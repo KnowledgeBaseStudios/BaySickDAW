@@ -1,0 +1,1284 @@
+#include "DrumPage.h"
+#include "../BaySickSynth/BaySickSynthProcessor.h"
+#include "../BaySickSynth/BaySickSynthEditor.h"
+#include "../VibePlayer/VibePlayerProcessor.h"
+#include "../VibePlayer/VibePlayerEditor.h"
+#include "../SampleLibrary.h"
+using namespace juce;
+
+// ── Helper: recursive Core Library menu builder ──────────────────────────────
+// Mirrors the legacy BaySickDrumsEditor.cpp::addLibDirToMenu exactly:
+//   - subdir → submenu, recurse all the way down
+//   - .wav/.aiff/.aif/.flac → individual clickable item (loads single file)
+//   - .sfz → clickable item with [SFZ] suffix (loads SFZ instrument)
+// No "load folder" group items — the legacy picker drilled into individual
+// samples and that's what users expect.
+static void addLibDirToMenuDP (juce::PopupMenu& menu,
+                                const juce::File& dir,
+                                int kLibBase,
+                                std::vector<SampleInstrument>& instruments)
+{
+    static const char* kAudioExts[] = { ".wav", ".aiff", ".aif", ".flac", nullptr };
+
+    // Folders first (alphabetical), then files (alphabetical) so the user
+    // sees navigable subfolders at the top of every level.
+    juce::Array<juce::File> dirs;
+    dir.findChildFiles (dirs, juce::File::findDirectories, false);
+    dirs.sort();
+    juce::Array<juce::File> files;
+    dir.findChildFiles (files, juce::File::findFiles, false);
+    files.sort();
+
+    for (const auto& child : dirs)
+    {
+        juce::PopupMenu sub;
+        addLibDirToMenuDP (sub, child, kLibBase, instruments);
+        if (sub.getNumItems() > 0)
+            menu.addSubMenu (child.getFileName(), sub);
+    }
+
+    for (const auto& child : files)
+    {
+        bool isAudio = false;
+        for (int i = 0; kAudioExts[i]; ++i)
+            if (child.hasFileExtension (kAudioExts[i])) { isAudio = true; break; }
+
+        if (isAudio)
+        {
+            const int id = kLibBase + (int) instruments.size();
+            menu.addItem (id, child.getFileNameWithoutExtension());
+            instruments.push_back ({ child.getFileNameWithoutExtension(), child, false });
+        }
+        else if (child.hasFileExtension ("sfz;SFZ"))
+        {
+            const int id = kLibBase + (int) instruments.size();
+            menu.addItem (id, child.getFileNameWithoutExtension() + "  [SFZ]");
+            instruments.push_back ({ child.getFileNameWithoutExtension(), child, true });
+        }
+    }
+}
+
+// Recursive XML-preset walker — mirrors addLibDirToMenuDP but for *.xml files.
+// Folders become real cascading submenus (matches the sample picker UX).
+static void addPresetDirToMenuDP (juce::PopupMenu& menu,
+                                   const juce::File& dir,
+                                   int kPresetBase,
+                                   juce::Array<juce::File>& presetXmls)
+{
+    juce::Array<juce::File> dirs;
+    dir.findChildFiles (dirs, juce::File::findDirectories, false);
+    dirs.sort();
+    juce::Array<juce::File> files;
+    dir.findChildFiles (files, juce::File::findFiles, false, "*.xml");
+    files.sort();
+
+    for (const auto& child : dirs)
+    {
+        juce::PopupMenu sub;
+        addPresetDirToMenuDP (sub, child, kPresetBase, presetXmls);
+        if (sub.getNumItems() > 0)
+            menu.addSubMenu (child.getFileName(), sub);
+    }
+
+    for (const auto& f : files)
+    {
+        const int id = kPresetBase + presetXmls.size();
+        menu.addItem (id, f.getFileNameWithoutExtension());
+        presetXmls.add (f);
+    }
+}
+
+juce::File DrumPage::presetsDir()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+               .getChildFile ("BaySickDAW").getChildFile ("Presets")
+               .getChildFile ("BaySickDrums");
+}
+
+juce::File DrumPage::userPresetsDir()
+{
+    return presetsDir().getChildFile ("My Presets");
+}
+
+// D1.4-fix (c): file-static clipboard for Copy/Paste/Duplicate.  Survives
+// across drum tab destroys so copying on one tab and pasting on another
+// (or onto a freshly-created tab) works.
+static juce::String sDrumClipboard;
+
+
+DrumPage::DrumPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
+    : mProcessor(p), mPM(pm), mPageIndex(juce::jlimit(0, kMaxDrumPages - 1, pageIndex))
+{
+    mPageColor = VC::DrumCol[mPageIndex];
+
+    // 2026-04-26 (step 2 commit 3): Drum Kit and per-drum Piano Roll both
+    // live on PianoRollPage now.  Skip building those sub-views here -
+    // mDrumKitTab + mPianoRoll stay null; sub-tab pills 0 (Drum Kit) and 2
+    // (Piano Roll) redirect to PianoRollPage via the editor's showPageForTab
+    // click handlers.  Player tab is now the default landing.
+    buildPlayerTab();
+    buildEQTab();
+
+    switchTab(1);        // 1 = Player (Drum Kit at index 0 redirects elsewhere)
+    startTimerHz(24);
+}
+
+DrumPage::~DrumPage()
+{
+    stopTimer();
+
+    const bool hadEngine = ! mEngineType.isEmpty();
+    if (hadEngine)
+        mProcessor.unregisterDrumEngine(mPageIndex);
+    juce::Thread::sleep(20);   // outlast one audio block
+
+    if (mEngineEditor && mPlayerTab)
+        mPlayerTab->removeChildComponent(mEngineEditor.get());
+    mEngineEditor.reset();
+    mEngineProcessor.reset();
+
+    if (hadEngine)
+        mProcessor.unregisterParamsForTrack(trackId());
+}
+
+void DrumPage::switchTab(int idx)
+{
+    mActiveTab = idx;
+    // D2: tab order is now 0 Drum Kit / 1 Player / 2 Piano Roll / 3 EQ.
+    if (mDrumKitTab)
+    {
+        mDrumKitTab->setVisible(idx == 0);
+        if (idx == 0)
+        {
+            mDrumKitTab->refreshKitView();   // pull fresh drum list when shown
+            mDrumKitTab->grabKeyboardFocus();// enable Ctrl+C/V/X/D/A/Esc
+        }
+    }
+    if (mPlayerTab)  mPlayerTab ->setVisible(idx == 1);
+    if (mPianoRoll)  mPianoRoll ->setVisible(idx == 2);
+    if (mEQTab)      mEQTab     ->setVisible(idx == 3);
+    if (idx == 2 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
+    resized();
+    if (onSubTabChanged) onSubTabChanged(idx);
+}
+
+// ── D2 Drum Kit hooks (forwarders to mDrumKitTab) ────────────────────────────
+// KitDrumInfo (DrumPage's struct, has ribbonTabId) is converted on the fly to
+// DrumKitRowInfo (DrumKitGrid's struct, identical fields minus ribbonTabId).
+void DrumPage::setKitListProvider (std::function<std::vector<KitDrumInfo>()> fn)
+{
+    if (! mDrumKitTab) return;
+    auto wrapped = [fn = std::move(fn)] {
+        std::vector<DrumKitRowInfo> out;
+        if (! fn) return out;
+        const auto src = fn();
+        out.reserve(src.size());
+        for (const auto& s : src)
+        {
+            DrumKitRowInfo r;
+            r.pageIndex   = s.pageIndex;
+            r.displayName = s.displayName;
+            r.hasEngine   = s.hasEngine;
+            r.locked      = s.locked;
+            r.isActive    = s.isActive;
+            r.color       = s.color;
+            out.push_back(std::move(r));
+        }
+        return out;
+    };
+    mDrumKitTab->setKitRowProvider(std::move(wrapped));
+}
+
+void DrumPage::setKitRowClickHandler (std::function<void(int, juce::Component*)> fn)
+{
+    if (mDrumKitTab) mDrumKitTab->setRowClickHandler (std::move (fn));
+}
+
+void DrumPage::setKitAuditionHandlers (std::function<void(int)> onOn,
+                                       std::function<void(int)> onOff)
+{
+    if (mDrumKitTab) mDrumKitTab->setAuditionHandlers (std::move (onOn), std::move (onOff));
+}
+
+void DrumPage::setKitReorderHandler (std::function<void(int, int)> fn)
+{
+    if (mDrumKitTab) mDrumKitTab->setReorderHandler (std::move (fn));
+}
+
+void DrumPage::refreshKitView()
+{
+    if (mDrumKitTab) mDrumKitTab->refreshKitView();
+}
+
+void DrumPage::setKitMenuHandler (std::function<void(juce::Component*)> fn)
+{
+    if (mDrumKitTab) mDrumKitTab->onKitMenuRequested = std::move (fn);
+}
+
+void DrumPage::setGlobalLockHandler (std::function<void()> fn)
+{
+    if (mDrumKitTab) mDrumKitTab->onGlobalLockRequested = std::move (fn);
+}
+
+void DrumPage::setEQMid(bool showMid)
+{
+    mEQMidActive = showMid;
+    if (mEQDisplay) mEQDisplay->setShowMid(showMid);
+}
+
+void DrumPage::buildDrumKitTab()
+{
+    mDrumKitTab = std::make_unique<DrumKitContainer>();
+    mDrumKitTab->setPatternManager (&mPM);
+    mDrumKitTab->setApvts (&mProcessor.apvts);
+    addAndMakeVisible(*mDrumKitTab);
+}
+
+void DrumPage::buildPlayerTab()
+{
+    mPlayerTab = std::make_unique<Component>();
+    addAndMakeVisible(*mPlayerTab);
+
+    // Single picker button.  Two states:
+    //   Pre-pick  → label "Pick a sound  v", click opens picker popup
+    //   Post-pick → label = current sound name, click opens context menu
+    // Right-click always opens context menu (no-op when nothing loaded).
+    mPickerBtn = std::make_unique<TextButton>("Pick a sound  v");
+    mPickerBtn->onClick = [this] {
+        if (mEngineType.isEmpty())
+            showSoundPicker (mPickerBtn.get());
+        else
+            showContextMenu (mPickerBtn.get());
+    };
+    // Right-click handled via per-instance MouseListener.
+    mPickerRC.owner = this;
+    mPickerBtn->addMouseListener (&mPickerRC, false);
+    mPlayerTab->addAndMakeVisible(*mPickerBtn);
+
+    // Sound name label (right of picker button).
+    mSoundLabel = std::make_unique<Label>("", "");
+    mSoundLabel->setColour(Label::textColourId, VC::Text);
+    mSoundLabel->setFont(Font(13.f, Font::bold));
+    mSoundLabel->setJustificationType(Justification::centredLeft);
+    mPlayerTab->addAndMakeVisible(*mSoundLabel);
+}
+
+void DrumPage::buildPianoRollTab()
+{
+    mPianoRoll = std::make_unique<PianoRollContainer>();
+    mPianoRoll->setData(&mPM.currentPattern().drumRolls[mPageIndex]);
+    mPianoRoll->setNoteColor(mPageColor);
+    addAndMakeVisible(*mPianoRoll);
+
+    if (mTabName.isEmpty())
+        mTabName = "Drum " + juce::String(mPageIndex);
+    refreshPianoRollContextLabel();
+}
+
+void DrumPage::buildEQTab()
+{
+    mEQTab     = std::make_unique<Component>();
+    mEQDisplay = std::make_unique<ParametricEQDisplay>();
+
+    mEQDisplay->setSampleRate(mProcessor.getSampleRate() > 0.0
+                              ? mProcessor.getSampleRate() : 44100.0);
+    mEQDisplay->showMidSideToggle(false);
+    mEQDisplay->onLatencyChanged = [this]
+    {
+        mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
+    };
+    mEQTab->addAndMakeVisible(*mEQDisplay);
+    addAndMakeVisible(*mEQTab);
+}
+
+void DrumPage::setPlayHead(StandalonePlayHead* ph)
+{
+    mPlayHead = ph;
+    if (mPianoRoll)
+        mPianoRoll->onSeek = [ph](double b) { if (ph) ph->seekTo(b); };
+    if (mDrumKitTab)
+        mDrumKitTab->onSeek = [ph](double b) { if (ph) ph->seekTo(b); };
+    // Playhead beat is pumped via timerCallback (matches PianoRollContainer flow).
+}
+
+void DrumPage::setUndoContext(const UndoContext& ctx)
+{
+    if (mPianoRoll)
+    {
+        mPianoRoll->setUndoContext(ctx);
+        if (ctx.showHistory) mPianoRoll->onShowHistoryWindow = ctx.showHistory;
+    }
+    if (mDrumKitTab)
+    {
+        mDrumKitTab->setUndoContext(ctx);
+        if (ctx.showHistory) mDrumKitTab->onShowHistoryWindow = ctx.showHistory;
+    }
+}
+
+void DrumPage::selectEngine(const juce::String& engineName)
+{
+    // D1.4-fix: swap-aware.  No-op if same engine already loaded; otherwise
+    // tear down old + create new.  Triggers fresh APVTS param registration
+    // for the new engine type via registerParamsForTrack (idempotent on prefix).
+    if (engineName == mEngineType && mEngineProcessor) return;
+
+    // Tear down previous engine if engine type is changing.
+    if (mEngineProcessor)
+    {
+        mProcessor.unregisterDrumEngine(mPageIndex);
+        if (mEngineEditor && mPlayerTab)
+            mPlayerTab->removeChildComponent(mEngineEditor.get());
+        mEngineEditor.reset();
+        mEngineProcessor.reset();
+        mLoadedSampleKind = SampleKind::None;
+        mLoadedSamplePath = juce::File();
+    }
+
+    mEngineType = engineName;
+    refreshPianoRollContextLabel();
+
+    mProcessor.registerParamsForTrack(trackId(), engineName);
+
+    double sr        = mProcessor.getSampleRate() > 0.0 ? mProcessor.getSampleRate() : 44100.0;
+    int    blockSize = 512;
+
+    const juce::String trackIdStr = trackId();
+    if (engineName == "BaySickPlayer")
+    {
+        auto* proc = new VibePlayerProcessor(trackIdStr);
+        proc->prepareToPlay(sr, blockSize);
+        mEngineProcessor.reset(proc);
+        mEngineEditor.reset(proc->createEditor());
+        // 2026-04-26: tell the editor it's in drum context so its preset menu
+        // filters to drum-only folders (Hip Hop Drums / EDM Drums) and skips
+        // the in-app Core Library (DrumPage's own showSoundPicker handles that).
+        if (auto* vpe = dynamic_cast<VibePlayerEditor*> (mEngineEditor.get()))
+            vpe->setDrumContext (true);
+    }
+    else if (engineName == "BaySickSynth")
+    {
+        auto* proc = new BaySickSynthProcessor(trackIdStr);
+        proc->prepareToPlay(sr, blockSize);
+        mEngineProcessor.reset(proc);
+        mEngineEditor.reset(proc->createEditor());
+    }
+
+    if (mPianoRoll)
+    {
+        mPianoRoll->onNoteAudition = [this](int midiNote)
+        {
+            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get()))
+                s->auditionNote(midiNote);
+            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+                v->auditionNote(midiNote);
+        };
+        mPianoRoll->onNoteAuditionOn = [this](int midiNote)
+        {
+            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get()))
+                s->auditionNoteOn(midiNote);
+            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+                v->auditionNoteOn(midiNote);
+        };
+        mPianoRoll->onNoteAuditionOff = [this](int midiNote)
+        {
+            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get()))
+                s->auditionNoteOff(midiNote);
+            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+                v->auditionNoteOff(midiNote);
+        };
+    }
+
+    if (mEngineEditor && mPlayerTab)
+        mPlayerTab->addAndMakeVisible(*mEngineEditor);
+
+    mProcessor.registerDrumEngine(mPageIndex, mEngineProcessor.get());
+
+    if (mEQDisplay)
+    {
+        if (auto* preEq = mProcessor.mVibeGraph.getInsertPreEQ(
+                              VibeGraph::InsertKind::Drum, mPageIndex))
+        {
+            const juce::String mixerPrefix = "mixer_drum_" + juce::String(mPageIndex);
+            mEQDisplay->bindMsDSP(preEq, &mProcessor.apvts,
+                                  mixerPrefix + "_preeq_mid_eq",
+                                  mixerPrefix + "_preeq_side_eq");
+        }
+        mEQDisplay->setSampleRate(sr);
+    }
+
+    juce::MessageManager::callAsync([this] { if (isShowing()) resized(); });
+
+    if (onEngineSelected) onEngineSelected();
+}
+
+void DrumPage::timerCallback()
+{
+    if (mEQDisplay && ! mEngineType.isEmpty())
+        mEQDisplay->syncFromDSP();
+
+    if (mPlayHead)
+    {
+        const bool songMode = mProcessor.isSongMode();
+        const double beat = songMode ? -1.0 : mPlayHead->getCurrentBeat();
+        if (mPianoRoll)  mPianoRoll->setPlayheadBeat(beat);
+        if (mDrumKitTab) mDrumKitTab->setPlayheadBeat(beat);
+    }
+
+    if (mPianoRoll)
+        mPianoRoll->setData(&mPM.currentPattern().drumRolls[mPageIndex]);
+
+    // While on the Drum Kit sub-tab, repaint at the timer rate so edits from
+    // the per-drum Piano Roll tab show up automatically (the kit view reads
+    // each drum's notes on every paint).
+    if (mActiveTab == 0 && mDrumKitTab)
+        mDrumKitTab->repaint();
+}
+
+void DrumPage::paint(Graphics& g)
+{
+    g.fillAll(VC::Bg);
+    // D2: "Select engine to begin" hint shows on Player sub-tab (idx 1) when
+    // no engine is loaded.  (Tab 0 is now the Drum Kit and renders its own
+    // placeholder grid even on empty drums.)
+    if (mActiveTab == 1 && mEngineType.isEmpty())
+    {
+        g.setColour(VC::TextDim);
+        g.setFont(Font(15.f));
+        auto area = getLocalBounds().withTrimmedTop(40);
+        g.drawText("Select engine to begin", area, Justification::centred);
+    }
+}
+
+void DrumPage::resized()
+{
+    auto b = getLocalBounds();
+    if (mDrumKitTab) mDrumKitTab->setBounds(b);
+    if (mPlayerTab)
+    {
+        mPlayerTab->setBounds(b);
+        constexpr int kRowH = 28;
+        constexpr int kPad  = 6;
+        auto pb = mPlayerTab->getLocalBounds();
+        auto row = pb.removeFromTop(kRowH + kPad * 2).reduced(kPad);
+        if (mPickerBtn)  mPickerBtn ->setBounds(row.removeFromLeft(160));
+        row.removeFromLeft(8);
+        if (mSoundLabel) mSoundLabel->setBounds(row);
+        if (mEngineEditor && pb.getHeight() > 0)
+            mEngineEditor->setBounds(pb);
+    }
+    if (mPianoRoll) mPianoRoll->setBounds(b);
+    if (mEQTab && mEQDisplay)
+    {
+        mEQTab->setBounds(b);
+        mEQDisplay->setBounds(mEQTab->getLocalBounds().reduced(4));
+    }
+}
+
+void DrumPage::setTabName(const juce::String& name)
+{
+    mTabName = name;
+    refreshPianoRollContextLabel();
+}
+
+void DrumPage::refreshPianoRollContextLabel()
+{
+    if (!mPianoRoll) return;
+    const juce::String engine = mEngineType.isEmpty() ? juce::String("(no engine)")
+                                                      : mEngineType;
+    mPianoRoll->setContextLabel(mTabName + " - " + engine);
+    if (mSoundLabel) mSoundLabel->setText (mSoundName, juce::dontSendNotification);
+    // D1.4-fix (c): picker button label tracks sound state.  Empty drum =
+    // open picker prompt; loaded drum = sound name + lock indicator.
+    if (mPickerBtn)
+    {
+        if (mEngineType.isEmpty())
+            mPickerBtn->setButtonText ("Pick a sound  v");
+        else
+            mPickerBtn->setButtonText ((mLocked ? juce::String ("[L] ") : juce::String())
+                                       + (mSoundName.isEmpty() ? juce::String ("(loaded)") : mSoundName));
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D1.4-fix: sound picker (Sample / Synth Patch / Save / New)
+// Single popup menu with two top-level submenus.  Picking an item swaps the
+// engine to BaySickPlayer (sample) or BaySickSynth (synth patch) and applies
+// the chosen state.  Engine type is invisible to the user.
+// ─────────────────────────────────────────────────────────────────────────────
+void DrumPage::showSoundPicker (juce::Component* anchor)
+{
+    if (anchor == nullptr) return;
+
+    juce::PopupMenu menu;
+
+    // Item ID layout (avoid colliding ranges):
+    //   1                = Clear (None)
+    //   2                = New Patch (Blank synth)
+    //   3                = Save Current Patch As...
+    //   100              = Browse sample folder...
+    //   101              = Load SFZ file...
+    //   1000..           = Core Library sample items
+    //   10000..          = Synth preset XMLs
+    constexpr int kIdNone        = 1;
+    constexpr int kIdNewPatch    = 2;
+    constexpr int kIdSaveAs      = 3;
+    constexpr int kIdBrowseSmp   = 100;
+    constexpr int kIdLoadSFZ     = 101;
+    constexpr int kLibBase       = 1000;
+    constexpr int kPresetBase    = 10000;
+
+    std::vector<SampleInstrument> libInstruments;
+    // Shared preset-XML list; used by both Sample and Synth Patch submenus
+    // so picks from either route to the same load-by-index dispatch below.
+    juce::Array<juce::File> presetXmls;
+
+    // ── Sample submenu ───────────────────────────────────────────────────────
+    juce::PopupMenu sampleSub;
+    sampleSub.addItem (kIdBrowseSmp, "Browse sample folder...");
+    sampleSub.addItem (kIdLoadSFZ,   "Load SFZ file...");
+    {
+        const auto libDir = SampleLibrary::getCoreLibraryDir();
+        if (libDir.isDirectory())
+        {
+            juce::PopupMenu libSub;
+            juce::Array<juce::File> packDirs;
+            libDir.findChildFiles (packDirs, juce::File::findDirectories, false);
+            packDirs.sort();
+            for (const auto& packDir : packDirs)
+            {
+                if (! SampleLibrary::isDrumPack (packDir.getFileName())) continue;
+                juce::PopupMenu packSub;
+                addLibDirToMenuDP (packSub, packDir, kLibBase, libInstruments);
+                if (packSub.getNumItems() > 0)
+                    libSub.addSubMenu (packDir.getFileName(), packSub);
+            }
+            if (libSub.getNumItems() > 0)
+            {
+                sampleSub.addSeparator();
+                sampleSub.addSubMenu ("Core Library", libSub);
+            }
+        }
+        // 2026-04-26: factory BaySickPlayer drum presets — XML wrappers around
+        // the Hip Hop / EDM .wav samples with friendly names ("Hip Hop Kick 01"
+        // etc.) and per-preset envelope/attack defaults.  Lives in Sample
+        // submenu since they're sample-based, not synth-based.
+        const auto bspRoot = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                  .getChildFile ("BaySickDAW/Presets/BaySickPlayer");
+        if (bspRoot.isDirectory())
+        {
+            juce::Array<juce::File> bspSubs;
+            bspRoot.findChildFiles (bspSubs, juce::File::findDirectories, false);
+            bspSubs.sort();
+            bool anyAdded = false;
+            for (const auto& sub : bspSubs)
+            {
+                if (! SampleLibrary::isDrumPack (sub.getFileName())) continue;
+                juce::PopupMenu inner;
+                addPresetDirToMenuDP (inner, sub, kPresetBase, presetXmls);
+                if (inner.getNumItems() > 0)
+                {
+                    if (! anyAdded) { sampleSub.addSeparator(); anyAdded = true; }
+                    sampleSub.addSubMenu (sub.getFileName(), inner);
+                }
+            }
+        }
+    }
+    menu.addSubMenu ("Sample", sampleSub);
+
+    // ── Synth Patch submenu — synthesized drum patches only (BaySickDrums) ──
+    juce::PopupMenu synthSub;
+    synthSub.addItem (kIdNewPatch, "+ New Patch (Blank)");
+    synthSub.addSeparator();
+    {
+        const auto presetDir = presetsDir();
+        if (presetDir.isDirectory())
+            addPresetDirToMenuDP (synthSub, presetDir, kPresetBase, presetXmls);
+        if (presetXmls.isEmpty())
+            synthSub.addItem (-1, "(no presets installed)", false, false);
+
+        synthSub.addSeparator();
+        const bool canSave = mEngineProcessor != nullptr
+                              && (mEngineType == "BaySickSynth" || mEngineType == "BaySickPlayer");
+        synthSub.addItem (kIdSaveAs, "Save Current Patch As...", canSave, false);
+    }
+    menu.addSubMenu ("Synth Patch", synthSub);
+
+    // ── None (clear) — only show if we have something loaded ─────────────────
+    if (! mEngineType.isEmpty())
+    {
+        menu.addSeparator();
+        menu.addItem (kIdNone, "None (clear)");
+    }
+
+    juce::Component::SafePointer<DrumPage> safeThis (this);
+    menu.showMenuAsync (
+        juce::PopupMenu::Options().withTargetComponent (anchor),
+        [safeThis,
+         libInstruments = std::move (libInstruments),
+         presetXmls     = std::move (presetXmls),
+         kIdNone, kIdNewPatch, kIdSaveAs, kIdBrowseSmp, kIdLoadSFZ,
+         kLibBase, kPresetBase] (int result) mutable
+        {
+            if (! safeThis || result <= 0) return;
+            auto* dp = safeThis.getComponent();
+
+            if (result == kIdNone)            { dp->clearSound();    return; }
+            if (result == kIdNewPatch)        { dp->newBlankPatch(); return; }
+            if (result == kIdSaveAs)          { dp->savePatchAs();   return; }
+
+            if (result == kIdBrowseSmp)
+            {
+                const auto libDir = SampleLibrary::getCoreLibraryDir();
+                const auto startDir = libDir.isDirectory() ? libDir
+                    : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+                dp->mFileChooser = std::make_unique<juce::FileChooser> (
+                    "Select sample folder for drum", startDir, "*", true);
+                const int flags = juce::FileBrowserComponent::openMode
+                                | juce::FileBrowserComponent::canSelectDirectories
+                                | juce::FileBrowserComponent::canSelectFiles;
+                dp->mFileChooser->launchAsync (flags, [safeThis] (const juce::FileChooser& fc)
+                {
+                    if (auto* d = safeThis.getComponent())
+                    {
+                        const auto chosen = fc.getResult();
+                        if (chosen.isDirectory())          d->loadSampleFolder (chosen);
+                        else if (chosen.existsAsFile())    d->loadSampleFile   (chosen);
+                    }
+                });
+                return;
+            }
+
+            if (result == kIdLoadSFZ)
+            {
+                const auto libDir = SampleLibrary::getCoreLibraryDir();
+                const auto startDir = libDir.isDirectory() ? libDir
+                    : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+                dp->mFileChooser = std::make_unique<juce::FileChooser> (
+                    "Select SFZ for drum", startDir, "*.sfz;*.SFZ", true);
+                const int flags = juce::FileBrowserComponent::openMode
+                                | juce::FileBrowserComponent::canSelectFiles;
+                dp->mFileChooser->launchAsync (flags, [safeThis] (const juce::FileChooser& fc)
+                {
+                    if (auto* d = safeThis.getComponent())
+                    {
+                        const auto chosen = fc.getResult();
+                        if (chosen.existsAsFile()) d->loadSampleSFZ (chosen);
+                    }
+                });
+                return;
+            }
+
+            if (result >= kLibBase && result < kLibBase + (int) libInstruments.size())
+            {
+                const auto& inst = libInstruments[result - kLibBase];
+                if      (inst.isSFZ)             dp->loadSampleSFZ    (inst.path);
+                else if (inst.path.isDirectory()) dp->loadSampleFolder (inst.path);
+                else                              dp->loadSampleFile   (inst.path);
+                return;
+            }
+
+            if (result >= kPresetBase && result < kPresetBase + presetXmls.size())
+            {
+                // Detect engine from preset's root tag — BaySickPlayerState
+                // routes to the player loader, BaySickSynthState to the synth.
+                const auto& xml = presetXmls[result - kPresetBase];
+                if (auto px = juce::XmlDocument::parse (xml))
+                {
+                    if (px->hasTagName ("BaySickPlayerState"))
+                        dp->loadPlayerPreset (xml);
+                    else
+                        dp->loadSynthPreset (xml);
+                }
+                return;
+            }
+        });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sound load helpers
+// ─────────────────────────────────────────────────────────────────────────────
+void DrumPage::loadSampleFile (const juce::File& f)
+{
+    selectEngine ("BaySickPlayer");
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+    {
+        vp->getSynth().getManager().loadSingleFile (f);
+        mLoadedSampleKind = SampleKind::File;
+        mLoadedSamplePath = f;
+        mSoundName = f.getFileNameWithoutExtension();
+        refreshPianoRollContextLabel();
+        if (onSoundNameChanged) onSoundNameChanged (mSoundName);
+        takeStateSnapshot();
+    }
+}
+
+void DrumPage::loadSampleFolder (const juce::File& f)
+{
+    selectEngine ("BaySickPlayer");
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+    {
+        auto& mgr = vp->getSynth().getManager();
+        mgr.loadFolder (f);
+        mgr.normalizeRootNotes (60);   // drums always trigger at MIDI 60
+        mLoadedSampleKind = SampleKind::Folder;
+        mLoadedSamplePath = f;
+        mSoundName = f.getFileName();
+        refreshPianoRollContextLabel();
+        if (onSoundNameChanged) onSoundNameChanged (mSoundName);
+        takeStateSnapshot();
+    }
+}
+
+void DrumPage::loadSampleSFZ (const juce::File& f)
+{
+    selectEngine ("BaySickPlayer");
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+    {
+        auto& mgr = vp->getSynth().getManager();
+        mgr.loadSFZ (f);
+        mgr.normalizeRootNotes (60);
+        mLoadedSampleKind = SampleKind::SFZ;
+        mLoadedSamplePath = f;
+        mSoundName = f.getFileNameWithoutExtension();
+        refreshPianoRollContextLabel();
+        if (onSoundNameChanged) onSoundNameChanged (mSoundName);
+        takeStateSnapshot();
+    }
+}
+
+void DrumPage::loadSynthPreset (const juce::File& xml)
+{
+    selectEngine ("BaySickSynth");
+    auto* bss = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get());
+    if (bss == nullptr) return;
+
+    auto px = juce::XmlDocument::parse (xml);
+    if (! px || ! px->hasTagName (bss->apvts.state.getType())) return;
+
+    auto loaded = juce::ValueTree::fromXml (*px);
+
+    // trackId substitution — preset XMLs were saved with a different prefix
+    // (e.g. tk_lay_0_bss_*); rewrite to this drum's prefix (tk_drm_N_bss_*)
+    // so the params bind into our engine instead of leaking elsewhere.
+    const juce::String localPrefix = bss->getParamPrefix();
+    juce::String loadedPrefix;
+    for (int i = 0; i < loaded.getNumChildren(); ++i)
+    {
+        auto child = loaded.getChild (i);
+        if (! child.hasType ("PARAM")) continue;
+        const juce::String id = child.getProperty ("id").toString();
+        const int tagIdx = id.indexOf ("_bss_");
+        if (id.startsWith ("tk_") && tagIdx > 3)
+        {
+            loadedPrefix = id.substring (0, tagIdx + 5);
+            break;
+        }
+    }
+    if (loadedPrefix.isNotEmpty() && loadedPrefix != localPrefix)
+    {
+        for (int i = 0; i < loaded.getNumChildren(); ++i)
+        {
+            auto child = loaded.getChild (i);
+            if (! child.hasType ("PARAM")) continue;
+            juce::String id = child.getProperty ("id").toString();
+            if (id.startsWith (loadedPrefix))
+            {
+                id = localPrefix + id.substring (loadedPrefix.length());
+                child.setProperty ("id", id, nullptr);
+            }
+        }
+    }
+    bss->apvts.replaceState (loaded);
+
+    // Synth preset → no sample reference.
+    mLoadedSampleKind = SampleKind::None;
+    mLoadedSamplePath = juce::File();
+
+    mSoundName = xml.getFileNameWithoutExtension();
+    refreshPianoRollContextLabel();
+    if (onSoundNameChanged) onSoundNameChanged (mSoundName);
+    takeStateSnapshot();
+}
+
+void DrumPage::newBlankPatch()
+{
+    selectEngine ("BaySickSynth");
+    mLoadedSampleKind = SampleKind::None;
+    mLoadedSamplePath = juce::File();
+    // Engine starts at APVTS defaults — nothing to apply.
+    mSoundName = "User Patch";
+    refreshPianoRollContextLabel();
+    if (onSoundNameChanged) onSoundNameChanged (mSoundName);
+    takeStateSnapshot();
+}
+
+void DrumPage::clearSound()
+{
+    if (mEngineProcessor)
+        mProcessor.unregisterDrumEngine (mPageIndex);
+    if (mEngineEditor && mPlayerTab)
+        mPlayerTab->removeChildComponent (mEngineEditor.get());
+    mEngineEditor.reset();
+    mEngineProcessor.reset();
+    mEngineType.clear();
+    mSoundName.clear();
+    mLoadedSampleKind = SampleKind::None;
+    mLoadedSamplePath = juce::File();
+    refreshPianoRollContextLabel();
+    // Restore default tab name on clear so the ribbon doesn't keep the cleared sound's label.
+    const juce::String defaultName = "Drum " + juce::String (mPageIndex + 1);
+    if (onSoundNameChanged) onSoundNameChanged (defaultName);
+    mLoadedStateSnapshot.reset();
+    juce::MessageManager::callAsync ([this] { if (isShowing()) resized(); });
+}
+
+// D2: snapshot helpers for the dirty-state Delete prompt.
+void DrumPage::takeStateSnapshot()
+{
+    mLoadedStateSnapshot.reset();
+    if (mEngineProcessor)
+        mEngineProcessor->getStateInformation (mLoadedStateSnapshot);
+}
+
+bool DrumPage::isPatchDirty() const
+{
+    if (mEngineProcessor == nullptr) return false;
+    if (mLoadedStateSnapshot.getSize() == 0) return false;   // no baseline → treat as clean
+    juce::MemoryBlock current;
+    mEngineProcessor->getStateInformation (current);
+    return current != mLoadedStateSnapshot;
+}
+
+void DrumPage::savePatchAs()
+{
+    if (mEngineProcessor == nullptr) return;
+    const bool isSynth  = (mEngineType == "BaySickSynth");
+    const bool isPlayer = (mEngineType == "BaySickPlayer");
+    if (! isSynth && ! isPlayer) return;
+
+    const bool isUserPatch = (mSoundName == "User Patch");
+    const juce::String message = isUserPatch
+        ? juce::String ("Renaming this drum saves it as a preset.\nEnter a name:")
+        : juce::String ("Enter a name to save this drum as a preset:");
+    auto* aw = new juce::AlertWindow ("Save Patch As",
+                                       message,
+                                       juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("name", isUserPatch ? juce::String ("My Patch") : mSoundName);
+    aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<DrumPage> safeThis (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safeThis, aw] (int r)
+        {
+            std::unique_ptr<juce::AlertWindow> own (aw);
+            if (r != 1 || ! safeThis) return;
+            auto name = aw->getTextEditorContents ("name").trim();
+            if (name.isEmpty()) return;
+            auto* dp = safeThis.getComponent();
+            if (dp->mEngineProcessor == nullptr) return;
+
+            auto dir = userPresetsDir();
+            dir.createDirectory();
+            auto file = dir.getChildFile (name + ".xml");
+
+            if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(dp->mEngineProcessor.get()))
+            {
+                // BaySickSynth: just the apvts state.
+                auto state = bss->apvts.copyState();
+                if (auto xml = state.createXml())
+                    xml->writeTo (file, {});
+            }
+            else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(dp->mEngineProcessor.get()))
+            {
+                // BaySickPlayer: wrap apvts state + sample reference.
+                // Sample path is stored relative to Core Library when the file
+                // lives there ("library:relative/path"), absolute otherwise.
+                juce::XmlElement root ("BaySickPlayerState");
+
+                auto state = vp->apvts.copyState();
+                if (auto stateXml = state.createXml())
+                    root.addChildElement (stateXml.release());
+
+                auto* sampleEl = root.createNewChildElement ("Sample");
+                const char* kindStr = "none";
+                switch (dp->mLoadedSampleKind)
+                {
+                    case SampleKind::File:   kindStr = "file";   break;
+                    case SampleKind::Folder: kindStr = "folder"; break;
+                    case SampleKind::SFZ:    kindStr = "sfz";    break;
+                    case SampleKind::None:   kindStr = "none";   break;
+                }
+                sampleEl->setAttribute ("kind", kindStr);
+                if (dp->mLoadedSampleKind != SampleKind::None)
+                {
+                    const auto libDir = SampleLibrary::getCoreLibraryDir();
+                    const auto absPath = dp->mLoadedSamplePath.getFullPathName();
+                    if (libDir.isDirectory()
+                        && dp->mLoadedSamplePath.isAChildOf (libDir))
+                    {
+                        const auto rel = dp->mLoadedSamplePath
+                                            .getRelativePathFrom (libDir)
+                                            .replaceCharacter ('\\', '/');
+                        sampleEl->setAttribute ("path", "library:" + rel);
+                    }
+                    else
+                    {
+                        sampleEl->setAttribute ("path", absPath);
+                    }
+                }
+
+                root.writeTo (file, {});
+            }
+
+            dp->mSoundName = name;
+            dp->refreshPianoRollContextLabel();
+            if (dp->onSoundNameChanged) dp->onSoundNameChanged (name);
+            dp->takeStateSnapshot();   // saved patch is the new clean baseline
+        }), false);
+}
+
+// D1.4-fix (c) — BaySickPlayer preset load.  Mirror of loadSynthPreset.
+// XML format: <BaySickPlayerState><BaySickPlayerState-apvts/><Sample kind=... path=.../></...>
+//   (the apvts state's root tag is BaySickPlayerState too — JUCE convention)
+// Sample path may be "library:rel/path" (resolved via SampleLibrary) or absolute.
+void DrumPage::loadPlayerPreset (const juce::File& xml)
+{
+    auto parsed = juce::XmlDocument::parse (xml);
+    if (! parsed || ! parsed->hasTagName ("BaySickPlayerState")) return;
+
+    selectEngine ("BaySickPlayer");
+    auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get());
+    if (vp == nullptr) return;
+
+    // 1. Apply the apvts state child (rewrite trackId prefix).
+    if (auto* stateEl = parsed->getChildByName (vp->apvts.state.getType()))
+    {
+        auto loaded = juce::ValueTree::fromXml (*stateEl);
+        const juce::String localPrefix = vp->getParamPrefix();
+        juce::String loadedPrefix;
+        for (int i = 0; i < loaded.getNumChildren(); ++i)
+        {
+            auto child = loaded.getChild (i);
+            if (! child.hasType ("PARAM")) continue;
+            const juce::String id = child.getProperty ("id").toString();
+            const int tagIdx = id.indexOf ("_bsp_");
+            if (id.startsWith ("tk_") && tagIdx > 3)
+            {
+                loadedPrefix = id.substring (0, tagIdx + 5);
+                break;
+            }
+        }
+        if (loadedPrefix.isNotEmpty() && loadedPrefix != localPrefix)
+        {
+            for (int i = 0; i < loaded.getNumChildren(); ++i)
+            {
+                auto child = loaded.getChild (i);
+                if (! child.hasType ("PARAM")) continue;
+                juce::String id = child.getProperty ("id").toString();
+                if (id.startsWith (loadedPrefix))
+                {
+                    id = localPrefix + id.substring (loadedPrefix.length());
+                    child.setProperty ("id", id, nullptr);
+                }
+            }
+        }
+        vp->apvts.replaceState (loaded);
+    }
+
+    // 2. Reload sample reference.
+    if (auto* sampleEl = parsed->getChildByName ("Sample"))
+    {
+        const juce::String kind = sampleEl->getStringAttribute ("kind", "none");
+        const juce::String pathStr = sampleEl->getStringAttribute ("path");
+        juce::File path;
+        if (pathStr.startsWith ("library:"))
+            path = SampleLibrary::getCoreLibraryDir().getChildFile (pathStr.substring (8));
+        else
+            path = juce::File (pathStr);
+
+        auto& mgr = vp->getSynth().getManager();
+        if (kind == "file" && path.existsAsFile())
+        {
+            mgr.loadSingleFile (path);
+            mLoadedSampleKind = SampleKind::File;
+            mLoadedSamplePath = path;
+        }
+        else if (kind == "folder" && path.isDirectory())
+        {
+            mgr.loadFolder (path);
+            mgr.normalizeRootNotes (60);
+            mLoadedSampleKind = SampleKind::Folder;
+            mLoadedSamplePath = path;
+        }
+        else if (kind == "sfz" && path.existsAsFile())
+        {
+            mgr.loadSFZ (path);
+            mgr.normalizeRootNotes (60);
+            mLoadedSampleKind = SampleKind::SFZ;
+            mLoadedSamplePath = path;
+        }
+        // Sample missing or kind == none → leave engine with empty sample slot.
+    }
+
+    mSoundName = xml.getFileNameWithoutExtension();
+    refreshPianoRollContextLabel();
+    if (onSoundNameChanged) onSoundNameChanged (mSoundName);
+    takeStateSnapshot();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D1.4-fix (c): right-click context menu (Lock / Polyphony / Copy / Paste /
+// Duplicate / Save Patch As / Delete).  Choke Group lands in D3.  Per-note
+// MIDI editing happens via double-click on a kit-grid note (D1.5).
+// ─────────────────────────────────────────────────────────────────────────────
+void DrumPage::PickerRightClickListener::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() && owner)
+        owner->showContextMenu (owner->mPickerBtn.get());
+}
+
+void DrumPage::showContextMenu (juce::Component* anchor)
+{
+    if (anchor == nullptr) return;
+
+    constexpr int kIdLock      = 1;
+    constexpr int kIdPolyphony = 2;
+    constexpr int kIdRename    = 5;
+    constexpr int kIdCopy      = 10;
+    constexpr int kIdPaste     = 11;
+    constexpr int kIdDuplicate = 12;
+    constexpr int kIdSaveAs    = 20;
+    // D3: choke-group submenu — 200 = None, 201..216 = groups 1..16.
+    constexpr int kIdChokeBase = 200;   // 200 = None
+    constexpr int kIdDelete    = 99;
+
+    juce::PopupMenu menu;
+    menu.addItem (kIdLock, "Lock Drum", true, mLocked);
+
+    // Polyphony toggle — engine-specific param dispatch.
+    //   BaySickSynth → _bss_voiceMode (0 = poly, 1 = mono)
+    //   BaySickPlayer → _bsp_voiceCap (1 = mono, 8 = poly default)
+    //   Harmless / others → polyphonic-only, no toggle
+    {
+        bool isMono = false;
+        bool canToggle = false;
+        if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get()))
+        {
+            // voiceMode raw: 0=Poly, 1=Mono, 2=Lead, 3=Legato.  We treat
+            // anything > 0 as "monophonic-ish" for label purposes.
+            if (auto* p = bss->apvts.getRawParameterValue (bss->getParamPrefix() + "voiceMode"))
+                isMono = (int) std::round (p->load()) >= 1;
+            canToggle = true;
+        }
+        else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+        {
+            if (auto* p = vp->apvts.getRawParameterValue (vp->getParamPrefix() + "voiceCap"))
+                isMono = p->load() <= 1.5f;
+            canToggle = true;
+        }
+        const juce::String label = canToggle
+            ? (isMono ? juce::String ("Polyphony: Monophonic")
+                      : juce::String ("Polyphony: Polyphonic"))
+            : juce::String ("Polyphony: (n/a)");
+        menu.addItem (kIdPolyphony, label, canToggle, false);
+    }
+
+    menu.addSeparator();
+    menu.addItem (kIdRename, "Rename...");
+    menu.addItem (kIdCopy, "Copy Drum", ! mEngineType.isEmpty());
+    menu.addItem (kIdPaste, "Paste Drum", sDrumClipboard.isNotEmpty() && ! mLocked);
+    menu.addItem (kIdDuplicate, "Duplicate Drum (new tab)", ! mEngineType.isEmpty());
+
+    menu.addSeparator();
+    // D3: Choke Group submenu — global cross-engine cut bus (1..16, 0 = none).
+    {
+        const juce::String prefix = "mixer_drum_" + juce::String (mPageIndex) + "_chokeGroup";
+        int curGroup = 0;
+        if (auto* p = mProcessor.apvts.getRawParameterValue (prefix))
+            curGroup = juce::jlimit (0, 16, (int) std::round (p->load()));
+
+        juce::PopupMenu chokeSub;
+        chokeSub.addItem (kIdChokeBase, "None", true, curGroup == 0);
+        for (int g = 1; g <= 16; ++g)
+            chokeSub.addItem (kIdChokeBase + g, "Group " + juce::String (g),
+                              true, curGroup == g);
+        menu.addSubMenu ("Choke Group", chokeSub);
+    }
+
+    menu.addSeparator();
+    const bool canSave = mEngineProcessor != nullptr
+                          && (mEngineType == "BaySickSynth" || mEngineType == "BaySickPlayer");
+    menu.addItem (kIdSaveAs, "Save Current Patch As...", canSave);
+
+    menu.addSeparator();
+    menu.addItem (kIdDelete, "Delete Drum", ! mLocked);   // locked drums can't be deleted
+
+    juce::Component::SafePointer<DrumPage> safeThis (this);
+    menu.showMenuAsync (
+        juce::PopupMenu::Options().withTargetComponent (anchor),
+        [safeThis,
+         kIdLock, kIdPolyphony, kIdRename, kIdCopy, kIdPaste, kIdDuplicate,
+         kIdChokeBase, kIdSaveAs, kIdDelete] (int r)
+        {
+            if (! safeThis || r <= 0) return;
+            auto* dp = safeThis.getComponent();
+
+            // D3: choke-group submenu (200..216 → 0..16).
+            if (r >= kIdChokeBase && r <= kIdChokeBase + 16)
+            {
+                const int newGroup = r - kIdChokeBase;
+                const juce::String prefix = "mixer_drum_" + juce::String (dp->mPageIndex) + "_chokeGroup";
+                if (auto* p = dp->mProcessor.apvts.getParameter (prefix))
+                {
+                    const auto& range = p->getNormalisableRange();
+                    p->setValueNotifyingHost (range.convertTo0to1 ((float) newGroup));
+                }
+                return;
+            }
+
+            if (r == kIdLock)         dp->setLocked (! dp->mLocked);
+            else if (r == kIdPolyphony)
+            {
+                if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(dp->mEngineProcessor.get()))
+                {
+                    // voiceMode is a 4-choice param: Poly(0) / Mono(1) / Lead(2) / Legato(3).
+                    // Toggle Poly <-> Mono ONLY (Lead/Legato are advanced; user wants binary).
+                    if (auto* p = bss->apvts.getParameter (bss->getParamPrefix() + "voiceMode"))
+                    {
+                        const auto& range = p->getNormalisableRange();
+                        const int curRaw = (int) std::round (range.convertFrom0to1 (p->getValue()));
+                        const int nextRaw = (curRaw == 0) ? 1 : 0;   // Poly=0, Mono=1
+                        p->setValueNotifyingHost (range.convertTo0to1 ((float) nextRaw));
+                    }
+                }
+                else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(dp->mEngineProcessor.get()))
+                {
+                    if (auto* p = vp->apvts.getParameter (vp->getParamPrefix() + "voiceCap"))
+                    {
+                        // Toggle 1 ↔ 8.  voiceCap range is 1..16, normalized 0..1.
+                        const auto& range = p->getNormalisableRange();
+                        const float curRaw = range.convertFrom0to1 (p->getValue());
+                        const float nextRaw = (curRaw <= 1.5f) ? 8.f : 1.f;
+                        p->setValueNotifyingHost (range.convertTo0to1 (nextRaw));
+                    }
+                }
+            }
+            else if (r == kIdRename)
+            {
+                if (dp->onRenameRequested) dp->onRenameRequested();
+            }
+            else if (r == kIdCopy)      sDrumClipboard = dp->exportDrumState();
+            else if (r == kIdPaste)     dp->importDrumState (sDrumClipboard);
+            else if (r == kIdDuplicate)
+            {
+                const auto state = dp->exportDrumState();
+                if (state.isNotEmpty() && dp->onDuplicateRequested)
+                    dp->onDuplicateRequested (state);
+            }
+            else if (r == kIdSaveAs)    dp->savePatchAs();
+            else if (r == kIdDelete)    dp->requestDelete();
+        });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Drum-state import/export (Copy/Paste/Duplicate)
+// ─────────────────────────────────────────────────────────────────────────────
+juce::String DrumPage::exportDrumState() const
+{
+    if (mEngineType.isEmpty() || mEngineProcessor == nullptr) return {};
+
+    juce::XmlElement el ("DrumPageState");
+    el.setAttribute ("engine",  mEngineType);
+    el.setAttribute ("name",    mSoundName);
+    el.setAttribute ("locked",  mLocked ? 1 : 0);
+
+    juce::MemoryBlock mb;
+    mEngineProcessor->getStateInformation (mb);
+    el.setAttribute ("data", mb.toBase64Encoding());
+
+    return el.toString (juce::XmlElement::TextFormat().singleLine());
+}
+
+void DrumPage::importDrumState (const juce::String& xml)
+{
+    if (xml.isEmpty()) return;
+    if (mLocked)       return;
+
+    auto parsed = juce::XmlDocument::parse (xml);
+    if (! parsed || ! parsed->hasTagName ("DrumPageState")) return;
+
+    const juce::String engine = parsed->getStringAttribute ("engine");
+    const juce::String name   = parsed->getStringAttribute ("name");
+    const bool         lock   = parsed->getIntAttribute    ("locked", 0) != 0;
+    const juce::String data   = parsed->getStringAttribute ("data");
+
+    if (engine.isEmpty()) return;
+
+    selectEngine (engine);
+    if (mEngineProcessor && data.isNotEmpty())
+    {
+        juce::MemoryBlock mb;
+        if (mb.fromBase64Encoding (data))
+            mEngineProcessor->setStateInformation (mb.getData(), (int) mb.getSize());
+    }
+
+    mSoundName = name;
+    mLocked    = lock;
+    refreshPianoRollContextLabel();
+    if (onSoundNameChanged) onSoundNameChanged (mSoundName);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Delete with confirmation (and optional Save Patch As prompt)
+// ─────────────────────────────────────────────────────────────────────────────
+void DrumPage::requestDelete()
+{
+    juce::Component::SafePointer<DrumPage> safeThis (this);
+
+    auto fireDelete = [safeThis] {
+        if (auto* dp = safeThis.getComponent())
+            if (dp->onDeleteRequested) dp->onDeleteRequested();
+    };
+
+    // For any saveable engine (BaySickSynth or BaySickPlayer), offer
+    // save-as-preset before delete IF the engine state has been tweaked
+    // since the last load / save.  Untouched patches just get the standard
+    // "Delete drum?" confirmation since there's nothing worth saving.
+    const bool isSaveable = mEngineProcessor != nullptr
+                             && (mEngineType == "BaySickSynth" || mEngineType == "BaySickPlayer");
+    if (isSaveable && isPatchDirty())
+    {
+        auto* aw = new juce::AlertWindow (
+            "Delete Drum",
+            "Save this drum as a preset before deleting?\n"
+            "(Engine settings will otherwise be lost.)",
+            juce::AlertWindow::QuestionIcon);
+        aw->addButton ("Save & Delete", 1);
+        aw->addButton ("Delete Anyway", 2);
+        aw->addButton ("Cancel",        0, juce::KeyPress (juce::KeyPress::escapeKey));
+        aw->enterModalState (true, juce::ModalCallbackFunction::create (
+            [safeThis, aw, fireDelete] (int r)
+            {
+                std::unique_ptr<juce::AlertWindow> own (aw);
+                if (r == 0 || ! safeThis) return;
+                if (r == 1) safeThis->savePatchAs();   // async — proceed to delete after
+                fireDelete();
+            }), false);
+        return;
+    }
+
+    // Otherwise standard confirmation.
+    auto* aw = new juce::AlertWindow (
+        "Delete Drum",
+        "This action cannot be undone. Delete this drum?",
+        juce::AlertWindow::WarningIcon);
+    aw->addButton ("Delete", 1);
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [aw, fireDelete] (int r)
+        {
+            std::unique_ptr<juce::AlertWindow> own (aw);
+            if (r == 1) fireDelete();
+        }), false);
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="EDM Big Room Basic" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Festival Big Room Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Distorted Gabber Kick.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Psytrance Zap Kick.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Underwater Kick.xml" locked="1"/>
+</BaySickKit>

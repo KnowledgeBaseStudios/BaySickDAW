@@ -1,0 +1,79 @@
+This breakdown focuses on the **Parametric EQ 2** interface from **EQ.jpg**. Since you are using the specific mechanical logic of this EQ for your build, I have detailed the functional specs for every control cluster to ensure the "look and feel" translates into a working JUCE replica.
+
+---
+
+## 1. The Main EQ Grid & Nodes
+* **Visual**: A dark, slate-blue background with a logarithmic frequency grid. 
+* **Nodes (1–7)**: Each node is a colored ring with a number.
+    * **Logic**: Vertical movement = **Gain** (+/- 18dB); Horizontal movement = **Frequency** (20Hz–20kHz).
+    * **Interaction**: Mouse-wheel on a node should adjust the **Bandwidth (Q)**, widening or narrowing the filter curve.
+    * **Color-Sync**: The color of the node ring must match the corresponding slider in the right-hand panel.
+
+---
+
+## 2. The Right-Hand Control Strip (The "Mixer" Section)
+This is a high-density vertical control bank for individual band management.
+
+### **Top Buttons (Band Toggle)**
+* **Visual**: Small colored squares matching nodes 1–7.
+* **Logic**: **Band On/Off Bypass**. Clicking toggles the active state of that specific EQ filter.
+
+### **The Faders (Gain)**
+* **Visual**: Slim vertical tracks with a small square thumb.
+* **Logic**: **Precision Gain Control**. This mirrors the vertical position of the node on the grid.
+
+### **The "Center" Circles (Filter Type)**
+* **Visual**: A row of small gray circles between the faders and lower dials.
+* **Logic**: **Filter Shape Selector**. Clicking/Scrolling here cycles through Low Shelf, Peaking, High Shelf, Low Pass, High Pass, Band Pass, and Notch.
+
+### **The Lower Dials (Frequency & Bandwidth)**
+* **Top Row (Freq)**: Adjusts the center frequency of the band.
+* **Bottom Row (BW/Q)**: Adjusts the steepness or width of the filter curve.
+
+---
+
+## 3. Bottom Global Controls (Toolbar)
+* **Play/Pause Icon**: Toggles the real-time **Spectrum Analyzer** overlay on the grid.
+* **LIN (Linear Phase)**: Toggles between standard IIR filters and Linear Phase mode (useful for mastering).
+* **HQ (High Quality)**: Enables **Oversampling** to reduce aliasing in the high frequencies.
+* **Monitor**: Changes the analyzer view (e.g., Peaks vs. Average).
+* **Compare**: An **A/B Switch** to quickly toggle between two different EQ states.
+
+---
+
+## 4. Color Palette & UI Elements
+
+| Element | Appearance | Approximate Hex |
+| :--- | :--- | :--- |
+| **Grid Background** | Deep navy/slate matte | `#1A2229` |
+| **Grid Lines** | Thin, dimmed gray (logarithmic) | `#2D3A45` |
+| **Active Curve** | Thick white or light-gray line | `#FFFFFF` |
+| **Node 1 (Sub)** | Violet | `#8E44AD` |
+| **Node 4 (Mid)** | Yellow/Gold | `#F1C40F` |
+| **Node 7 (Treble)** | Cyan/Blue | `#3498DB` |
+
+---
+
+## 5. Prompt Strategy for Claude
+
+> **Context:**
+> "I am building a JUCE-based EQ. I need you to recreate the UI and functional mapping of the Parametric EQ 2 based on the attached image.
+>
+> **Task 1: The Interactive Grid**
+> * Create a custom component for the frequency graph. 
+> * Implement 7 numbered 'Nodes' that can be dragged. Map X to Frequency and Y to Gain.
+> * Logic: The mouse wheel should change the 'Q' value of the filter, and the visual curve must update in real-time using a standard Biquad filter formula.
+>
+> **Task 2: The Right-Hand Fader Bank**
+> * Create a vertical strip of 7 colored sliders. 
+> * Logic: These sliders must be bi-directionally linked to the Nodes. Moving a slider moves the Node; dragging a Node moves the slider.
+>
+> **Task 3: Filter Shape Selection**
+> * Implement the small circular buttons under the faders. 
+> * Logic: Clicking these should cycle the filter type (Low Pass, Peaking, etc.) and change the visual math of the curve on the grid.
+>
+> **Task 4: Aesthetic Specs**
+> * Use a dark slate background (`#1A2229`) and match the specific color-coding for the 7 bands (Violet to Cyan).
+> * Add a high-resolution white line for the 'Main Curve' and a dimmed, filled-in area underneath the curve for visual weight."
+
+**Are there more images for your DAW library, or should we start organizing these into a master development plan?**

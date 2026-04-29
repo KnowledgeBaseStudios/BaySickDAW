@@ -1,0 +1,47 @@
+To include percussion in your architecture, you'll need to source the samples, host them alongside your other categories, and update your implementation prompt. Here is the revised guide for setting up your DAW sample distribution.
+
+---
+
+## 1. Where to Source Redistributable Samples
+The following libraries provide high-quality, legally safe audio that you can redistribute within your software.
+
+* [cite_start]**VSCO 2 Community Edition (Versilian Studios Chamber Orchestra 2):** Includes strings, brass, woodwinds, and **percussion**[cite: 2].
+    * [cite_start]**The License:** CC0 (Public Domain), allowing you to repackage and distribute them legally without cost[cite: 3, 4].
+* [cite_start]**Virtual Playing Orchestra:** A cohesive blend of several open-source libraries, including VSCO 2[cite: 5].
+    * [cite_start]**The License:** Mostly CC0; some specific instruments require attribution (CC-BY)[cite: 6].
+* [cite_start]**Salamander Grand Piano:** A deeply sampled Yamaha C5 grand piano[cite: 7].
+    * [cite_start]**The License:** CC-BY (Attribution required in your DAW's "About" section)[cite: 8].
+* [cite_start]**University of Iowa Musical Instrument Samples (MIS):** Raw, unedited recordings of nearly every orchestral instrument[cite: 9].
+    * [cite_start]**The License:** Public Domain[cite: 10].
+
+---
+
+## 2. Preparation for the Installer
+[cite_start]Claude and automated installer scripts require **Direct Download Links** to raw files (usually .zip) rather than navigating landing pages[cite: 11, 12].
+
+1.  [cite_start]**Download and Sort:** Organize your chosen CC0/Public Domain samples into five folders: **Strings, Horns, Woodwinds, Keys, and Percussion**[cite: 13, 14].
+2.  [cite_start]**Compress:** Create five individual .zip files[cite: 14].
+3.  [cite_start]**Host:** Upload these to a server or storage bucket (e.g., AWS S3, Google Cloud Storage) so they each have a public URL[cite: 15].
+
+---
+
+## 3. Revised Prompt for Claude
+Use this prompt to have Claude generate the installer script (Inno Setup or NSIS) with the additional percussion category included.
+
+> "I am building a C++/JUCE DAW and I am currently writing the Windows installer script using Inno Setup (or NSIS). I have curated open-source, CC0-licensed audio samples for the DAW and packaged them into **five** ZIP files.
+>
+> I need you to write the installer script so that it downloads these files dynamically during installation rather than bundling them in the .exe. 
+>
+> Please point the installer's download functions to these exact direct URLs:
+> * **Strings:** https://mega.nz/folder/QZEQFRzA#huWwLvrdIjts8cKSgPPO2A
+> * **Brass:** https://mega.nz/folder/4V9S3bAL#f-Gf8yPXTveG-HJkkP5V8w
+> * **Woodwinds:** https://mega.nz/folder/YNdGRQZQ#hlfj-K3_mye_IoXxfmAIEg
+> * **Keys:** https://mega.nz/folder/kAURRJ6C#EYcPzv_eZ-2v5j-BTvfJqQ
+> * **Percussion:** https://mega.nz/folder/tc9hBTIB#wWdYjN4jpHRmhTLf7y2pKw
+>
+> [cite_start]Write the script to securely download these files via HTTP/HTTPS, display a unified download progress bar to the user, and automatically extract the contents of all **five** ZIPs into the user's `AppData/Roaming/[YourDAWName]/CoreLibrary` folder. Handle any network timeout errors gracefully." [cite: 17, 18]
+
+---
+
+### Why This Works
+This architecture keeps your initial installer size small while ensuring the user receives the full library upon installation. [cite_start]By specifying the **Percussion** link separately, Claude will ensure the script handles the extra download thread and extraction path accurately[cite: 19].

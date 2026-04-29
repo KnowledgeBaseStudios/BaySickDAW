@@ -1,0 +1,46 @@
+---
+
+## 1. Dynamics
+*Focuses on amplitude logic, envelope following, and threshold-based gain manipulation. When designing skeuomorphic rack gear, these pair perfectly with classic VU meters and metallic indicator LEDs.*
+
+* **Gate / Downward Expander:** Essential utility for silencing noise floors or tightening drum bleed. Uses an inverted compression envelope where signal is attenuated *below* a threshold.
+* **Upward Compressor:** Raises the volume of the quietest parts of the signal without squashing the peaks (crucial for modern, aggressive "OTT" style sound design).
+* **Multi-band Compressor:** Splits the signal via `juce::dsp::LinkwitzRileyFilter` crossovers before hitting independent compression algorithms.
+* **De-Esser:** A specialized frequency-conscious compressor sidechained to trigger only when harsh sibilance (typically 5kHz–8kHz) crosses the threshold.
+* **Auto-Gain / Vocal Rider:** Smoothly levels an audio track over time using JUCE's `BallisticsFilter` with very slow attack and release times, mimicking a mixing engineer riding a fader.
+* **Maximizer:** A mastering-grade limiter variation that heavily relies on a look-ahead buffer to smoothly clamp down on transient peaks before they occur, allowing for extreme loudness.
+
+---
+
+## 2. Harmonics
+*Focuses on generating new frequencies, digital destruction, and waveform manipulation. Many of these require `juce::dsp::Oversampling` to prevent nasty aliasing artifacts.*
+
+* **Bitcrusher:** Achieved by quantizing the floating-point audio to a lower bit-depth and using a sample-and-hold algorithm to simulate a reduced sample rate.
+* **Wavefolder:** Instead of clipping a signal when it hits the threshold (like your Overdrive), a wavefolder folds the waveform back in on itself, creating complex, metallic synthesizer tones.
+* **Exciter / Harmonic Enhancer:** Uses a high-pass filter fed into a subtle distortion circuit, blending newly generated high-order harmonics back into the dry signal to add "air" without boosting EQ peaks.
+* **Ring Modulator:** Multiplies the incoming audio signal by a carrier oscillator (usually a sine wave), yielding sum and difference frequencies that sound robotic or bell-like.
+* **Subharmonic Generator (Octaver):** Tracks the pitch of the incoming audio and synthesizes a sine or square wave exactly one or two octaves below it to beef up low-end.
+* **Comb Filter:** A very short delay (under 20ms) mixed heavily with the dry signal, creating a series of deep frequency notches that resemble a comb.
+
+---
+
+## 3. Time-Based
+*Focuses on manipulating the audio buffer over time. These effects inherently introduce latency or require complex memory management via `juce::AudioBuffer`.*
+
+* **Convolution (IR Loader):** Uses `juce::dsp::Convolution` to load `.wav` impulse responses. This turns your rack into an authentic guitar cabinet simulator or a hardware-sampled environment.
+* **Pitch Shifter:** Alters the pitch of a signal without changing its duration. Usually built using a granular approach or an FFT-based phase vocoder.
+* **Granular Processor:** Chops the incoming audio buffer into tiny, overlapping "grains" (10ms–100ms) and scrambles, stretches, or repitches them for ambient textures.
+* **Stereo Widener (Haas Effect):** Delays one side of the stereo signal by a tiny amount (e.g., 10ms–30ms) to trick the human ear into perceiving a massive, wide stereo image.
+* **Reverse Buffer:** Continuously records the input signal into a circular buffer and reads it backwards at specified intervals.
+
+---
+
+## 4. Modulation
+*Focuses on using Low Frequency Oscillators (LFOs) to automate parameters automatically. These require smooth interpolation to prevent clicking.*
+
+* **Tremolo:** Uses an LFO to rhythmically modulate the amplitude (gain) of the signal. Can be customized with sine, triangle, or square wave LFOs.
+* **Auto-Pan:** Similar to Tremolo, but uses the LFO to modulate a `juce::dsp::Panner`, bouncing the audio left and right across the stereo field.
+* **Vibrato:** Modulates the pitch of the signal using a very short, modulating delay line (like a Chorus, but with the dry signal completely muted).
+* **Envelope Filter (Auto-Wah):** Uses an envelope follower (borrowing logic from a compressor) to modulate the cutoff frequency of a `juce::dsp::LadderFilter` based on how loud the input signal is.
+* **Frequency Shifter:** Adds or subtracts a fixed number of Hertz to every frequency in the signal (e.g., +100Hz). Because it breaks mathematical harmonic relationships, it creates a wildly dissonant, phasing sound.
+* **Rotary Speaker (Leslie Sim):** A complex modulation effect that combines Tremolo, Auto-Pan, and Vibrato to simulate a speaker physically spinning in a wooden cabinet.

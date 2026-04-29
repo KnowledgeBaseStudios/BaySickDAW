@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Hip Hop (Real) Full" version="1">
+  <Drum slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Kicks/Hip Hop Kick 01.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Snares/Hip Hop Snare 01.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Claps/Hip Hop Clap 01.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Snares/Hip Hop Snare 02.xml" locked="1"/>
+  <Drum slot="4" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Hats/Hip Hop Closed Hat 01.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Hats/Hip Hop Open Hat 01.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Hats/Hip Hop Closed Hat 02.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Toms/Hip Hop Tom 01.xml" locked="1"/>
+  <Drum slot="8" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Toms/Hip Hop Tom 02.xml" locked="1"/>
+  <Drum slot="9" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Toms/Hip Hop Tom 03.xml" locked="1"/>
+  <Drum slot="10" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Cymbals/Hip Hop Cymbal 01.xml" locked="1"/>
+  <Drum slot="11" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Cymbals/Hip Hop Crash 01.xml" locked="1"/>
+  <Drum slot="12" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Beatbox/Hip Hop Beatbox 01.xml" locked="1"/>
+  <Drum slot="13" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Beatbox/Hip Hop Beatbox 02.xml" locked="1"/>
+  <Drum slot="14" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Percussion/Hip Hop Perc 01.xml" locked="1"/>
+  <Drum slot="15" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/FX/Hip Hop FX 01.xml" locked="1"/>
+</BaySickKit>

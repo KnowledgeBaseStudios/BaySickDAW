@@ -1,0 +1,76 @@
+Act as an expert C++/JUCE audio DSP developer. I am building a custom DAW and need a raw C++ DSP class for a highly advanced Algorithmic Reverb effect. Do NOT use juce::AudioProcessor, juce::AudioProcessorValueTreeState, or any UI/Editor code. I only need a decoupled DSP block (e.g., class ReverbDSP) that I can instantiate and chain inside my own custom audio engine.
+
+1. Class Architecture
+Create a class called ReverbDSP that follows the standard juce::dsp paradigm. It should have:
+
+A prepare(const juce::dsp::ProcessSpec& spec) method to initialize filters, delay lines, and reverb networks.
+
+A process(const juce::dsp::ProcessContextReplacing<float>& context) method for the audio loop.
+
+A setHostBPM(double bpm) method to allow the engine to pass the current tempo for pre-delay sync.
+
+A reset() method to clear all delay buffers and filter states.
+
+A Parameters struct or dedicated setter methods for all the variables below.
+
+2. Parameters
+Processing Mode: Enum (Stereo, Mid Only, Side Only). Determines how the input is encoded before entering the reverb engine.
+
+Low Cut (L.CUT): Float (Hz). High-pass filter cutoff for the input signal.
+
+High Cut (H.CUT): Float (Hz). Low-pass filter cutoff for the input signal.
+
+Predelay: Float (ms). Time before the first reflection.
+
+Tempo Sync: Boolean. If true, Predelay snaps to musical subdivisions based on host BPM.
+
+Room Size (SIZE): Float. Scales the internal delay line lengths of the reverb network.
+
+Diffusion (DIFF): Float. Controls the density of the reflections (all-pass filter coefficients).
+
+Decay (DEC): Float (seconds). The RT60 time (time to decay 60dB) for the main reverb tail.
+
+Bass Multiplier (BASS): Float. A multiplier for the decay time of frequencies below the Crossover point.
+
+Bass Crossover (CROSS): Float (Hz). The frequency split point for the Bass Multiplier.
+
+High Damping (DAMP): Float (Hz or coefficient). Rate at which high frequencies decay in the reverb tail. Include a "Bypass" boolean for this.
+
+Early Reflection (ER): Float (dB or %). Level of the initial reflections.
+
+Stereo Separation (SEP): Float (0% to 200%). Width of the wet signal (0 = mono, 100 = original width, >100 = widened).
+
+Dry / Wet Levels: Floats (dB or %).
+
+3. DSP Signal Flow (process method)
+Since JUCE's standard juce::dsp::Reverb does not natively support split-band bass decay or M/S processing, you will need to implement a custom routing topology (using a Feedback Delay Network or Schroeder-style algorithm for the core):
+
+Mid/Side Matrixing:
+
+If Mode is Mid Only or Side Only, encode the incoming L/R signal into M/S. Route the selected component (Mid or Side) into the reverb engine, and pass the unselected component through dry to be summed later.
+
+Input EQ: Apply the L.CUT (high-pass) and H.CUT (low-pass) filters to the signal entering the reverb.
+
+Predelay: Pass the signal through a juce::dsp::DelayLine. Calculate the time in milliseconds or tempo-synced beats.
+
+Early Reflections: Branch the signal into a small multi-tap delay or all-pass network to simulate initial wall bounces. Scale this branch by the ER level.
+
+Late Reverberation Engine (The Core):
+
+Route the signal into an FDN or network of comb/all-pass filters.
+
+Dual-Band Decay: Inside the feedback loop of your reverb network, split the signal at the CROSS frequency. Apply the main DEC time calculation to the high band, and apply (DEC * BASS) to the low band.
+
+High Damping: Apply a low-pass filter in the feedback loop controlled by the DAMP parameter (unless bypassed).
+
+Stereo Width: Process the wet output of the reverb engine through a Mid/Side encoder, adjust the Side level based on the SEP (Stereo Separation) parameter, and decode back to L/R.
+
+Output Mix:
+
+Sum the Early Reflections and Late Reverberation. Scale by the WET level.
+
+If M/S mode was used in Step 1, decode the processed signal back to L/R.
+
+Sum with the original, unprocessed signal scaled by the DRY level.
+
+Please provide the complete .h and .cpp implementation for the ReverbDSP class.

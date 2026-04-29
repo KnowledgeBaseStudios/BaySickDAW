@@ -1,0 +1,167 @@
+Vibesynth Internal DSP: NAM & IR Loader Module Specification
+This document serves as the comprehensive architectural and UI/UX specification for the All-In-One Neural Amp Modeler (NAM) and Impulse Response (IR) Cabinet Simulator. This module is designed strictly as an internal processing node for the Vibesynth Digital Audio Workstation's proprietary DSP effects rack.
+1. Architectural Overview
+The module combines non-linear neural network inference (amplifier modeling) with linear convolution (cabinet simulation) into a single, cohesive, skeuomorphic hardware-style interface. The signal chain is strictly serial: Input → Noise Gate → NAM DSP → Convolution Engine → Output.
+Environment: C++ / JUCE Framework.
+Target Architecture: Internal Vibesynth rack module (No external VST wrapper overhead required).
+Primary Dependencies: NeuralAmpModelerCore (v0.5.0+), Eigen, and juce::dsp.
+2. DSP Engine Specifications
+2.1 The NAM Inference Engine (Non-Linear Stage)
+The amplifier simulation utilizes the official nam::DSP class to load .nam weight files. Because guitar signals are fundamentally monophonic, the neural network should process the audio buffer on a single channel to minimize CPU overhead, copying the processed signal to the right channel post-inference if a stereo output is required by the rack routing.
+// Pseudo-code implementation strategy
+void processBlock(juce::AudioBuffer<float>& buffer) {
+    if (m_namDsp != nullptr && !isNamBypassed) {
+        float* channelData = buffer.getWritePointer(0);
+        m_namDsp->process(channelData, channelData, buffer.getNumSamples());
+        // Copy to channel 1 for dual-mono
+        buffer.copyFrom(1, 0, buffer, 0, 0, buffer.getNumSamples());
+    }
+}
+
+
+2.2 The Convolution Engine (Linear Stage)
+The cabinet simulation relies on juce::dsp::Convolution to load .wav impulse responses. It is critical that this stage handles automatic sample rate conversion. A user loading a 44.1kHz IR into a 96kHz Vibesynth project must not experience pitch-shifting; the engine must resample the IR upon load.
+Latency Mode: Must be configured to juce::dsp::Convolution::Latency::ZeroLatency or minimal block sizes to accommodate real-time guitar tracking without phase delay.
+File Parsing: Utilize juce::AudioFormatManager to read the `.wav` files into a temporary buffer before passing to the convolution spec.
+3. UI/UX: Skeuomorphic Design System
+The user interface must simulate a high-end boutique piece of outboard hardware, abandoning standard OS controls in favor of tactile, photorealistic elements rendered via customized juce::LookAndFeel_V4 overrides.
+3.1 Faceplate and Global Lighting
+The module's background should feature a dual-texture design indicating the two internal stages. The left half (Amp) utilizes a brushed dark anodized metal, while the right half (Cabinet) utilizes a woven speaker grille cloth texture. A consistent top-left lighting source must dictate the drop shadows for all rotary dials and switches.
+3.2 Custom Rotary Sliders (Filmstrips) Boilerplate
+All knobs must use 128-frame pre-rendered PNG sprite sheets (filmstrips). Below is the C++ boilerplate to feed to Claude Code for implementing the custom look and feel.
+class SkeuomorphicLookAndFeel : public juce::LookAndFeel_V4 {
+public:
+    SkeuomorphicLookAndFeel() {
+        // Load the 128-frame filmstrip directly from BinaryData
+        knobFilmstrip = juce::ImageCache::getFromMemory(BinaryData::knob_filmstrip_png, 
+                                                        BinaryData::knob_filmstrip_pngSize);
+    }
+
+    void drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
+                          float sliderPos, const float rotStart, const float rotEnd,
+                          juce::Slider& slider) override {
+        if (knobFilmstrip.isValid()) {
+            const int numFrames = 128;
+            const int frameHeight = knobFilmstrip.getHeight() / numFrames;
+            // Map the normalized 0.0 - 1.0 position to the correct frame
+            const int frameIdx = (int)std::round(sliderPos * (numFrames - 1));
+            
+            g.drawImage(knobFilmstrip, 
+                        x, y, width, height, // Destination bounding box
+                        0, frameIdx * frameHeight, knobFilmstrip.getWidth(), frameHeight); // Source bounds
+        } else {
+            // Fallback if the image fails to load
+            juce::LookAndFeel_V4::drawRotarySlider(g, x, y, width, height, sliderPos, rotStart, rotEnd, slider);
+        }
+    }
+private:
+    juce::Image knobFilmstrip;
+};
+
+
+4. Parameter Mapping & Component Layout
+The following table outlines the required GUI components, their specific DSP mappings, and their visual specifications, structured from left to right across the module faceplate.
+Component
+Function / DSP Target
+Range / Spec
+Visual Element Specification
+ 
+Input Gain Knob
+Pre-NAM volume scaling. Crucial for hitting the neural model at the correct capture level.
+-24dB to +24dB
+Large knurled aluminum knob. Sprite sheet with heavy drop shadow.
+NAM File Display
+Triggers file browser to load `.nam`.
+String (Filepath)
+Inset LCD screen. Amber dot-matrix text.
+NAM Bypass Toggle
+Bypasses neural inference processing.
+Boolean
+Heavy-duty metal bat-handle toggle switch. 3-frame animation.
+IR File Display
+Triggers file browser to load `.wav` IR.
+String (Filepath)
+Inset LCD screen. Displays filename and small green waveform render.
+Low Cut (HPF)
+Pre-convolution high-pass filter.
+20Hz to 500Hz
+Bakelite pointer knob.
+High Cut (LPF)
+Pre-convolution low-pass filter.
+3kHz to 20kHz
+Bakelite pointer knob.
+Cabinet Mix
+Wet/Dry blend for the convolution engine.
+0% to 100%
+Bakelite pointer knob. Default set to 100%.
+Cab Bypass Toggle
+Bypasses convolution. Used when loading "Full Rig" `.nam` files.
+Boolean
+Heavy-duty metal bat-handle toggle switch.
+Master Output
+Post-chain volume scaling.
+-24dB to +12dB
+Large knurled aluminum knob matching Input Gain.
+
+5. State Management & APVTS Boilerplate
+All parameters must be attached to the module's juce::AudioProcessorValueTreeState (APVTS). The filepaths for the currently loaded .nam and .wav files must be stored as custom string properties within the APVTS XML state to ensure they recall correctly upon project restoration.
+5.1 Parameter Layout and Initialization
+// Declare in the AudioProcessor header:
+// juce::AudioProcessorValueTreeState parameters;
+
+juce::AudioProcessorValueTreeState::ParameterLayout YourAudioProcessor::createParameterLayout() {
+    juce::AudioProcessorValueTreeState::ParameterLayout layout;
+
+    // Gain and Mix Parameters
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("input_gain", 1), "Input Gain", juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f), 0.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("cab_mix", 1), "Cabinet Mix", juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 100.0f));
+    
+    // Filters
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("low_cut", 1), "Low Cut", juce::NormalisableRange<float>(20.0f, 500.0f, 1.0f), 20.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("high_cut", 1), "High Cut", juce::NormalisableRange<float>(3000.0f, 20000.0f, 10.0f), 20000.0f));
+
+    // Bypasses
+    layout.add(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID("nam_bypass", 1), "NAM Bypass", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID("cab_bypass", 1), "Cab Bypass", false));
+
+    return layout;
+}
+
+
+5.2 Saving and Recalling String Properties (File Paths)
+Since standard APVTS parameters are primarily for floats, ints, and bools, string paths must be appended directly to the ValueTree state before saving to XML, and parsed out when restoring the XML state.
+void YourAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
+    auto state = parameters.copyState();
+    
+    // Add custom string properties for the file paths so they recall on session load
+    state.setProperty("nam_filepath", currentNamPath, nullptr);
+    state.setProperty("ir_filepath", currentIrPath, nullptr);
+
+    std::unique_ptr<juce::XmlElement> xml(state.createXml());
+    copyXmlToBinary(*xml, destData);
+}
+
+void YourAudioProcessor::setStateInformation(const void* data, int sizeInBytes) {
+    std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
+    if (xmlState != nullptr && xmlState->hasTagName(parameters.state.getType())) {
+        parameters.replaceState(juce::ValueTree::fromXml(*xmlState));
+        
+        // Recall custom string properties and trigger loading logic
+        if (parameters.state.hasProperty("nam_filepath")) {
+            juce::String namPath = parameters.state.getProperty("nam_filepath");
+            loadNamModel(namPath);
+        }
+        if (parameters.state.hasProperty("ir_filepath")) {
+            juce::String irPath = parameters.state.getProperty("ir_filepath");
+            loadImpulseResponse(irPath);
+        }
+    }
+}
+
+

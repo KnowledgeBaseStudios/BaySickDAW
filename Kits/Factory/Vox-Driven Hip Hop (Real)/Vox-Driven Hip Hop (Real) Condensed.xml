@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Vox-Driven Hip Hop (Real) Condensed" version="1">
+  <Drum slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Kicks/Hip Hop Kick 02.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Snares/Hip Hop Snare 05.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Hats/Hip Hop Closed Hat 07.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Hats/Hip Hop Open Hat 07 (Part 2).xml" locked="1"/>
+  <Drum slot="4" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Toms/Hip Hop Tom 02.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Vox/Hip Hop Vox 01.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Vox/Hip Hop Vox 02 (D).xml" locked="1"/>
+  <Drum slot="7" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Vox/Hip Hop Vox 03.xml" locked="1"/>
+</BaySickKit>

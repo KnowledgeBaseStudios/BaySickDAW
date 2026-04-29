@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Cinematic Basic" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/Cinematic, Industrial &amp; FX/Reverse Snare Swell.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Tom Lo.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/Cinematic, Industrial &amp; FX/Reverse Cymbal Sweep.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/Cinematic, Industrial &amp; FX/Cinematic Sub Drop.xml" locked="1"/>
+</BaySickKit>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="TR-606 Basic" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/606 Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/606 Kick (2).xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/606 Snare.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/606 Snare (2).xml" locked="1"/>
+</BaySickKit>

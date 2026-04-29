@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="80s Electronic Basic" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/Simmons Group/Simmons Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/Simmons Group/Simmons SDS-7 Kick.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/Simmons Group/Simmons Snare.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/Simmons Group/Gated 80s Snare.xml" locked="1"/>
+</BaySickKit>

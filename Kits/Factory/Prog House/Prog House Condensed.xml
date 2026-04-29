@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Prog House Condensed" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Festival Big Room Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909-Style Kick.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Distorted Gabber Kick.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Snare.xml" locked="1"/>
+  <Drum slot="4" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/Synthesized Clap.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/Synth Rimshot.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/Tight Closed Hat.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Open Hat.xml" locked="1"/>
+</BaySickKit>

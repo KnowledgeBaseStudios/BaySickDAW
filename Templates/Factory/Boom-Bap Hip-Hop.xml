@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="Boom-Bap Hip-Hop" version="1">
+  <Kit path="Boom-Bap Hip-Hop/Boom-Bap Hip-Hop Full.xml"/>
+  <Layer slot="0" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Boom-Bap Rhodes.xml" locked="1"/>
+  <Layer slot="1" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Dusty EP.xml" locked="1"/>
+  <Layer slot="2" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Soulful Pad.xml" locked="1"/>
+  <Layer slot="3" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Sample Chop Pluck.xml" locked="1"/>
+  <Layer slot="4" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Vocal-Style Lead.xml" locked="1"/>
+  <Layer slot="5" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Trap Bell.xml" locked="1"/>
+  <Layer slot="6" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Dark Brooding Pad.xml" locked="1"/>
+  <Layer slot="7" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/Lo-Fi Keys.xml" locked="1"/>
+  <Bass slot="0" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Boom-Bap 808.xml" locked="1"/>
+  <Bass slot="1" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Hip-Hop Sub.xml" locked="1"/>
+  <Bass slot="2" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Dirty Square Bass.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Sub Bass &amp; 808s/Punchy 808 Bass.xml" locked="1"/>
+</BaySickTemplate>

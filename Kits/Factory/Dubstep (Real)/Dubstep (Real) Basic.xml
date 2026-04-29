@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Dubstep (Real) Basic" version="1">
+  <Drum slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Kick 1.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Acoustic Kick 1.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Airy Kick.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Clappy Kick.xml" locked="1"/>
+</BaySickKit>

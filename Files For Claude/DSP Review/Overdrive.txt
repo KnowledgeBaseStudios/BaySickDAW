@@ -1,0 +1,49 @@
+To round out the **Vibesynth** suite, the **OverdriveDSP** needs to move away from a simple "distortion" plug-in and toward a multi-stage **analog-modeled signal path**. 
+
+The "stock FL" sound for overdrive (like *Fruity Blood Overdrive*) isn't just about the clip; it’s about the specific way the signal is filtered *before* it hits the virtual tube. This prevents "digital fizz" and ensures the distortion feels like it has "weight" and "color."
+
+---
+
+### 1. Stage 1: The Pre-Emphasis Filter (Color)
+If you send a full-spectrum signal into an overdrive, the low end will cause the distortion to "fart out" and the high end will sound like static.
+* **The Logic:** Use a **State-Variable TPT (Topology Preserving Transform)** filter set to **Band-Pass**. 
+* **The Parameter:** The `Color` knob controls the center frequency (usually 500Hz to 3kHz), and `Pre Band` controls the resonance (Q). This "focuses" the energy into the distortion engine.
+
+### 2. Stage 2: The Preamplifier (Linear Gain)
+Before the non-linear stage, you need a massive linear gain boost.
+* **The Logic:** Multiply the signal by the `Pre Amp` value.
+* **The x100 Switch:** If the user toggles `x100`, multiply the gain by an additional factor of 100. This is the secret to those "destroyed" industrial FL sounds.
+
+### 3. Stage 3: The Tube Engine (Non-Linear Waveshaper)
+Standard `std::tanh` is too clean for an overdrive. You want a function that mimics the "upward compression" of a vacuum tube.
+
+**The Math (Soft-Clip Sigmoid):**
+$$f(x) = \frac{x}{1 + |x|}$$
+*This function saturates more gracefully than tanh and provides a "rounder" harmonic profile. For the "Pro" version, run this inside a **4x Oversampling** block to eliminate aliasing.*
+
+### 4. Stage 4: The Post-Filter (Edge Smoothing)
+Distortion creates high-frequency harmonics that extend well beyond the range of human hearing (and your sample rate). 
+* **The Logic:** Use a **2-Pole TPT Low-Pass Filter**.
+* **The Parameter:** The `Post Filter` knob should sweep from 22kHz down to 2kHz. This "tames" the harshness and makes the overdrive sound like it’s coming out of a physical guitar cabinet.
+
+### 5. Stage 5: Post-Gain & Hard Clipping
+Because the Pre-Amp stage can add +40dB of gain, you need a final stage to bring the volume back to professional levels.
+* **Post-Gain:** A simple multiplier (usually -24dB to 0dB).
+* **Hard Safety Clip:** After the post-gain, implement a hard `std::clamp(sample, -1.0f, 1.0f)`. This ensures that even with extreme settings, **Vibesynth** never outputs a signal that could damage speakers or ears.
+
+---
+
+### The Instructions for Claude
+When you hand off the `Overdrive.txt` file to Claude, provide these specific "Pro" requirements:
+
+> "Rewrite the `OverdriveDSP` class using a sequential 5-stage pipeline:
+> 1.  **Pre-Filter:** Use a `juce::dsp::StateVariableTPTFilter` in **Band-Pass** mode. Map `Color` to frequency and `Pre Band` to Q.
+> 2.  **Gain Stage:** Implement the `Pre Amp` multiplier with an `x100` boolean toggle for extreme saturation.
+> 3.  **Shaper:** Use a **4x Oversampled** wave-shaper using the sigmoid function: `x / (1 + abs(x))`.
+> 4.  **Post-Filter:** Use a second `juce::dsp::StateVariableTPTFilter` in **Low-Pass** mode (2-pole) to smooth out the harmonic fizz.
+> 5.  **DC Block:** Add a **One-Pole HPF at 5Hz** before the final output.
+> 6.  **Final Stage:** Apply `Post Gain` followed by a hard digital clipper at +/- 1.0. 
+> 7.  **Smoothing:** Ensure `Color`, `Pre Amp`, and `Post Filter` use `juce::LinearSmoothedValue` to allow for smooth automated sweeps."
+
+
+

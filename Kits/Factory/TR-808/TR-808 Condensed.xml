@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="TR-808 Condensed" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/Long 808 Trap Kick.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Snare.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Handclap.xml" locked="1"/>
+  <Drum slot="4" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Rimshot.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Closed Hat.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Open Hat.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Tom Lo.xml" locked="1"/>
+</BaySickKit>

@@ -1,0 +1,46 @@
+Now that I have the image, I can give you something much closer to what you need! 
+
+While I can't extract the *exact* internal pixel variables the Image-Line developers used in their source code, I can visually measure the screenshot to provide **relative proportions and aspect ratios**. 
+
+In JUCE, hardcoding exact pixels is usually a bad idea for responsive scaling anyway. The best approach is to give Claude the **proportional splits** (using `flex-grow` or grid track fractions `fr`) based on this image, combined with the hierarchy from your text file. 
+
+Here is the visual breakdown you can feed directly to Claude alongside your text file:
+
+### **1. Overall Application Layout (The Grid)**
+The interface is split into a **Top Half** and a **Bottom Half**.
+* **Total Aspect Ratio:** Approximately 1.6:1 (Width is about 1.6x the Height).
+* **Vertical Split:** * Top Half (Timbre/Filtering): ~55% of total height (`flex-grow: 55`).
+    * Bottom Half (Global/Graph): ~45% of total height (`flex-grow: 45`).
+
+### **2. Top Half Layout (Left to Right)**
+The top section is split into three main columns:
+* **Top Left (Timbre/Mod/Pitch):** Takes up roughly **40%** of the width. 
+    * *Claude Instruction:* Use a CSS-style grid here or FlexBox with wrapping. The Mixer/Routing matrix takes up the center of this specific panel.
+* **Top Middle (Unison):** A narrow vertical strip taking up roughly **10%** of the width.
+    * *Claude Instruction:* Stack items vertically (`flex-direction: column`).
+* **Top Right (Filtering Section):** Takes up the remaining **50%** of the width.
+    * *Claude Instruction:* Split into 3 horizontal rows. Row 1 (Filter 1) and Row 2 (Filter 2) each take up about 40% of this panel's height. Row 3 (Bottom FX) takes up the remaining 20% and is split into Pluck, Phaser, and EQ.
+
+### **3. Bottom Half Layout (Left to Right)**
+The bottom section is split into two columns:
+* **Bottom Left (Global/Performance):** Takes up roughly **40%** of the width (aligning perfectly with the top-left panel's right edge).
+    * *Claude Instruction:* Sub-divide this into a 2x2 grid. Top-left: Global. Top-right: LFO Sliders. Bottom-left: Strum & Info. Bottom-right: X/Y/Z Mod Pad.
+* **Bottom Right (Modulation Graph):** Takes up the remaining **60%** of the width.
+    * *Claude Instruction:* Allocate ~10% height for the top header/routing tabs, ~80% for the main graph component, and ~10% for the bottom graph modifiers.
+
+---
+
+### **Suggested Prompt to give to Claude:**
+
+> "I am building a standalone JUCE application and applying custom skeuomorphic textures. I need you to generate the C++ boilerplate for the UI. 
+> 
+> **Step 1:** Read the attached text file for the exact topography, parameter names, and UI component types (`juce::Slider`, `juce::ComboBox`, etc.). 
+> **Step 2:** Create separate `juce::Component` subclasses for the 5 major panels described in the text file. 
+> **Step 3:** In the `MainComponent::resized()` method, use `juce::FlexBox` to lay out the main panels using these proportional splits:
+> - Split the main window vertically: Top half gets `flex-grow: 55`, bottom half gets `flex-grow: 45`.
+> - Split the top half horizontally into 3 panels: Left panel gets `flex-grow: 40`, middle gets `flex-grow: 10`, right gets `flex-grow: 50`.
+> - Split the bottom half horizontally into 2 panels: Left panel gets `flex-grow: 40`, right panel gets `flex-grow: 60`.
+> 
+> Please generate the header and cpp code to structure this interface."
+
+This combination of the text file's exact parameter names and the visual proportions from the image will give Claude exactly what it needs to write a beautifully structured, responsive JUCE interface for you. How are you planning on handling the vector drawing for that large modulation graph?

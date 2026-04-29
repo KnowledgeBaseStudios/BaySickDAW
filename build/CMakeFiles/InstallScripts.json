@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/jeffm/Documents/BaySickDAW/build/cmake_install.cmake",
+		"C:/Users/jeffm/Documents/BaySickDAW/build/juce_build/cmake_install.cmake",
+		"C:/Users/jeffm/Documents/BaySickDAW/build/juce_build/modules/cmake_install.cmake",
+		"C:/Users/jeffm/Documents/BaySickDAW/build/juce_build/extras/Build/cmake_install.cmake",
+		"C:/Users/jeffm/Documents/BaySickDAW/build/juce_build/extras/Build/juceaide/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

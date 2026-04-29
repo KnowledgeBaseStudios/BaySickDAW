@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Hardstyle (Real) Basic" version="1">
+  <Drum slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Hardstyle Kicks/Hardstyle Kick 1 (A).xml" locked="1"/>
+  <Drum slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Hardstyle Kicks/Hardstyle Kick 2 (D).xml" locked="1"/>
+  <Drum slot="2" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Hardstyle Kicks/Hardstyle Kick 3 (F#).xml" locked="1"/>
+  <Drum slot="3" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Hardstyle Kicks/Hardstyle Kick 5 (G).xml" locked="1"/>
+</BaySickKit>

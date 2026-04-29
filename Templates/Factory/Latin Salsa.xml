@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="Latin Salsa" version="1">
+  <Kit path="Latin Salsa/Latin Salsa Full.xml"/>
+  <Layer slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/Keys/Upright Piano.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/Brass/Trumpet (Sustained).xml" locked="1"/>
+  <Layer slot="2" engine="BaySickPlayer" presetPath="BaySickPlayer/Brass/Trumpet (Staccato).xml" locked="1"/>
+  <Layer slot="3" engine="BaySickPlayer" presetPath="BaySickPlayer/Brass/Trombone (Sustained).xml" locked="1"/>
+  <Layer slot="4" engine="BaySickPlayer" presetPath="BaySickPlayer/Brass/Trombone (Staccato).xml" locked="1"/>
+  <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/B3 Organ.xml" locked="1"/>
+  <Layer slot="6" engine="BaySickPlayer" presetPath="BaySickPlayer/Woodwinds/Flute (Sustained Vibrato).xml" locked="1"/>
+  <Layer slot="7" engine="BaySickSynth" presetPath="BaySickSynth/Plucks &amp; Mallets/Marimba Pluck.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/Strings/Contrabass (Pizzicato).xml" locked="1"/>
+  <Bass slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/Strings/Contrabass (Sustained).xml" locked="1"/>
+  <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Picked Bass.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Upright Jazz Sub.xml" locked="1"/>
+</BaySickTemplate>

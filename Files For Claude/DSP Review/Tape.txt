@@ -1,0 +1,45 @@
+To make **Vibesynth** compete with stock FL or high-end tape emulations, the **TapeDSP** module cannot just be a simple distortion. Tape is a "living" medium defined by **magnetic memory (Hysteresis)** and **mechanical instability (Wow & Flutter)**.
+
+Here is the professional breakdown for the **Type 1 Cassette Tape** module.
+
+---
+
+### 1. The Magnetic Engine (Hysteresis & Saturation)
+Standard distortion treats every sample in isolation. Real tape has "memory"—the magnetic particles on the tape stay partially oriented based on the *previous* sample. This creates the "thick" low-end and smoothed transients tape is known for.
+
+**The Math (Differential Equation for Hysteresis):**
+Instead of a static shaper, use a state-dependent variable that "drifts" toward the target.
+$$y[n] = y[n-1] + \alpha \cdot (\text{shaper}(x[n]) - y[n-1])$$
+* **$\alpha$:** A coefficient based on the tape "speed" (lower speed = more hysteresis/memory).
+* **shaper:** Use the **Asymmetrical Sigmoid** we discussed for the Saturation module to generate those musical even-order harmonics.
+
+### 2. The Mechanical Engine (Wow & Flutter)
+This is what makes tape sound "real." It’s a modulated delay line, but the key is the **Fractional Interpolation**. If you use linear interpolation, you get "zipper noise" that sounds like a cheap 90s digital toy.
+
+* **Wow (Motor Drift):** A slow Sine LFO (0.5Hz – 2Hz).
+* **Flutter (Capstan Friction):** A fast Sine LFO (10Hz – 20Hz) mixed with a **Perlin Noise** or smoothed random generator.
+* **Interpolation:** You must use **Cubic Lagrange** or **Hermite** interpolation. This ensures that as the delay time shifts by tiny fractions of a sample, the audio remains "liquid" and smooth.
+
+### 3. The Static Profile (Convolution/EQ)
+A Type 1 Cassette has a very specific "frequency footprint"—it usually rolls off sharply above 15kHz and has a "bump" in the low-mids.
+* **The Logic:** Use `juce::dsp::Convolution` to load a tiny (128-sample) Impulse Response of a real cassette deck.
+* **Backup (Algorithmic):** If you don't want to use IRs, use a **Emphasis/De-Emphasis** filter pair. Boost the highs by 6dB before the saturation, then cut them by 8dB after. This "traps" the distortion in the high frequencies, making them sound "smeared" rather than "crunchy."
+
+### 4. Noise Floor (Dithered Hiss)
+Tape hiss isn't just white noise; it's weighted.
+* **The Logic:** Generate white noise and pass it through a **Pink Filter** (3dB/octave slope) followed by a High-Pass at 200Hz. This creates the "ssshhh" sound without the "rumble."
+
+---
+
+### The Instructions for Claude
+When you hand off `Tape.txt` to Claude, use these specific technical requirements to ensure it sounds "Pro":
+
+> "Rewrite the `TapeDSP` class with the following high-end specifications:
+> 1. **Saturation Stage:** Use a **4x Oversampled** block. Inside, implement an **Asymmetrical Sigmoid** shaper paired with a **Hysteresis state-variable** ($y = y_{prev} + \alpha * (sat - y_{prev})$) to simulate magnetic memory.
+> 2. **Modulation:** Implement Wow & Flutter using a `juce::dsp::DelayLine`. The read pointer **MUST** use `juce::dsp::DelayLineInterpolationType::cubic`. 
+> 3. **LFOs:** Wow is a 1Hz Sine; Flutter is a 15Hz Sine mixed with 20% smoothed White Noise.
+> 4. **Frequency Response:** Implement a **Pre-Emphasis/De-Emphasis** filter scheme (High Shelf boost @ 5kHz pre-distortion, High Shelf cut @ 4kHz post-distortion) to mimic cassette high-frequency saturation.
+> 5. **Noise:** Add a 'Tape Hiss' generator using Pink-filtered noise, mixed in at the final output stage with a DC Offset filter (One-Pole HPF @ 5Hz)."
+
+### Next Module: Reverb or Transient Shaper?
+The **Reverb** (FDN Matrix) is the most complex, while the **Transient Shaper** is the most surgical. Which one are we fixing next?

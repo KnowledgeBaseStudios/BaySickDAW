@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="EDM Big Room" version="1">
+  <Kit path="EDM Big Room/EDM Big Room Full.xml"/>
+  <Layer slot="0" engine="BaySickSynth" presetPath="BaySickSynth/Modern EDM &amp; Hyperpop/Supersaw Chords.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSynth" presetPath="BaySickSynth/Modern EDM &amp; Hyperpop/Festival Lead.xml" locked="1"/>
+  <Layer slot="2" engine="BaySickSynth" presetPath="BaySickSynth/Leads &amp; Solos/EDM Saw Lead.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickSynth" presetPath="BaySickSynth/Modern EDM &amp; Hyperpop/Slap House Lead.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSynth" presetPath="BaySickSynth/Modern EDM &amp; Hyperpop/Future Bass Chord.xml" locked="1"/>
+  <Layer slot="5" engine="Harmless" presetPath="Harmless/Modern EDM &amp; Hyperpop/Festival Lead.xml" locked="1"/>
+  <Layer slot="6" engine="Harmless" presetPath="Harmless/Cinematic &amp; Drones/Riser FX.xml" locked="1"/>
+  <Layer slot="7" engine="BaySickSynth" presetPath="BaySickSynth/Cinematic &amp; Drones/Sub Drop FX.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickBass" presetPath="BaySickBass/Sub Bass &amp; 808s/Deep House Sub.xml" locked="1"/>
+  <Bass slot="1" engine="BaySickBass" presetPath="BaySickBass/Sub Bass &amp; 808s/Saturation Sub.xml" locked="1"/>
+  <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Reese &amp; Neuro/Standard Reese.xml" locked="1"/>
+  <Bass slot="3" engine="Harmless" presetPath="Harmless/Bass Music/Skrillex Reese.xml" locked="1"/>
+</BaySickTemplate>

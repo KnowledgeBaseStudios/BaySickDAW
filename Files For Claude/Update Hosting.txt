@@ -1,0 +1,52 @@
+Here is how you architect the opt-in update loop strictly using GitHub's ecosystem.
+
+1. Hosting the version.json (GitHub Pages)
+While you can use raw GitHub file URLs (like raw.githubusercontent.com/...), they are heavily cached and can delay your users seeing the update. The professional way to do this is using GitHub Pages.
+
+Create a branch in your repository (or a separate repo entirely) for your GitHub Pages site.
+
+Place your version.json file in the root directory.
+
+Your DAW will now ping a clean, stable URL on startup:
+https://yourusername.github.io/vibesynth/version.json
+
+The JSON file only needs two keys:
+
+JSON
+{
+  "latest_version": "1.0.5",
+  "release_url": "https://github.com/yourusername/vibesynth/releases/latest"
+}
+2. Hosting the Installers (GitHub Releases)
+GitHub Releases is designed specifically for distributing compiled software binaries.
+
+Whenever you finish a new build of the DAW, you create a new "Release" on GitHub and tag it with the version number (e.g., v1.0.5). You then attach your compiled .exe or macOS installer (the .pkg or .dmg) directly to that release as an "Asset."
+
+3. The App Logic & The Handoff
+Here is exactly how the C++/JUCE logic flows with this setup:
+
+The Ping: On an isolated background thread, the app reads the version.json from your GitHub Pages URL.
+
+The Check: It parses the JSON and checks if "latest_version" is greater than ProjectInfo::versionString.
+
+The Prompt: If an update is found, you trigger your custom juce::Component alert window. You can perfectly match the skeuomorphic, matte charcoal aesthetic of your DAW's effects rack so the prompt feels native to the application.
+
+The Handoff: If the user clicks "Download Update" on your prompt, you execute the handoff using the URL parsed from the JSON:
+
+C++
+juce::URL("https://github.com/yourusername/vibesynth/releases/latest").launchInDefaultBrowser();
+Because you use the /releases/latest URL, you don't even need to update the JSON file's URL every time. GitHub automatically redirects that link to whichever release you published most recently. The user lands on a clean GitHub page where they can read your release notes and click the installer file to download it.
+
+4. Terminal Automation
+This entire pipeline is easily automated right from the terminal. By installing the GitHub CLI (gh), your AI coding assistants can handle the deployment without you ever opening a web browser.
+
+Once your build script finishes compiling, you can have your terminal agent execute:
+
+Bash
+gh release create v1.0.5 ./Vibesynth-Windows-Installer.exe --title "Version 1.0.5" --notes "Added new serial effects rack routing."
+This single command uploads the binary and publishes the release globally.
+
+The Only Caveat: Bandwidth Limits
+GitHub provides this service for free, but their Acceptable Use Policy prohibits using GitHub Releases as a massive content delivery network. For an indie audio developer, you are highly unlikely to hit this limit. However, if the DAW explodes in popularity and you are pushing terabytes of downloads a day, GitHub may eventually ask you to move your binaries to a dedicated host like Amazon S3 or Cloudflare R2.
+
+Is the repository you are using for the DAW currently public or private? (GitHub limits Pages and Releases slightly differently depending on the repository visibility).

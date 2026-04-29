@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Funk Basic" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Snare.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Handclap.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/Synthesized Clap.xml" locked="1"/>
+</BaySickKit>

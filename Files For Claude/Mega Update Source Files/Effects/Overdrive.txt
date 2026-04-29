@@ -1,0 +1,50 @@
+Here is the prompt for the Overdrive module.
+
+This effect has a very specific, linear signal flow outlined in your documentation. I’ve structured the prompt so Claude implements exactly that pipeline using JUCE’s built-in StateVariableTPTFilter and a WaveShaper to mimic the vacuum tube style non-linear response mentioned in your notes.
+
+Copy and paste this to Claude:
+
+Act as an expert C++/JUCE audio DSP developer. I am building a custom DAW and need a raw C++ DSP class for an Overdrive effect. Do NOT use juce::AudioProcessor, juce::AudioProcessorValueTreeState, or any UI/Editor code. I only need a decoupled DSP block (e.g., class OverdriveDSP) that I can instantiate and chain inside my own custom audio engine.
+
+1. Class Architecture
+Create a class called OverdriveDSP that follows the standard juce::dsp paradigm. It should have:
+
+A prepare(const juce::dsp::ProcessSpec& spec) method to initialize the filters and waveshapers.
+
+A process(const juce::dsp::ProcessContextReplacing<float>& context) method for the audio loop.
+
+A reset() method to clear filter states.
+
+A Parameters struct or dedicated setter methods for all the variables below.
+
+2. Parameters
+Pre Band: Float. Controls the bandwidth/amount of the initial band-pass filter.
+
+Color: Float (Frequency in Hz). Sets the center/cutoff frequency for the Pre Band filter.
+
+Pre Amp: Float. The main drive/gain applied to the audio to push it into distortion.
+
+x100: Boolean. A switch that multiplies the Pre Amp drive level by 100 for extreme distortion.
+
+Post Filter: Float (Frequency in Hz). Sets the cutoff frequency for the post-distortion 2-pole low-pass filter.
+
+Post Gain: Float (in dB or linear multiplier). Acts as a final gain reducer to compensate for the massive volume boost introduced by the Pre Amp stage.
+
+3. DSP Signal Flow (process method)
+The documentation dictates a very specific, sequential 5-stage signal flow. Please implement this using juce::dsp::ProcessorChain or direct sequential processing:
+
+Band Pass Filter: Route the input through a Band Pass filter (use juce::dsp::StateVariableTPTFilter set to band-pass). The frequency is controlled by Color and the resonance/bandwidth by Pre Band.
+
+Preamplifier (Gain Stage): Multiply the signal by the Pre Amp amount. If x100 is TRUE, multiply this pre-amp gain by an additional factor of 100.
+
+Distortion/Waveshaping: Pass the pre-amplified signal through a non-linear waveshaper (juce::dsp::WaveShaper). Use a mathematical function (like std::tanh or a custom polynomial) that simulates the non-linear signal response of a vacuum tube compressor to create upward compression and rich harmonic distortion.
+
+Post Filter: Route the distorted signal through a 2-Pole Low Pass filter (again, juce::dsp::StateVariableTPTFilter set to low-pass). The cutoff frequency is controlled by the Post Filter parameter.
+
+Post Gain & Final Clipping:
+
+Apply the Post Gain reduction to tame the volume.
+
+Pass the final output through a hard digital clipper (e.g., clipping at -1.0 to 1.0) as the absolute final stage of the signal path.
+
+Please provide the complete .h and .cpp implementation for the OverdriveDSP class.

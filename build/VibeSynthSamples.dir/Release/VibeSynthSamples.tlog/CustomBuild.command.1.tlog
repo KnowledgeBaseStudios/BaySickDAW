@@ -1,0 +1,24 @@
+^C:\USERS\JEFFM\DOCUMENTS\BAYSICKDAW\BUILD\CMAKEFILES\0E7DBFBA379DDEA263193D14A23B184E\BINARYDATA1.CPP.RULE
+setlocal
+cd C:\Users\jeffm\Documents\BaySickDAW
+if %errorlevel% neq 0 goto :cmEnd
+C:
+if %errorlevel% neq 0 goto :cmEnd
+C:\Users\jeffm\Documents\BaySickDAW\build\juce_build\tools\extras\Build\juceaide\juceaide_artefacts\Custom\juceaide.exe binarydata BinaryData BinaryData.h C:/Users/jeffm/Documents/BaySickDAW/build/juce_binarydata_VibeSynthSamples/JuceLibraryCode C:/Users/jeffm/Documents/BaySickDAW/build/juce_binarydata_VibeSynthSamples/JuceLibraryCode/input_file_list
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\JEFFM\DOCUMENTS\BAYSICKDAW\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/jeffm/Documents/BaySickDAW -BC:/Users/jeffm/Documents/BaySickDAW/build --check-stamp-file C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

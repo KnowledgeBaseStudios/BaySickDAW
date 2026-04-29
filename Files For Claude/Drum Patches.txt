@@ -1,0 +1,119 @@
+1. 808 Group (Deep, Sustained)
+1. Deep Sub Boom: waveform: 10.0, transpose: -24.0, amp_decay: 1.5, amp_release: 1.5
+2. Long 808 Trap Kick: waveform: 10.0, transpose: -24.0, pEnv_amt: 24.0, amp_decay: 2.5
+3. 808-Style Snare: waveform: 10.0, transpose: 5.0, noise: 0.4, pEnv_amt: 24.0
+4. 808 Cowbell: waveform: 2.0, dualOscMode: 1.0, unison_detune: 0.6, transpose: 7.0
+5. Gliding 808: waveform: 10.0, transpose: -24.0, glide: 0.5, voiceMode: 1.0
+6. High Conga 808: waveform: 10.0, transpose: 15.0, pEnv_amt: 12.0, amp_decay: 0.4
+7. Muffled 808 Bass: waveform: 10.0, transpose: -24.0, amp_attack: 0.05, pEnv_amt: 0.0
+8. Classic 808 Rimshot: waveform: 10.0, transpose: 17.0, pEnv_amt: 0.0, trans_amount: 1.0
+9. 808 Low Tom: waveform: 10.0, transpose: -12.0, pEnv_amt: 18.0, pEnv_decay: 0.2
+10. 808 Mid Tom: waveform: 10.0, transpose: -5.0, pEnv_amt: 18.0, pEnv_decay: 0.15
+
+2. 909 Group (Punchy, Transient)
+11. 909-Style Kick: waveform: 10.0, transpose: -12.0, pEnv_amt: 24.0, pEnv_decay: 0.08, trans_amount: 0.8
+12. Classic Analog Snare: waveform: 10.0, noise: 0.8, pEnv_amt: 12.0, flt_cutoff: 8000.0
+13. Tight Closed Hat: noiseOnly: 1.0, noiseColor: 0.9, amp_decay: 0.04, flt_cutoff: 12000.0
+14. Open Hat: noiseOnly: 1.0, cutSelf: 1.0, amp_decay: 0.4, amp_release: 0.3
+15. Synthesized Clap: noiseOnly: 1.0, burst_mode: 1.0, burst_count: 4.0, burst_spacing: 12.0
+16. White Noise Crash: noiseOnly: 1.0, amp_decay: 1.8, flt_type: 1.0, flt_cutoff: 8000.0
+17. Synth Rimshot: waveform: 10.0, transpose: 10.0, trans_amount: 1.0, pEnv_amt: 24.0
+18. Pedal Hat (Chick): noiseOnly: 1.0, noiseColor: 0.6, amp_decay: 0.08, flt_cutoff: 8000.0
+19. Deep House Thump: waveform: 10.0, transpose: -18.0, pEnv_amt: 15.0, trans_amount: 0.1
+20. 909 High Tom: waveform: 10.0, transpose: 5.0, noise: 0.2, pEnv_amt: 20.0
+
+3. 606 Group (Tight, Clicky)
+21. Analog Metronome: waveform: 10.0, transpose: 12.0, amp_decay: 0.01, trans_amount: 1.0
+22. Electro Castanet: waveform: 2.0, transpose: 19.0, burst_mode: 1.0, burst_count: 2.0
+23. High Woodblock: waveform: 2.0, transpose: 24.0, amp_decay: 0.04, trans_amount: 0.8
+24. Master Sync Tick: waveform: 10.0, transpose: 36.0, amp_decay: 0.001, noiseOnly: 1.0
+25. 606 Closed Hat: noiseOnly: 1.0, noiseColor: 0.8, amp_decay: 0.03, flt_type: 1.0
+26. 606 Open Hat: noiseOnly: 1.0, noiseColor: 0.8, amp_decay: 0.25, cutSelf: 1.0
+27. 606 Snare: waveform: 10.0, transpose: 8.0, noise: 0.6, amp_decay: 0.12
+28. 606 Kick: waveform: 10.0, transpose: -10.0, pEnv_amt: 24.0, pEnv_decay: 0.05
+29. 606 Low Tom: waveform: 10.0, transpose: -5.0, pEnv_amt: 15.0, amp_decay: 0.2
+30. 606 High Tom: waveform: 10.0, transpose: 10.0, pEnv_amt: 15.0, amp_decay: 0.15
+
+4. Simmons Group (80s Sweeps)
+31. Resonant Synth Tom: waveform: 10.0, transpose: -5.0, pEnv_amt: 12.0, pEnv_decay: 0.2
+32. Sci-Fi Laser Zap: waveform: 0.0, transpose: 24.0, pEnv_amt: -24.0, pEnv_decay: 0.05
+33. Simmons 80s Tom: waveform: 0.0, noise: 0.3, pEnv_amt: 24.0, pEnv_decay: 0.15
+34. Gated 80s Snare: waveform: 10.0, noise: 0.9, amp_sustain: 0.4, amp_release: 0.01
+35. Electro Pew-Pew: waveform: 0.0, transpose: 0.0, pEnv_amt: -24.0, pEnv_decay: 0.15
+36. Disco Syndrum: waveform: 10.0, transpose: 12.0, pEnv_amt: -24.0, pEnv_decay: 0.2
+37. Vintage Simmons Snare: waveform: 0.0, transpose: 5.0, noise: 0.7, pEnv_amt: -24.0
+38. Tom Thud (Dead Room): waveform: 10.0, transpose: -7.0, amp_decay: 0.1, pEnv_amt: 10.0
+39. Simmons Low Tom: waveform: 0.0, transpose: -12.0, noise: 0.2, pEnv_amt: 24.0
+40. Simmons Sweep FX: waveform: 0.0, transpose: 12.0, pEnv_amt: -24.0, amp_decay: 1.0
+
+5. Yamaha Group (FM & Digital)
+41. FM Metallic Cowbell: waveform: 2.0, transpose: 12.0, ringMod: 1.0, unison_detune: 0.7
+42. Synthetic Ride Bell: waveform: 10.0, transpose: 24.0, ringMod: 1.0, trans_amount: 0.8
+43. Synth Gong: waveform: 2.0, transpose: -15.0, ringMod: 1.0, amp_decay: 3.5
+44. Agogo Bell: waveform: 2.0, transpose: 17.0, ringMod: 1.0, pEnv_amt: 0.0
+45. Shimmering Ride: waveform: 2.0, transpose: 36.0, ringMod: 1.0, noise: 0.7
+46. Synthetic Triangle: waveform: 10.0, transpose: 36.0, amp_decay: 1.5, trans_amount: 0.5
+47. FM Pluck Percussion: waveform: 2.0, transpose: 12.0, ringMod: 1.0, pEnv_amt: 5.0
+48. FM Digital Bell: waveform: 2.0, transpose: 24.0, ringMod: 1.0, amp_decay: 0.8
+49. Gong Crash Mix: waveform: 2.0, transpose: 12.0, ringMod: 1.0, unison_voices: 3.0
+50. DX Style Tubulum: waveform: 6.0, transpose: -5.0, ringMod: 1.0, amp_decay: 0.5
+
+6. Hand Percussion
+51. Shaker: noiseOnly: 1.0, noiseColor: 0.8, amp_attack: 0.05, amp_decay: 0.1
+52. Tambourine: noiseOnly: 1.0, burst_mode: 1.0, burst_count: 3.0, burst_spacing: 25.0
+53. Electronic Bongo: waveform: 10.0, transpose: 12.0, pEnv_amt: 15.0, pEnv_decay: 0.05
+54. Hollow Woodblock: waveform: 2.0, transpose: 19.0, amp_decay: 0.05, pEnv_amt: 5.0
+55. Electronic Clave: waveform: 10.0, transpose: 24.0, amp_decay: 0.08, trans_amount: 0.6
+56. Finger Snap: noiseOnly: 1.0, burst_mode: 1.0, burst_count: 2.0, burst_spacing: 8.0
+57. Guiro Scrape: noiseOnly: 1.0, burst_mode: 1.0, burst_count: 8.0, burst_spacing: 15.0
+58. Cabasa: noiseOnly: 1.0, burst_mode: 1.0, burst_count: 6.0, burst_spacing: 12.0
+59. Stomp Kick: waveform: 10.0, transpose: -18.0, noise: 0.6, flt_cutoff: 3000.0
+60. Sleigh Bells: noiseOnly: 1.0, burst_mode: 1.0, burst_count: 4.0, flt_type: 1.0
+
+7. Tuned Percussion
+61. Tribal Log Drum: waveform: 10.0, transpose: -5.0, amp_attack: 0.02, pEnv_amt: 5.0
+62. Synthetic Marimba: waveform: 10.0, transpose: 12.0, amp_attack: 0.02, trans_amount: 0.4
+63. Deep Floor Tom: waveform: 10.0, transpose: -12.0, pEnv_amt: 12.0, pEnv_decay: 0.2
+64. Cricket Synth Perc: waveform: 10.0, transpose: 24.0, burst_mode: 1.0, pEnv_amt: 12.0
+65. Synthetic Tabla: waveform: 10.0, transpose: 10.0, pEnv_amt: 8.0, pEnv_decay: 0.15
+66. PVC Tube Strike: waveform: 2.0, transpose: -5.0, flt_cutoff: 400.0, flt_res: 0.9
+67. Steel Drum Perc: waveform: 6.0, transpose: 12.0, ringMod: 1.0, amp_decay: 0.4
+68. Tuned Kalimba: waveform: 10.0, trans_amount: 0.7, amp_decay: 0.3, pEnv_amt: 2.0
+69. Crystal Tom: waveform: 6.0, transpose: 0.0, trans_amount: 0.5, pEnv_amt: 5.0
+70. Wooden Mallet: waveform: 2.0, transpose: 5.0, flt_cutoff: 1500.0, trans_amount: 0.6
+
+8. Modern EDM & Trap
+71. Distorted Gabber Kick: waveform: 2.0, transpose: -24.0, unison_detune: 0.1, pEnv_amt: 24.0
+72. Trap Snare Roll: waveform: 10.0, transpose: 7.0, burst_mode: 1.0, burst_count: 4.0
+73. Dubstep Sub Impact: waveform: 0.0, transpose: -24.0, flt_attack: 0.1, flt_env_amt: 0.8
+74. Underwater Kick: waveform: 10.0, transpose: -24.0, flt_cutoff: 150.0, trans_amount: 0.0
+75. Donk Bass Perc: waveform: 2.0, transpose: -12.0, pEnv_amt: 24.0, flt_res: 0.8
+76. Psytrance Zap Kick: waveform: 10.0, transpose: -24.0, pEnv_amt: 24.0, pEnv_decay: 0.02
+77. Distorted Slap Clap: noiseOnly: 1.0, unison_voices: 3.0, unison_detune: 0.8, burst_mode: 1.0
+78. Granular Smear Snare: waveform: 10.0, noise: 0.8, amp_attack: 0.08, trans_amount: 1.0
+79. Stuttering Snare Tail: noiseOnly: 1.0, burst_mode: 1.0, burst_count: 8.0, burst_spacing: 2.0
+80. Festival Big Room Kick: waveform: 10.0, transpose: -24.0, pEnv_amt: 24.0, trans_duration: 5.0
+
+9. Lo-Fi, Chiptune & Texture
+81. 8-Bit Kick: waveform: 2.0, transpose: -12.0, pEnv_amt: 24.0, flt_cutoff: 8000.0
+82. Vinyl Crackle Layer: noiseOnly: 1.0, noiseColor: 0.1, amp_sustain: 0.3, flt_cutoff: 2000.0
+83. White Noise Sizzle: noiseOnly: 1.0, noiseColor: 0.95, amp_decay: 0.25, trans_amount: 0.0
+84. 8-Bit Snare: waveform: 2.0, transpose: 5.0, noise: 0.7, pEnv_amt: 12.0
+85. Crunch Snare: waveform: 10.0, noise: 0.9, noiseColor: 0.2, flt_cutoff: 2500.0
+86. Trash Cymbal: waveform: 2.0, transpose: 12.0, noise: 0.6, ringMod: 1.0
+87. Fake Reverb Snare Tail: noiseOnly: 1.0, noiseColor: 0.3, amp_attack: 0.05, amp_decay: 1.2
+88. Lo-Fi Digital Shaker: noiseOnly: 1.0, noiseColor: 0.2, burst_mode: 1.0, flt_cutoff: 3000.0
+89. Square Pop: waveform: 2.0, transpose: 12.0, pEnv_amt: 18.0, flt_cutoff: 8000.0
+90. Glitch Hop Squash: noiseOnly: 1.0, unison_voices: 4.0, unison_detune: 1.0, amp_decay: 0.1
+
+10. Cinematic, Industrial & FX
+91. Reverse Cymbal Sweep: noiseOnly: 1.0, amp_attack: 1.5, flt_attack: 1.5, flt_env_amt: 0.5
+92. Cinematic Sub Drop: waveform: 10.0, transpose: -12.0, pEnv_amt: -24.0, pEnv_decay: 3.0
+93. Riser Sweep FX: waveform: 0.0, transpose: -24.0, amp_attack: 4.0, pEnv_amt: 24.0
+94. Water Plop: waveform: 10.0, transpose: 15.0, pEnv_amt: -24.0, pEnv_decay: 0.04
+95. Reverse Suck FX: noise: 0.5, amp_attack: 1.5, pEnv_amt: -24.0, pEnv_attack: 1.5
+96. Anvil Strike: waveform: 2.0, ringMod: 1.0, unison_voices: 3.0, trans_amount: 1.0
+97. Reverse Snare Swell: waveform: 10.0, noise: 0.8, amp_attack: 0.8, flt_env_amt: 0.8
+98. Impact Downshifter: noiseOnly: 1.0, amp_decay: 4.0, flt_decay: 3.0, flt_env_amt: -0.8
+99. Raygun FX: waveform: 0.0, burst_mode: 1.0, burst_count: 5.0, pEnv_amt: -24.0
+100. Formant Vocal Uh!: waveform: 2.0, transpose: -5.0, flt_cutoff: 300.0, flt_env_amt: 0.8

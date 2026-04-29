@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Vox-Driven Hip Hop (Real) Basic" version="1">
+  <Drum slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Kicks/Hip Hop Kick 02.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Snares/Hip Hop Snare 05.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Hats/Hip Hop Closed Hat 07.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Hats/Hip Hop Open Hat 07 (Part 2).xml" locked="1"/>
+</BaySickKit>

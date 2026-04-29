@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Jazz Fusion Condensed" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/Acoustic Live Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/Classic Analog Snare.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Closed Hat.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Open Hat.xml" locked="1"/>
+  <Drum slot="4" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/Pedal Hat (Chick).xml" locked="1"/>
+  <Drum slot="5" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Tom Hi.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Tom Mid.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Tom Lo.xml" locked="1"/>
+</BaySickKit>

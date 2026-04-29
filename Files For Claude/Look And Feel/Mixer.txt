@@ -1,0 +1,72 @@
+This breakdown covers the **FL Studio Mixer** aesthetic from **Mixer.jpg**. Since you are excluding the "Effects Slot" sidebar on the left, we will focus on the modular channel strip components and the master-bus architecture.
+
+---
+
+## 1. Visual Schematic & Geometry
+
+### **The Channel Strip (Per Track)**
+* **Track Header**: Small rectangular area at the top containing the track index number (e.g., 1, 2, 3).
+* **Peak Meter**: A long, ultra-slim vertical rectangle. It features a dark background with thin, dimmed horizontal tick marks.
+* **Panning Knob**: A small, circular "Modern Domed" knob located just above the fader. It features a center-detent indicator (a small green LED glow that appears when centered).
+* **The Main Fader**: 
+    * **Track**: A vertical line etched into the panel.
+    * **Thumb**: A rectangular, "cap-style" slider with a subtle horizontal highlight to indicate the grip.
+    * **Level Indicator**: As the fader moves, a thin neon-green line follows the thumb from the bottom to the current position.
+* **The Track Footer**: Contains the "Record Arm" (disk icon), "Mute/Solo" (light bulb icon), and track naming label.
+
+### **Routing & Bottom Icons**
+* **Routing Wire**: A curved, neon-green line that visually connects the bottom of one channel to another (usually the Master), indicating signal flow.
+* **Phase Invert / Swap Channels**: Small triangular icons at the very bottom of the strip used for signal polarity.
+
+---
+
+## 2. Color Palette & Textures
+
+| Element | Appearance / Texture | Approximate Hex |
+| :--- | :--- | :--- |
+| **Main Panel** | Deep charcoal/matte black | `#1E1E1E` |
+| **Track Separators** | Very thin vertical lines in a slightly lighter gray | `#2C2C2C` |
+| **Accent Glow** | Neon "FL Green" for active signals/routing | `#A0DB2B` |
+| **Peak Meter BG** | Recessed, near-black slate | `#121212` |
+| **Fader Thumb** | Matte metallic dark gray | `#4A4A4A` |
+
+---
+
+## 3. Special Interaction & Usage Logic
+
+### **The "Magnetism" Logic**
+* **Fader Snapping**: Implement logic where holding `Alt` allows for fine-grain movement (0.1dB increments), while a standard drag moves in 0.5dB increments.
+* **Pan Reset**: A double-click on the panning knob must instantly snap the value back to 0 (Center).
+
+### **Routing Logic**
+* **Visual Cable**: The "Routing Wire" is not just a line; it is a `juce::Path` drawn with a Bezier curve (`cubicTo`). 
+* **Logic**: The wire should only appear when a track is "armed" to send signal to another track. The thickness of the line could subtly pulse based on the audio amplitude being sent.
+
+---
+
+## 4. Prompt Strategy for Claude
+
+> **Context:**
+> "I am building a JUCE-based Mixer. I need you to recreate the UI for the individual channel strips based on the attached image, excluding the effects sidebar on the left.
+>
+> **Task 1: The Channel Strip Component**
+> * Create a `MixerChannel` class. 
+> * Top: Track number. 
+> * Middle: Ultra-slim vertical DBFS meter (reusing the logic from our previous Meter blueprint).
+> * Bottom: A vertical fader with a dark gray rectangular thumb and a neon-green (`#A0DB2B`) trailing line.
+>
+> **Task 2: The Pan Knob**
+> * Implement a small version of the 'Modern Domed' knob. 
+> * Logic: Add a small 'LED' dot above it that glows green only when the pan value is exactly 0.
+>
+> **Task 3: The Routing Wire**
+> * Write a function using `juce::Graphics::strokePath` to draw a Bezier curve between the bottom of Track X and the Master Track.
+> * Use a gradient stroke that mimics a glowing neon wire.
+>
+> **Task 4: Aesthetic Specs**
+> * Use the Charcoal (`#1E1E1E`) and Slate (`#121212`) color scheme.
+> * Ensure every track footer has the 'record', 'mute', and 'solo' icons drawn as vector paths for scalability."
+
+---
+
+**This completes the Mixer blueprint. Are there more components to document, or should we move on to the code integration phase?**

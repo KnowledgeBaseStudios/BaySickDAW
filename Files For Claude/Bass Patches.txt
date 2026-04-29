@@ -1,0 +1,119 @@
+1. Sub Bass & 808s
+1. Pure Sine Sub: waveform: 10.0, transpose: -24.0, amp_decay: 2.0, amp_sustain: 1.0
+2. Filtered Pulse Sub: waveform: 2.0, transpose: -24.0, flt_cutoff: 800.0, amp_release: 0.8
+3. Punchy 808 Bass: waveform: 10.0, transpose: -24.0, pEnv_amt: 12.0, pEnv_decay: 0.1
+4. Gliding Sub: waveform: 10.0, transpose: -24.0, voiceMode: 1.0, glide: 0.6
+5. Saturation Sub: waveform: 10.0, transpose: -24.0, unison_voices: 2.0, unison_detune: 0.05
+6. Deep House Sub: waveform: 2.0, flt_type: 0.0, flt_cutoff: 250.0, amp_decay: 0.5
+7. Sub Thump: waveform: 10.0, trans_amount: 0.8, trans_duration: 5.0, amp_decay: 1.0
+8. Hovering Sub: waveform: 10.0, drift: 0.5, amp_attack: 0.5, amp_sustain: 1.0
+9. R&B Glide Bass: waveform: 10.0, transpose: -24.0, voiceMode: 1.0, glide: 0.8
+10. Cinema Rumble Sub: waveform: 10.0, transpose: -36.0, unison_detune: 0.4, amp_release: 3.0
+
+2. Acid & 303
+11. Classic 303 Saw: waveform: 0.0, flt_cutoff: 200.0, flt_res: 0.8, flt_env_amt: 0.5, flt_decay: 0.3
+12. Classic 303 Pulse: waveform: 2.0, flt_cutoff: 200.0, flt_res: 0.8, flt_env_amt: 0.5, flt_decay: 0.3
+13. Rubber Acid: waveform: 0.0, flt_res: 0.95, flt_env_amt: 0.8, flt_decay: 0.15
+14. Hollow Acid: waveform: 2.0, transpose: -12.0, flt_res: 0.7, flt_env_amt: 0.3
+15. Distorted 303: waveform: 0.0, unison_voices: 2.0, unison_detune: 0.1, flt_res: 0.85
+16. Plucky Acid: waveform: 0.0, amp_decay: 0.1, amp_sustain: 0.0, flt_decay: 0.1
+17. Acid Glide: waveform: 2.0, glide: 0.7, voiceMode: 1.0, flt_res: 0.8
+18. Squelch Bass: waveform: 0.0, flt_cutoff: 100.0, flt_res: 0.9, flt_env_amt: 1.0
+19. Dark Acid: waveform: 0.0, flt_cutoff: 50.0, flt_res: 0.6, flt_env_amt: 0.2
+20. Buzzing Acid: waveform: 2.0, ringMod: 1.0, flt_res: 0.8, flt_decay: 0.2
+
+3. Reese & Neuro
+21. Standard Reese: waveform: 0.0, unison_voices: 3.0, unison_detune: 0.6, flt_cutoff: 4000.0
+22. Wide Reese: waveform: 0.0, unison_voices: 4.0, unison_detune: 0.8, unison_spread: 1.0
+23. Dark Neuro: waveform: 2.0, unison_voices: 3.0, flt_cutoff: 800.0, flt_env_amt: -0.5
+24. Phasing Reese: waveform: 0.0, unison_voices: 2.0, unison_detune: 0.3, drift: 0.8
+25. Growl Bass: waveform: 0.0, unison_voices: 3.0, flt_cutoff: 200.0, flt_env_amt: 0.4
+26. Square Reese: waveform: 2.0, unison_voices: 3.0, unison_detune: 0.5
+27. Sub-Reese Blend: waveform: 0.0, dualOscMode: 1.0, unison_voices: 3.0
+28. High-Pass Neuro: waveform: 0.0, flt_type: 1.0, flt_cutoff: 200.0, unison_detune: 0.7
+29. Vowel Reese: waveform: 0.0, flt_res: 0.6, flt_env_amt: 0.2, flt_attack: 0.5
+30. Muffled Reese: waveform: 0.0, unison_voices: 4.0, flt_cutoff: 1000.0, amp_attack: 0.2
+
+4. Pluck, Donk & FM
+31. Classic Donk: waveform: 2.0, flt_cutoff: 1500.0, flt_res: 0.8, pEnv_amt: 24.0
+32. FM Metallic Pluck: waveform: 10.0, ringMod: 1.0, amp_decay: 0.2, amp_sustain: 0.0
+33. Deep House Pluck: waveform: 2.0, flt_cutoff: 100.0, flt_env_amt: 0.3, flt_decay: 0.15
+34. Organ Bass: waveform: 10.0, unison_voices: 2.0, unison_detune: 0.0, transpose: -12.0
+35. Hollow Wood Pluck: waveform: 2.0, amp_decay: 0.1, flt_cutoff: 2000.0
+36. Garage Sub Pluck: waveform: 10.0, trans_amount: 0.5, amp_decay: 0.4, amp_sustain: 0.0
+37. Tech House Stub: waveform: 0.0, flt_cutoff: 150.0, flt_env_amt: 0.4, flt_decay: 0.08
+38. Rubber Band Bass: waveform: 10.0, pEnv_amt: 12.0, pEnv_decay: 0.1, flt_res: 0.5
+39. Bell Bass: waveform: 10.0, ringMod: 1.0, amp_decay: 1.0, transpose: -12.0
+40. Marimba Bass: waveform: 10.0, trans_amount: 0.4, amp_decay: 0.3, amp_release: 0.3
+
+5. Synthwave & Retrowave
+41. 80s Drive Saw: waveform: 0.0, unison_voices: 2.0, unison_detune: 0.15, flt_cutoff: 2500.0
+42. Outrun Pulse: waveform: 2.0, flt_cutoff: 800.0, flt_env_amt: 0.2, flt_decay: 0.3
+43. Cyber-Slap: waveform: 0.0, trans_amount: 0.6, amp_decay: 0.2, amp_sustain: 0.5
+44. Chorus Bass: waveform: 0.0, unison_voices: 3.0, unison_detune: 0.4, unison_spread: 0.8
+45. Analog Moog Style: waveform: 0.0, flt_cutoff: 500.0, flt_res: 0.3, drift: 0.5
+46. Italo Disco Bass: waveform: 2.0, amp_decay: 0.2, amp_sustain: 0.0, flt_cutoff: 5000.0
+47. Warm Pulse: waveform: 2.0, flt_cutoff: 1200.0, drift: 0.3
+48. Retrowave Sub: waveform: 10.0, unison_voices: 2.0, unison_detune: 0.1, amp_sustain: 1.0
+49. Resonant Sweep: waveform: 0.0, flt_res: 0.6, flt_attack: 0.1, flt_env_amt: 0.3
+50. Synth-Brass Bass: waveform: 0.0, flt_attack: 0.05, flt_decay: 0.4, flt_env_amt: 0.4
+
+6. Dubstep & Wobble
+51. Classic Wobble: waveform: 0.0, flt_cutoff: 200.0, flt_attack: 0.2, flt_env_amt: 0.5
+52. Fast Wub: waveform: 2.0, flt_attack: 0.05, flt_decay: 0.05, flt_env_amt: 0.6
+53. Yoi Bass: waveform: 0.0, flt_res: 0.8, flt_attack: 0.1, flt_env_amt: 0.4
+54. Screech Bass: waveform: 0.0, ringMod: 1.0, flt_env_amt: 0.8, flt_decay: 0.4
+55. Pulse Wobble: waveform: 2.0, unison_voices: 2.0, flt_attack: 0.15, flt_decay: 0.15
+56. Dirty Wub: waveform: 0.0, noise: 0.3, flt_attack: 0.1, flt_env_amt: 0.5
+57. Sub Wobble: waveform: 10.0, flt_cutoff: 100.0, flt_attack: 0.2, flt_env_amt: 0.1
+58. Laser Wobble: waveform: 0.0, pEnv_amt: -24.0, pEnv_decay: 0.2, flt_attack: 0.1
+59. Heavy Formant Wub: waveform: 0.0, flt_res: 0.9, flt_attack: 0.3, flt_env_amt: 0.3
+60. Stutter Wub: waveform: 0.0, burst_mode: 1.0, burst_count: 4.0, flt_env_amt: 0.4
+
+7. Chiptune & 8-Bit
+61. Gameboy Pulse: waveform: 2.0, flt_cutoff: 20000.0, amp_release: 0.0
+62. 8-Bit Bell: waveform: 6.0, flt_cutoff: 20000.0, amp_decay: 0.2
+63. Arcade Pluck: waveform: 2.0, amp_decay: 0.1, amp_sustain: 0.0
+64. Boss Battle Bass: waveform: 2.0, unison_voices: 2.0, unison_detune: 0.05
+65. Bit-Crush Sub: waveform: 10.0, noise: 0.2, noiseColor: 1.0
+66. 8-Bit Glide: waveform: 2.0, glide: 0.2, voiceMode: 1.0
+67. Retro Zap Bass: waveform: 2.0, pEnv_amt: -12.0, pEnv_decay: 0.05
+68. Chiptune Drone: waveform: 2.0, amp_sustain: 1.0, drift: 0.0
+69. SID Chip Bass: waveform: 2.0, ringMod: 1.0, amp_decay: 0.2
+70. Pixel Slap: waveform: 2.0, trans_amount: 1.0, amp_sustain: 0.5
+
+8. Midtempo & Cyberpunk
+71. Cyber Drive: waveform: 0.0, unison_voices: 3.0, unison_detune: 0.8, flt_cutoff: 3000.0
+72. Hard Sync Bass: waveform: 0.0, oscSync: 1.0, flt_env_amt: 0.6
+73. Industrial Grind: waveform: 2.0, unison_voices: 4.0, ringMod: 1.0
+74. Dystopian Sub: waveform: 10.0, noise: 0.4, unison_detune: 0.2
+75. Doom Saw: waveform: 0.0, transpose: -36.0, flt_res: 0.4, flt_env_amt: 0.2
+76. Cyberpunk Pluck: waveform: 0.0, amp_decay: 0.15, flt_env_amt: 0.8
+77. Metallic Tear: waveform: 0.0, ringMod: 1.0, flt_attack: 0.1
+78. Rezz Style Bass: waveform: 2.0, unison_voices: 2.0, unison_detune: 0.1, glide: 0.5
+79. Distorted Wub: waveform: 0.0, unison_detune: 0.7, flt_attack: 0.2, flt_env_amt: 0.5
+80. Grime Bass: waveform: 2.0, flt_cutoff: 800.0, pEnv_amt: 12.0, pEnv_decay: 0.1
+
+9. Vintage Analog
+81. 70s Moog Bass: waveform: 0.0, flt_cutoff: 800.0, flt_res: 0.2, drift: 0.6
+82. Analog Pulse: waveform: 2.0, flt_cutoff: 2000.0, drift: 0.4
+83. Fat Juno Sub: waveform: 2.0, flt_cutoff: 400.0, unison_voices: 2.0, unison_detune: 0.1
+84. Smooth Glide: waveform: 0.0, glide: 0.6, voiceMode: 1.0, flt_cutoff: 1000.0
+85. Warm Saw Pluck: waveform: 0.0, flt_env_amt: 0.3, flt_decay: 0.3, amp_sustain: 0.2
+86. Prophet Sync: waveform: 0.0, oscSync: 1.0, flt_cutoff: 1500.0
+87. Dusty Bass: waveform: 0.0, noise: 0.1, noiseColor: 1.0, flt_cutoff: 600.0
+88. Resonant Analog: waveform: 2.0, flt_res: 0.7, flt_decay: 0.4
+89. Vintage Round Bass: waveform: 10.0, flt_cutoff: 300.0, amp_attack: 0.02
+90. Classic Electro Bass: waveform: 0.0, flt_env_amt: 0.4, flt_decay: 0.2, amp_release: 0.2
+
+10. Slap & Electric
+91. Synth Slap: waveform: 2.0, trans_amount: 0.8, flt_env_amt: 0.3, flt_decay: 0.1
+92. Picked Bass: waveform: 0.0, trans_amount: 0.6, amp_decay: 0.5, amp_sustain: 0.2
+93. Muted Electric: waveform: 10.0, trans_amount: 0.3, amp_decay: 0.2, amp_sustain: 0.0
+94. Fretless Glide: waveform: 10.0, glide: 0.8, voiceMode: 1.0, amp_attack: 0.05
+95. Funk Pop Bass: waveform: 2.0, pEnv_amt: 5.0, pEnv_decay: 0.02, trans_amount: 0.5
+96. Distorted Electric: waveform: 0.0, unison_voices: 2.0, flt_cutoff: 4000.0, trans_amount: 0.4
+97. String Buzz Bass: waveform: 0.0, ringMod: 1.0, amp_decay: 0.6
+98. Upright Jazz Sub: waveform: 10.0, trans_amount: 0.2, amp_decay: 1.5, amp_sustain: 0.0
+99. Heavy Pick: waveform: 2.0, trans_amount: 1.0, flt_env_amt: 0.2, flt_decay: 0.1
+100. Chorus Slap: waveform: 2.0, unison_voices: 2.0, trans_amount: 0.7, amp_decay: 0.4

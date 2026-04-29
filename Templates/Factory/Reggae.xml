@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="Reggae" version="1">
+  <Kit path="Reggae/Reggae Full.xml"/>
+  <Layer slot="0" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/Hammond Organ.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/B3 Organ.xml" locked="1"/>
+  <Layer slot="2" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/Vintage Rhodes.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/Wurli Tremolo.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSynth" presetPath="BaySickSynth/Plucks &amp; Mallets/Tropical Pluck.xml" locked="1"/>
+  <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Brass &amp; Strings/Brass Scoop.xml" locked="1"/>
+  <Layer slot="6" engine="BaySickPlayer" presetPath="BaySickPlayer/Brass/Trumpet (Sustained).xml" locked="1"/>
+  <Layer slot="7" engine="BaySickSynth" presetPath="BaySickSynth/Pads &amp; Atmospheres/Warm Analog Pad.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Reggae Dub Bass.xml" locked="1"/>
+  <Bass slot="1" engine="BaySickBass" presetPath="BaySickBass/Sub Bass &amp; 808s/Sub Bass.xml" locked="1"/>
+  <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Picked Bass.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Muted Electric.xml" locked="1"/>
+</BaySickTemplate>

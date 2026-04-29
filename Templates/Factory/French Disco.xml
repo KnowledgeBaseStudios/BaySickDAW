@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="French Disco" version="1">
+  <Kit path="French Disco/French Disco Full.xml"/>
+  <Layer slot="0" engine="Harmless" presetPath="Harmless/French Disco/Vocoder Pad.xml" locked="1"/>
+  <Layer slot="1" engine="Harmless" presetPath="Harmless/French Disco/Disco String Stack.xml" locked="1"/>
+  <Layer slot="2" engine="Harmless" presetPath="Harmless/French Disco/Talkbox Lead.xml" locked="1"/>
+  <Layer slot="3" engine="Harmless" presetPath="Harmless/French Disco/Phaser Lead.xml" locked="1"/>
+  <Layer slot="4" engine="Harmless" presetPath="Harmless/French Disco/Warm Rhodes.xml" locked="1"/>
+  <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Synthwave &amp; Vintage/Juno Poly.xml" locked="1"/>
+  <Layer slot="6" engine="Harmless" presetPath="Harmless/French Disco/Funky Pluck.xml" locked="1"/>
+  <Layer slot="7" engine="Harmless" presetPath="Harmless/French Disco/Analog Brass.xml" locked="1"/>
+  <Bass slot="0" engine="Harmless" presetPath="Harmless/French Disco/Funky Synth Bass.xml" locked="1"/>
+  <Bass slot="1" engine="Harmless" presetPath="Harmless/French Disco/Disco Sub.xml" locked="1"/>
+  <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Funk Pop Bass.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Synth Slap.xml" locked="1"/>
+</BaySickTemplate>

@@ -1,0 +1,127 @@
+#pragma once
+#include <JuceHeader.h>
+#include "VibePlayerDSP.h"
+
+// ── VibePlayerProcessor (user-facing name: BaySickPlayer) ────────────────────
+// AudioProcessor wrapper for VibeSynth.
+// Owns its own APVTS; param IDs follow the consolidated plan convention:
+//   tk_{trackId}_bsp_{paramName}
+//
+// CPU safeguarding:
+//   updateFromApvts() guards every setter with a cached last-value comparison.
+//   Only calls the setter when the value actually changed.
+// ─────────────────────────────────────────────────────────────────────────────
+class VibePlayerProcessor : public juce::AudioProcessor
+{
+public:
+    explicit VibePlayerProcessor (const juce::String& trackId = "lay_0");
+
+    // ── AudioProcessor interface ──────────────────────────────────────────────
+    void prepareToPlay    (double sampleRate, int maxBlockSize) override;
+    void releaseResources () override {}
+    void processBlock     (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+
+    juce::AudioProcessorEditor* createEditor () override;
+    bool hasEditor ()           const override { return true; }
+
+    const juce::String getName ()             const override { return "BaySickPlayer"; }
+    bool   acceptsMidi ()                     const override { return true; }
+    bool   producesMidi ()                    const override { return false; }
+    bool   isMidiEffect ()                    const override { return false; }
+    double getTailLengthSeconds ()            const override { return 2.0; }
+
+    int  getNumPrograms ()                    override { return 1; }
+    int  getCurrentProgram ()                 override { return 0; }
+    void setCurrentProgram  (int)             override {}
+    const juce::String getProgramName   (int) override { return "Default"; }
+    void changeProgramName  (int, const juce::String&) override {}
+
+    void getStateInformation (juce::MemoryBlock& dest) override;
+    void setStateInformation (const void* data, int sz) override;
+
+    bool isBusesLayoutSupported (const BusesLayout&) const override;
+
+    // ── Public interface ──────────────────────────────────────────────────────
+    juce::AudioProcessorValueTreeState apvts;
+
+    // Engine access for the editor
+    VibeSynth& getSynth() { return mSynth; }
+
+    // Param prefix used for this instance
+    const juce::String& getParamPrefix() const { return mPrefix; }
+    juce::String pid (const char* name)  const { return mPrefix + name; }
+
+    // Thread-safe note audition (UI thread → audio thread via atomic)
+    void auditionNote    (int midiNote) { mAuditionNote.store    (midiNote); }
+    void auditionNoteOn  (int midiNote) { mAuditionHoldOn.store  (midiNote); }
+    void auditionNoteOff (int midiNote) { mAuditionHoldOff.store (midiNote); }
+
+    // P3 persistence (2026-04-24): wrappers around VibeSampleManager's
+    // loadFolder / loadSFZ / loadSingleFile that ALSO stash the loaded path
+    // on `apvts.state` as non-APVTS properties.  setStateInformation replays
+    // whichever one was last used so the samples come back on project load.
+    //   loadKind property values: "folder" / "sfz" / "file"
+    //   loadPath property value:  absolute path to the loaded asset
+    // All editor code paths (drag-drop + Core Library menu + Drums slots)
+    // go through these wrappers instead of reaching into the manager.
+    //   normalizeRoot = optional MIDI note for VibeSampleManager::normalizeRootNotes
+    //   (e.g. 60 for drum-slot conventions).  -1 = don't normalize.
+    void loadSampleFolder  (const juce::File& folder,  int normalizeRoot = -1);
+    void loadSampleSFZ     (const juce::File& sfzFile, int normalizeRoot = -1);
+    void loadSampleFile    (const juce::File& wavFile, int normalizeRoot = -1);
+    juce::File getLoadedSampleFile() const;   // returns whatever's stashed (folder/sfz/file)
+
+private:
+    static juce::AudioProcessorValueTreeState::ParameterLayout
+        createLayout (const juce::String& prefix);
+
+    // CPU-guarded: reads APVTS and pushes to synth only when values changed.
+    void updateFromApvts();
+
+    VibeSynth        mSynth;
+    juce::String     mPrefix;
+    juce::String     mTrackId;
+    std::atomic<int> mAuditionNote    { -1 };
+    std::atomic<int> mAuditionHoldOn  { -1 };
+    std::atomic<int> mAuditionHoldOff { -1 };
+
+    // ── CPU guard cache ───────────────────────────────────────────────────────
+    struct ParamCache
+    {
+        float lfoAmt       { -1.f };
+        float cutoff       { -1.f };
+        float res          { -1.f };
+        float drive        { -1.f };
+        float reduct       { -1.f };
+        float decay        { -1.f };
+        float release      { -1.f };
+        float pan          { -1.f };
+        float volume       { -1.f };
+        float stereo       { -1.f };
+        float treble       { -1.f };
+        float stretch      { -1.f };
+        float muffle       { -1.f };
+        float velToMuffle  { -1.f };
+        float hardness     { -1.f };
+        float velToHardness{ -1.f };
+        float sensitivity  { -1.f };
+        float tune         { 9999.f };
+        float detune       { 9999.f };
+        int   articGroup   { -1 };
+        // S1 2026-04-21 additions
+        float attack       { -1.f };
+        float sustain      { -1.f };
+        float lfoRate      { -1.f };
+        float velToVolume  { -1.f };
+        float sampleStart  { -1.f };
+        int   voiceCap     { -1 };
+        int   detuneMode   { -1 };
+        // S1 Incr3 cache
+        float cutSelf      { -1.f };   // bool as float (apvts bool stores 0/1)
+        float reverse      { -1.f };
+        int   unisonVoices { -1 };
+        float unisonSpread { -1.f };
+    } mCache;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibePlayerProcessor)
+};

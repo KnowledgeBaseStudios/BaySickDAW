@@ -1,0 +1,34 @@
+Act as an expert C++/JUCE audio DSP developer. I am building a custom DAW and need a raw C++ DSP class for a Saturation effect. Do NOT use juce::AudioProcessor, juce::AudioProcessorValueTreeState, or any UI/Editor code. I only need a decoupled DSP block (e.g., class SaturationDSP) that I can instantiate and chain inside my own custom audio engine.
+1. Class Architecture
+Create a class called SaturationDSP that follows the standard juce::dsp paradigm. It should have:
+* A prepare(const juce::dsp::ProcessSpec& spec) method to initialize filters and sample rates.
+* A process(const juce::dsp::ProcessContextReplacing<float>& context) method for the audio loop.
+* A reset() method to clear states.
+* A Parameters struct or dedicated setter methods for all the variables below.
+2. Parameters
+* Flowers: Float from 0 to 10. Subtle tube saturation (even harmonics).
+* Dabs: Float from 0 to 10. Aggressive saturation (odd harmonics).
+* Sensitivity: Float from -12.0 to +12.0 dB. Input gain to drive saturators.
+* Bass Relief: Float from 0 to 100. Controls a 350 Hz shelf filter to bypass the tube engine for the low end.
+* Transformer: Boolean (On/Off). Adds base harmonic distortion. Note: Even when Flowers/Dabs are 0, the base saturator applies subtle compression/distortion unless Transformer is Off.
+* Tube Type: Choice ("Type A", "Type B"). Changes the harmonic algorithm for Dabs.
+* Tone Pre: Float from -9.0 to +9.0 dB. 10 kHz shelf EQ before the tube engine.
+* Tone Post: Float from -9.0 to +9.0 dB. 10 kHz shelf EQ after the tube engine.
+* Wet/Dry Mix: Float from 0.0 to 100.0%.
+* Out: Float from -18.0 to +18.0 dB. Final output gain.
+3. DSP Signal Flow (process method)
+Implement the signal flow, preferably utilizing juce::dsp::ProcessorChain and juce::dsp::StateVariableTPTFilter where optimal:
+1. Sensitivity Input Gain: Apply gain. Calculate the exact inverse of this gain to apply at the end of the chain.
+2. Pre-EQ: Apply Tone Pre 10 kHz shelf.
+3. Bass Relief Crossover: Split the signal at 350 Hz. The low frequencies bypass the tube engine; the high frequencies go through it. Sum them back together afterward.
+4. Tube Engine:
+o Apply base saturation/compression if Transformer is ON.
+o Apply even harmonics (Flowers) and odd harmonics (Dabs) using appropriate wave-shaping functions (e.g., juce::dsp::WaveShaper or custom math). Switch the Dabs algorithm based on Tube Type.
+5. Post-EQ: Apply Tone Post 10 kHz shelf.
+6. Compensation & Output: Apply the inverse Sensitivity gain to maintain unity, apply the Wet/Dry Mix, and finally apply the Out gain.
+4. Metering Variables
+Include two public getter methods or std::atomic<float> variables so my engine can poll them for UI later:
+* getCurrentInputLevel(): Returns the absolute peak or RMS level of the signal after the Sensitivity gain is applied.
+* getCurrentTHD(): Returns a calculation of the total harmonic distortion added to the dry signal.
+Please provide the complete .h and .cpp implementation for the SaturationDSP class.
+

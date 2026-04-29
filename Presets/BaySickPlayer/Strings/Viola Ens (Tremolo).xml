@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickPlayerState>
+  <BaySickPlayerState>
+    <PARAM id="tk_lay_0_bsp_lfoAmt" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_cutoff" value="20000.0"/>
+    <PARAM id="tk_lay_0_bsp_res" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_drive" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_reduct" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_decay" value="0.5"/>
+    <PARAM id="tk_lay_0_bsp_release" value="0.3"/>
+    <PARAM id="tk_lay_0_bsp_attack" value="0.05"/>
+    <PARAM id="tk_lay_0_bsp_sustain" value="1.0"/>
+    <PARAM id="tk_lay_0_bsp_pan" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_volume" value="0.8"/>
+    <PARAM id="tk_lay_0_bsp_stereo" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_lfo_rate" value="5.5"/>
+    <PARAM id="tk_lay_0_bsp_treble" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_stretch" value="1.0"/>
+    <PARAM id="tk_lay_0_bsp_velToMuffle" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_muffle" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_velToHardness" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_hardness" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_sensitivity" value="0.5"/>
+    <PARAM id="tk_lay_0_bsp_velToVolume" value="1.0"/>
+    <PARAM id="tk_lay_0_bsp_tune" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_detune" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_artic_group" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_cutSelf" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_detuneMode" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_voiceCap" value="16.0"/>
+    <PARAM id="tk_lay_0_bsp_reverse" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_sampleStart" value="0.0"/>
+    <PARAM id="tk_lay_0_bsp_unisonVoices" value="1.0"/>
+    <PARAM id="tk_lay_0_bsp_unisonSpread" value="0.0"/>
+  </BaySickPlayerState>
+  <Sample kind="sfz" path="library:Strings Package/ViolaEnsTrem.sfz"/>
+</BaySickPlayerState>

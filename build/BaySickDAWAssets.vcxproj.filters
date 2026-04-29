@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\jeffm\Documents\BaySickDAW\build\CMakeFiles\025024c608c4512e9d7d543fca11733a\BinaryData1.cpp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\Users\jeffm\Documents\BaySickDAW\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{9C72778C-12C3-3E59-8A4C-5083D4E340A2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{9CFA93D1-D729-31D8-BF8E-BDE6784D26D8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{3EF99C19-76A4-348B-9A65-AA9E3E0D8A56}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

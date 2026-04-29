@@ -1,0 +1,33 @@
+Here is the comprehensive prompt to feed into Claude to generate the raw ChorusDSP class, formatted specifically for your custom DAW architecture.
+Copy and paste this to Claude:
+
+Act as an expert C++/JUCE audio DSP developer. I am building a custom DAW and need a raw C++ DSP class for a multi-voice Chorus effect. Do NOT use juce::AudioProcessor, juce::AudioProcessorValueTreeState, or any UI/Editor code. I only need a decoupled DSP block (e.g., class ChorusDSP) that I can instantiate and chain inside my own custom audio engine.
+1. Class Architecture
+Create a class called ChorusDSP that follows the standard juce::dsp paradigm. It should have:
+* A prepare(const juce::dsp::ProcessSpec& spec) method to initialize delay lines, crossover filters, and LFOs.
+* A process(const juce::dsp::ProcessContextReplacing<float>& context) method for the audio loop.
+* A reset() method to clear delay line buffers and filter states.
+* A Parameters struct or dedicated setter methods for all the variables below.
+2. Parameters
+* Delay: Float from 0.0 to 30.0 ms. Sets the minimum delay between the chorus voices.
+* Depth: Float. Controls the chorus delay modulation. The delay will sweep between Delay and Delay + Depth. If zero, the modulation is constant.
+* Stereo: Float from 0 to 360 degrees. Controls the widening of the stereo image. At 0, left and right LFOs are in perfect sync. At 180, left and right are 100% out of phase.
+* LFO 1 Freq / LFO 2 Freq / LFO 3 Freq: Floats. Sets the modulation speed for three independent LFOs.
+* LFO 1 Wave / LFO 2 Wave / LFO 3 Wave: Choices. Sets the waveform of the LFOs (e.g., Sine, Triangle, Multi-sine). The "Multi-sine" option must be mathematically defined as a mix of a normal sine wave and one running at three times its speed.
+* Cross Type: Choice (Process HP / Process LP). Defines whether the plugin works on the lower or higher frequency part of the signal. "Process HP" processes only high frequencies, "Process LP" processes only low frequencies.
+* Cross Cutoff: Float. The cutoff frequency of the crossover filter.
+* Wet Only: Boolean. If used as a send effect, this switch outputs the pure wet signal.
+3. DSP Signal Flow (process method)
+Implement the signal flow, preferably utilizing juce::dsp::DelayLine, juce::dsp::Oscillator, and juce::dsp::LinkwitzRileyFilter (or StateVariableTPTFilter) for the crossover:
+1. Crossover Split: Split the incoming audio into a high band and a low band using the Cross Cutoff frequency.
+2. Targeted Routing: Based on the Cross Type, route either the High-Pass or Low-Pass band into the active Chorus engine. The unselected band bypasses the chorus.
+3. Chorus Engine:
+o Set up the delay lines and modulate their read pointers using the three LFOs.
+o Ensure the delay time sweeps accurately between Delay and Delay + Depth.
+o Apply the Stereo phase parameter logic so the left and right channel LFOs offset according to the degrees set (0 to 360).
+o Implement the custom Multi-sine waveform generator logic.
+4. Output & Mix:
+o Sum the chorused band back with the dry, un-chorused band.
+o Implement the Wet Only toggle so that when activated, the original dry signal (and the un-chorused crossover band) is removed, leaving only the processed chorused audio.
+Please provide the complete .h and .cpp implementation for the ChorusDSP class.
+

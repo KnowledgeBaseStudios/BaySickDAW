@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Lo-Fi Hip-Hop Basic" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/Lo-Fi, Chiptune &amp; Texture/8-Bit Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/Lo-Fi, Chiptune &amp; Texture/8-Bit Snare.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/Lo-Fi, Chiptune &amp; Texture/Crunch Snare.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/Lo-Fi, Chiptune &amp; Texture/Fake Reverb Snare Tail.xml" locked="1"/>
+</BaySickKit>

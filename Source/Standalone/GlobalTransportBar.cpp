@@ -1,0 +1,827 @@
+#include "GlobalTransportBar.h"
+#include "SharedUI.h"
+#if JUCE_WINDOWS
+ #include <windows.h>
+ #include <psapi.h>
+ #pragma comment(lib, "psapi.lib")
+#endif
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PlayButton (R5a, 2026-04-23)
+// White play-triangle glyph on a recessed dark body.  When `playing` is true
+// the body fills green; the white triangle stays in place.  Pure path render -
+// no font dependency, no color-button tinting (which inverts on hover and
+// looked grimy at small sizes).
+// ─────────────────────────────────────────────────────────────────────────────
+class PlayButton : public juce::TextButton
+{
+public:
+    PlayButton() : juce::TextButton("")
+    {
+        setMouseClickGrabsKeyboardFocus(false);
+        // LAF reads buttonColourId for off + buttonOnColourId when toggled on.
+        // Green-on when playing; off state inherits the LAF default so it
+        // matches every other transport TextButton.
+        setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff1ea848));
+        setClickingTogglesState(false);   // we drive the state manually
+    }
+    void setPlaying(bool p)
+    {
+        if (p == getToggleState()) return;
+        setToggleState(p, juce::dontSendNotification);
+        repaint();
+    }
+
+    void paintButton(juce::Graphics& g, bool isOver, bool isDown) override
+    {
+        if (getToggleState())
+            paintActiveTintedSlab(g, getLocalBounds().toFloat(),
+                                   juce::Colour(0xff1ea848), isOver);    // green
+        else
+            getLookAndFeel().drawButtonBackground(g, *this,
+                findColour(juce::TextButton::buttonColourId), isOver, isDown);
+
+        // White play triangle on top
+        auto b = getLocalBounds().toFloat();
+        const float side = juce::jmin(b.getWidth(), b.getHeight()) * 0.50f;
+        const float cx   = b.getCentreX();
+        const float cy   = b.getCentreY();
+        juce::Path tri;
+        tri.addTriangle(cx - side * 0.40f, cy - side * 0.55f,
+                        cx - side * 0.40f, cy + side * 0.55f,
+                        cx + side * 0.55f, cy);
+        g.setColour(juce::Colours::white);
+        g.fillPath(tri);
+    }
+
+    // Mirrors VibeLAF's LRX-12 "action button" raised-slab shape, but with a
+    // tinted backdrop instead of VC::Chrome.  Used by the active states of
+    // both PlayButton (green) and RecordButton (red) so they match the rest
+    // of the transport row in every respect except colour.
+    static void paintActiveTintedSlab(juce::Graphics& g,
+                                       juce::Rectangle<float> bounds,
+                                       juce::Colour tint,
+                                       bool isOver)
+    {
+        const float radius = 3.f;
+        // Drop shadow
+        g.setColour(juce::Colours::black.withAlpha(0.30f));
+        g.fillRoundedRectangle(bounds.translated(0.f, 1.5f), radius);
+        // Body gradient (tint brighter on top, darker on bottom)
+        juce::Colour topCol = isOver ? tint.brighter(0.15f) : tint.brighter(0.05f);
+        juce::Colour botCol = tint.darker(0.20f);
+        g.setGradientFill(juce::ColourGradient(topCol, 0.f, bounds.getY(),
+                                                botCol, 0.f, bounds.getBottom(), false));
+        g.fillRoundedRectangle(bounds, radius);
+        // Side highlight
+        juce::ColourGradient sideHL(juce::Colours::white.withAlpha(0.22f), bounds.getX(), 0.f,
+                                     juce::Colours::transparentWhite,       bounds.getX() + 3.f, 0.f, false);
+        g.setGradientFill(sideHL);
+        g.fillRoundedRectangle(bounds, radius);
+        // Top specular
+        g.setColour(juce::Colour(0x44ffffff));
+        g.drawLine(bounds.getX() + radius, bounds.getY() + 1.f,
+                   bounds.getRight() - radius, bounds.getY() + 1.f, 1.f);
+        // Border
+        g.setColour(tint.darker(0.4f));
+        g.drawRoundedRectangle(bounds.reduced(0.5f), radius, 1.f);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RecordButton (R5a, 2026-04-23)
+// White dot glyph on a recessed dark body.  When `armed` is true the body
+// fills red; the white dot stays in the centre.  A small chevron on the right
+// edge acts as the dropdown trigger - clicks within `kArrowZoneW` from the
+// right edge fire onArrowClicked, anything else fires onDotClicked.
+// ─────────────────────────────────────────────────────────────────────────────
+class RecordButton : public juce::TextButton
+{
+public:
+    static constexpr int kArrowZoneW = 14;
+
+    RecordButton() : juce::TextButton("")
+    {
+        setMouseClickGrabsKeyboardFocus(false);
+        setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xffd02020));
+        setClickingTogglesState(false);
+    }
+
+    void setArmed(bool a)
+    {
+        if (a == getToggleState()) return;
+        setToggleState(a, juce::dontSendNotification);
+        repaint();
+    }
+    bool isArmed() const noexcept { return getToggleState(); }
+
+    std::function<void()> onDotClicked;
+    std::function<void()> onArrowClicked;
+
+    void clicked(const juce::ModifierKeys&) override
+    {
+        if (mLastClickInArrow) { if (onArrowClicked) onArrowClicked(); }
+        else                   { if (onDotClicked)   onDotClicked();   }
+    }
+
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        mLastClickInArrow = (e.x >= getWidth() - kArrowZoneW);
+        juce::TextButton::mouseDown(e);
+    }
+
+    void paintButton(juce::Graphics& g, bool isOver, bool isDown) override
+    {
+        if (getToggleState())
+            PlayButton::paintActiveTintedSlab(
+                g, getLocalBounds().toFloat(),
+                juce::Colour(0xffd02020), isOver);              // red when armed
+        else
+            getLookAndFeel().drawButtonBackground(g, *this,
+                findColour(juce::TextButton::buttonColourId), isOver, isDown);
+
+        auto b = getLocalBounds().toFloat();
+
+        // White dot — centred in the dot zone (left of the arrow strip)
+        auto dotZone = b.withTrimmedRight((float) kArrowZoneW);
+        const float dotR = juce::jmin(dotZone.getWidth(), dotZone.getHeight()) * 0.30f;
+        const float cx   = dotZone.getCentreX();
+        const float cy   = dotZone.getCentreY();
+        g.setColour(juce::Colours::white);
+        g.fillEllipse(cx - dotR, cy - dotR, dotR * 2.f, dotR * 2.f);
+
+        // Divider line + chevron on the right
+        const float ax = b.getRight() - kArrowZoneW;
+        g.setColour(juce::Colours::white.withAlpha(0.30f));
+        g.drawLine(ax, b.getY() + 3.f, ax, b.getBottom() - 3.f, 1.f);
+
+        const float acx = ax + (kArrowZoneW * 0.5f);
+        const float acy = b.getCentreY();
+        juce::Path chev;
+        chev.addTriangle(acx - 3.5f, acy - 1.5f,
+                         acx + 3.5f, acy - 1.5f,
+                         acx,        acy + 3.0f);
+        g.setColour(juce::Colours::white);
+        g.fillPath(chev);
+    }
+
+private:
+    bool mLastClickInArrow{ false };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MetronomeButton (D-5 polish, 2026-04-26)
+// Custom-painted icon — classic mechanical metronome shape (trapezoidal body
+// + vertical pendulum + small weight).  Replaces the prior "METRO" text
+// label.  Editor drives toggle state manually (matches Play/Record pattern).
+// ─────────────────────────────────────────────────────────────────────────────
+class MetronomeButton : public juce::TextButton
+{
+public:
+    MetronomeButton() : juce::TextButton("")
+    {
+        setMouseClickGrabsKeyboardFocus(false);
+        setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xffd8a520));   // amber
+        setClickingTogglesState(false);   // editor drives state
+    }
+
+    void paintButton(juce::Graphics& g, bool isOver, bool isDown) override
+    {
+        // Same raised-slab styling Play/Record use when active.
+        if (getToggleState())
+            PlayButton::paintActiveTintedSlab(g, getLocalBounds().toFloat(),
+                                               juce::Colour(0xffd8a520), isOver);
+        else
+            getLookAndFeel().drawButtonBackground(g, *this,
+                findColour(juce::TextButton::buttonColourId), isOver, isDown);
+
+        // 2026-04-26: smaller absolute-sized symbol so the button can sit
+        // tight around it (~4 px padding on each side) and leave room for
+        // the keyboard-MIDI button (D-4) to slot in next to the metronome.
+        auto b = getLocalBounds().toFloat();
+        const float cx       = b.getCentreX();
+        const float cy       = b.getCentreY();
+        const float bodyTopW = 12.0f;   // narrower top
+        const float bodyBotW = 22.0f;   // narrower base (was ~33)
+        const float bodyH    = juce::jmin(b.getHeight() - 4.f, 16.0f);
+        const float topY     = cy - bodyH * 0.5f;
+        const float botY     = cy + bodyH * 0.5f;
+
+        juce::Path body;
+        body.startNewSubPath(cx - bodyTopW * 0.5f, topY);
+        body.lineTo         (cx + bodyTopW * 0.5f, topY);
+        body.lineTo         (cx + bodyBotW * 0.5f, botY);
+        body.lineTo         (cx - bodyBotW * 0.5f, botY);
+        body.closeSubPath();
+
+        const juce::Colour fg = getToggleState() ? juce::Colours::white : VC::Text;
+        g.setColour(fg);
+        g.fillPath(body);
+
+        // Pendulum + weight (drawn inset over the body).
+        const juce::Colour inner = getToggleState() ? juce::Colour(0xff222222) : VC::Bg;
+        g.setColour(inner);
+        g.drawLine(cx, topY + 1.5f, cx, botY - 2.f, 1.3f);
+        g.fillEllipse(cx - 1.5f, topY + bodyH * 0.22f, 3.f, 3.f);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MetroArrowButton (D-5 polish, 2026-04-26)
+// Custom-painted downward chevron, matching the ▾ glyph used on ribbon tabs.
+// Was a TextButton with the UTF-8 ▾ as its label, but the rendered glyph was
+// invisible at the available font size — this paints the path explicitly.
+// ─────────────────────────────────────────────────────────────────────────────
+class MetroArrowButton : public juce::TextButton
+{
+public:
+    MetroArrowButton() : juce::TextButton("")
+    {
+        setMouseClickGrabsKeyboardFocus(false);
+        setClickingTogglesState(false);
+    }
+
+    void paintButton(juce::Graphics& g, bool isOver, bool isDown) override
+    {
+        getLookAndFeel().drawButtonBackground(g, *this,
+            findColour(juce::TextButton::buttonColourId), isOver, isDown);
+
+        // Filled triangle pointing down — same convention as the ribbon tabs.
+        auto b = getLocalBounds().toFloat();
+        const float cx = b.getCentreX();
+        const float cy = b.getCentreY();
+        const float w  = 5.f;
+        const float h  = 4.f;
+        juce::Path tri;
+        tri.addTriangle(cx - w, cy - h * 0.5f,
+                        cx + w, cy - h * 0.5f,
+                        cx,     cy + h * 0.5f);
+        g.setColour(VC::Text.withAlpha(0.85f));
+        g.fillPath(tri);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LoopModeButton — custom-painted toggle for play-through (→|) vs loop (↻).
+// Default font lacks the unicode glyphs we'd want, so we paint icons directly.
+// ─────────────────────────────────────────────────────────────────────────────
+class LoopModeButton : public juce::TextButton
+{
+public:
+    LoopModeButton()
+    {
+        setClickingTogglesState(true);
+        setMouseClickGrabsKeyboardFocus(false);
+    }
+
+    void paintButton(juce::Graphics& g, bool /*hover*/, bool /*down*/) override
+    {
+        auto b   = getLocalBounds().toFloat().reduced(1.f);
+        bool on  = getToggleState();
+        // Background — match other transport buttons' look
+        g.setColour(on ? VC::Purple.withAlpha(0.5f) : VC::Accent);
+        g.fillRoundedRectangle(b, 3.f);
+        g.setColour(juce::Colour(0xff333333));
+        g.drawRoundedRectangle(b, 3.f, 1.f);
+
+        auto inner = b.reduced(4.f);
+        g.setColour(on ? juce::Colours::white : VC::TextDim);
+
+        if (on)
+        {
+            // Loop icon: 3/4 circular arc with arrowhead
+            const float cx = inner.getCentreX();
+            const float cy = inner.getCentreY();
+            const float r  = juce::jmin(inner.getWidth(), inner.getHeight()) * 0.40f;
+
+            juce::Path arc;
+            // Arc from ~30° to ~330° (270° sweep) — leaves a gap for the arrow
+            arc.addCentredArc(cx, cy, r, r, 0.f,
+                              juce::degreesToRadians(30.f),
+                              juce::degreesToRadians(330.f),
+                              true);
+            g.strokePath(arc, juce::PathStrokeType(1.6f, juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
+            // Arrowhead at the arc end (top-right)
+            const float endA = juce::degreesToRadians(330.f);
+            const float ex = cx + r * std::sin(endA);
+            const float ey = cy - r * std::cos(endA);
+            juce::Path head;
+            head.addTriangle(ex,             ey,
+                             ex + 4.5f,      ey - 1.f,
+                             ex + 1.5f,      ey - 5.f);
+            g.fillPath(head);
+        }
+        else
+        {
+            // Play-through-then-stop icon: arrow → end-bar (→|)
+            const float midY  = inner.getCentreY();
+            const float left  = inner.getX() + 1.f;
+            const float right = inner.getRight() - 3.f;
+            const float headW = 4.f;
+            const float barX  = right;
+            // Shaft
+            g.drawLine(left, midY, barX - headW, midY, 1.6f);
+            // Arrowhead
+            juce::Path head;
+            head.addTriangle(barX - headW, midY - 3.f,
+                             barX - headW, midY + 3.f,
+                             barX,         midY);
+            g.fillPath(head);
+            // End bar (the "stop" line after the arrow)
+            g.drawLine(barX + 1.f, midY - 4.5f,
+                       barX + 1.f, midY + 4.5f, 1.6f);
+        }
+    }
+};
+
+GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
+    : mPlayHead(ph)
+{
+    auto makeBtn = [this](const juce::String& text, bool isToggle = false)
+    {
+        auto b = std::make_unique<juce::TextButton>(text);
+        b->setClickingTogglesState(isToggle);
+        b->setMouseClickGrabsKeyboardFocus(false);
+        addAndMakeVisible(*b);
+        return b;
+    };
+
+    // R5a: custom-painted Play (white triangle, green when playing).
+    {
+        auto p = std::make_unique<PlayButton>();
+        p->setMouseClickGrabsKeyboardFocus(false);
+        addAndMakeVisible(*p);
+        mPlayBtn.reset(p.release());
+    }
+    mPauseBtn    = makeBtn(juce::CharPointer_UTF8("\xe2\x80\x96")); // ‖
+    mStopBtn     = makeBtn(juce::CharPointer_UTF8("\xe2\x96\xa0")); // ■
+    // 2026-04-26 (D-5 polish): icon-painted metronome button replaces "METRO" text.
+    {
+        auto m = std::make_unique<MetronomeButton>();
+        addAndMakeVisible(*m);
+        mMetronomeBtn.reset(m.release());
+    }
+
+    // 2026-04-26 (D-5 polish): custom path-painted chevron — the previous
+    // text-button rendered the UTF-8 ▾ at an invisible size.
+    {
+        auto a = std::make_unique<MetroArrowButton>();
+        addAndMakeVisible(*a);
+        mMetroArrowBtn.reset(a.release());
+    }
+    mMetroArrowBtn->setTooltip("Metronome settings");
+    mMetroArrowBtn->onClick = [this] { if (onMetroSettings) onMetroSettings(); };
+
+    mSongModeBtn = makeBtn("PATTERN", false);
+
+    // Song-loop-mode toggle: custom-painted icons (→| for play-through, ↻ for loop).
+    // Default font lacks the unicode arrows, so we draw with juce::Path.
+    mSongLoopBtn = std::make_unique<LoopModeButton>();
+    mSongLoopBtn->setMouseClickGrabsKeyboardFocus(false);
+    mSongLoopBtn->setTooltip("Song playback: arrow + bar = play to end and stop / circle = loop");
+    // 2026-04-26: default to loop (🔁) — was play-through (→).  Pairs with
+    // the matching default in `VibeSynthProcessor::mSongLoopMode`.
+    mSongLoopBtn->setToggleState(true, juce::dontSendNotification);
+    addAndMakeVisible(*mSongLoopBtn);
+
+    mPlayBtn->setTooltip("Play  (Space)");
+    mPauseBtn->setTooltip("Pause  (Space while playing)");
+    mStopBtn->setTooltip("Stop  (Shift+Space)");
+    mMetronomeBtn->setTooltip("Toggle metronome");
+    mSongModeBtn->setTooltip("Toggle Pattern / Song playback mode");
+
+    // R5a: custom-painted Record button (white dot, red body when armed, +
+    // dropdown chevron on the right for the upcoming ASIO / MIDI mode menu).
+    {
+        auto r = std::make_unique<RecordButton>();
+        r->setMouseClickGrabsKeyboardFocus(false);
+        r->setTooltip("Arm recording (R) - press Play to start; click chevron for ASIO / MIDI mode");
+        r->onDotClicked = [this] {
+            mIsRecording = !mIsRecording;
+            if (auto* rb = dynamic_cast<RecordButton*>(mRecBtn.get())) rb->setArmed(mIsRecording);
+            if (onRecord) onRecord(mIsRecording);
+        };
+        r->onArrowClicked = [this] {
+            // R5c (2026-04-24): ASIO / MIDI mode picker.  Label on MIDI spells
+            // out "(piano roll tabs only)" so beginners know the mode is
+            // strictly for capturing notes into whatever piano-roll page is
+            // open - not a general MIDI input router.
+            juce::PopupMenu m;
+            const auto cur = mRecordMode;
+            m.addItem (1, "ASIO",                       true, cur == RecordMode::Audio);
+            m.addItem (2, "MIDI (piano roll tabs only)", true, cur == RecordMode::Midi);
+            m.showMenuAsync (
+                juce::PopupMenu::Options().withTargetComponent (mRecBtn.get()),
+                [this](int r) {
+                    if      (r == 1) setRecordMode (RecordMode::Audio);
+                    else if (r == 2) setRecordMode (RecordMode::Midi);
+                });
+        };
+        addAndMakeVisible(*r);
+        mRecBtn.reset(r.release());
+    }
+
+    mPlayBtn->onClick = [this] { if (onPlay) onPlay(); };
+    mPauseBtn->onClick = [this] { if (onPause) onPause(); };
+    mStopBtn->onClick  = [this] {
+        mIsRecording = false;
+        if (auto* rb = dynamic_cast<RecordButton*>(mRecBtn.get())) rb->setArmed(false);
+        if (onRecord) onRecord(false);
+        if (onStop) onStop();
+    };
+
+    mMetronomeBtn->onClick = [this] {
+        bool on = !mMetronomeBtn->getToggleState();
+        mMetronomeBtn->setToggleState(on, juce::dontSendNotification);
+        if (onMetronomeToggle) onMetronomeToggle(on);
+    };
+    mSongModeBtn->onClick = [this] {
+        bool songMode = !mSongModeBtn->getToggleState();
+        mSongModeBtn->setToggleState(songMode, juce::dontSendNotification);
+        mSongModeBtn->setButtonText(songMode ? "SONG" : "PATTERN");
+        if (onSongModeChanged) onSongModeChanged(songMode);
+    };
+
+    mSongLoopBtn->onClick = [this] {
+        // setClickingTogglesState(true) in LoopModeButton already flipped the
+        // state by the time onClick fires — just read the new state and
+        // notify. Don't flip again or the two flips will cancel out and the
+        // button will appear inert.
+        const bool loop = mSongLoopBtn->getToggleState();
+        mSongLoopBtn->repaint();
+        if (onSongLoopModeChanged) onSongLoopModeChanged(loop);
+    };
+
+    // BPM
+    mBpmLabel = std::make_unique<juce::Label>();
+    mBpmLabel->setText("BPM", juce::dontSendNotification);
+    mBpmLabel->setFont(juce::Font(9.0f));
+    mBpmLabel->setColour(juce::Label::textColourId, VC::TextDim);
+    mBpmLabel->setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(*mBpmLabel);
+
+    mBpmField = std::make_unique<juce::TextEditor>();
+    mBpmField->setText("120", false);
+    mBpmField->setInputRestrictions(6, "0123456789.");
+    mBpmField->setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::bold));
+    mBpmField->setJustification(juce::Justification::centred);
+    mBpmField->setTooltip("Tempo (BPM)");
+    // LRX-14: LCD amber digits on dark recessed background
+    mBpmField->setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff0A0A08));
+    mBpmField->setColour(juce::TextEditor::textColourId,       juce::Colour(0xffFFB030));
+    mBpmField->setColour(juce::TextEditor::outlineColourId,    juce::Colour(0xff2A2A28));
+    mBpmField->setColour(juce::TextEditor::focusedOutlineColourId, juce::Colour(0xff604020));
+    mBpmField->onReturnKey = [this] {
+        if (onTempoChanged) onTempoChanged(getBPM());
+        mBpmField->giveAwayKeyboardFocus();
+    };
+    mBpmField->onFocusLost = [this] {
+        if (onTempoChanged) onTempoChanged(getBPM());
+    };
+    // 2026-04-24: right-click the BPM field -> "Automate tempo".  Override
+    // the built-in copy/paste popup and show our own menu via a persistent
+    // MouseListener member.
+    mBpmField->setPopupMenuEnabled (false);
+    mBpmField->addMouseListener (&mBpmMouseWatcher, true);
+    addAndMakeVisible(*mBpmField);
+
+    // Tap Tempo button
+    mTapBtn = makeBtn("TAP");
+    mTapBtn->setTooltip("Tap to set tempo - tap repeatedly then it locks in");
+    mTapBtn->onClick = [this] { doTap(); };
+
+    // CPU / DSP / MEM / LAT 2x2 grid. Same width footprint as the old single-
+    // line label; uses two text rows in a smaller font instead of one long row.
+    mPerfLabel = std::make_unique<juce::Label>();
+    mPerfLabel->setText("SYS --%  DSP --%\nMEM --  LAT --", juce::dontSendNotification);
+    mPerfLabel->setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 9.f, juce::Font::plain));
+    mPerfLabel->setColour(juce::Label::textColourId, VC::TextDim);
+    mPerfLabel->setJustificationType(juce::Justification::centredRight);
+    mPerfLabel->setMinimumHorizontalScale(1.0f);
+    mPerfLabel->setTooltip("SYS: system-wide CPU %  |  DSP: audio engine load (% of buffer window)  |  MEM: process memory in MB  |  LAT: total reported plugin latency in samples (sum of every effect that adds PDC)");
+    addAndMakeVisible(*mPerfLabel);
+
+    startTimerHz(10);
+}
+
+void GlobalTransportBar::BpmMouseWatcher::mouseDown (const juce::MouseEvent& e)
+{
+    if (! e.mods.isRightButtonDown()) return;
+    juce::PopupMenu m;
+    m.addItem ("Automate tempo", [this] {
+        if (owner.onAutomateTempo) owner.onAutomateTempo();
+    });
+    m.showMenuAsync (juce::PopupMenu::Options()
+                       .withTargetComponent (owner.mBpmField.get()));
+}
+
+GlobalTransportBar::~GlobalTransportBar()
+{
+    stopTimer();
+}
+
+double GlobalTransportBar::getBPM() const
+{
+    double v = mBpmField->getText().getDoubleValue();
+    return (v >= 20.0 && v <= 300.0) ? v : 120.0;
+}
+
+void GlobalTransportBar::setPlayState(bool playing, bool paused)
+{
+    mIsPlaying = playing;
+    mIsPaused  = paused;
+}
+
+void GlobalTransportBar::setRecordArmed(bool armed)
+{
+    mIsRecording = armed;
+    if (auto* rb = dynamic_cast<RecordButton*>(mRecBtn.get())) rb->setArmed(armed);
+}
+
+void GlobalTransportBar::setRecordMode(RecordMode m)
+{
+    if (m == mRecordMode) return;
+    mRecordMode = m;
+    if (mRecBtn)
+        mRecBtn->setTooltip (juce::String ("Arm recording (R) - mode: ")
+                              + (m == RecordMode::Audio
+                                 ? "ASIO"
+                                 : "MIDI (piano roll tabs only)"));
+    if (onRecordModeChanged) onRecordModeChanged (m);
+}
+
+void GlobalTransportBar::togglePlayPause()
+{
+    if (mIsPlaying && ! mIsPaused)
+    { if (onPause) onPause(); }
+    else
+    { if (onPlay)  onPlay();  }
+}
+
+void GlobalTransportBar::stopAndDisarm()
+{
+    mIsRecording = false;
+    if (auto* rb = dynamic_cast<RecordButton*>(mRecBtn.get())) rb->setArmed(false);
+    if (onRecord) onRecord(false);
+    if (onStop)   onStop();
+}
+
+void GlobalTransportBar::toggleRecord()
+{
+    mIsRecording = ! mIsRecording;
+    if (auto* rb = dynamic_cast<RecordButton*>(mRecBtn.get())) rb->setArmed(mIsRecording);
+    if (onRecord) onRecord(mIsRecording);
+}
+
+void GlobalTransportBar::toggleMetronome()
+{
+    if (mMetronomeBtn == nullptr) return;
+    const bool on = ! mMetronomeBtn->getToggleState();
+    // dontSendNotification — the button's own onClick also toggles + fires
+    // onMetronomeToggle, so sendNotification would double-toggle and leave the
+    // visual state out of sync with the listener payload.
+    mMetronomeBtn->setToggleState(on, juce::dontSendNotification);
+    if (onMetronomeToggle) onMetronomeToggle(on);
+}
+
+void GlobalTransportBar::toggleSongMode()
+{
+    setSongMode(! isSongMode());   // setSongMode already fires onSongModeChanged
+}
+
+void GlobalTransportBar::timerCallback()
+{
+    // Keep playhead loop wrap point in sync with the current pattern content
+    if (onGetLoopBeats)
+        mPlayHead.setLoopBeats(onGetLoopBeats());
+
+    bool playing = mPlayHead.isPlaying();
+
+    // R5a: Play + Record paint themselves from internal state flags.  No more
+    // per-tick colour fights with the LookAndFeel.
+    if (auto* pb = dynamic_cast<PlayButton*>(mPlayBtn.get())) pb->setPlaying(playing);
+    if (auto* rb = dynamic_cast<RecordButton*>(mRecBtn.get())) rb->setArmed(mIsRecording);
+
+    // Pause button colour
+    mPauseBtn->setColour(juce::TextButton::buttonColourId,
+        mIsPaused ? VC::Yellow.withAlpha(0.45f) : VC::Accent);
+
+    // Stop button
+    mStopBtn->setColour(juce::TextButton::buttonColourId,
+        playing ? VC::Highlight.withAlpha(0.45f) : VC::Accent);
+
+    // Metronome button + arrow
+    mMetronomeBtn->setColour(juce::TextButton::buttonOnColourId,  VC::Blue.withAlpha(0.5f));
+    mMetronomeBtn->setColour(juce::TextButton::buttonColourId,    VC::Accent);
+    if (mMetroArrowBtn)
+    {
+        mMetroArrowBtn->setColour(juce::TextButton::buttonColourId, VC::Accent);
+        mMetroArrowBtn->setColour(juce::TextButton::textColourOffId, VC::TextDim);
+    }
+
+    // Song/Pattern mode button
+    mSongModeBtn->setColour(juce::TextButton::buttonOnColourId,   VC::Purple.withAlpha(0.5f));
+    mSongModeBtn->setColour(juce::TextButton::buttonColourId,     VC::Accent);
+
+    // CPU + DSP load readout
+    {
+       #if JUCE_WINDOWS
+        float sysCpu = 0.f;
+        int   memMb  = 0;
+        {
+            PROCESS_MEMORY_COUNTERS pmc{};
+            if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+                memMb = (int)(pmc.WorkingSetSize / (1024 * 1024));
+        }
+        {
+            static ULONGLONG lastIdle = 0, lastKernel = 0, lastUser = 0;
+            FILETIME idleT, kernelT, userT;
+            if (GetSystemTimes(&idleT, &kernelT, &userT))
+            {
+                auto toU = [](FILETIME ft) -> ULONGLONG {
+                    return (ULONGLONG(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+                };
+                ULONGLONG idle    = toU(idleT);
+                ULONGLONG kernel  = toU(kernelT);
+                ULONGLONG user    = toU(userT);
+                ULONGLONG dKernel = kernel - lastKernel;
+                ULONGLONG dUser   = user   - lastUser;
+                ULONGLONG dIdle   = idle   - lastIdle;
+                ULONGLONG total   = dKernel + dUser;
+                if (total > 0)
+                    sysCpu = 100.f * float(total - dIdle) / float(total);
+                lastIdle = idle; lastKernel = kernel; lastUser = user;
+            }
+        }
+       #else
+        float sysCpu = 0.f;
+        int   memMb  = 0;
+       #endif
+
+        // 1M: read audio DSP load from processor (via callbacks set by StandaloneEditor)
+        const float dspLoad   = onGetDspLoad ? onGetDspLoad() : 0.f;
+        const bool  over95    = onGetDsp95   ? onGetDsp95()   : false;
+        const int   dspPct    = juce::jlimit(0, 999, (int)(dspLoad * 100.f));
+
+        // 12f: PDC latency readout. Total samples reported by host PDC, plus
+        // ms-converted form when sample rate is known. "--" when callback empty.
+        juce::String latStr ("--");
+        if (onGetLatencySamples)
+            latStr = juce::String(onGetLatencySamples());
+
+        // 2x2 grid: SYS%/DSP% on top row, MEM/LAT on bottom row. Bottom-row
+        // unit suffixes dropped (covered by tooltip) to keep the column widths
+        // balanced - otherwise "MEM 234MB  LAT 16sp/0.3ms" overflows the cell
+        // bounds left of the right-justified anchor and clips the M of MEM.
+        juce::String s;
+        s << "SYS " << (int)sysCpu << "%  DSP " << dspPct << "%\n"
+          << "MEM " << memMb << "  LAT " << latStr;
+        mPerfLabel->setText(s, juce::dontSendNotification);
+
+        // Color priority: 95% overload (flash red) > 85% warn (yellow) > normal (green)
+        juce::Colour col;
+        if (over95)
+        {
+            // Flash between bright red and dark red each tick (10 Hz = visible flicker)
+            static bool sFlash = false;
+            sFlash = !sFlash;
+            col = sFlash ? juce::Colour(0xffff2222) : juce::Colour(0xff991111);
+        }
+        else if (dspLoad > 0.85f || sysCpu > 80.f)
+            col = VC::Yellow;
+        else if (dspLoad > 0.5f  || sysCpu > 50.f)
+            col = VC::Yellow.withAlpha(0.7f);
+        else
+            col = VC::Green;
+
+        mPerfLabel->setColour(juce::Label::textColourId, col);
+    }
+
+    // Keep BPM field synced to playhead tempo if it's not focused
+    if (!mBpmField->hasKeyboardFocus(false))
+    {
+        double ph_bpm = mPlayHead.getBPM();
+        double ui_bpm = getBPM();
+        if (std::abs(ph_bpm - ui_bpm) > 0.01)
+            mBpmField->setText(juce::String(ph_bpm, 1), false);
+    }
+}
+
+void GlobalTransportBar::doTap()
+{
+    double now = juce::Time::getMillisecondCounterHiRes();
+
+    // If gap > 2 s, treat as a fresh sequence
+    if (!mTapTimes.isEmpty() && (now - mTapTimes.getLast()) > 2000.0)
+        mTapTimes.clear();
+
+    mTapTimes.add(now);
+
+    // Need at least 2 taps to compute a period
+    if (mTapTimes.size() < 2)
+        return;
+
+    // Keep only the last 8 taps
+    while (mTapTimes.size() > 8)
+        mTapTimes.remove(0);
+
+    // Average inter-tap interval
+    double totalMs = mTapTimes.getLast() - mTapTimes.getFirst();
+    double avgMs   = totalMs / (double)(mTapTimes.size() - 1);
+    double bpm     = juce::jlimit(20.0, 300.0, 60000.0 / avgMs);
+
+    // Round to nearest whole number
+    bpm = std::round(bpm);
+
+    mBpmField->setText(juce::String((int)bpm), false);
+    if (onTempoChanged) onTempoChanged(bpm);
+}
+
+void GlobalTransportBar::paint(juce::Graphics& g)
+{
+    auto b = getLocalBounds().toFloat();
+
+    // LRX-14: Brushed aluminum base — dark silver with subtle top-lit gradient
+    juce::ColourGradient baseGrad(
+        juce::Colour(0xff22252A), 0.f, b.getY(),
+        juce::Colour(0xff1A1D21), 0.f, b.getBottom(), false);
+    g.setGradientFill(baseGrad);
+    g.fillRect(b);
+
+    // LRX-14: 1D horizontal grain (brushed aluminum)
+    {
+        juce::Random rng(17);
+        for (int y = 0; y < getHeight(); ++y)
+        {
+            float alpha = rng.nextFloat() * 0.025f + 0.005f;
+            bool bright = rng.nextBool();
+            g.setColour((bright ? juce::Colours::white : juce::Colours::black).withAlpha(alpha));
+            g.drawHorizontalLine(y, 0.f, (float)getWidth());
+        }
+    }
+
+    // Top highlight edge (light catching the rim)
+    g.setColour(juce::Colours::white.withAlpha(0.12f));
+    g.fillRect(0.f, 0.f, (float)getWidth(), 1.f);
+
+    // Bottom separator line
+    g.setColour(VC::Accent);
+    g.fillRect(0, getHeight() - 1, getWidth(), 1);
+}
+
+void GlobalTransportBar::resized()
+{
+    auto b = getLocalBounds().reduced(4, 3);
+
+    // Left side: transport buttons
+    int btnH  = b.getHeight();
+    int btnW  = 34;
+    int space = 3;
+
+    mPlayBtn->setBounds (b.removeFromLeft(btnW).reduced(1, 1));
+    b.removeFromLeft(space);
+    mPauseBtn->setBounds(b.removeFromLeft(btnW).reduced(1, 1));
+    b.removeFromLeft(space);
+    mStopBtn->setBounds (b.removeFromLeft(btnW).reduced(1, 1));
+    b.removeFromLeft(space);
+    // R5a: record button is wider to fit the dropdown chevron without crowding the dot.
+    mRecBtn->setBounds  (b.removeFromLeft(btnW + 10).reduced(1, 1));
+    b.removeFromLeft(12);
+
+    // BPM: label + field + tap button
+    mBpmLabel->setBounds(b.removeFromLeft(28).reduced(0, 2));
+    mBpmField->setBounds(b.removeFromLeft(54).reduced(1, 1));
+    b.removeFromLeft(4);
+    mTapBtn->setBounds(b.removeFromLeft(46).reduced(1, 1));
+    b.removeFromLeft(8);
+
+    // Right side: mode toggles
+    mSongModeBtn->setBounds (b.removeFromLeft(72).reduced(1, 1));
+    b.removeFromLeft(2);
+    // Loop toggle (→ / 🔁) sits immediately next to SONG button
+    if (mSongLoopBtn) mSongLoopBtn->setBounds(b.removeFromLeft(28).reduced(1, 1));
+    b.removeFromLeft(space);
+    // 2026-04-26 (D-5 polish): button widths tightened around the icon glyphs
+    // (metronome 30, arrow 18).  kControlsWidth stays at 520 — the saved
+    // ~40 px reserves space for the keyboard-MIDI button slot (D-4).
+    mMetronomeBtn->setBounds(b.removeFromLeft(30).reduced(1, 1));
+    if (mMetroArrowBtn) mMetroArrowBtn->setBounds(b.removeFromLeft(18).reduced(1, 1));
+    b.removeFromLeft(12);
+
+    // CPU / DSP / MEM / LAT 2x2 grid (far right). Width sized for the longest
+    // bottom-row variant ("MEM 999MB  LAT 99999sp/22.2ms") at 9pt monospaced.
+    // No wider than the old 1-line layout in the common case (bar height
+    // accommodates the second text row instead of widening).
+    mPerfLabel->setBounds(b.removeFromRight(160).reduced(2, 0));
+    b.removeFromRight(6);
+}
+
+void GlobalTransportBar::setSongMode(bool song)
+{
+    if (!mSongModeBtn) return;
+    if (mSongModeBtn->getToggleState() == song) return;   // no-op, avoid callback churn
+    mSongModeBtn->setToggleState(song, juce::dontSendNotification);
+    mSongModeBtn->setButtonText(song ? "SONG" : "PATTERN");
+    if (onSongModeChanged) onSongModeChanged(song);
+}

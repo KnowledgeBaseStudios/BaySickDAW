@@ -1,0 +1,45 @@
+To make your **TransientShaperDSP** sound like a professional, punchy FL-style plugin rather than a simple volume gate, the secret lies in **frequency-dependent detection** and **envelope difference modeling**. 
+
+Standard transient shapers often "pump" the low-end in an ugly way. For **Vibesynth**, we will use a split-band architecture that preserves the sub-fundamental while reshaping the "snap."
+
+### 1. The Frequency Split (Linkwitz-Riley)
+You don't want to shape the sub-bass of a kick drum the same way you shape the "click" of the beater. 
+* **The Logic:** Use a **Linkwitz-Riley 4th Order crossover** (24dB/oct). This is the "Gold Standard" because it is phase-perfect at the summing point. 
+* **Split Point:** Fixed or adjustable around **260Hz - 350Hz**. 
+* **Routing:** The Low band bypasses the shaper entirely to keep the weight of the track consistent. Only the High band is processed.
+
+### 2. The Detection Logic (The "Difference" Method)
+A professional shaper works by comparing two envelope followers: one very fast (Attack) and one slower (Sustain/Release).
+
+**The Math:**
+1.  **Fast Envelope ($Env_{fast}$):** Follows the signal peaks almost instantly (e.g., 1ms–5ms).
+2.  **Slow Envelope ($Env_{slow}$):** Follows the signal more gracefully (e.g., 20ms–50ms).
+3.  **The Transient Signal:** $Transient = \frac{Env_{fast}}{Env_{slow} + \epsilon}$ (where $\epsilon$ is a tiny floor value).
+
+If the signal is a steady tone, $Env_{fast}$ and $Env_{slow}$ are nearly equal, and the result is 1.0 (no change). If a sharp snare hit happens, $Env_{fast}$ spikes while $Env_{slow}$ lags, creating a value > 1.0. This is your "Attack" trigger.
+
+### 3. Ballistics (Time Constants)
+To avoid "clicking" sounds, you must smooth the gain changes.
+* **Attack Phase:** Use a **Logarithmic** curve for the boost.
+* **Release Phase:** Use an **Exponential** curve for the "Sustain" part of the shaper. 
+* **Formula:** $\alpha = 1.0 - e^{-1.0 / (time\_ms \cdot 0.001 \cdot fs)}$
+
+### 4. Output Saturation (The Soft Clipper)
+Transient shaping often creates massive peaks that will clip your DAW's master. 
+* **The Logic:** Place a **Soft Clipper** (Asymmetrical Sigmoid) at the end of the high-band chain.
+* **Pro Tip:** Use the **4x Oversampling** logic we discussed for the Saturation module here. This ensures that when you "boost" an attack, any resulting clipping is "warm" and analog-sounding rather than "digital crunch."
+
+---
+
+### The Instructions for Claude
+When you hand off the `Transient Shaper.txt` file to Claude, provide these specific "Pro" requirements:
+
+> "Rewrite the `TransientShaperDSP` class with these high-end specifications:
+> 1.  **Crossover:** Use a `juce::dsp::LinkwitzRileyFilter` (4th order) to split the signal at 260Hz. Process **ONLY** the high band.
+> 2.  **Detector:** Use a dual-envelope follower system. Calculate the transient ratio by comparing a fast peak follower against a slow RMS follower.
+> 3.  **Attack/Sustain:** Implement independent curves for the Attack and Release parameters. The Attack boost should use a **Quadratic** curve to feel more 'snappy.'
+> 4.  **Soft Clipping:** Wrap the output in a **4x Oversampled** wave-shaper. Use the formula: `f(x) = x / (1 + abs(x))` to catch peaks created by the attack boost.
+> 5.  **Balance:** The `Split Balance` parameter should crossfade between the unprocessed Low band and the processed High band, ensuring they sum to unity at 0% balance."
+
+### Next Module: Modulation (Chorus/Phaser/Flanger) or Overdrive?
+The **Modulation** effects will require specific LFO phase-offset math for that wide "Pro" stereo sound, whereas **Overdrive** requires sequential filtering to avoid being "fizzy." Which one are we breaking down next?

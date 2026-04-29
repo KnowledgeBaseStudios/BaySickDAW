@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="Jazz Fusion" version="1">
+  <Kit path="Jazz Fusion/Jazz Fusion Full.xml"/>
+  <Layer slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/Keys/Upright Piano.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/Rhodes EP.xml" locked="1"/>
+  <Layer slot="2" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/Hammond Drawbar.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickPlayer" presetPath="BaySickPlayer/Strings/Violin Ens (Sustained).xml" locked="1"/>
+  <Layer slot="4" engine="BaySickPlayer" presetPath="BaySickPlayer/Brass/Trumpet (Sustained).xml" locked="1"/>
+  <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Plucks &amp; Mallets/Marimba Pluck.xml" locked="1"/>
+  <Layer slot="6" engine="BaySickSynth" presetPath="BaySickSynth/Plucks &amp; Mallets/Pizzicato Synth.xml" locked="1"/>
+  <Layer slot="7" engine="BaySickSynth" presetPath="BaySickSynth/Pads &amp; Atmospheres/Warm Analog Pad.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/Strings/Contrabass (Pizzicato).xml" locked="1"/>
+  <Bass slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/Strings/Contrabass (Sustained).xml" locked="1"/>
+  <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Upright Jazz Sub.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Fretless Glide.xml" locked="1"/>
+</BaySickTemplate>

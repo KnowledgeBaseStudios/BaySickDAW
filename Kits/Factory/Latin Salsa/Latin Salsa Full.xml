@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Latin Salsa Full" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/Hand Percussion/Stomp Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Snare.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Closed Hat.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909 Open Hat.xml" locked="1"/>
+  <Drum slot="4" engine="BaySickSynth" presetPath="BaySickDrums/Hand Percussion/Bongo Hi.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickSynth" presetPath="BaySickDrums/Hand Percussion/Bongo Lo.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Conga Hi.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Conga Lo.xml" locked="1"/>
+  <Drum slot="8" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Conga Mid.xml" locked="1"/>
+  <Drum slot="9" engine="BaySickSynth" presetPath="BaySickDrums/Hand Percussion/Djembe.xml" locked="1"/>
+  <Drum slot="10" engine="BaySickSynth" presetPath="BaySickDrums/Hand Percussion/Frame Drum.xml" locked="1"/>
+  <Drum slot="11" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Cowbell.xml" locked="1"/>
+  <Drum slot="12" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Claves.xml" locked="1"/>
+  <Drum slot="13" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Maraca.xml" locked="1"/>
+  <Drum slot="14" engine="BaySickSynth" presetPath="BaySickDrums/Hand Percussion/Cabasa Shaker.xml" locked="1"/>
+  <Drum slot="15" engine="BaySickSynth" presetPath="BaySickDrums/Hand Percussion/Tambourine.xml" locked="1"/>
+</BaySickKit>

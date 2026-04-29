@@ -1,0 +1,53 @@
+To get the professional, "stock FL" sound for **Vibesynth**, we need to break these down into individual modules. Each one requires a specific combination of legacy math and modern DSP "cleanliness" (like oversampling).
+
+Here is the full breakdown for the **Saturation Engine** first. If this looks right to you, we can move on to the Compressor, Delay, and the others one by one.
+
+---
+
+### Module 1: The "Fruity" Saturation Engine
+The goal here is to replicate the behavior of a high-end waveshaper that feels "analog" but stays clean. This is the breakdown of the logic you should hand to Claude.
+
+#### 1. Pre-Processing (The "Tone" Stage)
+Before the distortion hits, you need a **Pre-Emphasis Filter**.
+* **Logic:** A high-shelf filter at 5kHz.
+* **Why:** Pushing high frequencies into the saturator creates that "shimmer" or "air." If you saturate a flat signal, the low end often gets "farty."
+* **Formula:** Use `juce::dsp::IIR::Coefficients<float>::makeHighShelf`.
+
+#### 2. The Core Shaper (Asymmetrical Sigmoid)
+Instead of standard `tanh`, use this asymmetrical function. It mimics the way a vacuum tube or a tape head saturates one side of the waveform slightly differently than the other, creating musical even-order harmonics.
+
+**The Math:**
+$$f(x) = \frac{x + (k \cdot x^2 \cdot \text{sgn}(x))}{1 + |x|}$$
+* **$x$:** Input sample (post-pre-gain).
+* **$k$:** The "Flowers" or "Symmetry" amount (0.0 to 1.0).
+* **$\text{sgn}(x)$:** Returns 1 if positive, -1 if negative (maintains the direction of the wave).
+
+#### 3. Oversampling (The "Pro" Requirement)
+You cannot run this at 44.1kHz or it will sound like "crap" due to aliasing.
+* **Requirement:** 4x Oversampling. 
+* **Implementation:** Wrap the shaper in a `juce::dsp::Oversampling` block.
+    1.  **Upsample** 4x.
+    2.  **Process** the math above.
+    3.  **Downsample** back to the host rate.
+
+#### 4. Post-Processing (The "Clean-up")
+To ensure it doesn't sound "digital" or "broken":
+* **DC Offset Filter:** A one-pole High Pass Filter at 5Hz.
+    * $y[n] = x[n] - x[n-1] + 0.995 \cdot y[n-1]$
+* **Post-Gain Compensation:** Automatically reduce the output volume by the same amount you boosted the input gain (Sensitivity).
+
+---
+
+### The Instructions for Claude
+When you want Claude to write this specific file, give it this prompt:
+
+> "Write a C++ class `SaturationDSP` using the `juce::dsp` paradigm. 
+> 1. **Architecture:** Use a `ProcessorChain` containing a `HighShelf` Pre-EQ, an `Oversampling` block (4x), and a `LowPass` Post-filter.
+> 2. **Math:** Inside the oversampling block, implement an asymmetrical sigmoid shaper: `f(x) = (x + k * x * x * sgn(x)) / (1 + abs(x))`.
+> 3. **Safety:** Add a one-pole HPF at 5Hz to the final output to remove DC offset.
+> 4. **Parameters:** Include `Flowers` (Symmetry), `Dabs` (Input Drive), and `Bass Relief` (a 350Hz crossover that allows low-end to bypass the distortion stage)."
+
+---
+
+### Next Module: The "Analog" Compressor
+Would you like the full breakdown for the **Compressor** next (focusing on the recursive smoothing and the "Vintage" knee logic), or should we do the **Tape/Hysteresis** engine?

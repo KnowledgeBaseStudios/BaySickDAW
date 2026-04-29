@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Dubstep (Real) Full" version="1">
+  <Drum slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Kick 1.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Acoustic Kick 1.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Airy Kick.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Clappy Kick.xml" locked="1"/>
+  <Drum slot="4" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Muffled Kick.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Pre-Kick.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Dubstep Kicks/Dubstep Smol Kick.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Hardstyle Snares/Hardstyle Snare 1.xml" locked="1"/>
+  <Drum slot="8" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/House Claps &amp; Snares/House Clap-Snare 01.xml" locked="1"/>
+  <Drum slot="9" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Hardstyle Snares/Hardstyle Snare 2.xml" locked="1"/>
+  <Drum slot="10" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Hats/Hip Hop Closed Hat 04.xml" locked="1"/>
+  <Drum slot="11" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Hats/Hip Hop Open Hat 04.xml" locked="1"/>
+  <Drum slot="12" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Cymbals/Hip Hop Cymbal 01.xml" locked="1"/>
+  <Drum slot="13" engine="BaySickPlayer" presetPath="BaySickPlayer/Hip Hop Drums/Cymbals/Hip Hop Crash 01.xml" locked="1"/>
+  <Drum slot="14" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Hardstyle Percussion/Hardstyle Perc 1.xml" locked="1"/>
+  <Drum slot="15" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/Hardstyle Percussion/Hardstyle Perc 2.xml" locked="1"/>
+</BaySickKit>

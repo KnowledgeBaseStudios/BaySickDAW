@@ -1,0 +1,176 @@
+IT IS CRITICAL that you read everything precisely and implement ALL actions with no exceptions, all else is a critical failure. Please review everything here and ask as many questions as possible.
+
+First I guess I wasn't specific enough as I just want the red VibeDAW logo in the middle but I still want the pattern selector drop down, the add pattern + and the pattern name box on the left with the left end of the pattern selector box lining up with the left end of the play button so they are all together.
+
+The rack looks a lot better but we do have a couple problems. 
+*First is the buttons on the bars are too small so you can't see if it's an up or down arrow or a X you just see ".." so those need to be respaced so the that it can be seen. In addition the button on the left I don't even know what that's for. Is this to turn on and off that effect? If so I want the default to be on.
+*Next is when you press a plus button it does pull the dropdown up but its fixed to the left side of the screen and I need it to be fixed to the mouse so when you click anywhere in the box the dropdown appears right at your mouse. Also I want the plugins sorted by alphabetical order.
+*Also in regards to the effects on the rack is it possible to add logic that effects always shift up to the first open slot? What I mean by this is say  you have a full rack and you close the first two slots, the logic would be that all other effects shift upward so that you are always adding from the bottom. This should make work flow easier as well engrain the logic that the signal flow is top down.
+*Next is it's difficult to tell if the bpm/ping/(M/S)/etc buttons are engaged or not because of the black and grey scheme so make them pink as well like the tab color functioning the same way. 
+*Also speaking of the M/S button can you explain how that would function within the settings of my DAW's setup. Does it allow for M/S processing through the EQ or does it do some sort of effect change based on the parameters of the effect? Please explain.
+
+*Next I want to remove the EQ from the dropdown selection for the effects rack since there is already the EQ tab for EQ on that channel.
+*Next it appears as though a number of effects are missing their actual knob setups based on the design docs. Specifically the Saturation one seems to be completely unchanged even though there was a whole set of knobs to be with the way it functions changing drastically. Below is each effect and the dials it should have and implore you as it is critical that nothing here is missed as that would be a critical failure:
+
+*Saturation
+ * Flowers: Float from 0 to 10. Subtle tube saturation (even harmonics).
+ * Dabs: Float from 0 to 10. Aggressive saturation (odd harmonics).
+ * Sensitivity: Float from -12.0 to +12.0 dB. Input gain to drive saturators.
+ * Bass Relief: Float from 0 to 100. Controls a 350 Hz shelf filter to bypass the tube engine for the low end.
+ * Transformer: Boolean (On/Off). Adds base harmonic distortion. Note: Even when Flowers/Dabs are 0, the base saturator applies subtle compression/distortion unless Transformer is Off.
+ * Tube Type: Choice ("Type A", "Type B"). Changes the harmonic algorithm for Dabs.
+ * Tone Pre: Float from -9.0 to +9.0 dB. 10 kHz shelf EQ before the tube engine.
+ * Tone Post: Float from -9.0 to +9.0 dB. 10 kHz shelf EQ after the tube engine.
+ * Wet/Dry Mix: Float from 0.0 to 100.0%.
+ * Out: Float from -18.0 to +18.0 dB. Final output gain.
+
+*Chorus
+ * Delay: Float from 0.0 to 30.0 ms. Sets the minimum delay between the chorus voices.
+ * Depth: Float. Controls the chorus delay modulation. The delay will sweep between Delay and Delay + Depth. If zero, the modulation is constant.
+ * Stereo: Float from 0 to 360 degrees. Controls the widening of the stereo image. At 0, left and right LFOs are in perfect sync. At 180, left and right are 100% out of phase.
+ * LFO 1 Freq / LFO 2 Freq / LFO 3 Freq: Floats. Sets the modulation speed for three independent LFOs.
+ * LFO 1 Wave / LFO 2 Wave / LFO 3 Wave: Choices. Sets the waveform of the LFOs (e.g., Sine, Triangle, Multi-sine). The "Multi-sine" option must be mathematically defined as a mix of a normal sine wave and one running at three times its speed.
+ * Cross Type: Choice (Process HP / Process LP). Defines whether the plugin works on the lower or higher frequency part of the signal. "Process HP" processes only high frequencies, "Process LP" processes only low frequencies.
+ * Cross Cutoff: Float. The cutoff frequency of the crossover filter.
+
+*Compressor
+ *Threshold: Float from 0.0 to -60.0 dB. Sets the level at which compression kicks in.
+ *Ratio: Float from 0.4 to 30.0 (representing 0.4:1 to 30:1). Controls the amount of gain reduction. Note that values below 1:1 should act as upward expansion.
+ *Gain: Float from -30.0 to +30.0 dB. Make-up gain applied after compression.
+ *Attack: Float from 0.0 to 400.0 ms. Time to reach full compression.
+ *Release: Float from 1.0 to 4000.0 ms. Time to stop acting after the level falls below threshold.
+ *Type (Knee): Choice (Hard, Medium, Vintage, Soft, Hard/R, Medium/R, Vintage/R, Soft/R).
+ *Hard means compression takes place immediately at the threshold.
+ *Soft/Medium/Vintage dictate different curve widths and program-dependent behaviors around the threshold. Ensure the math translates these into an actual knee width (in dB) for the gain computer.
+
+*Delay
+ *Input: Wet In (Input level scaling).
+ *Delay Time: Time (1ms to 1000ms, or musical subdivisions if synced), Tempo Sync (Bool), Keep Pitch (Bool - determines if delay line reads use interpolation that causes pitch-shifting vs crossfading), Smoothing (slew rate for time  changes), Offset/Pan (stereo offset percentage).
+ *Delay Model: Choice (Mono, Stereo, Ping-Pong, Off), Stereo Spread (0.0 to 1.0).
+ *Feedback: Level (0.0 to >1.0 for self-oscillation), Filter Type (LP, HP, BP, Off), Cutoff, Resonance.
+ *Lo-Fi (in feedback loop): Samp Rate (downsampling target in Hz), Bits (bitcrushing depth).
+ *Modulation: Rate (0-20 Hz sine wave LFO), Time Mod (amount applied to Delay Time), Cutoff Mod (amount applied to Feedback Filter Cutoff).
+ *Diffusion: Level (amount of smearing), Spread (time spread of the smear).
+ *Feedback Distortion: Type (Limit, Saturation), Knee (soft vs hard), Symmetry (symmetrical vs asymmetrical clipping), Level (threshold for distortion).
+ *Output: Tone (Bipolar: negative is LP, positive is HP), Wet Out, Dry Out.
+
+*Flanger
+ *Delay: Float from 0.0 to 20.0 ms. Sets the minimum delay time.
+ *Depth: Float. Controls the modulation depth. The delay time sweeps between Delay and Delay + Depth.
+ *Rate: Float from 0.0 to 5.0 Hz. The speed of the LFO.
+ *Phase: Float from 0 to 360 degrees. Controls the stereo offset of the LFOs (0 = perfect sync, 180 = completely out of phase where Left max equals Right min).
+ *Damp: Float from 0.0 to 1.0. A low-pass filter to attenuate high frequencies in the processed output (0 = no filtering, 1 = full filtering/no output).
+ *Shape: Float from 0.0 to 1.0. Smoothly transitions the LFO waveform from Sine (0.0) to Triangle (1.0).
+ *Feed (Feedback): Float from 0.0 to 100.0%.
+ *Invert Feedback: Boolean. Inverts the phase of the signal fed back into the delay line.
+ *Invert Wet: Boolean. Inverts the phase of the processed wet signal before it reaches the output mix.
+ *Dry / Wet / Cross Levels: Floats from -100.0 dB (or -inf) to 0.0 dB. Controls the final output mix.
+
+*Overdrive
+ *Pre Band: Float. Controls the bandwidth/amount of the initial band-pass filter.
+ *Color: Float (Frequency in Hz). Sets the center/cutoff frequency for the Pre Band filter.
+ *Pre Amp: Float. The main drive/gain applied to the audio to push it into distortion.
+ *x100: Boolean. A switch that multiplies the Pre Amp drive level by 100 for extreme distortion.
+ *Post Filter: Float (Frequency in Hz). Sets the cutoff frequency for the post-distortion 2-pole low-pass filter.
+ *Post Gain: Float (in dB or linear multiplier). Acts as a final gain reducer to compensate for the massive volume boost introduced by the Pre Amp stage.
+
+*Phaser
+ *Frequency Range: Boolean or Enum (Small / Large). Dictates the maximum speed of the LFO.
+ *Sweep Frequency: Float. The speed of the LFO. If Frequency Range is Small, this ranges from 0.0 to 2.0 Hz. If Large, it ranges from 0.0 to 10.0 Hz.
+ *Min Depth / Max Depth: Floats (in Hz). These define the lower and upper frequency boundaries that the LFO will sweep the all-pass filters between.
+ *Stereo: Float from 0 to 360 degrees. Controls the phase offset between the Left and Right channel LFOs (0 = perfect sync, 180 = complete opposite).
+ *Stages: Integer from 1 to 24 (The documentation states up to 23, but you can round to 24 for standard memory allocation). This dynamically sets how many all-pass filters are active in the chain.
+ *Feedback: Float from 0.0 to 1.0 (or >1.0 if safe clipping is implemented). How much of the processed signal is sent back to the input of the all-pass cascade.
+ *Dry/Wet: Float from 0.0 to 100.0%. Mixes the original signal with the phase-shifted signal.
+ *Out-Gain: Float (in dB). A final gain stage to boost the output level.
+
+*Reverb
+ *Processing Mode: Enum (Stereo, Mid Only, Side Only). Determines how the input is encoded before entering the reverb engine.
+ *Low Cut (L.CUT): Float (Hz). High-pass filter cutoff for the input signal.
+ *High Cut (H.CUT): Float (Hz). Low-pass filter cutoff for the input signal.
+ *Predelay: Float (ms). Time before the first reflection.
+ *Tempo Sync: Boolean. If true, Predelay snaps to musical subdivisions based on host BPM.
+ *Room Size (SIZE): Float. Scales the internal delay line lengths of the reverb network.
+ *Diffusion (DIFF): Float. Controls the density of the reflections (all-pass filter coefficients).
+ *Decay (DEC): Float (seconds). The RT60 time (time to decay 60dB) for the main reverb tail.
+ *Bass Multiplier (BASS): Float. A multiplier for the decay time of frequencies below the Crossover point.
+ *Bass Crossover (CROSS): Float (Hz). The frequency split point for the Bass Multiplier.
+ *High Damping (DAMP): Float (Hz or coefficient). Rate at which high frequencies decay in the reverb tail. Include a "Bypass" boolean for this.
+ *Early Reflection (ER): Float (dB or %). Level of the initial reflections.
+ *Stereo Separation (SEP): Float (0% to 200%). Width of the wet signal (0 = mono, 100 = original width, >100 = widened).
+ *Dry / Wet Levels: Floats (dB or %).
+
+*Transient Shaper
+ *Split Frequency: Float from 5.0 Hz to 1000.0 Hz (Default 260 Hz). The crossover point separating the unprocessed Low band from the processed High band.
+ *Split Balance: Float from -100.0% to 100.0%. Controls the mix between the bands. 0% is normal summing. -100% outputs only the unprocessed Low band. 100% outputs only the processed High band.
+ *Attack: Float from -100.0% (cut) to +100.0% (boost). Adjusts the gain of the detected transient peaks.
+ *Attack Shape: Enum/Choice (Sharp, Medium, Soft). Modifies the window size/time constants of the attack envelope detector (Sharp = fast/narrow, Soft = slow/wide).
+ *Release (Sustain): Float from -100.0% (cut) to +100.0% (boost). Adjusts the gain of the decay portion of the signal.
+ *Release Shape: Enum/Choice (Sharp, Medium, Soft). Modifies the window size/time constants of the release envelope detector.
+ *Drive: Float. Applies analog-style saturation (rounding/distorting peaks) to the summed signal.
+ *Gain: Float (in dB). Overall output level compensation.
+
+*EQ 
+ *The EQ seems to have been untouched as well even though there was a whole doc for its new design. Please see parameters shown below:
+1. Band Core Parameters (Per-Band)
+Filter Types: OFF, Low Pass, Band Pass, High Pass, Notch, Low Shelf, Peaking (default), High Shelf.
+Filter Slopes / Order: * Steep: 4 (-24 dB/Oct), 6 (-36 dB/Oct), 8 (-48 dB/Oct). Maintains ~ -3 dB at the cutoff.
+Center: 2 (-12 dB/Oct).
+Gentle: 4 (-24 dB/Oct), 6 (-36 dB/Oct), 8 (-48 dB/Oct). Has a more gradual acceleration into the main slope (-6 dB to -12 dB at cutoff).
+Center Frequency (FREQ): The target frequency for the band.
+Bandwidth (BW): The Q/width of the band.
+Level (Gain): Note that Low Pass, Band Pass, High Pass, and Notch filters must have their gain parameter/fader disabled as they do not use it.
+Key: Ability to snap or center the frequency band to the fundamental frequency of a specific musical note.
+Mute/Solo: Per-band toggle.
+
+2. Global Audio & DSP Modes
+Main Level: Global output gain.
+Phase Modes:
+Standard (IIR): Minimum phase mode. Fast parameter changes but alters phase.
+LIN (Linear Phase): Uses FFT filters. Introduces latency but prevents phase rotation. Includes a "Precision" setting (Lowest to Highest) where higher precision allows steeper slopes at the cost of more latency.
+HQ (High Quality) Modes:
+Standard: Disabled (Normal standard IIR).
+HQ+ (Plus): Decramped consistent bandwidth IIR filters (mimicking ideal analog without digital shallow bandwidth artifacts, no oversampling).
+HQL (Legacy): Polyphase downsampling filter (no latency, but phase rotation above 15 kHz and potential inter-sample peaks).
+HQE (Enhanced): FIR downsampling filter (1ms latency, accurate peak levels, no additional phase rotation).
+Parameter Smoothing:
+Minimum Phase Mod Speed: Controls max modulation slew-rate for IIR filters to prevent crackling on fast movements.
+Linear Phase Mod Speed: Choose between Normal, Fast, Faster, or Ultra (higher uses more CPU).
+
+3. Monitoring & Analyzers
+Monitor Input Source: MID (L+R/2), SIDE (L-R), Left Channel, Right Channel.
+Monitor Stage: Input (Pre-EQ), Output (Post-EQ), or Disabled.
+Frequency Histogram:
+Displays peaks from 20 Hz to 20 kHz.
+Range: -60 dB, -90 dB, or -120 dB.
+Pivot Slope: 1.5, 3, 4.5 (default), or 6 dB/octave (rotates spectrum around 1 kHz for visual emphasis/de-emphasis).
+Frequency Precision: Controls the number of bands used (higher = more visual latency).
+Average Mode: OFF (reacts to instantaneous peaks), ON/RMS (shows average peaks over a time window).
+Time Smoothing: Controls fall speed (if Average is OFF) or time window length (if Average is ON).
+Heatmap:
+Top-down intensity view of the frequencies.
+High Precision: Toggles precise vertical lines vs. an alternative algorithm that blurs lows but makes center frequencies easier to spot.
+Enhanced Frequency: Thinner lines.
+Position: Top, Bottom, or Full (over the histogram).
+Phase Rotation Display: View the phase rotation caused by IIR filters (+/- 180 degrees scale, aligned with +/- 18 dB labels).
+
+4. Interactive UI & Workflow Features
+Band Tokens (Nodes):
+Left-click drag: Adjust Frequency (X-axis) and Gain (Y-axis).
+Mouse-wheel (or Shift+Drag horizontal): Adjust Bandwidth.
+Alt+Click: Reset band.
+Ctrl+Click: Fine adjustment.
+Right-click menu: Filter Type, Order/Slope, and Key.
+Toggle Visibility: Turn tokens ON/OFF.
+Band Soloing Options:
+"Band solo on shift": Holding Shift and clicking a token momentarily solos the band. Includes an "Inherit bandwidth" option (changes made while soloed apply to the active band upon release).
+Solo Modes:
+Bandpass: Uses a Steep 8 Bandpass filter to solo the token.
+Adaptive: Uses dynamic filters based on the band being soloed (e.g., LP uses HP to solo what's being removed, Peaking uses Bandpass to solo what's being adjusted).
+State Management:
+Compare: Save current settings to a spare bank, swap between main and spare banks.
+Lock Spare State: Prevents the temporary save state from being overwritten.
+
+
+
+

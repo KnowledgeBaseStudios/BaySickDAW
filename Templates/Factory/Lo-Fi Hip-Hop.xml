@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="Lo-Fi Hip-Hop" version="1">
+  <Kit path="Lo-Fi Hip-Hop/Lo-Fi Hip-Hop Full.xml"/>
+  <Layer slot="0" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/Lo-Fi Keys.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/Vintage Rhodes.xml" locked="1"/>
+  <Layer slot="2" engine="Harmless" presetPath="Harmless/Pads &amp; Atmospheres/Lo-Fi Tape Pad.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickSynth" presetPath="BaySickSynth/Pads &amp; Atmospheres/Lo-Fi Tape Pad.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSynth" presetPath="BaySickSynth/Plucks &amp; Mallets/Marimba Pluck.xml" locked="1"/>
+  <Layer slot="5" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Dusty EP.xml" locked="1"/>
+  <Layer slot="6" engine="BaySickSynth" presetPath="BaySickSynth/Brass &amp; Strings/Lo-Fi Brass.xml" locked="1"/>
+  <Layer slot="7" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Soulful Pad.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickBass" presetPath="BaySickBass/Vintage Analog/Dusty Bass.xml" locked="1"/>
+  <Bass slot="1" engine="BaySickBass" presetPath="BaySickBass/Sub Bass &amp; 808s/Sub Bass.xml" locked="1"/>
+  <Bass slot="2" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Hip-Hop Sub.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Upright Jazz Sub.xml" locked="1"/>
+</BaySickTemplate>

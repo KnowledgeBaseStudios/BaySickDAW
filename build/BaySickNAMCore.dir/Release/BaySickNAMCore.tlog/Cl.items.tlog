@@ -1,0 +1,12 @@
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\activations.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\activations.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\container.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\container.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\conv1d.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\conv1d.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\convnet.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\convnet.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\dsp.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\dsp.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\get_dsp.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\get_dsp.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\lstm.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\lstm.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\ring_buffer.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\ring_buffer.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\util.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\util.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\wavenet\model.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\model.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\wavenet\a2_fast.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\a2_fast.obj
+C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM\wavenet\slimmable.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickNAMCore.dir\Release\slimmable.obj

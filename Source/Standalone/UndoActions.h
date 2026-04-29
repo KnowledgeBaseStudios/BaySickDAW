@@ -1,0 +1,237 @@
+#pragma once
+#include <JuceHeader.h>
+#include <array>
+#include <deque>
+#include <functional>
+#include <vector>
+#include "../PatternManager.h"
+#include "../EffectRack.h"
+
+// ── UndoContext ────────────────────────────────────────────────────────────────
+// Lightweight token passed to any component that needs to perform undoable
+// actions. StandaloneEditor owns one instance; all pages hold a copy by value.
+// 'manager' gives canUndo/canRedo; 'perform' routes through the central
+// history-label tracker and then calls UndoManager::perform().
+// ─────────────────────────────────────────────────────────────────────────────
+struct UndoContext
+{
+    juce::UndoManager* manager { nullptr };
+
+    // Perform an undoable action. Takes ownership. Also updates the global
+    // history-label list maintained by StandaloneEditor.
+    std::function<bool(juce::UndoableAction*, const juce::String& label)> perform;
+
+    // Undo / redo — ALWAYS use these instead of calling manager->undo/redo() directly.
+    // These route through StandaloneEditor::globalUndo/Redo() so mHistoryCursor stays
+    // in sync and the history window refreshes correctly.
+    std::function<void()> undo;
+    std::function<void()> redo;
+
+    // Open the global undo history window (optional — wire where available).
+    std::function<void()> showHistory;
+
+    bool isValid() const { return manager != nullptr && (bool)perform; }
+};
+
+// ── PianoRollEditAction ───────────────────────────────────────────────────────
+// Full before/after snapshot of piano roll notes for one edit operation.
+// ─────────────────────────────────────────────────────────────────────────────
+class PianoRollEditAction : public juce::UndoableAction
+{
+public:
+    using NoteVec = std::vector<PianoNote>;
+    using ApplyFn = std::function<void(const NoteVec&)>;
+
+    PianoRollEditAction(juce::String label,
+                        NoteVec before, NoteVec after,
+                        ApplyFn applyFn)
+        : mLabel(std::move(label))
+        , mBefore(std::move(before))
+        , mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    // The change is already applied before commitEdit() calls UndoManager::perform(),
+    // so skip the first perform() call (redo still works on subsequent calls).
+    bool perform() override
+    {
+        if (mFirstPerform) { mFirstPerform = false; return true; }
+        mApply(mAfter);
+        return true;
+    }
+    bool undo() override { mApply(mBefore); return true; }
+
+    int getSizeInUnits() override
+    {
+        return (int)((mBefore.size() + mAfter.size()) * sizeof(PianoNote));
+    }
+
+private:
+    juce::String mLabel;
+    NoteVec      mBefore, mAfter;
+    ApplyFn      mApply;
+    bool         mFirstPerform { true };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PianoRollEditAction)
+};
+
+// ── ArrangementEditAction ─────────────────────────────────────────────────────
+// Full before/after snapshot of arrangement blocks + row names.
+// ─────────────────────────────────────────────────────────────────────────────
+class ArrangementEditAction : public juce::UndoableAction
+{
+public:
+    struct Snapshot
+    {
+        std::vector<ArrangementBlock> blocks;
+        std::vector<juce::String>     rowNames;  // kNumRows entries
+    };
+    using ApplyFn = std::function<void(const Snapshot&)>;
+
+    ArrangementEditAction(juce::String label,
+                          Snapshot before, Snapshot after,
+                          ApplyFn applyFn)
+        : mLabel(std::move(label))
+        , mBefore(std::move(before))
+        , mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    bool perform() override { mApply(mAfter);  return true; }
+    bool undo()    override { mApply(mBefore); return true; }
+
+private:
+    juce::String mLabel;
+    Snapshot     mBefore, mAfter;
+    ApplyFn      mApply;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ArrangementEditAction)
+};
+
+// ── MixerStateAction ──────────────────────────────────────────────────────────
+// Full before/after snapshot of MixerState for one fader/mute/solo change.
+// ─────────────────────────────────────────────────────────────────────────────
+class MixerStateAction : public juce::UndoableAction
+{
+public:
+    using ApplyFn = std::function<void(const MixerState&)>;
+
+    MixerStateAction(juce::String label,
+                     MixerState before, MixerState after,
+                     ApplyFn applyFn)
+        : mLabel(std::move(label))
+        , mBefore(std::move(before))
+        , mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    bool perform() override { mApply(mAfter);  return true; }
+    bool undo()    override { mApply(mBefore); return true; }
+
+private:
+    juce::String mLabel;
+    MixerState   mBefore, mAfter;
+    ApplyFn      mApply;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MixerStateAction)
+};
+
+// ── FloatParamAction ─────────────────────────────────────────────────────────
+// Generic single-parameter undo for any float value (knob, pan, etc.).
+// The apply function is responsible for updating both the UI control and the DSP.
+// ─────────────────────────────────────────────────────────────────────────────
+class FloatParamAction : public juce::UndoableAction
+{
+public:
+    using ApplyFn = std::function<void(float)>;
+
+    FloatParamAction(juce::String label, float before, float after, ApplyFn applyFn)
+        : mLabel(std::move(label))
+        , mBefore(before)
+        , mAfter(after)
+        , mApply(std::move(applyFn))
+    {}
+
+    bool perform() override { mApply(mAfter);  return true; }
+    bool undo()    override { mApply(mBefore); return true; }
+
+private:
+    juce::String mLabel;
+    float        mBefore, mAfter;
+    ApplyFn      mApply;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FloatParamAction)
+};
+
+// ── EffectRackAction ──────────────────────────────────────────────────────────
+// Before/after snapshot of the 6 rack slot types for load/remove/swap.
+// ─────────────────────────────────────────────────────────────────────────────
+class EffectRackAction : public juce::UndoableAction
+{
+public:
+    using SlotTypes = std::array<EffectType, EffectRack::kNumSlots>;
+    using ApplyFn   = std::function<void(const SlotTypes&)>;
+
+    EffectRackAction(juce::String label,
+                     SlotTypes before, SlotTypes after,
+                     ApplyFn applyFn)
+        : mLabel(std::move(label))
+        , mBefore(std::move(before))
+        , mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    // The slot change was already applied by the caller (EffectsPage) before
+    // this action was passed to UndoManager::perform(). Skip the first
+    // perform() so we don't re-apply and destroy-then-recreate every DSP
+    // (which would leave every panel's cached DSP* pointer dangling). Future
+    // perform() calls (redo) do apply the change.
+    bool perform() override
+    {
+        if (mFirstPerform) { mFirstPerform = false; return true; }
+        mApply(mAfter);
+        return true;
+    }
+    bool undo() override { mApply(mBefore); return true; }
+
+private:
+    juce::String mLabel;
+    SlotTypes    mBefore, mAfter;
+    ApplyFn      mApply;
+    bool         mFirstPerform { true };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EffectRackAction)
+};
+
+// ── AutomationLaneEditAction ──────────────────────────────────────────────────
+// Before/after snapshot of one AutomationLane (inside an ArrangementBlock).
+// Used by EventEditor for all point edits (add, move, erase, curve-type change).
+// ─────────────────────────────────────────────────────────────────────────────
+class AutomationLaneEditAction : public juce::UndoableAction
+{
+public:
+    using ApplyFn = std::function<void(const AutomationLane&)>;
+
+    AutomationLaneEditAction(juce::String label,
+                             AutomationLane before, AutomationLane after,
+                             ApplyFn applyFn)
+        : mLabel(std::move(label))
+        , mBefore(std::move(before))
+        , mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    bool perform() override { mApply(mAfter);  return true; }
+    bool undo()    override { mApply(mBefore); return true; }
+    int  getSizeInUnits() override
+    {
+        return (int)((mBefore.points.size() + mAfter.points.size()) * sizeof(ControlPoint));
+    }
+
+private:
+    juce::String   mLabel;
+    AutomationLane mBefore, mAfter;
+    ApplyFn        mApply;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AutomationLaneEditAction)
+};

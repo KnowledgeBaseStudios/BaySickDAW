@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Synth-Pop Basic" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909-Style Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/Simmons Group/Gated 80s Snare Long.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/Simmons Group/Simmons Snare.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/Synthesized Clap.xml" locked="1"/>
+</BaySickKit>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="TR-808 Full" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/Long 808 Trap Kick.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Snare.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Handclap.xml" locked="1"/>
+  <Drum slot="4" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Rimshot.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Closed Hat.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Open Hat.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Tom Lo.xml" locked="1"/>
+  <Drum slot="8" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Conga Lo.xml" locked="1"/>
+  <Drum slot="9" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Conga Mid.xml" locked="1"/>
+  <Drum slot="10" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Conga Hi.xml" locked="1"/>
+  <Drum slot="11" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Tom Mid.xml" locked="1"/>
+  <Drum slot="12" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Tom Hi.xml" locked="1"/>
+  <Drum slot="13" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Cowbell.xml" locked="1"/>
+  <Drum slot="14" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Claves.xml" locked="1"/>
+  <Drum slot="15" engine="BaySickSynth" presetPath="BaySickDrums/808 Group/808 Maraca.xml" locked="1"/>
+</BaySickKit>

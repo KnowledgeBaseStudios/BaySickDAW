@@ -1,0 +1,727 @@
+#include "VibePlayerEditor.h"
+#include "../SampleLibrary.h"
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+static constexpr int   kHdrH         = 36;
+static constexpr int   kLblH         = 13;   // knob label height
+static constexpr int   kPad          = 6;
+static constexpr int   kKnobSz       = 55;   // knob diameter
+static constexpr float kArrowSz      = 10.f; // routing arrow size (Box 3)
+// 2026-04-21: 6-box grid layout constants
+static constexpr int   kOuterMargin  = 10;
+static constexpr int   kBoxGap       = 8;
+static constexpr int   kBoxTitleH    = 22;
+static constexpr int   kInnerPad     = 6;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+void VibePlayerEditor::initKnob (juce::Slider& s, const juce::String& tooltip)
+{
+    s.setSliderStyle      (juce::Slider::RotaryVerticalDrag);
+    s.setTextBoxStyle     (juce::Slider::NoTextBox, false, 0, 0);
+    // 2026-04-21: show current value in a popup while hovering/dragging.
+    s.setPopupDisplayEnabled (true, true, nullptr);
+    if (tooltip.isNotEmpty()) s.setTooltip (tooltip);
+}
+
+void VibePlayerEditor::initLabel (juce::Label& l, const juce::String& text)
+{
+    l.setText              (text, juce::dontSendNotification);
+    l.setJustificationType (juce::Justification::centred);
+    l.setFont              (juce::Font (10.0f));
+    l.setColour            (juce::Label::textColourId, juce::Colour (0xFFB0B0B0));
+}
+
+// ── Constructor ───────────────────────────────────────────────────────────────
+VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
+    : juce::AudioProcessorEditor (p), mProc (p)
+{
+    setLookAndFeel (&mLAF);
+    // 2026-04-21: 6-box grid layout — 600x560 editor. Drums editor sizes its
+    //   embedded child via setBounds; dims here only matter in standalone.
+    setSize (600, 560);
+
+    auto& avts = p.apvts;
+    auto  pid  = [&] (const char* s) { return p.pid (s); };
+
+    // ── Header ────────────────────────────────────────────────────────────────
+    mTitleLbl.setText ("BAYSICKPLAYER", juce::dontSendNotification);
+    mTitleLbl.setFont (juce::Font (16.f, juce::Font::bold));
+    mTitleLbl.setColour (juce::Label::textColourId, juce::Colour (0xFFE0E0E0));
+    addAndMakeVisible (mTitleLbl);
+
+    mPresetBtn.onClick = [this] { showPresetMenu(); };
+    addAndMakeVisible (mPresetBtn);
+
+    mHelpBtn.onClick = [this]
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+            "BaySickPlayer",
+            "Load a sample folder or SFZ via Preset menu.\n"
+            "MIDI input triggers sample playback.\n"
+            "A/B/C/D select articulation layers.");
+    };
+    addAndMakeVisible (mHelpBtn);
+
+    // ── Box titles ────────────────────────────────────────────────────────────
+    const char* kBoxTitles[6] = {
+        "SAMPLE ENGINE", "PITCH & VOICING", "DYNAMICS",
+        "AMP ENVELOPE",  "LFO",             "OUTPUT"
+    };
+    for (int i = 0; i < 6; ++i)
+    {
+        mBoxHdr[i].setText (kBoxTitles[i], juce::dontSendNotification);
+        mBoxHdr[i].setJustificationType (juce::Justification::centred);
+        mBoxHdr[i].setFont (juce::Font (11.f, juce::Font::bold));
+        mBoxHdr[i].setColour (juce::Label::textColourId, juce::Colour (0xFFCCCCCC));
+        addAndMakeVisible (mBoxHdr[i]);
+    }
+
+    // ── Knob helper: apply ModulationLAF, tooltip, popup value on hover/drag ──
+    auto initModKnob = [&] (juce::Slider& s, const char* tooltip)
+    {
+        s.setSliderStyle  (juce::Slider::RotaryVerticalDrag);
+        s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        s.setPopupDisplayEnabled (true, true, nullptr);
+        s.setLookAndFeel  (&ModulationLAF::get());
+        if (tooltip && *tooltip) s.setTooltip (tooltip);
+    };
+
+    // ── Box 1: Sample Engine (2 knobs + 2 toggles) ────────────────────────────
+    initModKnob (mSampleStartKnob, "Sample start offset (0-1)");
+    initModKnob (mStretchKnob,     "Stretch / playback speed (0.5-2.0)");
+    initLabel   (mSampleStartLbl,  "SMPL START");
+    initLabel   (mStretchLbl,      "STRETCH");
+    for (auto* s : { &mSampleStartKnob, &mStretchKnob }) addAndMakeVisible (*s);
+    for (auto* l : { &mSampleStartLbl,  &mStretchLbl  }) addAndMakeVisible (*l);
+    mReverseTog.setupOnOff ("REVERSE", "Play samples in reverse");
+    mCutSelfTog.setupOnOff ("CUT SELF", "Kill previous notes when a new note starts");
+    // Match the other VibePlayer labels (0xFFB0B0B0 per initLabel).
+    mReverseTog.setLabelColour (juce::Colour (0xFFB0B0B0));
+    mCutSelfTog.setLabelColour (juce::Colour (0xFFB0B0B0));
+    addAndMakeVisible (mReverseTog);
+    addAndMakeVisible (mCutSelfTog);
+
+    // ── Box 2: Pitch & Voicing (5 knobs + 1 chickenhead) ─────────────────────
+    initModKnob (mTuneKnob,          "Tune (semitones)");
+    initModKnob (mVoiceCapKnob,      "Max simultaneous voices (1-16)");
+    initModKnob (mUnisonVoicesKnob,  "Unison voice count (1-8)");
+    initModKnob (mDetuneKnob,        "Detune (cents)");
+    initModKnob (mUnisonSpreadKnob,  "Unison detune spread (cents)");
+    initLabel   (mTuneLbl,           "TUNE");
+    initLabel   (mVoiceCapLbl,       "VOICE CAP");
+    initLabel   (mUnisonVoicesLbl,   "UNISON");
+    initLabel   (mDetuneLbl,         "DETUNE");
+    initLabel   (mUnisonSpreadLbl,   "SPREAD");
+    for (auto* s : { &mTuneKnob, &mVoiceCapKnob, &mUnisonVoicesKnob,
+                     &mDetuneKnob, &mUnisonSpreadKnob })
+        addAndMakeVisible (*s);
+    for (auto* l : { &mTuneLbl, &mVoiceCapLbl, &mUnisonVoicesLbl,
+                     &mDetuneLbl, &mUnisonSpreadLbl })
+        addAndMakeVisible (*l);
+    mDetuneModeSel.setOptions ({
+        { "S", "Simple: all unison voices get the same detune" },
+        { "R", "Random: each voice gets a random detune value" },
+        { "P", "Pair: voices spread symmetrically across +/- detune" }
+    });
+    mDetuneModeSel.setBodyTooltip ("Detune mode");
+    mDetuneModeSel.setDefaultLabelColour (juce::Colours::white);
+    addAndMakeVisible (mDetuneModeSel);
+    initLabel   (mDetuneModeLbl, "DET MODE");
+    addAndMakeVisible (mDetuneModeLbl);
+
+    // ── Box 3: Dynamics (6 knobs: Sensitivity, VEL>MASTER, VEL>MUFFLE pair,
+    //   VEL>HARDNESS pair) ──────────────────────────────────────────────────────
+    initModKnob (mSensKnob,      "Sensitivity (velocity curve)");
+    initModKnob (mVelVolKnob,    "Velocity -> Master Volume routing amount");
+    initModKnob (mVelMuffleKnob, "Velocity -> Muffle routing amount");
+    initModKnob (mMuffleKnob,    "Muffle (LP cutoff reduction target)");
+    initModKnob (mVelHardKnob,   "Velocity -> Hardness routing amount");
+    initModKnob (mHardnessKnob,  "Hardness (filter resonance target)");
+    initLabel   (mSensLbl,       "SENS");
+    initLabel   (mVelVolLbl,     "VEL>MASTER");
+    initLabel   (mVelMuffleLbl,  "VEL>MUFFLE");
+    initLabel   (mMuffleLbl,     "MUFFLE");
+    initLabel   (mVelHardLbl,    "VEL>HARD");
+    initLabel   (mHardnessLbl,   "HARDNESS");
+    for (auto* s : { &mSensKnob,     &mVelVolKnob,   &mVelMuffleKnob,
+                     &mMuffleKnob,   &mVelHardKnob,  &mHardnessKnob })
+        addAndMakeVisible (*s);
+    for (auto* l : { &mSensLbl,      &mVelVolLbl,    &mVelMuffleLbl,
+                     &mMuffleLbl,    &mVelHardLbl,   &mHardnessLbl  })
+        addAndMakeVisible (*l);
+
+    // ── Box 4: Amp Envelope (ADSR) ───────────────────────────────────────────
+    initModKnob (mAttackKnob,   "Attack time (seconds)");
+    initModKnob (mDecayKnob,    "Decay time");
+    initModKnob (mSustainKnob,  "Sustain level (0-1)");
+    initModKnob (mReleaseKnob,  "Release time");
+    initLabel   (mAttackLbl,    "ATTACK");
+    initLabel   (mDecayLbl,     "DECAY");
+    initLabel   (mSustainLbl,   "SUSTAIN");
+    initLabel   (mReleaseLbl,   "RELEASE");
+    for (auto* s : { &mAttackKnob, &mDecayKnob, &mSustainKnob, &mReleaseKnob })
+        addAndMakeVisible (*s);
+    for (auto* l : { &mAttackLbl,  &mDecayLbl,  &mSustainLbl,  &mReleaseLbl  })
+        addAndMakeVisible (*l);
+
+    // ── Box 5: LFO ───────────────────────────────────────────────────────────
+    initModKnob (mLfoRateKnob, "LFO rate (Hz)");
+    initModKnob (mLfoAmtKnob,  "LFO / vibrato amount");
+    initLabel   (mLfoRateLbl,  "LFO RATE");
+    initLabel   (mLfoAmtLbl,   "LFO");
+    for (auto* s : { &mLfoRateKnob, &mLfoAmtKnob }) addAndMakeVisible (*s);
+    for (auto* l : { &mLfoRateLbl,  &mLfoAmtLbl  }) addAndMakeVisible (*l);
+
+    // ── Box 6: Output (5 knobs — Master Volume uses white volume filmstrip) ──
+    initModKnob (mPanKnob,    "Pan (L/R)");
+    initModKnob (mStereoKnob, "Stereo width");
+    initModKnob (mTrebleKnob, "Treble shelf (cut/boost at 8kHz)");
+    initModKnob (mDriveKnob,  "Overdrive amount");
+    initLabel   (mPanLbl,     "PAN");
+    initLabel   (mStereoLbl,  "STEREO");
+    initLabel   (mTrebleLbl,  "TREBLE");
+    initLabel   (mDriveLbl,   "OVERDRIVE");
+    for (auto* s : { &mPanKnob, &mStereoKnob, &mTrebleKnob, &mDriveKnob })
+        addAndMakeVisible (*s);
+    for (auto* l : { &mPanLbl,  &mStereoLbl,  &mTrebleLbl,  &mDriveLbl  })
+        addAndMakeVisible (*l);
+    // Master Volume knob: VibeLAF with "volumeKnob=white" property -> Volume White filmstrip.
+    mVolumeKnob.setSliderStyle     (juce::Slider::RotaryVerticalDrag);
+    mVolumeKnob.setTextBoxStyle    (juce::Slider::NoTextBox, false, 0, 0);
+    mVolumeKnob.setPopupDisplayEnabled (true, true, nullptr);
+    mVolumeKnob.setLookAndFeel     (&VibeLAF::get());
+    mVolumeKnob.getProperties().set ("volumeKnob", "white");
+    mVolumeKnob.setTooltip         ("Master volume (overall engine gain)");
+    initLabel                       (mVolumeLbl, "MASTER VOL");
+    addAndMakeVisible              (mVolumeKnob);
+    addAndMakeVisible              (mVolumeLbl);
+
+    // ── componentID pass (2026-04-21) ─────────────────────────────────────────
+    //   Each attached slider gets its APVTS paramID as its componentID so that
+    //   GlobalAutoRightClick + VKnobAutomation resolve the right-click Automate
+    //   and Type-in-value menus. Pattern mirrors Harmless (see HarmlessEditor:387).
+    auto wireID = [&p] (juce::Slider& s, const char* paramName)
+    {
+        s.setComponentID (p.pid (paramName));
+    };
+    wireID (mSampleStartKnob,   "sampleStart");
+    wireID (mStretchKnob,       "stretch");
+    wireID (mTuneKnob,          "tune");
+    wireID (mVoiceCapKnob,      "voiceCap");
+    wireID (mUnisonVoicesKnob,  "unisonVoices");
+    wireID (mDetuneKnob,        "detune");
+    wireID (mUnisonSpreadKnob,  "unisonSpread");
+    wireID (mSensKnob,          "sensitivity");
+    wireID (mVelVolKnob,        "velToVolume");
+    wireID (mVelMuffleKnob,     "velToMuffle");
+    wireID (mMuffleKnob,        "muffle");
+    wireID (mVelHardKnob,       "velToHardness");
+    wireID (mHardnessKnob,      "hardness");
+    wireID (mAttackKnob,        "attack");
+    wireID (mDecayKnob,         "decay");
+    wireID (mSustainKnob,       "sustain");
+    wireID (mReleaseKnob,       "release");
+    wireID (mLfoRateKnob,       "lfo_rate");
+    wireID (mLfoAmtKnob,        "lfoAmt");
+    wireID (mPanKnob,           "pan");
+    wireID (mStereoKnob,        "stereo");
+    wireID (mVolumeKnob,        "volume");
+    wireID (mTrebleKnob,        "treble");
+    wireID (mDriveKnob,         "drive");
+
+    // D-CC2: same componentID pattern for non-slider attached components so
+    // right-click Automate works on buttons + the detune-mode selector too.
+    mReverseTog .btn().setComponentID (p.pid ("reverse"));
+    mCutSelfTog .btn().setComponentID (p.pid ("cutSelf"));
+    mDetuneModeSel    .setComponentID (p.pid ("detuneMode"));
+
+    // ── APVTS Attachments ─────────────────────────────────────────────────────
+    mSampleStartAtt   = std::make_unique<SliderAtt> (avts, pid ("sampleStart"),  mSampleStartKnob);
+    mStretchAtt       = std::make_unique<SliderAtt> (avts, pid ("stretch"),      mStretchKnob);
+    mReverseAtt       = std::make_unique<ButtonAtt> (avts, pid ("reverse"),      mReverseTog.btn());
+    mCutSelfAtt       = std::make_unique<ButtonAtt> (avts, pid ("cutSelf"),      mCutSelfTog.btn());
+
+    mTuneAtt          = std::make_unique<SliderAtt> (avts, pid ("tune"),         mTuneKnob);
+    mVoiceCapAtt      = std::make_unique<SliderAtt> (avts, pid ("voiceCap"),     mVoiceCapKnob);
+    mUnisonVoicesAtt  = std::make_unique<SliderAtt> (avts, pid ("unisonVoices"), mUnisonVoicesKnob);
+    mDetuneAtt        = std::make_unique<SliderAtt> (avts, pid ("detune"),       mDetuneKnob);
+    mUnisonSpreadAtt  = std::make_unique<SliderAtt> (avts, pid ("unisonSpread"), mUnisonSpreadKnob);
+
+    mSensAtt          = std::make_unique<SliderAtt> (avts, pid ("sensitivity"),  mSensKnob);
+    mVelVolAtt        = std::make_unique<SliderAtt> (avts, pid ("velToVolume"),  mVelVolKnob);
+    mVelMuffleAtt     = std::make_unique<SliderAtt> (avts, pid ("velToMuffle"),  mVelMuffleKnob);
+    mMuffleAtt        = std::make_unique<SliderAtt> (avts, pid ("muffle"),       mMuffleKnob);
+    mVelHardAtt       = std::make_unique<SliderAtt> (avts, pid ("velToHardness"),mVelHardKnob);
+    mHardnessAtt      = std::make_unique<SliderAtt> (avts, pid ("hardness"),     mHardnessKnob);
+
+    mAttackAtt        = std::make_unique<SliderAtt> (avts, pid ("attack"),       mAttackKnob);
+    mDecayAtt         = std::make_unique<SliderAtt> (avts, pid ("decay"),        mDecayKnob);
+    mSustainAtt       = std::make_unique<SliderAtt> (avts, pid ("sustain"),      mSustainKnob);
+    mReleaseAtt       = std::make_unique<SliderAtt> (avts, pid ("release"),      mReleaseKnob);
+
+    mLfoRateAtt       = std::make_unique<SliderAtt> (avts, pid ("lfo_rate"),     mLfoRateKnob);
+    mLfoAmtAtt        = std::make_unique<SliderAtt> (avts, pid ("lfoAmt"),       mLfoAmtKnob);
+
+    mPanAtt           = std::make_unique<SliderAtt> (avts, pid ("pan"),          mPanKnob);
+    mStereoAtt        = std::make_unique<SliderAtt> (avts, pid ("stereo"),       mStereoKnob);
+    mVolumeAtt        = std::make_unique<SliderAtt> (avts, pid ("volume"),       mVolumeKnob);
+    mTrebleAtt        = std::make_unique<SliderAtt> (avts, pid ("treble"),       mTrebleKnob);
+    mDriveAtt         = std::make_unique<SliderAtt> (avts, pid ("drive"),        mDriveKnob);
+
+    // ChickenHeadSelector <-> APVTS int param (manual two-way binding)
+    if (auto* p = avts.getParameter (pid ("detuneMode")))
+    {
+        mDetuneModeAtt = std::make_unique<juce::ParameterAttachment> (
+            *p,
+            [this] (float v) { mDetuneModeSel.setSelectedIndex (juce::jlimit (0, 2, (int) v),
+                                                                juce::dontSendNotification); },
+            nullptr);
+        mDetuneModeAtt->sendInitialUpdate();
+        mDetuneModeSel.onChange = [this] (int idx)
+        {
+            if (mDetuneModeAtt) mDetuneModeAtt->setValueAsCompleteGesture ((float) idx);
+        };
+    }
+
+    // Slider double-click default = current preset value (refreshed every
+    // time the APVTS state is replaced via valueTreeRedirected).
+    setSliderDoubleClickDefaultsFromApvts (*this, mProc.apvts);
+    mProc.apvts.state.addListener (this);
+}
+
+VibePlayerEditor::~VibePlayerEditor()
+{
+    mProc.apvts.state.removeListener (this);
+    setLookAndFeel (nullptr);
+}
+
+void VibePlayerEditor::valueTreeRedirected (juce::ValueTree& tree)
+{
+    if (tree != mProc.apvts.state) return;
+    setSliderDoubleClickDefaultsFromApvts (*this, mProc.apvts);
+}
+
+// ── Box-rect helper (used by both paint and resized) ─────────────────────────
+static juce::Rectangle<int> boxRectFor (int idx, int editorW, int editorH)
+{
+    const int col = idx % 3;
+    const int row = idx / 3;
+    const int boxW = (editorW - 2 * kOuterMargin - 2 * kBoxGap) / 3;
+    const int boxH = (editorH - kHdrH - 2 * kOuterMargin - kBoxGap) / 2;
+    return { kOuterMargin + col * (boxW + kBoxGap),
+             kHdrH + kOuterMargin + row * (boxH + kBoxGap),
+             boxW, boxH };
+}
+
+// ── Paint ─────────────────────────────────────────────────────────────────────
+void VibePlayerEditor::paint (juce::Graphics& g)
+{
+    // Background
+    g.fillAll (juce::Colour (0xFF1A1C1F));
+
+    // Header bar
+    g.setColour (juce::Colour (0xFF141618));
+    g.fillRect  (0, 0, getWidth(), kHdrH);
+    g.setColour (juce::Colour (0xFF333537));
+    g.drawHorizontalLine (kHdrH, 0.f, (float) getWidth());
+
+    // 6 box section titles only — no box borders, no underlines, no fill.
+    //   Kept flat matte to avoid the AA ghost-rings the rounded-rect outlines
+    //   were producing against the dark background. Section labels alone
+    //   provide the visual grouping.
+
+    // Routing arrows inside Box 2 (Dynamics): VEL>MUFFLE -> MUFFLE (row 1),
+    //   VEL>HARD -> HARDNESS (row 2).
+    auto drawArrow = [&] (int cx, int cy)
+    {
+        const float ax = (float) cx - kArrowSz * 0.5f;
+        const float ay = (float) cy - 4.f;
+        const float aw = kArrowSz;
+        const float ah = 8.f;
+        juce::Path arrow;
+        arrow.startNewSubPath (ax, ay + ah * 0.5f);
+        arrow.lineTo (ax + aw * 0.6f, ay + ah * 0.5f);
+        arrow.startNewSubPath (ax + aw * 0.35f, ay);
+        arrow.lineTo (ax + aw, ay + ah * 0.5f);
+        arrow.lineTo (ax + aw * 0.35f, ay + ah);
+        g.setColour (juce::Colour (0xFF888A90));
+        g.strokePath (arrow, juce::PathStrokeType (1.5f,
+                      juce::PathStrokeType::mitered,
+                      juce::PathStrokeType::square));
+    };
+
+    auto dynBox = boxRectFor (2, getWidth(), getHeight());
+    const int contentX = dynBox.getX() + kInnerPad;
+    const int contentY = dynBox.getY() + kBoxTitleH + kInnerPad;
+    const int contentW = dynBox.getWidth() - 2 * kInnerPad;
+    const int contentH = dynBox.getHeight() - kBoxTitleH - 2 * kInnerPad;
+    const int cellW    = contentW / 2;
+    const int cellH    = contentH / 3;
+    const int arrowX   = contentX + cellW;                       // on the col boundary
+    // Row 1 knob centre y = row top + knob height/2
+    drawArrow (arrowX, contentY + cellH     + kKnobSz / 2);
+    drawArrow (arrowX, contentY + cellH * 2 + kKnobSz / 2);
+}
+
+// ── Resized ───────────────────────────────────────────────────────────────────
+void VibePlayerEditor::resized()
+{
+    const int w = getWidth();
+
+    // ── Header ────────────────────────────────────────────────────────────────
+    mTitleLbl.setBounds  (kPad, 0,        100, kHdrH);
+    mPresetBtn.setBounds (w - 200 - kPad, 7,   110, 22);
+    mHelpBtn.setBounds   (w - 82 - kPad,  7,   24,  22);
+
+    // ── Box layout helpers ───────────────────────────────────────────────────
+    auto box = [&] (int i) { return boxRectFor (i, getWidth(), getHeight()); };
+
+    // Per-cell rectangle inside a box (2 cols x 3 rows content area)
+    auto cell = [&] (int boxIdx, int col, int row) -> juce::Rectangle<int>
+    {
+        auto b = box (boxIdx);
+        const int cx = b.getX() + kInnerPad;
+        const int cy = b.getY() + kBoxTitleH + kInnerPad;
+        const int cw = b.getWidth() - 2 * kInnerPad;
+        const int ch = b.getHeight() - kBoxTitleH - 2 * kInnerPad;
+        return { cx + col * (cw / 2), cy + row * (ch / 3),
+                 cw / 2, ch / 3 };
+    };
+
+    auto placeKnob = [&] (int boxIdx, int col, int row,
+                           juce::Slider& s, juce::Label& l)
+    {
+        auto c = cell (boxIdx, col, row);
+        const int kx = c.getX() + (c.getWidth() - kKnobSz) / 2;
+        s.setBounds (kx, c.getY(), kKnobSz, kKnobSz);
+        l.setBounds (c.getX(), c.getY() + kKnobSz, c.getWidth(), kLblH);
+    };
+
+    // Box-title labels centred across full box width
+    for (int i = 0; i < 6; ++i)
+    {
+        auto b = box (i);
+        mBoxHdr[i].setBounds (b.getX(), b.getY() + 2, b.getWidth(), kBoxTitleH - 2);
+    }
+
+    // ── Box 0: Sample Engine (2 knobs on row 0, 2 toggles spanning rows 1+2)
+    //   The toggles get double cell height so the filmstrip switch + the
+    //   TITLE/OFF/switch/ON label stack has proper breathing room.
+    placeKnob (0, 0, 0, mSampleStartKnob, mSampleStartLbl);
+    placeKnob (0, 1, 0, mStretchKnob,     mStretchLbl);
+    {
+        auto revCell = cell (0, 0, 1);
+        auto cutCell = cell (0, 1, 1);
+        const int doubleH = revCell.getHeight() * 2;
+        mReverseTog.setBounds (revCell.withHeight (doubleH));
+        mCutSelfTog.setBounds (cutCell.withHeight (doubleH));
+    }
+
+    // ── Box 1: Pitch & Voicing (5 knobs + chickenhead, 2x3) ──────────────────
+    placeKnob (1, 0, 0, mTuneKnob,         mTuneLbl);
+    placeKnob (1, 1, 0, mVoiceCapKnob,     mVoiceCapLbl);
+    placeKnob (1, 0, 1, mUnisonVoicesKnob, mUnisonVoicesLbl);
+    placeKnob (1, 1, 1, mDetuneKnob,       mDetuneLbl);
+    {
+        auto c = cell (1, 0, 2);
+        const int selSz = 50;
+        const int sx = c.getX() + (c.getWidth() - selSz) / 2;
+        mDetuneModeSel.setBounds (sx, c.getY(), selSz, selSz);
+        mDetuneModeLbl.setBounds (c.getX(), c.getY() + selSz, c.getWidth(), kLblH);
+    }
+    placeKnob (1, 1, 2, mUnisonSpreadKnob, mUnisonSpreadLbl);
+
+    // ── Box 2: Dynamics (6 knobs, 2x3 with routing arrows on rows 1 & 2) ─────
+    placeKnob (2, 0, 0, mSensKnob,     mSensLbl);
+    placeKnob (2, 1, 0, mVelVolKnob,   mVelVolLbl);
+    placeKnob (2, 0, 1, mVelMuffleKnob, mVelMuffleLbl);
+    placeKnob (2, 1, 1, mMuffleKnob,   mMuffleLbl);
+    placeKnob (2, 0, 2, mVelHardKnob,  mVelHardLbl);
+    placeKnob (2, 1, 2, mHardnessKnob, mHardnessLbl);
+
+    // ── Box 3: Amp Envelope (4 knobs, 2x2 centred in 2x3 area) ───────────────
+    placeKnob (3, 0, 0, mAttackKnob,  mAttackLbl);
+    placeKnob (3, 1, 0, mDecayKnob,   mDecayLbl);
+    placeKnob (3, 0, 1, mSustainKnob, mSustainLbl);
+    placeKnob (3, 1, 1, mReleaseKnob, mReleaseLbl);
+
+    // ── Box 4: LFO (2 knobs — centred in middle row of a 2x3 area) ───────────
+    placeKnob (4, 0, 1, mLfoRateKnob, mLfoRateLbl);
+    placeKnob (4, 1, 1, mLfoAmtKnob,  mLfoAmtLbl);
+
+    // ── Box 5: Output — Master Volume on its own row 2 so it stands out.
+    //   Row 0: Pan | Stereo
+    //   Row 1: Overdrive | Treble
+    //   Row 2: Master Volume | (empty)
+    placeKnob (5, 0, 0, mPanKnob,    mPanLbl);
+    placeKnob (5, 1, 0, mStereoKnob, mStereoLbl);
+    placeKnob (5, 0, 1, mDriveKnob,  mDriveLbl);
+    placeKnob (5, 1, 1, mTrebleKnob, mTrebleLbl);
+    placeKnob (5, 0, 2, mVolumeKnob, mVolumeLbl);
+}
+
+// ── Preset management ─────────────────────────────────────────────────────────
+juce::File VibePlayerEditor::presetsDir()
+{
+    // P4b (2026-04-23): moved Roaming -> Documents per unified-folder layout.
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+               .getChildFile ("BaySickDAW/Presets/BaySickPlayer");
+}
+
+void VibePlayerEditor::showPresetMenu()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Load Sample");
+    // Default all file pickers to the installed Core Library (same as BaySickDrums).
+    // Falls back to user Music if the library folder hasn't been created yet.
+    auto libRoot = [] () -> juce::File
+    {
+        const auto d = SampleLibrary::getCoreLibraryDir();
+        return d.isDirectory() ? d
+                                : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+    };
+
+    menu.addItem ("Open Folder...", [this, libRoot]
+    {
+        auto fc = std::make_shared<juce::FileChooser> (
+            "Select Sample Folder", libRoot());
+        fc->launchAsync (juce::FileBrowserComponent::openMode
+                       | juce::FileBrowserComponent::canSelectDirectories,
+            [this, fc] (const juce::FileChooser& ch)
+            {
+                const auto f = ch.getResult();
+                if (f.isDirectory())
+                    mProc.loadSampleFolder (f);
+            });
+    });
+    menu.addItem ("Open SFZ...", [this, libRoot]
+    {
+        auto fc = std::make_shared<juce::FileChooser> (
+            "Select SFZ File", libRoot(), "*.sfz");
+        fc->launchAsync (juce::FileBrowserComponent::openMode
+                       | juce::FileBrowserComponent::canSelectFiles,
+            [this, fc] (const juce::FileChooser& ch)
+            {
+                const auto f = ch.getResult();
+                if (f.existsAsFile())
+                    mProc.loadSampleSFZ (f);
+            });
+    });
+    menu.addItem ("Open Sample...", [this, libRoot]
+    {
+        auto fc = std::make_shared<juce::FileChooser> (
+            "Select Sample File", libRoot(),
+            "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+        fc->launchAsync (juce::FileBrowserComponent::openMode
+                       | juce::FileBrowserComponent::canSelectFiles,
+            [this, fc] (const juce::FileChooser& ch)
+            {
+                const auto f = ch.getResult();
+                if (f.existsAsFile())
+                    mProc.loadSampleFile (f);
+            });
+    });
+
+    // ── 2026-04-23: in-app Core Library browser, filtered to melodic packs ──
+    // Drum packs (Hip Hop Drums / EDM Drums / Percussion) are hidden because
+    // VibePlayer is the engine on Layer / Bass pages where drum samples don't
+    // belong.  Skipped entirely when this editor is embedded inside a drum
+    // slot (mIsDrumContext = true) since the outer BaySickDrumsEditor's slot
+    // picker already handles library selection with the drum-pack filter.
+    if (! mIsDrumContext)
+    {
+        const auto root = SampleLibrary::getCoreLibraryDir();
+        if (root.isDirectory())
+        {
+            // Recursive walker (lambda items - each click does its own load).
+            std::function<void(juce::PopupMenu&, const juce::File&)> walk;
+            walk = [this, &walk] (juce::PopupMenu& m, const juce::File& dir)
+            {
+                juce::Array<juce::File> children;
+                dir.findChildFiles (children, juce::File::findFilesAndDirectories, false);
+                children.sort();
+                for (const auto& c : children)
+                {
+                    if (c.isDirectory())
+                    {
+                        // Folders that DIRECTLY contain audio files become a
+                        // single "load folder" item; otherwise recurse.
+                        bool hasAudio = false;
+                        for (const auto& f : juce::RangedDirectoryIterator (
+                                                  c, false, "*.wav;*.aif;*.aiff;*.flac",
+                                                  juce::File::findFiles))
+                        { juce::ignoreUnused (f); hasAudio = true; break; }
+                        if (hasAudio)
+                            m.addItem (c.getFileName(),
+                                [this, c] { mProc.loadSampleFolder (c); });
+                        else
+                        {
+                            juce::PopupMenu sub;
+                            walk (sub, c);
+                            if (sub.getNumItems() > 0) m.addSubMenu (c.getFileName(), sub);
+                        }
+                    }
+                    else if (c.hasFileExtension ("sfz"))
+                    {
+                        m.addItem (c.getFileNameWithoutExtension() + "  [SFZ]",
+                            [this, c] { mProc.loadSampleSFZ (c); });
+                    }
+                    else if (c.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+                    {
+                        m.addItem (c.getFileNameWithoutExtension(),
+                            [this, c] { mProc.loadSampleFile (c); });
+                    }
+                }
+            };
+
+            juce::PopupMenu libSub;
+            juce::Array<juce::File> packDirs;
+            root.findChildFiles (packDirs, juce::File::findDirectories, false);
+            packDirs.sort();
+            for (const auto& packDir : packDirs)
+            {
+                if (SampleLibrary::isDrumPack (packDir.getFileName())) continue;
+                juce::PopupMenu packSub;
+                walk (packSub, packDir);
+                if (packSub.getNumItems() > 0) libSub.addSubMenu (packDir.getFileName(), packSub);
+            }
+            if (libSub.getNumItems() > 0)
+            {
+                menu.addSeparator();
+                menu.addSubMenu ("Core Library", libSub);
+            }
+        }
+    }
+
+    menu.addSeparator();
+    menu.addSectionHeader ("Presets");
+
+    // 2026-04-26: recursive walk so factory subfolders appear as cascading
+    // submenus.  Top-level folders are filtered by drum/melodic context to
+    // mirror the sample-pack filter — drum tabs see only Hip Hop / EDM Drums,
+    // melodic tabs see Brass / Keys / Strings / Woodwinds.  "My Presets"
+    // always shows regardless of context (user content can be either).
+    std::function<void (juce::PopupMenu&, const juce::File&)> walkPresets;
+    walkPresets = [this, &walkPresets] (juce::PopupMenu& sub, const juce::File& dir)
+    {
+        if (! dir.isDirectory()) return;
+        juce::Array<juce::File> dirs;
+        dir.findChildFiles (dirs, juce::File::findDirectories, false);
+        dirs.sort();
+        for (auto& d : dirs)
+        {
+            juce::PopupMenu inner;
+            walkPresets (inner, d);
+            if (inner.getNumItems() > 0)
+                sub.addSubMenu (d.getFileName(), inner);
+        }
+        auto files = dir.findChildFiles (juce::File::findFiles, false, "*.xml");
+        files.sort();
+        for (auto& f : files)
+            sub.addItem (f.getFileNameWithoutExtension(), [this, f] { loadPreset (f); });
+    };
+    {
+        const auto dir = presetsDir();
+        if (dir.isDirectory())
+        {
+            juce::Array<juce::File> topLevelDirs;
+            dir.findChildFiles (topLevelDirs, juce::File::findDirectories, false);
+            topLevelDirs.sort();
+            for (const auto& d : topLevelDirs)
+            {
+                const auto folderName = d.getFileName();
+                // Always show user-saved presets folder.
+                const bool isUserFolder = folderName.equalsIgnoreCase ("My Presets");
+                if (! isUserFolder)
+                {
+                    const bool isDrumFolder = SampleLibrary::isDrumPack (folderName);
+                    if (mIsDrumContext  && ! isDrumFolder) continue;   // drums skip melodic
+                    if (! mIsDrumContext &&   isDrumFolder) continue;  // melodic skip drums
+                }
+                juce::PopupMenu sub;
+                walkPresets (sub, d);
+                if (sub.getNumItems() > 0)
+                    menu.addSubMenu (folderName, sub);
+            }
+            // Also include any loose XMLs at the engine root (rare).
+            auto rootFiles = dir.findChildFiles (juce::File::findFiles, false, "*.xml");
+            rootFiles.sort();
+            for (const auto& f : rootFiles)
+                menu.addItem (f.getFileNameWithoutExtension(), [this, f] { loadPreset (f); });
+        }
+    }
+
+    menu.addSeparator();
+    menu.addItem ("Save preset...", [this]
+    {
+        auto* dlg = new juce::AlertWindow ("Save Preset", "Enter preset name:",
+                                            juce::MessageBoxIconType::NoIcon);
+        dlg->addTextEditor ("name", "My BaySickPlayer Preset");
+        dlg->addButton ("Save",   1);
+        dlg->addButton ("Cancel", 0);
+        dlg->enterModalState (true, juce::ModalCallbackFunction::create (
+            [this, dlg] (int result)
+            {
+                if (result == 1) savePreset (dlg->getTextEditorContents ("name"));
+                delete dlg;
+            }));
+    });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (mPresetBtn));
+}
+
+void VibePlayerEditor::savePreset (const juce::String& name)
+{
+    // 2026-04-26: user presets go into "My Presets/" subfolder.
+    const auto dir = presetsDir().getChildFile ("My Presets");
+    dir.createDirectory();
+    if (auto xml = mProc.apvts.copyState().createXml())
+        xml->writeTo (dir.getChildFile (name + ".xml"));
+}
+
+void VibePlayerEditor::loadPreset (const juce::File& f)
+{
+    auto xml = juce::XmlDocument::parse (f);
+    if (! xml || ! xml->hasTagName (mProc.apvts.state.getType())) return;
+
+    auto loaded = juce::ValueTree::fromXml (*xml);
+
+    // P4.1 trackId-portability fix — see BaySickSynthEditor::loadPreset for full
+    // explanation.  Engine tag for VibePlayer (BaySickPlayer) is "_bsp_".
+    const juce::String localPrefix = mProc.getParamPrefix();   // e.g. "tk_lay_0_bsp_"
+    juce::String loadedPrefix;
+    for (int i = 0; i < loaded.getNumChildren(); ++i)
+    {
+        auto child = loaded.getChild (i);
+        if (! child.hasType ("PARAM")) continue;
+        const juce::String id = child.getProperty ("id").toString();
+        const int tagIdx = id.indexOf ("_bsp_");
+        if (id.startsWith ("tk_") && tagIdx > 3)
+        {
+            loadedPrefix = id.substring (0, tagIdx + 5);
+            break;
+        }
+    }
+    if (loadedPrefix.isNotEmpty() && loadedPrefix != localPrefix)
+    {
+        for (int i = 0; i < loaded.getNumChildren(); ++i)
+        {
+            auto child = loaded.getChild (i);
+            if (! child.hasType ("PARAM")) continue;
+            juce::String id = child.getProperty ("id").toString();
+            if (id.startsWith (loadedPrefix))
+            {
+                id = localPrefix + id.substring (loadedPrefix.length());
+                child.setProperty ("id", id, nullptr);
+            }
+        }
+    }
+
+    mProc.apvts.replaceState (loaded);
+}
+
+void VibePlayerEditor::setInfoText (const juce::String& text)
+{
+    mTitleLbl.setText (text.isEmpty() ? "BAYSICKPLAYER" : text.toUpperCase(),
+                       juce::dontSendNotification);
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="FM Digital Basic" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/RX-11 Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/RX-11 Snare.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/Synthetic Ride Bell.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/Synth Gong.xml" locked="1"/>
+</BaySickKit>

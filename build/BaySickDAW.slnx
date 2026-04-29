@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Solution>
+	<Configurations>
+		<BuildType Name="Debug"/>
+		<BuildType Name="Release"/>
+		<BuildType Name="MinSizeRel"/>
+		<BuildType Name="RelWithDebInfo"/>
+		<Platform Name="x64"/>
+	</Configurations>
+	<Project Path="BaySickDAWAssets.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="7edcb4a1-144d-3a2a-8e85-7e344be7756d">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="BaySickDAWStandalone.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="74607149-c86a-3ba4-9154-53782e9d9302">
+		<BuildDependency Project="BaySickDAWAssets.vcxproj"/>
+		<BuildDependency Project="BaySickDAWStandalone_rc_lib.vcxproj"/>
+		<BuildDependency Project="BaySickNAMCore.vcxproj"/>
+		<BuildDependency Project="VibeSynthSamples.vcxproj"/>
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="BaySickDAWStandalone_rc_lib.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="6f77dcb4-8c0f-31af-9ad9-112057a3a1a2">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="BaySickDAW_rc_lib.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="caa0c607-2591-3d9a-8b64-b0f3ffa1ab69">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="BaySickDAW_vst3_helper.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="241f19eb-1ffb-313c-ba78-f893255251b8">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="BaySickNAMCore.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="8cd257c3-d0de-3dc7-83f6-f1be7c3803ae">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="VibeSynthSamples.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="262faab1-9d08-3a7a-81fc-327128d9ee43">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Folder Name="/BaySickDAW/">
+		<Project Path="BaySickDAW.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="77afa7f6-e668-302d-a246-5c6d0ed16f12">
+			<BuildDependency Project="VibeSynthSamples.vcxproj"/>
+			<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		</Project>
+		<Project Path="BaySickDAW_All.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="21c3ea12-e507-3b10-a1de-528f9d562eb7">
+			<BuildDependency Project="BaySickDAW_VST3.vcxproj"/>
+			<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+			<Build Solution="Debug|*" Project="false"/>
+			<Build Solution="Release|*" Project="false"/>
+			<Build Solution="MinSizeRel|*" Project="false"/>
+			<Build Solution="RelWithDebInfo|*" Project="false"/>
+		</Project>
+		<Project Path="BaySickDAW_VST3.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c7bfa4ca-8112-315c-936c-b63a399579a7">
+			<BuildDependency Project="BaySickDAW.vcxproj"/>
+			<BuildDependency Project="BaySickDAW_rc_lib.vcxproj"/>
+			<BuildDependency Project="BaySickDAW_vst3_helper.vcxproj"/>
+			<BuildDependency Project="VibeSynthSamples.vcxproj"/>
+			<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		</Project>
+	</Folder>
+	<Folder Name="/CMakePredefinedTargets/">
+		<Project Path="ALL_BUILD.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a8e82f49-3516-37c8-a040-f0ba65800511" DefaultStartup="true">
+			<BuildDependency Project="BaySickDAW.vcxproj"/>
+			<BuildDependency Project="BaySickDAWAssets.vcxproj"/>
+			<BuildDependency Project="BaySickDAWStandalone.vcxproj"/>
+			<BuildDependency Project="BaySickDAWStandalone_rc_lib.vcxproj"/>
+			<BuildDependency Project="BaySickDAW_VST3.vcxproj"/>
+			<BuildDependency Project="BaySickDAW_rc_lib.vcxproj"/>
+			<BuildDependency Project="BaySickDAW_vst3_helper.vcxproj"/>
+			<BuildDependency Project="BaySickNAMCore.vcxproj"/>
+			<BuildDependency Project="VibeSynthSamples.vcxproj"/>
+			<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		</Project>
+		<Project Path="INSTALL.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1a8c4386-5e34-353a-b289-2fd302a5dd54">
+			<BuildDependency Project="ALL_BUILD.vcxproj"/>
+			<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+			<Build Solution="Debug|*" Project="false"/>
+			<Build Solution="Release|*" Project="false"/>
+			<Build Solution="MinSizeRel|*" Project="false"/>
+			<Build Solution="RelWithDebInfo|*" Project="false"/>
+		</Project>
+		<Project Path="ZERO_CHECK.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c145778c-817e-34b8-a5a1-57d57a629720"/>
+	</Folder>
+</Solution>

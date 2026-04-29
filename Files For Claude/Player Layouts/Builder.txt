@@ -1,0 +1,35 @@
+This layout represents the macro-arrangement view of your DAW—often called the Playlist or Builder Page. Architecturally in JUCE, this shares a lot of similarities with the Piano Roll, but instead of managing individual MIDI notes, it manages larger blocks of data (patterns, audio clips, and automation clips) across multiple tracks.
+
+Here is the topographical breakdown to hand off to Claude to generate your C++ component hierarchy:
+
+### **1. Top Toolbar (Global Control)**
+This is your standard horizontal strip managing the interaction modes for the arrangement view, mirroring the tools found in the Piano Roll.
+
+* **Tool Icons Strip (Left):** A tight row of toggle buttons for interacting with clips. Icons include: Magnet (snap-to-grid), Pencil (draw clip), Paintbrush (paint multiple clips), Mute (speaker with an X), Slice (razor), Select (lasso), Zoom (magnifying glass), and Playback (speaker).
+* **Context Label:** Text label reading `Playlist - Arrangement > Pattern 1` (indicating the current view and selected pattern).
+* **View/Window Controls (Right):** Small utility icons for managing the window.
+
+### **2. Left Side Panel (Asset Picker/Browser)**
+This is a dockable or fixed left-hand pane that acts as a staging area for dragging assets into the main arrangement.
+
+* **Asset Type Tabs (Top Header):** 3 Icon Buttons used to filter the list below. Icons represent: Patterns (Keyboard), Audio Clips (Waveform), and Automation Clips (Spline/Line).
+* **Asset List Area:** A selectable list box component (`juce::ListBox` or `juce::TreeView`). Currently, the "Pattern" tab is active, and the list displays one item: `Pattern 1`.
+
+### **3. Track Header Column**
+This vertical strip sits between the asset picker and the main grid, managing the macro-controls for each horizontal lane.
+
+* **Header Controls:** A small top header area with a `+` (add track) button and text labels: `NOTE`, `CHAN`, `PAT`.
+* **Track List:** A vertical list of individual Track Header components. Each individual header contains:
+    * 1 LED-style Toggle Button (Green dot): Mute/Solo status.
+    * Text Label: Track Name (e.g., `Track 1`, `Track 2`, down to `Track 12`).
+* **Divider:** A vertical, draggable resizing bar separating this column from the main grid.
+
+### **4. Main Arrangement Grid (Canvas)**
+This is the massive interactive workspace where the actual song is built by arranging clips.
+
+* **Timeline Ruler (Top Edge):** A horizontal strip displaying measure/bar numbers (`1`, `2`, `3`, `4`, up to `22` in this view).
+* **Grid Background:** A dark 2D canvas with horizontal shading that aligns perfectly with the Track Headers on the left, and vertical lines indicating beat/bar subdivisions.
+* **Clip Area:** This is the container where your custom `ClipComponent` blocks will be drawn and dragged around.
+* **Scrollbars:** Vertical and horizontal scrollbars at the edges.
+
+**Prompting Tip for Claude:** The most critical instruction for Claude here is **Vertical Scroll Synchronization**. You will need two separate `juce::Viewport` components: one for the Track Header Column and one for the Main Arrangement Grid. When the user scrolls down through the arrangement grid, the Track Headers *must* scroll perfectly in sync so `Track 12` always aligns with its respective lane. Tell Claude to link the vertical scrollbar of the main grid's viewport to the vertical scroll position of the track header's viewport.

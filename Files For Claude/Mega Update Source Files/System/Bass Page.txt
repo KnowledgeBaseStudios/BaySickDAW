@@ -1,0 +1,7 @@
+Bass Page Notes
+*For the bass page there is the 808/909 option in the drop down and when this is selected I want the functionality of the VibePlayer to be available for the user to use (The specific knobs, dials, faders, etc.) but the "instruments" available will be the 808/909 bass sounds we had already created.
+
+Bass Page
+*Bass page opens to blank screen with a drop down
+*Bass drop down selections are "Harmless", "VibePlayer" and "808/909"
+*When the bass page drop down is chosen 3 tabs will appear for Sound, Piano Roll and EQ with the Sound tab being filled out with the selected player

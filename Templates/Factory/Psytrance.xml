@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="Psytrance" version="1">
+  <Kit path="Psytrance/Psytrance Full.xml"/>
+  <Layer slot="0" engine="Harmless" presetPath="Harmless/Psytrance/Supersaw Lead.xml" locked="1"/>
+  <Layer slot="1" engine="Harmless" presetPath="Harmless/Psytrance/Trance Pluck.xml" locked="1"/>
+  <Layer slot="2" engine="Harmless" presetPath="Harmless/Psytrance/Acid Hoover.xml" locked="1"/>
+  <Layer slot="3" engine="Harmless" presetPath="Harmless/Psytrance/Gated Arp Pad.xml" locked="1"/>
+  <Layer slot="4" engine="Harmless" presetPath="Harmless/Psytrance/FM Bell Stab.xml" locked="1"/>
+  <Layer slot="5" engine="Harmless" presetPath="Harmless/Psytrance/Glitch Lead.xml" locked="1"/>
+  <Layer slot="6" engine="Harmless" presetPath="Harmless/Psytrance/Hi-Pass Pad.xml" locked="1"/>
+  <Layer slot="7" engine="Harmless" presetPath="Harmless/Psytrance/Tribal Pluck.xml" locked="1"/>
+  <Bass slot="0" engine="Harmless" presetPath="Harmless/Psytrance/Acid Roll Bass.xml" locked="1"/>
+  <Bass slot="1" engine="Harmless" presetPath="Harmless/Psytrance/Reese Bass.xml" locked="1"/>
+  <Bass slot="2" engine="Harmless" presetPath="Harmless/Psytrance/Gated Bass Roll.xml" locked="1"/>
+  <Bass slot="3" engine="Harmless" presetPath="Harmless/Psytrance/Psytrance Sub Pulse.xml" locked="1"/>
+</BaySickTemplate>

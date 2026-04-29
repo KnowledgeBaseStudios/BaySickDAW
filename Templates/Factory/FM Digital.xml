@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="FM Digital" version="1">
+  <Kit path="FM Digital/FM Digital Full.xml"/>
+  <Layer slot="0" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/DX EP.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/FM Tines.xml" locked="1"/>
+  <Layer slot="2" engine="Harmless" presetPath="Harmless/Plucks &amp; Mallets/FM Bell Pluck.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickSynth" presetPath="BaySickSynth/Pads &amp; Atmospheres/Glass Pad.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSynth" presetPath="BaySickSynth/Leads &amp; Solos/DX Lead FM.xml" locked="1"/>
+  <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Plucks &amp; Mallets/FM Bell Pluck.xml" locked="1"/>
+  <Layer slot="6" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/Crystal Keys.xml" locked="1"/>
+  <Layer slot="7" engine="Harmless" presetPath="Harmless/Pads &amp; Atmospheres/Glass Shimmer Pad.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickBass" presetPath="BaySickBass/Pluck, Donk &amp; FM/DX Bass FM.xml" locked="1"/>
+  <Bass slot="1" engine="BaySickBass" presetPath="BaySickBass/Pluck, Donk &amp; FM/FM Growl Bass.xml" locked="1"/>
+  <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Pluck, Donk &amp; FM/Bell Bass.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Pluck, Donk &amp; FM/FM Metallic Pluck.xml" locked="1"/>
+</BaySickTemplate>

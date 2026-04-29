@@ -1,0 +1,43 @@
+To achieve the professional, immersive sound of stock FL Studio chorus effects for **Vibesynth**, you must move beyond a single modulated delay line. High-end chorus depends on **stereo decorrelation**, **multi-voice density**, and **targeted frequency processing**.
+
+Here is the professional breakdown for the **ChorusDSP**.
+
+---
+
+### 1. The Crossover Stage (Targeted Routing)
+A common mistake in digital chorus is modulating the low-end, which causes "phase mud" and ruins the punch of your kick or bass.
+* **The Logic:** Use a **Linkwitz-Riley 4th Order crossover** (24dB/oct). 
+* **Processing:** Only the High-Pass band (frequencies above your `Cross Cutoff`, usually 200Hz–500Hz) should enter the chorus engine. The Low-Pass band remains "dry" and mono-stable, then sums back at the end.
+
+### 2. Multi-Voice Architecture
+A "pro" chorus isn't just one voice; it’s a cluster. 
+* **The Logic:** Use **3 independent voices** per channel (6 total for stereo).
+* **The Math:** Each voice should have a slightly different base `Delay` time (e.g., Voice A = 10ms, Voice B = 14ms, Voice C = 18ms). This prevents the "metallic" resonant peaks that occur when multiple voices overlap perfectly.
+
+### 3. The LFO Engine (Multi-Sine & Stereo Phase)
+Instead of a single sine wave, use a "Multi-Sine" generator.
+* **The Shape:** Sum two sines together (e.g., `primary_rate` and `primary_rate * 0.37`) to create a more "organic" and less predictable wobble.
+* **Stereo Phase (The Width Secret):** This is the `Stereo` parameter (0 to 360 degrees).
+    * **Left LFO:** $\sin(\phi)$
+    * **Right LFO:** $\sin(\phi + \text{StereoDegrees})$
+    * *Result:* At 180°, the left voice is moving "in" while the right is moving "out," creating massive perceived width.
+
+### 4. High-Quality Interpolation
+If the chorus sounds "grainy," it is due to linear interpolation errors in the delay line.
+* **Requirement:** You **must** use **Cubic Lagrange Interpolation** for the delay line read pointers. This ensures the pitch-shifting (which is essentially what a chorus is) remains liquid and smooth.
+
+---
+
+### The Instructions for Claude
+When you hand off the `Chorus.txt` file to Claude, give it these specific "Pro" requirements:
+
+> "Rewrite the `ChorusDSP` class using these professional specifications:
+> 1.  **Crossover:** Implement a `juce::dsp::LinkwitzRileyFilter` to split the signal. Only process the high band to preserve low-end phase integrity.
+> 2.  **Voice Density:** Create **3 voices per channel**. Offset their base delay times by prime increments (e.g., +2ms and +5ms) to avoid resonance stacking.
+> 3.  **LFO Phase:** Implement the `Stereo` parameter as a phase offset (in radians) between the Left and Right LFOs.
+> 4.  **Multi-Sine LFO:** The LFO should be a sum of two sine waves at different frequencies to create a more 'hardware-like' modulation.
+> 5.  **Interpolation:** Use `juce::dsp::DelayLineInterpolationType::cubic` for all delay line reads. Linear interpolation is strictly forbidden.
+> 6.  **Dry/Wet:** Ensure the `Wet Only` toggle completely removes the dry signal path, including the unprocessed low-frequency band from the crossover."
+
+### Next Module: Phaser or Flanger?
+The **Phaser** requires a cascade of all-pass filters (up to 24 stages), while the **Flanger** relies on feedback-loop damping and phase inversion. Which one are we doing next?

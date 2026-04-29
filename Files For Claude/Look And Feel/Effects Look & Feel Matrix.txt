@@ -1,0 +1,16 @@
+Modulation Effects
+*Chorus
+*Flanger
+*Phaser
+
+Dynamics & Transient Processing
+*Compressor
+*Transient Shaper
+
+Time-Based Effects
+*Delay
+*Reverb
+
+Harmonic & Distortion Effects
+*Saturation
+*Overdrive

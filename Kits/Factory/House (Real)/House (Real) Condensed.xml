@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="House (Real) Condensed" version="1">
+  <Drum slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/House Kicks/House Kick 01.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/House Kicks/House Kick 02.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/House Kicks/House Kick 03.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/House Kicks/House Kick 04.xml" locked="1"/>
+  <Drum slot="4" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/House Kicks/House Kick 05.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/House Claps &amp; Snares/House Clap-Snare 01.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/House Claps &amp; Snares/House Clap-Snare 02.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickPlayer" presetPath="BaySickPlayer/EDM Drums/House Claps &amp; Snares/House Clap-Snare 03.xml" locked="1"/>
+</BaySickKit>

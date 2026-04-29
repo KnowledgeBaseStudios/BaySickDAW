@@ -1,0 +1,57 @@
+To make your **CompressorDSP** stand out as a professional-grade tool for **Vibesynth**, you have to move beyond the basic "if signal > threshold" logic. Stock FL effects and high-end plugins use **Logarithmic Domain** processing and **Recursive Ballistics**.
+
+Here is the full breakdown for a professional, analog-modeled Compressor.
+
+---
+
+### 1. The Detection Path (Logarithmic Domain)
+Most "cheap" compressors calculate gain in the linear domain (0.0 to 1.0), which sounds aggressive and unmusical. Professional compressors convert the signal to Decibels first.
+* **The Logic:** Convert the absolute peak/RMS of the sidechain (or input) to dB.
+* **Formula:** $x_{dB} = 20 \cdot \log_{10}(|x| + \epsilon)$ (where $\epsilon$ is a tiny value like $1e-9$ to prevent math errors at silence).
+
+### 2. The Gain Computer (Soft-Knee & Expansion)
+This is the "brain" that decides how much to turn the volume down. To get the "Vintage" knee you want, we use a quadratic interpolation.
+
+**The Math (Gain Reduction in dB):**
+If your Threshold is $T$, Ratio is $R$, and Knee width is $W$:
+* **If $2(x_{dB} - T) < -W$:** Output is $x_{dB}$ (No compression).
+* **If $2|x_{dB} - T| \le W$:** Output is $x_{dB} + \frac{(\frac{1}{R} - 1)(x_{dB} - T + \frac{W}{2})^2}{2W}$ (Inside the Knee).
+* **If $2(x_{dB} - T) > W$:** Output is $T + \frac{x_{dB} - T}{R}$ (Full compression).
+
+*Note: If $R < 1.0$, this same formula naturally becomes an **Upward Expander**, which is a "pro" feature for adding life back into dull drums.*
+
+### 3. Ballistics (Recursive Exponential Smoothing)
+This is where the "sound" of the compressor lives. Clicks and pops happen because the attack/release is too fast or linear. We use **Time Constants** that mimic a capacitor charging.
+
+**The Formula (Coefficient Calculation):**
+$$\alpha = 1.0 - e^{-1.0 / (\text{time\_ms} \cdot 0.001 \cdot \text{sampleRate})}$$
+
+**The Recursive Loop:**
+```cpp
+// Logic for the envelope follower
+if (targetGain < lastGain) // Attacking
+    currentGain = targetGain + attackCoeff * (lastGain - targetGain);
+else // Releasing
+    currentGain = targetGain + releaseCoeff * (lastGain - targetGain);
+```
+
+### 4. Architecture & Sidechaining
+To ensure it’s "FL-ready," the compressor must support an external sidechain buffer.
+* **Look-ahead:** Implement a small `juce::dsp::DelayLine` (approx. 2ms to 5ms) on the **main signal**, but NOT on the detector signal. This allows the compressor to "react" to a peak before the peak actually hits the speakers.
+* **Stereo Linking:** Calculate the envelope based on the maximum of the Left and Right channels to prevent the stereo image from shifting/wobbling.
+
+---
+
+### The Instructions for Claude
+When you hand off the `Compressor.txt` file to Claude, give it these specific "Pro" requirements:
+
+> "Rewrite the `CompressorDSP` class using the following specifications:
+> 1. **Detection:** Perform all gain calculations in the **Logarithmic (dB) domain**.
+> 2. **Knee:** Implement a **Quadratic Soft-Knee** algorithm. The 'Vintage' setting should have a knee width of 12dB; 'Soft' should be 6dB.
+> 3. **Ballistics:** Use **Recursive Exponential Smoothing** for attack and release. Coefficients must be calculated using the $1 - e^{-x}$ formula.
+> 4. **Sidechain:** The `process` method must accept an optional `juce::AudioBuffer<float>* sidechainBuffer`. If provided, the detector uses this; if not, it defaults to the input.
+> 5. **Expansion:** Ensure the ratio logic supports values from 0.5 to 1.0 for upward expansion.
+> 6. **Safety:** Include an **Auto-Makeup Gain** toggle that compensates for the lost volume based on the Threshold and Ratio."
+
+### Next Module: Tape or Reverb?
+Which one should we tackle next to ensure it doesn't sound like "crap"? The **Tape Engine** (focusing on Hysteresis) or the **Algorithmic Reverb** (focusing on the FDN matrix)?

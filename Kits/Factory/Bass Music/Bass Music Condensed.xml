@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Bass Music Condensed" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Festival Big Room Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Distorted Gabber Kick.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Underwater Kick.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Psytrance Zap Kick.xml" locked="1"/>
+  <Drum slot="4" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Trap Snare Roll.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Distorted Slap Clap.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Stuttering Snare Tail.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickSynth" presetPath="BaySickDrums/Modern EDM &amp; Trap/Granular Smear Snare.xml" locked="1"/>
+</BaySickKit>

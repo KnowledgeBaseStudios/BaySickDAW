@@ -1,0 +1,1 @@
+I am making a DAW in C++/JUCE. I need you to write me a prompt to give Claude to make a  with the parameters in the attached file. Make sure you don't leave any of my parameters out.

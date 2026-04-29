@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="FM Digital Full" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/RX-11 Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/RX-11 Snare.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/Synthetic Ride Bell.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/Synth Gong.xml" locked="1"/>
+  <Drum slot="4" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/Shimmering Ride.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/Gong Crash Mix.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/DX7 Glass.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/DX7 Metal.xml" locked="1"/>
+  <Drum slot="8" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/FM Metallic Cowbell.xml" locked="1"/>
+  <Drum slot="9" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/Agogo Bell.xml" locked="1"/>
+  <Drum slot="10" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/Synthetic Triangle.xml" locked="1"/>
+  <Drum slot="11" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/DX7 Woodblock.xml" locked="1"/>
+  <Drum slot="12" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/FM Pluck Percussion.xml" locked="1"/>
+  <Drum slot="13" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/FM Digital Bell.xml" locked="1"/>
+  <Drum slot="14" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/DX Style Tubulum.xml" locked="1"/>
+  <Drum slot="15" engine="BaySickSynth" presetPath="BaySickDrums/Tuned Percussion/Steel Drum Perc.xml" locked="1"/>
+</BaySickKit>

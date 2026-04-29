@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickKit name="Krautrock Full" version="1">
+  <Drum slot="0" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/909-Style Kick.xml" locked="1"/>
+  <Drum slot="1" engine="BaySickSynth" presetPath="BaySickDrums/Simmons Group/Vintage Simmons Snare.xml" locked="1"/>
+  <Drum slot="2" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/606 Open Hat.xml" locked="1"/>
+  <Drum slot="3" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/Pedal Hat (Chick).xml" locked="1"/>
+  <Drum slot="4" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/606 Low Tom.xml" locked="1"/>
+  <Drum slot="5" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/606 High Tom.xml" locked="1"/>
+  <Drum slot="6" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/Synth Gong.xml" locked="1"/>
+  <Drum slot="7" engine="BaySickSynth" presetPath="BaySickDrums/909 Group/White Noise Crash.xml" locked="1"/>
+  <Drum slot="8" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/Master Sync Tick.xml" locked="1"/>
+  <Drum slot="9" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/Analog Metronome.xml" locked="1"/>
+  <Drum slot="10" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/Electro Castanet.xml" locked="1"/>
+  <Drum slot="11" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/FM Robot Stab.xml" locked="1"/>
+  <Drum slot="12" engine="BaySickSynth" presetPath="BaySickDrums/Yamaha Group/Synthetic Triangle.xml" locked="1"/>
+  <Drum slot="13" engine="BaySickSynth" presetPath="BaySickDrums/Simmons Group/Simmons Sweep FX.xml" locked="1"/>
+  <Drum slot="14" engine="BaySickSynth" presetPath="BaySickDrums/606 Group/High Woodblock.xml" locked="1"/>
+  <Drum slot="15" engine="BaySickSynth" presetPath="BaySickDrums/Simmons Group/Sci-Fi Laser Zap.xml" locked="1"/>
+</BaySickKit>

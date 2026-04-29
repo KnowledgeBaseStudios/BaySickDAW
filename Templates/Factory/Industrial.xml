@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="Industrial" version="1">
+  <Kit path="Industrial/Industrial Full.xml"/>
+  <Layer slot="0" engine="Harmless" presetPath="Harmless/Synth-Pop/Industrial Lead.xml" locked="1"/>
+  <Layer slot="1" engine="Harmless" presetPath="Harmless/Cinematic &amp; Drones/Sci-Fi Wash.xml" locked="1"/>
+  <Layer slot="2" engine="Harmless" presetPath="Harmless/Cinematic &amp; Drones/Wind Howl.xml" locked="1"/>
+  <Layer slot="3" engine="Harmless" presetPath="Harmless/Cinematic &amp; Drones/Granular Texture.xml" locked="1"/>
+  <Layer slot="4" engine="Harmless" presetPath="Harmless/Bass Music/Aggressive Saw.xml" locked="1"/>
+  <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Cinematic &amp; Drones/Dystopian Siren.xml" locked="1"/>
+  <Layer slot="6" engine="BaySickSynth" presetPath="BaySickSynth/Cinematic &amp; Drones/Tension Drone.xml" locked="1"/>
+  <Layer slot="7" engine="Harmless" presetPath="Harmless/Modern Hip-Hop/Distorted Lo-Fi Lead.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickBass" presetPath="BaySickBass/Midtempo &amp; Cyberpunk/Industrial Grind.xml" locked="1"/>
+  <Bass slot="1" engine="BaySickBass" presetPath="BaySickBass/Midtempo &amp; Cyberpunk/Doom Saw.xml" locked="1"/>
+  <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Midtempo &amp; Cyberpunk/Dystopian Sub.xml" locked="1"/>
+  <Bass slot="3" engine="Harmless" presetPath="Harmless/Bass Music/FM Growl.xml" locked="1"/>
+</BaySickTemplate>

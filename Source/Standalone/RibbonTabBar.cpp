@@ -1,0 +1,669 @@
+#include "RibbonTabBar.h"
+#include "SharedUI.h"
+
+// ── Colour helpers ───────────────────────────────────────────────────────────
+juce::Colour RibbonTabBar::tabColour(TabType type, bool active)
+{
+    switch (type)
+    {
+        case TabType::Mixer:     return active ? juce::Colour(0xff7b2fbe) : juce::Colour(0xff3d1760);
+        case TabType::Effects:   return active ? juce::Colour(0xffce3f8e) : juce::Colour(0xff661f47);
+        case TabType::Builder:   return active ? juce::Colour(0xffd4a017) : juce::Colour(0xff6b5008);
+        // 2026-04-28 (G-2): Clip = mixer Clips-bus amber/gold (VC::Warm).
+        // Inactive shade is roughly half-brightness, matching the convention
+        // used by Layers / Bass / Drums slots.
+        case TabType::Clip:      return active ? juce::Colour(0xffd4a017) : juce::Colour(0xff6a500b);
+        case TabType::Layers:    return active ? juce::Colour(0xffe06030) : juce::Colour(0xff703018);
+        case TabType::Bass:      return active ? juce::Colour(0xff2e8b57) : juce::Colour(0xff17452b);
+        case TabType::Drums:     return active ? juce::Colour(0xffcc2222) : juce::Colour(0xff661111);
+        // 2026-04-26: PianoRoll = piano-key black; active brightens slightly
+        // so the active-state is still visible against the inactive black.
+        case TabType::PianoRoll: return active ? juce::Colour(0xff1a1a1a) : juce::Colour(0xff060606);
+        default:                 return active ? VC::Panel : VC::Bg;
+    }
+}
+
+// ── Static helpers ───────────────────────────────────────────────────────────
+RibbonTabBar::TabType RibbonTabBar::slotType(int slotIndex)
+{
+    static constexpr TabType order[] = {
+        TabType::Mixer, TabType::Effects, TabType::Builder,
+        TabType::Clip,  // 2026-04-28 (G-2): inserted between Builder and Layers
+        TabType::Layers, TabType::Bass, TabType::Drums,
+        TabType::PianoRoll   // 2026-04-26: unified piano-roll page
+    };
+    return order[juce::jlimit(0, kNumSlots - 1, slotIndex)];
+}
+
+bool RibbonTabBar::hasDropdown(TabType type)
+{
+    // 2026-04-26 (1a): PianoRoll's engine-picker dropdown lands in step 1b /
+    // step 2 once the page actually hosts a DrumKit + per-engine roll list.
+    // For 1a the slot is click-only, no chevron.
+    if (type == TabType::PianoRoll) return false;
+    return type != TabType::Mixer;
+}
+
+// ── Ctor ─────────────────────────────────────────────────────────────────────
+RibbonTabBar::RibbonTabBar()
+{
+    // Create the 3 permanent single-instance tabs.
+    // Layers/Bass/Drums instances are added via addTab() from StandaloneEditor.
+    auto addFixed = [this](TabType t, const char* name)
+    {
+        Tab tab;
+        tab.id   = mNextId++;
+        tab.type = t;
+        tab.name = name;
+        mTabs.add(tab);
+    };
+    addFixed(TabType::Mixer,     "Mixer");
+    addFixed(TabType::Effects,   "Effects");
+    addFixed(TabType::Builder,   "Builder");
+    // 2026-04-26: PianoRoll fixed slot.  Layers/Bass/Drums dynamic instances
+    // are inserted between Builder and PianoRoll by StandaloneEditor's
+    // create...Page() calls — addTab() pushes them at the end of mTabs but the
+    // ribbon's slot ordering uses slotType() and a per-type index lookup,
+    // not raw mTabs order.  Adding PianoRoll here keeps the slot fixed at
+    // index 6 regardless of how many dynamic tabs exist.
+    addFixed(TabType::PianoRoll, "Piano Roll");
+
+    mSelectedId = mTabs[0].id;
+    setInterceptsMouseClicks(true, true);
+}
+
+// ── Public API ───────────────────────────────────────────────────────────────
+int RibbonTabBar::addTab(TabType type, const juce::String& name)
+{
+    Tab tab;
+    tab.id   = mNextId++;
+    tab.type = type;
+    tab.name = name;
+    mTabs.add(tab);
+    repaint();
+    return tab.id;
+}
+
+void RibbonTabBar::clearAllDynamicTabs()
+{
+    for (int i = mTabs.size() - 1; i >= 0; --i)
+    {
+        const auto t = mTabs[i].type;
+        if (t == TabType::Layers || t == TabType::Bass || t == TabType::Drums || t == TabType::Clip)
+            mTabs.remove (i);
+    }
+    // Drop selection if it pointed at a removed tab.
+    bool stillValid = false;
+    for (auto& t : mTabs) if (t.id == mSelectedId) { stillValid = true; break; }
+    if (! stillValid) mSelectedId = -1;
+    repaint();
+}
+
+void RibbonTabBar::clearTabsOfType (TabType type)
+{
+    for (int i = mTabs.size() - 1; i >= 0; --i)
+        if (mTabs[i].type == type)
+            mTabs.remove (i);
+    bool stillValid = false;
+    for (auto& t : mTabs) if (t.id == mSelectedId) { stillValid = true; break; }
+    if (! stillValid) mSelectedId = -1;
+    repaint();
+}
+
+void RibbonTabBar::closeTab(int tabId)
+{
+    for (int i = 0; i < mTabs.size(); ++i)
+    {
+        if (mTabs[i].id != tabId) continue;
+
+        TabType type = mTabs[i].type;
+
+        // D1.4-fix (c): Layers / Bass / Drums instances can all be closed.
+        // G-2 (2026-04-28): Clip instances are also closeable.
+        if (type != TabType::Layers && type != TabType::Bass
+         && type != TabType::Drums  && type != TabType::Clip) return;
+
+        // Never delete the last instance of a type — EXCEPT for Clip, which
+        // can legitimately be at zero (no clips yet → empty placeholder page).
+        if (type != TabType::Clip && countTabsOfType(type) <= 1) return;
+
+        mTabs.remove(i);
+
+        // If we removed the selected tab, select another of the same type
+        if (mSelectedId == tabId)
+        {
+            for (auto& t : mTabs)
+            {
+                if (t.type == type)
+                {
+                    mSelectedId = t.id;
+                    if (onTabSelected) onTabSelected(mSelectedId);
+                    break;
+                }
+            }
+        }
+
+        repaint();
+        if (onTabClosed) onTabClosed(tabId);
+        return;
+    }
+}
+
+void RibbonTabBar::selectTab(int tabId)
+{
+    for (auto& t : mTabs)
+    {
+        if (t.id == tabId) { mSelectedId = tabId; repaint(); return; }
+    }
+}
+
+void RibbonTabBar::renameTab(int tabId, const juce::String& newName)
+{
+    for (auto& t : mTabs)
+    {
+        if (t.id == tabId) { t.name = newName; repaint(); return; }
+    }
+}
+
+const RibbonTabBar::Tab* RibbonTabBar::getTabById(int id) const
+{
+    for (auto& t : mTabs)
+        if (t.id == id) return &t;
+    return nullptr;
+}
+
+// ── Internal helpers ─────────────────────────────────────────────────────────
+int RibbonTabBar::getActiveTabForType(TabType type) const
+{
+    // If the currently selected tab is of this type, use it
+    auto* sel = getTabById(mSelectedId);
+    if (sel && sel->type == type) return mSelectedId;
+
+    // Otherwise return the first tab of this type
+    for (auto& t : mTabs)
+        if (t.type == type) return t.id;
+    return -1;
+}
+
+int RibbonTabBar::countTabsOfType(TabType type) const
+{
+    int n = 0;
+    for (auto& t : mTabs)
+        if (t.type == type) ++n;
+    return n;
+}
+
+int RibbonTabBar::getBadgeCount(TabType type) const
+{
+    switch (type)
+    {
+    case TabType::Effects: return 2;
+    case TabType::Builder: return 3;
+    case TabType::Clip:    // G-2 (2026-04-28): badge tracks instance count
+    case TabType::Layers:
+    case TabType::Bass:
+    case TabType::Drums:   return countTabsOfType(type);
+    default:               return 0;
+    }
+}
+
+bool RibbonTabBar::isSlotSelected(int slotIndex) const
+{
+    auto* tab = getTabById(mSelectedId);
+    return tab && tab->type == slotType(slotIndex);
+}
+
+juce::String RibbonTabBar::getSlotDisplayName(int slotIndex) const
+{
+    TabType type = slotType(slotIndex);
+    int activeId = getActiveTabForType(type);
+    auto* tab    = getTabById(activeId);
+    if (! tab)
+    {
+        // G-2 (2026-04-28): Clip slot is valid with zero instances (drop-only
+        // spawn).  Fall back to a generic label so the empty state is visible.
+        if (type == TabType::Clip) return "Clips";
+        return {};
+    }
+    return (tab->locked ? juce::String("[L] ") : juce::String()) + tab->name;
+}
+
+void RibbonTabBar::setTabLocked (int tabId, bool locked)
+{
+    for (auto& t : mTabs)
+    {
+        if (t.id == tabId)
+        {
+            if (t.locked != locked)
+            {
+                t.locked = locked;
+                repaint();
+            }
+            return;
+        }
+    }
+}
+
+bool RibbonTabBar::isTabLocked (int tabId) const
+{
+    if (auto* t = getTabById (tabId))
+        return t->locked;
+    return false;
+}
+
+void RibbonTabBar::moveTabOfType (TabType type, int srcRowOfType, int dstRowOfType)
+{
+    std::vector<int> typeIdxs;
+    for (int i = 0; i < mTabs.size(); ++i)
+        if (mTabs[i].type == type)
+            typeIdxs.push_back (i);
+
+    const int n = (int) typeIdxs.size();
+    if (srcRowOfType < 0 || srcRowOfType >= n) return;
+    if (dstRowOfType < 0 || dstRowOfType >= n) return;
+    if (srcRowOfType == dstRowOfType) return;
+
+    mTabs.move (typeIdxs[(size_t) srcRowOfType], typeIdxs[(size_t) dstRowOfType]);
+    repaint();
+}
+
+// ── Layout ───────────────────────────────────────────────────────────────────
+juce::Rectangle<int> RibbonTabBar::slotRect(int slotIndex) const
+{
+    int totalW = getWidth();
+    int w = totalW / kNumSlots;
+    int x = slotIndex * w;
+    // Last slot takes remainder to avoid 1px gaps
+    if (slotIndex == kNumSlots - 1)
+        w = totalW - x;
+    return { x, 0, w, kTabH };
+}
+
+int RibbonTabBar::hitTestSlot(juce::Point<int> pos, bool& hitArrow) const
+{
+    hitArrow = false;
+    for (int s = 0; s < kNumSlots; ++s)
+    {
+        auto r = slotRect(s);
+        if (r.contains(pos))
+        {
+            if (hasDropdown(slotType(s)))
+            {
+                auto arrowR = r.withTrimmedLeft(r.getWidth() - kArrowW);
+                hitArrow = arrowR.contains(pos);
+            }
+            return s;
+        }
+    }
+    return -1;
+}
+
+// ── Mouse ────────────────────────────────────────────────────────────────────
+void RibbonTabBar::mouseDown(const juce::MouseEvent& e)
+{
+    bool hitArrow = false;
+    int slot = hitTestSlot(e.position.toInt(), hitArrow);
+    if (slot < 0) return;
+
+    TabType type = slotType(slot);
+
+    if (hitArrow)
+    {
+        showDropdown(slot);
+    }
+    else
+    {
+        // Body click: navigate to the active tab for this type
+        int tabId = getActiveTabForType(type);
+        if (tabId >= 0)
+        {
+            mSelectedId = tabId;
+            repaint();
+            if (onTabSelected) onTabSelected(tabId);
+        }
+        else if (type == TabType::Clip && onClipsEmptyStateRequested)
+        {
+            // G-2: 0 Clip instances → editor shows the empty-state drop zone.
+            onClipsEmptyStateRequested();
+        }
+    }
+}
+
+// ── Dropdown menus ───────────────────────────────────────────────────────────
+void RibbonTabBar::showDropdown(int slotIndex)
+{
+    TabType type = slotType(slotIndex);
+    // Anchor the popup to the ▾ arrow region, not the full tab
+    auto r       = slotRect(slotIndex);
+    auto arrowR  = r.withTrimmedLeft(r.getWidth() - kArrowW);
+
+    switch (type)
+    {
+    case TabType::Effects:
+    case TabType::Builder:
+        showSubPageDropdown(type, arrowR);
+        break;
+    case TabType::Layers:
+    case TabType::Bass:
+    case TabType::Drums:
+        showInstanceDropdown(type, arrowR);
+        break;
+    case TabType::Clip:
+        // G-2 (2026-04-28): Clip dropdown is greyed out / suppressed when no
+        // clips have been added yet — drag/drop is the only spawn path so a
+        // dropdown over zero instances has nothing to act on.
+        if (countTabsOfType(TabType::Clip) > 0)
+            showInstanceDropdown(type, arrowR);
+        break;
+    default:
+        break;
+    }
+}
+
+void RibbonTabBar::showSubPageDropdown(TabType type, juce::Rectangle<int> tabBounds)
+{
+    juce::PopupMenu m;
+
+    if (type == TabType::Effects)
+    {
+        m.addItem(1, "Rack");
+        m.addItem(2, "EQ");
+    }
+    else if (type == TabType::Builder)
+    {
+        m.addItem(1, "Patterns");
+        m.addItem(2, "Audio Clips");
+        m.addItem(3, "Automation");
+    }
+    else if (type == TabType::Drums)
+    {
+        m.addItem(1, "Sound");
+        m.addItem(2, "Piano Roll");
+        m.addItem(3, "EQ");
+    }
+
+    auto screenArea = localAreaToGlobal(tabBounds);
+    m.showMenuAsync(
+        juce::PopupMenu::Options().withTargetScreenArea(screenArea),
+        [this, type](int result)
+        {
+            if (result <= 0) return;
+
+            // Navigate to this page type first
+            int tabId = getActiveTabForType(type);
+            if (tabId >= 0)
+            {
+                mSelectedId = tabId;
+                repaint();
+                if (onTabSelected) onTabSelected(tabId);
+            }
+            // Then notify about sub-page selection (0-based index)
+            if (onSubPageSelected)
+                onSubPageSelected(type, result - 1);
+        });
+}
+
+void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBounds)
+{
+    juce::PopupMenu m;
+
+    int activeId = getActiveTabForType(type);
+    int count    = countTabsOfType(type);
+
+    // List all instances — tick mark on the active one, "[L] " prefix if locked
+    for (auto& tab : mTabs)
+    {
+        if (tab.type == type)
+        {
+            const juce::String label = (tab.locked ? juce::String("[L] ") : juce::String()) + tab.name;
+            m.addItem(tab.id, label, true, tab.id == activeId);
+        }
+    }
+
+    m.addSeparator();
+
+    // Sub-page navigation — opens the active instance and switches to that sub-tab
+    // Negative IDs reserved for menu actions: -1/-2/-3 (rename/delete/add) and
+    // -10..-13 (sub-page items) so we can disambiguate from instance IDs.
+    // Drums has 4 sub-tabs (Drum Kit added in D2); Layers/Bass have 3.
+    // Note: PopupMenu has no addSectionHeading; use a disabled "Pages:" item.
+    m.addItem(-99, "Pages:", false /* enabled */, false);
+    if (type == TabType::Drums)
+    {
+        m.addItem(-10, "  Drum Kit");
+        m.addItem(-11, "  Player");
+        m.addItem(-12, "  Piano Roll");
+        m.addItem(-13, "  EQ");
+    }
+    else
+    {
+        m.addItem(-10, "  Player");
+        m.addItem(-11, "  Piano Roll");
+        m.addItem(-12, "  EQ");
+    }
+
+    m.addSeparator();
+
+    // Rename / Delete apply to the currently active instance
+    m.addItem(-1, "Rename...");
+    m.addItem(-2, "Delete", count > 1);   // grey out if only 1 instance
+
+    // G-2 (2026-04-28): Clips can ONLY be spawned via drop/upload onto the
+    // Builder grid or the Clips empty-state page — no "+ Add" entry on the
+    // ribbon dropdown for Clip type.
+    if (type != TabType::Clip)
+    {
+        m.addSeparator();
+        juce::String addLabel = (type == TabType::Layers) ? "+ Add New Layers"
+                              : (type == TabType::Bass)   ? "+ Add New Bass"
+                              :                             "+ Add New Drum";
+        m.addItem(-3, addLabel);
+    }
+
+    auto screenArea = localAreaToGlobal(tabBounds);
+    m.showMenuAsync(
+        juce::PopupMenu::Options().withTargetScreenArea(screenArea),
+        [this, type, activeId](int result)
+        {
+            if (result == 0) return;
+
+            if (result == -1)
+            {
+                // Rename active instance
+                if (activeId >= 0) startRename(activeId);
+            }
+            else if (result == -2)
+            {
+                // Delete active instance.
+                if (activeId < 0) return;
+
+                // D2: refuse delete when the active tab is locked.  Mirror the
+                // per-page right-click context menu, which greys out Delete
+                // when locked.
+                if (isTabLocked (activeId))
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::AlertWindow::InfoIcon,
+                        "Cannot Delete",
+                        "This tab is locked. Unlock it first to delete.");
+                    return;
+                }
+
+                // D2: route through the page's requestDelete() (Save & Delete /
+                // Delete Anyway / Cancel for saveable engines).  Falls back to
+                // the ribbon's own primitive confirm only if no handler is
+                // wired (defensive — StandaloneEditor wires this in ctor).
+                if (onTabDeleteRequested)
+                {
+                    onTabDeleteRequested (activeId);
+                }
+                else
+                {
+                    auto* aw = new juce::AlertWindow(
+                        "Delete",
+                        "This action cannot be undone. Are you sure?",
+                        juce::MessageBoxIconType::WarningIcon);
+                    aw->addButton("Delete", 1);
+                    aw->addButton("Cancel", 0);
+                    aw->enterModalState(true,
+                        juce::ModalCallbackFunction::create(
+                            [this, activeId](int r) {
+                                if (r == 1) closeTab(activeId);
+                            }),
+                        true);
+                }
+            }
+            else if (result == -3)
+            {
+                // Add new instance
+                if (onAddTabRequest) onAddTabRequest(type);
+            }
+            else if (result <= -10 && result >= (type == TabType::Drums ? -13 : -12))
+            {
+                // Sub-page item: open the active instance, then notify the
+                // editor to switch its sub-tab.
+                // Drums (D2): -10=DrumKit(0), -11=Player(1), -12=PianoRoll(2), -13=EQ(3).
+                // Layers/Bass: -10=Player(0), -11=PianoRoll(1), -12=EQ(2).
+                int tabId = getActiveTabForType(type);
+                if (tabId >= 0)
+                {
+                    mSelectedId = tabId;
+                    repaint();
+                    if (onTabSelected) onTabSelected(tabId);
+                }
+                if (onSubPageSelected) onSubPageSelected(type, -10 - result);
+            }
+            else
+            {
+                // Instance selected — switch to it
+                mSelectedId = result;
+                repaint();
+                if (onTabSelected) onTabSelected(result);
+            }
+        });
+}
+
+// ── Rename ───────────────────────────────────────────────────────────────────
+void RibbonTabBar::startRename(int tabId)
+{
+    // D1.4-fix: let editor intercept (e.g. Drum "User Patch" → savePatchAs).
+    if (onRenameInterceptRequested && onRenameInterceptRequested (tabId))
+        return;
+
+    for (auto& t : mTabs)
+    {
+        if (t.id != tabId) continue;
+
+        auto* aw = new juce::AlertWindow(
+            "Rename", "Enter a new name:",
+            juce::MessageBoxIconType::NoIcon);
+        aw->addTextEditor("name", t.name);
+        aw->addButton("OK", 1);
+        aw->addButton("Cancel", 0);
+        aw->enterModalState(true,
+            juce::ModalCallbackFunction::create(
+                [this, tabId, aw](int result) {
+                    if (result == 1)
+                    {
+                        auto newName = aw->getTextEditorContents("name");
+                        if (newName.isNotEmpty())
+                        {
+                            for (auto& tab : mTabs)
+                            {
+                                if (tab.id == tabId)
+                                {
+                                    tab.name = newName;
+                                    if (onTabRenamed) onTabRenamed(tabId, newName);
+                                    repaint();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }),
+            true);
+        return;
+    }
+}
+
+// ── Paint ────────────────────────────────────────────────────────────────────
+void RibbonTabBar::paint(juce::Graphics& g)
+{
+    // No background fill — the parent transport bar's brushed-aluminum shows through.
+
+    for (int s = 0; s < kNumSlots; ++s)
+    {
+        TabType type = slotType(s);
+        bool    sel  = isSlotSelected(s);
+        auto    r    = slotRect(s);
+
+        // ── Tab background (rounded top corners) ─────────────────────────────
+        juce::Path tabPath;
+        float cornerR = 5.0f;
+        tabPath.addRoundedRectangle(
+            (float)r.getX(), (float)r.getY(),
+            (float)r.getWidth(), (float)r.getHeight() + 2.0f,
+            cornerR, cornerR, true, true, false, false);
+
+        g.setColour(tabColour(type, sel));
+        g.fillPath(tabPath);
+
+        // Active tab: bright top stripe
+        if (sel)
+        {
+            g.setColour(VC::Highlight);
+            g.fillRect(r.getX() + 1, r.getY(), r.getWidth() - 2, 2);
+        }
+
+        // ── Compute badge count first (affects text area) ─────────────────
+        int badge = getBadgeCount(type);
+
+        // ── Tab text ─────────────────────────────────────────────────────────
+        // Layout from right edge: [arrow 24px] [badge 20px if present] [text fills rest]
+        juce::Rectangle<int> textR = r;
+        if (hasDropdown(type))
+            textR = textR.withTrimmedRight(kArrowW);
+        if (badge > 0)
+            textR = textR.withTrimmedRight(kBadgeR * 2 + 4);
+
+        juce::String name = getSlotDisplayName(s);
+        g.setColour(juce::Colours::white.withAlpha(sel ? 1.0f : 0.75f));
+        g.setFont(juce::Font(12.0f, sel ? juce::Font::bold : 0));
+        g.drawText(name, textR.reduced(8, 0), juce::Justification::centredLeft, true);
+
+        // ── Badge circle (between text and arrow) ────────────────────────────
+        if (badge > 0)
+        {
+            int bx = r.getRight() - kArrowW - kBadgeR * 2 - 2;
+            int by = r.getY() + (kTabH - kBadgeR * 2) / 2;
+
+            g.setColour(juce::Colours::white.withAlpha(0.85f));
+            g.fillEllipse((float)bx, (float)by,
+                          (float)(kBadgeR * 2), (float)(kBadgeR * 2));
+
+            g.setColour(juce::Colour(0xff1a1a2e));
+            g.setFont(juce::Font(10.0f, juce::Font::bold));
+            g.drawText(juce::String(badge),
+                       juce::Rectangle<int>(bx, by, kBadgeR * 2, kBadgeR * 2),
+                       juce::Justification::centred);
+        }
+
+        // ── ▾ arrow (rightmost region) ───────────────────────────────────────
+        if (hasDropdown(type))
+        {
+            auto arrowR = r.withTrimmedLeft(r.getWidth() - kArrowW)
+                           .withSizeKeepingCentre(kArrowW, kTabH);
+            g.setColour(juce::Colours::white.withAlpha(sel ? 0.9f : 0.55f));
+            g.setFont(juce::Font(26.0f));
+            g.drawText(juce::CharPointer_UTF8("\xe2\x96\xbe"), arrowR,
+                       juce::Justification::centred);   // ▾
+        }
+
+        // ── Separator between slots ──────────────────────────────────────────
+        if (s + 1 < kNumSlots)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.15f));
+            g.fillRect(r.getRight() - 1, r.getY() + 4, 1, r.getHeight() - 8);
+        }
+    }
+}

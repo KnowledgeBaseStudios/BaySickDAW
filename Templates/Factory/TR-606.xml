@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BaySickTemplate name="TR-606" version="1">
+  <Kit path="TR-606/TR-606 Full.xml"/>
+  <Layer slot="0" engine="BaySickSynth" presetPath="BaySickSynth/Keys &amp; Electric Pianos/Toy Piano.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSynth" presetPath="BaySickSynth/Pads &amp; Atmospheres/Vintage String Pad.xml" locked="1"/>
+  <Layer slot="2" engine="BaySickSynth" presetPath="BaySickSynth/Synthwave &amp; Vintage/Outrun Lead.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickSynth" presetPath="BaySickSynth/Plucks &amp; Mallets/Analog Pluck.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSynth" presetPath="BaySickSynth/Brass &amp; Strings/80s Synth Brass.xml" locked="1"/>
+  <Layer slot="5" engine="Harmless" presetPath="Harmless/Synthwave &amp; Vintage/Retrowave Bell.xml" locked="1"/>
+  <Layer slot="6" engine="BaySickSynth" presetPath="BaySickSynth/Synthwave &amp; Vintage/Neon Lead.xml" locked="1"/>
+  <Layer slot="7" engine="Harmless" presetPath="Harmless/Pads &amp; Atmospheres/Lo-Fi Tape Pad.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickBass" presetPath="BaySickBass/Vintage Analog/70s Moog Bass.xml" locked="1"/>
+  <Bass slot="1" engine="BaySickBass" presetPath="BaySickBass/Vintage Analog/Analog Pulse.xml" locked="1"/>
+  <Bass slot="2" engine="Harmless" presetPath="Harmless/Krautrock/Pulse Sub Bass.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Vintage Analog/Classic Electro Bass.xml" locked="1"/>
+</BaySickTemplate>
