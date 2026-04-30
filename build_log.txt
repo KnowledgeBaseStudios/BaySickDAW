@@ -1,14 +1,20 @@
-CMake Error:
-  Generator
+MSBuild version 18.5.4+cb4e32d21 for .NET Framework
 
-    Visual Studio 18 2026
-
-  could not find specified instance of Visual Studio:
-
-    C:/Program Files/Microsoft Visual Studio/18/Community
-
-  The directory exists, but the instance is not known to the Visual Studio
-  Installer, and no 'version=' field was given.
-
-
-EXIT_CODE=1 
+  Checking File Globs
+  BaySickDAWStandalone_rc_lib.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone_rc_lib.dir\Release\BaySickDAWStandalone_rc_lib.lib
+  BaySickDAWAssets.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\BaySickDAWAssets.lib
+  VibeSynthSamples.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\VibeSynthSamples.lib
+  BaySickNAMCore.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\BaySickNAMCore.lib
+  PluginProcessor.cpp
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerDSP.h(125,31): warning C4100: 'newValue': unreferenced parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/PluginProcessor.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\PluginProcessor.cpp(1828,26): warning C4456: declaration of 'bpm' hides previous local declaration [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+      C:\Users\jeffm\Documents\BaySickDAW\Source\PluginProcessor.cpp(1083,12):
+      see declaration of 'bpm'
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\PluginProcessor.cpp(1123,29): warning C4189: 'rowLevel': local variable is initialized but not referenced [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  Generating code
+  Finished generating code
+  BaySickDAWStandalone.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone_artefacts\Release\BaySickDAW.exe
+EXIT_CODE=0 

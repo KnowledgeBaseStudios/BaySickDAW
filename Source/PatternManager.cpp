@@ -353,13 +353,18 @@ double PatternManager::getEffectivePatternLoopBeats() const
     // right pattern in Song mode), but they are NOT part of the pattern's
     // loop length.  A 6-minute auto-dropped master recording must not drag
     // pattern-mode playback out to 90 bars.
+    // G-7 polish (2026-04-29): use effectiveLengthBeats() so blocks with
+    // sub-bar precision (lengthBeats override, e.g. record-dropped blocks
+    // that end mid-bar) loop at their actual length.  Previously
+    // `lengthBars * kBeatsPerBar` ignored the lengthBeats override, making
+    // a 2-bar block whose record happened to be 1.5 bars wide loop at 1 bar.
     {
         double maxBlockBeats = 0.0;
         for (auto& b : mArrangement)
         {
             if (b.clipType != ClipType::Pattern) continue;
             if (b.patternIndex == mCurrentPattern)
-                maxBlockBeats = juce::jmax(maxBlockBeats, (double)b.lengthBars * kBeatsPerBar);
+                maxBlockBeats = juce::jmax(maxBlockBeats, effectiveLengthBeats (b));
         }
         if (maxBlockBeats > kMinBeats)
             return maxBlockBeats;
@@ -383,6 +388,9 @@ double PatternManager::getEffectivePatternLoopBeats() const
         // every bar (pattern wrap at the 1-bar minimum) instead of the wrap
         // point sitting past the note's end like every other roll type.
         for (auto& roll : pat.clipRoll)  scanRoll(roll);
+        // G-4 (2026-04-28): Vox + Inst rolls likewise.
+        for (auto& roll : pat.voxRoll)   scanRoll(roll);
+        for (auto& roll : pat.instRoll)  scanRoll(roll);
 
         if (latestEnd > 0.0)
         {
@@ -756,6 +764,22 @@ juce::ValueTree PatternManager::toValueTree() const
             rn.setProperty("page", i, nullptr);
             rollsNode.addChild(rn, -1, nullptr);
         }
+        // G-4 (2026-04-28): per-Vox / per-Inst piano rolls.  Same idempotent
+        // pattern as Clips — only non-empty rolls saved.
+        for (int i = 0; i < (int)p.voxRoll.size(); ++i)
+        {
+            if (p.voxRoll[i].notes.empty()) continue;
+            auto rn = rollToValueTree("VoxPageRoll", p.voxRoll[i]);
+            rn.setProperty("page", i, nullptr);
+            rollsNode.addChild(rn, -1, nullptr);
+        }
+        for (int i = 0; i < (int)p.instRoll.size(); ++i)
+        {
+            if (p.instRoll[i].notes.empty()) continue;
+            auto rn = rollToValueTree("InstPageRoll", p.instRoll[i]);
+            rn.setProperty("page", i, nullptr);
+            rollsNode.addChild(rn, -1, nullptr);
+        }
         pNode.addChild(rollsNode, -1, nullptr);
 
         patternsNode.addChild(pNode, -1, nullptr);
@@ -1038,6 +1062,20 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
                     int page = (int) rn.getProperty("page", 0);
                     if (page >= 0 && page < (int)p.clipRoll.size())
                         rollFromValueTree(rn, p.clipRoll[page]);
+                }
+                else if (rn.hasType("VoxPageRoll"))
+                {
+                    // G-4 (2026-04-28): per-Vox roll.  Page index = Vox insert idx.
+                    int page = (int) rn.getProperty("page", 0);
+                    if (page >= 0 && page < (int)p.voxRoll.size())
+                        rollFromValueTree(rn, p.voxRoll[page]);
+                }
+                else if (rn.hasType("InstPageRoll"))
+                {
+                    // G-4 (2026-04-28): per-Inst roll.  Page index = Inst insert idx.
+                    int page = (int) rn.getProperty("page", 0);
+                    if (page >= 0 && page < (int)p.instRoll.size())
+                        rollFromValueTree(rn, p.instRoll[page]);
                 }
                 else if (rn.hasType("DrumRoll"))
                 {

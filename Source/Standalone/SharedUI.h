@@ -1505,24 +1505,64 @@ private:
 };
 
 // ── Digital peak meter (dBFS scale, green→yellow→red, peak hold) ─────────────
+// 2026-04-30: rewritten for stereo L/R + FL-parity range/scale.
+//  - Range: -60 dBFS .. +6 dBFS (headroom above 0 visible like FL).
+//  - Mapping: piecewise linear log-style — top 30 % covers -18..+6, bottom 70 %
+//    covers -60..-18 (compressed) so the dB range that matters takes the most
+//    pixels.
+//  - Inside tick labels: drawn over unlit segments, naturally covered when lit
+//    segments paint on top.  Idle meter shows full scale; loud meter hides
+//    labels under the lit fill except above the current level.
+//  - Stereo split (single bar, two halves filled separately).  Mono callers
+//    use setLevel(); strip callers now use setStereoLevel().
+//  - setCompact() kept as a no-op for back-compat (legacy callers may still
+//    call it; the FL-parity range above is now the only mode).
 class DBFSMeter : public juce::Component, public juce::SettableTooltipClient, private juce::Timer {
 public:
     DBFSMeter();
     ~DBFSMeter() override { stopTimer(); }
-    void setLevel(float dBFS);   // safe to call from audio thread via atomic
-    // Must be called from the message thread only.
-    void setCompact(bool);       // if true, truncate display floor at -20dBFS
-    void paint(juce::Graphics&) override;
-    void resized() override {}
+
+    // Mono entry point — both L and R get the same value.
+    void setLevel       (float dBFS);
+    // Stereo entry point — independent L and R levels.
+    void setStereoLevel (float dBFS_L, float dBFS_R);
+
+    // Back-compat no-op.  All strips now use the FL-parity range below.
+    void setCompact (bool) {}
+
+    void paint   (juce::Graphics&) override;
+    void resized () override {}
+
+    // 2026-04-30: hover tooltip shows live "L: -3.2 dB  |  R: -5.7 dB" while
+    // the mouse is over the meter.  TooltipWindow polls getTooltip() on its
+    // own timer (~100 ms) so the value tracks audio in real time.  Overrides
+    // SettableTooltipClient::getTooltip so any setTooltip() call still
+    // gets ignored — the dynamic per-channel string takes precedence.
+    juce::String getTooltip() override;
+
 private:
-    void timerCallback() override;  // 60fps — decay + peak hold
-    std::atomic<float> mLevelDb { -60.f };
-    float mDisplayDb { -60.f }, mPeakDb { -60.f };
-    int   mPeakHoldFrames { 0 };
-    bool  mCompact { false };
-    static constexpr float kFloor    = -36.f;
-    static constexpr float kFloorCmp = -20.f;
-    static constexpr float kDecayDbPerSec = 20.f;
+    void timerCallback() override;   // 60 Hz — decay + peak hold per channel
+    void paintBar (juce::Graphics& g, juce::Rectangle<float> r,
+                   float displayDb, float peakDb, bool drawLabels) const;
+    static float dbToNorm (float dB) noexcept;   // log-style mapping
+
+    // Per-channel atomic input (audio thread sets, UI timer reads).
+    std::atomic<float> mLevelDbL { -60.f };
+    std::atomic<float> mLevelDbR { -60.f };
+
+    // Per-channel UI state (decayed display + peak hold).
+    float mDisplayDbL { -60.f }, mPeakDbL { -60.f };
+    float mDisplayDbR { -60.f }, mPeakDbR { -60.f };
+    int   mPeakHoldFramesL { 0 }, mPeakHoldFramesR { 0 };
+
+    // FL-parity range — top has +6 dB headroom above 0 dBFS so peaks above
+    // the digital ceiling are still visible.
+    static constexpr float kFloor         = -60.f;
+    static constexpr float kCeiling       =   6.f;
+    static constexpr float kDecayDbPerSec =  20.f;
+    // Piecewise log: top 30 % of bar covers -18..+6 dB (where it matters).
+    static constexpr float kBreakDb       = -18.f;
+    static constexpr float kBreakNorm     =  0.7f;
 };
 
 // ── Full basic sequence grid (rows x steps, scrollable) ──────────────────────

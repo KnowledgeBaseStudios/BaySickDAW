@@ -255,6 +255,8 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/Standalone/LayersPage.cpp
     Source/Standalone/BassPage.cpp
     Source/Standalone/DrumPage.cpp
+    # G-7 — unified Page Preset save / load
+    Source/Standalone/PagePresetIO.cpp
     Source/Standalone/DrumKitGrid.cpp
     Source/Standalone/PianoRoll.cpp
     Source/Standalone/PianoRollPage.cpp
@@ -266,6 +268,10 @@ target_sources(BaySickDAWStandalone PRIVATE
     # BaySickNAM/IR; spawned via Builder drop or empty-state drop, never
     # via the ribbon dropdown)
     Source/Clips/ClipsPage.cpp
+    # Phase G-4 — Vox + Inst pages (same dual-engine A/B-style architecture
+    # as Clips, spawned by the Mixer page's "Add Vox/Inst Strip" buttons).
+    Source/Vox/VoxPage.cpp
+    Source/Inst/InstPage.cpp
     # Phase 4D — Event Editor
     Source/Standalone/EventEditor.cpp
     # Phase 1 — Mixer Page
@@ -285,7 +291,7 @@ target_compile_definitions(BaySickDAWStandalone
     PUBLIC ${VIBESYNTH_DEFS} VIBESYNTH_STANDALONE=1
 )
 
-target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/Clips
+target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/Clips Source/Vox Source/Inst
     # Rubber Band Library (Phase 4B time-stretch) — headers only; link rubberband.lib to enable DSP
     "${CMAKE_CURRENT_SOURCE_DIR}/libs/rubberband"
     # ASIO SDK include path (empty when SDK absent — harmless to leave in the list).

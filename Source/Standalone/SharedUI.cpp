@@ -274,13 +274,20 @@ void VibeLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
             // ── Programmatic mixer / EQ fader — metallic dark, HiDPI-safe ─────
             // Mixer dB range: -60 .. +10 (matches MixerTrackStrip constants).
             // EQ    dB range: -18 .. +18 (bipolar, matches EQ8DSP::setBandGain clamp).
+            // 2026-04-30: mixer fader max dropped +10 → +5.6 dB (FL parity).
+            // Was +10 — too much boost, and the fader cap visually pinned past
+            // the +10 tick when at max.  +5.6 matches FL's standard mixer cap.
             const float kFMin   = isEqFader ? -18.0f : -60.0f;
-            const float kFMax   = isEqFader ?  18.0f :  10.0f;
+            const float kFMax   = isEqFader ?  18.0f :   5.6f;
             const float kFRange = kFMax - kFMin;
-            constexpr float kCapH   = 57.0f;
+            // 2026-04-30: cap shrunk 57 → 35 px (kGuard 28.5 → 17.5).  Reclaims
+            // ~22 px of visible track length on every strip and matches FL's
+            // slim cap style.  See MixerTrackStrip kFaderBottomGuard which
+            // mirrors this so the dB-label C-overlap calculation stays in sync.
+            constexpr float kCapH   = 35.0f;
             constexpr float kTrackW = 3.0f;
             constexpr float kTickLen = 5.0f;
-            constexpr float kGuard  = kCapH * 0.5f;   // dead zone at track ends
+            constexpr float kGuard  = kCapH * 0.5f;   // dead zone at track ends (= 17.5)
 
             float capW  = std::max(11.0f, std::round((float)w * 0.195f) - 3.0f);
             float capX  = std::round(cx - capW * 0.5f);
@@ -310,9 +317,12 @@ void VibeLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
             }
 
             // ── dB scale (left of track) ──────────────────────────────────────
-            // Mixer faders: non-linear scale focused on -60..+10 mixing range.
-            // EQ faders:    symmetric bipolar scale -18..+18.
-            static const int kMixerMarks[] = { 10, 5, 0, -5, -10, -15, -20, -25, -30, -40, -60 };
+            // 2026-04-30: mixer fader range now -60..+5.6 dB (FL-parity max).
+            // Marks compressed at the bottom (large jumps -30→-40→-60) and
+            // tighter near 0 dB where mixing precision matters.  EQ faders
+            // unchanged — symmetric bipolar -18..+18 is independent of mixer
+            // changes.
+            static const int kMixerMarks[] = { 5, 0, -5, -10, -15, -20, -25, -30, -40, -60 };
             static const int kEqMarks[]    = { 18, 12, 6, 0, -6, -12, -18 };
             const int* dbMarks    = isEqFader ? kEqMarks : kMixerMarks;
             const int  numDbMarks = isEqFader ? (int) (sizeof(kEqMarks)   / sizeof(int))
@@ -5845,124 +5855,201 @@ DBFSMeter::DBFSMeter()
     startTimerHz(60);
 }
 
-void DBFSMeter::setLevel(float dBFS)
+juce::String DBFSMeter::getTooltip()
 {
-    mLevelDb.store(dBFS, std::memory_order_relaxed);
+    // Format helper — anything within 0.5 dB of the floor reads as "-inf"
+    // since segments below that are visually empty / would show silence.
+    auto fmt = [] (float dB) -> juce::String
+    {
+        if (dB <= kFloor + 0.5f) return juce::String ("-inf");
+        // One decimal place keeps the tooltip stable at a glance — the
+        // audio thread's 60 Hz updates feed the UI's display values which
+        // are what we report here, so the number tracks the bar in real
+        // time without flickering on every sub-decibel atomic change.
+        return juce::String (dB, 1) + " dB";
+    };
+    return "L: " + fmt (mDisplayDbL) + "  |  R: " + fmt (mDisplayDbR);
 }
 
-void DBFSMeter::setCompact(bool c)
+void DBFSMeter::setLevel(float dBFS)
 {
-    mCompact = c;
+    mLevelDbL.store(dBFS, std::memory_order_relaxed);
+    mLevelDbR.store(dBFS, std::memory_order_relaxed);
+}
+
+void DBFSMeter::setStereoLevel(float dBFS_L, float dBFS_R)
+{
+    mLevelDbL.store(dBFS_L, std::memory_order_relaxed);
+    mLevelDbR.store(dBFS_R, std::memory_order_relaxed);
+}
+
+// 2026-04-30: piecewise-linear log-style mapping.  Bottom 70 % of the bar
+// covers -60..-18 dB; top 30 % covers -18..+6 dB.  Aggressive enough to put
+// the action near 0 dB on screen without obliterating the lower range.
+float DBFSMeter::dbToNorm(float dB) noexcept
+{
+    if (dB <= kFloor)   return 0.f;
+    if (dB >= kCeiling) return 1.f;
+    if (dB <= kBreakDb)
+        return juce::jmap(dB, kFloor, kBreakDb, 0.f, kBreakNorm);
+    return juce::jmap(dB, kBreakDb, kCeiling, kBreakNorm, 1.f);
 }
 
 void DBFSMeter::timerCallback()
 {
-    float incoming = mLevelDb.load(std::memory_order_relaxed);
-    float floor = mCompact ? kFloorCmp : kFloor;
+    const float decayPerFrame = kDecayDbPerSec / 60.f;
 
-    // Decay display level
-    float decayPerFrame = kDecayDbPerSec / 60.f;
-    if (incoming > mDisplayDb)
-        mDisplayDb = incoming;
-    else
-        mDisplayDb = std::max(floor, mDisplayDb - decayPerFrame);
+    auto step = [&] (std::atomic<float>& src, float& display, float& peak, int& holdFrames)
+    {
+        const float incoming = src.load(std::memory_order_relaxed);
 
-    // Peak hold: hold 1000ms then decay
-    if (incoming >= mPeakDb)
-    {
-        mPeakDb = incoming;
-        mPeakHoldFrames = 0;
-    }
-    else
-    {
-        mPeakHoldFrames++;
-        if (mPeakHoldFrames > 60)  // ~1 second at 60fps
-            mPeakDb = std::max(floor, mPeakDb - decayPerFrame);
-    }
+        // Decay display level
+        if (incoming > display) display = incoming;
+        else                    display = std::max(kFloor, display - decayPerFrame);
+
+        // Peak hold: hold ~1 s, then decay
+        if (incoming >= peak) { peak = incoming; holdFrames = 0; }
+        else
+        {
+            ++holdFrames;
+            if (holdFrames > 60)
+                peak = std::max(kFloor, peak - decayPerFrame);
+        }
+    };
+
+    step(mLevelDbL, mDisplayDbL, mPeakDbL, mPeakHoldFramesL);
+    step(mLevelDbR, mDisplayDbR, mPeakDbR, mPeakHoldFramesR);
 
     repaint();
+}
+
+// Paint one bar (L or R half).  drawLabels=true on the LEFT half so labels
+// appear once across the whole meter, naturally covered by lit segments.
+void DBFSMeter::paintBar(juce::Graphics& g, juce::Rectangle<float> r,
+                          float displayDb, float peakDb, bool drawLabels) const
+{
+    const float zeroY  = r.getY();
+    const float floorY = r.getBottom();
+    const float totalH = floorY - zeroY;
+
+    const float displayNorm = dbToNorm(displayDb);
+    const float peakNorm    = dbToNorm(peakDb);
+
+    // LED segment geometry — same look as the legacy meter.
+    const float gap   = 1.5f;
+    const float segH  = 4.5f;
+    const int numSegs = juce::jmax(1, (int)(totalH / (segH + gap)));
+
+    const float segW = r.getWidth() - 1.f;
+    const float segX = r.getX() + 0.5f;
+
+    const float peakY   = floorY - peakNorm * totalH;
+    const int   peakSeg = (int)((floorY - peakY) / (segH + gap));
+
+    // PASS 1 — paint every segment as DIM so tick labels overlay onto the
+    // unlit background.  Lit segments paint over them in PASS 3.
+    for (int i = 0; i < numSegs; ++i)
+    {
+        const float segTop = floorY - (i + 1) * (segH + gap) + gap;
+        const float norm   = (float)(i + 1) / (float)numSegs;
+
+        // Pick the segment's nominal color (dim version).
+        juce::Colour col;
+        if      (norm > 0.94f) col = juce::Colour(0xffFF2020);   // clip red (above 0 dB)
+        else if (norm > 0.85f) col = juce::Colour(0xffFF6020);   // hot red (-3..0)
+        else if (norm > 0.72f) col = juce::Colour(0xffFFCC00);   // yellow
+        else                   col = juce::Colour(0xff22EE44);   // green
+
+        g.setColour(col.withAlpha(0.09f));
+        g.fillRect(segX, segTop, segW, segH);
+    }
+
+    // PASS 2 — tick labels INSIDE the meter (only on the left half so they
+    // appear once across the whole bar).  These get covered by the lit segs
+    // in pass 3 wherever the meter is filled — exactly the FL behaviour.
+    if (drawLabels)
+    {
+        static const int kLabels[] = { 6, 0, -3, -6, -9, -12, -18, -24, -36, -48 };
+        g.setColour(juce::Colour(0xff7A7E80));   // dim grey, readable on dim segs
+        g.setFont(juce::Font(7.5f, juce::Font::plain));
+        // Labels live in a tiny strip on the LEFT inside the half.  We let
+        // them spill across the half-width so the digits aren't crushed.
+        for (int db : kLabels)
+        {
+            const float n = dbToNorm((float) db);
+            const float y = floorY - n * totalH;
+            // Center the text vertically on the tick line.
+            g.drawText(juce::String(db), (int)(r.getX() + 1), (int)(y - 4),
+                       (int)(r.getWidth() * 2.f), 8,
+                       juce::Justification::centredLeft);
+        }
+    }
+
+    // PASS 3 — lit segments (and the white peak-hold marker).  These paint
+    // ON TOP of the dim+labels layers; wherever a segment is lit the labels
+    // beneath it disappear (covered by the bright fill).
+    for (int i = 0; i < numSegs; ++i)
+    {
+        const float segTop = floorY - (i + 1) * (segH + gap) + gap;
+        const float norm   = (float)(i + 1) / (float)numSegs;
+
+        const bool lit    = (norm <= displayNorm);
+        const bool isPeak = (i == peakSeg && peakNorm > 0.01f);
+        if (! lit && ! isPeak) continue;
+
+        juce::Colour col;
+        if      (norm > 0.94f) col = juce::Colour(0xffFF2020);   // clip red (above 0)
+        else if (norm > 0.85f) col = juce::Colour(0xffFF6020);   // hot red
+        else if (norm > 0.72f) col = juce::Colour(0xffFFCC00);   // yellow
+        else                   col = juce::Colour(0xff22EE44);   // green
+        if (isPeak) col = juce::Colours::white;
+
+        juce::ColourGradient litGrad(
+            col.withAlpha(0.95f), segX, segTop,
+            col.withAlpha(0.60f), segX, segTop + segH, false);
+        g.setGradientFill(litGrad);
+        g.fillRect(segX, segTop, segW, segH);
+
+        // Specular highlight on top edge.
+        g.setColour(juce::Colours::white.withAlpha(isPeak ? 0.55f : 0.22f));
+        g.fillRect(segX, segTop, segW, 1.f);
+    }
 }
 
 void DBFSMeter::paint(juce::Graphics& g)
 {
     auto b = getLocalBounds().toFloat();
-    float floor = mCompact ? kFloorCmp : kFloor;
-    float range = 0.f - floor;  // range in dB (floor to 0dBFS)
 
-    // LRX-11: Recessed housing background
+    // Recessed housing background.
     {
         juce::ColourGradient housing(
             juce::Colour(0xff0A0C0E), b.getX(), b.getY(),
             juce::Colour(0xff161A1C), b.getRight(), b.getBottom(), false);
         g.setGradientFill(housing);
         g.fillRect(b);
-        // Inner shadow at top edge (depth illusion)
         juce::ColourGradient topShadow(juce::Colours::black.withAlpha(0.7f), 0.f, b.getY(),
                                        juce::Colours::transparentBlack, 0.f, b.getY() + 5.f, false);
         g.setGradientFill(topShadow);
         g.fillRect(b.withBottom(b.getY() + 5.f));
     }
 
-    float zeroY  = b.getY();
-    float floorY = b.getBottom();
+    // Single bar split into two halves: LEFT = L channel, RIGHT = R channel.
+    // 1 px gutter between halves so the split is readable but the bar still
+    // reads as a single piece (Jeff's spec — option B, not separated bars).
+    const float halfW   = (b.getWidth() - 1.f) * 0.5f;
+    const auto  leftR   = juce::Rectangle<float>(b.getX(),                   b.getY(), halfW, b.getHeight());
+    const auto  rightR  = juce::Rectangle<float>(b.getX() + halfW + 1.f,     b.getY(), halfW, b.getHeight());
 
-    float displayNorm = juce::jlimit(0.f, 1.f, (mDisplayDb - floor) / range);
-    float peakNorm    = juce::jlimit(0.f, 1.f, (mPeakDb   - floor) / range);
+    // Labels on the LEFT half only — they span across (drawText box width is
+    // 2x half-width so digits are readable across both halves).
+    paintBar(g, leftR,  mDisplayDbL, mPeakDbL, /*drawLabels*/ true);
+    paintBar(g, rightR, mDisplayDbR, mPeakDbR, /*drawLabels*/ false);
 
-    // LRX-11: LED segment geometry
-    const float gap    = 1.5f;   // gap between segments
-    const float segH   = mCompact ? 3.5f : 4.5f;
-    float totalH  = floorY - zeroY;
-    int   numSegs = juce::jmax(1, (int)(totalH / (segH + gap)));
+    // Center gutter — paint thin black line so the L|R split is visible.
+    g.setColour(juce::Colour(0xff000000));
+    g.fillRect(b.getX() + halfW, b.getY(), 1.f, b.getHeight());
 
-    float segW = b.getWidth() - 2.f;  // slight horizontal inset
-    float segX = b.getX() + 1.f;
-
-    // Compute which segment the peak hold falls on
-    float peakY    = floorY - peakNorm * totalH;
-    int   peakSeg  = (int)((floorY - peakY) / (segH + gap));
-
-    for (int i = 0; i < numSegs; ++i)
-    {
-        // Segment i=0 is bottom (floor), i=numSegs-1 is top (0 dBFS)
-        float segTop = floorY - (i + 1) * (segH + gap) + gap;
-        float norm   = (float)(i + 1) / (float)numSegs;
-
-        // Is this segment lit?
-        bool  lit    = (norm <= displayNorm);
-        bool  isPeak = (i == peakSeg && peakNorm > 0.01f);
-
-        // Segment colour: green → yellow → red
-        juce::Colour segColour;
-        if      (norm > 0.92f) segColour = juce::Colour(0xffFF2020);   // red
-        else if (norm > 0.72f) segColour = juce::Colour(0xffFFCC00);   // yellow
-        else                   segColour = juce::Colour(0xff22EE44);   // green
-
-        if (isPeak)
-            segColour = juce::Colours::white;
-
-        if (lit || isPeak)
-        {
-            // LRX-11: Lit segment — fill with gradient + specular top edge
-            juce::ColourGradient litGrad(
-                segColour.withAlpha(0.95f), segX, segTop,
-                segColour.withAlpha(0.60f), segX, segTop + segH, false);
-            g.setGradientFill(litGrad);
-            g.fillRect(segX, segTop, segW, segH);
-
-            // Specular highlight on top edge of lit segment
-            g.setColour(juce::Colours::white.withAlpha(isPeak ? 0.55f : 0.22f));
-            g.fillRect(segX, segTop, segW, 1.f);
-        }
-        else
-        {
-            // Unlit segment — dim cavity colour (barely visible)
-            g.setColour(segColour.withAlpha(0.09f));
-            g.fillRect(segX, segTop, segW, segH);
-        }
-    }
-
-    // Outer frame / bezel edge
+    // Outer frame / bezel.
     g.setColour(juce::Colour(0xff2A2E30));
     g.drawRect(b, 1.f);
 }

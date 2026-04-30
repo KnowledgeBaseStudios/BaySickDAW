@@ -73,7 +73,7 @@ events:
       The output was:
       0
       MSBuild version 18.5.4+cb4e32d21 for .NET Framework
-      Build started 4/28/2026 4:11:26 PM.
+      Build started 4/29/2026 8:37:10 PM.
       
       Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\4.3.1\\CompilerIdC\\CompilerIdC.vcxproj" on node 1 (default targets).
       PrepareForBuild:
@@ -102,7 +102,7 @@ events:
           0 Warning(s)
           0 Error(s)
       
-      Time Elapsed 00:00:00.54
+      Time Elapsed 00:00:00.66
       
       
       Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "CompilerIdC.exe"
@@ -612,7 +612,7 @@ events:
       The output was:
       0
       MSBuild version 18.5.4+cb4e32d21 for .NET Framework
-      Build started 4/28/2026 4:11:27 PM.
+      Build started 4/29/2026 8:37:11 PM.
       
       Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\4.3.1\\CompilerIdCXX\\CompilerIdCXX.vcxproj" on node 1 (default targets).
       PrepareForBuild:
@@ -641,7 +641,7 @@ events:
           0 Warning(s)
           0 Error(s)
       
-      Time Elapsed 00:00:00.45
+      Time Elapsed 00:00:00.46
       
       
       Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.exe"
@@ -951,8 +951,8 @@ events:
     checks:
       - "Detecting C compiler ABI info"
     directories:
-      source: "C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-borj03"
-      binary: "C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-borj03"
+      source: "C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-8yoll8"
+      binary: "C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-8yoll8"
     cmakeVariables:
       CMAKE_CXX_STDLIB_MODULES_JSON: ""
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS"
@@ -962,33 +962,33 @@ events:
       variable: "CMAKE_C_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-borj03'
+        Change Dir: 'C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-8yoll8'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_ba7ca.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_13c92.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild version 18.5.4+cb4e32d21 for .NET Framework
-        Build started 4/28/2026 4:11:27 PM.
+        Build started 4/29/2026 8:37:15 PM.
         
-        Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-borj03\\cmTC_ba7ca.vcxproj" on node 1 (default targets).
+        Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8yoll8\\cmTC_13c92.vcxproj" on node 1 (default targets).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Creating directory "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-borj03\\Debug\\".
-          Creating directory "cmTC_ba7ca.dir\\Debug\\cmTC_ba7ca.tlog\\".
+          Creating directory "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8yoll8\\Debug\\".
+          Creating directory "cmTC_13c92.dir\\Debug\\cmTC_13c92.tlog\\".
         InitializeBuildStatus:
-          Creating "cmTC_ba7ca.dir\\Debug\\cmTC_ba7ca.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
-          Touching "cmTC_ba7ca.dir\\Debug\\cmTC_ba7ca.tlog\\unsuccessfulbuild".
+          Creating "cmTC_13c92.dir\\Debug\\cmTC_13c92.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_13c92.dir\\Debug\\cmTC_13c92.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_ba7ca.dir\\Debug\\\\" /Fd"cmTC_ba7ca.dir\\Debug\\vc145.pdb" /external:W1 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCCompilerABI.c"
-          Microsoft (R) C/C++ Optimizing Compiler Version 19.50.35729 for x64
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_13c92.dir\\Debug\\\\" /Fd"cmTC_13c92.dir\\Debug\\vc145.pdb" /external:W1 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCCompilerABI.c"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.50.35730 for x64
           Copyright (C) Microsoft Corporation.  All rights reserved.
-          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_ba7ca.dir\\Debug\\\\" /Fd"cmTC_ba7ca.dir\\Debug\\vc145.pdb" /external:W1 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCCompilerABI.c"
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_13c92.dir\\Debug\\\\" /Fd"cmTC_13c92.dir\\Debug\\vc145.pdb" /external:W1 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCCompilerABI.c"
           CMakeCCompilerABI.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-borj03\\Debug\\cmTC_ba7ca.exe" /INCREMENTAL /ILK:"cmTC_ba7ca.dir\\Debug\\cmTC_ba7ca.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-borj03/Debug/cmTC_ba7ca.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-borj03/Debug/cmTC_ba7ca.lib" /MACHINE:X64  /machine:x64 cmTC_ba7ca.dir\\Debug\\CMakeCCompilerABI.obj
-          cmTC_ba7ca.vcxproj -> C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-borj03\\Debug\\cmTC_ba7ca.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8yoll8\\Debug\\cmTC_13c92.exe" /INCREMENTAL /ILK:"cmTC_13c92.dir\\Debug\\cmTC_13c92.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-8yoll8/Debug/cmTC_13c92.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-8yoll8/Debug/cmTC_13c92.lib" /MACHINE:X64  /machine:x64 cmTC_13c92.dir\\Debug\\CMakeCCompilerABI.obj
+          cmTC_13c92.vcxproj -> C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8yoll8\\Debug\\cmTC_13c92.exe
         FinalizeBuildStatus:
-          Deleting file "cmTC_ba7ca.dir\\Debug\\cmTC_ba7ca.tlog\\unsuccessfulbuild".
-          Touching "cmTC_ba7ca.dir\\Debug\\cmTC_ba7ca.tlog\\cmTC_ba7ca.lastbuildstate".
-        Done Building Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-borj03\\cmTC_ba7ca.vcxproj" (default targets).
+          Deleting file "cmTC_13c92.dir\\Debug\\cmTC_13c92.tlog\\unsuccessfulbuild".
+          Touching "cmTC_13c92.dir\\Debug\\cmTC_13c92.tlog\\cmTC_13c92.lastbuildstate".
+        Done Building Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8yoll8\\cmTC_13c92.vcxproj" (default targets).
         
         Build succeeded.
             0 Warning(s)
@@ -1023,7 +1023,7 @@ events:
       - "CMakeLists.txt:2 (project)"
     message: |
       Running the C compiler's linker: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/HostX64/x64/link.exe" "-v"
-      Microsoft (R) Incremental Linker Version 14.50.35729.0
+      Microsoft (R) Incremental Linker Version 14.50.35730.0
       Copyright (C) Microsoft Corporation.  All rights reserved.
   -
     kind: "try_compile-v1"
@@ -1034,8 +1034,8 @@ events:
     checks:
       - "Detecting CXX compiler ABI info"
     directories:
-      source: "C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-g1cizd"
-      binary: "C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-g1cizd"
+      source: "C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-3okyd6"
+      binary: "C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-3okyd6"
     cmakeVariables:
       CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /EHsc"
       CMAKE_CXX_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
@@ -1046,39 +1046,39 @@ events:
       variable: "CMAKE_CXX_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-g1cizd'
+        Change Dir: 'C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-3okyd6'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_3f676.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_8480a.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild version 18.5.4+cb4e32d21 for .NET Framework
-        Build started 4/28/2026 4:11:28 PM.
+        Build started 4/29/2026 8:37:15 PM.
         
-        Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-g1cizd\\cmTC_3f676.vcxproj" on node 1 (default targets).
+        Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-3okyd6\\cmTC_8480a.vcxproj" on node 1 (default targets).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Creating directory "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-g1cizd\\Debug\\".
-          Creating directory "cmTC_3f676.dir\\Debug\\cmTC_3f676.tlog\\".
+          Creating directory "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-3okyd6\\Debug\\".
+          Creating directory "cmTC_8480a.dir\\Debug\\cmTC_8480a.tlog\\".
         InitializeBuildStatus:
-          Creating "cmTC_3f676.dir\\Debug\\cmTC_3f676.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
-          Touching "cmTC_3f676.dir\\Debug\\cmTC_3f676.tlog\\unsuccessfulbuild".
+          Creating "cmTC_8480a.dir\\Debug\\cmTC_8480a.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_8480a.dir\\Debug\\cmTC_8480a.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_3f676.dir\\Debug\\\\" /Fd"cmTC_3f676.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
-          Microsoft (R) C/C++ Optimizing Compiler Version 19.50.35729 for x64
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_8480a.dir\\Debug\\\\" /Fd"cmTC_8480a.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.50.35730 for x64
           Copyright (C) Microsoft Corporation.  All rights reserved.
-          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_3f676.dir\\Debug\\\\" /Fd"cmTC_3f676.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_8480a.dir\\Debug\\\\" /Fd"cmTC_8480a.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
           CMakeCXXCompilerABI.cpp
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-g1cizd\\Debug\\cmTC_3f676.exe" /INCREMENTAL /ILK:"cmTC_3f676.dir\\Debug\\cmTC_3f676.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-g1cizd/Debug/cmTC_3f676.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-g1cizd/Debug/cmTC_3f676.lib" /MACHINE:X64  /machine:x64 cmTC_3f676.dir\\Debug\\CMakeCXXCompilerABI.obj
-          cmTC_3f676.vcxproj -> C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-g1cizd\\Debug\\cmTC_3f676.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-3okyd6\\Debug\\cmTC_8480a.exe" /INCREMENTAL /ILK:"cmTC_8480a.dir\\Debug\\cmTC_8480a.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-3okyd6/Debug/cmTC_8480a.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/CMakeScratch/TryCompile-3okyd6/Debug/cmTC_8480a.lib" /MACHINE:X64  /machine:x64 cmTC_8480a.dir\\Debug\\CMakeCXXCompilerABI.obj
+          cmTC_8480a.vcxproj -> C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-3okyd6\\Debug\\cmTC_8480a.exe
         FinalizeBuildStatus:
-          Deleting file "cmTC_3f676.dir\\Debug\\cmTC_3f676.tlog\\unsuccessfulbuild".
-          Touching "cmTC_3f676.dir\\Debug\\cmTC_3f676.tlog\\cmTC_3f676.lastbuildstate".
-        Done Building Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-g1cizd\\cmTC_3f676.vcxproj" (default targets).
+          Deleting file "cmTC_8480a.dir\\Debug\\cmTC_8480a.tlog\\unsuccessfulbuild".
+          Touching "cmTC_8480a.dir\\Debug\\cmTC_8480a.tlog\\cmTC_8480a.lastbuildstate".
+        Done Building Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\CMakeFiles\\CMakeScratch\\TryCompile-3okyd6\\cmTC_8480a.vcxproj" (default targets).
         
         Build succeeded.
             0 Warning(s)
             0 Error(s)
         
-        Time Elapsed 00:00:00.42
+        Time Elapsed 00:00:00.43
         
       exitCode: 0
   -
@@ -1107,7 +1107,7 @@ events:
       - "CMakeLists.txt:2 (project)"
     message: |
       Running the CXX compiler's linker: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/HostX64/x64/link.exe" "-v"
-      Microsoft (R) Incremental Linker Version 14.50.35729.0
+      Microsoft (R) Incremental Linker Version 14.50.35730.0
       Copyright (C) Microsoft Corporation.  All rights reserved.
   -
     kind: "try_compile-v1"
@@ -1129,37 +1129,37 @@ events:
       stdout: |
         Change Dir: 'C:/Users/jeffm/Documents/BaySickDAW/build/juce_build/CMakeFiles/CMakeTmp'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_5ada2.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_0e179.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild version 18.5.4+cb4e32d21 for .NET Framework
-        Build started 4/28/2026 4:11:29 PM.
+        Build started 4/29/2026 8:37:16 PM.
         
-        Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\cmTC_5ada2.vcxproj" on node 1 (default targets).
+        Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\cmTC_0e179.vcxproj" on node 1 (default targets).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
           Creating directory "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\Debug\\".
-          Creating directory "cmTC_5ada2.dir\\Debug\\cmTC_5ada2.tlog\\".
+          Creating directory "cmTC_0e179.dir\\Debug\\cmTC_0e179.tlog\\".
         InitializeBuildStatus:
-          Creating "cmTC_5ada2.dir\\Debug\\cmTC_5ada2.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
-          Touching "cmTC_5ada2.dir\\Debug\\cmTC_5ada2.tlog\\unsuccessfulbuild".
+          Creating "cmTC_0e179.dir\\Debug\\cmTC_0e179.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_0e179.dir\\Debug\\cmTC_0e179.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /std:c++17 /Fo"cmTC_5ada2.dir\\Debug\\\\" /Fd"cmTC_5ada2.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue C:\\Users\\jeffm\\Documents\\BaySickDAW\\juce\\extras\\Build\\CMake\\juce_runtime_arch_detection.cpp
-          Microsoft (R) C/C++ Optimizing Compiler Version 19.50.35729 for x64
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /std:c++17 /Fo"cmTC_0e179.dir\\Debug\\\\" /Fd"cmTC_0e179.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue C:\\Users\\jeffm\\Documents\\BaySickDAW\\juce\\extras\\Build\\CMake\\juce_runtime_arch_detection.cpp
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.50.35730 for x64
           Copyright (C) Microsoft Corporation.  All rights reserved.
-          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /std:c++17 /Fo"cmTC_5ada2.dir\\Debug\\\\" /Fd"cmTC_5ada2.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue C:\\Users\\jeffm\\Documents\\BaySickDAW\\juce\\extras\\Build\\CMake\\juce_runtime_arch_detection.cpp
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /std:c++17 /Fo"cmTC_0e179.dir\\Debug\\\\" /Fd"cmTC_0e179.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue C:\\Users\\jeffm\\Documents\\BaySickDAW\\juce\\extras\\Build\\CMake\\juce_runtime_arch_detection.cpp
           juce_runtime_arch_detection.cpp
-        C:\\Users\\jeffm\\Documents\\BaySickDAW\\juce\\extras\\Build\\CMake\\juce_runtime_arch_detection.cpp(56,1): error C1189: #error:  JUCE_ARCH x86_64 [C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\cmTC_5ada2.vcxproj]
-        Done Building Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\cmTC_5ada2.vcxproj" (default targets) -- FAILED.
+        C:\\Users\\jeffm\\Documents\\BaySickDAW\\juce\\extras\\Build\\CMake\\juce_runtime_arch_detection.cpp(56,1): error C1189: #error:  JUCE_ARCH x86_64 [C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\cmTC_0e179.vcxproj]
+        Done Building Project "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\cmTC_0e179.vcxproj" (default targets) -- FAILED.
         
         Build FAILED.
         
-        "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\cmTC_5ada2.vcxproj" (default target) (1) ->
+        "C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\cmTC_0e179.vcxproj" (default target) (1) ->
         (ClCompile target) -> 
-          C:\\Users\\jeffm\\Documents\\BaySickDAW\\juce\\extras\\Build\\CMake\\juce_runtime_arch_detection.cpp(56,1): error C1189: #error:  JUCE_ARCH x86_64 [C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\cmTC_5ada2.vcxproj]
+          C:\\Users\\jeffm\\Documents\\BaySickDAW\\juce\\extras\\Build\\CMake\\juce_runtime_arch_detection.cpp(56,1): error C1189: #error:  JUCE_ARCH x86_64 [C:\\Users\\jeffm\\Documents\\BaySickDAW\\build\\juce_build\\CMakeFiles\\CMakeTmp\\cmTC_0e179.vcxproj]
         
             0 Warning(s)
             1 Error(s)
         
-        Time Elapsed 00:00:00.28
+        Time Elapsed 00:00:00.24
         
       exitCode: 1
 ...

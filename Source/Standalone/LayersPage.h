@@ -87,6 +87,17 @@ public:
     void requestDelete    ();
     juce::String exportLayerState() const;
     void         importLayerState (const juce::String& xml);
+
+    // ── G-7 (2026-04-29): Page Preset save/load ──────────────────────────────
+    // Captures the full chain (engine + strip params + insert rack + post-EQ)
+    // and writes / restores it via PagePresetIO.  Distinct from savePatchAs
+    // (engine-only).  Surfaced on the page menu bar's hamburger ≡.
+    // onSaved fires only on successful save (cancel/empty-name aborts the
+    // continuation).  Used by requestDelete's "Save Page Preset & Delete"
+    // button to chain delete after save completes.
+    void savePagePreset   (std::function<void()> onSaved = {});
+    void loadPagePreset   (const juce::File& xml);
+    void showPageActionsMenu (juce::Component* anchor);
     bool isLocked() const { return mLocked; }
     void setLocked(bool l);   // D2: fires onLockChanged so ribbon + UI reflect the new state
     std::function<void()>           onDeleteRequested;

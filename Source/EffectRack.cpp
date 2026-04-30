@@ -277,6 +277,10 @@ void EffectRack::getStateInformation(juce::MemoryBlock& dest)
         slotTree.setProperty("index",    i,                              nullptr);
         slotTree.setProperty("type",     (int)mSlots[i].type,            nullptr);
         slotTree.setProperty("bypassed", mSlots[i].bypassed,             nullptr);
+        // 2026-04-30: per-slot output Vol knob (post-effect gain in dB).
+        // Was missing from save — every project load reset every slot's
+        // Vol knob to 0 dB.  Range -24..+12 dB per EditorPanelBase.
+        slotTree.setProperty("outputGainDb", mSlots[i].outputGainDb,    nullptr);
 
         if (mSlots[i].effect)
         {
@@ -312,11 +316,15 @@ void EffectRack::setStateInformation(const void* data, int sz)
 
             auto type = (EffectType)(int)child.getProperty("type", 0);
             bool byp  = (bool)(int)child.getProperty("bypassed", 0);
+            // 2026-04-30: restore per-slot Vol knob (default 0 dB if the
+            // saved project predates this fix and didn't write it).
+            float vol = (float)(double)child.getProperty("outputGainDb", 0.0);
 
             if (type != EffectType::None)
             {
                 loadEffect(slotIdx, type);
                 setSlotBypassed(slotIdx, byp);
+                setSlotOutputGain(slotIdx, vol);
 
                 juce::String b64 = child.getProperty("data", "");
                 if (b64.isNotEmpty() && mSlots[slotIdx].effect)

@@ -396,7 +396,14 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     mAmpRAtt         = std::make_unique<SliderAtt> (apvts, pid("amp_r"),          mAmpR);
     mPhaseStartAtt   = std::make_unique<SliderAtt> (apvts, pid("phase_start"),    mPhaseStart);
     mPhaseRandAtt    = std::make_unique<SliderAtt> (apvts, pid("phase_rand"),     mPhaseRand);
-    // S4: lfo_vel/vol/pitch attachments removed with the params.
+    // 2026-04-30: T2-B LFO depth shortcuts restored after the S4 strip.
+    // Three global sliders write LFO source depth on per-voice destinations
+    // (vol → Volume target / pitch → Pitch target / vel → note-on velocity
+    // scaling).  Bipolar -1..+1; replace semantics override any per-target
+    // depth set in the in-player Mod Editor.
+    mLfoVelAtt   = std::make_unique<SliderAtt> (apvts, pid ("lfo_vel"),   mLfoVel);
+    mLfoVolAtt   = std::make_unique<SliderAtt> (apvts, pid ("lfo_vol"),   mLfoVol);
+    mLfoPitchAtt = std::make_unique<SliderAtt> (apvts, pid ("lfo_pitch"), mLfoPitch);
     mStrumDirAtt     = std::make_unique<SliderAtt> (apvts, pid("strum_dir"),      mStrumDirSlider);
     mStrumTimeAtt    = std::make_unique<SliderAtt> (apvts, pid("strum_time"),     mStrumTime);
     mStrumTnsAtt     = std::make_unique<SliderAtt> (apvts, pid("strum_tns"),      mStrumTns);
@@ -458,7 +465,10 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     wireMeta (mAmpR,           "amp_r",            "Amp Release (seconds)");
     wireMeta (mPhaseStart,     "phase_start",      "Phase Start position (0..1)");
     wireMeta (mPhaseRand,      "phase_rand",       "Phase Randomisation amount (0..1)");
-    // S4: lfo_vel / vol / pitch wireMeta removed (params ripped).
+    // 2026-04-30: T2-B LFO depth shortcuts restored.
+    wireMeta (mLfoVel,         "lfo_vel",          "LFO Vel Depth (-1..+1) - global LFO scaling on note-on velocity");
+    wireMeta (mLfoVol,         "lfo_vol",          "LFO Vol Depth (-1..+1) - global LFO depth on Volume target");
+    wireMeta (mLfoPitch,       "lfo_pitch",        "LFO Pitch Depth (-1..+1) - global LFO depth on Pitch target");
     wireMeta (mStrumDirSlider, "strum_dir",        "Strum Direction (0 up, 1 down, 2 random)");
     wireMeta (mStrumTime,      "strum_time",       "Strum Time - total stagger (seconds)");
     wireMeta (mStrumTns,       "strum_tns",        "Strum Tension - curve (-1 end / 0 linear / +1 start)");
@@ -597,6 +607,7 @@ void HarmlessEditor::paint (juce::Graphics& g)
     drawSection (g, mPitchSec,     "PITCH");
     drawSection (g, mLFOSec,       "LFO MOD");
 
+
     // Top-right 5x2 grid: Flt1 | Flt2, Timbre | Blur/Prism, AmpEnv | FX.
     drawSection (g, mFlt1Sec,      "FILTER 1");
     drawSection (g, mFlt2Sec,      "FILTER 2");
@@ -665,6 +676,11 @@ void HarmlessEditor::paint (juce::Graphics& g)
     knobLabel (g, mPhaseRand,    "RAND");
     knobLabel (g, mLfoRate,  "RATE");
     knobLabel (g, mLfoShape, "SHAPE");
+    // 2026-04-30: T2-B LFO depth shortcuts — labels under each slider, same
+    // knobLabel convention as everything else in the editor.
+    knobLabel (g, mLfoVel,   "VEL");
+    knobLabel (g, mLfoVol,   "VOL");
+    knobLabel (g, mLfoPitch, "PITCH");
     knobLabel (g, mStrumDirSlider,"DIR");
     knobLabel (g, mStrumTime,    "TIME");
     knobLabel (g, mStrumTns,     "TNS");
@@ -827,28 +843,45 @@ void HarmlessEditor::resized()
     {
         auto r = mTopMidBounds.reduced (6, 4);
         const int avail  = r.getHeight();
-        // Reserve Pitch + LFO Mod each at the height of Row B in top-left
-        // (0.18 × top-area ≈ Vib/Legato-box height). Unison gets the rest.
+        // 2026-04-30 — Unison shrinks to free space for the LFO Mod's new
+        // 2-row layout, per Jeff's spec:
+        //   • Voices knob: kKnob (44) → kKnobSm (32) → saves 12 px
+        //   • Faders: cut to 75 % of their previous length → saves ~25 %
+        //     of the leftover-fader height inside the Unison box.
+        // The recovered space is added to lfoH so the LFO section fits
+        // [RATE | SHAPE | TEMPO] above [VEL | VOL | PITCH].
         const int rowBHeq = int (avail * 0.18f);
         const int pitchH  = rowBHeq;
-        const int lfoH    = rowBHeq;
+        // Compute what the original (pre-shrink) Unison fader height was,
+        // then shave 25 % off — that's our "fader saving" pixel count.
+        const int origUnisonH      = avail - rowBHeq - rowBHeq - 4;
+        const int origUnisonInnerH = origUnisonH - 28;   // reduce(6,14)
+        // Original layout consumed: kKnob(voices) + 8 + kKnobSm(type) + 2
+        //                         + 18(alt button) + 2 (advance gap) → 76.
+        const int origFaderH = juce::jmax (10, origUnisonInnerH - 76);
+        const int voicesSaving = kKnob - kKnobSm;        // 12 px
+        const int faderSaving  = origFaderH / 4;         // 25 % of length
+        const int lfoH    = rowBHeq + voicesSaving + faderSaving;
         const int unisonH = avail - pitchH - lfoH - 4;   // - 2 gaps of 2
 
-        // Unison (top). Knob + button row keeps its current size; faders
-        // shrink to fit the remaining height.
+        // Unison (top).  2026-04-30: voices knob shrinks from kKnob (44)
+        // to kKnobSm (32) — same size as every other knob in the editor.
+        // Faders auto-shrink because the section's overall height was
+        // reduced by voicesSaving + faderSaving above.
         auto unisonRect = r.removeFromTop (unisonH);
         mUnisonSec = unisonRect;
         {
             auto ur = unisonRect.reduced (6, 14);
-            int x = ur.getX() + (ur.getWidth() - kKnob) / 2;
-            mUnisonVoices.setBounds (x, ur.getY(), kKnob, kKnob);
-            ur.removeFromTop (kKnob + 8);
+            int x = ur.getX() + (ur.getWidth() - kKnobSm) / 2;
+            mUnisonVoices.setBounds (x, ur.getY(), kKnobSm, kKnobSm);
+            ur.removeFromTop (kKnobSm + 8);
             mUnisonType  .setBounds (ur.getX(), ur.getY(), ur.getWidth(), kKnobSm);
             ur.removeFromTop (kKnobSm + 2);
             mUnisonAltBtn.setBounds (ur.getX(), ur.getY(), ur.getWidth(), 18);
             ur.removeFromTop (20);
-            // Remaining height -> 3 vertical faders. Will be short in the
-            // compressed layout, per design (knobs/button keep their size).
+            // Remaining height -> 3 vertical faders.  Length is now ~75 %
+            // of the previous version since the section was shrunk by
+            // faderSaving above.  Plenty of throw for the user.
             const int sliderW = (ur.getWidth() - 8) / 3;
             const int sliderH = juce::jmax (10, ur.getHeight() - 2);
             mUnisonPan  .setBounds (ur.getX(),                   ur.getY(), sliderW, sliderH);
@@ -868,13 +901,50 @@ void HarmlessEditor::resized()
         });
         r.removeFromTop (2);
 
-        // LFO Mod (bottom): RATE / SHAPE / TEMPO — global macro.
+        // LFO Mod (bottom): two-row layout.
+        //   Row 1: RATE / SHAPE / TEMPO — global macro carriers.
+        //   Row 2: VEL / VOL / PITCH — depth shortcuts that route to the
+        //          Volume + Pitch mod-registry targets and the noteOn
+        //          velocity-scaling path.
+        // 2026-04-30: T2-B Vel/Vol/Pitch depth sliders restored after the
+        // S4 strip.  Section height bumped to 0.32 × avail (steals from
+        // Unison's overlong faders) so two rows fit cleanly inside the
+        // existing section title border.
         mLFOSec = r;
-        layoutRow (mLFOSec.reduced (4, 14), {
-            { &mLfoRate,     kKnobSm, kKnobSm },
-            { &mLfoShape,    kKnobSm, kKnobSm },
-            { &mLfoTempoBtn, 52,      24      },
-        });
+        {
+            // Inset for section title (matches the single-row version).
+            auto inner = mLFOSec.reduced (4, 14);
+            // 2026-04-30: two-row LFO Mod layout.  Row-1 RATE/SHAPE/TEMPO
+            // already gets its labels via knobLabel under each control.
+            // Row-2 sliders get the same — labels are drawn 1 px below the
+            // slider's bottom (knobLabel convention), so we reserve 11 px
+            // at the bottom of row 2 (10 px label height + 1 px gap) and
+            // size the slider height to fill what's left.
+            const int rowGap     = 4;
+            const int row1H      = kKnobSm;
+            constexpr int kLblH  = 11;   // label band beneath each slider
+
+            auto row1 = inner.removeFromTop (row1H);
+            layoutRow (row1, {
+                { &mLfoRate,     kKnobSm, kKnobSm },
+                { &mLfoShape,    kKnobSm, kKnobSm },
+                { &mLfoTempoBtn, 52,      24      },
+            });
+            inner.removeFromTop (rowGap);
+
+            // Row 2 — three vertical depth sliders.  Trim 11 px off the
+            // bottom of the layout rect so layoutRow's vertical centering
+            // never reaches into the label band, and size sliderH to fill
+            // the trimmed rect.  Net: slider's bottom edge = inner.bottom
+            // - 11 px, label rendered by knobLabel sits cleanly below.
+            auto sliderArea = inner.withTrimmedBottom (kLblH);
+            const int sliderH = juce::jmax (12, sliderArea.getHeight());
+            layoutRow (sliderArea, {
+                { &mLfoVel,   22, sliderH },
+                { &mLfoVol,   22, sliderH },
+                { &mLfoPitch, 22, sliderH },
+            });
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

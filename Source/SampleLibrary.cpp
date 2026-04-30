@@ -19,6 +19,37 @@ juce::File SampleLibrary::getCoreLibraryDir()
                .getChildFile ("BaySickDAW/CoreLibrary");
 }
 
+juce::File SampleLibrary::getUserSamplesDir()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+              .getChildFile ("BaySickDAW")
+              .getChildFile ("My Samples");
+}
+
+void SampleLibrary::ensureUserSamplesDir()
+{
+    auto dir = getUserSamplesDir();
+    if (! dir.isDirectory())
+        dir.createDirectory();
+
+    // Place a shortcut to the Core Library inside My Samples so the user
+    // can navigate from the OS file picker into factory content with one
+    // click, without leaving the dialog.  Windows: .lnk; macOS: alias;
+    // Linux: not supported by JUCE (silently skipped).
+   #if JUCE_WINDOWS
+    const juce::String linkName = "Core Library.lnk";
+   #else
+    const juce::String linkName = "Core Library";   // macOS alias has no extension
+   #endif
+    const auto shortcut = dir.getChildFile (linkName);
+    if (! shortcut.exists())
+    {
+        const auto coreLib = getCoreLibraryDir();
+        if (coreLib.isDirectory())
+            coreLib.createShortcut ("BaySickDAW Core Library", shortcut);
+    }
+}
+
 bool SampleLibrary::isDrumPack (const juce::String& folderName)
 {
     // Drum heuristic: substring match (case-insensitive) on either "Drums"

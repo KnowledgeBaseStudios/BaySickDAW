@@ -523,8 +523,13 @@ GlobalTransportBar::~GlobalTransportBar()
 
 double GlobalTransportBar::getBPM() const
 {
-    double v = mBpmField->getText().getDoubleValue();
-    return (v >= 20.0 && v <= 300.0) ? v : 120.0;
+    // 2026-04-30: clamp to range instead of snapping to 120.  Old behaviour
+    // silently dropped a typed value of 19 or 301 to 120 with no feedback —
+    // user couldn't tell whether their input was accepted.  Clamp keeps the
+    // intent (limit value to musical range) but preserves the closest legal
+    // value rather than reverting to default.
+    const double v = mBpmField->getText().getDoubleValue();
+    return juce::jlimit (20.0, 300.0, v);
 }
 
 void GlobalTransportBar::setPlayState(bool playing, bool paused)
@@ -610,6 +615,21 @@ void GlobalTransportBar::timerCallback()
     // Stop button
     mStopBtn->setColour(juce::TextButton::buttonColourId,
         playing ? VC::Highlight.withAlpha(0.45f) : VC::Accent);
+
+    // 2026-04-30: re-sync visual toggle state from processor truth (after
+    // project load, atomics may have changed without the buttons knowing).
+    if (onGetSongLoopMode && mSongLoopBtn)
+    {
+        const bool want = onGetSongLoopMode();
+        if (mSongLoopBtn->getToggleState() != want)
+            mSongLoopBtn->setToggleState (want, juce::dontSendNotification);
+    }
+    if (onGetMetronomeEnabled && mMetronomeBtn)
+    {
+        const bool want = onGetMetronomeEnabled();
+        if (mMetronomeBtn->getToggleState() != want)
+            mMetronomeBtn->setToggleState (want, juce::dontSendNotification);
+    }
 
     // Metronome button + arrow
     mMetronomeBtn->setColour(juce::TextButton::buttonOnColourId,  VC::Blue.withAlpha(0.5f));

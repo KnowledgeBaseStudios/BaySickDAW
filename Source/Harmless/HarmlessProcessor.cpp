@@ -471,6 +471,24 @@ HarmlessProcessor::createLayout (const juce::String& p)
     layout.add (std::make_unique<juce::AudioParameterInt>  (vid (p + "lfo_shape"), "LFO Shape", 0, 3, 0));
     layout.add (std::make_unique<juce::AudioParameterBool> (vid (p + "lfo_tempo"), "LFO Tempo Sync", true));
 
+    // 2026-04-30: re-add T2-B LFO depth shortcuts that were ripped in S4.
+    // Three global sliders that set the LFO source DEPTH on specific mod
+    // registry targets (vol → Volume, pitch → Pitch).  Bipolar -1..+1 so
+    // negative depths invert the LFO swing relative to the user's setting.
+    // lfo_vel routes outside the registry — see HarmlessSynth note-on
+    // velocity scaling below — because the registry has no Velocity target
+    // (velocity is a one-shot at note-on, not a continuous modulator).
+    // Replace semantics: moving these global sliders OVERWRITES any
+    // per-target depth the user set in the in-player Mod Editor for that
+    // destination.  Mirrors the existing applyGlobalLfoToAllTargets pattern
+    // for lfo_rate/lfo_shape — global sliders clobber per-target settings.
+    layout.add (std::make_unique<juce::AudioParameterFloat> (vid (p + "lfo_vel"),
+        "LFO Vel Depth",   juce::NormalisableRange<float> (-1.0f, 1.0f), 0.0f));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (vid (p + "lfo_vol"),
+        "LFO Vol Depth",   juce::NormalisableRange<float> (-1.0f, 1.0f), 0.0f));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (vid (p + "lfo_pitch"),
+        "LFO Pitch Depth", juce::NormalisableRange<float> (-1.0f, 1.0f), 0.0f));
+
     // ── Part selector + vel link ──────────────────────────────────────────────
     layout.add (std::make_unique<juce::AudioParameterInt> (
         vid (p + "part_sel"), "Part Select", 0, 1, 0));
@@ -919,7 +937,29 @@ void HarmlessProcessor::updateFromApvts()
         mCache.lfoRateIdx = lfoRateIdx;
         mCache.lfoShape   = lfoShape;
         mCache.lfoTempo   = lfoTempo ? 1 : 0;
+
+        // 2026-04-30: T2-B lfo_vel uses a separate global LFO clock since
+        // velocity isn't a mod registry target.  Mirror the rate/shape into
+        // HarmlessSynth so its noteOn-velocity-scaling LFO ticks at the
+        // same period as the registry's LFO.  Beats↔seconds conversion
+        // happens at tick time using the latest bps so BPM changes track.
+        static const float kLens[13] = {
+            0.125f, 0.25f, 0.375f, 0.5f, 0.625f, 0.75f, 0.875f,
+            1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f
+        };
+        const float cycleLen = kLens[juce::jlimit (0, 12, lfoRateIdx)];
+        mSynth.setGlobalLfoVelRate (cycleLen, lfoShape, lfoTempo);
     }
+
+    // 2026-04-30: T2-B LFO depth shortcuts.  Bipolar -1..+1.  Each routes
+    // to one specific destination — vol→Volume target, pitch→Pitch target,
+    // vel→note-on velocity scaling (handled inside HarmlessSynth).
+    const float lfoVel   = getf ("lfo_vel");
+    const float lfoVol   = getf ("lfo_vol");
+    const float lfoPitch = getf ("lfo_pitch");
+    if (lfoVel   != mCache.lfoVel)   { mSynth.setGlobalLfoVelDepth   (lfoVel);   mCache.lfoVel   = lfoVel; }
+    if (lfoVol   != mCache.lfoVol)   { mSynth.applyGlobalLfoVolDepth (lfoVol);   mCache.lfoVol   = lfoVol; }
+    if (lfoPitch != mCache.lfoPitch) { mSynth.applyGlobalLfoPitchDepth (lfoPitch); mCache.lfoPitch = lfoPitch; }
 
     // ── 2026-04-19 (S2 SLA) Blur extensions (S3.5: A-only) ───────────────────
     const float bT = getf ("blur_time"), bH = getf ("blur_harm");

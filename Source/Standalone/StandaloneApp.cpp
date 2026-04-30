@@ -90,7 +90,7 @@ juce::Optional<juce::AudioPlayHead::PositionInfo> StandalonePlayHead::getPositio
     info.setBpm(mBPM.load());
     info.setPpqPosition(mPPQPos.load());
     info.setIsPlaying(mPlaying.load());
-    info.setIsRecording(false);
+    info.setIsRecording(mRecording.load());
     info.setTimeSignature(juce::AudioPlayHead::TimeSignature{4,4});
     return info;
 }

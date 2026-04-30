@@ -2,19 +2,34 @@
 
 namespace
 {
-    // dB range for the level fader
+    // dB range for the level fader.
+    // 2026-04-30: max dropped +10 → +5.6 dB (FL-parity ish — FL caps at +5.6).
     constexpr float kFaderMin = -60.0f;
-    constexpr float kFaderMax =  10.0f;
+    constexpr float kFaderMax =   5.6f;
     constexpr float kFaderDef =   0.0f;
 
-    // Row heights
+    // Row heights.
+    // 2026-04-30: Pan row tightened 36→28, Width row tightened 28→24
+    // (saves 12 px total for the meter to grow into).
     constexpr int kNameH    = 20;
-    constexpr int kMeterH   = 80;
+    constexpr int kMeterH   = 80;   // unused now — meter is right-column flex
     constexpr int kMSH      = 20;   // Mute / Solo row
-    constexpr int kPanH     = 36;
+    constexpr int kPanH     = 28;   // was 36
     constexpr int kFaderH   = 100;
     constexpr int kDbH      = 16;
     constexpr int kPadV     = 4;    // vertical padding between rows
+
+    // 2026-04-30: meter is a 28 px wide vertical L/R bar in the strip's
+    // right column (Jeff's spec).  Bar spans from below the name label down
+    // to above the dB-readout label, so the strip top + bottom regions show
+    // the strip's own colour, framing the meter as one piece.
+    constexpr int kMeterColW = 28;
+    constexpr int kMeterColGap = 2;   // 2 px between controls column and meter
+
+    // 2026-04-30: fader cap shrunk 57 → 35 (kGuard becomes 17.5 each side).
+    // Used for C-overlap: dB label can overlap the fader's bottom kGuard
+    // (dB label's top y = fader bottom y - kFaderBottomGuard).
+    constexpr int kFaderBottomGuard = 18;   // round(35/2) = 17.5 → 18 px
 }
 
 MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
@@ -90,6 +105,18 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
     mPanKnob.setValue(0.0, juce::dontSendNotification);
     mPanKnob.setDoubleClickReturnValue(true, 0.0);
     mPanKnob.setTooltip("Pan (double-click to center)");
+    // 2026-04-30: percent-style popup display on hover/drag (FL parity).
+    // setPopupDisplayEnabled enables the floating popup, textFromValueFunction
+    // formats it as "L 42%", "Center", "R 17%".  Without this, the strip's
+    // pan knob silently spun with no value shown anywhere on screen.
+    mPanKnob.setPopupDisplayEnabled(true, true, nullptr);
+    mPanKnob.textFromValueFunction = [](double v)
+    {
+        if (std::abs(v) < 0.005) return juce::String("Center");
+        return (v < 0 ? juce::String("L ") : juce::String("R "))
+             + juce::String((int) std::round(std::abs(v) * 100.0)) + "%";
+    };
+    mPanKnob.updateText();
     mPanKnob.onValueChange = [this]
     {
         if (!mUpdating && onPanChanged)
@@ -137,6 +164,14 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
     mWidthKnob.setValue(1.0, juce::dontSendNotification);
     mWidthKnob.setDoubleClickReturnValue(true, 1.0);
     mWidthKnob.setTooltip("Stereo width (double-click to reset)");
+    // 2026-04-30: percent popup display.  Width range 0..2 maps to 0%..200%
+    // (1.0 = unchanged stereo).  Same rationale as Pan above.
+    mWidthKnob.setPopupDisplayEnabled(true, true, nullptr);
+    mWidthKnob.textFromValueFunction = [](double v)
+    {
+        return juce::String((int) std::round(v * 100.0)) + "%";
+    };
+    mWidthKnob.updateText();
     addAndMakeVisible(mWidthKnob);
 
     // ── 5F-4a: Arm LED (insert strips only) ─────────────────────────────────
@@ -354,6 +389,11 @@ void MixerTrackStrip::setLevel(float dBFS)
     mMeter.setLevel(dBFS);
 }
 
+void MixerTrackStrip::setStereoLevel(float dBFS_L, float dBFS_R)
+{
+    mMeter.setStereoLevel(dBFS_L, dBFS_R);
+}
+
 void MixerTrackStrip::setFaderDb(float db, bool notify)
 {
     mUpdating = !notify;
@@ -410,9 +450,14 @@ void MixerTrackStrip::paint(juce::Graphics& g)
     g.setColour(VC::Panel);
     g.fillRoundedRectangle(b.toFloat(), 3.0f);
 
-    // Accent top bar (2px) in the strip's color
-    g.setColour(mAccent.withAlpha(0.85f));
-    g.fillRect(b.getX(), b.getY(), b.getWidth(), 2);
+    // Accent top bar in the strip's color.
+    // 2026-04-30: alpha 0.85 → 1.0 + bar height 2 → 3 px so the top stripe
+    // matches the brightness of the bus → first-member neon divider.  The
+    // divider draws at full alpha with a glow halo (line.bright path in
+    // ScrollContent::paintOverChildren), so the strip top used to look
+    // dim by comparison.  Same alpha now reads as one piece.
+    g.setColour(mAccent);
+    g.fillRect(b.getX(), b.getY(), b.getWidth(), 3);
 
     // Right border separator
     g.setColour(VC::Bg);
@@ -439,146 +484,162 @@ void MixerTrackStrip::paint(juce::Graphics& g)
                       kSocketDiam - 2.f, kSocketDiam - 2.f, 1.f);
     }
 
-    // 5F-4a: dBFS tick marks beside the meter (reserved 18px left margin).
-    // DBFSMeter compact mode spans -20..0 dBFS (kFloorCmp = -20, top = 0).
-    {
-        auto mb = mMeter.getBounds();
-        if (mb.getHeight() > 30)
-        {
-            constexpr float kMeterMin = -20.0f;    // matches DBFSMeter::kFloorCmp
-            constexpr float kMeterMax =   0.0f;
-            static const int kLabels[] = { 0, -3, -6, -9, -12, -15, -20 };
-
-            const int tickAreaX = mb.getX() - 18;
-            const int tickX     = mb.getX() - 4;    // tick line end (touches meter)
-            g.setColour(VC::TextDim);
-            g.setFont(juce::Font(7.0f));
-
-            for (int db : kLabels)
-            {
-                const float t = (kMeterMax - (float)db) / (kMeterMax - kMeterMin);
-                const int y   = mb.getY() + (int)(t * mb.getHeight());
-                // Tick line (5 px wide)
-                g.drawLine((float)(tickX - 5), (float)y, (float)tickX, (float)y, 1.0f);
-                // Label
-                g.drawText(juce::String(db), tickAreaX, y - 5, 12, 10,
-                           juce::Justification::centredRight);
-            }
-        }
-    }
+    // 2026-04-30: tick marks are now drawn INSIDE DBFSMeter::paint (tick
+    // labels overlay unlit segments and get covered by lit segments — FL
+    // parity).  The strip used to draw them in an 18 px column to the
+    // left of the meter, but with the meter now in the strip's right
+    // column there's no room for an external tick column anyway.
 }
 
+// 2026-04-30: TWO-COLUMN layout per Jeff's spec.
+//   Top:    name label (full strip width)
+//   Middle: LEFT controls column + RIGHT 28 px meter column
+//   Bottom: dB label (full width, overlapping fader's bottom kGuard) + socket
+// The meter spans the full middle height (top to dB-label-top), and shows
+// strip background above (under the name) and below (around dB label +
+// socket) so it reads as one piece per Jeff's spec.
 void MixerTrackStrip::resized()
 {
-    auto b = getLocalBounds().reduced(3, 4);
-    int y = b.getY();
-    int w = b.getWidth();
-    int x = b.getX();
+    auto outer = getLocalBounds();
 
-    // 5F-4a extra row heights
-    constexpr int kPolH   = 18;   // polarity arrows row
-    constexpr int kWidthH = 28;   // width knob row
+    // Row heights specific to controls column.
+    constexpr int kPolH   = 18;   // polarity row
+    constexpr int kWidthH = 24;   // 2026-04-30 tightened from 28
     constexpr int kUtilH  = 20;   // arm + bypass row
+    constexpr int kSocketRowH = 18;
+    constexpr int kSocketDiam = 12;
 
     const bool polRow    = hasPolarityRow();
     const bool utilRow   = hasUtilityRow();
-    const bool masterRow = (mType == StripType::Master);   // extra Master FX Bypass row
+    const bool masterRow = (mType == StripType::Master);
 
-    // Fixed content (everything except meter and fader — those flex to fill).
-    constexpr int kSocketRowH = 18;  // socket circle + "+" button row at bottom
-    const int fixedContentH = kNameH + kPadV
-                            + kPadV                               // after meter
-                            + kMSH + kPadV                        // Mute + Solo
-                            + 18 + kPadV                          // FX button
-                            + (utilRow ? (kUtilH + kPadV) : 0)    // Arm + Bypass (moved up)
-                            + (masterRow ? (kUtilH + kPadV) : 0)  // Master FX Bypass (Master only)
-                            + kPanH + kPadV
-                            + (polRow ? (kPolH + kPadV) : 0)
-                            + kWidthH + kPadV
-                            + kPadV                               // after fader
-                            + kDbH + kPadV                        // dB label
-                            + kSocketRowH;                        // socket row
+    // ── Top: name label, full strip width ────────────────────────────────────
+    {
+        auto top = outer.removeFromTop(kNameH);
+        mNameLabel.setBounds(top.reduced(3, 0));
+    }
+    outer.removeFromTop(kPadV);
 
-    // Flex space split between meter (~40%) and fader (~60%).
-    const int flexSpace = juce::jmax(120, b.getHeight() - fixedContentH);
-    const int meterH    = juce::jlimit(60, 130, flexSpace * 2 / 5);
-    const int faderH    = juce::jmax(40, flexSpace - meterH);
+    // ── Bottom: socket row + "+" send button, full strip width ──────────────
+    {
+        auto socketRow = outer.removeFromBottom(kSocketRowH);
+        const int socketCx = socketRow.getX() + 3 + kSocketDiam / 2;
+        const int socketCy = socketRow.getY() + kSocketRowH / 2;
+        mSocketCentre = { socketCx, socketCy };
+        mAddSendBtn.setBounds(socketRow.getX() + kSocketDiam + 8, socketRow.getY(),
+                              socketRow.getWidth() - kSocketDiam - 11, kSocketRowH);
+    }
+    outer.removeFromBottom(kPadV);
 
-    // Name
-    mNameLabel.setBounds(x, y, w, kNameH);
-    y += kNameH + kPadV;
+    // `outer` is now the MIDDLE area between name+pad on top and socket+pad
+    // on bottom.  Reserve dB-label height at the bottom of the middle area
+    // and split the remaining middle into LEFT controls + RIGHT meter cols.
+    const int middleBottom = outer.getBottom();
+    const int dbLabelTopY  = middleBottom - kDbH;
 
-    // Meter — leave 18px on the left for dB scale (drawn in paint())
-    constexpr int kDbTickW = 18;
-    mMeter.setBounds(x + kDbTickW, y, w - kDbTickW, meterH);
-    y += meterH + kPadV;
+    // Right column: 28 px wide meter, spanning from middle-top to
+    // dB-label-top (so the meter's bottom edge lines up with the dB label's
+    // top edge).
+    auto meterCol = outer.removeFromRight(kMeterColW);
+    mMeter.setBounds(meterCol.getX(), meterCol.getY(),
+                     meterCol.getWidth(), dbLabelTopY - meterCol.getY());
 
-    // Mute / Solo LED row
-    int btnW = (w - 2) / 2;
-    mMuteBtn.setBounds(x,            y, btnW,         kMSH);
-    mSoloBtn.setBounds(x + btnW + 2, y, w - btnW - 2, kMSH);
+    // Tiny gap between controls column and meter.
+    outer.removeFromRight(kMeterColGap);
+
+    // Controls column lives in `outer` minus 3 px side padding.
+    auto controls = outer.reduced(3, 0);
+    int y = controls.getY();
+    int w = controls.getWidth();
+    int x = controls.getX();
+
+    // ── Mute / Solo LED row ─────────────────────────────────────────────────
+    {
+        const int btnW = (w - 2) / 2;
+        mMuteBtn.setBounds(x,            y, btnW,         kMSH);
+        mSoloBtn.setBounds(x + btnW + 2, y, w - btnW - 2, kMSH);
+    }
     y += kMSH + kPadV;
 
-    // FX button (jump to Effects page)
+    // ── FX (Effects-page jump) button ───────────────────────────────────────
     mFXBtn.setBounds(x, y, w, 18);
     y += 18 + kPadV;
 
-    // Utility row — Bypass on all strips; Arm + Listen on Vox / Inst.
-    if (hasArm())
+    // ── Utility row: Arm + Listen + Bypass (Vox/Inst), or Bypass full ───────
+    if (utilRow)
     {
-        // R4: three columns - Arm | Listen | Bypass.
-        const int third = (w - 4) / 3;
-        mArmBtn   .setBounds(x,                       y, third,                       kUtilH);
-        mListenBtn.setBounds(x + third + 2,           y, third,                       kUtilH);
-        mBypassBtn.setBounds(x + (third + 2) * 2,     y, w - (third + 2) * 2,         kUtilH);
+        if (hasArm())
+        {
+            const int third = (w - 4) / 3;
+            mArmBtn   .setBounds(x,                   y, third,                kUtilH);
+            mListenBtn.setBounds(x + third + 2,       y, third,                kUtilH);
+            mBypassBtn.setBounds(x + (third + 2) * 2, y, w - (third + 2) * 2,  kUtilH);
+        }
+        else
+        {
+            mBypassBtn.setBounds(x, y, w, kUtilH);
+        }
+        y += kUtilH + kPadV;
     }
-    else
-    {
-        // Master/bus: Bypass LED full width, centered
-        mBypassBtn.setBounds(x, y, w, kUtilH);
-    }
-    y += kUtilH + kPadV;
 
-    // Master FX Bypass LED — Master strip only, below the regular FX Bypass
+    // ── Master FX Bypass row (Master strip only) ────────────────────────────
     if (masterRow)
     {
         mMasterFXBypassBtn.setBounds(x, y, w, kUtilH);
         y += kUtilH + kPadV;
     }
 
-    // Pan knob
-    int panSize = juce::jmin(w, kPanH);
-    mPanKnob.setBounds(x + (w - panSize) / 2, y, panSize, kPanH);
+    // ── Pan knob ────────────────────────────────────────────────────────────
+    {
+        const int panSize = juce::jmin(w, kPanH);
+        mPanKnob.setBounds(x + (w - panSize) / 2, y, panSize, kPanH);
+    }
     y += kPanH + kPadV;
 
-    // Polarity row (bus + insert) — single button, full width
+    // ── Polarity row (Bus + Insert only) ────────────────────────────────────
     if (polRow)
     {
         mPolarityBtn.setBounds(x, y, w, kPolH);
         y += kPolH + kPadV;
     }
 
-    // Width knob (all strip types)
-    int widthSize = juce::jmin(w, kWidthH);
-    mWidthKnob.setBounds(x + (w - widthSize) / 2, y, widthSize, kWidthH);
+    // ── Width knob ──────────────────────────────────────────────────────────
+    {
+        const int widthSize = juce::jmin(w, kWidthH);
+        mWidthKnob.setBounds(x + (w - widthSize) / 2, y, widthSize, kWidthH);
+    }
     y += kWidthH + kPadV;
 
-    // Fader — full width (dB scale is next to the meter, not the fader)
-    mFader.setBounds(x, y, w, faderH);
-    y += faderH + kPadV;
+    // ── Fader ───────────────────────────────────────────────────────────────
+    // C-overlap: fader's BOUNDS extend kFaderBottomGuard (~18 px) below the
+    // dB label's TOP y so the dB label visually sits inside the fader's
+    // bottom kGuard zone (which is empty unless the cap is at -60 dB).  The
+    // visible track still ends at dB-label-top because the LookAndFeel only
+    // paints the track between the kGuard zones.
+    {
+        const int faderBottomY = dbLabelTopY + kFaderBottomGuard;
+        const int faderH       = juce::jmax(40, faderBottomY - y);
+        mFader.setBounds(x, y, w, faderH);
+    }
 
-    // dB label (full width)
-    mDbLabel.setBounds(x, y, w, kDbH);
-    y += kDbH + kPadV;
+    // ── dB label (full strip width, overlaps fader's bottom kGuard) ─────────
+    {
+        const int stripX = getLocalBounds().getX();
+        const int stripW = getLocalBounds().getWidth();
+        mDbLabel.setBounds(stripX + 3, dbLabelTopY, stripW - 6, kDbH);
+    }
+}
 
-    // Socket row: neon green ring (left) + "+" send button (right).
-    // The ring is painted in paint(); here we just position the "+" button
-    // and store the socket centre for cable rendering.
-    constexpr int kSocketH    = 18;
-    constexpr int kSocketDiam = 12;
-    const int socketCx = x + kSocketDiam / 2 + 3;
-    const int socketCy = y + kSocketH / 2;
-    mSocketCentre = { socketCx, socketCy };
-
-    mAddSendBtn.setBounds(x + kSocketDiam + 8, y, w - kSocketDiam - 8, kSocketH);
+// G-7 (2026-04-29): right-click on a strip's empty area pops a context menu.
+// Only fires when onContextMenuRequested is wired (MixerPage wires it on Aux
+// strips and secondary Vox/Inst bus strips).  Left-clicks fall through to the
+// strip's child components (faders / knobs / buttons / etc.) untouched.
+void MixerTrackStrip::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() && onContextMenuRequested)
+    {
+        onContextMenuRequested (e.getScreenPosition());
+        return;
+    }
+    juce::Component::mouseDown (e);
 }

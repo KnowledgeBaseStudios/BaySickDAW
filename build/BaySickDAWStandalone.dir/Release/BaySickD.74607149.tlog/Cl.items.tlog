@@ -66,6 +66,7 @@ C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EffectEditorPanels.cpp;C:\
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\LayersPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\LayersPage.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BassPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BassPage.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\DrumPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\DrumPage.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\PagePresetIO.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\PagePresetIO.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\DrumKitGrid.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\DrumKitGrid.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\PianoRoll.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\PianoRoll.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\PianoRollPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\PianoRollPage.obj
@@ -73,6 +74,8 @@ C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp;C:\Users\j
 C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickNAMIR\BaySickNAMIRProcessor.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BaySickNAMIRProcessor.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickNAMIR\BaySickNAMIREditor.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BaySickNAMIREditor.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Clips\ClipsPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\ClipsPage.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\Vox\VoxPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\VoxPage.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\Inst\InstPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\InstPage.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\EventEditor.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MixerTrackStrip.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\MixerTrackStrip.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MixerPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\MixerPage.obj

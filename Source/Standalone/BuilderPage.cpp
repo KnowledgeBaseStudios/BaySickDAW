@@ -103,6 +103,89 @@ void BrowserItem::mouseDoubleClick(const MouseEvent&)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// G-5 (2026-04-29): AudioBrowserItem + AudioCategoryItem TreeViewItem subclasses
+// ─────────────────────────────────────────────────────────────────────────────
+AudioBrowserItem::AudioBrowserItem (const CategorizedAudioEntry& e)
+    : mEntry (e)
+{
+}
+
+void AudioBrowserItem::paintItem (Graphics& g, int width, int height)
+{
+    // Match the flat-list BrowserItem aesthetic: dark fill + accent stripe on
+    // the left + white text.  Selection highlight when this item is the
+    // tree's selected item.
+    auto r = Rectangle<int> (width, height).reduced (3, 1).toFloat();
+
+    // Background
+    g.setColour (isSelected() ? Colour (0xff404858) : Colour (0xff262a30));
+    g.fillRoundedRectangle (r, 3.0f);
+
+    // Accent stripe on left
+    g.setColour (mEntry.accent);
+    g.fillRoundedRectangle (r.withWidth (4.0f), 1.5f);
+
+    // Label
+    g.setColour (Colour (0xffe0e4ec));
+    g.setFont (Font (12.0f));
+    g.drawText (mEntry.displayName,
+                r.withTrimmedLeft (10.0f).withTrimmedRight (4.0f).toNearestInt(),
+                Justification::centredLeft, true);
+}
+
+void AudioBrowserItem::itemClicked (const MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+    {
+        if (onContextMenu) onContextMenu (e.getScreenPosition());
+        return;
+    }
+    if (e.getNumberOfClicks() == 2)
+    {
+        if (onRenameRequested) onRenameRequested();
+        return;
+    }
+    // Single left click: TreeView default selection behavior.
+}
+
+AudioCategoryItem::AudioCategoryItem (const String& name, Colour accent)
+    : mName (name), mAccent (accent)
+{
+    setOpen (true);   // expand by default
+}
+
+void AudioCategoryItem::paintItem (Graphics& g, int width, int height)
+{
+    auto r = Rectangle<int> (width, height).reduced (2, 1).toFloat();
+
+    // Header background — slightly lighter than item background, with accent tint
+    g.setColour (Colour (0xff1c2028));
+    g.fillRoundedRectangle (r, 2.0f);
+    g.setColour (mAccent.withAlpha (0.3f));
+    g.fillRoundedRectangle (r.withWidth (3.0f), 1.0f);
+
+    // Section name + count
+    const int   childCount = const_cast<AudioCategoryItem*> (this)->getNumSubItems();
+    const String label = mName + (childCount > 0
+                                       ? " (" + String (childCount) + ")"
+                                       : " (none)");
+
+    g.setColour (Colour (0xffc0c4cc));
+    g.setFont (Font (12.0f, Font::bold));
+    g.drawText (label,
+                r.withTrimmedLeft (10.0f).withTrimmedRight (4.0f).toNearestInt(),
+                Justification::centredLeft, true);
+}
+
+void AudioCategoryItem::itemClicked (const MouseEvent& e)
+{
+    // Toggle open state on label click for usability (in addition to the
+    // triangle icon).  Right-click is a no-op on category nodes.
+    if (e.mods.isPopupMenu()) return;
+    setOpen (! isOpen());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BrowserPanel
 // ─────────────────────────────────────────────────────────────────────────────
 BrowserPanel::BrowserPanel(PatternManager& pm,
@@ -148,6 +231,30 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
     };
     addAndMakeVisible(*mDeleteBtn);
 
+    // G-5 (2026-04-29): build the unified Audio tree.  Three category nodes
+    // (Clips amber / Vox teal / Inst navy) under an invisible root.  Leaves
+    // are populated lazily by rebuildAudioRows() via onEnumerateAudio.
+    mAudioTree = std::make_unique<juce::TreeView>();
+    mAudioTree->setIndentSize (12);
+    mAudioTree->setMultiSelectEnabled (false);
+    mAudioTree->setDefaultOpenness (true);
+    mAudioTree->setColour (juce::TreeView::backgroundColourId, juce::Colour (0xff181c20));
+    mAudioTree->setColour (juce::TreeView::linesColourId,      juce::Colour (0xff303640));
+    addChildComponent (*mAudioTree);   // initial visibility off; switchTab(1) shows it
+
+    mAudioRoot = std::make_unique<AudioRootItem>();   // invisible root holding the 3 categories
+    auto clipsCat = std::make_unique<AudioCategoryItem> ("Clips", juce::Colour (0xffd4a017));
+    auto voxCat   = std::make_unique<AudioCategoryItem> ("Vox",   juce::Colour (0xff0fafa5));
+    auto instCat  = std::make_unique<AudioCategoryItem> ("Inst",  juce::Colour (0xff1c3a8a));
+    mClipsCat = clipsCat.get();
+    mVoxCat   = voxCat  .get();
+    mInstCat  = instCat .get();
+    mAudioRoot->addSubItem (clipsCat.release());
+    mAudioRoot->addSubItem (voxCat  .release());
+    mAudioRoot->addSubItem (instCat .release());
+    mAudioTree->setRootItem (mAudioRoot.get());
+    mAudioTree->setRootItemVisible (false);
+
     rebuildPatternRows();
     switchTab(0);
 }
@@ -162,6 +269,8 @@ void BrowserPanel::setCollapsed(bool c)
     for (auto& r : mAutomItems) r->setVisible(!c);
     mAddBtn->setVisible(!c);
     mDeleteBtn->setVisible(!c);
+    // G-5: tree visibility tracks the collapsed state on the Audio tab.
+    if (mAudioTree) mAudioTree->setVisible (! c && mActiveTab == 1);
     if (auto* p = getParentComponent()) p->resized();
 }
 
@@ -173,8 +282,10 @@ void BrowserPanel::switchTab(int t)
     bool isAuto = (t == 2);
 
     for (auto& r : mPatItems)   r->setVisible(isPat);
-    for (auto& r : mAudioItems) r->setVisible(isAud);
+    for (auto& r : mAudioItems) r->setVisible(isAud);   // G-5: legacy flat list, kept empty
     for (auto& r : mAutomItems) r->setVisible(isAuto);
+    // G-5 (2026-04-29): Audio tab now drives the unified tree, not the flat list.
+    if (mAudioTree) mAudioTree->setVisible (isAud && ! mCollapsed);
     mAddBtn   ->setVisible(isPat);
     mDeleteBtn->setVisible(isPat);
 
@@ -222,31 +333,266 @@ void BrowserPanel::rebuildPatternRows()
 
 void BrowserPanel::rebuildAudioRows()
 {
-    for (auto& r : mAudioItems) removeChildComponent(r.get());
-    mAudioItems.clear();
+    // G-5 (2026-04-29): unified Audio tree.  Clear all leaves under each
+    // category, re-enumerate via onEnumerateAudio (page-walk), bucket by
+    // category, re-attach.  mAudioPaths still tracks position-by-libIdx so
+    // the existing right-click "Remove" + drag descriptor flows keep working
+    // (descriptor format is `audio:<libIdx>` — unchanged from flat-list era).
     mAudioPaths.clear();
+    if (! mClipsCat || ! mVoxCat || ! mInstCat) return;
 
-    // Drive the list from the persistent audio library so deleting blocks
-    // doesn't wipe Browser entries.
+    mClipsCat->clearSubItems();
+    mVoxCat  ->clearSubItems();
+    mInstCat ->clearSubItems();
+
+    // Track audioLibrary index → mAudioPaths position so existing index-based
+    // lookups (Remove, drag descriptor lookup in ArrangementGrid::itemDropped)
+    // resolve to the right path even though we're page-walking now.
+    // We populate mAudioPaths in audioLibrary index order so that
+    // mAudioPaths[i] == mPM.getAudioLibraryPath(i).
     for (int i = 0; i < mPM.getNumAudioLibrary(); ++i)
+        mAudioPaths.add (mPM.getAudioLibraryPath (i));
+
+    // Walk pages via the editor-supplied enumerator.  No callback wired =
+    // empty tree (defensive).
+    if (! onEnumerateAudio) return;
+
+    auto entries = onEnumerateAudio();
+    for (auto& e : entries)
     {
-        const String path  = mPM.getAudioLibraryPath(i);
-        const String alias = mPM.getAudioLibraryAlias(i);
-        if (path.isEmpty()) continue;
+        auto* leaf = new AudioBrowserItem (e);
+        leaf->onRenameRequested = [this, leaf]
+        {
+            // G-5: rename uses the audio library index, mirroring the flat-list
+            // path.  Tree refresh happens via the existing refresh() timer.
+            const int libIdx = leaf->getAudioLibIdx();
+            const String current = leaf->getDisplayName();
+            auto editor = std::make_unique<TextEditor>();
+            editor->setText (current, false);
+            editor->setFont (Font (13.f));
+            editor->setSelectAllWhenFocused (true);
+            editor->setSize (180, 26);
+            editor->setEscapeAndReturnKeysConsumed (true);
+            auto* rawEdit = editor.get();
+            editor->onReturnKey = [this, libIdx, rawEdit]
+            {
+                const String t = rawEdit->getText().trim();
+                if (t.isNotEmpty()) renameAudioAt (libIdx, t);
+                if (auto* cb = rawEdit->findParentComponentOfClass<CallOutBox>())
+                    cb->dismiss();
+            };
+            editor->onEscapeKey = [rawEdit]
+            {
+                if (auto* cb = rawEdit->findParentComponentOfClass<CallOutBox>())
+                    cb->dismiss();
+            };
+            // Anchor the popup near the tree leaf.
+            Rectangle<int> anchor;
+            if (mAudioTree)
+                anchor = mAudioTree->getScreenBounds().withHeight (28);
+            CallOutBox::launchAsynchronously (std::move (editor), anchor, nullptr);
+        };
+        leaf->onContextMenu = [this, leaf](Point<int> pt)
+        {
+            showAudioTreeContextMenu (*leaf, pt);
+        };
 
-        const int idx = (int)mAudioItems.size();
-        mAudioPaths.add(path);
-        const String displayName = alias.isNotEmpty() ? alias : File(path).getFileName();
-
-        auto item = std::make_unique<BrowserItem>(BrowserItem::Kind::Audio, idx, displayName);
-        item->setAccentColour(Colour(0xff4a8fa0));
-        BrowserItem* raw = item.get();
-        raw->onRenameRequested = [this, raw] { openRenamePopup(*raw); };
-        raw->onContextMenu     = [this, raw](Point<int> pt) { showItemContextMenu(*raw, pt); };
-        addAndMakeVisible(*item);
-        mAudioItems.push_back(std::move(item));
+        if      (e.category == "Clips") mClipsCat->addSubItem (leaf);
+        else if (e.category == "Vox")   mVoxCat  ->addSubItem (leaf);
+        else if (e.category == "Inst")  mInstCat ->addSubItem (leaf);
+        else                            delete leaf;   // unknown category — drop
     }
-    resized();
+}
+
+void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> globalPt)
+{
+    const int libIdx = item.getAudioLibIdx();
+    if (libIdx < 0 || libIdx >= mPM.getNumAudioLibrary()) return;
+
+    constexpr int kIdRename     = 1;
+    constexpr int kIdDuplicate  = 2;
+    constexpr int kIdDelete     = 3;
+    constexpr int kIdReveal     = 7;
+    constexpr int kIdChokeBase  = 200;
+
+    PopupMenu m;
+    m.addItem (kIdRename,    "Rename...");
+    m.addItem (kIdDuplicate, "Duplicate...");
+    m.addItem (kIdReveal,    "Reveal in Explorer");
+    m.addSeparator();
+
+    // Choke Group submenu — same model as the flat-list audio context menu.
+    const int curGroup = mPM.getAudioLibraryChokeGroup (libIdx);
+    PopupMenu chokeSub;
+    chokeSub.addItem (kIdChokeBase, "None", true, curGroup == 0);
+    for (int g = 1; g <= 16; ++g)
+        chokeSub.addItem (kIdChokeBase + g, "Group " + String (g),
+                          true, curGroup == g);
+    m.addSubMenu ("Choke Group", chokeSub);
+    m.addSeparator();
+    m.addItem (kIdDelete, "Delete");
+
+    // Capture the resolved absolute path BEFORE the async menu fires so
+    // Reveal in Explorer doesn't try to walk the relative-path string the
+    // library stores ("Samples/foo.wav") — that fails File::existsAsFile.
+    const String absPath = item.getFullPath();
+    auto onRename = item.onRenameRequested;
+
+    m.showMenuAsync (PopupMenu::Options().withTargetScreenArea (
+                         Rectangle<int> (globalPt.x, globalPt.y, 1, 1)),
+        [this, libIdx, absPath, onRename] (int result)
+        {
+            if (result == 0) return;
+
+            if (result == kIdRename)
+            {
+                if (onRename) onRename();
+                return;
+            }
+            if (result == kIdDuplicate)
+            {
+                // G-6: kick off the duplicate flow.  Default name = "<base>
+                // Duplicate" (extension preserved automatically by the
+                // helper).  Rename path is recursive — re-prompts with the
+                // user's last value.
+                if (absPath.isNotEmpty())
+                {
+                    const String baseName = File (absPath).getFileNameWithoutExtension();
+                    runAudioDuplicateFlow (absPath, baseName + " Duplicate");
+                }
+                return;
+            }
+            if (result == kIdReveal)
+            {
+                if (absPath.isNotEmpty())
+                {
+                    File f (absPath);
+                    if (f.existsAsFile())
+                        f.revealToUser();
+                    else if (f.getParentDirectory().exists())
+                        f.getParentDirectory().revealToUser();   // fall back to folder
+                }
+                return;
+            }
+            if (result >= kIdChokeBase && result <= kIdChokeBase + 16)
+            {
+                mPM.setAudioLibraryChokeGroup (libIdx, result - kIdChokeBase);
+                return;
+            }
+            if (result == kIdDelete)
+            {
+                if (libIdx >= 0 && libIdx < mPM.getNumAudioLibrary())
+                {
+                    const String path = mPM.getAudioLibraryPath (libIdx);
+                    // Mirror flat-list flow: cascade-remove every block
+                    // referencing this file, then remove from library.
+                    for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
+                        if (mPM.getBlock (i).clipType == ClipType::Audio
+                            && mPM.getBlock (i).audioFilePath == path)
+                            mPM.removeBlock (i);
+                    mPM.removeAudioFromLibrary (path);
+                    rebuildAudioRows();
+                    if (onArrangementChanged) onArrangementChanged();
+                }
+                return;
+            }
+        });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-6 (2026-04-29): Duplicate... right-click flow on Audio tree leaves.
+// Recursive on Rename.  Self-contained: shows name prompt, resolves filename
+// conflicts (Overwrite / Cancel / Rename re-prompt), physically copies the
+// WAV, then hands BOTH the source path AND the new file's absolute path to
+// the editor's onDuplicateClipSpawn callback so StandaloneEditor can spawn
+// a new ClipsPage on the copy AND clone the source page's full state
+// (engine choice, all knob values, both engines' APVTS state).
+// ─────────────────────────────────────────────────────────────────────────────
+void BrowserPanel::runAudioDuplicateFlow (const juce::String& sourceAbsPath,
+                                          const juce::String& defaultName)
+{
+    File source (sourceAbsPath);
+    if (! source.existsAsFile()) return;
+
+    const String ext = source.getFileExtension();   // e.g. ".wav"
+
+    // Name prompt (juce::AlertWindow with single text editor row).  Modal
+    // pattern matches RibbonTabBar::startRename — deleteWhenDismissed = true
+    // so the AlertWindow deletes itself once the callback fires.
+    auto* aw = new juce::AlertWindow ("Duplicate Clip",
+                                       "Enter a name for the duplicate:",
+                                       juce::MessageBoxIconType::NoIcon);
+    aw->addTextEditor ("name", defaultName);
+    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<BrowserPanel> self (this);
+    aw->enterModalState (true,
+        juce::ModalCallbackFunction::create (
+            [self, sourceAbsPath, ext, aw] (int result)
+            {
+                if (! self || result != 1) return;
+
+                const String typedName = aw->getTextEditorContents ("name").trim();
+                if (typedName.isEmpty()) return;
+
+                // Build destination path: same folder as source, typed name,
+                // preserve extension.  Strip any extension the user typed
+                // (we re-append the source extension).
+                File source (sourceAbsPath);
+                File destDir = source.getParentDirectory();
+                String stem = typedName;
+                if (stem.endsWithIgnoreCase (ext)) stem = stem.dropLastCharacters (ext.length());
+                File dest = destDir.getChildFile (stem + ext);
+
+                if (dest == source) return;   // same file — no-op
+
+                if (dest.existsAsFile())
+                {
+                    // G-7 (2026-04-29): no-file-delete contract — Overwrite
+                    // dropped.  User can either pick a new name or cancel.
+                    // Prevents BaySickDAW from ever deleting user audio files.
+                    auto* conflict = new juce::AlertWindow (
+                        "File Exists",
+                        "A file named \"" + dest.getFileName() + "\" already exists.\n"
+                        "Choose a different name or cancel.",
+                        juce::MessageBoxIconType::WarningIcon);
+                    conflict->addButton ("Rename...", 2);
+                    conflict->addButton ("Cancel",    0);
+
+                    juce::Component::SafePointer<BrowserPanel> self2 (self);
+                    conflict->enterModalState (true,
+                        juce::ModalCallbackFunction::create (
+                            [self2, sourceAbsPath, stem] (int r)
+                            {
+                                if (! self2) return;
+                                if (r == 2)
+                                {
+                                    // Rename: recurse with the user's last typed name.
+                                    self2->runAudioDuplicateFlow (sourceAbsPath, stem);
+                                }
+                                // r == 0 → cancel, do nothing.
+                            }),
+                        true);
+                    return;
+                }
+
+                // No conflict — copy and spawn.
+                if (source.copyFileTo (dest))
+                {
+                    if (self->onDuplicateClipSpawn)
+                        self->onDuplicateClipSpawn (sourceAbsPath, dest.getFullPathName());
+                }
+                else
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon,
+                        "Duplicate Failed",
+                        "Could not copy the file to \"" + dest.getFileName() + "\".  "
+                        "Check disk space and folder permissions.");
+                }
+            }),
+        true);   // deleteWhenDismissed: AlertWindow self-deletes after callback
 }
 
 void BrowserPanel::rebuildAutomationRows()
@@ -297,9 +643,19 @@ void BrowserPanel::refresh()
     }
     else if (mActiveTab == 1)
     {
+        // G-5 (2026-04-29): tree is page-driven so the snapshot must include
+        // page enumeration too — otherwise add/remove/rename of a Clips/
+        // Vox/Inst page wouldn't trigger a tree rebuild.
         snapshot << "A:" << mPM.getNumAudioLibrary() << "|";
         for (int i = 0; i < mPM.getNumAudioLibrary(); ++i)
             snapshot << mPM.getAudioLibraryPath(i) << "/" << mPM.getAudioLibraryAlias(i) << "\n";
+        if (onEnumerateAudio)
+        {
+            auto entries = onEnumerateAudio();
+            snapshot << "P:" << entries.size() << "|";
+            for (auto& e : entries)
+                snapshot << e.category << ":" << e.audioLibIdx << ":" << e.displayName << "|";
+        }
     }
     else
     {
@@ -681,10 +1037,15 @@ void BrowserPanel::resized()
         hideItems(mAudioItems);
         hideItems(mAutomItems);
     } else if (mActiveTab == 1) {
+        // G-5 (2026-04-29): Audio tab uses the unified tree.  Hide flat-list
+        // items (legacy storage, kept empty post-tree-migration) + give the
+        // tree the remaining vertical space.
         mAddBtn->setVisible(false); mDeleteBtn->setVisible(false);
-        layoutItems(mAudioItems);
+        hideItems(mAudioItems);
         hideItems(mPatItems);
         hideItems(mAutomItems);
+        if (mAudioTree)
+            mAudioTree->setBounds (b.reduced (3, 1));
     } else {
         mAddBtn->setVisible(false); mDeleteBtn->setVisible(false);
         layoutItems(mAutomItems);
@@ -3929,16 +4290,7 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
     mBrowser->onImportAudio   = [this](const String& path) {
         if (mGrid) mGrid->importAudioFile(path, 0, 0.f);
     };
-    mBrowser->onArrangementChanged = [this] {
-        if (mGrid)
-        {
-            mGrid->repaint();
-            // Forward to the grid's own onArrangementChanged so audio-clip
-            // players get rebuilt when the user deletes blocks via the
-            // Browser right-click menu.
-            if (mGrid->onArrangementChanged) mGrid->onArrangementChanged();
-        }
-    };
+    mBrowser->onArrangementChanged = [this] { notifyArrangementChanged(); };
     addAndMakeVisible(*mBrowser);
 
     // Grid + viewport
@@ -4078,6 +4430,13 @@ void BuilderPage::setPlayHead(StandalonePlayHead* ph)
 void BuilderPage::setBrowserTab(int idx)
 {
     if (mBrowser) mBrowser->selectTab(juce::jlimit(0, 2, idx));
+}
+
+void BuilderPage::notifyArrangementChanged()
+{
+    if (! mGrid) return;
+    mGrid->repaint();
+    if (mGrid->onArrangementChanged) mGrid->onArrangementChanged();
 }
 
 void BuilderPage::timerCallback()

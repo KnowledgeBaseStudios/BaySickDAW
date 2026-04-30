@@ -19,7 +19,9 @@ class StandalonePlayHead;
 
 // 2026-04-28 (Phase G-2): Clip added.  Sampler-style instrument fed by piano-
 // roll notes; one Clip engine per ClipsPage.
-enum class EngineKind { DrumKit, Layer, Bass, Drum, Clip };
+// 2026-04-28 (Phase G-4): Vox + Inst added.  Same shape as Clip — engine
+// picker per page, piano-roll triggering through the unified PianoRollPage.
+enum class EngineKind { DrumKit, Layer, Bass, Drum, Clip, Vox, Inst };
 
 struct EngineId
 {

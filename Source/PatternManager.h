@@ -190,6 +190,12 @@ struct Pattern
     // them per its own semantics.  Data populated lazily as clips are spawned.
     std::array<PianoRollData, kMaxClipPages> clipRoll;
 
+    // G-4 (2026-04-28): per-Vox / per-Inst piano-roll data.  Same shape as
+    // clipRoll — pageIndex is the corresponding mixer Vox/Inst insert index
+    // (0..kMaxVoxPages-1 / 0..kMaxInstPages-1).
+    std::array<PianoRollData, kMaxVoxPages>  voxRoll;
+    std::array<PianoRollData, kMaxInstPages> instRoll;
+
     Pattern()
     {
         for (auto& arr : drumGrid) arr.fill(false);

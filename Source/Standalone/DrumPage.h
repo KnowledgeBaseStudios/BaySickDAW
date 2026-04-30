@@ -144,6 +144,20 @@ public:
     juce::String exportDrumState() const;
     void         importDrumState (const juce::String& xml);
 
+    // ── G-7 (2026-04-29): Page Preset save/load (full chain) ─────────────────
+    // onSaved fires only on successful save (cancel/empty-name aborts the
+    // continuation).  Used by requestDelete's "Save Page Preset & Delete"
+    // button to chain delete after save completes.
+    void savePagePreset   (std::function<void()> onSaved = {});
+    void loadPagePreset   (const juce::File& xml);
+    void showPageActionsMenu (juce::Component* anchor);
+
+    // XML-string variants used by kit save/load so the full chain
+    // (engine + strip params + insert rack + post-EQ) round-trips per drum
+    // without writing per-drum temp files.
+    juce::String exportPagePresetXml() const;
+    void         importPagePresetXml (const juce::String& xml);
+
 private:
     VibeSynthProcessor& mProcessor;
     PatternManager&     mPM;

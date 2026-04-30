@@ -61,6 +61,17 @@ public:
     // or ~/Library/Application Support/BaySickDAW/CoreLibrary on macOS.
     static juce::File getCoreLibraryDir();
 
+    // G-6 (2026-04-29): user-facing samples folder under the main BaySickDAW
+    // Documents tree (`Documents/BaySickDAW/My Samples`).  This is where
+    // users put samples they want to pull from across projects.  The Clips
+    // ribbon `+Add New Clip...` file picker defaults to this folder so users
+    // see their own samples first; a Core Library shortcut lives inside so
+    // they can drill into factory content without leaving the dialog.
+    static juce::File getUserSamplesDir();
+    // Creates the folder + Core Library shortcut if missing.  Idempotent —
+    // safe to call repeatedly (and on every startup).
+    static void       ensureUserSamplesDir();
+
 private:
     SampleLibrary() = default;
     JUCE_DECLARE_NON_COPYABLE (SampleLibrary)

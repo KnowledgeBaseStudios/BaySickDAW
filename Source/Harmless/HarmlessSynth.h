@@ -136,6 +136,30 @@ public:
     // per-target values. rateIdx = 13-step index, shape 0..3, tempoSync bool.
     void applyGlobalLfoToAllTargets (int rateIdx, int shape, bool tempoSync);
 
+    // 2026-04-30: T2-B LFO depth shortcuts (restored after the S4 strip).
+    // Three global slider values that route to per-voice destinations:
+    //  - lfo_vol   → ModTarget("volume")'s LFO source depth
+    //  - lfo_pitch → ModTarget("pitch_semitones")'s LFO source depth
+    //  - lfo_vel   → noteOn velocity scaling (handled internally — there's
+    //    no Velocity ModTarget since velocity is a one-shot, not continuous)
+    // All three are bipolar -1..+1.  Replace semantics: writing a non-zero
+    // depth via these macros clobbers any per-target depth set in the
+    // in-player Mod Editor (matches the rate/shape macro pattern).
+    void applyGlobalLfoVolDepth   (float depth) noexcept;
+    void applyGlobalLfoPitchDepth (float depth) noexcept;
+
+    // lfo_vel is a separate path: stores depth + the global LFO state used
+    // to sample the LFO at note-on time.  Voice velocity at note-on is
+    // scaled by (1 + LFO * depth * 0.5) for ±50% per-note variation when
+    // depth is at full +1 / -1.
+    void setGlobalLfoVelDepth     (float depth) noexcept { mGlobalLfoVelDepth = depth; }
+    // Called when the global rate / shape / tempoSync params change.  rateLen
+    // is in beats when tempoSync is true, seconds otherwise (matches the
+    // applyGlobalLfoToAllTargets convention).
+    void setGlobalLfoVelRate      (float rateLen, int shape, bool tempoSync) noexcept;
+    // Called per block from renderNextBlock to advance the global LFO phase.
+    void tickGlobalLfoVel         (int numSamples) noexcept;
+
     // S5 T2-M: fill `outBuf[0..numPartials-1]` with the sum of partial
     // amplitudes across all active voices (each weighted by that voice's
     // env level + per-part A/B level). Called from the GUI thread at ~30 Hz
@@ -224,6 +248,21 @@ private:
 
     // Cached pointer to the registry so global-LFO macro writes can reach it.
     const HarmlessModRegistry* mModRegistry { nullptr };
+
+    // 2026-04-30: global LFO state for the lfo_vel note-on velocity scaling.
+    // Phase advances per block in tickGlobalLfoVel and is sampled at each
+    // noteOn message (intercepted in renderNextBlock).  Volume + pitch
+    // depths route through the mod registry instead, so they don't need
+    // any state here.
+    // Cycle is stored as raw rate length + tempo-sync flag and converted
+    // to seconds at tick time using the current bps — that way BPM changes
+    // mid-session adjust the LFO period without any explicit recompute.
+    float mGlobalLfoVelDepth        { 0.0f };   // -1..+1 from lfo_vel slider
+    float mGlobalLfoPhase01         { 0.0f };   // 0..1, advances per block
+    float mGlobalLfoRateLen         { 1.0f };   // beats (if tempoSync) or sec
+    bool  mGlobalLfoTempoSync       { true  };
+    int   mGlobalLfoShape           { 0 };      // 0=sine 1=tri 2=saw 3=square
+    double mGlobalLfoBps            { 2.0  };   // mirrors mSampleRate-side bps
 
     // S5 T2-P: background thread for off-audio-thread wavetable rebuilds.
     // mPartA + mPartB register as TimeSliceClients; the thread polls their

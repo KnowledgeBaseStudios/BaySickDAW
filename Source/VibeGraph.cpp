@@ -27,6 +27,64 @@ static float bufferPeakDb(const juce::AudioBuffer<float>& buf) noexcept
     return juce::Decibels::gainToDecibels(peak, -60.f);
 }
 
+// 2026-04-30: per-channel peak helper for stereo L/R split meters.  Returns
+// {peakDbL, peakDbR}.  Mono buffers fan to L=R; >2-channel buffers only
+// expose channels 0 and 1 (matches the strip's L/R display).
+static std::pair<float, float> bufferPeakDbStereo(const juce::AudioBuffer<float>& buf) noexcept
+{
+    const int n  = buf.getNumSamples();
+    const int nc = buf.getNumChannels();
+    if (nc <= 0 || n <= 0) return { -60.f, -60.f };
+
+    const float pL = buf.getMagnitude (0, 0, n);
+    const float pR = (nc >= 2) ? buf.getMagnitude (1, 0, n) : pL;
+    return { juce::Decibels::gainToDecibels (pL, -60.f),
+             juce::Decibels::gainToDecibels (pR, -60.f) };
+}
+
+// ── Pan law helper (2026-04-29) ──────────────────────────────────────────────
+// FL Studio parity.  Maps pan ∈ [-1, +1] + project-level law selector
+// (master_pan_law: 0=Circular / 1=Triangular / 2=Square) → (gainL, gainR).
+//   Circular   — constant power, -3 dB at center (cos/sin curve, FL default)
+//   Triangular — linear, -6 dB at center
+//   Square     — 0 dB at center (only attenuates the opposite side)
+// Applied per-strip after the fader-gain stage in every Insert/Bus/Master node.
+static void applyPanLaw (float pan, int law, float& gainL, float& gainR) noexcept
+{
+    pan = juce::jlimit (-1.f, 1.f, pan);
+    const float normPan = (pan + 1.f) * 0.5f;   // 0 = full L, 0.5 = center, 1 = full R
+    switch (law)
+    {
+        case 1: // Triangular — linear, -6 dB at center
+            gainL = 1.f - normPan;
+            gainR = normPan;
+            break;
+        case 2: // Square — 0 dB at center, only attenuates the opposite side
+            gainL = (pan <= 0.f) ? 1.f : (1.f - pan);
+            gainR = (pan >= 0.f) ? 1.f : (1.f + pan);
+            break;
+        default: // 0 = Circular — constant power, -3 dB at center (FL default)
+        {
+            const float a = normPan * juce::MathConstants<float>::halfPi;
+            gainL = std::cos (a);
+            gainR = std::sin (a);
+            break;
+        }
+    }
+}
+
+// Apply pan in-place to a stereo buffer using the given pan + law.  No-op for
+// near-center pan (avoids the cost of two applyGain calls when the user hasn't
+// touched the pan knob).
+static void applyStereoPan (juce::AudioBuffer<float>& buf, float pan, int law) noexcept
+{
+    if (buf.getNumChannels() < 2 || std::abs (pan) < 1.0e-4f) return;
+    float gL = 1.f, gR = 1.f;
+    applyPanLaw (pan, law, gL, gR);
+    buf.applyGain (0, 0, buf.getNumSamples(), gL);
+    buf.applyGain (1, 0, buf.getNumSamples(), gR);
+}
+
 // ── PDC compensation delay line ───────────────────────────────────────────────
 // A simple stereo ring buffer. setDelay() resizes and resets it on the message
 // thread (safe because processBlock() only runs between prepareToPlay calls or
@@ -78,7 +136,11 @@ struct VibeGraph::LayersBusNode
     EffectRack             rack;
     EQ8MsDSP               busEq;    // post-rack bus EQ — shown on Effects Page
     CompDelayLine          compDelay;
-    std::atomic<float>     peakDb { -60.f };
+    std::atomic<float>     peakDb  { -60.f };
+    // 2026-04-30: stereo L/R peakDb for the new split DBFSMeter.  Mono
+    // peakDb (above) kept for back-compat; written as max(L, R) each block.
+    std::atomic<float>     peakDbL { -60.f };
+    std::atomic<float>     peakDbR { -60.f };
     // Peak-hold decay (set in prepare) — see InsertNode for rationale.
     float                  peakDecayDbPerBlock { 0.35f };
 
@@ -92,6 +154,23 @@ struct VibeGraph::LayersBusNode
     // 5F-4a Batch 6: APVTS pointers for polarity + width
     std::atomic<float>* pPolarity { nullptr };
     std::atomic<float>* pWidth    { nullptr };
+    // 2026-04-29: strip-local FX Bypass (mixer_layers_bypass) — bypasses THIS
+    // bus's rack only.  Global kill-all (master_fx_bypass) bypasses every
+    // rack on every strip; the two are OR-ed together each block.
+    std::atomic<float>* pBypass   { nullptr };
+    // 2026-04-29: pan (mixer_layers_pan) — applied L/R after fader.
+    std::atomic<float>* pPan      { nullptr };
+    std::atomic<float>* pPanLaw   { nullptr };
+    // 2026-04-30 (audit B.3): read fader / mute / solo direct from APVTS
+    // instead of going through busMix (PatternManager) — audio-thread
+    // automation now reaches the bus at audio-block rate instead of via
+    // the UI's 30 Hz applicator timer.  Cross-bus anySolo computed by
+    // reading sibling-bus solo params (2 extra atomic loads per block).
+    std::atomic<float>* pLevel       { nullptr };
+    std::atomic<float>* pMute        { nullptr };
+    std::atomic<float>* pSolo        { nullptr };
+    std::atomic<float>* pSiblingBass { nullptr };   // mixer_bass_solo
+    std::atomic<float>* pSiblingDrum { nullptr };   // mixer_drums_solo
     // Global "kill-all" FX bypass (master_fx_bypass) — forces rack bypass when true.
     std::atomic<float>* pGlobalFxBypass { nullptr };
 
@@ -103,6 +182,14 @@ struct VibeGraph::LayersBusNode
     {
         pPolarity       = apvts.getRawParameterValue(prefix + "_polarity");
         pWidth          = apvts.getRawParameterValue(prefix + "_width");
+        pBypass         = apvts.getRawParameterValue(prefix + "_bypass");
+        pPan            = apvts.getRawParameterValue(prefix + "_pan");
+        pPanLaw         = apvts.getRawParameterValue("master_pan_law");
+        pLevel          = apvts.getRawParameterValue(prefix + "_level");
+        pMute           = apvts.getRawParameterValue(prefix + "_mute");
+        pSolo           = apvts.getRawParameterValue(prefix + "_solo");
+        pSiblingBass    = apvts.getRawParameterValue("mixer_bass_solo");
+        pSiblingDrum    = apvts.getRawParameterValue("mixer_drums_solo");
         pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
     }
 
@@ -145,18 +232,32 @@ struct VibeGraph::LayersBusNode
         // restored uniformly across every bus + insert).
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside process)
         rack.setHostBPM(bpm);
-        // Respect global master_fx_bypass (kill-all flag).
+        // 2026-04-29: respect strip-local FX Bypass (mixer_layers_bypass)
+        // OR-ed with global master_fx_bypass kill-all flag.
         {
+            const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
             const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
-            if (rack.isRackBypassed() != globalBypass)
-                rack.setRackBypassed(globalBypass);
+            const bool bypass       = stripBypass || globalBypass;
+            if (rack.isRackBypassed() != bypass)
+                rack.setRackBypassed(bypass);
         }
         rack.process(buf);
         if (buf.getNumChannels() >= 2) busEq.process(buf);   // post-rack bus EQ (identity short-circuit + spectrum feed inside)
 
-        bool anySolo = busMix.layersSolo || busMix.bassSolo || busMix.drumsSolo;
-        float g = calcBusGain(busMix.layersGain, busMix.layersMute,
-                              busMix.layersSolo, anySolo);
+        // 2026-04-30 (audit B.3): read fader/mute/solo from APVTS directly
+        // so audio-thread automation lands at audio-block rate.  busMix
+        // values stay in sync via the strip's onFaderChanged callbacks
+        // for legacy code paths but are no longer the audio source of
+        // truth for these three params.
+        const bool  thisSolo  = loadParam(pSolo,        0.f) > 0.5f;
+        const bool  bassSolo  = loadParam(pSiblingBass, 0.f) > 0.5f;
+        const bool  drumSolo  = loadParam(pSiblingDrum, 0.f) > 0.5f;
+        const bool  anySolo   = thisSolo || bassSolo || drumSolo;
+        const bool  thisMuted = loadParam(pMute, 0.f) > 0.5f;
+        const float fadDb     = loadParam(pLevel, 0.f);
+        const float fadLin    = juce::Decibels::decibelsToGain(fadDb, -60.f);
+        // calcBusGain returns 0 when muted or (anySolo && !soloed); else fadLin.
+        const float g = (thisMuted || (anySolo && ! thisSolo)) ? 0.f : fadLin;
         if (g != 1.f) buf.applyGain(g);
 
         // 5F-4a Batch 6: polarity + M/S width
@@ -176,14 +277,25 @@ struct VibeGraph::LayersBusNode
             }
         }
 
+        // 2026-04-29: pan applied AFTER fader + width using project-level law.
+        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
+
         compDelay.process(buf);
         // Peak meter with hold+decay — matches InsertNode pattern so transient
         // bus peaks aren't missed between ~30 Hz UI polls.
         {
-            const float thisPeak = bufferPeakDb(buf);
-            const float prev     = peakDb.load(std::memory_order_relaxed);
-            const float decayed  = juce::jmax(-60.0f, prev - peakDecayDbPerBlock);
-            peakDb.store(juce::jmax(thisPeak, decayed), std::memory_order_relaxed);
+            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
+            // Mono atomic kept (= max(L, R)) for legacy readers.
+            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
+            const float prevL = peakDbL.load(std::memory_order_relaxed);
+            const float prevR = peakDbR.load(std::memory_order_relaxed);
+            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
+            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
+            const float newL = juce::jmax(thisL, decayedL);
+            const float newR = juce::jmax(thisR, decayedR);
+            peakDbL.store(newL, std::memory_order_relaxed);
+            peakDbR.store(newR, std::memory_order_relaxed);
+            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
         }
     }
 };
@@ -195,7 +307,11 @@ struct VibeGraph::BassBusNode
     EffectRack             rack;
     EQ8MsDSP               busEq;
     CompDelayLine          compDelay;
-    std::atomic<float>     peakDb { -60.f };
+    std::atomic<float>     peakDb  { -60.f };
+    // 2026-04-30: stereo L/R peakDb for the new split DBFSMeter.  Mono
+    // peakDb (above) kept for back-compat; written as max(L, R) each block.
+    std::atomic<float>     peakDbL { -60.f };
+    std::atomic<float>     peakDbR { -60.f };
     float                  peakDecayDbPerBlock { 0.35f };
 
     BassSynth&               bass;
@@ -208,6 +324,16 @@ struct VibeGraph::BassBusNode
     // 5F-4a Batch 6: APVTS pointers for polarity + width
     std::atomic<float>* pPolarity { nullptr };
     std::atomic<float>* pWidth    { nullptr };
+    // 2026-04-29: strip-local FX Bypass + pan (see LayersBusNode for rationale).
+    std::atomic<float>* pBypass   { nullptr };
+    std::atomic<float>* pPan      { nullptr };
+    std::atomic<float>* pPanLaw   { nullptr };
+    // 2026-04-30 (audit B.3): direct APVTS reads — see LayersBusNode header.
+    std::atomic<float>* pLevel         { nullptr };
+    std::atomic<float>* pMute          { nullptr };
+    std::atomic<float>* pSolo          { nullptr };
+    std::atomic<float>* pSiblingLayers { nullptr };   // mixer_layers_solo
+    std::atomic<float>* pSiblingDrum   { nullptr };   // mixer_drums_solo
     // Global "kill-all" FX bypass (master_fx_bypass) — forces rack bypass when true.
     std::atomic<float>* pGlobalFxBypass { nullptr };
 
@@ -219,6 +345,14 @@ struct VibeGraph::BassBusNode
     {
         pPolarity       = apvts.getRawParameterValue(prefix + "_polarity");
         pWidth          = apvts.getRawParameterValue(prefix + "_width");
+        pBypass         = apvts.getRawParameterValue(prefix + "_bypass");
+        pPan            = apvts.getRawParameterValue(prefix + "_pan");
+        pPanLaw         = apvts.getRawParameterValue("master_pan_law");
+        pLevel          = apvts.getRawParameterValue(prefix + "_level");
+        pMute           = apvts.getRawParameterValue(prefix + "_mute");
+        pSolo           = apvts.getRawParameterValue(prefix + "_solo");
+        pSiblingLayers  = apvts.getRawParameterValue("mixer_layers_solo");
+        pSiblingDrum    = apvts.getRawParameterValue("mixer_drums_solo");
         pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
     }
 
@@ -259,18 +393,26 @@ struct VibeGraph::BassBusNode
         // §P4.3: pre-rack bus EQ.
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside process)
         rack.setHostBPM(bpm);
-        // Respect global master_fx_bypass (kill-all flag).
+        // 2026-04-29: strip-local FX Bypass OR global master_fx_bypass.
         {
+            const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
             const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
-            if (rack.isRackBypassed() != globalBypass)
-                rack.setRackBypassed(globalBypass);
+            const bool bypass       = stripBypass || globalBypass;
+            if (rack.isRackBypassed() != bypass)
+                rack.setRackBypassed(bypass);
         }
         rack.process(buf);
         if (buf.getNumChannels() >= 2) busEq.process(buf);   // post-rack bus EQ (identity short-circuit + spectrum feed inside)
 
-        bool anySolo = busMix.layersSolo || busMix.bassSolo || busMix.drumsSolo;
-        float g = calcBusGain(busMix.bassGain, busMix.bassMute,
-                              busMix.bassSolo, anySolo);
+        // 2026-04-30 (audit B.3): direct APVTS read — see LayersBusNode.
+        const bool  thisSolo  = loadParam(pSolo,           0.f) > 0.5f;
+        const bool  layerSolo = loadParam(pSiblingLayers,  0.f) > 0.5f;
+        const bool  drumSolo  = loadParam(pSiblingDrum,    0.f) > 0.5f;
+        const bool  anySolo   = thisSolo || layerSolo || drumSolo;
+        const bool  thisMuted = loadParam(pMute, 0.f) > 0.5f;
+        const float fadDb     = loadParam(pLevel, 0.f);
+        const float fadLin    = juce::Decibels::decibelsToGain(fadDb, -60.f);
+        const float g = (thisMuted || (anySolo && ! thisSolo)) ? 0.f : fadLin;
         if (g != 1.f) buf.applyGain(g);
 
         // 5F-4a Batch 6: polarity + M/S width
@@ -290,12 +432,23 @@ struct VibeGraph::BassBusNode
             }
         }
 
+        // 2026-04-29: pan applied AFTER fader + width using project-level law.
+        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
+
         compDelay.process(buf);
         {
-            const float thisPeak = bufferPeakDb(buf);
-            const float prev     = peakDb.load(std::memory_order_relaxed);
-            const float decayed  = juce::jmax(-60.0f, prev - peakDecayDbPerBlock);
-            peakDb.store(juce::jmax(thisPeak, decayed), std::memory_order_relaxed);
+            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
+            // Mono atomic kept (= max(L, R)) for legacy readers.
+            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
+            const float prevL = peakDbL.load(std::memory_order_relaxed);
+            const float prevR = peakDbR.load(std::memory_order_relaxed);
+            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
+            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
+            const float newL = juce::jmax(thisL, decayedL);
+            const float newR = juce::jmax(thisR, decayedR);
+            peakDbL.store(newL, std::memory_order_relaxed);
+            peakDbR.store(newR, std::memory_order_relaxed);
+            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
         }
     }
 };
@@ -307,7 +460,11 @@ struct VibeGraph::DrumsBusNode
     EffectRack             rack;
     EQ8MsDSP               busEq;
     CompDelayLine          compDelay;
-    std::atomic<float>     peakDb { -60.f };
+    std::atomic<float>     peakDb  { -60.f };
+    // 2026-04-30: stereo L/R peakDb for the new split DBFSMeter.  Mono
+    // peakDb (above) kept for back-compat; written as max(L, R) each block.
+    std::atomic<float>     peakDbL { -60.f };
+    std::atomic<float>     peakDbR { -60.f };
     float                  peakDecayDbPerBlock { 0.35f };
 
     // 2026-04-25: DrumSynth ref removed — drum bus now ALWAYS uses preRendered
@@ -318,6 +475,16 @@ struct VibeGraph::DrumsBusNode
     // 5F-4a Batch 6: APVTS pointers for polarity + width
     std::atomic<float>* pPolarity { nullptr };
     std::atomic<float>* pWidth    { nullptr };
+    // 2026-04-29: strip-local FX Bypass + pan (see LayersBusNode for rationale).
+    std::atomic<float>* pBypass   { nullptr };
+    std::atomic<float>* pPan      { nullptr };
+    std::atomic<float>* pPanLaw   { nullptr };
+    // 2026-04-30 (audit B.3): direct APVTS reads — see LayersBusNode header.
+    std::atomic<float>* pLevel         { nullptr };
+    std::atomic<float>* pMute          { nullptr };
+    std::atomic<float>* pSolo          { nullptr };
+    std::atomic<float>* pSiblingLayers { nullptr };   // mixer_layers_solo
+    std::atomic<float>* pSiblingBass   { nullptr };   // mixer_bass_solo
     // Global "kill-all" FX bypass (master_fx_bypass) — forces rack bypass when true.
     std::atomic<float>* pGlobalFxBypass { nullptr };
 
@@ -329,6 +496,14 @@ struct VibeGraph::DrumsBusNode
     {
         pPolarity       = apvts.getRawParameterValue(prefix + "_polarity");
         pWidth          = apvts.getRawParameterValue(prefix + "_width");
+        pBypass         = apvts.getRawParameterValue(prefix + "_bypass");
+        pPan            = apvts.getRawParameterValue(prefix + "_pan");
+        pPanLaw         = apvts.getRawParameterValue("master_pan_law");
+        pLevel          = apvts.getRawParameterValue(prefix + "_level");
+        pMute           = apvts.getRawParameterValue(prefix + "_mute");
+        pSolo           = apvts.getRawParameterValue(prefix + "_solo");
+        pSiblingLayers  = apvts.getRawParameterValue("mixer_layers_solo");
+        pSiblingBass    = apvts.getRawParameterValue("mixer_bass_solo");
         pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
     }
 
@@ -367,18 +542,26 @@ struct VibeGraph::DrumsBusNode
         // §P4.3 pre-rack EQ (legacy pageEq retired in B7).
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // identity short-circuit + spectrum feed inside process
         rack.setHostBPM(bpm);
-        // Respect global master_fx_bypass (kill-all flag).
+        // 2026-04-29: strip-local FX Bypass OR global master_fx_bypass.
         {
+            const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
             const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
-            if (rack.isRackBypassed() != globalBypass)
-                rack.setRackBypassed(globalBypass);
+            const bool bypass       = stripBypass || globalBypass;
+            if (rack.isRackBypassed() != bypass)
+                rack.setRackBypassed(bypass);
         }
         rack.process(buf);
         if (buf.getNumChannels() >= 2) busEq.process(buf);   // post-rack bus EQ (identity short-circuit + spectrum feed inside)
 
-        bool anySolo = busMix.layersSolo || busMix.bassSolo || busMix.drumsSolo;
-        float g = calcBusGain(busMix.drumsGain, busMix.drumsMute,
-                              busMix.drumsSolo, anySolo);
+        // 2026-04-30 (audit B.3): direct APVTS read — see LayersBusNode.
+        const bool  thisSolo  = loadParam(pSolo,           0.f) > 0.5f;
+        const bool  layerSolo = loadParam(pSiblingLayers,  0.f) > 0.5f;
+        const bool  bassSolo  = loadParam(pSiblingBass,    0.f) > 0.5f;
+        const bool  anySolo   = thisSolo || layerSolo || bassSolo;
+        const bool  thisMuted = loadParam(pMute, 0.f) > 0.5f;
+        const float fadDb     = loadParam(pLevel, 0.f);
+        const float fadLin    = juce::Decibels::decibelsToGain(fadDb, -60.f);
+        const float g = (thisMuted || (anySolo && ! thisSolo)) ? 0.f : fadLin;
         if (g != 1.f) buf.applyGain(g);
 
         // 5F-4a Batch 6: polarity + M/S width
@@ -398,12 +581,23 @@ struct VibeGraph::DrumsBusNode
             }
         }
 
+        // 2026-04-29: pan applied AFTER fader + width using project-level law.
+        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
+
         compDelay.process(buf);
         {
-            const float thisPeak = bufferPeakDb(buf);
-            const float prev     = peakDb.load(std::memory_order_relaxed);
-            const float decayed  = juce::jmax(-60.0f, prev - peakDecayDbPerBlock);
-            peakDb.store(juce::jmax(thisPeak, decayed), std::memory_order_relaxed);
+            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
+            // Mono atomic kept (= max(L, R)) for legacy readers.
+            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
+            const float prevL = peakDbL.load(std::memory_order_relaxed);
+            const float prevR = peakDbR.load(std::memory_order_relaxed);
+            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
+            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
+            const float newL = juce::jmax(thisL, decayedL);
+            const float newR = juce::jmax(thisR, decayedR);
+            peakDbL.store(newL, std::memory_order_relaxed);
+            peakDbR.store(newR, std::memory_order_relaxed);
+            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
         }
     }
 };
@@ -416,7 +610,11 @@ struct VibeGraph::MasterBusNode
     EQ8MsDSP               preEq;    // §P4.3 pre-rack
     EffectRack             rack;
     EQ8MsDSP               busEq;    // post-rack master EQ — shown on Effects Page
-    std::atomic<float>     peakDb { -60.f };
+    std::atomic<float>     peakDb  { -60.f };
+    // 2026-04-30: stereo L/R peakDb for the new split DBFSMeter.  Mono
+    // peakDb (above) kept for back-compat; written as max(L, R) each block.
+    std::atomic<float>     peakDbL { -60.f };
+    std::atomic<float>     peakDbR { -60.f };
     float                  peakDecayDbPerBlock { 0.35f };
 
     juce::AudioProcessorValueTreeState& apvts;
@@ -426,6 +624,22 @@ struct VibeGraph::MasterBusNode
     std::atomic<float>* pWidth { nullptr };
     // Global "kill-all" FX bypass (master_fx_bypass).
     std::atomic<float>* pGlobalFxBypass { nullptr };
+    // 2026-04-29: master mute (was previously only wired to UI; clicking it
+    // updated APVTS but no audio code read the param so master mute did
+    // nothing).
+    std::atomic<float>* pMute  { nullptr };
+    // 2026-04-29: master strip's own FX Bypass (mixer_master_bypass) — bypasses
+    // ONLY the master rack.  Distinct from master_fx_bypass which bypasses
+    // every rack on every strip globally.  The two are OR-ed together so
+    // either one being on bypasses the master rack.
+    std::atomic<float>* pBypass { nullptr };
+    // 2026-04-29: master pan + project-level pan law.
+    std::atomic<float>* pPan    { nullptr };
+    std::atomic<float>* pPanLaw { nullptr };
+    // 2026-04-30 (audit B.3): mixer_master_level direct read — was relayed
+    // through busMix.masterFader (PatternManager) on a 30 Hz UI timer.
+    // Now audio thread reads APVTS directly each block.
+    std::atomic<float>* pLevel  { nullptr };
 
     static float loadParam(const std::atomic<float>* p, float fallback) noexcept
     {
@@ -435,6 +649,11 @@ struct VibeGraph::MasterBusNode
     {
         pWidth          = a.getRawParameterValue(prefix + "_width");
         pGlobalFxBypass = a.getRawParameterValue("master_fx_bypass");
+        pMute           = a.getRawParameterValue(prefix + "_mute");
+        pBypass         = a.getRawParameterValue(prefix + "_bypass");
+        pPan            = a.getRawParameterValue(prefix + "_pan");
+        pPanLaw         = a.getRawParameterValue("master_pan_law");
+        pLevel          = a.getRawParameterValue(prefix + "_level");
     }
 
     MasterBusNode(juce::AudioProcessorValueTreeState& a, VibeGraph::BusMix& m)
@@ -461,11 +680,15 @@ struct VibeGraph::MasterBusNode
         // §P4.3 pre-rack master EQ.
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside process)
         rack.setHostBPM(bpm);
-        // Respect global master_fx_bypass (kill-all flag).
+        // 2026-04-29: master rack bypass = strip-local OR global kill-all.
+        // mixer_master_bypass bypasses the master rack only; master_fx_bypass
+        // also bypasses every other strip's rack downstream.
         {
+            const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
             const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
-            if (rack.isRackBypassed() != globalBypass)
-                rack.setRackBypassed(globalBypass);
+            const bool bypass       = stripBypass || globalBypass;
+            if (rack.isRackBypassed() != bypass)
+                rack.setRackBypassed(bypass);
         }
         rack.process(buf);
         if (buf.getNumChannels() >= 2) busEq.process(buf);   // post-rack master EQ
@@ -474,8 +697,19 @@ struct VibeGraph::MasterBusNode
         if (auto* p = apvts.getRawParameterValue("masterGain"))
             masterGain = p->load();
 
-        float g = masterGain * busMix.masterFader;
+        // 2026-04-29: master mute (mixer_master_mute APVTS toggle).  Multiplies
+        // gain by zero when set — master output silenced regardless of bus
+        // contributions.  Read via cached pMute pointer (rebindApvts).
+        // 2026-04-30 (audit B.3): mixer_master_level read direct from APVTS
+        // instead of busMix.masterFader (was 30 Hz UI relay).
+        const bool  masterMuted = loadParam(pMute, 0.f) > 0.5f;
+        const float masterFadDb = loadParam(pLevel, 0.f);
+        const float masterFadLn = juce::Decibels::decibelsToGain(masterFadDb, -60.f);
+        float g = masterMuted ? 0.f : (masterGain * masterFadLn);
         if (g != 1.f) buf.applyGain(g);
+
+        // 2026-04-29: master pan applied AFTER master fader using project-level law.
+        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
 
         // 5F-4a Batch 6: master M/S width (no polarity on master)
         const float width = loadParam(pWidth, 1.f);
@@ -494,10 +728,18 @@ struct VibeGraph::MasterBusNode
         }
 
         {
-            const float thisPeak = bufferPeakDb(buf);
-            const float prev     = peakDb.load(std::memory_order_relaxed);
-            const float decayed  = juce::jmax(-60.0f, prev - peakDecayDbPerBlock);
-            peakDb.store(juce::jmax(thisPeak, decayed), std::memory_order_relaxed);
+            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
+            // Mono atomic kept (= max(L, R)) for legacy readers.
+            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
+            const float prevL = peakDbL.load(std::memory_order_relaxed);
+            const float prevR = peakDbR.load(std::memory_order_relaxed);
+            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
+            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
+            const float newL = juce::jmax(thisL, decayedL);
+            const float newR = juce::jmax(thisR, decayedR);
+            peakDbL.store(newL, std::memory_order_relaxed);
+            peakDbR.store(newR, std::memory_order_relaxed);
+            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
         }
     }
 };
@@ -510,7 +752,13 @@ struct VibeGraph::EffectsBusNode
     EQ8MsDSP           preEq;    // §P4.3 pre-rack
     EffectRack         rack;
     EQ8MsDSP           busEq;    // post-rack Effects Bus EQ — shown on Effects Page
-    std::atomic<float> peakDb { -60.f };
+    std::atomic<float> peakDb  { -60.f };
+    // 2026-04-30: stereo L/R peakDb for split DBFSMeter (matches all other
+    // bus nodes).  EffectsBusNode itself isn't currently driven by audio
+    // (its processBlock is a stub), but the atomics are here so the meter
+    // rebuild has consistent shape across every bus type.
+    std::atomic<float> peakDbL { -60.f };
+    std::atomic<float> peakDbR { -60.f };
     float              peakDecayDbPerBlock { 0.35f };
 
     // 5F-4a Batch 6: APVTS pointers for polarity + width
@@ -578,10 +826,18 @@ struct VibeGraph::EffectsBusNode
         }
 
         {
-            const float thisPeak = bufferPeakDb(buf);
-            const float prev     = peakDb.load(std::memory_order_relaxed);
-            const float decayed  = juce::jmax(-60.0f, prev - peakDecayDbPerBlock);
-            peakDb.store(juce::jmax(thisPeak, decayed), std::memory_order_relaxed);
+            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
+            // Mono atomic kept (= max(L, R)) for legacy readers.
+            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
+            const float prevL = peakDbL.load(std::memory_order_relaxed);
+            const float prevR = peakDbR.load(std::memory_order_relaxed);
+            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
+            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
+            const float newL = juce::jmax(thisL, decayedL);
+            const float newR = juce::jmax(thisR, decayedR);
+            peakDbL.store(newL, std::memory_order_relaxed);
+            peakDbR.store(newR, std::memory_order_relaxed);
+            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
         }
     }
 };
@@ -614,7 +870,12 @@ struct VibeGraph::InsertNode
     EffectRack            rack;
     EQ8MsDSP              eq;         // post-rack
     CompDelayLine         compDelay;  // per-insert PDC
-    std::atomic<float>    peakDb { -60.f };
+    // 2026-04-30: stereo L/R peak atomics for the strip's split DBFSMeter.
+    // peakDb (mono = max(L, R)) is kept for back-compat with any reader
+    // that hasn't switched to the stereo getters yet.
+    std::atomic<float>    peakDb  { -60.f };
+    std::atomic<float>    peakDbL { -60.f };
+    std::atomic<float>    peakDbR { -60.f };
     // Peak-hold decay (set in prepare) so transient hits don't get missed
     // between UI polls (30 Hz) when audio runs at 86+ blocks/sec.
     float                 peakDecayDbPerBlock { 0.35f };
@@ -638,6 +899,9 @@ struct VibeGraph::InsertNode
     std::atomic<float>* pChokeGroup { nullptr };
     // Global "kill-all" FX bypass (master_fx_bypass) — OR-ed into pBypass each block.
     std::atomic<float>* pGlobalFxBypass { nullptr };
+    // 2026-04-29: project-level pan law selector (master_pan_law) — read
+    // every block alongside pPan so the user can pick FL-style pan curve.
+    std::atomic<float>* pPanLaw { nullptr };
 
     InsertNode(VibeGraph::InsertKind k, int i,
                juce::String displayName, juce::String prefix)
@@ -676,6 +940,7 @@ struct VibeGraph::InsertNode
         pArm            = apvts.getRawParameterValue(apvtsPrefix + "_arm");
         pChokeGroup     = apvts.getRawParameterValue(apvtsPrefix + "_chokeGroup");
         pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
+        pPanLaw         = apvts.getRawParameterValue("master_pan_law");
     }
 
     static float load(const std::atomic<float>* p, float fallback) noexcept
@@ -757,6 +1022,12 @@ struct VibeGraph::InsertNode
         }
         mLastFaderGain = g;
 
+        // 2026-04-29: per-strip pan applied AFTER fader using project-level
+        // pan law (master_pan_law: 0=Circular / 1=Triangular / 2=Square).
+        // applyStereoPan no-ops when pan is at center, so this costs ~nothing
+        // for the common case.
+        applyStereoPan (buf, load(pPan, 0.f), (int) load(pPanLaw, 0.f));
+
         // Per-insert PDC alignment
         compDelay.process(buf);
 
@@ -765,10 +1036,22 @@ struct VibeGraph::InsertNode
         // peaks never reach the UI. max(thisBlockPeak, previousPeak - decay)
         // keeps the meter responsive to transients and decays smoothly over
         // ~1 second to the -60 dB floor.
-        const float thisPeak = bufferPeakDb(buf);
-        const float prev     = peakDb.load(std::memory_order_relaxed);
-        const float decayed  = juce::jmax(-60.0f, prev - peakDecayDbPerBlock);
-        peakDb.store(juce::jmax(thisPeak, decayed), std::memory_order_relaxed);
+        // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.  Compute
+        // per-channel peaks from the buffer; store mono (max of L+R) for
+        // back-compat with legacy readers that haven't switched to the
+        // stereo getters yet.
+        {
+            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
+            const float prevL = peakDbL.load(std::memory_order_relaxed);
+            const float prevR = peakDbR.load(std::memory_order_relaxed);
+            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
+            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
+            const float newL = juce::jmax(thisL, decayedL);
+            const float newR = juce::jmax(thisR, decayedR);
+            peakDbL.store(newL, std::memory_order_relaxed);
+            peakDbR.store(newR, std::memory_order_relaxed);
+            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
+        }
     }
 };
 
@@ -870,6 +1153,18 @@ void VibeGraph::prepare(double sampleRate, int maxBlockSize)
     if (!mInstBusNode) mInstBusNode = std::make_unique<InstrChannelNode>("Inst Bus");
     mInstBusNode->prepare(sampleRate, maxBlockSize);
 
+    // G-6 (2026-04-29): secondary Vox/Inst buses — always allocated so audio
+    // routing works whether or not the user has activated the strip on
+    // Mixer.  Same shape as the primary buses (InstrChannelNode = pre-EQ +
+    // rack + post-EQ + fader + meter).  Pre-process is cheap when no
+    // inserts route to them (silent buffer).
+    if (!mVoxBus2Node)  mVoxBus2Node  = std::make_unique<InstrChannelNode>("Vox Bus 2");
+    mVoxBus2Node->prepare(sampleRate, maxBlockSize);
+    if (!mInstBus2Node) mInstBus2Node = std::make_unique<InstrChannelNode>("Inst Bus 2");
+    mInstBus2Node->prepare(sampleRate, maxBlockSize);
+    if (!mInstBus3Node) mInstBus3Node = std::make_unique<InstrChannelNode>("Inst Bus 3");
+    mInstBus3Node->prepare(sampleRate, maxBlockSize);
+
     if (!mTopologyBuilt) return;
 
     // Re-prepare all nodes (e.g. sample rate change)
@@ -917,6 +1212,9 @@ void VibeGraph::reset()
     if (mAudioClipsBusNode) mAudioClipsBusNode->reset();
     if (mVoxBusNode)        mVoxBusNode->reset();
     if (mInstBusNode)       mInstBusNode->reset();
+    if (mVoxBus2Node)       mVoxBus2Node->reset();
+    if (mInstBus2Node)      mInstBus2Node->reset();
+    if (mInstBus3Node)      mInstBus3Node->reset();
     if (!mTopologyBuilt) return;
     mLayersNode    ->reset();
     mBassNode      ->reset();
@@ -1013,13 +1311,19 @@ void VibeGraph::processBlock(juce::AudioBuffer<float>& outputBuf,
 
     // ── Render each bus node ──────────────────────────────────────────────────
     mLayersNode->processBlock(layersBuf, midi, bpm, layersPreRendered);
-    layersPeakDb.store(mLayersNode->peakDb.load(), std::memory_order_relaxed);
+    layersPeakDb .store(mLayersNode->peakDb .load(), std::memory_order_relaxed);
+    layersPeakDbL.store(mLayersNode->peakDbL.load(), std::memory_order_relaxed);
+    layersPeakDbR.store(mLayersNode->peakDbR.load(), std::memory_order_relaxed);
 
     mBassNode->processBlock(bassBuf, bpm, bassPreRendered);
-    bassPeakDb.store(mBassNode->peakDb.load(), std::memory_order_relaxed);
+    bassPeakDb .store(mBassNode->peakDb .load(), std::memory_order_relaxed);
+    bassPeakDbL.store(mBassNode->peakDbL.load(), std::memory_order_relaxed);
+    bassPeakDbR.store(mBassNode->peakDbR.load(), std::memory_order_relaxed);
 
     mDrumsNode->processBlock(drumsBuf, bpm, drumsPreRendered);
-    drumsPeakDb.store(mDrumsNode->peakDb.load(), std::memory_order_relaxed);
+    drumsPeakDb .store(mDrumsNode->peakDb .load(), std::memory_order_relaxed);
+    drumsPeakDbL.store(mDrumsNode->peakDbL.load(), std::memory_order_relaxed);
+    drumsPeakDbR.store(mDrumsNode->peakDbR.load(), std::memory_order_relaxed);
 
     // ── Sum buses into master input ───────────────────────────────────────────
     sumBuf.clear();
@@ -1048,7 +1352,9 @@ void VibeGraph::processBlock(juce::AudioBuffer<float>& outputBuf,
 
     // ── Master bus (rack + masterGain × masterFader) ──────────────────────────
     mMasterNode->processBlock(sumBuf, bpm);
-    masterPeakDb.store(mMasterNode->peakDb.load(), std::memory_order_relaxed);
+    masterPeakDb .store(mMasterNode->peakDb .load(), std::memory_order_relaxed);
+    masterPeakDbL.store(mMasterNode->peakDbL.load(), std::memory_order_relaxed);
+    masterPeakDbR.store(mMasterNode->peakDbR.load(), std::memory_order_relaxed);
 
     // ── Write master output to the output buffer ──────────────────────────────
     outputBuf.clear();
@@ -1065,6 +1371,9 @@ EffectRack* VibeGraph::getEffectsBusRack()    { return mEffectsBusNode   ? &mEff
 EffectRack* VibeGraph::getAudioClipsBusRack() { return mAudioClipsBusNode ? &mAudioClipsBusNode->rack : nullptr; }
 EffectRack* VibeGraph::getVoxBusRack()        { return mVoxBusNode        ? &mVoxBusNode       ->rack : nullptr; }
 EffectRack* VibeGraph::getInstBusRack()       { return mInstBusNode       ? &mInstBusNode      ->rack : nullptr; }
+EffectRack* VibeGraph::getVoxBus2Rack()       { return mVoxBus2Node       ? &mVoxBus2Node      ->rack : nullptr; }
+EffectRack* VibeGraph::getInstBus2Rack()      { return mInstBus2Node      ? &mInstBus2Node     ->rack : nullptr; }
+EffectRack* VibeGraph::getInstBus3Rack()      { return mInstBus3Node      ? &mInstBus3Node     ->rack : nullptr; }
 
 EffectRack* VibeGraph::getLayerPageRack(int idx)
 {
@@ -1131,6 +1440,9 @@ EQ8MsDSP* VibeGraph::getEffectsBusEQ()    { return mEffectsBusNode   ? &mEffects
 EQ8MsDSP* VibeGraph::getAudioClipsBusEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->eq  : nullptr; }
 EQ8MsDSP* VibeGraph::getVoxBusEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->eq  : nullptr; }
 EQ8MsDSP* VibeGraph::getInstBusEQ()       { return mInstBusNode       ? &mInstBusNode      ->eq  : nullptr; }
+EQ8MsDSP* VibeGraph::getVoxBus2EQ()       { return mVoxBus2Node       ? &mVoxBus2Node      ->eq  : nullptr; }
+EQ8MsDSP* VibeGraph::getInstBus2EQ()      { return mInstBus2Node      ? &mInstBus2Node     ->eq  : nullptr; }
+EQ8MsDSP* VibeGraph::getInstBus3EQ()      { return mInstBus3Node      ? &mInstBus3Node     ->eq  : nullptr; }
 
 // §P4.3: Pre-rack bus EQs (NEW — every bus gets one).
 EQ8MsDSP* VibeGraph::getLayersBusPreEQ()     { return mLayersNode       ? &mLayersNode       ->preEq : nullptr; }
@@ -1141,6 +1453,9 @@ EQ8MsDSP* VibeGraph::getEffectsBusPreEQ()    { return mEffectsBusNode   ? &mEffe
 EQ8MsDSP* VibeGraph::getAudioClipsBusPreEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->preEq : nullptr; }
 EQ8MsDSP* VibeGraph::getVoxBusPreEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->preEq : nullptr; }
 EQ8MsDSP* VibeGraph::getInstBusPreEQ()       { return mInstBusNode       ? &mInstBusNode      ->preEq : nullptr; }
+EQ8MsDSP* VibeGraph::getVoxBus2PreEQ()       { return mVoxBus2Node       ? &mVoxBus2Node      ->preEq : nullptr; }
+EQ8MsDSP* VibeGraph::getInstBus2PreEQ()      { return mInstBus2Node      ? &mInstBus2Node     ->preEq : nullptr; }
+EQ8MsDSP* VibeGraph::getInstBus3PreEQ()      { return mInstBus3Node      ? &mInstBus3Node     ->preEq : nullptr; }
 
 // ── Rack + bus EQ state serialization ────────────────────────────────────────
 
@@ -1190,6 +1505,9 @@ void VibeGraph::saveRackStates(juce::ValueTree& parent)
     if (mAudioClipsBusNode) addNode ("ClipsBus", mAudioClipsBusNode->rack, mAudioClipsBusNode->eq);
     if (mVoxBusNode)        addNode ("VoxBus",   mVoxBusNode->rack,        mVoxBusNode->eq);
     if (mInstBusNode)       addNode ("InstBus",  mInstBusNode->rack,       mInstBusNode->eq);
+    if (mVoxBus2Node)       addNode ("VoxBus2",  mVoxBus2Node->rack,       mVoxBus2Node->eq);
+    if (mInstBus2Node)      addNode ("InstBus2", mInstBus2Node->rack,      mInstBus2Node->eq);
+    if (mInstBus3Node)      addNode ("InstBus3", mInstBus3Node->rack,      mInstBus3Node->eq);
 
     for (int chId : mInstrChannelOrder)
     {
@@ -1254,6 +1572,9 @@ void VibeGraph::clearAllRackStates()
     if (mAudioClipsBusNode) wipe (mAudioClipsBusNode->rack);
     if (mVoxBusNode)        wipe (mVoxBusNode      ->rack);
     if (mInstBusNode)       wipe (mInstBusNode     ->rack);
+    if (mVoxBus2Node)       wipe (mVoxBus2Node     ->rack);
+    if (mInstBus2Node)      wipe (mInstBus2Node    ->rack);
+    if (mInstBus3Node)      wipe (mInstBus3Node    ->rack);
 
     for (auto& [id, node] : mInstrChannelNodes) if (node) wipe (node->rack);
     for (auto* m : { &mLayerInserts, &mBassInserts, &mDrumInserts,
@@ -1302,6 +1623,9 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
     if (mAudioClipsBusNode) restoreNode ("ClipsBus", mAudioClipsBusNode->rack, mAudioClipsBusNode->eq);
     if (mVoxBusNode)        restoreNode ("VoxBus",   mVoxBusNode->rack,        mVoxBusNode->eq);
     if (mInstBusNode)       restoreNode ("InstBus",  mInstBusNode->rack,       mInstBusNode->eq);
+    if (mVoxBus2Node)       restoreNode ("VoxBus2",  mVoxBus2Node->rack,       mVoxBus2Node->eq);
+    if (mInstBus2Node)      restoreNode ("InstBus2", mInstBus2Node->rack,      mInstBus2Node->eq);
+    if (mInstBus3Node)      restoreNode ("InstBus3", mInstBus3Node->rack,      mInstBus3Node->eq);
 
     for (int i = 0; i < parent.getNumChildren(); ++i)
     {
@@ -1508,7 +1832,16 @@ VibeGraph::ensureInsertNode(InsertKind kind, int index,
     auto* m = selectInsertMap(kind, mLayerInserts, mBassInserts, mDrumInserts, mAudioInserts, mAuxInserts, mVoxInserts, mInstInserts);
 
     if (auto it = m->find(index); it != m->end())
+    {
+        // 2026-04-29: defensive re-bind.  If the node was first created before
+        // mApvts was set (i.e. before buildFixedTopology), or before the strip's
+        // params were registered, pLevel/pMute/etc. would be NULL and stay NULL
+        // forever — strip fader/mute/meter would silently no-op.  Re-binding on
+        // every ensure call keeps pointers fresh.
+        if (mApvts != nullptr)
+            it->second->rebindApvts(*mApvts);
         return it->second.get();
+    }
 
     auto node = std::make_unique<InsertNode>(kind, index, displayName, apvtsPrefix);
     if (mSampleRate > 0.0)
@@ -1586,6 +1919,29 @@ float VibeGraph::getInsertPeakDb(InsertKind kind, int index) const
     return -60.f;
 }
 
+// 2026-04-30: stereo peak getter for the new split DBFSMeter.  Returns
+// {peakDbL, peakDbR}.  Falls back to {-60, -60} when the insert doesn't
+// exist (matches mono getter behaviour).
+std::pair<float, float> VibeGraph::getInsertPeakDbStereo(InsertKind kind, int index) const
+{
+    const std::map<int, std::unique_ptr<InsertNode>>* m = nullptr;
+    switch (kind)
+    {
+        case InsertKind::Layer: m = &mLayerInserts; break;
+        case InsertKind::Bass:  m = &mBassInserts;  break;
+        case InsertKind::Drum:  m = &mDrumInserts;  break;
+        case InsertKind::Audio: m = &mAudioInserts; break;
+        case InsertKind::Aux:   m = &mAuxInserts;   break;
+        case InsertKind::Vox:   m = &mVoxInserts;   break;
+        case InsertKind::Inst:  m = &mInstInserts;  break;
+    }
+    if (m)
+        if (auto it = m->find(index); it != m->end())
+            return { it->second->peakDbL.load(std::memory_order_relaxed),
+                     it->second->peakDbR.load(std::memory_order_relaxed) };
+    return { -60.f, -60.f };
+}
+
 // D3: read the insert's choke group (0 = none).  Wait-free.
 int VibeGraph::getInsertChokeGroup(InsertKind kind, int index) const
 {
@@ -1622,6 +1978,9 @@ void VibeGraph::rebindBusApvts()
     if (mAudioClipsBusNode) mAudioClipsBusNode ->rebindApvts(*mApvts, "mixer_clipsbus");
     if (mVoxBusNode)        mVoxBusNode        ->rebindApvts(*mApvts, "mixer_voxbus");
     if (mInstBusNode)       mInstBusNode       ->rebindApvts(*mApvts, "mixer_instbus");
+    if (mVoxBus2Node)       mVoxBus2Node       ->rebindApvts(*mApvts, "mixer_voxbus2");
+    if (mInstBus2Node)      mInstBus2Node      ->rebindApvts(*mApvts, "mixer_instbus2");
+    if (mInstBus3Node)      mInstBus3Node      ->rebindApvts(*mApvts, "mixer_instbus3");
     if (mMasterNode)        mMasterNode        ->rebindApvts(*mApvts, "mixer_master");
 }
 
@@ -1646,6 +2005,19 @@ void VibeGraph::applyVoxBusPolarityWidth(juce::AudioBuffer<float>& buf)
 void VibeGraph::applyInstBusPolarityWidth(juce::AudioBuffer<float>& buf)
 {
     if (mInstBusNode) mInstBusNode->applyPolarityWidth(buf);
+}
+// G-6 (2026-04-29): polarity/width application for secondary buses.
+void VibeGraph::applyVoxBus2PolarityWidth(juce::AudioBuffer<float>& buf)
+{
+    if (mVoxBus2Node) mVoxBus2Node->applyPolarityWidth(buf);
+}
+void VibeGraph::applyInstBus2PolarityWidth(juce::AudioBuffer<float>& buf)
+{
+    if (mInstBus2Node) mInstBus2Node->applyPolarityWidth(buf);
+}
+void VibeGraph::applyInstBus3PolarityWidth(juce::AudioBuffer<float>& buf)
+{
+    if (mInstBus3Node) mInstBus3Node->applyPolarityWidth(buf);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1821,6 +2193,12 @@ void VibeGraph::rebuildRoutingFromApvts()
     mActiveChannels.emplace_back(kClipsBus,  juce::String("mixer_clipsbus"));
     mActiveChannels.emplace_back(kVoxBus,    juce::String("mixer_voxbus"));
     mActiveChannels.emplace_back(kInstBus,   juce::String("mixer_instbus"));
+    // G-6 (2026-04-29): secondary buses included always so the routing
+    // graph picks up their _sendTo (set when active strip's main-out cable
+    // is dragged) regardless of whether the UI strip is currently visible.
+    mActiveChannels.emplace_back(kVoxBus2,   juce::String("mixer_voxbus2"));
+    mActiveChannels.emplace_back(kInstBus2,  juce::String("mixer_instbus2"));
+    mActiveChannels.emplace_back(kInstBus3,  juce::String("mixer_instbus3"));
 
     for (auto& [idx, node] : mLayerInserts)
         mActiveChannels.emplace_back(layerInsert(idx), node->apvtsPrefix);

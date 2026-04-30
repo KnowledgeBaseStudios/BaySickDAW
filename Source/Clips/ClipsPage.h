@@ -1,22 +1,21 @@
 #pragma once
 #include <JuceHeader.h>
+#include "../Standalone/SharedUI.h"   // ParametricEQDisplay
+
+class VibeSynthProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ClipsPage — host component for one Clips tab (Phase G-2).
 // ─────────────────────────────────────────────────────────────────────────────
-// One Clips tab = one engine instance.  The engine is picked from a small
-// dropdown (BaySickPlayer or BaySickNAM/IR) — same UX pattern as the Layer /
-// Bass / Drum tabs, just with a narrower set of options.  The page itself
-// can ONLY be spawned via dragging or uploading a clip onto the Builder grid
-// or the Clips empty-state placeholder; the ribbon's Clip dropdown is an
-// instance switcher only (no `+ Add` entry).
+// One Clips tab = one BaySickPlayer instance.  Clips is a sampler-style page;
+// piano-roll notes trigger the loaded WAV.  No engine picker exists — Clips
+// has only one engine choice, so the player auto-instantiates on tab spawn.
+// (G-6 cleanup, 2026-04-29: removed BaySickNAM/IR from Clips per Jeff's
+// "Clips is essentially a sample player" — NAM/IR belongs on the Inst page.)
 //
-// Engine semantics:
-//   BaySickPlayer  — sampler-style instrument; piano-roll notes trigger the
-//                    loaded clip.  Default on first spawn.
-//   BaySickNAM/IR  — re-amp processor; the clip's audio is intended to feed
-//                    the amp model's input.  Audio routing for re-amp is
-//                    G-3 work; G-2 just hosts the editor.
+// The page itself can ONLY be spawned via dragging or uploading a clip onto
+// the Builder grid or the Clips empty-state placeholder; the ribbon's Clip
+// dropdown is an instance switcher only (no `+ Add` entry).
 //
 // Sub-tabs mirror Layer/Bass shape — Player / Piano Roll / Pre EQ8 M/S — but
 // only Player is locally rendered.  Piano Roll redirects to PianoRollPage
@@ -27,7 +26,10 @@
 class ClipsPage : public juce::Component
 {
 public:
-    enum class EngineType { None, BaySickPlayer, BaySickNAMIR };
+    // G-6 (2026-04-29): EngineType kept for compatibility with existing call
+    // sites (importClipState reads/writes the active type).  Only valid
+    // values are None and BaySickPlayer.
+    enum class EngineType { None, BaySickPlayer };
 
     explicit ClipsPage (int pageIndex);
     ~ClipsPage() override;
@@ -41,62 +43,157 @@ public:
 
     // ── Page metadata ────────────────────────────────────────────────────────
     int          getPageIndex() const noexcept { return mPageIndex; }
-    // 2026-04-28 (G-2): page accent matches the mixer Clips-bus colour
-    // (`VC::Warm` = 0xffd4a017 amber/gold) so the ribbon tab + Mixer strip +
-    // page header all read as the same channel identity.
     juce::Colour getPageColor() const noexcept { return juce::Colour (0xffd4a017); }
 
     // ── Clip path access (set by drop-spawn flow) ────────────────────────────
     juce::String getClipFilePath() const                    { return mClipPath; }
     void         setClipFilePath (const juce::String& p);
 
-    // ── Engine selection ─────────────────────────────────────────────────────
+    // ── Engine accessors ─────────────────────────────────────────────────────
+    // selectEngine remains as the activation entry-point so spawnClipsTabIfMissing
+    // can fire onEngineChanged AFTER the editor's callbacks are wired.  Only
+    // BaySickPlayer is supported; passing None is a no-op.
     void          selectEngine (EngineType e);
     EngineType    getEngineType() const noexcept { return mEngineType; }
-    // Returns the currently-active engine instance (null if EngineType::None).
-    // Both BaySickPlayer + NAM/IR instances are kept alive across swaps so
-    // their settings persist — this picker just selects which one is "live".
     juce::AudioProcessor* getEngineProcessor() const noexcept;
 
     // G-3 (2026-04-28): fired BEFORE the active engine swaps so the editor
-    // can unregisterClipEngine while the OLD pointer is still valid (no
-    // dangling-pointer crash on audio thread).  Counterpart to onEngineChanged.
+    // can unregisterClipEngine while the OLD pointer is still valid.
     std::function<void()> onEngineDestroying;
-    // Fired AFTER the active engine has been swapped to its new value.  The
-    // editor wires this to call registerClipEngine with the new active
-    // processor so the audio thread starts dispatching MIDI to it.
     std::function<void()> onEngineChanged;
 
     // ── Tab name (for ribbon rename) ─────────────────────────────────────────
     void                setTabName (const juce::String& n) { mTabName = n; repaint(); }
     const juce::String& getTabName () const                 { return mTabName; }
 
+    // ── G-6 (2026-04-29): full-state export/import for Duplicate flow ────────
+    // Captures BaySickPlayer's APVTS state (single-engine page now).  Saves
+    // the actual engine prefix in the XML so import does proper substitution
+    // even though VibePlayerProcessor's prefix format is composite
+    // ("tk_<trackId>_bsp_" with double-underscore artifact when trackId
+    // already ends in "_").
+    juce::String exportClipState() const;
+    void         importClipState (const juce::String& xml);
+
+    // ── G-6 (2026-04-29): right-click context menu on the engine picker ──────
+    // Wired by StandaloneEditor.  Mirrors the Layers/Bass/Drums right-click
+    // context menus on their LockableCombo sound-pickers.
+    std::function<void()>                        onDuplicateRequested;
+    std::function<void()>                        onRenameRequested;
+    std::function<void()>                        onDeleteRequested;
+    std::function<void()>                        onLockChanged;        // editor wires to ribbon setTabLocked
+    // Choke Group: editor reads/writes the mixer_audio_<pageIdx>_chokeGroup
+    // APVTS param on the main VibeSynthProcessor.  ClipsPage doesn't carry
+    // a reference to that processor so the menu queries via these callbacks.
+    std::function<int()>                         onGetChokeGroup;
+    std::function<void(int)>                     onSetChokeGroup;
+
+    // Lock — protects tab from delete (sync'd to ribbon [L] prefix).
+    bool isLocked() const noexcept { return mLocked; }
+    void setLocked (bool b) { if (b == mLocked) return; mLocked = b; if (onLockChanged) onLockChanged(); repaint(); }
+
+    // ── G-7 polish (2026-04-29): Pre EQ8 M/S sub-tab (mirrors LayersPage) ─────
+    // Bound to the per-Audio-insert pre-rack EQ at engine creation time.
+    // MID/SIDE buttons in the page menu bar drive setEQMid; StandaloneEditor
+    // wires the buttons + uses getEQDisplay for hamburger menu installation.
+    ParametricEQDisplay* getEQDisplay() const { return mEQDisplay.get(); }
+    void setEQMid (bool showMid)
+    {
+        mEQMidActive = showMid;
+        if (mEQDisplay) mEQDisplay->setShowMid (showMid);
+    }
+    bool isEQMidActive() const { return mEQMidActive; }
+
+    // Save / Load page preset — writes the entire ClipPageState XML to
+    // Documents/BaySickDAW/Presets/Clips/My Presets/<name>.xml.  Load Preset
+    // walks the same folder + Factory subfolders.
+    void savePatchAs();
+    void loadPreset (const juce::File& xml);
+
+    // ── G-7 (2026-04-29): Page Preset save/load (full chain) ─────────────────
+    // savePagePreset writes engine + strip params + insert rack + post-EQ to
+    // Documents/BaySickDAW/Presets/Clip Page/My Presets/.  Requires
+    // setProcessor() to have been called with the global VibeSynthProcessor;
+    // otherwise falls back to the engine-only savePatchAs.
+    void setProcessor (VibeSynthProcessor* p) { mFullProcessor = p; }
+    void savePagePreset (std::function<void()> onSaved = {});
+    void loadPagePreset (const juce::File& xml);
+    void showPageActionsMenu (juce::Component* anchor);
+    // G-7: tab-close prompt (replaces the inline AlertWindow that the
+    // editor was firing).  Calls onDeleteRequested after confirmation;
+    // 3-button "Save Page Preset & Delete" when player state is dirty.
+    void requestDelete ();
+
 private:
     void buildEnginePicker();
-    void buildEqStub();
+    void buildEQTab();   // G-7 polish: replaced buildEqStub
     void layoutEditor (juce::Rectangle<int> r);
-    juce::AudioProcessorEditor* activeEditor() const;
+    void showEngineContextMenu();
+
+    // G-6 ComboBox subclass that fires onRightClick instead of opening the
+    // dropdown when right-clicked.  Locked to BaySickPlayer (the only option)
+    // so left-click is informational only.
+    class LockedClipsEngineCombo : public juce::ComboBox
+    {
+    public:
+        std::function<void()> onRightClick;
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu()) { if (onRightClick) onRightClick(); return; }
+            juce::ComboBox::mouseDown (e);
+        }
+    };
 
     int                                          mPageIndex { 0 };
-    int                                          mActiveTab { 0 };   // 0 = Player, 2 = EQ stub
+    int                                          mActiveTab { 0 };
     juce::String                                 mTabName;
     juce::String                                 mClipPath;
+    bool                                         mLocked { false };
 
-    juce::ComboBox                               mEnginePicker;
-    juce::Label                                  mClipFileLabel;     // small filename strip above editor
+    LockedClipsEngineCombo                       mEnginePicker;
+    juce::Label                                  mClipFileLabel;
     EngineType                                   mEngineType { EngineType::None };
-    // G-3 (2026-04-28): dual-engine A/B-style architecture.  Both engines are
-    // lazy-created on first selection and KEPT ALIVE across swaps so each
-    // retains its own APVTS state (knobs, params, loaded files) — picking
-    // BaySickPlayer → BaySickNAM/IR → BaySickPlayer doesn't reset anything.
-    // Audio-thread crash fix: registration is unregistered BEFORE swapping
-    // the active pointer, never destroyed mid-block.
-    std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor; null until BaySickPlayer first picked
-    std::unique_ptr<juce::AudioProcessor>        mNamIrProc;         // BaySickNAMIRProcessor; null until NAM/IR first picked
+    std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor
     std::unique_ptr<juce::AudioProcessorEditor>  mPlayerEditor;
-    std::unique_ptr<juce::AudioProcessorEditor>  mNamIrEditor;
 
-    std::unique_ptr<juce::Label>                 mEqStub;
+    // G-7 polish (2026-04-29): real Pre EQ8 M/S display (replaced placeholder
+    // label).  Bound at engine-creation time to the Audio InsertNode's preEq
+    // member with mixer_audio_<row>_preeq_(mid|side)_eq* APVTS prefix.
+    std::unique_ptr<ParametricEQDisplay>         mEQDisplay;
+    bool                                         mEQMidActive { true };
+
+    // G-7 (2026-04-29): set by StandaloneEditor after construction so we
+    // can call PagePresetIO with the global apvts + VibeGraph.
+    VibeSynthProcessor*                          mFullProcessor { nullptr };
+
+    // G-7 dirty tracking — listener-based instead of byte comparison so it
+    // catches every parameter mutation reliably regardless of how the
+    // engine's getStateInformation is implemented.  Attached to the engine
+    // apvts.state when the engine is created; detached on engine destroy.
+    // mSuppressDirty is set during setStateInformation paths so import flows
+    // don't mark the freshly-loaded state as dirty.
+    struct ApvtsDirtyListener : public juce::ValueTree::Listener
+    {
+        bool* dirtyFlag { nullptr };
+        bool* suppress  { nullptr };
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override
+        {
+            if (suppress && *suppress) return;
+            if (dirtyFlag) *dirtyFlag = true;
+        }
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override {}
+        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override {}
+        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override {}
+        void valueTreeParentChanged (juce::ValueTree&) override {}
+        void valueTreeRedirected (juce::ValueTree&) override {}
+    };
+    bool                                         mPageDirty { false };
+    bool                                         mSuppressDirty { false };
+    ApvtsDirtyListener                           mDirtyListener;
+    void attachDirtyListener();
+    void detachDirtyListener();
+    void takeStateSnapshot();   // resets mPageDirty
+    bool isPatchDirty() const { return mPageDirty; }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ClipsPage)
 };

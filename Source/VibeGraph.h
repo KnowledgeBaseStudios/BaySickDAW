@@ -25,7 +25,14 @@ namespace MixerChannelIds
     constexpr int kClipsBus  = 6;
     constexpr int kVoxBus    = 7;    // R1 (2026-04-23): live-vocal strip bus
     constexpr int kInstBus   = 8;    // R1: live-instrument strip bus
-    constexpr int kAuxBase   = 100;  // Aux 0..15 → 100..115
+    // G-6 (2026-04-29): secondary buses for splitting Vox/Inst groups
+    // (e.g. lead vs backup vocals, guitars vs bass).  Always-allocated audio
+    // (cheap pre-process when no inserts route to them) but UI strip is lazy
+    // — only rendered on Mixer after user clicks "Add Vox/Inst Bus".
+    constexpr int kVoxBus2   = 9;    // G-6: optional 2nd Vox bus
+    constexpr int kInstBus2  = 10;   // G-6: optional 2nd Inst bus
+    constexpr int kInstBus3  = 11;   // G-6: optional 3rd Inst bus
+    constexpr int kAuxBase   = 100;  // Aux 0..17 → 100..117 (G-7 polish: 16 → 18)
     constexpr int kLayerBase = 200;  // Layer insert 0..15 → 200..215
     constexpr int kBassBase  = 300;  // Bass insert 0..15 → 300..315
     constexpr int kAudioBase = 400;  // Audio insert 0..49 → 400..449
@@ -34,7 +41,8 @@ namespace MixerChannelIds
     constexpr int kInstBase  = 700;  // R1: Inst insert 0..5 → 700..705
 
     constexpr int kMaxVoxStrips  = 6;   // R1
-    constexpr int kMaxInstStrips = 6;   // R1
+    constexpr int kMaxInstStrips = 20;  // R1; bumped 6 → 10 in G-4 (2026-04-28); 10 → 20 in G-6 (2026-04-29)
+    constexpr int kMaxAuxStrips  = 18;  // 5F-4b B2; bumped 16 → 18 in G-7 polish (2026-04-29)
 
     inline int layerInsert (int idx) { return kLayerBase + idx; }
     inline int bassInsert  (int idx) { return kBassBase  + idx; }
@@ -57,12 +65,15 @@ namespace MixerChannelIds
             case kClipsBus:  return "mixer_clipsbus";
             case kVoxBus:    return "mixer_voxbus";
             case kInstBus:   return "mixer_instbus";
+            case kVoxBus2:   return "mixer_voxbus2";
+            case kInstBus2:  return "mixer_instbus2";
+            case kInstBus3:  return "mixer_instbus3";
         }
         if (chId >= kLayerBase && chId < kLayerBase + 16)           return "mixer_layer_" + juce::String(chId - kLayerBase);
         if (chId >= kBassBase  && chId < kBassBase  + 16)           return "mixer_bass_"  + juce::String(chId - kBassBase);
         if (chId >= kDrumBase  && chId < kDrumBase  + 16)           return "mixer_drum_"  + juce::String(chId - kDrumBase);
         if (chId >= kAudioBase && chId < kAudioBase + 50)           return "mixer_audio_" + juce::String(chId - kAudioBase);
-        if (chId >= kAuxBase   && chId < kAuxBase   + 16)           return "mixer_aux_"   + juce::String(chId - kAuxBase);
+        if (chId >= kAuxBase   && chId < kAuxBase   + kMaxAuxStrips) return "mixer_aux_"   + juce::String(chId - kAuxBase);
         if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)  return "mixer_vox_"   + juce::String(chId - kVoxBase);
         if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips) return "mixer_inst_"  + juce::String(chId - kInstBase);
         return {};
@@ -73,7 +84,8 @@ namespace MixerChannelIds
     {
         return chId == kLayersBus || chId == kBassBus || chId == kDrumsBus
             || chId == kFxBus     || chId == kClipsBus
-            || chId == kVoxBus    || chId == kInstBus;
+            || chId == kVoxBus    || chId == kInstBus
+            || chId == kVoxBus2   || chId == kInstBus2 || chId == kInstBus3;
     }
 
     // Is this channel's main-out locked (cannot be rerouted)?
@@ -86,7 +98,7 @@ namespace MixerChannelIds
     // Rule: buses/master can only send to Aux strips.
     inline bool isValidBusSendTarget (int dstId)
     {
-        return dstId >= kAuxBase && dstId < kAuxBase + 16;
+        return dstId >= kAuxBase && dstId < kAuxBase + kMaxAuxStrips;
     }
 
     // Default main-out destination for a given channel.
@@ -102,13 +114,16 @@ namespace MixerChannelIds
             case kFxBus:
             case kClipsBus:
             case kVoxBus:
-            case kInstBus:   return kMaster;
+            case kInstBus:
+            case kVoxBus2:
+            case kInstBus2:
+            case kInstBus3:  return kMaster;
         }
         if (channelId >= kLayerBase && channelId < kLayerBase + 16)            return kLayersBus;
         if (channelId >= kBassBase  && channelId < kBassBase  + 16)            return kBassBus;
         if (channelId >= kDrumBase  && channelId < kDrumBase  + 16)            return kDrumsBus;
         if (channelId >= kAudioBase && channelId < kAudioBase + 50)            return kClipsBus;
-        if (channelId >= kAuxBase   && channelId < kAuxBase   + 16)            return kFxBus;
+        if (channelId >= kAuxBase   && channelId < kAuxBase   + kMaxAuxStrips) return kFxBus;
         if (channelId >= kVoxBase   && channelId < kVoxBase   + kMaxVoxStrips)  return kVoxBus;
         if (channelId >= kInstBase  && channelId < kInstBase  + kMaxInstStrips) return kInstBus;
         return kMaster;
@@ -239,6 +254,14 @@ public:
     EffectRack* getAudioClipsBusRack();   // ID 6 in Effects dropdown
     EffectRack* getVoxBusRack();          // R3.5: Vox Bus rack
     EffectRack* getInstBusRack();         // R3.5: Inst Bus rack
+    // G-6 (2026-04-29): secondary Vox/Inst buses (kVoxBus2 / kInstBus2 / kInstBus3).
+    // Always allocated so audio routing works whether or not the user has
+    // activated the strip on Mixer.  Inactive buses pre-process silent input
+    // (cheap) — the strip activation flag only controls UI presence + route
+    // picker filtering.
+    EffectRack* getVoxBus2Rack();
+    EffectRack* getInstBus2Rack();
+    EffectRack* getInstBus3Rack();
 
     // ── Per-page instrument EffectRacks ────────────────────────────────────────
     // These sit between each engine's pre-rack page EQ and the bus sum.
@@ -262,6 +285,10 @@ public:
     EQ8MsDSP* getAudioClipsBusEQ();       // ID 6 in Effects dropdown
     EQ8MsDSP* getVoxBusEQ();              // R3.5
     EQ8MsDSP* getInstBusEQ();             // R3.5
+    // G-6 (2026-04-29): post-rack EQs for secondary Vox/Inst buses.
+    EQ8MsDSP* getVoxBus2EQ();
+    EQ8MsDSP* getInstBus2EQ();
+    EQ8MsDSP* getInstBus3EQ();
 
     // §P4.3: Pre-rack bus EQs — fresh EQ8MsDSP per bus, runs at the very start
     // of each bus's processBlock chain (input -> preEq -> rack -> postEq -> fader).
@@ -275,6 +302,10 @@ public:
     EQ8MsDSP* getAudioClipsBusPreEQ();
     EQ8MsDSP* getVoxBusPreEQ();           // R3.5
     EQ8MsDSP* getInstBusPreEQ();          // R3.5
+    // G-6 (2026-04-29): pre-rack EQs for secondary Vox/Inst buses.
+    EQ8MsDSP* getVoxBus2PreEQ();
+    EQ8MsDSP* getInstBus2PreEQ();
+    EQ8MsDSP* getInstBus3PreEQ();
 
     // ── PDC — Plugin Delay Compensation ──────────────────────────────────────
     // Call from message thread after any effect is loaded/removed/bypassed.
@@ -357,6 +388,9 @@ public:
 
     // Peak dB atomic for UI (one per slot, per kind). Returns -60 if node doesn't exist.
     float       getInsertPeakDb (InsertKind kind, int index) const;
+    // 2026-04-30: stereo L/R peak for split DBFSMeter.  Returns {-60, -60} if
+    // node doesn't exist.  Wait-free — both atomics read with relaxed ordering.
+    std::pair<float, float> getInsertPeakDbStereo (InsertKind kind, int index) const;
 
     // D3: read this insert's choke group (0 = none, 1..16 = group id).
     // Returns 0 if the node doesn't exist or the param isn't bound.
@@ -385,6 +419,10 @@ public:
     // R3.5: same shape, applied to Vox / Inst bus accumulators after rack/EQ.
     void applyVoxBusPolarityWidth (juce::AudioBuffer<float>& buf);
     void applyInstBusPolarityWidth(juce::AudioBuffer<float>& buf);
+    // G-6 (2026-04-29): polarity/width application for secondary buses.
+    void applyVoxBus2PolarityWidth (juce::AudioBuffer<float>& buf);
+    void applyInstBus2PolarityWidth(juce::AudioBuffer<float>& buf);
+    void applyInstBus3PolarityWidth(juce::AudioBuffer<float>& buf);
 
     // 5F-4b B1b: per-channel input accumulator buffers. PluginProcessor sums
     // each InsertNode's output into the correct channel's accumulator based on
@@ -415,10 +453,20 @@ public:
     std::vector<int> getAuxIndices() const;
 
     // ── Level meters (written by audio thread, read by UI timer) ─────────────
-    std::atomic<float> layersPeakDb { -60.f };
-    std::atomic<float> bassPeakDb   { -60.f };
-    std::atomic<float> drumsPeakDb  { -60.f };
-    std::atomic<float> masterPeakDb { -60.f };
+    std::atomic<float> layersPeakDb  { -60.f };
+    std::atomic<float> bassPeakDb    { -60.f };
+    std::atomic<float> drumsPeakDb   { -60.f };
+    std::atomic<float> masterPeakDb  { -60.f };
+    // 2026-04-30: stereo L/R for split DBFSMeter.  Mono atomics above kept
+    // (= max(L, R)) for back-compat with legacy readers.
+    std::atomic<float> layersPeakDbL { -60.f };
+    std::atomic<float> layersPeakDbR { -60.f };
+    std::atomic<float> bassPeakDbL   { -60.f };
+    std::atomic<float> bassPeakDbR   { -60.f };
+    std::atomic<float> drumsPeakDbL  { -60.f };
+    std::atomic<float> drumsPeakDbR  { -60.f };
+    std::atomic<float> masterPeakDbL { -60.f };
+    std::atomic<float> masterPeakDbR { -60.f };
 
     // ── Phase-2 instrument node registry ─────────────────────────────────────
     // Nodes registered here will be integrated into the processing graph in a
@@ -478,6 +526,10 @@ private:
     // mInstBusNode; both buses route to Master.
     std::unique_ptr<InstrChannelNode> mVoxBusNode;
     std::unique_ptr<InstrChannelNode> mInstBusNode;
+    // G-6 (2026-04-29): secondary buses (kVoxBus2 / kInstBus2 / kInstBus3).
+    std::unique_ptr<InstrChannelNode> mVoxBus2Node;
+    std::unique_ptr<InstrChannelNode> mInstBus2Node;
+    std::unique_ptr<InstrChannelNode> mInstBus3Node;
 
     // Deferred rack state: set by loadRackStates() if topology not yet built;
     // applied at the end of buildFixedTopology().

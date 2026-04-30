@@ -64,6 +64,83 @@ private:
     bool         mSelected { false };
 };
 
+// ── G-5 (2026-04-29): Audio browser unified view ─────────────────────────────
+// CategorizedAudioEntry — one record per file the browser shows in the Audio
+// tree.  StandaloneEditor's onEnumerateAudio callback walks mPages and emits
+// one entry per ClipsPage / VoxPage / InstPage with a bound file.  Orphan
+// audioLibrary entries (no bound page) are skipped — there is NO 4th
+// "Imported" / "Library" bucket per Jeff's invariant ("all importable files
+// become clips").
+struct CategorizedAudioEntry
+{
+    int          audioLibIdx { -1 };   // index into mPM.audioLibrary for drag descriptor
+    juce::String category;             // "Clips" | "Vox" | "Inst"
+    juce::String displayName;          // shown as leaf label
+    juce::String fullPath;             // for tooltip + Reveal in Explorer
+    juce::Colour accent;               // category accent color
+};
+
+// AudioBrowserItem — TreeViewItem leaf for a single audio file.  Replaces
+// the per-file BrowserItem in the flat-list world.  Drag descriptor matches
+// the existing format ("audio:<libIdx>") so ArrangementGrid::itemDropped
+// keeps working unchanged.
+class AudioBrowserItem : public juce::TreeViewItem
+{
+public:
+    AudioBrowserItem (const CategorizedAudioEntry& e);
+
+    bool          mightContainSubItems () override               { return false; }
+    int           getItemHeight        () const override         { return 26; }
+    juce::String  getUniqueName        () const override         { return mEntry.category + ":" + juce::String(mEntry.audioLibIdx); }
+    juce::String  getTooltip           () override               { return mEntry.fullPath; }
+    juce::var     getDragSourceDescription () override           { return juce::String("audio:") + juce::String(mEntry.audioLibIdx); }
+    bool          canBeSelected        () const override         { return true; }
+    void          paintItem            (juce::Graphics&, int, int) override;
+    void          itemClicked          (const juce::MouseEvent&) override;
+
+    int  getAudioLibIdx () const { return mEntry.audioLibIdx; }
+    const juce::String& getDisplayName () const { return mEntry.displayName; }
+    const juce::String& getFullPath    () const { return mEntry.fullPath;    }
+
+    // Wired by BrowserPanel so right-click can route into the existing
+    // Choke Group / Delete / Rename context flow.
+    std::function<void(juce::Point<int>)> onContextMenu;
+    std::function<void()>                 onRenameRequested;
+
+private:
+    CategorizedAudioEntry mEntry;
+};
+
+// AudioRootItem — invisible root holding the 3 category nodes.  Concrete
+// subclass needed because juce::TreeViewItem::mightContainSubItems is pure
+// virtual.
+class AudioRootItem : public juce::TreeViewItem
+{
+public:
+    bool          mightContainSubItems () override               { return true; }
+    juce::String  getUniqueName        () const override         { return "audio_root"; }
+};
+
+// AudioCategoryItem — non-selectable header node holding audio leaves of one
+// kind ("Clips" / "Vox" / "Inst").  Click on the triangle expands / collapses;
+// click on the label area also toggles open state for usability.
+class AudioCategoryItem : public juce::TreeViewItem
+{
+public:
+    AudioCategoryItem (const juce::String& name, juce::Colour accent);
+
+    bool          mightContainSubItems () override               { return getNumSubItems() > 0; }
+    int           getItemHeight        () const override         { return 24; }
+    juce::String  getUniqueName        () const override         { return "cat:" + mName; }
+    bool          canBeSelected        () const override         { return false; }
+    void          paintItem            (juce::Graphics&, int, int) override;
+    void          itemClicked          (const juce::MouseEvent&) override;
+
+private:
+    juce::String mName;
+    juce::Colour mAccent;
+};
+
 // ── BrowserPanel ──────────────────────────────────────────────────────────────
 // Collapsible left panel — 3 filter tabs: Patterns | Audio | Automation.
 // Each item is a single draggable BrowserItem (no separate text editor).
@@ -97,6 +174,23 @@ public:
     // falls back to the auto-generated "Channel - Effect - Param" format).
     // Set by StandaloneEditor; null on construction.
     std::function<juce::String(const AutomationLane&)> onResolveDisplayName;
+    // G-5 (2026-04-29): page-walk based enumeration of audio files for the
+    // unified Audio tree.  StandaloneEditor wires this with a closure that
+    // walks mPages and emits one CategorizedAudioEntry per ClipsPage /
+    // VoxPage / InstPage with a bound file.  Returning empty causes the tree
+    // to render with empty Clips / Vox / Inst categories (which is normal
+    // before any pages exist).
+    std::function<std::vector<CategorizedAudioEntry>()> onEnumerateAudio;
+    // G-6 (2026-04-29): right-click "Duplicate..." on an audio tree leaf has
+    // already (a) prompted for a name + resolved any filename conflict and
+    // (b) physically copied the WAV.  This callback hands BOTH the source
+    // path (so the editor can find the source page and capture its full
+    // state) AND the new copy's absolute path to StandaloneEditor, which
+    // spawns a fresh ClipsPage / VoxPage / InstPage bound to the copy and
+    // clones the source page's full state (active engine, all knob values,
+    // both engines' APVTS state in the dual-engine A/B case).
+    std::function<void(const juce::String& sourceAbsPath,
+                       const juce::String& copiedAbsPath)> onDuplicateClipSpawn;
 
 private:
     PatternManager&            mPM;
@@ -109,9 +203,19 @@ private:
     std::array<std::unique_ptr<juce::TextButton>, 3> mTabBtns;
 
     std::vector<std::unique_ptr<BrowserItem>> mPatItems;
-    std::vector<std::unique_ptr<BrowserItem>> mAudioItems;
+    std::vector<std::unique_ptr<BrowserItem>> mAudioItems;     // G-5 legacy — kept empty post-tree migration
     std::vector<std::unique_ptr<BrowserItem>> mAutomItems;
     int mSelectedPat { 0 };
+
+    // G-5 (2026-04-29): unified audio tree replacing the flat mAudioItems
+    // when Audio tab is active.  Owns a hidden root TreeViewItem populated
+    // with 3 category nodes (Clips / Vox / Inst) — leaves come from
+    // onEnumerateAudio().  Tree visibility tracks mActiveTab == 1.
+    std::unique_ptr<juce::TreeView>           mAudioTree;
+    std::unique_ptr<juce::TreeViewItem>       mAudioRoot;
+    AudioCategoryItem*                        mClipsCat { nullptr };  // raw — owned by mAudioRoot
+    AudioCategoryItem*                        mVoxCat   { nullptr };
+    AudioCategoryItem*                        mInstCat  { nullptr };
 
     std::unique_ptr<juce::TextButton> mAddBtn;
     std::unique_ptr<juce::TextButton> mDeleteBtn;
@@ -125,7 +229,7 @@ private:
     juce::String      mLastRefreshSnapshot;
 
     void rebuildPatternRows();
-    void rebuildAudioRows();
+    void rebuildAudioRows();         // G-5: now rebuilds the tree, not the flat list
     void rebuildAutomationRows();
     void switchTab(int t);
     void selectPattern(int idx);
@@ -133,6 +237,22 @@ private:
     // ── Item interaction helpers ─────────────────────────────────────────
     void openRenamePopup(BrowserItem& item);
     void showItemContextMenu(BrowserItem& item, juce::Point<int> globalPt);
+
+    // G-5 (2026-04-29): right-click on an Audio tree leaf — same context-menu
+    // shape as the legacy flat-list audio item (Rename / Choke Group / Delete
+    // + new Reveal in Explorer).  audioLibIdx is the global library index for
+    // direct lookup into mPM.audioLibrary.
+    void showAudioTreeContextMenu(AudioBrowserItem& item, juce::Point<int> globalPt);
+
+    // G-6 (2026-04-29): "Duplicate..." right-click flow.  Shows the name
+    // prompt, resolves conflicts (Overwrite / Cancel / Rename re-prompt),
+    // copies the WAV to the same folder, and fires onDuplicateClipSpawn so
+    // StandaloneEditor can spawn a new ClipsPage on the copy + clone the
+    // source page's full state.  defaultName is pre-populated ("<original>
+    // Duplicate" on first call; on Rename, the user's last typed value is
+    // fed back in).  Recursive on Rename.
+    void runAudioDuplicateFlow(const juce::String& sourceAbsPath,
+                               const juce::String& defaultName);
 
     void renamePatternAt   (int idx, const juce::String& newName);
     void renameAudioAt     (int idx, const juce::String& newName);
@@ -598,6 +718,13 @@ public:
     // Grid accessor (used by StandaloneEditor to wire EventEditor callback)
     ArrangementGrid* getGrid() { return mGrid.get(); }
     BrowserPanel*    getBrowserPanel() { return mBrowser.get(); }
+
+    // G-7 (2026-04-29): public hook for callers (StandaloneEditor) that
+    // mutate the arrangement directly (e.g. closing a Clips tab sweeps the
+    // blocks pointing to that clip).  Repaints the grid and fires the grid's
+    // internal onArrangementChanged so audio-clip players rebuild.  Mirrors
+    // the BrowserPanel::onArrangementChanged callback path.
+    void notifyArrangementChanged();
 
     // Switch the browser pane to one of its 3 tabs (0=Patterns, 1=Audio Clips,
     // 2=Automation). Wired to the ribbon Builder dropdown.

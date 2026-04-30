@@ -46,11 +46,23 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
     if (destChannelId == kDrumsBus)  return VC::DrumsCol;
     if (destChannelId == kClipsBus)  return VC::Warm;
     if (destChannelId == kFxBus)     return juce::Colour(kEffectsTabPink);
+    // 2026-04-30: Vox + Inst destination buses got teal + navy mirrors of
+    // the matching ribbon tabs.  Was missing — Vox/Inst insert strips
+    // routed to their natural bus fell through to VC::Accent (grey-blue),
+    // so the top accent stripe was effectively invisible vs the bus's
+    // bright neon divider.  These two lines + the chId fallbacks below
+    // unify the appearance so insert strip top stripe matches the bus
+    // group neon divider.
+    if (destChannelId == kVoxBus || destChannelId == kVoxBus2)   return juce::Colour(0xFF0FAFA5);
+    if (destChannelId == kInstBus || destChannelId == kInstBus2
+                                  || destChannelId == kInstBus3) return juce::Colour(0xFF1C3A8A);
     // Direct Routing / aux chain: fall back to the strip's natural color
     if (chId >= kLayerBase && chId < kLayerBase + 16) return VC::LayerCol[0];
     if (chId >= kBassBase  && chId < kBassBase  + 16) return VC::BassCol[0];
     if (chId >= kDrumBase  && chId < kDrumBase  + 16) return VC::DrumsCol;
     if (chId >= kAudioBase && chId < kAudioBase + 50) return VC::Warm;
+    if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)  return juce::Colour(0xFF0FAFA5);
+    if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips) return juce::Colour(0xFF1C3A8A);
     return VC::Accent;
 }
 
@@ -374,6 +386,14 @@ int MixerPage::CableOverlay::findSocketNear(juce::Point<float> pt, float radius,
         if (check(kDrumsBus))  return kDrumsBus;
         if (check(kFxBus))     return kFxBus;
         if (check(kClipsBus))  return kClipsBus;
+        // G-6 (2026-04-29): Vox + Inst buses (primary + secondary) were
+        // missing here pre-G-6.  Without them, dragging a cable into a Vox/
+        // Inst bus did nothing.  Now fully supported as drop sockets.
+        if (check(kVoxBus))    return kVoxBus;
+        if (check(kInstBus))   return kInstBus;
+        if (owner.isVoxBus2Active()  && check(kVoxBus2))   return kVoxBus2;
+        if (owner.isInstBus2Active() && check(kInstBus2))  return kInstBus2;
+        if (owner.isInstBus3Active() && check(kInstBus3))  return kInstBus3;
     }
 
     for (auto& [tabId, strip] : owner.mLayerStrips)
@@ -427,6 +447,13 @@ int MixerPage::CableOverlay::findStripUnder(juce::Point<float> pt) const
     if (checkBounds(kDrumsBus))  return kDrumsBus;
     if (checkBounds(kFxBus))     return kFxBus;
     if (checkBounds(kClipsBus))  return kClipsBus;
+    // G-6 (2026-04-29): Vox + Inst buses (primary + secondary).  Pre-G-6
+    // these weren't in this list which is why cable-drag-to-bus didn't work.
+    if (checkBounds(kVoxBus))    return kVoxBus;
+    if (checkBounds(kInstBus))   return kInstBus;
+    if (owner.isVoxBus2Active()  && checkBounds(kVoxBus2))   return kVoxBus2;
+    if (owner.isInstBus2Active() && checkBounds(kInstBus2))  return kInstBus2;
+    if (owner.isInstBus3Active() && checkBounds(kInstBus3))  return kInstBus3;
 
     for (auto& [tabId, s] : owner.mLayerStrips)
         if (checkBounds(layerInsert(tabId))) return layerInsert(tabId);
@@ -483,20 +510,31 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
 
     // Audio insert: any bus EXCEPT FX · Master (FX reachable only via aux-send).
     // R1 (2026-04-23): added Vox + Inst bus destinations.
+    // G-6 (2026-04-29): secondary Vox/Inst buses also valid destinations.
     if (srcIsAudio)
         return dstIsMaster || dstId == kLayersBus || dstId == kBassBus
             || dstId == kDrumsBus || dstId == kClipsBus
-            || dstId == kVoxBus  || dstId == kInstBus;
+            || dstId == kVoxBus  || dstId == kInstBus
+            || dstId == kVoxBus2 || dstId == kInstBus2 || dstId == kInstBus3;
 
     // Aux strip: Master · FX Bus · other Aux
     if (srcIsAux)
         return dstIsMaster || dstId == kFxBus || dstIsAux;
 
-    // R1 (2026-04-23): Vox / Inst strips - main-out limited to Master,
-    // Clips Bus, and their own bus (default).  Other instrument buses are
-    // explicitly excluded - live-input goes to live-input destinations.
-    if (srcIsVox)  return dstIsMaster || dstId == kClipsBus || dstId == kVoxBus;
-    if (srcIsInst) return dstIsMaster || dstId == kClipsBus || dstId == kInstBus;
+    // R1 (2026-04-23): Vox / Inst strips - main-out limited to Master, Clips
+    // Bus, and their own bus family.  Other instrument buses are explicitly
+    // excluded - live-input goes to live-input destinations.
+    // G-6 (2026-04-29): Vox can ALSO route to kVoxBus2; Inst to kInstBus2/3.
+    // Activation state checked at the source so cables to inactive buses
+    // don't open invisible routing — owner is referenced via the const ref
+    // in the surrounding CableOverlay class.
+    if (srcIsVox)  return dstIsMaster || dstId == kClipsBus
+                       || dstId == kVoxBus
+                       || (dstId == kVoxBus2 && owner.isVoxBus2Active());
+    if (srcIsInst) return dstIsMaster || dstId == kClipsBus
+                       || dstId == kInstBus
+                       || (dstId == kInstBus2 && owner.isInstBus2Active())
+                       || (dstId == kInstBus3 && owner.isInstBus3Active());
 
     // Unknown strip type — be safe
     return false;
@@ -769,6 +807,10 @@ MixerTrackStrip* MixerPage::findStripByChannelId(int channelId) const
     if (channelId == kClipsBus  && mAudioClipsBusStrip) return mAudioClipsBusStrip.get();
     if (channelId == kVoxBus    && mVoxBusStrip)        return mVoxBusStrip.get();
     if (channelId == kInstBus   && mInstBusStrip)       return mInstBusStrip.get();
+    // G-6 (2026-04-29): secondary Vox/Inst buses.
+    if (channelId == kVoxBus2   && mVoxBus2Strip)       return mVoxBus2Strip.get();
+    if (channelId == kInstBus2  && mInstBus2Strip)      return mInstBus2Strip.get();
+    if (channelId == kInstBus3  && mInstBus3Strip)      return mInstBus3Strip.get();
 
     for (auto& [tabId, strip] : mLayerStrips)
         if (kLayerBase + tabId == channelId) return strip.get();
@@ -897,6 +939,21 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
 
+    // G-6 (2026-04-29): Vox + Inst BUS strips are user-renameable.  System
+    // buses (Layers/Bass/Drums/FX/Clips/Master) keep fixed names since they
+    // map to fixed channel identities.  Names persist via UIState (see
+    // serialize/deserialize in StandaloneEditor).
+    mVoxBusStrip ->setRenameable (true);
+    mInstBusStrip->setRenameable (true);
+    mVoxBusStrip->onNameChanged = [this](const juce::String&) {
+        if (getWidth() > 0) layoutScrollContent();
+        if (onAudioStripRenamed) onAudioStripRenamed();
+    };
+    mInstBusStrip->onNameChanged = [this](const juce::String&) {
+        if (getWidth() > 0) layoutScrollContent();
+        if (onAudioStripRenamed) onAudioStripRenamed();
+    };
+
     mScrollContent->addAndMakeVisible(*mLayersBusStrip);
     mScrollContent->addAndMakeVisible(*mBassBusStrip);
     mScrollContent->addAndMakeVisible(*mDrumsBusStrip);
@@ -960,10 +1017,29 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mAddVoxBtn->onClick = [this] { addVoxChannel(); };
 
     mAddInstBtn = std::make_unique<juce::TextButton>("Add Inst Strip");
-    mAddInstBtn->setTooltip("Add a live-input instrument strip (up to 6)");
+    mAddInstBtn->setTooltip("Add a live-input instrument strip (up to 20)");
     mAddInstBtn->setColour(juce::TextButton::buttonColourId, VC::Surface);
     mAddInstBtn->setColour(juce::TextButton::textColourOffId, VC::Text);
     mAddInstBtn->onClick = [this] { addInstChannel(); };
+
+    // G-6 (2026-04-29): Add Vox Bus + Add Inst Bus buttons.  Each opens a
+    // secondary bus on demand (Vox: 1 extra max → kVoxBus2; Inst: 2 extra
+    // max → kInstBus2 / kInstBus3).  Greyed out at cap.
+    mAddVoxBusBtn = std::make_unique<juce::TextButton>("Add Vox Bus");
+    mAddVoxBusBtn->setTooltip("Add a second Vox bus (e.g. lead vs backup vocals).  Max 1 extra.");
+    mAddVoxBusBtn->setColour(juce::TextButton::buttonColourId, VC::Surface);
+    mAddVoxBusBtn->setColour(juce::TextButton::textColourOffId, VC::Text);
+    mAddVoxBusBtn->onClick = [this] { activateVoxBus2(); };
+
+    mAddInstBusBtn = std::make_unique<juce::TextButton>("Add Inst Bus");
+    mAddInstBusBtn->setTooltip("Add a secondary Inst bus (e.g. guitars vs bass).  Max 2 extra.");
+    mAddInstBusBtn->setColour(juce::TextButton::buttonColourId, VC::Surface);
+    mAddInstBusBtn->setColour(juce::TextButton::textColourOffId, VC::Text);
+    mAddInstBusBtn->onClick = [this]
+    {
+        if      (! mInstBus2Active) activateInstBus2();
+        else if (! mInstBus3Active) activateInstBus3();
+    };
 
     // 5F-4b B7: restore any aux strips that were in the saved project.
     // VibeGraph already has their InsertNodes (registered by restoreAuxStripsFromState
@@ -1124,6 +1200,202 @@ void MixerPage::addAuxChannel()
 void MixerPage::addVoxChannel()  { addVoxChannelAtIndex  (mNextVoxIdx);  }
 void MixerPage::addInstChannel() { addInstChannelAtIndex (mNextInstIdx); }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// G-6 (2026-04-29): secondary Vox/Inst bus activation.  Lazy-creates the
+// strip + flags the bus active.  Idempotent — already-active activate is
+// a no-op (returns false).  Audio infrastructure (DSP node + APVTS params)
+// is always allocated; this just controls UI presence + route picker
+// filtering.  Bus rename works the same as primary bus strip rename.
+// ─────────────────────────────────────────────────────────────────────────────
+bool MixerPage::activateVoxBus2()
+{
+    if (mVoxBus2Active) return false;
+    if (! mVoxBus2Strip)
+    {
+        mVoxBus2Strip = std::make_unique<MixerTrackStrip>("Vox Bus 2",
+            MixerTrackStrip::StripType::Bus, juce::Colour(0xFF0FAFA5));   // teal
+        mVoxBus2Strip->setAutomationPrefix("mixer_voxbus2");
+        mVoxBus2Strip->setApvts(mProcessor.apvts, "mixer_voxbus2");
+        mVoxBus2Strip->setChannelId(MixerChannelIds::kVoxBus2);
+        mVoxBus2Strip->onAddSendRequested = [this](int chId) {
+            if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+        };
+        mVoxBus2Strip->onFXClicked = [this](const juce::String& id) {
+            if (onEffectsTabRequested) onEffectsTabRequested(id);
+        };
+        mVoxBus2Strip->onNameChanged = [this](const juce::String&) {
+            if (getWidth() > 0) layoutScrollContent();
+            if (onAudioStripRenamed) onAudioStripRenamed();
+        };
+        mVoxBus2Strip->setRenameable (true);   // G-6: Vox/Inst buses are user-renameable
+        // G-7: right-click → Delete with auto-reroute attached strips → kVoxBus.
+        {
+            juce::Component::SafePointer<MixerPage> safeThis (this);
+            mVoxBus2Strip->onContextMenuRequested = [safeThis] (juce::Point<int> screenPos)
+            {
+                if (! safeThis) return;
+                juce::PopupMenu m;
+                m.addItem (1, "Delete Vox Bus");
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (
+                                    juce::Rectangle<int> (screenPos.x, screenPos.y, 1, 1)),
+                    [safeThis] (int r)
+                    {
+                        if (! safeThis || r != 1) return;
+                        auto* aw = new juce::AlertWindow (
+                            "Delete Vox Bus",
+                            "Deleting this bus removes its Effects Rack.\n"
+                            "All attached strips will be moved to the main Vox Bus.",
+                            juce::AlertWindow::WarningIcon);
+                        aw->addButton ("Delete", 1);
+                        aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                        aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                            [safeThis, aw] (int result)
+                            {
+                                std::unique_ptr<juce::AlertWindow> own (aw);
+                                if (result != 1 || ! safeThis) return;
+                                safeThis->deleteSecondaryBus (MixerChannelIds::kVoxBus2);
+                            }), false);
+                    });
+            };
+        }
+        mScrollContent->addAndMakeVisible(*mVoxBus2Strip);
+    }
+    else
+    {
+        mVoxBus2Strip->setVisible(true);
+    }
+    mVoxBus2Active = true;
+    if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();   // refresh Effects dropdown
+    if (mAddVoxBusBtn) mAddVoxBusBtn->setEnabled(false);   // capped at 1 extra
+    return true;
+}
+
+bool MixerPage::activateInstBus2()
+{
+    if (mInstBus2Active) return false;
+    if (! mInstBus2Strip)
+    {
+        mInstBus2Strip = std::make_unique<MixerTrackStrip>("Inst Bus 2",
+            MixerTrackStrip::StripType::Bus, juce::Colour(0xFF1C3A8A));   // navy
+        mInstBus2Strip->setAutomationPrefix("mixer_instbus2");
+        mInstBus2Strip->setApvts(mProcessor.apvts, "mixer_instbus2");
+        mInstBus2Strip->setChannelId(MixerChannelIds::kInstBus2);
+        mInstBus2Strip->onAddSendRequested = [this](int chId) {
+            if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+        };
+        mInstBus2Strip->onFXClicked = [this](const juce::String& id) {
+            if (onEffectsTabRequested) onEffectsTabRequested(id);
+        };
+        mInstBus2Strip->onNameChanged = [this](const juce::String&) {
+            if (getWidth() > 0) layoutScrollContent();
+            if (onAudioStripRenamed) onAudioStripRenamed();
+        };
+        mInstBus2Strip->setRenameable (true);   // G-6
+        {
+            juce::Component::SafePointer<MixerPage> safeThis (this);
+            mInstBus2Strip->onContextMenuRequested = [safeThis] (juce::Point<int> screenPos)
+            {
+                if (! safeThis) return;
+                juce::PopupMenu m;
+                m.addItem (1, "Delete Inst Bus");
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (
+                                    juce::Rectangle<int> (screenPos.x, screenPos.y, 1, 1)),
+                    [safeThis] (int r)
+                    {
+                        if (! safeThis || r != 1) return;
+                        auto* aw = new juce::AlertWindow (
+                            "Delete Inst Bus",
+                            "Deleting this bus removes its Effects Rack.\n"
+                            "All attached strips will be moved to the main Inst Bus.",
+                            juce::AlertWindow::WarningIcon);
+                        aw->addButton ("Delete", 1);
+                        aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                        aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                            [safeThis, aw] (int result)
+                            {
+                                std::unique_ptr<juce::AlertWindow> own (aw);
+                                if (result != 1 || ! safeThis) return;
+                                safeThis->deleteSecondaryBus (MixerChannelIds::kInstBus2);
+                            }), false);
+                    });
+            };
+        }
+        mScrollContent->addAndMakeVisible(*mInstBus2Strip);
+    }
+    else
+    {
+        mInstBus2Strip->setVisible(true);
+    }
+    mInstBus2Active = true;
+    if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+    return true;
+}
+
+bool MixerPage::activateInstBus3()
+{
+    if (mInstBus3Active) return false;
+    if (! mInstBus3Strip)
+    {
+        mInstBus3Strip = std::make_unique<MixerTrackStrip>("Inst Bus 3",
+            MixerTrackStrip::StripType::Bus, juce::Colour(0xFF1C3A8A));   // navy
+        mInstBus3Strip->setAutomationPrefix("mixer_instbus3");
+        mInstBus3Strip->setApvts(mProcessor.apvts, "mixer_instbus3");
+        mInstBus3Strip->setChannelId(MixerChannelIds::kInstBus3);
+        mInstBus3Strip->onAddSendRequested = [this](int chId) {
+            if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+        };
+        mInstBus3Strip->onFXClicked = [this](const juce::String& id) {
+            if (onEffectsTabRequested) onEffectsTabRequested(id);
+        };
+        mInstBus3Strip->onNameChanged = [this](const juce::String&) {
+            if (getWidth() > 0) layoutScrollContent();
+            if (onAudioStripRenamed) onAudioStripRenamed();
+        };
+        mInstBus3Strip->setRenameable (true);   // G-6
+        {
+            juce::Component::SafePointer<MixerPage> safeThis (this);
+            mInstBus3Strip->onContextMenuRequested = [safeThis] (juce::Point<int> screenPos)
+            {
+                if (! safeThis) return;
+                juce::PopupMenu m;
+                m.addItem (1, "Delete Inst Bus");
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (
+                                    juce::Rectangle<int> (screenPos.x, screenPos.y, 1, 1)),
+                    [safeThis] (int r)
+                    {
+                        if (! safeThis || r != 1) return;
+                        auto* aw = new juce::AlertWindow (
+                            "Delete Inst Bus",
+                            "Deleting this bus removes its Effects Rack.\n"
+                            "All attached strips will be moved to the main Inst Bus.",
+                            juce::AlertWindow::WarningIcon);
+                        aw->addButton ("Delete", 1);
+                        aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                        aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                            [safeThis, aw] (int result)
+                            {
+                                std::unique_ptr<juce::AlertWindow> own (aw);
+                                if (result != 1 || ! safeThis) return;
+                                safeThis->deleteSecondaryBus (MixerChannelIds::kInstBus3);
+                            }), false);
+                    });
+            };
+        }
+        mScrollContent->addAndMakeVisible(*mInstBus3Strip);
+    }
+    else
+    {
+        mInstBus3Strip->setVisible(true);
+    }
+    mInstBus3Active = true;
+    if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+    if (mAddInstBusBtn) mAddInstBusBtn->setEnabled(false);   // capped at 2 extra
+    return true;
+}
+
 void MixerPage::addVoxChannelAtIndex(int idx)
 {
     if (idx < 0 || idx >= MixerChannelIds::kMaxVoxStrips) return;
@@ -1158,6 +1430,10 @@ void MixerPage::addVoxChannelAtIndex(int idx)
 
     if (getWidth() > 0) resized();
     if (onAudioStripRenamed) onAudioStripRenamed();
+    // G-4 (2026-04-28): notify StandaloneEditor so the matching Vox ribbon
+    // page is spawned alongside the strip.  spawnVoxTabIfMissing is idempotent
+    // so firing this on project-load restore paths is safe.
+    if (onVoxStripAdded) onVoxStripAdded(idx);
 }
 
 // R2 (2026-04-23): shared ASIO input-channel picker for Vox + Inst Arm-LED
@@ -1271,6 +1547,9 @@ void MixerPage::addInstChannelAtIndex(int idx)
 
     if (getWidth() > 0) resized();
     if (onAudioStripRenamed) onAudioStripRenamed();
+    // G-4 (2026-04-28): notify StandaloneEditor so the matching Inst ribbon
+    // page is spawned alongside the strip.
+    if (onInstStripAdded) onInstStripAdded(idx);
 }
 
 void MixerPage::clearDynamicStrips()
@@ -1333,7 +1612,7 @@ juce::String MixerPage::getInstStripName (int idx) const
 
 void MixerPage::addAuxChannelAtIndex(int idx)
 {
-    if (idx < 0 || idx >= 16) return;
+    if (idx < 0 || idx >= MixerChannelIds::kMaxAuxStrips) return;
     if (mAuxStrips.count(idx) > 0) return;   // already exists
 
     const juce::String prefix = "mixer_aux_" + juce::String(idx);
@@ -1362,6 +1641,40 @@ void MixerPage::addAuxChannelAtIndex(int idx)
         if (onAudioStripRenamed) onAudioStripRenamed();
     };
 
+    // G-7 (2026-04-29): right-click on the aux strip pops a context menu
+    // with a Delete option.  Confirmation prompt fires before the strip is
+    // removed; we sweep any strip whose _sendTo / _sendN_to targeted this
+    // aux's channel id and reset those to inactive (-1) so audio doesn't
+    // get routed to a phantom channel after the aux is gone.
+    juce::Component::SafePointer<MixerPage> safeThis (this);
+    const int auxChannelId = MixerChannelIds::auxStrip (idx);
+    strip->onContextMenuRequested = [safeThis, idx, auxChannelId] (juce::Point<int> screenPos)
+    {
+        if (! safeThis) return;
+        juce::PopupMenu m;
+        m.addItem (1, "Delete Aux Strip");
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (
+                            juce::Rectangle<int> (screenPos.x, screenPos.y, 1, 1)),
+            [safeThis, idx, auxChannelId] (int r)
+            {
+                if (! safeThis || r != 1) return;
+                auto* aw = new juce::AlertWindow (
+                    "Delete Aux Strip",
+                    "Delete this aux strip?  Its Effects Rack will be cleared.\n"
+                    "Any sends routed to this aux will be reset to inactive.",
+                    juce::AlertWindow::WarningIcon);
+                aw->addButton ("Delete", 1);
+                aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [safeThis, idx, auxChannelId, aw] (int result)
+                    {
+                        std::unique_ptr<juce::AlertWindow> own (aw);
+                        if (result != 1 || ! safeThis) return;
+                        safeThis->deleteAuxStrip (idx, auxChannelId);
+                    }), false);
+            });
+    };
+
     mScrollContent->addAndMakeVisible(*strip);
     mAuxStrips[idx] = std::move(strip);
     mAuxOrder.push_back(idx);
@@ -1383,6 +1696,164 @@ void MixerPage::removeAuxChannel(int idx)
     // Note: InsertNode + APVTS params intentionally preserved so re-creating
     // an aux at the same idx restores its prior settings.
     if (getWidth() > 0) resized();
+}
+
+// G-7 (2026-04-29): full aux delete via right-click → Delete prompt.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+    // Maps a strip APVTS prefix (e.g. "mixer_layer_3") back to its channel id
+    // so callers can resolve "what's this param's strip's natural parent?"
+    int channelIdFromMixerPrefix (const juce::String& prefix)
+    {
+        using namespace MixerChannelIds;
+        if (prefix == "mixer_master")    return kMaster;
+        if (prefix == "mixer_layers")    return kLayersBus;
+        if (prefix == "mixer_bass")      return kBassBus;
+        if (prefix == "mixer_drums")     return kDrumsBus;
+        if (prefix == "mixer_fx")        return kFxBus;
+        if (prefix == "mixer_clipsbus")  return kClipsBus;
+        if (prefix == "mixer_voxbus")    return kVoxBus;
+        if (prefix == "mixer_instbus")   return kInstBus;
+        if (prefix == "mixer_voxbus2")   return kVoxBus2;
+        if (prefix == "mixer_instbus2")  return kInstBus2;
+        if (prefix == "mixer_instbus3")  return kInstBus3;
+        if (prefix.startsWith ("mixer_layer_")) return kLayerBase + prefix.substring (12).getIntValue();
+        if (prefix.startsWith ("mixer_bass_"))  return kBassBase  + prefix.substring (11).getIntValue();
+        if (prefix.startsWith ("mixer_drum_"))  return kDrumBase  + prefix.substring (11).getIntValue();
+        if (prefix.startsWith ("mixer_audio_")) return kAudioBase + prefix.substring (12).getIntValue();
+        if (prefix.startsWith ("mixer_aux_"))   return kAuxBase   + prefix.substring (10).getIntValue();
+        if (prefix.startsWith ("mixer_vox_"))   return kVoxBase   + prefix.substring (10).getIntValue();
+        if (prefix.startsWith ("mixer_inst_"))  return kInstBase  + prefix.substring (11).getIntValue();
+        return -1;
+    }
+
+    // Setter: writes natural value to a RangedAudioParameter via setValueNotifyingHost.
+    void writeParamNatural (juce::RangedAudioParameter* rp, float natural)
+    {
+        const float normalized = rp->getNormalisableRange().convertTo0to1 (natural);
+        rp->setValueNotifyingHost (normalized);
+    }
+
+    // Predicate: is this parameter id a primary _sendTo or one of the 4
+    // additional send destinations (_sendN_to)?
+    bool isSendDestId (const juce::String& id, bool& isPrimary)
+    {
+        if (id.endsWith ("_sendTo")) { isPrimary = true; return true; }
+        for (int n = 0; n < 4; ++n)
+            if (id.endsWith ("_send" + juce::String (n) + "_to")) { isPrimary = false; return true; }
+        return false;
+    }
+
+    // Walks every parameter whose id is a send-destination on a strip prefix.
+    // For each match where current value equals targetChId, calls onMatch
+    // (which decides what to reset to).  onMatch returns the new natural value.
+    void sweepSendsTargeting (juce::AudioProcessor& processor,
+                              int targetChId,
+                              std::function<float (juce::RangedAudioParameter*,
+                                                    int /*stripChId*/,
+                                                    bool /*isPrimary*/)> onMatch)
+    {
+        for (auto* p : processor.getParameters())
+        {
+            auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p);
+            if (rp == nullptr) continue;
+            const juce::String id = rp->getParameterID();
+            bool isPrimary = false;
+            if (! isSendDestId (id, isPrimary)) continue;
+
+            const float current = rp->convertFrom0to1 (rp->getValue());
+            if ((int) current != targetChId) continue;
+
+            // Extract strip prefix (everything before the trailing "_send..." tag).
+            juce::String stripPrefix;
+            if (isPrimary)
+                stripPrefix = id.dropLastCharacters (juce::String ("_sendTo").length());
+            else
+            {
+                // _sendN_to → strip prefix is everything up to "_sendN_to"
+                for (int n = 0; n < 4; ++n)
+                {
+                    const juce::String suffix = "_send" + juce::String (n) + "_to";
+                    if (id.endsWith (suffix))
+                    {
+                        stripPrefix = id.dropLastCharacters (suffix.length());
+                        break;
+                    }
+                }
+            }
+            const int stripChId = channelIdFromMixerPrefix (stripPrefix);
+            const float newVal = onMatch (rp, stripChId, isPrimary);
+            writeParamNatural (rp, newVal);
+        }
+    }
+}
+
+void MixerPage::deleteAuxStrip (int idx, int auxChannelId)
+{
+    // Reset every send that targeted this aux.
+    //  - Primary _sendTo  → natural parent for that strip's channel id
+    //  - Secondary _sendN_to → -1 (inactive)
+    sweepSendsTargeting (mProcessor, auxChannelId,
+        [] (juce::RangedAudioParameter*, int stripChId, bool isPrimary) -> float
+        {
+            if (isPrimary)
+                return (float) MixerChannelIds::defaultSendTo (stripChId);
+            return -1.0f;
+        });
+
+    // Remove the UI strip.
+    removeAuxChannel (idx);
+
+    // Free the audio-graph InsertNode.  Re-creating an aux at the same idx
+    // calls ensureAuxInsert which lazily reallocates.
+    mProcessor.mVibeGraph.removeInsertNode (VibeGraph::InsertKind::Aux, idx);
+
+    // Routing graph rebuild on the next block picks up the param changes.
+    if (onAudioStripRenamed) onAudioStripRenamed();
+    repaint();
+}
+
+void MixerPage::deleteSecondaryBus (int channelId)
+{
+    using namespace MixerChannelIds;
+    if (channelId != kVoxBus2 && channelId != kInstBus2 && channelId != kInstBus3)
+        return;   // primary buses + master never deletable
+
+    const int parentBus = (channelId == kVoxBus2) ? kVoxBus : kInstBus;
+
+    // Reroute any strip whose primary _sendTo targets this bus → parent bus.
+    // Reroute any _sendN_to targeting this bus → -1 (inactive) so we don't
+    // double-up the parent bus on multiple sends.
+    sweepSendsTargeting (mProcessor, channelId,
+        [parentBus] (juce::RangedAudioParameter*, int /*stripChId*/, bool isPrimary) -> float
+        {
+            return isPrimary ? (float) parentBus : -1.0f;
+        });
+
+    // Hide the bus strip.  Audio InsertNode stays allocated (always alloc'd
+    // in prepare()) — no audio leaks to it because all senders were just
+    // rerouted.  Activation flag flip drops it from layout + the route
+    // picker submenu list.
+    if (channelId == kVoxBus2)
+    {
+        if (mVoxBus2Strip) mVoxBus2Strip->setVisible (false);
+        mVoxBus2Active = false;
+    }
+    else if (channelId == kInstBus2)
+    {
+        if (mInstBus2Strip) mInstBus2Strip->setVisible (false);
+        mInstBus2Active = false;
+    }
+    else if (channelId == kInstBus3)
+    {
+        if (mInstBus3Strip) mInstBus3Strip->setVisible (false);
+        mInstBus3Active = false;
+    }
+
+    if (getWidth() > 0) layoutScrollContent();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+    repaint();
 }
 
 void MixerPage::addAudioChannel(int row, const juce::String& name)
@@ -1673,39 +2144,68 @@ void MixerPage::setUndoContext(const UndoContext& ctx)
 // ─────────────────────────────────────────────────────────────────────────────
 void MixerPage::timerCallback()
 {
-    mMasterStrip       ->setLevel(mProcessor.mMasterPeakDb          .load(std::memory_order_relaxed));
-    mLayersBusStrip    ->setLevel(mProcessor.mLayersPeakDb          .load(std::memory_order_relaxed));
-    mBassBusStrip      ->setLevel(mProcessor.mBassPeakDb            .load(std::memory_order_relaxed));
-    mDrumsBusStrip     ->setLevel(mProcessor.mDrumsPeakDb           .load(std::memory_order_relaxed));
-    mFXBusStrip        ->setLevel(-60.0f);
-    mAudioClipsBusStrip->setLevel(mProcessor.mAudioClipsBusPeakDb   .load(std::memory_order_relaxed));
-    mVoxBusStrip       ->setLevel(mProcessor.mVoxBusPeakDb          .load(std::memory_order_relaxed));
-    mInstBusStrip      ->setLevel(mProcessor.mInstBusPeakDb         .load(std::memory_order_relaxed));
+    // 2026-04-30: every strip now reads stereo L/R peakDb atomics and
+    // pushes via setStereoLevel.  The mono setLevel path is gone — the new
+    // DBFSMeter has independent L+R bars.
+    auto pushStereoBus = [] (MixerTrackStrip* strip,
+                              const std::atomic<float>& l,
+                              const std::atomic<float>& r)
+    {
+        strip->setStereoLevel(l.load(std::memory_order_relaxed),
+                               r.load(std::memory_order_relaxed));
+    };
 
-    // Per-insert peak from each strip's own InsertNode — showing the bus
-    // peak on every strip made all strips meter identically regardless of
-    // which slot was actually playing. Matches the Aux pattern below.
+    pushStereoBus(mMasterStrip       .get(), mProcessor.mMasterPeakDbL,        mProcessor.mMasterPeakDbR);
+    pushStereoBus(mLayersBusStrip    .get(), mProcessor.mLayersPeakDbL,        mProcessor.mLayersPeakDbR);
+    pushStereoBus(mBassBusStrip      .get(), mProcessor.mBassPeakDbL,          mProcessor.mBassPeakDbR);
+    pushStereoBus(mDrumsBusStrip     .get(), mProcessor.mDrumsPeakDbL,         mProcessor.mDrumsPeakDbR);
+    mFXBusStrip                       ->setStereoLevel(-60.0f, -60.0f);
+    pushStereoBus(mAudioClipsBusStrip.get(), mProcessor.mAudioClipsBusPeakDbL, mProcessor.mAudioClipsBusPeakDbR);
+    pushStereoBus(mVoxBusStrip       .get(), mProcessor.mVoxBusPeakDbL,        mProcessor.mVoxBusPeakDbR);
+    pushStereoBus(mInstBusStrip      .get(), mProcessor.mInstBusPeakDbL,       mProcessor.mInstBusPeakDbR);
+
+    // Per-insert peak from each strip's own InsertNode (stereo via the new
+    // getInsertPeakDbStereo).  Each bin still calls into VibeGraph; the
+    // meter bar is split into L/R inside DBFSMeter.
+    auto pushStereoInsert = [&] (VibeGraph::InsertKind kind, int idx, MixerTrackStrip* strip)
+    {
+        const auto [pkL, pkR] = mProcessor.mVibeGraph.getInsertPeakDbStereo(kind, idx);
+        strip->setStereoLevel(pkL, pkR);
+    };
+
     for (auto& [pageIdx, strip] : mLayerStrips)
-        strip->setLevel(mProcessor.mVibeGraph.getInsertPeakDb(
-            VibeGraph::InsertKind::Layer, pageIdx));
+        pushStereoInsert(VibeGraph::InsertKind::Layer, pageIdx, strip.get());
 
     for (auto& [pageIdx, strip] : mBassStrips)
-        strip->setLevel(mProcessor.mVibeGraph.getInsertPeakDb(
-            VibeGraph::InsertKind::Bass, pageIdx));
+        pushStereoInsert(VibeGraph::InsertKind::Bass, pageIdx, strip.get());
 
     for (auto& [slot, strip] : mDrumStrips)
-        strip->setLevel(mProcessor.mVibeGraph.getInsertPeakDb(
-            VibeGraph::InsertKind::Drum, slot));
+        pushStereoInsert(VibeGraph::InsertKind::Drum, slot, strip.get());
 
     for (auto& [row, strip] : mAudioStrips)
     {
         if (row >= 0 && row < VibeSynthProcessor::kMaxAudioRows)
-            strip->setLevel(mProcessor.mAudioRowPeakDb[row].load(std::memory_order_relaxed));
+            strip->setStereoLevel(
+                mProcessor.mAudioRowPeakDbL[row].load(std::memory_order_relaxed),
+                mProcessor.mAudioRowPeakDbR[row].load(std::memory_order_relaxed));
     }
 
-    // 5F-4b B2: aux strip peak meters — driven by each InsertNode's peakDb atomic
+    // 5F-4b B2: aux strip peak meters — stereo via getInsertPeakDbStereo.
     for (auto& [idx, strip] : mAuxStrips)
-        strip->setLevel(mProcessor.mVibeGraph.getInsertPeakDb(VibeGraph::InsertKind::Aux, idx));
+        pushStereoInsert(VibeGraph::InsertKind::Aux, idx, strip.get());
+
+    // 2026-04-30: Vox / Inst insert strips were not being metered before
+    // the rebuild — they had stripts but the old timer skipped them.  Now
+    // they pull from getInsertPeakDbStereo too.
+    for (auto& [idx, strip] : mVoxStrips)
+        pushStereoInsert(VibeGraph::InsertKind::Vox, idx, strip.get());
+    for (auto& [idx, strip] : mInstStrips)
+        pushStereoInsert(VibeGraph::InsertKind::Inst, idx, strip.get());
+
+    // G-6 (2026-04-29): secondary bus strip meters (Vox 2 / Inst 2 / Inst 3).
+    if (mVoxBus2Strip)  pushStereoBus(mVoxBus2Strip .get(), mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
+    if (mInstBus2Strip) pushStereoBus(mInstBus2Strip.get(), mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);
+    if (mInstBus3Strip) pushStereoBus(mInstBus3Strip.get(), mProcessor.mInstBus3PeakDbL, mProcessor.mInstBus3PeakDbR);
 
     // 5F-4b B3: repaint cable overlay only when scroll position changes — the
     // bezier path itself only depends on socket positions, which only move on
@@ -1750,6 +2250,13 @@ void MixerPage::timerCallback()
             anyChange |= check(audioInsert(k), "mixer_audio_" + juce::String(k));
         for (int k : mAuxOrder)
             anyChange |= check(auxStrip(k), "mixer_aux_" + juce::String(k));
+        // G-6 (2026-04-29): Vox + Inst inserts were missing from this scan
+        // pre-G-6, so cable-rerouting a Vox tab to a different bus didn't
+        // trigger a re-layout (strip stayed visually behind the wrong bus).
+        for (int k : mVoxOrder)
+            anyChange |= check(voxInsert(k), "mixer_vox_" + juce::String(k));
+        for (int k : mInstOrder)
+            anyChange |= check(instInsert(k), "mixer_inst_" + juce::String(k));
 
         if (anyChange)
         {
@@ -1923,7 +2430,15 @@ void MixerPage::layoutScrollContent()
     // shape as other buses (full rack/EQ/fader DSP applied in PluginProcessor
     // before the accumulator drains to Master).
     laidOutBus(*mVoxBusStrip,  kVoxBus,  juce::Colour(0xFF0FAFA5));
+    // G-6 (2026-04-29): Vox Bus 2 (when active) sits next to Vox Bus.
+    if (mVoxBus2Active && mVoxBus2Strip)
+        laidOutBus(*mVoxBus2Strip, kVoxBus2, juce::Colour(0xFF0FAFA5));
     laidOutBus(*mInstBusStrip, kInstBus, juce::Colour(0xFF1C3A8A));
+    // G-6 (2026-04-29): Inst Bus 2 + 3 (when active) sit next to Inst Bus.
+    if (mInstBus2Active && mInstBus2Strip)
+        laidOutBus(*mInstBus2Strip, kInstBus2, juce::Colour(0xFF1C3A8A));
+    if (mInstBus3Active && mInstBus3Strip)
+        laidOutBus(*mInstBus3Strip, kInstBus3, juce::Colour(0xFF1C3A8A));
 
     laidOutBus(*mLayersBusStrip,      kLayersBus, VC::LayerCol[0]);
     laidOutBus(*mBassBusStrip,        kBassBus,   VC::BassCol[0]);

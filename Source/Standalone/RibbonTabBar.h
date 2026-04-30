@@ -2,7 +2,7 @@
 #include <JuceHeader.h>
 
 // ── RibbonTabBar ──────────────────────────────────────────────────────────────
-// Fixed 8-slot tab bar. Each slot represents a page type:
+// Fixed 10-slot tab bar. Each slot represents a page type:
 //
 //   Mixer       — no dropdown, no badge
 //   Effects     — dropdown (Rack / EQ), badge ②
@@ -11,6 +11,12 @@
 //                 Instances are ONLY spawned via drag/drop or upload of audio
 //                 onto Builder — the ribbon dropdown can't create new ones.
 //                 Phase G-2 (2026-04-28).
+//   Vox         — dropdown (instance list + sub-pages + rename/delete; NO add).
+//                 Instances are ONLY spawned via the "Add Vox Strip" button on
+//                 the Mixer page.  Phase G-4 (2026-04-28).
+//   Inst        — dropdown (instance list + sub-pages + rename/delete; NO add).
+//                 Instances are ONLY spawned via the "Add Inst Strip" button
+//                 on the Mixer page.  Phase G-4 (2026-04-28).
 //   Layers      — dropdown (instance list + rename/delete/add), dynamic badge
 //   Bass        — dropdown (instance list + rename/delete/add), dynamic badge
 //   Drums       — dropdown (Sounds / EQ), badge ②
@@ -24,7 +30,7 @@
 class RibbonTabBar : public juce::Component
 {
 public:
-    enum class TabType { Mixer, Effects, Builder, Clip, Layers, Bass, Drums, PianoRoll };
+    enum class TabType { Mixer, Effects, Builder, Clip, Vox, Inst, Layers, Bass, Drums, PianoRoll };
 
     struct Tab
     {
@@ -62,6 +68,10 @@ public:
     // Clip instances exist yet.  Editor uses this to show the empty-state
     // placeholder ("drop a clip here..." with FileDragAndDropTarget).
     std::function<void()>                             onClipsEmptyStateRequested;
+    // G-4 (2026-04-28): same pattern for Vox + Inst.  Empty states tell the
+    // user to click the corresponding "Add Strip" button on the Mixer page.
+    std::function<void()>                             onVoxEmptyStateRequested;
+    std::function<void()>                             onInstEmptyStateRequested;
 
     // ── API ──────────────────────────────────────────────────────────────────
     int  addTab(TabType type, const juce::String& name);
@@ -112,7 +122,7 @@ public:
     bool isLastOfType(TabType type) const { return countTabsOfType(type) <= 1; }
 
 private:
-    static constexpr int kNumSlots = 8;   // 2026-04-28: +1 for Clip (G-2)
+    static constexpr int kNumSlots = 10;  // 2026-04-28: +Vox +Inst (G-4)
     static constexpr int kTabH     = 30;
     static constexpr int kArrowW   = 22;   // hit-test width for ▾ region
     static constexpr int kBadgeR   = 8;    // badge circle radius

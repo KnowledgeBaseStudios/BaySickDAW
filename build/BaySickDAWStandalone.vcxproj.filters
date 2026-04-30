@@ -205,6 +205,9 @@
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\DrumPage.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\PagePresetIO.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\DrumKitGrid.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -224,6 +227,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Clips\ClipsPage.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Vox\VoxPage.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Inst\InstPage.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp">

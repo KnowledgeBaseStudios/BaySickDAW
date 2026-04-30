@@ -13,6 +13,12 @@ juce::Colour RibbonTabBar::tabColour(TabType type, bool active)
         // Inactive shade is roughly half-brightness, matching the convention
         // used by Layers / Bass / Drums slots.
         case TabType::Clip:      return active ? juce::Colour(0xffd4a017) : juce::Colour(0xff6a500b);
+        // 2026-04-28 (G-4): Vox + Inst match their mixer-bus colours so the
+        // ribbon tab + page header + mixer strip read as one channel identity
+        // (same convention Clips uses with VC::Warm).  Bus colours come from
+        // MixerPage.cpp's laidOutBus calls.
+        case TabType::Vox:       return active ? juce::Colour(0xff0fafa5) : juce::Colour(0xff075853);   // teal
+        case TabType::Inst:      return active ? juce::Colour(0xff1c3a8a) : juce::Colour(0xff0e1d45);   // navy
         case TabType::Layers:    return active ? juce::Colour(0xffe06030) : juce::Colour(0xff703018);
         case TabType::Bass:      return active ? juce::Colour(0xff2e8b57) : juce::Colour(0xff17452b);
         case TabType::Drums:     return active ? juce::Colour(0xffcc2222) : juce::Colour(0xff661111);
@@ -26,9 +32,15 @@ juce::Colour RibbonTabBar::tabColour(TabType type, bool active)
 // ── Static helpers ───────────────────────────────────────────────────────────
 RibbonTabBar::TabType RibbonTabBar::slotType(int slotIndex)
 {
+    // G-8 (2026-04-29): Builder is now the leftmost slot, immediately to
+    // the LEFT of Mixer.  Tab IDs remain fixed (assignment order in ctor
+    // unchanged), so existing `selectTab(<id>)` call sites keep working;
+    // only the visual ordering changes.
     static constexpr TabType order[] = {
-        TabType::Mixer, TabType::Effects, TabType::Builder,
+        TabType::Builder, TabType::Mixer, TabType::Effects,
         TabType::Clip,  // 2026-04-28 (G-2): inserted between Builder and Layers
+        TabType::Vox,   // 2026-04-28 (G-4): Vox + Inst between Clip and Layers
+        TabType::Inst,
         TabType::Layers, TabType::Bass, TabType::Drums,
         TabType::PianoRoll   // 2026-04-26: unified piano-roll page
     };
@@ -89,7 +101,8 @@ void RibbonTabBar::clearAllDynamicTabs()
     for (int i = mTabs.size() - 1; i >= 0; --i)
     {
         const auto t = mTabs[i].type;
-        if (t == TabType::Layers || t == TabType::Bass || t == TabType::Drums || t == TabType::Clip)
+        if (t == TabType::Layers || t == TabType::Bass || t == TabType::Drums
+         || t == TabType::Clip   || t == TabType::Vox  || t == TabType::Inst)
             mTabs.remove (i);
     }
     // Drop selection if it pointed at a removed tab.
@@ -120,12 +133,17 @@ void RibbonTabBar::closeTab(int tabId)
 
         // D1.4-fix (c): Layers / Bass / Drums instances can all be closed.
         // G-2 (2026-04-28): Clip instances are also closeable.
+        // G-4 (2026-04-28): Vox / Inst follow the same drop-spawn pattern.
         if (type != TabType::Layers && type != TabType::Bass
-         && type != TabType::Drums  && type != TabType::Clip) return;
+         && type != TabType::Drums  && type != TabType::Clip
+         && type != TabType::Vox    && type != TabType::Inst) return;
 
-        // Never delete the last instance of a type — EXCEPT for Clip, which
-        // can legitimately be at zero (no clips yet → empty placeholder page).
-        if (type != TabType::Clip && countTabsOfType(type) <= 1) return;
+        // Never delete the last instance of a type — EXCEPT for Clip / Vox /
+        // Inst, all of which can legitimately be at zero (empty-state page).
+        const bool zeroAllowed = (type == TabType::Clip
+                               || type == TabType::Vox
+                               || type == TabType::Inst);
+        if (! zeroAllowed && countTabsOfType(type) <= 1) return;
 
         mTabs.remove(i);
 
@@ -200,6 +218,8 @@ int RibbonTabBar::getBadgeCount(TabType type) const
     case TabType::Effects: return 2;
     case TabType::Builder: return 3;
     case TabType::Clip:    // G-2 (2026-04-28): badge tracks instance count
+    case TabType::Vox:     // G-4 (2026-04-28)
+    case TabType::Inst:    // G-4 (2026-04-28)
     case TabType::Layers:
     case TabType::Bass:
     case TabType::Drums:   return countTabsOfType(type);
@@ -222,7 +242,10 @@ juce::String RibbonTabBar::getSlotDisplayName(int slotIndex) const
     {
         // G-2 (2026-04-28): Clip slot is valid with zero instances (drop-only
         // spawn).  Fall back to a generic label so the empty state is visible.
+        // G-4 (2026-04-28): Vox + Inst follow the same pattern.
         if (type == TabType::Clip) return "Clips";
+        if (type == TabType::Vox)  return "Vox";
+        if (type == TabType::Inst) return "Inst";
         return {};
     }
     return (tab->locked ? juce::String("[L] ") : juce::String()) + tab->name;
@@ -326,6 +349,15 @@ void RibbonTabBar::mouseDown(const juce::MouseEvent& e)
             // G-2: 0 Clip instances → editor shows the empty-state drop zone.
             onClipsEmptyStateRequested();
         }
+        else if (type == TabType::Vox && onVoxEmptyStateRequested)
+        {
+            // G-4: 0 Vox instances → editor shows "Click Add Vox Strip" hint.
+            onVoxEmptyStateRequested();
+        }
+        else if (type == TabType::Inst && onInstEmptyStateRequested)
+        {
+            onInstEmptyStateRequested();
+        }
     }
 }
 
@@ -349,11 +381,13 @@ void RibbonTabBar::showDropdown(int slotIndex)
         showInstanceDropdown(type, arrowR);
         break;
     case TabType::Clip:
-        // G-2 (2026-04-28): Clip dropdown is greyed out / suppressed when no
-        // clips have been added yet — drag/drop is the only spawn path so a
-        // dropdown over zero instances has nothing to act on.
-        if (countTabsOfType(TabType::Clip) > 0)
-            showInstanceDropdown(type, arrowR);
+    case TabType::Vox:
+    case TabType::Inst:
+        // G-6 (2026-04-29): always show the dropdown — even at 0 instances —
+        // so the +Add entry is reachable.  showInstanceDropdown handles the
+        // 0-instance case by showing only the +Add (skipping Pages/Rename/
+        // Delete which have no active instance to operate on).
+        showInstanceDropdown(type, arrowR);
         break;
     default:
         break;
@@ -410,55 +444,78 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
     int activeId = getActiveTabForType(type);
     int count    = countTabsOfType(type);
 
-    // List all instances — tick mark on the active one, "[L] " prefix if locked
-    for (auto& tab : mTabs)
+    // G-6 (2026-04-29): Pages/Rename/Delete are only meaningful when at least
+    // one instance exists.  Skip them at count == 0 so the dropdown shows
+    // ONLY the +Add (clean UX — nothing to navigate to or rename otherwise).
+    if (count > 0)
     {
-        if (tab.type == type)
+        // List all instances — tick mark on the active one, "[L] " prefix if locked
+        for (auto& tab : mTabs)
         {
-            const juce::String label = (tab.locked ? juce::String("[L] ") : juce::String()) + tab.name;
-            m.addItem(tab.id, label, true, tab.id == activeId);
+            if (tab.type == type)
+            {
+                const juce::String label = (tab.locked ? juce::String("[L] ") : juce::String()) + tab.name;
+                m.addItem(tab.id, label, true, tab.id == activeId);
+            }
         }
-    }
 
-    m.addSeparator();
-
-    // Sub-page navigation — opens the active instance and switches to that sub-tab
-    // Negative IDs reserved for menu actions: -1/-2/-3 (rename/delete/add) and
-    // -10..-13 (sub-page items) so we can disambiguate from instance IDs.
-    // Drums has 4 sub-tabs (Drum Kit added in D2); Layers/Bass have 3.
-    // Note: PopupMenu has no addSectionHeading; use a disabled "Pages:" item.
-    m.addItem(-99, "Pages:", false /* enabled */, false);
-    if (type == TabType::Drums)
-    {
-        m.addItem(-10, "  Drum Kit");
-        m.addItem(-11, "  Player");
-        m.addItem(-12, "  Piano Roll");
-        m.addItem(-13, "  EQ");
-    }
-    else
-    {
-        m.addItem(-10, "  Player");
-        m.addItem(-11, "  Piano Roll");
-        m.addItem(-12, "  EQ");
-    }
-
-    m.addSeparator();
-
-    // Rename / Delete apply to the currently active instance
-    m.addItem(-1, "Rename...");
-    m.addItem(-2, "Delete", count > 1);   // grey out if only 1 instance
-
-    // G-2 (2026-04-28): Clips can ONLY be spawned via drop/upload onto the
-    // Builder grid or the Clips empty-state page — no "+ Add" entry on the
-    // ribbon dropdown for Clip type.
-    if (type != TabType::Clip)
-    {
         m.addSeparator();
-        juce::String addLabel = (type == TabType::Layers) ? "+ Add New Layers"
-                              : (type == TabType::Bass)   ? "+ Add New Bass"
-                              :                             "+ Add New Drum";
-        m.addItem(-3, addLabel);
+
+        // Sub-page navigation — opens the active instance and switches to that sub-tab
+        // Negative IDs reserved for menu actions: -1/-2/-3 (rename/delete/add) and
+        // -10..-13 (sub-page items) so we can disambiguate from instance IDs.
+        // Drums has 4 sub-tabs (Drum Kit added in D2); Layers/Bass have 3.
+        // Note: PopupMenu has no addSectionHeading; use a disabled "Pages:" item.
+        m.addItem(-99, "Pages:", false /* enabled */, false);
+        if (type == TabType::Drums)
+        {
+            m.addItem(-10, "  Drum Kit");
+            m.addItem(-11, "  Player");
+            m.addItem(-12, "  Piano Roll");
+            m.addItem(-13, "  EQ");
+        }
+        else if (type == TabType::Vox || type == TabType::Inst)
+        {
+            // G-4 (2026-04-28): Vox + Inst have NO piano roll — they're live-input
+            // / recorded-audio destinations, not MIDI-triggered engines.
+            m.addItem(-10, "  Player");
+            m.addItem(-11, "  EQ");
+        }
+        else
+        {
+            m.addItem(-10, "  Player");
+            m.addItem(-11, "  Piano Roll");
+            m.addItem(-12, "  EQ");
+        }
+
+        m.addSeparator();
+
+        // Rename / Delete apply to the currently active instance.
+        // G-7 (2026-04-29): Clip/Vox/Inst can legitimately be at zero
+        // instances (empty-state page handles the no-tabs case), so
+        // Delete is enabled even when count == 1 for those types.
+        // Layer/Bass/Drum still require count > 1 (project must always
+        // have at least one of each).
+        const bool allowZero = (type == TabType::Clip
+                              || type == TabType::Vox
+                              || type == TabType::Inst);
+        m.addItem(-1, "Rename...");
+        m.addItem(-2, "Delete", allowZero ? true : (count > 1));
+
+        m.addSeparator();
     }
+
+    // G-6 (2026-04-29): all multi-instance types now have a +Add entry,
+    // including Clip.  Clip's +Add opens an OS file picker (handled by the
+    // editor's onAddTabRequest closure) so the user can add a clip without
+    // dragging from elsewhere.
+    juce::String addLabel = (type == TabType::Layers) ? "+ Add New Layers"
+                          : (type == TabType::Bass)   ? "+ Add New Bass"
+                          : (type == TabType::Vox)    ? "+ Add New Vox"
+                          : (type == TabType::Inst)   ? "+ Add New Inst"
+                          : (type == TabType::Clip)   ? "+ Add New Clip..."
+                          :                             "+ Add New Drum";
+    m.addItem(-3, addLabel);
 
     auto screenArea = localAreaToGlobal(tabBounds);
     m.showMenuAsync(
@@ -518,12 +575,15 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                 // Add new instance
                 if (onAddTabRequest) onAddTabRequest(type);
             }
-            else if (result <= -10 && result >= (type == TabType::Drums ? -13 : -12))
+            else if (result <= -10 && result >= (type == TabType::Drums ? -13
+                                                : (type == TabType::Vox || type == TabType::Inst) ? -11
+                                                : -12))
             {
                 // Sub-page item: open the active instance, then notify the
                 // editor to switch its sub-tab.
                 // Drums (D2): -10=DrumKit(0), -11=Player(1), -12=PianoRoll(2), -13=EQ(3).
-                // Layers/Bass: -10=Player(0), -11=PianoRoll(1), -12=EQ(2).
+                // Vox/Inst (G-4): -10=Player(0), -11=EQ(1) — no Piano Roll.
+                // Layers/Bass/Clip: -10=Player(0), -11=PianoRoll(1), -12=EQ(2).
                 int tabId = getActiveTabForType(type);
                 if (tabId >= 0)
                 {
@@ -605,8 +665,50 @@ void RibbonTabBar::paint(juce::Graphics& g)
             (float)r.getWidth(), (float)r.getHeight() + 2.0f,
             cornerR, cornerR, true, true, false, false);
 
-        g.setColour(tabColour(type, sel));
-        g.fillPath(tabPath);
+        // G-8 (2026-04-29): Builder slot uses an 8-color tie-dye gradient
+        // matching the mixer-strip palette in mixer order
+        // (Master / FX / Clips / Vox / Inst / Layers / Bass / Drums) so
+        // the Builder tab visually echoes the channels it arranges.  All
+        // other slots keep their flat single-colour fill.
+        if (type == TabType::Builder)
+        {
+            // Sourced from MixerPage.cpp's actual strip-construction colors:
+            //   Master  = kMixerTabPurple    (0xff7b2fbe)
+            //   FX      = kEffectsTabPink    (0xffce3f8e)
+            //   Clips   = VC::Warm           (0xffd4a017)
+            //   Vox     = teal               (0xff0fafa5)
+            //   Inst    = navy               (0xff1c3a8a)
+            //   Layers  = VC::LayerCol[0]    (0xffff8833)
+            //   Bass    = VC::BassCol[0]     (0xff33ff88)
+            //   Drums   = VC::DrumsCol       (0xffff4444)
+            const juce::Colour stops[8] = {
+                juce::Colour (0xff7b2fbe),   // Master (purple)
+                juce::Colour (0xffce3f8e),   // FX (pink)
+                juce::Colour (0xffd4a017),   // Clips (gold)
+                juce::Colour (0xff0fafa5),   // Vox (teal)
+                juce::Colour (0xff1c3a8a),   // Inst (navy)
+                juce::Colour (0xffff8833),   // Layers (orange)
+                juce::Colour (0xff33ff88),   // Bass (neon green)
+                juce::Colour (0xffff4444)    // Drums (red)
+            };
+            const float bright = sel ? 1.0f : 0.55f;
+
+            juce::ColourGradient grad (stops[0].withMultipliedBrightness (bright),
+                                         (float) r.getX(),     (float) r.getCentreY(),
+                                         stops[7].withMultipliedBrightness (bright),
+                                         (float) r.getRight(), (float) r.getCentreY(),
+                                         false);
+            for (int i = 1; i < 7; ++i)
+                grad.addColour ((double) i / 7.0,
+                                 stops[i].withMultipliedBrightness (bright));
+            g.setGradientFill (grad);
+            g.fillPath (tabPath);
+        }
+        else
+        {
+            g.setColour(tabColour(type, sel));
+            g.fillPath(tabPath);
+        }
 
         // Active tab: bright top stripe
         if (sel)

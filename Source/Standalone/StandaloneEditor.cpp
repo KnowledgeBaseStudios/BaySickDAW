@@ -21,6 +21,8 @@
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"   // G-1.5: floating test window
 #include "../BaySickNAMIR/BaySickNAMIREditor.h"      // G-1.5: floating test window
 #include "../Clips/ClipsPage.h"                       // G-2: Clips page + empty state
+#include "../Vox/VoxPage.h"                           // G-4: Vox page + empty state
+#include "../Inst/InstPage.h"                         // G-4: Inst page + empty state
 
 namespace
 {
@@ -217,7 +219,14 @@ private:
             xml->setAttribute("deviceType", types[typeIdx]->getTypeName());
 
         xml->setAttribute("audioOutputDeviceName", mDevBox.getText());
-        xml->setAttribute("audioInputDeviceName",  "");
+        // 2026-04-30: do NOT clobber audioInputDeviceName here.  The dialog
+        // has no input-device picker, so the old line `setAttribute(..., "")`
+        // silently disabled ASIO inputs every Apply — Vox/Inst Listen mode
+        // would stop receiving audio after any sample-rate / buffer-size
+        // change.  Whatever input device was previously open survives via
+        // the createStateXml() snapshot at the top of applySettings().
+        // (Adding a real input-device picker is a follow-up; until then,
+        // leaving the existing entry alone preserves the user's setup.)
 
         if (mRateBox.getSelectedId() > 0)
             xml->setAttribute("audioDeviceRate",       (double)mRateBox.getSelectedId());
@@ -307,6 +316,12 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // Scan core sample library once at startup (non-blocking on message thread,
     // just a directory walk — typically < 10 ms)
     SampleLibrary::getInstance().scan();
+
+    // G-6 (2026-04-29): ensure the user-facing My Samples folder + Core
+    // Library shortcut exist.  Idempotent — fast no-op when already present.
+    // Done at startup so file pickers don't have to handle missing-folder
+    // races and the user sees the folder in their Documents tree immediately.
+    SampleLibrary::ensureUserSamplesDir();
 
     mPM = std::make_unique<PatternManager>();
     mProcessor.setPatternManager(mPM.get());
@@ -472,6 +487,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                                 mProjectManager->getCurrentName(),
                                 mProjectManager->getSamplesFolder());
                             mRecordingActive = true;
+                            mPlayHead.setRecording (true);   // 2026-04-30 playhead PositionInfo
                             startPlayback (mTransport->getBPM());
                         });
                     return;
@@ -520,10 +536,17 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             auto res = mProcessor.stopRecording();
             commitRecordingResult (res);
             mRecordingActive = false;
+            mPlayHead.setRecording (false);   // 2026-04-30 playhead PositionInfo
         }
         mRecordArmed = false;
         if (mTransport) mTransport->setRecordArmed (false);
         if (mPlayHead.isPlaying()) { mPlayHead.stop(); mTransport->setPlayState(false, true); }
+        // 2026-04-30: flush all-notes-off on Pause.  Was Stop-only — long-tail
+        // notes (Harmless pads, big reverbs) would keep ringing after Pause
+        // until the user hit Stop.  Same broadcast Stop uses, just promoted
+        // up so the user never hears stuck voices regardless of which
+        // halting button they pressed.
+        mProcessor.mFlushAllNotes.store (true, std::memory_order_release);
     };
     mTransport->onStop  = [this]
     {
@@ -536,6 +559,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             auto res = mProcessor.stopRecording();
             commitRecordingResult (res);
             mRecordingActive = false;
+            mPlayHead.setRecording (false);   // 2026-04-30 playhead PositionInfo
         }
         mRecordArmed = false;
         if (mTransport) mTransport->setRecordArmed (false);
@@ -661,6 +685,18 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     mTransport->onGetSampleRate = [this] {
         return mProcessor.getSampleRate();
     };
+    // 2026-04-30: button-state sync so SongLoop + Metronome buttons re-paint
+    // correctly after project load.  Both the processor's atomics and the
+    // PatternManager's mixer state are restored from XML before the
+    // transport bar is re-laid out, but nothing pushed those values back
+    // into the buttons' visual toggle state.  Polled via the transport's
+    // existing 30 Hz timer.
+    mTransport->onGetSongLoopMode = [this] {
+        return mProcessor.mSongLoopMode.load (std::memory_order_relaxed);
+    };
+    mTransport->onGetMetronomeEnabled = [this] {
+        return mProcessor.mMetro.enabled.load (std::memory_order_relaxed);
+    };
     mTransport->onRecord = [this](bool armed)
     {
         // R5b (2026-04-23): Record button now ONLY toggles the arm state.  No
@@ -673,6 +709,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             auto res = mProcessor.stopRecording();
             commitRecordingResult (res);
             mRecordingActive = false;
+            mPlayHead.setRecording (false);   // 2026-04-30 playhead PositionInfo
         }
     };
     mTransport->onMetronomeToggle = [this](bool on) {
@@ -830,13 +867,19 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // D2: dropdown Delete routes through the page's requestDelete() so the
     // Save & Delete / Delete Anyway / Cancel prompt matches the right-click
     // context menu's Delete prompt exactly (single source of truth).
+    // G-7 (2026-04-29): Clips/Vox/Inst now have requestDelete() too — wire
+    // them through the same dispatch so the ribbon ▾ dropdown's Delete
+    // shows the new G-7 prompt instead of silently doing nothing.
     mRibbon->onTabDeleteRequested = [this](int tabId) {
         for (auto* entry : mPages)
         {
             if (! entry || entry->ribbonTabId != tabId) continue;
-            if (auto* lp = dynamic_cast<LayersPage*>(entry->component.get())) lp->requestDelete();
-            else if (auto* bp = dynamic_cast<BassPage*> (entry->component.get())) bp->requestDelete();
-            else if (auto* dp = dynamic_cast<DrumPage*> (entry->component.get())) dp->requestDelete();
+            if      (auto* lp = dynamic_cast<LayersPage*>(entry->component.get())) lp->requestDelete();
+            else if (auto* bp = dynamic_cast<BassPage*>  (entry->component.get())) bp->requestDelete();
+            else if (auto* dp = dynamic_cast<DrumPage*>  (entry->component.get())) dp->requestDelete();
+            else if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get())) cp->requestDelete();
+            else if (auto* vp = dynamic_cast<VoxPage*>   (entry->component.get())) vp->requestDelete();
+            else if (auto* ip = dynamic_cast<InstPage*>  (entry->component.get())) ip->requestDelete();
             return;
         }
     };
@@ -855,6 +898,16 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         if (mBuilderPage && mBuilderPage->getGrid())
             mBuilderPage->getGrid()->importAudioFile (filePath, 0, 0.0f);
     };
+
+    // G-4: Vox + Inst empty-state placeholders, shown when the user clicks
+    // the Vox / Inst ribbon body and 0 instances exist.  No drop target —
+    // the spawn trigger is the Mixer page's "Add Vox/Inst Strip" button.
+    mVoxEmptyState  = std::make_unique<VoxEmptyState>();
+    mInstEmptyState = std::make_unique<InstEmptyState>();
+    addChildComponent (*mVoxEmptyState);
+    addChildComponent (*mInstEmptyState);
+    mRibbon->onVoxEmptyStateRequested  = [this]() { showVoxEmptyState();  };
+    mRibbon->onInstEmptyStateRequested = [this]() { showInstEmptyState(); };
     mRibbon->onSubPageSelected = [this](RibbonTabBar::TabType t, int idx) { onSubPageSelected(t, idx); };
     // D1.4-fix: intercept rename for Drum tabs whose name == "User Patch" so
     // we can route to Save Patch As (which prompts for name + saves the
@@ -1067,6 +1120,10 @@ void StandaloneEditor::buildDefaultTabs()
                     k = EngineKind::Clip;
                     idx = cp->getPageIndex();
                 }
+                // G-4 (2026-04-28): Vox + Inst do NOT appear in the unified
+                // Piano Roll dropdown — they're live-input / recorded-audio
+                // destinations, not MIDI-triggered engines.  Skipping them
+                // here keeps the dropdown clean.
                 else continue;
                 if (idx < 0 || ! mRibbon) continue;
                 const auto* tab = mRibbon->getTabById (entry->ribbonTabId);
@@ -1520,14 +1577,25 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         {
             juce::String name = rowName.isNotEmpty() ? rowName
                                                      : "Audio " + juce::String(row + 1);
-            // Create mixer strip for this row if not already present
+
+            // 2026-04-29 ORDER FIX: register APVTS params + create the Audio
+            // InsertNode FIRST.  addAudioChannel below calls setApvts which
+            // only attaches sliders/buttons if the APVTS params already exist
+            // — with the prior order (strip first, then ensureAudioInsert)
+            // the strip's fader/mute/solo/width attachments silently failed
+            // to bind, so strip controls did nothing and the strip meter
+            // stayed dead.  WAV audio still played because the per-clip
+            // path's routeInsertOutput fans the buffer to the ClipsBus
+            // accumulator regardless of whether the InsertNode chain ran,
+            // hence the symptom: clip plays, ClipsBus controls work, strip
+            // controls and master mute don't.
+            mProcessor.mVibeGraph.addAudioRowChannel(row, name);
+            mProcessor.ensureAudioInsert(row, name);
+
+            // Create mixer strip for this row if not already present.  setApvts
+            // now finds every param registered by ensureAudioInsert above.
             if (mMixerPage)
                 mMixerPage->addAudioChannel(row, name);
-
-            // Create per-clip EffectRack in VibeGraph (ID 400+row)
-            mProcessor.mVibeGraph.addAudioRowChannel(row, name);
-            // 5F-4a: ensure APVTS params + Audio InsertNode for this row.
-            mProcessor.ensureAudioInsert(row, name);
 
             // Rebuild the Effects dropdown to include the new clip channel
             if (mEffectsPage)
@@ -1619,6 +1687,202 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         panel->onResolveDisplayName = [this](const AutomationLane& lane) -> juce::String
         {
             return displayNameFor(lane);
+        };
+
+        // G-5 (2026-04-29): page-walk based enumeration of audio files for
+        // the unified Audio tree.  Mutually-exclusive categories (Clips /
+        // Vox / Inst); orphan audioLibrary entries (no bound page) are not
+        // emitted.  Vox + Inst entries only fire once recording-to-file
+        // ships in G-9 — until then their getClipFilePath() returns empty
+        // and we skip.  Helper resolves an audio file path to its global
+        // audioLibrary index (drag descriptor needs the index, not the path).
+        // G-6 (2026-04-29): Duplicate... right-click flow.  BrowserPanel has
+        // already (a) copied the WAV to the destination + (b) resolved any
+        // filename conflict.  This callback is the back-half: capture the
+        // source page's full state, spawn a new page on the copied file,
+        // then apply the captured state to the new page so engine choice +
+        // every knob + both A/B engines' APVTS are cloned exactly.
+        //
+        // Target row = first arrangement-grid row with no Audio block
+        // (avoids stacking blocks at bar 0); falls back to row 0 if all 32
+        // rows are populated.
+        panel->onDuplicateClipSpawn = [this](const juce::String& sourceAbsPath,
+                                              const juce::String& copiedAbsPath)
+        {
+            if (copiedAbsPath.isEmpty() || ! mBuilderPage || ! mPM) return;
+            auto* grid = mBuilderPage->getGrid();
+            if (! grid) return;
+
+            // ── Step 1: locate the source page by absolute path + capture
+            // its full state.  Three possible page types (Clips / Vox /
+            // Inst) — each has its own export* method.  We hold the saved
+            // state as XML strings so we can apply after the new page exists.
+            juce::String savedClipState, savedVoxState, savedInstState;
+            for (auto* entry : mPages)
+            {
+                if (! entry || ! entry->component) continue;
+                if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+                {
+                    const juce::String pageAbs =
+                        mProcessor.resolveProjectFile (cp->getClipFilePath()).getFullPathName();
+                    if (pageAbs == sourceAbsPath || cp->getClipFilePath() == sourceAbsPath)
+                    {
+                        savedClipState = cp->exportClipState();
+                        break;
+                    }
+                }
+                else if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+                {
+                    const juce::String pageAbs =
+                        mProcessor.resolveProjectFile (vp->getClipFilePath()).getFullPathName();
+                    if (pageAbs == sourceAbsPath || vp->getClipFilePath() == sourceAbsPath)
+                    {
+                        savedVoxState = vp->exportVoxState();
+                        break;
+                    }
+                }
+                else if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+                {
+                    const juce::String pageAbs =
+                        mProcessor.resolveProjectFile (ip->getClipFilePath()).getFullPathName();
+                    if (pageAbs == sourceAbsPath || ip->getClipFilePath() == sourceAbsPath)
+                    {
+                        savedInstState = ip->exportInstState();
+                        break;
+                    }
+                }
+            }
+
+            // ── Step 2: find first arrangement row with no Audio block,
+            // then spawn the new ClipsPage via the canonical import path.
+            // ClipsPage spawn is the only auto-spawning page right now; Vox
+            // / Inst would land here once G-9 wires recording-to-file but
+            // those don't have an "import via Builder" path yet, so the
+            // Vox/Inst branches below stay null at this stage.
+            constexpr int kMaxRows = 32;
+            std::array<bool, kMaxRows> rowHasAudio {};
+            for (int i = 0; i < mPM->getNumBlocks(); ++i)
+            {
+                const auto& b = mPM->getBlock (i);
+                if (b.clipType == ClipType::Audio
+                    && b.trackRow >= 0 && b.trackRow < kMaxRows)
+                    rowHasAudio[(size_t) b.trackRow] = true;
+            }
+            int targetRow = 0;
+            for (int r = 0; r < kMaxRows; ++r)
+                if (! rowHasAudio[(size_t) r]) { targetRow = r; break; }
+
+            grid->importAudioFile (copiedAbsPath, targetRow, 0.0f);
+
+            // ── Step 3: importAudioFile triggered onAudioClipAdded →
+            // spawnClipsTabIfMissing(targetRow, ...).  The new ClipsPage is
+            // now in mPages.  Apply the captured state to clone every knob
+            // + engine selection + both A/B engines' APVTS.
+            if (savedClipState.isNotEmpty())
+            {
+                for (auto* entry : mPages)
+                {
+                    if (! entry || ! entry->component) continue;
+                    if (auto* newCp = dynamic_cast<ClipsPage*> (entry->component.get()))
+                    {
+                        if (newCp->getPageIndex() == targetRow)
+                        {
+                            newCp->importClipState (savedClipState);
+                            break;
+                        }
+                    }
+                }
+            }
+            // VoxPage / InstPage duplicate paths defer to G-9 — Vox/Inst
+            // recordings don't exist yet and the current G-6 audio tree
+            // only surfaces Clips entries.  When G-9 ships, these branches
+            // will spawn on the matching mixer strip + apply saved state.
+        };
+
+        panel->onEnumerateAudio = [this]() -> std::vector<CategorizedAudioEntry>
+        {
+            std::vector<CategorizedAudioEntry> out;
+            if (! mPM) return out;
+
+            // Library paths are stored as RELATIVE strings (e.g.
+            // "Samples/file.wav" per P4's copy-on-drop flow), but page-side
+            // paths (cp->getClipFilePath() / vp / ip) are ABSOLUTE — resolved
+            // by spawn*TabIfMissing.  Normalize both to absolute via
+            // mProcessor.resolveProjectFile so the lookup matches regardless
+            // of storage form.
+            auto findLibIdx = [this](const juce::String& pagePath) -> int
+            {
+                if (pagePath.isEmpty()) return -1;
+                const juce::String pageAbs =
+                    mProcessor.resolveProjectFile (pagePath).getFullPathName();
+                for (int i = 0; i < mPM->getNumAudioLibrary(); ++i)
+                {
+                    const juce::String libRel = mPM->getAudioLibraryPath (i);
+                    if (libRel == pagePath) return i;   // identical strings
+                    const juce::String libAbs =
+                        mProcessor.resolveProjectFile (libRel).getFullPathName();
+                    if (libAbs.isNotEmpty() && libAbs == pageAbs) return i;
+                }
+                return -1;
+            };
+
+            for (auto* entry : mPages)
+            {
+                if (! entry || ! entry->component) continue;
+
+                if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+                {
+                    const juce::String path = cp->getClipFilePath();
+                    if (path.isEmpty()) continue;
+                    const int libIdx = findLibIdx (path);
+                    if (libIdx < 0) continue;
+                    CategorizedAudioEntry e;
+                    e.audioLibIdx = libIdx;
+                    e.category    = "Clips";
+                    e.displayName = mPM->getAudioLibraryAlias (libIdx).isNotEmpty()
+                                       ? mPM->getAudioLibraryAlias (libIdx)
+                                       : juce::File (path).getFileName();
+                    e.fullPath    = mProcessor.resolveProjectFile (path).getFullPathName();
+                    if (e.fullPath.isEmpty()) e.fullPath = path;
+                    e.accent      = juce::Colour (0xffd4a017);   // Clips amber
+                    out.push_back (std::move (e));
+                }
+                else if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+                {
+                    const juce::String path = vp->getClipFilePath();
+                    if (path.isEmpty()) continue;   // empty until G-9 records
+                    const int libIdx = findLibIdx (path);
+                    if (libIdx < 0) continue;
+                    CategorizedAudioEntry e;
+                    e.audioLibIdx = libIdx;
+                    e.category    = "Vox";
+                    e.displayName = vp->getTabName().isNotEmpty()
+                                       ? vp->getTabName()
+                                       : juce::File (path).getFileName();
+                    e.fullPath    = mProcessor.resolveProjectFile (path).getFullPathName();
+                    if (e.fullPath.isEmpty()) e.fullPath = path;
+                    e.accent      = juce::Colour (0xff0fafa5);   // Vox teal
+                    out.push_back (std::move (e));
+                }
+                else if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+                {
+                    const juce::String path = ip->getClipFilePath();
+                    if (path.isEmpty()) continue;   // empty until G-9 records
+                    const int libIdx = findLibIdx (path);
+                    if (libIdx < 0) continue;
+                    CategorizedAudioEntry e;
+                    e.audioLibIdx = libIdx;
+                    e.category    = "Inst";
+                    e.displayName = ip->getTabName().isNotEmpty()
+                                       ? ip->getTabName()
+                                       : juce::File (path).getFileName();
+                    e.fullPath    = mProcessor.resolveProjectFile (path).getFullPathName();
+                    if (e.fullPath.isEmpty()) e.fullPath = path;
+                    e.accent      = juce::Colour (0xff1c3a8a);   // Inst navy
+                    out.push_back (std::move (e));
+                }
+            }
+            return out;
         };
     }
 
@@ -2122,14 +2386,22 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
         if (! paramId.startsWith("mixer_")) return {};
 
         // Bus + Master strips (fixed names).
+        // 2026-04-30 (audit B.5): Vox / Inst / secondary buses added — were
+        // missing, so right-click "Automate: ..." showed raw param IDs like
+        // "Mixer Voxbus Level" instead of "Mx Vox Bus - Level".
         struct BusEntry { const char* prefix; const char* label; };
         static const BusEntry kBusEntries[] = {
-            { "mixer_master_",   "Master"      },
-            { "mixer_layers_",   "Layers Bus"  },
-            { "mixer_bass_",     "Bass Bus"    },
-            { "mixer_drums_",    "Drums Bus"   },
-            { "mixer_fx_",       "Effects Bus" },
-            { "mixer_clipsbus_", "Clips Bus"   },
+            { "mixer_master_",    "Master"      },
+            { "mixer_layers_",    "Layers Bus"  },
+            { "mixer_bass_",      "Bass Bus"    },
+            { "mixer_drums_",     "Drums Bus"   },
+            { "mixer_fx_",        "Effects Bus" },
+            { "mixer_clipsbus_",  "Clips Bus"   },
+            { "mixer_voxbus_",    "Vox Bus"     },
+            { "mixer_instbus_",   "Inst Bus"    },
+            { "mixer_voxbus2_",   "Vox Bus 2"   },
+            { "mixer_instbus2_",  "Inst Bus 2"  },
+            { "mixer_instbus3_",  "Inst Bus 3"  },
         };
         for (const auto& e : kBusEntries)
         {
@@ -2140,6 +2412,9 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
         }
 
         // Indexed insert strips: mixer_{kind}_{N}_{suffix}.
+        // 2026-04-30 (audit B.5): Vox / Inst insert prefixes added — were
+        // missing, so per-Vox / per-Inst strip params fell through to raw
+        // prettify-fallback labels in the right-click Automate menu.
         struct InsertEntry { const char* prefix; Kind kind; const char* singular; };
         static const InsertEntry kInsertEntries[] = {
             { "mixer_layer_", Kind::Layer, "Layer"     },
@@ -2147,6 +2422,8 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
             { "mixer_drum_",  Kind::Drum,  "Drum"      },
             { "mixer_audio_", Kind::Audio, "Audio Row" },
             { "mixer_aux_",   Kind::Aux,   "Aux"       },
+            { "mixer_vox_",   Kind::Vox,   "Vox"       },
+            { "mixer_inst_",  Kind::Inst,  "Inst"      },
         };
         for (const auto& e : kInsertEntries)
         {
@@ -2168,6 +2445,10 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
                 if      (e.kind == Kind::Drum)  channelLabel = mMixerPage->getDrumStripName(insertIdx);
                 else if (e.kind == Kind::Audio) channelLabel = mMixerPage->getAudioStripName(insertIdx);
                 else if (e.kind == Kind::Aux)   channelLabel = mMixerPage->getAuxStripName(insertIdx);
+                // 2026-04-30: MixerPage doesn't expose per-Vox / per-Inst
+                // strip-name lookups yet — fall through to the default
+                // "Vox N+1" / "Inst N+1" label.  Once those getters land
+                // (G-9 strip rename UX), add lookups here.
             }
             if (channelLabel.isEmpty())
                 channelLabel = juce::String(e.singular) + " " + juce::String(insertIdx + 1);
@@ -2249,6 +2530,17 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
             out = dev->getInputChannelNames();
         return out;
     };
+    // G-4 (2026-04-28): "Add Vox Strip" / "Add Inst Strip" buttons in the
+    // Mixer page are the spawn trigger for the matching ribbon page (no other
+    // path).  spawnVoxTabIfMissing / spawnInstTabIfMissing are idempotent on
+    // pageIdx so restoring a project (which calls addVoxChannelAtIndex during
+    // load) is safe — duplicate spawns are a no-op.
+    // G-6 (2026-04-29): Mixer "Add Vox/Inst Strip" should NOT auto-jump to
+    // the new page — keep user on Mixer so they can add multiple strips in
+    // a row without bouncing back each time.  Empty-state spawn flow (and
+    // any other path that wants navigation) leaves selectAfter at default.
+    page->onVoxStripAdded  = [this](int idx) { spawnVoxTabIfMissing  (idx, /*selectAfter*/ false); };
+    page->onInstStripAdded = [this](int idx) { spawnInstTabIfMissing (idx, /*selectAfter*/ false); };
     return page;
 }
 
@@ -2369,6 +2661,90 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
 // ─────────────────────────────────────────────────────────────────────────────
 void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
 {
+    // G-6 (2026-04-29): Clip ribbon +Add opens an OS file picker.  Defaults
+    // to Documents/BaySickDAW/My Samples (created on demand, with a Core
+    // Library shortcut inside).  On choose, route through the Builder
+    // grid's importAudioFile so onAudioClipAdded → spawnClipsTabIfMissing
+    // fires uniformly with drag-drop.
+    if (type == RibbonTabBar::TabType::Clip)
+    {
+        if (! mBuilderPage || ! mBuilderPage->getGrid()) return;
+        SampleLibrary::ensureUserSamplesDir();
+        auto chooser = std::make_shared<juce::FileChooser> (
+            "Choose an audio file to add as a Clip",
+            SampleLibrary::getUserSamplesDir(),
+            "*.wav;*.mp3;*.aiff;*.aif;*.flac;*.ogg");
+        const int flags = juce::FileBrowserComponent::openMode
+                        | juce::FileBrowserComponent::canSelectFiles;
+        chooser->launchAsync (flags, [this, chooser] (const juce::FileChooser& fc)
+        {
+            const juce::File f = fc.getResult();
+            if (f == juce::File()) return;
+            if (mBuilderPage && mBuilderPage->getGrid())
+                mBuilderPage->getGrid()->importAudioFile (f.getFullPathName(), 0, 0.0f);
+        });
+        return;
+    }
+
+    // G-6 (2026-04-29): Vox + Inst now support ribbon +Add (in addition to
+    // the Mixer page button).  These flows go through the Mixer's add-strip
+    // path so the strip creation cascade fires the page spawn callback.
+    if (type == RibbonTabBar::TabType::Vox || type == RibbonTabBar::TabType::Inst)
+    {
+        if (! mMixerPage) return;
+        const bool isVox = (type == RibbonTabBar::TabType::Vox);
+        const int  cap   = isVox ? (int) kMaxVoxPages : (int) kMaxInstPages;
+
+        // Find first free idx not already used by an existing page.
+        std::vector<bool> taken ((size_t) cap, false);
+        for (auto* entry : mPages)
+        {
+            if (! entry || entry->type != type) continue;
+            int idx = -1;
+            if (isVox)
+            {
+                if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get())) idx = vp->getPageIndex();
+            }
+            else
+            {
+                if (auto* ip = dynamic_cast<InstPage*> (entry->component.get())) idx = ip->getPageIndex();
+            }
+            if (idx >= 0 && idx < cap) taken[(size_t) idx] = true;
+        }
+        int newIdx = -1;
+        for (int i = 0; i < cap; ++i)
+            if (! taken[(size_t) i]) { newIdx = i; break; }
+        if (newIdx < 0) return;
+
+        // Mixer's addVoxChannelAtIndex / addInstChannelAtIndex creates the
+        // strip and synchronously fires onVoxStripAdded / onInstStripAdded
+        // → spawnVoxTabIfMissing(newIdx, false) / spawnInstTabIfMissing.
+        if (isVox) mMixerPage->addVoxChannelAtIndex  (newIdx);
+        else       mMixerPage->addInstChannelAtIndex (newIdx);
+
+        // User clicked ribbon +Add — explicitly navigate to the new tab.
+        for (auto* entry : mPages)
+        {
+            if (! entry || entry->type != type) continue;
+            int idx = -1;
+            if (isVox)
+            {
+                if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get())) idx = vp->getPageIndex();
+            }
+            else
+            {
+                if (auto* ip = dynamic_cast<InstPage*> (entry->component.get())) idx = ip->getPageIndex();
+            }
+            if (idx == newIdx && mRibbon)
+            {
+                mRibbon->selectTab (entry->ribbonTabId);
+                onTabSelected (entry->ribbonTabId);
+                break;
+            }
+        }
+        return;
+    }
+
     // D1.4: Layers, Bass, and Drums all support adding new instances.
     if (type != RibbonTabBar::TabType::Layers
         && type != RibbonTabBar::TabType::Bass
@@ -2625,15 +3001,56 @@ void StandaloneEditor::onTabClosed(int tabId)
             // mixer audio insert stays intact — closing a Clips tab only
             // removes the page, never the underlying clip data (no-file-
             // delete contract).
+            // G-7 (2026-04-29): also sweep Builder arrangement blocks that
+            // point to this clip's audio file.  Without this, the blocks
+            // become orphaned (silent, since the engine is unregistered)
+            // but visually remain on the Builder grid.  Reported by Jeff.
             if (auto* cp = dynamic_cast<ClipsPage*>(mPages[i]->component.get()))
             {
                 int idx = cp->getPageIndex();
+                const juce::String clipPath = cp->getClipFilePath();
                 if (idx >= 0)
                 {
                     mProcessor.unregisterClipEngine (idx);
                     if (mPianoRollPage)
                         mPianoRollPage->unregisterEngine ({ EngineKind::Clip, idx });
                 }
+                if (mPM && clipPath.isNotEmpty())
+                {
+                    bool anyRemoved = false;
+                    for (int b = mPM->getNumBlocks() - 1; b >= 0; --b)
+                    {
+                        const auto& blk = mPM->getBlock (b);
+                        if (blk.clipType == ClipType::Audio
+                            && blk.audioFilePath == clipPath)
+                        {
+                            mPM->removeBlock (b);
+                            anyRemoved = true;
+                        }
+                    }
+                    if (anyRemoved && mBuilderPage)
+                        mBuilderPage->notifyArrangementChanged();
+                }
+            }
+
+            // G-4 (2026-04-28): Vox tab close — unregister the audio engine
+            // so the audio thread stops processing it.  No piano-roll
+            // unregister needed (Vox isn't registered with PianoRollPage).
+            // The mixer Vox strip and any bound recording stay intact
+            // (no-file-delete contract).
+            if (auto* vp = dynamic_cast<VoxPage*>(mPages[i]->component.get()))
+            {
+                int idx = vp->getPageIndex();
+                if (idx >= 0)
+                    mProcessor.unregisterVoxEngine (idx);
+            }
+
+            // G-4 (2026-04-28): Inst tab close — same shape as Vox.
+            if (auto* ip = dynamic_cast<InstPage*>(mPages[i]->component.get()))
+            {
+                int idx = ip->getPageIndex();
+                if (idx >= 0)
+                    mProcessor.unregisterInstEngine (idx);
             }
 
             // Clear legacy raw pointers if we're removing those pages
@@ -2649,9 +3066,41 @@ void StandaloneEditor::onTabClosed(int tabId)
             if (mVisiblePage == mPages[i]->component.get())
                 mVisiblePage = nullptr;
 
+            // G-7 (2026-04-29): track type before removing so we can decide
+            // whether to surface the empty-state placeholder afterward.
+            const auto closedType = mPages[i]->type;
+
             mPages.remove(i);
             resized();
             refreshAllKitViews();   // D2: drum row freed → kit view shrinks
+
+            // G-7: if we just closed the LAST Clip/Vox/Inst tab, surface the
+            // empty-state placeholder so the user has a clear next action
+            // (drag a clip / Add Vox Strip / Add Inst Strip).  Layer/Bass/
+            // Drum can't reach zero (isLastOfType guard prevents it).
+            auto remainingOfType = [this] (RibbonTabBar::TabType t)
+            {
+                int n = 0;
+                for (auto* e : mPages)
+                    if (e && e->type == t) ++n;
+                return n;
+            };
+
+            if (closedType == RibbonTabBar::TabType::Clip
+                && remainingOfType (RibbonTabBar::TabType::Clip) == 0)
+            {
+                showClipsEmptyState();
+            }
+            else if (closedType == RibbonTabBar::TabType::Vox
+                     && remainingOfType (RibbonTabBar::TabType::Vox) == 0)
+            {
+                showVoxEmptyState();
+            }
+            else if (closedType == RibbonTabBar::TabType::Inst
+                     && remainingOfType (RibbonTabBar::TabType::Inst) == 0)
+            {
+                showInstEmptyState();
+            }
             return;
         }
     }
@@ -2694,16 +3143,94 @@ void StandaloneEditor::onSubPageSelected(RibbonTabBar::TabType type, int subPage
         // 0 = Player, 1 = Piano Roll, 2 = EQ.  Dispatch to the ACTIVE page
         // for this type (not the last-created legacy ptr, which gets stale
         // once multiple tabs of the same type exist).
+        // Layers/Bass sub-tab 1 (Piano Roll) redirects to the unified
+        // PianoRollPage with this engine selected — same logic the
+        // page-menu-bar pill click uses.  Drums has Piano Roll at sub-tab 2
+        // and an additional Drum Kit at sub-tab 0; both redirect.
         const int activeId = mRibbon->getActiveTabForType(type);
         for (auto* entry : mPages)
         {
             if (! entry || entry->ribbonTabId != activeId) continue;
             if (auto* lp = dynamic_cast<LayersPage*>(entry->component.get()))
-                lp->switchTab(subPageIndex);
+            {
+                if (subPageIndex == 1 && mPianoRollPage)
+                {
+                    if (mRibbon) mRibbon->selectTab (4);
+                    onTabSelected (4);
+                    mPianoRollPage->selectEngine ({ EngineKind::Layer, lp->getPageIndex() });
+                }
+                else lp->switchTab(subPageIndex);
+            }
             else if (auto* bp = dynamic_cast<BassPage*>(entry->component.get()))
-                bp->switchTab(subPageIndex);
+            {
+                if (subPageIndex == 1 && mPianoRollPage)
+                {
+                    if (mRibbon) mRibbon->selectTab (4);
+                    onTabSelected (4);
+                    mPianoRollPage->selectEngine ({ EngineKind::Bass, bp->getPageIndex() });
+                }
+                else bp->switchTab(subPageIndex);
+            }
             else if (auto* dp = dynamic_cast<DrumPage*>(entry->component.get()))
-                dp->switchTab(subPageIndex);
+            {
+                // Drums: 0=DrumKit (redirect), 1=Player, 2=PianoRoll (redirect), 3=EQ.
+                if (subPageIndex == 0 && mPianoRollPage)
+                {
+                    if (mRibbon) mRibbon->selectTab (4);
+                    onTabSelected (4);
+                    mPianoRollPage->selectEngine ({ EngineKind::DrumKit, 0 });
+                }
+                else if (subPageIndex == 2 && mPianoRollPage)
+                {
+                    if (mRibbon) mRibbon->selectTab (4);
+                    onTabSelected (4);
+                    mPianoRollPage->selectEngine ({ EngineKind::Drum, dp->getPageIndex() });
+                }
+                else dp->switchTab(subPageIndex);
+            }
+            break;
+        }
+        break;
+    }
+
+    case RibbonTabBar::TabType::Clip:
+    {
+        // G-2 (2026-04-28): Clip dropdown sub-pages — 0=Player, 1=Piano Roll
+        // (redirect), 2=Pre EQ8 M/S.  Sub-tab 1 jumps to the unified
+        // PianoRollPage with this Clip's engine selected.
+        const int activeId = mRibbon->getActiveTabForType(type);
+        for (auto* entry : mPages)
+        {
+            if (! entry || entry->ribbonTabId != activeId) continue;
+            if (auto* cp = dynamic_cast<ClipsPage*>(entry->component.get()))
+            {
+                if (subPageIndex == 1 && mPianoRollPage)
+                {
+                    if (mRibbon) mRibbon->selectTab (4);
+                    onTabSelected (4);
+                    mPianoRollPage->selectEngine ({ EngineKind::Clip, cp->getPageIndex() });
+                }
+                else cp->switchTab(subPageIndex);
+            }
+            break;
+        }
+        break;
+    }
+
+    case RibbonTabBar::TabType::Vox:
+    case RibbonTabBar::TabType::Inst:
+    {
+        // G-4 (2026-04-28): Vox + Inst dropdown sub-pages — 0=Player, 1=EQ.
+        // No Piano Roll redirect — these are live-input / recorded-audio
+        // destinations, not MIDI-triggered engines.
+        const int activeId = mRibbon->getActiveTabForType(type);
+        for (auto* entry : mPages)
+        {
+            if (! entry || entry->ribbonTabId != activeId) continue;
+            if (auto* vp = dynamic_cast<VoxPage*>(entry->component.get()))
+                vp->switchTab(subPageIndex);
+            else if (auto* ip = dynamic_cast<InstPage*>(entry->component.get()))
+                ip->switchTab(subPageIndex);
             break;
         }
         break;
@@ -2721,6 +3248,9 @@ void StandaloneEditor::showPageForTab(int tabId)
         if (entry->component) entry->component->setVisible(false);
     // G-2: hide empty-state when a real page is being shown.
     if (mClipsEmptyState) mClipsEmptyState->setVisible(false);
+    // G-4: same for Vox + Inst.
+    if (mVoxEmptyState)   mVoxEmptyState  ->setVisible(false);
+    if (mInstEmptyState)  mInstEmptyState ->setVisible(false);
 
     mVisiblePage = nullptr;
 
@@ -2861,8 +3391,28 @@ void StandaloneEditor::showPageForTab(int tabId)
             // a nav shortcut - clicking it switches to PianoRollPage and
             // selects this engine in the dropdown.  Player (0) and EQ (2)
             // remain local sub-pages.
+            // G-7 (2026-04-29): hamburger ≡ shows Save/Load Page Preset
+            // when not on the EQ tab.  syncPagePresetMenu installs/clears
+            // the menu builder; called both initially and on every sub-tab
+            // switch so the EQ menu can take over on EQ tab.
+            auto syncPagePresetMenu = [this, lp] (int subTabIdx)
+            {
+                if (! mPageMenuBar) return;
+                const bool onEqTab = (subTabIdx == 2);
+                if (! onEqTab && lp != nullptr)
+                {
+                    juce::Component::SafePointer<LayersPage> safe (lp);
+                    mPageMenuBar->setMenuBuilder (
+                        [safe] (juce::Component* anchor)
+                        {
+                            if (auto* p = safe.getComponent())
+                                p->showPageActionsMenu (anchor);
+                        });
+                }
+            };
+
             mPageMenuBar->setTabSlots({"Player", "Piano Roll", "Pre EQ8 M/S"},
-                [this, lp, syncEQHamburger](int i) {
+                [this, lp, syncEQHamburger, syncPagePresetMenu](int i) {
                     if (i == 1)
                     {
                         if (mRibbon) mRibbon->selectTab (4);
@@ -2875,8 +3425,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                     mPageMenuBar->updateTabActive(i);
                     mPageMenuBar->setMidSideVisible(i == 2);
                     syncEQHamburger (lp->getEQDisplay(), i == 2);
+                    syncPagePresetMenu (i);
                 }, lp->getActiveTab(), lp->getPageColor());
             syncEQHamburger (lp->getEQDisplay(), lp->getActiveTab() == 2);
+            syncPagePresetMenu (lp->getActiveTab());
             mPageMenuBar->setMidSideSlots(
                 [this, lp] { lp->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
                 [this, lp] { lp->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
@@ -2888,8 +3440,25 @@ void StandaloneEditor::showPageForTab(int tabId)
             // §P4.3 (B5): same rename as Layers above.
             // 2026-04-26 (step 2 commit 3): Piano Roll sub-tab redirects to
             // PianoRollPage with this Bass engine selected.
+            // G-7: same Page Preset hamburger pattern as Layers.
+            auto syncPagePresetMenu = [this, bp] (int subTabIdx)
+            {
+                if (! mPageMenuBar) return;
+                const bool onEqTab = (subTabIdx == 2);
+                if (! onEqTab && bp != nullptr)
+                {
+                    juce::Component::SafePointer<BassPage> safe (bp);
+                    mPageMenuBar->setMenuBuilder (
+                        [safe] (juce::Component* anchor)
+                        {
+                            if (auto* p = safe.getComponent())
+                                p->showPageActionsMenu (anchor);
+                        });
+                }
+            };
+
             mPageMenuBar->setTabSlots({"Player", "Piano Roll", "Pre EQ8 M/S"},
-                [this, bp, syncEQHamburger](int i) {
+                [this, bp, syncEQHamburger, syncPagePresetMenu](int i) {
                     if (i == 1)
                     {
                         if (mRibbon) mRibbon->selectTab (4);
@@ -2902,8 +3471,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                     mPageMenuBar->updateTabActive(i);
                     mPageMenuBar->setMidSideVisible(i == 2);
                     syncEQHamburger (bp->getEQDisplay(), i == 2);
+                    syncPagePresetMenu (i);
                 }, bp->getActiveTab(), bp->getPageColor());
             syncEQHamburger (bp->getEQDisplay(), bp->getActiveTab() == 2);
+            syncPagePresetMenu (bp->getActiveTab());
             mPageMenuBar->setMidSideSlots(
                 [this, bp] { bp->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
                 [this, bp] { bp->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
@@ -2916,8 +3487,24 @@ void StandaloneEditor::showPageForTab(int tabId)
             // (Player / Piano Roll / Pre EQ8 M/S).  Piano Roll redirects to
             // PianoRollPage with this Clip's engine selected; Pre EQ8 M/S is
             // a stub placeholder for now.
+            // G-7: Page Preset hamburger always installed (Save greys out
+            // when no engine; Load Preset works regardless).  Pre EQ8 M/S
+            // tab keeps the same menu since the EQ stub has no own menu.
+            auto syncPagePresetMenu = [this, cp] (int i)
+            {
+                juce::ignoreUnused (i);   // menu builder is the same on all sub-tabs
+                if (! mPageMenuBar || cp == nullptr) return;
+                juce::Component::SafePointer<ClipsPage> safe (cp);
+                mPageMenuBar->setMenuBuilder (
+                    [safe] (juce::Component* anchor)
+                    {
+                        if (auto* p = safe.getComponent())
+                            p->showPageActionsMenu (anchor);
+                    });
+            };
+
             mPageMenuBar->setTabSlots({"Player", "Piano Roll", "Pre EQ8 M/S"},
-                [this, cp](int i) {
+                [this, cp, syncPagePresetMenu, syncEQHamburger](int i) {
                     if (i == 1)
                     {
                         if (mRibbon) mRibbon->selectTab (4);
@@ -2928,9 +3515,89 @@ void StandaloneEditor::showPageForTab(int tabId)
                     }
                     cp->switchTab (i);
                     mPageMenuBar->updateTabActive (i);
-                    mPageMenuBar->setMidSideVisible (false);   // EQ stub doesn't need M/S yet
+                    mPageMenuBar->setMidSideVisible (i == 2);
+                    syncEQHamburger (cp->getEQDisplay(), i == 2);
+                    syncPagePresetMenu (i);
                 }, cp->getActiveTab(), cp->getPageColor());
-            mPageMenuBar->setMidSideVisible (false);
+            syncEQHamburger (cp->getEQDisplay(), cp->getActiveTab() == 2);
+            syncPagePresetMenu (cp->getActiveTab());
+            mPageMenuBar->setMidSideSlots(
+                [this, cp] { cp->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
+                [this, cp] { cp->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
+                cp->isEQMidActive());
+            mPageMenuBar->setMidSideVisible (cp->getActiveTab() == 2);
+        }
+        else if (auto* vp = dynamic_cast<VoxPage*>(mVisiblePage))
+        {
+            // 2026-04-28 (G-4): Vox page — Player + EQ only, no Piano Roll
+            // (live-input / recorded-audio destination, not MIDI-triggered).
+            // G-7: Page Preset hamburger menu installed regardless of sub-tab
+            // since the EQ stub doesn't have its own menu.  Save Page Preset
+            // greys out when there's no engine; Load Page Preset stays active
+            // so users can apply a saved preset to an engineless Vox tab.
+            auto syncPagePresetMenu = [this, vp] (int i)
+            {
+                juce::ignoreUnused (i);
+                if (! mPageMenuBar || vp == nullptr) return;
+                juce::Component::SafePointer<VoxPage> safe (vp);
+                mPageMenuBar->setMenuBuilder (
+                    [safe] (juce::Component* anchor)
+                    {
+                        if (auto* p = safe.getComponent())
+                            p->showPageActionsMenu (anchor);
+                    });
+            };
+
+            mPageMenuBar->setTabSlots({"Player", "Pre EQ8 M/S"},
+                [this, vp, syncPagePresetMenu, syncEQHamburger](int i) {
+                    vp->switchTab (i);
+                    mPageMenuBar->updateTabActive (i);
+                    mPageMenuBar->setMidSideVisible (i == 1);
+                    syncEQHamburger (vp->getEQDisplay(), i == 1);
+                    syncPagePresetMenu (i);
+                }, vp->getActiveTab(), vp->getPageColor());
+            syncEQHamburger (vp->getEQDisplay(), vp->getActiveTab() == 1);
+            syncPagePresetMenu (vp->getActiveTab());
+            mPageMenuBar->setMidSideSlots(
+                [this, vp] { vp->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
+                [this, vp] { vp->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
+                vp->isEQMidActive());
+            mPageMenuBar->setMidSideVisible (vp->getActiveTab() == 1);
+        }
+        else if (auto* ip = dynamic_cast<InstPage*>(mVisiblePage))
+        {
+            // 2026-04-28 (G-4): Inst page — Player + EQ only, no Piano Roll
+            // (same reasoning as Vox).
+            // G-7: Page Preset hamburger menu installed regardless of sub-tab
+            // (same reasoning as Vox above).
+            auto syncPagePresetMenu = [this, ip] (int i)
+            {
+                juce::ignoreUnused (i);
+                if (! mPageMenuBar || ip == nullptr) return;
+                juce::Component::SafePointer<InstPage> safe (ip);
+                mPageMenuBar->setMenuBuilder (
+                    [safe] (juce::Component* anchor)
+                    {
+                        if (auto* p = safe.getComponent())
+                            p->showPageActionsMenu (anchor);
+                    });
+            };
+
+            mPageMenuBar->setTabSlots({"Player", "Pre EQ8 M/S"},
+                [this, ip, syncPagePresetMenu, syncEQHamburger](int i) {
+                    ip->switchTab (i);
+                    mPageMenuBar->updateTabActive (i);
+                    mPageMenuBar->setMidSideVisible (i == 1);
+                    syncEQHamburger (ip->getEQDisplay(), i == 1);
+                    syncPagePresetMenu (i);
+                }, ip->getActiveTab(), ip->getPageColor());
+            syncEQHamburger (ip->getEQDisplay(), ip->getActiveTab() == 1);
+            syncPagePresetMenu (ip->getActiveTab());
+            mPageMenuBar->setMidSideSlots(
+                [this, ip] { ip->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
+                [this, ip] { ip->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
+                ip->isEQMidActive());
+            mPageMenuBar->setMidSideVisible (ip->getActiveTab() == 1);
         }
         else if (auto* dp = dynamic_cast<DrumPage*>(mVisiblePage))
         {
@@ -2939,8 +3606,27 @@ void StandaloneEditor::showPageForTab(int tabId)
             // (index 2) are nav shortcuts - clicking them switches to
             // PianoRollPage with that view selected.  Player (1) and EQ (3)
             // remain local sub-pages.
+            // G-7: Page Preset hamburger menu — installed when sub-tab is
+            // Player (1) only.  EQ (3) hands the menu off to ParametricEQDisplay
+            // via syncEQHamburger; Drum Kit (0) + Piano Roll (2) are nav-only.
+            auto syncPagePresetMenu = [this, dp] (int subTabIdx)
+            {
+                if (! mPageMenuBar) return;
+                const bool onPlayer = (subTabIdx == 1);
+                if (onPlayer && dp != nullptr)
+                {
+                    juce::Component::SafePointer<DrumPage> safe (dp);
+                    mPageMenuBar->setMenuBuilder (
+                        [safe] (juce::Component* anchor)
+                        {
+                            if (auto* p = safe.getComponent())
+                                p->showPageActionsMenu (anchor);
+                        });
+                }
+            };
+
             mPageMenuBar->setTabSlots({"Drum Kit", "Player", "Piano Roll", "Pre EQ8 M/S"},
-                [this, dp, syncEQHamburger](int i) {
+                [this, dp, syncEQHamburger, syncPagePresetMenu](int i) {
                     if (i == 0)
                     {
                         if (mRibbon) mRibbon->selectTab (4);
@@ -2961,8 +3647,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                     mPageMenuBar->updateTabActive(i);
                     mPageMenuBar->setMidSideVisible(i == 3);
                     syncEQHamburger (dp->getEQDisplay(), i == 3);
+                    syncPagePresetMenu (i);
                 }, dp->getActiveTab(), dp->getPageColor());
             syncEQHamburger (dp->getEQDisplay(), dp->getActiveTab() == 3);
+            syncPagePresetMenu (dp->getActiveTab());
             mPageMenuBar->setMidSideSlots(
                 [this, dp] { dp->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
                 [this, dp] { dp->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
@@ -2971,13 +3659,46 @@ void StandaloneEditor::showPageForTab(int tabId)
         }
         else if (auto* mxp = dynamic_cast<MixerPage*>(mVisiblePage))
         {
-            // R1 (2026-04-23): three add-strip buttons in the Mixer page menu bar:
-            //   [Add Aux Strip] [Add Vox Strip] [Add Inst Strip]
-            // Added right-to-left so visual order matches (extra-right slot stacks
-            // from the right edge inward).
-            mPageMenuBar->addExtraRightComponent(mxp->getAddInstBtn(), 120);
-            mPageMenuBar->addExtraRightComponent(mxp->getAddVoxBtn(),  120);
-            mPageMenuBar->addExtraRightComponent(mxp->getAddAuxBtn(),  120);
+            // G-6 (2026-04-29): five add buttons in the Mixer page menu bar.
+            // User-spec'd order (left → right):
+            //   [Add Vox Bus] [Add Vox Strip] [Add Inst Bus] [Add Inst Strip] [Add Aux Strip]
+            // Verified empirically: addExtraRightComponent appends rightward,
+            // so the FIRST add lands leftmost.  (The pre-existing comment in
+            // the R1 code claimed the opposite — it was wrong.)
+            mPageMenuBar->addExtraRightComponent(mxp->getAddVoxBusBtn(),  120);
+            mPageMenuBar->addExtraRightComponent(mxp->getAddVoxBtn(),     120);
+            mPageMenuBar->addExtraRightComponent(mxp->getAddInstBusBtn(), 120);
+            mPageMenuBar->addExtraRightComponent(mxp->getAddInstBtn(),    120);
+            mPageMenuBar->addExtraRightComponent(mxp->getAddAuxBtn(),     120);
+
+            // 2026-04-29: Mixer hamburger menu — project-level Pan Law selector.
+            // Three options matching FL Studio: Circular (default), Triangular,
+            // Square.  Choice writes master_pan_law APVTS (Int 0..2) which
+            // every Insert/Bus/Master node reads each block when applying _pan.
+            juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+            mPageMenuBar->setMenuBuilder (
+                [safeThis] (juce::Component* anchor)
+                {
+                    if (! safeThis) return;
+                    juce::PopupMenu m;
+                    juce::PopupMenu panLawSub;
+                    auto* p = safeThis->mProcessor.apvts.getParameter ("master_pan_law");
+                    const int current = p ? (int) ((juce::AudioParameterInt*) p)->get() : 0;
+                    panLawSub.addItem (101, "Circular (-3 dB at center)", true, current == 0);
+                    panLawSub.addItem (102, "Triangular (-6 dB at center)", true, current == 1);
+                    panLawSub.addItem (103, "Square (0 dB at center)", true, current == 2);
+                    m.addSubMenu ("Pan Law", panLawSub);
+
+                    m.showMenuAsync (
+                        juce::PopupMenu::Options().withTargetComponent (anchor),
+                        [safeThis] (int r)
+                        {
+                            if (! safeThis || r < 101 || r > 103) return;
+                            if (auto* param = safeThis->mProcessor.apvts.getParameter ("master_pan_law"))
+                                param->setValueNotifyingHost (
+                                    param->convertTo0to1 ((float) (r - 101)));
+                        });
+                });
         }
         else if (mPianoRollPage != nullptr && mVisiblePage == mPianoRollPage)
         {
@@ -3199,43 +3920,39 @@ void StandaloneEditor::wireDrumPageKitView (DrumPage* dp)
 
     dp->setKitRowClickHandler ([this] (int row, juce::Component* anchor)
     {
+        // 2026-04-28 (G-3 follow-up): post-D1.4 unified migration, DrumPage
+        // no longer hosts its own kit container — `mDrumKitTab` stays null —
+        // so this row-click handler is effectively dead code (PianoRollPage's
+        // wireKitView handler is what actually fires).  Kept as a safety net
+        // and updated to match the unified pattern (no navigation away,
+        // no switchTab(0) which would render the empty redirect sub-tab).
         auto list = getKitDrumList();
 
         if (row < (int) list.size())
         {
-            // Existing drum at this row: activate its ribbon tab (matching
-            // the ribbon-click flow) + force kit-view sub-tab so the user
-            // stays in the kit context, then open the picker (unlocked) or
-            // the per-drum context menu (locked).
             const int targetId = list[row].ribbonTabId;
-            if (mRibbon) mRibbon->selectTab (targetId);
-            onTabSelected (targetId);   // updates mVisiblePage + refreshAllKitViews
-
-            if (auto* targetDp = dynamic_cast<DrumPage*> (mVisiblePage))
+            for (auto* entry : mPages)
             {
-                targetDp->switchTab (0);
-                // Mirror Player tab's picker click logic: engine picked →
-                // context menu; engine empty → sound picker.  isEngineLocked
-                // returns true once an engine type has been selected (it's
-                // independent of the user's Lock Drum toggle).
-                if (targetDp->isEngineLocked())
-                    targetDp->showContextMenu (anchor);
-                else
-                    targetDp->showSoundPicker (anchor);
+                if (! entry || entry->ribbonTabId != targetId) continue;
+                if (auto* targetDp = dynamic_cast<DrumPage*> (entry->component.get()))
+                {
+                    if (targetDp->isEngineLocked())
+                        targetDp->showContextMenu (anchor);
+                    else
+                        targetDp->showSoundPicker (anchor);
+                }
+                return;
             }
         }
         else
         {
-            // Empty row: create a new drum (onAddTabRequest auto-activates
-            // and refreshes kit views via onTabSelected), force kit view,
-            // then open the sound picker on the just-created drum.
             onAddTabRequest (RibbonTabBar::TabType::Drums);
-
-            if (auto* newDp = dynamic_cast<DrumPage*> (mVisiblePage))
-            {
-                newDp->switchTab (0);
-                newDp->showSoundPicker (anchor);
-            }
+            DrumPage* newDp = dynamic_cast<DrumPage*> (mVisiblePage);
+            if (mRibbon) mRibbon->selectTab (4);
+            onTabSelected (4);
+            if (mPianoRollPage)
+                mPianoRollPage->selectEngine ({ EngineKind::DrumKit, 0 });
+            if (newDp) newDp->showSoundPicker (anchor);
         }
     });
 
@@ -3317,29 +4034,49 @@ void StandaloneEditor::wirePianoRollPageKitView (PianoRollPage* prp)
 
     kit->setRowClickHandler ([this] (int row, juce::Component* anchor)
     {
+        // 2026-04-28 (G-3 follow-up): the prior code navigated to the per-
+        // drum DrumPage tab and called switchTab(0) to "stay in kit context".
+        // Post-D1.4 unified migration, DrumPage's sub-tab 0 is a REDIRECT
+        // (Drum Kit lives on PianoRollPage now) — switching to it left the
+        // page rendering an empty content area (the dreaded black page).
+        // Fix: do NOT navigate to DrumPage at all.  The user is already on
+        // the unified Drum Kit view; open the picker / menu in-place.  The
+        // popup is anchored to the kit-row component so positioning works
+        // regardless of which page hosts the kit.
         auto list = getKitDrumList();
         if (row < (int) list.size())
         {
+            // Existing drum: find its DrumPage instance, open its picker
+            // (unlocked) or context menu (locked) without leaving the kit.
             const int targetId = list[row].ribbonTabId;
-            if (mRibbon) mRibbon->selectTab (targetId);
-            onTabSelected (targetId);
-            if (auto* targetDp = dynamic_cast<DrumPage*> (mVisiblePage))
+            for (auto* entry : mPages)
             {
-                targetDp->switchTab (0);
-                if (targetDp->isEngineLocked())
-                    targetDp->showContextMenu (anchor);
-                else
-                    targetDp->showSoundPicker (anchor);
+                if (! entry || entry->ribbonTabId != targetId) continue;
+                if (auto* targetDp = dynamic_cast<DrumPage*> (entry->component.get()))
+                {
+                    if (targetDp->isEngineLocked())
+                        targetDp->showContextMenu (anchor);
+                    else
+                        targetDp->showSoundPicker (anchor);
+                }
+                return;
             }
         }
         else
         {
+            // Empty row: spawn a new drum tab (onAddTabRequest auto-navigates
+            // to it), then snap back to the unified Drum Kit view and open
+            // the picker on the freshly-spawned drum.
             onAddTabRequest (RibbonTabBar::TabType::Drums);
-            if (auto* newDp = dynamic_cast<DrumPage*> (mVisiblePage))
-            {
-                newDp->switchTab (0);
-                newDp->showSoundPicker (anchor);
-            }
+            DrumPage* newDp = dynamic_cast<DrumPage*> (mVisiblePage);
+
+            // Return user to the unified Drum Kit (PianoRoll ribbon = id 4).
+            if (mRibbon) mRibbon->selectTab (4);
+            onTabSelected (4);
+            if (mPianoRollPage)
+                mPianoRollPage->selectEngine ({ EngineKind::DrumKit, 0 });
+
+            if (newDp) newDp->showSoundPicker (anchor);
         }
     });
 
@@ -3933,6 +4670,10 @@ void StandaloneEditor::saveKitAs()
 
             // Build the kit XML: walk every DrumPage in mPages, snapshot
             // each via exportDrumState() and embed under a slot wrapper.
+            // (G-7 note 2026-04-29: kits stay drum-sound-only on purpose.
+            // EQ / mixer-strip / effects-rack settings are NOT embedded —
+            // those live on per-tab Page Presets, which are saved/loaded
+            // separately via the page menu bar's hamburger menu.)
             juce::XmlElement root ("BaySickKit");
             root.setAttribute ("name",    name);
             root.setAttribute ("version", "1");
@@ -4614,6 +5355,186 @@ void StandaloneEditor::showNamIrTestWindow()
 // ─────────────────────────────────────────────────────────────────────────────
 // G-2: Clips ribbon helpers.
 // ─────────────────────────────────────────────────────────────────────────────
+// G-7 (2026-04-29): empty-state hamburger menus.  Empty states (no
+// Clips/Vox/Inst tabs yet) used to leave the hamburger silent.  Now they
+// install a "Load Page Preset" submenu so users can recall a saved preset
+// without first manually adding a tab.  Picking a preset spawns a new tab
+// at the next free index and applies the preset onto it.
+void StandaloneEditor::installEmptyStatePagePresetMenu (PagePresetIO::PageKind kind)
+{
+    if (! mPageMenuBar) return;
+
+    juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+    mPageMenuBar->setMenuBuilder (
+        [safeThis, kind] (juce::Component* anchor)
+        {
+            if (! safeThis) return;
+
+            constexpr int kIdSavePagePreset = 100;
+            constexpr int kIdLoadBase       = 1000;
+
+            juce::PopupMenu menu;
+            // Save isn't applicable on an empty state — no engine to save.
+            menu.addItem (kIdSavePagePreset, "Save Page Preset As...", false);
+
+            juce::Array<juce::File> presetXmls;
+            {
+                juce::PopupMenu loadSub;
+                const auto root = PagePresetIO::myPresetsDirForPageKind (kind);
+                if (root.isDirectory())
+                {
+                    juce::Array<juce::File> files;
+                    root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
+                    files.sort();
+                    for (auto& f : files)
+                    {
+                        const int id = kIdLoadBase + presetXmls.size();
+                        presetXmls.add (f);
+                        loadSub.addItem (id, f.getFileNameWithoutExtension());
+                    }
+                }
+                if (presetXmls.isEmpty())
+                    loadSub.addItem (-1, "(no page presets saved)", false, false);
+                menu.addSubMenu ("Load Page Preset", loadSub);
+            }
+
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
+                [safeThis, kind, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
+                {
+                    if (! safeThis || r <= 0) return;
+                    if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
+                        safeThis->spawnAndLoadFromEmptyState (kind, presetXmls[r - kIdLoadBase]);
+                });
+        });
+}
+
+void StandaloneEditor::spawnAndLoadFromEmptyState (PagePresetIO::PageKind kind,
+                                                    const juce::File& presetFile)
+{
+    if (! presetFile.existsAsFile()) return;
+
+    if (kind == PagePresetIO::PageKind::Vox)
+    {
+        // Find next free vox index.
+        int idx = -1;
+        for (int i = 0; i < kMaxVoxPages; ++i)
+        {
+            bool taken = false;
+            for (auto* e : mPages)
+            {
+                if (e && e->type == RibbonTabBar::TabType::Vox)
+                    if (auto* p = dynamic_cast<VoxPage*> (e->component.get()))
+                        if (p->getPageIndex() == i) { taken = true; break; }
+            }
+            if (! taken) { idx = i; break; }
+        }
+        if (idx < 0) return;
+
+        // Spawn requires a mixer strip (Vox tabs are paired with mixer Vox
+        // strips).  Use the existing addVoxChannel path so the strip + tab
+        // are wired correctly.
+        if (mMixerPage) mMixerPage->addVoxChannelAtIndex (idx);
+        // After the strip-add cascades back to spawnVoxTabIfMissing, find
+        // the new page and load the preset onto it.
+        for (auto* e : mPages)
+        {
+            if (e && e->type == RibbonTabBar::TabType::Vox)
+                if (auto* p = dynamic_cast<VoxPage*> (e->component.get()))
+                    if (p->getPageIndex() == idx)
+                    {
+                        if (mRibbon) mRibbon->selectTab (e->ribbonTabId);
+                        onTabSelected (e->ribbonTabId);
+                        p->loadPagePreset (presetFile);
+                        return;
+                    }
+        }
+    }
+    else if (kind == PagePresetIO::PageKind::Inst)
+    {
+        int idx = -1;
+        for (int i = 0; i < kMaxInstPages; ++i)
+        {
+            bool taken = false;
+            for (auto* e : mPages)
+            {
+                if (e && e->type == RibbonTabBar::TabType::Inst)
+                    if (auto* p = dynamic_cast<InstPage*> (e->component.get()))
+                        if (p->getPageIndex() == i) { taken = true; break; }
+            }
+            if (! taken) { idx = i; break; }
+        }
+        if (idx < 0) return;
+
+        if (mMixerPage) mMixerPage->addInstChannelAtIndex (idx);
+        for (auto* e : mPages)
+        {
+            if (e && e->type == RibbonTabBar::TabType::Inst)
+                if (auto* p = dynamic_cast<InstPage*> (e->component.get()))
+                    if (p->getPageIndex() == idx)
+                    {
+                        if (mRibbon) mRibbon->selectTab (e->ribbonTabId);
+                        onTabSelected (e->ribbonTabId);
+                        p->loadPagePreset (presetFile);
+                        return;
+                    }
+        }
+    }
+    else if (kind == PagePresetIO::PageKind::Clip)
+    {
+        // Clip preset must carry a clipRef pointing to a file in My Samples
+        // — without it we can't bind the new page to an audio file.
+        auto parsed = juce::XmlDocument::parse (presetFile.loadFileAsString());
+        if (! parsed) return;
+        const juce::String clipRefRel = parsed->getStringAttribute ("clipRef");
+        if (clipRefRel.isEmpty())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+                "Cannot Load Preset",
+                "This Clip preset has no audio file attached.\n"
+                "Save it from a clip with a loaded audio file first.");
+            return;
+        }
+        const juce::File clipFile =
+            SampleLibrary::getUserSamplesDir().getChildFile (clipRefRel);
+        if (! clipFile.existsAsFile())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+                "Cannot Load Preset",
+                "The audio file this preset references is missing:\n"
+                + clipFile.getFullPathName());
+            return;
+        }
+        // Find next free audio row.
+        int row = -1;
+        for (int i = 0; i < kMaxClipPages; ++i)
+        {
+            bool taken = false;
+            for (auto* e : mPages)
+            {
+                if (e && e->type == RibbonTabBar::TabType::Clip)
+                    if (auto* p = dynamic_cast<ClipsPage*> (e->component.get()))
+                        if (p->getPageIndex() == i) { taken = true; break; }
+            }
+            if (! taken) { row = i; break; }
+        }
+        if (row < 0) return;
+
+        spawnClipsTabIfMissing (row, clipFile.getFullPathName(), /*allowDuplicate*/ true);
+        for (auto* e : mPages)
+        {
+            if (e && e->type == RibbonTabBar::TabType::Clip)
+                if (auto* p = dynamic_cast<ClipsPage*> (e->component.get()))
+                    if (p->getPageIndex() == row)
+                    {
+                        if (mRibbon) mRibbon->selectTab (e->ribbonTabId);
+                        onTabSelected (e->ribbonTabId);
+                        p->loadPagePreset (presetFile);
+                        return;
+                    }
+        }
+    }
+}
+
 void StandaloneEditor::showClipsEmptyState()
 {
     // Hide every other page; show the empty-state drop zone.
@@ -4630,30 +5551,37 @@ void StandaloneEditor::showClipsEmptyState()
         mPageMenuBar->clearTabSlots();
         mPageMenuBar->clearExtraRightComponents();
         mPageMenuBar->setBankIndicator (nullptr);
-        mPageMenuBar->setMenuBuilder (nullptr);
+        installEmptyStatePagePresetMenu (PagePresetIO::PageKind::Clip);
     }
     resized();   // make sure the empty state has its bounds
 }
 
-void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String& path)
+void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String& path,
+                                               bool allowDuplicate)
 {
     if (path.isEmpty()) return;
     if (audioRow < 0 || audioRow >= kMaxClipPages) return;
 
-    // Idempotent: skip if a Clips tab already exists for this audio file
-    // (file-based dedup; the same file dropped on multiple Builder rows
+    // Idempotent (default): skip if a Clips tab already exists for this audio
+    // file (file-based dedup; the same file dropped on multiple Builder rows
     // produces ONE Clips page bound to the FIRST drop's audio row).
-    for (auto* entry : mPages)
+    // G-6 (2026-04-29): allowDuplicate=true bypasses this check so the
+    // picker's Duplicate flow can spawn a SECOND ClipsPage on the same WAV
+    // at a different audio row (with cloned engine state applied separately).
+    if (! allowDuplicate)
     {
-        if (! entry) continue;
-        if (entry->type != RibbonTabBar::TabType::Clip) continue;
-        if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+        for (auto* entry : mPages)
         {
-            if (cp->getClipFilePath() == path) return;
+            if (! entry) continue;
+            if (entry->type != RibbonTabBar::TabType::Clip) continue;
+            if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+            {
+                if (cp->getClipFilePath() == path) return;
+            }
         }
     }
-    // Also skip if the row slot is already taken (defensive — shouldn't happen
-    // since the row uniqueness is maintained by the audio insert flow).
+    // Always skip if the row slot is already taken (each ClipsPage must own
+    // a unique audioRow == mixer_audio_<row> insert).
     for (auto* entry : mPages)
     {
         if (! entry) continue;
@@ -4671,6 +5599,7 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
     auto cpHolder = std::make_unique<ClipsPage> (audioRow);
     auto* cpRaw = cpHolder.get();
     cpRaw->setTabName (tabName);
+    cpRaw->setProcessor (&mProcessor);   // G-7: Page Preset save/load access
 
     // G-3 (2026-04-28): resolve the imported path BEFORE handing it to the
     // engine.  P4's copy-on-drop flow returns RELATIVE paths (e.g.
@@ -4709,9 +5638,56 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
         }
     };
 
-    // 2026-04-28 (G-3): NO auto-pick.  Per Jeff's spec the picker stays
-    // unlocked / unselected on first spawn — the user must pick BaySickPlayer
-    // or BaySickNAM/IR explicitly, mirroring how Layer / Bass tabs behave.
+    // G-6 (2026-04-29): right-click engine-picker context menu callbacks.
+    cpRaw->onDuplicateRequested = [this, cpRaw] { spawnDuplicateClipsTab (cpRaw); };
+    cpRaw->onRenameRequested    = [this, ribbonId = -1, cpRaw]() mutable
+    {
+        // Resolve the ribbon tab id lazily so we don't capture a stale value
+        // (mPages may be in flux during construction).
+        if (ribbonId < 0)
+            for (auto* entry : mPages)
+                if (entry && entry->component.get() == cpRaw)
+                    { ribbonId = entry->ribbonTabId; break; }
+        if (ribbonId >= 0 && mRibbon) mRibbon->startRename (ribbonId);
+    };
+    cpRaw->onDeleteRequested = [this, ribbonId = -1, cpRaw]() mutable
+    {
+        if (ribbonId < 0)
+            for (auto* entry : mPages)
+                if (entry && entry->component.get() == cpRaw)
+                    { ribbonId = entry->ribbonTabId; break; }
+        if (ribbonId >= 0 && mRibbon) mRibbon->closeTab (ribbonId);
+    };
+    cpRaw->onLockChanged = [this, ribbonId = -1, cpRaw]() mutable
+    {
+        if (ribbonId < 0)
+            for (auto* entry : mPages)
+                if (entry && entry->component.get() == cpRaw)
+                    { ribbonId = entry->ribbonTabId; break; }
+        if (ribbonId >= 0 && mRibbon) mRibbon->setTabLocked (ribbonId, cpRaw->isLocked());
+    };
+    cpRaw->onGetChokeGroup = [this, audioRow]() -> int
+    {
+        const juce::String pid = "mixer_audio_" + juce::String (audioRow) + "_chokeGroup";
+        if (auto* p = mProcessor.apvts.getRawParameterValue (pid))
+            return juce::jlimit (0, 16, (int) std::round (p->load()));
+        return 0;
+    };
+    cpRaw->onSetChokeGroup = [this, audioRow] (int g)
+    {
+        const juce::String pid = "mixer_audio_" + juce::String (audioRow) + "_chokeGroup";
+        if (auto* p = mProcessor.apvts.getParameter (pid))
+            p->setValueNotifyingHost (
+                p->getNormalisableRange().convertTo0to1 ((float) juce::jlimit (0, 16, g)));
+    };
+
+    // G-6 (2026-04-29): Clips is BaySickPlayer-only — no engine picker UI.
+    // Auto-instantiate the player here AFTER callbacks are wired so the
+    // onEngineChanged closure fires the audio-thread registration with the
+    // freshly-created processor.  (Was previously a manual user picker
+    // choice; NAM/IR removed from Clips entirely since it doesn't fit a
+    // sample-playback context — moved to Inst page.)
+    cpRaw->selectEngine (ClipsPage::EngineType::BaySickPlayer);
 
     // G-3: register the piano roll with the unified PianoRollPage so the
     // Piano Roll sub-tab redirect (already wired in showPageForTab Clip
@@ -4730,6 +5706,54 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
     if (mClipsEmptyState) mClipsEmptyState->setVisible (false);
     mRibbon->selectTab (newId);
     onTabSelected (newId);
+}
+
+// G-6 (2026-04-29): right-click "Duplicate" on a ClipsPage's engine picker.
+// Captures full source state, finds the next free audio row, spawns a NEW
+// ClipsPage bound to the same WAV file (allowDuplicate bypass), then
+// applies the source's state.  No file copy — both pages reference the
+// same source file.  Distinct from the Builder browser tree's Duplicate
+// which copies the WAV first.
+void StandaloneEditor::spawnDuplicateClipsTab (ClipsPage* sourceCp)
+{
+    if (! sourceCp) return;
+
+    const juce::String savedState = sourceCp->exportClipState();
+    const juce::String sourcePath = sourceCp->getClipFilePath();
+    if (sourcePath.isEmpty()) return;
+
+    // Find next free audio row not occupied by an existing ClipsPage.
+    constexpr int kMaxRows = kMaxClipPages;
+    std::array<bool, kMaxRows> rowHasPage {};
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Clip) continue;
+        if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+        {
+            const int idx = cp->getPageIndex();
+            if (idx >= 0 && idx < kMaxRows) rowHasPage[(size_t) idx] = true;
+        }
+    }
+    int targetRow = -1;
+    for (int r = 0; r < kMaxRows; ++r)
+        if (! rowHasPage[(size_t) r]) { targetRow = r; break; }
+    if (targetRow < 0) return;   // Clip cap reached
+
+    spawnClipsTabIfMissing (targetRow, sourcePath, /*allowDuplicate*/ true);
+
+    // Find the freshly-spawned page and apply cloned state.
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Clip) continue;
+        if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+        {
+            if (cp->getPageIndex() == targetRow)
+            {
+                cp->importClipState (savedState);
+                break;
+            }
+        }
+    }
 }
 
 void StandaloneEditor::registerClipPianoRoll (int idx, ClipsPage* cp)
@@ -4770,6 +5794,339 @@ void StandaloneEditor::registerClipPianoRoll (int idx, ClipsPage* cp)
     conn.rollMode = PianoRollContainer::RollMode::Standard;
 
     mPianoRollPage->registerEngine ({ EngineKind::Clip, idx }, conn);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-4 (2026-04-28): Vox + Inst empty-state + spawn + piano-roll registration.
+// Mirror of the G-2/G-3 Clips helpers — same shape, different page color +
+// different default engine list.
+// ─────────────────────────────────────────────────────────────────────────────
+void StandaloneEditor::showVoxEmptyState()
+{
+    for (auto* entry : mPages)
+        if (entry && entry->component) entry->component->setVisible (false);
+    mVisiblePage = nullptr;
+    if (mClipsEmptyState) mClipsEmptyState->setVisible (false);
+    if (mInstEmptyState)  mInstEmptyState ->setVisible (false);
+
+    if (! mVoxEmptyState) return;
+    mVoxEmptyState->setVisible (true);
+    mVoxEmptyState->toFront (false);
+    if (mPageMenuBar)
+    {
+        mPageMenuBar->setPageTitle ("Vox");
+        mPageMenuBar->clearTabSlots();
+        mPageMenuBar->clearExtraRightComponents();
+        mPageMenuBar->setBankIndicator (nullptr);
+        installEmptyStatePagePresetMenu (PagePresetIO::PageKind::Vox);
+    }
+    resized();
+}
+
+void StandaloneEditor::showInstEmptyState()
+{
+    for (auto* entry : mPages)
+        if (entry && entry->component) entry->component->setVisible (false);
+    mVisiblePage = nullptr;
+    if (mClipsEmptyState) mClipsEmptyState->setVisible (false);
+    if (mVoxEmptyState)   mVoxEmptyState  ->setVisible (false);
+
+    if (! mInstEmptyState) return;
+    mInstEmptyState->setVisible (true);
+    mInstEmptyState->toFront (false);
+    if (mPageMenuBar)
+    {
+        mPageMenuBar->setPageTitle ("Inst");
+        mPageMenuBar->clearTabSlots();
+        mPageMenuBar->clearExtraRightComponents();
+        mPageMenuBar->setBankIndicator (nullptr);
+        installEmptyStatePagePresetMenu (PagePresetIO::PageKind::Inst);
+    }
+    resized();
+}
+
+void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
+{
+    if (voxIdx < 0 || voxIdx >= kMaxVoxPages) return;
+
+    // Idempotent on pageIndex.
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Vox) continue;
+        if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+            if (vp->getPageIndex() == voxIdx) return;
+    }
+
+    const juce::String tabName = "Vox " + juce::String (voxIdx + 1);
+    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Vox, tabName);
+
+    auto cpHolder = std::make_unique<VoxPage> (voxIdx);
+    auto* cpRaw = cpHolder.get();
+    cpRaw->setTabName (tabName);
+    cpRaw->setProcessor (&mProcessor);   // G-7: Page Preset save/load access
+    cpRaw->setBusActiveQuery ([this] (int chId)
+    {
+        // Bus fallback query: kVoxBus2 active iff MixerPage activated it.
+        if (! mMixerPage) return true;
+        if (chId == MixerChannelIds::kVoxBus2) return mMixerPage->isVoxBus2Active();
+        return true;
+    });
+
+    cpRaw->onEngineDestroying = [this, voxIdx]()
+    {
+        mProcessor.unregisterVoxEngine (voxIdx);
+    };
+    cpRaw->onEngineChanged = [this, voxIdx, cpRaw]()
+    {
+        if (auto* eng = cpRaw->getEngineProcessor())
+        {
+            const double sr = mProcessor.getSampleRate() > 0.0
+                                ? mProcessor.getSampleRate() : 44100.0;
+            const int    bs = mProcessor.getBlockSize() > 0
+                                ? mProcessor.getBlockSize() : 512;
+            eng->prepareToPlay (sr, bs);
+            mProcessor.registerVoxEngine (voxIdx, eng);
+        }
+    };
+
+    // G-6 (2026-04-29): right-click engine-picker context menu callbacks.
+    cpRaw->onDuplicateRequested = [this, cpRaw] { spawnDuplicateVoxTab (cpRaw); };
+    cpRaw->onRenameRequested = [this, ribbonId = -1, cpRaw]() mutable
+    {
+        if (ribbonId < 0)
+            for (auto* entry : mPages)
+                if (entry && entry->component.get() == cpRaw)
+                    { ribbonId = entry->ribbonTabId; break; }
+        if (ribbonId >= 0 && mRibbon) mRibbon->startRename (ribbonId);
+    };
+    cpRaw->onDeleteRequested = [this, ribbonId = -1, cpRaw]() mutable
+    {
+        if (ribbonId < 0)
+            for (auto* entry : mPages)
+                if (entry && entry->component.get() == cpRaw)
+                    { ribbonId = entry->ribbonTabId; break; }
+        if (ribbonId >= 0 && mRibbon) mRibbon->closeTab (ribbonId);
+    };
+    cpRaw->onLockChanged = [this, ribbonId = -1, cpRaw]() mutable
+    {
+        if (ribbonId < 0)
+            for (auto* entry : mPages)
+                if (entry && entry->component.get() == cpRaw)
+                    { ribbonId = entry->ribbonTabId; break; }
+        if (ribbonId >= 0 && mRibbon) mRibbon->setTabLocked (ribbonId, cpRaw->isLocked());
+    };
+
+    // G-4 (2026-04-28): NO piano-roll registration for Vox.  Vox is a
+    // live-input / recorded-audio destination, not a MIDI-triggered engine.
+
+    addChildComponent (*cpRaw);
+
+    auto entry           = std::make_unique<PageEntry>();
+    entry->ribbonTabId   = newId;
+    entry->type          = RibbonTabBar::TabType::Vox;
+    entry->component     = std::move (cpHolder);
+    mPages.add (entry.release());
+
+    if (mVoxEmptyState) mVoxEmptyState->setVisible (false);
+    if (selectAfter)
+    {
+        mRibbon->selectTab (newId);
+        onTabSelected (newId);
+    }
+}
+
+void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
+{
+    if (instIdx < 0 || instIdx >= kMaxInstPages) return;
+
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
+        if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+            if (ip->getPageIndex() == instIdx) return;
+    }
+
+    const juce::String tabName = "Inst " + juce::String (instIdx + 1);
+    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Inst, tabName);
+
+    auto cpHolder = std::make_unique<InstPage> (instIdx);
+    auto* cpRaw = cpHolder.get();
+    cpRaw->setTabName (tabName);
+    cpRaw->setProcessor (&mProcessor);   // G-7: Page Preset save/load access
+    cpRaw->setBusActiveQuery ([this] (int chId)
+    {
+        // Bus fallback query: kInstBus2 / kInstBus3 active iff MixerPage activated.
+        if (! mMixerPage) return true;
+        if (chId == MixerChannelIds::kInstBus2) return mMixerPage->isInstBus2Active();
+        if (chId == MixerChannelIds::kInstBus3) return mMixerPage->isInstBus3Active();
+        return true;
+    });
+
+    cpRaw->onEngineDestroying = [this, instIdx]()
+    {
+        mProcessor.unregisterInstEngine (instIdx);
+    };
+    cpRaw->onEngineChanged = [this, instIdx, cpRaw]()
+    {
+        if (auto* eng = cpRaw->getEngineProcessor())
+        {
+            const double sr = mProcessor.getSampleRate() > 0.0
+                                ? mProcessor.getSampleRate() : 44100.0;
+            const int    bs = mProcessor.getBlockSize() > 0
+                                ? mProcessor.getBlockSize() : 512;
+            eng->prepareToPlay (sr, bs);
+            mProcessor.registerInstEngine (instIdx, eng);
+        }
+    };
+
+    // G-6 (2026-04-29): right-click engine-picker context menu callbacks.
+    cpRaw->onDuplicateRequested = [this, cpRaw] { spawnDuplicateInstTab (cpRaw); };
+    cpRaw->onRenameRequested = [this, ribbonId = -1, cpRaw]() mutable
+    {
+        if (ribbonId < 0)
+            for (auto* entry : mPages)
+                if (entry && entry->component.get() == cpRaw)
+                    { ribbonId = entry->ribbonTabId; break; }
+        if (ribbonId >= 0 && mRibbon) mRibbon->startRename (ribbonId);
+    };
+    cpRaw->onDeleteRequested = [this, ribbonId = -1, cpRaw]() mutable
+    {
+        if (ribbonId < 0)
+            for (auto* entry : mPages)
+                if (entry && entry->component.get() == cpRaw)
+                    { ribbonId = entry->ribbonTabId; break; }
+        if (ribbonId >= 0 && mRibbon) mRibbon->closeTab (ribbonId);
+    };
+    cpRaw->onLockChanged = [this, ribbonId = -1, cpRaw]() mutable
+    {
+        if (ribbonId < 0)
+            for (auto* entry : mPages)
+                if (entry && entry->component.get() == cpRaw)
+                    { ribbonId = entry->ribbonTabId; break; }
+        if (ribbonId >= 0 && mRibbon) mRibbon->setTabLocked (ribbonId, cpRaw->isLocked());
+    };
+
+    // G-4 (2026-04-28): NO piano-roll registration for Inst.  Same reasoning
+    // as Vox — live-input / recorded-audio destination, not MIDI-triggered.
+
+    addChildComponent (*cpRaw);
+
+    auto entry           = std::make_unique<PageEntry>();
+    entry->ribbonTabId   = newId;
+    entry->type          = RibbonTabBar::TabType::Inst;
+    entry->component     = std::move (cpHolder);
+    mPages.add (entry.release());
+
+    if (mInstEmptyState) mInstEmptyState->setVisible (false);
+    if (selectAfter)
+    {
+        mRibbon->selectTab (newId);
+        onTabSelected (newId);
+    }
+}
+
+// G-4 (2026-04-28): registerVoxPianoRoll / registerInstPianoRoll DELETED.
+// Vox + Inst are live-input / recorded-audio destinations, not MIDI-triggered
+// engines — they don't appear in the unified Piano Roll page's engine
+// dropdown.  Engine register/unregister still happens via mProcessor's
+// registerVoxEngine / registerInstEngine for audio-thread routing.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-6 (2026-04-29): right-click "Duplicate" on a VoxPage / InstPage engine
+// picker — capture source state, create a new mixer strip via the Mixer's
+// addVoxChannelAtIndex / addInstChannelAtIndex (cascade fires the page
+// spawn callback), then apply the cloned state.  Both surfaces navigate to
+// the new tab (user just asked for it).
+// ─────────────────────────────────────────────────────────────────────────────
+void StandaloneEditor::spawnDuplicateVoxTab (VoxPage* sourceVp)
+{
+    if (! sourceVp || ! mMixerPage) return;
+
+    const juce::String savedState = sourceVp->exportVoxState();
+
+    // Find next free voxIdx not occupied by an existing VoxPage.
+    std::array<bool, kMaxVoxPages> idxTaken {};
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Vox) continue;
+        if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+        {
+            const int i = vp->getPageIndex();
+            if (i >= 0 && i < (int) kMaxVoxPages) idxTaken[(size_t) i] = true;
+        }
+    }
+    int newIdx = -1;
+    for (int i = 0; i < (int) kMaxVoxPages; ++i)
+        if (! idxTaken[(size_t) i]) { newIdx = i; break; }
+    if (newIdx < 0) return;
+
+    // Create the mixer strip — cascade fires onVoxStripAdded → spawnVoxTabIfMissing(newIdx, false).
+    mMixerPage->addVoxChannelAtIndex (newIdx);
+
+    // Apply state to the freshly-spawned page + select the new tab.
+    int newRibbonId = -1;
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Vox) continue;
+        if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+        {
+            if (vp->getPageIndex() == newIdx)
+            {
+                vp->importVoxState (savedState);
+                newRibbonId = entry->ribbonTabId;
+                break;
+            }
+        }
+    }
+    if (newRibbonId >= 0 && mRibbon)
+    {
+        mRibbon->selectTab (newRibbonId);
+        onTabSelected (newRibbonId);
+    }
+}
+
+void StandaloneEditor::spawnDuplicateInstTab (InstPage* sourceIp)
+{
+    if (! sourceIp || ! mMixerPage) return;
+
+    const juce::String savedState = sourceIp->exportInstState();
+
+    std::array<bool, kMaxInstPages> idxTaken {};
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
+        if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+        {
+            const int i = ip->getPageIndex();
+            if (i >= 0 && i < (int) kMaxInstPages) idxTaken[(size_t) i] = true;
+        }
+    }
+    int newIdx = -1;
+    for (int i = 0; i < (int) kMaxInstPages; ++i)
+        if (! idxTaken[(size_t) i]) { newIdx = i; break; }
+    if (newIdx < 0) return;
+
+    mMixerPage->addInstChannelAtIndex (newIdx);
+
+    int newRibbonId = -1;
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
+        if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+        {
+            if (ip->getPageIndex() == newIdx)
+            {
+                ip->importInstState (savedState);
+                newRibbonId = entry->ribbonTabId;
+                break;
+            }
+        }
+    }
+    if (newRibbonId >= 0 && mRibbon)
+    {
+        mRibbon->selectTab (newRibbonId);
+        onTabSelected (newRibbonId);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5149,6 +6506,9 @@ void StandaloneEditor::resized()
         if (entry->component) entry->component->setBounds(b);
     // G-2: Clips empty-state placeholder shares the same content area.
     if (mClipsEmptyState) mClipsEmptyState->setBounds(b);
+    // G-4: Vox + Inst empty-state placeholders.
+    if (mVoxEmptyState)   mVoxEmptyState  ->setBounds(b);
+    if (mInstEmptyState)  mInstEmptyState ->setBounds(b);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5844,6 +7204,39 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
             rec->setAttribute ("engine",     dp->getEngineType());
             rec->setAttribute ("engineData", encodeEngineState (dp->getEngineProcessor()));
         }
+        // 2026-04-30 (audit C6): Clips / Vox / Inst tabs were dropped on
+        // every save+reopen — the mixer strip's APVTS state survived but
+        // the ribbon tab + page disappeared.  Now serialized with the same
+        // shape as Layer/Bass/Drum.  Clips tabs additionally carry their
+        // bound audioFilePath so the engine reloads the same sample.
+        else if (auto* cp = dynamic_cast<ClipsPage*> (e->component.get()))
+        {
+            rec = tabs->createNewChildElement ("Tab");
+            rec->setAttribute ("type",       "Clips");
+            rec->setAttribute ("pageIndex",  cp->getPageIndex());
+            rec->setAttribute ("name",       cp->getTabName());
+            rec->setAttribute ("engine",     (int) cp->getEngineType());
+            rec->setAttribute ("engineData", encodeEngineState (cp->getEngineProcessor()));
+            rec->setAttribute ("clipPath",   cp->getClipFilePath());
+        }
+        else if (auto* vp = dynamic_cast<VoxPage*> (e->component.get()))
+        {
+            rec = tabs->createNewChildElement ("Tab");
+            rec->setAttribute ("type",       "Vox");
+            rec->setAttribute ("pageIndex",  vp->getPageIndex());
+            rec->setAttribute ("name",       vp->getTabName());
+            rec->setAttribute ("engine",     (int) vp->getEngineType());
+            rec->setAttribute ("engineData", encodeEngineState (vp->getEngineProcessor()));
+        }
+        else if (auto* ip = dynamic_cast<InstPage*> (e->component.get()))
+        {
+            rec = tabs->createNewChildElement ("Tab");
+            rec->setAttribute ("type",       "Inst");
+            rec->setAttribute ("pageIndex",  ip->getPageIndex());
+            rec->setAttribute ("name",       ip->getTabName());
+            rec->setAttribute ("engine",     (int) ip->getEngineType());
+            rec->setAttribute ("engineData", encodeEngineState (ip->getEngineProcessor()));
+        }
         juce::ignoreUnused (rec);
     }
 }
@@ -6006,6 +7399,71 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             // from the legacy single drumRoll were already migrated into
             // drumRolls[slot] by PatternManager::fromValueTree (D1.1).
             continue;
+        }
+        // 2026-04-30 (audit C6): Clips / Vox / Inst tab restore.  Each calls
+        // the existing spawn-helper to recreate the page+ribbon+callbacks,
+        // then looks up the spawned page in mPages and applies the
+        // serialized engine state on top.  Mirror of Layer/Bass/Drum.
+        else if (type == "Clips")
+        {
+            const juce::String clipPath = rec->getStringAttribute ("clipPath");
+            spawnClipsTabIfMissing (pageIndex, clipPath);
+            for (auto* entry : mPages)
+            {
+                if (! entry) continue;
+                if (entry->type != RibbonTabBar::TabType::Clip) continue;
+                auto* cp = dynamic_cast<ClipsPage*> (entry->component.get());
+                if (cp == nullptr || cp->getPageIndex() != pageIndex) continue;
+                if (name.isNotEmpty())
+                {
+                    cp->setTabName (name);
+                    if (mRibbon) mRibbon->renameTab (entry->ribbonTabId, name);
+                }
+                if (engine.isNotEmpty())
+                    cp->selectEngine ((ClipsPage::EngineType) engine.getIntValue());
+                applyEngineState (cp->getEngineProcessor(), engineData);
+                break;
+            }
+        }
+        else if (type == "Vox")
+        {
+            spawnVoxTabIfMissing (pageIndex, /*selectAfter*/ false);
+            for (auto* entry : mPages)
+            {
+                if (! entry) continue;
+                if (entry->type != RibbonTabBar::TabType::Vox) continue;
+                auto* vp = dynamic_cast<VoxPage*> (entry->component.get());
+                if (vp == nullptr || vp->getPageIndex() != pageIndex) continue;
+                if (name.isNotEmpty())
+                {
+                    vp->setTabName (name);
+                    if (mRibbon) mRibbon->renameTab (entry->ribbonTabId, name);
+                }
+                if (engine.isNotEmpty())
+                    vp->selectEngine ((VoxPage::EngineType) engine.getIntValue());
+                applyEngineState (vp->getEngineProcessor(), engineData);
+                break;
+            }
+        }
+        else if (type == "Inst")
+        {
+            spawnInstTabIfMissing (pageIndex, /*selectAfter*/ false);
+            for (auto* entry : mPages)
+            {
+                if (! entry) continue;
+                if (entry->type != RibbonTabBar::TabType::Inst) continue;
+                auto* ip = dynamic_cast<InstPage*> (entry->component.get());
+                if (ip == nullptr || ip->getPageIndex() != pageIndex) continue;
+                if (name.isNotEmpty())
+                {
+                    ip->setTabName (name);
+                    if (mRibbon) mRibbon->renameTab (entry->ribbonTabId, name);
+                }
+                if (engine.isNotEmpty())
+                    ip->selectEngine ((InstPage::EngineType) engine.getIntValue());
+                applyEngineState (ip->getEngineProcessor(), engineData);
+                break;
+            }
         }
         else if (type == "Drum")
         {
@@ -6220,10 +7678,12 @@ void StandaloneEditor::restoreAudioStripsFromArrangement()
         const juce::String stripName =
             b.displayAlias.isNotEmpty() ? b.displayAlias
                                          : juce::String ("Audio ") + juce::String (row + 1);
-        if (mMixerPage)
-            mMixerPage->addAudioChannel (row, stripName);
+        // 2026-04-29 ORDER FIX: register InsertNode + APVTS params BEFORE
+        // creating the strip so setApvts can attach the fader/mute/etc.
         mProcessor.mVibeGraph.addAudioRowChannel (row, stripName);
         mProcessor.ensureAudioInsert (row, stripName);
+        if (mMixerPage)
+            mMixerPage->addAudioChannel (row, stripName);
     }
     if (mEffectsPage)
         mEffectsPage->rebuildChannelDropdown();
@@ -6302,10 +7762,12 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
         // InsertNode + no routing edges, so processInsert is a no-op and
         // routeInsertOutput fans into nothing -> silence on playback.
         const juce::String stripName = "Audio " + juce::String (nextRow + 1);
-        if (mMixerPage)
-            mMixerPage->addAudioChannel (nextRow, stripName);
+        // 2026-04-29 ORDER FIX: register InsertNode + APVTS params BEFORE
+        // creating the strip so setApvts can attach the fader/mute/etc.
         mProcessor.mVibeGraph.addAudioRowChannel (nextRow, stripName);
         mProcessor.ensureAudioInsert (nextRow, stripName);
+        if (mMixerPage)
+            mMixerPage->addAudioChannel (nextRow, stripName);
         if (mEffectsPage)
             mEffectsPage->rebuildChannelDropdown();
     };

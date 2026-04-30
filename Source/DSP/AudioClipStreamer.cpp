@@ -13,6 +13,31 @@ AudioClipStreamer::AudioClipStreamer (std::unique_ptr<juce::AudioFormatReader> r
     mNumChannels   = (int) juce::jmin ((juce::int64) 2,
                                        (juce::int64) mReader->numChannels);
 
+    // G-7 polish (2026-04-29): try to RAM-load the entire file if its raw
+    // float-PCM size is at or under kRamThresholdBytes.  Eliminates the
+    // cold-start sputter on first playback for short clips.
+    const juce::int64 totalBytes = (juce::int64) sizeof (float)
+                                       * (juce::int64) mNumChannels
+                                       * mTotalLength;
+    if (mTotalLength > 0 && totalBytes > 0 && totalBytes <= kRamThresholdBytes)
+    {
+        mRamMode  = true;
+        mCapacity = (int) mTotalLength;
+        mRing.setSize (mNumChannels, mCapacity, false, true, false);
+
+        {
+            juce::CriticalSection::ScopedLockType lk (mReaderLock);
+            mReader->read (&mRing, 0, mCapacity, 0, true, true);
+        }
+
+        mRingReadHead .store (0,            std::memory_order_release);
+        mRingWriteHead.store (mTotalLength, std::memory_order_release);
+        mReady        .store (true,         std::memory_order_release);
+        // RAM mode: no background pre-fetch needed — data is already loaded.
+        return;
+    }
+
+    // Streaming mode: 4-second ring with background pre-fetch.
     mCapacity = (int) (mFileSampleRate * kBufSeconds);
     mRing.setSize (mNumChannels, mCapacity, false, true, false);
 
@@ -21,13 +46,25 @@ AudioClipStreamer::AudioClipStreamer (std::unique_ptr<juce::AudioFormatReader> r
 
 AudioClipStreamer::~AudioClipStreamer()
 {
-    mBgThread.removeTimeSliceClient (this);
+    if (! mRamMode)
+        mBgThread.removeTimeSliceClient (this);
 }
 
 // ── seek — message thread ─────────────────────────────────────────────────────
 
 void AudioClipStreamer::seek (int64 filePos)
 {
+    // G-7 polish: in RAM mode the entire file is always covered, so seek is
+    // a no-op aside from clamping the read head for any external observers.
+    // Don't touch mRingWriteHead (must stay at mTotalLength) or mReady
+    // (must stay true).
+    if (mRamMode)
+    {
+        const int64 clampedPos = juce::jlimit ((int64) 0, mTotalLength, filePos);
+        mRingReadHead.store (clampedPos, std::memory_order_release);
+        return;
+    }
+
     mReady.store (false, std::memory_order_release);
 
     const int64 clampedPos = juce::jlimit ((int64) 0, mTotalLength, filePos);
@@ -153,21 +190,31 @@ bool AudioClipStreamer::readRaw (juce::AudioBuffer<float>& dest,
     if (! mReady.load (std::memory_order_acquire) || numSamples <= 0)
         return false;
 
-    const int64 rh = mRingReadHead .load (std::memory_order_acquire);
-    const int64 wh = mRingWriteHead.load (std::memory_order_acquire);
-
-    // The ring physically covers [wh - capacity, wh).
-    // We use coveredStart (not rh) as the lower bound because the stateless
-    // filePos computation (outPosInClip * readRatio) can land 1-2 samples
-    // behind rh due to integer rounding — using rh would trigger a phantom
-    // seek every block even though the data is right there in the ring.
-    const int64 coveredStart = wh - (int64) mCapacity;
-    if (filePos < coveredStart || filePos + numSamples > wh)
+    // G-7 polish: in RAM mode the entire file is loaded, so skip the ring
+    // availability + seek-trigger logic.  Out-of-range reads return false
+    // (silence) without resetting mReady (no bg thread to refill anyway).
+    if (mRamMode)
     {
-        mSeekTarget .store (filePos, std::memory_order_release);
-        mSeekPending.store (true,    std::memory_order_release);
-        mReady      .store (false,   std::memory_order_release);
-        return false;
+        if (filePos < 0 || filePos + numSamples > mTotalLength)
+            return false;
+    }
+    else
+    {
+        const int64 wh = mRingWriteHead.load (std::memory_order_acquire);
+
+        // The ring physically covers [wh - capacity, wh).
+        // We use coveredStart (not rh) as the lower bound because the stateless
+        // filePos computation (outPosInClip * readRatio) can land 1-2 samples
+        // behind rh due to integer rounding — using rh would trigger a phantom
+        // seek every block even though the data is right there in the ring.
+        const int64 coveredStart = wh - (int64) mCapacity;
+        if (filePos < coveredStart || filePos + numSamples > wh)
+        {
+            mSeekTarget .store (filePos, std::memory_order_release);
+            mSeekPending.store (true,    std::memory_order_release);
+            mReady      .store (false,   std::memory_order_release);
+            return false;
+        }
     }
 
     const int numDestCh = juce::jmin (dest.getNumChannels(), mNumChannels);
@@ -198,23 +245,34 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
     // How many file samples we need (+ 2 for interpolation lookahead)
     const int numFileSamples = (int) std::ceil ((double) numOutputSamples * readRatio) + 2;
 
-    const int64 rh = mRingReadHead .load (std::memory_order_acquire);
-    const int64 wh = mRingWriteHead.load (std::memory_order_acquire);
-
-    // The ring physically covers [wh - capacity, wh).
-    // Use coveredStart (not rh) as the lower bound — the stateless filePos
-    // (outPosInClip * readRatio) lands 1-2 samples behind rh every block due
-    // to the +2 interpolation lookahead in numFileSamples.  Using rh caused a
-    // phantom seek on every single block even though the data was present.
-    const int64 coveredStart = wh - (int64) mCapacity;
-    if (fileStartPos < coveredStart || fileStartPos + numFileSamples > wh)
+    // G-7 polish: in RAM mode the entire file is loaded, so skip the ring
+    // availability + seek-trigger logic.  Reads past EOF still bail with
+    // silence rather than triggering a phantom seek.
+    if (mRamMode)
     {
-        // Genuine position jump (backward scrub, loop, or first-block miss) —
-        // signal the background thread to seek.
-        mSeekTarget .store (fileStartPos, std::memory_order_release);
-        mSeekPending.store (true,         std::memory_order_release);
-        mReady      .store (false,        std::memory_order_release);
-        return 0.0f;
+        if (fileStartPos < 0 || fileStartPos >= mTotalLength)
+            return 0.0f;
+        // Per-sample bounds checks below already break out at EOF — fine.
+    }
+    else
+    {
+        const int64 wh = mRingWriteHead.load (std::memory_order_acquire);
+
+        // The ring physically covers [wh - capacity, wh).
+        // Use coveredStart (not rh) as the lower bound — the stateless filePos
+        // (outPosInClip * readRatio) lands 1-2 samples behind rh every block due
+        // to the +2 interpolation lookahead in numFileSamples.  Using rh caused a
+        // phantom seek on every single block even though the data was present.
+        const int64 coveredStart = wh - (int64) mCapacity;
+        if (fileStartPos < coveredStart || fileStartPos + numFileSamples > wh)
+        {
+            // Genuine position jump (backward scrub, loop, or first-block miss) —
+            // signal the background thread to seek.
+            mSeekTarget .store (fileStartPos, std::memory_order_release);
+            mSeekPending.store (true,         std::memory_order_release);
+            mReady      .store (false,        std::memory_order_release);
+            return 0.0f;
+        }
     }
 
     float peak = 0.0f;

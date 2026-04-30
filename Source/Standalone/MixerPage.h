@@ -48,6 +48,14 @@ public:
     // Fired when any audio row strip is renamed — StandaloneEditor rebuilds Effects dropdown.
     std::function<void()> onAudioStripRenamed;
 
+    // G-4 (2026-04-28): fired AFTER a Vox / Inst strip is created via the
+    // Mixer page's "Add Vox Strip" / "Add Inst Strip" button (or restored at
+    // project load).  StandaloneEditor wires these to spawnVoxTabIfMissing /
+    // spawnInstTabIfMissing so the matching ribbon page appears alongside the
+    // strip.  idx is the strip's slot index (0..kMaxVoxStrips-1 / 0..kMaxInstStrips-1).
+    std::function<void(int idx)> onVoxStripAdded;
+    std::function<void(int idx)> onInstStripAdded;
+
     // Fired when any strip's main-out _sendTo changes — StandaloneEditor rebuilds
     // the Effects dropdown so strips rerouted to Master (Direct Routing) or
     // between buses show up under the correct group.
@@ -90,6 +98,20 @@ public:
     // Remove the aux strip at the given idx. APVTS params preserved.
     void removeAuxChannel(int idx);
 
+    // G-7 (2026-04-29): full delete via right-click → Delete prompt.  Sweeps
+    // every strip's send params and resets any pointing at this aux's
+    // channel id (sends → inactive; primary _sendTo → natural parent).
+    // Then removes the InsertNode + UI strip.  APVTS params for the aux
+    // strip itself are left intact so re-creating the aux at the same idx
+    // restores prior settings.
+    void deleteAuxStrip (int idx, int auxChannelId);
+
+    // G-7: delete a secondary Vox/Inst bus.  Reroutes any strip whose
+    // _sendTo or _sendN_to targets this bus → the natural parent bus
+    // (kVoxBus / kInstBus).  Hides the UI strip (mVoxBus2Active etc. → false).
+    // Audio InsertNode stays allocated (always-allocated in prepare()).
+    void deleteSecondaryBus (int channelId);
+
     // R1 (2026-04-23): Vox / Inst strip creation.  Up to kMaxVoxStrips (6)
     // and kMaxInstStrips (6) respectively.  Same pattern as aux.
     void addVoxChannel();
@@ -99,9 +121,23 @@ public:
 
     // 5F-4b B2: accessor for PageMenuBar injection (StandaloneEditor reparents
     // this button into the menu bar when the Mixer page becomes visible).
-    juce::Component* getAddAuxBtn()  const { return mAddAuxBtn.get();  }
-    juce::Component* getAddVoxBtn()  const { return mAddVoxBtn.get();  }
-    juce::Component* getAddInstBtn() const { return mAddInstBtn.get(); }
+    juce::Component* getAddAuxBtn()    const { return mAddAuxBtn.get();    }
+    juce::Component* getAddVoxBtn()    const { return mAddVoxBtn.get();    }
+    juce::Component* getAddInstBtn()   const { return mAddInstBtn.get();   }
+    // G-6 (2026-04-29): Add Vox/Inst BUS buttons (separate from Strip buttons).
+    juce::Component* getAddVoxBusBtn() const { return mAddVoxBusBtn.get(); }
+    juce::Component* getAddInstBusBtn() const { return mAddInstBusBtn.get(); }
+
+    // G-6 (2026-04-29): activate a secondary Vox/Inst bus — creates the
+    // strip on Mixer + flags the bus active for route-picker / cable
+    // filtering.  Idempotent (no-op if already active).  Returns true on
+    // success, false if at cap.
+    bool activateVoxBus2();
+    bool activateInstBus2();
+    bool activateInstBus3();
+    bool isVoxBus2Active()  const { return mVoxBus2Active; }
+    bool isInstBus2Active() const { return mInstBus2Active; }
+    bool isInstBus3Active() const { return mInstBus3Active; }
 
     // Called by StandaloneEditor when a ribbon tab is renamed (ribbon → mixer sync).
     void renameChannel(int tabId, const juce::String& newName);
@@ -190,6 +226,15 @@ private:
     // R1 (2026-04-23): Vox + Inst buses for live-input strip aggregation.
     std::unique_ptr<MixerTrackStrip> mVoxBusStrip;
     std::unique_ptr<MixerTrackStrip> mInstBusStrip;
+    // G-6 (2026-04-29): secondary Vox/Inst bus strips — lazy.  Created on
+    // first activate*() call; visibility flag tracked separately so the
+    // strip can be hidden/shown without destroying its state.
+    std::unique_ptr<MixerTrackStrip> mVoxBus2Strip;
+    std::unique_ptr<MixerTrackStrip> mInstBus2Strip;
+    std::unique_ptr<MixerTrackStrip> mInstBus3Strip;
+    bool                             mVoxBus2Active  { false };
+    bool                             mInstBus2Active { false };
+    bool                             mInstBus3Active { false };
 
     // Dynamic instrument strips — keyed by tabId (Layer/Bass) or slot (Drums)
     std::map<int, std::unique_ptr<MixerTrackStrip>> mLayerStrips;
@@ -208,6 +253,11 @@ private:
     std::map<int, std::unique_ptr<MixerTrackStrip>> mAuxStrips;
     std::vector<int>                                mAuxOrder;
     std::unique_ptr<juce::TextButton>               mAddAuxBtn;
+    // G-6 (2026-04-29): Add Vox Bus / Add Inst Bus buttons — sit alongside
+    // the existing strip-add buttons.  Greyed out at cap (Vox: 1 extra max,
+    // Inst: 2 extra max).
+    std::unique_ptr<juce::TextButton>               mAddVoxBusBtn;
+    std::unique_ptr<juce::TextButton>               mAddInstBusBtn;
     int                                             mNextAuxIdx { 0 };
 
     // R1 (2026-04-23): Vox + Inst strip storage + "+" buttons.

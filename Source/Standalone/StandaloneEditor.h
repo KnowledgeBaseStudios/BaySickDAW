@@ -11,6 +11,7 @@
 #include "UndoHistoryWindow.h"
 #include "EventEditor.h"
 #include "DrumPage.h"   // D2: KitDrumInfo struct used in helper signatures below
+#include "PagePresetIO.h"   // G-7: PageKind enum used in helper signatures below
 
 class PatternManager;
 class ProjectManager;
@@ -23,6 +24,10 @@ class PianoRollContainer;
 class KeyBindsWindow;   // 2026-04-26 (Phase A — keymap editor popup)
 class ClipsPage;        // 2026-04-28 (G-2: Clips engine page)
 class ClipsEmptyState;  // 2026-04-28 (G-2: Clips empty-state placeholder)
+class VoxPage;          // 2026-04-28 (G-4: Vox engine page)
+class VoxEmptyState;    // 2026-04-28 (G-4: Vox empty-state placeholder)
+class InstPage;         // 2026-04-28 (G-4: Inst engine page)
+class InstEmptyState;   // 2026-04-28 (G-4: Inst empty-state placeholder)
 
 // ── StandaloneEditor ──────────────────────────────────────────────────────────
 // Top-level UI component. Owns:
@@ -419,12 +424,50 @@ private:
     // routes through that same audio insert.  Called from the onAudioClipAdded
     // hook (Builder drop) and from the empty-state drop handler (which routes
     // through Builder's importAudioFile path internally).
-    void spawnClipsTabIfMissing (int audioRow, const juce::String& path);
+    // G-6 (2026-04-29): allowDuplicate=true skips the "is there already a
+    // ClipsPage for this file?" dedup check.  Used by the picker's Duplicate
+    // flow to spawn a second ClipsPage on the same WAV at a different audioRow.
+    // Default false preserves drag-drop import semantics (one page per file).
+    void spawnClipsTabIfMissing (int audioRow, const juce::String& path,
+                                 bool allowDuplicate = false);
     // G-3 (2026-04-28): wires a Clips tab into the unified PianoRollPage so
     // its piano roll appears in the engine dropdown alongside layers / bass /
     // drums.  The PianoRollConnection's dataAccessor closure points at
     // Pattern::clipRoll[idx] so pattern switches stay live.
     void registerClipPianoRoll (int idx, ClipsPage* cp);
+
+    // ── G-4 (2026-04-28): Vox + Inst empty-state placeholders + spawn flow.
+    //    Mirrors the Clips structure exactly — pages spawn from the Mixer
+    //    page's "Add Vox/Inst Strip" buttons (NOT drag/drop).  Engine
+    //    register / unregister wires through mProcessor.registerVoxEngine /
+    //    registerInstEngine for audio-thread routing.  No piano-roll
+    //    registration — Vox + Inst are live-input / recorded-audio
+    //    destinations, not MIDI-triggered engines.
+    std::unique_ptr<VoxEmptyState>  mVoxEmptyState;
+    std::unique_ptr<InstEmptyState> mInstEmptyState;
+    void showVoxEmptyState  ();
+    void showInstEmptyState ();
+    // G-7 (2026-04-29): empty-state hamburger Load Page Preset support.
+    // Installs a menu builder on the empty-state page menu bar so users can
+    // restore a saved Page Preset which auto-spawns the appropriate tab.
+    void installEmptyStatePagePresetMenu (PagePresetIO::PageKind kind);
+    void spawnAndLoadFromEmptyState      (PagePresetIO::PageKind kind,
+                                           const juce::File& presetFile);
+    // G-6 (2026-04-29): right-click "Duplicate" on a ClipsPage's engine
+    // picker spawns a new ClipsPage at the next free audio row bound to the
+    // SAME WAV file as the source, then applies the source's full state
+    // (engine + APVTS).  Distinct from the Builder browser tree's
+    // Duplicate which COPIES the WAV first.
+    void spawnDuplicateClipsTab (class ClipsPage* sourceCp);
+    void spawnDuplicateVoxTab   (class VoxPage*   sourceVp);
+    void spawnDuplicateInstTab  (class InstPage*  sourceIp);
+    // G-6 (2026-04-29): selectAfter controls whether the new tab takes focus.
+    // false = stay on current page (used by Mixer "Add Vox/Inst Strip" so the
+    // user can add multiple without being yanked away on each add).  true =
+    // navigate to the new tab (used by ribbon empty-state click + ribbon "+Add"
+    // entry where the user explicitly asked for the page).
+    void spawnVoxTabIfMissing  (int voxIdx,  bool selectAfter = true);
+    void spawnInstTabIfMissing (int instIdx, bool selectAfter = true);
 
     // Phase B-1 helpers (page-switch commands).
     // Find the first tab of the given ribbon type and select it.  No-op when

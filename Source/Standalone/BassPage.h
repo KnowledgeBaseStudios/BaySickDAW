@@ -77,6 +77,14 @@ public:
     void requestDelete    ();
     juce::String exportBassState() const;
     void         importBassState (const juce::String& xml);
+
+    // ── G-7 (2026-04-29): Page Preset save/load (full chain) ─────────────────
+    // onSaved fires only on successful save (cancel/empty-name aborts the
+    // continuation).  Used by requestDelete's "Save Page Preset & Delete"
+    // button to chain delete after save completes.
+    void savePagePreset   (std::function<void()> onSaved = {});
+    void loadPagePreset   (const juce::File& xml);
+    void showPageActionsMenu (juce::Component* anchor);
     bool isLocked() const { return mLocked; }
     void setLocked(bool l);   // D2: fires onLockChanged
     std::function<void()>           onDeleteRequested;

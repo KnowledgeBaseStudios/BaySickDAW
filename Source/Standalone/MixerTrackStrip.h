@@ -75,6 +75,11 @@ public:
 
     // ── Level feed (safe to call from UI timer) ───────────────────────────────
     void setLevel(float dBFS);
+    // 2026-04-30: stereo entry point — independent L/R peak feeds.  When the
+    // audio thread doesn't yet have stereo peakDb atomics wired, callers stay
+    // on setLevel() (mono fans to L=R inside DBFSMeter).  As bus / insert
+    // nodes get split into peakDbL+peakDbR, callers switch to this method.
+    void setStereoLevel(float dBFS_L, float dBFS_R);
 
     // ── Model sync (does NOT fire callbacks) ─────────────────────────────────
     // Use these to push state from PatternManager into the UI.
@@ -94,6 +99,15 @@ public:
     void setTrackName(const juce::String& name)
     {
         mNameLabel.setText(name, juce::dontSendNotification);
+    }
+
+    // G-6 (2026-04-29): opt Bus-type strips into rename.  By default Bus
+    // strips are non-renameable (system buses have fixed identity); Vox/Inst
+    // BUS strips opt in via this setter.
+    void setRenameable (bool canRename)
+    {
+        mNameLabel.setEditable (canRename, canRename, false);
+        mNameLabel.setTooltip (canRename ? "Double-click to rename" : juce::String());
     }
 
     // 5F-4b B3: channel ID for cable routing (MixerChannelIds value)
@@ -135,6 +149,11 @@ public:
     // accordingly.  Other strip types ignore this callback.
     std::function<void(int channelId)> onArmRequested;
 
+    // G-7 (2026-04-29): right-click context menu hook.  MixerPage installs a
+    // handler on Aux strips + secondary Vox/Inst bus strips that pops a
+    // Delete prompt.  Other strips ignore right-click (left as-is).
+    std::function<void(juce::Point<int> screenPos)> onContextMenuRequested;
+
     // R2: tooltip text shown when hovering the Arm LED ("Mic 1" / "no input").
     // MixerPage updates this whenever the input channel selection changes.
     void setInputChannelLabel (const juce::String& label);
@@ -144,20 +163,27 @@ public:
     {
         switch (t)
         {
-            case StripType::Master:                  return 96;
-            case StripType::Bus:                     return 72;
+            // 2026-04-30 v2: every strip type is now 80 px wide.  Earlier 64
+            // for inserts left the Pan/Width knobs cramped after the meter
+            // moved into a 28 px right column.  72 for Master (matching
+            // Bus) was still slightly tight.  Unified at 80 — controls
+            // column gets ~52 px usable width on every strip, regardless
+            // of type.
+            case StripType::Master:
+            case StripType::Bus:
             case StripType::DrumChannel:
             case StripType::LayerChannel:
             case StripType::BassChannel:
             case StripType::Aux:
             case StripType::Vox:
             case StripType::Inst:
-            default:                                 return 64;
+            default:                                 return 80;
         }
     }
 
-    void paint  (juce::Graphics&) override;
-    void resized() override;
+    void paint     (juce::Graphics&)         override;
+    void resized   ()                        override;
+    void mouseDown (const juce::MouseEvent&) override;   // G-7: right-click → onContextMenuRequested
 
     // ── 5F-4a: APVTS binding for new controls (polarity/width/arm/bypass) ────
     // Call after setAutomationPrefix() AND after the APVTS params for this

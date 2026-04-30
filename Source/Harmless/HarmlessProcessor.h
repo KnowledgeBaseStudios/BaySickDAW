@@ -174,6 +174,11 @@ private:
         int   lfoRateIdx { -1 };
         int   lfoShape   { -1 };
         int   lfoTempo   { -1 };
+        // 2026-04-30: T2-B LFO depth cache (restored after S4 strip).
+        // Sentinels init at -100 so the first block always pushes a value.
+        float lfoVel    { -100.f };
+        float lfoVol    { -100.f };
+        float lfoPitch  { -100.f };
         float blurTime { -1.f };
         float blurHarm { -1.f };
         // 2026-04-19 (S3) - Unison Type / Alt / Phase + Part B shape.

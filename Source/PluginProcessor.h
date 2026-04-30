@@ -228,6 +228,16 @@ public:
     void registerClipEngine  (int pageIdx, juce::AudioProcessor* eng);
     void unregisterClipEngine(int pageIdx);
 
+    // G-4 (2026-04-28): per-Vox / per-Inst page engine registration.  pageIdx
+    // is the Vox / Inst insert index (1:1 with mixer_vox_<idx> / mixer_inst_
+    // <idx>).  Same shape as registerClipEngine — engine output mixes into
+    // the existing Vox / Inst InsertNode (created when the user clicks "Add
+    // Vox/Inst Strip" on the Mixer page).
+    void registerVoxEngine   (int pageIdx, juce::AudioProcessor* eng);
+    void unregisterVoxEngine (int pageIdx);
+    void registerInstEngine  (int pageIdx, juce::AudioProcessor* eng);
+    void unregisterInstEngine(int pageIdx);
+
     // §P4.3 B7 (2026-04-22): per-page pre-rack EQ register/unregister APIs +
     // mDrumsEQDSP / mLayerPageEQs / mBassPageEQs / mDrumsPageEQ members all
     // deleted.  Pre-rack EQs now live on InsertNode / BusNode preEq members
@@ -240,14 +250,41 @@ public:
 
     // ── Level meter feeds (audio thread writes, UI timer reads) ───────────────
     // Peak dB for each mix section — used by MixerPage strip meters.
-    std::atomic<float> mMasterPeakDb       { -60.0f };
-    std::atomic<float> mLayersPeakDb       { -60.0f };
-    std::atomic<float> mBassPeakDb         { -60.0f };
-    std::atomic<float> mDrumsPeakDb        { -60.0f };
-    std::atomic<float> mAudioClipsBusPeakDb{ -60.0f };
+    // 2026-04-30: stereo L/R atomics added alongside the mono atomics for
+    // the new split DBFSMeter.  The mono atomics are still written (max(L,R))
+    // for legacy readers.  UI calls the new stereo getters below.
+    std::atomic<float> mMasterPeakDb        { -60.0f };
+    std::atomic<float> mMasterPeakDbL       { -60.0f };
+    std::atomic<float> mMasterPeakDbR       { -60.0f };
+    std::atomic<float> mLayersPeakDb        { -60.0f };
+    std::atomic<float> mLayersPeakDbL       { -60.0f };
+    std::atomic<float> mLayersPeakDbR       { -60.0f };
+    std::atomic<float> mBassPeakDb          { -60.0f };
+    std::atomic<float> mBassPeakDbL         { -60.0f };
+    std::atomic<float> mBassPeakDbR         { -60.0f };
+    std::atomic<float> mDrumsPeakDb         { -60.0f };
+    std::atomic<float> mDrumsPeakDbL        { -60.0f };
+    std::atomic<float> mDrumsPeakDbR        { -60.0f };
+    std::atomic<float> mAudioClipsBusPeakDb { -60.0f };
+    std::atomic<float> mAudioClipsBusPeakDbL{ -60.0f };
+    std::atomic<float> mAudioClipsBusPeakDbR{ -60.0f };
     // R3.5 (2026-04-23): Vox + Inst bus peaks (UI mixer-strip meters).
-    std::atomic<float> mVoxBusPeakDb       { -60.0f };
-    std::atomic<float> mInstBusPeakDb      { -60.0f };
+    std::atomic<float> mVoxBusPeakDb        { -60.0f };
+    std::atomic<float> mVoxBusPeakDbL       { -60.0f };
+    std::atomic<float> mVoxBusPeakDbR       { -60.0f };
+    std::atomic<float> mInstBusPeakDb       { -60.0f };
+    std::atomic<float> mInstBusPeakDbL      { -60.0f };
+    std::atomic<float> mInstBusPeakDbR      { -60.0f };
+    // G-6 (2026-04-29): secondary bus peak meters.
+    std::atomic<float> mVoxBus2PeakDb       { -60.0f };
+    std::atomic<float> mVoxBus2PeakDbL      { -60.0f };
+    std::atomic<float> mVoxBus2PeakDbR      { -60.0f };
+    std::atomic<float> mInstBus2PeakDb      { -60.0f };
+    std::atomic<float> mInstBus2PeakDbL     { -60.0f };
+    std::atomic<float> mInstBus2PeakDbR     { -60.0f };
+    std::atomic<float> mInstBus3PeakDb      { -60.0f };
+    std::atomic<float> mInstBus3PeakDbL     { -60.0f };
+    std::atomic<float> mInstBus3PeakDbR     { -60.0f };
 
     // ── 1M: Audio DSP load monitoring (audio thread writes, UI timer reads) ──
     // mAudioDspLoad : smoothed fraction of buffer window used by processBlock (0..1)
@@ -292,7 +329,10 @@ public:
     // Per-row peak dB for audio strip meters (audio thread writes, UI timer reads).
     // kMaxAudioRows == 50 (matches MixerState::kMaxAudioRows).
     static constexpr int kMaxAudioRows = 50;
-    std::atomic<float> mAudioRowPeakDb[kMaxAudioRows];
+    std::atomic<float> mAudioRowPeakDb [kMaxAudioRows];
+    // 2026-04-30: stereo L/R for split DBFSMeter (UI reads via mProcessor).
+    std::atomic<float> mAudioRowPeakDbL[kMaxAudioRows];
+    std::atomic<float> mAudioRowPeakDbR[kMaxAudioRows];
 
     // ── Graph infrastructure (Phase 1A) ───────────────────────────────────────
     VibeGraph mVibeGraph;
@@ -397,6 +437,18 @@ private:
     // that don't use clips.  Same pattern as mAnyDrumPageActive.
     std::atomic<bool>                                      mAnyClipPageActive { false };
 
+    // G-4 (2026-04-28): per-Vox / per-Inst-page engine processors.  Same
+    // pattern as Clips — engine output routes through the existing Vox / Inst
+    // InsertNode (created by the Mixer page's "Add Vox/Inst Strip" flow).
+    juce::SpinLock                                         mVoxEngineLock;
+    std::array<juce::AudioProcessor*, kMaxVoxPages>        mVoxEngines {};
+    juce::AudioBuffer<float>                               mVoxEngineScratch;
+    std::atomic<bool>                                      mAnyVoxPageActive { false };
+    juce::SpinLock                                         mInstEngineLock;
+    std::array<juce::AudioProcessor*, kMaxInstPages>       mInstEngines {};
+    juce::AudioBuffer<float>                               mInstEngineScratch;
+    std::atomic<bool>                                      mAnyInstPageActive { false };
+
     // R3 (2026-04-23): Live-input audio capture for Vox / Inst strips.
     // mLiveInputSnapshot - non-cleared copy of the input channels before
     // buffer.clear(), populated each block when numInputs > 0.
@@ -495,10 +547,16 @@ private:
     // InsertNode.  Audio clip mutedByChoke is also reset to false here for
     // clips not currently in playback range so a fresh playthrough starts
     // un-choked.
+    // 2026-04-30 (audit B.6): Vox + Inst page MIDI buffers added so choke
+    // groups also dispatch to / from those engines.  Was Layer/Bass/Drum
+    // only — Audio/Aux/Vox/Inst chokeGroup APVTS params were registered
+    // but the dispatch loop never scanned or injected them.
     void applyChokeGroupDispatch(
         std::array<juce::MidiBuffer, kMaxLayerPages>& layerMidi,
         std::array<juce::MidiBuffer, kMaxBassPages>&  bassMidi,
         std::array<juce::MidiBuffer, kMaxDrumPages>&  drumMidi,
+        std::array<juce::MidiBuffer, kMaxVoxPages>&   voxMidi,
+        std::array<juce::MidiBuffer, kMaxInstPages>&  instMidi,
         juce::int64 projectStartSamp,
         int         numSamples,
         double      secPerBeat);

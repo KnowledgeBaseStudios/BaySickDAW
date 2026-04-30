@@ -65,6 +65,14 @@ public:
     std::function<int()>        onGetLatencySamples;
     std::function<double()>     onGetSampleRate;   // for sample -> ms conversion
 
+    // 2026-04-30: state-source callbacks so the timer can re-sync the
+    // SongLoop + Metronome button visuals from the processor's atomics
+    // after a project load.  Without these, project XML restored the
+    // processor state but the buttons stayed at their default toggle
+    // values until the user clicked them.
+    std::function<bool()>       onGetSongLoopMode;
+    std::function<bool()>       onGetMetronomeEnabled;
+
     // Public state accessors
     double getBPM()         const;
     bool   isSongMode()     const { return mSongModeBtn->getToggleState(); }

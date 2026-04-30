@@ -265,7 +265,9 @@
       "Bash(Remove-Item \"C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\SharedUI.cpp.obj\" -Force -ErrorAction SilentlyContinue)",
       "Bash(Remove-Item \"C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\EffectEditorPanels.cpp.obj\" -Force -ErrorAction SilentlyContinue)",
       "Bash(powershell -Command \"Remove-Item ''C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\SharedUI.cpp.obj'' -Force -ErrorAction SilentlyContinue; Remove-Item ''C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\EffectEditorPanels.cpp.obj'' -Force -ErrorAction SilentlyContinue; Write-Host ''Stale obj files removed''\")",
-      "Bash(powershell -Command 'Remove-Item \"\"C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\SharedUI.cpp.obj\"\" -Force -ErrorAction SilentlyContinue; Remove-Item \"\"C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\EffectsPage.cpp.obj\"\" -Force -ErrorAction SilentlyContinue; Write-Host \"\"Done\"\"')"
+      "Bash(powershell -Command 'Remove-Item \"\"C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\SharedUI.cpp.obj\"\" -Force -ErrorAction SilentlyContinue; Remove-Item \"\"C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\EffectsPage.cpp.obj\"\" -Force -ErrorAction SilentlyContinue; Write-Host \"\"Done\"\"')",
+      "Bash(grep -v \"//.*case\")",
+      "Bash(powershell -Command \"\\(Get-Content 'C:\\\\Users\\\\jeffm\\\\Documents\\\\BaySickDAW\\\\Files For Claude\\\\vibedaw_blueprint.md' | Measure-Object -Line\\).Lines\")"
     ]
   }
 }

@@ -90,6 +90,55 @@ void HarmlessSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
         midi.swapWith (processed);
     }
 
+    // 2026-04-30: T2-B lfo_vel — note-on velocity scaling.  If the global
+    // lfo_vel slider is non-zero, sample the LFO at the START of this block
+    // (block-rate is plenty for an LFO at sub-Hz to ~10 Hz rates) and scale
+    // every incoming noteOn's velocity by 1 + LFO * depth * 0.5.  Result:
+    // ±50 % per-note velocity variation when depth is at full ±1.
+    if (std::abs (mGlobalLfoVelDepth) > 1.0e-4f)
+    {
+        const float twoPi = juce::MathConstants<float>::twoPi;
+        const float ph    = mGlobalLfoPhase01;
+        // Bipolar LFO output -1..+1 based on shape.  Same set of shapes as
+        // applyGlobalLfoToAllTargets (0=sine 1=tri 2=saw 3=square).
+        float lfoOut = 0.0f;
+        switch (mGlobalLfoShape)
+        {
+            case 1: // triangle
+                lfoOut = (ph < 0.5f) ? (4.0f * ph - 1.0f) : (3.0f - 4.0f * ph);
+                break;
+            case 2: // saw (rising)
+                lfoOut = 2.0f * ph - 1.0f;
+                break;
+            case 3: // square
+                lfoOut = (ph < 0.5f) ? -1.0f : 1.0f;
+                break;
+            default: // sine
+                lfoOut = std::sin (twoPi * ph);
+                break;
+        }
+        const float velScale = 1.0f + lfoOut * mGlobalLfoVelDepth * 0.5f;
+
+        // Walk midi, multiply each noteOn's velocity by velScale.
+        juce::MidiBuffer scaled;
+        for (const auto meta : midi)
+        {
+            auto msg = meta.getMessage();
+            if (msg.isNoteOn())
+            {
+                const float v01 = juce::jlimit (0.0f, 1.0f,
+                    msg.getFloatVelocity() * velScale);
+                msg = juce::MidiMessage::noteOn (msg.getChannel(), msg.getNoteNumber(), v01);
+            }
+            scaled.addEvent (msg, meta.samplePosition);
+        }
+        midi.swapWith (scaled);
+    }
+
+    // Advance the global LFO phase by this block's sample count so the next
+    // block's noteOn velocity scaling uses the next LFO sample.
+    tickGlobalLfoVel (buffer.getNumSamples());
+
     mSynth.renderNextBlock (buffer, midi, 0, buffer.getNumSamples());
 
     // S4 Batch 2b: aggregate SynthLevel mod targets across voices using the
@@ -315,6 +364,9 @@ void HarmlessSynth::setModRegistry (const HarmlessModRegistry* r) noexcept
 
 void HarmlessSynth::setBeatsPerSecond (double bps) noexcept
 {
+    // 2026-04-30: also feed the global LFO clock used for lfo_vel scaling
+    // so it stays in sync when the user changes BPM mid-session.
+    mGlobalLfoBps = juce::jmax (1.0e-3, bps);
     forEachVoice ([bps] (AdditiveVoice& v) { v.setBeatsPerSecond (bps); });
 }
 
@@ -353,6 +405,73 @@ void HarmlessSynth::applyGlobalLfoToAllTargets (int rateIdx, int shape, bool tem
         src.tempoSync = tempoSync;
     }
     const_cast<HarmlessModRegistry*> (mModRegistry)->publishSnapshot();
+}
+
+// ── 2026-04-30: T2-B LFO depth shortcuts (restored after S4 strip) ──────
+// Each macro writes the LFO source's `depth` field on ONE specific mod
+// registry target.  Replace semantics: the global slider's value clobbers
+// whatever per-target depth the user set in the in-player Mod Editor.
+void HarmlessSynth::applyGlobalLfoVolDepth (float depth) noexcept
+{
+    // The Volume mod target was registered with paramId pid("volume") in
+    // HarmlessProcessor::registerModTargets — but that paramId already
+    // includes the per-track prefix (e.g. "tk_lay_0_harm_volume").  We can't
+    // reconstruct the full id here; loop the targets and match the suffix
+    // instead.  16 targets, called only when the user moves the slider, so
+    // the cost is negligible.
+    if (mModRegistry == nullptr) return;
+    auto* mut = const_cast<HarmlessModRegistry*> (mModRegistry);
+    const juce::SpinLock::ScopedLockType lock (mut->getEditLock());
+    for (const auto& tgt : mModRegistry->getAllTargets())
+    {
+        if (tgt->paramId.endsWith ("_volume"))
+        {
+            tgt->sources[(int) ModSource::LFO].depth = juce::jlimit (-1.0f, 1.0f, depth);
+            break;
+        }
+    }
+    mut->publishSnapshot();
+}
+
+void HarmlessSynth::applyGlobalLfoPitchDepth (float depth) noexcept
+{
+    if (mModRegistry == nullptr) return;
+    auto* mut = const_cast<HarmlessModRegistry*> (mModRegistry);
+    const juce::SpinLock::ScopedLockType lock (mut->getEditLock());
+    for (const auto& tgt : mModRegistry->getAllTargets())
+    {
+        if (tgt->paramId.endsWith ("_pitch_semitones"))
+        {
+            tgt->sources[(int) ModSource::LFO].depth = juce::jlimit (-1.0f, 1.0f, depth);
+            break;
+        }
+    }
+    mut->publishSnapshot();
+}
+
+void HarmlessSynth::setGlobalLfoVelRate (float rateLen, int shape, bool tempoSync) noexcept
+{
+    mGlobalLfoRateLen   = juce::jmax (1.0e-3f, rateLen);
+    mGlobalLfoShape     = juce::jlimit (0, 3, shape);
+    mGlobalLfoTempoSync = tempoSync;
+}
+
+void HarmlessSynth::tickGlobalLfoVel (int numSamples) noexcept
+{
+    // Period in seconds: rateLen / bps when tempo-synced, else rateLen
+    // already in seconds.  Always uses the current bps — so BPM changes
+    // mid-session shift the LFO period the next block, no recompute call
+    // needed from the processor side.
+    const float periodSec = mGlobalLfoTempoSync
+                              ? (float) (mGlobalLfoRateLen / juce::jmax (1.0e-3, mGlobalLfoBps))
+                              : mGlobalLfoRateLen;
+    const float cycleSamples = (float) (periodSec * mSampleRate);
+    if (cycleSamples > 0.0f)
+    {
+        mGlobalLfoPhase01 += (float) numSamples / cycleSamples;
+        if (mGlobalLfoPhase01 >= 1.0f)
+            mGlobalLfoPhase01 -= std::floor (mGlobalLfoPhase01);
+    }
 }
 
 // ── 2026-04-19 (S2 SLA) Blur extensions on engines ─────────────────────────

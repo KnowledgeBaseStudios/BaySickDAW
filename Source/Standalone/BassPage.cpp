@@ -6,6 +6,7 @@
 #include "../VibePlayer/VibePlayerProcessor.h"
 #include "../VibePlayer/VibePlayerEditor.h"
 #include "../SampleLibrary.h"
+#include "PagePresetIO.h"
 using namespace juce;
 
 // ── Constructor / Destructor ──────────────────────────────────────────────────
@@ -341,7 +342,7 @@ void BassPage::refreshPianoRollContextLabel()
 // D1.4-fix (c) — per-bass right-click context menu + save / delete
 // (mirror of LayersPage; see that file for design notes)
 // ─────────────────────────────────────────────────────────────────────────────
-static juce::String sBassClipboard;
+// G-6 (2026-04-29): sBassClipboard removed (Copy/Paste menu items dropped).
 
 static juce::File bassEnginePresetsDir (const juce::String& engineName)
 {
@@ -381,6 +382,65 @@ static void bassApplyApvtsTree (juce::AudioProcessor* proc, const juce::ValueTre
     if (auto* bsb = dynamic_cast<BaySickBassProcessor*>(proc))   { bsb->apvts.replaceState(vt); return; }
     if (auto* bsp = dynamic_cast<VibePlayerProcessor*>(proc))    { bsp->apvts.replaceState(vt); return; }
     if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      { h  ->apvts.replaceState(vt); return; }
+}
+
+// G-6 (2026-04-29): rewrite the binary state's PARAM ids so the source page's
+// APVTS prefix (tk_bass_<srcIdx>_<engineTag>_) becomes this destination page's
+// prefix.  Without this, importBassState() silently drops every param because
+// setStateInformation matches by id.  Mirrors the F-2 fix in loadPreset().
+static void bassSubstituteEnginePrefixInBinary (juce::AudioProcessor* proc,
+                                                juce::MemoryBlock& mb)
+{
+    if (proc == nullptr || mb.getSize() == 0) return;
+
+    const juce::String localPrefix = bassEngineLocalPrefix (proc);
+    if (localPrefix.isEmpty()) return;
+
+    const int trailingUnder = localPrefix.length() - 1;
+    if (trailingUnder < 1) return;
+    const int tagStart = localPrefix.substring (0, trailingUnder).lastIndexOfChar ('_');
+    if (tagStart < 0) return;
+    const juce::String engineTagWithUnders = localPrefix.substring (tagStart, trailingUnder + 1);
+
+    auto xmlEl = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+    if (! xmlEl) return;
+
+    juce::ValueTree loaded = juce::ValueTree::fromXml (*xmlEl);
+    if (! loaded.isValid()) return;
+
+    juce::String loadedPrefix;
+    for (int i = 0; i < loaded.getNumChildren(); ++i)
+    {
+        auto child = loaded.getChild (i);
+        if (! child.hasType ("PARAM")) continue;
+        const juce::String id = child.getProperty ("id").toString();
+        const int idx = id.indexOf (engineTagWithUnders);
+        if (idx > 0 && id.startsWith ("tk_"))
+        {
+            loadedPrefix = id.substring (0, idx + engineTagWithUnders.length());
+            break;
+        }
+    }
+
+    if (loadedPrefix.isEmpty() || loadedPrefix == localPrefix) return;
+
+    for (int i = 0; i < loaded.getNumChildren(); ++i)
+    {
+        auto child = loaded.getChild (i);
+        if (! child.hasType ("PARAM")) continue;
+        juce::String id = child.getProperty ("id").toString();
+        if (id.startsWith (loadedPrefix))
+        {
+            id = localPrefix + id.substring (loadedPrefix.length());
+            child.setProperty ("id", id, nullptr);
+        }
+    }
+
+    if (auto modifiedXml = loaded.createXml())
+    {
+        mb.reset();
+        juce::AudioProcessor::copyXmlToBinary (*modifiedXml, mb);
+    }
 }
 
 // Recursive XML-preset walker — folders become real cascading submenus.
@@ -429,9 +489,8 @@ void BassPage::showContextMenu (juce::Component* anchor)
     constexpr int kIdLock      = 1;
     constexpr int kIdPolyphony = 2;
     constexpr int kIdRename    = 5;
-    constexpr int kIdCopy      = 10;
-    constexpr int kIdPaste     = 11;
     constexpr int kIdDuplicate = 12;
+    // G-6 (2026-04-29): Copy/Paste menu items dropped.
     constexpr int kIdSaveAs    = 20;
     // D3: choke-group submenu — 200 = None, 201..216 = groups 1..16.
     constexpr int kIdChokeBase = 200;
@@ -472,8 +531,6 @@ void BassPage::showContextMenu (juce::Component* anchor)
 
     menu.addSeparator();
     menu.addItem (kIdRename, "Rename...");
-    menu.addItem (kIdCopy, "Copy Bass", ! mEngineType.isEmpty());
-    menu.addItem (kIdPaste, "Paste Bass", sBassClipboard.isNotEmpty() && ! mLocked);
     menu.addItem (kIdDuplicate, "Duplicate Bass (new tab)", ! mEngineType.isEmpty());
 
     menu.addSeparator();
@@ -519,7 +576,7 @@ void BassPage::showContextMenu (juce::Component* anchor)
     menu.showMenuAsync (
         juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis, presetXmls = std::move (presetXmls),
-         kIdLock, kIdPolyphony, kIdRename, kIdCopy, kIdPaste, kIdDuplicate,
+         kIdLock, kIdPolyphony, kIdRename, kIdDuplicate,
          kIdChokeBase, kIdSaveAs, kIdLoadPresetBase, kIdDelete] (int r) mutable
         {
             if (! safeThis || r <= 0) return;
@@ -575,8 +632,7 @@ void BassPage::showContextMenu (juce::Component* anchor)
             {
                 if (bp->onRenameRequested) bp->onRenameRequested();
             }
-            else if (r == kIdCopy)      sBassClipboard = bp->exportBassState();
-            else if (r == kIdPaste)     bp->importBassState (sBassClipboard);
+            // G-6: kIdCopy / kIdPaste handlers removed.
             else if (r == kIdDuplicate)
             {
                 const auto state = bp->exportBassState();
@@ -616,7 +672,13 @@ void BassPage::importBassState (const juce::String& xml)
     {
         juce::MemoryBlock mb;
         if (mb.fromBase64Encoding (data))
+        {
+            // G-6 (2026-04-29): rewrite the binary's PARAM ids so the source
+            // page's prefix becomes this destination page's prefix.  Without
+            // this every param is dropped by setStateInformation's id match.
+            bassSubstituteEnginePrefixInBinary (mEngineProcessor.get(), mb);
             mEngineProcessor->setStateInformation (mb.getData(), (int) mb.getSize());
+        }
     }
     mLocked = lock;
     refreshPianoRollContextLabel();
@@ -782,37 +844,44 @@ void BassPage::savePatchAs()
 
 void BassPage::requestDelete()
 {
+    // G-7 (2026-04-29): close-prompt with dirty-aware buttons (matches LayersPage).
     juce::Component::SafePointer<BassPage> safeThis (this);
     auto fireDelete = [safeThis] {
         if (auto* bp = safeThis.getComponent())
             if (bp->onDeleteRequested) bp->onDeleteRequested();
     };
 
+    const juce::String warning =
+        "Deleting this bass removes its Player, Mixer Strip, "
+        "Effects Rack, and Piano Roll.";
+
     if (mEngineProcessor != nullptr && isPatchDirty())
     {
+        const juce::String dirtyWarning = warning
+            + "\n\n\"Save Page Preset & Delete\" writes the entire page state "
+              "(engine + EQ + effects rack + strip settings) to disk first, "
+              "then deletes the tab.";
+
         auto* aw = new juce::AlertWindow (
-            "Delete Bass",
-            "Save this bass as a preset before deleting?\n"
-            "(Engine settings will otherwise be lost.)",
-            juce::AlertWindow::QuestionIcon);
-        aw->addButton ("Save & Delete", 1);
-        aw->addButton ("Delete Anyway", 2);
-        aw->addButton ("Cancel",        0, juce::KeyPress (juce::KeyPress::escapeKey));
+            "Delete Bass", dirtyWarning, juce::AlertWindow::QuestionIcon);
+        aw->addButton ("Save Page Preset & Delete", 1,
+                       juce::KeyPress (juce::KeyPress::returnKey));
+        aw->addButton ("Delete",                    2);
+        aw->addButton ("Cancel",                    0,
+                       juce::KeyPress (juce::KeyPress::escapeKey));
         aw->enterModalState (true, juce::ModalCallbackFunction::create (
             [safeThis, aw, fireDelete] (int r)
             {
                 std::unique_ptr<juce::AlertWindow> own (aw);
                 if (r == 0 || ! safeThis) return;
-                if (r == 1) safeThis->savePatchAs();
-                fireDelete();
+                if (r == 1) safeThis->savePagePreset (fireDelete);   // chained
+                else if (r == 2) fireDelete();                        // delete only
             }), false);
         return;
     }
 
     auto* aw = new juce::AlertWindow (
-        "Delete Bass",
-        "This action cannot be undone. Delete this bass?",
-        juce::AlertWindow::WarningIcon);
+        "Delete Bass", warning, juce::AlertWindow::WarningIcon);
     aw->addButton ("Delete", 1);
     aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
     aw->enterModalState (true, juce::ModalCallbackFunction::create (
@@ -821,6 +890,134 @@ void BassPage::requestDelete()
             std::unique_ptr<juce::AlertWindow> own (aw);
             if (r == 1) fireDelete();
         }), false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-7 (2026-04-29): Page Preset save/load (full chain).
+// ─────────────────────────────────────────────────────────────────────────────
+static juce::String bassEnginePrefixOf (juce::AudioProcessor* p)
+{
+    if (auto* bsb = dynamic_cast<BaySickBassProcessor*> (p))   return bsb->getParamPrefix();
+    if (auto* h   = dynamic_cast<HarmlessProcessor*>    (p))   return h  ->getParamPrefix();
+    if (auto* v   = dynamic_cast<VibePlayerProcessor*>  (p))   return v  ->getParamPrefix();
+    return {};
+}
+
+void BassPage::savePagePreset (std::function<void()> onSaved)
+{
+    auto* aw = new juce::AlertWindow ("Save Page Preset",
+                                       "Enter a name for this bass page preset:",
+                                       juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("name", "My Bass");
+    aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<BassPage> safeThis (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safeThis, aw, onSaved] (int r)
+        {
+            std::unique_ptr<juce::AlertWindow> own (aw);
+            if (r != 1 || ! safeThis) return;
+
+            const juce::String name = aw->getTextEditorContents ("name").trim();
+            if (name.isEmpty()) return;
+
+            auto dir = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Bass);
+            dir.createDirectory();
+            auto target = dir.getChildFile (name + ".xml");
+            int n = 2;
+            while (target.exists())
+                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
+
+            const juce::String stripPrefix = "mixer_bass_" + juce::String (safeThis->mPageIndex);
+            const juce::String enginePrefix = bassEnginePrefixOf (safeThis->mEngineProcessor.get());
+
+            const juce::String xml = PagePresetIO::exportPagePreset (
+                safeThis->mProcessor,
+                PagePresetIO::PageKind::Bass,
+                safeThis->mPageIndex,
+                stripPrefix,
+                safeThis->mEngineProcessor.get(),
+                safeThis->mEngineType,
+                enginePrefix);
+
+            if (xml.isNotEmpty())
+                target.replaceWithText (xml);
+
+            safeThis->takeStateSnapshot();
+            if (onSaved) onSaved();   // G-7: chain delete after save completes
+        }), false);
+}
+
+void BassPage::loadPagePreset (const juce::File& xml)
+{
+    if (! xml.existsAsFile()) return;
+
+    const juce::String savedEngineType = PagePresetIO::peekEngineType (xml);
+    if (savedEngineType.isNotEmpty() && savedEngineType != mEngineType)
+        selectEngine (savedEngineType);
+
+    const juce::String stripPrefix = "mixer_bass_" + juce::String (mPageIndex);
+    const juce::String enginePrefix = bassEnginePrefixOf (mEngineProcessor.get());
+    auto noFallback = [] (int) { return true; };
+
+    PagePresetIO::importPagePreset (mProcessor,
+                                     PagePresetIO::PageKind::Bass,
+                                     mPageIndex,
+                                     stripPrefix,
+                                     mEngineProcessor.get(),
+                                     enginePrefix,
+                                     noFallback,
+                                     xml.loadFileAsString());
+
+    const juce::String newName = xml.getFileNameWithoutExtension();
+    setTabName (newName);
+    if (onSoundNameChanged) onSoundNameChanged (newName);
+    takeStateSnapshot();
+}
+
+void BassPage::showPageActionsMenu (juce::Component* anchor)
+{
+    constexpr int kIdSavePagePreset = 100;
+    constexpr int kIdLoadBase       = 1000;
+
+    juce::PopupMenu menu;
+    menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
+                  mEngineProcessor != nullptr);
+
+    juce::Array<juce::File> presetXmls;
+    {
+        juce::PopupMenu loadSub;
+        const auto root = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Bass);
+        if (root.isDirectory())
+        {
+            juce::Array<juce::File> files;
+            root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
+            files.sort();
+            for (auto& f : files)
+            {
+                const int id = kIdLoadBase + presetXmls.size();
+                presetXmls.add (f);
+                loadSub.addItem (id, f.getFileNameWithoutExtension());
+            }
+        }
+        if (presetXmls.isEmpty())
+            loadSub.addItem (-1, "(no page presets saved)", false, false);
+        menu.addSubMenu ("Load Page Preset", loadSub);
+    }
+
+    juce::Component::SafePointer<BassPage> safeThis (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
+        [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
+        {
+            if (! safeThis || r <= 0) return;
+            if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
+            if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
+            {
+                safeThis->loadPagePreset (presetXmls[r - kIdLoadBase]);
+                return;
+            }
+        });
 }
 
 // ── D2 lock + dirty-snapshot helpers ─────────────────────────────────────────

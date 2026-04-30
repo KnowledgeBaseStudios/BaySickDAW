@@ -10,9 +10,17 @@ static constexpr int kMaxDrumPages     = 16;   // max simultaneous Drums pages (
 // the audio-row index, so the engine output can mix into the matching audio_<row>
 // InsertNode without a separate audio-row lookup table.
 static constexpr int kMaxClipPages     = 50;   // matches the audio-insert cap
+// Phase G-4 (2026-04-28): Vox + Inst pages — 1:1 with their mixer inserts.
+// Spawn trigger is the Mixer page's "Add Vox/Inst Strip" button (NOT drop).
+// kMaxVoxStrips / kMaxInstStrips live in VibeGraph.h's MixerChannelIds; mirror
+// here for piano-roll dispatch sizing without pulling that header into core.
+static constexpr int kMaxVoxPages      = 6;    // matches MixerChannelIds::kMaxVoxStrips
+static constexpr int kMaxInstPages     = 20;   // matches MixerChannelIds::kMaxInstStrips (G-4 bumped 6 → 10; G-6 bumped 10 → 20)
 static constexpr int kBassPRTarget     = kMaxLayerPages; // PRPendingOff target ID for bass roll
 static constexpr int kDrumPRTarget     = kMaxLayerPages + kMaxBassPages; // PRPendingOff target ID base for drum rolls
 static constexpr int kClipPRTarget     = kMaxLayerPages + kMaxBassPages + kMaxDrumPages; // PRPendingOff target ID base for clip rolls (G-3)
+static constexpr int kVoxPRTarget      = kClipPRTarget + kMaxClipPages;       // G-4
+static constexpr int kInstPRTarget     = kVoxPRTarget  + kMaxVoxPages;        // G-4
 static constexpr int MAX_DRUM_SOUNDS   = 46;   // total drum sound library size
 static constexpr int MAX_DRUM_ROWS     = 16;   // max rows visible in the drums grid
 static constexpr int MAX_STEPS_TOTAL   = 64;   // max steps across any sequence

@@ -12,6 +12,12 @@ public:
     void reset();
 
     bool   isPlaying()           const { return mPlaying.load(); }
+    // 2026-04-30: real recording flag for playhead's PositionInfo (the
+    // standalone editor sets this when arming + clears on stop/disarm).
+    // Was hardcoded to false in getPosition() so any host-style PositionInfo
+    // consumer wouldn't see the recording state.
+    bool   isRecording()         const { return mRecording.load(); }
+    void   setRecording(bool r)        { mRecording.store(r); }
     double getBPM()              const { return mBPM.load(); }
     void   setBPM(double bpm)          { mBPM.store(bpm); }
     double getCurrentBeat()      const { return mPPQPos.load(); }
@@ -29,6 +35,7 @@ public:
 
 private:
     std::atomic<bool>   mPlaying    { false };
+    std::atomic<bool>   mRecording  { false };
     std::atomic<double> mBPM        { 120.0 };
     std::atomic<double> mPPQPos     { 0.0 };
     std::atomic<double> mLoopBeats  { 0.0 };
