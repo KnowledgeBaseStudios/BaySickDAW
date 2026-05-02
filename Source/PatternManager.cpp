@@ -238,6 +238,10 @@ void PatternManager::setCurrentPattern(int index)
 
 void PatternManager::addBlock(ArrangementBlock block)
 {
+    // C.5b (post-revert): auto-derive removed.  Song-level TS markers are
+    // decorative-only (visual reference on the Builder ruler), so deriving a
+    // pattern's intrinsic TS from a marker would be confusing.  Pattern TS
+    // is set explicitly via right-click → "Set Time Signature".
     mArrangement.push_back(block);
 }
 
@@ -327,6 +331,159 @@ int PatternManager::findTimeSigChangeAtBar (int bar) const
     return -1;
 }
 
+// ── C.5: time-signature-aware beat/bar conversion ────────────────────────────
+TimeSigChange PatternManager::getEffectiveTimeSigAtBar (int bar) const
+{
+    TimeSigChange eff { 0, 4, 4 };   // implicit 4/4 default
+    for (const auto& ts : mTimeSigChanges)
+    {
+        if (ts.bar <= bar) eff = ts;
+        else break;   // sorted ascending; first ts.bar > bar means we're done
+    }
+    return eff;
+}
+
+double PatternManager::getBeatsPerBarAtBar (int bar) const
+{
+    const auto eff = getEffectiveTimeSigAtBar (bar);
+    // PPQ beat = quarter note.  Bar length in PPQ = num * (4/den).
+    const int den = (eff.den > 0) ? eff.den : 4;
+    return (double) eff.num * 4.0 / (double) den;
+}
+
+double PatternManager::getBeatsPerBarAtBeat (double beat) const
+{
+    int bar = 0;
+    double bib = 0.0;
+    beatToBarAndBeatInBar (beat, bar, bib);
+    return getBeatsPerBarAtBar (bar);
+}
+
+void PatternManager::beatToBarAndBeatInBar (double beat, int& outBar, double& outBeatInBar) const
+{
+    if (beat <= 0.0)
+    {
+        outBar = 0;
+        outBeatInBar = juce::jmax (0.0, beat);
+        return;
+    }
+
+    // Walk through TS changes accumulating bar-by-bar beat counts.
+    int    barCounter  = 0;
+    double beatCounter = 0.0;
+    int    currentNum  = 4;
+    int    currentDen  = 4;
+
+    auto bpbFor = [](int num, int den) -> double {
+        return (double) num * 4.0 / (double) (den > 0 ? den : 4);
+    };
+
+    const size_t n = mTimeSigChanges.size();
+    for (size_t i = 0; i <= n; ++i)
+    {
+        const int nextSwitchBar = (i < n) ? mTimeSigChanges[i].bar
+                                          : std::numeric_limits<int>::max();
+        const double bpb = bpbFor (currentNum, currentDen);
+
+        // Walk bars while still inside this TS run AND not past target.
+        while (barCounter < nextSwitchBar)
+        {
+            const double barEnd = beatCounter + bpb;
+            if (beat < barEnd)
+            {
+                outBar = barCounter;
+                outBeatInBar = beat - beatCounter;
+                return;
+            }
+            beatCounter = barEnd;
+            ++barCounter;
+        }
+
+        if (i < n)
+        {
+            currentNum = mTimeSigChanges[i].num;
+            currentDen = mTimeSigChanges[i].den;
+        }
+    }
+
+    // Should be unreachable (loop above always returns), but be safe.
+    outBar = barCounter;
+    outBeatInBar = 0.0;
+}
+
+// C.5b: per-pattern intrinsic TS.
+double PatternManager::getPatternBeatsPerBar (int patternIndex) const
+{
+    if (patternIndex < 0 || patternIndex >= (int) mPatterns.size()) return 4.0;
+    const auto& pat = mPatterns[(size_t) patternIndex];
+    const int den = (pat.tsDen > 0) ? pat.tsDen : 4;
+    return (double) juce::jmax (1, pat.tsNum) * 4.0 / (double) den;
+}
+
+bool PatternManager::autoDerivePatternTimeSig (int patternIndex, int placementBar)
+{
+    if (patternIndex < 0 || patternIndex >= (int) mPatterns.size()) return false;
+    auto& pat = mPatterns[(size_t) patternIndex];
+    if (pat.tsLocked) return false;   // user already set or already auto-derived
+
+    const auto eff = getEffectiveTimeSigAtBar (placementBar);
+    pat.tsNum    = eff.num;
+    pat.tsDen    = eff.den;
+    pat.tsLocked = true;
+    return true;
+}
+
+void PatternManager::setPatternTimeSig (int patternIndex, int num, int den)
+{
+    if (patternIndex < 0 || patternIndex >= (int) mPatterns.size()) return;
+    auto& pat = mPatterns[(size_t) patternIndex];
+    pat.tsNum    = juce::jlimit (1, 32, num);
+    // Round denominator to nearest power of 2 in [1, 32].
+    static const int kAllowedDen[] = { 1, 2, 4, 8, 16, 32 };
+    int closest = 4, bestDiff = 999;
+    for (int d : kAllowedDen)
+        if (std::abs (d - den) < bestDiff) { closest = d; bestDiff = std::abs (d - den); }
+    pat.tsDen    = closest;
+    pat.tsLocked = true;
+}
+
+double PatternManager::barStartBeat (int bar) const
+{
+    if (bar <= 0) return 0.0;
+
+    int    barCounter  = 0;
+    double beatCounter = 0.0;
+    int    currentNum  = 4;
+    int    currentDen  = 4;
+
+    auto bpbFor = [](int num, int den) -> double {
+        return (double) num * 4.0 / (double) (den > 0 ? den : 4);
+    };
+
+    const size_t n = mTimeSigChanges.size();
+    for (size_t i = 0; i <= n; ++i)
+    {
+        const int nextSwitchBar = (i < n) ? mTimeSigChanges[i].bar
+                                          : std::numeric_limits<int>::max();
+        const double bpb = bpbFor (currentNum, currentDen);
+
+        const int runEnd = juce::jmin (bar, nextSwitchBar);
+        if (runEnd > barCounter)
+        {
+            beatCounter += (runEnd - barCounter) * bpb;
+            barCounter = runEnd;
+        }
+        if (barCounter >= bar) return beatCounter;
+
+        if (i < n)
+        {
+            currentNum = mTimeSigChanges[i].num;
+            currentDen = mTimeSigChanges[i].den;
+        }
+    }
+    return beatCounter;
+}
+
 void PatternManager::enableDrum(int slot, bool enabled)
 {
     if (slot >= 0 && slot < MAX_DRUM_SOUNDS) mDrumEnabled[slot] = enabled;
@@ -341,35 +498,31 @@ int PatternManager::getNumEnabledDrums() const
 
 double PatternManager::getEffectivePatternLoopBeats() const
 {
-    const double kBeatsPerBar = 4.0;
-    const auto&  pat          = mPatterns[mCurrentPattern];
-    // Minimum is 1 bar (4 beats) — not pat.bars*4 — so a bar-1-only piano roll
-    // loops immediately rather than waiting for the full configured bar count.
-    const double kMinBeats    = kBeatsPerBar;
+    // C.5b (post-revert): pattern owns its TS.  Bar length in PPQ = pattern's
+    // own bpb (4/4 = 4, 3/4 = 3, 6/8 = 3, 7/8 = 3.5).  Builder grid is
+    // uniform 4-beat-per-bar separately (song-level TS markers are decorative
+    // only) — but pattern playback length is in pattern-bars, each pat-bpb wide.
+    if (mPatterns.empty() || mCurrentPattern < 0 || mCurrentPattern >= (int) mPatterns.size())
+        return 4.0;   // safe fallback when no patterns loaded
+    const auto&  pat          = mPatterns[(size_t) mCurrentPattern];
+    const double patBpb       = juce::jmax (1.0, getPatternBeatsPerBar (mCurrentPattern));
+    // Minimum is 1 pattern-bar so a bar-1-only piano roll loops immediately
+    // rather than waiting for the full configured bar count.
+    const double kMinBeats    = patBpb;
 
-    // ── Priority 1: longest PATTERN-typed builder block that references this pattern ─
-    // R5d follow-up (2026-04-24): audio + automation clips share `patternIndex`
-    // with the pattern they were authored under (so they render against the
-    // right pattern in Song mode), but they are NOT part of the pattern's
-    // loop length.  A 6-minute auto-dropped master recording must not drag
-    // pattern-mode playback out to 90 bars.
-    // G-7 polish (2026-04-29): use effectiveLengthBeats() so blocks with
-    // sub-bar precision (lengthBeats override, e.g. record-dropped blocks
-    // that end mid-bar) loop at their actual length.  Previously
-    // `lengthBars * kBeatsPerBar` ignored the lengthBeats override, making
-    // a 2-bar block whose record happened to be 1.5 bars wide loop at 1 bar.
+    // Helper: ceil a beat position up to the next bar-start beat using the
+    // pattern's intrinsic bpb (uniform within the pattern).
+    auto ceilToBarStart = [patBpb](double endBeat) -> double
     {
-        double maxBlockBeats = 0.0;
-        for (auto& b : mArrangement)
-        {
-            if (b.clipType != ClipType::Pattern) continue;
-            if (b.patternIndex == mCurrentPattern)
-                maxBlockBeats = juce::jmax(maxBlockBeats, effectiveLengthBeats (b));
-        }
-        if (maxBlockBeats > kMinBeats)
-            return maxBlockBeats;
-    }
+        if (endBeat <= 0.0) return 0.0;
+        const double bars = std::ceil (endBeat / patBpb - 1e-9);
+        return bars * patBpb;
+    };
 
+    // C.5b: default loop = 1 pattern-bar (kMinBeats).  Note-end + step-end
+    // priorities below extend when content exists.  Block-driven priority
+    // dropped because Builder bars are uniform 4-beat while patterns play at
+    // their intrinsic TS — mixing units broke 7/4 → 3/4 transitions.
     double loopBeats = kMinBeats;
 
     // ── Priority 2: furthest note end in any roll, ceiled to bar boundary ────
@@ -393,15 +546,15 @@ double PatternManager::getEffectivePatternLoopBeats() const
         for (auto& roll : pat.instRoll)  scanRoll(roll);
 
         if (latestEnd > 0.0)
-        {
-            double bars = std::ceil(latestEnd / kBeatsPerBar);
-            loopBeats = juce::jmax(loopBeats, bars * kBeatsPerBar);
-        }
+            loopBeats = juce::jmax (loopBeats, ceilToBarStart (latestEnd));
     }
 
     // ── Priority 3: extend to cover any active basic-sequence steps ───────────
     // The step index = (ppqPos / stepLen) % totalSteps, wrapping with mLoopBeats.
     // If active steps exist beyond the current loop length, extend so they fire.
+    // C.5b: stepLen still uses 4-beat-per-bar reference for stepsPerBar — the
+    // basic step grid is grid-based, not TS-based.  This is consistent with
+    // how step grids work in FL-style sequencers.
     {
         auto scanSeq = [&](const PageSequenceData& seq) {
             double stepLen = 4.0 / juce::jmax(1, seq.stepsPerBar);
@@ -413,8 +566,7 @@ double PatternManager::getEffectivePatternLoopBeats() const
                     if (seq.basicGrid[row][s].active)
                     {
                         double stepEnd = (s + 1) * stepLen;
-                        double bars    = std::ceil(stepEnd / kBeatsPerBar);
-                        loopBeats = juce::jmax(loopBeats, bars * kBeatsPerBar);
+                        loopBeats = juce::jmax (loopBeats, ceilToBarStart (stepEnd));
                     }
                 }
             }
@@ -638,6 +790,10 @@ juce::ValueTree PatternManager::toValueTree() const
         pNode.setProperty("bars",        p.bars,        nullptr);
         pNode.setProperty("stepsPerBar", p.stepsPerBar, nullptr);
         pNode.setProperty("color",       (int) p.color.getARGB(), nullptr);   // F-1
+        // C.5b: per-pattern intrinsic TS
+        pNode.setProperty("tsNum",       p.tsNum,       nullptr);
+        pNode.setProperty("tsDen",       p.tsDen,       nullptr);
+        pNode.setProperty("tsLocked",    p.tsLocked,    nullptr);
 
         // Legacy per-row drum step grid
         for (int d = 0; d < MAX_DRUM_SOUNDS; ++d)
@@ -946,6 +1102,10 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         p.name        = pNode.getProperty("name",        "Pattern").toString();
         p.bars        = (int)pNode.getProperty("bars",        DEFAULT_BARS);
         p.stepsPerBar = (int)pNode.getProperty("stepsPerBar", DEFAULT_SPB);
+        // C.5b: per-pattern intrinsic TS (defaults 4/4 for legacy projects).
+        p.tsNum       = (int) pNode.getProperty("tsNum",    4);
+        p.tsDen       = (int) pNode.getProperty("tsDen",    4);
+        p.tsLocked    =       pNode.getProperty("tsLocked", false);
         // F-1: missing color attribute → fall back to default (light grey).
         if (pNode.hasProperty("color"))
             p.color = juce::Colour ((juce::uint32) (int) pNode.getProperty ("color"));

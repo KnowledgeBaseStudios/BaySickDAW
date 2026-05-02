@@ -175,6 +175,12 @@ void EQ8DSP::reset()
 bool EQ8DSP::isIdentity() const noexcept
 {
     constexpr float kZeroEpsilon = 0.001f;   // sub-millibel; user can't hear
+    // D.4-Q6 fix (2026-05-01): mainLevel != 0 must NOT short-circuit the
+    // EQ to bypass — the multiply happens at the end of process() so the
+    // early-return path skipped it.  All-bands-flat with mainLevel = +6 dB
+    // previously produced 0 dB output.  Now any non-zero mainLevel keeps
+    // process() running so the gain is applied.
+    if (std::abs (mMainLevelDb) >= kZeroEpsilon) return false;
     for (int i = 0; i < kNumBands; ++i)
     {
         const auto& b = mBands[i].params;
@@ -906,12 +912,26 @@ void EQ8DSP::processDynamic(int i, int numSamples)
     if (!bs.detFilterL.coefficients) updateDetector(i);
 
     // Detector source: the saved original input (parallel-detector model).
-    // Pick the relevant channel domain from the saved scratch based on the
-    // band's channel routing. Stereo + LOnly use L; ROnly uses R; Mid uses
-    // (L+R)/2; Side uses (L-R)/2 computed on the fly.
-    const float* detSrcL = mDetInput.getReadPointer(0);
-    const float* detSrcR = mDetInput.getNumChannels() > 1
-                         ? mDetInput.getReadPointer(1) : detSrcL;
+    // C.4 Phase 1 (2026-04-30): if this band has scSourceId in 0..3, swap
+    // the detector source for the strip's SC array entry at that index.
+    // Pre-C.4 scSourceId was channel-id scaffolding; under the new SC
+    // infrastructure it's a slot index into the strip's SC receive array.
+    // -1 = no external SC, fall back to the parallel-detector internal copy.
+    const juce::AudioBuffer<float>* detSrc = &mDetInput;
+    if (p.scSourceId >= 0 && mScBufs != nullptr
+        && p.scSourceId < mScCount && mScBufs[p.scSourceId] != nullptr)
+    {
+        auto* cand = mScBufs[p.scSourceId];
+        if (cand->getNumSamples() >= numSamples && cand->getNumChannels() > 0)
+            detSrc = cand;
+    }
+
+    // Pick the relevant channel domain from the chosen detector source based
+    // on the band's channel routing. Stereo + LOnly use L; ROnly uses R; Mid
+    // uses (L+R)/2; Side uses (L-R)/2 computed on the fly.
+    const float* detSrcL = detSrc->getReadPointer(0);
+    const float* detSrcR = detSrc->getNumChannels() > 1
+                         ? detSrc->getReadPointer(1) : detSrcL;
 
     // Envelope follower constants (one-pole smoother with asymmetric times).
     // coef = exp(-1 / (time_ms * sr / 1000)) is the standard formula.
@@ -970,23 +990,20 @@ void EQ8DSP::processDynamic(int i, int numSamples)
     {
         if (isUp)
         {
-            // 12j Issue 1: noise-floor gate. Expansion should fire only when the
-            // envelope is below threshold BUT still contains real signal. Without
-            // this gate, silence in the band's frequency range registers envDb
-            // near -120 (my floor) which makes `under` enormous and GR pegged at
-            // rangeMag - so the band is visually "fully expanding" on silence
-            // even though the boost has nothing to boost. The gate at
-            // thr - 2*rangeMag produces a sensitive window [thr - 2*rangeMag, thr]
-            // where expansion fires, beyond which GR drops back to zero.
-            const float floorDb = thr - 2.0f * rangeMag;
-            if (envDb > floorDb)
-            {
-                const float under = thr - envDb;
-                if (under > 0.0f)
-                    grDb = under * (1.0f - 1.0f / ratio);   // positive = boost
-                grDb = juce::jmin(grDb, rangeMag);
-            }
-            // else: envelope below noise floor -> silence -> no fake expansion.
+            // C.4 follow-up (2026-04-30): the noise-floor gate at
+            // thr - 2*rangeMag was removed. It produced a tight expansion
+            // window [thr - 2*rangeMag, thr] that made "Range positive does
+            // nothing" the typical user experience -- the band's detector
+            // level had to land in that narrow band to fire. Pro-Q3 / Neutron
+            // / etc. don't gate; they expand whenever envDb < thr, capped at
+            // rangeMag. The original concern (curve visually pegged at
+            // max boost during silence) is a cosmetic artifact only -- silence
+            // x gain is still silence; the dotted "outer range" line showing
+            // full extent on silence is actually the correct semantic.
+            const float under = thr - envDb;
+            if (under > 0.0f)
+                grDb = under * (1.0f - 1.0f / ratio);   // positive = boost
+            grDb = juce::jmin(grDb, rangeMag);
         }
         else
         {

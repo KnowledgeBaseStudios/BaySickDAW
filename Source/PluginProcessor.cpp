@@ -2,6 +2,7 @@
 // 2026-04-25: BaySickDrumsProcessor include removed — class deleted.
 #include "BaySickSynth/BaySickSynthProcessor.h"   // D1.4-fix (c): drum transpose compensation
 #include "VibePlayer/VibePlayerProcessor.h"       // D1.4-fix (c): drum tune compensation
+#include "DSP/EngineSidechainHelper.h"            // C.4 Phase 2.2: ISidechainEngine for engine-level SC push
 #ifdef VIBESYNTH_VST
   #include "PluginEditor.h"
 #endif
@@ -35,6 +36,16 @@ static void emitPianoNoteOn (juce::MidiBuffer& dst,
         const int wheel = juce::jlimit (0, 16383,
             (int) std::round (8192.f + note.finePitch * 4096.f));
         dst.addEvent (juce::MidiMessage::pitchWheel (ch, wheel), samplePos);
+    }
+    // Batch E #2 (2026-05-01): per-note Filter Cutoff via standard CC 74
+    // ("Brightness").  Engine voices listen for CC 74 and apply a +/-2-octave
+    // offset on top of the master cutoff for the upcoming note.  0.5 = neutral,
+    // 0 = full close (-2 oct), 1 = full open (+2 oct).
+    if (std::abs (note.filterCutoff - 0.5f) > 0.005f)
+    {
+        const int cc = juce::jlimit (0, 127,
+            (int) std::round (note.filterCutoff * 127.0f));
+        dst.addEvent (juce::MidiMessage::controllerEvent (ch, 74, cc), samplePos);
     }
     dst.addEvent (juce::MidiMessage::noteOn (ch, note.midiNote, (juce::uint8) vel),
                   samplePos);
@@ -145,6 +156,10 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     mSynth.setCurrentPlaybackSampleRate(sampleRate);
     mBassSynth.prepare(sampleRate, samplesPerBlock);
+
+    // C.3 (2026-04-30): reset MIDI input collector for the current SR.  Without
+    // this, removeNextBlockOfMessages can't compute correct sample offsets.
+    mLiveMidiCollector.reset (sampleRate);
 
     // Pre-allocate engine scratch buffers to avoid audio-thread allocation
     mLayerEngineSum    .setSize(2, samplesPerBlock, false, true, false);
@@ -417,7 +432,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
                 // Schedule notes from all Pattern arrangement blocks that overlap current beat range.
                 // No loop wrap — playhead advances linearly until stop.
-                constexpr double kBPB = 4.0;  // beats per bar (4/4 time)
+                // C.5b (post-revert): Builder grid is uniform 4-beat-per-bar
+                // (song-level TS markers are decorative-only).  Block start/end
+                // are simple bar*4.  Pattern's own loop length uses the
+                // pattern's INTRINSIC TS (FL-style), so a 3/4 pattern in an
+                // 8-bar block plays for 3-beat-bars and loops within the block.
+                constexpr double kBPB = 4.0;
                 for (int blkIdx = 0; blkIdx < mPatternManager->getNumBlocks(); ++blkIdx)
                 {
                     const auto& blk = mPatternManager->getBlock(blkIdx);
@@ -430,7 +450,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     if (beatEnd <= blkStartBeat || beatStart >= blkEndBeat) continue;
 
                     const auto& sPat   = mPatternManager->getPattern(blk.patternIndex);
-                    double patOwnLen   = juce::jmax(1.0, (double)sPat.bars * kBPB);
+                    // Pattern looping length uses pattern's intrinsic TS.
+                    const double patBpb = mPatternManager->getPatternBeatsPerBar (blk.patternIndex);
+                    double patOwnLen   = juce::jmax (1.0, (double) sPat.bars * patBpb);
 
                     // Helper: schedule notes from a roll, repeating within the block if needed.
                     // Also schedules note-offs into mPRPendingOffs so voices don't hang.
@@ -816,7 +838,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // ── Automation clip playback ──────────────────────────────────────────
     if (pos.getIsPlaying() && mPatternManager)
     {
-        const double kBeatsPerBar = 4.0;   // assumes 4/4; good enough for 4C
+        // C.5b (post-revert): Builder grid is uniform 4-beat-per-bar.
+        const double kBeatsPerBar = 4.0;
         double autoBeat = pos.getPpqPosition().orFallback(0.0);
         double autoBar  = autoBeat / kBeatsPerBar;
 
@@ -892,7 +915,11 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // 5F-4b B1b: refresh routing graph + clear per-channel accumulators
     mVibeGraph.rebuildRoutingFromApvts();
     mVibeGraph.clearChannelAccumulators();
-    const auto& routingEdges = mVibeGraph.getRoutingGraph().edges();
+    // C.4 Phase 1 (2026-04-30): clear SC receive buffers each block before
+    // sources fan their post-everything taps in.
+    mVibeGraph.clearScRecvBuffers();
+    const auto& routingEdges   = mVibeGraph.getRoutingGraph().edges();
+    const auto& routingScEdges = mVibeGraph.getRoutingGraph().scEdges();
 
     // Helper: fan this source channel's output out to all destinations listed
     // in the RoutingGraph (main-out + active sends). Called after each
@@ -915,8 +942,51 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     dst->addFrom(c, 0, buf, c, 0, n, gain);
             }
         }
+        // C.4 Phase 1 (2026-04-30): SC fan -- copy (not add) src's tap into
+        // dst's SC receive slot.  Per the encoding contract there is at most
+        // one source per (dst, slot), so copy-replaces is correct.  Tap point
+        // = post-everything per Q4=A: by the time routeInsertOutput is called
+        // for a strip, its full pipeline (rack -> EQ -> fader -> mute -> solo
+        // -> pan) has already run on `buf`.
+        for (const auto& sce : routingScEdges)
+        {
+            if (sce.srcId != srcChannelId) continue;
+            if (auto* recv = mVibeGraph.getScRecvBuffer(sce.dstId, sce.dstSlot))
+            {
+                const int rnc = juce::jmin(nc, recv->getNumChannels());
+                for (int c = 0; c < rnc; ++c)
+                    recv->copyFrom(c, 0, buf, c, 0, n);
+            }
+        }
     };
     const double bpmForInserts = pos.getBpm().orFallback(120.0);
+
+    // C.3 (2026-04-30): drain hardware MIDI input collector and route into
+    // the engine page-buffer named by the Piano Roll's currently-focused
+    // engine (set via setLiveMidiTarget on focus change).  Runs before
+    // choke-group dispatch so live note-ons participate in the same choke
+    // semantics as piano-roll scheduled notes.  Q3 spec: only Layer / Bass
+    // / Drum receive — Vox / Inst / Clip / DrumKit grid drop.
+    {
+        juce::MidiBuffer liveMidi;
+        mLiveMidiCollector.removeNextBlockOfMessages (liveMidi, numSamples);
+        if (! liveMidi.isEmpty())
+        {
+            const int kind = mLiveMidiTargetKind .load (std::memory_order_relaxed);
+            const int idx  = mLiveMidiTargetIndex.load (std::memory_order_relaxed);
+            juce::MidiBuffer* dest = nullptr;
+            // Encoding matches PianoRollPage::EngineKind ordering.
+            if      (kind == 1 && idx >= 0 && idx < kMaxLayerPages) dest = &layerPageMidi[idx];
+            else if (kind == 2 && idx >= 0 && idx < kMaxBassPages)  dest = &bassPageMidi [idx];
+            else if (kind == 3 && idx >= 0 && idx < kMaxDrumPages)  dest = &drumPageMidi [idx];
+            if (dest != nullptr)
+            {
+                for (const auto m : liveMidi)
+                    dest->addEvent (m.getMessage(), m.samplePosition);
+            }
+            // else: drop (DrumKit grid / Clip / Vox / Inst / unset target).
+        }
+    }
 
     // ── D3: choke-group dispatch ──────────────────────────────────────────
     // Scan synth note-ons + audio clip starts in this block; for each fire
@@ -933,6 +1003,24 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                 projStartSamp, numSamples, secPerBeatCh);
     }
 
+    // C.4 Phase 2.2: helper that pushes the strip's SC array to the engine
+    // via ISidechainEngine, then calls the engine's processBlock.  The cast
+    // is safe — every engine processor type registered into mLayerEngines /
+    // mBassEngines / mDrumEngines / mClipEngines / mVoxEngines / mInstEngines
+    // inherits ISidechainEngine.  dynamic_cast cost is acceptable here (one
+    // per active engine per block).
+    auto pushScToEngine = [this] (juce::AudioProcessor* eng, int channelId)
+    {
+        if (auto* sc = dynamic_cast<ISidechainEngine*>(eng))
+        {
+            const auto arr = mVibeGraph.getScRecvArray(channelId);
+            juce::AudioBuffer<float>* bufs[VibeGraph::kMaxScRecvSlots];
+            for (int s = 0; s < VibeGraph::kMaxScRecvSlots; ++s)
+                bufs[s] = arr[(size_t) s];
+            sc->setSidechainBuffers(bufs, VibeGraph::kMaxScRecvSlots);
+        }
+    };
+
     {
         juce::SpinLock::ScopedTryLockType lk(mLayerEngineLock);
         if (lk.isLocked())
@@ -942,6 +1030,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 if (!mLayerEngines[i]) continue;
                 mLayerEngineScratch.setSize(numRenderCh, numSamples, false, false, true);
                 mLayerEngineScratch.clear();
+                pushScToEngine(mLayerEngines[i], MixerChannelIds::layerInsert(i));
                 mLayerEngines[i]->processBlock(mLayerEngineScratch, layerPageMidi[i]);
                 // §P4.3 B7: legacy per-page pre-rack EQ removed — pre-rack EQ is
                 // now the InsertNode's own preEq member (runs inside processInsert).
@@ -982,6 +1071,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 if (!mBassEngines[i]) continue;
                 mBassEngineScratch.setSize(numRenderCh, numSamples, false, false, true);
                 mBassEngineScratch.clear();
+                pushScToEngine(mBassEngines[i], MixerChannelIds::bassInsert(i));
                 mBassEngines[i]->processBlock(mBassEngineScratch, bassPageMidi[i]);
                 // §P4.3 B7: legacy per-page pre-rack EQ removed — see Layer loop.
                 // 5F-4a Batch 6: InsertNode handles polarity/preEq/width/rack/EQ/fader/mute/solo
@@ -1020,6 +1110,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 if (!mDrumEngines[i]) continue;
                 mDrumEngineScratch.setSize(numRenderCh, numSamples, false, false, true);
                 mDrumEngineScratch.clear();
+                pushScToEngine(mDrumEngines[i], MixerChannelIds::drumInsert(i));
                 mDrumEngines[i]->processBlock(mDrumEngineScratch, drumPageMidi[i]);
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Drum, i,
                                           mDrumEngineScratch, bpmForInserts, anySolo);
@@ -1046,6 +1137,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 if (!mClipEngines[ci]) continue;
                 mClipEngineScratch.setSize(numRenderCh, numSamples, false, false, true);
                 mClipEngineScratch.clear();
+                pushScToEngine(mClipEngines[ci], MixerChannelIds::audioInsert(ci));
                 mClipEngines[ci]->processBlock(mClipEngineScratch, clipPageMidi[ci]);
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Audio, ci,
                                           mClipEngineScratch, bpmForInserts, anySolo);
@@ -1071,6 +1163,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 if (!mVoxEngines[vi]) continue;
                 mVoxEngineScratch.setSize(numRenderCh, numSamples, false, false, true);
                 mVoxEngineScratch.clear();
+                pushScToEngine(mVoxEngines[vi], MixerChannelIds::voxInsert(vi));
                 mVoxEngines[vi]->processBlock(mVoxEngineScratch, voxPageMidi[vi]);
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Vox, vi,
                                           mVoxEngineScratch, bpmForInserts, anySolo);
@@ -1089,6 +1182,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 if (!mInstEngines[ii]) continue;
                 mInstEngineScratch.setSize(numRenderCh, numSamples, false, false, true);
                 mInstEngineScratch.clear();
+                pushScToEngine(mInstEngines[ii], MixerChannelIds::instInsert(ii));
                 mInstEngines[ii]->processBlock(mInstEngineScratch, instPageMidi[ii]);
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Inst, ii,
                                           mInstEngineScratch, bpmForInserts, anySolo);
@@ -1141,7 +1235,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 const int   row      = player.trackRow;
                 const bool  inRange  = (row >= 0 && row < kMaxAudioRows);
                 const bool  rowMuted = inRange && mx.audioRowMute[row];
-                const float rowLevel = inRange ? mx.audioRowLevel[row] : 1.0f;
+                // Batch E #7 (2026-05-01): rowLevel removed - was a dead local.
+                // Audio-row fader is applied downstream by the InsertNode chain,
+                // not here.
                 const bool  builderRowMuted = !mPatternManager->isRowAudible(row);
 
                 // D3: skip clips that have been silenced by a choke fire.
@@ -1379,6 +1475,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         if (clipsAccum != nullptr)
         {
             juce::AudioBuffer<float>& clipsBus = *clipsAccum;
+
+            // C.4 Phase 1: push SC array to ClipsBus chain before processing.
+            mVibeGraph.pushScArrayToStrip(MixerChannelIds::kClipsBus);
 
             // §P4.3: Audio Clips Bus pre-rack EQ.
             if (auto* preEq = mVibeGraph.getAudioClipsBusPreEQ();
@@ -1649,7 +1748,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                soloOf ("mixer_clipsbus")
             || soloOf ("mixer_voxbus")  || soloOf ("mixer_instbus")
             || soloOf ("mixer_voxbus2") || soloOf ("mixer_instbus2")
-            || soloOf ("mixer_instbus3");
+            || soloOf ("mixer_instbus3")
+            || soloOf ("mixer_fx");   // C.1: FX Bus joins receive-group solo
 
         for (const auto& bs : kBusSets)
         {
@@ -1659,6 +1759,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             if (buf.getNumChannels() < 2) continue;
 
             const juce::String prefix = bs.prefix;
+
+            // C.4 Phase 1: push SC array to this bus's chain before processing.
+            mVibeGraph.pushScArrayToStrip(bs.chId);
 
             if (bs.preEq) bs.preEq->process(buf);
             if (bs.rack)
@@ -1736,6 +1839,54 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             }
 
             routeInsertOutput (bs.chId, buf, numSamples);
+        }
+    }
+
+    // C.1 (2026-04-30): FX Bus pipeline.  By this point its accumulator has
+    // been populated by every upstream insert / aux / bus that targets it
+    // (default destination for aux strips).  Pre-C.1 the accumulator was
+    // built but never read back -- effects loaded into the FX Bus rack
+    // produced zero audio change and aux output silently disappeared.
+    {
+        // Compute panLaw the same way the Vox/Inst bus loop did (whether
+        // or not the loop ran -- we may be in numInputs == 0 path).
+        const int fxPanLaw =
+            (apvts.getRawParameterValue("master_pan_law") != nullptr)
+                ? (int) apvts.getRawParameterValue("master_pan_law")->load()
+                : 0;
+
+        // Recompute busAnySolo for the FX Bus path -- the Vox/Inst loop's
+        // local is scoped to the if (numInputs > 0) block above.
+        auto soloOfFx = [&] (const char* p) -> bool {
+            const auto* v = apvts.getRawParameterValue (juce::String (p) + "_solo");
+            return v && v->load() > 0.5f;
+        };
+        const bool fxBusAnySolo =
+               soloOfFx ("mixer_clipsbus")
+            || soloOfFx ("mixer_voxbus")  || soloOfFx ("mixer_instbus")
+            || soloOfFx ("mixer_voxbus2") || soloOfFx ("mixer_instbus2")
+            || soloOfFx ("mixer_instbus3")
+            || soloOfFx ("mixer_fx");
+
+        if (auto* fxAccum = mVibeGraph.getChannelAccumulator(MixerChannelIds::kFxBus))
+        {
+            if (fxAccum->getNumChannels() >= 2)
+            {
+                mVibeGraph.processEffectsBus (*fxAccum, bpmForInserts,
+                                                fxBusAnySolo, fxPanLaw);
+
+                // Mirror EffectsBusNode internal peak atomics into PluginProcessor
+                // atomics so the MixerPage timer pushes them into the strip's
+                // DBFSMeter (same shape as the other bus peak atomics).
+                const auto [pkL, pkR] = mVibeGraph.getEffectsBusPeakDbStereo();
+                mFxBusPeakDbL.store (pkL, std::memory_order_relaxed);
+                mFxBusPeakDbR.store (pkR, std::memory_order_relaxed);
+                mFxBusPeakDb .store (juce::jmax (pkL, pkR), std::memory_order_relaxed);
+
+                // Fan the post-pipeline output to FX Bus's _sendTo destination
+                // (default = Master).
+                routeInsertOutput (MixerChannelIds::kFxBus, *fxAccum, numSamples);
+            }
         }
     }
 
@@ -1853,6 +2004,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         {
             const double bpm = mMetro.countInBpm.load(std::memory_order_relaxed);
             const double bps = juce::jmax(1e-6, bpm / (60.0 * mSampleRate));
+            // C.5b: count-in accent honors the CURRENT pattern's intrinsic TS
+            // (FL-style — patterns own their own TS).  Falls back to 4 when
+            // no pattern.
+            const int countInBeatsPerBar = mPatternManager
+                ? juce::jmax (1, mPatternManager->currentPattern().tsNum)
+                : 4;
             for (int s = 0; s < numSamples; ++s)
             {
                 double prevPhase = mMetro.countInPhase;
@@ -1862,7 +2019,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     // Crossing into integer N means beat (N+1).  countInBeatsFired
                     // tracks how many beats have fired so far.
                     ++mMetro.countInBeatsFired;
-                    triggerClick((mMetro.countInBeatsFired - 1) % 4 == 0);   // accent every 4
+                    triggerClick((mMetro.countInBeatsFired - 1) % countInBeatsPerBar == 0);
                 }
                 float s0 = synthClick();
                 for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
@@ -1886,6 +2043,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     const double bps  = juce::jmax(1e-6, bpmV / (60.0 * mSampleRate));
                     const double bs0  = pi->getPpqPosition().orFallback(0.0);
 
+                    // C.5b: accent on every Nth beat where N = current
+                    // pattern's intrinsic numerator (FL-style — pattern owns
+                    // its own TS).  Falls back to 4 when no pattern.
+                    const int accentEvery = mPatternManager
+                        ? juce::jmax (1, mPatternManager->currentPattern().tsNum)
+                        : 4;
                     for (int s = 0; s < numSamples; ++s)
                     {
                         double sampleBeat = bs0 + s * bps;
@@ -1896,7 +2059,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                         {
                             mMetro.lastBeatFloor = beatFloor;
                             long long bf = (long long)std::round(beatFloor);
-                            triggerClick((((bf % 4) + 4) % 4 == 0));
+                            triggerClick ((((bf % accentEvery) + accentEvery) % accentEvery) == 0);
                         }
                         float s0 = synthClick();
                         for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
@@ -2185,7 +2348,9 @@ void VibeSynthProcessor::updateAllPreRackEQsFromApvts()
 void VibeSynthProcessor::rebuildAudioClipPlayers()
 {
     if (!mPatternManager) return;
-    constexpr double kBPB = 4.0;  // beats per bar (4/4)
+    // C.5b (post-revert): Builder grid is uniform 4-beat-per-bar (song-level
+    // TS markers are decorative-only).
+    constexpr double kBPB = 4.0;
 
     std::vector<AudioClipPlayer> newPlayers;
     for (int i = 0; i < mPatternManager->getNumBlocks(); ++i)
@@ -2957,7 +3122,10 @@ void VibeSynthProcessor::addParamsForEQBank(const juce::String& prefix,
             // magnitude (-18..+18) so Range can't exceed what the band's gain
             // could theoretically reach on its own. Keeps the live-animated curve
             // inside the -18..+18 dB grid for single-band modulation scenarios.
-            dynF(apvts, ids, bp + "Range",     labelBase + " Range",    -18.f, 18.f, -12.f);
+            // C.4 follow-up (2026-04-30): default 0 (was -12) so the dotted
+            // ghost curve is flat on first Make-Dynamic toggle.  User adjusts
+            // the Range slider to dial in downward (-) or upward (+) intent.
+            dynF(apvts, ids, bp + "Range",     labelBase + " Range",    -18.f, 18.f, 0.f);
             dynB(apvts, ids, bp + "Upward",    labelBase + " Upward",    false);
             // Option B scaffolding for Tier 3 T11 external sidechain. Default -1
             // = internal (band's own input); integer routing id when ready.
@@ -3264,7 +3432,12 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
     // FX Bypass on ALL strip types (master/bus/insert) — each has its own rack.
     addB(prefix + "_bypass", prefix + " FX Bypass", false);
 
-    if (kind == MixerStripKind::Insert)
+    // Batch E #6 (2026-05-01): _arm only meaningful on Vox/Inst inserts
+    // (record-arm for live audio capture).  Layer/Bass/Drum/Audio/Aux strips
+    // never read it, so registering it on every Insert kind was zombie state
+    // bloating presets.
+    if (kind == MixerStripKind::Insert
+        && (prefix.startsWith("mixer_vox_") || prefix.startsWith("mixer_inst_")))
     {
         addB(prefix + "_arm", prefix + " Arm", false);
     }
@@ -3287,6 +3460,18 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
         addI(sp + "_to",      prefix + " Send" + juce::String(s) + " To",      -1, 999, -1);
         addF(sp + "_amount",  prefix + " Send" + juce::String(s) + " Amount",  -60.f, 6.f, 0.f);
         addB(sp + "_prepost", prefix + " Send" + juce::String(s) + " PrePost", false);
+    }
+
+    // C.4 Phase 1 (2026-04-30): SC receive lines.  Per Q5=C, every strip can
+    // receive up to 4 separate SC signals (white cables in the UI).  Each
+    // receive slot stores the SOURCE strip's channel id; -1 = empty.  DSP
+    // modules pick which receive line drives them via _sc_pick (per rack
+    // slot) or scSourceId (per EQ8 band).  Source signal is the source
+    // strip's post-everything tap (Q4=A — final output, post-fader/pan).
+    for (int s = 0; s < 4; ++s)
+    {
+        const juce::String sp = prefix + "_sc_recv" + juce::String(s);
+        addI(sp + "_from",    prefix + " SC Recv" + juce::String(s) + " From", -1, 999, -1);
     }
 
     // D3: choke group — 0 = none, 1..16 = group id.  When two inserts share a

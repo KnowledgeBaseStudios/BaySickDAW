@@ -127,15 +127,18 @@ public:
         bool  dynamic    { false };
         float threshold  { -18.0f };  // dB (-60..0)
         float ratio      { 2.0f };    // >=1; 1 = no effect (1..20)
+        // C.4 follow-up (2026-04-30): rangeDb default 0 (was 12) so dynamic
+        // bands start with no modulation -- matches the new APVTS default
+        // and the UI Band mirror; user explicitly dials in the range.
         float attack     { 10.0f };   // ms (0.1..500)
         float release    { 100.0f };  // ms (1..2000)
-        float rangeDb    { 12.0f };   // max |GR| in dB (0..24)
+        float rangeDb    { 0.0f };    // signed dB (-18..+18); 0 = no modulation
         bool  upward     { false };   // false = compress above thr; true = expand below thr
 
-        // 12j Option B scaffolding for Tier 3 T11 external sidechain: source id
-        // for the detector. -1 = internal (band's own input). No DSP effect today;
-        // preserved in APVTS for preset stability when the sidechain infrastructure
-        // session lands later.
+        // C.4 Phase 1 (2026-04-30): slot index into the strip's SC receive
+        // array (0..3).  -1 = internal (band's own input).  When >= 0 the
+        // detector swaps to mScBufs[scSourceId] so dynamic-EQ gain reduction
+        // is driven by the chosen sidechain source.
         int   scSourceId { -1 };
     };
 
@@ -172,7 +175,7 @@ public:
     void setBandRelease  (int i, float ms);
     void setBandRange    (int i, float dB);
     void setBandUpward   (int i, bool upward);
-    void setBandScSource (int i, int sourceId);   // Option B scaffolding; DSP no-op today
+    void setBandScSource (int i, int sourceId);   // C.4 Phase 1: live - swaps detector source to mScBufs[sourceId]
 
     // 12j: UI polling - current gain reduction (dB, signed: negative = downward
     // compression, positive = upward expansion). Wait-free atomic read.
@@ -201,10 +204,12 @@ public:
             || mPhaseMode == PhaseMode::HQE;
     }
     void setLinearPhasePrecision(int precision);  // 0-4 maps to FFT 256/512/1024/2048/4096
+    int  getLinearPhasePrecision() const noexcept { return mLinearPrec; }
 
     // ---- IIR parameter smoothing (12d: wired to smoother ramp length) -------
     // 0 = instant (~1 ms), 1 = slow (~50 ms).
     void setIIRModSpeed(float speed01);
+    float getIIRModSpeed() const noexcept { return mIIRModSpeed; }
 
     // 12b: Proportional Q toggle. When true, Peaking bands narrow their Q as
     // gain rises (SSL/Neve hardware feel). Default true. Has no effect on

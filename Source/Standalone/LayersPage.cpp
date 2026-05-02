@@ -106,6 +106,8 @@ void LayersPage::buildPianoRollTab()
 {
     mPianoRoll = std::make_unique<PianoRollContainer>();
     mPianoRoll->setData(&mPM.currentPattern().layerRoll[mPageIndex]);
+    // C.5b: pattern's intrinsic TS drives the piano roll's bar-line spacing.
+    mPianoRoll->setTimeSignature(mPM.currentPattern().tsNum, mPM.currentPattern().tsDen);
     mPianoRoll->setNoteColor(mPageColor);
     addAndMakeVisible(*mPianoRoll);
 
@@ -196,6 +198,22 @@ void LayersPage::selectEngine(const juce::String& engineName)
         mEngineEditor.reset(proc->createEditor());
     }
 
+    // 2026-04-30: wire engine-internal patch picker -> page tab/strip rename.
+    // Each engine editor fires onPatchLoaded(filename) after its internal
+    // loadPreset succeeds.  Forward through onSoundNameChanged so ribbon tab,
+    // mixer strip, and piano-roll context label all rename to the patch.
+    {
+        auto onPatch = [this](const juce::String& name)
+        {
+            if (name.isEmpty()) return;
+            setTabName(name);
+            if (onSoundNameChanged) onSoundNameChanged(name);
+        };
+        if      (auto* he = dynamic_cast<HarmlessEditor*>      (mEngineEditor.get())) he->onPatchLoaded = onPatch;
+        else if (auto* se = dynamic_cast<BaySickSynthEditor*>  (mEngineEditor.get())) se->onPatchLoaded = onPatch;
+        else if (auto* pe = dynamic_cast<VibePlayerEditor*>    (mEngineEditor.get())) pe->onPatchLoaded = onPatch;
+    }
+
     // Wire note audition callback (fires on note draw, pitch drag, and key click)
     if (mPianoRoll)
     {
@@ -251,6 +269,9 @@ void LayersPage::selectEngine(const juce::String& engineName)
             mEQDisplay->bindMsDSP(preEq, &mProcessor.apvts,
                                   mixerPrefix + "_preeq_mid_eq",
                                   mixerPrefix + "_preeq_side_eq");
+            // C.4 Phase 1 (2026-04-30): SC source dropdown context.
+            mEQDisplay->setStripContext(mixerPrefix,
+                [](int id){ return MixerChannelIds::friendlyName(id); });
         }
         mEQDisplay->setSampleRate(sr);
     }
@@ -287,7 +308,11 @@ void LayersPage::timerCallback()
 
     // Refresh piano roll data pointer when pattern changes
     if (mPianoRoll)
+    {
         mPianoRoll->setData(&mPM.currentPattern().layerRoll[mPageIndex]);
+        // C.5b: refresh pattern TS too so bar lines re-spaced for new pattern.
+        mPianoRoll->setTimeSignature(mPM.currentPattern().tsNum, mPM.currentPattern().tsDen);
+    }
 }
 
 // ── Component overrides ───────────────────────────────────────────────────────

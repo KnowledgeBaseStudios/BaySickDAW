@@ -31,9 +31,12 @@ struct EditorPanelBase : public juce::Component
 
     // Stamp automation paramIds on all knobs.
     // channelPrefix: e.g. "layers_bus", "layer_1", "master"
-    // slotIndex: 0-5 (which rack slot this panel occupies)
+    // slotUuid:     stable per-slot identity from EffectRack::Slot::uuid.  C13:
+    //               drives paramIds so reorder/pack-to-top preserves automation
+    //               (UUID travels with the Slot via std::swap).  Empty uuid =
+    //               no paramIds stamped (slot is empty or pre-C13 fallback).
     // Call after the panel is created and placed in a slot.
-    void setSlotContext(const juce::String& channelPrefix, int slotIndex);
+    void setSlotContext(const juce::String& channelPrefix, const juce::String& slotUuid);
 
     // Hook for panels that keep knobs in their own vectors (r1knobs, r2knobs)
     // instead of the base-class `knobs`. Return raw pointers to extra knobs so

@@ -79,6 +79,17 @@ public:
         return mMid.isIdentity() && mSide.isIdentity();
     }
 
+    // C.4 Phase 1 (2026-04-30): forward SC array to both inner EQ8 instances
+    // so their per-band scSourceId picks can resolve to a buffer.  The wrapper
+    // itself doesn't pick a single line (it has no per-instance pick) — the
+    // inner EQ8DSPs read mScBufs[band.scSourceId] per band.
+    void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept override
+    {
+        DSPBase::setSidechainBuffers(bufs, count);
+        mMid .setSidechainBuffers(bufs, count);
+        mSide.setSidechainBuffers(bufs, count);
+    }
+
     // ── UI hint: which side the display is currently showing ─────────────────
     // Does NOT affect audio - both EQs always run.
     bool showMid { true };

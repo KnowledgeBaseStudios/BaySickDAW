@@ -39,7 +39,7 @@ std::unique_ptr<DSPBase> EffectRack::createEffect(EffectType type)
 // ── Slot management ───────────────────────────────────────────────────────────
 // All mutators take mSlotsLock so the audio thread (which try-locks in
 // process()) can skip one block rather than race with an effect destructor.
-void EffectRack::loadEffect(int slot, EffectType type)
+void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidOverride)
 {
     if (slot < 0 || slot >= kNumSlots) return;
 
@@ -50,6 +50,15 @@ void EffectRack::loadEffect(int slot, EffectType type)
         effect->prepare(mSampleRate, mMaxBlock);
     if (effect)
         effect->setHostBPM(mHostBPM);
+
+    // Stable per-slot identity for automation paramIds. Fresh UUID on each
+    // user-facing load (effect-type swap drops old automation, which matches
+    // intuition — different effect = different knobs). setStateInformation
+    // passes the saved UUID via uuidOverride to keep automation lanes alive
+    // across project save/load.
+    juce::String newUuid = uuidOverride.isNotEmpty()
+        ? uuidOverride
+        : juce::Uuid().toString();
 
     // Old-effect tear-down + pointer swap must be atomic w.r.t. process().
     // Move the outgoing effect OUT of the slot under the lock, then release
@@ -62,7 +71,10 @@ void EffectRack::loadEffect(int slot, EffectType type)
         outgoing                = std::move (mSlots[slot].effect);
         mSlots[slot].effect     = std::move (effect);
         mSlots[slot].type       = type;
-        mSlots[slot].bypassed   = false;
+        // D.1: preserve the slot's bypass flag across hot-swap so a user-bypassed
+        // slot stays bypassed when the user swaps in a different effect type
+        // (the bypass is a slot property, not an effect property).
+        mSlots[slot].uuid       = newUuid;
     }
     // outgoing destructs here, outside the lock — safe, audio thread can
     // already see the new pointer on its next block.
@@ -78,6 +90,7 @@ void EffectRack::clearSlot(int slot)
         outgoing                = std::move (mSlots[slot].effect);
         mSlots[slot].type       = EffectType::None;
         mSlots[slot].bypassed   = false;
+        mSlots[slot].uuid       = {};   // empty slot = no automation identity
     }
     // outgoing destructs here, outside the lock
 }
@@ -135,6 +148,7 @@ void EffectRack::packSlotsToTop()
                 mSlots[i].effect.reset();
                 mSlots[i].type     = EffectType::None;
                 mSlots[i].bypassed = false;
+                mSlots[i].uuid     = {};
             }
         }
     }
@@ -199,6 +213,12 @@ void EffectRack::process(juce::AudioBuffer<float>& buffer)
         s.inputLevelRms.store(prevRms + vuAlpha * (rmsThisBlock - prevRms),
                               std::memory_order_relaxed);
 
+        // C.4 Phase 1 (2026-04-30): push SC context to this slot's effect
+        // BEFORE processing so SC consumers see the right array + pick.
+        if (mScBufs != nullptr)
+            s.effect->setSidechainBuffers(mScBufs, mScCount);
+        s.effect->setSidechainPick(s.scPick);
+
         s.effect->process(buffer);
 
         // Per-slot output gain
@@ -227,6 +247,24 @@ void EffectRack::setSlotOutputGain(int slot, float db)
 float EffectRack::getSlotOutputGain(int slot) const
 {
     return (slot >= 0 && slot < kNumSlots) ? mSlots[slot].outputGainDb : 0.f;
+}
+
+// C.4 Phase 1 (2026-04-30): SC pick + array setters.
+void EffectRack::setSlotSidechainPick (int slot, int pickIdx) noexcept
+{
+    if (slot >= 0 && slot < kNumSlots) mSlots[slot].scPick = pickIdx;
+}
+int EffectRack::getSlotSidechainPick (int slot) const noexcept
+{
+    return (slot >= 0 && slot < kNumSlots) ? mSlots[slot].scPick : -1;
+}
+void EffectRack::setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept
+{
+    const int n = juce::jmin(count, (int) mScArrCopy.size());
+    for (int i = 0; i < (int) mScArrCopy.size(); ++i)
+        mScArrCopy[(size_t) i] = (bufs != nullptr && i < count) ? bufs[i] : nullptr;
+    mScBufs  = mScArrCopy.data();
+    mScCount = n;
 }
 float EffectRack::getSlotInputLevel(int slot) const
 {
@@ -269,7 +307,9 @@ int EffectRack::getTotalLatencySamples() const
 void EffectRack::getStateInformation(juce::MemoryBlock& dest)
 {
     juce::ValueTree state("EffectRack");
-    state.setProperty("bypassed", mRackBypassed, nullptr);
+    // Batch E #5 (2026-05-01): mRackBypassed is owned by the strip's _bypass
+    // APVTS param.  XML dual-storage was overwritten on every load by the
+    // APVTS listener, so the XML half was dead weight.  Removed.
 
     for (int i = 0; i < kNumSlots; ++i)
     {
@@ -281,6 +321,13 @@ void EffectRack::getStateInformation(juce::MemoryBlock& dest)
         // Was missing from save — every project load reset every slot's
         // Vol knob to 0 dB.  Range -24..+12 dB per EditorPanelBase.
         slotTree.setProperty("outputGainDb", mSlots[i].outputGainDb,    nullptr);
+        // C13: stable per-slot UUID drives automation paramIds.  Persisted
+        // so automation lanes survive project reload.  Pre-C13 saves omit
+        // this property — those projects' lanes silently no-op (matches
+        // the audit's existing Tier 4 stale-lane behavior).
+        slotTree.setProperty("uuid",     mSlots[i].uuid,                 nullptr);
+        // C.4 Phase 1: per-slot SC pick (-1 = no SC, 0..3 = strip SC line).
+        slotTree.setProperty("scPick",   mSlots[i].scPick,               nullptr);
 
         if (mSlots[i].effect)
         {
@@ -304,7 +351,8 @@ void EffectRack::setStateInformation(const void* data, int sz)
     auto state = juce::ValueTree::fromXml(*xml);
     if (!state.isValid()) return;
 
-    mRackBypassed = (bool)(int)state.getProperty("bypassed", 0);
+    // Batch E #5: do NOT read "bypassed" here -- APVTS _bypass param drives it.
+    // (Old projects with a stale XML "bypassed" property are silently ignored.)
 
     for (int i = 0; i < state.getNumChildren(); ++i)
     {
@@ -319,12 +367,19 @@ void EffectRack::setStateInformation(const void* data, int sz)
             // 2026-04-30: restore per-slot Vol knob (default 0 dB if the
             // saved project predates this fix and didn't write it).
             float vol = (float)(double)child.getProperty("outputGainDb", 0.0);
+            // C13: restore saved UUID so automation paramIds match across
+            // load.  Empty when loading a pre-C13 project; loadEffect will
+            // generate a fresh UUID in that case.
+            juce::String uuid = child.getProperty("uuid", "").toString();
+            // C.4 Phase 1: restore per-slot SC pick (default -1 = no SC).
+            int scPick = (int) child.getProperty("scPick", -1);
 
             if (type != EffectType::None)
             {
-                loadEffect(slotIdx, type);
+                loadEffect(slotIdx, type, uuid);
                 setSlotBypassed(slotIdx, byp);
                 setSlotOutputGain(slotIdx, vol);
+                setSlotSidechainPick(slotIdx, scPick);
 
                 juce::String b64 = child.getProperty("data", "");
                 if (b64.isNotEmpty() && mSlots[slotIdx].effect)

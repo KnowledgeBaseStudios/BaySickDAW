@@ -119,6 +119,14 @@ public:
     void addInstChannel();
     void addInstChannelAtIndex(int idx);
 
+    // D.3 (2026-05-01): override strip display order from a saved project.
+    // The vector lists indices in left-to-right display order.  Indices not
+    // currently registered are dropped silently; currently-registered indices
+    // missing from the saved order are appended at the end so we never lose
+    // a strip.  Triggers a re-layout.
+    enum class OrderKind { Aux, Vox, Inst, Audio };
+    void setStripOrder (OrderKind kind, const std::vector<int>& indices);
+
     // 5F-4b B2: accessor for PageMenuBar injection (StandaloneEditor reparents
     // this button into the menu bar when the Mixer page becomes visible).
     juce::Component* getAddAuxBtn()    const { return mAddAuxBtn.get();    }
@@ -140,7 +148,13 @@ public:
     bool isInstBus3Active() const { return mInstBus3Active; }
 
     // Called by StandaloneEditor when a ribbon tab is renamed (ribbon → mixer sync).
-    void renameChannel(int tabId, const juce::String& newName);
+    // C.4 follow-up (2026-04-30): kind tag added because Layer / Bass / Drum
+    // strip maps are all keyed by per-type page index (0..N-1).  The old
+    // signature took only an index and searched maps in order Layer -> Bass
+    // -> Drum, stopping at first match -- which collided when Bass[0] and
+    // Drum[0] coexisted (renaming the Drum hit Bass's strip first).
+    enum class StripKind { Layer, Bass, Drum };
+    void renameChannel(StripKind kind, int pageIdx, const juce::String& newName);
 
     // Connect to the global undo system.
     void setUndoContext(const UndoContext& ctx);
@@ -169,6 +183,7 @@ public:
     // equivalents).  Used by serializeUIState to stash custom names.
     std::vector<int> getVoxStripIndices()  const;
     std::vector<int> getInstStripIndices() const;
+    std::vector<int> getAudioStripIndices() const { return mAudioRowOrder; }
     juce::String     getVoxStripName  (int idx) const;
     juce::String     getInstStripName (int idx) const;
 
@@ -301,6 +316,10 @@ private:
 
         // 5F-4b B5: send-placement mode (click "+" → click destination)
         int   mPendingSendSrcId { -1 };
+        // C.4 Phase 1 (2026-04-30): sidechain-placement mode (click "+" →
+        // pick "Sidechain" from popup → click destination strip).  At most
+        // ONE of mPendingSendSrcId / mPendingScSrcId is >= 0 at a time.
+        int   mPendingScSrcId   { -1 };
 
         explicit CableOverlay(MixerPage& o);
         ~CableOverlay() override { stopTimer(); }
@@ -317,6 +336,9 @@ private:
         // B5: enter/exit send-placement mode
         void startSendPlacement(int srcChannelId);
         void cancelSendPlacement();
+        // C.4 Phase 1: enter/exit sidechain-placement mode (white cable).
+        void startSidechainPlacement(int srcChannelId);
+        void cancelSidechainPlacement();
 
         int findSocketNear(juce::Point<float> pt, float radius, bool skipLocked) const;
         int findStripUnder(juce::Point<float> pt) const;
@@ -324,14 +346,33 @@ private:
 
         // B5: find the first inactive send slot (0..3) for a strip, or -1 if full.
         int findAvailableSendSlot(const juce::String& prefix) const;
+        // C.4 Phase 1: find the first empty SC receive slot on a TARGET strip
+        // (target-side encoding).  Returns -1 if all 4 receive lines are full.
+        int findAvailableScRecvSlot(const juce::String& targetPrefix) const;
 
         // B6: right-click cable popup
         // Returns {srcId, dstId, sendSlotIdx} if a cable is near pt; else {-1,-1,-1}.
-        struct CableHit { int srcId = -1; int dstId = -1; int sendSlot = -1; bool isMainOut = false; };
+        // C.4 Phase 1 extends with sidechain detection: when isSidechain is
+        // true, scRecvSlot holds the target's receive line (0..3) and sendSlot
+        // is unused.
+        struct CableHit {
+            int  srcId      = -1;
+            int  dstId      = -1;
+            int  sendSlot   = -1;
+            int  scRecvSlot = -1;
+            bool isMainOut  = false;
+            bool isSidechain= false;
+        };
         CableHit hitTestCable(juce::Point<float> pt) const;
         void showCablePopup(juce::Point<float> screenPt, const CableHit& hit);
     };
     std::unique_ptr<CableOverlay> mCableOverlay;
+
+    // C.4 Phase 1 (2026-04-30): popup-then-dispatch helper for the per-strip
+    // "+" Add-Send button.  Shows a Send / Sidechain submenu and routes the
+    // user's pick to the corresponding CableOverlay placement mode.  Wired
+    // from every onAddSendRequested lambda.
+    void onAddCableRequestedFor(int srcChannelId);
 
     // Find the strip component for a given MixerChannelIds value (or nullptr).
     MixerTrackStrip* findStripByChannelId(int channelId) const;

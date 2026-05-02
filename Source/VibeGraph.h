@@ -101,6 +101,35 @@ namespace MixerChannelIds
         return dstId >= kAuxBase && dstId < kAuxBase + kMaxAuxStrips;
     }
 
+    // C.4 Phase 1 (2026-04-30): friendly display name for a strip channel id.
+    // Used by DynamicParamsPopout / SlotComponent SC source dropdowns to
+    // label routed sources ("Layer 1", "Master", "FX Bus", etc.).
+    inline juce::String friendlyName (int chId)
+    {
+        switch (chId)
+        {
+            case kMaster:    return "Master";
+            case kLayersBus: return "Layers Bus";
+            case kBassBus:   return "Bass Bus";
+            case kDrumsBus:  return "Drums Bus";
+            case kFxBus:     return "FX Bus";
+            case kClipsBus:  return "Clips Bus";
+            case kVoxBus:    return "Vox Bus";
+            case kInstBus:   return "Inst Bus";
+            case kVoxBus2:   return "Vox Bus 2";
+            case kInstBus2:  return "Inst Bus 2";
+            case kInstBus3:  return "Inst Bus 3";
+        }
+        if (chId >= kLayerBase && chId < kLayerBase + 16) return "Layer " + juce::String(chId - kLayerBase + 1);
+        if (chId >= kBassBase  && chId < kBassBase  + 16) return "Bass "  + juce::String(chId - kBassBase  + 1);
+        if (chId >= kDrumBase  && chId < kDrumBase  + 16) return "Drum "  + juce::String(chId - kDrumBase  + 1);
+        if (chId >= kAudioBase && chId < kAudioBase + 50) return "Audio " + juce::String(chId - kAudioBase + 1);
+        if (chId >= kAuxBase   && chId < kAuxBase   + kMaxAuxStrips)  return "Aux "  + juce::String(chId - kAuxBase  + 1);
+        if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)  return "Vox "  + juce::String(chId - kVoxBase  + 1);
+        if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips) return "Inst " + juce::String(chId - kInstBase + 1);
+        return "Ch " + juce::String(chId);
+    }
+
     // Default main-out destination for a given channel.
     // Master → kOutput (locked). Buses/Aux → FxBus. Inserts → their parent bus.
     inline int defaultSendTo (int channelId)
@@ -145,10 +174,24 @@ public:
         bool  isMainOut;    // true = main-out cable (exactly one per src)
     };
 
-    static constexpr int kMaxSendsPerStrip = 4;
+    // C.4 Phase 1 (2026-04-30): sidechain edge.  Source's post-everything
+    // tap feeds dst's SC receive line `dstSlot` (0..3).  Cycle check covers
+    // SC + main + send edges combined (a strip mustn't sidechain itself
+    // through any path that loops back).
+    struct ScEdge
+    {
+        int srcId;
+        int dstId;
+        int dstSlot;        // 0..3, the receive line index on dst
+    };
+
+    static constexpr int kMaxSendsPerStrip   = 4;
+    static constexpr int kMaxScRecvsPerStrip = 4;
 
     // Pre-flight cycle check (message thread). Would adding {src → dst} create
     // a cycle given the current edge list? Called before committing a cable drop.
+    // Considers main + send + sidechain edges; SC cables participate in the
+    // same DAG so cyclic feedback is impossible.
     bool wouldCreateCycle(int src, int dst) const noexcept;
 
     // Rebuild edges + topological order from APVTS. Returns true on clean build;
@@ -156,12 +199,14 @@ public:
     bool rebuildFromApvts(juce::AudioProcessorValueTreeState& apvts,
                           const std::vector<std::pair<int, juce::String>>& activeChannels);
 
-    const std::vector<int>&  topoOrder() const noexcept { return mTopoOrder; }
-    const std::vector<Edge>& edges()     const noexcept { return mEdges; }
+    const std::vector<int>&    topoOrder() const noexcept { return mTopoOrder; }
+    const std::vector<Edge>&   edges()     const noexcept { return mEdges; }
+    const std::vector<ScEdge>& scEdges()   const noexcept { return mScEdges; }
 
 private:
-    std::vector<Edge> mEdges;
-    std::vector<int>  mTopoOrder;
+    std::vector<Edge>   mEdges;
+    std::vector<ScEdge> mScEdges;
+    std::vector<int>    mTopoOrder;
 
     bool computeTopo(const std::vector<int>& ids);
 };
@@ -173,7 +218,8 @@ private:
 //   LayersBusNode ─┐
 //   BassBusNode   ─┤→ MasterBusNode → output
 //   DrumsBusNode  ─┘
-//   EffectsBusNode  (post-master parallel send — stub, wired in Phase 1E)
+//   EffectsBusNode  (FX Bus — receive bus for aux strips + user-routed sends;
+//                    driven by VibeGraph::processEffectsBus each block)
 //
 // Each bus node owns an EffectRack (6 slots) and holds a reference to the
 // channel EQ8MsDSP managed by PluginProcessor.  Mixer gain/mute/solo comes
@@ -244,6 +290,20 @@ public:
                       juce::AudioBuffer<float>* bassPreRendered        = nullptr,
                       juce::AudioBuffer<float>* drumsPreRendered       = nullptr,
                       juce::AudioBuffer<float>* audioClipsPreRendered  = nullptr);
+
+    // C.1 (2026-04-30): runs the FX Bus pipeline on its accumulator buffer
+    // (preEq -> rack -> postEq -> polarity -> M/S width -> fader x mute x
+    // solo -> pan -> peak meter).  Caller must subsequently routeInsertOutput
+    // from kFxBus to fan the result downstream (default = Master).  busAnySolo
+    // participates in the receive-group solo gate; panLaw matches the project-
+    // level master_pan_law convention used by the Vox/Inst bus loop.
+    void processEffectsBus(juce::AudioBuffer<float>& buf, double bpm,
+                            bool busAnySolo, int panLaw);
+
+    // C.1 (2026-04-30): post-pipeline FX Bus peak (dBFS), written by
+    // processEffectsBus each block.  Returns -60 if EffectsBusNode hasn't
+    // been built yet.
+    std::pair<float, float> getEffectsBusPeakDbStereo() const;
 
     // ── Bus EffectRack access (Effects Page / Mixer UI) ───────────────────────
     EffectRack* getLayersBusRack();
@@ -433,6 +493,28 @@ public:
     // Clear all accumulator buffers to zero at top of each block.
     void clearChannelAccumulators();
 
+    // C.4 Phase 1 (2026-04-30): per-strip SC receive buffer set.  Each strip
+    // can hold up to kMaxScRecvsPerStrip stereo SC inputs from upstream
+    // sources; consumed by DSP modules on the strip via setSidechainBuffers.
+    // Lazy: nullptr until first use.  Cleared (but not freed) at top of each
+    // block alongside channel accumulators.  Slot index 0..3 maps directly
+    // to _sc_recv{N}_from APVTS / _sc_pick lookups.
+    static constexpr int kMaxScRecvSlots = RoutingGraph::kMaxScRecvsPerStrip;
+    juce::AudioBuffer<float>* getScRecvBuffer (int channelId, int slotIdx);
+    // Returns a pointer to the channel's full SC array (4 stereo buffers).
+    // Slots that have never been allocated are nullptr in the returned array.
+    // The array itself is owned by VibeGraph; do not free.
+    using ScRecvArray = std::array<juce::AudioBuffer<float>*, kMaxScRecvSlots>;
+    ScRecvArray getScRecvArray (int channelId);
+    // Clear all SC receive buffers (call alongside clearChannelAccumulators).
+    void clearScRecvBuffers();
+    // Push the strip's SC array to its preEq + rack + postEq DSP modules.
+    // Address-only push -- the actual buffer contents are filled by upstream
+    // routeInsertOutput SC fanout, AFTER topo-sorted source strips process.
+    // Called by VibeGraph internally for inserts + buses + master, and by
+    // PluginProcessor for the Vox/Inst bus loop strips.
+    void pushScArrayToStrip (int channelId);
+
     // Routing graph used by PluginProcessor to look up per-insert main/send
     // destinations. Rebuilt from APVTS each block via rebuildRoutingFromApvts.
     RoutingGraph& getRoutingGraph() noexcept { return mRoutingGraph; }
@@ -557,6 +639,11 @@ private:
     // 5F-4b B1b: routing state
     RoutingGraph                                       mRoutingGraph;
     std::unordered_map<int, juce::AudioBuffer<float>>  mChannelAccum;
+
+    // C.4 Phase 1: per-channel SC receive buffer set (4 stereo bufs per strip).
+    // Each ScSet is allocated lazily on first ensureScRecvBuffers() / getScRecvBuffer.
+    struct ScSet { std::array<juce::AudioBuffer<float>, kMaxScRecvSlots> bufs; };
+    std::unordered_map<int, ScSet>                     mScRecv;
     std::vector<std::pair<int, juce::String>>          mActiveChannels;
 
     // ── Phase-2 node registry (AudioProcessorGraph, not yet driving audio) ────

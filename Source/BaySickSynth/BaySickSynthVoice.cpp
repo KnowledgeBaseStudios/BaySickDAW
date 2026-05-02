@@ -1,6 +1,17 @@
 #include "BaySickSynthVoice.h"
 #include <cmath>
 
+// Batch E #9 (2026-05-01): musical-range constants extracted from hot path.
+// Not user-tunable — chosen to give the synth a particular feel.  Renamed
+// from naked literals so the intent is self-documenting.
+namespace
+{
+    constexpr float kVelTrackOctaveSweep   = 4.0f;   // velocity-to-cutoff full sweep
+    constexpr float kEnvFullSweepOctaves   = 4.0f;   // envAmt=1 sweeps cutoff +/- 4 oct
+    constexpr float kLfoFullSweepOctaves   = 2.0f;   // LFO at full depth = +/- 2 oct
+    constexpr float kModWheelSweepOctaves  = 2.0f;   // mod wheel max = +2 oct
+}
+
 BaySickSynthVoice::BaySickSynthVoice()
 {
     mOsc.buildSaw();
@@ -167,6 +178,12 @@ void BaySickSynthVoice::controllerMoved (int cc, int value)
 {
     if (cc == 1) // CC1 = mod wheel
         mModWheelValue = (float) value / 127.0f;
+    else if (cc == 74) // CC74 = filter cutoff (Brightness) - Batch E #2
+    {
+        // Map 0..127 (cc) -> -2..+2 octaves, centered at 64.
+        const float norm = (float) value / 127.0f;          // 0..1
+        mPerNoteCutoffOctaves = (norm - 0.5f) * 4.0f;        // -2 .. +2
+    }
 }
 
 //==============================================================================
@@ -252,19 +269,23 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
 
         // Velocity tracking: higher velocity → higher cutoff
         if (mFilterVelTrack > 0.0f)
-            effCutoff *= std::pow (2.0f, (mCurrentVelocity - 0.5f) * mFilterVelTrack * 4.0f);
+            effCutoff *= std::pow (2.0f, (mCurrentVelocity - 0.5f) * mFilterVelTrack * kVelTrackOctaveSweep);
 
-        // Envelope modulation: ±4 octaves at full env amount
+        // Envelope modulation: ± kEnvFullSweepOctaves at full env amount
         if (mFilterEnvAmt != 0.0f)
-            effCutoff *= std::pow (2.0f, fltEnvVal * mFilterEnvAmt * 4.0f);
+            effCutoff *= std::pow (2.0f, fltEnvVal * mFilterEnvAmt * kEnvFullSweepOctaves);
 
-        // LFO filter modulation: ±2 octaves at full amount
+        // LFO filter modulation: ± kLfoFullSweepOctaves at full amount
         if (mLFODest == BssLFODest::Filter)
-            effCutoff *= std::pow (2.0f, effectiveLFO * 2.0f);
+            effCutoff *= std::pow (2.0f, effectiveLFO * kLfoFullSweepOctaves);
 
-        // Mod wheel → Filter: up to +2 octaves sweep
+        // Mod wheel → Filter: up to + kModWheelSweepOctaves sweep
         if (mModWheelDest == 0)
-            effCutoff *= std::pow (2.0f, mModWheelValue * mModWheelAmt * 2.0f);
+            effCutoff *= std::pow (2.0f, mModWheelValue * mModWheelAmt * kModWheelSweepOctaves);
+
+        // Batch E #2: per-note filter cutoff offset from CC74.
+        if (mPerNoteCutoffOctaves != 0.0f)
+            effCutoff *= std::pow (2.0f, mPerNoteCutoffOctaves);
 
         effCutoff = juce::jlimit (20.0f, 20000.0f, effCutoff);
 

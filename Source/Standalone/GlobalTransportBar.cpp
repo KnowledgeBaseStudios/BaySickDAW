@@ -601,6 +601,14 @@ void GlobalTransportBar::timerCallback()
     if (onGetLoopBeats)
         mPlayHead.setLoopBeats(onGetLoopBeats());
 
+    // C.5: keep playhead time-signature in sync with current beat's TS lookup.
+    if (onGetTimeSig)
+    {
+        int n = 4, d = 4;
+        onGetTimeSig (n, d);
+        mPlayHead.setTimeSignature (n, d);
+    }
+
     bool playing = mPlayHead.isPlaying();
 
     // R5a: Play + Record paint themselves from internal state flags.  No more

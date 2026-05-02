@@ -75,6 +75,9 @@ void HarmlessProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     buffer.clear();
     updateFromApvts();
 
+    // C.4 Phase 2.2: refresh engine-level SC RMS for any internal mod source.
+    mScHelper.updateLevel (buffer.getNumSamples());
+
     // S4 Batch 2b: feed transport tempo to the synth so tempo-synced envelopes
     // and LFO rates track the host. Fall back to 120 BPM when no transport.
     double bps = 2.0;   // 120 BPM default

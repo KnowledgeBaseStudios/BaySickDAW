@@ -355,6 +355,31 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
             rawReadR = cubicInterp(mLineR, rposR, lineSize);
         }
 
+        // ── Lo-Fi (sample-rate reduction + bit crush) ───────────────────────
+        // D.4-Q5 fix (2026-05-01): applied to the delay-line READ (before the
+        // feedback / output split) so the lo-fi character is heard on EVERY
+        // echo — not just on echo #2+ via feedback-buildup, which was the old
+        // placement and made lo-fi inaudible at low feedback levels.
+        {
+            mLoFiPhase += mLoFiRate / static_cast<float>(mSampleRate);
+            if (mLoFiPhase >= 1.0f)
+            {
+                mLoFiPhase -= 1.0f;
+                mLoFiHoldL = rawReadL;
+                mLoFiHoldR = rawReadR;
+            }
+            if (mLoFiBits < 23.0f || mLoFiRate < static_cast<float>(mSampleRate) - 1.0f)
+            {
+                rawReadL = bitcrush(mLoFiHoldL, mLoFiBits);
+                rawReadR = bitcrush(mLoFiHoldR, mLoFiBits);
+            }
+            else
+            {
+                rawReadL = mLoFiHoldL;
+                rawReadR = mLoFiHoldR;
+            }
+        }
+
         // ── Feedback path ────────────────────────────────────────────────────
         float feedL = rawReadL;
         float feedR = rawReadR;
@@ -364,27 +389,6 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         {
             for (int s = 0; s < kDiffStages; ++s)
                 mDiffusion[s].processLR(feedL, feedR);
-        }
-
-        // 2. Lo-Fi (sample-rate reduction + bit crush)
-        {
-            mLoFiPhase += mLoFiRate / static_cast<float>(mSampleRate);
-            if (mLoFiPhase >= 1.0f)
-            {
-                mLoFiPhase -= 1.0f;
-                mLoFiHoldL = feedL;
-                mLoFiHoldR = feedR;
-            }
-            if (mLoFiBits < 23.0f || mLoFiRate < static_cast<float>(mSampleRate) - 1.0f)
-            {
-                feedL = bitcrush(mLoFiHoldL, mLoFiBits);
-                feedR = bitcrush(mLoFiHoldR, mLoFiBits);
-            }
-            else
-            {
-                feedL = mLoFiHoldL;
-                feedR = mLoFiHoldR;
-            }
         }
 
         // 3. Feedback filter (TPT SVF LP/HP/BP, per-sample modulated cutoff)

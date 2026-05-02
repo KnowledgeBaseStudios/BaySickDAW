@@ -31,9 +31,43 @@ public:
     // EffectRack accumulates these for PDC.
     virtual int getLatencySamples() const { return 0; }
 
+    // ── C.4 Phase 1 (2026-04-30): sidechain context ──────────────────────────
+    // Strip pushes its 4 SC receive buffers (post-everything tap of upstream
+    // sources) to every DSP module on the strip each block.  Modules that
+    // consume SC choose which line drives them via their own state:
+    //   * Rack effects (Compressor / Limiter / TransientShaper / future NS-2):
+    //     setSidechainPick(idx) -- single pick stored in mScPick; use
+    //     getActiveSidechain() inside process().
+    //   * EQ8DSP: per-band scSourceId picks; module overrides setSidechainBuffers
+    //     to store the array and reads buffers[scSourceId] per band.
+    // bufs may be nullptr for unused slots; count is always kMaxScRecvSlots.
+    virtual void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept
+    {
+        mScBufs  = bufs;
+        mScCount = count;
+    }
+    void setSidechainPick (int pickIdx) noexcept { mScPick = pickIdx; }
+
+    // True for effects whose process() actually consumes the SC signal
+    // (Compressor / Limiter / TransientShaper / future NS-2).  SlotComponent
+    // shows the SC source dropdown in its header chrome only for these
+    // effects so non-consumers (Reverb / Chorus / etc.) don't display a
+    // confusing dead control.  Default false.
+    virtual bool usesSidechain() const noexcept { return false; }
+
     bool bypassed { false };
 
 protected:
+    juce::AudioBuffer<float>* getActiveSidechain() const noexcept
+    {
+        if (mScBufs == nullptr || mScPick < 0 || mScPick >= mScCount) return nullptr;
+        return mScBufs[mScPick];
+    }
+
     double mSampleRate  { 44100.0 };
     int    mMaxBlock    { 512 };
+
+    juce::AudioBuffer<float>* const* mScBufs  { nullptr };
+    int                              mScCount { 0 };
+    int                              mScPick  { -1 };
 };

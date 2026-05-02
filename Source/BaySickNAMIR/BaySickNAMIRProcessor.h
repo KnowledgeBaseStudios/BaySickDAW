@@ -4,6 +4,7 @@
 #include <atomic>
 #include <memory>
 #include <vector>
+#include "../DSP/EngineSidechainHelper.h"
 
 // Forward declaration so we don't drag Eigen into every translation unit that
 // includes this header.  Full definition is included only inside the .cpp.
@@ -40,6 +41,7 @@ namespace nam { class DSP; }
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BaySickNAMIRProcessor : public juce::AudioProcessor,
+                              public ISidechainEngine,
                               private juce::AudioProcessorValueTreeState::Listener
 {
 public:
@@ -106,6 +108,13 @@ public:
     juce::String getIrFilePath  (int slot = -1) const;
     void         setNamFilePath (const juce::String& p, int slot = -1);
     void         setIrFilePath  (const juce::String& p, int slot = -1);
+
+    // C.4 Phase 2.2: engine-level SC primitive.
+    void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept override
+    {
+        mScHelper.setSidechainBuffers (bufs, count);
+    }
+    float getSidechainLevel() const noexcept override { return mScHelper.getLevel(); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -176,6 +185,8 @@ private:
     // Index 0 = slot A, index 1 = slot B.
     std::array<juce::String, 2> mNamPaths;
     std::array<juce::String, 2> mIrPaths;
+
+    EngineSidechainHelper mScHelper;   // C.4 Phase 2.2 SC primitive
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickNAMIRProcessor)
 };

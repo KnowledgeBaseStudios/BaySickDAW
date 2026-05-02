@@ -5,6 +5,17 @@ SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
 {
     setInterceptsMouseClicks(true, true);
     startTimerHz(30);  // 30fps level feed to meters
+
+    // C.4 Phase 1 (2026-04-30): SC source dropdown.  Hidden by default;
+    // setEditor() shows it only when the loaded effect declares
+    // usesSidechain().  Click pops a menu of currently-routed SC lines.
+    mScBtn = std::make_unique<juce::TextButton>("SC: Off");
+    mScBtn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3b3b));
+    mScBtn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd6d6d6));
+    mScBtn->setTooltip("Sidechain source");
+    mScBtn->setVisible(false);
+    mScBtn->onClick = [this] { showScMenu(); };
+    addChildComponent(*mScBtn);
 }
 
 SlotComponent::~SlotComponent()
@@ -70,8 +81,103 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
         }
     }
 
+    // C.4 Phase 1: show SC dropdown only for effects that consume SC.
+    if (mScBtn)
+    {
+        bool show = false;
+        if (mRack)
+        {
+            const auto& s = mRack->getSlot(mSlotIndex);
+            if (s.effect && s.effect->usesSidechain())
+                show = true;
+        }
+        mScBtn->setVisible(show);
+        if (show) refreshScBtnLabel();
+    }
+
     resized();
     repaint();
+}
+
+// C.4 Phase 1 (2026-04-30): channel context wiring -- EffectsPage::rebuildSlotEditor
+// pushes the strip's mixer APVTS prefix and a source-name resolver every time
+// it rebuilds a slot editor.  Read by showScMenu / refreshScBtnLabel.
+void SlotComponent::setChannelContext (juce::AudioProcessorValueTreeState* apvts,
+                                         const juce::String& channelMixerPrefix,
+                                         std::function<juce::String(int)> resolveSourceName)
+{
+    mApvts              = apvts;
+    mChannelMixerPrefix = channelMixerPrefix;
+    mResolveSourceName  = std::move(resolveSourceName);
+    refreshScBtnLabel();
+}
+
+void SlotComponent::refreshScBtnLabel()
+{
+    if (!mScBtn || !mRack) return;
+    const int pick = mRack->getSlotSidechainPick(mSlotIndex);
+
+    auto label = juce::String("SC: Off");
+    if (pick >= 0 && pick < 4 && mApvts != nullptr && mChannelMixerPrefix.isNotEmpty())
+    {
+        const juce::String pid = mChannelMixerPrefix
+            + "_sc_recv" + juce::String(pick) + "_from";
+        if (auto* p = mApvts->getRawParameterValue(pid))
+        {
+            const int srcId = (int) p->load();
+            if (srcId >= 0)
+            {
+                juce::String srcName = mResolveSourceName ? mResolveSourceName(srcId)
+                                                          : juce::String("Ch ") + juce::String(srcId);
+                if (srcName.isEmpty()) srcName = juce::String("Ch ") + juce::String(srcId);
+                label = "SC: " + srcName;
+            }
+        }
+    }
+    mScBtn->setButtonText(label);
+}
+
+void SlotComponent::showScMenu()
+{
+    if (!mRack || !mApvts || mChannelMixerPrefix.isEmpty()) return;
+
+    juce::PopupMenu m;
+    m.addItem(1, "Off", true, mRack->getSlotSidechainPick(mSlotIndex) < 0);
+
+    // Enumerate active SC receive lines on this strip.  Inactive lines
+    // (-1) are skipped so the user only sees real, drag-routed sources.
+    bool anyActive = false;
+    for (int s = 0; s < 4; ++s)
+    {
+        const juce::String pid = mChannelMixerPrefix
+            + "_sc_recv" + juce::String(s) + "_from";
+        if (auto* p = mApvts->getRawParameterValue(pid))
+        {
+            const int srcId = (int) p->load();
+            if (srcId < 0) continue;
+            anyActive = true;
+            juce::String srcName = mResolveSourceName ? mResolveSourceName(srcId)
+                                                      : juce::String("Ch ") + juce::String(srcId);
+            if (srcName.isEmpty()) srcName = juce::String("Ch ") + juce::String(srcId);
+            m.addItem(10 + s, srcName, true,
+                      mRack->getSlotSidechainPick(mSlotIndex) == s);
+        }
+    }
+
+    if (! anyActive)
+    {
+        m.addSeparator();
+        m.addItem(99, "(no sidechain cables routed to this strip)", false, false);
+    }
+
+    m.showMenuAsync(juce::PopupMenu::Options{}.withTargetComponent(mScBtn.get()),
+        [this](int r)
+        {
+            if (r <= 0 || !mRack) return;
+            const int pick = (r == 1) ? -1 : (r - 10);
+            mRack->setSlotSidechainPick(mSlotIndex, pick);
+            refreshScBtnLabel();
+        });
 }
 
 void SlotComponent::setEditorUndoContext(const UndoContext& ctx)
@@ -143,9 +249,14 @@ void SlotComponent::paint(juce::Graphics& g)
         g.drawText(juce::String::fromUTF8("\xe2\x97\x8f"),  // UTF-8 for ●
                    mBypassRect, juce::Justification::centred);
 
-        // Effect name (between bypass and up-arrow)
+        // Effect name (between bypass and the SC dropdown / up-arrow on the right).
+        // C.4 Phase 1: when SC dropdown is visible, name area shrinks to leave
+        // room for it.  When hidden, name extends to ▲ glyph as before.
         int nameX = mBypassRect.getRight() + 4;
-        int nameW = mUpRect.getX() - nameX - 4;
+        int nameRight = mUpRect.getX() - 4;
+        if (mScBtn != nullptr && mScBtn->isVisible())
+            nameRight = mScBtn->getX() - 4;
+        int nameW = juce::jmax(0, nameRight - nameX);
         g.setFont(juce::Font(12.0f, juce::Font::bold));
         g.setColour(VC::Text);
         g.drawText(mEffectName,
@@ -190,6 +301,14 @@ void SlotComponent::resized()
     mDownRect  = header.removeFromRight(24).withSizeKeepingCentre(20, 20);
     mUpRect    = header.removeFromRight(24).withSizeKeepingCentre(20, 20);
     header.removeFromRight(2);
+
+    // C.4 Phase 1: SC dropdown sits between the effect name area and the
+    // ▲▼× glyph cluster.  ~110 px wide so "SC: Layer 2" fits comfortably.
+    if (mScBtn && mScBtn->isVisible())
+    {
+        mScBtn->setBounds(header.removeFromRight(110).withSizeKeepingCentre(108, 20));
+        header.removeFromRight(4);
+    }
 
     // Editor fills the rest (fader column already removed from b)
     if (mEditor)

@@ -55,6 +55,8 @@ public:
     void setAutoRelease   (bool on);
     // C2: Sidechain HPF cutoff on detector path (20..2000 Hz; 20 = effectively off).
     void setSidechainHPF  (float hz);
+    // C.4 Phase 2.1: LimiterDSP consumes external SC for the detector path.
+    bool usesSidechain() const noexcept override { return true; }
     // C4: Auto-makeup gain. Boosts output by -ceilingDb so lowering the ceiling
     // doesn't quiet the signal (loudness-maximizer workflow).
     void setAutoMakeup    (bool on);

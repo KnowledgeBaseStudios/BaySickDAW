@@ -31,6 +31,15 @@ public:
     // When loopStart > 0 the playhead wraps to loopStart rather than 0.
     void   setLoopStart(double beat)   { mLoopStart.store(juce::jmax(0.0, beat)); }
 
+    // C.5: per-block-updated time signature reported via getPosition().
+    // PluginProcessor::processBlock pushes the TS effective at the current
+    // beat (looked up via PatternManager::getEffectiveTimeSigAtBar).
+    void   setTimeSignature(int num, int den)
+    {
+        mTsNum.store (juce::jlimit (1, 32, num));
+        mTsDen.store (juce::jlimit (1, 32, den));
+    }
+
     juce::Optional<PositionInfo> getPosition() const override;
 
 private:
@@ -40,12 +49,15 @@ private:
     std::atomic<double> mPPQPos     { 0.0 };
     std::atomic<double> mLoopBeats  { 0.0 };
     std::atomic<double> mLoopStart  { 0.0 };
+    std::atomic<int>    mTsNum      { 4 };
+    std::atomic<int>    mTsDen      { 4 };
     double              mSampleRate { 44100.0 };
 };
 
 // ── Standalone JUCE Application ───────────────────────────────────────────────
 class VibesynthStandaloneApp : public juce::JUCEApplication,
-                               public juce::ChangeListener
+                               public juce::ChangeListener,
+                               public juce::MidiInputCallback   // C.3 (2026-04-30)
 {
 public:
     const juce::String getApplicationName()    override { return "BaySickDAW"; }
@@ -58,6 +70,14 @@ public:
 
     // ChangeListener — saves audio device state whenever the user changes it
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
+
+    // C.3 (2026-04-30): hardware MIDI input bridge.  Called from the JUCE MIDI
+    // input thread for every enabled device.  Pushes the message to the
+    // processor's MidiMessageCollector; the audio thread drains the collector
+    // each block and routes by Piano-Roll-page focus (set via
+    // PluginProcessor::setLiveMidiTarget).
+    void handleIncomingMidiMessage (juce::MidiInput*,
+                                     const juce::MidiMessage& message) override;
 
 private:
     std::unique_ptr<VibeSynthProcessor>          mProcessor;

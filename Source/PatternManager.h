@@ -142,6 +142,14 @@ struct Pattern
     juce::String name        { "Pattern 1" };
     int          bars        { DEFAULT_BARS };
     int          stepsPerBar { DEFAULT_SPB  };
+    // C.5b (2026-04-30): per-pattern intrinsic time signature (FL-style).
+    // Drives the piano roll's bar width + beat sub-divisions for THIS pattern.
+    // Default 4/4.  Auto-assigned on first Builder placement (looks up song
+    // TS at the placement bar).  Right-click pattern menu lets users override
+    // and locks tsLocked = true so subsequent placements don't re-derive.
+    int          tsNum       { 4 };
+    int          tsDen       { 4 };
+    bool         tsLocked    { false };   // true once user-set or first-placed
     // Phase F-1 (2026-04-26): per-pattern user colour, shown on Builder grid
     // blocks + Browser pattern items.  Default = light grey.  Persisted to the
     // project XML; loaded patterns without the attribute fall back to the
@@ -369,6 +377,31 @@ public:
     void                 addTimeSigChange (int bar, int num, int den);
     void                 removeTimeSigChange (int idx);
     int                  findTimeSigChangeAtBar (int bar) const;   // exact-bar match, -1 otherwise
+
+    // C.5 (2026-04-30): time-signature-aware beat/bar conversion.
+    // The DAW beat is one quarter note (PPQ).  For a time signature N/D, one
+    // bar contains N * (4/D) PPQ beats — so 4/4 = 4 beats, 3/4 = 3, 6/8 = 3,
+    // 7/8 = 3.5, etc.  When mTimeSigChanges is empty, defaults to 4/4.
+    // Audio thread safe (read-only, no allocations).
+    double getBeatsPerBarAtBar  (int bar) const;
+    double getBeatsPerBarAtBeat (double beat) const;
+    // Returns the (num,den) effective at the given bar.  Defaults to {4,4}.
+    TimeSigChange getEffectiveTimeSigAtBar (int bar) const;
+    // Convert PPQ beat position to (bar, beatInBar) honoring TS changes.
+    // beatInBar is in PPQ beats from the bar's start (so a 6/8 bar runs 0..3).
+    void   beatToBarAndBeatInBar (double beat, int& outBar, double& outBeatInBar) const;
+    // Convert bar count to PPQ beat using TS changes (start of bar).
+    double barStartBeat (int bar) const;
+
+    // Per-pattern beats-per-bar (Pattern.tsNum/tsDen).  PPQ-beat (quarter note)
+    // basis: 4/4 = 4, 3/4 = 3, 6/8 = 3, 5/4 = 5, 7/8 = 3.5.  Defaults 4/4.
+    double getPatternBeatsPerBar (int patternIndex) const;
+    // Auto-derive a pattern's intrinsic TS from the song-level TS at the
+    // given placement bar.  No-op if pattern.tsLocked is already true.
+    // Sets pattern.tsLocked = true after derive.  Returns true if changed.
+    bool   autoDerivePatternTimeSig (int patternIndex, int placementBar);
+    // Manual TS setter (right-click override).  Always locks.
+    void   setPatternTimeSig (int patternIndex, int num, int den);
 
     // ── Audio file library (persists independently of blocks) ────────────
     // Items here survive deletion of all blocks that reference them so the

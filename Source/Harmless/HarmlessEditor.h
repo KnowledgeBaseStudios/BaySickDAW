@@ -29,6 +29,13 @@ public:
     void paint   (juce::Graphics&) override;
     void resized () override;
 
+    // 2026-04-30: fired after the engine's internal preset picker loads a patch.
+    // LayersPage / BassPage wire this to their onSoundNameChanged callback so
+    // the ribbon tab + mixer strip + piano-roll context label all update to
+    // the patch's filename.  Pre-2026-04-30 the engine editors loaded presets
+    // silently and the page wrappers had no way to know.
+    std::function<void(const juce::String&)> onPatchLoaded;
+
 private:
     void valueTreeRedirected (juce::ValueTree& tree) override;
 
@@ -65,9 +72,21 @@ private:
     juce::Slider    mTimbreBlend;
     juce::Slider    mPartALevel, mPartBLevel;
     juce::Slider    mBrownian;
-    // S4 AG-1: Auto-gain mode 2-state toggle (REL / ABS). Positioned in the
-    // Timbre panel alongside Brownian.
+    // S4 AG-1: Auto-gain mode 2-state toggle (REL / ABS).  D.4-Q1+Q2
+    // (2026-05-01): moved from Timbre to Output cell to free space for the
+    // new 2x2 stack of filter offsets + part masks.
     juce::TextButton mAutoGainBtn { "AG: REL" };
+    // D.4-Q2 (2026-05-01): 2x2 stack added to Timbre cell.  Top row: filter 1
+    // cutoff offset + filter 2 cutoff offset.  Bottom row: part A timbre filter
+    // mask + part B timbre filter mask.
+    juce::Slider    mFlt1CutoffOfs;
+    juce::Slider    mFlt2CutoffOfs;
+    juce::Slider    mPartAMask;
+    juce::Slider    mPartBMask;
+    // D.4-Q1 (2026-05-01): per-filter ADSR envelopes (8 knobs total) shown in
+    // a new 2x2 ADSR panel placed to the right of each filter row.
+    juce::Slider    mFlt1A, mFlt1D, mFlt1S, mFlt1R;
+    juce::Slider    mFlt2A, mFlt2D, mFlt2S, mFlt2R;
     // Blur
     juce::Slider    mBlurSize;
     juce::Slider    mBlurTime;     // S2 SLA #8
@@ -144,6 +163,7 @@ private:
     // Top-right: 5x2 grid. R1 = Flt1 | Flt2, R2 = Timbre | BlurPrism, R3 = AmpEnv | FX,
     // R4 + R5 = blank (future upgrade space).
     juce::Rectangle<int> mFlt1Sec, mFlt2Sec, mFXSec;
+    juce::Rectangle<int> mFlt1AdsrSec, mFlt2AdsrSec;   // D.4-Q1 (2026-05-01)
     juce::Rectangle<int> mFutureR4LSec, mFutureR4RSec, mFutureR5LSec, mFutureR5RSec;
     // Bottom-left: left column blank; right column reserved for spectrogram (S5 L2).
     juce::Rectangle<int> mGlobalSec, mAmpEnvSec, mLFOSec, mStrumSec;
@@ -158,6 +178,11 @@ private:
     std::unique_ptr<SliderAtt> mTimbreShapeAtt, mTimbreBlendAtt;
     std::unique_ptr<SliderAtt> mPartBShapeAtt;   // S3: Part B waveform interactivity
     std::unique_ptr<SliderAtt> mPartAAtt, mPartBAtt, mBrownianAtt;
+    // D.4-Q1+Q2 (2026-05-01): timbre 2x2 stack + filter ADSRs.
+    std::unique_ptr<SliderAtt> mFlt1OfsAtt, mFlt2OfsAtt;
+    std::unique_ptr<SliderAtt> mPartAMaskAtt, mPartBMaskAtt;
+    std::unique_ptr<SliderAtt> mFlt1AAtt, mFlt1DAtt, mFlt1SAtt, mFlt1RAtt;
+    std::unique_ptr<SliderAtt> mFlt2AAtt, mFlt2DAtt, mFlt2SAtt, mFlt2RAtt;
     std::unique_ptr<SliderAtt> mBlurSizeAtt;
     std::unique_ptr<SliderAtt> mPrismAmtAtt, mPrismModeAtt;
     std::unique_ptr<SliderAtt> mTremShapeAtt, mTremDepthAtt, mTremSpeedAtt, mTremGapAtt;

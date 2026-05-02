@@ -117,7 +117,7 @@ public:
     void renderNextBlock (juce::AudioBuffer<float>&,
                           int startSample, int numSamples)               override;
     void pitchWheelMoved (int newValue)                                  override;
-    void controllerMoved (int, int)                                      override {}
+    void controllerMoved (int controllerNumber, int newValue)            override;
     void setCurrentPlaybackSampleRate (double newRate)                   override;
 
 private:
@@ -197,6 +197,9 @@ private:
     float  mPartALevel      { 1.0f };
     float  mPartBLevel      { 0.0f };
     float  mVolume          { 1.0f };
+    // Batch E #2 (2026-05-01): per-note filter cutoff offset from CC74.
+    // -2..+2 octaves added to filter-cutoff multiplier in renderNextBlock.
+    float  mPerNoteCutoffOctaves { 0.0f };
     float  mMasterPanL      { 1.0f };   // from setPan() — constant-power
     float  mMasterPanR      { 1.0f };
 

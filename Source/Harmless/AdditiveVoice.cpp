@@ -227,6 +227,18 @@ void AdditiveVoice::pitchWheelMoved (int newValue)
         mTargetHz = midiNoteToHz (getCurrentlyPlayingNote(), mPitchWheelSemis);
 }
 
+void AdditiveVoice::controllerMoved (int controllerNumber, int newValue)
+{
+    // Batch E #2 (2026-05-01): CC 74 (Brightness) = per-note filter cutoff
+    // offset.  Map 0..127 -> -2..+2 octaves.  Applied multiplicatively to
+    // both filter cutoffs in the per-block cutoff calculation.
+    if (controllerNumber == 74)
+    {
+        const float norm = (float) newValue / 127.0f;          // 0..1
+        mPerNoteCutoffOctaves = (norm - 0.5f) * 4.0f;          // -2..+2
+    }
+}
+
 //==============================================================================
 void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
                                       int startSample, int numSamples)
@@ -306,14 +318,18 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
     const float noteSemisAbove60 = juce::jlimit (-60.f, 60.f,
         12.0f * std::log2 (juce::jmax (1.0f, mNoteHz) / 261.6256f));
 
+    // Batch E #2: per-note CC74 cutoff offset, -2..+2 octaves = -24..+24 semis.
+    const float perNoteSemis = mPerNoteCutoffOctaves * 12.0f;
     const float flt1Semis = envSemisFor (mFltADSR1, mFlt1EnvAmt)
                           + mFlt1CutoffOfs
                           + mFlt1KbTrack * noteSemisAbove60
-                          + modFlt1Semis;
+                          + modFlt1Semis
+                          + perNoteSemis;
     const float flt2Semis = envSemisFor (mFltADSR2, mFlt2EnvAmt)
                           + mFlt2CutoffOfs
                           + mFlt2KbTrack * noteSemisAbove60
-                          + modFlt2Semis;
+                          + modFlt2Semis
+                          + perNoteSemis;
     const float flt1Cutoff = juce::jlimit (20.f, 20000.f,
                                            mFilterCutoff  * std::pow (2.0f, flt1Semis / 12.0f));
     const float flt2Cutoff = juce::jlimit (20.f, 20000.f,

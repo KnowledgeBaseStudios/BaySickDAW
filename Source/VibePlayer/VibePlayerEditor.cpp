@@ -63,11 +63,11 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     addAndMakeVisible (mHelpBtn);
 
     // ── Box titles ────────────────────────────────────────────────────────────
-    const char* kBoxTitles[6] = {
+    const char* kBoxTitles[7] = {
         "SAMPLE ENGINE", "PITCH & VOICING", "DYNAMICS",
-        "AMP ENVELOPE",  "LFO",             "OUTPUT"
+        "AMP ENVELOPE",  "LFO",             "FILTER",   "OUTPUT"
     };
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < 7; ++i)
     {
         mBoxHdr[i].setText (kBoxTitles[i], juce::dontSendNotification);
         mBoxHdr[i].setJustificationType (juce::Justification::centred);
@@ -172,7 +172,23 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     for (auto* s : { &mLfoRateKnob, &mLfoAmtKnob }) addAndMakeVisible (*s);
     for (auto* l : { &mLfoRateLbl,  &mLfoAmtLbl  }) addAndMakeVisible (*l);
 
-    // ── Box 6: Output (5 knobs — Master Volume uses white volume filmstrip) ──
+    // ── Box 6: Filter (D.4-Q3 2026-05-01) — 3 hidden APVTS params surfaced ──
+    // mFilterArticKnob removed from the UI on 2026-05-01: the bundled Core
+    // Library has zero SFZs that use `group=`, so any non-zero value silences
+    // the engine.  APVTS param `artic_group` retained so power-user automation
+    // + presets-with-non-zero-artic still apply; just no UI knob.
+    initModKnob (mFilterCutoffKnob, "Filter cutoff (Hz)");
+    initModKnob (mFilterResKnob,    "Filter resonance / Q");
+    initModKnob (mFilterReductKnob, "Lo-fi sample-rate reduction (0=off, 1=max grit)");
+    initLabel   (mFilterCutoffLbl,  "CUTOFF");
+    initLabel   (mFilterResLbl,     "RES");
+    initLabel   (mFilterReductLbl,  "REDUCT");
+    for (auto* s : { &mFilterCutoffKnob, &mFilterResKnob, &mFilterReductKnob })
+        addAndMakeVisible (*s);
+    for (auto* l : { &mFilterCutoffLbl,  &mFilterResLbl,  &mFilterReductLbl  })
+        addAndMakeVisible (*l);
+
+    // ── Box 7: Output (5 knobs — Master Volume uses white volume filmstrip) ──
     initModKnob (mPanKnob,    "Pan (L/R)");
     initModKnob (mStereoKnob, "Stereo width");
     initModKnob (mTrebleKnob, "Treble shelf (cut/boost at 8kHz)");
@@ -228,6 +244,10 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     wireID (mVolumeKnob,        "volume");
     wireID (mTrebleKnob,        "treble");
     wireID (mDriveKnob,         "drive");
+    // D.4-Q3: filter box knob IDs (artic knob hidden — see ctor note)
+    wireID (mFilterCutoffKnob,  "cutoff");
+    wireID (mFilterResKnob,     "res");
+    wireID (mFilterReductKnob,  "reduct");
 
     // D-CC2: same componentID pattern for non-slider attached components so
     // right-click Automate works on buttons + the detune-mode selector too.
@@ -261,6 +281,11 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
 
     mLfoRateAtt       = std::make_unique<SliderAtt> (avts, pid ("lfo_rate"),     mLfoRateKnob);
     mLfoAmtAtt        = std::make_unique<SliderAtt> (avts, pid ("lfoAmt"),       mLfoAmtKnob);
+
+    // D.4-Q3: filter box attachments (artic knob hidden — APVTS param kept)
+    mFilterCutoffAtt  = std::make_unique<SliderAtt> (avts, pid ("cutoff"),       mFilterCutoffKnob);
+    mFilterResAtt     = std::make_unique<SliderAtt> (avts, pid ("res"),          mFilterResKnob);
+    mFilterReductAtt  = std::make_unique<SliderAtt> (avts, pid ("reduct"),       mFilterReductKnob);
 
     mPanAtt           = std::make_unique<SliderAtt> (avts, pid ("pan"),          mPanKnob);
     mStereoAtt        = std::make_unique<SliderAtt> (avts, pid ("stereo"),       mStereoKnob);
@@ -302,12 +327,19 @@ void VibePlayerEditor::valueTreeRedirected (juce::ValueTree& tree)
 }
 
 // ── Box-rect helper (used by both paint and resized) ─────────────────────────
+// D.4-Q3 (2026-05-01): 7 boxes — top row has 3 boxes (Sample/Pitch/Dynamics),
+// bottom row has 4 boxes (AmpEnv/LFO/Filter/Output).  Top boxes are wider
+// than bottom boxes since they share the same total width split into 3 vs 4
+// columns.
 static juce::Rectangle<int> boxRectFor (int idx, int editorW, int editorH)
 {
-    const int col = idx % 3;
-    const int row = idx / 3;
-    const int boxW = (editorW - 2 * kOuterMargin - 2 * kBoxGap) / 3;
-    const int boxH = (editorH - kHdrH - 2 * kOuterMargin - kBoxGap) / 2;
+    const bool topRow = (idx < 3);
+    const int  cols   = topRow ? 3 : 4;
+    const int  col    = topRow ? idx : (idx - 3);
+    const int  row    = topRow ? 0 : 1;
+    const int  totalW = editorW - 2 * kOuterMargin - (cols - 1) * kBoxGap;
+    const int  boxW   = totalW / cols;
+    const int  boxH   = (editorH - kHdrH - 2 * kOuterMargin - kBoxGap) / 2;
     return { kOuterMargin + col * (boxW + kBoxGap),
              kHdrH + kOuterMargin + row * (boxH + kBoxGap),
              boxW, boxH };
@@ -398,7 +430,7 @@ void VibePlayerEditor::resized()
     };
 
     // Box-title labels centred across full box width
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < 7; ++i)
     {
         auto b = box (i);
         mBoxHdr[i].setBounds (b.getX(), b.getY() + 2, b.getWidth(), kBoxTitleH - 2);
@@ -449,15 +481,21 @@ void VibePlayerEditor::resized()
     placeKnob (4, 0, 1, mLfoRateKnob, mLfoRateLbl);
     placeKnob (4, 1, 1, mLfoAmtKnob,  mLfoAmtLbl);
 
-    // ── Box 5: Output — Master Volume on its own row 2 so it stands out.
+    // ── Box 5: Filter (D.4-Q3 — 3 knobs after artic knob removed) ───────────
+    // Cutoff + Res on row 0, Reduct centred on row 1 with empty cell beside it.
+    placeKnob (5, 0, 0, mFilterCutoffKnob, mFilterCutoffLbl);
+    placeKnob (5, 1, 0, mFilterResKnob,    mFilterResLbl);
+    placeKnob (5, 0, 1, mFilterReductKnob, mFilterReductLbl);
+
+    // ── Box 6: Output — Master Volume on its own row 2 so it stands out.
     //   Row 0: Pan | Stereo
     //   Row 1: Overdrive | Treble
     //   Row 2: Master Volume | (empty)
-    placeKnob (5, 0, 0, mPanKnob,    mPanLbl);
-    placeKnob (5, 1, 0, mStereoKnob, mStereoLbl);
-    placeKnob (5, 0, 1, mDriveKnob,  mDriveLbl);
-    placeKnob (5, 1, 1, mTrebleKnob, mTrebleLbl);
-    placeKnob (5, 0, 2, mVolumeKnob, mVolumeLbl);
+    placeKnob (6, 0, 0, mPanKnob,    mPanLbl);
+    placeKnob (6, 1, 0, mStereoKnob, mStereoLbl);
+    placeKnob (6, 0, 1, mDriveKnob,  mDriveLbl);
+    placeKnob (6, 1, 1, mTrebleKnob, mTrebleLbl);
+    placeKnob (6, 0, 2, mVolumeKnob, mVolumeLbl);
 }
 
 // ── Preset management ─────────────────────────────────────────────────────────
@@ -481,6 +519,9 @@ void VibePlayerEditor::showPresetMenu()
                                 : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
     };
 
+    // D.4-Q3 follow-up (2026-05-01): direct sample loads now also fire
+    // onPatchLoaded so the page's tab + mixer strip + piano-roll context label
+    // update to the loaded file's name (was only happening on preset load).
     menu.addItem ("Open Folder...", [this, libRoot]
     {
         auto fc = std::make_shared<juce::FileChooser> (
@@ -491,7 +532,10 @@ void VibePlayerEditor::showPresetMenu()
             {
                 const auto f = ch.getResult();
                 if (f.isDirectory())
+                {
                     mProc.loadSampleFolder (f);
+                    if (onPatchLoaded) onPatchLoaded (f.getFileName());
+                }
             });
     });
     menu.addItem ("Open SFZ...", [this, libRoot]
@@ -504,7 +548,10 @@ void VibePlayerEditor::showPresetMenu()
             {
                 const auto f = ch.getResult();
                 if (f.existsAsFile())
+                {
                     mProc.loadSampleSFZ (f);
+                    if (onPatchLoaded) onPatchLoaded (f.getFileNameWithoutExtension());
+                }
             });
     });
     menu.addItem ("Open Sample...", [this, libRoot]
@@ -518,7 +565,10 @@ void VibePlayerEditor::showPresetMenu()
             {
                 const auto f = ch.getResult();
                 if (f.existsAsFile())
+                {
                     mProc.loadSampleFile (f);
+                    if (onPatchLoaded) onPatchLoaded (f.getFileNameWithoutExtension());
+                }
             });
     });
 
@@ -553,7 +603,10 @@ void VibePlayerEditor::showPresetMenu()
                         { juce::ignoreUnused (f); hasAudio = true; break; }
                         if (hasAudio)
                             m.addItem (c.getFileName(),
-                                [this, c] { mProc.loadSampleFolder (c); });
+                                [this, c] {
+                                    mProc.loadSampleFolder (c);
+                                    if (onPatchLoaded) onPatchLoaded (c.getFileName());
+                                });
                         else
                         {
                             juce::PopupMenu sub;
@@ -564,12 +617,18 @@ void VibePlayerEditor::showPresetMenu()
                     else if (c.hasFileExtension ("sfz"))
                     {
                         m.addItem (c.getFileNameWithoutExtension() + "  [SFZ]",
-                            [this, c] { mProc.loadSampleSFZ (c); });
+                            [this, c] {
+                                mProc.loadSampleSFZ (c);
+                                if (onPatchLoaded) onPatchLoaded (c.getFileNameWithoutExtension());
+                            });
                     }
                     else if (c.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
                     {
                         m.addItem (c.getFileNameWithoutExtension(),
-                            [this, c] { mProc.loadSampleFile (c); });
+                            [this, c] {
+                                mProc.loadSampleFile (c);
+                                if (onPatchLoaded) onPatchLoaded (c.getFileNameWithoutExtension());
+                            });
                     }
                 }
             };
@@ -679,45 +738,84 @@ void VibePlayerEditor::savePreset (const juce::String& name)
         xml->writeTo (dir.getChildFile (name + ".xml"));
 }
 
+// D.4-Q3 fix (2026-05-01): preset XML format is the nested page-style format
+// written by Layer/Bass/Drum savePatchAs (mirror of DrumPage::loadPlayerPreset):
+//   <BaySickPlayerState>
+//     <BaySickPlayerState>           ← inner = apvts state
+//       <PARAM id=... value=.../> ...
+//     </BaySickPlayerState>
+//     <Sample kind="sfz|file|folder" path="library:... | absolute"/>
+//   </BaySickPlayerState>
+// The previous flat-XML parser silently failed on this format (root tag check
+// rejected the wrapper element), so presets loaded the filename but never
+// updated the apvts and never reloaded the sample.
 void VibePlayerEditor::loadPreset (const juce::File& f)
 {
-    auto xml = juce::XmlDocument::parse (f);
-    if (! xml || ! xml->hasTagName (mProc.apvts.state.getType())) return;
+    auto parsed = juce::XmlDocument::parse (f);
+    if (! parsed || ! parsed->hasTagName ("BaySickPlayerState")) return;
 
-    auto loaded = juce::ValueTree::fromXml (*xml);
-
-    // P4.1 trackId-portability fix — see BaySickSynthEditor::loadPreset for full
-    // explanation.  Engine tag for VibePlayer (BaySickPlayer) is "_bsp_".
-    const juce::String localPrefix = mProc.getParamPrefix();   // e.g. "tk_lay_0_bsp_"
-    juce::String loadedPrefix;
-    for (int i = 0; i < loaded.getNumChildren(); ++i)
+    // 1. Apply the inner apvts state child (rewrite trackId prefix so a patch
+    // saved under tk_lay_0_bsp_ loads cleanly under tk_bas_0_bsp_ etc.).
+    if (auto* stateEl = parsed->getChildByName (mProc.apvts.state.getType()))
     {
-        auto child = loaded.getChild (i);
-        if (! child.hasType ("PARAM")) continue;
-        const juce::String id = child.getProperty ("id").toString();
-        const int tagIdx = id.indexOf ("_bsp_");
-        if (id.startsWith ("tk_") && tagIdx > 3)
-        {
-            loadedPrefix = id.substring (0, tagIdx + 5);
-            break;
-        }
-    }
-    if (loadedPrefix.isNotEmpty() && loadedPrefix != localPrefix)
-    {
+        auto loaded = juce::ValueTree::fromXml (*stateEl);
+        const juce::String localPrefix = mProc.getParamPrefix();
+        juce::String loadedPrefix;
         for (int i = 0; i < loaded.getNumChildren(); ++i)
         {
             auto child = loaded.getChild (i);
             if (! child.hasType ("PARAM")) continue;
-            juce::String id = child.getProperty ("id").toString();
-            if (id.startsWith (loadedPrefix))
+            const juce::String id = child.getProperty ("id").toString();
+            const int tagIdx = id.indexOf ("_bsp_");
+            if (id.startsWith ("tk_") && tagIdx > 3)
             {
-                id = localPrefix + id.substring (loadedPrefix.length());
-                child.setProperty ("id", id, nullptr);
+                loadedPrefix = id.substring (0, tagIdx + 5);
+                break;
             }
         }
+        if (loadedPrefix.isNotEmpty() && loadedPrefix != localPrefix)
+        {
+            for (int i = 0; i < loaded.getNumChildren(); ++i)
+            {
+                auto child = loaded.getChild (i);
+                if (! child.hasType ("PARAM")) continue;
+                juce::String id = child.getProperty ("id").toString();
+                if (id.startsWith (loadedPrefix))
+                {
+                    id = localPrefix + id.substring (loadedPrefix.length());
+                    child.setProperty ("id", id, nullptr);
+                }
+            }
+        }
+        mProc.apvts.replaceState (loaded);
     }
 
-    mProc.apvts.replaceState (loaded);
+    // 2. Reload the referenced sample (handles "library:rel/path" + absolute).
+    // In drum context, drum-pack samples get root-normalized to MIDI 60 so
+    // they play at native pitch when triggered by the drum tab's note 60.
+    if (auto* sampleEl = parsed->getChildByName ("Sample"))
+    {
+        const juce::String kind    = sampleEl->getStringAttribute ("kind", "none");
+        const juce::String pathStr = sampleEl->getStringAttribute ("path");
+        juce::File path;
+        if (pathStr.startsWith ("library:"))
+            path = SampleLibrary::getCoreLibraryDir().getChildFile (pathStr.substring (8));
+        else
+            path = juce::File (pathStr);
+
+        const int normRoot = mIsDrumContext ? 60 : -1;
+        if (kind == "file" && path.existsAsFile())
+            mProc.loadSampleFile (path, normRoot);
+        else if (kind == "folder" && path.isDirectory())
+            mProc.loadSampleFolder (path, normRoot);
+        else if (kind == "sfz" && path.existsAsFile())
+            mProc.loadSampleSFZ (path, normRoot);
+    }
+
+    // 2026-04-30: notify page wrapper so Layer/Bass tab + mixer strip get
+    // renamed to the patch filename.
+    if (onPatchLoaded)
+        onPatchLoaded (f.getFileNameWithoutExtension());
 }
 
 void VibePlayerEditor::setInfoText (const juce::String& text)

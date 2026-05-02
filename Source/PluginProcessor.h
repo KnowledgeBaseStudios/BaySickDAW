@@ -188,6 +188,26 @@ public:
     // re-register their InsertNodes. Called from setStateInformation.
     void restoreAuxStripsFromState();
 
+    // ── C.3 (2026-04-30): Hardware MIDI input ────────────────────────────────
+    // The MIDI input thread (StandaloneApp::handleIncomingMidiMessage) pushes
+    // every message to mLiveMidiCollector.  processBlock drains the collector
+    // each block and routes its messages into the engine page-buffer named by
+    // mLiveMidiTargetKind/mLiveMidiTargetIndex (the Piano Roll page's currently
+    // focused engine, pushed via setLiveMidiTarget when focus changes).
+    //
+    // Target encoding (matches PianoRollPage::EngineKind ordering):
+    //   1 = Layer (mLiveMidiTargetIndex = 0..kMaxLayerPages-1)
+    //   2 = Bass  (mLiveMidiTargetIndex = 0..kMaxBassPages-1)
+    //   3 = Drum  (mLiveMidiTargetIndex = 0..kMaxDrumPages-1)
+    //   anything else (0 DrumKit grid / 4 Clip / 5 Vox / 6 Inst / -1 unset)
+    //   = drop incoming messages (no target).  Q3 spec call locks Vox/Inst out.
+    juce::MidiMessageCollector& getLiveMidiCollector() noexcept { return mLiveMidiCollector; }
+    void setLiveMidiTarget (int engineKind, int index) noexcept
+    {
+        mLiveMidiTargetKind .store (engineKind, std::memory_order_relaxed);
+        mLiveMidiTargetIndex.store (index,      std::memory_order_relaxed);
+    }
+
     // ── Latency ───────────────────────────────────────────────────────────
     // Device output latency (set by StandaloneApp when device initialises or changes).
     void setDeviceOutputLatency (int samples) { mDeviceOutputLatency.store (samples); }
@@ -275,6 +295,12 @@ public:
     std::atomic<float> mInstBusPeakDb       { -60.0f };
     std::atomic<float> mInstBusPeakDbL      { -60.0f };
     std::atomic<float> mInstBusPeakDbR      { -60.0f };
+    // C.1 (2026-04-30): FX Bus peak — written by VibeGraph::processEffectsBus
+    // each block (mirrors the EffectsBusNode internal atomics so MixerPage
+    // can read alongside its peers without reaching into VibeGraph internals).
+    std::atomic<float> mFxBusPeakDb         { -60.0f };
+    std::atomic<float> mFxBusPeakDbL        { -60.0f };
+    std::atomic<float> mFxBusPeakDbR        { -60.0f };
     // G-6 (2026-04-29): secondary bus peak meters.
     std::atomic<float> mVoxBus2PeakDb       { -60.0f };
     std::atomic<float> mVoxBus2PeakDbL      { -60.0f };
@@ -643,6 +669,12 @@ private:
 
     // Track which mixer-strip prefixes have been registered (prevents double-register)
     std::set<juce::String> mRegisteredMixerStrips;
+
+    // C.3 (2026-04-30): hardware MIDI input bridge.  See public getter +
+    // setLiveMidiTarget for the contract.
+    juce::MidiMessageCollector mLiveMidiCollector;
+    std::atomic<int>           mLiveMidiTargetKind  { -1 };   // -1 = unset
+    std::atomic<int>           mLiveMidiTargetIndex { 0  };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VibeSynthProcessor)
 };

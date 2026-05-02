@@ -55,6 +55,10 @@ public:
     // buffer is bound via setSidechainBuffer(), detection reads from the SC
     // source instead of the main input. Flag is serialized.
     void setUseSidechain (bool on);
+
+    // C.4 Phase 1 (2026-04-30): SlotComponent header SC dropdown gate -- only
+    // shown for effects that actually consume the SC signal.
+    bool usesSidechain() const noexcept override { return true; }
     // C2 -- Sidechain high-pass filter cutoff (20..2000 Hz). Applied to the
     // detection source only (internal or external). 20 Hz = effectively off.
     void setSidechainHPF (float hz);

@@ -46,6 +46,13 @@ void PianoRollPage::timerCallback()
         {
             if (connIt->second.dataAccessor)
                 rollIt->second->setData (connIt->second.dataAccessor());
+            // C.5b: refresh pattern TS so bar lines re-space on pattern change.
+            if (connIt->second.patternTimeSigProvider)
+            {
+                int n = 4, d = 4;
+                connIt->second.patternTimeSigProvider (n, d);
+                rollIt->second->setTimeSignature (n, d);
+            }
             rollIt->second->setPlayheadBeat (beat);
         }
     }
@@ -72,6 +79,14 @@ void PianoRollPage::registerEngine (EngineId id, PianoRollConnection conn)
 
     auto roll = std::make_unique<PianoRollContainer>();
     if (conn.dataAccessor) roll->setData (conn.dataAccessor());
+    // C.5b: prime pattern TS at registration so the grid is correct from the
+    // very first paint, not deferred to the first timer tick.
+    if (conn.patternTimeSigProvider)
+    {
+        int n = 4, d = 4;
+        conn.patternTimeSigProvider (n, d);
+        roll->setTimeSignature (n, d);
+    }
     roll->setNoteColor (conn.noteColor);
     roll->setContextLabel (conn.displayName);
     roll->setUndoContext (mUndoCtx);

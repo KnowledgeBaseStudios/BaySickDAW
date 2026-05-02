@@ -165,15 +165,32 @@ private:
 
 // ── EffectRackAction ──────────────────────────────────────────────────────────
 // Before/after snapshot of the 6 rack slot types for load/remove/swap.
+// D.2 (2026-05-01): snapshot expanded from type-only to a full SlotSnapshot
+// (type + bypassed + outputGainDb + DSP state blob + UUID) so undo/redo of
+// Move/Load/Remove preserves the full slot configuration including knob
+// values and the slot's UUID (which keeps automation lanes pointed at the
+// right paramId after an undo).
 // ─────────────────────────────────────────────────────────────────────────────
 class EffectRackAction : public juce::UndoableAction
 {
 public:
+    struct SlotSnapshot
+    {
+        EffectType        type         { EffectType::None };
+        bool              bypassed     { false };
+        float             outputGainDb { 0.0f };
+        juce::MemoryBlock dspState;
+        juce::String      uuid;
+    };
+    using SlotSnapshots = std::array<SlotSnapshot, EffectRack::kNumSlots>;
+    using ApplyFn       = std::function<void(const SlotSnapshots&)>;
+
+    // Legacy alias kept for now — type-only snapshot.  D.2 extends call sites
+    // to use SlotSnapshots directly.
     using SlotTypes = std::array<EffectType, EffectRack::kNumSlots>;
-    using ApplyFn   = std::function<void(const SlotTypes&)>;
 
     EffectRackAction(juce::String label,
-                     SlotTypes before, SlotTypes after,
+                     SlotSnapshots before, SlotSnapshots after,
                      ApplyFn applyFn)
         : mLabel(std::move(label))
         , mBefore(std::move(before))
@@ -195,10 +212,10 @@ public:
     bool undo() override { mApply(mBefore); return true; }
 
 private:
-    juce::String mLabel;
-    SlotTypes    mBefore, mAfter;
-    ApplyFn      mApply;
-    bool         mFirstPerform { true };
+    juce::String  mLabel;
+    SlotSnapshots mBefore, mAfter;
+    ApplyFn       mApply;
+    bool          mFirstPerform { true };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EffectRackAction)
 };

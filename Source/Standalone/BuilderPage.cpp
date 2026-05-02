@@ -1291,7 +1291,9 @@ void ArrangementGrid::drawRuler(Graphics& g) const
     int totalBars = totalVisibleBars();
     int maxBar    = (int)mBarOff + b.getWidth() / jmax(1, (int)mPPBar) + 2;
 
-    // Subdivision tick marks in ruler (adaptive: beat / 1/8 / 1/16 / 1/32)
+    // Subdivision tick marks in ruler (adaptive: beat / 1/8 / 1/16 / 1/32).
+    // C.5b (post-revert): Builder grid is uniform 4-beat-per-bar.  Song-level
+    // TS markers are decorative flags drawn separately, not driving the grid.
     static constexpr float kMinRulerSpacing = 5.f;
     struct RulerLevel { int denom; float tickH; Colour col; };
     const RulerLevel rulerLevels[] = {
@@ -1488,7 +1490,9 @@ void ArrangementGrid::drawMidiShading(Graphics& g, const ArrangementBlock& b,
     if (b.patternIndex < 0 || b.patternIndex >= mPM.getNumPatterns()) return;
     const auto& pat = mPM.getPattern(b.patternIndex);
 
-    double beatsPerBar = (double)mTimeSig.numerator;
+    // C.5b: block MIDI shading uses the pattern's intrinsic TS to map note
+    // beats to fractional positions inside the block.
+    double beatsPerBar = mPM.getPatternBeatsPerBar (b.patternIndex);
     double totalBeats  = (double)pat.bars * beatsPerBar;
     if (totalBeats <= 0.0) return;
 
@@ -1589,8 +1593,16 @@ void ArrangementGrid::drawPatternClip(Graphics& g, const ArrangementBlock& b,
 void ArrangementGrid::drawAudioClip(Graphics& g, const ArrangementBlock& b,
                                     int x, int y, int w, int h, bool sel) const
 {
-    static const Colour kAudioBase { 0xff4a8fa0 };
-    Colour base = kAudioBase;
+    static const Colour kAudioBase   { 0xff4a8fa0 };
+    static const Colour kMissingBase { 0xffaa3030 };   // Batch E #3: dim red
+
+    // Batch E #3 (2026-05-01): if the audio file path no longer resolves on
+    // disk, render the clip in red instead of the standard teal so the user
+    // can see at a glance that this clip is dead.  Empty path also counts as
+    // missing (newly-dropped clips that haven't been resolved yet).
+    const bool missingFile = b.audioFilePath.isEmpty()
+                          || ! juce::File (b.audioFilePath).existsAsFile();
+    Colour base = missingFile ? kMissingBase : kAudioBase;
 
     // Background
     g.setGradientFill(ColourGradient(
@@ -2548,6 +2560,31 @@ void ArrangementGrid::showClipContextMenu(int blockIdx)
         m.addItem(8, "Open in Event Editor...");
     m.addItem(7, "Properties...");
 
+    // C.5b: Pattern blocks get a "Set Time Signature" submenu that overrides
+    // the referenced pattern's intrinsic TS (also lockable via this path).
+    if (b.clipType == ClipType::Pattern
+        && b.patternIndex >= 0 && b.patternIndex < mPM.getNumPatterns())
+    {
+        m.addSeparator();
+        juce::PopupMenu tsSub;
+        const auto& pat = mPM.getPattern(b.patternIndex);
+        const int curN = pat.tsNum;
+        const int curD = pat.tsDen;
+        struct TsOpt { int n, d; const char* lbl; };
+        static const TsOpt kTsOpts[] = {
+            {4,4,"4/4"}, {3,4,"3/4"}, {2,4,"2/4"}, {6,8,"6/8"},
+            {5,4,"5/4"}, {7,8,"7/8"}, {12,8,"12/8"}, {9,8,"9/8"}
+        };
+        const int kTsIdBase = 100;   // 100..107
+        for (int i = 0; i < 8; ++i)
+        {
+            const auto& o = kTsOpts[i];
+            const bool tick = (curN == o.n && curD == o.d);
+            tsSub.addItem (kTsIdBase + i, o.lbl, true, tick);
+        }
+        m.addSubMenu ("Set Time Signature", tsSub);
+    }
+
     m.showMenuAsync(PopupMenu::Options(), [this, blockIdx](int result) {
         if (blockIdx >= mPM.getNumBlocks()) return;
         switch (result)
@@ -2564,7 +2601,23 @@ void ArrangementGrid::showClipContextMenu(int blockIdx)
                       muteSelected(m2); break; }
             case 6: showAudioClipProperties(blockIdx); break;
             case 8: if (onOpenEventEditor) onOpenEventEditor(blockIdx); break;
-            default: break;
+            default:
+                // C.5b: 100..107 = TS preset picks for the block's pattern.
+                if (result >= 100 && result <= 107)
+                {
+                    struct TsOpt { int n, d; };
+                    static const TsOpt kTsOpts[] = {
+                        {4,4},{3,4},{2,4},{6,8},{5,4},{7,8},{12,8},{9,8}
+                    };
+                    const int patIdx = mPM.getBlock(blockIdx).patternIndex;
+                    const int optIdx = result - 100;
+                    if (patIdx >= 0 && optIdx >= 0 && optIdx < 8)
+                    {
+                        mPM.setPatternTimeSig (patIdx, kTsOpts[optIdx].n, kTsOpts[optIdx].d);
+                        repaint();
+                    }
+                }
+                break;
         }
     });
 }

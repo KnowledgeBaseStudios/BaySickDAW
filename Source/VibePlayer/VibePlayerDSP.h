@@ -123,7 +123,16 @@ public:
                           int pitchWheelPos)                           override;
     void stopNote        (float velocity, bool allowTailOff)           override;
     void pitchWheelMoved (int newValue)                                override {}
-    void controllerMoved (int, int)                                    override {}
+    // Batch E #2 (2026-05-01): CC74 = per-note filter cutoff offset
+    // (-2..+2 octaves multiplied into effCutoff in renderNextBlock).
+    void controllerMoved (int controllerNumber, int newValue)          override
+    {
+        if (controllerNumber == 74)
+        {
+            const float norm = (float) newValue / 127.0f;
+            mPerNoteCutoffOctaves = (norm - 0.5f) * 4.0f;
+        }
+    }
     void renderNextBlock (juce::AudioBuffer<float>& buf,
                           int startSample, int numSamples)             override;
 
@@ -209,6 +218,9 @@ private:
     float  mBaseRes       { 0.5f };
     float  mNoteCutoffBias{ 0.0f };
     float  mNoteResBias   { 0.0f };
+    // Batch E #2 (2026-05-01): per-note cutoff offset from CC74 (Brightness).
+    // -2..+2 octaves multiplied into effCutoff in renderNextBlock.
+    float  mPerNoteCutoffOctaves { 0.0f };
 
     // Resampling hold counter (for sample-rate reduction)
     int    mReductHold  { 0 };

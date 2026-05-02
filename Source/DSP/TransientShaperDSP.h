@@ -54,6 +54,9 @@ public:
     void setStateInformation (const void* data, int sz) override;
     int  getLatencySamples() const override { return mLatencySamples; }
 
+    // C.4: TransientShaperDSP consumes external sidechain for detector path
+    bool usesSidechain() const noexcept override { return true; }
+
     // ---- API ----------------------------------------------------------------
     void setAttack       (float a);         // -100..100 (panel range; stored as -1..1)
     void setSustain      (float s);         // -1..1 (legacy path)

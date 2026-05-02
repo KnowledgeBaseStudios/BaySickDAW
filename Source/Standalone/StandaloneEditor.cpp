@@ -59,8 +59,6 @@ public:
                         juce::AudioIODeviceCallback* cb)
         : mMgr(dm), mCallback(cb)
     {
-        setSize(480, 290);
-
         auto styleCombo = [](juce::ComboBox& b)
         {
             b.setColour(juce::ComboBox::backgroundColourId, VC::Panel);
@@ -80,6 +78,18 @@ public:
         styleLabel(mRateLbl, "Sample Rate:");  styleCombo(mRateBox); addAndMakeVisible(mRateLbl); addAndMakeVisible(mRateBox);
         styleLabel(mBufLbl,  "Buffer Size:");  styleCombo(mBufBox);  addAndMakeVisible(mBufLbl);  addAndMakeVisible(mBufBox);
 
+        // C.3 (2026-04-30): MIDI input device list.  Toggling a device is
+        // applied LIVE via setMidiInputDeviceEnabled (no restart needed unlike
+        // audio); persistence happens via AudioDeviceManager's auto-save when
+        // settings.xml is rewritten.  Layout: a bordered panel with one
+        // ToggleButton per detected device.  Expands the dialog height to
+        // fit; max 8 devices visible inline (current installs typically have
+        // 1-3 detected; >8 will need a viewport — follow-up if it ever bites).
+        styleLabel(mMidiLbl, "MIDI Inputs:");
+        mMidiLbl.setJustificationType(juce::Justification::topRight);
+        addAndMakeVisible(mMidiLbl);
+        rebuildMidiToggles();
+
         mApplyBtn.setButtonText("Apply");
         mApplyBtn.setColour(juce::TextButton::buttonColourId,  VC::Accent.withAlpha(0.25f));
         mApplyBtn.setColour(juce::TextButton::textColourOffId, VC::Text);
@@ -96,6 +106,12 @@ public:
         addAndMakeVisible(mCloseBtn);
 
         populateFromManager();
+
+        // Set the dialog size after the toggles are built so resized() can
+        // measure (kRowH * (4 audio rows + N midi toggles + footer)).
+        const int midiToggleCount = juce::jmax(1, (int) mMidiToggles.size());
+        const int kRowH = 36, kPad = 16, kFooter = 60;
+        setSize(480, kPad + 4 * kRowH + 8 + midiToggleCount * 26 + kFooter);
     }
 
     void resized() override
@@ -112,7 +128,24 @@ public:
         row(mRateLbl, mRateBox);
         row(mBufLbl,  mBufBox);
 
-        y += 12;
+        // C.3 (2026-04-30): MIDI inputs list — label on the left, stacked
+        // toggles on the right.  Empty list shows "(none detected)" italic.
+        const int midiBlockTop = y;
+        mMidiLbl.setBounds(kPad, midiBlockTop, kLblW, kComboH);
+        const int togX = kPad + kLblW + 8;
+        const int togW = getWidth() - kPad * 2 - kLblW - 8;
+        const int togH = 24;
+        if (mMidiToggles.empty())
+        {
+            mMidiNoneLbl.setBounds(togX, midiBlockTop, togW, togH);
+        }
+        else
+        {
+            for (size_t i = 0; i < mMidiToggles.size(); ++i)
+                mMidiToggles[i]->setBounds(togX, midiBlockTop + (int) i * togH, togW, togH);
+        }
+        y = midiBlockTop + (int) juce::jmax((size_t) 1, mMidiToggles.size()) * togH + 12;
+
         const int btnW = 90, btnH = 28;
         mApplyBtn.setBounds(getWidth() - kPad - btnW * 2 - 8, y, btnW, btnH);
         mCloseBtn.setBounds(getWidth() - kPad - btnW,         y, btnW, btnH);
@@ -278,13 +311,53 @@ private:
         });
     }
 
+    // C.3 (2026-04-30): build a ToggleButton per detected MIDI input device.
+    // Each toggle's onClick calls setMidiInputDeviceEnabled live.  Persistence
+    // happens via the device manager's auto-saved settings XML on shutdown.
+    void rebuildMidiToggles()
+    {
+        for (auto& t : mMidiToggles)
+            removeChildComponent(t.get());
+        mMidiToggles.clear();
+        removeChildComponent(&mMidiNoneLbl);
+
+        const auto devices = juce::MidiInput::getAvailableDevices();
+        if (devices.isEmpty())
+        {
+            mMidiNoneLbl.setText("(no MIDI devices detected)", juce::dontSendNotification);
+            mMidiNoneLbl.setColour(juce::Label::textColourId, VC::TextDim);
+            mMidiNoneLbl.setJustificationType(juce::Justification::centredLeft);
+            mMidiNoneLbl.setFont(juce::Font(14.0f, juce::Font::italic));
+            addAndMakeVisible(mMidiNoneLbl);
+            return;
+        }
+
+        for (const auto& d : devices)
+        {
+            auto t = std::make_unique<juce::ToggleButton>(d.name);
+            t->setColour(juce::ToggleButton::textColourId,         VC::Text);
+            t->setColour(juce::ToggleButton::tickColourId,         VC::Accent);
+            t->setColour(juce::ToggleButton::tickDisabledColourId, VC::TextDim);
+            t->setToggleState(mMgr.isMidiInputDeviceEnabled(d.identifier),
+                              juce::dontSendNotification);
+            const juce::String id = d.identifier;
+            t->onClick = [this, id, ptr = t.get()] {
+                mMgr.setMidiInputDeviceEnabled(id, ptr->getToggleState());
+            };
+            addAndMakeVisible(*t);
+            mMidiToggles.push_back(std::move(t));
+        }
+    }
+
     juce::AudioDeviceManager&             mMgr;
     juce::AudioIODeviceCallback*          mCallback;
     juce::AudioDeviceManager::AudioDeviceSetup mSnapshot;
 
     juce::Label      mTypeLbl, mDevLbl, mRateLbl, mBufLbl;
+    juce::Label      mMidiLbl, mMidiNoneLbl;
     juce::ComboBox   mTypeBox, mDevBox, mRateBox, mBufBox;
     juce::TextButton mApplyBtn, mCloseBtn;
+    std::vector<std::unique_ptr<juce::ToggleButton>> mMidiToggles;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioSettingsDialog)
 };
@@ -580,6 +653,17 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     mTransport->onSongLoopModeChanged = [this](bool loop) {
         mProcessor.mSongLoopMode.store(loop, std::memory_order_relaxed);
     };
+    // C.5b (post-revert): report the CURRENT PATTERN's intrinsic TS to the
+    // playhead each tick (FL-style — pattern owns its TS).  Song-level TS
+    // markers are decorative-only and don't drive the playhead.
+    mTransport->onGetTimeSig = [this](int& outNum, int& outDen) {
+        outNum = 4; outDen = 4;
+        if (auto* pm = mProcessor.getPatternManager())
+        {
+            outNum = pm->currentPattern().tsNum;
+            outDen = pm->currentPattern().tsDen;
+        }
+    };
     mTransport->onGetLoopBeats = [this]() -> double {
         const bool songMode = mTransport->isSongMode();
 
@@ -765,6 +849,32 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         m.addSeparator();
         m.addItem(-2, "Rename...");
         m.addItem(-4, "Change Color...");   // F-1 (2026-04-26)
+        // C.5b: per-pattern intrinsic time signature.  Auto-derived on first
+        // Builder placement; manual override here.
+        {
+            juce::PopupMenu tsSub;
+            const int curN = mPM->currentPattern().tsNum;
+            const int curD = mPM->currentPattern().tsDen;
+            const bool locked = mPM->currentPattern().tsLocked;
+            struct TsOpt { int n, d; const char* lbl; };
+            static const TsOpt kTsOpts[] = {
+                {4,4,"4/4"}, {3,4,"3/4"}, {2,4,"2/4"}, {6,8,"6/8"},
+                {5,4,"5/4"}, {7,8,"7/8"}, {12,8,"12/8"}, {9,8,"9/8"}
+            };
+            int tsIdBase = 200;   // -200..-207 for the 8 presets
+            for (int i = 0; i < 8; ++i)
+            {
+                const auto& o = kTsOpts[i];
+                const bool tick = (curN == o.n && curD == o.d);
+                tsSub.addItem (-(tsIdBase + i), o.lbl, true, tick);
+            }
+            tsSub.addSeparator();
+            tsSub.addItem (-208, juce::String("Status: ")
+                                   + (locked ? juce::String("locked at ") + juce::String(curN) + "/" + juce::String(curD)
+                                             : juce::String("default 4/4 (will auto-derive on first placement)")),
+                          false /* disabled, info-only */);
+            m.addSubMenu ("Set Time Signature", tsSub);
+        }
         m.addItem(-3, "Delete", n > 1);   // grey out if only one pattern
 
         auto bounds = mPatternBtn->getScreenBounds();
@@ -828,6 +938,23 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                             refreshPatternBox();
                             if (mBuilderPage) mBuilderPage->repaint();
                         });
+                }
+                else if (result <= -200 && result >= -207)
+                {
+                    // C.5b: manual TS override on current pattern.
+                    struct TsOpt { int n, d; };
+                    static const TsOpt kTsOpts[] = {
+                        {4,4},{3,4},{2,4},{6,8},{5,4},{7,8},{12,8},{9,8}
+                    };
+                    const int optIdx = (-result) - 200;
+                    if (optIdx >= 0 && optIdx < 8)
+                    {
+                        const int idx = mPM->getCurrentPatternIndex();
+                        mPM->setPatternTimeSig (idx, kTsOpts[optIdx].n, kTsOpts[optIdx].d);
+                        // Repaint everything that depends on pattern TS.
+                        if (mPianoRollPage) mPianoRollPage->repaint();
+                        if (mBuilderPage)   mBuilderPage->repaint();
+                    }
                 }
                 else if (result == -3)
                 {
@@ -969,17 +1096,17 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             if (!entry || entry->ribbonTabId != id) continue;
             if (auto* lp = dynamic_cast<LayersPage*>(entry->component.get()))
             {
-                if (mMixerPage) mMixerPage->renameChannel(lp->getPageIndex(), finalName);
+                if (mMixerPage) mMixerPage->renameChannel(MixerPage::StripKind::Layer, lp->getPageIndex(), finalName);
                 lp->setTabName(finalName);
             }
             else if (auto* bp = dynamic_cast<BassPage*>(entry->component.get()))
             {
-                if (mMixerPage) mMixerPage->renameChannel(bp->getPageIndex(), finalName);
+                if (mMixerPage) mMixerPage->renameChannel(MixerPage::StripKind::Bass, bp->getPageIndex(), finalName);
                 bp->setTabName(finalName);
             }
             else if (auto* dp = dynamic_cast<DrumPage*>(entry->component.get()))
             {
-                if (mMixerPage) mMixerPage->renameChannel(dp->getPageIndex(), finalName);
+                if (mMixerPage) mMixerPage->renameChannel(MixerPage::StripKind::Drum, dp->getPageIndex(), finalName);
                 dp->setTabName(finalName);
             }
             break;
@@ -1136,7 +1263,14 @@ void StandaloneEditor::buildDefaultTabs()
             return out;
         };
 
-        mPianoRollPage->onEngineSelected = [this](EngineId) {
+        mPianoRollPage->onEngineSelected = [this](EngineId id) {
+            // C.3 (2026-04-30): push the focused engine into the processor as
+            // the live MIDI input target.  Routing semantics in
+            // PluginProcessor::processBlock: only Layer (1) / Bass (2) /
+            // Drum (3) receive -- DrumKit grid (0) and Clip / Vox / Inst
+            // (4..6) drop incoming messages per Q3 spec.
+            mProcessor.setLiveMidiTarget ((int) id.kind, id.index);
+
             // Refresh the menu-bar pill label on the next showPageForTab pass
             // (onEngineSelected fires AFTER selectEngine completes).  If the
             // PianoRollPage is currently visible, force the setTabSlots
@@ -1144,6 +1278,13 @@ void StandaloneEditor::buildDefaultTabs()
             if (mVisiblePage == mPianoRollPage)
                 showPageForTab (4);
         };
+        // C.3: push the initial focus once so the processor knows the target
+        // before the user picks anything.  Default = whatever PianoRollPage
+        // boots with (DrumKit grid -> drop, harmless).
+        {
+            const auto initial = mPianoRollPage->getActiveEngineId();
+            mProcessor.setLiveMidiTarget ((int) initial.kind, initial.index);
+        }
     }
 
     // Default dynamic tabs.
@@ -1202,7 +1343,7 @@ void StandaloneEditor::addDefaultDynamicTabs()
             p->onSoundNameChanged = [this, layersId, pageIdx] (const juce::String& nm) {
                 if (nm.isEmpty()) return;
                 if (mRibbon)    mRibbon->renameTab (layersId, nm);
-                if (mMixerPage) mMixerPage->renameChannel (pageIdx, nm);
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Layer, pageIdx, nm);
                 if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Layer, pageIdx }, nm);
             };
             registerLayerPianoRoll (p);
@@ -1244,7 +1385,7 @@ void StandaloneEditor::addDefaultDynamicTabs()
             p->onSoundNameChanged = [this, bassId, pageIdx] (const juce::String& nm) {
                 if (nm.isEmpty()) return;
                 if (mRibbon)    mRibbon->renameTab (bassId, nm);
-                if (mMixerPage) mMixerPage->renameChannel (pageIdx, nm);
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Bass, pageIdx, nm);
                 if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Bass, pageIdx }, nm);
             };
             registerBassPianoRoll (p);
@@ -1267,7 +1408,7 @@ void StandaloneEditor::addDefaultDynamicTabs()
             p->onSoundNameChanged = [this, drumsId, pageIdx, p] (const juce::String& nm) {
                 if (nm.isEmpty()) return;
                 if (mRibbon)    mRibbon->renameTab (drumsId, nm);
-                if (mMixerPage) mMixerPage->renameChannel (pageIdx, nm);
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Drum, pageIdx, nm);
                 p->setTabName (nm);
                 refreshAllKitViews();
                 if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Drum, pageIdx }, nm);
@@ -1411,7 +1552,7 @@ void StandaloneEditor::spawnDuplicateLayerTab (const juce::String& clipboardXml)
     lp->onSoundNameChanged = [this, newId, pageIdx] (const juce::String& nm) {
         if (nm.isEmpty()) return;
         if (mRibbon)    mRibbon->renameTab (newId, nm);
-        if (mMixerPage) mMixerPage->renameChannel (pageIdx, nm);
+        if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Layer, pageIdx, nm);
         if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Layer, pageIdx }, nm);
     };
     registerLayerPianoRoll (lp);
@@ -1456,7 +1597,7 @@ void StandaloneEditor::spawnDuplicateBassTab (const juce::String& clipboardXml)
     bp->onSoundNameChanged = [this, newId, pageIdx] (const juce::String& nm) {
         if (nm.isEmpty()) return;
         if (mRibbon)    mRibbon->renameTab (newId, nm);
-        if (mMixerPage) mMixerPage->renameChannel (pageIdx, nm);
+        if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Bass, pageIdx, nm);
         if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Bass, pageIdx }, nm);
     };
     registerBassPianoRoll (bp);
@@ -1492,7 +1633,7 @@ void StandaloneEditor::spawnDuplicateDrumTab (const juce::String& clipboardXml)
     dp->onSoundNameChanged = [this, newId, pageIdx, dp] (const juce::String& nm) {
         if (nm.isEmpty()) return;
         if (mRibbon)    mRibbon->renameTab (newId, nm);
-        if (mMixerPage) mMixerPage->renameChannel (pageIdx, nm);
+        if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Drum, pageIdx, nm);
         dp->setTabName (nm);
         refreshAllKitViews();
         if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Drum, pageIdx }, nm);
@@ -1944,7 +2085,16 @@ void StandaloneEditor::openEventEditor(int blockIdx)
         // Forward the resolver to the browser pane inside the content so its
         // row labels match (pane is private; expose via accessor on content).
         if (auto* pane = content->getBrowserPane())
+        {
             pane->onResolveDisplayName = content->onResolveDisplayName;
+            // Batch E #3 (2026-05-01): stale-lane detector.  Pane uses this to
+            // dim/red rows whose target paramId no longer exists in APVTS.
+            pane->onIsParamStale = [this](const juce::String& pid) -> bool
+            {
+                if (pid.isEmpty()) return false;
+                return mProcessor.apvts.getParameter(pid) == nullptr;
+            };
+        }
     }
 
     mEventEditors.add(ed);
@@ -1978,6 +2128,15 @@ void StandaloneEditor::applyAutomationAtCurrentPosition()
 
         const auto& lane = block.automationLane;
         if (lane.paramId.isEmpty()) continue;
+
+        // Batch E #4 (2026-05-01): the audio-thread automation pass
+        // (PluginProcessor::processBlock, around line 902) already writes
+        // every APVTS-backed automation lane via param->setValue() which
+        // eventually fires APVTS listeners on the message thread.  Doing it
+        // again here would be a redundant write; UI applicator now only
+        // handles non-APVTS lanes (e.g. "global_tempo" which mutates the
+        // PlayHead + PatternManager directly and must run on the UI thread).
+        if (mProcessor.apvts.getParameter(lane.paramId) != nullptr) continue;
 
         // Normalised position within clip (0..1)
         const float pos01 = (float)((currentBeats - blockStart) / clipLenBeats);
@@ -2093,6 +2252,102 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
 
     using Kind = VibeGraph::InsertKind;
 
+    auto& vg = const_cast<VibeSynthProcessor&>(mProcessor).mVibeGraph;
+
+    // C13 (2026-04-30): UUID-keyed slot paramIds.  setSlotContext now stamps
+    // "<channelPrefix>_<32hex>_<knob>" instead of "<channelPrefix>_s<N>_<knob>"
+    // so reorder/pack-to-top doesn't break automation lanes.  Translate the
+    // UUID back to the live slot index before the user-facing renderer below
+    // sees it -- the user should keep seeing "Mx Layers Bus - Chorus - Wet Dry"
+    // exactly as before, with no UUID ever surfacing.
+    auto isUuidToken = [](const juce::String& s) -> bool
+    {
+        if (s.length() != 32) return false;
+        for (int i = 0; i < 32; ++i)
+        {
+            const auto c = s[i];
+            const bool hex = juce::CharacterFunctions::isDigit((char) c)
+                          || (c >= 'a' && c <= 'f');
+            if (! hex) return false;
+        }
+        return true;
+    };
+    auto splitByUuid = [&isUuidToken](const juce::String& id,
+                                       juce::String& outBase,
+                                       juce::String& outUuid,
+                                       juce::String& outParam) -> bool
+    {
+        int us = id.indexOfChar(0, '_');
+        while (us >= 0)
+        {
+            const int next = id.indexOfChar(us + 1, '_');
+            if (next < 0) return false;
+            const juce::String token = id.substring(us + 1, next);
+            if (isUuidToken(token))
+            {
+                outBase  = id.substring(0, us);
+                outUuid  = token;
+                outParam = id.substring(next + 1);
+                return true;
+            }
+            us = next;
+        }
+        return false;
+    };
+    auto findRackForBase = [&vg](const juce::String& b) -> EffectRack*
+    {
+        if (b == "layers_bus" || b == "mixer_layers")     return vg.getLayersBusRack();
+        if (b == "bass_bus"   || b == "mixer_bass")       return vg.getBassBusRack();
+        if (b == "drums_bus"  || b == "mixer_drums")      return vg.getDrumsBusRack();
+        if (b == "master"     || b == "mixer_master")     return vg.getMasterRack();
+        if (b == "fx_bus"     || b == "mixer_fx")         return vg.getEffectsBusRack();
+        if (b == "clips_bus"  || b == "mixer_clipsbus")   return vg.getAudioClipsBusRack();
+        if (b.startsWith("layer_"))
+            return vg.getLayerPageRack(b.substring(6).getIntValue());
+        if (b.startsWith("bass_"))
+            return vg.getBassPageRack(b.substring(5).getIntValue());
+        if (b.startsWith("instr_"))
+            return vg.getInstrChannelRack(b.substring(6).getIntValue());
+        if (b.startsWith("mixer_layer_"))
+            return vg.getInsertRack(Kind::Layer, b.substring(12).getIntValue());
+        if (b.startsWith("mixer_bass_"))
+            return vg.getInsertRack(Kind::Bass,  b.substring(11).getIntValue());
+        if (b.startsWith("mixer_drum_"))
+            return vg.getInsertRack(Kind::Drum,  b.substring(11).getIntValue());
+        if (b.startsWith("mixer_audio_"))
+            return vg.getInsertRack(Kind::Audio, b.substring(12).getIntValue());
+        if (b.startsWith("mixer_aux_"))
+            return vg.getInsertRack(Kind::Aux,   b.substring(10).getIntValue());
+        return nullptr;
+    };
+    {
+        juce::String uBase, uUuid, uParam;
+        if (splitByUuid(paramId, uBase, uUuid, uParam))
+        {
+            if (auto* rack = findRackForBase(uBase))
+            {
+                for (int i = 0; i < EffectRack::kNumSlots; ++i)
+                {
+                    if (rack->getSlotUuid(i) == uUuid)
+                    {
+                        // Recurse with the slot-index form so the existing
+                        // renderer below handles it identically to legacy.
+                        return resolveAutomationDisplayName(
+                            uBase + "_s" + juce::String(i) + "_" + uParam);
+                    }
+                }
+            }
+            // UUID not in any rack -- effect was deleted after the lane was
+            // created.  Best-effort label: channel + (deleted) + param so the
+            // automation row is still legible without exposing the UUID.
+            juce::String channelOnly = uBase;
+            channelOnly = channelOnly.replaceCharacter('_', ' ').trim();
+            juce::String prettyP = uParam;
+            prettyP = prettyP.replaceCharacter('_', ' ').trim();
+            return channelOnly + " - (deleted slot) - " + prettyP;
+        }
+    }
+
     // 2026-04-21: engine-tag -> user-facing engine name
     //   (must match the 3-char trackId tags in each engine ctor).
     auto engineLabelFromTag = [](const juce::String& tag) -> juce::String
@@ -2186,8 +2441,6 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
     juce::String base, param;
     int slotN = -1;
     const bool hasSlot = splitSlotAndParam(paramId, base, slotN, param);
-
-    auto& vg = const_cast<VibeSynthProcessor&>(mProcessor).mVibeGraph;
 
     auto stitch = [](const juce::String& channelLabel,
                      const juce::String& effectLabel,
@@ -2858,7 +3111,7 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
             p->onSoundNameChanged = [this, newId, pageIdx, p] (const juce::String& nm) {
                 if (nm.isEmpty()) return;
                 if (mRibbon)    mRibbon->renameTab (newId, nm);
-                if (mMixerPage) mMixerPage->renameChannel (pageIdx, nm);
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Drum, pageIdx, nm);
                 p->setTabName (nm);
                 refreshAllKitViews();
                 if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Drum, pageIdx }, nm);
@@ -4098,6 +4351,11 @@ void StandaloneEditor::registerLayerPianoRoll (LayersPage* lp)
         if (idx < 0) return nullptr;
         return &mPM->currentPattern().layerRoll[idx];
     };
+    // C.5b: pattern's intrinsic TS feeds the piano roll's bar-line spacing.
+    conn.patternTimeSigProvider = [this](int& outNum, int& outDen) {
+        outNum = mPM ? mPM->currentPattern().tsNum : 4;
+        outDen = mPM ? mPM->currentPattern().tsDen : 4;
+    };
     conn.noteColor   = lp->getPageColor();
     conn.displayName = lp->getTabName();
     auto cast = [lp]() { return lp->getEngineProcessor(); };
@@ -4128,6 +4386,10 @@ void StandaloneEditor::registerBassPianoRoll (BassPage* bp)
         const int idx = bp ? bp->getPageIndex() : -1;
         if (idx < 0) return nullptr;
         return &mPM->currentPattern().bassRoll[idx];
+    };
+    conn.patternTimeSigProvider = [this](int& outNum, int& outDen) {
+        outNum = mPM ? mPM->currentPattern().tsNum : 4;
+        outDen = mPM ? mPM->currentPattern().tsDen : 4;
     };
     conn.noteColor   = bp->getPageColor();
     conn.displayName = bp->getTabName();
@@ -4162,6 +4424,10 @@ void StandaloneEditor::registerDrumPianoRoll (DrumPage* dp)
         const int idx = dp ? dp->getPageIndex() : -1;
         if (idx < 0) return nullptr;
         return &mPM->currentPattern().drumRolls[idx];
+    };
+    conn.patternTimeSigProvider = [this](int& outNum, int& outDen) {
+        outNum = mPM ? mPM->currentPattern().tsNum : 4;
+        outDen = mPM ? mPM->currentPattern().tsDen : 4;
     };
     conn.noteColor   = dp->getPageColor();
     conn.displayName = dp->getTabName();
@@ -4285,7 +4551,7 @@ juce::Component* StandaloneEditor::spawnLayerTabFromTemplate (const juce::String
     lp->onSoundNameChanged = [this, newId, pageIdx] (const juce::String& nm) {
         if (nm.isEmpty()) return;
         if (mRibbon)    mRibbon->renameTab (newId, nm);
-        if (mMixerPage) mMixerPage->renameChannel (pageIdx, nm);
+        if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Layer, pageIdx, nm);
         if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Layer, pageIdx }, nm);
     };
     registerLayerPianoRoll (lp);
@@ -4338,7 +4604,7 @@ juce::Component* StandaloneEditor::spawnBassTabFromTemplate (const juce::String&
     bp->onSoundNameChanged = [this, newId, pageIdx] (const juce::String& nm) {
         if (nm.isEmpty()) return;
         if (mRibbon)    mRibbon->renameTab (newId, nm);
-        if (mMixerPage) mMixerPage->renameChannel (pageIdx, nm);
+        if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Bass, pageIdx, nm);
         if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Bass, pageIdx }, nm);
     };
     registerBassPianoRoll (bp);
@@ -4852,7 +5118,7 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
         dp->onSoundNameChanged = [this, newId, pageIdx, dp] (const juce::String& nm) {
             if (nm.isEmpty()) return;
             if (mRibbon)    mRibbon->renameTab (newId, nm);
-            if (mMixerPage) mMixerPage->renameChannel (pageIdx, nm);
+            if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Drum, pageIdx, nm);
             dp->setTabName (nm);
             refreshAllKitViews();
             if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Drum, pageIdx }, nm);
@@ -5770,6 +6036,10 @@ void StandaloneEditor::registerClipPianoRoll (int idx, ClipsPage* cp)
         if (! pmRaw) return nullptr;
         if (idx < 0 || idx >= (int) pmRaw->currentPattern().clipRoll.size()) return nullptr;
         return &pmRaw->currentPattern().clipRoll[idx];
+    };
+    conn.patternTimeSigProvider = [pmRaw](int& outNum, int& outDen) {
+        outNum = pmRaw ? pmRaw->currentPattern().tsNum : 4;
+        outDen = pmRaw ? pmRaw->currentPattern().tsDen : 4;
     };
     conn.noteColor   = juce::Colour (0xffd4a017);   // VC::Warm — Clips amber
     conn.displayName = cp->getTabName();
@@ -7137,6 +7407,22 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
                          [this](int i) { return mMixerPage->getVoxStripName (i); });
         writeStripNames ("InstNames", "Inst ", mMixerPage->getInstStripIndices(),
                          [this](int i) { return mMixerPage->getInstStripName (i); });
+
+        // D.3: persist mixer strip insertion order so re-ordered strips come
+        // back in the user's display order, not numeric-index order.
+        auto writeOrder = [&](const char* tag, const std::vector<int>& indices)
+        {
+            auto* list = ui->createNewChildElement (tag);
+            for (int idx : indices)
+            {
+                auto* rec = list->createNewChildElement ("S");
+                rec->setAttribute ("idx", idx);
+            }
+        };
+        writeOrder ("AuxOrder",   mMixerPage->getAuxStripIndices());
+        writeOrder ("VoxOrder",   mMixerPage->getVoxStripIndices());
+        writeOrder ("InstOrder",  mMixerPage->getInstStripIndices());
+        writeOrder ("AudioOrder", mMixerPage->getAudioStripIndices());
     }
     if (mBuilderPage)
     {
@@ -7325,7 +7611,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             lp->onSoundNameChanged = [this, newId, pageIndex] (const juce::String& nm) {
                 if (nm.isEmpty()) return;
                 if (mRibbon)    mRibbon->renameTab (newId, nm);
-                if (mMixerPage) mMixerPage->renameChannel (pageIndex, nm);
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Layer, pageIndex, nm);
                 if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Layer, pageIndex }, nm);
             };
             if (lp) registerLayerPianoRoll (lp);
@@ -7376,7 +7662,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             bp->onSoundNameChanged = [this, newId, pageIndex] (const juce::String& nm) {
                 if (nm.isEmpty()) return;
                 if (mRibbon)    mRibbon->renameTab (newId, nm);
-                if (mMixerPage) mMixerPage->renameChannel (pageIndex, nm);
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Bass, pageIndex, nm);
                 if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Bass, pageIndex }, nm);
             };
             if (bp) registerBassPianoRoll (bp);
@@ -7485,7 +7771,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 dp2->onSoundNameChanged = [this, newId, pageIndex, dp2] (const juce::String& nm) {
                     if (nm.isEmpty()) return;
                     if (mRibbon)    mRibbon->renameTab (newId, nm);
-                    if (mMixerPage) mMixerPage->renameChannel (pageIndex, nm);
+                    if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Drum, pageIndex, nm);
                     dp2->setTabName (nm);
                     refreshAllKitViews();
                     if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Drum, pageIndex }, nm);
@@ -7620,6 +7906,29 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
     restoreStripNames ("InstNames",
                        [this](int i) { mMixerPage->addInstChannelAtIndex (i); },
                        [this](int i, const juce::String& n) { mMixerPage->setInstStripName (i, n); });
+
+    // D.3: restore mixer strip insertion order (was previously numeric-index
+    // order, losing user re-order across project save/load).  Run after the
+    // restoreStripNames calls above so all strips are registered before we
+    // sort them.
+    auto restoreOrder = [&](const char* tag, MixerPage::OrderKind kind)
+    {
+        auto* list = ui->getChildByName (tag);
+        if (list == nullptr || mMixerPage == nullptr) return;
+        std::vector<int> indices;
+        indices.reserve ((size_t) list->getNumChildElements());
+        for (auto* rec : list->getChildWithTagNameIterator ("S"))
+        {
+            const int idx = rec->getIntAttribute ("idx", -1);
+            if (idx >= 0) indices.push_back (idx);
+        }
+        if (! indices.empty())
+            mMixerPage->setStripOrder (kind, indices);
+    };
+    restoreOrder ("AuxOrder",   MixerPage::OrderKind::Aux);
+    restoreOrder ("VoxOrder",   MixerPage::OrderKind::Vox);
+    restoreOrder ("InstOrder",  MixerPage::OrderKind::Inst);
+    restoreOrder ("AudioOrder", MixerPage::OrderKind::Audio);
 
     // Prefer the saved active tab, then the first dynamic tab, then Builder.
     int preferred = ui->getIntAttribute ("activeTabId", -1);

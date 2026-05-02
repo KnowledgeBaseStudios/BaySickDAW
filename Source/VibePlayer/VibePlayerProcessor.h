@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "VibePlayerDSP.h"
+#include "../DSP/EngineSidechainHelper.h"
 
 // ── VibePlayerProcessor (user-facing name: BaySickPlayer) ────────────────────
 // AudioProcessor wrapper for VibeSynth.
@@ -11,7 +12,8 @@
 //   updateFromApvts() guards every setter with a cached last-value comparison.
 //   Only calls the setter when the value actually changed.
 // ─────────────────────────────────────────────────────────────────────────────
-class VibePlayerProcessor : public juce::AudioProcessor
+class VibePlayerProcessor : public juce::AudioProcessor,
+                            public ISidechainEngine
 {
 public:
     explicit VibePlayerProcessor (const juce::String& trackId = "lay_0");
@@ -71,6 +73,13 @@ public:
     void loadSampleFile    (const juce::File& wavFile, int normalizeRoot = -1);
     juce::File getLoadedSampleFile() const;   // returns whatever's stashed (folder/sfz/file)
 
+    // C.4 Phase 2.2: engine-level SC primitive.
+    void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept override
+    {
+        mScHelper.setSidechainBuffers (bufs, count);
+    }
+    float getSidechainLevel() const noexcept override { return mScHelper.getLevel(); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout
         createLayout (const juce::String& prefix);
@@ -84,6 +93,7 @@ private:
     std::atomic<int> mAuditionNote    { -1 };
     std::atomic<int> mAuditionHoldOn  { -1 };
     std::atomic<int> mAuditionHoldOff { -1 };
+    EngineSidechainHelper mScHelper;   // C.4 Phase 2.2 SC primitive
 
     // ── CPU guard cache ───────────────────────────────────────────────────────
     struct ParamCache

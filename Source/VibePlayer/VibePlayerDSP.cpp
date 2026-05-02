@@ -682,11 +682,15 @@ void VibeVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
         return;
     }
 
-    // ── Apply per-note filter bias (muffle + hardness) ───────────────────────
-    if (mNoteCutoffBias > 0.001f || mNoteResBias > 0.001f)
+    // ── Apply per-note filter bias (muffle + hardness + Batch E #2 CC74) ────
+    if (mNoteCutoffBias > 0.001f || mNoteResBias > 0.001f
+        || mPerNoteCutoffOctaves != 0.0f)
     {
-        const float effCutoff = juce::jlimit (20.f, 20000.f, mBaseCutoff - mNoteCutoffBias);
-        const float effRes    = juce::jlimit (0.5f, 10.0f,   mBaseRes   + mNoteResBias * 9.5f);
+        float effCutoff = juce::jlimit (20.f, 20000.f, mBaseCutoff - mNoteCutoffBias);
+        if (mPerNoteCutoffOctaves != 0.0f)
+            effCutoff = juce::jlimit (20.f, 20000.f,
+                                       effCutoff * std::pow (2.0f, mPerNoteCutoffOctaves));
+        const float effRes    = juce::jlimit (0.5f, 10.0f, mBaseRes + mNoteResBias * 9.5f);
         mFilter.setCutoffFrequency (effCutoff);
         mFilter.setResonance       (effRes);
     }

@@ -180,6 +180,9 @@ private:
     int   mModWheelDest  { 0 };     // 0=Filter, 1=LFO
     float mModWheelAmt   { 0.0f };
     float mModWheelValue { 0.0f };  // current CC1 value 0..1
+    // Batch E #2 (2026-05-01): per-note filter cutoff offset from CC74.
+    // -2..+2 octaves applied multiplicatively to effCutoff in renderNextBlock.
+    float mPerNoteCutoffOctaves { 0.0f };
 
     // ── Filter state ──────────────────────────────────────────────────────────
     BssFilterType mFilterType       { BssFilterType::LowPass };

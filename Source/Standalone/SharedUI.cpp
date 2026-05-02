@@ -2763,6 +2763,28 @@ ParametricEQDisplay::ParametricEQDisplay()
     mBankIndicator = std::make_unique<BankIndicator>(*this);
     mBankIndicator->setTooltip("Current EQ bank - click to swap A <-> B (or use Page menu A/B Compare)");
 
+    // D.4-Q6: main-level output fader (9th vertical fader on the right of the
+    // band column area).  Bipolar, -18..+18 dB, double-click to reset to 0.
+    mMainLevelFader = std::make_unique<VibeSlider> (juce::Slider::LinearVertical,
+                                                     juce::Slider::NoTextBox);
+    mMainLevelFader->getProperties().set ("eqFader", true);
+    mMainLevelFader->setRange (-18.0, 18.0);
+    mMainLevelFader->setValue (0.0, juce::dontSendNotification);
+    mMainLevelFader->setDoubleClickReturnValue (true, 0.0);
+    mMainLevelFader->setTooltip ("EQ main output level (dB) - double-click to reset to 0");
+    mMainLevelFader->onValueChange = [this]
+    {
+        const float v = (float) mMainLevelFader->getValue();
+        if (mBindMode == BindMode::DSP && mBoundDSP)
+            mBoundDSP->setMainLevel (v);
+        else if (mBindMode == BindMode::MsDSP && mBoundMsDsp)
+        {
+            mBoundMsDsp->mid ().setMainLevel (v);
+            mBoundMsDsp->side().setMainLevel (v);
+        }
+    };
+    addAndMakeVisible (*mMainLevelFader);
+
     // 5F-9 sec.12 Phase 2 (12h): internal MID/SIDE pill removed - M/S view is now
     // driven exclusively by the page-header external MID/SIDE buttons that call
     // setShowMid() / isShowingMid() from outside. Keeping mMidSideBtn nullptr lets
@@ -3298,8 +3320,9 @@ void ParametricEQDisplay::resized()
 
     // Right panel: 8 color-coded columns beside the graph — target ~25% of total width
     // Each column needs room for: type dropdown + gain fader + freq knob + q knob
+    // D.4-Q6: 9th column added on the far right for the EQ main-level fader.
     const int kColW        = juce::jmax(22, (b.getWidth() / 32));
-    const int rightPanelW  = kColW * kNumBands;
+    const int rightPanelW  = kColW * (kNumBands + 1);   // +1 for main fader column
     mRightPanelArea = b.removeFromRight(rightPanelW);
     mGraphArea      = b;
 
@@ -3350,6 +3373,22 @@ void ParametricEQDisplay::resized()
         if (c.freqKnob)   c.freqKnob  ->setBounds(freqR);
         if (c.qKnob)      c.qKnob     ->setBounds(qR);
     }
+
+    // D.4-Q6: 9th "Main" column — fader spans the same vertical real estate as
+    // a band's gain fader, but with no type combo / freq / Q knobs.  The col
+    // matches band column geometry so headers and tick rows line up.
+    {
+        auto col = panel.removeFromLeft(kColW).reduced(1, 0);
+        // Skip the bottom Q + freq blocks so the fader has the same vertical
+        // bounds as the band gain faders.
+        col.removeFromBottom (kColW);   // (Q block area, intentionally blank)
+        col.removeFromBottom (kColW);   // (Freq block area, intentionally blank)
+        col.removeFromTop (22);         // (Type combo area, intentionally blank)
+        mMainReadoutR = col.removeFromBottom (kReadoutH).translated (0, -5);
+        auto faderR   = col.reduced (3, 2);
+        if (mMainLevelFader && faderR.getHeight() > 8)
+            mMainLevelFader->setBounds (faderR);
+    }
 }
 
 void ParametricEQDisplay::paint(juce::Graphics& g)
@@ -3385,8 +3424,10 @@ void ParametricEQDisplay::paint(juce::Graphics& g)
                            (float)mRightPanelArea.getY(),
                            (float)mRightPanelArea.getBottom());
 
-        // Per-column: color dot header + vertical separator
-        const int kColW = mRightPanelArea.getWidth() / kNumBands;
+        // Per-column: color dot header + vertical separator.
+        // D.4-Q6: 9-column grid (8 bands + 1 main).  Last column uses a
+        // "Main" text header instead of a band color dot.
+        const int kColW = mRightPanelArea.getWidth() / (kNumBands + 1);
         for (int i = 0; i < kNumBands; ++i)
         {
             // Color dot at top of each column
@@ -3457,6 +3498,34 @@ void ParametricEQDisplay::paint(juce::Graphics& g)
                 g.drawText(txt, mQReadoutR[i], juce::Justification::centred, false);
             }
         }
+
+        // D.4-Q6: 9th column header — "Main" label + separator + readout.
+        {
+            const int mainColX = mRightPanelArea.getX() + kNumBands * kColW;
+            // Separator between band 8 and Main
+            g.setColour (VC::Accent.withAlpha (0.4f));
+            g.drawVerticalLine (mainColX,
+                                (float) mRightPanelArea.getY() + 1.f,
+                                (float) mRightPanelArea.getBottom() - 1.f);
+            // "Main" header text where the color dot would be
+            g.setColour (VC::Text.withAlpha (0.9f));
+            g.setFont (juce::Font (8.f, juce::Font::bold));
+            g.drawText ("Main",
+                        mainColX, mRightPanelArea.getY() + 1, kColW, 12,
+                        juce::Justification::centred, false);
+
+            // Main fader readout
+            if (mMainLevelFader && mMainReadoutR.getWidth() > 4)
+            {
+                const float  db   = (float) mMainLevelFader->getValue();
+                const bool   zero = std::abs (db) < 0.05f;
+                juce::String txt  = zero ? juce::String ("0.0")
+                                         : juce::String (db, 1);
+                g.setFont (juce::Font (9.0f));
+                g.setColour (VC::Text.withAlpha (0.85f));
+                g.drawText (txt, mMainReadoutR, juce::Justification::centred, false);
+            }
+        }
     }
 
     // 12j Issue 3: rich hover tooltip drawn LAST so it sits on top of the graph
@@ -3499,7 +3568,7 @@ void ParametricEQDisplay::mouseDown(const juce::MouseEvent& e)
     // The dot is painted at the top of each right-panel column (cy ≈ mRightPanelArea.y + 5)
     if (mRightPanelArea.getWidth() > 0 && e.mods.isLeftButtonDown())
     {
-        const int kColW = mRightPanelArea.getWidth() / kNumBands;
+        const int kColW = mRightPanelArea.getWidth() / (kNumBands + 1);   // D.4-Q6: +1 main column
         float dotCy = (float)mRightPanelArea.getY() + 5.f;
         if (pos.y >= dotCy - 8.f && pos.y <= dotCy + 8.f)
         {
@@ -3701,9 +3770,58 @@ void ParametricEQDisplay::mouseDown(const juce::MouseEvent& e)
                     VKnobAutomation::sOnAutomate(paramId);
             } else if (result == 600) {
                 // 12j: toggle Make Dynamic on this band.
+                // C.4 follow-up (2026-04-30): write only the Dynamic flag (not
+                // the full band state, which would clobber APVTS-authoritative
+                // values with stale UI defaults).  When toggling FROM off TO
+                // on, ALSO reset Range to 0 so the dotted ghost curve sits
+                // flat on first enable -- user dials in the modulation
+                // direction + amount via the Range slider.  Toggling off
+                // leaves Range alone so re-enabling preserves the user's
+                // setting (and turning off doesn't strip out their work).
+                const bool wasOff = ! mBands[band].dynamic;
                 mBands[band].dynamic = !mBands[band].dynamic;
-                setAPVTSFromBand(band);
-                pushBandToDSP(band);
+                if (wasOff)
+                    mBands[band].rangeDb = 0.f;
+
+                auto writeFlag = [this, band](juce::AudioProcessorValueTreeState* apvts,
+                                                const juce::String& prefix)
+                {
+                    if (apvts == nullptr || prefix.isEmpty()) return;
+                    auto setF = [&](const juce::String& id, float val)
+                    {
+                        if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(apvts->getParameter(id)))
+                            p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1(val));
+                    };
+                    const juce::String bp = prefix + juce::String(band);
+                    setF(bp + "Dynamic", mBands[band].dynamic ? 1.f : 0.f);
+                    if (mBands[band].dynamic) // wasOff is implied when dynamic is now true
+                        setF(bp + "Range", mBands[band].rangeDb);   // 0
+                };
+                if (mBindMode == BindMode::MsDSP && mMsDSPApvts)
+                {
+                    writeFlag(mMsDSPApvts, mMsDSPMidPrefix);
+                    writeFlag(mMsDSPApvts, mMsDSPSidePrefix);
+                }
+                else if (mBindMode == BindMode::APVTS && mAPVTS && mLayerIdx >= 0)
+                {
+                    writeFlag(mAPVTS, "L" + juce::String(mLayerIdx) + "_eq");
+                }
+
+                // Tell DSP the new dynamic state too (UI-authoritative for
+                // direct-DSP bind modes that don't have APVTS write-back).
+                auto pushDspFlag = [this, band](EQ8DSP& d)
+                {
+                    d.setBandDynamic(band, mBands[band].dynamic);
+                    if (mBands[band].dynamic)
+                        d.setBandRange(band, mBands[band].rangeDb);   // 0
+                };
+                if (mBindMode == BindMode::DSP && mBoundDSP)
+                    pushDspFlag(*mBoundDSP);
+                else if (mBindMode == BindMode::MsDSP && mBoundMsDsp)
+                {
+                    pushDspFlag(mBoundMsDsp->mid());
+                    pushDspFlag(mBoundMsDsp->side());
+                }
                 repaint();
             } else if (result == 601) {
                 // 12j: Open dynamic params popout (CallOutBox with threshold /
@@ -4345,16 +4463,15 @@ void ParametricEQDisplay::setAPVTSFromBand(int b)
         setF(bp + "Mute",      mBands[b].muted   ? 1.f : 0.f);
         setF(bp + "Solo",      mBands[b].soloed  ? 1.f : 0.f);
         setF(bp + "Channel",   (float)mBands[b].channel);   // 12h / Session B
-        // 12j: dynamic EQ params (only written when they exist; no-op on APVTS
-        // instances that haven't registered 12j fields yet).
-        setF(bp + "Dynamic",   mBands[b].dynamic ? 1.f : 0.f);
-        setF(bp + "Threshold", mBands[b].threshold);
-        setF(bp + "Ratio",     mBands[b].ratio);
-        setF(bp + "Attack",    mBands[b].attack);
-        setF(bp + "Release",   mBands[b].release);
-        setF(bp + "Range",     mBands[b].rangeDb);
-        setF(bp + "Upward",    mBands[b].upward  ? 1.f : 0.f);
-        setF(bp + "ScSource",  (float)mBands[b].scSourceId);
+        // C.4 follow-up (2026-04-30): dynamic EQ params NO LONGER written from
+        // here.  setAPVTSFromBand fires from band-drag / wheel / type-change /
+        // any static-param change -- writing the UI mBands' dyn defaults back
+        // would clobber whatever the popout's slider attachments set.  Dyn
+        // params (Dynamic/Threshold/Ratio/Attack/Release/Range/Upward/ScSource)
+        // flow exclusively through the popout's SliderAttachment + APVTS ->
+        // updateXxxEQ -> DSP -> syncFromDSP -> mBands.  Make-Dynamic toggle
+        // (item 600 in the band right-click menu) writes Dynamic + Range
+        // explicitly itself, bypassing this function.
     };
 
     if (mBindMode == BindMode::APVTS && mAPVTS && mLayerIdx >= 0)
@@ -4391,15 +4508,11 @@ void ParametricEQDisplay::pushBandToDSP(int b)
         target.setBandMuted   (b, mBands[b].muted);
         target.setBandSoloed  (b, mBands[b].soloed);
         target.setBandChannel (b, mBands[b].channel);    // 12h / Session B
-        // 12j: dynamic EQ params.
-        target.setBandDynamic  (b, mBands[b].dynamic);
-        target.setBandThreshold(b, mBands[b].threshold);
-        target.setBandRatio    (b, mBands[b].ratio);
-        target.setBandAttack   (b, mBands[b].attack);
-        target.setBandRelease  (b, mBands[b].release);
-        target.setBandRange    (b, mBands[b].rangeDb);
-        target.setBandUpward   (b, mBands[b].upward);
-        target.setBandScSource (b, mBands[b].scSourceId);
+        // C.4 follow-up (2026-04-30): dynamic EQ params NO LONGER pushed from
+        // here -- mBands' UI defaults would clobber whatever the popout
+        // sliders set.  Dyn params live in APVTS (via SliderAttachment) and
+        // get pushed to DSP exclusively via updateXxxEQ each block.  See
+        // setAPVTSFromBand for the matching skip + rationale.
     };
     if (mBindMode == BindMode::DSP && mBoundDSP)
         pushAll(*mBoundDSP);
@@ -4474,8 +4587,22 @@ namespace
         DynamicParamsPopout(juce::AudioProcessorValueTreeState& apvts,
                             const juce::String& paramPrefix,
                             int bandIdx,
-                            EQ8DSP* dsp /* for live GR polling */)
-            : mApvts(apvts), mDsp(dsp), mBandIdx(bandIdx)
+                            EQ8DSP* dsp /* for live GR polling */,
+                            juce::String stripMixerPrefix = {},
+                            std::function<juce::String(int)> resolveSourceName = {},
+                            std::function<void(float)> onRangeChanged     = {},
+                            std::function<void(float)> onThresholdChanged = {},
+                            std::function<void(float)> onRatioChanged     = {},
+                            std::function<void(float)> onAttackChanged    = {},
+                            std::function<void(float)> onReleaseChanged   = {})
+            : mApvts(apvts), mDsp(dsp), mBandIdx(bandIdx),
+              mStripMixerPrefix(std::move(stripMixerPrefix)),
+              mResolveSourceName(std::move(resolveSourceName)),
+              mOnRangeChanged(std::move(onRangeChanged)),
+              mOnThresholdChanged(std::move(onThresholdChanged)),
+              mOnRatioChanged(std::move(onRatioChanged)),
+              mOnAttackChanged(std::move(onAttackChanged)),
+              mOnReleaseChanged(std::move(onReleaseChanged))
         {
             auto makeSlider = [&](VibeSlider& s, const juce::String& name,
                                   float lo, double skewMid, const juce::String& suffix)
@@ -4512,7 +4639,49 @@ namespace
             mAttRel = attachS(mRel, "Release");
             mAttRng = attachS(mRng, "Range");
 
-            setSize(380, 140);   // +20 px so the Range knob doesn't touch the GR meter
+            // C.4 follow-up (2026-04-30): direct path so EVERY dyn slider
+            // (Threshold, Ratio, Attack, Release, Range) drives parent's
+            // mBands + DSP in the same message-thread tick.  Without this
+            // the chain is slider -> APVTS -> processBlock's updateXxxEQ ->
+            // DSP -> syncFromDSP's timer-driven poll -> mBands; that has
+            // multi-tick latency and depends on the host page's timer
+            // actually firing syncFromDSP between each tweak, which led to
+            // "ratio/attack/release do nothing" + "dotted line snaps back to
+            // 0 on slider release" symptoms.  Slider attachment still writes
+            // APVTS (for persistence + automation); the onValueChange below
+            // mirrors the same value into the live audio path immediately.
+            mRng.onValueChange = [this]
+            {
+                if (mOnRangeChanged) mOnRangeChanged((float) mRng.getValue());
+            };
+            mThr.onValueChange = [this]
+            {
+                if (mOnThresholdChanged) mOnThresholdChanged((float) mThr.getValue());
+            };
+            mRat.onValueChange = [this]
+            {
+                if (mOnRatioChanged) mOnRatioChanged((float) mRat.getValue());
+            };
+            mAtt.onValueChange = [this]
+            {
+                if (mOnAttackChanged) mOnAttackChanged((float) mAtt.getValue());
+            };
+            mRel.onValueChange = [this]
+            {
+                if (mOnReleaseChanged) mOnReleaseChanged((float) mRel.getValue());
+            };
+
+            // C.4 Phase 1 (2026-04-30): per-band SC source dropdown.  Click
+            // pops a menu listing currently-routed SC lines on the strip.
+            // Selection writes mDsp->setBandScSource(band, lineIdx); -1 = Off.
+            mScBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3b3b));
+            mScBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd6d6d6));
+            mScBtn.setTooltip("Sidechain source for this band");
+            mScBtn.onClick = [this] { showScMenu(); };
+            addAndMakeVisible(mScBtn);
+            refreshScBtnLabel();
+
+            setSize(380, 168);   // +28 px to fit the SC dropdown row below knobs
             startTimerHz(30);
 
             // 12j follow-up Q4: listen for right-click events on our own children.
@@ -4636,6 +4805,78 @@ namespace
             mRel.setBounds(x, row0y, knobW, knobH); x += knobW + pad;
             mRng.setBounds(x, row0y, knobW, knobH); x += knobW + pad;
             // 12j follow-up Q2: Upward toggle removed - Range is bipolar now.
+
+            // C.4 Phase 1: SC source dropdown row beneath the knobs.
+            const int scY = row0y + knobH + 8;
+            mScBtn.setBounds(pad, scY, getWidth() - pad - 80, 24);
+        }
+
+        void showScMenu()
+        {
+            juce::PopupMenu m;
+            const int currentPick = (mDsp != nullptr)
+                ? mDsp->getBand(mBandIdx).scSourceId : -1;
+            m.addItem(1, "Off", true, currentPick < 0);
+
+            bool anyActive = false;
+            if (mStripMixerPrefix.isNotEmpty())
+            {
+                for (int s = 0; s < 4; ++s)
+                {
+                    const juce::String pid = mStripMixerPrefix
+                        + "_sc_recv" + juce::String(s) + "_from";
+                    if (auto* p = mApvts.getRawParameterValue(pid))
+                    {
+                        const int srcId = (int) p->load();
+                        if (srcId < 0) continue;
+                        anyActive = true;
+                        juce::String srcName = mResolveSourceName ? mResolveSourceName(srcId)
+                                                                  : juce::String("Ch ") + juce::String(srcId);
+                        if (srcName.isEmpty()) srcName = juce::String("Ch ") + juce::String(srcId);
+                        m.addItem(10 + s, srcName, true, currentPick == s);
+                    }
+                }
+            }
+            if (! anyActive)
+            {
+                m.addSeparator();
+                m.addItem(99, "(no sidechain cables routed to this strip)", false, false);
+            }
+
+            m.showMenuAsync(juce::PopupMenu::Options{}.withTargetComponent(&mScBtn),
+                [this](int r)
+                {
+                    if (r <= 0 || !mDsp) return;
+                    const int pick = (r == 1) ? -1 : (r - 10);
+                    mDsp->setBandScSource(mBandIdx, pick);
+                    refreshScBtnLabel();
+                });
+        }
+
+        void refreshScBtnLabel()
+        {
+            juce::String label = "Sidechain Source: Off";
+            if (mDsp != nullptr)
+            {
+                const int pick = mDsp->getBand(mBandIdx).scSourceId;
+                if (pick >= 0 && pick < 4 && mStripMixerPrefix.isNotEmpty())
+                {
+                    const juce::String pid = mStripMixerPrefix
+                        + "_sc_recv" + juce::String(pick) + "_from";
+                    if (auto* p = mApvts.getRawParameterValue(pid))
+                    {
+                        const int srcId = (int) p->load();
+                        if (srcId >= 0)
+                        {
+                            juce::String name = mResolveSourceName ? mResolveSourceName(srcId)
+                                                                   : juce::String("Ch ") + juce::String(srcId);
+                            if (name.isEmpty()) name = juce::String("Ch ") + juce::String(srcId);
+                            label = "Sidechain Source: " + name;
+                        }
+                    }
+                }
+            }
+            mScBtn.setButtonText(label);
         }
 
     private:
@@ -4658,10 +4899,28 @@ namespace
         VibeSlider mThr, mRat, mAtt, mRel, mRng;
         // 12j follow-up Q2: Upward toggle removed - Range is bipolar.
 
+        // C.4 Phase 1: SC source dropdown + strip context.
+        juce::TextButton                          mScBtn;
+        juce::String                              mStripMixerPrefix;
+        std::function<juce::String(int)>          mResolveSourceName;
+        // C.4 follow-up (2026-04-30): direct dyn-param -> parent mBands+DSP paths.
+        std::function<void(float)>                mOnRangeChanged;
+        std::function<void(float)>                mOnThresholdChanged;
+        std::function<void(float)>                mOnRatioChanged;
+        std::function<void(float)>                mOnAttackChanged;
+        std::function<void(float)>                mOnReleaseChanged;
+
         using SA = juce::AudioProcessorValueTreeState::SliderAttachment;
         std::unique_ptr<SA> mAttThr, mAttRat, mAttAtt, mAttRel, mAttRng;
     };
 } // namespace
+
+void ParametricEQDisplay::setStripContext (juce::String mixerPrefix,
+                                            std::function<juce::String(int)> resolveSourceName)
+{
+    mStripMixerPrefix  = std::move(mixerPrefix);
+    mResolveSourceName = std::move(resolveSourceName);
+}
 
 void ParametricEQDisplay::openDynamicParamsPopout(int bandIdx)
 {
@@ -4673,7 +4932,94 @@ void ParametricEQDisplay::openDynamicParamsPopout(int bandIdx)
     EQ8DSP* dsp = mShowMid ? &mBoundMsDsp->mid() : &mBoundMsDsp->side();
     const juce::String prefix = mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix;
 
-    auto content = std::make_unique<DynamicParamsPopout>(*mMsDSPApvts, prefix, bandIdx, dsp);
+    // C.4 Phase 1 (2026-04-30): hand the popout the strip's SC enumeration
+    // context so its per-band SC dropdown can list routed source lines.
+    // C.4 follow-up: also direct dyn-param -> mBands + DSP callbacks for all
+    // five sliders.  Without these the slider attachment writes only APVTS,
+    // and the chain APVTS -> processBlock::updateXxxEQ -> DSP -> timer-driven
+    // syncFromDSP -> mBands has multi-tick latency and is gated on host-page
+    // timer cadence; that caused the "ratio/attack/release do nothing" and
+    // "dotted line snaps back on slider release" symptoms.
+    juce::Component::SafePointer<ParametricEQDisplay> safeSelf(this);
+
+    auto pushDspBoth = [safeSelf, bandIdx](void (EQ8DSP::*fn)(int, float), float v)
+    {
+        if (auto* self = safeSelf.getComponent())
+        {
+            if (self->mBindMode == BindMode::MsDSP && self->mBoundMsDsp)
+            {
+                (self->mBoundMsDsp->mid()  .*fn)(bandIdx, v);
+                (self->mBoundMsDsp->side() .*fn)(bandIdx, v);
+            }
+            else if (self->mBindMode == BindMode::DSP && self->mBoundDSP)
+            {
+                (self->mBoundDSP->*fn)(bandIdx, v);
+            }
+        }
+    };
+    auto onRangeChanged = [safeSelf, bandIdx, pushDspBoth](float v)
+    {
+        if (auto* self = safeSelf.getComponent())
+        {
+            if (bandIdx >= 0 && bandIdx < kNumBands)
+            {
+                self->mBands[bandIdx].rangeDb = v;
+                pushDspBoth(&EQ8DSP::setBandRange, v);
+                self->repaint();
+            }
+        }
+    };
+    auto onThresholdChanged = [safeSelf, bandIdx, pushDspBoth](float v)
+    {
+        if (auto* self = safeSelf.getComponent())
+        {
+            if (bandIdx >= 0 && bandIdx < kNumBands)
+            {
+                self->mBands[bandIdx].threshold = v;
+                pushDspBoth(&EQ8DSP::setBandThreshold, v);
+            }
+        }
+    };
+    auto onRatioChanged = [safeSelf, bandIdx, pushDspBoth](float v)
+    {
+        if (auto* self = safeSelf.getComponent())
+        {
+            if (bandIdx >= 0 && bandIdx < kNumBands)
+            {
+                self->mBands[bandIdx].ratio = v;
+                pushDspBoth(&EQ8DSP::setBandRatio, v);
+            }
+        }
+    };
+    auto onAttackChanged = [safeSelf, bandIdx, pushDspBoth](float v)
+    {
+        if (auto* self = safeSelf.getComponent())
+        {
+            if (bandIdx >= 0 && bandIdx < kNumBands)
+            {
+                self->mBands[bandIdx].attack = v;
+                pushDspBoth(&EQ8DSP::setBandAttack, v);
+            }
+        }
+    };
+    auto onReleaseChanged = [safeSelf, bandIdx, pushDspBoth](float v)
+    {
+        if (auto* self = safeSelf.getComponent())
+        {
+            if (bandIdx >= 0 && bandIdx < kNumBands)
+            {
+                self->mBands[bandIdx].release = v;
+                pushDspBoth(&EQ8DSP::setBandRelease, v);
+            }
+        }
+    };
+    auto content = std::make_unique<DynamicParamsPopout>(*mMsDSPApvts, prefix, bandIdx, dsp,
+                                                          mStripMixerPrefix, mResolveSourceName,
+                                                          std::move(onRangeChanged),
+                                                          std::move(onThresholdChanged),
+                                                          std::move(onRatioChanged),
+                                                          std::move(onAttackChanged),
+                                                          std::move(onReleaseChanged));
     // Anchor the CallOutBox to the band handle's screen rect so the arrow points
     // at the band it's editing.
     const float hx = freqToX(mBands[bandIdx].freq);
@@ -4761,6 +5107,21 @@ void ParametricEQDisplay::syncFromDSP()
         mPhaseMode = (int) mBoundDSP->getPhaseMode();
     else if (mBindMode == BindMode::MsDSP && mBoundMsDsp)
         mPhaseMode = (int) mBoundMsDsp->getPhaseMode();
+
+    // D.4-Q6: sync the main-level fader from DSP without firing onValueChange
+    // (avoid the DSP->UI->DSP loop).  Only when not actively dragging the
+    // fader so user input wins.
+    if (mMainLevelFader != nullptr && ! mMainLevelFader->isMouseButtonDown())
+    {
+        float dspMainDb = 0.0f;
+        if (mBindMode == BindMode::DSP && mBoundDSP)
+            dspMainDb = mBoundDSP->getMainLevel();
+        else if (mBindMode == BindMode::MsDSP && mBoundMsDsp)
+            dspMainDb = mBoundMsDsp->mid().getMainLevel();
+        const float curUi = (float) mMainLevelFader->getValue();
+        if (std::abs (dspMainDb - curUi) > 0.01f)
+            mMainLevelFader->setValue (dspMainDb, juce::dontSendNotification);
+    }
 
     // Band-value sync: SKIP during drag / nested sync so the DSP->UI poll doesn't
     // fight the user's drag input, and so we don't recurse from pushBandToDSP.
@@ -5118,6 +5479,49 @@ void ParametricEQDisplay::showEQOptionsMenu(juce::Component* anchor)
     }
     menu.addSubMenu("Processing Mode", modeMenu);
 
+    // D.4-Q6 (2026-05-01): expose three previously-hidden EQ8 settings here
+    // (Jeff confirmed these are options, not toolbar knobs).  All three apply
+    // only when a live DSP is bound (DSP mode or MsDSP mode); APVTS-only mode
+    // hides them.
+    EQ8DSP* directDsp = (mBindMode == BindMode::DSP) ? mBoundDSP : nullptr;
+    EQ8MsDSP* msDsp   = (mBindMode == BindMode::MsDSP) ? mBoundMsDsp : nullptr;
+    if (directDsp != nullptr || msDsp != nullptr)
+    {
+        menu.addSeparator();
+
+        // Linear Phase Precision: 5-position radio (FFT size).  Only meaningful
+        // when a linear-phase processing mode is active.
+        const int curPrec = directDsp ? directDsp->getLinearPhasePrecision()
+                                      : msDsp->mid().getLinearPhasePrecision();
+        juce::PopupMenu precMenu;
+        static const char* kPrecLabels[] = { "256 (low CPU)", "512", "1024", "2048 (default)", "4096 (high)" };
+        for (int p = 0; p < 5; ++p)
+            precMenu.addItem (20 + p, kPrecLabels[p], true, curPrec == p);
+        menu.addSubMenu ("Linear Phase Precision", precMenu);
+
+        // IIR Mod Speed: 5-position radio (smoother ramp time).
+        const float curSpeed = directDsp ? directDsp->getIIRModSpeed()
+                                         : msDsp->mid().getIIRModSpeed();
+        auto speedIdx = [] (float v) -> int {
+            if (v < 0.125f) return 0;
+            if (v < 0.375f) return 1;
+            if (v < 0.625f) return 2;
+            if (v < 0.875f) return 3;
+            return 4;
+        };
+        const int curSpeedIdx = speedIdx (curSpeed);
+        juce::PopupMenu speedMenu;
+        static const char* kSpeedLabels[] = { "Instant (~1 ms)", "Fast", "Medium", "Slow", "Slowest (~50 ms)" };
+        for (int s = 0; s < 5; ++s)
+            speedMenu.addItem (25 + s, kSpeedLabels[s], true, curSpeedIdx == s);
+        menu.addSubMenu ("IIR Mod Speed", speedMenu);
+
+        // Proportional Q toggle.
+        const bool propQ = directDsp ? directDsp->getProportionalQ()
+                                     : msDsp->mid().getProportionalQ();
+        menu.addItem (30, "Proportional Q (SSL/Neve hardware feel)", true, propQ);
+    }
+
     menu.showMenuAsync(
         juce::PopupMenu::Options().withTargetComponent(anchor),
         [this](int result)
@@ -5171,6 +5575,51 @@ void ParametricEQDisplay::showEQOptionsMenu(juce::Component* anchor)
                         else if (mBindMode == BindMode::MsDSP && mBoundMsDsp)
                             mBoundMsDsp->setPhaseMode(pm);
                         if (onLatencyChanged) onLatencyChanged();
+                        repaint();
+                    }
+                    // D.4-Q6: Linear Phase Precision (20..24)
+                    else if (result >= 20 && result <= 24)
+                    {
+                        const int prec = result - 20;
+                        if (mBindMode == BindMode::DSP && mBoundDSP)
+                            mBoundDSP->setLinearPhasePrecision (prec);
+                        else if (mBindMode == BindMode::MsDSP && mBoundMsDsp)
+                        {
+                            mBoundMsDsp->mid ().setLinearPhasePrecision (prec);
+                            mBoundMsDsp->side().setLinearPhasePrecision (prec);
+                        }
+                        if (onLatencyChanged) onLatencyChanged();
+                        repaint();
+                    }
+                    // D.4-Q6: IIR Mod Speed (25..29)
+                    else if (result >= 25 && result <= 29)
+                    {
+                        static const float kSpeeds[] = { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f };
+                        const float v = kSpeeds[result - 25];
+                        if (mBindMode == BindMode::DSP && mBoundDSP)
+                            mBoundDSP->setIIRModSpeed (v);
+                        else if (mBindMode == BindMode::MsDSP && mBoundMsDsp)
+                        {
+                            mBoundMsDsp->mid ().setIIRModSpeed (v);
+                            mBoundMsDsp->side().setIIRModSpeed (v);
+                        }
+                    }
+                    // D.4-Q6: Proportional Q toggle (30)
+                    else if (result == 30)
+                    {
+                        bool curOn = false;
+                        if (mBindMode == BindMode::DSP && mBoundDSP)
+                            curOn = mBoundDSP->getProportionalQ();
+                        else if (mBindMode == BindMode::MsDSP && mBoundMsDsp)
+                            curOn = mBoundMsDsp->mid().getProportionalQ();
+                        const bool next = ! curOn;
+                        if (mBindMode == BindMode::DSP && mBoundDSP)
+                            mBoundDSP->setProportionalQ (next);
+                        else if (mBindMode == BindMode::MsDSP && mBoundMsDsp)
+                        {
+                            mBoundMsDsp->mid ().setProportionalQ (next);
+                            mBoundMsDsp->side().setProportionalQ (next);
+                        }
                         repaint();
                     }
                     break;

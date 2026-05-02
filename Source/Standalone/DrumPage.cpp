@@ -268,6 +268,8 @@ void DrumPage::buildPianoRollTab()
 {
     mPianoRoll = std::make_unique<PianoRollContainer>();
     mPianoRoll->setData(&mPM.currentPattern().drumRolls[mPageIndex]);
+    // C.5b: pattern's intrinsic TS drives the piano roll's bar-line spacing.
+    mPianoRoll->setTimeSignature(mPM.currentPattern().tsNum, mPM.currentPattern().tsDen);
     mPianoRoll->setNoteColor(mPageColor);
     addAndMakeVisible(*mPianoRoll);
 
@@ -403,6 +405,8 @@ void DrumPage::selectEngine(const juce::String& engineName)
             mEQDisplay->bindMsDSP(preEq, &mProcessor.apvts,
                                   mixerPrefix + "_preeq_mid_eq",
                                   mixerPrefix + "_preeq_side_eq");
+            mEQDisplay->setStripContext(mixerPrefix,
+                [](int id){ return MixerChannelIds::friendlyName(id); });
         }
         mEQDisplay->setSampleRate(sr);
     }
@@ -426,7 +430,10 @@ void DrumPage::timerCallback()
     }
 
     if (mPianoRoll)
+    {
         mPianoRoll->setData(&mPM.currentPattern().drumRolls[mPageIndex]);
+        mPianoRoll->setTimeSignature(mPM.currentPattern().tsNum, mPM.currentPattern().tsDen);
+    }
 
     // While on the Drum Kit sub-tab, repaint at the timer rate so edits from
     // the per-drum Piano Roll tab show up automatically (the kit view reads

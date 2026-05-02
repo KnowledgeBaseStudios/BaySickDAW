@@ -43,6 +43,9 @@ void BaySickSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     updateFromApvts();
 
+    // C.4 Phase 2.2: refresh engine-level SC RMS for any internal mod source.
+    mScHelper.updateLevel (buffer.getNumSamples());
+
     const int auditNote = mAuditionNote.exchange (-1);
     if (auditNote >= 0 && auditNote <= 127)
     {

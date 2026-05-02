@@ -39,6 +39,10 @@ struct EngineId
 struct PianoRollConnection
 {
     std::function<PianoRollData*()>           dataAccessor;
+    // C.5b: optional pattern-TS provider — returns current pattern's
+    // intrinsic (num,den) so the page can refresh bar-line spacing when the
+    // active pattern changes or the user right-clicks "Set Time Signature".
+    std::function<void(int& outNum, int& outDen)>  patternTimeSigProvider;
     juce::Colour                              noteColor;
     juce::String                              displayName;
     std::function<void(int)>                  auditionMomentary;   // brief preview

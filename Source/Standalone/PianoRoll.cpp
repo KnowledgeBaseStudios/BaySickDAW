@@ -199,6 +199,18 @@ void PianoRollGrid::setScrollState(float ppb, double beatOff, int topNote,
     repaint();
 }
 
+void PianoRollGrid::setTimeSignature(int num, int den)
+{
+    const int n = juce::jlimit (1, 32, num);
+    const int d = (den > 0) ? den : 4;
+    if (n != mTsNum || d != mTsDen)
+    {
+        mTsNum = n;
+        mTsDen = d;
+        repaint();
+    }
+}
+
 void PianoRollGrid::setData(PianoRollData* data)
 {
     if (mData != data)
@@ -1812,17 +1824,23 @@ void PianoRollGrid::paint(Graphics& g)
             g.drawVerticalLine(x, (float)mNoteYOffset, (float)b.getHeight());
         }
     }
-    // Bar lines (every 4 beats) — always shown, drawn last (on top)
+    // C.5b: Bar lines at multiples of (tsNum * 4 / tsDen) PPQ beats — always
+    // shown, drawn on top.  4/4 = 4-beat bars, 3/4 = 3, 6/8 = 3, 5/4 = 5, 7/8 = 3.5.
+    const double barBpb = (double) juce::jmax (1, mTsNum) * 4.0 / (double) juce::jmax (1, mTsDen);
     {
-        double startBeat = std::floor(mBeatOff / 4.0) * 4.0;
-        for (double beat = startBeat; beat <= mBeatOff + b.getWidth() / mPPB + 4.0; beat += 4.0)
+        const double startBar = std::floor (mBeatOff / barBpb);
+        double startBeat = startBar * barBpb;
+        for (double beat = startBeat;
+             beat <= mBeatOff + b.getWidth() / mPPB + barBpb;
+             beat += barBpb)
         {
             int x = beatToX(beat);
             if (x < 0 || x > b.getWidth()) continue;
             g.setColour(VC::Accent.brighter(0.3f));
             g.drawVerticalLine(x, 0, (float)b.getHeight());
             g.setColour(VC::TextDim); g.setFont(Font(9));
-            g.drawText(String((int)(beat / 4.0) + 1), x + 2, 2, 24, 10, Justification::centredLeft);
+            g.drawText(String((int) std::round (beat / barBpb) + 1),
+                       x + 2, 2, 24, 10, Justification::centredLeft);
         }
     }
 
@@ -2034,19 +2052,24 @@ void PianoRollGrid::paint(Graphics& g)
     g.fillRect(0, 0, b.getWidth(), kRulerH);
     g.setColour(VC::Accent.withAlpha(0.5f));
     g.drawHorizontalLine(kRulerH - 1, 0, (float)b.getWidth());
-    // Beat tick marks and bar numbers in ruler
+    // C.5b: ruler bar boundaries follow the pattern's intrinsic TS so the
+    // grid bars + ruler bar numbers stay aligned.  4/4 → every 4 beats,
+    // 3/4 → every 3, 6/8 → every 3 (PPQ-beat basis), 7/8 → every 3.5.
+    const double rulerBarBpb = (double) juce::jmax (1, mTsNum) * 4.0
+                              / (double) juce::jmax (1, mTsDen);
     for (double beat = std::floor(mBeatOff); beat <= mBeatOff + b.getWidth() / mPPB + 1.0; beat += 0.5)
     {
         int rx = beatToX(beat);
         if (rx < 0 || rx > b.getWidth()) continue;
-        bool isBar  = (std::fmod(beat, 4.0) < 1e-9);
+        const double barFrac = beat / rulerBarBpb;
+        bool isBar  = (std::abs (barFrac - std::round (barFrac)) < 1e-6);
         bool isBeat = (std::fmod(beat, 1.0) < 1e-9);
         if (isBar)
         {
             g.setColour(VC::Accent.brighter(0.5f));
             g.drawVerticalLine(rx, 0, (float)kRulerH);
             g.setColour(VC::Text); g.setFont(Font(9));
-            g.drawText(String((int)(beat / 4.0) + 1), rx + 2, 1, 20, kRulerH - 2,
+            g.drawText(String((int) std::round (barFrac) + 1), rx + 2, 1, 20, kRulerH - 2,
                        Justification::centredLeft, false);
         }
         else if (isBeat)
@@ -2294,9 +2317,13 @@ void ControlLane::mouseDown(const MouseEvent& e)
         m.addItem(1, "Velocity");
         m.addItem(2, "Panning");
         m.addItem(3, "Pitch Bend");
+        // Batch E #2 (2026-05-01): Filter Cutoff exposed.  Engines read
+        // PianoNote::filterCutoff (0..1) on note-on and apply as a per-note
+        // cutoff offset (octaves around master cutoff knob).
+        m.addItem(4, "Filter Cutoff");
         m.showMenuAsync(PopupMenu::Options().withTargetComponent(this),
             [this](int r) {
-                if (r < 1 || r > 3) return;
+                if (r < 1 || r > 4) return;
                 mMode = static_cast<Mode>(r - 1);
                 if (onModeChange) onModeChange(mMode);
                 repaint();
@@ -2777,6 +2804,11 @@ void PianoRollContainer::setData(PianoRollData* data)
     mGrid->setData(data);
     mLane->setData(data);
     syncScrollState();
+}
+
+void PianoRollContainer::setTimeSignature(int num, int den)
+{
+    if (mGrid) mGrid->setTimeSignature (num, den);
 }
 
 void PianoRollContainer::setPlayheadBeat(double beat)

@@ -1,4 +1,6 @@
 #include "EffectEditorPanels.h"
+// D.4 (2026-05-01): force MSBuild to recompile this file — Compressor + Delay
+// knob additions were missing from the previous incremental build.
 #include "../DSP/CompressorDSP.h"
 #include "../DSP/ReverbDSP.h"
 #include "../DSP/ChorusDSP.h"
@@ -119,10 +121,15 @@ void EditorPanelBase::setUndoContext(const UndoContext& ctx)
     wireKnob(outputVolKnob.get());
 }
 
-void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, int slotIndex)
+void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const juce::String& slotUuid)
 {
-    // Build a base prefix: e.g. "layers_bus_s2_"
-    juce::String base = channelPrefix + "_s" + juce::String(slotIndex) + "_";
+    // C13: paramIds are keyed by the slot's stable UUID, not its position.
+    // Reorder/pack-to-top swaps Slot structs (UUID travels with the effect)
+    // so automation lanes stay valid.  Empty UUID = nothing to stamp.
+    if (slotUuid.isEmpty()) return;
+
+    // Build a base prefix: e.g. "layers_bus_{a1b2c3...}_"
+    juce::String base = channelPrefix + "_" + slotUuid + "_";
 
     auto stampId = [&base](VKnob* k)
     {
@@ -270,6 +277,8 @@ struct CompressorPanel : public EditorPanelBase,
         buildKnobs(*this, knobs, {
             { "Thresh",  -60.f,   0.f, -12.f, 0.5f, "Threshold (dB)" },
             { "Ratio",    0.4f,  30.f,   4.f, 0.1f, "Compression ratio (0.4=expand, >1=compress)" },
+            // D.4-Q4 (2026-05-01): manual knee-width knob (was hidden APVTS).
+            { "KneeW",    0.f,  18.f,   6.f,  0.1f, "Manual knee width (dB) - overrides knee-type's default smoothing" },
             { "Gain",   -30.f,  30.f,   0.f,  0.5f, "Output gain (dB) - ignored if Auto MU is on" },
             { "Attack",   0.f, 400.f,  10.f,  0.5f, "Attack (ms)" },
             { "Release",  1.f,4000.f, 100.f,  1.f,  "Release (ms)" },
@@ -280,7 +289,7 @@ struct CompressorPanel : public EditorPanelBase,
         });
 
         // All knobs use modernAnalog variant (black cream-plate knob)
-        for (int i = 0; i < 9; ++i)
+        for (int i = 0; i < 10; ++i)
             knobs[i]->slider.getProperties().set(DynamicsLAF::kKnobVariant, "modernAnalog");
 
         // KneeType — 8-position chicken-head selector
@@ -303,25 +312,27 @@ struct CompressorPanel : public EditorPanelBase,
 
         knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setThreshold   ((float)knobs[0]->slider.getValue()); };
         knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setRatio       ((float)knobs[1]->slider.getValue()); };
-        knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setGain        ((float)knobs[2]->slider.getValue()); };
-        knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setAttack      ((float)knobs[3]->slider.getValue()); };
-        knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setRelease     ((float)knobs[4]->slider.getValue()); };
-        knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setMix         ((float)knobs[5]->slider.getValue()); };
-        knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setLookaheadMs ((float)knobs[6]->slider.getValue()); };
-        knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setDetectionMs ((float)knobs[7]->slider.getValue()); };
-        knobs[8]->slider.onValueChange = [dsp,this]{ dsp->setSidechainHPF((float)knobs[8]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setKnee        ((float)knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setGain        ((float)knobs[3]->slider.getValue()); };
+        knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setAttack      ((float)knobs[4]->slider.getValue()); };
+        knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setRelease     ((float)knobs[5]->slider.getValue()); };
+        knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setMix         ((float)knobs[6]->slider.getValue()); };
+        knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setLookaheadMs ((float)knobs[7]->slider.getValue()); };
+        knobs[8]->slider.onValueChange = [dsp,this]{ dsp->setDetectionMs ((float)knobs[8]->slider.getValue()); };
+        knobs[9]->slider.onValueChange = [dsp,this]{ dsp->setSidechainHPF((float)knobs[9]->slider.getValue()); };
 
         // A9 slider sync from DSP state + clamp cleanup (sendNotificationSync fires the
         // onValueChange lambdas, which call the DSP setters with the slider-clamped value).
         knobs[0]->slider.setValue(dsp->threshold,    juce::sendNotificationSync);
         knobs[1]->slider.setValue(dsp->ratio,        juce::sendNotificationSync);
-        knobs[2]->slider.setValue(dsp->makeupDb,     juce::sendNotificationSync);
-        knobs[3]->slider.setValue(dsp->attackMs,     juce::sendNotificationSync);
-        knobs[4]->slider.setValue(dsp->releaseMs,    juce::sendNotificationSync);
-        knobs[5]->slider.setValue(dsp->mix,          juce::sendNotificationSync);
-        knobs[6]->slider.setValue(dsp->lookaheadMs,  juce::sendNotificationSync);
-        knobs[7]->slider.setValue(dsp->detectionMs,  juce::sendNotificationSync);
-        knobs[8]->slider.setValue(dsp->sidechainHPF, juce::sendNotificationSync);
+        knobs[2]->slider.setValue(dsp->kneeDb,       juce::sendNotificationSync);
+        knobs[3]->slider.setValue(dsp->makeupDb,     juce::sendNotificationSync);
+        knobs[4]->slider.setValue(dsp->attackMs,     juce::sendNotificationSync);
+        knobs[5]->slider.setValue(dsp->releaseMs,    juce::sendNotificationSync);
+        knobs[6]->slider.setValue(dsp->mix,          juce::sendNotificationSync);
+        knobs[7]->slider.setValue(dsp->lookaheadMs,  juce::sendNotificationSync);
+        knobs[8]->slider.setValue(dsp->detectionMs,  juce::sendNotificationSync);
+        knobs[9]->slider.setValue(dsp->sidechainHPF, juce::sendNotificationSync);
 
         // -- Auto-MU on/off toggle ----------------------------------------
         autoMuTog = std::make_unique<DualLabelToggle>();
@@ -364,7 +375,7 @@ struct CompressorPanel : public EditorPanelBase,
         if (mDsp && grMeter) grMeter->setGainReduction(mDsp->getGainReductionDb());
     }
 
-    // Layout: [VU] [GR] Thresh|Ratio|Gain|Knee|Atk|Rel|Mix|LookA|Det|SCHPF [AutoMU/Link/PeakRMS toggles] [DBFS][Vol]
+    // Layout: [VU] [GR] Thresh|Ratio|KneeW|Gain|Knee|Atk|Rel|Mix|LookA|Det|SCHPF [AutoMU/Link/PeakRMS toggles] [DBFS][Vol]
     void resized() override
     {
         auto b = getLocalBounds().reduced(4, 4);
@@ -385,9 +396,7 @@ struct CompressorPanel : public EditorPanelBase,
         b.removeFromRight(4);
 
         // Toggles laid out as two columns: Auto MU on its own (left), Link +
-        // Peak/RMS stacked (right). All three toggles keep the same size --
-        // Auto MU is vertically centered in its column. Previous 3-tall stack
-        // was cramming labels together; this split eliminates the overlap.
+        // Peak/RMS stacked (right).
         constexpr int kToggleColW = 62;
         auto togArea = b.removeFromRight(kToggleColW * 2 + 2);
         b.removeFromRight(4);
@@ -398,28 +407,30 @@ struct CompressorPanel : public EditorPanelBase,
         if (linkTog)    linkTog   ->setBounds(linkSlot.reduced(1));
         if (peakRmsTog) peakRmsTog->setBounds(rightCol.reduced(1));
 
-        togArea.removeFromRight(2);   // gutter between the two columns
+        togArea.removeFromRight(2);
         auto autoMuSlot = togArea.withSizeKeepingCentre(kToggleColW, halfH);
         if (autoMuTog)  autoMuTog ->setBounds(autoMuSlot.reduced(1));
 
-        // Knob strip: 10 slots (Thresh|Ratio|Gain|Knee|Atk|Rel|Mix|LookA|Det|SCHPF)
-        const int n     = 10;
+        // Knob strip: 11 slots (D.4-Q4: KneeW added between Ratio and Gain).
+        // Thresh|Ratio|KneeW|Gain|KneeType|Atk|Rel|Mix|LookA|Det|SCHPF
+        const int n     = 11;
         const int slotW = b.getWidth() / n;
         const int sz    = juce::jmin(slotW, b.getHeight(), kKnobSz);
 
         knobs[0]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Thresh
         knobs[1]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Ratio
-        knobs[2]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Gain
+        knobs[2]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // KneeW (D.4-Q4)
+        knobs[3]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Gain
         {
             auto slot = b.removeFromLeft(slotW);
-            if (kneeSel) kneeSel->setBounds(slot.reduced(2));                          // Knee chicken-head
+            if (kneeSel) kneeSel->setBounds(slot.reduced(2));                          // KneeType chicken-head
         }
-        knobs[3]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Attack
-        knobs[4]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Release
-        knobs[5]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Mix
-        knobs[6]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // LookA
-        knobs[7]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Det
-        knobs[8]->setBounds(b.withSizeKeepingCentre(sz, sz));                          // SCHPF
+        knobs[4]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Attack
+        knobs[5]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Release
+        knobs[6]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Mix
+        knobs[7]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // LookA
+        knobs[8]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Det
+        knobs[9]->setBounds(b.withSizeKeepingCentre(sz, sz));                          // SCHPF
     }
 
     void paint(juce::Graphics& g) override
@@ -977,10 +988,13 @@ struct DelayPanel : public EditorPanelBase
         addAndMakeVisible(mJewel);
         mJewel.setActive(true);
 
-        // Row 1: Time | Feed | WetIn | Wet | Dry | FBCut | FBReso | Tone  (8 knobs)
+        // Row 1: Time | Feed | LoFiSR | WetIn | Wet | Dry | FBCut | FBReso | Tone  (9 knobs)
+        // D.4-Q5 (2026-05-01): LoFiSR sits next to Feed since it only colors the
+        // feedback tail.  ModTime + Smooth moved to row 2 next to their dependencies.
         buildKnobs(*this, r1knobs, {
             { "Time",    1.f,  2000.f,  250.f,  1.f,   "Delay time (ms)" },
             { "Feed",    0.f,    1.2f,    0.4f, 0.01f, "Feedback level (>1 builds up)" },
+            { "LoFiSR",100.f,48000.f,48000.f, 100.f,  "Lo-Fi sample rate (Hz) - 48000 = full quality; lower = bit-crusher / vintage character on every echo (drop below ~6000 for obvious grit)" },
             { "WetIn",   0.f,    1.f,     1.f,  0.01f, "Input gain INTO delay line - drop to freeze current feedback while muting new input" },
             { "Wet",     0.f,    1.f,     0.3f, 0.01f, "Wet output level" },
             { "Dry",     0.f,    1.f,     1.0f, 0.01f, "Dry output level" },
@@ -989,9 +1003,12 @@ struct DelayPanel : public EditorPanelBase
             { "Tone",   -1.f,    1.f,     0.f,  0.01f, "Tone (-=HP, +=LP)" },
         });
 
-        // Row 2: ModHz | ModFB | Diff | DiffSprd | LoBit | FBDst | FBKnee | FBSym | Spread | Pan  (10 knobs)
+        // Row 2: ModHz | ModTime | ModFB | Diff | DiffSprd | LoBit | FBDst | FBKnee | FBSym | Spread | Pan | Smooth  (12 knobs)
+        // ModTime placed next to ModHz (its LFO-rate dependency).  Smooth at the
+        // end near the Pitch toggle (its keep-pitch dependency).
         buildKnobs(*this, r2knobs, {
             { "ModHz",    0.f,  20.f,  0.f,  0.1f,  "LFO modulation rate (Hz)" },
+            { "ModTime",  0.f,   1.f,  0.f,  0.01f, "LFO depth on delay TIME (chorus / flange-into-delay character). Requires ModHz > 0 (left of this knob) to hear any change" },
             { "ModFB",    0.f,   1.f,  0.f,  0.01f, "LFO depth on feedback filter cutoff (+/- octaves)" },
             { "Diff",     0.f,   1.f,  0.f,  0.01f, "Diffusion level (allpass smearing)" },
             { "DiffSprd", 0.f,   1.f,  0.5f, 0.01f, "Diffusion spread - scales the 4 allpass base delays (tight 0 to wide 1)" },
@@ -1001,6 +1018,7 @@ struct DelayPanel : public EditorPanelBase
             { "FBSym",    0.f,   1.f,  0.f,  0.01f, "Sat-mode symmetry (0=symmetric, 1=asymmetric DC offset)" },
             { "Spread",   0.f,   1.f,  0.f,  0.01f, "Stereo spread (L/R base delay difference)" },
             { "Pan",     -1.f,   1.f,  0.f,  0.01f, "L/R offset pan" },
+            { "Smooth",   0.f,   1.f,  0.5f, 0.01f, "Time smoothing - higher = slower transition when delay time changes. Only audible when the Pitch toggle (right of this row) is ON" },
         });
 
         modelSel = std::make_unique<ChickenHeadSelector>();
@@ -1094,48 +1112,54 @@ struct DelayPanel : public EditorPanelBase
         };
         addAndMakeVisible(*syncDivSel);
 
-        // Row 1 bindings (8 knobs)
+        // Row 1 bindings (9 knobs)
         r1knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setDelayMs           ((float)r1knobs[0]->slider.getValue()); };
         r1knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setFeedbackLevel     ((float)r1knobs[1]->slider.getValue()); };
-        r1knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setWetIn             ((float)r1knobs[2]->slider.getValue()); };
-        r1knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setWetOut            ((float)r1knobs[3]->slider.getValue()); };
-        r1knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setDryOut            ((float)r1knobs[4]->slider.getValue()); };
-        r1knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setFeedbackCutoff    ((float)r1knobs[5]->slider.getValue()); };
-        r1knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setFeedbackResonance ((float)r1knobs[6]->slider.getValue()); };
-        r1knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setTone              ((float)r1knobs[7]->slider.getValue()); };
+        r1knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setLoFiSampleRate    ((float)r1knobs[2]->slider.getValue()); };
+        r1knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setWetIn             ((float)r1knobs[3]->slider.getValue()); };
+        r1knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setWetOut            ((float)r1knobs[4]->slider.getValue()); };
+        r1knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setDryOut            ((float)r1knobs[5]->slider.getValue()); };
+        r1knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setFeedbackCutoff    ((float)r1knobs[6]->slider.getValue()); };
+        r1knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setFeedbackResonance ((float)r1knobs[7]->slider.getValue()); };
+        r1knobs[8]->slider.onValueChange = [dsp,this]{ dsp->setTone              ((float)r1knobs[8]->slider.getValue()); };
 
-        // Row 2 bindings (10 knobs)
-        r2knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setModRate           ((float)r2knobs[0]->slider.getValue()); };
-        r2knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setModCutoffMod      ((float)r2knobs[1]->slider.getValue()); };
-        r2knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setDiffusionLevel    ((float)r2knobs[2]->slider.getValue()); };
-        r2knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setDiffusionSpread   ((float)r2knobs[3]->slider.getValue()); };
-        r2knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setLoFiBits          ((float)r2knobs[4]->slider.getValue()); };
-        r2knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setFBDistLevel       ((float)r2knobs[5]->slider.getValue()); };
-        r2knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setFBDistKnee        ((float)r2knobs[6]->slider.getValue()); };
-        r2knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setFBDistSymmetry    ((float)r2knobs[7]->slider.getValue()); };
-        r2knobs[8]->slider.onValueChange = [dsp,this]{ dsp->setStereoSpread      ((float)r2knobs[8]->slider.getValue()); };
-        r2knobs[9]->slider.onValueChange = [dsp,this]{ dsp->setOffsetPan         ((float)r2knobs[9]->slider.getValue()); };
+        // Row 2 bindings (12 knobs — ModTime at idx 1, Smooth at idx 11)
+        r2knobs[0] ->slider.onValueChange = [dsp,this]{ dsp->setModRate           ((float)r2knobs[0] ->slider.getValue()); };
+        r2knobs[1] ->slider.onValueChange = [dsp,this]{ dsp->setModTimeMod        ((float)r2knobs[1] ->slider.getValue()); };
+        r2knobs[2] ->slider.onValueChange = [dsp,this]{ dsp->setModCutoffMod      ((float)r2knobs[2] ->slider.getValue()); };
+        r2knobs[3] ->slider.onValueChange = [dsp,this]{ dsp->setDiffusionLevel    ((float)r2knobs[3] ->slider.getValue()); };
+        r2knobs[4] ->slider.onValueChange = [dsp,this]{ dsp->setDiffusionSpread   ((float)r2knobs[4] ->slider.getValue()); };
+        r2knobs[5] ->slider.onValueChange = [dsp,this]{ dsp->setLoFiBits          ((float)r2knobs[5] ->slider.getValue()); };
+        r2knobs[6] ->slider.onValueChange = [dsp,this]{ dsp->setFBDistLevel       ((float)r2knobs[6] ->slider.getValue()); };
+        r2knobs[7] ->slider.onValueChange = [dsp,this]{ dsp->setFBDistKnee        ((float)r2knobs[7] ->slider.getValue()); };
+        r2knobs[8] ->slider.onValueChange = [dsp,this]{ dsp->setFBDistSymmetry    ((float)r2knobs[8] ->slider.getValue()); };
+        r2knobs[9] ->slider.onValueChange = [dsp,this]{ dsp->setStereoSpread      ((float)r2knobs[9] ->slider.getValue()); };
+        r2knobs[10]->slider.onValueChange = [dsp,this]{ dsp->setOffsetPan         ((float)r2knobs[10]->slider.getValue()); };
+        r2knobs[11]->slider.onValueChange = [dsp,this]{ dsp->setSmoothing         ((float)r2knobs[11]->slider.getValue()); };
 
         // A9 slider sync from DSP state + clamp cleanup (via public getters).
         // delayMs is already a public field on DelayDSP; the rest need getters.
         r1knobs[0]->slider.setValue(dsp->delayMs,                juce::sendNotificationSync);
         r1knobs[1]->slider.setValue(dsp->getFeedbackLevel(),     juce::sendNotificationSync);
-        r1knobs[2]->slider.setValue(dsp->getWetIn(),             juce::sendNotificationSync);
-        r1knobs[3]->slider.setValue(dsp->getWetOut(),            juce::sendNotificationSync);
-        r1knobs[4]->slider.setValue(dsp->getDryOut(),            juce::sendNotificationSync);
-        r1knobs[5]->slider.setValue(dsp->getFBCutoff(),          juce::sendNotificationSync);
-        r1knobs[6]->slider.setValue(dsp->getFBResonance(),       juce::sendNotificationSync);
-        r1knobs[7]->slider.setValue(dsp->getTone(),              juce::sendNotificationSync);
-        r2knobs[0]->slider.setValue(dsp->getModRate(),           juce::sendNotificationSync);
-        r2knobs[1]->slider.setValue(dsp->getModCutoffMod(),      juce::sendNotificationSync);
-        r2knobs[2]->slider.setValue(dsp->getDiffLevel(),         juce::sendNotificationSync);
-        r2knobs[3]->slider.setValue(dsp->getDiffSpread(),        juce::sendNotificationSync);
-        r2knobs[4]->slider.setValue(dsp->getLoFiBits(),          juce::sendNotificationSync);
-        r2knobs[5]->slider.setValue(dsp->getFBDistLevel(),       juce::sendNotificationSync);
-        r2knobs[6]->slider.setValue(dsp->getFBDistKnee(),        juce::sendNotificationSync);
-        r2knobs[7]->slider.setValue(dsp->getFBDistSymmetry(),    juce::sendNotificationSync);
-        r2knobs[8]->slider.setValue(dsp->getStereoSpread(),      juce::sendNotificationSync);
-        r2knobs[9]->slider.setValue(dsp->getOffsetPan(),         juce::sendNotificationSync);
+        r1knobs[2]->slider.setValue(dsp->getLoFiSampleRate(),    juce::sendNotificationSync);
+        r1knobs[3]->slider.setValue(dsp->getWetIn(),             juce::sendNotificationSync);
+        r1knobs[4]->slider.setValue(dsp->getWetOut(),            juce::sendNotificationSync);
+        r1knobs[5]->slider.setValue(dsp->getDryOut(),            juce::sendNotificationSync);
+        r1knobs[6]->slider.setValue(dsp->getFBCutoff(),          juce::sendNotificationSync);
+        r1knobs[7]->slider.setValue(dsp->getFBResonance(),       juce::sendNotificationSync);
+        r1knobs[8]->slider.setValue(dsp->getTone(),              juce::sendNotificationSync);
+        r2knobs[0] ->slider.setValue(dsp->getModRate(),           juce::sendNotificationSync);
+        r2knobs[1] ->slider.setValue(dsp->getModTimeMod(),        juce::sendNotificationSync);
+        r2knobs[2] ->slider.setValue(dsp->getModCutoffMod(),      juce::sendNotificationSync);
+        r2knobs[3] ->slider.setValue(dsp->getDiffLevel(),         juce::sendNotificationSync);
+        r2knobs[4] ->slider.setValue(dsp->getDiffSpread(),        juce::sendNotificationSync);
+        r2knobs[5] ->slider.setValue(dsp->getLoFiBits(),          juce::sendNotificationSync);
+        r2knobs[6] ->slider.setValue(dsp->getFBDistLevel(),       juce::sendNotificationSync);
+        r2knobs[7] ->slider.setValue(dsp->getFBDistKnee(),        juce::sendNotificationSync);
+        r2knobs[8] ->slider.setValue(dsp->getFBDistSymmetry(),    juce::sendNotificationSync);
+        r2knobs[9] ->slider.setValue(dsp->getStereoSpread(),      juce::sendNotificationSync);
+        r2knobs[10]->slider.setValue(dsp->getOffsetPan(),         juce::sendNotificationSync);
+        r2knobs[11]->slider.setValue(dsp->getSmoothing(),         juce::sendNotificationSync);
 
         // A6 -- apply initial Time-knob lockout state
         applyTimeLockout(dsp->syncBPM);

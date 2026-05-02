@@ -453,6 +453,12 @@ void EffectsPage::onChannelChanged()
     // full bindMsDSP overload with APVTS prefix so (a) widget drags propagate to
     // APVTS and become audible, (b) band params are automatable via right-click
     // "Automate: ..." menu. Fall back to stub only if the graph isn't built yet.
+    // C.4 Phase 1 (2026-04-30): also push the strip context (mixer prefix +
+    // source-name resolver) so the per-band SC dropdown in DynamicParamsPopout
+    // can enumerate routed lines and label them.
+    auto resolveSrcName = [](int srcChId) -> juce::String
+    { return MixerChannelIds::friendlyName(srcChId); };
+
     if (mEQDisplay)
     {
         const juce::String chanPrefix = getMixerApvtsPrefixForChannel(id);
@@ -466,6 +472,7 @@ void EffectsPage::onChannelChanged()
         {
             mEQDisplay->bindMsDSP(eq ? eq : &mEffectsEQDsp);
         }
+        mEQDisplay->setStripContext(chanPrefix, resolveSrcName);
     }
 
     // §P4.3 (B6.2): bind the Pre EQ display to this channel's pre-rack EQ
@@ -504,6 +511,9 @@ void EffectsPage::onChannelChanged()
         {
             mPreEQDisplay->bindMsDSP(preEq ? preEq : &mPreEffectsEQDsp);
         }
+        // C.4 Phase 1: same strip context as post-rack EQ above -- the
+        // pre-rack EQ8 lives on the same strip, sees the same SC array.
+        mPreEQDisplay->setStripContext(chanPrefix, resolveSrcName);
     }
 
     // 2026-04-26: restore the new channel's last-used sub-tab (default Rack).
@@ -615,47 +625,83 @@ void EffectsPage::setRack(EffectRack* rack)
 }
 
 // ── Slot interaction ──────────────────────────────────────────────────────────
-static EffectRackAction::SlotTypes captureSlotTypes(EffectRack* rack)
+// D.2 (2026-05-01): full-state snapshot — captures type + bypassed +
+// outputGainDb + serialized DSP state + slot UUID per slot.  Replaces the
+// old type-only captureSlotTypes / applySlotTypes pair so undo/redo
+// preserves knob values and keeps slot UUIDs stable (which keeps automation
+// lanes pointed at the same paramId across an undo).
+static EffectRackAction::SlotSnapshots captureSlotSnapshots(EffectRack* rack)
 {
-    EffectRackAction::SlotTypes types;
+    EffectRackAction::SlotSnapshots snaps;
     for (int i = 0; i < EffectRack::kNumSlots; ++i)
-        types[i] = rack->getSlotType(i);
-    return types;
+    {
+        auto& s = snaps[(size_t) i];
+        s.type         = rack->getSlotType(i);
+        s.bypassed     = rack->isSlotBypassed(i);
+        s.outputGainDb = rack->getSlotOutputGain(i);
+        s.uuid         = rack->getSlotUuid(i);
+        // Serialize DSP knob state into the snapshot.
+        const auto& slot = rack->getSlot(i);
+        if (slot.effect != nullptr)
+            slot.effect->getStateInformation (s.dspState);
+    }
+    return snaps;
 }
 
-// Apply a target slot-type snapshot, skipping slots whose type already
-// matches so we don't destroy-then-recreate DSPs unnecessarily. Writes a
-// parallel `out` array of which slots actually changed; callers use that to
-// rebuild only the affected editor panels (preserving sliders in untouched
-// panels so queued FloatParamActions don't dangle).
-static void applySlotTypes(EffectRack* rack, const EffectRackAction::SlotTypes& target,
-                           std::array<bool, EffectRack::kNumSlots>& outChanged)
+// Apply a target slot-snapshot.  Slots whose type+UUID match the current
+// state are diff-applied (only bypass / output-gain / DSP-state restored —
+// the existing effect instance is preserved).  Slots whose type or UUID
+// differ get their effect reloaded with the snapshot's UUID so automation
+// lanes survive.  Writes a parallel `outChanged` array indicating which
+// slots had their effect instance replaced (so callers can rebuild only the
+// affected editor panels — preserves slider SafePointers on untouched ones).
+static void applySlotSnapshots(EffectRack* rack,
+                               const EffectRackAction::SlotSnapshots& target,
+                               std::array<bool, EffectRack::kNumSlots>& outChanged)
 {
     outChanged.fill(false);
     for (int i = 0; i < EffectRack::kNumSlots; ++i)
     {
-        const auto current = rack->getSlotType(i);
-        if (current == target[i]) continue;   // no-op
+        const auto& tgt        = target[(size_t) i];
+        const auto  currType   = rack->getSlotType(i);
+        const auto  currUuid   = rack->getSlotUuid(i);
 
-        outChanged[i] = true;
-        if (target[i] == EffectType::None)
-            rack->clearSlot(i);
-        else
-            rack->loadEffect(i, target[i]);
+        // Reload effect instance if the type changed OR the UUID changed.
+        const bool replaceInstance = (currType != tgt.type) || (currUuid != tgt.uuid);
+        if (replaceInstance)
+        {
+            outChanged[i] = true;
+            if (tgt.type == EffectType::None)
+                rack->clearSlot(i);
+            else
+                rack->loadEffect(i, tgt.type, tgt.uuid);
+        }
+
+        // Restore DSP knob state, bypass, and output-gain on the (possibly
+        // newly-instantiated) slot.
+        if (tgt.type != EffectType::None)
+        {
+            const auto& slot = rack->getSlot(i);
+            if (slot.effect != nullptr && tgt.dspState.getSize() > 0)
+                slot.effect->setStateInformation (tgt.dspState.getData(),
+                                                   (int) tgt.dspState.getSize());
+            rack->setSlotBypassed   (i, tgt.bypassed);
+            rack->setSlotOutputGain (i, tgt.outputGainDb);
+        }
     }
 }
 
 void EffectsPage::onEffectChosen(int slotIndex, EffectType type)
 {
     if (!mRack) return;
-    auto before = captureSlotTypes(mRack);
+    auto before = captureSlotSnapshots(mRack);
     mRack->loadEffect(slotIndex, type);
-    auto after = captureSlotTypes(mRack);
+    auto after = captureSlotSnapshots(mRack);
     if (mUndoCtx.isValid())
         mUndoCtx.perform(new EffectRackAction("Load Effect", before, after,
-            [this](const EffectRackAction::SlotTypes& t) {
+            [this](const EffectRackAction::SlotSnapshots& t) {
                 std::array<bool, EffectRack::kNumSlots> changed;
-                applySlotTypes(mRack, t, changed);
+                applySlotSnapshots(mRack, t, changed);
                 // Only rebuild editors for slots whose DSP was actually
                 // replaced — preserves sliders (and hence any queued
                 // FloatParamActions' captured SafePointers) on untouched
@@ -674,15 +720,15 @@ void EffectsPage::onEffectChosen(int slotIndex, EffectType type)
 void EffectsPage::onEffectRemoved(int slotIndex)
 {
     if (!mRack) return;
-    auto before = captureSlotTypes(mRack);
+    auto before = captureSlotSnapshots(mRack);
     mRack->clearSlot(slotIndex);
     mRack->packSlotsToTop();
-    auto after = captureSlotTypes(mRack);
+    auto after = captureSlotSnapshots(mRack);
     if (mUndoCtx.isValid())
         mUndoCtx.perform(new EffectRackAction("Remove Effect", before, after,
-            [this](const EffectRackAction::SlotTypes& t) {
+            [this](const EffectRackAction::SlotSnapshots& t) {
                 std::array<bool, EffectRack::kNumSlots> changed;
-                applySlotTypes(mRack, t, changed);
+                applySlotSnapshots(mRack, t, changed);
                 for (int i = 0; i < EffectRack::kNumSlots; ++i)
                     if (changed[i]) rebuildSlotEditor(i);
                 refreshAllSlots();
@@ -698,15 +744,15 @@ void EffectsPage::onEffectRemoved(int slotIndex)
 void EffectsPage::onMoveRequested(int slotIndex, bool up)
 {
     if (!mRack) return;
-    auto before = captureSlotTypes(mRack);
+    auto before = captureSlotSnapshots(mRack);
     if (up) mRack->moveSlotUp  (slotIndex);
     else    mRack->moveSlotDown(slotIndex);
-    auto after = captureSlotTypes(mRack);
+    auto after = captureSlotSnapshots(mRack);
     if (mUndoCtx.isValid())
         mUndoCtx.perform(new EffectRackAction("Move Effect", before, after,
-            [this](const EffectRackAction::SlotTypes& t) {
+            [this](const EffectRackAction::SlotSnapshots& t) {
                 std::array<bool, EffectRack::kNumSlots> changed;
-                applySlotTypes(mRack, t, changed);
+                applySlotSnapshots(mRack, t, changed);
                 for (int i = 0; i < EffectRack::kNumSlots; ++i)
                     if (changed[i]) rebuildSlotEditor(i);
                 refreshAllSlots();
@@ -736,9 +782,18 @@ void EffectsPage::rebuildSlotEditor(int slotIndex)
     {
         auto editor = createEffectEditor(slot.effect.get(), slot.type);
 
-        // Stamp automation paramIds on all knobs before handing off to the slot
+        // Stamp automation paramIds on all knobs before handing off to the slot.
+        // C13: keyed by slot UUID, not index, so reorder preserves automation.
         if (auto* base = dynamic_cast<EditorPanelBase*>(editor.get()))
-            base->setSlotContext(getChannelPrefix(), slotIndex);
+            base->setSlotContext(getChannelPrefix(), mRack->getSlotUuid(slotIndex));
+
+        // C.4 Phase 1 (2026-04-30): push the strip's mixer APVTS prefix +
+        // a source-name resolver so the slot's SC dropdown can enumerate
+        // routed lines and label them ("Layer 2", "Bass 1", "Master", ...).
+        const int chId = mTrackBox ? mTrackBox->getSelectedId() : 0;
+        const juce::String mixerPrefix = getMixerApvtsPrefixForChannel(chId);
+        mSlots[slotIndex]->setChannelContext(&mProcessor.apvts, mixerPrefix,
+                                              [](int id){ return MixerChannelIds::friendlyName(id); });
 
         mSlots[slotIndex]->setEditor(std::move(editor));
         mSlots[slotIndex]->setEditorUndoContext(mUndoCtx);
@@ -747,6 +802,12 @@ void EffectsPage::rebuildSlotEditor(int slotIndex)
 
 juce::String EffectsPage::getChannelPrefix() const
 {
+    // Batch E #8 (2026-05-01): added missing channel categories that
+    // previously fell through to "instr_<id>".  Audio Clips Bus, Vox/Inst
+    // buses (incl. spawnable extras), Drum / Audio / Vox / Inst inserts
+    // all now have proper prefixes for slot-context tagging.  Insert ranges
+    // sourced from MixerChannelIds + VibesynthConstants so size bumps stay
+    // in sync (kMaxInstStrips bumped 6 -> 10 -> 20 over G-4/G-6).
     const int id = mTrackBox ? mTrackBox->getSelectedId() : 0;
     switch (id)
     {
@@ -755,14 +816,26 @@ juce::String EffectsPage::getChannelPrefix() const
         case 3:  return "drums_bus";
         case 4:  return "master";
         case 5:  return "fx_bus";
+        case 6:  return "clips_bus";
+        case 7:  return "vox_bus";
+        case 8:  return "inst_bus";
+        case 9:  return "vox_bus2";
+        case 10: return "inst_bus2";
+        case 11: return "inst_bus3";
         default: break;
     }
-    if (id >= 200 && id < 200 + kMaxLayerPages)
+    if (id >= 100 && id < 200)
+        return "drum_" + juce::String(id - 100);
+    if (id >= 200 && id < 200 + kMaxLayerPages)         // 8 layers (200..207)
         return "layer_" + juce::String(id - 199);
-    if (id >= 300 && id < 300 + kMaxBassPages)
+    if (id >= 300 && id < 300 + kMaxBassPages)          // 4 basses (300..303)
         return "bass_" + juce::String(id - 299);
-    if (id >= 100)
-        return "instr_" + juce::String(id);
+    if (id >= 400 && id < 400 + MixerState::kMaxAudioRows) // 50 audio inserts
+        return "audio_" + juce::String(id - 400);
+    if (id >= 600 && id < 600 + MixerChannelIds::kMaxVoxStrips)  // 6 vox inserts
+        return "vox_" + juce::String(id - 600);
+    if (id >= 700 && id < 700 + MixerChannelIds::kMaxInstStrips) // 20 inst inserts
+        return "inst_" + juce::String(id - 700);
     return "fx";
 }
 
@@ -928,5 +1001,13 @@ void EffectsPage::timerCallback()
     // 12i: drive the EQ display so pre/post spectrum feeds are polled from the
     // bound EQ8MsDSP. Also pulls band-handle changes back into the widget when
     // processBlock's updateXxxEQ runs against an APVTS-backed bus EQ.
-    if (mEQDisplay) mEQDisplay->syncFromDSP();
+    if (mEQDisplay)    mEQDisplay   ->syncFromDSP();
+    // C.4 follow-up (2026-04-30): pre-rack EQ display ALSO needs polling --
+    // without this, the Pre EQ8 M/S tab's dynamic-band dotted curve never
+    // updates when the user moves Range/Threshold/etc. in the popout
+    // (the slider attachment writes APVTS, processBlock pushes APVTS to DSP,
+    // but mBands never syncs back from DSP -> the cached UI band state
+    // stays stale -> ghost curve doesn't follow live state).  Same fix
+    // shape as the post-rack EQ above.
+    if (mPreEQDisplay) mPreEQDisplay->syncFromDSP();
 }

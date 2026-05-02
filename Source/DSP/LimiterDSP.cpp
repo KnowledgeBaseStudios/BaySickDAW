@@ -200,6 +200,21 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
 
     float inPeakLin = 0.0f;
     const bool scHpfActive = (mSidechainHPF > 21.0f);   // only cost cycles when above floor
+
+    // C.4 Phase 2 (2026-04-30): external-key detection.  When an SC source
+    // is connected to this slot, the TP detector reads SC samples instead
+    // of the limiter's own input.  Audio path (input gain + soft sat +
+    // delay line + output) is unchanged -- the limiter still ducks ITS
+    // input, but the duck timing is driven by the SC source.
+    const juce::AudioBuffer<float>* extSc = getActiveSidechain();
+    const float* extScL = nullptr;
+    const float* extScR = nullptr;
+    if (extSc != nullptr && extSc->getNumSamples() >= numSamples && extSc->getNumChannels() > 0)
+    {
+        extScL = extSc->getReadPointer(0);
+        extScR = (extSc->getNumChannels() > 1) ? extSc->getReadPointer(1) : extScL;
+    }
+
     for (int i = 0; i < numSamples; ++i)
     {
         const float gainDb  = mInputGainSmooth.getNextValue();
@@ -215,10 +230,12 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         const float processedL = softSat (rawL, drive, satCv);
         const float processedR = softSat (rawR, drive, satCv);
 
-        // Detector path: optional HPF on the signal the TP oversampler will
-        // analyze. Main audio path (delay line, output) is NOT filtered.
-        float detL = processedL;
-        float detR = processedR;
+        // Detector path: SC source when external-keyed, otherwise processed
+        // input.  HPF still applies to whichever source feeds the detector.
+        // Main audio path (delay line, output) is NOT filtered + uses
+        // processed input regardless of SC state.
+        float detL = (extScL != nullptr) ? extScL[i] : processedL;
+        float detR = (extScR != nullptr) ? extScR[i] : processedR;
         if (scHpfActive)
         {
             detL = mScHpfL.processSample (0, detL);

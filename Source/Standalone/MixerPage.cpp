@@ -1,4 +1,5 @@
 #include "MixerPage.h"
+#include <set>   // D.3: setStripOrder uses std::set for dedup
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Direct Routing label — vertical-text panel between Master and FX Bus group,
@@ -114,6 +115,7 @@ bool MixerPage::CableOverlay::hitTest(int x, int y)
 {
     if (mDragging) return true;
     if (mPendingSendSrcId >= 0) return true;   // B5: intercept everything in send-placement mode
+    if (mPendingScSrcId   >= 0) return true;   // C.4 Phase 1: same for SC-placement mode
 
     auto pt = juce::Point<float>((float) x, (float) y);
 
@@ -125,8 +127,30 @@ bool MixerPage::CableOverlay::hitTest(int x, int y)
 
 void MixerPage::CableOverlay::paint(juce::Graphics& g)
 {
-    const auto& edges = owner.mProcessor.mVibeGraph.getRoutingGraph().edges();
+    // C.4 Phase 1 (2026-04-30): cable color palette per Jeff's spec —
+    //   Main cable (locked main-out): green, kept as-is
+    //   Send cable: pink (was green-with-alpha)
+    //   Sidechain cable: white
+    constexpr juce::uint32 kCableMain = 0xff33ff88;   // green
+    constexpr juce::uint32 kCableSend = 0xffce3f8e;   // pink (matches kEffectsTabPink)
+    constexpr juce::uint32 kCableSc   = 0xffeeeeee;   // white
 
+    auto strokeBezier = [&g](juce::Point<float> src, juce::Point<float> dst)
+    {
+        const float hDist = std::abs(dst.x - src.x);
+        const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
+        juce::Path path;
+        path.startNewSubPath(src);
+        path.cubicTo(src.x, src.y + sag, dst.x, dst.y + sag, dst.x, dst.y);
+        g.strokePath(path, juce::PathStrokeType(2.5f,
+            juce::PathStrokeType::curved,
+            juce::PathStrokeType::rounded));
+    };
+
+    const auto& edges   = owner.mProcessor.mVibeGraph.getRoutingGraph().edges();
+    const auto& scEdges = owner.mProcessor.mVibeGraph.getRoutingGraph().scEdges();
+
+    // Main + send cables
     for (const auto& e : edges)
     {
         // While dragging a main-out, hide the source's existing main-out cable
@@ -135,31 +159,28 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
 
         auto src = owner.getSocketPosition(e.srcId);
         auto dst = owner.getSocketPosition(e.dstId);
-
         if (src.x < 0 || dst.x < 0) continue;
 
-        g.setColour(e.isMainOut
-            ? juce::Colour(0xff33ff88)
-            : juce::Colour(0xff33ff88).withAlpha(0.55f));
-
-        const float hDist = std::abs(dst.x - src.x);
-        const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
-
-        juce::Path path;
-        path.startNewSubPath(src);
-        path.cubicTo(src.x, src.y + sag,
-                     dst.x, dst.y + sag,
-                     dst.x, dst.y);
-
-        g.strokePath(path, juce::PathStrokeType(2.5f,
-            juce::PathStrokeType::curved,
-            juce::PathStrokeType::rounded));
+        g.setColour(juce::Colour(e.isMainOut ? kCableMain : kCableSend));
+        strokeBezier(src, dst);
     }
 
-    // Ghost cable while dragging
+    // C.4 Phase 1: SC cables (white).  Drawn on top of send/main so SC stands
+    // out visually when overlapping with sends.
+    for (const auto& sce : scEdges)
+    {
+        auto src = owner.getSocketPosition(sce.srcId);
+        auto dst = owner.getSocketPosition(sce.dstId);
+        if (src.x < 0 || dst.x < 0) continue;
+
+        g.setColour(juce::Colour(kCableSc));
+        strokeBezier(src, dst);
+    }
+
+    // Ghost cable while dragging the main-out
     if (mDragging)
     {
-        g.setColour(juce::Colour(0xff33ff88).withAlpha(0.45f));
+        g.setColour(juce::Colour(kCableMain).withAlpha(0.45f));
 
         const float hDist = std::abs(mDragMousePos.x - mDragSrcSocket.x);
         const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
@@ -175,13 +196,13 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
             juce::PathStrokeType::rounded));
     }
 
-    // B5: ghost cable in send-placement mode (follows cursor)
+    // B5: ghost cable in send-placement mode (follows cursor) — pink.
     if (mPendingSendSrcId >= 0)
     {
         auto srcSock = owner.getSocketPosition(mPendingSendSrcId);
         if (srcSock.x >= 0)
         {
-            g.setColour(juce::Colour(0xff33ff88).withAlpha(0.40f));
+            g.setColour(juce::Colour(kCableSend).withAlpha(0.40f));
 
             const float hDist = std::abs(mDragMousePos.x - srcSock.x);
             const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
@@ -192,7 +213,28 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
                           mDragMousePos.x, mDragMousePos.y + sag,
                           mDragMousePos.x, mDragMousePos.y);
 
-            float dashLengths[] = { 6.f, 4.f };
+            g.strokePath(ghost, juce::PathStrokeType(2.0f),
+                         juce::AffineTransform{});
+        }
+    }
+
+    // C.4 Phase 1: ghost cable in SC-placement mode — white.
+    if (mPendingScSrcId >= 0)
+    {
+        auto srcSock = owner.getSocketPosition(mPendingScSrcId);
+        if (srcSock.x >= 0)
+        {
+            g.setColour(juce::Colour(kCableSc).withAlpha(0.45f));
+
+            const float hDist = std::abs(mDragMousePos.x - srcSock.x);
+            const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
+
+            juce::Path ghost;
+            ghost.startNewSubPath(srcSock);
+            ghost.cubicTo(srcSock.x, srcSock.y + sag,
+                          mDragMousePos.x, mDragMousePos.y + sag,
+                          mDragMousePos.x, mDragMousePos.y);
+
             g.strokePath(ghost, juce::PathStrokeType(2.0f),
                          juce::AffineTransform{});
         }
@@ -282,6 +324,49 @@ void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
             p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1((float)dstId));
 
         cancelSendPlacement();
+        return;
+    }
+
+    // C.4 Phase 1 (2026-04-30): sidechain-placement mode — click commits SC
+    // on the TARGET strip's _sc_recv{N}_from (target-side encoding so per-
+    // module pickers see stable line indices regardless of cable order).
+    if (mPendingScSrcId >= 0)
+    {
+        int dstId = findStripUnder(e.position);
+
+        if (dstId < 0 || dstId == mPendingScSrcId)
+        {
+            cancelSidechainPlacement();
+            return;
+        }
+
+        // Cycle check (covers SC + send + main edges combined).
+        if (owner.mProcessor.mVibeGraph.getRoutingGraph().wouldCreateCycle(mPendingScSrcId, dstId))
+        {
+            mFlashStripId = dstId; mFlashCountdown = 6; startTimerHz(30);
+            cancelSidechainPlacement();
+            return;
+        }
+
+        // Find available SC receive slot on the TARGET (0..3).
+        const juce::String targetPrefix =
+            MixerChannelIds::prefixFromChannelId(dstId);
+        int slot = findAvailableScRecvSlot(targetPrefix);
+        if (slot < 0)
+        {
+            // Target's 4 SC receive lines are full — flash the target.
+            mFlashStripId = dstId; mFlashCountdown = 6; startTimerHz(30);
+            cancelSidechainPlacement();
+            return;
+        }
+
+        // Commit: write target's _sc_recv{N}_from with source's channel id.
+        const juce::String sp = targetPrefix + "_sc_recv" + juce::String(slot);
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(
+                owner.mProcessor.apvts.getParameter(sp + "_from")))
+            p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1((float) mPendingScSrcId));
+
+        cancelSidechainPlacement();
         return;
     }
 
@@ -545,7 +630,7 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
 // ─────────────────────────────────────────────────────────────────────────────
 void MixerPage::CableOverlay::mouseMove(const juce::MouseEvent& e)
 {
-    if (mPendingSendSrcId >= 0)
+    if (mPendingSendSrcId >= 0 || mPendingScSrcId >= 0)
     {
         mDragMousePos = e.position;
         repaint();
@@ -554,6 +639,11 @@ void MixerPage::CableOverlay::mouseMove(const juce::MouseEvent& e)
 
 bool MixerPage::CableOverlay::keyPressed(const juce::KeyPress& k)
 {
+    if (k == juce::KeyPress::escapeKey && mPendingScSrcId >= 0)
+    {
+        cancelSidechainPlacement();
+        return true;
+    }
     if (k == juce::KeyPress::escapeKey && mPendingSendSrcId >= 0)
     {
         cancelSendPlacement();
@@ -573,6 +663,7 @@ void MixerPage::CableOverlay::startSendPlacement(int srcChannelId)
     }
 
     mPendingSendSrcId = srcChannelId;
+    mPendingScSrcId   = -1;   // C.4 Phase 1: mutually exclusive with SC mode
     mDragMousePos     = owner.getSocketPosition(srcChannelId);
     setMouseCursor(juce::MouseCursor::CrosshairCursor);
     grabKeyboardFocus();   // so Escape works
@@ -598,6 +689,59 @@ int MixerPage::CableOverlay::findAvailableSendSlot(const juce::String& prefix) c
     return -1;   // all 4 slots occupied
 }
 
+// C.4 Phase 1 (2026-04-30): start/end SC-placement mode + target-side slot
+// finder.  Mirrors send placement but writes to TARGET's _sc_recv{N}_from
+// instead of SOURCE's _send{N}_to.
+void MixerPage::CableOverlay::startSidechainPlacement(int srcChannelId)
+{
+    mPendingScSrcId   = srcChannelId;
+    mPendingSendSrcId = -1;            // mutually exclusive
+    mDragMousePos     = owner.getSocketPosition(srcChannelId);
+    setMouseCursor(juce::MouseCursor::CrosshairCursor);
+    grabKeyboardFocus();
+    repaint();
+}
+void MixerPage::CableOverlay::cancelSidechainPlacement()
+{
+    mPendingScSrcId = -1;
+    setMouseCursor(juce::MouseCursor::NormalCursor);
+    repaint();
+}
+int MixerPage::CableOverlay::findAvailableScRecvSlot(const juce::String& targetPrefix) const
+{
+    if (targetPrefix.isEmpty()) return -1;
+    for (int s = 0; s < 4; ++s)
+    {
+        const juce::String paramId = targetPrefix + "_sc_recv" + juce::String(s) + "_from";
+        if (auto* p = owner.mProcessor.apvts.getRawParameterValue(paramId))
+            if ((int) p->load() < 0)
+                return s;
+    }
+    return -1;
+}
+
+// C.4 Phase 1 (2026-04-30): per-strip "+" Add-Cable button popup.  Pops a
+// 2-item menu (Send / Sidechain) and routes the user's pick into the
+// CableOverlay's corresponding placement mode.  Wired from every strip's
+// onAddSendRequested lambda so the user gets a consistent "+ -> pick type
+// -> click target" flow.
+void MixerPage::onAddCableRequestedFor(int srcChannelId)
+{
+    if (mCableOverlay == nullptr) return;
+
+    juce::PopupMenu m;
+    m.addItem(1, "Send...");
+    m.addItem(2, "Sidechain...");
+
+    m.showMenuAsync(juce::PopupMenu::Options{},
+        [this, srcChannelId](int r)
+        {
+            if (mCableOverlay == nullptr) return;
+            if (r == 1) mCableOverlay->startSendPlacement      (srcChannelId);
+            else if (r == 2) mCableOverlay->startSidechainPlacement(srcChannelId);
+        });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  5F-4b B6: cable hit-testing + right-click popup
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -605,27 +749,45 @@ int MixerPage::CableOverlay::findAvailableSendSlot(const juce::String& prefix) c
 MixerPage::CableOverlay::CableHit
 MixerPage::CableOverlay::hitTestCable(juce::Point<float> pt) const
 {
-    const auto& edges = owner.mProcessor.mVibeGraph.getRoutingGraph().edges();
+    const auto& edges   = owner.mProcessor.mVibeGraph.getRoutingGraph().edges();
+    const auto& scEdges = owner.mProcessor.mVibeGraph.getRoutingGraph().scEdges();
+
+    auto cableHits = [&pt](juce::Point<float> src, juce::Point<float> dst) -> bool
+    {
+        const float hDist = std::abs(dst.x - src.x);
+        const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
+        juce::Path bezier;
+        bezier.startNewSubPath(src);
+        bezier.cubicTo(src.x, src.y + sag, dst.x, dst.y + sag, dst.x, dst.y);
+        juce::Path hitZone;
+        juce::PathStrokeType(10.f).createStrokedPath(hitZone, bezier);
+        return hitZone.contains(pt);
+    };
+
+    // C.4 Phase 1 (2026-04-30): SC cables hit-tested first so they "win" when
+    // overlapping with sends visually (matches paint order: SC drawn on top).
+    for (const auto& sce : scEdges)
+    {
+        auto src = owner.getSocketPosition(sce.srcId);
+        auto dst = owner.getSocketPosition(sce.dstId);
+        if (src.x < 0 || dst.x < 0) continue;
+        if (cableHits(src, dst))
+        {
+            CableHit hit;
+            hit.srcId       = sce.srcId;
+            hit.dstId       = sce.dstId;
+            hit.scRecvSlot  = sce.dstSlot;
+            hit.isSidechain = true;
+            return hit;
+        }
+    }
 
     for (const auto& e : edges)
     {
         auto src = owner.getSocketPosition(e.srcId);
         auto dst = owner.getSocketPosition(e.dstId);
         if (src.x < 0 || dst.x < 0) continue;
-
-        // Rebuild the same bezier as paint()
-        const float hDist = std::abs(dst.x - src.x);
-        const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
-
-        juce::Path bezier;
-        bezier.startNewSubPath(src);
-        bezier.cubicTo(src.x, src.y + sag, dst.x, dst.y + sag, dst.x, dst.y);
-
-        // Stroke into a thick region for hit detection
-        juce::Path hitZone;
-        juce::PathStrokeType(10.f).createStrokedPath(hitZone, bezier);
-
-        if (hitZone.contains(pt))
+        if (cableHits(src, dst))
         {
             CableHit hit;
             hit.srcId    = e.srcId;
@@ -760,7 +922,75 @@ void MixerPage::CableOverlay::showCablePopup(juce::Point<float> screenPt,
 
     std::unique_ptr<juce::Component> content;
 
-    if (hit.isMainOut)
+    if (hit.isSidechain)
+    {
+        // C.4 Phase 1 (2026-04-30): SC cable popup — info-only label + Delete.
+        // No amount slider (SC tap is unity-gain post-everything per Q4=A) or
+        // pre/post toggle.  Delete writes -1 back to TARGET's _sc_recv{N}_from.
+        const juce::String targetPrefix = prefixFromChannelId(hit.dstId);
+        auto deleteAction = [this, targetPrefix, slot = hit.scRecvSlot]
+        {
+            if (targetPrefix.isEmpty()) return;
+            const juce::String sp = targetPrefix + "_sc_recv" + juce::String(slot);
+            if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(
+                    owner.mProcessor.apvts.getParameter(sp + "_from")))
+                p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1(-1.f));
+            // C.4 Phase 1 (2026-04-30): force overlay repaint so the cable
+            // disappears immediately.  RoutingGraph rebuilds from APVTS each
+            // audio block, but nothing else triggers the UI to redraw after
+            // the param write -- without this the cable lingers visually
+            // until something else (mouse move, etc.) repaints the overlay.
+            repaint();
+        };
+
+        // Reuse CableMainOutPopup as a simple info-only label for now.  A
+        // dedicated SC popup with a Delete button is a tiny UI follow-up; for
+        // this batch the cable can be removed by setting the line to -1 via
+        // the strip's APVTS or by dragging another cable to overwrite the
+        // slot.  Until then, expose Delete via a single-button label widget.
+        struct ScCablePopup : public juce::Component {
+            juce::Label    info;
+            juce::TextButton delBtn;
+            std::function<void()> onDelete;
+            ScCablePopup(juce::String src, juce::String dst, int line,
+                          std::function<void()> del)
+                : onDelete(std::move(del))
+            {
+                info.setText("Sidechain: " + src + " -> " + dst
+                              + "  (line " + juce::String(line) + ")",
+                              juce::dontSendNotification);
+                info.setColour(juce::Label::textColourId, juce::Colours::white);
+                info.setJustificationType(juce::Justification::centred);
+                addAndMakeVisible(info);
+
+                delBtn.setButtonText("Delete");
+                delBtn.setColour(juce::TextButton::buttonColourId,
+                                  juce::Colour(0xff4a3030));
+                delBtn.onClick = [this] {
+                    if (onDelete) onDelete();
+                    if (auto* cb = findParentComponentOfClass<juce::CallOutBox>())
+                        cb->dismiss();
+                };
+                addAndMakeVisible(delBtn);
+
+                setSize(220, 60);
+            }
+            void resized() override
+            {
+                info.setBounds(0, 4, getWidth(), 22);
+                delBtn.setBounds(getWidth()/2 - 40, 30, 80, 24);
+            }
+            void paint(juce::Graphics& g) override
+            {
+                g.fillAll(juce::Colour(0xff1e2024));
+            }
+        };
+
+        content = std::make_unique<ScCablePopup>(
+            getStripName(hit.srcId), getStripName(hit.dstId),
+            hit.scRecvSlot, std::move(deleteAction));
+    }
+    else if (hit.isMainOut)
     {
         content = std::make_unique<CableMainOutPopup>(getStripName(hit.srcId),
                                                        getStripName(hit.dstId));
@@ -976,7 +1206,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     {
         s->onAddSendRequested = [this](int chId)
         {
-            if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+            onAddCableRequestedFor(chId);
         };
     };
     wireSendBtn(mMasterStrip.get());
@@ -1074,7 +1304,7 @@ void MixerPage::addLayerChannel(int pageIndex, const juce::String& name)
     strip->setApvts(mProcessor.apvts, prefix);
     strip->setChannelId(MixerChannelIds::layerInsert(pageIndex));
     strip->onAddSendRequested = [this](int chId) {
-        if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+        onAddCableRequestedFor(chId);
     };
 
     strip->onFXClicked = [this](const juce::String& id) {
@@ -1103,7 +1333,7 @@ void MixerPage::addBassChannel(int pageIndex, const juce::String& name)
     strip->setApvts(mProcessor.apvts, prefix);
     strip->setChannelId(MixerChannelIds::bassInsert(pageIndex));
     strip->onAddSendRequested = [this](int chId) {
-        if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+        onAddCableRequestedFor(chId);
     };
 
     strip->onFXClicked = [this](const juce::String& id) {
@@ -1141,7 +1371,7 @@ void MixerPage::addDrumChannel(int slot, const juce::String& name)
     strip->setApvts(mProcessor.apvts, drumPrefix);
     strip->setChannelId(MixerChannelIds::drumInsert(slot));
     strip->onAddSendRequested = [this](int chId) {
-        if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+        onAddCableRequestedFor(chId);
     };
 
     if (slot < MAX_DRUM_ROWS)
@@ -1218,7 +1448,7 @@ bool MixerPage::activateVoxBus2()
         mVoxBus2Strip->setApvts(mProcessor.apvts, "mixer_voxbus2");
         mVoxBus2Strip->setChannelId(MixerChannelIds::kVoxBus2);
         mVoxBus2Strip->onAddSendRequested = [this](int chId) {
-            if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+            onAddCableRequestedFor(chId);
         };
         mVoxBus2Strip->onFXClicked = [this](const juce::String& id) {
             if (onEffectsTabRequested) onEffectsTabRequested(id);
@@ -1282,7 +1512,7 @@ bool MixerPage::activateInstBus2()
         mInstBus2Strip->setApvts(mProcessor.apvts, "mixer_instbus2");
         mInstBus2Strip->setChannelId(MixerChannelIds::kInstBus2);
         mInstBus2Strip->onAddSendRequested = [this](int chId) {
-            if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+            onAddCableRequestedFor(chId);
         };
         mInstBus2Strip->onFXClicked = [this](const juce::String& id) {
             if (onEffectsTabRequested) onEffectsTabRequested(id);
@@ -1344,7 +1574,7 @@ bool MixerPage::activateInstBus3()
         mInstBus3Strip->setApvts(mProcessor.apvts, "mixer_instbus3");
         mInstBus3Strip->setChannelId(MixerChannelIds::kInstBus3);
         mInstBus3Strip->onAddSendRequested = [this](int chId) {
-            if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+            onAddCableRequestedFor(chId);
         };
         mInstBus3Strip->onFXClicked = [this](const juce::String& id) {
             if (onEffectsTabRequested) onEffectsTabRequested(id);
@@ -1411,7 +1641,7 @@ void MixerPage::addVoxChannelAtIndex(int idx)
     strip->setApvts(mProcessor.apvts, prefix);
     strip->setChannelId(MixerChannelIds::voxInsert(idx));
     strip->onAddSendRequested = [this](int chId) {
-        if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+        onAddCableRequestedFor(chId);
     };
     strip->onFXClicked = [this](const juce::String& id) {
         if (onEffectsTabRequested) onEffectsTabRequested(id);
@@ -1530,7 +1760,7 @@ void MixerPage::addInstChannelAtIndex(int idx)
     strip->setApvts(mProcessor.apvts, prefix);
     strip->setChannelId(MixerChannelIds::instInsert(idx));
     strip->onAddSendRequested = [this](int chId) {
-        if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+        onAddCableRequestedFor(chId);
     };
     strip->onFXClicked = [this](const juce::String& id) {
         if (onEffectsTabRequested) onEffectsTabRequested(id);
@@ -1596,6 +1826,45 @@ void MixerPage::setInstStripName (int idx, const juce::String& name)
 std::vector<int> MixerPage::getVoxStripIndices() const  { return mVoxOrder; }
 std::vector<int> MixerPage::getInstStripIndices() const { return mInstOrder; }
 
+// D.3: re-order strips per a saved project's display order.
+void MixerPage::setStripOrder (OrderKind kind, const std::vector<int>& indices)
+{
+    auto reorder = [&](std::vector<int>& orderVec, auto& stripMap)
+    {
+        // Build the new order: only indices that exist in stripMap, in the
+        // saved sequence.  Then append any registered indices missing from
+        // the saved order so no strip is lost.
+        std::vector<int> reordered;
+        reordered.reserve (stripMap.size());
+        std::set<int> seen;
+        for (int idx : indices)
+        {
+            if (stripMap.count (idx) > 0 && seen.insert (idx).second)
+                reordered.push_back (idx);
+        }
+        for (const auto& kv : stripMap)
+        {
+            if (seen.count (kv.first) == 0)
+                reordered.push_back (kv.first);
+        }
+        orderVec = std::move (reordered);
+    };
+
+    switch (kind)
+    {
+        case OrderKind::Aux:   reorder (mAuxOrder,      mAuxStrips);   break;
+        case OrderKind::Vox:   reorder (mVoxOrder,      mVoxStrips);   break;
+        case OrderKind::Inst:  reorder (mInstOrder,     mInstStrips);  break;
+        case OrderKind::Audio: reorder (mAudioRowOrder, mAudioStrips); break;
+    }
+
+    if (getWidth() > 0)
+    {
+        layoutScrollContent();
+        if (mCableOverlay) mCableOverlay->repaint();
+    }
+}
+
 juce::String MixerPage::getVoxStripName (int idx) const
 {
     auto it = mVoxStrips.find (idx);
@@ -1627,7 +1896,7 @@ void MixerPage::addAuxChannelAtIndex(int idx)
     strip->setApvts(mProcessor.apvts, prefix);
     strip->setChannelId(MixerChannelIds::auxStrip(idx));
     strip->onAddSendRequested = [this](int chId) {
-        if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+        onAddCableRequestedFor(chId);
     };
     strip->onFXClicked = [this](const juce::String& id) {
         if (onEffectsTabRequested) onEffectsTabRequested(id);
@@ -1870,7 +2139,7 @@ void MixerPage::addAudioChannel(int row, const juce::String& name)
     strip->setApvts(mProcessor.apvts, audioPrefix);
     strip->setChannelId(MixerChannelIds::audioInsert(row));
     strip->onAddSendRequested = [this](int chId) {
-        if (mCableOverlay) mCableOverlay->startSendPlacement(chId);
+        onAddCableRequestedFor(chId);
     };
     strip->onFXClicked = [this](const juce::String& id) {
         if (onEffectsTabRequested) onEffectsTabRequested(id);
@@ -1894,14 +2163,27 @@ void MixerPage::addAudioChannel(int row, const juce::String& name)
     if (getWidth() > 0) resized();
 }
 
-void MixerPage::renameChannel(int tabId, const juce::String& newName)
+void MixerPage::renameChannel(StripKind kind, int pageIdx, const juce::String& newName)
 {
-    if (auto it = mLayerStrips.find(tabId); it != mLayerStrips.end())
-        it->second->setTrackName(newName);
-    else if (auto it2 = mBassStrips.find(tabId); it2 != mBassStrips.end())
-        it2->second->setTrackName(newName);
-    else if (auto it3 = mDrumStrips.find(tabId); it3 != mDrumStrips.end())
-        it3->second->setTrackName(newName);   // D1.4: dynamic-drum strip rename
+    // C.4 follow-up (2026-04-30): dispatch by kind so a Drum rename at
+    // pageIdx=0 doesn't accidentally hit a Bass strip at index 0 (and so on
+    // for any Layer/Bass/Drum index collision).  Each strip type's map is
+    // keyed by its own per-type page index.
+    switch (kind)
+    {
+        case StripKind::Layer:
+            if (auto it = mLayerStrips.find(pageIdx); it != mLayerStrips.end())
+                it->second->setTrackName(newName);
+            break;
+        case StripKind::Bass:
+            if (auto it = mBassStrips.find(pageIdx); it != mBassStrips.end())
+                it->second->setTrackName(newName);
+            break;
+        case StripKind::Drum:
+            if (auto it = mDrumStrips.find(pageIdx); it != mDrumStrips.end())
+                it->second->setTrackName(newName);
+            break;
+    }
 }
 
 juce::String MixerPage::getAudioStripName(int row) const
@@ -2159,7 +2441,7 @@ void MixerPage::timerCallback()
     pushStereoBus(mLayersBusStrip    .get(), mProcessor.mLayersPeakDbL,        mProcessor.mLayersPeakDbR);
     pushStereoBus(mBassBusStrip      .get(), mProcessor.mBassPeakDbL,          mProcessor.mBassPeakDbR);
     pushStereoBus(mDrumsBusStrip     .get(), mProcessor.mDrumsPeakDbL,         mProcessor.mDrumsPeakDbR);
-    mFXBusStrip                       ->setStereoLevel(-60.0f, -60.0f);
+    pushStereoBus(mFXBusStrip        .get(), mProcessor.mFxBusPeakDbL,        mProcessor.mFxBusPeakDbR);
     pushStereoBus(mAudioClipsBusStrip.get(), mProcessor.mAudioClipsBusPeakDbL, mProcessor.mAudioClipsBusPeakDbR);
     pushStereoBus(mVoxBusStrip       .get(), mProcessor.mVoxBusPeakDbL,        mProcessor.mVoxBusPeakDbR);
     pushStereoBus(mInstBusStrip      .get(), mProcessor.mInstBusPeakDbL,       mProcessor.mInstBusPeakDbR);

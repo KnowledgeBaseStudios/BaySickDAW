@@ -484,6 +484,8 @@ void VoxPage::selectEngine (EngineType e)
             mEQDisplay->bindMsDSP (preEq, &mFullProcessor->apvts,
                                     mixerPrefix + "_preeq_mid_eq",
                                     mixerPrefix + "_preeq_side_eq");
+            mEQDisplay->setStripContext(mixerPrefix,
+                [](int id){ return MixerChannelIds::friendlyName(id); });
         }
         const double sr = mFullProcessor->getSampleRate() > 0.0
                               ? mFullProcessor->getSampleRate() : 44100.0;

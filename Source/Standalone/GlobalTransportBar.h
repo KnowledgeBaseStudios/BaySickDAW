@@ -55,6 +55,10 @@ public:
     // Returns effective pattern loop length in beats (queried each timer tick to keep
     // the standalone playhead wrap point in sync with the current pattern content).
     std::function<double()>     onGetLoopBeats;
+    // C.5: returns the (num,den) time signature effective at the current beat
+    // (queried each timer tick; pushed onto the standalone playhead so JUCE
+    // PositionInfo reports the right TS to all consumers).
+    std::function<void(int& outNum, int& outDen)>  onGetTimeSig;
 
     // 1M: DSP load readout — set by StandaloneEditor, polled every timer tick
     std::function<float()>      onGetDspLoad;  // returns 0..1 (smoothed fraction of buffer window)

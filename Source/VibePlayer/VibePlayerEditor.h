@@ -32,6 +32,12 @@ public:
     // Core Library submenu is shown filtered to melodic packs.
     void setDrumContext (bool isDrum) { mIsDrumContext = isDrum; }
 
+    // 2026-04-30: fired after the engine's internal preset picker loads a
+    // patch.  LayersPage / BassPage wire this to onSoundNameChanged so the
+    // ribbon tab + mixer strip + piano-roll context label update to the
+    // patch filename.
+    std::function<void(const juce::String&)> onPatchLoaded;
+
 private:
     void valueTreeRedirected (juce::ValueTree& tree) override;
 
@@ -53,10 +59,10 @@ private:
     juce::TextButton mPresetBtn { "Preset v" };
     juce::TextButton mHelpBtn   { "?" };
 
-    // ── 2026-04-21: 6-box grid layout. Boxes in a 3x2 arrangement:
+    // ── 7-box grid layout (D.4-Q3 2026-05-01 — 7th box "Filter" added):
     //    Row 1: Sample Engine | Pitch & Voicing | Dynamics
-    //    Row 2: Amp Envelope  | LFO             | Output
-    juce::Label mBoxHdr[6];
+    //    Row 2: Amp Envelope  | LFO | Filter | Output  (4-up bottom row)
+    juce::Label mBoxHdr[7];
 
     // ── Box 1: Sample Engine ─────────────────────────────────────────────────
     juce::Slider    mSampleStartKnob, mStretchKnob;
@@ -91,14 +97,22 @@ private:
     juce::Slider mLfoRateKnob, mLfoAmtKnob;
     juce::Label  mLfoRateLbl,  mLfoAmtLbl;
 
-    // ── Box 6: Output ────────────────────────────────────────────────────────
+    // ── Box 6: Filter (D.4-Q3 2026-05-01) ────────────────────────────────────
+    // Surfaces 4 previously-hidden APVTS params: cutoff / res / reduct /
+    // artic_group.  Sits between LFO (Box 5) and Output (now Box 7).
+    juce::Slider mFilterCutoffKnob, mFilterResKnob;
+    juce::Slider mFilterReductKnob, mFilterArticKnob;
+    juce::Label  mFilterCutoffLbl,  mFilterResLbl;
+    juce::Label  mFilterReductLbl,  mFilterArticLbl;
+
+    // ── Box 7: Output (was Box 6 before D.4-Q3) ──────────────────────────────
     juce::Slider mPanKnob,    mStereoKnob;
     juce::Slider mVolumeKnob, mTrebleKnob;
     juce::Slider mDriveKnob;                // Overdrive
     juce::Label  mPanLbl,     mStereoLbl;
     juce::Label  mVolumeLbl,  mTrebleLbl;
     juce::Label  mDriveLbl;
-    // Leftover knobs exposed in Box 6 but still driven by their existing APVTS params.
+    // Leftover knobs exposed in Box 7 but still driven by their existing APVTS params.
 
     // ── APVTS attachments ─────────────────────────────────────────────────────
     using SliderAtt = TaggedSliderAttachment;
@@ -122,6 +136,8 @@ private:
     std::unique_ptr<ButtonAtt> mCutSelfAtt,  mReverseAtt;
     // detuneMode selector is wired manually (ChickenHeadSelector has no juce Attachment):
     std::unique_ptr<juce::ParameterAttachment> mDetuneModeAtt;
+    // D.4-Q3 (2026-05-01): Filter box attachments
+    std::unique_ptr<SliderAtt> mFilterCutoffAtt, mFilterResAtt, mFilterReductAtt, mFilterArticAtt;
 
     VibePlayerProcessor& mProc;
     bool mIsDrumContext { false };   // 2026-04-23: page-context flag (see setter)

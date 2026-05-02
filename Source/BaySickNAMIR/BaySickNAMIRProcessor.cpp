@@ -206,6 +206,9 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (numCh == 0 || numSamples == 0)
         return;
 
+    // C.4 Phase 2.2: refresh engine-level SC RMS for any internal mod source.
+    mScHelper.updateLevel (numSamples);
+
     // ── 2. Snapshot APVTS params once per block ──────────────────────────────
     auto get = [&] (const char* id) -> float
     {

@@ -101,6 +101,10 @@ public:
     float getFBDistSymmetry  () const noexcept { return mFBDistSymmetry; }
     float getStereoSpread    () const noexcept { return mStereoSpread;   }
     float getOffsetPan       () const noexcept { return mOffsetPan;      }
+    // D.4-Q5 (2026-05-01): getters for previously-hidden params now wired to UI knobs.
+    float getSmoothing       () const noexcept { return mSmoothing;      }
+    float getLoFiSampleRate  () const noexcept { return mLoFiRate;       }
+    float getModTimeMod      () const noexcept { return mModTimeMod;     }
 
 private:
     // ── Internal types ────────────────────────────────────────────────────────

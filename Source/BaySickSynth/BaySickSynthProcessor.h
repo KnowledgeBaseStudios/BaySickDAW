@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "BaySickSynthDSP.h"
+#include "../DSP/EngineSidechainHelper.h"
 
 // ── BaySickSynthProcessor ─────────────────────────────────────────────────────
 // AudioProcessor wrapper for BaySickSynthDSP.
@@ -11,7 +12,8 @@
 // last-value comparison.  Only calls the setter when value actually changed.
 // processBlock fires hundreds of times per second — keep setters cheap.
 // ─────────────────────────────────────────────────────────────────────────────
-class BaySickSynthProcessor : public juce::AudioProcessor
+class BaySickSynthProcessor : public juce::AudioProcessor,
+                              public ISidechainEngine
 {
 public:
     explicit BaySickSynthProcessor (const juce::String& trackId = "lay_0");
@@ -57,6 +59,13 @@ public:
     // Visualizer reads this to drive its LFO animation at the sync-aware rate.
     std::atomic<float>* getEffectiveLfoRatePtr() { return &mEffectiveLfoRate; }
 
+    // C.4 Phase 2.2: engine-level SC primitive.
+    void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept override
+    {
+        mScHelper.setSidechainBuffers (bufs, count);
+    }
+    float getSidechainLevel() const noexcept override { return mScHelper.getLevel(); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout
     createLayout (const juce::String& prefix);
@@ -71,6 +80,7 @@ private:
     std::atomic<int>     mAuditionHoldOff    { -1 };
     float                mHostBPM            { 120.0f };
     std::atomic<float>   mEffectiveLfoRate   { 1.0f };
+    EngineSidechainHelper mScHelper;   // C.4 Phase 2.2 SC primitive
 
     // ── CPU guard cache ───────────────────────────────────────────────────────
     struct ParamCache

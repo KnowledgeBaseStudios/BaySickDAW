@@ -449,17 +449,20 @@ void DrumKitGrid::setSnapEnabled(bool b) { mSnapEnabled = b; }
 
 double DrumKitGrid::totalBeats() const
 {
-    constexpr double kBeatsPerBar = 4.0;
+    // C.5b: pattern's intrinsic TS drives bar-length so a 3/4 pattern's
+    // total beats reflect the actual playback length.
     int patternBars = 4;
+    double bpb = 4.0;
     double last = 0.0;
     if (mPM != nullptr)
     {
         patternBars = jmax(1, mPM->currentPattern().drumRolls[0].numBars);
+        bpb = jmax (1.0, mPM->getPatternBeatsPerBar (mPM->getCurrentPatternIndex()));
         for (int p = 0; p < (int) kMaxDrumPages; ++p)
             for (const auto& n : mPM->currentPattern().drumRolls[p].notes)
                 last = jmax(last, n.startBeat + jmax(0.0625, n.durationBeats));
     }
-    return jmax((double) patternBars * kBeatsPerBar, last + kBeatsPerBar);
+    return jmax((double) patternBars * bpb, last + bpb);
 }
 
 int DrumKitGrid::rowToPageIndex(int rowIdx) const
@@ -2099,17 +2102,25 @@ void DrumKitGrid::paint(Graphics& g)
             g.drawVerticalLine(x, (float) rowsTop, (float) b.getHeight());
         }
     }
-    // Bar lines (every 4 beats).
+    // Bar lines (every patternBpb PPQ beats — pattern's intrinsic TS).
+    // C.5b: 4/4 → 4-beat bars; 3/4 → 3-beat bars; 6/8 → 3-beat bars.
     {
-        const double startBeat = std::floor(mBeatOff / 4.0) * 4.0;
-        for (double beat = startBeat; beat <= mBeatOff + b.getWidth() / mPPB + 4.0; beat += 4.0)
+        const double barBpb = (mPM != nullptr)
+            ? mPM->getPatternBeatsPerBar (mPM->getCurrentPatternIndex())
+            : 4.0;
+        const double safeBpb = juce::jmax (1.0, barBpb);
+        const double startBeat = std::floor(mBeatOff / safeBpb) * safeBpb;
+        for (double beat = startBeat;
+             beat <= mBeatOff + b.getWidth() / mPPB + safeBpb;
+             beat += safeBpb)
         {
             const int x = beatToX(beat);
             if (x < 0 || x > b.getWidth()) continue;
             g.setColour(VC::Accent.brighter(0.3f));
             g.drawVerticalLine(x, 0, (float) b.getHeight());
             g.setColour(VC::TextDim); g.setFont(Font(9));
-            g.drawText(String((int)(beat / 4.0) + 1), x + 2, 2, 24, 10, Justification::centredLeft);
+            g.drawText(String((int) std::round (beat / safeBpb) + 1),
+                       x + 2, 2, 24, 10, Justification::centredLeft);
         }
     }
 
@@ -2233,18 +2244,23 @@ void DrumKitGrid::paint(Graphics& g)
     g.fillRect(0, 0, b.getWidth(), kRulerH);
     g.setColour(VC::Accent.withAlpha(0.5f));
     g.drawHorizontalLine(kRulerH - 1, 0.f, (float) b.getWidth());
+    // C.5b: ruler bar boundaries follow pattern's intrinsic TS.
+    const double rulerBarBpb = (mPM != nullptr)
+        ? juce::jmax (1.0, mPM->getPatternBeatsPerBar (mPM->getCurrentPatternIndex()))
+        : 4.0;
     for (double beat = std::floor(mBeatOff); beat <= mBeatOff + b.getWidth() / mPPB + 1.0; beat += 0.5)
     {
         const int rx = beatToX(beat);
         if (rx < 0 || rx > b.getWidth()) continue;
-        const bool isBar  = (std::fmod(beat, 4.0) < 1e-9);
+        const double barFrac = beat / rulerBarBpb;
+        const bool isBar  = (std::abs (barFrac - std::round (barFrac)) < 1e-6);
         const bool isBeat = (std::fmod(beat, 1.0) < 1e-9);
         if (isBar)
         {
             g.setColour(VC::Accent.brighter(0.5f));
             g.drawVerticalLine(rx, 0, (float) kRulerH);
             g.setColour(VC::Text); g.setFont(Font(9));
-            g.drawText(String((int)(beat / 4.0) + 1), rx + 2, 1, 20, kRulerH - 2,
+            g.drawText(String((int) std::round (barFrac) + 1), rx + 2, 1, 20, kRulerH - 2,
                        Justification::centredLeft, false);
         }
         else if (isBeat)
@@ -3384,12 +3400,14 @@ void DrumKitContainer::pushScrollStateToBars()
     mPushingToBars = true;
     const int    gridW         = jmax(1, mGrid->getWidth());
     const double visibleBeats0 = (double) gridW / jmax(1.f, mPPB);
-    constexpr double kBeatsPerBar = 4.0;
+    // C.5b: pattern's intrinsic TS drives bar length.
+    double bpb = 4.0;
     double last = 0.0;
     int patternBars = 4;
     if (mPM)
     {
         patternBars = jmax(1, mPM->currentPattern().drumRolls[0].numBars);
+        bpb = jmax (1.0, mPM->getPatternBeatsPerBar (mPM->getCurrentPatternIndex()));
         for (int p = 0; p < (int) kMaxDrumPages; ++p)
             for (const auto& n : mPM->currentPattern().drumRolls[p].notes)
             {
@@ -3397,8 +3415,8 @@ void DrumKitContainer::pushScrollStateToBars()
                 if (end > last) last = end;
             }
     }
-    const double totalBeats   = jmax((double) patternBars * kBeatsPerBar,
-                                     jmax(last + kBeatsPerBar, visibleBeats0));
+    const double totalBeats   = jmax((double) patternBars * bpb,
+                                     jmax(last + bpb, visibleBeats0));
     const double visibleBeats = jmin(totalBeats, visibleBeats0);
     mHScroll->setRangeLimits(0.0, totalBeats);
     mHScroll->setCurrentRange(jlimit(0.0, jmax(0.0, totalBeats - visibleBeats), mBeatOff),

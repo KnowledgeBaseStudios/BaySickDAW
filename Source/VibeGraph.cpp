@@ -745,18 +745,25 @@ struct VibeGraph::MasterBusNode
 };
 
 // ── EffectsBusNode ────────────────────────────────────────────────────────────
-// Post-master parallel send.  Stub for Phase 1A — EffectRack is present and
-// can be loaded via the Effects Page; audio routing is wired in Phase 1E.
+// FX Bus — receive bus for aux strip output (default destination), and any
+// other strip whose user-cable points here.  Pipeline matches the Vox/Inst
+// bus loop in PluginProcessor (preEq -> rack -> postEq -> polarity -> width
+// -> fader x mute x solo -> pan -> peak).  Driven each block by
+// VibeGraph::processEffectsBus, called from PluginProcessor after the
+// Vox/Inst bus loop so every upstream send has fanned in by then.  Output
+// fans downstream via routeInsertOutput (default _sendTo = Master).
+// Pre-C.1 (2026-04-30) this struct existed but its processBlock was never
+// invoked -- the FX Bus was completely silent.
 struct VibeGraph::EffectsBusNode
 {
     EQ8MsDSP           preEq;    // §P4.3 pre-rack
     EffectRack         rack;
     EQ8MsDSP           busEq;    // post-rack Effects Bus EQ — shown on Effects Page
     std::atomic<float> peakDb  { -60.f };
-    // 2026-04-30: stereo L/R peakDb for split DBFSMeter (matches all other
-    // bus nodes).  EffectsBusNode itself isn't currently driven by audio
-    // (its processBlock is a stub), but the atomics are here so the meter
-    // rebuild has consistent shape across every bus type.
+    // 2026-04-30: stereo L/R peakDb for split DBFSMeter, written each block
+    // inside processBlock once the FX Bus pipeline runs.  Mirrored into
+    // PluginProcessor's mFxBusPeakDb* atomics so MixerPage can read alongside
+    // its peers.
     std::atomic<float> peakDbL { -60.f };
     std::atomic<float> peakDbR { -60.f };
     float              peakDecayDbPerBlock { 0.35f };
@@ -766,6 +773,14 @@ struct VibeGraph::EffectsBusNode
     std::atomic<float>* pWidth    { nullptr };
     // Global "kill-all" FX bypass (master_fx_bypass) — forces rack bypass when true.
     std::atomic<float>* pGlobalFxBypass { nullptr };
+    // C.1 (2026-04-30): full strip param set so FX Bus participates in the
+    // mixer's fader / mute / solo / pan / strip-bypass behaviour.  Pre-C.1
+    // these were registered + UI-bound but never read by audio.
+    std::atomic<float>* pStripBypass { nullptr };
+    std::atomic<float>* pLevel       { nullptr };
+    std::atomic<float>* pPan         { nullptr };
+    std::atomic<float>* pMute        { nullptr };
+    std::atomic<float>* pSolo        { nullptr };
 
     static float loadParam(const std::atomic<float>* p, float fallback) noexcept
     {
@@ -776,6 +791,11 @@ struct VibeGraph::EffectsBusNode
         pPolarity       = apvts.getRawParameterValue(prefix + "_polarity");
         pWidth          = apvts.getRawParameterValue(prefix + "_width");
         pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
+        pStripBypass    = apvts.getRawParameterValue(prefix + "_bypass");
+        pLevel          = apvts.getRawParameterValue(prefix + "_level");
+        pPan            = apvts.getRawParameterValue(prefix + "_pan");
+        pMute           = apvts.getRawParameterValue(prefix + "_mute");
+        pSolo           = apvts.getRawParameterValue(prefix + "_solo");
     }
 
     void prepare(double sr, int blockSize)
@@ -794,16 +814,24 @@ struct VibeGraph::EffectsBusNode
         busEq.reset();
     }
 
-    void processBlock(juce::AudioBuffer<float>& buf, double bpm)
+    // C.1 (2026-04-30): full FX Bus pipeline — preEq → rack (with strip OR
+    // global bypass) → postEq → polarity → M/S width → fader × mute × solo
+    // → pan → peak meter.  busAnySolo participates in the receive-group solo
+    // gate.  panLaw matches PluginProcessor's bus-loop convention (0=Circular,
+    // 1=Triangular, 2=Square).
+    void processBlock(juce::AudioBuffer<float>& buf, double bpm,
+                       bool busAnySolo, int panLaw)
     {
         // §P4.3 pre-rack Effects Bus EQ.
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside process)
         rack.setHostBPM(bpm);
-        // Respect global master_fx_bypass (kill-all flag).
+        // Strip-local FX Bypass OR global master_fx_bypass (kill-all flag).
         {
+            const bool stripBypass  = loadParam(pStripBypass, 0.f) > 0.5f;
             const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
-            if (rack.isRackBypassed() != globalBypass)
-                rack.setRackBypassed(globalBypass);
+            const bool bypass       = stripBypass || globalBypass;
+            if (rack.isRackBypassed() != bypass)
+                rack.setRackBypassed(bypass);
         }
         rack.process(buf);
         if (buf.getNumChannels() >= 2) busEq.process(buf);
@@ -811,11 +839,11 @@ struct VibeGraph::EffectsBusNode
         // 5F-4a Batch 6: polarity + M/S width
         if (loadParam(pPolarity, 0.f) > 0.5f) buf.applyGain(-1.f);
         const float width = loadParam(pWidth, 1.f);
+        const int   n     = buf.getNumSamples();
         if (buf.getNumChannels() >= 2 && std::abs(width - 1.f) > 1.0e-4f)
         {
             float* L = buf.getWritePointer(0);
             float* R = buf.getWritePointer(1);
-            const int n = buf.getNumSamples();
             for (int s = 0; s < n; ++s)
             {
                 const float m    = 0.5f * (L[s] + R[s]);
@@ -823,6 +851,34 @@ struct VibeGraph::EffectsBusNode
                 L[s] = m + side;
                 R[s] = m - side;
             }
+        }
+
+        // Fader × mute × in-group solo.  Matches PluginProcessor BusSet pattern.
+        const float dB     = loadParam(pLevel, 0.0f);
+        const bool  muted  = loadParam(pMute, 0.f) > 0.5f;
+        const bool  soloed = loadParam(pSolo, 0.f) > 0.5f;
+        const bool  silenced = muted || (busAnySolo && ! soloed);
+        const float gain   = silenced ? 0.0f : juce::Decibels::decibelsToGain(dB, -60.0f);
+        if (gain != 1.0f) buf.applyGain(gain);
+
+        // Pan (project-level law).  Inline copy of PluginProcessor's bus-loop pan
+        // application so we don't reach into VibeGraph's private helper.
+        const float pan = loadParam(pPan, 0.f);
+        if (buf.getNumChannels() >= 2 && std::abs(pan) > 1.0e-4f)
+        {
+            float gL = 1.f, gR = 1.f;
+            const float p  = juce::jlimit(-1.f, 1.f, pan);
+            const float np = (p + 1.f) * 0.5f;
+            switch (panLaw)
+            {
+                case 1: gL = 1.f - np;          gR = np;             break;
+                case 2: gL = (p <= 0.f ? 1.f : 1.f - p);
+                        gR = (p >= 0.f ? 1.f : 1.f + p);             break;
+                default: { const float a = np * juce::MathConstants<float>::halfPi;
+                           gL = std::cos(a); gR = std::sin(a); }     break;
+            }
+            buf.applyGain(0, 0, n, gL);
+            buf.applyGain(1, 0, n, gR);
         }
 
         {
@@ -1310,16 +1366,20 @@ void VibeGraph::processBlock(juce::AudioBuffer<float>& outputBuf,
     juce::AudioBuffer<float> sumBuf   (mSumBuf   .getArrayOfWritePointers(), numCh, numSamples);
 
     // ── Render each bus node ──────────────────────────────────────────────────
+    // C.4 Phase 1 (2026-04-30): push SC arrays before each bus's processBlock.
+    pushScArrayToStrip(MixerChannelIds::kLayersBus);
     mLayersNode->processBlock(layersBuf, midi, bpm, layersPreRendered);
     layersPeakDb .store(mLayersNode->peakDb .load(), std::memory_order_relaxed);
     layersPeakDbL.store(mLayersNode->peakDbL.load(), std::memory_order_relaxed);
     layersPeakDbR.store(mLayersNode->peakDbR.load(), std::memory_order_relaxed);
 
+    pushScArrayToStrip(MixerChannelIds::kBassBus);
     mBassNode->processBlock(bassBuf, bpm, bassPreRendered);
     bassPeakDb .store(mBassNode->peakDb .load(), std::memory_order_relaxed);
     bassPeakDbL.store(mBassNode->peakDbL.load(), std::memory_order_relaxed);
     bassPeakDbR.store(mBassNode->peakDbR.load(), std::memory_order_relaxed);
 
+    pushScArrayToStrip(MixerChannelIds::kDrumsBus);
     mDrumsNode->processBlock(drumsBuf, bpm, drumsPreRendered);
     drumsPeakDb .store(mDrumsNode->peakDb .load(), std::memory_order_relaxed);
     drumsPeakDbL.store(mDrumsNode->peakDbL.load(), std::memory_order_relaxed);
@@ -1351,6 +1411,8 @@ void VibeGraph::processBlock(juce::AudioBuffer<float>& outputBuf,
     }
 
     // ── Master bus (rack + masterGain × masterFader) ──────────────────────────
+    // C.4 Phase 1: push SC array to master chain before processing.
+    pushScArrayToStrip(MixerChannelIds::kMaster);
     mMasterNode->processBlock(sumBuf, bpm);
     masterPeakDb .store(mMasterNode->peakDb .load(), std::memory_order_relaxed);
     masterPeakDbL.store(mMasterNode->peakDbL.load(), std::memory_order_relaxed);
@@ -1368,6 +1430,29 @@ EffectRack* VibeGraph::getBassBusRack()       { return mBassNode         ? &mBas
 EffectRack* VibeGraph::getDrumsBusRack()      { return mDrumsNode        ? &mDrumsNode       ->rack : nullptr; }
 EffectRack* VibeGraph::getMasterRack()        { return mMasterNode       ? &mMasterNode      ->rack : nullptr; }
 EffectRack* VibeGraph::getEffectsBusRack()    { return mEffectsBusNode   ? &mEffectsBusNode  ->rack : nullptr; }
+
+// C.1 (2026-04-30): public wrapper — drives the FX Bus pipeline once per
+// block.  Called from PluginProcessor after the Vox/Inst bus loop, i.e.
+// after every upstream send / aux / bus has had a chance to fan into the
+// FX Bus accumulator via routeInsertOutput.  Pre-C.1 this was never
+// invoked anywhere — the accumulator filled but nothing read it back.
+void VibeGraph::processEffectsBus(juce::AudioBuffer<float>& buf, double bpm,
+                                   bool busAnySolo, int panLaw)
+{
+    if (mEffectsBusNode)
+    {
+        // C.4 Phase 1: push SC array to FX Bus chain before processing.
+        pushScArrayToStrip(MixerChannelIds::kFxBus);
+        mEffectsBusNode->processBlock(buf, bpm, busAnySolo, panLaw);
+    }
+}
+
+std::pair<float, float> VibeGraph::getEffectsBusPeakDbStereo() const
+{
+    if (! mEffectsBusNode) return { -60.f, -60.f };
+    return { mEffectsBusNode->peakDbL.load(std::memory_order_relaxed),
+             mEffectsBusNode->peakDbR.load(std::memory_order_relaxed) };
+}
 EffectRack* VibeGraph::getAudioClipsBusRack() { return mAudioClipsBusNode ? &mAudioClipsBusNode->rack : nullptr; }
 EffectRack* VibeGraph::getVoxBusRack()        { return mVoxBusNode        ? &mVoxBusNode       ->rack : nullptr; }
 EffectRack* VibeGraph::getInstBusRack()       { return mInstBusNode       ? &mInstBusNode      ->rack : nullptr; }
@@ -1874,7 +1959,26 @@ void VibeGraph::processInsert(InsertKind kind, int index,
                                double bpm, bool anySolo)
 {
     if (auto* node = getInsertNode(kind, index))
+    {
+        // C.4 Phase 1: push SC array to this strip's preEq + rack + postEq
+        // before processing.  Topo order ensures any SOURCE feeding this
+        // strip's SC has already populated the receive buffers via
+        // routeInsertOutput SC fanout.
+        using namespace MixerChannelIds;
+        int chId = -1;
+        switch (kind)
+        {
+            case InsertKind::Layer: chId = layerInsert(index); break;
+            case InsertKind::Bass:  chId = bassInsert (index); break;
+            case InsertKind::Drum:  chId = drumInsert (index); break;
+            case InsertKind::Audio: chId = audioInsert(index); break;
+            case InsertKind::Aux:   chId = auxStrip   (index); break;
+            case InsertKind::Vox:   chId = voxInsert  (index); break;
+            case InsertKind::Inst:  chId = instInsert (index); break;
+        }
+        if (chId >= 0) pushScArrayToStrip(chId);
         node->processBlock(buf, bpm, anySolo);
+    }
 }
 
 EffectRack* VibeGraph::getInsertRack(InsertKind kind, int index)
@@ -2028,6 +2132,8 @@ bool RoutingGraph::wouldCreateCycle(int src, int dst) const noexcept
 {
     // DFS from dst: if we can reach src from dst via existing edges,
     // adding src → dst would complete a cycle.
+    // C.4 Phase 1 (2026-04-30): SC edges participate in the same DAG, so
+    // a sidechain cable can't sneak past the cycle check via an audio path.
     std::unordered_set<int> visited;
     std::vector<int> stack { dst };
     while (! stack.empty())
@@ -2039,6 +2145,9 @@ bool RoutingGraph::wouldCreateCycle(int src, int dst) const noexcept
         for (const auto& e : mEdges)
             if (e.srcId == node)
                 stack.push_back(e.dstId);
+        for (const auto& e : mScEdges)
+            if (e.srcId == node)
+                stack.push_back(e.dstId);
     }
     return false;
 }
@@ -2048,6 +2157,8 @@ bool RoutingGraph::rebuildFromApvts(juce::AudioProcessorValueTreeState& apvts,
 {
     mEdges.clear();
     mEdges.reserve(activeChannels.size() * (1 + kMaxSendsPerStrip));
+    mScEdges.clear();
+    mScEdges.reserve(activeChannels.size() * kMaxScRecvsPerStrip);
 
     auto loadInt = [&](const juce::String& id, int fallback)
     {
@@ -2085,6 +2196,18 @@ bool RoutingGraph::rebuildFromApvts(juce::AudioProcessorValueTreeState& apvts,
             e.isMainOut = false;
             mEdges.push_back(e);
         }
+
+        // C.4 Phase 1 (2026-04-30): SC receive lines.  Each strip reads up
+        // to 4 _sc_recv{N}_from params (channel id of the source, -1 = empty).
+        // Build SC edges as src -> this strip on receive line N.
+        for (int s = 0; s < kMaxScRecvsPerStrip; ++s)
+        {
+            const juce::String sp = prefix + "_sc_recv" + juce::String(s);
+            const int src = loadInt(sp + "_from", -1);
+            if (src < 0 || src == chId) continue;
+            ScEdge e; e.srcId = src; e.dstId = chId; e.dstSlot = s;
+            mScEdges.push_back(e);
+        }
     }
 
     std::vector<int> ids;
@@ -2096,9 +2219,16 @@ bool RoutingGraph::rebuildFromApvts(juce::AudioProcessorValueTreeState& apvts,
 bool RoutingGraph::computeTopo(const std::vector<int>& ids)
 {
     // Kahn's algorithm. Drops cycle edges on retry if needed.
+    // C.4 Phase 1 (2026-04-30): SC edges add a "src must process before dst"
+    // constraint just like main/send edges (the src's post-everything tap is
+    // read into dst's SC receive buffer that block, so src needs to have
+    // produced its output already).
     std::unordered_map<int, int> inDegree;
     for (int id : ids) inDegree[id] = 0;
     for (const auto& e : mEdges)
+        if (inDegree.count(e.dstId))
+            ++inDegree[e.dstId];
+    for (const auto& e : mScEdges)
         if (inDegree.count(e.dstId))
             ++inDegree[e.dstId];
 
@@ -2114,6 +2244,12 @@ bool RoutingGraph::computeTopo(const std::vector<int>& ids)
         int node = queue.back(); queue.pop_back();
         mTopoOrder.push_back(node);
         for (const auto& e : mEdges)
+        {
+            if (e.srcId != node) continue;
+            if (inDegree.count(e.dstId) && --inDegree[e.dstId] == 0)
+                queue.push_back(e.dstId);
+        }
+        for (const auto& e : mScEdges)
         {
             if (e.srcId != node) continue;
             if (inDegree.count(e.dstId) && --inDegree[e.dstId] == 0)
@@ -2174,6 +2310,116 @@ void VibeGraph::clearChannelAccumulators()
         buf.clear();
 }
 
+// C.4 Phase 1 (2026-04-30): per-strip SC receive buffer accessors.  Lazy
+// allocation matches the channel-accumulator pattern.  Slot 0..3 maps to
+// _sc_recv{N}_from APVTS / _sc_pick lookups in DSP modules.
+juce::AudioBuffer<float>* VibeGraph::getScRecvBuffer (int channelId, int slotIdx)
+{
+    if (slotIdx < 0 || slotIdx >= kMaxScRecvSlots) return nullptr;
+    auto& set = mScRecv[channelId];   // creates if missing
+    auto& buf = set.bufs[(size_t) slotIdx];
+    if (buf.getNumChannels() < 2 || buf.getNumSamples() < mBlockSize)
+    {
+        const int blockSize = mBlockSize > 0 ? mBlockSize : 512;
+        buf.setSize(2, blockSize, false, true, false);
+    }
+    return &buf;
+}
+
+VibeGraph::ScRecvArray VibeGraph::getScRecvArray (int channelId)
+{
+    ScRecvArray out {};
+    auto it = mScRecv.find(channelId);
+    if (it == mScRecv.end()) return out;
+    for (int i = 0; i < kMaxScRecvSlots; ++i)
+    {
+        auto& b = it->second.bufs[(size_t) i];
+        out[(size_t) i] = (b.getNumChannels() >= 2) ? &b : nullptr;
+    }
+    return out;
+}
+
+void VibeGraph::clearScRecvBuffers()
+{
+    // C.4 follow-up (2026-04-30): only clear SC receive buffers whose
+    // (dstId, slot) pair is NOT currently the destination of an active
+    // scEdge.  For active edges we leave the previous block's source data
+    // in place -- this gives cross-order SC (where the source strip's
+    // hardcoded process order is AFTER the target's) a one-block-latency
+    // signal rather than silence.  Same-order SC (source processes before
+    // target) overwrites the buffer in this block via routeInsertOutput's
+    // SC fan, so the latency window only applies when the audio order
+    // can't satisfy the SC dependency directly (e.g. Drum -> Bass duck).
+    //
+    // For inactive edges (cable just removed, or never wired), the buffer
+    // gets cleared so stale data from a deleted cable doesn't linger.
+    const auto& scEdges = mRoutingGraph.scEdges();
+
+    auto isActive = [&scEdges](int dstId, int slot) -> bool
+    {
+        for (const auto& e : scEdges)
+            if (e.dstId == dstId && e.dstSlot == slot)
+                return true;
+        return false;
+    };
+
+    for (auto& [id, set] : mScRecv)
+        for (int s = 0; s < (int) set.bufs.size(); ++s)
+            if (set.bufs[(size_t) s].getNumChannels() >= 2 && ! isActive(id, s))
+                set.bufs[(size_t) s].clear();
+}
+
+// C.4 Phase 1 (2026-04-30): push the strip's SC array to all SC-capable DSP
+// modules on the strip (preEq + rack + postEq).  Caller is responsible for
+// invoking before that strip's processBlock; VibeGraph::processInsert /
+// processBlock / processEffectsBus do this internally for the strips they
+// own, and PluginProcessor's bus loop calls it for the Vox/Inst secondary
+// buses.  Address-only push so the call is cheap (4 pointer copies + maybe
+// 8 forwards into preEq/rack/postEq members).
+void VibeGraph::pushScArrayToStrip (int channelId)
+{
+    using namespace MixerChannelIds;
+
+    const ScRecvArray arr = getScRecvArray(channelId);
+    juce::AudioBuffer<float>* bufs[kMaxScRecvSlots];
+    for (int i = 0; i < kMaxScRecvSlots; ++i) bufs[i] = arr[(size_t) i];
+
+    auto push3 = [bufs](EQ8MsDSP* preEq, EffectRack* rack, EQ8MsDSP* postEq)
+    {
+        if (preEq)  preEq ->setSidechainBuffers(bufs, kMaxScRecvSlots);
+        if (rack)   rack  ->setSidechainBuffers(bufs, kMaxScRecvSlots);
+        if (postEq) postEq->setSidechainBuffers(bufs, kMaxScRecvSlots);
+    };
+
+    switch (channelId)
+    {
+        case kMaster:    return push3(getMasterPreEQ(),       getMasterRack(),        getMasterEQ());
+        case kLayersBus: return push3(getLayersBusPreEQ(),    getLayersBusRack(),     getLayersBusEQ());
+        case kBassBus:   return push3(getBassBusPreEQ(),      getBassBusRack(),       getBassBusEQ());
+        case kDrumsBus:  return push3(getDrumsBusPreEQ(),     getDrumsBusRack(),      getDrumsBusEQ());
+        case kFxBus:     return push3(getEffectsBusPreEQ(),   getEffectsBusRack(),    getEffectsBusEQ());
+        case kClipsBus:  return push3(getAudioClipsBusPreEQ(),getAudioClipsBusRack(), getAudioClipsBusEQ());
+        case kVoxBus:    return push3(getVoxBusPreEQ(),       getVoxBusRack(),        getVoxBusEQ());
+        case kInstBus:   return push3(getInstBusPreEQ(),      getInstBusRack(),       getInstBusEQ());
+        case kVoxBus2:   return push3(getVoxBus2PreEQ(),      getVoxBus2Rack(),       getVoxBus2EQ());
+        case kInstBus2:  return push3(getInstBus2PreEQ(),     getInstBus2Rack(),      getInstBus2EQ());
+        case kInstBus3:  return push3(getInstBus3PreEQ(),     getInstBus3Rack(),      getInstBus3EQ());
+    }
+
+    // Insert channels: route to per-kind getters.
+    auto pushInsert = [&](InsertKind kind, int idx)
+    {
+        push3(getInsertPreEQ(kind, idx), getInsertRack(kind, idx), getInsertEQ(kind, idx));
+    };
+    if (channelId >= kLayerBase && channelId < kLayerBase + 16)              return pushInsert(InsertKind::Layer, channelId - kLayerBase);
+    if (channelId >= kBassBase  && channelId < kBassBase  + 16)              return pushInsert(InsertKind::Bass,  channelId - kBassBase);
+    if (channelId >= kDrumBase  && channelId < kDrumBase  + 16)              return pushInsert(InsertKind::Drum,  channelId - kDrumBase);
+    if (channelId >= kAudioBase && channelId < kAudioBase + 50)              return pushInsert(InsertKind::Audio, channelId - kAudioBase);
+    if (channelId >= kAuxBase   && channelId < kAuxBase   + kMaxAuxStrips)   return pushInsert(InsertKind::Aux,   channelId - kAuxBase);
+    if (channelId >= kVoxBase   && channelId < kVoxBase   + kMaxVoxStrips)   return pushInsert(InsertKind::Vox,   channelId - kVoxBase);
+    if (channelId >= kInstBase  && channelId < kInstBase  + kMaxInstStrips)  return pushInsert(InsertKind::Inst,  channelId - kInstBase);
+}
+
 void VibeGraph::rebuildRoutingFromApvts()
 {
     if (mApvts == nullptr) return;
@@ -2220,6 +2466,13 @@ void VibeGraph::rebuildRoutingFromApvts()
         mActiveChannels.emplace_back(instInsert(idx), node->apvtsPrefix);
 
     mRoutingGraph.rebuildFromApvts(*mApvts, mActiveChannels);
+
+    // C.4 Phase 1 (2026-04-30): pre-allocate SC receive buffers for every
+    // (dst, slot) pair the routing graph references this block.  Pulls
+    // allocation off the audio thread; the audio loop's getScRecvBuffer
+    // calls then hit existing buffers and just .clear() them.
+    for (const auto& sce : mRoutingGraph.scEdges())
+        getScRecvBuffer(sce.dstId, sce.dstSlot);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

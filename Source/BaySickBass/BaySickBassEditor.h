@@ -27,6 +27,11 @@ public:
     void paint   (juce::Graphics&) override;
     void resized () override;
 
+    // 2026-04-30: fired after the engine's internal preset picker loads a
+    // patch.  BassPage wires this to onSoundNameChanged so the ribbon tab +
+    // mixer strip + piano-roll context label update to the patch filename.
+    std::function<void(const juce::String&)> onPatchLoaded;
+
 private:
     void parameterChanged   (const juce::String& paramID, float newValue) override;
     void valueTreeRedirected(juce::ValueTree& tree) override;

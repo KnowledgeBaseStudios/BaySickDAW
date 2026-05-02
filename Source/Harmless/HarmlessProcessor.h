@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "HarmlessSynth.h"
 #include "HarmlessModRegistry.h"
+#include "../DSP/EngineSidechainHelper.h"
 
 // ── HarmlessProcessor ─────────────────────────────────────────────────────────
 // AudioProcessor wrapper for HarmlessSynth.
@@ -16,7 +17,8 @@
 //   createEditor() returns the HarmlessEditor (Basic/Advanced UI).
 //   Timbre-shape changes will trigger partA/B.setShape() on a background thread.
 // ─────────────────────────────────────────────────────────────────────────────
-class HarmlessProcessor : public juce::AudioProcessor
+class HarmlessProcessor : public juce::AudioProcessor,
+                          public ISidechainEngine
 {
 public:
     explicit HarmlessProcessor (const juce::String& trackId = "lay_0");
@@ -69,6 +71,14 @@ public:
     HarmlessModRegistry& getModRegistry() noexcept { return mModRegistry; }
     const HarmlessModRegistry& getModRegistry() const noexcept { return mModRegistry; }
 
+    // C.4 Phase 2.2: engine-level SC primitive.  PluginProcessor's render
+    // loop pushes the host InsertNode's SC array before processBlock.
+    void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept override
+    {
+        mScHelper.setSidechainBuffers (bufs, count);
+    }
+    float getSidechainLevel() const noexcept override { return mScHelper.getLevel(); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout
     createLayout (const juce::String& prefix);
@@ -85,6 +95,7 @@ private:
     std::atomic<int>    mAuditionHoldOn  { -1 };
     std::atomic<int>    mAuditionHoldOff { -1 };
     HarmlessModRegistry mModRegistry;
+    EngineSidechainHelper mScHelper;   // C.4 Phase 2.2 SC primitive
     void registerModTargets();   // called once in ctor
 
     // ── CPU guard cache ───────────────────────────────────────────────────────

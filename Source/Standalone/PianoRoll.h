@@ -53,6 +53,9 @@ public:
 
     void setScrollState(float ppb, double beatOff, int topNote, int noteH,
                         int numBars, int snapDenom);
+    // C.5b: pattern's intrinsic time signature drives bar-line spacing +
+    // sub-grid count.  Bar PPQ width = num * (4/den).  Sub-grid count = num.
+    void setTimeSignature(int num, int den);
     void setData         (PianoRollData* data);
     void setPlayheadBeat (double beat);
     void setTool         (PRTool t);
@@ -195,6 +198,9 @@ private:
     int    mNumBars   { 2 };
     int    mSnapDenom { 32 };
     double mPlayhead  { -1.0 };
+    // C.5b: pattern intrinsic TS used for bar-line spacing.
+    int    mTsNum     { 4 };
+    int    mTsDen     { 4 };
 
     // ── Ruler offset (2026-04-21: default to kRulerH so note rows never
     //    draw under the ruler). Setters can override for special modes.
@@ -446,6 +452,11 @@ public:
     void focusGained(juce::Component::FocusChangeType) override;
 
     void setData         (PianoRollData* data);
+    // C.5b: forward pattern's intrinsic TS to the grid.  Caller is the
+    // editor's pattern-change handler, so the piano roll updates whenever
+    // the active pattern changes or the user manually overrides via the
+    // pattern dropdown's "Set Time Signature" submenu.
+    void setTimeSignature (int num, int den);
     void setGhostData    (const std::vector<std::pair<const PianoRollData*, juce::Colour>>& ghosts);
     void setNoteColor    (juce::Colour c);
     void setFixedNoteRange(int bottomMidi, int topMidi);

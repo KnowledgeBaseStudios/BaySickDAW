@@ -1077,6 +1077,9 @@ void AutomationBrowserPane::refresh(PatternManager* pm)
                 if (label.isEmpty()) label = b.automationLane.paramId;
                 if (label.isEmpty()) label = juce::String("Block ") + juce::String(i);
                 r.label = label;
+                // Batch E #3: flag rows whose target param has been deleted.
+                r.stale = (onIsParamStale && b.automationLane.paramId.isNotEmpty()
+                           && onIsParamStale(b.automationLane.paramId));
                 mRows.push_back(r);
             }
         }
@@ -1096,20 +1099,30 @@ int AutomationBrowserPane::getNumRows() { return (int)mRows.size(); }
 void AutomationBrowserPane::paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool sel)
 {
     if (row < 0 || row >= (int)mRows.size()) return;
+    const bool isStale = mRows[row].stale;
     if (sel)
     {
         g.setColour(kSelBlue);
         g.fillRect(0, 0, w, h);
-        g.setColour(juce::Colours::lightgrey);
+        g.setColour(isStale ? juce::Colour(0xffff8888) : juce::Colours::lightgrey);
     }
     else
     {
         g.setColour(row % 2 == 0 ? juce::Colour(0xff141618) : juce::Colour(0xff1a1c1e));
         g.fillRect(0, 0, w, h);
-        g.setColour(kTextGray);
+        // Batch E #3 (2026-05-01): stale rows -- target param deleted -- get
+        // a dim red wash + red text so users see at a glance they're dead.
+        if (isStale)
+        {
+            g.setColour(juce::Colour(0x33ff4040));
+            g.fillRect(0, 0, w, h);
+        }
+        g.setColour(isStale ? juce::Colour(0xffff6060) : kTextGray);
     }
     g.setFont(juce::Font(11.f));
-    g.drawText(mRows[row].label, 6, 0, w - 6, h, juce::Justification::centredLeft, true);
+    juce::String text = isStale ? juce::String("[stale] ") + mRows[row].label
+                                : mRows[row].label;
+    g.drawText(text, 6, 0, w - 6, h, juce::Justification::centredLeft, true);
 }
 
 void AutomationBrowserPane::listBoxItemClicked(int row, const juce::MouseEvent&)

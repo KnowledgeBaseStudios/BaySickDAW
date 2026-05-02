@@ -167,7 +167,11 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
                      &mPrismAmt, &mPrismMode,
                      &mTremDepth, &mTremSpeed, &mTremGap,
                      &mVibDepth, &mVibSpeed, &mVibEnv,
-                     &mGlideTime, &mLegatoLimit })
+                     &mGlideTime, &mLegatoLimit,
+                     // D.4-Q1+Q2 (2026-05-01): timbre 2x2 stack + filter ADSRs
+                     &mFlt1CutoffOfs, &mFlt2CutoffOfs, &mPartAMask, &mPartBMask,
+                     &mFlt1A, &mFlt1D, &mFlt1S, &mFlt1R,
+                     &mFlt2A, &mFlt2D, &mFlt2S, &mFlt2R })
         { setupRotary (*s); addAndMakeVisible (*s); }
     // S4 Batch 4 fix: Global LFO re-exposed as macro. Rate+Shape+Tempo knobs
     // in the main editor write to lfo_rate/lfo_shape/lfo_tempo APVTS, which
@@ -331,6 +335,19 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     // here - rebindToPart() below installs the active attachment based on the
     // current part_sel. mBrownianAtt / mBlurSizeAtt / mPrismAmtAtt / etc are
     // intentionally left null; the dual-slider list owns the live attachment.
+    // D.4-Q1+Q2 (2026-05-01): timbre 2x2 stack + filter ADSR attachments.
+    mFlt1OfsAtt      = std::make_unique<SliderAtt> (apvts, pid("flt1_cutoff_ofs"), mFlt1CutoffOfs);
+    mFlt2OfsAtt      = std::make_unique<SliderAtt> (apvts, pid("flt2_cutoff_ofs"), mFlt2CutoffOfs);
+    mPartAMaskAtt    = std::make_unique<SliderAtt> (apvts, pid("filter_mask_cutoff"),    mPartAMask);
+    mPartBMaskAtt    = std::make_unique<SliderAtt> (apvts, pid("partB_filter_mask_cutoff"), mPartBMask);
+    mFlt1AAtt        = std::make_unique<SliderAtt> (apvts, pid("flt_a"),          mFlt1A);
+    mFlt1DAtt        = std::make_unique<SliderAtt> (apvts, pid("flt_d"),          mFlt1D);
+    mFlt1SAtt        = std::make_unique<SliderAtt> (apvts, pid("flt_s"),          mFlt1S);
+    mFlt1RAtt        = std::make_unique<SliderAtt> (apvts, pid("flt_r"),          mFlt1R);
+    mFlt2AAtt        = std::make_unique<SliderAtt> (apvts, pid("flt2_a"),         mFlt2A);
+    mFlt2DAtt        = std::make_unique<SliderAtt> (apvts, pid("flt2_d"),         mFlt2D);
+    mFlt2SAtt        = std::make_unique<SliderAtt> (apvts, pid("flt2_s"),         mFlt2S);
+    mFlt2RAtt        = std::make_unique<SliderAtt> (apvts, pid("flt2_r"),         mFlt2R);
     mTremShapeAtt    = std::make_unique<SliderAtt> (apvts, pid("trem_shape"),     mTremShapeSlider);
     mTremDepthAtt    = std::make_unique<SliderAtt> (apvts, pid("trem_depth"),     mTremDepth);
     mTremSpeedAtt    = std::make_unique<SliderAtt> (apvts, pid("trem_speed"),     mTremSpeed);
@@ -377,13 +394,44 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     mLfoShapeAtt = std::make_unique<SliderAtt> (apvts, pid ("lfo_shape"), mLfoShape);
     mLfoTempoAtt = std::make_unique<ButtonAtt> (apvts, pid ("lfo_tempo"), mLfoTempoBtn);
     // XYZ destination dropdowns removed - routing moved to the mod matrix.
-    // oct + Hz are UI-only display toggles (no APVTS attachment) per the SLA
-    // decision - they don't change DSP, just toggle the popup-display unit.
-    mPitchOctBtn.onClick = [this]
+    // Batch E #1 (2026-05-01): OCT + Hz are UI-only display toggles for the
+    // FREQ pitch knob.  No APVTS attachment - they don't change DSP, just
+    // toggle drag-snap and popup-display unit (semitones / octaves / Hz).
+    auto applyPitchDisplayMode = [this]
     {
-        // Round-trip current pitch_semitones through octaves on toggle.
-        // Implementation deferred - for now just toggle visual state.
+        const bool oct = mPitchOctBtn.getToggleState();
+        const bool hz  = mPitchHzBtn .getToggleState();
+        // Drag interval: octave snap (12 semis) when OCT is on, free 1-semi steps otherwise.
+        mPitchFreq.setRange (-24.0, 24.0, oct ? 12.0 : 1.0);
+        // Popup display: Hz mode shows absolute Hz at A4-anchored frequency.
+        // OCT mode shows octave count.  Default = semitones with sign.
+        mPitchFreq.textFromValueFunction = [oct, hz] (double v)
+        {
+            if (hz)
+            {
+                const double freqHz = 440.0 * std::pow (2.0, v / 12.0);
+                if (freqHz >= 1000.0)
+                    return juce::String (freqHz / 1000.0, 2) + " kHz";
+                return juce::String (freqHz, 1) + " Hz";
+            }
+            if (oct)
+            {
+                const int oc = (int) std::round (v / 12.0);
+                if (oc == 0) return juce::String ("0");
+                return (oc > 0 ? juce::String ("+") : juce::String())
+                       + juce::String (oc) + " oct";
+            }
+            const int st = (int) std::round (v);
+            return (st >= 0 ? juce::String ("+") : juce::String())
+                   + juce::String (st) + " st";
+        };
+        mPitchFreq.updateText();
     };
+    mPitchOctBtn.onClick = applyPitchDisplayMode;
+    mPitchHzBtn .onClick = applyPitchDisplayMode;
+    // Apply once at construction so the textFromValue lambda is installed
+    // before the user touches anything.
+    applyPitchDisplayMode();
     // Bottom-left
     mPartSelAtt      = std::make_unique<SliderAtt> (apvts, pid("part_sel"),       mPartSel);
     mVolumeAtt       = std::make_unique<SliderAtt> (apvts, pid("volume"),         mVolume);
@@ -418,8 +466,8 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     };
     // Top-Left
     wireMeta (mTimbreBlend,    "timbre_blend",     "Timbre Blend - crossfades Part A toward Part B (0..1)");
-    wireMeta (mPartALevel,     "partA_level",      "Part A Level (0..1)");
-    wireMeta (mPartBLevel,     "partB_level",      "Part B Level (0..1)");
+    wireMeta (mPartALevel,     "partA_level",      "Voice A Level (0..1)");
+    wireMeta (mPartBLevel,     "partB_level",      "Voice B Level (0..1)");
     wireMeta (mBrownian,       "brownian_amount",  "Brownian rolloff - 0 flat / 1 brown noise (~6 dB/oct)");
     wireMeta (mBlurSize,       "blur_size",        "Blur - spectral smear amount (0..1)");
     wireMeta (mPrismAmt,       "prism_amount",     "Prism - inharmonic spread amount (0..1)");
@@ -432,6 +480,19 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     wireMeta (mVibEnv,         "vib_env",          "Vibrato Envelope - onset delay (0 instant .. 1 slow)");
     wireMeta (mGlideTime,      "glide_time",       "Glide / Portamento Time (seconds, 0..2)");
     wireMeta (mLegatoLimit,    "legato_limit",     "Legato Limit - max glide time cap (seconds)");
+    // D.4-Q1+Q2 (2026-05-01): timbre 2x2 stack + filter ADSRs.
+    wireMeta (mFlt1CutoffOfs,  "flt1_cutoff_ofs",          "Filter 1 Cutoff Offset - shifts F1 cutoff up/down by this amount (semitones)");
+    wireMeta (mFlt2CutoffOfs,  "flt2_cutoff_ofs",          "Filter 2 Cutoff Offset - shifts F2 cutoff up/down by this amount (semitones)");
+    wireMeta (mPartAMask,      "filter_mask_cutoff",       "Part A Timbre Filter Mask Cutoff (Hz) - limits which harmonics pass through Part A's timbre");
+    wireMeta (mPartBMask,      "partB_filter_mask_cutoff", "Part B Timbre Filter Mask Cutoff (Hz) - limits which harmonics pass through Part B's timbre");
+    wireMeta (mFlt1A,          "flt_a",                    "Filter 1 Envelope Attack (seconds)");
+    wireMeta (mFlt1D,          "flt_d",                    "Filter 1 Envelope Decay (seconds)");
+    wireMeta (mFlt1S,          "flt_s",                    "Filter 1 Envelope Sustain (0..1)");
+    wireMeta (mFlt1R,          "flt_r",                    "Filter 1 Envelope Release (seconds)");
+    wireMeta (mFlt2A,          "flt2_a",                   "Filter 2 Envelope Attack (seconds)");
+    wireMeta (mFlt2D,          "flt2_d",                   "Filter 2 Envelope Decay (seconds)");
+    wireMeta (mFlt2S,          "flt2_s",                   "Filter 2 Envelope Sustain (0..1)");
+    wireMeta (mFlt2R,          "flt2_r",                   "Filter 2 Envelope Release (seconds)");
     // Top-Middle (Unison)
     wireMeta (mUnisonVoices,   "unison_voices",    "Unison Voices (1..9)");
     wireMeta (mUnisonType,     "unison_type",      "Unison Type (0=Pure, 1=Random, 2=Drifting, 3=Alt-only)");
@@ -608,9 +669,12 @@ void HarmlessEditor::paint (juce::Graphics& g)
     drawSection (g, mLFOSec,       "LFO MOD");
 
 
-    // Top-right 5x2 grid: Flt1 | Flt2, Timbre | Blur/Prism, AmpEnv | FX.
+    // Top-right 5x2 grid (D.4-Q1+Q2): Flt1 | Flt1 ADSR, Flt2 | Flt2 ADSR,
+    // Timbre | Blur/Prism, AmpEnv | FX.
     drawSection (g, mFlt1Sec,      "FILTER 1");
+    drawSection (g, mFlt1AdsrSec,  "FILTER 1 ADSR");
     drawSection (g, mFlt2Sec,      "FILTER 2");
+    drawSection (g, mFlt2AdsrSec,  "FILTER 2 ADSR");
     drawSection (g, mTimbreSec,    "TIMBRE");
     drawSection (g, mBlurPrismSec, "BLUR / PRISM");
     drawSection (g, mAmpEnvSec,    "AMP ENV / PHASE");
@@ -625,9 +689,22 @@ void HarmlessEditor::paint (juce::Graphics& g)
     knobLabel (g, mTimbreWavA,   "PART A");
     knobLabel (g, mTimbreWavB,   "PART B");
     knobLabel (g, mTimbreBlend,  "MIX");
-    knobLabel (g, mPartALevel,   "A LVL");
-    knobLabel (g, mPartBLevel,   "B LVL");
+    knobLabel (g, mPartALevel,   "VOICE A");
+    knobLabel (g, mPartBLevel,   "VOICE B");
     knobLabel (g, mBrownian,     "BROWN");
+    // D.4-Q1+Q2 (2026-05-01): timbre 2x2 stack + filter ADSR labels.
+    knobLabel (g, mFlt1CutoffOfs, "F1 OFS");
+    knobLabel (g, mFlt2CutoffOfs, "F2 OFS");
+    knobLabel (g, mPartAMask,     "A MASK");
+    knobLabel (g, mPartBMask,     "B MASK");
+    knobLabel (g, mFlt1A,         "ATK");
+    knobLabel (g, mFlt1D,         "DEC");
+    knobLabel (g, mFlt1S,         "SUS");
+    knobLabel (g, mFlt1R,         "REL");
+    knobLabel (g, mFlt2A,         "ATK");
+    knobLabel (g, mFlt2D,         "DEC");
+    knobLabel (g, mFlt2S,         "SUS");
+    knobLabel (g, mFlt2R,         "REL");
     knobLabel (g, mBlurSize,     "BLUR");
     knobLabel (g, mBlurTime,     "TIME");      // S2 SLA #8
     knobLabel (g, mBlurHarm,     "HARM");      // S2 SLA #9
@@ -790,10 +867,11 @@ void HarmlessEditor::resized()
         mGlobalSec   = rowA.withWidth (halfW);                                 // Output
         mRoutingSec  = rowA.withX (rowA.getX() + halfW + secGap).withWidth (halfW);
         layoutRow (mGlobalSec.reduced (4, 16), {
-            { &mVolume,     kKnobSm, kKnobSm },
-            { &mPan,        kKnobSm, kKnobSm },
-            { &mVelLinkBtn, 34,      18      },
-            { &mCutSelfBtn, 56,      18      },
+            { &mVolume,      kKnobSm, kKnobSm },
+            { &mPan,         kKnobSm, kKnobSm },
+            { &mVelLinkBtn,  34,      18      },
+            { &mCutSelfBtn,  56,      18      },
+            { &mAutoGainBtn, 52,      18      },   // D.4-Q1+Q2: moved here from Timbre cell
         });
         mRoutingMatrix.setBounds (mRoutingSec.reduced (4, 16));
         r.removeFromTop (secGap);
@@ -949,10 +1027,13 @@ void HarmlessEditor::resized()
 
     // ─────────────────────────────────────────────────────────────────────────
     // TOP-RIGHT panel — 5×2 grid.
-    //   R1: Filter 1 | Filter 2
-    //   R2: Timbre (with A+B) | Blur/Prism
-    //   R3: Amp Env + Phase | FX (Pluck / Phaser / EQ)
-    //   R4+R5: blank (future upgrade space)
+    //   D.4-Q1+Q2 (2026-05-01): Filter 2 moved BELOW Filter 1; new ADSR boxes
+    //   placed to the right of each filter row (4 knobs each, 2x2 layout).
+    //   R1: Filter 1 | Filter 1 ADSR
+    //   R2: Filter 2 | Filter 2 ADSR
+    //   R3: Timbre (with A+B + 2x2 stack) | Blur/Prism
+    //   R4: Amp Env + Phase | FX (Pluck / Phaser / EQ)
+    //   R5: blank (future upgrade space)
     // ─────────────────────────────────────────────────────────────────────────
     {
         auto r = mTopRightBounds.reduced (4, 4);
@@ -967,26 +1048,80 @@ void HarmlessEditor::resized()
             return { x, y, halfW, rowH };
         };
 
-        // R1: Filter 1 | Filter 2
-        mFlt1Sec = cellAt (0, 0);
-        mFlt2Sec = cellAt (0, 1);
-        mFilter1Row.setBounds (mFlt1Sec.reduced (3, 12));
-        mFilter2Row.setBounds (mFlt2Sec.reduced (3, 12));
+        // ADSR-cell layout helper: single row of 4 A/D/S/R knobs (matches
+        // the existing layoutRow style used by Amp Env elsewhere).
+        auto layoutAdsr = [&] (juce::Rectangle<int> cell, juce::Slider& a,
+                                juce::Slider& d, juce::Slider& s, juce::Slider& rk)
+        {
+            layoutRow (cell.reduced (3, 12), {
+                { &a,  kKnobSm, kKnobSm },
+                { &d,  kKnobSm, kKnobSm },
+                { &s,  kKnobSm, kKnobSm },
+                { &rk, kKnobSm, kKnobSm },
+            });
+        };
 
-        // R2: Timbre (with A/B) | Blur/Prism
-        mTimbreSec    = cellAt (1, 0);
-        mBlurPrismSec = cellAt (1, 1);
-        layoutRow (mTimbreSec.reduced (3, 12), {
-            { &mPartABtn,    22,      18      },
-            { &mPartBBtn,    22,      18      },
-            { &mTimbreWavA,  28,      28      },
-            { &mTimbreWavB,  28,      28      },
-            { &mTimbreBlend, kKnobSm, kKnobSm },
-            { &mPartALevel,  kKnobSm, kKnobSm },
-            { &mPartBLevel,  kKnobSm, kKnobSm },
-            { &mBrownian,    kKnobSm, kKnobSm },
-            { &mAutoGainBtn, 52,      kKnobSm - 8 },
-        });
+        // R1: Filter 1 | Filter 1 ADSR
+        mFlt1Sec      = cellAt (0, 0);
+        mFlt1AdsrSec  = cellAt (0, 1);
+        mFilter1Row.setBounds (mFlt1Sec.reduced (3, 12));
+        layoutAdsr (mFlt1AdsrSec, mFlt1A, mFlt1D, mFlt1S, mFlt1R);
+
+        // R2: Filter 2 | Filter 2 ADSR
+        mFlt2Sec      = cellAt (1, 0);
+        mFlt2AdsrSec  = cellAt (1, 1);
+        mFilter2Row.setBounds (mFlt2Sec.reduced (3, 12));
+        layoutAdsr (mFlt2AdsrSec, mFlt2A, mFlt2D, mFlt2S, mFlt2R);
+
+        // R3: Timbre (with A/B) | Blur/Prism
+        mTimbreSec    = cellAt (2, 0);
+        mBlurPrismSec = cellAt (2, 1);
+        // D.4-Q1+Q2 (2026-05-01): Timbre cell now also hosts a 2x2 stack on the
+        // right (offsets row + masks row).  Left strip = 8 horizontal controls
+        // (AutoGain moved out to Output cell to free this width); right block
+        // = 4 knobs in 2x2 grid.
+        {
+            auto timbreInner = mTimbreSec.reduced (3, 12);
+            // Reserve the rightmost 2 columns of kKnobSm width for the 2x2 stack.
+            const int stackW = kKnobSm * 2 + 4;
+            auto stackArea   = timbreInner.removeFromRight (stackW);
+            timbreInner.removeFromRight (4);   // gap between strip and stack
+
+            layoutRow (timbreInner, {
+                { &mPartABtn,    22,      18      },
+                { &mPartBBtn,    22,      18      },
+                { &mTimbreWavA,  28,      28      },
+                { &mTimbreWavB,  28,      28      },
+                { &mTimbreBlend, kKnobSm, kKnobSm },
+                { &mPartALevel,  kKnobSm, kKnobSm },
+                { &mPartBLevel,  kKnobSm, kKnobSm },
+                { &mBrownian,    kKnobSm, kKnobSm },
+            });
+
+            // 2x2 stack: top row = flt1Ofs | flt2Ofs (filter offsets pair)
+            //            bot row = partAMask | partBMask (timbre mask pair)
+            // Reserve 11px under each knob for its label so adjacent rows /
+            // knobs don't overlap.  Knob size shrinks to fit the remaining
+            // vertical space (label-aware).
+            constexpr int kLabelGap = 11;
+            const int half  = stackArea.getHeight() / 2;
+            const int knobW = (stackArea.getWidth() - 4) / 2;
+            const int sz    = juce::jmin (kKnobSm, knobW, juce::jmax (12, half - kLabelGap));
+            auto top = stackArea.removeFromTop (half);
+            auto bot = stackArea;
+            mFlt1CutoffOfs.setBounds (top.removeFromLeft (knobW)
+                                          .withSizeKeepingCentre (sz, sz)
+                                          .translated (0, -(kLabelGap / 2)));
+            top.removeFromLeft (4);
+            mFlt2CutoffOfs.setBounds (top.withSizeKeepingCentre (sz, sz)
+                                          .translated (0, -(kLabelGap / 2)));
+            mPartAMask    .setBounds (bot.removeFromLeft (knobW)
+                                          .withSizeKeepingCentre (sz, sz)
+                                          .translated (0, -(kLabelGap / 2)));
+            bot.removeFromLeft (4);
+            mPartBMask    .setBounds (bot.withSizeKeepingCentre (sz, sz)
+                                          .translated (0, -(kLabelGap / 2)));
+        }
         layoutRow (mBlurPrismSec.reduced (3, 12), {
             { &mBlurSize,  kKnobSm, kKnobSm },
             { &mBlurTime,  kKnobSm, kKnobSm },
@@ -995,9 +1130,10 @@ void HarmlessEditor::resized()
             { &mPrismMode, kKnobSm, kKnobSm },
         });
 
-        // R3: Amp Env + Phase | FX (Pluck / Phaser / EQ)
-        mAmpEnvSec = cellAt (2, 0);
-        mFXSec     = cellAt (2, 1);
+        // R4: Amp Env + Phase | FX (Pluck / Phaser / EQ).  D.4-Q1+Q2: was R3
+        // before Filter 2 got its own row.
+        mAmpEnvSec = cellAt (3, 0);
+        mFXSec     = cellAt (3, 1);
         layoutRow (mAmpEnvSec.reduced (3, 12), {
             { &mAmpA,       kKnobSm, kKnobSm },
             { &mAmpD,       kKnobSm, kKnobSm },
@@ -1152,7 +1288,15 @@ void HarmlessEditor::savePreset (const juce::String& name)
 
 void HarmlessEditor::loadPreset (const juce::File& f)
 {
+    bool ok = false;
     if (auto xml = juce::XmlDocument::parse (f))
         if (xml->hasTagName (mProc.apvts.state.getType()))
+        {
             mProc.apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            ok = true;
+        }
+    // 2026-04-30: notify page wrapper so Layer/Bass tab + mixer strip get
+    // renamed to the patch filename (matches DrumPage's sound-pick auto-rename).
+    if (ok && onPatchLoaded)
+        onPatchLoaded (f.getFileNameWithoutExtension());
 }

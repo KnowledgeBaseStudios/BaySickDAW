@@ -1098,7 +1098,14 @@ public:
         float ratio     { 2.f };
         float attack    { 10.f };
         float release   { 100.f };
-        float rangeDb   { 12.f };
+        // C.4 follow-up (2026-04-30): default 0 so the dotted ghost curve sits
+        // flat (no modulation) when the user first toggles Dynamic on.  Was
+        // +12 (legacy from the pre-bipolar era when 12 = max upward + a
+        // separate Upward bool); the bipolar redesign repurposed +12 to mean
+        // "12 dB upward expansion" which the user didn't ask for.  All three
+        // tiers (this UI Band, EQ8DSP::Band, APVTS Range param) now default
+        // to 0 so they don't fight each other on first use.
+        float rangeDb   { 0.f };
         bool  upward    { false };
         int   scSourceId{ -1 };       // Option B scaffolding, not user-editable yet
         // Live gain reduction in dB, polled from DSP::getBandGrDb each timer tick.
@@ -1136,6 +1143,15 @@ public:
     // Full bind with APVTS write-back so processBlock updateXxxEQ() doesn't revert UI edits
     void bindMsDSP (EQ8MsDSP* msDsp, juce::AudioProcessorValueTreeState* apvts,
                     juce::String midPrefix, juce::String sidePrefix);
+
+    // C.4 Phase 1 (2026-04-30): the strip the EQ is on -- used by the
+    // DynamicParamsPopout's SC source dropdown to enumerate routed SC lines.
+    // mixerPrefix should be the strip's mixer APVTS prefix (e.g.
+    // "mixer_layer_0").  resolveSourceName maps a source channel id to a
+    // friendly label ("Layer 1" / "Bass 1" / "Master" / etc.).  Optional --
+    // when unset the popout shows "(no sidechain context)" disabled item.
+    void setStripContext (juce::String mixerPrefix,
+                           std::function<juce::String(int)> resolveSourceName);
 
     // Periodically called (from timer) to pull values from bound DSP instance
     void syncFromDSP();
@@ -1258,6 +1274,12 @@ private:
     std::array<juce::Rectangle<int>, kNumBands> mFreqReadoutR {};
     std::array<juce::Rectangle<int>, kNumBands> mQReadoutR    {};
 
+    // D.4-Q6 (2026-05-01): EQ8 main-level output fader, surfaced as a 9th
+    // vertical fader on the right of the band column area.  -18..+18 dB.
+    // Bound to EQ8DSP::setMainLevel (or both Mid+Side in MsDSP mode).
+    std::unique_ptr<VibeSlider> mMainLevelFader;
+    juce::Rectangle<int>        mMainReadoutR {};
+
     // 12j follow-up Q1: shared inline TextEditor for readout editing. Positioned
     // at whichever readout rect the user double-clicked; pre-filled with current
     // value, select-all'd, grab-focus. Enter / Escape / focus-loss commits or
@@ -1314,6 +1336,11 @@ private:
     juce::AudioProcessorValueTreeState* mMsDSPApvts     { nullptr };
     juce::String                        mMsDSPMidPrefix;
     juce::String                        mMsDSPSidePrefix;
+
+    // C.4 Phase 1 (2026-04-30): strip context for the SC dropdown in
+    // DynamicParamsPopout.  Set externally via setStripContext.
+    juce::String                                mStripMixerPrefix;
+    std::function<juce::String(int)>            mResolveSourceName;
 
     void setAPVTSFromBand(int b);
     void pushBandToDSP   (int b);

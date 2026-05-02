@@ -238,6 +238,18 @@ void TransientShaperDSP::process (juce::AudioBuffer<float>& buffer)
 
     const int numCh = std::min (buffer.getNumChannels(), 2);
 
+    // C.4: external sidechain override for detector path. Audio path (band-split,
+    // gain application, drive) still operates on `buffer`; only the level used
+    // to drive the fast+slow envelopes comes from SC when present.
+    const juce::AudioBuffer<float>* extSc = getActiveSidechain();
+    const float* extScL = nullptr;
+    const float* extScR = nullptr;
+    if (extSc != nullptr && extSc->getNumSamples() >= numSamples && extSc->getNumChannels() > 0)
+    {
+        extScL = extSc->getReadPointer (0);
+        extScR = (extSc->getNumChannels() > 1) ? extSc->getReadPointer (1) : extScL;
+    }
+
     const float fastAtt = mFastAttCoef;
     const float fastRel = mFastRelCoef;
     const float slowAtt = mSlowAttCoef;
@@ -297,9 +309,11 @@ void TransientShaperDSP::process (juce::AudioBuffer<float>& buffer)
 
         if (mStereoDetect && numCh > 1)
         {
-            // Per-channel detection
-            const float levL = std::abs (buffer.getSample (0, n));
-            const float levR = std::abs (buffer.getSample (1, n));
+            // Per-channel detection - prefer external SC if connected
+            const float levL = (extScL != nullptr) ? std::abs (extScL[n])
+                                                   : std::abs (buffer.getSample (0, n));
+            const float levR = (extScR != nullptr) ? std::abs (extScR[n])
+                                                   : std::abs (buffer.getSample (1, n));
             gainL = computeGain (levL, mFastL, mSlowMs);
             gainR = computeGain (levR, mFastR, mSlowMsR);
         }
@@ -307,9 +321,21 @@ void TransientShaperDSP::process (juce::AudioBuffer<float>& buffer)
         {
             // Mono-sum detection (default / v1 behavior)
             float level = 0.0f;
-            for (int ch = 0; ch < numCh; ++ch)
-                level += std::abs (buffer.getSample (ch, n));
-            if (numCh > 0) level /= (float) numCh;
+            if (extScL != nullptr)
+            {
+                // SC path: same channel-averaging behavior over the SC buffer
+                level = std::abs (extScL[n]);
+                if (extScR != nullptr && extScR != extScL)
+                {
+                    level = (level + std::abs (extScR[n])) * 0.5f;
+                }
+            }
+            else
+            {
+                for (int ch = 0; ch < numCh; ++ch)
+                    level += std::abs (buffer.getSample (ch, n));
+                if (numCh > 0) level /= (float) numCh;
+            }
 
             gainL = computeGain (level, mFastL, mSlowMs);
             gainR = gainL;   // same gain on both channels

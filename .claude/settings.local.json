@@ -267,7 +267,12 @@
       "Bash(powershell -Command \"Remove-Item ''C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\SharedUI.cpp.obj'' -Force -ErrorAction SilentlyContinue; Remove-Item ''C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\EffectEditorPanels.cpp.obj'' -Force -ErrorAction SilentlyContinue; Write-Host ''Stale obj files removed''\")",
       "Bash(powershell -Command 'Remove-Item \"\"C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\SharedUI.cpp.obj\"\" -Force -ErrorAction SilentlyContinue; Remove-Item \"\"C:\\\\Users\\\\jeffm\\\\Documents\\\\Vibesynth\\\\build\\\\CMakeFiles\\\\VibesynthStandalone.dir\\\\Source\\\\Standalone\\\\EffectsPage.cpp.obj\"\" -Force -ErrorAction SilentlyContinue; Write-Host \"\"Done\"\"')",
       "Bash(grep -v \"//.*case\")",
-      "Bash(powershell -Command \"\\(Get-Content 'C:\\\\Users\\\\jeffm\\\\Documents\\\\BaySickDAW\\\\Files For Claude\\\\vibedaw_blueprint.md' | Measure-Object -Line\\).Lines\")"
+      "Bash(powershell -Command \"\\(Get-Content 'C:\\\\Users\\\\jeffm\\\\Documents\\\\BaySickDAW\\\\Files For Claude\\\\vibedaw_blueprint.md' | Measure-Object -Line\\).Lines\")",
+      "Bash(git -C \"C:/Users/jeffm/Documents/BaySickDAW\" diff --stat HEAD -- \"Source/VibePlayer/\")",
+      "Bash(git -C \"C:/Users/jeffm/Documents/BaySickDAW\" diff HEAD -- \"Source/VibePlayer/VibePlayerProcessor.cpp\" \"Source/VibePlayer/VibePlayerProcessor.h\")",
+      "Bash(git -C \"C:/Users/jeffm/Documents/BaySickDAW\" diff HEAD -- \"Source/VibePlayer/VibePlayerEditor.cpp\")",
+      "Bash(git -C \"C:/Users/jeffm/Documents/BaySickDAW\" log --oneline -20 -- \"Source/VibePlayer/VibePlayerEditor.cpp\")",
+      "Bash(git -C \"C:/Users/jeffm/Documents/BaySickDAW\" diff HEAD -- \"Source/VibePlayer/VibePlayerEditor.h\")"
     ]
   }
 }

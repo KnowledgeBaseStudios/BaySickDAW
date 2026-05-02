@@ -171,6 +171,22 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
     if (numSamples == 0 || numChannels == 0)
         return;
 
+    // C.4 Phase 1 (2026-04-30): pull SC source from the strip's SC array via
+    // mScPick (set each block by EffectRack from slot.scPick).  Overrides
+    // any legacy setSidechainBuffer / setUseSidechain wiring -- the strip's
+    // SC array is the single source of truth now.  scPick == -1 (no source
+    // selected) leaves SC off and detection falls back to the input buffer.
+    if (auto* scBuf = getActiveSidechain())
+    {
+        useSidechain     = true;
+        mSidechainBuffer = scBuf;
+    }
+    else
+    {
+        useSidechain     = false;
+        mSidechainBuffer = nullptr;
+    }
+
     // -- Detection source (sidechain or input) -----------------------------
     const juce::AudioBuffer<float>* detSrc = &buffer;
     if (useSidechain && mSidechainBuffer != nullptr &&

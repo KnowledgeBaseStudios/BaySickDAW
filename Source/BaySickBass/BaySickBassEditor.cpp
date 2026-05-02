@@ -1024,6 +1024,9 @@ void BaySickBassEditor::loadPreset (const juce::File& f)
     auto xml = juce::XmlDocument::parse (f);
     if (! xml || ! xml->hasTagName (mProc.apvts.state.getType())) return;
 
+    // 2026-04-30: notify page wrapper at the end so Bass tab + mixer strip
+    // get renamed to the patch filename.  Fired after replaceState below.
+
     auto loaded = juce::ValueTree::fromXml (*xml);
 
     // P4.1 trackId-portability fix — see BaySickSynthEditor::loadPreset for full
@@ -1058,4 +1061,7 @@ void BaySickBassEditor::loadPreset (const juce::File& f)
     }
 
     mProc.apvts.replaceState (loaded);
+
+    if (onPatchLoaded)
+        onPatchLoaded (f.getFileNameWithoutExtension());
 }

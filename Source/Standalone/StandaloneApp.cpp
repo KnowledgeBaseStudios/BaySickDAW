@@ -91,7 +91,7 @@ juce::Optional<juce::AudioPlayHead::PositionInfo> StandalonePlayHead::getPositio
     info.setPpqPosition(mPPQPos.load());
     info.setIsPlaying(mPlaying.load());
     info.setIsRecording(mRecording.load());
-    info.setTimeSignature(juce::AudioPlayHead::TimeSignature{4,4});
+    info.setTimeSignature (juce::AudioPlayHead::TimeSignature{ mTsNum.load(), mTsDen.load() });
     return info;
 }
 
@@ -201,6 +201,34 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // Auto-save whenever the user changes device settings via the dialog.
     mDeviceManager->addChangeListener(this);
 
+    // C.3 (2026-04-30): hardware MIDI input.  After initialise reads the saved
+    // device-state XML, enumerate all detected MIDI inputs and register the
+    // app as a callback for each.  First-launch default = enable all (Q1=B
+    // multi-device, all on); subsequent launches respect the saved state by
+    // only enabling devices that already had a MIDIINPUT entry in the XML.
+    {
+        bool anySavedMidiState = false;
+        if (settingsFile.existsAsFile())
+        {
+            if (auto savedXml = juce::XmlDocument::parse (settingsFile))
+            {
+                for (auto* c : savedXml->getChildIterator())
+                    if (c->hasTagName ("MIDIINPUT")) { anySavedMidiState = true; break; }
+            }
+        }
+
+        const auto availableMidi = juce::MidiInput::getAvailableDevices();
+        for (const auto& d : availableMidi)
+        {
+            if (! anySavedMidiState)
+                mDeviceManager->setMidiInputDeviceEnabled (d.identifier, true);
+            // Register the callback for every available device.  JUCE only
+            // invokes it while the device is enabled, so toggling
+            // setMidiInputDeviceEnabled later is sufficient.
+            mDeviceManager->addMidiInputDeviceCallback (d.identifier, this);
+        }
+    }
+
     mPlayer = std::make_unique<juce::AudioProcessorPlayer>();
     mPlayer->setProcessor(mProcessor.get());
     mAdvancer = std::make_unique<PlayHeadAdvancer>(*mPlayHead, *mPlayer);
@@ -237,6 +265,16 @@ void VibesynthStandaloneApp::shutdown()
     mWindow = nullptr;
     if (mDeviceManager)
         mDeviceManager->removeChangeListener(this);
+    // C.3 (2026-04-30): unregister MIDI input callbacks before tearing down
+    // the device manager.  Defensive: ~AudioDeviceManager would clear them
+    // anyway, but explicit removal prevents any race against in-flight MIDI
+    // thread work during shutdown.
+    if (mDeviceManager)
+    {
+        const auto availableMidi = juce::MidiInput::getAvailableDevices();
+        for (const auto& d : availableMidi)
+            mDeviceManager->removeMidiInputDeviceCallback (d.identifier, this);
+    }
     if (mDeviceManager && mAdvancer)
         mDeviceManager->removeAudioCallback(mAdvancer.get());
     mAdvancer      = nullptr;
@@ -244,6 +282,15 @@ void VibesynthStandaloneApp::shutdown()
     mProcessor     = nullptr;
     mPlayHead      = nullptr;
     mDeviceManager = nullptr;
+}
+
+// C.3 (2026-04-30): MIDI input thread -> processor's collector.  Keep this
+// short and lock-free; MidiMessageCollector::addMessageToQueue is wait-free.
+void VibesynthStandaloneApp::handleIncomingMidiMessage (juce::MidiInput*,
+                                                         const juce::MidiMessage& message)
+{
+    if (mProcessor != nullptr)
+        mProcessor->getLiveMidiCollector().addMessageToQueue (message);
 }
 
 START_JUCE_APPLICATION(VibesynthStandaloneApp)

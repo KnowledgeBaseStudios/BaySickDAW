@@ -164,8 +164,13 @@ public:
     // the raw paramId for each row label.
     std::function<juce::String(const AutomationLane&)> onResolveDisplayName;
 
+    // Batch E #3 (2026-05-01): when set, refresh() asks the host whether the
+    // lane's target paramId still resolves in APVTS.  Stale rows are marked
+    // visually so users can see at a glance which automation is dead-ended.
+    std::function<bool(const juce::String& paramId)> onIsParamStale;
+
 private:
-    struct Row { int blockIdx; juce::String label; };
+    struct Row { int blockIdx; juce::String label; bool stale { false }; };
     std::vector<Row> mRows;
     juce::ListBox    mList;
 

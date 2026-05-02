@@ -36,6 +36,16 @@ public:
     std::function<void(int slot)>                  onEffectRemoved;
     std::function<void(int slot, bool up)>         onMoveRequested;
 
+    // C.4 Phase 1 (2026-04-30): SC source dropdown context.  EffectsPage wires
+    // this when a slot's editor is rebuilt.  channelMixerPrefix is the strip's
+    // mixer APVTS prefix (e.g. "mixer_layer_0") -- the dropdown scans
+    // <prefix>_sc_recv{0..3}_from to enumerate active SC lines.
+    // resolveSourceName(int channelId) returns a display name for a source
+    // strip's channel id (e.g. "Layer 1", "Bass 1", "Master").
+    void setChannelContext (juce::AudioProcessorValueTreeState* apvts,
+                             const juce::String& channelMixerPrefix,
+                             std::function<juce::String(int)> resolveSourceName);
+
     void paint(juce::Graphics&) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -61,8 +71,17 @@ private:
     // Inline editor (owned; replaced on each effect change)
     std::unique_ptr<juce::Component> mEditor;
 
+    // C.4 Phase 1 (2026-04-30): SC dropdown in the header chrome.  Only
+    // visible when the loaded effect's usesSidechain() returns true.  Items
+    // populated each click from APVTS scan + resolveSourceName callback.
+    std::unique_ptr<juce::TextButton>                  mScBtn;
+    juce::AudioProcessorValueTreeState*                mApvts { nullptr };
+    juce::String                                       mChannelMixerPrefix;
+    std::function<juce::String(int)>                   mResolveSourceName;
 
     void showAddMenu();
+    void showScMenu();
+    void refreshScBtnLabel();
 
     void timerCallback() override;   // feeds levels to meters
 
