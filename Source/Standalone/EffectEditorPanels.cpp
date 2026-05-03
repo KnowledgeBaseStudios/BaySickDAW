@@ -1,4 +1,5 @@
 #include "EffectEditorPanels.h"
+#include "SlotComponent.h"   // H-8: VocalDoubler's Slap button calls remountEditor
 // D.4 (2026-05-01): force MSBuild to recompile this file — Compressor + Delay
 // knob additions were missing from the previous incremental build.
 #include "../DSP/CompressorDSP.h"
@@ -12,6 +13,7 @@
 #include "../DSP/TransientShaperDSP.h"
 #include "../DSP/TapeDSP.h"
 #include "../DSP/LimiterDSP.h"
+#include "../DSP/DeEsserDSP.h"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 struct KnobDef { const char* label; float min, max, def, step; const char* tip; };
@@ -258,6 +260,326 @@ void EditorPanelBase::resized()
 // CompressorPanel
 // Thresh | Ratio | Gain | Attack | Release  +  KneeType combo (8 types)
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// FETCompressorPanel — H-7 (2026-05-01)
+// 1176-style minimalist layout: Input + Output + Attack + Release + 4-position
+// Ratio chickenhead (4:1 / 8:1 / 12:1 / 20:1) + GR meter.  Selected when the
+// underlying CompressorDSP's mType == FET.
+// ─────────────────────────────────────────────────────────────────────────────
+struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
+{
+    std::unique_ptr<ChickenHeadSelector> ratioSel;     // 4 / 8 / 12 / 20 / All-in
+    std::unique_ptr<ChickenHeadSelector> meterSel;     // GR / +8 / +4 / OFF
+    std::unique_ptr<GRMeter>             grMeter;      // GR display widget
+    CompressorDSP*                       mDsp { nullptr };
+    int                                  mMeterMode { 0 };   // 0=GR
+
+    // 1176 datasheet attack/release tables.  Position 0 = OFF (bypass that
+    // stage), 1..7 are real positions with 1 = slowest, 7 = fastest.
+    static constexpr float kAttackMs[8]  = { 0.f, 0.8f, 0.5f, 0.3f, 0.15f, 0.075f, 0.035f, 0.020f };
+    static constexpr float kReleaseMs[8] = { 0.f, 1100.f, 700.f, 450.f, 250.f, 150.f, 90.f, 50.f };
+
+    explicit FETCompressorPanel (CompressorDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&DynamicsLAF::get());
+        setVolumeKnobVariant (true);
+
+        // Input + Output: continuous dB attenuators (1176 face plate).  Range
+        // -60..0 dB; on the face plate "0" = max signal at top, "-∞" at bottom.
+        // Attack + Release stored as integer position 0..7 (0=OFF) -- mapped to
+        // ms via kAttackMs / kReleaseMs in the onValueChange callbacks.
+        buildKnobs (*this, knobs, {
+            { "Input",   -60.f,   0.f, -12.f, 0.5f, "Input drive into the FET stage (dB) -- more = more compression" },
+            { "Output",  -60.f,   0.f,   0.f, 0.5f, "Output level (dB)" },
+            { "Attack",   0.f,    7.f,   4.f,  1.f, "Attack position (0=OFF, 1=slow 800us, 7=fast 20us)" },
+            { "Release",  0.f,    7.f,   4.f,  1.f, "Release position (0=OFF, 1=slow 1100ms, 7=fast 50ms)" },
+        });
+        for (auto& k : knobs)
+            k->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
+
+        // Ratio chickenhead: 4 / 8 / 12 / 20 / All (all-buttons-in mode).
+        ratioSel = std::make_unique<ChickenHeadSelector>();
+        ratioSel->setOptions ({
+            { "4",   "4 : 1",        "Mild compression" },
+            { "8",   "8 : 1",        "Medium compression" },
+            { "12",  "12 : 1",       "Heavy compression" },
+            { "20",  "20 : 1",       "Limiting / heavy" },
+            { "All", "All-buttons in", "All-buttons-in mode -- the famous UREI sound (~30:1 with bias shift)" },
+        });
+        ratioSel->setBodyTooltip ("Ratio (1176 face plate)");
+        ratioSel->setDefaultLabelColour (juce::Colours::black);
+        const float r = dsp ? dsp->ratio : 4.0f;
+        const int initIdx = (r < 6.f)  ? 0
+                          : (r < 10.f) ? 1
+                          : (r < 16.f) ? 2
+                          : (r < 50.f) ? 3 : 4;
+        ratioSel->setSelectedIndex (initIdx, juce::dontSendNotification);
+        ratioSel->onChange = [dsp] (int idx)
+        {
+            const float ratios[] = { 4.f, 8.f, 12.f, 20.f, 1000.f };
+            if (dsp) dsp->setRatio (ratios[juce::jlimit (0, 4, idx)]);
+        };
+        addAndMakeVisible (*ratioSel);
+
+        // Meter mode chickenhead: GR / +8 / +4 / OFF.
+        meterSel = std::make_unique<ChickenHeadSelector>();
+        meterSel->setOptions ({
+            { "GR",  "Gain Reduction", "VU shows gain reduction (dB)" },
+            { "+8",  "Output +8",      "VU shows output level (calibrated to +8 dBu)" },
+            { "+4",  "Output +4",      "VU shows output level (calibrated to +4 dBu)" },
+            { "OFF", "Off",            "Meter off" },
+        });
+        meterSel->setBodyTooltip ("Meter mode");
+        meterSel->setDefaultLabelColour (juce::Colours::black);
+        meterSel->setSelectedIndex (0, juce::dontSendNotification);
+        meterSel->onChange = [this] (int idx) { mMeterMode = idx; };
+        addAndMakeVisible (*meterSel);
+
+        // Knob -> DSP wiring.
+        knobs[0]->slider.onValueChange = [dsp,this]
+        {
+            // Input drives signal hot into the FET; map slider dB to threshold.
+            // Slider 0 dB (top of face plate) = aggressive threshold; -60 = no comp.
+            if (dsp) dsp->setThreshold ((float) knobs[0]->slider.getValue());
+        };
+        knobs[1]->slider.onValueChange = [dsp,this]
+        {
+            if (dsp) dsp->setGain ((float) knobs[1]->slider.getValue());
+        };
+        knobs[2]->slider.onValueChange = [dsp,this]
+        {
+            const int pos = juce::jlimit (0, 7, (int) std::round (knobs[2]->slider.getValue()));
+            if (dsp) dsp->setAttack (kAttackMs[pos]);
+        };
+        knobs[3]->slider.onValueChange = [dsp,this]
+        {
+            const int pos = juce::jlimit (0, 7, (int) std::round (knobs[3]->slider.getValue()));
+            if (dsp) dsp->setRelease (kReleaseMs[pos]);
+        };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->threshold, juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->makeupDb,  juce::sendNotificationSync);
+            // Best-effort sync from current ms back to the closest 1..7 position.
+            int aPos = 4, rPos = 4;
+            for (int i = 1; i < 8; ++i) if (std::abs (dsp->attackMs  - kAttackMs[i])  < std::abs (dsp->attackMs  - kAttackMs[aPos]))  aPos = i;
+            for (int i = 1; i < 8; ++i) if (std::abs (dsp->releaseMs - kReleaseMs[i]) < std::abs (dsp->releaseMs - kReleaseMs[rPos])) rPos = i;
+            knobs[2]->slider.setValue ((double) aPos, juce::sendNotificationSync);
+            knobs[3]->slider.setValue ((double) rPos, juce::sendNotificationSync);
+        }
+
+        grMeter = std::make_unique<GRMeter>();
+        addAndMakeVisible (*grMeter);
+        startTimerHz (30);
+    }
+
+    ~FETCompressorPanel() override { stopTimer(); setLookAndFeel (nullptr); }
+
+    void timerCallback() override
+    {
+        if (grMeter && mDsp)
+        {
+            // Mode 0 = GR display.  Modes 1/2 (+8 / +4 output) and mode 3 (OFF)
+            // route through the same widget; output-level routing lands in a
+            // follow-up batch (needs DSP-side post-makeup peak), so for now
+            // those modes display "--" by zeroing the GR widget.
+            const float val = (mMeterMode == 0) ? mDsp->getGainReductionDb() : 0.0f;
+            grMeter->setGainReduction (val);
+        }
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        DynamicsLAF::paintLA2APanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+
+        // VU input meter + GR meter strip on the LEFT (matches CompressorPanel).
+        if (vuIn) vuIn->setBounds (b.removeFromLeft (120).reduced (1, 2));
+        if (grMeter)
+        {
+            int gw = juce::jmin (96, b.getHeight() + 8);
+            grMeter->setBounds (b.removeFromLeft (gw).reduced (1, 2));
+            b.removeFromLeft (4);
+        }
+
+        // Right edge: dBFS meter + output-vol knob.
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (2);
+        outputVolKnob->setBounds (b.removeFromRight (kKnobSz).withSizeKeepingCentre (kKnobSz, kKnobSz));
+        b.removeFromRight (4);
+
+        // Right side: meter-mode chickenhead.
+        if (meterSel)
+        {
+            auto col = b.removeFromRight (66);
+            meterSel->setBounds (col.reduced (2));
+            b.removeFromRight (4);
+        }
+
+        // Knob strip middle: Input | Output | Attack | Release | Ratio.
+        const int n     = 5;
+        const int slotW = juce::jmax (1, b.getWidth() / n);
+        const int sz    = juce::jmin (slotW, b.getHeight(), kKnobSz);
+        knobs[0]->setBounds (b.removeFromLeft (slotW).withSizeKeepingCentre (sz, sz));
+        knobs[1]->setBounds (b.removeFromLeft (slotW).withSizeKeepingCentre (sz, sz));
+        knobs[2]->setBounds (b.removeFromLeft (slotW).withSizeKeepingCentre (sz, sz));
+        knobs[3]->setBounds (b.removeFromLeft (slotW).withSizeKeepingCentre (sz, sz));
+        if (ratioSel) ratioSel->setBounds (b.reduced (2));
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OptoCompressorPanel — H-7 (2026-05-01)
+// LA-2A-style minimalist: Peak Reduction + Gain + Comp/Limit toggle + GR meter.
+// Selected when the underlying CompressorDSP's mType == Opto.
+// ─────────────────────────────────────────────────────────────────────────────
+struct OptoCompressorPanel : public EditorPanelBase, public juce::Timer
+{
+    std::unique_ptr<DualLabelToggle>     compLimitTog;   // Comp = 3:1, Limit = inf:1
+    std::unique_ptr<ChickenHeadSelector> meterSel;        // GR / Output +10 / Output +4
+    std::unique_ptr<GRMeter>             grMeter;
+    CompressorDSP*                       mDsp { nullptr };
+    int                                  mMeterMode { 0 };  // 0=GR
+
+    explicit OptoCompressorPanel (CompressorDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&DynamicsLAF::get());
+        setVolumeKnobVariant (true);
+
+        // LA-2A face plate: Peak Reduction + Gain knobs both displayed 0..100.
+        // Internal mapping inside the onValueChange lambdas converts that
+        // 0..100 user-facing scale to the DSP's threshold/gain dB.
+        buildKnobs (*this, knobs, {
+            { "Peak Reduction", 0.f, 100.f, 30.f, 0.5f, "Peak Reduction -- more = more compression (LA-2A face plate scale)" },
+            { "Gain",           0.f, 100.f, 50.f, 0.5f, "Output gain (LA-2A face plate scale)" },
+        });
+        for (auto& k : knobs)
+            k->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
+
+        // Comp/Limit 2-position vertical toggle, top-left of the panel.
+        compLimitTog = std::make_unique<DualLabelToggle>();
+        compLimitTog->setupNamed (
+            "Comp",  "Compress mode (3:1 ratio)",
+            "Limit", "Limit mode (effectively infinity:1 -- LA-2A 'limit' position)");
+        compLimitTog->btn().setToggleState (dsp && dsp->ratio > 50.f, juce::dontSendNotification);
+        compLimitTog->btn().onClick = [dsp, this]
+        {
+            const bool limit = compLimitTog->btn().getToggleState();
+            if (dsp) dsp->setRatio (limit ? 100.0f : 3.0f);
+        };
+        addAndMakeVisible (*compLimitTog);
+
+        // Meter mode chickenhead: GR / Output +10 / Output +4.
+        meterSel = std::make_unique<ChickenHeadSelector>();
+        meterSel->setOptions ({
+            { "GR",  "Gain Reduction", "VU shows gain reduction (dB)" },
+            { "+10", "Output +10",     "VU shows output level (calibrated to +10 dBu)" },
+            { "+4",  "Output +4",      "VU shows output level (calibrated to +4 dBu)" },
+        });
+        meterSel->setBodyTooltip ("Meter mode");
+        meterSel->setDefaultLabelColour (juce::Colours::black);
+        meterSel->setSelectedIndex (0, juce::dontSendNotification);
+        meterSel->onChange = [this] (int idx) { mMeterMode = idx; };
+        addAndMakeVisible (*meterSel);
+
+        // Slider value 0..100 -> DSP dB mapping.
+        knobs[0]->slider.onValueChange = [dsp,this]
+        {
+            // Peak Reduction 0..100 -> threshold 0 dB .. -40 dB.
+            const float v01 = (float) knobs[0]->slider.getValue() * 0.01f;
+            if (dsp) dsp->setThreshold (juce::jmap (v01, 0.0f, 1.0f, 0.0f, -40.0f));
+        };
+        knobs[1]->slider.onValueChange = [dsp,this]
+        {
+            // Gain 0..100 -> output -inf..+30 dB (linear in dB above -inf).
+            // Use 0 = -30 dB (effectively quiet) so the knob has musical range.
+            const float v01 = (float) knobs[1]->slider.getValue() * 0.01f;
+            if (dsp) dsp->setGain (juce::jmap (v01, 0.0f, 1.0f, -30.0f, 30.0f));
+        };
+
+        if (dsp)
+        {
+            // Reverse map current threshold -> 0..100 face plate.
+            const float thr01  = juce::jlimit (0.0f, 1.0f,
+                                                juce::jmap (dsp->threshold, 0.0f, -40.0f, 0.0f, 1.0f));
+            const float gain01 = juce::jlimit (0.0f, 1.0f,
+                                                juce::jmap (dsp->makeupDb, -30.0f, 30.0f, 0.0f, 1.0f));
+            knobs[0]->slider.setValue (thr01  * 100.0, juce::sendNotificationSync);
+            knobs[1]->slider.setValue (gain01 * 100.0, juce::sendNotificationSync);
+        }
+
+        grMeter = std::make_unique<GRMeter>();
+        addAndMakeVisible (*grMeter);
+        startTimerHz (30);
+    }
+
+    ~OptoCompressorPanel() override { stopTimer(); setLookAndFeel (nullptr); }
+
+    void timerCallback() override
+    {
+        if (grMeter && mDsp)
+        {
+            // GR mode: real GR.  +10 / +4 modes wired but display "--" until
+            // output-level routing lands in a follow-up.
+            const float val = (mMeterMode == 0) ? mDsp->getGainReductionDb() : 0.0f;
+            grMeter->setGainReduction (val);
+        }
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        DynamicsLAF::paintLA2APanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+
+        // VU + GR cluster on the left (matches CompressorPanel).
+        if (vuIn) vuIn->setBounds (b.removeFromLeft (120).reduced (1, 2));
+        if (grMeter)
+        {
+            int gw = juce::jmin (96, b.getHeight() + 8);
+            grMeter->setBounds (b.removeFromLeft (gw).reduced (1, 2));
+            b.removeFromLeft (4);
+        }
+
+        // Right edge: dBFS meter + output-vol knob.
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (2);
+        outputVolKnob->setBounds (b.removeFromRight (kKnobSz).withSizeKeepingCentre (kKnobSz, kKnobSz));
+        b.removeFromRight (4);
+
+        // Meter mode chickenhead (top-right on the LA-2A face plate).
+        if (meterSel)
+        {
+            auto col = b.removeFromRight (70);
+            meterSel->setBounds (col.reduced (2));
+            b.removeFromRight (4);
+        }
+
+        // Compress/Limit toggle (top-left on the LA-2A face plate).
+        if (compLimitTog)
+        {
+            auto col = b.removeFromLeft (60);
+            compLimitTog->setBounds (col.reduced (2));
+            b.removeFromLeft (4);
+        }
+
+        // Two big knobs (Peak Reduction + Gain) fill the rest.
+        const int n     = 2;
+        const int slotW = juce::jmax (1, b.getWidth() / n);
+        const int sz    = juce::jmin (slotW, b.getHeight(), kKnobSz + 12);
+        knobs[0]->setBounds (b.removeFromLeft (slotW).withSizeKeepingCentre (sz, sz));
+        knobs[1]->setBounds (b.removeFromLeft (slotW).withSizeKeepingCentre (sz, sz));
+    }
+};
+
 struct CompressorPanel : public EditorPanelBase,
                          public juce::Timer
 {
@@ -362,6 +684,10 @@ struct CompressorPanel : public EditorPanelBase,
         addAndMakeVisible(*grMeter);
 
         startTimerHz(30);
+        // H-7 (2026-05-01): the existing CompressorPanel is now used ONLY for
+        // Type::Modern.  FET + Opto have dedicated minimalist panel classes
+        // (FETCompressorPanel / OptoCompressorPanel) that SlotComponent
+        // mounts when the user picks those modes.  No hide-some-knobs hack.
     }
 
     ~CompressorPanel() override
@@ -461,7 +787,7 @@ struct ReverbPanel : public EditorPanelBase
         return v;
     }
     std::unique_ptr<DualLabelToggle>            tempoTog, hdBypassTog, freezeTog;
-    std::unique_ptr<ChickenHeadSelector>        modeSel, tailShapeSel;
+    std::unique_ptr<ChickenHeadSelector>        modeSel, tailShapeSel, syncDivSel;
     JewelIndicator                              mJewel;
 
     explicit ReverbPanel(ReverbDSP* dsp)
@@ -525,9 +851,38 @@ struct ReverbPanel : public EditorPanelBase
 
         tempoTog = std::make_unique<DualLabelToggle>();
         tempoTog->setupOnOff("Sync", "Sync pre-delay to host BPM");
-        tempoTog->btn().onClick = [dsp, this]{ dsp->setTempoSync(tempoTog->btn().getToggleState()); };
+        tempoTog->btn().onClick = [dsp, this]{
+            const bool on = tempoTog->btn().getToggleState();
+            dsp->setTempoSync (on);
+            // H-9 (2026-05-02): grey the division selector when sync is off.
+            if (syncDivSel) syncDivSel->setLocked (! on);
+        };
         tempoTog->setLabelColour(VC::Text);   // TimeLAF dark Pultec panel
         addAndMakeVisible(*tempoTog);
+
+        // H-9 (2026-05-02): tempo-sync division selector.  Mirrors the
+        // chicken-head pattern used by Chorus / Flanger / Phaser.  Locked
+        // (greyed) when Sync toggle is off since division only matters when
+        // tempo-sync is engaged.
+        syncDivSel = std::make_unique<ChickenHeadSelector>();
+        syncDivSel->setOptions({
+            { "1/1",  "Whole",    "Whole note (1/1) pre-delay" },
+            { "1/2",  "Half",     "Half note (1/2) pre-delay" },
+            { "1/4",  "Quarter",  "Quarter note (1/4) pre-delay (default)" },
+            { "1/8",  "Eighth",   "Eighth note (1/8) pre-delay" },
+            { "1/8D", "8th Dot.", "Dotted 8th (= 3/16) pre-delay" },
+            { "1/4T", "Qtr Trip", "Quarter triplet (= 1/6) pre-delay" },
+            { "1/16", "16th",     "Sixteenth note (1/16) pre-delay" },
+            { "1/8T", "8th Trip", "Eighth triplet (= 1/12) pre-delay" },
+        });
+        syncDivSel->setBodyTooltip("Tempo-sync note division (when Sync toggle is on)");
+        syncDivSel->setSelectedIndex(
+            juce::jlimit(0, ReverbDSP::kNumSyncDivisions - 1, dsp->getSyncDivision()),
+            juce::dontSendNotification);
+        syncDivSel->onChange = [dsp](int idx){ dsp->setSyncDivision(idx); };
+        // Initial lockout state -- tempoTog defaults off, so dropdown locked.
+        syncDivSel->setLocked (true);
+        addAndMakeVisible(*syncDivSel);
 
         hdBypassTog = std::make_unique<DualLabelToggle>();
         hdBypassTog->setupOnOff("HiDmp", "Bypass high-freq damping");
@@ -605,19 +960,32 @@ struct ReverbPanel : public EditorPanelBase
         auto r1 = b.removeFromTop(b.getHeight() / 2);
         auto r2 = b;
 
-        // Row 1 right: Freeze on/off toggle + Mode chicken-head selector
-        auto freezeSlot = r1.removeFromRight(62); r1.removeFromRight(2);
+        // H-9 (2026-05-02): right-side controls grid (visual right-to-left).
+        // The chicken-heads stack vertically by column so each pair reads as
+        // a unit:
+        //   Col A (rightmost): Freeze toggle  /  HiDmp toggle
+        //   Col B:             SyncDiv combo  /  Sync toggle
+        //   Col C:             Mode combo     /  TailShape combo
+        //   Row 2 only:        ER knob (no row-1 partner)
+        // Matched widths per column so the rows align cleanly.
+        constexpr int kTogW = 62;   // toggle column width
+        constexpr int kCmbW = 66;   // chicken-head column width
+
+        // ── Row 1 right (right-to-left): Freeze | SyncDiv | Mode ──────────
+        auto freezeSlot = r1.removeFromRight(kTogW); r1.removeFromRight(2);
         if (freezeTog) freezeTog->setBounds(freezeSlot.reduced(1));
-        auto modeSlot = r1.removeFromRight(66); r1.removeFromRight(2);
+        auto syncDivSlot = r1.removeFromRight(kCmbW); r1.removeFromRight(2);
+        if (syncDivSel)  syncDivSel->setBounds(syncDivSlot.reduced(2));
+        auto modeSlot = r1.removeFromRight(kCmbW); r1.removeFromRight(2);
         if (modeSel)   modeSel->setBounds(modeSlot.reduced(2));
         layoutKnobsH(r1, r1knobs);
 
-        // Row 2 right: HiDmp + Sync on/off toggles, TailShape chicken-head, ER knob
-        auto hiDmpSlot = r2.removeFromRight(62); r2.removeFromRight(2);
+        // ── Row 2 right (right-to-left): HiDmp | Sync | TailShape | ER ────
+        auto hiDmpSlot = r2.removeFromRight(kTogW); r2.removeFromRight(2);
         if (hdBypassTog) hdBypassTog->setBounds(hiDmpSlot.reduced(1));
-        auto syncSlot = r2.removeFromRight(62); r2.removeFromRight(2);
+        auto syncSlot = r2.removeFromRight(kCmbW); r2.removeFromRight(2);
         if (tempoTog)    tempoTog->setBounds(syncSlot.reduced(1));
-        auto tailShapeSlot = r2.removeFromRight(66); r2.removeFromRight(2);
+        auto tailShapeSlot = r2.removeFromRight(kCmbW); r2.removeFromRight(2);
         if (tailShapeSel) tailShapeSel->setBounds(tailShapeSlot.reduced(2));
         auto erSlot = r2.removeFromRight(kKnobSz + 4); r2.removeFromRight(2);
         if (erKnob) erKnob->setBounds(erSlot.withSizeKeepingCentre(kKnobSz, kKnobSz));
@@ -639,6 +1007,7 @@ struct SaturationPanel : public EditorPanelBase,
     std::unique_ptr<ChickenHeadSelector>        tubeTypeSel;
     std::unique_ptr<ChickenHeadSelector>        osSel;             // C2
     std::unique_ptr<juce::Label>                autoGainCompLabel; // C4 - dB readout next to Auto-Gain toggle
+    std::unique_ptr<ChickenHeadSelector>        harmModeSel;       // H-7: Keep Low / Normal / Keep High
     SaturationDSP*                              mDsp { nullptr };
 
     std::vector<VKnob*> getExtraKnobs() override
@@ -747,6 +1116,23 @@ struct SaturationPanel : public EditorPanelBase,
 
         // Timer keeps the comp-label synced against automation-driven Sens changes too.
         startTimerHz(10);
+        // H-7 (2026-05-01): the existing SaturationPanel is now used ONLY for
+        // Type::Tube.  Console mode mounts a dedicated ConsoleSaturationPanel.
+
+        // H-7: Keep Low / Normal / Keep High harmonic-routing chickenhead.
+        // Same selector as ConsoleSaturationPanel; both umbrella Types share
+        // the routing logic at the DSP level.
+        harmModeSel = std::make_unique<ChickenHeadSelector>();
+        harmModeSel->setOptions ({
+            { "Lo",  "Keep Low",  "Saturate highs only -- bass passes through dry" },
+            { "Nrm", "Normal",    "Full-band saturation (default)" },
+            { "Hi",  "Keep High", "Saturate lows only -- highs pass through dry" },
+        });
+        harmModeSel->setBodyTooltip ("Harmonics routing");
+        if (dsp)
+            harmModeSel->setSelectedIndex ((int) dsp->mHarmonicsMode, juce::dontSendNotification);
+        harmModeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setHarmonicsMode (idx); };
+        addAndMakeVisible (*harmModeSel);
     }
 
     void updateAutoGainLabel()
@@ -801,7 +1187,10 @@ struct SaturationPanel : public EditorPanelBase,
 
         layoutKnobsH(r1, r1knobs);
 
-        // Row 2: TubeType chicken-head + Transformer on/off toggle on right, knobs fill left
+        // Row 2: TubeType chicken-head + Transformer on/off toggle on right, knobs fill left.
+        // H-7 (2026-05-01): Harmonic-mode chickenhead added at the right edge.
+        auto hm = r2.removeFromRight(66); r2.removeFromRight(2);
+        if (harmModeSel) harmModeSel->setBounds(hm.reduced(2));
         auto tc = r2.removeFromRight(66); r2.removeFromRight(2);
         if (tubeTypeSel) tubeTypeSel->setBounds(tc.reduced(2));
         auto tb = r2.removeFromRight(62); r2.removeFromRight(2);
@@ -962,7 +1351,7 @@ struct DelayPanel : public EditorPanelBase
     std::vector<std::unique_ptr<VKnob>>         r1knobs, r2knobs;
     std::unique_ptr<DualLabelToggle>            tempoTog, keepPitchTog, fbDistTypeTog;
     std::unique_ptr<ChickenHeadSelector>        modelSel, fbFilterTypeSel, syncDivSel;
-    JewelIndicator                              mJewel;
+    std::unique_ptr<juce::TextButton>           slapbackBtn;   // H-8 (2026-05-02)
 
     std::vector<VKnob*> getExtraKnobs() override
     {
@@ -985,8 +1374,6 @@ struct DelayPanel : public EditorPanelBase
     {
         disableVU();   // Delay has no input VU — full knob width
         setLookAndFeel(&TimeLAF::get());
-        addAndMakeVisible(mJewel);
-        mJewel.setActive(true);
 
         // Row 1: Time | Feed | LoFiSR | WetIn | Wet | Dry | FBCut | FBReso | Tone  (9 knobs)
         // D.4-Q5 (2026-05-01): LoFiSR sits next to Feed since it only colors the
@@ -1019,6 +1406,7 @@ struct DelayPanel : public EditorPanelBase
             { "Spread",   0.f,   1.f,  0.f,  0.01f, "Stereo spread (L/R base delay difference)" },
             { "Pan",     -1.f,   1.f,  0.f,  0.01f, "L/R offset pan" },
             { "Smooth",   0.f,   1.f,  0.5f, 0.01f, "Time smoothing - higher = slower transition when delay time changes. Only audible when the Pitch toggle (right of this row) is ON" },
+            { "Duck",     0.f, 100.f,  0.f,  1.0f,  "0..100 %.  Sidechain ducking amount.  When dry input crosses threshold, wet output is attenuated by this amount.  0 = disabled (vocal-friendly setting around 60 %).  Threshold/attack/release at sane defaults (-24 dB / 10 ms / 200 ms)." },
         });
 
         modelSel = std::make_unique<ChickenHeadSelector>();
@@ -1112,6 +1500,52 @@ struct DelayPanel : public EditorPanelBase
         };
         addAndMakeVisible(*syncDivSel);
 
+        // H-8 (2026-05-02): Slapback preset button.  Loads classic-slapback
+        // values into the Echo Type (single short delay ~110 ms, ~12 % feedback,
+        // 30 % wet, no diffusion).  After loading, re-syncs all panel knobs
+        // from the DSP so the UI reflects the new state.
+        slapbackBtn = std::make_unique<juce::TextButton>("Slap");
+        slapbackBtn->setTooltip ("Slapback preset -- single short delay, low "
+                                   "feedback, low wet.  Classic 50s-rockabilly / "
+                                   "vintage-vocal effect.  Replaces current settings.");
+        slapbackBtn->onClick = [this, dsp]
+        {
+            if (! dsp) return;
+            dsp->presetSlapback();
+            // Re-sync r1 + r2 knob sliders from the new DSP state so the UI
+            // reflects the loaded preset.  setValue with sendNotificationSync
+            // would re-trigger our onValueChange and write back to the DSP --
+            // use dontSendNotification + the public DSP fields/getters.
+            r1knobs[0]->slider.setValue (dsp->delayMs,             juce::dontSendNotification);
+            r1knobs[1]->slider.setValue (dsp->getFeedbackLevel(),  juce::dontSendNotification);
+            r1knobs[2]->slider.setValue (dsp->getLoFiSampleRate(), juce::dontSendNotification);
+            r1knobs[3]->slider.setValue (dsp->getWetIn(),          juce::dontSendNotification);
+            r1knobs[4]->slider.setValue (dsp->getWetOut(),         juce::dontSendNotification);
+            r1knobs[5]->slider.setValue (dsp->getDryOut(),         juce::dontSendNotification);
+            r1knobs[6]->slider.setValue (dsp->getFBCutoff(),       juce::dontSendNotification);
+            r1knobs[7]->slider.setValue (dsp->getFBResonance(),    juce::dontSendNotification);
+            r1knobs[8]->slider.setValue (dsp->getTone(),           juce::dontSendNotification);
+            r2knobs[0] ->slider.setValue (dsp->getModRate(),        juce::dontSendNotification);
+            r2knobs[1] ->slider.setValue (dsp->getModTimeMod(),     juce::dontSendNotification);
+            r2knobs[2] ->slider.setValue (dsp->getModCutoffMod(),   juce::dontSendNotification);
+            r2knobs[3] ->slider.setValue (dsp->getDiffLevel(),      juce::dontSendNotification);
+            r2knobs[4] ->slider.setValue (dsp->getDiffSpread(),     juce::dontSendNotification);
+            r2knobs[5] ->slider.setValue (dsp->getLoFiBits(),       juce::dontSendNotification);
+            r2knobs[6] ->slider.setValue (dsp->getFBDistLevel(),    juce::dontSendNotification);
+            r2knobs[7] ->slider.setValue (dsp->getFBDistKnee(),     juce::dontSendNotification);
+            r2knobs[8] ->slider.setValue (dsp->getFBDistSymmetry(), juce::dontSendNotification);
+            r2knobs[9] ->slider.setValue (dsp->getStereoSpread(),   juce::dontSendNotification);
+            r2knobs[10]->slider.setValue (dsp->getOffsetPan(),      juce::dontSendNotification);
+            r2knobs[11]->slider.setValue (dsp->getSmoothing(),      juce::dontSendNotification);
+            // Selectors
+            if (modelSel)        modelSel       ->setSelectedIndex (juce::jlimit (0, 3, dsp->getDelayModel()),   juce::dontSendNotification);
+            if (fbFilterTypeSel) fbFilterTypeSel->setSelectedIndex (juce::jlimit (0, 2, dsp->getFBFilterType()), juce::dontSendNotification);
+            if (tempoTog)        tempoTog->btn().setToggleState (dsp->syncBPM,                  juce::dontSendNotification);
+            if (keepPitchTog)    keepPitchTog->btn().setToggleState (dsp->getKeepPitch(),       juce::dontSendNotification);
+            if (fbDistTypeTog)   fbDistTypeTog->btn().setToggleState (dsp->getFBDistType() == 1, juce::dontSendNotification);
+        };
+        addAndMakeVisible(*slapbackBtn);
+
         // Row 1 bindings (9 knobs)
         r1knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setDelayMs           ((float)r1knobs[0]->slider.getValue()); };
         r1knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setFeedbackLevel     ((float)r1knobs[1]->slider.getValue()); };
@@ -1136,6 +1570,7 @@ struct DelayPanel : public EditorPanelBase
         r2knobs[9] ->slider.onValueChange = [dsp,this]{ dsp->setStereoSpread      ((float)r2knobs[9] ->slider.getValue()); };
         r2knobs[10]->slider.onValueChange = [dsp,this]{ dsp->setOffsetPan         ((float)r2knobs[10]->slider.getValue()); };
         r2knobs[11]->slider.onValueChange = [dsp,this]{ dsp->setSmoothing         ((float)r2knobs[11]->slider.getValue()); };
+        r2knobs[12]->slider.onValueChange = [dsp,this]{ dsp->setDuckAmount        ((float)r2knobs[12]->slider.getValue()); };
 
         // A9 slider sync from DSP state + clamp cleanup (via public getters).
         // delayMs is already a public field on DelayDSP; the rest need getters.
@@ -1160,6 +1595,7 @@ struct DelayPanel : public EditorPanelBase
         r2knobs[9] ->slider.setValue(dsp->getStereoSpread(),      juce::sendNotificationSync);
         r2knobs[10]->slider.setValue(dsp->getOffsetPan(),         juce::sendNotificationSync);
         r2knobs[11]->slider.setValue(dsp->getSmoothing(),         juce::sendNotificationSync);
+        r2knobs[12]->slider.setValue(dsp->getDuckAmount(),        juce::sendNotificationSync);
 
         // A6 -- apply initial Time-knob lockout state
         applyTimeLockout(dsp->syncBPM);
@@ -1194,9 +1630,6 @@ struct DelayPanel : public EditorPanelBase
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
         b.removeFromRight(4);
 
-        // Jewel: top-right of content area
-        mJewel.setBounds(b.getRight() - 14, b.getY(), 12, 12);
-
         auto r1 = b.removeFromTop(b.getHeight() / 2);
         auto r2 = b;
 
@@ -1205,6 +1638,9 @@ struct DelayPanel : public EditorPanelBase
         if (modelSel) modelSel->setBounds(mc.reduced(2));
         auto fbc = r1.removeFromRight(66); r1.removeFromRight(2);
         if (fbFilterTypeSel) fbFilterTypeSel->setBounds(fbc.reduced(2));
+        // H-8: Slapback preset button between FB filter selector and the knob row.
+        auto slap = r1.removeFromRight(46); r1.removeFromRight(2);
+        if (slapbackBtn) slapbackBtn->setBounds(slap.reduced(2, 4));
         layoutKnobsH(r1, r1knobs);
 
         // Row 2 right: SyncDiv chicken-head | BPM on/off | Pitch on/off | FBDistType named
@@ -1218,6 +1654,123 @@ struct DelayPanel : public EditorPanelBase
         auto sd = r2.removeFromRight(66); r2.removeFromRight(2);
         if (syncDivSel) syncDivSel->setBounds(sd.reduced(2));
         layoutKnobsH(r2, r2knobs);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VocalDoublerDelayPanel — H-8 (2026-05-02)
+// Renders when DelayDSP::Type == VocalDoubler.  Single row of 6 knobs:
+// Time L | Time R | Detune | Width | Rate | Mix.  Shares the TimeLAF look
+// with the Echo DelayPanel so switching Mode keeps a coherent visual family.
+// No feedback / lo-fi / mod LFO / diffusion -- VocalDoubler is fundamentally
+// a different effect (dual short detuned taps, no FB).  Slapback button
+// flips back to Echo Type and writes the slapback preset.
+// ─────────────────────────────────────────────────────────────────────────────
+struct VocalDoublerDelayPanel : public EditorPanelBase
+{
+    std::vector<std::unique_ptr<VKnob>> knobsRow;
+    std::unique_ptr<juce::TextButton>    slapBtn;
+
+    std::vector<VKnob*> getExtraKnobs() override
+    {
+        std::vector<VKnob*> v;
+        for (auto& k : knobsRow) if (k) v.push_back (k.get());
+        return v;
+    }
+
+    explicit VocalDoublerDelayPanel (DelayDSP* dsp)
+    {
+        disableVU();
+        setLookAndFeel (&TimeLAF::get());
+
+        buildKnobs (*this, knobsRow, {
+            { "Time L",  5.f,   50.f, 13.f, 0.1f,
+                "5..50 ms.  Left-tap delay time.  Short delays (10-20 ms) sound like "
+                "doubling; longer (25-50 ms) drift toward slapback territory." },
+            { "Time R",  5.f,   50.f, 22.f, 0.1f,
+                "5..50 ms.  Right-tap delay time.  Set different from Time L for the "
+                "classic stereo-doubled vocal effect (e.g. 13 ms L / 22 ms R)." },
+            { "Detune",  0.f,  100.f, 50.f, 1.0f,
+                "0..100 %.  Drift LFO depth -- adds slow random pitch wobble per tap so the "
+                "two virtual takes drift apart like a real double-tracked vocal.  0 = no drift." },
+            { "Width",   0.f,  100.f, 80.f, 1.0f,
+                "0..100 %.  Stereo spread of the two taps.  0 = both taps centred (mono "
+                "doubling); 100 = full L/R split (wide stereo doubling)." },
+            { "Rate",    0.1f,   2.f,  0.7f, 0.05f,
+                "0.1..2 Hz.  Drift LFO rate.  Slow (0.3-0.7 Hz) feels like natural performer "
+                "drift; faster reads as chorus-y wobble." },
+            { "Mix",     0.f,  100.f, 50.f, 1.0f,
+                "0..100 %.  Wet/dry blend.  100 = all doubled signal; 0 = bypass-equivalent.  "
+                "30-60 % is typical for sit-behind doubling." },
+            { "Duck",    0.f,  100.f,  0.f, 1.0f,
+                "0..100 %.  Sidechain ducking amount.  Pick a SC source on the slot header "
+                "(typically the lead vocal) -- when the source crosses threshold, the doubled "
+                "signal is attenuated so it sits behind the lead.  0 = disabled.  No SC source "
+                "= self-ducks on the doubler's own input." },
+        });
+
+        knobsRow[0]->slider.onValueChange = [dsp,this]{ dsp->setDoubleTimeLMs ((float) knobsRow[0]->slider.getValue()); };
+        knobsRow[1]->slider.onValueChange = [dsp,this]{ dsp->setDoubleTimeRMs ((float) knobsRow[1]->slider.getValue()); };
+        knobsRow[2]->slider.onValueChange = [dsp,this]{ dsp->setDoubleDetune  ((float) knobsRow[2]->slider.getValue()); };
+        knobsRow[3]->slider.onValueChange = [dsp,this]{ dsp->setDoubleWidth   ((float) knobsRow[3]->slider.getValue()); };
+        knobsRow[4]->slider.onValueChange = [dsp,this]{ dsp->setDoubleRate    ((float) knobsRow[4]->slider.getValue()); };
+        knobsRow[5]->slider.onValueChange = [dsp,this]{ dsp->setWetOut        ((float) knobsRow[5]->slider.getValue() * 0.01f); };
+        knobsRow[6]->slider.onValueChange = [dsp,this]{ dsp->setDuckAmount    ((float) knobsRow[6]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobsRow[0]->slider.setValue (dsp->getDoubleTimeLMs(), juce::sendNotificationSync);
+            knobsRow[1]->slider.setValue (dsp->getDoubleTimeRMs(), juce::sendNotificationSync);
+            knobsRow[2]->slider.setValue (dsp->getDoubleDetune(),  juce::sendNotificationSync);
+            knobsRow[3]->slider.setValue (dsp->getDoubleWidth(),   juce::sendNotificationSync);
+            knobsRow[4]->slider.setValue (dsp->getDoubleRate(),    juce::sendNotificationSync);
+            knobsRow[5]->slider.setValue (dsp->getWetOut() * 100.0f, juce::sendNotificationSync);
+            knobsRow[6]->slider.setValue (dsp->getDuckAmount(),    juce::sendNotificationSync);
+        }
+
+        // H-8: Slapback preset button (matches the one on the Echo DelayPanel).
+        // presetSlapback() flips Type back to Echo + writes the preset values;
+        // we then ask the parent SlotComponent to re-mount so the Echo panel
+        // shows the loaded settings.  Without the re-mount the user would be
+        // stuck with VocalDoubler knobs while the DSP is now in Echo mode.
+        slapBtn = std::make_unique<juce::TextButton>("Slap");
+        slapBtn->setTooltip ("Slapback preset -- single short delay, low feedback, "
+                              "low wet.  Switches to Echo Type and loads the classic "
+                              "vintage-vocal effect (50s rockabilly / John Lennon "
+                              "doubling).  Replaces current settings.");
+        slapBtn->onClick = [this, dsp]
+        {
+            if (! dsp) return;
+            dsp->presetSlapback();
+            if (auto* sc = findParentComponentOfClass<SlotComponent>())
+                sc->remountEditor();
+        };
+        addAndMakeVisible (*slapBtn);
+    }
+
+    ~VocalDoublerDelayPanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        TimeLAF::paintPultecPanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+
+        // DBFS meter + output knob on the right (shared base-class layout).
+        if (dbfsOut)         dbfsOut->setBounds (b.removeFromRight (24).reduced (1, 2));
+        b.removeFromRight (2);
+        if (outputVolKnob)   outputVolKnob->setBounds (b.removeFromRight (kKnobSz)
+                                                          .withSizeKeepingCentre (kKnobSz, kKnobSz));
+        b.removeFromRight (4);
+
+        // Slap button on the right between Output and the knob row.
+        if (slapBtn) slapBtn->setBounds (b.removeFromRight (46).reduced (2, 14));
+        b.removeFromRight (4);
+
+        layoutKnobsH (b, knobsRow, kKnobSz);
     }
 };
 
@@ -2003,6 +2556,148 @@ struct TapePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TapeSatPanel — H-10 (2026-05-02): Saturation umbrella's Tape sub-panel.
+// Mirrors TapePanel's knob layout + chicken-heads exactly but binds to
+// SaturationDSP's setTape* setters instead of the legacy TapeDSP class.
+// SlotComponent's Mode dropdown picks Tube / Console / Tape; this panel
+// is constructed when Tape is the active type.
+// ─────────────────────────────────────────────────────────────────────────────
+struct TapeSatPanel : public EditorPanelBase
+{
+    std::vector<std::unique_ptr<VKnob>>  r1knobs, r2knobs;
+    std::unique_ptr<ChickenHeadSelector> tapeSpeedSel;   // C4
+    std::unique_ptr<ChickenHeadSelector> osSel;          // C2
+
+    std::vector<VKnob*> getExtraKnobs() override
+    {
+        std::vector<VKnob*> v;
+        for (auto& k : r1knobs) if (k) v.push_back(k.get());
+        for (auto& k : r2knobs) if (k) v.push_back(k.get());
+        return v;
+    }
+
+    explicit TapeSatPanel(SaturationDSP* dsp)
+    {
+        setLookAndFeel(&HarmonicLAF::get());
+
+        // Row 1: shaper character + input + hiss (matches TapePanel exactly)
+        buildKnobs(*this, r1knobs, {
+            { "Vibe",    0.f,  1.f,   0.5f, 0.01f, "Shaper asymmetry driver - k = 0.3 * Vibe in the sigmoid" },
+            { "Hyst",    0.f,  2.f,   1.0f, 0.01f, "Hysteresis amount (C1) - 0 = no tape memory, 1 = default, 2 = strong memory" },
+            { "Bias",    0.f, 10.f,   5.0f, 0.1f,  "Tape bias (C5) - 5 = neutral (zero DC offset); extremes inject even harmonics" },
+            { "InGain",  0.f,  4.f,   1.0f, 0.01f, "Input gain (linear)" },
+            { "Hiss",    0.f,  1.f,   0.0f, 0.01f, "Hiss level (pink-filtered + 200 Hz HPF, independent L/R) - default 0; raise to taste" },
+        });
+
+        // Row 2: wow/flutter + pre/de-emphasis shelves
+        buildKnobs(*this, r2knobs, {
+            { "WowHz",   0.1f,  5.f,   0.5f, 0.05f, "Wow LFO rate (Hz)" },
+            { "WowDp",   0.f,   1.f,   0.0f, 0.01f, "Wow depth (slow motor drift) - default 0 so tape starts clean; raise to taste" },
+            { "FlutHz",  1.f,  15.f,   5.0f, 0.1f,  "Flutter LFO rate (Hz) - capstan friction shimmer" },
+            { "FlutDp",  0.f,   1.f,   0.0f, 0.01f, "Flutter depth (fast modulation) - default 0 so tape starts clean; raise to taste" },
+            { "PreShf", -12.f, 12.f,   0.0f, 0.1f,  "Pre-emphasis shelf @ 5 kHz (dB). Default 0 (flat); boost = more high-freq harmonics into shaper" },
+            { "DeShf",  -12.f, 12.f,   0.0f, 0.1f,  "De-emphasis shelf @ 4 kHz (dB). Default 0 (flat); cut = tame high harmonics after shaper" },
+        });
+
+        // Tape speed chicken-head
+        tapeSpeedSel = std::make_unique<ChickenHeadSelector>();
+        tapeSpeedSel->setOptions({
+            { "7.5",  "7.5 ips", "7.5 ips cassette speed - slowest, squishiest, strongest hysteresis memory" },
+            { "15",   "15 ips",  "15 ips pro reel-to-reel - balanced character (default)" },
+            { "30",   "30 ips",  "30 ips mastering speed - fastest, cleanest, minimal hysteresis" },
+        });
+        tapeSpeedSel->setBodyTooltip("Tape speed - affects hysteresis memory time constant");
+        {
+            const float ts = dsp->getTapeSpeed();
+            const int idx = (ts < 0.25f) ? 0 : (ts < 0.75f) ? 1 : 2;
+            tapeSpeedSel->setSelectedIndex(idx, juce::dontSendNotification);
+        }
+        tapeSpeedSel->onChange = [dsp](int idx){
+            static constexpr float kTapeSpeedValues[3] = { 0.0f, 0.5f, 1.0f };
+            dsp->setTapeSpeed(kTapeSpeedValues[juce::jlimit(0, 2, idx)]);
+        };
+        addAndMakeVisible(*tapeSpeedSel);
+
+        // Oversampling factor chicken-head -- shared with the rest of Saturation
+        osSel = std::make_unique<ChickenHeadSelector>();
+        osSel->setOptions({
+            { "2x",  "2x OS",  "2x oversampling - lowest CPU, some alias from shaper at high drive" },
+            { "4x",  "4x OS",  "4x oversampling (default) - balanced quality vs CPU" },
+            { "8x",  "8x OS",  "8x oversampling - cleaner high-drive character, more CPU" },
+            { "16x", "16x OS", "16x oversampling - maximum alias suppression" },
+        });
+        osSel->setBodyTooltip("Oversampling factor (shared by Tube/Console/Tape) around shaper + hysteresis");
+        osSel->setSelectedIndex(juce::jlimit(0, 3, dsp->getTapeOsLog2() - 1),
+                                juce::dontSendNotification);
+        osSel->onChange = [dsp](int idx){ dsp->setOversamplingFactor(juce::jlimit(1, 4, idx + 1)); };
+        addAndMakeVisible(*osSel);
+
+        // Row 1 knob bindings -- call setTape* on SaturationDSP
+        r1knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setTapeVibe       ((float)r1knobs[0]->slider.getValue()); };
+        r1knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setTapeHystAmount ((float)r1knobs[1]->slider.getValue()); };
+        r1knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setTapeBias       ((float)r1knobs[2]->slider.getValue()); };
+        r1knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setTapeInputGain  ((float)r1knobs[3]->slider.getValue()); };
+        r1knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setTapeHiss       ((float)r1knobs[4]->slider.getValue()); };
+
+        // Row 2 knob bindings
+        r2knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setTapeWowRate      ((float)r2knobs[0]->slider.getValue()); };
+        r2knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setTapeWowDepth     ((float)r2knobs[1]->slider.getValue()); };
+        r2knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setTapeFlutterRate  ((float)r2knobs[2]->slider.getValue()); };
+        r2knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setTapeFlutterDepth ((float)r2knobs[3]->slider.getValue()); };
+        r2knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setTapePreShelfDb   ((float)r2knobs[4]->slider.getValue()); };
+        r2knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setTapeDeShelfDb    ((float)r2knobs[5]->slider.getValue()); };
+
+        // Sync sliders to DSP state.
+        r1knobs[0]->slider.setValue (dsp->mTapeVibe,         juce::sendNotificationSync);
+        r1knobs[1]->slider.setValue (dsp->mTapeHystAmount,   juce::sendNotificationSync);
+        r1knobs[2]->slider.setValue (dsp->mTapeBias,         juce::sendNotificationSync);
+        r1knobs[3]->slider.setValue (dsp->mTapeInputGain,    juce::sendNotificationSync);
+        r1knobs[4]->slider.setValue (dsp->mTapeHiss,         juce::sendNotificationSync);
+        r2knobs[0]->slider.setValue (dsp->mTapeWowRate,      juce::sendNotificationSync);
+        r2knobs[1]->slider.setValue (dsp->mTapeWowDepth,     juce::sendNotificationSync);
+        r2knobs[2]->slider.setValue (dsp->mTapeFlutterRate,  juce::sendNotificationSync);
+        r2knobs[3]->slider.setValue (dsp->mTapeFlutterDepth, juce::sendNotificationSync);
+        r2knobs[4]->slider.setValue (dsp->mTapePreShelfDb,   juce::sendNotificationSync);
+        r2knobs[5]->slider.setValue (dsp->mTapeDeShelfDb,    juce::sendNotificationSync);
+    }
+
+    ~TapeSatPanel() override
+    {
+        setLookAndFeel(nullptr);
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        HarmonicLAF::paintHammeritePanel(g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced(4, 2);
+
+        // Meter strips
+        if (vuIn) vuIn->setBounds(b.removeFromLeft(120).reduced(1, 2));
+        dbfsOut      ->setBounds(b.removeFromRight(32).reduced(1, 2));
+        b.removeFromRight(2);
+        outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
+        b.removeFromRight(4);
+
+        auto r1 = b.removeFromTop(b.getHeight() / 2);
+        auto r2 = b;
+
+        // Row 1 right: OS chicken-head | Tape Speed chicken-head
+        auto osSlot = r1.removeFromRight(60); r1.removeFromRight(2);
+        if (osSel) osSel->setBounds(osSlot.reduced(2));
+        auto tsSlot = r1.removeFromRight(62); r1.removeFromRight(2);
+        if (tapeSpeedSel) tapeSpeedSel->setBounds(tsSlot.reduced(2));
+        layoutKnobsH(r1, r1knobs);
+
+        // Row 2: knobs only
+        layoutKnobsH(r2, r2knobs);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // LimiterPanel (basic, functional — polished Limiter.txt UI is a separate task)
 // Row 1: InGain | Ceil | SatTh | SatCv
 // Row 2: Atk   | Rel  | Ahead | RelCv   + Auto toggle
@@ -2163,6 +2858,165 @@ struct LimiterPanel : public EditorPanelBase,
 };
 
 // ── Factory ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ConsoleSaturationPanel — H-7 (2026-05-01)
+// Minimalist preamp/console layout: Drive + Tone + Mix + Output.  Selected
+// when SaturationDSP's mSatType == Console.  Tube-only fields (TubeType
+// chickenhead, BassRelief, Sensitivity, Transformer) are not exposed here --
+// Console mode interprets the underlying DSP differently and these knobs
+// would be confusing.
+// ─────────────────────────────────────────────────────────────────────────────
+struct ConsoleSaturationPanel : public EditorPanelBase
+{
+    SaturationDSP* mDsp { nullptr };
+    std::unique_ptr<ChickenHeadSelector> harmModeSel;   // Keep Low / Normal / Keep High
+
+    explicit ConsoleSaturationPanel (SaturationDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+
+        buildKnobs (*this, knobs, {
+            { "Drive",  0.f,  10.f,  3.f,   0.05f, "Preamp drive (gentler than Tube tanh)" },
+            { "Color",  0.f,  10.f,  3.f,   0.05f, "Transformer 2nd-harmonic colour" },
+            { "Mix",    0.f, 100.f, 70.f,   0.5f,  "Wet / dry blend (%)" },
+            { "Output",-18.f, 18.f,  0.f,   0.5f,  "Output gain (dB)" },
+        });
+
+        knobs[0]->slider.onValueChange = [dsp,this]{ if (dsp) dsp->setFlowers ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this]{ if (dsp) dsp->setDabs    ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this]{ if (dsp) dsp->setWet     ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this]{ if (dsp) dsp->setOut     ((float) knobs[3]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mFlowers, juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mDabs,    juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mWet,     juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->mOut,     juce::sendNotificationSync);
+        }
+
+        // H-7: Keep Low / Normal / Keep High harmonic-routing chickenhead.
+        harmModeSel = std::make_unique<ChickenHeadSelector>();
+        harmModeSel->setOptions ({
+            { "Lo",  "Keep Low",  "Saturate highs only -- bass passes through dry" },
+            { "Nrm", "Normal",    "Full-band saturation (default)" },
+            { "Hi",  "Keep High", "Saturate lows only -- highs pass through dry" },
+        });
+        harmModeSel->setBodyTooltip ("Harmonics routing");
+        if (dsp)
+            harmModeSel->setSelectedIndex ((int) dsp->mHarmonicsMode, juce::dontSendNotification);
+        harmModeSel->onChange = [dsp] (int idx)
+        {
+            if (dsp) dsp->setHarmonicsMode (idx);
+        };
+        addAndMakeVisible (*harmModeSel);
+    }
+
+    ~ConsoleSaturationPanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        // H-7 (2026-05-01): match the existing SaturationPanel's Hammerite
+        // panel paint so Console + Tube look like siblings, not strangers.
+        HarmonicLAF::paintHammeritePanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+
+        // VU meter on the left (matches existing SaturationPanel).
+        if (vuIn) vuIn->setBounds (b.removeFromLeft (120).reduced (1, 2));
+        b.removeFromLeft (4);
+
+        dbfsOut->setBounds (b.removeFromRight (24).reduced (1, 2));
+        b.removeFromRight (2);
+        outputVolKnob->setBounds (b.removeFromRight (kKnobSz).withSizeKeepingCentre (kKnobSz, kKnobSz));
+        b.removeFromRight (4);
+
+        // Harmonics-mode chickenhead on the right (before the meters strip).
+        if (harmModeSel)
+        {
+            auto col = b.removeFromRight (66);
+            harmModeSel->setBounds (col.reduced (2));
+            b.removeFromRight (4);
+        }
+
+        layoutKnobsH (b, knobs, kKnobSz);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DeEsserPanel — H-3/H-6 (2026-05-01)
+// ─────────────────────────────────────────────────────────────────────────────
+struct DeEsserPanel : public EditorPanelBase
+{
+    ~DeEsserPanel() override { setLookAndFeel (nullptr); }
+
+    explicit DeEsserPanel (DeEsserDSP* dsp)
+    {
+        setLookAndFeel (&DynamicsLAF::get());
+
+        // 8 knobs in a single horizontal row matching the Compressor / Limiter
+        // visual vocabulary.  Mode / Listen / M-S toggles deferred to a polish
+        // pass — defaults are preset-safe (Wide / Off / Stereo).
+        buildKnobs (*this, knobs, {
+            { "Freq",   4000.f, 12000.f, 6500.f, 10.f,  "Sidechain HPF cutoff (Hz). 4-12 kHz typical sibilance band" },
+            { "Q",      0.5f,    4.0f,   1.4f,  0.05f, "Sidechain HPF Q. Higher = narrower detection band" },
+            { "Thresh",-40.f,    0.f,  -24.f,   0.5f,  "Threshold (dB). Detector triggers above this level" },
+            { "Range", -20.f,    0.f,  -12.f,   0.5f,  "Max reduction (dB). Caps how much the de-esser can pull down" },
+            { "Atk",    0.1f,   30.f,   1.f,   0.1f,  "Attack (ms)" },
+            { "Rel",   10.f,   500.f,  80.f,   1.f,   "Release (ms)" },
+            { "Look",   0.f,     5.f,   0.f,   0.05f, "Lookahead (ms). Catches consonant before it lands" },
+            { "Mix",    0.f,     1.f,   1.f,   0.01f, "Wet / dry blend" },
+        });
+
+        // DynamicsLAF "modernAnalog" knob variant -- matches Compressor +
+        // Transient Shaper panels for visual consistency across all dynamics-
+        // family effects.
+        for (auto& k : knobs)
+            k->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
+
+        knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setFrequencyHz ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setQ           ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setThresholdDb ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setRangeDb     ((float) knobs[3]->slider.getValue()); };
+        knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setAttackMs    ((float) knobs[4]->slider.getValue()); };
+        knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setReleaseMs   ((float) knobs[5]->slider.getValue()); };
+        knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setLookaheadMs ((float) knobs[6]->slider.getValue()); };
+        knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setMix         ((float) knobs[7]->slider.getValue()); };
+
+        // Sync slider visual state from current DSP state.
+        knobs[0]->slider.setValue (dsp->mFreqHz,      juce::sendNotificationSync);
+        knobs[1]->slider.setValue (dsp->mQ,           juce::sendNotificationSync);
+        knobs[2]->slider.setValue (dsp->mThresholdDb, juce::sendNotificationSync);
+        knobs[3]->slider.setValue (dsp->mRangeDb,     juce::sendNotificationSync);
+        knobs[4]->slider.setValue (dsp->mAttackMs,    juce::sendNotificationSync);
+        knobs[5]->slider.setValue (dsp->mReleaseMs,   juce::sendNotificationSync);
+        knobs[6]->slider.setValue (dsp->mLookaheadMs, juce::sendNotificationSync);
+        knobs[7]->slider.setValue (dsp->mMix,         juce::sendNotificationSync);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        // LA-2A cream/wood panel paint (same as Compressor + Transient Shaper).
+        DynamicsLAF::paintLA2APanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+
+        // Right-edge meter + output-vol knob (matches Compressor / Limiter).
+        dbfsOut      ->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (2);
+        outputVolKnob->setBounds (b.removeFromRight (kKnobSz).withSizeKeepingCentre (kKnobSz, kKnobSz));
+        b.removeFromRight (4);
+
+        layoutKnobsH (b, knobs, kKnobSz);
+    }
+};
+
 std::unique_ptr<juce::Component> createEffectEditor(DSPBase* effect, EffectType type)
 {
     if (!effect) return nullptr;
@@ -2170,15 +3024,48 @@ std::unique_ptr<juce::Component> createEffectEditor(DSPBase* effect, EffectType 
     switch (type)
     {
         case EffectType::Compressor:
-            return std::make_unique<CompressorPanel>    (static_cast<CompressorDSP*>    (effect));
+        {
+            // H-7 (2026-05-01): dispatch to the right inline panel based on
+            // the DSP's character mode.  Modern = full SSL-ish layout; FET +
+            // Opto get authentic 1176 / LA-2A minimal layouts.
+            auto* c = static_cast<CompressorDSP*> (effect);
+            switch (c->mType)
+            {
+                case CompressorDSP::Type::FET:    return std::make_unique<FETCompressorPanel>  (c);
+                case CompressorDSP::Type::Opto:   return std::make_unique<OptoCompressorPanel> (c);
+                case CompressorDSP::Type::Modern: default: return std::make_unique<CompressorPanel> (c);
+            }
+        }
         case EffectType::Reverb:
             return std::make_unique<ReverbPanel>        (static_cast<ReverbDSP*>        (effect));
         case EffectType::Chorus:
             return std::make_unique<ChorusPanel>        (static_cast<ChorusDSP*>        (effect));
         case EffectType::Delay:
-            return std::make_unique<DelayPanel>         (static_cast<DelayDSP*>         (effect));
+        {
+            // H-8 (2026-05-02): Echo Type = full DelayPanel; VocalDoubler Type
+            // = minimal dual-tap layout (Time L / R / Detune / Width / Rate / Mix).
+            auto* d = static_cast<DelayDSP*> (effect);
+            return (d->getType() == (int) DelayDSP::Type::VocalDoubler)
+                ? std::unique_ptr<juce::Component> (new VocalDoublerDelayPanel (d))
+                : std::unique_ptr<juce::Component> (new DelayPanel             (d));
+        }
         case EffectType::Saturation:
-            return std::make_unique<SaturationPanel>    (static_cast<SaturationDSP*>    (effect));
+        {
+            // H-7: Tube = full layout; Console = minimalist Drive/Color/Mix/Out.
+            // H-10 (2026-05-02): Tape routes to TapeSatPanel -- mirrors the
+            // legacy TapePanel layout but binds to SaturationDSP::setTape*.
+            auto* s = static_cast<SaturationDSP*> (effect);
+            switch (s->mSatType)
+            {
+                case SaturationDSP::Type::Console:
+                    return std::unique_ptr<juce::Component> (new ConsoleSaturationPanel (s));
+                case SaturationDSP::Type::Tape:
+                    return std::unique_ptr<juce::Component> (new TapeSatPanel           (s));
+                case SaturationDSP::Type::Tube:
+                default:
+                    return std::unique_ptr<juce::Component> (new SaturationPanel        (s));
+            }
+        }
         case EffectType::Flanger:
             return std::make_unique<FlangerPanel>       (static_cast<FlangerDSP*>       (effect));
         case EffectType::Overdrive:
@@ -2188,9 +3075,15 @@ std::unique_ptr<juce::Component> createEffectEditor(DSPBase* effect, EffectType 
         case EffectType::TransientShaper:
             return std::make_unique<TransientShaperPanel>(static_cast<TransientShaperDSP*>(effect));
         case EffectType::Tape:
-            return std::make_unique<TapePanel>          (static_cast<TapeDSP*>          (effect));
+            // H-10 cutover (2026-05-02): EffectType::Tape is now an alias
+            // for SaturationDSP+Type::Tape; the slot's effect ptr is a
+            // SaturationDSP, not a TapeDSP.  Construct the Saturation-bound
+            // TapeSatPanel so knob bindings hit setTape* on the right object.
+            return std::make_unique<TapeSatPanel>       (static_cast<SaturationDSP*>    (effect));
         case EffectType::Limiter:
             return std::make_unique<LimiterPanel>       (static_cast<LimiterDSP*>       (effect));
+        case EffectType::DeEsser:
+            return std::make_unique<DeEsserPanel>       (static_cast<DeEsserDSP*>       (effect));
         default:
             return nullptr;
     }

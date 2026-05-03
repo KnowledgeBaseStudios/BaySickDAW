@@ -10,6 +10,7 @@
 #include "DSP/TransientShaperDSP.h"
 #include "DSP/TapeDSP.h"
 #include "DSP/LimiterDSP.h"
+#include "DSP/DeEsserDSP.h"
 
 // ── Ctor ──────────────────────────────────────────────────────────────────────
 EffectRack::EffectRack()
@@ -30,21 +31,73 @@ std::unique_ptr<DSPBase> EffectRack::createEffect(EffectType type)
         case EffectType::Overdrive:       return std::make_unique<OverdriveDSP>();
         case EffectType::Phaser:          return std::make_unique<PhaserDSP>();
         case EffectType::TransientShaper: return std::make_unique<TransientShaperDSP>();
-        case EffectType::Tape:            return std::make_unique<TapeDSP>();
+        case EffectType::Tape:
+        {
+            // H-10 cutover (2026-05-02): EffectType::Tape is now an ALIAS that
+            // constructs a SaturationDSP with mSatType pre-set to Type::Tape.
+            // Old projects load via this path; the Saturation umbrella runs
+            // a bit-exact port of the legacy TapeDSP body.  TapeDSP class
+            // stays in the source tree as an emergency-rollback safety net
+            // but is no longer instantiated by the rack.
+            auto sat = std::make_unique<SaturationDSP>();
+            sat->setSatType ((int) SaturationDSP::Type::Tape);
+            return sat;
+        }
         case EffectType::Limiter:         return std::make_unique<LimiterDSP>();
+        case EffectType::DeEsser:         return std::make_unique<DeEsserDSP>();
+
+        // I-1 (2026-05-02): BaySickPedals 18-module spec entries.  DSP classes
+        // land in I-5..I-13; factory returns nullptr until then so empty slots
+        // are skipped on the audio path.  Picker entries can still be saved
+        // and persisted as enum values without crashing.
+        case EffectType::BluesDriveStyle:
+        case EffectType::OverdriveStyle:
+        case EffectType::DistortionStyle:
+        case EffectType::FuzzStyle:
+        case EffectType::NoiseGateStyle:
+        case EffectType::HighGainStyle:
+        case EffectType::TunerStyle:
+        case EffectType::AcousticPreampStyle:
+        case EffectType::GraphicEQStyle:
+        case EffectType::SynthStyle:
+        case EffectType::OctaveStyle:
+        case EffectType::WahStyle:
+        case EffectType::BassGraphicEQStyle:
+        case EffectType::BassCompressorStyle:
+        case EffectType::BassDriverStyle:
+        case EffectType::BassOverdriveStyle:
+        case EffectType::FurmanEQStyle:
+            return nullptr;
+
         default:                          return nullptr;
     }
 }
 
 // ── Slot management ───────────────────────────────────────────────────────────
-// All mutators take mSlotsLock so the audio thread (which try-locks in
-// process()) can skip one block rather than race with an effect destructor.
+// I-0a (2026-05-02): single-slot mutations (loadEffect/clearSlot/setSlotBypassed)
+// publish via per-slot swapPending atomic and DO NOT take mSlotsLock --- the
+// audio thread is wait-free on these paths.  mLoadLock serializes message-
+// thread mutations against each other.  Multi-slot mutations (moveSlot*,
+// packSlotsToTop, setStateInformation) still take mSlotsLock because their
+// atomicity spans multiple slots; audio's process() try-locks to skip during
+// those rare rearrangements.
+
+// Internal helper: spin-wait briefly for a previously-parked pending DSP to
+// be consumed by the audio thread before overwriting `pending`.  Mirrors the
+// 1-second budget in BaySickNAMIRProcessor::loadNamModel.  In practice the
+// wait is 0 iterations because audio runs every ~10ms and the consumer flag
+// clears at the top of each process().
+static void waitForPendingDrain (std::atomic<bool>& flag) noexcept
+{
+    for (int spin = 0; spin < 1000 && flag.load (std::memory_order_acquire); ++spin)
+        juce::Thread::sleep (1);
+}
+
 void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidOverride)
 {
     if (slot < 0 || slot >= kNumSlots) return;
 
-    // Prepare the new effect OUTSIDE the lock — prepare can allocate and is
-    // potentially slow; we don't want to stall the audio thread waiting.
+    // Build + prepare the new DSP OUTSIDE every lock (prepare can allocate).
     auto effect = createEffect(type);
     if (effect && mSampleRate > 0.0)
         effect->prepare(mSampleRate, mMaxBlock);
@@ -60,64 +113,114 @@ void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidO
         ? uuidOverride
         : juce::Uuid().toString();
 
-    // Old-effect tear-down + pointer swap must be atomic w.r.t. process().
-    // Move the outgoing effect OUT of the slot under the lock, then release
-    // the lock before destructing it — the destructor itself can be slow
-    // (Limiter tears down juce::dsp::Oversampling filter state) and must not
-    // hold the audio thread.
-    std::unique_ptr<DSPBase> outgoing;
+    const juce::ScopedLock lk (mLoadLock);
+
+    // If a prior swap is still pending, drain it on the message thread under
+    // mSlotsLock instead of waiting for audio to consume the flag.  Audio
+    // could be inactive (project load before audio device starts) in which
+    // case waiting forever is wrong; or rapidly active in which case taking
+    // mSlotsLock briefly is cheap.  Either way, drained-by-message-thread
+    // is correct -- the per-slot drain logic is identical to audio's.
+    if (mSlots[slot].swapPending.load (std::memory_order_acquire))
     {
-        const juce::SpinLock::ScopedLockType lk (mSlotsLock);
-        outgoing                = std::move (mSlots[slot].effect);
-        mSlots[slot].effect     = std::move (effect);
-        mSlots[slot].type       = type;
-        // D.1: preserve the slot's bypass flag across hot-swap so a user-bypassed
-        // slot stays bypassed when the user swaps in a different effect type
-        // (the bypass is a slot property, not an effect property).
-        mSlots[slot].uuid       = newUuid;
+        const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
+        if (mSlots[slot].swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (mSlots[slot].active, mSlots[slot].pending);
+            mSlots[slot].swapPending.store (false, std::memory_order_release);
+        }
     }
-    // outgoing destructs here, outside the lock — safe, audio thread can
-    // already see the new pointer on its next block.
+
+    // Move the new DSP into pending.  Any previously-parked DSP (the OLD
+    // active that was demoted by the most recent swap) destructs HERE on the
+    // message thread -- never on audio.
+    mSlots[slot].pending = std::move (effect);
+    mSlots[slot].type    = type;
+    mSlots[slot].uuid    = newUuid;
+
+    // Publish: audio's next process() will std::swap active <-> pending.
+    mSlots[slot].swapPending.store (true, std::memory_order_release);
 }
 
 void EffectRack::clearSlot(int slot)
 {
     if (slot < 0 || slot >= kNumSlots) return;
 
-    std::unique_ptr<DSPBase> outgoing;
+    const juce::ScopedLock lk (mLoadLock);
+
+    // If a prior swap is still pending, drain it on the message thread
+    // (avoids the 1-second sleep when audio isn't running -- e.g., during
+    // project load).  Holds mSlotsLock briefly to lock out any audio block
+    // that's currently doing its own drain.
+    if (mSlots[slot].swapPending.load (std::memory_order_acquire))
     {
-        const juce::SpinLock::ScopedLockType lk (mSlotsLock);
-        outgoing                = std::move (mSlots[slot].effect);
-        mSlots[slot].type       = EffectType::None;
-        mSlots[slot].bypassed   = false;
-        mSlots[slot].uuid       = {};   // empty slot = no automation identity
+        const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
+        if (mSlots[slot].swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (mSlots[slot].active, mSlots[slot].pending);
+            mSlots[slot].swapPending.store (false, std::memory_order_release);
+        }
     }
-    // outgoing destructs here, outside the lock
+
+    // Park nullptr in pending; audio swaps active->pending so the OLD
+    // active sits in pending until the NEXT loadEffect on this slot
+    // destructs it on the message thread.
+    mSlots[slot].pending.reset();
+    mSlots[slot].type     = EffectType::None;
+    mSlots[slot].bypassed.store (false, std::memory_order_relaxed);
+    mSlots[slot].uuid     = {};
+    mSlots[slot].swapPending.store (true, std::memory_order_release);
 }
 
 void EffectRack::moveSlotUp(int slot)
 {
     if (slot <= 0 || slot >= kNumSlots) return;
-    const juce::SpinLock::ScopedLockType lk (mSlotsLock);
-    std::swap(mSlots[slot], mSlots[slot - 1]);
+    const juce::ScopedLock          lkMsg   (mLoadLock);
+    const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
+    // Drain any pending swaps on the affected slots so the std::swap below
+    // moves the LATEST state.  Equivalent to what audio would have done at
+    // the top of process(); doing it here under mSlotsLock guarantees audio
+    // can't observe a partial multi-slot rearrangement.
+    auto drain = [] (Slot& s) noexcept
+    {
+        if (s.swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (s.active, s.pending);
+            s.swapPending.store (false, std::memory_order_release);
+        }
+    };
+    drain (mSlots[slot]);
+    drain (mSlots[slot - 1]);
+    std::swap (mSlots[slot], mSlots[slot - 1]);
 }
 
 void EffectRack::moveSlotDown(int slot)
 {
     if (slot < 0 || slot >= kNumSlots - 1) return;
-    const juce::SpinLock::ScopedLockType lk (mSlotsLock);
-    std::swap(mSlots[slot], mSlots[slot + 1]);
+    const juce::ScopedLock          lkMsg   (mLoadLock);
+    const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
+    auto drain = [] (Slot& s) noexcept
+    {
+        if (s.swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (s.active, s.pending);
+            s.swapPending.store (false, std::memory_order_release);
+        }
+    };
+    drain (mSlots[slot]);
+    drain (mSlots[slot + 1]);
+    std::swap (mSlots[slot], mSlots[slot + 1]);
 }
 
 void EffectRack::setSlotBypassed(int slot, bool bypass)
 {
     if (slot < 0 || slot >= kNumSlots) return;
-    // Bool writes are safe without lock; the effect pointer only has
-    // its `bypassed` field set, not swapped/destroyed.
-    const juce::SpinLock::ScopedLockType lk (mSlotsLock);
-    mSlots[slot].bypassed = bypass;
-    if (mSlots[slot].effect)
-        mSlots[slot].effect->bypassed = bypass;
+    // Atomic store -- audio reads relaxed in process().  No spinlock; no
+    // mLoadLock either since this is a single atomic write.  EffectRack short-
+    // circuits before calling effect->process() based on Slot.bypassed, so
+    // the DSP's own bypassed flag (DSPBase::bypassed) is no longer the source
+    // of truth for rack-owned effects -- we don't sync it.
+    mSlots[slot].bypassed.store (bypass, std::memory_order_relaxed);
 }
 
 void EffectRack::packSlotsToTop()
@@ -127,7 +230,19 @@ void EffectRack::packSlotsToTop()
     std::vector<Slot> leaving;
 
     {
-        const juce::SpinLock::ScopedLockType lk (mSlotsLock);
+        const juce::ScopedLock          lkMsg   (mLoadLock);
+        const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
+
+        // Drain pending swaps on every slot first so we pack the LATEST
+        // state, not stale active pointers.
+        for (auto& s : mSlots)
+        {
+            if (s.swapPending.load (std::memory_order_acquire))
+            {
+                std::swap (s.active, s.pending);
+                s.swapPending.store (false, std::memory_order_release);
+            }
+        }
 
         std::vector<Slot> filled;
         filled.reserve(kNumSlots);
@@ -144,10 +259,13 @@ void EffectRack::packSlotsToTop()
             else
             {
                 // Defer destructor until after lock drops.
-                if (mSlots[i].effect) leaving.push_back (std::move (mSlots[i]));
-                mSlots[i].effect.reset();
+                if (mSlots[i].active || mSlots[i].pending)
+                    leaving.push_back (std::move (mSlots[i]));
+                mSlots[i].active.reset();
+                mSlots[i].pending.reset();
+                mSlots[i].swapPending.store (false, std::memory_order_relaxed);
                 mSlots[i].type     = EffectType::None;
-                mSlots[i].bypassed = false;
+                mSlots[i].bypassed.store (false, std::memory_order_relaxed);
                 mSlots[i].uuid     = {};
             }
         }
@@ -160,72 +278,102 @@ void EffectRack::prepare(double sampleRate, int maxBlockSize)
 {
     // prepare() is called from the message thread (or audio init path before
     // processing begins). Lock to block any process() that might be racing
-    // with startup init.
-    const juce::SpinLock::ScopedLockType lk (mSlotsLock);
+    // with startup init.  Multi-slot path -- holds mSlotsLock.
+    const juce::ScopedLock          lkMsg   (mLoadLock);
+    const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
 
     mSampleRate = sampleRate;
     mMaxBlock   = maxBlockSize;
 
+    // Drain pending swaps so prepare() touches the latest active DSPs.
     for (auto& s : mSlots)
-        if (s.effect) s.effect->prepare(sampleRate, maxBlockSize);
+    {
+        if (s.swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (s.active, s.pending);
+            s.swapPending.store (false, std::memory_order_release);
+        }
+    }
+
+    for (auto& s : mSlots)
+        if (s.active) s.active->prepare(sampleRate, maxBlockSize);
 }
 
 void EffectRack::process(juce::AudioBuffer<float>& buffer)
 {
     if (mRackBypassed) return;
 
-    // Try-lock against slot mutations. If the message thread is currently
-    // loading/clearing/moving/packing a slot, skip this block — one silent
-    // block is far better than a use-after-free when an effect destructor
-    // runs concurrently with process().
+    // Try-lock against multi-slot mutations only (moveSlot/pack/setStateInfo/
+    // prepare/reset/setHostBPM).  Single-slot loads/clears/bypass changes do
+    // NOT take this lock -- they publish via per-slot swapPending and audio
+    // is wait-free on those paths.  If a multi-slot op is currently in
+    // flight, skip this block (rare, user-UI-driven).
     const juce::SpinLock::ScopedTryLockType tryLk (mSlotsLock);
     if (! tryLk.isLocked()) return;
+
+    // Per-slot wait-free swap-pending drain (mirrors NAM/IR pattern).  Audio
+    // thread is the publisher of `active`; message thread only ever writes
+    // `pending`.  After std::swap, `pending` holds the OLD active DSP -- it
+    // stays alive until the NEXT message-thread loadEffect on this slot
+    // overwrites `pending` (and destructs the old DSP on the message thread).
+    for (auto& s : mSlots)
+    {
+        if (s.swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (s.active, s.pending);
+            s.swapPending.store (false, std::memory_order_release);
+        }
+    }
 
     int numCh      = buffer.getNumChannels();
     int numSamples = buffer.getNumSamples();
 
-    // Per-block meter ballistic constants:
-    //   VU RMS  → 300 ms integration (ANSI C16.5-1942 spec window). Smooths
-    //             per-block RMS snapshots into a stable target for the VU
-    //             meter's spring-damper. Without this, VU needle "jumps" on
-    //             percussive signals because each block's RMS varies.
-    //   DBFS    → 30 dB/sec peak hold-and-decay. Audio blocks at ~86/sec but
-    //             UI polls at 30 Hz — previously 2 of 3 transient peaks got
-    //             overwritten before the UI read them.
-    const float blockDurSec   = (mSampleRate > 0.0)
-                                 ? (float) numSamples / (float) mSampleRate
-                                 : (float) numSamples / 44100.0f;
-    const float vuAlpha       = 1.0f - std::exp(-blockDurSec / 0.300f);
-    const float peakDecayDb   = 30.0f * blockDurSec;
+    // 2026-05-02: meter ballistics + decay live entirely on the UI thread.
+    // Audio computes per-block input-RMS + output-peak and CAS-maxes them
+    // into the slot's atomic.  SlotComponent's vblank handler exchanges-and-
+    // resets each frame to start a fresh "max within UI frame" window.  No
+    // more audio-side 300 ms RMS smoothing or 30 dB/sec peak decay --
+    // VUMeter's spring-damper does the visual smoothing, DBFSMeter's UI
+    // ballistics do the visual decay.
+    auto casMaxFloat = [] (std::atomic<float>& a, float v) noexcept
+    {
+        float cur = a.load (std::memory_order_relaxed);
+        while (cur < v
+               && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+        {}
+    };
 
     for (auto& s : mSlots)
     {
-        if (!s.effect || s.bypassed) continue;
+        DSPBase* eff = s.active.get();
+        if (!eff || s.bypassed.load (std::memory_order_relaxed)) continue;
 
-        // Input RMS (smoothed — 300 ms time constant drives VU ballistic)
-        float sumSq = 0.f;
+        // Input peak (linear amplitude) -- the VU meter expects rms01 by
+        // name but treating per-block PEAK as the input gives more useful
+        // visual response than RMS (a transient pinging the meter is what
+        // the user wants to see).  Spring-damper still smooths the needle
+        // motion so the visual looks like classic VU ballistics.
+        float inPeak = 0.f;
         for (int ch = 0; ch < numCh; ++ch) {
             const float* d = buffer.getReadPointer(ch);
-            for (int i = 0; i < numSamples; ++i) sumSq += d[i] * d[i];
+            for (int i = 0; i < numSamples; ++i)
+                inPeak = juce::jmax(inPeak, std::abs(d[i]));
         }
-        const float rmsThisBlock = std::sqrt(sumSq / (float)juce::jmax(1, numCh * numSamples));
-        const float prevRms = s.inputLevelRms.load(std::memory_order_relaxed);
-        s.inputLevelRms.store(prevRms + vuAlpha * (rmsThisBlock - prevRms),
-                              std::memory_order_relaxed);
+        casMaxFloat (s.inputLevelRmsRun, juce::jlimit (0.f, 1.f, inPeak));
 
         // C.4 Phase 1 (2026-04-30): push SC context to this slot's effect
         // BEFORE processing so SC consumers see the right array + pick.
         if (mScBufs != nullptr)
-            s.effect->setSidechainBuffers(mScBufs, mScCount);
-        s.effect->setSidechainPick(s.scPick);
+            eff->setSidechainBuffers(mScBufs, mScCount);
+        eff->setSidechainPick(s.scPick);
 
-        s.effect->process(buffer);
+        eff->process(buffer);
 
         // Per-slot output gain
         if (s.outputGainDb != 0.f)
             buffer.applyGain(std::pow(10.f, s.outputGainDb / 20.f));
 
-        // Output peak dBFS (hold-and-decay so transients aren't missed)
+        // Output peak dBFS -- CAS-max only; UI exchange-and-resets each vblank.
         float peak = 0.f;
         for (int ch = 0; ch < numCh; ++ch) {
             const float* d = buffer.getReadPointer(ch);
@@ -233,10 +381,7 @@ void EffectRack::process(juce::AudioBuffer<float>& buffer)
                 peak = juce::jmax(peak, std::abs(d[i]));
         }
         const float peakDbThisBlock = peak > 1e-6f ? 20.f * std::log10(peak) : -96.f;
-        const float prevPeakDb      = s.outputLevelDb.load(std::memory_order_relaxed);
-        const float decayedPeakDb   = juce::jmax(-96.0f, prevPeakDb - peakDecayDb);
-        s.outputLevelDb.store(juce::jmax(peakDbThisBlock, decayedPeakDb),
-                              std::memory_order_relaxed);
+        casMaxFloat (s.outputLevelDbRun, peakDbThisBlock);
     }
 }
 
@@ -277,19 +422,70 @@ float EffectRack::getSlotOutputLevel(int slot) const
         ? mSlots[slot].outputLevelDb.load(std::memory_order_relaxed) : -96.f;
 }
 
+// 2026-05-02: drain variants exchange the SNAPSHOT atomics (audio promotes
+// Run -> Snap at end of each audio block via promoteSlotPeakSnapshots()).
+// UI calls these once per vblank from SlotComponent::onVBlank.
+float EffectRack::drainSlotInputLevel(int slot)
+{
+    if (slot < 0 || slot >= kNumSlots) return 0.f;
+    return mSlots[slot].inputLevelRms.exchange(0.f, std::memory_order_relaxed);
+}
+float EffectRack::drainSlotOutputLevel(int slot)
+{
+    if (slot < 0 || slot >= kNumSlots) return -96.f;
+    return mSlots[slot].outputLevelDb.exchange(-96.f, std::memory_order_relaxed);
+}
+
+// 2026-05-02: end-of-audio-block promotion of every slot's Run atomics into
+// the UI-visible Snapshot atomics.  Single drain-and-CAS-max per slot per
+// channel.  Called once per audio block from VibeGraph::promoteAllInsert
+// PeakSnapshots() after walking every rack.
+void EffectRack::promoteSlotPeakSnapshots()
+{
+    auto promoteOne = [] (std::atomic<float>& runMax, std::atomic<float>& snap, float resetTo) noexcept
+    {
+        const float v = runMax.exchange (resetTo, std::memory_order_relaxed);
+        if (v == resetTo) return;
+        float cur = snap.load (std::memory_order_relaxed);
+        while (cur < v && ! snap.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+        {}
+    };
+    for (auto& s : mSlots)
+    {
+        promoteOne (s.inputLevelRmsRun, s.inputLevelRms, 0.f);
+        promoteOne (s.outputLevelDbRun, s.outputLevelDb, -96.f);
+    }
+}
+
 void EffectRack::reset()
 {
-    const juce::SpinLock::ScopedLockType lk (mSlotsLock);
+    const juce::ScopedLock          lkMsg   (mLoadLock);
+    const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
     for (auto& s : mSlots)
-        if (s.effect) s.effect->reset();
+    {
+        if (s.swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (s.active, s.pending);
+            s.swapPending.store (false, std::memory_order_release);
+        }
+        if (s.active) s.active->reset();
+    }
 }
 
 void EffectRack::setHostBPM(double bpm)
 {
     mHostBPM = bpm;
-    const juce::SpinLock::ScopedLockType lk (mSlotsLock);
+    const juce::ScopedLock          lkMsg   (mLoadLock);
+    const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
     for (auto& s : mSlots)
-        if (s.effect) s.effect->setHostBPM(bpm);
+    {
+        if (s.swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (s.active, s.pending);
+            s.swapPending.store (false, std::memory_order_release);
+        }
+        if (s.active) s.active->setHostBPM(bpm);
+    }
 }
 
 // ── PDC ───────────────────────────────────────────────────────────────────────
@@ -298,8 +494,8 @@ int EffectRack::getTotalLatencySamples() const
     if (mRackBypassed) return 0;
     int total = 0;
     for (const auto& s : mSlots)
-        if (s.effect && !s.bypassed)
-            total += s.effect->getLatencySamples();
+        if (s.active && ! s.bypassed.load (std::memory_order_relaxed))
+            total += s.active->getLatencySamples();
     return total;
 }
 
@@ -311,12 +507,18 @@ void EffectRack::getStateInformation(juce::MemoryBlock& dest)
     // APVTS param.  XML dual-storage was overwritten on every load by the
     // APVTS listener, so the XML half was dead weight.  Removed.
 
+    // I-0a: Capture state from `pending` if a swap is pending (audio hasn't
+    // promoted it yet but the user-visible "current" effect is the pending
+    // one).  Otherwise read from `active`.
     for (int i = 0; i < kNumSlots; ++i)
     {
+        const bool swapPending = mSlots[i].swapPending.load (std::memory_order_acquire);
+        DSPBase* eff = swapPending ? mSlots[i].pending.get() : mSlots[i].active.get();
+
         juce::ValueTree slotTree("Slot");
-        slotTree.setProperty("index",    i,                              nullptr);
-        slotTree.setProperty("type",     (int)mSlots[i].type,            nullptr);
-        slotTree.setProperty("bypassed", mSlots[i].bypassed,             nullptr);
+        slotTree.setProperty("index",    i,                                                       nullptr);
+        slotTree.setProperty("type",     (int)mSlots[i].type,                                     nullptr);
+        slotTree.setProperty("bypassed", mSlots[i].bypassed.load (std::memory_order_relaxed),     nullptr);
         // 2026-04-30: per-slot output Vol knob (post-effect gain in dB).
         // Was missing from save — every project load reset every slot's
         // Vol knob to 0 dB.  Range -24..+12 dB per EditorPanelBase.
@@ -329,10 +531,10 @@ void EffectRack::getStateInformation(juce::MemoryBlock& dest)
         // C.4 Phase 1: per-slot SC pick (-1 = no SC, 0..3 = strip SC line).
         slotTree.setProperty("scPick",   mSlots[i].scPick,               nullptr);
 
-        if (mSlots[i].effect)
+        if (eff)
         {
             juce::MemoryBlock slotData;
-            mSlots[i].effect->getStateInformation(slotData);
+            eff->getStateInformation(slotData);
             slotTree.setProperty("data",
                 juce::Base64::toBase64(slotData.getData(), slotData.getSize()), nullptr);
         }
@@ -376,20 +578,60 @@ void EffectRack::setStateInformation(const void* data, int sz)
 
             if (type != EffectType::None)
             {
-                loadEffect(slotIdx, type, uuid);
+                // I-0a fix (2026-05-02): we cannot use loadEffect followed by
+                // a write to pending -- audio could run between the two and
+                // swap pending into active (leaving pending null) before we
+                // get to write the state blob.  Instead, build the new DSP
+                // locally, apply the saved state to it on this thread, THEN
+                // park it atomically via the same swap-pending publish that
+                // loadEffect uses.  Audio sees a fully-restored DSP on the
+                // first swap.
+                auto effect = createEffect(type);
+                if (effect)
+                {
+                    if (mSampleRate > 0.0)
+                        effect->prepare(mSampleRate, mMaxBlock);
+                    effect->setHostBPM(mHostBPM);
+
+                    juce::String b64 = child.getProperty("data", "");
+                    if (b64.isNotEmpty())
+                    {
+                        juce::MemoryOutputStream mos;
+                        juce::Base64::convertFromBase64(mos, b64);
+                        juce::MemoryBlock decoded = mos.getMemoryBlock();
+                        effect->setStateInformation(
+                            decoded.getData(), (int)decoded.getSize());
+                    }
+                }
+
+                juce::String newUuid = uuid.isNotEmpty()
+                    ? uuid
+                    : juce::Uuid().toString();
+
+                // Bulk-restore path: install the fully-prepared DSP into
+                // `active` directly under mSlotsLock (audio thread try-locks
+                // and skips the block).  Avoids the swap-pending drain wait
+                // during project load when the audio thread isn't yet producing
+                // blocks to consume the flag -- which previously caused a
+                // 1-second-per-slot hang adding up to minutes for a full project.
+                {
+                    const juce::ScopedLock                lkMsg   (mLoadLock);
+                    const juce::SpinLock::ScopedLockType  lkAudio (mSlotsLock);
+
+                    if (mSlots[slotIdx].swapPending.load (std::memory_order_acquire))
+                    {
+                        std::swap (mSlots[slotIdx].active, mSlots[slotIdx].pending);
+                        mSlots[slotIdx].swapPending.store (false, std::memory_order_release);
+                    }
+                    mSlots[slotIdx].active = std::move (effect);
+                    mSlots[slotIdx].pending.reset();
+                    mSlots[slotIdx].type   = type;
+                    mSlots[slotIdx].uuid   = newUuid;
+                }
+
                 setSlotBypassed(slotIdx, byp);
                 setSlotOutputGain(slotIdx, vol);
                 setSlotSidechainPick(slotIdx, scPick);
-
-                juce::String b64 = child.getProperty("data", "");
-                if (b64.isNotEmpty() && mSlots[slotIdx].effect)
-                {
-                    juce::MemoryOutputStream mos;
-                    juce::Base64::convertFromBase64(mos, b64);
-                    juce::MemoryBlock decoded = mos.getMemoryBlock();
-                    mSlots[slotIdx].effect->setStateInformation(
-                        decoded.getData(), (int)decoded.getSize());
-                }
             }
             else
             {

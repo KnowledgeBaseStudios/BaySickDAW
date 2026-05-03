@@ -1,6 +1,8 @@
 #include "StandaloneApp.h"
 #include "StandaloneEditor.h"
 #include "BaySickAssets.h"   // BaySickDAWLogo_png / _pngSize (logo for splash + window icon)
+#include "EffectPresetIO.h"  // H-9 prep: seed factory presets at launch
+#include "../VibeGraph.h"    // MeterLatencyComp::recomputeFromDevice (2026-05-02)
 
 // ── VibeSynthWindow ───────────────────────────────────────────────────────────
 // Subclass so the OS close button actually quits the application.
@@ -138,7 +140,15 @@ void VibesynthStandaloneApp::changeListenerCallback(juce::ChangeBroadcaster*)
         // compensation stays accurate after a device change.
         if (mDeviceManager && mProcessor)
             if (auto* dev = mDeviceManager->getCurrentAudioDevice())
+            {
                 mProcessor->setDeviceOutputLatency (dev->getOutputLatencyInSamples());
+                // 2026-05-02: refresh meter latency-comp block count too so
+                // the user's hamburger toggle stays accurate across device
+                // changes (different driver -> different latency).
+                MeterLatencyComp::recomputeFromDevice (dev->getCurrentSampleRate(),
+                                                         dev->getCurrentBufferSizeSamples(),
+                                                         dev->getOutputLatencyInSamples());
+            }
     });
 }
 
@@ -164,6 +174,16 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
         splash->deleteAfterDelay (juce::RelativeTime::seconds (4.0),
                                    /*removeOnMouseClick=*/true);
     }
+
+    // H-9 prep (2026-05-02): seed effect-rack factory presets on every launch.
+    // Idempotent -- only writes preset XML files that aren't already on disk,
+    // so re-runs are nearly free.  Replaces any user-deleted factory presets.
+    // H-10 cutover (2026-05-02): migrate legacy Tape preset folder into
+    // Saturation BEFORE seeding -- Tape's My Presets get moved over and
+    // its stale Factory dir gets wiped, so the new Saturation/Factory entries
+    // ("Tape Vintage" etc) seed cleanly.
+    EffectPresetIO::migrateTapeFolderToSaturation();
+    EffectPresetIO::seedFactoryPresets();
 
     mProcessor    = std::make_unique<VibeSynthProcessor>();
     mPlayHead     = std::make_unique<StandalonePlayHead>();
@@ -196,7 +216,14 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
 
     // Push initial device output latency into the processor.
     if (auto* dev = mDeviceManager->getCurrentAudioDevice())
+    {
         mProcessor->setDeviceOutputLatency (dev->getOutputLatencyInSamples());
+        // 2026-05-02: also update the meter latency-compensation block count
+        // so vsync-locked meters can align with the audio you actually hear.
+        MeterLatencyComp::recomputeFromDevice (dev->getCurrentSampleRate(),
+                                                 dev->getCurrentBufferSizeSamples(),
+                                                 dev->getOutputLatencyInSamples());
+    }
 
     // Auto-save whenever the user changes device settings via the dialog.
     mDeviceManager->addChangeListener(this);

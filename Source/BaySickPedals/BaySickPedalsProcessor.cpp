@@ -1,0 +1,485 @@
+#include "BaySickPedalsProcessor.h"
+
+namespace
+{
+    // Per-slot APVTS bypass param IDs.  IDs are stable -- changing them breaks
+    // saved projects.
+    juce::String slotBypassId (int slot)
+    {
+        return "bsp_slot" + juce::String (slot) + "_bypass";
+    }
+
+    constexpr const char* kPedalboardRootTag = "Pedalboard";
+    constexpr const char* kStateRootTag      = "BaySickPedalsState";
+    constexpr int         kStateVersion      = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Construction
+// ─────────────────────────────────────────────────────────────────────────────
+BaySickPedalsProcessor::BaySickPedalsProcessor()
+    : juce::AudioProcessor (BusesProperties()
+                                .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
+                                .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+      apvts (*this, nullptr, "BaySickPedalsState", createLayout())
+{
+    // Defaults: slot 0 = Tuner, slot 7 = Graphic EQ (option 1 of 3).  Both
+    // are placeholder enum values until I-13 / I-12 ship the real DSPs --
+    // EffectRack::createEffect returns nullptr for them and the audio path
+    // simply skips empty slots.
+    mSlots[kSlotTuner].type = EffectType::TunerStyle;
+    mSlots[kSlotEQ   ].type = EffectType::GraphicEQStyle;
+    // Slots 1-6 default to None (empty).
+}
+
+BaySickPedalsProcessor::~BaySickPedalsProcessor() = default;
+
+juce::AudioProcessorValueTreeState::ParameterLayout
+BaySickPedalsProcessor::createLayout()
+{
+    juce::AudioProcessorValueTreeState::ParameterLayout layout;
+    using B = juce::AudioParameterBool;
+    using PID = juce::ParameterID;
+
+    for (int s = 0; s < kNumSlots; ++s)
+    {
+        layout.add (std::make_unique<B> (
+            PID (slotBypassId (s), 1),
+            "Slot " + juce::String (s) + " Bypass",
+            false));
+    }
+    return layout;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slot policy
+// ─────────────────────────────────────────────────────────────────────────────
+bool BaySickPedalsProcessor::isEffectAllowedInSlot (int slot,
+                                                    EffectType type) const noexcept
+{
+    if (slot < 0 || slot >= kNumSlots) return false;
+
+    if (slot == kSlotTuner)
+        return type == EffectType::None || type == EffectType::TunerStyle;
+
+    if (slot == kSlotEQ)
+        return type == EffectType::None
+            || type == EffectType::GraphicEQStyle
+            || type == EffectType::BassGraphicEQStyle
+            || type == EffectType::FurmanEQStyle;
+
+    // Slots 1-6: any type EXCEPT the slot-locked types (Tuner / 3 EQs).
+    switch (type)
+    {
+        case EffectType::TunerStyle:
+        case EffectType::GraphicEQStyle:
+        case EffectType::BassGraphicEQStyle:
+        case EffectType::FurmanEQStyle:
+            return false;
+        default:
+            return true;
+    }
+}
+
+EffectType BaySickPedalsProcessor::getSlotType (int slot) const noexcept
+{
+    return (slot >= 0 && slot < kNumSlots) ? mSlots[slot].type : EffectType::None;
+}
+
+DSPBase* BaySickPedalsProcessor::getSlotEffect (int slot) const noexcept
+{
+    if (slot < 0 || slot >= kNumSlots) return nullptr;
+    const auto& s = mSlots[slot];
+    if (s.swapPending.load (std::memory_order_acquire))
+        return s.pending.get();
+    return s.active.get();
+}
+
+bool BaySickPedalsProcessor::isSlotBypassed (int slot) const noexcept
+{
+    if (slot < 0 || slot >= kNumSlots) return false;
+    if (auto* p = apvts.getRawParameterValue (slotBypassId (slot)))
+        return p->load() > 0.5f;
+    return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slot mutation -- wait-free swap-pending pattern (mirrors EffectRack).
+// ─────────────────────────────────────────────────────────────────────────────
+void BaySickPedalsProcessor::publishPending (int slot,
+                                             std::unique_ptr<DSPBase> effect,
+                                             EffectType type)
+{
+    // Caller holds mLoadLock.  Drain any pending swap on this slot on the
+    // message thread (avoids audio-not-running deadlock during project load).
+    if (mSlots[slot].swapPending.load (std::memory_order_acquire))
+    {
+        const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
+        if (mSlots[slot].swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (mSlots[slot].active, mSlots[slot].pending);
+            mSlots[slot].swapPending.store (false, std::memory_order_release);
+        }
+    }
+
+    mSlots[slot].pending = std::move (effect);
+    mSlots[slot].type    = type;
+    mSlots[slot].swapPending.store (true, std::memory_order_release);
+}
+
+bool BaySickPedalsProcessor::loadEffect (int slot, EffectType type)
+{
+    if (slot < 0 || slot >= kNumSlots)         return false;
+    if (! isEffectAllowedInSlot (slot, type))  return false;
+
+    auto effect = EffectRack::createEffect (type);
+    if (effect && mSampleRate > 0.0)
+        effect->prepare (mSampleRate, mMaxBlock);
+
+    const juce::ScopedLock lk (mLoadLock);
+    publishPending (slot, std::move (effect), type);
+    return true;
+}
+
+bool BaySickPedalsProcessor::clearSlot (int slot)
+{
+    if (slot < 0 || slot >= kNumSlots) return false;
+    // Slot 0 / 7 cannot be cleared -- they always hold their locked type.
+    if (isSlotLocked (slot))           return false;
+
+    const juce::ScopedLock lk (mLoadLock);
+    publishPending (slot, nullptr, EffectType::None);
+    return true;
+}
+
+bool BaySickPedalsProcessor::moveSlot (int from, int to)
+{
+    // Only slots 1..kNumSlots-2 (i.e., 1-6) can move.  Locked slots stay put.
+    const int firstFree = kSlotTuner + 1;
+    const int lastFree  = kSlotEQ - 1;
+    if (from < firstFree || from > lastFree) return false;
+    if (to   < firstFree || to   > lastFree) return false;
+    if (from == to)                          return true;
+
+    const juce::ScopedLock                 lkMsg   (mLoadLock);
+    const juce::SpinLock::ScopedLockType   lkAudio (mSlotsLock);
+
+    auto drain = [] (Slot& s) noexcept
+    {
+        if (s.swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (s.active, s.pending);
+            s.swapPending.store (false, std::memory_order_release);
+        }
+    };
+    drain (mSlots[from]);
+    drain (mSlots[to]);
+
+    // Naive sequential shift: remove `from` and re-insert at `to`.  For
+    // adjacent positions this is identical to a swap; for distant moves it
+    // walks the slots between them.  All under mSlotsLock so audio sees one
+    // coherent layout per block.
+    Slot moving = std::move (mSlots[from]);
+    if (from < to)
+    {
+        for (int i = from; i < to; ++i)
+            mSlots[i] = std::move (mSlots[i + 1]);
+    }
+    else
+    {
+        for (int i = from; i > to; --i)
+            mSlots[i] = std::move (mSlots[i - 1]);
+    }
+    mSlots[to] = std::move (moving);
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio thread
+// ─────────────────────────────────────────────────────────────────────────────
+void BaySickPedalsProcessor::prepareToPlay (double sampleRate, int maxBlock)
+{
+    const juce::ScopedLock                 lkMsg   (mLoadLock);
+    const juce::SpinLock::ScopedLockType   lkAudio (mSlotsLock);
+
+    mSampleRate = sampleRate;
+    mMaxBlock   = maxBlock;
+
+    for (auto& s : mSlots)
+    {
+        if (s.swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (s.active, s.pending);
+            s.swapPending.store (false, std::memory_order_release);
+        }
+        if (s.active) s.active->prepare (sampleRate, maxBlock);
+    }
+}
+
+void BaySickPedalsProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+                                           juce::MidiBuffer&)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    // Try-lock against multi-slot mutations.  Single-slot loads/clears
+    // publish via per-slot swapPending and don't take this lock, so audio is
+    // wait-free for the common path.
+    const juce::SpinLock::ScopedTryLockType tryLk (mSlotsLock);
+    if (! tryLk.isLocked()) return;
+
+    // Drain per-slot pending swaps.
+    for (auto& s : mSlots)
+    {
+        if (s.swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (s.active, s.pending);
+            s.swapPending.store (false, std::memory_order_release);
+        }
+    }
+
+    // Process slots in order: 0 (Tuner) -> 1..6 (user) -> 7 (EQ).
+    for (int i = 0; i < kNumSlots; ++i)
+    {
+        if (isSlotBypassed (i)) continue;
+        if (auto* eff = mSlots[(size_t) i].active.get())
+            eff->process (buffer);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Editor stub -- I-15 ships the real BaySickPedals editor.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+    class BaySickPedalsEditorStub : public juce::AudioProcessorEditor
+    {
+    public:
+        explicit BaySickPedalsEditorStub (BaySickPedalsProcessor& p)
+            : juce::AudioProcessorEditor (&p)
+        {
+            setSize (600, 360);
+        }
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (juce::Colour (0xff181818));
+            g.setColour (juce::Colour (0xffc0c0c0));
+            g.setFont (juce::Font (16.0f, juce::Font::plain));
+            g.drawText (
+                "BaySickPedals processor (rack UI lands in I-15)",
+                getLocalBounds(),
+                juce::Justification::centred,
+                true);
+        }
+    };
+}
+
+juce::AudioProcessorEditor* BaySickPedalsProcessor::createEditor()
+{
+    return new BaySickPedalsEditorStub (*this);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State capture / restore.  Used by both the project XML path
+// (get/setStateInformation) and the standalone Pedalboard preset library
+// (savePedalboardPreset / loadPedalboardPreset).
+// ─────────────────────────────────────────────────────────────────────────────
+juce::ValueTree BaySickPedalsProcessor::captureFullState() const
+{
+    juce::ValueTree state (kStateRootTag);
+    state.setProperty ("version", kStateVersion, nullptr);
+
+    // APVTS (per-slot bypass bools).  state is a live ValueTree that the
+    // listeners are bound to -- we deep-copy via createCopy() so the saved
+    // snapshot doesn't track future changes (and so this method stays const).
+    state.appendChild (apvts.state.createCopy(), nullptr);
+
+    // Per-slot snapshot.
+    juce::ValueTree slotsTree ("Slots");
+    for (int i = 0; i < kNumSlots; ++i)
+    {
+        const auto& s  = mSlots[(size_t) i];
+        const bool sp  = s.swapPending.load (std::memory_order_acquire);
+        DSPBase* eff   = sp ? s.pending.get() : s.active.get();
+
+        juce::ValueTree slotTree ("Slot");
+        slotTree.setProperty ("index", i,                 nullptr);
+        slotTree.setProperty ("type",  (int) s.type,      nullptr);
+        if (eff)
+        {
+            juce::MemoryBlock mb;
+            eff->getStateInformation (mb);
+            if (mb.getSize() > 0)
+                slotTree.setProperty ("data", mb.toBase64Encoding(), nullptr);
+        }
+        slotsTree.appendChild (slotTree, nullptr);
+    }
+    state.appendChild (slotsTree, nullptr);
+    return state;
+}
+
+void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
+{
+    if (! state.isValid() || ! state.hasType (kStateRootTag)) return;
+
+    // APVTS first so per-slot bypass bools restore before slots load (DSPs
+    // don't depend on the bypass param themselves; this just keeps state
+    // consistent before the audio swap).
+    if (auto apvtsState = state.getChildWithName ("BaySickPedalsState");
+        apvtsState.isValid())
+    {
+        apvts.replaceState (apvtsState);
+    }
+
+    auto slotsTree = state.getChildWithName ("Slots");
+    if (! slotsTree.isValid()) return;
+
+    for (int i = 0; i < slotsTree.getNumChildren(); ++i)
+    {
+        auto slotTree = slotsTree.getChild (i);
+        if (! slotTree.hasType ("Slot")) continue;
+
+        const int slotIdx = (int) slotTree.getProperty ("index", -1);
+        if (slotIdx < 0 || slotIdx >= kNumSlots) continue;
+
+        const auto type = (EffectType) (int) slotTree.getProperty ("type", 0);
+
+        // Build the new DSP off-thread (createEffect, prepare, restore state)
+        // BEFORE parking into pending.  Mirrors EffectRack::setStateInformation
+        // pattern from I-0a -- avoids the swap-pending vs blob-write race.
+        std::unique_ptr<DSPBase> effect;
+        if (type != EffectType::None)
+        {
+            effect = EffectRack::createEffect (type);
+            if (effect)
+            {
+                if (mSampleRate > 0.0)
+                    effect->prepare (mSampleRate, mMaxBlock);
+                const juce::String b64 = slotTree.getProperty ("data", "").toString();
+                if (b64.isNotEmpty())
+                {
+                    juce::MemoryOutputStream mos;
+                    juce::Base64::convertFromBase64 (mos, b64);
+                    juce::MemoryBlock decoded = mos.getMemoryBlock();
+                    effect->setStateInformation (decoded.getData(),
+                                                  (int) decoded.getSize());
+                }
+            }
+        }
+
+        // Bulk-restore path: install directly into active under mSlotsLock
+        // (audio try-locks and skips the block).  Same approach as
+        // EffectRack::setStateInformation -- avoids the 1s drain wait when
+        // audio isn't yet producing blocks during project load.
+        const juce::ScopedLock                 lkMsg   (mLoadLock);
+        const juce::SpinLock::ScopedLockType   lkAudio (mSlotsLock);
+
+        if (mSlots[slotIdx].swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (mSlots[slotIdx].active, mSlots[slotIdx].pending);
+            mSlots[slotIdx].swapPending.store (false, std::memory_order_release);
+        }
+        mSlots[slotIdx].active = std::move (effect);
+        mSlots[slotIdx].pending.reset();
+        mSlots[slotIdx].type   = type;
+    }
+}
+
+void BaySickPedalsProcessor::getStateInformation (juce::MemoryBlock& dest)
+{
+    auto state = captureFullState();
+    auto xml = state.createXml();
+    if (xml) juce::AudioProcessor::copyXmlToBinary (*xml, dest);
+}
+
+void BaySickPedalsProcessor::setStateInformation (const void* data, int sz)
+{
+    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    if (! xml) return;
+    auto state = juce::ValueTree::fromXml (*xml);
+    restoreFullState (state);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pedalboard preset library
+// ─────────────────────────────────────────────────────────────────────────────
+juce::File BaySickPedalsProcessor::pedalboardPresetsRoot()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+              .getChildFile ("BaySickDAW")
+              .getChildFile ("Presets")
+              .getChildFile ("Pedalboards");
+}
+
+bool BaySickPedalsProcessor::savePedalboardPreset (const juce::String& name,
+                                                   juce::String& outErr)
+{
+    juce::String safeName = name.trim();
+    if (safeName.isEmpty()) { outErr = "Preset name cannot be empty."; return false; }
+    for (auto c : juce::String ("\\/:*?\"<>|"))
+        safeName = safeName.replace (juce::String::charToString (c), "_");
+
+    auto dir = pedalboardPresetsRoot();
+    if (! dir.createDirectory())
+    {
+        outErr = "Could not create folder: " + dir.getFullPathName();
+        return false;
+    }
+    auto target = dir.getChildFile (safeName + ".xml");
+
+    juce::XmlElement root (kPedalboardRootTag);
+    root.setAttribute ("version", kStateVersion);
+    root.setAttribute ("name",    safeName);
+
+    auto state = captureFullState();
+    if (auto inner = state.createXml())
+        root.addChildElement (inner.release());
+
+    if (! root.writeTo (target, juce::XmlElement::TextFormat()))
+    {
+        outErr = "Could not write preset file: " + target.getFullPathName();
+        return false;
+    }
+    return true;
+}
+
+bool BaySickPedalsProcessor::loadPedalboardPreset (const juce::File& xml,
+                                                   juce::String& outErr)
+{
+    if (! xml.existsAsFile())
+    {
+        outErr = "Preset file does not exist: " + xml.getFullPathName();
+        return false;
+    }
+    auto root = juce::parseXML (xml);
+    if (! root || ! root->hasTagName (kPedalboardRootTag))
+    {
+        outErr = "Preset file is not a Pedalboard preset.";
+        return false;
+    }
+    auto* inner = root->getChildByName (kStateRootTag);
+    if (! inner)
+    {
+        outErr = "Preset file is missing the state payload.";
+        return false;
+    }
+    auto state = juce::ValueTree::fromXml (*inner);
+    if (! state.isValid())
+    {
+        outErr = "Preset file's state payload is invalid.";
+        return false;
+    }
+    restoreFullState (state);
+    return true;
+}
+
+juce::Array<juce::File> BaySickPedalsProcessor::enumeratePedalboardPresets()
+{
+    juce::Array<juce::File> out;
+    auto dir = pedalboardPresetsRoot();
+    if (dir.isDirectory())
+    {
+        dir.findChildFiles (out, juce::File::findFiles, false, "*.xml");
+        out.sort();
+    }
+    return out;
+}

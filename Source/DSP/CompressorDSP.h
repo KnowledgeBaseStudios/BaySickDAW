@@ -6,10 +6,25 @@
 // -- CompressorDSP ------------------------------------------------------------
 // Full-featured stereo compressor with soft knee, parallel mix, sidechain
 // input, look-ahead, peak/RMS detection, and a lock-free GR meter output.
+//
+// Phase H-2 (2026-05-01): Type umbrella adds character modes:
+//   Modern -- existing algorithm bit-exact untouched (default).
+//   FET    -- 1176-inspired: aggressive envelope, asymmetric attack curve,
+//             tanh saturation on the gain-control signal at deep GR.
+//   Opto   -- LA-2A-inspired: blended multi-stage release with program-
+//             dependent memory, soft-knee floor, subtle 2nd-harmonic warmth.
+// Existing presets default to Modern -- audio identical to pre-H-2 behavior.
 // -----------------------------------------------------------------------------
 class CompressorDSP : public DSPBase
 {
 public:
+    enum class Type : int
+    {
+        Modern = 0,   // current algorithm, bit-exact preserved
+        FET    = 1,   // 1176-style nonlinear envelope + GR saturation
+        Opto   = 2    // LA-2A-style multi-stage release + soft knee + cell warmth
+    };
+
     CompressorDSP();
     ~CompressorDSP() override = default;
 
@@ -79,7 +94,12 @@ public:
     // detection.  The buffer is NOT owned by this object.
     void setSidechainBuffer (juce::AudioBuffer<float>* buf);
 
+    // H-2 (2026-05-01): Type umbrella -- switches algorithm character.
+    // 0 = Modern (default, current algo), 1 = FET, 2 = Opto.
+    void setType (int t);
+
     // Public parameter values (read-only externally; use setters to change)
+    Type  mType      { Type::Modern };
     float threshold  { -12.0f };
     float ratio      {   4.0f };
     float attackMs   {  10.0f };
@@ -129,6 +149,16 @@ private:
     float mPeakR       { 0.0f };
     float mPeakAttCoef { 0.0f };   // very fast (~0.1 ms)
     float mPeakRelCoef { 0.0f };   // slower (derived from detectionMs)
+
+    // H-2 -- Opto multi-stage release state.
+    // mOptoHistory tracks recent gain-reduction magnitude over a ~1 sec window
+    // (one-pole running average); higher value -> more weight to the slow
+    // release stage, less to the fast.  This is the "memory effect" that lets
+    // sustained material relax slower than transient material on an LA-2A.
+    float mOptoHistory       { 0.0f };
+    float mOptoHistoryCoef   { 0.0f };   // ~1 sec one-pole, computed in calcCoefs
+    float mOptoFastRelCoef   { 0.0f };   // ~60 ms exp coef
+    float mOptoSlowRelCoef   { 0.0f };   // ~500 ms exp coef
 
     // C2 -- Sidechain HPF biquad state (per channel). Simple TPT highpass.
     juce::dsp::StateVariableTPTFilter<float> mScHpfL, mScHpfR;

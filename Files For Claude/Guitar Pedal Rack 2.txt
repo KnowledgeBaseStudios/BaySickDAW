@@ -1,0 +1,123 @@
+Master C++/JUCE DSP Blueprints: The Complete 18-Module Effects Rack
+This document serves as the comprehensive technical specification and architectural blueprint for generating 18 guitar and bass effect modules within a custom standalone Digital Audio Workstation. Feed this document to Claude to establish the precise DSP flow, class structures, and GUI logic required for the project.
+1. Global Architecture & Environmental Context
+Prompting Instruction for Claude: "Before writing the individual module logic, acknowledge and implement the following global architectural standards:"
+Framework: C++20 and JUCE framework. These are internal modules for a standalone DAW's DSP effects rack, NOT compiled VST/AU plugins. Any references to plugin wrappers should be ignored in favor of internal processor nodes.
+State Management: All parameters must be mapped to juce::AudioProcessorValueTreeState (APVTS) for seamless preset saving and recall.
+Anti-Aliasing: All non-linear processing modules (overdrive, distortion, fuzz) must utilize juce::dsp::Oversampling (minimum 4x) wrapping their respective processBlock functions to prevent digital aliasing.
+GUI Aesthetic: The UI classes must subclass juce::Component and utilize custom juce::LookAndFeel_V4 methods to draw skeuomorphic, professional "hardware-in-a-rack" elements (e.g., concentric knobs, tactile toggle switches, slider detents).
+Output Expectation: Generate structural blueprints, header file declarations, DSP processing loops, and math algorithms. Do not generate full binary configurations or standard JUCE boilerplate unless it specifically pertains to the DSP logic.
+2. Detailed Module Specifications
+Module 1: BD-Style Blues Drive (Asymmetrical Saturation)
+DSP Blueprint: Emulates a discrete op-amp push-pull stage. The core requires an asymmetrical clipping function to mimic tube-like even-order harmonics.
+Clipping Math: Use a modified hyperbolic tangent function with a DC offset prior to the shaper, removed post-shaper. Example: y = tanh(x + 0.2) - 0.19. Implement via juce::dsp::WaveShaper.
+Tone Stack: A passive low-pass filter (Fender style) placed after the clipping stage. Use juce::dsp::IIR::Filter configured as a first-order LPF with a cutoff sweeping from 500Hz to 5kHz.
+UI Controls: Level, Tone, Drive (with a wide gain sweep from clean boost to heavy overdrive).
+Module 2: OD-Style Overdrive (Dual-Stage Symmetrical)
+DSP Blueprint: A dual-stage soft-clipping circuit designed to retain low-end frequencies, avoiding the typical mid-hump of standard overdrives.
+Frequency Split: Split the incoming signal. Path A runs through a high-pass filter (approx 80Hz) into the clipping stage. Path B is a clean blend of the sub-80Hz frequencies, summed back at the output.
+Clipping Math: Symmetrical soft clipping using x / (1 + abs(x)) or a standard tanh(x) function applied iteratively across two cascaded gain blocks.
+UI Controls: Level, Tone, Drive.
+Module 3: DS-Style Distortion (Hard Clipping)
+DSP Blueprint: Aggressive hard-clipping to ground with a pre-distortion treble boost.
+Pre-Emphasis: A high-pass filter shelving boost at around 1kHz prior to the gain stage to tighten the distortion.
+Clipping Math: Hard clipping using std::clamp(x, -threshold, threshold) to completely square off the waveform.
+Tone Stack: A Big Muff-style tilt EQ. Create a parallel network with an LPF (cutoff ~400Hz) and HPF (cutoff ~2kHz). The Tone knob crossfades between these two paths.
+UI Controls: Tone, Level, Dist.
+Module 4: FZ-Style Fuzz (Multi-Mode Waveshaping)
+DSP Blueprint: Non-linear waveshaping utilizing a switch statement to handle three distinct DSP modes.
+Modes: Mode M (Maestro FZ-1A, bias-starved), Mode F (Fuzz Face, warm soft/hard clipping), Mode O (Octavia, full-wave rectification for an upper-octave effect).
+UI Controls: Level, Mode Switch (M/F/O), Fuzz (Drive).
+Module 5: NS-Style Noise Gate (VCA Downward Expander)
+DSP Blueprint: An RMS-based envelope detector driving a gain reduction multiplier.
+Architecture: Requires a sidechain input bus to read the buffer at a clean DI position to calculate the envelope, applying the gain reduction multiplier post-distortion.
+UI Controls: Threshold, Decay, Mode (Reduction/Mute).
+Module 6: CS-Style Compressor (VCA Dynamics)
+DSP Blueprint: A feedforward compressor optimized for high sustain and fast transients.
+Core: Utilize juce::dsp::Compressor. The "Sustain" knob maps inversely to the Threshold while simultaneously increasing makeup gain.
+Tone: Active tilt EQ placed post-compression.
+UI Controls: Level, Tone, Attack, Sustain (Threshold/Ratio macro).
+Module 7: MT-Style High-Gain (Cascading Gyrators)
+DSP Blueprint: Complex cascading hard clipping with an aggressive pre/post EQ network.
+EQ Network: Fixed mid-boost biquad before distortion, fixed severe mid-scoop biquad immediately after clipping stage.
+UI Controls: Level, Dist, High/Low (Concentric Knobs), Middle/Mid-Freq (Concentric Knobs, sweeping 200Hz to 5kHz).
+Module 8: TU-Style Tuner
+DSP Blueprint: Real-time pitch tracking with strict thread-safety.
+Algorithm: Implement the YIN or McLeod Pitch Method (MPM) on a background thread utilizing a lock-free circular buffer.
+UI Controls: Pitch Reference (436-445Hz), Mode (Chromatic, Guitar, Bass), Mute Toggle. Skeuomorphic LED strobe UI.
+Module 9: AD-Style Acoustic Preamp
+DSP Blueprint: Restores body resonance to piezo pickups using lightweight convolution.
+DSP: Use juce::dsp::Convolution loaded with an acoustic guitar body IR. Include a Schroeder reverberator for Ambience and a high-Q band-stop notch filter.
+UI Controls: Ambience, Notch (Feedback frequency rejection), Acoustic Resonance (Dry/Wet blend).
+Module 10: GE-Style Graphic EQ
+DSP Blueprint: A 7-band parallel biquad filter bank.
+Frequencies: Fixed at 100Hz, 200Hz, 400Hz, 800Hz, 1.6kHz, 3.2kHz, 6.4kHz. Constant Q-factor. +/- 15dB gain.
+UI Controls: 8 vertical sliders (7 bands + master output gain) with center detent snap in the GUI.
+Module 11: SY-Style Synthesizer (Polyphonic Guitar Synth)
+DSP Blueprint: Real-time, zero-latency polyphonic synthesis tracking.
+Tracking Math: FFT-based Phase Vocoder approach or a bank of bandpass filters acting as an envelope follower array. Modulates internal juce::dsp::Oscillator classes.
+UI Controls: Type (Lead, Pad, Bass, Seq), Variation (1-11 selector), Tone/Rate (Concentric), Depth (Concentric), Effect Level, Direct Level.
+Module 12: OC-Style Octave (Polyphonic & Vintage Modes)
+DSP Blueprint: Dual-mode octave generation.
+Logic: Vintage Mode uses a software Phase-Locked Loop (PLL) or Schmitt trigger divider. Polyphonic mode uses a Granular Pitch Shifter with a dynamic low-pass crossover to isolate the fundamental bass notes.
+UI Controls: Direct Level, +1 Oct, -1 Oct, -2 Oct / Range (Concentric).
+Module 13: PW-Style Wah (Analog & Rich Modes)
+DSP Blueprint: A highly resonant, sweepable bandpass filter using juce::dsp::StateVariableTPTFilter.
+Logic: Center frequency sweeps logarithmically (~400Hz to 2.2kHz). Rich mode blends a parallel low-pass filter (~200Hz) to retain bass.
+UI Controls: Pedal Position (Expression Input), Range Switch (Vintage/Rich).
+Module 14: GEB-Style Bass Graphic EQ
+DSP Blueprint: 7-band parallel biquad filter bank tuned for bass guitar.
+Frequencies: 50Hz, 120Hz, 400Hz, 500Hz, 800Hz, 4.5kHz, 10kHz. +/- 15dB gain.
+UI Controls: 8 vertical sliders (7 bands + master level) with center detents.
+Module 15: BC-Style Bass Compressor (Multi-Band)
+DSP Blueprint: Intelligent multi-band compression using juce::dsp::LinkwitzRileyFilter to split into 3 bands (Low, Mid, High).
+Logic: Independent compressors per band. Comp knob acts as a macro lowering threshold/increasing ratio across bands.
+UI Controls: Level, Release, Ratio, Comp (Macro), LED Gain Reduction Meter.
+Module 16: BB-Style Bass Driver (Multi-Band Drive)
+DSP Blueprint: Multi-band saturation leaving fundamental bass frequencies clean.
+Logic: 3-band split. Low band bypasses clipping for a clean VCA punch. Mid and High bands use asymmetrical soft-clipping (juce::dsp::WaveShaper).
+UI Controls: Level, Blend (Clean/Drive mix), Low, High, Drive.
+Module 17: ODB-Style Bass Overdrive
+DSP Blueprint: Full-range hard clipping with an active 2-band EQ and heavy dry-blend.
+Logic: Hard clipping via std::clamp. Active Baxandall shelving EQ (Low ~100Hz, High ~3kHz) sits *after* the dry/wet blend.
+UI Controls: Level, EQ (High/Low Concentric), Balance (Clean/Drive), Gain.
+Module 18: EQFH Pro-Style Parametric EQ (Furman PQ-3 Model)
+DSP Blueprint: A faithful DSP recreation of the vintage Furman PQ-3 parametric equalizer, built specifically as an internal module (using state-variable filters) rather than an external VST3.
+Filter Architecture: 3-band fully parametric EQ utilizing juce::dsp::IIR::Filter objects or a juce::dsp::ProcessorChain to model the analog "Gyrator" or State-Variable filter topology.
+Low Band: 25 Hz – 500 Hz.
+Mid Band: 150 Hz – 2.5 kHz.
+High Band: 600 Hz – 10 kHz.
+Gain per Band: +20dB to -infinity.
+Preamp Stage: Must include a high-gain preamp multiplier mimicking the original hardware (+86dB total gain). Wrap this multiplier in a Sigmoid function or juce::dsp::WaveShaper for soft saturation to replicate the analog clipping of the hardware unit when pushed.
+UI Controls:
+- Master Input Volume
+- Low Band: Frequency, Boost/Cut, Bandwidth (Q: 0.1 to 10.0)
+- Mid Band: Frequency, Boost/Cut, Bandwidth (Q: 0.1 to 10.0)
+- High Band: Frequency, Boost/Cut, Bandwidth (Q: 0.1 to 10.0)
+- Global EQ Bypass Switch (keeps preamp saturation active)
+
+
+LAF Group Adds
+
+### 1. Harmonics LAF
+* **BD-Style Blues Drive
+* **OD-Style Overdrive
+* **DS-Style Distortion
+* **MT-Style High-Gain
+* **FZ-Style Fuzz
+* **BB-Style Bass Driver
+* **ODB-Style Bass Overdrive
+* **OC-Style Octave
+
+### 2. Dynamics LAF
+* **CS-Style Compressor
+* **BC-Style Bass Compressor
+* **NS-Style Noise Gate
+
+### 3. Modulation LAF
+* **SY-Style Synth
+* **PW-Style Wah
+
+### 4. Time LAF
+* **AD-Style Acoustic Preamp
+* **All EQ's

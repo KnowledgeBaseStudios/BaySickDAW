@@ -105,5 +105,32 @@ private:
     juce::Label mFullRigHint;
     juce::Label mErrorLabel;
 
+    // ── H-6d Mic Sim + Mic Placement (only visible when editor is taller
+    //    than the standalone 760x340 size -- i.e. when hosted in a Vox/Inst
+    //    sub-tab that gives us extra vertical room).  ─────────────────────────
+    juce::Label   mMicSimSectionLbl;
+    juce::Label   mMicPlacementSectionLbl;
+
+    ChickenHeadSelector mMicSimMode;          // None / Built-in / User IR
+    juce::Label         mMicSimModeLbl;
+    juce::ComboBox      mMicSimModelCombo;    // 10 built-in archetypes
+    juce::Label         mMicSimModelLbl;
+    FilePickerButton    mMicSimUserIrBtn;     // Browse / clear user IR
+    juce::Label         mMicSimUserIrLabel;   // Currently-loaded user IR path
+    VKnob               mMicSimMixKnob;
+    std::unique_ptr<SliderAtt> mMicSimMixAtt;
+
+    ChickenHeadSelector mMicPlacementPolar;   // Omni / Cardioid / Super / Hyper / Fig-8
+    juce::Label         mMicPlacementPolarLbl;
+    VKnob               mMicPlacementDistanceKnob;
+    VKnob               mMicPlacementAngleKnob;
+    VKnob               mMicPlacementMixKnob;
+    std::unique_ptr<SliderAtt> mMicPlacementDistanceAtt, mMicPlacementAngleAtt,
+                                 mMicPlacementMixAtt;
+
+    void browseForMicUserIr();
+    void updateMicSimModeUI();   // updates the model combo + browse btn visibility
+    void updateMicSimModelTooltip();   // refreshes "typical use" tooltip on combo
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickNAMIREditor)
 };

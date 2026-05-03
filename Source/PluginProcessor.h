@@ -211,6 +211,9 @@ public:
     // ── Latency ───────────────────────────────────────────────────────────
     // Device output latency (set by StandaloneApp when device initialises or changes).
     void setDeviceOutputLatency (int samples) { mDeviceOutputLatency.store (samples); }
+    // 2026-05-02: read-only accessor for the meter latency-compensation toggle
+    // (Mixer hamburger menu) -- returns the most recent driver latency in samples.
+    int  getDeviceOutputLatency() const noexcept { return mDeviceOutputLatency.load(); }
     // Total latency = PDC (getLatencySamples) + audio device output latency.
     int  getTotalOutputLatency() const
          { return getLatencySamples() + mDeviceOutputLatency.load(); }
@@ -312,6 +315,37 @@ public:
     std::atomic<float> mInstBus3PeakDbL     { -60.0f };
     std::atomic<float> mInstBus3PeakDbR     { -60.0f };
 
+    // 2026-05-02: running-max companion atomics.  Audio thread CAS-maxes into
+    // these during processBlock; a single end-of-block promotion lifts them
+    // into the UI-visible atomics above.  Result: every meter (every bus,
+    // every audio row) is end-of-block coherent so a UI vblank firing at any
+    // time sees a consistent snapshot across all of them, not "this bus
+    // updated, that one not yet".  Default to -inf so a "no audio writes
+    // this block" case promotes nothing (skip-on-INF inside the promote
+    // helper) and the existing snapshot keeps decaying via UI ballistics.
+    static constexpr float kPeakAtomicNegInf = -std::numeric_limits<float>::infinity();
+    std::atomic<float> mAudioClipsBusPeakDbRun  { kPeakAtomicNegInf };
+    std::atomic<float> mAudioClipsBusPeakDbLRun { kPeakAtomicNegInf };
+    std::atomic<float> mAudioClipsBusPeakDbRRun { kPeakAtomicNegInf };
+    std::atomic<float> mVoxBusPeakDbRun         { kPeakAtomicNegInf };
+    std::atomic<float> mVoxBusPeakDbLRun        { kPeakAtomicNegInf };
+    std::atomic<float> mVoxBusPeakDbRRun        { kPeakAtomicNegInf };
+    std::atomic<float> mInstBusPeakDbRun        { kPeakAtomicNegInf };
+    std::atomic<float> mInstBusPeakDbLRun       { kPeakAtomicNegInf };
+    std::atomic<float> mInstBusPeakDbRRun       { kPeakAtomicNegInf };
+    std::atomic<float> mFxBusPeakDbRun          { kPeakAtomicNegInf };
+    std::atomic<float> mFxBusPeakDbLRun         { kPeakAtomicNegInf };
+    std::atomic<float> mFxBusPeakDbRRun         { kPeakAtomicNegInf };
+    std::atomic<float> mVoxBus2PeakDbRun        { kPeakAtomicNegInf };
+    std::atomic<float> mVoxBus2PeakDbLRun       { kPeakAtomicNegInf };
+    std::atomic<float> mVoxBus2PeakDbRRun       { kPeakAtomicNegInf };
+    std::atomic<float> mInstBus2PeakDbRun       { kPeakAtomicNegInf };
+    std::atomic<float> mInstBus2PeakDbLRun      { kPeakAtomicNegInf };
+    std::atomic<float> mInstBus2PeakDbRRun      { kPeakAtomicNegInf };
+    std::atomic<float> mInstBus3PeakDbRun       { kPeakAtomicNegInf };
+    std::atomic<float> mInstBus3PeakDbLRun      { kPeakAtomicNegInf };
+    std::atomic<float> mInstBus3PeakDbRRun      { kPeakAtomicNegInf };
+
     // ── 1M: Audio DSP load monitoring (audio thread writes, UI timer reads) ──
     // mAudioDspLoad : smoothed fraction of buffer window used by processBlock (0..1)
     // mDspOverload85: true when load has been >85% for >500 ms (voice steal fired)
@@ -359,6 +393,12 @@ public:
     // 2026-04-30: stereo L/R for split DBFSMeter (UI reads via mProcessor).
     std::atomic<float> mAudioRowPeakDbL[kMaxAudioRows];
     std::atomic<float> mAudioRowPeakDbR[kMaxAudioRows];
+    // 2026-05-02: running-max companion atomics for audio rows.  Audio
+    // thread CAS-maxes during processBlock; promotion at end of block lifts
+    // them into the UI-visible atomics above so all meters update coherently.
+    std::atomic<float> mAudioRowPeakDbRun [kMaxAudioRows];
+    std::atomic<float> mAudioRowPeakDbLRun[kMaxAudioRows];
+    std::atomic<float> mAudioRowPeakDbRRun[kMaxAudioRows];
 
     // ── Graph infrastructure (Phase 1A) ───────────────────────────────────────
     VibeGraph mVibeGraph;

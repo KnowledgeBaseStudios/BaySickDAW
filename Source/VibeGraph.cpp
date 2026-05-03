@@ -42,6 +42,90 @@ static std::pair<float, float> bufferPeakDbStereo(const juce::AudioBuffer<float>
              juce::Decibels::gainToDecibels (pR, -60.f) };
 }
 
+// ── Meter-latency-compensation globals (2026-05-02) ──────────────────────────
+// gEnabled is the user's hamburger-menu toggle.  gCompensationBlocks is the
+// number of audio blocks to delay the published peak by (so the visual meter
+// matches the sound the user actually hears, given the audio device's output
+// latency).  Recomputed on toggle change OR audio-device prepare.
+namespace MeterLatencyComp
+{
+    std::atomic<int>  gCompensationBlocks { 0 };
+    std::atomic<bool> gEnabled            { false };
+
+    void recomputeFromDevice (double sampleRate, int blockSize, int latencySamples)
+    {
+        juce::ignoreUnused (sampleRate);
+        if (! gEnabled.load (std::memory_order_relaxed)
+            || blockSize <= 0 || latencySamples <= 0)
+        {
+            gCompensationBlocks.store (0, std::memory_order_relaxed);
+            return;
+        }
+        // Round to nearest block.  Clamp so the compensated read stays inside
+        // the per-node ring buffer (kRingMask = 15 blocks max).
+        const int blocks = juce::jlimit (0, kRingMask,
+                                          (latencySamples + blockSize / 2) / blockSize);
+        gCompensationBlocks.store (blocks, std::memory_order_relaxed);
+    }
+}
+
+// ── Lock-free max-peak publisher (2026-05-02) ────────────────────────────────
+// Replaces the legacy "max + per-block decay" pattern in every bus / insert /
+// master node.  The audio thread:
+//   1. computes the current block's L/R peak in dB,
+//   2. writes it into a small per-node ring buffer (16 entries),
+//   3. reads back from the ring at offset = MeterLatencyComp::gCompensationBlocks
+//      so the published value matches what the user is currently hearing,
+//   4. CAS-loops the latency-compensated peak into the running-max atomics.
+//
+// The CAS loop is the lock-free counterpart to the UI's exchange-and-reset:
+// the UI thread atomically swaps the running-max with -inf each frame to
+// start a fresh "max within frame" window.  Audio's CAS retries safely if
+// it races with that swap, so no peak is lost across the boundary.
+//
+// peakRingL/R are passed in as references so each node owns its own ring
+// (peaks are inherently per-node).  Audio thread is the only writer of the
+// ring; UI thread never reads it directly (only the atomics).
+namespace
+{
+    inline void publishPeakReading (const juce::AudioBuffer<float>& buf,
+                                     std::array<float, MeterLatencyComp::kRingSize>& ringL,
+                                     std::array<float, MeterLatencyComp::kRingSize>& ringR,
+                                     int& writeIdx,
+                                     std::atomic<float>& peakDbL,
+                                     std::atomic<float>& peakDbR,
+                                     std::atomic<float>& peakDbMono) noexcept
+    {
+        const auto [thisL, thisR] = bufferPeakDbStereo (buf);
+        ringL[(size_t) (writeIdx & MeterLatencyComp::kRingMask)] = thisL;
+        ringR[(size_t) (writeIdx & MeterLatencyComp::kRingMask)] = thisR;
+        const int compBlocks =
+            juce::jlimit (0, MeterLatencyComp::kRingMask,
+                           MeterLatencyComp::gCompensationBlocks.load (std::memory_order_relaxed));
+        const int rIdx = (writeIdx - compBlocks) & MeterLatencyComp::kRingMask;
+        const float dispL = ringL[(size_t) rIdx];
+        const float dispR = ringR[(size_t) rIdx];
+        ++writeIdx;
+
+        // CAS-max: each audio block, raise the running max in the node's
+        // atomic if this block's compensated peak is louder.  The atomic is
+        // drained either by the PluginProcessor mirror sync (for buses --
+        // exchange-and-merge into the cross-block mirror once per block) or
+        // by the UI vblank (for inserts -- direct exchange-and-reset each
+        // frame via getInsertPeakDbStereoExchange).
+        auto casMax = [] (std::atomic<float>& a, float v) noexcept
+        {
+            float cur = a.load (std::memory_order_relaxed);
+            while (cur < v
+                   && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+            {}
+        };
+        casMax (peakDbL,    dispL);
+        casMax (peakDbR,    dispR);
+        casMax (peakDbMono, juce::jmax (dispL, dispR));
+    }
+}
+
 // ── Pan law helper (2026-04-29) ──────────────────────────────────────────────
 // FL Studio parity.  Maps pan ∈ [-1, +1] + project-level law selector
 // (master_pan_law: 0=Circular / 1=Triangular / 2=Square) → (gainL, gainR).
@@ -141,6 +225,10 @@ struct VibeGraph::LayersBusNode
     // peakDb (above) kept for back-compat; written as max(L, R) each block.
     std::atomic<float>     peakDbL { -60.f };
     std::atomic<float>     peakDbR { -60.f };
+    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
+    // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
+    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
+    int                    peakRingIdx { 0 };
     // Peak-hold decay (set in prepare) — see InsertNode for rationale.
     float                  peakDecayDbPerBlock { 0.35f };
 
@@ -284,18 +372,14 @@ struct VibeGraph::LayersBusNode
         // Peak meter with hold+decay — matches InsertNode pattern so transient
         // bus peaks aren't missed between ~30 Hz UI polls.
         {
-            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
-            // Mono atomic kept (= max(L, R)) for legacy readers.
-            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
-            const float prevL = peakDbL.load(std::memory_order_relaxed);
-            const float prevR = peakDbR.load(std::memory_order_relaxed);
-            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
-            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
-            const float newL = juce::jmax(thisL, decayedL);
-            const float newR = juce::jmax(thisR, decayedR);
-            peakDbL.store(newL, std::memory_order_relaxed);
-            peakDbR.store(newR, std::memory_order_relaxed);
-            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
+            // 2026-05-02: lock-free max + latency-compensated publish.  The UI
+            // exchanges the running-max atomic with -inf on each vsync to start
+            // a fresh "max within frame" window; this CAS-loop adds the current
+            // block (or, when latency comp is on, an N-block-old block) to the
+            // running max safely across that swap.  No more audio-side decay
+            // -- ballistics live entirely on the UI thread now.
+            publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
+                                peakDbL, peakDbR, peakDb);
         }
     }
 };
@@ -312,6 +396,10 @@ struct VibeGraph::BassBusNode
     // peakDb (above) kept for back-compat; written as max(L, R) each block.
     std::atomic<float>     peakDbL { -60.f };
     std::atomic<float>     peakDbR { -60.f };
+    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
+    // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
+    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
+    int                    peakRingIdx { 0 };
     float                  peakDecayDbPerBlock { 0.35f };
 
     BassSynth&               bass;
@@ -437,18 +525,14 @@ struct VibeGraph::BassBusNode
 
         compDelay.process(buf);
         {
-            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
-            // Mono atomic kept (= max(L, R)) for legacy readers.
-            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
-            const float prevL = peakDbL.load(std::memory_order_relaxed);
-            const float prevR = peakDbR.load(std::memory_order_relaxed);
-            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
-            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
-            const float newL = juce::jmax(thisL, decayedL);
-            const float newR = juce::jmax(thisR, decayedR);
-            peakDbL.store(newL, std::memory_order_relaxed);
-            peakDbR.store(newR, std::memory_order_relaxed);
-            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
+            // 2026-05-02: lock-free max + latency-compensated publish.  The UI
+            // exchanges the running-max atomic with -inf on each vsync to start
+            // a fresh "max within frame" window; this CAS-loop adds the current
+            // block (or, when latency comp is on, an N-block-old block) to the
+            // running max safely across that swap.  No more audio-side decay
+            // -- ballistics live entirely on the UI thread now.
+            publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
+                                peakDbL, peakDbR, peakDb);
         }
     }
 };
@@ -465,6 +549,10 @@ struct VibeGraph::DrumsBusNode
     // peakDb (above) kept for back-compat; written as max(L, R) each block.
     std::atomic<float>     peakDbL { -60.f };
     std::atomic<float>     peakDbR { -60.f };
+    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
+    // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
+    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
+    int                    peakRingIdx { 0 };
     float                  peakDecayDbPerBlock { 0.35f };
 
     // 2026-04-25: DrumSynth ref removed — drum bus now ALWAYS uses preRendered
@@ -586,18 +674,14 @@ struct VibeGraph::DrumsBusNode
 
         compDelay.process(buf);
         {
-            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
-            // Mono atomic kept (= max(L, R)) for legacy readers.
-            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
-            const float prevL = peakDbL.load(std::memory_order_relaxed);
-            const float prevR = peakDbR.load(std::memory_order_relaxed);
-            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
-            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
-            const float newL = juce::jmax(thisL, decayedL);
-            const float newR = juce::jmax(thisR, decayedR);
-            peakDbL.store(newL, std::memory_order_relaxed);
-            peakDbR.store(newR, std::memory_order_relaxed);
-            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
+            // 2026-05-02: lock-free max + latency-compensated publish.  The UI
+            // exchanges the running-max atomic with -inf on each vsync to start
+            // a fresh "max within frame" window; this CAS-loop adds the current
+            // block (or, when latency comp is on, an N-block-old block) to the
+            // running max safely across that swap.  No more audio-side decay
+            // -- ballistics live entirely on the UI thread now.
+            publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
+                                peakDbL, peakDbR, peakDb);
         }
     }
 };
@@ -615,6 +699,10 @@ struct VibeGraph::MasterBusNode
     // peakDb (above) kept for back-compat; written as max(L, R) each block.
     std::atomic<float>     peakDbL { -60.f };
     std::atomic<float>     peakDbR { -60.f };
+    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
+    // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
+    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
+    int                    peakRingIdx { 0 };
     float                  peakDecayDbPerBlock { 0.35f };
 
     juce::AudioProcessorValueTreeState& apvts;
@@ -728,18 +816,14 @@ struct VibeGraph::MasterBusNode
         }
 
         {
-            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
-            // Mono atomic kept (= max(L, R)) for legacy readers.
-            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
-            const float prevL = peakDbL.load(std::memory_order_relaxed);
-            const float prevR = peakDbR.load(std::memory_order_relaxed);
-            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
-            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
-            const float newL = juce::jmax(thisL, decayedL);
-            const float newR = juce::jmax(thisR, decayedR);
-            peakDbL.store(newL, std::memory_order_relaxed);
-            peakDbR.store(newR, std::memory_order_relaxed);
-            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
+            // 2026-05-02: lock-free max + latency-compensated publish.  The UI
+            // exchanges the running-max atomic with -inf on each vsync to start
+            // a fresh "max within frame" window; this CAS-loop adds the current
+            // block (or, when latency comp is on, an N-block-old block) to the
+            // running max safely across that swap.  No more audio-side decay
+            // -- ballistics live entirely on the UI thread now.
+            publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
+                                peakDbL, peakDbR, peakDb);
         }
     }
 };
@@ -766,6 +850,9 @@ struct VibeGraph::EffectsBusNode
     // its peers.
     std::atomic<float> peakDbL { -60.f };
     std::atomic<float> peakDbR { -60.f };
+    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
+    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
+    int                peakRingIdx { 0 };
     float              peakDecayDbPerBlock { 0.35f };
 
     // 5F-4a Batch 6: APVTS pointers for polarity + width
@@ -882,18 +969,14 @@ struct VibeGraph::EffectsBusNode
         }
 
         {
-            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
-            // Mono atomic kept (= max(L, R)) for legacy readers.
-            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
-            const float prevL = peakDbL.load(std::memory_order_relaxed);
-            const float prevR = peakDbR.load(std::memory_order_relaxed);
-            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
-            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
-            const float newL = juce::jmax(thisL, decayedL);
-            const float newR = juce::jmax(thisR, decayedR);
-            peakDbL.store(newL, std::memory_order_relaxed);
-            peakDbR.store(newR, std::memory_order_relaxed);
-            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
+            // 2026-05-02: lock-free max + latency-compensated publish.  The UI
+            // exchanges the running-max atomic with -inf on each vsync to start
+            // a fresh "max within frame" window; this CAS-loop adds the current
+            // block (or, when latency comp is on, an N-block-old block) to the
+            // running max safely across that swap.  No more audio-side decay
+            // -- ballistics live entirely on the UI thread now.
+            publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
+                                peakDbL, peakDbR, peakDb);
         }
     }
 };
@@ -932,6 +1015,21 @@ struct VibeGraph::InsertNode
     std::atomic<float>    peakDb  { -60.f };
     std::atomic<float>    peakDbL { -60.f };
     std::atomic<float>    peakDbR { -60.f };
+    // 2026-05-02: snapshot atomics promoted at END of every audio block from
+    // the running-max atomics above.  UI exchange-and-resets these (NOT the
+    // running-max), which guarantees the UI sees consistent block-boundary
+    // state across every insert: a vblank firing mid-audio-block reads
+    // SOMETHING from every snapshot (last block's data) instead of partial
+    // mid-block writes from some inserts and stale data from others.  This
+    // is what eliminates the layer-vs-bus meter ping-pong where the bus
+    // pulses one frame after the insert because UI captured the insert
+    // before the bus's audio-side write completed.
+    std::atomic<float>    peakDbSnap  { -60.f };
+    std::atomic<float>    peakDbLSnap { -60.f };
+    std::atomic<float>    peakDbRSnap { -60.f };
+    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
+    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
+    int                   peakRingIdx { 0 };
     // Peak-hold decay (set in prepare) so transient hits don't get missed
     // between UI polls (30 Hz) when audio runs at 86+ blocks/sec.
     float                 peakDecayDbPerBlock { 0.35f };
@@ -1367,23 +1465,30 @@ void VibeGraph::processBlock(juce::AudioBuffer<float>& outputBuf,
 
     // ── Render each bus node ──────────────────────────────────────────────────
     // C.4 Phase 1 (2026-04-30): push SC arrays before each bus's processBlock.
+    // 2026-05-02: drain node atomic via exchange-with--inf so the node's
+    // running-max window resets each block; the value is then forwarded to
+    // the VibeGraph-level mirror atomic.  PluginProcessor's downstream
+    // drainAndMerge stage CAS-maxes the VibeGraph mirror into the processor
+    // mirror -- that's where cross-block max accumulation lives until UI
+    // exchanges it on each vblank.
+    constexpr float kBusNegInf = -std::numeric_limits<float>::infinity();
     pushScArrayToStrip(MixerChannelIds::kLayersBus);
     mLayersNode->processBlock(layersBuf, midi, bpm, layersPreRendered);
-    layersPeakDb .store(mLayersNode->peakDb .load(), std::memory_order_relaxed);
-    layersPeakDbL.store(mLayersNode->peakDbL.load(), std::memory_order_relaxed);
-    layersPeakDbR.store(mLayersNode->peakDbR.load(), std::memory_order_relaxed);
+    layersPeakDb .store(mLayersNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    layersPeakDbL.store(mLayersNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    layersPeakDbR.store(mLayersNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
 
     pushScArrayToStrip(MixerChannelIds::kBassBus);
     mBassNode->processBlock(bassBuf, bpm, bassPreRendered);
-    bassPeakDb .store(mBassNode->peakDb .load(), std::memory_order_relaxed);
-    bassPeakDbL.store(mBassNode->peakDbL.load(), std::memory_order_relaxed);
-    bassPeakDbR.store(mBassNode->peakDbR.load(), std::memory_order_relaxed);
+    bassPeakDb .store(mBassNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    bassPeakDbL.store(mBassNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    bassPeakDbR.store(mBassNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
 
     pushScArrayToStrip(MixerChannelIds::kDrumsBus);
     mDrumsNode->processBlock(drumsBuf, bpm, drumsPreRendered);
-    drumsPeakDb .store(mDrumsNode->peakDb .load(), std::memory_order_relaxed);
-    drumsPeakDbL.store(mDrumsNode->peakDbL.load(), std::memory_order_relaxed);
-    drumsPeakDbR.store(mDrumsNode->peakDbR.load(), std::memory_order_relaxed);
+    drumsPeakDb .store(mDrumsNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    drumsPeakDbL.store(mDrumsNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    drumsPeakDbR.store(mDrumsNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
 
     // ── Sum buses into master input ───────────────────────────────────────────
     sumBuf.clear();
@@ -1414,9 +1519,11 @@ void VibeGraph::processBlock(juce::AudioBuffer<float>& outputBuf,
     // C.4 Phase 1: push SC array to master chain before processing.
     pushScArrayToStrip(MixerChannelIds::kMaster);
     mMasterNode->processBlock(sumBuf, bpm);
-    masterPeakDb .store(mMasterNode->peakDb .load(), std::memory_order_relaxed);
-    masterPeakDbL.store(mMasterNode->peakDbL.load(), std::memory_order_relaxed);
-    masterPeakDbR.store(mMasterNode->peakDbR.load(), std::memory_order_relaxed);
+    // 2026-05-02: drain via exchange-with--inf (matches the bus drain pattern
+    // above) so the node atomic's running-max window resets per block.
+    masterPeakDb .store(mMasterNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    masterPeakDbL.store(mMasterNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    masterPeakDbR.store(mMasterNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
 
     // ── Write master output to the output buffer ──────────────────────────────
     outputBuf.clear();
@@ -1452,6 +1559,18 @@ std::pair<float, float> VibeGraph::getEffectsBusPeakDbStereo() const
     if (! mEffectsBusNode) return { -60.f, -60.f };
     return { mEffectsBusNode->peakDbL.load(std::memory_order_relaxed),
              mEffectsBusNode->peakDbR.load(std::memory_order_relaxed) };
+}
+
+// 2026-05-02: drain variant -- exchange the FxBus node atomics with -inf and
+// return the running-max pair.  Audio thread calls this once per block after
+// processEffectsBus so the node's per-block window resets cleanly; the caller
+// CAS-maxes the returned values into the cross-block PluginProcessor mirror.
+std::pair<float, float> VibeGraph::drainEffectsBusPeakDbStereo()
+{
+    if (! mEffectsBusNode) return { -60.f, -60.f };
+    constexpr float kNegInf = -std::numeric_limits<float>::infinity();
+    return { mEffectsBusNode->peakDbL.exchange(kNegInf, std::memory_order_relaxed),
+             mEffectsBusNode->peakDbR.exchange(kNegInf, std::memory_order_relaxed) };
 }
 EffectRack* VibeGraph::getAudioClipsBusRack() { return mAudioClipsBusNode ? &mAudioClipsBusNode->rack : nullptr; }
 EffectRack* VibeGraph::getVoxBusRack()        { return mVoxBusNode        ? &mVoxBusNode       ->rack : nullptr; }
@@ -2044,6 +2163,112 @@ std::pair<float, float> VibeGraph::getInsertPeakDbStereo(InsertKind kind, int in
             return { it->second->peakDbL.load(std::memory_order_relaxed),
                      it->second->peakDbR.load(std::memory_order_relaxed) };
     return { -60.f, -60.f };
+}
+
+// 2026-05-02: drain variant -- exchanges the insert's SNAPSHOT atomics with
+// -inf and returns the values.  The snapshot is updated by audio at every
+// block boundary via promoteAllInsertPeakSnapshots(), so a UI vblank firing
+// mid-audio-block reads consistent block-boundary state across every insert
+// (no partial-write race).  This is what fixes the layer-vs-bus ping-pong.
+std::pair<float, float> VibeGraph::drainInsertPeakDbStereo(InsertKind kind, int index)
+{
+    std::map<int, std::unique_ptr<InsertNode>>* m = nullptr;
+    switch (kind)
+    {
+        case InsertKind::Layer: m = &mLayerInserts; break;
+        case InsertKind::Bass:  m = &mBassInserts;  break;
+        case InsertKind::Drum:  m = &mDrumInserts;  break;
+        case InsertKind::Audio: m = &mAudioInserts; break;
+        case InsertKind::Aux:   m = &mAuxInserts;   break;
+        case InsertKind::Vox:   m = &mVoxInserts;   break;
+        case InsertKind::Inst:  m = &mInstInserts;  break;
+    }
+    if (m)
+        if (auto it = m->find(index); it != m->end())
+        {
+            constexpr float kNegInf = -std::numeric_limits<float>::infinity();
+            return { it->second->peakDbLSnap.exchange(kNegInf, std::memory_order_relaxed),
+                     it->second->peakDbRSnap.exchange(kNegInf, std::memory_order_relaxed) };
+        }
+    return { -60.f, -60.f };
+}
+
+// 2026-05-02: end-of-audio-block snapshot promotion.  Called once per audio
+// block from PluginProcessor::processBlock AFTER all VibeGraph processing
+// completes.  For every insert, drains the running-max atomic via exchange
+// (resets to -inf so audio's next block starts fresh) and CAS-maxes into the
+// snapshot atomic so cross-block running max accumulates until UI drains.
+//
+// This single boundary point is what makes UI reads consistent: a vblank
+// firing mid-block sees stable last-block data on every insert, not a mix
+// of "this block written" / "this block not yet written" across siblings.
+void VibeGraph::promoteAllInsertPeakSnapshots()
+{
+    constexpr float kNegInf = -std::numeric_limits<float>::infinity();
+    auto promoteOne = [] (std::atomic<float>& runMax, std::atomic<float>& snap) noexcept
+    {
+        const float v = runMax.exchange (kNegInf, std::memory_order_relaxed);
+        if (v == kNegInf) return;
+        float cur = snap.load (std::memory_order_relaxed);
+        while (cur < v && ! snap.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+        {}
+    };
+    auto promoteMap = [&] (std::map<int, std::unique_ptr<InsertNode>>& m)
+    {
+        for (auto& [idx, node] : m)
+        {
+            if (! node) continue;
+            promoteOne (node->peakDbL, node->peakDbLSnap);
+            promoteOne (node->peakDbR, node->peakDbRSnap);
+            promoteOne (node->peakDb,  node->peakDbSnap);
+        }
+    };
+    promoteMap (mLayerInserts);
+    promoteMap (mBassInserts);
+    promoteMap (mDrumInserts);
+    promoteMap (mAudioInserts);
+    promoteMap (mAuxInserts);
+    promoteMap (mVoxInserts);
+    promoteMap (mInstInserts);
+
+    // 2026-05-02: also promote every rack's slot atomics so the effect-panel
+    // DBFSMeter + VU input meter on every slot in every rack across every
+    // node update coherently with the rest of the meter chain at the audio
+    // block boundary.  Walks: every InsertNode rack + every bus node rack.
+    auto promoteRack = [] (EffectRack* r)
+    {
+        if (r) r->promoteSlotPeakSnapshots();
+    };
+    auto promoteRacksInMap = [&] (std::map<int, std::unique_ptr<InsertNode>>& m)
+    {
+        for (auto& [idx, node] : m)
+            if (node) promoteRack (&node->rack);
+    };
+    promoteRacksInMap (mLayerInserts);
+    promoteRacksInMap (mBassInserts);
+    promoteRacksInMap (mDrumInserts);
+    promoteRacksInMap (mAudioInserts);
+    promoteRacksInMap (mAuxInserts);
+    promoteRacksInMap (mVoxInserts);
+    promoteRacksInMap (mInstInserts);
+    promoteRack (getLayersBusRack());
+    promoteRack (getBassBusRack());
+    promoteRack (getDrumsBusRack());
+    promoteRack (getMasterRack());
+    promoteRack (getEffectsBusRack());
+    promoteRack (getAudioClipsBusRack());
+    promoteRack (getVoxBusRack());
+    promoteRack (getInstBusRack());
+    promoteRack (getVoxBus2Rack());
+    promoteRack (getInstBus2Rack());
+    promoteRack (getInstBus3Rack());
+    // Deprecated per-page racks (5F-4a migration target was InsertNode racks
+    // above; these still exist in the source tree).  Promote them too so any
+    // legacy code path that still routes through them shows coherent meters.
+    for (int i = 0; i < kMaxLayerPages; ++i)
+        promoteRack (getLayerPageRack (i));
+    for (int i = 0; i < kMaxBassPages; ++i)
+        promoteRack (getBassPageRack (i));
 }
 
 // D3: read the insert's choke group (0 = none).  Wait-free.

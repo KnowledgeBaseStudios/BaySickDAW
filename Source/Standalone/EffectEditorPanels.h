@@ -46,6 +46,13 @@ struct EditorPanelBase : public juce::Component
     // two rows.
     virtual std::vector<VKnob*> getExtraKnobs() { return {}; }
 
+    // H-7 (2026-05-01): hook fired when the slot's character mode (Compressor
+    // Type / Saturation Type) changes via the SlotComponent's Mode dropdown,
+    // and once at editor-mount time so the initial Type's layout is applied.
+    // Default no-op; CompressorPanel + SaturationPanel override to show/hide
+    // mode-specific knobs and re-layout.
+    virtual void onTypeChanged() {}
+
     // Call from derived constructor to select filmstrip variant:
     //   dark=true  → Volume Black (Dynamics panels)
     //   dark=false → Volume White (all others, default)

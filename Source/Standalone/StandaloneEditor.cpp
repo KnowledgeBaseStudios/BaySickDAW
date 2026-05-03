@@ -9,6 +9,7 @@
 #include "BuilderPage.h"
 #include "PianoRollPage.h"
 #include "MixerPage.h"
+#include "../VibeGraph.h"   // MeterLatencyComp namespace (hamburger toggle)
 #include "MetroPanel.h"
 #include "SlotComponent.h"  // effectTypeName() for automation display-name resolver
 #include "KeyBindings.h"
@@ -3801,21 +3802,30 @@ void StandaloneEditor::showPageForTab(int tabId)
                     });
             };
 
-            mPageMenuBar->setTabSlots({"Player", "Pre EQ8 M/S"},
-                [this, vp, syncPagePresetMenu, syncEQHamburger](int i) {
+            // H-6b (2026-05-01): Vox page is now BaySickVocal-only with 6
+            // sub-tabs surfaced through the PageMenuBar tab buttons.  Pre EQ8
+            // M/S is still index-tracked for the MID/SIDE button visibility +
+            // EQ hamburger sync (idx 5 = "Pre Rack EQ").
+            mPageMenuBar->setTabSlots (VoxPage::getTabLabels(),
+                [this, vp, syncPagePresetMenu, syncEQHamburger] (int i) {
                     vp->switchTab (i);
                     mPageMenuBar->updateTabActive (i);
-                    mPageMenuBar->setMidSideVisible (i == 1);
-                    syncEQHamburger (vp->getEQDisplay(), i == 1);
+                    const bool isEQTab = (i == 5);
+                    mPageMenuBar->setMidSideVisible (isEQTab);
+                    syncEQHamburger (vp->getEQDisplay(), isEQTab);
                     syncPagePresetMenu (i);
                 }, vp->getActiveTab(), vp->getPageColor());
-            syncEQHamburger (vp->getEQDisplay(), vp->getActiveTab() == 1);
+            const bool isEQTabNow = (vp->getActiveTab() == 5);
+            syncEQHamburger (vp->getEQDisplay(), isEQTabNow);
             syncPagePresetMenu (vp->getActiveTab());
-            mPageMenuBar->setMidSideSlots(
-                [this, vp] { vp->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
-                [this, vp] { vp->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
+            mPageMenuBar->setMidSideSlots (
+                [this, vp] { vp->setEQMid (true);  mPageMenuBar->updateMidSideActive (true);  },
+                [this, vp] { vp->setEQMid (false); mPageMenuBar->updateMidSideActive (false); },
                 vp->isEQMidActive());
-            mPageMenuBar->setMidSideVisible (vp->getActiveTab() == 1);
+            mPageMenuBar->setMidSideVisible (isEQTabNow);
+            // H-6b: clip-name label hosted on the right of the PageMenuBar.
+            if (auto* lbl = vp->getClipFileLabel())
+                mPageMenuBar->addExtraRightComponent (lbl, 240);
         }
         else if (auto* ip = dynamic_cast<InstPage*>(mVisiblePage))
         {
@@ -3836,21 +3846,30 @@ void StandaloneEditor::showPageForTab(int tabId)
                     });
             };
 
-            mPageMenuBar->setTabSlots({"Player", "Pre EQ8 M/S"},
+            // I-0b (2026-05-02): Inst page sub-tabs restructured.
+            //   0 = BaySickPedals (placeholder until I-15)
+            //   1 = BaySickNAM/IR
+            //   2 = Pre EQ8 M/S
+            // BaySickPlayer removed entirely.
+            mPageMenuBar->setTabSlots(InstPage::getTabLabels(),
                 [this, ip, syncPagePresetMenu, syncEQHamburger](int i) {
                     ip->switchTab (i);
                     mPageMenuBar->updateTabActive (i);
-                    mPageMenuBar->setMidSideVisible (i == 1);
-                    syncEQHamburger (ip->getEQDisplay(), i == 1);
+                    mPageMenuBar->setMidSideVisible (i == 2);
+                    syncEQHamburger (ip->getEQDisplay(), i == 2);
                     syncPagePresetMenu (i);
                 }, ip->getActiveTab(), ip->getPageColor());
-            syncEQHamburger (ip->getEQDisplay(), ip->getActiveTab() == 1);
+            syncEQHamburger (ip->getEQDisplay(), ip->getActiveTab() == 2);
             syncPagePresetMenu (ip->getActiveTab());
             mPageMenuBar->setMidSideSlots(
                 [this, ip] { ip->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
                 [this, ip] { ip->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
                 ip->isEQMidActive());
-            mPageMenuBar->setMidSideVisible (ip->getActiveTab() == 1);
+            mPageMenuBar->setMidSideVisible (ip->getActiveTab() == 2);
+            // I-0b: clip-name label hosted on the right of the PageMenuBar
+            // (mirrors Vox).
+            if (auto* lbl = ip->getClipFileLabel())
+                mPageMenuBar->addExtraRightComponent (lbl, 240);
         }
         else if (auto* dp = dynamic_cast<DrumPage*>(mVisiblePage))
         {
@@ -3925,9 +3944,11 @@ void StandaloneEditor::showPageForTab(int tabId)
             mPageMenuBar->addExtraRightComponent(mxp->getAddAuxBtn(),     120);
 
             // 2026-04-29: Mixer hamburger menu — project-level Pan Law selector.
-            // Three options matching FL Studio: Circular (default), Triangular,
-            // Square.  Choice writes master_pan_law APVTS (Int 0..2) which
-            // every Insert/Bus/Master node reads each block when applying _pan.
+            // 2026-05-02: + meter latency-compensation toggle (off by default).
+            //   Pan Law: Circular (default), Triangular, Square -- matches FL.
+            //   Latency Compensate: when on, every meter shows the peak from
+            //   N audio blocks ago (where N = output device latency / blockSize)
+            //   so the visual lines up with the sound the user actually hears.
             juce::Component::SafePointer<StandaloneEditor> safeThis (this);
             mPageMenuBar->setMenuBuilder (
                 [safeThis] (juce::Component* anchor)
@@ -3942,14 +3963,37 @@ void StandaloneEditor::showPageForTab(int tabId)
                     panLawSub.addItem (103, "Square (0 dB at center)", true, current == 2);
                     m.addSubMenu ("Pan Law", panLawSub);
 
+                    // H-meter (2026-05-02): latency-compensate meters toggle.
+                    const bool latCompOn = MeterLatencyComp::gEnabled.load (std::memory_order_relaxed);
+                    m.addItem (201,
+                                "Latency-compensate meters",
+                                true,                  // enabled
+                                latCompOn);            // checked
+
                     m.showMenuAsync (
                         juce::PopupMenu::Options().withTargetComponent (anchor),
                         [safeThis] (int r)
                         {
-                            if (! safeThis || r < 101 || r > 103) return;
-                            if (auto* param = safeThis->mProcessor.apvts.getParameter ("master_pan_law"))
-                                param->setValueNotifyingHost (
-                                    param->convertTo0to1 ((float) (r - 101)));
+                            if (! safeThis) return;
+                            if (r >= 101 && r <= 103)
+                            {
+                                if (auto* param = safeThis->mProcessor.apvts.getParameter ("master_pan_law"))
+                                    param->setValueNotifyingHost (
+                                        param->convertTo0to1 ((float) (r - 101)));
+                                return;
+                            }
+                            if (r == 201)
+                            {
+                                // Toggle + recompute compensation block count from
+                                // the current device's output latency.  Stored in
+                                // the per-project state on save (UI->XML).
+                                const bool newOn = ! MeterLatencyComp::gEnabled.load (std::memory_order_relaxed);
+                                MeterLatencyComp::gEnabled.store (newOn, std::memory_order_relaxed);
+                                const int latSamples = safeThis->mProcessor.getDeviceOutputLatency();
+                                const int blockSize  = safeThis->mProcessor.getBlockSize();
+                                const double sr      = safeThis->mProcessor.getSampleRate();
+                                MeterLatencyComp::recomputeFromDevice (sr, blockSize, latSamples);
+                            }
                         });
                 });
         }
@@ -6158,6 +6202,10 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
             mProcessor.registerVoxEngine (voxIdx, eng);
         }
     };
+    // H-6b (2026-05-01): VoxPage now creates BaySickVocal in its constructor,
+    // before this onEngineChanged callback was wired.  Register the engine
+    // explicitly here so audio dispatch picks it up.
+    if (cpRaw->onEngineChanged) cpRaw->onEngineChanged();
 
     // G-6 (2026-04-29): right-click engine-picker context menu callbacks.
     cpRaw->onDuplicateRequested = [this, cpRaw] { spawnDuplicateVoxTab (cpRaw); };
@@ -6286,6 +6334,13 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
     entry->type          = RibbonTabBar::TabType::Inst;
     entry->component     = std::move (cpHolder);
     mPages.add (entry.release());
+
+    // I-0b (2026-05-02): Inst page pre-loads BaySickNAM/IR in its constructor
+    // (no engine picker any longer).  Trigger onEngineChanged manually so the
+    // PluginProcessor registers the just-instantiated engine -- previously this
+    // fired from selectEngine() when the user picked an engine, but selectEngine
+    // is now a no-op stub.
+    if (cpRaw->onEngineChanged) cpRaw->onEngineChanged();
 
     if (mInstEmptyState) mInstEmptyState->setVisible (false);
     if (selectAfter)
@@ -7377,6 +7432,14 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
         auto* vu = ui->createNewChildElement ("VUCalibration");
         vu->setAttribute ("dbfs", (double) VUMeter::getCalibrationDb());
     }
+    {
+        // 2026-05-02: meter latency-compensation toggle (Mixer hamburger menu).
+        // Defaults off; persisted with the project so saved-state matches user's
+        // last preference within that project.
+        auto* mlc = ui->createNewChildElement ("MeterLatencyComp");
+        mlc->setAttribute ("on",
+            MeterLatencyComp::gEnabled.load (std::memory_order_relaxed) ? 1 : 0);
+    }
     if (mTransport)
     {
         auto* sl = ui->createNewChildElement ("SongLoop");
@@ -7874,6 +7937,19 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
     if (auto* vu = ui->getChildByName ("VUCalibration"))
     {
         VUMeter::setCalibrationDb ((float) vu->getDoubleAttribute ("dbfs", -18.0));
+    }
+    if (auto* mlc = ui->getChildByName ("MeterLatencyComp"))
+    {
+        // 2026-05-02: restore meter latency-compensation toggle and recompute
+        // the block count from the live device latency (project saved an
+        // on/off bit; the actual ms-of-latency depends on the user's current
+        // audio device, which may differ from the saved session).
+        const bool on = mlc->getIntAttribute ("on", 0) != 0;
+        MeterLatencyComp::gEnabled.store (on, std::memory_order_relaxed);
+        const int latSamples = mProcessor.getDeviceOutputLatency();
+        const int blockSize  = mProcessor.getBlockSize();
+        const double sr      = mProcessor.getSampleRate();
+        MeterLatencyComp::recomputeFromDevice (sr, blockSize, latSamples);
     }
     if (auto* sl = ui->getChildByName ("SongLoop"))
     {

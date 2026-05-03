@@ -5,6 +5,8 @@
 #include <memory>
 #include <vector>
 #include "../DSP/EngineSidechainHelper.h"
+#include "../DSP/MicSimDSP.h"
+#include "../DSP/MicPlacementDSP.h"
 
 // Forward declaration so we don't drag Eigen into every translation unit that
 // includes this header.  Full definition is included only inside the .cpp.
@@ -109,6 +111,55 @@ public:
     void         setNamFilePath (const juce::String& p, int slot = -1);
     void         setIrFilePath  (const juce::String& p, int slot = -1);
 
+    // ── H-6d Mic Sim + Mic Placement (post-IR, pre-master-output) ────────────
+    // The two stages live as direct members of this processor so they ride
+    // along on every host (Vox sub-tab, Inst sub-tab, FX rack slot).  See
+    // MicSimDSP / MicPlacementDSP headers for parameter semantics.
+    MicSimDSP&       getMicSim()       noexcept { return mMicSim; }
+    MicPlacementDSP& getMicPlacement() noexcept { return mMicPlacement; }
+    bool loadUserMicIr (const juce::File& f, juce::String& outErr);
+    void clearUserMicIr();
+
+    // ── Per-slot A/B snapshot (full per-slot tone state, locked 2026-05-02) ──
+    // When `ab_slot` changes (UI click OR host automation), the processor
+    // captures the OUTGOING slot's APVTS values + per-stage state into its
+    // SlotSnapshot, then restores the INCOMING slot's snapshot into APVTS.
+    // Knobs auto-update via APVTS attachment; Mic Sim user IR reloads if
+    // the per-slot path differs from the currently-loaded one.
+    //
+    // NOT in the snapshot (stays global across slots):
+    //   ab_slot itself, oversampling.
+    struct SlotSnapshot
+    {
+        // Knob values
+        float inputGain    { 0.0f };
+        float output       { 0.0f };
+        float gateThresh   { -50.0f };
+        float gateRelease  { 100.0f };
+        float lowCut       { 20.0f };
+        float highCut      { 20000.0f };
+        float cabMix       { 100.0f };
+
+        // Bypass toggles
+        bool  namBypass    { false };
+        bool  cabBypass    { false };
+
+        // Mic Sim
+        int   micSimMode   { 0 };
+        int   micSimModel  { 0 };
+        float micSimMix    { 100.0f };
+        juce::String micUserIrPath;
+
+        // Mic Placement
+        float placementDistance { 30.0f };
+        float placementAngle    { 0.0f };
+        int   placementPolar    { 1 };
+        float placementMix      { 100.0f };
+
+        juce::ValueTree toValueTree (const juce::Identifier& root) const;
+        void             fromValueTree (const juce::ValueTree& v);
+    };
+
     // C.4 Phase 2.2: engine-level SC primitive.
     void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept override
     {
@@ -187,6 +238,18 @@ private:
     std::array<juce::String, 2> mIrPaths;
 
     EngineSidechainHelper mScHelper;   // C.4 Phase 2.2 SC primitive
+
+    // ── H-6d post-IR stages ──────────────────────────────────────────────────
+    MicSimDSP        mMicSim;
+    MicPlacementDSP  mMicPlacement;
+    juce::String     mLastMicIrError;
+
+    // ── Per-slot A/B snapshots (capture-then-restore on ab_slot change) ─────
+    std::array<SlotSnapshot, 2> mSnapshots;
+    int                          mLastSlot { 0 };
+
+    void captureSnapshotFromCurrent (int slot);
+    void applySnapshotToCurrent     (int slot);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickNAMIRProcessor)
 };

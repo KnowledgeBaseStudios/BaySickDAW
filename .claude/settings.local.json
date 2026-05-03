@@ -272,7 +272,10 @@
       "Bash(git -C \"C:/Users/jeffm/Documents/BaySickDAW\" diff HEAD -- \"Source/VibePlayer/VibePlayerProcessor.cpp\" \"Source/VibePlayer/VibePlayerProcessor.h\")",
       "Bash(git -C \"C:/Users/jeffm/Documents/BaySickDAW\" diff HEAD -- \"Source/VibePlayer/VibePlayerEditor.cpp\")",
       "Bash(git -C \"C:/Users/jeffm/Documents/BaySickDAW\" log --oneline -20 -- \"Source/VibePlayer/VibePlayerEditor.cpp\")",
-      "Bash(git -C \"C:/Users/jeffm/Documents/BaySickDAW\" diff HEAD -- \"Source/VibePlayer/VibePlayerEditor.h\")"
+      "Bash(git -C \"C:/Users/jeffm/Documents/BaySickDAW\" diff HEAD -- \"Source/VibePlayer/VibePlayerEditor.h\")",
+      "Bash(awk 'NR>=5196 && NR<=5260' \"C:/Users/jeffm/.claude/projects/C--Users-jeffm-Documents-BaySickDAW/7ac256bc-7e44-4a4d-95b9-ee890ed938f8.jsonl\")",
+      "Bash(awk 'NR>=5500 && NR<=6200' \"C:/Users/jeffm/.claude/projects/C--Users-jeffm-Documents-BaySickDAW/7ac256bc-7e44-4a4d-95b9-ee890ed938f8.jsonl\")",
+      "Bash(grep -oE '\"text\":\"[^\"]{20,3000}\"')"
     ]
   }
 }

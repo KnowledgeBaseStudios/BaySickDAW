@@ -1280,10 +1280,16 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     syncFromModel();
     syncApvtsFromMixerState();   // 5F-4a Batch 6
     startTimerHz(30);
+
+    // 2026-05-02: vblank-locked meter feed.  Each monitor refresh, exchange
+    // every per-strip peak atomic with -inf and push the running max to the
+    // matching DBFSMeter.  Mirrors FL Studio's vsync-locked metering.
+    mVBlank = std::make_unique<juce::VBlankAttachment> (this, [this] { onVBlank(); });
 }
 
 MixerPage::~MixerPage()
 {
+    mVBlank.reset();
     stopTimer();
 }
 
@@ -2426,68 +2432,10 @@ void MixerPage::setUndoContext(const UndoContext& ctx)
 // ─────────────────────────────────────────────────────────────────────────────
 void MixerPage::timerCallback()
 {
-    // 2026-04-30: every strip now reads stereo L/R peakDb atomics and
-    // pushes via setStereoLevel.  The mono setLevel path is gone — the new
-    // DBFSMeter has independent L+R bars.
-    auto pushStereoBus = [] (MixerTrackStrip* strip,
-                              const std::atomic<float>& l,
-                              const std::atomic<float>& r)
-    {
-        strip->setStereoLevel(l.load(std::memory_order_relaxed),
-                               r.load(std::memory_order_relaxed));
-    };
-
-    pushStereoBus(mMasterStrip       .get(), mProcessor.mMasterPeakDbL,        mProcessor.mMasterPeakDbR);
-    pushStereoBus(mLayersBusStrip    .get(), mProcessor.mLayersPeakDbL,        mProcessor.mLayersPeakDbR);
-    pushStereoBus(mBassBusStrip      .get(), mProcessor.mBassPeakDbL,          mProcessor.mBassPeakDbR);
-    pushStereoBus(mDrumsBusStrip     .get(), mProcessor.mDrumsPeakDbL,         mProcessor.mDrumsPeakDbR);
-    pushStereoBus(mFXBusStrip        .get(), mProcessor.mFxBusPeakDbL,        mProcessor.mFxBusPeakDbR);
-    pushStereoBus(mAudioClipsBusStrip.get(), mProcessor.mAudioClipsBusPeakDbL, mProcessor.mAudioClipsBusPeakDbR);
-    pushStereoBus(mVoxBusStrip       .get(), mProcessor.mVoxBusPeakDbL,        mProcessor.mVoxBusPeakDbR);
-    pushStereoBus(mInstBusStrip      .get(), mProcessor.mInstBusPeakDbL,       mProcessor.mInstBusPeakDbR);
-
-    // Per-insert peak from each strip's own InsertNode (stereo via the new
-    // getInsertPeakDbStereo).  Each bin still calls into VibeGraph; the
-    // meter bar is split into L/R inside DBFSMeter.
-    auto pushStereoInsert = [&] (VibeGraph::InsertKind kind, int idx, MixerTrackStrip* strip)
-    {
-        const auto [pkL, pkR] = mProcessor.mVibeGraph.getInsertPeakDbStereo(kind, idx);
-        strip->setStereoLevel(pkL, pkR);
-    };
-
-    for (auto& [pageIdx, strip] : mLayerStrips)
-        pushStereoInsert(VibeGraph::InsertKind::Layer, pageIdx, strip.get());
-
-    for (auto& [pageIdx, strip] : mBassStrips)
-        pushStereoInsert(VibeGraph::InsertKind::Bass, pageIdx, strip.get());
-
-    for (auto& [slot, strip] : mDrumStrips)
-        pushStereoInsert(VibeGraph::InsertKind::Drum, slot, strip.get());
-
-    for (auto& [row, strip] : mAudioStrips)
-    {
-        if (row >= 0 && row < VibeSynthProcessor::kMaxAudioRows)
-            strip->setStereoLevel(
-                mProcessor.mAudioRowPeakDbL[row].load(std::memory_order_relaxed),
-                mProcessor.mAudioRowPeakDbR[row].load(std::memory_order_relaxed));
-    }
-
-    // 5F-4b B2: aux strip peak meters — stereo via getInsertPeakDbStereo.
-    for (auto& [idx, strip] : mAuxStrips)
-        pushStereoInsert(VibeGraph::InsertKind::Aux, idx, strip.get());
-
-    // 2026-04-30: Vox / Inst insert strips were not being metered before
-    // the rebuild — they had stripts but the old timer skipped them.  Now
-    // they pull from getInsertPeakDbStereo too.
-    for (auto& [idx, strip] : mVoxStrips)
-        pushStereoInsert(VibeGraph::InsertKind::Vox, idx, strip.get());
-    for (auto& [idx, strip] : mInstStrips)
-        pushStereoInsert(VibeGraph::InsertKind::Inst, idx, strip.get());
-
-    // G-6 (2026-04-29): secondary bus strip meters (Vox 2 / Inst 2 / Inst 3).
-    if (mVoxBus2Strip)  pushStereoBus(mVoxBus2Strip .get(), mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
-    if (mInstBus2Strip) pushStereoBus(mInstBus2Strip.get(), mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);
-    if (mInstBus3Strip) pushStereoBus(mInstBus3Strip.get(), mProcessor.mInstBus3PeakDbL, mProcessor.mInstBus3PeakDbR);
+    // 2026-05-02: meter polling moved to onVBlank() (vblank-locked).  This
+    // 30 Hz timer now only handles cable-overlay scroll detection + _sendTo
+    // change detection + (via base class) flash decay -- none of which need
+    // monitor-refresh precision.
 
     // 5F-4b B3: repaint cable overlay only when scroll position changes — the
     // bezier path itself only depends on socket positions, which only move on
@@ -2550,6 +2498,73 @@ void MixerPage::timerCallback()
             if (onSendToChanged) onSendToChanged();
         }
     }
+}
+
+// 2026-05-02: vblank-locked meter feed.  Drains every per-strip peak atomic
+// (running max accumulated by the audio thread since the last vblank) and
+// pushes the value to the matching DBFSMeter, which then runs its own
+// vblank ballistics + repaint.  exchange-and-reset semantics: each atomic
+// is replaced with -inf so the next audio block starts a fresh max window.
+void MixerPage::onVBlank()
+{
+    constexpr float kNegInf = -std::numeric_limits<float>::infinity();
+
+    auto drainStereoBus = [] (MixerTrackStrip* strip,
+                               std::atomic<float>& l,
+                               std::atomic<float>& r)
+    {
+        if (! strip) return;
+        const float vL = l.exchange (kNegInf, std::memory_order_relaxed);
+        const float vR = r.exchange (kNegInf, std::memory_order_relaxed);
+        strip->setStereoLevel (vL, vR);
+    };
+
+    drainStereoBus (mMasterStrip       .get(), mProcessor.mMasterPeakDbL,        mProcessor.mMasterPeakDbR);
+    drainStereoBus (mLayersBusStrip    .get(), mProcessor.mLayersPeakDbL,        mProcessor.mLayersPeakDbR);
+    drainStereoBus (mBassBusStrip      .get(), mProcessor.mBassPeakDbL,          mProcessor.mBassPeakDbR);
+    drainStereoBus (mDrumsBusStrip     .get(), mProcessor.mDrumsPeakDbL,         mProcessor.mDrumsPeakDbR);
+    drainStereoBus (mFXBusStrip        .get(), mProcessor.mFxBusPeakDbL,         mProcessor.mFxBusPeakDbR);
+    drainStereoBus (mAudioClipsBusStrip.get(), mProcessor.mAudioClipsBusPeakDbL, mProcessor.mAudioClipsBusPeakDbR);
+    drainStereoBus (mVoxBusStrip       .get(), mProcessor.mVoxBusPeakDbL,        mProcessor.mVoxBusPeakDbR);
+    drainStereoBus (mInstBusStrip      .get(), mProcessor.mInstBusPeakDbL,       mProcessor.mInstBusPeakDbR);
+
+    // Per-insert peak: drain InsertNode atomics directly via the new exchange
+    // variant on VibeGraph.  Audio CAS-maxes into them; UI exchange-and-resets
+    // each vblank to capture every block since the last frame.
+    auto drainStereoInsert = [&] (VibeGraph::InsertKind kind, int idx, MixerTrackStrip* strip)
+    {
+        if (! strip) return;
+        const auto [pkL, pkR] = mProcessor.mVibeGraph.drainInsertPeakDbStereo (kind, idx);
+        strip->setStereoLevel (pkL, pkR);
+    };
+
+    for (auto& [pageIdx, strip] : mLayerStrips)
+        drainStereoInsert (VibeGraph::InsertKind::Layer, pageIdx, strip.get());
+    for (auto& [pageIdx, strip] : mBassStrips)
+        drainStereoInsert (VibeGraph::InsertKind::Bass, pageIdx, strip.get());
+    for (auto& [slot, strip] : mDrumStrips)
+        drainStereoInsert (VibeGraph::InsertKind::Drum, slot, strip.get());
+
+    // Audio row strips have their own per-row processor atomics (not in
+    // VibeGraph).  Drain them via exchange-and-reset.
+    for (auto& [row, strip] : mAudioStrips)
+    {
+        if (row < 0 || row >= VibeSynthProcessor::kMaxAudioRows) continue;
+        const float vL = mProcessor.mAudioRowPeakDbL[row].exchange (kNegInf, std::memory_order_relaxed);
+        const float vR = mProcessor.mAudioRowPeakDbR[row].exchange (kNegInf, std::memory_order_relaxed);
+        strip->setStereoLevel (vL, vR);
+    }
+
+    for (auto& [idx, strip] : mAuxStrips)
+        drainStereoInsert (VibeGraph::InsertKind::Aux, idx, strip.get());
+    for (auto& [idx, strip] : mVoxStrips)
+        drainStereoInsert (VibeGraph::InsertKind::Vox, idx, strip.get());
+    for (auto& [idx, strip] : mInstStrips)
+        drainStereoInsert (VibeGraph::InsertKind::Inst, idx, strip.get());
+
+    if (mVoxBus2Strip)  drainStereoBus (mVoxBus2Strip .get(), mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
+    if (mInstBus2Strip) drainStereoBus (mInstBus2Strip.get(), mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);
+    if (mInstBus3Strip) drainStereoBus (mInstBus3Strip.get(), mProcessor.mInstBus3PeakDbL, mProcessor.mInstBus3PeakDbR);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

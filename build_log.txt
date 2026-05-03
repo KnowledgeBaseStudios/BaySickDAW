@@ -3,16 +3,12 @@ MSBuild version 18.5.4+cb4e32d21 for .NET Framework
   Checking File Globs
   BaySickDAWStandalone_rc_lib.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone_rc_lib.dir\Release\BaySickDAWStandalone_rc_lib.lib
   BaySickDAWAssets.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\BaySickDAWAssets.lib
-  VibeSynthSamples.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\VibeSynthSamples.lib
+  Generating juce_binarydata_VibeSynthSamples/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_VibeSynthSamples/JuceLibraryCode/BinaryData.h
   BaySickNAMCore.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\BaySickNAMCore.lib
-  EffectsPage.cpp
-C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
-  (compiling source file '../Source/Standalone/EffectsPage.cpp')
-  
-C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
-  (compiling source file '../Source/Standalone/EffectsPage.cpp')
-  
-C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EffectsPage.cpp(17,36): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  VibeSynthSamples.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\VibeSynthSamples.lib
+  BaySickPedalsProcessor.cpp
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickPedals\BaySickPedalsProcessor.cpp(266,35): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  juce_graphics_Sheenbidi.c
   Generating code
   Finished generating code
   BaySickDAWStandalone.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone_artefacts\Release\BaySickDAW.exe

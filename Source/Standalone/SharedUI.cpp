@@ -5803,33 +5803,47 @@ float VUMeter::sCalibrationDb = -18.f;
 
 VUMeter::VUMeter(Style style) : mStyle(style)
 {
-    startTimerHz(kTimerHz);
+    // 2026-05-02: vblank attachment created lazily in parentHierarchyChanged
+    // once the component has a peer.  Old 60 Hz Timer dropped.
 }
 
 void VUMeter::setLevel(float rms01)
 {
     float clamped = juce::jlimit(0.f, 1.f, rms01);
 
+    // 2026-05-02: CAS-max so multiple per-frame pushes from the audio path
+    // capture running max instead of overwriting the last write.  UI vblank
+    // exchange-and-resets to start a fresh window each frame.
+    auto casMax = [] (std::atomic<float>& a, float v) noexcept
+    {
+        float cur = a.load (std::memory_order_relaxed);
+        while (cur < v && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+        {}
+    };
+
     if (mStyle == Horizontal)
     {
-        // Legacy bar-meter path — keep original instant-attack logic
-        // repaint() removed: timerCallback() calls repaint() unconditionally each tick
-        float curLevel = mLevel.load(std::memory_order_relaxed);
-        if (clamped >= curLevel)
-        {
-            mLevel.store(clamped, std::memory_order_relaxed);
-            float curPeak = mPeak.load(std::memory_order_relaxed);
-            if (clamped >= curPeak)
-            {
-                mPeak.store(clamped, std::memory_order_relaxed);
-                mPeakHoldFrames = kPeakHoldMs * kTimerHz / 1000;
-            }
-        }
+        casMax (mLevel, clamped);
+        casMax (mPeak,  clamped);
     }
     else
     {
-        // Vertical hardware VU path — store raw value, timer drives ballistics
-        mLevelRms01.store(clamped, std::memory_order_relaxed);
+        // Vertical hardware VU path -- vblank handler drives spring-damper
+        // ballistics off mLevelRms01.
+        casMax (mLevelRms01, clamped);
+    }
+}
+
+void VUMeter::parentHierarchyChanged()
+{
+    if (getPeer() != nullptr && mVBlank == nullptr)
+    {
+        mVBlank = std::make_unique<juce::VBlankAttachment> (
+            this, [this] { onVBlank(); });
+    }
+    else if (getPeer() == nullptr && mVBlank != nullptr)
+    {
+        mVBlank.reset();
     }
 }
 
@@ -5839,69 +5853,63 @@ void VUMeter::setGainReduction(float grDb)
     // repaint() not needed here — timerCallback() repaints on each tick
 }
 
-void VUMeter::timerCallback()
+void VUMeter::onVBlank()
 {
     if (mStyle == Horizontal)
     {
-        // Legacy ballistic fall-off
-        mLevel.store(juce::jmax(0.f, mLevel.load(std::memory_order_relaxed) - kFallRate),
-                     std::memory_order_relaxed);
-        if (mPeakHoldFrames > 0)
-            --mPeakHoldFrames;
+        // 2026-05-02: drain via exchange-and-reset so the audio thread starts
+        // a fresh max window after each frame.  Decay applied in UI thread.
+        const float incoming = mLevel.exchange (0.f, std::memory_order_relaxed);
+        // Snap up to incoming if higher; otherwise apply fall-off.
+        // (mLevel currently sits at 0 post-exchange; no separate display
+        // variable needed -- this Style is used by GR-only paths now.)
+        if (incoming > 0.f) mLevel.store (incoming, std::memory_order_relaxed);
+
+        if (mPeakHoldFrames > 0) --mPeakHoldFrames;
         else
             mPeak.store(juce::jmax(0.f, mPeak.load(std::memory_order_relaxed) - kFallRate * 0.5f),
                         std::memory_order_relaxed);
+        repaint();
+        return;
     }
-    else
+
     {
-        // ── Second-order mass-spring-damper VU ballistics (ANSI C16.5-1942) ──
-        static constexpr float kF       = 2.0f;         // natural frequency (stiffness)
-        static constexpr float kZ       = 0.65f;        // damping ratio
-        static constexpr float kR       = 2.0f;         // initial response gain
-        static constexpr float kDt      = 1.f / 60.f;
-        static constexpr float kMaxSpeed = 8.f;         // velocity clamp
+        // 2026-05-02: ditched the ANSI C16.5-1942 spring-damper.  Rationale:
+        // a 300 ms rise time literally cannot register a 10 ms snare hit at
+        // 60+ Hz vblank cadence, so transient signals showed -16 VU when a
+        // continuous identical-level signal pegged the meter.  Replaced with
+        // simple snap-up + dB-domain decay -- same ballistics as DBFSMeter,
+        // matches what FL / Logic / ProTools "VU-style" meters actually do
+        // (none of them implement true ANSI ballistics).  The skeuomorphic
+        // gauge UI is unchanged; only the math changed.
+        //
+        // Decay rate: 25 dB/sec ≈ ANSI fall time perception without the
+        // sluggish rise.  Frame interval is computed from real wall clock so
+        // 60 / 120 / 144 Hz monitors all see the same dB-per-second fall.
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        const double dt    = juce::jlimit (0.001, 0.100,
+                                            (mLastVBlankMs <= 0.0) ? 1.0 / 60.0
+                                                                    : (nowMs - mLastVBlankMs) * 0.001);
+        mLastVBlankMs = nowMs;
+        constexpr float kVuDecayDbPerSec = 25.f;
+        const float decayDb = (float) (kVuDecayDbPerSec * dt);
 
-        // 1. Get raw RMS level and convert to dBFS
-        float raw01 = mLevelRms01.load(std::memory_order_relaxed);
-        float dBFS  = (raw01 <= 0.f) ? -100.f : 20.f * std::log10(raw01);
+        // Drain the running-max input atomic (audio CAS-maxes between frames;
+        // exchange-with-0 starts a fresh window for the next frame).
+        const float raw01 = mLevelRms01.exchange (0.f, std::memory_order_relaxed);
+        const float dBFS  = (raw01 <= 0.f) ? -100.f : 20.f * std::log10 (raw01);
 
-        // 2. Map dBFS to VU dB: 0 VU = calibration target (e.g. -18 dBFS)
-        float calibTarget = VUMeter::getCalibrationDb();  // e.g. -18.f
-        float vuDb = dBFS - calibTarget;                  // e.g. dBFS=-18, calib=-18 → vuDb=0
+        // Map to VU dB via the calibration target (0 VU = e.g. -18 dBFS).
+        const float calibTarget = VUMeter::getCalibrationDb();
+        const float vuDb = juce::jlimit (kVuMin - 1.f, kVuMax + 60.f,
+                                          dBFS - calibTarget);
 
-        // 3. Normalize to 0..1 range (-20 VU = 0.0, +3 VU = 1.0)
-        float vuNorm = juce::jlimit(0.f, 1.f, (vuDb - kVuMin) / (kVuMax - kVuMin));
+        // Snap-up + decay on the displayed value (in VU dB space).
+        if (vuDb > mDisplayLevel) mDisplayLevel = vuDb;
+        else                       mDisplayLevel = juce::jmax (kVuMin, mDisplayLevel - decayDb);
 
-        // 4. Power curve for natural VU scale compression
-        float target = std::pow(vuNorm, 0.4f);
-
-        // 5. Second-order spring-damper integration
-        float estimate = mCurrentPos + kDt * mVelocity;
-        mVelocity += kDt * (target + kR * (target - estimate) - mCurrentPos - kZ * mVelocity) * kF;
-
-        // 6. Velocity clamp (prevents erratic overshoot on large transients)
-        mVelocity = juce::jlimit(-kMaxSpeed, kMaxSpeed, mVelocity);
-
-        // 7. Update position
-        mCurrentPos += kDt * mVelocity;
-
-        // 8. Physical end-stops
-        if (mCurrentPos > 1.0f)
-        {
-            mCurrentPos = 1.0f;
-            mVelocity  *= -0.2f;   // tiny bounce off upper pin
-        }
-        if (mCurrentPos < 0.0f)
-        {
-            mCurrentPos = 0.0f;
-            mVelocity   = 0.f;     // rest on lower peg, no bounce
-        }
-
-        // 9. Convert normalized position back to VU dB for display / MAX tracking
-        float displayVuDb = kVuMin + mCurrentPos * (kVuMax - kVuMin);
-        mDisplayLevel = displayVuDb;
-
-        // 10. Raw peak tracking for MAX display (uses instantaneous vuDb, pre-smoothing)
+        // MAX peak tracking -- hold ~1 s, then decay.  Same wall-clock-based
+        // timer so it stays consistent across monitor refresh rates.
         if (vuDb > mPeakDb)
         {
             mPeakDb = vuDb;
@@ -5910,9 +5918,15 @@ void VUMeter::timerCallback()
         else
         {
             mPeakMaxHoldFrames++;
-            if (mPeakMaxHoldFrames > 60)
-                mPeakDb = std::max(kVuMin, mPeakDb - (kDecayDbPerSec / 60.f));
+            if (mPeakMaxHoldFrames > 60)   // ~1 s @ 60 Hz, slightly less @ higher refresh
+                mPeakDb = juce::jmax (kVuMin, mPeakDb - decayDb);
         }
+
+        // mCurrentPos / mVelocity legacy spring state -- compute from
+        // mDisplayLevel so the existing paint() code that reads mCurrentPos
+        // keeps rendering at the right needle position.
+        mCurrentPos = juce::jlimit (0.f, 1.f, (mDisplayLevel - kVuMin) / (kVuMax - kVuMin));
+        mVelocity   = 0.f;
     }
 
     repaint();
@@ -6301,35 +6315,102 @@ void VUMeter::paint(juce::Graphics& g)
 // ============================================================ DBFSMeter
 DBFSMeter::DBFSMeter()
 {
-    startTimerHz(60);
+    // Vblank attachment is created in parentHierarchyChanged once the
+    // component is on a peer.  Until then nothing fires; safe.
 }
 
 juce::String DBFSMeter::getTooltip()
 {
-    // Format helper — anything within 0.5 dB of the floor reads as "-inf"
-    // since segments below that are visually empty / would show silence.
     auto fmt = [] (float dB) -> juce::String
     {
         if (dB <= kFloor + 0.5f) return juce::String ("-inf");
-        // One decimal place keeps the tooltip stable at a glance — the
-        // audio thread's 60 Hz updates feed the UI's display values which
-        // are what we report here, so the number tracks the bar in real
-        // time without flickering on every sub-decibel atomic change.
         return juce::String (dB, 1) + " dB";
     };
     return "L: " + fmt (mDisplayDbL) + "  |  R: " + fmt (mDisplayDbR);
 }
 
+// 2026-05-02: setLevel/setStereoLevel are CAS-loop max writes -- audio thread
+// raises the running max if the new value is bigger, otherwise no-ops.  The
+// UI's vblank callback exchanges these with -inf to start a fresh "max within
+// frame" window, so transient peaks between vblanks aren't lost.
+namespace
+{
+    inline void casMaxLevel (std::atomic<float>& a, float v) noexcept
+    {
+        float cur = a.load (std::memory_order_relaxed);
+        while (cur < v && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+        {}
+    }
+}
+
 void DBFSMeter::setLevel(float dBFS)
 {
-    mLevelDbL.store(dBFS, std::memory_order_relaxed);
-    mLevelDbR.store(dBFS, std::memory_order_relaxed);
+    casMaxLevel (mLevelDbL, dBFS);
+    casMaxLevel (mLevelDbR, dBFS);
 }
 
 void DBFSMeter::setStereoLevel(float dBFS_L, float dBFS_R)
 {
-    mLevelDbL.store(dBFS_L, std::memory_order_relaxed);
-    mLevelDbR.store(dBFS_R, std::memory_order_relaxed);
+    casMaxLevel (mLevelDbL, dBFS_L);
+    casMaxLevel (mLevelDbR, dBFS_R);
+}
+
+void DBFSMeter::parentHierarchyChanged()
+{
+    // Create / destroy the vblank attachment based on whether the meter is
+    // currently attached to a top-level peer.  JUCE only fires VBlank
+    // callbacks while the host window is on screen; the attachment itself
+    // costs nothing when the component isn't visible.
+    if (getPeer() != nullptr && mVBlank == nullptr)
+    {
+        mVBlank = std::make_unique<juce::VBlankAttachment> (
+            this, [this] { onVBlank(); });
+        mLastVBlankMs = juce::Time::getMillisecondCounterHiRes();
+    }
+    else if (getPeer() == nullptr && mVBlank != nullptr)
+    {
+        mVBlank.reset();
+    }
+}
+
+void DBFSMeter::onVBlank()
+{
+    // Exchange-and-reset reads the running-max written by the audio thread
+    // since the last vblank and starts a fresh window.  -inf is the sentinel:
+    // any new audio sample's dB will be larger and CAS will replace it.
+    constexpr float kNegInf = -std::numeric_limits<float>::infinity();
+    const float incomingL = mLevelDbL.exchange (kNegInf, std::memory_order_relaxed);
+    const float incomingR = mLevelDbR.exchange (kNegInf, std::memory_order_relaxed);
+
+    // Convert -inf to the visible floor so the dB-domain ballistics math
+    // doesn't try to subtract decay from -inf.  Anything below kFloor is
+    // already fully-empty visually.
+    const float clampedL = (incomingL <= kFloor) ? kFloor : incomingL;
+    const float clampedR = (incomingR <= kFloor) ? kFloor : incomingR;
+
+    // Delta-time decay -- ballistics scale with frame interval so 60/120/144
+    // Hz monitors all see the same dB-per-second fall rate.
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+    const double dt    = juce::jlimit (0.001, 0.100, (nowMs - mLastVBlankMs) * 0.001);
+    mLastVBlankMs = nowMs;
+    const float decayDb = (float) (kDecayDbPerSec * dt);
+
+    auto step = [&] (float incoming, float& display, float& peak, double& holdUntil)
+    {
+        if (incoming > display) display = incoming;
+        else                    display = juce::jmax (kFloor, display - decayDb);
+
+        if (incoming >= peak) { peak = incoming; holdUntil = nowMs + kPeakHoldMs; }
+        else if (nowMs > holdUntil)
+        {
+            peak = juce::jmax (kFloor, peak - decayDb);
+        }
+    };
+
+    step (clampedL, mDisplayDbL, mPeakDbL, mPeakHoldUntilL);
+    step (clampedR, mDisplayDbR, mPeakDbR, mPeakHoldUntilR);
+
+    repaint();
 }
 
 // 2026-04-30: piecewise-linear log-style mapping.  Bottom 70 % of the bar
@@ -6344,33 +6425,10 @@ float DBFSMeter::dbToNorm(float dB) noexcept
     return juce::jmap(dB, kBreakDb, kCeiling, kBreakNorm, 1.f);
 }
 
-void DBFSMeter::timerCallback()
-{
-    const float decayPerFrame = kDecayDbPerSec / 60.f;
-
-    auto step = [&] (std::atomic<float>& src, float& display, float& peak, int& holdFrames)
-    {
-        const float incoming = src.load(std::memory_order_relaxed);
-
-        // Decay display level
-        if (incoming > display) display = incoming;
-        else                    display = std::max(kFloor, display - decayPerFrame);
-
-        // Peak hold: hold ~1 s, then decay
-        if (incoming >= peak) { peak = incoming; holdFrames = 0; }
-        else
-        {
-            ++holdFrames;
-            if (holdFrames > 60)
-                peak = std::max(kFloor, peak - decayPerFrame);
-        }
-    };
-
-    step(mLevelDbL, mDisplayDbL, mPeakDbL, mPeakHoldFramesL);
-    step(mLevelDbR, mDisplayDbR, mPeakDbR, mPeakHoldFramesR);
-
-    repaint();
-}
+// timerCallback removed (2026-05-02) -- replaced by onVBlank above.  The new
+// callback runs on the monitor's vsync interval (60/120/144 Hz on matching
+// monitors) instead of JUCE's coalesced 60 Hz timer, so meter updates stay
+// in lockstep with the display refresh and never drop frames.
 
 // Paint one bar (L or R half).  drawLabels=true on the LEFT half so labels
 // appear once across the whole meter, naturally covered by lit segments.

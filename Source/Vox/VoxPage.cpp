@@ -1,5 +1,6 @@
 #include "VoxPage.h"
-#include "../VibePlayer/VibePlayerProcessor.h"
+#include "../BaySickVocal/BaySickVocalProcessor.h"
+#include "../BaySickVocal/BaySickVocalEditor.h"
 #include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
 #include "../PluginProcessor.h"
@@ -28,8 +29,9 @@ bool VoxPage::isInterestedInFileDrag (const juce::StringArray& files)
 void VoxPage::filesDropped (const juce::StringArray& files, int /*x*/, int /*y*/)
 {
     if (files.isEmpty()) return;
-    if (mEngineType != EngineType::BaySickPlayer)
-        selectEngine (EngineType::BaySickPlayer);
+    // H-6b (2026-05-01): Vox tabs are always BaySickVocal.  Dropped files set
+    // the clip path; BaySickVocal's eventual file-play mode (G-9.1) will use
+    // it.  No engine swap.
     setClipFilePath (files[0]);
 }
 
@@ -42,10 +44,13 @@ VoxPage::VoxPage (int pageIndex)
     mDirtyListener.dirtyFlag = &mPageDirty;
     mDirtyListener.suppress  = &mSuppressDirty;
 
-    buildEnginePicker();
     buildEQTab();
 
-    addAndMakeVisible (mClipFileLabel);
+    // H-6b (2026-05-01): the clip-name label is now hosted in the PageMenuBar's
+    // far-right slot via StandaloneEditor's addExtraRightComponent call when
+    // this page becomes visible.  We don't addAndMakeVisible it on the page
+    // itself.  The Label still lives on this VoxPage so its text + tooltip
+    // properties persist across page hide/show cycles.
     mClipFileLabel.setJustificationType (juce::Justification::centredLeft);
     mClipFileLabel.setColour (juce::Label::textColourId,        juce::Colour (0xff66ffd4));
     mClipFileLabel.setColour (juce::Label::backgroundColourId,  juce::Colour (0xff1a1a1a));
@@ -53,9 +58,11 @@ VoxPage::VoxPage (int pageIndex)
     mClipFileLabel.setBorderSize ({ 2, 6, 2, 6 });
     mClipFileLabel.setText ("(no recording)", juce::dontSendNotification);
     mClipFileLabel.setTooltip (
-        "Vocal recording or audio file bound to this Vox tab.  Loaded via the "
-        "BaySickPlayer engine's file picker, or auto-bound by Vox recording.");
+        "Vocal recording or audio file bound to this Vox tab.  G-9 routes "
+        "this through BaySickVocal's file-play path on transport playback.");
 
+    // H-6b (2026-05-01): Vox tabs are always BaySickVocal.  Pick on construction.
+    selectEngine (EngineType::BaySickVocal);
     switchTab (0);
 }
 
@@ -66,24 +73,10 @@ VoxPage::~VoxPage()
 
 void VoxPage::buildEnginePicker()
 {
-    addAndMakeVisible (mEnginePicker);
-    mEnginePicker.setTextWhenNothingSelected ("Pick an engine");
-    mEnginePicker.addItem ("BaySickPlayer", 1);
-    // BaySickVocal slot reserved for Phase H — added to dropdown at id 2 when
-    // the vocal channel-strip processor lands.  Until then, the only option
-    // is BaySickPlayer (sample playback of the recorded vocal).
-    mEnginePicker.setTooltip (
-        "Pick how the Vox track plays.  BaySickPlayer = sample playback of "
-        "the recorded vocal.  (BaySickVocal vocal-channel-strip processor "
-        "ships in Phase H.)");
-    mEnginePicker.onChange = [this]()
-    {
-        const int id = mEnginePicker.getSelectedId();
-        if (id == 1)      selectEngine (EngineType::BaySickPlayer);
-        else if (id == 2) selectEngine (EngineType::BaySickVocal);
-    };
-    // G-6 (2026-04-29): right-click → page context menu.
-    mEnginePicker.onRightClick = [this] { showEngineContextMenu(); };
+    // H-6b (2026-05-01): No engine picker on Vox tabs anymore.  BaySickVocal
+    // is the only engine; instantiated unconditionally in the ctor.  The
+    // page header bar stays minimal — clip file label only.  The right-click
+    // page actions menu lives on the ribbon tab itself, not here.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,7 +138,7 @@ void VoxPage::showEngineContextMenu()
 
     menu.addSeparator();
     menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
-                  mPlayerProc != nullptr || mVocalProc != nullptr);
+                  mVocalProc != nullptr);
 
     juce::Array<juce::File> presetXmls;
     {
@@ -162,7 +155,8 @@ void VoxPage::showEngineContextMenu()
     menu.addItem (kIdDelete, "Delete Vox", ! mLocked);
 
     juce::Component::SafePointer<VoxPage> self (this);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&mEnginePicker),
+    // H-6b: anchor on the page itself since the engine picker is gone.
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
         [self, presetXmls = std::move (presetXmls), kIdLoadPresetBase] (int r)
         {
             if (! self || r <= 0) return;
@@ -229,15 +223,15 @@ void VoxPage::takeStateSnapshot()
 void VoxPage::attachDirtyListener()
 {
     detachDirtyListener();
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
-        vp->apvts.state.addListener (&mDirtyListener);
-    // BaySickVocal listener wiring lands in Phase H when the processor exists.
+    // H-6b (2026-05-01): listener attaches to BaySickVocal's apvts instead.
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+        bv->apvts.state.addListener (&mDirtyListener);
 }
 
 void VoxPage::detachDirtyListener()
 {
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
-        vp->apvts.state.removeListener (&mDirtyListener);
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+        bv->apvts.state.removeListener (&mDirtyListener);
 }
 
 void VoxPage::savePagePreset (std::function<void()> onSaved)
@@ -274,10 +268,9 @@ void VoxPage::savePagePreset (std::function<void()> onSaved)
                 target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
 
             const juce::String stripPrefix = "mixer_vox_" + juce::String (safeThis->mPageIndex);
-            juce::String engineType = "BaySickPlayer";
-            juce::String enginePrefix;
-            if (auto* vp = dynamic_cast<VibePlayerProcessor*> (safeThis->getEngineProcessor()))
-                enginePrefix = vp->getParamPrefix();
+            // H-6b: always BaySickVocal.  Engine prefix is the constant `bsv_`.
+            juce::String engineType   = "BaySickVocal";
+            juce::String enginePrefix = "bsv_";
 
             const juce::String xml = PagePresetIO::exportPagePreset (
                 *safeThis->mFullProcessor,
@@ -301,12 +294,13 @@ void VoxPage::loadPagePreset (const juce::File& xml)
     if (! xml.existsAsFile()) return;
     if (mFullProcessor == nullptr) { loadVoxPagePreset (xml); return; }
 
-    if (mPlayerProc == nullptr) selectEngine (EngineType::BaySickPlayer);
+    // H-6b (2026-05-01): always BaySickVocal.
+    if (mVocalProc == nullptr) selectEngine (EngineType::BaySickVocal);
 
     const juce::String stripPrefix = "mixer_vox_" + juce::String (mPageIndex);
-    juce::String enginePrefix;
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (getEngineProcessor()))
-        enginePrefix = vp->getParamPrefix();
+    // BaySickVocal's engine prefix is the constant `bsv_` (no per-strip
+    // suffix today).  PagePresetIO uses this only for save/load XML keying.
+    const juce::String enginePrefix = "bsv_";
 
     // Bus fallback: query MixerPage for kVoxBus2 activation.  If the query
     // isn't installed (e.g. page constructed without StandaloneEditor wiring),
@@ -436,61 +430,46 @@ void VoxPage::buildEQTab()
 
 juce::AudioProcessor* VoxPage::getEngineProcessor() const noexcept
 {
-    return mEngineType == EngineType::BaySickPlayer ? mPlayerProc.get()
-         : mEngineType == EngineType::BaySickVocal  ? mVocalProc .get()
-         :                                            nullptr;
+    // H-6b: Vox tabs are always BaySickVocal.  BaySickPlayer kept in the enum
+    // for save-state back-compat only — never returned as the active engine.
+    return mVocalProc.get();
 }
 
 void VoxPage::selectEngine (EngineType e)
 {
-    if (e == mEngineType) return;
+    // H-6b (2026-05-01): coerce any caller's ask to BaySickVocal.  The picker
+    // is gone; this method is now mostly a "ensure the vocal processor is
+    // live" helper called from the constructor + state-load paths.
+    juce::ignoreUnused (e);
+    e = EngineType::BaySickVocal;
+
+    if (e == mEngineType && mVocalProc != nullptr)
+        return;
 
     if (onEngineDestroying) onEngineDestroying();
 
-    if (e == EngineType::BaySickPlayer && ! mPlayerProc)
+    if (! mVocalProc)
     {
-        const juce::String prefix = "vox_" + juce::String (mPageIndex) + "_";
-        auto vp = std::make_unique<VibePlayerProcessor> (prefix);
+        auto vp = std::make_unique<BaySickVocalProcessor>();
         vp->prepareToPlay (44100.0, 512);
-        if (mClipPath.isNotEmpty())
-            vp->loadSampleFile (juce::File (mClipPath));
-        mPlayerProc = std::move (vp);
-        mPlayerEditor.reset (mPlayerProc->createEditor());
-        if (mPlayerEditor) addChildComponent (*mPlayerEditor);
+        mVocalProc = std::move (vp);
+        // H-6b: cast-fixed editor pointer so we can call setPreRackEQ later.
+        auto* ed = static_cast<BaySickVocalEditor*> (mVocalProc->createEditor());
+        mVocalEditor.reset (ed);
+        if (mVocalEditor) addChildComponent (*mVocalEditor);
+        // Inject the strip's Pre Rack EQ into the editor's "Pre Rack EQ" sub-tab.
+        if (ed && mEQDisplay) ed->setPreRackEQ (mEQDisplay.get());
     }
-    // BaySickVocal lazy-creation lands in Phase H.
 
     mEngineType = e;
-    if (mPlayerEditor) mPlayerEditor->setVisible (e == EngineType::BaySickPlayer && mActiveTab == 0);
-    if (mVocalEditor)  mVocalEditor ->setVisible (e == EngineType::BaySickVocal  && mActiveTab == 0);
+    if (mVocalEditor) mVocalEditor->setVisible (true);
     resized();
-
-    const int id = (e == EngineType::BaySickPlayer) ? 1
-                 : (e == EngineType::BaySickVocal)  ? 2 : 0;
-    mEnginePicker.setSelectedId (id, juce::dontSendNotification);
 
     repaint();
 
-    // G-7 polish (2026-04-29): bind Pre EQ8 M/S to Vox InsertNode's preEq +
-    // mixer_vox_<idx>_preeq_(mid|side)_eq APVTS prefix.  Vox InsertNode is
-    // ensured by ensureVoxInsert when the user clicked Add Vox Strip on
-    // Mixer (before this page was even spawned).
-    if (mEQDisplay && mFullProcessor)
-    {
-        if (auto* preEq = mFullProcessor->mVibeGraph.getInsertPreEQ (
-                              VibeGraph::InsertKind::Vox, mPageIndex))
-        {
-            const juce::String mixerPrefix = "mixer_vox_" + juce::String (mPageIndex);
-            mEQDisplay->bindMsDSP (preEq, &mFullProcessor->apvts,
-                                    mixerPrefix + "_preeq_mid_eq",
-                                    mixerPrefix + "_preeq_side_eq");
-            mEQDisplay->setStripContext(mixerPrefix,
-                [](int id){ return MixerChannelIds::friendlyName(id); });
-        }
-        const double sr = mFullProcessor->getSampleRate() > 0.0
-                              ? mFullProcessor->getSampleRate() : 44100.0;
-        mEQDisplay->setSampleRate (sr);
-    }
+    // H-6b (2026-05-01): EQ binding moved into setProcessor() so it fires
+    // when the StandaloneEditor hands the full processor to this page (which
+    // happens AFTER the constructor's selectEngine call).
 
     // G-7 (2026-04-29): hook dirty-tracker on the new engine's apvts and
     // reset the flag.
@@ -502,23 +481,46 @@ void VoxPage::selectEngine (EngineType e)
 
 juce::AudioProcessorEditor* VoxPage::activeEditor() const
 {
-    return mEngineType == EngineType::BaySickPlayer ? mPlayerEditor.get()
-         : mEngineType == EngineType::BaySickVocal  ? mVocalEditor .get()
-         :                                            nullptr;
+    return mVocalEditor.get();
 }
 
 void VoxPage::switchTab (int idx)
 {
-    // G-4 (2026-04-28): Vox has 2 sub-tabs — 0 = Player, 1 = Pre EQ8 M/S.
-    // Piano Roll removed; Vox is a live-input / recorded-audio destination.
-    mActiveTab = juce::jlimit (0, 1, idx);
-
-    if (mPlayerEditor) mPlayerEditor->setVisible (mEngineType == EngineType::BaySickPlayer && mActiveTab == 0);
-    if (mVocalEditor)  mVocalEditor ->setVisible (mEngineType == EngineType::BaySickVocal  && mActiveTab == 0);
-    if (mEQDisplay)    mEQDisplay   ->setVisible (mActiveTab == 1);
-
+    // H-6b (2026-05-01): forward outer tab-slot click to BaySickVocalEditor's
+    // setActiveTab.  Tab labels:
+    //   0 BaySickVocals, 1 Vocal Chain, 2 BaySickPitch, 3 BaySickAlign,
+    //   4 BaySickNAM/IR, 5 Pre Rack EQ
+    mActiveTab = juce::jlimit (0, 5, idx);
+    if (auto* ed = dynamic_cast<BaySickVocalEditor*> (mVocalEditor.get()))
+        ed->setActiveTab (mActiveTab);
+    if (mVocalEditor) mVocalEditor->setVisible (true);
     resized();
     repaint();
+}
+
+// H-6b (2026-05-01): setProcessor was inline-set previously; promoted to a
+// real method so the EQ-binding logic can fire when the StandaloneEditor
+// hands the full processor over (constructor's selectEngine fires before
+// setProcessor in the new spawn order).
+void VoxPage::setProcessor (VibeSynthProcessor* p)
+{
+    mFullProcessor = p;
+    if (mEQDisplay && mFullProcessor)
+    {
+        if (auto* preEq = mFullProcessor->mVibeGraph.getInsertPreEQ (
+                              VibeGraph::InsertKind::Vox, mPageIndex))
+        {
+            const juce::String mixerPrefix = "mixer_vox_" + juce::String (mPageIndex);
+            mEQDisplay->bindMsDSP (preEq, &mFullProcessor->apvts,
+                                    mixerPrefix + "_preeq_mid_eq",
+                                    mixerPrefix + "_preeq_side_eq");
+            mEQDisplay->setStripContext (mixerPrefix,
+                [] (int id) { return MixerChannelIds::friendlyName (id); });
+        }
+        const double sr = mFullProcessor->getSampleRate() > 0.0
+                              ? mFullProcessor->getSampleRate() : 44100.0;
+        mEQDisplay->setSampleRate (sr);
+    }
 }
 
 void VoxPage::setClipFilePath (const juce::String& p)
@@ -528,10 +530,8 @@ void VoxPage::setClipFilePath (const juce::String& p)
                                 ? juce::File (p).getFileName()
                                 : juce::String ("(no recording)"),
                             juce::dontSendNotification);
-
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
-        if (p.isNotEmpty())
-            vp->loadSampleFile (juce::File (p));
+    // H-6b: file-play through BaySickVocal lands with G-9.1's wrapper class.
+    // The clip path is just stored for now; G-9 reads it.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -546,20 +546,17 @@ juce::String VoxPage::exportVoxState() const
     el.setAttribute ("pageIdx", mPageIndex);
     el.setAttribute ("locked",  mLocked ? 1 : 0);
 
-    if (mPlayerProc != nullptr)
+    // H-6b (2026-05-01): export BaySickVocal state.  BaySickPlayer state on
+    // Vox tabs no longer exists -- old projects with PlayerState chunks load
+    // via importVoxState which silently discards them.
+    if (mVocalProc != nullptr)
     {
         juce::MemoryBlock mb;
-        mPlayerProc->getStateInformation (mb);
-        auto* sub = el.createNewChildElement ("PlayerState");
-        sub->setAttribute ("data", mb.toBase64Encoding());
-        // G-6 fix (2026-04-29): save the actual processor prefix.
-        // VibePlayer's prefix is "tk_<trackId>_bsp_" which becomes
-        // "tk_vox_<idx>__bsp_" with the trailing-underscore in trackId
-        // — too fragile to reconstruct from page index, so persist it.
-        if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
-            sub->setAttribute ("prefix", vp->getParamPrefix());
+        mVocalProc->getStateInformation (mb);
+        auto* sub = el.createNewChildElement ("VocalState");
+        sub->setAttribute ("data",   mb.toBase64Encoding());
+        sub->setAttribute ("prefix", "bsv_");
     }
-    // BaySickVocal state export lands when Phase H ships.
 
     return el.toString (juce::XmlElement::TextFormat().singleLine());
 }
@@ -570,32 +567,22 @@ void VoxPage::importVoxState (const juce::String& xml)
     auto parsed = juce::XmlDocument::parse (xml);
     if (! parsed || ! parsed->hasTagName ("VoxPageState")) return;
 
-    const auto sourceActive = (EngineType) parsed->getIntAttribute (
-                                  "active", (int) EngineType::None);
-
-    if (auto* playerEl = parsed->getChildByName ("PlayerState"))
+    // H-6b: BaySickVocal state restore.
+    if (auto* vocalEl = parsed->getChildByName ("VocalState"))
     {
-        if (mPlayerProc == nullptr) selectEngine (EngineType::BaySickPlayer);
-        if (mPlayerProc != nullptr)
+        if (mVocalProc == nullptr) selectEngine (EngineType::BaySickVocal);
+        if (mVocalProc != nullptr)
         {
             juce::MemoryBlock mb;
-            if (mb.fromBase64Encoding (playerEl->getStringAttribute ("data")))
+            if (mb.fromBase64Encoding (vocalEl->getStringAttribute ("data")))
             {
-                const juce::String srcPrefix = playerEl->getStringAttribute ("prefix");
-                juce::String dstPrefix;
-                if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
-                    dstPrefix = vp->getParamPrefix();
-                substituteApvtsPrefixInBinary (mb, srcPrefix, dstPrefix);
-                // G-7: suppress dirty during bulk state restore.
                 mSuppressDirty = true;
-                mPlayerProc->setStateInformation (mb.getData(), (int) mb.getSize());
+                mVocalProc->setStateInformation (mb.getData(), (int) mb.getSize());
                 mSuppressDirty = false;
             }
         }
     }
-
-    if (sourceActive != EngineType::None && sourceActive != mEngineType)
-        selectEngine (sourceActive);
+    // Old PlayerState chunks from pre-H-6b projects are silently ignored.
 
     // G-6: restore lock state.
     setLocked (parsed->getIntAttribute ("locked", 0) != 0);
@@ -606,29 +593,26 @@ void VoxPage::importVoxState (const juce::String& xml)
 
 void VoxPage::paint (juce::Graphics& g)
 {
+    // H-6b (2026-05-01): page is just a thin host for BaySickVocalEditor;
+    // editor paints its own background.  No header bar anymore.
     g.fillAll (juce::Colour (0xff181818));
-    g.setColour (juce::Colour (0xff0a0a0a));
-    g.fillRect (0, 0, getWidth(), kHeaderRowH);
-    g.setColour (juce::Colour (0xff333333));
-    g.fillRect (0, kHeaderRowH, getWidth(), 1);
 }
 
 void VoxPage::resized()
 {
-    auto r = getLocalBounds();
-    auto header = r.removeFromTop (kHeaderRowH).reduced (kPad, 6);
-    mEnginePicker.setBounds (header.removeFromLeft (kPickerW));
-    header.removeFromLeft (kPad);
-    mClipFileLabel.setBounds (header.removeFromLeft (juce::jmin (kFilenameW, header.getWidth())));
-    layoutEditor (r);
+    // H-6b (2026-05-01): no in-page header.  Engine picker is gone, clip
+    // file label moved to PageMenuBar's right slot.  BaySickVocalEditor
+    // fills the entire VoxPage.
+    layoutEditor (getLocalBounds());
 }
 
 void VoxPage::layoutEditor (juce::Rectangle<int> r)
 {
     if (auto* ed = activeEditor(); ed && ed->isVisible())
         ed->setBounds (r);
-    if (mEQDisplay && mEQDisplay->isVisible())
-        mEQDisplay->setBounds (r.reduced (4));
+    // H-6b: mEQDisplay is hosted INSIDE BaySickVocalEditor's "Pre Rack EQ"
+    // sub-tab via setPreRackEQ() -- it sets its own bounds within that host
+    // panel.  No outer layout for it here.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

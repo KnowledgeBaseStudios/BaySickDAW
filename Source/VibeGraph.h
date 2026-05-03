@@ -11,6 +11,24 @@
 class BassSynth;
 // DrumSynth forward-decl removed — class no longer used in graph (2026-04-25).
 
+// ── Meter latency-compensation toggle (2026-05-02) ───────────────────────────
+// When enabled, audio nodes delay their published peak readings by N blocks so
+// the visual meter aligns with the sound the user actually hears (output-driver
+// latency).  Off by default; toggled from the Mixer hamburger menu.  Audio
+// thread reads this atomic per block.  N is the number of audio blocks to
+// delay; blocks() helper computes from a milliseconds value + the host SR/block.
+namespace MeterLatencyComp
+{
+    extern std::atomic<int>  gCompensationBlocks;   // 0 = off, >0 = N blocks delay
+    extern std::atomic<bool> gEnabled;              // user toggle (UI thread)
+    static constexpr int     kRingSize = 16;        // max compensation = 16 blocks
+    static constexpr int     kRingMask = kRingSize - 1;
+
+    // Recompute gCompensationBlocks from the current device latency.  Called
+    // by host when (a) toggle changes or (b) audio device prepare fires.
+    void recomputeFromDevice (double sampleRate, int blockSize, int latencySamples);
+}
+
 // ── Channel ID registry (5F-4b B1a) ──────────────────────────────────────────
 // Every mixer strip has a unique integer id used for cable routing, APVTS
 // _sendTo params, and the RoutingGraph.
@@ -304,6 +322,11 @@ public:
     // processEffectsBus each block.  Returns -60 if EffectsBusNode hasn't
     // been built yet.
     std::pair<float, float> getEffectsBusPeakDbStereo() const;
+    // 2026-05-02: drain variant -- exchanges the FxBus node atomics with -inf
+    // and returns the running-max pair.  Used by the audio thread per block to
+    // reset the per-block window cleanly.  UI should NOT call this -- the
+    // const load() variant is the read-only path for UI.
+    std::pair<float, float> drainEffectsBusPeakDbStereo();
 
     // ── Bus EffectRack access (Effects Page / Mixer UI) ───────────────────────
     EffectRack* getLayersBusRack();
@@ -450,7 +473,21 @@ public:
     float       getInsertPeakDb (InsertKind kind, int index) const;
     // 2026-04-30: stereo L/R peak for split DBFSMeter.  Returns {-60, -60} if
     // node doesn't exist.  Wait-free — both atomics read with relaxed ordering.
-    std::pair<float, float> getInsertPeakDbStereo (InsertKind kind, int index) const;
+    std::pair<float, float> getInsertPeakDbStereo  (InsertKind kind, int index) const;
+    // 2026-05-02: drain variant for vblank-locked metering -- exchanges the
+    // insert's snapshot atomics with -inf and returns the running max.  UI
+    // thread calls this once per vblank; the snapshot is updated by audio
+    // ONCE per audio block via promoteAllInsertPeakSnapshots() so UI reads
+    // are always consistent across every insert (no mid-block race window).
+    std::pair<float, float> drainInsertPeakDbStereo (InsertKind kind, int index);
+
+    // 2026-05-02: end-of-audio-block promotion of all insert peak snapshots.
+    // PluginProcessor::processBlock calls this AFTER VibeGraph::processBlock
+    // returns, so every insert's snapshot reflects the same just-completed
+    // audio block before any UI vblank can read.  Eliminates the layer-vs-
+    // bus ping-pong where one meter pulses one frame after the other due to
+    // UI sampling between the audio thread's per-node atomic writes.
+    void promoteAllInsertPeakSnapshots();
 
     // D3: read this insert's choke group (0 = none, 1..16 = group id).
     // Returns 0 if the node doesn't exist or the param isn't bound.

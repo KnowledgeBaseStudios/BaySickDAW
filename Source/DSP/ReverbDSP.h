@@ -41,6 +41,21 @@
 class ReverbDSP : public DSPBase
 {
 public:
+    // H-9 (2026-05-02): Algorithm umbrella.  Each algorithm has its own
+    // dedicated DSP code path; all share the same user-facing knob set
+    // (Pre-Delay / Decay / Damping / Size / Diffusion / Mix / Width) so
+    // switching algorithms swaps only the audible character, never the
+    // panel layout.  Mode dropdown on the SlotComponent header picks
+    // which algorithm runs in process().
+    enum class Algorithm : int
+    {
+        Plate       = 0,   // Schroeder allpass cascade (B - distinct topology)
+        Hall        = 1,   // Large FDN, hall character (C)
+        Chamber     = 2,   // Mid FDN, denser modulation (D)
+        Room        = 3,   // Small FDN + early-reflection taps (E)
+        VocalBooth  = 4    // Tight short-decay variant (F)
+    };
+
     ReverbDSP();
     ~ReverbDSP() override = default;
 
@@ -48,6 +63,12 @@ public:
     void prepare (double sampleRate, int maxBlockSize) override;
     void process (juce::AudioBuffer<float>& buffer) override;
     void reset() override;
+
+    // H-9 (2026-05-02): always advertises sidechain support so the SlotComponent
+    // SC picker appears.  Duck Amount = 0 means no audible attenuation; non-zero
+    // attenuates the wet output when the SC source crosses threshold.  Falls
+    // back to self-side-chain (dry input) when no SC source picked.
+    bool usesSidechain() const noexcept override { return true; }
 
     void getStateInformation (juce::MemoryBlock& dest) override;
     void setStateInformation (const void* data, int sz) override;
@@ -79,6 +100,14 @@ public:
     void setHFRatio         (float ratio);// §8e 0.3–2.0 (default 0.7)
     void setWetTone         (float dB);   // §8g -12..+12 dB tilt @ 1 kHz
 
+    // ── H-9 (2026-05-02) Algorithm umbrella + ducking + tempo-sync UI ─────
+    void setAlgorithm       (int   algo);     // 0..4 -- see Algorithm enum
+    void setDuckAmount      (float pct);      // 0..100  0 = disabled
+    void setDuckThresholdDb (float db);       // -60..0
+    void setDuckAttackMs    (float ms);       // 1..200
+    void setDuckReleaseMs   (float ms);       // 10..1000
+    void setSyncDivision    (int   divIdx);   // 0..7 sync-note index for pre-delay
+
     // ── Legacy setters (keep old editor panel compiling until Change G) ──────
     void setSize    (float v);   // old 0-1 → setRoomSize
     void setDamp    (float v);   // old 0-1 → setHighDamp (bright→dark)
@@ -103,7 +132,30 @@ public:
     float getStereoSep()      const noexcept { return mStereoSep;      }
     float getHighDampHz()     const noexcept { return mHighDampHz;     }
 
+    // H-9 getters
+    int   getAlgorithm()      const noexcept { return (int) mAlgorithm; }
+    float getDuckAmount()     const noexcept { return mDuckAmount;      }
+    float getDuckThresholdDb()const noexcept { return mDuckThresholdDb; }
+    float getDuckAttackMs()   const noexcept { return mDuckAttackMs;    }
+    float getDuckReleaseMs()  const noexcept { return mDuckReleaseMs;   }
+    int   getSyncDivision()   const noexcept { return mSyncDivIdx;      }
+
+    // ── H-9 (2026-05-02) tempo-sync division table (public so the editor
+    //   panel can populate its dropdown).  num/den expresses pre-delay
+    //   length in whole notes; index 2 = 1/4 is the construction default.
+    //   Pattern matches FlangerDSP::kSyncDivisions.
+    static constexpr int kNumSyncDivisions = 8;
+    struct SyncDiv { const char* label; int num; int den; };
+    static const SyncDiv kSyncDivisions[kNumSyncDivisions];
+
 private:
+    // H-9 stage B (2026-05-02): Plate algorithm body.  Schroeder allpass-
+    // cascade topology -- 8 series allpass stages + 4 parallel feedback
+    // combs with damping LPs.  Uses its own delay buffers (mPlateApBuf*,
+    // mPlateCombBuf*) -- the FDN buffers are not touched on this code path.
+    // Returns true if the algorithm fully handled the buffer (caller should
+    // skip the FDN path); false to let process() fall through.
+    bool processPlate (juce::AudioBuffer<float>& buffer) noexcept;
     // ── Constants ────────────────────────────────────────────────────────────
     static constexpr int   kN           = 8;     // FDN lines
     static constexpr int   kDiff        = 4;     // allpass pre-diffusion stages
@@ -159,6 +211,91 @@ private:
     // so positive WetTone = bright (cuts lows, boosts highs), negative = warm.
     // Cookbook RBJ biquads — provably stable for valid coefs.
     float mWetTiltDb { 0.0f };
+
+    // ── H-9 (2026-05-02) Algorithm umbrella + ducking + tempo-sync state ──
+    Algorithm mAlgorithm       { Algorithm::Hall };   // default = Hall (current FDN behavior)
+    float     mDuckAmount      { 0.0f };
+    float     mDuckThresholdDb { -24.0f };
+    float     mDuckAttackMs    { 10.0f };
+    float     mDuckReleaseMs   { 200.0f };
+    float     mDuckEnv         { 0.0f };       // envelope follower output
+
+    // Tempo-sync pre-delay state -- mTempoSync engages the snap; mSyncDivIdx
+    // picks which entry of kSyncDivisions[] (declared public above) gets used.
+    int       mSyncDivIdx      { 2 };          // default 1/4
+
+    // Plate algorithm state (H-9 stage B): allpass-cascade Schroeder topology.
+    // 8 series allpass stages with tuned delay lengths + 4 parallel feedback
+    // combs.  Independent of the FDN buffers since topology is fundamentally
+    // different.  Allocated at prepare() time for max SR.
+    static constexpr int kPlateAllpassStages = 8;
+    static constexpr int kPlateCombs         = 4;
+    std::array<std::vector<float>, kPlateAllpassStages> mPlateApBufL, mPlateApBufR;
+    std::array<int, kPlateAllpassStages> mPlateApDelay {};
+    std::array<int, kPlateAllpassStages> mPlateApPos   {};
+    std::array<std::vector<float>, kPlateCombs> mPlateCombBufL, mPlateCombBufR;
+    std::array<int, kPlateCombs> mPlateCombDelay {};
+    std::array<int, kPlateCombs> mPlateCombPos   {};
+    std::array<float, kPlateCombs> mPlateCombFiltL {}, mPlateCombFiltR {};
+
+    // ── H-9 stage D (2026-05-02): Chamber algorithm -- nested allpass
+    //   topology (Gardner / Bricasti M7 chamber).  4 outer allpass blocks
+    //   in series; each outer block has an inner allpass nested in its
+    //   delay path with an inner damping LP.  Genuinely different topology
+    //   from FDN -- generates dense, smooth chamber character that an FDN
+    //   cannot replicate via parameter tuning.  Per-channel L/R buffers.
+    static constexpr int kChamberOuterStages = 4;
+    std::array<std::vector<float>, kChamberOuterStages> mChOuterBufL, mChOuterBufR;
+    std::array<std::vector<float>, kChamberOuterStages> mChInnerBufL, mChInnerBufR;
+    std::array<int, kChamberOuterStages> mChOuterDelay {}, mChInnerDelay {};
+    std::array<int, kChamberOuterStages> mChOuterPosL  {}, mChOuterPosR  {};
+    std::array<int, kChamberOuterStages> mChInnerPosL  {}, mChInnerPosR  {};
+    std::array<float, kChamberOuterStages> mChInnerLPL {}, mChInnerLPR {};
+    float mChamberOuterCoef { 0.5f };
+    float mChamberInnerCoef { 0.6f };
+
+    // ── H-9 stage E (2026-05-02): Room algorithm -- explicit 15-tap early-
+    //   reflection cloud + short 4-comb Schroeder tail.  ER cloud captures
+    //   discrete first-reflection geometry; comb tail adds short stochastic
+    //   diffusion behind it.  Genuinely different topology from FDN.
+    static constexpr int kRoomERTaps  = 15;
+    static constexpr int kRoomCombs   = 4;
+    std::vector<float> mRoomERBufL, mRoomERBufR;
+    int                mRoomERPos { 0 };
+    static constexpr float kRoomERTapMs [kRoomERTaps] = {
+         7.0f, 11.0f, 17.0f, 23.0f, 29.0f,  37.0f,  43.0f,  53.0f,
+        67.0f, 79.0f, 89.0f, 101.0f,113.0f, 131.0f, 151.0f
+    };
+    static constexpr float kRoomERTapGain [kRoomERTaps] = {
+        1.00f, 0.92f, 0.84f, 0.76f, 0.68f, 0.60f, 0.53f, 0.46f,
+        0.40f, 0.34f, 0.29f, 0.25f, 0.21f, 0.18f, 0.15f
+    };
+    std::array<int, kRoomERTaps> mRoomERTapSamples {};
+    std::array<std::vector<float>, kRoomCombs> mRoomCombBufL, mRoomCombBufR;
+    std::array<int, kRoomCombs>   mRoomCombDelay {}, mRoomCombPosL {}, mRoomCombPosR {};
+    std::array<float, kRoomCombs> mRoomCombLPL {},  mRoomCombLPR  {};
+    float mRoomCombFB    { 0.65f };   // feedback gain (decay control)
+    float mRoomCombDampA { 0.4f  };   // 1-pole LP coefficient (HF damping)
+
+    // ── H-9 stage F (2026-05-02): VocalBooth algorithm -- tiny dedicated
+    //   4-line FDN with very short delays (7..15 ms), aggressive HF damp
+    //   per line, NO tail modulation (vocal-safe -- pitch correction loves
+    //   stable phase).  Hadamard 4x4 mixing matrix.  Independent buffers
+    //   from the main 8-line Hall FDN.
+    static constexpr int kBoothFDN = 4;
+    std::array<std::vector<float>, kBoothFDN> mVbFDNL, mVbFDNR;
+    std::array<int, kBoothFDN>   mVbFDNLen {}, mVbFDNWrL {}, mVbFDNWrR {};
+    std::array<float, kBoothFDN> mVbFDNFeedGain {};
+    std::array<float, kBoothFDN> mVbFDNLPL {}, mVbFDNLPR {};
+    float mVbDampAlpha { 0.32f };  // 1-pole LP coefficient (heavy)
+    // Booth delay seeds in samples-at-44.1k (tight prime spread, 7..15 ms range)
+    static constexpr int kBoothDelaySeeds [kBoothFDN] = { 309, 397, 487, 661 };
+
+    // Per-algorithm processors (return true if the algorithm fully wrote
+    // the output; false = caller falls through to FDN/Hall path).
+    bool processChamber    (juce::AudioBuffer<float>& buffer) noexcept;
+    bool processRoom       (juce::AudioBuffer<float>& buffer) noexcept;
+    bool processVocalBooth (juce::AudioBuffer<float>& buffer) noexcept;
 
 public:
     // TiltBiquad must be public so the free-function computeLoShelf /

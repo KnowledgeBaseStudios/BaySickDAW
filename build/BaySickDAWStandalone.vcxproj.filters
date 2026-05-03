@@ -145,6 +145,18 @@
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\CompressorDSP.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\DeEsserDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\PitchTrackerYIN.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\PitchCorrectorDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\BaySickAlignDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\ReverbDSP.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -184,6 +196,12 @@
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\LimiterDSP.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\MicSimDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\MicPlacementDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\EffectRack.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -194,6 +212,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EffectEditorPanels.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EffectPresetIO.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\LayersPage.cpp">
@@ -224,6 +245,21 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickNAMIR\BaySickNAMIREditor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickPedals\BaySickPedalsProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickVocalProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickVocalEditor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickPitchEditor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Clips\ClipsPage.cpp">

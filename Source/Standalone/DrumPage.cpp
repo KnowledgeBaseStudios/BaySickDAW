@@ -711,7 +711,11 @@ void DrumPage::loadSampleFile (const juce::File& f)
     selectEngine ("BaySickPlayer");
     if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
     {
-        vp->getSynth().getManager().loadSingleFile (f);
+        // 2026-05-02: route through the processor wrapper so the path/kind
+        // properties get stamped onto apvts.state.  Direct mgr.load* calls
+        // skip that step and the project-load reload path then has nothing
+        // to replay (silent engine after open until user re-picks).
+        vp->loadSampleFile (f);
         mLoadedSampleKind = SampleKind::File;
         mLoadedSamplePath = f;
         mSoundName = f.getFileNameWithoutExtension();
@@ -726,9 +730,9 @@ void DrumPage::loadSampleFolder (const juce::File& f)
     selectEngine ("BaySickPlayer");
     if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
     {
-        auto& mgr = vp->getSynth().getManager();
-        mgr.loadFolder (f);
-        mgr.normalizeRootNotes (60);   // drums always trigger at MIDI 60
+        // 2026-05-02: see loadSampleFile note above.  Drums always trigger
+        // at MIDI 60 -- pass 60 as normalizeRoot.
+        vp->loadSampleFolder (f, 60);
         mLoadedSampleKind = SampleKind::Folder;
         mLoadedSamplePath = f;
         mSoundName = f.getFileName();
@@ -743,9 +747,8 @@ void DrumPage::loadSampleSFZ (const juce::File& f)
     selectEngine ("BaySickPlayer");
     if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
     {
-        auto& mgr = vp->getSynth().getManager();
-        mgr.loadSFZ (f);
-        mgr.normalizeRootNotes (60);
+        // 2026-05-02: see loadSampleFile note above.
+        vp->loadSampleSFZ (f, 60);
         mLoadedSampleKind = SampleKind::SFZ;
         mLoadedSamplePath = f;
         mSoundName = f.getFileNameWithoutExtension();
@@ -1005,24 +1008,24 @@ void DrumPage::loadPlayerPreset (const juce::File& xml)
         else
             path = juce::File (pathStr);
 
-        auto& mgr = vp->getSynth().getManager();
+        // 2026-05-02: route through the processor wrappers so the sample
+        // path is stamped into apvts.state (project-save needs it for the
+        // reload-on-open replay path).
         if (kind == "file" && path.existsAsFile())
         {
-            mgr.loadSingleFile (path);
+            vp->loadSampleFile (path);
             mLoadedSampleKind = SampleKind::File;
             mLoadedSamplePath = path;
         }
         else if (kind == "folder" && path.isDirectory())
         {
-            mgr.loadFolder (path);
-            mgr.normalizeRootNotes (60);
+            vp->loadSampleFolder (path, 60);
             mLoadedSampleKind = SampleKind::Folder;
             mLoadedSamplePath = path;
         }
         else if (kind == "sfz" && path.existsAsFile())
         {
-            mgr.loadSFZ (path);
-            mgr.normalizeRootNotes (60);
+            vp->loadSampleSFZ (path, 60);
             mLoadedSampleKind = SampleKind::SFZ;
             mLoadedSamplePath = path;
         }

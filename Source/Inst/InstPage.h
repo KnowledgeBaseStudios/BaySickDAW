@@ -5,25 +5,28 @@
 class VibeSynthProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// InstPage — host component for one Inst tab (Phase G-4).
+// InstPage — host component for one Inst tab.
 // ─────────────────────────────────────────────────────────────────────────────
-// Mirror of ClipsPage with Inst-specific colour + naming.  Engine picker
-// offers BaySickPlayer (sampler) + BaySickNAM/IR (re-amp) with full A/B-style
-// persistence (both processors stay alive across swaps so each retains APVTS
-// state).  The page is spawned ONLY by the Mixer page's "Add Inst Strip"
-// button — the ribbon Inst dropdown is an instance switcher only (no `+ Add`).
-// Sub-tabs mirror Layer/Bass shape (Player / Piano Roll redirect / Pre EQ8
-// M/S stub).
+// I-0b (2026-05-02): Restructured for Phase I.
+//   * BaySickPlayer engine REMOVED entirely (no projects in the wild had it).
+//   * No engine picker — both stage processors are pre-loaded into permanent
+//     sub-tabs (mirrors Vox page layout).
+//   * Sub-tabs (3 total): BaySickPedals | BaySickNAM/IR | Pre EQ8 M/S.
+//     - BaySickPedals (sub-tab 0): I-1 will install BaySickPedalsProcessor +
+//       editor here.  For I-0b ships a placeholder component.
+//     - BaySickNAM/IR (sub-tab 1): hosts the existing BaySickNAMIRProcessor +
+//       BaySickNAMIREditor unchanged (same setup as the Vox page's NAM/IR sub-tab).
+//     - Pre EQ8 M/S (sub-tab 2): unchanged from prior layout.
+//   * Spawn trigger remains the Mixer page's "Add Inst Strip" button.
 // ─────────────────────────────────────────────────────────────────────────────
 
-class InstPage : public juce::Component,
-                 public juce::FileDragAndDropTarget
+class InstPage : public juce::Component
 {
 public:
-    // 2026-04-29 DEBUG: drag-drop file → BaySickPlayer (auto-pick + load).
-    bool isInterestedInFileDrag (const juce::StringArray& files) override;
-    void filesDropped           (const juce::StringArray& files, int x, int y) override;
-
+    // Back-compat shim: old saves wrote an EngineType int via selectEngine().
+    // Phase I: only "None" is meaningful (no engine picker exists).  selectEngine
+    // is now a no-op kept for save-format back-compat -- no projects in the wild
+    // use this field, but the dispatch site in StandaloneEditor still calls it.
     enum class EngineType { None, BaySickPlayer, BaySickNAMIR };
 
     explicit InstPage (int pageIndex);
@@ -35,18 +38,37 @@ public:
     void switchTab    (int idx);
     int  getActiveTab () const noexcept { return mActiveTab; }
 
+    // I-0b: tab labels surfaced through the PageMenuBar's setTabSlots.  Mirrors
+    // VoxPage::getTabLabels() pattern.
+    static juce::StringArray getTabLabels()
+    {
+        return { "BaySickPedals", "BaySickNAM/IR", "Pre EQ8 M/S" };
+    }
+
     int          getPageIndex() const noexcept { return mPageIndex; }
     // 2026-04-28 (G-4): page accent matches the mixer Inst-bus colour
     // (`0xff1c3a8a` navy) so the ribbon tab + Mixer strip + page header
     // all read as the same channel identity.
     juce::Colour getPageColor() const noexcept { return juce::Colour (0xff1c3a8a); }
 
+    // I-0b: file-binding label retained for the page header chrome (BaySickNAM/IR
+    // re-amp will eventually consume audio files; for now the label is informational).
     juce::String getClipFilePath() const                    { return mClipPath; }
     void         setClipFilePath (const juce::String& p);
 
-    void          selectEngine (EngineType e);
-    EngineType    getEngineType() const noexcept { return mEngineType; }
+    // Back-compat stub.  No-op in I-0b -- there's no engine picker; both engines
+    // live as permanent sub-tabs.  Old StandaloneEditor save-load code calls this
+    // from line 7796; keeping the symbol means we don't have to surgery that path
+    // for I-0b.
+    void selectEngine (EngineType /*e*/) {}
+    EngineType getEngineType() const noexcept { return EngineType::None; }
+
+    // Returns the BaySickNAM/IR processor (the only audio-thread-active engine
+    // on the page in I-0b; BaySickPedals lands in I-1).  External callers
+    // (Page Preset I/O, applyEngineState in state-load) use this.
     juce::AudioProcessor* getEngineProcessor() const noexcept;
+
+    juce::AudioProcessor* getNamIrProcessor() const noexcept { return mNamIrProc.get(); }
 
     std::function<void()> onEngineDestroying;
     std::function<void()> onEngineChanged;
@@ -76,8 +98,8 @@ public:
     }
     bool isEQMidActive() const { return mEQMidActive; }
 
-    // Save/Load PAGE preset — entire InstPage state (BaySickPlayer + BaySickNAM/IR;
-    // Phase I adds BaySickPedals).  XML matches exportInstState format.
+    // Save/Load PAGE preset — entire InstPage state (BaySickNAM/IR currently;
+    // I-1 adds BaySickPedals).  XML matches exportInstState format.
     void saveInstPagePreset();
     void loadInstPagePreset (const juce::File& xml);
 
@@ -85,7 +107,7 @@ public:
     // Bus fallback: if a saved _sendTo references kInstBus2 / kInstBus3 and
     // those buses aren't active in the current project, the loader silently
     // substitutes kInstBus.
-    void setProcessor (VibeSynthProcessor* p) { mFullProcessor = p; }
+    void setProcessor (VibeSynthProcessor* p);
     void setBusActiveQuery (std::function<bool(int channelId)> q) { mBusActiveQuery = std::move (q); }
     void savePagePreset (std::function<void()> onSaved = {});
     void loadPagePreset (const juce::File& xml);
@@ -93,23 +115,9 @@ public:
     void requestDelete ();
 
 private:
-    void buildEnginePicker();
-    void buildEQTab();   // G-7 polish: replaced buildEqStub
-    void layoutEditor (juce::Rectangle<int> r);
-    juce::AudioProcessorEditor* activeEditor() const;
+    void buildEQTab();
+    void layoutContent (juce::Rectangle<int> r);
     void showEngineContextMenu();
-
-    // G-6: ComboBox subclass with right-click → onRightClick callback.
-    class RightClickEngineCombo : public juce::ComboBox
-    {
-    public:
-        std::function<void()> onRightClick;
-        void mouseDown (const juce::MouseEvent& e) override
-        {
-            if (e.mods.isPopupMenu()) { if (onRightClick) onRightClick(); return; }
-            juce::ComboBox::mouseDown (e);
-        }
-    };
 
     int                                          mPageIndex { 0 };
     int                                          mActiveTab { 0 };
@@ -117,12 +125,23 @@ private:
     juce::String                                 mClipPath;
     bool                                         mLocked { false };
 
-    RightClickEngineCombo                        mEnginePicker;
+    // I-0b: page header label (informational).  Was previously parented to
+    // mEnginePicker's row; the picker is gone but we keep the label for the
+    // file path display.  Re-parented into PageMenuBar's right slot when the
+    // page is visible (mirrors Vox).
     juce::Label                                  mClipFileLabel;
-    EngineType                                   mEngineType { EngineType::None };
-    std::unique_ptr<juce::AudioProcessor>        mPlayerProc;
+
+public:
+    juce::Label* getClipFileLabel() noexcept { return &mClipFileLabel; }
+
+private:
+    // BaySickPedals stage (I-1 will replace placeholder with the real processor).
+    std::unique_ptr<juce::AudioProcessor>        mPedalsProc;
+    std::unique_ptr<juce::AudioProcessorEditor>  mPedalsEditor;
+    std::unique_ptr<juce::Component>             mPedalsPlaceholder;
+
+    // BaySickNAM/IR stage (existing — unchanged).
     std::unique_ptr<juce::AudioProcessor>        mNamIrProc;
-    std::unique_ptr<juce::AudioProcessorEditor>  mPlayerEditor;
     std::unique_ptr<juce::AudioProcessorEditor>  mNamIrEditor;
 
     // G-7 polish (2026-04-29): real Pre EQ8 M/S display.
@@ -163,8 +182,7 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InstEmptyState — placeholder shown when the Inst ribbon slot is clicked
-// with zero instances.  Unlike ClipsEmptyState there's no drag-drop target;
-// the spawn trigger is the "Add Inst Strip" button on the Mixer page.
+// with zero instances.  Spawn trigger is "Add Inst Strip" on Mixer.
 // ─────────────────────────────────────────────────────────────────────────────
 class InstEmptyState : public juce::Component
 {

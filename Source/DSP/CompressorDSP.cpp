@@ -66,6 +66,17 @@ void CompressorDSP::prepare (double sampleRate, int maxBlockSize)
 }
 
 // -----------------------------------------------------------------------------
+void CompressorDSP::setType (int t)
+{
+    const Type newType = static_cast<Type> (juce::jlimit (0, 2, t));
+    if (newType == mType) return;
+    mType = newType;
+    // Reset opto memory on type switch so prior history doesn't bleed into
+    // a different mode's release behavior.
+    mOptoHistory = 0.0f;
+}
+
+// -----------------------------------------------------------------------------
 void CompressorDSP::reset()
 {
     mEnvL        = 0.0f;
@@ -76,6 +87,7 @@ void CompressorDSP::reset()
     mRunningRmsR = 0.0f;
     mPeakL       = 0.0f;
     mPeakR       = 0.0f;
+    mOptoHistory = 0.0f;
     if (!mLookaheadL.empty()) std::fill(mLookaheadL.begin(), mLookaheadL.end(), 0.0f);
     if (!mLookaheadR.empty()) std::fill(mLookaheadR.begin(), mLookaheadR.end(), 0.0f);
     mLAWritePos = 0;
@@ -100,6 +112,14 @@ void CompressorDSP::calcCoefs()
     // C3 -- Peak detector: fast attack (~0.1 ms), slow release (= detectionMs).
     mPeakAttCoef = static_cast<float>(std::exp(-1.0 / (0.0001 * sr)));
     mPeakRelCoef = static_cast<float>(std::exp(-1.0 / (detectionMs * 0.001 * sr)));
+
+    // H-2 -- Opto multi-stage release coefficients.  60 ms fast / 500 ms slow,
+    // blended by mOptoHistory which itself averages over ~1 sec.  Numbers
+    // chosen to mirror the typical LA-2A release character (fast initial
+    // recovery from transients, slow final crawl back to unity).
+    mOptoFastRelCoef   = static_cast<float>(std::exp(-1.0 / (0.060 * sr)));
+    mOptoSlowRelCoef   = static_cast<float>(std::exp(-1.0 / (0.500 * sr)));
+    mOptoHistoryCoef   = static_cast<float>(std::exp(-1.0 / (1.000 * sr)));
 }
 
 // -----------------------------------------------------------------------------
@@ -324,11 +344,23 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
         const float targetDbR = computeGainDb(levelDbR);
 
         // -- 3. Per-sample envelope smoothing (attack/release) -----------
+        // H-2 (2026-05-01): Type umbrella character modes alter release path:
+        //   Opto -- blend fast (60ms) + slow (500ms) release coefs based on
+        //           mOptoHistory.  Sustained material -> more slow weight ->
+        //           characteristic LA-2A "memory" recovery.
+        //   FET / Modern -- standard release coef (or TCR dynamic when /R kneeType active).
         auto smoothOne = [&](float& env, float target) -> float
         {
             const bool releasing = (target >= env);
             float rCoef = rel;
-            if (isTCR && releasing)
+            if (mType == Type::Opto && releasing)
+            {
+                // mOptoHistory is the running magnitude of GR (positive dB).
+                // Map 0..6 dB GR history to 0..1 weight, blend the two coefs.
+                const float w = juce::jlimit (0.0f, 1.0f, mOptoHistory / 6.0f);
+                rCoef = (1.0f - w) * mOptoFastRelCoef + w * mOptoSlowRelCoef;
+            }
+            else if (isTCR && releasing)
             {
                 const float tcrNorm = juce::jlimit(0.0f, 1.0f, mTCRLevel / 0.1f);
                 const float dynRel  = std::max(1.0f, releaseMs / (1.0f + tcrNorm * 4.0f));
@@ -341,6 +373,35 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
 
         float grL = smoothOne(mEnvL, targetDbL);
         float grR = stereoLink ? (mEnvR = grL) : smoothOne(mEnvR, targetDbR);
+
+        // H-2 -- FET mode: soft-saturate the GR signal at deep compression.
+        // grL/grR are negative dB; magnitudes <= 6 pass through, magnitudes
+        // beyond 6 dB get tanh-compressed so the gain stage adds harmonic
+        // distortion rather than just clamping.  Approximates 1176's gain-stage
+        // FET nonlinearity at high GR.
+        if (mType == Type::FET)
+        {
+            auto satGr = [](float gr) noexcept -> float
+            {
+                if (gr >= -6.0f) return gr;
+                const float overshoot    = -6.0f - gr;             // positive
+                const float satOvershoot = 6.0f * std::tanh (overshoot / 6.0f);
+                return -6.0f - satOvershoot;
+            };
+            grL = satGr (grL);
+            grR = satGr (grR);
+        }
+
+        // H-2 -- Opto memory tracker: one-pole running magnitude of current GR
+        // over a ~1 sec window.  Drives the fast/slow release blend on next
+        // sample.  Always updated when Type=Opto, even outside release phase,
+        // so sustained material's history is always current.
+        if (mType == Type::Opto)
+        {
+            const float curGrMag = -std::min (grL, grR);   // negative GR -> positive magnitude
+            mOptoHistory = mOptoHistoryCoef * mOptoHistory
+                         + (1.0f - mOptoHistoryCoef) * curGrMag;
+        }
 
         // -- 4. Apply to look-ahead-delayed audio + makeup + mix ---------
         const float drySrcL = outL[i];
@@ -560,6 +621,9 @@ void CompressorDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("peakDetection", (int)peakDetection,  nullptr);
     state.setProperty ("detectionMs",   detectionMs,         nullptr);
     state.setProperty ("scSourceId",    sidechainSourceId,   nullptr);
+    // H-2 (2026-05-01) -- Type umbrella character mode (Modern/FET/Opto).
+    // Default 0 = Modern preserves old presets bit-exact on load.
+    state.setProperty ("type",          (int) mType,         nullptr);
 
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     if (xml)
@@ -591,6 +655,10 @@ void CompressorDSP::setStateInformation (const void* data, int sz)
     peakDetection      = ((int)state.getProperty ("peakDetection", 0)) != 0;
     detectionMs        = (float)(double)state.getProperty ("detectionMs",   10.0);
     sidechainSourceId  = (int)state.getProperty ("scSourceId",  -1);
+    // H-2 -- Type umbrella; absent in old projects (default 0 = Modern).
+    mType = static_cast<Type> (juce::jlimit (0, 2,
+        (int) state.getProperty ("type", 0)));
+    mOptoHistory = 0.0f;
 
     // Rebuild derived state
     if (mSampleRate > 0.0 && !mLookaheadL.empty())

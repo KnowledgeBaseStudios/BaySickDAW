@@ -17,6 +17,18 @@
 class DelayDSP : public DSPBase
 {
 public:
+    // H-8 (2026-05-02): Type umbrella matching the Compressor / Saturation
+    // pattern.  Echo = the existing full-featured delay (Stereo/Mono/
+    // PingPong/Off models, feedback chain, diffusion, lo-fi, mod LFO,
+    // tone filter, FB distortion) -- bit-exact unchanged.  VocalDoubler =
+    // new Eventide-H910-style doubler: two short detuned taps, no
+    // feedback, fixed dual-tap stereo image.
+    enum class Type : int
+    {
+        Echo         = 0,   // existing algorithm bit-exact
+        VocalDoubler = 1
+    };
+
     DelayDSP();
     ~DelayDSP() override = default;
 
@@ -24,6 +36,12 @@ public:
     void prepare (double sampleRate, int maxBlockSize) override;
     void process (juce::AudioBuffer<float>& buffer)    override;
     void reset()                                        override;
+
+    // H-8 (2026-05-02): always advertises sidechain support so the SlotComponent
+    // SC picker appears -- the Duck Amount knob uses the picked SC source as the
+    // envelope-follower trigger.  Falls back to self-sidechain (dry input) when
+    // no source is connected so duck still works on a single track.
+    bool usesSidechain() const noexcept override { return true; }
 
     void getStateInformation (juce::MemoryBlock& dest)  override;
     void setStateInformation (const void* data, int sz) override;
@@ -57,6 +75,29 @@ public:
     void setWetOut           (float v);   // 0..1
     void setDryOut           (float v);   // 0..1
 
+    // ── H-8 (2026-05-02): Type umbrella + VocalDoubler params ──────────────
+    void setType            (int t);          // 0=Echo (default), 1=VocalDoubler
+    void setDoubleTimeLMs   (float ms);       // 5..50  (VocalDoubler only)
+    void setDoubleTimeRMs   (float ms);       // 5..50
+    void setDoubleDetune    (float pct);      // 0..100  drift LFO depth
+    void setDoubleWidth     (float pct);      // 0..100  L/R tap pan spread
+    void setDoubleRate      (float hz);       // 0.1..2  drift LFO rate
+
+    // ── H-8: sidechain ducking (applies to both Types, post-effect output) ──
+    // Uses the dry input level as the sidechain trigger (self-ducking).  When
+    // input > threshold, the wet output is attenuated by Amount.  Recreates
+    // the classic "delay gets out of the way of the lead vocal" technique.
+    void setDuckAmount     (float pct);   // 0..100  0=disabled
+    void setDuckThresholdDb(float db);    // -60..0
+    void setDuckAttackMs   (float ms);    // 1..200
+    void setDuckReleaseMs  (float ms);    // 10..1000
+
+    // H-8: Slapback preset -- writes specific Echo-Type values into the DSP
+    // (single short delay ~110 ms, ~12% feedback, low wet, no diffusion).
+    // Doesn't change Type; if user is on VocalDoubler, presetSlapback first
+    // switches Type back to Echo.
+    void presetSlapback();
+
     // ── Legacy API ────────────────────────────────────────────────────────────
     void setFeedback  (float fb);
     void setWet       (float w);
@@ -82,6 +123,18 @@ public:
     int   getFBFilterType    () const noexcept { return mFBFilterType;   }
     int   getFBDistType      () const noexcept { return mFBDistType;     }
     bool  getKeepPitch       () const noexcept { return mKeepPitch;      }
+
+    // ── H-8: getters for new umbrella + VocalDoubler + ducking params ──────
+    int   getType                () const noexcept { return (int) mType; }
+    float getDoubleTimeLMs       () const noexcept { return mDoubleTimeLMs; }
+    float getDoubleTimeRMs       () const noexcept { return mDoubleTimeRMs; }
+    float getDoubleDetune        () const noexcept { return mDoubleDetune; }
+    float getDoubleWidth         () const noexcept { return mDoubleWidth; }
+    float getDoubleRate          () const noexcept { return mDoubleRate; }
+    float getDuckAmount          () const noexcept { return mDuckAmount; }
+    float getDuckThresholdDb     () const noexcept { return mDuckThresholdDb; }
+    float getDuckAttackMs        () const noexcept { return mDuckAttackMs; }
+    float getDuckReleaseMs       () const noexcept { return mDuckReleaseMs; }
 
     // ── A9 slider sync (extended 2026-04-18) ────────────────────────────────
     float getFeedbackLevel   () const noexcept { return mFeedbackLevel;  }
@@ -216,6 +269,25 @@ private:
     float mTone           { 0.0f };
     float mWetOut         { 0.3f };
     float mDryOut         { 1.0f };
+
+    // ── H-8: Type umbrella + VocalDoubler params + ducking ─────────────────
+    Type  mType            { Type::Echo };
+    float mDoubleTimeLMs   { 13.0f };
+    float mDoubleTimeRMs   { 22.0f };
+    float mDoubleDetune    { 50.0f };   // 0..100  drift LFO depth
+    float mDoubleWidth     { 80.0f };   // 0..100  L/R tap pan spread
+    float mDoubleRate      { 0.7f };    // 0.1..2  drift LFO rate (Hz)
+
+    float mDuckAmount      { 0.0f };    // 0..100  0 = disabled
+    float mDuckThresholdDb { -24.0f };
+    float mDuckAttackMs    { 10.0f };
+    float mDuckReleaseMs   { 200.0f };
+
+    // VocalDoubler internal state -- per-tap LFO phase + envelope follower for
+    // ducking.  Both paths share mLineL/mLineR delay buffers.
+    float mDoubleLfoPhaseL { 0.0f };
+    float mDoubleLfoPhaseR { 0.27f };   // offset to decorrelate L/R drift
+    float mDuckEnv         { 0.0f };    // 0..1 follower output
 
     // ── DSP state ─────────────────────────────────────────────────────────────
     juce::dsp::StateVariableTPTFilter<float> mFBTPT;

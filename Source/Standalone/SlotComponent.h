@@ -18,7 +18,7 @@
 //
 // Signal routing: slot 0 (top) is first in the DSP chain.
 // ─────────────────────────────────────────────────────────────────────────────
-class SlotComponent : public juce::Component, private juce::Timer
+class SlotComponent : public juce::Component
 {
 public:
     explicit SlotComponent(int slotIndex);
@@ -28,6 +28,19 @@ public:
     void refresh();  // sync bypass/name from rack without touching editor
     void setEditor(std::unique_ptr<juce::Component> editor);
 
+    // H-8 (2026-05-02): re-mount the inline editor for the current slot's
+    // DSP.  Called from a panel when the DSP's Type-driven layout changes
+    // outside the Mode dropdown (e.g. clicking a preset button that flips
+    // Type internally) so the user sees the right panel for the new state.
+    void remountEditor();
+
+    // H-6c (2026-05-01): when locked, the slot's effect can't be swapped,
+    // moved, or removed.  Bypass + sidechain dropdown still work normally.
+    // Used by BaySickVocal's Vocal Chain rack where slots are pinned to
+    // specific effect types (De-esser / Compressor / Saturation / Limiter).
+    void setLocked (bool b) { mLocked = b; repaint(); }
+    bool isLocked() const noexcept { return mLocked; }
+
     // Forward undo context to the inline editor panel (if it is an EditorPanelBase).
     void setEditorUndoContext(const UndoContext& ctx);
 
@@ -35,6 +48,13 @@ public:
     std::function<void(int slot, EffectType type)> onEffectChosen;
     std::function<void(int slot)>                  onEffectRemoved;
     std::function<void(int slot, bool up)>         onMoveRequested;
+
+    // H-7 (2026-05-01): Mode-dropdown callback fired when the user picks a
+    // character mode for an effect that supports one (Compressor: Modern/
+    // FET/Opto; Saturation: Tube/Console).  Host wires this to drive the
+    // DSP directly (regular FX rack) or to write APVTS (BaySickVocal).
+    // newType is the int value of the effect's Type enum.
+    std::function<void(int slot, int newType)>     onModeChanged;
 
     // C.4 Phase 1 (2026-04-30): SC source dropdown context.  EffectsPage wires
     // this when a slot's editor is rebuilt.  channelMixerPrefix is the strip's
@@ -60,6 +80,7 @@ private:
     EffectRack*  mRack     { nullptr };
     bool         mLoaded   { false };
     bool         mBypassed { false };
+    bool         mLocked   { false };   // H-6c: BaySickVocal locks chain slots
     juce::String mEffectName;
 
     // Hit-test regions for the header strip (only valid when mLoaded)
@@ -79,11 +100,32 @@ private:
     juce::String                                       mChannelMixerPrefix;
     std::function<juce::String(int)>                   mResolveSourceName;
 
+    // H-7 (2026-05-01): Mode dropdown in the header chrome.  Visible only
+    // for effects with character-mode umbrellas (Compressor: Modern/FET/
+    // Opto; Saturation: Tube/Console).  Sits beside mScBtn for Compressor;
+    // takes the SC slot's position for Saturation since Saturation has no
+    // sidechain.
+    std::unique_ptr<juce::TextButton>                  mModeBtn;
+
+    // H-9 prep (2026-05-02): preset menu button.  Sits at the LEFT of the
+    // slot header next to the bypass LED.  Visible whenever a non-empty
+    // effect is loaded.  Pop-up menu offers Save / Load / Restore / etc.
+    std::unique_ptr<juce::TextButton>                  mPresetBtn;
+
     void showAddMenu();
     void showScMenu();
+    void showModeMenu();
+    void showPresetMenu();
     void refreshScBtnLabel();
+    void refreshModeBtnLabel();
 
-    void timerCallback() override;   // feeds levels to meters
+    // 2026-05-02: vblank-locked level feed.  Replaces the old 30 Hz Timer so
+    // every effect panel's input VU + output dBFS update in lockstep with
+    // the monitor refresh.  The vblank attachment is created lazily once the
+    // component is on a peer (parentHierarchyChanged hook).
+    void parentHierarchyChanged() override;
+    void onVBlank();
+    std::unique_ptr<juce::VBlankAttachment> mVBlank;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SlotComponent)
 };

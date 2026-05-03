@@ -1,10 +1,17 @@
 #include "SlotComponent.h"
 #include "EffectEditorPanels.h"
+#include "../DSP/CompressorDSP.h"
+#include "../DSP/SaturationDSP.h"
+#include "../DSP/DelayDSP.h"
+#include "../DSP/ReverbDSP.h"
+#include "EffectPresetIO.h"
 
 SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
 {
     setInterceptsMouseClicks(true, true);
-    startTimerHz(30);  // 30fps level feed to meters
+    // 2026-05-02: vblank attachment is created lazily in parentHierarchyChanged
+    // once the component has a peer.  Old 30 Hz Timer dropped -- ballistics
+    // now run on monitor-refresh cadence.
 
     // C.4 Phase 1 (2026-04-30): SC source dropdown.  Hidden by default;
     // setEditor() shows it only when the loaded effect declares
@@ -16,11 +23,34 @@ SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
     mScBtn->setVisible(false);
     mScBtn->onClick = [this] { showScMenu(); };
     addChildComponent(*mScBtn);
+
+    // H-7 (2026-05-01): Mode dropdown for effects with character-mode
+    // umbrellas (Compressor: Modern/FET/Opto; Saturation: Tube/Console).
+    // Hidden by default; setEditor() shows it for the relevant effect types.
+    mModeBtn = std::make_unique<juce::TextButton>("Mode");
+    mModeBtn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3b3b));
+    mModeBtn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd6d6d6));
+    mModeBtn->setTooltip("Character mode");
+    mModeBtn->setVisible(false);
+    mModeBtn->onClick = [this] { showModeMenu(); };
+    addChildComponent(*mModeBtn);
+
+    // H-9 prep (2026-05-02): Preset menu button on the LEFT side of the slot
+    // header (next to the bypass LED).  Always visible when a non-empty
+    // effect is loaded.  Click pops Save / Load (Factory + My Presets) /
+    // Restore / Save as Default / Manage Presets.
+    mPresetBtn = std::make_unique<juce::TextButton>("Preset");
+    mPresetBtn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3b3b));
+    mPresetBtn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd6d6d6));
+    mPresetBtn->setTooltip("Effect presets -- save / load / restore");
+    mPresetBtn->setVisible(false);
+    mPresetBtn->onClick = [this] { showPresetMenu(); };
+    addChildComponent(*mPresetBtn);
 }
 
 SlotComponent::~SlotComponent()
 {
-    stopTimer();
+    mVBlank.reset();
     if (mEditor)
         removeChildComponent(mEditor.get());
 }
@@ -44,7 +74,7 @@ void SlotComponent::refresh()
     {
         const auto& slot = mRack->getSlot(mSlotIndex);
         mLoaded   = (slot.type != EffectType::None);
-        mBypassed = slot.bypassed;
+        mBypassed = slot.bypassed.load (std::memory_order_relaxed);
 
         if (mLoaded)
             mEffectName = effectTypeName(slot.type);
@@ -87,12 +117,42 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
         bool show = false;
         if (mRack)
         {
-            const auto& s = mRack->getSlot(mSlotIndex);
-            if (s.effect && s.effect->usesSidechain())
-                show = true;
+            if (auto* eff = mRack->getSlotEffect(mSlotIndex))
+                if (eff->usesSidechain())
+                    show = true;
         }
         mScBtn->setVisible(show);
         if (show) refreshScBtnLabel();
+    }
+
+    // H-7 (2026-05-01): show Mode dropdown only for effects with character-
+    // mode umbrellas.  Compressor: Modern/FET/Opto.  Saturation: Tube/Console.
+    // H-8 (2026-05-02): Delay: Echo / VocalDoubler.
+    // H-9 (2026-05-02): Reverb: Plate / Hall / Chamber / Room / VocalBooth.
+    if (mModeBtn)
+    {
+        bool show = false;
+        if (mRack)
+        {
+            const auto t = mRack->getSlot(mSlotIndex).type;
+            show = (t == EffectType::Compressor || t == EffectType::Saturation
+                 || t == EffectType::Delay      || t == EffectType::Reverb);
+        }
+        mModeBtn->setVisible(show);
+        if (show) refreshModeBtnLabel();
+    }
+
+    // H-9 prep (2026-05-02): Preset menu visible whenever a non-empty
+    // effect is loaded (every effect gets factory + user presets).
+    if (mPresetBtn)
+    {
+        bool show = false;
+        if (mRack)
+        {
+            const auto& s = mRack->getSlot(mSlotIndex);
+            show = (mRack->getSlotEffect(mSlotIndex) != nullptr && s.type != EffectType::None);
+        }
+        mPresetBtn->setVisible(show);
     }
 
     resized();
@@ -186,13 +246,31 @@ void SlotComponent::setEditorUndoContext(const UndoContext& ctx)
         base->setUndoContext(ctx);
 }
 
-void SlotComponent::timerCallback()
+// 2026-05-02: vblank-locked level feed (replaces 30 Hz timer).  Each monitor
+// refresh, drain the slot's running-max input/output atomics via exchange-
+// and-reset and push the values to the editor panel's VU + DBFS meters,
+// which run their own UI-thread ballistics on top.
+void SlotComponent::onVBlank()
 {
     if (!mRack || !mEditor) return;
     auto* base = dynamic_cast<EditorPanelBase*>(mEditor.get());
     if (!base) return;
-    base->setInputLevel (mRack->getSlotInputLevel (mSlotIndex));
-    base->setOutputLevel(mRack->getSlotOutputLevel(mSlotIndex));
+    base->setInputLevel (mRack->drainSlotInputLevel (mSlotIndex));
+    base->setOutputLevel(mRack->drainSlotOutputLevel(mSlotIndex));
+}
+
+void SlotComponent::parentHierarchyChanged()
+{
+    // Create / destroy the vblank attachment based on whether we have a peer.
+    if (getPeer() != nullptr && mVBlank == nullptr)
+    {
+        mVBlank = std::make_unique<juce::VBlankAttachment> (
+            this, [this] { onVBlank(); });
+    }
+    else if (getPeer() == nullptr && mVBlank != nullptr)
+    {
+        mVBlank.reset();
+    }
 }
 
 // ── Paint ─────────────────────────────────────────────────────────────────────
@@ -252,10 +330,16 @@ void SlotComponent::paint(juce::Graphics& g)
         // Effect name (between bypass and the SC dropdown / up-arrow on the right).
         // C.4 Phase 1: when SC dropdown is visible, name area shrinks to leave
         // room for it.  When hidden, name extends to ▲ glyph as before.
+        // H-7 (2026-05-01): Mode dropdown also takes header space; name shrinks
+        // to fit when it is visible.
         int nameX = mBypassRect.getRight() + 4;
         int nameRight = mUpRect.getX() - 4;
         if (mScBtn != nullptr && mScBtn->isVisible())
             nameRight = mScBtn->getX() - 4;
+        if (mModeBtn != nullptr && mModeBtn->isVisible())
+            nameRight = juce::jmin (nameRight, mModeBtn->getX() - 4);
+        if (mPresetBtn != nullptr && mPresetBtn->isVisible())
+            nameRight = juce::jmin (nameRight, mPresetBtn->getX() - 4);
         int nameW = juce::jmax(0, nameRight - nameX);
         g.setFont(juce::Font(12.0f, juce::Font::bold));
         g.setColour(VC::Text);
@@ -304,9 +388,27 @@ void SlotComponent::resized()
 
     // C.4 Phase 1: SC dropdown sits between the effect name area and the
     // ▲▼× glyph cluster.  ~110 px wide so "SC: Layer 2" fits comfortably.
+    // H-7 (2026-05-01): Mode dropdown sits immediately left of SC dropdown
+    // for Compressor (Modern/FET/Opto) and takes the SC slot's footprint
+    // for Saturation (Tube/Console — Saturation has no SC).
     if (mScBtn && mScBtn->isVisible())
     {
         mScBtn->setBounds(header.removeFromRight(110).withSizeKeepingCentre(108, 20));
+        header.removeFromRight(4);
+    }
+    if (mModeBtn && mModeBtn->isVisible())
+    {
+        mModeBtn->setBounds(header.removeFromRight(90).withSizeKeepingCentre(88, 20));
+        header.removeFromRight(4);
+    }
+
+    // H-9 prep (2026-05-02): Preset menu sits to the RIGHT of the effect
+    // name.  In the right-side header cluster it's the leftmost item --
+    // taken from removeFromRight after Mode + SC are placed (which sit
+    // further right).  Visible only when a non-empty effect is loaded.
+    if (mPresetBtn && mPresetBtn->isVisible())
+    {
+        mPresetBtn->setBounds(header.removeFromRight(60).withSizeKeepingCentre(58, 20));
         header.removeFromRight(4);
     }
 
@@ -320,6 +422,9 @@ void SlotComponent::mouseDown(const juce::MouseEvent& e)
 {
     if (!mLoaded)
     {
+        // H-6c (2026-05-01): locked + empty is a no-op (vocal chain slots
+        // are pre-loaded so this state shouldn't occur, but defensive).
+        if (mLocked) return;
         mLastMousePosScreen = e.getScreenPosition();
         showAddMenu();
         return;
@@ -334,15 +439,15 @@ void SlotComponent::mouseDown(const juce::MouseEvent& e)
         if (mRack) mRack->setSlotBypassed(mSlotIndex, mBypassed);
         repaint();
     }
-    else if (mUpRect.contains(pos))
+    else if (! mLocked && mUpRect.contains(pos))
     {
         if (onMoveRequested) onMoveRequested(mSlotIndex, true);
     }
-    else if (mDownRect.contains(pos))
+    else if (! mLocked && mDownRect.contains(pos))
     {
         if (onMoveRequested) onMoveRequested(mSlotIndex, false);
     }
-    else if (mCloseRect.contains(pos))
+    else if (! mLocked && mCloseRect.contains(pos))
     {
         if (onEffectRemoved) onEffectRemoved(mSlotIndex);
     }
@@ -351,18 +456,33 @@ void SlotComponent::mouseDown(const juce::MouseEvent& e)
 // ── Popup menu (Change D: appears at cursor, alphabetical, no EQ) ─────────────
 void SlotComponent::showAddMenu()
 {
+    // 2026-05-02: grouped by effect family.  Section headers are
+    // non-clickable JUCE separators so the list stays flat (no submenu
+    // hover step) but reads as 4 categories.
     juce::PopupMenu m;
-    m.addItem((int)EffectType::Chorus,          "Chorus");
-    m.addItem((int)EffectType::Compressor,      "Compressor");
-    m.addItem((int)EffectType::Delay,           "Delay");
-    m.addItem((int)EffectType::Flanger,         "Flanger");
-    m.addItem((int)EffectType::Limiter,         "Limiter");
-    m.addItem((int)EffectType::Overdrive,       "Overdrive");
-    m.addItem((int)EffectType::Phaser,          "Phaser");
-    m.addItem((int)EffectType::Reverb,          "Reverb");
-    m.addItem((int)EffectType::Saturation,      "Saturation");
-    m.addItem((int)EffectType::Tape,            "Tape");
-    m.addItem((int)EffectType::TransientShaper, "Transient Shaper");
+    m.addSectionHeader ("Dynamic");
+    m.addItem ((int)EffectType::Compressor,      "Compressor");
+    m.addItem ((int)EffectType::DeEsser,         "De-esser");
+    m.addItem ((int)EffectType::Limiter,         "Limiter");
+    m.addItem ((int)EffectType::TransientShaper, "Transient Shaper");
+
+    m.addSectionHeader ("Harmonics");
+    m.addItem ((int)EffectType::Overdrive,       "Overdrive");
+    m.addItem ((int)EffectType::Saturation,      "Saturation");
+    // H-10 cutover (2026-05-02): Tape was folded into Saturation as a 3rd
+    // type (Tube/Console/Tape).  Users now pick Saturation and switch the
+    // Mode dropdown to Tape; the standalone "Tape" picker entry is gone.
+    // EffectType::Tape stays in the enum + EffectRack as an alias so old
+    // projects load correctly, but it's no longer in the picker.
+
+    m.addSectionHeader ("Modulation");
+    m.addItem ((int)EffectType::Chorus,          "Chorus");
+    m.addItem ((int)EffectType::Flanger,         "Flanger");
+    m.addItem ((int)EffectType::Phaser,          "Phaser");
+
+    m.addSectionHeader ("Time");
+    m.addItem ((int)EffectType::Delay,           "Delay");
+    m.addItem ((int)EffectType::Reverb,          "Reverb");
 
     auto opts = juce::PopupMenu::Options()
         .withTargetScreenArea({ mLastMousePosScreen.x, mLastMousePosScreen.y, 1, 1 });
@@ -373,6 +493,307 @@ void SlotComponent::showAddMenu()
             if (result < 1) return;
             if (onEffectChosen) onEffectChosen(mSlotIndex, (EffectType)result);
         });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H-7 (2026-05-01): Mode dropdown -- character-mode picker per effect type.
+// Compressor:  Modern (0) / FET (1) / Opto (2)
+// Saturation:  Tube (0)   / Console (1)
+// ─────────────────────────────────────────────────────────────────────────────
+void SlotComponent::refreshModeBtnLabel()
+{
+    if (! mModeBtn || ! mRack) return;
+    const auto& slot = mRack->getSlot(mSlotIndex);
+    if (! mRack->getSlotEffect(mSlotIndex)) { mModeBtn->setButtonText("Mode"); return; }
+
+    juce::String label = "Mode";
+    if (slot.type == EffectType::Compressor)
+    {
+        if (auto* c = dynamic_cast<CompressorDSP*>(mRack->getSlotEffect(mSlotIndex)))
+        {
+            switch (c->mType)
+            {
+                case CompressorDSP::Type::Modern: label = "Modern"; break;
+                case CompressorDSP::Type::FET:    label = "FET";    break;
+                case CompressorDSP::Type::Opto:   label = "Opto";   break;
+            }
+        }
+    }
+    else if (slot.type == EffectType::Saturation)
+    {
+        if (auto* s = dynamic_cast<SaturationDSP*>(mRack->getSlotEffect(mSlotIndex)))
+        {
+            // H-10 (2026-05-02): Tape joins Tube/Console as a 3rd type.
+            switch (s->mSatType)
+            {
+                case SaturationDSP::Type::Tube:    label = "Tube";    break;
+                case SaturationDSP::Type::Console: label = "Console"; break;
+                case SaturationDSP::Type::Tape:    label = "Tape";    break;
+            }
+        }
+    }
+    else if (slot.type == EffectType::Delay)
+    {
+        if (auto* d = dynamic_cast<DelayDSP*>(mRack->getSlotEffect(mSlotIndex)))
+        {
+            label = (d->getType() == (int) DelayDSP::Type::VocalDoubler)
+                        ? "Doubler" : "Echo";
+        }
+    }
+    else if (slot.type == EffectType::Reverb)
+    {
+        if (auto* r = dynamic_cast<ReverbDSP*>(mRack->getSlotEffect(mSlotIndex)))
+        {
+            switch ((ReverbDSP::Algorithm) r->getAlgorithm())
+            {
+                case ReverbDSP::Algorithm::Plate:      label = "Plate"; break;
+                case ReverbDSP::Algorithm::Hall:       label = "Hall";  break;
+                case ReverbDSP::Algorithm::Chamber:    label = "Chamber"; break;
+                case ReverbDSP::Algorithm::Room:       label = "Room";  break;
+                case ReverbDSP::Algorithm::VocalBooth: label = "Booth"; break;
+            }
+        }
+    }
+    mModeBtn->setButtonText(label);
+}
+
+void SlotComponent::showModeMenu()
+{
+    if (! mRack) return;
+    const auto& slot = mRack->getSlot(mSlotIndex);
+    if (! mRack->getSlotEffect(mSlotIndex)) return;
+
+    juce::PopupMenu m;
+    int currentPick = -1;
+    if (slot.type == EffectType::Compressor)
+    {
+        if (auto* c = dynamic_cast<CompressorDSP*>(mRack->getSlotEffect(mSlotIndex)))
+            currentPick = (int) c->mType;
+        m.addItem(1 + (int) CompressorDSP::Type::Modern, "Modern", true,
+                  currentPick == (int) CompressorDSP::Type::Modern);
+        m.addItem(1 + (int) CompressorDSP::Type::FET,    "FET",    true,
+                  currentPick == (int) CompressorDSP::Type::FET);
+        m.addItem(1 + (int) CompressorDSP::Type::Opto,   "Opto",   true,
+                  currentPick == (int) CompressorDSP::Type::Opto);
+    }
+    else if (slot.type == EffectType::Saturation)
+    {
+        if (auto* s = dynamic_cast<SaturationDSP*>(mRack->getSlotEffect(mSlotIndex)))
+            currentPick = (int) s->mSatType;
+        m.addItem(1 + (int) SaturationDSP::Type::Tube,    "Tube",    true,
+                  currentPick == (int) SaturationDSP::Type::Tube);
+        m.addItem(1 + (int) SaturationDSP::Type::Console, "Console", true,
+                  currentPick == (int) SaturationDSP::Type::Console);
+        // H-10 (2026-05-02): Tape now lives under the Saturation umbrella as
+        // a 3rd type; picking it remounts the slot panel to TapeSatPanel.
+        m.addItem(1 + (int) SaturationDSP::Type::Tape,    "Tape",    true,
+                  currentPick == (int) SaturationDSP::Type::Tape);
+    }
+    else if (slot.type == EffectType::Delay)
+    {
+        if (auto* d = dynamic_cast<DelayDSP*>(mRack->getSlotEffect(mSlotIndex)))
+            currentPick = d->getType();
+        m.addItem(1 + (int) DelayDSP::Type::Echo,         "Echo",         true,
+                  currentPick == (int) DelayDSP::Type::Echo);
+        m.addItem(1 + (int) DelayDSP::Type::VocalDoubler, "Vocal Doubler", true,
+                  currentPick == (int) DelayDSP::Type::VocalDoubler);
+    }
+    else if (slot.type == EffectType::Reverb)
+    {
+        if (auto* r = dynamic_cast<ReverbDSP*>(mRack->getSlotEffect(mSlotIndex)))
+            currentPick = r->getAlgorithm();
+        m.addItem(1 + (int) ReverbDSP::Algorithm::Plate,      "Plate",      true,
+                  currentPick == (int) ReverbDSP::Algorithm::Plate);
+        m.addItem(1 + (int) ReverbDSP::Algorithm::Hall,       "Hall",       true,
+                  currentPick == (int) ReverbDSP::Algorithm::Hall);
+        m.addItem(1 + (int) ReverbDSP::Algorithm::Chamber,    "Chamber",    true,
+                  currentPick == (int) ReverbDSP::Algorithm::Chamber);
+        m.addItem(1 + (int) ReverbDSP::Algorithm::Room,       "Room",       true,
+                  currentPick == (int) ReverbDSP::Algorithm::Room);
+        m.addItem(1 + (int) ReverbDSP::Algorithm::VocalBooth, "VocalBooth", true,
+                  currentPick == (int) ReverbDSP::Algorithm::VocalBooth);
+    }
+    else
+    {
+        return;
+    }
+
+    m.showMenuAsync(juce::PopupMenu::Options{}.withTargetComponent(mModeBtn.get()),
+        [this, slotType = slot.type](int r)
+        {
+            if (r < 1) return;
+            const int newType = r - 1;
+            // Push directly to the DSP so the rack-state save/load picks it up
+            // on the next save.  Hosts that drive via APVTS (BaySickVocal) ALSO
+            // get notified through onModeChanged so they can mirror the value
+            // into APVTS, keeping the per-block APVTS push consistent.
+            if (mRack)
+            {
+                if (auto* eff = mRack->getSlotEffect(mSlotIndex))
+                {
+                    if (slotType == EffectType::Compressor)
+                    {
+                        if (auto* c = dynamic_cast<CompressorDSP*>(eff))
+                            c->setType(newType);
+                    }
+                    else if (slotType == EffectType::Saturation)
+                    {
+                        if (auto* s = dynamic_cast<SaturationDSP*>(eff))
+                            s->setSatType(newType);
+                    }
+                    else if (slotType == EffectType::Delay)
+                    {
+                        if (auto* d = dynamic_cast<DelayDSP*>(eff))
+                            d->setType(newType);
+                    }
+                    else if (slotType == EffectType::Reverb)
+                    {
+                        if (auto* r = dynamic_cast<ReverbDSP*>(eff))
+                            r->setAlgorithm(newType);
+                    }
+                }
+            }
+            if (onModeChanged) onModeChanged(mSlotIndex, newType);
+            // H-7 (2026-05-01): re-mount the inline editor with the dedicated
+            // panel for the new mode (FET / Opto / Modern -- Console / Tube).
+            // createEffectEditor dispatches by the DSP's mType field, which
+            // we just updated above.
+            if (mRack)
+            {
+                const auto& slotNow = mRack->getSlot (mSlotIndex);
+                if (auto* eff2 = mRack->getSlotEffect(mSlotIndex))
+                    setEditor (createEffectEditor (eff2, slotNow.type));
+            }
+            refreshModeBtnLabel();
+        });
+}
+
+// H-8 (2026-05-02): public re-mount helper.  Used by DelayDSP's Slapback
+// preset button (which flips Type back to Echo internally) so the inline
+// panel swaps from VocalDoublerDelayPanel to DelayPanel after the preset
+// loads.  Mirrors the re-mount logic at the bottom of showModeMenu's
+// callback so panel-driven Type changes show the right layout.
+void SlotComponent::remountEditor()
+{
+    if (! mRack) return;
+    const auto& slotNow = mRack->getSlot (mSlotIndex);
+    if (auto* eff = mRack->getSlotEffect(mSlotIndex))
+        setEditor (createEffectEditor (eff, slotNow.type));
+    refreshModeBtnLabel();
+}
+
+// H-9 prep (2026-05-02): preset menu.  Save / Load (Factory + My Presets) /
+// Restore Default / Save as Default / Manage Presets.  Save + Load both go
+// through EffectPresetIO::savePreset / loadPreset which use the DSP's
+// getStateInformation / setStateInformation -- so Type-umbrella state
+// (Compressor / Saturation / Delay) round-trips faithfully.  After a load,
+// the inline panel is re-mounted so a Type change in the loaded preset
+// shows the right layout.
+void SlotComponent::showPresetMenu()
+{
+    if (! mRack) return;
+    const auto& slot = mRack->getSlot (mSlotIndex);
+    DSPBase* preDsp = mRack->getSlotEffect(mSlotIndex);
+    if (! preDsp || slot.type == EffectType::None) return;
+
+    juce::PopupMenu menu;
+    const EffectType type = slot.type;
+    DSPBase* dsp          = mRack->getSlotEffect(mSlotIndex);
+
+    // ── Save Current ─────────────────────────────────────────────────────
+    menu.addItem ("Save Current Preset...", [this, type, dsp]()
+    {
+        auto* aw = new juce::AlertWindow ("Save Preset",
+            "Name this preset:", juce::AlertWindow::QuestionIcon);
+        aw->addTextEditor ("name", "", "Preset name");
+        aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
+        aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        aw->enterModalState (true,
+            juce::ModalCallbackFunction::create (
+                [aw, type, dsp] (int result)
+                {
+                    const juce::String name = aw->getTextEditorContents ("name").trim();
+                    delete aw;
+                    if (result != 1 || name.isEmpty()) return;
+                    juce::String err;
+                    if (! EffectPresetIO::savePreset (*dsp, type, name, err))
+                        juce::AlertWindow::showMessageBoxAsync (
+                            juce::AlertWindow::WarningIcon,
+                            "Could not save preset", err);
+                }),
+            true);
+    });
+
+    // ── Load Preset (Factory + My Presets sub-menus) ─────────────────────
+    auto buildLoadSubmenu = [this, type, dsp] (const juce::Array<juce::File>& files,
+                                                  juce::PopupMenu& sub,
+                                                  const juce::String& emptyHint)
+    {
+        if (files.isEmpty())
+        {
+            sub.addItem (emptyHint, false, false, [](){});
+            return;
+        }
+        for (auto& f : files)
+        {
+            const juce::String label = f.getFileNameWithoutExtension();
+            sub.addItem (label, [this, dsp, f]()
+            {
+                juce::String err;
+                if (! EffectPresetIO::loadPreset (*dsp, f, err))
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon,
+                        "Could not load preset", err);
+                    return;
+                }
+                // Re-mount the panel so Type changes inside the preset
+                // show the right layout (e.g. Compressor switching to FET).
+                remountEditor();
+            });
+        }
+    };
+
+    juce::PopupMenu loadFactory;
+    buildLoadSubmenu (EffectPresetIO::enumerateFactory (type), loadFactory,
+                       "(no factory presets)");
+    menu.addSubMenu ("Load: Factory", loadFactory);
+
+    juce::PopupMenu loadUser;
+    buildLoadSubmenu (EffectPresetIO::enumerateMyPresets (type), loadUser,
+                       "(no user presets yet)");
+    menu.addSubMenu ("Load: My Presets", loadUser);
+
+    menu.addSeparator();
+
+    // ── Restore Default ──────────────────────────────────────────────────
+    menu.addItem ("Restore Defaults", [this, type, dsp]()
+    {
+        EffectPresetIO::restoreDefaults (*dsp, type);
+        remountEditor();
+    });
+
+    // ── Save as Default ──────────────────────────────────────────────────
+    menu.addItem ("Save Current as Default", [type, dsp]()
+    {
+        juce::String err;
+        if (! EffectPresetIO::saveAsDefault (*dsp, type, err))
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::AlertWindow::WarningIcon,
+                "Could not save default", err);
+    });
+
+    menu.addSeparator();
+
+    // ── Manage Presets ───────────────────────────────────────────────────
+    menu.addItem ("Manage Presets... (open folder)", [type]()
+    {
+        const auto root = EffectPresetIO::typeRoot (type);
+        EffectPresetIO::ensureFolderTree (type);
+        if (root.isDirectory()) root.startAsProcess();
+    });
+
+    menu.showMenuAsync (juce::PopupMenu::Options{}.withTargetComponent (mPresetBtn.get()));
 }
 
 juce::String SlotComponent::effectTypeName(EffectType type)
@@ -390,6 +811,7 @@ juce::String SlotComponent::effectTypeName(EffectType type)
         case EffectType::TransientShaper: return "Transient Shaper";
         case EffectType::Tape:            return "Tape";
         case EffectType::Limiter:         return "Limiter";
+        case EffectType::DeEsser:         return "De-esser";
         default:                          return "-";
     }
 }

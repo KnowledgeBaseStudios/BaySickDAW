@@ -3,6 +3,7 @@
 #include "../Standalone/SharedUI.h"   // ParametricEQDisplay
 
 class VibeSynthProcessor;
+class BaySickVocalEditor;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VoxPage — host component for one Vox tab (Phase G-4).
@@ -24,9 +25,10 @@ public:
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped           (const juce::StringArray& files, int x, int y) override;
 
-    // BaySickVocal slot reserved for Phase H.  Listed in the enum now so the
-    // refactor lands without changing the public type — Phase H just enables
-    // the dropdown item + lazy-creates the processor on selection.
+    // H-6b (2026-05-01): Vox tabs are always BaySickVocal — no engine picker.
+    // EngineType retained for save/load back-compat but only BaySickVocal is
+    // valid going forward.  Old projects with BaySickPlayer state silently
+    // discard it on load (BaySickPlayer is no longer a Vox option).
     enum class EngineType { None, BaySickPlayer, BaySickVocal };
 
     explicit VoxPage (int pageIndex);
@@ -38,6 +40,14 @@ public:
     void switchTab    (int idx);
     int  getActiveTab () const noexcept { return mActiveTab; }
 
+    // H-6b (2026-05-01): tab labels surfaced through the PageMenuBar's
+    // setTabSlots.  StandaloneEditor calls this when the page becomes visible.
+    static juce::StringArray getTabLabels()
+    {
+        return { "BaySickVocals", "Vocal Chain", "BaySickPitch",
+                 "BaySickAlign",  "BaySickNAM/IR", "Pre Rack EQ" };
+    }
+
     int          getPageIndex() const noexcept { return mPageIndex; }
     // 2026-04-28 (G-4): page accent matches the mixer Vox-bus colour
     // (`0xff0fafa5` teal) so the ribbon tab + Mixer strip + page header
@@ -46,6 +56,11 @@ public:
 
     juce::String getClipFilePath() const                    { return mClipPath; }
     void         setClipFilePath (const juce::String& p);
+
+    // H-6b (2026-05-01): expose the clip-name label so StandaloneEditor can
+    // re-parent it into the PageMenuBar's far-right slot when this page is
+    // visible.  Label updates via setClipFilePath stay live across reparenting.
+    juce::Label* getClipFileLabel() noexcept { return &mClipFileLabel; }
 
     void          selectEngine (EngineType e);
     EngineType    getEngineType() const noexcept { return mEngineType; }
@@ -89,7 +104,7 @@ public:
     // must be called by StandaloneEditor with the global VibeSynthProcessor.
     // Bus fallback: if a saved _sendTo references kVoxBus2 and that bus isn't
     // active in the current project, the loader silently substitutes kVoxBus.
-    void setProcessor (VibeSynthProcessor* p) { mFullProcessor = p; }
+    void setProcessor (VibeSynthProcessor* p);
     void setBusActiveQuery (std::function<bool(int channelId)> q) { mBusActiveQuery = std::move (q); }
     void savePagePreset (std::function<void()> onSaved = {});
     void loadPagePreset (const juce::File& xml);

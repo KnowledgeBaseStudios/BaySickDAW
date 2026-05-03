@@ -233,6 +233,10 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/AudioClipStreamer.cpp
     Source/DSP/PhaseVocoder.cpp
     Source/DSP/CompressorDSP.cpp
+    Source/DSP/DeEsserDSP.cpp
+    Source/DSP/PitchTrackerYIN.cpp
+    Source/DSP/PitchCorrectorDSP.cpp
+    Source/DSP/BaySickAlignDSP.cpp
     Source/DSP/ReverbDSP.cpp
     Source/DSP/ChorusDSP.cpp
     Source/DSP/DelayDSP.cpp
@@ -246,11 +250,14 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/TransientShaperDSP.cpp
     Source/DSP/TapeDSP.cpp
     Source/DSP/LimiterDSP.cpp
+    Source/DSP/MicSimDSP.cpp
+    Source/DSP/MicPlacementDSP.cpp
     # Phase 2 — EffectRack + Effects Page
     Source/EffectRack.cpp
     Source/Standalone/SlotComponent.cpp
     Source/Standalone/EffectsPage.cpp
     Source/Standalone/EffectEditorPanels.cpp
+    Source/Standalone/EffectPresetIO.cpp
     # Pages
     Source/Standalone/LayersPage.cpp
     Source/Standalone/BassPage.cpp
@@ -264,6 +271,13 @@ target_sources(BaySickDAWStandalone PRIVATE
     # Phase G-1 — BaySickNAM/IR engine (Neural Amp Modeler + IR cabinet)
     Source/BaySickNAMIR/BaySickNAMIRProcessor.cpp
     Source/BaySickNAMIR/BaySickNAMIREditor.cpp
+    # Phase I-1 — BaySickPedals (8-slot guitar/bass pedal rack; editor lands in I-15)
+    Source/BaySickPedals/BaySickPedalsProcessor.cpp
+    # Phase H-1+ — BaySickVocal engine (vocal chain processor + editor)
+    Source/BaySickVocal/BaySickVocalProcessor.cpp
+    Source/BaySickVocal/BaySickVocalEditor.cpp
+    Source/BaySickVocal/BaySickPitchEditor.cpp
+    Source/BaySickVocal/BaySickAlignEditor.cpp
     # Phase G-2 — Clips page (engine picker hosts BaySickPlayer or
     # BaySickNAM/IR; spawned via Builder drop or empty-state drop, never
     # via the ribbon dropdown)
@@ -291,7 +305,7 @@ target_compile_definitions(BaySickDAWStandalone
     PUBLIC ${VIBESYNTH_DEFS} VIBESYNTH_STANDALONE=1
 )
 
-target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/Clips Source/Vox Source/Inst
+target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickVocal Source/Clips Source/Vox Source/Inst
     # Rubber Band Library (Phase 4B time-stretch) — headers only; link rubberband.lib to enable DSP
     "${CMAKE_CURRENT_SOURCE_DIR}/libs/rubberband"
     # ASIO SDK include path (empty when SDK absent — harmless to leave in the list).

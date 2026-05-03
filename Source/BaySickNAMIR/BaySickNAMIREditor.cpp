@@ -7,7 +7,33 @@
 namespace
 {
     constexpr int kEditorW       = 760;
-    constexpr int kEditorH       = 340;
+    constexpr int kEditorH       = 560;   // H-6d: grew from 340 to fit
+                                           // Mic Sim + Mic Placement rows.
+    constexpr int kMicSimRowH    = 100;   // Mic Sim section height
+    constexpr int kMicPlaceRowH  = 100;   // Mic Placement section height
+
+    // ── H-6d (2026-05-02): default Presets folders for the 3 file pickers ──
+    juce::File namIrPresetsRoot()
+    {
+        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                  .getChildFile ("BaySickDAW")
+                  .getChildFile ("Presets")
+                  .getChildFile ("BaySickNAMIR");
+    }
+    juce::File namPresetsDir()    { return namIrPresetsRoot().getChildFile ("NAM"); }
+    juce::File irPresetsDir()     { return namIrPresetsRoot().getChildFile ("IR"); }
+    juce::File micIrPresetsDir()  { return namIrPresetsRoot().getChildFile ("MIC IR"); }
+
+    // Returns the dir if it exists, or creates+returns it.  Falls back to
+    // userDocumentsDirectory if creation fails (rare; permissions issue).
+    juce::File ensurePresetsDir (const juce::File& dir)
+    {
+        if (! dir.exists())
+            dir.createDirectory();
+        return dir.exists()
+                  ? dir
+                  : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+    }
     constexpr int kHeaderH       = 28;
     constexpr int kFileRowH      = 50;
     constexpr int kKnobsRowH     = 130;
@@ -42,7 +68,15 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
       mCabMixKnob       ("Cab Mix",    100.0f,
         "Wet / dry mix on the cabinet IR (0..100 %).  100 = full cab; 0 = none."),
       mOutputKnob       ("Output",      0.0f,
-        "Master output (-24..+12 dB).  Adjust to match levels with other inserts.")
+        "Master output (-24..+12 dB).  Adjust to match levels with other inserts."),
+      mMicSimMixKnob              ("Mix",      100.0f,
+        "Mic Sim wet/dry mix (0..100 %)."),
+      mMicPlacementDistanceKnob   ("Distance", 30.0f,
+        "Virtual mic distance from the source (1..150 cm).  Closer = brighter + proximity bass; farther = darker + quieter."),
+      mMicPlacementAngleKnob      ("Angle",     0.0f,
+        "Off-axis angle (-90..+90 deg).  0 = on-axis.  Off-axis darkens the high end based on polar pattern."),
+      mMicPlacementMixKnob        ("Mix",      100.0f,
+        "Mic Placement wet/dry mix (0..100 %).")
 {
     setSize (kEditorW, kEditorH);
     setWantsKeyboardFocus (false);
@@ -193,6 +227,139 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
     mErrorLabel.setColour (juce::Label::textColourId, juce::Colour (kErrARGB));
     mErrorLabel.setJustificationType (juce::Justification::centredRight);
 
+    // ── H-6d: Mic Sim + Mic Placement sections ───────────────────────────────
+    auto setupSubSectionLbl = [] (juce::Label& l, const juce::String& txt,
+                                    const juce::String& tip)
+    {
+        l.setText (txt, juce::dontSendNotification);
+        l.setJustificationType (juce::Justification::centredLeft);
+        l.setColour (juce::Label::textColourId, juce::Colour (0xffd0d0d0));
+        l.setTooltip (tip);
+    };
+    setupSubSectionLbl (mMicSimSectionLbl, "MIC SIM",
+        "Mic fingerprint stage applied AFTER the cabinet IR.  None / Built-in "
+        "(10 generic mic archetypes) / User IR (load your own captured mic IR).");
+    setupSubSectionLbl (mMicPlacementSectionLbl, "MIC PLACEMENT",
+        "Virtual mic position model: distance + off-axis angle + polar pattern.  "
+        "Models 1/r gain, air absorption, proximity-effect bass, off-axis darkening.");
+    addAndMakeVisible (mMicSimSectionLbl);
+    addAndMakeVisible (mMicPlacementSectionLbl);
+
+    // Mic Sim mode chickenhead (None / Built-in / User IR -- exclusive)
+    addAndMakeVisible (mMicSimMode);
+    mMicSimMode.setOptions ({
+        { "Off",  "None",     "Mic Sim disabled (passthrough)" },
+        { "Bln",  "Built-in", "Use one of 10 built-in mic archetypes" },
+        { "User", "User IR",  "Load your own captured mic IR (.wav)" },
+    });
+    mMicSimMode.setBodyTooltip ("Mic Sim mode");
+    if (auto* p = processor.apvts.getRawParameterValue ("nam_micsim_mode"))
+        mMicSimMode.setSelectedIndex ((int) p->load(), juce::dontSendNotification);
+    mMicSimMode.onChange = [this] (int idx)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                          processor.apvts.getParameter ("nam_micsim_mode")))
+            p->setValueNotifyingHost (
+                p->getNormalisableRange().convertTo0to1 ((float) idx));
+        updateMicSimModeUI();
+    };
+    addAndMakeVisible (mMicSimModeLbl);
+    mMicSimModeLbl.setText ("Mode", juce::dontSendNotification);
+    mMicSimModeLbl.setJustificationType (juce::Justification::centred);
+    mMicSimModeLbl.setColour (juce::Label::textColourId, juce::Colour (0xff909090));
+
+    // Built-in model dropdown
+    addAndMakeVisible (mMicSimModelCombo);
+    for (int i = 0; i < (int) MicSimDSP::Model::kNumModels; ++i)
+        mMicSimModelCombo.addItem (MicSimDSP::modelDisplayName (i), i + 1);
+    if (auto* p = processor.apvts.getRawParameterValue ("nam_micsim_model"))
+        mMicSimModelCombo.setSelectedId ((int) p->load() + 1, juce::dontSendNotification);
+    mMicSimModelCombo.onChange = [this]()
+    {
+        const int idx = juce::jmax (0, mMicSimModelCombo.getSelectedId() - 1);
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                          processor.apvts.getParameter ("nam_micsim_model")))
+            p->setValueNotifyingHost (
+                p->getNormalisableRange().convertTo0to1 ((float) idx));
+        updateMicSimModelTooltip();
+    };
+    updateMicSimModelTooltip();
+
+    addAndMakeVisible (mMicSimModelLbl);
+    mMicSimModelLbl.setText ("Model", juce::dontSendNotification);
+    mMicSimModelLbl.setJustificationType (juce::Justification::centred);
+    mMicSimModelLbl.setColour (juce::Label::textColourId, juce::Colour (0xff909090));
+
+    // User IR file picker
+    addAndMakeVisible (mMicSimUserIrBtn);
+    mMicSimUserIrBtn.setButtonText ("Load Mic IR...");
+    mMicSimUserIrBtn.setTooltip ("Left-click: browse for a .wav mic IR.  "
+                                   "Right-click: clear the loaded IR.");
+    mMicSimUserIrBtn.onClick      = [this]() { browseForMicUserIr(); };
+    mMicSimUserIrBtn.onRightClick = [this]()
+    {
+        processor.clearUserMicIr();
+        mMicSimUserIrLabel.setText ("(no IR loaded)", juce::dontSendNotification);
+    };
+    addAndMakeVisible (mMicSimUserIrLabel);
+    mMicSimUserIrLabel.setJustificationType (juce::Justification::centredLeft);
+    mMicSimUserIrLabel.setColour (juce::Label::textColourId, juce::Colour (kCabGreenARGB));
+    mMicSimUserIrLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff1a1a1a));
+    mMicSimUserIrLabel.setColour (juce::Label::outlineColourId,    juce::Colour (0xff333333));
+    mMicSimUserIrLabel.setBorderSize ({ 2, 6, 2, 6 });
+    {
+        const auto path = processor.getMicSim().getUserIrPath();
+        mMicSimUserIrLabel.setText (path.isEmpty() ? "(no IR loaded)"
+                                                    : juce::File (path).getFileName(),
+                                      juce::dontSendNotification);
+    }
+
+    // Mic Sim mix knob
+    addAndMakeVisible (mMicSimMixKnob);
+    mMicSimMixAtt = std::make_unique<SliderAtt> (processor.apvts,
+                                                   "nam_micsim_mix",
+                                                   mMicSimMixKnob.slider);
+
+    // Mic Placement polar chickenhead
+    addAndMakeVisible (mMicPlacementPolar);
+    mMicPlacementPolar.setOptions ({
+        { "O",    "Omni",          "Equal pickup all directions; no proximity effect" },
+        { "Card", "Cardioid",      "Heart-shaped pattern; rejects rear" },
+        { "Sup",  "Supercardioid", "Tighter pattern with small rear lobe" },
+        { "Hyp",  "Hypercardioid", "Sharper still; pronounced side rejection" },
+        { "8",    "Figure-8",      "Bidirectional; equal front + rear, side rejection" },
+    });
+    mMicPlacementPolar.setBodyTooltip ("Polar pattern");
+    if (auto* p = processor.apvts.getRawParameterValue ("nam_placement_polar"))
+        mMicPlacementPolar.setSelectedIndex ((int) p->load(), juce::dontSendNotification);
+    mMicPlacementPolar.onChange = [this] (int idx)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                          processor.apvts.getParameter ("nam_placement_polar")))
+            p->setValueNotifyingHost (
+                p->getNormalisableRange().convertTo0to1 ((float) idx));
+    };
+    addAndMakeVisible (mMicPlacementPolarLbl);
+    mMicPlacementPolarLbl.setText ("Polar", juce::dontSendNotification);
+    mMicPlacementPolarLbl.setJustificationType (juce::Justification::centred);
+    mMicPlacementPolarLbl.setColour (juce::Label::textColourId, juce::Colour (0xff909090));
+
+    // Mic Placement knobs
+    addAndMakeVisible (mMicPlacementDistanceKnob);
+    addAndMakeVisible (mMicPlacementAngleKnob);
+    addAndMakeVisible (mMicPlacementMixKnob);
+    mMicPlacementDistanceAtt = std::make_unique<SliderAtt> (processor.apvts,
+                                                              "nam_placement_distance_cm",
+                                                              mMicPlacementDistanceKnob.slider);
+    mMicPlacementAngleAtt    = std::make_unique<SliderAtt> (processor.apvts,
+                                                              "nam_placement_angle_deg",
+                                                              mMicPlacementAngleKnob.slider);
+    mMicPlacementMixAtt      = std::make_unique<SliderAtt> (processor.apvts,
+                                                              "nam_placement_mix",
+                                                              mMicPlacementMixKnob.slider);
+
+    updateMicSimModeUI();
+
     // ── A/B + listener — initial sync ────────────────────────────────────────
     processor.apvts.addParameterListener ("ab_slot",       this);
     processor.apvts.addParameterListener ("oversampling",  this);
@@ -286,6 +453,102 @@ void BaySickNAMIREditor::resized()
     const int statusY = knobsY + kKnobsRowH + 8;
     mFullRigHint.setBounds (kPad, statusY, getWidth() / 2 - kPad, 22);
     mErrorLabel .setBounds (getWidth() / 2, statusY, getWidth() / 2 - kPad, 22);
+
+    // ── H-6d Mic Sim row ─────────────────────────────────────────────────────
+    const int micSimY = statusY + 26;
+    mMicSimSectionLbl.setBounds (kPad, micSimY, 100, 18);
+    {
+        const int rowY = micSimY + 22;
+        int x = kPad;
+        mMicSimModeLbl.setBounds (x, rowY,        80, 14);
+        mMicSimMode   .setBounds (x, rowY + 14,   84, 56);
+        x += 96;
+
+        mMicSimModelLbl.setBounds (x, rowY,       180, 14);
+        mMicSimModelCombo.setBounds (x, rowY + 18, 180, 22);
+        mMicSimUserIrBtn .setBounds (x, rowY + 44, 180, 22);
+        x += 192;
+
+        const int lblW = getWidth() - x - 80 - kPad - 8;
+        mMicSimUserIrLabel.setBounds (x, rowY + 18, juce::jmax (60, lblW), 22);
+
+        mMicSimMixKnob.setBounds (getWidth() - 80 - kPad, rowY, 80, 70);
+    }
+
+    // ── H-6d Mic Placement row ───────────────────────────────────────────────
+    const int placeY = micSimY + kMicSimRowH;
+    mMicPlacementSectionLbl.setBounds (kPad, placeY, 160, 18);
+    {
+        const int rowY = placeY + 22;
+        int x = kPad;
+        mMicPlacementPolarLbl.setBounds (x, rowY,      120, 14);
+        mMicPlacementPolar   .setBounds (x, rowY + 14, 120, 56);
+        x += 132;
+
+        mMicPlacementDistanceKnob.setBounds (x, rowY, 80, 70); x += 88;
+        mMicPlacementAngleKnob   .setBounds (x, rowY, 80, 70); x += 88;
+        mMicPlacementMixKnob     .setBounds (getWidth() - 80 - kPad, rowY, 80, 70);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H-6d Mic Sim helpers.
+// ─────────────────────────────────────────────────────────────────────────────
+void BaySickNAMIREditor::browseForMicUserIr()
+{
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Load Mic IR (.wav)",
+        ensurePresetsDir (micIrPresetsDir()),
+        "*.wav");
+
+    auto flags = juce::FileBrowserComponent::openMode
+               | juce::FileBrowserComponent::canSelectFiles;
+
+    chooser->launchAsync (flags, [this, chooser] (const juce::FileChooser& fc)
+    {
+        const auto file = fc.getResult();
+        if (file == juce::File()) return;
+
+        juce::String err;
+        if (processor.loadUserMicIr (file, err))
+        {
+            mMicSimUserIrLabel.setText (file.getFileName(), juce::dontSendNotification);
+            // Auto-switch the Mic Sim mode to User IR after a successful load
+            if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                              processor.apvts.getParameter ("nam_micsim_mode")))
+                p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (2.0f));
+            mMicSimMode.setSelectedIndex (2, juce::dontSendNotification);
+            updateMicSimModeUI();
+        }
+        else
+        {
+            showError (err);
+        }
+    });
+}
+
+void BaySickNAMIREditor::updateMicSimModeUI()
+{
+    const int mode = mMicSimMode.getSelectedIndex();
+    // Mode 0 = None: hide model + user IR controls (still painted as disabled)
+    // Mode 1 = Built-in: show model dropdown, hide user IR
+    // Mode 2 = User IR: hide model dropdown, show user IR file picker
+    const bool builtIn = (mode == 1);
+    const bool userIr  = (mode == 2);
+    mMicSimModelLbl   .setVisible (builtIn);
+    mMicSimModelCombo .setVisible (builtIn);
+    mMicSimUserIrBtn  .setVisible (userIr);
+    mMicSimUserIrLabel.setVisible (userIr);
+}
+
+void BaySickNAMIREditor::updateMicSimModelTooltip()
+{
+    const int idx = juce::jmax (0, mMicSimModelCombo.getSelectedId() - 1);
+    juce::String tip = juce::String ("Built-in mic archetype: ")
+                        + MicSimDSP::modelDisplayName (idx)
+                        + ".\nTypical use: "
+                        + MicSimDSP::modelTypicalUse (idx);
+    mMicSimModelCombo.setTooltip (tip);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -343,6 +606,13 @@ void BaySickNAMIREditor::updateLabels()
             juce::dontSendNotification);
     else
         mFullRigHint.setText ({}, juce::dontSendNotification);
+
+    // H-6d: per-slot Mic IR label tracks the active slot's loaded user IR.
+    const juce::String micPath = processor.getMicSim().getUserIrPath (slot);
+    mMicSimUserIrLabel.setText (micPath.isEmpty()
+                                    ? juce::String ("(no IR loaded)")
+                                    : juce::File (micPath).getFileName(),
+                                  juce::dontSendNotification);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -352,7 +622,7 @@ void BaySickNAMIREditor::browseForNamFile()
 {
     auto chooser = std::make_shared<juce::FileChooser> (
         "Choose a .nam model",
-        juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+        ensurePresetsDir (namPresetsDir()),
         "*.nam");
 
     auto flags = juce::FileBrowserComponent::openMode
@@ -380,7 +650,7 @@ void BaySickNAMIREditor::browseForIrFile()
 {
     auto chooser = std::make_shared<juce::FileChooser> (
         "Choose a .wav IR",
-        juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+        ensurePresetsDir (irPresetsDir()),
         "*.wav");
 
     auto flags = juce::FileBrowserComponent::openMode

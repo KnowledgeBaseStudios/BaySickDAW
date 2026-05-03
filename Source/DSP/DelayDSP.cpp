@@ -80,6 +80,11 @@ void DelayDSP::reset()
     mLoFiPhase = 1.0f;
     mLoFiHoldL = mLoFiHoldR = 0.0f;
     mDelayMsSmoothed.setCurrentAndTargetValue(delayMs);
+
+    // H-8: reset VocalDoubler drift phasors + ducking envelope
+    mDoubleLfoPhaseL = 0.0f;
+    mDoubleLfoPhaseR = 0.27f;
+    mDuckEnv         = 0.0f;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -278,6 +283,112 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
 
     juce::ScopedNoDenormals noDenormals;  // A1
 
+    // H-8: VocalDoubler Type runs an entirely different algorithm (dual
+    // detuned taps, no feedback, no diffusion / lo-fi / mod LFO chain).
+    if (mType == Type::VocalDoubler)
+    {
+        // Inline VocalDoubler loop -- short delay taps with per-side LFO
+        // drift gives the classic stacked-vocals doubler effect.  No
+        // feedback path so the existing Echo machinery is fully bypassed.
+        const int numSamples  = buffer.getNumSamples();
+        const int numChannels = buffer.getNumChannels();
+        if (numSamples == 0 || numChannels < 1 || mLineL.empty()) return;
+
+        float* L = buffer.getWritePointer (0);
+        float* R = (numChannels > 1) ? buffer.getWritePointer (1) : nullptr;
+
+        const int lineSize = (int) mLineL.size();
+        const float sr = (float) mSampleRate;
+
+        // Drift LFO -- per-side phase increment
+        const float lfoInc = (float) (juce::MathConstants<double>::twoPi
+                                          * (double) mDoubleRate / mSampleRate);
+        const float driftDepthMs = (mDoubleDetune * 0.01f) * 3.0f;   // 0..3 ms
+
+        // Per-sample base delay times (in samples)
+        const float baseL = (mDoubleTimeLMs * 0.001f) * sr;
+        const float baseR = (mDoubleTimeRMs * 0.001f) * sr;
+
+        // Width 0..1 -- 0 = both taps centered, 1 = full L/R split
+        const float w        = juce::jlimit (0.0f, 1.0f, mDoubleWidth * 0.01f);
+        const float lTapL    = 0.5f + 0.5f * w;   // L tap pan-left amount
+        const float lTapR    = 0.5f - 0.5f * w;   // L tap pan-right amount
+        const float rTapL    = 0.5f - 0.5f * w;
+        const float rTapR    = 0.5f + 0.5f * w;
+
+        // Ducking setup (also runs for Echo Type below).  External SC source
+        // when picked; falls back to the dry input so duck works on a single
+        // track without explicit routing.
+        const float duckThreshLin = juce::Decibels::decibelsToGain (mDuckThresholdDb);
+        const float duckAmt01     = juce::jlimit (0.0f, 1.0f, mDuckAmount * 0.01f);
+        const float duckAtk       = std::exp (-1.0f / std::max (1.0f,
+                                                                  mDuckAttackMs * 0.001f * sr));
+        const float duckRel       = std::exp (-1.0f / std::max (1.0f,
+                                                                  mDuckReleaseMs * 0.001f * sr));
+        auto* scBuf = getActiveSidechain();
+        const float* scL = (scBuf && scBuf->getNumChannels() > 0)
+                              ? scBuf->getReadPointer (0) : nullptr;
+        const float* scR = (scBuf && scBuf->getNumChannels() > 1)
+                              ? scBuf->getReadPointer (1) : scL;
+        const int scN = scBuf ? scBuf->getNumSamples() : 0;
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float inL = L[i];
+            const float inR = R ? R[i] : inL;
+
+            // Write dry mono-summed input into both lines
+            const float monoIn = 0.5f * (inL + inR);
+            mLineL[mWritePos] = monoIn * mWetIn;
+            mLineR[mWritePos] = monoIn * mWetIn;
+
+            // Per-side drift phasors (decorrelated by initial phase offset)
+            const float driftL = std::sin (mDoubleLfoPhaseL) * driftDepthMs * 0.001f * sr;
+            const float driftR = std::sin (mDoubleLfoPhaseR) * driftDepthMs * 0.001f * sr;
+            mDoubleLfoPhaseL += lfoInc;
+            mDoubleLfoPhaseR += lfoInc * 1.13f;   // slight rate offset for natural drift
+            while (mDoubleLfoPhaseL >= juce::MathConstants<float>::twoPi)
+                mDoubleLfoPhaseL -= juce::MathConstants<float>::twoPi;
+            while (mDoubleLfoPhaseR >= juce::MathConstants<float>::twoPi)
+                mDoubleLfoPhaseR -= juce::MathConstants<float>::twoPi;
+
+            // Read positions for L + R taps with drift
+            const float posL = (float) mWritePos - juce::jmax (1.0f, baseL + driftL);
+            const float posR = (float) mWritePos - juce::jmax (1.0f, baseR + driftR);
+            const float wrappedL = posL < 0.0f ? posL + (float) lineSize : posL;
+            const float wrappedR = posR < 0.0f ? posR + (float) lineSize : posR;
+            const float tapL = linInterp (mLineL, wrappedL, lineSize);
+            const float tapR = linInterp (mLineR, wrappedR, lineSize);
+
+            // Stereo recombine using width pans
+            float wetL = tapL * lTapL + tapR * rTapL;
+            float wetR = tapL * lTapR + tapR * rTapR;
+
+            // Ducking on the wet only -- envelope follows external SC if a
+            // source is picked, otherwise self-sidechains on the dry input.
+            const float trigL = (scL && i < scN) ? scL[i] : inL;
+            const float trigR = (scR && i < scN) ? scR[i] : inR;
+            const float inEnvSrc = std::max (std::abs (trigL), std::abs (trigR));
+            const float coef = (inEnvSrc > mDuckEnv) ? duckAtk : duckRel;
+            mDuckEnv = inEnvSrc + (mDuckEnv - inEnvSrc) * coef;
+            const float overshoot = std::max (0.0f, mDuckEnv - duckThreshLin);
+            const float duckScalar = (duckAmt01 > 0.0f && overshoot > 0.0f)
+                                        ? juce::jmax (0.0f, 1.0f - duckAmt01
+                                              * juce::jmin (1.0f, overshoot / duckThreshLin))
+                                        : 1.0f;
+            wetL *= duckScalar;
+            wetR *= duckScalar;
+
+            // Final mix (no feedback writeback -- VocalDoubler has no FB path)
+            L[i] = inL * mDryOut + wetL * mWetOut;
+            if (R) R[i] = inR * mDryOut + wetR * mWetOut;
+
+            mWritePos = (mWritePos + 1) % lineSize;
+        }
+
+        return;   // skip the Echo path entirely
+    }
+
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
     if (numSamples == 0 || numChannels < 1 || mLineL.empty()) return;
@@ -286,6 +397,22 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
     float* R = (numChannels > 1) ? buffer.getWritePointer(1) : nullptr;
 
     const int lineSize = static_cast<int>(mLineL.size());
+
+    // H-8: ducking setup for Echo path -- same envelope follower + threshold
+    // logic as the VocalDoubler branch above.  Wet output is attenuated when
+    // the SC trigger crosses threshold.  External SC source if picked,
+    // otherwise self-sidechains on the dry input.
+    const float duckThreshLin = juce::Decibels::decibelsToGain (mDuckThresholdDb);
+    const float duckAmt01     = juce::jlimit (0.0f, 1.0f, mDuckAmount * 0.01f);
+    const float sr            = (float) mSampleRate;
+    const float duckAtk       = std::exp (-1.0f / std::max (1.0f, mDuckAttackMs  * 0.001f * sr));
+    const float duckRel       = std::exp (-1.0f / std::max (1.0f, mDuckReleaseMs * 0.001f * sr));
+    auto* scBufEcho = getActiveSidechain();
+    const float* scL_E = (scBufEcho && scBufEcho->getNumChannels() > 0)
+                              ? scBufEcho->getReadPointer (0) : nullptr;
+    const float* scR_E = (scBufEcho && scBufEcho->getNumChannels() > 1)
+                              ? scBufEcho->getReadPointer (1) : scL_E;
+    const int scN_E = scBufEcho ? scBufEcho->getNumSamples() : 0;
 
     // LFO increment per sample
     const float lfoInc = static_cast<float>(
@@ -471,6 +598,23 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         // Output limiter (protect when feedback > 1 causes buildup)
         outL = juce::jlimit(-1.0f, 1.0f, outL);
         outR = juce::jlimit(-1.0f, 1.0f, outR);
+
+        // H-8: ducking on the wet output only.  Trigger = external SC source
+        // if picked, otherwise self-sidechain on the dry input.  duckScalar
+        // = 1.0 when amount = 0 (back-compat, no audible change vs pre-H-8
+        // Echo path).
+        const float trigL_E = (scL_E && i < scN_E) ? scL_E[i] : inL;
+        const float trigR_E = (scR_E && i < scN_E) ? scR_E[i] : inR;
+        const float inEnvSrc = std::max (std::abs (trigL_E), std::abs (trigR_E));
+        const float coef = (inEnvSrc > mDuckEnv) ? duckAtk : duckRel;
+        mDuckEnv = inEnvSrc + (mDuckEnv - inEnvSrc) * coef;
+        const float overshoot = std::max (0.0f, mDuckEnv - duckThreshLin);
+        const float duckScalar = (duckAmt01 > 0.0f && overshoot > 0.0f)
+                                    ? juce::jmax (0.0f, 1.0f - duckAmt01
+                                          * juce::jmin (1.0f, overshoot / duckThreshLin))
+                                    : 1.0f;
+        outL *= duckScalar;
+        outR *= duckScalar;
 
         // Final mix
         L[i] = inL * mDryOut + outL * mWetOut;
@@ -788,6 +932,19 @@ void DelayDSP::getStateInformation (juce::MemoryBlock& dest)
         state.setProperty(juce::Identifier("bandDelayMs" + juce::String(k)),
                           mBandDelayMs[(size_t) k], nullptr);
 
+    // H-8 (2026-05-02): Type umbrella + VocalDoubler params + ducking.
+    // Pre-H-8 presets default to Type=Echo via getProperty fallback.
+    state.setProperty ("type",             (int) mType,       nullptr);
+    state.setProperty ("doubleTimeLMs",    mDoubleTimeLMs,    nullptr);
+    state.setProperty ("doubleTimeRMs",    mDoubleTimeRMs,    nullptr);
+    state.setProperty ("doubleDetune",     mDoubleDetune,     nullptr);
+    state.setProperty ("doubleWidth",      mDoubleWidth,      nullptr);
+    state.setProperty ("doubleRate",       mDoubleRate,       nullptr);
+    state.setProperty ("duckAmount",       mDuckAmount,       nullptr);
+    state.setProperty ("duckThresholdDb",  mDuckThresholdDb,  nullptr);
+    state.setProperty ("duckAttackMs",     mDuckAttackMs,     nullptr);
+    state.setProperty ("duckReleaseMs",    mDuckReleaseMs,    nullptr);
+
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     if (xml) juce::AudioProcessor::copyXmlToBinary(*xml, dest);
 }
@@ -855,6 +1012,21 @@ void DelayDSP::setStateInformation (const void* data, int sz)
     if (! state.hasProperty("wetOut"))         mWetOut        = wet;
     if (! state.hasProperty("delayModel") && pingPong) mDelayModel = 2;
 
+    // H-8 (2026-05-02): Type umbrella + VocalDoubler params + ducking.
+    // Pre-H-8 presets lack these keys; getProperty fallback hands back our
+    // current defaults (Echo, sane VocalDoubler defaults, duck disabled),
+    // so existing presets sound exactly the same as before.
+    mType            = (Type) (int) state.getProperty ("type",             (int) mType);
+    mDoubleTimeLMs   = (float) (double) state.getProperty ("doubleTimeLMs", (double) mDoubleTimeLMs);
+    mDoubleTimeRMs   = (float) (double) state.getProperty ("doubleTimeRMs", (double) mDoubleTimeRMs);
+    mDoubleDetune    = (float) (double) state.getProperty ("doubleDetune",  (double) mDoubleDetune);
+    mDoubleWidth     = (float) (double) state.getProperty ("doubleWidth",   (double) mDoubleWidth);
+    mDoubleRate      = (float) (double) state.getProperty ("doubleRate",    (double) mDoubleRate);
+    mDuckAmount      = (float) (double) state.getProperty ("duckAmount",    (double) mDuckAmount);
+    mDuckThresholdDb = (float) (double) state.getProperty ("duckThresholdDb", (double) mDuckThresholdDb);
+    mDuckAttackMs    = (float) (double) state.getProperty ("duckAttackMs",  (double) mDuckAttackMs);
+    mDuckReleaseMs   = (float) (double) state.getProperty ("duckReleaseMs", (double) mDuckReleaseMs);
+
     if (mSampleRate > 0.0)
     {
         recalcTargetDelay();
@@ -873,4 +1045,116 @@ void DelayDSP::setStateInformation (const void* data, int sz)
         // A2 -- Snap the smoother so state-load doesn't trigger a 100 ms slide.
         mDelayMsSmoothed.setCurrentAndTargetValue(delayMs);
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H-8 (2026-05-02): Type umbrella + VocalDoubler + ducking + Slapback preset.
+// ─────────────────────────────────────────────────────────────────────────────
+void DelayDSP::setType (int t)
+{
+    const Type newT = (t == (int) Type::VocalDoubler) ? Type::VocalDoubler
+                                                      : Type::Echo;
+    if (newT == mType) return;
+    mType = newT;
+    // Reset transient per-Type state so the user doesn't hear leftover
+    // tails from the previous Type when switching.
+    mDoubleLfoPhaseL = 0.0f;
+    mDoubleLfoPhaseR = 0.27f;
+}
+
+void DelayDSP::setDoubleTimeLMs (float ms)
+{
+    const float v = juce::jlimit (5.0f, 50.0f, ms);
+    if (juce::approximatelyEqual (v, mDoubleTimeLMs)) return;
+    mDoubleTimeLMs = v;
+}
+
+void DelayDSP::setDoubleTimeRMs (float ms)
+{
+    const float v = juce::jlimit (5.0f, 50.0f, ms);
+    if (juce::approximatelyEqual (v, mDoubleTimeRMs)) return;
+    mDoubleTimeRMs = v;
+}
+
+void DelayDSP::setDoubleDetune (float pct)
+{
+    const float v = juce::jlimit (0.0f, 100.0f, pct);
+    if (juce::approximatelyEqual (v, mDoubleDetune)) return;
+    mDoubleDetune = v;
+}
+
+void DelayDSP::setDoubleWidth (float pct)
+{
+    const float v = juce::jlimit (0.0f, 100.0f, pct);
+    if (juce::approximatelyEqual (v, mDoubleWidth)) return;
+    mDoubleWidth = v;
+}
+
+void DelayDSP::setDoubleRate (float hz)
+{
+    const float v = juce::jlimit (0.1f, 2.0f, hz);
+    if (juce::approximatelyEqual (v, mDoubleRate)) return;
+    mDoubleRate = v;
+}
+
+void DelayDSP::setDuckAmount (float pct)
+{
+    const float v = juce::jlimit (0.0f, 100.0f, pct);
+    if (juce::approximatelyEqual (v, mDuckAmount)) return;
+    mDuckAmount = v;
+}
+
+void DelayDSP::setDuckThresholdDb (float db)
+{
+    const float v = juce::jlimit (-60.0f, 0.0f, db);
+    if (juce::approximatelyEqual (v, mDuckThresholdDb)) return;
+    mDuckThresholdDb = v;
+}
+
+void DelayDSP::setDuckAttackMs (float ms)
+{
+    const float v = juce::jlimit (1.0f, 200.0f, ms);
+    if (juce::approximatelyEqual (v, mDuckAttackMs)) return;
+    mDuckAttackMs = v;
+}
+
+void DelayDSP::setDuckReleaseMs (float ms)
+{
+    const float v = juce::jlimit (10.0f, 1000.0f, ms);
+    if (juce::approximatelyEqual (v, mDuckReleaseMs)) return;
+    mDuckReleaseMs = v;
+}
+
+// Slapback preset = single short delay (~110 ms), low feedback, low wet, no
+// diffusion, no mod, slight tone tilt.  Writes Echo-Type values; if user is
+// on VocalDoubler, switches Type back to Echo first so the preset audibly
+// applies.
+void DelayDSP::presetSlapback()
+{
+    setType ((int) Type::Echo);
+    setDelayModel (0);            // Stereo
+    setDelayMs (110.0f);
+    setStereoSpread (0.0f);
+    setOffsetPan (0.0f);
+    setFeedbackLevel (0.12f);
+    setFeedbackFilterType (0);    // LP
+    setFeedbackCutoff (8000.0f);
+    setFeedbackResonance (0.7f);
+    setLoFiBits (24.0f);
+    setLoFiSampleRate (48000.0f);
+    setDiffusionLevel (0.0f);
+    setDiffusionSpread (0.5f);
+    setModRate (0.0f);
+    setModTimeMod (0.0f);
+    setModCutoffMod (0.0f);
+    setFBDistType (0);            // Limit
+    setFBDistLevel (1.0f);
+    setTone (0.15f);              // mild high-shelf cut for vintage feel
+    setWetIn (1.0f);
+    setWetOut (0.30f);
+    setDryOut (1.0f);
+    setKeepPitch (false);
+    setSmoothing (0.5f);
+    setTempoSync (false);
+    // Ducking left where the user had it; Slapback doesn't override it.
 }

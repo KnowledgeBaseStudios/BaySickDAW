@@ -815,10 +815,12 @@ void BassPage::loadPreset (const juce::File& xml)
             else
                 path = juce::File (pathStr);
 
-            auto& mgr = vp->getSynth().getManager();
-            if      (kind == "sfz"    && path.existsAsFile()) mgr.loadSFZ        (path);
-            else if (kind == "file"   && path.existsAsFile()) mgr.loadSingleFile (path);
-            else if (kind == "folder" && path.isDirectory())  mgr.loadFolder     (path);
+            // 2026-05-02: route through the processor wrappers so the
+            // sample path lives on apvts.state for project-save replay.
+            // No normalizeRoot here -- preserve SFZ keymap for melodic play.
+            if      (kind == "sfz"    && path.existsAsFile()) vp->loadSampleSFZ    (path);
+            else if (kind == "file"   && path.existsAsFile()) vp->loadSampleFile   (path);
+            else if (kind == "folder" && path.isDirectory())  vp->loadSampleFolder (path);
         }
 
     // Use the preset's filename as the tab's display name.  Bass/Layers

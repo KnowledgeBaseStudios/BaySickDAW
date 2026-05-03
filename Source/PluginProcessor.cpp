@@ -125,6 +125,12 @@ VibeSynthProcessor::VibeSynthProcessor()
         mAudioRowPeakDb [i].store(-60.0f, std::memory_order_relaxed);
         mAudioRowPeakDbL[i].store(-60.0f, std::memory_order_relaxed);
         mAudioRowPeakDbR[i].store(-60.0f, std::memory_order_relaxed);
+        // 2026-05-02: running-max variants start at -inf so a "no audio
+        // wrote this block" case skips promotion (snapshot keeps decaying).
+        constexpr float kNI = -std::numeric_limits<float>::infinity();
+        mAudioRowPeakDbRun [i].store(kNI, std::memory_order_relaxed);
+        mAudioRowPeakDbLRun[i].store(kNI, std::memory_order_relaxed);
+        mAudioRowPeakDbRRun[i].store(kNI, std::memory_order_relaxed);
     }
 
     // G-7 polish (2026-04-29): bumped low → normal.  At low priority the bg
@@ -1141,9 +1147,24 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 mClipEngines[ci]->processBlock(mClipEngineScratch, clipPageMidi[ci]);
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Audio, ci,
                                           mClipEngineScratch, bpmForInserts, anySolo);
-                mAudioRowPeakDb[ci].store(
-                    mVibeGraph.getInsertPeakDb(VibeGraph::InsertKind::Audio, ci),
-                    std::memory_order_relaxed);
+                // 2026-05-02: drain-and-merge into running-max companions.
+                // End-of-processBlock promotion lifts them into the UI-visible
+                // atomics atomically alongside every other meter.
+                {
+                    const auto [pkL, pkR] = mVibeGraph.drainInsertPeakDbStereo(
+                        VibeGraph::InsertKind::Audio, ci);
+                    auto rowCasMax = [] (std::atomic<float>& a, float v) noexcept
+                    {
+                        if (v == -std::numeric_limits<float>::infinity()) return;
+                        float cur = a.load(std::memory_order_relaxed);
+                        while (cur < v
+                               && ! a.compare_exchange_weak(cur, v, std::memory_order_relaxed))
+                        {}
+                    };
+                    rowCasMax(mAudioRowPeakDbLRun[ci], pkL);
+                    rowCasMax(mAudioRowPeakDbRRun[ci], pkR);
+                    rowCasMax(mAudioRowPeakDbRun [ci], juce::jmax(pkL, pkR));
+                }
                 routeInsertOutput(MixerChannelIds::audioInsert(ci),
                                    mClipEngineScratch, numSamples);
             }
@@ -1243,13 +1264,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 // D3: skip clips that have been silenced by a choke fire.
                 if (player.mutedByChoke)
                 {
-                    if (inRange) mAudioRowPeakDb[row].store (-60.0f, std::memory_order_relaxed);
+                    if (inRange) mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
                     continue;
                 }
 
                 if (rowMuted || builderRowMuted)
                 {
-                    if (inRange) mAudioRowPeakDb[row].store (-60.0f, std::memory_order_relaxed);
+                    if (inRange) mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
                     continue;
                 }
 
@@ -1266,7 +1287,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 const int64 fileTotalSamples = player.streamer->getTotalLength();
                 if (filePos >= fileTotalSamples)
                 {
-                    if (inRange) mAudioRowPeakDb[row].store (-60.0f, std::memory_order_relaxed);
+                    if (inRange) mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
                     continue;
                 }
 
@@ -1437,15 +1458,23 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 {
                     mVibeGraph.processInsert(VibeGraph::InsertKind::Audio, row,
                                               mAudioClipScratch, bpmAC, anySolo);
-                    // 2026-04-30: copy mono + stereo peakDb to per-row atomics
-                    // for the split DBFSMeter.  Mono kept for legacy readers.
-                    mAudioRowPeakDb[row].store(
-                        mVibeGraph.getInsertPeakDb(VibeGraph::InsertKind::Audio, row),
-                        std::memory_order_relaxed);
-                    const auto [pkL, pkR] = mVibeGraph.getInsertPeakDbStereo(
+                    // 2026-05-02: drain-and-merge -- exchange the InsertNode's
+                    // L/R peaks (resets per-block running-max window) and
+                    // CAS-max into the audio-row mirror so cross-block max
+                    // accumulates until UI vblank exchanges-and-resets it.
+                    const auto [pkL, pkR] = mVibeGraph.drainInsertPeakDbStereo(
                         VibeGraph::InsertKind::Audio, row);
-                    mAudioRowPeakDbL[row].store(pkL, std::memory_order_relaxed);
-                    mAudioRowPeakDbR[row].store(pkR, std::memory_order_relaxed);
+                    auto arCasMax = [] (std::atomic<float>& a, float v) noexcept
+                    {
+                        if (v == -std::numeric_limits<float>::infinity()) return;
+                        float cur = a.load(std::memory_order_relaxed);
+                        while (cur < v
+                               && ! a.compare_exchange_weak(cur, v, std::memory_order_relaxed))
+                        {}
+                    };
+                    arCasMax(mAudioRowPeakDbLRun[row], pkL);
+                    arCasMax(mAudioRowPeakDbRRun[row], pkR);
+                    arCasMax(mAudioRowPeakDbRun [row], juce::jmax(pkL, pkR));
                     // 5F-4b B1b: route this audio insert's output via graph (main + sends)
                     routeInsertOutput(MixerChannelIds::audioInsert(row),
                                        mAudioClipScratch, numSamples);
@@ -1578,24 +1607,25 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
             // Mono atomic kept (= max(L, R)) for legacy readers.
             {
-                constexpr float kDecayDbPerSec = 30.0f;
-                const float decayPerBlock = kDecayDbPerSec * (float) numSamples
-                                            / (float) juce::jmax(1.0, getSampleRate());
+                // 2026-05-02: CAS-max into running-max companions; end-of-block
+                // promotion lifts to UI-visible atomics.
                 const int nc = clipsBus.getNumChannels();
                 const float pkLin_L = clipsBus.getMagnitude(0, 0, numSamples);
                 const float pkLin_R = (nc >= 2) ? clipsBus.getMagnitude(1, 0, numSamples)
                                                 : pkLin_L;
                 const float thisL = juce::Decibels::gainToDecibels(pkLin_L, -60.0f);
                 const float thisR = juce::Decibels::gainToDecibels(pkLin_R, -60.0f);
-                const float prevL = mAudioClipsBusPeakDbL.load(std::memory_order_relaxed);
-                const float prevR = mAudioClipsBusPeakDbR.load(std::memory_order_relaxed);
-                const float decL  = juce::jmax(-60.0f, prevL - decayPerBlock);
-                const float decR  = juce::jmax(-60.0f, prevR - decayPerBlock);
-                const float newL  = juce::jmax(thisL, decL);
-                const float newR  = juce::jmax(thisR, decR);
-                mAudioClipsBusPeakDbL.store(newL,                   std::memory_order_relaxed);
-                mAudioClipsBusPeakDbR.store(newR,                   std::memory_order_relaxed);
-                mAudioClipsBusPeakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
+                const float thisM = juce::jmax(thisL, thisR);
+                auto casMaxLocal = [] (std::atomic<float>& a, float v) noexcept
+                {
+                    float cur = a.load(std::memory_order_relaxed);
+                    while (cur < v
+                           && ! a.compare_exchange_weak(cur, v, std::memory_order_relaxed))
+                    {}
+                };
+                casMaxLocal(mAudioClipsBusPeakDbLRun, thisL);
+                casMaxLocal(mAudioClipsBusPeakDbRRun, thisR);
+                casMaxLocal(mAudioClipsBusPeakDbRun,  thisM);
             }
 
             // Hand the bus buffer to VibeGraph for the master rack.
@@ -1699,30 +1729,32 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             std::atomic<float>*                                      peakR;
             const char*                                              prefix;   // e.g. "mixer_voxbus"
         };
+        // 2026-05-02: pass the Run companion atomics here -- audio CAS-maxes
+        // into Run during processing, end-of-block promote lifts to snapshot.
         const BusSet kBusSets[] = {
             { MixerChannelIds::kVoxBus,
               mVibeGraph.getVoxBusPreEQ(),  mVibeGraph.getVoxBusRack(),  mVibeGraph.getVoxBusEQ(),
               &VibeGraph::applyVoxBusPolarityWidth,
-              &mVoxBusPeakDb,  &mVoxBusPeakDbL,  &mVoxBusPeakDbR,  "mixer_voxbus"  },
+              &mVoxBusPeakDbRun,  &mVoxBusPeakDbLRun,  &mVoxBusPeakDbRRun,  "mixer_voxbus"  },
             { MixerChannelIds::kInstBus,
               mVibeGraph.getInstBusPreEQ(), mVibeGraph.getInstBusRack(), mVibeGraph.getInstBusEQ(),
               &VibeGraph::applyInstBusPolarityWidth,
-              &mInstBusPeakDb, &mInstBusPeakDbL, &mInstBusPeakDbR, "mixer_instbus" },
+              &mInstBusPeakDbRun, &mInstBusPeakDbLRun, &mInstBusPeakDbRRun, "mixer_instbus" },
             // G-6 (2026-04-29): secondary buses.  Always processed (cheap when
             // no inserts route to them — buffer is silent).  UI activation
             // (Mixer "Add Vox/Inst Bus" button) is independent of audio path.
             { MixerChannelIds::kVoxBus2,
               mVibeGraph.getVoxBus2PreEQ(),  mVibeGraph.getVoxBus2Rack(),  mVibeGraph.getVoxBus2EQ(),
               &VibeGraph::applyVoxBus2PolarityWidth,
-              &mVoxBus2PeakDb,  &mVoxBus2PeakDbL,  &mVoxBus2PeakDbR,  "mixer_voxbus2"  },
+              &mVoxBus2PeakDbRun,  &mVoxBus2PeakDbLRun,  &mVoxBus2PeakDbRRun,  "mixer_voxbus2"  },
             { MixerChannelIds::kInstBus2,
               mVibeGraph.getInstBus2PreEQ(), mVibeGraph.getInstBus2Rack(), mVibeGraph.getInstBus2EQ(),
               &VibeGraph::applyInstBus2PolarityWidth,
-              &mInstBus2PeakDb, &mInstBus2PeakDbL, &mInstBus2PeakDbR, "mixer_instbus2" },
+              &mInstBus2PeakDbRun, &mInstBus2PeakDbLRun, &mInstBus2PeakDbRRun, "mixer_instbus2" },
             { MixerChannelIds::kInstBus3,
               mVibeGraph.getInstBus3PreEQ(), mVibeGraph.getInstBus3Rack(), mVibeGraph.getInstBus3EQ(),
               &VibeGraph::applyInstBus3PolarityWidth,
-              &mInstBus3PeakDb, &mInstBus3PeakDbL, &mInstBus3PeakDbR, "mixer_instbus3" },
+              &mInstBus3PeakDbRun, &mInstBus3PeakDbLRun, &mInstBus3PeakDbRRun, "mixer_instbus3" },
         };
         const bool globalBypass =
             (apvts.getRawParameterValue("master_fx_bypass") != nullptr)
@@ -1816,26 +1848,28 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             }
 
             // Hold + decay peak meter (matches InsertNode pattern).
-            // 2026-04-30: stereo L/R for split DBFSMeter (mono = max(L,R)).
+            // 2026-05-02: CAS-max running peak; UI vblank exchanges-and-resets.
+            // Decay lives on the UI thread (DBFSMeter ballistics).  Same pattern
+            // as Layers/Bass/Drums/Master/FxBus/AudioClipsBus.
             {
-                constexpr float kDecayDbPerSec = 30.0f;
-                const float decayPerBlock = kDecayDbPerSec * (float) numSamples
-                                            / (float) juce::jmax (1.0, getSampleRate());
                 const int   nc      = buf.getNumChannels();
                 const float pkLin_L = buf.getMagnitude (0, 0, numSamples);
                 const float pkLin_R = (nc >= 2) ? buf.getMagnitude (1, 0, numSamples)
                                                 : pkLin_L;
                 const float thisL = juce::Decibels::gainToDecibels (pkLin_L, -60.0f);
                 const float thisR = juce::Decibels::gainToDecibels (pkLin_R, -60.0f);
-                const float prevL = bs.peakL->load (std::memory_order_relaxed);
-                const float prevR = bs.peakR->load (std::memory_order_relaxed);
-                const float decL  = juce::jmax (-60.0f, prevL - decayPerBlock);
-                const float decR  = juce::jmax (-60.0f, prevR - decayPerBlock);
-                const float newL  = juce::jmax (thisL, decL);
-                const float newR  = juce::jmax (thisR, decR);
-                bs.peakL->store (newL,                   std::memory_order_relaxed);
-                bs.peakR->store (newR,                   std::memory_order_relaxed);
-                bs.peak ->store (juce::jmax (newL, newR),std::memory_order_relaxed);
+                const float thisM = juce::jmax (thisL, thisR);
+                auto vbCasMax = [] (std::atomic<float>* a, float v) noexcept
+                {
+                    if (! a) return;
+                    float cur = a->load (std::memory_order_relaxed);
+                    while (cur < v
+                           && ! a->compare_exchange_weak (cur, v, std::memory_order_relaxed))
+                    {}
+                };
+                vbCasMax (bs.peakL, thisL);
+                vbCasMax (bs.peakR, thisR);
+                vbCasMax (bs.peak,  thisM);
             }
 
             routeInsertOutput (bs.chId, buf, numSamples);
@@ -1875,13 +1909,23 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 mVibeGraph.processEffectsBus (*fxAccum, bpmForInserts,
                                                 fxBusAnySolo, fxPanLaw);
 
-                // Mirror EffectsBusNode internal peak atomics into PluginProcessor
-                // atomics so the MixerPage timer pushes them into the strip's
-                // DBFSMeter (same shape as the other bus peak atomics).
-                const auto [pkL, pkR] = mVibeGraph.getEffectsBusPeakDbStereo();
-                mFxBusPeakDbL.store (pkL, std::memory_order_relaxed);
-                mFxBusPeakDbR.store (pkR, std::memory_order_relaxed);
-                mFxBusPeakDb .store (juce::jmax (pkL, pkR), std::memory_order_relaxed);
+                // 2026-05-02: drain-and-merge -- exchange the FxBus node's
+                // running-max atomics (resets them to -inf so the next block
+                // starts fresh) and CAS-max into the processor mirror so the
+                // mirror accumulates running max across blocks.  UI vblank
+                // exchange-and-resets the mirror to take a per-frame window.
+                const auto [pkL, pkR] = mVibeGraph.drainEffectsBusPeakDbStereo();
+                auto fxCasMax = [] (std::atomic<float>& a, float v) noexcept
+                {
+                    if (v == -std::numeric_limits<float>::infinity()) return;
+                    float cur = a.load(std::memory_order_relaxed);
+                    while (cur < v
+                           && ! a.compare_exchange_weak(cur, v, std::memory_order_relaxed))
+                    {}
+                };
+                fxCasMax (mFxBusPeakDbLRun, pkL);
+                fxCasMax (mFxBusPeakDbRRun, pkR);
+                fxCasMax (mFxBusPeakDbRun,  juce::jmax (pkL, pkR));
 
                 // Fan the post-pipeline output to FX Bus's _sendTo destination
                 // (default = Master).
@@ -2070,47 +2114,17 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── Copy peak levels from graph to processor atomics (for Mixer UI) ──
-    // 2026-04-30: stereo L/R copies added alongside mono for the new split
-    // DBFSMeter.  Mono atomics (max(L,R)) kept for legacy readers.
-    mLayersPeakDb .store(mVibeGraph.layersPeakDb .load(), std::memory_order_relaxed);
-    mLayersPeakDbL.store(mVibeGraph.layersPeakDbL.load(), std::memory_order_relaxed);
-    mLayersPeakDbR.store(mVibeGraph.layersPeakDbR.load(), std::memory_order_relaxed);
-    mBassPeakDb   .store(mVibeGraph.bassPeakDb   .load(), std::memory_order_relaxed);
-    mBassPeakDbL  .store(mVibeGraph.bassPeakDbL  .load(), std::memory_order_relaxed);
-    mBassPeakDbR  .store(mVibeGraph.bassPeakDbR  .load(), std::memory_order_relaxed);
-    mDrumsPeakDb  .store(mVibeGraph.drumsPeakDb  .load(), std::memory_order_relaxed);
-    mDrumsPeakDbL .store(mVibeGraph.drumsPeakDbL .load(), std::memory_order_relaxed);
-    mDrumsPeakDbR .store(mVibeGraph.drumsPeakDbR .load(), std::memory_order_relaxed);
-    mMasterPeakDb .store(mVibeGraph.masterPeakDb .load(), std::memory_order_relaxed);
-    mMasterPeakDbL.store(mVibeGraph.masterPeakDbL.load(), std::memory_order_relaxed);
-    mMasterPeakDbR.store(mVibeGraph.masterPeakDbR.load(), std::memory_order_relaxed);
+    // 2026-05-02: bus drainAndMerge moved to the very end of processBlock
+    // (right next to the insert snapshot promotion) so the entire UI-visible
+    // meter state updates as one back-to-back block.  See the unified call
+    // site at the bottom of this function.
 
-    // 2026-04-30: peak-meter decay for transport-stopped state.
-    // The per-clip path (which writes mAudioRowPeakDb*) is gated by
-    // pos.getIsPlaying(), and ditto for the song-mode-only ClipsBus
-    // accumulator.  When transport stops they STOP firing — and without
-    // fresh writes the atomics freeze at the last value, which makes the
-    // strip meter wiggle ±1 segment around the frozen level instead of
-    // decaying to -60.  Apply a uniform 30 dB/sec decay every block.
-    // When clips ARE playing, the per-clip path writes fresh peaks BEFORE
-    // this point, so the decay only affects rows that didn't get a write.
-    {
-        constexpr float kDecayDbPerSec = 30.0f;
-        const float decayPerBlock = kDecayDbPerSec * (float) numSamples
-                                    / (float) juce::jmax(1.0, mSampleRate);
-        auto decay = [decayPerBlock](std::atomic<float>& a) noexcept
-        {
-            const float p = a.load(std::memory_order_relaxed);
-            a.store(juce::jmax(-60.0f, p - decayPerBlock), std::memory_order_relaxed);
-        };
-        for (int r = 0; r < kMaxAudioRows; ++r)
-        {
-            decay(mAudioRowPeakDb [r]);
-            decay(mAudioRowPeakDbL[r]);
-            decay(mAudioRowPeakDbR[r]);
-        }
-    }
+    // 2026-05-02: transport-stopped decay was needed under the old "atomic
+    // frozen at last value" model.  Under the new vsync architecture, UI
+    // exchange-and-resets the row mirrors each vblank -- when no audio
+    // writes them, the mirrors hold -inf (post-exchange).  The DBFSMeter's
+    // own UI-thread ballistics decay the displayed value to -60 on its own.
+    // No audio-side decay needed.
 
     // F4 reverted 2026-04-24: the master-bus Play/Stop fade silenced audition
     // when the transport wasn't running (audition produces audio without
@@ -2162,6 +2176,76 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             mOverload85Samples = (int64_t)(0.25 * mSampleRate);
         }
     }
+
+    // 2026-05-02: end-of-audio-block atomic snapshot for ALL meters.  This
+    // is the single boundary point where every UI-visible peak atomic gets
+    // updated.  Three groups:
+    //   1. Layers/Bass/Drums/Master bus mirrors -- drained from VibeGraph
+    //      mirror atomics (which were drained from node atomics earlier).
+    //   2. Audio rows + AudioClipsBus + FxBus + Vox/Inst (incl. secondary)
+    //      -- promoted from Run companion atomics (audio CAS-maxes Run during
+    //      processBlock; promotion lifts Run -> snapshot).
+    //   3. Inserts in every node + slot atomics in every rack -- promoted by
+    //      VibeGraph::promoteAllInsertPeakSnapshots().
+    // All three happen back-to-back so a UI vblank firing anywhere outside
+    // this small window catches a coherent snapshot across every meter.
+    {
+        constexpr float kPeakNegInf = -std::numeric_limits<float>::infinity();
+        auto drainAndMerge = [] (std::atomic<float>& mirror, std::atomic<float>& nodeAtom) noexcept
+        {
+            const float v = nodeAtom.exchange (kPeakNegInf, std::memory_order_relaxed);
+            if (v == kPeakNegInf) return;
+            float cur = mirror.load (std::memory_order_relaxed);
+            while (cur < v && ! mirror.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+            {}
+        };
+        // Group 1: bus mirrors (Layers/Bass/Drums/Master).
+        drainAndMerge (mLayersPeakDb,  mVibeGraph.layersPeakDb);
+        drainAndMerge (mLayersPeakDbL, mVibeGraph.layersPeakDbL);
+        drainAndMerge (mLayersPeakDbR, mVibeGraph.layersPeakDbR);
+        drainAndMerge (mBassPeakDb,    mVibeGraph.bassPeakDb);
+        drainAndMerge (mBassPeakDbL,   mVibeGraph.bassPeakDbL);
+        drainAndMerge (mBassPeakDbR,   mVibeGraph.bassPeakDbR);
+        drainAndMerge (mDrumsPeakDb,   mVibeGraph.drumsPeakDb);
+        drainAndMerge (mDrumsPeakDbL,  mVibeGraph.drumsPeakDbL);
+        drainAndMerge (mDrumsPeakDbR,  mVibeGraph.drumsPeakDbR);
+        drainAndMerge (mMasterPeakDb,  mVibeGraph.masterPeakDb);
+        drainAndMerge (mMasterPeakDbL, mVibeGraph.masterPeakDbL);
+        drainAndMerge (mMasterPeakDbR, mVibeGraph.masterPeakDbR);
+
+        // Group 2: Run -> snapshot promotion for AudioClipsBus / FxBus / Vox /
+        // Inst / secondary buses + per-row audio clip mirrors.
+        drainAndMerge (mAudioClipsBusPeakDb,  mAudioClipsBusPeakDbRun);
+        drainAndMerge (mAudioClipsBusPeakDbL, mAudioClipsBusPeakDbLRun);
+        drainAndMerge (mAudioClipsBusPeakDbR, mAudioClipsBusPeakDbRRun);
+        drainAndMerge (mFxBusPeakDb,    mFxBusPeakDbRun);
+        drainAndMerge (mFxBusPeakDbL,   mFxBusPeakDbLRun);
+        drainAndMerge (mFxBusPeakDbR,   mFxBusPeakDbRRun);
+        drainAndMerge (mVoxBusPeakDb,   mVoxBusPeakDbRun);
+        drainAndMerge (mVoxBusPeakDbL,  mVoxBusPeakDbLRun);
+        drainAndMerge (mVoxBusPeakDbR,  mVoxBusPeakDbRRun);
+        drainAndMerge (mInstBusPeakDb,  mInstBusPeakDbRun);
+        drainAndMerge (mInstBusPeakDbL, mInstBusPeakDbLRun);
+        drainAndMerge (mInstBusPeakDbR, mInstBusPeakDbRRun);
+        drainAndMerge (mVoxBus2PeakDb,  mVoxBus2PeakDbRun);
+        drainAndMerge (mVoxBus2PeakDbL, mVoxBus2PeakDbLRun);
+        drainAndMerge (mVoxBus2PeakDbR, mVoxBus2PeakDbRRun);
+        drainAndMerge (mInstBus2PeakDb, mInstBus2PeakDbRun);
+        drainAndMerge (mInstBus2PeakDbL,mInstBus2PeakDbLRun);
+        drainAndMerge (mInstBus2PeakDbR,mInstBus2PeakDbRRun);
+        drainAndMerge (mInstBus3PeakDb, mInstBus3PeakDbRun);
+        drainAndMerge (mInstBus3PeakDbL,mInstBus3PeakDbLRun);
+        drainAndMerge (mInstBus3PeakDbR,mInstBus3PeakDbRRun);
+        for (int r = 0; r < kMaxAudioRows; ++r)
+        {
+            drainAndMerge (mAudioRowPeakDb [r], mAudioRowPeakDbRun [r]);
+            drainAndMerge (mAudioRowPeakDbL[r], mAudioRowPeakDbLRun[r]);
+            drainAndMerge (mAudioRowPeakDbR[r], mAudioRowPeakDbRRun[r]);
+        }
+    }
+    // Group 3: insert atomics + every slot atomic in every rack across all
+    // nodes (Layers/Bass/Drums/Master/FxBus/AudioClipsBus + every InsertNode).
+    mVibeGraph.promoteAllInsertPeakSnapshots();
 }
 
 // ── Parameter sync helpers ────────────────────────────────────────────────────

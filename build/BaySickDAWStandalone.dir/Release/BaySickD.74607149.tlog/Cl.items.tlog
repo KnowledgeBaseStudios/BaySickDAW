@@ -46,6 +46,10 @@ C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\InstrumentPage.cpp;C:\User
 C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\AudioClipStreamer.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\AudioClipStreamer.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\PhaseVocoder.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\PhaseVocoder.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\CompressorDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\CompressorDSP.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\DeEsserDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\DeEsserDSP.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\PitchTrackerYIN.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\PitchTrackerYIN.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\PitchCorrectorDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\PitchCorrectorDSP.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\BaySickAlignDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BaySickAlignDSP.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\ReverbDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\ReverbDSP.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\ChorusDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\ChorusDSP.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\DelayDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\DelayDSP.obj
@@ -59,10 +63,13 @@ C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\PhaserDSP.cpp;C:\Users\jeffm\Docu
 C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\TransientShaperDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\TransientShaperDSP.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\TapeDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\TapeDSP.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\LimiterDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\LimiterDSP.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\MicSimDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\MicSimDSP.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\MicPlacementDSP.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\MicPlacementDSP.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\EffectRack.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\EffectRack.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SlotComponent.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\SlotComponent.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EffectsPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\EffectsPage.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EffectEditorPanels.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\EffectEditorPanels.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EffectPresetIO.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\EffectPresetIO.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\LayersPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\LayersPage.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BassPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BassPage.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\DrumPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\DrumPage.obj
@@ -73,6 +80,11 @@ C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\PianoRollPage.cpp;C:\Users
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BuilderPage.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickNAMIR\BaySickNAMIRProcessor.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BaySickNAMIRProcessor.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickNAMIR\BaySickNAMIREditor.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BaySickNAMIREditor.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickPedals\BaySickPedalsProcessor.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BaySickPedalsProcessor.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickVocalProcessor.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BaySickVocalProcessor.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickVocalEditor.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BaySickVocalEditor.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickPitchEditor.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BaySickPitchEditor.obj
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\BaySickAlignEditor.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Clips\ClipsPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\ClipsPage.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Vox\VoxPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\VoxPage.obj
 C:\Users\jeffm\Documents\BaySickDAW\Source\Inst\InstPage.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.dir\Release\InstPage.obj

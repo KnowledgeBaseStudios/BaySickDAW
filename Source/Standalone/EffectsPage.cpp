@@ -641,9 +641,8 @@ static EffectRackAction::SlotSnapshots captureSlotSnapshots(EffectRack* rack)
         s.outputGainDb = rack->getSlotOutputGain(i);
         s.uuid         = rack->getSlotUuid(i);
         // Serialize DSP knob state into the snapshot.
-        const auto& slot = rack->getSlot(i);
-        if (slot.effect != nullptr)
-            slot.effect->getStateInformation (s.dspState);
+        if (auto* eff = rack->getSlotEffect(i))
+            eff->getStateInformation (s.dspState);
     }
     return snaps;
 }
@@ -681,10 +680,10 @@ static void applySlotSnapshots(EffectRack* rack,
         // newly-instantiated) slot.
         if (tgt.type != EffectType::None)
         {
-            const auto& slot = rack->getSlot(i);
-            if (slot.effect != nullptr && tgt.dspState.getSize() > 0)
-                slot.effect->setStateInformation (tgt.dspState.getData(),
-                                                   (int) tgt.dspState.getSize());
+            if (auto* eff = rack->getSlotEffect(i))
+                if (tgt.dspState.getSize() > 0)
+                    eff->setStateInformation (tgt.dspState.getData(),
+                                              (int) tgt.dspState.getSize());
             rack->setSlotBypassed   (i, tgt.bypassed);
             rack->setSlotOutputGain (i, tgt.outputGainDb);
         }
@@ -774,13 +773,14 @@ void EffectsPage::rebuildSlotEditor(int slotIndex)
 
     if (!mSlots[slotIndex]) return;
 
-    if (slot.type == EffectType::None || !slot.effect)
+    DSPBase* eff = mRack->getSlotEffect(slotIndex);
+    if (slot.type == EffectType::None || ! eff)
     {
         mSlots[slotIndex]->setEditor(nullptr);
     }
     else
     {
-        auto editor = createEffectEditor(slot.effect.get(), slot.type);
+        auto editor = createEffectEditor(eff, slot.type);
 
         // Stamp automation paramIds on all knobs before handing off to the slot.
         // C13: keyed by slot UUID, not index, so reorder preserves automation.

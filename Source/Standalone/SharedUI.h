@@ -1402,18 +1402,23 @@ private:
 };
 
 // ── VU Meter (horizontal or vertical level / GR display) ─────────────────────
-class VUMeter : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+class VUMeter : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     enum Style { Horizontal, Vertical };
 
     VUMeter(Style style = Horizontal);
-    ~VUMeter() override { stopTimer(); }
+    ~VUMeter() override = default;
 
     void setLevel(float rms01);          // 0–1 normalised (maps to -60..0 dBFS internally)
     void setGainReduction(float grDb);   // negative dB value for GR overlay
 
     void paint(juce::Graphics&) override;
+
+    // 2026-05-02: vblank-locked refresh.  Replaces the 60 Hz Timer so the
+    // spring-damper ballistics integrate against monitor-refresh deltas
+    // instead of message-thread coalesced 60 Hz ticks.
+    void parentHierarchyChanged() override;
 
 private:
     Style mStyle;
@@ -1445,7 +1450,12 @@ private:
     float mVelocity   { 0.f };   // needle velocity for second-order dynamics
     float mCurrentPos { 0.f };   // normalized 0..1 position (maps to VU scale)
 
-    void timerCallback() override;
+    // 2026-05-02: wall-clock vblank timestamp for delta-time-based decay --
+    // ballistics stay consistent across 60/120/144 Hz monitors.
+    double mLastVBlankMs { 0.0 };
+
+    void onVBlank();
+    std::unique_ptr<juce::VBlankAttachment> mVBlank;
 
     // ── Drawing helpers ────────────────────────────────────────────────────
     void paintHorizontal(juce::Graphics&);
@@ -1544,12 +1554,14 @@ private:
 //    use setLevel(); strip callers now use setStereoLevel().
 //  - setCompact() kept as a no-op for back-compat (legacy callers may still
 //    call it; the FL-parity range above is now the only mode).
-class DBFSMeter : public juce::Component, public juce::SettableTooltipClient, private juce::Timer {
+class DBFSMeter : public juce::Component, public juce::SettableTooltipClient {
 public:
     DBFSMeter();
-    ~DBFSMeter() override { stopTimer(); }
+    ~DBFSMeter() override = default;
 
-    // Mono entry point — both L and R get the same value.
+    // Mono entry point — both L and R get the same value.  Audio thread
+    // writes (CAS-loop max) into mLevelDbL/R; UI thread on every vblank
+    // exchanges them with -inf to read+reset (lock-free max window pattern).
     void setLevel       (float dBFS);
     // Stereo entry point — independent L and R levels.
     void setStereoLevel (float dBFS_L, float dBFS_R);
@@ -1567,29 +1579,49 @@ public:
     // gets ignored — the dynamic per-channel string takes precedence.
     juce::String getTooltip() override;
 
+    // 2026-05-02: vblank-locked refresh.  Replaces the old 60 Hz Timer so
+    // meter ballistics + repaint stay in lockstep with the monitor refresh
+    // (FL-style).  The attachment is created lazily when the meter joins a
+    // peer (see parentHierarchyChanged) and torn down when it leaves.
+    void parentHierarchyChanged() override;
+
 private:
-    void timerCallback() override;   // 60 Hz — decay + peak hold per channel
+    void onVBlank();
     void paintBar (juce::Graphics& g, juce::Rectangle<float> r,
                    float displayDb, float peakDb, bool drawLabels) const;
     static float dbToNorm (float dB) noexcept;   // log-style mapping
 
-    // Per-channel atomic input (audio thread sets, UI timer reads).
-    std::atomic<float> mLevelDbL { -60.f };
-    std::atomic<float> mLevelDbR { -60.f };
+    // Per-channel running-max atomic.  Audio thread CAS-loops the max-since-
+    // last-read into here; UI exchanges with -inf on each vblank.
+    std::atomic<float> mLevelDbL { -std::numeric_limits<float>::infinity() };
+    std::atomic<float> mLevelDbR { -std::numeric_limits<float>::infinity() };
 
-    // Per-channel UI state (decayed display + peak hold).
+    // Per-channel UI state (decayed display + peak hold).  Updated only on
+    // the message thread inside onVBlank(); read in paint().  No atomicity
+    // needed because the sole writer (vblank callback) and reader (paint)
+    // both run on the message thread.
     float mDisplayDbL { -60.f }, mPeakDbL { -60.f };
     float mDisplayDbR { -60.f }, mPeakDbR { -60.f };
-    int   mPeakHoldFramesL { 0 }, mPeakHoldFramesR { 0 };
+    double mPeakHoldUntilL { 0.0 }, mPeakHoldUntilR { 0.0 };  // ms timestamps
+
+    // Last vblank timestamp (ms hi-res) for delta-time-based decay -- keeps
+    // ballistics consistent across 60/120/144 Hz monitors.
+    double mLastVBlankMs { 0.0 };
 
     // FL-parity range — top has +6 dB headroom above 0 dBFS so peaks above
     // the digital ceiling are still visible.
-    static constexpr float kFloor         = -60.f;
-    static constexpr float kCeiling       =   6.f;
-    static constexpr float kDecayDbPerSec =  20.f;
+    static constexpr float kFloor             = -60.f;
+    static constexpr float kCeiling           =   6.f;
+    static constexpr float kDecayDbPerSec     =  20.f;
+    static constexpr double kPeakHoldMs       = 1000.0;   // ~1 s hold
     // Piecewise log: top 30 % of bar covers -18..+6 dB (where it matters).
-    static constexpr float kBreakDb       = -18.f;
-    static constexpr float kBreakNorm     =  0.7f;
+    static constexpr float kBreakDb           = -18.f;
+    static constexpr float kBreakNorm         =  0.7f;
+
+    // VBlank attachment is constructed in parentHierarchyChanged once the
+    // component has a peer.  Optional so we can null it out cleanly when
+    // the meter is detached (e.g. tab switch).
+    std::unique_ptr<juce::VBlankAttachment> mVBlank;
 };
 
 // ── Full basic sequence grid (rows x steps, scrollable) ──────────────────────

@@ -384,6 +384,13 @@ private:
     // ── Internal helpers ──────────────────────────────────────────────────────
     void layoutScrollContent();
     void timerCallback() override;
+    // 2026-05-02: meter polling moved to a vblank-locked callback so the
+    // upstream sync (audio peak atomic -> DBFSMeter) runs in lockstep with
+    // the monitor refresh.  The 30 Hz Timer above is kept for the slower
+    // page-state polls (cable overlay scroll detection, _sendTo change
+    // detection, flash decay) where vsync precision isn't needed.
+    void onVBlank();
+    std::unique_ptr<juce::VBlankAttachment> mVBlank;
     void syncFromModel();
     // 5F-4a Batch 6: push MixerState into APVTS so the audio path starts with
     // correct values (InsertNode reads level/pan/mute/solo from APVTS).
