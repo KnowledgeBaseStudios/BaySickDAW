@@ -1,9 +1,0 @@
-Global Transport
-*I need a bar between the ribbon and the title bar that will contain the following buttons:
- *Play (mapped to Spacebar)
- *Pause (mapped to Spacebar)
- *Stop (mapped to Shift+Spacebar)
- *Selection (a dropdown that chooses if the current pattern is playing or if the full song on the builder page is playing)
- *Metronome (Turns Metronome on and off which plays at the selected tempo)
- *Text Box for inputting tempo
-*Please make this bar no wider than the title bar to minimize space usage

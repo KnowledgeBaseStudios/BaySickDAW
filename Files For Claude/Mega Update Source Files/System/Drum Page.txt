@@ -1,6 +1,0 @@
-Drum Page Notes
-*I want to keep the same 808/909 produced sounds in tact as options as well as have the sample library available for anything that is downloaded into the Percussion folder
-*The way this will function is in the background with the user only seeing the options selected but on the back end if they choose one of the 808/909 sounds these are produced as they were being via synth and if they choose a sample these will be played with the VibePlayer
-
-Drum Page
-*Drum page only has a piano roll tab with 14 dropdowns for selecting instruments to the left of 14 piano roll keys they are associated with

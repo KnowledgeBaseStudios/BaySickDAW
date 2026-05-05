@@ -1,7 +1,0 @@
-Layers Page Notes
-*Layers page does not get the 808/909 options as Harmless should be able to make these sounds. 
-
-Layers Page
-*Layers page opens to blank screen with a drop down
-*Layers drop down selections are "Harmless" and "VibePlayer"
-*When the layers page drop down is chosen 3 tabs will appear for Sound, Piano Roll and EQ with the Sound tab being filled out with the selected player
