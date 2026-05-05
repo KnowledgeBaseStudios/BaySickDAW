@@ -56,6 +56,7 @@ BaySickRustyDrumsPage::BaySickRustyDrumsPage (VibeSynthProcessor& p)
     buildPlayerTab();
     buildPianoRollTab();
     buildProgramCombo();
+    buildPlayerPresetButton();
 
     addAndMakeVisible (*mDrumKitTab);
     addChildComponent (*mPlayerTab);
@@ -216,6 +217,157 @@ void BaySickRustyDrumsPage::loadAriaPanelForProgram (Program target)
         mAriaPanel->loadFromKit (kitRoot, xml);
     else
         mAriaPanel->clear();
+}
+
+// ── J-11 Player Preset dropdown ────────────────────────────────────────────
+// "Player Preset" captures kit CC values only (every brd_cc<N> + brd_outVol).
+// Independent of the Save/Load Page Preset on the page hamburger (which also
+// captures the mixer strips + racks).  Apply uses overlay semantics: only
+// params present in the preset XML are written; everything else stays put.
+
+juce::File BaySickRustyDrumsPage::playerPresetsDir() const
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+               .getChildFile ("BaySickDAW")
+               .getChildFile ("Presets")
+               .getChildFile ("Rusty Player")
+               .getChildFile ("My Presets");
+}
+
+void BaySickRustyDrumsPage::buildPlayerPresetButton()
+{
+    mPlayerPresetBtn = std::make_unique<juce::TextButton> ("Player Preset");
+    mPlayerPresetBtn->setTooltip ("Save / load player preset (kit CC values only)");
+    mPlayerPresetBtn->setColour (juce::TextButton::buttonColourId, VC::Surface);
+    mPlayerPresetBtn->setColour (juce::TextButton::textColourOffId, VC::Text);
+    mPlayerPresetBtn->onClick = [this] { showPlayerPresetMenu(); };
+}
+
+void BaySickRustyDrumsPage::showPlayerPresetMenu()
+{
+    constexpr int kIdSave = 1;
+    constexpr int kIdLoadBase = 100;
+
+    juce::PopupMenu menu;
+    const bool hasEngine = mProcessor.getBaySickRustyDrums() != nullptr;
+    menu.addItem (kIdSave, "Save Player Preset As...", hasEngine);
+
+    juce::Array<juce::File> presetXmls;
+    {
+        const auto root = playerPresetsDir();
+        if (root.isDirectory())
+        {
+            juce::Array<juce::File> files;
+            root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
+            files.sort();
+            for (auto& f : files) presetXmls.add (f);
+        }
+    }
+
+    menu.addSeparator();
+    menu.addSectionHeader ("Load Player Preset");
+    if (presetXmls.isEmpty())
+    {
+        menu.addItem (-1, "(no presets saved)", false, false);
+    }
+    else
+    {
+        for (int i = 0; i < presetXmls.size(); ++i)
+            menu.addItem (kIdLoadBase + i,
+                          presetXmls[i].getFileNameWithoutExtension());
+    }
+
+    juce::Component::SafePointer<BaySickRustyDrumsPage> safe (this);
+    menu.showMenuAsync (
+        juce::PopupMenu::Options().withTargetComponent (mPlayerPresetBtn.get()),
+        [safe, presetXmls] (int r)
+        {
+            if (! safe || r <= 0) return;
+            if (r == kIdSave) { safe->savePlayerPresetAs(); return; }
+            if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
+                safe->loadPlayerPresetFromFile (presetXmls[r - kIdLoadBase]);
+        });
+}
+
+void BaySickRustyDrumsPage::savePlayerPresetAs()
+{
+    auto* engine = mProcessor.getBaySickRustyDrums();
+    if (engine == nullptr) return;
+
+    auto* aw = new juce::AlertWindow (
+        "Save Player Preset",
+        "Enter a name for this player preset:",
+        juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("name", "My Rusty Player");
+    aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<BaySickRustyDrumsPage> safe (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safe, aw] (int result)
+        {
+            std::unique_ptr<juce::AlertWindow> own (aw);
+            if (result != 1 || ! safe) return;
+            const auto name = aw->getTextEditorContents ("name").trim();
+            if (name.isEmpty()) return;
+
+            auto* engine = safe->mProcessor.getBaySickRustyDrums();
+            if (engine == nullptr) return;
+
+            juce::XmlElement root ("RustyPlayerPreset");
+            root.setAttribute ("version", 1);
+            auto* paramsEl = root.createNewChildElement ("Params");
+            auto pushParam = [&] (const juce::String& id)
+            {
+                if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (
+                        engine->apvts.getParameter (id)))
+                {
+                    const float natural = rp->convertFrom0to1 (rp->getValue());
+                    auto* pe = paramsEl->createNewChildElement ("Param");
+                    pe->setAttribute ("id", id);
+                    pe->setAttribute ("v",  natural);
+                }
+            };
+            for (int cc = 0; cc < 128; ++cc)
+                pushParam ("brd_cc" + juce::String (cc));
+            pushParam ("brd_outVol");
+
+            auto dir = safe->playerPresetsDir();
+            dir.createDirectory();
+            auto target = dir.getChildFile (name + ".xml");
+            int n = 2;
+            while (target.exists())
+                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
+            target.replaceWithText (root.toString (juce::XmlElement::TextFormat()
+                                                        .singleLine()));
+        }), false);
+}
+
+void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
+{
+    if (! xml.existsAsFile()) return;
+    auto* engine = mProcessor.getBaySickRustyDrums();
+    if (engine == nullptr) return;
+
+    auto parsed = juce::XmlDocument::parse (xml);
+    if (! parsed || ! parsed->hasTagName ("RustyPlayerPreset")) return;
+
+    if (auto* paramsEl = parsed->getChildByName ("Params"))
+    {
+        for (auto* pe = paramsEl->getFirstChildElement(); pe != nullptr;
+             pe = pe->getNextElement())
+        {
+            if (! pe->hasTagName ("Param")) continue;
+            const auto id      = pe->getStringAttribute ("id");
+            const float natural = (float) pe->getDoubleAttribute ("v");
+            if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (
+                    engine->apvts.getParameter (id)))
+            {
+                rp->setValueNotifyingHost (
+                    rp->getNormalisableRange().convertTo0to1 (natural));
+            }
+        }
+    }
 }
 
 // ── Program selector + switching ────────────────────────────────────────────

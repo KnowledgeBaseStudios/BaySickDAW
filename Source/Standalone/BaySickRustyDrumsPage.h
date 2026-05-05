@@ -87,6 +87,13 @@ public:
     // confirm prompt + tear-down + reload.
     juce::ComboBox* getProgramCombo() const { return mProgramCombo.get(); }
 
+    // J-11 (2026-05-05): Player Preset dropdown — sits on the PageMenuBar's
+    // extras-right cluster next to the Program selector.  Captures kit CC
+    // values only (every `brd_cc<N>` + `brd_outVol`); independent of the Page
+    // Preset (which also captures mixer strips + racks).  Storage at
+    // `Documents/BaySickDAW/Presets/Rusty Player/My Presets/<name>.xml`.
+    juce::TextButton* getPlayerPresetButton() const { return mPlayerPresetBtn.get(); }
+
     enum class Program { None = 0, Full = 1, Basic = 2 };
     Program getCurrentProgram() const noexcept { return mCurrentProgram; }
 
@@ -113,15 +120,25 @@ private:
     std::unique_ptr<juce::ComboBox>                 mProgramCombo;
     Program                                         mCurrentProgram { Program::None };
 
+    // J-11: Player Preset dropdown (lives next to mProgramCombo on PageMenuBar).
+    std::unique_ptr<juce::TextButton>               mPlayerPresetBtn;
+
     void buildDrumKitTab();
     void buildPlayerTab();
     void buildPianoRollTab();
     void buildProgramCombo();
+    void buildPlayerPresetButton();                  // J-11
     void onProgramComboChanged();
     void promptAndSwitchProgram (Program target);
     bool loadProgram (Program target);
     void tearDownCurrentProgram();
     void loadAriaPanelForProgram (Program target);   // J-8 stage 2
+
+    // J-11 Player Preset helpers.
+    void showPlayerPresetMenu();
+    void savePlayerPresetAs();
+    void loadPlayerPresetFromFile (const juce::File& xml);
+    juce::File playerPresetsDir() const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickRustyDrumsPage)
 };

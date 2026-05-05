@@ -4081,6 +4081,11 @@ void StandaloneEditor::showPageForTab(int tabId)
             if (auto* combo = rp->getProgramCombo())
                 mPageMenuBar->addExtraRightComponent (combo, 160);
 
+            // J-11 (2026-05-05): Player Preset dropdown — sits to the right
+            // of the Program selector.  Captures kit CC values only.
+            if (auto* btn = rp->getPlayerPresetButton())
+                mPageMenuBar->addExtraRightComponent (btn, 130);
+
             // J-8 Part D (2026-05-05): Save / Load Page Preset.  Page presets
             // capture the full Rusty player setup (engine CC values + kit
             // path), every Rusty mixer strip + the RustyDrums Bus, every Rusty

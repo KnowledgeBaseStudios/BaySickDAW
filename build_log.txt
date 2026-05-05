@@ -2,62 +2,62 @@ MSBuild version 18.5.4+cb4e32d21 for .NET Framework
 
   Checking File Globs
   BaySickDAWStandalone_rc_lib.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone_rc_lib.dir\Release\BaySickDAWStandalone_rc_lib.lib
-  BaySickDAWAssets.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\BaySickDAWAssets.lib
   BaySickNAMCore.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\BaySickNAMCore.lib
+  BaySickDAWAssets.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\BaySickDAWAssets.lib
   absl_log_severity.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_log_severity.lib
-  absl_spinlock_wait.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_spinlock_wait.lib
   absl_civil_time.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_civil_time.lib
+  absl_spinlock_wait.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_spinlock_wait.lib
+  absl_exponential_biased.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_exponential_biased.lib
   Generating juce_binarydata_VibeSynthSamples/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_VibeSynthSamples/JuceLibraryCode/BinaryData.h
   absl_int128.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_int128.lib
-  absl_exponential_biased.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_exponential_biased.lib
-  absl_time_zone.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_time_zone.lib
   absl_raw_logging_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_raw_logging_internal.lib
-  aiff.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\aiff.lib
-  plutovg.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\lunasvg_build\plutovg\Release\plutovg.lib
   VibeSynthSamples.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\VibeSynthSamples.lib
+  absl_time_zone.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_time_zone.lib
+  absl_throw_delegate.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_throw_delegate.lib
+  absl_bad_variant_access.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_bad_variant_access.lib
+  absl_debugging_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_debugging_internal.lib
+  absl_bad_optional_access.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_bad_optional_access.lib
+  absl_cordz_functions.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cordz_functions.lib
+  aiff.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\aiff.lib
   sfizz_cephes.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_cephes.lib
   sfizz_cpuid.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_cpuid.lib
+  plutovg.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\lunasvg_build\plutovg\Release\plutovg.lib
   sfizz_filesystem_impl.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_filesystem_impl.lib
-  absl_base.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_base.lib
-  absl_bad_optional_access.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_bad_optional_access.lib
-  absl_throw_delegate.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_throw_delegate.lib
-  absl_strings_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_strings_internal.lib
-  absl_debugging_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_debugging_internal.lib
-  absl_city.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_city.lib
-  absl_demangle_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_demangle_internal.lib
-  absl_malloc_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_malloc_internal.lib
+  lunasvg.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\lunasvg_build\Release\lunasvg.lib
   sfizz_kissfft.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_kissfft.lib
-  absl_crc_cpu_detect.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc_cpu_detect.lib
-  absl_bad_variant_access.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_bad_variant_access.lib
-  absl_crc_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc_internal.lib
   sfizz_pugixml.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_pugixml.lib
   sfizz_spin_mutex.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_spin_mutex.lib
-  absl_string_view.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_string_view.lib
   sfizz_spline.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_spline.lib
-  absl_graphcycles_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_graphcycles_internal.lib
   sfizz_tunings.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_tunings.lib
-  absl_low_level_hash.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_low_level_hash.lib
-  absl_cordz_functions.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cordz_functions.lib
-  lunasvg.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\lunasvg_build\Release\lunasvg.lib
+  absl_base.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_base.lib
   wavpack.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\libwavpack.lib
   absl_stacktrace.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_stacktrace.lib
+  absl_malloc_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_malloc_internal.lib
+  absl_crc_cpu_detect.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc_cpu_detect.lib
+  absl_city.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_city.lib
+  absl_graphcycles_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_graphcycles_internal.lib
+  absl_demangle_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_demangle_internal.lib
+  absl_string_view.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_string_view.lib
+  absl_strings_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_strings_internal.lib
+  absl_low_level_hash.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_low_level_hash.lib
   st_audiofile_formats.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\st_audiofile_formats.lib
+  absl_crc_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc_internal.lib
+  st_audiofile.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\st_audiofile.lib
   absl_strings.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_strings.lib
   sfizz_messaging.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_messaging.lib
-  absl_str_format_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_str_format_internal.lib
-  st_audiofile.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\st_audiofile.lib
   absl_symbolize.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_symbolize.lib
-  absl_hash.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_hash.lib
+  absl_str_format_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_str_format_internal.lib
   absl_time.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_time.lib
-  absl_crc32c.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc32c.lib
+  absl_hash.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_hash.lib
   absl_kernel_timeout_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_kernel_timeout_internal.lib
+  absl_crc32c.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc32c.lib
   absl_crc_cord_state.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc_cord_state.lib
-  absl_cord_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cord_internal.lib
   absl_synchronization.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_synchronization.lib
-  absl_cordz_handle.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cordz_handle.lib
   absl_hashtablez_sampler.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_hashtablez_sampler.lib
-  absl_raw_hash_set.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_raw_hash_set.lib
+  absl_cord_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cord_internal.lib
+  absl_cordz_handle.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cordz_handle.lib
   absl_cordz_info.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cordz_info.lib
+  absl_raw_hash_set.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_raw_hash_set.lib
   absl_cord.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cord.lib
   sfizz_parser.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_parser.lib
   sfizz_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_internal.lib
@@ -99,7 +99,7 @@ C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(3083,
       C:\Users\jeffm\Documents\BaySickDAW\juce\modules\juce_gui_basics\components\juce_Component.h(2709,24):
       see declaration of 'juce::Component::flags'
   
-C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(7592,15): warning C4458: declaration of 'flags' hides class member [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(7597,15): warning C4458: declaration of 'flags' hides class member [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
       C:\Users\jeffm\Documents\BaySickDAW\juce\modules\juce_gui_basics\components\juce_Component.h(2709,24):
       see declaration of 'juce::Component::flags'
   
