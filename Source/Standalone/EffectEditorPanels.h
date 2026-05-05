@@ -15,6 +15,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 struct EditorPanelBase : public juce::Component
 {
+    // I-2 (2026-05-02): Universal pedal panel mode.
+    //   * Full  — current FX-rack layout (all knobs visible).
+    //   * Pedal — simplified pedalboard layout (subset of knobs, smaller
+    //     footprint).  New pedal effects (I-5+) implement Full as a
+    //     right-skewed cluster so the BaySickPedals view crops the empty
+    //     left side; existing effects (I-14) get a separate Pedal layout.
+    // Set by createEffectEditor before construction completes; panels read
+    // `mPanelMode` in their constructor or first `resized()` to choose
+    // layout.  Default is Full so untouched callers behave unchanged.
+    enum class PanelMode { Full, Pedal };
+
+    PanelMode mPanelMode { PanelMode::Full };
+
     std::vector<std::unique_ptr<VKnob>>            knobs;
     std::vector<std::unique_ptr<juce::TextButton>> toggles;
     std::unique_ptr<juce::ComboBox>                combo;
@@ -68,6 +81,24 @@ struct EditorPanelBase : public juce::Component
     // Call from derived constructor for panels that have no input VU meter
     void disableVU();
 
+    // I-4 (2026-05-02): Call from derived constructor for panels that own their
+    // own output level control (pedal-style panels: CS Style Compressor and
+    // every I-5+ new pedal effect).  The base-class right-edge "Output Vol"
+    // knob is hidden + freed so derived layouts can claim that horizontal
+    // space.  dBFS meter stays.
+    void disableOutputVolKnob();
+
+    // I-15 (2026-05-03): pedal-mode finalize -- call when the panel is mounted
+    // inside BaySickPedals to strip the dBFS output meter.  Pedal tiles do
+    // not show level meters per locked spec.
+    void disableDbfsMeter();
+
+    // I-15 (2026-05-03): pedal-mode hook -- frees a panel-specific gain-
+    // reduction meter (Compressor only).  Default no-op; CompressorPanel
+    // / FETCompressorPanel / OptoCompressorPanel / CSStyleCompressorPanel
+    // override to clear their own grMeter member.
+    virtual void disableGrMeter() {}
+
     void setInputLevel (float rms01);
     void setOutputLevel(float dbfs);
 
@@ -80,5 +111,16 @@ private:
 // ── createEffectEditor ────────────────────────────────────────────────────────
 // Factory: creates the inline VKnob editor panel for the given DSPBase subclass.
 // Returns nullptr for EffectType::None.
+//
+// I-2 (2026-05-02): `mode` lets BaySickPedalsProcessor request the simplified
+// pedal-mode layout for the 7 existing effects (Limiter / Saturation / Chorus /
+// Flanger / Phaser / Delay / Reverb).  Regular FX-rack callers omit the arg
+// and get the full layout.  The factory sets `panel->mPanelMode = mode` after
+// construction so derived panels can read it in their first `resized()` to
+// pick layout.  I-14 ships the actual Pedal-mode panel variants for those 7
+// existing effects; for now Pedal mode produces the same panel as Full but
+// with the flag set (panels treat it as Full until I-14 implementations land).
 // ─────────────────────────────────────────────────────────────────────────────
-std::unique_ptr<juce::Component> createEffectEditor(DSPBase* effect, EffectType type);
+std::unique_ptr<juce::Component> createEffectEditor (DSPBase* effect,
+                                                     EffectType type,
+                                                     EditorPanelBase::PanelMode mode = EditorPanelBase::PanelMode::Full);

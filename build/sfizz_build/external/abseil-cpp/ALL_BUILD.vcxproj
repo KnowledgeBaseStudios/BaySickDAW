@@ -1,0 +1,527 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ResolveNugetPackages>false</ResolveNugetPackages>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{A8E82F49-3516-37C8-A040-F0BA65800511}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>ALL_BUILD</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/abseil-cpp/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/jeffm/Documents/BaySickDAW -BC:/Users/jeffm/Documents/BaySickDAW/build --check-stamp-file C:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/external/abseil-cpp/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Program Files\CMake\share\cmake-4.3\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CMakeParseArguments.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckCSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckCXXSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckIncludeFile.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckLibraryExists.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindThreads.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\WriteBasicConfigVersionFile.cmake;C:\Users\jeffm\Documents\BaySickDAW\build\CMakeFiles\cmake.verify_globs;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\CMake\AbseilDll.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\CMake\AbseilHelpers.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\copts\AbseilConfigureCopts.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\copts\GENERATED_AbseilCopts.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/abseil-cpp/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/jeffm/Documents/BaySickDAW -BC:/Users/jeffm/Documents/BaySickDAW/build --check-stamp-file C:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/external/abseil-cpp/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Program Files\CMake\share\cmake-4.3\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CMakeParseArguments.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckCSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckCXXSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckIncludeFile.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckLibraryExists.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindThreads.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\WriteBasicConfigVersionFile.cmake;C:\Users\jeffm\Documents\BaySickDAW\build\CMakeFiles\cmake.verify_globs;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\CMake\AbseilDll.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\CMake\AbseilHelpers.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\copts\AbseilConfigureCopts.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\copts\GENERATED_AbseilCopts.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/abseil-cpp/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/jeffm/Documents/BaySickDAW -BC:/Users/jeffm/Documents/BaySickDAW/build --check-stamp-file C:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/external/abseil-cpp/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Program Files\CMake\share\cmake-4.3\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CMakeParseArguments.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckCSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckCXXSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckIncludeFile.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckLibraryExists.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindThreads.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\WriteBasicConfigVersionFile.cmake;C:\Users\jeffm\Documents\BaySickDAW\build\CMakeFiles\cmake.verify_globs;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\CMake\AbseilDll.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\CMake\AbseilHelpers.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\copts\AbseilConfigureCopts.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\copts\GENERATED_AbseilCopts.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/abseil-cpp/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/jeffm/Documents/BaySickDAW -BC:/Users/jeffm/Documents/BaySickDAW/build --check-stamp-file C:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/external/abseil-cpp/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Program Files\CMake\share\cmake-4.3\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CMakeParseArguments.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckCSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckCXXSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckIncludeFile.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\CheckLibraryExists.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\FindThreads.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-4.3\Modules\WriteBasicConfigVersionFile.cmake;C:\Users\jeffm\Documents\BaySickDAW\build\CMakeFiles\cmake.verify_globs;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\CMake\AbseilDll.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\CMake\AbseilHelpers.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\copts\AbseilConfigureCopts.cmake;C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\copts\GENERATED_AbseilCopts.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\ZERO_CHECK.vcxproj">
+      <Project>{C145778C-817E-34B8-A5A1-57D57A629720}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\types\absl_bad_any_cast_impl.vcxproj">
+      <Project>{7528EAE9-DF4F-3B31-8423-D4A095399692}</Project>
+      <Name>absl_bad_any_cast_impl</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\types\absl_bad_optional_access.vcxproj">
+      <Project>{B4B14C4D-DA0F-3FE1-8318-4BB854858A2C}</Project>
+      <Name>absl_bad_optional_access</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\types\absl_bad_variant_access.vcxproj">
+      <Project>{5B9B8C8A-CDEE-3580-81DE-8DF6D579BFD8}</Project>
+      <Name>absl_bad_variant_access</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\base\absl_base.vcxproj">
+      <Project>{E62075B4-E587-3885-8BFF-5659E21D7CCA}</Project>
+      <Name>absl_base</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\hash\absl_city.vcxproj">
+      <Project>{C2937B51-080F-3902-8F76-ECEB68CC8AB7}</Project>
+      <Name>absl_city</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\time\absl_civil_time.vcxproj">
+      <Project>{CDF1E715-2C21-3B9B-AA56-03EE2C524153}</Project>
+      <Name>absl_civil_time</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\strings\absl_cord.vcxproj">
+      <Project>{84D2C48D-63F5-3289-A39D-4FD65186E72F}</Project>
+      <Name>absl_cord</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\strings\absl_cord_internal.vcxproj">
+      <Project>{398E469B-F0CF-3344-A4D7-F56018DC48DB}</Project>
+      <Name>absl_cord_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\strings\absl_cordz_functions.vcxproj">
+      <Project>{3BBE344A-12A7-3CBD-A9D8-F1441D3C6985}</Project>
+      <Name>absl_cordz_functions</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\strings\absl_cordz_handle.vcxproj">
+      <Project>{D27BF9D8-33CA-32A0-B986-9643B8AFAB65}</Project>
+      <Name>absl_cordz_handle</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\strings\absl_cordz_info.vcxproj">
+      <Project>{282FA143-A5E8-3B82-B594-AD052CEB9E91}</Project>
+      <Name>absl_cordz_info</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\strings\absl_cordz_sample_token.vcxproj">
+      <Project>{D1793730-79E6-3E35-A5C9-0C801095A3D6}</Project>
+      <Name>absl_cordz_sample_token</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\crc\absl_crc32c.vcxproj">
+      <Project>{7F125B5F-2D4D-31E0-BCE4-31AB6B577FE0}</Project>
+      <Name>absl_crc32c</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\crc\absl_crc_cord_state.vcxproj">
+      <Project>{A1E84AB6-9DDA-35B3-8EA3-A07A0D6CCE54}</Project>
+      <Name>absl_crc_cord_state</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\crc\absl_crc_cpu_detect.vcxproj">
+      <Project>{CA10D69D-69C5-3AC7-A0CD-A72BD5DE7851}</Project>
+      <Name>absl_crc_cpu_detect</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\crc\absl_crc_internal.vcxproj">
+      <Project>{07F6FBD0-9B51-3B84-B554-5892B77B98E1}</Project>
+      <Name>absl_crc_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\debugging\absl_debugging_internal.vcxproj">
+      <Project>{80C70AE4-4B4D-3FD0-A9A9-F30AF1135006}</Project>
+      <Name>absl_debugging_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\debugging\absl_demangle_internal.vcxproj">
+      <Project>{643FACA2-29C5-350C-991E-FB3585E2461C}</Project>
+      <Name>absl_demangle_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_die_if_null.vcxproj">
+      <Project>{C000174E-2D09-3951-B3BC-2811D3EEC340}</Project>
+      <Name>absl_die_if_null</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\debugging\absl_examine_stack.vcxproj">
+      <Project>{C5028570-8F81-360E-A77E-0B3B156B07B9}</Project>
+      <Name>absl_examine_stack</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\profiling\absl_exponential_biased.vcxproj">
+      <Project>{E4837E02-283A-3094-960E-9721C4FB3BF1}</Project>
+      <Name>absl_exponential_biased</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\debugging\absl_failure_signal_handler.vcxproj">
+      <Project>{4ECEAEFB-DD11-33E0-9BCD-F31FF2635E3F}</Project>
+      <Name>absl_failure_signal_handler</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_commandlineflag.vcxproj">
+      <Project>{3BE346BF-9020-31A5-A5F2-C81D844ACFC0}</Project>
+      <Name>absl_flags_commandlineflag</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_commandlineflag_internal.vcxproj">
+      <Project>{9A920FCD-619C-33DA-991D-DDFE8D17DF0C}</Project>
+      <Name>absl_flags_commandlineflag_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_config.vcxproj">
+      <Project>{EB4DA5D0-4E45-3815-BE60-E04DACD4DB01}</Project>
+      <Name>absl_flags_config</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_internal.vcxproj">
+      <Project>{8BC43CB7-925D-398F-A3A8-2B862758B90F}</Project>
+      <Name>absl_flags_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_marshalling.vcxproj">
+      <Project>{5A5EEFD3-E9E0-3108-B5F8-7C18314A0175}</Project>
+      <Name>absl_flags_marshalling</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_parse.vcxproj">
+      <Project>{81BA841E-CA83-3503-B784-A593CEDEE725}</Project>
+      <Name>absl_flags_parse</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_private_handle_accessor.vcxproj">
+      <Project>{99FBCD73-CFC2-37C2-961F-F058307CBB6B}</Project>
+      <Name>absl_flags_private_handle_accessor</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_program_name.vcxproj">
+      <Project>{BBF51E1B-BEF3-3906-8143-DBA79471EF70}</Project>
+      <Name>absl_flags_program_name</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_reflection.vcxproj">
+      <Project>{2687EAB8-2C07-3433-BC4D-8E59D372CD0B}</Project>
+      <Name>absl_flags_reflection</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_usage.vcxproj">
+      <Project>{3A2ED913-7C60-3D28-8270-CAC8AF6C3BB3}</Project>
+      <Name>absl_flags_usage</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\flags\absl_flags_usage_internal.vcxproj">
+      <Project>{EC535CEF-5F4A-3A9D-B624-FE17B03402BA}</Project>
+      <Name>absl_flags_usage_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\synchronization\absl_graphcycles_internal.vcxproj">
+      <Project>{80E74205-89CE-34B4-9A0E-F84B801ADBBB}</Project>
+      <Name>absl_graphcycles_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\hash\absl_hash.vcxproj">
+      <Project>{BC1EA146-0441-338A-ABB6-D54A9550F55A}</Project>
+      <Name>absl_hash</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\container\absl_hashtablez_sampler.vcxproj">
+      <Project>{3CBE253E-6E63-3E37-985E-CD8852C8BCCA}</Project>
+      <Name>absl_hashtablez_sampler</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\numeric\absl_int128.vcxproj">
+      <Project>{318B2F19-AF77-336D-8A50-191A372B4A8A}</Project>
+      <Name>absl_int128</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\synchronization\absl_kernel_timeout_internal.vcxproj">
+      <Project>{1BBA00B3-9423-3631-9D32-62B89817917E}</Project>
+      <Name>absl_kernel_timeout_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\debugging\absl_leak_check.vcxproj">
+      <Project>{343230D4-46D9-351C-9232-808517BC809F}</Project>
+      <Name>absl_leak_check</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_entry.vcxproj">
+      <Project>{8FC15E9E-597E-3647-B980-4C64314C2855}</Project>
+      <Name>absl_log_entry</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_flags.vcxproj">
+      <Project>{6AEE689A-D7C7-3C28-9D2A-F4860E004C48}</Project>
+      <Name>absl_log_flags</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_globals.vcxproj">
+      <Project>{EC4BA064-BB17-3E7D-99E5-60BAC2125965}</Project>
+      <Name>absl_log_globals</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_initialize.vcxproj">
+      <Project>{D5F4008A-CE20-3F0D-A04A-D0B008AF235B}</Project>
+      <Name>absl_log_initialize</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_internal_check_op.vcxproj">
+      <Project>{FFF6725C-5753-39FF-8E9D-03C2B9F9239B}</Project>
+      <Name>absl_log_internal_check_op</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_internal_conditions.vcxproj">
+      <Project>{BE37F688-C9E7-3FAD-9E42-E2DF1BA99C6A}</Project>
+      <Name>absl_log_internal_conditions</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_internal_fnmatch.vcxproj">
+      <Project>{86986B12-20A3-31EC-B202-10DF8E64D5B1}</Project>
+      <Name>absl_log_internal_fnmatch</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_internal_format.vcxproj">
+      <Project>{640D28AF-198D-36C1-8540-E67F57ACC1C5}</Project>
+      <Name>absl_log_internal_format</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_internal_globals.vcxproj">
+      <Project>{BAD0FADA-7CC9-3453-9EA8-B1495D4662EF}</Project>
+      <Name>absl_log_internal_globals</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_internal_log_sink_set.vcxproj">
+      <Project>{1EE2C029-AB35-3A3D-B1AE-9BB4C99A261F}</Project>
+      <Name>absl_log_internal_log_sink_set</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_internal_message.vcxproj">
+      <Project>{F94710F1-B65C-3ED1-B2CF-18A734A2DB7D}</Project>
+      <Name>absl_log_internal_message</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_internal_nullguard.vcxproj">
+      <Project>{6FB0B0DF-AB48-30C9-BF3F-73BAA5DEAD0F}</Project>
+      <Name>absl_log_internal_nullguard</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_internal_proto.vcxproj">
+      <Project>{443D7A11-A6F1-3BC5-8913-F36E2AAADBA5}</Project>
+      <Name>absl_log_internal_proto</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\base\absl_log_severity.vcxproj">
+      <Project>{5784C9F7-7EA8-33E6-B09B-BD78DEB436A8}</Project>
+      <Name>absl_log_severity</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_log_sink.vcxproj">
+      <Project>{33A538A5-39DA-3840-BA62-C51FBE833DE7}</Project>
+      <Name>absl_log_sink</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\hash\absl_low_level_hash.vcxproj">
+      <Project>{E44C2642-F0B4-3676-8573-6D486B611A33}</Project>
+      <Name>absl_low_level_hash</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\base\absl_malloc_internal.vcxproj">
+      <Project>{8964C542-A39A-324C-8049-4A0253FB2A5A}</Project>
+      <Name>absl_malloc_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\profiling\absl_periodic_sampler.vcxproj">
+      <Project>{E5A5113F-E4F1-35E1-A7A1-B2196E16A1A4}</Project>
+      <Name>absl_periodic_sampler</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_distributions.vcxproj">
+      <Project>{CF0EE42A-FB83-3495-A04C-0B415062EFEB}</Project>
+      <Name>absl_random_distributions</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_internal_distribution_test_util.vcxproj">
+      <Project>{1160C8FF-E004-30A4-8F6A-CFD912386A1A}</Project>
+      <Name>absl_random_internal_distribution_test_util</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_internal_platform.vcxproj">
+      <Project>{BBB5CE17-C10D-3C67-98C7-B77A2569C2A6}</Project>
+      <Name>absl_random_internal_platform</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_internal_pool_urbg.vcxproj">
+      <Project>{7D988E40-0747-3112-8217-2F8A61463DCA}</Project>
+      <Name>absl_random_internal_pool_urbg</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_internal_randen.vcxproj">
+      <Project>{59F18116-15C0-343C-BA72-D55D3C548A30}</Project>
+      <Name>absl_random_internal_randen</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_internal_randen_hwaes.vcxproj">
+      <Project>{A2C7A7DC-DB7A-3D80-A56D-B6A2A290C162}</Project>
+      <Name>absl_random_internal_randen_hwaes</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_internal_randen_hwaes_impl.vcxproj">
+      <Project>{B3AC4553-6A4E-3AD3-BB33-59C445F940DA}</Project>
+      <Name>absl_random_internal_randen_hwaes_impl</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_internal_randen_slow.vcxproj">
+      <Project>{D3CF85C3-B815-3408-94E5-913F6472C8C7}</Project>
+      <Name>absl_random_internal_randen_slow</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_internal_seed_material.vcxproj">
+      <Project>{3C100EB7-65BF-35AB-94D8-5F3C58B801B2}</Project>
+      <Name>absl_random_internal_seed_material</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_seed_gen_exception.vcxproj">
+      <Project>{C6DA0770-E23B-34DC-87A4-1DBA76EEC1CB}</Project>
+      <Name>absl_random_seed_gen_exception</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\random\absl_random_seed_sequences.vcxproj">
+      <Project>{993D02F9-8C8A-394F-A0D1-471851E8C3B8}</Project>
+      <Name>absl_random_seed_sequences</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\container\absl_raw_hash_set.vcxproj">
+      <Project>{EFEA056B-9462-3D71-8673-08F854FAF796}</Project>
+      <Name>absl_raw_hash_set</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\base\absl_raw_logging_internal.vcxproj">
+      <Project>{5D27A7B1-5CFE-390C-B71E-CD3461B31CA1}</Project>
+      <Name>absl_raw_logging_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\base\absl_scoped_set_env.vcxproj">
+      <Project>{F6B5A805-67AE-34AC-8FA8-111220855B2C}</Project>
+      <Name>absl_scoped_set_env</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\base\absl_spinlock_wait.vcxproj">
+      <Project>{B646888E-D96F-333F-BEB8-03FBD0CDB923}</Project>
+      <Name>absl_spinlock_wait</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\debugging\absl_stacktrace.vcxproj">
+      <Project>{1D060D3D-AAEE-383A-A7B3-78CC8A19A019}</Project>
+      <Name>absl_stacktrace</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\status\absl_status.vcxproj">
+      <Project>{30FA3907-38A5-3CFE-9C11-E362279C21CB}</Project>
+      <Name>absl_status</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\status\absl_statusor.vcxproj">
+      <Project>{9F6217D0-EA4C-3D53-B8C3-E8EF4F29870D}</Project>
+      <Name>absl_statusor</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\strings\absl_str_format_internal.vcxproj">
+      <Project>{7615B492-5970-3004-82A1-CC0803F78AF7}</Project>
+      <Name>absl_str_format_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\base\absl_strerror.vcxproj">
+      <Project>{0AF41313-79D8-33C8-8B1D-DA26D193FFD9}</Project>
+      <Name>absl_strerror</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\strings\absl_string_view.vcxproj">
+      <Project>{C2FCBB67-82D3-3CE0-8A55-66B16D10FE44}</Project>
+      <Name>absl_string_view</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\strings\absl_strings.vcxproj">
+      <Project>{9CDFC491-93DD-3EC5-BADF-C3BDBE9E0E45}</Project>
+      <Name>absl_strings</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\strings\absl_strings_internal.vcxproj">
+      <Project>{396B3600-D176-368E-8812-DD7AA018494A}</Project>
+      <Name>absl_strings_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\debugging\absl_symbolize.vcxproj">
+      <Project>{3BDBDF75-210B-398B-9757-955FE685508D}</Project>
+      <Name>absl_symbolize</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\synchronization\absl_synchronization.vcxproj">
+      <Project>{7D723378-4826-34AE-A7F2-DF3DE505401B}</Project>
+      <Name>absl_synchronization</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\base\absl_throw_delegate.vcxproj">
+      <Project>{52B81911-B805-3A8E-AEEA-9CE17B9CC1FA}</Project>
+      <Name>absl_throw_delegate</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\time\absl_time.vcxproj">
+      <Project>{50C5BEE8-F99D-3733-89FB-CC6F91B170B5}</Project>
+      <Name>absl_time</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\time\absl_time_zone.vcxproj">
+      <Project>{735445FC-910E-32E6-B802-216ADCC2F443}</Project>
+      <Name>absl_time_zone</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\external\abseil-cpp\absl\log\absl_vlog_config_internal.vcxproj">
+      <Project>{EE11F0DD-CADC-3D48-A7F4-34B59D9D3AB9}</Project>
+      <Name>absl_vlog_config_internal</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
+  </ImportGroup>
+</Project>

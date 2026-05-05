@@ -21,6 +21,9 @@ static constexpr int kDrumPRTarget     = kMaxLayerPages + kMaxBassPages; // PRPe
 static constexpr int kClipPRTarget     = kMaxLayerPages + kMaxBassPages + kMaxDrumPages; // PRPendingOff target ID base for clip rolls (G-3)
 static constexpr int kVoxPRTarget      = kClipPRTarget + kMaxClipPages;       // G-4
 static constexpr int kInstPRTarget     = kVoxPRTarget  + kMaxVoxPages;        // G-4
+// J-7b (2026-05-03): BaySickRustyDrums singleton — single PRPendingOff target
+// (no array dimension since the engine is a 1-instance lock).
+static constexpr int kRustyPRTarget    = kInstPRTarget + kMaxInstPages;
 static constexpr int MAX_DRUM_SOUNDS   = 46;   // total drum sound library size
 static constexpr int MAX_DRUM_ROWS     = 16;   // max rows visible in the drums grid
 static constexpr int MAX_STEPS_TOTAL   = 64;   // max steps across any sequence

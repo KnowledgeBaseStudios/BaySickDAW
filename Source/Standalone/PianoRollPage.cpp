@@ -95,6 +95,9 @@ void PianoRollPage::registerEngine (EngineId id, PianoRollConnection conn)
     if (conn.auditionMomentary) roll->onNoteAudition    = conn.auditionMomentary;
     if (conn.auditionOn)        roll->onNoteAuditionOn  = conn.auditionOn;
     if (conn.auditionOff)       roll->onNoteAuditionOff = conn.auditionOff;
+    if (conn.noteLabelProvider) roll->setNoteLabelProvider (conn.noteLabelProvider);
+    if (conn.defaultTopNote >= 0) roll->setTopNote (conn.defaultTopNote);
+    if (conn.allKeysWhite) roll->setAllKeysWhiteMode (true);
     if (mPlayHead)
         roll->onSeek = [ph = mPlayHead](double b) { if (ph) ph->seekTo (b); };
     if (mUndoCtx.showHistory)

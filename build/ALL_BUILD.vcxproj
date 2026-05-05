@@ -55,6 +55,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -216,8 +217,77 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <Project>{262FAAB1-9D08-3A7A-81FC-327128D9EE43}</Project>
       <Name>VibeSynthSamples</Name>
     </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\lunasvg_build\lunasvg.vcxproj">
+      <Project>{476BCE7B-9FCA-3E05-95CC-4B539DC51FDE}</Project>
+      <Name>lunasvg</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\lunasvg_build\plutovg\plutovg.vcxproj">
+      <Project>{6638B24F-A170-3E7D-9D48-765506CE8F60}</Project>
+      <Name>plutovg</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\sfizz_cephes.vcxproj">
+      <Project>{0877D833-1B31-3E72-8626-97FF58FB3717}</Project>
+      <Name>sfizz_cephes</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\sfizz_cpuid.vcxproj">
+      <Project>{1EE58F69-EFDA-31D4-B5D4-A3FBC9CE65D0}</Project>
+      <Name>sfizz_cpuid</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\sfizz_filesystem_impl.vcxproj">
+      <Project>{BA2463A4-4E2C-3729-8018-453ADF23615F}</Project>
+      <Name>sfizz_filesystem_impl</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\sfizz_fmidi.vcxproj">
+      <Project>{2429A74A-A1CA-3F11-BFF3-1CBA4923E165}</Project>
+      <Name>sfizz_fmidi</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\sfizz_hiir_polyphase_iir2designer.vcxproj">
+      <Project>{7F7B8A50-D1AB-37D9-9986-07443BF88CA0}</Project>
+      <Name>sfizz_hiir_polyphase_iir2designer</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\src\sfizz_import.vcxproj">
+      <Project>{C212D53F-8D50-3EBE-943D-732BBE84EABB}</Project>
+      <Name>sfizz_import</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\src\sfizz_internal.vcxproj">
+      <Project>{79335079-3AE7-39B4-A7E8-2776549198F3}</Project>
+      <Name>sfizz_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\sfizz_kissfft.vcxproj">
+      <Project>{4BC50775-D499-3709-9AA2-9981D65C2065}</Project>
+      <Name>sfizz_kissfft</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\src\sfizz_messaging.vcxproj">
+      <Project>{EA74BC8B-7EA7-390B-8D60-1852779EB49D}</Project>
+      <Name>sfizz_messaging</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\src\sfizz_parser.vcxproj">
+      <Project>{4517B758-16E9-3600-95AE-71F9905811BD}</Project>
+      <Name>sfizz_parser</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\sfizz_pugixml.vcxproj">
+      <Project>{76AF5922-471C-3F12-867E-A126EC761EC1}</Project>
+      <Name>sfizz_pugixml</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\src\sfizz_spin_mutex.vcxproj">
+      <Project>{0142907E-31C2-36B4-A4A5-6E629D15766A}</Project>
+      <Name>sfizz_spin_mutex</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\sfizz_spline.vcxproj">
+      <Project>{329FBF1D-EF15-3E5D-9370-114EC627FA1C}</Project>
+      <Name>sfizz_spline</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\src\sfizz_static.vcxproj">
+      <Project>{5679C9F8-2774-3AD3-987C-F74F1C2353E3}</Project>
+      <Name>sfizz_static</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\sfizz_tunings.vcxproj">
+      <Project>{45FED331-FFE9-346C-930D-86592414FC3B}</Project>
+      <Name>sfizz_tunings</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
   </ImportGroup>
 </Project>

@@ -25,8 +25,30 @@
 class OverdriveDSP : public DSPBase
 {
 public:
+    // I-4 (2026-05-02): Type umbrella covers two algorithm characters.
+    //   Rack  -- existing chain (Pre BPF + 4x oversampled atan + tone stack).
+    //            Default; preserves all old projects bit-exact.
+    //   Pedal -- I-5 OD Style algorithm (frequency split + dual cascaded
+    //            soft-clip).  DSP body lands in I-5; Type::Pedal currently
+    //            falls through to the same Rack algorithm so the slot loads
+    //            and processes audio normally until I-5 fills it in.
+    enum class Type : int
+    {
+        Rack  = 0,
+        Pedal = 1
+    };
+
     OverdriveDSP();
     ~OverdriveDSP() override = default;
+
+    // Type setter (no-op when unchanged).  Mode dropdown calls into this
+    // via SlotComponent.  Kept beside the rest of the public param API.
+    void setType (int t)
+    {
+        const Type newType = static_cast<Type> (juce::jlimit (0, 1, t));
+        if (newType != mType) mType = newType;
+    }
+    Type mType { Type::Rack };
 
     // DSPBase interface
     void prepare (double sampleRate, int maxBlockSize) override;
@@ -102,6 +124,15 @@ private:
     float mDcX_L { 0.0f }, mDcY_L { 0.0f };
     float mDcX_R { 0.0f }, mDcY_R { 0.0f };
     float mDcCoef{ 0.0f };   // R = 1 - 2π·5/sr, cached from prepare()
+
+    // I-5 (2026-05-02): OD Style Pedal mode -- 80 Hz frequency split (HPF
+    // feeds the dual cascaded soft-clip; LPF feeds the clean blend) +
+    // separate scratch for the clean sub-bass path.  Filters allocated in
+    // prepare(); only walked in process() when mType == Type::Pedal so they
+    // cost nothing in Rack mode.
+    juce::dsp::StateVariableTPTFilter<float> mPedalSplitHpf;
+    juce::dsp::StateVariableTPTFilter<float> mPedalSplitLpf;
+    juce::AudioBuffer<float>                 mPedalCleanBuf;
 
     // ── Helpers ──────────────────────────────────────────────────────────────
     void refreshFilterCoefs(int numSamples);   // called at top of each process()

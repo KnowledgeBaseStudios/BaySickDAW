@@ -14,6 +14,46 @@
 # EXTERNAL cache entries
 ########################
 
+//If ON, Abseil will build all of Abseil's own tests.
+ABSL_BUILD_TESTING:BOOL=OFF
+
+//If ON, Abseil will build libraries that you can use to write
+// tests against Abseil code. This option requires that Abseil
+// is configured to use GoogleTest.
+ABSL_BUILD_TEST_HELPERS:BOOL=OFF
+
+//Enable install rule
+ABSL_ENABLE_INSTALL:BOOL=OFF
+
+//If set, download GoogleTest from this URL
+ABSL_GOOGLETEST_DOWNLOAD_URL:STRING=
+
+//If ABSL_USE_GOOGLETEST_HEAD is OFF and ABSL_GOOGLETEST_URL is
+// not set, specifies the directory of a local GoogleTest checkout.
+ABSL_LOCAL_GOOGLETEST_DIR:PATH=/usr/src/googletest
+
+//Use CMake C++ standard meta features (e.g. cxx_std_14) that propagate
+// to targets that link to Abseil
+ABSL_PROPAGATE_CXX_STD:BOOL=OFF
+
+//If ON, Abseil will assume that the targets for GoogleTest are
+// already provided by the including project. This makes sense
+// when Abseil is used with add_subdirectory.
+ABSL_USE_EXTERNAL_GOOGLETEST:BOOL=OFF
+
+//If ON, abseil will download HEAD from GoogleTest at config time.
+ABSL_USE_GOOGLETEST_HEAD:BOOL=OFF
+
+//Silence warnings in Abseil headers by marking them as SYSTEM
+// includes
+ABSL_USE_SYSTEM_INCLUDES:BOOL=OFF
+
+//Build the library as a shared library
+BUILD_SHARED_LIBS:BOOL=OFF
+
+//Build tests
+BUILD_TESTING:BOOL=OFF
+
 //Value Computed by CMake
 BaySickDAW_BINARY_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/build
 
@@ -25,6 +65,27 @@ BaySickDAW_SOURCE_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW
 
 //Path to a program.
 CMAKE_AR:FILEPATH=C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lib.exe
+
+//ASM compiler
+CMAKE_ASM_COMPILER:FILEPATH=NOTFOUND
+
+//ASM_MASM compiler
+CMAKE_ASM_MASM_COMPILER:FILEPATH=C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/ml64.exe
+
+//Flags used by the ASM_MASM compiler during all build types.
+CMAKE_ASM_MASM_FLAGS:STRING=
+
+//Flags used by the ASM_MASM compiler during DEBUG builds.
+CMAKE_ASM_MASM_FLAGS_DEBUG:STRING=
+
+//Flags used by the ASM_MASM compiler during MINSIZEREL builds.
+CMAKE_ASM_MASM_FLAGS_MINSIZEREL:STRING=
+
+//Flags used by the ASM_MASM compiler during RELEASE builds.
+CMAKE_ASM_MASM_FLAGS_RELEASE:STRING=
+
+//Flags used by the ASM_MASM compiler during RELWITHDEBINFO builds.
+CMAKE_ASM_MASM_FLAGS_RELWITHDEBINFO:STRING=
 
 //Semicolon separated list of supported configuration types, only
 // supports Debug, Release, MinSizeRel, and RelWithDebInfo, anything
@@ -46,6 +107,9 @@ CMAKE_CXX_FLAGS_RELEASE:STRING=/O2 /Ob2 /DNDEBUG
 //Flags used by the CXX compiler during RELWITHDEBINFO builds.
 CMAKE_CXX_FLAGS_RELWITHDEBINFO:STRING=/Zi /O2 /Ob1 /DNDEBUG
 
+//C++ standard to be used
+CMAKE_CXX_STANDARD:STRING=14
+
 //Libraries linked by default with all C++ applications.
 CMAKE_CXX_STANDARD_LIBRARIES:STRING=kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib
 
@@ -63,6 +127,9 @@ CMAKE_C_FLAGS_RELEASE:STRING=/O2 /Ob2 /DNDEBUG
 
 //Flags used by the C compiler during RELWITHDEBINFO builds.
 CMAKE_C_FLAGS_RELWITHDEBINFO:STRING=/Zi /O2 /Ob1 /DNDEBUG
+
+//C standard to be used
+CMAKE_C_STANDARD:STRING=99
 
 //Libraries linked by default with all C applications.
 CMAKE_C_STANDARD_LIBRARIES:STRING=kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib
@@ -85,8 +152,56 @@ CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO:STRING=/debug /INCREMENTAL
 //Value Computed by CMake.
 CMAKE_FIND_PACKAGE_REDIRECTS_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/pkgRedirects
 
+//User executables (bin)
+CMAKE_INSTALL_BINDIR:PATH=bin
+
+//Read-only architecture-independent data (DATAROOTDIR)
+CMAKE_INSTALL_DATADIR:PATH=
+
+//Read-only architecture-independent data root (share)
+CMAKE_INSTALL_DATAROOTDIR:PATH=share
+
+//Documentation root (DATAROOTDIR/doc/PROJECT_NAME)
+CMAKE_INSTALL_DOCDIR:PATH=
+
+//C header files (include)
+CMAKE_INSTALL_INCLUDEDIR:PATH=include
+
+//Info documentation (DATAROOTDIR/info)
+CMAKE_INSTALL_INFODIR:PATH=
+
+//Object code libraries (lib)
+CMAKE_INSTALL_LIBDIR:PATH=lib
+
+//Program executables (libexec)
+CMAKE_INSTALL_LIBEXECDIR:PATH=libexec
+
+//Locale-dependent data (DATAROOTDIR/locale)
+CMAKE_INSTALL_LOCALEDIR:PATH=
+
+//Modifiable single-machine data (var)
+CMAKE_INSTALL_LOCALSTATEDIR:PATH=var
+
+//Man documentation (DATAROOTDIR/man)
+CMAKE_INSTALL_MANDIR:PATH=
+
+//C header files for non-gcc (/usr/include)
+CMAKE_INSTALL_OLDINCLUDEDIR:PATH=/usr/include
+
 //Install path prefix, prepended onto install directories.
 CMAKE_INSTALL_PREFIX:PATH=C:/Program Files (x86)/BaySickDAW
+
+//Run-time variable data (LOCALSTATEDIR/run)
+CMAKE_INSTALL_RUNSTATEDIR:PATH=
+
+//System admin executables (sbin)
+CMAKE_INSTALL_SBINDIR:PATH=sbin
+
+//Modifiable architecture-independent data (com)
+CMAKE_INSTALL_SHAREDSTATEDIR:PATH=com
+
+//Read-only single-machine data (etc)
+CMAKE_INSTALL_SYSCONFDIR:PATH=etc
 
 //Path to a program.
 CMAKE_LINKER:FILEPATH=C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/link.exe
@@ -111,8 +226,10 @@ CMAKE_MODULE_LINKER_FLAGS_RELEASE:STRING=/INCREMENTAL:NO
 // RELWITHDEBINFO builds.
 CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO:STRING=/debug /INCREMENTAL
 
+CMAKE_MSVC_RUNTIME_LIBRARY:STRING=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL
+
 //Path to a program.
-CMAKE_MT:FILEPATH=CMAKE_MT-NOTFOUND
+CMAKE_MT:FILEPATH=C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mt.exe
 
 //Value Computed by CMake
 CMAKE_PROJECT_COMPAT_VERSION:STATIC=
@@ -215,6 +332,44 @@ CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO:STRING=
 // Studio IDE projects all commands are done without /nologo.
 CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 
+//Enable to build 7-Zip packages
+CPACK_BINARY_7Z:BOOL=OFF
+
+//Enable to build IFW packages
+CPACK_BINARY_IFW:BOOL=OFF
+
+//Enable to build Inno Setup packages
+CPACK_BINARY_INNOSETUP:BOOL=OFF
+
+//Enable to build NSIS packages
+CPACK_BINARY_NSIS:BOOL=ON
+
+//Enable to build NuGet packages
+CPACK_BINARY_NUGET:BOOL=OFF
+
+//Enable to build WiX packages
+CPACK_BINARY_WIX:BOOL=OFF
+
+//Enable to build ZIP packages
+CPACK_BINARY_ZIP:BOOL=OFF
+
+//Enable to build 7-Zip source packages
+CPACK_SOURCE_7Z:BOOL=ON
+
+//Enable to build ZIP source packages
+CPACK_SOURCE_ZIP:BOOL=ON
+
+ENABLE_LTO:BOOL=OFF
+
+//Path to a library.
+EXECINFO_LIBRARY:FILEPATH=EXECINFO_LIBRARY-NOTFOUND
+
+//iconv include directory
+Iconv_INCLUDE_DIR:PATH=Iconv_INCLUDE_DIR-NOTFOUND
+
+//iconv library (if not in the C library)
+Iconv_LIBRARY:FILEPATH=Iconv_LIBRARY-NOTFOUND
+
 //Value Computed by CMake
 JUCE_BINARY_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/build/juce_build
 
@@ -252,13 +407,514 @@ JUCE_TOOL_INSTALL_DIR:STRING=bin/JUCE-8.0.12
 // script is looking for the *Microsoft.Web.WebView2* directory
 JUCE_WEBVIEW2_PACKAGE_LOCATION:BOOL=OFF
 
+//Path to a library.
+LIBRT:FILEPATH=LIBRT-NOTFOUND
+
+//Build examples
+LUNASVG_BUILD_EXAMPLES:BOOL=OFF
+
+//Disable automatic loading of fonts from system directories
+LUNASVG_DISABLE_LOAD_SYSTEM_FONTS:BOOL=OFF
+
+//Path to a library.
+MATH_LIBRARY:FILEPATH=MATH_LIBRARY-NOTFOUND
+
+//Maximum number of managed Control Change messages
+MIDI_CC_COUNT:STRING=512
+
+//CXX compiler flags for OpenMP parallelization
+OpenMP_CXX_FLAGS:STRING=-openmp
+
+//CXX compiler libraries for OpenMP parallelization
+OpenMP_CXX_LIB_NAMES:STRING=
+
+//C compiler flags for OpenMP parallelization
+OpenMP_C_FLAGS:STRING=-openmp
+
+//C compiler libraries for OpenMP parallelization
+OpenMP_C_LIB_NAMES:STRING=
+
+//Arguments to supply to pkg-config
+PKG_CONFIG_ARGN:STRING=
+
+//pkg-config executable
+PKG_CONFIG_EXECUTABLE:FILEPATH=PKG_CONFIG_EXECUTABLE-NOTFOUND
+
+//Build examples
+PLUTOVG_BUILD_EXAMPLES:BOOL=OFF
+
+//Disable loading font face cache from files and directories
+PLUTOVG_DISABLE_FONT_FACE_CACHE_LOAD:BOOL=OFF
+
+PROJECT_SYSTEM_PROCESSOR:STRING=x64
+
+//The directory containing a CMake configuration file for Qt5.
+Qt5_DIR:PATH=Qt5_DIR-NOTFOUND
+
+//Path to a file.
+SAMPLERATE_INCLUDE_DIR:PATH=SAMPLERATE_INCLUDE_DIR-NOTFOUND
+
+//Path to a library.
+SAMPLERATE_LIBRARY:FILEPATH=SAMPLERATE_LIBRARY-NOTFOUND
+
+//Use address sanitizer on all sfizz targets [default: OFF]
+SFIZZ_ASAN:BOOL=OFF
+
+//Enable benchmarks build [default: OFF]
+SFIZZ_BENCHMARKS:BOOL=OFF
+
+//Enable feature demos build [default: OFF]
+SFIZZ_DEMOS:BOOL=OFF
+
+//Enable developer tools build [default: OFF]
+SFIZZ_DEVTOOLS:BOOL=OFF
+
+//Check Git submodules presence [default: ON]
+SFIZZ_GIT_SUBMODULE_CHECK:BOOL=OFF
+
+//Enable JACK stand-alone build [default: OFF]
+SFIZZ_JACK:BOOL=OFF
+
+//Profile the build time [default: OFF]
+SFIZZ_PROFILE_BUILD:BOOL=OFF
+
+//Recompile faust sources
+SFIZZ_RECOMPILE_FAUST:BOOL=OFF
+
+//Forced assertions in release builds [default: OFF]
+SFIZZ_RELEASE_ASSERTS:BOOL=OFF
+
+//Enable renderer of SMF files [default: ON]
+SFIZZ_RENDER:BOOL=OFF
+
+//Enable shared library build [default: ON]
+SFIZZ_SHARED:BOOL=OFF
+
+//Link the sndfile library statically [default: OFF]
+SFIZZ_SNDFILE_STATIC:BOOL=OFF
+
+//Enable tests build [default: OFF]
+SFIZZ_TESTS:BOOL=OFF
+
+//Enable use of the sndfile library [default: OFF]
+SFIZZ_USE_SNDFILE:BOOL=OFF
+
+//Use Abseil libraries preinstalled on system [default: OFF]
+SFIZZ_USE_SYSTEM_ABSEIL:BOOL=OFF
+
+//Use Catch libraries preinstalled on system [default: OFF]
+SFIZZ_USE_SYSTEM_CATCH:BOOL=OFF
+
+//Use CXXOPTS libraries preinstalled on system [default: OFF]
+SFIZZ_USE_SYSTEM_CXXOPTS:BOOL=OFF
+
+//Use GHC Filesystem libraries preinstalled on system [default:
+// OFF]
+SFIZZ_USE_SYSTEM_GHC_FS:BOOL=OFF
+
+//Use KISS FFT libraries preinstalled on system [default: OFF]
+SFIZZ_USE_SYSTEM_KISS_FFT:BOOL=OFF
+
+//Use pugixml libraries preinstalled on system [default: OFF]
+SFIZZ_USE_SYSTEM_PUGIXML:BOOL=OFF
+
+//Use SIMDe libraries preinstalled on system [default: OFF]
+SFIZZ_USE_SYSTEM_SIMDE:BOOL=OFF
+
+//Path to a library.
+STDTHREADS_LIBRARY:FILEPATH=STDTHREADS_LIBRARY-NOTFOUND
+
+ST_AUDIO_FILE_EXTERNAL_SNDFILE:STRING=
+
+//Use sndfile
+ST_AUDIO_FILE_USE_SNDFILE:BOOL=OFF
+
+//Use system plutovg library
+USE_SYSTEM_PLUTOVG:BOOL=OFF
+
+//Build CoolEdit plugin
+WAVPACK_BUILD_COOLEDIT_PLUGIN:BOOL=OFF
+
+//Build programs
+WAVPACK_BUILD_PROGRAMS:BOOL=OFF
+
+//Build WinAmp plugin
+WAVPACK_BUILD_WINAMP_PLUGIN:BOOL=OFF
+
+//Enable assembly optimizations
+WAVPACK_ENABLE_ASM:BOOL=ON
+
+//Enable support for WavPack DSD files
+WAVPACK_ENABLE_DSD:BOOL=ON
+
+//Decode legacy (< 4.0) WavPack files
+WAVPACK_ENABLE_LEGACY:BOOL=OFF
+
+//Enable support for threading in libwavpack
+WAVPACK_ENABLE_THREADS:BOOL=ON
+
+//Generate and install CMake package configuration module
+WAVPACK_INSTALL_CMAKE_MODULE:BOOL=OFF
+
+//Install documentation
+WAVPACK_INSTALL_DOCS:BOOL=OFF
+
+//Generate and install wavpack.pc
+WAVPACK_INSTALL_PKGCONFIG_MODULE:BOOL=OFF
+
+//Value Computed by CMake
+WavPack_BINARY_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/external/st_audiofile/thirdparty/wavpack
+
+//Value Computed by CMake
+WavPack_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+WavPack_SOURCE_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/st_audiofile/thirdparty/wavpack
+
+//Value Computed by CMake
+absl_BINARY_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/external/abseil-cpp
+
+//Value Computed by CMake
+absl_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+absl_SOURCE_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/abseil-cpp
+
+//Dependencies for the target
+absl_bad_any_cast_impl_LIB_DEPENDS:STATIC=general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_bad_optional_access_LIB_DEPENDS:STATIC=general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_bad_variant_access_LIB_DEPENDS:STATIC=general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_base_LIB_DEPENDS:STATIC=general;absl::log_severity;general;absl::raw_logging_internal;general;absl::spinlock_wait;general;absl::type_traits;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_city_LIB_DEPENDS:STATIC=general;-ignore:4221;
+
+//Dependencies for the target
+absl_civil_time_LIB_DEPENDS:STATIC=general;-ignore:4221;
+
+//Dependencies for the target
+absl_cord_LIB_DEPENDS:STATIC=general;absl::base;general;absl::cord_internal;general;absl::cordz_functions;general;absl::cordz_info;general;absl::crc32c;general;absl::crc_cord_state;general;absl::optional;general;absl::raw_logging_internal;general;absl::span;general;absl::strings;general;-ignore:4221;
+
+//Dependencies for the target
+absl_cord_internal_LIB_DEPENDS:STATIC=general;absl::crc_cord_state;general;absl::raw_logging_internal;general;absl::strings;general;absl::throw_delegate;general;-ignore:4221;
+
+//Dependencies for the target
+absl_cordz_functions_LIB_DEPENDS:STATIC=general;absl::exponential_biased;general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_cordz_handle_LIB_DEPENDS:STATIC=general;absl::base;general;absl::raw_logging_internal;general;absl::synchronization;general;-ignore:4221;
+
+//Dependencies for the target
+absl_cordz_info_LIB_DEPENDS:STATIC=general;absl::base;general;absl::cord_internal;general;absl::cordz_functions;general;absl::cordz_handle;general;absl::span;general;absl::raw_logging_internal;general;absl::stacktrace;general;absl::synchronization;general;absl::time;general;-ignore:4221;
+
+//Dependencies for the target
+absl_cordz_sample_token_LIB_DEPENDS:STATIC=general;absl::cordz_handle;general;absl::cordz_info;general;-ignore:4221;
+
+//Dependencies for the target
+absl_crc32c_LIB_DEPENDS:STATIC=general;absl::crc_cpu_detect;general;absl::crc_internal;general;absl::non_temporal_memcpy;general;absl::str_format;general;absl::strings;general;-ignore:4221;
+
+//Dependencies for the target
+absl_crc_cord_state_LIB_DEPENDS:STATIC=general;absl::crc32c;general;absl::strings;general;-ignore:4221;
+
+//Dependencies for the target
+absl_crc_cpu_detect_LIB_DEPENDS:STATIC=general;absl::base;general;-ignore:4221;
+
+//Dependencies for the target
+absl_crc_internal_LIB_DEPENDS:STATIC=general;absl::crc_cpu_detect;general;absl::raw_logging_internal;general;absl::memory;general;absl::bits;general;-ignore:4221;
+
+//Dependencies for the target
+absl_debugging_internal_LIB_DEPENDS:STATIC=general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_demangle_internal_LIB_DEPENDS:STATIC=general;absl::base;general;-ignore:4221;
+
+//Dependencies for the target
+absl_die_if_null_LIB_DEPENDS:STATIC=general;absl::log;general;absl::strings;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_examine_stack_LIB_DEPENDS:STATIC=general;absl::stacktrace;general;absl::symbolize;general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_exponential_biased_LIB_DEPENDS:STATIC=general;-ignore:4221;
+
+//Dependencies for the target
+absl_failure_signal_handler_LIB_DEPENDS:STATIC=general;absl::examine_stack;general;absl::stacktrace;general;absl::base;general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_commandlineflag_LIB_DEPENDS:STATIC=general;absl::flags_commandlineflag_internal;general;absl::optional;general;absl::strings;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_commandlineflag_internal_LIB_DEPENDS:STATIC=general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_config_LIB_DEPENDS:STATIC=general;absl::flags_program_name;general;absl::strings;general;absl::synchronization;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_internal_LIB_DEPENDS:STATIC=general;absl::base;general;absl::flags_commandlineflag;general;absl::flags_commandlineflag_internal;general;absl::flags_config;general;absl::flags_marshalling;general;absl::synchronization;general;absl::meta;general;absl::utility;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_marshalling_LIB_DEPENDS:STATIC=general;absl::log_severity;general;absl::int128;general;absl::optional;general;absl::strings;general;absl::str_format;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_parse_LIB_DEPENDS:STATIC=general;absl::flags_config;general;absl::flags_commandlineflag;general;absl::flags_commandlineflag_internal;general;absl::flags_internal;general;absl::flags_private_handle_accessor;general;absl::flags_program_name;general;absl::flags_reflection;general;absl::flags_usage;general;absl::strings;general;absl::synchronization;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_private_handle_accessor_LIB_DEPENDS:STATIC=general;absl::flags_commandlineflag;general;absl::flags_commandlineflag_internal;general;absl::strings;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_program_name_LIB_DEPENDS:STATIC=general;absl::strings;general;absl::synchronization;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_reflection_LIB_DEPENDS:STATIC=general;absl::flags_commandlineflag;general;absl::flags_private_handle_accessor;general;absl::flags_config;general;absl::strings;general;absl::synchronization;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_usage_LIB_DEPENDS:STATIC=general;absl::flags_usage_internal;general;absl::raw_logging_internal;general;absl::strings;general;absl::synchronization;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_flags_usage_internal_LIB_DEPENDS:STATIC=general;absl::flags_config;general;absl::flags_commandlineflag;general;absl::flags_internal;general;absl::flags_private_handle_accessor;general;absl::flags_program_name;general;absl::flags_reflection;general;absl::strings;general;absl::synchronization;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_graphcycles_internal_LIB_DEPENDS:STATIC=general;absl::base;general;absl::malloc_internal;general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_hash_LIB_DEPENDS:STATIC=general;absl::bits;general;absl::city;general;absl::meta;general;absl::int128;general;absl::strings;general;absl::optional;general;absl::variant;general;absl::utility;general;absl::low_level_hash;general;-ignore:4221;
+
+//Dependencies for the target
+absl_hashtablez_sampler_LIB_DEPENDS:STATIC=general;absl::base;general;absl::exponential_biased;general;absl::raw_logging_internal;general;absl::sample_recorder;general;absl::synchronization;general;absl::time;general;-ignore:4221;
+
+//Dependencies for the target
+absl_int128_LIB_DEPENDS:STATIC=general;-ignore:4221;
+
+//Dependencies for the target
+absl_kernel_timeout_internal_LIB_DEPENDS:STATIC=general;absl::base;general;absl::raw_logging_internal;general;absl::time;general;-ignore:4221;
+
+//Dependencies for the target
+absl_leak_check_LIB_DEPENDS:STATIC=general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_entry_LIB_DEPENDS:STATIC=general;absl::log_severity;general;absl::span;general;absl::strings;general;absl::time;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_flags_LIB_DEPENDS:STATIC=general;absl::log_globals;general;absl::log_severity;general;absl::flags_marshalling;general;absl::strings;general;absl::vlog_config_internal;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_globals_LIB_DEPENDS:STATIC=general;absl::hash;general;absl::log_severity;general;absl::raw_logging_internal;general;absl::strings;general;absl::vlog_config_internal;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_initialize_LIB_DEPENDS:STATIC=general;absl::log_globals;general;absl::log_internal_globals;general;absl::time;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_internal_check_op_LIB_DEPENDS:STATIC=general;absl::log_internal_nullguard;general;absl::log_internal_nullstream;general;absl::log_internal_strip;general;absl::strings;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_internal_conditions_LIB_DEPENDS:STATIC=general;absl::base;general;absl::log_internal_voidify;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_internal_fnmatch_LIB_DEPENDS:STATIC=general;absl::strings;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_internal_format_LIB_DEPENDS:STATIC=general;absl::log_internal_append_truncated;general;absl::log_internal_globals;general;absl::log_severity;general;absl::strings;general;absl::str_format;general;absl::time;general;absl::span;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_internal_globals_LIB_DEPENDS:STATIC=general;absl::log_severity;general;absl::raw_logging_internal;general;absl::strings;general;absl::time;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_internal_log_sink_set_LIB_DEPENDS:STATIC=general;absl::base;general;absl::log_internal_globals;general;absl::log_globals;general;absl::log_entry;general;absl::log_severity;general;absl::log_sink;general;absl::raw_logging_internal;general;absl::synchronization;general;absl::span;general;absl::strings;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_internal_message_LIB_DEPENDS:STATIC=general;absl::base;general;absl::examine_stack;general;absl::log_internal_append_truncated;general;absl::log_internal_format;general;absl::log_internal_globals;general;absl::log_internal_proto;general;absl::log_internal_log_sink_set;general;absl::log_internal_nullguard;general;absl::log_globals;general;absl::log_entry;general;absl::log_severity;general;absl::log_sink;general;absl::log_sink_registry;general;absl::memory;general;absl::raw_logging_internal;general;absl::strings;general;absl::strerror;general;absl::time;general;absl::span;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_internal_nullguard_LIB_DEPENDS:STATIC=general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_internal_proto_LIB_DEPENDS:STATIC=general;absl::base;general;absl::strings;general;absl::span;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_severity_LIB_DEPENDS:STATIC=general;absl::config;general;absl::core_headers;general;-ignore:4221;
+
+//Dependencies for the target
+absl_log_sink_LIB_DEPENDS:STATIC=general;absl::log_entry;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_low_level_hash_LIB_DEPENDS:STATIC=general;absl::int128;general;-ignore:4221;
+
+//Dependencies for the target
+absl_malloc_internal_LIB_DEPENDS:STATIC=general;absl::base;general;absl::base_internal;general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_periodic_sampler_LIB_DEPENDS:STATIC=general;absl::exponential_biased;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_distributions_LIB_DEPENDS:STATIC=general;absl::random_internal_generate_real;general;absl::random_internal_distribution_caller;general;absl::random_internal_fast_uniform_bits;general;absl::random_internal_fastmath;general;absl::random_internal_iostream_state_saver;general;absl::random_internal_traits;general;absl::random_internal_uniform_helper;general;absl::random_internal_wide_multiply;general;absl::strings;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_internal_distribution_test_util_LIB_DEPENDS:STATIC=general;absl::raw_logging_internal;general;absl::strings;general;absl::str_format;general;absl::span;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_internal_platform_LIB_DEPENDS:STATIC=general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_internal_pool_urbg_LIB_DEPENDS:STATIC=general;absl::base;general;absl::random_internal_randen;general;absl::random_internal_seed_material;general;absl::random_seed_gen_exception;general;absl::raw_logging_internal;general;absl::span;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_internal_randen_LIB_DEPENDS:STATIC=general;absl::random_internal_platform;general;absl::random_internal_randen_hwaes;general;absl::random_internal_randen_slow;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_internal_randen_hwaes_LIB_DEPENDS:STATIC=general;absl::random_internal_platform;general;absl::random_internal_randen_hwaes_impl;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_internal_randen_hwaes_impl_LIB_DEPENDS:STATIC=general;absl::random_internal_platform;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_internal_randen_slow_LIB_DEPENDS:STATIC=general;absl::random_internal_platform;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_internal_seed_material_LIB_DEPENDS:STATIC=general;absl::optional;general;absl::raw_logging_internal;general;absl::span;general;absl::strings;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_seed_gen_exception_LIB_DEPENDS:STATIC=general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_random_seed_sequences_LIB_DEPENDS:STATIC=general;absl::random_internal_pool_urbg;general;absl::random_internal_salted_seed_seq;general;absl::random_internal_seed_material;general;absl::random_seed_gen_exception;general;absl::span;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_raw_hash_set_LIB_DEPENDS:STATIC=general;absl::bits;general;absl::hash;general;absl::hashtablez_sampler;general;absl::memory;general;absl::meta;general;absl::optional;general;absl::raw_logging_internal;general;absl::utility;general;-ignore:4221;
+
+//Dependencies for the target
+absl_raw_logging_internal_LIB_DEPENDS:STATIC=general;absl::config;general;absl::core_headers;general;absl::log_severity;general;-ignore:4221;
+
+//Dependencies for the target
+absl_scoped_set_env_LIB_DEPENDS:STATIC=general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_spinlock_wait_LIB_DEPENDS:STATIC=general;absl::base_internal;general;absl::core_headers;general;-ignore:4221;
+
+//Dependencies for the target
+absl_stacktrace_LIB_DEPENDS:STATIC=general;absl::debugging_internal;general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_status_LIB_DEPENDS:STATIC=general;absl::cord;general;absl::optional;general;absl::raw_logging_internal;general;absl::span;general;absl::stacktrace;general;absl::strerror;general;absl::str_format;general;absl::strings;general;absl::symbolize;general;-ignore:4221;
+
+//Dependencies for the target
+absl_statusor_LIB_DEPENDS:STATIC=general;absl::base;general;absl::has_ostream_operator;general;absl::raw_logging_internal;general;absl::status;general;absl::str_format;general;absl::strings;general;absl::utility;general;absl::variant;general;-ignore:4221;
+
+//Dependencies for the target
+absl_str_format_internal_LIB_DEPENDS:STATIC=general;absl::strings;general;absl::utility;general;absl::int128;general;absl::span;general;-ignore:4221;
+
+//Dependencies for the target
+absl_strerror_LIB_DEPENDS:STATIC=general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_string_view_LIB_DEPENDS:STATIC=general;absl::base;general;absl::throw_delegate;general;-ignore:4221;
+
+//Dependencies for the target
+absl_strings_LIB_DEPENDS:STATIC=general;absl::string_view;general;absl::strings_internal;general;absl::base;general;absl::charset;general;absl::int128;general;absl::raw_logging_internal;general;absl::throw_delegate;general;-ignore:4221;
+
+//Dependencies for the target
+absl_strings_internal_LIB_DEPENDS:STATIC=general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_symbolize_LIB_DEPENDS:STATIC=general;absl::debugging_internal;general;absl::demangle_internal;general;absl::base;general;absl::malloc_internal;general;absl::raw_logging_internal;general;absl::strings;general;-ignore:4221;general;-ignore:4221;
+
+//Dependencies for the target
+absl_synchronization_LIB_DEPENDS:STATIC=general;absl::graphcycles_internal;general;absl::kernel_timeout_internal;general;absl::base;general;absl::malloc_internal;general;absl::raw_logging_internal;general;absl::stacktrace;general;absl::symbolize;general;absl::time;general;-ignore:4221;
+
+//Dependencies for the target
+absl_throw_delegate_LIB_DEPENDS:STATIC=general;absl::raw_logging_internal;general;-ignore:4221;
+
+//Dependencies for the target
+absl_time_LIB_DEPENDS:STATIC=general;absl::base;general;absl::civil_time;general;absl::int128;general;absl::raw_logging_internal;general;absl::strings;general;absl::time_zone;general;-ignore:4221;
+
+//Dependencies for the target
+absl_time_zone_LIB_DEPENDS:STATIC=general;-ignore:4221;
+
+//Dependencies for the target
+absl_vlog_config_internal_LIB_DEPENDS:STATIC=general;absl::base;general;absl::log_internal_fnmatch;general;absl::memory;general;absl::strings;general;absl::synchronization;general;absl::optional;general;-ignore:4221;general;-ignore:4221;
+
+//Value Computed by CMake
+libaiff_BINARY_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/external/st_audiofile/thirdparty/libaiff
+
+//Value Computed by CMake
+libaiff_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+libaiff_SOURCE_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/st_audiofile/thirdparty/libaiff
+
+//Value Computed by CMake
+libsfizz_BINARY_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build
+
+//Value Computed by CMake
+libsfizz_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+libsfizz_SOURCE_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz
+
+//Value Computed by CMake
+lunasvg_BINARY_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/build/lunasvg_build
+
+//Value Computed by CMake
+lunasvg_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+lunasvg_SOURCE_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/libs/lunasvg
+
+//Value Computed by CMake
+plutovg_BINARY_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/build/lunasvg_build/plutovg
+
+//Value Computed by CMake
+plutovg_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+plutovg_SOURCE_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/libs/lunasvg/plutovg
+
+//Value Computed by CMake
+st_audiofile_BINARY_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/external/st_audiofile
+
+//Value Computed by CMake
+st_audiofile_IS_TOP_LEVEL:STATIC=OFF
+
+//Dependencies for the target
+st_audiofile_LIB_DEPENDS:STATIC=general;st_audiofile_formats;
+
+//Value Computed by CMake
+st_audiofile_SOURCE_DIR:STATIC=C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/st_audiofile
+
+//Dependencies for the target
+st_audiofile_formats_LIB_DEPENDS:STATIC=general;aiff::aiff;general;wavpack;
+
 
 ########################
 # INTERNAL cache entries
 ########################
 
+//Test ABSL_INTERNAL_AT_LEAST_CXX17
+ABSL_INTERNAL_AT_LEAST_CXX17:INTERNAL=1
+//Test ABSL_INTERNAL_AT_LEAST_CXX20
+ABSL_INTERNAL_AT_LEAST_CXX20:INTERNAL=
 //ADVANCED property for variable: CMAKE_AR
 CMAKE_AR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_COMPILER
+CMAKE_ASM_COMPILER-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_MASM_COMPILER
+CMAKE_ASM_MASM_COMPILER-ADVANCED:INTERNAL=1
+CMAKE_ASM_MASM_COMPILER_WORKS:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_MASM_FLAGS
+CMAKE_ASM_MASM_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_MASM_FLAGS_DEBUG
+CMAKE_ASM_MASM_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_MASM_FLAGS_MINSIZEREL
+CMAKE_ASM_MASM_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_MASM_FLAGS_RELEASE
+CMAKE_ASM_MASM_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_MASM_FLAGS_RELWITHDEBINFO
+CMAKE_ASM_MASM_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //This is the directory where this CMakeCache.txt was created
 CMAKE_CACHEFILE_DIR:INTERNAL=c:/Users/jeffm/Documents/BaySickDAW/build
 //Major version of cmake used to create the current loaded cache
@@ -319,9 +975,47 @@ CMAKE_GENERATOR_INSTANCE:INTERNAL=C:/Program Files/Microsoft Visual Studio/18/Co
 CMAKE_GENERATOR_PLATFORM:INTERNAL=
 //Name of generator toolset.
 CMAKE_GENERATOR_TOOLSET:INTERNAL=
+//Test CMAKE_HAVE_LIBC_PTHREAD
+CMAKE_HAVE_LIBC_PTHREAD:INTERNAL=
+//Have library pthreads
+CMAKE_HAVE_PTHREADS_CREATE:INTERNAL=
+//Have library pthread
+CMAKE_HAVE_PTHREAD_CREATE:INTERNAL=
 //Source directory with the top level CMakeLists.txt file for this
 // project
 CMAKE_HOME_DIRECTORY:INTERNAL=C:/Users/jeffm/Documents/BaySickDAW
+//ADVANCED property for variable: CMAKE_INSTALL_BINDIR
+CMAKE_INSTALL_BINDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_DATADIR
+CMAKE_INSTALL_DATADIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_DATAROOTDIR
+CMAKE_INSTALL_DATAROOTDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_DOCDIR
+CMAKE_INSTALL_DOCDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_INCLUDEDIR
+CMAKE_INSTALL_INCLUDEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_INFODIR
+CMAKE_INSTALL_INFODIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_LIBDIR
+CMAKE_INSTALL_LIBDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_LIBEXECDIR
+CMAKE_INSTALL_LIBEXECDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_LOCALEDIR
+CMAKE_INSTALL_LOCALEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_LOCALSTATEDIR
+CMAKE_INSTALL_LOCALSTATEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_MANDIR
+CMAKE_INSTALL_MANDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_OLDINCLUDEDIR
+CMAKE_INSTALL_OLDINCLUDEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_RUNSTATEDIR
+CMAKE_INSTALL_RUNSTATEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_SBINDIR
+CMAKE_INSTALL_SBINDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_SHAREDSTATEDIR
+CMAKE_INSTALL_SHAREDSTATEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_SYSCONFDIR
+CMAKE_INSTALL_SYSCONFDIR-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_LINKER
 CMAKE_LINKER-ADVANCED:INTERNAL=1
 //Name of CMakeLists files to read
@@ -339,7 +1033,7 @@ CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_MT
 CMAKE_MT-ADVANCED:INTERNAL=1
 //number of local generators
-CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=5
+CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=36
 //Platform information initialized
 CMAKE_PLATFORM_INFO_INITIALIZED:INTERNAL=1
 //noop for ranlib
@@ -385,6 +1079,52 @@ CMAKE_STATIC_LINKER_FLAGS_RELEASE-ADVANCED:INTERNAL=1
 CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_VERBOSE_MAKEFILE
 CMAKE_VERBOSE_MAKEFILE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_7Z
+CPACK_BINARY_7Z-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_IFW
+CPACK_BINARY_IFW-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_INNOSETUP
+CPACK_BINARY_INNOSETUP-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_NSIS
+CPACK_BINARY_NSIS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_NUGET
+CPACK_BINARY_NUGET-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_WIX
+CPACK_BINARY_WIX-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_ZIP
+CPACK_BINARY_ZIP-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_SOURCE_7Z
+CPACK_SOURCE_7Z-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_SOURCE_ZIP
+CPACK_SOURCE_ZIP-ADVANCED:INTERNAL=1
+//Details about finding OpenMP
+FIND_PACKAGE_MESSAGE_DETAILS_OpenMP:INTERNAL=[TRUE][TRUE][ ][v2.0()]
+//Details about finding OpenMP_C
+FIND_PACKAGE_MESSAGE_DETAILS_OpenMP_C:INTERNAL=[-openmp][v2.0()]
+//Details about finding OpenMP_CXX
+FIND_PACKAGE_MESSAGE_DETAILS_OpenMP_CXX:INTERNAL=[-openmp][v2.0()]
+//Details about finding Threads
+FIND_PACKAGE_MESSAGE_DETAILS_Threads:INTERNAL=[TRUE][v()]
+//Have function fseeko
+HAVE_FSEEKO:INTERNAL=
+//Have library m
+HAVE_LIBM:INTERNAL=
+//Result of TRY_COMPILE
+HAVE_SIZEOF_OFF_T:INTERNAL=TRUE
+//Have include stddef.h
+HAVE_STDDEF_H:INTERNAL=1
+//Have include stdint.h
+HAVE_STDINT_H:INTERNAL=1
+//Have include sys/types.h
+HAVE_SYS_TYPES_H:INTERNAL=1
+//Have include threads.h
+HAVE_THREADS_H:INTERNAL=
+//Test HAVE___BUILTIN_CLZ
+HAVE___BUILTIN_CLZ:INTERNAL=
+//ADVANCED property for variable: Iconv_INCLUDE_DIR
+Iconv_INCLUDE_DIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Iconv_LIBRARY
+Iconv_LIBRARY-ADVANCED:INTERNAL=1
 //The path to the folder holding this file and other resources
 JUCE_CMAKE_UTILS_DIR:INTERNAL=C:/Users/jeffm/Documents/BaySickDAW/juce/extras/Build/CMake
 //The name of the juceaide program
@@ -397,6 +1137,39 @@ JUCE_TARGET_ARCHITECTURE:INTERNAL=x86_64
 //Signals whether plugin related helper utilities can run on the
 // build machine
 JUCE_WINDOWS_HELPERS_CAN_RUN:INTERNAL=TRUE
+//Result of test for large file support
+LARGE_FILES_SUPPORTED:INTERNAL=0
+//Result of TRY_COMPILE
+OpenMP_COMPILE_RESULT_CXX_openmp:INTERNAL=TRUE
+//Result of TRY_COMPILE
+OpenMP_COMPILE_RESULT_C_openmp:INTERNAL=TRUE
+//ADVANCED property for variable: OpenMP_CXX_FLAGS
+OpenMP_CXX_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: OpenMP_CXX_LIB_NAMES
+OpenMP_CXX_LIB_NAMES-ADVANCED:INTERNAL=1
+//CXX compiler's OpenMP specification date
+OpenMP_CXX_SPEC_DATE:INTERNAL=200203
+//ADVANCED property for variable: OpenMP_C_FLAGS
+OpenMP_C_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: OpenMP_C_LIB_NAMES
+OpenMP_C_LIB_NAMES-ADVANCED:INTERNAL=1
+//C compiler's OpenMP specification date
+OpenMP_C_SPEC_DATE:INTERNAL=200203
+//Result of TRY_COMPILE
+OpenMP_SPECTEST_CXX_:INTERNAL=TRUE
+//Result of TRY_COMPILE
+OpenMP_SPECTEST_C_:INTERNAL=TRUE
+//ADVANCED property for variable: PKG_CONFIG_ARGN
+PKG_CONFIG_ARGN-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: PKG_CONFIG_EXECUTABLE
+PKG_CONFIG_EXECUTABLE-ADVANCED:INTERNAL=1
+//Test SFIZZ_HAVE_CXX17_ALIGNED_NEW
+SFIZZ_HAVE_CXX17_ALIGNED_NEW:INTERNAL=1
+//CHECK_TYPE_SIZE: sizeof(off_t)
+SIZEOF_OFF_T:INTERNAL=4
+_FILE_OFFSET_BITS_CODE:INTERNAL=
+//CMAKE_INSTALL_PREFIX during last run
+_GNUInstallDirs_LAST_CMAKE_INSTALL_PREFIX:INTERNAL=C:/Program Files (x86)/BaySickDAW
 //Result of TRY_COMPILE
 compile_result:INTERNAL=FALSE
 

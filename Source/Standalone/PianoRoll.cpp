@@ -74,6 +74,43 @@ void PianoKeyboard::setScrollState(int topNote, int noteH)
     mTopNote = topNote; mNoteH = noteH; repaint();
 }
 
+void PianoKeyboard::setNoteLabelProvider(std::function<juce::String(int)> provider)
+{
+    mNoteLabelProvider = std::move(provider);
+    repaint();
+}
+
+void PianoKeyboard::setAllKeysWhiteMode(bool enabled)
+{
+    if (mAllKeysWhite == enabled) return;
+    mAllKeysWhite = enabled;
+    repaint();
+}
+
+void PianoKeyboard::mouseMove(const juce::MouseEvent& e)
+{
+    const int n = yToNote(e.y);
+    if (n != mHoverNote)
+    {
+        mHoverNote = n;
+        // Toggling tooltip text forces JUCE's TooltipWindow to refresh.
+        setTooltip(getTooltip());
+    }
+}
+
+juce::String PianoKeyboard::getTooltip()
+{
+    if (mDrumLabelMode || mHoverNote < 0)
+        return {};
+    if (mNoteLabelProvider)
+    {
+        const auto label = mNoteLabelProvider(mHoverNote);
+        if (label.isNotEmpty())
+            return label;
+    }
+    return {};
+}
+
 void PianoKeyboard::setDrumRowLabels(const std::vector<juce::String>& labels)
 {
     mDrumLabelMode = !labels.empty();
@@ -126,7 +163,12 @@ void PianoKeyboard::paint(Graphics& g)
     {
         int y  = noteToY(note);
 
-        if (isBlackKey(note))
+        // J-7b: in all-keys-white mode (BaySickRustyDrums), paint every row
+        // as a full-width white key so engine labels are legible regardless
+        // of pitch class.  Skip the black-key strip rendering entirely.
+        const bool paintAsBlack = ! mAllKeysWhite && isBlackKey(note);
+
+        if (paintAsBlack)
         {
             g.setColour(note == mPreviewNote ? VC::Highlight.brighter() : Colour(0xff181820));
             g.fillRect(0, y, bw * 7 / 10, mNoteH);
@@ -140,7 +182,19 @@ void PianoKeyboard::paint(Graphics& g)
             g.setColour(Colour(0xffaaaaaa));
             g.drawHorizontalLine(y + mNoteH - 1, 0, (float)bw);
 
-            if (note % 12 == 0)
+            // J-7b: engine-provided label takes priority over the C-octave default.
+            juce::String engineLabel;
+            if (mNoteLabelProvider)
+                engineLabel = mNoteLabelProvider(note);
+
+            if (engineLabel.isNotEmpty() && mNoteH >= 8)
+            {
+                g.setColour(Colour(0xff404048));
+                g.setFont(Font(jmin(10.f, (float)(mNoteH - 2))));
+                g.drawText(engineLabel, 4, y, bw - 6, mNoteH - 1,
+                           Justification::centredLeft, true);
+            }
+            else if (note % 12 == 0)
             {
                 g.setColour(VC::TextDim);
                 g.setFont(Font(jmin(9, mNoteH - 2)));
@@ -2795,6 +2849,23 @@ void PianoRollContainer::setActiveSlot (int slot)
 void PianoRollContainer::setDrumRowLabels(const std::vector<juce::String>& labels)
 {
     if (mKeyboard) mKeyboard->setDrumRowLabels(labels);
+}
+
+void PianoRollContainer::setNoteLabelProvider(std::function<juce::String(int)> provider)
+{
+    if (mKeyboard) mKeyboard->setNoteLabelProvider(std::move(provider));
+}
+
+void PianoRollContainer::setAllKeysWhiteMode(bool enabled)
+{
+    if (mKeyboard) mKeyboard->setAllKeysWhiteMode(enabled);
+}
+
+void PianoRollContainer::setTopNote(int topNote)
+{
+    mTopNote = juce::jlimit(0, 127, topNote);
+    syncScrollState();
+    repaint();
 }
 
 void PianoRollContainer::setData(PianoRollData* data)

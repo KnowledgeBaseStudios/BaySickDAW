@@ -1,0 +1,30 @@
+// Updated rusty-kit hitbox table.  Paste into kDefaultEllipses[] in
+// Source/BaySickRustyDrums/BaySickRustyDrumsKitGraphic.cpp.
+// Format: { label, cx, cy, rx, ry, rotationDegrees, tiltDegrees }
+constexpr DefaultEllipse kDefaultEllipses[] = {
+    { "Crash 17",    326.1f,    202.9f,    289.6f,     81.7f,     -2.6f,    -30.8f },
+    { "Stack Mid",    311.6f,    118.2f,     87.9f,     50.5f,     -2.5f,    -56.3f },
+    { "Stack Edge",    313.2f,    154.6f,    130.3f,     74.7f,      0.0f,    -58.6f },
+    { "Crash Sizzle 17 Crash",    735.5f,    280.4f,    151.0f,     45.3f,     -2.0f,    -31.6f },
+    { "Crash Sizzle 17 Bow",    737.7f,    278.5f,    124.9f,     42.1f,     -1.8f,    -47.7f },
+    { "Crash Sizzle 17 Bell",    736.8f,    275.6f,     43.1f,     35.1f,     -4.5f,    -61.0f },
+    { "Ride 22 Edge Crash",   1172.7f,    282.5f,    243.6f,     98.6f,      1.2f,    -23.4f },
+    { "Ride 22 Bow",   1174.4f,    271.0f,    183.5f,    102.5f,      1.8f,    -49.9f },
+    { "Ride 22 Bell",   1176.6f,    248.2f,     73.9f,     72.4f,      0.0f,    -62.4f },
+    { "Ride Sizzle 19 Bow",   1588.3f,    191.9f,    236.6f,     77.6f,      2.6f,    -33.9f },
+    { "Ride Sizzle 19 Edge Crash",   1591.0f,    206.6f,    298.3f,    128.9f,      1.9f,    -44.2f },
+    { "Ride Sizzle 19 Bell",   1583.8f,    174.1f,     81.7f,     60.0f,      3.9f,    -50.3f },
+    { "China 18",   1798.1f,    432.3f,    251.7f,    118.8f,     -2.0f,    -32.5f },
+    { "Hi-hat Tip",    227.9f,    481.7f,    214.5f,     94.4f,     -3.8f,    -33.1f },
+    { "Hi-hat Shaft",    231.1f,    464.3f,    162.6f,    116.2f,     -3.1f,    -66.2f },
+    { "Tom 14",    543.0f,    377.0f,    135.0f,     60.0f,      0.0f,      0.0f },
+    { "Tom 15",    880.8f,    381.7f,    144.3f,     56.1f,      0.0f,      0.0f },
+    { "Snare Center",    645.3f,    596.0f,     91.6f,     59.1f,      0.0f,    -42.6f },
+    { "Snare Edge",    642.0f,    597.1f,    185.4f,     96.8f,     -1.7f,    -47.2f },
+    { "Snare Rim",    645.5f,    604.2f,    202.7f,    154.6f,     -2.1f,    -57.1f },
+    { "Snare Sidestick",    645.6f,    618.6f,    213.1f,    169.3f,     -1.8f,    -52.2f },
+    { "Kick",   1012.3f,    846.3f,    269.9f,    203.2f,      0.0f,      0.0f },
+    { "Tom 18",   1349.6f,    492.4f,    200.5f,     75.2f,      0.0f,      0.0f },
+    { "Tom 22",   1663.8f,    630.7f,    241.7f,     84.0f,      2.5f,      0.0f },
+    { "Hi-hat Pedal",    365.9f,   1051.2f,     95.0f,    136.1f,    -21.1f,      2.4f },
+};

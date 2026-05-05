@@ -38,9 +38,69 @@ juce::String typeFolderName (EffectType type)
         case EffectType::Tape:            return "Tape";
         case EffectType::Limiter:         return "Limiter";
         case EffectType::DeEsser:         return "DeEsser";
+
+        // I-2 (2026-05-02): BaySickPedals 18-module folder names.  Routed to
+        // a "Pedals" subfolder by typeRoot() below, not folded into the flat
+        // Effects/ tree, so the user's preset library stays organised.
+        //
+        // Naming locked 2026-05-02 (option A picker): drop the "X Style"
+        // code prefix from user-facing labels; folder names mirror picker
+        // labels.  CS Style Compressor isn't here -- it's a 4th Type on
+        // existing Compressor.  Same for Overdrive (Rack) / (Pedal): single
+        // "Overdrive" entry with Mode dropdown switching algorithm.
+        case EffectType::BluesDriveStyle:     return "Blues Drive";
+        case EffectType::DistortionStyle:     return "Distortion";
+        case EffectType::FuzzStyle:           return "Fuzz";
+        case EffectType::NoiseGateStyle:      return "Noise Gate";
+        case EffectType::HighGainStyle:       return "High-Gain";
+        case EffectType::TunerStyle:          return "Tuner";
+        case EffectType::AcousticPreampStyle:    return "Acoustic Preamp";
+        case EffectType::AcousticSimulatorStyle: return "Acoustic Simulator";
+        case EffectType::NAMPedalStyle:          return "User NAM Pedal";
+        case EffectType::GraphicEQStyle:      return "Graphic EQ";
+        case EffectType::SynthStyle:          return "Polyphonic Synth";
+        case EffectType::OctaveStyle:         return "Octave";
+        case EffectType::WahStyle:            return "Wah";
+        case EffectType::BassGraphicEQStyle:  return "Bass Graphic EQ";
+        case EffectType::BassCompressorStyle: return "Bass Compressor";
+        case EffectType::BassDriverStyle:     return "Bass Driver";
+        case EffectType::BassOverdriveStyle:  return "Bass Overdrive";
+        case EffectType::FurmanEQStyle:       return "Pro Parametric EQ";
+
         case EffectType::None:            return {};
     }
     return {};
+}
+
+// I-2 (2026-05-02): pedal-type predicate.  Used by typeRoot() to route the 17
+// new pedal-style entries into a dedicated "Pedals" subfolder under
+// Presets/Effects/.  Existing 12 effect types stay flat under Presets/Effects/.
+static bool isPedalType (EffectType type) noexcept
+{
+    switch (type)
+    {
+        case EffectType::BluesDriveStyle:
+        case EffectType::DistortionStyle:
+        case EffectType::FuzzStyle:
+        case EffectType::NoiseGateStyle:
+        case EffectType::HighGainStyle:
+        case EffectType::TunerStyle:
+        case EffectType::AcousticPreampStyle:
+        case EffectType::AcousticSimulatorStyle:
+        case EffectType::NAMPedalStyle:
+        case EffectType::GraphicEQStyle:
+        case EffectType::SynthStyle:
+        case EffectType::OctaveStyle:
+        case EffectType::WahStyle:
+        case EffectType::BassGraphicEQStyle:
+        case EffectType::BassCompressorStyle:
+        case EffectType::BassDriverStyle:
+        case EffectType::BassOverdriveStyle:
+        case EffectType::FurmanEQStyle:
+            return true;
+        default:
+            return false;
+    }
 }
 
 juce::File presetsRoot()
@@ -53,6 +113,9 @@ juce::File presetsRoot()
 
 juce::File typeRoot (EffectType type)
 {
+    // I-2: pedals nest one level deeper under Effects/Pedals/{TypeName}/.
+    if (isPedalType (type))
+        return presetsRoot().getChildFile ("Pedals").getChildFile (typeFolderName (type));
     return presetsRoot().getChildFile (typeFolderName (type));
 }
 
@@ -622,6 +685,32 @@ void migrateTapeFolderToSaturation()
 void seedFactoryPresets()
 {
     presetsRoot().createDirectory();
+
+    // I-15c (2026-05-03): ensure folder tree exists for EVERY pedal type so
+    // the user sees a complete `Presets/Effects/Pedals/{TypeName}/` layout
+    // even for pedals without factory presets.  Previously folders were
+    // created lazily on first ensureFolderTree() call (e.g. via the per-pedal
+    // preset menu), which meant brand-new installs only saw folders for the
+    // pedals that happened to have factory presets seeded.
+    static const EffectType kAllPedals[] = {
+        EffectType::BluesDriveStyle, EffectType::DistortionStyle,
+        EffectType::FuzzStyle,       EffectType::HighGainStyle,
+        EffectType::NoiseGateStyle,  EffectType::TunerStyle,
+        EffectType::AcousticPreampStyle, EffectType::AcousticSimulatorStyle,
+        EffectType::GraphicEQStyle,  EffectType::SynthStyle,
+        EffectType::OctaveStyle,     EffectType::WahStyle,
+        EffectType::BassGraphicEQStyle, EffectType::BassCompressorStyle,
+        EffectType::BassDriverStyle, EffectType::BassOverdriveStyle,
+        EffectType::FurmanEQStyle,   EffectType::NAMPedalStyle,
+    };
+    for (auto t : kAllPedals)
+        ensureFolderTree (t);
+
+    // Also ensure the User NAM Pedals .nam-file folder exists (separate from
+    // the User NAM Pedal preset folder above -- this one holds the actual
+    // .nam capture files the user loads via the panel's Load button).
+    presetsRoot().getChildFile ("Pedals").getChildFile ("User NAM Pedals")
+                 .createDirectory();
 
     // Build a temp DSP per preset, configure it via the lambda, capture
     // state, write XML to disk if the file is missing.  Idempotent.

@@ -1,0 +1,30 @@
+# CMake generation dependency list for this directory.
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeASMInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeASM_MASMInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDependentOption.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakePackageConfigHelpers.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakePushCheckState.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CPack.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CPackComponent.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckCCompilerFlag.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckCSourceCompiles.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckFunctionExists.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIncludeFile.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIncludeFileCXX.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckLanguage.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckLibraryExists.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckTypeSize.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FeatureSummary.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindIconv.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageHandleStandardArgs.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageMessage.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/GNUInstallDirs.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CMakeASMLinkerInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CMakeASM_MASMLinkerInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/WriteBasicConfigVersionFile.cmake
+C:/Program Files/CMake/share/cmake-4.3/Templates/CPackConfig.cmake.in
+C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/4.3.1/CMakeASM_MASMCompiler.cmake
+C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/cmake.verify_globs
+C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/st_audiofile/thirdparty/wavpack/CMakeLists.txt
+C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/st_audiofile/thirdparty/wavpack/cmake/CheckCLinkerFlag.cmake
+C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/st_audiofile/thirdparty/wavpack/cmake/TestLargeFiles.cmake

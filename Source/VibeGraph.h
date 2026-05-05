@@ -50,6 +50,7 @@ namespace MixerChannelIds
     constexpr int kVoxBus2   = 9;    // G-6: optional 2nd Vox bus
     constexpr int kInstBus2  = 10;   // G-6: optional 2nd Inst bus
     constexpr int kInstBus3  = 11;   // G-6: optional 3rd Inst bus
+    constexpr int kRustyDrumsBus = 12; // J-4 (2026-05-03): dedicated bus for BaySickRustyDrums strips
     constexpr int kAuxBase   = 100;  // Aux 0..17 → 100..117 (G-7 polish: 16 → 18)
     constexpr int kLayerBase = 200;  // Layer insert 0..15 → 200..215
     constexpr int kBassBase  = 300;  // Bass insert 0..15 → 300..315
@@ -57,10 +58,12 @@ namespace MixerChannelIds
     constexpr int kDrumBase  = 500;  // Drum insert 0..15 → 500..515
     constexpr int kVoxBase   = 600;  // R1: Vox insert 0..5 → 600..605
     constexpr int kInstBase  = 700;  // R1: Inst insert 0..5 → 700..705
+    constexpr int kRustyBase = 800;  // J-4: BaySickRustyDrums insert 0..12 → 800..812
 
-    constexpr int kMaxVoxStrips  = 6;   // R1
-    constexpr int kMaxInstStrips = 20;  // R1; bumped 6 → 10 in G-4 (2026-04-28); 10 → 20 in G-6 (2026-04-29)
-    constexpr int kMaxAuxStrips  = 18;  // 5F-4b B2; bumped 16 → 18 in G-7 polish (2026-04-29)
+    constexpr int kMaxVoxStrips   = 6;   // R1
+    constexpr int kMaxInstStrips  = 20;  // R1; bumped 6 → 10 in G-4 (2026-04-28); 10 → 20 in G-6 (2026-04-29)
+    constexpr int kMaxAuxStrips   = 18;  // 5F-4b B2; bumped 16 → 18 in G-7 polish (2026-04-29)
+    constexpr int kMaxRustyStrips = 13;  // J-4: 13 sound types per BaySickRustyDrums kit (no doubles)
 
     inline int layerInsert (int idx) { return kLayerBase + idx; }
     inline int bassInsert  (int idx) { return kBassBase  + idx; }
@@ -69,6 +72,7 @@ namespace MixerChannelIds
     inline int auxStrip    (int idx) { return kAuxBase   + idx; }
     inline int voxInsert   (int idx) { return kVoxBase   + idx; }
     inline int instInsert  (int idx) { return kInstBase  + idx; }
+    inline int rustyInsert (int idx) { return kRustyBase + idx; }
 
     // Derive the APVTS prefix from a channel id (e.g. 200 → "mixer_layer_0").
     inline juce::String prefixFromChannelId (int chId)
@@ -86,14 +90,16 @@ namespace MixerChannelIds
             case kVoxBus2:   return "mixer_voxbus2";
             case kInstBus2:  return "mixer_instbus2";
             case kInstBus3:  return "mixer_instbus3";
+            case kRustyDrumsBus: return "mixer_rustybus";
         }
         if (chId >= kLayerBase && chId < kLayerBase + 16)           return "mixer_layer_" + juce::String(chId - kLayerBase);
         if (chId >= kBassBase  && chId < kBassBase  + 16)           return "mixer_bass_"  + juce::String(chId - kBassBase);
         if (chId >= kDrumBase  && chId < kDrumBase  + 16)           return "mixer_drum_"  + juce::String(chId - kDrumBase);
         if (chId >= kAudioBase && chId < kAudioBase + 50)           return "mixer_audio_" + juce::String(chId - kAudioBase);
-        if (chId >= kAuxBase   && chId < kAuxBase   + kMaxAuxStrips) return "mixer_aux_"   + juce::String(chId - kAuxBase);
-        if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)  return "mixer_vox_"   + juce::String(chId - kVoxBase);
-        if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips) return "mixer_inst_"  + juce::String(chId - kInstBase);
+        if (chId >= kAuxBase   && chId < kAuxBase   + kMaxAuxStrips)   return "mixer_aux_"   + juce::String(chId - kAuxBase);
+        if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)   return "mixer_vox_"   + juce::String(chId - kVoxBase);
+        if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips)  return "mixer_inst_"  + juce::String(chId - kInstBase);
+        if (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips) return "mixer_rusty_" + juce::String(chId - kRustyBase);
         return {};
     }
 
@@ -103,13 +109,18 @@ namespace MixerChannelIds
         return chId == kLayersBus || chId == kBassBus || chId == kDrumsBus
             || chId == kFxBus     || chId == kClipsBus
             || chId == kVoxBus    || chId == kInstBus
-            || chId == kVoxBus2   || chId == kInstBus2 || chId == kInstBus3;
+            || chId == kVoxBus2   || chId == kInstBus2 || chId == kInstBus3
+            || chId == kRustyDrumsBus;
     }
 
     // Is this channel's main-out locked (cannot be rerouted)?
+    // J-5 (2026-05-03): Rusty inserts join Master + buses as locked main-out
+    // (each Rusty strip is permanently bound to kRustyDrumsBus; sends can
+    // still go out to aux strips via the per-strip "+" send button).
     inline bool isMainOutLocked (int chId)
     {
-        return chId == kMaster || isBus(chId);
+        return chId == kMaster || isBus(chId)
+            || (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips);
     }
 
     // Is this a valid send target from a Bus or Master strip?
@@ -137,14 +148,16 @@ namespace MixerChannelIds
             case kVoxBus2:   return "Vox Bus 2";
             case kInstBus2:  return "Inst Bus 2";
             case kInstBus3:  return "Inst Bus 3";
+            case kRustyDrumsBus: return "RustyDrums Bus";
         }
         if (chId >= kLayerBase && chId < kLayerBase + 16) return "Layer " + juce::String(chId - kLayerBase + 1);
         if (chId >= kBassBase  && chId < kBassBase  + 16) return "Bass "  + juce::String(chId - kBassBase  + 1);
         if (chId >= kDrumBase  && chId < kDrumBase  + 16) return "Drum "  + juce::String(chId - kDrumBase  + 1);
         if (chId >= kAudioBase && chId < kAudioBase + 50) return "Audio " + juce::String(chId - kAudioBase + 1);
-        if (chId >= kAuxBase   && chId < kAuxBase   + kMaxAuxStrips)  return "Aux "  + juce::String(chId - kAuxBase  + 1);
-        if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)  return "Vox "  + juce::String(chId - kVoxBase  + 1);
-        if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips) return "Inst " + juce::String(chId - kInstBase + 1);
+        if (chId >= kAuxBase   && chId < kAuxBase   + kMaxAuxStrips)   return "Aux "   + juce::String(chId - kAuxBase   + 1);
+        if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)   return "Vox "   + juce::String(chId - kVoxBase   + 1);
+        if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips)  return "Inst "  + juce::String(chId - kInstBase  + 1);
+        if (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips) return "Rusty " + juce::String(chId - kRustyBase + 1);
         return "Ch " + juce::String(chId);
     }
 
@@ -165,14 +178,16 @@ namespace MixerChannelIds
             case kVoxBus2:
             case kInstBus2:
             case kInstBus3:  return kMaster;
+            case kRustyDrumsBus: return kMaster;
         }
-        if (channelId >= kLayerBase && channelId < kLayerBase + 16)            return kLayersBus;
-        if (channelId >= kBassBase  && channelId < kBassBase  + 16)            return kBassBus;
-        if (channelId >= kDrumBase  && channelId < kDrumBase  + 16)            return kDrumsBus;
-        if (channelId >= kAudioBase && channelId < kAudioBase + 50)            return kClipsBus;
-        if (channelId >= kAuxBase   && channelId < kAuxBase   + kMaxAuxStrips) return kFxBus;
+        if (channelId >= kLayerBase && channelId < kLayerBase + 16)             return kLayersBus;
+        if (channelId >= kBassBase  && channelId < kBassBase  + 16)             return kBassBus;
+        if (channelId >= kDrumBase  && channelId < kDrumBase  + 16)             return kDrumsBus;
+        if (channelId >= kAudioBase && channelId < kAudioBase + 50)             return kClipsBus;
+        if (channelId >= kAuxBase   && channelId < kAuxBase   + kMaxAuxStrips)  return kFxBus;
         if (channelId >= kVoxBase   && channelId < kVoxBase   + kMaxVoxStrips)  return kVoxBus;
         if (channelId >= kInstBase  && channelId < kInstBase  + kMaxInstStrips) return kInstBus;
+        if (channelId >= kRustyBase && channelId < kRustyBase + kMaxRustyStrips) return kRustyDrumsBus;
         return kMaster;
     }
 }
@@ -345,6 +360,11 @@ public:
     EffectRack* getVoxBus2Rack();
     EffectRack* getInstBus2Rack();
     EffectRack* getInstBus3Rack();
+    // J-4: dedicated bus for BaySickRustyDrums strips.  Always-allocated
+    // so audio routing works regardless of whether the user has added a
+    // BaySickRustyDrums instance — sums silence (cheap pre-process) until
+    // a kit is loaded and 13 strips spawn at kRustyBase..kRustyBase+12.
+    EffectRack* getRustyDrumsBusRack();
 
     // ── Per-page instrument EffectRacks ────────────────────────────────────────
     // These sit between each engine's pre-rack page EQ and the bus sum.
@@ -372,6 +392,7 @@ public:
     EQ8MsDSP* getVoxBus2EQ();
     EQ8MsDSP* getInstBus2EQ();
     EQ8MsDSP* getInstBus3EQ();
+    EQ8MsDSP* getRustyDrumsBusEQ();        // J-4
 
     // §P4.3: Pre-rack bus EQs — fresh EQ8MsDSP per bus, runs at the very start
     // of each bus's processBlock chain (input -> preEq -> rack -> postEq -> fader).
@@ -389,6 +410,7 @@ public:
     EQ8MsDSP* getVoxBus2PreEQ();
     EQ8MsDSP* getInstBus2PreEQ();
     EQ8MsDSP* getInstBus3PreEQ();
+    EQ8MsDSP* getRustyDrumsBusPreEQ();     // J-4
 
     // ── PDC — Plugin Delay Compensation ──────────────────────────────────────
     // Call from message thread after any effect is loaded/removed/bypassed.
@@ -445,7 +467,7 @@ public:
     // Each insert gets its own rack + post-rack EQ + polarity/width/fader path.
     // Driven by APVTS reads in the audio thread (memoized per block).
     // Batch 1 declares the API; Batch 2 defines InsertNode and the process loop.
-    enum class InsertKind { Layer, Bass, Drum, Audio, Aux, Vox, Inst };
+    enum class InsertKind { Layer, Bass, Drum, Audio, Aux, Vox, Inst, Rusty };
 
     struct InsertNode;
 
@@ -520,6 +542,8 @@ public:
     void applyVoxBus2PolarityWidth (juce::AudioBuffer<float>& buf);
     void applyInstBus2PolarityWidth(juce::AudioBuffer<float>& buf);
     void applyInstBus3PolarityWidth(juce::AudioBuffer<float>& buf);
+    // J-4: BaySickRustyDrums bus polarity/width.
+    void applyRustyDrumsBusPolarityWidth(juce::AudioBuffer<float>& buf);
 
     // 5F-4b B1b: per-channel input accumulator buffers. PluginProcessor sums
     // each InsertNode's output into the correct channel's accumulator based on
@@ -649,6 +673,12 @@ private:
     std::unique_ptr<InstrChannelNode> mVoxBus2Node;
     std::unique_ptr<InstrChannelNode> mInstBus2Node;
     std::unique_ptr<InstrChannelNode> mInstBus3Node;
+    // J-4 (2026-05-03): dedicated bus for BaySickRustyDrums.  Always allocated
+    // (matches Vox/Inst pattern) so audio routing works whether or not a
+    // BaySickRustyDrums instance exists — bus sums silence cheaply until a
+    // kit's 13 strips are registered via ensureRustyInsertNode.
+    std::unique_ptr<InstrChannelNode> mRustyDrumsBusNode;
+    std::map<int, std::unique_ptr<InsertNode>> mRustyInserts;
 
     // Deferred rack state: set by loadRackStates() if topology not yet built;
     // applied at the end of buildFixedTopology().

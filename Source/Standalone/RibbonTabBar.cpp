@@ -81,6 +81,8 @@ RibbonTabBar::RibbonTabBar()
     addFixed(TabType::PianoRoll, "Piano Roll");
 
     mSelectedId = mTabs[0].id;
+    if (! mTabs.isEmpty())
+        mLastUsedByType[mTabs[0].type] = mTabs[0].id;
     setInterceptsMouseClicks(true, true);
 }
 
@@ -155,6 +157,7 @@ void RibbonTabBar::closeTab(int tabId)
                 if (t.type == type)
                 {
                     mSelectedId = t.id;
+                    mLastUsedByType[t.type] = t.id;
                     if (onTabSelected) onTabSelected(mSelectedId);
                     break;
                 }
@@ -171,7 +174,13 @@ void RibbonTabBar::selectTab(int tabId)
 {
     for (auto& t : mTabs)
     {
-        if (t.id == tabId) { mSelectedId = tabId; repaint(); return; }
+        if (t.id == tabId)
+        {
+            mSelectedId = tabId;
+            mLastUsedByType[t.type] = tabId;   // J-6: per-type last-used cache
+            repaint();
+            return;
+        }
     }
 }
 
@@ -193,11 +202,18 @@ const RibbonTabBar::Tab* RibbonTabBar::getTabById(int id) const
 // ── Internal helpers ─────────────────────────────────────────────────────────
 int RibbonTabBar::getActiveTabForType(TabType type) const
 {
-    // If the currently selected tab is of this type, use it
+    // 1. If the currently selected tab is of this type, use it.
     auto* sel = getTabById(mSelectedId);
     if (sel && sel->type == type) return mSelectedId;
 
-    // Otherwise return the first tab of this type
+    // 2. J-6 (2026-05-03): otherwise prefer the user's last-visited tab of
+    //    this type.  Verifies the id still exists in mTabs (covers the case
+    //    where the cached tab was closed since last visit).
+    if (auto it = mLastUsedByType.find(type); it != mLastUsedByType.end())
+        if (auto* cached = getTabById(it->second); cached && cached->type == type)
+            return cached->id;
+
+    // 3. Fallback: first tab of this type.
     for (auto& t : mTabs)
         if (t.type == type) return t.id;
     return -1;
@@ -341,6 +357,8 @@ void RibbonTabBar::mouseDown(const juce::MouseEvent& e)
         if (tabId >= 0)
         {
             mSelectedId = tabId;
+            if (auto* tab = getTabById(tabId))
+                mLastUsedByType[tab->type] = tabId;
             repaint();
             if (onTabSelected) onTabSelected(tabId);
         }
@@ -428,6 +446,8 @@ void RibbonTabBar::showSubPageDropdown(TabType type, juce::Rectangle<int> tabBou
             if (tabId >= 0)
             {
                 mSelectedId = tabId;
+                if (auto* tab = getTabById(tabId))
+                    mLastUsedByType[tab->type] = tabId;
                 repaint();
                 if (onTabSelected) onTabSelected(tabId);
             }
@@ -467,17 +487,19 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
         // Drums has 4 sub-tabs (Drum Kit added in D2); Layers/Bass have 3.
         // Note: PopupMenu has no addSectionHeading; use a disabled "Pages:" item.
         m.addItem(-99, "Pages:", false /* enabled */, false);
+        // J-6 EQ unification (2026-05-03): EQ sub-page item removed from
+        // Drums/Layers/Bass/Clip dropdowns — pre + post EQ for every strip
+        // now live exclusively on the Effects page.  Vox/Inst keep "EQ"
+        // because BaySickVocalEditor still hosts the Pre Rack EQ as one of
+        // its internal tabs (deferred clean-up).
         if (type == TabType::Drums)
         {
             m.addItem(-10, "  Drum Kit");
             m.addItem(-11, "  Player");
             m.addItem(-12, "  Piano Roll");
-            m.addItem(-13, "  EQ");
         }
         else if (type == TabType::Vox || type == TabType::Inst)
         {
-            // G-4 (2026-04-28): Vox + Inst have NO piano roll — they're live-input
-            // / recorded-audio destinations, not MIDI-triggered engines.
             m.addItem(-10, "  Player");
             m.addItem(-11, "  EQ");
         }
@@ -485,7 +507,6 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
         {
             m.addItem(-10, "  Player");
             m.addItem(-11, "  Piano Roll");
-            m.addItem(-12, "  EQ");
         }
 
         m.addSeparator();
@@ -516,6 +537,16 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                           : (type == TabType::Clip)   ? "+ Add New Clip..."
                           :                             "+ Add New Drum";
     m.addItem(-3, addLabel);
+
+    // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry — only on the Drums
+    // dropdown, only when the singleton isn't already spawned (1-instance lock).
+    if (type == TabType::Drums)
+    {
+        const bool brdActive = onIsBaySickRustyDrumsActive
+                            && onIsBaySickRustyDrumsActive();
+        if (! brdActive)
+            m.addItem(-4, "+ Add BaySickRustyDrums");
+    }
 
     auto screenArea = localAreaToGlobal(tabBounds);
     m.showMenuAsync(
@@ -575,9 +606,14 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                 // Add new instance
                 if (onAddTabRequest) onAddTabRequest(type);
             }
-            else if (result <= -10 && result >= (type == TabType::Drums ? -13
+            else if (result == -4)
+            {
+                // J-6 (2026-05-03): + Add BaySickRustyDrums (Drums dropdown only).
+                if (onAddBaySickRustyDrumsRequest) onAddBaySickRustyDrumsRequest();
+            }
+            else if (result <= -10 && result >= (type == TabType::Drums ? -12
                                                 : (type == TabType::Vox || type == TabType::Inst) ? -11
-                                                : -12))
+                                                : -11))
             {
                 // Sub-page item: open the active instance, then notify the
                 // editor to switch its sub-tab.
@@ -588,6 +624,8 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                 if (tabId >= 0)
                 {
                     mSelectedId = tabId;
+                    if (auto* tab = getTabById(tabId))
+                        mLastUsedByType[tab->type] = tabId;
                     repaint();
                     if (onTabSelected) onTabSelected(tabId);
                 }
@@ -597,6 +635,8 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
             {
                 // Instance selected — switch to it
                 mSelectedId = result;
+                if (auto* tab = getTabById(result))
+                    mLastUsedByType[tab->type] = result;
                 repaint();
                 if (onTabSelected) onTabSelected(result);
             }

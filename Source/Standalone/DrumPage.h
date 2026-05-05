@@ -52,7 +52,6 @@ public:
     void setPlayHead(StandalonePlayHead* ph);
     int  getPageIndex()    const { return mPageIndex; }
     int  getActiveTab()    const { return mActiveTab; }
-    ParametricEQDisplay* getEQDisplay() const { return mEQDisplay.get(); }
     juce::Colour getPageColor() const { return mPageColor; }
     void setUndoContext(const UndoContext& ctx);
 
@@ -76,9 +75,6 @@ public:
     // 2026-04-26: Global Lock/Unlock button click — wired by StandaloneEditor.
     void setGlobalLockHandler   (std::function<void()> fn);
     void refreshKitView ();
-
-    void setEQMid(bool showMid);
-    bool isEQMidActive() const { return mEQMidActive; }
 
     std::function<void()> onEngineSelected;
     // D1.4-fix: drum tab name auto-update.  Fired whenever mSoundName changes
@@ -166,7 +162,6 @@ private:
     StandalonePlayHead* mPlayHead { nullptr };
 
     int  mActiveTab   { 0 };
-    bool mEQMidActive { true };
 
     // Tab 0: Drum Kit (D2 — cross-drum 16-row piano-roll-style view).
     // Same content regardless of which drum tab is active in the ribbon.
@@ -204,14 +199,12 @@ private:
     // Tab 2: Piano Roll
     std::unique_ptr<PianoRollContainer>         mPianoRoll;
 
-    // Tab 3: EQ
-    std::unique_ptr<juce::Component>            mEQTab;
-    std::unique_ptr<ParametricEQDisplay>        mEQDisplay;
+    // J-6 EQ unification (2026-05-03): EQ tab + display removed; pre-rack EQ
+    // is exclusively edited via the Effects page Pre EQ tab.
 
     void buildDrumKitTab();
     void buildPlayerTab();
     void buildPianoRollTab();
-    void buildEQTab();
     void refreshPianoRollContextLabel();
 
     // D1.4-fix (c): per-instance MouseListener that catches right-clicks on

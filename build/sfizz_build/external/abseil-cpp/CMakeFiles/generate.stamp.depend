@@ -1,0 +1,21 @@
+# CMake generation dependency list for this directory.
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDependentOption.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakePackageConfigHelpers.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeParseArguments.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CTest.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CTestUseLaunchers.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckCSourceCompiles.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckCXXSourceCompiles.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIncludeFile.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckLibraryExists.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageHandleStandardArgs.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageMessage.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/GNUInstallDirs.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/WriteBasicConfigVersionFile.cmake
+C:/Users/jeffm/Documents/BaySickDAW/build/CMakeFiles/cmake.verify_globs
+C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/abseil-cpp/CMake/AbseilDll.cmake
+C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/abseil-cpp/CMake/AbseilHelpers.cmake
+C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/abseil-cpp/CMakeLists.txt
+C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/abseil-cpp/absl/copts/AbseilConfigureCopts.cmake
+C:/Users/jeffm/Documents/BaySickDAW/libs/sfizz/external/abseil-cpp/absl/copts/GENERATED_AbseilCopts.cmake

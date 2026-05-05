@@ -4,6 +4,15 @@
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData4.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h">

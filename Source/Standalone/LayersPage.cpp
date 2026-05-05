@@ -21,7 +21,10 @@ LayersPage::LayersPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
     // as dead code (mPianoRoll stays null) and every `if (mPianoRoll) ...`
     // guard becomes a no-op.  The Piano Roll sub-tab pill on the menu bar
     // redirects to PianoRollPage via the editor's showPageForTab handler.
-    buildEQTab();
+    // J-6 EQ unification (2026-05-03): EQ sub-tab removed — pre + post EQ
+    // for this insert now live exclusively on the Effects page (uniform with
+    // every other strip type).  The pre-EQ DSP + APVTS params still live on
+    // the InsertNode unchanged.
 
     switchTab(0);
     startTimerHz(24);
@@ -55,19 +58,13 @@ LayersPage::~LayersPage()
 // ── Tab switching ─────────────────────────────────────────────────────────────
 void LayersPage::switchTab(int idx)
 {
-    mActiveTab = idx;
-    if (mPlayerTab) mPlayerTab->setVisible(idx == 0);
-    if (mPianoRoll) mPianoRoll->setVisible(idx == 1);
-    if (mEQTab)     mEQTab    ->setVisible(idx == 2);
-    if (idx == 1 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
+    // J-6 EQ unification: 2 sub-tabs only (Player + Piano Roll).
+    mActiveTab = juce::jlimit(0, 1, idx);
+    if (mPlayerTab) mPlayerTab->setVisible(mActiveTab == 0);
+    if (mPianoRoll) mPianoRoll->setVisible(mActiveTab == 1);
+    if (mActiveTab == 1 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
     resized();
-    if (onSubTabChanged) onSubTabChanged(idx);
-}
-
-void LayersPage::setEQMid(bool showMid)
-{
-    mEQMidActive = showMid;
-    if (mEQDisplay) mEQDisplay->setShowMid(showMid);
+    if (onSubTabChanged) onSubTabChanged(mActiveTab);
 }
 
 // ── Tab builders ──────────────────────────────────────────────────────────────
@@ -115,25 +112,6 @@ void LayersPage::buildPianoRollTab()
     if (mTabName.isEmpty())
         mTabName = "Layer " + juce::String(mPageIndex);
     refreshPianoRollContextLabel();
-}
-
-void LayersPage::buildEQTab()
-{
-    mEQTab     = std::make_unique<Component>();
-    mEQDisplay = std::make_unique<ParametricEQDisplay>();
-
-    // §P4.3 B7: EQ display starts unbound; selectEngine() binds it to the
-    // Layer InsertNode's preEq + mixer_layer_<N>_preeq_* APVTS prefix.
-    mEQDisplay->setSampleRate(mProcessor.getSampleRate() > 0.0
-                              ? mProcessor.getSampleRate() : 44100.0);
-    mEQDisplay->showMidSideToggle(false);  // M/S controlled by external buttons
-    // 12f: refresh host PDC after anti-cramping toggle.
-    mEQDisplay->onLatencyChanged = [this]
-    {
-        mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
-    };
-    mEQTab->addAndMakeVisible(*mEQDisplay);
-    addAndMakeVisible(*mEQTab);
 }
 
 // ── PlayHead ──────────────────────────────────────────────────────────────────
@@ -257,25 +235,9 @@ void LayersPage::selectEngine(const juce::String& engineName)
     if (mEngineCombo)
         mEngineCombo->locked = true;   // D1.4-fix (c): hijack future clicks → menu
 
-    // §P4.3 B7: bind EQ display to the Layer InsertNode's preEq + the unified
-    // mixer_layer_<N>_preeq_* APVTS prefix.  InsertNode was just created by
-    // registerLayerEngine above, so getInsertPreEQ is guaranteed non-null.
-    if (mEQDisplay)
-    {
-        if (auto* preEq = mProcessor.mVibeGraph.getInsertPreEQ(
-                              VibeGraph::InsertKind::Layer, mPageIndex))
-        {
-            const juce::String mixerPrefix = "mixer_layer_" + juce::String(mPageIndex);
-            mEQDisplay->bindMsDSP(preEq, &mProcessor.apvts,
-                                  mixerPrefix + "_preeq_mid_eq",
-                                  mixerPrefix + "_preeq_side_eq");
-            // C.4 Phase 1 (2026-04-30): SC source dropdown context.
-            mEQDisplay->setStripContext(mixerPrefix,
-                [](int id){ return MixerChannelIds::friendlyName(id); });
-        }
-        mEQDisplay->setSampleRate(sr);
-    }
-
+    // J-6 EQ unification (2026-05-03): page-level EQ display removed.  Pre-rack
+    // EQ is now bound exclusively by EffectsPage when the user selects this
+    // insert there (mixer_layer_<N>_preeq_* APVTS prefix, same params as before).
     juce::MessageManager::callAsync([this] { if (isShowing()) resized(); });
 
     // Notify StandaloneEditor so it can create the mixer channel strip
@@ -293,10 +255,8 @@ void LayersPage::selectEngine(const juce::String& engineName)
 // ── Timer ─────────────────────────────────────────────────────────────────────
 void LayersPage::timerCallback()
 {
-    // EQ display update — DSP sync happens inside ParametricEQDisplay (which
-    // reads APVTS directly via the prefix bound in selectEngine).
-    if (mEQDisplay && mEngineLocked)
-        mEQDisplay->syncFromDSP();
+    // J-6 EQ unification (2026-05-03): page-level EQ display removed; the
+    // Effects-page Pre EQ tab handles its own syncFromDSP polling now.
 
     // Update piano roll playhead — only visible in Pattern mode. In Song mode
     // the playhead lives on the Builder, so we push -1 here to hide it.
@@ -353,12 +313,6 @@ void LayersPage::resized()
     }
 
     if (mPianoRoll) mPianoRoll->setBounds(b);
-
-    if (mEQTab && mEQDisplay)
-    {
-        mEQTab->setBounds(b);
-        mEQDisplay->setBounds(mEQTab->getLocalBounds().reduced(4));
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

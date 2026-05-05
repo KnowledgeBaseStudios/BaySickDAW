@@ -1,0 +1,6 @@
+# Stub Doxyfile.in template.
+#
+# The original was deleted during pre-J-1 sfizz tree pruning (we don't build
+# sfizz's API docs).  This stub exists only so sfizz/src/CMakeLists.txt:442's
+# unconditional configure_file() call can succeed.  The generated Doxyfile is
+# never executed.

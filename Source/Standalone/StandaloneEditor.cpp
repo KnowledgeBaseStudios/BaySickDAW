@@ -1,4 +1,5 @@
 #include "StandaloneEditor.h"
+#include "StandaloneApp.h"   // J-A2: MasterOutputRouting + saveMasterOutputRouting
 #include "../PatternManager.h"
 #include "../ProjectManager.h"
 #include "ProjectBrowserWindow.h"
@@ -14,16 +15,19 @@
 #include "SlotComponent.h"  // effectTypeName() for automation display-name resolver
 #include "KeyBindings.h"
 #include "KeyBindsWindow.h"
+#include "RustyDrumsMapWindow.h"
 #include "PatternColorPicker.h"
 #include "../BaySickSynth/BaySickSynthProcessor.h"   // D2 Batch 4: kit audition dispatch
 #include "../VibePlayer/VibePlayerProcessor.h"       // D2 Batch 4: kit audition dispatch
 #include "../Harmless/HarmlessProcessor.h"           // step 2 commit 2: layer/bass register helpers
 #include "../BaySickBass/BaySickBassProcessor.h"     // step 2 commit 2: bass register helper
-#include "../BaySickNAMIR/BaySickNAMIRProcessor.h"   // G-1.5: floating test window
-#include "../BaySickNAMIR/BaySickNAMIREditor.h"      // G-1.5: floating test window
+#include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-3: kit loader verify
+#include "BaySickRustyDrumsPage.h"                            // J-6: dedicated player page
+#include "RustyDrumsPagePresetIO.h"                            // J-8 Part D: Save/Load Page Preset
 #include "../Clips/ClipsPage.h"                       // G-2: Clips page + empty state
 #include "../Vox/VoxPage.h"                           // G-4: Vox page + empty state
 #include "../Inst/InstPage.h"                         // G-4: Inst page + empty state
+#include "../MidiLearn/MidiLearnUI.h"                  // I-3c: MIDI Learn UI controller
 
 namespace
 {
@@ -192,6 +196,13 @@ private:
         if (typeIdx < 0 || typeIdx >= types.size()) return;
 
         auto* typeObj = types[typeIdx];
+        // 2026-05-04: AudioDeviceManager only auto-scans the active device type
+        // at initialise().  Switching the dropdown to a non-active type (e.g.
+        // ASIO from Windows Audio) leaves that type's device list empty until
+        // we explicitly trigger a scan.  scanForDevices() refreshes the type's
+        // internal list without changing the manager's current device, so it's
+        // safe to call from a passive-snapshot dialog like this one.
+        typeObj->scanForDevices();
         auto devNames = typeObj->getDeviceNames(false); // false = output
         for (int i = 0; i < devNames.size(); ++i)
             mDevBox.addItem(devNames[i], i + 1);
@@ -242,6 +253,26 @@ private:
     // restart; initialise() on the next launch opens the new device cleanly.
     void applySettings()
     {
+        // 2026-05-04: refuse to write a pending file with an empty device
+        // name.  When the chosen audio mode has no installed drivers (e.g.
+        // ASIO with no native ASIO driver and no ASIO4ALL), the device-list
+        // ComboBox is empty.  Letting Apply through writes audioOutputDeviceName=""
+        // to the pending XML, then the next launch fails to open any device,
+        // processBlock never runs, the routing graph is never rebuilt, and
+        // every cable on the Mixer page silently disappears.
+        if (mDevBox.getText().isEmpty())
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "No audio device selected",
+                "Pick an audio device from the list before applying.\n\n"
+                "If the list is empty, the chosen audio mode has no installed drivers "
+                "on this machine.  For ASIO mode, install your interface's native ASIO "
+                "driver (recommended) or ASIO4ALL, then reopen this dialog.",
+                "OK");
+            return;
+        }
+
         // Start from the current saved state so we only change what we touched.
         auto xml = mMgr.createStateXml();
         if (!xml)
@@ -447,6 +478,66 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     {
         return resolveAutomationDisplayName(pid);
     };
+
+    // ── I-3c (2026-05-02): MIDI Learn UI wiring ──────────────────────────────
+    // Owns the 30s auto-cancel timer + Escape-cancels keyboard hook.  Routes
+    // every VKnob's right-click MIDI Learn / Forget / Save-as-default items
+    // to the registry on the PluginProcessor.  Repaints VKnobs via a global
+    // refresh whenever learn state or mappings change so the dashed-yellow
+    // learn outline tracks the current target.
+    mMidiLearnUI = std::make_unique<MidiLearnUI> (mProcessor.getMidiLearnRegistry());
+    mMidiLearnUI->onLearnStateChanged = [this]
+    {
+        // Cheap message-thread repaint of every visible VKnob -- they read
+        // sIsMidiLearningTarget in paintOverChildren.  In practice the
+        // editor and all current pages get repainted; cost is negligible
+        // because repaint() is async-coalesced.
+        repaint();
+    };
+
+    VKnobAutomation::sIsMidiMapped = [this](const juce::String& pid) -> bool
+    {
+        return mMidiLearnUI && mMidiLearnUI->isMapped (pid);
+    };
+    VKnobAutomation::sIsMidiLearningTarget = [this](const juce::String& pid) -> bool
+    {
+        return mMidiLearnUI && mMidiLearnUI->isLearningTarget (pid);
+    };
+    VKnobAutomation::sDescribeMidiMapping = [this](const juce::String& pid) -> juce::String
+    {
+        return mMidiLearnUI ? mMidiLearnUI->describeMapping (pid) : juce::String();
+    };
+    VKnobAutomation::sOnMidiLearn = [this](const juce::String& pid)
+    {
+        if (mMidiLearnUI) mMidiLearnUI->beginLearn (pid);
+    };
+    VKnobAutomation::sOnMidiForget = [this](const juce::String& pid)
+    {
+        if (mMidiLearnUI) mMidiLearnUI->forget (pid);
+    };
+    VKnobAutomation::sOnMidiSaveAsDefault = [this]
+    {
+        if (! mMidiLearnUI) return;
+        const bool ok = mMidiLearnUI->saveAsGlobalDefaults();
+        juce::AlertWindow::showMessageBoxAsync (
+            ok ? juce::MessageBoxIconType::InfoIcon
+               : juce::MessageBoxIconType::WarningIcon,
+            "MIDI Mappings",
+            ok ? juce::String ("Saved current MIDI mappings as the global default. "
+                                 "New projects will start with these mappings; existing "
+                                 "projects keep their per-project settings.")
+               : juce::String ("Could not write the global MIDI mappings file."));
+    };
+    VKnobAutomation::sHasAnyMidiMappings = [this]() -> bool
+    {
+        return mMidiLearnUI
+            && mProcessor.getMidiLearnRegistry().getAllParamIds().size() > 0;
+    };
+
+    // Install the Escape-cancels listener on the editor itself (the JUCE
+    // top-level Component wrapping the standalone window).  Focus rules:
+    // KeyListener fires for any descendant whose key wasn't already handled.
+    mMidiLearnUI->installOnTopLevelComponent (this);
 
     // Auto-register all static APVTS params (instrument synths, EQ bands, etc.)
     for (auto* p : mProcessor.getParameters())
@@ -1008,10 +1099,28 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             else if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get())) cp->requestDelete();
             else if (auto* vp = dynamic_cast<VoxPage*>   (entry->component.get())) vp->requestDelete();
             else if (auto* ip = dynamic_cast<InstPage*>  (entry->component.get())) ip->requestDelete();
+            // J-6 (2026-05-03): BaySickRustyDrums uses the page's "Remove
+            // BaySickRustyDrums" button as its delete action; if the user
+            // hits dropdown Delete instead, route to the same flow.
+            else if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*> (entry->component.get()))
+                if (rp->onDeleteRequested) rp->onDeleteRequested();
             return;
         }
     };
     mRibbon->onAddTabRequest  = [this](RibbonTabBar::TabType t) { onAddTabRequest(t); };
+    // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry on the Drums dropdown.
+    // 1-instance lock: hide entry when a BaySickRustyDrumsPage already exists
+    // in mPages (the page can exist even before a kit is loaded, so checking
+    // hasBaySickRustyDrums() on the processor isn't sufficient — that flag
+    // only flips true after loadBaySickRustyDrumsKit succeeds).
+    mRibbon->onAddBaySickRustyDrumsRequest = [this] { addBaySickRustyDrumsTab(); };
+    mRibbon->onIsBaySickRustyDrumsActive   = [this]
+    {
+        for (auto* entry : mPages)
+            if (entry && dynamic_cast<BaySickRustyDrumsPage*>(entry->component.get()))
+                return true;
+        return false;
+    };
     // G-2 (2026-04-28): empty-state hook for the Clip ribbon slot.
     mRibbon->onClipsEmptyStateRequested = [this]() { showClipsEmptyState(); };
 
@@ -1247,6 +1356,13 @@ void StandaloneEditor::buildDefaultTabs()
                     // the unified Piano Roll page.
                     k = EngineKind::Clip;
                     idx = cp->getPageIndex();
+                }
+                else if (dynamic_cast<BaySickRustyDrumsPage*> (entry->component.get()))
+                {
+                    // J-7a (2026-05-03): BaySickRustyDrums singleton appears
+                    // in the dropdown.  Index always 0 (1-instance lock).
+                    k = EngineKind::BaySickRustyDrums;
+                    idx = 0;
                 }
                 // G-4 (2026-04-28): Vox + Inst do NOT appear in the unified
                 // Piano Roll dropdown — they're live-input / recorded-audio
@@ -2784,6 +2900,13 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
             out = dev->getInputChannelNames();
         return out;
     };
+    // B2 + B1 (2026-05-04): device name for the input-picker pair detector.
+    page->getInputDeviceName = [this]() -> juce::String
+    {
+        if (auto* dev = mDeviceManager.getCurrentAudioDevice())
+            return dev->getName();
+        return {};
+    };
     // G-4 (2026-04-28): "Add Vox Strip" / "Add Inst Strip" buttons in the
     // Mixer page are the spawn trigger for the matching ribbon page (no other
     // path).  spawnVoxTabIfMissing / spawnInstTabIfMissing are idempotent on
@@ -2817,6 +2940,17 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
         result.push_back({3, "Drums Bus"});
         result.push_back({5, "FX Bus"});
         result.push_back({6, "Clips Bus"});
+        // R3.5 (2026-04-23): Vox + Inst buses always-allocated.
+        result.push_back({7, "Vox Bus"});
+        result.push_back({8, "Inst Bus"});
+        // G-6 (2026-04-29): secondary Vox/Inst buses surfaced only when active
+        // (their UI strip is gated; without this, FX rack click on the bus
+        // would fail to navigate even though the channel is wired).
+        if (mMixerPage && mMixerPage->isVoxBus2Active())  result.push_back({9,  "Vox Bus 2"});
+        if (mMixerPage && mMixerPage->isInstBus2Active()) result.push_back({10, "Inst Bus 2"});
+        if (mMixerPage && mMixerPage->isInstBus3Active()) result.push_back({11, "Inst Bus 3"});
+        // J-5 (2026-05-03): RustyDrums Bus surfaced only when active (singleton spawned).
+        if (mProcessor.hasBaySickRustyDrums()) result.push_back({12, "RustyDrums Bus"});
 
         // Active Layer pages (engine selected)
         for (auto* entry : mPages)
@@ -2895,6 +3029,24 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
         {
             for (int auxIdx : mMixerPage->getAuxStripIndices())
                 result.push_back({600 + auxIdx, mMixerPage->getAuxStripName(auxIdx)});
+
+            // J-6 (2026-05-03): Vox/Inst inserts surfaced on the Effects page.
+            // Disambiguated dropdown ranges: Vox 700+, Inst 800+, Rusty 900+.
+            for (int idx : mMixerPage->getVoxStripIndices())
+                result.push_back({700 + idx, mMixerPage->getVoxStripName(idx)});
+            for (int idx : mMixerPage->getInstStripIndices())
+                result.push_back({800 + idx, mMixerPage->getInstStripName(idx)});
+        }
+
+        // J-6 (2026-05-03): Rusty inserts (when singleton is spawned).
+        if (mProcessor.hasBaySickRustyDrums())
+        {
+            if (auto* eng = mProcessor.getBaySickRustyDrums())
+            {
+                const auto& chans = eng->getChannels();
+                for (size_t i = 0; i < chans.size() && i < (size_t) MixerChannelIds::kMaxRustyStrips; ++i)
+                    result.push_back({900 + (int) i, chans[i].name});
+            }
         }
 
         return result;
@@ -3307,6 +3459,26 @@ void StandaloneEditor::onTabClosed(int tabId)
                     mProcessor.unregisterInstEngine (idx);
             }
 
+            // J-6 (2026-05-03): BaySickRustyDrums tab close — tear down the
+            // singleton engine + clear its 13 mixer strips.  Defensive: most
+            // close paths already do this (the page's onDeleteRequested fires
+            // first), but if the user closes via a path that bypasses the
+            // page button (project load purge, mass close), this catches it.
+            // J-8 stage 2 (2026-05-04): destroy order matters — the ARIA panel's
+            // SliderParameterAttachments live on the engine's APVTS, so the
+            // page (and its widgets) must be destructed BEFORE the engine.
+            // mPages.remove(i) below handles the page destruction; we just
+            // tear down adjacent state here, then let the remove() destroy
+            // the page, then null the engine on the next pass via a deferred
+            // callback when control returns.
+            const bool isRusty = dynamic_cast<BaySickRustyDrumsPage*>(mPages[i]->component.get()) != nullptr;
+            if (isRusty)
+            {
+                if (mMixerPage) mMixerPage->clearAllRustyChannels();
+                if (mPianoRollPage)
+                    mPianoRollPage->unregisterEngine ({ EngineKind::BaySickRustyDrums, 0 });
+            }
+
             // Clear legacy raw pointers if we're removing those pages
             if (mPages[i]->component.get() == mLegacyLayersPage)
                 mLegacyLayersPage = nullptr;
@@ -3325,6 +3497,10 @@ void StandaloneEditor::onTabClosed(int tabId)
             const auto closedType = mPages[i]->type;
 
             mPages.remove(i);
+            // J-8 stage 2: now safe to destroy the engine — the page (and its
+            // SliderParameterAttachment-bearing ARIA widgets) is already gone.
+            if (isRusty && mProcessor.hasBaySickRustyDrums())
+                mProcessor.destroyBaySickRustyDrums();
             resized();
             refreshAllKitViews();   // D2: drum row freed → kit view shrinks
 
@@ -3638,35 +3814,24 @@ void StandaloneEditor::showPageForTab(int tabId)
         }
         else if (auto* lp = dynamic_cast<LayersPage*>(mVisiblePage))
         {
-            // §P4.3 (B5): EQ tab renamed "EQ" → "Pre EQ8 M/S".  Page-side EQ
-            // is the per-insert pre-rack EQ (post-rack EQ lives on the mixer
-            // strip's Effects-page Post EQ8 M/S tab).
-            // 2026-04-26 (step 2 commit 3): Piano Roll sub-tab (index 1) is
-            // a nav shortcut - clicking it switches to PianoRollPage and
-            // selects this engine in the dropdown.  Player (0) and EQ (2)
-            // remain local sub-pages.
-            // G-7 (2026-04-29): hamburger ≡ shows Save/Load Page Preset
-            // when not on the EQ tab.  syncPagePresetMenu installs/clears
-            // the menu builder; called both initially and on every sub-tab
-            // switch so the EQ menu can take over on EQ tab.
-            auto syncPagePresetMenu = [this, lp] (int subTabIdx)
+            // J-6 EQ unification (2026-05-03): EQ sub-tab removed.  Pre + post
+            // EQ live exclusively on the Effects page.  Piano Roll sub-tab (1)
+            // remains a nav shortcut to PianoRollPage; Player (0) is the
+            // local sub-page.
+            auto syncPagePresetMenu = [this, lp] (int /*subTabIdx*/)
             {
-                if (! mPageMenuBar) return;
-                const bool onEqTab = (subTabIdx == 2);
-                if (! onEqTab && lp != nullptr)
-                {
-                    juce::Component::SafePointer<LayersPage> safe (lp);
-                    mPageMenuBar->setMenuBuilder (
-                        [safe] (juce::Component* anchor)
-                        {
-                            if (auto* p = safe.getComponent())
-                                p->showPageActionsMenu (anchor);
-                        });
-                }
+                if (! mPageMenuBar || lp == nullptr) return;
+                juce::Component::SafePointer<LayersPage> safe (lp);
+                mPageMenuBar->setMenuBuilder (
+                    [safe] (juce::Component* anchor)
+                    {
+                        if (auto* p = safe.getComponent())
+                            p->showPageActionsMenu (anchor);
+                    });
             };
 
-            mPageMenuBar->setTabSlots({"Player", "Piano Roll", "Pre EQ8 M/S"},
-                [this, lp, syncEQHamburger, syncPagePresetMenu](int i) {
+            mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
+                [this, lp, syncPagePresetMenu](int i) {
                     if (i == 1)
                     {
                         if (mRibbon) mRibbon->selectTab (4);
@@ -3677,42 +3842,30 @@ void StandaloneEditor::showPageForTab(int tabId)
                     }
                     lp->switchTab(i);
                     mPageMenuBar->updateTabActive(i);
-                    mPageMenuBar->setMidSideVisible(i == 2);
-                    syncEQHamburger (lp->getEQDisplay(), i == 2);
+                    mPageMenuBar->setMidSideVisible(false);
                     syncPagePresetMenu (i);
                 }, lp->getActiveTab(), lp->getPageColor());
-            syncEQHamburger (lp->getEQDisplay(), lp->getActiveTab() == 2);
             syncPagePresetMenu (lp->getActiveTab());
-            mPageMenuBar->setMidSideSlots(
-                [this, lp] { lp->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
-                [this, lp] { lp->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
-                lp->isEQMidActive());
-            mPageMenuBar->setMidSideVisible(lp->getActiveTab() == 2);
+            mPageMenuBar->setMidSideVisible(false);
         }
         else if (auto* bp = dynamic_cast<BassPage*>(mVisiblePage))
         {
-            // §P4.3 (B5): same rename as Layers above.
-            // 2026-04-26 (step 2 commit 3): Piano Roll sub-tab redirects to
-            // PianoRollPage with this Bass engine selected.
-            // G-7: same Page Preset hamburger pattern as Layers.
-            auto syncPagePresetMenu = [this, bp] (int subTabIdx)
+            // J-6 EQ unification (2026-05-03): EQ sub-tab removed; pre+post EQ
+            // on Effects page only.  Piano Roll sub-tab redirects to PianoRollPage.
+            auto syncPagePresetMenu = [this, bp] (int /*subTabIdx*/)
             {
-                if (! mPageMenuBar) return;
-                const bool onEqTab = (subTabIdx == 2);
-                if (! onEqTab && bp != nullptr)
-                {
-                    juce::Component::SafePointer<BassPage> safe (bp);
-                    mPageMenuBar->setMenuBuilder (
-                        [safe] (juce::Component* anchor)
-                        {
-                            if (auto* p = safe.getComponent())
-                                p->showPageActionsMenu (anchor);
-                        });
-                }
+                if (! mPageMenuBar || bp == nullptr) return;
+                juce::Component::SafePointer<BassPage> safe (bp);
+                mPageMenuBar->setMenuBuilder (
+                    [safe] (juce::Component* anchor)
+                    {
+                        if (auto* p = safe.getComponent())
+                            p->showPageActionsMenu (anchor);
+                    });
             };
 
-            mPageMenuBar->setTabSlots({"Player", "Piano Roll", "Pre EQ8 M/S"},
-                [this, bp, syncEQHamburger, syncPagePresetMenu](int i) {
+            mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
+                [this, bp, syncPagePresetMenu](int i) {
                     if (i == 1)
                     {
                         if (mRibbon) mRibbon->selectTab (4);
@@ -3723,17 +3876,11 @@ void StandaloneEditor::showPageForTab(int tabId)
                     }
                     bp->switchTab(i);
                     mPageMenuBar->updateTabActive(i);
-                    mPageMenuBar->setMidSideVisible(i == 2);
-                    syncEQHamburger (bp->getEQDisplay(), i == 2);
+                    mPageMenuBar->setMidSideVisible(false);
                     syncPagePresetMenu (i);
                 }, bp->getActiveTab(), bp->getPageColor());
-            syncEQHamburger (bp->getEQDisplay(), bp->getActiveTab() == 2);
             syncPagePresetMenu (bp->getActiveTab());
-            mPageMenuBar->setMidSideSlots(
-                [this, bp] { bp->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
-                [this, bp] { bp->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
-                bp->isEQMidActive());
-            mPageMenuBar->setMidSideVisible(bp->getActiveTab() == 2);
+            mPageMenuBar->setMidSideVisible(false);
         }
         else if (auto* cp = dynamic_cast<ClipsPage*>(mVisiblePage))
         {
@@ -3757,8 +3904,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                     });
             };
 
-            mPageMenuBar->setTabSlots({"Player", "Piano Roll", "Pre EQ8 M/S"},
-                [this, cp, syncPagePresetMenu, syncEQHamburger](int i) {
+            // J-6 EQ unification (2026-05-03): Pre EQ8 M/S sub-tab removed;
+            // Audio insert pre-rack EQ now lives on the Effects page only.
+            mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
+                [this, cp, syncPagePresetMenu](int i) {
                     if (i == 1)
                     {
                         if (mRibbon) mRibbon->selectTab (4);
@@ -3769,17 +3918,11 @@ void StandaloneEditor::showPageForTab(int tabId)
                     }
                     cp->switchTab (i);
                     mPageMenuBar->updateTabActive (i);
-                    mPageMenuBar->setMidSideVisible (i == 2);
-                    syncEQHamburger (cp->getEQDisplay(), i == 2);
+                    mPageMenuBar->setMidSideVisible (false);
                     syncPagePresetMenu (i);
                 }, cp->getActiveTab(), cp->getPageColor());
-            syncEQHamburger (cp->getEQDisplay(), cp->getActiveTab() == 2);
             syncPagePresetMenu (cp->getActiveTab());
-            mPageMenuBar->setMidSideSlots(
-                [this, cp] { cp->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
-                [this, cp] { cp->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
-                cp->isEQMidActive());
-            mPageMenuBar->setMidSideVisible (cp->getActiveTab() == 2);
+            mPageMenuBar->setMidSideVisible (false);
         }
         else if (auto* vp = dynamic_cast<VoxPage*>(mVisiblePage))
         {
@@ -3802,27 +3945,17 @@ void StandaloneEditor::showPageForTab(int tabId)
                     });
             };
 
-            // H-6b (2026-05-01): Vox page is now BaySickVocal-only with 6
-            // sub-tabs surfaced through the PageMenuBar tab buttons.  Pre EQ8
-            // M/S is still index-tracked for the MID/SIDE button visibility +
-            // EQ hamburger sync (idx 5 = "Pre Rack EQ").
+            // H-6b (2026-05-01) / J-6 (2026-05-03): Vox page is BaySickVocal-only;
+            // EQ unification dropped the "Pre Rack EQ" sub-tab so Vox now has 5 sub-tabs.
             mPageMenuBar->setTabSlots (VoxPage::getTabLabels(),
-                [this, vp, syncPagePresetMenu, syncEQHamburger] (int i) {
+                [this, vp, syncPagePresetMenu] (int i) {
                     vp->switchTab (i);
                     mPageMenuBar->updateTabActive (i);
-                    const bool isEQTab = (i == 5);
-                    mPageMenuBar->setMidSideVisible (isEQTab);
-                    syncEQHamburger (vp->getEQDisplay(), isEQTab);
+                    mPageMenuBar->setMidSideVisible (false);
                     syncPagePresetMenu (i);
                 }, vp->getActiveTab(), vp->getPageColor());
-            const bool isEQTabNow = (vp->getActiveTab() == 5);
-            syncEQHamburger (vp->getEQDisplay(), isEQTabNow);
             syncPagePresetMenu (vp->getActiveTab());
-            mPageMenuBar->setMidSideSlots (
-                [this, vp] { vp->setEQMid (true);  mPageMenuBar->updateMidSideActive (true);  },
-                [this, vp] { vp->setEQMid (false); mPageMenuBar->updateMidSideActive (false); },
-                vp->isEQMidActive());
-            mPageMenuBar->setMidSideVisible (isEQTabNow);
+            mPageMenuBar->setMidSideVisible (false);
             // H-6b: clip-name label hosted on the right of the PageMenuBar.
             if (auto* lbl = vp->getClipFileLabel())
                 mPageMenuBar->addExtraRightComponent (lbl, 240);
@@ -3846,26 +3979,19 @@ void StandaloneEditor::showPageForTab(int tabId)
                     });
             };
 
-            // I-0b (2026-05-02): Inst page sub-tabs restructured.
+            // I-0b (2026-05-02) / J-6 (2026-05-03): Inst page sub-tabs restructured.
             //   0 = BaySickPedals (placeholder until I-15)
             //   1 = BaySickNAM/IR
-            //   2 = Pre EQ8 M/S
-            // BaySickPlayer removed entirely.
+            //  (Pre EQ8 M/S removed in J-6 EQ unification — Effects page only)
             mPageMenuBar->setTabSlots(InstPage::getTabLabels(),
-                [this, ip, syncPagePresetMenu, syncEQHamburger](int i) {
+                [this, ip, syncPagePresetMenu](int i) {
                     ip->switchTab (i);
                     mPageMenuBar->updateTabActive (i);
-                    mPageMenuBar->setMidSideVisible (i == 2);
-                    syncEQHamburger (ip->getEQDisplay(), i == 2);
+                    mPageMenuBar->setMidSideVisible (false);
                     syncPagePresetMenu (i);
                 }, ip->getActiveTab(), ip->getPageColor());
-            syncEQHamburger (ip->getEQDisplay(), ip->getActiveTab() == 2);
             syncPagePresetMenu (ip->getActiveTab());
-            mPageMenuBar->setMidSideSlots(
-                [this, ip] { ip->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
-                [this, ip] { ip->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
-                ip->isEQMidActive());
-            mPageMenuBar->setMidSideVisible (ip->getActiveTab() == 2);
+            mPageMenuBar->setMidSideVisible (false);
             // I-0b: clip-name label hosted on the right of the PageMenuBar
             // (mirrors Vox).
             if (auto* lbl = ip->getClipFileLabel())
@@ -3897,8 +4023,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                 }
             };
 
-            mPageMenuBar->setTabSlots({"Drum Kit", "Player", "Piano Roll", "Pre EQ8 M/S"},
-                [this, dp, syncEQHamburger, syncPagePresetMenu](int i) {
+            // J-6 EQ unification (2026-05-03): Pre EQ8 M/S sub-tab removed.
+            // Tabs: 0 Drum Kit (nav shortcut), 1 Player, 2 Piano Roll (nav shortcut).
+            mPageMenuBar->setTabSlots({"Drum Kit", "Player", "Piano Roll"},
+                [this, dp, syncPagePresetMenu](int i) {
                     if (i == 0)
                     {
                         if (mRibbon) mRibbon->selectTab (4);
@@ -3917,17 +4045,127 @@ void StandaloneEditor::showPageForTab(int tabId)
                     }
                     dp->switchTab(i);
                     mPageMenuBar->updateTabActive(i);
-                    mPageMenuBar->setMidSideVisible(i == 3);
-                    syncEQHamburger (dp->getEQDisplay(), i == 3);
+                    mPageMenuBar->setMidSideVisible(false);
                     syncPagePresetMenu (i);
                 }, dp->getActiveTab(), dp->getPageColor());
-            syncEQHamburger (dp->getEQDisplay(), dp->getActiveTab() == 3);
             syncPagePresetMenu (dp->getActiveTab());
-            mPageMenuBar->setMidSideSlots(
-                [this, dp] { dp->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
-                [this, dp] { dp->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
-                dp->isEQMidActive());
-            mPageMenuBar->setMidSideVisible(dp->getActiveTab() == 3);
+            mPageMenuBar->setMidSideVisible(false);
+        }
+        else if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*>(mVisiblePage))
+        {
+            // J-8 stage 1 (2026-05-04): 3 sub-tabs (Drum Kit / Player / Piano
+            // Roll) matching DrumPage's layout.  Drum Kit (0) hosts the
+            // clickable kit-graphic auditioner; Player (1) hosts the ARIA
+            // control panel (placeholder until J-8 stage 2 ships); Piano
+            // Roll (2) redirects to the unified PianoRollPage with this
+            // engine selected.
+            mPageMenuBar->setTabSlots({"Drum Kit", "Player", "Piano Roll"},
+                [this, rp](int i) {
+                    if (i == 2)
+                    {
+                        if (mRibbon) mRibbon->selectTab (4);   // 4 = PianoRoll ribbon slot
+                        onTabSelected (4);
+                        if (mPianoRollPage)
+                            mPianoRollPage->selectEngine ({ EngineKind::BaySickRustyDrums, 0 });
+                        return;
+                    }
+                    rp->switchTab(i);
+                    mPageMenuBar->updateTabActive(i);
+                    mPageMenuBar->setMidSideVisible(false);
+                }, rp->getActiveTab(), rp->getPageColor());
+            mPageMenuBar->setMidSideVisible(false);
+
+            // J-8 Part B (2026-05-04): "Load Player" program-selector dropdown
+            // gets parked on PageMenuBar's extra-right cluster while this page
+            // is visible.  The page owns the ComboBox; we just borrow it.
+            if (auto* combo = rp->getProgramCombo())
+                mPageMenuBar->addExtraRightComponent (combo, 160);
+
+            // J-8 Part D (2026-05-05): Save / Load Page Preset.  Page presets
+            // capture the full Rusty player setup (engine CC values + kit
+            // path), every Rusty mixer strip + the RustyDrums Bus, every Rusty
+            // effect rack and EQ — but NOT the piano roll.  Stored under
+            // Documents/BaySickDAW/Presets/Rusty Drums Page/My Presets/.
+            juce::Component::SafePointer<StandaloneEditor> safeThisRusty (this);
+            mPageMenuBar->setMenuBuilder (
+                [safeThisRusty] (juce::Component* anchor)
+                {
+                    if (! safeThisRusty) return;
+                    constexpr int kIdSave     = 100;
+                    constexpr int kIdLoadBase = 1000;
+
+                    juce::PopupMenu m;
+                    const bool kitLoaded = safeThisRusty->mProcessor.hasBaySickRustyDrums();
+                    m.addItem (kIdSave, "Save Page Preset As...", kitLoaded);
+
+                    juce::Array<juce::File> presetXmls;
+                    {
+                        juce::PopupMenu loadSub;
+                        const auto root = RustyDrumsPagePresetIO::myPresetsDir();
+                        if (root.isDirectory())
+                        {
+                            juce::Array<juce::File> files;
+                            root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
+                            files.sort();
+                            for (auto& f : files)
+                            {
+                                const int id = kIdLoadBase + presetXmls.size();
+                                presetXmls.add (f);
+                                loadSub.addItem (id, f.getFileNameWithoutExtension());
+                            }
+                        }
+                        if (presetXmls.isEmpty())
+                            loadSub.addItem (-1, "(no page presets saved)", false, false);
+                        m.addSubMenu ("Load Page Preset", loadSub);
+                    }
+
+                    m.showMenuAsync (
+                        juce::PopupMenu::Options().withTargetComponent (anchor),
+                        [safeThisRusty, presetXmls] (int r)
+                        {
+                            if (! safeThisRusty || r <= 0) return;
+                            if (r == kIdSave)
+                            {
+                                auto* aw = new juce::AlertWindow (
+                                    "Save Page Preset",
+                                    "Enter a name for this Rusty Drums page preset:",
+                                    juce::AlertWindow::NoIcon);
+                                aw->addTextEditor ("name", "My Rusty Drums Setup");
+                                aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
+                                aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                                juce::Component::SafePointer<StandaloneEditor> saveSafe (safeThisRusty);
+                                aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                                    [saveSafe, aw] (int result)
+                                    {
+                                        std::unique_ptr<juce::AlertWindow> own (aw);
+                                        if (result != 1 || ! saveSafe) return;
+                                        const auto name = aw->getTextEditorContents ("name").trim();
+                                        if (name.isEmpty()) return;
+
+                                        auto dir = RustyDrumsPagePresetIO::myPresetsDir();
+                                        dir.createDirectory();
+                                        auto target = dir.getChildFile (name + ".xml");
+                                        int n = 2;
+                                        while (target.exists())
+                                            target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
+
+                                        const auto xml = RustyDrumsPagePresetIO::exportPreset (
+                                            saveSafe->mProcessor);
+                                        if (xml.isNotEmpty())
+                                            target.replaceWithText (xml);
+                                    }), false);
+                                return;
+                            }
+                            if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
+                            {
+                                const auto& f = presetXmls[r - kIdLoadBase];
+                                RustyDrumsPagePresetIO::importPreset (
+                                    safeThisRusty->mProcessor,
+                                    f.loadFileAsString());
+                                return;
+                            }
+                        });
+                });
         }
         else if (auto* mxp = dynamic_cast<MixerPage*>(mVisiblePage))
         {
@@ -3963,6 +4201,41 @@ void StandaloneEditor::showPageForTab(int tabId)
                     panLawSub.addItem (103, "Square (0 dB at center)", true, current == 2);
                     m.addSubMenu ("Pan Law", panLawSub);
 
+                    // J-A2 (2026-05-04): Master Output channel selector.  Lists
+                    // every stereo pair on the active audio device first, then
+                    // every mono channel.  IDs:
+                    //   300 + firstChannel  -> stereo pair starting at firstChannel
+                    //   400 + channelIndex  -> mono on channelIndex
+                    juce::PopupMenu masterOutSub;
+                    int curFirst = MasterOutputRouting::gFirstOutputChannel.load (std::memory_order_relaxed);
+                    bool curMono = MasterOutputRouting::gMasterIsMono.load (std::memory_order_relaxed);
+                    if (auto* dev = safeThis->mDeviceManager.getCurrentAudioDevice())
+                    {
+                        const auto outNames = dev->getOutputChannelNames();
+                        const int nOut = outNames.size();
+                        // Stereo pairs (consecutive even-indexed pairs).
+                        for (int i = 0; i + 1 < nOut; i += 2)
+                        {
+                            const juce::String label = juce::String (i + 1) + "/" + juce::String (i + 2)
+                                + "  (" + outNames[i].trim() + " / " + outNames[i + 1].trim() + ")";
+                            const bool ticked = (! curMono) && (curFirst == i);
+                            masterOutSub.addItem (300 + i, label, true, ticked);
+                        }
+                        if (nOut > 0) masterOutSub.addSeparator();
+                        for (int i = 0; i < nOut; ++i)
+                        {
+                            const juce::String label = "Output " + juce::String (i + 1) + " (mono)  ("
+                                + outNames[i].trim() + ")";
+                            const bool ticked = curMono && (curFirst == i);
+                            masterOutSub.addItem (400 + i, label, true, ticked);
+                        }
+                    }
+                    else
+                    {
+                        masterOutSub.addItem (-1, "(no audio device open)", false, false);
+                    }
+                    m.addSubMenu ("Master Output", masterOutSub);
+
                     // H-meter (2026-05-02): latency-compensate meters toggle.
                     const bool latCompOn = MeterLatencyComp::gEnabled.load (std::memory_order_relaxed);
                     m.addItem (201,
@@ -3993,6 +4266,22 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 const int blockSize  = safeThis->mProcessor.getBlockSize();
                                 const double sr      = safeThis->mProcessor.getSampleRate();
                                 MeterLatencyComp::recomputeFromDevice (sr, blockSize, latSamples);
+                                return;
+                            }
+                            // J-A2: master output selector handlers.
+                            if (r >= 300 && r < 400)
+                            {
+                                MasterOutputRouting::gFirstOutputChannel.store (r - 300, std::memory_order_relaxed);
+                                MasterOutputRouting::gMasterIsMono.store (false, std::memory_order_relaxed);
+                                VibesynthStandaloneApp::saveMasterOutputRouting();
+                                return;
+                            }
+                            if (r >= 400 && r < 500)
+                            {
+                                MasterOutputRouting::gFirstOutputChannel.store (r - 400, std::memory_order_relaxed);
+                                MasterOutputRouting::gMasterIsMono.store (true, std::memory_order_relaxed);
+                                VibesynthStandaloneApp::saveMasterOutputRouting();
+                                return;
                             }
                         });
                 });
@@ -4489,6 +4778,76 @@ void StandaloneEditor::registerDrumPianoRoll (DrumPage* dp)
         else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNoteOff(n);
     };
     mPianoRollPage->registerEngine ({ EngineKind::Drum, dp->getPageIndex() }, std::move (conn));
+}
+
+// J-7a (2026-05-03): BaySickRustyDrums singleton — appears in the unified
+// PianoRollPage's engine dropdown.  index always 0 (1-instance lock).
+// Note dispatch routes to the singleton processor's auditionNote.  J-7b will
+// add a drummer-conventional remap (piano-roll MIDI 60+ → kit-native note).
+void StandaloneEditor::registerBaySickRustyDrumsPianoRoll()
+{
+    if (! mPianoRollPage) return;
+    PianoRollConnection conn;
+    conn.dataAccessor = [this]() -> PianoRollData*
+    {
+        return mPM ? &mPM->currentPattern().baySickRustyDrumsRoll : nullptr;
+    };
+    conn.patternTimeSigProvider = [this](int& outNum, int& outDen) {
+        outNum = mPM ? mPM->currentPattern().tsNum : 4;
+        outDen = mPM ? mPM->currentPattern().tsDen : 4;
+    };
+    conn.noteColor   = VC::DrumsCol;
+    conn.displayName = "BaySickRustyDrums";
+    conn.auditionMomentary = [this](int n)
+    {
+        if (auto* eng = mProcessor.getBaySickRustyDrums())
+            eng->auditionNote(n);
+    };
+    // BaySickRustyDrumsProcessor only exposes auditionNote (one-shot), not
+    // press-and-hold auditionOn/Off.  Wire both Hold callbacks to the same
+    // one-shot trigger so click-and-hold still fires.
+    conn.auditionOn  = conn.auditionMomentary;
+    conn.auditionOff = [](int) {};
+
+    // J-7b: per-MIDI-note label provider — pulls from the kit's parsed
+    // keymap (e.g. MIDI 38 → "Snare Center", MIDI 42 → "Hi-hat Tight Closed").
+    // Returns empty for MIDI notes outside the kit's keymap (which fall
+    // through to the default "C5" naming).
+    // J-8 (2026-05-04): when the loaded program is Basic, the kit's keymap
+    // still lists every articulation (the keymap is shared across programs)
+    // but the sounds for missing pieces don't actually trigger.  Filter the
+    // label down to empty when the soundName is NOT in the loaded program's
+    // channel set so the piano roll keys for those notes show no label
+    // (matches the kit-graphic grey-out behavior).  Full keeps every label.
+    conn.noteLabelProvider = [this](int midiNote) -> juce::String
+    {
+        auto* eng = mProcessor.getBaySickRustyDrums();
+        if (! eng) return {};
+        for (const auto& key : eng->getPianoRollKeymap())
+            if (key.midiNote == midiNote)
+            {
+                bool inProgram = false;
+                for (const auto& ch : eng->getChannels())
+                    if (ch.name == key.soundName) { inProgram = true; break; }
+                if (! inProgram) return {};
+
+                if (key.articulation.isNotEmpty())
+                    return key.soundName + " " + key.articulation;
+                return key.soundName;
+            }
+        return {};
+    };
+    // J-7b: default top note = MIDI 60 (C5) so kit-native MIDI 24..60 fits
+    // in roughly two octaves of view.  User can scroll to see the higher
+    // percussive-click defines (83..96) on demand.
+    conn.defaultTopNote = 60;
+
+    // J-7b: drum kits don't have a meaningful sharp/flat distinction —
+    // paint every row as white so engine labels (Snare Center, Hi-hat
+    // Tight Closed, etc.) are readable across the full kit range.
+    conn.allKeysWhite = true;
+
+    mPianoRollPage->registerEngine ({ EngineKind::BaySickRustyDrums, 0 }, std::move (conn));
 }
 
 void StandaloneEditor::showGlobalLockPrompt ()
@@ -5597,6 +5956,17 @@ void StandaloneEditor::cyclePattern (int delta)
     refreshPatternBox();
 }
 
+void StandaloneEditor::showRustyDrumsMapWindow()
+{
+    if (mRustyDrumsMapWin != nullptr)
+    {
+        mRustyDrumsMapWin->toFront (true);
+        return;
+    }
+    auto* w = new RustyDrumsMapWindow (mProcessor.getBaySickRustyDrums());
+    mRustyDrumsMapWin = w;     // SafePointer — auto-clears when closed
+}
+
 void StandaloneEditor::showKeyBindsWindow()
 {
     if (mKeyBindsWin != nullptr)
@@ -5608,58 +5978,99 @@ void StandaloneEditor::showKeyBindsWindow()
     mKeyBindsWin = w;     // SafePointer — auto-clears when the window deletes itself
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// G-1.5 (temporary): BaySickNAM/IR layout test window.
-// Owns a private BaySickNAMIRProcessor + its editor; not routed into the
-// audio graph.  Lets the engine's UI be opened for layout review without
-// requiring an ASIO device or graph integration.  Removed once the engine
-// gets a real home (Inst tab / FX-rack effect type / wherever).
-// ─────────────────────────────────────────────────────────────────────────────
-namespace
+// ── J-6 (2026-05-03): BaySickRustyDrums singleton spawn ──────────────────────
+// Triggered by the "+ Add BaySickRustyDrums" entry on the Drums▾ ribbon
+// dropdown.  Creates a Drums-type ribbon tab whose mPages component is a
+// BaySickRustyDrumsPage (the dedicated singleton page).  1-instance lock
+// enforced both at the ribbon (the menu entry hides via
+// onIsBaySickRustyDrumsActive) and here (defensive early-return).
+void StandaloneEditor::addBaySickRustyDrumsTab()
 {
-    class NamIrTestWindow : public juce::DocumentWindow
+    // 1-instance lock: bail if a BaySickRustyDrumsPage is already registered
+    // (regardless of whether its kit has been loaded yet).
+    for (auto* entry : mPages)
+        if (entry && dynamic_cast<BaySickRustyDrumsPage*>(entry->component.get()))
+            return;
+    if (! mRibbon) return;
+
+    const int ribbonId = mRibbon->addTab (RibbonTabBar::TabType::Drums,
+                                           "BaySickRustyDrums");
+
+    auto page = std::make_unique<BaySickRustyDrumsPage> (mProcessor);
+    auto* rawPage = page.get();
+
+    // J-6 (2026-05-03): on successful loadKit, spawn the 13 visible mixer
+    // strips.  PluginProcessor::loadBaySickRustyDrumsKit already created the
+    // audio-graph InsertNodes; this is the visible-UI side that pairs with them.
+    rawPage->onKitLoaded = [this]
     {
-    public:
-        NamIrTestWindow()
-            : juce::DocumentWindow ("BaySickNAM/IR Test Layout",
-                                    juce::Colour (0xff1a1a1a),
-                                    juce::DocumentWindow::closeButton)
+        if (! mMixerPage) return;
+        mMixerPage->clearAllRustyChannels();
+        if (auto* eng = mProcessor.getBaySickRustyDrums())
         {
-            setUsingNativeTitleBar (true);
-            setResizable (false, false);
-
-            mProc = std::make_unique<BaySickNAMIRProcessor>();
-            // Prepare with a sane SR / block so loadImpulseResponse paths
-            // work for layout review (no audio is actually routed through).
-            mProc->prepareToPlay (44100.0, 512);
-
-            setContentOwned (mProc->createEditor(), true);
-            centreWithSize (getWidth(), getHeight());
-            setVisible (true);
+            const auto& chans = eng->getChannels();
+            for (size_t i = 0; i < chans.size() && i < (size_t) MixerChannelIds::kMaxRustyStrips; ++i)
+                mMixerPage->addRustyChannelAtIndex ((int) i, chans[i].name);
         }
-
-        void closeButtonPressed() override { delete this; }
-
-    private:
-        std::unique_ptr<BaySickNAMIRProcessor> mProc;
-        // Local tooltip window — the StandaloneEditor's main VibeTooltip only
-        // monitors the editor's subtree, not this separate DocumentWindow,
-        // so without a local instance the per-widget setTooltip() calls in
-        // BaySickNAMIREditor would never fire.
-        juce::TooltipWindow                    mTooltips { this, 600 };
-        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NamIrTestWindow)
     };
-}
 
-void StandaloneEditor::showNamIrTestWindow()
-{
-    if (mNamIrTestWin != nullptr)
+    // J-7a (2026-05-03): NO ribbon-rename hookup for this engine.
+    // BaySickRustyDrums is a singleton — its ribbon tab name represents the
+    // engine's identity, not the active kit/program.  Layer/Bass/Drum/Clip
+    // rename their tab to the loaded preset name because users juggle many
+    // instances; here there is only one, so the tab stays "BaySickRustyDrums".
+    // The Player-tab status label inside the page shows the loaded kit name
+    // for users who want to see which program is active.
+
+    // J-8 stage 2 (2026-05-04): confirm prompt before deleting.  Wiping a
+    // BaySickRustyDrums tab cascades to: the singleton sfizz engine, every
+    // Rusty mixer strip + the RustyDrums Bus, every Rusty effect rack + EQ,
+    // and the BaySickRustyDrums piano-roll across all patterns.  Same prompt
+    // pattern as the program-switch dialog for consistency.
+    juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+    rawPage->onDeleteRequested = [safeThis, ribbonId, rawPage]
     {
-        mNamIrTestWin->toFront (true);
-        return;
-    }
-    auto* w = new NamIrTestWindow();
-    mNamIrTestWin = w;     // SafePointer — auto-clears on window self-delete
+        if (! safeThis) return;
+        juce::AlertWindow::showOkCancelBox (
+            juce::AlertWindow::WarningIcon,
+            "Delete BaySickRustyDrums?",
+            "Removing this tab will tear down the player, every Rusty mixer "
+            "strip and the RustyDrums Bus, every Rusty effects rack and EQ, "
+            "and clear the Rusty piano roll on every pattern.  This cannot "
+            "be undone.  Continue?",
+            "Yes, delete", "Cancel", nullptr,
+            juce::ModalCallbackFunction::create ([safeThis, ribbonId, rawPage] (int result)
+            {
+                if (! safeThis || result != 1) return;
+                if (rawPage) rawPage->onDeleteRequested = nullptr;   // re-entry guard
+                // closeTab fires onTabClosed → the defensive Rusty-tab-close
+                // path in StandaloneEditor::onTabClosed handles the rest:
+                // destroying the page (and its SliderParameterAttachment-
+                // bearing ARIA widgets) first, then the engine.  Order matters.
+                if (safeThis->mRibbon) safeThis->mRibbon->closeTab (ribbonId);
+            }));
+    };
+
+    auto* entry = new PageEntry();
+    entry->ribbonTabId = ribbonId;
+    entry->type        = RibbonTabBar::TabType::Drums;
+    entry->component   = std::move (page);
+    addChildComponent (*entry->component);
+    mPages.add (entry);
+
+    // J-7a (2026-05-03): register with the unified PianoRollPage so the
+    // engine appears in its dropdown + the BaySickRustyDrumsPage's "Piano
+    // Roll" sub-tab can redirect to it.
+    registerBaySickRustyDrumsPianoRoll();
+
+    // J-8 stage 1 (2026-05-04): no auto-load on tab spawn.  The user must
+    // pick Full or Basic from the "Load Player" dropdown on the sub-tab bar.
+    // Until then the kit graphic shows the "Pick a program to begin" overlay.
+    // Auto-select the newly created tab.  RibbonTabBar::selectTab updates
+    // internal state but doesn't fire onTabSelected, so call onTabSelected
+    // explicitly to trigger showPageForTab + page-menu setup.
+    if (mRibbon) mRibbon->selectTab (ribbonId);
+    onTabSelected (ribbonId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6620,8 +7031,7 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
     case 5: // Help
         m.addItem(601, "Help Index  (F1)");
         m.addItem(603, "Key Binds...");
-        m.addSeparator();
-        m.addItem(604, "BaySickNAM/IR Test Layout...");   // G-1.5 temporary
+        m.addItem(604, "Rusty Drums Map...");
         m.addSeparator();
         m.addItem(602, "About BaySickDAW v1.9");
         break;
@@ -6752,7 +7162,9 @@ void StandaloneEditor::menuItemSelected(int id, int)
         juce::AlertWindow::showMessageBoxAsync(
             juce::MessageBoxIconType::InfoIcon, "BaySickDAW v1.9",
             "BaySickDAW v1.9 - Phase 1 build\n"
-            "Built with JUCE 7  |  (c) KnowledgeBase Studios",
+            "Built with JUCE 7  |  (c) KnowledgeBase Studios\n\n"
+            "Powered by:\n"
+            "  - sfizz (BSD 2-Clause) - SFZ player engine",
             "OK");
         break;
 
@@ -6760,9 +7172,13 @@ void StandaloneEditor::menuItemSelected(int id, int)
         showKeyBindsWindow();
         break;
 
-    case 604:   // Help > BaySickNAM/IR Test Layout...  (G-1.5 temporary)
-        showNamIrTestWindow();
+    case 604:   // Help > Rusty Drums Map...
+        showRustyDrumsMapWindow();
         break;
+
+    // J-6 (2026-05-03): cases 605 + 606 (BaySickRustyDrums Help-menu test
+    // entries) removed — replaced by the "+ Add BaySickRustyDrums" entry on
+    // the Drums dropdown which spawns a real BaySickRustyDrumsPage.
 
     default: break;
     }
@@ -6864,6 +7280,21 @@ bool StandaloneEditor::doUndoAction(juce::UndoableAction* action,
 
 void StandaloneEditor::globalUndo()
 {
+    // J-8 stage 2 (2026-05-04): if the BaySickRustyDrums page is visible AND
+    // its engine UndoManager has a pending action, prefer that — player CC
+    // edits stack into the engine's APVTS undo manager (separate from the
+    // editor's main mUndoManager).  This makes Ctrl+Z reverse the most recent
+    // ARIA panel knob edit when you're on the player tab.
+    if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*> (mVisiblePage))
+    {
+        juce::ignoreUnused (rp);
+        if (auto* eng = mProcessor.getBaySickRustyDrums())
+        {
+            auto& engUm = eng->getUndoManager();
+            if (engUm.canUndo()) { engUm.undo(); return; }
+        }
+    }
+
     // 2026-04-26: decrement unconditionally (matches the original behaviour
     // before my conditional-on-undo-return tweak which left the cursor stuck
     // at the end on the user's machine).  Cursor + UndoManager can drift on
@@ -6876,6 +7307,16 @@ void StandaloneEditor::globalUndo()
 
 void StandaloneEditor::globalRedo()
 {
+    if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*> (mVisiblePage))
+    {
+        juce::ignoreUnused (rp);
+        if (auto* eng = mProcessor.getBaySickRustyDrums())
+        {
+            auto& engUm = eng->getUndoManager();
+            if (engUm.canRedo()) { engUm.redo(); return; }
+        }
+    }
+
     if (mHistoryCursor < (int)mHistoryLabels.size()) ++mHistoryCursor;
     mUndoManager.redo();
     if (mProjectManager) mProjectManager->markDirty();
@@ -7586,6 +8027,18 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
             rec->setAttribute ("engine",     (int) ip->getEngineType());
             rec->setAttribute ("engineData", encodeEngineState (ip->getEngineProcessor()));
         }
+        // J-9 (2026-05-05): BaySickRustyDrums singleton tab.  Singleton means
+        // pageIndex is always 0 and there's at most one of these in mPages.
+        // engineData captures the BaySickRustyDrumsProcessor's full state
+        // (apvts + KitPath); on load that re-runs loadKit which spawns the
+        // 13 mixer InsertNodes via the wrapper.
+        else if (dynamic_cast<BaySickRustyDrumsPage*> (e->component.get()))
+        {
+            rec = tabs->createNewChildElement ("Tab");
+            rec->setAttribute ("type",       "BaySickRustyDrums");
+            rec->setAttribute ("pageIndex",  0);
+            rec->setAttribute ("engineData", encodeEngineState (mProcessor.getBaySickRustyDrums()));
+        }
         juce::ignoreUnused (rec);
     }
 }
@@ -7874,6 +8327,78 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             addChildComponent (*entry->component);
             mPages.add (entry);
         }
+        else if (type == "BaySickRustyDrums")
+        {
+            // J-9 (2026-05-05): BaySickRustyDrums singleton restore.
+            //
+            // Safe-load order:
+            //   1. addBaySickRustyDrumsTab spawns the ribbon tab + page object
+            //      + PianoRoll registry hooks.
+            //   2. Decode saved engine state to recover the kit path.
+            //   3. page->reloadForProjectRestore(kitPath) — this is the path
+            //      that:
+            //         (a) loads the kit through the active-flag-protected
+            //             wrapper (no sfizz race),
+            //         (b) fires onKitLoaded so the mixer strips spawn,
+            //         (c) syncs mCurrentProgram + mProgramCombo so a later
+            //             re-pick of the same program is a no-op (otherwise
+            //             the kit's set_cc directives stomp saved CC values),
+            //         (d) renders the ARIA control panel for the program.
+            //   4. apvts.replaceState applies the saved CC values on top of
+            //      the just-written kit defaults — saved values WIN.
+            //
+            // Calling engine->setStateInformation directly would re-run
+            // loadKit WITHOUT the active-flag dance — that's the crash path:
+            // sfizz's hash maps get mutated while renderBlock is walking them.
+            addBaySickRustyDrumsTab();
+            if (engineData.isNotEmpty())
+            {
+                juce::MemoryBlock mb;
+                if (mb.fromBase64Encoding (engineData))
+                {
+                    if (auto kitXml = juce::AudioProcessor::getXmlFromBinary (
+                            mb.getData(), (int) mb.getSize()))
+                    {
+                        if (kitXml->hasTagName ("BaySickRustyDrumsState"))
+                        {
+                            juce::File kitFile;
+                            if (auto* kp = kitXml->getChildByName ("KitPath"))
+                                kitFile = juce::File (kp->getStringAttribute ("path"));
+
+                            // Find the just-spawned BaySickRustyDrumsPage and
+                            // route through its restore method (handles UI
+                            // state + ARIA panel + mixer-strip spawn together).
+                            BaySickRustyDrumsPage* rustyPage = nullptr;
+                            for (auto* entry : mPages)
+                                if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*> (entry->component.get()))
+                                { rustyPage = rp; break; }
+
+                            if (rustyPage != nullptr
+                                && kitFile.existsAsFile()
+                                && rustyPage->reloadForProjectRestore (kitFile))
+                            {
+                                // Saved CC values overlay the kit's just-written
+                                // set_cc defaults.  Sliders update via the
+                                // SliderParameterAttachment listener chain.
+                                if (auto* eng = mProcessor.getBaySickRustyDrums())
+                                {
+                                    for (auto* child : kitXml->getChildIterator())
+                                    {
+                                        auto state = juce::ValueTree::fromXml (*child);
+                                        if (state.isValid()
+                                            && state.getType() == eng->apvts.state.getType())
+                                        {
+                                            eng->apvts.replaceState (state);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
@@ -8093,10 +8618,15 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
 {
     if (! mPM) return;
 
-    // Drop each captured WAV as an Audio clip on the next free arrangement
-    // row.  Start bar comes from the playhead position at record-start; length
-    // in bars is ceil(file duration in beats / beats-per-bar).
-    auto dropWavAsClip = [&](const juce::File& wavFile)
+    // I-16 G-9 (2026-05-03): per-block routing decision.  Vox/Inst channelIds
+    // produce a block linked to the originating page (block.routeChannel set;
+    // playback fans through the page's chain).  Master / Audio-row files
+    // (chId 0) keep the legacy "create new Audio row" behavior.
+    //
+    // For Vox: dry+wet both added to Audio Browser; only the WET file is
+    // placed on the grid (per locked Option C of the spec).
+    // For Inst: single dry file added to Browser AND placed on grid.
+    auto dropWavAsClip = [&](const juce::File& wavFile, int routeChannel)
     {
         if (! wavFile.existsAsFile()) return;
 
@@ -8135,34 +8665,74 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
         block.audioFilePath = "Samples/" + wavFile.getFileName();   // relative to project
         block.originalBPM   = (float) bpm;
         block.stretchMode   = true;
+        block.routeChannel  = routeChannel;                         // I-16 G-9: link to Vox/Inst page (0 = Audio row)
         // 2026-04-24 recorded-clip library registration: matches what
         // BuilderPage::importAudioFile does on user drop so the clip shows
         // up in the Builder's Audio tab and survives save/close/reopen.
         mPM->addAudioToLibrary (block.audioFilePath);
         mPM->addBlock (block);
 
-        // R5d follow-up (2026-04-24): mirror the full onAudioClipAdded path so
-        // the recorded clip gets the same wiring a user-dragged clip does.
-        // Without these calls, the row has no mixer strip + no VibeGraph
-        // InsertNode + no routing edges, so processInsert is a no-op and
-        // routeInsertOutput fans into nothing -> silence on playback.
-        const juce::String stripName = "Audio " + juce::String (nextRow + 1);
-        // 2026-04-29 ORDER FIX: register InsertNode + APVTS params BEFORE
-        // creating the strip so setApvts can attach the fader/mute/etc.
-        mProcessor.mVibeGraph.addAudioRowChannel (nextRow, stripName);
-        mProcessor.ensureAudioInsert (nextRow, stripName);
-        if (mMixerPage)
-            mMixerPage->addAudioChannel (nextRow, stripName);
-        if (mEffectsPage)
-            mEffectsPage->rebuildChannelDropdown();
+        // I-16 G-9: only spin up a new Audio row + InsertNode + mixer strip
+        // for non-routed clips (master capture, untagged files).  Vox/Inst-
+        // routed clips play back through the originating page's chain via
+        // PluginProcessor's audio-clip FilePlay branch -- no new strip needed.
+        if (routeChannel == 0)
+        {
+            const juce::String stripName = "Audio " + juce::String (nextRow + 1);
+            // 2026-04-29 ORDER FIX: register InsertNode + APVTS params BEFORE
+            // creating the strip so setApvts can attach the fader/mute/etc.
+            mProcessor.mVibeGraph.addAudioRowChannel (nextRow, stripName);
+            mProcessor.ensureAudioInsert (nextRow, stripName);
+            if (mMixerPage)
+                mMixerPage->addAudioChannel (nextRow, stripName);
+            if (mEffectsPage)
+                mEffectsPage->rebuildChannelDropdown();
+        }
     };
 
+    // Master capture (no strips armed) -> Audio row, route channel 0.
     if (res.masterFile.existsAsFile())
-        dropWavAsClip (res.masterFile);
-    for (const auto& [chId, f] : res.stripFiles)
+        dropWavAsClip (res.masterFile, /*routeChannel=*/0);
+
+    // I-16 G-9: per-strip files.  For Vox channelIds we have BOTH a dry and
+    // a wet file; the WET one goes on the grid, both go in the Audio Browser.
+    // Inst channelIds have only a dry file -- it goes on the grid.
+    auto isVoxCh  = [] (int c) { return c >= MixerChannelIds::kVoxBase
+                                       && c <  MixerChannelIds::kVoxBase + MixerChannelIds::kMaxVoxStrips; };
+    auto isInstCh = [] (int c) { return c >= MixerChannelIds::kInstBase
+                                       && c <  MixerChannelIds::kInstBase + MixerChannelIds::kMaxInstStrips; };
+
+    auto findWet = [&] (int chId) -> juce::File
     {
-        juce::ignoreUnused (chId);
-        dropWavAsClip (f);
+        for (const auto& [c, f] : res.stripWetFiles)
+            if (c == chId) return f;
+        return {};
+    };
+
+    for (const auto& [chId, dryFile] : res.stripFiles)
+    {
+        if (isVoxCh (chId))
+        {
+            const juce::File wetFile = findWet (chId);
+            const juce::String dryRel = "Samples/" + dryFile.getFileName();
+            // Add DRY to Audio Browser only (it doesn't go on the grid; the
+            // BaySickPitch offline editor loads it).
+            mPM->addAudioToLibrary (dryRel);
+
+            if (wetFile.existsAsFile())
+                dropWavAsClip (wetFile, chId);     // WET on grid + linked to Vox page
+            else
+                dropWavAsClip (dryFile, chId);     // fallback if wet capture failed
+        }
+        else if (isInstCh (chId))
+        {
+            dropWavAsClip (dryFile, chId);         // single file on grid + linked to Inst page
+        }
+        else
+        {
+            // Unknown channel -> fall back to legacy Audio row behavior.
+            dropWavAsClip (dryFile, /*routeChannel=*/0);
+        }
     }
 
     // Kick the audio-clip streamer so the new block(s) are playable immediately.

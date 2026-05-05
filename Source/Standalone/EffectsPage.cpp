@@ -145,22 +145,15 @@ void EffectsPage::buildPreEQTab()
 
 // §P4.3 (B6.2) — Layer / Bass / Drum-slot channels have their pre-EQ on the
 // player page; the mixer Effects page hides the Pre EQ tab for those.
-// Aux / Audio / Bus channels have no page, so the Pre EQ tab IS the only
-// surface for their pre-rack EQ.
+// J-6 (2026-05-03): EQ unification — every channel now exposes Pre + Rack +
+// Post on the Effects page (was: only buses + non-player inserts had a Pre
+// tab; player inserts had their pre-EQ as a sub-tab on the player page).
+// Returning false unconditionally makes the Pre tab visible for every
+// channel and the EQ sub-tab on player pages is removed entirely.  Function
+// kept for now (not deleted) so any caller that asks "is there a page
+// pre-EQ?" gets the consistent "no" answer regardless of channel type.
 bool EffectsPage::currentChannelHasPagePreEQ() const
 {
-    if (mTrackBox == nullptr) return false;
-    const int id = mTrackBox->getSelectedId();
-    // ID ranges (per onChannelChanged + StandaloneEditor::onGetActiveChannels):
-    //   1-6  : bus channels (no page)         → Pre tab visible
-    //   100-115 : Drum inserts (page-pre-EQ)  → Pre tab hidden
-    //   200-207 : Layer inserts (page-pre-EQ) → Pre tab hidden
-    //   300-303 : Bass inserts (page-pre-EQ)  → Pre tab hidden
-    //   400-499 : Audio inserts (no page)     → Pre tab visible
-    //   600-615 : Aux inserts (no page)       → Pre tab visible
-    if (id >= 100 && id < 200) return true;
-    if (id >= 200 && id < 200 + kMaxLayerPages) return true;
-    if (id >= 300 && id < 300 + kMaxBassPages)  return true;
     return false;
 }
 
@@ -217,25 +210,30 @@ void EffectsPage::rebuildChannelDropdown()
         };
 
         auto channelToMixerId = [](int dropdownId) -> int {
-            // Bus IDs in the dropdown match MixerChannelIds.
-            if (dropdownId >= 1 && dropdownId <= 6) return dropdownId;
+            // Bus IDs in the dropdown match MixerChannelIds 1-12 directly.
+            if (dropdownId >= 1 && dropdownId <= 12) return dropdownId;
             if (dropdownId >= 100 && dropdownId < 200) return kDrumBase + (dropdownId - 100);
             if (dropdownId >= 200 && dropdownId < 216) return kLayerBase + (dropdownId - 200);
             if (dropdownId >= 300 && dropdownId < 316) return kBassBase  + (dropdownId - 300);
             if (dropdownId >= 400 && dropdownId < 450) return kAudioBase + (dropdownId - 400);
-            if (dropdownId >= 600 && dropdownId < 616) return kAuxBase   + (dropdownId - 600);
+            if (dropdownId >= 600 && dropdownId < 600 + (int) kMaxAuxStrips)   return kAuxBase   + (dropdownId - 600);
+            if (dropdownId >= 700 && dropdownId < 700 + (int) kMaxVoxStrips)   return kVoxBase   + (dropdownId - 700);
+            if (dropdownId >= 800 && dropdownId < 800 + (int) kMaxInstStrips)  return kInstBase  + (dropdownId - 800);
+            if (dropdownId >= 900 && dropdownId < 900 + (int) kMaxRustyStrips) return kRustyBase + (dropdownId - 900);
             return dropdownId;
         };
 
-        // Separate buses from inserts — buses are group anchors, inserts go in buckets
-        std::vector<Item> busItems;   // id in [1..6]
+        // Separate buses from inserts — buses are group anchors, inserts go in buckets.
+        // J-6 (2026-05-03): bus id range expanded 1-6 → 1-12 to include
+        // VoxBus/InstBus/VoxBus2/InstBus2/InstBus3/RustyDrumsBus.
+        std::vector<Item> busItems;
         std::vector<Item> insertItems;
         for (auto& [id, name] : channels)
         {
             juce::String prefix = getMixerApvtsPrefixForChannel(id);
             Item it { id, name, prefix };
-            if (id >= 1 && id <= 6) busItems.push_back(it);
-            else                     insertItems.push_back(it);
+            if (id >= 1 && id <= 12) busItems.push_back(it);
+            else                      insertItems.push_back(it);
         }
 
         for (auto& it : insertItems)
@@ -311,6 +309,19 @@ void EffectsPage::rebuildChannelDropdown()
 
         // ── Drums Bus ─────────────────────────────────────────────────────
         addBusAndMembers(3, kDrumsBus, "DRUMS BUS", VC::DrumsCol);
+
+        // J-6 (2026-05-03): EQ unification + missing bus groups.
+        // ── RustyDrums Bus (J-5) ─────────────────────────────────────────
+        addBusAndMembers(12, kRustyDrumsBus, "RUSTYDRUMS BUS", VC::DrumsCol);
+
+        // ── Vox Bus(es) (R3.5 + G-6) ─────────────────────────────────────
+        addBusAndMembers(7, kVoxBus,   "VOX BUS",   juce::Colour(0xFF0FAFA5));
+        addBusAndMembers(9, kVoxBus2,  "VOX BUS 2", juce::Colour(0xFF0FAFA5));
+
+        // ── Inst Bus(es) (R3.5 + G-6) ────────────────────────────────────
+        addBusAndMembers(8,  kInstBus,  "INST BUS",   juce::Colour(0xFF1C3A8A));
+        addBusAndMembers(10, kInstBus2, "INST BUS 2", juce::Colour(0xFF1C3A8A));
+        addBusAndMembers(11, kInstBus3, "INST BUS 3", juce::Colour(0xFF1C3A8A));
     }
     else
     {
@@ -376,6 +387,12 @@ void EffectsPage::onChannelChanged()
     case 4:  rack = vg.getMasterRack();         eq = vg.getMasterEQ();        break;
     case 5:  rack = vg.getEffectsBusRack();     eq = vg.getEffectsBusEQ();    break;
     case 6:  rack = vg.getAudioClipsBusRack();  eq = vg.getAudioClipsBusEQ(); break;
+    case 7:  rack = vg.getVoxBusRack();         eq = vg.getVoxBusEQ();        break;
+    case 8:  rack = vg.getInstBusRack();        eq = vg.getInstBusEQ();       break;
+    case 9:  rack = vg.getVoxBus2Rack();        eq = vg.getVoxBus2EQ();       break;
+    case 10: rack = vg.getInstBus2Rack();       eq = vg.getInstBus2EQ();      break;
+    case 11: rack = vg.getInstBus3Rack();       eq = vg.getInstBus3EQ();      break;
+    case 12: rack = vg.getRustyDrumsBusRack();  eq = vg.getRustyDrumsBusEQ(); break;
     default:
         if (id >= 200 && id < 200 + kMaxLayerPages)
         {
@@ -444,6 +461,27 @@ void EffectsPage::onChannelChanged()
                 eq   = vg.getInstrChannelEQ(id);
             }
         }
+        else if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)
+        {
+            const int idx = id - 700;
+            rack = vg.getInsertRack(VibeGraph::InsertKind::Vox, idx);
+            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Vox, idx);
+        }
+        else if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)
+        {
+            const int idx = id - 800;
+            rack = vg.getInsertRack(VibeGraph::InsertKind::Inst, idx);
+            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Inst, idx);
+        }
+        else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)
+        {
+            // J-8 stage 2 (2026-05-04): Rusty per-strip racks + EQ.  Same
+            // InsertNode registry pattern as Layer/Bass/Drum — racks bind to
+            // the audio-graph node so widget edits hit the audible signal.
+            const int idx = id - 900;
+            rack = vg.getInsertRack(VibeGraph::InsertKind::Rusty, idx);
+            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Rusty, idx);
+        }
         break;
     }
 
@@ -486,18 +524,27 @@ void EffectsPage::onChannelChanged()
         EQ8MsDSP* preEq = nullptr;
         switch (id)
         {
-            case 1: preEq = vg.getLayersBusPreEQ();    break;
-            case 2: preEq = vg.getBassBusPreEQ();      break;
-            case 3: preEq = vg.getDrumsBusPreEQ();     break;
-            case 4: preEq = vg.getMasterPreEQ();       break;
-            case 5: preEq = vg.getEffectsBusPreEQ();   break;
-            case 6: preEq = vg.getAudioClipsBusPreEQ();break;
+            case 1:  preEq = vg.getLayersBusPreEQ();     break;
+            case 2:  preEq = vg.getBassBusPreEQ();       break;
+            case 3:  preEq = vg.getDrumsBusPreEQ();      break;
+            case 4:  preEq = vg.getMasterPreEQ();        break;
+            case 5:  preEq = vg.getEffectsBusPreEQ();    break;
+            case 6:  preEq = vg.getAudioClipsBusPreEQ(); break;
+            case 7:  preEq = vg.getVoxBusPreEQ();        break;
+            case 8:  preEq = vg.getInstBusPreEQ();       break;
+            case 9:  preEq = vg.getVoxBus2PreEQ();       break;
+            case 10: preEq = vg.getInstBus2PreEQ();      break;
+            case 11: preEq = vg.getInstBus3PreEQ();      break;
+            case 12: preEq = vg.getRustyDrumsBusPreEQ(); break;
             default:
-                if      (id >= 100 && id < 200)                 preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Drum,  id - 100);
-                else if (id >= 200 && id < 200 + kMaxLayerPages) preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Layer, id - 200);
-                else if (id >= 300 && id < 300 + kMaxBassPages)  preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Bass,  id - 300);
-                else if (id >= 400 && id < 500)                  preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Audio, id - 400);
-                else if (id >= 600 && id < 616)                  preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Aux,   id - 600);
+                if      (id >= 100 && id < 200)                                    preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Drum,  id - 100);
+                else if (id >= 200 && id < 200 + kMaxLayerPages)                    preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Layer, id - 200);
+                else if (id >= 300 && id < 300 + kMaxBassPages)                     preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Bass,  id - 300);
+                else if (id >= 400 && id < 500)                                     preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Audio, id - 400);
+                else if (id >= 600 && id < 616)                                     preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Aux,   id - 600);
+                else if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)   preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Vox,   id - 700);
+                else if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)  preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Inst,  id - 800);
+                else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips) preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Rusty, id - 900);
                 break;
         }
         const juce::String chanPrefix = getMixerApvtsPrefixForChannel(id);
@@ -847,12 +894,18 @@ juce::String EffectsPage::getMixerApvtsPrefixForChannel(int id) const
 
     switch (id)
     {
-        case 1: return "mixer_layers";
-        case 2: return "mixer_bass";
-        case 3: return "mixer_drums";
-        case 4: return "mixer_master";
-        case 5: return "mixer_fx";
-        case 6: return "mixer_clipsbus";
+        case 1:  return "mixer_layers";
+        case 2:  return "mixer_bass";
+        case 3:  return "mixer_drums";
+        case 4:  return "mixer_master";
+        case 5:  return "mixer_fx";
+        case 6:  return "mixer_clipsbus";
+        case 7:  return "mixer_voxbus";       // R3.5
+        case 8:  return "mixer_instbus";      // R3.5
+        case 9:  return "mixer_voxbus2";      // G-6
+        case 10: return "mixer_instbus2";     // G-6
+        case 11: return "mixer_instbus3";     // G-6
+        case 12: return "mixer_rustybus";     // J-6
         default: break;
     }
 
@@ -863,12 +916,20 @@ juce::String EffectsPage::getMixerApvtsPrefixForChannel(int id) const
         return "mixer_layer_" + juce::String(id - 200);
     if (id >= 300 && id < 300 + kMaxBassPages)
         return "mixer_bass_" + juce::String(id - 300);
-    // Audio inserts: 400+row. But aux strips share this range visually; we
-    // disambiguate by reserving 600+idx for aux in the dropdown (see StandaloneEditor).
-    if (id >= 600 && id < 600 + 16)
-        return "mixer_aux_" + juce::String(id - 600);
+    // Audio inserts: 400+row.
     if (id >= 400 && id < 500)
         return "mixer_audio_" + juce::String(id - 400);
+    // Aux strips: dropdown 600..617 (re-mapped from MixerChannelIds kAuxBase 100+).
+    if (id >= 600 && id < 600 + (int) MixerChannelIds::kMaxAuxStrips)
+        return "mixer_aux_" + juce::String(id - 600);
+    // J-6 (2026-05-03): Vox/Inst/Rusty insert dropdown ranges.  Disambiguated
+    // from each other AND from Aux by giving each kind its own dropdown range.
+    if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)
+        return "mixer_vox_" + juce::String(id - 700);
+    if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)
+        return "mixer_inst_" + juce::String(id - 800);
+    if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)
+        return "mixer_rusty_" + juce::String(id - 900);
 
     return {};
 }

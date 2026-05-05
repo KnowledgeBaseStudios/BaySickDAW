@@ -52,6 +52,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -108,6 +109,13 @@
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;NAM_ENABLE_A2_FAST;NOMINMAX;WIN32_LEAN_AND_MEAN;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
+    <MASM>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NAM_ENABLE_A2_FAST;NOMINMAX;WIN32_LEAN_AND_MEAN;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
+      <IncludePaths>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(IncludePaths)</IncludePaths>
+      <AdditionalOptions>%(AdditionalOptions) /wd4127 /wd4244 /wd4267 /wd4305</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <WarningLevel>3</WarningLevel>
+    </MASM>
     <Midl>
       <AdditionalIncludeDirectories>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
@@ -153,6 +161,13 @@
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;NAM_ENABLE_A2_FAST;NOMINMAX;WIN32_LEAN_AND_MEAN;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
+    <MASM>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;NAM_ENABLE_A2_FAST;NOMINMAX;WIN32_LEAN_AND_MEAN;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
+      <IncludePaths>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(IncludePaths)</IncludePaths>
+      <AdditionalOptions>%(AdditionalOptions) /wd4127 /wd4244 /wd4267 /wd4305</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <WarningLevel>3</WarningLevel>
+    </MASM>
     <Midl>
       <AdditionalIncludeDirectories>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
@@ -198,6 +213,13 @@
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;NAM_ENABLE_A2_FAST;NOMINMAX;WIN32_LEAN_AND_MEAN;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
+    <MASM>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;NAM_ENABLE_A2_FAST;NOMINMAX;WIN32_LEAN_AND_MEAN;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
+      <IncludePaths>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(IncludePaths)</IncludePaths>
+      <AdditionalOptions>%(AdditionalOptions) /wd4127 /wd4244 /wd4267 /wd4305</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <WarningLevel>3</WarningLevel>
+    </MASM>
     <Midl>
       <AdditionalIncludeDirectories>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
@@ -242,6 +264,13 @@
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;NAM_ENABLE_A2_FAST;NOMINMAX;WIN32_LEAN_AND_MEAN;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
+    <MASM>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;NAM_ENABLE_A2_FAST;NOMINMAX;WIN32_LEAN_AND_MEAN;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
+      <IncludePaths>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(IncludePaths)</IncludePaths>
+      <AdditionalOptions>%(AdditionalOptions) /wd4127 /wd4244 /wd4267 /wd4305</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <WarningLevel>3</WarningLevel>
+    </MASM>
     <Midl>
       <AdditionalIncludeDirectories>C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\NAM;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\eigen;C:\Users\jeffm\Documents\BaySickDAW\libs\NeuralAmpModelerCore\Dependencies\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
@@ -336,5 +365,6 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
   </ImportGroup>
 </Project>

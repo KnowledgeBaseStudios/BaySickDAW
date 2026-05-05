@@ -52,6 +52,12 @@ public:
     std::function<void(int tabId)>                    onTabClosed;       // Layers/Bass delete
     std::function<void(TabType)>                      onAddTabRequest;   // Layers/Bass add
     std::function<void(TabType, int subPageIndex)>    onSubPageSelected; // Effects/Builder/Drums
+    // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry in the Drums dropdown.
+    // Singleton — fires only when no instance currently exists.
+    std::function<void()>                             onAddBaySickRustyDrumsRequest;
+    // J-6: 1-instance lock query — set by StandaloneEditor; the dropdown
+    // hides "+ Add BaySickRustyDrums" when this returns true.
+    std::function<bool()>                             onIsBaySickRustyDrumsActive;
     std::function<void(int tabId, const juce::String& newName)> onTabRenamed;
     // D1.4-fix: editor-side rename intercept.  Return true to suppress the
     // ribbon's default rename dialog (editor handles it).  Used for Drum
@@ -150,6 +156,12 @@ private:
     juce::Array<Tab> mTabs;
     int              mSelectedId { -1 };
     int              mNextId     { 1 };
+    // J-6 (2026-05-03): per-type "last used" tab id.  Updated every time a
+    // tab is selected; consulted by getActiveTabForType when the currently
+    // selected tab is of a different type, so clicking a ribbon header
+    // re-opens the user's last-visited instance of that type instead of
+    // always falling back to the first instance.
+    std::map<TabType, int> mLastUsedByType;
 
     static juce::Colour tabColour(TabType type, bool active);
 

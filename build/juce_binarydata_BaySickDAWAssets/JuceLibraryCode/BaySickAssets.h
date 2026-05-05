@@ -11,8 +11,17 @@ namespace BaySickAssets
     extern const char*   BaySickDAWLogo_png;
     const int            BaySickDAWLogo_pngSize = 957688;
 
+    extern const char*   big_rusty_drums_svg;
+    const int            big_rusty_drums_svgSize = 8743;
+
+    extern const char*   big_rusty_drums_png;
+    const int            big_rusty_drums_pngSize = 3656182;
+
+    extern const char*   control_tab_png;
+    const int            control_tab_pngSize = 304558;
+
     // Number of elements in the namedResourceList and originalFileNames arrays.
-    const int namedResourceListSize = 1;
+    const int namedResourceListSize = 4;
 
     // Points to the start of a list of resource names.
     extern const char* namedResourceList[];

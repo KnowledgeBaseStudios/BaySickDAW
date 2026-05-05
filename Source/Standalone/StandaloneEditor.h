@@ -28,6 +28,7 @@ class VoxPage;          // 2026-04-28 (G-4: Vox engine page)
 class VoxEmptyState;    // 2026-04-28 (G-4: Vox empty-state placeholder)
 class InstPage;         // 2026-04-28 (G-4: Inst engine page)
 class InstEmptyState;   // 2026-04-28 (G-4: Inst empty-state placeholder)
+class BaySickRustyDrumsPage;  // J-6 (2026-05-03): singleton drum-kit page
 
 // ── StandaloneEditor ──────────────────────────────────────────────────────────
 // Top-level UI component. Owns:
@@ -200,6 +201,7 @@ private:
     void registerLayerPianoRoll (class LayersPage* lp);
     void registerBassPianoRoll  (class BassPage*   bp);
     void registerDrumPianoRoll  (class DrumPage*   dp);
+    void registerBaySickRustyDrumsPianoRoll();   // J-7a (2026-05-03)
     // D2 Batch 4: move drum at row `srcRow` to row `dstRow` in ribbon order.
     // Reorders mPages + mRibbon's tab list + refreshes every kit view.
     void moveDrumTab (int srcRow, int dstRow);
@@ -404,13 +406,13 @@ private:
     // full include here.
     juce::Component::SafePointer<juce::Component> mKeyBindsWin;
     void showKeyBindsWindow();
+    juce::Component::SafePointer<juce::Component> mRustyDrumsMapWin;  // J-7b
+    void showRustyDrumsMapWindow();
 
-    // ── G-1.5 (temporary): floating test window for BaySickNAM/IR layout
-    //    review.  Owns a private BaySickNAMIRProcessor + its editor; not
-    //    routed into the audio graph.  Removed once the engine gets a real
-    //    home (Inst tab / FX-rack effect type / wherever).
-    juce::Component::SafePointer<juce::Component> mNamIrTestWin;
-    void showNamIrTestWindow();
+    // J-6 (2026-05-03): BaySickRustyDrums singleton tab spawn.  Triggered by
+    // the "+ Add BaySickRustyDrums" entry in the Drums▾ ribbon dropdown.
+    // No-op when the singleton already exists (1-instance lock).
+    void addBaySickRustyDrumsTab();
 
     // ── G-2 (2026-04-28): Clips ribbon tab.  Empty-state placeholder shown
     //    when the user clicks the Clip ribbon slot before any clips have
@@ -484,6 +486,11 @@ private:
     void createNewPattern();          // F4
     void cyclePattern (int delta);    // + / - (delta = ±1, wraps)
     bool isPatternEmpty (int idx) const;
+
+    // I-3c (2026-05-02): MIDI Learn UI controller.  Owns the 30s learn timer
+    // and the Escape-cancels keyboard hook.  Wires all VKnobAutomation
+    // sOnMidi* callbacks in the StandaloneEditor constructor.
+    std::unique_ptr<class MidiLearnUI> mMidiLearnUI;
 
     // ── Automation playback (Phase 4D) ────────────────────────────────────────
     // Maps paramId → function that applies a 0..1 normalised value on the message thread.

@@ -5,13 +5,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickVocalEditor — Phase H-6 (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
-// Stretch-to-fill editor for BaySickVocalProcessor.  Six sub-tabs:
+// Stretch-to-fill editor for BaySickVocalProcessor.  Five sub-tabs:
 //   1. BaySickVocals  — realtime pitch correction + page-wide controls
 //   2. Vocal Chain    — De-esser / Compressor / Saturation / Limiter rack
 //   3. BaySickPitch   — Newtone-clone offline pitch editor    [placeholder]
 //   4. BaySickAlign   — VocAlign-clone offline alignment      [placeholder]
 //   5. BaySickNAM/IR  — existing engine hosted as sub-tab     [placeholder; G-9]
-//   6. Pre Rack EQ    — strip's existing Pre EQ8 M/S          [placeholder; G-9]
+//
+// J-6 EQ unification (2026-05-03): the former 6th "Pre Rack EQ" tab is
+// removed.  Pre + post EQ for this strip live exclusively on the Effects
+// page (mixer_vox_<N>_preeq_* / mixer_vox_<N>_*) — same as every other
+// strip type.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BaySickVocalEditor : public juce::AudioProcessorEditor
@@ -25,7 +29,7 @@ public:
         TabBaySickPitch  = 2,
         TabBaySickAlign  = 3,
         TabBaySickNAMIR  = 4,
-        TabPreRackEQ     = 5,
+        // J-6 EQ unification (2026-05-03): TabPreRackEQ removed.
         kNumTabs
     };
 
@@ -35,11 +39,8 @@ public:
     void paint   (juce::Graphics&) override;
     void resized() override;
 
-    // H-6b (2026-05-01): inject the strip's Pre Rack EQ display into the
-    // "Pre Rack EQ" sub-tab.  VoxPage owns the ParametricEQDisplay (it knows
-    // which strip's InsertNode the EQ binds to) and hands it here for visual
-    // hosting.  Pass nullptr to clear.
-    void setPreRackEQ (juce::Component* eq);
+    // J-6 EQ unification (2026-05-03): setPreRackEQ removed; Pre Rack EQ is
+    // now exclusively edited on the Effects page.
 
     // Driven by the PageMenuBar tab-slot buttons (StandaloneEditor wires the
     // setTabSlots callback to call this).  Default = TabBaySickVocals.
@@ -61,7 +62,7 @@ private:
     std::unique_ptr<juce::Component>    mPanelBaySickPitch;   // H-6b: BaySickPitchEditor
     std::unique_ptr<juce::Component>    mPanelBaySickAlign;   // H-6c: BaySickAlignEditor
     std::unique_ptr<juce::Component>    mPanelBaySickNAMIR;   // H-6d: NAMIRHostPanel
-    std::unique_ptr<HostPanel>          mPanelPreRackEQ;
+    // J-6 EQ unification (2026-05-03): mPanelPreRackEQ removed.
 
     int mActiveTab { TabBaySickVocals };
 

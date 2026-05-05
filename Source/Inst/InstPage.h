@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../Standalone/SharedUI.h"   // ParametricEQDisplay
+#include "../Standalone/EngineChainProcessor.h"   // I-16 G-9: Pedals -> NAM/IR chain
 
 class VibeSynthProcessor;
 
@@ -11,12 +12,11 @@ class VibeSynthProcessor;
 //   * BaySickPlayer engine REMOVED entirely (no projects in the wild had it).
 //   * No engine picker — both stage processors are pre-loaded into permanent
 //     sub-tabs (mirrors Vox page layout).
-//   * Sub-tabs (3 total): BaySickPedals | BaySickNAM/IR | Pre EQ8 M/S.
+//   * Sub-tabs (2 total — J-6 EQ unification 2026-05-03): BaySickPedals | BaySickNAM/IR.
 //     - BaySickPedals (sub-tab 0): I-1 will install BaySickPedalsProcessor +
 //       editor here.  For I-0b ships a placeholder component.
 //     - BaySickNAM/IR (sub-tab 1): hosts the existing BaySickNAMIRProcessor +
 //       BaySickNAMIREditor unchanged (same setup as the Vox page's NAM/IR sub-tab).
-//     - Pre EQ8 M/S (sub-tab 2): unchanged from prior layout.
 //   * Spawn trigger remains the Mixer page's "Add Inst Strip" button.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -42,7 +42,7 @@ public:
     // VoxPage::getTabLabels() pattern.
     static juce::StringArray getTabLabels()
     {
-        return { "BaySickPedals", "BaySickNAM/IR", "Pre EQ8 M/S" };
+        return { "BaySickPedals", "BaySickNAM/IR" };  // J-6 (2026-05-03): Pre EQ8 M/S removed
     }
 
     int          getPageIndex() const noexcept { return mPageIndex; }
@@ -55,6 +55,12 @@ public:
     // re-amp will eventually consume audio files; for now the label is informational).
     juce::String getClipFilePath() const                    { return mClipPath; }
     void         setClipFilePath (const juce::String& p);
+
+    // I-16 G-9 (2026-05-03): linked recorded-clip file path (the audio that
+    // plays back through this page's chain on transport playback).  Set by
+    // StandaloneEditor::commitRecordingResult after a successful Inst take.
+    juce::String getLinkedClipPath() const                  { return mLinkedClipPath; }
+    void         setLinkedClipPath (const juce::String& p)  { mLinkedClipPath = p; }
 
     // Back-compat stub.  No-op in I-0b -- there's no engine picker; both engines
     // live as permanent sub-tabs.  Old StandaloneEditor save-load code calls this
@@ -89,14 +95,7 @@ public:
     bool isLocked() const noexcept { return mLocked; }
     void setLocked (bool b) { if (b == mLocked) return; mLocked = b; if (onLockChanged) onLockChanged(); repaint(); }
 
-    // ── G-7 polish (2026-04-29): Pre EQ8 M/S sub-tab (mirrors LayersPage) ─────
-    ParametricEQDisplay* getEQDisplay() const { return mEQDisplay.get(); }
-    void setEQMid (bool showMid)
-    {
-        mEQMidActive = showMid;
-        if (mEQDisplay) mEQDisplay->setShowMid (showMid);
-    }
-    bool isEQMidActive() const { return mEQMidActive; }
+    // J-6 EQ unification (2026-05-03): EQ accessors removed; pre-rack EQ on Effects page only.
 
     // Save/Load PAGE preset — entire InstPage state (BaySickNAM/IR currently;
     // I-1 adds BaySickPedals).  XML matches exportInstState format.
@@ -115,7 +114,7 @@ public:
     void requestDelete ();
 
 private:
-    void buildEQTab();
+    // J-6 EQ unification (2026-05-03): buildEQTab removed.
     void layoutContent (juce::Rectangle<int> r);
     void showEngineContextMenu();
 
@@ -140,13 +139,29 @@ private:
     std::unique_ptr<juce::AudioProcessorEditor>  mPedalsEditor;
     std::unique_ptr<juce::Component>             mPedalsPlaceholder;
 
+    // I-15 polish (2026-05-03): header chrome for the BaySickPedals sub-tab.
+    // Lives in the 36-px page header strip, visible only when sub-tab 0 is
+    // active.  Title on the left, "Preset..." button on the right opening
+    // the pedalboard preset library popup (Save / Load / Reveal Folder).
+    juce::Label                                  mPedalsHeaderTitle;
+    std::unique_ptr<juce::TextButton>            mPedalsPresetBtn;
+    void                                         showPedalboardPresetMenu();
+
     // BaySickNAM/IR stage (existing — unchanged).
     std::unique_ptr<juce::AudioProcessor>        mNamIrProc;
     std::unique_ptr<juce::AudioProcessorEditor>  mNamIrEditor;
 
-    // G-7 polish (2026-04-29): real Pre EQ8 M/S display.
-    std::unique_ptr<ParametricEQDisplay>         mEQDisplay;
-    bool                                         mEQMidActive { true };
+    // I-16 G-9 (2026-05-03): chain wrapper -- registerInstEngine sees this
+    // single processor; processBlock fans the buffer through Pedals -> NAM/IR.
+    std::unique_ptr<EngineChainProcessor>        mChain;
+
+    // I-16 G-9 (2026-05-03): file path of the recorded clip linked to this
+    // page's strip.  Set by commitRecordingResult after a successful armed
+    // take.  Used by the engine loop to drive FilePlay during transport
+    // playback.  Empty when nothing is linked yet.
+    juce::String                                 mLinkedClipPath;
+
+    // J-6 EQ unification (2026-05-03): mEQDisplay removed.
 
     // G-7: full processor + bus-active query for Page Preset save/load.
     VibeSynthProcessor*                          mFullProcessor { nullptr };

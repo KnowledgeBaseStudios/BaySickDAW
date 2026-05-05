@@ -80,9 +80,29 @@ public:
     // H-6d (2026-05-02): owned BaySickNAMIRProcessor for the BaySickNAM/IR
     // sub-tab.  Owning it here (instead of on the editor) lets the page
     // preset save/load capture its state automatically through
-    // BaySickVocalProcessor::getStateInformation.  Audio routing through
-    // it is wired in G-9.
+    // BaySickVocalProcessor::getStateInformation.  Audio routing wired in
+    // G-9 (2026-05-03): processBlock now calls mNamIrProc->processBlock
+    // after the vocal-chain rack.
     BaySickNAMIRProcessor& getNamIrProcessor() noexcept { return *mNamIrProc; }
+
+    // I-16 G-9 (2026-05-03): force-bypass realtime pitch correction.  Set to
+    // true during FilePlay so a recording with realtime pitch already baked
+    // into the wet file doesn't get corrected twice.  Engine loop in
+    // PluginProcessor toggles this per-block based on source-mux state.
+    // Independent of the user's pitch-correction toggle (which is the
+    // "want correction" intent).  Both must be true for correction to run:
+    // user-toggle ON AND not force-bypassed.
+    void setForcePitchBypass (bool yes) noexcept { mForcePitchBypass.store (yes, std::memory_order_release); }
+    bool isForcePitchBypassed() const noexcept   { return mForcePitchBypass.load (std::memory_order_acquire); }
+
+    // I-16 G-9 (2026-05-03): wet recording tap.  Plugged in by
+    // VibeSynthProcessor::startRecording when this strip is armed.
+    // Captures the post-realtime-pitch / pre-vocal-chain signal (Option C
+    // from G-9 spec).  Pass nullptr to clear (stopRecording).
+    void setWetRecorder (class AudioFileRecorder* recorder) noexcept
+    {
+        mWetRecorder.store (recorder, std::memory_order_release);
+    }
 
     // ── Sidechain primitive (engine-level, for future ducking stages) ────────
     void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept override
@@ -113,6 +133,11 @@ private:
     PitchCorrectorDSP mPitchCorrector;
 
     juce::AudioBuffer<float> mDryScratch;   // for global Mix dry/wet crossfade
+
+    // I-16 G-9 (2026-05-03): realtime-bypass + wet recorder hooks.  Atomics
+    // because audio thread reads / message thread writes.
+    std::atomic<bool> mForcePitchBypass { false };
+    std::atomic<class AudioFileRecorder*> mWetRecorder { nullptr };
 
     // H-6d (2026-05-02): owned NAM/IR processor (per-Vox-strip instance).
     // unique_ptr so the include only needs the forward declaration in

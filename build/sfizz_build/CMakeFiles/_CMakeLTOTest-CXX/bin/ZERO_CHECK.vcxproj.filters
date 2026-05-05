@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\jeffm\Documents\BaySickDAW\build\sfizz_build\CMakeFiles\_CMakeLTOTest-CXX\bin\CMakeFiles\25a9a7f1b944d902cd5b7529c35d9826\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{8C34FE7D-7119-3C57-8B83-2DAACDACC92E}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

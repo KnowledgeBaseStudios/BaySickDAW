@@ -62,18 +62,114 @@ void CompressorDSP::prepare (double sampleRate, int maxBlockSize)
     mScHpfR.reset();
     updateScHpfCoefs();
 
+    // I-4 (2026-05-02): prepare the CS Style tilt-EQ shelves at full stereo
+    // width.  ProcessorDuplicator handles both channels off the same coefs.
+    juce::dsp::ProcessSpec tiltSpec { sampleRate,
+                                       (juce::uint32) juce::jmax(1, maxBlockSize),
+                                       2 };
+    mCsLowShelf .prepare (tiltSpec);
+    mCsHighShelf.prepare (tiltSpec);
+    mCsLowShelf .reset();
+    mCsHighShelf.reset();
+    updateCsToneCoefs();
+
     reset();
 }
 
 // -----------------------------------------------------------------------------
 void CompressorDSP::setType (int t)
 {
-    const Type newType = static_cast<Type> (juce::jlimit (0, 2, t));
+    const Type newType = static_cast<Type> (juce::jlimit (0, 3, t));   // I-4: range 0..3 (CS = 3)
     if (newType == mType) return;
     mType = newType;
     // Reset opto memory on type switch so prior history doesn't bleed into
     // a different mode's release behavior.
     mOptoHistory = 0.0f;
+
+    // I-4 (2026-05-02): switching TO CS Style coerces ratio + release to
+    // CS-typical values (BOSS CS-3 reference: ~5:1 ratio, ~200ms release)
+    // and re-applies the Sustain macro.  Switching AWAY leaves the user's
+    // explicit ratio/release intact -- a user who came from CS Style will
+    // see whatever values the CS macro left in place, which is fine since
+    // they're standard params on the other Types.
+    if (mType == Type::CS)
+    {
+        // CS Style fixed character: ratio 5:1, release 200ms.  Attack stays
+        // user-driven (it's a CS Style face-plate knob).
+        if (ratio    != 5.0f)   { ratio    = 5.0f;   mRatioSmoothed.setTargetValue (ratio); }
+        if (releaseMs != 200.0f) { releaseMs = 200.0f; calcCoefs(); }
+        applyCsSustainMacro();
+        // Refresh tilt-EQ coefs in case csTone01 was edited while a non-CS
+        // Type was active (the coefs are only USED in process() under CS,
+        // but keeping them current makes the switch instantaneous).
+        updateCsToneCoefs();
+    }
+}
+
+// I-4 (2026-05-02): build a complementary low-shelf + high-shelf pair from
+// csTone01.  Pivot ~ 1 kHz; max ±6 dB at the extremes (csTone01 = 0 or 1).
+// At csTone01 = 0.5 both shelves are flat (gain = 1.0).
+void CompressorDSP::updateCsToneCoefs()
+{
+    if (mSampleRate <= 0.0) return;
+    const float toneSigned = juce::jlimit (-1.0f, 1.0f,
+                                            (csTone01 - 0.5f) * 2.0f);
+    constexpr float kMaxShelfDb  = 6.0f;
+    constexpr float kLowShelfHz  = 300.0f;
+    constexpr float kHighShelfHz = 3000.0f;
+
+    const float highShelfDb =  kMaxShelfDb * toneSigned;   // bright = positive
+    const float lowShelfDb  = -kMaxShelfDb * toneSigned;   // bright = bass cut
+
+    auto lowGain  = juce::Decibels::decibelsToGain (lowShelfDb,  -60.0f);
+    auto highGain = juce::Decibels::decibelsToGain (highShelfDb, -60.0f);
+
+    *mCsLowShelf .state = *juce::dsp::IIR::Coefficients<float>::makeLowShelf
+        ((double) mSampleRate, kLowShelfHz, 0.7071f, lowGain);
+    *mCsHighShelf.state = *juce::dsp::IIR::Coefficients<float>::makeHighShelf
+        ((double) mSampleRate, kHighShelfHz, 0.7071f, highGain);
+}
+
+void CompressorDSP::applyCsSustainMacro()
+{
+    // sustain01 = 0  -> threshold -6 dB,  makeup 0 dB
+    // sustain01 = 1  -> threshold -36 dB, makeup +12 dB
+    const float s01 = juce::jlimit (0.0f, 1.0f, csSustain01);
+    const float newThreshold = -6.0f - 30.0f * s01;
+    const float newMakeup    =  12.0f * s01;
+    if (threshold != newThreshold)
+    {
+        threshold = newThreshold;
+        mThresholdSmoothed.setTargetValue (threshold);
+    }
+    if (makeupDb != newMakeup)
+    {
+        makeupDb = newMakeup;
+        mMakeupDbSmoothed.setTargetValue (makeupDb);
+    }
+}
+
+void CompressorDSP::setCsSustain (float sustain01)
+{
+    sustain01 = juce::jlimit (0.0f, 1.0f, sustain01);
+    if (csSustain01 == sustain01) return;
+    csSustain01 = sustain01;
+    if (mType == Type::CS) applyCsSustainMacro();
+}
+
+void CompressorDSP::setCsTone (float tone01)
+{
+    tone01 = juce::jlimit (0.0f, 1.0f, tone01);
+    if (csTone01 == tone01) return;
+    csTone01 = tone01;
+    updateCsToneCoefs();
+}
+
+void CompressorDSP::setCsLevel (float dB)
+{
+    dB = juce::jlimit (-12.0f, 12.0f, dB);
+    if (csLevelDb == dB) return;
+    csLevelDb = dB;
 }
 
 // -----------------------------------------------------------------------------
@@ -93,6 +189,10 @@ void CompressorDSP::reset()
     mLAWritePos = 0;
     mScHpfL.reset();
     mScHpfR.reset();
+    // I-4: clear tilt-EQ filter state so a transport reset doesn't ring on
+    // resume.
+    mCsLowShelf .reset();
+    mCsHighShelf.reset();
 }
 
 // -----------------------------------------------------------------------------
@@ -434,6 +534,20 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
         if (outR) outR[i] = audioR + curMix * (wetR - audioR);
     }
 
+    // I-4 (2026-05-02): CS Style post-comp tilt EQ + output Level trim.
+    // Tilt EQ sits on the compressed signal (BOSS CS-3 Tone-pot semantic);
+    // Level trim runs LAST so it nets the user-visible "how loud is this
+    // pedal" knob.  Both stages active only when mType == CS.
+    if (mType == Type::CS && numChannels >= 1)
+    {
+        juce::dsp::AudioBlock<float> block (buffer);
+        juce::dsp::ProcessContextReplacing<float> ctx (block);
+        mCsLowShelf .process (ctx);
+        mCsHighShelf.process (ctx);
+        if (csLevelDb != 0.0f)
+            buffer.applyGain (juce::Decibels::decibelsToGain (csLevelDb, -60.0f));
+    }
+
     // A4 -- GR meter hold + decay (30 dB/sec). max-negative is the deepest GR
     // seen this block; keep the deepest value but let it decay back toward 0
     // so the meter both catches transient dips AND returns to rest visibly.
@@ -621,9 +735,15 @@ void CompressorDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("peakDetection", (int)peakDetection,  nullptr);
     state.setProperty ("detectionMs",   detectionMs,         nullptr);
     state.setProperty ("scSourceId",    sidechainSourceId,   nullptr);
-    // H-2 (2026-05-01) -- Type umbrella character mode (Modern/FET/Opto).
+    // H-2 (2026-05-01) -- Type umbrella character mode (Modern/FET/Opto/CS).
     // Default 0 = Modern preserves old presets bit-exact on load.
     state.setProperty ("type",          (int) mType,         nullptr);
+    // I-4 (2026-05-02) -- CS Style state.  Persisted regardless of active
+    // Type so a user who set up CS Style settings, switched to FET briefly,
+    // and saved doesn't lose their CS values on reload.
+    state.setProperty ("csSustain",     csSustain01,         nullptr);
+    state.setProperty ("csTone",        csTone01,            nullptr);
+    state.setProperty ("csLevel",       csLevelDb,           nullptr);
 
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     if (xml)
@@ -656,9 +776,15 @@ void CompressorDSP::setStateInformation (const void* data, int sz)
     detectionMs        = (float)(double)state.getProperty ("detectionMs",   10.0);
     sidechainSourceId  = (int)state.getProperty ("scSourceId",  -1);
     // H-2 -- Type umbrella; absent in old projects (default 0 = Modern).
-    mType = static_cast<Type> (juce::jlimit (0, 2,
+    // I-4: range bumped 0..2 -> 0..3 to admit CS Style.
+    mType = static_cast<Type> (juce::jlimit (0, 3,
         (int) state.getProperty ("type", 0)));
     mOptoHistory = 0.0f;
+    // I-4 -- CS Style state.  Defaults preserve neutral behaviour for old
+    // projects (csSustain=0 => light comp; csTone=0.5 => flat tilt EQ).
+    csSustain01 = (float)(double) state.getProperty ("csSustain", 0.0);
+    csTone01    = (float)(double) state.getProperty ("csTone",    0.5);
+    csLevelDb   = (float)(double) state.getProperty ("csLevel",   0.0);
 
     // Rebuild derived state
     if (mSampleRate > 0.0 && !mLookaheadL.empty())
@@ -668,6 +794,8 @@ void CompressorDSP::setStateInformation (const void* data, int sz)
 
     calcCoefs();
     updateScHpfCoefs();
+    // I-4: refresh CS tilt-EQ coefs from the just-loaded csTone01.
+    updateCsToneCoefs();
     // Snap smoothers to loaded values (no ramp on state load).
     mThresholdSmoothed.setCurrentAndTargetValue(threshold);
     mRatioSmoothed    .setCurrentAndTargetValue(ratio);
@@ -676,4 +804,6 @@ void CompressorDSP::setStateInformation (const void* data, int sz)
     // Clear filter state so coefficient jump doesn't click.
     mScHpfL.reset();
     mScHpfR.reset();
+    mCsLowShelf .reset();
+    mCsHighShelf.reset();
 }

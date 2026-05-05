@@ -14,6 +14,15 @@
 //   Opto   -- LA-2A-inspired: blended multi-stage release with program-
 //             dependent memory, soft-knee floor, subtle 2nd-harmonic warmth.
 // Existing presets default to Modern -- audio identical to pre-H-2 behavior.
+//
+// Phase I-4 (2026-05-02): CS Style Type added (4th option):
+//   CS     -- BOSS CS-Style sustain compressor.  Single Sustain macro knob
+//             that simultaneously lowers Threshold and increases makeup gain
+//             so one knob = "more sustain".  Active tilt EQ post-comp (single
+//             Tone knob: bipolar, center=flat, up=brighter, down=darker).
+//             Ratio + Release fixed internally to CS-typical values when this
+//             Type is active; user-facing knobs are Level / Tone / Attack /
+//             Sustain only.
 // -----------------------------------------------------------------------------
 class CompressorDSP : public DSPBase
 {
@@ -22,7 +31,8 @@ public:
     {
         Modern = 0,   // current algorithm, bit-exact preserved
         FET    = 1,   // 1176-style nonlinear envelope + GR saturation
-        Opto   = 2    // LA-2A-style multi-stage release + soft knee + cell warmth
+        Opto   = 2,   // LA-2A-style multi-stage release + soft knee + cell warmth
+        CS     = 3    // I-4: BOSS CS-Style sustain comp + tilt EQ post-comp
     };
 
     CompressorDSP();
@@ -95,8 +105,32 @@ public:
     void setSidechainBuffer (juce::AudioBuffer<float>* buf);
 
     // H-2 (2026-05-01): Type umbrella -- switches algorithm character.
-    // 0 = Modern (default, current algo), 1 = FET, 2 = Opto.
+    // 0 = Modern (default, current algo), 1 = FET, 2 = Opto, 3 = CS Style.
+    // Switching to CS Style coerces ratio + release to CS-typical fixed
+    // values (ratio 5:1, release 200ms) and applies the current csSustain
+    // macro to threshold + makeup.  Switching away leaves the user-facing
+    // params as-is (Modern/FET/Opto don't read csSustain or csTone).
     void setType (int t);
+
+    // I-4 (2026-05-02): CS Style "Sustain" macro.  Single user knob 0..1
+    // that maps inversely to threshold AND boosts makeup gain in lockstep.
+    //   sustain=0  -> threshold ~ -6 dB,  makeup +0 dB (light comp)
+    //   sustain=1  -> threshold ~ -36 dB, makeup +12 dB (heavy comp + sustain)
+    // Stored on the DSP so the panel surface stays one-knob; setSustain is
+    // applied immediately when mType == CS, ignored otherwise (Modern/FET/
+    // Opto continue to use the user's manual threshold + gain settings).
+    void setCsSustain (float sustain01);
+
+    // I-4 (2026-05-02): CS Style post-comp tilt EQ.  0..1, center 0.5 = flat.
+    // < 0.5 = darker (low-shelf boost + high-shelf cut); > 0.5 = brighter
+    // (low-shelf cut + high-shelf boost).  Applied AFTER the compression
+    // stage, only when mType == CS.
+    void setCsTone (float tone01);
+
+    // I-4 (2026-05-02): CS Style output Level trim (dB), applied AFTER the
+    // tilt EQ.  Range -12..+12.  Independent of the Sustain macro's auto-
+    // makeup so the user can level-trim without unwinding the macro.
+    void setCsLevel (float dB);
 
     // Public parameter values (read-only externally; use setters to change)
     Type  mType      { Type::Modern };
@@ -117,7 +151,26 @@ public:
     float detectionMs  { 10.0f };   // C4: RMS window in ms
     int   sidechainSourceId { -1 };  // scaffolding: -1 = internal detection path
 
+    // I-4 (2026-05-02): CS Style state.  csSustain01 [0..1] is the macro
+    // knob value; csTone01 [0..1] is the post-comp tilt EQ position
+    // (0.5 = flat); csLevelDb is the user's output trim added AFTER the
+    // tilt EQ (range +/-12 dB; independent of macro makeup so the user can
+    // shape level without disturbing the Sustain macro's auto-makeup).
+    // These are STORED regardless of mType so a user who dialed in CS Style
+    // settings, switched to FET briefly, and switched back doesn't lose
+    // their values.  Applied in process() only when mType == CS.
+    float csSustain01 { 0.0f };
+    float csTone01    { 0.5f };
+    float csLevelDb   { 0.0f };
+
 private:
+    // I-4: build tilt-EQ coefficients from csTone01 + sample rate.  Called
+    // from setCsTone, setType (when switching to CS), and prepare.
+    void updateCsToneCoefs();
+
+    // I-4: apply csSustain01 macro to threshold + makeup.  Called from
+    // setCsSustain when mType == CS (and from setType when switching TO CS).
+    void applyCsSustainMacro();
     // Recalculates attack/release/RMS/TCR coefficients from mSampleRate + stored ms values
     void calcCoefs();
     // Rebuilds sidechain HPF biquad coefficients from sidechainHPF + mSampleRate
@@ -162,6 +215,15 @@ private:
 
     // C2 -- Sidechain HPF biquad state (per channel). Simple TPT highpass.
     juce::dsp::StateVariableTPTFilter<float> mScHpfL, mScHpfR;
+
+    // I-4: CS Style post-comp tilt EQ.  Two stereo IIR shelves whose gains
+    // move in opposite directions as csTone01 sweeps from 0.5 (flat) toward
+    // 0 (darker) or 1 (brighter).  Applied only when mType == CS.
+    using TiltShelf = juce::dsp::ProcessorDuplicator<
+                          juce::dsp::IIR::Filter<float>,
+                          juce::dsp::IIR::Coefficients<float>>;
+    TiltShelf mCsLowShelf;
+    TiltShelf mCsHighShelf;
 
     // 2a -- Look-ahead delay lines (main audio path only; detector is un-delayed)
     std::vector<float> mLookaheadL, mLookaheadR;

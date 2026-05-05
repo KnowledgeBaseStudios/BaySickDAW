@@ -634,6 +634,34 @@ namespace VKnobAutomation
     extern std::function<bool(const juce::String& paramId)> sShouldOfferModulate;
     extern std::function<void(const juce::String& paramId)> sOnModulateEnvelope;
 
+    // I-3c (2026-05-02): MIDI Learn right-click items.  Wired by
+    // StandaloneEditor's startup; null on plugin builds (legacy VST target).
+    // sIsMidiMapped: returns true if `paramId` already has a mapping (used
+    //   to gate the "MIDI Forget" menu item).
+    // sIsMidiLearningTarget: returns true if `paramId` is the current learn
+    //   target (VKnob uses this to draw the dashed-yellow learn outline).
+    // sDescribeMidiMapping: returns short human-readable mapping summary
+    //   ("USB Keyboard CC#74 ch1") for the "MIDI Forget" item label.
+    // sOnMidiLearn / sOnMidiForget / sOnMidiSaveAsDefault: action triggers.
+    // sHasAnyMidiMappings: gates the "Save as global default" item visibility.
+    extern std::function<bool(const juce::String& paramId)>          sIsMidiMapped;
+    extern std::function<bool(const juce::String& paramId)>          sIsMidiLearningTarget;
+    extern std::function<juce::String(const juce::String& paramId)>  sDescribeMidiMapping;
+    extern std::function<void(const juce::String& paramId)>          sOnMidiLearn;
+    extern std::function<void(const juce::String& paramId)>          sOnMidiForget;
+    extern std::function<void()>                                     sOnMidiSaveAsDefault;
+    extern std::function<bool()>                                     sHasAnyMidiMappings;
+
+    // Builds the MIDI Learn submenu items into `m`.  Shared between VKnob
+    // and GlobalAutoRightClick; keeps the menu structure in one place.
+    // Returns the highest reserved menu id (caller picks ids above this).
+    int  appendMidiLearnMenuItems (juce::PopupMenu& m, const juce::String& paramId, int firstId);
+
+    // Dispatch the click result for a MIDI Learn submenu item.  Returns
+    // true if the result code was a MIDI Learn item; false otherwise so
+    // callers can fall through to their own handlers.
+    bool handleMidiLearnMenuResult (int result, int firstId, const juce::String& paramId);
+
     // Shared helper: prompt the user for a text value, parse it back through
     // the slider's `getValueFromText()` so units/scaling match the drag popup,
     // and `setValue(..., sendNotification)` (which auto-clamps to range).
@@ -681,6 +709,12 @@ public:
         if (offerModulate)
             m.addItem(3, "Modulate envelope...");
 
+        // I-3c (2026-05-02): MIDI Learn items shared between VKnob's own
+        // mouseDown and this global handler.  IDs start at 100 to keep the
+        // 1-99 range free for automation items above.
+        constexpr int kMidiFirstId = 100;
+        VKnobAutomation::appendMidiLearnMenuItems (m, id, kMidiFirstId);
+
         m.showMenuAsync(juce::PopupMenu::Options{}, [id, safeSlider](int result)
         {
             if (result == 1 && VKnobAutomation::sOnAutomate)
@@ -693,6 +727,10 @@ public:
             else if (result == 3 && VKnobAutomation::sOnModulateEnvelope)
             {
                 VKnobAutomation::sOnModulateEnvelope(id);
+            }
+            else
+            {
+                VKnobAutomation::handleMidiLearnMenuResult (result, kMidiFirstId, id);
             }
         });
     }
@@ -713,6 +751,10 @@ public:
     ~VKnob() override;
     void resized() override;
     void mouseDown(const juce::MouseEvent& e) override;
+    // I-3c (2026-05-02): draw dashed-yellow outline when this knob is the
+    // current MIDI Learn target.  Called after children paint so the outline
+    // sits on top of the slider rendering.
+    void paintOverChildren(juce::Graphics& g) override;
 
     // Soft lockout: knob visually greys out and ignores value-changing input,
     // but tooltips on hover (both on the body and the label) still work so users

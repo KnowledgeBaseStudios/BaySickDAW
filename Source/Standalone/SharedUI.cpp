@@ -1595,6 +1595,73 @@ namespace VKnobAutomation
     std::function<bool(const juce::String& paramId)>                             sShouldOfferModulate;
     std::function<void(const juce::String& paramId)>                             sOnModulateEnvelope;
 
+    // I-3c (2026-05-02): MIDI Learn callbacks.  Wired by StandaloneEditor.
+    std::function<bool(const juce::String& paramId)>                             sIsMidiMapped;
+    std::function<bool(const juce::String& paramId)>                             sIsMidiLearningTarget;
+    std::function<juce::String(const juce::String& paramId)>                     sDescribeMidiMapping;
+    std::function<void(const juce::String& paramId)>                             sOnMidiLearn;
+    std::function<void(const juce::String& paramId)>                             sOnMidiForget;
+    std::function<void()>                                                        sOnMidiSaveAsDefault;
+    std::function<bool()>                                                        sHasAnyMidiMappings;
+
+    int appendMidiLearnMenuItems (juce::PopupMenu& m, const juce::String& paramId, int firstId)
+    {
+        // Skip the section entirely on plugin builds where StandaloneEditor
+        // hasn't wired any of the MIDI Learn callbacks.
+        if (! sOnMidiLearn) return firstId - 1;
+        if (paramId.isEmpty()) return firstId - 1;
+
+        m.addSeparator();
+
+        // "MIDI Learn" -- greyed out when no MIDI input devices are detected
+        // (locked spec call 2026-05-02: hot-plug not supported, user must
+        // plug a device + reopen the menu).  Re-learn replaces an existing
+        // mapping when devices ARE present.
+        const bool hasDevices = ! juce::MidiInput::getAvailableDevices().isEmpty();
+        const juce::String learnLabel = hasDevices
+            ? juce::String ("MIDI Learn")
+            : juce::String ("MIDI Learn (no MIDI input devices)");
+        m.addItem (firstId, learnLabel, /*enabled*/ hasDevices);
+
+        // "MIDI Forget: <summary>" -- only if there's an existing mapping.
+        const bool isMapped = sIsMidiMapped && sIsMidiMapped (paramId);
+        if (isMapped)
+        {
+            juce::String summary;
+            if (sDescribeMidiMapping) summary = sDescribeMidiMapping (paramId);
+            const juce::String label = summary.isNotEmpty()
+                ? juce::String ("MIDI Forget: ") + summary
+                : juce::String ("MIDI Forget");
+            m.addItem (firstId + 1, label);
+        }
+
+        // "Save MIDI mappings as global default" -- only if registry has any.
+        if (sHasAnyMidiMappings && sHasAnyMidiMappings())
+            m.addItem (firstId + 2, "Save MIDI mappings as global default");
+
+        return firstId + 2;
+    }
+
+    bool handleMidiLearnMenuResult (int result, int firstId, const juce::String& paramId)
+    {
+        if (result == firstId)
+        {
+            if (sOnMidiLearn) sOnMidiLearn (paramId);
+            return true;
+        }
+        if (result == firstId + 1)
+        {
+            if (sOnMidiForget) sOnMidiForget (paramId);
+            return true;
+        }
+        if (result == firstId + 2)
+        {
+            if (sOnMidiSaveAsDefault) sOnMidiSaveAsDefault();
+            return true;
+        }
+        return false;
+    }
+
     void promptSliderValueEntry(juce::Slider& slider, const juce::String& displayId)
     {
         // Pre-fill with the slider's current display text (matches drag popup).
@@ -1703,16 +1770,38 @@ void VKnob::mouseDown(const juce::MouseEvent& e)
         juce::PopupMenu m;
         m.addItem(1, "Automate: " + menuLabel);
         m.addItem(2, "Type in value...");
+
+        // I-3c (2026-05-02): MIDI Learn / Forget / Save-as-default.  IDs
+        // start at 100 to leave room for future automation items (1-99).
+        constexpr int kMidiFirstId = 100;
+        const int midiHighest = VKnobAutomation::appendMidiLearnMenuItems (m, id, kMidiFirstId);
+        juce::ignoreUnused (midiHighest);
+
         m.showMenuAsync(juce::PopupMenu::Options{}, [id, safeSlider](int result)
         {
             if (result == 1 && VKnobAutomation::sOnAutomate)
                 VKnobAutomation::sOnAutomate(id);
             else if (result == 2)
+            {
                 if (auto* s = safeSlider.getComponent())
                     VKnobAutomation::promptSliderValueEntry(*s, id);
+            }
+            else if (VKnobAutomation::handleMidiLearnMenuResult (result, kMidiFirstId, id))
+            {
+                // Handled by the MIDI Learn dispatcher.
+            }
         });
     }
 }
+void VKnob::paintOverChildren(juce::Graphics&)
+{
+    // I-3c (2026-05-02): The dashed-yellow learn outline is now drawn by a
+    // generic MidiLearnOutlineOverlay parented on top of the active learn
+    // target, so it works for plain juce::Slider controls (mixer faders) too,
+    // not just VKnobs.  See MidiLearnUI::beginLearn.  Method retained as a
+    // no-op so the override declared in the header still has a definition.
+}
+
 void VKnob::sliderDragStarted(juce::Slider* s)
 {
     mValueBeforeDrag = (float)s->getValue();

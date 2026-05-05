@@ -1,4 +1,7 @@
 #include "BaySickPedalsProcessor.h"
+#include "BaySickPedalsEditor.h"
+#include "../DSP/CompressorDSP.h"   // for I-15: Compressor in pedal slot defaults to Type::CS
+#include "../DSP/OverdriveDSP.h"    // for I-15: Overdrive in pedal slot defaults to Type::Pedal
 
 namespace
 {
@@ -23,12 +26,14 @@ BaySickPedalsProcessor::BaySickPedalsProcessor()
                                 .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "BaySickPedalsState", createLayout())
 {
-    // Defaults: slot 0 = Tuner, slot 7 = Graphic EQ (option 1 of 3).  Both
-    // are placeholder enum values until I-13 / I-12 ship the real DSPs --
-    // EffectRack::createEffect returns nullptr for them and the audio path
-    // simply skips empty slots.
-    mSlots[kSlotTuner].type = EffectType::TunerStyle;
-    mSlots[kSlotEQ   ].type = EffectType::GraphicEQStyle;
+    // Defaults: slot 0 = Tuner, slot 7 = Graphic EQ.  Construct the DSPs into
+    // `active` directly (pre-audio-thread, no swap dance needed) so the editor
+    // sees real DSPs on first paint -- otherwise tiles would render empty until
+    // the audio thread first fires.
+    mSlots[kSlotTuner].type   = EffectType::TunerStyle;
+    mSlots[kSlotTuner].active = EffectRack::createEffect (EffectType::TunerStyle);
+    mSlots[kSlotEQ   ].type   = EffectType::GraphicEQStyle;
+    mSlots[kSlotEQ   ].active = EffectRack::createEffect (EffectType::GraphicEQStyle);
     // Slots 1-6 default to None (empty).
 }
 
@@ -69,6 +74,9 @@ bool BaySickPedalsProcessor::isEffectAllowedInSlot (int slot,
             || type == EffectType::FurmanEQStyle;
 
     // Slots 1-6: any type EXCEPT the slot-locked types (Tuner / 3 EQs).
+    // I-4 (2026-05-02): EffectType::OverdriveStyle was removed -- Overdrive
+    // pedal mode is now Type::Pedal on the existing OverdriveDSP, so the
+    // slot picker uses EffectType::Overdrive (allowed-by-default below).
     switch (type)
     {
         case EffectType::TunerStyle:
@@ -133,6 +141,25 @@ bool BaySickPedalsProcessor::loadEffect (int slot, EffectType type)
     if (! isEffectAllowedInSlot (slot, type))  return false;
 
     auto effect = EffectRack::createEffect (type);
+
+    // I-15 (2026-05-03): Compressor loaded into a pedal slot defaults to
+    // Type::CS (CS-Style sustain pedal layout), matching the locked Phase I
+    // spec.  In the FX rack the Compressor still defaults to Type::Modern.
+    if (effect && type == EffectType::Compressor)
+    {
+        if (auto* comp = dynamic_cast<CompressorDSP*> (effect.get()))
+            comp->setType ((int) CompressorDSP::Type::CS);
+    }
+
+    // I-15 (2026-05-03): Overdrive loaded into a pedal slot defaults to
+    // Type::Pedal (OD Style pedal panel: HPF split + dual cascaded tanh).
+    // FX rack still defaults to Type::Rack (full Overdrive panel).
+    if (effect && type == EffectType::Overdrive)
+    {
+        if (auto* od = dynamic_cast<OverdriveDSP*> (effect.get()))
+            od->setType ((int) OverdriveDSP::Type::Pedal);
+    }
+
     if (effect && mSampleRate > 0.0)
         effect->prepare (mSampleRate, mMaxBlock);
 
@@ -247,35 +274,11 @@ void BaySickPedalsProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Editor stub -- I-15 ships the real BaySickPedals editor.
+// I-15 (2026-05-03): real BaySickPedalsEditor (4x2 pedal-rack UI).
 // ─────────────────────────────────────────────────────────────────────────────
-namespace
-{
-    class BaySickPedalsEditorStub : public juce::AudioProcessorEditor
-    {
-    public:
-        explicit BaySickPedalsEditorStub (BaySickPedalsProcessor& p)
-            : juce::AudioProcessorEditor (&p)
-        {
-            setSize (600, 360);
-        }
-        void paint (juce::Graphics& g) override
-        {
-            g.fillAll (juce::Colour (0xff181818));
-            g.setColour (juce::Colour (0xffc0c0c0));
-            g.setFont (juce::Font (16.0f, juce::Font::plain));
-            g.drawText (
-                "BaySickPedals processor (rack UI lands in I-15)",
-                getLocalBounds(),
-                juce::Justification::centred,
-                true);
-        }
-    };
-}
-
 juce::AudioProcessorEditor* BaySickPedalsProcessor::createEditor()
 {
-    return new BaySickPedalsEditorStub (*this);
+    return new BaySickPedalsEditor (*this);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

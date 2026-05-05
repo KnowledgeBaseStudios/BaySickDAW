@@ -1,7 +1,9 @@
 ﻿#include "PluginProcessor.h"
 // 2026-04-25: BaySickDrumsProcessor include removed — class deleted.
 #include "BaySickSynth/BaySickSynthProcessor.h"   // D1.4-fix (c): drum transpose compensation
+#include "BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-5: singleton sfizz drum-kit engine
 #include "VibePlayer/VibePlayerProcessor.h"       // D1.4-fix (c): drum tune compensation
+#include "BaySickVocal/BaySickVocalProcessor.h"   // I-16 G-9: wet recorder hand-off
 #include "DSP/EngineSidechainHelper.h"            // C.4 Phase 2.2: ISidechainEngine for engine-level SC push
 #ifdef VIBESYNTH_VST
   #include "PluginEditor.h"
@@ -106,10 +108,12 @@ VibeSynthProcessor::createParameterLayout()
 VibeSynthProcessor::VibeSynthProcessor()
     : AudioProcessor(BusesProperties()
         // R3 (2026-04-23): declare an input bus so JUCE feeds the audio
-        // device's input channels into the processBlock buffer.  Capped at
-        // 16 channels (discreteChannels(16)) - covers most desktop ASIO
-        // interfaces without forcing every machine to allocate big buffers.
-        .withInput ("Input",  juce::AudioChannelSet::discreteChannels(16), true)
+        // device's input channels into the processBlock buffer.
+        // J-A2 (2026-05-04): bumped 16 -> 64 to cover Tascam Model 24 (22 in),
+        // Behringer X32 (32 in), Yamaha O1V (24 in), and other large interfaces.
+        // JUCE clamps to the device's actual input count, so a 2-input USB
+        // headset still gets 2 channels — only the upper bound moved.
+        .withInput ("Input",  juce::AudioChannelSet::discreteChannels(64), true)
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "BaySickDAWState", createParameterLayout())
 {
@@ -174,6 +178,8 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     mBassEngineScratch .setSize(2, samplesPerBlock, false, true, false);
     mAudioRowScratch   .setSize(2, samplesPerBlock, false, true, false);
     mAudioClipScratch  .setSize(2, samplesPerBlock, false, true, false);
+    // J-7a (2026-05-03): BaySickRustyDrums singleton scratch.
+    mRustyDrumsScratch .setSize(2, samplesPerBlock, false, true, false);
     // R3 (2026-04-23): pre-allocate live-input scratch + snapshot.  Snapshot
     // gets resized at first non-zero numInputs in processBlock; here we just
     // guarantee a safe initial state.  Slot scratch is always stereo.
@@ -211,6 +217,12 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         juce::SpinLock::ScopedLockType lk(mInstEngineLock);
         for (int i = 0; i < kMaxInstPages; ++i)
             if (mInstEngines[i]) mInstEngines[i]->prepareToPlay(sampleRate, samplesPerBlock);
+    }
+    // J-7a (2026-05-03): re-prepare the BaySickRustyDrums singleton on
+    // host SR / block-size change.
+    {
+        juce::SpinLock::ScopedLockType lk(mRustyDrumsEngineLock);
+        if (mRustyDrumsEngine) mRustyDrumsEngine->prepareToPlay(sampleRate, samplesPerBlock);
     }
     mVibeGraph.prepare(sampleRate, samplesPerBlock);
 
@@ -327,6 +339,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
             else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
                 instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
+            else if (off.target == kRustyPRTarget)
+                mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
         }
         mPRPendingOffs.clear();
         // Belt-and-suspenders: fire CC 123 (All Notes Off) on every engine
@@ -338,6 +352,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         for (auto& b : clipPageMidi)  b.addEvent(juce::MidiMessage::allNotesOff(1), 0);   // G-3
         for (auto& b : voxPageMidi)   b.addEvent(juce::MidiMessage::allNotesOff(1), 0);   // G-4
         for (auto& b : instPageMidi)  b.addEvent(juce::MidiMessage::allNotesOff(1), 0);   // G-4
+        mRustyDrumsMidi.addEvent(juce::MidiMessage::allNotesOff(1), 0);                   // J-7b
     }
 
     // ── Piano roll note scheduling ────────────────────────────────────────
@@ -361,6 +376,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                         voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
                     else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
                         instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
+                    else if (off.target == kRustyPRTarget)
+                        mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
                 }
                 mPRPendingOffs.clear();
             }
@@ -397,6 +414,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                 voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
                             else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
                                 instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
+                            else if (off.target == kRustyPRTarget)
+                                mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
                             continue;
                         }
                         if (off.beatOff < beatEnd)
@@ -415,6 +434,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                 voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
                             else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
                                 instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
+                            else if (off.target == kRustyPRTarget)
+                                mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
                         }
                         else
                         {
@@ -553,6 +574,16 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                         }
                     }
 
+                    // J-7b (2026-05-03): BaySickRustyDrums singleton roll.
+                    // Same fast-path bypass + try-lock pattern as the engine arrays.
+                    if (mRustyDrumsActive.load(std::memory_order_acquire))
+                    {
+                        juce::SpinLock::ScopedTryLockType rlk(mRustyDrumsEngineLock);
+                        if (rlk.isLocked() && mRustyDrumsEngine)
+                            scheduleRoll(sPat.baySickRustyDrumsRoll.notes,
+                                         mRustyDrumsMidi, kRustyPRTarget);
+                    }
+
                     // 2026-04-25: legacy sPat.drumRoll dispatch removed —
                     // notes are now in sPat.drumRolls[di] and dispatched
                     // through D1.2 per-drum loop above.
@@ -595,6 +626,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                         voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
                     else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
                         instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
+                    else if (off.target == kRustyPRTarget)
+                        mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
                 }
                 mPRPendingOffs.clear();
             }
@@ -621,6 +654,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                             voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
                         else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
                             instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
+                        else if (off.target == kRustyPRTarget)
+                            mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
                         continue;
                     }
                     if (off.beatOff < beatEnd)
@@ -639,6 +674,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                             voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
                         else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
                             instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
+                        else if (off.target == kRustyPRTarget)
+                            mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
                     }
                     else
                     {
@@ -801,6 +838,32 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                             emitPianoNoteOn (instPageMidi[ii], note, smp);
                             mPRPendingOffs.push_back(
                                 { absStart + note.durationBeats, note.midiNote, kInstPRTarget + ii });
+                        }
+                    }
+                }
+            }
+
+            // J-7b (2026-05-03): BaySickRustyDrums singleton roll — pattern mode.
+            // Mirrors the per-engine loops above; bypass via mRustyDrumsActive.
+            if (mRustyDrumsActive.load(std::memory_order_acquire))
+            {
+                juce::SpinLock::ScopedTryLockType rlk(mRustyDrumsEngineLock);
+                if (rlk.isLocked() && mRustyDrumsEngine)
+                {
+                    for (const auto& note : pat.baySickRustyDrumsRoll.notes)
+                    {
+                        if (note.muted) continue;
+                        double baseLoop = std::floor(beatStart / patLen) * patLen;
+                        double absStart = baseLoop + note.startBeat;
+                        if (absStart < beatStart - kWrapSlop) absStart += patLen;
+                        if (absStart >= patLen && beatEnd > patLen) continue;
+                        if (absStart >= windowStart && absStart < beatEnd)
+                        {
+                            int smp = juce::jlimit(0, numSamples - 1,
+                                                   (int)std::max(0.0, (absStart - beatStart) / bs));
+                            emitPianoNoteOn (mRustyDrumsMidi, note, smp);
+                            mPRPendingOffs.push_back(
+                                { absStart + note.durationBeats, note.midiNote, kRustyPRTarget });
                         }
                     }
                 }
@@ -994,6 +1057,27 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // I-3b (2026-05-02): MIDI Learn dispatch.  Drain device-tagged events
+    // pushed by StandaloneApp::handleIncomingMidiMessage.  For each event:
+    //   1. If a learn capture is active, route to the registry's capture
+    //      handler (which builds a Mapping from the event and commits it).
+    //      If captured, the event is suppressed from regular dispatch -- a
+    //      learn click that landed on a CC shouldn't ALSO move whatever was
+    //      previously mapped to that CC.
+    //   2. Otherwise, dispatch through the registry's mapping table; matching
+    //      mappings call setValueNotifyingHost on their target APVTS params.
+    //
+    // Block-rate per locked spec (Jeff 2026-05-02): events apply at the audio
+    // block boundary, not sample-accurate within the block.  Stair-step
+    // automation behaviour matches every other DAW's MIDI Learn.
+    mMidiLearnQueue.drainAndProcess (
+        [this] (const juce::String& deviceName, const juce::MidiMessage& msg)
+        {
+            if (mMidiLearn.tryCaptureLearn (deviceName, msg))
+                return;   // event was a learn-capture; don't double-dispatch
+            mMidiLearn.dispatchEvent (apvts, deviceName, msg);
+        });
+
     // ── D3: choke-group dispatch ──────────────────────────────────────────
     // Scan synth note-ons + audio clip starts in this block; for each fire
     // whose source has chokeGroup G > 0, inject allNotesOff into peer synth
@@ -1126,6 +1210,42 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // ── J-7b (2026-05-04): Render the BaySickRustyDrums singleton ──────────
+    // Single sfizz instance renders one stereo pair per kit piece into
+    // its multi-out scratch via the wrapper SFZ (output=N injected at
+    // <master>/<group> level in every piece file's text).  We fan each
+    // strip's stereo pair through its dedicated Rusty InsertNode so
+    // faders / mute / solo / EQ / FX rack / sends operate per-piece.
+    // Rusty InsertNodes route to kRustyDrumsBus by default.
+    if (mRustyDrumsActive.load(std::memory_order_acquire))
+    {
+        juce::SpinLock::ScopedTryLockType lk(mRustyDrumsEngineLock);
+        if (lk.isLocked() && mRustyDrumsEngine)
+        {
+            mRustyDrumsEngine->processStrips(numSamples, mRustyDrumsMidi);
+            const int stripCount = mRustyDrumsEngine->getStripCount();
+            mRustyDrumsScratch.setSize(numRenderCh, numSamples, false, false, true);
+            for (int s = 0; s < stripCount; ++s)
+            {
+                mRustyDrumsScratch.clear();
+                auto stripBuf = mRustyDrumsEngine->getStripBuffer(s, numSamples);
+                if (stripBuf.getNumChannels() >= 2 && numRenderCh >= 2)
+                {
+                    mRustyDrumsScratch.copyFrom(0, 0, stripBuf, 0, 0, numSamples);
+                    mRustyDrumsScratch.copyFrom(1, 0, stripBuf, 1, 0, numSamples);
+                }
+                else if (stripBuf.getNumChannels() >= 1)
+                {
+                    mRustyDrumsScratch.copyFrom(0, 0, stripBuf, 0, 0, numSamples);
+                }
+                mVibeGraph.processInsert(VibeGraph::InsertKind::Rusty, s,
+                                          mRustyDrumsScratch, bpmForInserts, anySolo);
+                routeInsertOutput(MixerChannelIds::rustyInsert(s),
+                                   mRustyDrumsScratch, numSamples);
+            }
+        }
+    }
+
     // ── G-3 (2026-04-28): Render per-clip-page engines ──────────────────────
     // Same shape as the drum-engine loop above, but routes the engine output
     // through the existing Audio InsertNode for the bound row (clip-page-index
@@ -1171,9 +1291,50 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── G-4 (2026-04-28): Render per-Vox / per-Inst-page engines ────────────
-    // Same shape as the Clip loop above; routes engine output through the
-    // existing Vox / Inst InsertNode.  Fast-path bypass via mAnyXPageActive.
+    // ── I-16 G-9 (2026-05-03): pre-scan clip players for FilePlay ───────────
+    // Determine which Vox / Inst pages have an active linked clip overlapping
+    // this block.  Pages flagged here are skipped by the engine loop below
+    // (the audio-clip rendering loop will drive their engines in the FilePlay
+    // branch instead, with realtime-pitch force-bypassed for single-pass).
+    mVoxFilePlayActive .fill (false);
+    mInstFilePlayActive.fill (false);
+    if (mSongMode.load (std::memory_order_relaxed) && pos.getIsPlaying() && mPatternManager)
+    {
+        const double secPerBeatPS = 60.0 / juce::jmax (20.0, pos.getBpm().orFallback (120.0));
+        const double beatStartPS  = pos.getPpqPosition().orFallback (0.0);
+        const int64  blockStart   = (int64)(beatStartPS * secPerBeatPS * mSampleRate);
+        const int64  blockEnd     = blockStart + numSamples;
+
+        juce::SpinLock::ScopedTryLockType tryLk (mAudioClipLock);
+        if (tryLk.isLocked())
+        {
+            for (auto& p : mAudioClipPlayers)
+            {
+                if (p.routeChannel == 0 || p.streamer == nullptr) continue;
+                const int64 cs = (int64)(p.clipStartBeat * secPerBeatPS * mSampleRate);
+                const int64 ce = (int64)(p.clipEndBeat   * secPerBeatPS * mSampleRate);
+                if (blockEnd <= cs || blockStart >= ce) continue;
+
+                const int chId = p.routeChannel;
+                if (chId >= MixerChannelIds::kVoxBase
+                    && chId <  MixerChannelIds::kVoxBase + kMaxVoxPages)
+                {
+                    mVoxFilePlayActive[chId - MixerChannelIds::kVoxBase] = true;
+                }
+                else if (chId >= MixerChannelIds::kInstBase
+                         && chId <  MixerChannelIds::kInstBase + kMaxInstPages)
+                {
+                    mInstFilePlayActive[chId - MixerChannelIds::kInstBase] = true;
+                }
+            }
+        }
+    }
+
+    // ── G-4 (2026-04-28) / I-16 G-9 (2026-05-03): per-Vox / per-Inst engines.
+    // Source mux: LiveASIO (armed) / Silence (else).  FilePlay-active pages
+    // are skipped; the audio-clip loop below drives their engine with the
+    // streamed clip samples + setForcePitchBypass(true).  Fast-path bypass
+    // via mAnyXPageActive.
     if (mAnyVoxPageActive.load(std::memory_order_acquire))
     {
         juce::SpinLock::ScopedTryLockType lk(mVoxEngineLock);
@@ -1182,14 +1343,77 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             for (int vi = 0; vi < kMaxVoxPages; ++vi)
             {
                 if (!mVoxEngines[vi]) continue;
+                if (mVoxFilePlayActive[vi]) continue;   // clip loop will drive
+
                 mVoxEngineScratch.setSize(numRenderCh, numSamples, false, false, true);
                 mVoxEngineScratch.clear();
+
+                // I-16 G-9: LiveASIO source mux -- if this Vox strip is armed,
+                // copy the selected ASIO input channel into the engine scratch
+                // (mono -> dual-mono).  Else silence (engine generates from MIDI
+                // or sits silent if it has no internal source).
+                const juce::String voxPrefix = "mixer_vox_" + juce::String (vi);
+                const auto* armP = apvts.getRawParameterValue (voxPrefix + "_arm");
+                const auto* idxP = apvts.getRawParameterValue (voxPrefix + "_inputChannelIdx");
+                const auto* stereoP = apvts.getRawParameterValue (voxPrefix + "_inputChannelStereo");
+                const int   chIdx = (idxP != nullptr) ? (int) idxP->load() : -1;
+                const bool  isStereo = (stereoP != nullptr) && stereoP->load() > 0.5f;
+                const bool  armed = (armP != nullptr) && armP->load() > 0.5f
+                                 && chIdx >= 0
+                                 && chIdx < mLiveInputSnapshot.getNumChannels();
+                if (armed)
+                {
+                    const int n = numSamples;
+                    // I-16 G-9: dry recorder tap (RAW pre-chain mono ASIO).
+                    // Captured here so the recorded file is the unprocessed
+                    // DI -- chain runs ONCE on the dry source whether live
+                    // or playing back (single-pass guarantee).
+                    const int chId = MixerChannelIds::voxInsert (vi);
+                    for (auto& sr : mStripRecorders)
+                    {
+                        if (sr.channelId == chId && sr.recorder
+                            && sr.recorder->isRecording())
+                        {
+                            juce::AudioBuffer<float> monoView (
+                                mLiveInputSnapshot.getArrayOfWritePointers() + chIdx,
+                                1, n);
+                            sr.recorder->writeBlock (monoView);
+                            break;
+                        }
+                    }
+
+                    // B2 (2026-05-04): stereo input pair -> copy chIdx into L,
+                    // chIdx+1 into R.  Falls back to dual-mono if the right
+                    // channel is out of range (e.g. last channel selected as
+                    // a pair on a device with one more channel than expected).
+                    const int rightCh = (isStereo && chIdx + 1 < mLiveInputSnapshot.getNumChannels())
+                                          ? (chIdx + 1) : chIdx;
+                    if (mVoxEngineScratch.getNumChannels() > 0)
+                        mVoxEngineScratch.copyFrom (0, 0, mLiveInputSnapshot, chIdx, 0, n);
+                    if (mVoxEngineScratch.getNumChannels() > 1)
+                        mVoxEngineScratch.copyFrom (1, 0, mLiveInputSnapshot, rightCh, 0, n);
+                }
+
+                // I-16 G-9: clear pitch force-bypass for non-FilePlay sources.
+                if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (mVoxEngines[vi]))
+                    vp->setForcePitchBypass (false);
+
                 pushScToEngine(mVoxEngines[vi], MixerChannelIds::voxInsert(vi));
                 mVoxEngines[vi]->processBlock(mVoxEngineScratch, voxPageMidi[vi]);
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Vox, vi,
                                           mVoxEngineScratch, bpmForInserts, anySolo);
-                routeInsertOutput(MixerChannelIds::voxInsert(vi),
-                                   mVoxEngineScratch, numSamples);
+                // I-16 G-9: when armed, gate routing on _listen (monitor btn).
+                // Unarmed pages always route (engine may produce its own audio
+                // from MIDI input).
+                bool routeOutput = true;
+                if (armed)
+                {
+                    const auto* listenP = apvts.getRawParameterValue (voxPrefix + "_listen");
+                    routeOutput = (listenP != nullptr) && listenP->load() > 0.5f;
+                }
+                if (routeOutput)
+                    routeInsertOutput(MixerChannelIds::voxInsert(vi),
+                                       mVoxEngineScratch, numSamples);
             }
         }
     }
@@ -1201,14 +1425,64 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             for (int ii = 0; ii < kMaxInstPages; ++ii)
             {
                 if (!mInstEngines[ii]) continue;
+                if (mInstFilePlayActive[ii]) continue;   // clip loop will drive
+
                 mInstEngineScratch.setSize(numRenderCh, numSamples, false, false, true);
                 mInstEngineScratch.clear();
+
+                const juce::String instPrefix = "mixer_inst_" + juce::String (ii);
+                const auto* armP = apvts.getRawParameterValue (instPrefix + "_arm");
+                const auto* idxP = apvts.getRawParameterValue (instPrefix + "_inputChannelIdx");
+                const auto* stereoP = apvts.getRawParameterValue (instPrefix + "_inputChannelStereo");
+                const int   chIdx = (idxP != nullptr) ? (int) idxP->load() : -1;
+                const bool  isStereo = (stereoP != nullptr) && stereoP->load() > 0.5f;
+                const bool  armed = (armP != nullptr) && armP->load() > 0.5f
+                                 && chIdx >= 0
+                                 && chIdx < mLiveInputSnapshot.getNumChannels();
+                if (armed)
+                {
+                    const int n = numSamples;
+                    // I-16 G-9: dry recorder tap for Inst (single file -- no
+                    // realtime stage analogous to Vox's pitch correction).
+                    const int chId = MixerChannelIds::instInsert (ii);
+                    for (auto& sr : mStripRecorders)
+                    {
+                        if (sr.channelId == chId && sr.recorder
+                            && sr.recorder->isRecording())
+                        {
+                            juce::AudioBuffer<float> monoView (
+                                mLiveInputSnapshot.getArrayOfWritePointers() + chIdx,
+                                1, n);
+                            sr.recorder->writeBlock (monoView);
+                            break;
+                        }
+                    }
+
+                    // B2 (2026-05-04): stereo input pair -> copy chIdx into L,
+                    // chIdx+1 into R.  Falls back to dual-mono on the right
+                    // channel if it's out of range.
+                    const int rightCh = (isStereo && chIdx + 1 < mLiveInputSnapshot.getNumChannels())
+                                          ? (chIdx + 1) : chIdx;
+                    if (mInstEngineScratch.getNumChannels() > 0)
+                        mInstEngineScratch.copyFrom (0, 0, mLiveInputSnapshot, chIdx, 0, n);
+                    if (mInstEngineScratch.getNumChannels() > 1)
+                        mInstEngineScratch.copyFrom (1, 0, mLiveInputSnapshot, rightCh, 0, n);
+                }
+
                 pushScToEngine(mInstEngines[ii], MixerChannelIds::instInsert(ii));
                 mInstEngines[ii]->processBlock(mInstEngineScratch, instPageMidi[ii]);
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Inst, ii,
                                           mInstEngineScratch, bpmForInserts, anySolo);
-                routeInsertOutput(MixerChannelIds::instInsert(ii),
-                                   mInstEngineScratch, numSamples);
+                // I-16 G-9: armed -> gate routing on _listen.  Unarmed -> route.
+                bool routeOutput = true;
+                if (armed)
+                {
+                    const auto* listenP = apvts.getRawParameterValue (instPrefix + "_listen");
+                    routeOutput = (listenP != nullptr) && listenP->load() > 0.5f;
+                }
+                if (routeOutput)
+                    routeInsertOutput(MixerChannelIds::instInsert(ii),
+                                       mInstEngineScratch, numSamples);
             }
         }
     }
@@ -1452,6 +1726,66 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     }
                 }
 
+                // I-16 G-9 (2026-05-03): FilePlay branch.  When the clip is
+                // linked to a Vox/Inst page (routeChannel != 0), copy its
+                // post-declick samples into that page's engine scratch and
+                // drive the page's chain (BaySickVocals -> BaySickChain ->
+                // BaySickNAMIR for Vox; BaySickPedals -> BaySickNAMIR for
+                // Inst), then route through the Vox/Inst InsertNode + bus
+                // instead of the Audio InsertNode.  setForcePitchBypass(true)
+                // for Vox so realtime pitch (already baked into the wet
+                // recording) doesn't double-apply.
+                const int routeCh = player.routeChannel;
+                const bool isVoxRoute  = routeCh >= MixerChannelIds::kVoxBase
+                                       && routeCh <  MixerChannelIds::kVoxBase + kMaxVoxPages;
+                const bool isInstRoute = routeCh >= MixerChannelIds::kInstBase
+                                       && routeCh <  MixerChannelIds::kInstBase + kMaxInstPages;
+                if (isVoxRoute || isInstRoute)
+                {
+                    if (isVoxRoute)
+                    {
+                        const int vi = routeCh - MixerChannelIds::kVoxBase;
+                        if (auto* eng = mVoxEngines[vi])
+                        {
+                            mVoxEngineScratch.setSize (numRenderCh, numSamples, false, false, true);
+                            mVoxEngineScratch.clear();
+                            const int copyCh = juce::jmin (numOut, mVoxEngineScratch.getNumChannels());
+                            for (int ch = 0; ch < copyCh; ++ch)
+                                mVoxEngineScratch.copyFrom (ch, 0, mAudioClipScratch, ch, 0, numSamples);
+
+                            if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
+                                vp->setForcePitchBypass (true);
+
+                            pushScToEngine (eng, MixerChannelIds::voxInsert (vi));
+                            eng->processBlock (mVoxEngineScratch, voxPageMidi[vi]);
+                            mVibeGraph.processInsert (VibeGraph::InsertKind::Vox, vi,
+                                                       mVoxEngineScratch, bpmForInserts, anySolo);
+                            routeInsertOutput (MixerChannelIds::voxInsert (vi),
+                                                mVoxEngineScratch, numSamples);
+                        }
+                    }
+                    else   // isInstRoute
+                    {
+                        const int ii = routeCh - MixerChannelIds::kInstBase;
+                        if (auto* eng = mInstEngines[ii])
+                        {
+                            mInstEngineScratch.setSize (numRenderCh, numSamples, false, false, true);
+                            mInstEngineScratch.clear();
+                            const int copyCh = juce::jmin (numOut, mInstEngineScratch.getNumChannels());
+                            for (int ch = 0; ch < copyCh; ++ch)
+                                mInstEngineScratch.copyFrom (ch, 0, mAudioClipScratch, ch, 0, numSamples);
+
+                            pushScToEngine (eng, MixerChannelIds::instInsert (ii));
+                            eng->processBlock (mInstEngineScratch, instPageMidi[ii]);
+                            mVibeGraph.processInsert (VibeGraph::InsertKind::Inst, ii,
+                                                       mInstEngineScratch, bpmForInserts, anySolo);
+                            routeInsertOutput (MixerChannelIds::instInsert (ii),
+                                                mInstEngineScratch, numSamples);
+                        }
+                    }
+                    continue;   // skip the Audio InsertNode + audio-row peak path below
+                }
+
                 // 5F-4a Batch 6: route per-clip scratch through Audio InsertNode
                 // (polarity → width → rack → post-rack EQ → fader × mute × solo → PDC → peak).
                 if (inRange)
@@ -1644,70 +1978,15 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             routeInsertOutput(auxChId, buf, numSamples);
         });
 
-    // R3 (2026-04-23): process Vox + Inst live-input strips.  For each
-    // armed strip with a valid `_inputChannelIdx`, copy that one input
-    // channel from the device snapshot into the per-slot scratch (mono ->
-    // stereo via duplication), run the InsertNode (preEQ -> rack -> postEQ
-    // -> fader / mute / solo / meter), and route to the strip's bus
-    // accumulator.  After all strips processed, fan the Vox / Inst BUS
-    // accumulators out to their destinations (default = Master).
+    // R3 (2026-04-23) / I-16 G-9 (2026-05-03): the standalone live-ASIO
+    // loop that ran the InsertNode on raw ASIO input was REMOVED here.
+    // The Vox / Inst engine loop above now handles armed live input via
+    // the source mux (LiveASIO copies snapshot -> engine scratch -> chain
+    // -> InsertNode -> bus).  Dry-recording tap moved to the engine loop's
+    // armed branch.  Listen toggle gate moved to the engine loop's
+    // routeOutput check.  Single audio path, no double-processing.
     if (numInputs > 0)
     {
-        if (mLiveInputSlotBuf.getNumSamples() < numSamples
-            || mLiveInputSlotBuf.getNumChannels() < 2)
-            mLiveInputSlotBuf.setSize (2, numSamples, false, false, true);
-
-        struct LiveSet { VibeGraph::InsertKind kind; int max; const char* prefixBase; int chBase; };
-        static const LiveSet kLive[] = {
-            { VibeGraph::InsertKind::Vox,  MixerChannelIds::kMaxVoxStrips,  "mixer_vox_",  MixerChannelIds::kVoxBase  },
-            { VibeGraph::InsertKind::Inst, MixerChannelIds::kMaxInstStrips, "mixer_inst_", MixerChannelIds::kInstBase },
-        };
-        for (const auto& set : kLive)
-        {
-            for (int i = 0; i < set.max; ++i)
-            {
-                if (mVibeGraph.getInsertNode (set.kind, i) == nullptr) continue;
-
-                const juce::String prefix = juce::String (set.prefixBase) + juce::String (i);
-                const auto* armP = apvts.getRawParameterValue (prefix + "_arm");
-                const auto* idxP = apvts.getRawParameterValue (prefix + "_inputChannelIdx");
-                if (armP == nullptr || idxP == nullptr) continue;
-                if (armP->load() < 0.5f) continue;
-                const int chIdx = (int) idxP->load();
-                if (chIdx < 0 || chIdx >= numInputs) continue;
-
-                // Mono -> stereo duplication so the InsertNode's stereo chain
-                // (M/S width, EQ, etc.) processes a balanced signal.
-                mLiveInputSlotBuf.copyFrom (0, 0, mLiveInputSnapshot, chIdx, 0, numSamples);
-                mLiveInputSlotBuf.copyFrom (1, 0, mLiveInputSnapshot, chIdx, 0, numSamples);
-
-                // R5d: if a per-strip recorder is armed for this channel id,
-                // capture the RAW pre-rack input (mono) so the user gets a
-                // clean source file.  Rack / EQ effects can be re-applied to
-                // the WAV after import if desired.
-                const int chId = set.chBase + i;
-                for (auto& sr : mStripRecorders)
-                {
-                    if (sr.channelId == chId && sr.recorder && sr.recorder->isRecording())
-                    {
-                        juce::AudioBuffer<float> monoView (
-                            mLiveInputSnapshot.getArrayOfWritePointers() + chIdx,
-                            1, numSamples);
-                        sr.recorder->writeBlock (monoView);
-                        break;
-                    }
-                }
-
-                mVibeGraph.processInsert (set.kind, i, mLiveInputSlotBuf,
-                                            bpmForInserts, anySolo);
-                // R4: only route downstream when Listen is on.  The InsertNode
-                // already updated its peak meter so the UI still sees signal
-                // even with monitoring muted.
-                const auto* listenP = apvts.getRawParameterValue (prefix + "_listen");
-                if (listenP != nullptr && listenP->load() > 0.5f)
-                    routeInsertOutput (set.chBase + i, mLiveInputSlotBuf, numSamples);
-            }
-        }
 
         // R3.5: process Vox + Inst BUS accumulators through their full DSP
         // chain (preEQ -> rack -> postEQ -> polarity/width -> fader/mute) and
@@ -1930,6 +2209,108 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 // Fan the post-pipeline output to FX Bus's _sendTo destination
                 // (default = Master).
                 routeInsertOutput (MixerChannelIds::kFxBus, *fxAccum, numSamples);
+            }
+        }
+    }
+
+    // J-7a (2026-05-03): RustyDrums Bus pipeline.  Unconditional (engine-driven,
+    // not gated by live input).  Mirrors the kBusSets loop pattern for Vox/Inst
+    // but compact + always runs so the singleton's audio reaches Master.
+    if (mRustyDrumsActive.load(std::memory_order_acquire))
+    {
+        if (auto* accum = mVibeGraph.getChannelAccumulator(MixerChannelIds::kRustyDrumsBus))
+        {
+            if (accum->getNumChannels() >= 2)
+            {
+                auto& buf = *accum;
+                const juce::String prefix = "mixer_rustybus";
+
+                mVibeGraph.pushScArrayToStrip(MixerChannelIds::kRustyDrumsBus);
+
+                if (auto* preEq = mVibeGraph.getRustyDrumsBusPreEQ()) preEq->process(buf);
+                if (auto* rack  = mVibeGraph.getRustyDrumsBusRack())
+                {
+                    const auto* bypP = apvts.getRawParameterValue(prefix + "_bypass");
+                    const bool  globalBypass2 =
+                        (apvts.getRawParameterValue("master_fx_bypass") != nullptr)
+                        && (apvts.getRawParameterValue("master_fx_bypass")->load() > 0.5f);
+                    const bool stripBypass = bypP && bypP->load() > 0.5f;
+                    const bool bypass = stripBypass || globalBypass2;
+                    if (rack->isRackBypassed() != bypass) rack->setRackBypassed(bypass);
+                    rack->process(buf);
+                }
+                if (auto* postEq = mVibeGraph.getRustyDrumsBusEQ()) postEq->process(buf);
+                mVibeGraph.applyRustyDrumsBusPolarityWidth(buf);
+
+                // Fader / mute (no in-group solo for this bus — it's standalone).
+                const auto* lvlP  = apvts.getRawParameterValue(prefix + "_level");
+                const auto* muteP = apvts.getRawParameterValue(prefix + "_mute");
+                const float dB    = lvlP  ? lvlP->load() : 0.0f;
+                const bool  muted = muteP && muteP->load() > 0.5f;
+                const float gain  = muted ? 0.0f : juce::Decibels::decibelsToGain(dB, -60.0f);
+                if (gain != 1.0f) buf.applyGain(gain);
+
+                // Pan (project-level law).
+                if (const auto* panP = apvts.getRawParameterValue(prefix + "_pan"))
+                {
+                    const float pan = panP->load();
+                    if (std::abs(pan) > 1.0e-4f)
+                    {
+                        const int rdPanLaw =
+                            (apvts.getRawParameterValue("master_pan_law") != nullptr)
+                                ? (int) apvts.getRawParameterValue("master_pan_law")->load()
+                                : 0;
+                        float gL = 1.f, gR = 1.f;
+                        const float p = juce::jlimit(-1.f, 1.f, pan);
+                        const float np = (p + 1.f) * 0.5f;
+                        switch (rdPanLaw)
+                        {
+                            case 1: gL = 1.f - np;          gR = np;            break;
+                            case 2: gL = (p <= 0.f ? 1.f : 1.f - p);
+                                    gR = (p >= 0.f ? 1.f : 1.f + p);            break;
+                            default: { const float a = np * juce::MathConstants<float>::halfPi;
+                                       gL = std::cos(a); gR = std::sin(a); }    break;
+                        }
+                        buf.applyGain(0, 0, numSamples, gL);
+                        buf.applyGain(1, 0, numSamples, gR);
+                    }
+                }
+
+                // J-7b (2026-05-04): peak meter for the RustyDrums Bus strip.
+                // Mirrors the FX Bus pattern: compute stereo peaks on the
+                // post-fader/pan buffer, CAS-max into the Run atomics, then
+                // promote at end of block so the mixer strip's DBFSMeter
+                // shows signal activity coherently with every other bus.
+                {
+                    auto bufferPeakDbStereoLocal = [] (const juce::AudioBuffer<float>& b)
+                        -> std::pair<float, float>
+                    {
+                        const int n = b.getNumSamples();
+                        float pkL = 0.f, pkR = 0.f;
+                        if (b.getNumChannels() >= 1) pkL = b.getMagnitude (0, 0, n);
+                        if (b.getNumChannels() >= 2) pkR = b.getMagnitude (1, 0, n);
+                        constexpr float kFloor = -60.f;
+                        auto toDb = [] (float lin) {
+                            return lin > 0.f ? juce::Decibels::gainToDecibels (lin, -60.f) : -60.f;
+                        };
+                        return { juce::jmax (kFloor, toDb (pkL)),
+                                 juce::jmax (kFloor, toDb (pkR)) };
+                    };
+                    const auto [pkL, pkR] = bufferPeakDbStereoLocal (buf);
+                    auto casMax = [] (std::atomic<float>& a, float v) noexcept
+                    {
+                        if (v == -std::numeric_limits<float>::infinity()) return;
+                        float cur = a.load (std::memory_order_relaxed);
+                        while (cur < v
+                               && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+                        {}
+                    };
+                    casMax (mRustyDrumsBusPeakDbLRun, pkL);
+                    casMax (mRustyDrumsBusPeakDbRRun, pkR);
+                    casMax (mRustyDrumsBusPeakDbRun,  juce::jmax (pkL, pkR));
+                }
+
+                routeInsertOutput(MixerChannelIds::kRustyDrumsBus, buf, numSamples);
             }
         }
     }
@@ -2227,6 +2608,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         drainAndMerge (mInstBusPeakDb,  mInstBusPeakDbRun);
         drainAndMerge (mInstBusPeakDbL, mInstBusPeakDbLRun);
         drainAndMerge (mInstBusPeakDbR, mInstBusPeakDbRRun);
+        drainAndMerge (mRustyDrumsBusPeakDb,  mRustyDrumsBusPeakDbRun);   // J-7b
+        drainAndMerge (mRustyDrumsBusPeakDbL, mRustyDrumsBusPeakDbLRun);  // J-7b
+        drainAndMerge (mRustyDrumsBusPeakDbR, mRustyDrumsBusPeakDbRRun);  // J-7b
         drainAndMerge (mVoxBus2PeakDb,  mVoxBus2PeakDbRun);
         drainAndMerge (mVoxBus2PeakDbL, mVoxBus2PeakDbLRun);
         drainAndMerge (mVoxBus2PeakDbR, mVoxBus2PeakDbRRun);
@@ -2342,6 +2726,7 @@ void VibeSynthProcessor::updateAllPostRackEQsFromApvts()
         { "mixer_voxbus2",  [](VibeGraph& g) { return g.getVoxBus2EQ();      } },
         { "mixer_instbus2", [](VibeGraph& g) { return g.getInstBus2EQ();     } },
         { "mixer_instbus3", [](VibeGraph& g) { return g.getInstBus3EQ();     } },
+        { "mixer_rustybus", [](VibeGraph& g) { return g.getRustyDrumsBusEQ(); } },  // J-6
     };
     for (const auto& bp : kBusEQs)
     {
@@ -2361,6 +2746,7 @@ void VibeSynthProcessor::updateAllPostRackEQsFromApvts()
         { VibeGraph::InsertKind::Aux,   "mixer_aux_",   MixerChannelIds::kMaxAuxStrips },
         { VibeGraph::InsertKind::Vox,   "mixer_vox_",   MixerChannelIds::kMaxVoxStrips  },
         { VibeGraph::InsertKind::Inst,  "mixer_inst_",  MixerChannelIds::kMaxInstStrips },
+        { VibeGraph::InsertKind::Rusty, "mixer_rusty_", MixerChannelIds::kMaxRustyStrips }, // J-6
     };
     for (const auto& is : kInsertSets)
     {
@@ -2395,6 +2781,7 @@ void VibeSynthProcessor::updateAllPreRackEQsFromApvts()
         { "mixer_voxbus2",  [](VibeGraph& g) { return g.getVoxBus2PreEQ();      } },
         { "mixer_instbus2", [](VibeGraph& g) { return g.getInstBus2PreEQ();     } },
         { "mixer_instbus3", [](VibeGraph& g) { return g.getInstBus3PreEQ();     } },
+        { "mixer_rustybus", [](VibeGraph& g) { return g.getRustyDrumsBusPreEQ(); } },  // J-6
     };
     for (const auto& bp : kBusPreEQs)
     {
@@ -2414,6 +2801,7 @@ void VibeSynthProcessor::updateAllPreRackEQsFromApvts()
         { VibeGraph::InsertKind::Aux,   "mixer_aux_",   MixerChannelIds::kMaxAuxStrips },
         { VibeGraph::InsertKind::Vox,   "mixer_vox_",   MixerChannelIds::kMaxVoxStrips  },
         { VibeGraph::InsertKind::Inst,  "mixer_inst_",  MixerChannelIds::kMaxInstStrips },
+        { VibeGraph::InsertKind::Rusty, "mixer_rusty_", MixerChannelIds::kMaxRustyStrips }, // J-6
     };
     for (const auto& is : kInsertSets)
     {
@@ -2460,6 +2848,7 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         // ceil'd bar count.
         p.clipEndBeat    = blk.startBar * kBPB + effectiveLengthBeats (blk);
         p.trackRow       = blk.trackRow;
+        p.routeChannel   = blk.routeChannel;   // I-16 G-9: Vox/Inst page link
         p.originalBPM    = (blk.originalBPM > 0.f) ? blk.originalBPM : 120.f;
         p.stretchMode    = blk.stretchMode;
         p.fileSampleRate = rawReader->sampleRate;
@@ -2695,8 +3084,11 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
     samplesFolder.createDirectory();
 
     // Scan Vox + Inst strips for _arm on.
+    // I-16 G-9 (2026-05-03): Vox strips also spin up a WET recorder for the
+    // post-realtime-pitch / pre-vocal-chain tap inside BaySickVocalProcessor.
+    // Inst strips have no realtime stage to bake in -> dry only.
     auto scan = [&](const char* prefixBase, int maxCount, int chBase,
-                    const char* displayBase)
+                    const char* displayBase, bool isVox)
     {
         for (int i = 0; i < maxCount; ++i)
         {
@@ -2708,16 +3100,37 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
             sr.channelId   = chBase + i;
             sr.displayName = juce::String (displayBase) + " " + juce::String (i + 1);
             sr.file        = samplesFolder.getChildFile (
-                projectName + " - " + sr.displayName + " - " + ts + ".wav");
+                projectName + " - " + sr.displayName + " - " + ts + " - DRY.wav");
             sr.recorder    = std::make_unique<AudioFileRecorder>();
-            if (sr.recorder->startRecording (sr.file, mSampleRate, 1))
-                mStripRecorders.push_back (std::move (sr));
+            if (! sr.recorder->startRecording (sr.file, mSampleRate, 1)) continue;
+
+            // I-16 G-9: Vox-only wet recorder + push pointer to the
+            // BaySickVocalProcessor for this page so its processBlock taps
+            // post-realtime-pitch audio into the wet file.
+            if (isVox && i < kMaxVoxPages)
+            {
+                sr.wetFile     = samplesFolder.getChildFile (
+                    projectName + " - " + sr.displayName + " - " + ts + " - WET.wav");
+                sr.wetRecorder = std::make_unique<AudioFileRecorder>();
+                if (sr.wetRecorder->startRecording (sr.wetFile, mSampleRate, 1))
+                {
+                    if (auto* eng = mVoxEngines[i])
+                        if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
+                            vp->setWetRecorder (sr.wetRecorder.get());
+                }
+                else
+                {
+                    sr.wetRecorder.reset();   // failed to open -> drop wet recording
+                }
+            }
+
+            mStripRecorders.push_back (std::move (sr));
         }
     };
     scan ("mixer_vox_",  MixerChannelIds::kMaxVoxStrips,
-          MixerChannelIds::kVoxBase,  "Vox");
+          MixerChannelIds::kVoxBase,  "Vox",  /*isVox=*/true);
     scan ("mixer_inst_", MixerChannelIds::kMaxInstStrips,
-          MixerChannelIds::kInstBase, "Inst");
+          MixerChannelIds::kInstBase, "Inst", /*isVox=*/false);
 
     // No strips armed -> fall back to master output capture.
     if (mStripRecorders.empty())
@@ -2739,11 +3152,29 @@ VibeSynthProcessor::RecordResult VibeSynthProcessor::stopRecording()
 
     for (auto& sr : mStripRecorders)
     {
+        // I-16 G-9 (2026-05-03): clear the wet-recorder pointer on the
+        // BaySickVocalProcessor BEFORE stopping the writer, so the audio
+        // thread can't push another block into a stopped recorder.
+        if (sr.wetRecorder)
+        {
+            const int voxIdx = sr.channelId - MixerChannelIds::kVoxBase;
+            if (voxIdx >= 0 && voxIdx < kMaxVoxPages)
+                if (auto* eng = mVoxEngines[voxIdx])
+                    if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
+                        vp->setWetRecorder (nullptr);
+        }
+
         if (sr.recorder && sr.recorder->isRecording())
         {
             auto f = sr.recorder->stopRecording();
             if (f.existsAsFile())
                 out.stripFiles.emplace_back (sr.channelId, f);
+        }
+        if (sr.wetRecorder && sr.wetRecorder->isRecording())
+        {
+            auto f = sr.wetRecorder->stopRecording();
+            if (f.existsAsFile())
+                out.stripWetFiles.emplace_back (sr.channelId, f);
         }
     }
     mStripRecorders.clear();
@@ -2760,6 +3191,12 @@ void VibeSynthProcessor::getStateInformation(juce::MemoryBlock& destData)
     juce::ValueTree rackStates("VibeRackStates");
     mVibeGraph.saveRackStates(rackStates);
     state.addChild(rackStates, -1, nullptr);
+
+    // I-3b (2026-05-02): MIDI Learn registry persistence.  Per-project mapping
+    // table sits under <MidiCCMappings> as a child of the saved state.  Load
+    // path mirrors -- removeChild before APVTS replaceState, then restore.
+    state.removeChild(state.getChildWithName(MidiLearnRegistry::kRootTag), nullptr);
+    state.addChild(mMidiLearn.saveToValueTree(), -1, nullptr);
 
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     copyXmlToBinary(*xml, destData);
@@ -2779,6 +3216,17 @@ void VibeSynthProcessor::setStateInformation(const void* data, int sizeInBytes)
     {
         state.removeChild(rackStates, nullptr);
         mVibeGraph.loadRackStates(rackStates);   // deferred if topology not built yet
+    }
+
+    // I-3b: extract MIDI Learn mappings before passing to APVTS so the
+    // mapping tree doesn't end up living under apvts.state.  If the project
+    // has no <MidiCCMappings> child, the registry retains whatever was
+    // already in place (e.g., global defaults loaded at app startup).
+    auto midiMaps = state.getChildWithName(MidiLearnRegistry::kRootTag);
+    if (midiMaps.isValid())
+    {
+        state.removeChild(midiMaps, nullptr);
+        mMidiLearn.loadFromValueTree(midiMaps);
     }
 
     if (state.hasType(apvts.state.getType()))
@@ -3606,6 +4054,9 @@ void VibeSynthProcessor::ensureMixerBusAndMasterParams()
     ensureMixerStripParams("mixer_voxbus2",  MixerStripKind::Bus,    kMaster);
     ensureMixerStripParams("mixer_instbus2", MixerStripKind::Bus,    kMaster);
     ensureMixerStripParams("mixer_instbus3", MixerStripKind::Bus,    kMaster);
+    // J-5 (2026-05-03): BaySickRustyDrums dedicated bus.  Always register so
+    // routing + audio paths work the moment the singleton spawns its 13 strips.
+    ensureMixerStripParams("mixer_rustybus", MixerStripKind::Bus,    kMaster);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3664,6 +4115,194 @@ void VibeSynthProcessor::ensureInstInsert(int idx, const juce::String& displayNa
                                  prefix);
 }
 
+// J-5 (2026-05-03): BaySickRustyDrums per-strip registration.  Same pattern as
+// Vox/Inst but the parent bus is kRustyDrumsBus (the dedicated BaySickRustyDrums
+// bus), and there's no live-input param block (these strips receive only from
+// the singleton sfizz engine, never from a hardware input).
+void VibeSynthProcessor::ensureRustyInsert(int idx, const juce::String& displayName)
+{
+    if (idx < 0 || idx >= MixerChannelIds::kMaxRustyStrips) return;
+    const juce::String prefix = "mixer_rusty_" + juce::String(idx);
+    ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kRustyDrumsBus);
+    mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Rusty, idx,
+                                 displayName.isNotEmpty() ? displayName
+                                     : ("Rusty " + juce::String(idx + 1)),
+                                 prefix);
+}
+
+void VibeSynthProcessor::removeRustyInsert(int idx)
+{
+    if (idx < 0 || idx >= MixerChannelIds::kMaxRustyStrips) return;
+    mVibeGraph.removeInsertNode(VibeGraph::InsertKind::Rusty, idx);
+    // APVTS params persist (existing pattern — JUCE doesn't allow unregister).
+    // Reset to defaults so a future re-create starts clean.  Common cleanup
+    // covers: level (0 dB), pan (centre), mute/solo/polarity/bypass/arm (off).
+    const juce::String prefix = "mixer_rusty_" + juce::String(idx);
+    auto resetParam = [&](const juce::String& suffix, float defaultVal)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(apvts.getParameter(prefix + suffix)))
+            p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1(defaultVal));
+    };
+    resetParam("_level",    0.0f);   // 0 dB
+    resetParam("_pan",      0.0f);
+    resetParam("_width",    1.0f);
+    resetParam("_mute",     0.0f);
+    resetParam("_solo",     0.0f);
+    resetParam("_polarity", 0.0f);
+    resetParam("_bypass",   0.0f);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// J-5: BaySickRustyDrums singleton lifecycle
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool VibeSynthProcessor::hasBaySickRustyDrums() const noexcept
+{
+    return mRustyDrumsActive.load (std::memory_order_acquire);
+}
+
+BaySickRustyDrumsProcessor* VibeSynthProcessor::getBaySickRustyDrums() noexcept
+{
+    return mRustyDrumsEngine.get();
+}
+
+bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
+{
+    if (! sfzPath.existsAsFile()) return false;
+
+    // J-7b race fix (2026-05-04): keep mRustyDrumsActive FALSE during the
+    // entire load.  loadKit calls mSfizz->loadSfzString which mutates sfizz
+    // internal state (regions, voices, output buses) for several seconds;
+    // if the audio thread sees active=true mid-load and takes the try-lock
+    // between two engine-state writes, it'll call renderBlock against a
+    // half-parsed kit and crash inside sfizz.  Only flip active=true AFTER
+    // load completes.
+    mRustyDrumsActive.store (false, std::memory_order_release);
+
+    // Create the singleton on first call.  Locked because the audio thread
+    // may also access mRustyDrumsEngine via getBaySickRustyDrums().
+    {
+        const juce::SpinLock::ScopedLockType sl (mRustyDrumsEngineLock);
+        if (! mRustyDrumsEngine)
+        {
+            mRustyDrumsEngine = std::make_unique<BaySickRustyDrumsProcessor>();
+            mRustyDrumsEngine->prepareToPlay (getSampleRate() > 0.0 ? getSampleRate() : 48000.0,
+                                              getBlockSize()  > 0   ? getBlockSize()  : 512);
+        }
+    }
+
+    if (! mRustyDrumsEngine->loadKit (sfzPath))
+        return false;
+
+    // Tear down any existing strips from a prior kit before spawning the new
+    // ones — protects against accidental double-creation if the user loads a
+    // different kit while the singleton already exists.
+    for (int i = 0; i < MixerChannelIds::kMaxRustyStrips; ++i)
+        mVibeGraph.removeInsertNode (VibeGraph::InsertKind::Rusty, i);
+
+    // Spawn one strip per discovered channel, in drummer-conventional order.
+    const auto& channels = mRustyDrumsEngine->getChannels();
+    for (size_t i = 0; i < channels.size() && i < (size_t) MixerChannelIds::kMaxRustyStrips; ++i)
+        ensureRustyInsert ((int) i, channels[i].name);
+
+    // J-7b: now safe — the engine is fully loaded, output buses sized,
+    // strip InsertNodes registered.  Audio thread can begin rendering.
+    mRustyDrumsActive.store (true, std::memory_order_release);
+    return true;
+}
+
+void VibeSynthProcessor::destroyBaySickRustyDrums()
+{
+    // Remove all 13 InsertNodes first (audio thread will see empty mRustyInserts
+    // immediately even if the engine teardown takes another instant).
+    for (int i = 0; i < MixerChannelIds::kMaxRustyStrips; ++i)
+        removeRustyInsert (i);
+
+    // Then drop the engine.  Audio thread reads mRustyDrumsActive before
+    // touching the engine pointer, so flip the active flag before freeing.
+    mRustyDrumsActive.store (false, std::memory_order_release);
+
+    {
+        const juce::SpinLock::ScopedLockType sl (mRustyDrumsEngineLock);
+        mRustyDrumsEngine.reset();
+    }
+
+    // Reset bus-level mixer params to defaults so a future re-create starts
+    // clean (mixer_rustybus_* params persist as APVTS zombies, harmless).
+    auto resetBusParam = [&](const juce::String& suffix, float defaultVal)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(apvts.getParameter("mixer_rustybus" + suffix)))
+            p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1(defaultVal));
+    };
+    resetBusParam("_level",    0.0f);
+    resetBusParam("_pan",      0.0f);
+    resetBusParam("_width",    1.0f);
+    resetBusParam("_mute",     0.0f);
+    resetBusParam("_solo",     0.0f);
+    resetBusParam("_polarity", 0.0f);
+}
+
+void VibeSynthProcessor::resetBaySickRustyDrumsMixerState()
+{
+    // Walks every `mixer_rusty_*` insert prefix + `mixer_rustybus_*` and
+    // resets the standard strip/bus params to the registered defaults.
+    // Called when the user switches programs (Full <-> Basic) so the
+    // freshly-spawned strips for the new program start clean.
+    auto resetParam = [&] (const juce::String& id, float defaultVal)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (id)))
+            p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (defaultVal));
+    };
+
+    auto resetStripPrefix = [&] (const juce::String& prefix)
+    {
+        resetParam (prefix + "_level",    0.0f);
+        resetParam (prefix + "_pan",      0.0f);
+        resetParam (prefix + "_width",    1.0f);
+        resetParam (prefix + "_mute",     0.0f);
+        resetParam (prefix + "_solo",     0.0f);
+        resetParam (prefix + "_polarity", 0.0f);
+        resetParam (prefix + "_bypass",   0.0f);   // Insert-only; no-op for buses
+        resetParam (prefix + "_arm",      0.0f);   // Insert-only; no-op for buses
+        resetParam (prefix + "_chokeGroup", 0.0f);
+        // Sends — `_send{0..3}_to` to -1 (inactive), `_send{0..3}_amount` to 0 dB,
+        // `_send{0..3}_prepost` to 0 (post).
+        for (int s = 0; s < 4; ++s)
+        {
+            resetParam (prefix + "_send" + juce::String (s) + "_to",      -1.0f);
+            resetParam (prefix + "_send" + juce::String (s) + "_amount",   0.0f);
+            resetParam (prefix + "_send" + juce::String (s) + "_prepost",  0.0f);
+        }
+        // EQ band defaults — every band Bell, 0 dB, freq mid, Q 0.7.
+        for (int b = 0; b < 8; ++b)
+        {
+            for (auto side : { juce::String ("_mid_eq"), juce::String ("_side_eq") })
+            {
+                const auto bandPrefix = prefix + side + juce::String (b);
+                resetParam (bandPrefix + "_freq", 1000.0f);
+                resetParam (bandPrefix + "_gain",    0.0f);
+                resetParam (bandPrefix + "_q",       0.7f);
+                resetParam (bandPrefix + "_type",    0.0f);   // Bell
+                resetParam (bandPrefix + "_on",      0.0f);
+            }
+            for (auto side : { juce::String ("_preeq_mid_eq"), juce::String ("_preeq_side_eq") })
+            {
+                const auto bandPrefix = prefix + side + juce::String (b);
+                resetParam (bandPrefix + "_freq", 1000.0f);
+                resetParam (bandPrefix + "_gain",    0.0f);
+                resetParam (bandPrefix + "_q",       0.7f);
+                resetParam (bandPrefix + "_type",    0.0f);
+                resetParam (bandPrefix + "_on",      0.0f);
+            }
+        }
+    };
+
+    // Bus + every potential Rusty insert slot.
+    resetStripPrefix ("mixer_rustybus");
+    for (int i = 0; i < MixerChannelIds::kMaxRustyStrips; ++i)
+        resetStripPrefix ("mixer_rusty_" + juce::String (i));
+}
+
 // R2 (2026-04-23): Vox / Inst-only APVTS params.  Lazy-registered alongside
 // the standard mixer-strip params for live-input strip types.
 //   _inputChannelIdx  Int  -1..127  default -1  (no input assigned)
@@ -3692,6 +4331,14 @@ void VibeSynthProcessor::addLiveInputParams (const juce::String& prefix)
         apvts.createAndAddParameter (std::make_unique<juce::AudioParameterBool> (
             VID(prefix + "_listen"),
             prefix + " Listen", false));
+    // J-A2 / B2 (2026-05-04): when the picked input is a stereo pair (e.g.
+    // Tascam Model 24's 13/14, 15/16, ...), this is true and the audio thread
+    // copies _inputChannelIdx -> strip[L] and _inputChannelIdx+1 -> strip[R]
+    // instead of dual-monoing _inputChannelIdx onto both.
+    if (apvts.getParameter (prefix + "_inputChannelStereo") == nullptr)
+        apvts.createAndAddParameter (std::make_unique<juce::AudioParameterBool> (
+            VID(prefix + "_inputChannelStereo"),
+            prefix + " Input Stereo", false));
 }
 
 void VibeSynthProcessor::setInputChannelName (const juce::String& stripPrefix,

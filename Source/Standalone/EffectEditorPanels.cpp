@@ -14,6 +14,35 @@
 #include "../DSP/TapeDSP.h"
 #include "../DSP/LimiterDSP.h"
 #include "../DSP/DeEsserDSP.h"
+// I-5 (2026-05-02): Harmonics drive pedals batch -- 4 new DSP classes.
+#include "../DSP/BluesDriveStyleDSP.h"
+#include "../DSP/DistortionStyleDSP.h"
+#include "../DSP/FuzzStyleDSP.h"
+#include "../DSP/HighGainStyleDSP.h"
+// I-6 (2026-05-02): Harmonics bass pedals batch -- 2 multi-band drives.
+#include "../DSP/BassDriverStyleDSP.h"
+#include "../DSP/BassOverdriveStyleDSP.h"
+// I-7 (2026-05-02): OC Style Octave.
+#include "../DSP/OctaveStyleDSP.h"
+// I-8 (2026-05-02): Dynamics pedals batch.
+#include "../DSP/NoiseGateStyleDSP.h"
+#include "../DSP/BassCompressorStyleDSP.h"
+// I-9 (2026-05-03): SY Style Polyphonic Synth.
+#include "../DSP/SynthStyleDSP.h"
+// I-10 (2026-05-03): PW Style Wah.
+#include "../DSP/WahStyleDSP.h"
+// I-11 (2026-05-03): AD Style Acoustic Preamp.
+#include "../DSP/AcousticPreampStyleDSP.h"
+// I-11 (2026-05-03): AC Style Acoustic Simulator.
+#include "../DSP/AcousticSimulatorStyleDSP.h"
+// I-12 (2026-05-03): EQ trio batch.
+#include "../DSP/GraphicEQStyleDSP.h"
+#include "../DSP/BassGraphicEQStyleDSP.h"
+#include "../DSP/FurmanEQStyleDSP.h"
+// I-13 (2026-05-03): TU Style Tuner.
+#include "../DSP/TunerStyleDSP.h"
+// I-15c (2026-05-03): User NAM Pedal.
+#include "../DSP/NAMPedalStyleDSP.h"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 struct KnobDef { const char* label; float min, max, def, step; const char* tip; };
@@ -223,6 +252,30 @@ void EditorPanelBase::disableVU()
     }
 }
 
+void EditorPanelBase::disableOutputVolKnob()
+{
+    // I-4 (2026-05-02): pedal-style panels (CS Style Compressor + I-5+ new
+    // pedals) own their own Level / Output knobs and don't need the base-
+    // class right-edge "Output Vol" knob.  Removing it lets derived layouts
+    // reclaim the horizontal slot.  The dBFS meter stays.
+    if (outputVolKnob)
+    {
+        removeChildComponent (outputVolKnob.get());
+        outputVolKnob.reset();
+    }
+}
+
+void EditorPanelBase::disableDbfsMeter()
+{
+    // I-15 (2026-05-03): pedal-mode finalize -- pedal tiles render no level
+    // meters per locked spec.  We hide rather than delete so existing panel
+    // resized() bodies (which call dbfsOut->setBounds without null guards)
+    // continue to work cleanly; the 32-px column is reserved but draws as
+    // dark background so the visual matches the spec.
+    if (dbfsOut)
+        dbfsOut->setVisible (false);
+}
+
 void EditorPanelBase::setInputLevel(float rms01)  { if (vuIn)    vuIn->setLevel(rms01); }
 void EditorPanelBase::setOutputLevel(float dbfs)  { if (dbfsOut) dbfsOut->setLevel(dbfs); }
 
@@ -237,8 +290,13 @@ void EditorPanelBase::resized()
     // Right: vol knob + DBFS meter
     dbfsOut      ->setBounds(b.removeFromRight(32).reduced(1, 2));
     b.removeFromRight(2);
-    outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
-    b.removeFromRight(4);
+    // I-4 (2026-05-02): outputVolKnob may have been freed by
+    // disableOutputVolKnob() (pedal-style panels own their own Level knob).
+    if (outputVolKnob)
+    {
+        outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
+        b.removeFromRight(4);
+    }
 
     // Center: combo, toggles, knobs
     juce::Rectangle<int> comboR;
@@ -273,6 +331,11 @@ struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
     std::unique_ptr<GRMeter>             grMeter;      // GR display widget
     CompressorDSP*                       mDsp { nullptr };
     int                                  mMeterMode { 0 };   // 0=GR
+
+    void disableGrMeter() override
+    {
+        if (grMeter) { removeChildComponent (grMeter.get()); grMeter.reset(); }
+    }
 
     // 1176 datasheet attack/release tables.  Position 0 = OFF (bypass that
     // stage), 1..7 are real positions with 1 = slowest, 7 = fastest.
@@ -446,6 +509,11 @@ struct OptoCompressorPanel : public EditorPanelBase, public juce::Timer
     CompressorDSP*                       mDsp { nullptr };
     int                                  mMeterMode { 0 };  // 0=GR
 
+    void disableGrMeter() override
+    {
+        if (grMeter) { removeChildComponent (grMeter.get()); grMeter.reset(); }
+    }
+
     explicit OptoCompressorPanel (CompressorDSP* dsp) : mDsp (dsp)
     {
         setLookAndFeel (&DynamicsLAF::get());
@@ -580,6 +648,117 @@ struct OptoCompressorPanel : public EditorPanelBase, public juce::Timer
     }
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CSStyleCompressorPanel — I-4 (2026-05-02)
+// BOSS CS-Style sustain pedal layout.  4 user knobs: Level / Tone / Attack /
+// Sustain.  Selected when the underlying CompressorDSP's mType == CS Style.
+// Sustain is the macro that drives both Threshold (down) and makeup gain
+// (up); Tone is the post-comp tilt EQ; Level is the post-EQ output trim;
+// Attack is exposed directly (1..50 ms typical).  Ratio + Release are
+// fixed internally to CS-typical values (5:1 / 200ms) by setType.
+// ─────────────────────────────────────────────────────────────────────────────
+struct CSStyleCompressorPanel : public EditorPanelBase, public juce::Timer
+{
+    std::unique_ptr<GRMeter>      grMeter;
+    CompressorDSP*                mDsp { nullptr };
+
+    void disableGrMeter() override
+    {
+        if (grMeter) { removeChildComponent (grMeter.get()); grMeter.reset(); }
+    }
+
+    explicit CSStyleCompressorPanel (CompressorDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&DynamicsLAF::get());
+        setVolumeKnobVariant (true);
+
+        // I-4 (2026-05-02): pedal-style panels own their own output Level
+        // knob; drop the base-class right-edge "Output Vol" knob so the
+        // 4 face-plate knobs claim the freed horizontal space.
+        disableOutputVolKnob();
+
+        // Level   -- output trim, -12..+12 dB (csLevelDb).
+        // Tone    -- 0..1, center 0.5 = flat (csTone01); bipolar tilt EQ.
+        // Attack  -- 1..50 ms (compressor attackMs, exposed directly).
+        // Sustain -- 0..1 macro (csSustain01) -> threshold + auto-makeup.
+        buildKnobs (*this, knobs, {
+            { "Level",   -12.f,  12.f,   0.f, 0.1f, "Output level trim (dB)" },
+            { "Tone",      0.f,   1.f,  0.5f, 0.01f, "Tilt EQ (left = darker, right = brighter, center = flat)" },
+            { "Attack",    1.f,  50.f,  10.f, 0.1f, "Attack time (ms)" },
+            { "Sustain",   0.f,   1.f,   0.f, 0.01f, "Sustain macro (more = lower threshold + more makeup gain)" },
+        });
+        for (auto& k : knobs)
+            k->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
+
+        // Knob -> DSP wiring.
+        knobs[0]->slider.onValueChange = [dsp, this]
+        {
+            if (dsp) dsp->setCsLevel ((float) knobs[0]->slider.getValue());
+        };
+        knobs[1]->slider.onValueChange = [dsp, this]
+        {
+            if (dsp) dsp->setCsTone ((float) knobs[1]->slider.getValue());
+        };
+        knobs[2]->slider.onValueChange = [dsp, this]
+        {
+            if (dsp) dsp->setAttack ((float) knobs[2]->slider.getValue());
+        };
+        knobs[3]->slider.onValueChange = [dsp, this]
+        {
+            if (dsp) dsp->setCsSustain ((float) knobs[3]->slider.getValue());
+        };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->csLevelDb,   juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->csTone01,    juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->attackMs,    juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->csSustain01, juce::sendNotificationSync);
+        }
+
+        grMeter = std::make_unique<GRMeter>();
+        addAndMakeVisible (*grMeter);
+        startTimerHz (30);
+    }
+
+    ~CSStyleCompressorPanel() override { stopTimer(); setLookAndFeel (nullptr); }
+
+    void timerCallback() override
+    {
+        if (grMeter && mDsp) grMeter->setGainReduction (mDsp->getGainReductionDb());
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        DynamicsLAF::paintLA2APanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+
+        // Left strip: VU input meter + GR meter (matches FET/Opto panels).
+        if (vuIn) vuIn->setBounds (b.removeFromLeft (120).reduced (1, 2));
+        if (grMeter)
+        {
+            int gw = juce::jmin (96, b.getHeight() + 8);
+            grMeter->setBounds (b.removeFromLeft (gw).reduced (1, 2));
+            b.removeFromLeft (4);
+        }
+
+        // Right edge: dBFS meter only (output knob disabled in ctor).
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+
+        // 4 knobs evenly across the remaining width: Level / Tone / Attack / Sustain.
+        const int n     = 4;
+        const int slotW = juce::jmax (1, b.getWidth() / n);
+        const int sz    = juce::jmin (slotW, b.getHeight(), kKnobSz + 8);
+        for (int i = 0; i < n; ++i)
+            knobs[(size_t) i]->setBounds (b.removeFromLeft (slotW).withSizeKeepingCentre (sz, sz));
+    }
+};
+
 struct CompressorPanel : public EditorPanelBase,
                          public juce::Timer
 {
@@ -589,6 +768,11 @@ struct CompressorPanel : public EditorPanelBase,
     std::unique_ptr<DualLabelToggle>     peakRmsTog;  // C3: Peak vs RMS detection
     std::unique_ptr<GRMeter>             grMeter;
     CompressorDSP*                       mDsp { nullptr };
+
+    void disableGrMeter() override
+    {
+        if (grMeter) { removeChildComponent (grMeter.get()); grMeter.reset(); }
+    }
 
     explicit CompressorPanel(CompressorDSP* dsp)
         : mDsp(dsp)
@@ -2713,6 +2897,11 @@ struct LimiterPanel : public EditorPanelBase,
     std::unique_ptr<GRMeter>            grMeter;
     LimiterDSP*                         mDsp { nullptr };
 
+    void disableGrMeter() override
+    {
+        if (grMeter) { removeChildComponent (grMeter.get()); grMeter.reset(); }
+    }
+
     std::vector<VKnob*> getExtraKnobs() override
     {
         std::vector<VKnob*> v;
@@ -3017,9 +3206,2144 @@ struct DeEsserPanel : public EditorPanelBase
     }
 };
 
-std::unique_ptr<juce::Component> createEffectEditor(DSPBase* effect, EffectType type)
+// ─────────────────────────────────────────────────────────────────────────────
+// I-5 (2026-05-02): Harmonics drive pedals batch -- 5 inline panels.
+//
+// Layout: right-clustered per locked spec call #8.  All controls live on the
+// right side of the panel near the dBFS meter; the left side is intentionally
+// empty so BaySickPedals (post-I-15) can host the same panel in a smaller
+// frame that crops the empty left portion.  In the FX rack the full panel
+// shows; the empty left is harmless visually.  All five panels:
+//   * inherit EditorPanelBase
+//   * use HarmonicLAF (matches the existing OverdriveDSP / SaturationDSP
+//     panel aesthetic; locked LAF group "Harmonics")
+//   * call disableOutputVolKnob() so the panel-owned Level knob is the only
+//     output control (no duplicate FX-rack Vol knob)
+//   * disable the input VU meter (keeps the layout clean for cropping)
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace
+{
+    // Shared helper: paint Hammerite olive panel + lay out a right-clustered
+    // knob row.  Knobs are laid right-to-left so the rightmost knob sits next
+    // to the dBFS meter.  Returns the leftover empty rectangle on the left.
+    juce::Rectangle<int> rightClusterKnobs (juce::Rectangle<int> bounds,
+                                             std::vector<std::unique_ptr<VKnob>>& ks,
+                                             int slotW = kKnobSz + 16,
+                                             int sz    = kKnobSz)
+    {
+        for (int i = (int) ks.size() - 1; i >= 0; --i)
+        {
+            auto col = bounds.removeFromRight (slotW);
+            ks[(size_t) i]->setBounds (col.withSizeKeepingCentre (sz, sz));
+        }
+        return bounds;   // remaining empty-left rect
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BluesDriveStylePanel — BD Style Blues Drive
+// 3 knobs: Drive / Tone / Level
+// ─────────────────────────────────────────────────────────────────────────────
+struct BluesDriveStylePanel : public EditorPanelBase
+{
+    BluesDriveStyleDSP* mDsp { nullptr };
+
+    explicit BluesDriveStylePanel (BluesDriveStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Drive", 0.f, 1.f, 0.5f, 0.001f, "Drive amount (0 = clean, 1 = heavy overdrive)" },
+            { "Tone",  0.f, 1.f, 0.5f, 0.001f, "Tone (LPF cutoff sweep 500 Hz - 5 kHz)" },
+            { "Level", -24.f, 12.f, 0.f, 0.1f, "Output level (dB)" },
+        });
+
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDrive ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setTone  ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevel ((float) knobs[2]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mDrive, juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mTone,  juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mLevel, juce::sendNotificationSync);
+        }
+    }
+
+    ~BluesDriveStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        HarmonicLAF::paintHammeritePanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        rightClusterKnobs (b, knobs);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OverdrivePedalPanel — OD Style Overdrive (Type::Pedal on OverdriveDSP)
+// Reuses OverdriveDSP existing knob fields: PreAmp = Drive, PostFilter = Tone,
+// PostGain = Level.
+// ─────────────────────────────────────────────────────────────────────────────
+struct OverdrivePedalPanel : public EditorPanelBase
+{
+    OverdriveDSP* mDsp { nullptr };
+
+    explicit OverdrivePedalPanel (OverdriveDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Drive", 0.f,    10.f,   5.f,   0.01f, "Drive amount (PreAmp gain into the dual-stage soft clip)" },
+            { "Tone",  200.f,  8000.f, 4000.f, 1.f,  "Tone -- post-clip LPF cutoff (Hz)" },
+            { "Level", -18.f,  18.f,   0.f,   0.1f,  "Output level (dB)" },
+        });
+        knobs[1]->slider.setSkewFactor (0.4);   // log-feel sweep on the Hz knob
+
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setPreAmp     ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setPostFilter ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setPostGain   ((float) knobs[2]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mPreAmp,     juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mPostFilter, juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mPostGain,   juce::sendNotificationSync);
+        }
+    }
+
+    ~OverdrivePedalPanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        HarmonicLAF::paintHammeritePanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        rightClusterKnobs (b, knobs);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DistortionStylePanel — DS Style Distortion
+// 3 knobs: Tone / Level / Dist
+// ─────────────────────────────────────────────────────────────────────────────
+struct DistortionStylePanel : public EditorPanelBase
+{
+    DistortionStyleDSP* mDsp { nullptr };
+
+    explicit DistortionStylePanel (DistortionStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Dist",  0.f,   1.f,   0.5f, 0.001f, "Distortion amount (drives the hard-clipper into a square wave at max)" },
+            { "Tone",  0.f,   1.f,   0.5f, 0.001f, "Tone (Big-Muff style tilt EQ -- left = darker, right = brighter, center = scoop)" },
+            { "Level", -24.f, 12.f,  0.f,  0.1f,   "Output level (dB)" },
+        });
+
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDist  ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setTone  ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevel ((float) knobs[2]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mDist,  juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mTone,  juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mLevel, juce::sendNotificationSync);
+        }
+    }
+
+    ~DistortionStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        HarmonicLAF::paintHammeritePanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        rightClusterKnobs (b, knobs);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FuzzStylePanel — FZ Style Fuzz
+// 3 controls: Level / Mode chickenhead (M / F / O) / Fuzz
+// ─────────────────────────────────────────────────────────────────────────────
+struct FuzzStylePanel : public EditorPanelBase
+{
+    FuzzStyleDSP* mDsp { nullptr };
+    std::unique_ptr<ChickenHeadSelector> modeSel;
+
+    explicit FuzzStylePanel (FuzzStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Fuzz",  0.f,   1.f,   0.5f, 0.001f, "Fuzz amount" },
+            { "Level", -24.f, 12.f,  0.f,  0.1f,   "Output level (dB)" },
+        });
+
+        modeSel = std::make_unique<ChickenHeadSelector>();
+        modeSel->setOptions ({
+            { "M", "Maestro",  "Bias-starved gated fuzz (Maestro FZ-1A character)" },
+            { "F", "Fuzz Face","Warm germanium soft tanh (Fuzz Face character)" },
+            { "O", "Octavia",  "Full-wave rectifier + hard clip (upper-octave Octavia character)" },
+        });
+        modeSel->setBodyTooltip ("Fuzz mode");
+        modeSel->setSelectedIndex (dsp ? (int) dsp->mMode : (int) FuzzStyleDSP::Mode::F,
+                                    juce::dontSendNotification);
+        modeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setMode (idx); };
+        addAndMakeVisible (*modeSel);
+
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setFuzz  ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevel ((float) knobs[1]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mFuzz,  juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mLevel, juce::sendNotificationSync);
+        }
+    }
+
+    ~FuzzStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        HarmonicLAF::paintHammeritePanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        // Mode chickenhead sits left of the knobs.  Right-cluster the knobs
+        // first, then place the chickenhead immediately left of them.
+        auto remainingLeft = rightClusterKnobs (b, knobs);
+        if (modeSel)
+        {
+            auto col = remainingLeft.removeFromRight (66);
+            modeSel->setBounds (col.reduced (2));
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HighGainStylePanel — MT Style High-Gain
+// 6 knobs: Level / Dist / High / Low / Mid Hz / Mid dB
+// ─────────────────────────────────────────────────────────────────────────────
+struct HighGainStylePanel : public EditorPanelBase
+{
+    HighGainStyleDSP* mDsp { nullptr };
+
+    explicit HighGainStylePanel (HighGainStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Dist",   0.f,    1.f,   0.5f,  0.001f, "Distortion amount (cascading hard-clip drive)" },
+            { "Low",    -15.f,  15.f,  0.f,   0.1f,   "Low shelf at 80 Hz (dB)" },
+            { "Mid Hz", 200.f,  5000.f, 800.f, 1.f,   "Mid peak frequency (Hz)" },
+            { "Mid dB", -15.f,  15.f,  0.f,   0.1f,   "Mid peak gain (dB)" },
+            { "High",   -15.f,  15.f,  0.f,   0.1f,   "High shelf at 5 kHz (dB)" },
+            { "Level",  -24.f,  12.f,  0.f,   0.1f,   "Output level (dB)" },
+        });
+        knobs[2]->slider.setSkewFactor (0.4);   // log-feel sweep on Mid Hz
+
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDist   ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLowDb  ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setMidHz  ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setMidDb  ((float) knobs[3]->slider.getValue()); };
+        knobs[4]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setHighDb ((float) knobs[4]->slider.getValue()); };
+        knobs[5]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevel  ((float) knobs[5]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mDist,   juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mLowDb,  juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mMidHz,  juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->mMidDb,  juce::sendNotificationSync);
+            knobs[4]->slider.setValue (dsp->mHighDb, juce::sendNotificationSync);
+            knobs[5]->slider.setValue (dsp->mLevel,  juce::sendNotificationSync);
+        }
+    }
+
+    ~HighGainStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        HarmonicLAF::paintHammeritePanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        // 6 knobs is wider than the other pedals; tighter slot to keep the
+        // right-cluster from spilling all the way across the panel.
+        rightClusterKnobs (b, knobs, kKnobSz + 4, kKnobSz);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BassDriverStylePanel — BB Style Bass Driver (5 knobs: Drive/Blend/Low/High/Level)
+// ─────────────────────────────────────────────────────────────────────────────
+struct BassDriverStylePanel : public EditorPanelBase
+{
+    BassDriverStyleDSP* mDsp { nullptr };
+
+    explicit BassDriverStylePanel (BassDriverStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Drive", 0.f,   1.f,  0.5f, 0.001f, "Drive amount on the Mid + High bands (Low band stays clean)" },
+            { "Blend", 0.f,   1.f,  0.7f, 0.001f, "Clean / clipped mix on the Mid+High bands" },
+            { "Low",   0.f,   1.f,  0.7f, 0.001f, "Low-band gain (clean VCA punch on the fundamental)" },
+            { "High",  0.f,   1.f,  0.7f, 0.001f, "High-band gain (post-clip)" },
+            { "Level", -24.f, 12.f, 0.f,  0.1f,   "Output level (dB)" },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDrive ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setBlend ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLow   ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setHigh  ((float) knobs[3]->slider.getValue()); };
+        knobs[4]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevel ((float) knobs[4]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mDrive, juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mBlend, juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mLow,   juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->mHigh,  juce::sendNotificationSync);
+            knobs[4]->slider.setValue (dsp->mLevel, juce::sendNotificationSync);
+        }
+    }
+
+    ~BassDriverStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        HarmonicLAF::paintHammeritePanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        rightClusterKnobs (b, knobs);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BassOverdriveStylePanel — ODB Style Bass Overdrive
+// 5 knobs: Gain / Balance / EQ-Low / EQ-High / Level
+// ─────────────────────────────────────────────────────────────────────────────
+struct BassOverdriveStylePanel : public EditorPanelBase
+{
+    BassOverdriveStyleDSP* mDsp { nullptr };
+
+    explicit BassOverdriveStylePanel (BassOverdriveStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Gain",    0.f,   1.f,  0.5f, 0.001f, "Drive amount (full-range hard clip)" },
+            { "Balance", 0.f,   1.f,  0.5f, 0.001f, "Dry / wet blend (0 = clean, 1 = fully clipped)" },
+            { "Low",     -15.f, 15.f, 0.f,  0.1f,   "EQ Low shelf at 100 Hz (post-blend; dB)" },
+            { "High",    -15.f, 15.f, 0.f,  0.1f,   "EQ High shelf at 3 kHz (post-blend; dB)" },
+            { "Level",   -24.f, 12.f, 0.f,  0.1f,   "Output level (dB)" },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setGain    ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setBalance ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setEqLow   ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setEqHigh  ((float) knobs[3]->slider.getValue()); };
+        knobs[4]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevel   ((float) knobs[4]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mGain,    juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mBalance, juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mEqLow,   juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->mEqHigh,  juce::sendNotificationSync);
+            knobs[4]->slider.setValue (dsp->mLevel,   juce::sendNotificationSync);
+        }
+    }
+
+    ~BassOverdriveStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        HarmonicLAF::paintHammeritePanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        rightClusterKnobs (b, knobs);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OctaveStylePanel — OC Style Octave (Polyphonic + Vintage modes)
+// 5 knobs (Direct / +1 Oct / -1 Oct / -2 Oct / Range) + Mode chickenhead.
+// ─────────────────────────────────────────────────────────────────────────────
+struct OctaveStylePanel : public EditorPanelBase
+{
+    OctaveStyleDSP* mDsp { nullptr };
+    std::unique_ptr<ChickenHeadSelector> modeSel;
+
+    explicit OctaveStylePanel (OctaveStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Direct", 0.f, 1.f, 1.0f, 0.001f, "Dry signal level (0 = effect only)" },
+            { "+1",     0.f, 1.f, 0.0f, 0.001f, "+1 octave shift level" },
+            { "-1",     0.f, 1.f, 0.5f, 0.001f, "-1 octave shift level" },
+            { "-2",     0.f, 1.f, 0.0f, 0.001f, "-2 octave shift level" },
+            { "Range",  0.f, 1.f, 0.6f, 0.001f, "Input LP cutoff (300 Hz - 3 kHz). Lower = better tracking on bass; higher = more harmonic content." },
+        });
+
+        modeSel = std::make_unique<ChickenHeadSelector>();
+        modeSel->setOptions ({
+            { "Po", "Polyphonic", "Granular pitch shifter -- clean octave shifts, works on chords" },
+            { "Vi", "Vintage",    "Schmitt-trigger divider + full-wave rectifier -- low-CPU squelchy character" },
+        });
+        modeSel->setBodyTooltip ("Octave mode");
+        modeSel->setSelectedIndex (dsp ? (int) dsp->mMode : 0, juce::dontSendNotification);
+        modeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setMode (idx); };
+        addAndMakeVisible (*modeSel);
+
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDirectLevel ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setOct1Up      ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setOct1Down    ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setOct2Down    ((float) knobs[3]->slider.getValue()); };
+        knobs[4]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setRange       ((float) knobs[4]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mDirectLevel, juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mOct1Up,      juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mOct1Down,    juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->mOct2Down,    juce::sendNotificationSync);
+            knobs[4]->slider.setValue (dsp->mRange,       juce::sendNotificationSync);
+        }
+    }
+
+    ~OctaveStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        HarmonicLAF::paintHammeritePanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        auto remainingLeft = rightClusterKnobs (b, knobs);
+        if (modeSel)
+        {
+            auto col = remainingLeft.removeFromRight (66);
+            modeSel->setBounds (col.reduced (2));
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NoiseGateStylePanel — NS Style Noise Gate
+// 2 knobs (Threshold / Decay) + Mode chickenhead (Reduction / Mute) +
+// Source chickenhead (DI / Self).
+// ─────────────────────────────────────────────────────────────────────────────
+struct NoiseGateStylePanel : public EditorPanelBase
+{
+    NoiseGateStyleDSP* mDsp { nullptr };
+    std::unique_ptr<ChickenHeadSelector> modeSel;
+    std::unique_ptr<ChickenHeadSelector> sourceSel;
+
+    explicit NoiseGateStylePanel (NoiseGateStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&DynamicsLAF::get());
+        setVolumeKnobVariant (true);
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Threshold", -60.f, 0.f,    -40.f,  0.1f, "Gate opens above this RMS level (dB); closes below" },
+            { "Decay",     1.f,   1000.f, 100.f,  1.f,  "Gate close release time (ms)" },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setThresholdDb ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDecayMs     ((float) knobs[1]->slider.getValue()); };
+
+        modeSel = std::make_unique<ChickenHeadSelector>();
+        modeSel->setOptions ({
+            { "Re", "Reduction", "Below threshold the signal is attenuated to -20 dB (lets some bleed through)" },
+            { "Mu", "Mute",      "Below threshold the signal is fully muted (-60 dB floor)" },
+        });
+        modeSel->setBodyTooltip ("Gate mode");
+        modeSel->setDefaultLabelColour (juce::Colours::black);
+        modeSel->setSelectedIndex (dsp ? (int) dsp->mMode : 0, juce::dontSendNotification);
+        modeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setMode (idx); };
+        addAndMakeVisible (*modeSel);
+
+        sourceSel = std::make_unique<ChickenHeadSelector>();
+        sourceSel->setOptions ({
+            { "DI", "DI Sidechain", "Detect from the strip's sidechain bus (clean pre-drive tap; preferred when this gate sits after distortion)" },
+            { "Sf", "Self",         "Detect from this gate's own input" },
+        });
+        sourceSel->setBodyTooltip ("Detector source");
+        sourceSel->setDefaultLabelColour (juce::Colours::black);
+        sourceSel->setSelectedIndex (dsp ? (int) dsp->mSource : 0, juce::dontSendNotification);
+        sourceSel->onChange = [dsp] (int idx) { if (dsp) dsp->setSource (idx); };
+        addAndMakeVisible (*sourceSel);
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mThresholdDb, juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mDecayMs,     juce::sendNotificationSync);
+        }
+    }
+
+    ~NoiseGateStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        DynamicsLAF::paintLA2APanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        auto remainingLeft = rightClusterKnobs (b, knobs);
+        if (modeSel)
+        {
+            auto col = remainingLeft.removeFromRight (66);
+            modeSel->setBounds (col.reduced (2));
+        }
+        remainingLeft.removeFromRight (4);
+        if (sourceSel)
+        {
+            auto col = remainingLeft.removeFromRight (66);
+            sourceSel->setBounds (col.reduced (2));
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BassCompressorStylePanel — BC Style Bass Compressor
+// 4 knobs (Comp / Ratio / Release / Level) + LED GR meter
+// ─────────────────────────────────────────────────────────────────────────────
+struct BassCompressorStylePanel : public EditorPanelBase, public juce::Timer
+{
+    BassCompressorStyleDSP* mDsp { nullptr };
+    std::unique_ptr<GRMeter> grMeter;
+
+    void disableGrMeter() override
+    {
+        if (grMeter) { removeChildComponent (grMeter.get()); grMeter.reset(); }
+    }
+
+    explicit BassCompressorStylePanel (BassCompressorStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&DynamicsLAF::get());
+        setVolumeKnobVariant (true);
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Comp",    0.f,   1.f,    0.5f,  0.001f, "Macro compression amount (lowers thresholds + raises ratios across all 3 bands)" },
+            { "Ratio",   1.f,   10.f,   4.f,   0.1f,   "Per-band ratio (multiplied by the Comp macro)" },
+            { "Release", 50.f,  500.f,  200.f, 1.f,    "Per-band release time (ms)" },
+            { "Level",   -24.f, 12.f,   0.f,   0.1f,   "Output level (dB)" },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setComp      ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setRatio     ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setReleaseMs ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevel     ((float) knobs[3]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mComp,     juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mRatio,    juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mReleaseMs, juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->mLevel,    juce::sendNotificationSync);
+        }
+
+        grMeter = std::make_unique<GRMeter>();
+        addAndMakeVisible (*grMeter);
+        startTimerHz (30);
+    }
+
+    ~BassCompressorStylePanel() override { stopTimer(); setLookAndFeel (nullptr); }
+
+    void timerCallback() override
+    {
+        if (grMeter && mDsp) grMeter->setGainReduction (mDsp->getGainReductionDb());
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        DynamicsLAF::paintLA2APanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        auto remainingLeft = rightClusterKnobs (b, knobs);
+        if (grMeter)
+        {
+            int gw = juce::jmin (96, remainingLeft.getHeight() + 8);
+            auto col = remainingLeft.removeFromRight (gw);
+            grMeter->setBounds (col.reduced (1, 2));
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SynthStylePanel — SY Style Polyphonic Synth
+// 6 knobs (Variation / Tone / Rate / Depth / Effect / Direct) + Type chickenhead
+// ─────────────────────────────────────────────────────────────────────────────
+struct SynthStylePanel : public EditorPanelBase
+{
+    SynthStyleDSP* mDsp { nullptr };
+    std::unique_ptr<ChickenHeadSelector> typeSel;
+
+    explicit SynthStylePanel (SynthStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&ModulationLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Var",    1.f, 11.f, 1.f,  1.f,    "Variation (sub-character within the Type)" },
+            { "Tone",   0.f, 1.f,  0.6f, 0.001f, "Synth voice tone (filter cutoff)" },
+            { "Rate",   0.f, 1.f,  0.3f, 0.001f, "LFO rate (modulates filter on Lead/Pad, amplitude on Seq)" },
+            { "Depth",  0.f, 1.f,  0.4f, 0.001f, "LFO depth" },
+            { "Effect", 0.f, 1.f,  0.5f, 0.001f, "Synth voice level" },
+            { "Direct", 0.f, 1.f,  1.0f, 0.001f, "Dry signal level" },
+        });
+
+        typeSel = std::make_unique<ChickenHeadSelector>();
+        typeSel->setOptions ({
+            { "Le", "Lead", "Saw lead voice -- fast envelope follow + filter LFO" },
+            { "Pa", "Pad",  "Sine/saw pad -- slow attack + gentle filter LFO" },
+            { "Ba", "Bass", "Square -1 oct bass voice -- fast envelope, no LFO" },
+            { "Sq", "Seq",  "Saw with LFO-modulated amplitude (rhythmic stutter)" },
+        });
+        typeSel->setBodyTooltip ("Voice type");
+        typeSel->setSelectedIndex (dsp ? (int) dsp->mType : 0, juce::dontSendNotification);
+        typeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setType (idx); };
+        addAndMakeVisible (*typeSel);
+
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setVariation   ((int)   knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setTone        ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setRate        ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDepth       ((float) knobs[3]->slider.getValue()); };
+        knobs[4]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setEffectLevel ((float) knobs[4]->slider.getValue()); };
+        knobs[5]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDirectLevel ((float) knobs[5]->slider.getValue()); };
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue ((double) dsp->mVariation,  juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mTone,        juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mRate,        juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->mDepth,       juce::sendNotificationSync);
+            knobs[4]->slider.setValue (dsp->mEffectLevel, juce::sendNotificationSync);
+            knobs[5]->slider.setValue (dsp->mDirectLevel, juce::sendNotificationSync);
+        }
+    }
+
+    ~SynthStylePanel() override { setLookAndFeel (nullptr); }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        auto remainingLeft = rightClusterKnobs (b, knobs, kKnobSz + 4, kKnobSz);
+        if (typeSel)
+        {
+            auto col = remainingLeft.removeFromRight (66);
+            typeSel->setBounds (col.reduced (2));
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WahStylePanel — PW Style Wah
+// 1 knob (Pedal Position) + Mode chickenhead (Vintage / Rich)
+// ─────────────────────────────────────────────────────────────────────────────
+struct WahStylePanel : public EditorPanelBase
+{
+    WahStyleDSP* mDsp { nullptr };
+    std::unique_ptr<ChickenHeadSelector> modeSel;
+
+    explicit WahStylePanel (WahStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&ModulationLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Pedal", 0.f, 1.f, 0.5f, 0.001f, "Pedal Position (0 = heel-down / dark, 1 = toe-down / bright). MIDI Learn binds an expression pedal CC; right-click the knob to assign." },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setPedalPosition ((float) knobs[0]->slider.getValue()); };
+
+        modeSel = std::make_unique<ChickenHeadSelector>();
+        modeSel->setOptions ({
+            { "Vi", "Vintage", "Standard wah -- single resonant bandpass swept by Pedal Position" },
+            { "Ri", "Rich",    "Vintage wah + parallel ~200 Hz lowpass blended at -6 dB so the bass fundamental survives the bandpass" },
+        });
+        modeSel->setBodyTooltip ("Wah mode");
+        modeSel->setSelectedIndex (dsp ? (int) dsp->mMode : 0, juce::dontSendNotification);
+        modeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setMode (idx); };
+        addAndMakeVisible (*modeSel);
+
+        if (dsp)
+            knobs[0]->slider.setValue (dsp->mPedalPosition, juce::sendNotificationSync);
+    }
+
+    ~WahStylePanel() override { setLookAndFeel (nullptr); }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        auto remainingLeft = rightClusterKnobs (b, knobs, kKnobSz + 4, kKnobSz);
+        if (modeSel)
+        {
+            auto col = remainingLeft.removeFromRight (66);
+            modeSel->setBounds (col.reduced (2));
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AcousticPreampStylePanel — AD Style Acoustic Preamp
+// 3 knobs (Resonance / Ambience / Notch) + Body chickenhead (Dr/Pa/Ju/Us) +
+// "Load IR..." button (visible/active when Body == User).
+// ─────────────────────────────────────────────────────────────────────────────
+struct AcousticPreampStylePanel : public EditorPanelBase
+{
+    AcousticPreampStyleDSP* mDsp { nullptr };
+    std::unique_ptr<ChickenHeadSelector> bodySel;
+    std::unique_ptr<juce::TextButton>    loadBtn;
+    std::unique_ptr<juce::FileChooser>   chooser;
+
+    explicit AcousticPreampStylePanel (AcousticPreampStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&TimeLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Resonance", 0.f,   1.f,    0.5f,  0.001f, "Body convolution wet/dry mix (Dry / Wet)" },
+            { "Ambience",  0.f,   1.f,    0.2f,  0.001f, "Schroeder reverberator wet/dry mix" },
+            { "Notch",     50.f, 1000.f,  250.f, 1.0f,   "Feedback-rejection notch frequency (50 Hz - 1 kHz, log-swept). Q fixed at ~10." },
+            { "Level",    -24.f,  12.f,   0.f,   0.1f,   "Output level (dB)" },
+        });
+        knobs[2]->slider.setSkewFactorFromMidPoint (224.0); // log feel for 50..1000 Hz
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setResonance ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setAmbience  ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setNotchHz   ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevelDb   ((float) knobs[3]->slider.getValue()); };
+
+        bodySel = std::make_unique<ChickenHeadSelector>();
+        bodySel->setOptions ({
+            { "Dr", "Dreadnought", "Big steel-string body. Punchy low-mids, body resonance ~100 Hz" },
+            { "Pa", "Parlor",      "Small steel-string body. Brighter, body resonance ~180 Hz" },
+            { "Ju", "Jumbo",       "Biggest body. Deep bass, body resonance ~80 Hz" },
+            { "Us", "User",        "Custom impulse response loaded from disk via the Load IR button" },
+        });
+        bodySel->setBodyTooltip ("Body type");
+        bodySel->setSelectedIndex (dsp ? (int) dsp->mBody : 0, juce::dontSendNotification);
+        bodySel->onChange = [this, dsp] (int idx)
+        {
+            if (dsp) dsp->setBody (idx);
+            updateLoadBtnState();
+        };
+        addAndMakeVisible (*bodySel);
+
+        loadBtn = std::make_unique<juce::TextButton> ("Load IR...");
+        loadBtn->setTooltip ("Load a custom impulse response (.wav) for the User body type");
+        loadBtn->onClick = [this]
+        {
+            if (! mDsp) return;
+            auto startDir = mDsp->getUserIRPath().isNotEmpty()
+                              ? juce::File (mDsp->getUserIRPath()).getParentDirectory()
+                              : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+            chooser = std::make_unique<juce::FileChooser> ("Pick acoustic IR", startDir, "*.wav");
+            chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (! f.existsAsFile() || ! mDsp) return;
+                    mDsp->loadUserIR (f);
+                    if (mDsp->mBody != AcousticPreampStyleDSP::Body::User)
+                    {
+                        mDsp->setBody ((int) AcousticPreampStyleDSP::Body::User);
+                        if (bodySel) bodySel->setSelectedIndex ((int) AcousticPreampStyleDSP::Body::User, juce::dontSendNotification);
+                    }
+                });
+        };
+        addAndMakeVisible (*loadBtn);
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mResonance01, juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mAmbience01,  juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mNotchHz,     juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->mLevelDb,     juce::sendNotificationSync);
+        }
+        updateLoadBtnState();
+    }
+
+    ~AcousticPreampStylePanel() override { setLookAndFeel (nullptr); }
+
+    void updateLoadBtnState()
+    {
+        if (! loadBtn) return;
+        const bool isUser = mDsp && mDsp->mBody == AcousticPreampStyleDSP::Body::User;
+        loadBtn->setAlpha (isUser ? 1.0f : 0.55f);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        TimeLAF::paintPultecPanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        auto remainingLeft = rightClusterKnobs (b, knobs);
+        if (bodySel)
+        {
+            auto col = remainingLeft.removeFromRight (70);
+            auto load = col.removeFromBottom (20);
+            if (loadBtn) loadBtn->setBounds (load.reduced (2, 1));
+            bodySel->setBounds (col.reduced (2));
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AcousticSimulatorStylePanel — AC Style Acoustic Simulator
+// 4 knobs (Top / Body / Reverb / Level) + Mode chickenhead (St/Ju/En/Pi/Us) +
+// "Load IR..." button (active when Mode == User).
+// ─────────────────────────────────────────────────────────────────────────────
+struct AcousticSimulatorStylePanel : public EditorPanelBase
+{
+    AcousticSimulatorStyleDSP* mDsp { nullptr };
+    std::unique_ptr<ChickenHeadSelector> modeSel;
+    std::unique_ptr<juce::TextButton>    loadBtn;
+    std::unique_ptr<juce::FileChooser>   chooser;
+
+    explicit AcousticSimulatorStylePanel (AcousticSimulatorStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&ModulationLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Top",    -15.f, 15.f, 0.f, 0.1f,   "Transient pick attack (HF shelf >4 kHz, modulated by envelope follower). +15 emphasizes pick clack; -15 ducks attack." },
+            { "Body",   -15.f, 15.f, 0.f, 0.1f,   "Body modeler depth (-15 = invert curve, 0 = flat, +15 = full character). In User mode this becomes IR wet/dry mix." },
+            { "Reverb",   0.f,  1.f, 0.2f, 0.001f,"Schroeder reverb wet/dry mix" },
+            { "Level",  -24.f, 12.f, 0.f, 0.1f,   "Output level (dB)" },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setTopDb   ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setBodyDb  ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setReverb  ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevelDb ((float) knobs[3]->slider.getValue()); };
+
+        modeSel = std::make_unique<ChickenHeadSelector>();
+        modeSel->setOptions ({
+            { "St", "Standard", "General acoustic emulation -- low-mid scoop, flat highs" },
+            { "Ju", "Jumbo",    "Massive low-end shelf boost, slightly scooped mids" },
+            { "En", "Enhanced", "High-shelf boost for hi-fi mix-ready tone" },
+            { "Pi", "Piezo",    "Pronounced upper-mid peak (~2-3 kHz) -- under-saddle pickup quack" },
+            { "Us", "User",     "Custom impulse response loaded from disk via Load IR. Body knob becomes IR wet/dry mix in this mode." },
+        });
+        modeSel->setBodyTooltip ("Body type / mode");
+        modeSel->setSelectedIndex (dsp ? (int) dsp->mMode : 0, juce::dontSendNotification);
+        modeSel->onChange = [this, dsp] (int idx)
+        {
+            if (dsp) dsp->setMode (idx);
+            updateLoadBtnState();
+        };
+        addAndMakeVisible (*modeSel);
+
+        loadBtn = std::make_unique<juce::TextButton> ("Load IR...");
+        loadBtn->setTooltip ("Load a custom impulse response (.wav) for User mode");
+        loadBtn->onClick = [this]
+        {
+            if (! mDsp) return;
+            auto startDir = mDsp->getUserIRPath().isNotEmpty()
+                              ? juce::File (mDsp->getUserIRPath()).getParentDirectory()
+                              : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+            chooser = std::make_unique<juce::FileChooser> ("Pick acoustic simulator IR", startDir, "*.wav");
+            chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (! f.existsAsFile() || ! mDsp) return;
+                    mDsp->loadUserIR (f);
+                    if (mDsp->mMode != AcousticSimulatorStyleDSP::Mode::User)
+                    {
+                        mDsp->setMode ((int) AcousticSimulatorStyleDSP::Mode::User);
+                        if (modeSel) modeSel->setSelectedIndex ((int) AcousticSimulatorStyleDSP::Mode::User, juce::dontSendNotification);
+                    }
+                    updateLoadBtnState();
+                });
+        };
+        addAndMakeVisible (*loadBtn);
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mTopDb,    juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mBodyDb,   juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mReverb01, juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->mLevelDb,  juce::sendNotificationSync);
+        }
+        updateLoadBtnState();
+    }
+
+    ~AcousticSimulatorStylePanel() override { setLookAndFeel (nullptr); }
+
+    void updateLoadBtnState()
+    {
+        if (! loadBtn) return;
+        const bool isUser = mDsp && mDsp->mMode == AcousticSimulatorStyleDSP::Mode::User;
+        loadBtn->setAlpha (isUser ? 1.0f : 0.55f);
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        auto remainingLeft = rightClusterKnobs (b, knobs);
+        if (modeSel)
+        {
+            auto col = remainingLeft.removeFromRight (70);
+            auto load = col.removeFromBottom (20);
+            if (loadBtn) loadBtn->setBounds (load.reduced (2, 1));
+            modeSel->setBounds (col.reduced (2));
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EQFader — Self-painted vertical fader for I-12 graphic EQ panels.
+// Bypasses TimeLAF/VibeLAF entirely so we get the locked spec look:
+//   * Vertical track with center-detent notch
+//   * Rectangular thumb cap with bevel
+//   * Snaps to 0 dB within +/-1.5 dB of center
+// ─────────────────────────────────────────────────────────────────────────────
+class EQFader : public VibeSlider
+{
+public:
+    EQFader() : VibeSlider (juce::Slider::LinearVertical, juce::Slider::NoTextBox)
+    {
+        setDoubleClickReturnValue (true, 0.0);
+        // Disable LAF interference -- we paint everything ourselves.
+        setColour (juce::Slider::backgroundColourId,    juce::Colours::transparentBlack);
+        setColour (juce::Slider::trackColourId,         juce::Colours::transparentBlack);
+        setColour (juce::Slider::thumbColourId,         juce::Colours::transparentBlack);
+        setColour (juce::Slider::rotarySliderFillColourId, juce::Colours::transparentBlack);
+        setColour (juce::Slider::rotarySliderOutlineColourId, juce::Colours::transparentBlack);
+    }
+
+    double snapValue (double v, DragMode) override
+    {
+        return (std::abs (v) < 1.5) ? 0.0 : v;
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto b = getLocalBounds().toFloat().reduced (2.0f);
+        if (b.isEmpty()) return;
+
+        const float cx = b.getCentreX();
+
+        // ── Track (dark inset rounded rectangle down the centre) ───────────
+        const float trackW = 4.0f;
+        juce::Rectangle<float> track (cx - trackW * 0.5f, b.getY(), trackW, b.getHeight());
+        g.setColour (juce::Colour (0xff181818));
+        g.fillRoundedRectangle (track, 2.0f);
+        g.setColour (juce::Colour (0xff080808));
+        g.drawRoundedRectangle (track, 2.0f, 1.0f);
+
+        // ── Center-detent notch ─────────────────────────────────────────────
+        const float midY = b.getY() + b.getHeight() * 0.5f;
+        g.setColour (juce::Colour (0xffaaaaaa));
+        g.fillRect (cx - 8.0f, midY - 0.75f, 16.0f, 1.5f);
+
+        // ── Compute cap position from current value ─────────────────────────
+        const auto range = getRange();
+        const double rangeLen = range.getLength();
+        if (rangeLen <= 0.0) return;
+
+        // Apply the slider's skew so the cap visually matches the value.
+        const double v01 = valueToProportionOfLength (getValue());
+        const float capY = b.getBottom() - (float) v01 * b.getHeight();
+
+        // ── Rectangular cap (the fader thumb) ───────────────────────────────
+        const float capW = juce::jmin (b.getWidth() - 4.0f, 22.0f);
+        const float capH = 14.0f;
+        juce::Rectangle<float> cap (cx - capW * 0.5f, capY - capH * 0.5f, capW, capH);
+
+        // Cap fill (light grey with a subtle vertical gradient for body).
+        juce::ColourGradient grad (juce::Colour (0xffe6e6e6), cap.getX(), cap.getY(),
+                                    juce::Colour (0xffb0b0b0), cap.getX(), cap.getBottom(),
+                                    false);
+        g.setGradientFill (grad);
+        g.fillRoundedRectangle (cap, 2.0f);
+
+        // Cap outline.
+        g.setColour (juce::Colour (0xff303030));
+        g.drawRoundedRectangle (cap, 2.0f, 1.0f);
+
+        // Cap centre indicator stripe (the actual value reference line on the cap).
+        g.setColour (juce::Colour (0xff202020));
+        g.fillRect (cap.getX() + 2.0f, cap.getCentreY() - 0.75f,
+                    cap.getWidth() - 4.0f, 1.5f);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GraphicEQStylePanel — GE Style 7-band guitar graphic EQ
+// 7 vertical faders (each band) + 1 vertical fader (master Level).
+// All faders snap to 0 dB at center detent; rectangular caps painted by EQFader.
+// ─────────────────────────────────────────────────────────────────────────────
+struct GraphicEQStylePanel : public EditorPanelBase
+{
+    GraphicEQStyleDSP* mDsp { nullptr };
+    std::array<std::unique_ptr<EQFader>,    GraphicEQStyleDSP::kNumBands + 1> faders;
+    std::array<std::unique_ptr<juce::Label>, GraphicEQStyleDSP::kNumBands + 1> labels;
+
+    explicit GraphicEQStylePanel (GraphicEQStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&TimeLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        for (int i = 0; i < GraphicEQStyleDSP::kNumBands; ++i)
+        {
+            auto f = std::make_unique<EQFader>();
+            f->setRange (-15.0, 15.0, 0.1);
+            f->setValue (dsp ? dsp->getBandDb (i) : 0.0, juce::dontSendNotification);
+            f->onValueChange = [this, i] { if (mDsp) mDsp->setBandDb (i, (float) faders[i]->getValue()); };
+            f->setTooltip (juce::String ((int) GraphicEQStyleDSP::kFreqs[i]) + " Hz - +/-15 dB peaking band");
+            addAndMakeVisible (*f);
+            faders[i] = std::move (f);
+
+            auto l = std::make_unique<juce::Label>();
+            l->setJustificationType (juce::Justification::centred);
+            const float hz = GraphicEQStyleDSP::kFreqs[i];
+            l->setText (hz >= 1000.0f ? juce::String (hz / 1000.0f, 1) + "k" : juce::String ((int) hz),
+                        juce::dontSendNotification);
+            l->setFont (juce::Font (10.0f));
+            l->setColour (juce::Label::textColourId, VC::Text);
+            addAndMakeVisible (*l);
+            labels[i] = std::move (l);
+        }
+
+        // Master Level fader (-inf..+12).
+        {
+            auto f = std::make_unique<EQFader>();
+            f->setRange (-60.0, 12.0, 0.1);
+            f->setSkewFactorFromMidPoint (0.0);
+            f->setValue (dsp ? dsp->getLevelDb() : 0.0, juce::dontSendNotification);
+            f->onValueChange = [this] { if (mDsp) mDsp->setLevelDb ((float) faders[GraphicEQStyleDSP::kNumBands]->getValue()); };
+            f->setTooltip ("Master output level (-inf..+12 dB).  Center detent at 0 dB.");
+            addAndMakeVisible (*f);
+            faders[GraphicEQStyleDSP::kNumBands] = std::move (f);
+
+            auto l = std::make_unique<juce::Label>();
+            l->setJustificationType (juce::Justification::centred);
+            l->setText ("Lvl", juce::dontSendNotification);
+            l->setFont (juce::Font (10.0f));
+            l->setColour (juce::Label::textColourId, VC::Text);
+            addAndMakeVisible (*l);
+            labels[GraphicEQStyleDSP::kNumBands] = std::move (l);
+        }
+    }
+
+    ~GraphicEQStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        TimeLAF::paintPultecPanel (g, getLocalBounds());
+
+        // Center detent line across all faders (0 dB reference).
+        auto b = getLocalBounds().reduced (4, 4);
+        b.removeFromRight (32 + 4);   // dBFS meter + spacing
+        const int labelH = 14;
+        b.removeFromBottom (labelH);
+
+        const int total = GraphicEQStyleDSP::kNumBands + 1;
+        const int colW = b.getWidth() / total;
+        g.setColour (VC::Text.withAlpha (0.25f));
+        for (int i = 0; i < total; ++i)
+        {
+            auto col = b.withX (b.getX() + i * colW).withWidth (colW).reduced (4, 0);
+            const float midY = (float) col.getY() + (float) col.getHeight() * 0.5f;
+            g.drawLine ((float) col.getX(), midY, (float) col.getRight(), midY, 1.0f);
+        }
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+
+        const int labelH = 14;
+        auto labelRow = b.removeFromBottom (labelH);
+
+        const int total = GraphicEQStyleDSP::kNumBands + 1;
+        const int colW = b.getWidth() / total;
+        for (int i = 0; i < total; ++i)
+        {
+            auto col      = b.withX (b.getX() + i * colW).withWidth (colW);
+            auto labelCol = labelRow.withX (labelRow.getX() + i * colW).withWidth (colW);
+            if (faders[i]) faders[i]->setBounds (col.reduced (4, 2));
+            if (labels[i]) labels[i]->setBounds (labelCol);
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BassGraphicEQStylePanel — GEB Style 7-band bass graphic EQ
+// Mirrors GE panel; bass-tuned freq labels.
+// ─────────────────────────────────────────────────────────────────────────────
+struct BassGraphicEQStylePanel : public EditorPanelBase
+{
+    BassGraphicEQStyleDSP* mDsp { nullptr };
+    std::array<std::unique_ptr<EQFader>,    BassGraphicEQStyleDSP::kNumBands + 1> faders;
+    std::array<std::unique_ptr<juce::Label>, BassGraphicEQStyleDSP::kNumBands + 1> labels;
+
+    explicit BassGraphicEQStylePanel (BassGraphicEQStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&TimeLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        for (int i = 0; i < BassGraphicEQStyleDSP::kNumBands; ++i)
+        {
+            auto f = std::make_unique<EQFader>();
+            f->setRange (-15.0, 15.0, 0.1);
+            f->setValue (dsp ? dsp->getBandDb (i) : 0.0, juce::dontSendNotification);
+            f->onValueChange = [this, i] { if (mDsp) mDsp->setBandDb (i, (float) faders[i]->getValue()); };
+            f->setTooltip (juce::String ((int) BassGraphicEQStyleDSP::kFreqs[i]) + " Hz - +/-15 dB peaking band");
+            addAndMakeVisible (*f);
+            faders[i] = std::move (f);
+
+            auto l = std::make_unique<juce::Label>();
+            l->setJustificationType (juce::Justification::centred);
+            const float hz = BassGraphicEQStyleDSP::kFreqs[i];
+            l->setText (hz >= 1000.0f ? juce::String (hz / 1000.0f, 1) + "k" : juce::String ((int) hz),
+                        juce::dontSendNotification);
+            l->setFont (juce::Font (10.0f));
+            l->setColour (juce::Label::textColourId, VC::Text);
+            addAndMakeVisible (*l);
+            labels[i] = std::move (l);
+        }
+
+        {
+            auto f = std::make_unique<EQFader>();
+            f->setRange (-60.0, 12.0, 0.1);
+            f->setSkewFactorFromMidPoint (0.0);   // 0 dB sits at visual midpoint
+            f->setValue (dsp ? dsp->getLevelDb() : 0.0, juce::dontSendNotification);
+            f->onValueChange = [this] { if (mDsp) mDsp->setLevelDb ((float) faders[BassGraphicEQStyleDSP::kNumBands]->getValue()); };
+            f->setTooltip ("Master output level (-inf..+12 dB).  Center detent at 0 dB.");
+            addAndMakeVisible (*f);
+            faders[BassGraphicEQStyleDSP::kNumBands] = std::move (f);
+
+            auto l = std::make_unique<juce::Label>();
+            l->setJustificationType (juce::Justification::centred);
+            l->setText ("Lvl", juce::dontSendNotification);
+            l->setFont (juce::Font (10.0f));
+            l->setColour (juce::Label::textColourId, VC::Text);
+            addAndMakeVisible (*l);
+            labels[BassGraphicEQStyleDSP::kNumBands] = std::move (l);
+        }
+    }
+
+    ~BassGraphicEQStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        TimeLAF::paintPultecPanel (g, getLocalBounds());
+
+        auto b = getLocalBounds().reduced (4, 4);
+        b.removeFromRight (32 + 4);
+        const int labelH = 14;
+        b.removeFromBottom (labelH);
+
+        const int total = BassGraphicEQStyleDSP::kNumBands + 1;
+        const int colW = b.getWidth() / total;
+        g.setColour (VC::Text.withAlpha (0.25f));
+        for (int i = 0; i < total; ++i)
+        {
+            auto col = b.withX (b.getX() + i * colW).withWidth (colW).reduced (4, 0);
+            const float midY = (float) col.getY() + (float) col.getHeight() * 0.5f;
+            g.drawLine ((float) col.getX(), midY, (float) col.getRight(), midY, 1.0f);
+        }
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+
+        const int labelH = 14;
+        auto labelRow = b.removeFromBottom (labelH);
+
+        const int total = BassGraphicEQStyleDSP::kNumBands + 1;
+        const int colW = b.getWidth() / total;
+        for (int i = 0; i < total; ++i)
+        {
+            auto col      = b.withX (b.getX() + i * colW).withWidth (colW);
+            auto labelCol = labelRow.withX (labelRow.getX() + i * colW).withWidth (colW);
+            if (faders[i]) faders[i]->setBounds (col.reduced (4, 2));
+            if (labels[i]) labels[i]->setBounds (labelCol);
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FurmanEQStylePanel — EQFH Style Pro Parametric EQ (Furman PQ-3)
+// Per band (Low / Mid / High): Freq knob + Boost slider + Q knob.
+// Plus master Input Volume knob + Bypass toggle.
+// ─────────────────────────────────────────────────────────────────────────────
+struct FurmanEQStylePanel : public EditorPanelBase
+{
+    FurmanEQStyleDSP* mDsp { nullptr };
+
+    struct BandStrip
+    {
+        std::unique_ptr<VKnob>      freq;
+        std::unique_ptr<VKnob>      boost;
+        std::unique_ptr<VKnob>      q;
+        std::unique_ptr<juce::Label> name;
+    };
+    std::array<BandStrip, FurmanEQStyleDSP::kNumBands> strips;
+
+    std::unique_ptr<VKnob>            inputVol;
+    std::unique_ptr<juce::TextButton> bypassBtn;
+
+    explicit FurmanEQStylePanel (FurmanEQStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&TimeLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        const char* bandNames[FurmanEQStyleDSP::kNumBands] = { "Low", "Mid", "High" };
+
+        for (int i = 0; i < FurmanEQStyleDSP::kNumBands; ++i)
+        {
+            auto& s = strips[i];
+
+            s.freq = std::make_unique<VKnob>("Freq",
+                dsp ? dsp->getFreq (i) : FurmanEQStyleDSP::kFreqDef[i],
+                "Center frequency");
+            s.freq->slider.setRange (FurmanEQStyleDSP::kFreqMin[i], FurmanEQStyleDSP::kFreqMax[i], 1.0);
+            s.freq->slider.setSkewFactorFromMidPoint
+                ((double) std::sqrt (FurmanEQStyleDSP::kFreqMin[i] * FurmanEQStyleDSP::kFreqMax[i]));
+            s.freq->slider.setValue (dsp ? dsp->getFreq (i) : FurmanEQStyleDSP::kFreqDef[i],
+                                     juce::dontSendNotification);
+            s.freq->slider.onValueChange = [this, i] { if (mDsp) mDsp->setFreq (i, (float) strips[i].freq->slider.getValue()); };
+            addAndMakeVisible (*s.freq);
+
+            s.boost = std::make_unique<VKnob>("Boost",
+                dsp ? dsp->getBoostDb (i) : 0.0f,
+                "Boost (-inf..+20 dB).  0 dB at center (knob noon).  Double-click to return to 0 dB.");
+            s.boost->slider.setRange (-60.0, 20.0, 0.1);
+            // 0 dB at knob noon; range is asymmetric (-60..+20) so skew the slider so 0 is the midpoint.
+            s.boost->slider.setSkewFactorFromMidPoint (0.0);
+            s.boost->slider.setDoubleClickReturnValue (true, 0.0);
+            s.boost->slider.setValue (dsp ? dsp->getBoostDb (i) : 0.0, juce::dontSendNotification);
+            s.boost->slider.onValueChange = [this, i] { if (mDsp) mDsp->setBoostDb (i, (float) strips[i].boost->slider.getValue()); };
+            addAndMakeVisible (*s.boost);
+
+            s.q = std::make_unique<VKnob>("Q",
+                dsp ? dsp->getQ (i) : 0.7f,
+                "Bandwidth (Q): low values = wider, high values = narrower");
+            s.q->slider.setRange (0.1, 10.0, 0.01);
+            s.q->slider.setSkewFactorFromMidPoint (0.7);
+            s.q->slider.setValue (dsp ? dsp->getQ (i) : 0.7, juce::dontSendNotification);
+            s.q->slider.onValueChange = [this, i] { if (mDsp) mDsp->setQ (i, (float) strips[i].q->slider.getValue()); };
+            addAndMakeVisible (*s.q);
+
+            s.name = std::make_unique<juce::Label>();
+            s.name->setText (bandNames[i], juce::dontSendNotification);
+            s.name->setJustificationType (juce::Justification::centred);
+            s.name->setFont (juce::Font (12.0f, juce::Font::bold));
+            s.name->setColour (juce::Label::textColourId, VC::Text);
+            addAndMakeVisible (*s.name);
+        }
+
+        inputVol = std::make_unique<VKnob>("Input",
+            dsp ? dsp->getInputVolDb() : 0.0f,
+            "Master Input Volume (0 to +86 dB).  Above ~+12 dB the soft-clipper engages -- emulates the Furman PQ-3 preamp's analog clipping.");
+        inputVol->slider.setRange (0.0, 86.0, 0.1);
+        inputVol->slider.setSkewFactorFromMidPoint (24.0);
+        inputVol->slider.setValue (dsp ? dsp->getInputVolDb() : 0.0, juce::dontSendNotification);
+        inputVol->slider.onValueChange = [this] { if (mDsp) mDsp->setInputVolDb ((float) inputVol->slider.getValue()); };
+        addAndMakeVisible (*inputVol);
+
+        bypassBtn = std::make_unique<juce::TextButton>("EQ Bypass");
+        bypassBtn->setClickingTogglesState (true);
+        bypassBtn->setTooltip ("EQ Bypass -- bypasses the 3 parametric bands ONLY; preamp saturation stays active");
+        bypassBtn->setToggleState (dsp && dsp->isEqBypassed(), juce::dontSendNotification);
+        bypassBtn->onClick = [this] { if (mDsp) mDsp->setEqBypassed (bypassBtn->getToggleState()); };
+        addAndMakeVisible (*bypassBtn);
+    }
+
+    ~FurmanEQStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        TimeLAF::paintPultecPanel (g, getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+
+        // dBFS column (only in Full mode -- pedal mode strips it via createEffectEditor).
+        if (dbfsOut)
+        {
+            dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+            b.removeFromRight (4);
+        }
+
+        // Right cluster: Input Volume knob (top) + Bypass button (below).
+        const int rightW = kKnobSz + 14;
+        auto rightCol = b.removeFromRight (rightW);
+        if (inputVol)
+            inputVol->setBounds (rightCol.removeFromTop (kKnobSz + 14)
+                                            .withSizeKeepingCentre (kKnobSz, kKnobSz + 14));
+        rightCol.removeFromTop (4);
+        if (bypassBtn) bypassBtn->setBounds (rightCol.removeFromTop (22).reduced (2, 0));
+
+        b.removeFromRight (4);
+
+        // Pedal mode = 3x3 grid (3 bands as rows, 3 knobs per row); the
+        // BaySickPedals tile is tall enough to fit it cleanly.  Full mode =
+        // single horizontal row of 9 knobs (FX rack panel is short + wide).
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+        {
+            // 3x3 grid layout.
+            const int rowH = b.getHeight() / FurmanEQStyleDSP::kNumBands;
+            for (int i = 0; i < FurmanEQStyleDSP::kNumBands; ++i)
+            {
+                auto row  = b.removeFromTop (rowH);
+                // Band-name label on the left.
+                const int labelW = 38;
+                auto label = row.removeFromLeft (labelW);
+                if (strips[i].name) strips[i].name->setBounds (label);
+
+                // 3 knobs spread across the rest of the row.
+                const int colW = row.getWidth() / 3;
+                const int kSz  = juce::jmin (colW - 2, juce::jmax (28, rowH - 14));
+                auto place = [&] (VKnob* k, int idx)
+                {
+                    if (! k) return;
+                    const int cellX = row.getX() + idx * colW;
+                    k->setBounds (juce::Rectangle<int> (cellX, row.getY(), colW, row.getHeight())
+                                      .withSizeKeepingCentre (kSz, juce::jmin (row.getHeight(), kSz + 14)));
+                };
+                place (strips[i].freq.get(),  0);
+                place (strips[i].boost.get(), 1);
+                place (strips[i].q.get(),     2);
+            }
+            return;
+        }
+
+        // Full mode: single horizontal row.
+        const int headerH = 14;
+        auto headerRow = b.removeFromTop (headerH);
+
+        const int totalKnobs = FurmanEQStyleDSP::kNumBands * 3;
+        const int knobCellW  = b.getWidth() / totalKnobs;
+        const int kSz        = juce::jmin (knobCellW - 2, kKnobSz);
+
+        for (int i = 0; i < FurmanEQStyleDSP::kNumBands; ++i)
+        {
+            const int bandX = b.getX() + i * knobCellW * 3;
+            const int bandW = knobCellW * 3;
+            if (strips[i].name)
+                strips[i].name->setBounds (juce::Rectangle<int> (bandX, headerRow.getY(), bandW, headerH));
+
+            auto place = [&] (VKnob* k, int slot)
+            {
+                if (! k) return;
+                const int cellX = bandX + slot * knobCellW;
+                k->setBounds (juce::Rectangle<int> (cellX, b.getY(), knobCellW, b.getHeight())
+                                  .withSizeKeepingCentre (kSz, juce::jmin (b.getHeight(), kSz + 14)));
+            };
+            place (strips[i].freq.get(),  0);
+            place (strips[i].boost.get(), 1);
+            place (strips[i].q.get(),     2);
+        }
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TunerStylePanel — TU Style Tuner
+// Strobe LED display + chromatic note + cents indicator + Mute / 432 toggles
+// + Trim knob + Mode chickenhead + display-style switch (Strobe / LED bar).
+// 60 fps repaint; reads pitch via wait-free atomics from TunerStyleDSP.
+// ─────────────────────────────────────────────────────────────────────────────
+struct TunerStylePanel : public EditorPanelBase, private juce::Timer
+{
+    TunerStyleDSP* mDsp { nullptr };
+
+    enum class DisplayStyle : int { Strobe = 0, LEDBar = 1 };
+    DisplayStyle mDisplay { DisplayStyle::LEDBar };
+
+    std::unique_ptr<ChickenHeadSelector> modeSel;
+    std::unique_ptr<ChickenHeadSelector> displaySel;
+    std::unique_ptr<juce::TextButton>    muteBtn;
+    std::unique_ptr<juce::TextButton>    btn432;
+    std::unique_ptr<VKnob>               trimKnob;
+
+    // Latest cached reading for paint().
+    bool                  mHasReading { false };
+    TunerStyleDSP::Reading mReading {};
+
+    // Strobe scroll phase (advanced each frame proportional to cents-error).
+    float mStrobePhase { 0.0f };
+
+    explicit TunerStylePanel (TunerStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&ModulationLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        // Trim knob -- range follows the 432-toggle.  We re-set range on toggle.
+        trimKnob = std::make_unique<VKnob>("Trim",
+            dsp ? dsp->getTrimHz() : 440.0f,
+            "Reference Hz fine-trim.  Range is 436-445 Hz in 440 mode, 428-437 Hz in 432 mode.");
+        if (dsp)
+        {
+            float lo = 0.0f, hi = 0.0f;
+            dsp->getTrimRange (lo, hi);
+            trimKnob->slider.setRange (lo, hi, 0.1);
+            trimKnob->slider.setValue (dsp->getTrimHz(), juce::dontSendNotification);
+        }
+        else
+        {
+            trimKnob->slider.setRange (436.0, 445.0, 0.1);
+            trimKnob->slider.setValue (440.0, juce::dontSendNotification);
+        }
+        trimKnob->slider.onValueChange = [this] { if (mDsp) mDsp->setTrimHz ((float) trimKnob->slider.getValue()); };
+        addAndMakeVisible (*trimKnob);
+
+        modeSel = std::make_unique<ChickenHeadSelector>();
+        modeSel->setOptions ({
+            { "Ch", "Chromatic", "Detect all 12 notes (no snap)" },
+            { "Gt", "Guitar",    "Snap to nearest standard guitar tuning open string (E A D G B E)" },
+            { "Bs", "Bass",      "Snap to nearest standard bass tuning open string (E A D G)" },
+        });
+        modeSel->setBodyTooltip ("Detection mode");
+        modeSel->setSelectedIndex (dsp ? (int) dsp->getMode() : 0, juce::dontSendNotification);
+        modeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setMode (idx); };
+        addAndMakeVisible (*modeSel);
+
+        displaySel = std::make_unique<ChickenHeadSelector>();
+        displaySel->setOptions ({
+            { "St", "Strobe", "Strobe LED -- moving stripes; freeze = in tune, scroll up = sharp, scroll down = flat" },
+            { "LB", "LED Bar","LED bar -- horizontal row of LEDs; lit cell shows cents offset, center = in tune" },
+        });
+        displaySel->setBodyTooltip ("Display style");
+        displaySel->setSelectedIndex ((int) mDisplay, juce::dontSendNotification);
+        displaySel->onChange = [this] (int idx) { mDisplay = (DisplayStyle) idx; repaint(); };
+        addAndMakeVisible (*displaySel);
+
+        muteBtn = std::make_unique<juce::TextButton>("Mute");
+        muteBtn->setClickingTogglesState (true);
+        muteBtn->setTooltip ("Silence the audio output while tuning");
+        muteBtn->setToggleState (dsp && dsp->isMuted(), juce::dontSendNotification);
+        muteBtn->onClick = [this] { if (mDsp) mDsp->setMuted (muteBtn->getToggleState()); };
+        addAndMakeVisible (*muteBtn);
+
+        btn432 = std::make_unique<juce::TextButton>("432");
+        btn432->setClickingTogglesState (true);
+        btn432->setTooltip ("Toggle reference between 440 Hz (off) and 432 Hz (on).  Trim range follows.");
+        btn432->setToggleState (dsp && dsp->is432(), juce::dontSendNotification);
+        btn432->onClick = [this]
+        {
+            if (! mDsp) return;
+            mDsp->set432 (btn432->getToggleState());
+            // Update Trim knob range + value to follow the new mode.
+            float lo = 0.0f, hi = 0.0f;
+            mDsp->getTrimRange (lo, hi);
+            trimKnob->slider.setRange (lo, hi, 0.1);
+            trimKnob->slider.setValue (mDsp->getTrimHz(), juce::dontSendNotification);
+        };
+        addAndMakeVisible (*btn432);
+
+        startTimerHz (60);
+    }
+
+    ~TunerStylePanel() override
+    {
+        stopTimer();
+        setLookAndFeel (nullptr);
+    }
+
+    void timerCallback() override
+    {
+        if (! mDsp) return;
+        TunerStyleDSP::Reading r {};
+        const bool ok = mDsp->getReading (r);
+        if (ok != mHasReading || (ok && std::abs (r.frequencyHz - mReading.frequencyHz) > 0.01f))
+        {
+            mHasReading = ok;
+            mReading    = r;
+        }
+
+        // Advance strobe phase based on cents-error.
+        if (mHasReading)
+        {
+            const float cents = mReading.centsFromTarget;
+            // Strobe scroll speed = cents * 0.02 per frame (clamped).
+            mStrobePhase += juce::jlimit (-2.0f, 2.0f, cents * 0.02f);
+            if (mStrobePhase >= 1.0f) mStrobePhase -= 1.0f;
+            else if (mStrobePhase < 0.0f) mStrobePhase += 1.0f;
+        }
+        repaint();
+    }
+
+    static juce::String midiToName (int midi)
+    {
+        static const char* names[] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
+        const int oct  = (midi / 12) - 1;
+        const int idx  = juce::jlimit (0, 11, midi % 12);
+        return juce::String (names[idx]) + juce::String (oct);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        // ModulationLAF panels use the default VC::Panel background; paint our own
+        // dark display surface inside.
+        auto full = getLocalBounds();
+        g.fillAll (juce::Colour (0xff0a0a0a));
+
+        auto display = full.reduced (4, 4);
+        // Carve out right column for controls (knob + chickenheads + buttons).
+        const int rightW = juce::jmin (display.getWidth() / 3 + 30, 230);
+        display.removeFromRight (rightW);
+        // Reserve dBFS column.
+        display.removeFromRight (32 + 4);
+
+        // Display surface bg (sub-component).
+        auto disp = display.reduced (4, 4);
+        g.setColour (juce::Colour (0xff111111));
+        g.fillRoundedRectangle (disp.toFloat(), 4.0f);
+        g.setColour (juce::Colour (0xff222222));
+        g.drawRoundedRectangle (disp.toFloat(), 4.0f, 1.0f);
+
+        // ── Note name + cents reading text ──────────────────────────────────
+        const int textRowH = juce::jmax (24, disp.getHeight() / 3);
+        auto textRow = disp.removeFromTop (textRowH);
+
+        if (mHasReading)
+        {
+            const auto nameStr  = midiToName (mReading.targetNote);
+            const float cents   = mReading.centsFromTarget;
+            const bool inTune   = std::abs (cents) < 3.0f;
+
+            g.setColour (inTune ? juce::Colour (0xff44ff88) : juce::Colour (0xfff0f0d0));
+            g.setFont (juce::Font (24.0f, juce::Font::bold));
+            g.drawText (nameStr, textRow.reduced (8, 0), juce::Justification::centredLeft);
+
+            g.setColour (inTune ? juce::Colour (0xff44ff88) : juce::Colour (0xffaaaaaa));
+            g.setFont (juce::Font (14.0f));
+            const juce::String centsStr = (cents >= 0.0f ? "+" : "") + juce::String ((int) std::round (cents)) + "c";
+            g.drawText (centsStr, textRow.reduced (8, 0), juce::Justification::centredRight);
+
+            g.setColour (juce::Colour (0xff666666));
+            g.setFont (juce::Font (10.0f));
+            g.drawText (juce::String (mReading.frequencyHz, 1) + " Hz",
+                        textRow.reduced (8, 0).translated (0, textRow.getHeight() / 2 - 6),
+                        juce::Justification::centred);
+        }
+        else
+        {
+            g.setColour (juce::Colour (0xff444444));
+            g.setFont (juce::Font (14.0f));
+            g.drawText ("--", textRow, juce::Justification::centred);
+        }
+
+        // ── Strobe / LED bar visualization ──────────────────────────────────
+        auto vis = disp.reduced (8, 6);
+        if (mDisplay == DisplayStyle::Strobe)
+            paintStrobe (g, vis);
+        else
+            paintLEDBar (g, vis);
+    }
+
+    void paintStrobe (juce::Graphics& g, juce::Rectangle<int> b)
+    {
+        const int n = 12;        // 12 stripes
+        const float w = (float) b.getWidth() / (float) n;
+        for (int i = 0; i < n; ++i)
+        {
+            const float x = (float) b.getX() + (i + mStrobePhase) * w;
+            const float wrappedX = std::fmod (x - (float) b.getX(),
+                                              (float) b.getWidth() + w);
+            const auto cell = juce::Rectangle<float> (
+                (float) b.getX() + wrappedX, (float) b.getY(),
+                w * 0.55f, (float) b.getHeight());
+            // Alternating colour based on which stripe is moving.
+            const bool inTune = mHasReading && std::abs (mReading.centsFromTarget) < 3.0f;
+            const auto colour = inTune
+                ? juce::Colour (0xff44ff88)
+                : juce::Colour (0xffffaa20);
+            g.setColour (colour.withAlpha (mHasReading ? 0.9f : 0.25f));
+            g.fillRect (cell);
+        }
+    }
+
+    void paintLEDBar (juce::Graphics& g, juce::Rectangle<int> b)
+    {
+        const int n = 21;            // -50..+50 cents in 5-cent steps
+        const float w  = (float) b.getWidth() / (float) n;
+        const float h  = (float) b.getHeight();
+        const int   cx = n / 2;
+
+        const float cents      = mHasReading ? mReading.centsFromTarget : 0.0f;
+        const int   activeIdx  = juce::jlimit (0, n - 1, cx + (int) std::round (cents / 5.0f));
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto cell = juce::Rectangle<float> ((float) b.getX() + i * w + 1.0f,
+                                                      (float) b.getY() + 2.0f,
+                                                      w - 2.0f, h - 4.0f);
+            const bool isCenter = (i == cx);
+            const bool isLit    = mHasReading && (i == activeIdx);
+
+            juce::Colour base = isCenter ? juce::Colour (0xff44ff88) : juce::Colour (0xffffaa20);
+            g.setColour (base.withAlpha (isLit ? 0.9f : (isCenter ? 0.35f : 0.15f)));
+            g.fillRoundedRectangle (cell, 1.5f);
+        }
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+
+        // Right cluster: knob (top) + chickenheads + Mute / 432 buttons.
+        const int rightW = juce::jmin (b.getWidth() / 3 + 30, 230);
+        auto right = b.removeFromRight (rightW);
+
+        // Trim knob top-right.
+        if (trimKnob) trimKnob->setBounds (right.removeFromTop (kKnobSz + 14)
+                                                  .withSizeKeepingCentre (kKnobSz, kKnobSz + 14));
+
+        // Beneath: 2 chickenheads side-by-side.
+        auto sels = right.removeFromTop (50);
+        if (modeSel)    modeSel   ->setBounds (sels.removeFromLeft (sels.getWidth() / 2).reduced (2));
+        if (displaySel) displaySel->setBounds (sels.reduced (2));
+
+        // Bottom row: Mute + 432 buttons.
+        auto btnRow = right.removeFromTop (22);
+        if (muteBtn) muteBtn->setBounds (btnRow.removeFromLeft (btnRow.getWidth() / 2).reduced (2, 0));
+        if (btn432)  btn432 ->setBounds (btnRow.reduced (2, 0));
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NAMPedalStylePanel — User NAM Pedal panel
+// File-load button + filename label + 6 knobs (Input/Drive / Low / Mid /
+// High / Blend / Output).  HarmonicLAF (drive family).  Default file picker
+// location: Documents/BaySickDAW/Presets/Effects/Pedals/User NAM Pedals/.
+// ─────────────────────────────────────────────────────────────────────────────
+struct NAMPedalStylePanel : public EditorPanelBase
+{
+    NAMPedalStyleDSP* mDsp { nullptr };
+    std::unique_ptr<juce::TextButton>  loadBtn;
+    std::unique_ptr<juce::Label>       fileLabel;
+    std::unique_ptr<juce::FileChooser> chooser;
+
+    explicit NAMPedalStylePanel (NAMPedalStyleDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Input/Drive", -24.f, 24.f, 0.f, 0.1f, "Pre-model gain (-24 to +24 dB).  Pushes a hotter signal into the NAM model to fake more drive." },
+            { "Low",         -15.f, 15.f, 0.f, 0.1f, "Post-model low shelf @ 100 Hz (+/-15 dB)" },
+            { "Mid",         -15.f, 15.f, 0.f, 0.1f, "Post-model mid peak @ 1 kHz, Q=0.7 (+/-15 dB)" },
+            { "High",        -15.f, 15.f, 0.f, 0.1f, "Post-model high shelf @ 5 kHz (+/-15 dB)" },
+            { "Blend",         0.f,  1.f, 1.f, 0.001f, "Dry/wet mix.  100% = full NAM model.  Lower mixes the dry input back in." },
+            { "Output",      -24.f, 12.f, 0.f, 0.1f, "Output trim (-24 to +12 dB).  Lets you tame loud captures." },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setInputDb  ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLowDb    ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setMidDb    ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setHighDb   ((float) knobs[3]->slider.getValue()); };
+        knobs[4]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setBlend    ((float) knobs[4]->slider.getValue()); };
+        knobs[5]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setOutputDb ((float) knobs[5]->slider.getValue()); };
+
+        loadBtn = std::make_unique<juce::TextButton>("Load .nam");
+        loadBtn->setTooltip ("Load a Neural Amp Modeler capture (.nam) file");
+        loadBtn->onClick = [this] { showFileChooser(); };
+        addAndMakeVisible (*loadBtn);
+
+        fileLabel = std::make_unique<juce::Label>();
+        fileLabel->setJustificationType (juce::Justification::centredLeft);
+        fileLabel->setFont (juce::Font (10.0f));
+        fileLabel->setColour (juce::Label::textColourId, juce::Colour (0xffe0e0e0));
+        fileLabel->setText (dsp && dsp->getModelName().isNotEmpty()
+                                ? dsp->getModelName()
+                                : juce::String ("(no file loaded)"),
+                            juce::dontSendNotification);
+        addAndMakeVisible (*fileLabel);
+
+        if (dsp)
+        {
+            knobs[0]->slider.setValue (dsp->mInputDb,  juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mLowDb,    juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mMidDb,    juce::sendNotificationSync);
+            knobs[3]->slider.setValue (dsp->mHighDb,   juce::sendNotificationSync);
+            knobs[4]->slider.setValue (dsp->mBlend01,  juce::sendNotificationSync);
+            knobs[5]->slider.setValue (dsp->mOutputDb, juce::sendNotificationSync);
+        }
+    }
+
+    ~NAMPedalStylePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        HarmonicLAF::paintHammeritePanel (g, getLocalBounds());
+    }
+
+    void showFileChooser()
+    {
+        if (! mDsp) return;
+        auto userPedals = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                              .getChildFile ("BaySickDAW")
+                              .getChildFile ("Presets")
+                              .getChildFile ("Effects")
+                              .getChildFile ("Pedals")
+                              .getChildFile ("User NAM Pedals");
+        userPedals.createDirectory();
+
+        auto startDir = mDsp->getModelPath().isNotEmpty()
+                            ? juce::File (mDsp->getModelPath()).getParentDirectory()
+                            : userPedals;
+
+        chooser = std::make_unique<juce::FileChooser>("Load NAM Pedal", startDir, "*.nam");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [this] (const juce::FileChooser& fc)
+            {
+                auto f = fc.getResult();
+                if (! f.existsAsFile() || ! mDsp) return;
+                juce::String err;
+                if (mDsp->loadModel (f, err))
+                {
+                    if (fileLabel)
+                        fileLabel->setText (mDsp->getModelName(), juce::dontSendNotification);
+                }
+                else
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon, "NAM Load Failed", err);
+                }
+            });
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+
+        // Top strip: Load button + filename label.
+        auto topStrip = b.removeFromTop (22);
+        if (loadBtn)   loadBtn  ->setBounds (topStrip.removeFromLeft (76).reduced (2, 1));
+        if (fileLabel) fileLabel->setBounds (topStrip.reduced (4, 1));
+
+        // 6 knobs right-clustered.
+        rightClusterKnobs (b, knobs);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// I-14 (2026-05-03): Simplified pedalboard panels (PanelMode::Pedal) for the
+// 7 existing effects that show up inside BaySickPedals as well as the FX rack.
+// Same DSP as their full-mode siblings; just simpler subset of knobs per
+// locked spec.  createEffectEditor dispatches to these when mode == Pedal.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// LimiterDSP pedal panel — Ceiling + Release.
+struct LimiterPedalPanel : public EditorPanelBase
+{
+    LimiterDSP* mDsp { nullptr };
+    explicit LimiterPedalPanel (LimiterDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&DynamicsLAF::get());
+        setVolumeKnobVariant (true);
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Ceiling", -24.f, 0.f,    -1.f,   0.1f, "Output ceiling (dB).  Anything above this gets pulled down." },
+            { "Release",  10.f, 1000.f, 100.f,  1.f,  "Release time (ms)" },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setCeilingDb ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setReleaseMs ((float) knobs[1]->slider.getValue()); };
+    }
+    ~LimiterPedalPanel() override { setLookAndFeel (nullptr); }
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        rightClusterKnobs (b, knobs);
+    }
+};
+
+// SaturationDSP pedal panel — Drive + Mix + Tube/Console/Tape mode chickenhead.
+struct SaturationPedalPanel : public EditorPanelBase
+{
+    SaturationDSP* mDsp { nullptr };
+    std::unique_ptr<ChickenHeadSelector> typeSel;
+
+    explicit SaturationPedalPanel (SaturationDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&HarmonicLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Drive", 0.f, 10.f,  3.f,   0.01f, "Saturation drive amount" },
+            { "Mix",   0.f, 100.f, 100.f, 1.f,   "Wet/dry mix (%)" },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setFlowers ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setWet     ((float) knobs[1]->slider.getValue()); };
+
+        typeSel = std::make_unique<ChickenHeadSelector>();
+        typeSel->setOptions ({
+            { "Tu", "Tube",    "Tube saturation -- warm, asymmetric harmonics" },
+            { "Co", "Console", "Console saturation -- transparent, low-distortion" },
+            { "Ta", "Tape",    "Tape saturation -- compression + high-frequency rolloff" },
+        });
+        typeSel->setBodyTooltip ("Saturation type");
+        typeSel->setSelectedIndex (dsp ? (int) dsp->mSatType : 0, juce::dontSendNotification);
+        typeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setSatType (idx); };
+        addAndMakeVisible (*typeSel);
+    }
+    ~SaturationPedalPanel() override { setLookAndFeel (nullptr); }
+    void paint (juce::Graphics& g) override { HarmonicLAF::paintHammeritePanel (g, getLocalBounds()); }
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        auto remaining = rightClusterKnobs (b, knobs);
+        if (typeSel)
+        {
+            auto col = remaining.removeFromRight (66);
+            typeSel->setBounds (col.reduced (2));
+        }
+    }
+};
+
+// ChorusDSP pedal panel — Rate + Depth + Mix.
+struct ChorusPedalPanel : public EditorPanelBase
+{
+    ChorusDSP* mDsp { nullptr };
+    explicit ChorusPedalPanel (ChorusDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&ModulationLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Rate",  0.05f, 5.f,  0.5f,  0.01f, "LFO rate (Hz)" },
+            { "Depth", 0.f,   20.f, 4.f,   0.1f,  "Modulation depth (ms)" },
+            { "Mix",   0.f,   1.f,  0.5f,  0.01f, "Wet level" },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLFOFreq (0, (float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDepth      ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setWet        ((float) knobs[2]->slider.getValue()); };
+    }
+    ~ChorusPedalPanel() override { setLookAndFeel (nullptr); }
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        rightClusterKnobs (b, knobs);
+    }
+};
+
+// FlangerDSP pedal panel — Rate + Depth + Feedback + Mix.
+struct FlangerPedalPanel : public EditorPanelBase
+{
+    FlangerDSP* mDsp { nullptr };
+    explicit FlangerPedalPanel (FlangerDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&ModulationLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Rate",     0.05f, 5.f,  0.5f, 0.01f, "LFO rate (Hz)" },
+            { "Depth",    0.f,  10.f,  3.f,  0.1f,  "Sweep depth (ms)" },
+            { "Feedback", -1.f,  1.f,  0.5f, 0.01f, "Feedback (-1..+1)" },
+            { "Mix",      0.f,   1.f,  0.5f, 0.01f, "Wet level" },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setRate     ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDepth    ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setFeedback ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setWet      ((float) knobs[3]->slider.getValue()); };
+    }
+    ~FlangerPedalPanel() override { setLookAndFeel (nullptr); }
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        rightClusterKnobs (b, knobs);
+    }
+};
+
+// PhaserDSP pedal panel — Rate + Depth + Feedback + Mix.
+struct PhaserPedalPanel : public EditorPanelBase
+{
+    PhaserDSP* mDsp { nullptr };
+    explicit PhaserPedalPanel (PhaserDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&ModulationLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Rate",     0.05f,  10.f,  0.5f, 0.01f, "LFO rate (Hz)" },
+            { "Depth",    0.f,     1.f,  0.5f, 0.01f, "Sweep depth" },
+            { "Feedback", -1.2f,   1.2f, 0.5f, 0.01f, "Feedback amount" },
+            { "Mix",      0.f,     1.f,  0.5f, 0.01f, "Wet level" },
+        });
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setRate     ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDepth    ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setFeedback ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setWet      ((float) knobs[3]->slider.getValue()); };
+    }
+    ~PhaserPedalPanel() override { setLookAndFeel (nullptr); }
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        rightClusterKnobs (b, knobs);
+    }
+};
+
+// DelayDSP pedal panel — Time + Feedback + Mix + Sync toggle.
+struct DelayPedalPanel : public EditorPanelBase
+{
+    DelayDSP* mDsp { nullptr };
+    std::unique_ptr<juce::TextButton> syncBtn;
+
+    explicit DelayPedalPanel (DelayDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&TimeLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Time",     1.f, 2000.f, 375.f, 1.f,   "Delay time (ms).  Sync toggle locks to host BPM." },
+            { "Feedback", 0.f, 1.2f,   0.4f,  0.01f, "Feedback level" },
+            { "Mix",      0.f, 1.f,    0.4f,  0.01f, "Wet level" },
+        });
+        knobs[0]->slider.setSkewFactorFromMidPoint (250.0);
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDelayMs       ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setFeedbackLevel ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setWetIn         ((float) knobs[2]->slider.getValue()); };
+
+        syncBtn = std::make_unique<juce::TextButton>("Sync");
+        syncBtn->setClickingTogglesState (true);
+        syncBtn->setTooltip ("Lock delay time to host BPM");
+        syncBtn->onClick = [this] { if (mDsp) mDsp->setTempoSync (syncBtn->getToggleState()); };
+        addAndMakeVisible (*syncBtn);
+    }
+    ~DelayPedalPanel() override { setLookAndFeel (nullptr); }
+    void paint (juce::Graphics& g) override { TimeLAF::paintPultecPanel (g, getLocalBounds()); }
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        auto remaining = rightClusterKnobs (b, knobs);
+        if (syncBtn)
+        {
+            auto col = remaining.removeFromRight (60);
+            syncBtn->setBounds (col.withSizeKeepingCentre (54, 22));
+        }
+    }
+};
+
+// ReverbDSP pedal panel — Decay + Damp + Mix + Algorithm chickenhead.
+struct ReverbPedalPanel : public EditorPanelBase
+{
+    ReverbDSP* mDsp { nullptr };
+    std::unique_ptr<ChickenHeadSelector> algoSel;
+
+    explicit ReverbPedalPanel (ReverbDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&TimeLAF::get());
+        disableVU();
+        disableOutputVolKnob();
+
+        buildKnobs (*this, knobs, {
+            { "Decay", 0.1f,   10.f,    1.5f,  0.01f, "RT60 decay (seconds)" },
+            { "Damp",  500.f,  20000.f, 6000.f, 1.f,  "High-frequency damping cutoff (Hz)" },
+            { "Mix",   0.f,    1.f,     0.3f,  0.01f, "Wet level" },
+        });
+        knobs[1]->slider.setSkewFactorFromMidPoint (4000.0);
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setDecay    ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setHighDamp ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setWet      ((float) knobs[2]->slider.getValue()); };
+
+        algoSel = std::make_unique<ChickenHeadSelector>();
+        algoSel->setOptions ({
+            { "Pl", "Plate",    "Schroeder allpass cascade -- bright, dense plate reverb" },
+            { "Hl", "Hall",     "Large FDN hall character" },
+            { "Ch", "Chamber",  "Mid-size FDN with denser modulation" },
+            { "Rm", "Room",     "Small FDN + early reflections" },
+            { "VB", "VocalBth", "Tight short-decay vocal booth" },
+        });
+        algoSel->setBodyTooltip ("Reverb algorithm");
+        algoSel->setSelectedIndex (dsp ? dsp->getAlgorithm() : 1, juce::dontSendNotification);
+        algoSel->onChange = [dsp] (int idx) { if (dsp) dsp->setAlgorithm (idx); };
+        addAndMakeVisible (*algoSel);
+    }
+    ~ReverbPedalPanel() override { setLookAndFeel (nullptr); }
+    void paint (juce::Graphics& g) override { TimeLAF::paintPultecPanel (g, getLocalBounds()); }
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (4);
+        auto remaining = rightClusterKnobs (b, knobs);
+        if (algoSel)
+        {
+            auto col = remaining.removeFromRight (66);
+            algoSel->setBounds (col.reduced (2));
+        }
+    }
+};
+
+std::unique_ptr<juce::Component> createEffectEditor (DSPBase* effect,
+                                                     EffectType type,
+                                                     EditorPanelBase::PanelMode mode)
 {
     if (!effect) return nullptr;
+
+    std::unique_ptr<juce::Component> panel;
+
+    // I-14 (2026-05-03): Pedal-mode dispatch for the 7 existing effects that
+    // appear inside BaySickPedals.  Same DSP, simplified knob set per locked
+    // spec.  Falls through to the default Full-mode dispatch below for all
+    // other effects (and for these 7 when mode == Full).
+    if (mode == EditorPanelBase::PanelMode::Pedal)
+    {
+        switch (type)
+        {
+            case EffectType::Limiter:
+                panel = std::make_unique<LimiterPedalPanel>    (static_cast<LimiterDSP*>    (effect));
+                break;
+            case EffectType::Saturation:
+            case EffectType::Tape:   // Tape = SaturationDSP+Type::Tape alias
+                panel = std::make_unique<SaturationPedalPanel> (static_cast<SaturationDSP*> (effect));
+                break;
+            case EffectType::Chorus:
+                panel = std::make_unique<ChorusPedalPanel>     (static_cast<ChorusDSP*>     (effect));
+                break;
+            case EffectType::Flanger:
+                panel = std::make_unique<FlangerPedalPanel>    (static_cast<FlangerDSP*>    (effect));
+                break;
+            case EffectType::Phaser:
+                panel = std::make_unique<PhaserPedalPanel>     (static_cast<PhaserDSP*>     (effect));
+                break;
+            case EffectType::Delay:
+                panel = std::make_unique<DelayPedalPanel>      (static_cast<DelayDSP*>      (effect));
+                break;
+            case EffectType::Reverb:
+                panel = std::make_unique<ReverbPedalPanel>     (static_cast<ReverbDSP*>     (effect));
+                break;
+            default:
+                break;   // not a pedal-variant effect; fall through to Full dispatch.
+        }
+
+        if (panel)
+        {
+            if (auto* base = dynamic_cast<EditorPanelBase*> (panel.get()))
+            {
+                base->mPanelMode = mode;
+                base->disableVU();
+                base->disableDbfsMeter();
+                base->disableGrMeter();
+            }
+            return panel;
+        }
+        // else: fall through and use the Full-mode panel for non-listed effects.
+    }
 
     switch (type)
     {
@@ -3028,26 +5352,33 @@ std::unique_ptr<juce::Component> createEffectEditor(DSPBase* effect, EffectType 
             // H-7 (2026-05-01): dispatch to the right inline panel based on
             // the DSP's character mode.  Modern = full SSL-ish layout; FET +
             // Opto get authentic 1176 / LA-2A minimal layouts.
+            // I-4 (2026-05-02): CS Style = BOSS CS-Style sustain pedal layout
+            // (Level / Tone / Attack / Sustain).
             auto* c = static_cast<CompressorDSP*> (effect);
             switch (c->mType)
             {
-                case CompressorDSP::Type::FET:    return std::make_unique<FETCompressorPanel>  (c);
-                case CompressorDSP::Type::Opto:   return std::make_unique<OptoCompressorPanel> (c);
-                case CompressorDSP::Type::Modern: default: return std::make_unique<CompressorPanel> (c);
+                case CompressorDSP::Type::FET:    panel = std::make_unique<FETCompressorPanel>     (c); break;
+                case CompressorDSP::Type::Opto:   panel = std::make_unique<OptoCompressorPanel>    (c); break;
+                case CompressorDSP::Type::CS:     panel = std::make_unique<CSStyleCompressorPanel> (c); break;
+                case CompressorDSP::Type::Modern: default: panel = std::make_unique<CompressorPanel> (c); break;
             }
+            break;
         }
         case EffectType::Reverb:
-            return std::make_unique<ReverbPanel>        (static_cast<ReverbDSP*>        (effect));
+            panel = std::make_unique<ReverbPanel>        (static_cast<ReverbDSP*>        (effect));
+            break;
         case EffectType::Chorus:
-            return std::make_unique<ChorusPanel>        (static_cast<ChorusDSP*>        (effect));
+            panel = std::make_unique<ChorusPanel>        (static_cast<ChorusDSP*>        (effect));
+            break;
         case EffectType::Delay:
         {
             // H-8 (2026-05-02): Echo Type = full DelayPanel; VocalDoubler Type
             // = minimal dual-tap layout (Time L / R / Detune / Width / Rate / Mix).
             auto* d = static_cast<DelayDSP*> (effect);
-            return (d->getType() == (int) DelayDSP::Type::VocalDoubler)
+            panel = (d->getType() == (int) DelayDSP::Type::VocalDoubler)
                 ? std::unique_ptr<juce::Component> (new VocalDoublerDelayPanel (d))
                 : std::unique_ptr<juce::Component> (new DelayPanel             (d));
+            break;
         }
         case EffectType::Saturation:
         {
@@ -3058,33 +5389,147 @@ std::unique_ptr<juce::Component> createEffectEditor(DSPBase* effect, EffectType 
             switch (s->mSatType)
             {
                 case SaturationDSP::Type::Console:
-                    return std::unique_ptr<juce::Component> (new ConsoleSaturationPanel (s));
+                    panel = std::unique_ptr<juce::Component> (new ConsoleSaturationPanel (s));
+                    break;
                 case SaturationDSP::Type::Tape:
-                    return std::unique_ptr<juce::Component> (new TapeSatPanel           (s));
+                    panel = std::unique_ptr<juce::Component> (new TapeSatPanel           (s));
+                    break;
                 case SaturationDSP::Type::Tube:
                 default:
-                    return std::unique_ptr<juce::Component> (new SaturationPanel        (s));
+                    panel = std::unique_ptr<juce::Component> (new SaturationPanel        (s));
+                    break;
             }
+            break;
         }
         case EffectType::Flanger:
-            return std::make_unique<FlangerPanel>       (static_cast<FlangerDSP*>       (effect));
+            panel = std::make_unique<FlangerPanel>       (static_cast<FlangerDSP*>       (effect));
+            break;
         case EffectType::Overdrive:
-            return std::make_unique<OverdrivePanel>     (static_cast<OverdriveDSP*>     (effect));
+        {
+            // I-5 (2026-05-02): Type::Pedal mounts the OD Style pedal panel
+            // (HarmonicLAF, Drive/Tone/Level); Type::Rack keeps the existing
+            // full FX-rack panel.  Same DSP, different layout.
+            auto* o = static_cast<OverdriveDSP*> (effect);
+            if (o->mType == OverdriveDSP::Type::Pedal)
+                panel = std::make_unique<OverdrivePedalPanel> (o);
+            else
+                panel = std::make_unique<OverdrivePanel>      (o);
+            break;
+        }
         case EffectType::Phaser:
-            return std::make_unique<PhaserPanel>        (static_cast<PhaserDSP*>        (effect));
+            panel = std::make_unique<PhaserPanel>        (static_cast<PhaserDSP*>        (effect));
+            break;
         case EffectType::TransientShaper:
-            return std::make_unique<TransientShaperPanel>(static_cast<TransientShaperDSP*>(effect));
+            panel = std::make_unique<TransientShaperPanel>(static_cast<TransientShaperDSP*>(effect));
+            break;
         case EffectType::Tape:
             // H-10 cutover (2026-05-02): EffectType::Tape is now an alias
             // for SaturationDSP+Type::Tape; the slot's effect ptr is a
             // SaturationDSP, not a TapeDSP.  Construct the Saturation-bound
             // TapeSatPanel so knob bindings hit setTape* on the right object.
-            return std::make_unique<TapeSatPanel>       (static_cast<SaturationDSP*>    (effect));
+            panel = std::make_unique<TapeSatPanel>       (static_cast<SaturationDSP*>    (effect));
+            break;
         case EffectType::Limiter:
-            return std::make_unique<LimiterPanel>       (static_cast<LimiterDSP*>       (effect));
+            panel = std::make_unique<LimiterPanel>       (static_cast<LimiterDSP*>       (effect));
+            break;
         case EffectType::DeEsser:
-            return std::make_unique<DeEsserPanel>       (static_cast<DeEsserDSP*>       (effect));
+            panel = std::make_unique<DeEsserPanel>       (static_cast<DeEsserDSP*>       (effect));
+            break;
+
+        // I-5 (2026-05-02): BaySickPedals Harmonics drive pedals batch panels.
+        case EffectType::BluesDriveStyle:
+            panel = std::make_unique<BluesDriveStylePanel> (static_cast<BluesDriveStyleDSP*> (effect));
+            break;
+        case EffectType::DistortionStyle:
+            panel = std::make_unique<DistortionStylePanel> (static_cast<DistortionStyleDSP*> (effect));
+            break;
+        case EffectType::FuzzStyle:
+            panel = std::make_unique<FuzzStylePanel>       (static_cast<FuzzStyleDSP*>       (effect));
+            break;
+        case EffectType::HighGainStyle:
+            panel = std::make_unique<HighGainStylePanel>   (static_cast<HighGainStyleDSP*>   (effect));
+            break;
+
+        // I-6 (2026-05-02): BaySickPedals Harmonics bass pedals batch panels.
+        case EffectType::BassDriverStyle:
+            panel = std::make_unique<BassDriverStylePanel>    (static_cast<BassDriverStyleDSP*>    (effect));
+            break;
+        case EffectType::BassOverdriveStyle:
+            panel = std::make_unique<BassOverdriveStylePanel> (static_cast<BassOverdriveStyleDSP*> (effect));
+            break;
+
+        // I-7 (2026-05-02): OC Style Octave panel.
+        case EffectType::OctaveStyle:
+            panel = std::make_unique<OctaveStylePanel> (static_cast<OctaveStyleDSP*> (effect));
+            break;
+
+        // I-8 (2026-05-03): Dynamics pedals batch panels.
+        case EffectType::NoiseGateStyle:
+            panel = std::make_unique<NoiseGateStylePanel>      (static_cast<NoiseGateStyleDSP*>      (effect));
+            break;
+        case EffectType::BassCompressorStyle:
+            panel = std::make_unique<BassCompressorStylePanel> (static_cast<BassCompressorStyleDSP*> (effect));
+            break;
+
+        // I-9 (2026-05-03): SY Style Polyphonic Synth panel.
+        case EffectType::SynthStyle:
+            panel = std::make_unique<SynthStylePanel> (static_cast<SynthStyleDSP*> (effect));
+            break;
+
+        // I-10 (2026-05-03): PW Style Wah panel.
+        case EffectType::WahStyle:
+            panel = std::make_unique<WahStylePanel> (static_cast<WahStyleDSP*> (effect));
+            break;
+
+        // I-11 (2026-05-03): AD Style Acoustic Preamp panel.
+        case EffectType::AcousticPreampStyle:
+            panel = std::make_unique<AcousticPreampStylePanel> (static_cast<AcousticPreampStyleDSP*> (effect));
+            break;
+        // I-11 (2026-05-03): AC Style Acoustic Simulator panel.
+        case EffectType::AcousticSimulatorStyle:
+            panel = std::make_unique<AcousticSimulatorStylePanel> (static_cast<AcousticSimulatorStyleDSP*> (effect));
+            break;
+
+        // I-12 (2026-05-03): EQ trio batch panels.
+        case EffectType::GraphicEQStyle:
+            panel = std::make_unique<GraphicEQStylePanel>     (static_cast<GraphicEQStyleDSP*>     (effect));
+            break;
+        case EffectType::BassGraphicEQStyle:
+            panel = std::make_unique<BassGraphicEQStylePanel> (static_cast<BassGraphicEQStyleDSP*> (effect));
+            break;
+        case EffectType::FurmanEQStyle:
+            panel = std::make_unique<FurmanEQStylePanel>      (static_cast<FurmanEQStyleDSP*>      (effect));
+            break;
+
+        // I-13 (2026-05-03): TU Style Tuner panel.
+        case EffectType::TunerStyle:
+            panel = std::make_unique<TunerStylePanel> (static_cast<TunerStyleDSP*> (effect));
+            break;
+
+        // I-15c (2026-05-03): User NAM Pedal panel.
+        case EffectType::NAMPedalStyle:
+            panel = std::make_unique<NAMPedalStylePanel> (static_cast<NAMPedalStyleDSP*> (effect));
+            break;
+
         default:
-            return nullptr;
+            panel = nullptr;
+            break;
     }
+
+    // I-2 (2026-05-02): stamp the panel's mPanelMode flag so derived layouts
+    // can branch in resized().
+    // I-15 (2026-05-03): pedal-mode panels strip VU + dBFS + GR meters per
+    // locked spec (BaySickPedals tiles do not display level meters).
+    if (auto* base = dynamic_cast<EditorPanelBase*> (panel.get()))
+    {
+        base->mPanelMode = mode;
+        if (mode == EditorPanelBase::PanelMode::Pedal)
+        {
+            base->disableVU();
+            base->disableDbfsMeter();
+            base->disableGrMeter();
+        }
+    }
+
+    return panel;
 }

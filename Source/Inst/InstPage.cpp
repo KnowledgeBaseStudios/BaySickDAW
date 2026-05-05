@@ -1,5 +1,6 @@
 #include "InstPage.h"
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
+#include "../BaySickPedals/BaySickPedalsProcessor.h"
 #include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
 #include "../PluginProcessor.h"
@@ -78,12 +79,41 @@ InstPage::InstPage (int pageIndex)
         if (mNamIrEditor) addChildComponent (*mNamIrEditor);
     }
 
-    // BaySickPedals: I-1 will instantiate the real processor here.  For I-0b
-    // ship a placeholder component for sub-tab 0.
-    mPedalsPlaceholder = std::make_unique<PedalsPlaceholder>();
-    addChildComponent (*mPedalsPlaceholder);
+    // I-15 (2026-05-03): real BaySickPedals processor + 4x2 rack editor.
+    {
+        auto pedals = std::make_unique<BaySickPedalsProcessor>();
+        pedals->prepareToPlay (44100.0, 512);
+        mPedalsProc = std::move (pedals);
+        mPedalsEditor.reset (mPedalsProc->createEditor());
+        if (mPedalsEditor) addChildComponent (*mPedalsEditor);
+    }
+    // Placeholder is no longer used post-I-15 but the field stays declared so
+    // the layoutContent() guarded path below still compiles.
+    (void) mPedalsPlaceholder;
 
-    buildEQTab();
+    // I-16 G-9 (2026-05-03): chain wrapper now that both stages exist.
+    // registerInstEngine receives this single pointer; its processBlock fans
+    // through Pedals -> NAM/IR.  Each stage's prepareToPlay was already
+    // called above; setChain() picks up the existing prepared state.
+    mChain = std::make_unique<EngineChainProcessor>();
+    mChain->setChain ({ mPedalsProc.get(), mNamIrProc.get() });
+
+    // I-15 polish (2026-05-03): BaySickPedals sub-tab header chrome.  Lives
+    // in the 36-px page header strip; hidden on other sub-tabs.
+    mPedalsHeaderTitle.setText ("BaySickPedals", juce::dontSendNotification);
+    mPedalsHeaderTitle.setJustificationType (juce::Justification::centredLeft);
+    mPedalsHeaderTitle.setFont (juce::Font (16.0f, juce::Font::bold));
+    mPedalsHeaderTitle.setColour (juce::Label::textColourId, juce::Colour (0xffe0e0e0));
+    addChildComponent (mPedalsHeaderTitle);
+
+    mPedalsPresetBtn = std::make_unique<juce::TextButton>("Preset...");
+    mPedalsPresetBtn->setTooltip (
+        "Pedalboard preset library -- save / load the entire 8-slot rack "
+        "configuration as a single .xml under Documents/BaySickDAW/Presets/Pedalboards/");
+    mPedalsPresetBtn->onClick = [this] { showPedalboardPresetMenu(); };
+    addChildComponent (*mPedalsPresetBtn);
+
+    // J-6 EQ unification (2026-05-03): buildEQTab removed; pre-rack EQ on Effects page only.
 
     // Hook dirty tracker for the live engine.
     attachDirtyListener();
@@ -94,6 +124,28 @@ InstPage::InstPage (int pageIndex)
 InstPage::~InstPage()
 {
     detachDirtyListener();
+
+    // I-15 polish (2026-05-03): unregister this page's NAM/IR engine from
+    // VibeSynthProcessor's audio-thread routing BEFORE tearing down anything.
+    // The TunerStyleDSP -> PitchTrackerYIN worker join can take a few ms during
+    // mPedalsProc.reset() below; without this unregister the audio thread can
+    // continue calling our (partially destroyed) NAM/IR processor during that
+    // window and crash inside MicPlacementDSP.  StandaloneEditor's tab-close
+    // path also calls unregisterInstEngine, so on tab-close this is a redundant
+    // no-op (unregister is idempotent); on app-shutdown it's load-bearing.
+    if (mFullProcessor != nullptr)
+        mFullProcessor->unregisterInstEngine (mPageIndex);
+
+    // Explicitly destroy editors before their processors so editor child
+    // components don't access dangling APVTS / DSP pointers during teardown.
+    // I-16 G-9: chain holds raw pointers into Pedals + NAM/IR -- tear it down
+    // first so processBlock can't fire on stale pointers if the audio thread
+    // is mid-callback.
+    mChain       .reset();
+    mPedalsEditor.reset();
+    mNamIrEditor .reset();
+    mPedalsProc  .reset();
+    mNamIrProc   .reset();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -427,54 +479,37 @@ void InstPage::requestDelete()
         }), false);
 }
 
-void InstPage::buildEQTab()
-{
-    mEQDisplay = std::make_unique<ParametricEQDisplay>();
-    if (mFullProcessor)
-        mEQDisplay->setSampleRate (mFullProcessor->getSampleRate() > 0.0
-                                       ? mFullProcessor->getSampleRate() : 44100.0);
-    mEQDisplay->showMidSideToggle (false);
-    addChildComponent (*mEQDisplay);
-}
+// J-6 EQ unification (2026-05-03): buildEQTab removed.
 
 juce::AudioProcessor* InstPage::getEngineProcessor() const noexcept
 {
-    return mNamIrProc.get();
+    // I-16 G-9 (2026-05-03): return chain wrapper so registerInstEngine sees
+    // a single processor whose processBlock drives Pedals -> NAM/IR in order.
+    // Pre-G-9 this returned only mNamIrProc (Pedals were bypassed by audio).
+    return mChain.get();
 }
 
 void InstPage::setProcessor (VibeSynthProcessor* p)
 {
     mFullProcessor = p;
-    if (mEQDisplay && mFullProcessor)
-    {
-        if (auto* preEq = mFullProcessor->mVibeGraph.getInsertPreEQ (
-                              VibeGraph::InsertKind::Inst, mPageIndex))
-        {
-            const juce::String mixerPrefix = "mixer_inst_" + juce::String (mPageIndex);
-            mEQDisplay->bindMsDSP (preEq, &mFullProcessor->apvts,
-                                    mixerPrefix + "_preeq_mid_eq",
-                                    mixerPrefix + "_preeq_side_eq");
-            mEQDisplay->setStripContext(mixerPrefix,
-                [](int id){ return MixerChannelIds::friendlyName(id); });
-        }
-        const double sr = mFullProcessor->getSampleRate() > 0.0
-                              ? mFullProcessor->getSampleRate() : 44100.0;
-        mEQDisplay->setSampleRate (sr);
-    }
+    // J-6 EQ unification (2026-05-03): page-level EQ binding removed; pre-rack
+    // EQ is bound exclusively by EffectsPage (mixer_inst_<N>_preeq_*).
 }
 
 void InstPage::switchTab (int idx)
 {
-    // I-0b (2026-05-02): 3 sub-tabs.
+    // I-0b (2026-05-02) / J-6 (2026-05-03): 2 sub-tabs (was 3 before EQ unification).
     //   0 = BaySickPedals (placeholder until I-15 ships the rack UI)
     //   1 = BaySickNAM/IR  (existing BaySickNAMIRProcessor + editor)
-    //   2 = Pre EQ8 M/S    (existing ParametricEQDisplay)
-    mActiveTab = juce::jlimit (0, 2, idx);
+    mActiveTab = juce::jlimit (0, 1, idx);
 
     if (mPedalsPlaceholder) mPedalsPlaceholder->setVisible (mActiveTab == 0);
     if (mPedalsEditor)      mPedalsEditor    ->setVisible (mActiveTab == 0);
     if (mNamIrEditor)       mNamIrEditor     ->setVisible (mActiveTab == 1);
-    if (mEQDisplay)         mEQDisplay       ->setVisible (mActiveTab == 2);
+
+    // I-15 polish: BaySickPedals header chrome only on sub-tab 0.
+    mPedalsHeaderTitle.setVisible (mActiveTab == 0);
+    if (mPedalsPresetBtn) mPedalsPresetBtn->setVisible (mActiveTab == 0);
 
     resized();
     repaint();
@@ -508,7 +543,14 @@ juce::String InstPage::exportInstState() const
         auto* sub = el.createNewChildElement ("NamIrState");
         sub->setAttribute ("data", mb.toBase64Encoding());
     }
-    // I-1: BaySickPedals state export lands when the processor ships.
+    // I-15 (2026-05-03): BaySickPedals state export.
+    if (mPedalsProc != nullptr)
+    {
+        juce::MemoryBlock mb;
+        mPedalsProc->getStateInformation (mb);
+        auto* sub = el.createNewChildElement ("PedalsState");
+        sub->setAttribute ("data", mb.toBase64Encoding());
+    }
 
     return el.toString (juce::XmlElement::TextFormat().singleLine());
 }
@@ -532,7 +574,20 @@ void InstPage::importInstState (const juce::String& xml)
             }
         }
     }
-    // I-1: BaySickPedals state import lands when the processor ships.
+    // I-15 (2026-05-03): BaySickPedals state import.
+    if (auto* pedalsEl = parsed->getChildByName ("PedalsState"))
+    {
+        if (mPedalsProc != nullptr)
+        {
+            juce::MemoryBlock mb;
+            if (mb.fromBase64Encoding (pedalsEl->getStringAttribute ("data")))
+            {
+                mSuppressDirty = true;
+                mPedalsProc->setStateInformation (mb.getData(), (int) mb.getSize());
+                mSuppressDirty = false;
+            }
+        }
+    }
     // I-0b: any old <PlayerState> child from pre-Phase-I saves is silently
     // ignored (per the locked spec call -- no projects in the wild had it).
 
@@ -551,10 +606,94 @@ void InstPage::paint (juce::Graphics& g)
     g.fillRect (0, kHeaderRowH, getWidth(), 1);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// I-15 polish: pedalboard preset library popup -- save/load the entire
+// 8-slot rack as Documents/BaySickDAW/Presets/Pedalboards/{name}.xml.
+// Distinct from the Page Preset (hamburger menu, full chain) and per-pedal
+// presets (the "..." button on each tile).
+// ─────────────────────────────────────────────────────────────────────────────
+void InstPage::showPedalboardPresetMenu()
+{
+    auto* pedals = dynamic_cast<BaySickPedalsProcessor*> (mPedalsProc.get());
+    if (pedals == nullptr) return;
+
+    auto presets = pedals->enumeratePedalboardPresets();
+
+    juce::PopupMenu m;
+    m.addItem (1, "Save Pedalboard As...");
+    m.addSeparator();
+    if (presets.isEmpty())
+    {
+        m.addItem (-1, "(no saved pedalboards)", false);
+    }
+    else
+    {
+        for (int i = 0; i < presets.size(); ++i)
+            m.addItem (1000 + i, presets[i].getFileNameWithoutExtension());
+    }
+    m.addSeparator();
+    m.addItem (2, "Reveal Folder...");
+
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (mPedalsPresetBtn.get()),
+        [this, pedals, presets] (int r)
+        {
+            if (r == 0) return;
+            if (r == 1)
+            {
+                auto* aw = new juce::AlertWindow (
+                    "Save Pedalboard Preset",
+                    "Pedalboard preset name:",
+                    juce::AlertWindow::NoIcon);
+                aw->addTextEditor ("name", "");
+                aw->addButton ("OK",     1, juce::KeyPress (juce::KeyPress::returnKey));
+                aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                aw->enterModalState (true,
+                    juce::ModalCallbackFunction::create (
+                        [aw, pedals] (int result)
+                        {
+                            if (result == 1)
+                            {
+                                const auto name = aw->getTextEditorContents ("name").trim();
+                                if (name.isNotEmpty())
+                                {
+                                    juce::String err;
+                                    pedals->savePedalboardPreset (name, err);
+                                }
+                            }
+                            delete aw;
+                        }),
+                    false);
+                return;
+            }
+            if (r == 2)
+            {
+                BaySickPedalsProcessor::pedalboardPresetsRoot().revealToUser();
+                return;
+            }
+            if (r >= 1000)
+            {
+                const int idx = r - 1000;
+                if (idx >= 0 && idx < presets.size())
+                {
+                    juce::String err;
+                    pedals->loadPedalboardPreset (presets[idx], err);
+                }
+            }
+        });
+}
+
 void InstPage::resized()
 {
     auto r = getLocalBounds();
-    r.removeFromTop (kHeaderRowH);
+
+    // I-15 polish (2026-05-03): BaySickPedals header chrome lives in the
+    // 36-px page header strip.  Title flush-left, preset button flush-right.
+    auto header = r.removeFromTop (kHeaderRowH);
+    if (mPedalsPresetBtn && mPedalsPresetBtn->isVisible())
+        mPedalsPresetBtn->setBounds (header.removeFromRight (90).reduced (8, 6));
+    if (mPedalsHeaderTitle.isVisible())
+        mPedalsHeaderTitle.setBounds (header.reduced (12, 4));
+
     layoutContent (r);
 }
 
@@ -566,8 +705,7 @@ void InstPage::layoutContent (juce::Rectangle<int> r)
         mPedalsEditor->setBounds (r);
     if (mNamIrEditor && mNamIrEditor->isVisible())
         mNamIrEditor->setBounds (r);
-    if (mEQDisplay && mEQDisplay->isVisible())
-        mEQDisplay->setBounds (r.reduced (4));
+    // J-6 EQ unification (2026-05-03): mEQDisplay layout removed.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

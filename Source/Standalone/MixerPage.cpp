@@ -57,6 +57,9 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
     if (destChannelId == kVoxBus || destChannelId == kVoxBus2)   return juce::Colour(0xFF0FAFA5);
     if (destChannelId == kInstBus || destChannelId == kInstBus2
                                   || destChannelId == kInstBus3) return juce::Colour(0xFF1C3A8A);
+    // J-5 (2026-05-03): RustyDrums Bus strips share the Drums-red accent so
+    // the top stripe matches the bus group neon divider.
+    if (destChannelId == kRustyDrumsBus) return VC::DrumsCol;
     // Direct Routing / aux chain: fall back to the strip's natural color
     if (chId >= kLayerBase && chId < kLayerBase + 16) return VC::LayerCol[0];
     if (chId >= kBassBase  && chId < kBassBase  + 16) return VC::BassCol[0];
@@ -64,6 +67,7 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
     if (chId >= kAudioBase && chId < kAudioBase + 50) return VC::Warm;
     if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)  return juce::Colour(0xFF0FAFA5);
     if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips) return juce::Colour(0xFF1C3A8A);
+    if (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips) return VC::DrumsCol;
     return VC::Accent;
 }
 
@@ -479,6 +483,9 @@ int MixerPage::CableOverlay::findSocketNear(juce::Point<float> pt, float radius,
         if (owner.isVoxBus2Active()  && check(kVoxBus2))   return kVoxBus2;
         if (owner.isInstBus2Active() && check(kInstBus2))  return kInstBus2;
         if (owner.isInstBus3Active() && check(kInstBus3))  return kInstBus3;
+        // J-5 (2026-05-03): RustyDrums Bus is a valid drop socket whenever
+        // the singleton has spawned its strips (mRustyDrumsBusActive flag).
+        if (owner.mRustyDrumsBusActive && check(kRustyDrumsBus)) return kRustyDrumsBus;
     }
 
     for (auto& [tabId, strip] : owner.mLayerStrips)
@@ -496,6 +503,9 @@ int MixerPage::CableOverlay::findSocketNear(juce::Point<float> pt, float radius,
         if (check(voxInsert(idx))) return voxInsert(idx);
     for (auto& [idx, strip] : owner.mInstStrips)
         if (check(instInsert(idx))) return instInsert(idx);
+    // J-5 (2026-05-03)
+    for (auto& [idx, strip] : owner.mRustyStrips)
+        if (check(rustyInsert(idx))) return rustyInsert(idx);
 
     return -1;
 }
@@ -539,6 +549,7 @@ int MixerPage::CableOverlay::findStripUnder(juce::Point<float> pt) const
     if (owner.isVoxBus2Active()  && checkBounds(kVoxBus2))   return kVoxBus2;
     if (owner.isInstBus2Active() && checkBounds(kInstBus2))  return kInstBus2;
     if (owner.isInstBus3Active() && checkBounds(kInstBus3))  return kInstBus3;
+    if (owner.mRustyDrumsBusActive && checkBounds(kRustyDrumsBus)) return kRustyDrumsBus;
 
     for (auto& [tabId, s] : owner.mLayerStrips)
         if (checkBounds(layerInsert(tabId))) return layerInsert(tabId);
@@ -555,6 +566,9 @@ int MixerPage::CableOverlay::findStripUnder(juce::Point<float> pt) const
         if (checkBounds(voxInsert(idx))) return voxInsert(idx);
     for (auto& [idx, s] : owner.mInstStrips)
         if (checkBounds(instInsert(idx))) return instInsert(idx);
+    // J-5 (2026-05-03)
+    for (auto& [idx, s] : owner.mRustyStrips)
+        if (checkBounds(rustyInsert(idx))) return rustyInsert(idx);
 
     return -1;
 }
@@ -577,6 +591,7 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     const bool srcIsAux    = (srcId >= kAuxBase   && srcId < kAuxBase   + 16);
     const bool srcIsVox    = (srcId >= kVoxBase   && srcId < kVoxBase   + kMaxVoxStrips);
     const bool srcIsInst   = (srcId >= kInstBase  && srcId < kInstBase  + kMaxInstStrips);
+    const bool srcIsRusty  = (srcId >= kRustyBase && srcId < kRustyBase + kMaxRustyStrips);
 
     const bool dstIsMaster = (dstId == kMaster);
     const bool dstIsAux    = (dstId >= kAuxBase && dstId < kAuxBase + 16);
@@ -592,6 +607,12 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     // Drum insert: Drums Bus · Master
     if (srcIsDrum)
         return dstIsMaster || dstId == kDrumsBus;
+
+    // J-5 (2026-05-03): Rusty insert main-out is LOCKED to kRustyDrumsBus
+    // (enforced via isMainOutLocked).  This rule covers send cables only —
+    // sends are restricted to aux strips per spec, no inter-bus routing.
+    if (srcIsRusty)
+        return dstIsAux;
 
     // Audio insert: any bus EXCEPT FX · Master (FX reachable only via aux-send).
     // R1 (2026-04-23): added Vox + Inst bus destinations.
@@ -1041,6 +1062,8 @@ MixerTrackStrip* MixerPage::findStripByChannelId(int channelId) const
     if (channelId == kVoxBus2   && mVoxBus2Strip)       return mVoxBus2Strip.get();
     if (channelId == kInstBus2  && mInstBus2Strip)      return mInstBus2Strip.get();
     if (channelId == kInstBus3  && mInstBus3Strip)      return mInstBus3Strip.get();
+    // J-5 (2026-05-03): RustyDrums Bus.
+    if (channelId == kRustyDrumsBus && mRustyDrumsBusStrip) return mRustyDrumsBusStrip.get();
 
     for (auto& [tabId, strip] : mLayerStrips)
         if (kLayerBase + tabId == channelId) return strip.get();
@@ -1057,6 +1080,10 @@ MixerTrackStrip* MixerPage::findStripByChannelId(int channelId) const
         if (kVoxBase + idx == channelId) return strip.get();
     for (auto& [idx, strip] : mInstStrips)
         if (kInstBase + idx == channelId) return strip.get();
+    // J-5 (2026-05-03): RustyDrums per-strip lookup (so CableOverlay can
+    // resolve socket positions for main-out cables to kRustyDrumsBus).
+    for (auto& [idx, strip] : mRustyStrips)
+        if (kRustyBase + idx == channelId) return strip.get();
 
     return nullptr;
 }
@@ -1132,6 +1159,10 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
                               MixerTrackStrip::StripType::Bus, juce::Colour(0xFF0FAFA5));
     mInstBusStrip = std::make_unique<MixerTrackStrip>("Inst Bus",
                               MixerTrackStrip::StripType::Bus, juce::Colour(0xFF1C3A8A));
+    // J-5 (2026-05-03): BaySickRustyDrums dedicated bus.  Drums-red accent
+    // matches the existing Drums Bus so the user reads them as the same family.
+    mRustyDrumsBusStrip = std::make_unique<MixerTrackStrip>("RustyDrums Bus",
+                              MixerTrackStrip::StripType::Bus, VC::DrumsCol);
 
     mLayersBusStrip    ->setAutomationPrefix("mixer_layers");
     mBassBusStrip      ->setAutomationPrefix("mixer_bass");
@@ -1140,6 +1171,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mAudioClipsBusStrip->setAutomationPrefix("mixer_clipsbus");
     mVoxBusStrip       ->setAutomationPrefix("mixer_voxbus");
     mInstBusStrip      ->setAutomationPrefix("mixer_instbus");
+    mRustyDrumsBusStrip->setAutomationPrefix("mixer_rustybus");
 
     // 5F-4a: bind each bus strip's new controls (polarity/width/bypass) to APVTS
     mLayersBusStrip    ->setApvts(mProcessor.apvts, "mixer_layers");
@@ -1149,6 +1181,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mAudioClipsBusStrip->setApvts(mProcessor.apvts, "mixer_clipsbus");
     mVoxBusStrip       ->setApvts(mProcessor.apvts, "mixer_voxbus");
     mInstBusStrip      ->setApvts(mProcessor.apvts, "mixer_instbus");
+    mRustyDrumsBusStrip->setApvts(mProcessor.apvts, "mixer_rustybus");
 
     wireBusCallbacks(mLayersBusStrip.get(),     mx.layersLevel,          mx.layersPan,        mx.layersMute,         mx.layersSolo);
     wireBusCallbacks(mBassBusStrip.get(),        mx.bassLevel,            mx.bassPan,          mx.bassMute,           mx.bassSolo);
@@ -1166,6 +1199,9 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
     mInstBusStrip->onFXClicked = [this](const juce::String& id) {
+        if (onEffectsTabRequested) onEffectsTabRequested(id);
+    };
+    mRustyDrumsBusStrip->onFXClicked = [this](const juce::String& id) {
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
 
@@ -1191,6 +1227,10 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mScrollContent->addAndMakeVisible(*mAudioClipsBusStrip);
     mScrollContent->addAndMakeVisible(*mVoxBusStrip);
     mScrollContent->addAndMakeVisible(*mInstBusStrip);
+    // J-5: bus strip added to children but visibility flag (mRustyDrumsBusActive)
+    // is what gates whether layoutScrollContent positions it on-screen.
+    mScrollContent->addChildComponent(*mRustyDrumsBusStrip);
+    mRustyDrumsBusStrip->setVisible(false);
 
     // Direct Routing label (hidden until any strip main-outs to Master)
     mDirectRoutingLabel = std::make_unique<DirectRoutingLabel>();
@@ -1217,6 +1257,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     wireSendBtn(mAudioClipsBusStrip.get());
     wireSendBtn(mVoxBusStrip.get());
     wireSendBtn(mInstBusStrip.get());
+    wireSendBtn(mRustyDrumsBusStrip.get());
 
     // 5F-4b B3: set channel IDs on fixed strips for cable rendering
     mMasterStrip      ->setChannelId(MixerChannelIds::kMaster);
@@ -1227,6 +1268,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mAudioClipsBusStrip->setChannelId(MixerChannelIds::kClipsBus);
     mVoxBusStrip      ->setChannelId(MixerChannelIds::kVoxBus);
     mInstBusStrip     ->setChannelId(MixerChannelIds::kInstBus);
+    mRustyDrumsBusStrip->setChannelId(MixerChannelIds::kRustyDrumsBus);
 
     // 5F-4b B2: "Add Aux Strip" button (renamed from "Add Mixer Strip" during
     // R1 2026-04-23 when Vox + Inst were added alongside).  Owned here,
@@ -1674,6 +1716,169 @@ void MixerPage::addVoxChannelAtIndex(int idx)
 
 // R2 (2026-04-23): shared ASIO input-channel picker for Vox + Inst Arm-LED
 // clicks.  Reads channel names from the AudioDeviceManager via the
+// B2 + B1 (2026-05-04): smart channel grouping for the input picker.
+//
+// B2 heuristic - pair adjacent channels if their names suggest a stereo pair:
+//   * suffix "L"/"R" or " L"/" R" or " (L)"/" (R)" - case-insensitive
+//   * common base prefix (everything except the suffix) is identical
+// B1 fallback - known device profiles when names are generic ("IN 1", "IN 2", ...)
+//   * Tascam Model 24: pairs at 13/14, 15/16, 17/18, 19/20, 21/22 (line inputs).
+//     23/24 is the master mix bus and is left as two mono entries — not a true
+//     stereo line-input pair.
+//   * Tascam Model 16 / Model 12: similar smaller layouts.
+// Anything not paired stays mono.  Pure code-side; no UI option to override.
+namespace
+{
+struct ChannelGroup
+{
+    int          startIdx;     // 0-based first channel in the group
+    bool         isPair;       // false = single mono channel
+    juce::String label;        // display text for the picker item
+};
+
+struct DevicePairProfile
+{
+    const char*       deviceNameContains;
+    int               requiredChannelCount;   // -1 = any count
+    std::vector<int>  pairFirstIndices;       // 0-based starts; pairs are (i, i+1)
+};
+
+static const DevicePairProfile kDeviceProfiles[] =
+{
+    // Tascam ships a single "Model Mixer ASIO" driver across the entire
+    // Model series — Model 12, 16, 24, 2400 all use the same driver name.
+    // Channel count is the only thing that disambiguates them at runtime.
+    //
+    // Model 24 = 24 input channels: 12 mono mic preamps + 5 line-input
+    // stereo pairs (13/14..21/22) + 2 mono master-mix returns (23/24).
+    { "Model Mixer", 24, { 12, 14, 16, 18, 20 } },
+};
+
+// Returns true if `name` ends with one of the L-channel suffixes; if so
+// `outBase` is the name minus the suffix.
+static bool stripLeftSuffix (const juce::String& name, juce::String& outBase)
+{
+    static const char* kLs[] = { " L", "_L", "-L", "(L)", " (L)" };
+    for (auto* s : kLs)
+    {
+        if (name.endsWithIgnoreCase (s))
+        {
+            outBase = name.dropLastCharacters ((int) std::strlen (s)).trimEnd();
+            return true;
+        }
+    }
+    if (name.endsWithIgnoreCase ("L") && ! name.endsWithIgnoreCase ("AL")
+        && ! name.endsWithIgnoreCase ("EL") && ! name.endsWithIgnoreCase ("IL")
+        && ! name.endsWithIgnoreCase ("OL") && ! name.endsWithIgnoreCase ("UL"))
+    {
+        outBase = name.dropLastCharacters (1).trimEnd();
+        return true;
+    }
+    return false;
+}
+
+static bool stripRightSuffix (const juce::String& name, juce::String& outBase)
+{
+    static const char* kRs[] = { " R", "_R", "-R", "(R)", " (R)" };
+    for (auto* s : kRs)
+    {
+        if (name.endsWithIgnoreCase (s))
+        {
+            outBase = name.dropLastCharacters ((int) std::strlen (s)).trimEnd();
+            return true;
+        }
+    }
+    if (name.endsWithIgnoreCase ("R") && ! name.endsWithIgnoreCase ("AR")
+        && ! name.endsWithIgnoreCase ("ER") && ! name.endsWithIgnoreCase ("IR")
+        && ! name.endsWithIgnoreCase ("OR") && ! name.endsWithIgnoreCase ("UR"))
+    {
+        outBase = name.dropLastCharacters (1).trimEnd();
+        return true;
+    }
+    return false;
+}
+
+// Build groups for the picker.  Tries B2 first; if zero pairs were detected
+// AND the device name matches a B1 profile, applies that profile instead.
+// Final list is sorted by channel index so groups appear in natural order.
+static std::vector<ChannelGroup> computeChannelGroups (const juce::StringArray& names,
+                                                        const juce::String& deviceName)
+{
+    std::vector<ChannelGroup> groups;
+    std::vector<bool> consumed ((size_t) names.size(), false);
+
+    // B2 - adjacent L/R name pairing.
+    for (int i = 0; i + 1 < names.size(); ++i)
+    {
+        if (consumed[(size_t) i]) continue;
+        juce::String lBase, rBase;
+        const bool lOk = stripLeftSuffix  (names[i].trim(),     lBase);
+        const bool rOk = stripRightSuffix (names[i + 1].trim(), rBase);
+        if (lOk && rOk && lBase.equalsIgnoreCase (rBase) && lBase.isNotEmpty())
+        {
+            ChannelGroup g;
+            g.startIdx = i;
+            g.isPair   = true;
+            g.label    = juce::String (i + 1) + "/" + juce::String (i + 2)
+                          + ":  " + lBase + " (stereo)";
+            groups.push_back (std::move (g));
+            consumed[(size_t) i]     = true;
+            consumed[(size_t) i + 1] = true;
+            ++i;
+        }
+    }
+
+    const bool b2FoundPairs = std::any_of (groups.begin(), groups.end(),
+                                            [] (const ChannelGroup& g) { return g.isPair; });
+
+    // B1 - device-profile fallback when B2 found nothing.  Profile match
+    // requires the device-name substring AND (when set) the channel count
+    // to match — needed because some vendors (e.g. Tascam) ship one ASIO
+    // driver for an entire product family, distinguishing models only by
+    // the actual channel count the driver enumerates.
+    if (! b2FoundPairs && deviceName.isNotEmpty())
+    {
+        for (const auto& prof : kDeviceProfiles)
+        {
+            if (! deviceName.containsIgnoreCase (prof.deviceNameContains)) continue;
+            if (prof.requiredChannelCount >= 0
+                && prof.requiredChannelCount != names.size()) continue;
+            for (int idx : prof.pairFirstIndices)
+            {
+                if (idx < 0 || idx + 1 >= names.size()) continue;
+                if (consumed[(size_t) idx] || consumed[(size_t) idx + 1]) continue;
+                ChannelGroup g;
+                g.startIdx = idx;
+                g.isPair   = true;
+                g.label    = juce::String (idx + 1) + "/" + juce::String (idx + 2)
+                              + ":  " + names[idx].trim()
+                              + " + " + names[idx + 1].trim() + " (stereo)";
+                groups.push_back (std::move (g));
+                consumed[(size_t) idx]     = true;
+                consumed[(size_t) idx + 1] = true;
+            }
+            break;   // first matching profile wins
+        }
+    }
+
+    // Add remaining mono channels.
+    for (int i = 0; i < names.size(); ++i)
+    {
+        if (consumed[(size_t) i]) continue;
+        ChannelGroup g;
+        g.startIdx = i;
+        g.isPair   = false;
+        g.label    = juce::String (i + 1) + ":  " + names[i].trim();
+        groups.push_back (std::move (g));
+    }
+
+    std::sort (groups.begin(), groups.end(),
+               [] (const ChannelGroup& a, const ChannelGroup& b)
+               { return a.startIdx < b.startIdx; });
+    return groups;
+}
+} // namespace
+
 // `getInputChannelNames` callback (wired by StandaloneEditor); writes the
 // chosen index to APVTS `_inputChannelIdx` + name to `_inputChannelName`;
 // sets `_arm` true on selection / false on "Disarm".  When the device has
@@ -1706,12 +1911,26 @@ void MixerPage::showInputChannelPicker(int channelId)
                                  : -1.f);
     const bool curArmed = (mProcessor.apvts.getRawParameterValue (prefix + "_arm") != nullptr
                               && mProcessor.apvts.getRawParameterValue (prefix + "_arm")->load() > 0.5f);
+    const bool curStereo = (mProcessor.apvts.getRawParameterValue (prefix + "_inputChannelStereo") != nullptr
+                              && mProcessor.apvts.getRawParameterValue (prefix + "_inputChannelStereo")->load() > 0.5f);
 
-    for (int i = 0; i < names.size(); ++i)
-        menu.addItem (juce::PopupMenu::Item ("Channel " + juce::String (i + 1)
-                                                + ": " + names[i])
-                          .setID (100 + i)
-                          .setTicked (curIdx == i && curArmed));
+    // B2 + B1: build channel groups (stereo pairs + mono channels) and add
+    // them as flat items in channel order.  Item IDs:
+    //   100..199 = mono on idx-100
+    //   200..299 = stereo pair starting at idx-200
+    //   99       = disarm
+    const juce::String devName = getInputDeviceName ? getInputDeviceName() : juce::String();
+    const auto groups = computeChannelGroups (names, devName);
+    for (const auto& g : groups)
+    {
+        const int itemId = g.isPair ? (200 + g.startIdx) : (100 + g.startIdx);
+        const bool ticked = curArmed
+            && curIdx == g.startIdx
+            && curStereo == g.isPair;
+        menu.addItem (juce::PopupMenu::Item (g.label)
+                        .setID (itemId)
+                        .setTicked (ticked));
+    }
 
     if (curArmed)
     {
@@ -1726,16 +1945,32 @@ void MixerPage::showInputChannelPicker(int channelId)
             if (! self || chosen == 0) return;
 
             const bool disarm = (chosen == 99);
-            const int  newIdx = disarm ? -1 : (chosen - 100);
+            // B2 + B1: 100..199 = mono on (chosen - 100); 200..299 = stereo
+            // pair starting at (chosen - 200).
+            const bool isStereoPick = (chosen >= 200 && chosen < 300);
+            const int  newIdx = disarm ? -1
+                              : (isStereoPick ? (chosen - 200)
+                                              : (chosen - 100));
 
             if (auto* p = self->mProcessor.apvts.getParameter (prefix + "_inputChannelIdx"))
                 p->setValueNotifyingHost (
                     p->getNormalisableRange().convertTo0to1 ((float) newIdx));
+            if (auto* p = self->mProcessor.apvts.getParameter (prefix + "_inputChannelStereo"))
+                p->setValueNotifyingHost (disarm ? 0.f : (isStereoPick ? 1.f : 0.f));
             if (auto* p = self->mProcessor.apvts.getParameter (prefix + "_arm"))
                 p->setValueNotifyingHost (disarm ? 0.f : 1.f);
 
-            self->mProcessor.setInputChannelName (prefix,
-                disarm ? juce::String() : names[newIdx]);
+            // Display name: for stereo pairs, show "13/14: ..." composite.
+            juce::String displayName;
+            if (! disarm)
+            {
+                if (isStereoPick && newIdx + 1 < names.size())
+                    displayName = juce::String (newIdx + 1) + "/" + juce::String (newIdx + 2)
+                                    + ": " + names[newIdx].trim() + " + " + names[newIdx + 1].trim();
+                else if (newIdx >= 0 && newIdx < names.size())
+                    displayName = names[newIdx];
+            }
+            self->mProcessor.setInputChannelName (prefix, displayName);
             self->refreshLiveInputStrip (channelId);
         });
 }
@@ -1775,6 +2010,11 @@ void MixerPage::addInstChannelAtIndex(int idx)
         if (getWidth() > 0) layoutScrollContent();
         if (onAudioStripRenamed) onAudioStripRenamed();
     };
+    // I-16 G-9 polish (2026-05-03): missing-from-inception copy-paste oversight
+    // -- Vox strips wire onArmRequested -> showInputChannelPicker so clicking
+    // the arm LED opens the ASIO input picker.  Inst strips never did, so
+    // arming was silent.  Match the Vox path here.
+    strip->onArmRequested = [this](int chId) { showInputChannelPicker(chId); };
 
     mScrollContent->addAndMakeVisible(*strip);
     mInstStrips[idx] = std::move(strip);
@@ -1788,6 +2028,89 @@ void MixerPage::addInstChannelAtIndex(int idx)
     if (onInstStripAdded) onInstStripAdded(idx);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// J-5 (2026-05-03): BaySickRustyDrums strip lifecycle on the Mixer page.
+// PluginProcessor::loadBaySickRustyDrumsKit calls these in a batch (one per
+// discovered channel); destroyBaySickRustyDrums calls clearAllRustyChannels.
+// ─────────────────────────────────────────────────────────────────────────────
+void MixerPage::addRustyChannelAtIndex (int idx, const juce::String& name)
+{
+    if (idx < 0 || idx >= MixerChannelIds::kMaxRustyStrips) return;
+    if (mRustyStrips.count (idx) > 0) return;
+
+    const juce::String prefix = "mixer_rusty_" + juce::String (idx);
+    // Backstop: APVTS params + InsertNode are normally created by
+    // PluginProcessor::ensureRustyInsert before this is called, but call
+    // again here so the function is robust if invoked stand-alone.
+    mProcessor.ensureRustyInsert (idx, name);
+
+    // J-5 (2026-05-03): use DrumChannel (no arm/monitor buttons — these
+    // strips are sfizz-driven, not live-input).  Drums-red accent matches
+    // the existing Drums Bus family + the new RustyDrums Bus.
+    auto strip = std::make_unique<MixerTrackStrip> (
+        name,
+        MixerTrackStrip::StripType::DrumChannel,
+        VC::DrumsCol);
+    strip->setAutomationPrefix (prefix);
+    strip->setApvts (mProcessor.apvts, prefix);
+    strip->setChannelId (MixerChannelIds::rustyInsert (idx));
+    strip->onAddSendRequested = [this](int chId) { onAddCableRequestedFor (chId); };
+    strip->onFXClicked = [this](const juce::String& id) {
+        if (onEffectsTabRequested) onEffectsTabRequested (id);
+    };
+    strip->onNameChanged = [this](const juce::String&) {
+        if (getWidth() > 0) layoutScrollContent();
+        if (onAudioStripRenamed) onAudioStripRenamed();
+    };
+
+    mScrollContent->addAndMakeVisible (*strip);
+    mRustyStrips[idx] = std::move (strip);
+    mRustyOrder.push_back (idx);
+
+    // First strip activates the bus visibility.
+    if (! mRustyDrumsBusActive && mRustyDrumsBusStrip)
+    {
+        mRustyDrumsBusActive = true;
+        mRustyDrumsBusStrip->setVisible (true);
+    }
+
+    if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+}
+
+void MixerPage::removeRustyChannelAtIndex (int idx)
+{
+    auto it = mRustyStrips.find (idx);
+    if (it == mRustyStrips.end()) return;
+
+    if (it->second)
+        mScrollContent->removeChildComponent (it->second.get());
+    mRustyStrips.erase (it);
+    mRustyOrder.erase (std::remove (mRustyOrder.begin(), mRustyOrder.end(), idx),
+                       mRustyOrder.end());
+
+    if (getWidth() > 0) layoutScrollContent();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+}
+
+void MixerPage::clearAllRustyChannels()
+{
+    for (auto& [idx, strip] : mRustyStrips)
+        if (strip) mScrollContent->removeChildComponent (strip.get());
+    mRustyStrips.clear();
+    mRustyOrder.clear();
+
+    // Empty Rusty group → hide the bus strip too.
+    if (mRustyDrumsBusActive && mRustyDrumsBusStrip)
+    {
+        mRustyDrumsBusActive = false;
+        mRustyDrumsBusStrip->setVisible (false);
+    }
+
+    if (getWidth() > 0) layoutScrollContent();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+}
+
 void MixerPage::clearDynamicStrips()
 {
     mLayerStrips.clear();    mLayerTabOrder.clear();
@@ -1797,6 +2120,12 @@ void MixerPage::clearDynamicStrips()
     mAuxStrips  .clear();    mAuxOrder     .clear();    mNextAuxIdx  = 0;
     mVoxStrips  .clear();    mVoxOrder     .clear();    mNextVoxIdx  = 0;
     mInstStrips .clear();    mInstOrder    .clear();    mNextInstIdx = 0;
+    mRustyStrips.clear();    mRustyOrder   .clear();
+    if (mRustyDrumsBusActive && mRustyDrumsBusStrip)
+    {
+        mRustyDrumsBusActive = false;
+        mRustyDrumsBusStrip->setVisible(false);
+    }
     mLastSendToCache.clear();
     if (getWidth() > 0) layoutScrollContent();
     if (mCableOverlay) mCableOverlay->repaint();
@@ -2487,6 +2816,10 @@ void MixerPage::timerCallback()
             anyChange |= check(voxInsert(k), "mixer_vox_" + juce::String(k));
         for (int k : mInstOrder)
             anyChange |= check(instInsert(k), "mixer_inst_" + juce::String(k));
+        // J-5 (2026-05-03): Rusty inserts must be in this scan so any send
+        // cable change re-runs layout (re-buckets the strip to its new dest).
+        for (int k : mRustyOrder)
+            anyChange |= check(rustyInsert(k), "mixer_rusty_" + juce::String(k));
 
         if (anyChange)
         {
@@ -2527,6 +2860,7 @@ void MixerPage::onVBlank()
     drainStereoBus (mAudioClipsBusStrip.get(), mProcessor.mAudioClipsBusPeakDbL, mProcessor.mAudioClipsBusPeakDbR);
     drainStereoBus (mVoxBusStrip       .get(), mProcessor.mVoxBusPeakDbL,        mProcessor.mVoxBusPeakDbR);
     drainStereoBus (mInstBusStrip      .get(), mProcessor.mInstBusPeakDbL,       mProcessor.mInstBusPeakDbR);
+    drainStereoBus (mRustyDrumsBusStrip.get(), mProcessor.mRustyDrumsBusPeakDbL, mProcessor.mRustyDrumsBusPeakDbR);   // J-7b
 
     // Per-insert peak: drain InsertNode atomics directly via the new exchange
     // variant on VibeGraph.  Audio CAS-maxes into them; UI exchange-and-resets
@@ -2561,6 +2895,9 @@ void MixerPage::onVBlank()
         drainStereoInsert (VibeGraph::InsertKind::Vox, idx, strip.get());
     for (auto& [idx, strip] : mInstStrips)
         drainStereoInsert (VibeGraph::InsertKind::Inst, idx, strip.get());
+    // J-5 (2026-05-03): per-Rusty-strip peak meter drain.
+    for (auto& [idx, strip] : mRustyStrips)
+        drainStereoInsert (VibeGraph::InsertKind::Rusty, idx, strip.get());
 
     if (mVoxBus2Strip)  drainStereoBus (mVoxBus2Strip .get(), mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
     if (mInstBus2Strip) drainStereoBus (mInstBus2Strip.get(), mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);
@@ -2652,6 +2989,17 @@ void MixerPage::layoutScrollContent()
             bucketPush(it->second.get(), instInsert(k), auxW,
                        "mixer_inst_" + juce::String(k));
     }
+    // J-5 (2026-05-03): BaySickRustyDrums strips bucket together (default
+    // dest = kRustyDrumsBus) so they appear as a single group on the Mixer
+    // page next to the RustyDrums Bus strip.  drumW width matches the
+    // DrumChannel strip type used for these strips.
+    for (int k : mRustyOrder)
+    {
+        auto it = mRustyStrips.find(k);
+        if (it != mRustyStrips.end())
+            bucketPush(it->second.get(), rustyInsert(k), drumW,
+                       "mixer_rusty_" + juce::String(k));
+    }
 
     int x = kSepW;
 
@@ -2739,6 +3087,11 @@ void MixerPage::layoutScrollContent()
 
     laidOutBus(*mLayersBusStrip,      kLayersBus, VC::LayerCol[0]);
     laidOutBus(*mBassBusStrip,        kBassBus,   VC::BassCol[0]);
+    // J-5 (2026-05-03): RustyDrums Bus + 13 inserts sit between Bass and
+    // Drums so they read as a sibling of Drums.  Visible only when
+    // mRustyDrumsBusActive (= a BaySickRustyDrums singleton has been spawned).
+    if (mRustyDrumsBusActive && mRustyDrumsBusStrip)
+        laidOutBus(*mRustyDrumsBusStrip, kRustyDrumsBus, VC::DrumsCol);
     laidOutBus(*mDrumsBusStrip,       kDrumsBus,  VC::DrumsCol);
 
     x += kSepW;

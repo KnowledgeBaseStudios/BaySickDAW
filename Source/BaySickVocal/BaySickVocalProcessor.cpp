@@ -1,4 +1,5 @@
 #include "BaySickVocalProcessor.h"
+#include "../AudioFileRecorder.h"   // I-16 G-9: wet recorder tap inside processBlock
 #include "BaySickVocalEditor.h"
 #include "../DSP/DeEsserDSP.h"
 #include "../DSP/CompressorDSP.h"
@@ -271,9 +272,44 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 
     // ── Run the locked vocal chain in order ──────────────────────────────
-    // input -> pitch correction -> [rack: deess->comp->sat->lim] -> output
-    mPitchCorrector.process (buffer);
+    // input -> pitch correction -> [WET TAP] -> [rack: deess->comp->sat->lim]
+    //       -> NAM/IR -> output
+    // I-16 G-9 (2026-05-03): pitch correction skipped when the source mux is
+    // FilePlay (force-bypass) so a wet file with realtime pitch already
+    // committed at record time doesn't get corrected twice.  NAM/IR routing
+    // also added in G-9.
+    if (! mForcePitchBypass.load (std::memory_order_acquire))
+        mPitchCorrector.process (buffer);
+
+    // ── Wet recording tap (post-realtime pitch / pre-vocal-chain) ────────
+    // This is the user-locked tap point per Option C of G-9.1: the file
+    // captures realtime-pitch-applied audio so playback bypasses realtime
+    // (single pass) while everything from the vocal chain rack onwards
+    // stays dynamic across sessions.
+    if (auto* wetRec = mWetRecorder.load (std::memory_order_acquire))
+    {
+        // Sum stereo to mono for the recorder (dry source was a mono ASIO
+        // channel duplicated to L=R upstream; pitch correction may have
+        // diverged the channels slightly).
+        const float invCh = (numChannels > 1) ? (1.0f / (float) numChannels) : 1.0f;
+        juce::AudioBuffer<float> monoView (1, numSamples);
+        float* dst = monoView.getWritePointer (0);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float s = 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+                s += buffer.getReadPointer (ch)[i];
+            dst[i] = s * invCh;
+        }
+        wetRec->writeBlock (monoView);
+    }
+
     mVocalChainRack .process (buffer);
+    if (mNamIrProc != nullptr)
+    {
+        juce::MidiBuffer dummyMidi;
+        mNamIrProc->processBlock (buffer, dummyMidi);
+    }
 
     // ── Global Mix (wet/dry crossfade) ──────────────────────────────────
     if (needDry)

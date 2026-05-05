@@ -40,12 +40,12 @@ public:
     void switchTab    (int idx);
     int  getActiveTab () const noexcept { return mActiveTab; }
 
-    // H-6b (2026-05-01): tab labels surfaced through the PageMenuBar's
-    // setTabSlots.  StandaloneEditor calls this when the page becomes visible.
+    // H-6b (2026-05-01) / J-6 (2026-05-03): tab labels surfaced through the
+    // PageMenuBar's setTabSlots.  Pre Rack EQ removed in J-6 EQ unification.
     static juce::StringArray getTabLabels()
     {
         return { "BaySickVocals", "Vocal Chain", "BaySickPitch",
-                 "BaySickAlign",  "BaySickNAM/IR", "Pre Rack EQ" };
+                 "BaySickAlign",  "BaySickNAM/IR" };
     }
 
     int          getPageIndex() const noexcept { return mPageIndex; }
@@ -56,6 +56,13 @@ public:
 
     juce::String getClipFilePath() const                    { return mClipPath; }
     void         setClipFilePath (const juce::String& p);
+
+    // I-16 G-9 (2026-05-03): linked recorded-clip file path (the wet audio
+    // that plays back through this page's chain on transport playback).
+    // Set by StandaloneEditor::commitRecordingResult after a successful
+    // armed Vox take (always the WET file per Option C of the spec).
+    juce::String getLinkedClipPath() const                  { return mLinkedClipPath; }
+    void         setLinkedClipPath (const juce::String& p)  { mLinkedClipPath = p; }
 
     // H-6b (2026-05-01): expose the clip-name label so StandaloneEditor can
     // re-parent it into the PageMenuBar's far-right slot when this page is
@@ -85,14 +92,7 @@ public:
     bool isLocked() const noexcept { return mLocked; }
     void setLocked (bool b) { if (b == mLocked) return; mLocked = b; if (onLockChanged) onLockChanged(); repaint(); }
 
-    // ── G-7 polish (2026-04-29): Pre EQ8 M/S sub-tab (mirrors LayersPage) ─────
-    ParametricEQDisplay* getEQDisplay() const { return mEQDisplay.get(); }
-    void setEQMid (bool showMid)
-    {
-        mEQMidActive = showMid;
-        if (mEQDisplay) mEQDisplay->setShowMid (showMid);
-    }
-    bool isEQMidActive() const { return mEQMidActive; }
+    // J-6 EQ unification (2026-05-03): EQ accessors removed; pre-rack EQ on Effects page only.
 
     // Save/Load PAGE preset — entire VoxPage state (currently just BaySickPlayer;
     // Phase H adds BaySickVocal alongside).  XML matches exportVoxState format.
@@ -113,7 +113,6 @@ public:
 
 private:
     void buildEnginePicker();
-    void buildEQTab();   // G-7 polish: replaced buildEqStub
     void layoutEditor (juce::Rectangle<int> r);
     juce::AudioProcessorEditor* activeEditor() const;
     void showEngineContextMenu();
@@ -142,12 +141,14 @@ private:
     EngineType                                   mEngineType { EngineType::None };
     std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor
     std::unique_ptr<juce::AudioProcessor>        mVocalProc;         // BaySickVocal (Phase H — null until then)
+
+    // I-16 G-9 (2026-05-03): file path of the wet recording linked to this
+    // page's strip.  Set by commitRecordingResult after a successful take.
+    juce::String                                 mLinkedClipPath;
     std::unique_ptr<juce::AudioProcessorEditor>  mPlayerEditor;
     std::unique_ptr<juce::AudioProcessorEditor>  mVocalEditor;
 
-    // G-7 polish (2026-04-29): real Pre EQ8 M/S display.
-    std::unique_ptr<ParametricEQDisplay>         mEQDisplay;
-    bool                                         mEQMidActive { true };
+    // J-6 EQ unification (2026-05-03): mEQDisplay removed.
 
     // G-7: full processor + bus-active query for Page Preset save/load.
     VibeSynthProcessor*                          mFullProcessor { nullptr };

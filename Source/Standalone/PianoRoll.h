@@ -5,19 +5,32 @@
 #include "UndoActions.h"
 
 // ── Piano keyboard strip (left side of piano roll) ────────────────────────────
-class PianoKeyboard : public juce::Component
+class PianoKeyboard : public juce::Component,
+                      public juce::SettableTooltipClient
 {
 public:
     PianoKeyboard();
     void paint         (juce::Graphics&)                                          override;
     void mouseDown     (const juce::MouseEvent&)                                  override;
     void mouseUp       (const juce::MouseEvent&)                                  override;
+    void mouseMove     (const juce::MouseEvent&)                                  override;
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&)  override;
+    juce::String getTooltip() override;
 
     void setScrollState(int topNote, int noteH);
     // Drum mode: show row labels instead of piano key graphics.
     // Labels are in top-to-bottom order: labels[0] = highest visible note.
     void setDrumRowLabels(const std::vector<juce::String>& labels);
+    // J-7b: per-MIDI-note label provider — when set, each visible white key
+    // shows the engine-supplied label (e.g. "Snare Center", "Hi-hat Tip")
+    // instead of just the C-octave name.  Returning empty falls through to
+    // the default name.  Used by BaySickRustyDrums to label the full kit
+    // keymap; ignored in drum-row-label mode.
+    void setNoteLabelProvider(std::function<juce::String(int)> provider);
+    // J-7b: render every key as white (no black-key strips) so labels are
+    // legible across the full range.  Used by BaySickRustyDrums where the
+    // sharp/flat distinction has no musical meaning (it's a drum kit).
+    void setAllKeysWhiteMode(bool enabled);
     std::function<void(int midiNote, bool noteOn)> onNotePreview;
     // 2026-04-21: forward wheel events to the grid so scrolling works over keys too.
     std::function<void(const juce::MouseEvent&, const juce::MouseWheelDetails&)> onWheel;
@@ -28,8 +41,11 @@ private:
     int mTopNote { 96 };
     int mNoteH   { 12 };
     int mPreviewNote { -1 };
+    int mHoverNote { -1 };  // J-7b: tracks key under mouse for tooltip
     bool mDrumLabelMode { false };
+    bool mAllKeysWhite { false };
     std::vector<juce::String> mDrumRowLabels;  // top-to-bottom row labels
+    std::function<juce::String(int)> mNoteLabelProvider;
 
     int noteToY  (int note) const;
     int yToNote  (int y)    const;
@@ -485,6 +501,12 @@ public:
     int  getActiveSlot  () const { return mActiveSlot; }
     // Drum row labels — forwarded to PianoKeyboard. Top-to-bottom order.
     void setDrumRowLabels(const std::vector<juce::String>& labels);
+    // J-7b: forward a per-MIDI-note label provider to the keyboard widget.
+    void setNoteLabelProvider(std::function<juce::String(int)> provider);
+    // J-7b: paint every keyboard row as a white key (BaySickRustyDrums).
+    void setAllKeysWhiteMode(bool enabled);
+    // J-7b: scroll the view so `topNote` is the highest visible MIDI note.
+    void setTopNote(int topNote);
     void setPlayheadBeat (double beat);
 
     // ── Toolbar context label (e.g. "Layer 0 - Harmless") ────────────────

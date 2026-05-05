@@ -29,11 +29,20 @@ public:
 // ── PlayHeadAdvancer ──────────────────────────────────────────────────────────
 // Wraps AudioProcessorPlayer and advances the standalone playhead PPQ position
 // before each audio block so the Sequencer sees time advancing.
+//
+// J-A2 (2026-05-04): also routes the processor's stereo master output to a
+// user-chosen output channel pair (or single channel for mono).  Multi-output
+// audio interfaces (e.g. Tascam Model 24, Focusrite 18i20) typically expose
+// 8-22 output channels; the user selects which pair the master mix lands on
+// via a dropdown in the Audio Settings dialog.  Stored as two atomics so the
+// audio thread reads lock-free.
 struct PlayHeadAdvancer : public juce::AudioIODeviceCallback
 {
     StandalonePlayHead&          playHead;
     juce::AudioProcessorPlayer&  player;
     double                       sampleRate { 44100.0 };
+
+    juce::AudioBuffer<float> mScratchStereo;   // pre-sized in audioDeviceAboutToStart
 
     PlayHeadAdvancer(StandalonePlayHead& ph, juce::AudioProcessorPlayer& pl)
         : playHead(ph), player(pl) {}
@@ -43,6 +52,9 @@ struct PlayHeadAdvancer : public juce::AudioIODeviceCallback
         if (d == nullptr) return;
         sampleRate = d->getCurrentSampleRate();
         if (sampleRate <= 0.0) sampleRate = 44100.0;
+        const int blockSize = juce::jmax (32, d->getCurrentBufferSizeSamples());
+        mScratchStereo.setSize (2, blockSize, /*keepContent*/false, /*clearExtra*/true,
+                                /*avoidReallocating*/false);
         player.audioDeviceAboutToStart(d);
     }
     void audioDeviceStopped() override
@@ -58,12 +70,55 @@ struct PlayHeadAdvancer : public juce::AudioIODeviceCallback
                                           float* const* out, int no, int n,
                                           const juce::AudioIODeviceCallbackContext& ctx) override
     {
-        // Process FIRST so beatStart reads the position at the START of this block.
-        // Advancing before processing was off by one block, causing notes to play late.
-        player.audioDeviceIOCallbackWithContext(in, ni, out, no, n, ctx);
+        // J-A2: zero every device output channel so untouched ones go silent
+        // even if the player's prior callback left residue.
+        for (int c = 0; c < no; ++c)
+            if (out[c] != nullptr)
+                juce::FloatVectorOperations::clear (out[c], n);
+
+        const int  firstCh = juce::jlimit (0, juce::jmax (0, no - 1),
+                                            MasterOutputRouting::gFirstOutputChannel.load (std::memory_order_relaxed));
+        const bool isMono  = MasterOutputRouting::gMasterIsMono.load (std::memory_order_relaxed);
+
+        if (isMono || no <= 1)
+        {
+            // Player writes stereo into the scratch; we sum L+R*0.5 into the
+            // chosen output channel.  Skips silently if the chosen channel is
+            // out of range (firstCh clamped above).
+            if (n > mScratchStereo.getNumSamples())
+                mScratchStereo.setSize (2, n, false, true, true);   // last-resort grow
+            float* scratchPtrs[2] = { mScratchStereo.getWritePointer (0),
+                                       mScratchStereo.getWritePointer (1) };
+            juce::FloatVectorOperations::clear (scratchPtrs[0], n);
+            juce::FloatVectorOperations::clear (scratchPtrs[1], n);
+            player.audioDeviceIOCallbackWithContext (in, ni, scratchPtrs, 2, n, ctx);
+            if (auto* dst = (firstCh < no) ? out[firstCh] : nullptr)
+                for (int s = 0; s < n; ++s)
+                    dst[s] = (scratchPtrs[0][s] + scratchPtrs[1][s]) * 0.5f;
+        }
+        else
+        {
+            // Stereo: route the player's L/R into the chosen pair.  If
+            // firstCh+1 exceeds device channel count, fall back to mono on
+            // firstCh (single-channel device or last-channel selection).
+            const int secondCh = juce::jmin (firstCh + 1, no - 1);
+            float* mapped[2] = {
+                out[firstCh],
+                (secondCh != firstCh) ? out[secondCh] : out[firstCh]
+            };
+            player.audioDeviceIOCallbackWithContext (in, ni, mapped, 2, n, ctx);
+        }
+
         playHead.advanceBlock(n, sampleRate);
     }
 };
+
+// J-A2 master-output routing globals (declarations live in StandaloneApp.h).
+namespace MasterOutputRouting
+{
+    std::atomic<int>  gFirstOutputChannel { 0 };
+    std::atomic<bool> gMasterIsMono       { false };
+}
 
 // ── StandalonePlayHead ────────────────────────────────────────────────────────
 void StandalonePlayHead::advanceBlock(int numSamples, double sampleRate)
@@ -115,6 +170,38 @@ juce::File VibesynthStandaloneApp::getAudioSettingsFile()
                       .getChildFile("audio_settings.xml");
     if (legacy.existsAsFile()) return legacy;
     return neu;   // fresh install - return the new path so save lands there
+}
+
+// J-A2 (2026-05-04): master-output routing persistence.  Lives in a sibling
+// file of audio_settings.xml so it stays per-machine (different audio
+// interfaces per workstation).
+juce::File VibesynthStandaloneApp::getMasterOutputFile()
+{
+    return getAudioSettingsFile().getSiblingFile ("master_output.xml");
+}
+
+void VibesynthStandaloneApp::loadMasterOutputRouting()
+{
+    const auto f = getMasterOutputFile();
+    if (! f.existsAsFile()) return;
+    auto xml = juce::XmlDocument::parse (f);
+    if (xml == nullptr || ! xml->hasTagName ("MASTEROUT")) return;
+    const int  first = xml->getIntAttribute ("firstChannel", 0);
+    const bool mono  = xml->getBoolAttribute ("mono", false);
+    MasterOutputRouting::gFirstOutputChannel.store (juce::jmax (0, first), std::memory_order_relaxed);
+    MasterOutputRouting::gMasterIsMono.store (mono, std::memory_order_relaxed);
+}
+
+void VibesynthStandaloneApp::saveMasterOutputRouting()
+{
+    juce::XmlElement xml ("MASTEROUT");
+    xml.setAttribute ("firstChannel",
+                      MasterOutputRouting::gFirstOutputChannel.load (std::memory_order_relaxed));
+    xml.setAttribute ("mono",
+                      MasterOutputRouting::gMasterIsMono.load (std::memory_order_relaxed));
+    auto f = getMasterOutputFile();
+    f.getParentDirectory().createDirectory();
+    f.replaceWithText (xml.toString());
 }
 
 void VibesynthStandaloneApp::saveAudioSettings()
@@ -204,15 +291,136 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // covers most desktop interfaces (Tascam Model 24, Focusrite 18i20, etc.);
     // larger devices still work because JUCE clamps to the device's actual
     // channel count.  The 2-output count is unchanged (stereo master).
+    // J-A2 (2026-05-04): bumped output channel request from 2 -> 64 so the
+    // Mixer hamburger's Master Output picker has every channel of a multi-out
+    // interface available.  Tascam Model 24 = 22 outs, Focusrite 18i20 = 8 outs,
+    // most consumer audio = 2 outs.  JUCE clamps to the device's actual count
+    // (request 64 -> get all 22 on the Tascam, all 2 on a USB headset).  Same
+    // clamp behavior the input request (16) already relied on.
+    // J-A2 / C3 (2026-05-04): two-stage channel-mask override.
+    //
+    // Stage 1 - strip the saved channel masks BEFORE initialise.  JUCE saves
+    // the active-input / active-output BigInteger as `audioDeviceInChans` /
+    // `audioDeviceOutChans` (binary strings).  When you switch from a
+    // 2-channel device (e.g. laptop mic) to a 22+ channel ASIO interface, the
+    // saved bits stay restrictive: JUCE preserves them across the swap, so
+    // the new device opens with most of its channels DISABLED.  Removing the
+    // attributes forces JUCE to use the defaults inferred from the
+    // `numInputChannelsNeeded` / `numOutputChannelsNeeded` initialise() args.
+    //
+    // Stage 2 - after initialise, write a fresh setup with EVERY channel
+    // enabled and call restartLastAudioDevice() so the change actually takes.
+    // setAudioDeviceSetup alone sometimes no-ops if JUCE thinks nothing
+    // material changed; the explicit restart guarantees the new mask sticks.
     if (settingsFile.existsAsFile())
     {
         auto xml = juce::XmlDocument::parse(settingsFile);
-        mDeviceManager->initialise(16, 2, xml.get(), true);
+        if (xml != nullptr)
+        {
+            xml->removeAttribute ("audioDeviceInChans");
+            xml->removeAttribute ("audioDeviceOutChans");
+        }
+        mDeviceManager->initialise(64, 64, xml.get(), true);
     }
     else
     {
-        mDeviceManager->initialiseWithDefaultDevices(16, 2);
+        mDeviceManager->initialiseWithDefaultDevices(64, 64);
     }
+
+    // J-A2 / C3 (2026-05-04): diagnostic log to disk — captures what JUCE
+    // actually does with the audio device setup at startup, so we can see
+    // why the input mask refuses to enable channels.  Written next to
+    // audio_settings.xml as `audio_setup_log.txt`.
+    juce::String diagLog;
+    diagLog << "Settings file: " << settingsFile.getFullPathName() << "\n";
+    diagLog << "Settings exists: " << (settingsFile.existsAsFile() ? "yes" : "no") << "\n\n";
+
+    if (auto* dev = mDeviceManager->getCurrentAudioDevice())
+    {
+        juce::AudioDeviceManager::AudioDeviceSetup setup;
+        mDeviceManager->getAudioDeviceSetup (setup);
+
+        diagLog << "BEFORE setAudioDeviceSetup:\n";
+        diagLog << "  type: " << mDeviceManager->getCurrentAudioDeviceType() << "\n";
+        diagLog << "  inputDeviceName: '" << setup.inputDeviceName << "'\n";
+        diagLog << "  outputDeviceName: '" << setup.outputDeviceName << "'\n";
+        diagLog << "  inputChannels: " << setup.inputChannels.toString (2) << "\n";
+        diagLog << "  outputChannels: " << setup.outputChannels.toString (2) << "\n";
+        diagLog << "  useDefaultInputChannels: " << (setup.useDefaultInputChannels ? "true" : "false") << "\n";
+        diagLog << "  useDefaultOutputChannels: " << (setup.useDefaultOutputChannels ? "true" : "false") << "\n";
+        diagLog << "  device active inputs:  " << dev->getActiveInputChannels().toString (2) << "\n";
+        diagLog << "  device active outputs: " << dev->getActiveOutputChannels().toString (2) << "\n";
+        diagLog << "  device input names count:  " << dev->getInputChannelNames().size() << "\n";
+        diagLog << "  device output names count: " << dev->getOutputChannelNames().size() << "\n\n";
+
+        // For ASIO devices, input and output device names must match.  The
+        // settings dialog deliberately leaves audioInputDeviceName alone (to
+        // avoid clobbering across configs), so the saved XML may have only the
+        // output name.  Force them equal when input is empty.
+        if (setup.inputDeviceName.isEmpty() && setup.outputDeviceName.isNotEmpty())
+            setup.inputDeviceName = setup.outputDeviceName;
+
+        const int devIns  = dev->getInputChannelNames().size();
+        const int devOuts = dev->getOutputChannelNames().size();
+        if (devIns > 0)
+        {
+            juce::BigInteger ins;
+            ins.setRange (0, devIns, true);
+            setup.inputChannels           = ins;
+            setup.useDefaultInputChannels = false;
+        }
+        if (devOuts > 0)
+        {
+            juce::BigInteger outs;
+            outs.setRange (0, devOuts, true);
+            setup.outputChannels           = outs;
+            setup.useDefaultOutputChannels = false;
+        }
+
+        diagLog << "ATTEMPTING setAudioDeviceSetup with:\n";
+        diagLog << "  inputDeviceName: '" << setup.inputDeviceName << "'\n";
+        diagLog << "  outputDeviceName: '" << setup.outputDeviceName << "'\n";
+        diagLog << "  inputChannels: " << setup.inputChannels.toString (2) << "\n";
+        diagLog << "  outputChannels: " << setup.outputChannels.toString (2) << "\n\n";
+
+        const auto err = mDeviceManager->setAudioDeviceSetup (setup, /*treatAsChosenDevice*/ true);
+        diagLog << "setAudioDeviceSetup result: '" << (err.isEmpty() ? juce::String ("(ok)") : err) << "'\n\n";
+
+        mDeviceManager->restartLastAudioDevice();
+
+        juce::AudioDeviceManager::AudioDeviceSetup after;
+        mDeviceManager->getAudioDeviceSetup (after);
+        diagLog << "AFTER restartLastAudioDevice:\n";
+        diagLog << "  inputDeviceName: '" << after.inputDeviceName << "'\n";
+        diagLog << "  outputDeviceName: '" << after.outputDeviceName << "'\n";
+        diagLog << "  inputChannels: " << after.inputChannels.toString (2) << "\n";
+        diagLog << "  outputChannels: " << after.outputChannels.toString (2) << "\n";
+        if (auto* d2 = mDeviceManager->getCurrentAudioDevice())
+        {
+            diagLog << "  device active inputs:  " << d2->getActiveInputChannels().toString (2) << "\n";
+            diagLog << "  device active outputs: " << d2->getActiveOutputChannels().toString (2) << "\n";
+        }
+        else
+        {
+            diagLog << "  device: NULL after restart\n";
+        }
+    }
+    else
+    {
+        diagLog << "getCurrentAudioDevice() returned null after initialise.\n";
+    }
+
+    {
+        const auto logFile = settingsFile.getSiblingFile ("audio_setup_log.txt");
+        logFile.getParentDirectory().createDirectory();
+        logFile.replaceWithText (diagLog);
+    }
+
+    // J-A2 (2026-05-04): restore the user's master-output channel pick from
+    // master_output.xml (sibling of audio_settings.xml).  Done AFTER
+    // mDeviceManager->initialise so the chosen index is clamped against the
+    // current device's actual channel count later in the audio callback.
+    loadMasterOutputRouting();
 
     // Push initial device output latency into the processor.
     if (auto* dev = mDeviceManager->getCurrentAudioDevice())
@@ -255,6 +463,12 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
             mDeviceManager->addMidiInputDeviceCallback (d.identifier, this);
         }
     }
+
+    // I-3b (2026-05-02): Load the user's global MIDI Learn defaults if the
+    // file exists.  Per-project setStateInformation overlays its own mapping
+    // table on top later, so per-project mappings win.  No-op if the file
+    // doesn't exist (first launch).
+    mProcessor->getMidiLearnRegistry().loadGlobalDefaults();
 
     mPlayer = std::make_unique<juce::AudioProcessorPlayer>();
     mPlayer->setProcessor(mProcessor.get());
@@ -313,11 +527,29 @@ void VibesynthStandaloneApp::shutdown()
 
 // C.3 (2026-04-30): MIDI input thread -> processor's collector.  Keep this
 // short and lock-free; MidiMessageCollector::addMessageToQueue is wait-free.
-void VibesynthStandaloneApp::handleIncomingMidiMessage (juce::MidiInput*,
+//
+// I-3b (2026-05-02): Also fan the same event into mProcessor's MIDI Learn
+// event queue, tagged with the source device's name.  The audio thread
+// drains both the live MIDI collector (engine-page routing) and the learn
+// queue (CC -> APVTS dispatch) in processBlock.  Two parallel paths: the
+// live collector loses device origin (fine for engine-page MIDI), the learn
+// queue preserves it (so device-locked mappings can filter).
+void VibesynthStandaloneApp::handleIncomingMidiMessage (juce::MidiInput* source,
                                                          const juce::MidiMessage& message)
 {
-    if (mProcessor != nullptr)
-        mProcessor->getLiveMidiCollector().addMessageToQueue (message);
+    if (mProcessor == nullptr) return;
+
+    mProcessor->getLiveMidiCollector().addMessageToQueue (message);
+
+    // Only learnable channel-voice messages (CC / pitch-bend / channel
+    // pressure) need to enter the learn queue.  Filter here to keep the
+    // queue from filling with note-on/off traffic that the registry would
+    // discard anyway.
+    if (message.isController() || message.isPitchWheel() || message.isChannelPressure())
+    {
+        const juce::String deviceName = (source != nullptr) ? source->getName() : juce::String();
+        mProcessor->getMidiLearnEventQueue().push (deviceName, message);
+    }
 }
 
 START_JUCE_APPLICATION(VibesynthStandaloneApp)

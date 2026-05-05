@@ -118,7 +118,8 @@ DrumPage::DrumPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
     // (Piano Roll) redirect to PianoRollPage via the editor's showPageForTab
     // click handlers.  Player tab is now the default landing.
     buildPlayerTab();
-    buildEQTab();
+    // J-6 EQ unification (2026-05-03): EQ sub-tab removed; pre+post EQ live
+    // on the Effects page (mixer_drum_<N>_preeq_* / mixer_drum_<N>_*).
 
     switchTab(1);        // 1 = Player (Drum Kit at index 0 redirects elsewhere)
     startTimerHz(24);
@@ -144,23 +145,23 @@ DrumPage::~DrumPage()
 
 void DrumPage::switchTab(int idx)
 {
-    mActiveTab = idx;
-    // D2: tab order is now 0 Drum Kit / 1 Player / 2 Piano Roll / 3 EQ.
+    // J-6 EQ unification (2026-05-03): tab order is 0 Drum Kit / 1 Player /
+    // 2 Piano Roll (was: 0..3 with EQ as tab 3 — EQ moved to Effects page).
+    mActiveTab = juce::jlimit(0, 2, idx);
     if (mDrumKitTab)
     {
-        mDrumKitTab->setVisible(idx == 0);
-        if (idx == 0)
+        mDrumKitTab->setVisible(mActiveTab == 0);
+        if (mActiveTab == 0)
         {
-            mDrumKitTab->refreshKitView();   // pull fresh drum list when shown
-            mDrumKitTab->grabKeyboardFocus();// enable Ctrl+C/V/X/D/A/Esc
+            mDrumKitTab->refreshKitView();
+            mDrumKitTab->grabKeyboardFocus();
         }
     }
-    if (mPlayerTab)  mPlayerTab ->setVisible(idx == 1);
-    if (mPianoRoll)  mPianoRoll ->setVisible(idx == 2);
-    if (mEQTab)      mEQTab     ->setVisible(idx == 3);
-    if (idx == 2 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
+    if (mPlayerTab) mPlayerTab->setVisible(mActiveTab == 1);
+    if (mPianoRoll) mPianoRoll->setVisible(mActiveTab == 2);
+    if (mActiveTab == 2 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
     resized();
-    if (onSubTabChanged) onSubTabChanged(idx);
+    if (onSubTabChanged) onSubTabChanged(mActiveTab);
 }
 
 // ── D2 Drum Kit hooks (forwarders to mDrumKitTab) ────────────────────────────
@@ -221,11 +222,8 @@ void DrumPage::setGlobalLockHandler (std::function<void()> fn)
     if (mDrumKitTab) mDrumKitTab->onGlobalLockRequested = std::move (fn);
 }
 
-void DrumPage::setEQMid(bool showMid)
-{
-    mEQMidActive = showMid;
-    if (mEQDisplay) mEQDisplay->setShowMid(showMid);
-}
+// J-6 EQ unification (2026-05-03): setEQMid removed; pre-rack EQ M/S toggle
+// is on the Effects page Pre EQ tab.
 
 void DrumPage::buildDrumKitTab()
 {
@@ -278,21 +276,7 @@ void DrumPage::buildPianoRollTab()
     refreshPianoRollContextLabel();
 }
 
-void DrumPage::buildEQTab()
-{
-    mEQTab     = std::make_unique<Component>();
-    mEQDisplay = std::make_unique<ParametricEQDisplay>();
-
-    mEQDisplay->setSampleRate(mProcessor.getSampleRate() > 0.0
-                              ? mProcessor.getSampleRate() : 44100.0);
-    mEQDisplay->showMidSideToggle(false);
-    mEQDisplay->onLatencyChanged = [this]
-    {
-        mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
-    };
-    mEQTab->addAndMakeVisible(*mEQDisplay);
-    addAndMakeVisible(*mEQTab);
-}
+// J-6 EQ unification (2026-05-03): buildEQTab removed.
 
 void DrumPage::setPlayHead(StandalonePlayHead* ph)
 {
@@ -396,21 +380,8 @@ void DrumPage::selectEngine(const juce::String& engineName)
 
     mProcessor.registerDrumEngine(mPageIndex, mEngineProcessor.get());
 
-    if (mEQDisplay)
-    {
-        if (auto* preEq = mProcessor.mVibeGraph.getInsertPreEQ(
-                              VibeGraph::InsertKind::Drum, mPageIndex))
-        {
-            const juce::String mixerPrefix = "mixer_drum_" + juce::String(mPageIndex);
-            mEQDisplay->bindMsDSP(preEq, &mProcessor.apvts,
-                                  mixerPrefix + "_preeq_mid_eq",
-                                  mixerPrefix + "_preeq_side_eq");
-            mEQDisplay->setStripContext(mixerPrefix,
-                [](int id){ return MixerChannelIds::friendlyName(id); });
-        }
-        mEQDisplay->setSampleRate(sr);
-    }
-
+    // J-6 EQ unification (2026-05-03): page-level EQ display removed; pre-rack
+    // EQ is bound exclusively by EffectsPage (mixer_drum_<N>_preeq_*).
     juce::MessageManager::callAsync([this] { if (isShowing()) resized(); });
 
     if (onEngineSelected) onEngineSelected();
@@ -418,8 +389,8 @@ void DrumPage::selectEngine(const juce::String& engineName)
 
 void DrumPage::timerCallback()
 {
-    if (mEQDisplay && ! mEngineType.isEmpty())
-        mEQDisplay->syncFromDSP();
+    // J-6 EQ unification (2026-05-03): page-level EQ syncFromDSP removed;
+    // Effects-page Pre EQ tab handles its own polling.
 
     if (mPlayHead)
     {
@@ -475,11 +446,6 @@ void DrumPage::resized()
             mEngineEditor->setBounds(pb);
     }
     if (mPianoRoll) mPianoRoll->setBounds(b);
-    if (mEQTab && mEQDisplay)
-    {
-        mEQTab->setBounds(b);
-        mEQDisplay->setBounds(mEQTab->getLocalBounds().reduced(4));
-    }
 }
 
 void DrumPage::setTabName(const juce::String& name)

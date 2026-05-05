@@ -16,6 +16,7 @@
 #include "AudioFileRecorder.h"
 #include "DSP/AudioClipStreamer.h"
 #include "DSP/PhaseVocoder.h"
+#include "MidiLearn/MidiLearnRegistry.h"
 
 // ── APVTS parameter helper ────────────────────────────────────────────────────
 // Creates a ParameterID with version 1
@@ -175,6 +176,30 @@ public:
     void ensureVoxInsert  (int idx, const juce::String& displayName);
     void ensureInstInsert (int idx, const juce::String& displayName);
 
+    // J-5 (2026-05-03): BaySickRustyDrums strip registration.  One strip per
+    // sound type (kick / snare / tom / hi-hat / ride / crash / china / stack —
+    // 13 total for Big Rusty Drums).  Default main-out = kRustyDrumsBus.
+    void ensureRustyInsert (int idx, const juce::String& displayName);
+    void removeRustyInsert (int idx);
+
+    // J-5: BaySickRustyDrums singleton lifecycle.  PluginProcessor owns the
+    // singleton sfizz-driven engine; only one instance allowed per project.
+    bool                          hasBaySickRustyDrums() const noexcept;
+    class BaySickRustyDrumsProcessor* getBaySickRustyDrums() noexcept;
+    // Creates the singleton if absent + loads the kit at sfzPath.  On success:
+    // discovers 13 channels, registers 13 strips at kRustyBase..kRustyBase+12,
+    // returns true.  Idempotent — calling twice with same path no-ops cleanly.
+    bool loadBaySickRustyDrumsKit (const juce::File& sfzPath);
+    // Tear-down: free engine + remove all 13 InsertNodes.  APVTS params
+    // persist as zombies (existing pattern — JUCE doesn't allow unregister).
+    void destroyBaySickRustyDrums();
+    // J-8 Part C (2026-05-04): reset every `mixer_rusty_*` + `mixer_rustybus_*`
+    // APVTS param to its registered default value.  Called by the page when
+    // the user switches programs — wipes mixer state so the new kit's
+    // freshly-spawned strips start clean (no stale level/pan/mute/EQ from
+    // the previous program).
+    void resetBaySickRustyDrumsMixerState();
+
     // R2 (2026-04-23): live-input ASIO channel persistence.  Index lives in
     // APVTS as `<prefix>_inputChannelIdx` (Int -1..127, default -1).  The
     // channel NAME (e.g. "Mic 1") is stored as a non-APVTS attribute on
@@ -207,6 +232,16 @@ public:
         mLiveMidiTargetKind .store (engineKind, std::memory_order_relaxed);
         mLiveMidiTargetIndex.store (index,      std::memory_order_relaxed);
     }
+
+    // ── I-3b (2026-05-02): MIDI Learn registry ───────────────────────────────
+    // App-wide MIDI Learn mapping table.  Audio thread reads it during
+    // processBlock to dispatch incoming hardware CC / pitch-bend / aftertouch
+    // events to APVTS params.  Message thread (UI from I-3c) mutates via the
+    // registry's set/remove/learn methods.  Persisted in project XML as a
+    // <MidiCCMappings> child of getStateInformation; also overlay-loaded at
+    // app startup from Documents/BaySickDAW/MidiMappings.xml (global defaults).
+    MidiLearnRegistry&  getMidiLearnRegistry()  noexcept { return mMidiLearn; }
+    MidiLearnEventQueue& getMidiLearnEventQueue() noexcept { return mMidiLearnQueue; }
 
     // ── Latency ───────────────────────────────────────────────────────────
     // Device output latency (set by StandaloneApp when device initialises or changes).
@@ -314,6 +349,13 @@ public:
     std::atomic<float> mInstBus3PeakDb      { -60.0f };
     std::atomic<float> mInstBus3PeakDbL     { -60.0f };
     std::atomic<float> mInstBus3PeakDbR     { -60.0f };
+    // J-7b (2026-05-04): RustyDrums Bus peak meter — written by the bus
+    // pipeline post-fader/pan, drained at end of block alongside every
+    // other bus meter so the UI strip sees signal activity.  Run variants
+    // declared below alongside the other *Run atomics.
+    std::atomic<float> mRustyDrumsBusPeakDb     { -60.0f };
+    std::atomic<float> mRustyDrumsBusPeakDbL    { -60.0f };
+    std::atomic<float> mRustyDrumsBusPeakDbR    { -60.0f };
 
     // 2026-05-02: running-max companion atomics.  Audio thread CAS-maxes into
     // these during processBlock; a single end-of-block promotion lifts them
@@ -345,6 +387,10 @@ public:
     std::atomic<float> mInstBus3PeakDbRun       { kPeakAtomicNegInf };
     std::atomic<float> mInstBus3PeakDbLRun      { kPeakAtomicNegInf };
     std::atomic<float> mInstBus3PeakDbRRun      { kPeakAtomicNegInf };
+    // J-7b: RustyDrums Bus running atomics (companion to mRustyDrumsBusPeakDb*).
+    std::atomic<float> mRustyDrumsBusPeakDbRun  { kPeakAtomicNegInf };
+    std::atomic<float> mRustyDrumsBusPeakDbLRun { kPeakAtomicNegInf };
+    std::atomic<float> mRustyDrumsBusPeakDbRRun { kPeakAtomicNegInf };
 
     // ── 1M: Audio DSP load monitoring (audio thread writes, UI timer reads) ──
     // mAudioDspLoad : smoothed fraction of buffer window used by processBlock (0..1)
@@ -365,6 +411,12 @@ public:
         int    trackRow       = 0;
         float  originalBPM    = 120.f;
         bool   stretchMode    = true;
+        // I-16 G-9 (2026-05-03): when non-zero AND clipType==Audio, the player
+        // routes its samples through the Vox/Inst page identified by this
+        // mixer channel id (e.g., MixerChannelIds::voxInsert(0)) instead of
+        // through a new Audio row.  Copied from ArrangementBlock at
+        // rebuildAudioClipPlayers() time.
+        int    routeChannel   = 0;
         // D3: choke group (0 = none, 1..16).  Copied from the source clip's
         // AudioLibraryEntry at rebuildAudioClipPlayers() time so the audio
         // thread can read it without a library lookup.
@@ -418,17 +470,25 @@ public:
 
     struct StripRecorder
     {
-        int                                channelId;    // MixerChannelIds
-        juce::String                       displayName;  // e.g. "Vox 1"
-        juce::File                         file;
-        std::unique_ptr<AudioFileRecorder> recorder;
+        int                                channelId;       // MixerChannelIds
+        juce::String                       displayName;     // e.g. "Vox 1"
+        juce::File                         file;            // dry file (RAW pre-chain ASIO)
+        std::unique_ptr<AudioFileRecorder> recorder;        // dry recorder
+
+        // I-16 G-9 (2026-05-03): Vox-only second writer for the WET tap.
+        // BaySickVocalProcessor pushes post-realtime / pre-vocal-chain audio
+        // here.  Inst strips leave wetRecorder null (no realtime stage to
+        // bake into a wet capture).
+        juce::File                         wetFile;
+        std::unique_ptr<AudioFileRecorder> wetRecorder;
     };
 
     struct RecordResult
     {
-        juce::File                                masterFile;   // only when no strips armed
-        std::vector<std::pair<int, juce::File>>   stripFiles;   // per-strip captures
-        std::vector<PianoNote>                    midiNotes;    // from MidiRecorder
+        juce::File                                masterFile;     // only when no strips armed
+        std::vector<std::pair<int, juce::File>>   stripFiles;     // per-strip dry captures
+        std::vector<std::pair<int, juce::File>>   stripWetFiles;  // I-16 G-9: per-strip wet (Vox only)
+        std::vector<PianoNote>                    midiNotes;      // from MidiRecorder
         double                                    startBeat { 0.0 };
     };
 
@@ -514,6 +574,23 @@ private:
     std::array<juce::AudioProcessor*, kMaxInstPages>       mInstEngines {};
     juce::AudioBuffer<float>                               mInstEngineScratch;
     std::atomic<bool>                                      mAnyInstPageActive { false };
+
+    // J-5 (2026-05-03): BaySickRustyDrums singleton engine.  Only one
+    // instance per project.  Owned here so PluginProcessor can orchestrate
+    // strip lifecycle on kit load/unload.  The class is forward-declared so
+    // PluginProcessor.h doesn't pull sfizz headers into every TU.
+    juce::SpinLock                                         mRustyDrumsEngineLock;
+    std::unique_ptr<class BaySickRustyDrumsProcessor>      mRustyDrumsEngine;
+    std::atomic<bool>                                      mRustyDrumsActive { false };
+    juce::AudioBuffer<float>                               mRustyDrumsScratch; // J-7a: per-block render target
+    juce::MidiBuffer                                       mRustyDrumsMidi;    // J-7a: per-block MIDI feed
+
+    // I-16 G-9 (2026-05-03): per-page FilePlay flag.  Pre-scan in processBlock
+    // sets these for pages whose linked recorded clip overlaps the current
+    // playhead window.  Engine loop skips flagged pages (the audio-clip
+    // rendering loop will drive their engine via the FilePlay branch instead).
+    std::array<bool, kMaxVoxPages>                         mVoxFilePlayActive {};
+    std::array<bool, kMaxInstPages>                        mInstFilePlayActive {};
 
     // R3 (2026-04-23): Live-input audio capture for Vox / Inst strips.
     // mLiveInputSnapshot - non-cleared copy of the input channels before
@@ -715,6 +792,15 @@ private:
     juce::MidiMessageCollector mLiveMidiCollector;
     std::atomic<int>           mLiveMidiTargetKind  { -1 };   // -1 = unset
     std::atomic<int>           mLiveMidiTargetIndex { 0  };
+
+    // I-3b (2026-05-02): MIDI Learn registry + per-device event queue.
+    // The queue is a MIDI-thread -> audio-thread bridge that preserves source
+    // device names (the live MIDI collector loses them).  StandaloneApp
+    // pushes into it from MidiInputCallback::handleIncomingMidiMessage; the
+    // audio thread drains it inside processBlock and feeds events through the
+    // registry's dispatch.  Mutators on mMidiLearn run on the message thread.
+    MidiLearnRegistry   mMidiLearn;
+    MidiLearnEventQueue mMidiLearnQueue;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VibeSynthProcessor)
 };

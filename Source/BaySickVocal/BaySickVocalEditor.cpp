@@ -7,8 +7,11 @@
 #include "../Standalone/EffectEditorPanels.h"
 
 // H-6c (2026-05-01): createEffectEditor lives in EffectEditorPanels.cpp; the
-// VocalChainPanel uses it to materialise per-slot inline editors.
-extern std::unique_ptr<juce::Component> createEffectEditor (DSPBase* effect, EffectType type);
+// VocalChainPanel uses it to materialise per-slot inline editors.  Declaration
+// comes from EffectEditorPanels.h (included above) -- no extern needed.
+// I-2 (2026-05-02): the function is now 3-arg with a defaulted PanelMode;
+// the stale extern with the 2-arg signature here was hiding the new overload
+// behind an ambiguous-call error.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickVocalEditor — Phase H-6 (2026-05-01)
@@ -469,15 +472,14 @@ BaySickVocalEditor::BaySickVocalEditor (BaySickVocalProcessor& p)
     mPanelVocalChain    = std::make_unique<VocalChainPanel>    (p);
     mPanelBaySickPitch  = std::make_unique<BaySickPitchEditor> (p);   // H-6b
     mPanelBaySickAlign  = std::make_unique<BaySickAlignEditor> (p);   // H-6c
-    mPanelBaySickNAMIR = std::make_unique<NAMIRHostPanel> (p.getNamIrProcessor());   // H-6d
-    mPanelPreRackEQ     = std::make_unique<HostPanel>();
+    mPanelBaySickNAMIR  = std::make_unique<NAMIRHostPanel> (p.getNamIrProcessor()); // H-6d
+    // J-6 EQ unification (2026-05-03): Pre Rack EQ panel removed.
 
     addChildComponent (*mPanelBaySickVocals);
     addChildComponent (*mPanelVocalChain);
     addChildComponent (*mPanelBaySickPitch);
     addChildComponent (*mPanelBaySickAlign);
     addChildComponent (*mPanelBaySickNAMIR);
-    addChildComponent (*mPanelPreRackEQ);
 
     setActiveTab (TabBaySickVocals);
     setSize (kMinW, kMinH);
@@ -492,7 +494,7 @@ juce::Component* BaySickVocalEditor::panelForTab (int idx) const noexcept
         case TabBaySickPitch:  return mPanelBaySickPitch .get();
         case TabBaySickAlign:  return mPanelBaySickAlign .get();
         case TabBaySickNAMIR:  return mPanelBaySickNAMIR .get();
-        case TabPreRackEQ:     return mPanelPreRackEQ    .get();
+        // J-6 EQ unification (2026-05-03): TabPreRackEQ removed.
         default:               return nullptr;
     }
 }
@@ -506,10 +508,7 @@ void BaySickVocalEditor::setActiveTab (int idx)
     resized();
 }
 
-void BaySickVocalEditor::setPreRackEQ (juce::Component* eq)
-{
-    if (mPanelPreRackEQ) mPanelPreRackEQ->setHosted (eq);
-}
+// J-6 EQ unification (2026-05-03): setPreRackEQ removed.
 
 void BaySickVocalEditor::paint (juce::Graphics& g)
 {

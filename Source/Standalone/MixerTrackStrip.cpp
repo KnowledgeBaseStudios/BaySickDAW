@@ -223,6 +223,26 @@ MixerTrackStrip::~MixerTrackStrip()
 {
     mFader.removeListener(this);
     mPanKnob.removeListener(this);
+    // C3 (2026-05-04): unregister the _arm listener (Vox/Inst strips only).
+    if (mApvtsForListener != nullptr && mArmParamId.isNotEmpty())
+        mApvtsForListener->removeParameterListener (mArmParamId, this);
+}
+
+// C3 (2026-05-04): drives the Arm LED's visual from the _arm APVTS value for
+// Vox/Inst strips (which don't get a ButtonAttachment because their click
+// opens the input picker instead of toggling).  Listener fires on whichever
+// thread wrote the param; bounce to the message thread before touching the
+// component.
+void MixerTrackStrip::parameterChanged (const juce::String& paramId, float newValue)
+{
+    if (paramId != mArmParamId) return;
+    const bool armed = newValue > 0.5f;
+    juce::Component::SafePointer<MixerTrackStrip> safe (this);
+    juce::MessageManager::callAsync ([safe, armed]
+    {
+        if (auto* p = safe.getComponent())
+            p->mArmBtn.setToggleState (armed, juce::dontSendNotification);
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -283,6 +303,22 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
             {
                 if (onArmRequested) onArmRequested (mChannelId);
             };
+
+            // C3 (2026-05-04): the click writes _arm via the picker, but the
+            // LED visual still needs a path back from APVTS to the button.
+            // Register a parameter listener that calls setToggleState when
+            // _arm changes (writes from MixerPage::showInputChannelPicker, or
+            // any project-state restore path).  Also seed the initial visual
+            // from the current APVTS value.
+            if (mApvtsForListener != nullptr && mArmParamId.isNotEmpty())
+                mApvtsForListener->removeParameterListener (mArmParamId, this);
+            mApvtsForListener = &apvts;
+            mArmParamId       = paramPrefix + "_arm";
+            apvts.addParameterListener (mArmParamId, this);
+            const bool armedNow =
+                apvts.getRawParameterValue (mArmParamId) != nullptr
+                && apvts.getRawParameterValue (mArmParamId)->load() > 0.5f;
+            mArmBtn.setToggleState (armedNow, juce::dontSendNotification);
         }
         else
         {

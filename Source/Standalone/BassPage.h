@@ -11,10 +11,9 @@
 // ── BassPage ──────────────────────────────────────────────────────────────────
 // One Bass instrument page. Up to kMaxBassPages (4) instances.
 //
-// Three sub-tabs:
+// Two sub-tabs (J-6 EQ unification 2026-05-03 — EQ moved to Effects page):
 //   Tab 0 "Player"     — engine selector ComboBox (locks on first pick) + engine editor
 //   Tab 1 "Piano Roll" — PianoRollContainer bound to bassRoll[mPageIndex]
-//   Tab 2 "EQ"         — EQ8 M/S (pre-rack). MID/SIDE buttons float in the tab bar.
 //
 // Engine choices: Harmless | VibePlayer | BaySickBass
 // Each page owns its engine processor + editor (created on first engine selection).
@@ -38,12 +37,9 @@ public:
     int  getActiveTab()     const { return mActiveTab; }
     bool isEngineLocked()   const { return mEngineLocked; }
     juce::Colour getPageColor() const { return mPageColor; }
-    ParametricEQDisplay* getEQDisplay() const { return mEQDisplay.get(); }   // 2026-04-19: PageMenuBar hamburger wiring
     void setUndoContext(const UndoContext& ctx);
 
     void switchTab(int idx);
-    void setEQMid(bool showMid);
-    bool isEQMidActive() const { return mEQMidActive; }
 
     // Fired AFTER switchTab applies the change.
     std::function<void(int idx)> onSubTabChanged;
@@ -104,7 +100,6 @@ private:
 
     // ── Tab system ────────────────────────────────────────────────────────────
     int  mActiveTab   { 0 };
-    bool mEQMidActive { true };
 
     // ── Tab 0: Player ─────────────────────────────────────────────────────────
     std::unique_ptr<juce::Component>            mPlayerTab;
@@ -135,16 +130,12 @@ private:
     // ── Tab 1: Piano Roll ─────────────────────────────────────────────────────
     std::unique_ptr<PianoRollContainer>         mPianoRoll;
 
-    // ── Tab 2: EQ ─────────────────────────────────────────────────────────────
-    // §P4.3 B7: page no longer owns a local EQ DSP.  mEQDisplay binds to the
-    // Bass InsertNode's preEq member (via VibeGraph::getInsertPreEQ).
-    std::unique_ptr<juce::Component>            mEQTab;
-    std::unique_ptr<ParametricEQDisplay>        mEQDisplay;
+    // J-6 EQ unification (2026-05-03): EQ tab + display removed; pre-rack EQ
+    // is exclusively edited via the Effects page Pre EQ tab.
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     void buildPlayerTab();
     void buildPianoRollTab();
-    void buildEQTab();
 
     void refreshPianoRollContextLabel();
 

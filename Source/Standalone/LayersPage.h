@@ -11,10 +11,9 @@
 // ── LayersPage ────────────────────────────────────────────────────────────────
 // One Layers instrument page. Up to 8 instances (kMaxLayerPages).
 //
-// Three sub-tabs:
+// Two sub-tabs (J-6 EQ unification 2026-05-03 — EQ moved to Effects page):
 //   Tab 0 "Player"     — engine selector ComboBox (locks on first pick) + engine editor
 //   Tab 1 "Piano Roll" — PianoRollContainer bound to layerRoll[mPageIndex]
-//   Tab 2 "EQ"         — EQ8 M/S (pre-rack). MID/SIDE buttons float in the tab bar.
 //
 // Engine choices: Harmless | VibePlayer | BaySickSynth
 // Each page owns its engine processor + editor (created on first engine selection).
@@ -37,7 +36,6 @@ public:
     int  getPageIndex()   const { return mPageIndex; }
     int  getActiveTab()     const { return mActiveTab; }
     bool isEngineLocked()   const { return mEngineLocked; }
-    ParametricEQDisplay* getEQDisplay() const { return mEQDisplay.get(); }   // 2026-04-19: PageMenuBar hamburger wiring
     juce::Colour getPageColor() const { return mPageColor; }
     void setUndoContext(const UndoContext& ctx);
 
@@ -47,10 +45,6 @@ public:
     // Fired AFTER switchTab applies the change. StandaloneEditor wires this to
     // auto-swap transport mode (Pattern when idx==1 piano roll, else Song).
     std::function<void(int idx)> onSubTabChanged;
-
-    // EQ MID/SIDE — called by PageMenuBar MID/SIDE slot buttons
-    void setEQMid(bool showMid);
-    bool isEQMidActive() const { return mEQMidActive; }
 
     // Fired once when the user selects an engine (first pick only, locks after).
     // StandaloneEditor uses this to add the mixer channel strip.
@@ -121,7 +115,6 @@ private:
 
     // ── Tab system ────────────────────────────────────────────────────────────
     int  mActiveTab   { 0 };
-    bool mEQMidActive { true };
 
     // D1.4-fix (c): combo subclass that intercepts clicks when locked so we
     // can route to the per-layer context menu (instead of the engine
@@ -157,16 +150,13 @@ private:
     // ── Tab 1: Piano Roll ─────────────────────────────────────────────────────
     std::unique_ptr<PianoRollContainer>         mPianoRoll;
 
-    // ── Tab 2: EQ ─────────────────────────────────────────────────────────────
-    // §P4.3 B7: page no longer owns a local EQ DSP.  mEQDisplay binds to the
-    // Layer InsertNode's preEq member (via VibeGraph::getInsertPreEQ).
-    std::unique_ptr<juce::Component>            mEQTab;
-    std::unique_ptr<ParametricEQDisplay>        mEQDisplay;
+    // J-6 EQ unification (2026-05-03): EQ tab + display removed; pre-rack EQ
+    // is exclusively edited via the Effects page Pre EQ tab (same APVTS
+    // params: mixer_layer_<N>_preeq_*).
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     void buildPlayerTab();
     void buildPianoRollTab();
-    void buildEQTab();
 
     // Push "{mTabName} - {mEngineType or (no engine)}" to mPianoRoll.
     void refreshPianoRollContextLabel();

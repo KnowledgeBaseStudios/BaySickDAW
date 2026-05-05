@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\base\log_severity.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\base\log_severity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\abseil-cpp\absl\base\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{9CFA93D1-D729-31D8-BF8E-BDE6784D26D8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{3EF99C19-76A4-348B-9A65-AA9E3E0D8A56}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

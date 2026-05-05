@@ -50,7 +50,8 @@ public:
 // and mute/solo button highlights.
 // ─────────────────────────────────────────────────────────────────────────────
 class MixerTrackStrip : public juce::Component,
-                        private juce::Slider::Listener
+                        private juce::Slider::Listener,
+                        private juce::AudioProcessorValueTreeState::Listener
 {
 public:
     enum class StripType
@@ -195,6 +196,14 @@ public:
                   const juce::String& paramPrefix);
 
 private:
+    // C3 (2026-05-04): APVTS listener — drives the Arm LED's visual state on
+    // Vox/Inst strips.  These strips don't get a ButtonAttachment for `_arm`
+    // (the click opens the input picker instead of toggling), so without an
+    // explicit listener the LED never tracks the APVTS value the picker writes.
+    void parameterChanged (const juce::String& paramId, float newValue) override;
+    juce::AudioProcessorValueTreeState* mApvtsForListener { nullptr };
+    juce::String                        mArmParamId;
+
     StripType    mType;
     juce::Colour mAccent;
     int          mChannelId { -1 };  // MixerChannelIds value — set by MixerPage

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<Pedalboard version="1" name="Jeff 1">
+  <BaySickPedalsState version="1">
+    <BaySickPedalsState>
+      <PARAM id="bsp_slot0_bypass" value="0.0"/>
+      <PARAM id="bsp_slot1_bypass" value="0.0"/>
+      <PARAM id="bsp_slot2_bypass" value="0.0"/>
+      <PARAM id="bsp_slot3_bypass" value="0.0"/>
+      <PARAM id="bsp_slot4_bypass" value="0.0"/>
+      <PARAM id="bsp_slot5_bypass" value="0.0"/>
+      <PARAM id="bsp_slot6_bypass" value="0.0"/>
+      <PARAM id="bsp_slot7_bypass" value="0.0"/>
+    </BaySickPedalsState>
+    <Slots>
+      <Slot index="0" type="106" data="121.VMjLg.G....O+fWarAhckI2bo8la8HRLt.iHfTlai8FYo41Y8HRUTYTK3HxO9.BOTUmakI2TzkGakQzTPARauQVY8HBLh.Ra0QWYj0iHvHBHoMGMyHSOh.iHfPmbo0FR50iHzPCLt.iHfHVdvE1byUFY8HBLh7hO.."/>
+      <Slot index="1" type="1" data="381.VMjLgPW....O+fWarAhckI2bo8la8HRLt.iHfTlai8FYo41Y8HRUTYTK3HxO9.BOC8VavIWYyM2axQzTPABcnIWYyg1arQVOhzhMt.iHfHWXzk1a8HRMt.iHfDFczE1Xq0zb8HRLv3BLh.hbkwVYgMWYMMWOhHCLv3BLh.RagsVY0AGQh0iHv3BLh.xZtUVYDIVOhXiKvHBHskFd8HRLt.iHfT2bkMUZjU1XnEVZt0iHvHBHq4VYkQUdvUVOhDiHfHVdvE1byUFY8HBLh.Bau81ZggVYgQVSy0iHv3BLh.xbzUlbk8FSo41Z8HRLh.RX0Q2aME1ZkUGb8HBLh.xboQVYigVXo4FRPYTOhHCLt.iHf.WYgsFQkQWYiQWZu4VOh.iHfPVYzU1Xzk1at0zb8HRLv3BLh.xbiM0a0I2XkkDY8HRKwHBHzkGbk0iHyHBHiM2T0MGcgkla8HBLt.iHfL1bT8lak0iHv3RMh.xXywTY1UFa8HBLt.iHu3C."/>
+      <Slot index="2" type="100" data="117.VMjLgvF....O+fWarAhckI2bo8la8HRLt.iHfTlai8FYo41Y8HRUTYTK3HxO9.BOBwVckMGQxklckMEc4wVYDMETfPlboYWY8HBLtTiHfP2atUVOh.iK0HBHrUlckwVOh.iKvHBHhkGbgM2bkQVOh.iHu3C."/>
+      <Slot index="3" type="103" data="108.VMjLgLF....O+fWarAhckI2bo8la8HRLt.iHfTlai8FYo41Y8HRUTYTK3HxO9.BOFUmd5MEc4wVYDMETfXVc5oWOh.iK0HBHs8FYk0iHwHBHrUlckwVOh.iKvHBHhkGbgM2bkQVOh.iHu3C."/>
+      <Slot index="4" type="5" data="535.VMjLg3f....O+fWarAhckI2bo8la8HRLt.iHfTlai8FYo41Y8HRUTYTK3HxO9.BOSEFc0IWXzk1atQzTPAhYr81ckI2b8HxLt.iHfPVXhMWOhLiKvHBHyUlaykFcoYWZzkWOh.iKvHBHhE1byIUYrkVYl0iHy.iKvHBHzIWXtMmYuIWakIWOh.iHfPWchUFU4AWY8HBLh.Bcu4VYPIWY8HBLt.iHfP2atUFTuMGc8HBLt.iHfbWYz0iH2.iKvHBHuUGc8HBLt.iHfDVcz81Qgkla8HBLh.xaywzamISOhHiHfLWXzQUdvUVOhHiHfX2aiEFaB8FY40iHvHBHnElbs8laoM1bM8FYk0iHwHBHzEFbk8kcoIVY8HBLtTiHfPWXvU1WzEFbkMEbkUFY8HBLtTiHfPWXvU1Wnk2bzETauUmaz0iHw3BLh.BcgAWYec2a2IUXzUVOh.iK0HBHzEFbk80cucGQkAGcn0iHv3BLh.BcgAWYeYFa0QGckImTgQWY8HRMt.iHfPWXvU1WlwVczQWYxQTYvQGZ8HBLt.iHfPWXvU1Wo4Fb0Q2Qgkla8HRLt.iHfPWXvU1WuUGcvUGcGEVZt0iHw3BLh.BcgAWYegVZyMWOh.iKvHBHzEFbk8kXoE1b8HRMt.iHfPWXvU1WvIWYSgVYrYFQh0iHv3BLh.BcgAWYeQVYSgVYrYFQh0iHv3BLh7hO.."/>
+      <Slot index="5" type="104" data="133.VMjLgvG....O+fWarAhckI2bo8la8HRLt.iHfTlai8FYo41Y8HRUTYTK3HxO9.BON8VZyU1QgQWYSQWdrUFQSAEHzglbkMGZuwFY8HRKz.iKvHBHjU1XgkWOhDCLv3BLh.RauQVY8HBLh.xbuUmbiUVOh.iHfHVdvE1byUFY8HBLh7hO.."/>
+      <Slot index="6" type="2" data="618.VMjLgDl....O+fWarAhckI2bo8la8HRLt.iHfTlai8FYo41Y8HRUTYTK3HxO9.BORUlckImXDMETx.RauQVY8HBLh.Bauc2P0QWOhfCLt.iHffVZmg1P0QWOhDCNv.CLt.iHf.mbkQTYrEVdMMWOhDCLt.iHfPWYsA2aSkmai0iHvHBHx81asMUZ5UVOh.iK1.CLv.CLvHyL3PSL3TyM4HBHjklYlU2bo8la8HBLtTiHfPVYiEVd8HhLt.iHfHVXyMWS0wFc8HRLtHCLv.CLv.CM2XCNybSL1HBHhE1byMjbuM2b8HhL0.iKvHBHnk1YnQTXsAWOhfCLv.iKvHBHnk1YnQTXsAmP4AWOh.iHfTlbDITOhzhMt.iHfLGckIWYuMUYv0iHw.CLt.iHfPlb40iHv3hM4jSN4jSN3fCL2jCL2DiHfbWYz0iHv3xLv.CLv.CLwDSNx.SNxjiHfHVdvE1byUFY8HBLh.BcgkFaM8FYDUFbzgVSy0iHv3xLv.CLv.CLwDSNx.SNxjiHfPWXowVSuQlTgQWYHoWOh.iKyPSN4jSN4jCMvLSN0LSM0HBHzEVZr0zajMEZgAWY8HBLh.hYxUVY5UVOh.iHfflYREFco8VOh.iK1jSN4jSN4fCNvbSNvbSLh.xckQGUu4VYDIVOh.iKvHBHgw1YuIWZzgVa8HRLh.BY0M1ZA01a04Fc8HBLt.iHfPVcisFUnIWYyg1arQFQh0iHsHCMt.iHfPVcisVPzQWXisVSy0iHw.iKvHBHjU2XqIUYrUVXyUVSy0iHx.CLt.iHfLWdtMFQoYWRjgWOhHiHu3C."/>
+      <Slot index="7" type="108" data="177.VMjLgfJ....O+fWarAhckI2bo8la8HRLt.iHfTlai8FYo41Y8HRUTYTK3HxO9.BOGIWXvgVZiUTTSQWdrUFQSAEHhElajASOh.iKvHBHhElajESOh.iKvHBHhElajISOh.iKvHBHhElajMSOh.iKvHBHhElajQSOh.iKvHBHhElajUSOh.iKvHBHhElajYSOh.iKvHBHrUlckwVOh.iKvHBHhkGbgM2bkQVOh.iHu3C."/>
+    </Slots>
+  </BaySickPedalsState>
+</Pedalboard>

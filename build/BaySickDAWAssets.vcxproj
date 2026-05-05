@@ -52,6 +52,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -103,6 +104,10 @@
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
     </ResourceCompile>
+    <MASM>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+    </MASM>
     <Midl>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
@@ -143,6 +148,10 @@
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
     </ResourceCompile>
+    <MASM>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+    </MASM>
     <Midl>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
@@ -183,6 +192,10 @@
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
     </ResourceCompile>
+    <MASM>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+    </MASM>
     <Midl>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
@@ -222,6 +235,10 @@
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
     </ResourceCompile>
+    <MASM>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+    </MASM>
     <Midl>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
@@ -236,7 +253,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <CustomBuild Include="C:\Users\jeffm\Documents\BaySickDAW\build\CMakeFiles\025024c608c4512e9d7d543fca11733a\BinaryData1.cpp.rule">
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Generating juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BaySickAssets.h</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Generating juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData2.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData3.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData4.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BaySickAssets.h</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
 cd C:\Users\jeffm\Documents\BaySickDAW
 if %errorlevel% neq 0 goto :cmEnd
@@ -250,10 +267,10 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\input_file_list;C:\Users\jeffm\Documents\BaySickDAW\Assets\BaySickDAWLogo.png;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\input_file_list;C:\Users\jeffm\Documents\BaySickDAW\Assets\BaySickDAWLogo.png;C:\Users\jeffm\Documents\BaySickDAW\Assets\big_rusty_drums.svg;C:\Users\jeffm\Documents\BaySickDAW\Assets\big_rusty_drums.png;C:\Users\jeffm\Documents\BaySickDAW\Assets\control_tab.png;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData2.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData3.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData4.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Generating juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BaySickAssets.h</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Generating juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData2.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData3.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData4.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BaySickAssets.h</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
 cd C:\Users\jeffm\Documents\BaySickDAW
 if %errorlevel% neq 0 goto :cmEnd
@@ -267,10 +284,10 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\input_file_list;C:\Users\jeffm\Documents\BaySickDAW\Assets\BaySickDAWLogo.png;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\input_file_list;C:\Users\jeffm\Documents\BaySickDAW\Assets\BaySickDAWLogo.png;C:\Users\jeffm\Documents\BaySickDAW\Assets\big_rusty_drums.svg;C:\Users\jeffm\Documents\BaySickDAW\Assets\big_rusty_drums.png;C:\Users\jeffm\Documents\BaySickDAW\Assets\control_tab.png;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData2.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData3.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData4.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Generating juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BaySickAssets.h</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Generating juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData2.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData3.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData4.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BaySickAssets.h</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
 cd C:\Users\jeffm\Documents\BaySickDAW
 if %errorlevel% neq 0 goto :cmEnd
@@ -284,10 +301,10 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\input_file_list;C:\Users\jeffm\Documents\BaySickDAW\Assets\BaySickDAWLogo.png;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\input_file_list;C:\Users\jeffm\Documents\BaySickDAW\Assets\BaySickDAWLogo.png;C:\Users\jeffm\Documents\BaySickDAW\Assets\big_rusty_drums.svg;C:\Users\jeffm\Documents\BaySickDAW\Assets\big_rusty_drums.png;C:\Users\jeffm\Documents\BaySickDAW\Assets\control_tab.png;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData2.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData3.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData4.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Generating juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BaySickAssets.h</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Generating juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData2.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData3.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BinaryData4.cpp, juce_binarydata_BaySickDAWAssets/JuceLibraryCode/BaySickAssets.h</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
 cd C:\Users\jeffm\Documents\BaySickDAW
 if %errorlevel% neq 0 goto :cmEnd
@@ -301,8 +318,8 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\input_file_list;C:\Users\jeffm\Documents\BaySickDAW\Assets\BaySickDAWLogo.png;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\input_file_list;C:\Users\jeffm\Documents\BaySickDAW\Assets\BaySickDAWLogo.png;C:\Users\jeffm\Documents\BaySickDAW\Assets\big_rusty_drums.svg;C:\Users\jeffm\Documents\BaySickDAW\Assets\big_rusty_drums.png;C:\Users\jeffm\Documents\BaySickDAW\Assets\control_tab.png;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData2.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData3.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData4.cpp;C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
     </CustomBuild>
   </ItemGroup>
@@ -365,6 +382,9 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData1.cpp" />
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData2.cpp" />
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData3.cpp" />
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BinaryData4.cpp" />
     <ClInclude Include="C:\Users\jeffm\Documents\BaySickDAW\build\juce_binarydata_BaySickDAWAssets\JuceLibraryCode\BaySickAssets.h" />
   </ItemGroup>
   <ItemGroup />
@@ -378,5 +398,6 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
   </ImportGroup>
 </Project>

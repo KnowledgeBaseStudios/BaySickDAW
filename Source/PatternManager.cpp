@@ -544,6 +544,10 @@ double PatternManager::getEffectivePatternLoopBeats() const
         // G-4 (2026-04-28): Vox + Inst rolls likewise.
         for (auto& roll : pat.voxRoll)   scanRoll(roll);
         for (auto& roll : pat.instRoll)  scanRoll(roll);
+        // J-7b (2026-05-04): BaySickRustyDrums singleton roll likewise — without
+        // this scan, multi-bar drum patterns wrap at the 1-bar minimum instead
+        // of the longest note's end.
+        scanRoll(pat.baySickRustyDrumsRoll);
 
         if (latestEnd > 0.0)
             loopBeats = juce::jmax (loopBeats, ceilToBarStart (latestEnd));

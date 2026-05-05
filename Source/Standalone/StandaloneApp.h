@@ -54,6 +54,15 @@ private:
     double              mSampleRate { 44100.0 };
 };
 
+// J-A2 (2026-05-04): master-output routing globals.  Atomics live here so the
+// Mixer hamburger menu (in StandaloneEditor.cpp) can flip them and the audio
+// callback (PlayHeadAdvancer in StandaloneApp.cpp) can read them lock-free.
+namespace MasterOutputRouting
+{
+    extern std::atomic<int>  gFirstOutputChannel;   // 0-based device output channel index
+    extern std::atomic<bool> gMasterIsMono;         // true = sum L+R into gFirstOutputChannel only
+}
+
 // ── Standalone JUCE Application ───────────────────────────────────────────────
 class VibesynthStandaloneApp : public juce::JUCEApplication,
                                public juce::ChangeListener,
@@ -94,4 +103,11 @@ public:
     // can write the pending file as a SIBLING of the live settings file.
     // Single source of truth for the settings path resolution.
     static juce::File getAudioSettingsFile();
+
+    // J-A2 (2026-05-04): master output channel routing persistence.  Lives
+    // alongside audio_settings.xml as `master_output.xml` (machine-scoped,
+    // not project-scoped — different rigs have different audio interfaces).
+    static juce::File getMasterOutputFile();
+    static void       loadMasterOutputRouting();   // call once at startup before mDeviceManager->initialise
+    static void       saveMasterOutputRouting();   // call when the mixer hamburger writes a new selection
 };

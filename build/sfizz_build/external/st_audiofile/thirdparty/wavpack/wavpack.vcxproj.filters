@@ -1,0 +1,103 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\common_utils.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\decorr_utils.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\entropy_utils.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\extra1.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\extra2.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\open_utils.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\open_filename.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\open_legacy.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\open_raw.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\pack.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\pack_dns.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\pack_floats.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\pack_utils.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\read_words.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\tags.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\tag_utils.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\unpack.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\unpack_floats.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\unpack_seek.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\unpack_utils.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\write_words.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\pack_dsd.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\unpack_dsd.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\decorr_tables.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\unpack3.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\wavpack_local.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\wavpack_version.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <MASM Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\pack_x64.asm" />
+    <MASM Include="C:\Users\jeffm\Documents\BaySickDAW\libs\sfizz\external\st_audiofile\thirdparty\wavpack\src\unpack_x64.asm" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{9CFA93D1-D729-31D8-BF8E-BDE6784D26D8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{3EF99C19-76A4-348B-9A65-AA9E3E0D8A56}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

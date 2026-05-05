@@ -11,6 +11,35 @@
 #include "DSP/TapeDSP.h"
 #include "DSP/LimiterDSP.h"
 #include "DSP/DeEsserDSP.h"
+// I-5 (2026-05-02): Harmonics drive pedals batch -- 4 new DSP classes.
+#include "DSP/BluesDriveStyleDSP.h"
+#include "DSP/DistortionStyleDSP.h"
+#include "DSP/FuzzStyleDSP.h"
+#include "DSP/HighGainStyleDSP.h"
+// I-6 (2026-05-02): Harmonics bass pedals batch -- 2 multi-band drives.
+#include "DSP/BassDriverStyleDSP.h"
+#include "DSP/BassOverdriveStyleDSP.h"
+// I-7 (2026-05-02): OC Style Octave (Polyphonic granular + Vintage divider).
+#include "DSP/OctaveStyleDSP.h"
+// I-8 (2026-05-02): Dynamics pedals batch -- Noise Gate + Bass Compressor.
+#include "DSP/NoiseGateStyleDSP.h"
+#include "DSP/BassCompressorStyleDSP.h"
+// I-9 (2026-05-03): SY Style Polyphonic Synth (YIN tracker + oscillator voice).
+#include "DSP/SynthStyleDSP.h"
+// I-10 (2026-05-03): PW Style Wah (resonant bandpass with Vintage/Rich modes).
+#include "DSP/WahStyleDSP.h"
+// I-11 (2026-05-03): AD Style Acoustic Preamp (body convolution + Schroeder + notch).
+#include "DSP/AcousticPreampStyleDSP.h"
+// I-11 (2026-05-03): AC Style Acoustic Simulator (corrective EQ + transient + Schroeder).
+#include "DSP/AcousticSimulatorStyleDSP.h"
+// I-12 (2026-05-03): EQ trio batch (GE / GEB / EQFH).
+#include "DSP/GraphicEQStyleDSP.h"
+#include "DSP/BassGraphicEQStyleDSP.h"
+#include "DSP/FurmanEQStyleDSP.h"
+// I-13 (2026-05-03): TU Style Tuner (YIN-driven).
+#include "DSP/TunerStyleDSP.h"
+// I-15c (2026-05-03): User NAM Pedal (loads .nam capture).
+#include "DSP/NAMPedalStyleDSP.h"
 
 // ── Ctor ──────────────────────────────────────────────────────────────────────
 EffectRack::EffectRack()
@@ -46,28 +75,44 @@ std::unique_ptr<DSPBase> EffectRack::createEffect(EffectType type)
         case EffectType::Limiter:         return std::make_unique<LimiterDSP>();
         case EffectType::DeEsser:         return std::make_unique<DeEsserDSP>();
 
-        // I-1 (2026-05-02): BaySickPedals 18-module spec entries.  DSP classes
-        // land in I-5..I-13; factory returns nullptr until then so empty slots
-        // are skipped on the audio path.  Picker entries can still be saved
-        // and persisted as enum values without crashing.
-        case EffectType::BluesDriveStyle:
-        case EffectType::OverdriveStyle:
-        case EffectType::DistortionStyle:
-        case EffectType::FuzzStyle:
-        case EffectType::NoiseGateStyle:
-        case EffectType::HighGainStyle:
-        case EffectType::TunerStyle:
-        case EffectType::AcousticPreampStyle:
-        case EffectType::GraphicEQStyle:
-        case EffectType::SynthStyle:
-        case EffectType::OctaveStyle:
-        case EffectType::WahStyle:
-        case EffectType::BassGraphicEQStyle:
-        case EffectType::BassCompressorStyle:
-        case EffectType::BassDriverStyle:
-        case EffectType::BassOverdriveStyle:
-        case EffectType::FurmanEQStyle:
-            return nullptr;
+        // I-5 (2026-05-02): BaySickPedals Harmonics drive pedals batch.
+        case EffectType::BluesDriveStyle: return std::make_unique<BluesDriveStyleDSP>();
+        case EffectType::DistortionStyle: return std::make_unique<DistortionStyleDSP>();
+        case EffectType::FuzzStyle:       return std::make_unique<FuzzStyleDSP>();
+        case EffectType::HighGainStyle:   return std::make_unique<HighGainStyleDSP>();
+
+        // I-6 (2026-05-02): BaySickPedals Harmonics bass pedals batch.
+        case EffectType::BassDriverStyle:    return std::make_unique<BassDriverStyleDSP>();
+        case EffectType::BassOverdriveStyle: return std::make_unique<BassOverdriveStyleDSP>();
+
+        // I-7 (2026-05-02): OC Style Octave (Polyphonic + Vintage modes).
+        case EffectType::OctaveStyle:        return std::make_unique<OctaveStyleDSP>();
+
+        // I-8 (2026-05-02): BaySickPedals Dynamics pedals batch.
+        case EffectType::NoiseGateStyle:      return std::make_unique<NoiseGateStyleDSP>();
+        case EffectType::BassCompressorStyle: return std::make_unique<BassCompressorStyleDSP>();
+
+        // I-9 (2026-05-03): SY Style Polyphonic Synth.
+        case EffectType::SynthStyle:          return std::make_unique<SynthStyleDSP>();
+
+        // I-10 (2026-05-03): PW Style Wah.
+        case EffectType::WahStyle:            return std::make_unique<WahStyleDSP>();
+
+        // I-11 (2026-05-03): AD Style Acoustic Preamp.
+        case EffectType::AcousticPreampStyle:    return std::make_unique<AcousticPreampStyleDSP>();
+        // I-11 (2026-05-03): AC Style Acoustic Simulator.
+        case EffectType::AcousticSimulatorStyle: return std::make_unique<AcousticSimulatorStyleDSP>();
+
+        // I-12 (2026-05-03): EQ trio batch.
+        case EffectType::GraphicEQStyle:      return std::make_unique<GraphicEQStyleDSP>();
+        case EffectType::BassGraphicEQStyle:  return std::make_unique<BassGraphicEQStyleDSP>();
+        case EffectType::FurmanEQStyle:       return std::make_unique<FurmanEQStyleDSP>();
+
+        // I-13 (2026-05-03): TU Style Tuner.
+        case EffectType::TunerStyle:          return std::make_unique<TunerStyleDSP>();
+
+        // I-15c (2026-05-03): User NAM Pedal.
+        case EffectType::NAMPedalStyle:       return std::make_unique<NAMPedalStyleDSP>();
 
         default:                          return nullptr;
     }
@@ -343,10 +388,24 @@ void EffectRack::process(juce::AudioBuffer<float>& buffer)
         {}
     };
 
+    // I-5 (2026-05-02): bypass-crossfade ramp length.  ~5 ms is short enough
+    // to feel instant but long enough to hide the click from a +30 dB drive
+    // pedal toggling on/off.  Computed in samples per call rather than
+    // cached so a sample-rate change between blocks remains correct.
+    constexpr float kBypassRampMs = 5.0f;
+    const float rampSamples = juce::jmax (1.0f,
+        (float) (mSampleRate * kBypassRampMs * 0.001));
+
     for (auto& s : mSlots)
     {
         DSPBase* eff = s.active.get();
-        if (!eff || s.bypassed.load (std::memory_order_relaxed)) continue;
+        if (!eff) continue;
+
+        const bool wantBypass = s.bypassed.load (std::memory_order_relaxed);
+        const float rampTarget = wantBypass ? 0.0f : 1.0f;
+
+        // Fully bypassed and ramp settled -- skip DSP entirely (CPU savings).
+        if (rampTarget == 0.0f && s.bypassRampValue == 0.0f) continue;
 
         // Input peak (linear amplitude) -- the VU meter expects rms01 by
         // name but treating per-block PEAK as the input gives more useful
@@ -361,6 +420,22 @@ void EffectRack::process(juce::AudioBuffer<float>& buffer)
         }
         casMaxFloat (s.inputLevelRmsRun, juce::jlimit (0.f, 1.f, inPeak));
 
+        // I-5 (2026-05-02): snapshot dry into the slot's scratch buffer
+        // BEFORE running the DSP so the per-sample crossfade below has the
+        // pre-DSP signal to mix back in during the ramp.  Skipped when the
+        // ramp is fully wet (rampValue == 1 and target == 1) -- in that
+        // steady-state case the crossfade collapses to a no-op and we save
+        // the copy.
+        const bool rampActive = ! (s.bypassRampValue == 1.0f && rampTarget == 1.0f);
+        if (rampActive)
+        {
+            if (s.dryScratch.getNumChannels() < numCh
+             || s.dryScratch.getNumSamples() < numSamples)
+                s.dryScratch.setSize (numCh, numSamples, false, false, true);
+            for (int ch = 0; ch < numCh; ++ch)
+                s.dryScratch.copyFrom (ch, 0, buffer, ch, 0, numSamples);
+        }
+
         // C.4 Phase 1 (2026-04-30): push SC context to this slot's effect
         // BEFORE processing so SC consumers see the right array + pick.
         if (mScBufs != nullptr)
@@ -372,6 +447,38 @@ void EffectRack::process(juce::AudioBuffer<float>& buffer)
         // Per-slot output gain
         if (s.outputGainDb != 0.f)
             buffer.applyGain(std::pow(10.f, s.outputGainDb / 20.f));
+
+        // I-5: bypass crossfade.  Linearly ramp wet/dry mix toward target
+        // over kBypassRampMs.  The DSP is run unconditionally above; here
+        // we mix its output (wet) with the pre-DSP scratch (dry).  When
+        // rampValue settles to the target the ramp goes inactive and a
+        // future block may skip the DSP if target is 0.
+        if (rampActive)
+        {
+            const float startMix = s.bypassRampValue;
+            const float dist     = rampTarget - startMix;
+            const float perSamp  = dist / rampSamples;
+            float endMix = startMix;
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                float* wet = buffer.getWritePointer (ch);
+                const float* dry = s.dryScratch.getReadPointer (ch);
+                float mix = startMix;
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    // mix in [0..1]; out = dry*(1-mix) + wet*mix.
+                    wet[i] = dry[i] + mix * (wet[i] - dry[i]);
+                    mix += perSamp;
+                    // Clamp so floating-point drift past target doesn't
+                    // overshoot and re-engage the wet path forever.
+                    if ((perSamp > 0.f && mix > rampTarget)
+                     || (perSamp < 0.f && mix < rampTarget))
+                        mix = rampTarget;
+                }
+                endMix = mix;
+            }
+            s.bypassRampValue = juce::jlimit (0.f, 1.f, endMix);
+        }
 
         // Output peak dBFS -- CAS-max only; UI exchange-and-resets each vblank.
         float peak = 0.f;

@@ -68,6 +68,12 @@ public:
     // Inst Arm-LED click handler to populate its input-channel picker.
     std::function<juce::StringArray()> getInputChannelNames;
 
+    // B2 + B1 (2026-05-04): returns the active audio device's name (e.g.
+    // "Tascam Model 24") so the input-picker can apply known stereo-pair
+    // profiles for interfaces whose driver names channels without L/R
+    // suffixes.  Empty when no device is open.
+    std::function<juce::String()> getInputDeviceName;
+
     // Returns the current display name of an audio row strip (for Effects dropdown).
     juce::String getAudioStripName(int row) const;
 
@@ -118,6 +124,12 @@ public:
     void addVoxChannelAtIndex(int idx);
     void addInstChannel();
     void addInstChannelAtIndex(int idx);
+
+    // J-5: BaySickRustyDrums strip add/remove (driven by kit-load lifecycle,
+    // NOT user-clicks).  Idempotent — safe to call again with same idx.
+    void addRustyChannelAtIndex (int idx, const juce::String& name);
+    void removeRustyChannelAtIndex (int idx);
+    void clearAllRustyChannels();
 
     // D.3 (2026-05-01): override strip display order from a saved project.
     // The vector lists indices in left-to-right display order.  Indices not
@@ -250,6 +262,10 @@ private:
     bool                             mVoxBus2Active  { false };
     bool                             mInstBus2Active { false };
     bool                             mInstBus3Active { false };
+    // J-5: BaySickRustyDrums dedicated bus strip.  Visible whenever any
+    // mRustyStrips entry exists (mRustyDrumsBusActive flag).
+    std::unique_ptr<MixerTrackStrip> mRustyDrumsBusStrip;
+    bool                             mRustyDrumsBusActive { false };
 
     // Dynamic instrument strips — keyed by tabId (Layer/Bass) or slot (Drums)
     std::map<int, std::unique_ptr<MixerTrackStrip>> mLayerStrips;
@@ -285,6 +301,13 @@ private:
     std::vector<int>                                mInstOrder;
     std::unique_ptr<juce::TextButton>               mAddInstBtn;
     int                                             mNextInstIdx { 0 };
+
+    // J-5 (2026-05-03): BaySickRustyDrums strips.  Spawned/destroyed in
+    // batches of 13 by PluginProcessor::loadBaySickRustyDrumsKit /
+    // destroyBaySickRustyDrums.  No "Add Rusty" UI button — strip lifecycle
+    // is engine-driven, not user-driven.
+    std::map<int, std::unique_ptr<MixerTrackStrip>> mRustyStrips;
+    std::vector<int>                                mRustyOrder;
 
     // Direct Routing label — shown between Master and FX Bus when any strip
     // has _sendTo = Master. Small vertical-text panel; visibility driven by

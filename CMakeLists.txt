@@ -4,6 +4,18 @@ project(BaySickDAW VERSION 1.2.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ── MSVC runtime (must match across JUCE + vendored libs) ────────────────────
+# JUCE compiles with /MD (dynamic CRT) by default.  sfizz's CMakeLists picks
+# /MT (static CRT) by default, which causes LNK2038 mismatches at link time.
+# Force /MD across every target (including vendored sub-projects) so the
+# runtime is consistent.  CMP0091 NEW makes CMAKE_MSVC_RUNTIME_LIBRARY the
+# canonical control instead of the legacy per-target compile flags.  Must be
+# set BEFORE any add_subdirectory or add_library call.
+if(MSVC)
+    cmake_policy(SET CMP0091 NEW)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL" CACHE STRING "" FORCE)
+endif()
+
 # ── Local JUCE (no network / no DNS hit) ─────────────────────────────────────
 # JUCE 7.0.12 must be extracted to: C:\Users\jeffm\Documents\Vibesynth\juce\
 set(JUCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/juce")
@@ -31,7 +43,11 @@ endif()
 juce_add_binary_data(BaySickDAWAssets
     HEADER_NAME "BaySickAssets.h"
     NAMESPACE   BaySickAssets
-    SOURCES     "${CMAKE_CURRENT_SOURCE_DIR}/Assets/BaySickDAWLogo.png"
+    SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/Assets/BaySickDAWLogo.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Assets/big_rusty_drums.svg"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Assets/big_rusty_drums.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Assets/control_tab.png"
 )
 
 # ── Shared compile definitions ────────────────────────────────────────────────
@@ -168,6 +184,52 @@ else()
     set(BAYSICK_HAS_NAM_CORE FALSE)
 endif()
 
+# ── sfizz (SFZ player engine) static library ─────────────────────────────────
+# Vendored at libs/sfizz/.  Powers Phase J BaySickRustyDrums.  BSD 2-Clause —
+# static-link only requires credits-screen attribution (no relink token, no
+# source disclosure, no dynamic-link mandate).  The pruned tree at libs/sfizz/
+# has dev tooling (.git, .github, benchmarks, tests, demos, devtools, scripts,
+# non-CMake build files, dev linting configs, docs) stripped — what remains is
+# just the library + its 11 vendored deps in external/.
+set(SFIZZ_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/sfizz")
+if(EXISTS "${SFIZZ_DIR}/src/sfizz.h")
+    # sfizz options must be set BEFORE add_subdirectory.  CACHE FORCE so they
+    # override sfizz's own option_ex defaults.
+    set(SFIZZ_RENDER              OFF CACHE BOOL "" FORCE) # skip clients/sfizz_render exe
+    set(SFIZZ_JACK                OFF CACHE BOOL "" FORCE) # n/a on Windows
+    set(SFIZZ_TESTS               OFF CACHE BOOL "" FORCE)
+    set(SFIZZ_DEMOS               OFF CACHE BOOL "" FORCE)
+    set(SFIZZ_DEVTOOLS            OFF CACHE BOOL "" FORCE)
+    set(SFIZZ_BENCHMARKS          OFF CACHE BOOL "" FORCE)
+    set(SFIZZ_SHARED              OFF CACHE BOOL "" FORCE) # static link only
+    set(SFIZZ_USE_SNDFILE         OFF CACHE BOOL "" FORCE) # uses bundled st_audiofile
+    set(SFIZZ_GIT_SUBMODULE_CHECK OFF CACHE BOOL "" FORCE) # .git pruned; submodules pre-populated
+    set(BUILD_TESTING             OFF CACHE BOOL "" FORCE) # gates Abseil's tests
+    add_subdirectory("${SFIZZ_DIR}" sfizz_build)
+    set(BAYSICK_HAS_SFIZZ TRUE)
+else()
+    message(STATUS "sfizz not found at ${SFIZZ_DIR}/src/sfizz.h"
+                   " — Phase J BaySickRustyDrums engine will be disabled.")
+    set(BAYSICK_HAS_SFIZZ FALSE)
+endif()
+
+# ── J-8 (2026-05-04): vendored LunaSVG for high-fidelity SVG rendering ────────
+# JUCE's built-in SVG renderer is incomplete (no <linearGradient>/<radialGradient>
+# resolution, no `fill="url(#id)"` support).  Big Rusty Drums' kit graphic relies
+# on radial gradients for shells/heads/cymbals; without LunaSVG every piece would
+# render as a black ellipse.  LunaSVG (MIT) is single-deps (PlutoVG, vendored as
+# submodule) and renders to a pixel bitmap we wrap as juce::Image once at load.
+set(LUNASVG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/lunasvg")
+if(EXISTS "${LUNASVG_DIR}/include/lunasvg.h")
+    set(LUNASVG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${LUNASVG_DIR}" lunasvg_build)
+    set(BAYSICK_HAS_LUNASVG TRUE)
+else()
+    message(STATUS "LunaSVG not found at ${LUNASVG_DIR}/include/lunasvg.h"
+                   " — kit graphic will fall back to JUCE SVG (black blobs).")
+    set(BAYSICK_HAS_LUNASVG FALSE)
+endif()
+
 # ── Legacy plugin target (NOT shipped; BaySickDAW is standalone-only) ────────
 # Kept as build scaffolding only. Do not distribute. See
 # memory/feedback_standalone_only_no_vst.md for rationale.
@@ -220,6 +282,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     ${VIBESYNTH_DSP_SOURCES}
     # Shared standalone UI
     Source/Standalone/SharedUI.cpp
+    Source/Standalone/EngineChainProcessor.cpp
     # Main shell
     Source/Standalone/StandaloneApp.cpp
     Source/Standalone/StandaloneEditor.cpp
@@ -252,6 +315,35 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/LimiterDSP.cpp
     Source/DSP/MicSimDSP.cpp
     Source/DSP/MicPlacementDSP.cpp
+    # Phase I-5 — Harmonics drive pedals batch (4 new DSPs; OD Style is folded into OverdriveDSP)
+    Source/DSP/BluesDriveStyleDSP.cpp
+    Source/DSP/DistortionStyleDSP.cpp
+    Source/DSP/FuzzStyleDSP.cpp
+    Source/DSP/HighGainStyleDSP.cpp
+    # Phase I-6 — Harmonics bass pedals batch (2 multi-band DSPs)
+    Source/DSP/BassDriverStyleDSP.cpp
+    Source/DSP/BassOverdriveStyleDSP.cpp
+    # Phase I-7 — OC Style Octave (Polyphonic granular + Vintage divider)
+    Source/DSP/OctaveStyleDSP.cpp
+    # Phase I-8 — Dynamics pedals batch (Noise Gate + multi-band Bass Comp)
+    Source/DSP/NoiseGateStyleDSP.cpp
+    Source/DSP/BassCompressorStyleDSP.cpp
+    # Phase I-9 — SY Style Polyphonic Synth (YIN pitch tracker + oscillator voice)
+    Source/DSP/SynthStyleDSP.cpp
+    # Phase I-10 — PW Style Wah (TPT resonant bandpass + parallel bass LP)
+    Source/DSP/WahStyleDSP.cpp
+    # Phase I-11 — AD Style Acoustic Preamp (body convolution + Schroeder + notch)
+    Source/DSP/AcousticPreampStyleDSP.cpp
+    # Phase I-11 — AC Style Acoustic Simulator (corrective EQ + transient + Schroeder)
+    Source/DSP/AcousticSimulatorStyleDSP.cpp
+    # Phase I-12 — EQ trio batch (GE / GEB / EQFH)
+    Source/DSP/GraphicEQStyleDSP.cpp
+    Source/DSP/BassGraphicEQStyleDSP.cpp
+    Source/DSP/FurmanEQStyleDSP.cpp
+    # Phase I-13 — TU Style Tuner (YIN-driven strobe + LED bar)
+    Source/DSP/TunerStyleDSP.cpp
+    # Phase I-15c — User NAM Pedal (.nam capture loader + EQ + blend)
+    Source/DSP/NAMPedalStyleDSP.cpp
     # Phase 2 — EffectRack + Effects Page
     Source/EffectRack.cpp
     Source/Standalone/SlotComponent.cpp
@@ -262,8 +354,10 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/Standalone/LayersPage.cpp
     Source/Standalone/BassPage.cpp
     Source/Standalone/DrumPage.cpp
+    Source/Standalone/BaySickRustyDrumsPage.cpp   # J-6 (2026-05-03)
     # G-7 — unified Page Preset save / load
     Source/Standalone/PagePresetIO.cpp
+    Source/Standalone/RustyDrumsPagePresetIO.cpp   # J-8 Part D
     Source/Standalone/DrumKitGrid.cpp
     Source/Standalone/PianoRoll.cpp
     Source/Standalone/PianoRollPage.cpp
@@ -273,6 +367,13 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/BaySickNAMIR/BaySickNAMIREditor.cpp
     # Phase I-1 — BaySickPedals (8-slot guitar/bass pedal rack; editor lands in I-15)
     Source/BaySickPedals/BaySickPedalsProcessor.cpp
+    Source/BaySickPedals/BaySickPedalsEditor.cpp
+    # Phase J-2 — BaySickRustyDrums (sfizz-driven drum-kit engine; editor lands in J-8)
+    Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp
+    Source/BaySickRustyDrums/BaySickRustyDrumsKitGraphic.cpp
+    Source/BaySickRustyDrums/AriaControlPanel.cpp
+    # Phase I-3b — App-wide MIDI Learn registry (right-click "MIDI Learn" UI lands in I-3c)
+    Source/MidiLearn/MidiLearnRegistry.cpp
     # Phase H-1+ — BaySickVocal engine (vocal chain processor + editor)
     Source/BaySickVocal/BaySickVocalProcessor.cpp
     Source/BaySickVocal/BaySickVocalEditor.cpp
@@ -294,6 +395,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     # Keymap framework (Phase A — 2026-04-26)
     Source/Standalone/KeyBindings.cpp
     Source/Standalone/KeyBindsWindow.cpp
+    Source/Standalone/RustyDrumsMapWindow.cpp
     # Pattern colour picker (Phase F-1 — 2026-04-26)
     Source/Standalone/PatternColorPicker.cpp
     # Phase 2B — VibePlayer Editor (standalone UI only — includes SharedUI.h)
@@ -305,7 +407,7 @@ target_compile_definitions(BaySickDAWStandalone
     PUBLIC ${VIBESYNTH_DEFS} VIBESYNTH_STANDALONE=1
 )
 
-target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickVocal Source/Clips Source/Vox Source/Inst
+target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn
     # Rubber Band Library (Phase 4B time-stretch) — headers only; link rubberband.lib to enable DSP
     "${CMAKE_CURRENT_SOURCE_DIR}/libs/rubberband"
     # ASIO SDK include path (empty when SDK absent — harmless to leave in the list).
@@ -325,6 +427,20 @@ target_link_libraries(BaySickDAWStandalone
 if(BAYSICK_HAS_NAM_CORE)
     target_link_libraries(BaySickDAWStandalone PRIVATE BaySickNAMCore)
     target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_NAM_CORE=1)
+endif()
+
+# Phase J — link sfizz (SFZ player engine) when vendored.
+if(BAYSICK_HAS_SFIZZ)
+    target_link_libraries(BaySickDAWStandalone PRIVATE sfizz::sfizz)
+    target_include_directories(BaySickDAWStandalone PRIVATE "${SFIZZ_DIR}/src")
+    target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_SFIZZ=1)
+endif()
+
+# J-8 — link LunaSVG (high-fidelity SVG → pixel bitmap rendering) when vendored.
+if(BAYSICK_HAS_LUNASVG)
+    target_link_libraries(BaySickDAWStandalone PRIVATE lunasvg)
+    target_include_directories(BaySickDAWStandalone PRIVATE "${LUNASVG_DIR}/include")
+    target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_LUNASVG=1)
 endif()
 
 # ── Generate PDBs in Release builds so minidumps symbolicate ─────────────────

@@ -12661,6 +12661,12 @@ static const unsigned char temp_binary_data_0[] =
 
 const char* BaySickDAWLogo_png = (const char*) temp_binary_data_0;
 
+}
+
+#include "BaySickAssets.h"
+
+namespace BaySickAssets
+{
 
 const char* getNamedResource (const char* resourceNameUTF8, int& numBytes);
 const char* getNamedResource (const char* resourceNameUTF8, int& numBytes)
@@ -12674,6 +12680,9 @@ const char* getNamedResource (const char* resourceNameUTF8, int& numBytes)
     switch (hash)
     {
         case 0x89523bd7:  numBytes = 957688; return BaySickDAWLogo_png;
+        case 0x860bc0c9:  numBytes = 8743; return big_rusty_drums_svg;
+        case 0x860bb48e:  numBytes = 3656182; return big_rusty_drums_png;
+        case 0x9e592d9d:  numBytes = 304558; return control_tab_png;
         default: break;
     }
 
@@ -12683,12 +12692,18 @@ const char* getNamedResource (const char* resourceNameUTF8, int& numBytes)
 
 const char* namedResourceList[] =
 {
-    "BaySickDAWLogo_png"
+    "BaySickDAWLogo_png",
+    "big_rusty_drums_svg",
+    "big_rusty_drums_png",
+    "control_tab_png"
 };
 
 const char* originalFilenames[] =
 {
-    "BaySickDAWLogo.png"
+    "BaySickDAWLogo.png",
+    "big_rusty_drums.svg",
+    "big_rusty_drums.png",
+    "control_tab.png"
 };
 
 const char* getNamedResourceOriginalFilename (const char* resourceNameUTF8);

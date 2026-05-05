@@ -92,17 +92,9 @@ public:
     bool isLocked() const noexcept { return mLocked; }
     void setLocked (bool b) { if (b == mLocked) return; mLocked = b; if (onLockChanged) onLockChanged(); repaint(); }
 
-    // ── G-7 polish (2026-04-29): Pre EQ8 M/S sub-tab (mirrors LayersPage) ─────
-    // Bound to the per-Audio-insert pre-rack EQ at engine creation time.
-    // MID/SIDE buttons in the page menu bar drive setEQMid; StandaloneEditor
-    // wires the buttons + uses getEQDisplay for hamburger menu installation.
-    ParametricEQDisplay* getEQDisplay() const { return mEQDisplay.get(); }
-    void setEQMid (bool showMid)
-    {
-        mEQMidActive = showMid;
-        if (mEQDisplay) mEQDisplay->setShowMid (showMid);
-    }
-    bool isEQMidActive() const { return mEQMidActive; }
+    // J-6 EQ unification (2026-05-03): EQ sub-tab + accessors removed.  Pre-rack
+    // EQ for this Audio insert is exclusively edited via the Effects page
+    // (mixer_audio_<row>_preeq_*).
 
     // Save / Load page preset — writes the entire ClipPageState XML to
     // Documents/BaySickDAW/Presets/Clips/My Presets/<name>.xml.  Load Preset
@@ -126,7 +118,6 @@ public:
 
 private:
     void buildEnginePicker();
-    void buildEQTab();   // G-7 polish: replaced buildEqStub
     void layoutEditor (juce::Rectangle<int> r);
     void showEngineContextMenu();
 
@@ -156,11 +147,8 @@ private:
     std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor
     std::unique_ptr<juce::AudioProcessorEditor>  mPlayerEditor;
 
-    // G-7 polish (2026-04-29): real Pre EQ8 M/S display (replaced placeholder
-    // label).  Bound at engine-creation time to the Audio InsertNode's preEq
-    // member with mixer_audio_<row>_preeq_(mid|side)_eq* APVTS prefix.
-    std::unique_ptr<ParametricEQDisplay>         mEQDisplay;
-    bool                                         mEQMidActive { true };
+    // J-6 EQ unification (2026-05-03): mEQDisplay removed; pre-rack EQ on
+    // Effects page only.
 
     // G-7 (2026-04-29): set by StandaloneEditor after construction so we
     // can call PagePresetIO with the global apvts + VibeGraph.

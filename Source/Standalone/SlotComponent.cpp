@@ -4,6 +4,7 @@
 #include "../DSP/SaturationDSP.h"
 #include "../DSP/DelayDSP.h"
 #include "../DSP/ReverbDSP.h"
+#include "../DSP/OverdriveDSP.h"   // I-4: Mode dropdown for Overdrive (Rack vs Pedal)
 #include "EffectPresetIO.h"
 
 SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
@@ -105,7 +106,11 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
             base->onOutputGainChanged = [this, slot](float db) {
                 if (mRack) mRack->setSlotOutputGain(slot, db);
             };
-            if (mRack)
+            // I-4 (2026-05-02): pedal-style panels (CSStyleCompressorPanel +
+            // every I-5+ pedal) call disableOutputVolKnob() in their ctor and
+            // own their own Level knob, so base->outputVolKnob may be null.
+            // Sync only when present.
+            if (mRack && base->outputVolKnob)
                 base->outputVolKnob->slider.setValue(mRack->getSlotOutputGain(slot),
                                                      juce::dontSendNotification);
         }
@@ -126,9 +131,11 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
     }
 
     // H-7 (2026-05-01): show Mode dropdown only for effects with character-
-    // mode umbrellas.  Compressor: Modern/FET/Opto.  Saturation: Tube/Console.
+    // mode umbrellas.  Compressor: Modern/FET/Opto/CS Style (I-4).
+    // Saturation: Tube/Console/Tape.
     // H-8 (2026-05-02): Delay: Echo / VocalDoubler.
     // H-9 (2026-05-02): Reverb: Plate / Hall / Chamber / Room / VocalBooth.
+    // I-4 (2026-05-02): Overdrive: Rack / Pedal.
     if (mModeBtn)
     {
         bool show = false;
@@ -136,7 +143,8 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
         {
             const auto t = mRack->getSlot(mSlotIndex).type;
             show = (t == EffectType::Compressor || t == EffectType::Saturation
-                 || t == EffectType::Delay      || t == EffectType::Reverb);
+                 || t == EffectType::Delay      || t == EffectType::Reverb
+                 || t == EffectType::Overdrive);
         }
         mModeBtn->setVisible(show);
         if (show) refreshModeBtnLabel();
@@ -461,14 +469,28 @@ void SlotComponent::showAddMenu()
     // hover step) but reads as 4 categories.
     juce::PopupMenu m;
     m.addSectionHeader ("Dynamic");
-    m.addItem ((int)EffectType::Compressor,      "Compressor");
-    m.addItem ((int)EffectType::DeEsser,         "De-esser");
-    m.addItem ((int)EffectType::Limiter,         "Limiter");
-    m.addItem ((int)EffectType::TransientShaper, "Transient Shaper");
+    // I-8 (2026-05-03): Dynamics pedals (Bass Compressor + Noise Gate)
+    // alpha-sorted alongside the existing rack dynamics.
+    m.addItem ((int)EffectType::BassCompressorStyle, "Bass Compressor");
+    m.addItem ((int)EffectType::Compressor,          "Compressor");
+    m.addItem ((int)EffectType::DeEsser,             "De-esser");
+    m.addItem ((int)EffectType::Limiter,             "Limiter");
+    m.addItem ((int)EffectType::NoiseGateStyle,      "Noise Gate");
+    m.addItem ((int)EffectType::TransientShaper,     "Transient Shaper");
 
     m.addSectionHeader ("Harmonics");
-    m.addItem ((int)EffectType::Overdrive,       "Overdrive");
-    m.addItem ((int)EffectType::Saturation,      "Saturation");
+    // I-5 + I-6 + I-7 (2026-05-02): Harmonics drive + bass + octave pedals.
+    // Sorted alpha within the group per H-cross-cutting effect-picker
+    // convention.
+    m.addItem ((int)EffectType::BassDriverStyle,    "Bass Driver");
+    m.addItem ((int)EffectType::BassOverdriveStyle, "Bass Overdrive");
+    m.addItem ((int)EffectType::BluesDriveStyle,    "Blues Drive");
+    m.addItem ((int)EffectType::DistortionStyle,    "Distortion");
+    m.addItem ((int)EffectType::FuzzStyle,          "Fuzz");
+    m.addItem ((int)EffectType::HighGainStyle,      "High-Gain");
+    m.addItem ((int)EffectType::OctaveStyle,        "Octave");
+    m.addItem ((int)EffectType::Overdrive,          "Overdrive");
+    m.addItem ((int)EffectType::Saturation,         "Saturation");
     // H-10 cutover (2026-05-02): Tape was folded into Saturation as a 3rd
     // type (Tube/Console/Tape).  Users now pick Saturation and switch the
     // Mode dropdown to Tape; the standalone "Tape" picker entry is gone.
@@ -476,11 +498,28 @@ void SlotComponent::showAddMenu()
     // projects load correctly, but it's no longer in the picker.
 
     m.addSectionHeader ("Modulation");
+    // I-9 (2026-05-03): added SY Style Polyphonic Synth (Modulation LAF group
+    // per locked spec).
+    // I-10 (2026-05-03): added PW Style Wah (filter pedal -- Modulation group).
+    // I-11 (2026-05-03): added AC Style Acoustic Simulator (Modulation group
+    // per Jeff's call -- corrective EQ + transient + Schroeder reverb, no IR
+    // unless User mode).
+    m.addItem ((int)EffectType::AcousticSimulatorStyle, "Acoustic Simulator");
     m.addItem ((int)EffectType::Chorus,          "Chorus");
     m.addItem ((int)EffectType::Flanger,         "Flanger");
     m.addItem ((int)EffectType::Phaser,          "Phaser");
+    m.addItem ((int)EffectType::SynthStyle,      "Polyphonic Synth");
+    m.addItem ((int)EffectType::WahStyle,        "Wah");
 
     m.addSectionHeader ("Time");
+    // I-11 (2026-05-03): added AD Style Acoustic Preamp (Time LAF group per
+    // locked spec table).
+    // I-15 (2026-05-03): GE / GEB / EQFH / TU are intentionally NOT in the FX
+    // rack picker -- per locked spec they are BaySickPedals-only effects.
+    // DSP + panels live in the codebase, factory wires them up, and the
+    // BaySickPedalsEditor (Inst page sub-tab) is the only place users can
+    // reach them.
+    m.addItem ((int)EffectType::AcousticPreampStyle, "Acoustic Preamp");
     m.addItem ((int)EffectType::Delay,           "Delay");
     m.addItem ((int)EffectType::Reverb,          "Reverb");
 
@@ -509,13 +548,17 @@ void SlotComponent::refreshModeBtnLabel()
     juce::String label = "Mode";
     if (slot.type == EffectType::Compressor)
     {
+        // I-4 (2026-05-02): friendly Mode-dropdown labels per locked spec
+        // (option B parenthetical descriptors).  Dropdown button shows the
+        // short label; full menu adds the descriptor in parens.
         if (auto* c = dynamic_cast<CompressorDSP*>(mRack->getSlotEffect(mSlotIndex)))
         {
             switch (c->mType)
             {
-                case CompressorDSP::Type::Modern: label = "Modern"; break;
-                case CompressorDSP::Type::FET:    label = "FET";    break;
-                case CompressorDSP::Type::Opto:   label = "Opto";   break;
+                case CompressorDSP::Type::Modern: label = "Modern";   break;
+                case CompressorDSP::Type::FET:    label = "FET";      break;
+                case CompressorDSP::Type::Opto:   label = "Opto";     break;
+                case CompressorDSP::Type::CS:     label = "CS Style"; break;
             }
         }
     }
@@ -554,6 +597,21 @@ void SlotComponent::refreshModeBtnLabel()
             }
         }
     }
+    else if (slot.type == EffectType::Overdrive)
+    {
+        // I-4 (2026-05-02): Overdrive folds the OD Style pedal in as a Type
+        // (Rack vs Pedal), same pattern as Compressor's Modern/FET/Opto/CS
+        // Style.  Single picker entry "Overdrive"; this Mode dropdown is
+        // where the user picks the algorithm character.
+        if (auto* o = dynamic_cast<OverdriveDSP*>(mRack->getSlotEffect(mSlotIndex)))
+        {
+            switch (o->mType)
+            {
+                case OverdriveDSP::Type::Rack:  label = "Rack";  break;
+                case OverdriveDSP::Type::Pedal: label = "Pedal"; break;
+            }
+        }
+    }
     mModeBtn->setButtonText(label);
 }
 
@@ -569,12 +627,17 @@ void SlotComponent::showModeMenu()
     {
         if (auto* c = dynamic_cast<CompressorDSP*>(mRack->getSlotEffect(mSlotIndex)))
             currentPick = (int) c->mType;
-        m.addItem(1 + (int) CompressorDSP::Type::Modern, "Modern", true,
+        // I-4 (2026-05-02): friendly Mode-menu labels with parenthetical
+        // descriptors per locked spec (option B).  CS Style is the new
+        // 4th Type alongside Modern/FET/Opto.
+        m.addItem(1 + (int) CompressorDSP::Type::Modern, "Modern",            true,
                   currentPick == (int) CompressorDSP::Type::Modern);
-        m.addItem(1 + (int) CompressorDSP::Type::FET,    "FET",    true,
+        m.addItem(1 + (int) CompressorDSP::Type::FET,    "FET (Punchy)",      true,
                   currentPick == (int) CompressorDSP::Type::FET);
-        m.addItem(1 + (int) CompressorDSP::Type::Opto,   "Opto",   true,
+        m.addItem(1 + (int) CompressorDSP::Type::Opto,   "Opto (Smooth)",     true,
                   currentPick == (int) CompressorDSP::Type::Opto);
+        m.addItem(1 + (int) CompressorDSP::Type::CS,     "CS Style (Sustain)", true,
+                  currentPick == (int) CompressorDSP::Type::CS);
     }
     else if (slot.type == EffectType::Saturation)
     {
@@ -613,6 +676,19 @@ void SlotComponent::showModeMenu()
         m.addItem(1 + (int) ReverbDSP::Algorithm::VocalBooth, "VocalBooth", true,
                   currentPick == (int) ReverbDSP::Algorithm::VocalBooth);
     }
+    else if (slot.type == EffectType::Overdrive)
+    {
+        // I-4 (2026-05-02): Overdrive Mode dropdown -- Rack vs Pedal.  Pedal
+        // body is a placeholder until I-5 ships the OD Style algorithm; for
+        // now both modes use the existing Rack chain so the slot processes
+        // audio normally.
+        if (auto* o = dynamic_cast<OverdriveDSP*>(mRack->getSlotEffect(mSlotIndex)))
+            currentPick = (int) o->mType;
+        m.addItem(1 + (int) OverdriveDSP::Type::Rack,  "Overdrive (Rack)",  true,
+                  currentPick == (int) OverdriveDSP::Type::Rack);
+        m.addItem(1 + (int) OverdriveDSP::Type::Pedal, "Overdrive (Pedal)", true,
+                  currentPick == (int) OverdriveDSP::Type::Pedal);
+    }
     else
     {
         return;
@@ -650,6 +726,11 @@ void SlotComponent::showModeMenu()
                     {
                         if (auto* r = dynamic_cast<ReverbDSP*>(eff))
                             r->setAlgorithm(newType);
+                    }
+                    else if (slotType == EffectType::Overdrive)
+                    {
+                        if (auto* o = dynamic_cast<OverdriveDSP*>(eff))
+                            o->setType(newType);
                     }
                 }
             }
@@ -812,6 +893,30 @@ juce::String SlotComponent::effectTypeName(EffectType type)
         case EffectType::Tape:            return "Tape";
         case EffectType::Limiter:         return "Limiter";
         case EffectType::DeEsser:         return "De-esser";
+
+        // I-5 (2026-05-02): BaySickPedals Harmonics drive pedals batch.
+        case EffectType::BluesDriveStyle: return "Blues Drive";
+        case EffectType::DistortionStyle: return "Distortion";
+        case EffectType::FuzzStyle:       return "Fuzz";
+        case EffectType::HighGainStyle:   return "High-Gain";
+
+        // I-1 enum entries with no DSP yet (I-6..I-13 ship them).  Names
+        // match the FX-rack picker labels so when those land, the slot
+        // header doesn't show "-" while the picker shows the friendly name.
+        case EffectType::NoiseGateStyle:      return "Noise Gate";
+        case EffectType::TunerStyle:          return "Tuner";
+        case EffectType::AcousticPreampStyle:    return "Acoustic Preamp";
+        case EffectType::AcousticSimulatorStyle: return "Acoustic Simulator";
+        case EffectType::GraphicEQStyle:      return "Graphic EQ";
+        case EffectType::SynthStyle:          return "Polyphonic Synth";
+        case EffectType::OctaveStyle:         return "Octave";
+        case EffectType::WahStyle:            return "Wah";
+        case EffectType::BassGraphicEQStyle:  return "Bass Graphic EQ";
+        case EffectType::BassCompressorStyle: return "Bass Compressor";
+        case EffectType::BassDriverStyle:     return "Bass Driver";
+        case EffectType::BassOverdriveStyle:  return "Bass Overdrive";
+        case EffectType::FurmanEQStyle:       return "Pro Parametric EQ";
+
         default:                          return "-";
     }
 }

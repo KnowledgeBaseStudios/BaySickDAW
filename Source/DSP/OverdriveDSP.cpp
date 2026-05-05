@@ -46,6 +46,19 @@ void OverdriveDSP::prepare (double sampleRate, int maxBlockSize)
     mBandBuf    .setSize (2, mMaxBlock, false, true, true);
     mResidualBuf.setSize (2, mMaxBlock, false, true, true);
 
+    // I-5 (2026-05-02): Pedal mode 80 Hz split filters + clean-path scratch.
+    mPedalSplitHpf.prepare (spec);
+    mPedalSplitLpf.prepare (spec);
+    mPedalSplitHpf.setType (juce::dsp::StateVariableTPTFilterType::highpass);
+    mPedalSplitLpf.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
+    mPedalSplitHpf.setCutoffFrequency (80.0f);
+    mPedalSplitLpf.setCutoffFrequency (80.0f);
+    mPedalSplitHpf.setResonance (juce::MathConstants<float>::sqrt2 * 0.5f);
+    mPedalSplitLpf.setResonance (juce::MathConstants<float>::sqrt2 * 0.5f);
+    mPedalSplitHpf.reset();
+    mPedalSplitLpf.reset();
+    mPedalCleanBuf.setSize (2, mMaxBlock, false, true, true);
+
     // ── SmoothedValues ───────────────────────────────────────────────────────
     mPreAmpSmooth    .reset (sampleRate, kSmoothMs     * 0.001);
     mColorSmooth     .reset (sampleRate, kSmoothMs     * 0.001);
@@ -201,6 +214,96 @@ void OverdriveDSP::process (juce::AudioBuffer<float>& buffer)
     if (numSamples > mMaxBlock)           return;   // block-size guard
     if (mOversampler == nullptr)          return;   // not prepared
 
+    // I-5 (2026-05-02): OD Style Pedal-mode algorithm.  When mType==Pedal,
+    // run the pedal-specific frequency-split + dual cascaded soft-clip path
+    // and return early -- the existing Rack chain stays untouched.
+    //
+    // Algorithm:
+    //   1. Split input at 80 Hz: HPF feeds the clipping path, LPF feeds the
+    //      clean blend (sub-80 keeps the low end intact, classic OD-3
+    //      character that "doesn't get muddy under heavy chords").
+    //   2. 4x oversample the HPF path.
+    //   3. Dual cascaded tanh soft-clip (two stages, second hits harder).
+    //   4. Downsample.
+    //   5. Sum drive + clean.
+    //   6. Tone LPF (PostFilter Hz, user knob).
+    //   7. PostGain (Level, user knob).
+    if (mType == Type::Pedal)
+    {
+        // Snapshot HPF input into the clean buf BEFORE we overwrite buffer
+        // with the HPF result.  Then run an LPF copy on the clean buf to get
+        // the sub-80 component.
+        if (mPedalCleanBuf.getNumChannels() < numCh
+         || mPedalCleanBuf.getNumSamples() < numSamples)
+            mPedalCleanBuf.setSize (numCh, numSamples, false, false, true);
+
+        for (int ch = 0; ch < numCh; ++ch)
+            mPedalCleanBuf.copyFrom (ch, 0, buffer, ch, 0, numSamples);
+
+        // HPF the main buffer (drive path).
+        {
+            juce::dsp::AudioBlock<float> blk (buffer);
+            auto sub = blk.getSubBlock (0, (size_t) numSamples)
+                          .getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing<float> ctx (sub);
+            mPedalSplitHpf.process (ctx);
+        }
+        // LPF the clean buf (clean blend path).
+        {
+            juce::dsp::AudioBlock<float> blk (mPedalCleanBuf);
+            auto sub = blk.getSubBlock (0, (size_t) numSamples)
+                          .getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing<float> ctx (sub);
+            mPedalSplitLpf.process (ctx);
+        }
+
+        // 4x oversampled dual cascaded soft-clip on the drive path.
+        const float drive = 1.0f + juce::jlimit (0.0f, 10.0f, mPreAmp) * 4.0f;  // up to ~+34 dB
+        juce::dsp::AudioBlock<float> driveBlock (buffer);
+        auto driveSub = driveBlock.getSubBlock (0, (size_t) numSamples)
+                                   .getSubsetChannelBlock (0, (size_t) numCh);
+        auto upBlock = mOversampler->processSamplesUp (driveSub);
+        const int upN   = (int) upBlock.getNumSamples();
+        const int upChs = (int) upBlock.getNumChannels();
+        for (int ch = 0; ch < upChs; ++ch)
+        {
+            float* d = upBlock.getChannelPointer ((size_t) ch);
+            for (int i = 0; i < upN; ++i)
+            {
+                // Stage 1: gentle pre-clip (warms the upper-mids).
+                float x = std::tanh (d[i] * drive);
+                // Stage 2: harder cascade (the "second op-amp clipping
+                // diodes" that give OD-3 its punchy attack).
+                d[i] = std::tanh (x * 1.6f);
+            }
+        }
+        mOversampler->processSamplesDown (driveSub);
+
+        // Sum drive + clean back into the main buffer.
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            float* drv = buffer.getWritePointer (ch);
+            const float* cln = mPedalCleanBuf.getReadPointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+                drv[i] += cln[i];
+        }
+
+        // Tone (PostFilter LPF) + Level (PostGain) at 1x.
+        const float toneHz = juce::jlimit (200.0f, 8000.0f, mPostFilter);
+        mLPF.setCutoffFrequency (toneHz);
+        {
+            juce::dsp::AudioBlock<float> blk (buffer);
+            auto sub = blk.getSubBlock (0, (size_t) numSamples)
+                          .getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing<float> ctx (sub);
+            mLPF.process (ctx);
+        }
+        if (mPostGain != 0.0f)
+            buffer.applyGain (juce::Decibels::decibelsToGain (mPostGain, -60.0f));
+
+        return;   // Pedal mode is done; skip the Rack chain below.
+    }
+
     // C5 pulls the current OS factor out of the live oversampler (updated on
     // setOversamplingFactor via prepare() reallocation).
     const int kOsNow = 1 << mOsLog2;
@@ -349,6 +452,7 @@ void OverdriveDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("bias",       mBias,       nullptr);   // C2
     state.setProperty ("parallel",   mParallel,   nullptr);   // C4
     state.setProperty ("osLog2",     mOsLog2,     nullptr);   // C5
+    state.setProperty ("type",       (int) mType, nullptr);   // I-4 (2026-05-02)
     auto xml = state.createXml();
     if (xml) juce::AudioProcessor::copyXmlToBinary (*xml, dest);
 }
@@ -367,6 +471,9 @@ void OverdriveDSP::setStateInformation (const void* data, int sz)
     mWet        = (float) xml->getDoubleAttribute ("wet",        mWet);
     mBias       = (float) xml->getDoubleAttribute ("bias",       mBias);       // C2
     mParallel   =         xml->getBoolAttribute   ("parallel",   mParallel);   // C4
+    // I-4 (2026-05-02): Type umbrella; defaults to Rack for old projects.
+    mType = static_cast<Type> (juce::jlimit (0, 1,
+        xml->getIntAttribute ("type", (int) Type::Rack)));
     const int loadedOs = xml->getIntAttribute ("osLog2", mOsLog2);             // C5
     const bool osChanged = (loadedOs != mOsLog2);
     mOsLog2 = juce::jlimit (1, 4, loadedOs);

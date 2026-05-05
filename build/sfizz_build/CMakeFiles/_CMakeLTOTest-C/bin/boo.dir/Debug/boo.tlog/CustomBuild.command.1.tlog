@@ -1,0 +1,10 @@
+^C:\USERS\JEFFM\DOCUMENTS\BAYSICKDAW\BUILD\SFIZZ_BUILD\CMAKEFILES\_CMAKELTOTEST-C\SRC\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/CMakeFiles/_CMakeLTOTest-C/src -BC:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/CMakeFiles/_CMakeLTOTest-C/bin --check-stamp-file C:/Users/jeffm/Documents/BaySickDAW/build/sfizz_build/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

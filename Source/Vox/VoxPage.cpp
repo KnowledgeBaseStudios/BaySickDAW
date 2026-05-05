@@ -44,7 +44,7 @@ VoxPage::VoxPage (int pageIndex)
     mDirtyListener.dirtyFlag = &mPageDirty;
     mDirtyListener.suppress  = &mSuppressDirty;
 
-    buildEQTab();
+    // J-6 EQ unification (2026-05-03): buildEQTab removed; pre-rack EQ on Effects page only.
 
     // H-6b (2026-05-01): the clip-name label is now hosted in the PageMenuBar's
     // far-right slot via StandaloneEditor's addExtraRightComponent call when
@@ -417,16 +417,7 @@ void VoxPage::requestDelete()
         }), false);
 }
 
-void VoxPage::buildEQTab()
-{
-    // G-7 polish (2026-04-29): real ParametricEQDisplay, mirrors LayersPage.
-    mEQDisplay = std::make_unique<ParametricEQDisplay>();
-    if (mFullProcessor)
-        mEQDisplay->setSampleRate (mFullProcessor->getSampleRate() > 0.0
-                                       ? mFullProcessor->getSampleRate() : 44100.0);
-    mEQDisplay->showMidSideToggle (false);   // M/S driven by external buttons
-    addChildComponent (*mEQDisplay);
-}
+// J-6 EQ unification (2026-05-03): buildEQTab removed.
 
 juce::AudioProcessor* VoxPage::getEngineProcessor() const noexcept
 {
@@ -453,12 +444,13 @@ void VoxPage::selectEngine (EngineType e)
         auto vp = std::make_unique<BaySickVocalProcessor>();
         vp->prepareToPlay (44100.0, 512);
         mVocalProc = std::move (vp);
-        // H-6b: cast-fixed editor pointer so we can call setPreRackEQ later.
+        // J-6 EQ unification (2026-05-03): cast-fixed editor pointer (originally
+        // for setPreRackEQ injection; that hookup is removed).
         auto* ed = static_cast<BaySickVocalEditor*> (mVocalProc->createEditor());
         mVocalEditor.reset (ed);
         if (mVocalEditor) addChildComponent (*mVocalEditor);
-        // Inject the strip's Pre Rack EQ into the editor's "Pre Rack EQ" sub-tab.
-        if (ed && mEQDisplay) ed->setPreRackEQ (mEQDisplay.get());
+        // J-6 EQ unification (2026-05-03): Pre Rack EQ injection removed —
+        // pre-rack EQ is exclusively edited via the Effects page.
     }
 
     mEngineType = e;
@@ -486,11 +478,11 @@ juce::AudioProcessorEditor* VoxPage::activeEditor() const
 
 void VoxPage::switchTab (int idx)
 {
-    // H-6b (2026-05-01): forward outer tab-slot click to BaySickVocalEditor's
-    // setActiveTab.  Tab labels:
+    // H-6b (2026-05-01) / J-6 (2026-05-03): forward outer tab-slot click to
+    // BaySickVocalEditor's setActiveTab.  Tab labels:
     //   0 BaySickVocals, 1 Vocal Chain, 2 BaySickPitch, 3 BaySickAlign,
-    //   4 BaySickNAM/IR, 5 Pre Rack EQ
-    mActiveTab = juce::jlimit (0, 5, idx);
+    //   4 BaySickNAM/IR  (Pre Rack EQ tab removed in J-6 EQ unification)
+    mActiveTab = juce::jlimit (0, 4, idx);
     if (auto* ed = dynamic_cast<BaySickVocalEditor*> (mVocalEditor.get()))
         ed->setActiveTab (mActiveTab);
     if (mVocalEditor) mVocalEditor->setVisible (true);
@@ -505,22 +497,8 @@ void VoxPage::switchTab (int idx)
 void VoxPage::setProcessor (VibeSynthProcessor* p)
 {
     mFullProcessor = p;
-    if (mEQDisplay && mFullProcessor)
-    {
-        if (auto* preEq = mFullProcessor->mVibeGraph.getInsertPreEQ (
-                              VibeGraph::InsertKind::Vox, mPageIndex))
-        {
-            const juce::String mixerPrefix = "mixer_vox_" + juce::String (mPageIndex);
-            mEQDisplay->bindMsDSP (preEq, &mFullProcessor->apvts,
-                                    mixerPrefix + "_preeq_mid_eq",
-                                    mixerPrefix + "_preeq_side_eq");
-            mEQDisplay->setStripContext (mixerPrefix,
-                [] (int id) { return MixerChannelIds::friendlyName (id); });
-        }
-        const double sr = mFullProcessor->getSampleRate() > 0.0
-                              ? mFullProcessor->getSampleRate() : 44100.0;
-        mEQDisplay->setSampleRate (sr);
-    }
+    // J-6 EQ unification (2026-05-03): page-level EQ display removed; pre-rack
+    // EQ is bound exclusively by EffectsPage (mixer_vox_<N>_preeq_*).
 }
 
 void VoxPage::setClipFilePath (const juce::String& p)
@@ -610,9 +588,7 @@ void VoxPage::layoutEditor (juce::Rectangle<int> r)
 {
     if (auto* ed = activeEditor(); ed && ed->isVisible())
         ed->setBounds (r);
-    // H-6b: mEQDisplay is hosted INSIDE BaySickVocalEditor's "Pre Rack EQ"
-    // sub-tab via setPreRackEQ() -- it sets its own bounds within that host
-    // panel.  No outer layout for it here.
+    // J-6 EQ unification (2026-05-03): mEQDisplay removed; no outer layout needed.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

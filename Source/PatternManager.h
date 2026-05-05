@@ -204,6 +204,12 @@ struct Pattern
     std::array<PianoRollData, kMaxVoxPages>  voxRoll;
     std::array<PianoRollData, kMaxInstPages> instRoll;
 
+    // J-7a (2026-05-03): BaySickRustyDrums singleton piano-roll data.  One
+    // PianoRollData (no array) — there's only ever zero or one BaySickRustyDrums
+    // per project (1-instance lock).  The roll covers the kit's full keymap;
+    // J-7b layers a drummer-conventional remap on top of dispatch.
+    PianoRollData baySickRustyDrumsRoll;
+
     Pattern()
     {
         for (auto& arr : drumGrid) arr.fill(false);
@@ -256,6 +262,15 @@ struct ArrangementBlock
 
     // Phase 4C — automation lane data (only used for ClipType::Automation)
     AutomationLane automationLane;
+
+    // I-16 G-9 (2026-05-03): for audio clips recorded from a Vox/Inst armed
+    // strip, this is the originating page's mixer channel id (e.g.,
+    // MixerChannelIds::voxInsert(0)).  When non-zero AND clipType==Audio,
+    // playback routes the file through that page's chain (BaySickVocals ->
+    // BaySickChain -> BaySickNAMIR for Vox; BaySickPedals -> BaySickNAMIR
+    // for Inst) instead of through a new Audio row's mixer strip.  Zero
+    // (default) = legacy "drop on Audio bus row" behavior.
+    int routeChannel { 0 };
 };
 
 // 2026-04-24: central helper for the "effective length in beats" of an

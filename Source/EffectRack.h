@@ -32,7 +32,12 @@ enum class EffectType
     // factory returns nullptr until then.  Numeric values explicit so saved
     // projects don't drift if we re-order the enum later.
     BluesDriveStyle      = 100,   // BD — Harmonics — slots 1-6
-    OverdriveStyle       = 101,   // OD — Harmonics — slots 1-6
+    // OverdriveStyle (was 101) REMOVED 2026-05-02 -- folded into existing
+    // OverdriveDSP as Type::Pedal alongside Type::Rack (mirrors the CS Style
+    // fold on CompressorDSP).  Single picker entry "Overdrive"; Mode dropdown
+    // exposes "Overdrive (Rack)" vs "Overdrive (Pedal)".  Numeric value 101
+    // intentionally left dead so future enum additions don't reuse it (no
+    // projects in the wild had Phase I OverdriveStyle data per locked spec).
     DistortionStyle      = 102,   // DS — Harmonics — slots 1-6
     FuzzStyle            = 103,   // FZ — Harmonics — slots 1-6
     NoiseGateStyle       = 104,   // NS — Dynamics  — slots 1-6
@@ -48,6 +53,8 @@ enum class EffectType
     BassDriverStyle      = 114,   // BB — Harmonics — slots 1-6 (multi-band)
     BassOverdriveStyle   = 115,   // ODB— Harmonics — slots 1-6
     FurmanEQStyle        = 116,   // EQFH-Time      — slot 7 (option 3)
+    AcousticSimulatorStyle = 117, // AC — Modulation — slots 1-6 (added 2026-05-03 alongside AD polish)
+    NAMPedalStyle          = 118, // User NAM Pedal — slots 1-6 (loads .nam capture; pedal-specific entry, BaySickPedals only)
 };
 
 // ── EffectRack ────────────────────────────────────────────────────────────────
@@ -114,11 +121,26 @@ public:
         std::atomic<float> inputLevelRmsRun  { 0.f };    // running max written by audio
         std::atomic<float> outputLevelDbRun  { -96.f };  // running max written by audio
 
+        // I-5 (2026-05-02): bypass crossfade state.  Audio-thread-only.
+        // bypassRampValue is the current wet mix coefficient (0 = fully dry,
+        // 1 = fully wet); it ramps toward (1 - bypassed) over kBypassRampMs
+        // milliseconds when the bypass flag toggles.  While the ramp is in
+        // motion the DSP keeps running and the rack mixes wet+dry; once
+        // ramp settles to 0 (fully bypassed) the DSP is skipped to save CPU.
+        // Without this, drive pedals at high gain produce big audible clicks
+        // on bypass toggle because the dry/wet level mismatch is large.
+        // Per-slot scratch buffer holds the dry input snapshot during the
+        // crossfade.  Lazy-resized in process() to match the current block.
+        float                    bypassRampValue { 1.f };
+        juce::AudioBuffer<float> dryScratch;
+
         Slot() = default;
         Slot(Slot&& o) noexcept
             : active(std::move(o.active)), pending(std::move(o.pending)),
               type(o.type),
-              outputGainDb(o.outputGainDb), uuid(std::move(o.uuid)), scPick(o.scPick)
+              outputGainDb(o.outputGainDb), uuid(std::move(o.uuid)), scPick(o.scPick),
+              bypassRampValue(o.bypassRampValue),
+              dryScratch(std::move(o.dryScratch))
         {
             swapPending     .store(o.swapPending     .load());
             bypassed        .store(o.bypassed        .load());
@@ -135,6 +157,8 @@ public:
                 type = o.type; outputGainDb = o.outputGainDb;
                 uuid = std::move(o.uuid);
                 scPick = o.scPick;
+                bypassRampValue = o.bypassRampValue;
+                dryScratch = std::move(o.dryScratch);
                 swapPending     .store(o.swapPending     .load());
                 bypassed        .store(o.bypassed        .load());
                 inputLevelRms   .store(o.inputLevelRms   .load());

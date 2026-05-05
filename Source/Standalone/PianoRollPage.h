@@ -21,7 +21,11 @@ class StandalonePlayHead;
 // roll notes; one Clip engine per ClipsPage.
 // 2026-04-28 (Phase G-4): Vox + Inst added.  Same shape as Clip — engine
 // picker per page, piano-roll triggering through the unified PianoRollPage.
-enum class EngineKind { DrumKit, Layer, Bass, Drum, Clip, Vox, Inst };
+// 2026-05-03 (Phase J-2): BaySickRustyDrums added — distinct from the
+// existing DrumKit value which represents the composited DrumKitGrid view.
+// BaySickRustyDrums is the singleton sfizz-driven drum-kit engine that
+// auto-spawns N mixer strips (one per kit channel).
+enum class EngineKind { DrumKit, Layer, Bass, Drum, Clip, Vox, Inst, BaySickRustyDrums };
 
 struct EngineId
 {
@@ -49,6 +53,17 @@ struct PianoRollConnection
     std::function<void(int)>                  auditionOn;          // press-and-hold on
     std::function<void(int)>                  auditionOff;         // press-and-hold off
     PianoRollContainer::RollMode              rollMode { PianoRollContainer::RollMode::Standard };
+    // J-7b: optional engine-supplied label for a piano-roll key.  When set,
+    // PianoKeyboard renders this string in place of the default "C5" naming
+    // (used by BaySickRustyDrums to show "Snare Center", "Hi-hat Tight Closed",
+    // etc.).  Returning empty falls back to the default JUCE note name.
+    std::function<juce::String(int midiNote)>  noteLabelProvider;
+    // J-7b: top-of-view default MIDI note when this engine is first selected.
+    // -1 = no preference (use the page's existing default).
+    int                                        defaultTopNote { -1 };
+    // J-7b: paint every keyboard row as a white key (drum kit — sharps
+    // have no musical meaning, labels need to be readable everywhere).
+    bool                                       allKeysWhite { false };
 };
 
 class PianoRollPage : public juce::Component,

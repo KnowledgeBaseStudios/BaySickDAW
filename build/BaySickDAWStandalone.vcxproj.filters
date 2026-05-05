@@ -115,6 +115,9 @@
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EngineChainProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneApp.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -202,6 +205,60 @@
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\MicPlacementDSP.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\BluesDriveStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\DistortionStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\FuzzStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\HighGainStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\BassDriverStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\BassOverdriveStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\OctaveStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\NoiseGateStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\BassCompressorStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\SynthStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\WahStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\AcousticPreampStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\AcousticSimulatorStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\GraphicEQStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\BassGraphicEQStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\FurmanEQStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\TunerStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\DSP\NAMPedalStyleDSP.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\EffectRack.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -226,7 +283,13 @@
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\DrumPage.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BaySickRustyDrumsPage.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\PagePresetIO.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\RustyDrumsPagePresetIO.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\DrumKitGrid.cpp">
@@ -248,6 +311,21 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickPedals\BaySickPedalsProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickPedals\BaySickPedalsEditor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickRustyDrums\BaySickRustyDrumsProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickRustyDrums\BaySickRustyDrumsKitGraphic.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickRustyDrums\AriaControlPanel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\MidiLearn\MidiLearnRegistry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickVocalProcessor.cpp">
@@ -284,6 +362,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\KeyBindsWindow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\RustyDrumsMapWindow.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\PatternColorPicker.cpp">

@@ -27,7 +27,7 @@ ClipsPage::ClipsPage (int pageIndex)
     mDirtyListener.suppress  = &mSuppressDirty;
 
     buildEnginePicker();
-    buildEQTab();
+    // J-6 EQ unification (2026-05-03): EQ sub-tab removed; pre+post EQ on Effects page.
 
     addAndMakeVisible (mClipFileLabel);
     mClipFileLabel.setJustificationType (juce::Justification::centredLeft);
@@ -481,16 +481,8 @@ void ClipsPage::requestDelete()
         }), false);
 }
 
-void ClipsPage::buildEQTab()
-{
-    // G-7 polish (2026-04-29): real Pre-EQ8 M/S display on the EQ sub-tab.
-    // Created hidden — switchTab(2) flips visibility on.  Bound to the Audio
-    // InsertNode's preEq + mixer_audio_<row>_preeq_* APVTS prefix inside
-    // selectEngine() (where mFullProcessor is guaranteed wired up).
-    mEQDisplay = std::make_unique<ParametricEQDisplay>();
-    mEQDisplay->showMidSideToggle (false);   // M/S driven by external page buttons
-    addChildComponent (*mEQDisplay);          // hidden until switchTab(2)
-}
+// J-6 EQ unification (2026-05-03): buildEQTab removed; Audio insert pre-rack EQ
+// (mixer_audio_<row>_preeq_*) is exclusively edited via the Effects page.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Engine activation.  Single-engine page (BaySickPlayer only).  selectEngine
@@ -537,22 +529,8 @@ void ClipsPage::selectEngine (EngineType e)
     // before ensureAudioInsert so the strip's APVTS attachments silently
     // failed.  Fixed there + a defensive rebindApvts in
     // VibeGraph::ensureInsertNode.  Pre-EQ binding is back on.)
-    if (mEQDisplay && mFullProcessor)
-    {
-        if (auto* preEq = mFullProcessor->mVibeGraph.getInsertPreEQ (
-                              VibeGraph::InsertKind::Audio, mPageIndex))
-        {
-            const juce::String mixerPrefix = "mixer_audio_" + juce::String (mPageIndex);
-            mEQDisplay->bindMsDSP (preEq, &mFullProcessor->apvts,
-                                    mixerPrefix + "_preeq_mid_eq",
-                                    mixerPrefix + "_preeq_side_eq");
-            mEQDisplay->setStripContext(mixerPrefix,
-                [](int id){ return MixerChannelIds::friendlyName(id); });
-        }
-        const double sr = mFullProcessor->getSampleRate() > 0.0
-                              ? mFullProcessor->getSampleRate() : 44100.0;
-        mEQDisplay->setSampleRate (sr);
-    }
+    // J-6 EQ unification (2026-05-03): page-level EQ display removed; pre-rack
+    // EQ is bound exclusively by EffectsPage (mixer_audio_<row>_preeq_*).
 
     // G-7 (2026-04-29): hook dirty-tracker on the new engine's apvts and
     // reset the flag.  ANY subsequent parameter change in the editor flips
@@ -568,10 +546,10 @@ void ClipsPage::selectEngine (EngineType e)
 // ─────────────────────────────────────────────────────────────────────────────
 void ClipsPage::switchTab (int idx)
 {
-    mActiveTab = juce::jlimit (0, 2, idx);
+    // J-6 EQ unification (2026-05-03): EQ tab removed.  Tabs: 0=Player, 1=Piano Roll redirect.
+    mActiveTab = juce::jlimit (0, 1, idx);
 
     if (mPlayerEditor) mPlayerEditor->setVisible (mActiveTab == 0);
-    if (mEQDisplay)    mEQDisplay   ->setVisible (mActiveTab == 2);
     // mActiveTab == 1 = Piano Roll redirect handled by StandaloneEditor before
     // it ever reaches this page.
 
@@ -686,8 +664,6 @@ void ClipsPage::layoutEditor (juce::Rectangle<int> r)
 {
     if (mPlayerEditor && mPlayerEditor->isVisible())
         mPlayerEditor->setBounds (r);
-    if (mEQDisplay && mEQDisplay->isVisible())
-        mEQDisplay->setBounds (r.reduced (4));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,750 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Solution>
+	<Configurations>
+		<BuildType Name="Debug"/>
+		<BuildType Name="Release"/>
+		<BuildType Name="MinSizeRel"/>
+		<BuildType Name="RelWithDebInfo"/>
+		<Platform Name="x64"/>
+	</Configurations>
+	<Project Path="external/st_audiofile/thirdparty/libaiff/aiff.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1e46abe4-f8fc-37a9-b1a2-5766fddda2fa">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="src/sfizz-generate-git-build-id.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b1397cfe-645b-36ca-a0e0-5c3b5641d5dd">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="src/sfizz-git-build-id.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c95eafbc-b40e-30ee-9bd2-7b207c336d7e">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="src/sfizz-generate-git-build-id.vcxproj"/>
+	</Project>
+	<Project Path="sfizz_cephes.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="0877d833-1b31-3e72-8626-97ff58fb3717">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="sfizz_cpuid.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1ee58f69-efda-31d4-b5d4-a3fbc9ce65d0">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="sfizz_filesystem_impl.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ba2463a4-4e2c-3729-8018-453adf23615f">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="sfizz_fmidi.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="2429a74a-a1ca-3f11-bff3-1cba4923e165">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="sfizz_hiir_polyphase_iir2designer.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="7f7b8a50-d1ab-37d9-9986-07443bf88ca0">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="src/sfizz_import.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c212d53f-8d50-3ebe-943d-732bbe84eabb">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_optional_access.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_variant_access.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_city.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cord.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cord_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_functions.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_handle.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_info.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc32c.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cord_state.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/profiling/absl_exponential_biased.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_hash.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/container/absl_hashtablez_sampler.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_low_level_hash.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/container/absl_raw_hash_set.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_str_format_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_synchronization.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/thirdparty/libaiff/aiff.vcxproj"/>
+		<BuildDependency Project="sfizz_cephes.vcxproj"/>
+		<BuildDependency Project="sfizz_cpuid.vcxproj"/>
+		<BuildDependency Project="sfizz_filesystem_impl.vcxproj"/>
+		<BuildDependency Project="src/sfizz_internal.vcxproj"/>
+		<BuildDependency Project="sfizz_kissfft.vcxproj"/>
+		<BuildDependency Project="src/sfizz_messaging.vcxproj"/>
+		<BuildDependency Project="src/sfizz_parser.vcxproj"/>
+		<BuildDependency Project="sfizz_pugixml.vcxproj"/>
+		<BuildDependency Project="src/sfizz_spin_mutex.vcxproj"/>
+		<BuildDependency Project="sfizz_spline.vcxproj"/>
+		<BuildDependency Project="sfizz_tunings.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/st_audiofile.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/st_audiofile_formats.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/thirdparty/wavpack/wavpack.vcxproj"/>
+	</Project>
+	<Project Path="src/sfizz_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="79335079-3ae7-39b4-a7e8-2776549198f3">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_optional_access.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_variant_access.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_city.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cord.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cord_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_functions.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_handle.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_info.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc32c.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cord_state.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/profiling/absl_exponential_biased.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_hash.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/container/absl_hashtablez_sampler.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_low_level_hash.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/container/absl_raw_hash_set.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_str_format_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_synchronization.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/thirdparty/libaiff/aiff.vcxproj"/>
+		<BuildDependency Project="sfizz_cephes.vcxproj"/>
+		<BuildDependency Project="sfizz_cpuid.vcxproj"/>
+		<BuildDependency Project="sfizz_filesystem_impl.vcxproj"/>
+		<BuildDependency Project="sfizz_kissfft.vcxproj"/>
+		<BuildDependency Project="src/sfizz_messaging.vcxproj"/>
+		<BuildDependency Project="src/sfizz_parser.vcxproj"/>
+		<BuildDependency Project="sfizz_pugixml.vcxproj"/>
+		<BuildDependency Project="src/sfizz_spin_mutex.vcxproj"/>
+		<BuildDependency Project="sfizz_spline.vcxproj"/>
+		<BuildDependency Project="sfizz_tunings.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/st_audiofile.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/st_audiofile_formats.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/thirdparty/wavpack/wavpack.vcxproj"/>
+	</Project>
+	<Project Path="sfizz_kissfft.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4bc50775-d499-3709-9aa2-9981d65c2065">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="src/sfizz_messaging.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ea74bc8b-7ea7-390b-8d60-1852779eb49d">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+	</Project>
+	<Project Path="src/sfizz_parser.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4517b758-16e9-3600-95ae-71f9905811bd">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_optional_access.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_variant_access.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_city.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cord.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cord_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_functions.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_handle.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_info.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc32c.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cord_state.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/profiling/absl_exponential_biased.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_hash.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/container/absl_hashtablez_sampler.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_low_level_hash.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/container/absl_raw_hash_set.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_str_format_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_synchronization.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		<BuildDependency Project="sfizz_filesystem_impl.vcxproj"/>
+	</Project>
+	<Project Path="sfizz_pugixml.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="76af5922-471c-3f12-867e-a126ec761ec1">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="src/sfizz_spin_mutex.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="0142907e-31c2-36b4-a4a5-6e629d15766a">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="sfizz_spline.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="329fbf1d-ef15-3e5d-9370-114ec627fa1c">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="src/sfizz_static.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5679c9f8-2774-3ad3-987c-f74f1c2353e3">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_optional_access.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_variant_access.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_city.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cord.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cord_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_functions.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_handle.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_info.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc32c.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cord_state.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/profiling/absl_exponential_biased.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_hash.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/container/absl_hashtablez_sampler.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/hash/absl_low_level_hash.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/container/absl_raw_hash_set.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_str_format_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_synchronization.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+		<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/thirdparty/libaiff/aiff.vcxproj"/>
+		<BuildDependency Project="sfizz_cephes.vcxproj"/>
+		<BuildDependency Project="sfizz_cpuid.vcxproj"/>
+		<BuildDependency Project="sfizz_filesystem_impl.vcxproj"/>
+		<BuildDependency Project="src/sfizz_internal.vcxproj"/>
+		<BuildDependency Project="sfizz_kissfft.vcxproj"/>
+		<BuildDependency Project="src/sfizz_messaging.vcxproj"/>
+		<BuildDependency Project="src/sfizz_parser.vcxproj"/>
+		<BuildDependency Project="sfizz_pugixml.vcxproj"/>
+		<BuildDependency Project="src/sfizz_spin_mutex.vcxproj"/>
+		<BuildDependency Project="sfizz_spline.vcxproj"/>
+		<BuildDependency Project="sfizz_tunings.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/st_audiofile.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/st_audiofile_formats.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/thirdparty/wavpack/wavpack.vcxproj"/>
+	</Project>
+	<Project Path="sfizz_tunings.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="45fed331-ffe9-346c-930d-86592414fc3b">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="external/st_audiofile/st_audiofile.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="863e83c4-f3ec-3b5c-be44-1dfe816aba8c">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/thirdparty/libaiff/aiff.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/st_audiofile_formats.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/thirdparty/wavpack/wavpack.vcxproj"/>
+	</Project>
+	<Project Path="external/st_audiofile/st_audiofile_formats.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a864a4b8-14be-3144-8f29-bada3e11b8fc">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/thirdparty/libaiff/aiff.vcxproj"/>
+		<BuildDependency Project="external/st_audiofile/thirdparty/wavpack/wavpack.vcxproj"/>
+	</Project>
+	<Project Path="external/st_audiofile/thirdparty/wavpack/wavpack.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="81c1f520-c886-3a83-8539-241fc7fe46b1">
+		<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Folder Name="/Abseil/">
+		<Project Path="external/abseil-cpp/absl/types/absl_bad_optional_access.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b4b14c4d-da0f-3fe1-8318-4bb854858a2c">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/types/absl_bad_variant_access.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5b9b8c8a-cdee-3580-81de-8df6d579bfd8">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/base/absl_base.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="e62075b4-e587-3885-8bff-5659e21d7cca">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/strings/absl_cord.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="84d2c48d-63f5-3289-a39d-4fd65186e72f">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_optional_access.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cord_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_functions.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_handle.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_info.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc32c.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cord_state.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/profiling/absl_exponential_biased.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_str_format_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_synchronization.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="643faca2-29c5-350c-991e-fb3585e2461c">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/hash/absl_hash.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="bc1ea146-0441-338a-abb6-d54a9550f55a">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_optional_access.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_variant_access.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/hash/absl_city.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/hash/absl_low_level_hash.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/numeric/absl_int128.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="318b2f19-af77-336d-8a50-191a372b4a8a">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/container/absl_raw_hash_set.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="efea056b-9462-3d71-8673-08f854faf796">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_optional_access.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/types/absl_bad_variant_access.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/hash/absl_city.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/profiling/absl_exponential_biased.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/hash/absl_hash.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/container/absl_hashtablez_sampler.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/hash/absl_low_level_hash.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_synchronization.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1d060d3d-aaee-383a-a7b3-78cc8a19a019">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/strings/absl_string_view.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c2fcbb67-82d3-3ce0-8a55-66b16d10fe44">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/strings/absl_strings.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="9cdfc491-93dd-3ec5-badf-c3bdbe9e0e45">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3bdbdf75-210b-398b-9757-955fe685508d">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/synchronization/absl_synchronization.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="7d723378-4826-34ae-a7f2-df3de505401b">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/time/absl_time.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="50c5bee8-f99d-3733-89fb-cc6f91b170b5">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		</Project>
+	</Folder>
+	<Folder Name="/Abseil/internal/">
+		<Project Path="external/abseil-cpp/absl/hash/absl_city.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c2937b51-080f-3902-8f76-eceb68cc8ab7">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/time/absl_civil_time.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="cdf1e715-2c21-3b9b-aa56-03ee2c524153">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/strings/absl_cord_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="398e469b-f0cf-3344-a4d7-f56018dc48db">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc32c.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cord_state.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_str_format_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/strings/absl_cordz_functions.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3bbe344a-12a7-3cbd-a9d8-f1441d3c6985">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/profiling/absl_exponential_biased.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/strings/absl_cordz_handle.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="d27bf9d8-33ca-32a0-b986-9643b8afab65">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_synchronization.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/strings/absl_cordz_info.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="282fa143-a5e8-3b82-b594-ad052ceb9e91">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cord_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_functions.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_cordz_handle.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc32c.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cord_state.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/profiling/absl_exponential_biased.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_str_format_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_synchronization.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/crc/absl_crc32c.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="7f125b5f-2d4d-31e0-bce4-31ab6b577fe0">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_str_format_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/crc/absl_crc_cord_state.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a1e84ab6-9dda-35b3-8ea3-a07a0d6cce54">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc32c.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_str_format_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ca10d69d-69c5-3ac7-a0cd-a72bd5de7851">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/crc/absl_crc_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="07f6fbd0-9b51-3b84-b554-5892b77b98e1">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/crc/absl_crc_cpu_detect.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="80c70ae4-4b4d-3fd0-a9a9-f30af1135006">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/profiling/absl_exponential_biased.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="e4837e02-283a-3094-960e-9721c4fb3bf1">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="80e74205-89ce-34b4-9a0e-f84b801adbbb">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/container/absl_hashtablez_sampler.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3cbe253e-6e63-3e37-985e-cd8852c8bcca">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_debugging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_demangle_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/profiling/absl_exponential_biased.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_graphcycles_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_stacktrace.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/debugging/absl_symbolize.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/synchronization/absl_synchronization.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/synchronization/absl_kernel_timeout_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1bba00b3-9423-3631-9d32-62b89817917e">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_civil_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/time/absl_time_zone.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/base/absl_log_severity.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5784c9f7-7ea8-33e6-b09b-bd78deb436a8">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/hash/absl_low_level_hash.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="e44c2642-f0b4-3676-8573-6d486b611a33">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/base/absl_malloc_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="8964c542-a39a-324c-8049-4a0253fb2a5a">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5d27a7b1-5cfe-390c-b71e-cd3461b31ca1">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b646888e-d96f-333f-beb8-03fbd0cdb923">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/strings/absl_str_format_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="7615b492-5970-3004-82a1-cc0803f78af7">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/numeric/absl_int128.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_string_view.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/strings/absl_strings_internal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="396b3600-d176-368e-8812-dd7aa018494a">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_base.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_spinlock_wait.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/base/absl_throw_delegate.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="52b81911-b805-3a8e-aeea-9ce17b9cc1fa">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_log_severity.vcxproj"/>
+			<BuildDependency Project="external/abseil-cpp/absl/base/absl_raw_logging_internal.vcxproj"/>
+		</Project>
+		<Project Path="external/abseil-cpp/absl/time/absl_time_zone.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="735445fc-910e-32e6-b802-216adcc2f443">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+		</Project>
+	</Folder>
+	<Folder Name="/CMakePredefinedTargets/">
+		<Project Path="ALL_BUILD.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a8e82f49-3516-37c8-a040-f0ba65800511" DefaultStartup="true">
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="sfizz_cephes.vcxproj"/>
+			<BuildDependency Project="sfizz_cpuid.vcxproj"/>
+			<BuildDependency Project="sfizz_filesystem_impl.vcxproj"/>
+			<BuildDependency Project="sfizz_fmidi.vcxproj"/>
+			<BuildDependency Project="sfizz_hiir_polyphase_iir2designer.vcxproj"/>
+			<BuildDependency Project="src/sfizz_import.vcxproj"/>
+			<BuildDependency Project="src/sfizz_internal.vcxproj"/>
+			<BuildDependency Project="sfizz_kissfft.vcxproj"/>
+			<BuildDependency Project="src/sfizz_messaging.vcxproj"/>
+			<BuildDependency Project="src/sfizz_parser.vcxproj"/>
+			<BuildDependency Project="sfizz_pugixml.vcxproj"/>
+			<BuildDependency Project="src/sfizz_spin_mutex.vcxproj"/>
+			<BuildDependency Project="sfizz_spline.vcxproj"/>
+			<BuildDependency Project="src/sfizz_static.vcxproj"/>
+			<BuildDependency Project="sfizz_tunings.vcxproj"/>
+		</Project>
+		<Project Path="INSTALL.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1a8c4386-5e34-353a-b289-2fd302a5dd54">
+			<BuildDependency Project="ALL_BUILD.vcxproj"/>
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<Build Solution="Debug|*" Project="false"/>
+			<Build Solution="Release|*" Project="false"/>
+			<Build Solution="MinSizeRel|*" Project="false"/>
+			<Build Solution="RelWithDebInfo|*" Project="false"/>
+		</Project>
+		<Project Path="PACKAGE.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="0abf3186-67ef-3739-a0c4-c4e61fb3c6df">
+			<BuildDependency Project="ALL_BUILD.vcxproj"/>
+			<BuildDependency Project="../ZERO_CHECK.vcxproj"/>
+			<Build Solution="Debug|*" Project="false"/>
+			<Build Solution="Release|*" Project="false"/>
+			<Build Solution="MinSizeRel|*" Project="false"/>
+			<Build Solution="RelWithDebInfo|*" Project="false"/>
+		</Project>
+		<Project Path="../ZERO_CHECK.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c145778c-817e-34b8-a5a1-57d57a629720"/>
+	</Folder>
+</Solution>

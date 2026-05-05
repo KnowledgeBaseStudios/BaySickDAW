@@ -18,7 +18,8 @@ BassPage::BassPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
     buildPlayerTab();
     // 2026-04-26 (step 2 commit 3): Piano Roll lives on PianoRollPage now.
     // mPianoRoll stays null; menu-bar pill redirects via the editor.
-    buildEQTab();
+    // J-6 EQ unification (2026-05-03): EQ sub-tab removed — pre + post EQ
+    // for this insert now live exclusively on the Effects page.
 
     switchTab(0);
     startTimerHz(24);
@@ -52,19 +53,13 @@ BassPage::~BassPage()
 // ── Tab switching ─────────────────────────────────────────────────────────────
 void BassPage::switchTab(int idx)
 {
-    mActiveTab = idx;
-    if (mPlayerTab) mPlayerTab->setVisible(idx == 0);
-    if (mPianoRoll) mPianoRoll->setVisible(idx == 1);
-    if (mEQTab)     mEQTab    ->setVisible(idx == 2);
-    if (idx == 1 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
+    // J-6 EQ unification: 2 sub-tabs only (Player + Piano Roll).
+    mActiveTab = juce::jlimit(0, 1, idx);
+    if (mPlayerTab) mPlayerTab->setVisible(mActiveTab == 0);
+    if (mPianoRoll) mPianoRoll->setVisible(mActiveTab == 1);
+    if (mActiveTab == 1 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
     resized();
-    if (onSubTabChanged) onSubTabChanged(idx);
-}
-
-void BassPage::setEQMid(bool showMid)
-{
-    mEQMidActive = showMid;
-    if (mEQDisplay) mEQDisplay->setShowMid(showMid);
+    if (onSubTabChanged) onSubTabChanged(mActiveTab);
 }
 
 // ── Tab builders ──────────────────────────────────────────────────────────────
@@ -110,24 +105,8 @@ void BassPage::buildPianoRollTab()
     refreshPianoRollContextLabel();
 }
 
-void BassPage::buildEQTab()
-{
-    mEQTab     = std::make_unique<Component>();
-    mEQDisplay = std::make_unique<ParametricEQDisplay>();
-
-    // §P4.3 B7: display starts unbound; selectEngine() binds to the Bass
-    // InsertNode's preEq + mixer_bass_<N>_preeq_* APVTS prefix.
-    mEQDisplay->setSampleRate(mProcessor.getSampleRate() > 0.0
-                              ? mProcessor.getSampleRate() : 44100.0);
-    mEQDisplay->showMidSideToggle(false);  // M/S controlled by external buttons
-    // 12f: refresh host PDC after anti-cramping toggle.
-    mEQDisplay->onLatencyChanged = [this]
-    {
-        mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
-    };
-    mEQTab->addAndMakeVisible(*mEQDisplay);
-    addAndMakeVisible(*mEQTab);
-}
+// J-6 EQ unification (2026-05-03): buildEQTab removed — pre + post EQ now
+// live exclusively on the Effects page (mixer_bass_<N>_preeq_* / mixer_bass_<N>_*).
 
 // ── PlayHead ──────────────────────────────────────────────────────────────────
 void BassPage::setPlayHead(StandalonePlayHead* ph)
@@ -249,23 +228,8 @@ void BassPage::selectEngine(const juce::String& engineName)
     if (mEngineCombo)
         mEngineCombo->locked = true;   // D1.4-fix (c): hijack future clicks → menu
 
-    // §P4.3 B7: bind EQ display to the Bass InsertNode's preEq + the unified
-    // mixer_bass_<N>_preeq_* APVTS prefix.
-    if (mEQDisplay)
-    {
-        if (auto* preEq = mProcessor.mVibeGraph.getInsertPreEQ(
-                              VibeGraph::InsertKind::Bass, mPageIndex))
-        {
-            const juce::String mixerPrefix = "mixer_bass_" + juce::String(mPageIndex);
-            mEQDisplay->bindMsDSP(preEq, &mProcessor.apvts,
-                                  mixerPrefix + "_preeq_mid_eq",
-                                  mixerPrefix + "_preeq_side_eq");
-            mEQDisplay->setStripContext(mixerPrefix,
-                [](int id){ return MixerChannelIds::friendlyName(id); });
-        }
-        mEQDisplay->setSampleRate(sr);
-    }
-
+    // J-6 EQ unification (2026-05-03): page-level EQ display removed; pre-rack
+    // EQ is now bound exclusively by EffectsPage (mixer_bass_<N>_preeq_*).
     juce::MessageManager::callAsync([this] { if (isShowing()) resized(); });
 
     // Notify StandaloneEditor so it can create the mixer channel strip
@@ -280,9 +244,8 @@ void BassPage::selectEngine(const juce::String& engineName)
 // ── Timer ─────────────────────────────────────────────────────────────────────
 void BassPage::timerCallback()
 {
-    // EQ display update — DSP sync happens inside ParametricEQDisplay.
-    if (mEQDisplay && mEngineLocked)
-        mEQDisplay->syncFromDSP();
+    // J-6 EQ unification (2026-05-03): page-level EQ display removed; the
+    // Effects-page Pre EQ tab handles its own syncFromDSP polling now.
 
     // Update piano roll playhead — hidden in Song mode (playhead lives on Builder)
     if (mPlayHead && mPianoRoll)
@@ -336,12 +299,6 @@ void BassPage::resized()
     }
 
     if (mPianoRoll) mPianoRoll->setBounds(b);
-
-    if (mEQTab && mEQDisplay)
-    {
-        mEQTab->setBounds(b);
-        mEQDisplay->setBounds(mEQTab->getLocalBounds().reduced(4));
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
