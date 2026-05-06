@@ -1957,38 +1957,6 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // C.4 Phase 1: push SC array to ClipsBus chain before processing.
             mVibeGraph.pushScArrayToStrip(MixerChannelIds::kClipsBus);
 
-            // 2026-05-06 Option A (bus): ClipsBus idle gate.  Same
-            // hysteresis as the receive-bus loop above (~1.4s) so reverb
-            // tails on the bus rack decay before we cut.  When suspended
-            // we still hand the (silent) buffer to the master rack via
-            // audioClipsBusForGraph so downstream summing stays consistent.
-            bool clipsBusSuspended = false;
-            if (clipsBus.getNumChannels() >= 2)
-            {
-                const float bufMag = juce::jmax (
-                    clipsBus.getMagnitude (0, 0, numSamples),
-                    clipsBus.getMagnitude (1, 0, numSamples));
-                constexpr float kSilentEps = 1.0e-5f;
-                if (bufMag <= kSilentEps)
-                {
-                    if (mClipsBusIdleBlocks >= kBusIdleBlocks)
-                        clipsBusSuspended = true;
-                    else
-                        ++mClipsBusIdleBlocks;
-                }
-                else
-                {
-                    mClipsBusIdleBlocks = 0;
-                }
-            }
-
-            if (clipsBusSuspended)
-            {
-                audioClipsBusForGraph = &clipsBus;
-            }
-            else
-            {
-
             // §P4.3: Audio Clips Bus pre-rack EQ.
             if (auto* preEq = mVibeGraph.getAudioClipsBusPreEQ();
                 preEq != nullptr && clipsBus.getNumChannels() >= 2)
@@ -2111,7 +2079,6 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
             // Hand the bus buffer to VibeGraph for the master rack.
             audioClipsBusForGraph = &clipsBus;
-            }   // end ! clipsBusSuspended
         }
     }
 
@@ -2210,39 +2177,14 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             || soloOf ("mixer_instbus3")
             || soloOf ("mixer_fx");   // C.1: FX Bus joins receive-group solo
 
-        int busSetIdx = -1;   // 2026-05-06 idle gate: index into mBusSetIdleBlocks
         for (const auto& bs : kBusSets)
         {
-            ++busSetIdx;
             auto* accum = mVibeGraph.getChannelAccumulator (bs.chId);
             if (accum == nullptr) continue;
             auto& buf = *accum;
             if (buf.getNumChannels() < 2) continue;
 
             const juce::String prefix = bs.prefix;
-
-            // 2026-05-06 Option A (bus): when the accumulator is silent for
-            // kBusIdleBlocks consecutive blocks, skip the entire bus pipeline.
-            // Hysteresis is sized so most reverb / delay tails on the bus
-            // rack decay before the gate cuts (kBusIdleBlocks=60 ~1.4s).
-            // Bus output remains silent (correct — input is silent and the
-            // skipped pipeline would have produced silence too).
-            const float bufMag = juce::jmax (buf.getMagnitude (0, 0, numSamples),
-                                              buf.getMagnitude (1, 0, numSamples));
-            constexpr float kSilentEps = 1.0e-5f;
-            if (busSetIdx >= 0 && busSetIdx < (int) mBusSetIdleBlocks.size())
-            {
-                if (bufMag <= kSilentEps)
-                {
-                    if (mBusSetIdleBlocks[(size_t) busSetIdx] >= kBusIdleBlocks)
-                        continue;   // suspended — skip entire bus pipeline
-                    ++mBusSetIdleBlocks[(size_t) busSetIdx];
-                }
-                else
-                {
-                    mBusSetIdleBlocks[(size_t) busSetIdx] = 0;
-                }
-            }
 
             // C.4 Phase 1: push SC array to this bus's chain before processing.
             mVibeGraph.pushScArrayToStrip(bs.chId);
@@ -2398,33 +2340,6 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 auto& buf = *accum;
                 const juce::String prefix = "mixer_rustybus";
 
-                // 2026-05-06 Option A (bus): RustyBus idle gate.  Same
-                // hysteresis as the receive-bus loop (~1.4s) so reverb
-                // tails on the bus rack decay before we cut.  Skip wraps
-                // the entire bus pipeline below (preEq + rack + postEq +
-                // polarity/width + fader + pan + meter + route).
-                bool rustyBusSuspended = false;
-                {
-                    const float bufMag = juce::jmax (
-                        buf.getMagnitude (0, 0, numSamples),
-                        buf.getMagnitude (1, 0, numSamples));
-                    constexpr float kSilentEps = 1.0e-5f;
-                    if (bufMag <= kSilentEps)
-                    {
-                        if (mRustyBusIdleBlocks >= kBusIdleBlocks)
-                            rustyBusSuspended = true;
-                        else
-                            ++mRustyBusIdleBlocks;
-                    }
-                    else
-                    {
-                        mRustyBusIdleBlocks = 0;
-                    }
-                }
-
-                if (! rustyBusSuspended)
-                {
-
                 mVibeGraph.pushScArrayToStrip(MixerChannelIds::kRustyDrumsBus);
 
                 if (auto* preEq = mVibeGraph.getRustyDrumsBusPreEQ()) preEq->process(buf);
@@ -2511,7 +2426,6 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 }
 
                 routeInsertOutput(MixerChannelIds::kRustyDrumsBus, buf, numSamples);
-                }   // end ! rustyBusSuspended
             }
         }
     }

@@ -643,17 +643,10 @@ private:
     static constexpr int kIdleSuspendBlocks = 9;   // ~200ms at 256/44.1k
     std::array<int, kMaxInstPages> mInstIdleBlocks {};
     int mRustyIdleBlocks { 0 };
-
-    // 2026-05-06 Option A (bus extension): per-receive-bus idle counter.
-    // When the bus accumulator has been silent for kBusIdleBlocks consecutive
-    // blocks (~1.4s at 256/44.1k), skip the entire bus pipeline (preEq +
-    // rack + postEq + polarity/width + fader + pan + meter).  Threshold is
-    // larger than per-tab so most reverb / delay tails decay before we cut.
-    // Index matches kBusSets order: Vox, Inst, Vox2, Inst2, Inst3.
-    static constexpr int kBusIdleBlocks = 60;     // ~1.4s
-    std::array<int, 5> mBusSetIdleBlocks {};
-    int mClipsBusIdleBlocks { 0 };
-    int mRustyBusIdleBlocks { 0 };
+    // 2026-05-06: bus-level idle gate REVERTED — the per-block magnitude
+    // check added overhead during active playback (where buses are not
+    // silent) without offsetting savings, net-negative on busy sessions.
+    // Per-tab Option A above remains the meaningful DSP win.
 
     // R3 (2026-04-23): Live-input audio capture for Vox / Inst strips.
     // mLiveInputSnapshot - non-cleared copy of the input channels before

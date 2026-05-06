@@ -2887,3 +2887,252 @@
 8:27:10    slot 7 savedType=108 b64Len=240
 8:27:10      createEffect returned 1
 8:27:10      decoded 177 bytes ok=1
+8:30:17  restoreFullState: BEGIN
+8:30:17    slot 0 savedType=106 b64Len=166
+8:30:17      createEffect returned 1
+8:30:17      decoded 121 bytes ok=1
+8:30:17    slot 1 savedType=113 b64Len=227
+8:30:17      createEffect returned 1
+8:30:17      decoded 167 bytes ok=1
+8:30:17    slot 2 savedType=114 b64Len=270
+8:30:17      createEffect returned 1
+8:30:17      decoded 199 bytes ok=1
+8:30:17    slot 3 savedType=115 b64Len=240
+8:30:17      createEffect returned 1
+8:30:17      decoded 177 bytes ok=1
+8:30:17    slot 4 savedType=6 b64Len=403
+8:30:17      createEffect returned 1
+8:30:17      decoded 299 bytes ok=1
+8:30:17    slot 5 savedType=0 b64Len=0
+8:30:17    slot 6 savedType=113 b64Len=227
+8:30:17      createEffect returned 1
+8:30:17      decoded 167 bytes ok=1
+8:30:17    slot 7 savedType=116 b64Len=422
+8:30:17      createEffect returned 1
+8:30:17      decoded 313 bytes ok=1
+8:47:10  restoreFullState: BEGIN
+8:47:10    slot 0 savedType=106 b64Len=166
+8:47:10      createEffect returned 1
+8:47:10      decoded 121 bytes ok=1
+8:47:10    slot 1 savedType=1 b64Len=587
+8:47:10      createEffect returned 1
+8:47:10      decoded 437 bytes ok=1
+8:47:10    slot 2 savedType=100 b64Len=180
+8:47:10      createEffect returned 1
+8:47:10      decoded 132 bytes ok=1
+8:47:10    slot 3 savedType=103 b64Len=188
+8:47:10      createEffect returned 1
+8:47:10      decoded 138 bytes ok=1
+8:47:10    slot 4 savedType=0 b64Len=0
+8:47:10    slot 5 savedType=0 b64Len=0
+8:47:10    slot 6 savedType=113 b64Len=227
+8:47:10      createEffect returned 1
+8:47:10      decoded 167 bytes ok=1
+8:47:10    slot 7 savedType=116 b64Len=404
+8:47:10      createEffect returned 1
+8:47:10      decoded 300 bytes ok=1
+8:47:12  restoreFullState: BEGIN
+8:47:12    slot 0 savedType=106 b64Len=166
+8:47:12      createEffect returned 1
+8:47:12      decoded 121 bytes ok=1
+8:47:12    slot 1 savedType=113 b64Len=227
+8:47:12      createEffect returned 1
+8:47:12      decoded 167 bytes ok=1
+8:47:12    slot 2 savedType=114 b64Len=270
+8:47:12      createEffect returned 1
+8:47:12      decoded 199 bytes ok=1
+8:47:12    slot 3 savedType=115 b64Len=240
+8:47:12      createEffect returned 1
+8:47:12      decoded 177 bytes ok=1
+8:47:12    slot 4 savedType=6 b64Len=403
+8:47:12      createEffect returned 1
+8:47:12      decoded 299 bytes ok=1
+8:47:12    slot 5 savedType=0 b64Len=0
+8:47:12    slot 6 savedType=113 b64Len=227
+8:47:12      createEffect returned 1
+8:47:12      decoded 167 bytes ok=1
+8:47:12    slot 7 savedType=116 b64Len=422
+8:47:12      createEffect returned 1
+8:47:12      decoded 313 bytes ok=1
+8:47:20  restoreFullState: BEGIN
+8:47:20    slot 0 savedType=106 b64Len=166
+8:47:20      createEffect returned 1
+8:47:20      decoded 121 bytes ok=1
+8:47:20    slot 1 savedType=0 b64Len=0
+8:47:20    slot 2 savedType=0 b64Len=0
+8:47:20    slot 3 savedType=0 b64Len=0
+8:47:20    slot 4 savedType=0 b64Len=0
+8:47:20    slot 5 savedType=0 b64Len=0
+8:47:20    slot 6 savedType=0 b64Len=0
+8:47:20    slot 7 savedType=108 b64Len=240
+8:47:20      createEffect returned 1
+8:47:20      decoded 177 bytes ok=1
+8:47:22  restoreFullState: BEGIN
+8:47:22    slot 0 savedType=106 b64Len=166
+8:47:22      createEffect returned 1
+8:47:22      decoded 121 bytes ok=1
+8:47:22    slot 1 savedType=0 b64Len=0
+8:47:22    slot 2 savedType=0 b64Len=0
+8:47:22    slot 3 savedType=0 b64Len=0
+8:47:22    slot 4 savedType=0 b64Len=0
+8:47:22    slot 5 savedType=0 b64Len=0
+8:47:22    slot 6 savedType=0 b64Len=0
+8:47:22    slot 7 savedType=108 b64Len=240
+8:47:22      createEffect returned 1
+8:47:22      decoded 177 bytes ok=1
+8:47:24  restoreFullState: BEGIN
+8:47:24    slot 0 savedType=106 b64Len=166
+8:47:24      createEffect returned 1
+8:47:24      decoded 121 bytes ok=1
+8:47:24    slot 1 savedType=0 b64Len=0
+8:47:24    slot 2 savedType=0 b64Len=0
+8:47:24    slot 3 savedType=0 b64Len=0
+8:47:24    slot 4 savedType=0 b64Len=0
+8:47:24    slot 5 savedType=0 b64Len=0
+8:47:24    slot 6 savedType=0 b64Len=0
+8:47:24    slot 7 savedType=108 b64Len=240
+8:47:24      createEffect returned 1
+8:47:24      decoded 177 bytes ok=1
+8:47:26  restoreFullState: BEGIN
+8:47:26    slot 0 savedType=106 b64Len=166
+8:47:26      createEffect returned 1
+8:47:26      decoded 121 bytes ok=1
+8:47:26    slot 1 savedType=0 b64Len=0
+8:47:26    slot 2 savedType=0 b64Len=0
+8:47:26    slot 3 savedType=0 b64Len=0
+8:47:26    slot 4 savedType=0 b64Len=0
+8:47:26    slot 5 savedType=0 b64Len=0
+8:47:26    slot 6 savedType=0 b64Len=0
+8:47:26    slot 7 savedType=108 b64Len=240
+8:47:26      createEffect returned 1
+8:47:26      decoded 177 bytes ok=1
+8:47:27  restoreFullState: BEGIN
+8:47:27    slot 0 savedType=106 b64Len=166
+8:47:27      createEffect returned 1
+8:47:27      decoded 121 bytes ok=1
+8:47:27    slot 1 savedType=0 b64Len=0
+8:47:27    slot 2 savedType=0 b64Len=0
+8:47:27    slot 3 savedType=0 b64Len=0
+8:47:27    slot 4 savedType=0 b64Len=0
+8:47:27    slot 5 savedType=0 b64Len=0
+8:47:27    slot 6 savedType=0 b64Len=0
+8:47:27    slot 7 savedType=108 b64Len=240
+8:47:27      createEffect returned 1
+8:47:27      decoded 177 bytes ok=1
+8:47:30  restoreFullState: BEGIN
+8:47:30    slot 0 savedType=106 b64Len=166
+8:47:30      createEffect returned 1
+8:47:30      decoded 121 bytes ok=1
+8:47:30    slot 1 savedType=0 b64Len=0
+8:47:30    slot 2 savedType=0 b64Len=0
+8:47:30    slot 3 savedType=0 b64Len=0
+8:47:30    slot 4 savedType=0 b64Len=0
+8:47:30    slot 5 savedType=0 b64Len=0
+8:47:30    slot 6 savedType=0 b64Len=0
+8:47:30    slot 7 savedType=108 b64Len=240
+8:47:30      createEffect returned 1
+8:47:30      decoded 177 bytes ok=1
+8:47:32  restoreFullState: BEGIN
+8:47:32    slot 0 savedType=106 b64Len=166
+8:47:32      createEffect returned 1
+8:47:32      decoded 121 bytes ok=1
+8:47:32    slot 1 savedType=0 b64Len=0
+8:47:32    slot 2 savedType=0 b64Len=0
+8:47:32    slot 3 savedType=0 b64Len=0
+8:47:32    slot 4 savedType=0 b64Len=0
+8:47:32    slot 5 savedType=0 b64Len=0
+8:47:32    slot 6 savedType=0 b64Len=0
+8:47:32    slot 7 savedType=108 b64Len=240
+8:47:32      createEffect returned 1
+8:47:32      decoded 177 bytes ok=1
+8:47:34  restoreFullState: BEGIN
+8:47:34    slot 0 savedType=106 b64Len=166
+8:47:34      createEffect returned 1
+8:47:34      decoded 121 bytes ok=1
+8:47:34    slot 1 savedType=0 b64Len=0
+8:47:34    slot 2 savedType=0 b64Len=0
+8:47:34    slot 3 savedType=0 b64Len=0
+8:47:34    slot 4 savedType=0 b64Len=0
+8:47:34    slot 5 savedType=0 b64Len=0
+8:47:34    slot 6 savedType=0 b64Len=0
+8:47:34    slot 7 savedType=108 b64Len=240
+8:47:34      createEffect returned 1
+8:47:34      decoded 177 bytes ok=1
+8:47:34  restoreFullState: BEGIN
+8:47:34    slot 0 savedType=106 b64Len=166
+8:47:34      createEffect returned 1
+8:47:34      decoded 121 bytes ok=1
+8:47:34    slot 1 savedType=0 b64Len=0
+8:47:34    slot 2 savedType=0 b64Len=0
+8:47:34    slot 3 savedType=0 b64Len=0
+8:47:34    slot 4 savedType=0 b64Len=0
+8:47:34    slot 5 savedType=0 b64Len=0
+8:47:34    slot 6 savedType=0 b64Len=0
+8:47:34    slot 7 savedType=108 b64Len=240
+8:47:34      createEffect returned 1
+8:47:34      decoded 177 bytes ok=1
+8:50:29  restoreFullState: BEGIN
+8:50:29    slot 0 savedType=106 b64Len=166
+8:50:29      createEffect returned 1
+8:50:29      decoded 121 bytes ok=1
+8:50:29    slot 1 savedType=113 b64Len=227
+8:50:29      createEffect returned 1
+8:50:29      decoded 167 bytes ok=1
+8:50:29    slot 2 savedType=114 b64Len=270
+8:50:29      createEffect returned 1
+8:50:29      decoded 199 bytes ok=1
+8:50:29    slot 3 savedType=115 b64Len=240
+8:50:29      createEffect returned 1
+8:50:29      decoded 177 bytes ok=1
+8:50:29    slot 4 savedType=6 b64Len=403
+8:50:29      createEffect returned 1
+8:50:29      decoded 299 bytes ok=1
+8:50:29    slot 5 savedType=0 b64Len=0
+8:50:29    slot 6 savedType=113 b64Len=227
+8:50:29      createEffect returned 1
+8:50:29      decoded 167 bytes ok=1
+8:50:29    slot 7 savedType=116 b64Len=422
+8:50:29      createEffect returned 1
+8:50:29      decoded 313 bytes ok=1
+8:50:39  restoreFullState: BEGIN
+8:50:39    slot 0 savedType=106 b64Len=166
+8:50:39      createEffect returned 1
+8:50:39      decoded 121 bytes ok=1
+8:50:39    slot 1 savedType=113 b64Len=187
+8:50:39      createEffect returned 1
+8:50:39      decoded 137 bytes ok=1
+8:50:39    slot 2 savedType=114 b64Len=246
+8:50:39      createEffect returned 1
+8:50:39      decoded 181 bytes ok=1
+8:50:39    slot 3 savedType=115 b64Len=200
+8:50:39      createEffect returned 1
+8:50:39      decoded 147 bytes ok=1
+8:50:39    slot 4 savedType=0 b64Len=0
+8:50:39    slot 5 savedType=0 b64Len=0
+8:50:39    slot 6 savedType=5 b64Len=718
+8:50:39      createEffect returned 1
+8:50:39      decoded 535 bytes ok=1
+8:50:39    slot 7 savedType=116 b64Len=346
+8:50:39      createEffect returned 1
+8:50:39      decoded 256 bytes ok=1
+8:50:49  restoreFullState: BEGIN
+8:50:49    slot 0 savedType=106 b64Len=166
+8:50:49      createEffect returned 1
+8:50:49      decoded 121 bytes ok=1
+8:50:49    slot 1 savedType=113 b64Len=226
+8:50:49      createEffect returned 1
+8:50:49      decoded 166 bytes ok=1
+8:50:49    slot 2 savedType=114 b64Len=288
+8:50:49      createEffect returned 1
+8:50:49      decoded 213 bytes ok=1
+8:50:49    slot 3 savedType=115 b64Len=280
+8:50:49      createEffect returned 1
+8:50:49      decoded 207 bytes ok=1
+8:50:49    slot 4 savedType=0 b64Len=0
+8:50:49    slot 5 savedType=0 b64Len=0
+8:50:49    slot 6 savedType=5 b64Len=718
+8:50:49      createEffect returned 1
+8:50:49      decoded 535 bytes ok=1
+8:50:49    slot 7 savedType=116 b64Len=384
+8:50:49      createEffect returned 1
+8:50:49      decoded 285 bytes ok=1
