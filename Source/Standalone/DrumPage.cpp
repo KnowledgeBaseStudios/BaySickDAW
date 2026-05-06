@@ -1410,6 +1410,37 @@ void DrumPage::loadPagePreset (const juce::File& xml)
                                      noFallback,
                                      xml.loadFileAsString());
 
+    // 2026-05-05 fix: sync the DrumPage's sound-picker tracking state from
+    // the engine that just had its state restored.  selectEngine creates a
+    // fresh engine with mLoadedSampleKind=None / mLoadedSamplePath=empty,
+    // and importPagePreset restores the engine's INTERNAL apvts (which
+    // includes bsp_loadKind / bsp_loadPath for VibePlayer + the sample
+    // re-load).  But DrumPage's display state is NOT in apvts — without
+    // syncing it here, the Player tab keeps showing the "Pick a sound"
+    // empty-state UI even though the engine has a kit loaded.
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mEngineProcessor.get()))
+    {
+        const auto kind = vp->apvts.state.getProperty ("bsp_loadKind", juce::String()).toString();
+        const auto path = vp->apvts.state.getProperty ("bsp_loadPath", juce::String()).toString();
+        if (path.isNotEmpty())
+        {
+            const juce::File f (path);
+            if      (kind == "folder") { mLoadedSampleKind = SampleKind::Folder; mLoadedSamplePath = f; mSoundName = f.getFileName(); }
+            else if (kind == "sfz")    { mLoadedSampleKind = SampleKind::SFZ;    mLoadedSamplePath = f; mSoundName = f.getFileNameWithoutExtension(); }
+            else if (kind == "file")   { mLoadedSampleKind = SampleKind::File;   mLoadedSamplePath = f; mSoundName = f.getFileNameWithoutExtension(); }
+        }
+    }
+    else if (mEngineProcessor != nullptr)
+    {
+        // BaySickSynth / Harmless / etc. — no sample reference; the patch is
+        // pure APVTS state.  Use the preset filename as the sound label.
+        mLoadedSampleKind = SampleKind::None;
+        mLoadedSamplePath = juce::File();
+        mSoundName = xml.getFileNameWithoutExtension();
+    }
+
+    refreshPianoRollContextLabel();
+
     const juce::String newName = xml.getFileNameWithoutExtension();
     setTabName (newName);
     if (onSoundNameChanged) onSoundNameChanged (newName);

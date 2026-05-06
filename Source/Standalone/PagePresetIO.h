@@ -1,59 +1,142 @@
 #pragma once
 #include <JuceHeader.h>
+#include <functional>
 
 class VibeSynthProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// G-7 (2026-04-29): unified Page Preset save / load.
+// PagePresetIO — unified page-preset save/load for every page type
+// ─────────────────────────────────────────────────────────────────────────────
+// A "page preset" captures every setting on an instrument-style page — every
+// engine state (including pages with multiple sub-tab engines like Inst's
+// Pedals + NAM/IR + sfizz Player), every mixer-strip APVTS param, every insert
+// effects rack + both pre + post EQ8 M/S, and (for pages that own a dedicated
+// bus like Rusty's RustyDrums Bus) the bus rack + its EQs.  Piano-roll notes
+// are intentionally excluded — that's musical content, separate from the
+// chain's sound design.
 //
-// A "page preset" captures every setting on an instrument-style page
-// (Layer / Bass / Drum / Clip / Vox / Inst) so the user can recreate the
-// exact sound in another tab or another project.  Captured surfaces:
+// 2026-05-05 consolidation: this module now serves every page-type
+// (Layers / Bass / Drums / Clips / Vox / Inst / RustyDrums).  Previously the
+// kit-aware sfizz engines (Rusty + Guitars + Basses) used a separate
+// `AriaPagePresetIO` module — that's been folded into here as the
+// `kitLoadCallback` field on `EngineSlot`.  Multi-strip + bus-rack capture
+// (Rusty's 13 strips + 1 bus) is now a first-class config option as well.
 //
-//   1. Engine processor state           (BaySickPlayer / Harmless /
-//                                        BaySickSynth / BaySickBass /
-//                                        BaySickVocal slot reserved)
-//   2. Mixer strip APVTS params         (level / pan / mute / solo / width /
-//                                        polarity / FX bypass / arm,
-//                                        plus per-strip EQ + sends)
-//   3. Insert Effects Rack              (slot types + per-slot APVTS)
-//   4. Insert post-rack EQ8 M/S         (8 bands × 2 channels)
-//
-// NOT captured: piano-roll patterns (song-specific musical content) and
-// the full mixer routing graph (project-specific cable topology).
-//
-// Bus fallback: when a Vox / Inst preset references a secondary bus
-// (kVoxBus2 / kInstBus2 / kInstBus3) that is not active in the current
-// project, the loader silently falls back to the natural parent bus
-// (kVoxBus / kInstBus) so the strip stays audible instead of ending up
-// routed to a phantom channel.
+// Saved-file format: version 2 XML, root tag `<BaySickPagePreset>`.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace PagePresetIO
 {
-    enum class PageKind { Layer, Bass, Drum, Clip, Vox, Inst };
+    enum class PageKind { Layer, Bass, Drum, Clip, Vox, Inst, RustyDrums };
 
     // Folder names use a "<Kind> Page" suffix so the directory layout is
     // self-explanatory in Windows Explorer (Documents/BaySickDAW/Presets/
-    // Layer Page/My Presets/...).  Distinct from per-engine "BaySickPlayer
-    // / Harmless / ..." preset folders, which keep capturing engine-only
-    // state via savePatchAs.
+    // Layer Page/My Presets/...).
     juce::File presetsDirForPageKind   (PageKind k);
     juce::File myPresetsDirForPageKind (PageKind k);
 
-    juce::String pageKindLabel (PageKind k);   // "Layer", "Bass", ...
+    juce::String pageKindLabel (PageKind k);   // "Layer", "Bass", ..., "Rusty Drums"
 
-    // Capture the page chain to an XML string.  Caller passes:
-    //   processor          — global VibeSynthProcessor (for apvts +
-    //                        VibeGraph::saveRackStates)
-    //   kind / pageIndex   — identifies the InsertNode + strip prefix
-    //   stripApvtsPrefix   — e.g. "mixer_layer_0" or "mixer_audio_5"
-    //   engineProc         — engine AudioProcessor (may be null for a no-
-    //                        engine page; engine state is then omitted)
-    //   engineType         — short tag stored in XML, e.g. "Harmless" /
-    //                        "BaySickPlayer" / "BaySickSynth"
-    //   enginePrefix       — engine's APVTS id prefix (e.g.
-    //                        "tk_lay_0_harm_") so the loader can rewrite
-    //                        ids if loading into a different page index
+    // ── Per-engine slot ──────────────────────────────────────────────────────
+    // A page can declare one or more engine slots so pages with sub-tab
+    // engines (Inst: Pedals + NAM/IR + active sfizz Player) save / restore
+    // every slot, not just the active one.  Each slot:
+    //   * `engine` / `engineApvts`  — the AudioProcessor + its APVTS, used
+    //                                 for getStateInformation on capture and
+    //                                 setStateInformation (or replaceState)
+    //                                 on restore.
+    //   * `engineRootTag`           — top-level XML tag of the engine's
+    //                                 getStateInformation blob; consulted
+    //                                 only when `kitLoadCallback` is set so
+    //                                 the loader can peel a `<KitPath>` child
+    //                                 out without applying state.
+    //   * `engineLabel`             — short tag stored in the saved XML so
+    //                                 the loader knows which slot a record
+    //                                 belongs to ("Pedals" / "NamIr" /
+    //                                 "Sfizz" / "Engine").  Must round-trip
+    //                                 byte-for-byte across save / load.
+    //   * `enginePrefix`            — the engine's APVTS id prefix (e.g.
+    //                                 "bgg_3_") so the loader can rewrite ids
+    //                                 if loading into a different page index.
+    //   * `kitLoadCallback`         — for sfizz-backed engines only.  When
+    //                                 non-null, the loader extracts the kit
+    //                                 path from the saved engine state and
+    //                                 calls this BEFORE applying APVTS, so
+    //                                 the wrapper's race-safe loadSfzFile
+    //                                 path runs (sfizz crashes when a kit is
+    //                                 reloaded mid-render without this).  For
+    //                                 non-sfizz engines (Harmless, BaySickPlayer,
+    //                                 NAM/IR, Pedals, etc.) leave null — the
+    //                                 loader falls back to setStateInformation.
+    struct EngineSlot
+    {
+        juce::AudioProcessor*               engine        { nullptr };
+        juce::AudioProcessorValueTreeState* engineApvts   { nullptr };
+        juce::String                        engineRootTag;
+        juce::String                        engineLabel;
+        juce::String                        enginePrefix;
+        std::function<bool(const juce::File& kitPath)> kitLoadCallback;
+    };
+
+    // ── Page chain config ────────────────────────────────────────────────────
+    struct PageChainConfig
+    {
+        // For Inst: "LiveInput" / "BaySickGuitars" / "BaySickBasses" so
+        // restore can switch to the right Source mode before applying engine
+        // states.  Empty for pages that don't have multiple source modes.
+        juce::String sourceModeLabel;
+
+        // One or more engine processors to capture.  Order doesn't matter on
+        // disk (each record carries its own `engineLabel`), but pages
+        // typically list slots in pipeline order for readability.
+        juce::Array<EngineSlot> engineSlots;
+
+        // APVTS prefixes for every mixer strip the preset should capture.
+        //   Layer: ["mixer_layer_<idx>"]
+        //   Inst:  ["mixer_inst_<idx>"]
+        //   Rusty: ["mixer_rustybus", "mixer_rusty_0", ..., "mixer_rusty_12"]
+        juce::StringArray stripPrefixes;
+
+        // VibeGraph InsertRack "kind" label to capture (matches saveRackStates'
+        // "kind" property).  e.g. "Layer", "Bass", "Drum", "Audio", "Vox",
+        // "Inst", "Rusty".
+        juce::String insertRackKindLabel;
+
+        // Empty = capture every insert of `insertRackKindLabel`.  Non-empty =
+        // only capture the listed indices (typical: [pageIndex]).
+        juce::Array<int> insertRackIndices;
+
+        // VibeGraph BusRack ids to capture.  Used for pages that own a
+        // dedicated bus (Rusty's RustyBus).  Empty for every other page —
+        // shared buses don't belong in per-page presets.
+        juce::StringArray busRackIds;
+    };
+
+    // Capture the page chain to an XML string.  Returns empty if the config
+    // has no engine slots (nothing to save).
+    juce::String exportPagePreset (VibeSynthProcessor& processor,
+                                    PageKind kind,
+                                    const PageChainConfig& cfg);
+
+    // Restore a page from saved XML.  Returns true on success.  On failure
+    // (parse error, missing kit on disk, kitLoadCallback returns false, etc.)
+    // returns false WITHOUT applying any partial state.
+    bool importPagePreset (VibeSynthProcessor& processor,
+                           PageKind kind,
+                           const PageChainConfig& cfg,
+                           const juce::String& xml);
+
+    // Read the sourceMode field from a preset file without applying state.
+    // Lets Inst page set its Source mode before instantiating the engine.
+    // Returns empty string on parse failure or if the preset has no source
+    // mode label (every preset other than Inst).
+    juce::String peekSourceMode (const juce::File& xml);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Legacy single-engine + single-strip API (kept for the 5 simpler pages
+    // until they're migrated to the richer config struct).  Captures the same
+    // surfaces but with a flatter signature.  New code should use the
+    // `PageChainConfig`-based API above.
+    // ─────────────────────────────────────────────────────────────────────────
     juce::String exportPagePreset (VibeSynthProcessor& processor,
                                     PageKind kind,
                                     int pageIndex,
@@ -62,12 +145,6 @@ namespace PagePresetIO
                                     const juce::String& engineType,
                                     const juce::String& enginePrefix);
 
-    // Restore a page from saved XML.  Returns the engineType recorded in
-    // the file (the page may need to instantiate a different engine before
-    // calling this).  isChannelActive is queried for kVoxBus2 / kInstBus2 /
-    // kInstBus3 so the loader can fall back to natural parent buses.  Pass
-    // a callback that always returns true if your page type doesn't have
-    // secondary buses — fallback then becomes a no-op.
     juce::String importPagePreset (VibeSynthProcessor& processor,
                                     PageKind kind,
                                     int pageIndex,
@@ -77,8 +154,5 @@ namespace PagePresetIO
                                     std::function<bool (int channelId)> isChannelActive,
                                     const juce::String& xml);
 
-    // Read the engineType field from a preset file without applying state.
-    // Lets pages instantiate the right engine before calling
-    // importPagePreset.  Returns empty string on parse failure.
     juce::String peekEngineType (const juce::File& xml);
 }

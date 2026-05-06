@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "VibePlayerDSP.h"
 #include "../DSP/EngineSidechainHelper.h"
+#include "../Standalone/ApvtsDirtyTracker.h"
 
 // ── VibePlayerProcessor (user-facing name: BaySickPlayer) ────────────────────
 // AudioProcessor wrapper for VibeSynth.
@@ -45,6 +46,9 @@ public:
 
     // ── Public interface ──────────────────────────────────────────────────────
     juce::AudioProcessorValueTreeState apvts;
+
+    // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).
+    void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
     // Engine access for the editor
     VibeSynth& getSynth() { return mSynth; }
@@ -132,6 +136,9 @@ private:
         int   unisonVoices { -1 };
         float unisonSpread { -1.f };
     } mCache;
+
+    // 2026-05-05 dirty-flag wiring.  Declared LAST so apvts is fully constructed.
+    ApvtsDirtyTracker mDirtyTracker { apvts };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibePlayerProcessor)
 };

@@ -1,7 +1,7 @@
 #include "BaySickRustyDrumsPage.h"
 #include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
 #include "../BaySickRustyDrums/BaySickRustyDrumsKitGraphic.h"
-#include "../BaySickRustyDrums/AriaControlPanel.h"
+#include "AriaControlPanel.h"   // K-5 (2026-05-05): moved to Source/Standalone/
 #include "../VibeGraph.h"
 #include "SampleLibrary.h"
 
@@ -134,7 +134,19 @@ void BaySickRustyDrumsPage::buildPlayerTab()
     // J-8 stage 2 (2026-05-04): ARIA control panel.  Pre-load it shows a
     // dimmed background placeholder; after a program loads, it renders the
     // kit's prebuilt GUI XML (knobs + labels + option menus + background art).
-    mAriaPanel = std::make_unique<AriaControlPanel> (mProcessor.getBaySickRustyDrums());
+    // K-5 (2026-05-05): build the engine-agnostic binding for the panel.
+    // Closures captured by value — engine pointer is null until loadKit
+    // succeeds, after which the panel re-binds via setEngine() below.
+    auto* engine = mProcessor.getBaySickRustyDrums();
+    AriaControlPanel::Binding binding;
+    if (engine != nullptr)
+    {
+        binding.apvts        = &engine->apvts;
+        binding.ccParamId    = [](int cc) { return juce::String ("brd_cc") + juce::String (cc); };
+        binding.kitDefaultCc = [engine](int cc) { return engine->getKitDefaultCc (cc); };
+        binding.ccLabel      = [engine](int cc) { return engine->getCcLabel (cc); };
+    }
+    mAriaPanel = std::make_unique<AriaControlPanel> (binding);
     mPlayerTab->addAndMakeVisible (*mAriaPanel);
 }
 
@@ -209,7 +221,18 @@ bool BaySickRustyDrumsPage::reloadForProjectRestore (const juce::File& sfzPath)
 void BaySickRustyDrumsPage::loadAriaPanelForProgram (Program target)
 {
     if (! mAriaPanel) return;
-    mAriaPanel->setEngine (mProcessor.getBaySickRustyDrums());
+    // K-5 (2026-05-05): rebuild binding for the (possibly-fresh) engine pointer
+    // and hand it to the panel before loading the new program XML.
+    auto* engine = mProcessor.getBaySickRustyDrums();
+    AriaControlPanel::Binding binding;
+    if (engine != nullptr)
+    {
+        binding.apvts        = &engine->apvts;
+        binding.ccParamId    = [](int cc) { return juce::String ("brd_cc") + juce::String (cc); };
+        binding.kitDefaultCc = [engine](int cc) { return engine->getKitDefaultCc (cc); };
+        binding.ccLabel      = [engine](int cc) { return engine->getCcLabel (cc); };
+    }
+    mAriaPanel->setEngine (binding);
 
     const auto kitRoot = SampleLibrary::getCoreLibraryDir().getChildFile ("Big Rusty Drums");
     const auto xml     = programGuiXml (target);
@@ -316,6 +339,17 @@ void BaySickRustyDrumsPage::savePlayerPresetAs()
 
             juce::XmlElement root ("RustyPlayerPreset");
             root.setAttribute ("version", 1);
+            // J-11 fix (2026-05-05): capture which program (Full / Basic) was
+            // loaded when the preset was saved.  Without this, loading a
+            // preset saved on Full while Basic is active would only apply the
+            // CCs Basic happens to share — Full-only knob values would write
+            // to APVTS but never reach a visible control, so the user would
+            // see "only the Basic controls" with their saved Full-program
+            // configuration silently lost.
+            {
+                auto* progEl = root.createNewChildElement ("Program");
+                progEl->setAttribute ("name", programLabel (safe->mCurrentProgram));
+            }
             auto* paramsEl = root.createNewChildElement ("Params");
             auto pushParam = [&] (const juce::String& id)
             {
@@ -346,20 +380,41 @@ void BaySickRustyDrumsPage::savePlayerPresetAs()
 void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
 {
     if (! xml.existsAsFile()) return;
-    auto* engine = mProcessor.getBaySickRustyDrums();
-    if (engine == nullptr) return;
 
     auto parsed = juce::XmlDocument::parse (xml);
     if (! parsed || ! parsed->hasTagName ("RustyPlayerPreset")) return;
 
+    // J-11 fix (2026-05-05): read the program the preset was saved on (if
+    // recorded) so we can switch to it before applying CCs.  Older presets
+    // (pre-fix) won't have this element — we apply on the current program.
+    Program presetProgram = Program::None;
+    if (auto* pe = parsed->getChildByName ("Program"))
+    {
+        const auto name = pe->getStringAttribute ("name");
+        if      (name.equalsIgnoreCase ("Full"))  presetProgram = Program::Full;
+        else if (name.equalsIgnoreCase ("Basic")) presetProgram = Program::Basic;
+    }
+
+    // Hoist param data out of the XML so it survives across the async program
+    // switch.  Each entry is (paramId, naturalValue).
+    auto paramPairs = std::make_shared<std::vector<std::pair<juce::String, float>>>();
     if (auto* paramsEl = parsed->getChildByName ("Params"))
     {
         for (auto* pe = paramsEl->getFirstChildElement(); pe != nullptr;
              pe = pe->getNextElement())
         {
             if (! pe->hasTagName ("Param")) continue;
-            const auto id      = pe->getStringAttribute ("id");
-            const float natural = (float) pe->getDoubleAttribute ("v");
+            paramPairs->emplace_back (pe->getStringAttribute ("id"),
+                                      (float) pe->getDoubleAttribute ("v"));
+        }
+    }
+
+    auto applyParams = [this, paramPairs]
+    {
+        auto* engine = mProcessor.getBaySickRustyDrums();
+        if (engine == nullptr) return;
+        for (const auto& [id, natural] : *paramPairs)
+        {
             if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (
                     engine->apvts.getParameter (id)))
             {
@@ -367,7 +422,42 @@ void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
                     rp->getNormalisableRange().convertTo0to1 (natural));
             }
         }
+    };
+
+    // Same program (or preset has no program tag): apply CCs immediately.
+    if (presetProgram == Program::None || presetProgram == mCurrentProgram)
+    {
+        applyParams();
+        return;
     }
+
+    // Preset specifies a different program.  If nothing is loaded yet, switch
+    // silently (no destructive state to warn about).
+    if (mCurrentProgram == Program::None)
+    {
+        if (loadProgram (presetProgram))
+            applyParams();
+        return;
+    }
+
+    // Active program differs — same destructive switch as picking a new
+    // program from the dropdown.  Confirm before wiping mixer + piano roll.
+    juce::Component::SafePointer<BaySickRustyDrumsPage> safe (this);
+    juce::AlertWindow::showOkCancelBox (
+        juce::AlertWindow::WarningIcon,
+        "Load Player Preset?",
+        juce::String ("This preset was saved on '") + programLabel (presetProgram)
+            + "' and will switch the player from '" + programLabel (mCurrentProgram)
+            + "'.  Switching will reset all mixer settings and clear the piano "
+              "roll across every pattern.  This cannot be undone.  Continue?",
+        "Yes, switch + load", "Cancel", nullptr,
+        juce::ModalCallbackFunction::create (
+            [safe, presetProgram, applyParams] (int r)
+            {
+                if (! safe || r != 1) return;
+                if (safe->loadProgram (presetProgram))
+                    applyParams();
+            }));
 }
 
 // ── Program selector + switching ────────────────────────────────────────────
@@ -485,7 +575,7 @@ void BaySickRustyDrumsPage::tearDownCurrentProgram()
     // engine is gone is a use-after-free.  Same logic for the kit graphic
     // (which holds a raw engine pointer for hi-hat pedal state).
     if (mKitGraphic) { mKitGraphic->setEngine (nullptr); mKitGraphic->setKitLoaded (false); }
-    if (mAriaPanel)  { mAriaPanel ->clear(); mAriaPanel->setEngine (nullptr); }
+    if (mAriaPanel)  { mAriaPanel ->clear(); mAriaPanel->setEngine (AriaControlPanel::Binding{}); }
 
     // Tear down all Rusty InsertNodes (PluginProcessor's destroy method) and
     // mark the engine inactive.  The engine itself is rebuilt in loadKit().

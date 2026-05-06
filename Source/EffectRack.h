@@ -192,6 +192,15 @@ public:
     // Bypass / un-bypass a single slot
     void setSlotBypassed(int slot, bool bypassed);
 
+    // 2026-05-05 dirty-flag wiring: fired from loadEffect / clearSlot /
+    // moveSlotUp / moveSlotDown / packSlotsToTop / setSlotBypassed /
+    // setSlotOutputGain / setStateInformation.  StandaloneEditor wires it
+    // to ProjectManager::markDirty so rack lifecycle changes flip the
+    // project dirty bit (per-slot APVTS edits already do via the main
+    // PluginProcessor's listener).  Per-slot bypass also writes APVTS, so
+    // its dirty fires twice (harmless — markDirty is idempotent).
+    std::function<void()> onSlotsChanged;
+
     // Per-slot output gain (dB, applied after effect, before next slot)
     void  setSlotOutputGain(int slot, float db);
     float getSlotOutputGain(int slot) const;

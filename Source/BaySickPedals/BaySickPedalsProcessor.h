@@ -5,6 +5,7 @@
 #include <memory>
 #include "../EffectRack.h"     // EffectType enum, DSPBase
 #include "../DSP/DSPBase.h"
+#include "../Standalone/ApvtsDirtyTracker.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickPedalsProcessor — Phase I-1 (2026-05-02)
@@ -84,6 +85,14 @@ public:
     // ── Public state ──────────────────────────────────────────────────────────
     juce::AudioProcessorValueTreeState apvts;
 
+    // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).
+    void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
+    // 2026-05-05 lifecycle dirty fire — Pedals' loadEffect / clearSlot / moveSlot
+    // mutate internal slot state without touching apvts (apvts only holds
+    // bypass + per-pedal CC params).  Lifecycle methods call this after the
+    // mutation publishes, mirroring the apvts-listener path.
+    void fireDirty() noexcept { if (mDirtyTracker.onAny) mDirtyTracker.onAny(); }
+
     // ── Slot data (mirrors EffectRack::Slot) ──────────────────────────────────
     struct Slot
     {
@@ -158,6 +167,15 @@ public:
     juce::ValueTree captureFullState() const;       // returns a ValueTree we can serialize
     void            restoreFullState (const juce::ValueTree& state);
 
+    // 2026-05-05 (Bug B fix): editor subscribes to this so a bulk state
+    // restore (page preset load, project load, pedalboard preset load) can
+    // refresh tiles even when the slot type didn't change but the underlying
+    // DSP pointer DID swap.  Without this, the editor's timer-based rebuild
+    // skips the slot (type comparison says "no change"), the cached widget
+    // bindings stay attached to the now-destroyed DSP, and the user sees
+    // stale parameter mappings (EQ frequency where boost should be, etc.).
+    std::function<void()> onSlotsExternallyChanged;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -170,6 +188,9 @@ private:
 
     double mSampleRate { 44100.0 };
     int    mMaxBlock   { 512 };
+
+    // 2026-05-05 dirty-flag wiring.  Declared LAST so apvts is fully constructed.
+    ApvtsDirtyTracker mDirtyTracker { apvts };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPedalsProcessor)
 };

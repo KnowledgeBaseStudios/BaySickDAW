@@ -202,6 +202,15 @@ private:
     void registerBassPianoRoll  (class BassPage*   bp);
     void registerDrumPianoRoll  (class DrumPage*   dp);
     void registerBaySickRustyDrumsPianoRoll();   // J-7a (2026-05-03)
+
+    // 2026-05-05 dirty-flag wiring helper.  Each per-engine processor
+    // (Harmless / BaySickSynth / BaySickBass / VibePlayer / BaySickGuitars /
+    // BaySickRustyDrums / BaySickPedals / BaySickNAMIR / BaySickVocal) owns
+    // its own APVTS that's invisible to the main PluginProcessor's project-
+    // dirty listener.  This helper dynamic_casts to each known type and
+    // installs a markDirty hook so any APVTS edit on the engine flips the
+    // project dirty bit.  Pass nullptr safe.  No-op for unknown types.
+    void wireEngineDirtyHook (juce::AudioProcessor* eng);
     // D2 Batch 4: move drum at row `srcRow` to row `dstRow` in ribbon order.
     // Reorders mPages + mRibbon's tab list + refreshes every kit view.
     void moveDrumTab (int srcRow, int dstRow);
@@ -437,6 +446,26 @@ private:
     // drums.  The PianoRollConnection's dataAccessor closure points at
     // Pattern::clipRoll[idx] so pattern switches stay live.
     void registerClipPianoRoll (int idx, ClipsPage* cp);
+
+    // K-3 (2026-05-05): wires a sfizz-source Inst page (BaySickGuitars /
+    // BaySickBasses) into the unified PianoRollPage.  dataAccessor points at
+    // Pattern::instRoll[idx]; audition closures route to the engine's
+    // auditionNote.  Caller (K-4 addBaySickGuitarsTab / L-3 addBaySickBassesTab)
+    // invokes after the engine is created via VibeSynthProcessor::loadKit.
+    void registerInstSourcePianoRoll (class InstPage* ip);
+    void unregisterInstSourcePianoRoll (class InstPage* ip);
+
+    // K-4 (2026-05-05): triggered by the "+ Add BaySickGuitars" entry on the
+    // Inst▾ ribbon dropdown.  Finds the lowest free Inst slot, spawns the
+    // mixer strip + InstPage, switches the page's source to BaySickGuitars,
+    // auto-loads the default kit (`Black&Green Guitars/Programs/01-green_keyswitch.sfz`),
+    // splices the Guitars engine into the chain, hides arm/listen LEDs on
+    // the strip, registers with PianoRollPage, and renames the tab "Guitar N".
+    void addBaySickGuitarsTab();
+
+    // L-3 (2026-05-05): same flow for BaySickBasses.  Default kit
+    // `Black&Blue Basses/Programs/01-darkblack_keysw.sfz`; tab named "Bass N".
+    void addBaySickBassesTab();
 
     // ── G-4 (2026-04-28): Vox + Inst empty-state placeholders + spawn flow.
     //    Mirrors the Clips structure exactly — pages spawn from the Mixer

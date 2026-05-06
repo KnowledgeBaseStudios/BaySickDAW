@@ -1507,11 +1507,22 @@ public:
     // ── Global VU calibration ─────────────────────────────────────────────
     // dBFS level that maps to 0 VU. Default -18. Range -18 to -14.
     // Stored as negative float (e.g. -18.f = -18 dBFS = 0 VU).
+    // 2026-05-05: persists in project files via <VUCalibration> in
+    // serializeUIState / deserializeUIState (-18 default for fresh projects).
     static float sCalibrationDb;
+    // 2026-05-05 dirty-flag wiring: fired on every successful change
+    // (no-fire on no-op when the value already matches).  StandaloneEditor
+    // wires this to ProjectManager::markDirty so menu changes flip the
+    // project dirty bit — without it, VU calibration edits would only
+    // persist if the user explicitly saved before exiting.
+    static std::function<void()> sOnCalibrationChanged;
     static float getCalibrationDb()      { return sCalibrationDb; }
     static void  setCalibrationDb(float db)
     {
-        sCalibrationDb = juce::jlimit(-18.f, -14.f, db);
+        const float clamped = juce::jlimit(-18.f, -14.f, db);
+        if (sCalibrationDb == clamped) return;
+        sCalibrationDb = clamped;
+        if (sOnCalibrationChanged) sOnCalibrationChanged();
     }
 };
 

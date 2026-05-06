@@ -141,6 +141,7 @@ int PatternManager::addPattern(const juce::String& name)
     Pattern p;
     p.name = name.isEmpty() ? "Pattern " + juce::String(mPatterns.size()+1) : name;
     mPatterns.push_back(std::move(p));
+    notifyContentChanged();
     return (int)mPatterns.size() - 1;
 }
 
@@ -150,6 +151,7 @@ int PatternManager::duplicatePattern(int srcIndex)
     Pattern copy = mPatterns[srcIndex];   // deep-copy by value: notes, sequences, rolls
     copy.name = copy.name + " (copy)";
     mPatterns.push_back(std::move(copy));
+    notifyContentChanged();
     return (int)mPatterns.size() - 1;
 }
 
@@ -213,12 +215,16 @@ void PatternManager::removePattern(int index)
     if (index < 0 || index >= (int)mPatterns.size() || mPatterns.size() <= 1) return;
     mPatterns.erase(mPatterns.begin() + index);
     mCurrentPattern = juce::jlimit(0, (int)mPatterns.size()-1, mCurrentPattern);
+    notifyContentChanged();
 }
 
 void PatternManager::renamePattern(int index, const juce::String& name)
 {
     if (index >= 0 && index < (int)mPatterns.size())
+    {
         mPatterns[index].name = name;
+        notifyContentChanged();
+    }
 }
 
 Pattern& PatternManager::getPattern(int index)
@@ -243,12 +249,16 @@ void PatternManager::addBlock(ArrangementBlock block)
     // pattern's intrinsic TS from a marker would be confusing.  Pattern TS
     // is set explicitly via right-click → "Set Time Signature".
     mArrangement.push_back(block);
+    notifyContentChanged();
 }
 
 void PatternManager::removeBlock(int index)
 {
     if (index >= 0 && index < (int)mArrangement.size())
+    {
         mArrangement.erase(mArrangement.begin() + index);
+        notifyContentChanged();
+    }
 }
 
 ArrangementBlock& PatternManager::getBlock(int index)
@@ -270,18 +280,25 @@ void PatternManager::addTimeMarker (int bar, const juce::String& label)
     mTimeMarkers.push_back({ bar, label });
     std::sort(mTimeMarkers.begin(), mTimeMarkers.end(),
               [](const TimeMarker& a, const TimeMarker& b) { return a.bar < b.bar; });
+    notifyContentChanged();
 }
 
 void PatternManager::removeTimeMarker (int idx)
 {
     if (idx >= 0 && idx < (int) mTimeMarkers.size())
+    {
         mTimeMarkers.erase(mTimeMarkers.begin() + idx);
+        notifyContentChanged();
+    }
 }
 
 void PatternManager::renameTimeMarker (int idx, const juce::String& label)
 {
     if (idx >= 0 && idx < (int) mTimeMarkers.size())
+    {
         mTimeMarkers[(size_t) idx].label = label;
+        notifyContentChanged();
+    }
 }
 
 int PatternManager::findTimeMarkerNearBar (float bar, float tolerance) const
@@ -940,6 +957,12 @@ juce::ValueTree PatternManager::toValueTree() const
             rn.setProperty("page", i, nullptr);
             rollsNode.addChild(rn, -1, nullptr);
         }
+        // J-7b (2026-05-04): BaySickRustyDrums singleton roll.  No page index
+        // (one Rusty engine per project).  Idempotent skip-if-empty so old
+        // projects without this tag round-trip cleanly.
+        if (! p.baySickRustyDrumsRoll.notes.empty())
+            rollsNode.addChild(rollToValueTree("BaySickRustyDrumsRoll",
+                                                p.baySickRustyDrumsRoll), -1, nullptr);
         pNode.addChild(rollsNode, -1, nullptr);
 
         patternsNode.addChild(pNode, -1, nullptr);
@@ -1240,6 +1263,11 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
                     int page = (int) rn.getProperty("page", 0);
                     if (page >= 0 && page < (int)p.instRoll.size())
                         rollFromValueTree(rn, p.instRoll[page]);
+                }
+                else if (rn.hasType("BaySickRustyDrumsRoll"))
+                {
+                    // J-7b (2026-05-04): singleton Rusty roll.
+                    rollFromValueTree(rn, p.baySickRustyDrumsRoll);
                 }
                 else if (rn.hasType("DrumRoll"))
                 {

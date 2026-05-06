@@ -15,6 +15,19 @@ namespace
     constexpr const char* kPedalboardRootTag = "Pedalboard";
     constexpr const char* kStateRootTag      = "BaySickPedalsState";
     constexpr int         kStateVersion      = 1;
+
+    // 2026-05-05 (Bug B diagnostics): file logger for save/load round-trip.
+    // Writes to Documents/BaySickDAW/pedals_state_log.txt, append-mode.
+    void pedalsLog (const juce::String& line)
+    {
+        const auto logFile = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                 .getChildFile ("BaySickDAW")
+                                 .getChildFile ("pedals_state_log.txt");
+        logFile.getParentDirectory().createDirectory();
+        const auto stamped = juce::Time::getCurrentTime().toString (false, true, true, true)
+                              + "  " + line + juce::newLine;
+        logFile.appendText (stamped);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,8 +176,11 @@ bool BaySickPedalsProcessor::loadEffect (int slot, EffectType type)
     if (effect && mSampleRate > 0.0)
         effect->prepare (mSampleRate, mMaxBlock);
 
-    const juce::ScopedLock lk (mLoadLock);
-    publishPending (slot, std::move (effect), type);
+    {
+        const juce::ScopedLock lk (mLoadLock);
+        publishPending (slot, std::move (effect), type);
+    }
+    fireDirty();   // 2026-05-05 lifecycle dirty
     return true;
 }
 
@@ -174,8 +190,11 @@ bool BaySickPedalsProcessor::clearSlot (int slot)
     // Slot 0 / 7 cannot be cleared -- they always hold their locked type.
     if (isSlotLocked (slot))           return false;
 
-    const juce::ScopedLock lk (mLoadLock);
-    publishPending (slot, nullptr, EffectType::None);
+    {
+        const juce::ScopedLock lk (mLoadLock);
+        publishPending (slot, nullptr, EffectType::None);
+    }
+    fireDirty();
     return true;
 }
 
@@ -218,6 +237,7 @@ bool BaySickPedalsProcessor::moveSlot (int from, int to)
             mSlots[i] = std::move (mSlots[i - 1]);
     }
     mSlots[to] = std::move (moving);
+    fireDirty();   // 2026-05-05 lifecycle dirty
     return true;
 }
 
@@ -296,6 +316,8 @@ juce::ValueTree BaySickPedalsProcessor::captureFullState() const
     // snapshot doesn't track future changes (and so this method stays const).
     state.appendChild (apvts.state.createCopy(), nullptr);
 
+    pedalsLog ("captureFullState: kNumSlots=" + juce::String (kNumSlots));
+
     // Per-slot snapshot.
     juce::ValueTree slotsTree ("Slots");
     for (int i = 0; i < kNumSlots; ++i)
@@ -307,13 +329,20 @@ juce::ValueTree BaySickPedalsProcessor::captureFullState() const
         juce::ValueTree slotTree ("Slot");
         slotTree.setProperty ("index", i,                 nullptr);
         slotTree.setProperty ("type",  (int) s.type,      nullptr);
+        size_t dataBytes = 0;
         if (eff)
         {
             juce::MemoryBlock mb;
             eff->getStateInformation (mb);
-            if (mb.getSize() > 0)
+            dataBytes = mb.getSize();
+            if (dataBytes > 0)
                 slotTree.setProperty ("data", mb.toBase64Encoding(), nullptr);
         }
+        pedalsLog ("  slot " + juce::String (i)
+                   + " type=" + juce::String ((int) s.type)
+                   + " swapPending=" + juce::String (sp ? 1 : 0)
+                   + " effPtr=" + juce::String (eff ? 1 : 0)
+                   + " dataBytes=" + juce::String ((int) dataBytes));
         slotsTree.appendChild (slotTree, nullptr);
     }
     state.appendChild (slotsTree, nullptr);
@@ -322,7 +351,13 @@ juce::ValueTree BaySickPedalsProcessor::captureFullState() const
 
 void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
 {
-    if (! state.isValid() || ! state.hasType (kStateRootTag)) return;
+    if (! state.isValid() || ! state.hasType (kStateRootTag))
+    {
+        pedalsLog ("restoreFullState: REJECTED — state invalid or wrong root tag");
+        return;
+    }
+
+    pedalsLog ("restoreFullState: BEGIN");
 
     // APVTS first so per-slot bypass bools restore before slots load (DSPs
     // don't depend on the bypass param themselves; this just keeps state
@@ -334,7 +369,11 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
     }
 
     auto slotsTree = state.getChildWithName ("Slots");
-    if (! slotsTree.isValid()) return;
+    if (! slotsTree.isValid())
+    {
+        pedalsLog ("restoreFullState: NO Slots child — params not restored");
+        return;
+    }
 
     for (int i = 0; i < slotsTree.getNumChildren(); ++i)
     {
@@ -345,6 +384,11 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
         if (slotIdx < 0 || slotIdx >= kNumSlots) continue;
 
         const auto type = (EffectType) (int) slotTree.getProperty ("type", 0);
+        const juce::String b64 = slotTree.getProperty ("data", "").toString();
+
+        pedalsLog ("  slot " + juce::String (slotIdx)
+                   + " savedType=" + juce::String ((int) type)
+                   + " b64Len=" + juce::String (b64.length()));
 
         // Build the new DSP off-thread (createEffect, prepare, restore state)
         // BEFORE parking into pending.  Mirrors EffectRack::setStateInformation
@@ -353,18 +397,26 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
         if (type != EffectType::None)
         {
             effect = EffectRack::createEffect (type);
+            pedalsLog ("    createEffect returned " + juce::String (effect ? 1 : 0));
             if (effect)
             {
                 if (mSampleRate > 0.0)
                     effect->prepare (mSampleRate, mMaxBlock);
-                const juce::String b64 = slotTree.getProperty ("data", "").toString();
                 if (b64.isNotEmpty())
                 {
-                    juce::MemoryOutputStream mos;
-                    juce::Base64::convertFromBase64 (mos, b64);
-                    juce::MemoryBlock decoded = mos.getMemoryBlock();
-                    effect->setStateInformation (decoded.getData(),
-                                                  (int) decoded.getSize());
+                    // 2026-05-05 fix: save side uses MemoryBlock::toBase64Encoding
+                    // which prefixes the string with `<byteCount>.<base64>`.
+                    // Decoding via juce::Base64::convertFromBase64 (raw-base64
+                    // only) silently produced 0 bytes on the prefix, so every
+                    // slot's DSP was recreated with defaults.  fromBase64Encoding
+                    // is the symmetric inverse and handles the prefix.
+                    juce::MemoryBlock decoded;
+                    const bool decodedOk = decoded.fromBase64Encoding (b64);
+                    pedalsLog ("    decoded " + juce::String ((int) decoded.getSize())
+                               + " bytes ok=" + juce::String (decodedOk ? 1 : 0));
+                    if (decodedOk && decoded.getSize() > 0)
+                        effect->setStateInformation (decoded.getData(),
+                                                      (int) decoded.getSize());
                 }
             }
         }
@@ -385,6 +437,19 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
         mSlots[slotIdx].pending.reset();
         mSlots[slotIdx].type   = type;
     }
+
+    // 2026-05-05 (Bug B fix): bulk-restore swaps DSP pointers on every slot.
+    // The editor's timer-based rebuild only fires when the type enum changes,
+    // so when the user saves + reloads the same pedal layout (types match,
+    // pointers differ), the editor's cached widget bindings stay attached to
+    // the destroyed DSP and the user sees stale parameter mappings (EQ
+    // frequency where boost should be, etc.).  Fire the external-change
+    // callback so the editor rebuilds every tile unconditionally.  Posted
+    // async so the audio thread (if it pumped this load via project-load)
+    // doesn't run editor mutation on its own thread.
+    if (onSlotsExternallyChanged)
+        juce::MessageManager::callAsync (
+            [cb = onSlotsExternallyChanged] { if (cb) cb(); });
 }
 
 void BaySickPedalsProcessor::getStateInformation (juce::MemoryBlock& dest)

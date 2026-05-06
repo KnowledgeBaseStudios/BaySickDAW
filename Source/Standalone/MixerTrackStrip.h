@@ -115,6 +115,15 @@ public:
     void setChannelId(int id) { mChannelId = id; }
     int  getChannelId() const { return mChannelId; }
 
+    // K-2 (2026-05-05): suppress arm + listen LEDs for sfizz-driven Inst strips
+    // (BaySickGuitars / BaySickBasses) which have no live input — the engine
+    // IS the source.  Strip stays type Inst (so it categorizes correctly on
+    // mixer / FX / sends), but hasArm() returns false and the buttons are
+    // hidden.  Safe to call before or after setApvts; the parameter listener
+    // for `_arm` is only registered when noLiveInput is false.
+    void setNoLiveInput (bool b);
+    bool isNoLiveInput() const noexcept { return mNoLiveInput; }
+
     // Unique APVTS prefix for this strip (e.g. "mixer_layer_0", "mixer_master").
     // Stable across renames, used by the Effects Page dropdown mapping.
     const juce::String& getAutomationPrefix() const { return mAutomationPrefix; }
@@ -207,6 +216,7 @@ private:
     StripType    mType;
     juce::Colour mAccent;
     int          mChannelId { -1 };  // MixerChannelIds value — set by MixerPage
+    bool         mNoLiveInput { false }; // K-2: suppress arm/listen for sfizz-source Inst strips
     juce::Point<int> mSocketCentre;   // cable socket centre in local coords
     juce::String mAutomationPrefix;   // e.g. "mixer_layer_0"; source of truth for FX routing
 
@@ -286,9 +296,12 @@ private:
     // Layer / Bass / Drum kept their arm param in APVTS for backward compat
     // but the UI is hidden (R5 will scrub them visually).  Aux strips are
     // receive-only and never had an arm.
+    // K-2 (2026-05-05): sfizz-source Inst strips (BaySickGuitars / BaySickBasses)
+    // also lose the LED via mNoLiveInput — the engine IS the source.
     bool hasArm() const noexcept
-        { return mType == StripType::Vox
-              || mType == StripType::Inst; }
+        { return ! mNoLiveInput
+              && (mType == StripType::Vox
+              ||  mType == StripType::Inst); }
     // Utility row — always present now (FX bypass LED is on every strip type)
     bool hasUtilityRow() const noexcept { return true; }
 

@@ -14,6 +14,8 @@ BEFORE setAudioDeviceSetup:
   device input names count:  1
   device output names count: 2
 
+Non-ASIO driver (Windows Audio) — leaving channel masks at JUCE defaults.
+
 ATTEMPTING setAudioDeviceSetup with:
   inputDeviceName: 'Microphone (HyperX Cloud Stinger Core Wireless DTS)'
   outputDeviceName: 'SONY TV  *00 (NVIDIA High Definition Audio)'

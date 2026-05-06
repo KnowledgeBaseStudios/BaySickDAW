@@ -72,6 +72,9 @@ public:
     void          selectEngine (EngineType e);
     EngineType    getEngineType() const noexcept { return mEngineType; }
     juce::AudioProcessor* getEngineProcessor() const noexcept;
+    // 2026-05-05 dirty-flag wiring: editor walks the vocal processor + its
+    // embedded NAM/IR sub-processor to install the markDirty hook.
+    juce::AudioProcessor* getVocalProcessor() const noexcept { return mVocalProc.get(); }
 
     std::function<void()> onEngineDestroying;
     std::function<void()> onEngineChanged;

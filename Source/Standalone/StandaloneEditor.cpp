@@ -23,7 +23,14 @@
 #include "../BaySickBass/BaySickBassProcessor.h"     // step 2 commit 2: bass register helper
 #include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-3: kit loader verify
 #include "BaySickRustyDrumsPage.h"                            // J-6: dedicated player page
-#include "RustyDrumsPagePresetIO.h"                            // J-8 Part D: Save/Load Page Preset
+#include "../BaySickGuitars/BaySickGuitarsProcessor.h"        // K-3: audition closure routes to engine->auditionNote
+#include "../BaySickBasses/BaySickBassesProcessor.h"          // L-3: parallel BaySickBasses engine for the same dispatch
+#include "../BaySickPedals/BaySickPedalsProcessor.h"          // 2026-05-05: dirty-hook wiring
+#include "../BaySickNAMIR/BaySickNAMIRProcessor.h"             // 2026-05-05: dirty-hook wiring
+#include "../BaySickVocal/BaySickVocalProcessor.h"             // 2026-05-05: dirty-hook wiring
+// 2026-05-05: RustyDrumsPagePresetIO + AriaPagePresetIO consolidated into
+// PagePresetIO.h.  Rusty's Save/Load Page Preset now uses PageKind::RustyDrums.
+#include "PagePresetIO.h"
 #include "../Clips/ClipsPage.h"                       // G-2: Clips page + empty state
 #include "../Vox/VoxPage.h"                           // G-4: Vox page + empty state
 #include "../Inst/InstPage.h"                         // G-4: Inst page + empty state
@@ -442,6 +449,21 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // P5: dirty tracking wiring.
     mProjectManager->onDirtyChanged = [this] { refreshWindowTitle(); };
     mProcessor.onAnyStateChange = [this]
+    {
+        if (mProjectManager) mProjectManager->markDirty();
+    };
+
+    // 2026-05-05 dirty-flag wiring: PatternManager mutations (pattern CRUD,
+    // arrangement add/remove, time-marker add/remove/rename) — none of which
+    // route through APVTS — chain into ProjectManager::markDirty.
+    if (mPM)
+        mPM->onAnyChange = [this] { if (mProjectManager) mProjectManager->markDirty(); };
+
+    // 2026-05-05 dirty-flag wiring: VU calibration target changes.  Default is
+    // -18 dBFS; persists per-project via <VUCalibration> in UIState.  Static
+    // callback so any caller of VUMeter::setCalibrationDb (Effects-page menu,
+    // future API) flips the dirty bit without per-call-site plumbing.
+    VUMeter::sOnCalibrationChanged = [this]
     {
         if (mProjectManager) mProjectManager->markDirty();
     };
@@ -1114,12 +1136,27 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // hasBaySickRustyDrums() on the processor isn't sufficient — that flag
     // only flips true after loadBaySickRustyDrumsKit succeeds).
     mRibbon->onAddBaySickRustyDrumsRequest = [this] { addBaySickRustyDrumsTab(); };
+    // 2026-05-05 dirty-flag wiring: tab lock toggle.
+    mRibbon->onTabLockChanged = [this] (int, bool) {
+        if (mProjectManager) mProjectManager->markDirty();
+    };
     mRibbon->onIsBaySickRustyDrumsActive   = [this]
     {
         for (auto* entry : mPages)
             if (entry && dynamic_cast<BaySickRustyDrumsPage*>(entry->component.get()))
                 return true;
         return false;
+    };
+    // K-4 (2026-05-05): "+ Add BaySickGuitars" entry on the Inst dropdown.
+    mRibbon->onAddBaySickGuitarsRequest = [this] { addBaySickGuitarsTab(); };
+    // L-3 (2026-05-05): "+ Add BaySickBasses" entry on the Inst dropdown.
+    mRibbon->onAddBaySickBassesRequest = [this] { addBaySickBassesTab(); };
+    mRibbon->onIsInstCapReached         = [this]
+    {
+        int n = 0;
+        for (auto* entry : mPages)
+            if (entry && entry->type == RibbonTabBar::TabType::Inst) ++n;
+        return n >= (int) kMaxInstPages;
     };
     // G-2 (2026-04-28): empty-state hook for the Clip ribbon slot.
     mRibbon->onClipsEmptyStateRequested = [this]() { showClipsEmptyState(); };
@@ -1364,10 +1401,22 @@ void StandaloneEditor::buildDefaultTabs()
                     k = EngineKind::BaySickRustyDrums;
                     idx = 0;
                 }
-                // G-4 (2026-04-28): Vox + Inst do NOT appear in the unified
-                // Piano Roll dropdown — they're live-input / recorded-audio
-                // destinations, not MIDI-triggered engines.  Skipping them
-                // here keeps the dropdown clean.
+                else if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+                {
+                    // K-3 (2026-05-05): sfizz-source Inst pages (BaySickGuitars
+                    // / BaySickBasses) surface in the dropdown.  LiveInput Inst
+                    // pages stay hidden (no MIDI-driven engine to play notes
+                    // through — the chain is fed by ASIO + recorded audio).
+                    const auto src = ip->getSource();
+                    if (src == InstPage::Source::LiveInput) continue;
+                    k = (src == InstPage::Source::BaySickGuitars)
+                            ? EngineKind::BaySickGuitars
+                            : EngineKind::BaySickBasses;
+                    idx = ip->getPageIndex();
+                }
+                // G-4 (2026-04-28): live-input Vox + Inst do NOT appear in
+                // the unified Piano Roll dropdown — they're live-input /
+                // recorded-audio destinations, not MIDI-triggered engines.
                 else continue;
                 if (idx < 0 || ! mRibbon) continue;
                 const auto* tab = mRibbon->getTabById (entry->ribbonTabId);
@@ -1431,10 +1480,12 @@ void StandaloneEditor::addDefaultDynamicTabs()
         if (auto* p = dynamic_cast<LayersPage*> (lp.get()))
         {
             const int pageIdx = p->getPageIndex();
-            p->onEngineSelected = [this, layersId, pageIdx] {
+            p->onEngineSelected = [this, layersId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById (layersId);
                 if (mMixerPage)   mMixerPage->addLayerChannel (pageIdx, tab ? tab->name : "Layers");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                // 2026-05-05 dirty-flag wiring on the just-installed engine.
+                wireEngineDirtyHook (p->getEngineProcessor());
             };
             // D1.4-fix (c): per-layer Delete + Duplicate.
             p->onDeleteRequested = [this, layersId] {
@@ -1474,10 +1525,12 @@ void StandaloneEditor::addDefaultDynamicTabs()
         if (auto* p = dynamic_cast<BassPage*> (bp.get()))
         {
             const int pageIdx = p->getPageIndex();
-            p->onEngineSelected = [this, bassId, pageIdx] {
+            p->onEngineSelected = [this, bassId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById (bassId);
                 if (mMixerPage)   mMixerPage->addBassChannel (pageIdx, tab ? tab->name : "Bass");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                // 2026-05-05 dirty-flag wiring on the just-installed engine.
+                wireEngineDirtyHook (p->getEngineProcessor());
             };
             p->onDeleteRequested = [this, bassId] {
                 if (! mRibbon) return;
@@ -1516,11 +1569,13 @@ void StandaloneEditor::addDefaultDynamicTabs()
         if (auto* p = dynamic_cast<DrumPage*> (dp.get()))
         {
             const int pageIdx = p->getPageIndex();
-            p->onEngineSelected = [this, drumsId, pageIdx] {
+            p->onEngineSelected = [this, drumsId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById (drumsId);
                 if (mMixerPage)   mMixerPage->addDrumChannel (pageIdx, tab ? tab->name : "Drums");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                 refreshAllKitViews();
+                // 2026-05-05 dirty-flag wiring on the just-installed engine.
+                wireEngineDirtyHook (p->getEngineProcessor());
             };
             p->onSoundNameChanged = [this, drumsId, pageIdx, p] (const juce::String& nm) {
                 if (nm.isEmpty()) return;
@@ -1647,10 +1702,11 @@ void StandaloneEditor::spawnDuplicateLayerTab (const juce::String& clipboardXml)
     if (lp == nullptr) return;
     const int pageIdx = lp->getPageIndex();
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Layers, "Layers");
-    lp->onEngineSelected = [this, newId, pageIdx] {
+    lp->onEngineSelected = [this, newId, pageIdx, lp] {
         const auto* tab = mRibbon->getTabById (newId);
         if (mMixerPage)   mMixerPage->addLayerChannel (pageIdx, tab ? tab->name : "Layers");
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+        wireEngineDirtyHook (lp->getEngineProcessor());
     };
     lp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
@@ -1692,10 +1748,11 @@ void StandaloneEditor::spawnDuplicateBassTab (const juce::String& clipboardXml)
     if (bp == nullptr) return;
     const int pageIdx = bp->getPageIndex();
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Bass, "Bass");
-    bp->onEngineSelected = [this, newId, pageIdx] {
+    bp->onEngineSelected = [this, newId, pageIdx, bp] {
         const auto* tab = mRibbon->getTabById (newId);
         if (mMixerPage)   mMixerPage->addBassChannel (pageIdx, tab ? tab->name : "Bass");
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+        wireEngineDirtyHook (bp->getEngineProcessor());
     };
     bp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
@@ -1741,11 +1798,12 @@ void StandaloneEditor::spawnDuplicateDrumTab (const juce::String& clipboardXml)
 
     const int pageIdx = dp->getPageIndex();
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Drums, "Drums");
-    dp->onEngineSelected = [this, newId, pageIdx] {
+    dp->onEngineSelected = [this, newId, pageIdx, dp] {
         const auto* tab = mRibbon->getTabById (newId);
         if (mMixerPage)   mMixerPage->addDrumChannel (pageIdx, tab ? tab->name : "Drums");
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
         refreshAllKitViews();
+        wireEngineDirtyHook (dp->getEngineProcessor());
     };
     dp->onSoundNameChanged = [this, newId, pageIdx, dp] (const juce::String& nm) {
         if (nm.isEmpty()) return;
@@ -3189,10 +3247,11 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
         if (auto* p = dynamic_cast<LayersPage*>(page.get()))
         {
             const int pageIdx = p->getPageIndex();
-            p->onEngineSelected = [this, newId, pageIdx] {
+            p->onEngineSelected = [this, newId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById(newId);
                 if (mMixerPage) mMixerPage->addLayerChannel(pageIdx, tab ? tab->name : "Layers");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                wireEngineDirtyHook (p->getEngineProcessor());
             };
             p->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
@@ -3222,10 +3281,11 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
         if (auto* p = dynamic_cast<BassPage*>(page.get()))
         {
             const int pageIdx = p->getPageIndex();
-            p->onEngineSelected = [this, newId, pageIdx] {
+            p->onEngineSelected = [this, newId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById(newId);
                 if (mMixerPage) mMixerPage->addBassChannel(pageIdx, tab ? tab->name : "Bass");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                wireEngineDirtyHook (p->getEngineProcessor());
             };
             p->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
@@ -3255,11 +3315,12 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
         if (auto* p = dynamic_cast<DrumPage*>(page.get()))
         {
             const int pageIdx = p->getPageIndex();
-            p->onEngineSelected = [this, newId, pageIdx] {
+            p->onEngineSelected = [this, newId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById(newId);
                 if (mMixerPage)   mMixerPage->addDrumChannel(pageIdx, tab ? tab->name : "Drums");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                 refreshAllKitViews();
+                wireEngineDirtyHook (p->getEngineProcessor());
             };
             p->onSoundNameChanged = [this, newId, pageIdx, p] (const juce::String& nm) {
                 if (nm.isEmpty()) return;
@@ -3452,11 +3513,37 @@ void StandaloneEditor::onTabClosed(int tabId)
             }
 
             // G-4 (2026-04-28): Inst tab close — same shape as Vox.
+            // K-4 / L-3 (2026-05-05): sfizz-source Inst pages also unregister
+            // their PianoRoll connection so the entry disappears from
+            // PianoRollPage's dropdown.  Engine teardown happens AFTER
+            // mPages.remove(i) (the page's destructor unregisters the chain
+            // processor first; only then is the Guitars/Basses engine safe to
+            // free).
+            int instGuitarsIdx = -1;
+            int instBassesIdx  = -1;
+            int instStripIdx   = -1;   // 2026-05-05: every Inst tab close
+                                        // drops its mixer strip so the index
+                                        // is reusable.  Captured here BEFORE
+                                        // mPages.remove(i) below invalidates
+                                        // the InstPage pointer.
             if (auto* ip = dynamic_cast<InstPage*>(mPages[i]->component.get()))
             {
                 int idx = ip->getPageIndex();
                 if (idx >= 0)
+                {
                     mProcessor.unregisterInstEngine (idx);
+                    instStripIdx = idx;
+                }
+                if (ip->getSource() == InstPage::Source::BaySickGuitars)
+                {
+                    unregisterInstSourcePianoRoll (ip);
+                    instGuitarsIdx = idx;
+                }
+                else if (ip->getSource() == InstPage::Source::BaySickBasses)
+                {
+                    unregisterInstSourcePianoRoll (ip);
+                    instBassesIdx = idx;
+                }
             }
 
             // J-6 (2026-05-03): BaySickRustyDrums tab close — tear down the
@@ -3501,8 +3588,32 @@ void StandaloneEditor::onTabClosed(int tabId)
             // SliderParameterAttachment-bearing ARIA widgets) is already gone.
             if (isRusty && mProcessor.hasBaySickRustyDrums())
                 mProcessor.destroyBaySickRustyDrums();
+            // K-4 / L-3 (2026-05-05): same ordering for BaySickGuitars +
+            // BaySickBasses — page is gone, chain dropped its raw pointer to
+            // the engine via the destructor's mChain.reset(), now drop the
+            // engine.  Frees the slot index so the user can `+ Add Bass`
+            // again after deleting one.
+            if (instGuitarsIdx >= 0)
+                mProcessor.destroyBaySickGuitars (instGuitarsIdx);
+            if (instBassesIdx >= 0)
+                mProcessor.destroyBaySickBasses  (instBassesIdx);
+
+            // 2026-05-05 fix: also drop the orphan mixer strip so the slot
+            // index is fully reusable.  Without this, addInstChannelAtIndex
+            // bails at its `count(idx) > 0` guard on re-add and the spawn
+            // flow silently aborts.  Applies to ALL Inst tabs (live-input,
+            // BaySickGuitars, BaySickBasses) — the strip lifecycle is tied
+            // to tab lifecycle.  APVTS params for the strip are intentionally
+            // kept (matches Aux/Vox/Clips remove convention) so re-adding at
+            // the same idx restores prior fader/pan/sends.
+            if (instStripIdx >= 0 && mMixerPage)
+                mMixerPage->removeInstChannel (instStripIdx);
             resized();
             refreshAllKitViews();   // D2: drum row freed → kit view shrinks
+
+            // 2026-05-05 dirty-flag wiring: tab close is a project-state
+            // change that doesn't go through APVTS.
+            if (mProjectManager) mProjectManager->markDirty();
 
             // G-7: if we just closed the LAST Clip/Vox/Inst tab, surface the
             // empty-state placeholder so the user has a clear next action
@@ -3983,8 +4094,26 @@ void StandaloneEditor::showPageForTab(int tabId)
             //   0 = BaySickPedals (placeholder until I-15)
             //   1 = BaySickNAM/IR
             //  (Pre EQ8 M/S removed in J-6 EQ unification — Effects page only)
-            mPageMenuBar->setTabSlots(InstPage::getTabLabels(),
-                [this, ip, syncPagePresetMenu](int i) {
+            // K-3 (2026-05-05): sfizz sources (BaySickGuitars / BaySickBasses)
+            // add a "Piano Roll" tab at the end that nav-redirects to the
+            // unified PianoRollPage with this engine selected.  Tab dispatch
+            // identifies the redirect target by label so adding new tabs
+            // (K-5's Player tab) doesn't break the index-based nav.
+            const auto labels = ip->getActiveTabLabels();
+            mPageMenuBar->setTabSlots(labels,
+                [this, ip, syncPagePresetMenu, labels](int i) {
+                    if (i >= 0 && i < (int) labels.size() && labels[i] == "Piano Roll")
+                    {
+                        const auto src = ip->getSource();
+                        EngineKind k = (src == InstPage::Source::BaySickGuitars)
+                                        ? EngineKind::BaySickGuitars
+                                        : EngineKind::BaySickBasses;
+                        if (mRibbon) mRibbon->selectTab (4);
+                        onTabSelected (4);
+                        if (mPianoRollPage)
+                            mPianoRollPage->selectEngine ({ k, ip->getPageIndex() });
+                        return;
+                    }
                     ip->switchTab (i);
                     mPageMenuBar->updateTabActive (i);
                     mPageMenuBar->setMidSideVisible (false);
@@ -3996,6 +4125,13 @@ void StandaloneEditor::showPageForTab(int tabId)
             // (mirrors Vox).
             if (auto* lbl = ip->getClipFileLabel())
                 mPageMenuBar->addExtraRightComponent (lbl, 240);
+            // K-5 (2026-05-05): sfizz sources (BaySickGuitars / BaySickBasses)
+            // surface a "Load Guitar" button in extras-right.  Click pops a
+            // menu listing every *.sfz in the kit's Programs/ folder.  The
+            // file label parked above shows the currently-loaded program.
+            if (ip->getSource() != InstPage::Source::LiveInput)
+                if (auto* btn = ip->getProgramButton())
+                    mPageMenuBar->addExtraRightComponent (btn, 130);
         }
         else if (auto* dp = dynamic_cast<DrumPage*>(mVisiblePage))
         {
@@ -4086,14 +4222,41 @@ void StandaloneEditor::showPageForTab(int tabId)
             if (auto* btn = rp->getPlayerPresetButton())
                 mPageMenuBar->addExtraRightComponent (btn, 130);
 
-            // J-8 Part D (2026-05-05): Save / Load Page Preset.  Page presets
-            // capture the full Rusty player setup (engine CC values + kit
-            // path), every Rusty mixer strip + the RustyDrums Bus, every Rusty
-            // effect rack and EQ — but NOT the piano roll.  Stored under
-            // Documents/BaySickDAW/Presets/Rusty Drums Page/My Presets/.
+            // 2026-05-05 consolidation: Save / Load Page Preset goes through
+            // the unified PagePresetIO API (PageKind::RustyDrums).  Captures
+            // the engine + every Rusty mixer strip + the RustyDrums Bus +
+            // every Rusty insert rack with both pre + post EQ — piano roll
+            // notes excluded.  Stored under Documents/BaySickDAW/Presets/
+            // Rusty Drums Page/My Presets/.
             juce::Component::SafePointer<StandaloneEditor> safeThisRusty (this);
+            auto buildRustyPresetCfg = [] (VibeSynthProcessor& processor)
+            {
+                PagePresetIO::PageChainConfig cfg;
+                if (auto* eng = processor.getBaySickRustyDrums())
+                {
+                    PagePresetIO::EngineSlot slot;
+                    slot.engine        = eng;
+                    slot.engineApvts   = &eng->apvts;
+                    slot.engineLabel   = "Sfizz";
+                    slot.engineRootTag = "BaySickRustyDrumsState";
+                    slot.enginePrefix  = "brd_";
+                    slot.kitLoadCallback = [&processor] (const juce::File& kitPath)
+                    {
+                        return processor.loadBaySickRustyDrumsKit (kitPath);
+                    };
+                    cfg.engineSlots.add (slot);
+                }
+                cfg.stripPrefixes.add ("mixer_rustybus");
+                for (int i = 0; i < MixerChannelIds::kMaxRustyStrips; ++i)
+                    cfg.stripPrefixes.add ("mixer_rusty_" + juce::String (i));
+                cfg.busRackIds.add ("RustyBus");
+                cfg.insertRackKindLabel = "Rusty";
+                // insertRackIndices empty → capture every Rusty insert.
+                return cfg;
+            };
+
             mPageMenuBar->setMenuBuilder (
-                [safeThisRusty] (juce::Component* anchor)
+                [safeThisRusty, buildRustyPresetCfg] (juce::Component* anchor)
                 {
                     if (! safeThisRusty) return;
                     constexpr int kIdSave     = 100;
@@ -4106,7 +4269,8 @@ void StandaloneEditor::showPageForTab(int tabId)
                     juce::Array<juce::File> presetXmls;
                     {
                         juce::PopupMenu loadSub;
-                        const auto root = RustyDrumsPagePresetIO::myPresetsDir();
+                        const auto root = PagePresetIO::myPresetsDirForPageKind (
+                            PagePresetIO::PageKind::RustyDrums);
                         if (root.isDirectory())
                         {
                             juce::Array<juce::File> files;
@@ -4126,7 +4290,7 @@ void StandaloneEditor::showPageForTab(int tabId)
 
                     m.showMenuAsync (
                         juce::PopupMenu::Options().withTargetComponent (anchor),
-                        [safeThisRusty, presetXmls] (int r)
+                        [safeThisRusty, presetXmls, buildRustyPresetCfg] (int r)
                         {
                             if (! safeThisRusty || r <= 0) return;
                             if (r == kIdSave)
@@ -4140,22 +4304,26 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
                                 juce::Component::SafePointer<StandaloneEditor> saveSafe (safeThisRusty);
                                 aw->enterModalState (true, juce::ModalCallbackFunction::create (
-                                    [saveSafe, aw] (int result)
+                                    [saveSafe, aw, buildRustyPresetCfg] (int result)
                                     {
                                         std::unique_ptr<juce::AlertWindow> own (aw);
                                         if (result != 1 || ! saveSafe) return;
                                         const auto name = aw->getTextEditorContents ("name").trim();
                                         if (name.isEmpty()) return;
 
-                                        auto dir = RustyDrumsPagePresetIO::myPresetsDir();
+                                        auto dir = PagePresetIO::myPresetsDirForPageKind (
+                                            PagePresetIO::PageKind::RustyDrums);
                                         dir.createDirectory();
                                         auto target = dir.getChildFile (name + ".xml");
                                         int n = 2;
                                         while (target.exists())
                                             target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
 
-                                        const auto xml = RustyDrumsPagePresetIO::exportPreset (
-                                            saveSafe->mProcessor);
+                                        const auto cfg = buildRustyPresetCfg (saveSafe->mProcessor);
+                                        const auto xml = PagePresetIO::exportPagePreset (
+                                            saveSafe->mProcessor,
+                                            PagePresetIO::PageKind::RustyDrums,
+                                            cfg);
                                         if (xml.isNotEmpty())
                                             target.replaceWithText (xml);
                                     }), false);
@@ -4164,8 +4332,11 @@ void StandaloneEditor::showPageForTab(int tabId)
                             if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
                             {
                                 const auto& f = presetXmls[r - kIdLoadBase];
-                                RustyDrumsPagePresetIO::importPreset (
+                                const auto cfg = buildRustyPresetCfg (safeThisRusty->mProcessor);
+                                PagePresetIO::importPagePreset (
                                     safeThisRusty->mProcessor,
+                                    PagePresetIO::PageKind::RustyDrums,
+                                    cfg,
                                     f.loadFileAsString());
                                 return;
                             }
@@ -4939,10 +5110,11 @@ juce::Component* StandaloneEditor::spawnLayerTabFromTemplate (const juce::String
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Layers,
                                         "Layer " + juce::String (pageIdx + 1));
 
-    lp->onEngineSelected = [this, newId, pageIdx] {
+    lp->onEngineSelected = [this, newId, pageIdx, lp] {
         const auto* tab = mRibbon->getTabById (newId);
         if (mMixerPage)   mMixerPage->addLayerChannel (pageIdx, tab ? tab->name : "Layer");
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+        wireEngineDirtyHook (lp->getEngineProcessor());
     };
     lp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
@@ -4992,10 +5164,11 @@ juce::Component* StandaloneEditor::spawnBassTabFromTemplate (const juce::String&
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Bass,
                                         "Bass " + juce::String (pageIdx + 1));
 
-    bp->onEngineSelected = [this, newId, pageIdx] {
+    bp->onEngineSelected = [this, newId, pageIdx, bp] {
         const auto* tab = mRibbon->getTabById (newId);
         if (mMixerPage)   mMixerPage->addBassChannel (pageIdx, tab ? tab->name : "Bass");
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+        wireEngineDirtyHook (bp->getEngineProcessor());
     };
     bp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
@@ -5517,11 +5690,12 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
         if (tabName.isNotEmpty()) dp->setTabName (tabName);
 
         const int pageIdx = slot;
-        dp->onEngineSelected = [this, newId, pageIdx] {
+        dp->onEngineSelected = [this, newId, pageIdx, dp] {
             const auto* tab = mRibbon->getTabById (newId);
             if (mMixerPage)   mMixerPage->addDrumChannel (pageIdx, tab ? tab->name : "Drums");
             if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
             refreshAllKitViews();
+            wireEngineDirtyHook (dp->getEngineProcessor());
         };
         dp->onSoundNameChanged = [this, newId, pageIdx, dp] (const juce::String& nm) {
             if (nm.isEmpty()) return;
@@ -6016,6 +6190,8 @@ void StandaloneEditor::addBaySickRustyDrumsTab()
             const auto& chans = eng->getChannels();
             for (size_t i = 0; i < chans.size() && i < (size_t) MixerChannelIds::kMaxRustyStrips; ++i)
                 mMixerPage->addRustyChannelAtIndex ((int) i, chans[i].name);
+            // 2026-05-05 dirty-flag wiring: engine exists post-load.
+            wireEngineDirtyHook (eng);
         }
     };
 
@@ -6076,6 +6252,187 @@ void StandaloneEditor::addBaySickRustyDrumsTab()
     // explicitly to trigger showPageForTab + page-menu setup.
     if (mRibbon) mRibbon->selectTab (ribbonId);
     onTabSelected (ribbonId);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// K-4 (2026-05-05): "+ Add BaySickGuitars" handler.  Spawns an Inst strip +
+// InstPage + Guitars engine all wired together at the lowest free Inst slot
+// index.  Cap check (20-page combined Inst total) is enforced by the ribbon
+// menu (entry greys when full); this function defensively checks again.
+// ─────────────────────────────────────────────────────────────────────────────
+void StandaloneEditor::addBaySickGuitarsTab()
+{
+    if (! mRibbon || ! mMixerPage) return;
+
+    // Find lowest free Inst slot (matches the existing Inst-add path).
+    std::array<bool, kMaxInstPages> idxTaken {};
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
+        if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+        {
+            const int i = ip->getPageIndex();
+            if (i >= 0 && i < (int) kMaxInstPages) idxTaken[(size_t) i] = true;
+        }
+    }
+    int newIdx = -1;
+    for (int i = 0; i < (int) kMaxInstPages; ++i)
+        if (! idxTaken[(size_t) i]) { newIdx = i; break; }
+    if (newIdx < 0) return;   // cap reached — defensive (ribbon already disables)
+
+    // Step 1: spawn the mixer strip.  Synchronously fires onInstStripAdded →
+    // spawnInstTabIfMissing, which creates a default LiveInput InstPage.
+    mMixerPage->addInstChannelAtIndex (newIdx);
+
+    // Step 2: locate the just-spawned InstPage so we can flip its source mode.
+    InstPage* ip = nullptr;
+    int       ribbonId = -1;
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
+        if (auto* p = dynamic_cast<InstPage*> (entry->component.get()))
+            if (p->getPageIndex() == newIdx)
+            {
+                ip = p;
+                ribbonId = entry->ribbonTabId;
+                break;
+            }
+    }
+    if (! ip) return;
+
+    // Step 3: load the default kit BEFORE switching source so the engine
+    // exists when rebuildEngineChain runs on setSource.  The race-safe wrapper
+    // creates the engine slot on first call + flips the active flag once the
+    // SFZ is fully parsed.
+    const juce::File defaultKit =
+        juce::File::getSpecialLocation (juce::File::windowsLocalAppData)
+              .getChildFile ("BaySickDAW")
+              .getChildFile ("CoreLibrary")
+              .getChildFile ("Black&Green Guitars")
+              .getChildFile ("Programs")
+              .getChildFile ("01-green_keyswitch.sfz");
+    const bool kitLoaded = mProcessor.loadBaySickGuitarsKit (newIdx, defaultKit);
+
+    // 2026-05-05 dirty-flag wiring: BaySickGuitars APVTS edits + program
+    // swap + per-program cache snapshot all flow through the engine's apvts.
+    // Install the markDirty hook now that the engine exists.
+    wireEngineDirtyHook (mProcessor.getBaySickGuitars (newIdx));
+
+    // Step 4: flip source → triggers chain rebuild + onSourceChanged callback.
+    // rebuildEngineChain pulls the engine pointer from PluginProcessor
+    // (non-null after step 3 succeeded; null otherwise — silent until the
+    // user manually loads a kit via the K-5 program selector).
+    ip->setSource (InstPage::Source::BaySickGuitars);
+
+    // Step 5: hide arm + listen LEDs on the strip — sfizz IS the source.
+    if (mMixerPage) mMixerPage->setInstStripNoLiveInput (newIdx, true);
+
+    // Step 6: register with the unified PianoRollPage so the engine appears
+    // in the dropdown + the InstPage's "Piano Roll" sub-tab can nav-redirect.
+    registerInstSourcePianoRoll (ip);
+
+    // Step 7: rename the tab "Guitar N" (1-based, human-friendly).  Counts
+    // existing Guitars-source tabs to pick N.
+    int guitarNum = 1;
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
+        if (auto* p = dynamic_cast<InstPage*> (entry->component.get()))
+            if (p != ip && p->getSource() == InstPage::Source::BaySickGuitars)
+                ++guitarNum;
+    }
+    const juce::String tabName = "Guitar " + juce::String (guitarNum);
+    ip->setTabName (tabName);
+    if (mRibbon && ribbonId >= 0)
+        mRibbon->renameTab (ribbonId, tabName);
+
+    // Step 8: select the new tab (user just asked to add it).
+    if (mRibbon && ribbonId >= 0)
+    {
+        mRibbon->selectTab (ribbonId);
+        onTabSelected (ribbonId);
+    }
+
+    juce::ignoreUnused (kitLoaded);   // silent failure path covered by step 4
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L-3 (2026-05-05): "+ Add BaySickBasses" handler.  Mirrors the Guitars path
+// above — same 8-step flow, just swaps the kit folder + engine API + tab name.
+// ─────────────────────────────────────────────────────────────────────────────
+void StandaloneEditor::addBaySickBassesTab()
+{
+    if (! mRibbon || ! mMixerPage) return;
+
+    std::array<bool, kMaxInstPages> idxTaken {};
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
+        if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+        {
+            const int i = ip->getPageIndex();
+            if (i >= 0 && i < (int) kMaxInstPages) idxTaken[(size_t) i] = true;
+        }
+    }
+    int newIdx = -1;
+    for (int i = 0; i < (int) kMaxInstPages; ++i)
+        if (! idxTaken[(size_t) i]) { newIdx = i; break; }
+    if (newIdx < 0) return;
+
+    mMixerPage->addInstChannelAtIndex (newIdx);
+
+    InstPage* ip = nullptr;
+    int       ribbonId = -1;
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
+        if (auto* p = dynamic_cast<InstPage*> (entry->component.get()))
+            if (p->getPageIndex() == newIdx)
+            {
+                ip = p;
+                ribbonId = entry->ribbonTabId;
+                break;
+            }
+    }
+    if (! ip) return;
+
+    const juce::File defaultKit =
+        juce::File::getSpecialLocation (juce::File::windowsLocalAppData)
+              .getChildFile ("BaySickDAW")
+              .getChildFile ("CoreLibrary")
+              .getChildFile ("Black&Blue Basses")
+              .getChildFile ("Programs")
+              .getChildFile ("01-darkblack_keysw.sfz");
+    const bool kitLoaded = mProcessor.loadBaySickBassesKit (newIdx, defaultKit);
+
+    wireEngineDirtyHook (mProcessor.getBaySickBasses (newIdx));
+
+    ip->setSource (InstPage::Source::BaySickBasses);
+
+    if (mMixerPage) mMixerPage->setInstStripNoLiveInput (newIdx, true);
+
+    registerInstSourcePianoRoll (ip);
+
+    int bassNum = 1;
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
+        if (auto* p = dynamic_cast<InstPage*> (entry->component.get()))
+            if (p != ip && p->getSource() == InstPage::Source::BaySickBasses)
+                ++bassNum;
+    }
+    const juce::String tabName = "Bass " + juce::String (bassNum);
+    ip->setTabName (tabName);
+    if (mRibbon && ribbonId >= 0)
+        mRibbon->renameTab (ribbonId, tabName);
+
+    if (mRibbon && ribbonId >= 0)
+    {
+        mRibbon->selectTab (ribbonId);
+        onTabSelected (ribbonId);
+    }
+
+    juce::ignoreUnused (kitLoaded);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6177,33 +6534,78 @@ void StandaloneEditor::spawnAndLoadFromEmptyState (PagePresetIO::PageKind kind,
     }
     else if (kind == PagePresetIO::PageKind::Inst)
     {
-        int idx = -1;
-        for (int i = 0; i < kMaxInstPages; ++i)
-        {
-            bool taken = false;
-            for (auto* e : mPages)
-            {
-                if (e && e->type == RibbonTabBar::TabType::Inst)
-                    if (auto* p = dynamic_cast<InstPage*> (e->component.get()))
-                        if (p->getPageIndex() == i) { taken = true; break; }
-            }
-            if (! taken) { idx = i; break; }
-        }
-        if (idx < 0) return;
+        // 2026-05-05 fix (Bug D): peek the saved Source mode from the preset
+        // file BEFORE picking a spawn path.  A preset saved on a sfizz tab
+        // (BaySickGuitars / BaySickBasses) needs the full sfizz spawn flow
+        // (engine create + chain rebuild + hide arm/listen + register
+        // PianoRoll + setSource + matching tab name + setTabSlots refresh).
+        // Previously empty-state load spawned a default LiveInput tab and
+        // just called loadPagePreset, leaving the PageMenuBar with 2-tab
+        // labels and the chain without the sfizz front stage.
+        const auto savedSrc = PagePresetIO::peekSourceMode (presetFile);
 
-        if (mMixerPage) mMixerPage->addInstChannelAtIndex (idx);
+        if (savedSrc == "BaySickGuitars")
+        {
+            addBaySickGuitarsTab();
+        }
+        else if (savedSrc == "BaySickBasses")
+        {
+            addBaySickBassesTab();
+        }
+        else
+        {
+            // LiveInput (or unknown) — use the simple spawn path.
+            int idx = -1;
+            for (int i = 0; i < kMaxInstPages; ++i)
+            {
+                bool taken = false;
+                for (auto* e : mPages)
+                {
+                    if (e && e->type == RibbonTabBar::TabType::Inst)
+                        if (auto* p = dynamic_cast<InstPage*> (e->component.get()))
+                            if (p->getPageIndex() == i) { taken = true; break; }
+                }
+                if (! taken) { idx = i; break; }
+            }
+            if (idx < 0) return;
+            if (mMixerPage) mMixerPage->addInstChannelAtIndex (idx);
+        }
+
+        // Find the just-spawned page (the highest-indexed Inst tab is the
+        // newly-added one — Guitars/Basses spawn helpers don't return its
+        // ribbon id, but mPages was just appended-to).  Apply the preset onto
+        // it; loadPagePreset itself sets source mode + spawns the engine if
+        // the saved kit doesn't match the current default.
+        InstPage* spawned = nullptr;
+        int       spawnedRibbonId = -1;
+        int       highestIdx = -1;
         for (auto* e : mPages)
         {
-            if (e && e->type == RibbonTabBar::TabType::Inst)
-                if (auto* p = dynamic_cast<InstPage*> (e->component.get()))
-                    if (p->getPageIndex() == idx)
-                    {
-                        if (mRibbon) mRibbon->selectTab (e->ribbonTabId);
-                        onTabSelected (e->ribbonTabId);
-                        p->loadPagePreset (presetFile);
-                        return;
-                    }
+            if (! e || e->type != RibbonTabBar::TabType::Inst) continue;
+            if (auto* p = dynamic_cast<InstPage*> (e->component.get()))
+            {
+                if (p->getPageIndex() > highestIdx)
+                {
+                    highestIdx = p->getPageIndex();
+                    spawned = p;
+                    spawnedRibbonId = e->ribbonTabId;
+                }
+            }
         }
+        if (spawned == nullptr) return;
+
+        // Apply the preset BEFORE the final onTabSelected so setTabSlots
+        // captures the right (4-tab for sfizz / 2-tab for live-input) label
+        // list.  loadPagePreset's setSource will have run by the time
+        // onTabSelected reads getActiveTabLabels.
+        spawned->loadPagePreset (presetFile);
+
+        if (mRibbon && spawnedRibbonId >= 0)
+        {
+            mRibbon->selectTab (spawnedRibbonId);
+            onTabSelected (spawnedRibbonId);
+        }
+        return;
     }
     else if (kind == PagePresetIO::PageKind::Clip)
     {
@@ -6361,6 +6763,8 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
                                 ? mProcessor.getBlockSize() : 512;
             eng->prepareToPlay (sr, bs);
             mProcessor.registerClipEngine (audioRow, eng);
+            // 2026-05-05 dirty-flag wiring on the just-installed engine.
+            wireEngineDirtyHook (eng);
         }
     };
 
@@ -6527,6 +6931,114 @@ void StandaloneEditor::registerClipPianoRoll (int idx, ClipsPage* cp)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 2026-05-05 dirty-flag wiring helper.  Each per-engine processor owns its
+// own APVTS that's invisible to the main PluginProcessor's project-dirty
+// listener.  This helper installs a markDirty hook so any APVTS edit on the
+// engine flips the project dirty bit.
+// ─────────────────────────────────────────────────────────────────────────────
+void StandaloneEditor::wireEngineDirtyHook (juce::AudioProcessor* eng)
+{
+    if (eng == nullptr) return;
+    juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+    auto hook = [safeThis] {
+        if (safeThis && safeThis->mProjectManager) safeThis->mProjectManager->markDirty();
+    };
+    if (auto* p = dynamic_cast<HarmlessProcessor*>           (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<BaySickSynthProcessor*>       (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<BaySickBassProcessor*>        (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<VibePlayerProcessor*>         (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<BaySickGuitarsProcessor*>     (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<BaySickBassesProcessor*>      (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<BaySickRustyDrumsProcessor*>  (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<BaySickPedalsProcessor*>      (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<BaySickNAMIRProcessor*>       (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<BaySickVocalProcessor*>       (eng))
+    {
+        p->setOnAnyStateChange (hook);
+        // BaySickVocal embeds a NAM/IR sub-processor; wire it too.
+        wireEngineDirtyHook (&p->getNamIrProcessor());
+        return;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// K-3 (2026-05-05): register / unregister a sfizz-source Inst page
+// (BaySickGuitars / BaySickBasses) with the unified PianoRollPage.
+// ─────────────────────────────────────────────────────────────────────────────
+void StandaloneEditor::registerInstSourcePianoRoll (InstPage* ip)
+{
+    if (! mPianoRollPage || ! ip || ! mPM) return;
+    const auto src = ip->getSource();
+    if (src == InstPage::Source::LiveInput) return;   // nothing to register
+
+    const int idx = ip->getPageIndex();
+    if (idx < 0 || idx >= (int) kMaxInstPages) return;
+
+    const EngineKind kind = (src == InstPage::Source::BaySickGuitars)
+                                ? EngineKind::BaySickGuitars
+                                : EngineKind::BaySickBasses;
+
+    PianoRollConnection conn;
+    auto* pmRaw = mPM.get();
+    conn.dataAccessor = [pmRaw, idx]() -> PianoRollData*
+    {
+        if (! pmRaw) return nullptr;
+        if (idx < 0 || idx >= (int) pmRaw->currentPattern().instRoll.size()) return nullptr;
+        return &pmRaw->currentPattern().instRoll[idx];
+    };
+    conn.patternTimeSigProvider = [pmRaw](int& outNum, int& outDen) {
+        outNum = pmRaw ? pmRaw->currentPattern().tsNum : 4;
+        outDen = pmRaw ? pmRaw->currentPattern().tsDen : 4;
+    };
+    conn.noteColor   = juce::Colour (0xff1c3a8a);   // Inst navy
+    conn.displayName = ip->getTabName();
+
+    // Audition routes directly to the per-instance sfizz processor.  PluginProcessor
+    // owns the engine; query it each call so a kit-reload between clicks doesn't
+    // leave a stale pointer.
+    auto* proc = &mProcessor;
+    if (kind == EngineKind::BaySickGuitars)
+    {
+        conn.auditionMomentary = [proc, idx](int n)
+        {
+            if (auto* eng = proc->getBaySickGuitars (idx))
+                eng->auditionNote (n);
+        };
+        conn.auditionOn  = conn.auditionMomentary;
+        conn.auditionOff = [](int) {};
+    }
+    else if (kind == EngineKind::BaySickBasses)
+    {
+        conn.auditionMomentary = [proc, idx](int n)
+        {
+            if (auto* eng = proc->getBaySickBasses (idx))
+                eng->auditionNote (n);
+        };
+        conn.auditionOn  = conn.auditionMomentary;
+        conn.auditionOff = [](int) {};
+        // L-4 (2026-05-05): bass range — default top of view to C4 (MIDI 48)
+        // so the user lands on the playable register on first open.
+        conn.defaultTopNote = 48;
+    }
+
+    conn.rollMode = PianoRollContainer::RollMode::Standard;
+
+    mPianoRollPage->registerEngine ({ kind, idx }, conn);
+}
+
+void StandaloneEditor::unregisterInstSourcePianoRoll (InstPage* ip)
+{
+    if (! mPianoRollPage || ! ip) return;
+    const auto src = ip->getSource();
+    if (src == InstPage::Source::LiveInput) return;
+    const int idx = ip->getPageIndex();
+    const EngineKind kind = (src == InstPage::Source::BaySickGuitars)
+                                ? EngineKind::BaySickGuitars
+                                : EngineKind::BaySickBasses;
+    mPianoRollPage->unregisterEngine ({ kind, idx });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // G-4 (2026-04-28): Vox + Inst empty-state + spawn + piano-roll registration.
 // Mirror of the G-2/G-3 Clips helpers — same shape, different page color +
 // different default engine list.
@@ -6617,6 +7129,10 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
             eng->prepareToPlay (sr, bs);
             mProcessor.registerVoxEngine (voxIdx, eng);
         }
+        // 2026-05-05 dirty-flag wiring: install on the BaySickVocal processor
+        // (its embedded NAM/IR sub-processor is wired transitively inside
+        // wireEngineDirtyHook's BaySickVocal branch).
+        wireEngineDirtyHook (cpRaw->getVocalProcessor());
     };
     // H-6b (2026-05-01): VoxPage now creates BaySickVocal in its constructor,
     // before this onEngineChanged callback was wired.  Register the engine
@@ -6712,6 +7228,15 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
             mProcessor.registerInstEngine (instIdx, eng);
         }
     };
+
+    // 2026-05-05 dirty-flag wiring: install the markDirty hook on the
+    // BaySickPedals + BaySickNAM/IR processors owned by this InstPage.  Their
+    // APVTS edits don't reach the main PluginProcessor's listener, so without
+    // this wiring rack edits / NAM file load / IR load wouldn't flip the
+    // project dirty bit.  BaySickGuitars (when source != LiveInput) is wired
+    // separately in addBaySickGuitarsTab + the K-6 deserialize path.
+    wireEngineDirtyHook (cpRaw->getPedalsProcessor());
+    wireEngineDirtyHook (cpRaw->getNamIrProcessor());
 
     // G-6 (2026-04-29): right-click engine-picker context menu callbacks.
     cpRaw->onDuplicateRequested = [this, cpRaw] { spawnDuplicateInstTab (cpRaw); };
@@ -8031,6 +8556,46 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
             rec->setAttribute ("name",       ip->getTabName());
             rec->setAttribute ("engine",     (int) ip->getEngineType());
             rec->setAttribute ("engineData", encodeEngineState (ip->getEngineProcessor()));
+            // K-6 follow-up (2026-05-05): the chain wrapper's getStateInformation
+            // is empty — capturing it leaves BaySickPedals + BaySickNAM/IR state
+            // unsaved.  exportInstState() walks the page's owned mPedalsProc +
+            // mNamIrProc and serializes their state into a single XML blob
+            // (the same one used for the right-click Duplicate flow).
+            rec->setAttribute ("instChainState", ip->exportInstState());
+
+            // K-6 (2026-05-05): persist sfizz-source state for BaySickGuitars
+            // (and BaySickBasses, when L-5 lands).  source attribute drives
+            // the deserialize dispatch; kitPath restores the chosen program;
+            // sfizzEngineData captures the per-instance engine's APVTS + the
+            // current kit path; ProgramStateCache child preserves every
+            // program's user tweaks so swapping back restores them.
+            const auto src = ip->getSource();
+            if (src == InstPage::Source::BaySickGuitars
+                || src == InstPage::Source::BaySickBasses)
+            {
+                rec->setAttribute ("source",
+                    src == InstPage::Source::BaySickGuitars ? "BaySickGuitars" : "BaySickBasses");
+
+                if (src == InstPage::Source::BaySickGuitars)
+                {
+                    if (auto* eng = mProcessor.getBaySickGuitars (ip->getPageIndex()))
+                    {
+                        rec->setAttribute ("kitPath", eng->getCurrentKitPath().getFullPathName());
+                        rec->setAttribute ("sfizzEngineData", encodeEngineState (eng));
+                    }
+                }
+                else if (src == InstPage::Source::BaySickBasses)
+                {
+                    if (auto* eng = mProcessor.getBaySickBasses (ip->getPageIndex()))
+                    {
+                        rec->setAttribute ("kitPath", eng->getCurrentKitPath().getFullPathName());
+                        rec->setAttribute ("sfizzEngineData", encodeEngineState (eng));
+                    }
+                }
+
+                if (auto* cacheXml = ip->serializeProgramCacheXml())
+                    rec->addChildElement (cacheXml);
+            }
         }
         // J-9 (2026-05-05): BaySickRustyDrums singleton tab.  Singleton means
         // pageIndex is always 0 and there's at most one of these in mPages.
@@ -8054,21 +8619,42 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
 // `clearAllDynamicTabs` path + clean up mPages explicitly via onTabClosed.
 void StandaloneEditor::closeAllDynamicTabs()
 {
-    // Collect ids first - onTabClosed mutates mPages.
+    // 2026-05-06: project-load barrier.  Set BEFORE teardown so the audio
+    // thread bails on the next callback while we're tearing down engines +
+    // pages.  Sleep ~30ms to let any in-flight processBlock complete (covers
+    // up to 1024-sample buffers at 44.1kHz).  Cleared at the end so audio
+    // resumes when the new project finishes loading.
+    mProcessor.setProjectLoadInProgress (true);
+    juce::Thread::sleep (30);
+
+    // 2026-05-06: extended scope to ALL dynamic tab types (was Layers/Bass/
+    // Drums only).  Inst/Vox/Clip/Rusty all hold engines that need teardown
+    // through onTabClosed (engine destroy + mixer-strip removal + slot
+    // index freeing) — without this, project re-open leaks the old engines
+    // (each sfizz Guitars/Basses kit is ~400-500MB) and the next project
+    // load piles a new instance on top of the zombie.
     juce::Array<int> toClose;
     for (auto& e : mPages)
     {
+        if (! e) continue;
+        const bool isRusty = dynamic_cast<BaySickRustyDrumsPage*> (e->component.get()) != nullptr;
         if (e->type == RibbonTabBar::TabType::Layers
             || e->type == RibbonTabBar::TabType::Bass
-            || e->type == RibbonTabBar::TabType::Drums)
+            || e->type == RibbonTabBar::TabType::Drums
+            || e->type == RibbonTabBar::TabType::Inst
+            || e->type == RibbonTabBar::TabType::Vox
+            || e->type == RibbonTabBar::TabType::Clip
+            || isRusty)
         {
             toClose.add (e->ribbonTabId);
         }
     }
     for (int id : toClose)
-        onTabClosed (id);   // removes mPages entry + frees index slot
+        onTabClosed (id);   // removes mPages entry + frees index slot + destroys engine
     if (mRibbon)
         mRibbon->clearAllDynamicTabs();   // unconditional ribbon wipe
+
+    mProcessor.setProjectLoadInProgress (false);
 }
 
 void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
@@ -8104,10 +8690,11 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             const int newId = mRibbon->addTab (RibbonTabBar::TabType::Layers,
                                                 name.isNotEmpty() ? name : "Layers");
             if (lp && name.isNotEmpty()) lp->setTabName (name);
-            lp->onEngineSelected = [this, newId, pageIndex] {
+            lp->onEngineSelected = [this, newId, pageIndex, lp] {
                 const auto* tab = mRibbon->getTabById (newId);
                 if (mMixerPage)   mMixerPage->addLayerChannel (pageIndex, tab ? tab->name : "Layers");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                wireEngineDirtyHook (lp->getEngineProcessor());
             };
             lp->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
@@ -8155,10 +8742,11 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             const int newId = mRibbon->addTab (RibbonTabBar::TabType::Bass,
                                                 name.isNotEmpty() ? name : "Bass");
             if (bp && name.isNotEmpty()) bp->setTabName (name);
-            bp->onEngineSelected = [this, newId, pageIndex] {
+            bp->onEngineSelected = [this, newId, pageIndex, bp] {
                 const auto* tab = mRibbon->getTabById (newId);
                 if (mMixerPage)   mMixerPage->addBassChannel (pageIndex, tab ? tab->name : "Bass");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                wireEngineDirtyHook (bp->getEngineProcessor());
             };
             bp->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
@@ -8254,7 +8842,26 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
         }
         else if (type == "Inst")
         {
+            // K-6 (2026-05-05): branch on the saved source attribute.  Live-input
+            // path (existing) when source is missing or "LiveInput".  sfizz-source
+            // (BaySickGuitars / BaySickBasses) takes a separate restore flow that
+            // spawns the page, switches source, loads the saved kit via the
+            // race-safe wrapper, then overlays the saved engine state + cache.
+            const juce::String source = rec->getStringAttribute ("source");
+            const bool sfizzSource = (source == "BaySickGuitars" || source == "BaySickBasses");
+
             spawnInstTabIfMissing (pageIndex, /*selectAfter*/ false);
+
+            // K-6 follow-up (2026-05-05): ensure the mixer strip exists at
+            // pageIndex.  restoreStripNames only creates strips that have a
+            // non-default name (legacy "persist renames only" semantics) —
+            // BaySickGuitars / live-input Inst tabs that the user never
+            // renamed get their strip dropped on save/load, leaving the
+            // InstPage with no audio path to the bus.  addInstChannelAtIndex
+            // is idempotent (early-returns when the strip already exists), so
+            // calling it here is safe even when restoreStripNames already ran.
+            if (mMixerPage) mMixerPage->addInstChannelAtIndex (pageIndex);
+
             for (auto* entry : mPages)
             {
                 if (! entry) continue;
@@ -8266,9 +8873,127 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                     ip->setTabName (name);
                     if (mRibbon) mRibbon->renameTab (entry->ribbonTabId, name);
                 }
-                if (engine.isNotEmpty())
-                    ip->selectEngine ((InstPage::EngineType) engine.getIntValue());
-                applyEngineState (ip->getEngineProcessor(), engineData);
+
+                // K-6 follow-up (2026-05-05): restore BaySickPedals + BaySickNAM/IR
+                // state via importInstState — applies to live-input AND sfizz
+                // Inst tabs.  Without this, Pedals + NAM/IR settings reset to
+                // defaults on every project load.
+                {
+                    const juce::String chainXml = rec->getStringAttribute ("instChainState");
+                    if (chainXml.isNotEmpty())
+                        ip->importInstState (chainXml);
+                }
+
+                if (sfizzSource
+                    && (source == "BaySickGuitars" || source == "BaySickBasses"))
+                {
+                    const bool isGuitars = source == "BaySickGuitars";
+                    const auto sourceMode = isGuitars
+                                              ? InstPage::Source::BaySickGuitars
+                                              : InstPage::Source::BaySickBasses;
+                    const juce::String engineRootTag = isGuitars
+                                                          ? "BaySickGuitarsState"
+                                                          : "BaySickBassesState";
+
+                    // 1) Switch source first so chain rebuild + Player tab + Piano
+                    //    Roll sub-tab + program button all wire up correctly.
+                    //    Engine doesn't exist yet — chain will fall through to
+                    //    Pedals+NAMIR until step 3 creates it.
+                    ip->setSource (sourceMode);
+
+                    // 2) Hide arm/listen LEDs on the strip (sfizz IS the source).
+                    if (mMixerPage) mMixerPage->setInstStripNoLiveInput (pageIndex, true);
+
+                    // 3) Race-safe load of the saved kit (creates engine slot,
+                    //    flips processing-enabled false → loadKit → true).
+                    //    Falls back to that source's default kit if the saved
+                    //    path is gone.
+                    juce::File savedKit (rec->getStringAttribute ("kitPath"));
+                    if (! savedKit.existsAsFile())
+                    {
+                        savedKit = juce::File::getSpecialLocation (juce::File::windowsLocalAppData)
+                                          .getChildFile ("BaySickDAW")
+                                          .getChildFile ("CoreLibrary");
+                        savedKit = isGuitars
+                            ? savedKit.getChildFile ("Black&Green Guitars")
+                                       .getChildFile ("Programs")
+                                       .getChildFile ("01-green_keyswitch.sfz")
+                            : savedKit.getChildFile ("Black&Blue Basses")
+                                       .getChildFile ("Programs")
+                                       .getChildFile ("01-darkblack_keysw.sfz");
+                    }
+                    if (isGuitars)
+                        mProcessor.loadBaySickGuitarsKit (pageIndex, savedKit);
+                    else
+                        mProcessor.loadBaySickBassesKit  (pageIndex, savedKit);
+
+                    // 2026-05-05 dirty-flag wiring on the just-created engine.
+                    wireEngineDirtyHook (isGuitars
+                                         ? (juce::AudioProcessor*) mProcessor.getBaySickGuitars (pageIndex)
+                                         : (juce::AudioProcessor*) mProcessor.getBaySickBasses  (pageIndex));
+
+                    // 4) Apply saved engine state (APVTS).  J-9 race fix:
+                    //    setStateInformation re-runs loadKit WITHOUT the active-
+                    //    flag protection, so we decode the blob and replaceState
+                    //    directly on the apvts instead.
+                    const juce::String sfizzData = rec->getStringAttribute ("sfizzEngineData");
+                    if (sfizzData.isNotEmpty())
+                    {
+                        juce::AudioProcessor* eng = isGuitars
+                            ? (juce::AudioProcessor*) mProcessor.getBaySickGuitars (pageIndex)
+                            : (juce::AudioProcessor*) mProcessor.getBaySickBasses  (pageIndex);
+                        juce::AudioProcessorValueTreeState* apv = nullptr;
+                        if (isGuitars)
+                        {
+                            if (auto* g = mProcessor.getBaySickGuitars (pageIndex)) apv = &g->apvts;
+                        }
+                        else
+                        {
+                            if (auto* b = mProcessor.getBaySickBasses (pageIndex))  apv = &b->apvts;
+                        }
+                        if (eng != nullptr && apv != nullptr)
+                        {
+                            juce::MemoryBlock mb;
+                            if (mb.fromBase64Encoding (sfizzData))
+                            {
+                                if (auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+                                {
+                                    if (xml->hasTagName (engineRootTag))
+                                    {
+                                        auto root2 = juce::ValueTree::fromXml (*xml);
+                                        if (auto apvtsState = root2.getChildWithName (
+                                                apv->state.getType()); apvtsState.isValid())
+                                        {
+                                            apv->replaceState (apvtsState);
+                                            for (auto* p : eng->getParameters())
+                                                if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (p))
+                                                    ranged->setValueNotifyingHost (ranged->getValue());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 5) Restore the per-program state cache.
+                    if (auto* cacheXml = rec->getChildByName ("ProgramStateCache"))
+                        ip->restoreProgramCacheFromXml (*cacheXml);
+
+                    // 6) Register with PianoRollPage now that source + engine
+                    //    are both live.
+                    registerInstSourcePianoRoll (ip);
+
+                    // 7) Refresh chain (engine pointer now non-null) + Player
+                    //    panel (re-binds widgets to the restored APVTS state).
+                    ip->notifySourceEngineChanged();
+                }
+                else
+                {
+                    // Live-input Inst (existing path).
+                    if (engine.isNotEmpty())
+                        ip->selectEngine ((InstPage::EngineType) engine.getIntValue());
+                    applyEngineState (ip->getEngineProcessor(), engineData);
+                }
                 break;
             }
         }
@@ -8283,11 +9008,12 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             if (dp2 && name.isNotEmpty()) dp2->setTabName (name);
             if (dp2)
             {
-                dp2->onEngineSelected = [this, newId, pageIndex] {
+                dp2->onEngineSelected = [this, newId, pageIndex, dp2] {
                     const auto* tab = mRibbon->getTabById (newId);
                     if (mMixerPage)   mMixerPage->addDrumChannel (pageIndex, tab ? tab->name : "Drums");
                     if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                     refreshAllKitViews();
+                    wireEngineDirtyHook (dp2->getEngineProcessor());
                 };
                 dp2->onSoundNameChanged = [this, newId, pageIndex, dp2] (const juce::String& nm) {
                     if (nm.isEmpty()) return;

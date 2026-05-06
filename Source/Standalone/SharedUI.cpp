@@ -5889,6 +5889,7 @@ void ParametricEQDisplay::drawPhaseCurve(juce::Graphics& g) const
 
 // ============================================================ VUMeter
 float VUMeter::sCalibrationDb = -18.f;
+std::function<void()> VUMeter::sOnCalibrationChanged;
 
 VUMeter::VUMeter(Style style) : mStyle(style)
 {

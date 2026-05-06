@@ -651,15 +651,36 @@ BaySickPedalsEditor::BaySickPedalsEditor (BaySickPedalsProcessor& proc)
         mLastTypes[s] = proc.getSlotType (s);
     }
     startTimerHz (10);
+
+    // 2026-05-05 (Bug B fix): subscribe to bulk-restore notifications so we
+    // rebuild every tile when the processor swaps DSP pointers behind our
+    // back (page preset load, project load, pedalboard preset load).  The
+    // timer-based rebuild only catches type-CHANGES — same-type DSP swaps
+    // need this explicit signal.
+    juce::Component::SafePointer<BaySickPedalsEditor> safeThis (this);
+    mProc.onSlotsExternallyChanged = [safeThis]
+    {
+        if (auto* e = safeThis.getComponent())
+        {
+            for (int s = 0; s < BaySickPedalsProcessor::kNumSlots; ++s)
+            {
+                e->mLastTypes[s] = e->mProc.getSlotType (s);
+                if (e->mTiles[s]) e->mTiles[s]->rebuild();
+            }
+        }
+    };
 }
 
 BaySickPedalsEditor::~BaySickPedalsEditor()
 {
     // Defensive cleanup: stop the rebuild-detector timer FIRST so it can't
-    // fire on a half-destroyed tile array, then explicitly tear down each
-    // tile (which cleans the APVTS button attachments + child panels) before
-    // the base AudioProcessorEditor destructor runs.
+    // fire on a half-destroyed tile array, then drop the external-change
+    // callback (the lambda's SafePointer would also catch this, but explicit
+    // is cheaper than waiting for the next message-thread pump), then
+    // explicitly tear down each tile (which cleans the APVTS button
+    // attachments + child panels) before the base destructor runs.
     stopTimer();
+    mProc.onSlotsExternallyChanged = nullptr;
     for (auto& tile : mTiles) tile.reset();
 }
 

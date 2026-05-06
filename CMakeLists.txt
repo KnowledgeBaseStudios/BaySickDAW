@@ -356,8 +356,11 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/Standalone/DrumPage.cpp
     Source/Standalone/BaySickRustyDrumsPage.cpp   # J-6 (2026-05-03)
     # G-7 — unified Page Preset save / load
+    # 2026-05-05 consolidation: AriaPagePresetIO + RustyDrumsPagePresetIO
+    # folded into PagePresetIO; both shim files deleted.  Every page-type
+    # (Layers / Bass / Drum / Clip / Vox / Inst / RustyDrums) now uses the
+    # one PagePresetIO::PageChainConfig API.
     Source/Standalone/PagePresetIO.cpp
-    Source/Standalone/RustyDrumsPagePresetIO.cpp   # J-8 Part D
     Source/Standalone/DrumKitGrid.cpp
     Source/Standalone/PianoRoll.cpp
     Source/Standalone/PianoRollPage.cpp
@@ -371,7 +374,12 @@ target_sources(BaySickDAWStandalone PRIVATE
     # Phase J-2 — BaySickRustyDrums (sfizz-driven drum-kit engine; editor lands in J-8)
     Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp
     Source/BaySickRustyDrums/BaySickRustyDrumsKitGraphic.cpp
-    Source/BaySickRustyDrums/AriaControlPanel.cpp
+    # K-5 (2026-05-05): AriaControlPanel moved to Source/Standalone/ (shared by Rusty + Guitars + Basses)
+    Source/Standalone/AriaControlPanel.cpp
+    # Phase K-1 — BaySickGuitars (sfizz-driven melodic guitar engine; one per Inst page; editor lands in K-5)
+    Source/BaySickGuitars/BaySickGuitarsProcessor.cpp
+    # Phase L-1 — BaySickBasses (sfizz-driven melodic bass engine; mirrors Guitars; one per Inst page)
+    Source/BaySickBasses/BaySickBassesProcessor.cpp
     # Phase I-3b — App-wide MIDI Learn registry (right-click "MIDI Learn" UI lands in I-3c)
     Source/MidiLearn/MidiLearnRegistry.cpp
     # Phase H-1+ — BaySickVocal engine (vocal chain processor + editor)
@@ -407,7 +415,7 @@ target_compile_definitions(BaySickDAWStandalone
     PUBLIC ${VIBESYNTH_DEFS} VIBESYNTH_STANDALONE=1
 )
 
-target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn
+target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn
     # Rubber Band Library (Phase 4B time-stretch) — headers only; link rubberband.lib to enable DSP
     "${CMAKE_CURRENT_SOURCE_DIR}/libs/rubberband"
     # ASIO SDK include path (empty when SDK absent — harmless to leave in the list).
@@ -427,6 +435,17 @@ target_link_libraries(BaySickDAWStandalone
 if(BAYSICK_HAS_NAM_CORE)
     target_link_libraries(BaySickDAWStandalone PRIVATE BaySickNAMCore)
     target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_NAM_CORE=1)
+    # K-6 follow-up (2026-05-05): force whole-archive linking so MSVC keeps
+    # every .obj from BaySickNAMCore — including wavenet/model.cpp's
+    # `static nam::ConfigParserHelper _register_WaveNet(...)` static
+    # initializer.  Without this, MSVC's linker dead-strips the .obj because
+    # nothing in the consumer code references it directly (the registry-based
+    # architecture system reaches it only via indirection), and the runtime
+    # ConfigParserRegistry stays empty → "No config parser registered for
+    # architecture: WaveNet" when the user tries to load a NAM model.
+    if(MSVC)
+        target_link_options(BaySickDAWStandalone PRIVATE /WHOLEARCHIVE:BaySickNAMCore)
+    endif()
 endif()
 
 # Phase J — link sfizz (SFZ player engine) when vendored.

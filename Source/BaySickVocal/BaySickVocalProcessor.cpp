@@ -126,6 +126,16 @@ BaySickVocalProcessor::BaySickVocalProcessor()
     // the Vox processor so its state is captured by getStateInformation
     // (page preset save/load picks it up automatically).
     mNamIrProc = std::make_unique<BaySickNAMIRProcessor>();
+
+    // 2026-05-05 dirty-flag wiring: the vocal-chain rack's slot lifecycle
+    // (load/clear/move/bypass) doesn't write to apvts, so chain it manually
+    // into the engine's dirty hook the same path apvts edits use.
+    mVocalChainRack.onSlotsChanged = [this]
+    {
+        // mDirtyTracker.onAny is the editor-installed markDirty closure;
+        // safe to call even when null (handled inside the lambda we set).
+        if (auto& fn = mDirtyTracker.onAny) fn();
+    };
 }
 
 // ─── Audio lifecycle ──────────────────────────────────────────────────────────

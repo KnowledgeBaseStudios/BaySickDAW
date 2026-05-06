@@ -58,7 +58,22 @@ public:
     // J-6: 1-instance lock query — set by StandaloneEditor; the dropdown
     // hides "+ Add BaySickRustyDrums" when this returns true.
     std::function<bool()>                             onIsBaySickRustyDrumsActive;
+    // K-4 (2026-05-05): "+ Add BaySickGuitars" entry in the Inst dropdown.
+    // Multi-instance; fires when the user picks the entry.  Cap is shared
+    // with classic LiveInput Inst pages + BaySickBasses pages — total
+    // ≤ kMaxInstPages.  RibbonTabBar greys the entry when onIsInstCapReached()
+    // returns true.
+    std::function<void()>                             onAddBaySickGuitarsRequest;
+    // L-3 (2026-05-05): "+ Add BaySickBasses" entry in the Inst dropdown.
+    // Same cap-shared semantics as Guitars.
+    std::function<void()>                             onAddBaySickBassesRequest;
+    // K-4: shared cap query — true when total Inst-type pages (LiveInput +
+    // BaySickGuitars + BaySickBasses) hits kMaxInstPages.
+    std::function<bool()>                             onIsInstCapReached;
     std::function<void(int tabId, const juce::String& newName)> onTabRenamed;
+    // 2026-05-05 dirty-flag wiring: fired when a tab's lock state actually
+    // toggles (no fire on no-op set).  Editor wires to ProjectManager::markDirty.
+    std::function<void(int tabId, bool locked)>                  onTabLockChanged;
     // D1.4-fix: editor-side rename intercept.  Return true to suppress the
     // ribbon's default rename dialog (editor handles it).  Used for Drum
     // tabs whose name == "User Patch" → re-routed to Save Patch As.

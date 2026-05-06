@@ -356,6 +356,15 @@ class PatternManager
 public:
     PatternManager();
 
+    // 2026-05-05 dirty-flag wiring: fired from every pattern-side mutation
+    // (note edits, pattern CRUD, arrangement add/remove, time-marker
+    // add/remove, color change, TS change).  StandaloneEditor wires it to
+    // ProjectManager::markDirty.  Note-edit fires arrive via
+    // notifyContentChanged(); pattern/arrangement/time-marker mutations call
+    // notifyContentChanged() at the end of each mutator.
+    std::function<void()> onAnyChange;
+    void notifyContentChanged() { if (onAnyChange) onAnyChange(); }
+
     // ── Pattern CRUD ──────────────────────────────────────────────────────
     int           addPattern      (const juce::String& name = "");
     int           duplicatePattern (int srcIndex);   // deep-copy; returns new index

@@ -1986,6 +1986,16 @@ void MixerPage::refreshLiveInputStrip (int channelId)
     strip->setInputChannelLabel (name);
 }
 
+// K-2 (2026-05-05): toggle the noLiveInput flag on an Inst strip — sfizz
+// sources (BaySickGuitars / BaySickBasses) hide arm + listen LEDs since the
+// engine IS the source.  No-op if the strip at idx doesn't exist.
+void MixerPage::setInstStripNoLiveInput (int idx, bool b)
+{
+    auto it = mInstStrips.find (idx);
+    if (it == mInstStrips.end() || ! it->second) return;
+    it->second->setNoLiveInput (b);
+}
+
 void MixerPage::addInstChannelAtIndex(int idx)
 {
     if (idx < 0 || idx >= MixerChannelIds::kMaxInstStrips) return;
@@ -2299,6 +2309,38 @@ void MixerPage::removeAuxChannel(int idx)
                     mAuxOrder.end());
     // Note: InsertNode + APVTS params intentionally preserved so re-creating
     // an aux at the same idx restores its prior settings.
+    if (getWidth() > 0) resized();
+}
+
+// 2026-05-05: orphaned-strip cleanup.  When a tab close fires we destroy the
+// page + engine, but pre-this-fix the matching mixer strip was never removed
+// from mInstStrips / mVoxStrips / mClipsStrips.  The next addInstChannelAtIndex
+// (et al) would then bail at `if (count(idx) > 0) return;` and the user
+// couldn't re-add a tab at that slot.  These helpers drop the strip widget +
+// the order entry; the underlying VibeGraph InsertNode + APVTS params stay
+// alive so re-adding the same idx restores prior settings (matches the Aux
+// remove convention above).
+void MixerPage::removeInstChannel(int idx)
+{
+    mInstStrips.erase(idx);
+    mInstOrder.erase(std::remove(mInstOrder.begin(), mInstOrder.end(), idx),
+                     mInstOrder.end());
+    if (getWidth() > 0) resized();
+}
+
+void MixerPage::removeVoxChannel(int idx)
+{
+    mVoxStrips.erase(idx);
+    mVoxOrder.erase(std::remove(mVoxOrder.begin(), mVoxOrder.end(), idx),
+                    mVoxOrder.end());
+    if (getWidth() > 0) resized();
+}
+
+void MixerPage::removeClipChannel(int idx)
+{
+    // Clip strips live in mAudioStrips (keyed by arrangement row index;
+    // there's no separate order vector — they're laid out in row order).
+    mAudioStrips.erase(idx);
     if (getWidth() > 0) resized();
 }
 

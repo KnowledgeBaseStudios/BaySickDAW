@@ -4,6 +4,7 @@
 #include "../Standalone/EngineChainProcessor.h"   // I-16 G-9: Pedals -> NAM/IR chain
 
 class VibeSynthProcessor;
+class AriaControlPanel;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InstPage — host component for one Inst tab.
@@ -29,6 +30,14 @@ public:
     // use this field, but the dispatch site in StandaloneEditor still calls it.
     enum class EngineType { None, BaySickPlayer, BaySickNAMIR };
 
+    // K-2 (2026-05-05): Inst page source mode.  LiveInput is the classic Inst
+    // tab — ASIO live input feeds Pedals → NAM/IR.  BaySickGuitars / BaySickBasses
+    // (L-2) replace the live-input source with a per-page sfizz engine driven
+    // from `Pattern::instRoll[mPageIndex]`.  Source-mode is set by the spawn
+    // path (LiveInput for "+ Add Inst" ribbon entry; BaySickGuitars for
+    // "+ Add BaySickGuitars" ribbon entry).
+    enum class Source { LiveInput, BaySickGuitars, BaySickBasses };
+
     explicit InstPage (int pageIndex);
     ~InstPage() override;
 
@@ -40,9 +49,27 @@ public:
 
     // I-0b: tab labels surfaced through the PageMenuBar's setTabSlots.  Mirrors
     // VoxPage::getTabLabels() pattern.
+    // K-3 (2026-05-05): tab list now depends on source mode.  LiveInput shows
+    // the classic 2-tab layout (Pedals + NAM/IR).  sfizz sources add a "Piano
+    // Roll" tab that nav-redirects to the unified PianoRollPage with this
+    // page's engine selected.  K-5 will add a "Player" tab at the front for
+    // the ARIA control panel.  Caller in StandaloneEditor uses the label
+    // strings (not raw indices) to identify nav-redirect targets, so adding
+    // tabs here doesn't require updating index-based dispatch.
     static juce::StringArray getTabLabels()
     {
-        return { "BaySickPedals", "BaySickNAM/IR" };  // J-6 (2026-05-03): Pre EQ8 M/S removed
+        return { "BaySickPedals", "BaySickNAM/IR" };
+    }
+    juce::StringArray getActiveTabLabels() const
+    {
+        if (mSource == Source::LiveInput)
+            return { "BaySickPedals", "BaySickNAM/IR" };
+        // K-5 (2026-05-05): sfizz source.  Player sub-tab labeled with the
+        // engine name sits leftmost (hosts the ARIA control panel); BaySickPedals
+        // and BaySickNAM/IR follow; Piano Roll nav-redirect is the rightmost tab.
+        const juce::String engineLabel =
+            (mSource == Source::BaySickGuitars) ? "BaySickGuitars" : "BaySickBasses";
+        return { engineLabel, "BaySickPedals", "BaySickNAM/IR", "Piano Roll" };
     }
 
     int          getPageIndex() const noexcept { return mPageIndex; }
@@ -75,6 +102,35 @@ public:
     juce::AudioProcessor* getEngineProcessor() const noexcept;
 
     juce::AudioProcessor* getNamIrProcessor() const noexcept { return mNamIrProc.get(); }
+    juce::AudioProcessor* getPedalsProcessor() const noexcept { return mPedalsProc.get(); }
+
+    // K-2 (2026-05-05): source mode access + setter.  setSource rebuilds the
+    // engine chain (sfizz front-end optional, then Pedals → NAM/IR) and fires
+    // onSourceChanged so MixerPage can flip the strip's noLiveInput flag and
+    // StandaloneEditor can update sub-tab visibility.  Caller must ensure the
+    // PluginProcessor's BaySickGuitars / BaySickBasses engine exists before
+    // calling setSource(...) with a non-LiveInput value (typically via
+    // VibeSynthProcessor::loadBaySickGuitarsKit) — if the engine pointer is
+    // null when the chain is rebuilt, the source effectively produces silence
+    // until a kit loads.
+    Source getSource() const noexcept { return mSource; }
+    void   setSource (Source s);
+    std::function<void(Source)> onSourceChanged;
+
+    // K-6 (2026-05-05): per-program state cache serialization for project
+    // save/load.  serializeProgramCache writes one <Program filename="..."/>
+    // child per cached entry; restoreProgramCacheFromXml reads them back.
+    // The cache holds each program's last APVTS state — losing it on save
+    // would mean every program reverts to kit defaults on project reload
+    // (per-session memory only).
+    juce::XmlElement* serializeProgramCacheXml() const;       // caller takes ownership
+    void              restoreProgramCacheFromXml (const juce::XmlElement& cacheXml);
+
+    // K-2 (2026-05-05): re-pull the source engine pointer from PluginProcessor
+    // and rebuild the chain.  Call after a kit-load creates the engine for the
+    // first time so the chain picks up the new pointer.  Idempotent — calling
+    // when nothing changed is harmless (just rebuilds the same stage list).
+    void notifySourceEngineChanged();
 
     std::function<void()> onEngineDestroying;
     std::function<void()> onEngineChanged;
@@ -117,9 +173,15 @@ private:
     // J-6 EQ unification (2026-05-03): buildEQTab removed.
     void layoutContent (juce::Rectangle<int> r);
     void showEngineContextMenu();
+    // K-2: rebuild the EngineChainProcessor stage list based on mSource.
+    // For LiveInput the chain is {Pedals, NAMIR}.  For BaySickGuitars it's
+    // {Guitars, Pedals, NAMIR} where Guitars is queried from PluginProcessor
+    // via getBaySickGuitars(mPageIndex).  Idempotent + safe to call repeatedly.
+    void rebuildEngineChain();
 
     int                                          mPageIndex { 0 };
     int                                          mActiveTab { 0 };
+    Source                                       mSource    { Source::LiveInput };
     juce::String                                 mTabName;
     juce::String                                 mClipPath;
     bool                                         mLocked { false };
@@ -134,6 +196,37 @@ public:
     juce::Label* getClipFileLabel() noexcept { return &mClipFileLabel; }
 
 private:
+    // K-5 (2026-05-05): ARIA control panel + Player tab host.  Created in the
+    // ctor with a null binding; setSource(BaySickGuitars/Basses) re-binds via
+    // rebuildPlayerPanel() and loads the kit's GUI XML.  Visible only when
+    // source != LiveInput AND active sub-tab == 0.
+    std::unique_ptr<juce::Component>             mPlayerTab;
+    std::unique_ptr<AriaControlPanel>            mAriaPanel;
+    // K-5 UI fix (2026-05-05): replaced ComboBox with a TextButton labeled
+    // "Load Guitar".  ComboBox always shows the selected item — Jeff wants
+    // a stable "click here to pick a program" affordance with the actual
+    // program name surfaced separately on the file-name label.
+    std::unique_ptr<juce::TextButton>            mProgramButton;
+    juce::String                                 mLastProgramFile; // currently-loaded SFZ filename
+    void showProgramPickerMenu();
+    // K-5 fix #4 (2026-05-05): per-program APVTS state cache so swapping
+    // between programs preserves each one's tweaked CC values for the
+    // session.  Keyed by program filename (e.g. "01-green_keyswitch.sfz").
+    // Saved on outgoing program; restored on incoming program if present.
+    // Project save (K-6) will persist this map alongside the kit path.
+    std::map<juce::String, juce::ValueTree>      mProgramStateCache;
+    void rebuildPlayerPanel();
+    void rebuildProgramCombo();
+    void onProgramComboChanged();
+
+public:
+    // K-5: PageMenuBar parks this button in extras-right when the page's
+    // source is sfizz-driven.  Always reads "Load Guitar" — actual loaded
+    // program surfaces on the clip-file label next to it.
+    juce::TextButton* getProgramButton() const { return mProgramButton.get(); }
+
+private:
+
     // BaySickPedals stage (I-1 will replace placeholder with the real processor).
     std::unique_ptr<juce::AudioProcessor>        mPedalsProc;
     std::unique_ptr<juce::AudioProcessorEditor>  mPedalsEditor;

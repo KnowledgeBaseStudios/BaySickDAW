@@ -10,6 +10,23 @@
 #include <filesystem>
 #include <stdexcept>
 
+// 2026-05-05 (Bug C diagnostics): one-off file logger so the get/set state
+// trace works in both Debug and Release builds.  Writes lines to
+// Documents/BaySickDAW/namir_state_log.txt, append-mode.
+namespace
+{
+    void namirLog (const juce::String& line)
+    {
+        const auto logFile = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                 .getChildFile ("BaySickDAW")
+                                 .getChildFile ("namir_state_log.txt");
+        logFile.getParentDirectory().createDirectory();
+        const auto stamped = juce::Time::getCurrentTime().toString (false, true, true, true)
+                              + "  " + line + juce::newLine;
+        logFile.appendText (stamped);
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickNAMIRProcessor — Phase G-1.3 implementation.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -238,6 +255,21 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const int numCh      = buffer.getNumChannels();
     const int numSamples = buffer.getNumSamples();
     if (numCh == 0 || numSamples == 0)
+        return;
+
+    // 2026-05-06 DSP gate: when neither slot has a NAM model AND neither has
+    // an IR loaded, the only DSP work left is mic placement on a dry signal —
+    // a barely-audible coloration.  Skip the whole pipeline (input gain,
+    // model, cab, mic placement, output gain) and let the input pass through
+    // unchanged.  Effect on user audio: passthrough = same as before this
+    // gate, since with nothing loaded the chain was approximately a unity
+    // pipeline anyway.  Saves the per-block cost of every IIR filter +
+    // gain stage on Inst tabs that haven't loaded a NAM yet.
+    const bool noModelOrIr =
+           ! hasNamModel (0) && ! hasNamModel (1)
+        && getIrFilePath (0).isEmpty()
+        && getIrFilePath (1).isEmpty();
+    if (noModelOrIr)
         return;
 
     // C.4 Phase 2.2: refresh engine-level SC RMS for any internal mod source.
@@ -834,6 +866,13 @@ void BaySickNAMIRProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty ("ir_filepath_b",  mIrPaths [1], nullptr);
     state.setProperty ("mic_user_ir_path", mMicSim.getUserIrPath(), nullptr);
 
+    // 2026-05-05 (Bug C diagnostics): log what's being saved.
+    namirLog ("getStateInformation:");
+    namirLog ("  nam_filepath  ='" + mNamPaths[0] + "'");
+    namirLog ("  ir_filepath   ='" + mIrPaths [0] + "'");
+    namirLog ("  nam_filepath_b='" + mNamPaths[1] + "'");
+    namirLog ("  ir_filepath_b ='" + mIrPaths [1] + "'");
+
     // H-6d: capture the currently-active slot's APVTS values into its
     // snapshot before serializing.  The other slot's snapshot already holds
     // its captured state from the last slot switch (or defaults).  Remove
@@ -861,6 +900,13 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
     {
+        // 2026-05-05 (Bug C diagnostics): log to a file so it works in both
+        // Debug and Release builds.  Output goes to
+        // Documents/BaySickDAW/namir_state_log.txt (open in Notepad).
+        namirLog ("setStateInformation: rootTag=" + xml->getTagName()
+                  + " expected=" + apvts.state.getType().toString()
+                  + " size=" + juce::String (sizeInBytes));
+
         if (xml->hasTagName (apvts.state.getType()))
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
@@ -869,11 +915,40 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
             mNamPaths[1] = apvts.state.getProperty ("nam_filepath_b", {}).toString();
             mIrPaths [1] = apvts.state.getProperty ("ir_filepath_b",  {}).toString();
 
+            namirLog ("  nam_filepath  ='" + mNamPaths[0] + "'");
+            namirLog ("  ir_filepath   ='" + mIrPaths [0] + "'");
+            namirLog ("  nam_filepath_b='" + mNamPaths[1] + "'");
+            namirLog ("  ir_filepath_b ='" + mIrPaths [1] + "'");
+
             juce::String err;
-            if (mNamPaths[0].isNotEmpty()) loadNamModel        (mNamPaths[0], err, 0);
-            if (mNamPaths[1].isNotEmpty()) loadNamModel        (mNamPaths[1], err, 1);
-            if (mIrPaths [0].isNotEmpty()) loadImpulseResponse (mIrPaths [0], err, 0);
-            if (mIrPaths [1].isNotEmpty()) loadImpulseResponse (mIrPaths [1], err, 1);
+            if (mNamPaths[0].isNotEmpty())
+            {
+                const bool ok = loadNamModel (mNamPaths[0], err, 0);
+                namirLog ("  loadNamModel slot=0 ok=" + juce::String (ok ? 1 : 0)
+                          + " err='" + err + "'");
+                err.clear();
+            }
+            if (mNamPaths[1].isNotEmpty())
+            {
+                const bool ok = loadNamModel (mNamPaths[1], err, 1);
+                namirLog ("  loadNamModel slot=1 ok=" + juce::String (ok ? 1 : 0)
+                          + " err='" + err + "'");
+                err.clear();
+            }
+            if (mIrPaths [0].isNotEmpty())
+            {
+                const bool ok = loadImpulseResponse (mIrPaths[0], err, 0);
+                namirLog ("  loadImpulseResponse slot=0 ok=" + juce::String (ok ? 1 : 0)
+                          + " err='" + err + "'");
+                err.clear();
+            }
+            if (mIrPaths [1].isNotEmpty())
+            {
+                const bool ok = loadImpulseResponse (mIrPaths[1], err, 1);
+                namirLog ("  loadImpulseResponse slot=1 ok=" + juce::String (ok ? 1 : 0)
+                          + " err='" + err + "'");
+                err.clear();
+            }
 
             // H-6d: restore both per-slot snapshots if present.  Snapshots
             // hold per-slot tone state (knobs + mic sim/placement params +
@@ -926,6 +1001,17 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
                 }
             }
             juce::ignoreUnused (err);
+
+            // 2026-05-05 (Bug C fix): notify the editor so file-name labels
+            // refresh.  setStateInformation reloaded the NAM/IR correctly
+            // (audio works) but the editor's labels are only updated by
+            // explicit browse/load calls — without this hook the user sees
+            // "(no model loaded)" even though the model is active.  Posted
+            // async so the audio thread (if it pumped this load via
+            // project-load) doesn't run editor mutation directly.
+            if (onStateRestored)
+                juce::MessageManager::callAsync (
+                    [cb = onStateRestored] { if (cb) cb(); });
         }
     }
 }

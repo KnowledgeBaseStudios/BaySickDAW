@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "BaySickSynthDSP.h"
 #include "../DSP/EngineSidechainHelper.h"
+#include "../Standalone/ApvtsDirtyTracker.h"
 
 // ── BaySickSynthProcessor ─────────────────────────────────────────────────────
 // AudioProcessor wrapper for BaySickSynthDSP.
@@ -45,6 +46,9 @@ public:
 
     // ── Public interface ──────────────────────────────────────────────────────
     juce::AudioProcessorValueTreeState apvts;
+
+    // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).
+    void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
     BaySickSynthDSP& getSynth() { return mSynth; }
 
@@ -145,6 +149,9 @@ private:
         int   lfoDivision   { -1 };
         float lfoHostBPM    { -1.f };
     } mCache;
+
+    // 2026-05-05 dirty-flag wiring.  Declared LAST so apvts is fully constructed.
+    ApvtsDirtyTracker mDirtyTracker { apvts };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickSynthProcessor)
 };

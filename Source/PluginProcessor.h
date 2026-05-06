@@ -200,6 +200,31 @@ public:
     // the previous program).
     void resetBaySickRustyDrumsMixerState();
 
+    // K-2 (2026-05-05): BaySickGuitars per-instance lifecycle.  Each Inst page
+    // whose source = BaySickGuitars owns one slot in the per-instance array.
+    // PluginProcessor owns the engines so it can drive them on the audio thread
+    // alongside the existing Inst chain dispatch.  The `mGuitarsActive[idx]`
+    // atomic gates audio-thread access during kit-load (sfizz hash maps are
+    // mutated by loadSfzFile and not safe to read concurrently with renderBlock).
+    class BaySickGuitarsProcessor* getBaySickGuitars (int instIdx) noexcept;
+    // Creates the engine at slot `instIdx` if absent + loads the kit at sfzPath.
+    // Active flag dance: false → drain audio thread → loadKit → true.  Returns
+    // true on success.  Idempotent — calling with same path on a loaded slot
+    // no-ops cleanly.
+    bool loadBaySickGuitarsKit (int instIdx, const juce::File& sfzPath);
+    // Tear-down: drop the engine at slot `instIdx` (clears the atomic first).
+    // APVTS params persist as zombies (JUCE doesn't allow unregister) — they
+    // simply have no listener once the engine is gone.
+    void destroyBaySickGuitars (int instIdx);
+
+    // L-2 (2026-05-05): BaySickBasses per-instance lifecycle.  Mirrors the
+    // Guitars pattern above — separate per-slot arrays so a single Inst tab
+    // can be in only one source mode at a time + the engines coexist when
+    // multiple tabs of different source modes are open.
+    class BaySickBassesProcessor* getBaySickBasses (int instIdx) noexcept;
+    bool loadBaySickBassesKit (int instIdx, const juce::File& sfzPath);
+    void destroyBaySickBasses (int instIdx);
+
     // R2 (2026-04-23): live-input ASIO channel persistence.  Index lives in
     // APVTS as `<prefix>_inputChannelIdx` (Int -1..127, default -1).  The
     // channel NAME (e.g. "Mic 1") is stored as a non-APVTS attribute on
@@ -585,12 +610,50 @@ private:
     juce::AudioBuffer<float>                               mRustyDrumsScratch; // J-7a: per-block render target
     juce::MidiBuffer                                       mRustyDrumsMidi;    // J-7a: per-block MIDI feed
 
+    // K-2 (2026-05-05): BaySickGuitars per-instance engines.  Up to kMaxInstPages
+    // total instances; one engine per Inst page whose source = BaySickGuitars.
+    // Lock array (one SpinLock per slot) avoids cross-instance contention when
+    // one tab's kit-load doesn't need to stall another tab's audio thread.
+    std::array<juce::SpinLock, kMaxInstPages>                                       mGuitarsEngineLock;
+    std::array<std::unique_ptr<class BaySickGuitarsProcessor>, kMaxInstPages>       mGuitarsEngine;
+    std::array<std::atomic<bool>, kMaxInstPages>                                    mGuitarsActive {}; // value-init → all false
+
+    // L-2 (2026-05-05): BaySickBasses per-instance engines.  Same pattern as
+    // Guitars above; the two source modes share the kMaxInstPages cap (one
+    // Inst slot is in exactly one mode at a time, but different tabs can
+    // hold different modes).
+    std::array<juce::SpinLock, kMaxInstPages>                                       mBassesEngineLock;
+    std::array<std::unique_ptr<class BaySickBassesProcessor>, kMaxInstPages>        mBassesEngine;
+    std::array<std::atomic<bool>, kMaxInstPages>                                    mBassesActive {};
+
     // I-16 G-9 (2026-05-03): per-page FilePlay flag.  Pre-scan in processBlock
     // sets these for pages whose linked recorded clip overlaps the current
     // playhead window.  Engine loop skips flagged pages (the audio-clip
     // rendering loop will drive their engine via the FilePlay branch instead).
     std::array<bool, kMaxVoxPages>                         mVoxFilePlayActive {};
     std::array<bool, kMaxInstPages>                        mInstFilePlayActive {};
+
+    // 2026-05-06 Option A: per-tab idle-block counter for sfizz Inst tabs +
+    // Rusty.  Increments each block where the tab has no MIDI activity AND
+    // sfizz reports 0 active voices AND no audition pending.  When the
+    // counter exceeds kIdleSuspendBlocks, the tab's entire chain (sfizz +
+    // Pedals + NAMIR + insert rack + EQ) is skipped on this block.  Wakes
+    // immediately on the next block where any of those gates fail (MIDI,
+    // voice activity, audition).  Audio-thread-only state — no atomics.
+    static constexpr int kIdleSuspendBlocks = 9;   // ~200ms at 256/44.1k
+    std::array<int, kMaxInstPages> mInstIdleBlocks {};
+    int mRustyIdleBlocks { 0 };
+
+    // 2026-05-06 Option A (bus extension): per-receive-bus idle counter.
+    // When the bus accumulator has been silent for kBusIdleBlocks consecutive
+    // blocks (~1.4s at 256/44.1k), skip the entire bus pipeline (preEq +
+    // rack + postEq + polarity/width + fader + pan + meter).  Threshold is
+    // larger than per-tab so most reverb / delay tails decay before we cut.
+    // Index matches kBusSets order: Vox, Inst, Vox2, Inst2, Inst3.
+    static constexpr int kBusIdleBlocks = 60;     // ~1.4s
+    std::array<int, 5> mBusSetIdleBlocks {};
+    int mClipsBusIdleBlocks { 0 };
+    int mRustyBusIdleBlocks { 0 };
 
     // R3 (2026-04-23): Live-input audio capture for Vox / Inst strips.
     // mLiveInputSnapshot - non-cleared copy of the input channels before
@@ -628,6 +691,19 @@ public:
     std::atomic<bool>   mSongMode { false };
     void setSongMode(bool b) { mSongMode.store(b, std::memory_order_relaxed); }
     bool isSongMode() const  { return mSongMode.load(std::memory_order_relaxed); }
+
+    // 2026-05-06: project-load barrier.  Set true at the start of project
+    // open / restoreBackup / closeAllDynamicTabs; the audio thread's
+    // processBlock checks this at entry and bails (clears buffer + returns)
+    // when set, so teardown of engines + InstPages is safe from concurrent
+    // audio-thread access.  Without this, project re-open while audio is
+    // running can crash inside a half-destroyed sub-engine (e.g. NAMIR /
+    // MicPlacement IIR filter dereferences after the processor was freed).
+    std::atomic<bool> mProjectLoadInProgress { false };
+    void setProjectLoadInProgress (bool b) noexcept
+        { mProjectLoadInProgress.store (b, std::memory_order_release); }
+    bool isProjectLoadInProgress() const noexcept
+        { return mProjectLoadInProgress.load (std::memory_order_acquire); }
 
     // P4: current project folder (for resolving relative audioFilePath strings).
     // Guarded by mProjectFolderLock since both message + audio threads read it.

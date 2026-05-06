@@ -82,17 +82,17 @@ void VoxPage::buildEnginePicker()
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 helpers — Vox preset folder + recursive folder→submenu walker.
 // ─────────────────────────────────────────────────────────────────────────────
+// 2026-05-05 consolidation: route every Vox preset through PagePresetIO's
+// per-kind directory ("Vox Page/My Presets") so saved files appear in the
+// load submenu (the previous `Vox/` literal didn't match where save wrote).
 static juce::File voxPresetsRootDir()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-              .getChildFile ("BaySickDAW")
-              .getChildFile ("Presets")
-              .getChildFile ("Vox");
+    return PagePresetIO::presetsDirForPageKind (PagePresetIO::PageKind::Vox);
 }
 
 static juce::File voxMyPresetsDir()
 {
-    return voxPresetsRootDir().getChildFile ("My Presets");
+    return PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Vox);
 }
 
 static void addVoxPresetDirToMenu (juce::PopupMenu& menu,

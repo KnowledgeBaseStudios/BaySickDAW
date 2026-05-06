@@ -7,6 +7,7 @@
 #include "../DSP/EngineSidechainHelper.h"
 #include "../DSP/MicSimDSP.h"
 #include "../DSP/MicPlacementDSP.h"
+#include "../Standalone/ApvtsDirtyTracker.h"
 
 // Forward declaration so we don't drag Eigen into every translation unit that
 // includes this header.  Full definition is included only inside the .cpp.
@@ -83,6 +84,12 @@ public:
 
     // ── Public state access ───────────────────────────────────────────────────
     juce::AudioProcessorValueTreeState apvts;
+
+    // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).  NAM file load,
+    // IR file load, mic-sim / mic-placement / oversampling toggle, A/B compare
+    // edits — every APVTS change fires this.  StandaloneEditor wires it to
+    // ProjectManager::markDirty.
+    void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
     // ── A/B slot helpers ──────────────────────────────────────────────────────
     // Active slot read from APVTS `ab_slot` (0 = A, 1 = B).  Returns 0 on
@@ -167,6 +174,14 @@ public:
     }
     float getSidechainLevel() const noexcept override { return mScHelper.getLevel(); }
 
+    // 2026-05-05 (Bug C fix): editor subscribes to this so a bulk state
+    // restore (page preset load, project load) refreshes the file-name
+    // labels + slot snapshot UI.  Without this, setStateInformation
+    // reloads the NAM model + IR correctly (audio works) but the editor
+    // still shows "(no model loaded)" because nothing tells it to call
+    // updateLabels.
+    std::function<void()> onStateRestored;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -250,6 +265,9 @@ private:
 
     void captureSnapshotFromCurrent (int slot);
     void applySnapshotToCurrent     (int slot);
+
+    // 2026-05-05 dirty-flag wiring.  Declared LAST so apvts is fully constructed.
+    ApvtsDirtyTracker mDirtyTracker { apvts };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickNAMIRProcessor)
 };

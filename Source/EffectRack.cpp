@@ -185,6 +185,8 @@ void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidO
 
     // Publish: audio's next process() will std::swap active <-> pending.
     mSlots[slot].swapPending.store (true, std::memory_order_release);
+
+    if (onSlotsChanged) onSlotsChanged();
 }
 
 void EffectRack::clearSlot(int slot)
@@ -215,6 +217,8 @@ void EffectRack::clearSlot(int slot)
     mSlots[slot].bypassed.store (false, std::memory_order_relaxed);
     mSlots[slot].uuid     = {};
     mSlots[slot].swapPending.store (true, std::memory_order_release);
+
+    if (onSlotsChanged) onSlotsChanged();
 }
 
 void EffectRack::moveSlotUp(int slot)
@@ -237,6 +241,8 @@ void EffectRack::moveSlotUp(int slot)
     drain (mSlots[slot]);
     drain (mSlots[slot - 1]);
     std::swap (mSlots[slot], mSlots[slot - 1]);
+
+    if (onSlotsChanged) onSlotsChanged();
 }
 
 void EffectRack::moveSlotDown(int slot)
@@ -255,6 +261,8 @@ void EffectRack::moveSlotDown(int slot)
     drain (mSlots[slot]);
     drain (mSlots[slot + 1]);
     std::swap (mSlots[slot], mSlots[slot + 1]);
+
+    if (onSlotsChanged) onSlotsChanged();
 }
 
 void EffectRack::setSlotBypassed(int slot, bool bypass)
@@ -266,6 +274,8 @@ void EffectRack::setSlotBypassed(int slot, bool bypass)
     // the DSP's own bypassed flag (DSPBase::bypassed) is no longer the source
     // of truth for rack-owned effects -- we don't sync it.
     mSlots[slot].bypassed.store (bypass, std::memory_order_relaxed);
+
+    if (onSlotsChanged) onSlotsChanged();
 }
 
 void EffectRack::packSlotsToTop()
@@ -316,6 +326,8 @@ void EffectRack::packSlotsToTop()
         }
     }
     // `leaving` destructs here — any old effect tear-downs happen outside the lock.
+
+    if (onSlotsChanged) onSlotsChanged();
 }
 
 // ── Audio thread ──────────────────────────────────────────────────────────────
@@ -494,7 +506,10 @@ void EffectRack::process(juce::AudioBuffer<float>& buffer)
 
 void EffectRack::setSlotOutputGain(int slot, float db)
 {
-    if (slot >= 0 && slot < kNumSlots) mSlots[slot].outputGainDb = db;
+    if (slot < 0 || slot >= kNumSlots) return;
+    if (mSlots[slot].outputGainDb == db) return;   // skip dirty fire on no-op
+    mSlots[slot].outputGainDb = db;
+    if (onSlotsChanged) onSlotsChanged();
 }
 float EffectRack::getSlotOutputGain(int slot) const
 {

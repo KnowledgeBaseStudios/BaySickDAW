@@ -1540,6 +1540,48 @@ void VibeGraph::processBlock(juce::AudioBuffer<float>& outputBuf,
 }
 
 // ── EffectRack getters ────────────────────────────────────────────────────────
+// 2026-05-05 dirty-flag wiring: walk every currently-known rack and chain
+// its onSlotsChanged into VibeGraph::onAnyRackChanged.  Called by
+// PluginProcessor after it sets the onAnyRackChanged callback.  ensureInsertNode
+// also wires per-insert racks at creation time, so this only needs to cover
+// pre-built ones (bus + per-page + already-existing inserts).
+void VibeGraph::rebindAllRackHooks()
+{
+    auto fire = [this]() { if (onAnyRackChanged) onAnyRackChanged(); };
+
+    auto chain = [&fire] (EffectRack* r) { if (r) r->onSlotsChanged = fire; };
+
+    chain (getLayersBusRack());
+    chain (getBassBusRack());
+    chain (getDrumsBusRack());
+    chain (getMasterRack());
+    chain (getEffectsBusRack());
+    chain (getAudioClipsBusRack());
+    chain (getVoxBusRack());
+    chain (getInstBusRack());
+    chain (getVoxBus2Rack());
+    chain (getInstBus2Rack());
+    chain (getInstBus3Rack());
+    chain (getRustyDrumsBusRack());
+
+    for (int i = 0; i < (int) mLayerPageRacks.size(); ++i)  chain (&mLayerPageRacks[(size_t) i]);
+    for (int i = 0; i < (int) mBassPageRacks.size();  ++i)  chain (&mBassPageRacks[(size_t) i]);
+
+    auto walkInserts = [&chain] (auto& m)
+    {
+        for (auto& [k, v] : m)
+            if (v) chain (&v->rack);
+    };
+    walkInserts (mLayerInserts);
+    walkInserts (mBassInserts);
+    walkInserts (mDrumInserts);
+    walkInserts (mAudioInserts);
+    walkInserts (mAuxInserts);
+    walkInserts (mVoxInserts);
+    walkInserts (mInstInserts);
+    walkInserts (mRustyInserts);
+}
+
 EffectRack* VibeGraph::getLayersBusRack()     { return mLayersNode       ? &mLayersNode      ->rack : nullptr; }
 EffectRack* VibeGraph::getBassBusRack()       { return mBassNode         ? &mBassNode        ->rack : nullptr; }
 EffectRack* VibeGraph::getDrumsBusRack()      { return mDrumsNode        ? &mDrumsNode       ->rack : nullptr; }
@@ -1693,37 +1735,44 @@ void VibeGraph::saveRackStates(juce::ValueTree& parent)
 {
     if (!mTopologyBuilt) return;
 
-    auto addNode = [&](const juce::String& id, EffectRack& rack, EQ8MsDSP& eq)
+    // 2026-05-05: every node with a §P4.3 pre-rack EQ8 M/S now writes a
+    // `preEq` property alongside the existing post-rack `eq`.  Older saves
+    // without `preEq` round-trip cleanly — applyRackStates only restores
+    // the property when it's present.
+    auto addNode = [&](const juce::String& id, EffectRack& rack,
+                        EQ8MsDSP& preEq, EQ8MsDSP& eq)
     {
         juce::ValueTree node("BusRack");
         node.setProperty("id", id, nullptr);
 
-        juce::MemoryBlock rackData, eqData;
-        rack.getStateInformation(rackData);
-        eq  .getStateInformation(eqData);
-        node.setProperty("rack", encodeBlock(rackData), nullptr);
-        node.setProperty("eq",   encodeBlock(eqData),   nullptr);
+        juce::MemoryBlock rackData, preEqData, eqData;
+        rack .getStateInformation(rackData);
+        preEq.getStateInformation(preEqData);
+        eq   .getStateInformation(eqData);
+        node.setProperty("rack",  encodeBlock(rackData),  nullptr);
+        node.setProperty("preEq", encodeBlock(preEqData), nullptr);
+        node.setProperty("eq",    encodeBlock(eqData),    nullptr);
 
         parent.addChild(node, -1, nullptr);
     };
 
-    addNode("LayersBus",  mLayersNode    ->rack, mLayersNode    ->busEq);
-    addNode("BassBus",    mBassNode      ->rack, mBassNode      ->busEq);
-    addNode("DrumsBus",   mDrumsNode     ->rack, mDrumsNode     ->busEq);
-    addNode("Master",     mMasterNode    ->rack, mMasterNode    ->busEq);
-    addNode("EffectsBus", mEffectsBusNode->rack, mEffectsBusNode->busEq);
+    addNode("LayersBus",  mLayersNode    ->rack, mLayersNode    ->preEq, mLayersNode    ->busEq);
+    addNode("BassBus",    mBassNode      ->rack, mBassNode      ->preEq, mBassNode      ->busEq);
+    addNode("DrumsBus",   mDrumsNode     ->rack, mDrumsNode     ->preEq, mDrumsNode     ->busEq);
+    addNode("Master",     mMasterNode    ->rack, mMasterNode    ->preEq, mMasterNode    ->busEq);
+    addNode("EffectsBus", mEffectsBusNode->rack, mEffectsBusNode->preEq, mEffectsBusNode->busEq);
 
     // 2026-04-24: the three special-bus InstrChannelNode racks (Audio Clips,
     // Vox, Inst) were silently dropped before - they're stored as separate
     // member pointers, not in mInstrChannelNodes, so the loop below missed
     // them.  Save each alongside the fixed buses.
-    if (mAudioClipsBusNode) addNode ("ClipsBus", mAudioClipsBusNode->rack, mAudioClipsBusNode->eq);
-    if (mVoxBusNode)        addNode ("VoxBus",   mVoxBusNode->rack,        mVoxBusNode->eq);
-    if (mInstBusNode)       addNode ("InstBus",  mInstBusNode->rack,       mInstBusNode->eq);
-    if (mVoxBus2Node)       addNode ("VoxBus2",  mVoxBus2Node->rack,       mVoxBus2Node->eq);
-    if (mInstBus2Node)      addNode ("InstBus2", mInstBus2Node->rack,      mInstBus2Node->eq);
-    if (mInstBus3Node)      addNode ("InstBus3", mInstBus3Node->rack,      mInstBus3Node->eq);
-    if (mRustyDrumsBusNode) addNode ("RustyBus", mRustyDrumsBusNode->rack, mRustyDrumsBusNode->eq);
+    if (mAudioClipsBusNode) addNode ("ClipsBus", mAudioClipsBusNode->rack, mAudioClipsBusNode->preEq, mAudioClipsBusNode->eq);
+    if (mVoxBusNode)        addNode ("VoxBus",   mVoxBusNode       ->rack, mVoxBusNode       ->preEq, mVoxBusNode       ->eq);
+    if (mInstBusNode)       addNode ("InstBus",  mInstBusNode      ->rack, mInstBusNode      ->preEq, mInstBusNode      ->eq);
+    if (mVoxBus2Node)       addNode ("VoxBus2",  mVoxBus2Node      ->rack, mVoxBus2Node      ->preEq, mVoxBus2Node      ->eq);
+    if (mInstBus2Node)      addNode ("InstBus2", mInstBus2Node     ->rack, mInstBus2Node     ->preEq, mInstBus2Node     ->eq);
+    if (mInstBus3Node)      addNode ("InstBus3", mInstBus3Node     ->rack, mInstBus3Node     ->preEq, mInstBus3Node     ->eq);
+    if (mRustyDrumsBusNode) addNode ("RustyBus", mRustyDrumsBusNode->rack, mRustyDrumsBusNode->preEq, mRustyDrumsBusNode->eq);
 
     for (int chId : mInstrChannelOrder)
     {
@@ -1734,11 +1783,13 @@ void VibeGraph::saveRackStates(juce::ValueTree& parent)
         juce::ValueTree node("InstrCh");
         node.setProperty("name", ch.name, nullptr);
 
-        juce::MemoryBlock rackData, eqData;
-        ch.rack.getStateInformation(rackData);
-        ch.eq  .getStateInformation(eqData);
-        node.setProperty("rack", encodeBlock(rackData), nullptr);
-        node.setProperty("eq",   encodeBlock(eqData),   nullptr);
+        juce::MemoryBlock rackData, preEqData, eqData;
+        ch.rack .getStateInformation(rackData);
+        ch.preEq.getStateInformation(preEqData);
+        ch.eq   .getStateInformation(eqData);
+        node.setProperty("rack",  encodeBlock(rackData),  nullptr);
+        node.setProperty("preEq", encodeBlock(preEqData), nullptr);
+        node.setProperty("eq",    encodeBlock(eqData),    nullptr);
 
         parent.addChild(node, -1, nullptr);
     }
@@ -1746,6 +1797,8 @@ void VibeGraph::saveRackStates(juce::ValueTree& parent)
     // 2026-04-24: per-insert rack + post-rack EQ state.  Every Layer / Bass /
     // Drum / Audio / Aux / Vox / Inst insert has its own rack - before this,
     // user effect choices on any of those strips were lost on save.
+    // 2026-05-05: also captures the §P4.3 pre-rack EQ (`preEq`) so per-page
+    // presets round-trip both EQs.
     auto addInsertMap = [&](const char* kindStr,
                              const std::map<int, std::unique_ptr<InsertNode>>& m)
     {
@@ -1755,11 +1808,13 @@ void VibeGraph::saveRackStates(juce::ValueTree& parent)
             juce::ValueTree rec ("InsertRack");
             rec.setProperty ("kind",  kindStr, nullptr);
             rec.setProperty ("index", idx,     nullptr);
-            juce::MemoryBlock rackData, eqData;
-            node->rack.getStateInformation (rackData);
-            node->eq  .getStateInformation (eqData);
-            rec.setProperty ("rack", encodeBlock (rackData), nullptr);
-            rec.setProperty ("eq",   encodeBlock (eqData),   nullptr);
+            juce::MemoryBlock rackData, preEqData, eqData;
+            node->rack .getStateInformation (rackData);
+            node->preEq.getStateInformation (preEqData);
+            node->eq   .getStateInformation (eqData);
+            rec.setProperty ("rack",  encodeBlock (rackData),  nullptr);
+            rec.setProperty ("preEq", encodeBlock (preEqData), nullptr);
+            rec.setProperty ("eq",    encodeBlock (eqData),    nullptr);
             parent.addChild (rec, -1, nullptr);
         }
     };
@@ -1814,7 +1869,25 @@ void VibeGraph::loadRackStates(const juce::ValueTree& parent)
 
 void VibeGraph::applyRackStates(const juce::ValueTree& parent)
 {
-    auto restoreNode = [&](const juce::String& id, EffectRack& rack, EQ8MsDSP& eq)
+    // 2026-05-05: when the saved record carries a `preEq` property (added in
+    // the matching saveRackStates change above), restore it onto the node's
+    // §P4.3 pre-rack EQ.  Older saves without `preEq` skip this step — the
+    // missing-property check below keeps backward compatibility.
+    auto restoreEqs = [&](const juce::ValueTree& rec, EQ8MsDSP& preEq, EQ8MsDSP& eq)
+    {
+        if (rec.hasProperty ("preEq"))
+        {
+            juce::MemoryBlock pe;
+            if (decodeBlock (rec.getProperty ("preEq").toString(), pe))
+                preEq.setStateInformation (pe.getData(), (int) pe.getSize());
+        }
+        juce::MemoryBlock eqData;
+        if (decodeBlock (rec.getProperty ("eq").toString(), eqData))
+            eq.setStateInformation (eqData.getData(), (int) eqData.getSize());
+    };
+
+    auto restoreNode = [&](const juce::String& id, EffectRack& rack,
+                            EQ8MsDSP& preEq, EQ8MsDSP& eq)
     {
         for (int i = 0; i < parent.getNumChildren(); ++i)
         {
@@ -1826,26 +1899,24 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
             if (decodeBlock(child.getProperty("rack").toString(), rackData))
                 rack.setStateInformation(rackData.getData(), (int)rackData.getSize());
 
-            juce::MemoryBlock eqData;
-            if (decodeBlock(child.getProperty("eq").toString(), eqData))
-                eq.setStateInformation(eqData.getData(), (int)eqData.getSize());
+            restoreEqs (child, preEq, eq);
 
             return;
         }
     };
 
-    restoreNode("LayersBus",  mLayersNode    ->rack, mLayersNode    ->busEq);
-    restoreNode("BassBus",    mBassNode      ->rack, mBassNode      ->busEq);
-    restoreNode("DrumsBus",   mDrumsNode     ->rack, mDrumsNode     ->busEq);
-    restoreNode("Master",     mMasterNode    ->rack, mMasterNode    ->busEq);
-    restoreNode("EffectsBus", mEffectsBusNode->rack, mEffectsBusNode->busEq);
-    if (mAudioClipsBusNode) restoreNode ("ClipsBus", mAudioClipsBusNode->rack, mAudioClipsBusNode->eq);
-    if (mVoxBusNode)        restoreNode ("VoxBus",   mVoxBusNode->rack,        mVoxBusNode->eq);
-    if (mInstBusNode)       restoreNode ("InstBus",  mInstBusNode->rack,       mInstBusNode->eq);
-    if (mVoxBus2Node)       restoreNode ("VoxBus2",  mVoxBus2Node->rack,       mVoxBus2Node->eq);
-    if (mInstBus2Node)      restoreNode ("InstBus2", mInstBus2Node->rack,      mInstBus2Node->eq);
-    if (mInstBus3Node)      restoreNode ("InstBus3", mInstBus3Node->rack,      mInstBus3Node->eq);
-    if (mRustyDrumsBusNode) restoreNode ("RustyBus", mRustyDrumsBusNode->rack, mRustyDrumsBusNode->eq);
+    restoreNode("LayersBus",  mLayersNode    ->rack, mLayersNode    ->preEq, mLayersNode    ->busEq);
+    restoreNode("BassBus",    mBassNode      ->rack, mBassNode      ->preEq, mBassNode      ->busEq);
+    restoreNode("DrumsBus",   mDrumsNode     ->rack, mDrumsNode     ->preEq, mDrumsNode     ->busEq);
+    restoreNode("Master",     mMasterNode    ->rack, mMasterNode    ->preEq, mMasterNode    ->busEq);
+    restoreNode("EffectsBus", mEffectsBusNode->rack, mEffectsBusNode->preEq, mEffectsBusNode->busEq);
+    if (mAudioClipsBusNode) restoreNode ("ClipsBus", mAudioClipsBusNode->rack, mAudioClipsBusNode->preEq, mAudioClipsBusNode->eq);
+    if (mVoxBusNode)        restoreNode ("VoxBus",   mVoxBusNode       ->rack, mVoxBusNode       ->preEq, mVoxBusNode       ->eq);
+    if (mInstBusNode)       restoreNode ("InstBus",  mInstBusNode      ->rack, mInstBusNode      ->preEq, mInstBusNode      ->eq);
+    if (mVoxBus2Node)       restoreNode ("VoxBus2",  mVoxBus2Node      ->rack, mVoxBus2Node      ->preEq, mVoxBus2Node      ->eq);
+    if (mInstBus2Node)      restoreNode ("InstBus2", mInstBus2Node     ->rack, mInstBus2Node     ->preEq, mInstBus2Node     ->eq);
+    if (mInstBus3Node)      restoreNode ("InstBus3", mInstBus3Node     ->rack, mInstBus3Node     ->preEq, mInstBus3Node     ->eq);
+    if (mRustyDrumsBusNode) restoreNode ("RustyBus", mRustyDrumsBusNode->rack, mRustyDrumsBusNode->preEq, mRustyDrumsBusNode->eq);
 
     for (int i = 0; i < parent.getNumChildren(); ++i)
     {
@@ -1863,15 +1934,14 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
             if (decodeBlock(child.getProperty("rack").toString(), rackData))
                 it->second->rack.setStateInformation(rackData.getData(), (int)rackData.getSize());
 
-            juce::MemoryBlock eqData;
-            if (decodeBlock(child.getProperty("eq").toString(), eqData))
-                it->second->eq.setStateInformation(eqData.getData(), (int)eqData.getSize());
+            restoreEqs (child, it->second->preEq, it->second->eq);
 
             break;
         }
     }
 
     // 2026-04-24: per-insert rack / EQ restore.  Match by kind string + index.
+    // 2026-05-05: also restores the §P4.3 pre-rack EQ when `preEq` is present.
     auto restoreInsert = [&](const juce::String& kindStr,
                               std::map<int, std::unique_ptr<InsertNode>>& m)
     {
@@ -1888,9 +1958,7 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
             if (decodeBlock (child.getProperty ("rack").toString(), rackData))
                 it->second->rack.setStateInformation (rackData.getData(), (int) rackData.getSize());
 
-            juce::MemoryBlock eqData;
-            if (decodeBlock (child.getProperty ("eq").toString(), eqData))
-                it->second->eq.setStateInformation (eqData.getData(), (int) eqData.getSize());
+            restoreEqs (child, it->second->preEq, it->second->eq);
         }
     };
     restoreInsert ("Layer", mLayerInserts);
@@ -2071,6 +2139,12 @@ VibeGraph::ensureInsertNode(InsertKind kind, int index,
         node->prepare(mSampleRate, mBlockSize);
     if (mApvts != nullptr)
         node->rebindApvts(*mApvts);
+
+    // 2026-05-05 dirty-flag wiring: route this freshly-created insert rack's
+    // onSlotsChanged into VibeGraph::onAnyRackChanged → PluginProcessor →
+    // editor's markDirty.  Without this, slot type swaps via the Effects page
+    // wouldn't flip the project dirty bit.
+    node->rack.onSlotsChanged = [this] { if (onAnyRackChanged) onAnyRackChanged(); };
 
     auto* raw = node.get();
     (*m)[index] = std::move(node);
@@ -2343,7 +2417,7 @@ void VibeGraph::rebindBusApvts()
 
 bool VibeGraph::isAnyInsertSoloed() const noexcept
 {
-    for (const auto* m : { &mLayerInserts, &mBassInserts, &mDrumInserts, &mAudioInserts, &mAuxInserts, &mVoxInserts, &mInstInserts })
+    for (const auto* m : { &mLayerInserts, &mBassInserts, &mDrumInserts, &mAudioInserts, &mAuxInserts, &mVoxInserts, &mInstInserts, &mRustyInserts })
         for (const auto& [i, node] : *m)
             if (node->isSoloed())
                 return true;

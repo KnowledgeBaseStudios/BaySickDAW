@@ -2,6 +2,8 @@
 // 2026-04-25: BaySickDrumsProcessor include removed — class deleted.
 #include "BaySickSynth/BaySickSynthProcessor.h"   // D1.4-fix (c): drum transpose compensation
 #include "BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-5: singleton sfizz drum-kit engine
+#include "BaySickGuitars/BaySickGuitarsProcessor.h"        // K-2: per-instance sfizz guitar engines
+#include "BaySickBasses/BaySickBassesProcessor.h"          // L-2: per-instance sfizz bass engines
 #include "VibePlayer/VibePlayerProcessor.h"       // D1.4-fix (c): drum tune compensation
 #include "BaySickVocal/BaySickVocalProcessor.h"   // I-16 G-9: wet recorder hand-off
 #include "DSP/EngineSidechainHelper.h"            // C.4 Phase 2.2: ISidechainEngine for engine-level SC push
@@ -236,6 +238,17 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // 5F-4a Batch 6: cache APVTS pointers in bus + master nodes (needs params registered).
     mVibeGraph.rebindBusApvts();
 
+    // 2026-05-05 dirty-flag wiring: route every VibeGraph rack's lifecycle
+    // events into the editor's project-dirty hook the same way main-APVTS
+    // edits do.  Effects-page slot type swap / move-up/down / clear / bypass
+    // doesn't write apvts, so without this rack lifecycle slips past the
+    // dirty listener.
+    mVibeGraph.onAnyRackChanged = [this]
+    {
+        if (onAnyStateChange) onAnyStateChange();
+    };
+    mVibeGraph.rebindAllRackHooks();
+
     // Compute initial PDC (0 for all current effects) and report to host.
     setLatencySamples(mVibeGraph.updateBusLatencies());
 }
@@ -259,6 +272,18 @@ bool VibeSynthProcessor::isBusesLayoutSupported(const BusesLayout& layouts) cons
 void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                        juce::MidiBuffer& midiMessages)
 {
+    // 2026-05-06: project-load barrier — bail immediately if the message
+    // thread is mid-teardown (closeAllDynamicTabs / openProject /
+    // restoreBackup).  Prevents use-after-free crashes inside engines
+    // currently being destroyed (NAMIR + MicPlacementDSP IIR filter
+    // dereference was the observed crash signature).
+    if (mProjectLoadInProgress.load (std::memory_order_acquire))
+    {
+        buffer.clear();
+        midiMessages.clear();
+        return;
+    }
+
     // 1M: capture wall-clock start time (high-res, audio-thread safe)
     const auto t0 = juce::Time::getHighResolutionTicks();
 
@@ -568,9 +593,22 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                         if (ilk.isLocked())
                         {
                             for (int ii = 0; ii < kMaxInstPages; ++ii)
-                                if (mInstEngines[ii])
-                                    scheduleRoll(sPat.instRoll[ii].notes, instPageMidi[ii],
-                                                 kInstPRTarget + ii);
+                            {
+                                if (! mInstEngines[ii]) continue;
+                                // K-3 / L-2 (2026-05-05): only dispatch the Inst
+                                // piano roll for sfizz-source pages (Guitars /
+                                // Basses).  Live-input Inst pages have no MIDI-
+                                // driven engine — the chain is fed by ASIO +
+                                // recorded clips, so notes scheduled into
+                                // instPageMidi[ii] would just be dropped by
+                                // Pedals/NAMIR.
+                                const bool sourceActive =
+                                    mGuitarsActive[ii].load(std::memory_order_acquire)
+                                    || mBassesActive[ii].load(std::memory_order_acquire);
+                                if (! sourceActive) continue;
+                                scheduleRoll(sPat.instRoll[ii].notes, instPageMidi[ii],
+                                             kInstPRTarget + ii);
+                            }
                         }
                     }
 
@@ -824,6 +862,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 for (int ii = 0; ii < kMaxInstPages; ++ii)
                 {
                     if (! ilkHeld || ! mInstEngines[ii]) continue;
+                    // K-3 / L-2 (2026-05-05): only dispatch instRoll notes when
+                    // the page's source is sfizz-driven (Guitars / Basses).
+                    // Live input chains discard MIDI; skip the schedule for them.
+                    if (! mGuitarsActive[ii].load(std::memory_order_acquire)
+                        && ! mBassesActive[ii].load(std::memory_order_acquire))
+                        continue;
                     for (const auto& note : pat.instRoll[ii].notes)
                     {
                         if (note.muted) continue;
@@ -1222,26 +1266,54 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         juce::SpinLock::ScopedTryLockType lk(mRustyDrumsEngineLock);
         if (lk.isLocked() && mRustyDrumsEngine)
         {
-            mRustyDrumsEngine->processStrips(numSamples, mRustyDrumsMidi);
-            const int stripCount = mRustyDrumsEngine->getStripCount();
-            mRustyDrumsScratch.setSize(numRenderCh, numSamples, false, false, true);
-            for (int s = 0; s < stripCount; ++s)
+            // 2026-05-06 Option A: Rusty idle suspend.  When MIDI is empty +
+            // sfizz reports 0 active voices for kIdleSuspendBlocks consecutive
+            // blocks, skip processStrips + the per-strip insert/route loop.
+            // Drum kits release fast (no long sustain), so this kicks in
+            // quickly after the last hit.  Big win because Rusty has 13
+            // strips — each one runs an InsertNode pipeline per block.
+            const bool midiEmpty = mRustyDrumsMidi.getNumEvents() == 0;
+            const bool noVoices  = mRustyDrumsEngine->getNumActiveVoices() == 0;
+            bool suspended = false;
+            if (midiEmpty && noVoices)
             {
-                mRustyDrumsScratch.clear();
-                auto stripBuf = mRustyDrumsEngine->getStripBuffer(s, numSamples);
-                if (stripBuf.getNumChannels() >= 2 && numRenderCh >= 2)
+                if (mRustyIdleBlocks >= kIdleSuspendBlocks)
+                    suspended = true;
+                else
+                    ++mRustyIdleBlocks;
+            }
+            else
+            {
+                mRustyIdleBlocks = 0;
+            }
+
+            if (suspended)
+            {
+                mRustyDrumsMidi.clear();
+            }
+            else
+            {
+                mRustyDrumsEngine->processStrips(numSamples, mRustyDrumsMidi);
+                const int stripCount = mRustyDrumsEngine->getStripCount();
+                mRustyDrumsScratch.setSize(numRenderCh, numSamples, false, false, true);
+                for (int s = 0; s < stripCount; ++s)
                 {
-                    mRustyDrumsScratch.copyFrom(0, 0, stripBuf, 0, 0, numSamples);
-                    mRustyDrumsScratch.copyFrom(1, 0, stripBuf, 1, 0, numSamples);
+                    mRustyDrumsScratch.clear();
+                    auto stripBuf = mRustyDrumsEngine->getStripBuffer(s, numSamples);
+                    if (stripBuf.getNumChannels() >= 2 && numRenderCh >= 2)
+                    {
+                        mRustyDrumsScratch.copyFrom(0, 0, stripBuf, 0, 0, numSamples);
+                        mRustyDrumsScratch.copyFrom(1, 0, stripBuf, 1, 0, numSamples);
+                    }
+                    else if (stripBuf.getNumChannels() >= 1)
+                    {
+                        mRustyDrumsScratch.copyFrom(0, 0, stripBuf, 0, 0, numSamples);
+                    }
+                    mVibeGraph.processInsert(VibeGraph::InsertKind::Rusty, s,
+                                              mRustyDrumsScratch, bpmForInserts, anySolo);
+                    routeInsertOutput(MixerChannelIds::rustyInsert(s),
+                                       mRustyDrumsScratch, numSamples);
                 }
-                else if (stripBuf.getNumChannels() >= 1)
-                {
-                    mRustyDrumsScratch.copyFrom(0, 0, stripBuf, 0, 0, numSamples);
-                }
-                mVibeGraph.processInsert(VibeGraph::InsertKind::Rusty, s,
-                                          mRustyDrumsScratch, bpmForInserts, anySolo);
-                routeInsertOutput(MixerChannelIds::rustyInsert(s),
-                                   mRustyDrumsScratch, numSamples);
             }
         }
     }
@@ -1430,13 +1502,55 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 mInstEngineScratch.setSize(numRenderCh, numSamples, false, false, true);
                 mInstEngineScratch.clear();
 
+                // K-2 / L-2 (2026-05-05): when this Inst slot's source =
+                // BaySickGuitars or BaySickBasses, the engine chain has the
+                // sfizz processor as its first stage and produces audio from
+                // piano-roll MIDI — no live input is copied into the scratch.
+                // The chain's processBlock will fill the cleared buffer with
+                // sfizz output, then run Pedals/NAMIR on it.
+                const bool guitarsActive = mGuitarsActive[ii].load (std::memory_order_acquire);
+                const bool bassesActive  = mBassesActive [ii].load (std::memory_order_acquire);
+                const bool sfizzActive   = guitarsActive || bassesActive;
+
+                // 2026-05-06 Option A: per-tab idle suspension for sfizz Inst
+                // tabs.  When the tab's MIDI buffer is empty, sfizz has 0
+                // active voices, AND we've stayed in that state for >
+                // kIdleSuspendBlocks blocks (~200ms), skip the ENTIRE chain
+                // (sfizz + Pedals + NAMIR + insert rack + EQ).  Wake instantly
+                // on the next block where any of those gates fails.  Live-
+                // input Inst tabs are NOT suspended (live audio + arm/listen
+                // can fire even with no MIDI).  This is the big DSP win for
+                // many-tab sessions where most tabs are silent at any moment.
+                if (sfizzActive)
+                {
+                    int activeVoices = 0;
+                    if (auto* g = getBaySickGuitars (ii)) activeVoices = g->getNumActiveVoices();
+                    if (activeVoices == 0)
+                        if (auto* b = getBaySickBasses (ii)) activeVoices = b->getNumActiveVoices();
+
+                    const bool midiEmpty = instPageMidi[ii].getNumEvents() == 0;
+                    const bool noVoices  = activeVoices == 0;
+
+                    if (midiEmpty && noVoices)
+                    {
+                        if (mInstIdleBlocks[(size_t) ii] >= kIdleSuspendBlocks)
+                            continue;   // suspended this block
+                        ++mInstIdleBlocks[(size_t) ii];
+                    }
+                    else
+                    {
+                        mInstIdleBlocks[(size_t) ii] = 0;   // wake
+                    }
+                }
+
                 const juce::String instPrefix = "mixer_inst_" + juce::String (ii);
                 const auto* armP = apvts.getRawParameterValue (instPrefix + "_arm");
                 const auto* idxP = apvts.getRawParameterValue (instPrefix + "_inputChannelIdx");
                 const auto* stereoP = apvts.getRawParameterValue (instPrefix + "_inputChannelStereo");
                 const int   chIdx = (idxP != nullptr) ? (int) idxP->load() : -1;
                 const bool  isStereo = (stereoP != nullptr) && stereoP->load() > 0.5f;
-                const bool  armed = (armP != nullptr) && armP->load() > 0.5f
+                const bool  armed = ! sfizzActive
+                                 && (armP != nullptr) && armP->load() > 0.5f
                                  && chIdx >= 0
                                  && chIdx < mLiveInputSnapshot.getNumChannels();
                 if (armed)
@@ -1474,6 +1588,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Inst, ii,
                                           mInstEngineScratch, bpmForInserts, anySolo);
                 // I-16 G-9: armed -> gate routing on _listen.  Unarmed -> route.
+                // K-2: sfizz-source slots always route (no live-input gate).
                 bool routeOutput = true;
                 if (armed)
                 {
@@ -1842,6 +1957,38 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // C.4 Phase 1: push SC array to ClipsBus chain before processing.
             mVibeGraph.pushScArrayToStrip(MixerChannelIds::kClipsBus);
 
+            // 2026-05-06 Option A (bus): ClipsBus idle gate.  Same
+            // hysteresis as the receive-bus loop above (~1.4s) so reverb
+            // tails on the bus rack decay before we cut.  When suspended
+            // we still hand the (silent) buffer to the master rack via
+            // audioClipsBusForGraph so downstream summing stays consistent.
+            bool clipsBusSuspended = false;
+            if (clipsBus.getNumChannels() >= 2)
+            {
+                const float bufMag = juce::jmax (
+                    clipsBus.getMagnitude (0, 0, numSamples),
+                    clipsBus.getMagnitude (1, 0, numSamples));
+                constexpr float kSilentEps = 1.0e-5f;
+                if (bufMag <= kSilentEps)
+                {
+                    if (mClipsBusIdleBlocks >= kBusIdleBlocks)
+                        clipsBusSuspended = true;
+                    else
+                        ++mClipsBusIdleBlocks;
+                }
+                else
+                {
+                    mClipsBusIdleBlocks = 0;
+                }
+            }
+
+            if (clipsBusSuspended)
+            {
+                audioClipsBusForGraph = &clipsBus;
+            }
+            else
+            {
+
             // §P4.3: Audio Clips Bus pre-rack EQ.
             if (auto* preEq = mVibeGraph.getAudioClipsBusPreEQ();
                 preEq != nullptr && clipsBus.getNumChannels() >= 2)
@@ -1964,6 +2111,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
             // Hand the bus buffer to VibeGraph for the master rack.
             audioClipsBusForGraph = &clipsBus;
+            }   // end ! clipsBusSuspended
         }
     }
 
@@ -2062,14 +2210,39 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             || soloOf ("mixer_instbus3")
             || soloOf ("mixer_fx");   // C.1: FX Bus joins receive-group solo
 
+        int busSetIdx = -1;   // 2026-05-06 idle gate: index into mBusSetIdleBlocks
         for (const auto& bs : kBusSets)
         {
+            ++busSetIdx;
             auto* accum = mVibeGraph.getChannelAccumulator (bs.chId);
             if (accum == nullptr) continue;
             auto& buf = *accum;
             if (buf.getNumChannels() < 2) continue;
 
             const juce::String prefix = bs.prefix;
+
+            // 2026-05-06 Option A (bus): when the accumulator is silent for
+            // kBusIdleBlocks consecutive blocks, skip the entire bus pipeline.
+            // Hysteresis is sized so most reverb / delay tails on the bus
+            // rack decay before the gate cuts (kBusIdleBlocks=60 ~1.4s).
+            // Bus output remains silent (correct — input is silent and the
+            // skipped pipeline would have produced silence too).
+            const float bufMag = juce::jmax (buf.getMagnitude (0, 0, numSamples),
+                                              buf.getMagnitude (1, 0, numSamples));
+            constexpr float kSilentEps = 1.0e-5f;
+            if (busSetIdx >= 0 && busSetIdx < (int) mBusSetIdleBlocks.size())
+            {
+                if (bufMag <= kSilentEps)
+                {
+                    if (mBusSetIdleBlocks[(size_t) busSetIdx] >= kBusIdleBlocks)
+                        continue;   // suspended — skip entire bus pipeline
+                    ++mBusSetIdleBlocks[(size_t) busSetIdx];
+                }
+                else
+                {
+                    mBusSetIdleBlocks[(size_t) busSetIdx] = 0;
+                }
+            }
 
             // C.4 Phase 1: push SC array to this bus's chain before processing.
             mVibeGraph.pushScArrayToStrip(bs.chId);
@@ -2225,6 +2398,33 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 auto& buf = *accum;
                 const juce::String prefix = "mixer_rustybus";
 
+                // 2026-05-06 Option A (bus): RustyBus idle gate.  Same
+                // hysteresis as the receive-bus loop (~1.4s) so reverb
+                // tails on the bus rack decay before we cut.  Skip wraps
+                // the entire bus pipeline below (preEq + rack + postEq +
+                // polarity/width + fader + pan + meter + route).
+                bool rustyBusSuspended = false;
+                {
+                    const float bufMag = juce::jmax (
+                        buf.getMagnitude (0, 0, numSamples),
+                        buf.getMagnitude (1, 0, numSamples));
+                    constexpr float kSilentEps = 1.0e-5f;
+                    if (bufMag <= kSilentEps)
+                    {
+                        if (mRustyBusIdleBlocks >= kBusIdleBlocks)
+                            rustyBusSuspended = true;
+                        else
+                            ++mRustyBusIdleBlocks;
+                    }
+                    else
+                    {
+                        mRustyBusIdleBlocks = 0;
+                    }
+                }
+
+                if (! rustyBusSuspended)
+                {
+
                 mVibeGraph.pushScArrayToStrip(MixerChannelIds::kRustyDrumsBus);
 
                 if (auto* preEq = mVibeGraph.getRustyDrumsBusPreEQ()) preEq->process(buf);
@@ -2311,6 +2511,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 }
 
                 routeInsertOutput(MixerChannelIds::kRustyDrumsBus, buf, numSamples);
+                }   // end ! rustyBusSuspended
             }
         }
     }
@@ -4159,6 +4360,136 @@ void VibeSynthProcessor::removeRustyInsert(int idx)
 bool VibeSynthProcessor::hasBaySickRustyDrums() const noexcept
 {
     return mRustyDrumsActive.load (std::memory_order_acquire);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// K-2 (2026-05-05): BaySickGuitars per-instance lifecycle.  Up to kMaxInstPages
+// instances coexist; each Inst page whose source = BaySickGuitars owns one
+// slot.  Mirrors the Rusty pattern but indexed by instIdx instead of singleton.
+// ─────────────────────────────────────────────────────────────────────────────
+
+BaySickGuitarsProcessor* VibeSynthProcessor::getBaySickGuitars (int instIdx) noexcept
+{
+    if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return nullptr;
+    return mGuitarsEngine[(size_t) instIdx].get();
+}
+
+bool VibeSynthProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& sfzPath)
+{
+    if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return false;
+    if (! sfzPath.existsAsFile()) return false;
+
+    // Active flag dance (mirrors Rusty's J-7b race fix): keep the slot's flag
+    // FALSE during the entire load.  loadSfzFile mutates sfizz internal state
+    // for several ms; the audio thread must not call renderBlock against a
+    // half-parsed kit.  Flip true only after load completes.
+    // K-5 fix #5 (2026-05-05): also flip the engine's per-instance
+    // mProcessingEnabled gate so its processBlock early-exits when the audio
+    // thread happens to fire while the SFZ load is mutating sfizz hash maps.
+    // mGuitarsActive[] alone wasn't enough — the chain processor calls the
+    // engine's processBlock directly without checking that flag.
+    mGuitarsActive[(size_t) instIdx].store (false, std::memory_order_release);
+
+    {
+        const juce::SpinLock::ScopedLockType sl (mGuitarsEngineLock[(size_t) instIdx]);
+        if (! mGuitarsEngine[(size_t) instIdx])
+        {
+            mGuitarsEngine[(size_t) instIdx] = std::make_unique<BaySickGuitarsProcessor> (instIdx);
+            mGuitarsEngine[(size_t) instIdx]->prepareToPlay (
+                getSampleRate() > 0.0 ? getSampleRate() : 48000.0,
+                getBlockSize()  > 0   ? getBlockSize()  : 512);
+        }
+    }
+
+    if (auto* eng = mGuitarsEngine[(size_t) instIdx].get())
+        eng->setProcessingEnabled (false);
+
+    if (! mGuitarsEngine[(size_t) instIdx]->loadKit (sfzPath))
+    {
+        // Even on failure, re-enable processing so the slot doesn't sit
+        // permanently silent (the engine will produce silence from the
+        // partially-loaded state until a successful load replaces it).
+        if (auto* eng = mGuitarsEngine[(size_t) instIdx].get())
+            eng->setProcessingEnabled (true);
+        return false;
+    }
+
+    // Now safe — engine fully loaded.  Audio thread can begin rendering.
+    if (auto* eng = mGuitarsEngine[(size_t) instIdx].get())
+        eng->setProcessingEnabled (true);
+    mGuitarsActive[(size_t) instIdx].store (true, std::memory_order_release);
+    return true;
+}
+
+void VibeSynthProcessor::destroyBaySickGuitars (int instIdx)
+{
+    if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return;
+
+    // Flip active flag BEFORE freeing the engine — audio thread reads the flag
+    // first and skips engine access when false.
+    mGuitarsActive[(size_t) instIdx].store (false, std::memory_order_release);
+
+    {
+        const juce::SpinLock::ScopedLockType sl (mGuitarsEngineLock[(size_t) instIdx]);
+        mGuitarsEngine[(size_t) instIdx].reset();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L-2 (2026-05-05): BaySickBasses per-instance lifecycle.  Same active-flag
+// dance + per-slot lock as Guitars above; separate arrays so the two source
+// modes don't collide.  Up to kMaxInstPages instances coexist; one Inst page
+// whose source = BaySickBasses owns one slot.
+// ─────────────────────────────────────────────────────────────────────────────
+
+BaySickBassesProcessor* VibeSynthProcessor::getBaySickBasses (int instIdx) noexcept
+{
+    if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return nullptr;
+    return mBassesEngine[(size_t) instIdx].get();
+}
+
+bool VibeSynthProcessor::loadBaySickBassesKit (int instIdx, const juce::File& sfzPath)
+{
+    if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return false;
+    if (! sfzPath.existsAsFile()) return false;
+
+    mBassesActive[(size_t) instIdx].store (false, std::memory_order_release);
+
+    {
+        const juce::SpinLock::ScopedLockType sl (mBassesEngineLock[(size_t) instIdx]);
+        if (! mBassesEngine[(size_t) instIdx])
+        {
+            mBassesEngine[(size_t) instIdx] = std::make_unique<BaySickBassesProcessor> (instIdx);
+            mBassesEngine[(size_t) instIdx]->prepareToPlay (
+                getSampleRate() > 0.0 ? getSampleRate() : 48000.0,
+                getBlockSize()  > 0   ? getBlockSize()  : 512);
+        }
+    }
+
+    if (auto* eng = mBassesEngine[(size_t) instIdx].get())
+        eng->setProcessingEnabled (false);
+
+    if (! mBassesEngine[(size_t) instIdx]->loadKit (sfzPath))
+    {
+        if (auto* eng = mBassesEngine[(size_t) instIdx].get())
+            eng->setProcessingEnabled (true);
+        return false;
+    }
+
+    if (auto* eng = mBassesEngine[(size_t) instIdx].get())
+        eng->setProcessingEnabled (true);
+    mBassesActive[(size_t) instIdx].store (true, std::memory_order_release);
+    return true;
+}
+
+void VibeSynthProcessor::destroyBaySickBasses (int instIdx)
+{
+    if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return;
+    mBassesActive[(size_t) instIdx].store (false, std::memory_order_release);
+    {
+        const juce::SpinLock::ScopedLockType sl (mBassesEngineLock[(size_t) instIdx]);
+        mBassesEngine[(size_t) instIdx].reset();
+    }
 }
 
 BaySickRustyDrumsProcessor* VibeSynthProcessor::getBaySickRustyDrums() noexcept

@@ -4490,6 +4490,9 @@ void BuilderPage::notifyArrangementChanged()
     if (! mGrid) return;
     mGrid->repaint();
     if (mGrid->onArrangementChanged) mGrid->onArrangementChanged();
+    // 2026-05-05 dirty-flag wiring: every Builder grid mutation routes
+    // through here, so chaining into the PatternManager hook covers them.
+    mPM.notifyContentChanged();
 }
 
 void BuilderPage::timerCallback()

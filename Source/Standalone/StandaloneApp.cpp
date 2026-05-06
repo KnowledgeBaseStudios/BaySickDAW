@@ -76,9 +76,19 @@ struct PlayHeadAdvancer : public juce::AudioIODeviceCallback
             if (out[c] != nullptr)
                 juce::FloatVectorOperations::clear (out[c], n);
 
-        const int  firstCh = juce::jlimit (0, juce::jmax (0, no - 1),
-                                            MasterOutputRouting::gFirstOutputChannel.load (std::memory_order_relaxed));
-        const bool isMono  = MasterOutputRouting::gMasterIsMono.load (std::memory_order_relaxed);
+        const int  rawFirst = MasterOutputRouting::gFirstOutputChannel.load (std::memory_order_relaxed);
+        const bool isMono   = MasterOutputRouting::gMasterIsMono.load (std::memory_order_relaxed);
+        // 2026-05-05 bug fix: clamp the saved channel index so a stereo pair
+        // (firstCh + 1) still fits inside the current device's channel count.
+        // Without this, a saved value larger than the new device's count (e.g.
+        // firstChannel=20 saved on a 22-out ASIO interface, then plugging in
+        // a 2-out USB headset) clamped to no-1 → both mapped[0] and mapped[1]
+        // collapsed onto out[no-1] → player's L and R both written to the same
+        // physical channel → user hears stereo only out of the right speaker.
+        const int  maxFirstStereo = juce::jmax (0, no - 2);
+        const int  firstCh = isMono
+                                 ? juce::jlimit (0, juce::jmax (0, no - 1), rawFirst)
+                                 : juce::jlimit (0, maxFirstStereo,         rawFirst);
 
         if (isMono || no <= 1)
         {
@@ -353,28 +363,49 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
         diagLog << "  device input names count:  " << dev->getInputChannelNames().size() << "\n";
         diagLog << "  device output names count: " << dev->getOutputChannelNames().size() << "\n\n";
 
-        // For ASIO devices, input and output device names must match.  The
-        // settings dialog deliberately leaves audioInputDeviceName alone (to
-        // avoid clobbering across configs), so the saved XML may have only the
-        // output name.  Force them equal when input is empty.
-        if (setup.inputDeviceName.isEmpty() && setup.outputDeviceName.isNotEmpty())
-            setup.inputDeviceName = setup.outputDeviceName;
+        // 2026-05-05: gate the J-A2 mask override to ASIO only.  For Windows-mode
+        // drivers (DirectSound, WASAPI shared/exclusive, "Windows Audio") the
+        // device's natural stereo defaults are already correct — forcing every
+        // device channel active causes JUCE to expose 4/6/8 channels in
+        // processBlock and the Windows audio mixer can route the stereo write
+        // to channels 0+1 onto the wrong physical pair (user-reported bug:
+        // every page audible only on the right speaker after this patch
+        // landed).  ASIO devices still need the patch because their saved XML
+        // typically lacks the input device name + has a zero output mask
+        // (input dialog deliberately left untouched).
+        const auto driverType = mDeviceManager->getCurrentAudioDeviceType();
+        const bool isAsio = driverType.equalsIgnoreCase ("ASIO");
 
-        const int devIns  = dev->getInputChannelNames().size();
-        const int devOuts = dev->getOutputChannelNames().size();
-        if (devIns > 0)
+        if (isAsio)
         {
-            juce::BigInteger ins;
-            ins.setRange (0, devIns, true);
-            setup.inputChannels           = ins;
-            setup.useDefaultInputChannels = false;
+            // For ASIO devices, input and output device names must match.  The
+            // settings dialog deliberately leaves audioInputDeviceName alone (to
+            // avoid clobbering across configs), so the saved XML may have only the
+            // output name.  Force them equal when input is empty.
+            if (setup.inputDeviceName.isEmpty() && setup.outputDeviceName.isNotEmpty())
+                setup.inputDeviceName = setup.outputDeviceName;
+
+            const int devIns  = dev->getInputChannelNames().size();
+            const int devOuts = dev->getOutputChannelNames().size();
+            if (devIns > 0)
+            {
+                juce::BigInteger ins;
+                ins.setRange (0, devIns, true);
+                setup.inputChannels           = ins;
+                setup.useDefaultInputChannels = false;
+            }
+            if (devOuts > 0)
+            {
+                juce::BigInteger outs;
+                outs.setRange (0, devOuts, true);
+                setup.outputChannels           = outs;
+                setup.useDefaultOutputChannels = false;
+            }
         }
-        if (devOuts > 0)
+        else
         {
-            juce::BigInteger outs;
-            outs.setRange (0, devOuts, true);
-            setup.outputChannels           = outs;
-            setup.useDefaultOutputChannels = false;
+            diagLog << "Non-ASIO driver (" << driverType
+                    << ") — leaving channel masks at JUCE defaults.\n\n";
         }
 
         diagLog << "ATTEMPTING setAudioDeviceSetup with:\n";

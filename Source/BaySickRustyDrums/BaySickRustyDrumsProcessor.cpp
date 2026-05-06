@@ -18,18 +18,23 @@ BaySickRustyDrumsProcessor::BaySickRustyDrumsProcessor()
     mSfizz = std::make_unique<sfz::Sfizz>();
     mSfizz->setSampleRate     (static_cast<float>(mSampleRate));
     mSfizz->setSamplesPerBlock (mMaxBlockSize);
+    // 2026-05-06 memory: see BaySickGuitars for rationale.  Drum kits hit
+    // their preload less than melodic kits (samples are short — full file
+    // often within preload, retriggers don't extend tail), so this also has
+    // less risk on Rusty than on long-sustained guitar/bass content.
+    mSfizz->setPreloadSize (4096);
 
     // J-8 stage 2 (2026-05-04): listen on every brd_cc<N> APVTS param so widget
     // edits, automation, and project state restore all funnel into a single
     // sfizz CC dispatch path.  Listener fires on the message thread; sfizz's
     // cc() is documented as message-thread safe when not concurrently rendering.
-    for (int cc = 0; cc < 128; ++cc)
+    for (int cc = 0; cc < kCcCount; ++cc)
         apvts.addParameterListener ("brd_cc" + juce::String (cc), this);
 }
 
 BaySickRustyDrumsProcessor::~BaySickRustyDrumsProcessor()
 {
-    for (int cc = 0; cc < 128; ++cc)
+    for (int cc = 0; cc < kCcCount; ++cc)
         apvts.removeParameterListener ("brd_cc" + juce::String (cc), this);
 }
 
@@ -39,7 +44,7 @@ void BaySickRustyDrumsProcessor::parameterChanged (const juce::String& paramId, 
     // serialization + the panel's getCcValue queries.
     if (! paramId.startsWith ("brd_cc")) return;
     const int cc = paramId.substring (6).getIntValue();
-    if (cc < 0 || cc >= 128) return;
+    if (cc < 0 || cc >= kCcCount) return;
     const int v  = juce::jlimit (0, 127, (int) std::round (newValue));
     {
         const juce::SpinLock::ScopedLockType lk (mCcStateLock);
@@ -61,7 +66,7 @@ void BaySickRustyDrumsProcessor::setHiHatPedalClosed (bool closed)
 // The parameterChanged listener forwards the new value to the sfizz instance.
 void BaySickRustyDrumsProcessor::sendCc (int cc, int value)
 {
-    if (cc < 0 || cc >= 128) return;
+    if (cc < 0 || cc >= kCcCount) return;
     if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
             apvts.getParameter ("brd_cc" + juce::String (cc))))
     {
@@ -69,12 +74,19 @@ void BaySickRustyDrumsProcessor::sendCc (int cc, int value)
     }
 }
 
+int BaySickRustyDrumsProcessor::getNumActiveVoices() const noexcept
+{
+    return mSfizz ? mSfizz->getNumActiveVoices() : 0;
+}
+
 int BaySickRustyDrumsProcessor::getCcValue (int cc) const
 {
-    if (cc < 0 || cc >= 128) return 64;
+    // K-5 fix (2026-05-05): unknown CC fallback is 0 (SFZ-spec "unset = 0")
+    // matching the new APVTS-registered default.
+    if (cc < 0 || cc >= kCcCount) return 0;
     if (auto* raw = apvts.getRawParameterValue ("brd_cc" + juce::String (cc)))
         return juce::jlimit (0, 127, (int) std::round (raw->load()));
-    return 64;
+    return 0;
 }
 
 int BaySickRustyDrumsProcessor::getKitDefaultCc (int cc) const
@@ -82,7 +94,7 @@ int BaySickRustyDrumsProcessor::getKitDefaultCc (int cc) const
     const juce::SpinLock::ScopedLockType lk (mCcKitDefaultLock);
     if (auto it = mCcKitDefault.find (cc); it != mCcKitDefault.end())
         return it->second;
-    return 64;
+    return 0;   // unset CC → 0 (matches SFZ spec; double-click resets to 0)
 }
 
 juce::String BaySickRustyDrumsProcessor::getCcLabel (int cc) const
@@ -101,15 +113,20 @@ BaySickRustyDrumsProcessor::createLayout()
         pid ("outVol"), "Output Volume", 0.0f, 1.0f, 0.8f));
 
     // J-8 stage 2 (2026-05-04): register one Int param per MIDI CC the ARIA
-    // surface might address.  Default 64 (mid) is a placeholder — the kit's
-    // `set_cc<N>=<int>` directives stomp these on loadKit, and the panel's
-    // double-click reset reads from the kit-default snapshot rather than the
-    // APVTS default (which is fixed at registration).  IDs `brd_cc0..127`.
-    for (int cc = 0; cc < 128; ++cc)
+    // surface might address.
+    // K-5 fix (2026-05-05): default 0 (matches SFZ-spec "unset CC = 0" that
+    // sfizz uses internally) instead of 64.  Kit-author `set_cc<N>=<int>`
+    // directives override during loadKit.  Without this, sliders for CCs
+    // the kit doesn't explicitly set sit at midpoint visually but sfizz
+    // hears 0 internally — visual mismatch.
+    // 2026-05-05 audit: range lifted to kCcCount=512 so kit "extended CCs"
+    // >= 128 (e.g. Big Rusty Drums CC400/401) get APVTS-bound the same way.
+    // IDs `brd_cc0..(kCcCount-1)`.
+    for (int cc = 0; cc < kCcCount; ++cc)
         params.push_back (std::make_unique<juce::AudioParameterInt> (
             "brd_cc" + juce::String (cc),
             "CC " + juce::String (cc),
-            0, 127, 64));
+            0, 127, 0));
 
     return { params.begin(), params.end() };
 }
@@ -213,6 +230,13 @@ void BaySickRustyDrumsProcessor::processStrips (int numFrames, juce::MidiBuffer&
     mMultiOutScratch.clear (0, numFrames);
     for (int i = 0; i < neededCh; ++i)
         mMultiOutPtrs[(size_t) i] = mMultiOutScratch.getWritePointer (i);
+
+    // 2026-05-06 DSP gate: skip the multi-out renderBlock when sfizz has no
+    // active voices.  Buffer was just cleared so per-strip views read
+    // silence — same effective output, but skipping the per-piece SFZ
+    // routing + voice scan is a sizable win for Rusty (13 strips).
+    if (mSfizz->getNumActiveVoices() == 0)
+        return;
 
     // J-7b: multi-output render.  Each piece's regions route to output=N
     // via wrapper SFZ injection.  sfizz writes 2*stripCount channels in
@@ -510,7 +534,7 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
                     {
                         const int cc  = t.substring (6, eq).getIntValue();
                         const int val = juce::jlimit (0, 127, t.substring (eq + 1).getIntValue());
-                        if (cc >= 0 && cc < 128) kitDefaults[cc] = val;
+                        if (cc >= 0 && cc < kCcCount) kitDefaults[cc] = val;
                     }
                 }
                 else if (t.startsWithIgnoreCase ("label_cc"))
@@ -523,7 +547,7 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
                     {
                         const int cc = t.substring (8, eq).getIntValue();
                         auto label   = t.substring (eq + 1).trim();
-                        if (cc >= 0 && cc < 128 && label.isNotEmpty())
+                        if (cc >= 0 && cc < kCcCount && label.isNotEmpty())
                             kitLabels[cc] = label;
                     }
                 }
@@ -549,6 +573,16 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
         const juce::SpinLock::ScopedLockType lk (mCcLabelLock);
         mCcLabel = kitLabels;
     }
+    // K-5 fix (2026-05-05): reset every CC to 0 before applying the kit's
+    // set_cc overrides.  Without this, switching programs (e.g. Full → Basic)
+    // leaks the previous program's user-tweaked CC values into the new program.
+    for (int cc = 0; cc < kCcCount; ++cc)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                apvts.getParameter ("brd_cc" + juce::String (cc))))
+            p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (0.0f));
+    }
+
     // Push kit defaults through APVTS — this drives the parameterChanged
     // listener which forwards each value to sfizz.  `gestureSetValue` would
     // be wrong here (would clobber project-restore state); use the ranged

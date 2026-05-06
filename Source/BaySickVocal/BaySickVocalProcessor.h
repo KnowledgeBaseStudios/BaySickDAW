@@ -4,6 +4,7 @@
 #include "../DSP/PitchCorrectorDSP.h"
 #include "../EffectRack.h"
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
+#include "../Standalone/ApvtsDirtyTracker.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickVocalProcessor — Phase H-1 skeleton (2026-05-01)
@@ -69,6 +70,12 @@ public:
 
     // ── Public state access ───────────────────────────────────────────────────
     juce::AudioProcessorValueTreeState apvts;
+
+    // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).  Fires on every
+    // bsv_* APVTS edit (vocals page knobs, vocal-chain rack slot params,
+    // pitch correction params).  StandaloneEditor wires it to markDirty;
+    // the embedded NAMIR sub-processor has its own tracker wired separately.
+    void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
     // H-6c (2026-05-01): Vocal Chain rack -- 4 locked slots in fixed order:
     //   [0] DeEsser  [1] Compressor  [2] Saturation  [3] Limiter
@@ -144,6 +151,9 @@ private:
     // header consumers; full BaySickNAMIRProcessor.h is already included
     // above so we can use make_unique inline.
     std::unique_ptr<BaySickNAMIRProcessor> mNamIrProc;
+
+    // 2026-05-05 dirty-flag wiring.  Declared LAST so apvts is fully constructed.
+    ApvtsDirtyTracker mDirtyTracker { apvts };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickVocalProcessor)
 };

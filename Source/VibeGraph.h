@@ -491,6 +491,18 @@ public:
     EQ8MsDSP*   getInsertEQ     (InsertKind kind, int index);
     EQ8MsDSP*   getInsertPreEQ  (InsertKind kind, int index);   // §P4.3
 
+    // 2026-05-05 dirty-flag wiring: fired from every VibeGraph-owned rack's
+    // onSlotsChanged (per-page racks, bus racks, insert racks).  PluginProcessor
+    // wires this to its own onAnyStateChange so EffectsPage-driven rack
+    // lifecycle (slot type swap, move-up/down, clear, bypass) flips the
+    // project dirty bit.  Per-slot APVTS edits already do via the main
+    // PluginProcessor's listener.
+    std::function<void()> onAnyRackChanged;
+    // After setting onAnyRackChanged, call this once to install the wiring on
+    // every currently-existing rack (bus + per-page + every insert).  ALSO
+    // arms ensureInsertNode to wire any future InsertNode rack the same way.
+    void rebindAllRackHooks();
+
     // Peak dB atomic for UI (one per slot, per kind). Returns -60 if node doesn't exist.
     float       getInsertPeakDb (InsertKind kind, int index) const;
     // 2026-04-30: stereo L/R peak for split DBFSMeter.  Returns {-60, -60} if

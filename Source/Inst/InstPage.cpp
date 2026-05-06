@@ -1,8 +1,12 @@
 #include "InstPage.h"
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
 #include "../BaySickPedals/BaySickPedalsProcessor.h"
+#include "../BaySickGuitars/BaySickGuitarsProcessor.h"   // K-2: sfizz Guitars front-end
+#include "../BaySickBasses/BaySickBassesProcessor.h"     // L-2: sfizz Basses front-end
+#include "../Standalone/AriaControlPanel.h"             // K-5: ARIA panel + Binding
 #include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
+#include "../SampleLibrary.h"                           // K-5: getCoreLibraryDir
 #include "../PluginProcessor.h"
 
 namespace
@@ -98,6 +102,26 @@ InstPage::InstPage (int pageIndex)
     mChain = std::make_unique<EngineChainProcessor>();
     mChain->setChain ({ mPedalsProc.get(), mNamIrProc.get() });
 
+    // K-5 (2026-05-05): Player sub-tab host.  Hidden when source = LiveInput.
+    // Construction binds with an empty Binding (no engine yet); rebuildPlayerPanel
+    // re-binds when setSource flips to a sfizz source AND the engine exists in
+    // PluginProcessor.
+    mPlayerTab = std::make_unique<juce::Component>();
+    mPlayerTab->setName ("Inst Player Tab");
+    addChildComponent (*mPlayerTab);
+
+    AriaControlPanel::Binding emptyBinding{};
+    mAriaPanel = std::make_unique<AriaControlPanel> (emptyBinding);
+    mPlayerTab->addAndMakeVisible (*mAriaPanel);
+
+    // K-5 / L-4 (2026-05-05): program selector TextButton.  Label is set per
+    // source mode in setSource — "Load Guitar" / "Load Bass" / "Load Inst".
+    // The initial "Load Program" text only shows briefly before setSource
+    // fires when a sfizz Inst tab spawns.
+    mProgramButton = std::make_unique<juce::TextButton> ("Load Program");
+    mProgramButton->setTooltip ("Pick a program — current selection shown on the file-name label");
+    mProgramButton->onClick = [this] { showProgramPickerMenu(); };
+
     // I-15 polish (2026-05-03): BaySickPedals sub-tab header chrome.  Lives
     // in the 36-px page header strip; hidden on other sub-tabs.
     mPedalsHeaderTitle.setText ("BaySickPedals", juce::dontSendNotification);
@@ -144,25 +168,42 @@ InstPage::~InstPage()
     mChain       .reset();
     mPedalsEditor.reset();
     mNamIrEditor .reset();
+    // K-5: ARIA panel holds SliderParameterAttachments to the engine APVTS;
+    // tear down BEFORE the engine destruction in PluginProcessor (the
+    // editor/StandaloneEditor onTabClosed flow calls destroyBaySickGuitars
+    // AFTER mPages.remove(i), which destroys this InstPage; ordering matches).
+    mAriaPanel   .reset();
+    mPlayerTab   .reset();
+    mProgramButton.reset();
     mPedalsProc  .reset();
     mNamIrProc   .reset();
 }
+
+// 2026-05-05: forward declaration so showEngineContextMenu / showPageActionsMenu
+// can call into the unified preset config builder defined further down.  One
+// config covers every Source mode (LiveInput / BaySickGuitars / BaySickBasses).
+static PagePresetIO::PageChainConfig
+makeInstPresetConfig (VibeSynthProcessor& processor,
+                       int                 pageIndex,
+                       InstPage::Source    source,
+                       juce::AudioProcessor* pedalsProc,
+                       juce::AudioProcessor* namIrProc);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inst page-level preset folder + recursive folder→submenu walker (G-6 helpers,
 // retained verbatim).
 // ─────────────────────────────────────────────────────────────────────────────
+// 2026-05-05 consolidation: route every Inst preset through PagePresetIO's
+// per-kind directory ("Inst Page/My Presets") so saved files appear in the
+// load submenu (the previous `Inst/` literal didn't match where save wrote).
 static juce::File instPresetsRootDir()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-              .getChildFile ("BaySickDAW")
-              .getChildFile ("Presets")
-              .getChildFile ("Inst");
+    return PagePresetIO::presetsDirForPageKind (PagePresetIO::PageKind::Inst);
 }
 
 static juce::File instMyPresetsDir()
 {
-    return instPresetsRootDir().getChildFile ("My Presets");
+    return PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Inst);
 }
 
 static void addInstPresetDirToMenu (juce::PopupMenu& menu,
@@ -207,13 +248,21 @@ void InstPage::showEngineContextMenu()
     menu.addItem (kIdDuplicate, "Duplicate Inst (new tab)");
 
     menu.addSeparator();
-    menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
-                  mNamIrProc != nullptr);
+    // 2026-05-05 consolidation: Save enabled when the page has anything in its
+    // chain — sfizz Player picked, NAM/IR loaded, or any pedal slot wired up.
+    // Load is always enabled (even on a blank tab) so the user can spawn a
+    // saved chain on a fresh tab.
+    const bool canSavePreset = (getEngineProcessor() != nullptr)
+                                || (mNamIrProc       != nullptr)
+                                || (mPedalsProc      != nullptr);
+    menu.addItem (kIdSavePagePreset, "Save Page Preset As...", canSavePreset);
 
     juce::Array<juce::File> presetXmls;
     {
         juce::PopupMenu loadSub;
-        const auto root = instPresetsRootDir();
+        // 2026-05-05 consolidation: every Inst preset (regardless of source
+        // mode at save time) lives in the unified Inst Page folder.
+        const auto root = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Inst);
         if (root.isDirectory())
             addInstPresetDirToMenu (loadSub, root, kIdLoadPresetBase, presetXmls);
         if (presetXmls.isEmpty())
@@ -302,17 +351,113 @@ void InstPage::detachDirtyListener()
         nm->apvts.state.removeListener (&mDirtyListener);
 }
 
+// 2026-05-05 consolidation: build a unified PagePresetIO config covering every
+// Inst Source mode (LiveInput / BaySickGuitars / BaySickBasses).  Engine slots
+// list every processor the page owns (always Pedals + NAM/IR + the active
+// sfizz engine when present) so the saved preset round-trips the full chain
+// regardless of which sub-tab was visible at save.  Single mixer strip +
+// Inst-kind insert at this pageIndex; no bus rack since the Inst Bus is
+// shared across every Inst tab.
+static PagePresetIO::PageChainConfig
+makeInstPresetConfig (VibeSynthProcessor& processor,
+                       int                 pageIndex,
+                       InstPage::Source    source,
+                       juce::AudioProcessor* pedalsProc,
+                       juce::AudioProcessor* namIrProc)
+{
+    PagePresetIO::PageChainConfig cfg;
+
+    cfg.sourceModeLabel = (source == InstPage::Source::LiveInput)      ? "LiveInput"
+                        : (source == InstPage::Source::BaySickGuitars) ? "BaySickGuitars"
+                        :                                                "BaySickBasses";
+
+    // Pedals (live-input pedalboard) — always owned by every Inst page.
+    if (pedalsProc != nullptr)
+    {
+        PagePresetIO::EngineSlot slot;
+        slot.engine        = pedalsProc;
+        if (auto* p = dynamic_cast<BaySickPedalsProcessor*> (pedalsProc))
+            slot.engineApvts = &p->apvts;
+        slot.engineLabel   = "Pedals";
+        slot.engineRootTag = "BaySickPedalsState";
+        // Pedals doesn't use a per-page-index APVTS prefix today, so no
+        // prefix substitution on cross-page load.
+        cfg.engineSlots.add (slot);
+    }
+
+    // NAM/IR (live-input amp + cabinet sim).
+    if (namIrProc != nullptr)
+    {
+        PagePresetIO::EngineSlot slot;
+        slot.engine        = namIrProc;
+        if (auto* n = dynamic_cast<BaySickNAMIRProcessor*> (namIrProc))
+            slot.engineApvts = &n->apvts;
+        slot.engineLabel   = "NamIr";
+        slot.engineRootTag = "BaySickNAMIRState";
+        cfg.engineSlots.add (slot);
+    }
+
+    // Sfizz engine (BaySickGuitars / BaySickBasses).  Only present when the
+    // current Source mode owns a sfizz processor.
+    if (source == InstPage::Source::BaySickGuitars)
+    {
+        if (auto* eng = processor.getBaySickGuitars (pageIndex))
+        {
+            PagePresetIO::EngineSlot slot;
+            slot.engine        = eng;
+            slot.engineApvts   = &eng->apvts;
+            slot.engineLabel   = "Sfizz";
+            slot.engineRootTag = "BaySickGuitarsState";
+            slot.enginePrefix  = "bgg_" + juce::String (pageIndex) + "_";
+            slot.kitLoadCallback = [&processor, pageIndex] (const juce::File& kitPath)
+            {
+                return processor.loadBaySickGuitarsKit (pageIndex, kitPath);
+            };
+            cfg.engineSlots.add (slot);
+        }
+    }
+    else if (source == InstPage::Source::BaySickBasses)
+    {
+        if (auto* eng = processor.getBaySickBasses (pageIndex))
+        {
+            PagePresetIO::EngineSlot slot;
+            slot.engine        = eng;
+            slot.engineApvts   = &eng->apvts;
+            slot.engineLabel   = "Sfizz";
+            slot.engineRootTag = "BaySickBassesState";
+            slot.enginePrefix  = "bbb_" + juce::String (pageIndex) + "_";
+            slot.kitLoadCallback = [&processor, pageIndex] (const juce::File& kitPath)
+            {
+                return processor.loadBaySickBassesKit (pageIndex, kitPath);
+            };
+            cfg.engineSlots.add (slot);
+        }
+    }
+
+    cfg.stripPrefixes.add ("mixer_inst_" + juce::String (pageIndex));
+    cfg.insertRackKindLabel = "Inst";
+    cfg.insertRackIndices.add (pageIndex);   // only this page's strip
+    // busRackIds left empty — Inst Bus is shared across every Inst tab.
+
+    return cfg;
+}
+
 void InstPage::savePagePreset (std::function<void()> onSaved)
 {
-    if (mFullProcessor == nullptr || getEngineProcessor() == nullptr)
+    if (mFullProcessor == nullptr)
     {
         saveInstPagePreset();
         if (onSaved) onSaved();
         return;
     }
 
+    // 2026-05-05 consolidation: one unified preset path captures Source mode +
+    // every owned engine slot (Pedals + NAM/IR + sfizz Player when present) +
+    // mixer strip + insert rack + both EQs.  Disabled at the menu level
+    // (showEngineContextMenu) when the page has nothing to save (no Pedals
+    // AND no NAM/IR AND no sfizz engine).
     auto* aw = new juce::AlertWindow ("Save Page Preset",
-                                       "Enter a name for this inst page preset:",
+                                       "Enter a name for this Inst page preset:",
                                        juce::AlertWindow::NoIcon);
     aw->addTextEditor ("name", "My Inst");
     aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
@@ -328,6 +473,13 @@ void InstPage::savePagePreset (std::function<void()> onSaved)
             const juce::String name = aw->getTextEditorContents ("name").trim();
             if (name.isEmpty()) return;
 
+            const auto cfg = makeInstPresetConfig (
+                *safeThis->mFullProcessor,
+                safeThis->mPageIndex,
+                safeThis->mSource,
+                safeThis->mPedalsProc.get(),
+                safeThis->mNamIrProc.get());
+
             auto dir = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Inst);
             dir.createDirectory();
             auto target = dir.getChildFile (name + ".xml");
@@ -335,21 +487,8 @@ void InstPage::savePagePreset (std::function<void()> onSaved)
             while (target.exists())
                 target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
 
-            const juce::String stripPrefix   = "mixer_inst_" + juce::String (safeThis->mPageIndex);
-            // I-0b: BaySickNAM/IR is the only saved engine in I-0b (BaySickPedals
-            // ships its own state in I-1 via a separate <PedalsState> child).
-            const juce::String engineType    = "BaySickNAMIR";
-            const juce::String enginePrefix  = {};   // NAM/IR uses unprefixed APVTS
-
             const juce::String xml = PagePresetIO::exportPagePreset (
-                *safeThis->mFullProcessor,
-                PagePresetIO::PageKind::Inst,
-                safeThis->mPageIndex,
-                stripPrefix,
-                safeThis->getEngineProcessor(),
-                engineType,
-                enginePrefix);
-
+                *safeThis->mFullProcessor, PagePresetIO::PageKind::Inst, cfg);
             if (xml.isNotEmpty())
                 target.replaceWithText (xml);
 
@@ -363,25 +502,120 @@ void InstPage::loadPagePreset (const juce::File& xml)
     if (! xml.existsAsFile()) return;
     if (mFullProcessor == nullptr) { loadInstPagePreset (xml); return; }
 
-    // I-0b: BaySickNAM/IR is the live engine (no engine picker; nothing to
-    // switch).  Just hand the saved blob to it via PagePresetIO.
-    const juce::String stripPrefix  = "mixer_inst_" + juce::String (mPageIndex);
-    const juce::String enginePrefix = {};   // NAM/IR uses unprefixed APVTS
+    const juce::String xmlText = xml.loadFileAsString();
 
-    auto query = mBusActiveQuery
-                    ? mBusActiveQuery
-                    : std::function<bool(int)> ([] (int) { return true; });
+    // 2026-05-05 consolidation: read the saved Source mode first so we can
+    // switch to it BEFORE applying engine state — setSource() flips mSource
+    // and rebuilds the chain pointers, but the sfizz processor itself is only
+    // spawned by `loadBaySickGuitarsKit` on first kit load.  So if we're
+    // loading a sfizz preset onto a LiveInput tab, we then have to peel the
+    // saved kit path out of the saved engine blob and invoke the race-safe
+    // loader to spawn the engine + load the kit, BEFORE building the config
+    // (which captures engine pointers for the import).  Without this step,
+    // makeInstPresetConfig sees a null engine pointer, silently drops the
+    // Sfizz slot, and the user ends up on a sfizz tab with no kit loaded.
+    const juce::String savedSourceMode = PagePresetIO::peekSourceMode (xml);
+    if (savedSourceMode.isNotEmpty())
+    {
+        const Source target = (savedSourceMode == "BaySickGuitars") ? Source::BaySickGuitars
+                            : (savedSourceMode == "BaySickBasses")  ? Source::BaySickBasses
+                            :                                          Source::LiveInput;
+        if (target != mSource)
+            setSource (target);
+    }
+
+    // Spawn the sfizz engine + load the kit when needed.  Walks the saved
+    // engine blob (v2: <Engines>/<Engine label="Sfizz">; legacy K-7: top-level
+    // <Engine>), base64-decodes its data, looks for <KitPath path=...> inside
+    // the engine state's root, and hands that path to the page's loader.
+    // Falls through silently for LiveInput presets (no engine blob) or when
+    // the kit file is missing (the alert in PagePresetIO::importPagePreset
+    // handles that case).
+    if (mSource == Source::BaySickGuitars
+        || mSource == Source::BaySickBasses)
+    {
+        if (auto parsed = juce::XmlDocument::parse (xmlText))
+        {
+            const auto rootTag = parsed->getTagName();
+            const bool acceptedRoot = rootTag == "BaySickPagePreset"
+                                       || rootTag == "GuitarsPagePreset"
+                                       || rootTag == "BassesPagePreset";
+            if (acceptedRoot)
+            {
+                // v2: look for <Engines>/<Engine label="Sfizz">.  Legacy K-7:
+                // single top-level <Engine>.  Either way the engine blob lives
+                // in `data="base64..."`.
+                juce::XmlElement* engineEl = nullptr;
+                if (auto* enginesEl = parsed->getChildByName ("Engines"))
+                {
+                    for (auto* e = enginesEl->getFirstChildElement(); e != nullptr;
+                         e = e->getNextElement())
+                    {
+                        if (e->hasTagName ("Engine")
+                            && e->getStringAttribute ("label") == "Sfizz")
+                        {
+                            engineEl = e; break;
+                        }
+                    }
+                }
+                if (engineEl == nullptr)
+                    engineEl = parsed->getChildByName ("Engine");
+
+                if (engineEl != nullptr)
+                {
+                    juce::MemoryBlock mb;
+                    if (mb.fromBase64Encoding (engineEl->getStringAttribute ("data"))
+                        && mb.getSize() > 0)
+                    {
+                        const juce::String engineRootTag =
+                            engineEl->hasAttribute ("rootTag")
+                                ? engineEl->getStringAttribute ("rootTag")
+                                : (mSource == Source::BaySickGuitars
+                                      ? juce::String ("BaySickGuitarsState")
+                                      : juce::String ("BaySickBassesState"));
+
+                        if (auto stateXml = juce::AudioProcessor::getXmlFromBinary (
+                                mb.getData(), (int) mb.getSize()))
+                        {
+                            if (engineRootTag.isEmpty()
+                                || stateXml->hasTagName (engineRootTag))
+                            {
+                                if (auto* kitEl = stateXml->getChildByName ("KitPath"))
+                                {
+                                    const juce::File kitPath (kitEl->getStringAttribute ("path"));
+                                    if (kitPath.existsAsFile())
+                                    {
+                                        if (mSource == Source::BaySickGuitars)
+                                            mFullProcessor->loadBaySickGuitarsKit (mPageIndex, kitPath);
+                                        else if (mSource == Source::BaySickBasses)
+                                            mFullProcessor->loadBaySickBassesKit  (mPageIndex, kitPath);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    const auto cfg = makeInstPresetConfig (*mFullProcessor, mPageIndex, mSource,
+                                            mPedalsProc.get(), mNamIrProc.get());
 
     mSuppressDirty = true;
-    PagePresetIO::importPagePreset (*mFullProcessor,
-                                     PagePresetIO::PageKind::Inst,
-                                     mPageIndex,
-                                     stripPrefix,
-                                     getEngineProcessor(),
-                                     enginePrefix,
-                                     query,
-                                     xml.loadFileAsString());
+    PagePresetIO::importPagePreset (*mFullProcessor, PagePresetIO::PageKind::Inst,
+                                     cfg, xmlText);
     mSuppressDirty = false;
+
+    // 2026-05-05 fix: rebuild the engine chain AFTER the engine state has been
+    // restored.  setSource (called above) ran rebuildEngineChain when the
+    // sfizz processor didn't exist yet, so the chain wrapper was built with
+    // only [Pedals, NAM/IR] — no sfizz front stage.  By the time
+    // importPagePreset finishes, the engine + kit + APVTS are all live; this
+    // call now sees the engine pointer and splices it into the chain so
+    // audio actually flows from the player.  rebuildPlayerPanel re-runs the
+    // ARIA panel binding against the just-restored engine state.
+    notifySourceEngineChanged();
     takeStateSnapshot();
 }
 
@@ -397,7 +631,10 @@ void InstPage::showPageActionsMenu (juce::Component* anchor)
     juce::Array<juce::File> presetXmls;
     {
         juce::PopupMenu loadSub;
+        // 2026-05-05 consolidation: every Inst preset lives in the unified
+        // Inst Page folder regardless of which source mode was active at save.
         const auto root = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Inst);
+
         if (root.isDirectory())
         {
             juce::Array<juce::File> files;
@@ -486,7 +723,352 @@ juce::AudioProcessor* InstPage::getEngineProcessor() const noexcept
     // I-16 G-9 (2026-05-03): return chain wrapper so registerInstEngine sees
     // a single processor whose processBlock drives Pedals -> NAM/IR in order.
     // Pre-G-9 this returned only mNamIrProc (Pedals were bypassed by audio).
+    // K-2 (2026-05-05): chain may also have a sfizz front-end stage when
+    // source = BaySickGuitars / BaySickBasses (rebuilt via setSource).
     return mChain.get();
+}
+
+// K-2 (2026-05-05): rebuild the EngineChainProcessor stage list based on the
+// current source mode.  LiveInput = {Pedals, NAMIR}.  BaySickGuitars (or
+// BaySickBasses, L-2) = {Guitars, Pedals, NAMIR} — sfizz front-end fills the
+// buffer with engine output, then Pedals + NAMIR process from there.
+//
+// The Guitars / Basses engine pointer is queried from PluginProcessor every
+// time this runs.  If the engine doesn't exist yet (kit not loaded), the chain
+// degrades to {Pedals, NAMIR} and the buffer arrives empty — silent until the
+// kit loads, at which point a follow-up call rebuilds with the engine spliced
+// in.  K-4 calls setSource → loadKit → setSource (or just setSource after the
+// load) to ensure the chain sees the engine.
+void InstPage::rebuildEngineChain()
+{
+    if (! mChain) return;
+
+    juce::AudioProcessor* sfizzFront = nullptr;
+    if (mFullProcessor != nullptr)
+    {
+        if (mSource == Source::BaySickGuitars)
+            sfizzFront = mFullProcessor->getBaySickGuitars (mPageIndex);
+        else if (mSource == Source::BaySickBasses)
+            sfizzFront = mFullProcessor->getBaySickBasses (mPageIndex);
+    }
+
+    if (sfizzFront != nullptr)
+        mChain->setChain ({ sfizzFront, mPedalsProc.get(), mNamIrProc.get() });
+    else
+        mChain->setChain ({ mPedalsProc.get(), mNamIrProc.get() });
+}
+
+void InstPage::setSource (Source s)
+{
+    if (s == mSource) return;
+    mSource = s;
+    rebuildEngineChain();
+    rebuildPlayerPanel();
+    // L-3 (2026-05-05): keep the program-picker button label in sync with
+    // the active source mode.  "Load Guitar" / "Load Bass" / "Load Inst"
+    // makes the affordance unambiguous in the page-menu-bar extras row.
+    if (mProgramButton)
+    {
+        const juce::String label =
+            (s == Source::BaySickGuitars) ? "Load Guitar"
+          : (s == Source::BaySickBasses)  ? "Load Bass"
+          :                                  "Load Inst";
+        const juce::String tip =
+            (s == Source::BaySickGuitars) ? "Pick a guitar program — current selection shown on the file-name label"
+          : (s == Source::BaySickBasses)  ? "Pick a bass program — current selection shown on the file-name label"
+          :                                  "Pick a program";
+        mProgramButton->setButtonText (label);
+        mProgramButton->setTooltip (tip);
+    }
+    // K-5 fix #1 (2026-05-05): refresh visibility under the new label list.
+    // Switching from LiveInput → BaySickGuitars/Basses changes which component
+    // is mapped to mActiveTab (e.g. index 0 was "BaySickPedals", now "Player").
+    // Re-running switchTab(mActiveTab) re-evaluates the label-based dispatch
+    // and flips the right component visible.  Caps to the new label range.
+    const auto labels = getActiveTabLabels();
+    if (mActiveTab >= (int) labels.size()) mActiveTab = 0;
+    switchTab (mActiveTab);
+    if (onSourceChanged) onSourceChanged (mSource);
+}
+
+void InstPage::notifySourceEngineChanged()
+{
+    rebuildEngineChain();
+    rebuildPlayerPanel();
+}
+
+// K-6 (2026-05-05): serialize the per-program APVTS cache for project save.
+// Returns a new <ProgramStateCache> XmlElement with one <Program> child per
+// cached entry.  Caller owns the returned pointer.  Empty cache → empty
+// element (still returned so deserialize can detect the cache existed).
+juce::XmlElement* InstPage::serializeProgramCacheXml() const
+{
+    auto* root = new juce::XmlElement ("ProgramStateCache");
+    for (const auto& [filename, tree] : mProgramStateCache)
+    {
+        auto* prog = root->createNewChildElement ("Program");
+        prog->setAttribute ("filename", filename);
+        if (auto treeXml = tree.createXml())
+            prog->addChildElement (treeXml.release());
+    }
+    return root;
+}
+
+void InstPage::restoreProgramCacheFromXml (const juce::XmlElement& cacheXml)
+{
+    mProgramStateCache.clear();
+    for (auto* prog : cacheXml.getChildWithTagNameIterator ("Program"))
+    {
+        if (prog == nullptr) continue;
+        const auto filename = prog->getStringAttribute ("filename");
+        if (filename.isEmpty()) continue;
+        if (auto* treeXml = prog->getFirstChildElement())
+        {
+            auto tree = juce::ValueTree::fromXml (*treeXml);
+            if (tree.isValid())
+                mProgramStateCache[filename] = tree;
+        }
+    }
+}
+
+// K-5 (2026-05-05): build a fresh AriaControlPanel::Binding for the current
+// source-mode engine and load the kit's Player GUI XML.  When the engine
+// pointer is null (kit not loaded yet, or LiveInput source), the panel falls
+// through to its placeholder ("Loading control surface...").
+void InstPage::rebuildPlayerPanel()
+{
+    if (! mAriaPanel) return;
+
+    AriaControlPanel::Binding binding{};
+
+    juce::File kitRoot;
+    juce::File programXml;
+
+    if (mFullProcessor != nullptr)
+    {
+        // L-4 (2026-05-05): Guitars + Basses share the binding-build path; the
+        // engine type's APVTS prefix differs (`bgg_<idx>_cc` vs `bbb_<idx>_cc`)
+        // but the closures reach into the engine's getApvtsPrefix() / getCc*
+        // accessors which already know their own prefix.
+        auto bindToSfizzEngine = [&binding, &kitRoot, &programXml] (auto* engine)
+        {
+            if (engine == nullptr) return;
+            binding.apvts        = &engine->apvts;
+            binding.ccParamId    = [pfx = engine->getApvtsPrefix() + "cc"](int cc)
+                                      { return pfx + juce::String (cc); };
+            binding.kitDefaultCc = [engine](int cc) { return engine->getKitDefaultCc (cc); };
+            binding.ccLabel      = [engine](int cc) { return engine->getCcLabel (cc); };
+
+            kitRoot = engine->getCurrentKitPath().getParentDirectory()
+                                                .getParentDirectory();
+            const auto stem = engine->getCurrentKitPath().getFileNameWithoutExtension();
+            if (stem.isNotEmpty())
+                programXml = kitRoot.getChildFile ("GUI").getChildFile (stem + ".xml");
+        };
+
+        if (mSource == Source::BaySickGuitars)
+            bindToSfizzEngine (mFullProcessor->getBaySickGuitars (mPageIndex));
+        else if (mSource == Source::BaySickBasses)
+            bindToSfizzEngine (mFullProcessor->getBaySickBasses  (mPageIndex));
+    }
+
+    mAriaPanel->setEngine (binding);
+    if (programXml.existsAsFile())
+        mAriaPanel->loadFromKit (kitRoot, programXml);
+    else
+        mAriaPanel->clear();
+
+    // K-5 fix #UI (2026-05-05): refresh the loaded-program label.  For sfizz
+    // sources, the file label that's parked in PageMenuBar shows the pretty
+    // program name (e.g. "Green Keyswitch") instead of the live-input clip
+    // path.  Empty kit → "(no program loaded)".
+    if (mSource != Source::LiveInput)
+    {
+        juce::File currentKit;
+        if (mFullProcessor != nullptr)
+        {
+            if (mSource == Source::BaySickGuitars)
+                if (auto* engine = mFullProcessor->getBaySickGuitars (mPageIndex))
+                    currentKit = engine->getCurrentKitPath();
+            if (mSource == Source::BaySickBasses)
+                if (auto* engine = mFullProcessor->getBaySickBasses (mPageIndex))
+                    currentKit = engine->getCurrentKitPath();
+        }
+
+        if (currentKit == juce::File())
+        {
+            mClipFileLabel.setText ("(no program loaded)", juce::dontSendNotification);
+            mLastProgramFile.clear();
+        }
+        else
+        {
+            // Strip "NN-" numeric prefix + title-case, mirroring the popup labels.
+            auto stem = currentKit.getFileNameWithoutExtension();
+            if (stem.length() > 3 && stem[2] == '-'
+                && juce::CharacterFunctions::isDigit (stem[0])
+                && juce::CharacterFunctions::isDigit (stem[1]))
+                stem = stem.substring (3);
+            stem = stem.replaceCharacter ('_', ' ');
+            juce::String pretty;
+            bool atWordStart = true;
+            for (auto ch : stem)
+            {
+                if (ch == ' ') { pretty += ch; atWordStart = true; continue; }
+                pretty += atWordStart
+                            ? juce::String::charToString (juce::CharacterFunctions::toUpperCase (ch))
+                            : juce::String::charToString (ch);
+                atWordStart = false;
+            }
+            mClipFileLabel.setText (pretty, juce::dontSendNotification);
+            mLastProgramFile = currentKit.getFileName();
+        }
+    }
+}
+
+// K-5 / L-4 (2026-05-05): program-picker button click — pop a menu listing
+// every *.sfz in the kit's Programs folder.  Selecting an item swaps programs
+// preserving each one's CC tweaks for the session (mProgramStateCache).
+// First visit to a program shows kit-author defaults.  No confirm dialog —
+// swap is non-destructive.  Source-aware: queries either the Guitars or
+// Basses engine via mFullProcessor based on mSource.
+void InstPage::showProgramPickerMenu()
+{
+    if (mFullProcessor == nullptr || mSource == Source::LiveInput) return;
+
+    // Closure unifies Guitars / Basses engine fetch into one APVTS-bearing
+    // accessor that returns the current kit path (sfizz is the only audio
+    // processor type that owns kit-path state — neither Pedals nor NAM/IR).
+    auto getCurrentKit = [&] () -> juce::File
+    {
+        if (mSource == Source::BaySickGuitars)
+            if (auto* eng = mFullProcessor->getBaySickGuitars (mPageIndex))
+                return eng->getCurrentKitPath();
+        if (mSource == Source::BaySickBasses)
+            if (auto* eng = mFullProcessor->getBaySickBasses (mPageIndex))
+                return eng->getCurrentKitPath();
+        return {};
+    };
+
+    const auto currentKit = getCurrentKit();
+    if (currentKit == juce::File()) return;
+
+    const auto programsDir = currentKit.getParentDirectory();
+    juce::Array<juce::File> sfzFiles;
+    programsDir.findChildFiles (sfzFiles, juce::File::findFiles, false, "*.sfz");
+    sfzFiles.sort();
+
+    auto prettyName = [] (const juce::File& f)
+    {
+        auto stem = f.getFileNameWithoutExtension();
+        if (stem.length() > 3 && stem[2] == '-'
+            && juce::CharacterFunctions::isDigit (stem[0])
+            && juce::CharacterFunctions::isDigit (stem[1]))
+            stem = stem.substring (3);
+        stem = stem.replaceCharacter ('_', ' ');
+        juce::String pretty;
+        bool atWordStart = true;
+        for (auto ch : stem)
+        {
+            if (ch == ' ') { pretty += ch; atWordStart = true; continue; }
+            pretty += atWordStart
+                        ? juce::String::charToString (juce::CharacterFunctions::toUpperCase (ch))
+                        : juce::String::charToString (ch);
+            atWordStart = false;
+        }
+        return pretty;
+    };
+
+    juce::PopupMenu m;
+    for (int i = 0; i < sfzFiles.size(); ++i)
+    {
+        const bool isCurrent = (sfzFiles[i] == currentKit);
+        m.addItem (i + 1, prettyName (sfzFiles[i]), /*enabled=*/true, /*ticked=*/isCurrent);
+    }
+
+    juce::Component::SafePointer<InstPage> safe (this);
+    auto picksCopy = sfzFiles;
+    m.showMenuAsync (
+        juce::PopupMenu::Options().withTargetComponent (mProgramButton.get()),
+        [safe, picksCopy] (int result)
+        {
+            if (! safe || result <= 0 || result > picksCopy.size()) return;
+            auto* p = safe.getComponent();
+            if (p == nullptr || p->mFullProcessor == nullptr) return;
+
+            // Resolve current sfizz engine for this page's source mode.
+            auto sfizzEngine = [&] () -> juce::AudioProcessor*
+            {
+                if (p->mSource == Source::BaySickGuitars)
+                    return p->mFullProcessor->getBaySickGuitars (p->mPageIndex);
+                if (p->mSource == Source::BaySickBasses)
+                    return p->mFullProcessor->getBaySickBasses  (p->mPageIndex);
+                return nullptr;
+            };
+            auto sfizzApvts = [&] () -> juce::AudioProcessorValueTreeState*
+            {
+                if (p->mSource == Source::BaySickGuitars)
+                    if (auto* eng = p->mFullProcessor->getBaySickGuitars (p->mPageIndex))
+                        return &eng->apvts;
+                if (p->mSource == Source::BaySickBasses)
+                    if (auto* eng = p->mFullProcessor->getBaySickBasses (p->mPageIndex))
+                        return &eng->apvts;
+                return nullptr;
+            };
+            auto sfizzKitPath = [&] () -> juce::File
+            {
+                if (p->mSource == Source::BaySickGuitars)
+                    if (auto* eng = p->mFullProcessor->getBaySickGuitars (p->mPageIndex))
+                        return eng->getCurrentKitPath();
+                if (p->mSource == Source::BaySickBasses)
+                    if (auto* eng = p->mFullProcessor->getBaySickBasses (p->mPageIndex))
+                        return eng->getCurrentKitPath();
+                return {};
+            };
+
+            auto* eng = sfizzEngine();
+            auto* apv = sfizzApvts();
+            if (eng == nullptr || apv == nullptr) return;
+            const auto current = sfizzKitPath();
+            const auto target  = picksCopy[result - 1];
+            if (target == current) return;
+
+            // 1) Save outgoing program's APVTS state.
+            const auto outgoingKey = current.getFileName();
+            if (outgoingKey.isNotEmpty())
+                p->mProgramStateCache[outgoingKey] = apv->copyState();
+
+            // 2) Race-safe kit load (source-aware wrapper).
+            const bool ok = (p->mSource == Source::BaySickGuitars)
+                              ? p->mFullProcessor->loadBaySickGuitarsKit (p->mPageIndex, target)
+                              : p->mFullProcessor->loadBaySickBassesKit  (p->mPageIndex, target);
+            if (! ok) return;
+
+            // 3) Restore incoming program's saved state if cached.  Walk the
+            //    cached PARAM tree directly and call setValueNotifyingHost on
+            //    each one — replaceState alone doesn't reliably fire the
+            //    parameterChanged listener for every changed param across all
+            //    JUCE versions, which would leave sfizz out of sync with the
+            //    restored APVTS state for any CC the kit just reset to 0.
+            const auto incomingKey = target.getFileName();
+            if (auto it = p->mProgramStateCache.find (incomingKey);
+                it != p->mProgramStateCache.end())
+            {
+                auto* apv2 = sfizzApvts();
+                auto* eng2 = sfizzEngine();
+                if (apv2 != nullptr && eng2 != nullptr)
+                {
+                    apv2->replaceState (it->second);
+                    for (auto* param : eng2->getParameters())
+                    {
+                        if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
+                            ranged->setValueNotifyingHost (ranged->getValue());
+                    }
+                }
+            }
+
+            // 4) Refresh chain + ARIA panel + file label.
+            p->notifySourceEngineChanged();
+        });
 }
 
 void InstPage::setProcessor (VibeSynthProcessor* p)
@@ -498,18 +1080,28 @@ void InstPage::setProcessor (VibeSynthProcessor* p)
 
 void InstPage::switchTab (int idx)
 {
-    // I-0b (2026-05-02) / J-6 (2026-05-03): 2 sub-tabs (was 3 before EQ unification).
-    //   0 = BaySickPedals (placeholder until I-15 ships the rack UI)
-    //   1 = BaySickNAM/IR  (existing BaySickNAMIRProcessor + editor)
-    mActiveTab = juce::jlimit (0, 1, idx);
+    // K-5 (2026-05-05): label-based dispatch — sub-tab indices vary by source
+    // mode (LiveInput has 2 tabs, sfizz sources have 4).  Resolve the active
+    // label first, then flip visibility on the components it represents.
+    const auto labels = getActiveTabLabels();
+    if (idx < 0 || idx >= (int) labels.size()) return;
+    mActiveTab = idx;
 
-    if (mPedalsPlaceholder) mPedalsPlaceholder->setVisible (mActiveTab == 0);
-    if (mPedalsEditor)      mPedalsEditor    ->setVisible (mActiveTab == 0);
-    if (mNamIrEditor)       mNamIrEditor     ->setVisible (mActiveTab == 1);
+    const juce::String active = labels[idx];
+    const bool isPlayer  = (active == "BaySickGuitars" || active == "BaySickBasses");
+    const bool isPedals  = (active == "BaySickPedals");
+    const bool isNamIr   = (active == "BaySickNAM/IR");
+    // "Piano Roll" is nav-redirect only (StandaloneEditor handles it before
+    // calling switchTab) — never the active in-page tab.
 
-    // I-15 polish: BaySickPedals header chrome only on sub-tab 0.
-    mPedalsHeaderTitle.setVisible (mActiveTab == 0);
-    if (mPedalsPresetBtn) mPedalsPresetBtn->setVisible (mActiveTab == 0);
+    if (mPlayerTab)         mPlayerTab        ->setVisible (isPlayer);
+    if (mPedalsPlaceholder) mPedalsPlaceholder->setVisible (isPedals);
+    if (mPedalsEditor)      mPedalsEditor    ->setVisible (isPedals);
+    if (mNamIrEditor)       mNamIrEditor     ->setVisible (isNamIr);
+
+    // I-15 polish: BaySickPedals header chrome only on the Pedals sub-tab.
+    mPedalsHeaderTitle.setVisible (isPedals);
+    if (mPedalsPresetBtn) mPedalsPresetBtn->setVisible (isPedals);
 
     resized();
     repaint();
@@ -705,7 +1297,12 @@ void InstPage::layoutContent (juce::Rectangle<int> r)
         mPedalsEditor->setBounds (r);
     if (mNamIrEditor && mNamIrEditor->isVisible())
         mNamIrEditor->setBounds (r);
-    // J-6 EQ unification (2026-05-03): mEQDisplay layout removed.
+    // K-5 (2026-05-05): Player tab fills the same content area when active.
+    if (mPlayerTab && mPlayerTab->isVisible())
+    {
+        mPlayerTab->setBounds (r);
+        if (mAriaPanel) mAriaPanel->setBounds (mPlayerTab->getLocalBounds());
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

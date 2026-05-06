@@ -68,17 +68,17 @@ void ClipsPage::buildEnginePicker()
 // G-6 helpers — preset folder + recursive folder→submenu walker (mirrors the
 // addLayerPresetDirToMenu pattern from LayersPage.cpp).
 // ─────────────────────────────────────────────────────────────────────────────
+// 2026-05-05 consolidation: route every Clip preset through PagePresetIO's
+// per-kind directory ("Clip Page/My Presets") so saved files appear in the
+// load submenu (the previous `Clips/` literal didn't match where save wrote).
 static juce::File clipsPresetsRootDir()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-              .getChildFile ("BaySickDAW")
-              .getChildFile ("Presets")
-              .getChildFile ("Clips");
+    return PagePresetIO::presetsDirForPageKind (PagePresetIO::PageKind::Clip);
 }
 
 static juce::File clipsMyPresetsDir()
 {
-    return clipsPresetsRootDir().getChildFile ("My Presets");
+    return PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Clip);
 }
 
 static void addClipsPresetDirToMenu (juce::PopupMenu& menu,

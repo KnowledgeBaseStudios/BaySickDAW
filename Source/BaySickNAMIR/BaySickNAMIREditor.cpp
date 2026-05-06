@@ -369,12 +369,22 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
     mSlotBBtn.setToggleState (slot0 == 1, juce::dontSendNotification);
 
     updateLabels();
+
+    // 2026-05-05 (Bug C fix): subscribe to bulk-restore notifications so the
+    // file-name labels refresh after page-preset load / project load.
+    juce::Component::SafePointer<BaySickNAMIREditor> safeThis (this);
+    processor.onStateRestored = [safeThis]
+    {
+        if (auto* e = safeThis.getComponent())
+            e->updateLabels();
+    };
 }
 
 BaySickNAMIREditor::~BaySickNAMIREditor()
 {
     processor.apvts.removeParameterListener ("ab_slot",      this);
     processor.apvts.removeParameterListener ("oversampling", this);
+    processor.onStateRestored = nullptr;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

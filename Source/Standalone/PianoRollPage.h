@@ -25,7 +25,12 @@ class StandalonePlayHead;
 // existing DrumKit value which represents the composited DrumKitGrid view.
 // BaySickRustyDrums is the singleton sfizz-driven drum-kit engine that
 // auto-spawns N mixer strips (one per kit channel).
-enum class EngineKind { DrumKit, Layer, Bass, Drum, Clip, Vox, Inst, BaySickRustyDrums };
+// 2026-05-05 (Phase K-1 / L-1): BaySickGuitars + BaySickBasses added —
+// per-Inst-page sfizz-driven melodic engines.  Multi-instance (up to 20
+// shared with classic live-input Inst pages); EngineId::index = Inst page
+// slot index.  Plural BaySickBasses to disambiguate from EngineKind::Bass
+// (the BaySickBass synth tab).
+enum class EngineKind { DrumKit, Layer, Bass, Drum, Clip, Vox, Inst, BaySickGuitars, BaySickBasses, BaySickRustyDrums };
 
 struct EngineId
 {

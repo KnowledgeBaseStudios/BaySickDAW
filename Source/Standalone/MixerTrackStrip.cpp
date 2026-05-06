@@ -292,7 +292,8 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
     // through APVTS + the timer-driven syncFromApvts already in place.  For
     // any other strip type that still has _arm registered (legacy back-compat
     // until R5 hides the LED), keep the old direct-toggle attachment.
-    if (hasUtilityRow() && apvts.getParameter(paramPrefix + "_arm") != nullptr)
+    if (hasUtilityRow() && apvts.getParameter(paramPrefix + "_arm") != nullptr
+        && ! mNoLiveInput)   // K-2: skip arm wiring entirely on sfizz-source strips
     {
         if (mType == StripType::Vox || mType == StripType::Inst)
         {
@@ -334,12 +335,44 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
     if (mType == StripType::Master && apvts.getParameter("master_fx_bypass") != nullptr)
         mMasterFXBypassAtt = std::make_unique<ButtonAtt>(apvts, "master_fx_bypass", mMasterFXBypassBtn);
 
-    // R4: Listen — Vox / Inst only.
+    // R4: Listen — Vox / Inst only.  K-2 (2026-05-05): skip on sfizz-source
+    // strips (mNoLiveInput) — listen has no meaning when there's no live input.
     if ((mType == StripType::Vox || mType == StripType::Inst)
+        && ! mNoLiveInput
         && apvts.getParameter(paramPrefix + "_listen") != nullptr)
     {
         mListenAtt = std::make_unique<ButtonAtt>(apvts, paramPrefix + "_listen", mListenBtn);
     }
+}
+
+// K-2 (2026-05-05): toggle the noLiveInput suppression.  When true, hides the
+// arm + listen LEDs (sfizz-source Inst strips don't have a live input — the
+// engine IS the source) and tears down the `_arm` parameter listener so APVTS
+// changes don't drive a hidden button.  When false (default), the strip
+// behaves exactly as before — Vox/Inst type strips show arm + listen LEDs.
+void MixerTrackStrip::setNoLiveInput (bool b)
+{
+    if (b == mNoLiveInput) return;
+    mNoLiveInput = b;
+
+    // Visibility of arm + listen LEDs follows hasArm().
+    const bool show = hasArm();
+    mArmBtn.setVisible (show);
+    mListenBtn.setVisible (show);
+
+    // Tear down the `_arm` parameter listener when suppressed; the LED is
+    // hidden so the listener has no work to do.  Setting back to false
+    // doesn't re-attach automatically — caller should re-run setApvts() if
+    // they need the listener restored.  In practice the source flag is set
+    // before setApvts on tab spawn, so the listener simply isn't installed.
+    if (mNoLiveInput && mApvtsForListener != nullptr && mArmParamId.isNotEmpty())
+    {
+        mApvtsForListener->removeParameterListener (mArmParamId, this);
+        mApvtsForListener = nullptr;
+        mArmParamId.clear();
+    }
+
+    if (getWidth() > 0) resized();
 }
 
 // R2 (2026-04-23): Update the Arm LED's tooltip with the currently-selected

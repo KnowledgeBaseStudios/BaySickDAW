@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "../Standalone/ApvtsDirtyTracker.h"
 #include <atomic>
 #include <map>
 #include <memory>
@@ -133,9 +134,20 @@ public:
     int                     getStripCount      () const noexcept { return (int) mChannels.size(); }
     juce::AudioBuffer<float> getStripBuffer    (int stripIdx, int numFrames);
 
+    // 2026-05-06 (Option A idle suspend): expose sfizz active-voice count so
+    // PluginProcessor's Rusty dispatch can skip processStrips + per-strip
+    // routing when the kit is silent.
+    int                     getNumActiveVoices () const noexcept;
+
     // J-8 stage 2 (2026-05-04): ARIA control surface CC dispatch.  Writes the
     // value (0..127) for `cc` through APVTS so the change is undoable, projectable,
     // and automatable.  The parameterChanged listener forwards to sfizz.
+    // 2026-05-05: kCcCount lifted to 512 so kit-author "extended CCs" >= 128
+    // (e.g. Big Rusty Drums uses CC400/401 for limiter thresh/level) get
+    // wired all the way through the panel ↔ APVTS ↔ sfizz pipeline instead
+    // of being silently dropped at the < 128 guard.
+    static constexpr int kCcCount = 512;
+
     void sendCc (int cc, int value);
     int  getCcValue (int cc) const;
     int  getKitDefaultCc (int cc) const;   // read-only snapshot of the kit's set_cc<N> values
@@ -147,6 +159,9 @@ public:
     // Project-level undo — the editor wires Ctrl+Z to undo()/redo() so panel
     // edits, automation captures, and CC type-in entries are all reversible.
     juce::UndoManager& getUndoManager() noexcept { return mUndoManager; }
+
+    // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).
+    void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -211,6 +226,10 @@ private:
     {
         float outVol { -1.f };
     } mCache;
+
+    // 2026-05-05 dirty-flag wiring.  Declared LAST so apvts is fully
+    // constructed by the time the tracker installs its listener.
+    ApvtsDirtyTracker mDirtyTracker { apvts };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickRustyDrumsProcessor)
 };

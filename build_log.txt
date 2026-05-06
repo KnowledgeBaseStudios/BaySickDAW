@@ -11,98 +11,387 @@ MSBuild version 18.5.4+cb4e32d21 for .NET Framework
   Generating juce_binarydata_VibeSynthSamples/JuceLibraryCode/BinaryData1.cpp, juce_binarydata_VibeSynthSamples/JuceLibraryCode/BinaryData.h
   absl_int128.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_int128.lib
   absl_raw_logging_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_raw_logging_internal.lib
-  VibeSynthSamples.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\VibeSynthSamples.lib
   absl_time_zone.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_time_zone.lib
   absl_throw_delegate.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_throw_delegate.lib
   absl_bad_variant_access.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_bad_variant_access.lib
   absl_debugging_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_debugging_internal.lib
   absl_bad_optional_access.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_bad_optional_access.lib
   absl_cordz_functions.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cordz_functions.lib
+  absl_base.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_base.lib
+  VibeSynthSamples.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\Release\VibeSynthSamples.lib
   aiff.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\aiff.lib
-  sfizz_cephes.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_cephes.lib
-  sfizz_cpuid.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_cpuid.lib
+  absl_malloc_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_malloc_internal.lib
   plutovg.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\lunasvg_build\plutovg\Release\plutovg.lib
+  absl_strings_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_strings_internal.lib
+  absl_city.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_city.lib
+  absl_low_level_hash.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_low_level_hash.lib
+  sfizz_cephes.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_cephes.lib
+  absl_string_view.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_string_view.lib
+  absl_demangle_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_demangle_internal.lib
+  absl_crc_cpu_detect.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc_cpu_detect.lib
   sfizz_filesystem_impl.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_filesystem_impl.lib
-  lunasvg.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\lunasvg_build\Release\lunasvg.lib
+  absl_graphcycles_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_graphcycles_internal.lib
+  sfizz_cpuid.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_cpuid.lib
   sfizz_kissfft.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_kissfft.lib
   sfizz_pugixml.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_pugixml.lib
+  lunasvg.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\lunasvg_build\Release\lunasvg.lib
   sfizz_spin_mutex.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_spin_mutex.lib
   sfizz_spline.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_spline.lib
-  sfizz_tunings.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_tunings.lib
-  absl_base.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_base.lib
-  wavpack.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\libwavpack.lib
   absl_stacktrace.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_stacktrace.lib
-  absl_malloc_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_malloc_internal.lib
-  absl_crc_cpu_detect.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc_cpu_detect.lib
-  absl_city.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_city.lib
-  absl_graphcycles_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_graphcycles_internal.lib
-  absl_demangle_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_demangle_internal.lib
-  absl_string_view.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_string_view.lib
-  absl_strings_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_strings_internal.lib
-  absl_low_level_hash.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_low_level_hash.lib
-  st_audiofile_formats.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\st_audiofile_formats.lib
-  absl_crc_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc_internal.lib
-  st_audiofile.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\st_audiofile.lib
+  sfizz_tunings.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_tunings.lib
   absl_strings.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_strings.lib
+  wavpack.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\libwavpack.lib
+  absl_crc_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc_internal.lib
+  st_audiofile_formats.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\st_audiofile_formats.lib
   sfizz_messaging.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_messaging.lib
   absl_symbolize.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_symbolize.lib
   absl_str_format_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_str_format_internal.lib
   absl_time.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_time.lib
-  absl_hash.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_hash.lib
-  absl_kernel_timeout_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_kernel_timeout_internal.lib
+  st_audiofile.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\st_audiofile.lib
   absl_crc32c.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc32c.lib
+  absl_kernel_timeout_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_kernel_timeout_internal.lib
+  absl_hash.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_hash.lib
   absl_crc_cord_state.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_crc_cord_state.lib
   absl_synchronization.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_synchronization.lib
+  absl_cordz_handle.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cordz_handle.lib
   absl_hashtablez_sampler.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_hashtablez_sampler.lib
   absl_cord_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cord_internal.lib
-  absl_cordz_handle.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cordz_handle.lib
-  absl_cordz_info.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cordz_info.lib
   absl_raw_hash_set.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_raw_hash_set.lib
+  absl_cordz_info.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cordz_info.lib
   absl_cord.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\absl_cord.lib
   sfizz_parser.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_parser.lib
   sfizz_internal.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_internal.lib
   sfizz_static.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\library\lib\Release\sfizz_static.lib
+  BaySickAlignEditor.cpp
+  ClipsPage.cpp
+  InstPage.cpp
+  PluginProcessor.cpp
+  ProjectManager.cpp
+  BassPage.cpp
   BaySickRustyDrumsPage.cpp
+  BuilderPage.cpp
+  DrumPage.cpp
+  EffectsPage.cpp
+  EventEditor.cpp
+  GlobalTransportBar.cpp
+  LayersPage.cpp
+  MixerPage.cpp
+  PagePresetIO.cpp
+  PianoRollPage.cpp
+  StandaloneApp.cpp
   StandaloneEditor.cpp
+  VoxPage.cpp
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/EffectsPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/EffectsPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Vox/VoxPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Vox/VoxPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Inst/InstPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Inst/InstPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/PianoRollPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/PianoRollPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Clips/ClipsPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/StandaloneApp.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/StandaloneApp.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Clips/ClipsPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/GlobalTransportBar.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/GlobalTransportBar.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/BaySickVocal/BaySickAlignEditor.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/BaySickVocal/BaySickAlignEditor.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/MixerPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/MixerPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/DrumPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/DrumPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BuilderPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BuilderPage.cpp')
+  
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
   (compiling source file '../Source/Standalone/BaySickRustyDrumsPage.cpp')
   
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
   (compiling source file '../Source/Standalone/BaySickRustyDrumsPage.cpp')
   
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerDSP.h(125,31): warning C4100: 'newValue': unreferenced parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Clips/ClipsPage.cpp')
+  
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
   (compiling source file '../Source/Standalone/StandaloneEditor.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/EventEditor.cpp')
   
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
   (compiling source file '../Source/Standalone/StandaloneEditor.cpp')
   
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/EventEditor.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(403,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\PagePresetIO.cpp(353,53): warning C4100: 'cfg': unreferenced parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\SharedUI.h(489,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\PagePresetIO.cpp(427,38): warning C4100: 'kind': unreferenced parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MixerTrackStrip.h(27,29): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/MixerPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EffectsPage.cpp(17,36): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerDSP.h(125,31): warning C4100: 'newValue': unreferenced parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/PluginProcessor.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MixerPage.cpp(21,29): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickSynth\BaySickSynthLAF.h(221,37): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickSynth\BaySickSynthLAF.h(230,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickSynth\BaySickSynthLAF.h(244,37): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickSynth\BaySickSynthLAF.h(282,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickSynth\BaySickSynthLAF.h(306,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(58,19): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(130,21): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(174,21): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(211,19): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(233,19): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(259,15): warning C4189: 'contentW': local variable is initialized but not referenced [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(356,33): warning C4189: 'p1': local variable is initialized but not referenced [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(357,33): warning C4189: 'p2': local variable is initialized but not referenced [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Vox\VoxPage.cpp(616,27): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MixerPage.cpp(849,38): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MixerPage.cpp(917,34): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\PluginProcessor.cpp(1277,18): warning C4458: declaration of 'suspended' hides class member [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+      C:\Users\jeffm\Documents\BaySickDAW\juce\modules\juce_audio_processors_headless\processors\juce_AudioProcessor.h(1609,10):
+      see declaration of 'juce::AudioProcessor::suspended'
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(372,35): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(1054,25): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(1122,25): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickBass\BaySickBassLAF.h(213,37): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickBass\BaySickBassLAF.h(221,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickBass\BaySickBassLAF.h(235,37): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickBass\BaySickBassLAF.h(273,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickBass\BaySickBassLAF.h(297,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Harmless\HarmlessLAF.h(365,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Harmless\HarmlessLAF.h(400,27): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Harmless\HarmlessLAF.h(430,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(690,25): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\PluginProcessor.cpp(2631,26): warning C4456: declaration of 'bpm' hides previous local declaration [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+      C:\Users\jeffm\Documents\BaySickDAW\Source\PluginProcessor.cpp(1608,12):
+      see declaration of 'bpm'
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Inst\InstPage.cpp(43,35): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(1176,32): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(1183,29): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(1240,36): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\EventEditor.cpp(1282,35): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickSynth\BaySickSynthLAF.h(221,37): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/DrumPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickSynth\BaySickSynthLAF.h(230,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/DrumPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickSynth\BaySickSynthLAF.h(244,37): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/DrumPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickSynth\BaySickSynthLAF.h(282,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/DrumPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickSynth\BaySickSynthLAF.h(306,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/DrumPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(989,19): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(996,65): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Inst\InstPage.cpp(129,44): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(998,23): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerDSP.h(125,31): warning C4100: 'newValue': unreferenced parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerLAF.h(190,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerLAF.h(217,79): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/LayersPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerDSP.h(125,31): warning C4100: 'newValue': unreferenced parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/DrumPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(1335,27): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(1401,27): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(1409,19): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(1584,23): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerLAF.h(190,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/DrumPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerLAF.h(217,79): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/DrumPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(1636,23): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(1644,23): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\LayersPage.cpp(79,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(1815,23): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(1928,23): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\LayersPage.cpp(287,23): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Harmless\HarmlessLAF.h(365,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Harmless\HarmlessLAF.h(400,27): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Harmless\HarmlessLAF.h(430,33): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\DrumPage.cpp(260,30): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\DrumPage.cpp(425,23): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Inst\InstPage.cpp(1330,27): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\GlobalTransportBar.cpp(459,34): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\GlobalTransportBar.cpp(467,34): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\GlobalTransportBar.cpp(498,35): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(57,39): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(152,36): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Clips\ClipsPage.cpp(691,27): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\GlobalTransportBar.cpp(806,9): warning C4189: 'btnH': local variable is initialized but not referenced [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(271,35): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(348,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(376,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerDSP.h(125,31): warning C4100: 'newValue': unreferenced parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(476,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(508,36): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(520,41): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(533,43): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(548,42): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(613,36): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(625,41): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(638,44): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(648,45): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(661,44): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(672,38): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(683,43): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerLAF.h(190,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerLAF.h(217,79): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+  (compiling source file '../Source/Standalone/BassPage.cpp')
+  
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(747,36): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(752,45): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(3463,21): warning C4189: 'bw': local variable is initialized but not referenced [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(757,39): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(3462,21): warning C4189: 'bx': local variable is initialized but not referenced [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(768,37): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\BaySickVocal\BaySickAlignEditor.cpp(779,45): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(3999,19): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(4029,27): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(4049,23): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BassPage.cpp(73,31): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(4239,29): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(4266,38): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BassPage.cpp(274,23): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\BuilderPage.cpp(4779,21): warning C4996: 'juce::AudioFormat::createWriterFor': Use the function taking an AudioFormatWriterOptions instead. [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MixerTrackStrip.h(27,29): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
   (compiling source file '../Source/Standalone/StandaloneEditor.cpp')
   
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MetroPanel.h(22,36): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
   (compiling source file '../Source/Standalone/StandaloneEditor.cpp')
   
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MixerPage.cpp(3054,68): warning C4100: 'busRight': unreferenced parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MixerPage.cpp(3228,25): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
 C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\MetroPanel.h(30,40): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
   (compiling source file '../Source/Standalone/StandaloneEditor.cpp')
   
 C:\Users\jeffm\Documents\BaySickDAW\Source\VibePlayer\VibePlayerDSP.h(125,31): warning C4100: 'newValue': unreferenced parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
   (compiling source file '../Source/Standalone/StandaloneEditor.cpp')
   
-C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(362,44): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
-C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(408,29): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
-C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(543,16): warning C4457: declaration of 'p' hides function parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
-      C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(416,56):
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(369,44): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(415,29): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(565,16): warning C4457: declaration of 'p' hides function parameter [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+      C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(423,56):
       see declaration of 'p'
   
-C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(921,36): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
-C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(3083,19): warning C4458: declaration of 'flags' hides class member [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(943,36): warning C4996: 'juce::Font::Font': Use the constructor that takes a FontOptions argument [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(3141,19): warning C4458: declaration of 'flags' hides class member [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
       C:\Users\jeffm\Documents\BaySickDAW\juce\modules\juce_gui_basics\components\juce_Component.h(2709,24):
       see declaration of 'juce::Component::flags'
   
-C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(7597,15): warning C4458: declaration of 'flags' hides class member [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
+C:\Users\jeffm\Documents\BaySickDAW\Source\Standalone\StandaloneEditor.cpp(8122,15): warning C4458: declaration of 'flags' hides class member [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
       C:\Users\jeffm\Documents\BaySickDAW\juce\modules\juce_gui_basics\components\juce_Component.h(2709,24):
       see declaration of 'juce::Component::flags'
   
+C:\Users\jeffm\Documents\BaySickDAW\Source\Inst\InstPage.cpp(199,19): warning C4505: 'instPresetsRootDir': unreferenced function with internal linkage has been removed [C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone.vcxproj]
   Generating code
   Finished generating code
   BaySickDAWStandalone.vcxproj -> C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone_artefacts\Release\BaySickDAW.exe

@@ -104,6 +104,15 @@ public:
     // Remove the aux strip at the given idx. APVTS params preserved.
     void removeAuxChannel(int idx);
 
+    // 2026-05-05: remove the Inst / Vox / Clip strip at the given idx so the
+    // index can be reused after a tab close.  APVTS params preserved (so
+    // re-adding at the same idx restores prior fader/pan/sends/etc).  Without
+    // these, deleting a tab leaves an orphan mixer strip pinned to the index
+    // forever — addInstChannelAtIndex et al silently bail when count(idx)>0.
+    void removeInstChannel(int idx);
+    void removeVoxChannel(int idx);
+    void removeClipChannel(int idx);
+
     // G-7 (2026-04-29): full delete via right-click → Delete prompt.  Sweeps
     // every strip's send params and resets any pointing at this aux's
     // channel id (sends → inactive; primary _sendTo → natural parent).
@@ -124,6 +133,13 @@ public:
     void addVoxChannelAtIndex(int idx);
     void addInstChannel();
     void addInstChannelAtIndex(int idx);
+
+    // K-2 (2026-05-05): toggle the noLiveInput flag on an existing Inst strip.
+    // Call when the corresponding InstPage's source mode changes from LiveInput
+    // to BaySickGuitars / BaySickBasses (or back).  Hides arm + listen LEDs.
+    // Safe to call before or after the strip's setApvts.  No-op if the strip
+    // doesn't exist at the given index.
+    void setInstStripNoLiveInput (int idx, bool b);
 
     // J-5: BaySickRustyDrums strip add/remove (driven by kit-load lifecycle,
     // NOT user-clicks).  Idempotent — safe to call again with same idx.

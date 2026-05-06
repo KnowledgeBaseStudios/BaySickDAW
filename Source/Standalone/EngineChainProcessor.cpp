@@ -9,15 +9,28 @@ EngineChainProcessor::EngineChainProcessor()
 
 void EngineChainProcessor::setChain (std::initializer_list<juce::AudioProcessor*> stages)
 {
-    const juce::SpinLock::ScopedLockType lk (mLock);
-    mStages.clear();
-    mStages.reserve (stages.size());
+    // K-5 fix (2026-05-05): build the new (non-null) stage list first and
+    // compare to what's already there.  If identical, skip both the swap and
+    // the prepareToPlay broadcast — repeatedly calling prepareToPlay on a
+    // freshly-loaded sfizz engine triggers sfizz->setSampleRate which can
+    // reset just-pushed CC defaults and silence the just-loaded kit.
+    std::vector<juce::AudioProcessor*> next;
+    next.reserve (stages.size());
     for (auto* s : stages)
-        if (s != nullptr) mStages.push_back (s);
+        if (s != nullptr) next.push_back (s);
+
+    {
+        const juce::SpinLock::ScopedLockType lk (mLock);
+        if (next == mStages) return;
+        mStages = std::move (next);
+    }
 
     if (mPrepared)
+    {
+        const juce::SpinLock::ScopedLockType lk (mLock);
         for (auto* s : mStages)
-            s->prepareToPlay (mSampleRate, mBlockSize);
+            if (s != nullptr) s->prepareToPlay (mSampleRate, mBlockSize);
+    }
 }
 
 void EngineChainProcessor::prepareToPlay (double sampleRate, int blockSize)

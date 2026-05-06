@@ -3,6 +3,7 @@
 #include "HarmlessSynth.h"
 #include "HarmlessModRegistry.h"
 #include "../DSP/EngineSidechainHelper.h"
+#include "../Standalone/ApvtsDirtyTracker.h"
 
 // ── HarmlessProcessor ─────────────────────────────────────────────────────────
 // AudioProcessor wrapper for HarmlessSynth.
@@ -50,6 +51,12 @@ public:
 
     // ── Public interface ──────────────────────────────────────────────────────
     juce::AudioProcessorValueTreeState apvts;
+
+    // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).  Fires on every
+    // tk_<id>_harm_* edit (full Harmless internal state — partial values,
+    // filter / LFO / envelope / mod-matrix / etc).  StandaloneEditor wires it
+    // to ProjectManager::markDirty.
+    void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
     // Engine access for the Phase 3A-Final editor.
     HarmlessSynth& getSynth() { return mSynth; }
@@ -209,6 +216,9 @@ private:
         float pBFilterMaskCutoff { -1.f };
         float pBPhaserMaskRate   { -1.f };
     } mCache;
+
+    // 2026-05-05 dirty-flag wiring.  Declared LAST so apvts is fully constructed.
+    ApvtsDirtyTracker mDirtyTracker { apvts };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HarmlessProcessor)
 };

@@ -277,6 +277,8 @@ void RibbonTabBar::setTabLocked (int tabId, bool locked)
             {
                 t.locked = locked;
                 repaint();
+                // 2026-05-05 dirty-flag wiring: lock toggle is project state.
+                if (onTabLockChanged) onTabLockChanged (tabId, locked);
             }
             return;
         }
@@ -548,6 +550,17 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
             m.addItem(-4, "+ Add BaySickRustyDrums");
     }
 
+    // K-4 / L-3 (2026-05-05): "+ Add BaySickGuitars" + "+ Add BaySickBasses"
+    // entries — only on the Inst dropdown.  Disabled when the shared 20-page
+    // cap is reached (live-input Inst + BaySickGuitars + BaySickBasses
+    // combined ≤ kMaxInstPages).
+    if (type == TabType::Inst)
+    {
+        const bool capReached = onIsInstCapReached && onIsInstCapReached();
+        m.addItem(-5, "+ Add BaySickGuitars", ! capReached);
+        m.addItem(-6, "+ Add BaySickBasses",  ! capReached);
+    }
+
     auto screenArea = localAreaToGlobal(tabBounds);
     m.showMenuAsync(
         juce::PopupMenu::Options().withTargetScreenArea(screenArea),
@@ -610,6 +623,16 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
             {
                 // J-6 (2026-05-03): + Add BaySickRustyDrums (Drums dropdown only).
                 if (onAddBaySickRustyDrumsRequest) onAddBaySickRustyDrumsRequest();
+            }
+            else if (result == -5)
+            {
+                // K-4 (2026-05-05): + Add BaySickGuitars (Inst dropdown only).
+                if (onAddBaySickGuitarsRequest) onAddBaySickGuitarsRequest();
+            }
+            else if (result == -6)
+            {
+                // L-3 (2026-05-05): + Add BaySickBasses (Inst dropdown only).
+                if (onAddBaySickBassesRequest) onAddBaySickBassesRequest();
             }
             else if (result <= -10 && result >= (type == TabType::Drums ? -12
                                                 : (type == TabType::Vox || type == TabType::Inst) ? -11
