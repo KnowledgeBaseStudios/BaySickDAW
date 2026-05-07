@@ -110,4 +110,16 @@ public:
     static juce::File getMasterOutputFile();
     static void       loadMasterOutputRouting();   // call once at startup before mDeviceManager->initialise
     static void       saveMasterOutputRouting();   // call when the mixer hamburger writes a new selection
+
+    // 2026-05-07 (Batch 10 Phase 3): persistence for the Mixer hamburger menu's
+    // "Multi-core Rendering" toggle.  Stored as <MultiCoreRendering on="0|1"/>
+    // child of the existing <BaySickDAWSettings> root in
+    // Documents/BaySickDAW/settings.xml -- the same file PatternColorPicker
+    // and BaySickNAMIREditor use for their own children.  Defaults to true
+    // when the key is missing (first launch / never toggled).  Load runs
+    // once at startup BEFORE mDeviceManager->initialise so the audio thread
+    // sees the correct value from block 1.  Save runs immediately after
+    // every toggle so the preference survives even an abrupt shutdown.
+    static void       loadMultiCoreRenderingPref();
+    static void       saveMultiCoreRenderingPref();
 };

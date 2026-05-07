@@ -3,3 +3,6 @@ build/
 
 # Claude / planning working notes — local-only.
 Files For Claude/
+
+# User-created projects + their backups + samples — runtime data, not source.
+Projects/

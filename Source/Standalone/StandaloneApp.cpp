@@ -3,6 +3,8 @@
 #include "BaySickAssets.h"   // BaySickDAWLogo_png / _pngSize (logo for splash + window icon)
 #include "EffectPresetIO.h"  // H-9 prep: seed factory presets at launch
 #include "../VibeGraph.h"    // MeterLatencyComp::recomputeFromDevice (2026-05-02)
+#include "../ProjectManager.h"            // ProjectManager::getSettingsFile (Batch 10 Phase 3)
+#include "../Engine/RenderEngineFlags.h"  // gMultiThreadedEngineEnabled atomic (Batch 10 Phase 3)
 
 // ── VibeSynthWindow ───────────────────────────────────────────────────────────
 // Subclass so the OS close button actually quits the application.
@@ -214,6 +216,56 @@ void VibesynthStandaloneApp::saveMasterOutputRouting()
     f.replaceWithText (xml.toString());
 }
 
+// 2026-05-07 (Batch 10 Phase 3): load + save the Mixer hamburger menu's
+// "Multi-core Rendering" preference from Documents/BaySickDAW/settings.xml.
+// Stored as <MultiCoreRendering on="0|1"/> child of <BaySickDAWSettings>;
+// preserves any other sections (RecentPatternColors, RecentNAMFiles,
+// RecentIRFiles, RecentProjects, etc.) the file already contains.  Default
+// is true when the key is missing, which matches the constexpr-default we
+// shipped in Phase 1 + 2.
+void VibesynthStandaloneApp::loadMultiCoreRenderingPref()
+{
+    const auto f = ProjectManager::getSettingsFile();
+    if (! f.existsAsFile()) return;   // first launch -- keep the in-memory default (true)
+
+    auto root = juce::XmlDocument::parse (f);
+    if (root == nullptr) return;
+
+    if (auto* node = root->getChildByName ("MultiCoreRendering"))
+    {
+        const bool on = node->getBoolAttribute ("on", true);
+        // release-store pairs with the audio thread's acquire-load at the top
+        // of processBlock.  Called before mDeviceManager->initialise so the
+        // very first audio callback already sees the persisted value.
+        RenderEngine::gMultiThreadedEngineEnabled.store (on, std::memory_order_release);
+    }
+}
+
+void VibesynthStandaloneApp::saveMultiCoreRenderingPref()
+{
+    const auto f = ProjectManager::getSettingsFile();
+    f.getParentDirectory().createDirectory();
+
+    // Read existing root or create a new one -- preserves every other
+    // sibling section already in settings.xml (PatternColorPicker writes
+    // <RecentPatternColors>, BaySickNAMIREditor writes <RecentNAMFiles> /
+    // <RecentIRFiles>, ProjectManager writes <RecentProjects>, etc.).
+    std::unique_ptr<juce::XmlElement> root;
+    if (f.existsAsFile())
+        root = juce::XmlDocument::parse (f);
+    if (root == nullptr)
+        root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
+
+    if (auto* existing = root->getChildByName ("MultiCoreRendering"))
+        root->removeChildElement (existing, true);
+
+    auto* node = root->createNewChildElement ("MultiCoreRendering");
+    node->setAttribute ("on",
+                        RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire));
+
+    root->writeTo (f);
+}
+
 void VibesynthStandaloneApp::saveAudioSettings()
 {
     if (!mDeviceManager) return;
@@ -322,6 +374,13 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // enabled and call restartLastAudioDevice() so the change actually takes.
     // setAudioDeviceSetup alone sometimes no-ops if JUCE thinks nothing
     // material changed; the explicit restart guarantees the new mask sticks.
+    // 2026-05-07 (Batch 10 Phase 3): restore the Mixer hamburger's "Multi-core
+    // Rendering" preference BEFORE mDeviceManager->initialise so the very
+    // first audio callback already routes via the correct path (MT vs serial).
+    // Defaults to true when the key is missing.  Independent of audio device
+    // settings -- lives in settings.xml not audio_settings.xml.
+    loadMultiCoreRenderingPref();
+
     if (settingsFile.existsAsFile())
     {
         auto xml = juce::XmlDocument::parse(settingsFile);

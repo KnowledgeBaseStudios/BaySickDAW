@@ -4484,10 +4484,16 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 // rendering.  release-store pairs with the
                                 // audio thread's acquire-load at the top of
                                 // processBlock; next block picks the new
-                                // path.  Phase 3 (settings.xml persistence)
-                                // ships separately.
+                                // path.  Phase 3 (2026-05-07): persist the
+                                // new state to settings.xml so it survives
+                                // restarts.  Save runs synchronously on
+                                // message thread -- file I/O is brief
+                                // (settings.xml is small, ~1 KB) and we'd
+                                // rather lose the toggle change than the
+                                // file under an abrupt shutdown.
                                 const bool wasOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
                                 RenderEngine::gMultiThreadedEngineEnabled.store (! wasOn, std::memory_order_release);
+                                VibesynthStandaloneApp::saveMultiCoreRenderingPref();
                                 return;
                             }
                             // J-A2: master output selector handlers.
