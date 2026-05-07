@@ -50,6 +50,7 @@ class VibeSynthProcessor : public juce::AudioProcessor,
     friend class InstStripTask;
     friend class ClipPageTask;            // Batch 5
     friend class AudioInsertTask;         // Batch 5
+    friend class CompositeAudioInsertTask; // QA-0 (2026-05-07)
     friend class RustyDrumsProducerTask;  // Batch 6
     friend class RustyInsertTask;         // Batch 6
     friend class PassiveStripTask;        // Batch 7
