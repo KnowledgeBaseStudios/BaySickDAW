@@ -145,8 +145,12 @@ set(VIBESYNTH_DSP_SOURCES
     Source/Engine/Tasks/VoxStripTask.cpp
     Source/Engine/Tasks/InstStripTask.cpp
     # Batch 5 (2026-05-06): Clip page + Audio insert wrappers.
+    # 2026-05-07 (QA-0): the old two are kept compiled alongside the new
+    # CompositeAudioInsertTask through Task 3's wiring; Task 4 deletes
+    # both source files + removes them from this list at the same time.
     Source/Engine/Tasks/ClipPageTask.cpp
     Source/Engine/Tasks/AudioInsertTask.cpp
+    Source/Engine/Tasks/CompositeAudioInsertTask.cpp
     # Batch 6 (2026-05-06): BaySickRustyDrums producer + 13 inserts.
     Source/Engine/Tasks/RustyDrumsProducerTask.cpp
     Source/Engine/Tasks/RustyInsertTask.cpp

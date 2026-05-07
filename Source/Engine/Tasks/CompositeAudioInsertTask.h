@@ -1,0 +1,80 @@
+#pragma once
+
+#include <JuceHeader.h>
+
+#include "../RenderTask.h"
+#include "../BlockContext.h"
+
+class VibeGraph;
+class ISidechainEngine;
+class VibeSynthProcessor;
+
+// CompositeAudioInsertTask
+// ------------------------
+// 2026-05-07 (QA-0): single render task per audio row that owns BOTH
+// previously-conflicting flows at channelId = audioInsert(row):
+//
+//   1. Clip-engine flow (was ClipPageTask): a sampler-style
+//      juce::AudioProcessor that the user assigned to a Clips ribbon tab,
+//      driven by piano-roll MIDI from BlockContext::clipPageMidi[row].
+//      processBlock writes engine audio into the row's arena slot;
+//      processInsert applies polarity / preEq / width / rack / postEq /
+//      fader x mute x solo / PDC / peak in-place.
+//
+//   2. Arrangement-clip flow (was AudioInsertTask): per-row decode of
+//      every NON-FilePlay AudioClipPlayer through the shared helper
+//      VibeSynthProcessor::renderAudioClipsForRow (mtDest = blockView).
+//      Each clip's post-rack output is ADDED to blockView (additive).
+//
+// Order B inside run(): clear blockView once -> clip-engine flow
+// (if engine set) -> arrangement-clip flow (if song mode + has clips).
+// Both contributions accumulate in mOutputBuffer.  Restores parity with
+// serial mode (where both PluginProcessor.cpp:2082-2118 and the audio-
+// clip players Pass 2 independently routeInsertOutput into the routing
+// accumulator at audioInsert(row)).
+//
+// Lifecycle (Strategy 1a):
+//   - One instance per audio row, created by
+//     VibeSynthProcessor::ensureAudioInsert and registered with the
+//     dispatcher under audioInsert(row).
+//   - registerClipEngine(pageIdx, eng) sets mClipEngine on the existing
+//     instance (no separate task registered, no most-recent-wins).
+//   - unregisterClipEngine clears mClipEngine (instance survives).
+//   - Instance lives for the project lifetime (matches the existing
+//     "no removeAudioInsert hook" pattern in ensureAudioInsert).
+class CompositeAudioInsertTask : public RenderTask
+{
+public:
+    CompositeAudioInsertTask (int                 row,
+                              int                 channelIdIn,
+                              VibeGraph&          graph,
+                              VibeSynthProcessor& processor);
+
+    void run() override;
+
+    // Set/clear the optional clip-engine pointer (sampler-style juce::AudioProcessor).
+    // Called from VibeSynthProcessor::registerClipEngine /
+    // unregisterClipEngine.  setClipEngine(nullptr) is the unregister path.
+    // Safe to call from the message thread; the audio thread reads via
+    // an acquire-load on the same atomic.
+    void setClipEngine (juce::AudioProcessor* engine);
+
+    // Per-task scratch used by renderAudioClipsForRow when this task's
+    // arrangement-clip flow runs.  Same API as the old AudioInsertTask
+    // helper -- the serial Pass 2 loop in PluginProcessor::processBlock
+    // also calls this so the new ownership pattern is exercised under
+    // flag=false ("no dead wiring" rule).  setSize avoidReallocating=true.
+    juce::AudioBuffer<float>& getClipScratch (int numChannels, int numSamples);
+
+private:
+    int                                mIndex     = 0;
+    VibeGraph*                         mGraph     = nullptr;
+    VibeSynthProcessor*                mProcessor = nullptr;
+
+    // Clip-engine flow state.
+    std::atomic<juce::AudioProcessor*> mClipEngine { nullptr };
+    std::atomic<ISidechainEngine*>     mScEngine   { nullptr };
+
+    // Arrangement-clip per-task scratch (pre-9b cross-task race fix).
+    juce::AudioBuffer<float>           mClipScratch;
+};
