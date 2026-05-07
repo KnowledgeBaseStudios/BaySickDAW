@@ -33,6 +33,7 @@
 #include "Engine/Tasks/RustyInsertTask.h"          // Batch 6: per-strip insert wrapper
 #include "Engine/Tasks/PassiveStripTask.h"         // Batch 7: aux + bus accumulator strips
 #include "Engine/Tasks/MasterTask.h"               // Batch 8: terminal task (graph sink)
+#include "Engine/RetirementQueue.h"                // Batch 9c B1: deferred-destruction GC
 
 // ── APVTS parameter helper ────────────────────────────────────────────────────
 // Creates a ParameterID with version 1
@@ -488,16 +489,63 @@ public:
         // Expected next file position — used to detect seeks and reset vocoder.
         int64 expectedFilePos { 0 };
     };
-    std::vector<AudioClipPlayer> mAudioClipPlayers;
-    juce::SpinLock               mAudioClipLock;
-    // NOTE (2026-05-06): the Batch 9b "snapshot" pattern that built a
-    // pointer view of mAudioClipPlayers and read it lock-free was removed
-    // after a UAF crash — raw pointers into the vector aren't safe when
-    // the mutator's swap destroys old AudioClipStreamer instances on the
-    // message thread.  9c needs to address worker lock contention via
-    // shared_ptr<AudioClipPlayer> semantics OR a deferred-destruction queue
-    // before MT-mode workers can read clip data without blocking.  See
-    // deferred items in Files For Claude/ batch map.
+    // 2026-05-06 (Batch 9c B1): deferred-destruction GC pattern.
+    //
+    // Audio thread reads the active snapshot lock-free at the top of
+    // processBlock (mActiveAudioClips.load -> mCurrentBlockClipSnapshot)
+    // and uses the same pointer for the entire block (every iteration site
+    // + every RenderTask reads mCurrentBlockClipSnapshot->players).
+    //
+    // Mutator (rebuildAudioClipPlayers, message thread) builds a fresh
+    // AudioClipSnapshot, atomic-exchanges it into mActiveAudioClips, and
+    // retires the old one to mClipRetirement with retiredBeforeGen set to
+    // the new snapshot's generation.  The drainer thread (owned by
+    // RetirementQueue) destroys the old snapshot once the audio thread has
+    // demonstrably moved past the retire point (mAudioInUseClipGen >=
+    // retiredBeforeGen) -- guaranteeing the slow ~AudioClipStreamer (file
+    // close + TimeSliceClient unregister) NEVER runs on the audio thread.
+    //
+    // Replaces the pre-9c per-site try-lock pattern (audio bailed silent
+    // for a block under MT contention) and the reverted a19c6e3 "lock for
+    // whole block" snapshot (which deadlocked with audio->Win32 GUI calls
+    // -- closed by the B2 fix in 3b2c85a).
+    struct AudioClipSnapshot
+    {
+        std::vector<AudioClipPlayer> players;
+        std::uint64_t                generation { 0 };
+    };
+
+    // Atomically published from the message thread; read once per audio
+    // block via load-acquire.  The pointer's target is owned by whoever
+    // last took it OUT of the atomic (initial bootstrap in the ctor;
+    // mutator's exchange returns the previous value to the retirement
+    // queue; ~VibeSynthProcessor explicitly deletes the final value).
+    std::atomic<AudioClipSnapshot*> mActiveAudioClips  { nullptr };
+
+    // Audio thread writes (release-store) at the top of every processBlock.
+    // RetirementQueue drainer reads (acquire-load) to decide which retired
+    // snapshots are safe to destroy.
+    std::atomic<std::uint64_t>      mAudioInUseClipGen { 0 };
+
+    // Mutator's monotonic generation counter.  Each rebuild assigns
+    // gen = mNextClipGen.fetch_add(1) + 1, so the first published snapshot
+    // beyond the bootstrap (gen 0) gets gen 1.
+    std::atomic<std::uint64_t>      mNextClipGen       { 0 };
+
+    // GC queue for retired AudioClipSnapshot instances.  Owns its own
+    // dedicated drainer thread (see Engine/RetirementQueue.h).
+    RetirementQueue<AudioClipSnapshot> mClipRetirement;
+
+    // Audio-thread-only.  Captured at the top of processBlock (under the
+    // load-acquire of mActiveAudioClips) and consumed by every iteration
+    // site for the rest of that block: FilePlay pre-scan, Pass 2
+    // song-mode loop, applyChokeGroupDispatch (both sub-loops), the
+    // shared renderAudioClipsForRow / renderFilePlayPlayer helpers, plus
+    // the AudioInsertTask / VoxStripTask / InstStripTask MT workers.
+    // Visibility to MT workers is established by the dispatcher's
+    // notify/wait release-acquire pair (workers wake AFTER the audio
+    // thread has written this).
+    AudioClipSnapshot* mCurrentBlockClipSnapshot { nullptr };
 
     // ── Batch 5 (2026-05-06): shared audio-clip render path ──────────────────
     // Per-block context bundle passed into renderAudioClipsForRow.  Keeps the
@@ -540,10 +588,13 @@ public:
     // direct-path SR-interp), copies into the matching Vox/Inst engine's
     // scratch, runs eng->processBlock + processInsert + routes the output.
     //
-    // Caller MUST hold mAudioClipLock for the duration of this call (the
-    // helper dereferences AudioClipStreamer + PhaseVocoder owned by the
-    // AudioClipPlayer).  Caller MUST also have already filtered the player
-    // by FilePlay status (player.routeChannel must be a Vox or Inst id).
+    // 2026-05-06 (Batch 9c B1): caller MUST be iterating over
+    // mCurrentBlockClipSnapshot->players (or have already obtained the
+    // player reference from there).  The snapshot is captured at the top
+    // of processBlock and is guaranteed alive for the duration of the
+    // block via the RetirementQueue ack protocol.  Caller MUST also have
+    // already filtered the player by FilePlay status (player.routeChannel
+    // must be a Vox or Inst id).
     //
     // engineMidi: per-page MIDI buffer for the Vox/Inst page identified by
     // player.routeChannel (e.g. voxPageMidi[vi] in serial code, or

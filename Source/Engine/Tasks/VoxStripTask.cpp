@@ -51,9 +51,12 @@ void VoxStripTask::run()
         if (mProcessor->mPatternManager == nullptr) return;
         if (! mProcessor->mSongMode.load (std::memory_order_relaxed)) return;
 
-        juce::SpinLock::ScopedTryLockType tryLk (mProcessor->mAudioClipLock);
-        if (! tryLk.isLocked()) return;   // contention this block — silence
-
+        // 2026-05-06 (Batch 9c B1): try-lock removed.  mCurrentBlockClipSnapshot
+        // is captured by VibeSynthProcessor::processBlock at the top of the
+        // audio callback BEFORE the dispatcher fires this task; the snapshot
+        // is guaranteed alive for the entire block via the RetirementQueue
+        // ack protocol.  Visibility is established by the dispatcher's
+        // notify/wait release-acquire pair.
         const double bpm        = mCtx->bpm;
         const double secPerBeat = 60.0 / juce::jmax (20.0, bpm);
         const double beatStart  = mCtx->posInfo->getPpqPosition().orFallback (0.0);
@@ -85,7 +88,8 @@ void VoxStripTask::run()
         juce::MidiBuffer& engineMidi = (mCtx->voxPageMidi != nullptr)
             ? mCtx->voxPageMidi[mIndex] : emptyMidi;
 
-        for (auto& player : mProcessor->mAudioClipPlayers)
+        // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot.
+        for (auto& player : mProcessor->mCurrentBlockClipSnapshot->players)
         {
             if (player.routeChannel != channelId) continue;
             mProcessor->renderFilePlayPlayer (player, clipCtx, engineMidi, &blockView);

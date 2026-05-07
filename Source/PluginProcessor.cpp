@@ -164,12 +164,33 @@ VibeSynthProcessor::VibeSynthProcessor()
     // for every param change (UI / automation / host-driven).  We just flip the
     // dirty flag so the next processBlock re-runs EQ sync; otherwise sync skips.
     apvts.state.addListener(this);
+
+    // 2026-05-06 (Batch 9c B1): bootstrap an empty AudioClipSnapshot at gen 0.
+    // The audio thread's first load-acquire on mActiveAudioClips MUST see a
+    // valid pointer (no null-checks in the iteration sites by design).
+    auto* initialSnap = new AudioClipSnapshot();
+    initialSnap->generation = 0;
+    mActiveAudioClips.store (initialSnap, std::memory_order_release);
 }
 
 VibeSynthProcessor::~VibeSynthProcessor()
 {
     apvts.state.removeListener(this);
     mAudioFileThread.stopThread (500);
+
+    // 2026-05-06 (Batch 9c B1): the atomic doesn't own the active snapshot;
+    // delete here so the AudioClipStreamer destructors (and their bg-thread
+    // unregister calls) run before mAudioFileThread is fully gone.  By the
+    // time this runs, the audio thread is no longer dispatching processBlock
+    // (~StandaloneEditor's closeAllDynamicTabs barrier + JUCE's standard
+    // plugin-shutdown ordering ensure that), so destroying on this thread
+    // is safe and avoids routing through the retirement queue during
+    // teardown (mClipRetirement is itself about to be destroyed via member
+    // destruction; doing one final retire here would be a sequencing race
+    // with that).
+    if (auto* lastRaw = mActiveAudioClips.exchange (nullptr,
+                                                     std::memory_order_acquire))
+        delete lastRaw;
 }
 
 // ── Preparation ───────────────────────────────────────────────────────────────
@@ -441,13 +462,13 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
                && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed)) {}
     };
 
-    // 2026-05-06 (Batch 9b backlog REVERTED): caller MUST hold mAudioClipLock
-    // for the duration of this iteration.  Serial code (Pass 2 loop in
-    // processBlock) is wrapped in a tryLk that's still held when this is
-    // called.  AudioInsertTask::run() also takes the lock before calling
-    // (under MT, when the flag flips).  Lock ensures the mutator can't
-    // destroy AudioClipPlayer/Streamer mid-iteration.
-    for (auto& player : mAudioClipPlayers)
+    // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot captured
+    // at the top of processBlock.  Serial Pass 2 + AudioInsertTask::run
+    // (MT) both call this helper after the audio thread published
+    // mCurrentBlockClipSnapshot, so the players[] vector is guaranteed
+    // alive for the duration of this block via the RetirementQueue ack
+    // protocol -- no per-site lock needed.
+    for (auto& player : mCurrentBlockClipSnapshot->players)
     {
         if (player.streamer == nullptr) continue;
         if (player.trackRow != row) continue;
@@ -923,6 +944,26 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         buffer.clear();
         midiMessages.clear();
         return;
+    }
+
+    // 2026-05-06 (Batch 9c B1): capture the active AudioClipSnapshot ONCE for
+    // this block.  Every iteration site below + every MT worker reads
+    // mCurrentBlockClipSnapshot for the rest of the block -- never re-loads
+    // mActiveAudioClips -- so the message-thread mutator can swap a new
+    // snapshot in mid-block without breaking consistency.
+    //
+    // The published mAudioInUseClipGen is read by RetirementQueue's drainer
+    // to know which retired snapshots are safe to destroy.  Bumping it here
+    // (release-store after the load-acquire) is what closes the GC race:
+    // any retired snapshot whose retiredBeforeGen > mAudioInUseClipGen at
+    // the time of retirement stays alive until this audio thread loads a
+    // newer snapshot in a future block and bumps the gen past it.
+    {
+        auto* snap = mActiveAudioClips.load (std::memory_order_acquire);
+        // Bootstrap (ctor) guarantees this is non-null on first entry; the
+        // mutator only ever publishes non-null pointers.
+        mCurrentBlockClipSnapshot = snap;
+        mClipRetirement.setInUseGeneration (snap->generation);
     }
 
     // ── Multi-threaded render engine branch ─────────────────────────────────
@@ -1695,18 +1736,15 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // dispatchBlock fires.
     mRenderDispatcher.rebuildLinks (mVibeGraph.getRoutingGraph());
 
-    // 2026-05-06 (Batch 9b backlog REVERTED): the audio-thread mAudioClipLock
-    // snapshot pattern was reverted after a UAF crash (AudioClipStreamer
-    // destructor races with worker reads of raw pointers in the snapshot).
-    // Original motivation — avoid MT-mode worker lock contention — needs a
-    // real fix in 9c: shared_ptr<AudioClipPlayer> semantics OR deferred
-    // destruction queue.  Restored pre-9b per-site try-lock pattern: each
-    // iteration site (FilePlay scan, song-mode Pass 1, renderAudioClipsForRow,
-    // applyChokeGroupDispatch, AudioInsertTask::run) takes mAudioClipLock
-    // briefly during the deref, releases on exit.  Safe because the mutator
-    // (rebuildAudioClipPlayers) waits for the lock to swap, and destruction
-    // can only happen after the swap (i.e., when audio thread doesn't hold
-    // any pointers to old contents).
+    // 2026-05-06 (Batch 9c B1): the per-site try-lock pattern this comment
+    // used to describe is gone.  Audio thread now reads the AudioClipSnapshot
+    // captured at the top of processBlock (mCurrentBlockClipSnapshot) and
+    // every iteration site -- FilePlay scan, song-mode Pass 1, Pass 2,
+    // applyChokeGroupDispatch, renderAudioClipsForRow, AudioInsertTask,
+    // VoxStripTask, InstStripTask -- reads from that single snapshot.
+    // Mutator (rebuildAudioClipPlayers) atomic-exchanges a new snapshot in
+    // and retires the old to mClipRetirement; the slow ~AudioClipStreamer
+    // destruction runs on the GC drainer thread, never on audio.
 
     // 5F-4b B1b: routeInsertOutput is a private member function (Batch 5
     // promoted it from a stack lambda).  Existing call sites below resolve
@@ -2050,27 +2088,25 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         const int64  blockStart   = (int64)(beatStartPS * secPerBeatPS * mSampleRate);
         const int64  blockEnd     = blockStart + numSamples;
 
-        juce::SpinLock::ScopedTryLockType tryLk (mAudioClipLock);
-        if (tryLk.isLocked())
+        // 2026-05-06 (Batch 9c B1): try-lock removed -- read the audio-thread
+        // snapshot captured at the top of processBlock.
+        for (auto& p : mCurrentBlockClipSnapshot->players)
         {
-            for (auto& p : mAudioClipPlayers)
-            {
-                if (p.routeChannel == 0 || p.streamer == nullptr) continue;
-                const int64 cs = (int64)(p.clipStartBeat * secPerBeatPS * mSampleRate);
-                const int64 ce = (int64)(p.clipEndBeat   * secPerBeatPS * mSampleRate);
-                if (blockEnd <= cs || blockStart >= ce) continue;
+            if (p.routeChannel == 0 || p.streamer == nullptr) continue;
+            const int64 cs = (int64)(p.clipStartBeat * secPerBeatPS * mSampleRate);
+            const int64 ce = (int64)(p.clipEndBeat   * secPerBeatPS * mSampleRate);
+            if (blockEnd <= cs || blockStart >= ce) continue;
 
-                const int chId = p.routeChannel;
-                if (chId >= MixerChannelIds::kVoxBase
-                    && chId <  MixerChannelIds::kVoxBase + kMaxVoxPages)
-                {
-                    mVoxFilePlayActive[chId - MixerChannelIds::kVoxBase] = true;
-                }
-                else if (chId >= MixerChannelIds::kInstBase
-                         && chId <  MixerChannelIds::kInstBase + kMaxInstPages)
-                {
-                    mInstFilePlayActive[chId - MixerChannelIds::kInstBase] = true;
-                }
+            const int chId = p.routeChannel;
+            if (chId >= MixerChannelIds::kVoxBase
+                && chId <  MixerChannelIds::kVoxBase + kMaxVoxPages)
+            {
+                mVoxFilePlayActive[chId - MixerChannelIds::kVoxBase] = true;
+            }
+            else if (chId >= MixerChannelIds::kInstBase
+                     && chId <  MixerChannelIds::kInstBase + kMaxInstPages)
+            {
+                mInstFilePlayActive[chId - MixerChannelIds::kInstBase] = true;
             }
         }
     }
@@ -2283,8 +2319,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         if (auto* p = apvts.getRawParameterValue("masterGain"))
             masterGain *= p->load();
 
-        juce::SpinLock::ScopedTryLockType tryLk (mAudioClipLock);
-        if (tryLk.isLocked())
+        // 2026-05-06 (Batch 9c B1): try-lock removed -- read the audio-thread
+        // snapshot captured at the top of processBlock.
         {
             // Bus accumulation buffer: all per-clip processed audio sums here.
             const int numOut = buffer.getNumChannels();
@@ -2317,7 +2353,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // 2026-05-06 (Batch 9b Item 9): per-clip body migrated into
             // renderFilePlayPlayer.  VoxStripTask / InstStripTask call the
             // same helper from their FilePlay branches under MT flag.
-            for (auto& player : mAudioClipPlayers)
+            // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot.
+            for (auto& player : mCurrentBlockClipSnapshot->players)
             {
                 if (player.streamer == nullptr) continue;
 
@@ -3074,7 +3111,13 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
     // TS markers are decorative-only).
     constexpr double kBPB = 4.0;
 
-    std::vector<AudioClipPlayer> newPlayers;
+    // 2026-05-06 (Batch 9c B1): build a fresh AudioClipSnapshot + assign it
+    // a new monotonic generation.  Atomic-exchanges the publication pointer
+    // and retires the OLD snapshot to mClipRetirement so its slow
+    // ~AudioClipStreamer (file close + bg-thread unregister) runs on the
+    // GC drainer thread instead of here on the message thread.
+    auto newSnap = std::make_unique<AudioClipSnapshot>();
+    auto& newPlayers = newSnap->players;
     for (int i = 0; i < mPatternManager->getNumBlocks(); ++i)
     {
         const auto& blk = mPatternManager->getBlock(i);
@@ -3133,13 +3176,20 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         newPlayers.push_back (std::move (p));
     }
 
-    // Swap under lock — audio thread always sees a consistent list.
-    // Old streamers are destroyed after the lock is released (no blocking under lock).
-    {
-        juce::SpinLock::ScopedLockType lk (mAudioClipLock);
-        std::swap (mAudioClipPlayers, newPlayers);
-    }
-    // newPlayers (old streamers) destroyed here on the message thread.
+    // 2026-05-06 (Batch 9c B1): publish the new snapshot atomically and
+    // retire the old to the GC queue.  retiredBeforeGen = newSnap->generation
+    // means "the audio thread is safe to free the old once it has loaded
+    // a snapshot with gen >= this value" (mirrors the contract documented
+    // in Engine/RetirementQueue.h).  fetch_add is relaxed because the
+    // synchronization is carried by the exchange's acq_rel below.
+    newSnap->generation = mNextClipGen.fetch_add (1, std::memory_order_relaxed) + 1;
+    const auto newGen   = newSnap->generation;
+    auto* newRaw        = newSnap.release();   // ownership passes into atomic
+    auto* oldRaw        = mActiveAudioClips.exchange (newRaw,
+                                                       std::memory_order_acq_rel);
+    if (oldRaw != nullptr)
+        mClipRetirement.retire (std::unique_ptr<AudioClipSnapshot> (oldRaw),
+                                 newGen);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3170,11 +3220,13 @@ void VibeSynthProcessor::applyChokeGroupDispatch(
     // A clip silenced by choke during a previous playback should start fresh
     // when the playhead re-enters its range.  Reset before adding new fires
     // so the upcoming choke broadcast sticks for the rest of this playthrough.
-    juce::SpinLock::ScopedTryLockType acLock(mAudioClipLock);
-    if (acLock.isLocked())
+    // 2026-05-06 (Batch 9c B1): try-lock removed -- read the audio-thread
+    // snapshot captured at the top of processBlock.  All three sub-loops
+    // in this function now read the same snapshot.
+    auto& clipPlayers = mCurrentBlockClipSnapshot->players;
     {
         const juce::int64 projectEnd = projectStartSamp + numSamples;
-        for (auto& player : mAudioClipPlayers)
+        for (auto& player : clipPlayers)
         {
             const juce::int64 cs = (juce::int64)(player.clipStartBeat * secPerBeat * mSampleRate);
             const juce::int64 ce = (juce::int64)(player.clipEndBeat   * secPerBeat * mSampleRate);
@@ -3215,11 +3267,10 @@ void VibeSynthProcessor::applyChokeGroupDispatch(
     for (int i = 0; i < kMaxInstPages;  ++i) scan(Kind::Inst,  i, instMidi[i]);
 
     // Audio clip starts in this block.
-    if (acLock.isLocked())
     {
-        for (int ci = 0; ci < (int) mAudioClipPlayers.size(); ++ci)
+        for (int ci = 0; ci < (int) clipPlayers.size(); ++ci)
         {
-            const auto& p = mAudioClipPlayers[ci];
+            const auto& p = clipPlayers[ci];
             if (p.chokeGroup <= 0) continue;
             const juce::int64 cs = (juce::int64)(p.clipStartBeat * secPerBeat * mSampleRate);
             // Clip "starts" if its absolute sample falls inside [projectStart, projectEnd).
@@ -3256,12 +3307,11 @@ void VibeSynthProcessor::applyChokeGroupDispatch(
         for (int i = 0; i < kMaxInstPages;  ++i) injectMidi(Kind::Inst,  i, instMidi[i],  f);
 
         // Audio peers — set mutedByChoke=true on others in same group.
-        if (acLock.isLocked())
         {
-            for (int ci = 0; ci < (int) mAudioClipPlayers.size(); ++ci)
+            for (int ci = 0; ci < (int) clipPlayers.size(); ++ci)
             {
                 if (f.src == ChokeFire::Src::Audio && ci == f.index) continue;
-                auto& p = mAudioClipPlayers[ci];
+                auto& p = clipPlayers[ci];
                 if (p.chokeGroup != f.group) continue;
                 p.mutedByChoke = true;
             }

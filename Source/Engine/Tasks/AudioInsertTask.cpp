@@ -46,14 +46,12 @@ void AudioInsertTask::run()
     if (auto* p = mProcessor->apvts.getRawParameterValue ("masterGain"))
         masterGain *= p->load();
 
-    // 2026-05-06 (Batch 9b backlog REVERTED): try-lock per task restored after
-    // the snapshot pattern's UAF crash.  When kEnableMultiThreadedEngine flips,
-    // multiple workers will contend for this lock and losers go silent for a
-    // block — same shape as pre-9b.  Real fix is a 9c task: shared_ptr-backed
-    // mAudioClipPlayers OR a deferred-destruction queue, then re-enable the
-    // lock-free snapshot pattern safely.
-    juce::SpinLock::ScopedTryLockType tryLk (mProcessor->mAudioClipLock);
-    if (! tryLk.isLocked()) return;
+    // 2026-05-06 (Batch 9c B1): per-task try-lock removed.  Workers no longer
+    // contend on a SpinLock -- the audio thread captured
+    // mCurrentBlockClipSnapshot at the top of processBlock and the snapshot
+    // is guaranteed alive for the entire block via the RetirementQueue ack
+    // protocol.  renderAudioClipsForRow (called below) iterates that
+    // snapshot directly.
 
     // 2026-05-06 (Batch 9b Item 10): per-task scratch buffer eliminates the
     // cross-task race that existed when every AudioInsertTask pointed at
