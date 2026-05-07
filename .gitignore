@@ -6,3 +6,13 @@ Files For Claude/
 
 # User-created projects + their backups + samples — runtime data, not source.
 Projects/
+
+# Per-machine audio settings (different audio interfaces per workstation).
+audio_settings.xml
+master_output.xml
+
+# Runtime diagnostic logs — regenerated each launch, not source.
+*_log.txt
+
+# Auto-saved Untitled-project backups — runtime, not source.
+Backups/Unsaved/
