@@ -106,7 +106,7 @@ void HarmlessProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     mSynth.renderNextBlock (buffer, midi);
 
-    // Flush NaN/Inf — a diverging SVF filter or malformed wavetable can produce
+    // Flush NaN/Inf - a diverging SVF filter or malformed wavetable can produce
     // these, and Windows WASAPI will permanently silence the device stream if
     // any NaN reaches the audio hardware.
     for (int c = 0; c < buffer.getNumChannels(); ++c)
@@ -271,7 +271,7 @@ HarmlessProcessor::createLayout (const juce::String& p)
     layout.add (std::make_unique<juce::AudioParameterBool> (
         vid (p + "legato"), "Legato", false));
 
-    // Session E — Cut Self: noteOn cuts prior voices playing the same note.
+    // Session E - Cut Self: noteOn cuts prior voices playing the same note.
     layout.add (std::make_unique<juce::AudioParameterBool> (
         vid (p + "cutSelf"), "Cut Self", false));
 
@@ -478,13 +478,13 @@ HarmlessProcessor::createLayout (const juce::String& p)
     // Three global sliders that set the LFO source DEPTH on specific mod
     // registry targets (vol → Volume, pitch → Pitch).  Bipolar -1..+1 so
     // negative depths invert the LFO swing relative to the user's setting.
-    // lfo_vel routes outside the registry — see HarmlessSynth note-on
-    // velocity scaling below — because the registry has no Velocity target
+    // lfo_vel routes outside the registry - see HarmlessSynth note-on
+    // velocity scaling below - because the registry has no Velocity target
     // (velocity is a one-shot at note-on, not a continuous modulator).
     // Replace semantics: moving these global sliders OVERWRITES any
     // per-target depth the user set in the in-player Mod Editor for that
     // destination.  Mirrors the existing applyGlobalLfoToAllTargets pattern
-    // for lfo_rate/lfo_shape — global sliders clobber per-target settings.
+    // for lfo_rate/lfo_shape - global sliders clobber per-target settings.
     layout.add (std::make_unique<juce::AudioParameterFloat> (vid (p + "lfo_vel"),
         "LFO Vel Depth",   juce::NormalisableRange<float> (-1.0f, 1.0f), 0.0f));
     layout.add (std::make_unique<juce::AudioParameterFloat> (vid (p + "lfo_vol"),
@@ -606,7 +606,7 @@ void HarmlessProcessor::updateFromApvts()
     }
 
     // ── Spectral modules ──────────────────────────────────────────────────────
-    // These call buildWavetable() internally — guard against fire-every-block.
+    // These call buildWavetable() internally - guard against fire-every-block.
 
     // 2026-04-19 (S3.5): existing param reads now drive Part A only via the
     // *A setters; Part B has its own partB_* twins read further down.
@@ -684,7 +684,7 @@ void HarmlessProcessor::updateFromApvts()
     }
 
     // timbre_blend, flt_env_amt, flt ADSR, reverb_amount:
-    // registered in APVTS for automation — wired in 3A-Final.
+    // registered in APVTS for automation - wired in 3A-Final.
 
     // ── Phase init ────────────────────────────────────────────────────────────
     const float phStart = getf ("phase_start"), phRand = getf ("phase_rand");
@@ -955,7 +955,7 @@ void HarmlessProcessor::updateFromApvts()
     }
 
     // 2026-04-30: T2-B LFO depth shortcuts.  Bipolar -1..+1.  Each routes
-    // to one specific destination — vol→Volume target, pitch→Pitch target,
+    // to one specific destination - vol→Volume target, pitch→Pitch target,
     // vel→note-on velocity scaling (handled inside HarmlessSynth).
     const float lfoVel   = getf ("lfo_vel");
     const float lfoVol   = getf ("lfo_vol");

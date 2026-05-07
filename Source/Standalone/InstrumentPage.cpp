@@ -70,7 +70,7 @@ void InstrumentPage::setSubTabContent(int idx, juce::Component* content)
     if (idx >= 0 && idx < mSubTabs.getNumTabs())
     {
         mSubTabs.setTabBackgroundColour(idx, VC::Panel);
-        // Replace the existing content component (ownership NOT transferred — caller manages it)
+        // Replace the existing content component (ownership NOT transferred - caller manages it)
         mSubTabs.getTabContentComponent(idx);  // just ensures tab exists
         // Use a non-owning wrapper so TabbedComponent doesn't delete it
         if (content)
@@ -88,7 +88,7 @@ void InstrumentPage::setSubTabContent(int idx, juce::Component* content)
                     void resized() override { inner->setBounds(getLocalBounds()); }
                 };
                 mSubTabs.removeTab(idx);
-                // Re-insert at same position — note: tabs shift so we need to be careful
+                // Re-insert at same position - note: tabs shift so we need to be careful
                 // Simplest: just remove/re-insert all three keeping order
                 // For Phase 1 this is only called once so order is safe
                 auto* w = new Wrapper(content);

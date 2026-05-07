@@ -4,7 +4,7 @@
 #include "PolyphaseOversampler.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FuzzStyleDSP — Phase I-5 (2026-05-02)
+// FuzzStyleDSP - Phase I-5 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // FZ Style Fuzz pedal.  Three-mode multi-character fuzz.  Knobs: Level / Mode /
 // Fuzz (Drive).

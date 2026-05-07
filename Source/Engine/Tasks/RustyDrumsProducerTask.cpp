@@ -5,7 +5,7 @@
 RustyDrumsProducerTask::RustyDrumsProducerTask (VibeSynthProcessor& processor)
     : mProcessor (&processor)
 {
-    // channelId stays at -1 (default) — producer-style task with no arena slot.
+    // channelId stays at -1 (default) - producer-style task with no arena slot.
 }
 
 void RustyDrumsProducerTask::run()

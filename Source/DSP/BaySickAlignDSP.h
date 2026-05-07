@@ -4,7 +4,7 @@
 #include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickAlignDSP — Phase H-6a (2026-05-01)
+// BaySickAlignDSP - Phase H-6a (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 // Offline time-alignment engine.  VocAlign-clone behaviour: computes a warp
 // map that morphs a "dub" take onto a "guide" take's timing, by pairing
@@ -83,7 +83,7 @@ public:
     // strength = 0..1.  At 0, no warp is produced (pure passthrough map).
     // At 1.0, every dub onset is snapped tightly to the nearest guide onset.
     // Intermediate values blend between the dub's natural timing and the
-    // guide's timing — matches VocAlign's "% align" knob.
+    // guide's timing - matches VocAlign's "% align" knob.
     //
     // pairingToleranceSec = max time difference between a dub onset and a
     // guide onset that may be paired.  Default 0.5 sec covers typical vocal

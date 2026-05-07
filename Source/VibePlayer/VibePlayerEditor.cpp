@@ -36,7 +36,7 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     : juce::AudioProcessorEditor (p), mProc (p)
 {
     setLookAndFeel (&mLAF);
-    // 2026-04-21: 6-box grid layout — 600x560 editor. Drums editor sizes its
+    // 2026-04-21: 6-box grid layout - 600x560 editor. Drums editor sizes its
     //   embedded child via setBounds; dims here only matter in standalone.
     setSize (600, 560);
 
@@ -172,7 +172,7 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     for (auto* s : { &mLfoRateKnob, &mLfoAmtKnob }) addAndMakeVisible (*s);
     for (auto* l : { &mLfoRateLbl,  &mLfoAmtLbl  }) addAndMakeVisible (*l);
 
-    // ── Box 6: Filter (D.4-Q3 2026-05-01) — 3 hidden APVTS params surfaced ──
+    // ── Box 6: Filter (D.4-Q3 2026-05-01) - 3 hidden APVTS params surfaced ──
     // mFilterArticKnob removed from the UI on 2026-05-01: the bundled Core
     // Library has zero SFZs that use `group=`, so any non-zero value silences
     // the engine.  APVTS param `artic_group` retained so power-user automation
@@ -188,7 +188,7 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     for (auto* l : { &mFilterCutoffLbl,  &mFilterResLbl,  &mFilterReductLbl  })
         addAndMakeVisible (*l);
 
-    // ── Box 7: Output (5 knobs — Master Volume uses white volume filmstrip) ──
+    // ── Box 7: Output (5 knobs - Master Volume uses white volume filmstrip) ──
     initModKnob (mPanKnob,    "Pan (L/R)");
     initModKnob (mStereoKnob, "Stereo width");
     initModKnob (mTrebleKnob, "Treble shelf (cut/boost at 8kHz)");
@@ -244,7 +244,7 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     wireID (mVolumeKnob,        "volume");
     wireID (mTrebleKnob,        "treble");
     wireID (mDriveKnob,         "drive");
-    // D.4-Q3: filter box knob IDs (artic knob hidden — see ctor note)
+    // D.4-Q3: filter box knob IDs (artic knob hidden - see ctor note)
     wireID (mFilterCutoffKnob,  "cutoff");
     wireID (mFilterResKnob,     "res");
     wireID (mFilterReductKnob,  "reduct");
@@ -282,7 +282,7 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     mLfoRateAtt       = std::make_unique<SliderAtt> (avts, pid ("lfo_rate"),     mLfoRateKnob);
     mLfoAmtAtt        = std::make_unique<SliderAtt> (avts, pid ("lfoAmt"),       mLfoAmtKnob);
 
-    // D.4-Q3: filter box attachments (artic knob hidden — APVTS param kept)
+    // D.4-Q3: filter box attachments (artic knob hidden - APVTS param kept)
     mFilterCutoffAtt  = std::make_unique<SliderAtt> (avts, pid ("cutoff"),       mFilterCutoffKnob);
     mFilterResAtt     = std::make_unique<SliderAtt> (avts, pid ("res"),          mFilterResKnob);
     mFilterReductAtt  = std::make_unique<SliderAtt> (avts, pid ("reduct"),       mFilterReductKnob);
@@ -327,7 +327,7 @@ void VibePlayerEditor::valueTreeRedirected (juce::ValueTree& tree)
 }
 
 // ── Box-rect helper (used by both paint and resized) ─────────────────────────
-// D.4-Q3 (2026-05-01): 7 boxes — top row has 3 boxes (Sample/Pitch/Dynamics),
+// D.4-Q3 (2026-05-01): 7 boxes - top row has 3 boxes (Sample/Pitch/Dynamics),
 // bottom row has 4 boxes (AmpEnv/LFO/Filter/Output).  Top boxes are wider
 // than bottom boxes since they share the same total width split into 3 vs 4
 // columns.
@@ -357,7 +357,7 @@ void VibePlayerEditor::paint (juce::Graphics& g)
     g.setColour (juce::Colour (0xFF333537));
     g.drawHorizontalLine (kHdrH, 0.f, (float) getWidth());
 
-    // 6 box section titles only — no box borders, no underlines, no fill.
+    // 6 box section titles only - no box borders, no underlines, no fill.
     //   Kept flat matte to avoid the AA ghost-rings the rounded-rect outlines
     //   were producing against the dark background. Section labels alone
     //   provide the visual grouping.
@@ -477,17 +477,17 @@ void VibePlayerEditor::resized()
     placeKnob (3, 0, 1, mSustainKnob, mSustainLbl);
     placeKnob (3, 1, 1, mReleaseKnob, mReleaseLbl);
 
-    // ── Box 4: LFO (2 knobs — centred in middle row of a 2x3 area) ───────────
+    // ── Box 4: LFO (2 knobs - centred in middle row of a 2x3 area) ───────────
     placeKnob (4, 0, 1, mLfoRateKnob, mLfoRateLbl);
     placeKnob (4, 1, 1, mLfoAmtKnob,  mLfoAmtLbl);
 
-    // ── Box 5: Filter (D.4-Q3 — 3 knobs after artic knob removed) ───────────
+    // ── Box 5: Filter (D.4-Q3 - 3 knobs after artic knob removed) ───────────
     // Cutoff + Res on row 0, Reduct centred on row 1 with empty cell beside it.
     placeKnob (5, 0, 0, mFilterCutoffKnob, mFilterCutoffLbl);
     placeKnob (5, 1, 0, mFilterResKnob,    mFilterResLbl);
     placeKnob (5, 0, 1, mFilterReductKnob, mFilterReductLbl);
 
-    // ── Box 6: Output — Master Volume on its own row 2 so it stands out.
+    // ── Box 6: Output - Master Volume on its own row 2 so it stands out.
     //   Row 0: Pan | Stereo
     //   Row 1: Overdrive | Treble
     //   Row 2: Master Volume | (empty)
@@ -657,7 +657,7 @@ void VibePlayerEditor::showPresetMenu()
 
     // 2026-04-26: recursive walk so factory subfolders appear as cascading
     // submenus.  Top-level folders are filtered by drum/melodic context to
-    // mirror the sample-pack filter — drum tabs see only Hip Hop / EDM Drums,
+    // mirror the sample-pack filter - drum tabs see only Hip Hop / EDM Drums,
     // melodic tabs see Brass / Keys / Strings / Woodwinds.  "My Presets"
     // always shows regardless of context (user content can be either).
     std::function<void (juce::PopupMenu&, const juce::File&)> walkPresets;

@@ -31,30 +31,30 @@ enum class EffectType
     // I-1: BaySickPedals 18-module spec.  DSP classes land in I-5..I-13;
     // factory returns nullptr until then.  Numeric values explicit so saved
     // projects don't drift if we re-order the enum later.
-    BluesDriveStyle      = 100,   // BD — Harmonics — slots 1-6
+    BluesDriveStyle      = 100,   // BD - Harmonics - slots 1-6
     // OverdriveStyle (was 101) REMOVED 2026-05-02 -- folded into existing
     // OverdriveDSP as Type::Pedal alongside Type::Rack (mirrors the CS Style
     // fold on CompressorDSP).  Single picker entry "Overdrive"; Mode dropdown
     // exposes "Overdrive (Rack)" vs "Overdrive (Pedal)".  Numeric value 101
     // intentionally left dead so future enum additions don't reuse it (no
     // projects in the wild had Phase I OverdriveStyle data per locked spec).
-    DistortionStyle      = 102,   // DS — Harmonics — slots 1-6
-    FuzzStyle            = 103,   // FZ — Harmonics — slots 1-6
-    NoiseGateStyle       = 104,   // NS — Dynamics  — slots 1-6
-    HighGainStyle        = 105,   // MT — Harmonics — slots 1-6
-    TunerStyle           = 106,   // TU — Time      — slot 0 (locked)
-    AcousticPreampStyle  = 107,   // AD — Time      — slots 1-6
-    GraphicEQStyle       = 108,   // GE — Time      — slot 7 (option 1)
-    SynthStyle           = 109,   // SY — Modulation— slots 1-6
-    OctaveStyle          = 110,   // OC — Harmonics — slots 1-6
-    WahStyle             = 111,   // PW — Modulation— slots 1-6
-    BassGraphicEQStyle   = 112,   // GEB— Time      — slot 7 (option 2)
-    BassCompressorStyle  = 113,   // BC — Dynamics  — slots 1-6 (multi-band)
-    BassDriverStyle      = 114,   // BB — Harmonics — slots 1-6 (multi-band)
-    BassOverdriveStyle   = 115,   // ODB— Harmonics — slots 1-6
-    FurmanEQStyle        = 116,   // EQFH-Time      — slot 7 (option 3)
-    AcousticSimulatorStyle = 117, // AC — Modulation — slots 1-6 (added 2026-05-03 alongside AD polish)
-    NAMPedalStyle          = 118, // User NAM Pedal — slots 1-6 (loads .nam capture; pedal-specific entry, BaySickPedals only)
+    DistortionStyle      = 102,   // DS - Harmonics - slots 1-6
+    FuzzStyle            = 103,   // FZ - Harmonics - slots 1-6
+    NoiseGateStyle       = 104,   // NS - Dynamics  - slots 1-6
+    HighGainStyle        = 105,   // MT - Harmonics - slots 1-6
+    TunerStyle           = 106,   // TU - Time      - slot 0 (locked)
+    AcousticPreampStyle  = 107,   // AD - Time      - slots 1-6
+    GraphicEQStyle       = 108,   // GE - Time      - slot 7 (option 1)
+    SynthStyle           = 109,   // SY - Modulation- slots 1-6
+    OctaveStyle          = 110,   // OC - Harmonics - slots 1-6
+    WahStyle             = 111,   // PW - Modulation- slots 1-6
+    BassGraphicEQStyle   = 112,   // GEB- Time      - slot 7 (option 2)
+    BassCompressorStyle  = 113,   // BC - Dynamics  - slots 1-6 (multi-band)
+    BassDriverStyle      = 114,   // BB - Harmonics - slots 1-6 (multi-band)
+    BassOverdriveStyle   = 115,   // ODB- Harmonics - slots 1-6
+    FurmanEQStyle        = 116,   // EQFH-Time      - slot 7 (option 3)
+    AcousticSimulatorStyle = 117, // AC - Modulation - slots 1-6 (added 2026-05-03 alongside AD polish)
+    NAMPedalStyle          = 118, // User NAM Pedal - slots 1-6 (loads .nam capture; pedal-specific entry, BaySickPedals only)
 };
 
 // ── EffectRack ────────────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ enum class EffectType
 //   * Audio thread (top of process()) checks the flag, std::swap()s active and
 //     pending, clears the flag.  Old DSP destruction defers to the next
 //     message-thread mutation (which overwrites `pending`, dropping its old
-//     occupant on the message thread — never on audio).
+//     occupant on the message thread - never on audio).
 // Audio is NEVER blocked by single-slot mutations.
 //
 // Multi-slot mutations (moveSlotUp/Down, packSlotsToTop, setStateInformation)
@@ -198,7 +198,7 @@ public:
     // to ProjectManager::markDirty so rack lifecycle changes flip the
     // project dirty bit (per-slot APVTS edits already do via the main
     // PluginProcessor's listener).  Per-slot bypass also writes APVTS, so
-    // its dirty fires twice (harmless — markDirty is idempotent).
+    // its dirty fires twice (harmless - markDirty is idempotent).
     std::function<void()> onSlotsChanged;
 
     // Per-slot output gain (dB, applied after effect, before next slot)
@@ -232,7 +232,7 @@ public:
     // meter state ends each block coherent.
     void promoteSlotPeakSnapshots();
 
-    // FX master switch — bypasses entire rack without destroying slot data
+    // FX master switch - bypasses entire rack without destroying slot data
     void setRackBypassed(bool bypass) { mRackBypassed = bypass; }
     bool isRackBypassed() const       { return mRackBypassed; }
 

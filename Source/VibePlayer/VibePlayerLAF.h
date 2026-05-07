@@ -2,16 +2,16 @@
 #include <JuceHeader.h>
 #include "../Standalone/SharedUI.h"   // TextureUtils, LRXHelper, Filmstrips
 
-// ── VibePlayerLAF — "Brushed Aluminum Mini-Player" ───────────────────────────
+// ── VibePlayerLAF - "Brushed Aluminum Mini-Player" ───────────────────────────
 //
 // Palette:
-//   Main panel        : #BCC6CC  (brushed aluminum — drawn via TextureUtils)
+//   Main panel        : #BCC6CC  (brushed aluminum - drawn via TextureUtils)
 //   Recessed trench   : #121212  (near-black matte control panel)
 //   Active LED / glow : #A0DB2B  (neon green)
 //   Knobs / buttons   : #1A1A1A  (matte black)
 //   Illustration accent: #40E0D0 / #F1C40F
 //
-// Knobs  : volumeBlack filmstrip (70×70, 100 frames) — black dome, white indicator
+// Knobs  : volumeBlack filmstrip (70×70, 100 frames) - black dome, white indicator
 // Faders : custom ultra-slim horizontal track + thin pill thumb
 // Buttons: beveled dark rect, neon green glow border when active (A/B/C/D artic)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ public:
         g.setGradientFill (face);
         g.fillRoundedRectangle (bounds, 3.f);
 
-        // Border — glows green when active
+        // Border - glows green when active
         if (on)
         {
             // Bloom outer ring

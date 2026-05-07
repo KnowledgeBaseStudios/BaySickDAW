@@ -53,7 +53,7 @@ public:
     juce::AudioProcessorValueTreeState apvts;
 
     // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).  Fires on every
-    // tk_<id>_harm_* edit (full Harmless internal state — partial values,
+    // tk_<id>_harm_* edit (full Harmless internal state - partial values,
     // filter / LFO / envelope / mod-matrix / etc).  StandaloneEditor wires it
     // to ProjectManager::markDirty.
     void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
@@ -92,7 +92,7 @@ private:
 
     // Reads APVTS values and pushes them to the synth.
     // CPU-guarded: only calls setters when values differ from cached state.
-    // Called from processBlock — must be audio-thread safe.
+    // Called from processBlock - must be audio-thread safe.
     void updateFromApvts();
 
     HarmlessSynth       mSynth;

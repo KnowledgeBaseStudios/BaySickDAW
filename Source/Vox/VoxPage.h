@@ -6,13 +6,13 @@ class VibeSynthProcessor;
 class BaySickVocalEditor;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VoxPage — host component for one Vox tab (Phase G-4).
+// VoxPage - host component for one Vox tab (Phase G-4).
 // ─────────────────────────────────────────────────────────────────────────────
 // Mirror of InstPage with Vox-specific colour + naming.  Engine list for V1
 // is just BaySickPlayer (sample playback of recorded vocal).  Phase H adds
 // `BaySickVocal` (the dedicated vocal channel-strip processor) as the
 // preferred default option.  Spawn trigger is the Mixer page's "Add Vox
-// Strip" button — ribbon Vox dropdown is an instance switcher only.
+// Strip" button - ribbon Vox dropdown is an instance switcher only.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class VoxPage : public juce::Component,
@@ -25,7 +25,7 @@ public:
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped           (const juce::StringArray& files, int x, int y) override;
 
-    // H-6b (2026-05-01): Vox tabs are always BaySickVocal — no engine picker.
+    // H-6b (2026-05-01): Vox tabs are always BaySickVocal - no engine picker.
     // EngineType retained for save/load back-compat but only BaySickVocal is
     // valid going forward.  Old projects with BaySickPlayer state silently
     // discard it on load (BaySickPlayer is no longer a Vox option).
@@ -97,7 +97,7 @@ public:
 
     // J-6 EQ unification (2026-05-03): EQ accessors removed; pre-rack EQ on Effects page only.
 
-    // Save/Load PAGE preset — entire VoxPage state (currently just BaySickPlayer;
+    // Save/Load PAGE preset - entire VoxPage state (currently just BaySickPlayer;
     // Phase H adds BaySickVocal alongside).  XML matches exportVoxState format.
     void saveVoxPagePreset();
     void loadVoxPagePreset (const juce::File& xml);
@@ -143,7 +143,7 @@ private:
     juce::Label                                  mClipFileLabel;
     EngineType                                   mEngineType { EngineType::None };
     std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor
-    std::unique_ptr<juce::AudioProcessor>        mVocalProc;         // BaySickVocal (Phase H — null until then)
+    std::unique_ptr<juce::AudioProcessor>        mVocalProc;         // BaySickVocal (Phase H - null until then)
 
     // I-16 G-9 (2026-05-03): file path of the wet recording linked to this
     // page's strip.  Set by commitRecordingResult after a successful take.
@@ -157,7 +157,7 @@ private:
     VibeSynthProcessor*                          mFullProcessor { nullptr };
     std::function<bool(int)>                     mBusActiveQuery;
 
-    // G-7 (2026-04-29): listener-based dirty tracking — see ClipsPage for
+    // G-7 (2026-04-29): listener-based dirty tracking - see ClipsPage for
     // the rationale.  Reliable across engines whose getStateInformation
     // serialization timing differs from byte-comparison expectations.
     struct ApvtsDirtyListener : public juce::ValueTree::Listener
@@ -187,7 +187,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VoxEmptyState — text-only placeholder shown when the Vox ribbon slot is
+// VoxEmptyState - text-only placeholder shown when the Vox ribbon slot is
 // clicked with zero instances.  Spawn trigger is "Add Vox Strip" on Mixer.
 // ─────────────────────────────────────────────────────────────────────────────
 class VoxEmptyState : public juce::Component

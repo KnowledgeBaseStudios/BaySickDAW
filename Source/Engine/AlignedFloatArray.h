@@ -16,7 +16,7 @@
 // size on every modern x86_64 CPU (Intel + AMD), so two workers writing to
 // adjacent allocations never trigger an MESI bounce.
 //
-// NOT real-time safe — allocate / free hit the OS allocator. Call from the
+// NOT real-time safe - allocate / free hit the OS allocator. Call from the
 // message thread only (typically in prepareToPlay paths).
 class AlignedFloatArray
 {

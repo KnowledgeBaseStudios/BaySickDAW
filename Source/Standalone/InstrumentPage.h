@@ -35,7 +35,7 @@ public:
     EngineType getEngine()         const { return mEngine; }
     bool       hasEngineSelected() const { return mEngine != EngineType::None; }
 
-    // Mixer graph node ID — set by StandaloneEditor in Phase 5
+    // Mixer graph node ID - set by StandaloneEditor in Phase 5
     int  getMixerTrackId()   const { return mMixerTrackId; }
     void setMixerTrackId(int id)   { mMixerTrackId = id; }
 

@@ -3,7 +3,7 @@
 
 AdditiveVoice::AdditiveVoice()
 {
-    // Stereo filter 1 — prepare called again in setCurrentPlaybackSampleRate.
+    // Stereo filter 1 - prepare called again in setCurrentPlaybackSampleRate.
     juce::dsp::ProcessSpec spec;
     spec.sampleRate       = 44100.0;
     spec.maximumBlockSize = 512;
@@ -13,13 +13,13 @@ AdditiveVoice::AdditiveVoice()
     mFilter.setCutoffFrequency (mFilterCutoff);
     mFilter.setResonance       (mFilterRes);
 
-    // Stereo filter 2 — lowpass at 20 kHz by default (transparent / fully open).
+    // Stereo filter 2 - lowpass at 20 kHz by default (transparent / fully open).
     mFilter2.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
     mFilter2.prepare (spec);
     mFilter2.setCutoffFrequency (mFilter2Cutoff);
     mFilter2.setResonance       (mFilter2Res);
 
-    // T1c notch helpers — bandpass mode used to compute (input - bp) for notch.
+    // T1c notch helpers - bandpass mode used to compute (input - bp) for notch.
     mFilterNotchHelper .setType (juce::dsp::StateVariableTPTFilterType::bandpass);
     mFilterNotchHelper .prepare (spec);
     mFilterNotchHelper .setCutoffFrequency (mFilterCutoff);
@@ -276,10 +276,10 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
                   ? outputBuffer.getWritePointer (1, startSample) : nullptr;
 
     const float uniNorm  = 1.0f / float (mNumUnison);
-    // Precompute the constant factor — avoids a float division per unison slot per sample.
+    // Precompute the constant factor - avoids a float division per unison slot per sample.
     const float invSrWt  = wtSzF / float (mSampleRate);
 
-    // Null checks are hoisted outside both loops — the pointers never change mid-block.
+    // Null checks are hoisted outside both loops - the pointers never change mid-block.
     const bool hasA = (wtA != nullptr);
     const bool hasB = (wtB != nullptr);
 
@@ -371,7 +371,7 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
 
     for (int s = 0; s < numSamples; ++s)
     {
-        // ── Vibrato — pitch modulation (before frequency computation) ──────────
+        // ── Vibrato - pitch modulation (before frequency computation) ──────────
         float vibSemis = 0.0f;
         if (mVibDepth > 0.001f)
         {
@@ -395,7 +395,7 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
         const float targetWithPitch  = mNoteHz * mPitchFracMult
                                       * std::pow (2.0f, pitchOffsetSemis / 12.0f);
 
-        // One-pole IIR frequency smoothing — safe for portamento since it
+        // One-pole IIR frequency smoothing - safe for portamento since it
         // never resets the current value unlike juce::SmoothedValue::reset().
         mCurrentHz += (targetWithPitch - mCurrentHz) * (1.0f - freqCoeff);
 
@@ -488,12 +488,12 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
             sampleR = mFilter2.processSample (1, sampleR);
         }
 
-        // ── Tremolo — amplitude modulation (after ADSR) ────────────────────────
+        // ── Tremolo - amplitude modulation (after ADSR) ────────────────────────
         float tremMult = 1.0f;
         if (mTremDepth > 0.001f)
         {
             const float tremLFO = lfoSample (mTremShape, mTremPhase);
-            // gap: dead zone around 0 — if |lfo| < gap treat as 0
+            // gap: dead zone around 0 - if |lfo| < gap treat as 0
             const float gapped = (std::abs (tremLFO) > mTremGap) ? tremLFO : 0.0f;
             tremMult = 1.0f - mTremDepth * 0.5f * (gapped + 1.0f);
             tremMult = juce::jlimit (0.0f, 1.0f, tremMult);
@@ -905,7 +905,7 @@ void AdditiveVoice::recalcUnisonSlots()
 float AdditiveVoice::readWavetable (const float* wt, int wtMask,
                                      float phase) const noexcept
 {
-    // wtMask must be (power-of-2 table size - 1) — bitmask replaces expensive modulo.
+    // wtMask must be (power-of-2 table size - 1) - bitmask replaces expensive modulo.
     const int   i    = int (phase) & wtMask;
     const float frac = phase - float (int (phase));
     const int   i1   = (i + 1) & wtMask;
@@ -918,7 +918,7 @@ float AdditiveVoice::midiNoteToHz (int note, float extraSemitones) noexcept
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S4 Batch 2b — Per-voice mod matrix implementation
+// S4 Batch 2b - Per-voice mod matrix implementation
 // ─────────────────────────────────────────────────────────────────────────────
 
 float AdditiveVoice::getCurrentEnvLevel() const noexcept

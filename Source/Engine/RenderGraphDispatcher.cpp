@@ -205,7 +205,7 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
 
     // ── Reset dep counters + assign ctx for every task ──────────────────────
     // Release ordering on the counter store pairs with the worker's acquire
-    // when picking up a child whose deps just hit zero — guarantees the
+    // when picking up a child whose deps just hit zero - guarantees the
     // worker sees the fresh counter value.
     for (auto* t : mTasks)
     {

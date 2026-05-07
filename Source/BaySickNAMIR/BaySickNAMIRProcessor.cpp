@@ -1,7 +1,7 @@
 #include "BaySickNAMIRProcessor.h"
 #include "BaySickNAMIREditor.h"
 
-// NAM core (C++20 internal; consumer translation unit is C++17 — only the
+// NAM core (C++20 internal; consumer translation unit is C++17 - only the
 // header pulls in Eigen / nlohmann, both of which are C++17-clean).
 #include <NAM/get_dsp.h>
 #include <NAM/dsp.h>
@@ -28,7 +28,7 @@ namespace
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickNAMIRProcessor — Phase G-1.3 implementation.
+// BaySickNAMIRProcessor - Phase G-1.3 implementation.
 // ─────────────────────────────────────────────────────────────────────────────
 
 BaySickNAMIRProcessor::BaySickNAMIRProcessor()
@@ -37,7 +37,7 @@ BaySickNAMIRProcessor::BaySickNAMIRProcessor()
                                 .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "BaySickNAMIR", createLayout())
 {
-    // Explicit atomic init — see the comment on mNamSwapPending in the header.
+    // Explicit atomic init - see the comment on mNamSwapPending in the header.
     for (auto& a : mNamSwapPending) a.store (false);
     for (auto& a : mNamLoaded)      a.store (false);
     for (auto& a : mNamIsFullRig)   a.store (false);
@@ -160,7 +160,7 @@ void         BaySickNAMIRProcessor::setNamFilePath     (const juce::String& p, i
 void         BaySickNAMIRProcessor::setIrFilePath      (const juce::String& p, int slot) { mIrPaths [(size_t) resolveSlot (slot)] = p; }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// prepareToPlay — size scratch + warm filters / convolution / NAM / OS / gate.
+// prepareToPlay - size scratch + warm filters / convolution / NAM / OS / gate.
 // ─────────────────────────────────────────────────────────────────────────────
 void BaySickNAMIRProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
 {
@@ -183,7 +183,7 @@ void BaySickNAMIRProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
     mMicSim      .prepare (sampleRate, maxBlockSize, 2);
     mMicPlacement.prepare (sampleRate, maxBlockSize, 2);
 
-    // Scratch — sized to the LARGEST block we might see, including 4x oversampling.
+    // Scratch - sized to the LARGEST block we might see, including 4x oversampling.
     const int maxBlockOS = maxBlockSize * 4;
     mNamMonoIn .assign ((size_t) maxBlockOS, 0.0);
     mNamMonoOut.assign ((size_t) maxBlockOS, 0.0);
@@ -201,11 +201,11 @@ void BaySickNAMIRProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
         if (nam)
         {
             try { nam->ResetAndPrewarm (osRate, osMaxBlock); }
-            catch (...) { /* model rejects rate — leave loaded but it'll glitch */ }
+            catch (...) { /* model rejects rate - leave loaded but it'll glitch */ }
         }
     }
 
-    // Gate state — invalidate cache so first block recomputes.
+    // Gate state - invalidate cache so first block recomputes.
     mGateEnv           = 0.0f;
     mLastGateThreshDb  = std::numeric_limits<float>::quiet_NaN();
     mLastGateReleaseMs = std::numeric_limits<float>::quiet_NaN();
@@ -216,7 +216,7 @@ void BaySickNAMIRProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
 void BaySickNAMIRProcessor::rebuildOversampling()
 {
     using OS = juce::dsp::Oversampling<float>;
-    // Mono — we oversample post-mono-sum.  Polyphase IIR is the standard cheap
+    // Mono - we oversample post-mono-sum.  Polyphase IIR is the standard cheap
     // anti-imaging filter; isMaximumQuality=true leans toward fewer artifacts.
     mOversampling[0] = std::make_unique<OS> ((size_t) 1, (size_t) 1,
                                              OS::filterHalfBandPolyphaseIIR, true);
@@ -235,7 +235,7 @@ int BaySickNAMIRProcessor::oversamplingLatencySamples (int factor) const
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// processBlock — full Phase G-1.3 chain.
+// processBlock - full Phase G-1.3 chain.
 // ─────────────────────────────────────────────────────────────────────────────
 void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                           juce::MidiBuffer&)
@@ -258,7 +258,7 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         return;
 
     // 2026-05-06 DSP gate: when neither slot has a NAM model AND neither has
-    // an IR loaded, the only DSP work left is mic placement on a dry signal —
+    // an IR loaded, the only DSP work left is mic placement on a dry signal -
     // a barely-audible coloration.  Skip the whole pipeline (input gain,
     // model, cab, mic placement, output gain) and let the input pass through
     // unchanged.  Effect on user audio: passthrough = same as before this
@@ -306,7 +306,7 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (! juce::approximatelyEqual (inLin, 1.0f))
         buffer.applyGain (inLin);
 
-    // ── 4. Noise gate (BEFORE NAM — gate the dry guitar, not the saturation)
+    // ── 4. Noise gate (BEFORE NAM - gate the dry guitar, not the saturation)
     {
         float* L = buffer.getWritePointer (0);
         float* R = numCh > 1 ? buffer.getWritePointer (1) : nullptr;
@@ -323,7 +323,7 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── 5. NAM inference — mono in/out; broadcast to both channels ───────────
+    // ── 5. NAM inference - mono in/out; broadcast to both channels ───────────
     //    OS factor 0 = direct path; 1/2 = oversample → NAM → downsample.
     auto& nam = mNamActive[(size_t) slot];
     if (nam && ! namBypassed)
@@ -339,7 +339,7 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         if (osFactor == 0)
         {
-            // Direct path — host-rate NAM.
+            // Direct path - host-rate NAM.
             if ((int) mNamMonoIn .size() < numSamples) mNamMonoIn .resize ((size_t) numSamples);
             if ((int) mNamMonoOut.size() < numSamples) mNamMonoOut.resize ((size_t) numSamples);
             for (int i = 0; i < numSamples; ++i)
@@ -402,7 +402,7 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         mHighCut.process (ctx);
     }
 
-    // ── 7. Cabinet (IR) — wet/dry mix on cab_mix, bypass-aware ───────────────
+    // ── 7. Cabinet (IR) - wet/dry mix on cab_mix, bypass-aware ───────────────
     const bool runIr = mIrLoaded[(size_t) slot].load (std::memory_order_acquire) && ! cabBypassed;
     if (runIr)
     {
@@ -490,7 +490,7 @@ void BaySickNAMIRProcessor::updateGateCoeffs (float thresholdDb, float releaseMs
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// loadNamModel / loadImpulseResponse — message-thread file I/O + swap pattern.
+// loadNamModel / loadImpulseResponse - message-thread file I/O + swap pattern.
 // ─────────────────────────────────────────────────────────────────────────────
 bool BaySickNAMIRProcessor::loadNamModel (const juce::String& filePath, juce::String& outErr, int slot)
 {
@@ -664,7 +664,7 @@ void BaySickNAMIRProcessor::clearImpulseResponse (int slot)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// APVTS listener — oversampling factor change re-Resets loaded NAM models at
+// APVTS listener - oversampling factor change re-Resets loaded NAM models at
 // the new effective rate.  Fires from whatever thread APVTS hands us; the
 // actual work runs via callAsync on the message thread because Reset can
 // allocate.
@@ -846,7 +846,7 @@ void BaySickNAMIRProcessor::reResetNamForOversampling (int factor)
         if (mNamActive[s])
         {
             try { mNamActive[s]->ResetAndPrewarm (osRate, osMaxBlock); }
-            catch (...) { /* swallow — model is left in whatever state Reset reached */ }
+            catch (...) { /* swallow - model is left in whatever state Reset reached */ }
         }
     }
 
@@ -854,7 +854,7 @@ void BaySickNAMIRProcessor::reResetNamForOversampling (int factor)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// State (un)serialization — paths persist as ValueTree custom string props.
+// State (un)serialization - paths persist as ValueTree custom string props.
 // Property keys stay backward-compatible with G-1.1/G-1.2 single-slot layouts.
 // ─────────────────────────────────────────────────────────────────────────────
 void BaySickNAMIRProcessor::getStateInformation (juce::MemoryBlock& destData)
@@ -1005,7 +1005,7 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
             // 2026-05-05 (Bug C fix): notify the editor so file-name labels
             // refresh.  setStateInformation reloaded the NAM/IR correctly
             // (audio works) but the editor's labels are only updated by
-            // explicit browse/load calls — without this hook the user sees
+            // explicit browse/load calls - without this hook the user sees
             // "(no model loaded)" even though the model is active.  Posted
             // async so the audio thread (if it pumped this load via
             // project-load) doesn't run editor mutation directly.

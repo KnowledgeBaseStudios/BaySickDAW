@@ -34,7 +34,7 @@ void ReverbDSP::prepare (double sampleRate, int maxBlockSize)
         mFDNR[i].assign ((size_t) maxLen, 0.0f);
     }
 
-    // §8c freeze smoother — 30 ms ramp for smooth engage/disengage
+    // §8c freeze smoother - 30 ms ramp for smooth engage/disengage
     mFreezeSmooth.reset (sampleRate, 0.030);
     mFreezeSmooth.setCurrentAndTargetValue (mFreeze ? 1.0f : 0.0f);
 
@@ -267,7 +267,7 @@ void ReverbDSP::updateDelayLines()
     const float scale = std::max (0.1f, mRoomSize) / 0.6f
                       * (float) (mSampleRate / 44100.0);
 
-    // §8b: no realloc — just update effective length. Wrap the write pointer
+    // §8b: no realloc - just update effective length. Wrap the write pointer
     // if it falls outside the new length (handles shrink case). Do NOT zero
     // filter state; the running tail keeps decaying naturally.
     for (int i = 0; i < kN; ++i)
@@ -389,7 +389,7 @@ static void computeHiShelf (ReverbDSP::TiltBiquad& bq, double sr, float fc, floa
 void ReverbDSP::updateWetTone()
 {
     if (mSampleRate <= 0.0) return;
-    // §8g: Pultec-style tilt — complementary low/high shelves around a centre
+    // §8g: Pultec-style tilt - complementary low/high shelves around a centre
     // pivot. Positive WetTone = bright: cut lows, boost highs (each ±dB/2).
     // This keeps overall broadband gain close to unity regardless of setting.
     const float halfDb = mWetTiltDb * 0.5f;
@@ -484,7 +484,7 @@ void ReverbDSP::process (juce::AudioBuffer<float>& buffer)
 {
     if (bypassed) return;
 
-    // Flush-to-zero for denormals — 8×N FDN delay lines + per-line LPs + bass
+    // Flush-to-zero for denormals - 8×N FDN delay lines + per-line LPs + bass
     // shelves + pre-delay + allpass + wet-tone LP all hold IIR state that
     // can slowly decay into subnormal territory, where every float op takes
     // ~100× longer and the message thread starves. Keeps the CPU sane.
@@ -543,7 +543,7 @@ void ReverbDSP::process (juce::AudioBuffer<float>& buffer)
     const bool  modEnabled    = (modDepthSmp > 1e-4f);
     const int   tailShape     = mTailModShape;
 
-    // §8e HF ratio (captured — applied per sample)
+    // §8e HF ratio (captured - applied per sample)
     const float hfRatio       = mHFRatio;
 
     // §8g wet-tone tilt: active only when the user has dialled the knob
@@ -580,7 +580,7 @@ void ReverbDSP::process (juce::AudioBuffer<float>& buffer)
     {
         const float origL = L[s], origR = R[s];
 
-        // §8c freeze smoother — 0 (off) .. 1 (full freeze)
+        // §8c freeze smoother - 0 (off) .. 1 (full freeze)
         const float frz        = mFreezeSmooth.getNextValue();
         const float inputScale = 1.0f - frz;            // input injection fades out
 
@@ -673,7 +673,7 @@ void ReverbDSP::process (juce::AudioBuffer<float>& buffer)
         }
 
         // §8d: multi-tap early reflections (3 taps per line at prime-ratio
-        // positions, natural decay envelope; ER taps stay as integer reads —
+        // positions, natural decay envelope; ER taps stay as integer reads -
         // per spec, early reflections should keep crisp pre-echo character).
         float erL = 0.0f, erR = 0.0f;
         if (erActive)
@@ -695,7 +695,7 @@ void ReverbDSP::process (juce::AudioBuffer<float>& buffer)
             erR *= erNorm;
         }
 
-        // ── Hadamard mix (feedback path only — output uses raw zL/zR) ───────
+        // ── Hadamard mix (feedback path only - output uses raw zL/zR) ───────
         std::array<float, kN> fL = zL, fR = zR;
         applyH8 (fL);
         applyH8 (fR);
@@ -708,10 +708,10 @@ void ReverbDSP::process (juce::AudioBuffer<float>& buffer)
         // ── Per-line feedback processing + write back ────────────────────────
         for (int i = 0; i < kN; ++i)
         {
-            // Feedback gain (lerped toward 1.0 under freeze — §8c)
+            // Feedback gain (lerped toward 1.0 under freeze - §8c)
             const float effGain = mFeedGain[(size_t) i] + (1.0f - mFeedGain[(size_t) i]) * frz;
 
-            // §8e HF damping + HF ratio — split into LP (lows) + residual (highs).
+            // §8e HF damping + HF ratio - split into LP (lows) + residual (highs).
             //  - Under freeze: HF ratio lerps to 1.0 so the held tail preserves
             //    its full spectrum (otherwise residual·hfRatio would darken the
             //    frozen content over time).
@@ -749,7 +749,7 @@ void ReverbDSP::process (juce::AudioBuffer<float>& buffer)
             mFDNL[(size_t) i][(size_t) mFDNWr[(size_t) i]] = fL[(size_t) i] + scaledInL;
             mFDNR[(size_t) i][(size_t) mFDNWr[(size_t) i]] = fR[(size_t) i] + scaledInR;
 
-            // Advance write pointer (respects mFDNLen[i], not buffer capacity — §8b)
+            // Advance write pointer (respects mFDNLen[i], not buffer capacity - §8b)
             if (++mFDNWr[(size_t) i] >= mFDNLen[(size_t) i])
                 mFDNWr[(size_t) i] = 0;
         }
@@ -797,7 +797,7 @@ void ReverbDSP::process (juce::AudioBuffer<float>& buffer)
 }
 
 //──────────────────────────────────────────────────────────────────────────────
-// Setters — CPU-guarded (R1). Audit fixes R2 (ER clamp), R7 (mode clamp).
+// Setters - CPU-guarded (R1). Audit fixes R2 (ER clamp), R7 (mode clamp).
 //──────────────────────────────────────────────────────────────────────────────
 void ReverbDSP::setProcessingMode (int m)
 {
@@ -937,7 +937,7 @@ void ReverbDSP::setHostBPM (double bpm)
 {
     if (bpm == mHostBPM) return;
     mHostBPM = bpm;
-    // R3: if sync is on, the pre-delay snap now uses the new BPM — refresh.
+    // R3: if sync is on, the pre-delay snap now uses the new BPM - refresh.
     if (mTempoSync) updatePreDelay();
 }
 
@@ -960,7 +960,7 @@ void ReverbDSP::setErLevel (float v)
 }
 
 //──────────────────────────────────────────────────────────────────────────────
-// H-9 (2026-05-02) — Algorithm umbrella + ducking + tempo-sync setters
+// H-9 (2026-05-02) - Algorithm umbrella + ducking + tempo-sync setters
 //──────────────────────────────────────────────────────────────────────────────
 void ReverbDSP::setAlgorithm (int algo)
 {
@@ -1080,7 +1080,7 @@ void ReverbDSP::setStateInformation (const void* data, int sz)
         mDry            = (float)s.getProperty ("dry",            mDry);
         mWet            = (float)s.getProperty ("wet",            mWet);
         bypassed        = (int)  s.getProperty ("bypassed",       0) != 0;
-        // §8 additions — missing attributes default to current (neutral) values
+        // §8 additions - missing attributes default to current (neutral) values
         mTailModDepthMs = (float)s.getProperty ("tailModDepthMs", mTailModDepthMs);
         mTailModRateHz  = (float)s.getProperty ("tailModRateHz",  mTailModRateHz);
         mTailModShape   = (int)  s.getProperty ("tailModShape",   mTailModShape);

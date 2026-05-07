@@ -11,9 +11,9 @@
 //
 // Default state: Master (fixed) + 4 Bus strips.
 // Instrument channel strips are created lazily:
-//   addLayerChannel(tabId, name) — called when a Layers tab is opened
-//   addBassChannel (tabId, name) — called when a Bass tab is opened
-//   addDrumChannel (slot,  name) — called when a drum slot gets a sound
+//   addLayerChannel(tabId, name) - called when a Layers tab is opened
+//   addBassChannel (tabId, name) - called when a Bass tab is opened
+//   addDrumChannel (slot,  name) - called when a drum slot gets a sound
 //
 // Strips never get destroyed (preserves effects chain).
 //
@@ -38,14 +38,14 @@ public:
     void paint  (juce::Graphics&) override;
     void resized() override;
 
-    // Set by StandaloneEditor — called when any strip's FX button is clicked.
+    // Set by StandaloneEditor - called when any strip's FX button is clicked.
     std::function<void(const juce::String&)> onEffectsTabRequested;
 
     // Fired when the user renames a Layer or Bass strip in the mixer.
     // StandaloneEditor wires this to mRibbon->renameTab().
     std::function<void(int tabId, const juce::String& newName)> onChannelRenamed;
 
-    // Fired when any audio row strip is renamed — StandaloneEditor rebuilds Effects dropdown.
+    // Fired when any audio row strip is renamed - StandaloneEditor rebuilds Effects dropdown.
     std::function<void()> onAudioStripRenamed;
 
     // G-4 (2026-04-28): fired AFTER a Vox / Inst strip is created via the
@@ -56,7 +56,7 @@ public:
     std::function<void(int idx)> onVoxStripAdded;
     std::function<void(int idx)> onInstStripAdded;
 
-    // Fired when any strip's main-out _sendTo changes — StandaloneEditor rebuilds
+    // Fired when any strip's main-out _sendTo changes - StandaloneEditor rebuilds
     // the Effects dropdown so strips rerouted to Master (Direct Routing) or
     // between buses show up under the correct group.
     std::function<void()> onSendToChanged;
@@ -108,7 +108,7 @@ public:
     // index can be reused after a tab close.  APVTS params preserved (so
     // re-adding at the same idx restores prior fader/pan/sends/etc).  Without
     // these, deleting a tab leaves an orphan mixer strip pinned to the index
-    // forever — addInstChannelAtIndex et al silently bail when count(idx)>0.
+    // forever - addInstChannelAtIndex et al silently bail when count(idx)>0.
     void removeInstChannel(int idx);
     void removeVoxChannel(int idx);
     void removeClipChannel(int idx);
@@ -142,7 +142,7 @@ public:
     void setInstStripNoLiveInput (int idx, bool b);
 
     // J-5: BaySickRustyDrums strip add/remove (driven by kit-load lifecycle,
-    // NOT user-clicks).  Idempotent — safe to call again with same idx.
+    // NOT user-clicks).  Idempotent - safe to call again with same idx.
     void addRustyChannelAtIndex (int idx, const juce::String& name);
     void removeRustyChannelAtIndex (int idx);
     void clearAllRustyChannels();
@@ -164,7 +164,7 @@ public:
     juce::Component* getAddVoxBusBtn() const { return mAddVoxBusBtn.get(); }
     juce::Component* getAddInstBusBtn() const { return mAddInstBusBtn.get(); }
 
-    // G-6 (2026-04-29): activate a secondary Vox/Inst bus — creates the
+    // G-6 (2026-04-29): activate a secondary Vox/Inst bus - creates the
     // strip on Mixer + flags the bus active for route-picker / cable
     // filtering.  Idempotent (no-op if already active).  Returns true on
     // success, false if at cap.
@@ -269,7 +269,7 @@ private:
     // R1 (2026-04-23): Vox + Inst buses for live-input strip aggregation.
     std::unique_ptr<MixerTrackStrip> mVoxBusStrip;
     std::unique_ptr<MixerTrackStrip> mInstBusStrip;
-    // G-6 (2026-04-29): secondary Vox/Inst bus strips — lazy.  Created on
+    // G-6 (2026-04-29): secondary Vox/Inst bus strips - lazy.  Created on
     // first activate*() call; visibility flag tracked separately so the
     // strip can be hidden/shown without destroying its state.
     std::unique_ptr<MixerTrackStrip> mVoxBus2Strip;
@@ -283,7 +283,7 @@ private:
     std::unique_ptr<MixerTrackStrip> mRustyDrumsBusStrip;
     bool                             mRustyDrumsBusActive { false };
 
-    // Dynamic instrument strips — keyed by tabId (Layer/Bass) or slot (Drums)
+    // Dynamic instrument strips - keyed by tabId (Layer/Bass) or slot (Drums)
     std::map<int, std::unique_ptr<MixerTrackStrip>> mLayerStrips;
     std::vector<int>                                mLayerTabOrder;
 
@@ -300,7 +300,7 @@ private:
     std::map<int, std::unique_ptr<MixerTrackStrip>> mAuxStrips;
     std::vector<int>                                mAuxOrder;
     std::unique_ptr<juce::TextButton>               mAddAuxBtn;
-    // G-6 (2026-04-29): Add Vox Bus / Add Inst Bus buttons — sit alongside
+    // G-6 (2026-04-29): Add Vox Bus / Add Inst Bus buttons - sit alongside
     // the existing strip-add buttons.  Greyed out at cap (Vox: 1 extra max,
     // Inst: 2 extra max).
     std::unique_ptr<juce::TextButton>               mAddVoxBusBtn;
@@ -320,12 +320,12 @@ private:
 
     // J-5 (2026-05-03): BaySickRustyDrums strips.  Spawned/destroyed in
     // batches of 13 by PluginProcessor::loadBaySickRustyDrumsKit /
-    // destroyBaySickRustyDrums.  No "Add Rusty" UI button — strip lifecycle
+    // destroyBaySickRustyDrums.  No "Add Rusty" UI button - strip lifecycle
     // is engine-driven, not user-driven.
     std::map<int, std::unique_ptr<MixerTrackStrip>> mRustyStrips;
     std::vector<int>                                mRustyOrder;
 
-    // Direct Routing label — shown between Master and FX Bus when any strip
+    // Direct Routing label - shown between Master and FX Bus when any strip
     // has _sendTo = Master. Small vertical-text panel; visibility driven by
     // layoutScrollContent().
     std::unique_ptr<juce::Component>                mDirectRoutingLabel;
@@ -338,7 +338,7 @@ private:
     // to-image) overlay only when the viewport scroll position changed.
     int                                             mLastViewportX { -1 };
 
-    // 5F-4b B3+B4: cable overlay — paints green beziers + handles cable drag.
+    // 5F-4b B3+B4: cable overlay - paints green beziers + handles cable drag.
     struct CableOverlay : public juce::Component, private juce::Timer
     {
         MixerPage& owner;

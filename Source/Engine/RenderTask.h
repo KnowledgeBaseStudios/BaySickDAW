@@ -11,10 +11,10 @@ class RenderGraphDispatcher;
 struct BlockContext;
 
 // Base class for one node in the render graph. Typically wraps one mixer
-// strip's processing — engine dispatch + insert chain + output publish for a
+// strip's processing - engine dispatch + insert chain + output publish for a
 // leaf, or upstream sum + bus chain + publish for a passive bus.
 //
-// Memory ordering (CRITICAL — see VibeThreadPool.cpp for enforcement):
+// Memory ordering (CRITICAL - see VibeThreadPool.cpp for enforcement):
 //   - When a worker finishes a task and decrements each child's mDeps, the
 //     decrement uses memory_order_acq_rel. The release half publishes this
 //     task's writes to mOutputBuffer; the acquire half pairs with downstream

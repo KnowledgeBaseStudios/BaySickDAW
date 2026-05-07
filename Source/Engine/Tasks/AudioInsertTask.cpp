@@ -89,7 +89,7 @@ void AudioInsertTask::run()
 juce::AudioBuffer<float>& AudioInsertTask::getClipScratch (int numChannels, int numSamples)
 {
     // setSize with avoidReallocating=true is a no-op when already at the
-    // requested geometry — cheap to call every block.  keepExistingContent
+    // requested geometry - cheap to call every block.  keepExistingContent
     // is false because the buffer is rewritten by every clip decode.
     if (mClipScratch.getNumChannels() != numChannels
         || mClipScratch.getNumSamples() < numSamples)

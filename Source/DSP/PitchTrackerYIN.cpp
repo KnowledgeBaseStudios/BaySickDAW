@@ -4,12 +4,12 @@
 #include <cstring>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PitchTrackerYIN — Phase H-4 (2026-05-01)
+// PitchTrackerYIN - Phase H-4 (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace
 {
-    // YIN difference function — d[tau] = sum_{i=0}^{W/2-1} (x[i] - x[i+tau])^2
+    // YIN difference function - d[tau] = sum_{i=0}^{W/2-1} (x[i] - x[i+tau])^2
     //
     // Standard YIN runs over the first half of the window so max tau == W/2;
     // this gives a cleaner CMNDF normalization than running edge-to-edge.
@@ -106,7 +106,7 @@ public:
 
     void run() override
     {
-        // Rolling analysis window — slides forward by kHopSize each iteration.
+        // Rolling analysis window - slides forward by kHopSize each iteration.
         // Initialized to zero; first analysis fires once kWindowSize samples
         // have been pulled from the FIFO so we don't analyze trailing zeros.
         std::vector<float> rolling ((size_t) kWindowSize, 0.0f);
@@ -181,7 +181,7 @@ private:
         const int tau = findFirstMinimum (cmndf, tauMin, tauMax, kYinThreshold);
         if (tau < 0)
         {
-            // No pitch detected — silence, noise, or fully unpitched material.
+            // No pitch detected - silence, noise, or fully unpitched material.
             owner.mFreqHz    .store (0.0f, std::memory_order_release);
             owner.mConfidence.store (0.0f, std::memory_order_release);
             return;
@@ -252,7 +252,7 @@ void PitchTrackerYIN::pushAudio (const float* mono, int numSamples) noexcept
     int s1 = 0, b1 = 0, s2 = 0, b2 = 0;
     const int free = mFifo.getFreeSpace();
     const int n    = juce::jmin (numSamples, free);
-    if (n <= 0) return;   // ring full — drop oldest reading by skipping push
+    if (n <= 0) return;   // ring full - drop oldest reading by skipping push
 
     mFifo.prepareToWrite (n, s1, b1, s2, b2);
     if (b1 > 0) std::memcpy (mFifoBuf.data() + s1, mono,           (size_t) b1 * sizeof (float));

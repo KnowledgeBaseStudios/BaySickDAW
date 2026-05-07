@@ -254,7 +254,7 @@ void VibeLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
         float fy = (float)y;
         float fh = (float)h;
 
-        // Dynamics panel gets pixel-inverted filmstrip (cream bg — original has white markings).
+        // Dynamics panel gets pixel-inverted filmstrip (cream bg - original has white markings).
         // All other panels use the original. Both sit directly on the panel with no backing.
         bool isDynamicsPanel = false;
         if (auto* parent = s.getParentComponent())
@@ -271,11 +271,11 @@ void VibeLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
         bool isEqFader    = s.getProperties().contains("eqFader");
         if (isMixerFader || isEqFader)
         {
-            // ── Programmatic mixer / EQ fader — metallic dark, HiDPI-safe ─────
+            // ── Programmatic mixer / EQ fader - metallic dark, HiDPI-safe ─────
             // Mixer dB range: -60 .. +10 (matches MixerTrackStrip constants).
             // EQ    dB range: -18 .. +18 (bipolar, matches EQ8DSP::setBandGain clamp).
             // 2026-04-30: mixer fader max dropped +10 → +5.6 dB (FL parity).
-            // Was +10 — too much boost, and the fader cap visually pinned past
+            // Was +10 - too much boost, and the fader cap visually pinned past
             // the +10 tick when at max.  +5.6 matches FL's standard mixer cap.
             const float kFMin   = isEqFader ? -18.0f : -60.0f;
             const float kFMax   = isEqFader ?  18.0f :   5.6f;
@@ -320,7 +320,7 @@ void VibeLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
             // 2026-04-30: mixer fader range now -60..+5.6 dB (FL-parity max).
             // Marks compressed at the bottom (large jumps -30→-40→-60) and
             // tighter near 0 dB where mixing precision matters.  EQ faders
-            // unchanged — symmetric bipolar -18..+18 is independent of mixer
+            // unchanged - symmetric bipolar -18..+18 is independent of mixer
             // changes.
             static const int kMixerMarks[] = { 5, 0, -5, -10, -15, -20, -25, -30, -40, -60 };
             static const int kEqMarks[]    = { 18, 12, 6, 0, -6, -12, -18 };
@@ -477,7 +477,7 @@ void VibeLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
             g.fillRoundedRectangle((float)x, cy - 2.5f, sp - (float)x, 5.f, 2.5f);
         }
 
-        // Thumb — vertical cap for horizontal sliders
+        // Thumb - vertical cap for horizontal sliders
         {
             float tw = 10.f, th = 20.f;
             float tx = sp - tw * 0.5f, ty = cy - th * 0.5f;
@@ -544,7 +544,7 @@ void VibeLAF::drawToggleButton(juce::Graphics& g, juce::ToggleButton& b, bool is
     }
     float radius = bounds.getHeight() * 0.4f;
 
-    // Outer trench (recessed housing) — always drawn
+    // Outer trench (recessed housing) - always drawn
     g.setColour(juce::Colour(0xff000000).withAlpha(0.55f));
     g.fillRoundedRectangle(bounds.expanded(1.f), radius + 1.f);
     g.setColour(juce::Colour(0xff000000).withAlpha(0.8f));
@@ -596,7 +596,7 @@ void VibeLAF::drawButtonBackground(juce::Graphics& g, juce::Button& b,
     const bool isClickToggle    = b.getClickingTogglesState();
     const bool isPlayerOrEffect = b.getProperties().contains("switchToggle");
 
-    // Path A: Switch filmstrip — short clickToggle button + switchToggle property.
+    // Path A: Switch filmstrip - short clickToggle button + switchToggle property.
     // Reserved for effect-panel + player editor toggles.
     if (isClickToggle && bounds.getHeight() < 44.f && isPlayerOrEffect)
     {
@@ -616,7 +616,7 @@ void VibeLAF::drawButtonBackground(juce::Graphics& g, juce::Button& b,
         }
     }
 
-    // Path B: player/effect tall toggle TextButton — preserve existing nav-pill rendering.
+    // Path B: player/effect tall toggle TextButton - preserve existing nav-pill rendering.
     if (isClickToggle && isPlayerOrEffect)
     {
         if (isOn)
@@ -653,14 +653,14 @@ void VibeLAF::drawButtonBackground(juce::Graphics& g, juce::Button& b,
         return;
     }
 
-    // 2026-04-26: page-tab special case — body stays chrome, only an outer
+    // 2026-04-26: page-tab special case - body stays chrome, only an outer
     // accent ring + bloom indicates active.  Triggered by "outlineGlowOnly"
     // property set in setTabSlots.  Rendered via fall-through: don't return
     // here; let the OFF chrome path render the body first, then we add the
     // ring at the end.
     const bool outlineGlowOnly = isOn && b.getProperties().contains("outlineGlowOnly");
 
-    // Path C: ON state — neon glow for active buttons that DON'T use the
+    // Path C: ON state - neon glow for active buttons that DON'T use the
     // outline-only style.  Custom buttonOnColourId is honored so transport
     // buttons (Metronome blue, SongMode purple) keep their identity colors;
     // otherwise default neon highlight (cyan).
@@ -688,7 +688,7 @@ void VibeLAF::drawButtonBackground(juce::Graphics& g, juce::Button& b,
         return;
     }
 
-    // Path D: OFF state — chrome action button.  Matches non-toggle siblings so
+    // Path D: OFF state - chrome action button.  Matches non-toggle siblings so
     // a Snap-OFF or unselected tool button looks identical to the Tools/Zoom buttons
     // beside it.  This is also the path for ordinary non-toggle action buttons.
     if (isDown)
@@ -728,7 +728,7 @@ void VibeLAF::drawButtonBackground(juce::Graphics& g, juce::Button& b,
     g.setColour(VC::Accent.brighter(0.15f));
     g.drawRoundedRectangle(bounds.reduced(0.5f), radius, 1.f);
 
-    // 2026-04-26: outline-only active ring — page sub-tabs (Player/Piano Roll/EQ)
+    // 2026-04-26: outline-only active ring - page sub-tabs (Player/Piano Roll/EQ)
     // keep their chrome body untouched; the ONLY active-state visual is a
     // sharp accent border drawn on the button edge.  No bloom, no fill change.
     if (outlineGlowOnly)
@@ -745,7 +745,7 @@ juce::Font VibeLAF::getLabelFont(juce::Label&) { return juce::Font(11); }
 void VibeLAF::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool /*isOver*/, bool /*isDown*/)
 {
     // Small toggle buttons: switch icon is on the left, text goes to the right of it.
-    // 2026-04-26: matches drawButtonBackground — opt-in via "switchToggle" property.
+    // 2026-04-26: matches drawButtonBackground - opt-in via "switchToggle" property.
     if (b.getClickingTogglesState() && b.getHeight() < 44 && b.getProperties().contains("switchToggle"))
     {
         const auto& strip = Filmstrips::switchToggle();
@@ -771,7 +771,7 @@ void VibeLAF::drawScrollbar(juce::Graphics& g, juce::ScrollBar&,
                              bool isVertical, int thumbStart, int thumbSize,
                              bool isOver, bool isDown)
 {
-    // LRX-14: Scrollbar — recessed gutter + chrome capsule thumb
+    // LRX-14: Scrollbar - recessed gutter + chrome capsule thumb
     auto track = juce::Rectangle<int>(x, y, w, h).toFloat();
 
     // Track: deep recessed slot
@@ -969,38 +969,38 @@ juce::Rectangle<int> VibeLAF::getTooltipBounds(const juce::String& text,
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// LRX-15 — Realism Technique Quick-Reference Matrix
+// LRX-15 - Realism Technique Quick-Reference Matrix
 //
 // Component         | Tex  | AO   | Aniso| Frsn | Vign | Asym | Topo | Notes
 // ------------------|------|------|------|------|------|------|------|------
-// Rotary Knobs      |  ✓   |  ✓   | metal| plas |  —   |  ✓   |  ✓   | per-LAF
-// Fader Caps        |  —   |  ✓   | chrm | plas |  —   |  ✓   |  —   |
-// Fader Tracks      |  —   |  —   |  —   |  —   |  —   |  ✓   |  —   | variable bevel
-// VU Meter          |  —   |  —   | bezl |  ✓   |  —   |  ✓   |  ✓   | glass+screws
-// DBFS Meter        |  —   |  —   |  —   |  —   |  —   |  ✓   |  —   | LED segments
-// Toggle Buttons    |  —   | L1   |  —   |  —   |  —   |  ✓   |  —   | off-white text
-// Action Buttons    |  —   |  ✓   |  ✓   |  —   |  —   |  ✓   |  —   |
-// Nav Tabs          |  —   | actv |  —   |  —   |  —   |  ✓   |  —   |
-// Mixer Surface     |  ✓   |  —   |  —   |  —   |  ✓   |  ✓   |  —   | PENDING: no mixer yet
-// Effect Panels     |  ✓   |  —   |  —   |  —   |  —   |  ✓   |  ✓   | screws
-// Transport Bar     |  ✓   |  —   |  —   |  —   |  —   |  —   |  —   | brushed alum + LCD BPM
-// EQ Dots           |  —   | L1   |  —   |  ✓   |  —   |  —   |  —   | color bleed on hover
-// Piano Roll Notes  |  —   | L1   |  —   |  —   |  —   |  ✓   |  —   |
-// Builder Clips     |  —   | drop |  —   |  —   |  —   |  —   |  —   |
-// Scrollbar Thumbs  |  —   | L1   |  ✓   |  ✓   |  —   |  —   |  —   |
-// Displays/Screens  |  —   |  —   |  —   |  ✓   |  —   |  —   |  —   | glass overlay
-// Plugin Window     |  —   |  —   |  —   |  —   |  ✓   |  —   |  —   | vignette on top
-// Combo Boxes       |  —   |  —   | arw  |  —   |  —   |  ✓   |  —   | off-white text
-// JewelIndicator    |  —   | L1   |  —   |  ✓   |  —   |  —   |  —   | faceted glass
-// Channel Strips    |  ✓   |  —   |  —   |  —   |  —   |  ✓   |  —   | PENDING: no mixer yet
-// LCD Displays      |  —   |  —   |  —   |  —   |  —   |  —   |  —   | LCD ghost-segment
+// Rotary Knobs      |  ✓   |  ✓   | metal| plas |  -   |  ✓   |  ✓   | per-LAF
+// Fader Caps        |  -   |  ✓   | chrm | plas |  -   |  ✓   |  -   |
+// Fader Tracks      |  -   |  -   |  -   |  -   |  -   |  ✓   |  -   | variable bevel
+// VU Meter          |  -   |  -   | bezl |  ✓   |  -   |  ✓   |  ✓   | glass+screws
+// DBFS Meter        |  -   |  -   |  -   |  -   |  -   |  ✓   |  -   | LED segments
+// Toggle Buttons    |  -   | L1   |  -   |  -   |  -   |  ✓   |  -   | off-white text
+// Action Buttons    |  -   |  ✓   |  ✓   |  -   |  -   |  ✓   |  -   |
+// Nav Tabs          |  -   | actv |  -   |  -   |  -   |  ✓   |  -   |
+// Mixer Surface     |  ✓   |  -   |  -   |  -   |  ✓   |  ✓   |  -   | PENDING: no mixer yet
+// Effect Panels     |  ✓   |  -   |  -   |  -   |  -   |  ✓   |  ✓   | screws
+// Transport Bar     |  ✓   |  -   |  -   |  -   |  -   |  -   |  -   | brushed alum + LCD BPM
+// EQ Dots           |  -   | L1   |  -   |  ✓   |  -   |  -   |  -   | color bleed on hover
+// Piano Roll Notes  |  -   | L1   |  -   |  -   |  -   |  ✓   |  -   |
+// Builder Clips     |  -   | drop |  -   |  -   |  -   |  -   |  -   |
+// Scrollbar Thumbs  |  -   | L1   |  ✓   |  ✓   |  -   |  -   |  -   |
+// Displays/Screens  |  -   |  -   |  -   |  ✓   |  -   |  -   |  -   | glass overlay
+// Plugin Window     |  -   |  -   |  -   |  -   |  ✓   |  -   |  -   | vignette on top
+// Combo Boxes       |  -   |  -   | arw  |  -   |  -   |  ✓   |  -   | off-white text
+// JewelIndicator    |  -   | L1   |  -   |  ✓   |  -   |  -   |  -   | faceted glass
+// Channel Strips    |  ✓   |  -   |  -   |  -   |  -   |  ✓   |  -   | PENDING: no mixer yet
+// LCD Displays      |  -   |  -   |  -   |  -   |  -   |  -   |  -   | LCD ghost-segment
 //
 // Abbreviations: Tex=LRX-1 Texture, AO=LRX-2 Shadow Stack, Aniso=LRX-3 Anisotropic,
 //   Frsn=LRX-4 Fresnel, Vign=LRX-5 Vignette, Asym=LRX-6 Asymmetry, Topo=LRX-7 Topography
 //   L1=contact shadow only, metal=metal knobs, plas=plastic knobs, chrm=chrome caps,
 //   bezl=bezel, actv=active state only, arw=arrow button, drop=drop shadow only
 // ══════════════════════════════════════════════════════════════════════════════
-// LRX — TextureUtils  (cached image generation)
+// LRX - TextureUtils  (cached image generation)
 // ══════════════════════════════════════════════════════════════════════════════
 std::map<juce::String, juce::Image>& TextureUtils::cache()
 {
@@ -1035,7 +1035,7 @@ juce::Image TextureUtils::makeBrushedAluminum(int w, int h)
     juce::Graphics g(img);
     juce::Random   rng(42);
 
-    // Horizontal scan lines with sinusoidal brightness — anisotropic sheen
+    // Horizontal scan lines with sinusoidal brightness - anisotropic sheen
     for (int scanY = 0; scanY < h; ++scanY)
     {
         float t    = (float)scanY / juce::jmax(1, h - 1);
@@ -1109,18 +1109,18 @@ juce::Image TextureUtils::makeFingerGrunge(int w, int h)
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// LRX — LRXHelper  (realism drawing utilities)
+// LRX - LRXHelper  (realism drawing utilities)
 // ══════════════════════════════════════════════════════════════════════════════
 void LRXHelper::drawAO(juce::Graphics& g, const juce::Path& shape,
                        bool withReflection, juce::Colour reflectCol)
 {
-    // Layer 1: contact AO — very tight black ring (ground contact)
+    // Layer 1: contact AO - very tight black ring (ground contact)
     juce::DropShadow contact(juce::Colours::black.withAlpha(0.92f), 2, {0, 1});
     contact.drawForPath(g, shape);
-    // Layer 2: drop shadow — medium, standard elevation
+    // Layer 2: drop shadow - medium, standard elevation
     juce::DropShadow drop(juce::Colours::black.withAlpha(0.72f), 6, {2, 3});
     drop.drawForPath(g, shape);
-    // Layer 3: reflection uplighting — faint tinted glow from below
+    // Layer 3: reflection uplighting - faint tinted glow from below
     if (withReflection)
     {
         auto col = reflectCol.isTransparent()
@@ -1174,7 +1174,7 @@ void LRXHelper::drawAnisotropicHL(juce::Graphics& g, juce::Rectangle<float> capB
     g.setGradientFill(hs);
     g.fillEllipse(hx - hsR, hy - hsR, hsR * 2.f, hsR * 2.f);
 
-    // Anisotropic band lines — bright at 135° quarter, dim elsewhere
+    // Anisotropic band lines - bright at 135° quarter, dim elsewhere
     {
         juce::Graphics::ScopedSaveState ss(g);
         juce::Path clip; clip.addEllipse(capBounds); g.reduceClipRegion(clip);
@@ -1538,7 +1538,7 @@ void PageMenuBar::paint(juce::Graphics& g)
     g.setColour(VC::Accent.withAlpha(0.55f));
     g.drawHorizontalLine(getHeight() - 1, 0.f, (float)getWidth());
 
-    // Page title — suppress when tab slots are present (page is obvious from tabs)
+    // Page title - suppress when tab slots are present (page is obvious from tabs)
     if (mTitle.isNotEmpty() && mTabSlotBtns.empty())
     {
         g.setColour(VC::TextDim.withAlpha(0.7f));
@@ -1941,7 +1941,7 @@ void ChickenHeadSelector::paint(juce::Graphics& g)
 
     // Letter marks around the bezel.
     // Selected  → bright red  (#E03A3A) regardless of panel.
-    // Hovered   → duller red  (#B05D5D) — preview of what'd be selected.
+    // Hovered   → duller red  (#B05D5D) - preview of what'd be selected.
     // Default   → mDefaultTextColour (white for dark panels, black for dynamics/cream).
     constexpr juce::uint32 kSelectedRed = 0xffE03A3A;
     constexpr juce::uint32 kHoverRed    = 0xffB05D5D;
@@ -2028,7 +2028,7 @@ void ChickenHeadSelector::mouseDown(const juce::MouseEvent& e)
         mIsDragging = false;
         return;
     }
-    // Start rotary drag — capture angle from knob centre.
+    // Start rotary drag - capture angle from knob centre.
     const auto c = getKnobBounds().getCentre();
     mDragStartAngle = std::atan2(p.x - c.x, c.y - p.y);
     mDragStartIdx   = mSelectedIdx;
@@ -2091,7 +2091,7 @@ DualLabelToggle::DualLabelToggle()
     // Force VibeLAF on the switch so it uses the shared switch_toggle filmstrip
     // regardless of the containing panel's LAF.
     mBtn.setLookAndFeel(&VibeLAF::get());
-    mBtn.getProperties().set("switchToggle", true);   // intentional switch — opt in to filmstrip
+    mBtn.getProperties().set("switchToggle", true);   // intentional switch - opt in to filmstrip
 
     auto setupLbl = [this](juce::Label& l, float ptSize, bool bold)
     {
@@ -2210,7 +2210,7 @@ void DualLabelToggle::resized()
     }
     else
     {
-        // Unset — still give the switch sensible bounds so it renders.
+        // Unset - still give the switch sensible bounds so it renders.
         mBtn.setBounds(b.withSizeKeepingCentre(sw, sh));
     }
 }
@@ -2524,7 +2524,7 @@ FXChainStrip::FXChainStrip(const juce::StringArray& slotLabels)
         auto& slot = mSlots[s];
         juce::String name = (s < slotLabels.size()) ? slotLabels[s] : kDefaultNames[s];
         slot.toggle = std::make_unique<juce::ToggleButton>(name);
-        slot.toggle->getProperties().set("switchToggle", true);   // FX rack slot — intentional switch
+        slot.toggle->getProperties().set("switchToggle", true);   // FX rack slot - intentional switch
         addAndMakeVisible(*slot.toggle);
         slot.k1 = std::make_unique<VKnob>(kK1[s], 0.5f, "");
         slot.k2 = std::make_unique<VKnob>(kK2[s], 0.5f, "");
@@ -2678,7 +2678,7 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     {
         mDrag = DragTarget::Body;
         mBodyDragStartY = e.position.y;
-        // Capture current LFO rate from the slider if available — default 1Hz
+        // Capture current LFO rate from the slider if available - default 1Hz
         mBodyDragStartRate = 1.f;
     }
 }
@@ -2755,7 +2755,7 @@ ParametricEQDisplay::ParametricEQDisplay()
     {
         auto& c = mControls[i];
 
-        // Type dropdown — select filter type from list
+        // Type dropdown - select filter type from list
         c.typeCombo = std::make_unique<juce::ComboBox>();
         c.typeCombo->addItem("Bell",   1);
         c.typeCombo->addItem("LP",     2);
@@ -2841,7 +2841,7 @@ ParametricEQDisplay::ParametricEQDisplay()
         return b;
     };
 
-    // Options button — opens popup with compare/lock/overlays/mode
+    // Options button - opens popup with compare/lock/overlays/mode
     mOptionsBtn = mkBtn("...");
     mOptionsBtn->setTooltip("EQ options - A/B compare, lock bands, heatmap/phase overlays, processing mode");
     mOptionsBtn->onClick = [this] { showEQOptionsMenu(mOptionsBtn.get()); };
@@ -3029,7 +3029,7 @@ float ParametricEQDisplay::evalBandDb(int idx, float hz, float gainOverride) con
             // Cascade numSections identical filters (approximate for display)
             return juce::jmax(-60.f, db * (float)numSections);
         }
-        case 3: // Low Shelf — proper RBJ biquad magnitude (Q-dependent, smooth S-curve)
+        case 3: // Low Shelf - proper RBJ biquad magnitude (Q-dependent, smooth S-curve)
         {
             if (mSampleRateForFFT <= 0.0) return 0.f;
             const float sr    = (float) mSampleRateForFFT;
@@ -3057,7 +3057,7 @@ float ParametricEQDisplay::evalBandDb(int idx, float hz, float gainOverride) con
             const float mag = std::sqrt((nRe * nRe + nIm * nIm) / magSq);
             return juce::Decibels::gainToDecibels(juce::jmax(mag, 1.0e-6f));
         }
-        case 4: // High Shelf — proper RBJ biquad magnitude (Q-dependent, smooth S-curve)
+        case 4: // High Shelf - proper RBJ biquad magnitude (Q-dependent, smooth S-curve)
         {
             if (mSampleRateForFFT <= 0.0) return 0.f;
             const float sr    = (float) mSampleRateForFFT;
@@ -3093,13 +3093,13 @@ float ParametricEQDisplay::evalBandDb(int idx, float hz, float gainOverride) con
         }
         case 6: // OFF
             return 0.f;
-        case 7: // Band Pass — bell-shaped peak (positive dB display)
+        case 7: // Band Pass - bell-shaped peak (positive dB display)
         {
             float logRatio = std::log2(hz / b.freq);
             float bw = 1.f / juce::jmax(0.01f, b.q);
             return 6.f * std::exp(-0.5f * (logRatio / bw) * (logRatio / bw));
         }
-        case 8: // Tilt — low shelf (+gainDb) + high shelf (-gainDb) at same pivot freq
+        case 8: // Tilt - low shelf (+gainDb) + high shelf (-gainDb) at same pivot freq
         {
             // 12j: uses effective gain (dynamic-aware when dynamic=true).
             float g = effGain;
@@ -3277,7 +3277,7 @@ void ParametricEQDisplay::drawHandles(juce::Graphics& g) const
             bleed.drawForPath(g, bleedPath);
         }
 
-        // LRX-14: Contact shadow (Layer 1 only — tight, offset {0,1})
+        // LRX-14: Contact shadow (Layer 1 only - tight, offset {0,1})
         {
             juce::DropShadow contactShadow(juce::Colours::black.withAlpha(0.40f), 2, {0, 1});
             juce::Path shadowPath; shadowPath.addEllipse(x - 6.f, y - 6.f, 12.f, 12.f);
@@ -3296,7 +3296,7 @@ void ParametricEQDisplay::drawHandles(juce::Graphics& g) const
                                             juce::Colours::white.withAlpha(0.6f);
         g.setColour(borderCol);
         g.drawEllipse(x - 6.f, y - 6.f, 12.f, 12.f, 1.2f);
-        // LRX-14: Fresnel rim — bright white arc at top-left edge (simplified)
+        // LRX-14: Fresnel rim - bright white arc at top-left edge (simplified)
         g.setColour(juce::Colours::white.withAlpha(0.15f * alpha));
         g.drawEllipse(x - 5.5f, y - 5.5f, 11.f, 11.f, 0.7f);
         // Band number
@@ -3407,7 +3407,7 @@ void ParametricEQDisplay::resized()
     // an empty rect so any leftover paint references no-op cleanly.
     mToolbarArea = juce::Rectangle<int>();
 
-    // Right panel: 8 color-coded columns beside the graph — target ~25% of total width
+    // Right panel: 8 color-coded columns beside the graph - target ~25% of total width
     // Each column needs room for: type dropdown + gain fader + freq knob + q knob
     // D.4-Q6: 9th column added on the far right for the EQ main-level fader.
     const int kColW        = juce::jmax(22, (b.getWidth() / 32));
@@ -3417,7 +3417,7 @@ void ParametricEQDisplay::resized()
 
     // ── Right panel: lay out per-band columns ──────────────────────────────
     // From top to bottom in each column:
-    //   [color dot — painted, not a component]
+    //   [color dot - painted, not a component]
     //   enable toggle  16px
     //   type button    22px
     //   gain fader     fills center (~60% of remaining)
@@ -3463,7 +3463,7 @@ void ParametricEQDisplay::resized()
         if (c.qKnob)      c.qKnob     ->setBounds(qR);
     }
 
-    // D.4-Q6: 9th "Main" column — fader spans the same vertical real estate as
+    // D.4-Q6: 9th "Main" column - fader spans the same vertical real estate as
     // a band's gain fader, but with no type combo / freq / Q knobs.  The col
     // matches band column geometry so headers and tick rows line up.
     {
@@ -3588,7 +3588,7 @@ void ParametricEQDisplay::paint(juce::Graphics& g)
             }
         }
 
-        // D.4-Q6: 9th column header — "Main" label + separator + readout.
+        // D.4-Q6: 9th column header - "Main" label + separator + readout.
         {
             const int mainColX = mRightPanelArea.getX() + kNumBands * kColW;
             // Separator between band 8 and Main
@@ -4609,7 +4609,7 @@ void ParametricEQDisplay::pushBandToDSP(int b)
         pushAll(mShowMid ? mBoundMsDsp->mid() : mBoundMsDsp->side());
 }
 
-// ── ParametricEQDisplay — new methods (H3) ────────────────────────────────────
+// ── ParametricEQDisplay - new methods (H3) ────────────────────────────────────
 
 void ParametricEQDisplay::bindAPVTS(juce::AudioProcessorValueTreeState& apvts, int layerIdx)
 {
@@ -5883,7 +5883,7 @@ void ParametricEQDisplay::drawPhaseCurve(juce::Graphics& g) const
     g.strokePath(phasePath, juce::PathStrokeType(1.2f));
 }
 
-// ── pushSamples — also update heatmap buffer ──────────────────────────────────
+// ── pushSamples - also update heatmap buffer ──────────────────────────────────
 // (Kept as the existing implementation; the heatmap frame push happens in the
 //  existing pushSamples block.  We patch the end of the FFT completion block.)
 
@@ -5940,7 +5940,7 @@ void VUMeter::parentHierarchyChanged()
 void VUMeter::setGainReduction(float grDb)
 {
     mGR.store(juce::jlimit(-40.f, 0.f, grDb), std::memory_order_relaxed);
-    // repaint() not needed here — timerCallback() repaints on each tick
+    // repaint() not needed here - timerCallback() repaints on each tick
 }
 
 void VUMeter::onVBlank()
@@ -6022,7 +6022,7 @@ void VUMeter::onVBlank()
     repaint();
 }
 
-// ── Horizontal bar-style GR meter (legacy — used in LayersPage glue comp) ─────
+// ── Horizontal bar-style GR meter (legacy - used in LayersPage glue comp) ─────
 void VUMeter::paintHorizontal(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat().reduced(1.f);
@@ -6073,13 +6073,13 @@ void VUMeter::paintVerticalVU(juce::Graphics& g)
     auto b = getLocalBounds().toFloat();
 
     // ── Filmstrip render (128x128, 100 frames) ────────────────────────────────
-    // Stretch the selected frame to fill the full component bounds — JUCE's
+    // Stretch the selected frame to fill the full component bounds - JUCE's
     // drawImage scales source to destination, so the image fills width × height.
     {
         const auto& strip = Filmstrips::vuMeter();
         if (strip.isValid())
         {
-            // Fill the full component — stretches horizontally to match component width
+            // Fill the full component - stretches horizontally to match component width
             Filmstrips::drawFrame(g, strip, 128, 128, 100, mCurrentPos,
                                   getLocalBounds().toFloat());
 
@@ -6119,7 +6119,7 @@ void VUMeter::paintVerticalVU(juce::Graphics& g)
         }
     }
 
-    // LRX-10: Metal bezel — chrome ring drawn before cream plate
+    // LRX-10: Metal bezel - chrome ring drawn before cream plate
     {
         juce::ColourGradient bezel(
             juce::Colour(0xffC0C0C0), b.getX(),      b.getY(),
@@ -6206,7 +6206,7 @@ void VUMeter::paintVerticalVU(juce::Graphics& g)
         {  -7.f,  "-7", true  },
         {  -5.f,  "-5", true  },
         {  -3.f,  "-3", true  },
-        {  -1.f,  "-1", true  },  // major — show label
+        {  -1.f,  "-1", true  },  // major - show label
         {   0.f,   "0", true  },
         {  +1.f,  "+1", true  },
         {  +2.f,  "+2", true  },
@@ -6349,7 +6349,7 @@ void VUMeter::paintVerticalVU(juce::Graphics& g)
     g.setColour(juce::Colour(0xffA0A080).withAlpha(0.6f));
     g.drawRoundedRectangle(b, 4.f, 1.f);
 
-    // LRX-10: Glass lens overlay — convex reflection sweep top-left corner
+    // LRX-10: Glass lens overlay - convex reflection sweep top-left corner
     {
         juce::ColourGradient lens(
             juce::Colours::white.withAlpha(0.18f), b.getX() + b.getWidth() * 0.15f, b.getY() + b.getHeight() * 0.08f,
@@ -6364,7 +6364,7 @@ void VUMeter::paintVerticalVU(juce::Graphics& g)
         g.fillRoundedRectangle(b, 4.f);
     }
 
-    // LRX-10: Bezel corner mounting screws (manual — VU meter may be small)
+    // LRX-10: Bezel corner mounting screws (manual - VU meter may be small)
     {
         const float sr = 3.5f;  // screw radius
         const float inset = 5.5f;
@@ -6532,7 +6532,7 @@ void DBFSMeter::paintBar(juce::Graphics& g, juce::Rectangle<float> r,
     const float displayNorm = dbToNorm(displayDb);
     const float peakNorm    = dbToNorm(peakDb);
 
-    // LED segment geometry — same look as the legacy meter.
+    // LED segment geometry - same look as the legacy meter.
     const float gap   = 1.5f;
     const float segH  = 4.5f;
     const int numSegs = juce::jmax(1, (int)(totalH / (segH + gap)));
@@ -6543,7 +6543,7 @@ void DBFSMeter::paintBar(juce::Graphics& g, juce::Rectangle<float> r,
     const float peakY   = floorY - peakNorm * totalH;
     const int   peakSeg = (int)((floorY - peakY) / (segH + gap));
 
-    // PASS 1 — paint every segment as DIM so tick labels overlay onto the
+    // PASS 1 - paint every segment as DIM so tick labels overlay onto the
     // unlit background.  Lit segments paint over them in PASS 3.
     for (int i = 0; i < numSegs; ++i)
     {
@@ -6561,9 +6561,9 @@ void DBFSMeter::paintBar(juce::Graphics& g, juce::Rectangle<float> r,
         g.fillRect(segX, segTop, segW, segH);
     }
 
-    // PASS 2 — tick labels INSIDE the meter (only on the left half so they
+    // PASS 2 - tick labels INSIDE the meter (only on the left half so they
     // appear once across the whole bar).  These get covered by the lit segs
-    // in pass 3 wherever the meter is filled — exactly the FL behaviour.
+    // in pass 3 wherever the meter is filled - exactly the FL behaviour.
     if (drawLabels)
     {
         static const int kLabels[] = { 6, 0, -3, -6, -9, -12, -18, -24, -36, -48 };
@@ -6582,7 +6582,7 @@ void DBFSMeter::paintBar(juce::Graphics& g, juce::Rectangle<float> r,
         }
     }
 
-    // PASS 3 — lit segments (and the white peak-hold marker).  These paint
+    // PASS 3 - lit segments (and the white peak-hold marker).  These paint
     // ON TOP of the dim+labels layers; wherever a segment is lit the labels
     // beneath it disappear (covered by the bright fill).
     for (int i = 0; i < numSegs; ++i)
@@ -6632,17 +6632,17 @@ void DBFSMeter::paint(juce::Graphics& g)
 
     // Single bar split into two halves: LEFT = L channel, RIGHT = R channel.
     // 1 px gutter between halves so the split is readable but the bar still
-    // reads as a single piece (Jeff's spec — option B, not separated bars).
+    // reads as a single piece (Jeff's spec - option B, not separated bars).
     const float halfW   = (b.getWidth() - 1.f) * 0.5f;
     const auto  leftR   = juce::Rectangle<float>(b.getX(),                   b.getY(), halfW, b.getHeight());
     const auto  rightR  = juce::Rectangle<float>(b.getX() + halfW + 1.f,     b.getY(), halfW, b.getHeight());
 
-    // Labels on the LEFT half only — they span across (drawText box width is
+    // Labels on the LEFT half only - they span across (drawText box width is
     // 2x half-width so digits are readable across both halves).
     paintBar(g, leftR,  mDisplayDbL, mPeakDbL, /*drawLabels*/ true);
     paintBar(g, rightR, mDisplayDbR, mPeakDbR, /*drawLabels*/ false);
 
-    // Center gutter — paint thin black line so the L|R split is visible.
+    // Center gutter - paint thin black line so the L|R split is visible.
     g.setColour(juce::Colour(0xff000000));
     g.fillRect(b.getX() + halfW, b.getY(), 1.f, b.getHeight());
 
@@ -6717,7 +6717,7 @@ void ModulationLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int
         LRXHelper::drawAO(g, skirtPath, true, juce::Colour(0xff0030ff));
     }
 
-    // SKIRT — glossy black radial dome
+    // SKIRT - glossy black radial dome
     juce::ColourGradient skirtGrad(juce::Colour(0xff2A2A2A),
                                     centre.x, centre.y - radius * 0.4f,
                                     juce::Colour(0xff000000),
@@ -6725,7 +6725,7 @@ void ModulationLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int
     g.setGradientFill(skirtGrad);
     g.fillEllipse(bounds);
 
-    // KNURLING — 40 fine lines around outer 10% of skirt
+    // KNURLING - 40 fine lines around outer 10% of skirt
     {
         const int ridges = 40;
         for (int i = 0; i < ridges; ++i)
@@ -6740,7 +6740,7 @@ void ModulationLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int
         }
     }
 
-    // INDICATOR LINE — on skirt, rotates with knob
+    // INDICATOR LINE - on skirt, rotates with knob
     {
         juce::Graphics::ScopedSaveState ss(g);
         g.addTransform(juce::AffineTransform::rotation(angle, centre.x, centre.y));
@@ -6749,7 +6749,7 @@ void ModulationLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int
                    centre.x, centre.y - radius * 0.88f, 1.5f);
     }
 
-    // CAP — brushed silver, STATIC (does not rotate)
+    // CAP - brushed silver, STATIC (does not rotate)
     float capR = radius * 0.52f;
     juce::Rectangle<float> capB(centre.x - capR, centre.y - capR, capR * 2, capR * 2);
 
@@ -6788,7 +6788,7 @@ void ModulationLAF::drawButtonBackground(juce::Graphics& g, juce::Button& b,
 
     if (b.getToggleState() || isDown)
     {
-        // RECESSED: inner shadow on top edge — "pushed in"
+        // RECESSED: inner shadow on top edge - "pushed in"
         g.setColour(juce::Colour(0xff080808));
         g.fillRoundedRectangle(bounds.reduced(1.f), 1.5f);
         g.setColour(juce::Colours::black.withAlpha(0.8f));
@@ -6796,7 +6796,7 @@ void ModulationLAF::drawButtonBackground(juce::Graphics& g, juce::Button& b,
     }
     else
     {
-        // RAISED: highlight on top edge — "popped out"
+        // RAISED: highlight on top edge - "popped out"
         g.setColour(juce::Colour(0xff2A2A2A));
         g.fillRoundedRectangle(bounds.reduced(1.f), 1.5f);
         g.setColour(juce::Colours::white.withAlpha(0.15f));
@@ -6874,7 +6874,7 @@ void DynamicsLAF::drawModernAnalog(juce::Graphics& g, juce::Rectangle<float> bou
     g.fillEllipse(centre.x - radius * 0.55f, centre.y - radius * 0.6f,
                    specR * 2.f, specR * 1.5f);
 
-    // LRX-4: Fresnel rim — cool silver (LA-2A style)
+    // LRX-4: Fresnel rim - cool silver (LA-2A style)
     LRXHelper::drawFresnelRim(g, bounds, juce::Colour(0xff99AABB), 1.4f);
 
     // White indicator line (thin, high-visibility)
@@ -6904,7 +6904,7 @@ void DynamicsLAF::drawDualLayerAluminum(juce::Graphics& g, juce::Rectangle<float
     g.setGradientFill(skirtGrad);
     g.fillEllipse(bounds);
 
-    // Knurling — 40 lines
+    // Knurling - 40 lines
     for (int i = 0; i < 40; ++i)
     {
         float a = juce::MathConstants<float>::twoPi * i / 40;
@@ -6991,7 +6991,7 @@ void DynamicsLAF::drawComboBox(juce::Graphics& g, int width, int height, bool /*
 
 void DynamicsLAF::positionComboBoxText(juce::ComboBox& box, juce::Label& label)
 {
-    // Hide the text label — the chicken head shows the selection visually
+    // Hide the text label - the chicken head shows the selection visually
     label.setBounds(0, 0, 0, 0);
 }
 
@@ -7025,7 +7025,7 @@ void DynamicsLAF::drawChickenHead(juce::Graphics& g, juce::Point<float> centre,
         pointer.startNewSubPath(centre.x, centre.y - radius * 0.92f);
         pointer.lineTo(centre.x - radius * 0.11f, centre.y - radius * 0.38f);
         pointer.lineTo(centre.x - radius * 0.24f, centre.y + radius * 0.12f);
-        // Counterweight arc — manual lineTo keeps path continuous (addArc starts a new subpath,
+        // Counterweight arc - manual lineTo keeps path continuous (addArc starts a new subpath,
         // leaving the right side disconnected and the fill missing on that side)
         {
             float cwR  = radius * 0.28f;
@@ -7053,10 +7053,10 @@ void DynamicsLAF::drawChickenHead(juce::Graphics& g, juce::Point<float> centre,
         beakEdge.startNewSubPath(centre.x, centre.y - radius * 0.92f);
         beakEdge.lineTo(centre.x - radius * 0.08f, centre.y - radius * 0.5f);
         beakEdge.applyTransform(juce::AffineTransform::rotation(angle, centre.x, centre.y));
-        g.setColour(juce::Colour(0xff505050).withAlpha(0.45f));  // dark — readable on white LA-2A panel
+        g.setColour(juce::Colour(0xff505050).withAlpha(0.45f));  // dark - readable on white LA-2A panel
         g.strokePath(beakEdge, juce::PathStrokeType(1.8f));
 
-        // Dark indicator line on beak — near-black so it reads on cream/white panel
+        // Dark indicator line on beak - near-black so it reads on cream/white panel
         juce::Path indicator;
         indicator.startNewSubPath(centre.x, centre.y - radius * 0.35f);
         indicator.lineTo(centre.x, centre.y - radius * 0.82f);
@@ -7072,14 +7072,14 @@ void DynamicsLAF::paintLA2APanel(juce::Graphics& g, juce::Rectangle<int> bounds)
     g.setColour(juce::Colour(0xffF5F0E8));  // warm cream
     g.fillRect(bounds);
 
-    // Subtle inner gradient (backlighting effect — lighter center)
+    // Subtle inner gradient (backlighting effect - lighter center)
     juce::ColourGradient innerGlow(
         juce::Colour(0xffFFFDF8), bounds.getCentreX(), bounds.getCentreY(),
         juce::Colour(0xffE8E2D8), bounds.getX(), bounds.getY(), true);
     g.setGradientFill(innerGlow);
     g.fillRect(bounds.reduced(0));
 
-    // Very subtle panel grain texture (minimal — LA-2A is smooth, not rough)
+    // Very subtle panel grain texture (minimal - LA-2A is smooth, not rough)
     juce::Random rng(99);  // fixed seed
     for (int i = 0; i < bounds.getWidth() * bounds.getHeight() / 200; ++i)
     {
@@ -7095,7 +7095,7 @@ void DynamicsLAF::paintLA2APanel(juce::Graphics& g, juce::Rectangle<int> bounds)
     g.setColour(juce::Colour(0xff8A8070));
     g.drawRect(bounds, 1);
 
-    // LRX-7: mounting screws — light ivory against cream panel
+    // LRX-7: mounting screws - light ivory against cream panel
     LRXHelper::drawMountingScrews(g, bounds, 8, juce::Colour(0xffD8D0C0));
 }
 
@@ -7106,7 +7106,7 @@ void JewelIndicator::paint(juce::Graphics& g)
     auto centre = b.getCentre();
     float r = b.getWidth() * 0.5f;
 
-    // PANEL BLEED GLOW — extends beyond component bounds when active
+    // PANEL BLEED GLOW - extends beyond component bounds when active
     if (isActive)
     {
         juce::DropShadow glow(juce::Colour(0xffCC0000).withAlpha(0.55f), 14, {0, 0});
@@ -7114,7 +7114,7 @@ void JewelIndicator::paint(juce::Graphics& g)
         glow.drawForPath(g, p);
     }
 
-    // FACETED GLASS LENS — radial gradient
+    // FACETED GLASS LENS - radial gradient
     juce::ColourGradient lens(
         isActive ? juce::Colour(0xffFF3333) : juce::Colour(0xff661111),
         centre.x, centre.y - r * 0.35f,
@@ -7122,7 +7122,7 @@ void JewelIndicator::paint(juce::Graphics& g)
     g.setGradientFill(lens);
     g.fillEllipse(b);
 
-    // DIAMOND FACET LINES — 4 crossing lines for "cut glass" effect
+    // DIAMOND FACET LINES - 4 crossing lines for "cut glass" effect
     if (isActive)
     {
         g.setColour(juce::Colours::white.withAlpha(0.22f));
@@ -7134,7 +7134,7 @@ void JewelIndicator::paint(juce::Graphics& g)
         }
     }
 
-    // SPECULAR SPOT — small bright reflection top-left
+    // SPECULAR SPOT - small bright reflection top-left
     juce::ColourGradient spec(juce::Colours::white.withAlpha(isActive ? 0.65f : 0.25f),
                                centre.x - r * 0.28f, centre.y - r * 0.35f,
                                juce::Colours::transparentBlack, centre.x, centre.y, false);
@@ -7175,7 +7175,7 @@ void TimeLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
     g.setGradientFill(base);
     g.fillEllipse(bounds);
 
-    // 8-FLUTED STAR GRIP — rotates with knob
+    // 8-FLUTED STAR GRIP - rotates with knob
     {
         const int numFlutes = 8;
         float fluteOuter = radius * 0.70f;
@@ -7195,7 +7195,7 @@ void TimeLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
         g.strokePath(star, juce::PathStrokeType(0.7f));
     }
 
-    // INDICATOR LINE — on base wall between flute ring and outer edge
+    // INDICATOR LINE - on base wall between flute ring and outer edge
     {
         float innerR = radius * 0.76f, outerR = radius * 0.96f;
         g.setColour(juce::Colours::white);
@@ -7213,7 +7213,7 @@ void TimeLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
     float lx = x + (w - leverW) * 0.5f;
     float ly = y + (h - leverH) * sliderPos;
 
-    // Drop shadow (heavy — Pultec style: light from upper-right)
+    // Drop shadow (heavy - Pultec style: light from upper-right)
     juce::DropShadow levShadow(juce::Colours::black.withAlpha(0.85f), 8, {-4, 5});
     juce::Path levPath;
     levPath.addRectangle(lx, ly, leverW, leverH);
@@ -7255,25 +7255,25 @@ static void drawLabelForcedColour(juce::Graphics& g, juce::Label& label, juce::C
 
 void TimeLAF::drawLabel(juce::Graphics& g, juce::Label& label)
 {
-    // Pultec Radio Gray panel — white text
+    // Pultec Radio Gray panel - white text
     drawLabelForcedColour(g, label, juce::Colours::white);
 }
 
 void DynamicsLAF::drawLabel(juce::Graphics& g, juce::Label& label)
 {
-    // LA-2A cream/white panel — dark warm text (matches chicken head labels)
+    // LA-2A cream/white panel - dark warm text (matches chicken head labels)
     drawLabelForcedColour(g, label, juce::Colour(0xff1a1208));
 }
 
 void HarmonicLAF::drawLabel(juce::Graphics& g, juce::Label& label)
 {
-    // Olive Hammerite dark panel — white text
+    // Olive Hammerite dark panel - white text
     drawLabelForcedColour(g, label, juce::Colours::white);
 }
 
 void ModulationLAF::drawLabel(juce::Graphics& g, juce::Label& label)
 {
-    // Dark modulation panels — white text
+    // Dark modulation panels - white text
     drawLabelForcedColour(g, label, juce::Colours::white);
 }
 
@@ -7283,7 +7283,7 @@ void TimeLAF::paintPultecPanel(juce::Graphics& g, juce::Rectangle<int> bounds)
     g.setColour(juce::Colour(0xff5B747E));
     g.fillRect(bounds);
 
-    // Aged metal noise grain texture (fixed seed — does not change every repaint)
+    // Aged metal noise grain texture (fixed seed - does not change every repaint)
     juce::Random rng(73);
     int totalPix = bounds.getWidth() * bounds.getHeight();
     for (int i = 0; i < totalPix / 60; ++i)
@@ -7297,7 +7297,7 @@ void TimeLAF::paintPultecPanel(juce::Graphics& g, juce::Rectangle<int> bounds)
         g.fillEllipse(px, py, sz, sz);
     }
 
-    // LRX-7: mounting screws — steel on Radio Gray panel
+    // LRX-7: mounting screws - steel on Radio Gray panel
     LRXHelper::drawMountingScrews(g, bounds, 9, juce::Colour(0xff8AABB8));
 }
 
@@ -7330,7 +7330,7 @@ void HarmonicLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h
     g.setGradientFill(bodyGrad);
     g.fillEllipse(bounds);
 
-    // Vertical groove fluting — 24 rectangles around perimeter (Bakelite style)
+    // Vertical groove fluting - 24 rectangles around perimeter (Bakelite style)
     {
         const int numGrooves = 24;
         for (int i = 0; i < numGrooves; ++i)
@@ -7349,7 +7349,7 @@ void HarmonicLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h
         }
     }
 
-    // Hollow triangular beak pointer — cream/gold stroke, transparent fill, rotates
+    // Hollow triangular beak pointer - cream/gold stroke, transparent fill, rotates
     {
         float tipR = radius * 0.90f, baseHW = radius * 0.14f, baseR = radius * 0.40f;
         juce::Path beak;
@@ -7376,7 +7376,7 @@ void HarmonicLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h
         g.drawLine(centre.x - capR * 0.7f, centre.y, centre.x + capR * 0.7f, centre.y, 1.f);
     }
 
-    // LRX-4: Fresnel rim — warm amber Bakelite
+    // LRX-4: Fresnel rim - warm amber Bakelite
     LRXHelper::drawFresnelRim(g, bounds, juce::Colour(0xffCC8833), 1.3f);
 }
 
@@ -7398,12 +7398,12 @@ void HarmonicLAF::paintHammeritePanel(juce::Graphics& g, juce::Rectangle<int> bo
         g.fillEllipse(px, py, sz, sz);
     }
 
-    // LRX-7: mounting screws — dull brass on olive Hammerite panel
+    // LRX-7: mounting screws - dull brass on olive Hammerite panel
     LRXHelper::drawMountingScrews(g, bounds, 8, juce::Colour(0xff7A6A3A));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ColoredSectionLAF — colored horizontal line for ComboBox popup section headings
+// ColoredSectionLAF - colored horizontal line for ComboBox popup section headings
 // ─────────────────────────────────────────────────────────────────────────────
 ColoredSectionLAF& ColoredSectionLAF::get()
 {
@@ -7649,7 +7649,7 @@ void GRMeter::paint(juce::Graphics& g)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// setSliderDoubleClickDefaultsFromApvts — see SharedUI.h
+// setSliderDoubleClickDefaultsFromApvts - see SharedUI.h
 // ─────────────────────────────────────────────────────────────────────────────
 void setSliderDoubleClickDefaultsFromApvts (juce::Component& root,
                                             juce::AudioProcessorValueTreeState& apvts)

@@ -21,7 +21,7 @@ public:
     // Drum mode: show row labels instead of piano key graphics.
     // Labels are in top-to-bottom order: labels[0] = highest visible note.
     void setDrumRowLabels(const std::vector<juce::String>& labels);
-    // J-7b: per-MIDI-note label provider — when set, each visible white key
+    // J-7b: per-MIDI-note label provider - when set, each visible white key
     // shows the engine-supplied label (e.g. "Snare Center", "Hi-hat Tip")
     // instead of just the C-octave name.  Returning empty falls through to
     // the default name.  Used by BaySickRustyDrums to label the full kit
@@ -120,12 +120,12 @@ public:
     void muteSelectedNotes(bool mute);   // 2026-04-26 (D-1): Alt+M / Alt+Shift+M
 
     // 2026-04-26 (D-7): Smaller Piano Roll bundle helpers.
-    void quickQuantizeQuarter();   // Ctrl+Q — snap to nearest 1/4 note
-    void quickLegato();            // Ctrl+L — extend each note to start of next
-    void flamSelected();           // Alt+F — grace note before each selected
-    void deleteTimeRegion();       // Ctrl+Delete — remove time, shift later left
+    void quickQuantizeQuarter();   // Ctrl+Q - snap to nearest 1/4 note
+    void quickLegato();            // Ctrl+L - extend each note to start of next
+    void flamSelected();           // Alt+F - grace note before each selected
+    void deleteTimeRegion();       // Ctrl+Delete - remove time, shift later left
     void toggleResizeFromLeftMode();   // Ctrl+Alt+Home
-    void scaleSelectionLevels();   // Alt+X — modal dialog scales velocity %
+    void scaleSelectionLevels();   // Alt+X - modal dialog scales velocity %
     // 2026-04-26 (D-7 sub-3): shift the ruler time-selection box left/right
     // by its own length.  Contents don't move; mSelection re-populates with
     // notes inside the new range so the visual highlight stays consistent.
@@ -181,7 +181,7 @@ public:
     // Mouse-button-held audition (fires on mouseDown of Draw / Move, releases
     // on mouseUp). Pitch changes during a Move drag fire AuditionOff(prev)
     // followed by AuditionOn(new) so the engine plays a continuous sustained
-    // note that follows the dragged pitch — matches FL's piano-roll feel.
+    // note that follows the dragged pitch - matches FL's piano-roll feel.
     std::function<void(int midiNote)>             onNoteAuditionOn;
     std::function<void(int midiNote)>             onNoteAuditionOff;
 
@@ -269,7 +269,7 @@ private:
     // ── Mouse-held audition state ─────────────────────────────────────────
     // Tracks the currently-held audition note across mouseDown / mouseDrag /
     // mouseUp.  triggerAudition releases any prior held note before starting
-    // a new one — drag pitch changes use this for off-then-on transitions.
+    // a new one - drag pitch changes use this for off-then-on transitions.
     int  mAuditionHeldNote { -1 };
     void triggerAudition (int midiNote);
     void releaseAudition ();
@@ -499,7 +499,7 @@ public:
     RollMode getRollMode() const { return mRollMode; }
     void setActiveSlot  (int slot);
     int  getActiveSlot  () const { return mActiveSlot; }
-    // Drum row labels — forwarded to PianoKeyboard. Top-to-bottom order.
+    // Drum row labels - forwarded to PianoKeyboard. Top-to-bottom order.
     void setDrumRowLabels(const std::vector<juce::String>& labels);
     // J-7b: forward a per-MIDI-note label provider to the keyboard widget.
     void setNoteLabelProvider(std::function<juce::String(int)> provider);
@@ -522,7 +522,7 @@ public:
     // Connect this container and its grid to the global undo system.
     void setUndoContext(const UndoContext& ctx);
 
-    // Global undo/redo — delegates to ctx.manager
+    // Global undo/redo - delegates to ctx.manager
     void undoRoll        ();
     void redoRoll        ();
     // Show the global history window via callback (wired by StandaloneEditor)
@@ -532,7 +532,7 @@ public:
     std::function<void(double beat)> onSeek;
 
     // Fired when a note is created or its pitch changes (for engine audition).
-    // One-shot — engine receives noteOn + auto-noteOff at end of buffer.
+    // One-shot - engine receives noteOn + auto-noteOff at end of buffer.
     std::function<void(int midiNote)> onNoteAudition;
 
     // Fired by the on-screen piano keyboard on key press / release respectively.
@@ -584,7 +584,7 @@ private:
     std::unique_ptr<PianoKeyboard>  mKeyboard;
     std::unique_ptr<PianoRollGrid>  mGrid;
     std::unique_ptr<ControlLane>    mLane;
-    // 2026-04-26 (D-7 sub-2): bare-M toggles this — when false the keyboard
+    // 2026-04-26 (D-7 sub-2): bare-M toggles this - when false the keyboard
     // column collapses to 0 width and the grid expands across the freed space.
     // Per-instance: each Piano Roll tab has its own visibility state.
     bool mKeyboardVisible { true };

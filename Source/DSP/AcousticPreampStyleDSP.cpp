@@ -293,7 +293,7 @@ void AcousticPreampStyleDSP::process (juce::AudioBuffer<float>& buffer)
         }
     }
 
-    // ── Notch (band-stop, last in chain — surgical feedback rejection) ──────
+    // ── Notch (band-stop, last in chain - surgical feedback rejection) ──────
     // Process bandpass tap and subtract from main buffer to get band-stop.
     {
         juce::AudioBuffer<float> bpScratch (numCh, n);

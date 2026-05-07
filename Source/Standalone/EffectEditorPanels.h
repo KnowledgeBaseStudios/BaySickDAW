@@ -7,17 +7,17 @@
 
 // ── EditorPanelBase ───────────────────────────────────────────────────────────
 // Base class for all effect editor panels. Provides:
-//   - VU input meter (left)   — Compressor, Saturation, Overdrive, Tape, TransientShaper only
-//   - DBFS output meter (right, compact) — all panels
-//   - Output gain fader (far right)      — all panels
+//   - VU input meter (left)   - Compressor, Saturation, Overdrive, Tape, TransientShaper only
+//   - DBFS output meter (right, compact) - all panels
+//   - Output gain fader (far right)      - all panels
 // Panels without VU (Delay, Reverb, Chorus, Flanger, Phaser) call disableVU()
 // in their constructor so knobs use the full remaining width.
 // ─────────────────────────────────────────────────────────────────────────────
 struct EditorPanelBase : public juce::Component
 {
     // I-2 (2026-05-02): Universal pedal panel mode.
-    //   * Full  — current FX-rack layout (all knobs visible).
-    //   * Pedal — simplified pedalboard layout (subset of knobs, smaller
+    //   * Full  - current FX-rack layout (all knobs visible).
+    //   * Pedal - simplified pedalboard layout (subset of knobs, smaller
     //     footprint).  New pedal effects (I-5+) implement Full as a
     //     right-skewed cluster so the BaySickPedals view crops the empty
     //     left side; existing effects (I-14) get a separate Pedal layout.

@@ -60,7 +60,7 @@ void EngineInsertTask::run()
     // Build a "this-block" view: same float* storage as mOutputBuffer, but
     // reporting numSamples=n so engine processBlocks size their work loops
     // to the host's current block size rather than the arena's max.
-    // getArrayOfWritePointers returns float* const* — preserve the const
+    // getArrayOfWritePointers returns float* const* - preserve the const
     // qualifier on the inner pointer; AudioBuffer's constructor accepts it.
     float* const* ptrs = mOutputBuffer->getArrayOfWritePointers();
     juce::AudioBuffer<float> blockView (ptrs, mOutputBuffer->getNumChannels(), n);
@@ -68,7 +68,7 @@ void EngineInsertTask::run()
 
     // ── Sidechain push ────────────────────────────────────────────────────────
     // Pull from each SC predecessor's mOutputBuffer (already written by the
-    // upstream task — guaranteed by mDeps reaching zero before we run). Feed
+    // upstream task - guaranteed by mDeps reaching zero before we run). Feed
     // into the engine via ISidechainEngine the same way the serial path does.
     if (mScEngine != nullptr)
     {

@@ -12,7 +12,7 @@
 //   - a default KeyPress (the out-of-the-box shortcut)
 //
 // Mouse-modifier interactions (Alt+RClick etc.) are surfaced as MouseRefRow
-// entries — they're documentation-only and not editable through the popup.
+// entries - they're documentation-only and not editable through the popup.
 //
 // Phase A scope: only commands whose handlers were already wired before this
 // refactor.  Phase B and beyond extend the catalog as features come online.
@@ -22,12 +22,12 @@ namespace BSCommands
     // App-defined IDs start above 0xf000 to stay clear of JUCE's reserved range.
     enum CommandIDs : int
     {
-        // ── General — transport ─────────────────────────────────────────────
+        // ── General - transport ─────────────────────────────────────────────
         cmdPlayPause       = 0x10001,
         cmdStopAndDisarm   = 0x10002,
         cmdToggleRecord    = 0x10003,
 
-        // ── General — page switches (Phase B-1, 2026-04-26) ─────────────────
+        // ── General - page switches (Phase B-1, 2026-04-26) ─────────────────
         cmdShowMixer       = 0x10010,
         cmdShowEffects     = 0x10011,
         cmdShowBuilder     = 0x10012,
@@ -36,20 +36,20 @@ namespace BSCommands
         cmdShowDrums       = 0x10015,
         cmdShowPianoRoll   = 0x10016,
 
-        // ── General — file operations (Phase B-1) ───────────────────────────
+        // ── General - file operations (Phase B-1) ───────────────────────────
         cmdFileNew         = 0x10020,
         cmdFileOpen        = 0x10021,
         cmdFileSave        = 0x10022,
         cmdFileSaveAs      = 0x10023,
 
-        // ── General — pattern navigation (Phase B-2, 2026-04-26) ────────────
+        // ── General - pattern navigation (Phase B-2, 2026-04-26) ────────────
         cmdRenameActivePattern = 0x10030,
         cmdNextEmptyPattern    = 0x10031,
         cmdNewPattern          = 0x10032,
         cmdNextPattern         = 0x10033,
         cmdPrevPattern         = 0x10034,
 
-        // ── General — transport extensions (Phase B-3, 2026-04-26) ──────────
+        // ── General - transport extensions (Phase B-3, 2026-04-26) ──────────
         cmdToggleSongMode      = 0x10040,
         cmdSeekHome            = 0x10041,
         cmdFastForward         = 0x10042,
@@ -57,11 +57,11 @@ namespace BSCommands
         cmdNextBarSong         = 0x10044,
         cmdToggleMetronome     = 0x10045,
 
-        // ── General — undo / redo (Phase B-5, 2026-04-26) ───────────────────
+        // ── General - undo / redo (Phase B-5, 2026-04-26) ───────────────────
         cmdGlobalUndo          = 0x10050,
         cmdGlobalRedo          = 0x10051,
 
-        // ── General — recording precount (Phase D-5, 2026-04-26) ────────────
+        // ── General - recording precount (Phase D-5, 2026-04-26) ────────────
         cmdToggleRecordingPrecount = 0x10060,
 
         // (later phases continue from 0x10070.)
@@ -87,7 +87,7 @@ namespace BSCommands
         juce::KeyPress defaultKey;
     };
 
-    // Catalog of editable commands.  Static — initialized on first call.
+    // Catalog of editable commands.  Static - initialized on first call.
     const std::vector<CommandInfo>& getAllCommands();
 
     // Look up a single command by id.  Returns nullptr if id isn't in the catalog.
@@ -96,7 +96,7 @@ namespace BSCommands
     // Return all commands belonging to a given category.
     std::vector<const CommandInfo*> getCommandsInCategory (Category c);
 
-    // Mouse-modifier reference rows (documentation only — non-editable).
+    // Mouse-modifier reference rows (documentation only - non-editable).
     struct MouseRefRow
     {
         Category     category;
@@ -120,10 +120,10 @@ namespace BSCommands
     juce::File getKeymapFile();
 
     // Write current mappings to keymap.xml.  Called whenever the user edits a
-    // shortcut in the popup.  Safe to call during editing — JUCE buffers writes.
+    // shortcut in the popup.  Safe to call during editing - JUCE buffers writes.
     void saveMappings (const juce::KeyPressMappingSet& set);
 
     // Restore mappings from disk.  Returns false if the file doesn't exist or
-    // failed to parse — caller should leave defaults in place when false.
+    // failed to parse - caller should leave defaults in place when false.
     bool loadMappings (juce::KeyPressMappingSet& set);
 }

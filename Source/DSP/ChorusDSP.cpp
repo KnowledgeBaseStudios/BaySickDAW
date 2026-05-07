@@ -31,7 +31,7 @@ void ChorusDSP::prepare (double sampleRate, int maxBlockSize)
         mLFOPhase[k] = juce::MathConstants<float>::twoPi
                         * static_cast<float>(k) / 3.0f;
 
-    // LR4 crossover — prepare both LP and HP with matching cutoff.
+    // LR4 crossover - prepare both LP and HP with matching cutoff.
     juce::dsp::ProcessSpec spec { sampleRate,
                                   (juce::uint32) juce::jmax(1, maxBlockSize),
                                   2 };
@@ -42,7 +42,7 @@ void ChorusDSP::prepare (double sampleRate, int maxBlockSize)
     mXoLP.reset();
     mXoHP.reset();
 
-    // Smoothed params — 20 ms ramp is fast enough to feel responsive but kills
+    // Smoothed params - 20 ms ramp is fast enough to feel responsive but kills
     // zipper artifacts on fast knob turns.
     const double rampSecs = 0.02;
     mDelaySmoothed .reset(sampleRate, rampSecs);
@@ -80,10 +80,10 @@ float ChorusDSP::evalLFO (int wave, float phase)
         case 1:  // Triangle  (2/π) * asin(sin(phase))
             return (2.0f / juce::MathConstants<float>::pi) * std::asin(std::sin(phase));
 
-        case 2:  // Multi-sine  0.7*sin(φ) + 0.3*sin(3φ) — harmonic blend
+        case 2:  // Multi-sine  0.7*sin(φ) + 0.3*sin(3φ) - harmonic blend
             return 0.7f * std::sin(phase) + 0.3f * std::sin(3.0f * phase);
 
-        case 3:  // Organic  sin(φ) + sin(0.37φ) — non-harmonic, slower secondary wobble
+        case 3:  // Organic  sin(φ) + sin(0.37φ) - non-harmonic, slower secondary wobble
         default:
             return 0.5f * (std::sin(phase) + std::sin(0.37f * phase));
     }
@@ -197,7 +197,7 @@ void ChorusDSP::process (juce::AudioBuffer<float>& buffer)
             const float lfoValL = evalLFO(lfoParams[lfoIdx].wave, phL);
             const float lfoValR = evalLFO(lfoParams[lfoIdx].wave, phR);
 
-            // Per-voice base offset — each of the up-to-6 voices has a unique prime offset.
+            // Per-voice base offset - each of the up-to-6 voices has a unique prime offset.
             const float voiceBase = baseSamplesRaw + voicePrimeOffsetSamples[v];
 
             // Read positions (write − delay), wrapped to [0, mBufSize)

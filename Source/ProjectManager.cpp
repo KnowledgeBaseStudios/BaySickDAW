@@ -14,7 +14,7 @@ juce::File ProjectManager::getDefaultProjectsRoot()
 juce::File ProjectManager::getSettingsFile()
 {
     // 2026-04-23: moved from Roaming APPDATA to Documents\BaySickDAW\ per the
-    // unified user-folder layout — every user-visible artifact (projects,
+    // unified user-folder layout - every user-visible artifact (projects,
     // recordings, presets, settings) lives under Documents\BaySickDAW\. Only
     // the CoreLibrary sample bundle stays in %LOCALAPPDATA% (too heavy to
     // round-trip through user-browsable paths + no reason to back it up with
@@ -257,7 +257,7 @@ bool ProjectManager::newProject (const juce::String& name,
     if (! folder.createDirectory().wasOk()) return false;
     folder.getChildFile ("Samples").createDirectory();
 
-    // Optional template seed — copy template's project.xml + Samples/ as start.
+    // Optional template seed - copy template's project.xml + Samples/ as start.
     if (templatePath.isDirectory() && templatePath != folder)
     {
         auto srcXml = templatePath.getChildFile ("project.xml");
@@ -474,7 +474,7 @@ std::vector<ProjectManager::Listing> ProjectManager::listProjects()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Sample import (P4 — defined here so the API surface is complete in P1)
+// Sample import (P4 - defined here so the API surface is complete in P1)
 // ──────────────────────────────────────────────────────────────────────────────
 juce::String ProjectManager::importSample (const juce::File& externalFile)
 {

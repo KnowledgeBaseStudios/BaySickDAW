@@ -3,7 +3,7 @@
 #include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EngineChainProcessor — Phase G-9 / I-16 (2026-05-03)
+// EngineChainProcessor - Phase G-9 / I-16 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // Non-owning AudioProcessor wrapper that chains processBlock calls through a
 // fixed-order list of stage processors.  Used by InstPage so the audio thread

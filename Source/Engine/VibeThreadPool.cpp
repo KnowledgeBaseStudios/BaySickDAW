@@ -5,7 +5,7 @@
 #include <thread>
 #include <vector>
 
-// moodycamel::ConcurrentQueue — vendored single-header library. Drop the
+// moodycamel::ConcurrentQueue - vendored single-header library. Drop the
 // header into libs/concurrentqueue/concurrentqueue.h before building.
 // CMakeLists.txt adds that folder to the include path. See README in the
 // folder for download instructions.
@@ -54,7 +54,7 @@ void VibeThreadPool::submit (RenderTask* task) noexcept
 
     // moodycamel::ConcurrentQueue::enqueue() never blocks; it allocates a
     // new block internally if the producer's local block is full. The
-    // allocation path is rare (amortized) but it CAN happen — to keep this
+    // allocation path is rare (amortized) but it CAN happen - to keep this
     // path RT-safe, the queue's pre-allocated capacity is sized in the pool
     // constructor (default initial capacity is large enough for our task
     // counts).
@@ -62,7 +62,7 @@ void VibeThreadPool::submit (RenderTask* task) noexcept
 
     // If any worker is sleeping, wake one. Signalling all is harmless (signal
     // is sticky) and cheaper than tracking which specific waker to poke. If
-    // no worker is sleeping, the signal is wasted but not incorrect — the
+    // no worker is sleeping, the signal is wasted but not incorrect - the
     // next worker to enter wait() will return immediately if any signal was
     // queued in the meantime.
     if (mImpl->activeWaiters.load (std::memory_order_acquire) > 0)
@@ -144,7 +144,7 @@ void VibeThreadPool::workerLoop (int workerIndex) noexcept
 
     while (! mShutdown.load (std::memory_order_acquire))
     {
-        // Spin phase — tight loop, no yield. Typical inter-task gap is
+        // Spin phase - tight loop, no yield. Typical inter-task gap is
         // microseconds; we'd rather burn a few cycles than pay a context
         // switch.
         bool gotTask = false;
@@ -160,7 +160,7 @@ void VibeThreadPool::workerLoop (int workerIndex) noexcept
         if (gotTask)
             continue;
 
-        // Sleep phase — register as waiter, recheck the queue once for the
+        // Sleep phase - register as waiter, recheck the queue once for the
         // submit/spin race, then wait on the event.
         mImpl->activeWaiters.fetch_add (1, std::memory_order_release);
 

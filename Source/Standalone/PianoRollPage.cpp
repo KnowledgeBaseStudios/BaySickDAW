@@ -31,7 +31,7 @@ void PianoRollPage::timerCallback()
     const bool song = (isSongMode && isSongMode());
     const double beat = song ? -1.0 : mPlayHead->getCurrentBeat();
 
-    // Drum Kit pump (always alive — even when not the active view, the kit
+    // Drum Kit pump (always alive - even when not the active view, the kit
     // keeps its playhead in sync so switching back is seamless).
     if (mDrumKit) mDrumKit->setPlayheadBeat (beat);
 
@@ -132,7 +132,7 @@ void PianoRollPage::unregisterEngine (EngineId id)
 void PianoRollPage::selectEngine (EngineId id)
 {
     if (id.kind != EngineKind::DrumKit && mRolls.find (id) == mRolls.end())
-        return;   // unknown engine — ignore
+        return;   // unknown engine - ignore
     mActive = id;
     applyActiveVisibility();
     if (onEngineSelected) onEngineSelected (mActive);

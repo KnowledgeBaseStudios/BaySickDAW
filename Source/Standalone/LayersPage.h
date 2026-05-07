@@ -11,9 +11,9 @@
 // ── LayersPage ────────────────────────────────────────────────────────────────
 // One Layers instrument page. Up to 8 instances (kMaxLayerPages).
 //
-// Two sub-tabs (J-6 EQ unification 2026-05-03 — EQ moved to Effects page):
-//   Tab 0 "Player"     — engine selector ComboBox (locks on first pick) + engine editor
-//   Tab 1 "Piano Roll" — PianoRollContainer bound to layerRoll[mPageIndex]
+// Two sub-tabs (J-6 EQ unification 2026-05-03 - EQ moved to Effects page):
+//   Tab 0 "Player"     - engine selector ComboBox (locks on first pick) + engine editor
+//   Tab 1 "Piano Roll" - PianoRollContainer bound to layerRoll[mPageIndex]
 //
 // Engine choices: Harmless | VibePlayer | BaySickSynth
 // Each page owns its engine processor + editor (created on first engine selection).
@@ -39,7 +39,7 @@ public:
     juce::Colour getPageColor() const { return mPageColor; }
     void setUndoContext(const UndoContext& ctx);
 
-    // Sub-tab switching — called by PageMenuBar tab slot buttons
+    // Sub-tab switching - called by PageMenuBar tab slot buttons
     void switchTab(int idx);
 
     // Fired AFTER switchTab applies the change. StandaloneEditor wires this to
@@ -50,7 +50,7 @@ public:
     // StandaloneEditor uses this to add the mixer channel strip.
     std::function<void()> onEngineSelected;
 
-    // Tab name sync — called by StandaloneEditor when the ribbon tab is
+    // Tab name sync - called by StandaloneEditor when the ribbon tab is
     // renamed. Refreshes the piano-roll context label ("{tab} - {engine}").
     void                setTabName(const juce::String& name);
     const juce::String& getTabName() const { return mTabName; }
@@ -70,7 +70,7 @@ public:
     // internal combo callback still uses the same method.
     void selectEngine (const juce::String& engineName);
 
-    // D1.4-fix (c) — per-layer right-click context menu + save/delete.
+    // D1.4-fix (c) - per-layer right-click context menu + save/delete.
     // Mirrors the drum tab pattern.  Lock toggle, Polyphony, Copy / Paste /
     // Duplicate, Choke Group placeholder, Save Patch As, Delete.
     void showContextMenu  (juce::Component* anchor);
@@ -102,7 +102,7 @@ public:
     // D2: fired when the user picks Rename from the right-click context menu.
     // StandaloneEditor wires it to mRibbon->startRename.
     std::function<void()>           onRenameRequested;
-    // 2026-04-26: fired when loadPreset applies a preset — owner renames the
+    // 2026-04-26: fired when loadPreset applies a preset - owner renames the
     // ribbon tab to match the preset's filename (mirrors DrumPage).
     std::function<void(const juce::String& newName)> onSoundNameChanged;
 
@@ -175,7 +175,7 @@ private:
     // APVTS track ID for this page.
     // 2026-04-21: unique "lay_{N}" prefix avoids collision with bass / drum
     //   engines at matching integer pageIndex. Matches engine processor prefix.
-    // §P4.3 B7: midEQPrefix / sideEQPrefix helpers deleted — pre-rack EQ params
+    // §P4.3 B7: midEQPrefix / sideEQPrefix helpers deleted - pre-rack EQ params
     // live on the mixer-strip prefix (mixer_layer_<N>_preeq_*), bound directly
     // by selectEngine().
     juce::String trackId()       const { return "lay_" + juce::String(mPageIndex); }

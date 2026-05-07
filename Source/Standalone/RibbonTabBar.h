@@ -4,23 +4,23 @@
 // ── RibbonTabBar ──────────────────────────────────────────────────────────────
 // Fixed 10-slot tab bar. Each slot represents a page type:
 //
-//   Mixer       — no dropdown, no badge
-//   Effects     — dropdown (Rack / EQ), badge ②
-//   Builder     — dropdown (Patterns / Audio Clips / Automation), badge ③
-//   Clip        — dropdown (instance list + sub-pages + rename/delete; NO add).
+//   Mixer       - no dropdown, no badge
+//   Effects     - dropdown (Rack / EQ), badge ②
+//   Builder     - dropdown (Patterns / Audio Clips / Automation), badge ③
+//   Clip        - dropdown (instance list + sub-pages + rename/delete; NO add).
 //                 Instances are ONLY spawned via drag/drop or upload of audio
-//                 onto Builder — the ribbon dropdown can't create new ones.
+//                 onto Builder - the ribbon dropdown can't create new ones.
 //                 Phase G-2 (2026-04-28).
-//   Vox         — dropdown (instance list + sub-pages + rename/delete; NO add).
+//   Vox         - dropdown (instance list + sub-pages + rename/delete; NO add).
 //                 Instances are ONLY spawned via the "Add Vox Strip" button on
 //                 the Mixer page.  Phase G-4 (2026-04-28).
-//   Inst        — dropdown (instance list + sub-pages + rename/delete; NO add).
+//   Inst        - dropdown (instance list + sub-pages + rename/delete; NO add).
 //                 Instances are ONLY spawned via the "Add Inst Strip" button
 //                 on the Mixer page.  Phase G-4 (2026-04-28).
-//   Layers      — dropdown (instance list + rename/delete/add), dynamic badge
-//   Bass        — dropdown (instance list + rename/delete/add), dynamic badge
-//   Drums       — dropdown (Sounds / EQ), badge ②
-//   PianoRoll   — unified piano-roll page (Drum Kit + every engine's roll),
+//   Layers      - dropdown (instance list + rename/delete/add), dynamic badge
+//   Bass        - dropdown (instance list + rename/delete/add), dynamic badge
+//   Drums       - dropdown (Sounds / EQ), badge ②
+//   PianoRoll   - unified piano-roll page (Drum Kit + every engine's roll),
 //                 black/white piano-key palette; dropdown picks the active
 //                 engine (Drum Kit always at top of list)
 //
@@ -53,21 +53,21 @@ public:
     std::function<void(TabType)>                      onAddTabRequest;   // Layers/Bass add
     std::function<void(TabType, int subPageIndex)>    onSubPageSelected; // Effects/Builder/Drums
     // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry in the Drums dropdown.
-    // Singleton — fires only when no instance currently exists.
+    // Singleton - fires only when no instance currently exists.
     std::function<void()>                             onAddBaySickRustyDrumsRequest;
-    // J-6: 1-instance lock query — set by StandaloneEditor; the dropdown
+    // J-6: 1-instance lock query - set by StandaloneEditor; the dropdown
     // hides "+ Add BaySickRustyDrums" when this returns true.
     std::function<bool()>                             onIsBaySickRustyDrumsActive;
     // K-4 (2026-05-05): "+ Add BaySickGuitars" entry in the Inst dropdown.
     // Multi-instance; fires when the user picks the entry.  Cap is shared
-    // with classic LiveInput Inst pages + BaySickBasses pages — total
+    // with classic LiveInput Inst pages + BaySickBasses pages - total
     // ≤ kMaxInstPages.  RibbonTabBar greys the entry when onIsInstCapReached()
     // returns true.
     std::function<void()>                             onAddBaySickGuitarsRequest;
     // L-3 (2026-05-05): "+ Add BaySickBasses" entry in the Inst dropdown.
     // Same cap-shared semantics as Guitars.
     std::function<void()>                             onAddBaySickBassesRequest;
-    // K-4: shared cap query — true when total Inst-type pages (LiveInput +
+    // K-4: shared cap query - true when total Inst-type pages (LiveInput +
     // BaySickGuitars + BaySickBasses) hits kMaxInstPages.
     std::function<bool()>                             onIsInstCapReached;
     std::function<void(int tabId, const juce::String& newName)> onTabRenamed;
@@ -108,7 +108,7 @@ public:
     // addTab for each saved / default record.
     void clearAllDynamicTabs();
     // Batch 5 (2026-04-25): same as clearAllDynamicTabs but only for one
-    // type — used by Load Kit to wipe Drums without disturbing Layers/Bass.
+    // type - used by Load Kit to wipe Drums without disturbing Layers/Bass.
     void clearTabsOfType (TabType type);
     void renameTab(int tabId, const juce::String& newName);  // programmatic rename (no dialog)
     // D2: opens the rename AlertWindow on the given tab (same dialog the

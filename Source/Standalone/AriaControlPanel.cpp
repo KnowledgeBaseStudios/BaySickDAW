@@ -226,7 +226,7 @@ private:
 };
 
 // ── AriaSlider (K-5 fix #2, 2026-05-05) ─────────────────────────────────────
-// ARIA's <Slider> element — vertical fader with a slot background image and
+// ARIA's <Slider> element - vertical fader with a slot background image and
 // a separate handle image.  Same CC mapping as AriaKnob (0..127) but linear-
 // vertical instead of rotary.  bg fills the bounds; handle is drawn at a
 // position computed from the current value.
@@ -290,7 +290,7 @@ public:
         if (! mHandle.isValid()) return;
 
         // Handle: drawn at native handle dimensions scaled by the slot's
-        // height ratio — preserves the kit author's intended aspect.  Position
+        // height ratio - preserves the kit author's intended aspect.  Position
         // along Y by normalized value (high = top).
         const double normalized = (getValue() - getMinimum())
                                  / juce::jmax (1.0, (getMaximum() - getMinimum()));
@@ -335,7 +335,7 @@ private:
 };
 
 // ── AriaToggle (K-5 fix #2, 2026-05-05) ─────────────────────────────────────
-// ARIA's <OnOffButton> element — 2-frame button (off / on) bound to a CC.
+// ARIA's <OnOffButton> element - 2-frame button (off / on) bound to a CC.
 // Click toggles between 0 (off) and 127 (on).  Image is treated as a 2-frame
 // vertical filmstrip (top half = off, bottom half = on); single-frame images
 // degrade gracefully.
@@ -679,7 +679,7 @@ void AriaControlPanel::rebuildTabBar()
 {
     mTabButtons.clear();
     // K-5 fix #3 (2026-05-05): when the kit ships only the main program XML
-    // (no 03-08 zoom-in pages), suppress the tab strip entirely — a single
+    // (no 03-08 zoom-in pages), suppress the tab strip entirely - a single
     // "Main" button takes vertical space without offering a choice.  The
     // resized() / paint() codepaths skip the tab-bar reservation when there
     // are no buttons, so the panel reclaims the full area below the toolbar.
@@ -814,7 +814,7 @@ void AriaControlPanel::parseGuiXml (const juce::File& xmlFile)
         {
             // K-5 fix #2 (2026-05-05): vertical fader.  bg = slot image,
             // handle = thumb image.  Guitar / bass kits use this for vibrato
-            // depth, mute, feedback, releases — every CC that the kit author
+            // depth, mute, feedback, releases - every CC that the kit author
             // wants represented as a fader instead of a knob.
             const int  cc = el->getIntAttribute ("param", -1);
             if (cc < 0) continue;
@@ -823,7 +823,7 @@ void AriaControlPanel::parseGuiXml (const juce::File& xmlFile)
             const auto bg     = loadImage (bgName);
             const auto handle = loadImage (handleName);
 
-            // Use the XML-declared rect verbatim — the fader's native size IS
+            // Use the XML-declared rect verbatim - the fader's native size IS
             // its slot dimensions (e.g. w=20 h=128 for vertical guitar faders).
             auto slider = std::make_unique<AriaSlider> (mBinding, cc, bg, handle, nativeRect);
             addAndMakeVisible (*slider);
@@ -913,7 +913,7 @@ void AriaControlPanel::paint (juce::Graphics& g)
     const auto b = getLocalBounds().toFloat();
     if (b.isEmpty() || mNativeW <= 0 || mNativeH <= 0) return;
 
-    // K-5 fix #3: match resized() — no tab buttons → no reserved tab strip.
+    // K-5 fix #3: match resized() - no tab buttons → no reserved tab strip.
     const int activeTabBarH = mTabButtons.empty() ? 0 : kTabBarHeight;
     const auto drawArea = computePanelDrawArea (b, mNativeW, mNativeH, activeTabBarH);
     const float fitW = drawArea.getWidth();

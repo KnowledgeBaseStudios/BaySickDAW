@@ -142,7 +142,7 @@ public:
 
         auto b = getLocalBounds().toFloat();
 
-        // White dot — centred in the dot zone (left of the arrow strip)
+        // White dot - centred in the dot zone (left of the arrow strip)
         auto dotZone = b.withTrimmedRight((float) kArrowZoneW);
         const float dotR = juce::jmin(dotZone.getWidth(), dotZone.getHeight()) * 0.30f;
         const float cx   = dotZone.getCentreX();
@@ -171,7 +171,7 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MetronomeButton (D-5 polish, 2026-04-26)
-// Custom-painted icon — classic mechanical metronome shape (trapezoidal body
+// Custom-painted icon - classic mechanical metronome shape (trapezoidal body
 // + vertical pendulum + small weight).  Replaces the prior "METRO" text
 // label.  Editor drives toggle state manually (matches Play/Record pattern).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ public:
 // MetroArrowButton (D-5 polish, 2026-04-26)
 // Custom-painted downward chevron, matching the ▾ glyph used on ribbon tabs.
 // Was a TextButton with the UTF-8 ▾ as its label, but the rendered glyph was
-// invisible at the available font size — this paints the path explicitly.
+// invisible at the available font size - this paints the path explicitly.
 // ─────────────────────────────────────────────────────────────────────────────
 class MetroArrowButton : public juce::TextButton
 {
@@ -246,7 +246,7 @@ public:
         getLookAndFeel().drawButtonBackground(g, *this,
             findColour(juce::TextButton::buttonColourId), isOver, isDown);
 
-        // Filled triangle pointing down — same convention as the ribbon tabs.
+        // Filled triangle pointing down - same convention as the ribbon tabs.
         auto b = getLocalBounds().toFloat();
         const float cx = b.getCentreX();
         const float cy = b.getCentreY();
@@ -262,7 +262,7 @@ public:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LoopModeButton — custom-painted toggle for play-through (→|) vs loop (↻).
+// LoopModeButton - custom-painted toggle for play-through (→|) vs loop (↻).
 // Default font lacks the unicode glyphs we'd want, so we paint icons directly.
 // ─────────────────────────────────────────────────────────────────────────────
 class LoopModeButton : public juce::TextButton
@@ -278,7 +278,7 @@ public:
     {
         auto b   = getLocalBounds().toFloat().reduced(1.f);
         bool on  = getToggleState();
-        // Background — match other transport buttons' look
+        // Background - match other transport buttons' look
         g.setColour(on ? VC::Purple.withAlpha(0.5f) : VC::Accent);
         g.fillRoundedRectangle(b, 3.f);
         g.setColour(juce::Colour(0xff333333));
@@ -295,7 +295,7 @@ public:
             const float r  = juce::jmin(inner.getWidth(), inner.getHeight()) * 0.40f;
 
             juce::Path arc;
-            // Arc from ~30° to ~330° (270° sweep) — leaves a gap for the arrow
+            // Arc from ~30° to ~330° (270° sweep) - leaves a gap for the arrow
             arc.addCentredArc(cx, cy, r, r, 0.f,
                               juce::degreesToRadians(30.f),
                               juce::degreesToRadians(330.f),
@@ -363,7 +363,7 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
         mMetronomeBtn.reset(m.release());
     }
 
-    // 2026-04-26 (D-5 polish): custom path-painted chevron — the previous
+    // 2026-04-26 (D-5 polish): custom path-painted chevron - the previous
     // text-button rendered the UTF-8 ▾ at an invisible size.
     {
         auto a = std::make_unique<MetroArrowButton>();
@@ -380,7 +380,7 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
     mSongLoopBtn = std::make_unique<LoopModeButton>();
     mSongLoopBtn->setMouseClickGrabsKeyboardFocus(false);
     mSongLoopBtn->setTooltip("Song playback: arrow + bar = play to end and stop / circle = loop");
-    // 2026-04-26: default to loop (🔁) — was play-through (→).  Pairs with
+    // 2026-04-26: default to loop (🔁) - was play-through (→).  Pairs with
     // the matching default in `VibeSynthProcessor::mSongLoopMode`.
     mSongLoopBtn->setToggleState(true, juce::dontSendNotification);
     addAndMakeVisible(*mSongLoopBtn);
@@ -445,7 +445,7 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
 
     mSongLoopBtn->onClick = [this] {
         // setClickingTogglesState(true) in LoopModeButton already flipped the
-        // state by the time onClick fires — just read the new state and
+        // state by the time onClick fires - just read the new state and
         // notify. Don't flip again or the two flips will cancel out and the
         // button will appear inert.
         const bool loop = mSongLoopBtn->getToggleState();
@@ -524,7 +524,7 @@ GlobalTransportBar::~GlobalTransportBar()
 double GlobalTransportBar::getBPM() const
 {
     // 2026-04-30: clamp to range instead of snapping to 120.  Old behaviour
-    // silently dropped a typed value of 19 or 301 to 120 with no feedback —
+    // silently dropped a typed value of 19 or 301 to 120 with no feedback -
     // user couldn't tell whether their input was accepted.  Clamp keeps the
     // intent (limit value to musical range) but preserves the closest legal
     // value rather than reverting to default.
@@ -583,7 +583,7 @@ void GlobalTransportBar::toggleMetronome()
 {
     if (mMetronomeBtn == nullptr) return;
     const bool on = ! mMetronomeBtn->getToggleState();
-    // dontSendNotification — the button's own onClick also toggles + fires
+    // dontSendNotification - the button's own onClick also toggles + fires
     // onMetronomeToggle, so sendNotification would double-toggle and leave the
     // visual state out of sync with the listener payload.
     mMetronomeBtn->setToggleState(on, juce::dontSendNotification);
@@ -770,7 +770,7 @@ void GlobalTransportBar::paint(juce::Graphics& g)
 {
     auto b = getLocalBounds().toFloat();
 
-    // LRX-14: Brushed aluminum base — dark silver with subtle top-lit gradient
+    // LRX-14: Brushed aluminum base - dark silver with subtle top-lit gradient
     juce::ColourGradient baseGrad(
         juce::Colour(0xff22252A), 0.f, b.getY(),
         juce::Colour(0xff1A1D21), 0.f, b.getBottom(), false);
@@ -831,7 +831,7 @@ void GlobalTransportBar::resized()
     if (mSongLoopBtn) mSongLoopBtn->setBounds(b.removeFromLeft(28).reduced(1, 1));
     b.removeFromLeft(space);
     // 2026-04-26 (D-5 polish): button widths tightened around the icon glyphs
-    // (metronome 30, arrow 18).  kControlsWidth stays at 520 — the saved
+    // (metronome 30, arrow 18).  kControlsWidth stays at 520 - the saved
     // ~40 px reserves space for the keyboard-MIDI button slot (D-4).
     mMetronomeBtn->setBounds(b.removeFromLeft(30).reduced(1, 1));
     if (mMetroArrowBtn) mMetroArrowBtn->setBounds(b.removeFromLeft(18).reduced(1, 1));

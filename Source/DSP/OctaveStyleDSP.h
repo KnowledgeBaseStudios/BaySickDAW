@@ -4,7 +4,7 @@
 #include <array>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OctaveStyleDSP — Phase I-7 (2026-05-02)
+// OctaveStyleDSP - Phase I-7 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // OC Style Octave pedal.  Adds parallel pitch-shifted copies (+1 oct, -1 oct,
 // -2 oct) on top of the dry signal.  Two modes:

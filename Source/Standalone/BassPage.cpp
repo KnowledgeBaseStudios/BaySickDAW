@@ -18,7 +18,7 @@ BassPage::BassPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
     buildPlayerTab();
     // 2026-04-26 (step 2 commit 3): Piano Roll lives on PianoRollPage now.
     // mPianoRoll stays null; menu-bar pill redirects via the editor.
-    // J-6 EQ unification (2026-05-03): EQ sub-tab removed — pre + post EQ
+    // J-6 EQ unification (2026-05-03): EQ sub-tab removed - pre + post EQ
     // for this insert now live exclusively on the Effects page.
 
     switchTab(0);
@@ -105,7 +105,7 @@ void BassPage::buildPianoRollTab()
     refreshPianoRollContextLabel();
 }
 
-// J-6 EQ unification (2026-05-03): buildEQTab removed — pre + post EQ now
+// J-6 EQ unification (2026-05-03): buildEQTab removed - pre + post EQ now
 // live exclusively on the Effects page (mixer_bass_<N>_preeq_* / mixer_bass_<N>_*).
 
 // ── PlayHead ──────────────────────────────────────────────────────────────────
@@ -247,7 +247,7 @@ void BassPage::timerCallback()
     // J-6 EQ unification (2026-05-03): page-level EQ display removed; the
     // Effects-page Pre EQ tab handles its own syncFromDSP polling now.
 
-    // Update piano roll playhead — hidden in Song mode (playhead lives on Builder)
+    // Update piano roll playhead - hidden in Song mode (playhead lives on Builder)
     if (mPlayHead && mPianoRoll)
     {
         const bool songMode = mProcessor.isSongMode();
@@ -319,7 +319,7 @@ void BassPage::refreshPianoRollContextLabel()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// D1.4-fix (c) — per-bass right-click context menu + save / delete
+// D1.4-fix (c) - per-bass right-click context menu + save / delete
 // (mirror of LayersPage; see that file for design notes)
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): sBassClipboard removed (Copy/Paste menu items dropped).
@@ -334,7 +334,7 @@ static juce::File bassEnginePresetsDir (const juce::String& engineName)
 }
 
 // 2026-04-25 (Load Preset support).
-// Top-level engine presets directory — siblings under <Documents>/BaySickDAW/
+// Top-level engine presets directory - siblings under <Documents>/BaySickDAW/
 // Presets/<engineName>/ are factory bundles; "My Presets" is user-saved.
 static juce::File bassEngineRootPresetsDir (const juce::String& engineName)
 {
@@ -344,7 +344,7 @@ static juce::File bassEngineRootPresetsDir (const juce::String& engineName)
                .getChildFile (engineName);
 }
 
-// Engine paramPrefix accessor — returns this page's local prefix for the
+// Engine paramPrefix accessor - returns this page's local prefix for the
 // currently-loaded engine.  Used by loadPreset to rewrite preset XML's param
 // IDs so they bind to this tab's track regardless of where saved.
 static juce::String bassEngineLocalPrefix (juce::AudioProcessor* proc)
@@ -423,10 +423,10 @@ static void bassSubstituteEnginePrefixInBinary (juce::AudioProcessor* proc,
     }
 }
 
-// Recursive XML-preset walker — folders become real cascading submenus.
+// Recursive XML-preset walker - folders become real cascading submenus.
 // Matches the sample-picker UX (addLibDirToMenuDP in DrumPage.cpp).
 // 2026-04-26: skipDrumFolders filters out top-level folders matching
-// SampleLibrary::isDrumPack — used for BaySickPlayer in Bass (melodic) context.
+// SampleLibrary::isDrumPack - used for BaySickPlayer in Bass (melodic) context.
 static void addBassPresetDirToMenu (juce::PopupMenu& menu,
                                      const juce::File& dir,
                                      int kPresetBase,
@@ -472,16 +472,16 @@ void BassPage::showContextMenu (juce::Component* anchor)
     constexpr int kIdDuplicate = 12;
     // G-6 (2026-04-29): Copy/Paste menu items dropped.
     constexpr int kIdSaveAs    = 20;
-    // D3: choke-group submenu — 200 = None, 201..216 = groups 1..16.
+    // D3: choke-group submenu - 200 = None, 201..216 = groups 1..16.
     constexpr int kIdChokeBase = 200;
-    // 2026-04-25: Load Preset submenu — 500 + i indexes into mPresetXmls[].
+    // 2026-04-25: Load Preset submenu - 500 + i indexes into mPresetXmls[].
     constexpr int kIdLoadPresetBase = 500;
     constexpr int kIdDelete    = 99;
 
     juce::PopupMenu menu;
     menu.addItem (kIdLock, "Lock Bass", true, mLocked);
 
-    // Polyphony — engine-specific param.
+    // Polyphony - engine-specific param.
     //   BaySickBass   → tk_bas_N_bsb_voiceMode  (0=poly, 1=mono)
     //   BaySickPlayer → tk_bas_N_bsp_voiceCap   (1=mono, 8=poly)
     //   Harmless      → polyphonic-only (n/a)
@@ -514,7 +514,7 @@ void BassPage::showContextMenu (juce::Component* anchor)
     menu.addItem (kIdDuplicate, "Duplicate Bass (new tab)", ! mEngineType.isEmpty());
 
     menu.addSeparator();
-    // D3: Choke Group submenu — global cross-engine cut bus.
+    // D3: Choke Group submenu - global cross-engine cut bus.
     {
         const juce::String prefix = "mixer_bass_" + juce::String (mPageIndex) + "_chokeGroup";
         int curGroup = 0;
@@ -533,13 +533,13 @@ void BassPage::showContextMenu (juce::Component* anchor)
     const bool canSave = mEngineProcessor != nullptr && ! mEngineType.isEmpty();
     menu.addItem (kIdSaveAs, "Save Current Patch As...", canSave);
 
-    // ── Load Preset submenu — walks Documents/BaySickDAW/Presets/<engineName>/
+    // ── Load Preset submenu - walks Documents/BaySickDAW/Presets/<engineName>/
     //    with real cascading submenus per folder (matches sample-picker UX).
     juce::Array<juce::File> presetXmls;
     {
         juce::PopupMenu loadSub;
         const auto root = bassEngineRootPresetsDir (mEngineType);
-        // 2026-04-26: BaySickPlayer presets include drum subfolders — skip
+        // 2026-04-26: BaySickPlayer presets include drum subfolders - skip
         // them here (Bass page is melodic context).  Other engines no-op.
         const bool skipDrums = (mEngineType == "BaySickPlayer");
         if (root.isDirectory() && ! mEngineType.isEmpty())
@@ -717,8 +717,8 @@ void BassPage::loadPreset (const juce::File& xml)
     // F-2 fix (2026-04-26): localPrefix format is `tk_<row>_<idx>_<engineTag>_`
     // (e.g. "tk_bas_1_bsb_").  The earlier 3-segment-style computation
     // returned the index segment ("_1_") instead of the engine tag ("_bsb_"),
-    // so the substring search against loaded PARAM ids — which carry a
-    // different page index ("_0_" from the saved slot) — never matched and
+    // so the substring search against loaded PARAM ids - which carry a
+    // different page index ("_0_" from the saved slot) - never matched and
     // the substitution silently no-op'd.  Engine sounded default after load.
     const int trailingUnder = localPrefix.length() - 1;
     if (trailingUnder < 1) return;
@@ -759,7 +759,7 @@ void BassPage::loadPreset (const juce::File& xml)
 
     // 2026-04-26: BaySickPlayer factory presets carry a sibling <Sample>
     // element pointing at an SFZ in the Core Library.  Resolve and load
-    // it here.  No normalizeRootNotes — preserves SFZ's natural keymap
+    // it here.  No normalizeRootNotes - preserves SFZ's natural keymap
     // for melodic playback (only DrumPage normalizes to 60).
     if (bspSample)
         if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
@@ -781,7 +781,7 @@ void BassPage::loadPreset (const juce::File& xml)
         }
 
     // Use the preset's filename as the tab's display name.  Bass/Layers
-    // don't have a separate "sound name" field like DrumPage — tab name +
+    // don't have a separate "sound name" field like DrumPage - tab name +
     // engine type is the only display surface.
     const juce::String newName = xml.getFileNameWithoutExtension();
     setTabName (newName);

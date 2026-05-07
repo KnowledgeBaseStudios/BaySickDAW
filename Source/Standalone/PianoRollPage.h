@@ -9,8 +9,8 @@ class StandalonePlayHead;
 // ─────────────────────────────────────────────────────────────────────────────
 // PianoRollPage
 // ─────────────────────────────────────────────────────────────────────────────
-// 2026-04-26: top-level page that consolidates every piano-roll-style view —
-// Drum Kit, per-drum piano rolls, and per-engine (Layers/Bass) piano rolls —
+// 2026-04-26: top-level page that consolidates every piano-roll-style view -
+// Drum Kit, per-drum piano rolls, and per-engine (Layers/Bass) piano rolls -
 // behind a single ribbon slot.  Single source of truth: PianoRollPage owns
 // every PianoRollContainer + the DrumKitContainer.  Engine pages
 // (Layers/Bass/Drum) navigate here via a Piano Roll nav button instead of
@@ -19,13 +19,13 @@ class StandalonePlayHead;
 
 // 2026-04-28 (Phase G-2): Clip added.  Sampler-style instrument fed by piano-
 // roll notes; one Clip engine per ClipsPage.
-// 2026-04-28 (Phase G-4): Vox + Inst added.  Same shape as Clip — engine
+// 2026-04-28 (Phase G-4): Vox + Inst added.  Same shape as Clip - engine
 // picker per page, piano-roll triggering through the unified PianoRollPage.
-// 2026-05-03 (Phase J-2): BaySickRustyDrums added — distinct from the
+// 2026-05-03 (Phase J-2): BaySickRustyDrums added - distinct from the
 // existing DrumKit value which represents the composited DrumKitGrid view.
 // BaySickRustyDrums is the singleton sfizz-driven drum-kit engine that
 // auto-spawns N mixer strips (one per kit channel).
-// 2026-05-05 (Phase K-1 / L-1): BaySickGuitars + BaySickBasses added —
+// 2026-05-05 (Phase K-1 / L-1): BaySickGuitars + BaySickBasses added -
 // per-Inst-page sfizz-driven melodic engines.  Multi-instance (up to 20
 // shared with classic live-input Inst pages); EngineId::index = Inst page
 // slot index.  Plural BaySickBasses to disambiguate from EngineKind::Bass
@@ -48,7 +48,7 @@ struct EngineId
 struct PianoRollConnection
 {
     std::function<PianoRollData*()>           dataAccessor;
-    // C.5b: optional pattern-TS provider — returns current pattern's
+    // C.5b: optional pattern-TS provider - returns current pattern's
     // intrinsic (num,den) so the page can refresh bar-line spacing when the
     // active pattern changes or the user right-clicks "Set Time Signature".
     std::function<void(int& outNum, int& outDen)>  patternTimeSigProvider;
@@ -66,7 +66,7 @@ struct PianoRollConnection
     // J-7b: top-of-view default MIDI note when this engine is first selected.
     // -1 = no preference (use the page's existing default).
     int                                        defaultTopNote { -1 };
-    // J-7b: paint every keyboard row as a white key (drum kit — sharps
+    // J-7b: paint every keyboard row as a white key (drum kit - sharps
     // have no musical meaning, labels need to be readable everywhere).
     bool                                       allKeysWhite { false };
 };
@@ -82,7 +82,7 @@ public:
     void resized ()                  override;
     void timerCallback ()            override;
 
-    // ── Drum Kit (singleton — always present at the top of the dropdown) ───
+    // ── Drum Kit (singleton - always present at the top of the dropdown) ───
     DrumKitContainer* getDrumKitContainer() { return mDrumKit.get(); }
 
     // ── Engine registry (Layers/Bass/Drum piano rolls) ─────────────────────
@@ -109,7 +109,7 @@ public:
     std::function<std::vector<DropdownEntry>()> dropdownEnumerator;
 
     // Editor wires this to be notified after the user picks an engine in the
-    // dropdown — typically to refresh the page-menu-bar pill label.
+    // dropdown - typically to refresh the page-menu-bar pill label.
     std::function<void(EngineId)> onEngineSelected;
 
     // Builds a juce::PopupMenu of every entry (DrumKit + dropdownEnumerator())

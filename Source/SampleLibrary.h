@@ -68,7 +68,7 @@ public:
     // see their own samples first; a Core Library shortcut lives inside so
     // they can drill into factory content without leaving the dialog.
     static juce::File getUserSamplesDir();
-    // Creates the folder + Core Library shortcut if missing.  Idempotent —
+    // Creates the folder + Core Library shortcut if missing.  Idempotent -
     // safe to call repeatedly (and on every startup).
     static void       ensureUserSamplesDir();
 

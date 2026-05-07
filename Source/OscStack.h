@@ -7,7 +7,7 @@
 #include "SynthFilter.h"
 #include "LFO.h"
 
-// One oscillator layer — holds all DSP for a single osc slot
+// One oscillator layer - holds all DSP for a single osc slot
 struct OscLayer
 {
     // DSP

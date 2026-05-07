@@ -13,14 +13,14 @@ class RenderTask;
 // Instantiated as a value member in PluginProcessor's constructor; destroyed
 // when PluginProcessor is destroyed. Worker threads are spawned in the pool
 // constructor and joined in the destructor. prepareToPlay does NOT recreate
-// the pool — sample-rate / block-size changes only call clearQueues(). This
+// the pool - sample-rate / block-size changes only call clearQueues(). This
 // avoids dropouts and host crashes that come from joining + spawning threads
 // inside prepareToPlay.
 //
 // Wake protocol (hybrid spin/sleep)
 // ---------------------------------
 // 1. Worker spins on tryPop() for kWorkerSpinIterations iterations. Tight
-//    loop, no yield — typical task gap is microseconds, well under the spin
+//    loop, no yield - typical task gap is microseconds, well under the spin
 //    budget.
 // 2. On miss, the worker sleeps on its private juce::WaitableEvent.
 // 3. Main thread / other workers calling submit() signal the wakers, which
@@ -63,14 +63,14 @@ public:
     // juce::Time::getMillisecondCounterHiRes() reaches deadlineMillisHiRes
     // AND the queue is empty.  Returns true if `done` fired normally.
     // The deadline is only checked on idle (queue empty) iterations, so a
-    // task that runs forever still hangs the call — this catches deadlocks
+    // task that runs forever still hangs the call - this catches deadlocks
     // (workers all blocked waiting on each other, queue empty), not runaway
     // tasks.  RT-safe.
     bool runUntilOrTimeout (std::atomic<bool>& done,
                              double              deadlineMillisHiRes) noexcept;
 
     // Drain any tasks left in the queue. Safe to call from prepareToPlay.
-    // Workers are NOT joined — they continue running and will idle in their
+    // Workers are NOT joined - they continue running and will idle in their
     // wait state until new tasks arrive.
     void clearQueues() noexcept;
 

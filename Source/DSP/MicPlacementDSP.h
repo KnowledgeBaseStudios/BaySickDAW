@@ -2,7 +2,7 @@
 #include <JuceHeader.h>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MicPlacementDSP — H-6d (2026-05-02)
+// MicPlacementDSP - H-6d (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // Virtual mic placement model.  Lives on BaySickNAMIRProcessor after
 // MicSimDSP and before the master output.  Models three things:

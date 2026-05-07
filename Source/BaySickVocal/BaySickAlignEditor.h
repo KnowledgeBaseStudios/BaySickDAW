@@ -4,7 +4,7 @@
 class BaySickVocalProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickAlignEditor — H-6c (2026-05-02)
+// BaySickAlignEditor - H-6c (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // Full-page VocAlign-clone offline alignment editor.  Lives inside the
 // BaySickVocalEditor's "BaySickAlign" sub-tab.  Three-lane layout

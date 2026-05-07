@@ -16,11 +16,11 @@
 //     > 1 → time expand    (project is slower, clip lengthened)
 //     = 1 → passthrough
 //
-// Usage (all calls on same thread — audio thread):
+// Usage (all calls on same thread - audio thread):
 //   1. setStretchRatio(sourceBPM / projectBPM)
-//   2. push(fileAudio, startSample, numSamples)   — feed raw file samples
-//   3. pull(output, startSample, numSamples)       — get stretched output
-//   4. reset()                                      — on transport seek / loop
+//   2. push(fileAudio, startSample, numSamples)   - feed raw file samples
+//   3. pull(output, startSample, numSamples)       - get stretched output
+//   4. reset()                                      - on transport seek / loop
 //
 // Latency: kFFTSize - kHopSize = 1536 samples at the file sample rate.
 
@@ -29,7 +29,7 @@ class PhaseVocoder
 public:
     static constexpr int kFFTOrder = 11;            // 2^11 = 2048
     static constexpr int kFFTSize  = 1 << kFFTOrder;
-    static constexpr int kHopSize  = kFFTSize / 4;  // 512 — 75 % overlap
+    static constexpr int kHopSize  = kFFTSize / 4;  // 512 - 75 % overlap
     static constexpr int kNumBins  = kFFTSize / 2 + 1;
 
     explicit PhaseVocoder (int numChannels);
@@ -74,8 +74,8 @@ private:
         int inAvail { 0 };
 
         // ── Phase tracking ────────────────────────────────────────────────
-        std::vector<float> lastPhase;   // [kNumBins] — previous frame's phase
-        std::vector<float> phaseAccum;  // [kNumBins] — accumulated synthesis phase
+        std::vector<float> lastPhase;   // [kNumBins] - previous frame's phase
+        std::vector<float> phaseAccum;  // [kNumBins] - accumulated synthesis phase
 
         // ── Output OLA buffer ─────────────────────────────────────────────
         // Linear (non-circular) with absolute counters so OLA indexing is simple.

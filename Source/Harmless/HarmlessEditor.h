@@ -12,12 +12,12 @@
 
 // ── HarmlessEditor ────────────────────────────────────────────────────────────
 // Full single-view dense layout: 960 × 620
-// No Basic/Advanced toggle — all controls visible.
+// No Basic/Advanced toggle - all controls visible.
 //
 // Layout:
-//   Header bar (36 px) — preset button, title
-//   Top row  (304 px) — [Timbre/Mod|Unison|Filter+FX]
-//   Bottom row (268 px) — [Global/AmpEnv/XYZ/Strum | ModEditor]
+//   Header bar (36 px) - preset button, title
+//   Top row  (304 px) - [Timbre/Mod|Unison|Filter+FX]
+//   Bottom row (268 px) - [Global/AmpEnv/XYZ/Strum | ModEditor]
 // ─────────────────────────────────────────────────────────────────────────────
 class HarmlessEditor : public juce::AudioProcessorEditor,
                        private juce::ValueTree::Listener

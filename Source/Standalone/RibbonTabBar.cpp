@@ -74,7 +74,7 @@ RibbonTabBar::RibbonTabBar()
     addFixed(TabType::Builder,   "Builder");
     // 2026-04-26: PianoRoll fixed slot.  Layers/Bass/Drums dynamic instances
     // are inserted between Builder and PianoRoll by StandaloneEditor's
-    // create...Page() calls — addTab() pushes them at the end of mTabs but the
+    // create...Page() calls - addTab() pushes them at the end of mTabs but the
     // ribbon's slot ordering uses slotType() and a per-type index lookup,
     // not raw mTabs order.  Adding PianoRoll here keeps the slot fixed at
     // index 6 regardless of how many dynamic tabs exist.
@@ -140,7 +140,7 @@ void RibbonTabBar::closeTab(int tabId)
          && type != TabType::Drums  && type != TabType::Clip
          && type != TabType::Vox    && type != TabType::Inst) return;
 
-        // Never delete the last instance of a type — EXCEPT for Clip / Vox /
+        // Never delete the last instance of a type - EXCEPT for Clip / Vox /
         // Inst, all of which can legitimately be at zero (empty-state page).
         const bool zeroAllowed = (type == TabType::Clip
                                || type == TabType::Vox
@@ -403,7 +403,7 @@ void RibbonTabBar::showDropdown(int slotIndex)
     case TabType::Clip:
     case TabType::Vox:
     case TabType::Inst:
-        // G-6 (2026-04-29): always show the dropdown — even at 0 instances —
+        // G-6 (2026-04-29): always show the dropdown - even at 0 instances -
         // so the +Add entry is reachable.  showInstanceDropdown handles the
         // 0-instance case by showing only the +Add (skipping Pages/Rename/
         // Delete which have no active instance to operate on).
@@ -468,10 +468,10 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
 
     // G-6 (2026-04-29): Pages/Rename/Delete are only meaningful when at least
     // one instance exists.  Skip them at count == 0 so the dropdown shows
-    // ONLY the +Add (clean UX — nothing to navigate to or rename otherwise).
+    // ONLY the +Add (clean UX - nothing to navigate to or rename otherwise).
     if (count > 0)
     {
-        // List all instances — tick mark on the active one, "[L] " prefix if locked
+        // List all instances - tick mark on the active one, "[L] " prefix if locked
         for (auto& tab : mTabs)
         {
             if (tab.type == type)
@@ -483,14 +483,14 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
 
         m.addSeparator();
 
-        // Sub-page navigation — opens the active instance and switches to that sub-tab
+        // Sub-page navigation - opens the active instance and switches to that sub-tab
         // Negative IDs reserved for menu actions: -1/-2/-3 (rename/delete/add) and
         // -10..-13 (sub-page items) so we can disambiguate from instance IDs.
         // Drums has 4 sub-tabs (Drum Kit added in D2); Layers/Bass have 3.
         // Note: PopupMenu has no addSectionHeading; use a disabled "Pages:" item.
         m.addItem(-99, "Pages:", false /* enabled */, false);
         // J-6 EQ unification (2026-05-03): EQ sub-page item removed from
-        // Drums/Layers/Bass/Clip dropdowns — pre + post EQ for every strip
+        // Drums/Layers/Bass/Clip dropdowns - pre + post EQ for every strip
         // now live exclusively on the Effects page.  Vox/Inst keep "EQ"
         // because BaySickVocalEditor still hosts the Pre Rack EQ as one of
         // its internal tabs (deferred clean-up).
@@ -540,7 +540,7 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                           :                             "+ Add New Drum";
     m.addItem(-3, addLabel);
 
-    // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry — only on the Drums
+    // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry - only on the Drums
     // dropdown, only when the singleton isn't already spawned (1-instance lock).
     if (type == TabType::Drums)
     {
@@ -551,7 +551,7 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
     }
 
     // K-4 / L-3 (2026-05-05): "+ Add BaySickGuitars" + "+ Add BaySickBasses"
-    // entries — only on the Inst dropdown.  Disabled when the shared 20-page
+    // entries - only on the Inst dropdown.  Disabled when the shared 20-page
     // cap is reached (live-input Inst + BaySickGuitars + BaySickBasses
     // combined ≤ kMaxInstPages).
     if (type == TabType::Inst)
@@ -593,7 +593,7 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                 // D2: route through the page's requestDelete() (Save & Delete /
                 // Delete Anyway / Cancel for saveable engines).  Falls back to
                 // the ribbon's own primitive confirm only if no handler is
-                // wired (defensive — StandaloneEditor wires this in ctor).
+                // wired (defensive - StandaloneEditor wires this in ctor).
                 if (onTabDeleteRequested)
                 {
                     onTabDeleteRequested (activeId);
@@ -641,7 +641,7 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                 // Sub-page item: open the active instance, then notify the
                 // editor to switch its sub-tab.
                 // Drums (D2): -10=DrumKit(0), -11=Player(1), -12=PianoRoll(2), -13=EQ(3).
-                // Vox/Inst (G-4): -10=Player(0), -11=EQ(1) — no Piano Roll.
+                // Vox/Inst (G-4): -10=Player(0), -11=EQ(1) - no Piano Roll.
                 // Layers/Bass/Clip: -10=Player(0), -11=PianoRoll(1), -12=EQ(2).
                 int tabId = getActiveTabForType(type);
                 if (tabId >= 0)
@@ -656,7 +656,7 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
             }
             else
             {
-                // Instance selected — switch to it
+                // Instance selected - switch to it
                 mSelectedId = result;
                 if (auto* tab = getTabById(result))
                     mLastUsedByType[tab->type] = result;
@@ -712,7 +712,7 @@ void RibbonTabBar::startRename(int tabId)
 // ── Paint ────────────────────────────────────────────────────────────────────
 void RibbonTabBar::paint(juce::Graphics& g)
 {
-    // No background fill — the parent transport bar's brushed-aluminum shows through.
+    // No background fill - the parent transport bar's brushed-aluminum shows through.
 
     for (int s = 0; s < kNumSlots; ++s)
     {

@@ -67,7 +67,7 @@ void PassiveStripTask::run()
         // Predecessors have been summed into blockView above; processBus runs
         // the per-bus chain (preEq → rack → postEq → polarity/width → fader
         // × mute × solo → pan → peak meter) in-place.  Caller is responsible
-        // for routing the result downstream — handled by the dispatcher's
+        // for routing the result downstream - handled by the dispatcher's
         // pull model: consumer tasks read mOutputBuffer directly.
         //
         // 2026-05-07 (Batch 9c follow-up): pick the correct solo flag per

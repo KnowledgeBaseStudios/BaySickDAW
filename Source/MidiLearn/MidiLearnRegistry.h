@@ -5,7 +5,7 @@
 #include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MidiLearnRegistry — Phase I-3b (2026-05-02)
+// MidiLearnRegistry - Phase I-3b (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // App-wide MIDI Learn registry.  Maps incoming hardware MIDI events to APVTS
 // param updates so the user can right-click any knob, pick "MIDI Learn", and
@@ -163,7 +163,7 @@ private:
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MidiLearnEventQueue — MIDI thread -> audio thread bridge
+// MidiLearnEventQueue - MIDI thread -> audio thread bridge
 // ─────────────────────────────────────────────────────────────────────────────
 // JUCE's MidiInputCallback runs on a per-device MIDI input thread.  We need
 // each event tagged with its source-device name when dispatch reaches the

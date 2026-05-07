@@ -34,7 +34,7 @@ struct KitChannel
 };
 
 // J-7b (2026-05-03, refactored): one entry per `#define $name <midi>` in the
-// kit's `keymap.sfz`.  Notes are reported at their NATIVE MIDI value — the
+// kit's `keymap.sfz`.  Notes are reported at their NATIVE MIDI value - the
 // piano roll speaks raw kit MIDI (no anchoring, no remap layer).  Variant
 // masters (brush/mallet/perc/sidestick/stir/release) all light up here
 // because sfizz has them loaded via the parent SFZ's #include chain.
@@ -116,7 +116,7 @@ public:
     }
 
     // J-8b (2026-05-04): hi-hat pedal state.  Drives CC4 on the sfizz
-    // engine (the kit's pedal-position controller — 0 = closed pedal,
+    // engine (the kit's pedal-position controller - 0 = closed pedal,
     // 127 = open pedal per Big Rusty Drums' cc_ranges).  Callable from
     // the UI thread; sfizz's cc() is documented as message-thread safe
     // when not concurrently rendering.
@@ -127,7 +127,7 @@ public:
     // channel into mMultiOutScratch via sfizz's multi-output SFZ routing.
     // PluginProcessor calls processStrips() to fan each strip through its
     // dedicated InsertNode.  After that call, getStripBuffer(i) returns a
-    // 2-channel view into the i-th stereo pair (read-only — copy-out).
+    // 2-channel view into the i-th stereo pair (read-only - copy-out).
     // The standard processBlock() path is the standalone fallback (sums
     // every strip into the single stereo `buffer` argument).
     void                    processStrips      (int numFrames, juce::MidiBuffer& midi);
@@ -153,10 +153,10 @@ public:
     int  getKitDefaultCc (int cc) const;   // read-only snapshot of the kit's set_cc<N> values
     juce::String getCcLabel (int cc) const;   // kit's `label_cc<N>=<text>` (empty if none)
 
-    // APVTS listener — forwards every brd_cc<N> change to sfizz.
+    // APVTS listener - forwards every brd_cc<N> change to sfizz.
     void parameterChanged (const juce::String& paramId, float newValue) override;
 
-    // Project-level undo — the editor wires Ctrl+Z to undo()/redo() so panel
+    // Project-level undo - the editor wires Ctrl+Z to undo()/redo() so panel
     // edits, automation captures, and CC type-in entries are all reversible.
     juce::UndoManager& getUndoManager() noexcept { return mUndoManager; }
 
@@ -182,7 +182,7 @@ private:
     double                     mSampleRate     { 48000.0 };
     int                        mMaxBlockSize   { 1024 };
 
-    // Multi-output scratch — sfizz writes 2*stripCount channels per block.
+    // Multi-output scratch - sfizz writes 2*stripCount channels per block.
     juce::AudioBuffer<float>   mMultiOutScratch;
     std::vector<float*>        mMultiOutPtrs;   // sfizz expects float**, sized 2*N
 
@@ -194,7 +194,7 @@ private:
                                               const juce::File& kitRoot);
 
     // J-3: walks the kit's mappings/ folder.  Returns the discovered list of
-    // channels.  Pure file-system scan — does not touch sfizz state.
+    // channels.  Pure file-system scan - does not touch sfizz state.
     // J-8 (2026-05-04): when programSfzPath is non-empty, the program file is
     // parsed and the result is filtered to only include channels whose master
     // `_map.sfz` is referenced (directly or via `_map_<articulation>` variant)
@@ -207,7 +207,7 @@ private:
     // Parses ONLY `Programs/keymap/keymap.sfz` and emits one PianoRollKey per
     // `#define $name <midi>` entry, sorted ascending by MIDI.  Sound-name +
     // articulation labels come from a $name → (sound, articulation) lookup
-    // table.  No anchoring, no remap — piano roll speaks raw kit MIDI.
+    // table.  No anchoring, no remap - piano roll speaks raw kit MIDI.
     static std::vector<PianoRollKey> discoverPianoRollKeymap (const juce::File& kitRoot);
 
     // J-8 stage 2 (2026-05-04): the live CC values are now stored in APVTS

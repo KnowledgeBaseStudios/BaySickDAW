@@ -137,14 +137,14 @@ private:
     double      mSyncPhase1  { 0.0 };
     double      mSyncPhase2  { 0.0 };
 
-    // P3.10 analog drift — slow per-voice pitch wander (±cents) for warmth.
+    // P3.10 analog drift - slow per-voice pitch wander (±cents) for warmth.
     float       mDriftAmount     { 0.0f };
     float       mDriftTargetCents { 0.0f };
     float       mDriftCurrentCents { 0.0f };
     int         mDriftCounter    { 0 };
     uint32_t    mDriftRngState   { 0x8F1BBCDCu };
 
-    // P3.11 unison — up to 6 detuned saw copies (voices 2-7) panned across stereo.
+    // P3.11 unison - up to 6 detuned saw copies (voices 2-7) panned across stereo.
     int         mUnisonVoices    { 1 };
     float       mUnisonDetune    { 0.2f };
     float       mUnisonSpread    { 0.8f };

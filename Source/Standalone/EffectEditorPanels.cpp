@@ -1,6 +1,6 @@
 #include "EffectEditorPanels.h"
 #include "SlotComponent.h"   // H-8: VocalDoubler's Slap button calls remountEditor
-// D.4 (2026-05-01): force MSBuild to recompile this file — Compressor + Delay
+// D.4 (2026-05-01): force MSBuild to recompile this file - Compressor + Delay
 // knob additions were missing from the previous incremental build.
 #include "../DSP/CompressorDSP.h"
 #include "../DSP/ReverbDSP.h"
@@ -74,7 +74,7 @@ static void layoutKnobsH(juce::Rectangle<int> b,
         k->setBounds(b.removeFromLeft(w).withSizeKeepingCentre(sz, sz));
 }
 
-// Pink = active (engaged), dark = off — Change C colors
+// Pink = active (engaged), dark = off - Change C colors
 static void setPink(juce::TextButton& btn)
 {
     btn.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xffce3f8e));
@@ -88,12 +88,12 @@ static void setPink(juce::TextButton& btn)
 // ── EditorPanelBase method implementations ────────────────────────────────────
 EditorPanelBase::EditorPanelBase()
 {
-    // VU input meter — all panels create it; panels without VU call disableVU()
+    // VU input meter - all panels create it; panels without VU call disableVU()
     vuIn = std::make_unique<VUMeter>(VUMeter::Vertical);
     vuIn->setTooltip("Input level");
     addAndMakeVisible(*vuIn);
 
-    // DBFS output meter — compact mode always on (floor -20 dBFS, labels truncated)
+    // DBFS output meter - compact mode always on (floor -20 dBFS, labels truncated)
     dbfsOut = std::make_unique<DBFSMeter>();
     dbfsOut->setCompact(true);
     dbfsOut->setTooltip("Output level (dBFS)");
@@ -229,7 +229,7 @@ void EditorPanelBase::childrenChanged()
 {
     // Whenever a child is added, if it's a toggle-state button, force VibeLAF so
     // drawButtonBackground in VibeLAF (switch-toggle filmstrip) is always called.
-    // 2026-04-26: also opt in to "switchToggle" property — switch styling is
+    // 2026-04-26: also opt in to "switchToggle" property - switch styling is
     // gated to opt-in callsites and effect panels qualify per the rule.
     for (auto* c : getChildren())
         if (auto* btn = dynamic_cast<juce::Button*>(c))
@@ -319,7 +319,7 @@ void EditorPanelBase::resized()
 // Thresh | Ratio | Gain | Attack | Release  +  KneeType combo (8 types)
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// FETCompressorPanel — H-7 (2026-05-01)
+// FETCompressorPanel - H-7 (2026-05-01)
 // 1176-style minimalist layout: Input + Output + Attack + Release + 4-position
 // Ratio chickenhead (4:1 / 8:1 / 12:1 / 20:1) + GR meter.  Selected when the
 // underlying CompressorDSP's mType == FET.
@@ -497,7 +497,7 @@ struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OptoCompressorPanel — H-7 (2026-05-01)
+// OptoCompressorPanel - H-7 (2026-05-01)
 // LA-2A-style minimalist: Peak Reduction + Gain + Comp/Limit toggle + GR meter.
 // Selected when the underlying CompressorDSP's mType == Opto.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -649,7 +649,7 @@ struct OptoCompressorPanel : public EditorPanelBase, public juce::Timer
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CSStyleCompressorPanel — I-4 (2026-05-02)
+// CSStyleCompressorPanel - I-4 (2026-05-02)
 // BOSS CS-Style sustain pedal layout.  4 user knobs: Level / Tone / Attack /
 // Sustain.  Selected when the underlying CompressorDSP's mType == CS Style.
 // Sustain is the macro that drives both Threshold (down) and makeup gain
@@ -798,7 +798,7 @@ struct CompressorPanel : public EditorPanelBase,
         for (int i = 0; i < 10; ++i)
             knobs[i]->slider.getProperties().set(DynamicsLAF::kKnobVariant, "modernAnalog");
 
-        // KneeType — 8-position chicken-head selector
+        // KneeType - 8-position chicken-head selector
         kneeSel = std::make_unique<ChickenHeadSelector>();
         kneeSel->setOptions({
             { "H",   "Hard",     "Hard knee - sharp, snappy compression" },
@@ -946,12 +946,12 @@ struct CompressorPanel : public EditorPanelBase,
     void paint(juce::Graphics& g) override
     {
         DynamicsLAF::paintLA2APanel(g, getLocalBounds());
-        // Knee labels are drawn by ChickenHeadSelector itself — no custom paint needed.
+        // Knee labels are drawn by ChickenHeadSelector itself - no custom paint needed.
     }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ReverbPanel — 5F-9 §8 expanded (2 rows, 8 knobs each + right-side extras)
+// ReverbPanel - 5F-9 §8 expanded (2 rows, 8 knobs each + right-side extras)
 // Row 1: Room | Decay | HFRatio | Diffuse | PreDly | WetTone | Wet | Dry
 // Row 1 right: Mode combo + Freeze toggle switch
 // Row 2: LoCut | HiCut | BassMlt | BassCross | TailDep | TailRt | Stereo | HiDamp
@@ -976,7 +976,7 @@ struct ReverbPanel : public EditorPanelBase
 
     explicit ReverbPanel(ReverbDSP* dsp)
     {
-        disableVU();   // Reverb has no input VU — full knob width
+        disableVU();   // Reverb has no input VU - full knob width
         setLookAndFeel(&TimeLAF::get());
         addAndMakeVisible(mJewel);
         mJewel.setActive(true);
@@ -1005,7 +1005,7 @@ struct ReverbPanel : public EditorPanelBase
             { "HiDamp",500.f, 20000.f,  8000.f, 10.f,   "High-freq damping (Hz)" },
         });
 
-        // ER knob (row 2 right side, compact — standalone since it's not in r2knobs)
+        // ER knob (row 2 right side, compact - standalone since it's not in r2knobs)
         erKnob = std::make_unique<VKnob>("ER", -6.0f, "Early reflections level (dB)");
         erKnob->slider.setRange(-60.0, 12.0, 0.1);
         erKnob->slider.setValue(-6.0, juce::dontSendNotification);
@@ -1131,7 +1131,7 @@ struct ReverbPanel : public EditorPanelBase
     {
         auto b = getLocalBounds().reduced(4, 2);
 
-        // Meter strips (Reverb has no input VU — disableVU() was called)
+        // Meter strips (Reverb has no input VU - disableVU() was called)
         if (vuIn) vuIn->setBounds(b.removeFromLeft(120).reduced(1, 2));
         dbfsOut      ->setBounds(b.removeFromRight(32).reduced(1, 2));
         b.removeFromRight(2);
@@ -1407,7 +1407,7 @@ struct ChorusPanel : public EditorPanelBase
 
     explicit ChorusPanel(ChorusDSP* dsp)
     {
-        disableVU();   // Chorus has no input VU — full knob width
+        disableVU();   // Chorus has no input VU - full knob width
         setLookAndFeel(&ModulationLAF::get());
         buildKnobs(*this, lfoFreqKnobs, {
             { "LFO1",  0.01f, 10.f, 0.5f, 0.01f, "LFO 1 rate (Hz)" },
@@ -1556,7 +1556,7 @@ struct DelayPanel : public EditorPanelBase
 
     explicit DelayPanel(DelayDSP* dsp)
     {
-        disableVU();   // Delay has no input VU — full knob width
+        disableVU();   // Delay has no input VU - full knob width
         setLookAndFeel(&TimeLAF::get());
 
         // Row 1: Time | Feed | LoFiSR | WetIn | Wet | Dry | FBCut | FBReso | Tone  (9 knobs)
@@ -1741,7 +1741,7 @@ struct DelayPanel : public EditorPanelBase
         r1knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setFeedbackResonance ((float)r1knobs[7]->slider.getValue()); };
         r1knobs[8]->slider.onValueChange = [dsp,this]{ dsp->setTone              ((float)r1knobs[8]->slider.getValue()); };
 
-        // Row 2 bindings (12 knobs — ModTime at idx 1, Smooth at idx 11)
+        // Row 2 bindings (12 knobs - ModTime at idx 1, Smooth at idx 11)
         r2knobs[0] ->slider.onValueChange = [dsp,this]{ dsp->setModRate           ((float)r2knobs[0] ->slider.getValue()); };
         r2knobs[1] ->slider.onValueChange = [dsp,this]{ dsp->setModTimeMod        ((float)r2knobs[1] ->slider.getValue()); };
         r2knobs[2] ->slider.onValueChange = [dsp,this]{ dsp->setModCutoffMod      ((float)r2knobs[2] ->slider.getValue()); };
@@ -1842,7 +1842,7 @@ struct DelayPanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VocalDoublerDelayPanel — H-8 (2026-05-02)
+// VocalDoublerDelayPanel - H-8 (2026-05-02)
 // Renders when DelayDSP::Type == VocalDoubler.  Single row of 6 knobs:
 // Time L | Time R | Detune | Width | Rate | Mix.  Shares the TimeLAF look
 // with the Echo DelayPanel so switching Mode keeps a coherent visual family.
@@ -1975,7 +1975,7 @@ struct FlangerPanel : public EditorPanelBase
 
     explicit FlangerPanel(FlangerDSP* dsp)
     {
-        disableVU();   // Flanger has no input VU — full knob width
+        disableVU();   // Flanger has no input VU - full knob width
         setLookAndFeel(&ModulationLAF::get());
         buildKnobs(*this, knobs, {
             { "Rate",   0.05f,    5.f,  0.5f,  0.01f, "LFO rate (Hz)" },
@@ -2080,7 +2080,7 @@ struct FlangerPanel : public EditorPanelBase
     {
         auto b = getLocalBounds().reduced(4, 4);
 
-        // Strip meters (no input VU — disableVU() was called; still need DBFS + fader)
+        // Strip meters (no input VU - disableVU() was called; still need DBFS + fader)
         dbfsOut      ->setBounds(b.removeFromRight(32).reduced(1, 2));
         b.removeFromRight(2);
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
@@ -2198,7 +2198,7 @@ struct OverdrivePanel : public EditorPanelBase
     {
         auto b = getLocalBounds().reduced(4, 4);
 
-        // Strip meters (no input VU — Overdrive doesn't use one)
+        // Strip meters (no input VU - Overdrive doesn't use one)
         if (vuIn) vuIn->setBounds(b.removeFromLeft(120).reduced(1, 2));
         dbfsOut      ->setBounds(b.removeFromRight(32).reduced(1, 2));
         b.removeFromRight(2);
@@ -2588,12 +2588,12 @@ struct TransientShaperPanel : public EditorPanelBase
     void paint(juce::Graphics& g) override
     {
         DynamicsLAF::paintLA2APanel(g, getLocalBounds());
-        // Shape labels are drawn by ChickenHeadSelector itself — no custom paint needed.
+        // Shape labels are drawn by ChickenHeadSelector itself - no custom paint needed.
     }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TapePanel — Vibe | WowRate | WowDepth | InGain | Hiss  (OutGain removed — use output fader)
+// TapePanel - Vibe | WowRate | WowDepth | InGain | Hiss  (OutGain removed - use output fader)
 // ─────────────────────────────────────────────────────────────────────────────
 struct TapePanel : public EditorPanelBase
 {
@@ -2740,7 +2740,7 @@ struct TapePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TapeSatPanel — H-10 (2026-05-02): Saturation umbrella's Tape sub-panel.
+// TapeSatPanel - H-10 (2026-05-02): Saturation umbrella's Tape sub-panel.
 // Mirrors TapePanel's knob layout + chicken-heads exactly but binds to
 // SaturationDSP's setTape* setters instead of the legacy TapeDSP class.
 // SlotComponent's Mode dropdown picks Tube / Console / Tape; this panel
@@ -2882,7 +2882,7 @@ struct TapeSatPanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LimiterPanel (basic, functional — polished Limiter.txt UI is a separate task)
+// LimiterPanel (basic, functional - polished Limiter.txt UI is a separate task)
 // Row 1: InGain | Ceil | SatTh | SatCv
 // Row 2: Atk   | Rel  | Ahead | RelCv   + Auto toggle
 // Also: GR meter (left of knobs, right of input VU)
@@ -2941,7 +2941,7 @@ struct LimiterPanel : public EditorPanelBase,
         autoRelTog->btn().onClick = [dsp, this]{ dsp->setAutoRelease (autoRelTog->btn().getToggleState()); };
         addAndMakeVisible (*autoRelTog);
 
-        // C4: Auto-makeup gain — post-limit boost by -ceilingDb for maximizer workflow.
+        // C4: Auto-makeup gain - post-limit boost by -ceilingDb for maximizer workflow.
         autoMuTog = std::make_unique<DualLabelToggle>();
         autoMuTog->setupOnOff("Auto MU", "Auto makeup gain: adds -ceilingDb of post-limit boost so lowering the ceiling doesn't quiet the signal");
         autoMuTog->btn().setToggleState(dsp->getAutoMakeup(), juce::dontSendNotification);
@@ -2977,7 +2977,7 @@ struct LimiterPanel : public EditorPanelBase,
         r2knobs[2]->slider.setValue(dsp->getAheadMs(),      juce::sendNotificationSync);
         r2knobs[3]->slider.setValue(dsp->getReleaseCurve(), juce::sendNotificationSync);
 
-        // GR meter (SSL-style — matches CompressorPanel)
+        // GR meter (SSL-style - matches CompressorPanel)
         grMeter = std::make_unique<GRMeter>();
         addAndMakeVisible (*grMeter);
 
@@ -3048,7 +3048,7 @@ struct LimiterPanel : public EditorPanelBase,
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// ConsoleSaturationPanel — H-7 (2026-05-01)
+// ConsoleSaturationPanel - H-7 (2026-05-01)
 // Minimalist preamp/console layout: Drive + Tone + Mix + Output.  Selected
 // when SaturationDSP's mSatType == Console.  Tube-only fields (TubeType
 // chickenhead, BassRelief, Sensitivity, Transformer) are not exposed here --
@@ -3136,7 +3136,7 @@ struct ConsoleSaturationPanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DeEsserPanel — H-3/H-6 (2026-05-01)
+// DeEsserPanel - H-3/H-6 (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 struct DeEsserPanel : public EditorPanelBase
 {
@@ -3148,7 +3148,7 @@ struct DeEsserPanel : public EditorPanelBase
 
         // 8 knobs in a single horizontal row matching the Compressor / Limiter
         // visual vocabulary.  Mode / Listen / M-S toggles deferred to a polish
-        // pass — defaults are preset-safe (Wide / Off / Stereo).
+        // pass - defaults are preset-safe (Wide / Off / Stereo).
         buildKnobs (*this, knobs, {
             { "Freq",   4000.f, 12000.f, 6500.f, 10.f,  "Sidechain HPF cutoff (Hz). 4-12 kHz typical sibilance band" },
             { "Q",      0.5f,    4.0f,   1.4f,  0.05f, "Sidechain HPF Q. Higher = narrower detection band" },
@@ -3242,7 +3242,7 @@ namespace
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BluesDriveStylePanel — BD Style Blues Drive
+// BluesDriveStylePanel - BD Style Blues Drive
 // 3 knobs: Drive / Tone / Level
 // ─────────────────────────────────────────────────────────────────────────────
 struct BluesDriveStylePanel : public EditorPanelBase
@@ -3290,7 +3290,7 @@ struct BluesDriveStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OverdrivePedalPanel — OD Style Overdrive (Type::Pedal on OverdriveDSP)
+// OverdrivePedalPanel - OD Style Overdrive (Type::Pedal on OverdriveDSP)
 // Reuses OverdriveDSP existing knob fields: PreAmp = Drive, PostFilter = Tone,
 // PostGain = Level.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3340,7 +3340,7 @@ struct OverdrivePedalPanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DistortionStylePanel — DS Style Distortion
+// DistortionStylePanel - DS Style Distortion
 // 3 knobs: Tone / Level / Dist
 // ─────────────────────────────────────────────────────────────────────────────
 struct DistortionStylePanel : public EditorPanelBase
@@ -3388,7 +3388,7 @@ struct DistortionStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FuzzStylePanel — FZ Style Fuzz
+// FuzzStylePanel - FZ Style Fuzz
 // 3 controls: Level / Mode chickenhead (M / F / O) / Fuzz
 // ─────────────────────────────────────────────────────────────────────────────
 struct FuzzStylePanel : public EditorPanelBase
@@ -3453,7 +3453,7 @@ struct FuzzStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HighGainStylePanel — MT Style High-Gain
+// HighGainStylePanel - MT Style High-Gain
 // 6 knobs: Level / Dist / High / Low / Mid Hz / Mid dB
 // ─────────────────────────────────────────────────────────────────────────────
 struct HighGainStylePanel : public EditorPanelBase
@@ -3513,7 +3513,7 @@ struct HighGainStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BassDriverStylePanel — BB Style Bass Driver (5 knobs: Drive/Blend/Low/High/Level)
+// BassDriverStylePanel - BB Style Bass Driver (5 knobs: Drive/Blend/Low/High/Level)
 // ─────────────────────────────────────────────────────────────────────────────
 struct BassDriverStylePanel : public EditorPanelBase
 {
@@ -3565,7 +3565,7 @@ struct BassDriverStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BassOverdriveStylePanel — ODB Style Bass Overdrive
+// BassOverdriveStylePanel - ODB Style Bass Overdrive
 // 5 knobs: Gain / Balance / EQ-Low / EQ-High / Level
 // ─────────────────────────────────────────────────────────────────────────────
 struct BassOverdriveStylePanel : public EditorPanelBase
@@ -3618,7 +3618,7 @@ struct BassOverdriveStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OctaveStylePanel — OC Style Octave (Polyphonic + Vintage modes)
+// OctaveStylePanel - OC Style Octave (Polyphonic + Vintage modes)
 // 5 knobs (Direct / +1 Oct / -1 Oct / -2 Oct / Range) + Mode chickenhead.
 // ─────────────────────────────────────────────────────────────────────────────
 struct OctaveStylePanel : public EditorPanelBase
@@ -3688,7 +3688,7 @@ struct OctaveStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NoiseGateStylePanel — NS Style Noise Gate
+// NoiseGateStylePanel - NS Style Noise Gate
 // 2 knobs (Threshold / Decay) + Mode chickenhead (Reduction / Mute) +
 // Source chickenhead (DI / Self).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3769,7 +3769,7 @@ struct NoiseGateStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BassCompressorStylePanel — BC Style Bass Compressor
+// BassCompressorStylePanel - BC Style Bass Compressor
 // 4 knobs (Comp / Ratio / Release / Level) + LED GR meter
 // ─────────────────────────────────────────────────────────────────────────────
 struct BassCompressorStylePanel : public EditorPanelBase, public juce::Timer
@@ -3841,7 +3841,7 @@ struct BassCompressorStylePanel : public EditorPanelBase, public juce::Timer
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SynthStylePanel — SY Style Polyphonic Synth
+// SynthStylePanel - SY Style Polyphonic Synth
 // 6 knobs (Variation / Tone / Rate / Depth / Effect / Direct) + Type chickenhead
 // ─────────────────────────────────────────────────────────────────────────────
 struct SynthStylePanel : public EditorPanelBase
@@ -3911,7 +3911,7 @@ struct SynthStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WahStylePanel — PW Style Wah
+// WahStylePanel - PW Style Wah
 // 1 knob (Pedal Position) + Mode chickenhead (Vintage / Rich)
 // ─────────────────────────────────────────────────────────────────────────────
 struct WahStylePanel : public EditorPanelBase
@@ -3961,7 +3961,7 @@ struct WahStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AcousticPreampStylePanel — AD Style Acoustic Preamp
+// AcousticPreampStylePanel - AD Style Acoustic Preamp
 // 3 knobs (Resonance / Ambience / Notch) + Body chickenhead (Dr/Pa/Ju/Us) +
 // "Load IR..." button (visible/active when Body == User).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4071,7 +4071,7 @@ struct AcousticPreampStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AcousticSimulatorStylePanel — AC Style Acoustic Simulator
+// AcousticSimulatorStylePanel - AC Style Acoustic Simulator
 // 4 knobs (Top / Body / Reverb / Level) + Mode chickenhead (St/Ju/En/Pi/Us) +
 // "Load IR..." button (active when Mode == User).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4177,7 +4177,7 @@ struct AcousticSimulatorStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EQFader — Self-painted vertical fader for I-12 graphic EQ panels.
+// EQFader - Self-painted vertical fader for I-12 graphic EQ panels.
 // Bypasses TimeLAF/VibeLAF entirely so we get the locked spec look:
 //   * Vertical track with center-detent notch
 //   * Rectangular thumb cap with bevel
@@ -4255,7 +4255,7 @@ public:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GraphicEQStylePanel — GE Style 7-band guitar graphic EQ
+// GraphicEQStylePanel - GE Style 7-band guitar graphic EQ
 // 7 vertical faders (each band) + 1 vertical fader (master Level).
 // All faders snap to 0 dB at center detent; rectangular caps painted by EQFader.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4358,7 +4358,7 @@ struct GraphicEQStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BassGraphicEQStylePanel — GEB Style 7-band bass graphic EQ
+// BassGraphicEQStylePanel - GEB Style 7-band bass graphic EQ
 // Mirrors GE panel; bass-tuned freq labels.
 // ─────────────────────────────────────────────────────────────────────────────
 struct BassGraphicEQStylePanel : public EditorPanelBase
@@ -4458,7 +4458,7 @@ struct BassGraphicEQStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FurmanEQStylePanel — EQFH Style Pro Parametric EQ (Furman PQ-3)
+// FurmanEQStylePanel - EQFH Style Pro Parametric EQ (Furman PQ-3)
 // Per band (Low / Mid / High): Freq knob + Boost slider + Q knob.
 // Plus master Input Volume knob + Bypass toggle.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4637,7 +4637,7 @@ struct FurmanEQStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TunerStylePanel — TU Style Tuner
+// TunerStylePanel - TU Style Tuner
 // Strobe LED display + chromatic note + cents indicator + Mute / 432 toggles
 // + Trim knob + Mode chickenhead + display-style switch (Strobe / LED bar).
 // 60 fps repaint; reads pitch via wait-free atomics from TunerStyleDSP.
@@ -4905,7 +4905,7 @@ struct TunerStylePanel : public EditorPanelBase, private juce::Timer
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NAMPedalStylePanel — User NAM Pedal panel
+// NAMPedalStylePanel - User NAM Pedal panel
 // File-load button + filename label + 6 knobs (Input/Drive / Low / Mid /
 // High / Blend / Output).  HarmonicLAF (drive family).  Default file picker
 // location: Documents/BaySickDAW/Presets/Effects/Pedals/User NAM Pedals/.
@@ -5029,7 +5029,7 @@ struct NAMPedalStylePanel : public EditorPanelBase
 // locked spec.  createEffectEditor dispatches to these when mode == Pedal.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// LimiterDSP pedal panel — Ceiling + Release.
+// LimiterDSP pedal panel - Ceiling + Release.
 struct LimiterPedalPanel : public EditorPanelBase
 {
     LimiterDSP* mDsp { nullptr };
@@ -5057,7 +5057,7 @@ struct LimiterPedalPanel : public EditorPanelBase
     }
 };
 
-// SaturationDSP pedal panel — Drive + Mix + Tube/Console/Tape mode chickenhead.
+// SaturationDSP pedal panel - Drive + Mix + Tube/Console/Tape mode chickenhead.
 struct SaturationPedalPanel : public EditorPanelBase
 {
     SaturationDSP* mDsp { nullptr };
@@ -5103,7 +5103,7 @@ struct SaturationPedalPanel : public EditorPanelBase
     }
 };
 
-// ChorusDSP pedal panel — Rate + Depth + Mix.
+// ChorusDSP pedal panel - Rate + Depth + Mix.
 struct ChorusPedalPanel : public EditorPanelBase
 {
     ChorusDSP* mDsp { nullptr };
@@ -5132,7 +5132,7 @@ struct ChorusPedalPanel : public EditorPanelBase
     }
 };
 
-// FlangerDSP pedal panel — Rate + Depth + Feedback + Mix.
+// FlangerDSP pedal panel - Rate + Depth + Feedback + Mix.
 struct FlangerPedalPanel : public EditorPanelBase
 {
     FlangerDSP* mDsp { nullptr };
@@ -5163,7 +5163,7 @@ struct FlangerPedalPanel : public EditorPanelBase
     }
 };
 
-// PhaserDSP pedal panel — Rate + Depth + Feedback + Mix.
+// PhaserDSP pedal panel - Rate + Depth + Feedback + Mix.
 struct PhaserPedalPanel : public EditorPanelBase
 {
     PhaserDSP* mDsp { nullptr };
@@ -5194,7 +5194,7 @@ struct PhaserPedalPanel : public EditorPanelBase
     }
 };
 
-// DelayDSP pedal panel — Time + Feedback + Mix + Sync toggle.
+// DelayDSP pedal panel - Time + Feedback + Mix + Sync toggle.
 struct DelayPedalPanel : public EditorPanelBase
 {
     DelayDSP* mDsp { nullptr };
@@ -5238,7 +5238,7 @@ struct DelayPedalPanel : public EditorPanelBase
     }
 };
 
-// ReverbDSP pedal panel — Decay + Damp + Mix + Algorithm chickenhead.
+// ReverbDSP pedal panel - Decay + Damp + Mix + Algorithm chickenhead.
 struct ReverbPedalPanel : public EditorPanelBase
 {
     ReverbDSP* mDsp { nullptr };

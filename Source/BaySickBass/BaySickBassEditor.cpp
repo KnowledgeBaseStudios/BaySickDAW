@@ -155,7 +155,7 @@ BaySickBassEditor::BaySickBassEditor (BaySickBassProcessor& p)
     initLabel (mVelAmpLbl,  "VEL");
     addAndMakeVisible (mVelAmpLbl);
 
-    // Pitch envelope — second row on OSC ENV tab
+    // Pitch envelope - second row on OSC ENV tab
     initVSlider (mPEnvASlider, "Pitch Env Attack");
     initVSlider (mPEnvDSlider, "Pitch Env Decay");
     initVSlider (mPEnvSSlider, "Pitch Env Sustain");
@@ -603,7 +603,7 @@ void BaySickBassEditor::layoutOscDeck (juce::Rectangle<int> deck)
 
     mCutSelfBtn.setBounds (vInner.getX(), vInner.getY() + ledH + vGap, vInner.getWidth(), cutH);
 
-    // Slide + Out Vol — split the remaining vertical space horizontally.
+    // Slide + Out Vol - split the remaining vertical space horizontally.
     const int knobsTop = vInner.getY() + ledH + vGap + cutH + vGap;
     const int knobsH   = vInner.getBottom() - knobsTop;
     const int vmHalfW  = vInner.getWidth() / 2;
@@ -776,7 +776,7 @@ void BaySickBassEditor::layoutLFODeck (juce::Rectangle<int> deck)
 
 void BaySickBassEditor::layoutModDeck (juce::Rectangle<int> deck)
 {
-    // MOD deck (Option C) — 8-column grid.
+    // MOD deck (Option C) - 8-column grid.
     //   Col 1 NOISE | Col 2-3 TRANSIENT | Col 4-5 BURST ENV | Col 6 DRIFT | Col 7-8 UNISON
     const int colW = deck.getWidth() / 8;
 
@@ -934,7 +934,7 @@ void BaySickBassEditor::setActiveTab (int tab)
     for (int i = 0; i < 6; ++i) showDeck (i, false);
     showDeck (mActiveTab, true);
     updateTabButtons();
-    // MOD tab isn't in the visualizer's rotation — clamp to 4 (LFO).
+    // MOD tab isn't in the visualizer's rotation - clamp to 4 (LFO).
     mVisualizer.setActiveTab (juce::jlimit (0, 4, mActiveTab));
     resized();
     repaint();
@@ -959,7 +959,7 @@ juce::File BaySickBassEditor::presetsDir()
                .getChildFile ("BaySickDAW/Presets/BaySickBass");
 }
 
-// Recursive XML-preset walker — folders become real cascading submenus.
+// Recursive XML-preset walker - folders become real cascading submenus.
 static void addBassEditorPresetDirToMenu (juce::PopupMenu& menu,
                                            const juce::File& dir,
                                            std::function<void(const juce::File&)> onSelect)
@@ -1029,7 +1029,7 @@ void BaySickBassEditor::loadPreset (const juce::File& f)
 
     auto loaded = juce::ValueTree::fromXml (*xml);
 
-    // P4.1 trackId-portability fix — see BaySickSynthEditor::loadPreset for full
+    // P4.1 trackId-portability fix - see BaySickSynthEditor::loadPreset for full
     // explanation.  Engine tag for BaySickBass is "_bsb_".
     const juce::String localPrefix = mProc.getParamPrefix();   // e.g. "tk_bas_0_bsb_"
     juce::String loadedPrefix;

@@ -1,7 +1,7 @@
 #include "BaySickNAMIREditor.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickNAMIREditor — Phase G-1.4 implementation.
+// BaySickNAMIREditor - Phase G-1.4 implementation.
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace
@@ -360,7 +360,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
 
     updateMicSimModeUI();
 
-    // ── A/B + listener — initial sync ────────────────────────────────────────
+    // ── A/B + listener - initial sync ────────────────────────────────────────
     processor.apvts.addParameterListener ("ab_slot",       this);
     processor.apvts.addParameterListener ("oversampling",  this);
 
@@ -452,7 +452,7 @@ void BaySickNAMIREditor::resized()
     placeKnob (mCabMixKnob);
     placeKnob (mOutputKnob);
 
-    // OS chicken head — center the 66×66 dial inside the last slot, label below.
+    // OS chicken head - center the 66×66 dial inside the last slot, label below.
     const int dialSz   = 66;
     const int dialX    = slotX + (slotW - dialSz) / 2;
     const int dialY    = knobsY + 4;

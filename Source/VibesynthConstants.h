@@ -5,12 +5,12 @@
 static constexpr int kMaxLayerPages    = 8;    // max simultaneous Layers pages
 static constexpr int kMaxBassPages     = 4;    // max simultaneous Bass pages
 static constexpr int kMaxDrumPages     = 16;   // max simultaneous Drums pages (D1: dynamic-drum model)
-// Phase G-2/G-3 (2026-04-28): Clips pages — 1:1 with audio inserts (mixer_audio_0..49).
+// Phase G-2/G-3 (2026-04-28): Clips pages - 1:1 with audio inserts (mixer_audio_0..49).
 // Each Clips tab is spawned by drag/drop of an audio file onto Builder; pageIndex is
 // the audio-row index, so the engine output can mix into the matching audio_<row>
 // InsertNode without a separate audio-row lookup table.
 static constexpr int kMaxClipPages     = 50;   // matches the audio-insert cap
-// Phase G-4 (2026-04-28): Vox + Inst pages — 1:1 with their mixer inserts.
+// Phase G-4 (2026-04-28): Vox + Inst pages - 1:1 with their mixer inserts.
 // Spawn trigger is the Mixer page's "Add Vox/Inst Strip" button (NOT drop).
 // kMaxVoxStrips / kMaxInstStrips live in VibeGraph.h's MixerChannelIds; mirror
 // here for piano-roll dispatch sizing without pulling that header into core.
@@ -21,7 +21,7 @@ static constexpr int kDrumPRTarget     = kMaxLayerPages + kMaxBassPages; // PRPe
 static constexpr int kClipPRTarget     = kMaxLayerPages + kMaxBassPages + kMaxDrumPages; // PRPendingOff target ID base for clip rolls (G-3)
 static constexpr int kVoxPRTarget      = kClipPRTarget + kMaxClipPages;       // G-4
 static constexpr int kInstPRTarget     = kVoxPRTarget  + kMaxVoxPages;        // G-4
-// J-7b (2026-05-03): BaySickRustyDrums singleton — single PRPendingOff target
+// J-7b (2026-05-03): BaySickRustyDrums singleton - single PRPendingOff target
 // (no array dimension since the engine is a 1-instance lock).
 static constexpr int kRustyPRTarget    = kInstPRTarget + kMaxInstPages;
 static constexpr int MAX_DRUM_SOUNDS   = 46;   // total drum sound library size

@@ -6,7 +6,7 @@
 #include "UndoActions.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DrumKitGrid — Drum-Kit-tab "piano roll" rebuilt from PianoRoll.cpp's shell.
+// DrumKitGrid - Drum-Kit-tab "piano roll" rebuilt from PianoRoll.cpp's shell.
 // ─────────────────────────────────────────────────────────────────────────────
 // Same visual + interaction model as PianoRollGrid, but the rows map to
 // per-drum piano-roll data (mPM->currentPattern().drumRolls[0..15]) instead
@@ -38,7 +38,7 @@ struct DrumKitRowInfo
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DrumKitSidebar — left strip of the kit grid, replacement for PianoKeyboard
+// DrumKitSidebar - left strip of the kit grid, replacement for PianoKeyboard
 // ─────────────────────────────────────────────────────────────────────────────
 class DrumKitSidebar : public juce::Component,
                        public juce::SettableTooltipClient
@@ -75,7 +75,7 @@ public:
     std::function<void(const juce::MouseEvent&,
                        const juce::MouseWheelDetails&)>    onWheel;
 
-    // 2026-04-26: Global Lock/Unlock — fired when the thin ruler-space button
+    // 2026-04-26: Global Lock/Unlock - fired when the thin ruler-space button
     // above the picker dropdowns is clicked.  Container forwards to DrumPage
     // and ultimately StandaloneEditor for the confirm-prompt + actual toggle.
     std::function<void()> onGlobalLockRequested;
@@ -115,7 +115,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DrumKitGrid — the main note-editing area
+// DrumKitGrid - the main note-editing area
 // ─────────────────────────────────────────────────────────────────────────────
 class DrumKitGrid : public juce::Component
 {
@@ -166,7 +166,7 @@ public:
     void duplicateSelected ();
     void toolQuantize      ();
     // 2026-04-26 (D-7): drum-applicable bundle helpers (quickLegato +
-    // transposeSelection are NOT mirrored here — drum hits don't legato and
+    // transposeSelection are NOT mirrored here - drum hits don't legato and
     // drum rows are slot-based, not pitch).
     void quickQuantizeQuarter ();   // Ctrl+Q
     void flamSelected         ();   // Alt+F
@@ -236,7 +236,7 @@ private:
     int    mDrawRow   { -1 };
     double mDrawStart { 0.0 };
     double mDrawEnd   { 0.25 };
-    // 2026-04-26 (D-7): FL-style click memory (length only — drum hits don't
+    // 2026-04-26 (D-7): FL-style click memory (length only - drum hits don't
     // carry slide / portamento types).  Drag-to-place still wins.
     double mClickMemoryDur { 0.25 };
     bool   mDrawHasDragged { false };
@@ -255,7 +255,7 @@ private:
     NoteRef mResizeRef;
     double  mResizeOrigDur   { 0.0 };
     double  mResizeOrigStart { 0.0 };
-    // 2026-04-26 (D-7): Ctrl+Alt+Home flips this — drag-to-resize then grabs
+    // 2026-04-26 (D-7): Ctrl+Alt+Home flips this - drag-to-resize then grabs
     // the LEFT edge instead of the right.  mResizingFromLeft locks at
     // mouseDown so the gesture's direction stays stable.
     bool    mResizeFromLeftEnabled { false };
@@ -335,7 +335,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DrumKitControlLane — velocity / panning only
+// DrumKitControlLane - velocity / panning only
 // ─────────────────────────────────────────────────────────────────────────────
 class DrumKitControlLane : public juce::Component
 {
@@ -397,7 +397,7 @@ public:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DrumKitContainer — menu bar + toolbar + sidebar + grid + lane
+// DrumKitContainer - menu bar + toolbar + sidebar + grid + lane
 // ─────────────────────────────────────────────────────────────────────────────
 class DrumKitContainer : public juce::Component,
                          private juce::ScrollBar::Listener
@@ -428,11 +428,11 @@ public:
 
     std::function<void(double beat)> onSeek;
 
-    // 2026-04-25 (Batch 5): Kit button click — wired by StandaloneEditor to
+    // 2026-04-25 (Batch 5): Kit button click - wired by StandaloneEditor to
     // open the Save Kit As / Load Kit popup.  Anchor passed for menu positioning.
     std::function<void(juce::Component* anchor)> onKitMenuRequested;
 
-    // 2026-04-26: Global Lock/Unlock button click — wired up the chain to
+    // 2026-04-26: Global Lock/Unlock button click - wired up the chain to
     // StandaloneEditor where the confirm-prompt + cross-slot lock toggle live.
     std::function<void()> onGlobalLockRequested;
 
@@ -472,7 +472,7 @@ private:
     std::unique_ptr<juce::TextButton>                mWrenchBtn;
     std::unique_ptr<DrumKitRightClickButton>         mMagnetBtn;
     std::unique_ptr<juce::TextButton>                mZoomInBtn, mZoomOutBtn;
-    // Batch 5: Kit button — opens the Save Kit As / Load Kit popup.
+    // Batch 5: Kit button - opens the Save Kit As / Load Kit popup.
     std::unique_ptr<juce::TextButton>                mKitBtn;
 
     PatternManager* mPM { nullptr };
@@ -505,7 +505,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DrumKitMenuBar — menu bar above the toolbar (Edit / Tools / View)
+// DrumKitMenuBar - menu bar above the toolbar (Edit / Tools / View)
 // ─────────────────────────────────────────────────────────────────────────────
 class DrumKitMenuBar : public juce::MenuBarModel
 {

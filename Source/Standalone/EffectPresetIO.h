@@ -7,7 +7,7 @@
 class DSPBase;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EffectPresetIO — H-9 prep (2026-05-02)
+// EffectPresetIO - H-9 prep (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // Generic factory + user preset save/load for every effect-rack DSP.  Adds
 // a Preset menu next to each SlotComponent's bypass LED so users can:

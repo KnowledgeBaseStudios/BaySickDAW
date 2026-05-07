@@ -4,7 +4,7 @@
 class BaySickVocalProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickPitchEditor — H-6b (2026-05-02)
+// BaySickPitchEditor - H-6b (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // Full-page Newtone-clone offline pitch editor.  Layout (top to bottom):
 //
@@ -24,7 +24,7 @@ class BaySickVocalProcessor;
 // canvas paints the grid + keyboard but renders an empty-state message
 // centered until audio is loaded.
 //
-// Edit lifecycle (Option C — locked in chat):
+// Edit lifecycle (Option C - locked in chat):
 //   - Edits stored as ValueTree on BaySickVocalProcessor.
 //   - Render writes Pitched/{name}_pitch_v{N}.wav and replaces the
 //     position on the Builder page; prior version stays in the browser

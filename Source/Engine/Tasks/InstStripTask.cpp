@@ -36,7 +36,7 @@ void InstStripTask::run()
     juce::AudioBuffer<float> blockView (ptrs, mOutputBuffer->getNumChannels(), n);
     blockView.clear();
 
-    // 2026-05-06 (Batch 9b Item 9): FilePlay branch — see VoxStripTask::run for
+    // 2026-05-06 (Batch 9b Item 9): FilePlay branch - see VoxStripTask::run for
     // rationale.  Audio clips routed to this Inst engine drive the chain via
     // renderFilePlayPlayer (decode + engine + processInsert + write to mtDest).
     if (mIndex >= 0 && mIndex < (int) mProcessor->mInstFilePlayActive.size()
@@ -145,7 +145,7 @@ void InstStripTask::run()
     const auto* snapshot = mCtx->liveInputSnapshot;
     const int   snapChs  = (snapshot != nullptr) ? snapshot->getNumChannels() : 0;
 
-    // sfizz-active slots ignore arm — sfizz is the source.
+    // sfizz-active slots ignore arm - sfizz is the source.
     const bool armed = ! sfizzActive
                     && (armP != nullptr) && armP->load() > 0.5f
                     && chIdx >= 0
@@ -154,7 +154,7 @@ void InstStripTask::run()
     if (armed)
     {
         // 2026-05-06 (Batch 9b Item 8): dry-recorder tap (RAW pre-chain mono).
-        // Mirrors the serial path's inline loop — captured here so the recorded
+        // Mirrors the serial path's inline loop - captured here so the recorded
         // file is the unprocessed DI; chain runs ONCE on the dry source.
         // Pre-existing race risk between this read of mStripRecorders and
         // message-thread mutation in startRecording / stopRecording is

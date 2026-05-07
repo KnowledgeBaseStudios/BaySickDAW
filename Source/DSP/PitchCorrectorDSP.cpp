@@ -4,7 +4,7 @@
 #include <cstring>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PitchCorrectorDSP — Phase H-5 (2026-05-01)
+// PitchCorrectorDSP - Phase H-5 (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace
@@ -25,7 +25,7 @@ namespace
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shifter — 2-grain Hann-windowed time-domain pitch shifter
+// Shifter - 2-grain Hann-windowed time-domain pitch shifter
 // ─────────────────────────────────────────────────────────────────────────────
 
 void PitchCorrectorDSP::Shifter::prepare (double sampleRate)
@@ -109,7 +109,7 @@ float PitchCorrectorDSP::Shifter::processSample (float in, float pitchRatio) noe
             g.active = false;
     }
 
-    // 50% overlap of two Hann windows sums to 1.0 — no normalization needed.
+    // 50% overlap of two Hann windows sums to 1.0 - no normalization needed.
     return out;
 }
 
@@ -230,7 +230,7 @@ float PitchCorrectorDSP::snapMidiToScale (float midiFloat) const noexcept
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RNG (xorshift32 — audio-thread-safe, deterministic seed)
+// RNG (xorshift32 - audio-thread-safe, deterministic seed)
 // ─────────────────────────────────────────────────────────────────────────────
 float PitchCorrectorDSP::nextRandPm1() noexcept
 {

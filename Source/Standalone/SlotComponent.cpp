@@ -388,7 +388,7 @@ void SlotComponent::resized()
     mBypassRect = header.removeFromLeft(24).withSizeKeepingCentre(20, 20);
     header.removeFromLeft(2);
 
-    // Action glyphs on the right (close, then down, then up — right-to-left)
+    // Action glyphs on the right (close, then down, then up - right-to-left)
     mCloseRect = header.removeFromRight(24).withSizeKeepingCentre(20, 20);
     mDownRect  = header.removeFromRight(24).withSizeKeepingCentre(20, 20);
     mUpRect    = header.removeFromRight(24).withSizeKeepingCentre(20, 20);
@@ -398,7 +398,7 @@ void SlotComponent::resized()
     // ▲▼× glyph cluster.  ~110 px wide so "SC: Layer 2" fits comfortably.
     // H-7 (2026-05-01): Mode dropdown sits immediately left of SC dropdown
     // for Compressor (Modern/FET/Opto) and takes the SC slot's footprint
-    // for Saturation (Tube/Console — Saturation has no SC).
+    // for Saturation (Tube/Console - Saturation has no SC).
     if (mScBtn && mScBtn->isVisible())
     {
         mScBtn->setBounds(header.removeFromRight(110).withSizeKeepingCentre(108, 20));

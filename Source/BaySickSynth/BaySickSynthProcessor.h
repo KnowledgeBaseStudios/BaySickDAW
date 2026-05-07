@@ -11,7 +11,7 @@
 //
 // CPU safeguarding: updateFromApvts() guards every setter with a cached
 // last-value comparison.  Only calls the setter when value actually changed.
-// processBlock fires hundreds of times per second — keep setters cheap.
+// processBlock fires hundreds of times per second - keep setters cheap.
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickSynthProcessor : public juce::AudioProcessor,
                               public ISidechainEngine

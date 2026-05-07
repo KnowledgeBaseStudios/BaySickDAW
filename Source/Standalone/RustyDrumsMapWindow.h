@@ -7,7 +7,7 @@ class BaySickRustyDrumsProcessor;
 // J-7b: Help-menu reference popup that lists every kit-native MIDI note
 // alongside its sound type and articulation label.  Driven by the engine's
 // PianoRollKey list (parsed at kit-load time from `keymap.sfz`); when no kit
-// is loaded the table renders empty.  Style mirrors KeyBindsWindow — a single
+// is loaded the table renders empty.  Style mirrors KeyBindsWindow - a single
 // scrollable table inside a self-deleting DocumentWindow.
 // ─────────────────────────────────────────────────────────────────────────────
 

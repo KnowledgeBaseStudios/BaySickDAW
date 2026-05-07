@@ -168,7 +168,7 @@ void EQ8DSP::reset()
 //   - muted
 //   - dynamic disabled AND it's a gain-bearing type (Bell/Shelf/Tilt) at 0 dB
 // Filter types (LP/HP/BP/Notch) are never treated as identity here even at
-// extreme cutoffs — conservative: they always count as "doing something".
+// extreme cutoffs - conservative: they always count as "doing something".
 // The OFF type (6) is always identity by definition.
 //
 // Returns true if every band is identity (so process() can be skipped entirely).
@@ -176,7 +176,7 @@ bool EQ8DSP::isIdentity() const noexcept
 {
     constexpr float kZeroEpsilon = 0.001f;   // sub-millibel; user can't hear
     // D.4-Q6 fix (2026-05-01): mainLevel != 0 must NOT short-circuit the
-    // EQ to bypass — the multiply happens at the end of process() so the
+    // EQ to bypass - the multiply happens at the end of process() so the
     // early-return path skipped it.  All-bands-flat with mainLevel = +6 dB
     // previously produced 0 dB output.  Now any non-zero mainLevel keeps
     // process() running so the gain is applied.

@@ -3,7 +3,7 @@
 #include "DSPBase.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FurmanEQStyleDSP — Phase I-12 (2026-05-03)
+// FurmanEQStyleDSP - Phase I-12 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // EQFH Style Pro Parametric EQ.  Models the Furman PQ-3 hardware:
 //   * Master Input Volume (preamp gain stage with sigmoid soft-clip,

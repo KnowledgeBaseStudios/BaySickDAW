@@ -25,7 +25,7 @@ class VibeSynthProcessor;
 //      arena slot.  Predecessors include the 11 bus PassiveStripTasks
 //      whose _sendTo defaults to kMaster, plus any direct-to-master
 //      insert sends configured via the routing graph.
-//   3. Call mGraph->processMasterBus(blockView, mCtx->bpm) — runs master
+//   3. Call mGraph->processMasterBus(blockView, mCtx->bpm) - runs master
 //      rack + EQ + fader + peak drain in-place.
 //   4. Set mDoneFlag.store(true, memory_order_release).  This is the
 //      signal the dispatcher's runUntil loop is polling; release ordering

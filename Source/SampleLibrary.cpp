@@ -54,8 +54,8 @@ bool SampleLibrary::isDrumPack (const juce::String& folderName)
 {
     // Drum heuristic: substring match (case-insensitive) on either "Drums"
     // or "Percussion".  Substring (not equals) so the actual installed
-    // folder names — "Hip Hop Drums Package", "EDM Drums Package",
-    // "Percussion Package" — all match.  Layer / Bass-page packs: every
+    // folder names - "Hip Hop Drums Package", "EDM Drums Package",
+    // "Percussion Package" - all match.  Layer / Bass-page packs: every
     // other pack (Brass / Keys / Strings / Woodwinds / etc.).
     if (folderName.containsIgnoreCase ("Drums"))      return true;
     if (folderName.containsIgnoreCase ("Percussion")) return true;

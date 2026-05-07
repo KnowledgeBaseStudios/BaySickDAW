@@ -28,7 +28,7 @@
 class AriaControlPanel : public juce::Component
 {
 public:
-    // Engine-agnostic binding.  Every field except apvts may be left empty —
+    // Engine-agnostic binding.  Every field except apvts may be left empty -
     // missing closures degrade gracefully (kit-default reset → 64; label →
     // empty string; param attachment → no-op).
     struct Binding
@@ -69,15 +69,15 @@ private:
     int mNativeW { 775 };
     int mNativeH { 335 };
 
-    // Image cache — every PNG from the kit's GUI/ folder loaded once + reused
+    // Image cache - every PNG from the kit's GUI/ folder loaded once + reused
     // across knobs that share the same filmstrip.
     std::unordered_map<juce::String, juce::Image> mImageCache;
 
-    // Background — drawn in paint() rather than via a child Component so child
+    // Background - drawn in paint() rather than via a child Component so child
     // widgets can sit on top without re-parenting.
     juce::Image mBackgroundImage;
 
-    // Static text labels — drawn in paint().  Position + style stored verbatim.
+    // Static text labels - drawn in paint().  Position + style stored verbatim.
     struct StaticText
     {
         juce::Rectangle<float> nativeRect;     // x, y, w, h in XML's native coords

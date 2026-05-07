@@ -2,7 +2,7 @@
 #include <JuceHeader.h>
 #include <cmath>
 
-// ── BaySickSynthLAF — "Flat Ring / FL Studio MiniSynth" ───────────────────────
+// ── BaySickSynthLAF - "Flat Ring / FL Studio MiniSynth" ───────────────────────
 // Palette:
 //   Main bg       : #1C1E21      Visualizer bg  : #0A0B0C
 //   Arc / active  : #A0DB2B  (FL Studio green)
@@ -73,7 +73,7 @@ public:
             g.strokePath (hex, juce::PathStrokeType (1.0f));
         }
 
-        // ── Track arc (inactive bg) — lineTo loop per CLAUDE.md ──────────────
+        // ── Track arc (inactive bg) - lineTo loop per CLAUDE.md ──────────────
         {
             juce::Path track;
             const int kSteps = 96;
@@ -196,7 +196,7 @@ public:
             return;
         }
 
-        // Non-toggle push style (tab bar, preset menu, etc.) — unchanged.
+        // Non-toggle push style (tab bar, preset menu, etc.) - unchanged.
         juce::Colour fill;
         if      (on)          fill = juce::Colour (kGreen);
         else if (down)        fill = juce::Colour (kInactive).brighter (0.12f);
@@ -233,7 +233,7 @@ public:
                           juce::Justification::centred, 1);
     }
 
-    // ── Label — force text color when setColour not applied via component ──────
+    // ── Label - force text color when setColour not applied via component ──────
     void drawLabel (juce::Graphics& g, juce::Label& label) override
     {
         g.fillAll (label.findColour (juce::Label::backgroundColourId));

@@ -2,7 +2,7 @@
 #include <cmath>
 
 // Batch E #9 (2026-05-01): musical-range constants extracted from hot path.
-// Not user-tunable — chosen to give the synth a particular feel.  Renamed
+// Not user-tunable - chosen to give the synth a particular feel.  Renamed
 // from naked literals so the intent is self-documenting.
 namespace
 {
@@ -85,7 +85,7 @@ void BaySickSynthVoice::startNote (int midiNote, float velocity,
     mDeclickGain = 0.0f;
     mDeclickStep = 1.0f / (float) fadeSamples;
 
-    // Arm transient injector (P3.5) — short HPF'd noise burst on noteOn.
+    // Arm transient injector (P3.5) - short HPF'd noise burst on noteOn.
     // Only fires when amount > 0 so the voice stays click-free by default.
     if (mTransientAmount > 0.0001f)
     {
@@ -166,7 +166,7 @@ void BaySickSynthVoice::retargetLegato (int midiNote)
     }
 
     mCurrentNote = midiNote;
-    // Velocity preserved from the original noteOn — feels more musical.
+    // Velocity preserved from the original noteOn - feels more musical.
 }
 
 void BaySickSynthVoice::pitchWheelMoved (int newValue)
@@ -622,7 +622,7 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
             --mTransientSamplesRemaining;
         }
 
-        // ── 10c. Unison (P3.11) — detuned saw stack, stereo-spread ────────────
+        // ── 10c. Unison (P3.11) - detuned saw stack, stereo-spread ────────────
         //   Adds (mUnisonVoices - 1) saw copies at slightly detuned frequencies,
         //   panned symmetrically across stereo by spread. Main voice stays centred.
         //   Applied post-amp-env + velocity so overall level tracks the note.
@@ -802,7 +802,7 @@ void BaySickSynthVoice::rebuildOscWavetable()
             break;
 
         case BssWaveform::Pulse:
-            // Inline phase — no wavetable needed; reset osc to harmless state
+            // Inline phase - no wavetable needed; reset osc to harmless state
             mOsc.buildSine();
             break;
 
@@ -825,7 +825,7 @@ void BaySickSynthVoice::rebuildOscWavetable()
         case BssWaveform::DeafSaw:
         case BssWaveform::SpreadOct:
         case BssWaveform::SpreadFifth:
-            // All inline — reset osc to harmless state
+            // All inline - reset osc to harmless state
             mOsc.setUnisonVoices (1, 0.0f);
             mOsc.buildSine();
             break;

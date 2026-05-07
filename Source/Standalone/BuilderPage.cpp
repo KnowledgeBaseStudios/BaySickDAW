@@ -20,7 +20,7 @@ static const Colour kBlockCols[8] = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BrowserItem — single draggable box used for all 3 browser tabs
+// BrowserItem - single draggable box used for all 3 browser tabs
 // ─────────────────────────────────────────────────────────────────────────────
 BrowserItem::BrowserItem(Kind k, int index, const String& displayName)
     : mKind(k), mIndex(index), mName(displayName)
@@ -32,19 +32,19 @@ void BrowserItem::paint(Graphics& g)
 {
     auto b = getLocalBounds().toFloat().reduced(1.f);
 
-    // Background gradient — accent-tinted, brighter at top.
+    // Background gradient - accent-tinted, brighter at top.
     Colour bg = mAccent.darker(mSelected ? 0.0f : 0.35f);
     g.setGradientFill(ColourGradient(bg.brighter(0.25f), b.getX(), b.getY(),
                                      bg.darker(0.20f),    b.getX(), b.getBottom(), false));
     g.fillRoundedRectangle(b, 4.f);
 
-    // Border — brighter when selected.
+    // Border - brighter when selected.
     g.setColour(mSelected ? Colours::white.withAlpha(0.85f)
                           : mAccent.brighter(0.35f).withAlpha(0.6f));
     g.drawRoundedRectangle(b, 4.f, mSelected ? 1.5f : 1.f);
 
 
-    // Drag-affordance dots (left edge) — hint that the item can be dragged.
+    // Drag-affordance dots (left edge) - hint that the item can be dragged.
     g.setColour(Colours::white.withAlpha(0.35f));
     const float gx = b.getX() + 4.f;
     for (int i = 0; i < 3; ++i)
@@ -158,7 +158,7 @@ void AudioCategoryItem::paintItem (Graphics& g, int width, int height)
 {
     auto r = Rectangle<int> (width, height).reduced (2, 1).toFloat();
 
-    // Header background — slightly lighter than item background, with accent tint
+    // Header background - slightly lighter than item background, with accent tint
     g.setColour (Colour (0xff1c2028));
     g.fillRoundedRectangle (r, 2.0f);
     g.setColour (mAccent.withAlpha (0.3f));
@@ -337,7 +337,7 @@ void BrowserPanel::rebuildAudioRows()
     // category, re-enumerate via onEnumerateAudio (page-walk), bucket by
     // category, re-attach.  mAudioPaths still tracks position-by-libIdx so
     // the existing right-click "Remove" + drag descriptor flows keep working
-    // (descriptor format is `audio:<libIdx>` — unchanged from flat-list era).
+    // (descriptor format is `audio:<libIdx>` - unchanged from flat-list era).
     mAudioPaths.clear();
     if (! mClipsCat || ! mVoxCat || ! mInstCat) return;
 
@@ -400,7 +400,7 @@ void BrowserPanel::rebuildAudioRows()
         if      (e.category == "Clips") mClipsCat->addSubItem (leaf);
         else if (e.category == "Vox")   mVoxCat  ->addSubItem (leaf);
         else if (e.category == "Inst")  mInstCat ->addSubItem (leaf);
-        else                            delete leaf;   // unknown category — drop
+        else                            delete leaf;   // unknown category - drop
     }
 }
 
@@ -421,7 +421,7 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
     m.addItem (kIdReveal,    "Reveal in Explorer");
     m.addSeparator();
 
-    // Choke Group submenu — same model as the flat-list audio context menu.
+    // Choke Group submenu - same model as the flat-list audio context menu.
     const int curGroup = mPM.getAudioLibraryChokeGroup (libIdx);
     PopupMenu chokeSub;
     chokeSub.addItem (kIdChokeBase, "None", true, curGroup == 0);
@@ -434,7 +434,7 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
 
     // Capture the resolved absolute path BEFORE the async menu fires so
     // Reveal in Explorer doesn't try to walk the relative-path string the
-    // library stores ("Samples/foo.wav") — that fails File::existsAsFile.
+    // library stores ("Samples/foo.wav") - that fails File::existsAsFile.
     const String absPath = item.getFullPath();
     auto onRename = item.onRenameRequested;
 
@@ -453,7 +453,7 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
             {
                 // G-6: kick off the duplicate flow.  Default name = "<base>
                 // Duplicate" (extension preserved automatically by the
-                // helper).  Rename path is recursive — re-prompts with the
+                // helper).  Rename path is recursive - re-prompts with the
                 // user's last value.
                 if (absPath.isNotEmpty())
                 {
@@ -517,7 +517,7 @@ void BrowserPanel::runAudioDuplicateFlow (const juce::String& sourceAbsPath,
     const String ext = source.getFileExtension();   // e.g. ".wav"
 
     // Name prompt (juce::AlertWindow with single text editor row).  Modal
-    // pattern matches RibbonTabBar::startRename — deleteWhenDismissed = true
+    // pattern matches RibbonTabBar::startRename - deleteWhenDismissed = true
     // so the AlertWindow deletes itself once the callback fires.
     auto* aw = new juce::AlertWindow ("Duplicate Clip",
                                        "Enter a name for the duplicate:",
@@ -545,11 +545,11 @@ void BrowserPanel::runAudioDuplicateFlow (const juce::String& sourceAbsPath,
                 if (stem.endsWithIgnoreCase (ext)) stem = stem.dropLastCharacters (ext.length());
                 File dest = destDir.getChildFile (stem + ext);
 
-                if (dest == source) return;   // same file — no-op
+                if (dest == source) return;   // same file - no-op
 
                 if (dest.existsAsFile())
                 {
-                    // G-7 (2026-04-29): no-file-delete contract — Overwrite
+                    // G-7 (2026-04-29): no-file-delete contract - Overwrite
                     // dropped.  User can either pick a new name or cancel.
                     // Prevents BaySickDAW from ever deleting user audio files.
                     auto* conflict = new juce::AlertWindow (
@@ -577,7 +577,7 @@ void BrowserPanel::runAudioDuplicateFlow (const juce::String& sourceAbsPath,
                     return;
                 }
 
-                // No conflict — copy and spawn.
+                // No conflict - copy and spawn.
                 if (source.copyFileTo (dest))
                 {
                     if (self->onDuplicateClipSpawn)
@@ -644,7 +644,7 @@ void BrowserPanel::refresh()
     else if (mActiveTab == 1)
     {
         // G-5 (2026-04-29): tree is page-driven so the snapshot must include
-        // page enumeration too — otherwise add/remove/rename of a Clips/
+        // page enumeration too - otherwise add/remove/rename of a Clips/
         // Vox/Inst page wouldn't trigger a tree rebuild.
         snapshot << "A:" << mPM.getNumAudioLibrary() << "|";
         for (int i = 0; i < mPM.getNumAudioLibrary(); ++i)
@@ -748,7 +748,7 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
         }
     }
 
-    // D3: Choke Group submenu — audio items only (per-clip, persisted in the
+    // D3: Choke Group submenu - audio items only (per-clip, persisted in the
     // audio library entry).  Synth choke uses the per-tab context menu.
     if (kind == BrowserItem::Kind::Audio)
     {
@@ -948,7 +948,7 @@ void BrowserPanel::renameAutomationAt(int idx, const String& newName)
     //
     // Bug fix 2026-04-21: compare against each other template's EFFECTIVE DISPLAY
     //   NAME (userDisplayName if set, else resolver output), not just the raw
-    //   userDisplayName field — otherwise typing "Bass" onto template A would
+    //   userDisplayName field - otherwise typing "Bass" onto template A would
     //   sail through the check because template B's userDisplayName is empty,
     //   but B's visible browser label is "Bass 1 - Harmless - …" (which the
     //   user might then try to duplicate-rename, producing a real collision).
@@ -1055,7 +1055,7 @@ void BrowserPanel::resized()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ArrangementGrid — constructor
+// ArrangementGrid - constructor
 // ─────────────────────────────────────────────────────────────────────────────
 ArrangementGrid::ArrangementGrid(PatternManager& pm,
                                  AudioFormatManager& afm,
@@ -1071,7 +1071,7 @@ ArrangementGrid::ArrangementGrid(PatternManager& pm,
 ArrangementGrid::~ArrangementGrid() = default;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Coordinate helpers  (no kLabelW offset — labels are external)
+// Coordinate helpers  (no kLabelW offset - labels are external)
 // ─────────────────────────────────────────────────────────────────────────────
 int ArrangementGrid::barToX(float bar) const
 {
@@ -1161,7 +1161,7 @@ bool ArrangementGrid::isSelected(int idx) const
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Automation point hit test — returns point index within lane, or -1
+// Automation point hit test - returns point index within lane, or -1
 // ─────────────────────────────────────────────────────────────────────────────
 int ArrangementGrid::hitTestAutomPoint(int blockIdx, int x, int y) const
 {
@@ -1262,7 +1262,7 @@ AudioThumbnail* ArrangementGrid::getOrCreateThumbnail(const juce::String& path) 
     if (path.isEmpty()) return nullptr;
     if (mThumbnails.count(path) == 0)
     {
-        // P4: stored path may be relative ("Samples/kick.wav") — resolve via
+        // P4: stored path may be relative ("Samples/kick.wav") - resolve via
         // the callback (wired by BuilderPage to VibeSynthProcessor).  Cache
         // key uses the ORIGINAL path string so draw-code lookups (which pass
         // b.audioFilePath as-is) always hit the same entry.  When the
@@ -1318,7 +1318,7 @@ void ArrangementGrid::drawRuler(Graphics& g) const
         }
     }
 
-    // Bar lines + labels (always shown). No upper cap on bar number — the
+    // Bar lines + labels (always shown). No upper cap on bar number - the
     // ruler extends as far as the viewport reaches, regardless of song length.
     (void)totalBars;
     for (int bar = (int)mBarOff; bar <= maxBar; ++bar)
@@ -1410,7 +1410,7 @@ void ArrangementGrid::drawRuler(Graphics& g) const
     g.drawText("Ctrl+Scroll=zoom  Alt+Scroll=vZoom  P=Draw  B=Paint  E=Select  D=Delete  T=Mute",
                4, 1, 500, kRulerH - 2, Justification::centredLeft);
 
-    // Playhead triangle arrow — drawn last so it's always on top of ruler content
+    // Playhead triangle arrow - drawn last so it's always on top of ruler content
     if (mPlayheadBar >= 0.0)
     {
         int px = barToX((float)mPlayheadBar);
@@ -1556,7 +1556,7 @@ void ArrangementGrid::drawPatternClip(Graphics& g, const ArrangementBlock& b,
         g.drawRoundedRectangle((float)x + 0.5f, (float)y + 0.5f, (float)w - 1.f, (float)h - 1.f, 3.f, 1.f);
     }
 
-    // Muted overlay — 2026-04-26 (D-1): 30% black wash + diagonal hatch.
+    // Muted overlay - 2026-04-26 (D-1): 30% black wash + diagonal hatch.
     if (b.muted)
     {
         g.setColour(Colour(0x4d000000));   // ~30% alpha black
@@ -1646,7 +1646,7 @@ void ArrangementGrid::drawAudioClip(Graphics& g, const ArrangementBlock& b,
                    x + w - 36, y + 1, 34, 12, Justification::centredRight, false);
     }
 
-    // Muted overlay — 2026-04-26 (D-1): 30% black wash + diagonal hatch.
+    // Muted overlay - 2026-04-26 (D-1): 30% black wash + diagonal hatch.
     if (b.muted)
     {
         g.setColour(Colour(0x4d000000));   // ~30% alpha black
@@ -1697,7 +1697,7 @@ void ArrangementGrid::drawAutomationClip(Graphics& g, const ArrangementBlock& b,
 
         if (!lane.points.empty())
         {
-            // ── Sample curve via evaluateAt — handles tension, spline, stepped ─
+            // ── Sample curve via evaluateAt - handles tension, spline, stepped ─
             // Sort to find first/last positions
             std::vector<ControlPoint> sortedPts = lane.points;
             std::sort(sortedPts.begin(), sortedPts.end(),
@@ -1790,7 +1790,7 @@ void ArrangementGrid::drawAutomationClip(Graphics& g, const ArrangementBlock& b,
         }
         else
         {
-            // No points yet — draw dashed guide line at midpoint
+            // No points yet - draw dashed guide line at midpoint
             float midY = iy + ih * 0.5f;
             g.setColour(kAutomCol.withAlpha(0.3f));
             float dashLen = 4.f;
@@ -1822,7 +1822,7 @@ void ArrangementGrid::drawAutomationClip(Graphics& g, const ArrangementBlock& b,
         g.drawText(label, x + 4, y + 1, w - 8, h - 2, Justification::centredLeft, true);
     }
 
-    // Muted overlay — 2026-04-26 (D-1): 30% black wash + diagonal hatch.
+    // Muted overlay - 2026-04-26 (D-1): 30% black wash + diagonal hatch.
     if (b.muted)
     {
         g.setColour(Colour(0x4d000000));   // ~30% alpha black
@@ -2099,7 +2099,7 @@ void ArrangementGrid::deleteSelected()
     resized(); repaint();
 }
 
-// Ctrl+Left / Ctrl+Right — shift the ruler time-selection box by its own
+// Ctrl+Left / Ctrl+Right - shift the ruler time-selection box by its own
 // length.  After the shift, re-populate `mSelection` from the new range
 // using the same overlap rule as the ruler-release auto-select so the
 // visual highlight stays in sync.  No-op when no range is set; clamps to
@@ -2340,7 +2340,7 @@ void ArrangementGrid::fitBlockToViewport(int blockIdx)
     resized(); repaint();
 }
 
-// 2026-04-26 (D-2): TooltipClient — show marker label / TS info when the
+// 2026-04-26 (D-2): TooltipClient - show marker label / TS info when the
 // mouse hovers over a flag or TS pill on the ruler.  Returns empty string
 // when the cursor is outside the ruler band so we don't overwrite tooltips
 // owned by other components (block names etc).
@@ -2375,7 +2375,7 @@ juce::String ArrangementGrid::getTooltip()
 // 2026-04-26 (D-2): right-click on the Builder ruler.  If the click lands
 // near an existing time-marker / TS-change, the menu offers Edit / Delete.
 // Otherwise it offers Add at this bar (or at the playhead if the user
-// invoked it via Alt+T / Shift+Alt+T — those reuse the prompt helpers).
+// invoked it via Alt+T / Shift+Alt+T - those reuse the prompt helpers).
 void ArrangementGrid::showRulerContextMenu(int xPx)
 {
     const float clickedBar  = xToBar(xPx);
@@ -2502,7 +2502,7 @@ void ArrangementGrid::promptEditTimeSigChange(int idx)
 // quantize options.  Snaps each selected block's startBar to the chosen unit.
 //
 // NOTE: ArrangementBlock currently stores startBar as int, so sub-bar units
-// (1/2 bar / beat / step) round to the same integer bar — effectively a
+// (1/2 bar / beat / step) round to the same integer bar - effectively a
 // no-op until startBar gets promoted to fractional alongside per-bar
 // time-signature changes (D-2).  The math is written for fractional units so
 // it Just Works once that migration lands.
@@ -2667,7 +2667,7 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     if (!f.existsAsFile()) return;
 
     // Read file metadata to get actual duration.
-    // Use a local AudioFormatManager — message thread, so file I/O is fine.
+    // Use a local AudioFormatManager - message thread, so file I/O is fine.
     juce::AudioFormatManager fm;
     fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
@@ -2728,11 +2728,11 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ghost clip helpers (Task 4 — Source Picker drag)
+// Ghost clip helpers (Task 4 - Source Picker drag)
 // ─────────────────────────────────────────────────────────────────────────────
 void ArrangementGrid::setGhostClip(const juce::OptionalScopedPointer<ArrangementBlock>*)
 {
-    // API stub — ghost block set directly via mHasGhost/mGhostBlock
+    // API stub - ghost block set directly via mHasGhost/mGhostBlock
 }
 
 void ArrangementGrid::clearGhostClip()
@@ -2754,7 +2754,7 @@ void ArrangementGrid::placeGhostClip()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// File Drag and Drop (Task 5 — audio import from OS)
+// File Drag and Drop (Task 5 - audio import from OS)
 // ─────────────────────────────────────────────────────────────────────────────
 bool ArrangementGrid::isInterestedInFileDrag(const StringArray& files)
 {
@@ -2807,7 +2807,7 @@ void ArrangementGrid::filesDropped(const StringArray& files, int x, int y)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DragAndDropTarget — accept BrowserItem drags from BrowserPanel
+// DragAndDropTarget - accept BrowserItem drags from BrowserPanel
 // Description format: "kind:index"  (kind = pattern / audio / auto)
 // ─────────────────────────────────────────────────────────────────────────────
 static bool parseBrowserDragDescription(const var& desc, String& outKind, int& outIdx)
@@ -3047,10 +3047,10 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         return;
     }
 
-    // Right-click: context menu — also handles automation point right-click menu
+    // Right-click: context menu - also handles automation point right-click menu
     if (e.mods.isRightButtonDown())
     {
-        // 2026-04-26 (D-1): modifier-aware right-click — these branches fire
+        // 2026-04-26 (D-1): modifier-aware right-click - these branches fire
         // BEFORE the context menu so they take priority over the default flow.
         if (e.mods.isCtrlDown() && e.mods.isShiftDown())
         {
@@ -3116,7 +3116,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
             }
             showClipContextMenu(hit);
         } else if (mActiveTool == AGTool::Delete) {
-            // nothing — right-click on empty with Delete tool is fine
+            // nothing - right-click on empty with Delete tool is fine
         }
         return;
     }
@@ -3292,7 +3292,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                 }
                 else
                 {
-                    // Near right edge — resize the clip
+                    // Near right edge - resize the clip
                     beginEdit("Resize");
                     mResizing        = true;
                     mResizeIdx       = hit;
@@ -3570,7 +3570,7 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
 
     if (mSlipping && mSlipIdx >= 0)
     {
-        // Slip edit: visual only (stub — no audio data shift yet)
+        // Slip edit: visual only (stub - no audio data shift yet)
         repaint();
         return;
     }
@@ -3600,7 +3600,7 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
             // operate on those blocks immediately.  The range itself stays
             // set so timeline-aware operations (Ctrl+B Duplicate Timeline)
             // continue to work.  Overlap rule: block_start < t1 AND
-            // block_end > t0 — covers blocks that start before, end after,
+            // block_end > t0 - covers blocks that start before, end after,
             // or fully contain the range, not just blocks whose start lies
             // inside it.
             const float t0 = jmin(mTimeSelStart, mTimeSelEnd);
@@ -3816,7 +3816,7 @@ bool ArrangementGrid::keyPressed(const KeyPress& key)
     const bool alt   = key.getModifiers().isAltDown();
 
     // Tool shortcuts (no modifiers)
-    // KeyPress::operator== does case-insensitive keyCode comparison — use it for bare letters
+    // KeyPress::operator== does case-insensitive keyCode comparison - use it for bare letters
     if (!ctrl && !alt && !shift)
     {
         if (key == KeyPress('p')) { setTool(AGTool::Draw);        return true; }
@@ -3839,7 +3839,7 @@ bool ArrangementGrid::keyPressed(const KeyPress& key)
     }
 
     // 2026-04-26 (D-1 / D-2): Alt+letter handlers.
-    // Normalize keycode to lowercase via `| 32` — JUCE on Windows can return
+    // Normalize keycode to lowercase via `| 32` - JUCE on Windows can return
     // either case for Alt+letter depending on shift state, mirroring the
     // Piano Roll Alt-tool-letter pattern (`PianoRoll.cpp:886`).
     if (alt && !ctrl)
@@ -3862,7 +3862,7 @@ bool ArrangementGrid::keyPressed(const KeyPress& key)
     // Ctrl shortcuts
     // JUCE on Windows stores letter keyCodes as the uppercase ASCII value (MapVirtualKey MAPVK_VK_TO_CHAR),
     // e.g. 'A'=65, 'Z'=90. Use uppercase literals with getKeyCode() inside modifier blocks.
-    // 2026-04-26 (B-5): Ctrl+Z / Ctrl+Alt+Z migrated to global BSCommands —
+    // 2026-04-26 (B-5): Ctrl+Z / Ctrl+Alt+Z migrated to global BSCommands -
     // page-local Ctrl+Z handler removed.  Other Ctrl shortcuts stay local.
     if (ctrl && !alt) {
         const int kc = key.getKeyCode();
@@ -3912,7 +3912,7 @@ bool ArrangementGrid::keyPressed(const KeyPress& key)
         if (key == KeyPress::downKey)  { nudgeSelection( 0, +1); return true; }
     }
 
-    // 2026-04-26 (B-4): Page Up/Down behavior is tool-dependent — when the
+    // 2026-04-26 (B-4): Page Up/Down behavior is tool-dependent - when the
     // Zoom tool is active they zoom in/out (matching the spreadsheet spec);
     // otherwise they fall through to vertical viewport scroll.
     if (!ctrl && !shift && !alt) {
@@ -4222,7 +4222,7 @@ ArrangementToolbar::ArrangementToolbar()
     mRedoBtn->setEnabled(false);
     addAndMakeVisible(*mRedoBtn);
 
-    // 2026-04-26 (D-1b): History button — opens the global undo-history list.
+    // 2026-04-26 (D-1b): History button - opens the global undo-history list.
     mHistoryBtn = std::make_unique<TextButton>("H");
     mHistoryBtn->setTooltip("Show undo history");
     mHistoryBtn->onClick = [this] { if (onShowHistory) onShowHistory(); };
@@ -4361,7 +4361,7 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
     mGridViewport->setScrollBarThickness(10);
     addAndMakeVisible(*mGridViewport);
 
-    // Track header panel (Task 10 — fixed left label column)
+    // Track header panel (Task 10 - fixed left label column)
     mTrackHeader = std::make_unique<TrackHeaderPanel>(*mGrid, pm);
     addAndMakeVisible(*mTrackHeader);
 
@@ -4469,7 +4469,7 @@ void BuilderPage::resized()
 
     // Grid viewport (remaining area)
     mGridViewport->setBounds(b);
-    // Grid content sized by ArrangementGrid::resized() — just trigger it
+    // Grid content sized by ArrangementGrid::resized() - just trigger it
     if (mGrid) mGrid->resized();
 }
 

@@ -4,11 +4,11 @@
 #include "../Standalone/SharedUI.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickNAMIREditor — Phase G-1.4
+// BaySickNAMIREditor - Phase G-1.4
 // ─────────────────────────────────────────────────────────────────────────────
 // 760×340 panel, two-tone amp/cab faceplate using existing widget vocabulary
 // (VKnob / DualLabelToggle / ChickenHeadSelector).  No skeuomorphic filmstrips
-// — those were spec'd in NAM & IR Loader.txt §3.2 but Jeff's house style is
+// - those were spec'd in NAM & IR Loader.txt §3.2 but Jeff's house style is
 // VibeLAF.  Picker buttons accept right-click for a recent-files popup; the
 // whole component is also a FileDragAndDropTarget so .nam → loadNamModel and
 // .wav → loadImpulseResponse just work.
@@ -29,7 +29,7 @@ public:
     void filesDropped           (const juce::StringArray& files, int x, int y) override;
 
 private:
-    // APVTS listener — keeps the A/B radio + per-slot labels in sync when the
+    // APVTS listener - keeps the A/B radio + per-slot labels in sync when the
     // ab_slot param changes from anywhere (other UI, automation, project load).
     void parameterChanged (const juce::String& paramID, float newValue) override;
 
@@ -42,7 +42,7 @@ private:
     void showError        (const juce::String& msg);
     void setActiveSlotFromUI (int slot);
 
-    // Recents — 10-deep per kind ("nam" / "ir"), persisted in
+    // Recents - 10-deep per kind ("nam" / "ir"), persisted in
     // Documents/BaySickDAW/settings.xml under <RecentNAMFiles> / <RecentIRFiles>.
     static juce::File settingsFile();
     juce::StringArray loadRecents (const juce::String& tag);
@@ -96,7 +96,7 @@ private:
     std::unique_ptr<SliderAtt> mInGainAtt, mGateThreshAtt, mGateReleaseAtt,
                                mLowCutAtt, mHighCutAtt, mCabMixAtt, mOutputAtt;
 
-    // ── Selectors (manual APVTS sync — chicken head doesn't have an APVTS
+    // ── Selectors (manual APVTS sync - chicken head doesn't have an APVTS
     //    attachment helper) ───────────────────────────────────────────────
     ChickenHeadSelector mOSSelector;
     juce::Label         mOSSelectorLbl;

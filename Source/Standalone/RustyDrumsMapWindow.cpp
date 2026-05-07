@@ -5,7 +5,7 @@
 
 namespace
 {
-constexpr int kColKey       = 1;   // J-7b: musical note name (e.g. "C3", "D#5") — primary cross-ref
+constexpr int kColKey       = 1;   // J-7b: musical note name (e.g. "C3", "D#5") - primary cross-ref
 constexpr int kColMidi      = 2;   // raw MIDI number for advanced users
 constexpr int kColSound     = 3;
 constexpr int kColArtic     = 4;
@@ -80,7 +80,7 @@ void RustyDrumsMapTable::rebuildRows()
 {
     mRows.clear();
 
-    // J-7b: prefer the live engine's parsed keymap when a kit is loaded —
+    // J-7b: prefer the live engine's parsed keymap when a kit is loaded -
     // it reflects whatever .sfz the user actually has open.  When no engine
     // exists (Help menu opened before adding the BaySickRustyDrums tab),
     // fall back to parsing the canonical Big Rusty Drums kit directly so

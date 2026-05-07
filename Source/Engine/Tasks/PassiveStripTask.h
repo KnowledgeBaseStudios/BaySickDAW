@@ -10,7 +10,7 @@ class VibeSynthProcessor;
 
 // PassiveStripTask
 // ----------------
-// Inner DAG node task for strips that DON'T own an engine — Aux strips and
+// Inner DAG node task for strips that DON'T own an engine - Aux strips and
 // the 11 Bus strips (Layers / Bass / Drums / FX / Clips / Vox / Inst /
 // VoxBus2 / InstBus2 / InstBus3 / RustyDrumsBus).  Pull-model:
 //
@@ -24,7 +24,7 @@ class VibeSynthProcessor;
 //      pull from it.
 //
 // Bus DSP migration (Batch 9b, 2026-05-06)
-//   processBus is the unified bus DSP entry point — same code path serial
+//   processBus is the unified bus DSP entry point - same code path serial
 //   PluginProcessor and this task call.  Internally switches on channelId
 //   to the right per-bus chain (Layers/Bass/Drums via BusNode helpers,
 //   Clips/Vox/Inst/Vox2/Inst2/Inst3/Rusty inlined, FxBus → processEffectsBus,

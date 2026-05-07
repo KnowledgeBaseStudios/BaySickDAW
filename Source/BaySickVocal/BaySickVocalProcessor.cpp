@@ -7,7 +7,7 @@
 #include "../DSP/LimiterDSP.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickVocalProcessor — Phase H-1 skeleton (2026-05-01)
+// BaySickVocalProcessor - Phase H-1 skeleton (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace
@@ -53,7 +53,7 @@ BaySickVocalProcessor::createLayout()
     addI ("ab_slot",  "A/B Slot",       0,    1,   0);       // A/B compare snapshot
 
     // ── Realtime pitch correction stage (BaySickVocals tab bottom half) ─────
-    // Default OFF per spec — user opts in via the bypass toggle.
+    // Default OFF per spec - user opts in via the bypass toggle.
     addB ("pitch_realtime_bypass",  "Pitch Realtime Bypass",  true);
 
     // H-5 (2026-05-01) -- Pitch correction knobs.
@@ -285,7 +285,7 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         return;
     }
 
-    // Master bypass — entire processor passes input straight to output unchanged.
+    // Master bypass - entire processor passes input straight to output unchanged.
     const bool masterBypass = apvts.getRawParameterValue ("bsv_bypass")->load() > 0.5f;
     mScHelper.updateLevel (numSamples);
     if (masterBypass) return;

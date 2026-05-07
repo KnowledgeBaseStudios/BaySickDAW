@@ -49,7 +49,7 @@ namespace RenderEngine
     inline constexpr int kMaxWorkers = 8;
 
     // Iterations a worker spins on try_dequeue before falling back to its
-    // private juce::WaitableEvent. Tuned for ~50 microseconds at 5 GHz —
+    // private juce::WaitableEvent. Tuned for ~50 microseconds at 5 GHz -
     // well under typical inter-block idle windows.
     inline constexpr int kWorkerSpinIterations = 256;
 

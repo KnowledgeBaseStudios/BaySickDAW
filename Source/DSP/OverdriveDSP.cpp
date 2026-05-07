@@ -110,7 +110,7 @@ void OverdriveDSP::snapSmoothedToTargets()
 void OverdriveDSP::refreshFilterCoefs (int /*numSamples*/) {}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Setters — CPU-guarded. Coef recomputation moved INTO process() per spec §6c.
+// Setters - CPU-guarded. Coef recomputation moved INTO process() per spec §6c.
 // ─────────────────────────────────────────────────────────────────────────────
 void OverdriveDSP::setPreBand (float v)
 {

@@ -4,7 +4,7 @@
 #include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PitchTrackerYIN — Phase H-4 (2026-05-01)
+// PitchTrackerYIN - Phase H-4 (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 // Autocorrelation-based pitch tracker (YIN by de Cheveigné & Kawahara 2002,
 // with the standard CMNDF + threshold + parabolic interpolation refinements).
@@ -19,7 +19,7 @@
 //     2048-sample analysis window forward by hop=512 each iteration, runs
 //     YIN on the window, atomically publishes the detected fundamental Hz +
 //     confidence (0..1).
-//   * UI / DSP consumers call getFrequencyHz() / getConfidence() — wait-free
+//   * UI / DSP consumers call getFrequencyHz() / getConfidence() - wait-free
 //     atomic reads, no locks.
 //
 // Latency:
@@ -47,7 +47,7 @@ public:
     PitchTrackerYIN();
     ~PitchTrackerYIN();
 
-    // Set sample rate + start the worker thread.  Idempotent — calling again
+    // Set sample rate + start the worker thread.  Idempotent - calling again
     // restarts the worker at the new rate.
     void prepare (double sampleRate);
 
@@ -59,7 +59,7 @@ public:
     // For stereo input, callers should average L+R into a mono buffer first.
     void pushAudio (const float* mono, int numSamples) noexcept;
 
-    // Convenience overload — averages stereo L+R to mono internally.
+    // Convenience overload - averages stereo L+R to mono internally.
     void pushAudio (const float* left, const float* right, int numSamples) noexcept;
 
     // Wait-free reads (any thread).  0 Hz published when no pitch detected
@@ -71,7 +71,7 @@ public:
     void reset() noexcept;
 
 private:
-    // Background worker — pulls samples from the ring, runs YIN on rolling
+    // Background worker - pulls samples from the ring, runs YIN on rolling
     // analysis window, publishes results.  See .cpp for run() body.
     class WorkerThread;
     std::unique_ptr<WorkerThread> mWorker;
@@ -84,7 +84,7 @@ private:
     juce::AbstractFifo  mFifo { kRingSize };
     std::vector<float>  mFifoBuf;
 
-    // Published outputs — atomic for wait-free cross-thread reads.
+    // Published outputs - atomic for wait-free cross-thread reads.
     std::atomic<float>  mFreqHz     { 0.0f };
     std::atomic<float>  mConfidence { 0.0f };
 

@@ -4,14 +4,14 @@
 #include "PitchTrackerYIN.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SynthStyleDSP — Phase I-9 (2026-05-03)
+// SynthStyleDSP - Phase I-9 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // SY Style Polyphonic Synth pedal.  Real-time pitch-tracked synth in the
 // style of the BOSS SY-200 / SY-1.  Drives an internal oscillator voice
 // from the input's detected fundamental + amplitude envelope.
 //
 // Algorithm:
-//   1. Sum input L+R to mono and push into PitchTrackerYIN (H-4) — runs
+//   1. Sum input L+R to mono and push into PitchTrackerYIN (H-4) - runs
 //      pitch detection on its own background thread; we just read the
 //      atomic published Hz + confidence each block.
 //   2. Per-block envelope follower on the input (tracks dynamics so the

@@ -2,7 +2,7 @@
 #include "BaySickVocalProcessor.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickPitchEditor — H-6b (2026-05-02)
+// BaySickPitchEditor - H-6b (2026-05-02)
 //
 // Newtone-clone visual + interaction model.  See header for layout summary.
 // H-6b ships the empty-state shell: layout + paint match Newtone, but no

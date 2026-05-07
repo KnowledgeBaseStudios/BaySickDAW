@@ -3,7 +3,7 @@
 #include "DSPBase.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BassGraphicEQStyleDSP — Phase I-12 (2026-05-03)
+// BassGraphicEQStyleDSP - Phase I-12 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // GEB Style Bass Graphic EQ.  7 fixed peaking biquads at the classic
 // MXR M-108-style bass 7-band frequencies + master output fader.

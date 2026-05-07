@@ -353,7 +353,7 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
 {
     if (! state.isValid() || ! state.hasType (kStateRootTag))
     {
-        pedalsLog ("restoreFullState: REJECTED — state invalid or wrong root tag");
+        pedalsLog ("restoreFullState: REJECTED - state invalid or wrong root tag");
         return;
     }
 
@@ -371,7 +371,7 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
     auto slotsTree = state.getChildWithName ("Slots");
     if (! slotsTree.isValid())
     {
-        pedalsLog ("restoreFullState: NO Slots child — params not restored");
+        pedalsLog ("restoreFullState: NO Slots child - params not restored");
         return;
     }
 

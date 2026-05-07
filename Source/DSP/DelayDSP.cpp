@@ -485,7 +485,7 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         // ── Lo-Fi (sample-rate reduction + bit crush) ───────────────────────
         // D.4-Q5 fix (2026-05-01): applied to the delay-line READ (before the
         // feedback / output split) so the lo-fi character is heard on EVERY
-        // echo — not just on echo #2+ via feedback-buildup, which was the old
+        // echo - not just on echo #2+ via feedback-buildup, which was the old
         // placement and made lo-fi inaudible at low feedback levels.
         {
             mLoFiPhase += mLoFiRate / static_cast<float>(mSampleRate);
@@ -570,17 +570,17 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
 
         switch (mDelayModel)
         {
-            case 1: // Mono — L+R averaged into both lines
+            case 1: // Mono - L+R averaged into both lines
                 mLineL[mWritePos] = monoIn * mWetIn + feedL;
                 mLineR[mWritePos] = monoIn * mWetIn + feedR;
                 break;
 
-            case 2: // PingPong — L input feeds L line + R's feedback, and vice versa
+            case 2: // PingPong - L input feeds L line + R's feedback, and vice versa
                 mLineL[mWritePos] = inL * mWetIn + feedR;
                 mLineR[mWritePos] = inR * mWetIn + feedL;
                 break;
 
-            case 3: // Off — only feedback, no new input into delay
+            case 3: // Off - only feedback, no new input into delay
                 mLineL[mWritePos] = feedL;
                 mLineR[mWritePos] = feedR;
                 break;
@@ -817,7 +817,7 @@ void DelayDSP::setTone (float v)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Legacy setters (backward compat — map to new parameters)
+// Legacy setters (backward compat - map to new parameters)
 // ─────────────────────────────────────────────────────────────────────────────
 void DelayDSP::setFeedback (float fb)
 {
@@ -1039,7 +1039,7 @@ void DelayDSP::setStateInformation (const void* data, int sz)
         updateToneFilter();
         mToneFilter.reset();   // clear stale biquad state so preset load doesn't pop
         updateDiffusion();
-        // DC-blocker state is local to DSP — clear to avoid click on preset load
+        // DC-blocker state is local to DSP - clear to avoid click on preset load
         mDcBlockXL = mDcBlockYL = 0.0f;
         mDcBlockXR = mDcBlockYR = 0.0f;
         // A2 -- Snap the smoother so state-load doesn't trigger a 100 ms slide.

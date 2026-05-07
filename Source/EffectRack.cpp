@@ -151,7 +151,7 @@ void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidO
 
     // Stable per-slot identity for automation paramIds. Fresh UUID on each
     // user-facing load (effect-type swap drops old automation, which matches
-    // intuition — different effect = different knobs). setStateInformation
+    // intuition - different effect = different knobs). setStateInformation
     // passes the saved UUID via uuidOverride to keep automation lanes alive
     // across project save/load.
     juce::String newUuid = uuidOverride.isNotEmpty()
@@ -325,7 +325,7 @@ void EffectRack::packSlotsToTop()
             }
         }
     }
-    // `leaving` destructs here — any old effect tear-downs happen outside the lock.
+    // `leaving` destructs here - any old effect tear-downs happen outside the lock.
 
     if (onSlotsChanged) onSlotsChanged();
 }
@@ -642,12 +642,12 @@ void EffectRack::getStateInformation(juce::MemoryBlock& dest)
         slotTree.setProperty("type",     (int)mSlots[i].type,                                     nullptr);
         slotTree.setProperty("bypassed", mSlots[i].bypassed.load (std::memory_order_relaxed),     nullptr);
         // 2026-04-30: per-slot output Vol knob (post-effect gain in dB).
-        // Was missing from save — every project load reset every slot's
+        // Was missing from save - every project load reset every slot's
         // Vol knob to 0 dB.  Range -24..+12 dB per EditorPanelBase.
         slotTree.setProperty("outputGainDb", mSlots[i].outputGainDb,    nullptr);
         // C13: stable per-slot UUID drives automation paramIds.  Persisted
         // so automation lanes survive project reload.  Pre-C13 saves omit
-        // this property — those projects' lanes silently no-op (matches
+        // this property - those projects' lanes silently no-op (matches
         // the audit's existing Tier 4 stale-lane behavior).
         slotTree.setProperty("uuid",     mSlots[i].uuid,                 nullptr);
         // C.4 Phase 1: per-slot SC pick (-1 = no SC, 0..3 = strip SC line).

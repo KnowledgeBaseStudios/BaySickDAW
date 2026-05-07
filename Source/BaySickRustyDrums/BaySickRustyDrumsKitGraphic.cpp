@@ -17,7 +17,7 @@ struct ArticDef
     int         midiNote;
     int         pedalOpenNote;        // when nonzero AND pedal open, send this instead
     bool        isPedalToggle;
-    const char* channelName;          // J-8: which kit channel this articulation belongs to —
+    const char* channelName;          // J-8: which kit channel this articulation belongs to -
                                       //       used to grey out the hitbox when the loaded program
                                       //       doesn't include the corresponding piece.  Empty
                                       //       string for "(unassigned)" / non-piece articulations.
@@ -292,7 +292,7 @@ void BaySickRustyDrumsKitGraphic::paintHitboxHandles (juce::Graphics& g, const H
     // Tilt handle (X-axis perspective tilt): teal disc on the LEFT of the
     // ellipse, on a stalk perpendicular to the rotation handle.  Drag it
     // up/down (in image space, after rotation) to tilt the ellipse forward
-    // / backward — compresses the rendered + hit-tested ry.
+    // / backward - compresses the rendered + hit-tested ry.
     const float tiltStalk = juce::jmax (40.0f, h.rx * 0.5f);
     const auto leftImg = localToImage ({ -h.rx, 0.0f });
     const auto tiltImg = localToImage ({ -h.rx - tiltStalk, 0.0f });
@@ -320,7 +320,7 @@ void BaySickRustyDrumsKitGraphic::paint (juce::Graphics& g)
         return;
     }
 
-    // J-8 stage 1: full-bleed layout — no inner padding, no black border.
+    // J-8 stage 1: full-bleed layout - no inner padding, no black border.
     // The largest 5:3 sub-rectangle that fits inside the component centers
     // and the side bands fill what's left.
     const float aspect = kImageW / kImageH;
@@ -386,7 +386,7 @@ void BaySickRustyDrumsKitGraphic::paint (juce::Graphics& g)
     }
 
     // J-8 (2026-05-04): grey out hitbox regions whose channel isn't in the
-    // loaded program (Basic-mode visual feedback — Crash Sizzle 17, Stack,
+    // loaded program (Basic-mode visual feedback - Crash Sizzle 17, Stack,
     // China 18, Tom 22, Ride Sizzle 19 don't exist in Basic, so we paint a
     // semi-transparent dark overlay over their image areas).  Only runs when
     // a kit IS loaded; pre-load already dims everything via kitAlpha.
@@ -472,7 +472,7 @@ void BaySickRustyDrumsKitGraphic::paint (juce::Graphics& g)
 
     // Normal mode: only show a thin outline while a piece is held pressed.
     // Hover state (mHoverIdx) is still tracked for the tooltip, but no
-    // visual ring on hover — keeps the kit photo unobscured during browsing.
+    // visual ring on hover - keeps the kit photo unobscured during browsing.
     if (mPressedIdx >= 0 && mPressedIdx < (int) mHitboxes.size())
     {
         const auto& h = mHitboxes[(size_t) mPressedIdx];
@@ -538,11 +538,11 @@ BaySickRustyDrumsKitGraphic::hitTestHandle (juce::Point<float> screenPt, int box
         return std::abs (loc.x - lx) <= hot && std::abs (loc.y - ly) <= hot;
     };
 
-    // Rotation handle — sits above the ellipse top.
+    // Rotation handle - sits above the ellipse top.
     const float stalkLen = juce::jmax (40.0f, eRy * 0.5f);
     if (near (0.0f, -eRy - stalkLen)) return DragMode::Rotate;
 
-    // Tilt handle — sits to the left of the ellipse.
+    // Tilt handle - sits to the left of the ellipse.
     const float tiltStalk = juce::jmax (40.0f, h.rx * 0.5f);
     if (near (-h.rx - tiltStalk, 0.0f)) return DragMode::Tilt;
 
@@ -621,7 +621,7 @@ void BaySickRustyDrumsKitGraphic::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // Audition mode — disabled when no kit is loaded (overlay state).
+    // Audition mode - disabled when no kit is loaded (overlay state).
     if (! mKitLoaded) return;
     const int idx = hitTestPiece (e.position);
     if (idx < 0) return;
@@ -741,7 +741,7 @@ void BaySickRustyDrumsKitGraphic::mouseDrag (const juce::MouseEvent& e)
             h.ry = juce::jmax (kMinR, mDragOriginalBox.ry + dyRy * 0.5f);
 
             // Re-center so the anchor handle stays where it was on the image
-            // (anchorXLocal, anchorYLocal) — translate the center by the
+            // (anchorXLocal, anchorYLocal) - translate the center by the
             // half-delta of rx/ry along the rotated axes.
             const float halfDx = (h.rx - mDragOriginalBox.rx) * (anchorXLocal > 0 ? -1.0f : 1.0f);
             const float halfDy = (h.ry - mDragOriginalBox.ry) * (anchorYLocal > 0 ? -1.0f : 1.0f);

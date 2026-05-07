@@ -7,13 +7,13 @@
 // editable category (General / Builder / Piano Roll), plus a Mouse Reference
 // section embedded at the bottom of each tab.
 //
-// Per-row tooltips are surfaced via TableListBoxModel::getCellTooltip — JUCE's
+// Per-row tooltips are surfaced via TableListBoxModel::getCellTooltip - JUCE's
 // stock KeyMappingEditorComponent has no equivalent, which is why the popup
 // rolls its own table.  Mouse-reference rows are visually identical except
 // the "Set" / "Reset" buttons are absent and the row text is dimmed.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// One tab's worth of rows — editable command rows + non-editable mouse rows.
+// One tab's worth of rows - editable command rows + non-editable mouse rows.
 class KeyBindsTab : public juce::Component,
                     public juce::TableListBoxModel,
                     public juce::ChangeListener
@@ -69,7 +69,7 @@ public:
 
 private:
     juce::TabbedComponent mTabs { juce::TabbedButtonBar::TabsAtTop };
-    // Local tooltip window — the editor's main TooltipWindow only monitors
+    // Local tooltip window - the editor's main TooltipWindow only monitors
     // its own component tree, so the popup needs its own to show per-row hover
     // tips on the keymap rows.
     juce::TooltipWindow   mTooltips { this, 600 };
@@ -77,7 +77,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KeyBindsContent)
 };
 
-// The popup itself.  Self-deleting on close — owners hold a SafePointer.
+// The popup itself.  Self-deleting on close - owners hold a SafePointer.
 class KeyBindsWindow : public juce::DocumentWindow
 {
 public:

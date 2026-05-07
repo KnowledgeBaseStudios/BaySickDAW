@@ -277,7 +277,7 @@ HarmlessModEditor::HarmlessModEditor()
     // from the curve's last peak via recomputeSustainTime(). Manual override
     // deferred to Tier 3.
 
-    // ── Warp knobs (SPD/TNS/SKEW/PW) — per-tab per-source per-target ──────
+    // ── Warp knobs (SPD/TNS/SKEW/PW) - per-tab per-source per-target ──────
     for (auto* s : { &mSpdKnob, &mTnsKnob, &mSkewKnob, &mPwKnob })
     {
         makeRotary (*s);

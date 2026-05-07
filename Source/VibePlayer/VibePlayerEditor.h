@@ -59,7 +59,7 @@ private:
     juce::TextButton mPresetBtn { "Preset v" };
     juce::TextButton mHelpBtn   { "?" };
 
-    // ── 7-box grid layout (D.4-Q3 2026-05-01 — 7th box "Filter" added):
+    // ── 7-box grid layout (D.4-Q3 2026-05-01 - 7th box "Filter" added):
     //    Row 1: Sample Engine | Pitch & Voicing | Dynamics
     //    Row 2: Amp Envelope  | LFO | Filter | Output  (4-up bottom row)
     juce::Label mBoxHdr[7];

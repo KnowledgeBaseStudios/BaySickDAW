@@ -3,7 +3,7 @@
 #include "BaySickPedalsProcessor.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickPedalsEditor — Phase I-15 (2026-05-03)
+// BaySickPedalsEditor - Phase I-15 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // 4x2 pedal-rack editor for the BaySickPedalsProcessor.
 //

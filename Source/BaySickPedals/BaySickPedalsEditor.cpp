@@ -6,7 +6,7 @@
 #include "../DSP/NAMPedalStyleDSP.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PedalArrowButton — tiny custom button that paints a filled triangle.  Used for
+// PedalArrowButton - tiny custom button that paints a filled triangle.  Used for
 // the per-tile Up/Down reorder controls.  No text labels (Unicode arrows
 // would render as box glyphs per the project's ASCII-only UI rule).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ namespace
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PedalSlotComponent — one pedal tile.
+// PedalSlotComponent - one pedal tile.
 // ─────────────────────────────────────────────────────────────────────────────
 class PedalSlotComponent : public juce::Component
 {
@@ -655,7 +655,7 @@ BaySickPedalsEditor::BaySickPedalsEditor (BaySickPedalsProcessor& proc)
     // 2026-05-05 (Bug B fix): subscribe to bulk-restore notifications so we
     // rebuild every tile when the processor swaps DSP pointers behind our
     // back (page preset load, project load, pedalboard preset load).  The
-    // timer-based rebuild only catches type-CHANGES — same-type DSP swaps
+    // timer-based rebuild only catches type-CHANGES - same-type DSP swaps
     // need this explicit signal.
     juce::Component::SafePointer<BaySickPedalsEditor> safeThis (this);
     mProc.onSlotsExternallyChanged = [safeThis]

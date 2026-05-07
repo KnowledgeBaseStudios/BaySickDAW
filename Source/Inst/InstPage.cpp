@@ -115,11 +115,11 @@ InstPage::InstPage (int pageIndex)
     mPlayerTab->addAndMakeVisible (*mAriaPanel);
 
     // K-5 / L-4 (2026-05-05): program selector TextButton.  Label is set per
-    // source mode in setSource — "Load Guitar" / "Load Bass" / "Load Inst".
+    // source mode in setSource - "Load Guitar" / "Load Bass" / "Load Inst".
     // The initial "Load Program" text only shows briefly before setSource
     // fires when a sfizz Inst tab spawns.
     mProgramButton = std::make_unique<juce::TextButton> ("Load Program");
-    mProgramButton->setTooltip ("Pick a program — current selection shown on the file-name label");
+    mProgramButton->setTooltip ("Pick a program - current selection shown on the file-name label");
     mProgramButton->onClick = [this] { showProgramPickerMenu(); };
 
     // I-15 polish (2026-05-03): BaySickPedals sub-tab header chrome.  Lives
@@ -249,7 +249,7 @@ void InstPage::showEngineContextMenu()
 
     menu.addSeparator();
     // 2026-05-05 consolidation: Save enabled when the page has anything in its
-    // chain — sfizz Player picked, NAM/IR loaded, or any pedal slot wired up.
+    // chain - sfizz Player picked, NAM/IR loaded, or any pedal slot wired up.
     // Load is always enabled (even on a blank tab) so the user can spawn a
     // saved chain on a fresh tab.
     const bool canSavePreset = (getEngineProcessor() != nullptr)
@@ -371,7 +371,7 @@ makeInstPresetConfig (VibeSynthProcessor& processor,
                         : (source == InstPage::Source::BaySickGuitars) ? "BaySickGuitars"
                         :                                                "BaySickBasses";
 
-    // Pedals (live-input pedalboard) — always owned by every Inst page.
+    // Pedals (live-input pedalboard) - always owned by every Inst page.
     if (pedalsProc != nullptr)
     {
         PagePresetIO::EngineSlot slot;
@@ -437,7 +437,7 @@ makeInstPresetConfig (VibeSynthProcessor& processor,
     cfg.stripPrefixes.add ("mixer_inst_" + juce::String (pageIndex));
     cfg.insertRackKindLabel = "Inst";
     cfg.insertRackIndices.add (pageIndex);   // only this page's strip
-    // busRackIds left empty — Inst Bus is shared across every Inst tab.
+    // busRackIds left empty - Inst Bus is shared across every Inst tab.
 
     return cfg;
 }
@@ -505,7 +505,7 @@ void InstPage::loadPagePreset (const juce::File& xml)
     const juce::String xmlText = xml.loadFileAsString();
 
     // 2026-05-05 consolidation: read the saved Source mode first so we can
-    // switch to it BEFORE applying engine state — setSource() flips mSource
+    // switch to it BEFORE applying engine state - setSource() flips mSource
     // and rebuilds the chain pointers, but the sfizz processor itself is only
     // spawned by `loadBaySickGuitarsKit` on first kit load.  So if we're
     // loading a sfizz preset onto a LiveInput tab, we then have to peel the
@@ -610,7 +610,7 @@ void InstPage::loadPagePreset (const juce::File& xml)
     // 2026-05-05 fix: rebuild the engine chain AFTER the engine state has been
     // restored.  setSource (called above) ran rebuildEngineChain when the
     // sfizz processor didn't exist yet, so the chain wrapper was built with
-    // only [Pedals, NAM/IR] — no sfizz front stage.  By the time
+    // only [Pedals, NAM/IR] - no sfizz front stage.  By the time
     // importPagePreset finishes, the engine + kit + APVTS are all live; this
     // call now sees the engine pointer and splices it into the chain so
     // audio actually flows from the player.  rebuildPlayerPanel re-runs the
@@ -730,12 +730,12 @@ juce::AudioProcessor* InstPage::getEngineProcessor() const noexcept
 
 // K-2 (2026-05-05): rebuild the EngineChainProcessor stage list based on the
 // current source mode.  LiveInput = {Pedals, NAMIR}.  BaySickGuitars (or
-// BaySickBasses, L-2) = {Guitars, Pedals, NAMIR} — sfizz front-end fills the
+// BaySickBasses, L-2) = {Guitars, Pedals, NAMIR} - sfizz front-end fills the
 // buffer with engine output, then Pedals + NAMIR process from there.
 //
 // The Guitars / Basses engine pointer is queried from PluginProcessor every
 // time this runs.  If the engine doesn't exist yet (kit not loaded), the chain
-// degrades to {Pedals, NAMIR} and the buffer arrives empty — silent until the
+// degrades to {Pedals, NAMIR} and the buffer arrives empty - silent until the
 // kit loads, at which point a follow-up call rebuilds with the engine spliced
 // in.  K-4 calls setSource → loadKit → setSource (or just setSource after the
 // load) to ensure the chain sees the engine.
@@ -774,8 +774,8 @@ void InstPage::setSource (Source s)
           : (s == Source::BaySickBasses)  ? "Load Bass"
           :                                  "Load Inst";
         const juce::String tip =
-            (s == Source::BaySickGuitars) ? "Pick a guitar program — current selection shown on the file-name label"
-          : (s == Source::BaySickBasses)  ? "Pick a bass program — current selection shown on the file-name label"
+            (s == Source::BaySickGuitars) ? "Pick a guitar program - current selection shown on the file-name label"
+          : (s == Source::BaySickBasses)  ? "Pick a bass program - current selection shown on the file-name label"
           :                                  "Pick a program";
         mProgramButton->setButtonText (label);
         mProgramButton->setTooltip (tip);
@@ -925,10 +925,10 @@ void InstPage::rebuildPlayerPanel()
     }
 }
 
-// K-5 / L-4 (2026-05-05): program-picker button click — pop a menu listing
+// K-5 / L-4 (2026-05-05): program-picker button click - pop a menu listing
 // every *.sfz in the kit's Programs folder.  Selecting an item swaps programs
 // preserving each one's CC tweaks for the session (mProgramStateCache).
-// First visit to a program shows kit-author defaults.  No confirm dialog —
+// First visit to a program shows kit-author defaults.  No confirm dialog -
 // swap is non-destructive.  Source-aware: queries either the Guitars or
 // Basses engine via mFullProcessor based on mSource.
 void InstPage::showProgramPickerMenu()
@@ -937,7 +937,7 @@ void InstPage::showProgramPickerMenu()
 
     // Closure unifies Guitars / Basses engine fetch into one APVTS-bearing
     // accessor that returns the current kit path (sfizz is the only audio
-    // processor type that owns kit-path state — neither Pedals nor NAM/IR).
+    // processor type that owns kit-path state - neither Pedals nor NAM/IR).
     auto getCurrentKit = [&] () -> juce::File
     {
         if (mSource == Source::BaySickGuitars)
@@ -1045,7 +1045,7 @@ void InstPage::showProgramPickerMenu()
 
             // 3) Restore incoming program's saved state if cached.  Walk the
             //    cached PARAM tree directly and call setValueNotifyingHost on
-            //    each one — replaceState alone doesn't reliably fire the
+            //    each one - replaceState alone doesn't reliably fire the
             //    parameterChanged listener for every changed param across all
             //    JUCE versions, which would leave sfizz out of sync with the
             //    restored APVTS state for any CC the kit just reset to 0.
@@ -1080,7 +1080,7 @@ void InstPage::setProcessor (VibeSynthProcessor* p)
 
 void InstPage::switchTab (int idx)
 {
-    // K-5 (2026-05-05): label-based dispatch — sub-tab indices vary by source
+    // K-5 (2026-05-05): label-based dispatch - sub-tab indices vary by source
     // mode (LiveInput has 2 tabs, sfizz sources have 4).  Resolve the active
     // label first, then flip visibility on the components it represents.
     const auto labels = getActiveTabLabels();
@@ -1092,7 +1092,7 @@ void InstPage::switchTab (int idx)
     const bool isPedals  = (active == "BaySickPedals");
     const bool isNamIr   = (active == "BaySickNAM/IR");
     // "Piano Roll" is nav-redirect only (StandaloneEditor handles it before
-    // calling switchTab) — never the active in-page tab.
+    // calling switchTab) - never the active in-page tab.
 
     if (mPlayerTab)         mPlayerTab        ->setVisible (isPlayer);
     if (mPedalsPlaceholder) mPedalsPlaceholder->setVisible (isPedals);
@@ -1306,7 +1306,7 @@ void InstPage::layoutContent (juce::Rectangle<int> r)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// InstEmptyState — text-only placeholder.  Mixer button is the spawn trigger.
+// InstEmptyState - text-only placeholder.  Mixer button is the spawn trigger.
 // ─────────────────────────────────────────────────────────────────────────────
 InstEmptyState::InstEmptyState()
 {

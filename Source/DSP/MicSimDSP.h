@@ -2,7 +2,7 @@
 #include <JuceHeader.h>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MicSimDSP — H-6d (2026-05-02)
+// MicSimDSP - H-6d (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // Three-way exclusive mic-fingerprint stage that lives on
 // BaySickNAMIRProcessor between the IR cabinet stage and the master output.

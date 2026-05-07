@@ -4,7 +4,7 @@
 #include "PolyphaseOversampler.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HighGainStyleDSP — Phase I-5 (2026-05-02)
+// HighGainStyleDSP - Phase I-5 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // MT Style High-Gain pedal.  Modern metal stack in the style of the BOSS
 // MT-2 Metal Zone.  Knobs: Level / Dist / High / Low / Mid Hz / Mid dB.

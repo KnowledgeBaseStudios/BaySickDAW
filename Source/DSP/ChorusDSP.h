@@ -73,14 +73,14 @@ private:
     int mBufSize  { 0 };
     int mWritePos { 0 };
 
-    // Per-LFO runtime phase (not serialised — reset on prepare)
+    // Per-LFO runtime phase (not serialised - reset on prepare)
     std::array<float, 3> mLFOPhase {};
 
-    // LR4 crossover — per-channel state lives inside the filter objects.
+    // LR4 crossover - per-channel state lives inside the filter objects.
     juce::dsp::LinkwitzRileyFilter<float> mXoLP;
     juce::dsp::LinkwitzRileyFilter<float> mXoHP;
 
-    // Per-sample smoothed continuous params — eliminate knob-drag zippers.
+    // Per-sample smoothed continuous params - eliminate knob-drag zippers.
     juce::LinearSmoothedValue<float> mDelaySmoothed;
     juce::LinearSmoothedValue<float> mDepthSmoothed;
     juce::LinearSmoothedValue<float> mStereoSmoothed;

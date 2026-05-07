@@ -11,13 +11,13 @@ class AriaControlPanel;
 // engine.  Mirrors DrumPage's 3-sub-tab layout: Drum Kit / Player / Piano Roll.
 //
 // Sub-tabs:
-//   Tab 0 "Drum Kit"   — kit-graphic auditioner (clickable hitbox kit photo,
+//   Tab 0 "Drum Kit"   - kit-graphic auditioner (clickable hitbox kit photo,
 //                        full-bleed; pre-load shows photo dimmed at 50%
 //                        opacity with "Pick a program to begin" overlay text)
-//   Tab 1 "Player"     — ARIA control panel (knobs/dropdowns/labels rendered
+//   Tab 1 "Player"     - ARIA control panel (knobs/dropdowns/labels rendered
 //                        from the kit's GUI XML).  Pre-load state mirrors
 //                        Drum Kit's overlay text.
-//   Tab 2 "Piano Roll" — nav shortcut to the unified PianoRollPage with the
+//   Tab 2 "Piano Roll" - nav shortcut to the unified PianoRollPage with the
 //                        BaySickRustyDrums engine selected (matches DrumPage's
 //                        nav-shortcut pattern; not a real local sub-tab).
 //
@@ -58,7 +58,7 @@ public:
     // Fired when the kit's display name changes (program switch / preset load).
     std::function<void(const juce::String&)> onSoundNameChanged;
 
-    // Fired after a successful program load — StandaloneEditor wires this to
+    // Fired after a successful program load - StandaloneEditor wires this to
     // MixerPage::addRustyChannelAtIndex so the visible strips spawn alongside
     // the audio-graph InsertNodes that PluginProcessor::loadBaySickRustyDrumsKit
     // just created.
@@ -80,14 +80,14 @@ public:
     // returns so saved CCs overlay the just-written kit defaults.
     bool reloadForProjectRestore (const juce::File& sfzPath);
 
-    // J-8 Part B: program selector dropdown — owned by this page, exposed to
+    // J-8 Part B: program selector dropdown - owned by this page, exposed to
     // StandaloneEditor which adds it to PageMenuBar's extra-right cluster
     // when this page is visible.  "Load Player" is the placeholder until the
     // user picks a program; subsequent picks of a different program show a
     // confirm prompt + tear-down + reload.
     juce::ComboBox* getProgramCombo() const { return mProgramCombo.get(); }
 
-    // J-11 (2026-05-05): Player Preset dropdown — sits on the PageMenuBar's
+    // J-11 (2026-05-05): Player Preset dropdown - sits on the PageMenuBar's
     // extras-right cluster next to the Program selector.  Captures kit CC
     // values only (every `brd_cc<N>` + `brd_outVol`); independent of the Page
     // Preset (which also captures mixer strips + racks).  Storage at
@@ -104,15 +104,15 @@ private:
     juce::String mTabName     { "BaySickRustyDrums" };
     juce::Colour mPageColor   { VC::DrumsCol };
 
-    // ── Tab 0: Drum Kit (auditioner — full-bleed kit graphic) ──────────────
+    // ── Tab 0: Drum Kit (auditioner - full-bleed kit graphic) ──────────────
     std::unique_ptr<juce::Component>                mDrumKitTab;
     std::unique_ptr<BaySickRustyDrumsKitGraphic>    mKitGraphic;
 
-    // ── Tab 1: Player (ARIA control panel — full kit GUI XML rendered) ─────
+    // ── Tab 1: Player (ARIA control panel - full kit GUI XML rendered) ─────
     std::unique_ptr<juce::Component>                mPlayerTab;
     std::unique_ptr<AriaControlPanel>               mAriaPanel;
 
-    // ── Tab 2: Piano Roll (redirect — no local content, handled by editor) ─
+    // ── Tab 2: Piano Roll (redirect - no local content, handled by editor) ─
     std::unique_ptr<juce::Component>                mPianoRollTab;
     std::unique_ptr<juce::Label>                    mPianoRollPlaceholder;
 

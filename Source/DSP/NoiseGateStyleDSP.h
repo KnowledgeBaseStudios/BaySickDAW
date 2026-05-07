@@ -3,7 +3,7 @@
 #include "DSPBase.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NoiseGateStyleDSP — Phase I-8 (2026-05-02)
+// NoiseGateStyleDSP - Phase I-8 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // NS Style Noise Gate pedal.  RMS-detector-driven downward expander.  Use
 // case: gate the buzz/hum that drive pedals upstream amplify when the player

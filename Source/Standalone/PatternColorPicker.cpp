@@ -39,7 +39,7 @@ namespace
 
         // Called when the user right-clicks a swatch + picks "Set this colour".
         // Default JUCE behaviour: write the current colour into the slot.  We
-        // honour that — slot becomes a manually-pinned colour — and persist.
+        // honour that - slot becomes a manually-pinned colour - and persist.
         void setSwatchColour (int index, const juce::Colour& newColour) override
         {
             if (index < 0 || index >= (int) mRecents.size()) return;
@@ -53,7 +53,7 @@ namespace
         std::vector<juce::Colour> mRecents;
     };
 
-    // ── Modal window — owns the selector + drives the live-update callback. ─
+    // ── Modal window - owns the selector + drives the live-update callback. ─
     class PickerWindow : public juce::DialogWindow,
                          public juce::ChangeListener
     {
@@ -84,7 +84,7 @@ namespace
 
         ~PickerWindow() override
         {
-            // Only commit the closing colour to the recent list — every
+            // Only commit the closing colour to the recent list - every
             // intermediate hue drag would otherwise spam the slots.
             if (mLastColour.getARGB() != 0)
                 pushRecent (mLastColour);
@@ -151,7 +151,7 @@ void saveRecents (const std::vector<juce::Colour>& recents)
     for (auto& c : recents)
     {
         if (written >= kMaxRecents) break;
-        // Skip empty/transparent slots — keeps the file tidy.
+        // Skip empty/transparent slots - keeps the file tidy.
         if (c.getARGB() == 0) continue;
         auto* e = node->createNewChildElement ("Color");
         e->setAttribute ("argb", (int) c.getARGB());
@@ -165,7 +165,7 @@ void pushRecent (juce::Colour c)
     if (c.getARGB() == 0) return;
     auto recents = loadRecents();
 
-    // Dedup — drop any prior occurrence so the new color rises to the front.
+    // Dedup - drop any prior occurrence so the new color rises to the front.
     recents.erase (std::remove_if (recents.begin(), recents.end(),
                                    [&] (const juce::Colour& x) { return x == c; }),
                    recents.end());

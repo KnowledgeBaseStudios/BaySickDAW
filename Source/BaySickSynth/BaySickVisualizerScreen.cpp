@@ -155,7 +155,7 @@ void BaySickVisualizerScreen::paintOscTab (juce::Graphics& g,
             case 0: // SAW
                 y = 1.0f - 2.0f * t;
                 break;
-            case 1: // SAW+SAW — two slightly offset saws summed
+            case 1: // SAW+SAW - two slightly offset saws summed
             {
                 float offset = modifier * 0.04f;
                 float t2 = std::fmod (t + offset, 1.0f);
@@ -168,13 +168,13 @@ void BaySickVisualizerScreen::paintOscTab (juce::Graphics& g,
                 y = (t < pw) ? 0.85f : -0.85f;
                 break;
             }
-            case 3: // SAW+SQUARE — average of saw and square
+            case 3: // SAW+SQUARE - average of saw and square
                 y = ((1.0f - 2.0f * t) + ((t < 0.5f) ? 1.0f : -1.0f)) * 0.5f;
                 break;
             case 4: // SQUARE+SQUARE
                 y = (t < 0.5f) ? 0.85f : -0.85f;
                 break;
-            case 5: // SUPERSAW — show as fat/fuzzy saw
+            case 5: // SUPERSAW - show as fat/fuzzy saw
             {
                 float offset1 = modifier * 0.015f;
                 float offset2 = modifier * 0.025f;
@@ -185,7 +185,7 @@ void BaySickVisualizerScreen::paintOscTab (juce::Graphics& g,
                      (1.0f - 2.0f * t2) + (1.0f - 2.0f * t3)) * 0.25f;
                 break;
             }
-            case 6: // BELL — FM modulated sine
+            case 6: // BELL - FM modulated sine
             {
                 const float beta = modifier * 6.0f; // display-range FM depth
                 y = std::sin (juce::MathConstants<float>::twoPi * t
@@ -193,7 +193,7 @@ void BaySickVisualizerScreen::paintOscTab (juce::Graphics& g,
                 y *= 0.7f;
                 break;
             }
-            case 7: // DEAF SAW — rounded / filtered saw
+            case 7: // DEAF SAW - rounded / filtered saw
             {
                 // Simple approximation: Fourier series low-pass (first 3 harmonics)
                 float fc = 0.1f + modifier * modifier * 0.8f; // "brightness"
@@ -203,7 +203,7 @@ void BaySickVisualizerScreen::paintOscTab (juce::Graphics& g,
                 y *= 0.9f;
                 break;
             }
-            case 8: // SPREAD OCT — root + oct up + oct down (3 saws)
+            case 8: // SPREAD OCT - root + oct up + oct down (3 saws)
             {
                 float mix = modifier;
                 float s1 = 1.0f - 2.0f * t;
@@ -212,7 +212,7 @@ void BaySickVisualizerScreen::paintOscTab (juce::Graphics& g,
                 y = s1 * (1.0f - mix * 0.5f) + (s2 + s3) * mix * 0.25f;
                 break;
             }
-            case 9: // SPREAD 5TH — root + 5th up + 5th down
+            case 9: // SPREAD 5TH - root + 5th up + 5th down
             {
                 float mix = modifier;
                 float s1 = 1.0f - 2.0f * t;
@@ -221,7 +221,7 @@ void BaySickVisualizerScreen::paintOscTab (juce::Graphics& g,
                 y = s1 * (1.0f - mix * 0.5f) + (s2 + s3) * mix * 0.25f;
                 break;
             }
-            case 10: // SINE (P3.2) — pure sine
+            case 10: // SINE (P3.2) - pure sine
                 y = std::sin (juce::MathConstants<float>::twoPi * t);
                 break;
             default: y = 0.0f; break;

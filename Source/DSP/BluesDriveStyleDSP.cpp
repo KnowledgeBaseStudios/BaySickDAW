@@ -20,7 +20,7 @@ void BluesDriveStyleDSP::prepare (double sampleRate, int maxBlockSize)
     mSampleRate = sampleRate;
     mMaxBlock   = maxBlockSize;
 
-    // 4x oversampler — stereo so we can process the buffer in place.
+    // 4x oversampler - stereo so we can process the buffer in place.
     mOs.prepare (2, maxBlockSize);
 
     juce::dsp::ProcessSpec spec { sampleRate,

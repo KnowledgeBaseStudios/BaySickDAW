@@ -7,13 +7,13 @@ class VibeSynthProcessor;
 class AriaControlPanel;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// InstPage — host component for one Inst tab.
+// InstPage - host component for one Inst tab.
 // ─────────────────────────────────────────────────────────────────────────────
 // I-0b (2026-05-02): Restructured for Phase I.
 //   * BaySickPlayer engine REMOVED entirely (no projects in the wild had it).
-//   * No engine picker — both stage processors are pre-loaded into permanent
+//   * No engine picker - both stage processors are pre-loaded into permanent
 //     sub-tabs (mirrors Vox page layout).
-//   * Sub-tabs (2 total — J-6 EQ unification 2026-05-03): BaySickPedals | BaySickNAM/IR.
+//   * Sub-tabs (2 total - J-6 EQ unification 2026-05-03): BaySickPedals | BaySickNAM/IR.
 //     - BaySickPedals (sub-tab 0): I-1 will install BaySickPedalsProcessor +
 //       editor here.  For I-0b ships a placeholder component.
 //     - BaySickNAM/IR (sub-tab 1): hosts the existing BaySickNAMIRProcessor +
@@ -31,7 +31,7 @@ public:
     enum class EngineType { None, BaySickPlayer, BaySickNAMIR };
 
     // K-2 (2026-05-05): Inst page source mode.  LiveInput is the classic Inst
-    // tab — ASIO live input feeds Pedals → NAM/IR.  BaySickGuitars / BaySickBasses
+    // tab - ASIO live input feeds Pedals → NAM/IR.  BaySickGuitars / BaySickBasses
     // (L-2) replace the live-input source with a per-page sfizz engine driven
     // from `Pattern::instRoll[mPageIndex]`.  Source-mode is set by the spawn
     // path (LiveInput for "+ Add Inst" ribbon entry; BaySickGuitars for
@@ -110,7 +110,7 @@ public:
     // StandaloneEditor can update sub-tab visibility.  Caller must ensure the
     // PluginProcessor's BaySickGuitars / BaySickBasses engine exists before
     // calling setSource(...) with a non-LiveInput value (typically via
-    // VibeSynthProcessor::loadBaySickGuitarsKit) — if the engine pointer is
+    // VibeSynthProcessor::loadBaySickGuitarsKit) - if the engine pointer is
     // null when the chain is rebuilt, the source effectively produces silence
     // until a kit loads.
     Source getSource() const noexcept { return mSource; }
@@ -120,7 +120,7 @@ public:
     // K-6 (2026-05-05): per-program state cache serialization for project
     // save/load.  serializeProgramCache writes one <Program filename="..."/>
     // child per cached entry; restoreProgramCacheFromXml reads them back.
-    // The cache holds each program's last APVTS state — losing it on save
+    // The cache holds each program's last APVTS state - losing it on save
     // would mean every program reverts to kit defaults on project reload
     // (per-session memory only).
     juce::XmlElement* serializeProgramCacheXml() const;       // caller takes ownership
@@ -128,7 +128,7 @@ public:
 
     // K-2 (2026-05-05): re-pull the source engine pointer from PluginProcessor
     // and rebuild the chain.  Call after a kit-load creates the engine for the
-    // first time so the chain picks up the new pointer.  Idempotent — calling
+    // first time so the chain picks up the new pointer.  Idempotent - calling
     // when nothing changed is harmless (just rebuilds the same stage list).
     void notifySourceEngineChanged();
 
@@ -153,7 +153,7 @@ public:
 
     // J-6 EQ unification (2026-05-03): EQ accessors removed; pre-rack EQ on Effects page only.
 
-    // Save/Load PAGE preset — entire InstPage state (BaySickNAM/IR currently;
+    // Save/Load PAGE preset - entire InstPage state (BaySickNAM/IR currently;
     // I-1 adds BaySickPedals).  XML matches exportInstState format.
     void saveInstPagePreset();
     void loadInstPagePreset (const juce::File& xml);
@@ -203,7 +203,7 @@ private:
     std::unique_ptr<juce::Component>             mPlayerTab;
     std::unique_ptr<AriaControlPanel>            mAriaPanel;
     // K-5 UI fix (2026-05-05): replaced ComboBox with a TextButton labeled
-    // "Load Guitar".  ComboBox always shows the selected item — Jeff wants
+    // "Load Guitar".  ComboBox always shows the selected item - Jeff wants
     // a stable "click here to pick a program" affordance with the actual
     // program name surfaced separately on the file-name label.
     std::unique_ptr<juce::TextButton>            mProgramButton;
@@ -221,7 +221,7 @@ private:
 
 public:
     // K-5: PageMenuBar parks this button in extras-right when the page's
-    // source is sfizz-driven.  Always reads "Load Guitar" — actual loaded
+    // source is sfizz-driven.  Always reads "Load Guitar" - actual loaded
     // program surfaces on the clip-file label next to it.
     juce::TextButton* getProgramButton() const { return mProgramButton.get(); }
 
@@ -240,7 +240,7 @@ private:
     std::unique_ptr<juce::TextButton>            mPedalsPresetBtn;
     void                                         showPedalboardPresetMenu();
 
-    // BaySickNAM/IR stage (existing — unchanged).
+    // BaySickNAM/IR stage (existing - unchanged).
     std::unique_ptr<juce::AudioProcessor>        mNamIrProc;
     std::unique_ptr<juce::AudioProcessorEditor>  mNamIrEditor;
 
@@ -260,7 +260,7 @@ private:
     VibeSynthProcessor*                          mFullProcessor { nullptr };
     std::function<bool(int)>                     mBusActiveQuery;
 
-    // G-7 (2026-04-29): listener-based dirty tracking — see ClipsPage for
+    // G-7 (2026-04-29): listener-based dirty tracking - see ClipsPage for
     // the rationale.
     struct ApvtsDirtyListener : public juce::ValueTree::Listener
     {
@@ -289,7 +289,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// InstEmptyState — placeholder shown when the Inst ribbon slot is clicked
+// InstEmptyState - placeholder shown when the Inst ribbon slot is clicked
 // with zero instances.  Spawn trigger is "Add Inst Strip" on Mixer.
 // ─────────────────────────────────────────────────────────────────────────────
 class InstEmptyState : public juce::Component

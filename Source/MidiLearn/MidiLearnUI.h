@@ -4,7 +4,7 @@
 #include "../Standalone/SharedUI.h"   // VKnob full type for dynamic_cast in findTargetRecursive
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MidiLearnOutlineOverlay — paints a dashed yellow outline on top of any
+// MidiLearnOutlineOverlay - paints a dashed yellow outline on top of any
 // control when MIDI Learn targets it.  Component-based instead of paint-only
 // so it works for plain juce::Slider widgets (mixer faders) just as well as
 // VKnobs -- the controller parents one of these onto the active target's
@@ -36,7 +36,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MidiLearnUI — Phase I-3c (2026-05-02)
+// MidiLearnUI - Phase I-3c (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // Front-end for MidiLearnRegistry.  Owns the learn-mode lifecycle:
 //   * 30 second auto-cancel timer (locked spec call)

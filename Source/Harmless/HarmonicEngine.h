@@ -9,7 +9,7 @@
 // buildWavetable() runs a 2048-point IFFT to produce a single-cycle waveform.
 //
 // Thread safety:
-//   Double-buffered — buildWavetable() writes into the inactive buffer then
+//   Double-buffered - buildWavetable() writes into the inactive buffer then
 //   atomically publishes it. The audio thread always reads a complete,
 //   consistent snapshot via getWavetable().
 //
@@ -86,7 +86,7 @@ public:
     void buildWavetable();
 
     // ── Audio-thread read interface ────────────────────────────────────────────
-    // Safe to call from renderNextBlock — returns pointer to the last fully
+    // Safe to call from renderNextBlock - returns pointer to the last fully
     // built buffer; never null after the first buildWavetable() call.
     const float* getWavetable()   const noexcept;
     bool          wavetableReady() const noexcept
@@ -94,7 +94,7 @@ public:
 
     // 2026-04-20 (S4 Option 2) Per-voice-engine support.
     //
-    // Generation counter — bumped every time buildWavetable() produces a new
+    // Generation counter - bumped every time buildWavetable() produces a new
     // wavetable. Voices cache the template's generation; when it changes,
     // they re-copy template state, re-apply their per-voice mods, and rebuild
     // their private wavetable. Atomic so the audio thread can observe
@@ -144,12 +144,12 @@ private:
     // the audio thread.
     std::atomic<bool> mRebuildRequested { false };
 
-    // Scratch buffer for IFFT — layout: [Re0,Im0, Re1,Im1, ... Re(N-1),Im(N-1)]
+    // Scratch buffer for IFFT - layout: [Re0,Im0, Re1,Im1, ... Re(N-1),Im(N-1)]
     std::array<float, kFFTSize * 2> mFFTData {};
 
     // juce::dsp::FFT is NOT default-constructible; must be in the init list.
     juce::dsp::FFT mFFT;
 
-    // Sine LUT — initialised once via std::call_once, shared across instances.
+    // Sine LUT - initialised once via std::call_once, shared across instances.
     static const float* getSineLUT() noexcept;
 };

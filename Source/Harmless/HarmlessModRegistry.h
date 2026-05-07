@@ -12,10 +12,10 @@
 //   (ENV + IMG) + depth + length + TEMPO/GLOBAL + SPD/TNS/SKEW/PW warp knobs.
 //
 // Thread model:
-//   UI thread  — mutates ModTarget structs directly (via findTarget/getAllTargets).
+//   UI thread  - mutates ModTarget structs directly (via findTarget/getAllTargets).
 //                Calls publishSnapshot() after any edit. Cheap; just bumps an
 //                atomic generation counter and publishes the live state.
-//   Audio thread — at note-on only, calls getCurrentSnapshot() to grab a
+//   Audio thread - at note-on only, calls getCurrentSnapshot() to grab a
 //                  read-only pointer to the current published state. Holds the
 //                  pointer for the voice's lifetime. Per-sample reads go
 //                  through it without locks.
@@ -260,7 +260,7 @@ public:
     const std::vector<std::unique_ptr<ModTarget>>& getAllTargets() const noexcept
         { return mTargets; }
 
-    // Snapshot API — audio-thread safe read side.
+    // Snapshot API - audio-thread safe read side.
     // At note-on, voices call getSnapshotGeneration() and cache it; they also
     // cache pointers to the ModTarget structs they consume. Pointers are
     // stable for the registry's lifetime. Leaf-field edits race-safely with

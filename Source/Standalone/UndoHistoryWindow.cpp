@@ -27,7 +27,7 @@ void UndoHistoryWindow::Content::refresh()
     // 2026-04-26: ASCII-only marker glyphs (was UTF-8 ↓ / ● / ↑ which rendered
     // as tofu boxes on the default font).  Now uses pure ASCII so labels read
     // cleanly on any system.
-    // Past items (oldest first — index 0 is oldest action still in history)
+    // Past items (oldest first - index 0 is oldest action still in history)
     for (int i = 0; i < mCursor; ++i)
         mItems.push_back({ "    " + mLabels[i], false, false });
 
@@ -40,7 +40,7 @@ void UndoHistoryWindow::Content::refresh()
         mItems.push_back({ "    " + mLabels[i], false, true });
 
     mList.updateContent();
-    mList.repaint();   // 2026-04-26: force redraw — updateContent may not repaint cells reliably
+    mList.repaint();   // 2026-04-26: force redraw - updateContent may not repaint cells reliably
     mList.selectRow (mCurrentRow, /*dontScroll*/ false, /*deselectOthersFirst*/ true);
     mList.scrollToEnsureRowIsOnscreen(mCurrentRow);
 }
@@ -162,5 +162,5 @@ void UndoHistoryWindow::changeListenerCallback(juce::ChangeBroadcaster*)
 
 // 2026-04-26: Ctrl+Z / Ctrl+Alt+Z dispatch handled by registering the
 // editor's KeyPressMappingSet as a KeyListener on this window in
-// `StandaloneEditor::showHistoryWindow` — same command path as the main
+// `StandaloneEditor::showHistoryWindow` - same command path as the main
 // editor uses, so cursor moves whether the history window has focus or not.

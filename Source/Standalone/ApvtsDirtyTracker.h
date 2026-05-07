@@ -8,7 +8,7 @@
 // Each per-engine processor (Harmless, BaySickSynth, BaySickBass, VibePlayer,
 // BaySickGuitars, BaySickBasses, BaySickRustyDrums, BaySickPedals,
 // BaySickNAMIR, BaySickVocal) owns its own `juce::AudioProcessorValueTreeState`
-// — separate from the main PluginProcessor's APVTS that ProjectManager's
+// - separate from the main PluginProcessor's APVTS that ProjectManager's
 // dirty hook listens to.  Without this tracker, edits to the engine's own
 // state ValueTree never reach the project-dirty listener, so the title-bar
 // "*" indicator stays clean even when the user has tweaked dozens of knobs.

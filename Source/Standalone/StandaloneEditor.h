@@ -17,11 +17,11 @@ class PatternManager;
 class ProjectManager;
 class LayersPage;
 class BassPage;
-// DrumsPage removed 2026-04-25 — replaced by per-drum DrumPage class.
+// DrumsPage removed 2026-04-25 - replaced by per-drum DrumPage class.
 class BuilderPage;
 class MixerPage;
 class PianoRollContainer;
-class KeyBindsWindow;   // 2026-04-26 (Phase A — keymap editor popup)
+class KeyBindsWindow;   // 2026-04-26 (Phase A - keymap editor popup)
 class ClipsPage;        // 2026-04-28 (G-2: Clips engine page)
 class ClipsEmptyState;  // 2026-04-28 (G-2: Clips empty-state placeholder)
 class VoxPage;          // 2026-04-28 (G-4: Vox engine page)
@@ -110,7 +110,7 @@ public:
     juce::PopupMenu   getMenuForIndex(int menuIndex, const juce::String&) override;
     void              menuItemSelected(int menuItemID, int topLevelMenuIndex) override;
 
-    // ── ApplicationCommandTarget (Phase A — keymap framework) ────────────────
+    // ── ApplicationCommandTarget (Phase A - keymap framework) ────────────────
     juce::ApplicationCommandTarget* getNextCommandTarget() override { return nullptr; }
     void getAllCommands  (juce::Array<juce::CommandID>& out) override;
     void getCommandInfo  (juce::CommandID id, juce::ApplicationCommandInfo& info) override;
@@ -257,7 +257,7 @@ private:
     // Single pattern manager shared by all pages
     std::unique_ptr<PatternManager> mPM;
 
-    // Project persistence (P1+ — 2026-04-23).  Owns the "current project"
+    // Project persistence (P1+ - 2026-04-23).  Owns the "current project"
     // folder on disk, serializes/deserializes via VibeSynthProcessor.
     std::unique_ptr<ProjectManager> mProjectManager;
 
@@ -272,7 +272,7 @@ private:
     void doFileSaveAs();
     void doFileRestoreBackup();
     // Prompts the user for a project name.  Shown the first time they try to
-    // save (explicit Save or — later in P4 — a Builder audio drop) when no
+    // save (explicit Save or - later in P4 - a Builder audio drop) when no
     // project folder exists yet.  Returns true if a project was created.
     bool promptCreateProject (const juce::String& reasonExplanation = {});
     // Update the DocumentWindow title to show the current project name + dirty marker.
@@ -290,7 +290,7 @@ public:
     bool requestAppQuit();
 private:
 
-    // Undo manager — owned here, passed by pointer to sub-systems
+    // Undo manager - owned here, passed by pointer to sub-systems
     juce::UndoManager mUndoManager;           // initialised in ctor with default 100 steps
     int               mUndoHistorySize { 100 };  // mirrors current max; JUCE has no getter
 
@@ -305,7 +305,7 @@ private:
 
     // Header row (title + pattern selector + level dials)
     std::unique_ptr<juce::Label>      mTitleLabel;
-    // Pattern dropdown button — replaces old ComboBox + Add + hidden TextEditor
+    // Pattern dropdown button - replaces old ComboBox + Add + hidden TextEditor
     std::unique_ptr<juce::TextButton> mPatternBtn;
 
     // Transport bar, ribbon, and page menu bar
@@ -337,7 +337,7 @@ private:
     // Currently visible page component
     juce::Component* mVisiblePage { nullptr };
 
-    // (mHasDrumsTab removed — Drums is now a permanent slot in the ribbon)
+    // (mHasDrumsTab removed - Drums is now a permanent slot in the ribbon)
 
     // ── Effects infrastructure ────────────────────────────────────────────────
     TrackSelectionManager          mTrackSel;
@@ -405,13 +405,13 @@ private:
     std::unique_ptr<VibeTooltip> mTooltipWindow;
     GlobalAutoRightClick         mAutoRightClick;  // global right-click → automate
 
-    // ── Keymap framework (Phase A — 2026-04-26) ───────────────────────────────
+    // ── Keymap framework (Phase A - 2026-04-26) ───────────────────────────────
     // ApplicationCommandManager owns the KeyPressMappingSet, dispatches keys to
     // perform() via this target.  Help > Key Binds opens KeyBindsWindow which
     // edits the same mapping set live; saves to keymap.xml on every change.
     juce::ApplicationCommandManager        mCmdMgr;
     // Holds the popup (DocumentWindow → Component).  Concrete KeyBindsWindow
-    // type only known in the .cpp — using base Component avoids needing the
+    // type only known in the .cpp - using base Component avoids needing the
     // full include here.
     juce::Component::SafePointer<juce::Component> mKeyBindsWin;
     void showKeyBindsWindow();
@@ -430,7 +430,7 @@ private:
     //    flow (which fires onAudioClipAdded → spawns the Clips tab).
     std::unique_ptr<ClipsEmptyState> mClipsEmptyState;
     void showClipsEmptyState();
-    // Idempotent — does nothing if a Clips tab already exists for `path`.
+    // Idempotent - does nothing if a Clips tab already exists for `path`.
     // pageIdx = audioRow (1:1 with mixer_audio_<row>), so the engine output
     // routes through that same audio insert.  Called from the onAudioClipAdded
     // hook (Builder drop) and from the empty-state drop handler (which routes
@@ -468,11 +468,11 @@ private:
     void addBaySickBassesTab();
 
     // ── G-4 (2026-04-28): Vox + Inst empty-state placeholders + spawn flow.
-    //    Mirrors the Clips structure exactly — pages spawn from the Mixer
+    //    Mirrors the Clips structure exactly - pages spawn from the Mixer
     //    page's "Add Vox/Inst Strip" buttons (NOT drag/drop).  Engine
     //    register / unregister wires through mProcessor.registerVoxEngine /
     //    registerInstEngine for audio-thread routing.  No piano-roll
-    //    registration — Vox + Inst are live-input / recorded-audio
+    //    registration - Vox + Inst are live-input / recorded-audio
     //    destinations, not MIDI-triggered engines.
     std::unique_ptr<VoxEmptyState>  mVoxEmptyState;
     std::unique_ptr<InstEmptyState> mInstEmptyState;
@@ -504,7 +504,7 @@ private:
     // Find the first tab of the given ribbon type and select it.  No-op when
     // no tab of that type exists.
     void selectFirstTabOfType (RibbonTabBar::TabType type);
-    // F11 — switch to the last-used Layer/Bass/Drum tab and land on its
+    // F11 - switch to the last-used Layer/Bass/Drum tab and land on its
     // Piano Roll sub-tab.  Falls back to the first Layers tab + Piano Roll
     // when no piano roll has been visited yet this session.
     void showLastUsedPianoRoll();

@@ -306,7 +306,7 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
 {
     // ── Splash screen (2026-04-21) ───────────────────────────────────────────
     // Shows the BaySickDAW logo on launch while the DAW initialises. The
-    // juce::SplashScreen is self-managing — it deletes itself after the delay
+    // juce::SplashScreen is self-managing - it deletes itself after the delay
     // (or on mouse click), so we don't store a pointer.
     const juce::Image logo = juce::ImageCache::getFromMemory(
         BaySickAssets::BaySickDAWLogo_png,
@@ -396,7 +396,7 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
         mDeviceManager->initialiseWithDefaultDevices(64, 64);
     }
 
-    // J-A2 / C3 (2026-05-04): diagnostic log to disk — captures what JUCE
+    // J-A2 / C3 (2026-05-04): diagnostic log to disk - captures what JUCE
     // actually does with the audio device setup at startup, so we can see
     // why the input mask refuses to enable channels.  Written next to
     // audio_settings.xml as `audio_setup_log.txt`.
@@ -424,7 +424,7 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
 
         // 2026-05-05: gate the J-A2 mask override to ASIO only.  For Windows-mode
         // drivers (DirectSound, WASAPI shared/exclusive, "Windows Audio") the
-        // device's natural stereo defaults are already correct — forcing every
+        // device's natural stereo defaults are already correct - forcing every
         // device channel active causes JUCE to expose 4/6/8 channels in
         // processBlock and the Windows audio mixer can route the stereo write
         // to channels 0+1 onto the wrong physical pair (user-reported bug:
@@ -464,7 +464,7 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
         else
         {
             diagLog << "Non-ASIO driver (" << driverType
-                    << ") — leaving channel masks at JUCE defaults.\n\n";
+                    << ") - leaving channel masks at JUCE defaults.\n\n";
         }
 
         diagLog << "ATTEMPTING setAudioDeviceSetup with:\n";

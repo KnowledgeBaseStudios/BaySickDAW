@@ -93,7 +93,7 @@ public:
 
     // 2026-04-22 §P4.3 perf: returns true if every band is mathematically a
     // pass-through (identity) at the moment.  Callers should skip process()
-    // entirely when this is true — no IIR work, no filter coefficient updates,
+    // entirely when this is true - no IIR work, no filter coefficient updates,
     // no per-sample loop.  Cheap to call (8 small comparisons).
     bool isIdentity() const noexcept;
     static constexpr int kMaxSections = 4;

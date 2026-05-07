@@ -80,7 +80,7 @@ void VoxStripTask::run()
         clipCtx.numOut       = blockView.getNumChannels();
         clipCtx.masterGain   = masterGain;
         clipCtx.mxState      = &mx;
-        // mAudioClipScratch is shared across tasks — race in MT mode but flag
+        // mAudioClipScratch is shared across tasks - race in MT mode but flag
         // is constexpr false; future fix tracked alongside the AudioClipPlayer
         // snapshot work in 9c.
         clipCtx.clipScratch  = &mProcessor->mAudioClipScratch;
@@ -123,7 +123,7 @@ void VoxStripTask::run()
     if (armed)
     {
         // 2026-05-06 (Batch 9b Item 8): dry-recorder tap (RAW pre-chain mono).
-        // Mirrors the serial path's inline loop — captured here so the recorded
+        // Mirrors the serial path's inline loop - captured here so the recorded
         // file is the unprocessed DI; chain runs ONCE on the dry source.
         // Pre-existing race risk between this read of mStripRecorders and
         // message-thread mutation in startRecording / stopRecording is

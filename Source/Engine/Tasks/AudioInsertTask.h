@@ -19,7 +19,7 @@ class VibeSynthProcessor;
 // run() invokes the helper with mtDest = mOutputBuffer so the pull-model
 // dispatcher can consume the row's summed clip output downstream.
 //
-// FilePlay clips (clip routed to a Vox/Inst engine) are NOT handled here —
+// FilePlay clips (clip routed to a Vox/Inst engine) are NOT handled here -
 // the helper skips them silently and the inline FilePlay pass in
 // PluginProcessor::processBlock owns that path.  See deferred notes in
 // the recovery doc Batch 5 entry.
@@ -50,7 +50,7 @@ public:
     // method resizes-if-needed (avoidReallocating=true → cheap no-op when
     // already the right size) and returns a reference to the buffer.  Audio-
     // thread safe: only the audio thread (serial mode) or this task's worker
-    // (MT mode) ever touches its own scratch — no cross-task contention.
+    // (MT mode) ever touches its own scratch - no cross-task contention.
     juce::AudioBuffer<float>& getClipScratch (int numChannels, int numSamples);
 
 private:

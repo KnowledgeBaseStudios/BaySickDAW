@@ -5,7 +5,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // ProjectBrowserWindow (project-persistence Phase P3, 2026-04-23)
 //
-// Custom "Open Project" browser — replaces the native file picker.  Shows one
+// Custom "Open Project" browser - replaces the native file picker.  Shows one
 // row per project folder under Documents\BaySickDAW\Projects\, sortable by
 // name / last modified / size.  Double-click opens; right-click gives the
 // Rename / Duplicate / Delete / Show in Explorer menu.  "New Project..." and
@@ -24,7 +24,7 @@ public:
     std::function<void (const juce::File& projectFolder)> onOpenSelected;
     std::function<void()>                                 onNewProject;
 
-    // Whether a given project folder is the one currently open — used to
+    // Whether a given project folder is the one currently open - used to
     // refuse destructive operations (Rename / Delete).  Caller plugs in a
     // query against ProjectManager::isCurrentProject.
     std::function<bool (const juce::File&)>               isCurrentProject;

@@ -38,10 +38,10 @@ public:
     // bg-thread priority.  Root cause: MP3 decode is ~10x slower per chunk
     // than WAV, so the streaming-path bg thread can't keep up with the
     // audio thread for long-form MP3s.  RAM-loading sidesteps decode in
-    // the audio thread entirely — decode happens once on message thread
+    // the audio thread entirely - decode happens once on message thread
     // at clip-add, audio thread just reads from already-decoded memory.
     //
-    // 100 MB ≈ 9.5 min stereo @ 44.1k — covers virtually every drum loop,
+    // 100 MB ≈ 9.5 min stereo @ 44.1k - covers virtually every drum loop,
     // vocal phrase, and music sample users will drop on the timeline.
     // Files bigger than this fall back to the streaming path (WAVs for
     // long-form audio decode trivially fast even via streaming).
@@ -83,7 +83,7 @@ public:
     int    getNumChannels()    const { return mNumChannels; }
     bool   isRamLoaded()       const { return mRamMode; }   // G-7 polish
 
-    // juce::TimeSliceClient — called by background thread
+    // juce::TimeSliceClient - called by background thread
     int useTimeSlice() override;
 
 private:

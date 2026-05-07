@@ -5,11 +5,11 @@
 // Live animated display in the top section of BaySickSynthEditor.
 // Behaviour changes per active tab:
 //
-//   0 — OSC      : Waveform path (neon green) matching selected waveform + modifier
-//   1 — OSC ENV  : Animated ADSR shape (segments expand/contract in real-time)
-//   2 — FILTER   : Real-time Bode magnitude plot (cutoff slope + resonance peak)
-//   3 — FLT ENV  : Same animated ADSR graph, filter envelope values
-//   4 — LFO      : Continuously scrolling LFO waveform (timer 30fps), cyan
+//   0 - OSC      : Waveform path (neon green) matching selected waveform + modifier
+//   1 - OSC ENV  : Animated ADSR shape (segments expand/contract in real-time)
+//   2 - FILTER   : Real-time Bode magnitude plot (cutoff slope + resonance peak)
+//   3 - FLT ENV  : Same animated ADSR graph, filter envelope values
+//   4 - LFO      : Continuously scrolling LFO waveform (timer 30fps), cyan
 //
 // All graphs update via APVTS parameter listeners that trigger repaint().
 // The LFO tab additionally uses a juce::Timer for continuous scroll animation.

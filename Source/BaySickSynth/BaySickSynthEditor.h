@@ -122,7 +122,7 @@ private:
     juce::Label  mAmpALbl,    mAmpDLbl,    mAmpSLbl,    mAmpRLbl;
     juce::Slider mVelAmpKnob;
     juce::Label  mVelAmpLbl;
-    // Pitch envelope (P3.1) — second row on OSC ENV tab
+    // Pitch envelope (P3.1) - second row on OSC ENV tab
     juce::Slider mPEnvASlider, mPEnvDSlider, mPEnvSSlider, mPEnvRSlider;
     juce::Label  mPEnvALbl,    mPEnvDLbl,    mPEnvSLbl,    mPEnvRLbl;
     juce::Slider mPEnvAmtKnob;
@@ -175,7 +175,7 @@ private:
     std::unique_ptr<SliderAtt> mPEnvAAtt, mPEnvDAtt, mPEnvSAtt, mPEnvRAtt;
     std::unique_ptr<SliderAtt> mPEnvAmtAtt;
 
-    // ── MOD deck (Option C layout — P3.3 noise-only is first; later D-sessions fill in the rest) ──
+    // ── MOD deck (Option C layout - P3.3 noise-only is first; later D-sessions fill in the rest) ──
     juce::GroupComponent mNoiseGroup;
     juce::TextButton     mNoiseOnlyBtn { "NOISE ONLY" };
     juce::ComboBox       mNoiseColorCbo;
@@ -207,7 +207,7 @@ private:
     juce::Slider         mUniVoicesKnob, mUniDetuneKnob, mUniSpreadKnob;
     juce::Label          mUniVoicesLbl,  mUniDetuneLbl,  mUniSpreadLbl;
     std::unique_ptr<SliderAtt> mUniVoicesAtt, mUniDetuneAtt, mUniSpreadAtt;
-    // Filter (no attachments for cutoff/res — XY pad writes directly)
+    // Filter (no attachments for cutoff/res - XY pad writes directly)
     std::unique_ptr<SliderAtt> mFltKbTrackAtt, mFltVelTrackAtt;
     // Filter Env
     std::unique_ptr<SliderAtt> mFltAAtt, mFltDAtt, mFltSAtt, mFltRAtt;

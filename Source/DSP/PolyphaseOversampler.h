@@ -3,7 +3,7 @@
 #include <memory>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PolyphaseOversampler4x — Phase I-2 (2026-05-02)
+// PolyphaseOversampler4x - Phase I-2 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared 4x oversampling helper for non-linear DSP modules (BaySickPedals
 // drive / distortion / fuzz / fuzz-octave / multi-band drive).  Centralises

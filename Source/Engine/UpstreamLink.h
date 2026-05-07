@@ -7,7 +7,7 @@ class RenderTask;
 //
 // Pull-model design: when a task runs, it iterates its mPredecessors and reads
 // each `source->mOutputBuffer` (which has already been written by the upstream
-// task — guaranteed by the dependency-counter semantics). This replaces the
+// task - guaranteed by the dependency-counter semantics). This replaces the
 // existing serial `routeInsertOutput → addFrom into shared accumulator`
 // pattern, which would race under parallel execution.
 //
@@ -19,7 +19,7 @@ class RenderTask;
 //     etc.) without re-querying the routing graph.
 //   - Sidechain edge: `isSc = true`, `scSlot = 0..3`. The destination's
 //     `run()` reads `source->mOutputBuffer` into its receive slot. Tap point
-//     is post-everything per the C.4 contract — by the time this link fires,
+//     is post-everything per the C.4 contract - by the time this link fires,
 //     `source->mOutputBuffer` contains the source strip's full output after
 //     rack/EQ/fader/mute/solo/pan.
 struct UpstreamLink

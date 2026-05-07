@@ -25,7 +25,7 @@ public:
 
 // ── BrowserItem ───────────────────────────────────────────────────────────────
 // A single draggable box in the Browser panel. Used for all three tabs
-// (Patterns / Audio / Automation) — same UI, same interactions.
+// (Patterns / Audio / Automation) - same UI, same interactions.
 //
 //  • Single-click  → onClicked    (e.g. select pattern)
 //  • Double-click  → onRenameRequested (panel opens floating rename input)
@@ -65,10 +65,10 @@ private:
 };
 
 // ── G-5 (2026-04-29): Audio browser unified view ─────────────────────────────
-// CategorizedAudioEntry — one record per file the browser shows in the Audio
+// CategorizedAudioEntry - one record per file the browser shows in the Audio
 // tree.  StandaloneEditor's onEnumerateAudio callback walks mPages and emits
 // one entry per ClipsPage / VoxPage / InstPage with a bound file.  Orphan
-// audioLibrary entries (no bound page) are skipped — there is NO 4th
+// audioLibrary entries (no bound page) are skipped - there is NO 4th
 // "Imported" / "Library" bucket per Jeff's invariant ("all importable files
 // become clips").
 struct CategorizedAudioEntry
@@ -80,7 +80,7 @@ struct CategorizedAudioEntry
     juce::Colour accent;               // category accent color
 };
 
-// AudioBrowserItem — TreeViewItem leaf for a single audio file.  Replaces
+// AudioBrowserItem - TreeViewItem leaf for a single audio file.  Replaces
 // the per-file BrowserItem in the flat-list world.  Drag descriptor matches
 // the existing format ("audio:<libIdx>") so ArrangementGrid::itemDropped
 // keeps working unchanged.
@@ -111,7 +111,7 @@ private:
     CategorizedAudioEntry mEntry;
 };
 
-// AudioRootItem — invisible root holding the 3 category nodes.  Concrete
+// AudioRootItem - invisible root holding the 3 category nodes.  Concrete
 // subclass needed because juce::TreeViewItem::mightContainSubItems is pure
 // virtual.
 class AudioRootItem : public juce::TreeViewItem
@@ -121,7 +121,7 @@ public:
     juce::String  getUniqueName        () const override         { return "audio_root"; }
 };
 
-// AudioCategoryItem — non-selectable header node holding audio leaves of one
+// AudioCategoryItem - non-selectable header node holding audio leaves of one
 // kind ("Clips" / "Vox" / "Inst").  Click on the triangle expands / collapses;
 // click on the label area also toggles open state for usability.
 class AudioCategoryItem : public juce::TreeViewItem
@@ -142,11 +142,11 @@ private:
 };
 
 // ── BrowserPanel ──────────────────────────────────────────────────────────────
-// Collapsible left panel — 3 filter tabs: Patterns | Audio | Automation.
+// Collapsible left panel - 3 filter tabs: Patterns | Audio | Automation.
 // Each item is a single draggable BrowserItem (no separate text editor).
 class BrowserPanel : public juce::Component
 {
-    // NOTE: BuilderPage is the DragAndDropContainer — not this panel — so
+    // NOTE: BuilderPage is the DragAndDropContainer - not this panel - so
     // drags started from BrowserItems can be routed to ArrangementGrid (a
     // sibling, not a descendant of this panel). JUCE only routes drags to
     // targets that share the SAME container ancestor.
@@ -163,7 +163,7 @@ public:
 
     int  getSelectedPatternIndex() const { return mSelectedPat; }
 
-    // Public alias for switchTab — used by BuilderPage::setBrowserTab + ribbon dropdown.
+    // Public alias for switchTab - used by BuilderPage::setBrowserTab + ribbon dropdown.
     void selectTab(int t) { switchTab(t); }
 
     std::function<void(int)>                  onPatternSelected;
@@ -203,17 +203,17 @@ private:
     std::array<std::unique_ptr<juce::TextButton>, 3> mTabBtns;
 
     std::vector<std::unique_ptr<BrowserItem>> mPatItems;
-    std::vector<std::unique_ptr<BrowserItem>> mAudioItems;     // G-5 legacy — kept empty post-tree migration
+    std::vector<std::unique_ptr<BrowserItem>> mAudioItems;     // G-5 legacy - kept empty post-tree migration
     std::vector<std::unique_ptr<BrowserItem>> mAutomItems;
     int mSelectedPat { 0 };
 
     // G-5 (2026-04-29): unified audio tree replacing the flat mAudioItems
     // when Audio tab is active.  Owns a hidden root TreeViewItem populated
-    // with 3 category nodes (Clips / Vox / Inst) — leaves come from
+    // with 3 category nodes (Clips / Vox / Inst) - leaves come from
     // onEnumerateAudio().  Tree visibility tracks mActiveTab == 1.
     std::unique_ptr<juce::TreeView>           mAudioTree;
     std::unique_ptr<juce::TreeViewItem>       mAudioRoot;
-    AudioCategoryItem*                        mClipsCat { nullptr };  // raw — owned by mAudioRoot
+    AudioCategoryItem*                        mClipsCat { nullptr };  // raw - owned by mAudioRoot
     AudioCategoryItem*                        mVoxCat   { nullptr };
     AudioCategoryItem*                        mInstCat  { nullptr };
 
@@ -238,7 +238,7 @@ private:
     void openRenamePopup(BrowserItem& item);
     void showItemContextMenu(BrowserItem& item, juce::Point<int> globalPt);
 
-    // G-5 (2026-04-29): right-click on an Audio tree leaf — same context-menu
+    // G-5 (2026-04-29): right-click on an Audio tree leaf - same context-menu
     // shape as the legacy flat-list audio item (Rename / Choke Group / Delete
     // + new Reveal in Explorer).  audioLibIdx is the global library index for
     // direct lookup into mPM.audioLibrary.
@@ -264,7 +264,7 @@ enum class SnapMode { Bar, Beat, Cell, Line, Steps, Events, None };
 
 // ── ArrangementGrid ───────────────────────────────────────────────────────────
 // Piano-roll-style arrangement editor.
-// Label column is EXTERNAL (TrackHeaderPanel) — grid starts at x=0 for bar 0.
+// Label column is EXTERNAL (TrackHeaderPanel) - grid starts at x=0 for bar 0.
 //
 // Tools: P=Draw  B=Paint  E=Select  D=Delete  T=Mute  S=SlipEdit  C=Slice
 //        Shift+Z=Zoom  Y=PlaySelected
@@ -299,13 +299,13 @@ public:
     bool keyPressed    (const juce::KeyPress&)                                   override;
     void modifierKeysChanged(const juce::ModifierKeys&)                          override;
 
-    // FileDragAndDropTarget — accept audio files dropped from OS
+    // FileDragAndDropTarget - accept audio files dropped from OS
     bool isInterestedInFileDrag(const juce::StringArray& files) override;
     void filesDropped(const juce::StringArray& files, int x, int y) override;
     void fileDragMove(const juce::StringArray& files, int x, int y) override;
     void fileDragExit(const juce::StringArray&) override;
 
-    // DragAndDropTarget — accept BrowserItem drags from the BrowserPanel.
+    // DragAndDropTarget - accept BrowserItem drags from the BrowserPanel.
     // Description format: "kind:index" (kind = "pattern" / "audio" / "auto").
     bool isInterestedInDragSource(const SourceDetails&) override;
     void itemDragEnter(const SourceDetails&) override;
@@ -369,7 +369,7 @@ public:
     // P4: copy-on-drop.  Called with the external source file; caller either
     // copies it into the current project's Samples/ folder and returns the
     // relative string to store (e.g. "Samples/kick.wav"), or returns {} to
-    // reject the drop (e.g. no project open — caller also shows the user an
+    // reject the drop (e.g. no project open - caller also shows the user an
     // explanation dialog).  When this callback is unset, imports fall back to
     // storing the absolute path (pre-P4 behavior).
     std::function<juce::String(const juce::File& externalFile)> onImportSampleRequest;
@@ -391,7 +391,7 @@ public:
     const std::array<juce::String, kNumRows>& getRowNames() const { return mRowNames; }
     void setRowName(int row, const juce::String& name);
 
-    // ── View state (public — BuilderPage accesses these directly) ────────────
+    // ── View state (public - BuilderPage accesses these directly) ────────────
     float  mPPBar        { 80.f };   // pixels per bar
     float  mEffectiveRowH{ 40.f };   // current row height (Alt+scroll adjusts)
     double mPlayheadBar  { -1.0 };   // <0 = not playing
@@ -496,7 +496,7 @@ private:
     juce::Point<int>     mMarqueeStart;
     juce::Rectangle<int> mMarqueeRect;
 
-    // Zoom-rect drag (Ctrl+RClick drag — D-1 2026-04-26)
+    // Zoom-rect drag (Ctrl+RClick drag - D-1 2026-04-26)
     bool                 mZoomRectActive { false };
     juce::Point<int>     mZoomRectStart;
     juce::Rectangle<int> mZoomRect;
@@ -546,7 +546,7 @@ private:
     void duplicateSelected();
     void nudgeSelection(int dBars, int dRows);
     void muteSelected(bool mute);
-    // 2026-04-26 (D-7): Ctrl+Delete — close the gap left behind by deleting
+    // 2026-04-26 (D-7): Ctrl+Delete - close the gap left behind by deleting
     // every block ENTIRELY inside the time span.  Source: ruler time-range
     // first, with a fall-back to the bounding span of the current selection.
     void deleteTimeRegion();
@@ -570,7 +570,7 @@ public:
     void promptRenameTimeMarker(int idx);
     void promptAddTimeSigChange(int bar);
     void promptEditTimeSigChange(int idx);
-    juce::String getTooltip() override;   // TooltipClient — shows marker label / TS info on ruler hover
+    juce::String getTooltip() override;   // TooltipClient - shows marker label / TS info on ruler hover
 
     // ── Paint helpers ─────────────────────────────────────────────────────────
     void drawRuler          (juce::Graphics&) const;
@@ -689,7 +689,7 @@ public:
     void timerCallback     ()                      override;
     void visibilityChanged ()                      override;
 
-    // KeyListener — intercepts key events from the top-level window
+    // KeyListener - intercepts key events from the top-level window
     bool keyPressed        (const juce::KeyPress&, juce::Component*) override;
 
     void renderPatternToWav(int patternIndex);

@@ -61,9 +61,9 @@ public:
         DrumChannel,   // 64px wide
         LayerChannel,  // 64px wide
         BassChannel,   // 64px wide
-        Aux,           // 64px wide — receive-only, no Arm LED (5F-4b B2)
-        Vox,           // 64px wide — R1 live-input vocal strip
-        Inst,          // 64px wide — R1 live-input instrument strip
+        Aux,           // 64px wide - receive-only, no Arm LED (5F-4b B2)
+        Vox,           // 64px wide - R1 live-input vocal strip
+        Inst,          // 64px wide - R1 live-input instrument strip
     };
 
     // accentColor: used for fader trailing line and solo button glow.
@@ -76,7 +76,7 @@ public:
 
     // ── Level feed (safe to call from UI timer) ───────────────────────────────
     void setLevel(float dBFS);
-    // 2026-04-30: stereo entry point — independent L/R peak feeds.  When the
+    // 2026-04-30: stereo entry point - independent L/R peak feeds.  When the
     // audio thread doesn't yet have stereo peakDb atomics wired, callers stay
     // on setLevel() (mono fans to L=R inside DBFSMeter).  As bus / insert
     // nodes get split into peakDbL+peakDbR, callers switch to this method.
@@ -116,7 +116,7 @@ public:
     int  getChannelId() const { return mChannelId; }
 
     // K-2 (2026-05-05): suppress arm + listen LEDs for sfizz-driven Inst strips
-    // (BaySickGuitars / BaySickBasses) which have no live input — the engine
+    // (BaySickGuitars / BaySickBasses) which have no live input - the engine
     // IS the source.  Strip stays type Inst (so it categorizes correctly on
     // mixer / FX / sends), but hasArm() returns false and the buttons are
     // hidden.  Safe to call before or after setApvts; the parameter listener
@@ -176,7 +176,7 @@ public:
             // 2026-04-30 v2: every strip type is now 80 px wide.  Earlier 64
             // for inserts left the Pan/Width knobs cramped after the meter
             // moved into a 28 px right column.  72 for Master (matching
-            // Bus) was still slightly tight.  Unified at 80 — controls
+            // Bus) was still slightly tight.  Unified at 80 - controls
             // column gets ~52 px usable width on every strip, regardless
             // of type.
             case StripType::Master:
@@ -205,7 +205,7 @@ public:
                   const juce::String& paramPrefix);
 
 private:
-    // C3 (2026-05-04): APVTS listener — drives the Arm LED's visual state on
+    // C3 (2026-05-04): APVTS listener - drives the Arm LED's visual state on
     // Vox/Inst strips.  These strips don't get a ButtonAttachment for `_arm`
     // (the click opens the input picker instead of toggling), so without an
     // explicit listener the LED never tracks the APVTS value the picker writes.
@@ -215,7 +215,7 @@ private:
 
     StripType    mType;
     juce::Colour mAccent;
-    int          mChannelId { -1 };  // MixerChannelIds value — set by MixerPage
+    int          mChannelId { -1 };  // MixerChannelIds value - set by MixerPage
     bool         mNoLiveInput { false }; // K-2: suppress arm/listen for sfizz-source Inst strips
     juce::Point<int> mSocketCentre;   // cable socket centre in local coords
     juce::String mAutomationPrefix;   // e.g. "mixer_layer_0"; source of truth for FX routing
@@ -236,7 +236,7 @@ private:
     juce::TextButton mAddSendBtn { "+" };
 
     // ── 5F-4a: New sub-components ────────────────────────────────────────────
-    // Polarity — single toggle; text reflects state ("Standard" / "Reverse").
+    // Polarity - single toggle; text reflects state ("Standard" / "Reverse").
     // Bus + insert strips only.
     PolarityButton   mPolarityBtn;
 
@@ -262,7 +262,7 @@ private:
     // Attachments (constructed in setApvts, torn down on destroy / rebind)
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
-    // 5F-4a Batch 6: level + pan + mute + solo — feed InsertNode audio path
+    // 5F-4a Batch 6: level + pan + mute + solo - feed InsertNode audio path
     std::unique_ptr<SliderAtt> mLevelAtt;
     std::unique_ptr<SliderAtt> mPanAtt;
     std::unique_ptr<ButtonAtt> mMuteAtt;
@@ -283,7 +283,7 @@ private:
 
     void updateDbLabel();
 
-    // Visibility helpers — driven by mType
+    // Visibility helpers - driven by mType
     bool hasPolarityRow() const noexcept
         { return mType == StripType::Bus
               || mType == StripType::LayerChannel
@@ -292,17 +292,17 @@ private:
               || mType == StripType::Aux
               || mType == StripType::Vox
               || mType == StripType::Inst; }
-    // Arm LED — Vox / Inst live-input strips (R2 2026-04-23) only.
+    // Arm LED - Vox / Inst live-input strips (R2 2026-04-23) only.
     // Layer / Bass / Drum kept their arm param in APVTS for backward compat
     // but the UI is hidden (R5 will scrub them visually).  Aux strips are
     // receive-only and never had an arm.
     // K-2 (2026-05-05): sfizz-source Inst strips (BaySickGuitars / BaySickBasses)
-    // also lose the LED via mNoLiveInput — the engine IS the source.
+    // also lose the LED via mNoLiveInput - the engine IS the source.
     bool hasArm() const noexcept
         { return ! mNoLiveInput
               && (mType == StripType::Vox
               ||  mType == StripType::Inst); }
-    // Utility row — always present now (FX bypass LED is on every strip type)
+    // Utility row - always present now (FX bypass LED is on every strip type)
     bool hasUtilityRow() const noexcept { return true; }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MixerTrackStrip)

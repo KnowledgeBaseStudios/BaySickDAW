@@ -8,7 +8,7 @@
 #include "../Standalone/ApvtsDirtyTracker.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickPedalsProcessor — Phase I-1 (2026-05-02)
+// BaySickPedalsProcessor - Phase I-1 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal 8-slot guitar/bass pedal rack hosted as the first sub-tab of the
 // Inst page (peer to BaySickNAM/IR in the Inst chain).  Architecture mirrors
@@ -17,7 +17,7 @@
 //   * Slot 0 (locked, front):  Tuner  (EffectType::TunerStyle only)
 //   * Slots 1-6:                User-adjustable; any non-locked EffectType;
 //                               drag-to-reorder, stacking allowed.
-//   * Slot 7 (locked position): EQ — exactly one of {GraphicEQStyle,
+//   * Slot 7 (locked position): EQ - exactly one of {GraphicEQStyle,
 //                               BassGraphicEQStyle, FurmanEQStyle}.
 //
 // Slot mutation uses the same wait-free swap-pending pattern as EffectRack
@@ -35,7 +35,7 @@
 //   * Prefix `bsp_` (BaySickPedals).
 //   * 8x per-slot bypass: `bsp_slot{N}_bypass` (Bool, default false).
 //   * No chain-level params (each pedal owns its own gain/output knobs in
-//     I-5+ — locked spec call from 2026-05-02 session).
+//     I-5+ - locked spec call from 2026-05-02 session).
 //
 // Audio routing: NOT wired into the InsertNode graph yet.  G-9 (post-Phase I)
 // adds the wire-up.  For I-1 the processor is instantiable + state roundtrips
@@ -87,7 +87,7 @@ public:
 
     // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).
     void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
-    // 2026-05-05 lifecycle dirty fire — Pedals' loadEffect / clearSlot / moveSlot
+    // 2026-05-05 lifecycle dirty fire - Pedals' loadEffect / clearSlot / moveSlot
     // mutate internal slot state without touching apvts (apvts only holds
     // bypass + per-pedal CC params).  Lifecycle methods call this after the
     // mutation publishes, mirroring the apvts-listener path.
@@ -154,7 +154,7 @@ public:
     bool        isSlotBypassed(int slot) const noexcept;  // reads APVTS
 
     // ── Pedalboard preset library ─────────────────────────────────────────────
-    // Documents/BaySickDAW/Presets/Pedalboards/{name}.xml — full 8-slot snapshot
+    // Documents/BaySickDAW/Presets/Pedalboards/{name}.xml - full 8-slot snapshot
     // wrapped in <Pedalboard> envelope.  Distinct from per-pedal presets which
     // use the existing EffectPresetIO framework (folder layout
     // Documents/BaySickDAW/Presets/Effects/{TypeName}/...).

@@ -5,19 +5,19 @@
 class VibeSynthProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ClipsPage — host component for one Clips tab (Phase G-2).
+// ClipsPage - host component for one Clips tab (Phase G-2).
 // ─────────────────────────────────────────────────────────────────────────────
 // One Clips tab = one BaySickPlayer instance.  Clips is a sampler-style page;
-// piano-roll notes trigger the loaded WAV.  No engine picker exists — Clips
+// piano-roll notes trigger the loaded WAV.  No engine picker exists - Clips
 // has only one engine choice, so the player auto-instantiates on tab spawn.
 // (G-6 cleanup, 2026-04-29: removed BaySickNAM/IR from Clips per Jeff's
-// "Clips is essentially a sample player" — NAM/IR belongs on the Inst page.)
+// "Clips is essentially a sample player" - NAM/IR belongs on the Inst page.)
 //
 // The page itself can ONLY be spawned via dragging or uploading a clip onto
 // the Builder grid or the Clips empty-state placeholder; the ribbon's Clip
 // dropdown is an instance switcher only (no `+ Add` entry).
 //
-// Sub-tabs mirror Layer/Bass shape — Player / Piano Roll / Pre EQ8 M/S — but
+// Sub-tabs mirror Layer/Bass shape - Player / Piano Roll / Pre EQ8 M/S - but
 // only Player is locally rendered.  Piano Roll redirects to PianoRollPage
 // via the StandaloneEditor's PageMenuBar setTabSlots wiring; Pre EQ8 M/S is
 // a placeholder until later polish.
@@ -88,7 +88,7 @@ public:
     std::function<int()>                         onGetChokeGroup;
     std::function<void(int)>                     onSetChokeGroup;
 
-    // Lock — protects tab from delete (sync'd to ribbon [L] prefix).
+    // Lock - protects tab from delete (sync'd to ribbon [L] prefix).
     bool isLocked() const noexcept { return mLocked; }
     void setLocked (bool b) { if (b == mLocked) return; mLocked = b; if (onLockChanged) onLockChanged(); repaint(); }
 
@@ -96,7 +96,7 @@ public:
     // EQ for this Audio insert is exclusively edited via the Effects page
     // (mixer_audio_<row>_preeq_*).
 
-    // Save / Load page preset — writes the entire ClipPageState XML to
+    // Save / Load page preset - writes the entire ClipPageState XML to
     // Documents/BaySickDAW/Presets/Clips/My Presets/<name>.xml.  Load Preset
     // walks the same folder + Factory subfolders.
     void savePatchAs();
@@ -154,7 +154,7 @@ private:
     // can call PagePresetIO with the global apvts + VibeGraph.
     VibeSynthProcessor*                          mFullProcessor { nullptr };
 
-    // G-7 dirty tracking — listener-based instead of byte comparison so it
+    // G-7 dirty tracking - listener-based instead of byte comparison so it
     // catches every parameter mutation reliably regardless of how the
     // engine's getStateInformation is implemented.  Attached to the engine
     // apvts.state when the engine is created; detached on engine destroy.
@@ -187,7 +187,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ClipsEmptyState — shown when the Clips ribbon slot is clicked with zero
+// ClipsEmptyState - shown when the Clips ribbon slot is clicked with zero
 // instances.  Drop a supported audio file here OR onto the Builder grid to
 // spawn the first Clips tab.  G-2 (2026-04-28).
 // ─────────────────────────────────────────────────────────────────────────────

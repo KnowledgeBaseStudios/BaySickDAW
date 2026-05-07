@@ -4,7 +4,7 @@
 #include <atomic>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BassCompressorStyleDSP — Phase I-8 (2026-05-02)
+// BassCompressorStyleDSP - Phase I-8 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // BC Style Bass Compressor pedal.  Multi-band feedforward compressor split
 // into 3 bands by Linkwitz-Riley 4th-order crossovers (200 Hz, 2 kHz).

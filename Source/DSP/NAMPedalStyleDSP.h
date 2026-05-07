@@ -5,7 +5,7 @@
 namespace nam { class DSP; }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NAMPedalStyleDSP — Phase I-15c (2026-05-03)
+// NAMPedalStyleDSP - Phase I-15c (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // User NAM Pedal.  Loads a .nam Neural Amp Modeler capture file and runs it
 // per-block, sandwiched between a pre-model gain stage (Input/Drive) and a

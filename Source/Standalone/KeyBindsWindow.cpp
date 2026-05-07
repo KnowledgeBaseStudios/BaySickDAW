@@ -85,7 +85,7 @@ void KeyBindsTab::rebuildRows()
         mRows.push_back (r);
     }
 
-    // Mouse reference rows for this category — appended after the editable list.
+    // Mouse reference rows for this category - appended after the editable list.
     for (auto* mr : BSCommands::getMouseRefsInCategory (mCategory))
     {
         Row r;
@@ -145,7 +145,7 @@ juce::String KeyBindsTab::getCellTooltip (int row, int /*col*/)
     return mRows[(size_t) row].tooltip;
 }
 
-// Custom button cell — owned by the TableListBox via refreshComponentForCell.
+// Custom button cell - owned by the TableListBox via refreshComponentForCell.
 namespace
 {
     class CellButton : public juce::TextButton
@@ -196,7 +196,7 @@ juce::Component* KeyBindsTab::refreshComponentForCell (int row, int col, bool /*
     return btn;
 }
 
-// Modal capture content — a plain Component that owns the keyPressed override.
+// Modal capture content - a plain Component that owns the keyPressed override.
 // Hosted inside a DialogWindow via LaunchOptions::launchAsync so focus + key
 // routing land directly on us instead of an AlertWindow's button child.
 namespace
@@ -219,7 +219,7 @@ namespace
             mLabel.setColour (juce::Label::textColourId, VC::Text);
             addAndMakeVisible (mLabel);
 
-            // No focusable button — we want every keypress on this component.
+            // No focusable button - we want every keypress on this component.
             // Cancel handled via Esc inside keyPressed.
         }
 
@@ -236,7 +236,7 @@ namespace
         void parentHierarchyChanged() override
         {
             // grabKeyboardFocus() during parentHierarchyChanged fires before
-            // the DialogWindow is on-screen — JUCE silently drops the request.
+            // the DialogWindow is on-screen - JUCE silently drops the request.
             // Defer to the next message-loop tick so the focus lands cleanly.
             if (getParentComponent() == nullptr) return;
 
@@ -281,7 +281,7 @@ namespace
                     return true;
                 }
 
-                // Hardcoded-only conflict path — warn and confirm.
+                // Hardcoded-only conflict path - warn and confirm.
                 juce::String list;
                 for (auto* r : hardcoded)
                     list += "    \"" + r->name + "\" ("
@@ -317,7 +317,7 @@ namespace
                 return true;
             }
 
-            // Editable conflict — close this prompt and ask whether to steal.
+            // Editable conflict - close this prompt and ask whether to steal.
             // Hardcoded conflicts are listed inline in the same prompt so the
             // user has the full picture in one click.
             const juce::String otherName = [otherCmd]
@@ -451,7 +451,7 @@ KeyBindsWindow::KeyBindsWindow (juce::ApplicationCommandManager& mgr)
     setUsingNativeTitleBar (true);
     setResizable (true, true);
     setContentOwned (new KeyBindsContent (mgr), true);
-    // 2026-04-26 (B-6): bumped from 640x500 — Builder + Piano Roll tabs are
+    // 2026-04-26 (B-6): bumped from 640x500 - Builder + Piano Roll tabs are
     // now densely populated, the larger size keeps tooltips + Set/Reset
     // buttons reachable without horizontal scroll.
     centreWithSize (880, 680);

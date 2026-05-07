@@ -175,7 +175,7 @@ struct Pattern
     int totalSteps() const { return juce::jlimit(1, MAX_STEPS_TOTAL, bars * stepsPerBar); }
     double stepLengthBeats() const { return 4.0 / juce::jmax(1, stepsPerBar); }
 
-    // Per-page piano roll note data — one slot per Layers page (max 8), one per Bass page (max 4)
+    // Per-page piano roll note data - one slot per Layers page (max 8), one per Bass page (max 4)
     std::array<PianoRollData, 8>            layerRoll;
     std::array<PianoRollData, kMaxBassPages> bassRoll;
 
@@ -185,7 +185,7 @@ struct Pattern
 
     // D1.1 (2026-04-24): per-drum piano-roll data.  Each drum tab owns its own
     // roll, indexed by drum-tab pageIndex (0..kMaxDrumPages-1).  Notes are
-    // standard piano-roll notes — midiNote is the played pitch, no slotIndex
+    // standard piano-roll notes - midiNote is the played pitch, no slotIndex
     // encoding.  Data populated lazily as drums are added; on project load,
     // legacy `drumRoll` notes are migrated into drumRolls[51 - midiNote].
     std::array<PianoRollData, kMaxDrumPages> drumRolls;
@@ -199,13 +199,13 @@ struct Pattern
     std::array<PianoRollData, kMaxClipPages> clipRoll;
 
     // G-4 (2026-04-28): per-Vox / per-Inst piano-roll data.  Same shape as
-    // clipRoll — pageIndex is the corresponding mixer Vox/Inst insert index
+    // clipRoll - pageIndex is the corresponding mixer Vox/Inst insert index
     // (0..kMaxVoxPages-1 / 0..kMaxInstPages-1).
     std::array<PianoRollData, kMaxVoxPages>  voxRoll;
     std::array<PianoRollData, kMaxInstPages> instRoll;
 
     // J-7a (2026-05-03): BaySickRustyDrums singleton piano-roll data.  One
-    // PianoRollData (no array) — there's only ever zero or one BaySickRustyDrums
+    // PianoRollData (no array) - there's only ever zero or one BaySickRustyDrums
     // per project (1-instance lock).  The roll covers the kit's full keymap;
     // J-7b layers a drummer-conventional remap on top of dispatch.
     PianoRollData baySickRustyDrumsRoll;
@@ -218,7 +218,7 @@ struct Pattern
 };
 
 // ── Time markers + per-bar time-signature changes (D-2, 2026-04-26) ─────────
-// Project-scope (not per-pattern) — both lists belong to the Builder ruler.
+// Project-scope (not per-pattern) - both lists belong to the Builder ruler.
 // Markers are user-labelled flags.  TS changes apply from `bar` forward until
 // the next change.  Default project tempo signature is 4/4 (encoded as the
 // implicit pre-bar-0 state when `mTimeSigChanges` is empty).
@@ -232,7 +232,7 @@ struct TimeSigChange
 {
     int bar { 0 };
     int num { 4 };   // beats per bar (numerator)
-    int den { 4 };   // note value (denominator — power of 2)
+    int den { 4 };   // note value (denominator - power of 2)
 };
 
 // ── Clip type ─────────────────────────────────────────────────────────────────
@@ -251,7 +251,7 @@ struct ArrangementBlock
     float lengthBeats { -1.f };
     bool layerTrack   { true };
 
-    // Phase 4B — clip type + audio/automation fields
+    // Phase 4B - clip type + audio/automation fields
     ClipType     clipType           { ClipType::Pattern };
     juce::String audioFilePath      {};                 // Audio clips only
     juce::String displayAlias       {};                 // optional per-clip display name (Browser rename)
@@ -260,7 +260,7 @@ struct ArrangementBlock
     bool         stretchMode        { true };           // true=Stretch (pitch locked), false=Resample
     bool         muted              { false };          // muted clips are skipped during playback
 
-    // Phase 4C — automation lane data (only used for ClipType::Automation)
+    // Phase 4C - automation lane data (only used for ClipType::Automation)
     AutomationLane automationLane;
 
     // I-16 G-9 (2026-05-03): for audio clips recorded from a Vox/Inst armed
@@ -333,7 +333,7 @@ struct MixerState
     std::array<float, kMaxAudioRows> audioRowLevel;
     std::array<bool,  kMaxAudioRows> audioRowMute;
 
-    // Audio Clips Bus — master fader/mute/pan for all audio clips combined
+    // Audio Clips Bus - master fader/mute/pan for all audio clips combined
     float audioClipsBusLevel { 1.0f };
     float audioClipsBusPan   { 0.0f };
     bool  audioClipsBusMute  { false };
@@ -404,7 +404,7 @@ public:
 
     // C.5 (2026-04-30): time-signature-aware beat/bar conversion.
     // The DAW beat is one quarter note (PPQ).  For a time signature N/D, one
-    // bar contains N * (4/D) PPQ beats — so 4/4 = 4 beats, 3/4 = 3, 6/8 = 3,
+    // bar contains N * (4/D) PPQ beats - so 4/4 = 4 beats, 3/4 = 3, 6/8 = 3,
     // 7/8 = 3.5, etc.  When mTimeSigChanges is empty, defaults to 4/4.
     // Audio thread safe (read-only, no allocations).
     double getBeatsPerBarAtBar  (int bar) const;
@@ -508,7 +508,7 @@ public:
 private:
     std::vector<Pattern>          mPatterns;
     std::vector<ArrangementBlock> mArrangement;
-    // D-2 (2026-04-26): time-markers + time-signature-changes — project scope.
+    // D-2 (2026-04-26): time-markers + time-signature-changes - project scope.
     std::vector<TimeMarker>       mTimeMarkers;
     std::vector<TimeSigChange>    mTimeSigChanges;
     int                           mCurrentPattern { 0 };

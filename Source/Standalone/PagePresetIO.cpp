@@ -97,7 +97,7 @@ namespace PagePresetIO
     }
 
     // Returns false when the slot is sfizz-backed (kitLoadCallback present)
-    // and the kit referenced in the saved state isn't installed on disk —
+    // and the kit referenced in the saved state isn't installed on disk -
     // the caller surfaces an alert and aborts the rest of the import.  Other
     // engine types and missing-data cases return true (silently skipped).
     static bool applyEngineSlotFromXml (const juce::XmlElement& engineEl,
@@ -121,7 +121,7 @@ namespace PagePresetIO
             // Sfizz path: peel kit path → load via wrapper → replaceState
             // the APVTS subtree onto the engine the wrapper just created.
             // Calling engine->setStateInformation here would re-run loadKit
-            // WITHOUT the wrapper's active-flag guard — that's a crash path
+            // WITHOUT the wrapper's active-flag guard - that's a crash path
             // because sfizz's internal hash maps get mutated while the
             // audio thread might be rendering.
             const auto kitPath = extractKitPath (mb, slot.engineRootTag);
@@ -163,7 +163,7 @@ namespace PagePresetIO
                                 // current state, which guarantees the APVTS
                                 // listener fires + dispatches the CC to
                                 // sfizz.  Previous force-fire code called
-                                // setValueNotifyingHost(getValue()) — same-
+                                // setValueNotifyingHost(getValue()) - same-
                                 // value calls were silently no-op'd by the
                                 // listener-short-circuit on some JUCE builds,
                                 // leaving sfizz holding kit defaults.
@@ -434,11 +434,11 @@ namespace PagePresetIO
         if (parsed == nullptr) return false;
 
         // 2026-05-05 backward-compat: accept three preset formats.
-        //   1. v2 (consolidated)         — root <BaySickPagePreset version=2>
+        //   1. v2 (consolidated)         - root <BaySickPagePreset version=2>
         //                                   wrappers <Engines>/<Strips>/<Racks>
-        //   2. v1 PagePresetIO           — root <BaySickPagePreset version=1>
+        //   2. v1 PagePresetIO           - root <BaySickPagePreset version=1>
         //                                   single <Engine>/<StripParams>/<Rack>
-        //   3. K-7 Aria/RustyDrums shim  — root <RustyDrumsPagePreset> /
+        //   3. K-7 Aria/RustyDrums shim  - root <RustyDrumsPagePreset> /
         //                                       <GuitarsPagePreset>
         //                                   single <Engine>, <Mixer>/<Strip>,
         //                                   <Racks>/<BusRack>+<InsertRack>
@@ -541,7 +541,7 @@ namespace PagePresetIO
         {
             if (auto* existing = parsed->getChildByName ("Racks")) return existing;
 
-            // PagePresetIO v1 used a single top-level <Rack rack eq/> — wrap
+            // PagePresetIO v1 used a single top-level <Rack rack eq/> - wrap
             // into <Racks><InsertRack kind index rack eq/></Racks> so the v2
             // apply path treats it as a one-item insert-rack list.  Kind +
             // index come from the config (single-strip page).
@@ -569,7 +569,7 @@ namespace PagePresetIO
         auto* stripsEl  = ensureStripsWrapper();
         auto* racksEl   = ensureRacksWrapper();
 
-        // ── 1. Engine slots — match by `engineLabel` so save/load order
+        // ── 1. Engine slots - match by `engineLabel` so save/load order
         // doesn't have to align.  Slots in the config but not in the saved
         // XML are simply not touched (engine keeps its current state).
         if (enginesEl != nullptr)
@@ -598,7 +598,7 @@ namespace PagePresetIO
                               [&processor](int chId) -> bool
                               {
                                   // No reliable "is this channel active?" for
-                                  // arbitrary buses today — keep all routes
+                                  // arbitrary buses today - keep all routes
                                   // unless the page passes its own test via
                                   // the legacy API.  TODO: wire this through.
                                   juce::ignoreUnused (processor, chId);
@@ -742,12 +742,12 @@ namespace PagePresetIO
         // strip block here with the page's `isChannelActive` query.  The
         // new importer auto-promotes legacy <StripParams> / <Mixer> wrappers
         // into <Strips> for back-compat, but this short-circuit only sees
-        // the modern wrapper — old saves go through the recursive call below.
+        // the modern wrapper - old saves go through the recursive call below.
         if (auto* stripsEl = parsed->getChildByName ("Strips"))
             applyStripParams (processor, *stripsEl, cfg.stripPrefixes, isChannelActive);
 
         // Apply engines + racks via the new path (which itself re-applies
-        // strips with a no-op fallback — harmless duplicate, last write wins).
+        // strips with a no-op fallback - harmless duplicate, last write wins).
         importPagePreset (processor, kind, cfg, xml);
 
         return engineType;
@@ -773,7 +773,7 @@ namespace PagePresetIO
             if (auto* first = enginesEl->getFirstChildElement())
                 if (first->hasTagName ("Engine"))
                     return first->getStringAttribute ("rootTag");
-        // K-7 Aria root + single top-level <Engine> with no `rootTag` attr —
+        // K-7 Aria root + single top-level <Engine> with no `rootTag` attr -
         // map root tag → engine type so `selectEngine` on the page can pick
         // the right processor before applying state.
         if (rootTag == "RustyDrumsPagePreset") return "BaySickRustyDrums";

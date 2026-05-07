@@ -35,7 +35,7 @@ public:
     std::function<void()>       onStop;
     std::function<void(bool)>   onRecord;           // true = start, false = stop
 
-    // R5c (2026-04-24): record mode selector — ASIO (audio) or MIDI (into the
+    // R5c (2026-04-24): record mode selector - ASIO (audio) or MIDI (into the
     // active piano-roll tab).  Dropdown chevron on the Record button opens the
     // picker; setter writes back to GlobalTransportBar's internal state + fires
     // onRecordModeChanged.
@@ -60,7 +60,7 @@ public:
     // PositionInfo reports the right TS to all consumers).
     std::function<void(int& outNum, int& outDen)>  onGetTimeSig;
 
-    // 1M: DSP load readout — set by StandaloneEditor, polled every timer tick
+    // 1M: DSP load readout - set by StandaloneEditor, polled every timer tick
     std::function<float()>      onGetDspLoad;  // returns 0..1 (smoothed fraction of buffer window)
     std::function<bool()>       onGetDsp95;    // returns true when load >95% (triggers red flash)
     // 12f follow-on: total host PDC latency in samples (sum of every effect that

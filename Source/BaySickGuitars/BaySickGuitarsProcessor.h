@@ -14,7 +14,7 @@ namespace sfz { class Sfizz; }
 // unique APVTS prefix `bgg_<instIdx>_*`, so up to 20 instances coexist (the
 // 20-cap is shared with BaySickBasses + classic live-input Inst pages).
 //
-// Single stereo out — guitars are melodic single-source instruments, no
+// Single stereo out - guitars are melodic single-source instruments, no
 // per-piece multi-out routing (that pattern lives in BaySickRustyDrums).
 //
 // APVTS prefix: bgg_<instIdx>_  (`bgg_<instIdx>_outVol` + 128 `bgg_<instIdx>_cc<N>`)
@@ -26,7 +26,7 @@ class BaySickGuitarsProcessor : public juce::AudioProcessor,
 private:
     // Declared FIRST so they initialize before mUndoManager + apvts below.
     // C++ initializes members in declaration order regardless of init-list
-    // order, and `createLayout(mPrefix)` is invoked while constructing apvts —
+    // order, and `createLayout(mPrefix)` is invoked while constructing apvts -
     // so mPrefix must already be set by that point.
     const int          mInstIdx;
     const juce::String mPrefix;     // "bgg_<instIdx>_"
@@ -69,7 +69,7 @@ public:
 
     // K-1 instance bookkeeping.  `mInstIdx` baked into APVTS prefix at
     // construction; queried by save/load + page wiring.  `mPrefix` =
-    // "bgg_<instIdx>_" — used everywhere a param ID is built.
+    // "bgg_<instIdx>_" - used everywhere a param ID is built.
     int          getInstIdx()    const noexcept { return mInstIdx; }
     juce::String getApvtsPrefix() const         { return mPrefix; }
 
@@ -103,7 +103,7 @@ public:
     int  getKitDefaultCc (int cc) const;   // read-only snapshot of kit's set_cc<N> values
     juce::String getCcLabel (int cc) const; // kit's `label_cc<N>=<text>` (empty if none)
 
-    // APVTS listener — forwards every <prefix>cc<N> change to sfizz.
+    // APVTS listener - forwards every <prefix>cc<N> change to sfizz.
     void parameterChanged (const juce::String& paramId, float newValue) override;
 
     // K-5 fix #5 (2026-05-05): processing gate.  Set to false BEFORE loadKit
@@ -117,10 +117,10 @@ public:
     // 2026-05-06 (Option A idle suspend): expose sfizz active-voice count so
     // PluginProcessor's per-tab dispatch can decide whether to skip the
     // entire chain for this block.  Returns 0 when sfizz isn't ready or
-    // processing is disabled — safe default for the suspend gate.
+    // processing is disabled - safe default for the suspend gate.
     int getNumActiveVoices() const noexcept;
 
-    // Project-level undo — editor wires Ctrl+Z to undo()/redo() so panel
+    // Project-level undo - editor wires Ctrl+Z to undo()/redo() so panel
     // edits, automation captures, and CC type-in entries are all reversible.
     juce::UndoManager& getUndoManager() noexcept { return mUndoManager; }
 
@@ -143,7 +143,7 @@ private:
     double                      mSampleRate   { 48000.0 };
     int                         mMaxBlockSize { 1024 };
 
-    // Single stereo render scratch — sfizz writes 2 channels per block.
+    // Single stereo render scratch - sfizz writes 2 channels per block.
     juce::AudioBuffer<float>    mRenderScratch;
     std::vector<float*>         mRenderPtrs;   // sized 2; refreshed per block
 

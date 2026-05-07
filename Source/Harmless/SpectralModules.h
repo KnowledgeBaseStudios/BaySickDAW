@@ -23,7 +23,7 @@ class SpectralModule
 public:
     virtual ~SpectralModule() = default;
 
-    // Modify amplitude and phase arrays in-place.  Arrays are working copies —
+    // Modify amplitude and phase arrays in-place.  Arrays are working copies -
     // safe to overwrite.  numPartials ≤ kMaxPartials.
     virtual void processPartials (float* amps, float* phases,
                                    int numPartials) = 0;
@@ -41,7 +41,7 @@ protected:
 // natural inharmonicity of piano strings; at high amounts it creates bell-like
 // metallic spectra.
 //
-// processPartials() is a no-op — the shift is applied inside
+// processPartials() is a no-op - the shift is applied inside
 // HarmonicEngine::buildWavetable() via getFrequencyShift().
 class PrismModule final : public SpectralModule
 {
@@ -73,7 +73,7 @@ private:
 };
 
 // ── PluckModule ───────────────────────────────────────────────────────────────
-// Applies an exponential amplitude decay across partials — higher harmonics
+// Applies an exponential amplitude decay across partials - higher harmonics
 // fade faster, leaving a duller, rounder tone.  Mimics the natural decay of
 // plucked / hammered string harmonics.
 class PluckModule final : public SpectralModule

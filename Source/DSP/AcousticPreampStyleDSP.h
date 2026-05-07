@@ -3,20 +3,20 @@
 #include "DSPBase.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AcousticPreampStyleDSP — Phase I-11 (2026-05-03)
+// AcousticPreampStyleDSP - Phase I-11 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // AD Style Acoustic Preamp.  Turns a piezo / under-saddle pickup signal into
 // a mic'd-acoustic-style tone via a body-resonance convolution + Schroeder
 // reverberator + parametric notch (feedback rejection).
 //
-// Body IR — chickenhead picker:
+// Body IR - chickenhead picker:
 //   Dreadnought  -- punchy low-mids, body resonance ~100 Hz
 //   Parlor       -- brighter, smaller body, resonance ~180 Hz
 //   Jumbo        -- deep bass, biggest body, resonance ~80 Hz
 //   User         -- user-supplied IR loaded via the panel file picker.
 //                   Path persists in save state (absolute or library-relative).
 //
-// Synthetic IRs (Dreadnought / Parlor / Jumbo) are generated inline — short
+// Synthetic IRs (Dreadnought / Parlor / Jumbo) are generated inline - short
 // (4096-sample @ 44.1k) decaying sums of damped sinusoids tuned to that body
 // type's main resonance peaks (air mode, top mode, body mode).  Drop a real
 // .wav into `Resources/IRs/Acoustic/{Dreadnought,Parlor,Jumbo}.wav` and the
@@ -35,10 +35,10 @@
 //     Level (output gain) -> output
 //
 // Knobs:
-//   Resonance — body IR wet/dry mix (Dry/Wet)
-//   Ambience  — Schroeder reverberator wet/dry mix
-//   Notch     — band-stop notch frequency (50 Hz - 1 kHz log)
-//   Level     — output gain (-24 dB to +12 dB)
+//   Resonance - body IR wet/dry mix (Dry/Wet)
+//   Ambience  - Schroeder reverberator wet/dry mix
+//   Notch     - band-stop notch frequency (50 Hz - 1 kHz log)
+//   Level     - output gain (-24 dB to +12 dB)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AcousticPreampStyleDSP : public DSPBase

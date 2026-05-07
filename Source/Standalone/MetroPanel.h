@@ -7,9 +7,9 @@
 // ▾ arrow button next to METRO is clicked.
 //
 // Controls:
-//   Sound    : ComboBox — Sine / Click / Wood / Bell
+//   Sound    : ComboBox - Sine / Click / Wood / Bell
 //   Volume   : Slider 0–200 % (0.0–2.0 internally)
-//   Precount : Toggle — fires a 1-bar lead-in click before recording starts
+//   Precount : Toggle - fires a 1-bar lead-in click before recording starts
 //              when both record-arm AND this toggle are on (D-5 2026-04-26).
 // ─────────────────────────────────────────────────────────────────────────────
 class MetroPanel : public juce::Component

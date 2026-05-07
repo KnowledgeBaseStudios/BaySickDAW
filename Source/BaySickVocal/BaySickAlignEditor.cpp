@@ -3,7 +3,7 @@
 #include "../Standalone/StandaloneEditor.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickAlignEditor — H-6c (2026-05-02)
+// BaySickAlignEditor - H-6c (2026-05-02)
 //
 // VocAlign-clone visual + interaction model.  See header for the full layout
 // summary.  H-6c ships the empty-state shell: every UI element paints
@@ -43,7 +43,7 @@ namespace
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Toolbar — VocAlign Pro logo + preset selector + modified indicator +
+// Toolbar - VocAlign Pro logo + preset selector + modified indicator +
 // undo / redo + settings + help
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickAlignEditor::Toolbar : public juce::Component
@@ -137,7 +137,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LaneHeader — left-side label + Capture/Render button + per-lane controls.
+// LaneHeader - left-side label + Capture/Render button + per-lane controls.
 // Used by all 3 lanes; role determines colour + button text + extra controls.
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickAlignEditor::LaneHeader : public juce::Component
@@ -243,7 +243,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WaveformLane — main waveform display per Guide / Dub / Output role.
+// WaveformLane - main waveform display per Guide / Dub / Output role.
 // Renders three view modes (Waveform / Pitch / Energy).  Empty state =
 // just the dark canvas.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -333,7 +333,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SyncPointsStrip — between Guide + Dub.  Hosts user-placed and
+// SyncPointsStrip - between Guide + Dub.  Hosts user-placed and
 // algorithm-placed sync-point markers.
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickAlignEditor::SyncPointsStrip : public juce::Component
@@ -361,7 +361,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ProtectedAreasStrip — between Dub + Output.  Drag-to-create areas that
+// ProtectedAreasStrip - between Dub + Output.  Drag-to-create areas that
 // exempt parts of the Dub from time / pitch / both alignment.
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickAlignEditor::ProtectedAreasStrip : public juce::Component
@@ -391,7 +391,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ViewModeBar — 3 buttons (Waveform / Pitch / Energy) at the bottom of the
+// ViewModeBar - 3 buttons (Waveform / Pitch / Energy) at the bottom of the
 // lane area, just above the history scrubber.
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickAlignEditor::ViewModeBar : public juce::Component
@@ -445,7 +445,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HistoryScrubber — bottom navigator.  K=2 (locked): repurposed from
+// HistoryScrubber - bottom navigator.  K=2 (locked): repurposed from
 // VocAlign's multi-region overview into a render-history scrubber.  Each
 // prior render is a mini lane the user can switch back to for A/B compare.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -495,7 +495,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MatchTimingPanel — right-side collapsible panel
+// MatchTimingPanel - right-side collapsible panel
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickAlignEditor::MatchTimingPanel : public juce::Component
 {
@@ -600,7 +600,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MatchPitchPanel — right-side collapsible panel
+// MatchPitchPanel - right-side collapsible panel
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickAlignEditor::MatchPitchPanel : public juce::Component
 {
@@ -734,7 +734,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OtherPanel — right-side collapsible panel (Pitch Ranges + Formant Shift)
+// OtherPanel - right-side collapsible panel (Pitch Ranges + Formant Shift)
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickAlignEditor::OtherPanel : public juce::Component
 {
@@ -830,7 +830,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SidePanelTabs — 3 vertical icon buttons on the far right edge
+// SidePanelTabs - 3 vertical icon buttons on the far right edge
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickAlignEditor::SidePanelTabs : public juce::Component
 {

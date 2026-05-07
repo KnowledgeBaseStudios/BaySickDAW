@@ -106,7 +106,7 @@ BaySickBassProcessor::createLayout (const juce::String& p)
         vid (p + "modifier"), "Modifier",
         juce::NormalisableRange<float> (0.f, 1.f), 0.5f));
 
-    // Dual-osc tuning mode (P3.4) — reinterprets Modifier for dual-osc waveforms.
+    // Dual-osc tuning mode (P3.4) - reinterprets Modifier for dual-osc waveforms.
     layout.add (std::make_unique<juce::AudioParameterChoice> (
         vid (p + "dualOscMode"), "Dual-Osc Tuning",
         juce::StringArray { "Musical", "Hz Offset", "Absolute Hz" }, 0));
@@ -168,7 +168,7 @@ BaySickBassProcessor::createLayout (const juce::String& p)
         vid (p + "modWheelAmt"), "Mod Wheel Amount",
         juce::NormalisableRange<float> (0.f, 1.f), 0.f));
 
-    // ── Amp ADSR — tighter defaults for bass ─────────────────────────────────
+    // ── Amp ADSR - tighter defaults for bass ─────────────────────────────────
     auto adsr = [&] (const char* sfx, const char* lbl, float def)
     {
         layout.add (std::make_unique<juce::AudioParameterFloat> (

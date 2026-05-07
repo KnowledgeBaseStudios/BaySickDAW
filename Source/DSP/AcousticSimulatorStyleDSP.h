@@ -3,18 +3,18 @@
 #include "DSPBase.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AcousticSimulatorStyleDSP — Phase I-11 (2026-05-03)
+// AcousticSimulatorStyleDSP - Phase I-11 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // AC Style Acoustic Simulator.  Turns an electric guitar pickup signal into
 // an acoustic-style tone via corrective EQ + transient shaping (NO impulse
 // response).  Distinct from AD Style which uses convolution.
 //
 // Modes (chickenhead, 5 options):
-//   Standard — scooped low-mids, flat highs (general acoustic emulation)
-//   Jumbo    — massive low-end shelf boost, slightly scooped mids
-//   Enhanced — high-shelf boost (hi-fi, mix-ready tone)
-//   Piezo    — pronounced upper-mid peak (~2-3 kHz) (under-saddle quack)
-//   User     — user-loaded IR replaces the body modeler stage (hybrid mode;
+//   Standard - scooped low-mids, flat highs (general acoustic emulation)
+//   Jumbo    - massive low-end shelf boost, slightly scooped mids
+//   Enhanced - high-shelf boost (hi-fi, mix-ready tone)
+//   Piezo    - pronounced upper-mid peak (~2-3 kHz) (under-saddle quack)
+//   User     - user-loaded IR replaces the body modeler stage (hybrid mode;
 //              transient shaper + reverb + level still run).  Body knob
 //              becomes IR wet/dry mix in this mode.
 //

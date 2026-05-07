@@ -685,7 +685,7 @@ void HarmlessEditor::paint (juce::Graphics& g)
     // mFutureR4L/R, mFutureR5L/R, mFutureBL_TopSec/BotSec, mSpectroBotSec
     // deliberately un-labelled - they're blank-for-future / continuation tiles.
 
-    // ── Knob labels — Top-Left ────────────────────────────────────────────────
+    // ── Knob labels - Top-Left ────────────────────────────────────────────────
     knobLabel (g, mTimbreWavA,   "PART A");
     knobLabel (g, mTimbreWavB,   "PART B");
     knobLabel (g, mTimbreBlend,  "MIX");
@@ -753,7 +753,7 @@ void HarmlessEditor::paint (juce::Graphics& g)
     knobLabel (g, mPhaseRand,    "RAND");
     knobLabel (g, mLfoRate,  "RATE");
     knobLabel (g, mLfoShape, "SHAPE");
-    // 2026-04-30: T2-B LFO depth shortcuts — labels under each slider, same
+    // 2026-04-30: T2-B LFO depth shortcuts - labels under each slider, same
     // knobLabel convention as everything else in the editor.
     knobLabel (g, mLfoVel,   "VEL");
     knobLabel (g, mLfoVol,   "VOL");
@@ -848,7 +848,7 @@ void HarmlessEditor::resized()
     // ═════════════════════════════════════════════════════════════════════════
 
     // ─────────────────────────────────────────────────────────────────────────
-    // TOP-LEFT panel — Row A (Output | Routing), Row B (Tremolo | Vib/Legato),
+    // TOP-LEFT panel - Row A (Output | Routing), Row B (Tremolo | Vib/Legato),
     // Row C merged (left blank | right: Strum top-1/4, XYZ pad bot-3/4).
     // ─────────────────────────────────────────────────────────────────────────
     {
@@ -916,12 +916,12 @@ void HarmlessEditor::resized()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // TOP-MIDDLE panel — Unison (shortened faders) / Pitch / LFO Mod stack.
+    // TOP-MIDDLE panel - Unison (shortened faders) / Pitch / LFO Mod stack.
     // ─────────────────────────────────────────────────────────────────────────
     {
         auto r = mTopMidBounds.reduced (6, 4);
         const int avail  = r.getHeight();
-        // 2026-04-30 — Unison shrinks to free space for the LFO Mod's new
+        // 2026-04-30 - Unison shrinks to free space for the LFO Mod's new
         // 2-row layout, per Jeff's spec:
         //   • Voices knob: kKnob (44) → kKnobSm (32) → saves 12 px
         //   • Faders: cut to 75 % of their previous length → saves ~25 %
@@ -931,7 +931,7 @@ void HarmlessEditor::resized()
         const int rowBHeq = int (avail * 0.18f);
         const int pitchH  = rowBHeq;
         // Compute what the original (pre-shrink) Unison fader height was,
-        // then shave 25 % off — that's our "fader saving" pixel count.
+        // then shave 25 % off - that's our "fader saving" pixel count.
         const int origUnisonH      = avail - rowBHeq - rowBHeq - 4;
         const int origUnisonInnerH = origUnisonH - 28;   // reduce(6,14)
         // Original layout consumed: kKnob(voices) + 8 + kKnobSm(type) + 2
@@ -943,7 +943,7 @@ void HarmlessEditor::resized()
         const int unisonH = avail - pitchH - lfoH - 4;   // - 2 gaps of 2
 
         // Unison (top).  2026-04-30: voices knob shrinks from kKnob (44)
-        // to kKnobSm (32) — same size as every other knob in the editor.
+        // to kKnobSm (32) - same size as every other knob in the editor.
         // Faders auto-shrink because the section's overall height was
         // reduced by voicesSaving + faderSaving above.
         auto unisonRect = r.removeFromTop (unisonH);
@@ -980,8 +980,8 @@ void HarmlessEditor::resized()
         r.removeFromTop (2);
 
         // LFO Mod (bottom): two-row layout.
-        //   Row 1: RATE / SHAPE / TEMPO — global macro carriers.
-        //   Row 2: VEL / VOL / PITCH — depth shortcuts that route to the
+        //   Row 1: RATE / SHAPE / TEMPO - global macro carriers.
+        //   Row 2: VEL / VOL / PITCH - depth shortcuts that route to the
         //          Volume + Pitch mod-registry targets and the noteOn
         //          velocity-scaling path.
         // 2026-04-30: T2-B Vel/Vol/Pitch depth sliders restored after the
@@ -994,7 +994,7 @@ void HarmlessEditor::resized()
             auto inner = mLFOSec.reduced (4, 14);
             // 2026-04-30: two-row LFO Mod layout.  Row-1 RATE/SHAPE/TEMPO
             // already gets its labels via knobLabel under each control.
-            // Row-2 sliders get the same — labels are drawn 1 px below the
+            // Row-2 sliders get the same - labels are drawn 1 px below the
             // slider's bottom (knobLabel convention), so we reserve 11 px
             // at the bottom of row 2 (10 px label height + 1 px gap) and
             // size the slider height to fill what's left.
@@ -1010,7 +1010,7 @@ void HarmlessEditor::resized()
             });
             inner.removeFromTop (rowGap);
 
-            // Row 2 — three vertical depth sliders.  Trim 11 px off the
+            // Row 2 - three vertical depth sliders.  Trim 11 px off the
             // bottom of the layout rect so layoutRow's vertical centering
             // never reaches into the label band, and size sliderH to fill
             // the trimmed rect.  Net: slider's bottom edge = inner.bottom
@@ -1026,7 +1026,7 @@ void HarmlessEditor::resized()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // TOP-RIGHT panel — 5×2 grid.
+    // TOP-RIGHT panel - 5×2 grid.
     //   D.4-Q1+Q2 (2026-05-01): Filter 2 moved BELOW Filter 1; new ADSR boxes
     //   placed to the right of each filter row (4 knobs each, 2x2 layout).
     //   R1: Filter 1 | Filter 1 ADSR
@@ -1162,7 +1162,7 @@ void HarmlessEditor::resized()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BOTTOM-LEFT panel — left column blank (future space), right column
+    // BOTTOM-LEFT panel - left column blank (future space), right column
     // reserved for the spectrogram visualizer (two stacked tiles, populated
     // in S5 batch L2).
     // ─────────────────────────────────────────────────────────────────────────
@@ -1185,7 +1185,7 @@ void HarmlessEditor::resized()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BOTTOM-RIGHT panel (Mod Editor) — 60% width
+    // BOTTOM-RIGHT panel (Mod Editor) - 60% width
     // ─────────────────────────────────────────────────────────────────────────
     mModEditor.setBounds (mBotRightBounds.reduced (2));
 }
@@ -1198,7 +1198,7 @@ juce::File HarmlessEditor::presetsDir()
                       .getChildFile ("BaySickDAW/Presets/Harmless");
 }
 
-// 2026-04-26: recursive XML-preset walker — folders become real cascading
+// 2026-04-26: recursive XML-preset walker - folders become real cascading
 // submenus.  Mirrors the synth/bass/drum picker UX.  Used by showPresetMenu.
 static void addHarmlessPresetDirToMenu (juce::PopupMenu& menu,
                                          const juce::File& dir,

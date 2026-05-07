@@ -39,7 +39,7 @@ EffectsPage::EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& process
         // update the rack on the next audio block. Nothing more to do.
         if (mFxBypassAtt != nullptr) return;
 
-        // Fallback (channel has no _bypass param — shouldn't happen after 5F-4a
+        // Fallback (channel has no _bypass param - shouldn't happen after 5F-4a
         // since all strips now get _bypass, but keep as a safety net).
         if (mRack)
             mRack->setRackBypassed(mFxBypassBtn->getToggleState());
@@ -56,7 +56,7 @@ EffectsPage::EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& process
     buildEQTab();
     buildPreEQTab();   // §P4.3 (B6.2)
 
-    // 2026-04-26: default to Rack explicitly via TabKind — switchTab(int 0)
+    // 2026-04-26: default to Rack explicitly via TabKind - switchTab(int 0)
     // historically resolved to PreEQ for non-player channels because of the
     // 3-tab layout, leading to "ribbon says Rack but Pre EQ shows" mismatches
     // on first open of the page.
@@ -70,7 +70,7 @@ EffectsPage::~EffectsPage()
 {
     stopTimer();
     // Defensive: visibilityChanged already removes the listener when the page
-    // 2026-04-26 (B-5): no more per-page KeyListener on the top-level — undo
+    // 2026-04-26 (B-5): no more per-page KeyListener on the top-level - undo
     // / redo route through the global BSCommands manager.
     if (mBypassParamId.isNotEmpty())
         mProcessor.apvts.removeParameterListener(mBypassParamId, this);
@@ -105,11 +105,11 @@ void EffectsPage::buildEQTab()
     mEQTab = std::make_unique<juce::Component>();
 
     // Prepare the owned M/S DSP with a default sample rate
-    // (will snap to real rate if EffectsPage ever receives setSampleRate — Phase 2)
+    // (will snap to real rate if EffectsPage ever receives setSampleRate - Phase 2)
     mEffectsEQDsp.prepare(44100.0, 512);
 
     mEQDisplay = std::make_unique<ParametricEQDisplay>();
-    // Bind to owned DSP so MID/SIDE bands store separate state (no APVTS yet — Phase 2)
+    // Bind to owned DSP so MID/SIDE bands store separate state (no APVTS yet - Phase 2)
     mEQDisplay->bindMsDSP(&mEffectsEQDsp);
     // 12f: refresh host PDC after the user toggles anti-cramping in the popup.
     mEQDisplay->onLatencyChanged = [this]
@@ -117,13 +117,13 @@ void EffectsPage::buildEQTab()
         mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
     };
     mEQTab->addAndMakeVisible(*mEQDisplay);
-    // Keep internal pill hidden — MID/SIDE are external buttons in the header row
+    // Keep internal pill hidden - MID/SIDE are external buttons in the header row
     mEQDisplay->showMidSideToggle(false);
 
     addAndMakeVisible(*mEQTab);
 }
 
-// §P4.3 (B6.2) Pre EQ tab — mirror of buildEQTab.  Visible only on Aux/Audio/
+// §P4.3 (B6.2) Pre EQ tab - mirror of buildEQTab.  Visible only on Aux/Audio/
 // Bus channels (player-channel pre-EQ lives on the player page).
 void EffectsPage::buildPreEQTab()
 {
@@ -143,9 +143,9 @@ void EffectsPage::buildPreEQTab()
     mPreEQTab->setVisible(false);   // hidden until tab is selected
 }
 
-// §P4.3 (B6.2) — Layer / Bass / Drum-slot channels have their pre-EQ on the
+// §P4.3 (B6.2) - Layer / Bass / Drum-slot channels have their pre-EQ on the
 // player page; the mixer Effects page hides the Pre EQ tab for those.
-// J-6 (2026-05-03): EQ unification — every channel now exposes Pre + Rack +
+// J-6 (2026-05-03): EQ unification - every channel now exposes Pre + Rack +
 // Post on the Effects page (was: only buses + non-player inserts had a Pre
 // tab; player inserts had their pre-EQ as a sub-tab on the player page).
 // Returning false unconditionally makes the Pre tab visible for every
@@ -174,7 +174,7 @@ int EffectsPage::visibleIndexForTabKind (TabKind kind) const
 {
     if (currentChannelHasPagePreEQ())
     {
-        // 2-tab layout — PreEQ has no slot, fall back to Rack.
+        // 2-tab layout - PreEQ has no slot, fall back to Rack.
         return (kind == TabKind::PostEQ) ? 1 : 0;
     }
     if (kind == TabKind::PreEQ)  return 0;
@@ -223,7 +223,7 @@ void EffectsPage::rebuildChannelDropdown()
             return dropdownId;
         };
 
-        // Separate buses from inserts — buses are group anchors, inserts go in buckets.
+        // Separate buses from inserts - buses are group anchors, inserts go in buckets.
         // J-6 (2026-05-03): bus id range expanded 1-6 → 1-12 to include
         // VoxBus/InstBus/VoxBus2/InstBus2/InstBus3/RustyDrumsBus.
         std::vector<Item> busItems;
@@ -253,7 +253,7 @@ void EffectsPage::rebuildChannelDropdown()
             if (it.prefix.isNotEmpty()) mIdToApvtsPrefix[it.id] = it.prefix;
         };
 
-        // Track whether this is the first group we render — used to inject a
+        // Track whether this is the first group we render - used to inject a
         // blank spacer *before* every group except the first. This keeps items
         // flush under their own colored heading but gives visual breathing
         // room between groups.
@@ -362,7 +362,7 @@ void EffectsPage::selectChannelByApvtsPrefix(const juce::String& apvtsPrefix)
 // ── Channel switching ─────────────────────────────────────────────────────────
 void EffectsPage::onChannelChanged()
 {
-    // 2026-04-26: per-channel sub-tab persistence — save the previous channel's
+    // 2026-04-26: per-channel sub-tab persistence - save the previous channel's
     // current TabKind, then restore the new channel's last-used TabKind (or
     // default to Rack on first visit).  Done here because onChannelChanged is
     // the single funnel for any channel selection change (dropdown click,
@@ -450,7 +450,7 @@ void EffectsPage::onChannelChanged()
             // already populates drums via MixerPage::getDrumStripIndices with ID=100+slot,
             // so we resolve the rack via VibeGraph's InsertNode registry here.
             // Fallback to legacy InstrChannelRack for any stray state-restore paths
-            // (belt-and-suspenders — mirrors the same pattern in onGetActiveChannels).
+            // (belt-and-suspenders - mirrors the same pattern in onGetActiveChannels).
             const int slot = id - 100;
             rack = vg.getInsertRack(VibeGraph::InsertKind::Drum, slot);
             eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Drum, slot);
@@ -476,7 +476,7 @@ void EffectsPage::onChannelChanged()
         else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)
         {
             // J-8 stage 2 (2026-05-04): Rusty per-strip racks + EQ.  Same
-            // InsertNode registry pattern as Layer/Bass/Drum — racks bind to
+            // InsertNode registry pattern as Layer/Bass/Drum - racks bind to
             // the audio-graph node so widget edits hit the audible signal.
             const int idx = id - 900;
             rack = vg.getInsertRack(VibeGraph::InsertKind::Rusty, idx);
@@ -515,9 +515,9 @@ void EffectsPage::onChannelChanged()
 
     // §P4.3 (B6.2): bind the Pre EQ display to this channel's pre-rack EQ
     // using the `_preeq_*` APVTS prefix.  Pre-EQ DSP is on the same node as
-    // the post-rack EQ — fetched via getInsertPreEQ / getXxxBusPreEQ.  Note:
+    // the post-rack EQ - fetched via getInsertPreEQ / getXxxBusPreEQ.  Note:
     // for player channels (Layer/Bass/Drum-slot) this STILL binds correctly
-    // even though the Pre tab itself is hidden — keeps state consistent if the
+    // even though the Pre tab itself is hidden - keeps state consistent if the
     // user later switches to a non-player channel.
     if (mPreEQDisplay)
     {
@@ -564,7 +564,7 @@ void EffectsPage::onChannelChanged()
     }
 
     // 2026-04-26: restore the new channel's last-used sub-tab (default Rack).
-    // Player channels never expose PreEQ — clamp PreEQ to Rack if persisted.
+    // Player channels never expose PreEQ - clamp PreEQ to Rack if persisted.
     {
         TabKind targetKind = TabKind::Rack;
         auto it = mLastTabPerChannel.find (newChanId);
@@ -574,7 +574,7 @@ void EffectsPage::onChannelChanged()
         switchTab (targetKind);
     }
 
-    // §P4.3 (B6.2): channel kind may have changed Pre-tab visibility — ask
+    // §P4.3 (B6.2): channel kind may have changed Pre-tab visibility - ask
     // StandaloneEditor to re-call setTabSlots with the right 2-vs-3 labels.
     if (onTabsNeedRefresh) onTabsNeedRefresh();
 
@@ -613,7 +613,7 @@ void EffectsPage::onChannelChanged()
     }
 }
 
-// 5F-4a: APVTS param listener — mirrors _bypass to rack.setRackBypassed().
+// 5F-4a: APVTS param listener - mirrors _bypass to rack.setRackBypassed().
 // Can be called on any thread (APVTS may fire from audio thread); EffectRack's
 // setRackBypassed is a plain bool store so this is safe.
 void EffectsPage::parameterChanged(const juce::String& paramId, float newValue)
@@ -672,7 +672,7 @@ void EffectsPage::setRack(EffectRack* rack)
 }
 
 // ── Slot interaction ──────────────────────────────────────────────────────────
-// D.2 (2026-05-01): full-state snapshot — captures type + bypassed +
+// D.2 (2026-05-01): full-state snapshot - captures type + bypassed +
 // outputGainDb + serialized DSP state + slot UUID per slot.  Replaces the
 // old type-only captureSlotTypes / applySlotTypes pair so undo/redo
 // preserves knob values and keeps slot UUIDs stable (which keeps automation
@@ -695,12 +695,12 @@ static EffectRackAction::SlotSnapshots captureSlotSnapshots(EffectRack* rack)
 }
 
 // Apply a target slot-snapshot.  Slots whose type+UUID match the current
-// state are diff-applied (only bypass / output-gain / DSP-state restored —
+// state are diff-applied (only bypass / output-gain / DSP-state restored -
 // the existing effect instance is preserved).  Slots whose type or UUID
 // differ get their effect reloaded with the snapshot's UUID so automation
 // lanes survive.  Writes a parallel `outChanged` array indicating which
 // slots had their effect instance replaced (so callers can rebuild only the
-// affected editor panels — preserves slider SafePointers on untouched ones).
+// affected editor panels - preserves slider SafePointers on untouched ones).
 static void applySlotSnapshots(EffectRack* rack,
                                const EffectRackAction::SlotSnapshots& target,
                                std::array<bool, EffectRack::kNumSlots>& outChanged)
@@ -749,7 +749,7 @@ void EffectsPage::onEffectChosen(int slotIndex, EffectType type)
                 std::array<bool, EffectRack::kNumSlots> changed;
                 applySlotSnapshots(mRack, t, changed);
                 // Only rebuild editors for slots whose DSP was actually
-                // replaced — preserves sliders (and hence any queued
+                // replaced - preserves sliders (and hence any queued
                 // FloatParamActions' captured SafePointers) on untouched
                 // slots. First perform() is skipped by EffectRackAction;
                 // this runs only on undo/redo.
@@ -780,7 +780,7 @@ void EffectsPage::onEffectRemoved(int slotIndex)
                 refreshAllSlots();
                 mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
             }), "Remove Effect");
-    // Rebuild all 6 editors — slots shifted, so all need updating
+    // Rebuild all 6 editors - slots shifted, so all need updating
     for (int i = 0; i < EffectRack::kNumSlots; ++i)
         rebuildSlotEditor(i);
     refreshAllSlots();
@@ -909,7 +909,7 @@ juce::String EffectsPage::getMixerApvtsPrefixForChannel(int id) const
         default: break;
     }
 
-    // Drum inserts — legacy InstrChannelNode IDs (100-199). Map to mixer_drum_N.
+    // Drum inserts - legacy InstrChannelNode IDs (100-199). Map to mixer_drum_N.
     if (id >= 100 && id < 200)
         return "mixer_drum_" + juce::String(id - 100);
     if (id >= 200 && id < 200 + kMaxLayerPages)
@@ -961,7 +961,7 @@ void EffectsPage::resized()
 {
     auto b = getLocalBounds();
 
-    // Header row removed — all controls live in PageMenuBar above.
+    // Header row removed - all controls live in PageMenuBar above.
     // Content fills full bounds.
     if (mRackTab)   mRackTab  ->setBounds(b);
     if (mEQTab)     mEQTab    ->setBounds(b);
@@ -986,7 +986,7 @@ void EffectsPage::resized()
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
-// §P4.3 (B6.2): legacy entry point — interprets `index` as a VISIBLE-tab index
+// §P4.3 (B6.2): legacy entry point - interprets `index` as a VISIBLE-tab index
 // (0..1 for player channels, 0..2 for Aux/Audio/Bus) and dispatches to the
 // TabKind-aware overload.
 void EffectsPage::switchTab(int index)
@@ -1003,7 +1003,7 @@ void EffectsPage::switchTab(TabKind kind)
     if (mEQTab)    mEQTab   ->setVisible(kind == TabKind::PostEQ);
 
     // 2026-04-26: persist this tab kind for the current channel so re-entry
-    // restores it.  Single source of truth — every tab change funnels through
+    // restores it.  Single source of truth - every tab change funnels through
     // here, so onChannelChanged's restore lookup will always find the most
     // recent value.  Skipped before any channel is selected (mPrevChannelId==0
     // during construction-time defaults).

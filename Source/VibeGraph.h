@@ -7,9 +7,9 @@
 #include "EffectRack.h"
 #include "VibesynthConstants.h"
 
-// Forward declarations — full headers included in VibeGraph.cpp only
+// Forward declarations - full headers included in VibeGraph.cpp only
 class BassSynth;
-// DrumSynth forward-decl removed — class no longer used in graph (2026-04-25).
+// DrumSynth forward-decl removed - class no longer used in graph (2026-04-25).
 
 // ── Meter latency-compensation toggle (2026-05-02) ───────────────────────────
 // When enabled, audio nodes delay their published peak readings by N blocks so
@@ -34,7 +34,7 @@ namespace MeterLatencyComp
 // _sendTo params, and the RoutingGraph.
 namespace MixerChannelIds
 {
-    constexpr int kOutput    = 0;    // Terminal sink — only Master routes here
+    constexpr int kOutput    = 0;    // Terminal sink - only Master routes here
     constexpr int kLayersBus = 1;
     constexpr int kBassBus   = 2;
     constexpr int kDrumsBus  = 3;
@@ -46,7 +46,7 @@ namespace MixerChannelIds
     // G-6 (2026-04-29): secondary buses for splitting Vox/Inst groups
     // (e.g. lead vs backup vocals, guitars vs bass).  Always-allocated audio
     // (cheap pre-process when no inserts route to them) but UI strip is lazy
-    // — only rendered on Mixer after user clicks "Add Vox/Inst Bus".
+    // - only rendered on Mixer after user clicks "Add Vox/Inst Bus".
     constexpr int kVoxBus2   = 9;    // G-6: optional 2nd Vox bus
     constexpr int kInstBus2  = 10;   // G-6: optional 2nd Inst bus
     constexpr int kInstBus3  = 11;   // G-6: optional 3rd Inst bus
@@ -251,7 +251,7 @@ private:
 //   LayersBusNode ─┐
 //   BassBusNode   ─┤→ MasterBusNode → output
 //   DrumsBusNode  ─┘
-//   EffectsBusNode  (FX Bus — receive bus for aux strips + user-routed sends;
+//   EffectsBusNode  (FX Bus - receive bus for aux strips + user-routed sends;
 //                    driven by VibeGraph::processEffectsBus each block)
 //
 // Each bus node owns an EffectRack (6 slots) and holds a reference to the
@@ -299,7 +299,7 @@ public:
     void prepare(double sampleRate, int maxBlockSize);
     void reset();
 
-    // Build the fixed bus topology.  Guards itself — no-op after first call so
+    // Build the fixed bus topology.  Guards itself - no-op after first call so
     // safe to call every prepareToPlay().  All references must remain valid for
     // the lifetime of this VibeGraph.
     // 12i: SpectrumFeed refs dropped - each EQ8MsDSP owns its own pre/post feeds
@@ -326,16 +326,16 @@ public:
 
     // 2026-05-06 (Batch 9b): unified bus DSP dispatcher used by both the serial
     // path and the MT path's PassiveStripTask Bus mode.  `buf` is treated as
-    // in/out — caller must have it pre-filled with the bus's input signal
+    // in/out - caller must have it pre-filled with the bus's input signal
     // (sum of upstream contributions) before calling.  Internally switches on
     // busChId to the right per-bus DSP path: Layers/Bass/Drums delegate to
     // the existing BusNodes via processChainOnly; Clips / Vox / Inst /
     // Vox2 / Inst2 / Inst3 / Rusty run their inline DSP migrated from
     // PluginProcessor; FxBus calls processEffectsBus; Master calls
-    // processMasterBus.  `anySolo` and `panLaw` are forwarded as needed —
+    // processMasterBus.  `anySolo` and `panLaw` are forwarded as needed -
     // unused for buses that read solo/pan directly via APVTS.  Caller is
     // responsible for routing the processed output downstream
-    // (e.g. routeInsertOutput) — processBus does DSP only.
+    // (e.g. routeInsertOutput) - processBus does DSP only.
     void processBus(int busChId, juce::AudioBuffer<float>& buf,
                     double bpm, bool anySolo, int panLaw);
 
@@ -344,7 +344,7 @@ public:
     // Drums/Master/FxBus carry their own peak atomics on their BusNode; the
     // remaining buses (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty)
     // store their running-max mirror atomics on PluginProcessor and register
-    // pointers here so processBus can CAS-max into them in-place — keeps
+    // pointers here so processBus can CAS-max into them in-place - keeps
     // PluginProcessor::drainAndMerge promotion path unchanged.
     struct BusPeakRefs
     {
@@ -388,14 +388,14 @@ public:
     // G-6 (2026-04-29): secondary Vox/Inst buses (kVoxBus2 / kInstBus2 / kInstBus3).
     // Always allocated so audio routing works whether or not the user has
     // activated the strip on Mixer.  Inactive buses pre-process silent input
-    // (cheap) — the strip activation flag only controls UI presence + route
+    // (cheap) - the strip activation flag only controls UI presence + route
     // picker filtering.
     EffectRack* getVoxBus2Rack();
     EffectRack* getInstBus2Rack();
     EffectRack* getInstBus3Rack();
     // J-4: dedicated bus for BaySickRustyDrums strips.  Always-allocated
     // so audio routing works regardless of whether the user has added a
-    // BaySickRustyDrums instance — sums silence (cheap pre-process) until
+    // BaySickRustyDrums instance - sums silence (cheap pre-process) until
     // a kit is loaded and 13 strips spawn at kRustyBase..kRustyBase+12.
     EffectRack* getRustyDrumsBusRack();
 
@@ -427,10 +427,10 @@ public:
     EQ8MsDSP* getInstBus3EQ();
     EQ8MsDSP* getRustyDrumsBusEQ();        // J-4
 
-    // §P4.3: Pre-rack bus EQs — fresh EQ8MsDSP per bus, runs at the very start
+    // §P4.3: Pre-rack bus EQs - fresh EQ8MsDSP per bus, runs at the very start
     // of each bus's processBlock chain (input -> preEq -> rack -> postEq -> fader).
     // Bound by the corresponding mixer-strip Effects-page Pre EQ8 M/S tab
-    // (NOT by player pages — those use per-insert pre-EQ instead).
+    // (NOT by player pages - those use per-insert pre-EQ instead).
     EQ8MsDSP* getLayersBusPreEQ();
     EQ8MsDSP* getBassBusPreEQ();
     EQ8MsDSP* getDrumsBusPreEQ();
@@ -445,7 +445,7 @@ public:
     EQ8MsDSP* getInstBus3PreEQ();
     EQ8MsDSP* getRustyDrumsBusPreEQ();     // J-4
 
-    // ── PDC — Plugin Delay Compensation ──────────────────────────────────────
+    // ── PDC - Plugin Delay Compensation ──────────────────────────────────────
     // Call from message thread after any effect is loaded/removed/bypassed.
     // Recomputes per-bus latency, resizes compensation ring buffers, and
     // updates the total latency exposed to the host via getLatencySamples().
@@ -458,7 +458,7 @@ public:
 
     // ── Rack + bus EQ state serialization ────────────────────────────────────
     // Covers all 5 bus nodes + all instrument channel nodes.
-    // loadRackStates is safe to call before buildFixedTopology — state is applied
+    // loadRackStates is safe to call before buildFixedTopology - state is applied
     // at the end of the first buildFixedTopology call (deferred via ValueTree copy).
     void saveRackStates(juce::ValueTree& parent);
     void loadRackStates(const juce::ValueTree& parent);
@@ -506,7 +506,7 @@ public:
 
     // Called on the message thread when a strip is created (engine registered,
     // drum slot assigned, or audio clip imported on a new row).
-    // Safe to call repeatedly — no-op if the node already exists.
+    // Safe to call repeatedly - no-op if the node already exists.
     // apvtsPrefix is the strip's APVTS prefix (e.g. "mixer_layer_0").
     InsertNode* ensureInsertNode(InsertKind kind, int index,
                                   const juce::String& displayName,
@@ -520,7 +520,7 @@ public:
     EffectRack* getInsertRack   (InsertKind kind, int index);
 
     // Return the post-rack EQ owned by an InsertNode (or nullptr). Parallels
-    // getInsertRack — same opaque-InsertNode reason.
+    // getInsertRack - same opaque-InsertNode reason.
     EQ8MsDSP*   getInsertEQ     (InsertKind kind, int index);
     EQ8MsDSP*   getInsertPreEQ  (InsertKind kind, int index);   // §P4.3
 
@@ -539,7 +539,7 @@ public:
     // Peak dB atomic for UI (one per slot, per kind). Returns -60 if node doesn't exist.
     float       getInsertPeakDb (InsertKind kind, int index) const;
     // 2026-04-30: stereo L/R peak for split DBFSMeter.  Returns {-60, -60} if
-    // node doesn't exist.  Wait-free — both atomics read with relaxed ordering.
+    // node doesn't exist.  Wait-free - both atomics read with relaxed ordering.
     std::pair<float, float> getInsertPeakDbStereo  (InsertKind kind, int index) const;
     // 2026-05-02: drain variant for vblank-locked metering -- exchanges the
     // insert's snapshot atomics with -inf and returns the running max.  UI
@@ -558,7 +558,7 @@ public:
 
     // D3: read this insert's choke group (0 = none, 1..16 = group id).
     // Returns 0 if the node doesn't exist or the param isn't bound.
-    // Wait-free — reads the cached atomic pChokeGroup pointer.
+    // Wait-free - reads the cached atomic pChokeGroup pointer.
     int         getInsertChokeGroup (InsertKind kind, int index) const;
 
     // 5F-4a Batch 6: run an insert node's process loop in-place on buf.
@@ -675,7 +675,7 @@ public:
 
 private:
     // ── Forward-declared nested bus node types (defined in VibeGraph.cpp) ─────
-    // unique_ptr with incomplete type — destructor defined in VibeGraph.cpp
+    // unique_ptr with incomplete type - destructor defined in VibeGraph.cpp
     struct LayersBusNode;
     struct BassBusNode;
     struct DrumsBusNode;
@@ -696,7 +696,7 @@ private:
     std::vector<int>                                 mInstrChannelOrder;
     int                                              mNextInstrChannelId { 100 };
 
-    // Per-page instrument EffectRacks — always live, prepared with the graph.
+    // Per-page instrument EffectRacks - always live, prepared with the graph.
     // Applied after per-page EQ, before the bus sum, in PluginProcessor::processBlock.
     // DEPRECATED 5F-4a: being migrated into InsertNode. Kept compiling through
     // Batch 1–2; Batch 3 removes these and routes to mLayerInserts/mBassInserts.
@@ -727,7 +727,7 @@ private:
     std::unique_ptr<InstrChannelNode> mInstBus3Node;
     // J-4 (2026-05-03): dedicated bus for BaySickRustyDrums.  Always allocated
     // (matches Vox/Inst pattern) so audio routing works whether or not a
-    // BaySickRustyDrums instance exists — bus sums silence cheaply until a
+    // BaySickRustyDrums instance exists - bus sums silence cheaply until a
     // kit's 13 strips are registered via ensureRustyInsertNode.
     std::unique_ptr<InstrChannelNode> mRustyDrumsBusNode;
     std::map<int, std::unique_ptr<InsertNode>> mRustyInserts;
@@ -755,7 +755,7 @@ private:
     int    mBlockSize     { 512 };
     bool   mTopologyBuilt { false };
 
-    // APVTS pointer captured at buildFixedTopology() — used by ensureInsertNode()
+    // APVTS pointer captured at buildFixedTopology() - used by ensureInsertNode()
     // to rebind each insert's cached param pointers on creation.
     juce::AudioProcessorValueTreeState* mApvts { nullptr };
 

@@ -13,13 +13,13 @@ class BaySickRustyDrumsProcessor;
 // RustyInsertTask
 // ---------------
 // Per-strip task for one of the BaySickRustyDrums sfizz engine's outputs.
-// One instance per active strip (up to 13 — kit-dependent).  channelId =
+// One instance per active strip (up to 13 - kit-dependent).  channelId =
 // MixerChannelIds::rustyInsert(stripIndex).
 //
 // Each task has a synthetic dep on RustyDrumsProducerTask (registered in
 // PluginProcessor when the producer + inserts are spawned).  When the
 // dispatcher runs, the producer fires first (drives processStrips), then
-// the 13 inserts can run in parallel — each reads its own strip from the
+// the 13 inserts can run in parallel - each reads its own strip from the
 // engine's internal buffer and runs the per-strip insert chain.
 //
 // Phase 6 scaffolding: dead at runtime while kEnableMultiThreadedEngine

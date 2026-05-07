@@ -11,14 +11,14 @@
 
 // ── DrumPage ──────────────────────────────────────────────────────────────────
 // One Drums instrument page (D1.3, dynamic-drum model).  Up to kMaxDrumPages
-// instances.  Functionally identical to LayersPage / BassPage — each drum tab
+// instances.  Functionally identical to LayersPage / BassPage - each drum tab
 // owns one independent engine instance + its own piano roll.
 //
 // Four sub-tabs (D2 added Drum Kit at index 0):
-//   Tab 0 "Drum Kit"   — 16-row drum-pad / step-sequencer view (cross-drum)
-//   Tab 1 "Player"     — engine selector + engine editor (locks on first pick)
-//   Tab 2 "Piano Roll" — PianoRollContainer bound to drumRolls[mPageIndex]
-//   Tab 3 "EQ"         — EQ8 M/S (pre-rack)
+//   Tab 0 "Drum Kit"   - 16-row drum-pad / step-sequencer view (cross-drum)
+//   Tab 1 "Player"     - engine selector + engine editor (locks on first pick)
+//   Tab 2 "Piano Roll" - PianoRollContainer bound to drumRolls[mPageIndex]
+//   Tab 3 "EQ"         - EQ8 M/S (pre-rack)
 //
 // D2 Drum Kit data model
 // ─────────────────────────
@@ -60,19 +60,19 @@ public:
 
     // ── D2 Drum Kit hooks ─────────────────────────────────────────────────────
     // StandaloneEditor wires:
-    //   getKitListProvider     — returns the cross-drum list in ribbon order
-    //   onKitRowClicked        — picker click → activate / add-new / context
-    //   onKitAuditionOn / Off  — piano-key press-and-hold (Batch 4)
-    //   onKitReorderRow        — drag-handle drop → reorder ribbon + kit (Batch 4)
+    //   getKitListProvider     - returns the cross-drum list in ribbon order
+    //   onKitRowClicked        - picker click → activate / add-new / context
+    //   onKitAuditionOn / Off  - piano-key press-and-hold (Batch 4)
+    //   onKitReorderRow        - drag-handle drop → reorder ribbon + kit (Batch 4)
     void setKitListProvider     (std::function<std::vector<KitDrumInfo>()> fn);
     void setKitRowClickHandler  (std::function<void(int row, juce::Component* anchor)> fn);
     void setKitAuditionHandlers (std::function<void(int row)> onOn,
                                  std::function<void(int row)> onOff);
     void setKitReorderHandler   (std::function<void(int srcRow, int dstRow)> fn);
-    // Batch 5: Kit button click — opens Save/Load Kit popup.  StandaloneEditor
+    // Batch 5: Kit button click - opens Save/Load Kit popup.  StandaloneEditor
     // wires this since kit save/load needs ribbon + DrumPage management access.
     void setKitMenuHandler      (std::function<void(juce::Component* anchor)> fn);
-    // 2026-04-26: Global Lock/Unlock button click — wired by StandaloneEditor.
+    // 2026-04-26: Global Lock/Unlock button click - wired by StandaloneEditor.
     void setGlobalLockHandler   (std::function<void()> fn);
     void refreshKitView ();
 
@@ -123,7 +123,7 @@ public:
     static juce::File presetsDir();        // Documents/BaySickDAW/Presets/BaySickDrums
     static juce::File userPresetsDir();    // <presetsDir>/My Presets
 
-    // Lock state — when true, this drum is protected from accidental swap
+    // Lock state - when true, this drum is protected from accidental swap
     // (picker shows current sound name only; right-click delete still works).
     // Used by future "Random Kit" / "Replace Kit" actions to skip locked drums.
     bool isLocked() const { return mLocked; }
@@ -163,7 +163,7 @@ private:
 
     int  mActiveTab   { 0 };
 
-    // Tab 0: Drum Kit (D2 — cross-drum 16-row piano-roll-style view).
+    // Tab 0: Drum Kit (D2 - cross-drum 16-row piano-roll-style view).
     // Same content regardless of which drum tab is active in the ribbon.
     std::unique_ptr<DrumKitContainer>           mDrumKitTab;
 
@@ -189,7 +189,7 @@ private:
     // D2: snapshot of engine state taken after every preset / sample load
     // and after a successful Save Patch As.  requestDelete() compares the
     // current engine state against this snapshot to decide which prompt to
-    // show — clean patch gets the simple "Delete drum?" confirmation; a
+    // show - clean patch gets the simple "Delete drum?" confirmation; a
     // dirty patch gets the Save & Delete / Delete Anyway / Cancel three-way
     // so the user can capture their tweaks before deleting.
     juce::MemoryBlock mLoadedStateSnapshot;

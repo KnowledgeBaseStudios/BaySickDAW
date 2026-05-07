@@ -3,7 +3,7 @@
 #include "DSPBase.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GraphicEQStyleDSP — Phase I-12 (2026-05-03)
+// GraphicEQStyleDSP - Phase I-12 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // GE Style Graphic EQ (guitar).  7 fixed peaking biquads at the classic
 // guitar 7-band Boss/MXR pedal frequencies + master output fader.

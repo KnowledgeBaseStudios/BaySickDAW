@@ -5,7 +5,7 @@
 #include <vector>
 
 //──────────────────────────────────────────────────────────────────────────────
-// ReverbDSP — 8-line FDN reverb + 5F-9 §8 quality pass
+// ReverbDSP - 8-line FDN reverb + 5F-9 §8 quality pass
 //
 //  Base architecture:
 //   • 8 delay lines, prime lengths × RoomSize scale (@ current SR)
@@ -22,17 +22,17 @@
 //
 //  5F-9 §8 additions:
 //   • §8a per-line tail modulation (sine LFO, ±depth ms, cubic-interp reads;
-//         depth==0 is an exact bypass — zero-cost)
+//         depth==0 is an exact bypass - zero-cost)
 //   • §8b FDN buffers allocated at MAX room size once in prepare(); room-size
-//         changes update mFDNLen only — no re-allocation, no state zeroing
-//   • §8c Freeze toggle — smooth on/off ramp; when engaged, feedback gains go
+//         changes update mFDNLen only - no re-allocation, no state zeroing
+//   • §8c Freeze toggle - smooth on/off ramp; when engaged, feedback gains go
 //         to 1.0, input inject → 0, HF damp + bass shelf → off (prevents drift)
 //   • §8d Multi-tap early reflections (3 taps per line at prime-ratio positions
-//         len/5, len/3, len/2 with natural-decay gain envelope — 24 taps total)
-//   • §8e HF Decay Ratio — post-LP tilt on feedback path so highs decay faster
+//         len/5, len/3, len/2 with natural-decay gain envelope - 24 taps total)
+//   • §8e HF Decay Ratio - post-LP tilt on feedback path so highs decay faster
 //         (ratio<1) or slower (ratio>1) than the overall Decay time
 //   • §8f Tail-mod shape selector (sine / triangle / random S&H)
-//   • §8g Wet Tone tilt — ±12 dB around 1 kHz pivot, wet path only
+//   • §8g Wet Tone tilt - ±12 dB around 1 kHz pivot, wet path only
 //   • §8h BassCrossover knob (already in DSP, now exposed to UI)
 //
 //  Audit fixes: CPU guards, R2 ER clamp, R3 host-BPM sync refresh, R5 state-
@@ -159,7 +159,7 @@ private:
     // ── Constants ────────────────────────────────────────────────────────────
     static constexpr int   kN           = 8;     // FDN lines
     static constexpr int   kDiff        = 4;     // allpass pre-diffusion stages
-    static constexpr int   kERTaps      = 3;     // §8d — 3 taps per line
+    static constexpr int   kERTaps      = 3;     // §8d - 3 taps per line
     static constexpr float kMaxRoomSize = 2.0f;  // §8b max-alloc ceiling for FDN lines
     static constexpr float kMaxSR       = 192000.0f; // §8b max-alloc ceiling for SR scaling
 
@@ -206,10 +206,10 @@ private:
     // §8e HF decay ratio
     float mHFRatio { 0.7f };
 
-    // §8g wet-tone tilt — cascaded low-shelf (250 Hz) + high-shelf (4 kHz)
+    // §8g wet-tone tilt - cascaded low-shelf (250 Hz) + high-shelf (4 kHz)
     // biquad pair, Pultec-style: highShelf gain = +dB/2, lowShelf gain = -dB/2
     // so positive WetTone = bright (cuts lows, boosts highs), negative = warm.
-    // Cookbook RBJ biquads — provably stable for valid coefs.
+    // Cookbook RBJ biquads - provably stable for valid coefs.
     float mWetTiltDb { 0.0f };
 
     // ── H-9 (2026-05-02) Algorithm umbrella + ducking + tempo-sync state ──

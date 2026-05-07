@@ -4,17 +4,17 @@
 #include "PitchTrackerYIN.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TunerStyleDSP — Phase I-13 (2026-05-03)
+// TunerStyleDSP - Phase I-13 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // TU Style Tuner.  Wraps the H-4 PitchTrackerYIN.  Audio thread pushes mono-
 // summed input to the YIN tracker; published frequency is converted to note
 // + cents and exposed via atomics for the UI strobe / LED display.
 //
 // Modes (chickenhead, 3 options):
-//   Chromatic — detects all 12 notes, no snap.  Default.
-//   Guitar    — snaps display to nearest standard guitar tuning open string
+//   Chromatic - detects all 12 notes, no snap.  Default.
+//   Guitar    - snaps display to nearest standard guitar tuning open string
 //               (E2 A2 D3 G3 B3 E4); cents are measured against that target.
-//   Bass      — snaps display to nearest standard bass tuning open string
+//   Bass      - snaps display to nearest standard bass tuning open string
 //               (E1 A1 D2 G2).
 //
 // Reference Hz: 440 / 432 toggle + Trim knob.  Trim range follows the toggle:

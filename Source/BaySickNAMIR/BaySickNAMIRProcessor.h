@@ -14,7 +14,7 @@
 namespace nam { class DSP; }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickNAMIRProcessor — Neural Amp Modeler + IR Cabinet engine (Phase G-1)
+// BaySickNAMIRProcessor - Neural Amp Modeler + IR Cabinet engine (Phase G-1)
 // ─────────────────────────────────────────────────────────────────────────────
 // Signal chain (Phase G-1.3):
 //   Input → Input Gain → Noise Gate → [oversample → NAM → downsample] →
@@ -34,7 +34,7 @@ namespace nam { class DSP; }
 //   message thread parks the new model in mNamPending[slot] and sets
 //   mNamSwapPending[slot]; the audio thread std::swap()s on the next
 //   processBlock so old-model dealloc happens later on the message thread
-//   (next load) — never on audio.  juce::dsp::Convolution provides its own
+//   (next load) - never on audio.  juce::dsp::Convolution provides its own
 //   wait-free swap internally.
 //
 //   Oversampling factor changes go through `parameterChanged` → message-
@@ -87,7 +87,7 @@ public:
 
     // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).  NAM file load,
     // IR file load, mic-sim / mic-placement / oversampling toggle, A/B compare
-    // edits — every APVTS change fires this.  StandaloneEditor wires it to
+    // edits - every APVTS change fires this.  StandaloneEditor wires it to
     // ProjectManager::markDirty.
     void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
@@ -214,7 +214,7 @@ private:
     juce::CriticalSection                    mLoadLock;     // serializes msg-thread loads
     juce::String                             mLastNamError;
 
-    // ── IR convolution (zero-latency mode) — per slot ────────────────────────
+    // ── IR convolution (zero-latency mode) - per slot ────────────────────────
     std::array<juce::dsp::Convolution, 2>  mIr;
     std::array<std::atomic<bool>, 2>       mIrLoaded;
     juce::String                            mLastIrError;
@@ -242,12 +242,12 @@ private:
     std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 2> mOversampling;
 
     // ── Working buffers ──────────────────────────────────────────────────────
-    std::vector<double>      mNamMonoIn;     // double — NAM_SAMPLE default is double
+    std::vector<double>      mNamMonoIn;     // double - NAM_SAMPLE default is double
     std::vector<double>      mNamMonoOut;
     juce::AudioBuffer<float> mMonoFloatBuf;  // mono scratch fed into Oversampling
     juce::AudioBuffer<float> mDryBuf;        // pre-cab fork copy
 
-    // ── File paths — saved as ValueTree custom string properties ─────────────
+    // ── File paths - saved as ValueTree custom string properties ─────────────
     // Index 0 = slot A, index 1 = slot B.
     std::array<juce::String, 2> mNamPaths;
     std::array<juce::String, 2> mIrPaths;

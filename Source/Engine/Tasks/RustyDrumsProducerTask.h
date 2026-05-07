@@ -12,7 +12,7 @@ class VibeSynthProcessor;
 // ----------------------
 // Drives the singleton BaySickRustyDrums sfizz engine's processStrips() once
 // per block, which fills the engine's internal per-strip output buffers
-// (one per Rusty channel — up to 13 in the loaded kit).  This task does NOT
+// (one per Rusty channel - up to 13 in the loaded kit).  This task does NOT
 // publish to a channel-id arena slot; channelId stays -1.  The 13
 // RustyInsertTasks consume the engine's internal buffers via getStripBuffer
 // and have a synthetic dep on this producer registered with the dispatcher

@@ -117,10 +117,10 @@ private:
     bool             mFrozen      { false };
     float            mZoomFactor  { 1.0f };    // 1..8
     float            mZoomOffset  { 0.0f };    // 0..(1 - 1/zoom) phase window start
-    int              mSnapDivision { 16 };     // 1 / 2 / 4 / 8 / 16 / 32 — snap target
+    int              mSnapDivision { 16 };     // 1 / 2 / 4 / 8 / 16 / 32 - snap target
     static constexpr int kGridSegments = 32;   // always 32 visible divisions
 
-    // ── Undo / Redo (Batch 5b) — per-target curve history ─────────────────────
+    // ── Undo / Redo (Batch 5b) - per-target curve history ─────────────────────
     // Simple stack of full point-vector snapshots. pushUndo() is called before
     // every mutating edit (add/remove/drag end); Ctrl+Z pops + restores.
     struct UndoFrame {

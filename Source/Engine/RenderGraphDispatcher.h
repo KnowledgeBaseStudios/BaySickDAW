@@ -10,8 +10,8 @@
 class RenderTask;
 class VibeThreadPool;
 class ChannelBufferArena;
-class RoutingGraph;   // VibeGraph.h — full def included only in the .cpp
-struct BlockContext;  // BlockContext.h — caller fills before dispatchBlock
+class RoutingGraph;   // VibeGraph.h - full def included only in the .cpp
+struct BlockContext;  // BlockContext.h - caller fills before dispatchBlock
 
 // Owns the per-block render graph dispatch logic. Holds non-owning pointers
 // to RenderTask instances registered by PluginProcessor as engines / strips
@@ -38,7 +38,7 @@ public:
 
     // Called from PluginProcessor::prepareToPlay. Resizes the arena to fit
     // the new block size; the worker pool itself is NOT recreated (per the
-    // lifetime contract — see VibeThreadPool.h).
+    // lifetime contract - see VibeThreadPool.h).
     void prepare (double sampleRate, int maxBlockSize);
 
     // Register a non-owning task pointer. Called from the message thread
@@ -47,7 +47,7 @@ public:
     // Has no effect on audio while kEnableMultiThreadedEngine is false.
     //
     // Special case: tasks with channelId == -1 (producer-style tasks that
-    // drive engine state without publishing to a channel — e.g.
+    // drive engine state without publishing to a channel - e.g.
     // RustyDrumsProducerTask) are added to the task list without an arena
     // slot or mTasksByChannel entry.  They participate in the dependency
     // graph via addSyntheticDep().
@@ -73,7 +73,7 @@ public:
     // Batch 8 (2026-05-06): expose the dispatcher's done flag so the
     // MasterTask can signal completion of a block.  MasterTask stores the
     // reference at construction time and `release`-stores `true` at the
-    // end of its run().  Dispatcher's runUntil polls with `acquire` —
+    // end of its run().  Dispatcher's runUntil polls with `acquire` -
     // the release/acquire pair publishes Master's writes to the arena
     // slot to the main thread.
     std::atomic<bool>& getAllDoneFlag() noexcept { return mAllDone; }
@@ -81,7 +81,7 @@ public:
     // Rebuild every registered task's mPredecessors / mChildren / mInitialDeps
     // from the RoutingGraph's current edges + sidechain edges.  Called from
     // PluginProcessor at the top of each block whenever the routing has
-    // changed (cheap — just walks two vectors).  Tasks not present in the
+    // changed (cheap - just walks two vectors).  Tasks not present in the
     // dispatcher (e.g. an edge references a channel id without a registered
     // RenderTask) are silently skipped; the corresponding edge is dropped
     // from the parallel section.
@@ -93,7 +93,7 @@ public:
     // Run one block.  PluginProcessor's processBlock calls this when
     // kEnableMultiThreadedEngine is true.  Caller MUST fully populate ctx
     // (numSamples, bpm, anySolo, posInfo, per-engine MIDI buffer pointers,
-    // liveInputSnapshot) before this call — Batch 9a moved that
+    // liveInputSnapshot) before this call - Batch 9a moved that
     // responsibility to the caller so each task sees consistent context
     // built once at the dispatch site rather than rebuilt internally.
     //
@@ -108,13 +108,13 @@ private:
     ChannelBufferArena& mArena;
 
     // Tasks indexed by channelId for O(1) lookup at register / unregister.
-    // Non-owning pointers — task lifetime is managed by PluginProcessor.
+    // Non-owning pointers - task lifetime is managed by PluginProcessor.
     std::array<RenderTask*, RenderEngine::kMaxStripChannels> mTasksByChannel {};
 
     // Insertion-ordered list for iteration (reset counters, seed leaves).
     std::vector<RenderTask*> mTasks;
 
-    // Batch 6: synthetic (non-routing) deps — pairs (producer, consumer).
+    // Batch 6: synthetic (non-routing) deps - pairs (producer, consumer).
     // Re-applied on every rebuildLinks call so consumer.mInitialDeps and
     // producer.mChildren stay coherent when topology changes.
     std::vector<std::pair<RenderTask*, RenderTask*>> mSyntheticDeps;

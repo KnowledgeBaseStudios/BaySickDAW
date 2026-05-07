@@ -3,13 +3,13 @@
 #include <cmath>
 #include "../Standalone/SharedUI.h"   // Filmstrips::chickenHead / fader (post-S1.5)
 
-// ── HarmlessLAF — "Ring-Glow Digital Orange" ──────────────────────────────────
+// ── HarmlessLAF - "Ring-Glow Digital Orange" ──────────────────────────────────
 // Palette:
 //   Main chassis  : #1A1A1C      Accent (glow): #FF6600 (neon amber)
 //   Recessed panel: #0D0D0E      Muted gold   : #CC9933
 //   Typography    : #B0B0B0      Inactive     : #332211
 //
-// No filmstrips — everything is custom vector drawn.
+// No filmstrips - everything is custom vector drawn.
 //   - Rotary knob: flat dark cap, dim track arc, glowing orange fill arc + bloom
 //   - Toggle button: dark flat rect, orange LED line on top edge when active
 //   - GroupComponent: near-black fill, 1px crisp inset border
@@ -54,7 +54,7 @@ public:
     // knobs stay on the default time-based filmstrip rendering.
     inline static const juce::Identifier kKnobVariant { "harmlessKnobVariant" };
 
-    // ── Rotary knob — variant dispatch ────────────────────────────────────────
+    // ── Rotary knob - variant dispatch ────────────────────────────────────────
     // 2026-04-19 (S1.5b) per Jeff: chicken-head visual is for DISCRETE-mode
     // multi-selectors only (Prism Mode, Unison Type, Strum Direction). All
     // other (continuous) knobs use the Time-effects filmstrip with the white
@@ -235,7 +235,7 @@ private:
 
 public:
 
-    // ── Linear vertical fader — standard fader-bar filmstrip + amber underglow
+    // ── Linear vertical fader - standard fader-bar filmstrip + amber underglow
     // 2026-04-19 (S1.5b) per Jeff: "no fader bar like on every other fader in
     // the app and we have no under glow". Switched to the same pattern VibeLAF
     // uses for non-mixer/non-EQ vertical faders: Filmstrips::fader() (128x128,
@@ -322,7 +322,7 @@ public:
                                                   sliderPos, minPos, maxPos, style, s);
     }
 
-    // ── Toggle / push button — Micro-Toggle with LED ──────────────────────────
+    // ── Toggle / push button - Micro-Toggle with LED ──────────────────────────
     void drawButtonBackground (juce::Graphics& g, juce::Button& b,
                                 const juce::Colour&, bool isOver, bool) override
     {

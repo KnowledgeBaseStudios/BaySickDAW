@@ -7,7 +7,7 @@
 #include "SharedUI.h"
 #include "UndoActions.h"
 
-class VibeSynthProcessor;  // forward declaration — full header in .cpp
+class VibeSynthProcessor;  // forward declaration - full header in .cpp
 
 // ── EffectsPage ───────────────────────────────────────────────────────────────
 // Permanent system tab (Effects). Layout:
@@ -42,7 +42,7 @@ public:
     // Switch the channel dropdown to the named channel and update rack + EQ.
     // Called by StandaloneEditor when a Mixer strip's FX button is clicked.
     // Accepts bus strip names ("Master", "Layers", "Bass", "Drums", "FX Bus")
-    // and instrument strip names ("Layer 1", "Bass 1", etc. — mapped to their bus).
+    // and instrument strip names ("Layer 1", "Bass 1", etc. - mapped to their bus).
     void selectChannelByName(const juce::String& channelName);
 
     // Preferred entry point for mixer FX-Rack-button routing: select by the
@@ -64,7 +64,7 @@ public:
     // Set by StandaloneEditor after construction; called by rebuildChannelDropdown().
     std::function<std::vector<std::pair<int,juce::String>>()> onGetActiveChannels;
 
-    // Rebuild the channel dropdown — now public so StandaloneEditor can trigger it
+    // Rebuild the channel dropdown - now public so StandaloneEditor can trigger it
     // when engines are selected or drum slots change.
     void rebuildChannelDropdown();
 
@@ -96,7 +96,7 @@ private:
     std::unique_ptr<juce::TextButton>  mMetersBtn;   // "Meters v" popup menu
 
     // §P4.3 (B6.2): TabKind models the 3 possible EffectsPage sub-tabs.  Tab
-    // index in setTabSlots is dynamic — Aux/Audio/Bus get all 3 (Pre/Rack/Post),
+    // index in setTabSlots is dynamic - Aux/Audio/Bus get all 3 (Pre/Rack/Post),
     // Layer/Bass/Drum-slot get 2 (Rack/Post) since their pre-EQ lives on the
     // player page.  Use TabKind internally to avoid index-meaning ambiguity.
 public:
@@ -104,7 +104,7 @@ public:
     bool currentChannelHasPagePreEQ() const;   // true for Layer/Bass/Drum channels
     ParametricEQDisplay* getPreEQDisplay() const { return mPreEQDisplay.get(); }
     // Switch by TabKind (preferred) or by visible-tab index (StandaloneEditor's
-    // tab-callback receives the visible index — switchTab(int) translates).
+    // tab-callback receives the visible index - switchTab(int) translates).
     void switchTab (TabKind kind);
     TabKind tabKindForVisibleIndex (int visibleIndex) const;
     int     visibleIndexForTabKind (TabKind kind) const;
@@ -114,7 +114,7 @@ public:
 private:
 
     TabKind mCurrentTabKind { TabKind::Rack };
-    int mCurrentTab { 0 };  // legacy raw index — kept in sync with mCurrentTabKind
+    int mCurrentTab { 0 };  // legacy raw index - kept in sync with mCurrentTabKind
 
     // 2026-04-26: per-channel sub-tab persistence.  Keyed by channel ID
     // (1..6 buses, 100+ inserts, 200+ layers, 300+ basses, 400+ audio,
@@ -167,7 +167,7 @@ private:
     // given effects-page channel id, or empty if unknown.
     juce::String getMixerApvtsPrefixForChannel(int effectsPageId) const;
 
-    // 5F-4a: ButtonAttachment for FX Bypass — created/destroyed as channel changes.
+    // 5F-4a: ButtonAttachment for FX Bypass - created/destroyed as channel changes.
     // When active, clicking the button writes to the APVTS _bypass param (which
     // InsertNode reads each audio block). When null (channel has no _bypass
     // param) the direct rack.setRackBypassed fallback in onClick is used.

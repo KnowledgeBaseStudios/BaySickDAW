@@ -32,7 +32,7 @@ public:
 // sources earlier in the topo-sorted process order.
 //
 // Per-engine internal consumers (UI routing, modulation depth, etc.) are
-// out of scope for this phase — this helper is the primitive only.
+// out of scope for this phase - this helper is the primitive only.
 // ────────────────────────────────────────────────────────────────────────────
 class EngineSidechainHelper
 {
@@ -54,7 +54,7 @@ public:
     }
 
     // Compute a peak-of-receivers RMS level across all connected SC slots
-    // for the current block.  O(numSlots * numChans * numSamples) — cheap
+    // for the current block.  O(numSlots * numChans * numSamples) - cheap
     // when count is 0 (early exit) or no slot has data.
     void updateLevel (int numSamples) noexcept
     {

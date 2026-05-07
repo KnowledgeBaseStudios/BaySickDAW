@@ -4,7 +4,7 @@
 #include "PolyphaseOversampler.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BassDriverStyleDSP — Phase I-6 (2026-05-02)
+// BassDriverStyleDSP - Phase I-6 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // BB Style Bass Driver pedal.  Multi-band drive in the style of the Tech 21
 // SansAmp Bass Driver DI.  3-band Linkwitz-Riley split (Low / Mid / High);

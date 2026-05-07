@@ -174,7 +174,7 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
     const int numSamples = buffer.getNumSamples();
     const int numCh      = buffer.getNumChannels();
     if (numSamples <= 0 || numCh <= 0) return;
-    if (numSamples > mMaxBlock) return;     // host exceeded declared block size — drop frame
+    if (numSamples > mMaxBlock) return;     // host exceeded declared block size - drop frame
     // Defensive: if prepare() was somehow skipped, the oversampler / delay
     // line / scratch bufs are not allocated. Skip the block rather than
     // dereference null state.
@@ -244,7 +244,7 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         scL[i] = detL;
         scR[i] = detR;
 
-        // Input meter (post-gain, post-sat — i.e. "what the limiter sees")
+        // Input meter (post-gain, post-sat - i.e. "what the limiter sees")
         inPeakLin = juce::jmax (inPeakLin, std::abs (processedL), std::abs (processedR));
 
         // Write UNFILTERED processed samples to delay line (main audio path)
@@ -279,7 +279,7 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         }
         mTpPeaks[(size_t) i] = pMax;
     }
-    // C5: unlinked mode — pack per-channel peaks so each envelope can run
+    // C5: unlinked mode - pack per-channel peaks so each envelope can run
     // independently below. Uses separate storage (not mScBuf) because the
     // oversampler still needs mScBuf intact for the processSamplesDown pair.
     if (! linked)
@@ -443,7 +443,7 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         outR *= gainR * makeupLin;
 
         // Hard ceiling safety clamp (applied AFTER makeup so auto-makeup can't
-        // push output above ceiling — limiter guarantee preserved).
+        // push output above ceiling - limiter guarantee preserved).
         outL = juce::jlimit (-ceilingLin, ceilingLin, outL);
         outR = juce::jlimit (-ceilingLin, ceilingLin, outR);
 
@@ -481,7 +481,7 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Setters — CPU-guarded per CLAUDE.md rule
+// Setters - CPU-guarded per CLAUDE.md rule
 // ─────────────────────────────────────────────────────────────────────────────
 void LimiterDSP::setInputGainDb (float dB)
 {

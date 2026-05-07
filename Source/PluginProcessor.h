@@ -132,7 +132,7 @@ public:
     // are resolved against the current project folder.
     juce::File resolveProjectFile (const juce::String& storedPath) const;
 
-    // PatternManager is owned by StandaloneEditor today — the processor holds
+    // PatternManager is owned by StandaloneEditor today - the processor holds
     // a pointer so audio-thread scheduling can read it (see mPatternManager).
     // serializeProject/deserializeProject need it too; this setter is already
     // called by StandaloneEditor on startup via setPatternManager (P1 reuses).
@@ -194,7 +194,7 @@ public:
     void ensureAudioInsert(int row, const juce::String& displayName);
 
     // ── 5F-4b B2: Aux/Group strip registration ──────────────────────────────
-    // Creates an Aux strip at the given idx (0..15). No audio source — aux is
+    // Creates an Aux strip at the given idx (0..15). No audio source - aux is
     // receive-only; its input is populated by sends from other strips.
     // Default main-out = FX Bus. Safe to call repeatedly for the same idx.
     void ensureAuxInsert(int idx, const juce::String& displayName);
@@ -206,7 +206,7 @@ public:
     void ensureInstInsert (int idx, const juce::String& displayName);
 
     // J-5 (2026-05-03): BaySickRustyDrums strip registration.  One strip per
-    // sound type (kick / snare / tom / hi-hat / ride / crash / china / stack —
+    // sound type (kick / snare / tom / hi-hat / ride / crash / china / stack -
     // 13 total for Big Rusty Drums).  Default main-out = kRustyDrumsBus.
     void ensureRustyInsert (int idx, const juce::String& displayName);
     void removeRustyInsert (int idx);
@@ -217,14 +217,14 @@ public:
     class BaySickRustyDrumsProcessor* getBaySickRustyDrums() noexcept;
     // Creates the singleton if absent + loads the kit at sfzPath.  On success:
     // discovers 13 channels, registers 13 strips at kRustyBase..kRustyBase+12,
-    // returns true.  Idempotent — calling twice with same path no-ops cleanly.
+    // returns true.  Idempotent - calling twice with same path no-ops cleanly.
     bool loadBaySickRustyDrumsKit (const juce::File& sfzPath);
     // Tear-down: free engine + remove all 13 InsertNodes.  APVTS params
-    // persist as zombies (existing pattern — JUCE doesn't allow unregister).
+    // persist as zombies (existing pattern - JUCE doesn't allow unregister).
     void destroyBaySickRustyDrums();
     // J-8 Part C (2026-05-04): reset every `mixer_rusty_*` + `mixer_rustybus_*`
     // APVTS param to its registered default value.  Called by the page when
-    // the user switches programs — wipes mixer state so the new kit's
+    // the user switches programs - wipes mixer state so the new kit's
     // freshly-spawned strips start clean (no stale level/pan/mute/EQ from
     // the previous program).
     void resetBaySickRustyDrumsMixerState();
@@ -238,16 +238,16 @@ public:
     class BaySickGuitarsProcessor* getBaySickGuitars (int instIdx) noexcept;
     // Creates the engine at slot `instIdx` if absent + loads the kit at sfzPath.
     // Active flag dance: false → drain audio thread → loadKit → true.  Returns
-    // true on success.  Idempotent — calling with same path on a loaded slot
+    // true on success.  Idempotent - calling with same path on a loaded slot
     // no-ops cleanly.
     bool loadBaySickGuitarsKit (int instIdx, const juce::File& sfzPath);
     // Tear-down: drop the engine at slot `instIdx` (clears the atomic first).
-    // APVTS params persist as zombies (JUCE doesn't allow unregister) — they
+    // APVTS params persist as zombies (JUCE doesn't allow unregister) - they
     // simply have no listener once the engine is gone.
     void destroyBaySickGuitars (int instIdx);
 
     // L-2 (2026-05-05): BaySickBasses per-instance lifecycle.  Mirrors the
-    // Guitars pattern above — separate per-slot arrays so a single Inst tab
+    // Guitars pattern above - separate per-slot arrays so a single Inst tab
     // can be in only one source mode at a time + the engines coexist when
     // multiple tabs of different source modes are open.
     class BaySickBassesProcessor* getBaySickBasses (int instIdx) noexcept;
@@ -326,13 +326,13 @@ public:
     // 2026-04-25: registerDrumsEngine / unregisterDrumsEngine removed
     // (legacy 16-slot processor deleted).
     // D1.2: per-drum-page engine registration (dynamic-drum model).  Mirrors
-    // registerLayerEngine — also creates the Drum InsertNode + mixer strip
+    // registerLayerEngine - also creates the Drum InsertNode + mixer strip
     // params for that drum's pageIdx.
     void registerDrumEngine  (int pageIdx, juce::AudioProcessor* eng);
     void unregisterDrumEngine(int pageIdx);
 
     // G-3 (2026-04-28): per-clip-page engine registration.  pageIdx here is
-    // the audio-row index for the bound clip (1:1 mapping — each Clips tab
+    // the audio-row index for the bound clip (1:1 mapping - each Clips tab
     // claims one of the 50 mixer_audio_<row> inserts on spawn).  Engine
     // output is mixed into THAT row's audio insert during processBlock so
     // arrangement-playback audio + piano-roll-triggered audio share the
@@ -342,7 +342,7 @@ public:
 
     // G-4 (2026-04-28): per-Vox / per-Inst page engine registration.  pageIdx
     // is the Vox / Inst insert index (1:1 with mixer_vox_<idx> / mixer_inst_
-    // <idx>).  Same shape as registerClipEngine — engine output mixes into
+    // <idx>).  Same shape as registerClipEngine - engine output mixes into
     // the existing Vox / Inst InsertNode (created when the user clicks "Add
     // Vox/Inst Strip" on the Mixer page).
     void registerVoxEngine   (int pageIdx, juce::AudioProcessor* eng);
@@ -361,7 +361,7 @@ public:
     using EQSpectrumFeed = VibeGraph::SpectrumFeed;
 
     // ── Level meter feeds (audio thread writes, UI timer reads) ───────────────
-    // Peak dB for each mix section — used by MixerPage strip meters.
+    // Peak dB for each mix section - used by MixerPage strip meters.
     // 2026-04-30: stereo L/R atomics added alongside the mono atomics for
     // the new split DBFSMeter.  The mono atomics are still written (max(L,R))
     // for legacy readers.  UI calls the new stereo getters below.
@@ -387,7 +387,7 @@ public:
     std::atomic<float> mInstBusPeakDb       { -60.0f };
     std::atomic<float> mInstBusPeakDbL      { -60.0f };
     std::atomic<float> mInstBusPeakDbR      { -60.0f };
-    // C.1 (2026-04-30): FX Bus peak — written by VibeGraph::processEffectsBus
+    // C.1 (2026-04-30): FX Bus peak - written by VibeGraph::processEffectsBus
     // each block (mirrors the EffectsBusNode internal atomics so MixerPage
     // can read alongside its peers without reaching into VibeGraph internals).
     std::atomic<float> mFxBusPeakDb         { -60.0f };
@@ -403,7 +403,7 @@ public:
     std::atomic<float> mInstBus3PeakDb      { -60.0f };
     std::atomic<float> mInstBus3PeakDbL     { -60.0f };
     std::atomic<float> mInstBus3PeakDbR     { -60.0f };
-    // J-7b (2026-05-04): RustyDrums Bus peak meter — written by the bus
+    // J-7b (2026-05-04): RustyDrums Bus peak meter - written by the bus
     // pipeline post-fader/pan, drained at end of block alongside every
     // other bus meter so the UI strip sees signal activity.  Run variants
     // declared below alongside the other *Run atomics.
@@ -479,14 +479,14 @@ public:
         // current playback.  Reset to false each block when the playhead is
         // outside the clip range (so a fresh playthrough starts un-choked).
         bool   mutedByChoke   = false;
-        // Disk-streaming reader — background thread pre-fetches, audio thread reads.
+        // Disk-streaming reader - background thread pre-fetches, audio thread reads.
         std::unique_ptr<AudioClipStreamer> streamer;
         // Phase vocoder for BPM-aware time stretch (null when stretchMode=false).
         std::unique_ptr<PhaseVocoder> vocoder;
         // Pre-allocated scratch buffers used by the audio thread (no heap alloc in processBlock).
         juce::AudioBuffer<float> pvInBuf;   // raw file samples fed into vocoder
         juce::AudioBuffer<float> pvOutBuf;  // stretched output from vocoder (file SR)
-        // Expected next file position — used to detect seeks and reset vocoder.
+        // Expected next file position - used to detect seeks and reset vocoder.
         int64 expectedFilePos { 0 };
     };
     // 2026-05-06 (Batch 9c B1): deferred-destruction GC pattern.
@@ -577,7 +577,7 @@ public:
     // InsertNode.  Serial path passes mtDest=nullptr (output fans via
     // routeInsertOutput).  AudioInsertTask passes its mOutputBuffer so the
     // pull-model task graph can consume.  FilePlay clips (clip routed to a
-    // Vox/Inst page) are skipped — they're handled by the inline FilePlay
+    // Vox/Inst page) are skipped - they're handled by the inline FilePlay
     // pass in processBlock for now (deferred to Batch 9 redesign).
     void renderAudioClipsForRow (int row,
                                  const AudioClipBlockContext& ctx,
@@ -601,9 +601,9 @@ public:
     // mCtx->voxPageMidi[mIndex] from a VoxStripTask in MT mode).
     //
     // mtDest:
-    //   nullptr  : serial mode — engine output is fanned via routeInsertOutput
+    //   nullptr  : serial mode - engine output is fanned via routeInsertOutput
     //              into the routing graph (main-out + sends).
-    //   non-null : MT mode — engine output is addFrom'd into mtDest so the
+    //   non-null : MT mode - engine output is addFrom'd into mtDest so the
     //              task's downstream pull-model consumers see it on this
     //              strip's mOutputBuffer.
     //
@@ -687,7 +687,7 @@ public:
     // from BOTH the serial Vox/Inst armed paths in processBlock and (when
     // kEnableMultiThreadedEngine flips) VoxStripTask / InstStripTask::run.
     // Pre-existing race hazard between iteration here and message-thread
-    // mutation in startRecording / stopRecording — same shape as pre-9b
+    // mutation in startRecording / stopRecording - same shape as pre-9b
     // serial code, not closed in 9b.  Future hardening would either move
     // mStripRecorders to shared_ptr-backed entries or use a small
     // SpinLock around iteration; deferred to 9c+.
@@ -762,7 +762,7 @@ private:
     std::array<juce::AudioProcessor*, kMaxDrumPages>       mDrumEngines {};
     juce::AudioBuffer<float>                               mDrumEngineBuf;     // per-drum render scratch
     juce::AudioBuffer<float>                               mDrumEngineScratch; // per-drum sum scratch
-    // Fast-path bypass — true only when at least one DrumPage tab has registered
+    // Fast-path bypass - true only when at least one DrumPage tab has registered
     // an engine.  Audio thread checks this before doing any D1.2 work.
     std::atomic<bool>                                      mAnyDrumPageActive { false };
 
@@ -773,13 +773,13 @@ private:
     juce::SpinLock                                         mClipEngineLock;
     std::array<juce::AudioProcessor*, kMaxClipPages>       mClipEngines {};
     juce::AudioBuffer<float>                               mClipEngineScratch;
-    // Fast-path bypass — set true the moment ANY Clips tab registers an engine,
+    // Fast-path bypass - set true the moment ANY Clips tab registers an engine,
     // false when none remain.  Avoids the per-block iteration cost on projects
     // that don't use clips.  Same pattern as mAnyDrumPageActive.
     std::atomic<bool>                                      mAnyClipPageActive { false };
 
     // G-4 (2026-04-28): per-Vox / per-Inst-page engine processors.  Same
-    // pattern as Clips — engine output routes through the existing Vox / Inst
+    // pattern as Clips - engine output routes through the existing Vox / Inst
     // InsertNode (created by the Mixer page's "Add Vox/Inst Strip" flow).
     juce::SpinLock                                         mVoxEngineLock;
     std::array<juce::AudioProcessor*, kMaxVoxPages>        mVoxEngines {};
@@ -829,11 +829,11 @@ private:
     // counter exceeds kIdleSuspendBlocks, the tab's entire chain (sfizz +
     // Pedals + NAMIR + insert rack + EQ) is skipped on this block.  Wakes
     // immediately on the next block where any of those gates fail (MIDI,
-    // voice activity, audition).  Audio-thread-only state — no atomics.
+    // voice activity, audition).  Audio-thread-only state - no atomics.
     static constexpr int kIdleSuspendBlocks = 9;   // ~200ms at 256/44.1k
     std::array<int, kMaxInstPages> mInstIdleBlocks {};
     int mRustyIdleBlocks { 0 };
-    // 2026-05-06: bus-level idle gate REVERTED — the per-block magnitude
+    // 2026-05-06: bus-level idle gate REVERTED - the per-block magnitude
     // check added overhead during active playback (where buses are not
     // silent) without offsetting savings, net-negative on busy sessions.
     // Per-tab Option A above remains the meaningful DSP win.
@@ -856,7 +856,7 @@ private:
 
     // §P4.3 B7 (2026-04-22): per-page pre-rack EQ pointer arrays + SpinLocks
     // deleted.  Pre-rack EQs now live on VibeGraph InsertNode / BusNode
-    // preEq members — no more page-owned DSPs held here as non-owning ptrs.
+    // preEq members - no more page-owned DSPs held here as non-owning ptrs.
 
     // ── State ─────────────────────────────────────────────────────────────
     std::atomic<int> mDeviceOutputLatency { 0 };
@@ -865,11 +865,11 @@ private:
     PatternManager* mPatternManager { nullptr };
 
 public:
-    // Effective loop length — written by the message thread (10 Hz GlobalTransportBar timer),
+    // Effective loop length - written by the message thread (10 Hz GlobalTransportBar timer),
     // read on the audio thread in processBlock. Avoids a data race on PatternManager vectors.
     std::atomic<double> mCachedPatternLoopBeats { 4.0 };   // 1 bar default; extended by content
 
-    // Song mode — written by UI thread, read on audio thread.
+    // Song mode - written by UI thread, read on audio thread.
     // true = play arrangement blocks linearly; false = loop current pattern.
     std::atomic<bool>   mSongMode { false };
     void setSongMode(bool b) { mSongMode.store(b, std::memory_order_relaxed); }
@@ -926,7 +926,7 @@ private:
     int mLastDrumStep { -1 };
     int mLastBassStep { -1 };
 
-    // 1M: overload accumulator — audio thread only, no sync needed
+    // 1M: overload accumulator - audio thread only, no sync needed
     int64_t mOverload85Samples { 0 };
 
     // ── Piano roll note scheduling (standalone) ───────────────────────────
@@ -951,7 +951,7 @@ private:
     // un-choked.
     // 2026-04-30 (audit B.6): Vox + Inst page MIDI buffers added so choke
     // groups also dispatch to / from those engines.  Was Layer/Bass/Drum
-    // only — Audio/Aux/Vox/Inst chokeGroup APVTS params were registered
+    // only - Audio/Aux/Vox/Inst chokeGroup APVTS params were registered
     // but the dispatch loop never scanned or injected them.
     void applyChokeGroupDispatch(
         std::array<juce::MidiBuffer, kMaxLayerPages>& layerMidi,
@@ -983,7 +983,7 @@ private:
     // when ANY APVTS state property changes.  The next processBlock will run
     // updateAllPost+PreRackEQsFromApvts; subsequent blocks skip until the next
     // change.  Catches param edits from UI (message thread), automation (audio
-    // thread), and host-driven setValue calls — all uniformly route through
+    // thread), and host-driven setValue calls - all uniformly route through
     // ValueTree::setProperty under the hood.
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override
     {

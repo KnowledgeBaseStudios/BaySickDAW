@@ -7,7 +7,7 @@
 #include "../Standalone/ApvtsDirtyTracker.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickVocalProcessor — Phase H-1 skeleton (2026-05-01)
+// BaySickVocalProcessor - Phase H-1 skeleton (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 // Vocal chain processor, peer to BaySickNAMIRProcessor in the Vox chain.
 // APVTS prefix `bsv_*`.
@@ -16,7 +16,7 @@
 //   input -> pitch correction -> de-esser -> compressor -> saturation
 //         -> limiter -> output
 //
-// Editor (H-6) — 6 sub-tabs:
+// Editor (H-6) - 6 sub-tabs:
 //   1. BaySickVocals      (realtime pitch + page-wide controls)
 //   2. Vocal Chain        (de-esser / compressor / saturation / limiter rack)
 //   3. BaySickPitch       (Newtone-clone offline pitch editor)
@@ -24,7 +24,7 @@
 //   5. BaySickNAM/IR      (existing engine hosted as a sub-tab)
 //   6. Pre Rack EQ        (strip's existing Pre EQ8 M/S)
 //
-// H-1 scope: structural shell only. No DSP yet — processBlock is a passthrough
+// H-1 scope: structural shell only. No DSP yet - processBlock is a passthrough
 // honoring the master bypass + mix params. Stage Bypass params registered as
 // placeholders so subsequent sub-batches can wire their stages without
 // re-touching the param layout.

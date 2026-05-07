@@ -77,7 +77,7 @@ public:
     void shutdown()  override;
     void systemRequestedQuit() override { quit(); }
 
-    // ChangeListener — saves audio device state whenever the user changes it
+    // ChangeListener - saves audio device state whenever the user changes it
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
 
     // C.3 (2026-04-30): hardware MIDI input bridge.  Called from the JUCE MIDI
@@ -93,7 +93,7 @@ private:
     std::unique_ptr<StandalonePlayHead>          mPlayHead;
     std::unique_ptr<juce::AudioDeviceManager>    mDeviceManager;
     std::unique_ptr<juce::AudioProcessorPlayer>  mPlayer;
-    std::unique_ptr<juce::AudioIODeviceCallback> mAdvancer; // PlayHeadAdvancer — defined in StandaloneApp.cpp
+    std::unique_ptr<juce::AudioIODeviceCallback> mAdvancer; // PlayHeadAdvancer - defined in StandaloneApp.cpp
     std::unique_ptr<juce::DocumentWindow>        mWindow;
 
     void saveAudioSettings();
@@ -106,7 +106,7 @@ public:
 
     // J-A2 (2026-05-04): master output channel routing persistence.  Lives
     // alongside audio_settings.xml as `master_output.xml` (machine-scoped,
-    // not project-scoped — different rigs have different audio interfaces).
+    // not project-scoped - different rigs have different audio interfaces).
     static juce::File getMasterOutputFile();
     static void       loadMasterOutputRouting();   // call once at startup before mDeviceManager->initialise
     static void       saveMasterOutputRouting();   // call when the mixer hamburger writes a new selection

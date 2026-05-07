@@ -69,7 +69,7 @@ static String midiToName(int midi)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DrumKitSidebar — left strip (16 picker rows + audition keys)
+// DrumKitSidebar - left strip (16 picker rows + audition keys)
 // ─────────────────────────────────────────────────────────────────────────────
 DrumKitSidebar::DrumKitSidebar()
 {
@@ -219,7 +219,7 @@ void DrumKitSidebar::paint(Graphics& g)
     const auto b = getLocalBounds();
     g.fillAll(VC::Panel);
 
-    // Ruler band — match the grid's ruler band so the area lines up.
+    // Ruler band - match the grid's ruler band so the area lines up.
     g.setColour(VC::Panel.brighter(0.12f));
     g.fillRect(0, 0, kWidth, mRulerH);
     g.setColour(VC::Accent.withAlpha(0.5f));
@@ -260,7 +260,7 @@ void DrumKitSidebar::paint(Graphics& g)
         g.drawRect(key, 1);
     }
 
-    // Active-row indicator — 2 px accent border around the picker only.
+    // Active-row indicator - 2 px accent border around the picker only.
     for (int r = 0; r < (int) mRows.size() && r < kNumRows; ++r)
     {
         if (! mRows[r].isActive) continue;
@@ -385,7 +385,7 @@ void DrumKitSidebar::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DrumKitGrid — constructor / coordinate helpers / accessors
+// DrumKitGrid - constructor / coordinate helpers / accessors
 // ─────────────────────────────────────────────────────────────────────────────
 DrumKitGrid::DrumKitGrid()
 {
@@ -859,7 +859,7 @@ void DrumKitGrid::duplicateSelected()
     }
 
     // Selection-based duplicate.  2026-04-26 (D-7): no longer falls back to
-    // "every drum hit on every row" when nothing is selected — duplicate now
+    // "every drum hit on every row" when nothing is selected - duplicate now
     // requires either an explicit selection or a ruler time-range (handled
     // above).
     if (mSelection.empty()) return;
@@ -1125,7 +1125,7 @@ bool DrumKitGrid::keyPressed(const KeyPress& key)
         if (! shift && (key.getKeyCode() == 'G' || key.getKeyCode() == 'g'))
             { toolGlue(); return true; }
         // 2026-04-26 (D-7): drum-applicable bundle.  Quick-legato + Ctrl+Up/Down
-        // transpose are skipped — drum hits don't legato and rows are
+        // transpose are skipped - drum hits don't legato and rows are
         // slot-based, not pitch-based.
         if (! shift && (key.getKeyCode() == 'Q' || key.getKeyCode() == 'q'))
             { quickQuantizeQuarter(); return true; }
@@ -1223,7 +1223,7 @@ bool DrumKitGrid::keyPressed(const KeyPress& key)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — hover cursor
+// Mouse - hover cursor
 // ─────────────────────────────────────────────────────────────────────────────
 void DrumKitGrid::mouseMove(const MouseEvent& e)
 {
@@ -1239,7 +1239,7 @@ void DrumKitGrid::mouseMove(const MouseEvent& e)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — button down
+// Mouse - button down
 // ─────────────────────────────────────────────────────────────────────────────
 void DrumKitGrid::mouseDown(const MouseEvent& e)
 {
@@ -1329,7 +1329,7 @@ void DrumKitGrid::mouseDown(const MouseEvent& e)
                 break;
             }
 
-            // Resize check (right edge — or left edge if Ctrl+Alt+Home toggle on).
+            // Resize check (right edge - or left edge if Ctrl+Alt+Home toggle on).
             const auto ri = noteNearRightEdge(e.x, e.y);
             if (ri.isValid())
             {
@@ -1350,7 +1350,7 @@ void DrumKitGrid::mouseDown(const MouseEvent& e)
             const auto ni = noteAtPos(e.x, e.y);
             if (ni.isValid())
             {
-                // 2026-04-26 (D-7): click memory — clicking an existing hit
+                // 2026-04-26 (D-7): click memory - clicking an existing hit
                 // remembers its duration so the next click-place uses it.
                 if (auto* roll = rollForRow(ni.row);
                     roll != nullptr && ni.idx < (int) roll->notes.size())
@@ -1531,7 +1531,7 @@ void DrumKitGrid::mouseDown(const MouseEvent& e)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — drag
+// Mouse - drag
 // ─────────────────────────────────────────────────────────────────────────────
 void DrumKitGrid::mouseDrag(const MouseEvent& e)
 {
@@ -1693,7 +1693,7 @@ void DrumKitGrid::mouseDrag(const MouseEvent& e)
             const double minDur = 4.0 / 32.0;
             if (mResizingFromLeft)
             {
-                // 2026-04-26 (D-7): drag the LEFT edge — origEnd stays put.
+                // 2026-04-26 (D-7): drag the LEFT edge - origEnd stays put.
                 const double origEnd  = mResizeOrigStart + mResizeOrigDur;
                 const double rawStart = e.mods.isAltDown() ? xToBeat(e.x) : snapBeat(xToBeat(e.x));
                 const double newStart = jmax(0.0, jmin(rawStart, origEnd - minDur));
@@ -1740,7 +1740,7 @@ void DrumKitGrid::mouseDrag(const MouseEvent& e)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — button up
+// Mouse - button up
 // ─────────────────────────────────────────────────────────────────────────────
 void DrumKitGrid::mouseUp(const MouseEvent&)
 {
@@ -1753,7 +1753,7 @@ void DrumKitGrid::mouseUp(const MouseEvent&)
         }
         else if (mPM != nullptr)
         {
-            // 2026-04-26 (D-7): mirror PianoRollGrid auto-select — every drum
+            // 2026-04-26 (D-7): mirror PianoRollGrid auto-select - every drum
             // hit (any row) whose start lies inside the ruler range becomes
             // selected so subsequent ops act on it without an extra marquee.
             const double t0 = jmin(mTimeSelBeatStart, mTimeSelBeatEnd);
@@ -1781,7 +1781,7 @@ void DrumKitGrid::mouseUp(const MouseEvent&)
         const int pi = rowToPageIndex(mDrawRow);
         if (pi >= 0)
         {
-            // 2026-04-26 (D-7): click memory — click-only placement uses the
+            // 2026-04-26 (D-7): click memory - click-only placement uses the
             // remembered duration; drag-to-place uses the dragged length.
             // Drum hits don't carry slide / portamento so type isn't tracked.
             const double dur = mDrawHasDragged
@@ -1879,7 +1879,7 @@ void DrumKitGrid::mouseUp(const MouseEvent&)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — double-click on note → context menu (Velocity / MIDI Note / Delete)
+// Mouse - double-click on note → context menu (Velocity / MIDI Note / Delete)
 // ─────────────────────────────────────────────────────────────────────────────
 void DrumKitGrid::mouseDoubleClick(const MouseEvent& e)
 {
@@ -2016,7 +2016,7 @@ void DrumKitGrid::promptMidiNote(NoteRef ref)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — wheel
+// Mouse - wheel
 // ─────────────────────────────────────────────────────────────────────────────
 void DrumKitGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails& wheel)
 {
@@ -2068,7 +2068,7 @@ void DrumKitGrid::paint(Graphics& g)
     const int rowH = jmax(1, mRowH);
     const int rowsTop = mRowYOffset;
 
-    // Row backgrounds — alternate brightness so adjacent drums are distinct.
+    // Row backgrounds - alternate brightness so adjacent drums are distinct.
     for (int r = 0; r < DrumKitSidebar::kNumRows; ++r)
     {
         const int y = rowsTop + r * rowH;
@@ -2102,7 +2102,7 @@ void DrumKitGrid::paint(Graphics& g)
             g.drawVerticalLine(x, (float) rowsTop, (float) b.getHeight());
         }
     }
-    // Bar lines (every patternBpb PPQ beats — pattern's intrinsic TS).
+    // Bar lines (every patternBpb PPQ beats - pattern's intrinsic TS).
     // C.5b: 4/4 → 4-beat bars; 3/4 → 3-beat bars; 6/8 → 3-beat bars.
     {
         const double barBpb = (mPM != nullptr)
@@ -2187,7 +2187,7 @@ void DrumKitGrid::paint(Graphics& g)
                     g.drawRoundedRectangle(nx + 0.5f, ny + 0.5f, nw - 1.f, nh - 1.f, 2.f, 1.f);
                 }
 
-                // Retune dot — top-right when not C5 (kit-grid placement note).
+                // Retune dot - top-right when not C5 (kit-grid placement note).
                 if (n.midiNote != kKitMidiNote && w >= 12 && rowH >= 10)
                 {
                     const float dotR = 4.f;
@@ -2299,7 +2299,7 @@ void DrumKitGrid::paint(Graphics& g)
 // ─────────────────────────────────────────────────────────────────────────────
 std::vector<DrumKitGrid::NoteRef> DrumKitGrid::getWorkingSet() const
 {
-    // 2026-04-26 (D-7): selection-only — mirrors PianoRollGrid::getWorkingSet
+    // 2026-04-26 (D-7): selection-only - mirrors PianoRollGrid::getWorkingSet
     // change.  Previously fell back to "every drum note across every row" when
     // mSelection was empty, which made tool shortcuts act on freshly-drawn
     // hits without an explicit highlight.
@@ -2364,7 +2364,7 @@ void DrumKitGrid::toolQuantize()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// D-7 (2026-04-26): Smaller piano roll bundle helpers — drum kit variants
+// D-7 (2026-04-26): Smaller piano roll bundle helpers - drum kit variants
 // ─────────────────────────────────────────────────────────────────────────────
 
 void DrumKitGrid::quickQuantizeQuarter()
@@ -2504,7 +2504,7 @@ namespace { struct DrumScaleLevelsHost : public juce::Component
 
 bool DrumKitGrid::isRefSelected (NoteRef ref) const { return isSelected (ref); }
 
-// Ctrl+Left / Ctrl+Right — mirror of PianoRollGrid version.  Walk every
+// Ctrl+Left / Ctrl+Right - mirror of PianoRollGrid version.  Walk every
 // drum row and re-populate mSelection from the new range so the visual
 // highlight stays in sync.
 void DrumKitGrid::shiftTimeSelectionLeft()  { /* uses internal helper */
@@ -2627,7 +2627,7 @@ void DrumKitGrid::toolChop(int divisions)
     auto targets = getWorkingSet();
     if (targets.empty()) return;
 
-    // 2026-04-26 (D-7): mirror PianoRollGrid's chop guard — refuse to
+    // 2026-04-26 (D-7): mirror PianoRollGrid's chop guard - refuse to
     // subdivide drum hits below 1/16 (0.25 beat).  Skip per-note; if every
     // target falls under the threshold the call is a no-op.
     constexpr double kMinSubDur = 0.25;
@@ -2837,7 +2837,7 @@ DrumKitGrid::NoteRef DrumKitControlLane::noteNearX(int x, int y) const
     static constexpr double kPxTol = 10.0;
     const double kBeatTol = kPxTol / mPPB;
 
-    // 2026-04-26 (D-7 sub-4): selection-locked editing — restrict candidates
+    // 2026-04-26 (D-7 sub-4): selection-locked editing - restrict candidates
     // to selected refs when the grid has any selection.
     const bool selectionLocked = (hasAnySelection && hasAnySelection());
 
@@ -3032,7 +3032,7 @@ void DrumKitControlLane::mouseUp(const MouseEvent&)
 }
 
 // 2026-04-26 (D-7 sub-4): Alt+Wheel over the drum-kit lane mirrors the
-// Piano-Roll behaviour — adjust the currently-displayed property
+// Piano-Roll behaviour - adjust the currently-displayed property
 // (velocity / pan) for the hit whose bar is under the cursor x.  Default
 // delta ±0.05; Shift+Alt+Wheel = ±0.01 for fine adjustment.
 void DrumKitControlLane::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& wheel)
@@ -3256,7 +3256,7 @@ DrumKitContainer::DrumKitContainer()
     mContextLabel->setInterceptsMouseClicks(false, false);
     addAndMakeVisible(*mContextLabel);
 
-    // Horizontal scrollbar (no V scrollbar — 16 rows are fixed).
+    // Horizontal scrollbar (no V scrollbar - 16 rows are fixed).
     mHScroll = std::make_unique<juce::ScrollBar>(false);
     mHScroll->setAutoHide(false);
     mHScroll->addListener(this);

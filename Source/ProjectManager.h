@@ -11,7 +11,7 @@ namespace juce { class Timer; }
 //
 // Owns the "current project" concept: the folder on disk that holds the user's
 // project.xml + Samples/ + any future per-project assets.  This is BaySickDAW's
-// equivalent of a .flp / .als / .logicx — a self-contained folder the user
+// equivalent of a .flp / .als / .logicx - a self-contained folder the user
 // names once and then saves to forever.
 //
 // Conventions locked (see blueprint Project Persistence section +
@@ -35,7 +35,7 @@ namespace juce { class Timer; }
 // autosave sidecar written every 15 min (P5).  No path-reference mode - v1
 // is bundled-only for beginner safety.
 //
-// Phase P1 scope: skeleton class only — methods exist, serialization works
+// Phase P1 scope: skeleton class only - methods exist, serialization works
 // against VibeSynthProcessor::serializeProject/deserializeProject, but the UI
 // (File menu / New/Open dialogs / autosave timer firing / dirty tracking) lands
 // in later phases P2-P5.  Recent-projects list is persisted to
@@ -54,7 +54,7 @@ public:
 
     // settings.xml (recent-projects list + future global prefs).  Lives in
     // Documents\BaySickDAW\ alongside Projects / Recordings / Presets /
-    // Templates — the unified user-visible folder.
+    // Templates - the unified user-visible folder.
     static juce::File getSettingsFile();
 
     // ── Project-name validation (Windows filename rules) ─────────────────────
@@ -81,13 +81,13 @@ public:
     bool saveProject();
 
     // saveProjectAs: duplicates the current project folder to <root>/<newName>/
-    // (pure GarageBand-style — user doesn't pick a location).  Switches the
+    // (pure GarageBand-style - user doesn't pick a location).  Switches the
     // "current" project to the new folder.  Returns true on success.
     bool saveProjectAs (const juce::String& newName);
 
     // deleteProject: moveToTrash the given project folder (Recycle Bin).
     // Caller must confirm first.  Does NOT close the current project if the
-    // target happens to be the currently-open one — caller is responsible.
+    // target happens to be the currently-open one - caller is responsible.
     static bool deleteProject (const juce::File& projectFolder);
 
     // renameProject: rename the folder on disk.  Only valid on projects NOT
@@ -106,7 +106,7 @@ public:
     // duplicateProject: copy the folder to <projects-root>/<newName>/.
     // Collision-safe (appends " (N)" if target exists).  Returns the new
     // folder on success, or juce::File() on failure.  Does NOT switch the
-    // current project — caller may openProject(returned) to switch.
+    // current project - caller may openProject(returned) to switch.
     static juce::File duplicateProject (const juce::File& projectFolder,
                                          const juce::String& newName);
 

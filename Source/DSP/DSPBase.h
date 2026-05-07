@@ -15,11 +15,11 @@ public:
     virtual void process(juce::AudioBuffer<float>& buffer)   = 0;
     virtual void reset()                                      = 0;
 
-    // Serialization — ValueTree XML stored as raw bytes
+    // Serialization - ValueTree XML stored as raw bytes
     virtual void getStateInformation(juce::MemoryBlock& dest) { (void)dest; }
     virtual void setStateInformation(const void* data, int sz) { (void)data; (void)sz; }
 
-    // BPM sync — only meaningful for time-based effects; default is no-op
+    // BPM sync - only meaningful for time-based effects; default is no-op
     virtual void setHostBPM(double /*bpm*/) {}
 
     // Gain-reduction meter (0 = no reduction, negative dB = compressed)

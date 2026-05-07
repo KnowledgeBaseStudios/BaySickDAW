@@ -150,7 +150,7 @@ private:
     std::atomic<float> mOutputDb { -96.0f };
     std::atomic<float> mGrDb     { 0.0f };
     float mLevelDecayDbPerBlock { 0.35f };   // for mInputDb / mOutputDb (falls toward -96)
-    float mGrDecayDbPerBlock    { 0.35f };   // for mGrDb (rises toward 0 — GR is <=0)
+    float mGrDecayDbPerBlock    { 0.35f };   // for mGrDb (rises toward 0 - GR is <=0)
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     void recalcCoefs();       // attack/release coefs from times

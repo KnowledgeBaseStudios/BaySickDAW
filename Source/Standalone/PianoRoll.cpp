@@ -230,7 +230,7 @@ void PianoKeyboard::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails&
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PianoRollGrid — constructor & coordinate helpers
+// PianoRollGrid - constructor & coordinate helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 // 2026-04-26 (D-7 sub-4): cross-tab clipboard.  Shared by every Piano-Roll
@@ -643,7 +643,7 @@ void PianoRollGrid::duplicateSelected()
     if (!mData) return;
 
     // ── Timeline-based duplicate (when a time-selection exists) ───────────
-    // The user marked a range on the ruler — copy every note whose start
+    // The user marked a range on the ruler - copy every note whose start
     // lies inside that range and paste it at +selLen, then advance the
     // time-sel so repeat-Ctrl+B chains forward. Wins over note selection.
     if (mTimeSelBeatStart >= 0.0 && mTimeSelBeatEnd > mTimeSelBeatStart)
@@ -683,7 +683,7 @@ void PianoRollGrid::duplicateSelected()
 
     // ── Selection-based duplicate (no time-selection) ─────────────────────
     // 2026-04-26 (D-7): no longer falls back to "all notes" when nothing
-    // is selected — duplicate now requires either an explicit note
+    // is selected - duplicate now requires either an explicit note
     // selection or a ruler time-selection (handled above).
     if (mSelection.empty()) return;
     std::vector<int> src = mSelection;
@@ -991,7 +991,7 @@ bool PianoRollGrid::keyPressed(const KeyPress& key)
     }
 
     // ── Ctrl shortcuts ────────────────────────────────────────────────────
-    // 2026-04-26 (B-5): Ctrl+Z / Ctrl+Alt+Z migrated to global BSCommands —
+    // 2026-04-26 (B-5): Ctrl+Z / Ctrl+Alt+Z migrated to global BSCommands -
     // page-local Z handlers removed.  Remaining Ctrl shortcuts stay local.
     if (ctrl && !alt)
     {
@@ -1009,7 +1009,7 @@ bool PianoRollGrid::keyPressed(const KeyPress& key)
         if (!shift && (key.getKeyCode() == 'Q' || key.getKeyCode() == 'q'))
             { quickQuantizeQuarter(); return true; }
         if (!shift && (key.getKeyCode() == 'U' || key.getKeyCode() == 'u'))
-            { if (!mSelection.empty()) toolChop(4); return true; }   // quick chop into 4 — selection only
+            { if (!mSelection.empty()) toolChop(4); return true; }   // quick chop into 4 - selection only
         if (!shift && (key.getKeyCode() == 'L' || key.getKeyCode() == 'l'))
             { quickLegato(); return true; }
         if (!shift && key.isKeyCode(KeyPress::upKey))
@@ -1022,7 +1022,7 @@ bool PianoRollGrid::keyPressed(const KeyPress& key)
             { shiftTimeSelectionLeft();  return true; }
         if (!shift && key.isKeyCode(KeyPress::rightKey))
             { shiftTimeSelectionRight(); return true; }
-        // 2026-04-26 (D-7): use isKeyCode(...) — `key == KeyPress::deleteKey`
+        // 2026-04-26 (D-7): use isKeyCode(...) - `key == KeyPress::deleteKey`
         // resolves to the operator==(KeyPress&) overload via implicit int→
         // KeyPress conversion, which compares MODIFIERS too and never matches
         // a press with Ctrl held.  isKeyCode is int-only and correct.
@@ -1083,7 +1083,7 @@ bool PianoRollGrid::keyPressed(const KeyPress& key)
         return true;
     }
 
-    // ── Shift+Arrows = nudge by snap unit (Shift+Z dropped in B-4 — bare Z) ──
+    // ── Shift+Arrows = nudge by snap unit (Shift+Z dropped in B-4 - bare Z) ──
     if (shift && !ctrl && !alt)
     {
         if (key.isKeyCode(KeyPress::leftKey))  { nudgeSelection(-1,  0); return true; }
@@ -1117,7 +1117,7 @@ bool PianoRollGrid::keyPressed(const KeyPress& key)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — hover cursor
+// Mouse - hover cursor
 // ─────────────────────────────────────────────────────────────────────────────
 void PianoRollGrid::mouseMove(const MouseEvent& e)
 {
@@ -1140,7 +1140,7 @@ void PianoRollGrid::mouseMove(const MouseEvent& e)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — button down
+// Mouse - button down
 // ─────────────────────────────────────────────────────────────────────────────
 void PianoRollGrid::mouseDown(const MouseEvent& e)
 {
@@ -1159,7 +1159,7 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
     // When a ruler time-range is set, a click whose x falls OUTSIDE [t0, t1)
     // clears both the range and the auto-populated mSelection BEFORE the
     // rest of mouseDown runs.  Inside the range = preserve.  This applies
-    // to grid + ruler clicks alike — including a fresh Ctrl+drag-on-ruler
+    // to grid + ruler clicks alike - including a fresh Ctrl+drag-on-ruler
     // outside the old range, which then starts a new range from scratch.
     // Right-button presses are skipped (right-click context menus shouldn't
     // wipe state).
@@ -1244,7 +1244,7 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
                 break;
             }
 
-            // Resize check (right edge — or left edge if Ctrl+Alt+Home toggle on)
+            // Resize check (right edge - or left edge if Ctrl+Alt+Home toggle on)
             int ri = noteIndexNearRightEdge(e.x, e.y);
             if (ri >= 0)
             {
@@ -1261,7 +1261,7 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
             int ni = noteIndexAtPos(e.x, e.y);
             if (ni >= 0)
             {
-                // 2026-04-26 (D-7): FL-style click memory — clicking on an
+                // 2026-04-26 (D-7): FL-style click memory - clicking on an
                 // existing note remembers its duration + type so the next
                 // click-place uses them.  Drag-to-place still wins.
                 mClickMemoryDur  = mData->notes[ni].durationBeats;
@@ -1390,7 +1390,7 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
             if (idx >= 0)
             {
                 // 2026-04-26 (D-7): click memory carries from the Select tool
-                // too — clicking a note here also primes the next Draw-tool
+                // too - clicking a note here also primes the next Draw-tool
                 // click-place with that note's length + type.
                 mClickMemoryDur  = mData->notes[idx].durationBeats;
                 mClickMemoryType = mData->notes[idx].type;
@@ -1414,7 +1414,7 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
             }
             else
             {
-                // Don't clearSelection here — do it in finaliseMarquee so that
+                // Don't clearSelection here - do it in finaliseMarquee so that
                 // a spurious extra mouseDown can't wipe out the completed selection.
                 mMarqueeWasCtrl = e.mods.isCtrlDown();
                 mMarqueeActive  = true;
@@ -1445,7 +1445,7 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — drag
+// Mouse - drag
 // ─────────────────────────────────────────────────────────────────────────────
 void PianoRollGrid::mouseDrag(const MouseEvent& e)
 {
@@ -1553,7 +1553,7 @@ void PianoRollGrid::mouseDrag(const MouseEvent& e)
         const double minDur = 4.0 / 32.0;  // always allow resize back to 1/32 regardless of snap
         if (mResizingFromLeft)
         {
-            // 2026-04-26 (D-7): drag the LEFT edge — keep the original right
+            // 2026-04-26 (D-7): drag the LEFT edge - keep the original right
             // edge fixed and adjust startBeat + durationBeats together.
             const double origEnd  = mResizeOrigStart + mResizeOrigDur;
             const double rawStart = e.mods.isAltDown() ? xToBeat(e.x) : snapBeat(xToBeat(e.x));
@@ -1581,7 +1581,7 @@ void PianoRollGrid::mouseDrag(const MouseEvent& e)
         return;
     }
 
-    // Slice drag — snap the moving endpoint's X to grid (Alt bypasses snap).
+    // Slice drag - snap the moving endpoint's X to grid (Alt bypasses snap).
     if (mSlicing)
     {
         const auto p = e.getPosition();
@@ -1603,7 +1603,7 @@ void PianoRollGrid::mouseDrag(const MouseEvent& e)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — button up
+// Mouse - button up
 // ─────────────────────────────────────────────────────────────────────────────
 void PianoRollGrid::mouseUp(const MouseEvent&)
 {
@@ -1620,7 +1620,7 @@ void PianoRollGrid::mouseUp(const MouseEvent&)
         {
             // 2026-04-26 (D-7): auto-select every note whose start lies inside
             // the ruler range so subsequent ops (Delete, Ctrl+Q, Ctrl+L, etc.)
-            // act on those notes immediately — matches user expectation that
+            // act on those notes immediately - matches user expectation that
             // "what's inside the time selection IS the selection".  The range
             // itself stays set so Ctrl+Delete (delete time + close gap) and
             // Ctrl+B Duplicate Timeline still target the time span.
@@ -1641,14 +1641,14 @@ void PianoRollGrid::mouseUp(const MouseEvent&)
     if (!mData) { mDrawing = mErasing = mMoving = mResizing = false; return; }
 
     // Commit drawn note (Draw tool)
-    // Note: audition is mouse-held and ends below in releaseAudition() — no
+    // Note: audition is mouse-held and ends below in releaseAudition() - no
     // one-shot fire here, otherwise the held noteOff would chase a brief
     // re-trigger and re-cut the voice mid-note.
     if (mDrawing && mDrawNote >= 0 && mActiveTool == PRTool::Draw)
     {
         // 2026-04-26 (D-7): click-memory length / type win for click-only
         // placement; drag-to-place uses the dragged length and the current
-        // mNewNoteType (S-cycled) — drag-to-place doesn't override the
+        // mNewNoteType (S-cycled) - drag-to-place doesn't override the
         // memory because the user explicitly chose a custom length.
         const double dur = mDrawHasDragged
             ? jmax(4.0 / 32.0, mDrawEnd - mDrawStart)
@@ -1750,7 +1750,7 @@ void PianoRollGrid::mouseUp(const MouseEvent&)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Audition helpers — mouse-button-held
+// Audition helpers - mouse-button-held
 // ─────────────────────────────────────────────────────────────────────────────
 void PianoRollGrid::triggerAudition (int midiNote)
 {
@@ -1769,7 +1769,7 @@ void PianoRollGrid::releaseAudition()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse — wheel
+// Mouse - wheel
 // ─────────────────────────────────────────────────────────────────────────────
 void PianoRollGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails& wheel)
 {
@@ -1852,7 +1852,7 @@ void PianoRollGrid::paint(Graphics& g)
         }
     }
 
-    // ── Vertical time grid — zoom-adaptive subdivisions ──────────────────
+    // ── Vertical time grid - zoom-adaptive subdivisions ──────────────────
     // Levels: subdivisions per beat (8 = 1/32 note, 4 = 1/16, 2 = 1/8, 1 = 1/4 beat).
     // A level is drawn only when its pixel spacing >= 5 px.
     // Finest lines drawn first; coarser lines overdraw at the same position.
@@ -1878,7 +1878,7 @@ void PianoRollGrid::paint(Graphics& g)
             g.drawVerticalLine(x, (float)mNoteYOffset, (float)b.getHeight());
         }
     }
-    // C.5b: Bar lines at multiples of (tsNum * 4 / tsDen) PPQ beats — always
+    // C.5b: Bar lines at multiples of (tsNum * 4 / tsDen) PPQ beats - always
     // shown, drawn on top.  4/4 = 4-beat bars, 3/4 = 3, 6/8 = 3, 5/4 = 5, 7/8 = 3.5.
     const double barBpb = (double) juce::jmax (1, mTsNum) * 4.0 / (double) juce::jmax (1, mTsDen);
     {
@@ -1898,7 +1898,7 @@ void PianoRollGrid::paint(Graphics& g)
         }
     }
 
-    // End-of-pattern marker — no special colour; falls through as a regular bar line
+    // End-of-pattern marker - no special colour; falls through as a regular bar line
 
     // ── Time selection highlight ──────────────────────────────────────────
     if (mTimeSelBeatStart >= 0.0 && mTimeSelBeatEnd > mTimeSelBeatStart)
@@ -1995,7 +1995,7 @@ void PianoRollGrid::paint(Graphics& g)
                 g.drawRoundedRectangle(nx + 0.5f, ny + 0.5f, nw - 1.f, nh - 1.f, 2.f, 1.f);
             }
 
-            // ── Note name (C5, D#4, etc.) — only when wide enough ──────────
+            // ── Note name (C5, D#4, etc.) - only when wide enough ──────────
             // FL Studio convention: MIDI 60 = C5 (middle C). Drop the -1.
             if (w >= 18 && mNoteH >= 9)
             {
@@ -2201,14 +2201,14 @@ PianoNote* ControlLane::noteNearX(int x, int y) const
 
     // Collect all notes within horizontal tolerance.
     // Tolerance is in PIXELS (converted to beats via mPPB) so the hit zone
-    // is consistent regardless of zoom level — 0.3 beats at default zoom
+    // is consistent regardless of zoom level - 0.3 beats at default zoom
     // was huge at max zoom and tight at min zoom.
     struct Candidate { PianoNote* note; double dist; };
     std::vector<Candidate> candidates;
     static constexpr double kPxTol = 10.0;
     const double kBeatTol = kPxTol / mPPB;
     // 2026-04-26 (D-7 sub-4): when the grid has a selection, restrict edits
-    // to the selected notes — fixes the chord-overlap bug where dragging
+    // to the selected notes - fixes the chord-overlap bug where dragging
     // the bar of a selected note in a chord would actually edit the
     // unselected note next to it.
     const bool selectionLocked = (hasAnySelection && hasAnySelection());
@@ -2223,7 +2223,7 @@ PianoNote* ControlLane::noteNearX(int x, int y) const
 
     if (candidates.empty()) return nullptr;
 
-    // Single hit or no Y provided — return closest by beat
+    // Single hit or no Y provided - return closest by beat
     if (candidates.size() == 1 || y < 0)
     {
         PianoNote* best = nullptr; double minD = kBeatTol;
@@ -2231,7 +2231,7 @@ PianoNote* ControlLane::noteNearX(int x, int y) const
         return best;
     }
 
-    // Multiple notes at same beat — disambiguate by closest node Y to cursor
+    // Multiple notes at same beat - disambiguate by closest node Y to cursor
     const bool bipolar  = (mMode == Panning || mMode == PitchBend);
     const int  contentH = jmax(1, getHeight() - kHeaderH);
 
@@ -2420,7 +2420,7 @@ void ControlLane::mouseUp(const MouseEvent&)
 // 2026-04-26 (D-7 sub-4): Alt+Wheel over the lane adjusts the currently-
 // displayed property (velocity / pan / pitch-bend) for the note whose bar
 // is under the cursor x.  Default delta ±0.05; Shift+Alt+Wheel = ±0.01 for
-// fine adjustment.  Honours the selection lock — when notes are selected,
+// fine adjustment.  Honours the selection lock - when notes are selected,
 // only those notes' bars are targetable (noteNearX filters internally).
 void ControlLane::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& wheel)
 {
@@ -2627,7 +2627,7 @@ PianoRollContainer::PianoRollContainer()
     mGrid->onVScroll = [this](int dN) {
         if (mFixedRange) return;
         int visRows = mGrid ? (mGrid->getHeight() / PianoRollGrid::kNoteH) : 8;
-        // 2026-04-21: FL-convention range — bottom C0 (MIDI 0), top G10 (MIDI 127).
+        // 2026-04-21: FL-convention range - bottom C0 (MIDI 0), top G10 (MIDI 127).
         int minTop  = visRows;
         mTopNote = jlimit(minTop, 127, mTopNote + dN);
         syncScrollState();
@@ -2922,7 +2922,7 @@ void PianoRollContainer::onVScroll(int dNotes)
     if (mFixedRange) return;
     int noteH    = jmax(4, (int)(PianoRollGrid::kNoteH * mNoteHScale));
     int visNotes = mGrid ? (mGrid->getHeight() / noteH) : 8;
-    // 2026-04-21: FL-convention range — bottom C0 (MIDI 0), top G10 (MIDI 127).
+    // 2026-04-21: FL-convention range - bottom C0 (MIDI 0), top G10 (MIDI 127).
     int minTop   = visNotes;
     mTopNote = jlimit(minTop, 127, mTopNote + dNotes);
     syncScrollState();
@@ -3010,7 +3010,7 @@ void PianoRollContainer::scrollBarMoved(juce::ScrollBar* sb, double newStart)
     {
         const int noteH    = jmax(4, (int)(PianoRollGrid::kNoteH * mNoteHScale));
         const int visNotes = mGrid ? jmax(1, (mGrid->getHeight() - PianoRollGrid::kRulerH) / noteH) : 8;
-        // 2026-04-21: FL-convention range — bottom C0 (MIDI 0), top G10 (MIDI 127).
+        // 2026-04-21: FL-convention range - bottom C0 (MIDI 0), top G10 (MIDI 127).
         const int minTop   = visNotes;
         mTopNote = jlimit(minTop, 127, 127 - (int)std::round(newStart));
         syncScrollState();
@@ -3101,7 +3101,7 @@ void PianoRollContainer::paint(Graphics& g)
     g.fillRect(0, 0, getWidth(), kMenuBarH + kToolbarH);
     g.setColour(VC::Accent);
     g.drawHorizontalLine(kMenuBarH + kToolbarH - 1, 0.f, (float)getWidth());
-    // (No line at mGrid->getBottom() — the H scrollbar now sits there and
+    // (No line at mGrid->getBottom() - the H scrollbar now sits there and
     //  provides its own visual separation between grid and control lane.)
 }
 
@@ -3127,7 +3127,7 @@ void PianoRollContainer::resized()
     row1.removeFromLeft(2);
     mHistoryBtn->setBounds(row1.removeFromLeft(22).reduced(2, 3));
     row1.removeFromLeft(6);
-    // Zoom buttons (all modes) — 2026-04-26: bumped 22→28 so the +/- glyphs fit.
+    // Zoom buttons (all modes) - 2026-04-26: bumped 22→28 so the +/- glyphs fit.
     mZoomOutBtn->setBounds(row1.removeFromLeft(28).reduced(2, 3));
     mZoomInBtn ->setBounds(row1.removeFromLeft(28).reduced(2, 3));
     // Context label fills remaining row1 space (right-justified).
@@ -3172,7 +3172,7 @@ void PianoRollContainer::resized()
 
     // Keyboard (left column, below the grid's ruler so rows align with grid).
     // 2026-04-21: always offset by kRulerH (previously only in fixed-range mode)
-    //   so the top MIDI row is usable — not covered by the ruler click-zone.
+    //   so the top MIDI row is usable - not covered by the ruler click-zone.
     mKeyboard->setVisible(mKeyboardVisible);
     if (mKeyboardVisible)
         mKeyboard->setBounds(bx, by + PianoRollGrid::kRulerH,
@@ -3188,17 +3188,17 @@ void PianoRollContainer::resized()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PianoRollGrid — Tools menu + algorithms
+// PianoRollGrid - Tools menu + algorithms
 // ─────────────────────────────────────────────────────────────────────────────
 
 std::vector<int> PianoRollGrid::getWorkingSet() const
 {
-    // 2026-04-26 (D-7): selection-only — previously fell back to "all notes
+    // 2026-04-26 (D-7): selection-only - previously fell back to "all notes
     // on the page" when nothing was highlighted, which made tools (Quantize /
     // Strum / Chop / etc.) act on freshly-drawn notes without the user ever
     // selecting them.  Now: no selection -> tools no-op.  The user must
     // explicitly select notes (drag-marquee, click, or drag a ruler time
-    // range — see PianoRollGrid::mouseUp time-range release path) first.
+    // range - see PianoRollGrid::mouseUp time-range release path) first.
     if (!mData || mSelection.empty()) return {};
     std::vector<int> expanded = mSelection;
     expandForGroups(expanded);
@@ -3284,7 +3284,7 @@ void PianoRollGrid::transposeSelection(int semitones)
 // D-7 (2026-04-26): Smaller piano roll bundle helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Ctrl+Q — snap each selected note's startBeat to the nearest 1/4 note
+// Ctrl+Q - snap each selected note's startBeat to the nearest 1/4 note
 // boundary.  Ignores the snap setting (the whole point: a fast "tighten to
 // quarters" pass regardless of how fine the user is currently working).
 // Selection-only: no-op when nothing is highlighted.
@@ -3303,7 +3303,7 @@ void PianoRollGrid::quickQuantizeQuarter()
     if (onNotesChanged) onNotesChanged();
 }
 
-// Ctrl+L — extend each selected note's duration so it ends right when the
+// Ctrl+L - extend each selected note's duration so it ends right when the
 // next note (on any pitch) begins.  Notes with no follower keep their length.
 // Selection-only: no-op when nothing is highlighted.
 void PianoRollGrid::quickLegato()
@@ -3334,7 +3334,7 @@ void PianoRollGrid::quickLegato()
     if (onNotesChanged) onNotesChanged();
 }
 
-// Alt+F — add a quick 1/32-note grace note one slot before each selected note,
+// Alt+F - add a quick 1/32-note grace note one slot before each selected note,
 // at the same pitch with reduced velocity.  Selection-only.
 void PianoRollGrid::flamSelected()
 {
@@ -3365,14 +3365,14 @@ void PianoRollGrid::flamSelected()
     if (onNotesChanged) onNotesChanged();
 }
 
-// Ctrl+Delete — delete a time span and slide every later note left by the
+// Ctrl+Delete - delete a time span and slide every later note left by the
 // removed length.  Source for [t0, t1):
 //   1. RULER time-range first (the highlighted box's width is exactly what
-//      the user sees and expects to disappear — including any empty space
+//      the user sees and expects to disappear - including any empty space
 //      beyond the last selected note inside the range).
 //   2. Note-selection fallback when no ruler range is set (e.g. user
 //      marquee-selected without ever dragging on the ruler).
-// Erase rule is "starts in [t0, t1)" — matches what the ruler-release
+// Erase rule is "starts in [t0, t1)" - matches what the ruler-release
 // auto-select highlights.  Distinct from plain Delete: this closes the gap
 // by sliding everything past t1 to the LEFT by removedLen.
 void PianoRollGrid::deleteTimeRegion()
@@ -3428,7 +3428,7 @@ void PianoRollGrid::deleteTimeRegion()
     if (onNotesChanged) onNotesChanged();
 }
 
-// Ctrl+Alt+Home — flip whether note resize grabs the LEFT or RIGHT edge.
+// Ctrl+Alt+Home - flip whether note resize grabs the LEFT or RIGHT edge.
 // State is kept on the grid so subsequent drags pick up the change.  No undo
 // entry: this is a UI mode toggle, not an edit.
 void PianoRollGrid::toggleResizeFromLeftMode()
@@ -3438,7 +3438,7 @@ void PianoRollGrid::toggleResizeFromLeftMode()
         mainWin->repaint();
 }
 
-// Ctrl+Left / Ctrl+Right helpers — shift the ruler time-selection by its
+// Ctrl+Left / Ctrl+Right helpers - shift the ruler time-selection by its
 // own length without moving the notes underneath.  After the shift we re-
 // populate mSelection with the notes inside the new range (mirroring the
 // mouseUp time-range release auto-select rule) so the visual highlight
@@ -3475,7 +3475,7 @@ void PianoRollGrid::shiftTimeSelectionByLength(int direction)
     repaint();
 }
 
-// Alt+X — modal popup with a velocity slider + linked numeric box that
+// Alt+X - modal popup with a velocity slider + linked numeric box that
 // scales the selection's velocities by a percentage (0-200 %).  Selection-
 // only.  juce::Slider's built-in TextBoxRight gives both controls in one
 // widget; the AlertWindow auto-deletes via enterModalState's deleteOnDismiss
@@ -3778,7 +3778,7 @@ void PianoRollGrid::toolGenerateChords()
         }
         else
         {
-            // No scale active — fall back to I–V–vi–IV in C major
+            // No scale active - fall back to I–V–vi–IV in C major
             static const int kRoots[4]     = { 0, 7, 9, 5 };
             static const int kShapes[4][3] = { {0,4,7},{0,4,7},{0,3,7},{0,4,7} };
             int root      = mScaleActive ? mScaleRoot : 0;

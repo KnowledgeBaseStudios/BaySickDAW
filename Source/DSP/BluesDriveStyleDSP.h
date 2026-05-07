@@ -4,7 +4,7 @@
 #include "PolyphaseOversampler.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BluesDriveStyleDSP — Phase I-5 (2026-05-02)
+// BluesDriveStyleDSP - Phase I-5 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // BD Style Blues Drive pedal.  Asymmetric tube-style overdrive in the style of
 // the BOSS BD-2 Blues Driver.  Three knobs (Drive / Tone / Level).

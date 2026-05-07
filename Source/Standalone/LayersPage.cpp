@@ -21,7 +21,7 @@ LayersPage::LayersPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
     // as dead code (mPianoRoll stays null) and every `if (mPianoRoll) ...`
     // guard becomes a no-op.  The Piano Roll sub-tab pill on the menu bar
     // redirects to PianoRollPage via the editor's showPageForTab handler.
-    // J-6 EQ unification (2026-05-03): EQ sub-tab removed — pre + post EQ
+    // J-6 EQ unification (2026-05-03): EQ sub-tab removed - pre + post EQ
     // for this insert now live exclusively on the Effects page (uniform with
     // every other strip type).  The pre-EQ DSP + APVTS params still live on
     // the InsertNode unchanged.
@@ -79,7 +79,7 @@ void LayersPage::buildPlayerTab()
     mEngineLabel->setFont(Font(13.f));
     mPlayerTab->addAndMakeVisible(*mEngineLabel);
 
-    // Engine selector combo — locks after first selection.
+    // Engine selector combo - locks after first selection.
     // D1.4-fix (c): LockableCombo lets us hijack clicks once locked so the
     // per-layer context menu opens instead of the engine dropdown.
     mEngineCombo = std::make_unique<LockableCombo>();
@@ -258,7 +258,7 @@ void LayersPage::timerCallback()
     // J-6 EQ unification (2026-05-03): page-level EQ display removed; the
     // Effects-page Pre EQ tab handles its own syncFromDSP polling now.
 
-    // Update piano roll playhead — only visible in Pattern mode. In Song mode
+    // Update piano roll playhead - only visible in Pattern mode. In Song mode
     // the playhead lives on the Builder, so we push -1 here to hide it.
     if (mPlayHead && mPianoRoll)
     {
@@ -333,10 +333,10 @@ void LayersPage::refreshPianoRollContextLabel()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// D1.4-fix (c) — per-layer right-click context menu + save / delete
+// D1.4-fix (c) - per-layer right-click context menu + save / delete
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): sLayerClipboard removed.  Was used by Copy/Paste menu
-// items which are now dropped — Duplicate covers all state-clone use cases.
+// items which are now dropped - Duplicate covers all state-clone use cases.
 
 static juce::File layerEnginePresetsDir (const juce::String& engineName)
 {
@@ -349,7 +349,7 @@ static juce::File layerEnginePresetsDir (const juce::String& engineName)
 }
 
 // 2026-04-25 (Load Preset support).
-// Top-level engine presets directory — siblings under <Documents>/BaySickDAW/
+// Top-level engine presets directory - siblings under <Documents>/BaySickDAW/
 // Presets/<engineName>/ are factory bundles; "My Presets" is user-saved.
 static juce::File layerEngineRootPresetsDir (const juce::String& engineName)
 {
@@ -359,7 +359,7 @@ static juce::File layerEngineRootPresetsDir (const juce::String& engineName)
                .getChildFile (engineName);
 }
 
-// Engine paramPrefix accessor — returns this page's local prefix for the
+// Engine paramPrefix accessor - returns this page's local prefix for the
 // currently-loaded engine.
 static juce::String layerEngineLocalPrefix (juce::AudioProcessor* proc)
 {
@@ -381,7 +381,7 @@ static void layerApplyApvtsTree (juce::AudioProcessor* proc, const juce::ValueTr
 // page's APVTS prefix (tk_lay_<srcIdx>_<engineTag>_) becomes this destination
 // page's prefix.  Without this, importLayerState() silently drops every
 // param because setStateInformation matches by id.  Mirrors the F-2 fix
-// pattern in loadPreset().  Operates in-place on the MemoryBlock — decoded
+// pattern in loadPreset().  Operates in-place on the MemoryBlock - decoded
 // XML → ValueTree → substitute → re-encoded back into mb.
 static void layerSubstituteEnginePrefixInBinary (juce::AudioProcessor* proc,
                                                  juce::MemoryBlock& mb)
@@ -442,12 +442,12 @@ static void layerSubstituteEnginePrefixInBinary (juce::AudioProcessor* proc,
     }
 }
 
-// Recursive XML-preset walker — folders become real cascading submenus.
+// Recursive XML-preset walker - folders become real cascading submenus.
 // Matches the sample-picker UX (addLibDirToMenuDP in DrumPage.cpp).
 // 2026-04-26: skipDrumFolders filters out top-level folders matching
 // SampleLibrary::isDrumPack (Hip Hop Drums, EDM Drums, Percussion).  Used
 // for BaySickPlayer presets in melodic (Layer/Bass) context.  Always keeps
-// "My Presets/".  The flag is only consulted at the top level — once we
+// "My Presets/".  The flag is only consulted at the top level - once we
 // descend into a kept folder, all its contents come in.
 static void addLayerPresetDirToMenu (juce::PopupMenu& menu,
                                       const juce::File& dir,
@@ -472,7 +472,7 @@ static void addLayerPresetDirToMenu (juce::PopupMenu& menu,
                 continue;
         }
         juce::PopupMenu sub;
-        // Recursing — don't propagate skipDrumFolders, only filter the top level.
+        // Recursing - don't propagate skipDrumFolders, only filter the top level.
         addLayerPresetDirToMenu (sub, child, kPresetBase, presetXmls, false);
         if (sub.getNumItems() > 0)
             menu.addSubMenu (child.getFileName(), sub);
@@ -495,18 +495,18 @@ void LayersPage::showContextMenu (juce::Component* anchor)
     constexpr int kIdDuplicate = 12;
     // G-6 (2026-04-29): Copy/Paste menu items dropped per Jeff's spec
     // ("copy and duplicate are the same thing").  Duplicate is the only
-    // state-clone operation now — spawns a new tab with cloned settings.
+    // state-clone operation now - spawns a new tab with cloned settings.
     constexpr int kIdSaveAs    = 20;
-    // D3: choke-group submenu — 200 = None, 201..216 = groups 1..16.
+    // D3: choke-group submenu - 200 = None, 201..216 = groups 1..16.
     constexpr int kIdChokeBase = 200;
-    // 2026-04-25: Load Preset submenu — 500 + i indexes into presetXmls[].
+    // 2026-04-25: Load Preset submenu - 500 + i indexes into presetXmls[].
     constexpr int kIdLoadPresetBase = 500;
     constexpr int kIdDelete    = 99;
 
     juce::PopupMenu menu;
     menu.addItem (kIdLock, "Lock Layer", true, mLocked);
 
-    // Polyphony — engine-specific param.
+    // Polyphony - engine-specific param.
     //   BaySickSynth → tk_lay_N_bss_voiceMode  (0=poly, 1=mono)
     //   BaySickPlayer → tk_lay_N_bsp_voiceCap   (1=mono, 8=poly)
     //   Harmless     → polyphonic-only (n/a)
@@ -539,7 +539,7 @@ void LayersPage::showContextMenu (juce::Component* anchor)
     menu.addItem (kIdDuplicate, "Duplicate Layer (new tab)", ! mEngineType.isEmpty());
 
     menu.addSeparator();
-    // D3: Choke Group submenu — global cross-engine cut bus.
+    // D3: Choke Group submenu - global cross-engine cut bus.
     {
         const juce::String prefix = "mixer_layer_" + juce::String (mPageIndex) + "_chokeGroup";
         int curGroup = 0;
@@ -558,14 +558,14 @@ void LayersPage::showContextMenu (juce::Component* anchor)
     const bool canSave = mEngineProcessor != nullptr && ! mEngineType.isEmpty();
     menu.addItem (kIdSaveAs, "Save Current Patch As...", canSave);
 
-    // ── Load Preset submenu — walks Documents/BaySickDAW/Presets/<engineName>/
+    // ── Load Preset submenu - walks Documents/BaySickDAW/Presets/<engineName>/
     //    with real cascading submenus per folder (matches sample-picker UX).
     juce::Array<juce::File> presetXmls;
     {
         juce::PopupMenu loadSub;
         const auto root = layerEngineRootPresetsDir (mEngineType);
         // 2026-04-26: BaySickPlayer presets include drum-sample subfolders
-        // (Hip Hop Drums / EDM Drums) — Layer page is melodic context, so
+        // (Hip Hop Drums / EDM Drums) - Layer page is melodic context, so
         // skip them here.  Other engines (BaySickSynth / Harmless) don't
         // have drum subfolders so the flag is a no-op for them.
         const bool skipDrums = (mEngineType == "BaySickPlayer");
@@ -742,8 +742,8 @@ void LayersPage::loadPreset (const juce::File& xml)
     // F-2 fix (2026-04-26): localPrefix format is `tk_<row>_<idx>_<engineTag>_`
     // (e.g. "tk_lay_1_bss_").  The earlier 3-segment-style computation
     // returned the index segment ("_1_") instead of the engine tag ("_bss_"),
-    // so the substring search against loaded PARAM ids — which carry a
-    // different page index ("_0_" from the saved slot) — never matched and
+    // so the substring search against loaded PARAM ids - which carry a
+    // different page index ("_0_" from the saved slot) - never matched and
     // the substitution silently no-op'd.  Engine sounded default after load.
     // Engine tag = segment immediately before the trailing underscore.
     const int trailingUnder = localPrefix.length() - 1;
@@ -785,7 +785,7 @@ void LayersPage::loadPreset (const juce::File& xml)
 
     // 2026-04-26: BaySickPlayer factory presets carry a sibling <Sample>
     // element pointing at an SFZ in the Core Library.  Resolve and load
-    // it here.  Unlike DrumPage we DO NOT call normalizeRootNotes — Layers
+    // it here.  Unlike DrumPage we DO NOT call normalizeRootNotes - Layers
     // need to preserve the SFZ's natural keymap for melodic playback.
     if (bspSample)
         if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
@@ -807,7 +807,7 @@ void LayersPage::loadPreset (const juce::File& xml)
         }
 
     // Use the preset's filename as the tab's display name.  Bass/Layers
-    // don't have a separate "sound name" field like DrumPage — tab name +
+    // don't have a separate "sound name" field like DrumPage - tab name +
     // engine type is the only display surface.
     const juce::String newName = xml.getFileNameWithoutExtension();
     setTabName (newName);
@@ -840,7 +840,7 @@ void LayersPage::savePatchAs()
             dir.createDirectory();
             auto file = dir.getChildFile (name + ".xml");
 
-            // Generic save — uses the engine's getStateInformation blob.
+            // Generic save - uses the engine's getStateInformation blob.
             // (Shared format across Harmless / BaySickPlayer / BaySickSynth /
             // BaySickBass.  BaySickPlayer's blob already contains its sample
             // reference because the engine serialises that internally.)
@@ -859,7 +859,7 @@ void LayersPage::requestDelete()
     // G-7 (2026-04-29): close-prompt with dirty-aware buttons.  Dirty patch
     // gets the 3-button [Save Page Preset & Delete / Delete / Cancel] flow
     // (Save chains savePagePreset's modal → fireDelete on success).  Clean
-    // patch (or no engine) gets the simpler 2-button [Delete / Cancel] —
+    // patch (or no engine) gets the simpler 2-button [Delete / Cancel] -
     // nothing to save.
     juce::Component::SafePointer<LayersPage> safeThis (this);
     auto fireDelete = [safeThis] {
@@ -934,7 +934,7 @@ bool LayersPage::isPatchDirty() const
 
 void LayersPage::valueTreeRedirected (juce::ValueTree& tree)
 {
-    // Engine apvts.state was replaced (preset load via engine editor) — refresh
+    // Engine apvts.state was replaced (preset load via engine editor) - refresh
     // baseline so the just-loaded preset becomes the new clean state.
     juce::ignoreUnused (tree);
     takeStateSnapshot();
@@ -955,7 +955,7 @@ void LayersPage::unsubscribeFromEngineApvtsState()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// G-7 (2026-04-29): Page Preset save/load (full chain — engine + strip +
+// G-7 (2026-04-29): Page Preset save/load (full chain - engine + strip +
 // insert rack + post-EQ).  Surfaced via the page menu bar's hamburger ≡.
 // ─────────────────────────────────────────────────────────────────────────────
 static juce::String layerEnginePrefixOf (juce::AudioProcessor* p)
@@ -1029,7 +1029,7 @@ void LayersPage::loadPagePreset (const juce::File& xml)
     const juce::String enginePrefix = layerEnginePrefixOf (mEngineProcessor.get());
 
     // Layer pages don't have secondary buses, so isChannelActive can return
-    // true unconditionally — bus fallback is a no-op.
+    // true unconditionally - bus fallback is a no-op.
     auto noFallback = [] (int) { return true; };
 
     PagePresetIO::importPagePreset (mProcessor,

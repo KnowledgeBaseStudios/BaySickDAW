@@ -30,7 +30,7 @@ struct VibeRegion
 
 // ── VibeSampleManager ─────────────────────────────────────────────────────────
 // Loads regions from a folder or SFZ file (message thread only).
-// findRegion() is called from the audio thread — reads only, safe once loaded.
+// findRegion() is called from the audio thread - reads only, safe once loaded.
 //
 // Disk I/O:  loadFolder / loadSFZ  (message thread, may block briefly)
 // Audio use: findRegion             (audio thread, lock-free reads)
@@ -94,7 +94,7 @@ private:
 };
 
 // ── VibeSynthSound ────────────────────────────────────────────────────────────
-// Trivial sound — all notes accepted; region lookup is in the voice.
+// Trivial sound - all notes accepted; region lookup is in the voice.
 struct VibeSynthSound : public juce::SynthesiserSound
 {
     bool appliesToNote    (int) override { return true; }
@@ -139,7 +139,7 @@ public:
     // ── Lifecycle helper called by VibeSynth::prepare ─────────────────────────
     void prepareForPlayback (int blockSize);
 
-    // ── Parameter setters (CPU guarded — call from audio thread only) ──────────
+    // ── Parameter setters (CPU guarded - call from audio thread only) ──────────
     void setFilterParams   (float cutoffHz, float q)            noexcept;
     void setDrive          (float drive)                        noexcept;
     void setReduct         (float reduct)                       noexcept;

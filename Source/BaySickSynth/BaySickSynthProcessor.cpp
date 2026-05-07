@@ -90,7 +90,7 @@ BaySickSynthProcessor::createLayout (const juce::String& p)
     auto vid = [] (const juce::String& id) { return juce::ParameterID { id, 1 }; };
 
     // 2026-04-25: master output volume (parity with BaySickPlayer).
-    // Default 0.8 ≈ -1.94 dB headroom — matches the sampler's authored
+    // Default 0.8 ≈ -1.94 dB headroom - matches the sampler's authored
     // baseline so synth + sample sources sit at comparable levels.
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         vid (p + "outVol"), "Out Vol",
@@ -111,7 +111,7 @@ BaySickSynthProcessor::createLayout (const juce::String& p)
         vid (p + "modifier"), "Modifier",
         juce::NormalisableRange<float> (0.f, 1.f), 0.5f));
 
-    // Dual-osc tuning mode (P3.4) — reinterprets Modifier for SAW+SAW / SAW+SQUARE
+    // Dual-osc tuning mode (P3.4) - reinterprets Modifier for SAW+SAW / SAW+SQUARE
     // / SQUARE+SQUARE waveforms. Default Musical = current behaviour.
     layout.add (std::make_unique<juce::AudioParameterChoice> (
         vid (p + "dualOscMode"), "Dual-Osc Tuning",

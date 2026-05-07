@@ -5,20 +5,20 @@
 class VibeSynthProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PagePresetIO — unified page-preset save/load for every page type
+// PagePresetIO - unified page-preset save/load for every page type
 // ─────────────────────────────────────────────────────────────────────────────
-// A "page preset" captures every setting on an instrument-style page — every
+// A "page preset" captures every setting on an instrument-style page - every
 // engine state (including pages with multiple sub-tab engines like Inst's
 // Pedals + NAM/IR + sfizz Player), every mixer-strip APVTS param, every insert
 // effects rack + both pre + post EQ8 M/S, and (for pages that own a dedicated
 // bus like Rusty's RustyDrums Bus) the bus rack + its EQs.  Piano-roll notes
-// are intentionally excluded — that's musical content, separate from the
+// are intentionally excluded - that's musical content, separate from the
 // chain's sound design.
 //
 // 2026-05-05 consolidation: this module now serves every page-type
 // (Layers / Bass / Drums / Clips / Vox / Inst / RustyDrums).  Previously the
 // kit-aware sfizz engines (Rusty + Guitars + Basses) used a separate
-// `AriaPagePresetIO` module — that's been folded into here as the
+// `AriaPagePresetIO` module - that's been folded into here as the
 // `kitLoadCallback` field on `EngineSlot`.  Multi-strip + bus-rack capture
 // (Rusty's 13 strips + 1 bus) is now a first-class config option as well.
 //
@@ -40,24 +40,24 @@ namespace PagePresetIO
     // A page can declare one or more engine slots so pages with sub-tab
     // engines (Inst: Pedals + NAM/IR + active sfizz Player) save / restore
     // every slot, not just the active one.  Each slot:
-    //   * `engine` / `engineApvts`  — the AudioProcessor + its APVTS, used
+    //   * `engine` / `engineApvts`  - the AudioProcessor + its APVTS, used
     //                                 for getStateInformation on capture and
     //                                 setStateInformation (or replaceState)
     //                                 on restore.
-    //   * `engineRootTag`           — top-level XML tag of the engine's
+    //   * `engineRootTag`           - top-level XML tag of the engine's
     //                                 getStateInformation blob; consulted
     //                                 only when `kitLoadCallback` is set so
     //                                 the loader can peel a `<KitPath>` child
     //                                 out without applying state.
-    //   * `engineLabel`             — short tag stored in the saved XML so
+    //   * `engineLabel`             - short tag stored in the saved XML so
     //                                 the loader knows which slot a record
     //                                 belongs to ("Pedals" / "NamIr" /
     //                                 "Sfizz" / "Engine").  Must round-trip
     //                                 byte-for-byte across save / load.
-    //   * `enginePrefix`            — the engine's APVTS id prefix (e.g.
+    //   * `enginePrefix`            - the engine's APVTS id prefix (e.g.
     //                                 "bgg_3_") so the loader can rewrite ids
     //                                 if loading into a different page index.
-    //   * `kitLoadCallback`         — for sfizz-backed engines only.  When
+    //   * `kitLoadCallback`         - for sfizz-backed engines only.  When
     //                                 non-null, the loader extracts the kit
     //                                 path from the saved engine state and
     //                                 calls this BEFORE applying APVTS, so
@@ -65,7 +65,7 @@ namespace PagePresetIO
     //                                 path runs (sfizz crashes when a kit is
     //                                 reloaded mid-render without this).  For
     //                                 non-sfizz engines (Harmless, BaySickPlayer,
-    //                                 NAM/IR, Pedals, etc.) leave null — the
+    //                                 NAM/IR, Pedals, etc.) leave null - the
     //                                 loader falls back to setStateInformation.
     struct EngineSlot
     {
@@ -106,7 +106,7 @@ namespace PagePresetIO
         juce::Array<int> insertRackIndices;
 
         // VibeGraph BusRack ids to capture.  Used for pages that own a
-        // dedicated bus (Rusty's RustyBus).  Empty for every other page —
+        // dedicated bus (Rusty's RustyBus).  Empty for every other page -
         // shared buses don't belong in per-page presets.
         juce::StringArray busRackIds;
     };

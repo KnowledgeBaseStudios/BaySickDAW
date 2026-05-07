@@ -9,7 +9,7 @@
 // Polyphonic synthesiser: 16 AdditiveVoice instances sharing two HarmonicEngines
 // (Part A and Part B).
 //
-// All voices share the same engine wavetables — the wavetables are read-only
+// All voices share the same engine wavetables - the wavetables are read-only
 // at audio time, so sharing is safe without locks.
 // Parameter changes (unison, envelope, filter, etc.) are broadcast to all
 // voices in one call and take effect sample-accurately via SmoothedValues.
@@ -48,7 +48,7 @@ public:
     void setGlide  (float glideTimeSec);
     void setLegato (bool legatoOn);
 
-    // ── Session E: Cut self — noteOn cuts prior voices playing the same note
+    // ── Session E: Cut self - noteOn cuts prior voices playing the same note
     void setCutSelf (bool on) noexcept { mCutSelf = on; }
 
     // ── Beta: strum ───────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ public:
     // fundamental Hz before pitch_semitones + cents.
     void setPitchFraction (int idx)                                          noexcept;
 
-    // ── 2026-04-19 (S2) — Filter envelopes / cutoff ofs / kb track ───────────
+    // ── 2026-04-19 (S2) - Filter envelopes / cutoff ofs / kb track ───────────
     void setFilter1Env       (float a, float d, float s, float r) noexcept;
     void setFilter2Env       (float a, float d, float s, float r) noexcept;
     void setFilter1EnvAmt    (float amt) noexcept;
@@ -106,17 +106,17 @@ public:
     void setFilter1KbTrack   (float depth) noexcept;
     void setFilter2KbTrack   (float depth) noexcept;
 
-    // ── 2026-04-19 (S4) — Mod XYZ pad value (destinations removed) ────────────
+    // ── 2026-04-19 (S4) - Mod XYZ pad value (destinations removed) ────────────
     // Destination routing moved into HarmlessModRegistry (per-target mod matrix).
     // The X/Y/Z values remain as input to the new mod system via the Registry's
     // ModSource::ModX/Y/Z sources.
     void setModXYZ (float x, float y, float z) noexcept;
 
-    // ── 2026-04-19 (S4 AG-1) — Auto-gain mode ─────────────────────────────────
+    // ── 2026-04-19 (S4 AG-1) - Auto-gain mode ─────────────────────────────────
     // 0 Relative, 1 Absolute. Forwards to both HarmonicEngines.
     void setAutoGainMode (int mode) noexcept;
 
-    // ── 2026-04-20 (S4 Batch 2b) — Mod registry + tempo feed ─────────────────
+    // ── 2026-04-20 (S4 Batch 2b) - Mod registry + tempo feed ─────────────────
     // Processor calls this once after construction, forwarding the same
     // HarmlessModRegistry that owns the serialized state chunk. All voices
     // cache this pointer and pull snapshots at note-on.
@@ -140,7 +140,7 @@ public:
     // Three global slider values that route to per-voice destinations:
     //  - lfo_vol   → ModTarget("volume")'s LFO source depth
     //  - lfo_pitch → ModTarget("pitch_semitones")'s LFO source depth
-    //  - lfo_vel   → noteOn velocity scaling (handled internally — there's
+    //  - lfo_vel   → noteOn velocity scaling (handled internally - there's
     //    no Velocity ModTarget since velocity is a one-shot, not continuous)
     // All three are bipolar -1..+1.  Replace semantics: writing a non-zero
     // depth via these macros clobbers any per-target depth set in the
@@ -166,7 +166,7 @@ public:
     // by the central spectrogram visualiser. Non-blocking.
     void getAggregatedPartialAmplitudes (float* outBuf, int numPartials) const;
 
-    // ── 2026-04-19 (S2 SLA) — Blur extensions on the engine wavetable ─────────
+    // ── 2026-04-19 (S2 SLA) - Blur extensions on the engine wavetable ─────────
     // S3.5: split into A/B variants.
     void setBlurTime  (float t);   // back-compat: A + B
     void setBlurHarm  (float h);   // back-compat: A + B
@@ -175,7 +175,7 @@ public:
     void setBlurHarmA (float h);
     void setBlurHarmB (float h);
 
-    // ── 2026-04-19 (S3 T2-C) — Unison Type / Alt / Phase + Part B shape ──────
+    // ── 2026-04-19 (S3 T2-C) - Unison Type / Alt / Phase + Part B shape ──────
     void setUnisonType  (int type);
     void setUnisonAlt   (bool on);
     void setUnisonPhase (float amt);
@@ -255,7 +255,7 @@ private:
     // depths route through the mod registry instead, so they don't need
     // any state here.
     // Cycle is stored as raw rate length + tempo-sync flag and converted
-    // to seconds at tick time using the current bps — that way BPM changes
+    // to seconds at tick time using the current bps - that way BPM changes
     // mid-session adjust the LFO period without any explicit recompute.
     float mGlobalLfoVelDepth        { 0.0f };   // -1..+1 from lfo_vel slider
     float mGlobalLfoPhase01         { 0.0f };   // 0..1, advances per block
@@ -308,7 +308,7 @@ private:
     bool mTiltReady { false };
     void rebuildTiltEQ();
 
-    // Convenience — iterates all voices and casts.
+    // Convenience - iterates all voices and casts.
     template <typename Fn>
     void forEachVoice (Fn&& fn)
     {

@@ -12,7 +12,7 @@ using namespace juce;
 //   - subdir → submenu, recurse all the way down
 //   - .wav/.aiff/.aif/.flac → individual clickable item (loads single file)
 //   - .sfz → clickable item with [SFZ] suffix (loads SFZ instrument)
-// No "load folder" group items — the legacy picker drilled into individual
+// No "load folder" group items - the legacy picker drilled into individual
 // samples and that's what users expect.
 static void addLibDirToMenuDP (juce::PopupMenu& menu,
                                 const juce::File& dir,
@@ -59,7 +59,7 @@ static void addLibDirToMenuDP (juce::PopupMenu& menu,
     }
 }
 
-// Recursive XML-preset walker — mirrors addLibDirToMenuDP but for *.xml files.
+// Recursive XML-preset walker - mirrors addLibDirToMenuDP but for *.xml files.
 // Folders become real cascading submenus (matches the sample picker UX).
 static void addPresetDirToMenuDP (juce::PopupMenu& menu,
                                    const juce::File& dir,
@@ -146,7 +146,7 @@ DrumPage::~DrumPage()
 void DrumPage::switchTab(int idx)
 {
     // J-6 EQ unification (2026-05-03): tab order is 0 Drum Kit / 1 Player /
-    // 2 Piano Roll (was: 0..3 with EQ as tab 3 — EQ moved to Effects page).
+    // 2 Piano Roll (was: 0..3 with EQ as tab 3 - EQ moved to Effects page).
     mActiveTab = juce::jlimit(0, 2, idx);
     if (mDrumKitTab)
     {
@@ -533,7 +533,7 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
                 sampleSub.addSubMenu ("Core Library", libSub);
             }
         }
-        // 2026-04-26: factory BaySickPlayer drum presets — XML wrappers around
+        // 2026-04-26: factory BaySickPlayer drum presets - XML wrappers around
         // the Hip Hop / EDM .wav samples with friendly names ("Hip Hop Kick 01"
         // etc.) and per-preset envelope/attack defaults.  Lives in Sample
         // submenu since they're sample-based, not synth-based.
@@ -560,7 +560,7 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
     }
     menu.addSubMenu ("Sample", sampleSub);
 
-    // ── Synth Patch submenu — synthesized drum patches only (BaySickDrums) ──
+    // ── Synth Patch submenu - synthesized drum patches only (BaySickDrums) ──
     juce::PopupMenu synthSub;
     synthSub.addItem (kIdNewPatch, "+ New Patch (Blank)");
     synthSub.addSeparator();
@@ -578,7 +578,7 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
     }
     menu.addSubMenu ("Synth Patch", synthSub);
 
-    // ── None (clear) — only show if we have something loaded ─────────────────
+    // ── None (clear) - only show if we have something loaded ─────────────────
     if (! mEngineType.isEmpty())
     {
         menu.addSeparator();
@@ -654,7 +654,7 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
 
             if (result >= kPresetBase && result < kPresetBase + presetXmls.size())
             {
-                // Detect engine from preset's root tag — BaySickPlayerState
+                // Detect engine from preset's root tag - BaySickPlayerState
                 // routes to the player loader, BaySickSynthState to the synth.
                 const auto& xml = presetXmls[result - kPresetBase];
                 if (auto px = juce::XmlDocument::parse (xml))
@@ -735,7 +735,7 @@ void DrumPage::loadSynthPreset (const juce::File& xml)
 
     auto loaded = juce::ValueTree::fromXml (*px);
 
-    // trackId substitution — preset XMLs were saved with a different prefix
+    // trackId substitution - preset XMLs were saved with a different prefix
     // (e.g. tk_lay_0_bss_*); rewrite to this drum's prefix (tk_drm_N_bss_*)
     // so the params bind into our engine instead of leaking elsewhere.
     const juce::String localPrefix = bss->getParamPrefix();
@@ -783,7 +783,7 @@ void DrumPage::newBlankPatch()
     selectEngine ("BaySickSynth");
     mLoadedSampleKind = SampleKind::None;
     mLoadedSamplePath = juce::File();
-    // Engine starts at APVTS defaults — nothing to apply.
+    // Engine starts at APVTS defaults - nothing to apply.
     mSoundName = "User Patch";
     refreshPianoRollContextLabel();
     if (onSoundNameChanged) onSoundNameChanged (mSoundName);
@@ -915,9 +915,9 @@ void DrumPage::savePatchAs()
         }), false);
 }
 
-// D1.4-fix (c) — BaySickPlayer preset load.  Mirror of loadSynthPreset.
+// D1.4-fix (c) - BaySickPlayer preset load.  Mirror of loadSynthPreset.
 // XML format: <BaySickPlayerState><BaySickPlayerState-apvts/><Sample kind=... path=.../></...>
-//   (the apvts state's root tag is BaySickPlayerState too — JUCE convention)
+//   (the apvts state's root tag is BaySickPlayerState too - JUCE convention)
 // Sample path may be "library:rel/path" (resolved via SampleLibrary) or absolute.
 void DrumPage::loadPlayerPreset (const juce::File& xml)
 {
@@ -1025,14 +1025,14 @@ void DrumPage::showContextMenu (juce::Component* anchor)
     constexpr int kIdDuplicate = 12;
     // G-6 (2026-04-29): Copy/Paste menu items dropped.
     constexpr int kIdSaveAs    = 20;
-    // D3: choke-group submenu — 200 = None, 201..216 = groups 1..16.
+    // D3: choke-group submenu - 200 = None, 201..216 = groups 1..16.
     constexpr int kIdChokeBase = 200;   // 200 = None
     constexpr int kIdDelete    = 99;
 
     juce::PopupMenu menu;
     menu.addItem (kIdLock, "Lock Drum", true, mLocked);
 
-    // Polyphony toggle — engine-specific param dispatch.
+    // Polyphony toggle - engine-specific param dispatch.
     //   BaySickSynth → _bss_voiceMode (0 = poly, 1 = mono)
     //   BaySickPlayer → _bsp_voiceCap (1 = mono, 8 = poly default)
     //   Harmless / others → polyphonic-only, no toggle
@@ -1065,7 +1065,7 @@ void DrumPage::showContextMenu (juce::Component* anchor)
     menu.addItem (kIdDuplicate, "Duplicate Drum (new tab)", ! mEngineType.isEmpty());
 
     menu.addSeparator();
-    // D3: Choke Group submenu — global cross-engine cut bus (1..16, 0 = none).
+    // D3: Choke Group submenu - global cross-engine cut bus (1..16, 0 = none).
     {
         const juce::String prefix = "mixer_drum_" + juce::String (mPageIndex) + "_chokeGroup";
         int curGroup = 0;
@@ -1415,7 +1415,7 @@ void DrumPage::loadPagePreset (const juce::File& xml)
     // fresh engine with mLoadedSampleKind=None / mLoadedSamplePath=empty,
     // and importPagePreset restores the engine's INTERNAL apvts (which
     // includes bsp_loadKind / bsp_loadPath for VibePlayer + the sample
-    // re-load).  But DrumPage's display state is NOT in apvts — without
+    // re-load).  But DrumPage's display state is NOT in apvts - without
     // syncing it here, the Player tab keeps showing the "Pick a sound"
     // empty-state UI even though the engine has a kit loaded.
     if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mEngineProcessor.get()))
@@ -1432,7 +1432,7 @@ void DrumPage::loadPagePreset (const juce::File& xml)
     }
     else if (mEngineProcessor != nullptr)
     {
-        // BaySickSynth / Harmless / etc. — no sample reference; the patch is
+        // BaySickSynth / Harmless / etc. - no sample reference; the patch is
         // pure APVTS state.  Use the preset filename as the sound label.
         mLoadedSampleKind = SampleKind::None;
         mLoadedSamplePath = juce::File();
@@ -1449,7 +1449,7 @@ void DrumPage::loadPagePreset (const juce::File& xml)
 
 // G-7 (2026-04-29): XML-string variants for kit save/load.  Lets saveKitAs
 // embed each drum's full Page Preset (engine + strip params + insert rack +
-// post-EQ) per drum slot — the kit XML now carries the entire chain rather
+// post-EQ) per drum slot - the kit XML now carries the entire chain rather
 // than just engine state.
 juce::String DrumPage::exportPagePresetXml() const
 {

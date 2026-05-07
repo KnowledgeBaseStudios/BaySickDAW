@@ -64,7 +64,7 @@ private:
         // tiltDeg = perspective tilt around the ellipse's local X-axis,
         // applied AFTER rotDeg.  Range -89..+89; rendered as effective ry
         // = ry * cos(tiltDeg) so tilting up/down compresses the ellipse
-        // vertically — useful for cymbals seen from a 3/4 angle.
+        // vertically - useful for cymbals seen from a 3/4 angle.
         float cx, cy, rx, ry;
         float rotDeg;
         float tiltDeg;

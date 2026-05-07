@@ -4,7 +4,7 @@
 #include "PolyphaseOversampler.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BassOverdriveStyleDSP — Phase I-6 (2026-05-02)
+// BassOverdriveStyleDSP - Phase I-6 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // ODB Style Bass Overdrive pedal.  Full-range hard-clipping with a heavy
 // dry/wet blend and a post-blend Active Baxandall shelving EQ.  Knobs:

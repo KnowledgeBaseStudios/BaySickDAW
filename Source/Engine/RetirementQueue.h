@@ -15,7 +15,7 @@
 #include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RetirementQueue<T> — generation-based deferred-destruction queue.
+// RetirementQueue<T> - generation-based deferred-destruction queue.
 // (Batch 9c B1, 2026-05-06)
 // ─────────────────────────────────────────────────────────────────────────────
 //

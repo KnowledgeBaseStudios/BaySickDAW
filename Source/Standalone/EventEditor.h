@@ -24,7 +24,7 @@ public:
     // All edits snapshot the lane before/after and register AutomationLaneEditActions.
     void setBlock(PatternManager* pm, int blockIdx, float clipLengthBeats = 4.f);
 
-    // Direct lane pointer (no undo support — for display only)
+    // Direct lane pointer (no undo support - for display only)
     void setLaneReadOnly(const AutomationLane* lane, float clipLengthBeats);
 
     float getTotalBeats() const { return mTotalBeats; }
@@ -116,7 +116,7 @@ private:
     // Value at the first control point (range-start) for erase resets
     float rangeStartVal() const;
 
-    // Lane accessor (non-const — caller must hold data lock)
+    // Lane accessor (non-const - caller must hold data lock)
     AutomationLane* lanePtr() const;
 
     // ── Paint helpers ──────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ public:
     void resized() override;
     void paint  (juce::Graphics&) override;
 
-    // KeyListener — handles P/B/D/I/E/Z tool shortcuts + Ctrl+Z/Y/A/M
+    // KeyListener - handles P/B/D/I/E/Z tool shortcuts + Ctrl+Z/Y/A/M
     bool keyPressed(const juce::KeyPress&, juce::Component*) override;
 
     // Callbacks set by StandaloneEditor after construction
@@ -259,13 +259,13 @@ private:
     std::unique_ptr<juce::TextButton>      mNewAutoBtn;
     int                                    mLastBlockCount { 0 };
 
-    // 5F-5: title label (top-left of content — shows current param id)
+    // 5F-5: title label (top-left of content - shows current param id)
     std::unique_ptr<juce::Label>           mTitleLabel;
     // 5F-5: delete-automation button (next to "New Automation Clip")
     std::unique_ptr<juce::TextButton>      mDeleteBtn;
     // 5F-5: tool button strip (22px row below the grid area)
     std::array<std::unique_ptr<juce::TextButton>, 6> mToolBtns;
-    // 5F-5: footer status bar (20px at bottom — shows hovered beat + value)
+    // 5F-5: footer status bar (20px at bottom - shows hovered beat + value)
     std::unique_ptr<juce::Label>           mStatusBar;
 
     void timerCallback() override;
@@ -287,7 +287,7 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EventEditor
-// Floating DocumentWindow — one per open automation lane.
+// Floating DocumentWindow - one per open automation lane.
 // Multiple instances can coexist simultaneously.
 // ─────────────────────────────────────────────────────────────────────────────
 class EventEditor : public juce::DocumentWindow
@@ -314,7 +314,7 @@ public:
 
 private:
     int mBlockIdx;
-    // Content is owned by DocumentWindow via setContentOwned() — access via getContent()
+    // Content is owned by DocumentWindow via setContentOwned() - access via getContent()
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EventEditor)
 };

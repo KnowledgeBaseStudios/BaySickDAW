@@ -2,7 +2,7 @@
 #include <JuceHeader.h>
 #include "HarmonicEngine.h"
 #include "HarmlessModRegistry.h"
-#include "SynthSound.h"   // in Source/ — on the include path via CMake
+#include "SynthSound.h"   // in Source/ - on the include path via CMake
 
 // ── AdditiveVoice ─────────────────────────────────────────────────────────────
 // One polyphonic voice for HarmlessSynth.
@@ -57,7 +57,7 @@ public:
     // multiplier on mNoteHz: 0=1, 1=0.5, 2=0.25, 3=0.125, 4=2, 5=4, 6=8.
     void setPitchFraction (int idx)    noexcept;
 
-    // ── 2026-04-19 (S2) — Filter envelopes + cutoff offset + kb track ─────────
+    // ── 2026-04-19 (S2) - Filter envelopes + cutoff offset + kb track ─────────
     // T2-A: per-voice ADSR for each filter; envAmt scales the modulation
     // applied to the filter cutoff (-1 closes filter on note, +1 opens).
     void setFilter1Env (float a, float d, float s, float r) noexcept;
@@ -71,25 +71,25 @@ public:
     void setFilter1KbTrack (float depth) noexcept;
     void setFilter2KbTrack (float depth) noexcept;
 
-    // ── 2026-04-19 (S4) — Mod XYZ pad input (dest routing moved to mod matrix)
+    // ── 2026-04-19 (S4) - Mod XYZ pad input (dest routing moved to mod matrix)
     // Destination routing is now owned by HarmlessModRegistry; voices will
     // consume per-target curves in S4 Batch 2. For now mModX/Y/Z are held
     // but do not route anywhere at the voice level.
     void setModXYZ (float x, float y, float z) noexcept;
 
-    // ── 2026-04-19 (S3 T2-C) — Unison Type / Alt / Phase ─────────────────────
+    // ── 2026-04-19 (S3 T2-C) - Unison Type / Alt / Phase ─────────────────────
     // Type 0 = Pure linear, 1 = Random, 2 = Drifting, 3 = Alt-only
     void setUnisonType  (int type) noexcept;
     void setUnisonAlt   (bool on)  noexcept;
     void setUnisonPhase (float amt) noexcept;   // 0..1 per-slot phase stagger
 
-    // ── 2026-04-19 (S3 T2-N) — vel_link ──────────────────────────────────────
+    // ── 2026-04-19 (S3 T2-N) - vel_link ──────────────────────────────────────
     // When ON (default): velocity scales both Part A + Part B equally.
     // When OFF: velocity only scales Part A; Part B uses fixed level (handy for
     // layered tones where the underneath stays at constant amplitude).
     void setVelLink (bool linkOn) noexcept { mVelLink = linkOn; }
 
-    // ── 2026-04-20 (S4) — Mod registry + project BPM ─────────────────────────
+    // ── 2026-04-20 (S4) - Mod registry + project BPM ─────────────────────────
     void setModRegistry (const HarmlessModRegistry* r) noexcept { mModRegistry = r; }
     void setBeatsPerSecond (double bps) noexcept { mBeatsPerSecond = bps; }
 
@@ -150,14 +150,14 @@ private:
     float mDetuneCents { 0.0f };
     float mSpread      { 0.0f };
 
-    // Per-slot state — all arrays sized kMaxUnison, no audio-thread allocation.
+    // Per-slot state - all arrays sized kMaxUnison, no audio-thread allocation.
     float mPhaseA     [kMaxUnison] {};  // wavetable read position [0, kFFTSize)
     float mPhaseB     [kMaxUnison] {};
     float mUnisonMult [kMaxUnison] {};  // frequency ratio from detune (cents→ratio)
     float mPanL       [kMaxUnison] {};  // stereo-spread left gain per slot
     float mPanR       [kMaxUnison] {};  // stereo-spread right gain per slot
 
-    // ── Frequency tracking (manual one-pole IIR — avoids SmoothedValue::reset
+    // ── Frequency tracking (manual one-pole IIR - avoids SmoothedValue::reset
     //    clobbering current value, which would break portamento glide) ──────────
     float mCurrentHz  { 440.0f };   // current smoothed frequency (audio thread)
     float mTargetHz   { 440.0f };   // target frequency
@@ -180,7 +180,7 @@ private:
     juce::ADSR             mAmpADSR;
     juce::ADSR::Parameters mAmpParams { 0.01f, 0.1f, 0.8f, 0.3f };
 
-    // ── Stereo filter 1 (2 channels — preserves unison spread) ──────────────
+    // ── Stereo filter 1 (2 channels - preserves unison spread) ──────────────
     // TODO (Beta): add filter ADSR modulation via mFltEnvAmt.
     juce::dsp::StateVariableTPTFilter<float> mFilter;
     float mFilterCutoff { 20000.0f };
@@ -200,7 +200,7 @@ private:
     // Batch E #2 (2026-05-01): per-note filter cutoff offset from CC74.
     // -2..+2 octaves added to filter-cutoff multiplier in renderNextBlock.
     float  mPerNoteCutoffOctaves { 0.0f };
-    float  mMasterPanL      { 1.0f };   // from setPan() — constant-power
+    float  mMasterPanL      { 1.0f };   // from setPan() - constant-power
     float  mMasterPanR      { 1.0f };
 
     // ── Phase init ────────────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ private:
     // Default 1.0 (= idx 0 = 1/1). Set via setPitchFraction(int).
     float mPitchFracMult  { 1.0f };
 
-    // ── 2026-04-19 (S2) — Filter envelopes (T2-A) ────────────────────────────
+    // ── 2026-04-19 (S2) - Filter envelopes (T2-A) ────────────────────────────
     juce::ADSR             mFltADSR1;
     juce::ADSR::Parameters mFltParams1 { 0.01f, 0.10f, 0.5f, 0.30f };
     float mFlt1EnvAmt   { 0.0f };
@@ -254,10 +254,10 @@ private:
     float mFlt1KbTrack   { 0.0f };
     float mFlt2KbTrack   { 0.0f };
 
-    // ── 2026-04-19 (S4) — Mod XYZ pad input values (consumed by mod matrix) ──
+    // ── 2026-04-19 (S4) - Mod XYZ pad input values (consumed by mod matrix) ──
     float mModX { 0.0f }, mModY { 0.0f }, mModZ { 0.0f };
 
-    // ── 2026-04-20 (S4 Batch 2b) — Per-voice mod-matrix state ────────────────
+    // ── 2026-04-20 (S4 Batch 2b) - Per-voice mod-matrix state ────────────────
     const HarmlessModRegistry* mModRegistry { nullptr };
     juce::uint64               mModSnapGen  { 0 };
     double                     mBeatsPerSecond { 2.0 };   // 120 BPM default
@@ -297,12 +297,12 @@ private:
     // private engines + rebuild if deltas are above threshold.
     void applyVoiceEngineMods();
 
-    // ── 2026-04-19 (S3 T2-C) — Extended unison state ─────────────────────────
+    // ── 2026-04-19 (S3 T2-C) - Extended unison state ─────────────────────────
     int   mUnisonType  { 0 };       // 0 Pure, 1 Random, 2 Drifting, 3 Alt-only
     bool  mUnisonAlt   { false };
     float mUnisonPhaseAmount { 0.0f };   // 0..1 per-slot phase stagger
 
-    // ── 2026-04-19 (S3 T2-N) — vel_link + per-part velocity tracking ─────────
+    // ── 2026-04-19 (S3 T2-N) - vel_link + per-part velocity tracking ─────────
     // mVolSmooth no longer pre-multiplies velocity (refactored S3); velocity
     // is applied per-part in the render loop based on mVelLink.
     bool  mVelLink { true };

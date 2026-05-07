@@ -33,7 +33,7 @@ AudioClipStreamer::AudioClipStreamer (std::unique_ptr<juce::AudioFormatReader> r
         mRingReadHead .store (0,            std::memory_order_release);
         mRingWriteHead.store (mTotalLength, std::memory_order_release);
         mReady        .store (true,         std::memory_order_release);
-        // RAM mode: no background pre-fetch needed — data is already loaded.
+        // RAM mode: no background pre-fetch needed - data is already loaded.
         return;
     }
 
@@ -50,7 +50,7 @@ AudioClipStreamer::~AudioClipStreamer()
         mBgThread.removeTimeSliceClient (this);
 }
 
-// ── seek — message thread ─────────────────────────────────────────────────────
+// ── seek - message thread ─────────────────────────────────────────────────────
 
 void AudioClipStreamer::seek (int64 filePos)
 {
@@ -86,7 +86,7 @@ void AudioClipStreamer::seek (int64 filePos)
     mReady.store (true, std::memory_order_release);
 }
 
-// ── fillIntoRing — internal, mReaderLock must be held ────────────────────────
+// ── fillIntoRing - internal, mReaderLock must be held ────────────────────────
 
 void AudioClipStreamer::fillIntoRing (int64 fromFilePos, int numSamples)
 {
@@ -110,7 +110,7 @@ void AudioClipStreamer::fillIntoRing (int64 fromFilePos, int numSamples)
         scratch.clear();
         mReader->read (&scratch, 0, chunk, fileAt, true, true);
 
-        // Write into ring — handle wrap-around
+        // Write into ring - handle wrap-around
         const int64 currentWH = mRingWriteHead.load (std::memory_order_relaxed);
         const int physStart    = (int) (currentWH % mCapacity);
         const int part1        = juce::jmin (chunk, mCapacity - physStart);
@@ -128,7 +128,7 @@ void AudioClipStreamer::fillIntoRing (int64 fromFilePos, int numSamples)
     }
 }
 
-// ── useTimeSlice — background thread ─────────────────────────────────────────
+// ── useTimeSlice - background thread ─────────────────────────────────────────
 
 int AudioClipStreamer::useTimeSlice()
 {
@@ -161,11 +161,11 @@ int AudioClipStreamer::useTimeSlice()
     const int64 wh        = mRingWriteHead.load (std::memory_order_relaxed);
     const int64 available = wh - rh;
 
-    // At EOF — nothing more to write
+    // At EOF - nothing more to write
     if (wh >= mTotalLength)
         return 50;
 
-    // Buffer is sufficiently full (> 75%) — rest briefly
+    // Buffer is sufficiently full (> 75%) - rest briefly
     if (available >= (int64) (mCapacity * 0.75))
         return 10;
 
@@ -180,7 +180,7 @@ int AudioClipStreamer::useTimeSlice()
     return 0;   // come back immediately if more is needed
 }
 
-// ── readRaw — audio thread ────────────────────────────────────────────────────
+// ── readRaw - audio thread ────────────────────────────────────────────────────
 
 bool AudioClipStreamer::readRaw (juce::AudioBuffer<float>& dest,
                                   int destOffset,
@@ -205,7 +205,7 @@ bool AudioClipStreamer::readRaw (juce::AudioBuffer<float>& dest,
         // The ring physically covers [wh - capacity, wh).
         // We use coveredStart (not rh) as the lower bound because the stateless
         // filePos computation (outPosInClip * readRatio) can land 1-2 samples
-        // behind rh due to integer rounding — using rh would trigger a phantom
+        // behind rh due to integer rounding - using rh would trigger a phantom
         // seek every block even though the data is right there in the ring.
         const int64 coveredStart = wh - (int64) mCapacity;
         if (filePos < coveredStart || filePos + numSamples > wh)
@@ -229,7 +229,7 @@ bool AudioClipStreamer::readRaw (juce::AudioBuffer<float>& dest,
     return true;
 }
 
-// ── readAndMix — audio thread ─────────────────────────────────────────────────
+// ── readAndMix - audio thread ─────────────────────────────────────────────────
 
 float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
                                      int    destOffset,
@@ -252,21 +252,21 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
     {
         if (fileStartPos < 0 || fileStartPos >= mTotalLength)
             return 0.0f;
-        // Per-sample bounds checks below already break out at EOF — fine.
+        // Per-sample bounds checks below already break out at EOF - fine.
     }
     else
     {
         const int64 wh = mRingWriteHead.load (std::memory_order_acquire);
 
         // The ring physically covers [wh - capacity, wh).
-        // Use coveredStart (not rh) as the lower bound — the stateless filePos
+        // Use coveredStart (not rh) as the lower bound - the stateless filePos
         // (outPosInClip * readRatio) lands 1-2 samples behind rh every block due
         // to the +2 interpolation lookahead in numFileSamples.  Using rh caused a
         // phantom seek on every single block even though the data was present.
         const int64 coveredStart = wh - (int64) mCapacity;
         if (fileStartPos < coveredStart || fileStartPos + numFileSamples > wh)
         {
-            // Genuine position jump (backward scrub, loop, or first-block miss) —
+            // Genuine position jump (backward scrub, loop, or first-block miss) -
             // signal the background thread to seek.
             mSeekTarget .store (fileStartPos, std::memory_order_release);
             mSeekPending.store (true,         std::memory_order_release);
@@ -317,7 +317,7 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
         }
     }
 
-    // Advance the ring read head — these file samples are consumed;
+    // Advance the ring read head - these file samples are consumed;
     // the background thread can now overwrite that space.
     mRingReadHead.store (fileStartPos + numFileSamples, std::memory_order_release);
 

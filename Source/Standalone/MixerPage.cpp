@@ -2,7 +2,7 @@
 #include <set>   // D.3: setStripOrder uses std::set for dedup
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Direct Routing label — vertical-text panel between Master and FX Bus group,
+// Direct Routing label - vertical-text panel between Master and FX Bus group,
 // shown only when strips are routed directly to Master. Paint-only; never
 // intercepts clicks so cables can still drag through.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,25 +30,25 @@ struct DirectRoutingLabel : public juce::Component
 };
 
 // Tab accent colors mirrored on the mixer so bus colors match the ribbon tab
-// colors — helps the user find "where to do things".
+// colors - helps the user find "where to do things".
 static constexpr juce::uint32 kMixerTabPurple = 0xff7b2fbe;  // Master strip
 static constexpr juce::uint32 kEffectsTabPink = 0xffce3f8e;  // FX Bus + aux strips
 
-// Accent-color resolver used by layoutScrollContent — maps (channelId, current
+// Accent-color resolver used by layoutScrollContent - maps (channelId, current
 // main-out destination) to the strip's top-bar accent color.
 static juce::Colour pickStripColor(int chId, int destChannelId)
 {
     using namespace MixerChannelIds;
     // Aux: always Effects-tab pink
     if (chId >= kAuxBase && chId < kAuxBase + 16) return juce::Colour(kEffectsTabPink);
-    // Colored bus groups — track the main-out destination
+    // Colored bus groups - track the main-out destination
     if (destChannelId == kLayersBus) return VC::LayerCol[0];
     if (destChannelId == kBassBus)   return VC::BassCol[0];
     if (destChannelId == kDrumsBus)  return VC::DrumsCol;
     if (destChannelId == kClipsBus)  return VC::Warm;
     if (destChannelId == kFxBus)     return juce::Colour(kEffectsTabPink);
     // 2026-04-30: Vox + Inst destination buses got teal + navy mirrors of
-    // the matching ribbon tabs.  Was missing — Vox/Inst insert strips
+    // the matching ribbon tabs.  Was missing - Vox/Inst insert strips
     // routed to their natural bus fell through to VC::Accent (grey-blue),
     // so the top accent stripe was effectively invisible vs the bus's
     // bright neon divider.  These two lines + the chId fallbacks below
@@ -103,7 +103,7 @@ void MixerPage::ScrollContent::paintOverChildren(juce::Graphics& g)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5F-4b B3: CableOverlay — green bezier cables between strip sockets
+// 5F-4b B3: CableOverlay - green bezier cables between strip sockets
 // ─────────────────────────────────────────────────────────────────────────────
 MixerPage::CableOverlay::CableOverlay(MixerPage& o) : owner(o)
 {
@@ -131,7 +131,7 @@ bool MixerPage::CableOverlay::hitTest(int x, int y)
 
 void MixerPage::CableOverlay::paint(juce::Graphics& g)
 {
-    // C.4 Phase 1 (2026-04-30): cable color palette per Jeff's spec —
+    // C.4 Phase 1 (2026-04-30): cable color palette per Jeff's spec -
     //   Main cable (locked main-out): green, kept as-is
     //   Send cable: pink (was green-with-alpha)
     //   Sidechain cable: white
@@ -200,7 +200,7 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
             juce::PathStrokeType::rounded));
     }
 
-    // B5: ghost cable in send-placement mode (follows cursor) — pink.
+    // B5: ghost cable in send-placement mode (follows cursor) - pink.
     if (mPendingSendSrcId >= 0)
     {
         auto srcSock = owner.getSocketPosition(mPendingSendSrcId);
@@ -222,7 +222,7 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
         }
     }
 
-    // C.4 Phase 1: ghost cable in SC-placement mode — white.
+    // C.4 Phase 1: ghost cable in SC-placement mode - white.
     if (mPendingScSrcId >= 0)
     {
         auto srcSock = owner.getSocketPosition(mPendingScSrcId);
@@ -280,7 +280,7 @@ void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
-    // B5: send-placement mode — click commits the send
+    // B5: send-placement mode - click commits the send
     if (mPendingSendSrcId >= 0)
     {
         int dstId = findStripUnder(e.position);
@@ -315,7 +315,7 @@ void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
         int slot = findAvailableSendSlot(prefix);
         if (slot < 0)
         {
-            // All 4 send slots full — flash the source strip
+            // All 4 send slots full - flash the source strip
             mFlashStripId = mPendingSendSrcId; mFlashCountdown = 6; startTimerHz(30);
             cancelSendPlacement();
             return;
@@ -331,7 +331,7 @@ void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
-    // C.4 Phase 1 (2026-04-30): sidechain-placement mode — click commits SC
+    // C.4 Phase 1 (2026-04-30): sidechain-placement mode - click commits SC
     // on the TARGET strip's _sc_recv{N}_from (target-side encoding so per-
     // module pickers see stable line indices regardless of cable order).
     if (mPendingScSrcId >= 0)
@@ -358,7 +358,7 @@ void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
         int slot = findAvailableScRecvSlot(targetPrefix);
         if (slot < 0)
         {
-            // Target's 4 SC receive lines are full — flash the target.
+            // Target's 4 SC receive lines are full - flash the target.
             mFlashStripId = dstId; mFlashCountdown = 6; startTimerHz(30);
             cancelSidechainPlacement();
             return;
@@ -374,7 +374,7 @@ void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
-    // B4: main-out drag — click near a non-locked socket
+    // B4: main-out drag - click near a non-locked socket
     int chId = findSocketNear(e.position, 14.f, true);
     if (chId < 0) return;
 
@@ -401,7 +401,7 @@ void MixerPage::CableOverlay::mouseUp(const juce::MouseEvent& e)
 
     if (dstId < 0 || dstId == mDragSrcId)
     {
-        // Dropped on empty space or self — cancel, cable snaps back
+        // Dropped on empty space or self - cancel, cable snaps back
         repaint();
         return;
     }
@@ -512,7 +512,7 @@ int MixerPage::CableOverlay::findSocketNear(juce::Point<float> pt, float radius,
 
 int MixerPage::CableOverlay::findStripUnder(juce::Point<float> pt) const
 {
-    // Check all strips — is pt within their page-coords bounds?
+    // Check all strips - is pt within their page-coords bounds?
     auto checkBounds = [&](int chId) -> bool
     {
         auto* strip = owner.findStripByChannelId(chId);
@@ -609,7 +609,7 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
         return dstIsMaster || dstId == kDrumsBus;
 
     // J-5 (2026-05-03): Rusty insert main-out is LOCKED to kRustyDrumsBus
-    // (enforced via isMainOutLocked).  This rule covers send cables only —
+    // (enforced via isMainOutLocked).  This rule covers send cables only -
     // sends are restricted to aux strips per spec, no inter-bus routing.
     if (srcIsRusty)
         return dstIsAux;
@@ -632,7 +632,7 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     // excluded - live-input goes to live-input destinations.
     // G-6 (2026-04-29): Vox can ALSO route to kVoxBus2; Inst to kInstBus2/3.
     // Activation state checked at the source so cables to inactive buses
-    // don't open invisible routing — owner is referenced via the const ref
+    // don't open invisible routing - owner is referenced via the const ref
     // in the surrounding CableOverlay class.
     if (srcIsVox)  return dstIsMaster || dstId == kClipsBus
                        || dstId == kVoxBus
@@ -642,7 +642,7 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
                        || (dstId == kInstBus2 && owner.isInstBus2Active())
                        || (dstId == kInstBus3 && owner.isInstBus3Active());
 
-    // Unknown strip type — be safe
+    // Unknown strip type - be safe
     return false;
 }
 
@@ -945,7 +945,7 @@ void MixerPage::CableOverlay::showCablePopup(juce::Point<float> screenPt,
 
     if (hit.isSidechain)
     {
-        // C.4 Phase 1 (2026-04-30): SC cable popup — info-only label + Delete.
+        // C.4 Phase 1 (2026-04-30): SC cable popup - info-only label + Delete.
         // No amount slider (SC tap is unity-gain post-everything per Q4=A) or
         // pre/post toggle.  Delete writes -1 back to TARGET's _sc_recv{N}_from.
         const juce::String targetPrefix = prefixFromChannelId(hit.dstId);
@@ -1127,7 +1127,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mScrollContent = std::make_unique<ScrollContent>();
     mViewport = std::make_unique<juce::Viewport>();
     mViewport->setViewedComponent(mScrollContent.get(), false);
-    // Hide BOTH of the viewport's internal scrollbars — we place our own
+    // Hide BOTH of the viewport's internal scrollbars - we place our own
     // permanent horizontal scrollbar at the top of the page so the cable
     // overlay can't cover it. Allow horizontal scrolling even without the
     // viewport's own bar (we drive it via setViewPosition).
@@ -1154,7 +1154,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
                               MixerTrackStrip::StripType::Bus, juce::Colour(kEffectsTabPink));
     mAudioClipsBusStrip = std::make_unique<MixerTrackStrip>("Clips Bus",
                               MixerTrackStrip::StripType::Bus, VC::Warm);
-    // R3.5 (2026-04-23): Vox + Inst BUS strips — teal + navy accents.
+    // R3.5 (2026-04-23): Vox + Inst BUS strips - teal + navy accents.
     mVoxBusStrip  = std::make_unique<MixerTrackStrip>("Vox Bus",
                               MixerTrackStrip::StripType::Bus, juce::Colour(0xFF0FAFA5));
     mInstBusStrip = std::make_unique<MixerTrackStrip>("Inst Bus",
@@ -1340,7 +1340,7 @@ MixerPage::~MixerPage()
 // ─────────────────────────────────────────────────────────────────────────────
 void MixerPage::addLayerChannel(int pageIndex, const juce::String& name)
 {
-    // pageIndex is authoritative — matches registerLayerEngine's InsertNode
+    // pageIndex is authoritative - matches registerLayerEngine's InsertNode
     // key + APVTS prefix (mixer_layer_{pageIndex}). Caller translates ribbonTabId
     // to pageIndex before calling.
     if (mLayerStrips.count(pageIndex) > 0) return;
@@ -1371,7 +1371,7 @@ void MixerPage::addLayerChannel(int pageIndex, const juce::String& name)
 
 void MixerPage::addBassChannel(int pageIndex, const juce::String& name)
 {
-    // pageIndex is authoritative — see addLayerChannel().
+    // pageIndex is authoritative - see addLayerChannel().
     if (mBassStrips.count(pageIndex) > 0) return;
 
     auto strip = std::make_unique<MixerTrackStrip>(name,
@@ -1480,7 +1480,7 @@ void MixerPage::addInstChannel() { addInstChannelAtIndex (mNextInstIdx); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): secondary Vox/Inst bus activation.  Lazy-creates the
-// strip + flags the bus active.  Idempotent — already-active activate is
+// strip + flags the bus active.  Idempotent - already-active activate is
 // a no-op (returns false).  Audio infrastructure (DSP node + APVTS params)
 // is always allocated; this just controls UI presence + route picker
 // filtering.  Bus rename works the same as primary bus strip rename.
@@ -1723,7 +1723,7 @@ void MixerPage::addVoxChannelAtIndex(int idx)
 //   * common base prefix (everything except the suffix) is identical
 // B1 fallback - known device profiles when names are generic ("IN 1", "IN 2", ...)
 //   * Tascam Model 24: pairs at 13/14, 15/16, 17/18, 19/20, 21/22 (line inputs).
-//     23/24 is the master mix bus and is left as two mono entries — not a true
+//     23/24 is the master mix bus and is left as two mono entries - not a true
 //     stereo line-input pair.
 //   * Tascam Model 16 / Model 12: similar smaller layouts.
 // Anything not paired stays mono.  Pure code-side; no UI option to override.
@@ -1746,7 +1746,7 @@ struct DevicePairProfile
 static const DevicePairProfile kDeviceProfiles[] =
 {
     // Tascam ships a single "Model Mixer ASIO" driver across the entire
-    // Model series — Model 12, 16, 24, 2400 all use the same driver name.
+    // Model series - Model 12, 16, 24, 2400 all use the same driver name.
     // Channel count is the only thing that disambiguates them at runtime.
     //
     // Model 24 = 24 input channels: 12 mono mic preamps + 5 line-input
@@ -1833,7 +1833,7 @@ static std::vector<ChannelGroup> computeChannelGroups (const juce::StringArray& 
 
     // B1 - device-profile fallback when B2 found nothing.  Profile match
     // requires the device-name substring AND (when set) the channel count
-    // to match — needed because some vendors (e.g. Tascam) ship one ASIO
+    // to match - needed because some vendors (e.g. Tascam) ship one ASIO
     // driver for an entire product family, distinguishing models only by
     // the actual channel count the driver enumerates.
     if (! b2FoundPairs && deviceName.isNotEmpty())
@@ -1986,7 +1986,7 @@ void MixerPage::refreshLiveInputStrip (int channelId)
     strip->setInputChannelLabel (name);
 }
 
-// K-2 (2026-05-05): toggle the noLiveInput flag on an Inst strip — sfizz
+// K-2 (2026-05-05): toggle the noLiveInput flag on an Inst strip - sfizz
 // sources (BaySickGuitars / BaySickBasses) hide arm + listen LEDs since the
 // engine IS the source.  No-op if the strip at idx doesn't exist.
 void MixerPage::setInstStripNoLiveInput (int idx, bool b)
@@ -2054,7 +2054,7 @@ void MixerPage::addRustyChannelAtIndex (int idx, const juce::String& name)
     // again here so the function is robust if invoked stand-alone.
     mProcessor.ensureRustyInsert (idx, name);
 
-    // J-5 (2026-05-03): use DrumChannel (no arm/monitor buttons — these
+    // J-5 (2026-05-03): use DrumChannel (no arm/monitor buttons - these
     // strips are sfizz-driven, not live-input).  Drums-red accent matches
     // the existing Drums Bus family + the new RustyDrums Bus.
     auto strip = std::make_unique<MixerTrackStrip> (
@@ -2339,7 +2339,7 @@ void MixerPage::removeVoxChannel(int idx)
 void MixerPage::removeClipChannel(int idx)
 {
     // Clip strips live in mAudioStrips (keyed by arrangement row index;
-    // there's no separate order vector — they're laid out in row order).
+    // there's no separate order vector - they're laid out in row order).
     mAudioStrips.erase(idx);
     if (getWidth() > 0) resized();
 }
@@ -2478,7 +2478,7 @@ void MixerPage::deleteSecondaryBus (int channelId)
         });
 
     // Hide the bus strip.  Audio InsertNode stays allocated (always alloc'd
-    // in prepare()) — no audio leaks to it because all senders were just
+    // in prepare()) - no audio leaks to it because all senders were just
     // rerouted.  Activation flag flip drops it from layout + the route
     // picker submenu list.
     if (channelId == kVoxBus2)
@@ -2590,7 +2590,7 @@ std::vector<int> MixerPage::getDrumStripIndices() const
     out.reserve (mDrumStrips.size());
     for (auto& kv : mDrumStrips)
         out.push_back (kv.first);
-    return out;   // std::map iterates keys in ascending order — stable
+    return out;   // std::map iterates keys in ascending order - stable
 }
 
 juce::String MixerPage::getDrumStripName(int slot) const
@@ -2808,7 +2808,7 @@ void MixerPage::timerCallback()
     // change detection + (via base class) flash decay -- none of which need
     // monitor-refresh precision.
 
-    // 5F-4b B3: repaint cable overlay only when scroll position changes — the
+    // 5F-4b B3: repaint cable overlay only when scroll position changes - the
     // bezier path itself only depends on socket positions, which only move on
     // scroll or layout.  The overlay is setBufferedToImage(true) so sibling
     // strip-meter repaints don't force a re-rasterize.  Drag / flash / send-
@@ -3110,7 +3110,7 @@ void MixerPage::layoutScrollContent()
     }
     x += kGroupSep;
 
-    // Clips Bus sits between FX and the instrument buses — matches Builder tab color.
+    // Clips Bus sits between FX and the instrument buses - matches Builder tab color.
     laidOutBus(*mAudioClipsBusStrip,  kClipsBus,  VC::Warm);
 
     // R3.5 (2026-04-23): Vox + Inst BUS strips alongside Clips Bus.  Same
@@ -3145,7 +3145,7 @@ void MixerPage::layoutScrollContent()
         mScrollContent->mNeonLines = std::move(neon);
         mScrollContent->repaint();
     }
-    // R3.5: any layout shift moves cable sockets — invalidate the cached overlay.
+    // R3.5: any layout shift moves cable sockets - invalidate the cached overlay.
     if (mCableOverlay) mCableOverlay->repaint();
 
     // Keep our top scrollbar in sync with the new content width.
@@ -3187,7 +3187,7 @@ void MixerPage::scrollBarMoved(juce::ScrollBar* sb, double newRangeStart)
 
 void MixerPage::resized()
 {
-    constexpr int kTopScrollH = 10;   // top scrollbar height — always visible
+    constexpr int kTopScrollH = 10;   // top scrollbar height - always visible
     auto b = getLocalBounds();
 
     // ── Top scrollbar strip (above everything, spans the console area) ────

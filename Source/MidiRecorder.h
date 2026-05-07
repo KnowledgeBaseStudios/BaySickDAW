@@ -7,9 +7,9 @@
 // to PianoNotes when recording stops.
 //
 // Usage (all calls on audio thread except start/stop):
-//   startRecording(currentBeat)             — arm, called from message thread
-//   processBlock(midi, beatStart, bps)      — called every block while recording
-//   stopRecording()  → vector<PianoNote>    — called from message thread; clears state
+//   startRecording(currentBeat)             - arm, called from message thread
+//   processBlock(midi, beatStart, bps)      - called every block while recording
+//   stopRecording()  → vector<PianoNote>    - called from message thread; clears state
 // ─────────────────────────────────────────────────────────────────────────────
 class MidiRecorder
 {

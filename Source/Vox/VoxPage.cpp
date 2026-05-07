@@ -75,12 +75,12 @@ void VoxPage::buildEnginePicker()
 {
     // H-6b (2026-05-01): No engine picker on Vox tabs anymore.  BaySickVocal
     // is the only engine; instantiated unconditionally in the ctor.  The
-    // page header bar stays minimal — clip file label only.  The right-click
+    // page header bar stays minimal - clip file label only.  The right-click
     // page actions menu lives on the ribbon tab itself, not here.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// G-6 helpers — Vox preset folder + recursive folder→submenu walker.
+// G-6 helpers - Vox preset folder + recursive folder→submenu walker.
 // ─────────────────────────────────────────────────────────────────────────────
 // 2026-05-05 consolidation: route every Vox preset through PagePresetIO's
 // per-kind directory ("Vox Page/My Presets") so saved files appear in the
@@ -422,7 +422,7 @@ void VoxPage::requestDelete()
 juce::AudioProcessor* VoxPage::getEngineProcessor() const noexcept
 {
     // H-6b: Vox tabs are always BaySickVocal.  BaySickPlayer kept in the enum
-    // for save-state back-compat only — never returned as the active engine.
+    // for save-state back-compat only - never returned as the active engine.
     return mVocalProc.get();
 }
 
@@ -449,7 +449,7 @@ void VoxPage::selectEngine (EngineType e)
         auto* ed = static_cast<BaySickVocalEditor*> (mVocalProc->createEditor());
         mVocalEditor.reset (ed);
         if (mVocalEditor) addChildComponent (*mVocalEditor);
-        // J-6 EQ unification (2026-05-03): Pre Rack EQ injection removed —
+        // J-6 EQ unification (2026-05-03): Pre Rack EQ injection removed -
         // pre-rack EQ is exclusively edited via the Effects page.
     }
 
@@ -514,7 +514,7 @@ void VoxPage::setClipFilePath (const juce::String& p)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): full-state export/import for Duplicate flow.
-// BaySickVocal slot reserved for Phase H — only BaySickPlayer is cloned for
+// BaySickVocal slot reserved for Phase H - only BaySickPlayer is cloned for
 // now.  Same prefix-substitution shape as ClipsPage (vox_<idx>_* prefix).
 // ─────────────────────────────────────────────────────────────────────────────
 juce::String VoxPage::exportVoxState() const
@@ -592,7 +592,7 @@ void VoxPage::layoutEditor (juce::Rectangle<int> r)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VoxEmptyState — text-only placeholder.  Mixer button is the spawn trigger.
+// VoxEmptyState - text-only placeholder.  Mixer button is the spawn trigger.
 // ─────────────────────────────────────────────────────────────────────────────
 VoxEmptyState::VoxEmptyState()
 {

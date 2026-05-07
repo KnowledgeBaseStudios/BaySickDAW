@@ -52,7 +52,7 @@ void ClipsPage::buildEnginePicker()
 {
     // G-6 (2026-04-29): single-engine page (BaySickPlayer only).  The picker
     // is shown for visual consistency with Vox/Inst (and to host the
-    // right-click context menu) but locked — left-click opens the dropdown
+    // right-click context menu) but locked - left-click opens the dropdown
     // showing the one option, right-click opens the page context menu.
     addAndMakeVisible (mEnginePicker);
     mEnginePicker.addItem ("BaySickPlayer", 1);
@@ -60,12 +60,12 @@ void ClipsPage::buildEnginePicker()
     mEnginePicker.setTooltip (
         "Clips uses BaySickPlayer (sample playback) - the only engine for clips.  "
         "Right-click for tab options (Rename / Duplicate / Delete).");
-    // Single option — no need for an onChange handler.
+    // Single option - no need for an onChange handler.
     mEnginePicker.onRightClick = [this] { showEngineContextMenu(); };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// G-6 helpers — preset folder + recursive folder→submenu walker (mirrors the
+// G-6 helpers - preset folder + recursive folder→submenu walker (mirrors the
 // addLayerPresetDirToMenu pattern from LayersPage.cpp).
 // ─────────────────────────────────────────────────────────────────────────────
 // 2026-05-05 consolidation: route every Clip preset through PagePresetIO's
@@ -124,7 +124,7 @@ void ClipsPage::showEngineContextMenu()
     menu.addItem (kIdDuplicate, "Duplicate Clip (new tab)");
 
     menu.addSeparator();
-    // Choke Group submenu — same model as Layers/Bass/Drums.
+    // Choke Group submenu - same model as Layers/Bass/Drums.
     {
         const int curGroup = onGetChokeGroup ? juce::jlimit (0, 16, onGetChokeGroup()) : 0;
         juce::PopupMenu chokeSub;
@@ -138,7 +138,7 @@ void ClipsPage::showEngineContextMenu()
     menu.addSeparator();
     menu.addItem (kIdSaveAs, "Save Current Patch As...", mPlayerProc != nullptr);
 
-    // Load Preset submenu — walks Documents/BaySickDAW/Presets/Clips/.
+    // Load Preset submenu - walks Documents/BaySickDAW/Presets/Clips/.
     juce::Array<juce::File> presetXmls;
     {
         juce::PopupMenu loadSub;
@@ -221,7 +221,7 @@ void ClipsPage::loadPreset (const juce::File& xml)
 // ─────────────────────────────────────────────────────────────────────────────
 void ClipsPage::takeStateSnapshot()
 {
-    // G-7: listener-based dirty tracking — just clear the flag.  Subsequent
+    // G-7: listener-based dirty tracking - just clear the flag.  Subsequent
     // parameter changes (sliders, combos, toggles in the engine editor) flip
     // it back to true via mDirtyListener.
     mPageDirty = false;
@@ -525,7 +525,7 @@ void ClipsPage::selectEngine (EngineType e)
     // first dropped onto Builder; getInsertPreEQ is non-null here.
     //
     // (2026-04-29 BISECT cleared: the routing regression was the strip-create
-    // ordering in StandaloneEditor::onAudioClipAdded — addAudioChannel ran
+    // ordering in StandaloneEditor::onAudioClipAdded - addAudioChannel ran
     // before ensureAudioInsert so the strip's APVTS attachments silently
     // failed.  Fixed there + a defensive rebindApvts in
     // VibeGraph::ensureInsertNode.  Pre-EQ binding is back on.)
@@ -573,7 +573,7 @@ void ClipsPage::setClipFilePath (const juce::String& p)
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): full-state export/import for Duplicate flow.
 // Single-engine page: just BaySickPlayer state.  Saves the actual processor
-// prefix (`getParamPrefix()`) so import can substitute correctly — the
+// prefix (`getParamPrefix()`) so import can substitute correctly - the
 // VibePlayerProcessor prefix format is `tk_<trackId>_bsp_` which collapses
 // to e.g. `tk_clip_5__bsp_` when trackId already ends in `_`, so we can't
 // reconstruct it from page index alone.
@@ -625,7 +625,7 @@ void ClipsPage::importClipState (const juce::String& xml)
         }
     }
 
-    // Old projects with a NamIrState child (pre-G-6 cleanup) — silently skip.
+    // Old projects with a NamIrState child (pre-G-6 cleanup) - silently skip.
     // Backward-compat: state still loads, just without the NAM/IR bits.
 
     // G-6: restore lock state (Duplicate preserves; Load Preset would too).
@@ -667,7 +667,7 @@ void ClipsPage::layoutEditor (juce::Rectangle<int> r)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ClipsEmptyState — placeholder when zero Clips tabs exist.
+// ClipsEmptyState - placeholder when zero Clips tabs exist.
 // ─────────────────────────────────────────────────────────────────────────────
 ClipsEmptyState::ClipsEmptyState()
 {

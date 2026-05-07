@@ -3,7 +3,7 @@
 namespace
 {
     // dB range for the level fader.
-    // 2026-04-30: max dropped +10 → +5.6 dB (FL-parity ish — FL caps at +5.6).
+    // 2026-04-30: max dropped +10 → +5.6 dB (FL-parity ish - FL caps at +5.6).
     constexpr float kFaderMin = -60.0f;
     constexpr float kFaderMax =   5.6f;
     constexpr float kFaderDef =   0.0f;
@@ -12,7 +12,7 @@ namespace
     // 2026-04-30: Pan row tightened 36→28, Width row tightened 28→24
     // (saves 12 px total for the meter to grow into).
     constexpr int kNameH    = 20;
-    constexpr int kMeterH   = 80;   // unused now — meter is right-column flex
+    constexpr int kMeterH   = 80;   // unused now - meter is right-column flex
     constexpr int kMSH      = 20;   // Mute / Solo row
     constexpr int kPanH     = 28;   // was 36
     constexpr int kFaderH   = 100;
@@ -182,7 +182,7 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
     if (hasArm()) addAndMakeVisible(mArmBtn);
     else          addChildComponent(mArmBtn);
 
-    // R4 (2026-04-23): Listen LED — Vox / Inst only.  Headphones glyph,
+    // R4 (2026-04-23): Listen LED - Vox / Inst only.  Headphones glyph,
     // ButtonAttachment-driven (no custom click handler).
     mListenBtn.setClickingTogglesState(true);
     mListenBtn.setColours(juce::Colour(0xff707070), juce::Colour(0xff33ff88));
@@ -190,14 +190,14 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
     if (hasArm()) addAndMakeVisible(mListenBtn);
     else          addChildComponent(mListenBtn);
 
-    // ── 5F-4a: FX Bypass LED (all strip types — master/bus/insert) ──────────
+    // ── 5F-4a: FX Bypass LED (all strip types - master/bus/insert) ──────────
     mBypassBtn.setButtonText("FX Bypass");
     mBypassBtn.setClickingTogglesState(true);
     mBypassBtn.setOnColour(juce::Colour(0xff4488ff));   // blue
     mBypassBtn.setTooltip("Bypass entire effects rack (preserves slot settings)");
     addAndMakeVisible(mBypassBtn);
 
-    // Master FX Bypass LED — visible only on the Master strip. Purple to match
+    // Master FX Bypass LED - visible only on the Master strip. Purple to match
     // the Mixer ribbon-tab color. Bypasses EVERY rack in the app when on.
     mMasterFXBypassBtn.setButtonText("Master FX Bypass");
     mMasterFXBypassBtn.setClickingTogglesState(true);
@@ -247,7 +247,7 @@ void MixerTrackStrip::parameterChanged (const juce::String& paramId, float newVa
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 5F-4a: bind new controls (polarity/width/arm/bypass) to APVTS params.
-// Safe to call repeatedly — tears down previous attachments first.
+// Safe to call repeatedly - tears down previous attachments first.
 // Caller must have registered the params via ensureMixerStripParams() already.
 // ─────────────────────────────────────────────────────────────────────────────
 void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
@@ -265,7 +265,7 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
     mBypassAtt        .reset();
     mMasterFXBypassAtt.reset();
 
-    // 5F-4a Batch 6: level/pan/mute/solo — all strip types (InsertNode reads these)
+    // 5F-4a Batch 6: level/pan/mute/solo - all strip types (InsertNode reads these)
     if (apvts.getParameter(paramPrefix + "_level") != nullptr)
         mLevelAtt = std::make_unique<SliderAtt>(apvts, paramPrefix + "_level", mFader);
     if (apvts.getParameter(paramPrefix + "_pan") != nullptr)
@@ -275,11 +275,11 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
     if (apvts.getParameter(paramPrefix + "_solo") != nullptr)
         mSoloAtt  = std::make_unique<ButtonAtt>(apvts, paramPrefix + "_solo", mSoloBtn);
 
-    // Width — always present
+    // Width - always present
     if (apvts.getParameter(paramPrefix + "_width") != nullptr)
         mWidthAtt = std::make_unique<SliderAtt>(apvts, paramPrefix + "_width", mWidthKnob);
 
-    // Polarity — bus + insert only. Single-button attachment.
+    // Polarity - bus + insert only. Single-button attachment.
     if (hasPolarityRow() && apvts.getParameter(paramPrefix + "_polarity") != nullptr)
     {
         mPolarityAtt = std::make_unique<ButtonAtt>(apvts, paramPrefix + "_polarity", mPolarityBtn);
@@ -327,16 +327,16 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
         }
     }
 
-    // Bypass — insert only (canonical store; EffectsPage button reads/writes the same param)
+    // Bypass - insert only (canonical store; EffectsPage button reads/writes the same param)
     if (hasUtilityRow() && apvts.getParameter(paramPrefix + "_bypass") != nullptr)
         mBypassAtt = std::make_unique<ButtonAtt>(apvts, paramPrefix + "_bypass", mBypassBtn);
 
-    // Master FX Bypass — Master strip only. Global app-wide kill-all flag.
+    // Master FX Bypass - Master strip only. Global app-wide kill-all flag.
     if (mType == StripType::Master && apvts.getParameter("master_fx_bypass") != nullptr)
         mMasterFXBypassAtt = std::make_unique<ButtonAtt>(apvts, "master_fx_bypass", mMasterFXBypassBtn);
 
-    // R4: Listen — Vox / Inst only.  K-2 (2026-05-05): skip on sfizz-source
-    // strips (mNoLiveInput) — listen has no meaning when there's no live input.
+    // R4: Listen - Vox / Inst only.  K-2 (2026-05-05): skip on sfizz-source
+    // strips (mNoLiveInput) - listen has no meaning when there's no live input.
     if ((mType == StripType::Vox || mType == StripType::Inst)
         && ! mNoLiveInput
         && apvts.getParameter(paramPrefix + "_listen") != nullptr)
@@ -346,10 +346,10 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
 }
 
 // K-2 (2026-05-05): toggle the noLiveInput suppression.  When true, hides the
-// arm + listen LEDs (sfizz-source Inst strips don't have a live input — the
+// arm + listen LEDs (sfizz-source Inst strips don't have a live input - the
 // engine IS the source) and tears down the `_arm` parameter listener so APVTS
 // changes don't drive a hidden button.  When false (default), the strip
-// behaves exactly as before — Vox/Inst type strips show arm + listen LEDs.
+// behaves exactly as before - Vox/Inst type strips show arm + listen LEDs.
 void MixerTrackStrip::setNoLiveInput (bool b)
 {
     if (b == mNoLiveInput) return;
@@ -362,7 +362,7 @@ void MixerTrackStrip::setNoLiveInput (bool b)
 
     // Tear down the `_arm` parameter listener when suppressed; the LED is
     // hidden so the listener has no work to do.  Setting back to false
-    // doesn't re-attach automatically — caller should re-run setApvts() if
+    // doesn't re-attach automatically - caller should re-run setApvts() if
     // they need the listener restored.  In practice the source flag is set
     // before setApvts on tab spawn, so the listener simply isn't installed.
     if (mNoLiveInput && mApvtsForListener != nullptr && mArmParamId.isNotEmpty())
@@ -532,7 +532,7 @@ void MixerTrackStrip::paint(juce::Graphics& g)
     g.setColour(VC::Bg);
     g.fillRect(b.getRight() - 1, b.getY(), 1, b.getHeight());
 
-    // 5F-4b B5: cable socket — neon green ring with black interior
+    // 5F-4b B5: cable socket - neon green ring with black interior
     {
         constexpr float kSocketDiam = 12.f;
         const float cx = (float) mSocketCentre.x;
@@ -554,7 +554,7 @@ void MixerTrackStrip::paint(juce::Graphics& g)
     }
 
     // 2026-04-30: tick marks are now drawn INSIDE DBFSMeter::paint (tick
-    // labels overlay unlit segments and get covered by lit segments — FL
+    // labels overlay unlit segments and get covered by lit segments - FL
     // parity).  The strip used to draw them in an 18 px column to the
     // left of the meter, but with the meter now in the strip's right
     // column there's no room for an external tick column anyway.

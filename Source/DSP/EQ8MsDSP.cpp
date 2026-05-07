@@ -40,7 +40,7 @@ void EQ8MsDSP::process(juce::AudioBuffer<float>& buffer)
     // 2026-04-22 §P4.3: identity short-circuit moved INSIDE process() so the
     // spectrum analyser feeds (preFeed / postFeed) keep getting populated even
     // when no IIR work runs.  Without this, isIdentity-skipped EQs showed
-    // empty waveform displays in the UI.  Identity behaves like bypass — same
+    // empty waveform displays in the UI.  Identity behaves like bypass - same
     // input on both feeds, no filter compute.
     if (bypassed || isIdentity())
     {

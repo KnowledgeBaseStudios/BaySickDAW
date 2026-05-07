@@ -2,11 +2,11 @@
 #include <JuceHeader.h>
 #include <cmath>
 
-// ── BaySickBassLAF — "Bass Green / neon low-end" ─────────────────────────────
+// ── BaySickBassLAF - "Bass Green / neon low-end" ─────────────────────────────
 // Palette:
 //   Main bg       : #1C1E21      Visualizer bg  : #0A0B0C
-//   Arc / active  : #33FF88  (B1 neon green — bass page color)
-//   Decay accent  : #00CED1  (soft cyan — for tab 1 envelope)
+//   Arc / active  : #33FF88  (B1 neon green - bass page color)
+//   Decay accent  : #00CED1  (soft cyan - for tab 1 envelope)
 //   Inactive      : #2A2C30      Typography     : #E0E0E0
 //
 // Identical knob/button rendering to BaySickSynthLAF, differentiated by the
@@ -70,7 +70,7 @@ public:
             g.strokePath (hex, juce::PathStrokeType (1.0f));
         }
 
-        // ── Track arc (inactive bg) — lineTo loop per CLAUDE.md ──────────────
+        // ── Track arc (inactive bg) - lineTo loop per CLAUDE.md ──────────────
         {
             juce::Path track;
             const int kSteps = 96;
@@ -189,7 +189,7 @@ public:
             return;
         }
 
-        // Non-toggle push style (tab bar, preset menu) — unchanged.
+        // Non-toggle push style (tab bar, preset menu) - unchanged.
         juce::Colour fill;
         if      (on)          fill = juce::Colour (kGreen);
         else if (down)        fill = juce::Colour (kInactive).brighter (0.12f);
@@ -224,7 +224,7 @@ public:
                           juce::Justification::centred, 1);
     }
 
-    // ── Label — force text color ──────────────────────────────────────────────
+    // ── Label - force text color ──────────────────────────────────────────────
     void drawLabel (juce::Graphics& g, juce::Label& label) override
     {
         g.fillAll (label.findColour (juce::Label::backgroundColourId));

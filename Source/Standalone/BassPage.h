@@ -11,9 +11,9 @@
 // ── BassPage ──────────────────────────────────────────────────────────────────
 // One Bass instrument page. Up to kMaxBassPages (4) instances.
 //
-// Two sub-tabs (J-6 EQ unification 2026-05-03 — EQ moved to Effects page):
-//   Tab 0 "Player"     — engine selector ComboBox (locks on first pick) + engine editor
-//   Tab 1 "Piano Roll" — PianoRollContainer bound to bassRoll[mPageIndex]
+// Two sub-tabs (J-6 EQ unification 2026-05-03 - EQ moved to Effects page):
+//   Tab 0 "Player"     - engine selector ComboBox (locks on first pick) + engine editor
+//   Tab 1 "Piano Roll" - PianoRollContainer bound to bassRoll[mPageIndex]
 //
 // Engine choices: Harmless | VibePlayer | BaySickBass
 // Each page owns its engine processor + editor (created on first engine selection).
@@ -62,7 +62,7 @@ public:
     // P1+P2 persistence: StandaloneEditor calls this during project load.
     void selectEngine (const juce::String& engineName);
 
-    // D1.4-fix (c) — per-bass right-click context menu + save / delete.
+    // D1.4-fix (c) - per-bass right-click context menu + save / delete.
     void showContextMenu  (juce::Component* anchor);
     void savePatchAs      ();
     // 2026-04-25: Load preset (factory + user) for the current engine.
@@ -87,7 +87,7 @@ public:
     std::function<void(const juce::String& clipboardXml)> onDuplicateRequested;
     std::function<void()>           onLockChanged;
     std::function<void()>           onRenameRequested;
-    // 2026-04-26: fired when loadPreset applies a preset — owner renames the
+    // 2026-04-26: fired when loadPreset applies a preset - owner renames the
     // ribbon tab to match the preset's filename (mirrors DrumPage).
     std::function<void(const juce::String& newName)> onSoundNameChanged;
 
@@ -103,7 +103,7 @@ private:
 
     // ── Tab 0: Player ─────────────────────────────────────────────────────────
     std::unique_ptr<juce::Component>            mPlayerTab;
-    // LockableCombo: same pattern as LayersPage — see LayersPage.h.
+    // LockableCombo: same pattern as LayersPage - see LayersPage.h.
     struct LockableCombo : public juce::ComboBox
     {
         bool locked { false };
@@ -149,7 +149,7 @@ private:
     void unsubscribeFromEngineApvtsState();
 
     // 2026-04-21: "bas_" (3-char) prefix matches the engine-processor trackId convention.
-    // §P4.3 B7: midEQPrefix / sideEQPrefix helpers deleted — pre-rack EQ params
+    // §P4.3 B7: midEQPrefix / sideEQPrefix helpers deleted - pre-rack EQ params
     // live on the mixer-strip prefix (mixer_bass_<N>_preeq_*).
     juce::String trackId()      const { return "bas_" + juce::String(mPageIndex); }
 

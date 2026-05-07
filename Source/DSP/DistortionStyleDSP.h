@@ -4,7 +4,7 @@
 #include "PolyphaseOversampler.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DistortionStyleDSP — Phase I-5 (2026-05-02)
+// DistortionStyleDSP - Phase I-5 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
 // DS Style Distortion pedal.  Aggressive hard-clipping in the style of the
 // BOSS DS-1.  Three knobs (Tone / Level / Dist).

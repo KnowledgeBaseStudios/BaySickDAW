@@ -5,7 +5,7 @@
 #include <atomic>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PitchCorrectorDSP — Phase H-5 (2026-05-01)
+// PitchCorrectorDSP - Phase H-5 (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 // Realtime pitch correction wrapper for BaySickVocal.  Owns:
 //   * PitchTrackerYIN for fundamental detection (40-1500 Hz, ~50 ms latency)
@@ -24,7 +24,7 @@
 //   8. Apply ratio to audio via granular shifter -> output.
 //
 // Formant Preserve toggle and Throat Shift APVTS params are wired but the
-// formant DSP itself is a follow-up (cepstral envelope swap pass) — for H-5
+// formant DSP itself is a follow-up (cepstral envelope swap pass) - for H-5
 // the toggle is a no-op pass through.  Knobs are preset-safe to add later.
 //
 // Mode switch (Realtime vs Offline) is a UI/processing choice; the DSP class
@@ -141,7 +141,7 @@ private:
     // ── State ────────────────────────────────────────────────────────────────
     double mSampleRate { 44100.0 };
 
-    // ── RNG for Humanize (xorshift32 — fast, deterministic, audio-thread-safe) ─
+    // ── RNG for Humanize (xorshift32 - fast, deterministic, audio-thread-safe) ─
     juce::uint32 mRngState { 0x12345678u };
     float        nextRandPm1() noexcept;   // returns -1..+1
 

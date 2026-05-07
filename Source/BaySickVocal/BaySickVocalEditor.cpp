@@ -14,7 +14,7 @@
 // behind an ambiguous-call error.
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickVocalEditor — Phase H-6 (2026-05-01)
+// BaySickVocalEditor - Phase H-6 (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace
@@ -26,7 +26,7 @@ namespace
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NAMIRHostPanel — H-6d (2026-05-02)
+// NAMIRHostPanel - H-6d (2026-05-02)
 // Hosts the editor for the BaySickNAMIRProcessor that lives on the owning
 // BaySickVocalProcessor (NOT a separately-owned instance, so state save/load
 // goes through the parent processor's getStateInformation -> NamIrState
@@ -65,7 +65,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HostPanel — wraps an externally-owned child component so the editor can
+// HostPanel - wraps an externally-owned child component so the editor can
 // inject things like the strip's Pre Rack EQ display into a sub-tab without
 // taking ownership.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ public:
         {
             g.setColour (juce::Colours::white.withAlpha (0.55f));
             g.setFont (juce::Font (14.0f));
-            g.drawText ("(Pre Rack EQ — available when this Vox tab has a strip on the mixer)",
+            g.drawText ("(Pre Rack EQ - available when this Vox tab has a strip on the mixer)",
                         getLocalBounds(), juce::Justification::centred);
         }
     }
@@ -103,7 +103,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PlaceholderPanel — used by the 4 sub-tabs whose content lands in follow-ups
+// PlaceholderPanel - used by the 4 sub-tabs whose content lands in follow-ups
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickVocalEditor::PlaceholderPanel : public juce::Component
 {
@@ -134,7 +134,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickVocalsPanel — realtime pitch correction + page-wide controls
+// BaySickVocalsPanel - realtime pitch correction + page-wide controls
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickVocalEditor::BaySickVocalsPanel : public juce::Component,
                                                 private juce::Timer
@@ -388,7 +388,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VocalChainPanel — H-6c (2026-05-01)
+// VocalChainPanel - H-6c (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 // Hosts 4 SlotComponents bound to BaySickVocalProcessor's mVocalChainRack.
 // Slots are locked (cannot be swapped / removed / reordered) -- they're

@@ -210,7 +210,7 @@ void BaySickGuitarsProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // 2026-05-06 DSP gate: skip the renderBlock entirely when sfizz has no
     // active voices (no notes playing, no release tail, no sustain-held
     // voices).  MIDI was already dispatched above, so any fresh note-on this
-    // block bumps the active-voice count above zero — we won't skip in that
+    // block bumps the active-voice count above zero - we won't skip in that
     // case.  Saves ~all the per-block sfizz overhead on Inst tabs that aren't
     // currently producing notes.  Mono fallback path also benefits: buffer
     // was just cleared, leaving channel 0 silent matches the mono mix of
@@ -246,7 +246,7 @@ void BaySickGuitarsProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     else
     {
         // Mono fallback: 0.5×L + 0.5×R into channel 0 via two addFrom calls
-        // (copyFrom has no 7-arg gain overload — only addFrom does).
+        // (copyFrom has no 7-arg gain overload - only addFrom does).
         buffer.addFrom (0, 0, mRenderScratch, 0, 0, numFrames, 0.5f);
         buffer.addFrom (0, 0, mRenderScratch, 1, 0, numFrames, 0.5f);
     }
@@ -295,7 +295,7 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
                 }
                 else if (t.startsWithIgnoreCase ("label_cc"))
                 {
-                    // Format: `label_cc<N>=<text>` — text runs to end-of-line,
+                    // Format: `label_cc<N>=<text>` - text runs to end-of-line,
                     // unquoted.  Used by ARIA hosts as the parameter's display
                     // name; we mirror that in tooltip + automation menu labels.
                     const int eq = t.indexOfChar ('=');
@@ -331,7 +331,7 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
     }
     // K-5 fix (2026-05-05): reset every CC to 0 before applying the kit's
     // set_cc overrides.  Without this, switching programs leaks values from
-    // the previous kit — e.g. user adjusts CC100 on Green to 90, switches to
+    // the previous kit - e.g. user adjusts CC100 on Green to 90, switches to
     // Black (which never set_cc100), CC100 stays at 90 from Green's session.
     // The reset hits sfizz too via setValueNotifyingHost → parameterChanged.
     for (int cc = 0; cc < kCcCount; ++cc)
@@ -341,7 +341,7 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
             p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (0.0f));
     }
 
-    // Push kit defaults through APVTS — drives the parameterChanged listener
+    // Push kit defaults through APVTS - drives the parameterChanged listener
     // which forwards each value to sfizz.  Overrides the 0 reset above for
     // CCs the kit author explicitly set.
     for (auto& [cc, val] : kitDefaults)

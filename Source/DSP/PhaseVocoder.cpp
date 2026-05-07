@@ -104,7 +104,7 @@ int PhaseVocoder::pull (juce::AudioBuffer<float>& out,
         {
             const int physIdx = (c.outReadAbs + i) % outBufSize;
             dst[i] = c.outBuf[physIdx];
-            c.outBuf[physIdx] = 0.0f;  // clear after read — essential for OLA correctness
+            c.outBuf[physIdx] = 0.0f;  // clear after read - essential for OLA correctness
         }
 
         c.outReadAbs += toPull;
@@ -183,7 +183,7 @@ void PhaseVocoder::processFrame()
         }
 
         // ── 4. Hermitian symmetry (required for real-valued IFFT output) ──
-        mFftA[0]            = { mFftA[0].real(), 0.0f };                // DC — real only
+        mFftA[0]            = { mFftA[0].real(), 0.0f };                // DC - real only
         mFftA[kFFTSize / 2] = { mFftA[kFFTSize / 2].real(), 0.0f };    // Nyquist
         for (int k = 1; k < kFFTSize / 2; ++k)
             mFftA[kFFTSize - k] = std::conj (mFftA[k]);

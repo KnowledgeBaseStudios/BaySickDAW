@@ -157,7 +157,7 @@ BaySickSynthEditor::BaySickSynthEditor (BaySickSynthProcessor& p)
     initLabel (mVelAmpLbl,  "VEL");
     addAndMakeVisible (mVelAmpLbl);
 
-    // Pitch envelope — second row on OSC ENV tab
+    // Pitch envelope - second row on OSC ENV tab
     initVSlider (mPEnvASlider, "Pitch Env Attack");
     initVSlider (mPEnvDSlider, "Pitch Env Decay");
     initVSlider (mPEnvSSlider, "Pitch Env Sustain");
@@ -621,7 +621,7 @@ void BaySickSynthEditor::layoutOscDeck (juce::Rectangle<int> deck)
 
     mCutSelfBtn.setBounds (vInner.getX(), vInner.getY() + ledH + vGap, vInner.getWidth(), cutH);
 
-    // Slide + Out Vol — split the remaining vertical space horizontally.
+    // Slide + Out Vol - split the remaining vertical space horizontally.
     // Two knobs side-by-side, each centered in its half-column with its own label.
     const int knobsTop = vInner.getY() + ledH + vGap + cutH + vGap;
     const int knobsH   = vInner.getBottom() - knobsTop;
@@ -803,12 +803,12 @@ void BaySickSynthEditor::layoutLFODeck (juce::Rectangle<int> deck)
 
 void BaySickSynthEditor::layoutModDeck (juce::Rectangle<int> deck)
 {
-    // MOD deck (Option C) — 8-column grid.
-    //   Col 1:   NOISE (toggle + colour)             — P3.3 / P3.9
-    //   Col 2-3: TRANSIENT (3 knobs)                  — P3.5
-    //   Col 4-5: BURST ENV (toggle + 2 knobs)         — P3.6
-    //   Col 6:   DRIFT (1 knob)                       — P3.10
-    //   Col 7-8: UNISON (3 knobs)                     — P3.11
+    // MOD deck (Option C) - 8-column grid.
+    //   Col 1:   NOISE (toggle + colour)             - P3.3 / P3.9
+    //   Col 2-3: TRANSIENT (3 knobs)                  - P3.5
+    //   Col 4-5: BURST ENV (toggle + 2 knobs)         - P3.6
+    //   Col 6:   DRIFT (1 knob)                       - P3.10
+    //   Col 7-8: UNISON (3 knobs)                     - P3.11
     const int colW = deck.getWidth() / 8;
 
     // Col 1: NOISE group (toggle + colour selector)
@@ -844,7 +844,7 @@ void BaySickSynthEditor::layoutModDeck (juce::Rectangle<int> deck)
     placeKnob (mTransDurKnob, mTransDurLbl, 1, tInner, kW3);
     placeKnob (mTransColKnob, mTransColLbl, 2, tInner, kW3);
 
-    // Col 4-5: BURST ENV — button on top, 2 knobs below
+    // Col 4-5: BURST ENV - button on top, 2 knobs below
     auto burstArea = deck.withX (deck.getX() + colW * 3).withWidth (colW * 2).reduced (kPad);
     mBurstGroup.setBounds (burstArea);
     auto bInner = burstArea.reduced (4, kGrpTop);
@@ -969,7 +969,7 @@ void BaySickSynthEditor::setActiveTab (int tab)
     for (int i = 0; i < 6; ++i) showDeck (i, false);
     showDeck (mActiveTab, true);
     updateTabButtons();
-    // MOD tab isn't in the visualizer's rotation — clamp to 4 (LFO) so the
+    // MOD tab isn't in the visualizer's rotation - clamp to 4 (LFO) so the
     // scrolling LFO display stays active there too.
     mVisualizer.setActiveTab (juce::jlimit (0, 4, mActiveTab));
     resized();
@@ -995,7 +995,7 @@ juce::File BaySickSynthEditor::presetsDir() const
                .getChildFile ("BaySickDAW/Presets/BaySickSynth");
 }
 
-// Recursive XML-preset walker — folders become real cascading submenus.
+// Recursive XML-preset walker - folders become real cascading submenus.
 static void addSynthPresetDirToMenu (juce::PopupMenu& menu,
                                       const juce::File& dir,
                                       std::function<void(const juce::File&)> onSelect)

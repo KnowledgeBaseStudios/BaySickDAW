@@ -3,18 +3,18 @@
 #include "BaySickVocalProcessor.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickVocalEditor — Phase H-6 (2026-05-01)
+// BaySickVocalEditor - Phase H-6 (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
 // Stretch-to-fill editor for BaySickVocalProcessor.  Five sub-tabs:
-//   1. BaySickVocals  — realtime pitch correction + page-wide controls
-//   2. Vocal Chain    — De-esser / Compressor / Saturation / Limiter rack
-//   3. BaySickPitch   — Newtone-clone offline pitch editor    [placeholder]
-//   4. BaySickAlign   — VocAlign-clone offline alignment      [placeholder]
-//   5. BaySickNAM/IR  — existing engine hosted as sub-tab     [placeholder; G-9]
+//   1. BaySickVocals  - realtime pitch correction + page-wide controls
+//   2. Vocal Chain    - De-esser / Compressor / Saturation / Limiter rack
+//   3. BaySickPitch   - Newtone-clone offline pitch editor    [placeholder]
+//   4. BaySickAlign   - VocAlign-clone offline alignment      [placeholder]
+//   5. BaySickNAM/IR  - existing engine hosted as sub-tab     [placeholder; G-9]
 //
 // J-6 EQ unification (2026-05-03): the former 6th "Pre Rack EQ" tab is
 // removed.  Pre + post EQ for this strip live exclusively on the Effects
-// page (mixer_vox_<N>_preeq_* / mixer_vox_<N>_*) — same as every other
+// page (mixer_vox_<N>_preeq_* / mixer_vox_<N>_*) - same as every other
 // strip type.
 // ─────────────────────────────────────────────────────────────────────────────
 

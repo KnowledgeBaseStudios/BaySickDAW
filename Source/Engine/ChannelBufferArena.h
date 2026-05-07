@@ -28,7 +28,7 @@
 // Lifetime
 // --------
 // Constructed in PluginProcessor as a value member. prepare() (re)allocates
-// when the host changes block size. releaseResources is a no-op — the arena
+// when the host changes block size. releaseResources is a no-op - the arena
 // stays alive for the plugin's lifetime to avoid allocator churn during
 // sample-rate / buffer-size transitions.
 class ChannelBufferArena

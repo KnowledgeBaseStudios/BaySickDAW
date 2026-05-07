@@ -135,7 +135,7 @@ void BaySickRustyDrumsPage::buildPlayerTab()
     // dimmed background placeholder; after a program loads, it renders the
     // kit's prebuilt GUI XML (knobs + labels + option menus + background art).
     // K-5 (2026-05-05): build the engine-agnostic binding for the panel.
-    // Closures captured by value — engine pointer is null until loadKit
+    // Closures captured by value - engine pointer is null until loadKit
     // succeeds, after which the panel re-binds via setEngine() below.
     auto* engine = mProcessor.getBaySickRustyDrums();
     AriaControlPanel::Binding binding;
@@ -191,7 +191,7 @@ bool BaySickRustyDrumsPage::reloadForProjectRestore (const juce::File& sfzPath)
     // loadKit forwards to mProcessor.loadBaySickRustyDrumsKit (which is the
     // active-flag-protected path) AND fires onKitLoaded so the mixer strips
     // spawn alongside the just-created InsertNodes.  Do NOT call the wrapper
-    // directly — that path skips the kit-graphic + onKitLoaded plumbing.
+    // directly - that path skips the kit-graphic + onKitLoaded plumbing.
     if (! loadKit (sfzPath))
         return false;
 
@@ -342,7 +342,7 @@ void BaySickRustyDrumsPage::savePlayerPresetAs()
             // J-11 fix (2026-05-05): capture which program (Full / Basic) was
             // loaded when the preset was saved.  Without this, loading a
             // preset saved on Full while Basic is active would only apply the
-            // CCs Basic happens to share — Full-only knob values would write
+            // CCs Basic happens to share - Full-only knob values would write
             // to APVTS but never reach a visible control, so the user would
             // see "only the Basic controls" with their saved Full-program
             // configuration silently lost.
@@ -386,7 +386,7 @@ void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
 
     // J-11 fix (2026-05-05): read the program the preset was saved on (if
     // recorded) so we can switch to it before applying CCs.  Older presets
-    // (pre-fix) won't have this element — we apply on the current program.
+    // (pre-fix) won't have this element - we apply on the current program.
     Program presetProgram = Program::None;
     if (auto* pe = parsed->getChildByName ("Program"))
     {
@@ -440,7 +440,7 @@ void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
         return;
     }
 
-    // Active program differs — same destructive switch as picking a new
+    // Active program differs - same destructive switch as picking a new
     // program from the dropdown.  Confirm before wiping mixer + piano roll.
     juce::Component::SafePointer<BaySickRustyDrumsPage> safe (this);
     juce::AlertWindow::showOkCancelBox (
@@ -485,12 +485,12 @@ void BaySickRustyDrumsPage::onProgramComboChanged()
 
     if (mCurrentProgram == Program::None)
     {
-        // First load — no confirm prompt, nothing to lose.
+        // First load - no confirm prompt, nothing to lose.
         loadProgram (target);
         return;
     }
 
-    // Subsequent switch — confirm prompt; revert dropdown on cancel.
+    // Subsequent switch - confirm prompt; revert dropdown on cancel.
     promptAndSwitchProgram (target);
 }
 
@@ -571,7 +571,7 @@ void BaySickRustyDrumsPage::tearDownCurrentProgram()
 
     // J-8 stage 2 (2026-05-04): clear UI widgets BEFORE the engine is freed.
     // The ARIA panel's AriaKnob / AriaOptionMenu widgets hold SliderParameter
-    // Attachments rooted in the engine's APVTS — destructing them after the
+    // Attachments rooted in the engine's APVTS - destructing them after the
     // engine is gone is a use-after-free.  Same logic for the kit graphic
     // (which holds a raw engine pointer for hi-hat pedal state).
     if (mKitGraphic) { mKitGraphic->setEngine (nullptr); mKitGraphic->setKitLoaded (false); }

@@ -185,7 +185,7 @@ void PatternManager::setAudioLibraryChokeGroup(int idx, int group)
 // ── Automation template library ─────────────────────────────────────────────
 void PatternManager::addAutomationTemplate(const AutomationLane& lane)
 {
-    // Dedupe by paramId — one template per parameter.
+    // Dedupe by paramId - one template per parameter.
     for (const auto& t : mAutomationTemplates)
         if (t.paramId == lane.paramId && lane.paramId.isNotEmpty()) return;
     mAutomationTemplates.push_back(lane);
@@ -518,7 +518,7 @@ double PatternManager::getEffectivePatternLoopBeats() const
     // C.5b (post-revert): pattern owns its TS.  Bar length in PPQ = pattern's
     // own bpb (4/4 = 4, 3/4 = 3, 6/8 = 3, 7/8 = 3.5).  Builder grid is
     // uniform 4-beat-per-bar separately (song-level TS markers are decorative
-    // only) — but pattern playback length is in pattern-bars, each pat-bpb wide.
+    // only) - but pattern playback length is in pattern-bars, each pat-bpb wide.
     if (mPatterns.empty() || mCurrentPattern < 0 || mCurrentPattern >= (int) mPatterns.size())
         return 4.0;   // safe fallback when no patterns loaded
     const auto&  pat          = mPatterns[(size_t) mCurrentPattern];
@@ -539,7 +539,7 @@ double PatternManager::getEffectivePatternLoopBeats() const
     // C.5b: default loop = 1 pattern-bar (kMinBeats).  Note-end + step-end
     // priorities below extend when content exists.  Block-driven priority
     // dropped because Builder bars are uniform 4-beat while patterns play at
-    // their intrinsic TS — mixing units broke 7/4 → 3/4 transitions.
+    // their intrinsic TS - mixing units broke 7/4 → 3/4 transitions.
     double loopBeats = kMinBeats;
 
     // ── Priority 2: furthest note end in any roll, ceiled to bar boundary ────
@@ -561,7 +561,7 @@ double PatternManager::getEffectivePatternLoopBeats() const
         // G-4 (2026-04-28): Vox + Inst rolls likewise.
         for (auto& roll : pat.voxRoll)   scanRoll(roll);
         for (auto& roll : pat.instRoll)  scanRoll(roll);
-        // J-7b (2026-05-04): BaySickRustyDrums singleton roll likewise — without
+        // J-7b (2026-05-04): BaySickRustyDrums singleton roll likewise - without
         // this scan, multi-bar drum patterns wrap at the 1-bar minimum instead
         // of the longest note's end.
         scanRoll(pat.baySickRustyDrumsRoll);
@@ -573,7 +573,7 @@ double PatternManager::getEffectivePatternLoopBeats() const
     // ── Priority 3: extend to cover any active basic-sequence steps ───────────
     // The step index = (ppqPos / stepLen) % totalSteps, wrapping with mLoopBeats.
     // If active steps exist beyond the current loop length, extend so they fire.
-    // C.5b: stepLen still uses 4-beat-per-bar reference for stepsPerBar — the
+    // C.5b: stepLen still uses 4-beat-per-bar reference for stepsPerBar - the
     // basic step grid is grid-based, not TS-based.  This is consistent with
     // how step grids work in FL-style sequencers.
     {
@@ -614,7 +614,7 @@ bool PatternManager::isComplexSequenceActive() const
 // ── Serialisation ─────────────────────────────────────────────────────────────
 // Project-persistence Phase P1 (2026-04-23): full round-trip for every field on
 // Pattern / PatternManager.  Schema is versioned via the "version" property on
-// the root PatternManager node — bumps happen when we break backward compat.
+// the root PatternManager node - bumps happen when we break backward compat.
 // Missing-attr reads always fall back to struct-default values so older files
 // load forward without data corruption.
 namespace
@@ -767,7 +767,7 @@ juce::ValueTree PatternManager::toValueTree() const
     mixNode.setProperty("audioClipsBusPan",   mMixer.audioClipsBusPan,   nullptr);
     mixNode.setProperty("audioClipsBusMute",  mMixer.audioClipsBusMute,  nullptr);
     mixNode.setProperty("audioClipsBusSolo",  mMixer.audioClipsBusSolo,  nullptr);
-    // Per-drum-row + per-audio-row arrays — pack as CSV strings for compactness
+    // Per-drum-row + per-audio-row arrays - pack as CSV strings for compactness
     {
         juce::StringArray slot, span, aLv, aMu;
         for (int i = 0; i < MAX_DRUM_ROWS;          ++i) { slot.add(juce::String(mMixer.drumSlotLevel[i]));
@@ -837,7 +837,7 @@ juce::ValueTree PatternManager::toValueTree() const
             pNode.addChild(n, -1, nullptr);
         }
 
-        // Per-page PageSequenceData — now writes basic+complex grids + full envelopes
+        // Per-page PageSequenceData - now writes basic+complex grids + full envelopes
         auto savePageSeq = [&](const juce::String& tag, const PageSequenceData& seq)
         {
             juce::ValueTree seqNode(tag);
@@ -856,7 +856,7 @@ juce::ValueTree PatternManager::toValueTree() const
             seqNode.setProperty("cEnvR",        seq.complexEnv.release_, nullptr);
             seqNode.setProperty("cSwing",       seq.complexEnv.swing,    nullptr);
             seqNode.setProperty("cTriplet",     seq.complexEnv.triplet,  nullptr);
-            // Basic + complex grids — only rows/steps that have non-default content.
+            // Basic + complex grids - only rows/steps that have non-default content.
             for (int r = 0; r < MAX_DRUM_SOUNDS; ++r)
             {
                 bool anyActive = false;
@@ -906,7 +906,7 @@ juce::ValueTree PatternManager::toValueTree() const
         savePageSeq("BassSeq",  p.bassSeq);
         savePageSeq("DrumSeq",  p.drumSeq);
 
-        // Piano-roll notes — layerRoll[0..7], bassRoll[0..kMaxBassPages-1], drumRoll
+        // Piano-roll notes - layerRoll[0..7], bassRoll[0..kMaxBassPages-1], drumRoll
         juce::ValueTree rollsNode("Rolls");
         for (int i = 0; i < (int)p.layerRoll.size(); ++i)
         {
@@ -931,7 +931,7 @@ juce::ValueTree PatternManager::toValueTree() const
             rollsNode.addChild(rn, -1, nullptr);
         }
         // G-3 (2026-04-28): per-clip piano rolls.  Mirrors the DrumPageRoll
-        // pattern — only non-empty rolls are persisted; on load, missing
+        // pattern - only non-empty rolls are persisted; on load, missing
         // entries default to empty so old projects without ClipPageRoll tags
         // round-trip cleanly.
         for (int i = 0; i < (int)p.clipRoll.size(); ++i)
@@ -942,7 +942,7 @@ juce::ValueTree PatternManager::toValueTree() const
             rollsNode.addChild(rn, -1, nullptr);
         }
         // G-4 (2026-04-28): per-Vox / per-Inst piano rolls.  Same idempotent
-        // pattern as Clips — only non-empty rolls saved.
+        // pattern as Clips - only non-empty rolls saved.
         for (int i = 0; i < (int)p.voxRoll.size(); ++i)
         {
             if (p.voxRoll[i].notes.empty()) continue;

@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): shared APVTS-prefix substitution for binary engine state.
 //
-// When duplicating a page (Clips / Vox / Inst — and conceptually Layers /
+// When duplicating a page (Clips / Vox / Inst - and conceptually Layers /
 // Bass / Drum, though those have their own auto-detecting helpers), the
 // destination page's APVTS uses a different per-tab prefix from the source
 // (e.g. "clip_5_" vs "clip_3_").  setStateInformation() matches by id, so

@@ -3,7 +3,7 @@
 #include "DSPBase.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WahStyleDSP — Phase I-10 (2026-05-03)
+// WahStyleDSP - Phase I-10 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // PW Style Wah pedal.  Resonant bandpass filter swept by a Pedal Position
 // knob (mappable via I-3 MIDI Learn for expression-pedal control + the

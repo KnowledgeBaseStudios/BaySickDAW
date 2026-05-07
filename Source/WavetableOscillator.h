@@ -29,7 +29,7 @@ public:
 private:
     using Frame = std::vector<float>;
 
-    // Heap-allocated — no stack overflow risk
+    // Heap-allocated - no stack overflow risk
     std::vector<Frame> mFrames;
     std::vector<float> mUnisonPhases;
     std::vector<float> mUnisonDeltas;

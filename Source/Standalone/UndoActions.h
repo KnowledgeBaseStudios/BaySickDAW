@@ -21,13 +21,13 @@ struct UndoContext
     // history-label list maintained by StandaloneEditor.
     std::function<bool(juce::UndoableAction*, const juce::String& label)> perform;
 
-    // Undo / redo — ALWAYS use these instead of calling manager->undo/redo() directly.
+    // Undo / redo - ALWAYS use these instead of calling manager->undo/redo() directly.
     // These route through StandaloneEditor::globalUndo/Redo() so mHistoryCursor stays
     // in sync and the history window refreshes correctly.
     std::function<void()> undo;
     std::function<void()> redo;
 
-    // Open the global undo history window (optional — wire where available).
+    // Open the global undo history window (optional - wire where available).
     std::function<void()> showHistory;
 
     bool isValid() const { return manager != nullptr && (bool)perform; }
@@ -185,7 +185,7 @@ public:
     using SlotSnapshots = std::array<SlotSnapshot, EffectRack::kNumSlots>;
     using ApplyFn       = std::function<void(const SlotSnapshots&)>;
 
-    // Legacy alias kept for now — type-only snapshot.  D.2 extends call sites
+    // Legacy alias kept for now - type-only snapshot.  D.2 extends call sites
     // to use SlotSnapshots directly.
     using SlotTypes = std::array<EffectType, EffectRack::kNumSlots>;
 

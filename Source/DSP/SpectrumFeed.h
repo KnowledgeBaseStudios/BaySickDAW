@@ -18,7 +18,7 @@ struct SpectrumFeed
 {
     static constexpr int kSize = 1024;
 
-    // Audio thread — called every block.
+    // Audio thread - called every block.
     void push(const float* src, int n)
     {
         mSeq.fetch_add(1, std::memory_order_release);   // odd  = writing
@@ -27,8 +27,8 @@ struct SpectrumFeed
         mSeq.fetch_add(1, std::memory_order_release);   // even = done
     }
 
-    // UI thread (30 Hz timer) — copies into caller's buffer.
-    // Returns false if audio was writing mid-copy (frame dropped — fine for a visualiser).
+    // UI thread (30 Hz timer) - copies into caller's buffer.
+    // Returns false if audio was writing mid-copy (frame dropped - fine for a visualiser).
     bool poll(float* outData, int& outCount)
     {
         uint32_t s1 = mSeq.load(std::memory_order_acquire);

@@ -57,7 +57,7 @@ void VibePlayerProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     mSynth.renderNextBlock (buffer, midi);
 
-    // Flush NaN/Inf — prevents Windows WASAPI from permanently silencing the device.
+    // Flush NaN/Inf - prevents Windows WASAPI from permanently silencing the device.
     for (int c = 0; c < buffer.getNumChannels(); ++c)
     {
         float* d = buffer.getWritePointer (c);

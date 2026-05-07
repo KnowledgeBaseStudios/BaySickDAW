@@ -474,7 +474,7 @@ void EEAutomationGrid::drawNodes(Graphics& g) const
         }
         else
         {
-            // Hollow — filled with dark bg
+            // Hollow - filled with dark bg
             g.setColour(kGridBgEE);
             g.fillEllipse(x - r + 1.5f, y - r + 1.5f, (r - 1.5f) * 2.f, (r - 1.5f) * 2.f);
         }
@@ -506,7 +506,7 @@ int EEAutomationGrid::hitTestCurveHandle(float px, float py) const
         const ControlPoint& p0 = sv[i].first;
         const ControlPoint& p1 = sv[i + 1].first;
         if (p0.curveType == CurveType::Stepped) continue;
-        if (std::abs(p0.value01 - p1.value01) < 0.02f) continue; // flat — no handle
+        if (std::abs(p0.value01 - p1.value01) < 0.02f) continue; // flat - no handle
 
         {
             float span = p1.timeTicks - p0.timeTicks;
@@ -1210,7 +1210,7 @@ EventEditorContent::EventEditorContent(VibeSynthProcessor& p, UndoManager& um)
     mGrid->onChanged = [this] { updateValueDisplay(); };
     addAndMakeVisible(*mGrid);
 
-    // Browser pane — lists all automation blocks from the Builder grid
+    // Browser pane - lists all automation blocks from the Builder grid
     mBrowserPane = std::make_unique<AutomationBrowserPane>();
     mBrowserPane->onBlockSelected = [this](int blockIdx) {
         if (!mPM || blockIdx < 0 || blockIdx >= mPM->getNumBlocks()) return;
@@ -1391,7 +1391,7 @@ void EventEditorContent::updateToolButtonStates()
             mToolBtns[i]->setToggleState(toolOrder[i] == tool, juce::dontSendNotification);
 }
 
-// 5F-5: clear all control points in the current lane — single flat point at 0.5.
+// 5F-5: clear all control points in the current lane - single flat point at 0.5.
 void EventEditorContent::doDeleteAutomationPoints()
 {
     if (!mPM || mBlockIdx < 0 || mBlockIdx >= mPM->getNumBlocks()) return;
@@ -1519,7 +1519,7 @@ void EventEditorContent::resized()
         mAutoTab->setBounds(topRow.removeFromLeft(60).reduced(2, 4));
         mLFOTab ->setBounds(topRow.removeFromLeft(60).reduced(2, 4));
 
-        // LFO knobs (only visible in LFO mode) — 64px each
+        // LFO knobs (only visible in LFO mode) - 64px each
         if (mInLFOMode)
         {
             mMinKnob ->setBounds(topRow.removeFromLeft(64).reduced(2, 2));
@@ -1661,7 +1661,7 @@ void EventEditorContent::menuItemSelected(int id, int /*topIdx*/)
 {
     switch (id)
     {
-        case 101: // Close — find parent EventEditor window
+        case 101: // Close - find parent EventEditor window
             if (auto* ew = findParentComponentOfClass<EventEditor>())
                 ew->closeButtonPressed();
             break;
@@ -1802,7 +1802,7 @@ void EventEditorContent::doImportMidi()
             if (clipDuration < 0.001) clipDuration = 1.0;
 
             // Collect all CC messages (any CC number, any channel)
-            // Group by CC number — ask user which to import
+            // Group by CC number - ask user which to import
             std::map<int, std::vector<std::pair<double,int>>> ccData; // cc# → [(time, value)]
             for (int t = 0; t < midiFile.getNumTracks(); ++t)
             {

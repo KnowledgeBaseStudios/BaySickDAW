@@ -3,19 +3,19 @@
 #include "DSPBase.h"
 #include <memory>
 
-// ── OverdriveDSP — 5F-9 §6 DSP quality pass ──────────────────────────────────
+// ── OverdriveDSP - 5F-9 §6 DSP quality pass ──────────────────────────────────
 //
 // Algorithm chain (stereo, per block):
-//   1. Pre BPF (TPT SVF) — 2nd-order bandpass at Color Hz, Q from PreBand.
+//   1. Pre BPF (TPT SVF) - 2nd-order bandpass at Color Hz, Q from PreBand.
 //      Only the filtered band is distorted; residual stays clean.
-//   2. Waveshaper — atan(PreAmp · (x100?100:1) · band) / (π/2)
+//   2. Waveshaper - atan(PreAmp · (x100?100:1) · band) / (π/2)
 //                   Processed at 4× via juce::dsp::Oversampling (IIR polyphase,
 //                   low-latency). Reduces aliasing on x100 especially.
-//   3. Recombine  — shaped_band + clean_residual
-//   4. Post LPF (TPT SVF) — 2nd-order Butterworth at PostFilter Hz
-//   5. PostGain   — dB trim
-//   6. Hard clip  — ±1.0 protection for ×100 blow-up
-//   7. 5 Hz DC blocker — strips DC injected by asymmetric shaping at high drive
+//   3. Recombine  - shaped_band + clean_residual
+//   4. Post LPF (TPT SVF) - 2nd-order Butterworth at PostFilter Hz
+//   5. PostGain   - dB trim
+//   6. Hard clip  - ±1.0 protection for ×100 blow-up
+//   7. 5 Hz DC blocker - strips DC injected by asymmetric shaping at high drive
 //   8. Legacy wet/dry mix
 //
 // Parameters PreAmp / Color / PostFilter / PostGain are smoothed (15-30 ms) to
@@ -116,8 +116,8 @@ private:
 
     // ── 4× oversampler around the shaper (stereo) ────────────────────────────
     std::unique_ptr<juce::dsp::Oversampling<float>> mOversampler;
-    juce::AudioBuffer<float> mBandBuf;     // stereo, mMaxBlock — band pre-shaper
-    juce::AudioBuffer<float> mResidualBuf; // stereo, mMaxBlock — x - band
+    juce::AudioBuffer<float> mBandBuf;     // stereo, mMaxBlock - band pre-shaper
+    juce::AudioBuffer<float> mResidualBuf; // stereo, mMaxBlock - x - band
     int  mLatencySamples { 0 };
 
     // ── 5 Hz DC-blocker state (post-clip, pre-wet/dry) ───────────────────────

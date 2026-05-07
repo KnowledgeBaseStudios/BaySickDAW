@@ -19,7 +19,7 @@ BaySickRustyDrumsProcessor::BaySickRustyDrumsProcessor()
     mSfizz->setSampleRate     (static_cast<float>(mSampleRate));
     mSfizz->setSamplesPerBlock (mMaxBlockSize);
     // 2026-05-06 memory: see BaySickGuitars for rationale.  Drum kits hit
-    // their preload less than melodic kits (samples are short — full file
+    // their preload less than melodic kits (samples are short - full file
     // often within preload, retriggers don't extend tail), so this also has
     // less risk on Rusty than on long-sustained guitar/bass content.
     mSfizz->setPreloadSize (4096);
@@ -118,7 +118,7 @@ BaySickRustyDrumsProcessor::createLayout()
     // sfizz uses internally) instead of 64.  Kit-author `set_cc<N>=<int>`
     // directives override during loadKit.  Without this, sliders for CCs
     // the kit doesn't explicitly set sit at midpoint visually but sfizz
-    // hears 0 internally — visual mismatch.
+    // hears 0 internally - visual mismatch.
     // 2026-05-05 audit: range lifted to kCcCount=512 so kit "extended CCs"
     // >= 128 (e.g. Big Rusty Drums CC400/401) get APVTS-bound the same way.
     // IDs `brd_cc0..(kCcCount-1)`.
@@ -233,7 +233,7 @@ void BaySickRustyDrumsProcessor::processStrips (int numFrames, juce::MidiBuffer&
 
     // 2026-05-06 DSP gate: skip the multi-out renderBlock when sfizz has no
     // active voices.  Buffer was just cleared so per-strip views read
-    // silence — same effective output, but skipping the per-piece SFZ
+    // silence - same effective output, but skipping the per-piece SFZ
     // routing + voice scan is a sizable win for Rusty (13 strips).
     if (mSfizz->getNumActiveVoices() == 0)
         return;
@@ -312,7 +312,7 @@ void BaySickRustyDrumsProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 //   Kick, Snare, Tom 22, Tom 18, Tom 15, Tom 14, Hi-hat, Ride 22,
 //   Ride Sizzle 19, Crash 17, Crash Sizzle 17, China 18, Stack
 //
-// Detection is purely lexical on filenames — does NOT parse SFZ contents.
+// Detection is purely lexical on filenames - does NOT parse SFZ contents.
 // Cheap, deterministic, and easy to verify against the on-disk listing.
 namespace
 {
@@ -320,7 +320,7 @@ struct SoundTypeRule
 {
     const char* stemPrefix;   // matches stripped filename (no `_map.sfz`) prefix
     const char* displayName;  // mixer-strip + piano-roll label
-    int         drummerOrder; // sort key — lower = lower in pitch / earlier in row order
+    int         drummerOrder; // sort key - lower = lower in pitch / earlier in row order
 };
 
 // Order of evaluation: more-specific prefixes BEFORE more-general (e.g.
@@ -387,14 +387,14 @@ BaySickRustyDrumsProcessor::discoverChannels (const juce::File& kitRoot,
             bucket.rule = rule;
             bucket.files.push_back (f.getFullPathName());
         }
-        // Unmatched masters are silently dropped — they're outside the rule
+        // Unmatched masters are silently dropped - they're outside the rule
         // table's coverage.  J-7 may revisit this if exotic kits arrive.
     }
 
     // J-8 (2026-05-04): program-include filter.  When a programSfzPath is given,
     // parse it for `#include "mappings/..."` lines and keep only the buckets
     // whose drummerOrder is referenced.  This is what makes Basic spawn 8 mixer
-    // strips instead of all 13 — Basic only `#include`s a subset of the
+    // strips instead of all 13 - Basic only `#include`s a subset of the
     // mappings (e.g. `snare_14_map_basic.sfz`, `tom_14_map_basic.sfz`).
     // Variants (`<piece>_map_<articulation>.sfz`) classify against the same
     // stemPrefix rules as the master, so they correctly indicate the piece.
@@ -455,7 +455,7 @@ BaySickRustyDrumsProcessor::discoverChannels (const juce::File& kitRoot,
         // Use the FIRST file in the bucket as the canonical mapFilePath
         // (e.g. kick_24_map.sfz wins over kick_24_nodamp_map.sfz).  All
         // files in the bucket are still loaded by sfizz when the parent
-        // SFZ #include's them — the path here is informational, not a
+        // SFZ #include's them - the path here is informational, not a
         // load-driver.
         ch.mapFilePath = bucket.files.empty() ? juce::String() : bucket.files.front();
         ch.midiNote    = -1; // J-3 does not parse SFZ for trigger notes
@@ -480,7 +480,7 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
 
     // Discover channels FIRST so the wrapper builder knows the strip count
     // and drummer-order indices.  J-8 (2026-05-04): pass the program SFZ so
-    // discoverChannels filters to only the pieces this program references —
+    // discoverChannels filters to only the pieces this program references -
     // Basic spawns ~8 strips, Full spawns 13.
     mChannels = discoverChannels (kitRoot, sfzPath);
 
@@ -539,7 +539,7 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
                 }
                 else if (t.startsWithIgnoreCase ("label_cc"))
                 {
-                    // Format: `label_cc<N>=<text>` — text runs to end-of-line,
+                    // Format: `label_cc<N>=<text>` - text runs to end-of-line,
                     // unquoted.  Used by ARIA hosts as the parameter's display
                     // name; we mirror that in tooltip + automation menu labels.
                     const int eq = t.indexOfChar ('=');
@@ -583,7 +583,7 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
             p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (0.0f));
     }
 
-    // Push kit defaults through APVTS — this drives the parameterChanged
+    // Push kit defaults through APVTS - this drives the parameterChanged
     // listener which forwards each value to sfizz.  `gestureSetValue` would
     // be wrong here (would clobber project-restore state); use the ranged
     // setter which respects the host's parameter pipeline.
@@ -728,7 +728,7 @@ BaySickRustyDrumsProcessor::buildOutputRoutedSfzWrapper (const juce::File& sfzPa
                 continue;
             }
 
-            // Non-piece include (keymap, hihat_cc_ranges, curves) — keep as-is.
+            // Non-piece include (keymap, hihat_cc_ranges, curves) - keep as-is.
             out += raw + "\n";
             continue;
         }
