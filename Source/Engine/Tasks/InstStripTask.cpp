@@ -30,18 +30,60 @@ void InstStripTask::run()
     if (n <= 0)
         return;
 
-    // FilePlay branch: Batch 5 territory.  Until then, silence.
-    if (mIndex >= 0 && mIndex < (int) mProcessor->mInstFilePlayActive.size()
-        && mProcessor->mInstFilePlayActive[(size_t) mIndex])
-    {
-        mOutputBuffer->clear();
-        return;
-    }
-
     // Build per-block view.
     float* const* ptrs = mOutputBuffer->getArrayOfWritePointers();
     juce::AudioBuffer<float> blockView (ptrs, mOutputBuffer->getNumChannels(), n);
     blockView.clear();
+
+    // 2026-05-06 (Batch 9b Item 9): FilePlay branch — see VoxStripTask::run for
+    // rationale.  Audio clips routed to this Inst engine drive the chain via
+    // renderFilePlayPlayer (decode + engine + processInsert + write to mtDest).
+    if (mIndex >= 0 && mIndex < (int) mProcessor->mInstFilePlayActive.size()
+        && mProcessor->mInstFilePlayActive[(size_t) mIndex])
+    {
+        if (mCtx->posInfo == nullptr) return;
+        if (! mCtx->posInfo->getIsPlaying()) return;
+        if (mProcessor->mPatternManager == nullptr) return;
+        if (! mProcessor->mSongMode.load (std::memory_order_relaxed)) return;
+
+        juce::SpinLock::ScopedTryLockType tryLk (mProcessor->mAudioClipLock);
+        if (! tryLk.isLocked()) return;
+
+        const double bpm        = mCtx->bpm;
+        const double secPerBeat = 60.0 / juce::jmax (20.0, bpm);
+        const double beatStart  = mCtx->posInfo->getPpqPosition().orFallback (0.0);
+        const juce::int64 projectStart =
+            (juce::int64) (beatStart * secPerBeat * mProcessor->mSampleRate);
+        const juce::int64 projectEnd   = projectStart + n;
+
+        const auto& mx = mProcessor->mPatternManager->getMixer();
+        float masterGain = mx.masterLevel;
+        if (auto* p = mProcessor->apvts.getRawParameterValue ("masterGain"))
+            masterGain *= p->load();
+
+        VibeSynthProcessor::AudioClipBlockContext clipCtx;
+        clipCtx.bpm          = bpm;
+        clipCtx.anySolo      = mCtx->anySolo;
+        clipCtx.secPerBeat   = secPerBeat;
+        clipCtx.projectStart = projectStart;
+        clipCtx.projectEnd   = projectEnd;
+        clipCtx.numSamples   = n;
+        clipCtx.numOut       = blockView.getNumChannels();
+        clipCtx.masterGain   = masterGain;
+        clipCtx.mxState      = &mx;
+        clipCtx.clipScratch  = &mProcessor->mAudioClipScratch;   // see VoxStripTask note
+
+        juce::MidiBuffer  emptyMidi;
+        juce::MidiBuffer& engineMidi = (mCtx->instPageMidi != nullptr)
+            ? mCtx->instPageMidi[mIndex] : emptyMidi;
+
+        for (auto& player : mProcessor->mAudioClipPlayers)
+        {
+            if (player.routeChannel != channelId) continue;
+            mProcessor->renderFilePlayPlayer (player, clipCtx, engineMidi, &blockView);
+        }
+        return;
+    }
 
     // ── Source-mode detection ────────────────────────────────────────────────
     const bool guitarsActive = mProcessor->mGuitarsActive[(size_t) mIndex]

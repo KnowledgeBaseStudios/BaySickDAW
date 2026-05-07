@@ -30,22 +30,68 @@ void VoxStripTask::run()
     if (n <= 0)
         return;
 
-    // FilePlay branch: serial code skips this engine and lets the audio-
-    // clip loop drive it. In the parallel path, AudioInsertTask (Batch 5)
-    // will own that case. Until then write silence so any partial flag-flip
-    // doesn't double-render.
-    if (mIndex >= 0 && mIndex < (int) mProcessor->mVoxFilePlayActive.size()
-        && mProcessor->mVoxFilePlayActive[(size_t) mIndex])
-    {
-        mOutputBuffer->clear();
-        return;
-    }
-
     // Build a "this-block" view of the arena slot's storage at the host's
     // current numSamples, then start by zeroing the output region.
     float* const* ptrs = mOutputBuffer->getArrayOfWritePointers();
     juce::AudioBuffer<float> blockView (ptrs, mOutputBuffer->getNumChannels(), n);
     blockView.clear();
+
+    // 2026-05-06 (Batch 9b Item 9): FilePlay branch.  When an audio clip is
+    // routed to this Vox engine (player.routeChannel == channelId),
+    // VibeSynthProcessor::renderFilePlayPlayer decodes the clip + drives the
+    // engine + processInsert + writes to blockView (mtDest).  The live-input
+    // path below is skipped entirely.  Same path the serial Pass 1 loop
+    // uses, so the helper is exercised under flag=false.
+    if (mIndex >= 0 && mIndex < (int) mProcessor->mVoxFilePlayActive.size()
+        && mProcessor->mVoxFilePlayActive[(size_t) mIndex])
+    {
+        // Gate on song mode + playing + pattern manager (matches serial Pass 1).
+        if (mCtx->posInfo == nullptr) return;
+        if (! mCtx->posInfo->getIsPlaying()) return;
+        if (mProcessor->mPatternManager == nullptr) return;
+        if (! mProcessor->mSongMode.load (std::memory_order_relaxed)) return;
+
+        juce::SpinLock::ScopedTryLockType tryLk (mProcessor->mAudioClipLock);
+        if (! tryLk.isLocked()) return;   // contention this block — silence
+
+        const double bpm        = mCtx->bpm;
+        const double secPerBeat = 60.0 / juce::jmax (20.0, bpm);
+        const double beatStart  = mCtx->posInfo->getPpqPosition().orFallback (0.0);
+        const juce::int64 projectStart =
+            (juce::int64) (beatStart * secPerBeat * mProcessor->mSampleRate);
+        const juce::int64 projectEnd   = projectStart + n;
+
+        const auto& mx = mProcessor->mPatternManager->getMixer();
+        float masterGain = mx.masterLevel;
+        if (auto* p = mProcessor->apvts.getRawParameterValue ("masterGain"))
+            masterGain *= p->load();
+
+        VibeSynthProcessor::AudioClipBlockContext clipCtx;
+        clipCtx.bpm          = bpm;
+        clipCtx.anySolo      = mCtx->anySolo;
+        clipCtx.secPerBeat   = secPerBeat;
+        clipCtx.projectStart = projectStart;
+        clipCtx.projectEnd   = projectEnd;
+        clipCtx.numSamples   = n;
+        clipCtx.numOut       = blockView.getNumChannels();
+        clipCtx.masterGain   = masterGain;
+        clipCtx.mxState      = &mx;
+        // mAudioClipScratch is shared across tasks — race in MT mode but flag
+        // is constexpr false; future fix tracked alongside the AudioClipPlayer
+        // snapshot work in 9c.
+        clipCtx.clipScratch  = &mProcessor->mAudioClipScratch;
+
+        juce::MidiBuffer  emptyMidi;
+        juce::MidiBuffer& engineMidi = (mCtx->voxPageMidi != nullptr)
+            ? mCtx->voxPageMidi[mIndex] : emptyMidi;
+
+        for (auto& player : mProcessor->mAudioClipPlayers)
+        {
+            if (player.routeChannel != channelId) continue;
+            mProcessor->renderFilePlayPlayer (player, clipCtx, engineMidi, &blockView);
+        }
+        return;   // FilePlay handled; skip live-input + engine branch below
+    }
 
     // ── APVTS strip params ────────────────────────────────────────────────────
     auto& apvts = mProcessor->apvts;

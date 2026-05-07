@@ -640,6 +640,275 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
     }
 }
 
+// ── Batch 9b Item 9 (2026-05-06): renderFilePlayPlayer ───────────────────────
+// Decode + run the engine + insert + route for ONE FilePlay AudioClipPlayer.
+// Used by both the serial Pass 1 loop in processBlock and (when MT flips) by
+// VoxStripTask / InstStripTask FilePlay branches.  See header for invariants.
+bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             player,
+                                                 const AudioClipBlockContext& ctx,
+                                                 juce::MidiBuffer&            engineMidi,
+                                                 juce::AudioBuffer<float>*    mtDest)
+{
+    using int64 = juce::int64;
+
+    // ── Preconditions ────────────────────────────────────────────────────────
+    const int routeCh = player.routeChannel;
+    const bool isVoxRoute  = routeCh >= MixerChannelIds::kVoxBase
+                           && routeCh <  MixerChannelIds::kVoxBase + kMaxVoxPages;
+    const bool isInstRoute = routeCh >= MixerChannelIds::kInstBase
+                           && routeCh <  MixerChannelIds::kInstBase + kMaxInstPages;
+    if (! isVoxRoute && ! isInstRoute) return false;
+    if (player.streamer == nullptr)    return false;
+    if (mPatternManager == nullptr)    return false;
+    if (ctx.clipScratch == nullptr)    return false;
+    if (ctx.mxState     == nullptr)    return false;
+
+    const auto& mx = *ctx.mxState;
+    auto& clipScratch = *ctx.clipScratch;
+    const int   numSamples = ctx.numSamples;
+    const int   numOut     = ctx.numOut;
+    const double secPerBeat = ctx.secPerBeat;
+
+    // ── Clip-range + mute/choke checks (mirrors inline serial Pass 1) ────────
+    const int64 clipStart = (int64)(player.clipStartBeat * secPerBeat * mSampleRate);
+    const int64 clipEnd   = (int64)(player.clipEndBeat   * secPerBeat * mSampleRate);
+    if (ctx.projectEnd <= clipStart || ctx.projectStart >= clipEnd) return false;
+
+    const int   row      = player.trackRow;
+    const bool  inRange  = (row >= 0 && row < kMaxAudioRows);
+    const bool  rowMuted = inRange && mx.audioRowMute[(size_t) row];
+    const bool  builderRowMuted = ! mPatternManager->isRowAudible (row);
+
+    if (player.mutedByChoke)
+    {
+        if (inRange) mAudioRowPeakDbRun[(size_t) row].store (-60.0f, std::memory_order_relaxed);
+        return false;
+    }
+    if (rowMuted || builderRowMuted)
+    {
+        if (inRange) mAudioRowPeakDbRun[(size_t) row].store (-60.0f, std::memory_order_relaxed);
+        return false;
+    }
+
+    // ── Decode params ────────────────────────────────────────────────────────
+    const int   bufOffset    = (int) juce::jmax ((int64) 0, clipStart - ctx.projectStart);
+    const int64 outPosInClip = (ctx.projectStart + bufOffset) - clipStart;
+    const double readRatio   = player.fileSampleRate / mSampleRate;
+    const int64  filePos     = (int64)(outPosInClip * readRatio);
+
+    const int64 fileTotalSamples = player.streamer->getTotalLength();
+    if (filePos >= fileTotalSamples)
+    {
+        if (inRange) mAudioRowPeakDbRun[(size_t) row].store (-60.0f, std::memory_order_relaxed);
+        return false;
+    }
+
+    const double stretchRatio = (player.vocoder != nullptr
+                                 && player.stretchMode
+                                 && player.originalBPM > 0.f)
+        ? (double) player.originalBPM / ctx.bpm
+        : 1.0;
+
+    const int64 fileEOFOutput = clipStart
+        + (int64) ((double) fileTotalSamples * stretchRatio / readRatio);
+    const int64 effectiveClipEnd = juce::jmin (clipEnd, fileEOFOutput);
+    const int outSamples = (int) juce::jmin (
+        (int64)(numSamples - bufOffset),
+        effectiveClipEnd - (ctx.projectStart + bufOffset));
+
+    if (outSamples <= 0) return false;
+
+    // ── Decode into ctx.clipScratch (Phase vocoder OR direct path) ───────────
+    clipScratch.clear();
+
+    const float gain = ctx.masterGain;
+    float       peak = 0.0f;
+
+    const bool usePV = (player.vocoder != nullptr)
+                    && player.stretchMode
+                    && (player.originalBPM > 0.f)
+                    && (std::abs (ctx.bpm - player.originalBPM) > 0.01);
+
+    if (usePV)
+    {
+        // ── Phase vocoder path (BPM stretch + pitch preservation) ────────────
+        player.vocoder->setStretchRatio (stretchRatio);
+
+        const int64 pvRefPos  = (int64) ((double) outPosInClip * readRatio / stretchRatio);
+        const int64 pvReadPos = player.expectedFilePos;
+
+        const bool seekNeeded =
+            (pvReadPos == 0 && pvRefPos > (int64) mSampleRate) ||
+            (pvReadPos  > 0
+             && std::abs (pvRefPos - pvReadPos) > (int64)(mSampleRate * 2));
+
+        if (seekNeeded)
+        {
+            player.vocoder->reset();
+            player.streamer->seek (pvRefPos);
+            player.expectedFilePos = pvRefPos;
+        }
+
+        const int numFileSamples = (int) std::ceil (
+            (double) outSamples * readRatio / stretchRatio);
+
+        player.pvInBuf.clear();
+        const bool gotRaw = player.streamer->readRaw (
+            player.pvInBuf, 0, numFileSamples, player.expectedFilePos);
+
+        if (gotRaw)
+        {
+            player.expectedFilePos += numFileSamples;
+            player.vocoder->push (player.pvInBuf, 0, numFileSamples);
+
+            const int numVocOut = (int) std::ceil ((double) outSamples * readRatio) + 2;
+            player.pvOutBuf.clear();
+            const int pulled = player.vocoder->pull (player.pvOutBuf, 0, numVocOut);
+
+            if (pulled > 0)
+            {
+                const int pvCh = player.pvOutBuf.getNumChannels();
+                for (int i = 0; i < outSamples; ++i)
+                {
+                    const double exactFP = (double) i * readRatio;
+                    const int    ip      = (int) exactFP;
+                    const float  frac    = (float)(exactFP - ip);
+
+                    if (ip + 1 >= pulled) break;
+
+                    for (int ch = 0; ch < numOut; ++ch)
+                    {
+                        const int   srcCh = ch % pvCh;
+                        const float s0    = player.pvOutBuf.getSample (srcCh, ip);
+                        const float s1    = player.pvOutBuf.getSample (srcCh, ip + 1);
+                        const float v     = (s0 + frac * (s1 - s0)) * gain;
+                        clipScratch.addSample (ch, bufOffset + i, v);
+                        peak = juce::jmax (peak, std::abs (v));
+                    }
+                }
+            }
+        }
+        // gotRaw false: expectedFilePos NOT advanced — retry next block.
+    }
+    else
+    {
+        // ── Direct path: SR-only interpolation (no BPM stretch) ──────────────
+        peak = player.streamer->readAndMix (
+            clipScratch, bufOffset, outSamples, filePos, readRatio, numOut, gain);
+        player.expectedFilePos = filePos + (int64) std::ceil (outSamples * readRatio);
+    }
+
+    juce::ignoreUnused (peak);
+
+    // ── F3: clip-edge declick (5 ms linear fade-in/out, capped at half-clip) ─
+    {
+        const int64 clipLenOutSamples = effectiveClipEnd - clipStart;
+        const int fadeSamples = juce::jmax (1, juce::jmin (
+            (int) std::round (mSampleRate * 0.005),
+            (int) (clipLenOutSamples / 2)));
+        for (int s = 0; s < outSamples; ++s)
+        {
+            const int64 absPos = outPosInClip + s;
+            float g = 1.0f;
+            if (absPos < (int64) fadeSamples)
+                g = (float) absPos / (float) fadeSamples;
+            const int64 distFromEnd = clipLenOutSamples - 1 - absPos;
+            if (distFromEnd >= 0 && distFromEnd < (int64) fadeSamples)
+                g = juce::jmin (g, (float) distFromEnd / (float) fadeSamples);
+            if (g < 1.0f)
+                for (int ch = 0; ch < numOut; ++ch)
+                    clipScratch.setSample (ch, bufOffset + s,
+                        clipScratch.getSample (ch, bufOffset + s) * g);
+        }
+    }
+
+    // ── Drive Vox/Inst engine + processInsert + route ────────────────────────
+    // pushScToEngine is a stack lambda inside processBlock; inline its body
+    // here via dynamic_cast to ISidechainEngine + setSidechainBuffers.
+    auto pushScToEng = [this] (juce::AudioProcessor* eng, int channelId)
+    {
+        if (auto* sc = dynamic_cast<ISidechainEngine*> (eng))
+        {
+            const auto arr = mVibeGraph.getScRecvArray (channelId);
+            juce::AudioBuffer<float>* bufs[VibeGraph::kMaxScRecvSlots];
+            for (int s = 0; s < VibeGraph::kMaxScRecvSlots; ++s)
+                bufs[s] = arr[(size_t) s];
+            sc->setSidechainBuffers (bufs, VibeGraph::kMaxScRecvSlots);
+        }
+    };
+
+    // numRenderCh matches processBlock's local: stereo render bus.
+    constexpr int numRenderCh = 2;
+
+    if (isVoxRoute)
+    {
+        const int vi = routeCh - MixerChannelIds::kVoxBase;
+        auto* eng = mVoxEngines[(size_t) vi];
+        if (eng == nullptr) return false;
+
+        mVoxEngineScratch.setSize (numRenderCh, numSamples, false, false, true);
+        mVoxEngineScratch.clear();
+        const int copyCh = juce::jmin (numOut, mVoxEngineScratch.getNumChannels());
+        for (int ch = 0; ch < copyCh; ++ch)
+            mVoxEngineScratch.copyFrom (ch, 0, clipScratch, ch, 0, numSamples);
+
+        // setForcePitchBypass(true) — realtime pitch was baked into the wet
+        // recording at capture time, so don't double-apply on FilePlay.
+        if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
+            vp->setForcePitchBypass (true);
+
+        pushScToEng (eng, MixerChannelIds::voxInsert (vi));
+        eng->processBlock (mVoxEngineScratch, engineMidi);
+        mVibeGraph.processInsert (VibeGraph::InsertKind::Vox, vi,
+                                   mVoxEngineScratch, ctx.bpm, ctx.anySolo);
+
+        if (mtDest == nullptr)
+        {
+            routeInsertOutput (MixerChannelIds::voxInsert (vi),
+                                mVoxEngineScratch, numSamples);
+        }
+        else
+        {
+            const int nc = juce::jmin (mtDest->getNumChannels(),
+                                        mVoxEngineScratch.getNumChannels());
+            for (int c = 0; c < nc; ++c)
+                mtDest->addFrom (c, 0, mVoxEngineScratch, c, 0, numSamples);
+        }
+    }
+    else   // isInstRoute
+    {
+        const int ii = routeCh - MixerChannelIds::kInstBase;
+        auto* eng = mInstEngines[(size_t) ii];
+        if (eng == nullptr) return false;
+
+        mInstEngineScratch.setSize (numRenderCh, numSamples, false, false, true);
+        mInstEngineScratch.clear();
+        const int copyCh = juce::jmin (numOut, mInstEngineScratch.getNumChannels());
+        for (int ch = 0; ch < copyCh; ++ch)
+            mInstEngineScratch.copyFrom (ch, 0, clipScratch, ch, 0, numSamples);
+
+        pushScToEng (eng, MixerChannelIds::instInsert (ii));
+        eng->processBlock (mInstEngineScratch, engineMidi);
+        mVibeGraph.processInsert (VibeGraph::InsertKind::Inst, ii,
+                                   mInstEngineScratch, ctx.bpm, ctx.anySolo);
+
+        if (mtDest == nullptr)
+        {
+            routeInsertOutput (MixerChannelIds::instInsert (ii),
+                                mInstEngineScratch, numSamples);
+        }
+        else
+        {
+            const int nc = juce::jmin (mtDest->getNumChannels(),
+                                        mInstEngineScratch.getNumChannels());
+            for (int c = 0; c < nc; ++c)
+                mtDest->addFrom (c, 0, mInstEngineScratch, c, 0, numSamples);
+        }
+    }
+
+    return true;
+}
+
 // ── processBlock ──────────────────────────────────────────────────────────────
 void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                        juce::MidiBuffer& midiMessages)
@@ -2023,296 +2292,49 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             mAudioClipScratch.setSize(numOut, numSamples, false, false, true);
             mAudioRowScratch.clear();
 
+            // 2026-05-06 (Batch 9b Item 9): clipCtx built once and shared by
+            // both Pass 1 (FilePlay via renderFilePlayPlayer) and Pass 2
+            // (non-FilePlay via renderAudioClipsForRow).  Pass 2 overrides
+            // clipScratch per-row to the task's owned scratch (Item 10);
+            // Pass 1 uses the shared mAudioClipScratch.
+            AudioClipBlockContext clipCtx;
+            clipCtx.bpm           = bpmAC;
+            clipCtx.anySolo       = anySolo;
+            clipCtx.secPerBeat    = secPerBeat;
+            clipCtx.projectStart  = projectStart;
+            clipCtx.projectEnd    = projectEnd;
+            clipCtx.numSamples    = numSamples;
+            clipCtx.numOut        = numOut;
+            clipCtx.masterGain    = masterGain;
+            clipCtx.mxState       = &mx;
+            clipCtx.clipScratch   = &mAudioClipScratch;
+
             // ── Batch 5 (2026-05-06): split audio-clip rendering ────────────
             // Pass 1 below: ONLY FilePlay clips (clip routed to a Vox/Inst
             // engine). Non-FilePlay clips are skipped here and handled by
-            // renderAudioClipsForRow per-row pass after this loop. The
-            // helper holds the same decode + insert + peak + route logic
-            // that used to live inline; the extraction lets AudioInsertTask
-            // (Batch 5 scaffolding) call the same path under the MT flag.
+            // renderAudioClipsForRow per-row pass after this loop.
+            //
+            // 2026-05-06 (Batch 9b Item 9): per-clip body migrated into
+            // renderFilePlayPlayer.  VoxStripTask / InstStripTask call the
+            // same helper from their FilePlay branches under MT flag.
             for (auto& player : mAudioClipPlayers)
             {
                 if (player.streamer == nullptr) continue;
 
                 // Filter to FilePlay-only at the top of this pass.
-                {
-                    const int rch = player.routeChannel;
-                    const bool isVox  = rch >= MixerChannelIds::kVoxBase
-                                     && rch <  MixerChannelIds::kVoxBase + kMaxVoxPages;
-                    const bool isInst = rch >= MixerChannelIds::kInstBase
-                                     && rch <  MixerChannelIds::kInstBase + kMaxInstPages;
-                    if (! isVox && ! isInst) continue;   // non-FilePlay → helper handles it
-                }
+                const int rch = player.routeChannel;
+                const bool isVox  = rch >= MixerChannelIds::kVoxBase
+                                 && rch <  MixerChannelIds::kVoxBase + kMaxVoxPages;
+                const bool isInst = rch >= MixerChannelIds::kInstBase
+                                 && rch <  MixerChannelIds::kInstBase + kMaxInstPages;
+                if (! isVox && ! isInst) continue;   // non-FilePlay → Pass 2 handles it
 
-                const int64 clipStart = (int64)(player.clipStartBeat * secPerBeat * mSampleRate);
-                const int64 clipEnd   = (int64)(player.clipEndBeat   * secPerBeat * mSampleRate);
+                // Resolve per-page MIDI buffer + dispatch to helper.
+                juce::MidiBuffer& engineMidi = isVox
+                    ? voxPageMidi [(size_t)(rch - MixerChannelIds::kVoxBase)]
+                    : instPageMidi[(size_t)(rch - MixerChannelIds::kInstBase)];
 
-                if (projectEnd <= clipStart || projectStart >= clipEnd) continue;
-
-                const int   row      = player.trackRow;
-                const bool  inRange  = (row >= 0 && row < kMaxAudioRows);
-                const bool  rowMuted = inRange && mx.audioRowMute[row];
-                // Batch E #7 (2026-05-01): rowLevel removed - was a dead local.
-                // Audio-row fader is applied downstream by the InsertNode chain,
-                // not here.
-                const bool  builderRowMuted = !mPatternManager->isRowAudible(row);
-
-                // D3: skip clips that have been silenced by a choke fire.
-                if (player.mutedByChoke)
-                {
-                    if (inRange) mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
-                    continue;
-                }
-
-                if (rowMuted || builderRowMuted)
-                {
-                    if (inRange) mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
-                    continue;
-                }
-
-                // Output samples before clip starts in this block
-                const int bufOffset = (int)juce::jmax ((int64)0, clipStart - projectStart);
-
-                // Position within the clip in output samples
-                const int64 outPosInClip = (projectStart + bufOffset) - clipStart;
-
-                // readRatio = file samples per output sample (SR conversion only).
-                const double readRatio = player.fileSampleRate / mSampleRate;
-                const int64  filePos   = (int64)(outPosInClip * readRatio);
-
-                const int64 fileTotalSamples = player.streamer->getTotalLength();
-                if (filePos >= fileTotalSamples)
-                {
-                    if (inRange) mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
-                    continue;
-                }
-
-                // Stretch ratio for EOF calculation (1.0 when not stretching).
-                const double stretchRatio = (player.vocoder != nullptr
-                                             && player.stretchMode
-                                             && player.originalBPM > 0.f)
-                    ? (double) player.originalBPM / bpmAC
-                    : 1.0;
-
-                // Actual file EOF in output-timeline samples.
-                // Without stretch: fileTotalSamples / readRatio output samples from clipStart.
-                // With stretch:    stretched duration = file_time * stretchRatio.
-                const int64 fileEOFOutput = clipStart
-                    + (int64) ((double) fileTotalSamples * stretchRatio / readRatio);
-
-                // Output samples to fill this block — capped by BOTH block boundary
-                // AND actual file EOF so playback stops when the audio ends.
-                const int64 effectiveClipEnd = juce::jmin (clipEnd, fileEOFOutput);
-                const int outSamples = (int)juce::jmin (
-                    (int64)(numSamples - bufOffset),
-                    effectiveClipEnd - (projectStart + bufOffset));
-
-                if (outSamples <= 0) continue;
-
-                // Per-clip scratch: clear for this clip's contribution.
-                // Clip writes here → per-clip rack → fader/mute → add to bus accumulator.
-                mAudioClipScratch.clear();
-
-                const float gain   = masterGain;  // row fader applied separately after rack
-                float       peak   = 0.0f;
-
-                const bool usePV = (player.vocoder != nullptr)
-                                && player.stretchMode
-                                && (player.originalBPM > 0.f)
-                                && (std::abs (bpmAC - player.originalBPM) > 0.01);
-
-                if (usePV)
-                {
-                    // ── Phase vocoder path (BPM stretch + pitch preservation) ──────
-                    player.vocoder->setStretchRatio (stretchRatio);
-
-                    // The PV consumes file samples at readRatio/stretchRatio per output
-                    // sample — NOT readRatio (which is the direct-path rate).  We must
-                    // therefore track the file read position SEQUENTIALLY in
-                    // player.expectedFilePos rather than recomputing it from outPosInClip
-                    // each block, because the two rates differ whenever stretchRatio != 1.
-                    //
-                    // Use the stateless stretched position only for SEEK DETECTION
-                    // (position jumped backward or far forward = loop / scrub).
-                    const int64 pvRefPos  = (int64) ((double) outPosInClip
-                                                     * readRatio / stretchRatio);
-                    const int64 pvReadPos = player.expectedFilePos;
-
-                    // Seek detection threshold: 2 s of file samples.
-                    // Normal per-block drift from rounding is ≤ 1 sample; over 2 s of
-                    // playback the accumulated drift stays well below this threshold.
-                    const bool seekNeeded =
-                        (pvReadPos == 0 && pvRefPos > (int64) mSampleRate) ||
-                        (pvReadPos  > 0 &&
-                         std::abs (pvRefPos - pvReadPos) > (int64) (mSampleRate * 2));
-
-                    if (seekNeeded)
-                    {
-                        player.vocoder->reset();
-                        player.streamer->seek (pvRefPos);
-                        player.expectedFilePos = pvRefPos;
-                    }
-
-                    // File samples consumed per output block:
-                    //   outSamples (output SR) × readRatio (→ file SR) ÷ stretchRatio
-                    //   (→ file consumption rate accounting for BPM stretch).
-                    // NO extra kHopSize padding — that caused the ring read-head to
-                    // overshoot the next block's read position, making readRaw fail
-                    // with "filePos < ringReadHead" on every subsequent block.
-                    const int numFileSamples = (int) std::ceil (
-                        (double) outSamples * readRatio / stretchRatio);
-
-                    // Read raw file samples from disk streamer (sequential position)
-                    player.pvInBuf.clear();
-                    const bool gotRaw = player.streamer->readRaw (
-                        player.pvInBuf, 0, numFileSamples, player.expectedFilePos);
-
-                    if (gotRaw)
-                    {
-                        // Advance sequential tracker ONLY on successful read
-                        player.expectedFilePos += numFileSamples;
-
-                        // Push into vocoder
-                        player.vocoder->push (player.pvInBuf, 0, numFileSamples);
-
-                        // How many vocoder output samples (still at file SR) we need
-                        const int numVocOut = (int) std::ceil (
-                            (double) outSamples * readRatio) + 2;
-
-                        // Pull stretched samples (file SR, pitch-preserved)
-                        player.pvOutBuf.clear();
-                        const int pulled = player.vocoder->pull (
-                            player.pvOutBuf, 0, numVocOut);
-
-                        // Mix into output buffer with SR interpolation
-                        if (pulled > 0)
-                        {
-                            const int pvCh = player.pvOutBuf.getNumChannels();
-                            for (int i = 0; i < outSamples; ++i)
-                            {
-                                const double exactFP = (double) i * readRatio;
-                                const int    ip      = (int) exactFP;
-                                const float  frac    = (float) (exactFP - ip);
-
-                                if (ip + 1 >= pulled) break;
-
-                                for (int ch = 0; ch < numOut; ++ch)
-                                {
-                                    const int   srcCh = ch % pvCh;
-                                    const float s0    = player.pvOutBuf.getSample (srcCh, ip);
-                                    const float s1    = player.pvOutBuf.getSample (srcCh, ip + 1);
-                                    const float v     = (s0 + frac * (s1 - s0)) * gain;
-                                    mAudioClipScratch.addSample (ch, bufOffset + i, v);
-                                    peak = juce::jmax (peak, std::abs (v));
-                                }
-                            }
-                        }
-                    }
-                    // If gotRaw was false (buffer not ready / seek in progress),
-                    // expectedFilePos is NOT advanced so we retry the same position next block.
-                }
-                else
-                {
-                    // ── Direct path: SR-only interpolation (no BPM stretch) ────────
-                    peak = player.streamer->readAndMix (
-                        mAudioClipScratch, bufOffset, outSamples, filePos, readRatio, numOut, gain);
-                    player.expectedFilePos = filePos + (int64) std::ceil (outSamples * readRatio);
-                }
-
-                // F3 (2026-04-24): clip-edge declick.  5 ms linear fade-in
-                // from absolute clip-start and fade-out into clip-end, capped
-                // at half the clip length for very short clips.  Applied on
-                // the source side (pre-rack) so the declick rides through the
-                // per-clip effects chain naturally.  Block-boundary aware:
-                // absPos here is relative to clip start, so a clip playing
-                // from block 3 onward gets full gain while a clip starting
-                // mid-block gets its first few samples ramped.
-                {
-                    const int64 clipLenOutSamples = effectiveClipEnd - clipStart;
-                    const int fadeSamples = juce::jmax (1, juce::jmin (
-                        (int) std::round (mSampleRate * 0.005),   // 5 ms
-                        (int) (clipLenOutSamples / 2)));           // or half clip
-                    for (int s = 0; s < outSamples; ++s)
-                    {
-                        const int64 absPos = outPosInClip + s;
-                        float g = 1.0f;
-                        if (absPos < (int64) fadeSamples)
-                            g = (float) absPos / (float) fadeSamples;
-                        const int64 distFromEnd = clipLenOutSamples - 1 - absPos;
-                        if (distFromEnd >= 0 && distFromEnd < (int64) fadeSamples)
-                            g = juce::jmin (g, (float) distFromEnd / (float) fadeSamples);
-                        if (g < 1.0f)
-                            for (int ch = 0; ch < numOut; ++ch)
-                                mAudioClipScratch.setSample (ch, bufOffset + s,
-                                    mAudioClipScratch.getSample (ch, bufOffset + s) * g);
-                    }
-                }
-
-                // I-16 G-9 (2026-05-03): FilePlay branch.  When the clip is
-                // linked to a Vox/Inst page (routeChannel != 0), copy its
-                // post-declick samples into that page's engine scratch and
-                // drive the page's chain (BaySickVocals -> BaySickChain ->
-                // BaySickNAMIR for Vox; BaySickPedals -> BaySickNAMIR for
-                // Inst), then route through the Vox/Inst InsertNode + bus
-                // instead of the Audio InsertNode.  setForcePitchBypass(true)
-                // for Vox so realtime pitch (already baked into the wet
-                // recording) doesn't double-apply.
-                const int routeCh = player.routeChannel;
-                const bool isVoxRoute  = routeCh >= MixerChannelIds::kVoxBase
-                                       && routeCh <  MixerChannelIds::kVoxBase + kMaxVoxPages;
-                const bool isInstRoute = routeCh >= MixerChannelIds::kInstBase
-                                       && routeCh <  MixerChannelIds::kInstBase + kMaxInstPages;
-                if (isVoxRoute || isInstRoute)
-                {
-                    if (isVoxRoute)
-                    {
-                        const int vi = routeCh - MixerChannelIds::kVoxBase;
-                        if (auto* eng = mVoxEngines[vi])
-                        {
-                            mVoxEngineScratch.setSize (numRenderCh, numSamples, false, false, true);
-                            mVoxEngineScratch.clear();
-                            const int copyCh = juce::jmin (numOut, mVoxEngineScratch.getNumChannels());
-                            for (int ch = 0; ch < copyCh; ++ch)
-                                mVoxEngineScratch.copyFrom (ch, 0, mAudioClipScratch, ch, 0, numSamples);
-
-                            if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
-                                vp->setForcePitchBypass (true);
-
-                            pushScToEngine (eng, MixerChannelIds::voxInsert (vi));
-                            eng->processBlock (mVoxEngineScratch, voxPageMidi[vi]);
-                            mVibeGraph.processInsert (VibeGraph::InsertKind::Vox, vi,
-                                                       mVoxEngineScratch, bpmForInserts, anySolo);
-                            routeInsertOutput (MixerChannelIds::voxInsert (vi),
-                                                mVoxEngineScratch, numSamples);
-                        }
-                    }
-                    else   // isInstRoute
-                    {
-                        const int ii = routeCh - MixerChannelIds::kInstBase;
-                        if (auto* eng = mInstEngines[ii])
-                        {
-                            mInstEngineScratch.setSize (numRenderCh, numSamples, false, false, true);
-                            mInstEngineScratch.clear();
-                            const int copyCh = juce::jmin (numOut, mInstEngineScratch.getNumChannels());
-                            for (int ch = 0; ch < copyCh; ++ch)
-                                mInstEngineScratch.copyFrom (ch, 0, mAudioClipScratch, ch, 0, numSamples);
-
-                            pushScToEngine (eng, MixerChannelIds::instInsert (ii));
-                            eng->processBlock (mInstEngineScratch, instPageMidi[ii]);
-                            mVibeGraph.processInsert (VibeGraph::InsertKind::Inst, ii,
-                                                       mInstEngineScratch, bpmForInserts, anySolo);
-                            routeInsertOutput (MixerChannelIds::instInsert (ii),
-                                                mInstEngineScratch, numSamples);
-                        }
-                    }
-                    // 5F-4b B1b: this clip's processed output has been routed
-                    // via the Vox/Inst InsertNode above.  Skip the Audio
-                    // InsertNode + audio-row peak path (unused for FilePlay).
-                    continue;
-                }
-                // Pass 1 only handles FilePlay clips. Non-FilePlay clips were
-                // filtered out at the top of this loop and are processed by
-                // the per-row helper below.
+                renderFilePlayPlayer (player, clipCtx, engineMidi, /*mtDest=*/ nullptr);
             }
 
             // ── Batch 5 Pass 2: non-FilePlay clips per-row ──────────────────
@@ -2329,26 +2351,17 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // mAudioClipScratch only if a row has no registered task —
             // shouldn't happen in practice (ensureAudioInsert creates the
             // task on first use) but keeps the code defensive.
+            //
+            // 2026-05-06 (Batch 9b Item 9): clipCtx already built above for
+            // Pass 1's renderFilePlayPlayer calls; Pass 2 reuses it and just
+            // overrides clipScratch per-row to point at the task-owned buffer.
+            for (int row = 0; row < kMaxAudioRows; ++row)
             {
-                AudioClipBlockContext clipCtx;
-                clipCtx.bpm           = bpmAC;
-                clipCtx.anySolo       = anySolo;
-                clipCtx.secPerBeat    = secPerBeat;
-                clipCtx.projectStart  = projectStart;
-                clipCtx.projectEnd    = projectEnd;
-                clipCtx.numSamples    = numSamples;
-                clipCtx.numOut        = numOut;
-                clipCtx.masterGain    = masterGain;
-                clipCtx.mxState       = &mx;
-
-                for (int row = 0; row < kMaxAudioRows; ++row)
-                {
-                    auto& task = mAudioRenderTasks[(size_t) row];
-                    clipCtx.clipScratch = task
-                        ? &task->getClipScratch (numOut, numSamples)
-                        : &mAudioClipScratch;
-                    renderAudioClipsForRow (row, clipCtx, /*mtDest=*/ nullptr);
-                }
+                auto& task = mAudioRenderTasks[(size_t) row];
+                clipCtx.clipScratch = task
+                    ? &task->getClipScratch (numOut, numSamples)
+                    : &mAudioClipScratch;
+                renderAudioClipsForRow (row, clipCtx, /*mtDest=*/ nullptr);
             }
 
             // 2026-04-28 (G-3): the Clips Bus pre-processing block was moved

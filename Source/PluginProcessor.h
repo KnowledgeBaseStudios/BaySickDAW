@@ -535,6 +535,34 @@ public:
                                  const AudioClipBlockContext& ctx,
                                  juce::AudioBuffer<float>* mtDest);
 
+    // 2026-05-06 (Batch 9b Item 9): per-clip FilePlay rendering helper.
+    // Decodes the clip portion that falls in this block (phase vocoder OR
+    // direct-path SR-interp), copies into the matching Vox/Inst engine's
+    // scratch, runs eng->processBlock + processInsert + routes the output.
+    //
+    // Caller MUST hold mAudioClipLock for the duration of this call (the
+    // helper dereferences AudioClipStreamer + PhaseVocoder owned by the
+    // AudioClipPlayer).  Caller MUST also have already filtered the player
+    // by FilePlay status (player.routeChannel must be a Vox or Inst id).
+    //
+    // engineMidi: per-page MIDI buffer for the Vox/Inst page identified by
+    // player.routeChannel (e.g. voxPageMidi[vi] in serial code, or
+    // mCtx->voxPageMidi[mIndex] from a VoxStripTask in MT mode).
+    //
+    // mtDest:
+    //   nullptr  : serial mode — engine output is fanned via routeInsertOutput
+    //              into the routing graph (main-out + sends).
+    //   non-null : MT mode — engine output is addFrom'd into mtDest so the
+    //              task's downstream pull-model consumers see it on this
+    //              strip's mOutputBuffer.
+    //
+    // Returns true if a clip portion was rendered (engine was driven).
+    // Returns false if the clip is out of range / muted / EOF / etc.
+    bool renderFilePlayPlayer (AudioClipPlayer&             player,
+                                const AudioClipBlockContext& ctx,
+                                juce::MidiBuffer&            engineMidi,
+                                juce::AudioBuffer<float>*    mtDest = nullptr);
+
     // Per-row peak dB for audio strip meters (audio thread writes, UI timer reads).
     // kMaxAudioRows == 50 (matches MixerState::kMaxAudioRows).
     static constexpr int kMaxAudioRows = 50;
