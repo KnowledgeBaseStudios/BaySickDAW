@@ -46,13 +46,13 @@ void AudioInsertTask::run()
     if (auto* p = mProcessor->apvts.getRawParameterValue ("masterGain"))
         masterGain *= p->load();
 
-    // Try-lock the audio-clip vector.  In MT mode multiple AudioInsertTasks
-    // can race for this lock; if a worker can't acquire it this block, its
-    // row produces silence (acceptable degraded state, same shape as serial
-    // tryLk skip).  Tracked in deferred notes for the snapshot-pattern
-    // backlog (Batch 9b).
-    juce::SpinLock::ScopedTryLockType tryLk (mProcessor->mAudioClipLock);
-    if (! tryLk.isLocked()) return;
+    // 2026-05-06 (Batch 9b backlog): no try-lock here — the audio thread
+    // holds mAudioClipLock for the entire processBlock and builds
+    // mAudioClipPlayersSnapshot under it.  This task reads the snapshot
+    // (via renderAudioClipsForRow) lock-free; pointers are valid for the
+    // block because the mutator (rebuildAudioClipPlayers) blocks waiting
+    // for the audio thread's lock.  Eliminates the per-task SpinLock
+    // contention that used to drop audio when MT-mode workers raced.
 
     // 2026-05-06 (Batch 9b Item 10): per-task scratch buffer eliminates the
     // cross-task race that existed when every AudioInsertTask pointed at

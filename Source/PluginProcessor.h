@@ -491,6 +491,19 @@ public:
     std::vector<AudioClipPlayer> mAudioClipPlayers;
     juce::SpinLock               mAudioClipLock;
 
+    // 2026-05-06 (Batch 9b backlog): block-scoped pointer snapshot of
+    // mAudioClipPlayers, built once at the top of processBlock under
+    // mAudioClipLock and read lock-free for the rest of the block by both
+    // the serial path and (when kEnableMultiThreadedEngine flips) MT mode's
+    // AudioInsertTask workers.  Replaces the per-site try-lock pattern that
+    // used to drop audio when multiple workers contended for the same
+    // SpinLock.  Pointers are stable for the duration of processBlock
+    // because the audio thread holds mAudioClipLock for the full block —
+    // the message-thread mutator (rebuildAudioClipPlayers) waits at most
+    // one block to swap the underlying vector.
+    std::vector<AudioClipPlayer*> mAudioClipPlayersSnapshot;
+    void rebuildAudioClipSnapshot();
+
     // ── Batch 5 (2026-05-06): shared audio-clip render path ──────────────────
     // Per-block context bundle passed into renderAudioClipsForRow.  Keeps the
     // helper signature short while preserving access to all the per-block
