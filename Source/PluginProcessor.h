@@ -709,6 +709,17 @@ public:
     // the UI mirrors.
     void drainMeterAtomicsForUI();
 
+    // 2026-05-07 (Batch 10): DSP-load measurement + overload protection.
+    // Extracted from end-of-processBlock so the MT branch (which returns
+    // early after dispatchBlock) calls the same path.  Without this call
+    // from the MT branch, mAudioDspLoad sits at 0% (the t1-t0 deltaT is
+    // never computed) and the in-app DSP meter reads 0% even when the
+    // audio thread is busy running worker tasks via runUntilOrTimeout.
+    // Voice-stealing on sustained 85% overload also lives here so the
+    // protection fires under MT just like serial.  Caller passes the
+    // t0 tick captured at the very top of processBlock.
+    void measureDspLoadAndOverload (juce::int64 t0Ticks, int numSamples);
+
     bool isRecording() const
     {
         return mMidiRecorder.isRecording() || mMasterRecorder.isRecording()

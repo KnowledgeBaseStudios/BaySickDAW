@@ -1821,9 +1821,14 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // (rebuilt above).  Build BlockContext once and hand off to the
     // dispatcher; the serial path below is skipped via early return.
     //
-    // Stays elided by the compiler while kEnableMultiThreadedEngine is
-    // constexpr false — no runtime cost on the serial path.
-    if constexpr (RenderEngine::kEnableMultiThreadedEngine)
+    // 2026-05-07 (Batch 10): gMultiThreadedEngineEnabled is now a runtime
+    // std::atomic<bool>, hot-toggleable from the Mixer hamburger menu.
+    // Both branches live in the compiled binary; the audio thread picks
+    // one per block via this acquire-load.  No glitches on flip --
+    // dispatcher tasks + arena stay live regardless, and rebuildLinks at
+    // line 1737 fires every block so MT-side predecessor / dep state is
+    // always fresh.  Cost: one atomic-load + one branch per block.
+    if (RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire))
     {
         // 2026-05-07 (Batch 9c follow-up): compute busAnySolo (bus-level
         // solo flag, distinct from strip-level anySolo).  Mirrors the serial
@@ -1873,6 +1878,16 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         // The MasterTask + per-strip tasks have already populated the
         // node-level atomics by this point; we just need to promote them.
         drainMeterAtomicsForUI();
+
+        // 2026-05-07 (Batch 10): drive the DSP-load meter + overload-protection
+        // path the same as the serial tail.  Without this, the in-app DSP
+        // meter reads 0% under MT because the t0->t1 deltaT computation
+        // never runs (we returned early before the inline block at the end
+        // of processBlock).  Under MT this measures audio-thread wall-clock
+        // -- naturally lower than serial when workers carry parallel load,
+        // which IS the architectural win and is the metric to compare when
+        // hot-toggling MT/serial via the Mixer hamburger.
+        measureDspLoadAndOverload (t0, numSamples);
         return;
     }
 
@@ -2838,40 +2853,10 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     midiMessages.clear();
 
     // ── 1M: DSP load measurement + overload protection ────────────────────────
-    {
-        const auto   t1       = juce::Time::getHighResolutionTicks();
-        const double elapsed  = (double)(t1 - t0)
-                                / (double)juce::Time::getHighResolutionTicksPerSecond();
-        const double bufDur   = numSamples / juce::jmax(1.0, mSampleRate);
-        const float  rawLoad  = (bufDur > 0.0)
-                                    ? juce::jlimit(0.f, 2.f, (float)(elapsed / bufDur))
-                                    : 0.f;
-
-        // Exponential smoothing — ~80 ms time constant at 512/44100 block rate
-        const float prev     = mAudioDspLoad.load(std::memory_order_relaxed);
-        const float smoothed = prev * 0.85f + rawLoad * 0.15f;
-        mAudioDspLoad.store(smoothed,         std::memory_order_relaxed);
-        mDspOverload95.store(smoothed > 0.95f, std::memory_order_relaxed);
-
-        // Sustained 85% detection — accumulate samples while above threshold
-        if (smoothed > 0.85f)
-            mOverload85Samples += numSamples;
-        else
-            mOverload85Samples = 0;
-
-        const bool over85 = (mOverload85Samples > (int64_t)(0.5 * mSampleRate));
-        mDspOverload85.store(over85, std::memory_order_relaxed);
-
-        if (over85)
-        {
-            // Steal all synth voices (tail-off = true → release envelopes play,
-            // no hard click). DrumSynth + BassSynth one-shot voices decay naturally.
-            mSynth.allNotesOff(1, true);
-            // Back off the counter so we don't re-trigger every block —
-            // next steal can only fire after another 250 ms of sustained overload.
-            mOverload85Samples = (int64_t)(0.25 * mSampleRate);
-        }
-    }
+    // 2026-05-07 (Batch 10): extracted into measureDspLoadAndOverload so the
+    // MT branch (early return) calls the same path.  Without that, the in-
+    // app DSP meter reads 0% under MT.
+    measureDspLoadAndOverload (t0, numSamples);
 
     // 2026-05-02: end-of-audio-block atomic snapshot for ALL meters.
     // 2026-05-07: extracted into drainMeterAtomicsForUI so the MT branch
@@ -2952,6 +2937,51 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     // Group 3: insert atomics + every slot atomic in every rack across all
     // nodes (Layers/Bass/Drums/Master/FxBus/AudioClipsBus + every InsertNode).
     mVibeGraph.promoteAllInsertPeakSnapshots();
+}
+
+// 2026-05-07 (Batch 10): DSP-load measurement + overload protection.
+// Extracted from end-of-processBlock so the MT branch (returns early after
+// dispatchBlock) drives the same path.  Under MT the audio thread isn't
+// idle while workers run -- it participates as a worker via
+// VibeThreadPool::runUntilOrTimeout, popping + executing tasks itself --
+// so wall-clock t1-t0 captures meaningful work time and the meter reads
+// LOWER than serial when worker parallelism saves audio-thread time
+// (the architectural win).  Voice-stealing on sustained 85% overload
+// fires identically under both paths.
+void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int numSamples)
+{
+    const auto   t1       = juce::Time::getHighResolutionTicks();
+    const double elapsed  = (double)(t1 - t0Ticks)
+                            / (double)juce::Time::getHighResolutionTicksPerSecond();
+    const double bufDur   = numSamples / juce::jmax (1.0, mSampleRate);
+    const float  rawLoad  = (bufDur > 0.0)
+                                ? juce::jlimit (0.f, 2.f, (float)(elapsed / bufDur))
+                                : 0.f;
+
+    // Exponential smoothing — ~80 ms time constant at 512/44100 block rate
+    const float prev     = mAudioDspLoad.load (std::memory_order_relaxed);
+    const float smoothed = prev * 0.85f + rawLoad * 0.15f;
+    mAudioDspLoad.store (smoothed,         std::memory_order_relaxed);
+    mDspOverload95.store (smoothed > 0.95f, std::memory_order_relaxed);
+
+    // Sustained 85% detection — accumulate samples while above threshold
+    if (smoothed > 0.85f)
+        mOverload85Samples += numSamples;
+    else
+        mOverload85Samples = 0;
+
+    const bool over85 = (mOverload85Samples > (int64_t)(0.5 * mSampleRate));
+    mDspOverload85.store (over85, std::memory_order_relaxed);
+
+    if (over85)
+    {
+        // Steal all synth voices (tail-off = true → release envelopes play,
+        // no hard click). DrumSynth + BassSynth one-shot voices decay naturally.
+        mSynth.allNotesOff (1, true);
+        // Back off the counter so we don't re-trigger every block —
+        // next steal can only fire after another 250 ms of sustained overload.
+        mOverload85Samples = (int64_t)(0.25 * mSampleRate);
+    }
 }
 
 // ── Parameter sync helpers ────────────────────────────────────────────────────

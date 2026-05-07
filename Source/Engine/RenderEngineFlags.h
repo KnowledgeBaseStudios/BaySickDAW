@@ -1,31 +1,47 @@
 #pragma once
 
-// Multi-threaded render engine — Phase 1 scaffolding (2026-05-06).
+#include <atomic>
+
+// Multi-threaded render engine flags + tunables.
 //
-// Phase 1 adds the lock-free task-graph dispatcher infrastructure but does
-// NOT wire any per-strip RenderTask wrappers yet. The flag below stays false
-// through Phase 1; flipping it in this build will produce silence (the
-// dispatcher returns a cleared buffer until per-strip integration ships).
-//
-// Promotion path: constexpr → runtime atomic + UI toggle in Batch 10.
+// 2026-05-07 (Batch 10): the master flag was promoted from `constexpr bool`
+// to `std::atomic<bool>`.  The audio thread now reads it once at the top of
+// every processBlock (acquire) and routes either to the MT dispatcher or
+// the serial path.  Both branches live in the compiled binary now -- the
+// compiler can no longer elide the unused side -- so flipping the flag at
+// runtime is a hot-swap: toggle from the message thread (release-store
+// from the Mixer hamburger menu) and the very next audio block picks the
+// new path with no glitches and no restart.
 namespace RenderEngine
 {
     // Master switch for the multi-threaded render path.
     //
-    //   false  → PluginProcessor::processBlock runs the existing serial loop
-    //            unchanged. The MT branch is elided by the compiler
-    //            (if constexpr).
-    //   true   → dispatcher takes over the block. ALL strips must have
-    //            RenderTask wrappers registered, otherwise audio is silent
-    //            or partial.
+    //   false  -> PluginProcessor::processBlock runs the serial loop.
+    //   true   -> dispatcher takes over the block.  ALL strips must have
+    //             RenderTask wrappers registered, otherwise audio is silent
+    //             or partial.  (rebuildLinks fires every block regardless,
+    //             so toggling from false->true sees fresh predecessor /
+    //             child / mInitialDeps state on the very next block.)
     //
-    // 2026-05-06 (Batch 9c): flipped true after pre-flip blockers cleared
-    // (B2 GUI deadlock, N1 BaySickVocal shutdown gate, ~StandaloneEditor
-    // teardown via closeAllDynamicTabs, B1 deferred-destruction GC for
-    // mAudioClipPlayers).  Watchdog (kWatchdogTimeoutMillis below) catches
-    // any remaining deadlocks loudly instead of letting the audio thread
-    // hang.  Revert to false if the validation pass surfaces a regression.
-    inline constexpr bool kEnableMultiThreadedEngine = true;
+    // Default true: MT validated as the production-quality path during
+    // Batch 9c (flag flip + watchdog + meter drain + SC pull + bus solo
+    // fix).  Pre-flip blockers (B2 GUI deadlock, N1 BaySickVocal shutdown
+    // gate, ~StandaloneEditor teardown, B1 deferred-destruction GC) all
+    // cleared in 3b2c85a / fdbe9e1 / 47ba7a2.  Watchdog
+    // (kWatchdogTimeoutMillis below) catches any remaining deadlocks
+    // loudly instead of letting the audio thread hang.
+    //
+    // Audio thread reads:    .load (std::memory_order_acquire)
+    // Message thread writes: .store (newValue, std::memory_order_release)
+    //
+    // The acquire/release pair publishes any preceding state-edits the
+    // message thread did before flipping the flag (e.g. a settings UI
+    // change) so the audio thread sees a consistent view.  In practice
+    // there's nothing else for the message thread to publish here -- the
+    // dispatcher's tasks + arena are always live regardless of flag --
+    // but using release/acquire keeps the protocol future-proof and
+    // matches the rest of the engine's atomic conventions.
+    inline std::atomic<bool> gMultiThreadedEngineEnabled { true };
 
     // Hard cap on worker threads. The 5950X (16C/32T) saturates well below
     // this for the ~17-task per-block load of a typical heavy session;

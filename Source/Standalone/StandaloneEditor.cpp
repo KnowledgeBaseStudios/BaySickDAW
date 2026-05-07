@@ -4441,6 +4441,18 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 true,                  // enabled
                                 latCompOn);            // checked
 
+                    // 2026-05-07 (Batch 10): hot-swappable multi-core rendering
+                    // toggle.  Click flips RenderEngine::gMultiThreadedEngineEnabled
+                    // immediately; the next audio block sees the new value via
+                    // its acquire-load at the top of processBlock and routes to
+                    // either the parallel dispatcher or the serial loop without
+                    // glitching.  No restart needed.
+                    const bool mtOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
+                    m.addItem (202,
+                                "Multi-core Rendering",
+                                true,                  // enabled
+                                mtOn);                 // checked
+
                     m.showMenuAsync (
                         juce::PopupMenu::Options().withTargetComponent (anchor),
                         [safeThis] (int r)
@@ -4464,6 +4476,18 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 const int blockSize  = safeThis->mProcessor.getBlockSize();
                                 const double sr      = safeThis->mProcessor.getSampleRate();
                                 MeterLatencyComp::recomputeFromDevice (sr, blockSize, latSamples);
+                                return;
+                            }
+                            if (r == 202)
+                            {
+                                // 2026-05-07 (Batch 10): hot-swap multi-core
+                                // rendering.  release-store pairs with the
+                                // audio thread's acquire-load at the top of
+                                // processBlock; next block picks the new
+                                // path.  Phase 3 (settings.xml persistence)
+                                // ships separately.
+                                const bool wasOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
+                                RenderEngine::gMultiThreadedEngineEnabled.store (! wasOn, std::memory_order_release);
                                 return;
                             }
                             // J-A2: master output selector handlers.
