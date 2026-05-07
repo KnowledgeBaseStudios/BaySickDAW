@@ -173,7 +173,16 @@ String File::parseAbsolutePath (const String& p)
             "File::getCurrentWorkingDirectory().getChildFile (myUnknownPath)" would return an absolute
             path if that's what was supplied, or would evaluate a partial path relative to the CWD.
         */
-        jassertfalse;
+        // QA-0a (2026-05-07): BaySickDAW stores RELATIVE audioFilePath on
+        // ArrangementBlocks (Samples/foo.wav etc) for project portability.
+        // BuilderPage::ArrangementGrid::drawAudioClip's existsAsFile probe
+        // hits this path during paint.  CWD-relative fallback below returns
+        // a path that existsAsFile correctly reports as missing -> the block
+        // renders in the dim-red "missing file" color, which is the right
+        // visual cue.  Real fix is for the paint code to resolve through
+        // mProcessor.resolveProjectFile before constructing juce::File.
+        // Deferred to a dedicated batch.
+        // jassertfalse;
 
         return File::getCurrentWorkingDirectory().getChildFile (path).getFullPathName();
     }

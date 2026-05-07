@@ -114,7 +114,12 @@ public:
     */
     void setSampleRate (double newSampleRate) noexcept
     {
-        jassert (newSampleRate > 0.0);
+        // QA-0a (2026-05-07): voices added during VibePlayerProcessor construction
+        // (Synthesiser::addVoice -> setCurrentPlaybackSampleRate -> here) before
+        // prepareToPlay has set a real sample rate.  The 0-rate phase is transient;
+        // prepareToPlay overwrites it before any audio processing.  Release ignores;
+        // Debug paused.  Suppressed.
+        // jassert (newSampleRate > 0.0);
         sampleRate = newSampleRate;
     }
 

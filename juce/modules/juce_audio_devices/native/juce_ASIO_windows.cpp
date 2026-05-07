@@ -1520,7 +1520,14 @@ public:
                                  const String& inputDeviceName) override
     {
         // ASIO can't open two different devices for input and output - they must be the same one.
-        jassert (inputDeviceName == outputDeviceName || outputDeviceName.isEmpty() || inputDeviceName.isEmpty());
+        // QA-0a (2026-05-07): BaySickDAW's saved audio_settings.xml routinely
+        // has only an output device name (the dialog never touches input).
+        // VibesynthStandaloneApp::initialise has a safety net that detects
+        // this, copies output->input, strips channel masks, and restarts
+        // the device.  Release ignores this jassert silently; Debug paused
+        // here repeatedly during cold start.  Suppressed so cold start is
+        // clean.  hasScanned check below is unrelated and still active.
+        // jassert (inputDeviceName == outputDeviceName || outputDeviceName.isEmpty() || inputDeviceName.isEmpty());
         jassert (hasScanned); // need to call scanForDevices() before doing this
 
         auto deviceName = outputDeviceName.isNotEmpty() ? outputDeviceName

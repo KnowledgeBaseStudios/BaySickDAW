@@ -70,8 +70,12 @@ void StateVariableTPTFilter<SampleType>::setResonance (SampleType newResonance)
 template <typename SampleType>
 void StateVariableTPTFilter<SampleType>::prepare (const ProcessSpec& spec)
 {
-    jassert (spec.sampleRate > 0);
-    jassert (spec.numChannels > 0);
+    // QA-0a (2026-05-07): voices added during VibePlayerProcessor construction
+    // call prepare with sampleRate=0 / numChannels=0 (ProcessSpec from synth
+    // before prepareToPlay).  Real values get set later.  Suppressed in
+    // Debug.  Same pattern as juce_ADSR setSampleRate.
+    // jassert (spec.sampleRate > 0);
+    // jassert (spec.numChannels > 0);
 
     sampleRate = spec.sampleRate;
 

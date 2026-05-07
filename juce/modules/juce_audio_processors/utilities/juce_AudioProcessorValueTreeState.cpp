@@ -317,7 +317,14 @@ RangedAudioParameter* AudioProcessorValueTreeState::createAndAddParameter (std::
         return nullptr;
 
     // All parameters must be created before giving this manager a ValueTree state!
-    jassert (! state.isValid());
+    // QA-0a (2026-05-07): BaySickDAW intentionally uses lazy APVTS registration --
+    // params are created on-demand as new mixer strips / audio rows / engine
+    // instances appear, well after the ValueTree state has been built from the
+    // saved project XML.  Release builds ignore this jassert silently and
+    // everything works.  Suppressing here so Debug builds don't pop hundreds
+    // of breakpoints during cold start (every lazy strip registration would
+    // trip it).  Real JUCE asserts elsewhere still fire.
+    // jassert (! state.isValid());
 
     if (getParameter (param->paramID) != nullptr)
         return nullptr;

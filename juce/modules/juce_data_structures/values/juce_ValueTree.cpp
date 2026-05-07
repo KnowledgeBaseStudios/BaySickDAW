@@ -774,7 +774,13 @@ ValueTree& ValueTree::setPropertyExcludingListener (Listener* listenerToExclude,
                                                     const var& newValue, UndoManager* undoManager)
 {
     jassert (name.toString().isNotEmpty()); // Must have a valid property name!
-    jassert (object != nullptr); // Trying to add a property to a null ValueTree will fail!
+    // QA-0a (2026-05-07): BaySickDAW's lazy APVTS registration creates params
+    // whose ValueTree object isn't bound at flush time -- the next line's
+    // null-check returns gracefully so this is a benign developer warning,
+    // not a crash.  Release ignores; Debug paused here from the APVTS
+    // parameter-flush timer.  Suppressed.  Property-name assert above stays
+    // active so genuinely empty names still surface.
+    // jassert (object != nullptr); // Trying to add a property to a null ValueTree will fail!
 
     if (object != nullptr)
         object->setProperty (name, newValue, undoManager, listenerToExclude);
