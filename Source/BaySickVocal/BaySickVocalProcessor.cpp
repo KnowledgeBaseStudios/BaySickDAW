@@ -138,6 +138,20 @@ BaySickVocalProcessor::BaySickVocalProcessor()
     };
 }
 
+// ─── Destructor ───────────────────────────────────────────────────────────────
+// 2026-05-06 (Batch 9c N1): audio-thread shutdown safety net.  Owners should
+// ideally pre-flag teardown via setShuttingDown(true) followed by ~30 ms of
+// sleep (mirrors VibeSynthProcessor's mProjectLoadInProgress barrier in
+// StandaloneEditor::closeAllDynamicTabs) so the audio thread sees the flag
+// before any member starts dying.  Setting it here as well so we still bail
+// on subsequent processBlock entries even if the owner forgot.  Without this,
+// the audio thread's mNamIrProc->processBlock(...) dispatches through a
+// vtable already zeroed by ~BaySickNAMIRProcessor and crashes.
+BaySickVocalProcessor::~BaySickVocalProcessor()
+{
+    mShuttingDown.store (true, std::memory_order_release);
+}
+
 // ─── Audio lifecycle ──────────────────────────────────────────────────────────
 void BaySickVocalProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
 {
@@ -259,6 +273,17 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
     if (numSamples <= 0 || numChannels <= 0) return;
+
+    // 2026-05-06 (Batch 9c N1): audio-thread shutdown gate.  Bail BEFORE
+    // touching any members (apvts, mScHelper, mNamIrProc, mVocalChainRack)
+    // so a teardown-in-progress doesn't race a half-destroyed member access.
+    // Mirrors VibeSynthProcessor::mProjectLoadInProgress check at the top
+    // of its processBlock.
+    if (mShuttingDown.load (std::memory_order_acquire))
+    {
+        buffer.clear();
+        return;
+    }
 
     // Master bypass — entire processor passes input straight to output unchanged.
     const bool masterBypass = apvts.getRawParameterValue ("bsv_bypass")->load() > 0.5f;

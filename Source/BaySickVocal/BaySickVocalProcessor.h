@@ -35,7 +35,10 @@ class BaySickVocalProcessor : public juce::AudioProcessor,
 {
 public:
     BaySickVocalProcessor();
-    ~BaySickVocalProcessor() override = default;
+    // 2026-05-06 (Batch 9c N1): no longer defaulted -- body sets the
+    // mShuttingDown gate so subsequent processBlock entries bail before
+    // dereferencing half-destroyed members.
+    ~BaySickVocalProcessor() override;
 
     // ── AudioProcessor overrides ──────────────────────────────────────────────
     void prepareToPlay (double sampleRate, int maxBlockSize) override;
@@ -102,6 +105,21 @@ public:
     void setForcePitchBypass (bool yes) noexcept { mForcePitchBypass.store (yes, std::memory_order_release); }
     bool isForcePitchBypassed() const noexcept   { return mForcePitchBypass.load (std::memory_order_acquire); }
 
+    // 2026-05-06 (Batch 9c N1): atomic shutdown gate.  Mirrors
+    // VibeSynthProcessor::mProjectLoadInProgress.  Owners SHOULD call
+    // setShuttingDown(true) ~30 ms before destroying this instance (same
+    // pattern StandaloneEditor::closeAllDynamicTabs uses on the main
+    // processor: setProjectLoadInProgress + Thread::sleep(30)) so the
+    // audio thread sees the flag in advance of member teardown.  The
+    // destructor sets it as a final safety net; in either case, processBlock
+    // bails out early instead of dereferencing mNamIrProc / mVocalChainRack
+    // after their dtors begin (the observed crash was mNamIrProc->processBlock
+    // dispatching through a vtable already zeroed by ~BaySickNAMIRProcessor).
+    void setShuttingDown (bool b) noexcept
+        { mShuttingDown.store (b, std::memory_order_release); }
+    bool isShuttingDown() const noexcept
+        { return mShuttingDown.load (std::memory_order_acquire); }
+
     // I-16 G-9 (2026-05-03): wet recording tap.  Plugged in by
     // VibeSynthProcessor::startRecording when this strip is armed.
     // Captures the post-realtime-pitch / pre-vocal-chain signal (Option C
@@ -145,6 +163,11 @@ private:
     // because audio thread reads / message thread writes.
     std::atomic<bool> mForcePitchBypass { false };
     std::atomic<class AudioFileRecorder*> mWetRecorder { nullptr };
+
+    // 2026-05-06 (Batch 9c N1): shutdown gate (see setShuttingDown above).
+    // Audio thread reads at the top of processBlock; message thread writes
+    // from the destructor (and ideally pre-flagged by the owner).
+    std::atomic<bool> mShuttingDown { false };
 
     // H-6d (2026-05-02): owned NAM/IR processor (per-Vox-strip instance).
     // unique_ptr so the include only needs the forward declaration in

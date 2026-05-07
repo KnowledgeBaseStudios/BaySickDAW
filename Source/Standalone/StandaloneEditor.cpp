@@ -1303,6 +1303,28 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
 StandaloneEditor::~StandaloneEditor()
 {
+    // 2026-05-06 (Batch 9c B2-followup): Tear down all dynamic tabs (Vox /
+    // Inst / Clip / Layers / Bass / Drums / Rusty) THROUGH THE SAFE PATH
+    // first.  Without this, the bare mPages.clear() below would destroy
+    // VoxPages (etc.) directly, leaving the raw pointers in
+    // VibeSynthProcessor::mVoxEngines / mInstEngines / mLayerEngines /
+    // mBassEngines / mDrumEngines / mClipEngines dangling while the audio
+    // device is still running.  The audio thread's per-block iteration
+    // (PluginProcessor.cpp:2136 etc.) would then dynamic_cast through a
+    // freed vtable -> use-after-free crash inside the VC runtime's RTTI
+    // walker.  Same crash signature appeared on app close on two different
+    // save files; not addressed by the BaySickVocal N1 gate (which lives
+    // INSIDE that processor's processBlock, downstream of the dangling
+    // dereference).
+    //
+    // closeAllDynamicTabs sets setProjectLoadInProgress(true) +
+    // Thread::sleep(30) BEFORE invoking onTabClosed on each tab (which
+    // calls unregisterVoxEngine / etc. before destroying the page), then
+    // clears the gate on its way out.  By the time it returns, every
+    // engine pointer in mVox/Inst/Layer/Bass/Drum/ClipEngines is nullptr
+    // and the rest of this destructor can clear mPages safely.
+    closeAllDynamicTabs();
+
     mAutomationTimer.stopTimer();
     removeMouseListener(&mAutoRightClick);
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
@@ -9513,6 +9535,35 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
 
 void StandaloneEditor::refreshWindowTitle()
 {
+    // 2026-05-06 (Batch 9c B2): self-marshal to the message thread.
+    //
+    // Audio thread can land here via the engine dirty-hook chain:
+    //   pushApvtsToDsp -> EffectRack::setSlotBypassed
+    //                  -> rack.onSlotsChanged
+    //                  -> ApvtsDirtyTracker::onAny  (or direct rack hook)
+    //                  -> ProjectManager::markDirty
+    //                  -> ProjectManager::onDirtyChanged
+    //                  -> StandaloneEditor::refreshWindowTitle
+    //                  -> DocumentWindow::setName
+    //                  -> Win32 SetWindowText  <-- SYNCHRONOUS, blocks
+    //                                              waiting for the message
+    //                                              thread to pump.
+    //
+    // Calling SetWindowText from the audio thread can deadlock under load:
+    // audio holds an EffectRack/Vox spinlock, message thread is waiting on
+    // that lock while pumping, SetWindowText spins forever.  Marshal the
+    // GUI mutation to the message thread and bail.  SafePointer guards
+    // against the editor being torn down before the lambda runs.
+    if (! juce::MessageManager::existsAndIsCurrentThread())
+    {
+        juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+        juce::MessageManager::callAsync ([safeThis]
+        {
+            if (safeThis) safeThis->refreshWindowTitle();
+        });
+        return;
+    }
+
     juce::String title = "BaySickDAW";
     if (mProjectManager && mProjectManager->hasProject())
     {
