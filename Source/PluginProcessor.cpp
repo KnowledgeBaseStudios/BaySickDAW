@@ -2312,6 +2312,17 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // ── Batch 5 Pass 2: non-FilePlay clips per-row ──────────────────
             // The shared helper is also called by AudioInsertTask in MT mode
             // (flag still false; dead at runtime).
+            //
+            // 2026-05-06 (Batch 9b Item 10): each row uses its task-owned
+            // scratch buffer instead of the single shared mAudioClipScratch.
+            // Eliminates the cross-row decode race that would surface when
+            // kEnableMultiThreadedEngine flips and multiple AudioInsertTasks
+            // run in parallel.  Serial loop routes through the same
+            // per-task buffers so the new ownership is actively exercised
+            // under flag=false ("no dead wiring" rule).  Fallback to
+            // mAudioClipScratch only if a row has no registered task —
+            // shouldn't happen in practice (ensureAudioInsert creates the
+            // task on first use) but keeps the code defensive.
             {
                 AudioClipBlockContext clipCtx;
                 clipCtx.bpm           = bpmAC;
@@ -2323,10 +2334,15 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 clipCtx.numOut        = numOut;
                 clipCtx.masterGain    = masterGain;
                 clipCtx.mxState       = &mx;
-                clipCtx.clipScratch   = &mAudioClipScratch;
 
                 for (int row = 0; row < kMaxAudioRows; ++row)
+                {
+                    auto& task = mAudioRenderTasks[(size_t) row];
+                    clipCtx.clipScratch = task
+                        ? &task->getClipScratch (numOut, numSamples)
+                        : &mAudioClipScratch;
                     renderAudioClipsForRow (row, clipCtx, /*mtDest=*/ nullptr);
+                }
             }
 
             // 2026-04-28 (G-3): the Clips Bus pre-processing block was moved

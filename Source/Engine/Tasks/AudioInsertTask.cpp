@@ -49,14 +49,18 @@ void AudioInsertTask::run()
     // Try-lock the audio-clip vector.  In MT mode multiple AudioInsertTasks
     // can race for this lock; if a worker can't acquire it this block, its
     // row produces silence (acceptable degraded state, same shape as serial
-    // tryLk skip).  Tracked in deferred notes for Batch 9 redesign.
+    // tryLk skip).  Tracked in deferred notes for the snapshot-pattern
+    // backlog (Batch 9b).
     juce::SpinLock::ScopedTryLockType tryLk (mProcessor->mAudioClipLock);
     if (! tryLk.isLocked()) return;
 
-    // Per-task scratch is the shared mAudioClipScratch in serial; in MT this
-    // would race between rows.  For Batch 5 (dead code) we use the shared
-    // member; Batch 9 redesign needs per-task scratch.  Tracked in deferred
-    // notes.
+    // 2026-05-06 (Batch 9b Item 10): per-task scratch buffer eliminates the
+    // cross-task race that existed when every AudioInsertTask pointed at
+    // the shared VibeSynthProcessor::mAudioClipScratch.  Each task now
+    // owns its own buffer (lazy-resized on first/changing block).  The
+    // serial Pass 2 loop in PluginProcessor::processBlock also threads
+    // through these per-row buffers so the new ownership pattern is
+    // actively exercised under flag=false.
     VibeSynthProcessor::AudioClipBlockContext clipCtx;
     clipCtx.bpm           = bpm;
     clipCtx.anySolo       = mCtx->anySolo;
@@ -67,7 +71,23 @@ void AudioInsertTask::run()
     clipCtx.numOut        = blockView.getNumChannels();
     clipCtx.masterGain    = masterGain;
     clipCtx.mxState       = &mx;
-    clipCtx.clipScratch   = &mProcessor->mAudioClipScratch;
+    clipCtx.clipScratch   = &getClipScratch (blockView.getNumChannels(), n);
 
     mProcessor->renderAudioClipsForRow (mIndex, clipCtx, &blockView);
+}
+
+juce::AudioBuffer<float>& AudioInsertTask::getClipScratch (int numChannels, int numSamples)
+{
+    // setSize with avoidReallocating=true is a no-op when already at the
+    // requested geometry — cheap to call every block.  keepExistingContent
+    // is false because the buffer is rewritten by every clip decode.
+    if (mClipScratch.getNumChannels() != numChannels
+        || mClipScratch.getNumSamples() < numSamples)
+    {
+        mClipScratch.setSize (numChannels, numSamples,
+                              /*keepExistingContent*/ false,
+                              /*clearExtraSpace*/    false,
+                              /*avoidReallocating*/  true);
+    }
+    return mClipScratch;
 }

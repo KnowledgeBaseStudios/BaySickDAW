@@ -36,7 +36,25 @@ public:
 
     void run() override;
 
+    // 2026-05-06 (Batch 9b Item 10): per-task scratch buffer for clip decode +
+    // per-clip rack processing.  Pre-9b, AudioClipBlockContext::clipScratch
+    // pointed at the single shared VibeSynthProcessor::mAudioClipScratch, so
+    // multiple AudioInsertTasks running in parallel under MT would race on
+    // it (decode overwrites in-place; processInsert modifies in-place;
+    // corruption window = entire clip rendering loop).  Each task now owns
+    // its own buffer; the serial Pass 2 loop in PluginProcessor::processBlock
+    // also routes through these per-row buffers so the new ownership pattern
+    // is actively exercised under flag=false ("no dead wiring" rule).
+    //
+    // Caller passes the current block's channel count + sample count; this
+    // method resizes-if-needed (avoidReallocating=true → cheap no-op when
+    // already the right size) and returns a reference to the buffer.  Audio-
+    // thread safe: only the audio thread (serial mode) or this task's worker
+    // (MT mode) ever touches its own scratch — no cross-task contention.
+    juce::AudioBuffer<float>& getClipScratch (int numChannels, int numSamples);
+
 private:
-    int                 mIndex     = 0;
-    VibeSynthProcessor* mProcessor = nullptr;
+    int                      mIndex     = 0;
+    VibeSynthProcessor*      mProcessor = nullptr;
+    juce::AudioBuffer<float> mClipScratch;
 };
