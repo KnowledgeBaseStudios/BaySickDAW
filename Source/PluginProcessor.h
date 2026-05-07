@@ -490,19 +490,14 @@ public:
     };
     std::vector<AudioClipPlayer> mAudioClipPlayers;
     juce::SpinLock               mAudioClipLock;
-
-    // 2026-05-06 (Batch 9b backlog): block-scoped pointer snapshot of
-    // mAudioClipPlayers, built once at the top of processBlock under
-    // mAudioClipLock and read lock-free for the rest of the block by both
-    // the serial path and (when kEnableMultiThreadedEngine flips) MT mode's
-    // AudioInsertTask workers.  Replaces the per-site try-lock pattern that
-    // used to drop audio when multiple workers contended for the same
-    // SpinLock.  Pointers are stable for the duration of processBlock
-    // because the audio thread holds mAudioClipLock for the full block —
-    // the message-thread mutator (rebuildAudioClipPlayers) waits at most
-    // one block to swap the underlying vector.
-    std::vector<AudioClipPlayer*> mAudioClipPlayersSnapshot;
-    void rebuildAudioClipSnapshot();
+    // NOTE (2026-05-06): the Batch 9b "snapshot" pattern that built a
+    // pointer view of mAudioClipPlayers and read it lock-free was removed
+    // after a UAF crash — raw pointers into the vector aren't safe when
+    // the mutator's swap destroys old AudioClipStreamer instances on the
+    // message thread.  9c needs to address worker lock contention via
+    // shared_ptr<AudioClipPlayer> semantics OR a deferred-destruction queue
+    // before MT-mode workers can read clip data without blocking.  See
+    // deferred items in Files For Claude/ batch map.
 
     // ── Batch 5 (2026-05-06): shared audio-clip render path ──────────────────
     // Per-block context bundle passed into renderAudioClipsForRow.  Keeps the
@@ -606,6 +601,24 @@ public:
     // Called on Pause or Stop.  Closes all writers + returns the captured
     // files + MIDI notes + the startBeat for arrangement-row placement.
     RecordResult stopRecording();
+
+    // 2026-05-06 (Batch 9b Item 8): dry-recorder tap helper.  Locates the
+    // StripRecorder whose channelId matches and writes one block of mono
+    // input (typically a single channel of mLiveInputSnapshot).  Called
+    // from BOTH the serial Vox/Inst armed paths in processBlock and (when
+    // kEnableMultiThreadedEngine flips) VoxStripTask / InstStripTask::run.
+    // Pre-existing race hazard between iteration here and message-thread
+    // mutation in startRecording / stopRecording — same shape as pre-9b
+    // serial code, not closed in 9b.  Future hardening would either move
+    // mStripRecorders to shared_ptr-backed entries or use a small
+    // SpinLock around iteration; deferred to 9c+.
+    //
+    // monoSource: read-only mono input pointer.  Typical usage:
+    //   serial: tapDryRecorder(channelId, snapshot.getReadPointer(chIdx), n)
+    //   MT:     mProcessor->tapDryRecorder(channelId,
+    //                                       ctx->liveInputSnapshot
+    //                                          ->getReadPointer(chIdx), n)
+    void tapDryRecorder (int channelId, const float* monoSource, int numSamples);
 
     bool isRecording() const
     {

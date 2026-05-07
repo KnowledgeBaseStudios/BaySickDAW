@@ -105,6 +105,16 @@ void InstStripTask::run()
 
     if (armed)
     {
+        // 2026-05-06 (Batch 9b Item 8): dry-recorder tap (RAW pre-chain mono).
+        // Mirrors the serial path's inline loop — captured here so the recorded
+        // file is the unprocessed DI; chain runs ONCE on the dry source.
+        // Pre-existing race risk between this read of mStripRecorders and
+        // message-thread mutation in startRecording / stopRecording is
+        // documented at the helper site; not closed in 9b.
+        mProcessor->tapDryRecorder (channelId,
+                                     snapshot->getReadPointer (chIdx),
+                                     n);
+
         const int rightCh = (isStereo && chIdx + 1 < snapChs) ? (chIdx + 1) : chIdx;
         if (blockView.getNumChannels() > 0)
             blockView.copyFrom (0, 0, *snapshot, chIdx,   0, n);
