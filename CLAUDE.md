@@ -12,10 +12,15 @@ JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone
 
 ## Build System
 
-- **Build command:** Run `do_build.bat` from `C:\Users\jeffm\Documents\BaySickDAW\`
-- **Exe output:** `build\BaySickDAWStandalone_artefacts\Release\BaySickDAW.exe`
+- **Build command:** Run `do_build.bat` from `C:\Users\jeffm\Documents\BaySickDAW\`. Builds BOTH Release and Debug per QA-0a (2026-05-07).
+- **Release exe:** `build\BaySickDAWStandalone_artefacts\Release\BaySickDAW.exe` - the shipping binary, used for music production.
+- **Debug exe:** `build\BaySickDAWStandalone_artefacts\Debug\BaySickDAW.exe` - the diagnostic binary, used for verifying fixes. Window title shows `[DEBUG]` suffix. Same embedded icon (JUCE+VS multi-config gotcha; differentiation via window title only).
 - **Build dir:** `C:\Users\jeffm\Documents\BaySickDAW\build\`
-- **Header dependencies:** handled automatically by MSBuild (the generator `do_build.bat` invokes). No manual `.obj` deletion needed after header edits — just re-run `do_build.bat`.
+- **Build log:** `build_log.txt` at repo root. Two exit codes - `RELEASE_EXIT_CODE` and `DEBUG_EXIT_CODE`. Either non-zero = that config failed.
+- **Header dependencies:** handled automatically by MSBuild. No manual `.obj` deletion after header edits - just re-run `do_build.bat`.
+- **Standing rule (verifying Claude fixes):** run the Debug exe FIRST. Any `jassert` that fires shows a Windows dialog with file path + line + condition - screenshot to share. Then re-run in Release as the actual user test. Debug runs slower; audio that glitches in Debug under heavy load may be fine in Release. Always confirm in Release before declaring a real performance regression.
+- **Don't run both simultaneously.** ASIO opens audio devices exclusively (second instance gets no audio). Both exes share `Documents\BaySickDAW\settings.xml` + `audio_settings.xml` - changes in one are seen by the other on next start.
+- **MT engine in Debug:** the multi-threaded render path is a no-op under Debug (real Debug-only bug, deferred to dedicated batch). DSP meter readings in Debug always reflect single-thread cost. Use Release for any MT vs serial verification.
 
 ---
 

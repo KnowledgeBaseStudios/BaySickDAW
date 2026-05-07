@@ -3,6 +3,10 @@
 
 BaySickSynthDSP::BaySickSynthDSP()
 {
+    // QA-0a (2026-05-07): placeholder sample rate before addVoice (see
+    // VibePlayerDSP::VibeSynth ctor for full reasoning).  prepare()
+    // overwrites with the real rate before any audio processing.
+    mSynth.setCurrentPlaybackSampleRate (44100.0);
     mSynth.addSound (new SynthSound());
     for (int i = 0; i < kNumVoices; ++i)
     {
@@ -71,7 +75,7 @@ void BaySickSynthDSP::renderNextBlock (juce::AudioBuffer<float>& buf,
         mLegatoVoice     = nullptr;
         mLegatoSynthNote = -1;
 
-        // Cut-self (Session E) — Poly mode only. Inject a noteOff for the
+        // Cut-self (Session E) - Poly mode only. Inject a noteOff for the
         // incoming note before each noteOn so any voice already playing that
         // note is stopped cleanly (no phase stacking on rapid retrigs).
         if (mCutSelf)
@@ -163,7 +167,7 @@ void BaySickSynthDSP::handleLegatoMidi (juce::MidiBuffer& midi)
             else if (mLegatoVoice != nullptr && mLegatoVoice->isVoiceActive())
             {
                 // Retarget to the most recently held note still down.
-                // Do NOT pass the user's noteOff through — synth still owns the
+                // Do NOT pass the user's noteOff through - synth still owns the
                 // original note and would release the voice prematurely.
                 mLegatoVoice->retargetLegato (mLegatoHeldNotes.back());
             }
@@ -188,7 +192,7 @@ BaySickSynthVoice* BaySickSynthDSP::findVoiceForNote (int note)
 }
 
 //==============================================================================
-// ── Setters — propagate to all voices ────────────────────────────────────────
+// ── Setters - propagate to all voices ────────────────────────────────────────
 
 void BaySickSynthDSP::setWaveform (BssWaveform w)
 {

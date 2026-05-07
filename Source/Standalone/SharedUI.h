@@ -50,7 +50,7 @@ namespace VC {
     // Drums (single red, legacy)
     inline const juce::Colour DrumsCol = juce::Colour(0xffff4444);
 
-    // Drum pages D1–D16 (red family, sequenced shades, no orange/pink — Phase C
+    // Drum pages D1–D16 (red family, sequenced shades, no orange/pink - Phase C
     // Batch 5 spec).  Used by D1.3 DrumPage tabs.
     inline const juce::Colour DrumCol[16] = {
         juce::Colour(0xff4a0000), juce::Colour(0xff5e0000), juce::Colour(0xff720000), juce::Colour(0xff860000),
@@ -127,7 +127,7 @@ public:
 
 // ── VibeTooltip ───────────────────────────────────────────────────────────────
 // Global tooltip window. Renders via VibeLAF::drawTooltip / getTooltipBounds.
-// One instance owned by StandaloneEditor — applies to all child components.
+// One instance owned by StandaloneEditor - applies to all child components.
 // APVTS-bound controls append "\n*Automatable*" via VibeLAF::automatable().
 class VibeTooltip : public juce::TooltipWindow
 {
@@ -144,7 +144,7 @@ public:
     }
 };
 
-// ── LRX — Texture cache ───────────────────────────────────────────────────────
+// ── LRX - Texture cache ───────────────────────────────────────────────────────
 // Generates and caches expensive textures (brushed aluminum, Voronoi, grunge).
 // All methods are thread-safe once the image has been generated (first call on
 // the message thread). Keys are derived from type + dimensions.
@@ -161,7 +161,7 @@ private:
     static juce::Image makeFingerGrunge   (int w, int h);
 };
 
-// ── LRX — Realism drawing helpers ────────────────────────────────────────────
+// ── LRX - Realism drawing helpers ────────────────────────────────────────────
 // Shared by all LAF classes. Static-only.
 struct LRXHelper
 {
@@ -211,17 +211,17 @@ namespace Filmstrips
                    juce::Rectangle<float> destBounds);
 
     // Lazy-loaded filmstrip accessors
-    const juce::Image& dynamics();    // Dynamics Group Knobs.png  — 96x96,   31 frames
-    const juce::Image& harmonics();   // Harmonics Group Knobs.png — 128x128, 200 frames
-    const juce::Image& modulation();  // Modulation Group Knobs.png — 70x70,  101 frames
-    const juce::Image& timeBased();   // Time Based Group Knobs.png — 64x64,  101 frames
-    const juce::Image& chickenHead(); // Chicken Head.png           — 66x66,   10 frames
-    const juce::Image& fader();         // Fader Slider.png           — 128x128,  31 frames
-    const juce::Image& faderInverted(); // Fader Slider.png (pixel-inverted) — for Dynamics panel
-    const juce::Image& vuMeter();      // VU Meter.png               — 128x128, 100 frames
-    const juce::Image& switchToggle(); // Switch Toggle.png          —   46x92,   2 frames
-    const juce::Image& volumeBlack();  // Volume Black.png           —   70x70, 100 frames
-    const juce::Image& volumeWhite();  // Volume White.png           —   70x70, 100 frames
+    const juce::Image& dynamics();    // Dynamics Group Knobs.png  - 96x96,   31 frames
+    const juce::Image& harmonics();   // Harmonics Group Knobs.png - 128x128, 200 frames
+    const juce::Image& modulation();  // Modulation Group Knobs.png - 70x70,  101 frames
+    const juce::Image& timeBased();   // Time Based Group Knobs.png - 64x64,  101 frames
+    const juce::Image& chickenHead(); // Chicken Head.png           - 66x66,   10 frames
+    const juce::Image& fader();         // Fader Slider.png           - 128x128,  31 frames
+    const juce::Image& faderInverted(); // Fader Slider.png (pixel-inverted) - for Dynamics panel
+    const juce::Image& vuMeter();      // VU Meter.png               - 128x128, 100 frames
+    const juce::Image& switchToggle(); // Switch Toggle.png          -   46x92,   2 frames
+    const juce::Image& volumeBlack();  // Volume Black.png           -   70x70, 100 frames
+    const juce::Image& volumeWhite();  // Volume White.png           -   70x70, 100 frames
 }
 
 // ── PageMenuBar ───────────────────────────────────────────────────────────────
@@ -352,7 +352,7 @@ public:
 // ── MixerLedButton (5F-4a) ───────────────────────────────────────────────────
 // LED-style toggle button with a glowing colored dot and optional small label.
 // Subclasses juce::Button directly so VibeLAF's filmstrip toggle path is
-// bypassed — prevents the "stuck toggle switch" rendering on mixer strips AND
+// bypassed - prevents the "stuck toggle switch" rendering on mixer strips AND
 // the Effects page FX Bypass button. Works as a drop-in replacement for
 // juce::TextButton in toggle mode, supports ButtonAttachment.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -533,9 +533,9 @@ private:
 
 // ── Dynamics effect LookAndFeel (Compressor / Transient Shaper) ───────────────
 // Set the "knobVariant" property on each Slider to select the draw style:
-//   "modernAnalog"       — threshold/ratio knobs (dark dome + specular)
-//   "dualLayerAluminum"  — gain/makeup knobs (knurled skirt + brushed cap)
-//   "chickenHead"        — discrete selectors (beak pointer over hex-bolt base)
+//   "modernAnalog"       - threshold/ratio knobs (dark dome + specular)
+//   "dualLayerAluminum"  - gain/makeup knobs (knurled skirt + brushed cap)
+//   "chickenHead"        - discrete selectors (beak pointer over hex-bolt base)
 class DynamicsLAF : public juce::LookAndFeel_V4
 {
 public:
@@ -559,7 +559,7 @@ public:
 
     void drawLabel(juce::Graphics& g, juce::Label& label) override;
 
-    // LA-2A style white/cream panel background — called from CompressorPanel and TransientShaperPanel paint()
+    // LA-2A style white/cream panel background - called from CompressorPanel and TransientShaperPanel paint()
     static void paintLA2APanel(juce::Graphics& g, juce::Rectangle<int> bounds);
 
 private:
@@ -671,7 +671,7 @@ namespace VKnobAutomation
 
 // Attach one instance to the top-level window with wantsEventsForAllNestedChildComponents=true.
 // Intercepts right-clicks on any component whose componentID is non-empty.
-// Skips VKnob sliders (VKnob's own mouseDown handles those — they set "vknob_slider" property).
+// Skips VKnob sliders (VKnob's own mouseDown handles those - they set "vknob_slider" property).
 class GlobalAutoRightClick : public juce::MouseListener
 {
 public:
@@ -682,7 +682,7 @@ public:
         auto* comp = e.eventComponent;
         if (!comp) return;
 
-        // Skip VKnob's internal slider — identified by a property tag set in VKnob ctor.
+        // Skip VKnob's internal slider - identified by a property tag set in VKnob ctor.
         if ((bool)comp->getProperties()["vknob_slider"]) return;
 
         juce::String id = comp->getComponentID();
@@ -715,7 +715,7 @@ public:
         constexpr int kMidiFirstId = 100;
         VKnobAutomation::appendMidiLearnMenuItems (m, id, kMidiFirstId);
 
-        m.showMenuAsync(juce::PopupMenu::Options{}, [id, safeSlider](int result)
+        m.showMenuAsync(juce::PopupMenu::Options{}, [id, safeSlider, kMidiFirstId](int result)
         {
             if (result == 1 && VKnobAutomation::sOnAutomate)
                 VKnobAutomation::sOnAutomate(id);
@@ -763,7 +763,7 @@ public:
     void setLocked(bool lock);
     bool isLocked() const noexcept { return mLocked; }
 
-    // Fired on drag start/end — use these to build undo actions.
+    // Fired on drag start/end - use these to build undo actions.
     std::function<void(float beforeVal)>             onDragStarted;
     std::function<void(float beforeVal, float after)> onDragEnded;
 
@@ -794,13 +794,13 @@ private:
 // filmstrip asset (66×66, 10 frames). Supports 2–10 options.
 //
 // Interaction:
-//   • Rotary drag  — click anywhere on the knob body + drag to cycle options.
-//   • Click a letter — snap directly to that option (faster than drag).
+//   • Rotary drag  - click anywhere on the knob body + drag to cycle options.
+//   • Click a letter - snap directly to that option (faster than drag).
 //
 // Tooltips:
 //   • Hovering a letter shows that option's own tooltip.
 //   • Hovering the knob body shows the component-wide tooltip (via
-//     setBodyTooltip()) — typically the combo's overall purpose.
+//     setBodyTooltip()) - typically the combo's overall purpose.
 //
 // Caller registers onChange callback; the selected index is authoritative.
 // Use for any discrete selector with >2 options on effect panels (LFO wave,
@@ -839,7 +839,7 @@ public:
     bool isLocked() const noexcept { return mLocked; }
 
     // Default colour for un-selected, un-hovered letters. Call from panel with
-    // the colour that reads well against the panel's background — typically
+    // the colour that reads well against the panel's background - typically
     // white on dark/modulation/time/harmonic panels, black on cream dynamics
     // panels. Selected and hover colours are fixed (red palette) and apply
     // on top of this default regardless.
@@ -1115,7 +1115,7 @@ class EQ8MsDSP;
 // Supports three binding modes:
 //   1. APVTS mode (Layers page): bindAPVTS()
 //   2. DSP-direct mode (Effects page): bindDSP()
-//   3. M/S DSP mode (Effects page): bindMsDSP()  — adds Mid/Side toggle pill
+//   3. M/S DSP mode (Effects page): bindMsDSP()  - adds Mid/Side toggle pill
 class ParametricEQDisplay : public juce::Component,
                              public juce::TooltipClient
 {
@@ -1179,8 +1179,8 @@ public:
     // Mode 2: DSP-direct (Effects page single EQ)
     void bindDSP   (EQ8DSP* dsp);
 
-    // Mode 3: M/S DSP (Drums/Bass EQ — Mid/Side toggle pill shown)
-    // Basic bind — no APVTS write-back (UI changes won't survive processBlock override)
+    // Mode 3: M/S DSP (Drums/Bass EQ - Mid/Side toggle pill shown)
+    // Basic bind - no APVTS write-back (UI changes won't survive processBlock override)
     void bindMsDSP (EQ8MsDSP* msDsp);
     // Full bind with APVTS write-back so processBlock updateXxxEQ() doesn't revert UI edits
     void bindMsDSP (EQ8MsDSP* msDsp, juce::AudioProcessorValueTreeState* apvts,
@@ -1305,7 +1305,7 @@ private:
         std::unique_ptr<VibeSlider>         gainFader;  // bipolar vertical -18..+18 dB
         std::unique_ptr<VibeSlider>         freqKnob;   // rotary 20..20000 Hz
         std::unique_ptr<VibeSlider>         qKnob;      // rotary 0.1..10
-        // enableBtn removed — click the colored dot at the top of each column to toggle on/off
+        // enableBtn removed - click the colored dot at the top of each column to toggle on/off
     };
     std::array<BandControl, kNumBands> mControls;
 
@@ -1513,7 +1513,7 @@ public:
     // 2026-05-05 dirty-flag wiring: fired on every successful change
     // (no-fire on no-op when the value already matches).  StandaloneEditor
     // wires this to ProjectManager::markDirty so menu changes flip the
-    // project dirty bit — without it, VU calibration edits would only
+    // project dirty bit - without it, VU calibration edits would only
     // persist if the user explicitly saved before exiting.
     static std::function<void()> sOnCalibrationChanged;
     static float getCalibrationDb()      { return sCalibrationDb; }
@@ -1562,7 +1562,7 @@ private:
 // ── ColoredSectionLAF ────────────────────────────────────────────────────────
 // LookAndFeel override for ComboBox popup menus that draws section headings
 // as colored horizontal lines. Encode the color in the heading string using
-// the prefix "\xc2\xa7#RRGGBB\xc2\xa7" — the LAF strips this prefix, parses the color, and
+// the prefix "\xc2\xa7#RRGGBB\xc2\xa7" - the LAF strips this prefix, parses the color, and
 // draws a 2 px glowing horizontal line in that color with the remaining text
 // below in bold.
 //
@@ -1597,7 +1597,7 @@ private:
 // ── Digital peak meter (dBFS scale, green→yellow→red, peak hold) ─────────────
 // 2026-04-30: rewritten for stereo L/R + FL-parity range/scale.
 //  - Range: -60 dBFS .. +6 dBFS (headroom above 0 visible like FL).
-//  - Mapping: piecewise linear log-style — top 30 % covers -18..+6, bottom 70 %
+//  - Mapping: piecewise linear log-style - top 30 % covers -18..+6, bottom 70 %
 //    covers -60..-18 (compressed) so the dB range that matters takes the most
 //    pixels.
 //  - Inside tick labels: drawn over unlit segments, naturally covered when lit
@@ -1612,11 +1612,11 @@ public:
     DBFSMeter();
     ~DBFSMeter() override = default;
 
-    // Mono entry point — both L and R get the same value.  Audio thread
+    // Mono entry point - both L and R get the same value.  Audio thread
     // writes (CAS-loop max) into mLevelDbL/R; UI thread on every vblank
     // exchanges them with -inf to read+reset (lock-free max window pattern).
     void setLevel       (float dBFS);
-    // Stereo entry point — independent L and R levels.
+    // Stereo entry point - independent L and R levels.
     void setStereoLevel (float dBFS_L, float dBFS_R);
 
     // Back-compat no-op.  All strips now use the FL-parity range below.
@@ -1629,7 +1629,7 @@ public:
     // the mouse is over the meter.  TooltipWindow polls getTooltip() on its
     // own timer (~100 ms) so the value tracks audio in real time.  Overrides
     // SettableTooltipClient::getTooltip so any setTooltip() call still
-    // gets ignored — the dynamic per-channel string takes precedence.
+    // gets ignored - the dynamic per-channel string takes precedence.
     juce::String getTooltip() override;
 
     // 2026-05-02: vblank-locked refresh.  Replaces the old 60 Hz Timer so
@@ -1661,7 +1661,7 @@ private:
     // ballistics consistent across 60/120/144 Hz monitors.
     double mLastVBlankMs { 0.0 };
 
-    // FL-parity range — top has +6 dB headroom above 0 dBFS so peaks above
+    // FL-parity range - top has +6 dB headroom above 0 dBFS so peaks above
     // the digital ceiling are still visible.
     static constexpr float kFloor             = -60.f;
     static constexpr float kCeiling           =   6.f;

@@ -61,6 +61,14 @@ set(VIBESYNTH_DEFS
     # .mp3 drops on Builder + Clips empty-state to actually decode (default
     # JUCE flag was 0 due to pre-2017 patent concerns that no longer apply).
     JUCE_USE_MP3AUDIOFORMAT=1
+    # QA-0a (2026-05-07): silence two AAX-format paramID asserts in JUCE's
+    # validateParameter (paramID-too-long, paramID-trimmed-duplicate).
+    # BaySickDAW is standalone-only -- no AAX target -- so these checks are
+    # irrelevant.  JUCE's own comment recommends this define as the silence
+    # mechanism (juce_AudioProcessor.cpp lines 469 + 480).  Without this,
+    # Debug builds break hundreds of times during cold start as our long /
+    # similar-prefix mixer-strip paramIDs trip the AAX trim check.
+    JUCE_DISABLE_CAUTIOUS_PARAMETER_ID_CHECKING=1
 )
 
 # ── ASIO (Steinberg) ─────────────────────────────────────────────────────────

@@ -2,6 +2,9 @@
 
 HarmlessSynth::HarmlessSynth()
 {
+    // QA-0a (2026-05-07): placeholder sample rate before addVoice (see
+    // VibePlayerDSP::VibeSynth ctor for full reasoning).
+    mSynth.setCurrentPlaybackSampleRate (44100.0);
     mSynth.addSound (new SynthSound());
 
     for (int i = 0; i < kNumVoices; ++i)
@@ -70,7 +73,7 @@ void HarmlessSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
 {
     applyStrum (midi, buffer.getNumSamples());
 
-    // Session E — Cut Self: inject a noteOff for each incoming noteOn so any
+    // Session E - Cut Self: inject a noteOff for each incoming noteOn so any
     // voice already playing that note is stopped cleanly. Prevents phase
     // stacking on rapid retrigs of the same note.
     if (mCutSelf)
@@ -90,7 +93,7 @@ void HarmlessSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
         midi.swapWith (processed);
     }
 
-    // 2026-04-30: T2-B lfo_vel — note-on velocity scaling.  If the global
+    // 2026-04-30: T2-B lfo_vel - note-on velocity scaling.  If the global
     // lfo_vel slider is non-zero, sample the LFO at the START of this block
     // (block-rate is plenty for an LFO at sub-Hz to ~10 Hz rates) and scale
     // every incoming noteOn's velocity by 1 + LFO * depth * 0.5.  Result:
@@ -143,7 +146,7 @@ void HarmlessSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
 
     // S4 Batch 2b: aggregate SynthLevel mod targets across voices using the
     // "loudest voice wins" rule and apply to the output phaser before it
-    // processes this block. Updates are block-rate — audibly smooth given
+    // processes this block. Updates are block-rate - audibly smooth given
     // typical 32-512 sample blocks.
     {
         float bestLevel    = -1.0f;
@@ -414,7 +417,7 @@ void HarmlessSynth::applyGlobalLfoToAllTargets (int rateIdx, int shape, bool tem
 void HarmlessSynth::applyGlobalLfoVolDepth (float depth) noexcept
 {
     // The Volume mod target was registered with paramId pid("volume") in
-    // HarmlessProcessor::registerModTargets — but that paramId already
+    // HarmlessProcessor::registerModTargets - but that paramId already
     // includes the per-track prefix (e.g. "tk_lay_0_harm_volume").  We can't
     // reconstruct the full id here; loop the targets and match the suffix
     // instead.  16 targets, called only when the user moves the slider, so
@@ -459,7 +462,7 @@ void HarmlessSynth::setGlobalLfoVelRate (float rateLen, int shape, bool tempoSyn
 void HarmlessSynth::tickGlobalLfoVel (int numSamples) noexcept
 {
     // Period in seconds: rateLen / bps when tempo-synced, else rateLen
-    // already in seconds.  Always uses the current bps — so BPM changes
+    // already in seconds.  Always uses the current bps - so BPM changes
     // mid-session shift the LFO period the next block, no recompute call
     // needed from the processor side.
     const float periodSec = mGlobalLfoTempoSync
@@ -536,7 +539,7 @@ void HarmlessSynth::setPartBShape (int shape)
 }
 
 //==============================================================================
-// Spectral module setters — set amount on both engines and rebuild wavetables.
+// Spectral module setters - set amount on both engines and rebuild wavetables.
 
 void HarmlessSynth::setPrismAmount (float amount)
 {
@@ -601,7 +604,7 @@ void HarmlessSynth::setBrownianAmountA   (float a) { mPartA.setBrownianAmount (a
 void HarmlessSynth::setBrownianAmountB   (float a) { mPartB.setBrownianAmount (a);   mPartB.requestRebuild(); }
 
 //==============================================================================
-// Strum preprocessing — staggers simultaneous note-ons across time.
+// Strum preprocessing - staggers simultaneous note-ons across time.
 // Uses a fixed-size stack buffer; no heap allocation on the audio thread.
 
 void HarmlessSynth::applyStrum (juce::MidiBuffer& midi, int numSamples)
@@ -625,7 +628,7 @@ void HarmlessSynth::applyStrum (juce::MidiBuffer& midi, int numSamples)
     }
 
     if (noteCount <= 1)
-        return;   // nothing to stagger — leave midi unchanged
+        return;   // nothing to stagger - leave midi unchanged
 
     // Sort / shuffle according to strum direction.
     if (mStrumDir == 1)

@@ -84,7 +84,7 @@ void VibeSampleManager::loadSFZ (const juce::File& sfzFile)
 }
 
 //==============================================================================
-// SFZ parser — handles the most common opcodes.
+// SFZ parser - handles the most common opcodes.
 // Format: opcodes as key=value pairs after a <region> header.
 // Comments: // to end of line.
 void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
@@ -96,7 +96,7 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
     VibeRegion current;
     bool inRegion  = false;
     bool inControl = false;
-    juce::String defaultPath;   // from <control> default_path= — prepended to all sample= values
+    juce::String defaultPath;   // from <control> default_path= - prepended to all sample= values
 
     auto flushRegion = [&]()
     {
@@ -130,7 +130,7 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
         }
         else if (line.startsWithChar ('<'))
         {
-            // <group>, <global>, etc. — flush current region, stop accumulating
+            // <group>, <global>, etc. - flush current region, stop accumulating
             flushRegion();
             inControl = false;
             continue;
@@ -147,7 +147,7 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
 
         if (!inRegion) continue;
 
-        // ── sample= (read to EOL — path may contain spaces) ──────────────────
+        // ── sample= (read to EOL - path may contain spaces) ──────────────────
         {
             auto v = sfzOpcode (line, "sample", true);
             if (v.isNotEmpty())
@@ -240,7 +240,7 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
 // Extract the value for a given opcode key from a line of SFZ text.
 // Returns empty string if not found.
 // readToEOL=true is used for path-type opcodes (sample=, default_path=) whose
-// values may contain spaces — those read to end of line rather than stopping at
+// values may contain spaces - those read to end of line rather than stopping at
 // the first whitespace.
 juce::String VibeSampleManager::sfzOpcode (const juce::String& line, const char* key,
                                              bool readToEOL)
@@ -767,7 +767,7 @@ void VibeVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
 }
 
 //==============================================================================
-// Parameter setters — called from VibeSynth::forEachVoice.
+// Parameter setters - called from VibeSynth::forEachVoice.
 // CPU-safe: voices cache their own values; VibeSynth guards before broadcast.
 void VibeVoice::setFilterParams (float cutoffHz, float q) noexcept
 {
@@ -821,6 +821,13 @@ void VibeVoice::setAdsr (float a, float d, float s, float r) noexcept
 
 VibeSynth::VibeSynth()
 {
+    // QA-0a (2026-05-07): set a placeholder sample rate before adding voices.
+    // JUCE's Synthesiser::addVoice propagates the synth's current sample rate
+    // to each new voice via setCurrentPlaybackSampleRate.  Without a non-zero
+    // value here, every voice's ADSR + StateVariableTPTFilter trip Debug
+    // asserts during construction (Release silently accepts 0).  prepare()
+    // overwrites with the real rate before any audio processing.
+    mSynth.setCurrentPlaybackSampleRate (44100.0);
     mSynth.addSound (new VibeSynthSound());
     for (int i = 0; i < kMaxVoices; ++i)
         mSynth.addVoice (new VibeVoice (mManager));
@@ -884,7 +891,7 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
 
             // ── Same-pitch preemption (bug fix 2026-04-21, revised) ─────────
             // Soft-stop any voice already playing this pitch (tail-off via
-            // ADSR release — avoids clicks on tonal sources like violin).
+            // ADSR release - avoids clicks on tonal sources like violin).
             // Combined with the per-pitch note-off strip below, this prevents
             // juce::Synthesiser's note-off matching from cascading onto a
             // newly allocated voice for the same pitch. Standard sampler
@@ -952,7 +959,7 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
                 if (activeCount >= cap && oldest)
                     oldest->stopNote (0.f, false);
 
-                // Pre-tag all voices with cents_i — juce::Synthesiser::noteOn will
+                // Pre-tag all voices with cents_i - juce::Synthesiser::noteOn will
                 // allocate exactly one idle voice and call startNote synchronously,
                 // which consumes mNextUnisonCents and resets it to 0.
                 forEachVoice ([cents_i] (VibeVoice& v) { v.setNextUnisonCents (cents_i); });
@@ -962,7 +969,7 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
         }
         else
         {
-            // Per-pitch note-off strip (always on — paired with per-pitch preempt).
+            // Per-pitch note-off strip (always on - paired with per-pitch preempt).
             // Drop any note-off whose pitch has a later-or-equal note-on in the
             // same block: that stale note-off would kill the fresh voice.
             if (msg.isNoteOff())
@@ -1029,7 +1036,7 @@ void VibeSynth::allNotesOff()
 }
 
 //==============================================================================
-// CPU-guarded parameter setters — only push to voices when value actually changed.
+// CPU-guarded parameter setters - only push to voices when value actually changed.
 
 void VibeSynth::setFilterParams (float cutoffHz, float resonance) noexcept
 {
@@ -1097,9 +1104,9 @@ void VibeSynth::setTreble (float treble) noexcept
     mLastTreble  = treble;
     // Bug fix 2026-04-21: APVTS range is -12..+12 (centered 0 = flat).
     // Map linearly to gain multiplier for high component:
-    //   treble = 0    → mTrebleGain = 0   (flat — no boost/cut)
+    //   treble = 0    → mTrebleGain = 0   (flat - no boost/cut)
     //   treble = +12  → mTrebleGain = +1  (~+6 dB shelf at 8 kHz)
-    //   treble = -12  → mTrebleGain = -1  (full high cut — cancels highs)
+    //   treble = -12  → mTrebleGain = -1  (full high cut - cancels highs)
     mTrebleGain  = juce::jlimit (-1.f, 1.f, treble / 12.f);
 }
 

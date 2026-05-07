@@ -1,5 +1,5 @@
 ﻿#include "PluginProcessor.h"
-// 2026-04-25: BaySickDrumsProcessor include removed — class deleted.
+// 2026-04-25: BaySickDrumsProcessor include removed - class deleted.
 #include "BaySickSynth/BaySickSynthProcessor.h"   // D1.4-fix (c): drum transpose compensation
 #include "BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-5: singleton sfizz drum-kit engine
 #include "BaySickGuitars/BaySickGuitarsProcessor.h"        // K-2: per-instance sfizz guitar engines
@@ -14,7 +14,7 @@
 
 // 2026-04-30 (audit C11+C12): emit a noteOn with the per-note panning +
 // fine-pitch values carried as standard MIDI CC10 + PitchWheel.  Was the
-// missing half of the piano roll's Panning + Pitch Bend control lanes —
+// missing half of the piano roll's Panning + Pitch Bend control lanes -
 // users could draw values, the project saved them, but no audio response.
 // Channel-wide (not MPE), so chord-with-mixed-per-note-pan behaves as
 // "last note wins" for the channel state.  Acceptable for melodic lines.
@@ -33,7 +33,7 @@ static void emitPianoNoteOn (juce::MidiBuffer& dst,
         dst.addEvent (juce::MidiMessage::controllerEvent (ch, 10, pan), samplePos);
     }
     // PitchWheel: 14-bit, center 8192.  finePitch is documented as
-    // ±100 cents, mapped to ±4096 from center — i.e. ±50 % of a typical
+    // ±100 cents, mapped to ±4096 from center - i.e. ±50 % of a typical
     // ±2-semitone synth pitch-bend range = ±1 semitone in the synth's
     // tuning.  Synths with non-default pitch-bend ranges will scale.
     if (std::abs (note.finePitch) > 0.005f)
@@ -84,7 +84,7 @@ VibeSynthProcessor::createParameterLayout()
 
     // Master
     addF("masterGain", "Master Gain", 0.f, 1.f, 0.8f);
-    // Global "kill-all" — when true, every effects rack in the app is bypassed
+    // Global "kill-all" - when true, every effects rack in the app is bypassed
     // regardless of its own _bypass state. Read by each bus/insert node per block.
     addB("master_fx_bypass", "Master FX Bypass", false);
 
@@ -126,12 +126,15 @@ VibeSynthProcessor::VibeSynthProcessor()
         // J-A2 (2026-05-04): bumped 16 -> 64 to cover Tascam Model 24 (22 in),
         // Behringer X32 (32 in), Yamaha O1V (24 in), and other large interfaces.
         // JUCE clamps to the device's actual input count, so a 2-input USB
-        // headset still gets 2 channels — only the upper bound moved.
+        // headset still gets 2 channels - only the upper bound moved.
         .withInput ("Input",  juce::AudioChannelSet::discreteChannels(64), true)
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "BaySickDAWState", createParameterLayout())
 {
     // Set up polyphonic synth -- 8 voices
+    // QA-0a (2026-05-07): placeholder sample rate before addVoice (see
+    // VibePlayerDSP::VibeSynth ctor for full reasoning).
+    mSynth.setCurrentPlaybackSampleRate (44100.0);
     mSynth.addSound(new SynthSound());
     for (int i = 0; i < 8; ++i)
         mSynth.addVoice(new SynthVoice());
@@ -262,7 +265,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     mVibeGraph.prepare(sampleRate, samplesPerBlock);
 
     // Build the fixed bus topology the first time; no-op on subsequent calls.
-    // §P4.3 B7: drumsEQ ref removed — DrumsBusNode now uses its own preEq member
+    // §P4.3 B7: drumsEQ ref removed - DrumsBusNode now uses its own preEq member
     // (sync'd via updateAllPreRackEQsFromApvts from mixer_drumsbus_preeq_*).
     mVibeGraph.buildFixedTopology(mSynth, mBassSynth, apvts);
 
@@ -274,7 +277,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // 2026-05-06 (Batch 9b): register peak-meter atomic refs for the buses
     // whose DSP migrated into VibeGraph::processBus.  Layers/Bass/Drums/
     // Master/FxBus carry their own peak atomics on their BusNode and don't
-    // need registration.  Idempotent — registerBusPeakAtomics overwrites the
+    // need registration.  Idempotent - registerBusPeakAtomics overwrites the
     // table entry, so repeated prepareToPlay calls (block-size / sample-rate
     // changes) just rewrite the same pointers.
     mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kClipsBus,
@@ -322,7 +325,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     // ── Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06) ───────
     // Resize the cache-aligned arena to fit the new block size and clear any
-    // stale tasks from the pool's queues. The pool itself is NOT recreated —
+    // stale tasks from the pool's queues. The pool itself is NOT recreated -
     // workers persist for the plugin's lifetime per the lifetime contract.
     // Sample-rate / block-size changes only touch the arena views.
     mRenderArena.prepare (samplesPerBlock);
@@ -331,7 +334,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     // Batch 7 (2026-05-06): register the 11 always-on bus PassiveStripTasks
     // here (after buildFixedTopology so VibeGraph bus nodes exist).
-    // Idempotent — guarded by null checks so prepareToPlay can be called
+    // Idempotent - guarded by null checks so prepareToPlay can be called
     // repeatedly (sample-rate / buffer changes).  Master is excluded; it
     // gets its own MasterTask in Batch 8.
     static constexpr std::array<int, kNumBatch7Buses> kBusChannelIds = {
@@ -358,7 +361,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     }
 
     // Batch 8 (2026-05-06): register the always-on MasterTask.  Idempotent
-    // — guarded by null check.  Must be registered AFTER the bus tasks
+    // - guarded by null check.  Must be registered AFTER the bus tasks
     // (above) so rebuildLinks finds the buses as predecessors of master.
     if (! mMasterRenderTask)
     {
@@ -386,7 +389,7 @@ bool VibeSynthProcessor::isBusesLayoutSupported(const BusesLayout& layouts) cons
 // ── Batch 5 (2026-05-06): routeInsertOutput member function ──────────────────
 // Promoted from a stack lambda inside processBlock so helpers + render tasks
 // outside that scope can call it.  Behavior is identical to the previous
-// lambda — fan source's output buffer to every destination in the routing
+// lambda - fan source's output buffer to every destination in the routing
 // graph (main-out + sends), plus copy into any sidechain receive slots.
 void VibeSynthProcessor::routeInsertOutput (int srcChannelId,
                                              const juce::AudioBuffer<float>& buf,
@@ -636,7 +639,7 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
         mVibeGraph.processInsert (VibeGraph::InsertKind::Audio, row,
                                    clipScratch, ctx.bpm, ctx.anySolo);
 
-        // 2026-05-02: drain-and-merge — exchange the InsertNode's L/R peaks
+        // 2026-05-02: drain-and-merge - exchange the InsertNode's L/R peaks
         // and CAS-max into the audio-row mirror.
         const auto [pkL, pkR] = mVibeGraph.drainInsertPeakDbStereo (
             VibeGraph::InsertKind::Audio, row);
@@ -809,7 +812,7 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
                 }
             }
         }
-        // gotRaw false: expectedFilePos NOT advanced — retry next block.
+        // gotRaw false: expectedFilePos NOT advanced - retry next block.
     }
     else
     {
@@ -873,7 +876,7 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
         for (int ch = 0; ch < copyCh; ++ch)
             mVoxEngineScratch.copyFrom (ch, 0, clipScratch, ch, 0, numSamples);
 
-        // setForcePitchBypass(true) — realtime pitch was baked into the wet
+        // setForcePitchBypass(true) - realtime pitch was baked into the wet
         // recording at capture time, so don't double-apply on FilePlay.
         if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
             vp->setForcePitchBypass (true);
@@ -934,7 +937,7 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
 void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                        juce::MidiBuffer& midiMessages)
 {
-    // 2026-05-06: project-load barrier — bail immediately if the message
+    // 2026-05-06: project-load barrier - bail immediately if the message
     // thread is mid-teardown (closeAllDynamicTabs / openProject /
     // restoreBackup).  Prevents use-after-free crashes inside engines
     // currently being destroyed (NAMIR + MicPlacementDSP IIR filter
@@ -1015,7 +1018,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // updateAllPreRackEQsFromApvts pass below.
     // §P4.3 perf: dirty-flag short-circuit.  EQ sync only runs in blocks where
     // an APVTS param actually changed (listener flips the flag).  Untouched
-    // blocks pay 1 atomic load + skip — eliminates ~1.4M string-concat hash
+    // blocks pay 1 atomic load + skip - eliminates ~1.4M string-concat hash
     // lookups/sec that were happening on the audio thread.
     if (mEQsDirty.exchange(false, std::memory_order_acquire))
     {
@@ -1114,7 +1117,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             if (mSongMode.load(std::memory_order_relaxed))
             {
                 // Fire pending note-offs in this block's window BEFORE scheduling new ons.
-                // (Same pattern as pattern-mode branch — prevents stuck notes when
+                // (Same pattern as pattern-mode branch - prevents stuck notes when
                 // blocks end mid-note.)
                 {
                     std::vector<PRPendingOff> keep;
@@ -1165,9 +1168,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     mPRPendingOffs = std::move(keep);
                 }
 
-                // Detect song end — request transport stop (or let playhead
+                // Detect song end - request transport stop (or let playhead
                 // wrap via mLoopBeats, which is set by the UI when loop mode is on).
-                // 2026-04-26: also fire stop when songEnd <= 0 in play-through —
+                // 2026-04-26: also fire stop when songEnd <= 0 in play-through -
                 // empty arrangement was previously playing indefinitely because the
                 // `songEnd > 0` guard skipped this block entirely.
                 const double songEnd = mSongEndBeats.load(std::memory_order_relaxed);
@@ -1178,7 +1181,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 }
 
                 // Schedule notes from all Pattern arrangement blocks that overlap current beat range.
-                // No loop wrap — playhead advances linearly until stop.
+                // No loop wrap - playhead advances linearly until stop.
                 // C.5b (post-revert): Builder grid is uniform 4-beat-per-bar
                 // (song-level TS markers are decorative-only).  Block start/end
                 // are simple bar*4.  Pattern's own loop length uses the
@@ -1239,7 +1242,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     // D1.2: per-drum-page rolls (dynamic-drum model).  Bypass
                     // when no DrumPage tabs exist (D1.3+).
                     // D1.4-fix (c) revert: NO transpose compensation.  Preset
-                    // transpose IS the sound design — it positions the drum's
+                    // transpose IS the sound design - it positions the drum's
                     // acoustic frequency relative to the C5 trigger.  Sending
                     // the raw pitch lets each drum play its native voice when
                     // triggered from C5; pitches above/below C5 retune from
@@ -1293,7 +1296,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                 // K-3 / L-2 (2026-05-05): only dispatch the Inst
                                 // piano roll for sfizz-source pages (Guitars /
                                 // Basses).  Live-input Inst pages have no MIDI-
-                                // driven engine — the chain is fed by ASIO +
+                                // driven engine - the chain is fed by ASIO +
                                 // recorded clips, so notes scheduled into
                                 // instPageMidi[ii] would just be dropped by
                                 // Pedals/NAMIR.
@@ -1317,7 +1320,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                          mRustyDrumsMidi, kRustyPRTarget);
                     }
 
-                    // 2026-04-25: legacy sPat.drumRoll dispatch removed —
+                    // 2026-04-25: legacy sPat.drumRoll dispatch removed -
                     // notes are now in sPat.drumRolls[di] and dispatched
                     // through D1.2 per-drum loop above.
                 }
@@ -1332,7 +1335,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // kWrapSlop = one block's worth of beats.  After a loop wrap, beatStart lands
             // slightly past 0 (e.g. 0.021 beats) due to fmod float arithmetic, so a note
             // at beat 0 would be missed without extending the window backward.
-            // We ONLY extend the window on jumped (post-wrap) blocks — applying it to every
+            // We ONLY extend the window on jumped (post-wrap) blocks - applying it to every
             // block would create a double-trigger: block N bumps beat-0's absStart to patLen
             // (falls in upper window) AND block N+1 catches it via the slop (lower window).
             const double kWrapSlop = beatEnd - beatStart;
@@ -1341,9 +1344,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
             if (jumped)
             {
-                // Loop restart (seek or wrap) — fire per-note offs for each pending voice
+                // Loop restart (seek or wrap) - fire per-note offs for each pending voice
                 // so their release envelopes play naturally.  allNotesOff() does a hard
-                // kill on ALL channel-1 voices (click + cuts layer/bass cross-page) —
+                // kill on ALL channel-1 voices (click + cuts layer/bass cross-page) -
                 // per-note offs only affect voices we actually started.
                 for (auto& off : mPRPendingOffs)
                 {
@@ -1428,7 +1431,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     double absStart = baseLoop + note.startBeat;
                     // Bump notes that fall behind the bump threshold into this cycle.
                     if (absStart < beatStart - kWrapSlop) absStart += patLen;
-                    // If absStart landed AT or past patLen in a straddling block, skip it —
+                    // If absStart landed AT or past patLen in a straddling block, skip it -
                     // the next (jumped) block will catch it via the windowStart slop.
                     if (absStart >= patLen && beatEnd > patLen) continue;
                     if (absStart >= windowStart && absStart < beatEnd)
@@ -1464,7 +1467,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             }
 
             // D1.2: per-drum-page rolls (dynamic-drum model).  Bypass when
-            // no DrumPage tabs exist (D1.3+).  No transpose compensation —
+            // no DrumPage tabs exist (D1.3+).  No transpose compensation -
             // see song-mode block above for rationale.
             if (mAnyDrumPageActive.load(std::memory_order_acquire))
             {
@@ -1492,11 +1495,11 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 }
             }
 
-            // 2026-04-25: legacy pat.drumRoll dispatch removed —
+            // 2026-04-25: legacy pat.drumRoll dispatch removed -
             // notes are now in pat.drumRolls[di] and dispatched
             // through D1.2 per-drum loop above.
 
-            // G-3 (2026-04-28): per-clip-page rolls — pattern mode.  Mirrors
+            // G-3 (2026-04-28): per-clip-page rolls - pattern mode.  Mirrors
             // the drum loop above; bypass when no Clips tabs are active.
             if (mAnyClipPageActive.load(std::memory_order_acquire))
             {
@@ -1524,7 +1527,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 }
             }
 
-            // G-4 (2026-04-28): per-Vox / per-Inst-page rolls — pattern mode.
+            // G-4 (2026-04-28): per-Vox / per-Inst-page rolls - pattern mode.
             if (mAnyVoxPageActive.load(std::memory_order_acquire))
             {
                 juce::SpinLock::ScopedTryLockType vlk(mVoxEngineLock);
@@ -1582,7 +1585,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 }
             }
 
-            // J-7b (2026-05-03): BaySickRustyDrums singleton roll — pattern mode.
+            // J-7b (2026-05-03): BaySickRustyDrums singleton roll - pattern mode.
             // Mirrors the per-engine loops above; bypass via mRustyDrumsActive.
             if (mRustyDrumsActive.load(std::memory_order_acquire))
             {
@@ -1729,7 +1732,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
     // Batch 9a (2026-05-06): rebuild render-graph predecessor / child links
     // from the freshly-rebuilt RoutingGraph.  Runs on EVERY block regardless
-    // of kEnableMultiThreadedEngine — keeps the new plumbing actively
+    // of kEnableMultiThreadedEngine - keeps the new plumbing actively
     // exercised in serial mode (per Jeff's "no dead wiring" rule) so any
     // bug in rebuildLinks surfaces today, not when the flag flips.  The
     // serial path doesn't read mPredecessors; the MT path will once
@@ -1749,7 +1752,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // 5F-4b B1b: routeInsertOutput is a private member function (Batch 5
     // promoted it from a stack lambda).  Existing call sites below resolve
     // to the member; the routing-graph getters are now re-fetched per call
-    // (cheap — const ref to a vector).
+    // (cheap - const ref to a vector).
     const double bpmForInserts = pos.getBpm().orFallback(120.0);
 
     // C.3 (2026-04-30): drain hardware MIDI input collector and route into
@@ -1757,7 +1760,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // engine (set via setLiveMidiTarget on focus change).  Runs before
     // choke-group dispatch so live note-ons participate in the same choke
     // semantics as piano-roll scheduled notes.  Q3 spec: only Layer / Bass
-    // / Drum receive — Vox / Inst / Clip / DrumKit grid drop.
+    // / Drum receive - Vox / Inst / Clip / DrumKit grid drop.
     {
         juce::MidiBuffer liveMidi;
         mLiveMidiCollector.removeNextBlockOfMessages (liveMidi, numSamples);
@@ -1893,7 +1896,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
     // C.4 Phase 2.2: helper that pushes the strip's SC array to the engine
     // via ISidechainEngine, then calls the engine's processBlock.  The cast
-    // is safe — every engine processor type registered into mLayerEngines /
+    // is safe - every engine processor type registered into mLayerEngines /
     // mBassEngines / mDrumEngines / mClipEngines / mVoxEngines / mInstEngines
     // inherits ISidechainEngine.  dynamic_cast cost is acceptable here (one
     // per active engine per block).
@@ -1920,7 +1923,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 mLayerEngineScratch.clear();
                 pushScToEngine(mLayerEngines[i], MixerChannelIds::layerInsert(i));
                 mLayerEngines[i]->processBlock(mLayerEngineScratch, layerPageMidi[i]);
-                // §P4.3 B7: legacy per-page pre-rack EQ removed — pre-rack EQ is
+                // §P4.3 B7: legacy per-page pre-rack EQ removed - pre-rack EQ is
                 // now the InsertNode's own preEq member (runs inside processInsert).
                 // 5F-4a Batch 6: InsertNode (polarity → preEq → width → rack →
                 // post-rack EQ → fader × mute × solo → PDC → peak)
@@ -1935,7 +1938,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
     // Guard against NaN/Inf from engine processors reaching the hardware.
     // Windows WASAPI silences the entire device stream when it sees NaN output.
-    // Use a sum-based check — SIMD getMagnitude() may silently swallow NaN.
+    // Use a sum-based check - SIMD getMagnitude() may silently swallow NaN.
     {
         float check = 0.0f;
         if (mLayerEngineSum.getNumChannels() > 0)
@@ -1961,7 +1964,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 mBassEngineScratch.clear();
                 pushScToEngine(mBassEngines[i], MixerChannelIds::bassInsert(i));
                 mBassEngines[i]->processBlock(mBassEngineScratch, bassPageMidi[i]);
-                // §P4.3 B7: legacy per-page pre-rack EQ removed — see Layer loop.
+                // §P4.3 B7: legacy per-page pre-rack EQ removed - see Layer loop.
                 // 5F-4a Batch 6: InsertNode handles polarity/preEq/width/rack/EQ/fader/mute/solo
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Bass, i,
                                           mBassEngineScratch, bpmForInserts, anySolo);
@@ -2025,7 +2028,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // blocks, skip processStrips + the per-strip insert/route loop.
             // Drum kits release fast (no long sustain), so this kicks in
             // quickly after the last hit.  Big win because Rusty has 13
-            // strips — each one runs an InsertNode pipeline per block.
+            // strips - each one runs an InsertNode pipeline per block.
             const bool midiEmpty = mRustyDrumsMidi.getNumEvents() == 0;
             const bool noVoices  = mRustyDrumsEngine->getNumActiveVoices() == 0;
             bool suspended = false;
@@ -2077,7 +2080,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // through the existing Audio InsertNode for the bound row (clip-page-index
     // = audio-row-index, 1:1 mapping per VibesynthConstants.h).  In song mode
     // the row's InsertNode is also processed by the audio_clip_players loop
-    // below (arrangement-playback path) — both paths feed the same rack /
+    // below (arrangement-playback path) - both paths feed the same rack /
     // EQ / fader sequentially.  Fast-path bypass via mAnyClipPageActive.
     if (mAnyClipPageActive.load(std::memory_order_acquire))
     {
@@ -2250,7 +2253,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 // K-2 / L-2 (2026-05-05): when this Inst slot's source =
                 // BaySickGuitars or BaySickBasses, the engine chain has the
                 // sfizz processor as its first stage and produces audio from
-                // piano-roll MIDI — no live input is copied into the scratch.
+                // piano-roll MIDI - no live input is copied into the scratch.
                 // The chain's processBlock will fill the cleared buffer with
                 // sfizz output, then run Pedals/NAMIR on it.
                 const bool guitarsActive = mGuitarsActive[ii].load (std::memory_order_acquire);
@@ -2340,7 +2343,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── Audio clip playback — runs BEFORE VibeGraph so master rack sees clips ─────
+    // ── Audio clip playback - runs BEFORE VibeGraph so master rack sees clips ─────
     // Signal chain per clip: per-clip rack → per-clip fader/mute → bus accumulator
     // Then: bus rack → bus fader/mute → passed into VibeGraph as audioClipsPreRendered
     double bpm = pos.getBpm().orFallback(120.0);
@@ -2428,7 +2431,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // run in parallel.  Serial loop routes through the same
             // per-task buffers so the new ownership is actively exercised
             // under flag=false ("no dead wiring" rule).  Fallback to
-            // mAudioClipScratch only if a row has no registered task —
+            // mAudioClipScratch only if a row has no registered task -
             // shouldn't happen in practice (ensureAudioInsert creates the
             // task on first use) but keeps the code defensive.
             //
@@ -2454,7 +2457,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── G-3 (2026-04-28): Clips Bus pre-processing — runs in BOTH song and
+    // ── G-3 (2026-04-28): Clips Bus pre-processing - runs in BOTH song and
     //    pattern modes so Clip engines triggered via piano roll always reach
     //    the master rack.  In song mode the accumulator also contains
     //    arrangement-playback audio summed in by the audio_clip_players loop
@@ -2472,7 +2475,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // VibeGraph::processBus.  Same chain (preEq -> rack -> postEq ->
             // polarity/width -> fader x mute x in-group solo -> pan -> peak
             // meter); same APVTS reads; same 6-bus localAnySolo formula
-            // (preserved bug-for-bug — see processBus comment).  The
+            // (preserved bug-for-bug - see processBus comment).  The
             // anySolo arg is ignored for kClipsBus; processBus re-derives
             // the receive-group flag internally because this block runs
             // BEFORE the Vox/Inst BusSet[] loop's busAnySolo is computed.
@@ -2519,9 +2522,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         // same DSP shape (preEq -> rack -> postEq -> polarity/width -> fader
         // x mute x in-group solo -> pan -> peak meter), so the for-loop is
         // now just a list of channel IDs that processBus dispatches on.
-        // routeInsertOutput remains here (caller responsibility — processBus
+        // routeInsertOutput remains here (caller responsibility - processBus
         // does DSP only).
-        // 2026-04-29: project-level pan law selector — each bus reads it once
+        // 2026-04-29: project-level pan law selector - each bus reads it once
         // per block when applying its _pan param.
         const int panLaw =
             (apvts.getRawParameterValue("master_pan_law") != nullptr)
@@ -2545,7 +2548,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             || soloOf ("mixer_fx");   // C.1: FX Bus joins receive-group solo
 
         // G-6 (2026-04-29): secondary buses always processed (cheap when no
-        // inserts route to them — buffer is silent).  UI activation (Mixer
+        // inserts route to them - buffer is silent).  UI activation (Mixer
         // "Add Vox/Inst Bus" button) is independent of audio path.
         for (const int busChId : { MixerChannelIds::kVoxBus,
                                     MixerChannelIds::kInstBus,
@@ -2649,7 +2652,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // via routeInsertOutput) into VibeGraph as preRendered inputs. Direct-to-
     // Master routing is picked up inside VibeGraph::processBlock via the kMaster
     // accumulator. The legacy mLayerEngineSum/mBassEngineBuf/mDrumsEngineBuf
-    // kind-sum buffers are no longer authoritative — kept compiled for back-compat
+    // kind-sum buffers are no longer authoritative - kept compiled for back-compat
     // but no longer consumed.
     auto* layersIn = mVibeGraph.getChannelAccumulator(MixerChannelIds::kLayersBus);
     auto* bassIn   = mVibeGraph.getChannelAccumulator(MixerChannelIds::kBassBus);
@@ -2671,7 +2674,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     }
 
     // 2026-04-26 (D-5 fix): write the master-output recorder BEFORE the
-    // metronome adds its click samples to the buffer — otherwise the
+    // metronome adds its click samples to the buffer - otherwise the
     // recorded WAV contains the metronome click on every recorded beat.
     // The post-metronome write that used to live below the metro block has
     // been removed.
@@ -2743,7 +2746,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         // ── Count-in: runs independently of transport ────────────────────────
         // 2026-04-26 (D-5 fix): the rising edge now fires beat 1 IMMEDIATELY
         // (was silently waiting until phase crossed 0→1, which delayed the
-        // first audible click by a full beat — user heard 3 clicks instead
+        // first audible click by a full beat - user heard 3 clicks instead
         // of 4).  Loop continues to fire on each subsequent integer crossing
         // (beats 2, 3, 4, …).  countInBeatsFired tracks accent placement.
         bool ciActive = mMetro.countInActive.load(std::memory_order_relaxed);
@@ -2751,7 +2754,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             mMetro.countInPhase      = 0.0;
             mMetro.lastBeatFloor     = -99999.0;
             mMetro.countInBeatsFired = 1;
-            triggerClick(true);   // Beat 1 (always accented) — fires at sample 0.
+            triggerClick(true);   // Beat 1 (always accented) - fires at sample 0.
         }
         mMetro.countInWasActive = ciActive;
 
@@ -2760,7 +2763,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             const double bpm = mMetro.countInBpm.load(std::memory_order_relaxed);
             const double bps = juce::jmax(1e-6, bpm / (60.0 * mSampleRate));
             // C.5b: count-in accent honors the CURRENT pattern's intrinsic TS
-            // (FL-style — patterns own their own TS).  Falls back to 4 when
+            // (FL-style - patterns own their own TS).  Falls back to 4 when
             // no pattern.
             const int countInBeatsPerBar = mPatternManager
                 ? juce::jmax (1, mPatternManager->currentPattern().tsNum)
@@ -2799,7 +2802,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     const double bs0  = pi->getPpqPosition().orFallback(0.0);
 
                     // C.5b: accent on every Nth beat where N = current
-                    // pattern's intrinsic numerator (FL-style — pattern owns
+                    // pattern's intrinsic numerator (FL-style - pattern owns
                     // its own TS).  Falls back to 4 when no pattern.
                     const int accentEvery = mPatternManager
                         ? juce::jmax (1, mPatternManager->currentPattern().tsNum)
@@ -2880,7 +2883,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 void VibeSynthProcessor::drainMeterAtomicsForUI()
 {
     constexpr float kPeakNegInf = -std::numeric_limits<float>::infinity();
-    auto drainAndMerge = [] (std::atomic<float>& mirror, std::atomic<float>& nodeAtom) noexcept
+    auto drainAndMerge = [kPeakNegInf] (std::atomic<float>& mirror, std::atomic<float>& nodeAtom) noexcept
     {
         const float v = nodeAtom.exchange (kPeakNegInf, std::memory_order_relaxed);
         if (v == kPeakNegInf) return;
@@ -2958,13 +2961,13 @@ void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int num
                                 ? juce::jlimit (0.f, 2.f, (float)(elapsed / bufDur))
                                 : 0.f;
 
-    // Exponential smoothing — ~80 ms time constant at 512/44100 block rate
+    // Exponential smoothing - ~80 ms time constant at 512/44100 block rate
     const float prev     = mAudioDspLoad.load (std::memory_order_relaxed);
     const float smoothed = prev * 0.85f + rawLoad * 0.15f;
     mAudioDspLoad.store (smoothed,         std::memory_order_relaxed);
     mDspOverload95.store (smoothed > 0.95f, std::memory_order_relaxed);
 
-    // Sustained 85% detection — accumulate samples while above threshold
+    // Sustained 85% detection - accumulate samples while above threshold
     if (smoothed > 0.85f)
         mOverload85Samples += numSamples;
     else
@@ -2978,7 +2981,7 @@ void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int num
         // Steal all synth voices (tail-off = true → release envelopes play,
         // no hard click). DrumSynth + BassSynth one-shot voices decay naturally.
         mSynth.allNotesOff (1, true);
-        // Back off the counter so we don't re-trigger every block —
+        // Back off the counter so we don't re-trigger every block -
         // next steal can only fire after another 250 ms of sustained overload.
         mOverload85Samples = (int64_t)(0.25 * mSampleRate);
     }
@@ -3113,7 +3116,7 @@ void VibeSynthProcessor::updateAllPostRackEQsFromApvts()
     }
 }
 
-// §P4.3: Pre-rack EQ sync — mirror of updateAllPostRackEQsFromApvts but uses
+// §P4.3: Pre-rack EQ sync - mirror of updateAllPostRackEQsFromApvts but uses
 // the `_preeq_` sub-prefix to read pre-EQ params + the new pre-EQ accessors.
 // Bus + insert pre-EQ DSPs were added in B2; their params in B3.  Called once
 // per processBlock alongside the post-rack version.
@@ -3188,7 +3191,7 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         const auto& blk = mPatternManager->getBlock(i);
         if (blk.clipType != ClipType::Audio || blk.audioFilePath.isEmpty() || blk.muted)
             continue;
-        // NOTE: no isRowAudible() gate here — runtime mute/solo is handled in the
+        // NOTE: no isRowAudible() gate here - runtime mute/solo is handled in the
         // live render loop so toggling mute does not require a player rebuild.
 
         // P4: resolve relative paths like "Samples/kick.wav" against the
@@ -3227,7 +3230,7 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         {
             const int pvCh = p.streamer->getNumChannels();
             p.vocoder = std::make_unique<PhaseVocoder> (pvCh);
-            // Pre-allocate scratch buffers — sized for worst-case block + PV headroom.
+            // Pre-allocate scratch buffers - sized for worst-case block + PV headroom.
             // pvInBuf:  file samples fed into PV each block (up to ~4x block size for large stretch)
             // pvOutBuf: stretched output from PV (one full analysis window of headroom)
             const int maxBlockSamples = 8192;
@@ -3265,7 +3268,7 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
 // and inject a noteOff (per-channel allNotesOff) into their buffers at the
 // same sample position so the engines silence before consuming the buffer.
 //
-// Cost: O(buffers × notes × inserts).  In practice trivially small — typical
+// Cost: O(buffers × notes × inserts).  In practice trivially small - typical
 // block has 0-3 noteOns and there are ≤ 28 inserts (8 layer + 4 bass + 16 drum).
 //
 // Audio-clip choke is handled separately at clip-start time (Batch 4).
@@ -3371,7 +3374,7 @@ void VibeSynthProcessor::applyChokeGroupDispatch(
         for (int i = 0; i < kMaxVoxPages;   ++i) injectMidi(Kind::Vox,   i, voxMidi[i],   f);
         for (int i = 0; i < kMaxInstPages;  ++i) injectMidi(Kind::Inst,  i, instMidi[i],  f);
 
-        // Audio peers — set mutedByChoke=true on others in same group.
+        // Audio peers - set mutedByChoke=true on others in same group.
         {
             for (int ci = 0; ci < (int) clipPlayers.size(); ++ci)
             {
@@ -3386,7 +3389,7 @@ void VibeSynthProcessor::applyChokeGroupDispatch(
 
 void VibeSynthProcessor::updateDrumMixLevels()
 {
-    // No-op now that DrumSynth is gone — per-drum-tab levels flow through
+    // No-op now that DrumSynth is gone - per-drum-tab levels flow through
     // their mixer strips' faders, applied inside each drum InsertNode.
 }
 
@@ -3546,10 +3549,10 @@ VibeSynthProcessor::RecordResult VibeSynthProcessor::stopRecording()
     return out;
 }
 
-// 2026-05-06 (Batch 9b Item 8): dry-recorder tap helper — see header for
+// 2026-05-06 (Batch 9b Item 8): dry-recorder tap helper - see header for
 // invariants.  Iterates mStripRecorders looking for the matching channel id
 // and writes one mono block via AudioFileRecorder::writeBlock (queue-backed,
-// drains on the recorder's own background thread — safe for the audio
+// drains on the recorder's own background thread - safe for the audio
 // thread).  Builds a non-owning AudioBuffer view via const_cast: JUCE's
 // AudioBuffer ctor wants non-const float**, but writeBlock takes its
 // buffer arg as const ref + only reads.
@@ -3652,7 +3655,7 @@ void VibeSynthProcessor::serializeProject (juce::XmlElement& root)
 {
     root.setAttribute ("version", 1);
 
-    // Processor state (APVTS + rack states) — reuse the same ValueTree we
+    // Processor state (APVTS + rack states) - reuse the same ValueTree we
     // produce in getStateInformation, but emit as XML child instead of a
     // MemoryBlock blob.
     auto state = apvts.copyState();
@@ -3665,7 +3668,7 @@ void VibeSynthProcessor::serializeProject (juce::XmlElement& root)
     if (auto stateXml = state.createXml())
         processor->addChildElement (stateXml.release());
 
-    // PatternManager — patterns, arrangement, piano-roll notes, libraries,
+    // PatternManager - patterns, arrangement, piano-roll notes, libraries,
     // row mute/solo, drum-enabled flags, full mixer snapshot.
     if (mPatternManager != nullptr)
     {
@@ -3748,7 +3751,7 @@ juce::File VibeSynthProcessor::resolveProjectFile (const juce::String& storedPat
     if (storedPath.isEmpty()) return {};
     // Absolute paths pass through (pre-P4 projects stored absolute audio paths).
     if (juce::File::isAbsolutePath (storedPath)) return juce::File (storedPath);
-    // Relative paths — resolve against current project folder.
+    // Relative paths - resolve against current project folder.
     juce::ScopedLock sl (mProjectFolderLock);
     if (mCurrentProjectFolder == juce::File()) return {};
     return mCurrentProjectFolder.getChildFile (storedPath);
@@ -3756,7 +3759,7 @@ juce::File VibeSynthProcessor::resolveProjectFile (const juce::String& storedPat
 
 void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
 {
-    // Processor state — first child under <Processor>.
+    // Processor state - first child under <Processor>.
     if (auto* processor = root.getChildByName ("Processor"))
     {
         // The saved APVTS tree is the single child of <Processor>.
@@ -3783,12 +3786,12 @@ void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
             break;   // only one APVTS state child expected
         }
 
-        // Aux strips follow from APVTS param presence — same path as
+        // Aux strips follow from APVTS param presence - same path as
         // setStateInformation.
         restoreAuxStripsFromState();
     }
 
-    // PatternManager — top-level child named "PatternManager".
+    // PatternManager - top-level child named "PatternManager".
     if (mPatternManager != nullptr)
     {
         if (auto* pmXml = root.getChildByName ("PatternManager"))
@@ -3902,7 +3905,7 @@ namespace
 void VibeSynthProcessor::addParamsForHarmless(const juce::String& prefix)
 {
     // 8 macro knobs (full Harmless param set registered here; individual partials
-    // are NOT APVTS-registered — they live in the Harmless preset only).
+    // are NOT APVTS-registered - they live in the Harmless preset only).
     auto& ids = mRegisteredTrackParams[prefix];
     for (int m = 0; m < 8; ++m)
     {
@@ -3982,12 +3985,12 @@ void VibeSynthProcessor::addParamsForBaySickBass(const juce::String& prefix)
     addParamsForBaySickSynth(prefix);
 }
 
-// 2026-04-25: addParamsForBaySickDrums removed — legacy 16-slot drum
+// 2026-04-25: addParamsForBaySickDrums removed - legacy 16-slot drum
 // processor deleted; per-drum-tab engines register their own params.
 
 void VibeSynthProcessor::addParamsForTrackEQ(const juce::String& prefix)
 {
-    // Post-rack EQ (existing behavior — IDs at prefix + "_mid_eq{b}{Suffix}").
+    // Post-rack EQ (existing behavior - IDs at prefix + "_mid_eq{b}{Suffix}").
     addParamsForEQBank(prefix, juce::String());
 }
 
@@ -3998,10 +4001,10 @@ void VibeSynthProcessor::addParamsForTrackPreEQ(const juce::String& prefix)
     addParamsForEQBank(prefix, "preeq_");
 }
 
-// Internal helper — registers an 8-band M/S EQ param bank under prefix +
+// Internal helper - registers an 8-band M/S EQ param bank under prefix +
 // "_" + subPrefix + "{mid|side}_eq{b}{Suffix}".
 //   subPrefix ""        → post-rack ("EQ" labels)
-//   subPrefix "preeq_"  → pre-rack  ("Pre EQ" labels — disambiguates automation menus)
+//   subPrefix "preeq_"  → pre-rack  ("Pre EQ" labels - disambiguates automation menus)
 void VibeSynthProcessor::addParamsForEQBank(const juce::String& prefix,
                                              const juce::String& subPrefix)
 {
@@ -4083,7 +4086,7 @@ void VibeSynthProcessor::registerLayerEngine(int idx, juce::AudioProcessor* eng)
         if (idx >= 0 && idx < kMaxLayerPages) mLayerEngines[idx] = eng;
     }
     // 5F-4a: ensure mixer strip params + Layer InsertNode exist for this page.
-    // Message thread only — safe to call APVTS and VibeGraph.
+    // Message thread only - safe to call APVTS and VibeGraph.
     if (idx >= 0 && idx < kMaxLayerPages && eng != nullptr)
     {
         const juce::String prefix = "mixer_layer_" + juce::String(idx);
@@ -4113,7 +4116,7 @@ void VibeSynthProcessor::unregisterLayerEngine(int idx)
     }
     juce::SpinLock::ScopedLockType lk(mLayerEngineLock);
     mLayerEngines[idx] = nullptr;
-    // InsertNode retained on purpose — preserves mixer state if the page is re-opened.
+    // InsertNode retained on purpose - preserves mixer state if the page is re-opened.
 }
 void VibeSynthProcessor::registerBassEngine(int pageIdx, juce::AudioProcessor* eng)
 {
@@ -4148,7 +4151,7 @@ void VibeSynthProcessor::unregisterBassEngine(int pageIdx)
     juce::SpinLock::ScopedLockType lk(mBassEngineLock);
     mBassEngines[pageIdx] = nullptr;
 }
-// 2026-04-25: registerDrumsEngine / unregisterDrumsEngine removed — legacy
+// 2026-04-25: registerDrumsEngine / unregisterDrumsEngine removed - legacy
 // 16-slot BaySickDrumsProcessor deleted.  Per-drum-tab registration uses
 // registerDrumEngine (singular) below.
 
@@ -4197,13 +4200,13 @@ void VibeSynthProcessor::unregisterDrumEngine(int pageIdx)
     bool any = false;
     for (auto* e : mDrumEngines) if (e) { any = true; break; }
     mAnyDrumPageActive.store(any, std::memory_order_release);
-    // InsertNode retained — preserves mixer state if drum is re-added.
+    // InsertNode retained - preserves mixer state if drum is re-added.
 }
 
 // G-3 (2026-04-28): per-clip-page engine registration.  pageIdx is the audio-
 // row index for the bound clip (1:1 mapping to mixer_audio_<row>).  Unlike
 // Layer / Bass / Drum engines which create their own InsertNode + mixer
-// strip, Clip engines share the existing Audio InsertNode for that row —
+// strip, Clip engines share the existing Audio InsertNode for that row -
 // arrangement-playback audio + piano-roll-triggered audio mix into the same
 // strip so the user sees one channel per clip rather than two.
 void VibeSynthProcessor::registerClipEngine(int pageIdx, juce::AudioProcessor* eng)
@@ -4241,7 +4244,7 @@ void VibeSynthProcessor::unregisterClipEngine(int pageIdx)
         // (audioInsert(pageIdx)).  We only unregister the ClipPageTask here;
         // the AudioInsertTask remains.  The dispatcher's mTasksByChannel slot
         // is overwritten on registerTask, so currently the most recent
-        // registration wins.  Tracked in deferred notes — Batch 9 needs to
+        // registration wins.  Tracked in deferred notes - Batch 9 needs to
         // resolve clip vs audio insert task ownership at the same id.
         mRenderDispatcher.unregisterTask(MixerChannelIds::audioInsert(pageIdx));
         mClipRenderTasks[(size_t) pageIdx].reset();
@@ -4348,7 +4351,7 @@ void VibeSynthProcessor::unregisterInstEngine(int pageIdx)
 
 // §P4.3 B7 (2026-04-22): register/unregister{Layer,Bass,Drums}PageEQ APIs
 // deleted.  Per-page EQ DSPs (mLayerPageEQs / mBassPageEQs / mDrumsPageEQ)
-// are gone — pages now bind their EQ display to the InsertNode / BusNode
+// are gone - pages now bind their EQ display to the InsertNode / BusNode
 // preEq directly via VibeGraph::getInsertPreEQ() / getXxxBusPreEQ().
 
 void VibeSynthProcessor::registerParamsForTrack(const juce::String& trackId,
@@ -4370,7 +4373,7 @@ void VibeSynthProcessor::registerParamsForTrack(const juce::String& trackId,
     // 2026-04-25: "BaySickDrums" engine type removed (legacy processor deleted).
 
     // §P4.3 B7: legacy per-track EQ params (tk_{id}_mid_eq*/side_eq*) no
-    // longer registered — pre-rack + post-rack EQs both live on the mixer
+    // longer registered - pre-rack + post-rack EQs both live on the mixer
     // strip prefix (mixer_{kind}_<N>_preeq_* / _mid_eq*), registered in
     // ensureMixerStripParams.  Every track still gets a 6-slot effect rack.
     addParamsForEffectRack(prefix);
@@ -4378,7 +4381,7 @@ void VibeSynthProcessor::registerParamsForTrack(const juce::String& trackId,
 
 void VibeSynthProcessor::unregisterParamsForTrack(const juce::String& trackId)
 {
-    // JUCE APVTS has no removeParameter API — params stay in the tree but
+    // JUCE APVTS has no removeParameter API - params stay in the tree but
     // we remove the trackId from our registry so isTrackRegistered() returns false.
     // Params are reset to default so stale automation data doesn't affect the next
     // engine loaded on the same trackId.
@@ -4407,7 +4410,7 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
                                                  MixerStripKind kind,
                                                  int defaultSendTo)
 {
-    // Helper lambdas scoped to this call — params are pushed directly via
+    // Helper lambdas scoped to this call - params are pushed directly via
     // apvts.createAndAddParameter (same pattern as existing lazy registration).
     auto addF = [&](const juce::String& id, const juce::String& name,
                     float lo, float hi, float def)
@@ -4425,7 +4428,7 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
     // 2026-04-30: max bumped down 10 → 5.6 dB to match the fader cap's
     // visual range (kFaderMax in MixerTrackStrip + kFMax in VibeLAF's
     // drawLinearSlider were both changed at meter-rebuild time, but this
-    // APVTS range wasn't — and SliderAttachment auto-overrides the
+    // APVTS range wasn't - and SliderAttachment auto-overrides the
     // slider's setRange to match the param's range, so the cap travelled
     // -60..+10 while the dB-mark column was drawn for -60..+5.6.  Net
     // effect: ~4 dB visual offset between cap position and the labelled
@@ -4446,13 +4449,13 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
         // strip's M button can attach (was previously visually toggling but
         // not bound to APVTS at all → MasterBusNode read a null pointer →
         // master mute did nothing).  Solo + polarity are intentionally
-        // omitted — master has no peer to solo against and polarity at the
+        // omitted - master has no peer to solo against and polarity at the
         // master is rarely useful (and would invert ALL output, easy to
         // mistake for "broken").
         addB(prefix + "_mute", prefix + " Mute", false);
     }
 
-    // FX Bypass on ALL strip types (master/bus/insert) — each has its own rack.
+    // FX Bypass on ALL strip types (master/bus/insert) - each has its own rack.
     addB(prefix + "_bypass", prefix + " FX Bypass", false);
 
     // Batch E #6 (2026-05-01): _arm only meaningful on Vox/Inst inserts
@@ -4465,7 +4468,7 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
         addB(prefix + "_arm", prefix + " Arm", false);
     }
 
-    // 5F-4b B1a: routing params — main-out + up to 4 sends
+    // 5F-4b B1a: routing params - main-out + up to 4 sends
     auto addI = [&](const juce::String& id, const juce::String& name,
                     int lo, int hi, int def)
     {
@@ -4490,16 +4493,16 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
     // receive slot stores the SOURCE strip's channel id; -1 = empty.  DSP
     // modules pick which receive line drives them via _sc_pick (per rack
     // slot) or scSourceId (per EQ8 band).  Source signal is the source
-    // strip's post-everything tap (Q4=A — final output, post-fader/pan).
+    // strip's post-everything tap (Q4=A - final output, post-fader/pan).
     for (int s = 0; s < 4; ++s)
     {
         const juce::String sp = prefix + "_sc_recv" + juce::String(s);
         addI(sp + "_from",    prefix + " SC Recv" + juce::String(s) + " From", -1, 999, -1);
     }
 
-    // D3: choke group — 0 = none, 1..16 = group id.  When two inserts share a
+    // D3: choke group - 0 = none, 1..16 = group id.  When two inserts share a
     // group > 0, a noteOn (or audio-clip start) on one chokes all others in
-    // the same group.  Inserts only — buses/master have no concept of voices
+    // the same group.  Inserts only - buses/master have no concept of voices
     // to choke.
     if (kind == MixerStripKind::Insert)
         addI(prefix + "_chokeGroup", prefix + " Choke Group", 0, 16, 0);
@@ -4536,10 +4539,10 @@ void VibeSynthProcessor::ensureMixerBusAndMasterParams()
     ensureMixerStripParams("mixer_drums",    MixerStripKind::Bus,    kMaster);
     ensureMixerStripParams("mixer_fx",       MixerStripKind::Bus,    kMaster);
     ensureMixerStripParams("mixer_clipsbus", MixerStripKind::Bus,    kMaster);
-    // R3.5 (2026-04-23): Vox + Inst buses — same shape as Clips/FX bus.
+    // R3.5 (2026-04-23): Vox + Inst buses - same shape as Clips/FX bus.
     ensureMixerStripParams("mixer_voxbus",   MixerStripKind::Bus,    kMaster);
     ensureMixerStripParams("mixer_instbus",  MixerStripKind::Bus,    kMaster);
-    // G-6 (2026-04-29): secondary Vox/Inst buses — always register params so
+    // G-6 (2026-04-29): secondary Vox/Inst buses - always register params so
     // routing + audio paths work regardless of UI activation state.  Strip
     // visibility on Mixer is a separate flag (see MixerPage::activate*Bus2/3).
     ensureMixerStripParams("mixer_voxbus2",  MixerStripKind::Bus,    kMaster);
@@ -4566,7 +4569,7 @@ void VibeSynthProcessor::ensureAudioInsert(int row, const juce::String& displayN
                                  prefix);
 
     // Batch 5 (2026-05-06): create the per-row AudioInsertTask if it doesn't
-    // exist yet.  No removeAudioInsert hook exists — audio inserts persist
+    // exist yet.  No removeAudioInsert hook exists - audio inserts persist
     // for the project lifetime; the unique_ptr cleans up on plugin destroy.
     if (! mAudioRenderTasks[(size_t) row])
     {
@@ -4590,7 +4593,7 @@ void VibeSynthProcessor::ensureAuxInsert(int idx, const juce::String& displayNam
                                  prefix);
 
     // Batch 7 (2026-05-06): create the per-aux PassiveStripTask if not yet
-    // present.  No removeAuxInsert hook exists — auxes persist for the
+    // present.  No removeAuxInsert hook exists - auxes persist for the
     // project lifetime; the unique_ptr cleans up on plugin destroy.
     if (! mAuxRenderTasks[(size_t) idx])
     {
@@ -4669,7 +4672,7 @@ void VibeSynthProcessor::removeRustyInsert(int idx)
     }
 
     mVibeGraph.removeInsertNode(VibeGraph::InsertKind::Rusty, idx);
-    // APVTS params persist (existing pattern — JUCE doesn't allow unregister).
+    // APVTS params persist (existing pattern - JUCE doesn't allow unregister).
     // Reset to defaults so a future re-create starts clean.  Common cleanup
     // covers: level (0 dB), pan (centre), mute/solo/polarity/bypass/arm (off).
     const juce::String prefix = "mixer_rusty_" + juce::String(idx);
@@ -4720,7 +4723,7 @@ bool VibeSynthProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& s
     // K-5 fix #5 (2026-05-05): also flip the engine's per-instance
     // mProcessingEnabled gate so its processBlock early-exits when the audio
     // thread happens to fire while the SFZ load is mutating sfizz hash maps.
-    // mGuitarsActive[] alone wasn't enough — the chain processor calls the
+    // mGuitarsActive[] alone wasn't enough - the chain processor calls the
     // engine's processBlock directly without checking that flag.
     mGuitarsActive[(size_t) instIdx].store (false, std::memory_order_release);
 
@@ -4748,7 +4751,7 @@ bool VibeSynthProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& s
         return false;
     }
 
-    // Now safe — engine fully loaded.  Audio thread can begin rendering.
+    // Now safe - engine fully loaded.  Audio thread can begin rendering.
     if (auto* eng = mGuitarsEngine[(size_t) instIdx].get())
         eng->setProcessingEnabled (true);
     mGuitarsActive[(size_t) instIdx].store (true, std::memory_order_release);
@@ -4759,7 +4762,7 @@ void VibeSynthProcessor::destroyBaySickGuitars (int instIdx)
 {
     if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return;
 
-    // Flip active flag BEFORE freeing the engine — audio thread reads the flag
+    // Flip active flag BEFORE freeing the engine - audio thread reads the flag
     // first and skips engine access when false.
     mGuitarsActive[(size_t) instIdx].store (false, std::memory_order_release);
 
@@ -4869,7 +4872,7 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
         return false;
 
     // Tear down any existing strips from a prior kit before spawning the new
-    // ones — protects against accidental double-creation if the user loads a
+    // ones - protects against accidental double-creation if the user loads a
     // different kit while the singleton already exists.
     for (int i = 0; i < MixerChannelIds::kMaxRustyStrips; ++i)
     {
@@ -4892,7 +4895,7 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     for (size_t i = 0; i < channels.size() && i < (size_t) MixerChannelIds::kMaxRustyStrips; ++i)
         ensureRustyInsert ((int) i, channels[i].name);
 
-    // J-7b: now safe — the engine is fully loaded, output buses sized,
+    // J-7b: now safe - the engine is fully loaded, output buses sized,
     // strip InsertNodes registered.  Audio thread can begin rendering.
     mRustyDrumsActive.store (true, std::memory_order_release);
     return true;
@@ -4963,7 +4966,7 @@ void VibeSynthProcessor::resetBaySickRustyDrumsMixerState()
         resetParam (prefix + "_bypass",   0.0f);   // Insert-only; no-op for buses
         resetParam (prefix + "_arm",      0.0f);   // Insert-only; no-op for buses
         resetParam (prefix + "_chokeGroup", 0.0f);
-        // Sends — `_send{0..3}_to` to -1 (inactive), `_send{0..3}_amount` to 0 dB,
+        // Sends - `_send{0..3}_to` to -1 (inactive), `_send{0..3}_amount` to 0 dB,
         // `_send{0..3}_prepost` to 0 (post).
         for (int s = 0; s < 4; ++s)
         {
@@ -4971,7 +4974,7 @@ void VibeSynthProcessor::resetBaySickRustyDrumsMixerState()
             resetParam (prefix + "_send" + juce::String (s) + "_amount",   0.0f);
             resetParam (prefix + "_send" + juce::String (s) + "_prepost",  0.0f);
         }
-        // EQ band defaults — every band Bell, 0 dB, freq mid, Q 0.7.
+        // EQ band defaults - every band Bell, 0 dB, freq mid, Q 0.7.
         for (int b = 0; b < 8; ++b)
         {
             for (auto side : { juce::String ("_mid_eq"), juce::String ("_side_eq") })

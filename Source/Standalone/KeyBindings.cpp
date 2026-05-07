@@ -17,7 +17,7 @@ juce::String categoryName (Category c)
 
 namespace
 {
-    // Build catalog once — order here is the order shown in each tab.
+    // Build catalog once - order here is the order shown in each tab.
     std::vector<CommandInfo> buildCatalog()
     {
         return
@@ -157,7 +157,7 @@ namespace
             // ── Undo / Redo (Phase B-5) ─────────────────────────────────────
             { cmdGlobalUndo, Category::General,
               "Undo",
-              "Step backward through your recent edits — note moves, pattern changes, mixer tweaks, the lot.",
+              "Step backward through your recent edits - note moves, pattern changes, mixer tweaks, the lot.",
               juce::KeyPress ('Z', juce::ModifierKeys::ctrlModifier, 0) },
 
             { cmdGlobalRedo, Category::General,
@@ -176,7 +176,7 @@ namespace
 
     std::vector<MouseRefRow> buildMouseRefs()
     {
-        // Phase B-6 (2026-04-26): Path A — populate Builder + Piano Roll tabs
+        // Phase B-6 (2026-04-26): Path A - populate Builder + Piano Roll tabs
         // with documentation-only rows for every page-local key + mouse
         // modifier.  These render dimmed and are non-editable.  Rebindable
         // commands live in the editable list above (via getAllCommands()).
@@ -190,13 +190,13 @@ namespace
               "Scroll Horizontally",
               "Hold Shift and scroll the mouse wheel to scroll left/right across whatever scrollable view you're hovering over." },
 
-            // ── Builder Page — tool letters (page-local) ────────────────────
+            // ── Builder Page - tool letters (page-local) ────────────────────
             { Category::Builder, "P",
               "Draw Tool",
               "Click to place a single clip at the cursor position." },
             { Category::Builder, "B",
               "Paint Tool",
-              "Drag to place identical clips along a row — useful for repeating loops." },
+              "Drag to place identical clips along a row - useful for repeating loops." },
             { Category::Builder, "C",
               "Slice Tool",
               "Click on a clip to split it at the click point into two independent clips." },
@@ -211,7 +211,7 @@ namespace
               "Drag the clip's contents inside its bounds without moving the clip itself." },
             { Category::Builder, "T",
               "Mute Tool",
-              "Click clips to mute them — they stay in place but produce no sound." },
+              "Click clips to mute them - they stay in place but produce no sound." },
             { Category::Builder, "Y",
               "Playback Tool",
               "Click a clip to audition it once from the start." },
@@ -219,8 +219,8 @@ namespace
               "Zoom Tool",
               "Click + drag to zoom into a region; right-click to zoom out. While the Zoom tool is active, PgUp / PgDn zoom in / out." },
 
-            // ── Builder Page — edit operations (page-local) ─────────────────
-            // (Ctrl + Z / Ctrl + Alt + Z migrated to global commands — see
+            // ── Builder Page - edit operations (page-local) ─────────────────
+            // (Ctrl + Z / Ctrl + Alt + Z migrated to global commands - see
             // Undo / Redo in the General tab.)
             { Category::Builder, "Ctrl + A",
               "Select All",
@@ -256,7 +256,7 @@ namespace
               "Vertical Scroll / Zoom",
               "Default: scroll the view by one viewport height. With the Zoom tool active: zoom in / out instead." },
 
-            // ── Builder Page — mouse modifiers ──────────────────────────────
+            // ── Builder Page - mouse modifiers ──────────────────────────────
             { Category::Builder, "Mouse Wheel",
               "Scroll Vertically",
               "Bare wheel scrolls the grid up / down by ~1 row per click." },
@@ -265,7 +265,7 @@ namespace
               "FL convention: wheel up scrolls right (advance through the timeline), wheel down scrolls left." },
             { Category::Builder, "Ctrl + Wheel",
               "Horizontal Zoom",
-              "Cursor-anchored zoom — the bar under the mouse stays under the mouse." },
+              "Cursor-anchored zoom - the bar under the mouse stays under the mouse." },
             { Category::Builder, "Alt + Wheel",
               "Vertical Zoom",
               "Adjusts the row height so more or fewer rows fit in the viewport." },
@@ -283,7 +283,7 @@ namespace
               "Bare click on the ruler moves the transport playhead to that position." },
             { Category::Builder, "Right-Click on Ruler",
               "Ruler Menu",
-              "Open the ruler menu — add time markers and time-signature changes here." },
+              "Open the ruler menu - add time markers and time-signature changes here." },
             { Category::Builder, "Alt + Right-Click",
               "Audition Clip",
               "Alt + right-click a clip to play it once from the start." },
@@ -309,7 +309,7 @@ namespace
               "Nudge Clip Position",
               "Hover over a clip and Shift + Alt + scroll to nudge it by tiny increments." },
 
-            // ── Piano Roll — tool letters (page-local) ──────────────────────
+            // ── Piano Roll - tool letters (page-local) ──────────────────────
             { Category::PianoRoll, "P",
               "Draw Tool",
               "Click to place a single note." },
@@ -338,8 +338,8 @@ namespace
               "Toggle Keyboard Column",
               "Hide / show the on-screen piano keyboard column on the left of the grid.  Per-tab state - each Piano Roll tab remembers its own visibility." },
 
-            // ── Piano Roll — edit operations (page-local) ───────────────────
-            // (Ctrl + Z / Ctrl + Alt + Z migrated to global commands — see
+            // ── Piano Roll - edit operations (page-local) ───────────────────
+            // (Ctrl + Z / Ctrl + Alt + Z migrated to global commands - see
             // Undo / Redo in the General tab.)
             { Category::PianoRoll, "Ctrl + A",
               "Select All",
@@ -364,7 +364,7 @@ namespace
               "Break the selected note group apart so each note moves independently." },
             { Category::PianoRoll, "Shift + I",
               "Invert Selection",
-              "Invert the current selection — selected notes deselect and vice versa." },
+              "Invert the current selection - selected notes deselect and vice versa." },
             { Category::PianoRoll, "Delete / Backspace",
               "Delete Selected",
               "Remove the selected notes." },
@@ -381,7 +381,7 @@ namespace
               "Zoom In / Out",
               "Active only when the Zoom tool is selected." },
 
-            // ── Piano Roll — tool dialogs (Alt + letter) ────────────────────
+            // ── Piano Roll - tool dialogs (Alt + letter) ────────────────────
             { Category::PianoRoll, "Alt + Q",
               "Quantize",
               "Open the quantize options dialog for selected notes." },
@@ -393,7 +393,7 @@ namespace
               "Generate an arpeggio from the selected notes." },
             { Category::PianoRoll, "Alt + U",
               "Chop",
-              "Open the chop dialog — split selected notes into N equal pieces." },
+              "Open the chop dialog - split selected notes into N equal pieces." },
             { Category::PianoRoll, "Alt + L",
               "Articulate",
               "Apply articulation curve to selected notes." },
@@ -413,7 +413,7 @@ namespace
               "Scale Levels",
               "Open a popup with a velocity slider + numeric input.  OK applies the percentage (100 % = no change) to every selected note's velocity." },
 
-            // ── Piano Roll — D-7 quick shortcuts ────────────────────────────
+            // ── Piano Roll - D-7 quick shortcuts ────────────────────────────
             { Category::PianoRoll, "Ctrl + Q",
               "Quick Quantize 1/4",
               "Snap each selected note's start to the nearest 1/4-note boundary - bypasses the snap setting (selection-only)." },
@@ -433,7 +433,7 @@ namespace
               "Flip Resize Edge",
               "Toggle whether note-edge drag-resize grabs the LEFT or the RIGHT edge.  When ON, dragging a note's left edge extends its start backward; when OFF, dragging the right edge extends the length forward." },
 
-            // ── Piano Roll — mouse modifiers ────────────────────────────────
+            // ── Piano Roll - mouse modifiers ────────────────────────────────
             { Category::PianoRoll, "Mouse Wheel",
               "Vertical Scroll",
               "Scroll vertically through the keyboard range (lower / higher pitches)." },
