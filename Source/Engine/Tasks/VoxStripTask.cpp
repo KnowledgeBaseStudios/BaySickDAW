@@ -3,6 +3,7 @@
 #include "../../PluginProcessor.h"
 #include "../../DSP/EngineSidechainHelper.h"
 #include "../../BaySickVocal/BaySickVocalProcessor.h"
+#include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
 
 VoxStripTask::VoxStripTask (juce::AudioProcessor* engine,
                             int                   index,
@@ -88,6 +89,10 @@ void VoxStripTask::run()
         juce::MidiBuffer& engineMidi = (mCtx->voxPageMidi != nullptr)
             ? mCtx->voxPageMidi[mIndex] : emptyMidi;
 
+        // 2026-05-07 (Batch 9c follow-up): populate this strip's SC accumulator
+        // so renderFilePlayPlayer's internal processInsert sees real SC data.
+        pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+
         // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot.
         for (auto& player : mProcessor->mCurrentBlockClipSnapshot->players)
         {
@@ -159,6 +164,12 @@ void VoxStripTask::run()
                               : &emptyMidi;
 
     mEngine->processBlock (blockView, *midi);
+
+    // 2026-05-07 (Batch 9c follow-up): SC accumulator population (live-input
+    // branch).  Mirrors the FilePlay branch above + the EngineInsertTask
+    // pattern.
+    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+
     mGraph->processInsert (VibeGraph::InsertKind::Vox, mIndex,
                            blockView, mCtx->bpm, mCtx->anySolo);
 

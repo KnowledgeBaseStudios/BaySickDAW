@@ -2,6 +2,7 @@
 #include "../../VibeGraph.h"
 #include "../../PluginProcessor.h"
 #include "../../DSP/EngineSidechainHelper.h"
+#include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
 
 #include <atomic>
 #include <limits>
@@ -56,6 +57,11 @@ void ClipPageTask::run()
                               : &emptyMidi;
 
     mEngine->processBlock (blockView, *midi);
+
+    // 2026-05-07 (Batch 9c follow-up): SC accumulator population for the
+    // strip's rack / preEq / postEq.
+    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+
     mGraph->processInsert (VibeGraph::InsertKind::Audio, mIndex,
                            blockView, mCtx->bpm, mCtx->anySolo);
 

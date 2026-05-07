@@ -19,9 +19,13 @@ namespace RenderEngine
     //            RenderTask wrappers registered, otherwise audio is silent
     //            or partial.
     //
-    // Do NOT flip to true until Batches 2-8 have shipped per-strip wrappers
-    // for every active strip type.
-    inline constexpr bool kEnableMultiThreadedEngine = false;
+    // 2026-05-06 (Batch 9c): flipped true after pre-flip blockers cleared
+    // (B2 GUI deadlock, N1 BaySickVocal shutdown gate, ~StandaloneEditor
+    // teardown via closeAllDynamicTabs, B1 deferred-destruction GC for
+    // mAudioClipPlayers).  Watchdog (kWatchdogTimeoutMillis below) catches
+    // any remaining deadlocks loudly instead of letting the audio thread
+    // hang.  Revert to false if the validation pass surfaces a regression.
+    inline constexpr bool kEnableMultiThreadedEngine = true;
 
     // Hard cap on worker threads. The 5950X (16C/32T) saturates well below
     // this for the ~17-task per-block load of a typical heavy session;
@@ -32,6 +36,16 @@ namespace RenderEngine
     // private juce::WaitableEvent. Tuned for ~50 microseconds at 5 GHz —
     // well under typical inter-block idle windows.
     inline constexpr int kWorkerSpinIterations = 256;
+
+    // 2026-05-06 (Batch 9c watchdog): block-timeout deadline for
+    // RenderGraphDispatcher::dispatchBlock.  The audio thread bails after
+    // this many milliseconds of waiting on mAllDone instead of hanging
+    // forever -- catches missed routing-graph cycles, stuck workers, etc.
+    // 100 ms is much longer than any healthy block (worst case ~25 ms at
+    // 1024 samples / 44.1 kHz with a heavy session) so false positives
+    // are very unlikely.  When the watchdog fires it logs the incomplete
+    // task list + clears the output buffer for that block.
+    inline constexpr double kWatchdogTimeoutMillis = 100.0;
 
     // Channel id space matches MixerChannelIds (0..999). The ChannelBufferArena
     // pre-allocates one stereo slot per id; most slots are unused at any given

@@ -228,7 +228,59 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
     // queue; main thread joins as a worker (no dedicated spin-wait).  Loop
     // exits when MasterTask sets mAllDone via release; main thread's
     // acquire on mAllDone publishes Master's writes to the arena slot.
-    mPool.runUntil (mAllDone);
+    //
+    // 2026-05-06 (Batch 9c watchdog): bounded by kWatchdogTimeoutMillis so a
+    // missed routing-graph cycle / stuck worker / unfired Master flag
+    // doesn't hang the audio thread forever.  On timeout we log the
+    // incomplete task list and clear the output buffer for this block --
+    // audio glitches once instead of locking up the whole DAW.
+    const double tStart   = juce::Time::getMillisecondCounterHiRes();
+    const double deadline = tStart + RenderEngine::kWatchdogTimeoutMillis;
+    const bool   completed = mPool.runUntilOrTimeout (mAllDone, deadline);
+
+    if (! completed)
+    {
+        // Build a one-line-per-incomplete-task diagnostic.  Logging from the
+        // audio thread is exceptional here -- we already lost real-time
+        // guarantees by timing out, so a synchronous Logger::writeToLog is
+        // acceptable.  Heap allocations inside juce::String are also OK
+        // for the same reason.  Read mDeps with relaxed: workers may still
+        // be modifying it (race), but a stale value is fine for diagnostics.
+        int incomplete = 0;
+        for (auto* t : mTasks)
+            if (t != nullptr && t->mDeps.load (std::memory_order_relaxed) > 0)
+                ++incomplete;
+
+        const double elapsed = juce::Time::getMillisecondCounterHiRes() - tStart;
+        juce::String msg;
+        msg << "[RenderGraphDispatcher] BLOCK TIMEOUT after "
+            << juce::String (elapsed, 2) << "ms -- "
+            << incomplete << "/" << (int) mTasks.size()
+            << " tasks incomplete, mAllDone="
+            << (mAllDone.load (std::memory_order_relaxed) ? "true" : "false")
+            << "\n";
+        for (auto* t : mTasks)
+        {
+            if (t == nullptr) continue;
+            const int d = t->mDeps.load (std::memory_order_relaxed);
+            if (d <= 0) continue;
+            msg << "  ch=" << t->channelId
+                << " deps=" << d << "/" << t->mInitialDeps
+                << " preds=" << (int) t->mPredecessors.size()
+                << " children=" << (int) t->mChildren.size()
+                << "\n";
+        }
+        juce::Logger::writeToLog (msg);
+
+        // Clear the host buffer so we emit silence for this block instead
+        // of whatever stale arena data might be there.  Any in-flight tasks
+        // continue running and will decrement child deps as they finish --
+        // those decrements race against the next block's mDeps reset,
+        // potentially desyncing the graph for one or two blocks before it
+        // settles.  Acceptable: the alternative is a permanent hang.
+        outputBuffer.clear();
+        return;
+    }
 
     // ── Copy master arena slot to host output buffer ────────────────────────
     if (auto* masterBuf = mArena.getStripBuffer (MixerChannelIds::kMaster))

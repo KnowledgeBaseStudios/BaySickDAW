@@ -4,6 +4,7 @@
 #include "../../DSP/EngineSidechainHelper.h"
 #include "../../BaySickGuitars/BaySickGuitarsProcessor.h"   // getNumActiveVoices
 #include "../../BaySickBasses/BaySickBassesProcessor.h"     // getNumActiveVoices
+#include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
 
 InstStripTask::InstStripTask (juce::AudioProcessor* engine,
                               int                   index,
@@ -76,6 +77,10 @@ void InstStripTask::run()
         juce::MidiBuffer  emptyMidi;
         juce::MidiBuffer& engineMidi = (mCtx->instPageMidi != nullptr)
             ? mCtx->instPageMidi[mIndex] : emptyMidi;
+
+        // 2026-05-07 (Batch 9c follow-up): SC accumulator population so
+        // renderFilePlayPlayer's internal processInsert sees real SC data.
+        pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
         // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot.
         for (auto& player : mProcessor->mCurrentBlockClipSnapshot->players)
@@ -186,6 +191,11 @@ void InstStripTask::run()
                               : &emptyMidi;
 
     mEngine->processBlock (blockView, *midi);
+
+    // 2026-05-07 (Batch 9c follow-up): SC accumulator population (live-input
+    // / sfizz branch).
+    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+
     mGraph->processInsert (VibeGraph::InsertKind::Inst, mIndex,
                            blockView, mCtx->bpm, mCtx->anySolo);
 

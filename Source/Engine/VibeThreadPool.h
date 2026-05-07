@@ -58,6 +58,17 @@ public:
     // of spinning idle while workers process the graph. RT-safe.
     void runUntil (std::atomic<bool>& done) noexcept;
 
+    // 2026-05-06 (Batch 9c watchdog): bounded variant of runUntil.  Same as
+    // runUntil except it returns false (instead of spinning forever) once
+    // juce::Time::getMillisecondCounterHiRes() reaches deadlineMillisHiRes
+    // AND the queue is empty.  Returns true if `done` fired normally.
+    // The deadline is only checked on idle (queue empty) iterations, so a
+    // task that runs forever still hangs the call — this catches deadlocks
+    // (workers all blocked waiting on each other, queue empty), not runaway
+    // tasks.  RT-safe.
+    bool runUntilOrTimeout (std::atomic<bool>& done,
+                             double              deadlineMillisHiRes) noexcept;
+
     // Drain any tasks left in the queue. Safe to call from prepareToPlay.
     // Workers are NOT joined — they continue running and will idle in their
     // wait state until new tasks arrive.

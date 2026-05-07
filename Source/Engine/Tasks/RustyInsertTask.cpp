@@ -2,6 +2,7 @@
 #include "../../VibeGraph.h"
 #include "../../PluginProcessor.h"
 #include "../../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
+#include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
 
 RustyInsertTask::RustyInsertTask (int                 stripIndex,
                                   int                 channelIdIn,
@@ -73,6 +74,9 @@ void RustyInsertTask::run()
         if (blockView.getNumChannels() > 1)
             blockView.copyFrom (1, 0, stripBuf, 0, 0, n);   // dual-mono
     }
+
+    // 2026-05-07 (Batch 9c follow-up): SC accumulator population.
+    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
     // Insert chain (polarity → preEq → width → rack → postEq → fader → ...).
     mGraph->processInsert (VibeGraph::InsertKind::Rusty, mStripIndex,

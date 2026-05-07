@@ -1825,10 +1825,31 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // constexpr false — no runtime cost on the serial path.
     if constexpr (RenderEngine::kEnableMultiThreadedEngine)
     {
+        // 2026-05-07 (Batch 9c follow-up): compute busAnySolo (bus-level
+        // solo flag, distinct from strip-level anySolo).  Mirrors the serial
+        // path's busAnySolo computation at PluginProcessor.cpp:2504.  Used
+        // by PassiveStripTask to feed the correct solo signal into
+        // processBus for Vox/Inst/Vox2/Inst2/Inst3 buses (whose default
+        // useGroupSolo = anySolo formula would otherwise mute the bus
+        // whenever any STRIP is soloed -- the serial bug surfaced under MT
+        // because PassiveStripTask was passing strip-level anySolo).
+        auto soloOfBus = [this] (const char* prefix) -> bool
+        {
+            const auto* p = apvts.getRawParameterValue (juce::String (prefix) + "_solo");
+            return p && p->load() > 0.5f;
+        };
+        const bool busAnySolo =
+               soloOfBus ("mixer_clipsbus")
+            || soloOfBus ("mixer_voxbus")  || soloOfBus ("mixer_instbus")
+            || soloOfBus ("mixer_voxbus2") || soloOfBus ("mixer_instbus2")
+            || soloOfBus ("mixer_instbus3")
+            || soloOfBus ("mixer_fx");
+
         BlockContext mtCtx;
         mtCtx.numSamples         = numSamples;
         mtCtx.bpm                = pos.getBpm().orFallback (120.0);
         mtCtx.anySolo            = anySolo;
+        mtCtx.busAnySolo         = busAnySolo;
         // 2026-05-06 (Batch 9b): cache project pan law for bus tasks.
         mtCtx.panLaw             =
             (apvts.getRawParameterValue("master_pan_law") != nullptr)
@@ -1845,6 +1866,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         mtCtx.liveInputSnapshot  = &mLiveInputSnapshot;
 
         mRenderDispatcher.dispatchBlock (buffer, mtCtx);
+
+        // 2026-05-07 (Batch 9c follow-up): drain UI meter atomics same as the
+        // serial tail does, otherwise dBFS / VU / per-effect meters all sit
+        // at -inf (the audio path's peak writes never reach the UI mirrors).
+        // The MasterTask + per-strip tasks have already populated the
+        // node-level atomics by this point; we just need to promote them.
+        drainMeterAtomicsForUI();
         return;
     }
 
@@ -2845,74 +2873,81 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // 2026-05-02: end-of-audio-block atomic snapshot for ALL meters.  This
-    // is the single boundary point where every UI-visible peak atomic gets
-    // updated.  Three groups:
-    //   1. Layers/Bass/Drums/Master bus mirrors -- drained from VibeGraph
-    //      mirror atomics (which were drained from node atomics earlier).
-    //   2. Audio rows + AudioClipsBus + FxBus + Vox/Inst (incl. secondary)
-    //      -- promoted from Run companion atomics (audio CAS-maxes Run during
-    //      processBlock; promotion lifts Run -> snapshot).
-    //   3. Inserts in every node + slot atomics in every rack -- promoted by
-    //      VibeGraph::promoteAllInsertPeakSnapshots().
-    // All three happen back-to-back so a UI vblank firing anywhere outside
-    // this small window catches a coherent snapshot across every meter.
-    {
-        constexpr float kPeakNegInf = -std::numeric_limits<float>::infinity();
-        auto drainAndMerge = [] (std::atomic<float>& mirror, std::atomic<float>& nodeAtom) noexcept
-        {
-            const float v = nodeAtom.exchange (kPeakNegInf, std::memory_order_relaxed);
-            if (v == kPeakNegInf) return;
-            float cur = mirror.load (std::memory_order_relaxed);
-            while (cur < v && ! mirror.compare_exchange_weak (cur, v, std::memory_order_relaxed))
-            {}
-        };
-        // Group 1: bus mirrors (Layers/Bass/Drums/Master).
-        drainAndMerge (mLayersPeakDb,  mVibeGraph.layersPeakDb);
-        drainAndMerge (mLayersPeakDbL, mVibeGraph.layersPeakDbL);
-        drainAndMerge (mLayersPeakDbR, mVibeGraph.layersPeakDbR);
-        drainAndMerge (mBassPeakDb,    mVibeGraph.bassPeakDb);
-        drainAndMerge (mBassPeakDbL,   mVibeGraph.bassPeakDbL);
-        drainAndMerge (mBassPeakDbR,   mVibeGraph.bassPeakDbR);
-        drainAndMerge (mDrumsPeakDb,   mVibeGraph.drumsPeakDb);
-        drainAndMerge (mDrumsPeakDbL,  mVibeGraph.drumsPeakDbL);
-        drainAndMerge (mDrumsPeakDbR,  mVibeGraph.drumsPeakDbR);
-        drainAndMerge (mMasterPeakDb,  mVibeGraph.masterPeakDb);
-        drainAndMerge (mMasterPeakDbL, mVibeGraph.masterPeakDbL);
-        drainAndMerge (mMasterPeakDbR, mVibeGraph.masterPeakDbR);
+    // 2026-05-02: end-of-audio-block atomic snapshot for ALL meters.
+    // 2026-05-07: extracted into drainMeterAtomicsForUI so the MT branch
+    // (which returns early after dispatchBlock) can call the same path.
+    drainMeterAtomicsForUI();
+}
 
-        // Group 2: Run -> snapshot promotion for AudioClipsBus / FxBus / Vox /
-        // Inst / secondary buses + per-row audio clip mirrors.
-        drainAndMerge (mAudioClipsBusPeakDb,  mAudioClipsBusPeakDbRun);
-        drainAndMerge (mAudioClipsBusPeakDbL, mAudioClipsBusPeakDbLRun);
-        drainAndMerge (mAudioClipsBusPeakDbR, mAudioClipsBusPeakDbRRun);
-        drainAndMerge (mFxBusPeakDb,    mFxBusPeakDbRun);
-        drainAndMerge (mFxBusPeakDbL,   mFxBusPeakDbLRun);
-        drainAndMerge (mFxBusPeakDbR,   mFxBusPeakDbRRun);
-        drainAndMerge (mVoxBusPeakDb,   mVoxBusPeakDbRun);
-        drainAndMerge (mVoxBusPeakDbL,  mVoxBusPeakDbLRun);
-        drainAndMerge (mVoxBusPeakDbR,  mVoxBusPeakDbRRun);
-        drainAndMerge (mInstBusPeakDb,  mInstBusPeakDbRun);
-        drainAndMerge (mInstBusPeakDbL, mInstBusPeakDbLRun);
-        drainAndMerge (mInstBusPeakDbR, mInstBusPeakDbRRun);
-        drainAndMerge (mRustyDrumsBusPeakDb,  mRustyDrumsBusPeakDbRun);   // J-7b
-        drainAndMerge (mRustyDrumsBusPeakDbL, mRustyDrumsBusPeakDbLRun);  // J-7b
-        drainAndMerge (mRustyDrumsBusPeakDbR, mRustyDrumsBusPeakDbRRun);  // J-7b
-        drainAndMerge (mVoxBus2PeakDb,  mVoxBus2PeakDbRun);
-        drainAndMerge (mVoxBus2PeakDbL, mVoxBus2PeakDbLRun);
-        drainAndMerge (mVoxBus2PeakDbR, mVoxBus2PeakDbRRun);
-        drainAndMerge (mInstBus2PeakDb, mInstBus2PeakDbRun);
-        drainAndMerge (mInstBus2PeakDbL,mInstBus2PeakDbLRun);
-        drainAndMerge (mInstBus2PeakDbR,mInstBus2PeakDbRRun);
-        drainAndMerge (mInstBus3PeakDb, mInstBus3PeakDbRun);
-        drainAndMerge (mInstBus3PeakDbL,mInstBus3PeakDbLRun);
-        drainAndMerge (mInstBus3PeakDbR,mInstBus3PeakDbRRun);
-        for (int r = 0; r < kMaxAudioRows; ++r)
-        {
-            drainAndMerge (mAudioRowPeakDb [r], mAudioRowPeakDbRun [r]);
-            drainAndMerge (mAudioRowPeakDbL[r], mAudioRowPeakDbLRun[r]);
-            drainAndMerge (mAudioRowPeakDbR[r], mAudioRowPeakDbRRun[r]);
-        }
+// 2026-05-07 (Batch 9c follow-up): UI-meter atomic drain.  Single boundary
+// point where every UI-visible peak atomic gets updated, called once per
+// processBlock from BOTH the serial tail and the MT branch (right before
+// `return;` after dispatchBlock).  Three groups:
+//   1. Layers/Bass/Drums/Master bus mirrors -- drained from VibeGraph
+//      mirror atomics (which were drained from node atomics earlier).
+//   2. Audio rows + AudioClipsBus + FxBus + Vox/Inst (incl. secondary)
+//      -- promoted from Run companion atomics (audio CAS-maxes Run during
+//      processBlock; promotion lifts Run -> snapshot).
+//   3. Inserts in every node + slot atomics in every rack -- promoted by
+//      VibeGraph::promoteAllInsertPeakSnapshots().
+// All three happen back-to-back so a UI vblank firing anywhere outside
+// this small window catches a coherent snapshot across every meter.
+void VibeSynthProcessor::drainMeterAtomicsForUI()
+{
+    constexpr float kPeakNegInf = -std::numeric_limits<float>::infinity();
+    auto drainAndMerge = [] (std::atomic<float>& mirror, std::atomic<float>& nodeAtom) noexcept
+    {
+        const float v = nodeAtom.exchange (kPeakNegInf, std::memory_order_relaxed);
+        if (v == kPeakNegInf) return;
+        float cur = mirror.load (std::memory_order_relaxed);
+        while (cur < v && ! mirror.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+        {}
+    };
+    // Group 1: bus mirrors (Layers/Bass/Drums/Master).
+    drainAndMerge (mLayersPeakDb,  mVibeGraph.layersPeakDb);
+    drainAndMerge (mLayersPeakDbL, mVibeGraph.layersPeakDbL);
+    drainAndMerge (mLayersPeakDbR, mVibeGraph.layersPeakDbR);
+    drainAndMerge (mBassPeakDb,    mVibeGraph.bassPeakDb);
+    drainAndMerge (mBassPeakDbL,   mVibeGraph.bassPeakDbL);
+    drainAndMerge (mBassPeakDbR,   mVibeGraph.bassPeakDbR);
+    drainAndMerge (mDrumsPeakDb,   mVibeGraph.drumsPeakDb);
+    drainAndMerge (mDrumsPeakDbL,  mVibeGraph.drumsPeakDbL);
+    drainAndMerge (mDrumsPeakDbR,  mVibeGraph.drumsPeakDbR);
+    drainAndMerge (mMasterPeakDb,  mVibeGraph.masterPeakDb);
+    drainAndMerge (mMasterPeakDbL, mVibeGraph.masterPeakDbL);
+    drainAndMerge (mMasterPeakDbR, mVibeGraph.masterPeakDbR);
+
+    // Group 2: Run -> snapshot promotion for AudioClipsBus / FxBus / Vox /
+    // Inst / secondary buses + per-row audio clip mirrors.
+    drainAndMerge (mAudioClipsBusPeakDb,  mAudioClipsBusPeakDbRun);
+    drainAndMerge (mAudioClipsBusPeakDbL, mAudioClipsBusPeakDbLRun);
+    drainAndMerge (mAudioClipsBusPeakDbR, mAudioClipsBusPeakDbRRun);
+    drainAndMerge (mFxBusPeakDb,    mFxBusPeakDbRun);
+    drainAndMerge (mFxBusPeakDbL,   mFxBusPeakDbLRun);
+    drainAndMerge (mFxBusPeakDbR,   mFxBusPeakDbRRun);
+    drainAndMerge (mVoxBusPeakDb,   mVoxBusPeakDbRun);
+    drainAndMerge (mVoxBusPeakDbL,  mVoxBusPeakDbLRun);
+    drainAndMerge (mVoxBusPeakDbR,  mVoxBusPeakDbRRun);
+    drainAndMerge (mInstBusPeakDb,  mInstBusPeakDbRun);
+    drainAndMerge (mInstBusPeakDbL, mInstBusPeakDbLRun);
+    drainAndMerge (mInstBusPeakDbR, mInstBusPeakDbRRun);
+    drainAndMerge (mRustyDrumsBusPeakDb,  mRustyDrumsBusPeakDbRun);   // J-7b
+    drainAndMerge (mRustyDrumsBusPeakDbL, mRustyDrumsBusPeakDbLRun);  // J-7b
+    drainAndMerge (mRustyDrumsBusPeakDbR, mRustyDrumsBusPeakDbRRun);  // J-7b
+    drainAndMerge (mVoxBus2PeakDb,  mVoxBus2PeakDbRun);
+    drainAndMerge (mVoxBus2PeakDbL, mVoxBus2PeakDbLRun);
+    drainAndMerge (mVoxBus2PeakDbR, mVoxBus2PeakDbRRun);
+    drainAndMerge (mInstBus2PeakDb, mInstBus2PeakDbRun);
+    drainAndMerge (mInstBus2PeakDbL,mInstBus2PeakDbLRun);
+    drainAndMerge (mInstBus2PeakDbR,mInstBus2PeakDbRRun);
+    drainAndMerge (mInstBus3PeakDb, mInstBus3PeakDbRun);
+    drainAndMerge (mInstBus3PeakDbL,mInstBus3PeakDbLRun);
+    drainAndMerge (mInstBus3PeakDbR,mInstBus3PeakDbRRun);
+    for (int r = 0; r < kMaxAudioRows; ++r)
+    {
+        drainAndMerge (mAudioRowPeakDb [r], mAudioRowPeakDbRun [r]);
+        drainAndMerge (mAudioRowPeakDbL[r], mAudioRowPeakDbLRun[r]);
+        drainAndMerge (mAudioRowPeakDbR[r], mAudioRowPeakDbRRun[r]);
     }
     // Group 3: insert atomics + every slot atomic in every rack across all
     // nodes (Layers/Bass/Drums/Master/FxBus/AudioClipsBus + every InsertNode).

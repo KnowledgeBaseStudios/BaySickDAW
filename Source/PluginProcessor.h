@@ -699,6 +699,16 @@ public:
     //                                          ->getReadPointer(chIdx), n)
     void tapDryRecorder (int channelId, const float* monoSource, int numSamples);
 
+    // 2026-05-07 (Batch 9c follow-up): end-of-block UI-meter atomic drain.
+    // Promotes per-node / per-bus / per-row peak atomics into the UI-visible
+    // mirror atomics that the editor's timer reads.  Called from the tail
+    // of processBlock in serial mode AND from the MT branch right before
+    // `return;` so meters work identically under both paths.  Without this
+    // call from the MT branch, every dBFS / VU / per-effect meter sits at
+    // its initial -inf because the audio path's peak writes never reach
+    // the UI mirrors.
+    void drainMeterAtomicsForUI();
+
     bool isRecording() const
     {
         return mMidiRecorder.isRecording() || mMasterRecorder.isRecording()

@@ -1,6 +1,7 @@
 #include "EngineInsertTask.h"
 #include "../../VibeGraph.h"
 #include "../../DSP/EngineSidechainHelper.h"   // ISidechainEngine
+#include "../SidechainPullHelper.h"            // pullSidechainPredecessorsToGraph
 
 namespace
 {
@@ -89,6 +90,13 @@ void EngineInsertTask::run()
         midi = &emptyMidi;
 
     mEngine->processBlock (blockView, *midi);
+
+    // 2026-05-07 (Batch 9c follow-up): populate the strip's SC accumulator
+    // from MT predecessors so processInsert's internal pushScArrayToStrip
+    // forwards real data to the rack / preEq / postEq.  Without this, the
+    // engine's setSidechainBuffers above covers engine-level SC but the
+    // rack-level SC (e.g. compressor with SC source) reads silence.
+    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
     // ── Insert chain (polarity → preEq → width → rack → postEq → fader …) ────
     mGraph->processInsert (toInsertKind (mKind), mIndex,

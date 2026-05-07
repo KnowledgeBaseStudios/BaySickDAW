@@ -1,6 +1,8 @@
 #include "AudioInsertTask.h"
 #include "../../PluginProcessor.h"
 #include "../../PatternManager.h"
+#include "../../VibeGraph.h"
+#include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
 
 AudioInsertTask::AudioInsertTask (int                 index,
                                   int                 channelIdIn,
@@ -71,6 +73,15 @@ void AudioInsertTask::run()
     clipCtx.masterGain    = masterGain;
     clipCtx.mxState       = &mx;
     clipCtx.clipScratch   = &getClipScratch (blockView.getNumChannels(), n);
+
+    // 2026-05-07 (Batch 9c follow-up): SC accumulator population so the
+    // per-row processInsert call inside renderAudioClipsForRow sees real
+    // SC data (compressors / dynamic-EQ bands on this audio insert row's
+    // rack would otherwise read silence).  AudioInsertTask is a friend of
+    // VibeSynthProcessor (see friend decl in PluginProcessor.h) so the
+    // private mVibeGraph access is allowed.
+    pullSidechainPredecessorsToGraph (mProcessor->mVibeGraph, channelId,
+                                       mPredecessors, n);
 
     mProcessor->renderAudioClipsForRow (mIndex, clipCtx, &blockView);
 }

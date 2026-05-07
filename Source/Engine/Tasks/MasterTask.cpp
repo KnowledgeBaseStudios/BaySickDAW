@@ -1,6 +1,7 @@
 #include "MasterTask.h"
 #include "../../VibeGraph.h"
 #include "../../PluginProcessor.h"
+#include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
 
 MasterTask::MasterTask (VibeGraph&          graph,
                         VibeSynthProcessor& processor,
@@ -53,6 +54,12 @@ void MasterTask::run()
         for (int c = 0; c < srcCh; ++c)
             blockView.addFrom (c, 0, src, c, 0, n, gain);
     }
+
+    // 2026-05-07 (Batch 9c follow-up): SC accumulator population for the
+    // master strip's rack / preEq / postEq.  processMasterBus internally
+    // calls pushScArrayToStrip(kMaster) which reads the accumulator we
+    // just populated.
+    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
     // ── Run master DSP (rack + EQ + fader + peak drain) in-place ─────────────
     mGraph->processMasterBus (blockView, mCtx->bpm);

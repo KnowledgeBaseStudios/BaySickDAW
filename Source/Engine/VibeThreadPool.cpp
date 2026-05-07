@@ -107,6 +107,30 @@ void VibeThreadPool::runUntil (std::atomic<bool>& done) noexcept
     }
 }
 
+// 2026-05-06 (Batch 9c watchdog): bounded variant.  We always run any task
+// available (greedy) -- the deadline is only checked on idle iterations
+// where there's nothing to do.  This biases toward "if work is available,
+// finish the block normally; only declare timeout when the system is
+// actually stuck waiting."
+bool VibeThreadPool::runUntilOrTimeout (std::atomic<bool>& done,
+                                          double              deadlineMillisHiRes) noexcept
+{
+    while (! done.load (std::memory_order_acquire))
+    {
+        if (auto* task = tryPop())
+        {
+            runOneTask (task);
+        }
+        else
+        {
+            if (juce::Time::getMillisecondCounterHiRes() >= deadlineMillisHiRes)
+                return false;
+            std::this_thread::yield();
+        }
+    }
+    return true;
+}
+
 void VibeThreadPool::clearQueues() noexcept
 {
     RenderTask* drained = nullptr;
