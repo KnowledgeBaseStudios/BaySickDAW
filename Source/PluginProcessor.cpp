@@ -7,6 +7,7 @@
 #include "VibePlayer/VibePlayerProcessor.h"       // D1.4-fix (c): drum tune compensation
 #include "BaySickVocal/BaySickVocalProcessor.h"   // I-16 G-9: wet recorder hand-off
 #include "DSP/EngineSidechainHelper.h"            // C.4 Phase 2.2: ISidechainEngine for engine-level SC push
+#include <thread>                                 // 2026-05-06: hardware_concurrency for render worker count
 #ifdef VIBESYNTH_VST
   #include "PluginEditor.h"
 #endif
@@ -104,6 +105,17 @@ VibeSynthProcessor::createParameterLayout()
     // mDrumsEQDSP / mLayerPageEQs / mBassPageEQs DSP instances are all gone.
 
     return { params.begin(), params.end() };
+}
+
+// ── Multi-threaded render engine: pool sizing ────────────────────────────────
+// Hardware concurrency minus one (leave a core for the OS audio thread to
+// schedule on), capped at kMaxWorkers (8). Falls back to 4 on systems where
+// hardware_concurrency reports 0.
+int VibeSynthProcessor::computeRenderWorkerCount() noexcept
+{
+    const int hw      = (int) std::thread::hardware_concurrency();
+    const int desired = hw > 0 ? juce::jmax (1, hw - 1) : 4;
+    return juce::jmin (desired, RenderEngine::kMaxWorkers);
 }
 
 // ── Constructor / Destructor ──────────────────────────────────────────────────
@@ -238,6 +250,41 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // 5F-4a Batch 6: cache APVTS pointers in bus + master nodes (needs params registered).
     mVibeGraph.rebindBusApvts();
 
+    // 2026-05-06 (Batch 9b): register peak-meter atomic refs for the buses
+    // whose DSP migrated into VibeGraph::processBus.  Layers/Bass/Drums/
+    // Master/FxBus carry their own peak atomics on their BusNode and don't
+    // need registration.  Idempotent — registerBusPeakAtomics overwrites the
+    // table entry, so repeated prepareToPlay calls (block-size / sample-rate
+    // changes) just rewrite the same pointers.
+    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kClipsBus,
+                                       &mAudioClipsBusPeakDbRun,
+                                       &mAudioClipsBusPeakDbLRun,
+                                       &mAudioClipsBusPeakDbRRun);
+    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kVoxBus,
+                                       &mVoxBusPeakDbRun,
+                                       &mVoxBusPeakDbLRun,
+                                       &mVoxBusPeakDbRRun);
+    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kInstBus,
+                                       &mInstBusPeakDbRun,
+                                       &mInstBusPeakDbLRun,
+                                       &mInstBusPeakDbRRun);
+    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kVoxBus2,
+                                       &mVoxBus2PeakDbRun,
+                                       &mVoxBus2PeakDbLRun,
+                                       &mVoxBus2PeakDbRRun);
+    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kInstBus2,
+                                       &mInstBus2PeakDbRun,
+                                       &mInstBus2PeakDbLRun,
+                                       &mInstBus2PeakDbRRun);
+    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kInstBus3,
+                                       &mInstBus3PeakDbRun,
+                                       &mInstBus3PeakDbLRun,
+                                       &mInstBus3PeakDbRRun);
+    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kRustyDrumsBus,
+                                       &mRustyDrumsBusPeakDbRun,
+                                       &mRustyDrumsBusPeakDbLRun,
+                                       &mRustyDrumsBusPeakDbRRun);
+
     // 2026-05-05 dirty-flag wiring: route every VibeGraph rack's lifecycle
     // events into the editor's project-dirty hook the same way main-APVTS
     // edits do.  Effects-page slot type swap / move-up/down / clear / bypass
@@ -251,6 +298,53 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     // Compute initial PDC (0 for all current effects) and report to host.
     setLatencySamples(mVibeGraph.updateBusLatencies());
+
+    // ── Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06) ───────
+    // Resize the cache-aligned arena to fit the new block size and clear any
+    // stale tasks from the pool's queues. The pool itself is NOT recreated —
+    // workers persist for the plugin's lifetime per the lifetime contract.
+    // Sample-rate / block-size changes only touch the arena views.
+    mRenderArena.prepare (samplesPerBlock);
+    mRenderDispatcher.prepare (sampleRate, samplesPerBlock);
+    mRenderPool.clearQueues();
+
+    // Batch 7 (2026-05-06): register the 11 always-on bus PassiveStripTasks
+    // here (after buildFixedTopology so VibeGraph bus nodes exist).
+    // Idempotent — guarded by null checks so prepareToPlay can be called
+    // repeatedly (sample-rate / buffer changes).  Master is excluded; it
+    // gets its own MasterTask in Batch 8.
+    static constexpr std::array<int, kNumBatch7Buses> kBusChannelIds = {
+        MixerChannelIds::kLayersBus,
+        MixerChannelIds::kBassBus,
+        MixerChannelIds::kDrumsBus,
+        MixerChannelIds::kFxBus,
+        MixerChannelIds::kClipsBus,
+        MixerChannelIds::kVoxBus,
+        MixerChannelIds::kInstBus,
+        MixerChannelIds::kVoxBus2,
+        MixerChannelIds::kInstBus2,
+        MixerChannelIds::kInstBus3,
+        MixerChannelIds::kRustyDrumsBus,
+    };
+    for (size_t i = 0; i < kBusChannelIds.size(); ++i)
+    {
+        if (mBusRenderTasks[i]) continue;   // already registered
+        auto task = std::make_unique<PassiveStripTask>(
+            PassiveStripTask::Kind::Bus, /*auxOrBusIndex*/ 0,
+            kBusChannelIds[i], mVibeGraph, *this);
+        mRenderDispatcher.registerTask(task.get());
+        mBusRenderTasks[i] = std::move(task);
+    }
+
+    // Batch 8 (2026-05-06): register the always-on MasterTask.  Idempotent
+    // — guarded by null check.  Must be registered AFTER the bus tasks
+    // (above) so rebuildLinks finds the buses as predecessors of master.
+    if (! mMasterRenderTask)
+    {
+        mMasterRenderTask = std::make_unique<MasterTask>(
+            mVibeGraph, *this, mRenderDispatcher.getAllDoneFlag());
+        mRenderDispatcher.registerTask(mMasterRenderTask.get());
+    }
 }
 
 void VibeSynthProcessor::releaseResources() {}
@@ -268,6 +362,278 @@ bool VibeSynthProcessor::isBusesLayoutSupported(const BusesLayout& layouts) cons
     return true;
 }
 
+// ── Batch 5 (2026-05-06): routeInsertOutput member function ──────────────────
+// Promoted from a stack lambda inside processBlock so helpers + render tasks
+// outside that scope can call it.  Behavior is identical to the previous
+// lambda — fan source's output buffer to every destination in the routing
+// graph (main-out + sends), plus copy into any sidechain receive slots.
+void VibeSynthProcessor::routeInsertOutput (int srcChannelId,
+                                             const juce::AudioBuffer<float>& buf,
+                                             int n)
+{
+    const auto& routingEdges   = mVibeGraph.getRoutingGraph().edges();
+    const auto& routingScEdges = mVibeGraph.getRoutingGraph().scEdges();
+
+    const int nc = juce::jmin (2, buf.getNumChannels());
+    for (const auto& e : routingEdges)
+    {
+        if (e.srcId != srcChannelId) continue;
+        if (auto* dst = mVibeGraph.getChannelAccumulator (e.dstId))
+        {
+            const float gain = e.isMainOut
+                ? 1.f
+                : juce::Decibels::decibelsToGain (e.amountDb, -60.f);
+            for (int c = 0; c < nc; ++c)
+                dst->addFrom (c, 0, buf, c, 0, n, gain);
+        }
+    }
+    // C.4 Phase 1: SC fan -- copy (not add) src's tap into dst's SC receive
+    // slot.  Per the encoding contract there is at most one source per
+    // (dst, slot), so copy-replaces is correct.  Tap point = post-everything
+    // per Q4=A: by the time routeInsertOutput is called for a strip, its
+    // full pipeline (rack -> EQ -> fader -> mute -> solo -> pan) has
+    // already run on `buf`.
+    for (const auto& sce : routingScEdges)
+    {
+        if (sce.srcId != srcChannelId) continue;
+        if (auto* recv = mVibeGraph.getScRecvBuffer (sce.dstId, sce.dstSlot))
+        {
+            const int rnc = juce::jmin (nc, recv->getNumChannels());
+            for (int c = 0; c < rnc; ++c)
+                recv->copyFrom (c, 0, buf, c, 0, n);
+        }
+    }
+}
+
+// ── Batch 5 (2026-05-06): renderAudioClipsForRow ─────────────────────────────
+// Decode + insert-chain processing for every NON-FilePlay audio clip whose
+// trackRow matches `row`.  Behavior is identical to the previous in-line
+// loop body in processBlock; the extraction lets AudioInsertTask call the
+// same code path.
+//
+// mtDest semantics:
+//   nullptr  : serial mode -- final routeInsertOutput call fans the clip's
+//              processed output via the routing graph (main-out + sends).
+//   non-null : MT mode (Batch 9 will flip the flag) -- per-clip output is
+//              added into *mtDest so the task's downstream pull-model
+//              consumers see the summed row output.
+//
+// FilePlay clips (clip with routeChannel pointing at a Vox/Inst page) are
+// silently skipped here; the inline FilePlay pass in processBlock owns
+// that path.  See deferred notes in the Batch 5 entry of the recovery doc.
+void VibeSynthProcessor::renderAudioClipsForRow (int row,
+                                                  const AudioClipBlockContext& ctx,
+                                                  juce::AudioBuffer<float>* mtDest)
+{
+    if (row < 0 || row >= kMaxAudioRows)
+        return;
+    if (mPatternManager == nullptr || ctx.mxState == nullptr || ctx.clipScratch == nullptr)
+        return;
+
+    const auto& mx = *ctx.mxState;
+    auto& clipScratch = *ctx.clipScratch;
+
+    auto arCasMax = [] (std::atomic<float>& a, float v) noexcept
+    {
+        if (v == -std::numeric_limits<float>::infinity()) return;
+        float cur = a.load (std::memory_order_relaxed);
+        while (cur < v
+               && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed)) {}
+    };
+
+    for (auto& player : mAudioClipPlayers)
+    {
+        if (player.streamer == nullptr) continue;
+        if (player.trackRow != row) continue;
+
+        // FilePlay clips are handled by the inline pass in processBlock.
+        const int routeCh = player.routeChannel;
+        const bool isVoxRoute  = routeCh >= MixerChannelIds::kVoxBase
+                              && routeCh <  MixerChannelIds::kVoxBase + kMaxVoxPages;
+        const bool isInstRoute = routeCh >= MixerChannelIds::kInstBase
+                              && routeCh <  MixerChannelIds::kInstBase + kMaxInstPages;
+        if (isVoxRoute || isInstRoute)
+            continue;
+
+        const juce::int64 clipStart = (juce::int64) (player.clipStartBeat * ctx.secPerBeat * mSampleRate);
+        const juce::int64 clipEnd   = (juce::int64) (player.clipEndBeat   * ctx.secPerBeat * mSampleRate);
+
+        if (ctx.projectEnd <= clipStart || ctx.projectStart >= clipEnd) continue;
+
+        const bool rowMuted        = mx.audioRowMute[(size_t) row];
+        const bool builderRowMuted = ! mPatternManager->isRowAudible (row);
+
+        if (player.mutedByChoke)
+        {
+            mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
+            continue;
+        }
+        if (rowMuted || builderRowMuted)
+        {
+            mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
+            continue;
+        }
+
+        const int bufOffset = (int) juce::jmax ((juce::int64) 0, clipStart - ctx.projectStart);
+        const juce::int64 outPosInClip = (ctx.projectStart + bufOffset) - clipStart;
+
+        const double readRatio = player.fileSampleRate / mSampleRate;
+        const juce::int64 filePos = (juce::int64) (outPosInClip * readRatio);
+
+        const juce::int64 fileTotalSamples = player.streamer->getTotalLength();
+        if (filePos >= fileTotalSamples)
+        {
+            mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
+            continue;
+        }
+
+        const double stretchRatio = (player.vocoder != nullptr
+                                     && player.stretchMode
+                                     && player.originalBPM > 0.f)
+            ? (double) player.originalBPM / ctx.bpm
+            : 1.0;
+
+        const juce::int64 fileEOFOutput = clipStart
+            + (juce::int64) ((double) fileTotalSamples * stretchRatio / readRatio);
+        const juce::int64 effectiveClipEnd = juce::jmin (clipEnd, fileEOFOutput);
+        const int outSamples = (int) juce::jmin (
+            (juce::int64) (ctx.numSamples - bufOffset),
+            effectiveClipEnd - (ctx.projectStart + bufOffset));
+
+        if (outSamples <= 0) continue;
+
+        clipScratch.clear();
+
+        const float gain = ctx.masterGain;
+        float       peak = 0.0f;
+
+        const bool usePV = (player.vocoder != nullptr)
+                        && player.stretchMode
+                        && (player.originalBPM > 0.f)
+                        && (std::abs (ctx.bpm - player.originalBPM) > 0.01);
+
+        if (usePV)
+        {
+            player.vocoder->setStretchRatio (stretchRatio);
+
+            const juce::int64 pvRefPos  = (juce::int64) ((double) outPosInClip
+                                                          * readRatio / stretchRatio);
+            const juce::int64 pvReadPos = player.expectedFilePos;
+
+            const bool seekNeeded =
+                (pvReadPos == 0 && pvRefPos > (juce::int64) mSampleRate) ||
+                (pvReadPos  > 0 &&
+                 std::abs (pvRefPos - pvReadPos) > (juce::int64) (mSampleRate * 2));
+
+            if (seekNeeded)
+            {
+                player.vocoder->reset();
+                player.streamer->seek (pvRefPos);
+                player.expectedFilePos = pvRefPos;
+            }
+
+            const int numFileSamples = (int) std::ceil (
+                (double) outSamples * readRatio / stretchRatio);
+
+            player.pvInBuf.clear();
+            const bool gotRaw = player.streamer->readRaw (
+                player.pvInBuf, 0, numFileSamples, player.expectedFilePos);
+
+            if (gotRaw)
+            {
+                player.expectedFilePos += numFileSamples;
+                player.vocoder->push (player.pvInBuf, 0, numFileSamples);
+
+                const int numVocOut = (int) std::ceil (
+                    (double) outSamples * readRatio) + 2;
+
+                player.pvOutBuf.clear();
+                const int pulled = player.vocoder->pull (
+                    player.pvOutBuf, 0, numVocOut);
+
+                if (pulled > 0)
+                {
+                    const int pvCh = player.pvOutBuf.getNumChannels();
+                    for (int i = 0; i < outSamples; ++i)
+                    {
+                        const double exactFP = (double) i * readRatio;
+                        const int    ip      = (int) exactFP;
+                        const float  frac    = (float) (exactFP - ip);
+
+                        if (ip + 1 >= pulled) break;
+
+                        for (int ch = 0; ch < ctx.numOut; ++ch)
+                        {
+                            const int   srcCh = ch % pvCh;
+                            const float s0    = player.pvOutBuf.getSample (srcCh, ip);
+                            const float s1    = player.pvOutBuf.getSample (srcCh, ip + 1);
+                            const float v     = (s0 + frac * (s1 - s0)) * gain;
+                            clipScratch.addSample (ch, bufOffset + i, v);
+                            peak = juce::jmax (peak, std::abs (v));
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            peak = player.streamer->readAndMix (
+                clipScratch, bufOffset, outSamples, filePos, readRatio, ctx.numOut, gain);
+            player.expectedFilePos = filePos + (juce::int64) std::ceil (outSamples * readRatio);
+        }
+
+        // F3 declick: 5 ms linear fade-in / -out, capped at half clip length.
+        {
+            const juce::int64 clipLenOutSamples = effectiveClipEnd - clipStart;
+            const int fadeSamples = juce::jmax (1, juce::jmin (
+                (int) std::round (mSampleRate * 0.005),
+                (int) (clipLenOutSamples / 2)));
+            for (int s = 0; s < outSamples; ++s)
+            {
+                const juce::int64 absPos = outPosInClip + s;
+                float g = 1.0f;
+                if (absPos < (juce::int64) fadeSamples)
+                    g = (float) absPos / (float) fadeSamples;
+                const juce::int64 distFromEnd = clipLenOutSamples - 1 - absPos;
+                if (distFromEnd >= 0 && distFromEnd < (juce::int64) fadeSamples)
+                    g = juce::jmin (g, (float) distFromEnd / (float) fadeSamples);
+                if (g < 1.0f)
+                    for (int ch = 0; ch < ctx.numOut; ++ch)
+                        clipScratch.setSample (ch, bufOffset + s,
+                            clipScratch.getSample (ch, bufOffset + s) * g);
+            }
+        }
+
+        // 5F-4a Batch 6: route per-clip scratch through Audio InsertNode
+        // (polarity → width → rack → post-rack EQ → fader × mute × solo → PDC → peak).
+        mVibeGraph.processInsert (VibeGraph::InsertKind::Audio, row,
+                                   clipScratch, ctx.bpm, ctx.anySolo);
+
+        // 2026-05-02: drain-and-merge — exchange the InsertNode's L/R peaks
+        // and CAS-max into the audio-row mirror.
+        const auto [pkL, pkR] = mVibeGraph.drainInsertPeakDbStereo (
+            VibeGraph::InsertKind::Audio, row);
+        arCasMax (mAudioRowPeakDbLRun[row], pkL);
+        arCasMax (mAudioRowPeakDbRRun[row], pkR);
+        arCasMax (mAudioRowPeakDbRun [row], juce::jmax (pkL, pkR));
+
+        // Publish: serial fans via routing graph; MT writes into the task's
+        // downstream-pull buffer (additive so multiple clips on the row sum).
+        if (mtDest == nullptr)
+        {
+            routeInsertOutput (MixerChannelIds::audioInsert (row),
+                                clipScratch, ctx.numSamples);
+        }
+        else
+        {
+            const int nc = juce::jmin (mtDest->getNumChannels(),
+                                       clipScratch.getNumChannels());
+            for (int c = 0; c < nc; ++c)
+                mtDest->addFrom (c, 0, clipScratch, c, 0, ctx.numSamples);
+        }
+    }
+}
+
 // ── processBlock ──────────────────────────────────────────────────────────────
 void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                        juce::MidiBuffer& midiMessages)
@@ -283,6 +649,19 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         midiMessages.clear();
         return;
     }
+
+    // ── Multi-threaded render engine branch ─────────────────────────────────
+    // Batch 9a (2026-05-06): the MT branch was MOVED from here (top of
+    // processBlock, right after the project-load barrier) to AFTER all MIDI
+    // scheduling + anySolo computation + routing-graph rebuild.  Reason:
+    // BlockContext now needs to carry per-engine MIDI buffer pointers,
+    // anySolo, the live-input snapshot, and a routing-graph-aware predecessor
+    // list.  Building that context cleanly requires the serial code below
+    // to populate the inputs first.  See the new MT branch site after
+    // applyChokeGroupDispatch().
+    //
+    // The project-load barrier above still gates BOTH paths, so MT mode
+    // never sees a half-torn-down state.
 
     // 1M: capture wall-clock start time (high-res, audio-thread safe)
     const auto t0 = juce::Time::getHighResolutionTicks();
@@ -1031,47 +1410,19 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // C.4 Phase 1 (2026-04-30): clear SC receive buffers each block before
     // sources fan their post-everything taps in.
     mVibeGraph.clearScRecvBuffers();
-    const auto& routingEdges   = mVibeGraph.getRoutingGraph().edges();
-    const auto& routingScEdges = mVibeGraph.getRoutingGraph().scEdges();
 
-    // Helper: fan this source channel's output out to all destinations listed
-    // in the RoutingGraph (main-out + active sends). Called after each
-    // InsertNode processBlock so the destination's accumulator is populated
-    // before bus/master processing downstream.
-    auto routeInsertOutput = [&](int srcChannelId,
-                                  const juce::AudioBuffer<float>& buf,
-                                  int n)
-    {
-        const int nc = juce::jmin(2, buf.getNumChannels());
-        for (const auto& e : routingEdges)
-        {
-            if (e.srcId != srcChannelId) continue;
-            if (auto* dst = mVibeGraph.getChannelAccumulator(e.dstId))
-            {
-                const float gain = e.isMainOut
-                    ? 1.f
-                    : juce::Decibels::decibelsToGain(e.amountDb, -60.f);
-                for (int c = 0; c < nc; ++c)
-                    dst->addFrom(c, 0, buf, c, 0, n, gain);
-            }
-        }
-        // C.4 Phase 1 (2026-04-30): SC fan -- copy (not add) src's tap into
-        // dst's SC receive slot.  Per the encoding contract there is at most
-        // one source per (dst, slot), so copy-replaces is correct.  Tap point
-        // = post-everything per Q4=A: by the time routeInsertOutput is called
-        // for a strip, its full pipeline (rack -> EQ -> fader -> mute -> solo
-        // -> pan) has already run on `buf`.
-        for (const auto& sce : routingScEdges)
-        {
-            if (sce.srcId != srcChannelId) continue;
-            if (auto* recv = mVibeGraph.getScRecvBuffer(sce.dstId, sce.dstSlot))
-            {
-                const int rnc = juce::jmin(nc, recv->getNumChannels());
-                for (int c = 0; c < rnc; ++c)
-                    recv->copyFrom(c, 0, buf, c, 0, n);
-            }
-        }
-    };
+    // Batch 9a (2026-05-06): rebuild render-graph predecessor / child links
+    // from the freshly-rebuilt RoutingGraph.  Runs on EVERY block regardless
+    // of kEnableMultiThreadedEngine — keeps the new plumbing actively
+    // exercised in serial mode (per Jeff's "no dead wiring" rule) so any
+    // bug in rebuildLinks surfaces today, not when the flag flips.  The
+    // serial path doesn't read mPredecessors; the MT path will once
+    // dispatchBlock fires.
+    mRenderDispatcher.rebuildLinks (mVibeGraph.getRoutingGraph());
+    // 5F-4b B1b: routeInsertOutput is a private member function (Batch 5
+    // promoted it from a stack lambda).  Existing call sites below resolve
+    // to the member; the routing-graph getters are now re-fetched per call
+    // (cheap — const ref to a vector).
     const double bpmForInserts = pos.getBpm().orFallback(120.0);
 
     // C.3 (2026-04-30): drain hardware MIDI input collector and route into
@@ -1135,6 +1486,39 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         applyChokeGroupDispatch(layerPageMidi, bassPageMidi, drumPageMidi,
                                 voxPageMidi,   instPageMidi,
                                 projStartSamp, numSamples, secPerBeatCh);
+    }
+
+    // ── Batch 9a (2026-05-06): MT engine branch, NEW location ───────────────
+    // All inputs the MT path needs are now in scope: numSamples + pos +
+    // anySolo + per-engine MidiBuffers + mLiveInputSnapshot + routing graph
+    // (rebuilt above).  Build BlockContext once and hand off to the
+    // dispatcher; the serial path below is skipped via early return.
+    //
+    // Stays elided by the compiler while kEnableMultiThreadedEngine is
+    // constexpr false — no runtime cost on the serial path.
+    if constexpr (RenderEngine::kEnableMultiThreadedEngine)
+    {
+        BlockContext mtCtx;
+        mtCtx.numSamples         = numSamples;
+        mtCtx.bpm                = pos.getBpm().orFallback (120.0);
+        mtCtx.anySolo            = anySolo;
+        // 2026-05-06 (Batch 9b): cache project pan law for bus tasks.
+        mtCtx.panLaw             =
+            (apvts.getRawParameterValue("master_pan_law") != nullptr)
+                ? (int) apvts.getRawParameterValue("master_pan_law")->load()
+                : 0;
+        mtCtx.posInfo            = &pos;
+        mtCtx.layerPageMidi      = layerPageMidi.data();
+        mtCtx.bassPageMidi       = bassPageMidi .data();
+        mtCtx.drumPageMidi       = drumPageMidi .data();
+        mtCtx.clipPageMidi       = clipPageMidi .data();
+        mtCtx.voxPageMidi        = voxPageMidi  .data();
+        mtCtx.instPageMidi       = instPageMidi .data();
+        mtCtx.rustyDrumsMidi     = &mRustyDrumsMidi;
+        mtCtx.liveInputSnapshot  = &mLiveInputSnapshot;
+
+        mRenderDispatcher.dispatchBlock (buffer, mtCtx);
+        return;
     }
 
     // C.4 Phase 2.2: helper that pushes the strip's SC array to the engine
@@ -1633,9 +2017,26 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             mAudioClipScratch.setSize(numOut, numSamples, false, false, true);
             mAudioRowScratch.clear();
 
+            // ── Batch 5 (2026-05-06): split audio-clip rendering ────────────
+            // Pass 1 below: ONLY FilePlay clips (clip routed to a Vox/Inst
+            // engine). Non-FilePlay clips are skipped here and handled by
+            // renderAudioClipsForRow per-row pass after this loop. The
+            // helper holds the same decode + insert + peak + route logic
+            // that used to live inline; the extraction lets AudioInsertTask
+            // (Batch 5 scaffolding) call the same path under the MT flag.
             for (auto& player : mAudioClipPlayers)
             {
                 if (player.streamer == nullptr) continue;
+
+                // Filter to FilePlay-only at the top of this pass.
+                {
+                    const int rch = player.routeChannel;
+                    const bool isVox  = rch >= MixerChannelIds::kVoxBase
+                                     && rch <  MixerChannelIds::kVoxBase + kMaxVoxPages;
+                    const bool isInst = rch >= MixerChannelIds::kInstBase
+                                     && rch <  MixerChannelIds::kInstBase + kMaxInstPages;
+                    if (! isVox && ! isInst) continue;   // non-FilePlay → helper handles it
+                }
 
                 const int64 clipStart = (int64)(player.clipStartBeat * secPerBeat * mSampleRate);
                 const int64 clipEnd   = (int64)(player.clipEndBeat   * secPerBeat * mSampleRate);
@@ -1898,36 +2299,34 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                                 mInstEngineScratch, numSamples);
                         }
                     }
-                    continue;   // skip the Audio InsertNode + audio-row peak path below
+                    // 5F-4b B1b: this clip's processed output has been routed
+                    // via the Vox/Inst InsertNode above.  Skip the Audio
+                    // InsertNode + audio-row peak path (unused for FilePlay).
+                    continue;
                 }
+                // Pass 1 only handles FilePlay clips. Non-FilePlay clips were
+                // filtered out at the top of this loop and are processed by
+                // the per-row helper below.
+            }
 
-                // 5F-4a Batch 6: route per-clip scratch through Audio InsertNode
-                // (polarity → width → rack → post-rack EQ → fader × mute × solo → PDC → peak).
-                if (inRange)
-                {
-                    mVibeGraph.processInsert(VibeGraph::InsertKind::Audio, row,
-                                              mAudioClipScratch, bpmAC, anySolo);
-                    // 2026-05-02: drain-and-merge -- exchange the InsertNode's
-                    // L/R peaks (resets per-block running-max window) and
-                    // CAS-max into the audio-row mirror so cross-block max
-                    // accumulates until UI vblank exchanges-and-resets it.
-                    const auto [pkL, pkR] = mVibeGraph.drainInsertPeakDbStereo(
-                        VibeGraph::InsertKind::Audio, row);
-                    auto arCasMax = [] (std::atomic<float>& a, float v) noexcept
-                    {
-                        if (v == -std::numeric_limits<float>::infinity()) return;
-                        float cur = a.load(std::memory_order_relaxed);
-                        while (cur < v
-                               && ! a.compare_exchange_weak(cur, v, std::memory_order_relaxed))
-                        {}
-                    };
-                    arCasMax(mAudioRowPeakDbLRun[row], pkL);
-                    arCasMax(mAudioRowPeakDbRRun[row], pkR);
-                    arCasMax(mAudioRowPeakDbRun [row], juce::jmax(pkL, pkR));
-                    // 5F-4b B1b: route this audio insert's output via graph (main + sends)
-                    routeInsertOutput(MixerChannelIds::audioInsert(row),
-                                       mAudioClipScratch, numSamples);
-                }
+            // ── Batch 5 Pass 2: non-FilePlay clips per-row ──────────────────
+            // The shared helper is also called by AudioInsertTask in MT mode
+            // (flag still false; dead at runtime).
+            {
+                AudioClipBlockContext clipCtx;
+                clipCtx.bpm           = bpmAC;
+                clipCtx.anySolo       = anySolo;
+                clipCtx.secPerBeat    = secPerBeat;
+                clipCtx.projectStart  = projectStart;
+                clipCtx.projectEnd    = projectEnd;
+                clipCtx.numSamples    = numSamples;
+                clipCtx.numOut        = numOut;
+                clipCtx.masterGain    = masterGain;
+                clipCtx.mxState       = &mx;
+                clipCtx.clipScratch   = &mAudioClipScratch;
+
+                for (int row = 0; row < kMaxAudioRows; ++row)
+                    renderAudioClipsForRow (row, clipCtx, /*mtDest=*/ nullptr);
             }
 
             // 2026-04-28 (G-3): the Clips Bus pre-processing block was moved
@@ -1954,128 +2353,21 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         {
             juce::AudioBuffer<float>& clipsBus = *clipsAccum;
 
-            // C.4 Phase 1: push SC array to ClipsBus chain before processing.
-            mVibeGraph.pushScArrayToStrip(MixerChannelIds::kClipsBus);
-
-            // §P4.3: Audio Clips Bus pre-rack EQ.
-            if (auto* preEq = mVibeGraph.getAudioClipsBusPreEQ();
-                preEq != nullptr && clipsBus.getNumChannels() >= 2)
-                preEq->process(clipsBus);
-
-            // Audio Clips Bus rack — strip-local FX Bypass OR global kill-all.
-            if (auto* rack = mVibeGraph.getAudioClipsBusRack())
-            {
-                const bool globalBypass =
-                    (apvts.getRawParameterValue("master_fx_bypass") != nullptr)
-                    && (apvts.getRawParameterValue("master_fx_bypass")->load() > 0.5f);
-                // 2026-04-29: also honor mixer_clipsbus_bypass strip button.
-                const auto* bypP = apvts.getRawParameterValue("mixer_clipsbus_bypass");
-                const bool stripBypass = bypP && bypP->load() > 0.5f;
-                const bool bypass = stripBypass || globalBypass;
-                if (rack->isRackBypassed() != bypass)
-                    rack->setRackBypassed(bypass);
-                rack->process(clipsBus);
-            }
-
-            // Audio Clips Bus post-rack EQ.
-            if (auto* eq = mVibeGraph.getAudioClipsBusEQ();
-                eq != nullptr && clipsBus.getNumChannels() >= 2)
-                eq->process(clipsBus);
-
-            // 5F-4a Batch 6: Audio Clips Bus polarity + M/S width.
-            mVibeGraph.applyAudioClipsBusPolarityWidth(clipsBus);
-
-            // Bus fader + mute + in-group solo.
-            // 2026-04-30: solo wiring added — was previously a dead button
-            // (mixer_clipsbus_solo registered + UI-bound but no audio code
-            // read it).  ClipsBus shares the in-group solo set with the
-            // Vox/Inst receive buses; if any sibling is soloed and this
-            // one isn't, gain goes to zero.
-            float clipsBusGain = 1.0f;
-            const auto* clipsSoloP = apvts.getRawParameterValue ("mixer_clipsbus_solo");
-            const auto* clipsAnySolo = (apvts.getRawParameterValue ("mixer_voxbus_solo")
-                                        || apvts.getRawParameterValue ("mixer_instbus_solo"))
-                                       ? apvts.getRawParameterValue ("mixer_clipsbus_solo")  // (handle re-derive below)
-                                       : nullptr;
-            (void) clipsAnySolo;   // suppress unused — we use the precomputed group flag
-            // anySolo was computed by the bus loop above as `busAnySolo`; but
-            // ClipsBus pre-processing runs BEFORE that loop in code order,
-            // so re-derive locally.  (Cheap — five atomic loads per block.)
-            const bool localAnySolo =
-                   (apvts.getRawParameterValue ("mixer_clipsbus_solo") && apvts.getRawParameterValue ("mixer_clipsbus_solo")->load() > 0.5f)
-                || (apvts.getRawParameterValue ("mixer_voxbus_solo")   && apvts.getRawParameterValue ("mixer_voxbus_solo")  ->load() > 0.5f)
-                || (apvts.getRawParameterValue ("mixer_instbus_solo")  && apvts.getRawParameterValue ("mixer_instbus_solo") ->load() > 0.5f)
-                || (apvts.getRawParameterValue ("mixer_voxbus2_solo")  && apvts.getRawParameterValue ("mixer_voxbus2_solo") ->load() > 0.5f)
-                || (apvts.getRawParameterValue ("mixer_instbus2_solo") && apvts.getRawParameterValue ("mixer_instbus2_solo")->load() > 0.5f)
-                || (apvts.getRawParameterValue ("mixer_instbus3_solo") && apvts.getRawParameterValue ("mixer_instbus3_solo")->load() > 0.5f);
-            const bool clipsSoloed = clipsSoloP && clipsSoloP->load() > 0.5f;
-            const bool clipsSilencedBySolo = localAnySolo && ! clipsSoloed;
-            // 2026-04-30 (audit B.3): direct APVTS reads for level + mute.
-            // Was: mx.audioClipsBusMute/Level (PatternManager) → 30 Hz UI
-            // applicator timer ferried APVTS automation into MixerState before
-            // audio could see it.  Now audio reads APVTS each block; the
-            // MixerState fields are still kept in sync via the strip's
-            // onFaderChanged / onMuteChanged callbacks for legacy code paths
-            // that still consume them, but they are no longer the source of
-            // truth for audio output gain.
-            const auto* clipsMuteP = apvts.getRawParameterValue ("mixer_clipsbus_mute");
-            const auto* clipsLvlP  = apvts.getRawParameterValue ("mixer_clipsbus_level");
-            const bool  clipsMuted = clipsMuteP && clipsMuteP->load() > 0.5f;
-            const float clipsFadDb = clipsLvlP  ? clipsLvlP->load()  : 0.0f;
-            const float clipsFadLn = juce::Decibels::decibelsToGain (clipsFadDb, -60.0f);
-            clipsBusGain = (clipsMuted || clipsSilencedBySolo) ? 0.0f : clipsFadLn;
-            if (! juce::approximatelyEqual (clipsBusGain, 1.0f))
-                clipsBus.applyGain(clipsBusGain);
-
-            // 2026-04-29: ClipsBus pan applied AFTER fader using project-level law.
-            if (const auto* panP = apvts.getRawParameterValue("mixer_clipsbus_pan");
-                panP != nullptr && clipsBus.getNumChannels() >= 2)
-            {
-                const float pan = panP->load();
-                if (std::abs (pan) > 1.0e-4f)
-                {
-                    const int law = (apvts.getRawParameterValue("master_pan_law") != nullptr)
-                        ? (int) apvts.getRawParameterValue("master_pan_law")->load() : 0;
-                    const float p = juce::jlimit (-1.f, 1.f, pan);
-                    const float np = (p + 1.f) * 0.5f;
-                    float gL = 1.f, gR = 1.f;
-                    switch (law)
-                    {
-                        case 1: gL = 1.f - np; gR = np; break;
-                        case 2: gL = (p <= 0.f ? 1.f : 1.f - p);
-                                gR = (p >= 0.f ? 1.f : 1.f + p); break;
-                        default: { const float a = np * juce::MathConstants<float>::halfPi;
-                                   gL = std::cos (a); gR = std::sin (a); } break;
-                    }
-                    clipsBus.applyGain (0, 0, numSamples, gL);
-                    clipsBus.applyGain (1, 0, numSamples, gR);
-                }
-            }
-
-            // Bus peak meter (hold + decay).
-            // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.
-            // Mono atomic kept (= max(L, R)) for legacy readers.
-            {
-                // 2026-05-02: CAS-max into running-max companions; end-of-block
-                // promotion lifts to UI-visible atomics.
-                const int nc = clipsBus.getNumChannels();
-                const float pkLin_L = clipsBus.getMagnitude(0, 0, numSamples);
-                const float pkLin_R = (nc >= 2) ? clipsBus.getMagnitude(1, 0, numSamples)
-                                                : pkLin_L;
-                const float thisL = juce::Decibels::gainToDecibels(pkLin_L, -60.0f);
-                const float thisR = juce::Decibels::gainToDecibels(pkLin_R, -60.0f);
-                const float thisM = juce::jmax(thisL, thisR);
-                auto casMaxLocal = [] (std::atomic<float>& a, float v) noexcept
-                {
-                    float cur = a.load(std::memory_order_relaxed);
-                    while (cur < v
-                           && ! a.compare_exchange_weak(cur, v, std::memory_order_relaxed))
-                    {}
-                };
-                casMaxLocal(mAudioClipsBusPeakDbLRun, thisL);
-                casMaxLocal(mAudioClipsBusPeakDbRRun, thisR);
-                casMaxLocal(mAudioClipsBusPeakDbRun,  thisM);
-            }
+            // 2026-05-06 (Batch 9b): ClipsBus DSP migrated into
+            // VibeGraph::processBus.  Same chain (preEq -> rack -> postEq ->
+            // polarity/width -> fader x mute x in-group solo -> pan -> peak
+            // meter); same APVTS reads; same 6-bus localAnySolo formula
+            // (preserved bug-for-bug — see processBus comment).  The
+            // anySolo arg is ignored for kClipsBus; processBus re-derives
+            // the receive-group flag internally because this block runs
+            // BEFORE the Vox/Inst BusSet[] loop's busAnySolo is computed.
+            const int clipsPanLaw =
+                (apvts.getRawParameterValue("master_pan_law") != nullptr)
+                    ? (int) apvts.getRawParameterValue("master_pan_law")->load()
+                    : 0;
+            mVibeGraph.processBus(MixerChannelIds::kClipsBus, clipsBus,
+                                   bpmForInserts, /*anySolo (ignored)*/ false,
+                                   clipsPanLaw);
 
             // Hand the bus buffer to VibeGraph for the master rack.
             audioClipsBusForGraph = &clipsBus;
@@ -2107,52 +2399,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         // chain (preEQ -> rack -> postEQ -> polarity/width -> fader/mute) and
         // measure peak before fanning out to Master.  Mirrors the Audio Clips
         // Bus path above.
-        // 2026-04-29: BusSet now carries a prefix string so per-block APVTS
-        // lookups for _bypass / _pan don't need to be hard-coded per-bus.
-        // Same APVTS ID convention the rest of the file uses.
-        // 2026-04-30: stereo peak atomics added alongside mono for the new
-        // split DBFSMeter.  All three are written each block.
-        struct BusSet {
-            int                                                      chId;
-            EQ8MsDSP*                                                preEq;
-            EffectRack*                                              rack;
-            EQ8MsDSP*                                                postEq;
-            void (VibeGraph::*polWidth)(juce::AudioBuffer<float>&);
-            std::atomic<float>*                                      peak;     // mono = max(L,R)
-            std::atomic<float>*                                      peakL;
-            std::atomic<float>*                                      peakR;
-            const char*                                              prefix;   // e.g. "mixer_voxbus"
-        };
-        // 2026-05-02: pass the Run companion atomics here -- audio CAS-maxes
-        // into Run during processing, end-of-block promote lifts to snapshot.
-        const BusSet kBusSets[] = {
-            { MixerChannelIds::kVoxBus,
-              mVibeGraph.getVoxBusPreEQ(),  mVibeGraph.getVoxBusRack(),  mVibeGraph.getVoxBusEQ(),
-              &VibeGraph::applyVoxBusPolarityWidth,
-              &mVoxBusPeakDbRun,  &mVoxBusPeakDbLRun,  &mVoxBusPeakDbRRun,  "mixer_voxbus"  },
-            { MixerChannelIds::kInstBus,
-              mVibeGraph.getInstBusPreEQ(), mVibeGraph.getInstBusRack(), mVibeGraph.getInstBusEQ(),
-              &VibeGraph::applyInstBusPolarityWidth,
-              &mInstBusPeakDbRun, &mInstBusPeakDbLRun, &mInstBusPeakDbRRun, "mixer_instbus" },
-            // G-6 (2026-04-29): secondary buses.  Always processed (cheap when
-            // no inserts route to them — buffer is silent).  UI activation
-            // (Mixer "Add Vox/Inst Bus" button) is independent of audio path.
-            { MixerChannelIds::kVoxBus2,
-              mVibeGraph.getVoxBus2PreEQ(),  mVibeGraph.getVoxBus2Rack(),  mVibeGraph.getVoxBus2EQ(),
-              &VibeGraph::applyVoxBus2PolarityWidth,
-              &mVoxBus2PeakDbRun,  &mVoxBus2PeakDbLRun,  &mVoxBus2PeakDbRRun,  "mixer_voxbus2"  },
-            { MixerChannelIds::kInstBus2,
-              mVibeGraph.getInstBus2PreEQ(), mVibeGraph.getInstBus2Rack(), mVibeGraph.getInstBus2EQ(),
-              &VibeGraph::applyInstBus2PolarityWidth,
-              &mInstBus2PeakDbRun, &mInstBus2PeakDbLRun, &mInstBus2PeakDbRRun, "mixer_instbus2" },
-            { MixerChannelIds::kInstBus3,
-              mVibeGraph.getInstBus3PreEQ(), mVibeGraph.getInstBus3Rack(), mVibeGraph.getInstBus3EQ(),
-              &VibeGraph::applyInstBus3PolarityWidth,
-              &mInstBus3PeakDbRun, &mInstBus3PeakDbLRun, &mInstBus3PeakDbRRun, "mixer_instbus3" },
-        };
-        const bool globalBypass =
-            (apvts.getRawParameterValue("master_fx_bypass") != nullptr)
-            && (apvts.getRawParameterValue("master_fx_bypass")->load() > 0.5f);
+        // 2026-05-06 (Batch 9b): Vox / Inst / Vox2 / Inst2 / Inst3 bus DSP
+        // migrated into VibeGraph::processBus.  All five buses share the
+        // same DSP shape (preEq -> rack -> postEq -> polarity/width -> fader
+        // x mute x in-group solo -> pan -> peak meter), so the for-loop is
+        // now just a list of channel IDs that processBus dispatches on.
+        // routeInsertOutput remains here (caller responsibility — processBus
+        // does DSP only).
         // 2026-04-29: project-level pan law selector — each bus reads it once
         // per block when applying its _pan param.
         const int panLaw =
@@ -2161,10 +2414,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 : 0;
 
         // 2026-04-30: cross-bus solo flag for the "post-rack receive" group
-        // (Audio Clips, Vox, Inst, Vox2, Inst2, Inst3).  Was missing — _solo
-        // params were registered + UI-bound but the bus loop only read level
-        // + mute.  When ANY bus in this group is soloed, all non-soloed buses
-        // in the group go silent (matches Layers/Bass/Drums in-group solo).
+        // (Audio Clips, Vox, Inst, Vox2, Inst2, Inst3).  When ANY bus in this
+        // group is soloed, all non-soloed buses in the group go silent
+        // (matches Layers/Bass/Drums in-group solo).  C.1: FX joins the group.
         auto soloOf = [&] (const char* prefix) -> bool
         {
             const auto* p = apvts.getRawParameterValue (juce::String (prefix) + "_solo");
@@ -2177,96 +2429,21 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             || soloOf ("mixer_instbus3")
             || soloOf ("mixer_fx");   // C.1: FX Bus joins receive-group solo
 
-        for (const auto& bs : kBusSets)
+        // G-6 (2026-04-29): secondary buses always processed (cheap when no
+        // inserts route to them — buffer is silent).  UI activation (Mixer
+        // "Add Vox/Inst Bus" button) is independent of audio path.
+        for (const int busChId : { MixerChannelIds::kVoxBus,
+                                    MixerChannelIds::kInstBus,
+                                    MixerChannelIds::kVoxBus2,
+                                    MixerChannelIds::kInstBus2,
+                                    MixerChannelIds::kInstBus3 })
         {
-            auto* accum = mVibeGraph.getChannelAccumulator (bs.chId);
+            auto* accum = mVibeGraph.getChannelAccumulator (busChId);
             if (accum == nullptr) continue;
-            auto& buf = *accum;
-            if (buf.getNumChannels() < 2) continue;
+            if (accum->getNumChannels() < 2) continue;
 
-            const juce::String prefix = bs.prefix;
-
-            // C.4 Phase 1: push SC array to this bus's chain before processing.
-            mVibeGraph.pushScArrayToStrip(bs.chId);
-
-            if (bs.preEq) bs.preEq->process(buf);
-            if (bs.rack)
-            {
-                // 2026-04-29: strip-local FX Bypass OR global kill-all.
-                const auto* bypP = apvts.getRawParameterValue (prefix + "_bypass");
-                const bool stripBypass = bypP && bypP->load() > 0.5f;
-                const bool bypass = stripBypass || globalBypass;
-                if (bs.rack->isRackBypassed() != bypass)
-                    bs.rack->setRackBypassed(bypass);
-                bs.rack->process(buf);
-            }
-            if (bs.postEq) bs.postEq->process(buf);
-            (mVibeGraph.*bs.polWidth)(buf);
-
-            // Fader (dB -> linear) * mute * (in-group solo).
-            // 2026-04-30: solo gating added — this bus is silenced if any
-            // sibling bus in the receive group is soloed AND this one isn't.
-            const auto* lvlP   = apvts.getRawParameterValue (prefix + "_level");
-            const auto* muteP  = apvts.getRawParameterValue (prefix + "_mute");
-            const auto* soloP  = apvts.getRawParameterValue (prefix + "_solo");
-            const float dB     = lvlP  ? lvlP->load() : 0.0f;
-            const bool  muted  = muteP && muteP->load() > 0.5f;
-            const bool  soloed = soloP && soloP->load() > 0.5f;
-            const bool  silenced = muted || (busAnySolo && ! soloed);
-            const float gain   = silenced ? 0.0f : juce::Decibels::decibelsToGain (dB, -60.0f);
-            if (gain != 1.0f) buf.applyGain (gain);
-
-            // 2026-04-29: pan applied AFTER fader using project-level law.
-            if (const auto* panP = apvts.getRawParameterValue (prefix + "_pan"))
-            {
-                const float pan = panP->load();
-                if (std::abs (pan) > 1.0e-4f)
-                {
-                    float gL = 1.f, gR = 1.f;
-                    // Inline pan law (matches VibeGraph::applyPanLaw).  Done
-                    // here rather than calling into VibeGraph because that
-                    // file's helper isn't exposed in the header.
-                    const float p = juce::jlimit (-1.f, 1.f, pan);
-                    const float np = (p + 1.f) * 0.5f;
-                    switch (panLaw)
-                    {
-                        case 1: gL = 1.f - np;          gR = np;            break;
-                        case 2: gL = (p <= 0.f ? 1.f : 1.f - p);
-                                gR = (p >= 0.f ? 1.f : 1.f + p);            break;
-                        default: { const float a = np * juce::MathConstants<float>::halfPi;
-                                   gL = std::cos (a); gR = std::sin (a); }  break;
-                    }
-                    buf.applyGain (0, 0, numSamples, gL);
-                    buf.applyGain (1, 0, numSamples, gR);
-                }
-            }
-
-            // Hold + decay peak meter (matches InsertNode pattern).
-            // 2026-05-02: CAS-max running peak; UI vblank exchanges-and-resets.
-            // Decay lives on the UI thread (DBFSMeter ballistics).  Same pattern
-            // as Layers/Bass/Drums/Master/FxBus/AudioClipsBus.
-            {
-                const int   nc      = buf.getNumChannels();
-                const float pkLin_L = buf.getMagnitude (0, 0, numSamples);
-                const float pkLin_R = (nc >= 2) ? buf.getMagnitude (1, 0, numSamples)
-                                                : pkLin_L;
-                const float thisL = juce::Decibels::gainToDecibels (pkLin_L, -60.0f);
-                const float thisR = juce::Decibels::gainToDecibels (pkLin_R, -60.0f);
-                const float thisM = juce::jmax (thisL, thisR);
-                auto vbCasMax = [] (std::atomic<float>* a, float v) noexcept
-                {
-                    if (! a) return;
-                    float cur = a->load (std::memory_order_relaxed);
-                    while (cur < v
-                           && ! a->compare_exchange_weak (cur, v, std::memory_order_relaxed))
-                    {}
-                };
-                vbCasMax (bs.peakL, thisL);
-                vbCasMax (bs.peakR, thisR);
-                vbCasMax (bs.peak,  thisM);
-            }
-
-            routeInsertOutput (bs.chId, buf, numSamples);
+            mVibeGraph.processBus (busChId, *accum, bpmForInserts, busAnySolo, panLaw);
+            routeInsertOutput (busChId, *accum, numSamples);
         }
     }
 
@@ -2337,95 +2514,18 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         {
             if (accum->getNumChannels() >= 2)
             {
-                auto& buf = *accum;
-                const juce::String prefix = "mixer_rustybus";
-
-                mVibeGraph.pushScArrayToStrip(MixerChannelIds::kRustyDrumsBus);
-
-                if (auto* preEq = mVibeGraph.getRustyDrumsBusPreEQ()) preEq->process(buf);
-                if (auto* rack  = mVibeGraph.getRustyDrumsBusRack())
-                {
-                    const auto* bypP = apvts.getRawParameterValue(prefix + "_bypass");
-                    const bool  globalBypass2 =
-                        (apvts.getRawParameterValue("master_fx_bypass") != nullptr)
-                        && (apvts.getRawParameterValue("master_fx_bypass")->load() > 0.5f);
-                    const bool stripBypass = bypP && bypP->load() > 0.5f;
-                    const bool bypass = stripBypass || globalBypass2;
-                    if (rack->isRackBypassed() != bypass) rack->setRackBypassed(bypass);
-                    rack->process(buf);
-                }
-                if (auto* postEq = mVibeGraph.getRustyDrumsBusEQ()) postEq->process(buf);
-                mVibeGraph.applyRustyDrumsBusPolarityWidth(buf);
-
-                // Fader / mute (no in-group solo for this bus — it's standalone).
-                const auto* lvlP  = apvts.getRawParameterValue(prefix + "_level");
-                const auto* muteP = apvts.getRawParameterValue(prefix + "_mute");
-                const float dB    = lvlP  ? lvlP->load() : 0.0f;
-                const bool  muted = muteP && muteP->load() > 0.5f;
-                const float gain  = muted ? 0.0f : juce::Decibels::decibelsToGain(dB, -60.0f);
-                if (gain != 1.0f) buf.applyGain(gain);
-
-                // Pan (project-level law).
-                if (const auto* panP = apvts.getRawParameterValue(prefix + "_pan"))
-                {
-                    const float pan = panP->load();
-                    if (std::abs(pan) > 1.0e-4f)
-                    {
-                        const int rdPanLaw =
-                            (apvts.getRawParameterValue("master_pan_law") != nullptr)
-                                ? (int) apvts.getRawParameterValue("master_pan_law")->load()
-                                : 0;
-                        float gL = 1.f, gR = 1.f;
-                        const float p = juce::jlimit(-1.f, 1.f, pan);
-                        const float np = (p + 1.f) * 0.5f;
-                        switch (rdPanLaw)
-                        {
-                            case 1: gL = 1.f - np;          gR = np;            break;
-                            case 2: gL = (p <= 0.f ? 1.f : 1.f - p);
-                                    gR = (p >= 0.f ? 1.f : 1.f + p);            break;
-                            default: { const float a = np * juce::MathConstants<float>::halfPi;
-                                       gL = std::cos(a); gR = std::sin(a); }    break;
-                        }
-                        buf.applyGain(0, 0, numSamples, gL);
-                        buf.applyGain(1, 0, numSamples, gR);
-                    }
-                }
-
-                // J-7b (2026-05-04): peak meter for the RustyDrums Bus strip.
-                // Mirrors the FX Bus pattern: compute stereo peaks on the
-                // post-fader/pan buffer, CAS-max into the Run atomics, then
-                // promote at end of block so the mixer strip's DBFSMeter
-                // shows signal activity coherently with every other bus.
-                {
-                    auto bufferPeakDbStereoLocal = [] (const juce::AudioBuffer<float>& b)
-                        -> std::pair<float, float>
-                    {
-                        const int n = b.getNumSamples();
-                        float pkL = 0.f, pkR = 0.f;
-                        if (b.getNumChannels() >= 1) pkL = b.getMagnitude (0, 0, n);
-                        if (b.getNumChannels() >= 2) pkR = b.getMagnitude (1, 0, n);
-                        constexpr float kFloor = -60.f;
-                        auto toDb = [] (float lin) {
-                            return lin > 0.f ? juce::Decibels::gainToDecibels (lin, -60.f) : -60.f;
-                        };
-                        return { juce::jmax (kFloor, toDb (pkL)),
-                                 juce::jmax (kFloor, toDb (pkR)) };
-                    };
-                    const auto [pkL, pkR] = bufferPeakDbStereoLocal (buf);
-                    auto casMax = [] (std::atomic<float>& a, float v) noexcept
-                    {
-                        if (v == -std::numeric_limits<float>::infinity()) return;
-                        float cur = a.load (std::memory_order_relaxed);
-                        while (cur < v
-                               && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed))
-                        {}
-                    };
-                    casMax (mRustyDrumsBusPeakDbLRun, pkL);
-                    casMax (mRustyDrumsBusPeakDbRRun, pkR);
-                    casMax (mRustyDrumsBusPeakDbRun,  juce::jmax (pkL, pkR));
-                }
-
-                routeInsertOutput(MixerChannelIds::kRustyDrumsBus, buf, numSamples);
+                // 2026-05-06 (Batch 9b): RustyDrums Bus DSP migrated into
+                // VibeGraph::processBus.  Standalone bus (no in-group solo);
+                // anySolo arg is ignored for kRustyDrumsBus.  routeInsertOutput
+                // remains here.
+                const int rdPanLaw =
+                    (apvts.getRawParameterValue("master_pan_law") != nullptr)
+                        ? (int) apvts.getRawParameterValue("master_pan_law")->load()
+                        : 0;
+                mVibeGraph.processBus (MixerChannelIds::kRustyDrumsBus, *accum,
+                                        bpmForInserts, /*anySolo (ignored)*/ false,
+                                        rdPanLaw);
+                routeInsertOutput (MixerChannelIds::kRustyDrumsBus, *accum, numSamples);
             }
         }
     }
@@ -3815,12 +3915,29 @@ void VibeSynthProcessor::registerLayerEngine(int idx, juce::AudioProcessor* eng)
         ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kLayersBus);
         mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Layer, idx,
                                      "Layer " + juce::String(idx + 1), prefix);
+
+        // Batch 3 (2026-05-06): create + register the multi-threaded render
+        // task for this Layer. Dead at runtime while
+        // kEnableMultiThreadedEngine is constexpr false; ready when it flips.
+        auto task = std::make_unique<EngineInsertTask>(
+            eng, EngineInsertTask::Kind::Layer, idx,
+            MixerChannelIds::layerInsert(idx), mVibeGraph);
+        mRenderDispatcher.registerTask(task.get());
+        mLayerRenderTasks[(size_t) idx] = std::move(task);
     }
 }
 void VibeSynthProcessor::unregisterLayerEngine(int idx)
 {
+    if (idx < 0 || idx >= kMaxLayerPages) return;
+    // Batch 3: tear down the task BEFORE clearing the engine pointer so the
+    // dispatcher never sees a task pointing at a dead engine.
+    if (mLayerRenderTasks[(size_t) idx])
+    {
+        mRenderDispatcher.unregisterTask(MixerChannelIds::layerInsert(idx));
+        mLayerRenderTasks[(size_t) idx].reset();
+    }
     juce::SpinLock::ScopedLockType lk(mLayerEngineLock);
-    if (idx >= 0 && idx < kMaxLayerPages) mLayerEngines[idx] = nullptr;
+    mLayerEngines[idx] = nullptr;
     // InsertNode retained on purpose — preserves mixer state if the page is re-opened.
 }
 void VibeSynthProcessor::registerBassEngine(int pageIdx, juce::AudioProcessor* eng)
@@ -3836,11 +3953,23 @@ void VibeSynthProcessor::registerBassEngine(int pageIdx, juce::AudioProcessor* e
         ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kBassBus);
         mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Bass, pageIdx,
                                      "Bass " + juce::String(pageIdx + 1), prefix);
+
+        // Batch 3 (2026-05-06): MT render task wrapper.
+        auto task = std::make_unique<EngineInsertTask>(
+            eng, EngineInsertTask::Kind::Bass, pageIdx,
+            MixerChannelIds::bassInsert(pageIdx), mVibeGraph);
+        mRenderDispatcher.registerTask(task.get());
+        mBassRenderTasks[(size_t) pageIdx] = std::move(task);
     }
 }
 void VibeSynthProcessor::unregisterBassEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxBassPages) return;
+    if (mBassRenderTasks[(size_t) pageIdx])
+    {
+        mRenderDispatcher.unregisterTask(MixerChannelIds::bassInsert(pageIdx));
+        mBassRenderTasks[(size_t) pageIdx].reset();
+    }
     juce::SpinLock::ScopedLockType lk(mBassEngineLock);
     mBassEngines[pageIdx] = nullptr;
 }
@@ -3865,6 +3994,13 @@ void VibeSynthProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* e
         ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kDrumsBus);
         mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Drum, pageIdx,
                                      "Drum " + juce::String(pageIdx + 1), prefix);
+
+        // Batch 3 (2026-05-06): MT render task wrapper.
+        auto task = std::make_unique<EngineInsertTask>(
+            eng, EngineInsertTask::Kind::Drum, pageIdx,
+            MixerChannelIds::drumInsert(pageIdx), mVibeGraph);
+        mRenderDispatcher.registerTask(task.get());
+        mDrumRenderTasks[(size_t) pageIdx] = std::move(task);
     }
     // Recompute fast-path flag (any engine alive?)
     bool any = false;
@@ -3874,6 +4010,11 @@ void VibeSynthProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* e
 void VibeSynthProcessor::unregisterDrumEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxDrumPages) return;
+    if (mDrumRenderTasks[(size_t) pageIdx])
+    {
+        mRenderDispatcher.unregisterTask(MixerChannelIds::drumInsert(pageIdx));
+        mDrumRenderTasks[(size_t) pageIdx].reset();
+    }
     {
         juce::SpinLock::ScopedLockType lk(mDrumEngineLock);
         mDrumEngines[pageIdx] = nullptr;
@@ -3903,11 +4044,34 @@ void VibeSynthProcessor::registerClipEngine(int pageIdx, juce::AudioProcessor* e
     bool any = false;
     for (auto* e : mClipEngines) if (e) { any = true; break; }
     mAnyClipPageActive.store(any, std::memory_order_release);
+
+    // Batch 5 (2026-05-06): MT render task wrapper.
+    if (eng != nullptr)
+    {
+        auto task = std::make_unique<ClipPageTask>(
+            eng, pageIdx, MixerChannelIds::audioInsert(pageIdx),
+            mVibeGraph, *this);
+        mRenderDispatcher.registerTask(task.get());
+        mClipRenderTasks[(size_t) pageIdx] = std::move(task);
+    }
 }
 
 void VibeSynthProcessor::unregisterClipEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxClipPages) return;
+
+    if (mClipRenderTasks[(size_t) pageIdx])
+    {
+        // Note: AudioInsertTask may also be registered at the same channelId
+        // (audioInsert(pageIdx)).  We only unregister the ClipPageTask here;
+        // the AudioInsertTask remains.  The dispatcher's mTasksByChannel slot
+        // is overwritten on registerTask, so currently the most recent
+        // registration wins.  Tracked in deferred notes — Batch 9 needs to
+        // resolve clip vs audio insert task ownership at the same id.
+        mRenderDispatcher.unregisterTask(MixerChannelIds::audioInsert(pageIdx));
+        mClipRenderTasks[(size_t) pageIdx].reset();
+    }
+
     {
         juce::SpinLock::ScopedLockType lk(mClipEngineLock);
         mClipEngines[pageIdx] = nullptr;
@@ -3932,11 +4096,28 @@ void VibeSynthProcessor::registerVoxEngine(int pageIdx, juce::AudioProcessor* en
     bool any = false;
     for (auto* e : mVoxEngines) if (e) { any = true; break; }
     mAnyVoxPageActive.store(any, std::memory_order_release);
+
+    // Batch 4 (2026-05-06): MT render task wrapper.
+    if (eng != nullptr)
+    {
+        auto task = std::make_unique<VoxStripTask>(
+            eng, pageIdx, MixerChannelIds::voxInsert(pageIdx),
+            mVibeGraph, *this);
+        mRenderDispatcher.registerTask(task.get());
+        mVoxRenderTasks[(size_t) pageIdx] = std::move(task);
+    }
 }
 
 void VibeSynthProcessor::unregisterVoxEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxVoxPages) return;
+
+    if (mVoxRenderTasks[(size_t) pageIdx])
+    {
+        mRenderDispatcher.unregisterTask(MixerChannelIds::voxInsert(pageIdx));
+        mVoxRenderTasks[(size_t) pageIdx].reset();
+    }
+
     {
         juce::SpinLock::ScopedLockType lk(mVoxEngineLock);
         mVoxEngines[pageIdx] = nullptr;
@@ -3956,11 +4137,31 @@ void VibeSynthProcessor::registerInstEngine(int pageIdx, juce::AudioProcessor* e
     bool any = false;
     for (auto* e : mInstEngines) if (e) { any = true; break; }
     mAnyInstPageActive.store(any, std::memory_order_release);
+
+    // Batch 4 (2026-05-06): MT render task wrapper.  Source-mode (LiveInput
+    // / BaySickGuitars / BaySickBasses) is detected at run time inside the
+    // task via the mGuitarsActive / mBassesActive atomics, so a single task
+    // instance survives source-mode swaps.
+    if (eng != nullptr)
+    {
+        auto task = std::make_unique<InstStripTask>(
+            eng, pageIdx, MixerChannelIds::instInsert(pageIdx),
+            mVibeGraph, *this);
+        mRenderDispatcher.registerTask(task.get());
+        mInstRenderTasks[(size_t) pageIdx] = std::move(task);
+    }
 }
 
 void VibeSynthProcessor::unregisterInstEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxInstPages) return;
+
+    if (mInstRenderTasks[(size_t) pageIdx])
+    {
+        mRenderDispatcher.unregisterTask(MixerChannelIds::instInsert(pageIdx));
+        mInstRenderTasks[(size_t) pageIdx].reset();
+    }
+
     {
         juce::SpinLock::ScopedLockType lk(mInstEngineLock);
         mInstEngines[pageIdx] = nullptr;
@@ -4188,6 +4389,17 @@ void VibeSynthProcessor::ensureAudioInsert(int row, const juce::String& displayN
                                  displayName.isNotEmpty() ? displayName
                                      : ("Audio " + juce::String(row + 1)),
                                  prefix);
+
+    // Batch 5 (2026-05-06): create the per-row AudioInsertTask if it doesn't
+    // exist yet.  No removeAudioInsert hook exists — audio inserts persist
+    // for the project lifetime; the unique_ptr cleans up on plugin destroy.
+    if (! mAudioRenderTasks[(size_t) row])
+    {
+        auto task = std::make_unique<AudioInsertTask>(
+            row, MixerChannelIds::audioInsert(row), *this);
+        mRenderDispatcher.registerTask(task.get());
+        mAudioRenderTasks[(size_t) row] = std::move(task);
+    }
 }
 
 // 5F-4b B2: Aux strip registration (receive-only, default routes to Master).
@@ -4201,6 +4413,18 @@ void VibeSynthProcessor::ensureAuxInsert(int idx, const juce::String& displayNam
                                  displayName.isNotEmpty() ? displayName
                                      : ("Aux " + juce::String(idx + 1)),
                                  prefix);
+
+    // Batch 7 (2026-05-06): create the per-aux PassiveStripTask if not yet
+    // present.  No removeAuxInsert hook exists — auxes persist for the
+    // project lifetime; the unique_ptr cleans up on plugin destroy.
+    if (! mAuxRenderTasks[(size_t) idx])
+    {
+        auto task = std::make_unique<PassiveStripTask>(
+            PassiveStripTask::Kind::Aux, idx,
+            MixerChannelIds::auxStrip(idx), mVibeGraph, *this);
+        mRenderDispatcher.registerTask(task.get());
+        mAuxRenderTasks[(size_t) idx] = std::move(task);
+    }
 }
 
 // R1 (2026-04-23): Vox / Inst strip registration.  Same pattern as Aux but
@@ -4243,11 +4467,32 @@ void VibeSynthProcessor::ensureRustyInsert(int idx, const juce::String& displayN
                                  displayName.isNotEmpty() ? displayName
                                      : ("Rusty " + juce::String(idx + 1)),
                                  prefix);
+
+    // Batch 6 (2026-05-06): create the per-strip RustyInsertTask + synthetic
+    // dep on the producer.  Producer is created in loadBaySickRustyDrumsKit
+    // BEFORE the ensureRustyInsert loop runs, so it's available here.
+    if (! mRustyRenderTasks[(size_t) idx] && mRustyProducerTask)
+    {
+        auto task = std::make_unique<RustyInsertTask>(
+            idx, MixerChannelIds::rustyInsert(idx), mVibeGraph, *this);
+        mRenderDispatcher.registerTask(task.get());
+        mRenderDispatcher.addSyntheticDep(mRustyProducerTask.get(), task.get());
+        mRustyRenderTasks[(size_t) idx] = std::move(task);
+    }
 }
 
 void VibeSynthProcessor::removeRustyInsert(int idx)
 {
     if (idx < 0 || idx >= MixerChannelIds::kMaxRustyStrips) return;
+
+    // Batch 6: tear down the per-strip RustyInsertTask before clearing
+    // the InsertNode so the dispatcher never holds a stale task pointer.
+    if (mRustyRenderTasks[(size_t) idx])
+    {
+        mRenderDispatcher.unregisterTask(MixerChannelIds::rustyInsert(idx));
+        mRustyRenderTasks[(size_t) idx].reset();
+    }
+
     mVibeGraph.removeInsertNode(VibeGraph::InsertKind::Rusty, idx);
     // APVTS params persist (existing pattern — JUCE doesn't allow unregister).
     // Reset to defaults so a future re-create starts clean.  Common cleanup
@@ -4436,6 +4681,15 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
         }
     }
 
+    // Batch 6 (2026-05-06): create the producer task on first kit load.
+    // Producer must exist before ensureRustyInsert runs (it adds a synthetic
+    // dep from the producer to each insert task).
+    if (! mRustyProducerTask)
+    {
+        mRustyProducerTask = std::make_unique<RustyDrumsProducerTask>(*this);
+        mRenderDispatcher.registerTask(mRustyProducerTask.get());
+    }
+
     if (! mRustyDrumsEngine->loadKit (sfzPath))
         return false;
 
@@ -4443,7 +4697,20 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     // ones — protects against accidental double-creation if the user loads a
     // different kit while the singleton already exists.
     for (int i = 0; i < MixerChannelIds::kMaxRustyStrips; ++i)
+    {
+        // Batch 6: also unregister the per-strip task so the dispatcher
+        // doesn't keep dangling tasks pointing at recycled InsertNodes.
+        // Note: mVibeGraph.removeInsertNode is the legacy direct path used
+        // here (rather than removeRustyInsert) because removeRustyInsert
+        // also resets APVTS params, which we want to preserve across kit
+        // reloads.
+        if (mRustyRenderTasks[(size_t) i])
+        {
+            mRenderDispatcher.unregisterTask(MixerChannelIds::rustyInsert(i));
+            mRustyRenderTasks[(size_t) i].reset();
+        }
         mVibeGraph.removeInsertNode (VibeGraph::InsertKind::Rusty, i);
+    }
 
     // Spawn one strip per discovered channel, in drummer-conventional order.
     const auto& channels = mRustyDrumsEngine->getChannels();
@@ -4460,8 +4727,19 @@ void VibeSynthProcessor::destroyBaySickRustyDrums()
 {
     // Remove all 13 InsertNodes first (audio thread will see empty mRustyInserts
     // immediately even if the engine teardown takes another instant).
+    // removeRustyInsert also unregisters the per-strip RustyInsertTask and
+    // drops any synthetic deps the dispatcher had pointing at it.
     for (int i = 0; i < MixerChannelIds::kMaxRustyStrips; ++i)
         removeRustyInsert (i);
+
+    // Batch 6 (2026-05-06): drop the producer task too.  Synthetic deps from
+    // producer to inserts are already gone (each removeRustyInsert removed
+    // its half of the pair); unregisterTask cleans up any stragglers.
+    if (mRustyProducerTask)
+    {
+        mRenderDispatcher.unregisterTask(mRustyProducerTask.get());
+        mRustyProducerTask.reset();
+    }
 
     // Then drop the engine.  Audio thread reads mRustyDrumsActive before
     // touching the engine pointer, so flip the active flag before freeing.

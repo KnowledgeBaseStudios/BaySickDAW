@@ -17,6 +17,22 @@
 #include "DSP/AudioClipStreamer.h"
 #include "DSP/PhaseVocoder.h"
 #include "MidiLearn/MidiLearnRegistry.h"
+// Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06).  These
+// members live for the lifetime of the processor; per-strip RenderTask
+// wrappers ship in Batches 3-8.
+#include "Engine/RenderEngineFlags.h"
+#include "Engine/ChannelBufferArena.h"
+#include "Engine/VibeThreadPool.h"
+#include "Engine/RenderGraphDispatcher.h"
+#include "Engine/Tasks/EngineInsertTask.h"   // Batch 3: Layer/Bass/Drum task wrappers
+#include "Engine/Tasks/VoxStripTask.h"       // Batch 4: Vox live-input strip wrapper
+#include "Engine/Tasks/InstStripTask.h"      // Batch 4: Inst source-mode-aware wrapper
+#include "Engine/Tasks/ClipPageTask.h"       // Batch 5: Clip page (sample trigger) wrapper
+#include "Engine/Tasks/AudioInsertTask.h"    // Batch 5: per-row audio clip wrapper
+#include "Engine/Tasks/RustyDrumsProducerTask.h"   // Batch 6: drives processStrips
+#include "Engine/Tasks/RustyInsertTask.h"          // Batch 6: per-strip insert wrapper
+#include "Engine/Tasks/PassiveStripTask.h"         // Batch 7: aux + bus accumulator strips
+#include "Engine/Tasks/MasterTask.h"               // Batch 8: terminal task (graph sink)
 
 // ── APVTS parameter helper ────────────────────────────────────────────────────
 // Creates a ParameterID with version 1
@@ -25,6 +41,18 @@
 class VibeSynthProcessor : public juce::AudioProcessor,
                            private juce::ValueTree::Listener   // §P4.3 perf: dirty-flag EQ sync
 {
+    // Multi-threaded render engine task wrappers (Batches 4+) read internal
+    // per-tab state (FilePlay flags, sfizz-active atomics, idle counters,
+    // kIdleSuspendBlocks) directly. Friend access avoids cluttering the
+    // public API with accessors used only by the engine layer.
+    friend class VoxStripTask;
+    friend class InstStripTask;
+    friend class ClipPageTask;            // Batch 5
+    friend class AudioInsertTask;         // Batch 5
+    friend class RustyDrumsProducerTask;  // Batch 6
+    friend class RustyInsertTask;         // Batch 6
+    friend class PassiveStripTask;        // Batch 7
+    friend class MasterTask;              // Batch 8
 public:
     VibeSynthProcessor();
     ~VibeSynthProcessor() override;
@@ -463,6 +491,42 @@ public:
     std::vector<AudioClipPlayer> mAudioClipPlayers;
     juce::SpinLock               mAudioClipLock;
 
+    // ── Batch 5 (2026-05-06): shared audio-clip render path ──────────────────
+    // Per-block context bundle passed into renderAudioClipsForRow.  Keeps the
+    // helper signature short while preserving access to all the per-block
+    // values the render needs.
+    struct AudioClipBlockContext
+    {
+        double      bpm              = 120.0;
+        bool        anySolo          = false;
+        double      secPerBeat       = 0.5;
+        juce::int64 projectStart     = 0;
+        juce::int64 projectEnd       = 0;
+        int         numSamples       = 0;
+        int         numOut           = 2;
+        float       masterGain       = 1.0f;
+        const MixerState* mxState    = nullptr;   // PatternManager.h top-level struct
+        juce::AudioBuffer<float>* clipScratch = nullptr;   // shared decode buffer
+    };
+
+    // 5F-4b B1b: fan a source channel's output out to all destinations listed
+    // in the RoutingGraph (main-out + sends + sidechain taps).  Was a stack
+    // lambda inside processBlock until Batch 5 promoted it to a member so
+    // helpers / tasks outside that scope can call it.
+    void routeInsertOutput (int srcChannelId,
+                            const juce::AudioBuffer<float>& buf,
+                            int numSamples);
+
+    // Render all non-FilePlay audio clips on `row` through the row's Audio
+    // InsertNode.  Serial path passes mtDest=nullptr (output fans via
+    // routeInsertOutput).  AudioInsertTask passes its mOutputBuffer so the
+    // pull-model task graph can consume.  FilePlay clips (clip routed to a
+    // Vox/Inst page) are skipped — they're handled by the inline FilePlay
+    // pass in processBlock for now (deferred to Batch 9 redesign).
+    void renderAudioClipsForRow (int row,
+                                 const AudioClipBlockContext& ctx,
+                                 juce::AudioBuffer<float>* mtDest);
+
     // Per-row peak dB for audio strip meters (audio thread writes, UI timer reads).
     // kMaxAudioRows == 50 (matches MixerState::kMaxAudioRows).
     static constexpr int kMaxAudioRows = 50;
@@ -870,6 +934,53 @@ private:
     // registry's dispatch.  Mutators on mMidiLearn run on the message thread.
     MidiLearnRegistry   mMidiLearn;
     MidiLearnEventQueue mMidiLearnQueue;
+
+    // ── Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06) ───────
+    // Lifetime = plugin lifetime. Pool spawns its workers in its constructor
+    // and joins them in its destructor; prepareToPlay only resizes the arena
+    // and clears queues, never touches the threads themselves.
+    //
+    // Declaration order is critical: dispatcher takes refs to pool + arena,
+    // and C++ guarantees member init order matches declaration order.
+    static int computeRenderWorkerCount() noexcept;
+
+    VibeThreadPool        mRenderPool       { computeRenderWorkerCount() };
+    ChannelBufferArena    mRenderArena;
+    RenderGraphDispatcher mRenderDispatcher { mRenderPool, mRenderArena };
+
+    // Batch 3 (2026-05-06): one EngineInsertTask per active Layer/Bass/Drum.
+    // Created in lockstep with the engine via registerXxxEngine; destroyed
+    // in unregisterXxxEngine. The dispatcher holds non-owning pointers; we
+    // own the storage so destruction is well-defined.
+    std::array<std::unique_ptr<EngineInsertTask>, kMaxLayerPages> mLayerRenderTasks;
+    std::array<std::unique_ptr<EngineInsertTask>, kMaxBassPages>  mBassRenderTasks;
+    std::array<std::unique_ptr<EngineInsertTask>, kMaxDrumPages>  mDrumRenderTasks;
+
+    // Batch 4 (2026-05-06): Vox + Inst live-input strip task wrappers.
+    std::array<std::unique_ptr<VoxStripTask>,  kMaxVoxPages>  mVoxRenderTasks;
+    std::array<std::unique_ptr<InstStripTask>, kMaxInstPages> mInstRenderTasks;
+
+    // Batch 5 (2026-05-06): Clip page + Audio insert task wrappers.
+    std::array<std::unique_ptr<ClipPageTask>,    kMaxClipPages> mClipRenderTasks;
+    std::array<std::unique_ptr<AudioInsertTask>, kMaxAudioRows> mAudioRenderTasks;
+
+    // Batch 6 (2026-05-06): BaySickRustyDrums producer + per-strip inserts.
+    // Producer owned per-engine (only one engine instance ever exists).
+    // Inserts are 1:1 with the engine's discovered strip count (up to 13);
+    // arrays sized to the max + indexed by stripIndex.
+    std::unique_ptr<RustyDrumsProducerTask>                                       mRustyProducerTask;
+    std::array<std::unique_ptr<RustyInsertTask>, MixerChannelIds::kMaxRustyStrips> mRustyRenderTasks;
+
+    // Batch 7 (2026-05-06): passive accumulator strip tasks.
+    // Aux: created lazily via ensureAuxInsert; up to kMaxAuxStrips (18).
+    // Bus: 11 always-on buses registered idempotently in prepareToPlay.
+    static constexpr int kNumBatch7Buses = 11;
+    std::array<std::unique_ptr<PassiveStripTask>, MixerChannelIds::kMaxAuxStrips> mAuxRenderTasks;
+    std::array<std::unique_ptr<PassiveStripTask>, kNumBatch7Buses>                mBusRenderTasks;
+
+    // Batch 8 (2026-05-06): terminal MasterTask.  Always-on, registered
+    // idempotently in prepareToPlay alongside the bus tasks.
+    std::unique_ptr<MasterTask> mMasterRenderTask;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VibeSynthProcessor)
 };

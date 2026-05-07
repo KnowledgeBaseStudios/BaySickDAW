@@ -324,6 +324,39 @@ public:
                       juce::AudioBuffer<float>* drumsPreRendered       = nullptr,
                       juce::AudioBuffer<float>* audioClipsPreRendered  = nullptr);
 
+    // 2026-05-06 (Batch 9b): unified bus DSP dispatcher used by both the serial
+    // path and the MT path's PassiveStripTask Bus mode.  `buf` is treated as
+    // in/out — caller must have it pre-filled with the bus's input signal
+    // (sum of upstream contributions) before calling.  Internally switches on
+    // busChId to the right per-bus DSP path: Layers/Bass/Drums delegate to
+    // the existing BusNodes via processChainOnly; Clips / Vox / Inst /
+    // Vox2 / Inst2 / Inst3 / Rusty run their inline DSP migrated from
+    // PluginProcessor; FxBus calls processEffectsBus; Master calls
+    // processMasterBus.  `anySolo` and `panLaw` are forwarded as needed —
+    // unused for buses that read solo/pan directly via APVTS.  Caller is
+    // responsible for routing the processed output downstream
+    // (e.g. routeInsertOutput) — processBus does DSP only.
+    void processBus(int busChId, juce::AudioBuffer<float>& buf,
+                    double bpm, bool anySolo, int panLaw);
+
+    // 2026-05-06 (Batch 9b): peak-meter atomic registration for the buses
+    // whose DSP migrated from PluginProcessor into processBus.  Layers/Bass/
+    // Drums/Master/FxBus carry their own peak atomics on their BusNode; the
+    // remaining buses (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty)
+    // store their running-max mirror atomics on PluginProcessor and register
+    // pointers here so processBus can CAS-max into them in-place — keeps
+    // PluginProcessor::drainAndMerge promotion path unchanged.
+    struct BusPeakRefs
+    {
+        std::atomic<float>* peak  = nullptr;   // mono = max(L,R)
+        std::atomic<float>* peakL = nullptr;
+        std::atomic<float>* peakR = nullptr;
+    };
+    void registerBusPeakAtomics(int busChId,
+                                std::atomic<float>* peak,
+                                std::atomic<float>* peakL,
+                                std::atomic<float>* peakR);
+
     // C.1 (2026-04-30): runs the FX Bus pipeline on its accumulator buffer
     // (preEq -> rack -> postEq -> polarity -> M/S width -> fader x mute x
     // solo -> pan -> peak meter).  Caller must subsequently routeInsertOutput
@@ -535,6 +568,13 @@ public:
                                   juce::AudioBuffer<float>& buf,
                                   double bpm, bool anySolo);
 
+    // Batch 8 (2026-05-06): run the master bus DSP in-place on sumBuf.
+    // Extracted from VibeGraph::processBlock so MasterTask can call the same
+    // path as the serial code (avoids drift).  Pushes SC array, runs the
+    // master node's processBlock, drains peak meters into the VibeGraph-
+    // level mirror atomics.  No-op if the master node hasn't been built.
+    void        processMasterBus(juce::AudioBuffer<float>& sumBuf, double bpm);
+
     // 5F-4a Batch 6: cache APVTS pointers inside bus + master nodes. Call after
     // ensureMixerBusAndMasterParams() so the nodes can read polarity/width in
     // their audio processing. Safe to call repeatedly.
@@ -691,6 +731,14 @@ private:
     // kit's 13 strips are registered via ensureRustyInsertNode.
     std::unique_ptr<InstrChannelNode> mRustyDrumsBusNode;
     std::map<int, std::unique_ptr<InsertNode>> mRustyInserts;
+
+    // 2026-05-06 (Batch 9b): per-bus peak-meter atomic refs, indexed by busChId.
+    // Populated by registerBusPeakAtomics() during PluginProcessor construction.
+    // processBus CAS-maxes through these pointers in-place so the existing
+    // PluginProcessor::drainAndMerge promotion path stays unchanged.
+    // Sized to cover MixerChannelIds 0..15 (current bus IDs run 1..12).
+    static constexpr int kBusPeakRefsTableSize = 16;
+    std::array<BusPeakRefs, kBusPeakRefsTableSize> mBusPeakRefs {};
 
     // Deferred rack state: set by loadRackStates() if topology not yet built;
     // applied at the end of buildFixedTopology().

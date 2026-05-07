@@ -125,6 +125,27 @@ set(VIBESYNTH_DSP_SOURCES
     Source/BaySickBass/BaySickBassEditor.cpp
     # 2026-04-25: BaySickDrumsProcessor removed (legacy 16-slot kit superseded
     # by per-drum-tab dynamic engines).  DrumSynth.cpp also gone.
+    # Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06) — flag is
+    # constexpr false; these compile but the dispatcher branch is elided in
+    # processBlock until per-strip integration ships in Batches 3-8.
+    Source/Engine/VibeThreadPool.cpp
+    Source/Engine/RenderGraphDispatcher.cpp
+    # Batch 3 (2026-05-06): EngineInsertTask wraps Layer/Bass/Drum engine
+    # dispatch + insert chain in one RenderTask subclass.
+    Source/Engine/Tasks/EngineInsertTask.cpp
+    # Batch 4 (2026-05-06): Vox + Inst live-input strip wrappers.
+    Source/Engine/Tasks/VoxStripTask.cpp
+    Source/Engine/Tasks/InstStripTask.cpp
+    # Batch 5 (2026-05-06): Clip page + Audio insert wrappers.
+    Source/Engine/Tasks/ClipPageTask.cpp
+    Source/Engine/Tasks/AudioInsertTask.cpp
+    # Batch 6 (2026-05-06): BaySickRustyDrums producer + 13 inserts.
+    Source/Engine/Tasks/RustyDrumsProducerTask.cpp
+    Source/Engine/Tasks/RustyInsertTask.cpp
+    # Batch 7 (2026-05-06): passive accumulator strips (Aux + 11 buses).
+    Source/Engine/Tasks/PassiveStripTask.cpp
+    # Batch 8 (2026-05-06): MasterTask (graph sink) + dispatcher pump.
+    Source/Engine/Tasks/MasterTask.cpp
 )
 
 set(VIBESYNTH_LINK_LIBS
@@ -265,7 +286,11 @@ target_compile_definitions(BaySickDAW
     PRIVATE JUCE_MODULE_AVAILABLE_juce_audio_plugin_client=1
 )
 
-target_include_directories(BaySickDAW PRIVATE Source Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass)
+target_include_directories(BaySickDAW PRIVATE Source Source/Engine Source/Engine/Tasks Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass
+    # moodycamel::ConcurrentQueue — vendored single-header MPMC queue for the
+    # multi-threaded render engine. Drop concurrentqueue.h into this folder.
+    "${CMAKE_CURRENT_SOURCE_DIR}/libs/concurrentqueue"
+)
 
 target_link_libraries(BaySickDAW
     PRIVATE ${VIBESYNTH_LINK_LIBS}
@@ -421,9 +446,12 @@ target_compile_definitions(BaySickDAWStandalone
     PUBLIC ${VIBESYNTH_DEFS} VIBESYNTH_STANDALONE=1
 )
 
-target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn
+target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Engine Source/Engine/Tasks Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn
     # Rubber Band Library (Phase 4B time-stretch) — headers only; link rubberband.lib to enable DSP
     "${CMAKE_CURRENT_SOURCE_DIR}/libs/rubberband"
+    # moodycamel::ConcurrentQueue — vendored single-header MPMC queue for the
+    # multi-threaded render engine. Drop concurrentqueue.h into this folder.
+    "${CMAKE_CURRENT_SOURCE_DIR}/libs/concurrentqueue"
     # ASIO SDK include path (empty when SDK absent — harmless to leave in the list).
     ${VIBESYNTH_ASIO_INCLUDES}
 )
