@@ -19,6 +19,10 @@ Formatting Conventions". Local layout for this doc:
 - `#### **<ID>: <Title>**` - individual entry
 - `#### <Sub-section>` - sub-section within an entry
 
+Top-level `## ` sections are the canonical domain buckets defined in Main Plan §0.
+Pre-existing phase names (Phase A / Phase D / Phase H / Phase 5F / etc.) are preserved
+as `### ` sub-clusters inside their natural bucket so historical traceability stays intact.
+
 Grep patterns:
 - `^### ` finds all phase / module headers
 - `^#### \*\*` finds all individual entries
@@ -40,9 +44,7 @@ against the build:
 
 ## How to read this doc
 
-Entries are grouped by phase / module / feature cluster derived from the
-source-doc context (the `SectionPhase` column of the deduped inventory).
-Within each grouping, entries are sorted by CanonicalID.
+Top-level sections are the 9 canonical domain buckets (Effects / Players / Mixer-Routing / System Pages / UI-L&F / Cross-cutting Infrastructure / User Tools / Workflow Polish / Other-Platform) plus a Meta bucket. Within each bucket, `### ` sub-clusters preserve the original phase / module names from the source docs. Entries are sorted by CanonicalID within each sub-cluster.
 
 Each entry uses a uniform 5-line shape:
 
@@ -64,6 +66,8 @@ existing entries are intentionally rare; the QA-era log records changes
 over time without rewriting history here.
 
 ## Entries
+
+## Effects
 
 ### Effect Modules - DSP Quality Pass (5F-9)
 
@@ -1515,6 +1519,8 @@ over time without rewriting history here.
 
 (Note: this section continues with the LDT-395 to LDT-412 5F-9 entries, but those are bucketed under the Phase 5F section per spec. The full file continues below with the remaining 22 sections covering all 1089 entries.)
 
+## Players
+
 ### Player Engines - Harmless / VibePlayer / BaySick family
 
 #### **BLU-303: T1a Output EQ Mix wired**
@@ -2653,226 +2659,6 @@ over time without rewriting history here.
 - **Source:** Phase D > Other deferred
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-### Phase A - Keybind Framework
-
-#### **FSW-007: Phase A Keybind Framework complete**
-- **Sources:** FSW-007
-- **Implemented:** juce::ApplicationCommandManager + KeyPressMappingSet at editor startup
-- **Source:** Phase A - Keybind Framework
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-008: juce::ApplicationCommandManager + KeyPressMappingSet at editor startup**
-- **Sources:** FSW-008
-- **Implemented:** Foundation for keybind system
-- **Source:** Phase A
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-009: Per-command catalog (id / category / name / tooltip / default key)**
-- **Sources:** FSW-009
-- **Implemented:** Command catalog
-- **Source:** Phase A
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-010: Persisted to Documents/BaySickDAW/keymap.xml**
-- **Sources:** FSW-010
-- **Implemented:** XML persistence
-- **Source:** Phase A
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-011: Help Key Binds 4-tab popup (General/Builder/Piano Roll/DrumKit)**
-- **Sources:** FSW-011
-- **Implemented:** Help menu integration
-- **Source:** Phase A
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-012: Custom TableListBox-based tab with per-row tooltips, Set/Reset, conflict-check**
-- **Sources:** FSW-012
-- **Implemented:** Keybind UI
-- **Source:** Phase A
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-013: GlobalTransportBar dropped its KeyListener role**
-- **Sources:** FSW-013
-- **Implemented:** Refactor
-- **Source:** Phase A
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-### Phase B - Conflict Resolutions
-
-#### **BLU-560: B-1 Page switches + file operations**
-- **Sources:** BLU-560
-- **Implemented:** F5-F11 + Ctrl+N/O/S/Shift+S
-- **Source:** Phase B Keymap > B-1
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-561: B-2 Pattern navigation**
-- **Sources:** BLU-561
-- **Implemented:** F2/F3/F4 + +/-
-- **Source:** Phase B Keymap > B-2
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-562: B-3 Transport extensions**
-- **Sources:** BLU-562
-- **Implemented:** L Song mode + Home + ±bar + Ctrl+M
-- **Source:** Phase B Keymap > B-3
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-563: B-4 Conflict rebinds + scroll fixes + Ctrl+drag marquee**
-- **Sources:** BLU-563
-- **Implemented:** Z=Zoom; PgUp/PgDn; mouse wheel direction
-- **Source:** Phase B Keymap > B-4
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-564: B-5 Ctrl+Z / Ctrl+Alt+Z global migration**
-- **Sources:** BLU-564
-- **Implemented:** Per-page handlers stripped
-- **Source:** Phase B Keymap > B-5
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-565: B-6 Path A documentation rows + popup expansion**
-- **Sources:** BLU-565
-- **Implemented:** ~80 reference rows + 880x680
-- **Source:** Phase B Keymap > B-6
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-014: Phase B Conflict Resolutions complete**
-- **Sources:** FSW-014
-- **Implemented:** All B sub-batches
-- **Source:** Phase B - Conflict Resolutions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-015: B-1 Page switches F5-F11 + file ops Ctrl+N/O/S/Shift+S**
-- **Sources:** FSW-015
-- **Implemented:** 11 commands
-- **Source:** Phase B
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-016: B-2 Pattern nav F2/F3/F4 + +/- cycle**
-- **Sources:** FSW-016
-- **Implemented:** 5 commands
-- **Source:** Phase B
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-017: B-3 Transport extensions (L/Home/fast-fwd/+-bar/Ctrl+M) + Song-mode-empty playback fix + Song loop default ON**
-- **Sources:** FSW-017
-- **Implemented:** Transport
-- **Source:** Phase B
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-018: B-4 Bare Z=Zoom + PgUp/PgDn zoom-when-tool + Alt+G ungroup + Builder wheel direction + slice snap fix + Ctrl+drag marquee on all 3 grids**
-- **Sources:** FSW-018
-- **Implemented:** Misc
-- **Source:** Phase B
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-019: B-5 Ctrl+Z / Ctrl+Alt+Z migrated to global commands**
-- **Sources:** FSW-019
-- **Implemented:** Global undo/redo
-- **Source:** Phase B
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-020: B-6 ~80 Path-A doc rows + 880x680 popup + hardcoded-conflict warning**
-- **Sources:** FSW-020
-- **Implemented:** Documentation
-- **Source:** Phase B
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-### Phase C - Simple New Keybinds
-
-#### **FSW-023: Ctrl+N/O/S/Shift+S, Ctrl+M, Home, +/- cycle, F3, L, NumPad 0, NumPad / ***
-- **Sources:** FSW-023
-- **Implemented:** Rolled into B-1/B-2/B-3
-- **Source:** Phase C
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-### Phase E - Mouse-modifier Reference Rows
-
-#### **BLU-554: E1 Factory preset/kit/template generation**
-- **Sources:** BLU-554
-- **Implemented:** 790 presets, 87 kits, 29 templates
-- **Source:** Player Engines > Phase E > E1
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-555: E2 Templates infrastructure**
-- **Sources:** BLU-555
-- **Implemented:** File menu + Save/Load Template + folders
-- **Source:** Player Engines > Phase E > E2
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-556: E3 VibeLAF property-gated rendering**
-- **Sources:** BLU-556
-- **Implemented:** switchToggle + outlineGlowOnly
-- **Source:** Player Engines > Phase E > E3
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-557: E4 Per-engine preset menu pattern (recursive walker)**
-- **Sources:** BLU-557
-- **Implemented:** My Presets + Factory + root
-- **Source:** Player Engines > Phase E > E4
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-558: E5 AudioSettingsDialog Documents-path fix**
-- **Sources:** BLU-558
-- **Implemented:** Single source of truth
-- **Source:** Player Engines > Phase E > E5
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-559: E6 Effects page sub-tab default + per-channel persistence**
-- **Sources:** BLU-559
-- **Implemented:** (also documented in Effects Page section)
-- **Source:** Player Engines > Phase E > E6
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-568: E7 Phase A keymap framework**
-- **Sources:** BLU-568
-- **Implemented:** juce::ApplicationCommandManager + Help menu
-- **Source:** Phase E > E7
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-074: Phase E Mouse-modifier reference rows**
-- **Sources:** FSW-074
-- **Implemented:** Builder ~30 rows, Piano Roll ~36 rows, DrumKit ~30 rows
-- **Source:** Phase E
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-075: Builder ~30, Piano Roll ~36, DrumKit ~30 self-documenting rows**
-- **Sources:** FSW-075
-- **Implemented:** Reference rows
-- **Source:** Phase E
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-076: Hardcoded-conflict warning when binding to a page-local key**
-- **Sources:** FSW-076
-- **Implemented:** Conflict warning
-- **Source:** Phase E
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-### Phase F - Pattern Colours
-
-#### **BLU-567: F-2 Template Layer/Bass preset prefix bug + DrumKit Ctrl+drag**
-- **Sources:** BLU-567
-- **Implemented:** 4-segment trackId fix
-- **Source:** Phase F > F-2
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-077: Phase F Pattern colours + template-load bugfix**
-- **Sources:** FSW-077
-- **Implemented:** Both sub-batches done
-- **Source:** Phase F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-078: F-1 Per-pattern user colour**
-- **Sources:** BLU-566|FSW-078
-- **Implemented:** Pattern struct, persisted, ColourSelector w/ 10-slot recents | Pattern struct color field + ColourSelector
-- **Source:** Phase F | Phase F > F-1
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-079: F-2 Template Layer/Bass preset prefix-extraction bug fix; DrumKit Ctrl+drag marquee added**
-- **Sources:** FSW-079
-- **Implemented:** Bug fix
-- **Source:** Phase F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
 ### Phase G - Clips / Vox / Inst
 
 #### **BLU-475: G-5 Audio browser unified view**
@@ -3665,6 +3451,1227 @@ over time without rewriting history here.
 - **Source:** Phase L Sub-batches
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
+### Phase 5F - Player Layout Overhauls
+
+#### **LDT-174: 5F Player Layout Overhauls (10 sub-items)**
+- **Sources:** LDT-174
+- **Implemented:** 5F-1 to 5F-6 done; 5F-7 Builder, 5F-8 UI Touch-ups, 5F-9 DSP Quality Pass remaining
+- **Source:** Master Checklist > Phase 5
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-373: Project Bundle & Export**
+- **Sources:** LDT-373
+- **Implemented:** File>Bundle & Export action; folder or .zip target
+- **Source:** Phase 5 > 5D-BUNDLE
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-376: BaySickSynth & BaySickBass Layout Overhaul**
+- **Sources:** LDT-376
+- **Implemented:** 5-tab layout; new waveforms; XY filter pad; BssEditorComponents
+- **Source:** Phase 5 > 5F-1
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-377: VibePlayer Layout Overhaul**
+- **Sources:** LDT-377
+- **Implemented:** 480x400 4-column FL Keys; ENVIRONMENT/MISC/VELOCITY/TUNING; references VibePlayer (renamed BaySickPlayer)
+- **Source:** Phase 5 > 5F-2
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-378: Drum system fixes paired with 5F-2**
+- **Sources:** LDT-378
+- **Implemented:** DrumSynth whiteNoise LCG fix; HARDNESS default 0.5->0.0; rootNote normalization; references DrumSynth (deleted)
+- **Source:** Phase 5 > 5F-2 drum fixes
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-379: Harmless Layout Overhaul**
+- **Sources:** LDT-379
+- **Implemented:** 960x620 5-panel proportional layout; ~50 new APVTS params
+- **Source:** Phase 5 > 5F-3
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-380: oeq_mix wire output EQ in 5F-8**
+- **Sources:** LDT-380
+- **Implemented:** Param referenced in editor but not in createLayout; subsequently wired in §P1 S1
+- **Source:** Phase 5 > 5F-3
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-381: Per-Strip Feature Update + Audio-Path Refactor**
+- **Sources:** LDT-381
+- **Implemented:** 6-batch rollout; InsertNode + lazy APVTS + MixerLedButton + width knob + dB ticks + bypass sync
+- **Source:** Phase 5 > 5F-4a
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-382: C/M header + polarity + LED colors + width knob + FX button + cable model**
+- **Sources:** LDT-382
+- **Implemented:** Various decisions during Q&A
+- **Source:** Phase 5 > 5F-4 decisions
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-383: Per-insert audio path move**
+- **Sources:** LDT-383
+- **Implemented:** Move per-engine racks into VibeGraph InsertNode
+- **Source:** Phase 5 > 5F-4a architecture
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-384: Lazy APVTS for all mixer state**
+- **Sources:** LDT-384
+- **Implemented:** Migrated MixerState arrays to lazy APVTS
+- **Source:** Phase 5 > 5F-4a architecture
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-385: FX Bypass LED two-way sync**
+- **Sources:** LDT-385
+- **Implemented:** rack.setRackBypassed + Effects page button two-way
+- **Source:** Phase 5 > 5F-4a architecture
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-386: Dynamic Routing + Cables + Add-Strip**
+- **Sources:** LDT-386
+- **Implemented:** 7-batch rollout; routing data model + dynamic audio path + aux strips + cable rendering + drag + +button + right-click + persistence
+- **Source:** Phase 5 > 5F-4b
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-389: Event Editor Layout Alignment**
+- **Sources:** LDT-389
+- **Implemented:** Title label + tool button strip + Delete button + footer status bar
+- **Source:** Phase 5 > 5F-5
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-391: Piano Roll Layout Alignment**
+- **Sources:** LDT-391
+- **Implemented:** Control lane header text + beat grid + toolbar context label + visible scrollbars
+- **Source:** Phase 5 > 5F-6
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-393: Builder Layout Alignment**
+- **Sources:** LDT-393
+- **Implemented:** Verify Phase 4B Builder matches; minor adjustments
+- **Source:** Phase 5 > 5F-7
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-395: DSP Quality Pass (12 effect modules + 3 player engines)**
+- **Sources:** LDT-395
+- **Implemented:** Comprehensive DSP-level upgrade; spec in _APPROVED_CHANGES.md; subsequently §1-§11 + §12 fully closed
+- **Source:** Phase 5 > 5F-9
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-396: Chorus per-voice prime delay offsets**
+- **Sources:** LDT-396
+- **Implemented:** Spec item; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §1
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-397: Compressor look-ahead + true stereo + auto-makeup + per-sample envelope**
+- **Sources:** LDT-397
+- **Implemented:** Spec item; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §2
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-398: Delay DC-blocker + cubic interp + TPT feedback + mModCutoffMod**
+- **Sources:** LDT-398
+- **Implemented:** Spec item; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §3
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-399: Flanger damp inside FB + cubic interp + SmoothedValue**
+- **Sources:** LDT-399
+- **Implemented:** Spec item; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-400: Limiter (NET-NEW) DSP**
+- **Sources:** LDT-036|LDT-400
+- **Implemented:** LimiterDSP.h/.cpp + 4× true-peak + adaptive release + tanh + look-ahead | Net-new Limiter shipped; toggle layout cross-applied to §2; subsequently shipped DSP; UI deferred
+- **Source:** Master Checklist > 5F-9 §5 | Phase 5 > 5F-9 §5
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-401: Limiter editor panel UI**
+- **Sources:** LDT-401
+- **Implemented:** 3-zone layout spec + skeuomorphic LAF (#00FFF2 cyan GR / #FF9100 orange sat)
+- **Source:** Phase 5 > 5F-9 §5 UI
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-402: Overdrive 4× oversampling + 5 Hz DC-blocker + SmoothedValue + TPT BPF/LPF**
+- **Sources:** LDT-402
+- **Implemented:** Spec item; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §6
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-403: Phaser logarithmic LFO->freq + always-allocated 24 stages + invert-feedback**
+- **Sources:** LDT-403
+- **Implemented:** Spec item; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §7
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-404: Reverb Valhalla-style tail modulation + click-free size changes**
+- **Sources:** LDT-404
+- **Implemented:** Spec item; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §8
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-405: Saturation 4× oversampling + auto-gain + SR-aware DC + SmoothedValue**
+- **Sources:** LDT-405
+- **Implemented:** Spec item; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §9
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-406: Tape (BIGGEST REWORK) hysteresis + asymmetric sigmoid + flutter + pre/de-emphasis**
+- **Sources:** LDT-406
+- **Implemented:** Spec item; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §10
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-407: Transient Shaper quadratic curves + LR4 24 dB/oct + 4× oversampling**
+- **Sources:** LDT-407
+- **Implemented:** Spec item; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §11
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-408: EQ8 10 items keeping 8 bands**
+- **Sources:** LDT-408
+- **Implemented:** getMagnitudeForFrequency + proportional Q + SmoothedValue + TPT hybrid + 2× anti-cramping + linear-phase + per-band M/S + spectrum analyzer + Dynamic EQ; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §12
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-409: Harmless DSP + UI quality pass**
+- **Sources:** LDT-409
+- **Implemented:** HarmonicEngine + AdditiveVoice filter chain + output phaser + strum direction + CPU-guard + SmoothedValue audit + UI review; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §P1
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-410: VibePlayer DSP + UI quality pass**
+- **Sources:** LDT-410
+- **Implemented:** AudioClipStreamer + VibeSampleManager + M/S width + treble shelf + PhaseVocoder + voice allocation + CPU guards
+- **Source:** Phase 5 > 5F-9 §P2
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-411: BaySick family DSP + UI quality pass**
+- **Sources:** LDT-411
+- **Implemented:** BaySickSynthVoice + filter chain + LFO routing + sub-osc + keyboard tracking + glide + auditionNote + mono MIDI preprocess; subsequently shipped
+- **Source:** Phase 5 > 5F-9 §P3
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-412: Limiter editor panel + EQ Dynamic UI extensions + EQ spectrum analyzer overlay**
+- **Sources:** LDT-412
+- **Implemented:** Tracked under 5F-9 but execute after DSP is stable
+- **Source:** Phase 5 > 5F-9 deferred UI
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+### Phase H-0 Audit
+
+#### **FSW-246: Phase H-0 Audit + targeted fixes (cross-cutting cleanup)**
+- **Sources:** FSW-246
+- **Implemented:** Triggered by surface-level Mixer-strip bugs
+- **Source:** Phase H-0 Audit
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-247: Audit work - meter rebuild + routing cleanup**
+- **Sources:** FSW-247
+- **Implemented:** 13 items
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-248: DBFSMeter rewrite (stereo L/R + range -60..+6 + log-scale)**
+- **Sources:** FSW-248
+- **Implemented:** Stereo meters
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-249: MixerTrackStrip layout rewrite (meter on right column 28px, all strips 80px wide)**
+- **Sources:** FSW-249
+- **Implemented:** Strip layout
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-250: Audio-thread stereo peak atomics on every InsertNode + buses**
+- **Sources:** FSW-250
+- **Implemented:** Stereo atomics
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-251: PluginProcessor stereo bus peak atomics + per-row stereo peak writes**
+- **Sources:** FSW-251
+- **Implemented:** Stereo writes
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-252: MixerPage timer pushes stereo L/R via setStereoLevel**
+- **Sources:** FSW-252
+- **Implemented:** Push stereo
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-253: Audio-row insert routing fix (addAudioChannel before ensureAudioInsert)**
+- **Sources:** FSW-253
+- **Implemented:** 3 call sites + defensive rebindApvts
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-254: Master mute wired to MasterBusNode + mixer_master_mute APVTS param**
+- **Sources:** FSW-254
+- **Implemented:** Master mute
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-255: Pan implementation in InsertNode + every BusNode + MasterBusNode**
+- **Sources:** FSW-255
+- **Implemented:** Pan DSP
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-256: Bus FX Bypass wiring (every bus's rack ORs strip-local _bypass with master_fx_bypass)**
+- **Sources:** FSW-256
+- **Implemented:** FX bypass
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-257: Pan Law selector (Circular/Triangular/Square)**
+- **Sources:** FSW-257
+- **Implemented:** master_pan_law APVTS + Mixer hamburger
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-258: Vox/Inst insert top-stripe color fix**
+- **Sources:** FSW-258
+- **Implemented:** pickStripColor
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-259: Stop-decay meter wiggle fix**
+- **Sources:** FSW-259
+- **Implemented:** Per-row peakDb atomics decay 30 dB/sec
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-260: Fader-mark misalignment fix**
+- **Sources:** FSW-260
+- **Implemented:** APVTS _level range -60..+10 -> -60..+5.6
+- **Source:** Phase H-0 > Audit Work
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-261: Batch A quick wins (7 fixes)**
+- **Sources:** FSW-261
+- **Implemented:** Quick wins bundle
+- **Source:** Phase H-0 > Batch A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-262: A.1 AudioSettingsDialog::applySettings no longer hardcodes audioInputDeviceName=""**
+- **Sources:** FSW-262
+- **Implemented:** ASIO input fix
+- **Source:** Phase H-0 > Batch A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-263: A.2 EffectRack slot outputGainDb (per-slot Vol knob) saved + restored in project XML**
+- **Sources:** FSW-263
+- **Implemented:** Knob persistence
+- **Source:** Phase H-0 > Batch A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-264: A.3 Pause now flushes all-notes-off**
+- **Sources:** FSW-264
+- **Implemented:** Was Stop-only
+- **Source:** Phase H-0 > Batch A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-265: A.4 BPM clamps to 20-300 instead of snapping to 120 on out-of-range input**
+- **Sources:** FSW-265
+- **Implemented:** BPM clamp
+- **Source:** Phase H-0 > Batch A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-266: A.5 Playhead's setIsRecording PositionInfo flag honors real recorder state**
+- **Sources:** FSW-266
+- **Implemented:** Was hardcoded false
+- **Source:** Phase H-0 > Batch A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-267: A.6 Bus solo wired on 6 buses (Clips/Vox/Inst/Vox2/Inst2/Inst3)**
+- **Sources:** FSW-267
+- **Implemented:** Was completely dead
+- **Source:** Phase H-0 > Batch A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-268: A.7 SongLoop + Metronome button visual sync via callbacks**
+- **Sources:** FSW-268
+- **Implemented:** Project load no longer leaves buttons lying about state
+- **Source:** Phase H-0 > Batch A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-269: Batch B moderate (6 items + 1 sub-fix)**
+- **Sources:** FSW-269
+- **Implemented:** Moderate fixes bundle
+- **Source:** Phase H-0 > Batch B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-270: B.1 C14 Harmless LFO sliders restored**
+- **Sources:** FSW-270
+- **Implemented:** 3 APVTS params + DSP routing + 2-row layout
+- **Source:** Phase H-0 > Batch B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-271: B.2 Clips/Vox/Inst tab persistence in serializeUIState/deserialize**
+- **Sources:** FSW-271
+- **Implemented:** Mirrors Layer/Bass/Drum pattern
+- **Source:** Phase H-0 > Batch B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-272: B.3 30Hz bus latency fix**
+- **Sources:** FSW-272
+- **Implemented:** Layers/Bass/Drums + Master + ClipsBus read direct from APVTS each block
+- **Source:** Phase H-0 > Batch B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-273: B.4 Piano roll panning + pitch bend MIDI emit**
+- **Sources:** FSW-273
+- **Implemented:** Per-note panning to CC10, finePitch to PitchWheel; emitPianoNoteOn helper
+- **Source:** Phase H-0 > Batch B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-274: B.5 resolveAutomationDisplayName covers 7 missing prefix groups**
+- **Sources:** FSW-274
+- **Implemented:** Vox/Inst Bus + secondary buses + inserts
+- **Source:** Phase H-0 > Batch B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-275: B.6 Choke groups expansion to Vox/Inst MIDI buffers**
+- **Sources:** FSW-275
+- **Implemented:** Was Layer/Bass/Drum only
+- **Source:** Phase H-0 > Batch B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-276: Batch C architectural (partial)**
+- **Sources:** FSW-276
+- **Implemented:** Partial
+- **Source:** Phase H-0 > Batch C
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-277: C.1 C8 FX Bus dead - wire EffectsBusNode::processBlock**
+- **Sources:** FSW-277
+- **Implemented:** Aux strips default-route there silent loss
+- **Source:** Phase H-0 > Batch C
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-278: C.2 C13 slot automation paramIds - needs spec call**
+- **Sources:** FSW-278
+- **Implemented:** UUID-per-slot vs effect-type-keyed vs defer
+- **Source:** Phase H-0 > Batch C
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-279: C.3 C1-C4 MIDI subsystem - partially shipped**
+- **Sources:** FSW-279
+- **Implemented:** Remaining: CC/pitch-bend to APVTS dispatch (delivered by I-3b)
+- **Source:** Phase H-0 > Batch C
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-280: C.4 Compressor sidechain wiring (Phase 1 + 2.1 + 2.2)**
+- **Sources:** FSW-280
+- **Implemented:** Per-strip Send/Sidechain submenu + audio-thread routing + 5 player engines
+- **Source:** Phase H-0 > Batch C
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-281: C.5 Time signature honor (FL-style per-pattern TS)**
+- **Sources:** FSW-281
+- **Implemented:** Pattern.timeSig field + auto-derive on placement + per-pattern TS
+- **Source:** Phase H-0 > Batch C
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-282: Batch D Tier 3 mop-up (4 items)**
+- **Sources:** FSW-282
+- **Implemented:** Mop-up bundle
+- **Source:** Phase H-0 > Batch D
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-283: D.1 EffectRack loadEffect preserves bypassed flag**
+- **Sources:** FSW-283
+- **Implemented:** No longer reset on hot-swap
+- **Source:** Phase H-0 > Batch D
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-284: D.2 EffectRackAction undo snapshot expanded (full SlotSnapshot)**
+- **Sources:** FSW-284
+- **Implemented:** Move/Load/Remove preserves knob values
+- **Source:** Phase H-0 > Batch D
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-285: D.3 Mixer strip insertion order persistence**
+- **Sources:** FSW-285
+- **Implemented:** mAuxOrder/mAudioRowOrder/mVoxOrder/mInstOrder
+- **Source:** Phase H-0 > Batch D
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-286: D.4 16 DSP-features-without-UI-knob surfaced as UI knobs (6 sub-batches)**
+- **Sources:** FSW-286
+- **Implemented:** Bundle
+- **Source:** Phase H-0 > Batch D
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-287: D.4-Q1+Q2 Harmless filter layout restructure**
+- **Sources:** FSW-287
+- **Implemented:** Filter 2 row + ADSR boxes + AutoGain to Output cell + timbre 2x2 stack
+- **Source:** Phase H-0 > Batch D > D.4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-288: D.4-Q3 BaySickPlayer Filter box (cutoff/res/reduct knobs)**
+- **Sources:** FSW-288
+- **Implemented:** 7th box bottom row
+- **Source:** Phase H-0 > Batch D > D.4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-289: D.4-Q4 Compressor knee width knob**
+- **Sources:** FSW-289
+- **Implemented:** Ratio<->Gain
+- **Source:** Phase H-0 > Batch D > D.4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-290: D.4-Q5 Delay LoFiSR / ModTime / Smooth knobs + DSP placement fix**
+- **Sources:** FSW-290
+- **Implemented:** Lo-fi moved from feedback path to delay-line read
+- **Source:** Phase H-0 > Batch D > D.4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-291: D.4-Q6 EQ8 main level fader + 3 hamburger menu items**
+- **Sources:** FSW-291
+- **Implemented:** Linear Phase Precision / IIR Mod Speed / Proportional Q
+- **Source:** Phase H-0 > Batch D > D.4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-292: Batch E Tier 4 polish (verified completed)**
+- **Sources:** FSW-292
+- **Implemented:** Bundle
+- **Source:** Phase H-0 > Batch E
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-293: Compressor manual-knee**
+- **Sources:** FSW-293
+- **Implemented:** Via D.4-Q4
+- **Source:** Phase H-0 > Batch E (already done)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-294: Delay smoothing**
+- **Sources:** FSW-294
+- **Implemented:** Via D.4-Q5
+- **Source:** Phase H-0 > Batch E (already done)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-295: EQ8 IIRModSpeed**
+- **Sources:** FSW-295
+- **Implemented:** Via D.4-Q6
+- **Source:** Phase H-0 > Batch E (already done)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-296: EQ8 ProportionalQ**
+- **Sources:** FSW-296
+- **Implemented:** Via D.4-Q6
+- **Source:** Phase H-0 > Batch E (already done)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-297: BPM out-of-range silent snap**
+- **Sources:** FSW-297
+- **Implemented:** Via A.4
+- **Source:** Phase H-0 > Batch E (already done)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-298: info.setIsRecording honored**
+- **Sources:** FSW-298
+- **Implemented:** Via A.5
+- **Source:** Phase H-0 > Batch E (already done)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-299: Flanger Dry/Wet dB levels (redundant with mix knob)**
+- **Sources:** FSW-299
+- **Implemented:** No work needed; defaults unity
+- **Source:** Phase H-0 > Batch E (deliberate)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-300: EQ8 per-band Upward (preset stability scaffolding)**
+- **Sources:** FSW-300
+- **Implemented:** No work needed
+- **Source:** Phase H-0 > Batch E (deliberate)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-301: EQ8 per-band ScSource (was wrongly tagged placeholder; actually fully wired in C.4 Phase 1)**
+- **Sources:** FSW-301
+- **Implemented:** UI per-band SC source dropdown live
+- **Source:** Phase H-0 > Batch E
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-302: Tape OutputGain (intentionally removed; slot fader replaces)**
+- **Sources:** FSW-302
+- **Implemented:** No work needed
+- **Source:** Phase H-0 > Batch E (deliberate)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-304: Harmless OCT/Hz pitch toggles wired**
+- **Sources:** FSW-304
+- **Implemented:** OCT snaps drag to +-12 semis; default semitones with sign
+- **Source:** Phase H-0 > Batch E (newly shipped)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-305: Piano Roll FilterCutoff lane**
+- **Sources:** FSW-305
+- **Implemented:** Added Filter Cutoff to control-lane dropdown + CC74 dispatch
+- **Source:** Phase H-0 > Batch E (newly shipped)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-306: Stale automation lane warnings**
+- **Sources:** FSW-306
+- **Implemented:** [stale] red-prefixed rows in EventEditor
+- **Source:** Phase H-0 > Batch E (newly shipped)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-307: Missing audio clip warnings**
+- **Sources:** FSW-307
+- **Implemented:** Builder grid renders red instead of teal
+- **Source:** Phase H-0 > Batch E (newly shipped)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-308: Piano Roll dual automation timing path**
+- **Sources:** FSW-308
+- **Implemented:** UI 30Hz applicator skips APVTS-backed paramIds
+- **Source:** Phase H-0 > Batch E (newly shipped)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-309: EffectRack mRackBypassed dual-storage smell removed**
+- **Sources:** FSW-309
+- **Implemented:** APVTS _bypass is sole source of truth
+- **Source:** Phase H-0 > Batch E (newly shipped)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-310: _arm zombie param - registration gated to mixer_vox_*/mixer_inst_* prefix only**
+- **Sources:** FSW-310
+- **Implemented:** Was registered on every Insert kind
+- **Source:** Phase H-0 > Batch E (newly shipped)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-311: Dead audioRowLevel local removed from PluginProcessor.cpp**
+- **Sources:** FSW-311
+- **Implemented:** Cleanup
+- **Source:** Phase H-0 > Batch E (newly shipped)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-312: EffectsPage getChannelPrefix() rewritten**
+- **Sources:** FSW-312
+- **Implemented:** Now handles every channel category
+- **Source:** Phase H-0 > Batch E (newly shipped)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-313: BaySickSynth voice octave-sweep literals to named constexpr**
+- **Sources:** FSW-313
+- **Implemented:** Self-documenting code
+- **Source:** Phase H-0 > Batch E (newly shipped)
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+## Mixer / Routing
+
+_No pre-QA entries in this domain.  Mixer + routing work shipped pre-QA
+is captured under [Cross-cutting Infrastructure](#cross-cutting-infrastructure)
+sub-clusters (the existing `## Cross-cutting Infrastructure` section
+contains routing-graph + mixer-strip foundation work).  Future-state
+candidates for this bucket live in `Future State.md`; in-flight V1
+work lives in `Main Plan.md` §5.5._
+
+## System Pages
+
+### Phase A - Keybind Framework
+
+#### **FSW-007: Phase A Keybind Framework complete**
+- **Sources:** FSW-007
+- **Implemented:** juce::ApplicationCommandManager + KeyPressMappingSet at editor startup
+- **Source:** Phase A - Keybind Framework
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-008: juce::ApplicationCommandManager + KeyPressMappingSet at editor startup**
+- **Sources:** FSW-008
+- **Implemented:** Foundation for keybind system
+- **Source:** Phase A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-009: Per-command catalog (id / category / name / tooltip / default key)**
+- **Sources:** FSW-009
+- **Implemented:** Command catalog
+- **Source:** Phase A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-010: Persisted to Documents/BaySickDAW/keymap.xml**
+- **Sources:** FSW-010
+- **Implemented:** XML persistence
+- **Source:** Phase A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-011: Help Key Binds 4-tab popup (General/Builder/Piano Roll/DrumKit)**
+- **Sources:** FSW-011
+- **Implemented:** Help menu integration
+- **Source:** Phase A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-012: Custom TableListBox-based tab with per-row tooltips, Set/Reset, conflict-check**
+- **Sources:** FSW-012
+- **Implemented:** Keybind UI
+- **Source:** Phase A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-013: GlobalTransportBar dropped its KeyListener role**
+- **Sources:** FSW-013
+- **Implemented:** Refactor
+- **Source:** Phase A
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+### Phase B - Conflict Resolutions
+
+#### **BLU-560: B-1 Page switches + file operations**
+- **Sources:** BLU-560
+- **Implemented:** F5-F11 + Ctrl+N/O/S/Shift+S
+- **Source:** Phase B Keymap > B-1
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-561: B-2 Pattern navigation**
+- **Sources:** BLU-561
+- **Implemented:** F2/F3/F4 + +/-
+- **Source:** Phase B Keymap > B-2
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-562: B-3 Transport extensions**
+- **Sources:** BLU-562
+- **Implemented:** L Song mode + Home + ±bar + Ctrl+M
+- **Source:** Phase B Keymap > B-3
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-563: B-4 Conflict rebinds + scroll fixes + Ctrl+drag marquee**
+- **Sources:** BLU-563
+- **Implemented:** Z=Zoom; PgUp/PgDn; mouse wheel direction
+- **Source:** Phase B Keymap > B-4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-564: B-5 Ctrl+Z / Ctrl+Alt+Z global migration**
+- **Sources:** BLU-564
+- **Implemented:** Per-page handlers stripped
+- **Source:** Phase B Keymap > B-5
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-565: B-6 Path A documentation rows + popup expansion**
+- **Sources:** BLU-565
+- **Implemented:** ~80 reference rows + 880x680
+- **Source:** Phase B Keymap > B-6
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-014: Phase B Conflict Resolutions complete**
+- **Sources:** FSW-014
+- **Implemented:** All B sub-batches
+- **Source:** Phase B - Conflict Resolutions
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-015: B-1 Page switches F5-F11 + file ops Ctrl+N/O/S/Shift+S**
+- **Sources:** FSW-015
+- **Implemented:** 11 commands
+- **Source:** Phase B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-016: B-2 Pattern nav F2/F3/F4 + +/- cycle**
+- **Sources:** FSW-016
+- **Implemented:** 5 commands
+- **Source:** Phase B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-017: B-3 Transport extensions (L/Home/fast-fwd/+-bar/Ctrl+M) + Song-mode-empty playback fix + Song loop default ON**
+- **Sources:** FSW-017
+- **Implemented:** Transport
+- **Source:** Phase B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-018: B-4 Bare Z=Zoom + PgUp/PgDn zoom-when-tool + Alt+G ungroup + Builder wheel direction + slice snap fix + Ctrl+drag marquee on all 3 grids**
+- **Sources:** FSW-018
+- **Implemented:** Misc
+- **Source:** Phase B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-019: B-5 Ctrl+Z / Ctrl+Alt+Z migrated to global commands**
+- **Sources:** FSW-019
+- **Implemented:** Global undo/redo
+- **Source:** Phase B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-020: B-6 ~80 Path-A doc rows + 880x680 popup + hardcoded-conflict warning**
+- **Sources:** FSW-020
+- **Implemented:** Documentation
+- **Source:** Phase B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+### Phase C - Simple New Keybinds
+
+#### **FSW-023: Ctrl+N/O/S/Shift+S, Ctrl+M, Home, +/- cycle, F3, L, NumPad 0, NumPad / ***
+- **Sources:** FSW-023
+- **Implemented:** Rolled into B-1/B-2/B-3
+- **Source:** Phase C
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+### Phase E - Mouse-modifier Reference Rows
+
+#### **BLU-554: E1 Factory preset/kit/template generation**
+- **Sources:** BLU-554
+- **Implemented:** 790 presets, 87 kits, 29 templates
+- **Source:** Player Engines > Phase E > E1
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-555: E2 Templates infrastructure**
+- **Sources:** BLU-555
+- **Implemented:** File menu + Save/Load Template + folders
+- **Source:** Player Engines > Phase E > E2
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-556: E3 VibeLAF property-gated rendering**
+- **Sources:** BLU-556
+- **Implemented:** switchToggle + outlineGlowOnly
+- **Source:** Player Engines > Phase E > E3
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-557: E4 Per-engine preset menu pattern (recursive walker)**
+- **Sources:** BLU-557
+- **Implemented:** My Presets + Factory + root
+- **Source:** Player Engines > Phase E > E4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-558: E5 AudioSettingsDialog Documents-path fix**
+- **Sources:** BLU-558
+- **Implemented:** Single source of truth
+- **Source:** Player Engines > Phase E > E5
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-559: E6 Effects page sub-tab default + per-channel persistence**
+- **Sources:** BLU-559
+- **Implemented:** (also documented in Effects Page section)
+- **Source:** Player Engines > Phase E > E6
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-568: E7 Phase A keymap framework**
+- **Sources:** BLU-568
+- **Implemented:** juce::ApplicationCommandManager + Help menu
+- **Source:** Phase E > E7
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-074: Phase E Mouse-modifier reference rows**
+- **Sources:** FSW-074
+- **Implemented:** Builder ~30 rows, Piano Roll ~36 rows, DrumKit ~30 rows
+- **Source:** Phase E
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-075: Builder ~30, Piano Roll ~36, DrumKit ~30 self-documenting rows**
+- **Sources:** FSW-075
+- **Implemented:** Reference rows
+- **Source:** Phase E
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-076: Hardcoded-conflict warning when binding to a page-local key**
+- **Sources:** FSW-076
+- **Implemented:** Conflict warning
+- **Source:** Phase E
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+### System Pages
+
+#### **BLU-471: Press-and-hold audition**
+- **Sources:** BLU-471
+- **Implemented:** Both keyboard and grid hold note
+- **Source:** System Pages > Piano Roll > Shipped
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-474: Mixer Page future enhancements**
+- **Sources:** BLU-474
+- **Implemented:** TBD survey pending
+- **Source:** System Pages > Mixer Page
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-476: Builder Page future enhancements**
+- **Sources:** BLU-476
+- **Implemented:** TBD survey pending
+- **Source:** System Pages > Builder Page
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-477: Perf cell layout 2x2 grid**
+- **Sources:** BLU-477
+- **Implemented:** SYS X% / DSP X% / MEM X / LAT X
+- **Source:** System Pages > Transport Bar
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-479: Sub-tab default + per-channel persistence**
+- **Sources:** BLU-479
+- **Implemented:** switchTab(TabKind::Rack) etc
+- **Source:** System Pages > Effects Page
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-481: Ribbon Tab Bar v1 state**
+- **Sources:** BLU-481
+- **Implemented:** 10 slots; multi-instance dropdowns
+- **Source:** System Pages > Ribbon Tab Bar
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-482: Clips Page G-2 + G-3**
+- **Sources:** BLU-482
+- **Implemented:** BaySickPlayer + BaySickNAM/IR engine picker
+- **Source:** System Pages > Clips Page > G-2/G-3
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-483: Vox Page G-4 baseline**
+- **Sources:** BLU-483
+- **Implemented:** BaySickPlayer + reserved BaySickVocal
+- **Source:** System Pages > Vox Page > G-4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-484: Vox Page G-9 BaySickVocal+NAM/IR chain**
+- **Sources:** BLU-484
+- **Implemented:** VoxChainProcessor wrapper
+- **Source:** System Pages > Vox Page > G-9
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-485: Inst Page G-4 baseline**
+- **Sources:** BLU-485
+- **Implemented:** BaySickPlayer + BaySickNAM/IR
+- **Source:** System Pages > Inst Page > G-4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **BLU-486: Inst Page G-9 BaySickPedals+NAM/IR chain**
+- **Sources:** BLU-486
+- **Implemented:** InstChainProcessor wrapper
+- **Source:** System Pages > Inst Page > G-9
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+## UI / L&F / Theming
+
+### Phase F - Pattern Colours
+
+#### **BLU-567: F-2 Template Layer/Bass preset prefix bug + DrumKit Ctrl+drag**
+- **Sources:** BLU-567
+- **Implemented:** 4-segment trackId fix
+- **Source:** Phase F > F-2
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-077: Phase F Pattern colours + template-load bugfix**
+- **Sources:** FSW-077
+- **Implemented:** Both sub-batches done
+- **Source:** Phase F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-078: F-1 Per-pattern user colour**
+- **Sources:** BLU-566|FSW-078
+- **Implemented:** Pattern struct, persisted, ColourSelector w/ 10-slot recents | Pattern struct color field + ColourSelector
+- **Source:** Phase F | Phase F > F-1
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **FSW-079: F-2 Template Layer/Bass preset prefix-extraction bug fix; DrumKit Ctrl+drag marquee added**
+- **Sources:** FSW-079
+- **Implemented:** Bug fix
+- **Source:** Phase F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+### L&F Sprint
+
+#### **LDT-126: L2 DBFSMeter**
+- **Sources:** LDT-126
+- **Implemented:** LED segments, 60fps
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-127: L2B Meters on Effect Panels**
+- **Sources:** LDT-127
+- **Implemented:** VU + DBFS placement matrix
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-128: L3 VUMeter**
+- **Sources:** LDT-128
+- **Implemented:** Hardware recreation, spring-mass-damper ballistics
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-129: L4 ModulationLAF**
+- **Sources:** LDT-129
+- **Implemented:** Chorus/Flanger/Phaser glossy black + brushed silver
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-130: L5 DynamicsLAF**
+- **Sources:** LDT-130
+- **Implemented:** Compressor/TransientShaper LA-2A cream
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-131: L6 TimeLAF**
+- **Sources:** LDT-131
+- **Implemented:** Delay/Reverb star-fluted lever switches JewelIndicator
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-132: L7 HarmonicLAF**
+- **Sources:** LDT-132
+- **Implemented:** Saturation/Overdrive/Tape Bakelite Hammerite
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-134: L8B EQ Default Band Frequencies**
+- **Sources:** LDT-134
+- **Implemented:** 40/250/500/1k/2k/4k/8k/12kHz + Reset All resets freq+type
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-136: L10 Global Tooltip System**
+- **Sources:** LDT-136
+- **Implemented:** Done via Phase 0B; subsequently flagged NOT COMPLETE per L2175
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-137: L11 Piano Roll Note Enhancement**
+- **Sources:** LDT-137|LDT-297
+- **Implemented:** 1px highlights, note name text, selected border | 1px highlights + note name + selected border
+- **Source:** L&F Sprint > L11 | Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-138: LRX-1 through LRX-7**
+- **Sources:** LDT-138
+- **Implemented:** Realism upgrades panel textures shadows highlights Fresnel vignette asymmetry topography
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-140: LRX-9 through LRX-15**
+- **Sources:** LDT-140
+- **Implemented:** Faders, VU realism, DBFS realism, buttons, mixer console, global elements, matrix
+- **Source:** Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-264: Toggle/Action/Navigation button types**
+- **Sources:** LDT-264
+- **Implemented:** 3 system-wide button types
+- **Source:** L&F Sprint > Global Button Visual
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-265: Keep visible never move to menu**
+- **Sources:** LDT-265
+- **Implemented:** FX bypass, mute/solo, transport, etc.
+- **Source:** L&F Sprint > Button Menu Consolidation
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-266: Effect reorder + EQ band options**
+- **Sources:** LDT-266
+- **Implemented:** Right-click menus alongside ≡ menu
+- **Source:** L&F Sprint > Right-click context menus
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-267: 3-tier all pages**
+- **Sources:** LDT-267
+- **Implemented:** Main tabs / Page menu bar / Sub-tabs / Content
+- **Source:** L&F Sprint > Page Layout Hierarchy
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-268: EQ right panel 8-column controls**
+- **Sources:** LDT-268
+- **Implemented:** 8 color-coded columns; some elements may be missing; subsequently shipped per §12 work
+- **Source:** L&F Sprint > EQ8 Right Panel Redesign
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-269: EQ Display Color Scheme**
+- **Sources:** LDT-125|LDT-269
+- **Implemented:** violet->yellow/gold->cyan gradient | Violet->cyan gradient
+- **Source:** L&F Sprint > L1 | Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-270: DBFSMeter class**
+- **Sources:** LDT-270
+- **Implemented:** LED segments, gold dB labels, peak hold
+- **Source:** L&F Sprint > L2
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-271: Meters on Effect Panels matrix**
+- **Sources:** LDT-271
+- **Implemented:** VU left + DBFS right rule
+- **Source:** L&F Sprint > L2B
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-272: VUMeter Hardware Recreation**
+- **Sources:** LDT-272
+- **Implemented:** Cream plate, needle, pivot, scale
+- **Source:** L&F Sprint > L3
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-273: Second-order dynamics**
+- **Sources:** LDT-273
+- **Implemented:** Mass-spring-damper f=2.0 z=0.65 r=2.0
+- **Source:** L&F Sprint > VU Ballistics
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-274: Global calibration setting**
+- **Sources:** LDT-274
+- **Implemented:** -18 to -14 dBFS configurable
+- **Source:** L&F Sprint > VU Calibration
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-275: ModulationLAF**
+- **Sources:** LDT-275
+- **Implemented:** Glossy black + brushed silver
+- **Source:** L&F Sprint > L4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-276: DynamicsLAF**
+- **Sources:** LDT-276
+- **Implemented:** 3 knob variants + Chicken Head KneeType
+- **Source:** L&F Sprint > L5
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-277: TimeLAF Pultec recreation**
+- **Sources:** LDT-277
+- **Implemented:** Star-fluted lever switches JewelIndicator
+- **Source:** L&F Sprint > L6
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-278: HarmonicLAF Fairchild Bakelite**
+- **Sources:** LDT-278
+- **Implemented:** Fluted Bakelite + Hammerite panel
+- **Source:** L&F Sprint > L7
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-279: Panel Faceplate Texturing per hardware**
+- **Sources:** LDT-279
+- **Implemented:** 1176 / Pultec / LA-2A / Fairchild surface simulation
+- **Source:** L&F Sprint > LRX-1
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-280: Three-Layer AO Shadow Stack**
+- **Sources:** LDT-280
+- **Implemented:** Contact + Drop + Reflection on every knob
+- **Source:** L&F Sprint > LRX-2
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-281: Anisotropic Highlights**
+- **Sources:** LDT-281
+- **Implemented:** 1176 + Pultec metal lathe
+- **Source:** L&F Sprint > LRX-3
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-282: Fresnel Rim Lighting**
+- **Sources:** LDT-282
+- **Implemented:** LA-2A + Fairchild plastic/bakelite
+- **Source:** L&F Sprint > LRX-4
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-283: Global Lens Vignetting**
+- **Sources:** LDT-283
+- **Implemented:** 5% radial gradient; subsequently disabled per 2026-04-21 (T3-LRX5Vignette)
+- **Source:** L&F Sprint > LRX-5
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-284: Organic Asymmetry**
+- **Sources:** LDT-284
+- **Implemented:** Fingerprint grunge + variable bevels + pointer wobble
+- **Source:** L&F Sprint > LRX-6
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-285: Hardware Topography Specifics**
+- **Sources:** LDT-285
+- **Implemented:** Per-LAF physical detail specs
+- **Source:** L&F Sprint > LRX-7
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-287: Faders Realism**
+- **Sources:** LDT-287
+- **Implemented:** Track + cap + scale + trailing line
+- **Source:** L&F Sprint > LRX-9
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-288: VU Meter Realism**
+- **Sources:** LDT-288
+- **Implemented:** Glass overlay + backlight + bezel + screws
+- **Source:** L&F Sprint > LRX-10
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-289: DBFS Meter Realism**
+- **Sources:** LDT-289
+- **Implemented:** LED segments + bloom + bezel + glass
+- **Source:** L&F Sprint > LRX-11
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-290: Buttons Realism**
+- **Sources:** LDT-290
+- **Implemented:** Toggle/Action/Navigation material physics
+- **Source:** L&F Sprint > LRX-12
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-291: Mixer Console Surface**
+- **Sources:** LDT-291
+- **Implemented:** Brushed aluminum + channel strip borders
+- **Source:** L&F Sprint > LRX-13
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-292: Global Application Elements**
+- **Sources:** LDT-292
+- **Implemented:** Transport, EQ, Piano Roll, Builder, Scrollbars, Combos
+- **Source:** L&F Sprint > LRX-14
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-293: Realism Technique Quick-Reference Matrix**
+- **Sources:** LDT-293
+- **Implemented:** Quick-reference matrix
+- **Source:** L&F Sprint > LRX-15
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-294: Drums EQ Tab + Bass EQ Tab**
+- **Sources:** LDT-133|LDT-294
+- **Implemented:** EQ tabs added | EQ tab work
+- **Source:** L&F Sprint > L8 | Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-295: Builder Page L&F**
+- **Sources:** LDT-135|LDT-295
+- **Implemented:** Track header, source picker, arrangement grid, clips | Builder visual treatment
+- **Source:** L&F Sprint > L9 | Master Checklist > L&F
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-298: Transport bar CPU monitor**
+- **Sources:** LDT-298
+- **Implemented:** CPU%, memory MB, scrolling history graph
+- **Source:** L&F Sprint > CPU Performance Monitor
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-299: CPU Update Rate + History Speed**
+- **Sources:** LDT-299
+- **Implemented:** Low/High + Slow/Medium/Fast
+- **Source:** L&F Sprint > Options>System
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-300: Tap Tempo**
+- **Sources:** LDT-300
+- **Implemented:** Modal dialog with tap area
+- **Source:** L&F Sprint
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-301: Render Pattern to WAV**
+- **Sources:** LDT-301
+- **Implemented:** Right-click pattern in Builder
+- **Source:** L&F Sprint
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-302: Effects Page Visual + Combined Toolbar + Tab Dropdowns**
+- **Sources:** LDT-302
+- **Implemented:** Documented in STANDALONE_UI_CHANGES.md
+- **Source:** L&F Sprint
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-303: L&F Sprint Verification**
+- **Sources:** LDT-303
+- **Implemented:** Sprint complete
+- **Source:** L&F Sprint Verification
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-452: L8 Drums/Bass EQ tabs + EQ M/S bug fix + SharedUI compile fix**
+- **Sources:** LDT-452
+- **Implemented:** Visual fixes
+- **Source:** L&F Sprint Visual Fixes Session 2026-04-08
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+#### **LDT-453: 7 Effects Panel visual issues + Chicken Head fixes + TransientShaperPanel + PhaserPanel + TapePanel**
+- **Sources:** LDT-453
+- **Implemented:** Visual fixes
+- **Source:** L&F Sprint Visual Fixes Session 2026-04-08
+- **Verified:** 2026-05-08 (Phase-4 source verification)
+
+## Cross-cutting Infrastructure
+
 ### Cross-cutting Infrastructure
 
 #### **BLU-455: R1 Bus infrastructure + insert APIs**
@@ -4015,74 +5022,6 @@ over time without rewriting history here.
 - **Source:** Cross-cutting > Drum sample-load bug fix
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-### System Pages
-
-#### **BLU-471: Press-and-hold audition**
-- **Sources:** BLU-471
-- **Implemented:** Both keyboard and grid hold note
-- **Source:** System Pages > Piano Roll > Shipped
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-474: Mixer Page future enhancements**
-- **Sources:** BLU-474
-- **Implemented:** TBD survey pending
-- **Source:** System Pages > Mixer Page
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-476: Builder Page future enhancements**
-- **Sources:** BLU-476
-- **Implemented:** TBD survey pending
-- **Source:** System Pages > Builder Page
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-477: Perf cell layout 2x2 grid**
-- **Sources:** BLU-477
-- **Implemented:** SYS X% / DSP X% / MEM X / LAT X
-- **Source:** System Pages > Transport Bar
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-479: Sub-tab default + per-channel persistence**
-- **Sources:** BLU-479
-- **Implemented:** switchTab(TabKind::Rack) etc
-- **Source:** System Pages > Effects Page
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-481: Ribbon Tab Bar v1 state**
-- **Sources:** BLU-481
-- **Implemented:** 10 slots; multi-instance dropdowns
-- **Source:** System Pages > Ribbon Tab Bar
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-482: Clips Page G-2 + G-3**
-- **Sources:** BLU-482
-- **Implemented:** BaySickPlayer + BaySickNAM/IR engine picker
-- **Source:** System Pages > Clips Page > G-2/G-3
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-483: Vox Page G-4 baseline**
-- **Sources:** BLU-483
-- **Implemented:** BaySickPlayer + reserved BaySickVocal
-- **Source:** System Pages > Vox Page > G-4
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-484: Vox Page G-9 BaySickVocal+NAM/IR chain**
-- **Sources:** BLU-484
-- **Implemented:** VoxChainProcessor wrapper
-- **Source:** System Pages > Vox Page > G-9
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-485: Inst Page G-4 baseline**
-- **Sources:** BLU-485
-- **Implemented:** BaySickPlayer + BaySickNAM/IR
-- **Source:** System Pages > Inst Page > G-4
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **BLU-486: Inst Page G-9 BaySickPedals+NAM/IR chain**
-- **Sources:** BLU-486
-- **Implemented:** InstChainProcessor wrapper
-- **Source:** System Pages > Inst Page > G-9
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
 ### Project Persistence
 
 #### **BLU-448: P1 Schema + serialization plumbing**
@@ -4253,744 +5192,6 @@ over time without rewriting history here.
 - **Sources:** FSW-245
 - **Implemented:** Memory documentation
 - **Source:** Audio-device infrastructure
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-### Locked Design Decisions
-
-#### **LDT-180: Version naming v0.9 first build v1.0 after testing**
-- **Sources:** LDT-180
-- **Implemented:** Version naming convention
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-181: Harmless scope full Harmor-equivalent**
-- **Sources:** LDT-181
-- **Implemented:** Layout overhaul in 5F dense Advanced-mode layout
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-182: BaySickSynth redesigned 5-tab structure**
-- **Sources:** LDT-182
-- **Implemented:** Reuses core DSP
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-183: Layers architecture old 4-layer-per-page REMOVED**
-- **Sources:** LDT-183
-- **Implemented:** Each Layers page = 1 engine instance; max 8 Layers pages
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-184: Per-channel effects FXChain.h REMOVED**
-- **Sources:** LDT-184
-- **Implemented:** All channels use EffectRack
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-185: EQ everywhere EQ6DSP/EQ6MsDSP REMOVED**
-- **Sources:** LDT-185
-- **Implemented:** EQ8MsDSP used on ALL EQ tabs
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-186: EQ signal flow**
-- **Sources:** LDT-186
-- **Implemented:** Engine -> Page EQ8 M/S -> Channel EffectRack -> Effects Page EQ8 -> Mixer Fader -> Bus chain -> Master chain -> Output
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-187: EffectRack built-in EQ REMOVED**
-- **Sources:** LDT-187
-- **Implemented:** Rack = 6 pure FX slots only
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-188: MasteringPage/MasteringEngine BOTH REMOVED**
-- **Sources:** LDT-188
-- **Implemented:** Master channel = regular EffectRack
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-189: Effects racks ALL empty by default**
-- **Sources:** LDT-189
-- **Implemented:** Templates/presets populate them
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-190: Effects Page layout 2 tabs per channel**
-- **Sources:** LDT-190
-- **Implemented:** Tab 1 = Rack, Tab 2 = EQ8 M/S
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-191: M/S EQ true parallel**
-- **Sources:** LDT-191
-- **Implemented:** Mid + Side independent 8-band each
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-192: VibePlayer layout overhaul in 5F**
-- **Sources:** LDT-192
-- **Implemented:** FL Keys 4-column layout
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-193: BaySickSynth layout overhaul in 5F**
-- **Sources:** LDT-193
-- **Implemented:** 5-tab layout; same for BaySickBass
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-194: Drums page max 1 (BaySickDrums fixed)**
-- **Sources:** LDT-194
-- **Implemented:** 14 slots; 3 sub-tabs Sound/Piano Roll/EQ; references BaySickDrums (deleted); replaced by Phase D dynamic drums
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-195: Bass page max 4**
-- **Sources:** LDT-195
-- **Implemented:** 3 sub-tabs each
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-196: Layers page max 8**
-- **Sources:** LDT-196
-- **Implemented:** 3 sub-tabs each
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-197: Engine dropdown locks on first selection**
-- **Sources:** LDT-197
-- **Implemented:** Layers and Bass only; Drums has no selector; references original drums design (now superseded by Phase D)
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-198: Engine naming final**
-- **Sources:** LDT-198
-- **Implemented:** Layers: Harmless/VibePlayer/BaySickSynth; Bass: Harmless/VibePlayer/BaySickBass; Drums: BaySickDrums; references VibePlayer/BaySickDrums (renamed/deleted)
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-199: Sequencer.h/.cpp REMOVED**
-- **Sources:** LDT-199
-- **Implemented:** Piano roll only sequencing
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-200: SamplerEngine.h/.cpp REMOVED**
-- **Sources:** LDT-200
-- **Implemented:** VibePlayer replaces all sample playback
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-201: MIDI input omni mode**
-- **Sources:** LDT-201
-- **Implemented:** All active OS-recognized MIDI devices auto-connected
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-202: MIDI recording per-page arm**
-- **Sources:** LDT-202
-- **Implemented:** Quantize-on-record option, red dot indicator
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-203: Audio recording dedicated Audio Track type**
-- **Sources:** LDT-203
-- **Implemented:** ASIO input -> disk writer -> audio clip
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-204: Input monitoring per-track Software Monitor toggle**
-- **Sources:** LDT-204
-- **Implemented:** Default OFF
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-205: ASIO setup full ASIO dialog**
-- **Sources:** LDT-205
-- **Implemented:** juce::AudioDeviceSelectorComponent
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-206: Metronome accent on beat 1**
-- **Sources:** LDT-206
-- **Implemented:** Sound selection menu, volume control, count-in
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-207: Main tabs permanent**
-- **Sources:** LDT-207
-- **Implemented:** Mixer/Effects/Builder/Layers/Bass/Drums + dropdowns
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-208: Mixer track auto-create**
-- **Sources:** LDT-208
-- **Implemented:** Add Layers/Bass page = mixer track; Drums on-demand
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-209: Mixer track grouping**
-- **Sources:** LDT-209
-- **Implemented:** Master | Buses | Layer 1-8 | Bass 1-4 | Drum Ch 1-14 | Audio Track 1+; references 14-channel drums (now 16 per Phase D)
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-210: Mixer bus strips visible**
-- **Sources:** LDT-210
-- **Implemented:** Faders, meters, controls
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-211: Mixer track count 100 max**
-- **Sources:** LDT-211
-- **Implemented:** Lazy load, horizontal scroll
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-212: FX Master Switch per-track + global**
-- **Sources:** LDT-212
-- **Implemented:** Master strip global FX on/off
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-213: Keyboard shortcuts focus-based routing**
-- **Sources:** LDT-213
-- **Implemented:** Global shortcuts work everywhere
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-214: APVTS naming convention**
-- **Sources:** LDT-214
-- **Implemented:** tk_{trackID}_{engine}_{param} for tracks; bus_fx_{slot}_{param}
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-215: APVTS lazy registration**
-- **Sources:** LDT-215
-- **Implemented:** Params registered when page/track created
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-216: APVTS param table**
-- **Sources:** LDT-216
-- **Implemented:** Per-effect param table when automation implemented (Phase 4)
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-217: Harmless automation macro only**
-- **Sources:** LDT-217
-- **Implemented:** ~30-50 APVTS params per instance
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-218: All other engine params APVTS-registered**
-- **Sources:** LDT-218
-- **Implemented:** VibePlayer, BaySickSynth, BaySickBass, Drums vol/pitch/pan
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-220: Standalone only**
-- **Sources:** LDT-220
-- **Implemented:** VibeDAW will never be a VST itself
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-221: Undo history size user-configurable**
-- **Sources:** LDT-221
-- **Implemented:** 100/250/500/1000 steps default 250
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-222: Audio import File>Import + drag-and-drop**
-- **Sources:** LDT-222
-- **Implemented:** .wav .mp3
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-223: Autosave every 15 minutes**
-- **Sources:** LDT-223
-- **Implemented:** Temp file
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-225: Ghost clip drag**
-- **Sources:** LDT-225
-- **Implemented:** Semi-transparent preview
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-226: Automation full APVTS**
-- **Sources:** LDT-226
-- **Implemented:** Per-effect named params; VibeDAW Event Editor
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-227: LAF per context**
-- **Sources:** LDT-227
-- **Implemented:** Separate LookAndFeel class per engine/effect category
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-228: Lever switch for 2-position toggles**
-- **Sources:** LDT-228
-- **Implemented:** Effects panels and player engines only
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-229: Global bloom on neon elements**
-- **Sources:** LDT-229
-- **Implemented:** Double-draw bloom glow
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-230: Shared hardware elements**
-- **Sources:** LDT-230
-- **Implemented:** JewelIndicator, Chicken Head, Hex-bolt, Lever switch
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-232: Texture caching**
-- **Sources:** LDT-232
-- **Implemented:** TextureUtils namespace; cached juce::Image
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-233: Lock-free audio->UI EQSpectrumFeed**
-- **Sources:** LDT-233
-- **Implemented:** Proper lock-free FIFO
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-234: CPU safeguarding**
-- **Sources:** LDT-234
-- **Implemented:** Every DSP update guards setters
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-235: Sample rate changes**
-- **Sources:** LDT-235
-- **Implemented:** suspend audio -> prepare -> resume
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-236: Meter components**
-- **Sources:** LDT-236
-- **Implemented:** DBFSMeter + VUMeter
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-237: Meter assignments**
-- **Sources:** LDT-237
-- **Implemented:** VU + DBFS for Dynamics/Harmonics; DBFS only for Time/Modulation
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-238: VU calibration -18 dBFS = 0 VU default**
-- **Sources:** LDT-238
-- **Implemented:** Configurable -18 to -14 via Effects Page
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-239: EQ band colors**
-- **Sources:** LDT-239
-- **Implemented:** violet->yellow/gold->cyan gradient via kBandCols[8]
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-240: Note colors**
-- **Sources:** LDT-240
-- **Implemented:** Drums Red; Layers 8 oranges; Bass 4 greens
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-241: Effects Bus position POST-master**
-- **Sources:** LDT-241
-- **Implemented:** Layer+Bass+Drums -> Master rack -> +Effects Bus -> Output
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-242: Time-stretching Rubber Band Library**
-- **Sources:** LDT-242
-- **Implemented:** BSD; libs/rubberband/ vendored; subsequently replaced by custom PhaseVocoder
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-243: PDC full automatic graph-wide**
-- **Sources:** LDT-243
-- **Implemented:** Each DSP reports latency
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-244: Preset system FILE menu**
-- **Sources:** LDT-244
-- **Implemented:** Save as Template / New from Template
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-245: Menu systems on Mixer/Builder/Effects/Piano Roll/Engines**
-- **Sources:** LDT-245
-- **Implemented:** Standard menu bar locations
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-246: Piano Roll menus standard**
-- **Sources:** LDT-246
-- **Implemented:** Edit, Tools, Scale, Chords, View
-- **Source:** Locked Design Decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-352: Browser Panel collapsible**
-- **Sources:** LDT-224|LDT-352
-- **Implemented:** Project Browser; patterns + automation targets | 3 filter buttons
-- **Source:** Locked Design Decisions | Phase 4 > 4B
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-### Standing Parallel Work
-
-#### **FSW-324: §1 to §6 + §8 retrospectives shipped (Chorus/Compressor/Delay/Flanger/Limiter/Overdrive/Reverb)**
-- **Sources:** FSW-324
-- **Implemented:** Quality pass partial
-- **Source:** Standing parallel work > Phase 5F-9 DSP Quality Pass
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-331: Legacy juce_add_plugin CMake target removal**
-- **Sources:** FSW-331
-- **Implemented:** Still at CMakeLists.txt:174
-- **Source:** Standing parallel work > Smaller open items
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-332: 5F-5 ambiguous Event Editor items**
-- **Sources:** FSW-332
-- **Implemented:** Deferred
-- **Source:** Standing parallel work > Smaller open items
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-333: 5F-6 ambiguous Piano Roll items**
-- **Sources:** FSW-333
-- **Implemented:** Deferred
-- **Source:** Standing parallel work > Smaller open items
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-335: Orfanidis analytical anti-cramping for EQ**
-- **Sources:** FSW-335
-- **Implemented:** Deferred
-- **Source:** Standing parallel work > Smaller open items
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **FSW-337: Internal cleanup: rip unused voxRoll/instRoll/kVoxPRTarget/kInstPRTarget/voxPageMidi/instPageMidi**
-- **Sources:** FSW-337
-- **Implemented:** Dead since piano-roll removal from Vox/Inst; We are leaving this alone in case I add synth vocals and inst already uses the piano roll now
-- **Source:** Standing parallel work > Smaller open items
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-### L&F Sprint
-
-#### **LDT-126: L2 DBFSMeter**
-- **Sources:** LDT-126
-- **Implemented:** LED segments, 60fps
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-127: L2B Meters on Effect Panels**
-- **Sources:** LDT-127
-- **Implemented:** VU + DBFS placement matrix
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-128: L3 VUMeter**
-- **Sources:** LDT-128
-- **Implemented:** Hardware recreation, spring-mass-damper ballistics
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-129: L4 ModulationLAF**
-- **Sources:** LDT-129
-- **Implemented:** Chorus/Flanger/Phaser glossy black + brushed silver
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-130: L5 DynamicsLAF**
-- **Sources:** LDT-130
-- **Implemented:** Compressor/TransientShaper LA-2A cream
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-131: L6 TimeLAF**
-- **Sources:** LDT-131
-- **Implemented:** Delay/Reverb star-fluted lever switches JewelIndicator
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-132: L7 HarmonicLAF**
-- **Sources:** LDT-132
-- **Implemented:** Saturation/Overdrive/Tape Bakelite Hammerite
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-134: L8B EQ Default Band Frequencies**
-- **Sources:** LDT-134
-- **Implemented:** 40/250/500/1k/2k/4k/8k/12kHz + Reset All resets freq+type
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-136: L10 Global Tooltip System**
-- **Sources:** LDT-136
-- **Implemented:** Done via Phase 0B; subsequently flagged NOT COMPLETE per L2175
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-137: L11 Piano Roll Note Enhancement**
-- **Sources:** LDT-137|LDT-297
-- **Implemented:** 1px highlights, note name text, selected border | 1px highlights + note name + selected border
-- **Source:** L&F Sprint > L11 | Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-138: LRX-1 through LRX-7**
-- **Sources:** LDT-138
-- **Implemented:** Realism upgrades panel textures shadows highlights Fresnel vignette asymmetry topography
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-140: LRX-9 through LRX-15**
-- **Sources:** LDT-140
-- **Implemented:** Faders, VU realism, DBFS realism, buttons, mixer console, global elements, matrix
-- **Source:** Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-264: Toggle/Action/Navigation button types**
-- **Sources:** LDT-264
-- **Implemented:** 3 system-wide button types
-- **Source:** L&F Sprint > Global Button Visual
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-265: Keep visible never move to menu**
-- **Sources:** LDT-265
-- **Implemented:** FX bypass, mute/solo, transport, etc.
-- **Source:** L&F Sprint > Button Menu Consolidation
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-266: Effect reorder + EQ band options**
-- **Sources:** LDT-266
-- **Implemented:** Right-click menus alongside ≡ menu
-- **Source:** L&F Sprint > Right-click context menus
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-267: 3-tier all pages**
-- **Sources:** LDT-267
-- **Implemented:** Main tabs / Page menu bar / Sub-tabs / Content
-- **Source:** L&F Sprint > Page Layout Hierarchy
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-268: EQ right panel 8-column controls**
-- **Sources:** LDT-268
-- **Implemented:** 8 color-coded columns; some elements may be missing; subsequently shipped per §12 work
-- **Source:** L&F Sprint > EQ8 Right Panel Redesign
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-269: EQ Display Color Scheme**
-- **Sources:** LDT-125|LDT-269
-- **Implemented:** violet->yellow/gold->cyan gradient | Violet->cyan gradient
-- **Source:** L&F Sprint > L1 | Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-270: DBFSMeter class**
-- **Sources:** LDT-270
-- **Implemented:** LED segments, gold dB labels, peak hold
-- **Source:** L&F Sprint > L2
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-271: Meters on Effect Panels matrix**
-- **Sources:** LDT-271
-- **Implemented:** VU left + DBFS right rule
-- **Source:** L&F Sprint > L2B
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-272: VUMeter Hardware Recreation**
-- **Sources:** LDT-272
-- **Implemented:** Cream plate, needle, pivot, scale
-- **Source:** L&F Sprint > L3
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-273: Second-order dynamics**
-- **Sources:** LDT-273
-- **Implemented:** Mass-spring-damper f=2.0 z=0.65 r=2.0
-- **Source:** L&F Sprint > VU Ballistics
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-274: Global calibration setting**
-- **Sources:** LDT-274
-- **Implemented:** -18 to -14 dBFS configurable
-- **Source:** L&F Sprint > VU Calibration
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-275: ModulationLAF**
-- **Sources:** LDT-275
-- **Implemented:** Glossy black + brushed silver
-- **Source:** L&F Sprint > L4
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-276: DynamicsLAF**
-- **Sources:** LDT-276
-- **Implemented:** 3 knob variants + Chicken Head KneeType
-- **Source:** L&F Sprint > L5
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-277: TimeLAF Pultec recreation**
-- **Sources:** LDT-277
-- **Implemented:** Star-fluted lever switches JewelIndicator
-- **Source:** L&F Sprint > L6
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-278: HarmonicLAF Fairchild Bakelite**
-- **Sources:** LDT-278
-- **Implemented:** Fluted Bakelite + Hammerite panel
-- **Source:** L&F Sprint > L7
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-279: Panel Faceplate Texturing per hardware**
-- **Sources:** LDT-279
-- **Implemented:** 1176 / Pultec / LA-2A / Fairchild surface simulation
-- **Source:** L&F Sprint > LRX-1
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-280: Three-Layer AO Shadow Stack**
-- **Sources:** LDT-280
-- **Implemented:** Contact + Drop + Reflection on every knob
-- **Source:** L&F Sprint > LRX-2
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-281: Anisotropic Highlights**
-- **Sources:** LDT-281
-- **Implemented:** 1176 + Pultec metal lathe
-- **Source:** L&F Sprint > LRX-3
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-282: Fresnel Rim Lighting**
-- **Sources:** LDT-282
-- **Implemented:** LA-2A + Fairchild plastic/bakelite
-- **Source:** L&F Sprint > LRX-4
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-283: Global Lens Vignetting**
-- **Sources:** LDT-283
-- **Implemented:** 5% radial gradient; subsequently disabled per 2026-04-21 (T3-LRX5Vignette)
-- **Source:** L&F Sprint > LRX-5
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-284: Organic Asymmetry**
-- **Sources:** LDT-284
-- **Implemented:** Fingerprint grunge + variable bevels + pointer wobble
-- **Source:** L&F Sprint > LRX-6
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-285: Hardware Topography Specifics**
-- **Sources:** LDT-285
-- **Implemented:** Per-LAF physical detail specs
-- **Source:** L&F Sprint > LRX-7
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-287: Faders Realism**
-- **Sources:** LDT-287
-- **Implemented:** Track + cap + scale + trailing line
-- **Source:** L&F Sprint > LRX-9
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-288: VU Meter Realism**
-- **Sources:** LDT-288
-- **Implemented:** Glass overlay + backlight + bezel + screws
-- **Source:** L&F Sprint > LRX-10
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-289: DBFS Meter Realism**
-- **Sources:** LDT-289
-- **Implemented:** LED segments + bloom + bezel + glass
-- **Source:** L&F Sprint > LRX-11
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-290: Buttons Realism**
-- **Sources:** LDT-290
-- **Implemented:** Toggle/Action/Navigation material physics
-- **Source:** L&F Sprint > LRX-12
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-291: Mixer Console Surface**
-- **Sources:** LDT-291
-- **Implemented:** Brushed aluminum + channel strip borders
-- **Source:** L&F Sprint > LRX-13
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-292: Global Application Elements**
-- **Sources:** LDT-292
-- **Implemented:** Transport, EQ, Piano Roll, Builder, Scrollbars, Combos
-- **Source:** L&F Sprint > LRX-14
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-293: Realism Technique Quick-Reference Matrix**
-- **Sources:** LDT-293
-- **Implemented:** Quick-reference matrix
-- **Source:** L&F Sprint > LRX-15
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-294: Drums EQ Tab + Bass EQ Tab**
-- **Sources:** LDT-133|LDT-294
-- **Implemented:** EQ tabs added | EQ tab work
-- **Source:** L&F Sprint > L8 | Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-295: Builder Page L&F**
-- **Sources:** LDT-135|LDT-295
-- **Implemented:** Track header, source picker, arrangement grid, clips | Builder visual treatment
-- **Source:** L&F Sprint > L9 | Master Checklist > L&F
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-298: Transport bar CPU monitor**
-- **Sources:** LDT-298
-- **Implemented:** CPU%, memory MB, scrolling history graph
-- **Source:** L&F Sprint > CPU Performance Monitor
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-299: CPU Update Rate + History Speed**
-- **Sources:** LDT-299
-- **Implemented:** Low/High + Slow/Medium/Fast
-- **Source:** L&F Sprint > Options>System
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-300: Tap Tempo**
-- **Sources:** LDT-300
-- **Implemented:** Modal dialog with tap area
-- **Source:** L&F Sprint
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-301: Render Pattern to WAV**
-- **Sources:** LDT-301
-- **Implemented:** Right-click pattern in Builder
-- **Source:** L&F Sprint
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-302: Effects Page Visual + Combined Toolbar + Tab Dropdowns**
-- **Sources:** LDT-302
-- **Implemented:** Documented in STANDALONE_UI_CHANGES.md
-- **Source:** L&F Sprint
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-303: L&F Sprint Verification**
-- **Sources:** LDT-303
-- **Implemented:** Sprint complete
-- **Source:** L&F Sprint Verification
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-452: L8 Drums/Bass EQ tabs + EQ M/S bug fix + SharedUI compile fix**
-- **Sources:** LDT-452
-- **Implemented:** Visual fixes
-- **Source:** L&F Sprint Visual Fixes Session 2026-04-08
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-453: 7 Effects Panel visual issues + Chicken Head fixes + TransientShaperPanel + PhaserPanel + TapePanel**
-- **Sources:** LDT-453
-- **Implemented:** Visual fixes
-- **Source:** L&F Sprint Visual Fixes Session 2026-04-08
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 ### Pre-Flight / Phase 0 / Phase 1 / Phase 2 / Phase 3 / Phase 4
@@ -5805,614 +6006,459 @@ over time without rewriting history here.
 - **Source:** Pre-Flight Phase 2
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-### Phase 5F - Player Layout Overhauls
+## User Tools / Learning
 
-#### **LDT-174: 5F Player Layout Overhauls (10 sub-items)**
-- **Sources:** LDT-174
-- **Implemented:** 5F-1 to 5F-6 done; 5F-7 Builder, 5F-8 UI Touch-ups, 5F-9 DSP Quality Pass remaining
-- **Source:** Master Checklist > Phase 5
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-373: Project Bundle & Export**
-- **Sources:** LDT-373
-- **Implemented:** File>Bundle & Export action; folder or .zip target
-- **Source:** Phase 5 > 5D-BUNDLE
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-376: BaySickSynth & BaySickBass Layout Overhaul**
-- **Sources:** LDT-376
-- **Implemented:** 5-tab layout; new waveforms; XY filter pad; BssEditorComponents
-- **Source:** Phase 5 > 5F-1
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-377: VibePlayer Layout Overhaul**
-- **Sources:** LDT-377
-- **Implemented:** 480x400 4-column FL Keys; ENVIRONMENT/MISC/VELOCITY/TUNING; references VibePlayer (renamed BaySickPlayer)
-- **Source:** Phase 5 > 5F-2
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-378: Drum system fixes paired with 5F-2**
-- **Sources:** LDT-378
-- **Implemented:** DrumSynth whiteNoise LCG fix; HARDNESS default 0.5->0.0; rootNote normalization; references DrumSynth (deleted)
-- **Source:** Phase 5 > 5F-2 drum fixes
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-379: Harmless Layout Overhaul**
-- **Sources:** LDT-379
-- **Implemented:** 960x620 5-panel proportional layout; ~50 new APVTS params
-- **Source:** Phase 5 > 5F-3
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-380: oeq_mix wire output EQ in 5F-8**
-- **Sources:** LDT-380
-- **Implemented:** Param referenced in editor but not in createLayout; subsequently wired in §P1 S1
-- **Source:** Phase 5 > 5F-3
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-381: Per-Strip Feature Update + Audio-Path Refactor**
-- **Sources:** LDT-381
-- **Implemented:** 6-batch rollout; InsertNode + lazy APVTS + MixerLedButton + width knob + dB ticks + bypass sync
-- **Source:** Phase 5 > 5F-4a
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-382: C/M header + polarity + LED colors + width knob + FX button + cable model**
-- **Sources:** LDT-382
-- **Implemented:** Various decisions during Q&A
-- **Source:** Phase 5 > 5F-4 decisions
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-383: Per-insert audio path move**
-- **Sources:** LDT-383
-- **Implemented:** Move per-engine racks into VibeGraph InsertNode
-- **Source:** Phase 5 > 5F-4a architecture
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-384: Lazy APVTS for all mixer state**
-- **Sources:** LDT-384
-- **Implemented:** Migrated MixerState arrays to lazy APVTS
-- **Source:** Phase 5 > 5F-4a architecture
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-385: FX Bypass LED two-way sync**
-- **Sources:** LDT-385
-- **Implemented:** rack.setRackBypassed + Effects page button two-way
-- **Source:** Phase 5 > 5F-4a architecture
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-386: Dynamic Routing + Cables + Add-Strip**
-- **Sources:** LDT-386
-- **Implemented:** 7-batch rollout; routing data model + dynamic audio path + aux strips + cable rendering + drag + +button + right-click + persistence
-- **Source:** Phase 5 > 5F-4b
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-389: Event Editor Layout Alignment**
-- **Sources:** LDT-389
-- **Implemented:** Title label + tool button strip + Delete button + footer status bar
-- **Source:** Phase 5 > 5F-5
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-391: Piano Roll Layout Alignment**
-- **Sources:** LDT-391
-- **Implemented:** Control lane header text + beat grid + toolbar context label + visible scrollbars
-- **Source:** Phase 5 > 5F-6
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-393: Builder Layout Alignment**
-- **Sources:** LDT-393
-- **Implemented:** Verify Phase 4B Builder matches; minor adjustments
-- **Source:** Phase 5 > 5F-7
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-395: DSP Quality Pass (12 effect modules + 3 player engines)**
-- **Sources:** LDT-395
-- **Implemented:** Comprehensive DSP-level upgrade; spec in _APPROVED_CHANGES.md; subsequently §1-§11 + §12 fully closed
-- **Source:** Phase 5 > 5F-9
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-396: Chorus per-voice prime delay offsets**
-- **Sources:** LDT-396
-- **Implemented:** Spec item; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §1
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-397: Compressor look-ahead + true stereo + auto-makeup + per-sample envelope**
-- **Sources:** LDT-397
-- **Implemented:** Spec item; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §2
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-398: Delay DC-blocker + cubic interp + TPT feedback + mModCutoffMod**
-- **Sources:** LDT-398
-- **Implemented:** Spec item; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §3
-- **Verified:** 2026-05-08 (Phase-4 source verification)
+_No pre-QA entries in this domain.  Tutorial / AI-helper / smart-feature
+work is post-V1; candidates live in `Future State.md` (CL-063..CL-086
+fire-hose additions).  In-flight V1 work for this domain (QA-Manuals,
+QA-Templates) is logged in `Main Plan.md` §5.5._
 
-#### **LDT-399: Flanger damp inside FB + cubic interp + SmoothedValue**
-- **Sources:** LDT-399
-- **Implemented:** Spec item; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §4
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-400: Limiter (NET-NEW) DSP**
-- **Sources:** LDT-036|LDT-400
-- **Implemented:** LimiterDSP.h/.cpp + 4× true-peak + adaptive release + tanh + look-ahead | Net-new Limiter shipped; toggle layout cross-applied to §2; subsequently shipped DSP; UI deferred
-- **Source:** Master Checklist > 5F-9 §5 | Phase 5 > 5F-9 §5
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-401: Limiter editor panel UI**
-- **Sources:** LDT-401
-- **Implemented:** 3-zone layout spec + skeuomorphic LAF (#00FFF2 cyan GR / #FF9100 orange sat)
-- **Source:** Phase 5 > 5F-9 §5 UI
-- **Verified:** 2026-05-08 (Phase-4 source verification)
-
-#### **LDT-402: Overdrive 4× oversampling + 5 Hz DC-blocker + SmoothedValue + TPT BPF/LPF**
-- **Sources:** LDT-402
-- **Implemented:** Spec item; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §6
-- **Verified:** 2026-05-08 (Phase-4 source verification)
+## Workflow Polish
 
-#### **LDT-403: Phaser logarithmic LFO->freq + always-allocated 24 stages + invert-feedback**
-- **Sources:** LDT-403
-- **Implemented:** Spec item; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §7
-- **Verified:** 2026-05-08 (Phase-4 source verification)
+_No pre-QA entries in this domain.  Multi-window / snapshots / cloud /
+macros / QoL features are post-V1; candidates live in `Future State.md`
+(CL-087..CL-108 fire-hose additions, plus FSW-330 walked).  In-flight
+V1 work for this domain (QA-Verify, QA-RC) is logged in `Main Plan.md`
+§5.5._
 
-#### **LDT-404: Reverb Valhalla-style tail modulation + click-free size changes**
-- **Sources:** LDT-404
-- **Implemented:** Spec item; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §8
-- **Verified:** 2026-05-08 (Phase-4 source verification)
+## Other / Platform / Deferred
 
-#### **LDT-405: Saturation 4× oversampling + auto-gain + SR-aware DC + SmoothedValue**
-- **Sources:** LDT-405
-- **Implemented:** Spec item; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §9
-- **Verified:** 2026-05-08 (Phase-4 source verification)
+_No pre-QA entries in this domain.  VST/AU plugin hosting, surround
+sound, tablet DJ, hardware MIDI output, MIDI export are all post-V1;
+candidates live in `Future State.md` (BLU-297..BLU-302, BLU-447,
+LDT-219..LDT-430 cluster).  No V1 batches are scheduled for this
+bucket._
 
-#### **LDT-406: Tape (BIGGEST REWORK) hysteresis + asymmetric sigmoid + flutter + pre/de-emphasis**
-- **Sources:** LDT-406
-- **Implemented:** Spec item; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §10
-- **Verified:** 2026-05-08 (Phase-4 source verification)
+## Meta
 
-#### **LDT-407: Transient Shaper quadratic curves + LR4 24 dB/oct + 4× oversampling**
-- **Sources:** LDT-407
-- **Implemented:** Spec item; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §11
-- **Verified:** 2026-05-08 (Phase-4 source verification)
+### Locked Design Decisions
 
-#### **LDT-408: EQ8 10 items keeping 8 bands**
-- **Sources:** LDT-408
-- **Implemented:** getMagnitudeForFrequency + proportional Q + SmoothedValue + TPT hybrid + 2× anti-cramping + linear-phase + per-band M/S + spectrum analyzer + Dynamic EQ; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §12
+#### **LDT-180: Version naming v0.9 first build v1.0 after testing**
+- **Sources:** LDT-180
+- **Implemented:** Version naming convention
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-409: Harmless DSP + UI quality pass**
-- **Sources:** LDT-409
-- **Implemented:** HarmonicEngine + AdditiveVoice filter chain + output phaser + strum direction + CPU-guard + SmoothedValue audit + UI review; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §P1
+#### **LDT-181: Harmless scope full Harmor-equivalent**
+- **Sources:** LDT-181
+- **Implemented:** Layout overhaul in 5F dense Advanced-mode layout
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-410: VibePlayer DSP + UI quality pass**
-- **Sources:** LDT-410
-- **Implemented:** AudioClipStreamer + VibeSampleManager + M/S width + treble shelf + PhaseVocoder + voice allocation + CPU guards
-- **Source:** Phase 5 > 5F-9 §P2
+#### **LDT-182: BaySickSynth redesigned 5-tab structure**
+- **Sources:** LDT-182
+- **Implemented:** Reuses core DSP
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-411: BaySick family DSP + UI quality pass**
-- **Sources:** LDT-411
-- **Implemented:** BaySickSynthVoice + filter chain + LFO routing + sub-osc + keyboard tracking + glide + auditionNote + mono MIDI preprocess; subsequently shipped
-- **Source:** Phase 5 > 5F-9 §P3
+#### **LDT-183: Layers architecture old 4-layer-per-page REMOVED**
+- **Sources:** LDT-183
+- **Implemented:** Each Layers page = 1 engine instance; max 8 Layers pages
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-412: Limiter editor panel + EQ Dynamic UI extensions + EQ spectrum analyzer overlay**
-- **Sources:** LDT-412
-- **Implemented:** Tracked under 5F-9 but execute after DSP is stable
-- **Source:** Phase 5 > 5F-9 deferred UI
+#### **LDT-184: Per-channel effects FXChain.h REMOVED**
+- **Sources:** LDT-184
+- **Implemented:** All channels use EffectRack
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-### Phase H-0 Audit
-
-#### **FSW-246: Phase H-0 Audit + targeted fixes (cross-cutting cleanup)**
-- **Sources:** FSW-246
-- **Implemented:** Triggered by surface-level Mixer-strip bugs
-- **Source:** Phase H-0 Audit
+#### **LDT-185: EQ everywhere EQ6DSP/EQ6MsDSP REMOVED**
+- **Sources:** LDT-185
+- **Implemented:** EQ8MsDSP used on ALL EQ tabs
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-247: Audit work - meter rebuild + routing cleanup**
-- **Sources:** FSW-247
-- **Implemented:** 13 items
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-186: EQ signal flow**
+- **Sources:** LDT-186
+- **Implemented:** Engine -> Page EQ8 M/S -> Channel EffectRack -> Effects Page EQ8 -> Mixer Fader -> Bus chain -> Master chain -> Output
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-248: DBFSMeter rewrite (stereo L/R + range -60..+6 + log-scale)**
-- **Sources:** FSW-248
-- **Implemented:** Stereo meters
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-187: EffectRack built-in EQ REMOVED**
+- **Sources:** LDT-187
+- **Implemented:** Rack = 6 pure FX slots only
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-249: MixerTrackStrip layout rewrite (meter on right column 28px, all strips 80px wide)**
-- **Sources:** FSW-249
-- **Implemented:** Strip layout
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-188: MasteringPage/MasteringEngine BOTH REMOVED**
+- **Sources:** LDT-188
+- **Implemented:** Master channel = regular EffectRack
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-250: Audio-thread stereo peak atomics on every InsertNode + buses**
-- **Sources:** FSW-250
-- **Implemented:** Stereo atomics
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-189: Effects racks ALL empty by default**
+- **Sources:** LDT-189
+- **Implemented:** Templates/presets populate them
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-251: PluginProcessor stereo bus peak atomics + per-row stereo peak writes**
-- **Sources:** FSW-251
-- **Implemented:** Stereo writes
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-190: Effects Page layout 2 tabs per channel**
+- **Sources:** LDT-190
+- **Implemented:** Tab 1 = Rack, Tab 2 = EQ8 M/S
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-252: MixerPage timer pushes stereo L/R via setStereoLevel**
-- **Sources:** FSW-252
-- **Implemented:** Push stereo
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-191: M/S EQ true parallel**
+- **Sources:** LDT-191
+- **Implemented:** Mid + Side independent 8-band each
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-253: Audio-row insert routing fix (addAudioChannel before ensureAudioInsert)**
-- **Sources:** FSW-253
-- **Implemented:** 3 call sites + defensive rebindApvts
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-192: VibePlayer layout overhaul in 5F**
+- **Sources:** LDT-192
+- **Implemented:** FL Keys 4-column layout
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-254: Master mute wired to MasterBusNode + mixer_master_mute APVTS param**
-- **Sources:** FSW-254
-- **Implemented:** Master mute
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-193: BaySickSynth layout overhaul in 5F**
+- **Sources:** LDT-193
+- **Implemented:** 5-tab layout; same for BaySickBass
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-255: Pan implementation in InsertNode + every BusNode + MasterBusNode**
-- **Sources:** FSW-255
-- **Implemented:** Pan DSP
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-194: Drums page max 1 (BaySickDrums fixed)**
+- **Sources:** LDT-194
+- **Implemented:** 14 slots; 3 sub-tabs Sound/Piano Roll/EQ; references BaySickDrums (deleted); replaced by Phase D dynamic drums
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-256: Bus FX Bypass wiring (every bus's rack ORs strip-local _bypass with master_fx_bypass)**
-- **Sources:** FSW-256
-- **Implemented:** FX bypass
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-195: Bass page max 4**
+- **Sources:** LDT-195
+- **Implemented:** 3 sub-tabs each
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-257: Pan Law selector (Circular/Triangular/Square)**
-- **Sources:** FSW-257
-- **Implemented:** master_pan_law APVTS + Mixer hamburger
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-196: Layers page max 8**
+- **Sources:** LDT-196
+- **Implemented:** 3 sub-tabs each
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-258: Vox/Inst insert top-stripe color fix**
-- **Sources:** FSW-258
-- **Implemented:** pickStripColor
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-197: Engine dropdown locks on first selection**
+- **Sources:** LDT-197
+- **Implemented:** Layers and Bass only; Drums has no selector; references original drums design (now superseded by Phase D)
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-259: Stop-decay meter wiggle fix**
-- **Sources:** FSW-259
-- **Implemented:** Per-row peakDb atomics decay 30 dB/sec
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-198: Engine naming final**
+- **Sources:** LDT-198
+- **Implemented:** Layers: Harmless/VibePlayer/BaySickSynth; Bass: Harmless/VibePlayer/BaySickBass; Drums: BaySickDrums; references VibePlayer/BaySickDrums (renamed/deleted)
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-260: Fader-mark misalignment fix**
-- **Sources:** FSW-260
-- **Implemented:** APVTS _level range -60..+10 -> -60..+5.6
-- **Source:** Phase H-0 > Audit Work
+#### **LDT-199: Sequencer.h/.cpp REMOVED**
+- **Sources:** LDT-199
+- **Implemented:** Piano roll only sequencing
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-261: Batch A quick wins (7 fixes)**
-- **Sources:** FSW-261
-- **Implemented:** Quick wins bundle
-- **Source:** Phase H-0 > Batch A
+#### **LDT-200: SamplerEngine.h/.cpp REMOVED**
+- **Sources:** LDT-200
+- **Implemented:** VibePlayer replaces all sample playback
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-262: A.1 AudioSettingsDialog::applySettings no longer hardcodes audioInputDeviceName=""**
-- **Sources:** FSW-262
-- **Implemented:** ASIO input fix
-- **Source:** Phase H-0 > Batch A
+#### **LDT-201: MIDI input omni mode**
+- **Sources:** LDT-201
+- **Implemented:** All active OS-recognized MIDI devices auto-connected
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-263: A.2 EffectRack slot outputGainDb (per-slot Vol knob) saved + restored in project XML**
-- **Sources:** FSW-263
-- **Implemented:** Knob persistence
-- **Source:** Phase H-0 > Batch A
+#### **LDT-202: MIDI recording per-page arm**
+- **Sources:** LDT-202
+- **Implemented:** Quantize-on-record option, red dot indicator
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-264: A.3 Pause now flushes all-notes-off**
-- **Sources:** FSW-264
-- **Implemented:** Was Stop-only
-- **Source:** Phase H-0 > Batch A
+#### **LDT-203: Audio recording dedicated Audio Track type**
+- **Sources:** LDT-203
+- **Implemented:** ASIO input -> disk writer -> audio clip
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-265: A.4 BPM clamps to 20-300 instead of snapping to 120 on out-of-range input**
-- **Sources:** FSW-265
-- **Implemented:** BPM clamp
-- **Source:** Phase H-0 > Batch A
+#### **LDT-204: Input monitoring per-track Software Monitor toggle**
+- **Sources:** LDT-204
+- **Implemented:** Default OFF
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-266: A.5 Playhead's setIsRecording PositionInfo flag honors real recorder state**
-- **Sources:** FSW-266
-- **Implemented:** Was hardcoded false
-- **Source:** Phase H-0 > Batch A
+#### **LDT-205: ASIO setup full ASIO dialog**
+- **Sources:** LDT-205
+- **Implemented:** juce::AudioDeviceSelectorComponent
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-267: A.6 Bus solo wired on 6 buses (Clips/Vox/Inst/Vox2/Inst2/Inst3)**
-- **Sources:** FSW-267
-- **Implemented:** Was completely dead
-- **Source:** Phase H-0 > Batch A
+#### **LDT-206: Metronome accent on beat 1**
+- **Sources:** LDT-206
+- **Implemented:** Sound selection menu, volume control, count-in
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-268: A.7 SongLoop + Metronome button visual sync via callbacks**
-- **Sources:** FSW-268
-- **Implemented:** Project load no longer leaves buttons lying about state
-- **Source:** Phase H-0 > Batch A
+#### **LDT-207: Main tabs permanent**
+- **Sources:** LDT-207
+- **Implemented:** Mixer/Effects/Builder/Layers/Bass/Drums + dropdowns
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-269: Batch B moderate (6 items + 1 sub-fix)**
-- **Sources:** FSW-269
-- **Implemented:** Moderate fixes bundle
-- **Source:** Phase H-0 > Batch B
+#### **LDT-208: Mixer track auto-create**
+- **Sources:** LDT-208
+- **Implemented:** Add Layers/Bass page = mixer track; Drums on-demand
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-270: B.1 C14 Harmless LFO sliders restored**
-- **Sources:** FSW-270
-- **Implemented:** 3 APVTS params + DSP routing + 2-row layout
-- **Source:** Phase H-0 > Batch B
+#### **LDT-209: Mixer track grouping**
+- **Sources:** LDT-209
+- **Implemented:** Master | Buses | Layer 1-8 | Bass 1-4 | Drum Ch 1-14 | Audio Track 1+; references 14-channel drums (now 16 per Phase D)
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-271: B.2 Clips/Vox/Inst tab persistence in serializeUIState/deserialize**
-- **Sources:** FSW-271
-- **Implemented:** Mirrors Layer/Bass/Drum pattern
-- **Source:** Phase H-0 > Batch B
+#### **LDT-210: Mixer bus strips visible**
+- **Sources:** LDT-210
+- **Implemented:** Faders, meters, controls
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-272: B.3 30Hz bus latency fix**
-- **Sources:** FSW-272
-- **Implemented:** Layers/Bass/Drums + Master + ClipsBus read direct from APVTS each block
-- **Source:** Phase H-0 > Batch B
+#### **LDT-211: Mixer track count 100 max**
+- **Sources:** LDT-211
+- **Implemented:** Lazy load, horizontal scroll
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-273: B.4 Piano roll panning + pitch bend MIDI emit**
-- **Sources:** FSW-273
-- **Implemented:** Per-note panning to CC10, finePitch to PitchWheel; emitPianoNoteOn helper
-- **Source:** Phase H-0 > Batch B
+#### **LDT-212: FX Master Switch per-track + global**
+- **Sources:** LDT-212
+- **Implemented:** Master strip global FX on/off
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-274: B.5 resolveAutomationDisplayName covers 7 missing prefix groups**
-- **Sources:** FSW-274
-- **Implemented:** Vox/Inst Bus + secondary buses + inserts
-- **Source:** Phase H-0 > Batch B
+#### **LDT-213: Keyboard shortcuts focus-based routing**
+- **Sources:** LDT-213
+- **Implemented:** Global shortcuts work everywhere
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-275: B.6 Choke groups expansion to Vox/Inst MIDI buffers**
-- **Sources:** FSW-275
-- **Implemented:** Was Layer/Bass/Drum only
-- **Source:** Phase H-0 > Batch B
+#### **LDT-214: APVTS naming convention**
+- **Sources:** LDT-214
+- **Implemented:** tk_{trackID}_{engine}_{param} for tracks; bus_fx_{slot}_{param}
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-276: Batch C architectural (partial)**
-- **Sources:** FSW-276
-- **Implemented:** Partial
-- **Source:** Phase H-0 > Batch C
+#### **LDT-215: APVTS lazy registration**
+- **Sources:** LDT-215
+- **Implemented:** Params registered when page/track created
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-277: C.1 C8 FX Bus dead - wire EffectsBusNode::processBlock**
-- **Sources:** FSW-277
-- **Implemented:** Aux strips default-route there silent loss
-- **Source:** Phase H-0 > Batch C
+#### **LDT-216: APVTS param table**
+- **Sources:** LDT-216
+- **Implemented:** Per-effect param table when automation implemented (Phase 4)
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-278: C.2 C13 slot automation paramIds - needs spec call**
-- **Sources:** FSW-278
-- **Implemented:** UUID-per-slot vs effect-type-keyed vs defer
-- **Source:** Phase H-0 > Batch C
+#### **LDT-217: Harmless automation macro only**
+- **Sources:** LDT-217
+- **Implemented:** ~30-50 APVTS params per instance
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-279: C.3 C1-C4 MIDI subsystem - partially shipped**
-- **Sources:** FSW-279
-- **Implemented:** Remaining: CC/pitch-bend to APVTS dispatch (delivered by I-3b)
-- **Source:** Phase H-0 > Batch C
+#### **LDT-218: All other engine params APVTS-registered**
+- **Sources:** LDT-218
+- **Implemented:** VibePlayer, BaySickSynth, BaySickBass, Drums vol/pitch/pan
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-280: C.4 Compressor sidechain wiring (Phase 1 + 2.1 + 2.2)**
-- **Sources:** FSW-280
-- **Implemented:** Per-strip Send/Sidechain submenu + audio-thread routing + 5 player engines
-- **Source:** Phase H-0 > Batch C
+#### **LDT-220: Standalone only**
+- **Sources:** LDT-220
+- **Implemented:** VibeDAW will never be a VST itself
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-281: C.5 Time signature honor (FL-style per-pattern TS)**
-- **Sources:** FSW-281
-- **Implemented:** Pattern.timeSig field + auto-derive on placement + per-pattern TS
-- **Source:** Phase H-0 > Batch C
+#### **LDT-221: Undo history size user-configurable**
+- **Sources:** LDT-221
+- **Implemented:** 100/250/500/1000 steps default 250
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-282: Batch D Tier 3 mop-up (4 items)**
-- **Sources:** FSW-282
-- **Implemented:** Mop-up bundle
-- **Source:** Phase H-0 > Batch D
+#### **LDT-222: Audio import File>Import + drag-and-drop**
+- **Sources:** LDT-222
+- **Implemented:** .wav .mp3
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-283: D.1 EffectRack loadEffect preserves bypassed flag**
-- **Sources:** FSW-283
-- **Implemented:** No longer reset on hot-swap
-- **Source:** Phase H-0 > Batch D
+#### **LDT-223: Autosave every 15 minutes**
+- **Sources:** LDT-223
+- **Implemented:** Temp file
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-284: D.2 EffectRackAction undo snapshot expanded (full SlotSnapshot)**
-- **Sources:** FSW-284
-- **Implemented:** Move/Load/Remove preserves knob values
-- **Source:** Phase H-0 > Batch D
+#### **LDT-225: Ghost clip drag**
+- **Sources:** LDT-225
+- **Implemented:** Semi-transparent preview
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-285: D.3 Mixer strip insertion order persistence**
-- **Sources:** FSW-285
-- **Implemented:** mAuxOrder/mAudioRowOrder/mVoxOrder/mInstOrder
-- **Source:** Phase H-0 > Batch D
+#### **LDT-226: Automation full APVTS**
+- **Sources:** LDT-226
+- **Implemented:** Per-effect named params; VibeDAW Event Editor
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-286: D.4 16 DSP-features-without-UI-knob surfaced as UI knobs (6 sub-batches)**
-- **Sources:** FSW-286
-- **Implemented:** Bundle
-- **Source:** Phase H-0 > Batch D
+#### **LDT-227: LAF per context**
+- **Sources:** LDT-227
+- **Implemented:** Separate LookAndFeel class per engine/effect category
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-287: D.4-Q1+Q2 Harmless filter layout restructure**
-- **Sources:** FSW-287
-- **Implemented:** Filter 2 row + ADSR boxes + AutoGain to Output cell + timbre 2x2 stack
-- **Source:** Phase H-0 > Batch D > D.4
+#### **LDT-228: Lever switch for 2-position toggles**
+- **Sources:** LDT-228
+- **Implemented:** Effects panels and player engines only
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-288: D.4-Q3 BaySickPlayer Filter box (cutoff/res/reduct knobs)**
-- **Sources:** FSW-288
-- **Implemented:** 7th box bottom row
-- **Source:** Phase H-0 > Batch D > D.4
+#### **LDT-229: Global bloom on neon elements**
+- **Sources:** LDT-229
+- **Implemented:** Double-draw bloom glow
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-289: D.4-Q4 Compressor knee width knob**
-- **Sources:** FSW-289
-- **Implemented:** Ratio<->Gain
-- **Source:** Phase H-0 > Batch D > D.4
+#### **LDT-230: Shared hardware elements**
+- **Sources:** LDT-230
+- **Implemented:** JewelIndicator, Chicken Head, Hex-bolt, Lever switch
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-290: D.4-Q5 Delay LoFiSR / ModTime / Smooth knobs + DSP placement fix**
-- **Sources:** FSW-290
-- **Implemented:** Lo-fi moved from feedback path to delay-line read
-- **Source:** Phase H-0 > Batch D > D.4
+#### **LDT-232: Texture caching**
+- **Sources:** LDT-232
+- **Implemented:** TextureUtils namespace; cached juce::Image
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-291: D.4-Q6 EQ8 main level fader + 3 hamburger menu items**
-- **Sources:** FSW-291
-- **Implemented:** Linear Phase Precision / IIR Mod Speed / Proportional Q
-- **Source:** Phase H-0 > Batch D > D.4
+#### **LDT-233: Lock-free audio->UI EQSpectrumFeed**
+- **Sources:** LDT-233
+- **Implemented:** Proper lock-free FIFO
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-292: Batch E Tier 4 polish (verified completed)**
-- **Sources:** FSW-292
-- **Implemented:** Bundle
-- **Source:** Phase H-0 > Batch E
+#### **LDT-234: CPU safeguarding**
+- **Sources:** LDT-234
+- **Implemented:** Every DSP update guards setters
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-293: Compressor manual-knee**
-- **Sources:** FSW-293
-- **Implemented:** Via D.4-Q4
-- **Source:** Phase H-0 > Batch E (already done)
+#### **LDT-235: Sample rate changes**
+- **Sources:** LDT-235
+- **Implemented:** suspend audio -> prepare -> resume
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-294: Delay smoothing**
-- **Sources:** FSW-294
-- **Implemented:** Via D.4-Q5
-- **Source:** Phase H-0 > Batch E (already done)
+#### **LDT-236: Meter components**
+- **Sources:** LDT-236
+- **Implemented:** DBFSMeter + VUMeter
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-295: EQ8 IIRModSpeed**
-- **Sources:** FSW-295
-- **Implemented:** Via D.4-Q6
-- **Source:** Phase H-0 > Batch E (already done)
+#### **LDT-237: Meter assignments**
+- **Sources:** LDT-237
+- **Implemented:** VU + DBFS for Dynamics/Harmonics; DBFS only for Time/Modulation
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-296: EQ8 ProportionalQ**
-- **Sources:** FSW-296
-- **Implemented:** Via D.4-Q6
-- **Source:** Phase H-0 > Batch E (already done)
+#### **LDT-238: VU calibration -18 dBFS = 0 VU default**
+- **Sources:** LDT-238
+- **Implemented:** Configurable -18 to -14 via Effects Page
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-297: BPM out-of-range silent snap**
-- **Sources:** FSW-297
-- **Implemented:** Via A.4
-- **Source:** Phase H-0 > Batch E (already done)
+#### **LDT-239: EQ band colors**
+- **Sources:** LDT-239
+- **Implemented:** violet->yellow/gold->cyan gradient via kBandCols[8]
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-298: info.setIsRecording honored**
-- **Sources:** FSW-298
-- **Implemented:** Via A.5
-- **Source:** Phase H-0 > Batch E (already done)
+#### **LDT-240: Note colors**
+- **Sources:** LDT-240
+- **Implemented:** Drums Red; Layers 8 oranges; Bass 4 greens
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-299: Flanger Dry/Wet dB levels (redundant with mix knob)**
-- **Sources:** FSW-299
-- **Implemented:** No work needed; defaults unity
-- **Source:** Phase H-0 > Batch E (deliberate)
+#### **LDT-241: Effects Bus position POST-master**
+- **Sources:** LDT-241
+- **Implemented:** Layer+Bass+Drums -> Master rack -> +Effects Bus -> Output
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-300: EQ8 per-band Upward (preset stability scaffolding)**
-- **Sources:** FSW-300
-- **Implemented:** No work needed
-- **Source:** Phase H-0 > Batch E (deliberate)
+#### **LDT-242: Time-stretching Rubber Band Library**
+- **Sources:** LDT-242
+- **Implemented:** BSD; libs/rubberband/ vendored; subsequently replaced by custom PhaseVocoder
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-301: EQ8 per-band ScSource (was wrongly tagged placeholder; actually fully wired in C.4 Phase 1)**
-- **Sources:** FSW-301
-- **Implemented:** UI per-band SC source dropdown live
-- **Source:** Phase H-0 > Batch E
+#### **LDT-243: PDC full automatic graph-wide**
+- **Sources:** LDT-243
+- **Implemented:** Each DSP reports latency
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-302: Tape OutputGain (intentionally removed; slot fader replaces)**
-- **Sources:** FSW-302
-- **Implemented:** No work needed
-- **Source:** Phase H-0 > Batch E (deliberate)
+#### **LDT-244: Preset system FILE menu**
+- **Sources:** LDT-244
+- **Implemented:** Save as Template / New from Template
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-304: Harmless OCT/Hz pitch toggles wired**
-- **Sources:** FSW-304
-- **Implemented:** OCT snaps drag to +-12 semis; default semitones with sign
-- **Source:** Phase H-0 > Batch E (newly shipped)
+#### **LDT-245: Menu systems on Mixer/Builder/Effects/Piano Roll/Engines**
+- **Sources:** LDT-245
+- **Implemented:** Standard menu bar locations
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-305: Piano Roll FilterCutoff lane**
-- **Sources:** FSW-305
-- **Implemented:** Added Filter Cutoff to control-lane dropdown + CC74 dispatch
-- **Source:** Phase H-0 > Batch E (newly shipped)
+#### **LDT-246: Piano Roll menus standard**
+- **Sources:** LDT-246
+- **Implemented:** Edit, Tools, Scale, Chords, View
+- **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-306: Stale automation lane warnings**
-- **Sources:** FSW-306
-- **Implemented:** [stale] red-prefixed rows in EventEditor
-- **Source:** Phase H-0 > Batch E (newly shipped)
+#### **LDT-352: Browser Panel collapsible**
+- **Sources:** LDT-224|LDT-352
+- **Implemented:** Project Browser; patterns + automation targets | 3 filter buttons
+- **Source:** Locked Design Decisions | Phase 4 > 4B
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-307: Missing audio clip warnings**
-- **Sources:** FSW-307
-- **Implemented:** Builder grid renders red instead of teal
-- **Source:** Phase H-0 > Batch E (newly shipped)
-- **Verified:** 2026-05-08 (Phase-4 source verification)
+### Standing Parallel Work
 
-#### **FSW-308: Piano Roll dual automation timing path**
-- **Sources:** FSW-308
-- **Implemented:** UI 30Hz applicator skips APVTS-backed paramIds
-- **Source:** Phase H-0 > Batch E (newly shipped)
+#### **FSW-324: §1 to §6 + §8 retrospectives shipped (Chorus/Compressor/Delay/Flanger/Limiter/Overdrive/Reverb)**
+- **Sources:** FSW-324
+- **Implemented:** Quality pass partial
+- **Source:** Standing parallel work > Phase 5F-9 DSP Quality Pass
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-309: EffectRack mRackBypassed dual-storage smell removed**
-- **Sources:** FSW-309
-- **Implemented:** APVTS _bypass is sole source of truth
-- **Source:** Phase H-0 > Batch E (newly shipped)
+#### **FSW-331: Legacy juce_add_plugin CMake target removal**
+- **Sources:** FSW-331
+- **Implemented:** Still at CMakeLists.txt:174
+- **Source:** Standing parallel work > Smaller open items
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-310: _arm zombie param - registration gated to mixer_vox_*/mixer_inst_* prefix only**
-- **Sources:** FSW-310
-- **Implemented:** Was registered on every Insert kind
-- **Source:** Phase H-0 > Batch E (newly shipped)
+#### **FSW-332: 5F-5 ambiguous Event Editor items**
+- **Sources:** FSW-332
+- **Implemented:** Deferred
+- **Source:** Standing parallel work > Smaller open items
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-311: Dead audioRowLevel local removed from PluginProcessor.cpp**
-- **Sources:** FSW-311
-- **Implemented:** Cleanup
-- **Source:** Phase H-0 > Batch E (newly shipped)
+#### **FSW-333: 5F-6 ambiguous Piano Roll items**
+- **Sources:** FSW-333
+- **Implemented:** Deferred
+- **Source:** Standing parallel work > Smaller open items
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-312: EffectsPage getChannelPrefix() rewritten**
-- **Sources:** FSW-312
-- **Implemented:** Now handles every channel category
-- **Source:** Phase H-0 > Batch E (newly shipped)
+#### **FSW-335: Orfanidis analytical anti-cramping for EQ**
+- **Sources:** FSW-335
+- **Implemented:** Deferred
+- **Source:** Standing parallel work > Smaller open items
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-313: BaySickSynth voice octave-sweep literals to named constexpr**
-- **Sources:** FSW-313
-- **Implemented:** Self-documenting code
-- **Source:** Phase H-0 > Batch E (newly shipped)
+#### **FSW-337: Internal cleanup: rip unused voxRoll/instRoll/kVoxPRTarget/kInstPRTarget/voxPageMidi/instPageMidi**
+- **Sources:** FSW-337
+- **Implemented:** Dead since piano-roll removal from Vox/Inst; We are leaving this alone in case I add synth vocals and inst already uses the piano roll now
+- **Source:** Standing parallel work > Smaller open items
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 ### Sessions / Working Rules / Open Issues
