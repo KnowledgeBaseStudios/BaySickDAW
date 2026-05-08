@@ -27,8 +27,7 @@
 #include "Engine/Tasks/EngineInsertTask.h"   // Batch 3: Layer/Bass/Drum task wrappers
 #include "Engine/Tasks/VoxStripTask.h"       // Batch 4: Vox live-input strip wrapper
 #include "Engine/Tasks/InstStripTask.h"      // Batch 4: Inst source-mode-aware wrapper
-#include "Engine/Tasks/ClipPageTask.h"       // Batch 5: Clip page (sample trigger) wrapper
-#include "Engine/Tasks/AudioInsertTask.h"    // Batch 5: per-row audio clip wrapper
+#include "Engine/Tasks/CompositeAudioInsertTask.h"  // QA-0 (2026-05-07): per-row composite (replaces ClipPageTask + AudioInsertTask)
 #include "Engine/Tasks/RustyDrumsProducerTask.h"   // Batch 6: drives processStrips
 #include "Engine/Tasks/RustyInsertTask.h"          // Batch 6: per-strip insert wrapper
 #include "Engine/Tasks/PassiveStripTask.h"         // Batch 7: aux + bus accumulator strips
@@ -48,8 +47,8 @@ class VibeSynthProcessor : public juce::AudioProcessor,
     // public API with accessors used only by the engine layer.
     friend class VoxStripTask;
     friend class InstStripTask;
-    friend class ClipPageTask;            // Batch 5
-    friend class AudioInsertTask;         // Batch 5
+    friend class ClipPageTask;            // Batch 5 -- removed in QA-0 Task 4
+    friend class AudioInsertTask;         // Batch 5 -- removed in QA-0 Task 4
     friend class CompositeAudioInsertTask; // QA-0 (2026-05-07)
     friend class RustyDrumsProducerTask;  // Batch 6
     friend class RustyInsertTask;         // Batch 6
@@ -1088,8 +1087,11 @@ private:
     std::array<std::unique_ptr<InstStripTask>, kMaxInstPages> mInstRenderTasks;
 
     // Batch 5 (2026-05-06): Clip page + Audio insert task wrappers.
-    std::array<std::unique_ptr<ClipPageTask>,    kMaxClipPages> mClipRenderTasks;
-    std::array<std::unique_ptr<AudioInsertTask>, kMaxAudioRows> mAudioRenderTasks;
+    // QA-0 (2026-05-07): per-row composite owns BOTH arrangement-clip
+    // decode + clip-engine MIDI trigger.  mClipRenderTasks is gone --
+    // registerClipEngine sets the composite's mClipEngine field on
+    // mAudioRenderTasks[pageIdx] instead of registering a separate task.
+    std::array<std::unique_ptr<CompositeAudioInsertTask>, kMaxAudioRows> mAudioRenderTasks;
 
     // Batch 6 (2026-05-06): BaySickRustyDrums producer + per-strip inserts.
     // Producer owned per-engine (only one engine instance ever exists).

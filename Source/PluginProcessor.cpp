@@ -4216,39 +4216,33 @@ void VibeSynthProcessor::registerClipEngine(int pageIdx, juce::AudioProcessor* e
         juce::SpinLock::ScopedLockType lk(mClipEngineLock);
         mClipEngines[pageIdx] = eng;
     }
-    // The Audio InsertNode for this row was already created when the clip
-    // was first dropped on Builder (onAudioClipAdded → ensureAudioInsert),
-    // so we don't need to create one here.  Just flip the fast-path flag.
     bool any = false;
     for (auto* e : mClipEngines) if (e) { any = true; break; }
     mAnyClipPageActive.store(any, std::memory_order_release);
 
-    // Batch 5 (2026-05-06): MT render task wrapper.
-    if (eng != nullptr)
-    {
-        auto task = std::make_unique<ClipPageTask>(
-            eng, pageIdx, MixerChannelIds::audioInsert(pageIdx),
-            mVibeGraph, *this);
-        mRenderDispatcher.registerTask(task.get());
-        mClipRenderTasks[(size_t) pageIdx] = std::move(task);
-    }
+    // QA-0 (2026-05-07): Strategy 1a -- set the Composite's clip-engine
+    // pointer on the existing per-row task instead of registering a
+    // separate task at the same channel id (which used to lose to
+    // most-recent-wins under MT and silence one of the two flows).
+    //
+    // Defensive: ensure the per-row Composite exists.  ensureAudioInsert
+    // is idempotent and creates it if no Builder drop has happened on
+    // this row yet (e.g. project-restore that walks Clips tabs before
+    // restoreAudioStripsFromArrangement runs).
+    ensureAudioInsert (pageIdx, "Audio " + juce::String (pageIdx + 1));
+    if (auto& task = mAudioRenderTasks[(size_t) pageIdx])
+        task->setClipEngine (eng);
 }
 
 void VibeSynthProcessor::unregisterClipEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxClipPages) return;
 
-    if (mClipRenderTasks[(size_t) pageIdx])
-    {
-        // Note: AudioInsertTask may also be registered at the same channelId
-        // (audioInsert(pageIdx)).  We only unregister the ClipPageTask here;
-        // the AudioInsertTask remains.  The dispatcher's mTasksByChannel slot
-        // is overwritten on registerTask, so currently the most recent
-        // registration wins.  Tracked in deferred notes - Batch 9 needs to
-        // resolve clip vs audio insert task ownership at the same id.
-        mRenderDispatcher.unregisterTask(MixerChannelIds::audioInsert(pageIdx));
-        mClipRenderTasks[(size_t) pageIdx].reset();
-    }
+    // QA-0 (2026-05-07): Strategy 1a -- clear the Composite's clip-engine
+    // pointer; the per-row Composite stays alive (it still owns the
+    // arrangement-clip flow).
+    if (auto& task = mAudioRenderTasks[(size_t) pageIdx])
+        task->setClipEngine (nullptr);
 
     {
         juce::SpinLock::ScopedLockType lk(mClipEngineLock);
@@ -4573,8 +4567,8 @@ void VibeSynthProcessor::ensureAudioInsert(int row, const juce::String& displayN
     // for the project lifetime; the unique_ptr cleans up on plugin destroy.
     if (! mAudioRenderTasks[(size_t) row])
     {
-        auto task = std::make_unique<AudioInsertTask>(
-            row, MixerChannelIds::audioInsert(row), *this);
+        auto task = std::make_unique<CompositeAudioInsertTask>(
+            row, MixerChannelIds::audioInsert(row), mVibeGraph, *this);
         mRenderDispatcher.registerTask(task.get());
         mAudioRenderTasks[(size_t) row] = std::move(task);
     }
