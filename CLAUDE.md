@@ -21,7 +21,7 @@ routed at batch close.
 JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone Windows app only** — no VST/plugin version planned; a legacy `juce_add_plugin` target still exists in CMake but is not shipped. Future platform plan: tablet "DJ Party" variant, still not a VST.
 **App name:** BaySickDAW by KnowledgeBase Studios
 **Target audience:** people who have never made music before.
-**User-facing engine names:** Harmless, BaySickPlayer (sample player — internal source is still `VibePlayer*`; class / file renames deferred), BaySickSynth, BaySickBass, BaySickDrums.
+**User-facing engine names:** Harmless, BaySickPlayer (sample player — internal source is still `VibePlayer*`; class / file renames deferred), BaySickSynth, BaySickBass. Drums are now per-tab engine instances (Phase D dynamic-drum architecture, 2026-04-25) — each Drums tab owns one BaySickPlayer or BaySickSynth instance; the legacy monolithic `BaySickDrums` engine was deleted.
 
 **Owner:** Jeff — professional FL Studio user. Technically capable. **Jeff runs builds himself** — never try to run do_build.bat in bash (MSVC env not available). Just tell him to run it.
 
@@ -37,7 +37,7 @@ JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone
 - **Header dependencies:** handled automatically by MSBuild. No manual `.obj` deletion after header edits - just re-run `do_build.bat`.
 - **Standing rule (verifying Claude fixes):** run the Debug exe FIRST. Any `jassert` that fires shows a Windows dialog with file path + line + condition - screenshot to share. Then re-run in Release as the actual user test. Debug runs slower; audio that glitches in Debug under heavy load may be fine in Release. Always confirm in Release before declaring a real performance regression.
 - **Don't run both simultaneously.** ASIO opens audio devices exclusively (second instance gets no audio). Both exes share `Documents\BaySickDAW\settings.xml` + `audio_settings.xml` - changes in one are seen by the other on next start.
-- **MT engine in Debug:** the multi-threaded render path is a no-op under Debug (real Debug-only bug, deferred to dedicated batch). DSP meter readings in Debug always reflect single-thread cost. Use Release for any MT vs serial verification.
+- **MT engine in Debug:** the multi-threaded render path is a no-op under Debug (real Debug-only bug; investigation owned by **QA-Md** in `Plans & Specs/Main Plan.md` §5). DSP meter readings in Debug always reflect single-thread cost. Use Release for any MT vs serial verification.
 
 ---
 
@@ -289,37 +289,17 @@ Restructured the entire drum subsystem.  Each drum tab is now a fully independen
 
 **Legacy DELETED (April 25)**: `Source/DrumSynth.h/.cpp`, `Source/Standalone/DrumsPage.h/.cpp`, `Source/BaySickDrums/BaySickDrumsProcessor.h/.cpp`, `Source/BaySickDrums/BaySickDrumsEditor.h/.cpp`, `Source/BaySickDrums/BaySickDrumsLAF.h`.  Plus all PluginProcessor / VibeGraph / StandaloneEditor / CMakeLists references stripped.  Old "Drums" type tabs in saved projects silently skip on load (notes already migrated to `drumRolls[slot]` by D1.1 path).
 
-**OPEN BUG carried into next session**: BaySickSynth-based drum playback produces a wider stereo "woofy" sound that sounds different from audition (which is correct mono kick).  Same engine instance, same MIDI noteOn, same insert chain — different output.  Voice stacking ruled out (mono mode no change), velocity ruled out (audition vel 100 vs playback vel 101 imperceptible), DrumSynth removal didn't fix it, EQ identity-skip confirmed (no doubling), legacy code paths confirmed gone.  Reducing outVol made wide+woofy MORE pronounced relative to kick → suggests separate signal source riding the drum strip downstream of engine gain.  Need fresh debugging session.
-
 ## Next Steps
 
-**Current position (2026-04-25):** Phase D dynamic-drum architecture mostly shipped (D1.1-D1.4 + fix(a/b/c) + legacy sweep).  Open bug carried: drum playback wide+woofy from BaySickSynth-based drums.  Main pending sub-batches:
-- **D1.5 — Per-drum MIDI input note + UI** (per-drum `mInputNote` field for pad-controller mapping; populates the MIDI Map ▸ submenu placeholder in the per-drum context menu)
-- **D2 — Drum Kit tab (4 batches)** — beginner-friendly composited grid view + kit picker as first sub-tab on each DrumPage
-- **D3 — Global choke groups (4 batches)** — cross-engine choke bus across Layers + Bass + Drums + Audio inserts; populates Choke Group ▸ submenus in all per-page context menus
-- **Save Patch As editor knob** — visible knob for the BaySickSynth/Bass `outVol` param so users can tune per-engine output level
-- **Layers/Bass: Load Preset submenu** — Save works but no in-app reload yet for Layer/Bass presets
-- **Mixer page review backlog** — see deferred section in blueprint
+**Current position (2026-05-08):** Post-Batch-10 QA cycle is the active program. Sequencing, scope, and per-batch routing are all owned by the new docs in `Plans & Specs/` — read those FIRST for any planning question (per the directive at the top of this file). Quick orientation:
 
-Beyond the drum work:
-- **5F-9 DSP Quality Pass** still has §12 EQ8 Phase 2/3 pending
-- Phases 5A–5E (presets, templates, export), 5G Q&A, and Phase 6 (docs, installer)
+- **Active phase:** Phase 1 of `Plans & Specs/Main Plan.md` after QA-0/QA-0a/QA-Inventory close. Next batch: **QA-Md** (MT Engine Debug-Build Investigation).
+- **Full sequence + scope:** `Plans & Specs/Main Plan.md` §5 (per-batch entries) and §6 (sequencing arrow).
+- **What's already shipped:** `Plans & Specs/Previously Implemented.md` (1089 entries, source-verified 2026-05-08) and `Plans & Specs/Implemented Work Log.md` (post-QA-0 work).
+- **What's deferred / dropped / post-v1.0:** `Plans & Specs/Future State.md`.
+- **Per-batch plan files:** `Plans & Specs/Batch Plans/<silly-name>.md` when a batch starts.
 
-### Deferred
-- Pre-fader sends in routing (audio path treats all sends as post-fader)
-- Ambiguous 5F-5 Event Editor spec items (LED "ON" toggle, RANGE numeric box, Link icon, 5-of-6 target-link icons)
-- Ambiguous 5F-6 Piano Roll spec items (draggable lane divider, speaker-icon toolbar transport, window controls)
-- LRX-8 GLSL Shader realism pass — post-v1.0
-- Orfanidis analytical anti-cramping for EQ — potential future (replaces §12f oversampling path in 5F-9)
-
-### §P3-CORE Cross-Apply Phase — scheduled POST-§P4 (do not start until DrumsPage ships)
-After §P4 DrumsPage closes, run the scheduled cross-apply phase spec'd in `Files For Claude/vibedaw_blueprint.md` → `Cross-cutting / Architecture` → `§P3-CORE Cross-Apply to other engines + effects`. 4-round plan:
-- **Round 1 (biggest wins):** port Transient Injector (P3.5) + Analog Drift (P3.10) to Harmless + BaySickPlayer
-- **Round 2:** port Pitch Envelope (P3.1) to BaySickPlayer
-- **Round 3:** integrate Drift into Tape + Delay effects; optional Pink/Brown noise-floor into Saturation/Tape/Overdrive
-- **Round 4:** new effect modules (Ring Mod, Gate/Rhythmic Tremolo, Transient Injector effect)
-
-Est Rounds 1-3 ~5-8 sessions; Round 4 separate phase. Trigger: §P4 DrumsPage sub-items (P4.1-P4.4) must all be shipped first. Full engine-by-engine matrix and effect-integration table in the blueprint subsection.
+Pre-QA reference docs (`Files For Claude/Final Stretch Work.txt`, `Files For Claude/vibedaw_blueprint.md`, `C:/Users/jeffm/.claude/plans/lucky-discovering-tiger.md`) are now historical — every still-needed item from those docs has been triaged and routed (see `Plans & Specs/Main Plan.md` §9 fifth Forks entry, dated 2026-05-08).
 
 ---
 
