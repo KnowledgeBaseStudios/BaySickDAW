@@ -49,6 +49,23 @@ Same goes for any agent that touches Plans & Specs/. Past blast-radius
 incidents (the 6-of-10 buckets mistake on 2026-05-08) confirm this is
 the right boundary.
 
+**Orchestration rules** — when to dispatch which agent — live in
+`Plans & Specs/Main Plan.md` §0 "Agent Orchestration Rules" (locked
+2026-05-08).  Every BaySickDAW session reads those rules at start.
+Highlights:
+
+- **Session open** → `/standup`
+- **Mid-batch checkpoint** → `/draft-doc running-notes`
+- **Build failure** → `/diagnose-build`
+- **Concept blocker** → `/explain <concept>`
+- **Pre-commit** → `/draft-commit`
+- **Batch close (mandatory)** → `/draft-doc batch-close` → `/review-batch` → apply draft → commit
+- **Pre-release** → `/audit-licenses`
+- **Pre-milestone** → `/research [focus]` (one-shot per focus)
+
+Anti-rules + the full table live in Main Plan §0.  When in doubt, ask
+the user before dispatching.
+
 ---
 
 ## Project Overview

@@ -237,6 +237,122 @@ what's deferred — all in one consistent place.
   Dropped) stays separate from this domain layout — drops stay grouped
   by drop-reason, not by domain.
 
+### Agent Orchestration Rules (canonical for all sessions, locked 2026-05-08)
+
+The project has a tiered subagent system at `~/.claude/agents/` (cross-
+project), `<repo>/.claude/agents/` (project-specific) plus matching
+slash commands.  Subagents are **manually dispatched** — there is no
+event system that auto-fires them.  These rules tell future sessions
+WHEN to dispatch which agent so the value gets captured without
+relying on the user to remember every slash command at every moment.
+
+**Cross-doc rule:** every BaySickDAW session reads these orchestration
+rules at start (alongside §0's Document Formatting Conventions and
+the canonical bucket list).  Future sessions in the CotBB game repo
+mirror the equivalents from that project's CLAUDE.md.
+
+#### Slash command + agent reference table
+
+| Scope | Slash command | Agent name |
+|-------|---------------|------------|
+| Global | `/draft-commit` | `commit-drafter` |
+| Global | `/diagnose-build` | `build-error-diagnoser` |
+| Global | `/explain` | `concept-explainer` |
+| Global | `/standup` | `standup-summarizer` |
+| Global | `/extract-spec` | `spec-extractor` |
+| Global | `/audit-licenses` | `license-auditor` |
+| BaySickDAW | `/read-doc` | `doc-reader` |
+| BaySickDAW | `/draft-doc` | `doc-drafter` |
+| BaySickDAW | `/review-batch` | `batch-code-reviewer` |
+| BaySickDAW | `/test-signal` | `dsp-test-signal` |
+| BaySickDAW | `/preset-gaps` | `preset-coverage-mapper` |
+| BaySickDAW | `/research` | `competitive-research` |
+| CotBB | `/write-scene` | `scene-script-writer` |
+| CotBB | `/build-dialog` | `dialog-tree-builder` |
+| CotBB | `/level-checklist` | `level-design-checklist` |
+| CotBB | `/validate-naming` | `asset-naming-validator` |
+
+#### Session lifecycle
+
+- **Session open** → `/standup`.  Brings the session up to speed on git
+  state + recent batch closes + uncommitted work + plan position
+  before any other work begins.
+- **Resume after compaction or context break** → `/standup` again.
+  Treat it as a context refresh, not just a daily ritual.
+
+#### Batch lifecycle
+
+- **Batch start** — read the batch's plan file, then dispatch
+  `/standup` with focus on the batch ID so any in-flight context from
+  prior sessions is surfaced.
+- **Mid-batch checkpoint** (after each significant chunk: a major file
+  change committed, a sub-task verified, a finding captured) →
+  `/draft-doc running-notes`.  Mode: append.  This is the
+  context-preservation mechanism — capture before context fills up,
+  not after.
+- **Build failure** (any `do_build.bat` non-zero exit) →
+  `/diagnose-build` with the failing block from `build_log.txt`.
+  Diagnose before retrying.
+- **Concept blocker** (you hit an unfamiliar idea) → `/explain
+  <concept>`.  Don't bluff or web-search inline; route to the agent.
+- **Pre-commit** → `/draft-commit`.  Show the user the proposed
+  message; commit only after explicit approval.
+- **Batch close (mandatory sequence):**
+  1. `/draft-doc batch-close` — compile the Implemented Work Log
+     entry from running notes.
+  2. `/review-batch <id>` — diff vs plan + rules + memory-tracked
+     gotchas.  Address BLOCKERS before proceeding.
+  3. Apply the doc draft via Edit (parent session, not the agent).
+  4. Commit the close (separate commit from the batch's source
+     commits — clean rollback boundary).
+
+#### Domain-specific triggers
+
+- **New DSP module added or upgraded** → `/test-signal <module>` once
+  wiring is complete.  Run before declaring the module shippable.
+- **New mixer-strip type** → cross-check against memory
+  `reference_mixer_strip_pattern_audit.md` BEFORE the implementation
+  diff lands; the audit checklist catches the ~15 sites a new strip
+  type touches.
+- **Pre-release sweep** (before tagging V1) → `/audit-licenses`.
+  Vendored libs, plugin licenses, asset attribution, EULA scope.
+- **Pre-QA-Templates batch** → `/preset-gaps`.  Gap analysis informs
+  what factory presets the QA-Templates batch should add.
+- **Pre-milestone (V1, V2)** → `/research [focus area]` one-shot per
+  focus area.  Don't run weekly — public info skews to marketing puff
+  and the value comes from milestone-spaced sweeps, not continuous
+  scanning.
+- **Long planning / triage discussion just wrapped** → `/extract-spec`
+  to capture decisions before they get lost across compactions.
+
+#### Anti-rules (when NOT to dispatch)
+
+- **Trivial 1-line edits, 2-file commits** — agent overhead exceeds
+  value.  Just do the work inline.
+- **Read-only lookups you already know** — don't dispatch `/read-doc`
+  for a section you've just read in the same session.
+- **Speculative "let me just check" runs** — no.  Only run on a real
+  trigger from the rules above.
+- **Building drafts NOT requested by the user** — `/draft-doc`
+  produces text the parent session reviews and applies.  Drafting
+  ahead of need wastes tokens.
+
+#### Drafter-only enforcement
+
+`/draft-doc`, `/research`, and any agent that produces content destined
+for `Plans & Specs/` operates in **drafter-only mode**: returns text
+in code blocks; the parent session reviews and applies via Edit.  No
+agent autonomously writes to `Plans & Specs/` files.  This boundary
+exists because of the 2026-05-08 6-of-10 buckets blast-radius incident
+(see `feedback_canonical_structure_no_eliding.md` in user memory).
+
+#### When in doubt
+
+If a situation isn't covered by a rule above, ask the user before
+dispatching an agent.  Pattern: "I think `/foo` would help here
+because <reason>; want me to dispatch?"  Never auto-dispatch on a
+gray-area trigger.
+
 **Initial carry-over for this plan (2026-05-07):**
 
 - **Completed**: Triage + verification + plan write + carry-forward
