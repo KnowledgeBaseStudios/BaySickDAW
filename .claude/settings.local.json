@@ -40,7 +40,7 @@
       "Bash(cp \"/c/Users/jeffm/Downloads/SKILL \\(2\\).md\" \"/c/Users/jeffm/.claude/skills/theme-factory/SKILL.md\")",
       "WebFetch(domain:github.com)",
       "WebSearch",
-      "WebFetch(domain:*)",
+      "WebFetch",
       "Bash(find . -name *.sln -o -name *.vcxproj)",
       "Bash(find /c/Users/jeffm/Documents/Vibesynth -maxdepth 5 -name *.sln)",
       "Bash(cmake --build . --target VibesynthStandalone --config Debug)",

@@ -71,7 +71,11 @@ This agent is **not** part of the regular QA cycle. Invoke only:
 
 - **Verify every claim with a fetched source.** Do NOT assert a competitor has a feature based on training-data memory. WebFetch their actual docs / blog post / product page.
 - **Cite URLs.** Every "Inspired by" gets a working URL.
-- **HIGH confidence only for verified-against-vendor-docs.** Demote to MEDIUM/LOW for everything else.
+- **Confidence ratings are tied to the verification METHOD used, not the destination URL:**
+  - **HIGH** — feature was confirmed by a successful **WebFetch** of the vendor's own docs / product page / changelog / official manual. The actual page text was read end-to-end (or relevant section).
+  - **MEDIUM** — feature was confirmed only via WebSearch result snippets (which quote vendor pages but were not fetched directly), OR via successful WebFetch of a credible third-party review (Sound on Sound, Tape Op, MusicTech, Plugin Boutique editorial, KVR Audio, etc.), OR vendor manuals that returned a 403 / 404 / paywall when WebFetched.
+  - **LOW** — feature claim is supported only by forum posts, vendor marketing bullets without spec backing, or single-source unverified claims.
+- **AUTO-DEMOTE rule (no exceptions):** if WebFetch is denied or fails for the run AND you only have WebSearch result snippets to work from, EVERY entry's maximum possible confidence is **MEDIUM**, regardless of how authoritative the snippet looks. Do not label entries HIGH in that scenario. Add a header note at the top of the report: "WebFetch denied this run — all entries capped at MEDIUM regardless of source quality."
 - **Don't propose features the BaySickDAW design philosophy explicitly rejects.** Memory `feedback_dont_speculate_about_fl_studio.md`: don't claim FL behavior unless verified. Same caution applies to all DAWs.
 - **No copy-paste from competitor docs.** Inspired-by, not derived. Re-describe in your own words.
 - **No edits to Future State.md.** Return draft text. The owner reviews; the parent applies.
