@@ -20,10 +20,12 @@ Formatting Conventions". Local layout for this doc:
 - `#` — document title
 - `##` — top-level section (How to read, Header conventions, Entry template, Table of contents, Entries)
 - `### YYYY-MM-DD HH:MM PT — <Batch ID> — <Summary>` — individual batch close entry header
+- `**Bucket:** <bucket1>[, <bucket2>...]` line immediately under each batch close entry header — names every canonical domain bucket from Main Plan §0 that the batch's scope touched. Multi-bucket batches list every bucket touched. Used for cross-doc grep: `Bucket: Effects` finds every batch-close that touched Effects.
 - `#### <Sub-section>` — sub-section within an entry (Done, Found along the way, etc.)
 
 Grep patterns:
 - `^### ` finds all batch close date entries
+- `\*\*Bucket:\*\*` finds the bucket tag line on each entry
 - `^#### ` finds sub-sections within entries
 - `^## ` finds top-level sections
 
@@ -67,6 +69,8 @@ Append-only. Never edit prior entries — surprise findings later get their own 
 ---
 
 ### 2026-05-07 21:27 PT — Triage — Plan + carry-forward + implemented-work docs created
+
+**Bucket:** Meta
 
 #### Done
 - Read the unified backlog end to end (64 entries: 59 active + 4 optional + 1 never).
@@ -112,6 +116,8 @@ Append-only. Never edit prior entries — surprise findings later get their own 
 
 ### 2026-05-07 16:29 PT — QA-0a — Debug build workflow setup
 
+**Bucket:** Cross-cutting Infrastructure
+
 #### Done
 - Annotated main plan with the QA-0a fork using the hybrid convention: §0 Rule updated, §5/§6/§7 inline back-refs, §9 master log appended.
 - do_build.bat now builds Release + Debug. Build log writes per-config exit codes.
@@ -154,6 +160,8 @@ Append-only. Never edit prior entries — surprise findings later get their own 
 ---
 
 ### 2026-05-07 18:23 PT — QA-0 — MT Composite RenderTask (DSP-12 restore)
+
+**Bucket:** Cross-cutting Infrastructure, Players
 
 #### Done
 - New `Source/Engine/Tasks/CompositeAudioInsertTask.h/.cpp` per-row task that owns BOTH the arrangement-clip flow (was AudioInsertTask) AND the clip-engine MIDI trigger flow (was ClipPageTask) at audioInsert(N) channel ids.
@@ -210,6 +218,8 @@ QA-Md promoted from Phase 5 to Phase 1 because Debug's diagnostic value depends 
 ---
 
 ### 2026-05-08 10:42 PT — QA-Inventory — 1429 source-doc items triaged + plan docs populated
+
+**Bucket:** Meta
 
 #### Done
 - Parsed all three pre-QA source docs end to end (`Files For Claude/Final Stretch Work.txt`, `Files For Claude/vibedaw_blueprint.md`, `C:/Users/jeffm/.claude/plans/lucky-discovering-tiger.md`); 1429 distinct items extracted to a master TSV at `C:/Users/jeffm/.claude/plans/qa-inventory-master.tsv`.
