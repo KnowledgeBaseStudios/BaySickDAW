@@ -188,9 +188,54 @@ before writing.**
 - `Main Plan.md`: **edit per Rule 3** (inline back-refs + master fork
   log). Original §1-§8 content preserved; §9 Forks is the canonical
   chronological log of changes since plan write.
-- `Future State.md`: **append-only**, organised by section. New Drops
-  go into Section 3; new fire-hose ideas continue Section 2 numbering;
-  source-doc Tier 3 items in Section 1 stay frozen at original IDs.
+- `Future State.md`: **append-only**, organised by domain bucket
+  (per the canonical bucket list below). New items land under their
+  natural domain alongside source-doc + fire-hose + walked entries
+  from the same domain. Section 2 ("Considered & Dropped") stays
+  separate as its own top-level section so we don't re-litigate, and
+  retains its drop-reason groupings.
+
+**Canonical domain buckets (cross-doc rule, locked 2026-05-08):**
+
+All `Plans & Specs/` docs (Main Plan §5.5 / `Implemented Work Log.md`
+/ `Previously Implemented.md` / `Future State.md`) use the same
+top-level domain vocabulary so cross-doc lookups stay one-shot. To
+answer "what's our story for X?" you grep one bucket name across all
+four docs and find what's done, what's in flight, what's next, and
+what's deferred — all in one consistent place.
+
+| # | Bucket | Covers |
+|---|--------|--------|
+| 1 | **Effects** | DSP modules (Chorus / Compressor / Delay / Flanger / Limiter / Overdrive / Phaser / Reverb / Saturation / Tape / Transient Shaper / EQ8) + FX rack mechanics + future / restoration effects + dynamic EQ + VST3 effect hosting. |
+| 2 | **Players** | Every sound-producing engine: Harmless, BaySickPlayer, BaySick family (Synth + Bass), dynamic-drum work (Phase D), BaySickVocal (Phase H), BaySickPedals (Phase I), BaySickRustyDrums (Phase J), BaySickGuitars (Phase K), BaySickBasses (Phase L), BaySickNAM/IR + future engines (Wavetable / FM / Analog / Modal / Strings / Vocoder / etc.). |
+| 3 | **Mixer / Routing** | Mixer page, mixer strips, routing graph (`VibeGraph`/`RoutingGraph`), sends + aux strips, cable overlay, mastering chain, metering. |
+| 4 | **System Pages** | Builder, Effects Page, Audio Settings, Project Persistence (XML / restore walker / migration), Keyboard input + ApplicationCommandManager, Mouse-modifier docs. |
+| 5 | **UI / L&F / Theming** | VibeLAF, palette, themes, layouts, pattern colours, ribbon visuals, knob styling, look-and-feel cross-cuts. |
+| 6 | **Cross-cutting Infrastructure** | Engine (MT render path), `RenderGraphDispatcher`, BlockContext, audio device init, MIDI input, recording lifecycle, `Project Persistence` sub-cluster, `Audio-Device Infrastructure` sub-cluster, performance / efficiency optimization. |
+| 7 | **User Tools / Learning** | AI helpers (Composer / Mixer / Master), tutorials, smart melody / chord / drum / bass generators, hover-to-hear, scale picker, beat detection, sound-design guides. |
+| 8 | **Workflow Polish** | Multi-window, project snapshots / version control, cloud sync, sharing, comments, macros, performance pad, drum-pad mode, track grouping, section markers, action recorder. |
+| 9 | **Other / Platform / Deferred** | VST/AU plugin hosting (instrument + effect), surround / Atmos, tablet DJ app, multi-touch, hardware MIDI output, MIDI export. |
+| 10 | **Meta** | Sessions / Decisions / Standing Parallel Work / Open Issues — non-domain bookkeeping that doesn't belong to any product surface. |
+
+**Bucket usage rule (per doc):**
+
+- **Main Plan**: §5 batch sequence stays in chronological / dependency
+  order. New §5.5 Domain Coverage section maps each bucket → which
+  QA-* batches fall in it (per-batch entries each get a `**Bucket:**`
+  line in their §5 header).
+- **Implemented Work Log**: every batch close entry has a `**Bucket:**`
+  line under the date header so grepping by bucket finds all completed
+  work in that domain.
+- **Previously Implemented**: top-level `## ` sections ARE the bucket
+  names (one per bucket). Existing phase-named clusters (Phase D /
+  Phase H / Phase 5F / etc.) are preserved as `### ` sub-clusters
+  inside their natural bucket.
+- **Future State**: top-level `## ` sections inside Section 1 ARE the
+  bucket names. Source-doc + fire-hose + walked items from the same
+  domain live together under sub-clusters (`### §1 ChorusDSP`, `### §P1
+  Harmless`, `### Fire-Hose net-new`, etc.). Section 2 (Considered &
+  Dropped) stays separate from this domain layout — drops stay grouped
+  by drop-reason, not by domain.
 
 **Initial carry-over for this plan (2026-05-07):**
 
@@ -929,6 +974,36 @@ These four batches were planned in the original `lucky-discovering-tiger` Phase 
 - Dependencies: independent (could parallel QA-Manuals).
 - Effort: medium (~6-10 hours).
 - Why this slot: meta-deliverable; ships as a separate document alongside the manuals.
+
+---
+
+## 5.5 Domain Coverage (batch → bucket map)
+
+§5 batches are listed in execution order (Phase 1 → Phase 7) so the
+sequencing arrow + dependencies stay readable. This section flips the
+view: each canonical bucket from §0 lists which QA-* batches touch it.
+Use this for "what's our V1 coverage in domain X?" lookups; pair with
+`Previously Implemented.md` (same buckets, what's already shipped) +
+`Future State.md` (same buckets, post-V1 candidates) for the full
+cross-doc picture.
+
+| Bucket | V1 batches that touch it (§5) |
+|--------|-------------------------------|
+| **Effects** | QA-F (DSP-03 PitchCorrector / Formant-Preserve no-op + BaySickVocal H-1..H-6), QA-Fa, QA-Audit (effects audit), QA-Cleanup-1 (dead DSP code) |
+| **Players** | QA-D (project-load teardown for engine instances), QA-E (Vox/Inst recording lifecycle, REC-01), QA-F (BaySickVocal DSP), QA-M, QA-Drum-Polish (Phase D dynamic drum UX), QA-Verify (per-engine smoke), QA-Audit (engine surface) |
+| **Mixer / Routing** | QA-D (mute/solo dispatch), QA-E (recording-finalize → strip lifecycle), QA-Audit (routing graph), QA-Cleanup-3 (orphan strip cleanup) |
+| **System Pages** | QA-G (Builder UX cluster), QA-H (Builder UX cluster — drop / mute / loop / drag), QA-I, QA-J (per-row audio-clip), QA-K, QA-L (Clips / Browser / picker-disable), QA-Export (Export Stems / Master), QA-Manuals, QA-Templates |
+| **UI / L&F / Theming** | QA-A (STYLE / fonts), QA-B, QA-C, QA-VibeSlider (right-click-swallow refactor), QA-Audit (UI surface), QA-Manuals (in-app help screens) |
+| **Cross-cutting Infrastructure** | QA-0 (DSP-12 Composite RenderTask), QA-0a (Debug build workflow), QA-Md (MT engine Debug-build investigation), QA-Audit (manifest), QA-Cleanup-1..4 (dead-code cleanup phase), QA-RC (release-candidate sweep), QA-Installer (TTF embed + EULA + signing), QA-Framework (icons / version stamping / registry) |
+| **User Tools / Learning** | QA-Manuals (beginner manual + in-app help), QA-Templates (factory project templates) |
+| **Workflow Polish** | QA-Verify (E-bucket walk), QA-RC (final QoL sweep) |
+| **Other / Platform / Deferred** | (no V1 batches — Section 9 of Future State holds these post-V1 candidates) |
+| **Meta** | QA-Inventory (triage + bucket categorisation across the three pre-QA source docs) |
+
+A given batch can touch multiple buckets; the table lists every bucket
+the batch's scope touches, not just the primary one. When a batch
+closes, the `**Bucket:**` line in its `Implemented Work Log.md` entry
+records the same set so cross-doc grep stays consistent.
 
 ---
 
