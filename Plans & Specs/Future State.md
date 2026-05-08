@@ -406,9 +406,63 @@ Generated 2026-05-08 during QA-Inventory Phase 5. Net-new beyond what's already 
 
 # Section 3 — Considered & Dropped
 
-Items reviewed during QA-Inventory walkthrough (bucket B) and confirmed dropped, with reason. Ensures we don't re-litigate.
+Items reviewed during QA-Inventory walkthrough (or post-walk Phase-4 reclassify) and confirmed dropped, with reason. Ensures we don't re-litigate.
 
-(populated at QA-Inventory close from Phase 6 routing of bucket B decisions; placeholder for now)
+## Harmless UI items dropped during QA-A STYLE / Phase 5F-3 (12)
+
+These were proposed in the source docs but explicitly dropped during the Harmless layout / SLA audit work. Confirmed drop in QA-Inventory walk.
+
+- **[BLU-629 / OT]** Timbre Fade horizontal slider (#4) — right-click-modulate covers the use case. PRESET-SAFE.
+- **[BLU-630 / OT]** Routing Matrix 6 LED toggles (#6) — S1 work already covered. PRESET-SAFE.
+- **[BLU-631 / OT]** Blur 2 curve-routing toggles (#10) — right-click-modulate covers. PRESET-SAFE.
+- **[BLU-632 / OT]** Prism "from vol" toggle (#15) — right-click-modulate covers. PRESET-SAFE.
+- **[BLU-633 / OT]** Filter width knob x2 (#32) — redundant with RES. PRESET-SAFE.
+- **[BLU-634 / OT]** Filter 6 tiny toggles per filter (#37) — Harmor-specific, not applicable. PRESET-SAFE.
+- **[BLU-635 / OT]** Phaser 4 toggles oct/Hz/harm/kb.t (#46) — same family not applicable. PRESET-SAFE.
+- **[BLU-636 / OT]** Global porta knob (#51) — redundant with glide_time. PRESET-SAFE.
+- **[BLU-637 / OT]** Global link/chain toggle (#53) — implicit via timbre_blend. PRESET-SAFE.
+- **[BLU-638 / OT]** LFO pre/post fx labels (#56) — no pre/post distinction in this DSP. PRESET-SAFE.
+- **[BLU-639 / OT]** Info Bar text area (#59) — removed as confusing per user direction. PRESET-SAFE.
+- **[BLU-407 / OT]** T3.7 Filter KB-track as cents/oct slider — DROPPED 2026-04-21 as synth-nerd feature. (Note: walked entry reclassified to Bucket D — see Section 1 walk additions; both routings preserved for traceability.)
+
+## Drum engine option dropped (1)
+
+- **[BLU-423 / OT]** Harmless as 3rd engine option for drums — not drum-tuned. Confirmed drop in walk.
+
+## Spec items dropped as ambiguous / N/A (3)
+
+- **[FSW-038 / OT]** F2 Edit Properties dialog (BaySickPitch) — dropped in walk.
+- **[LDT-390 / OT]** 5F-5 ambiguous Event Editor items (LED ON toggle / RANGE box / Link icon / spline tool icon / target-link icons / mode-toggle radio-switch) — original spec ambiguous; dropped during 5F-5 implementation, confirmed in walk.
+- **[LDT-392 / OT]** 5F-6 ambiguous Piano Roll items (Speaker icon transport / Window controls / Draggable lane divider) — ambiguous / structural / N/A; confirmed drop.
+
+## Phase-4 verification reclassify-to-Drop (1)
+
+- **[FSW-244 / OT]** Per-input-channel diagnostic ("Show Input Diagnostics dialog") — Phase-4 source verification couldn't find the dialog string in source (`MixerPage::showInputChannelPicker` has no diagnostic submenu). Original spec described a feature that was never built. Walked: dropped because spec intent is unclear; building from a fuzzy spec creates the wrong thing.
+
+## QA-Inventory walk reclassify-to-Drop (1)
+
+- **[BLU-605 / OT]** voxRoll/instRoll dead-code cleanup — originally proposed as Phase 6 cleanup. Per walk: piano-roll infrastructure is NEEDED for Inst (BaySickGuitars / BaySickBasses) and reserved for future SFZ vocal player. Not dead code; should not be removed.
+
+---
+
+# Section 4 — QA-Inventory Walk Reclassifications to Future State (6)
+
+Items originally in source docs as Tier 2 deferred or active backlog (bucket A/B). During QA-Inventory walk, user reclassified them as future-state (post-V1).
+
+## Effect Modules (4)
+
+- **[BLU-088 / AQ]** Dry / Wet / CrossLevel dB knobs (C5) — Flanger Tier 2 deferred. DSP exists but only Cross UI-exposed. PRESET-SAFE.
+- **[BLU-146 / AQ]** C6 SmoothedValue crossfade on Stages count — Phaser Tier 2 deferred. §7b state-preserve covers in practice. PRESET-SAFE.
+- **[BLU-147 / AQ]** Dry/Wet/CrossLevel dB knobs — Phaser Tier 2 deferred; consistency follow-on to §4 Flanger. PRESET-SAFE.
+- **[BLU-407 / AQ]** T3.7 Filter KB-track as cents/oct slider — BaySick family. Reclassified from DROPPED to future-state.
+
+## Performance / Efficiency (1)
+
+- **[FSW-121 / PE]** RAM-load <15MB clips — replaces AudioClipStreamer cold-start sputter. Post-V1 optimization (MT engine reduces but doesn't eliminate the symptom).
+
+## Workflow Polish (1)
+
+- **[FSW-330 / WP]** Pre-fader sends in routing — currently all sends are treated as post-fader by audio path; pre-fader wiring deferred. Future-state per walk.
 
 ---
 

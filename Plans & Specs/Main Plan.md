@@ -491,6 +491,11 @@ needed to find what you should pull up to review the work.
     DSP-09 bus solo (mute/solo dispatch).  Touch:
     `PatternManager::isRowAudible`, MIDI dispatch loop in
     `processBlock`, audio-row mute UI binding.
+  - **Folded in 2026-05-08 (QA-Inventory close via Rule 3)** — REC-01 scope expansion:
+    - **BLU-470** "Audio recording findings" — document master mix + per-track arm + debug pops; verify recording lifecycle works end-to-end.
+    - **Vox recording not playing on Builder after recording** (QA-Inventory walk runtime test) — Vox strip records audio successfully, file lands in library, but builder grid playback shows the clip silent. Likely related to FilePlay routing (`mForcePitchBypass=true` set on FilePlay paths but never cleared after stop) OR the auto-spawned ClipsBus path stealing the audio (DSP-12 family).
+    - **Inst recording not playing on Builder after recording** (same issue, also tested) — same surface as Vox; covers the parallel Inst path through `BaySickGuitars` / `BaySickBasses` / `BaySickPedals` chain.
+    - **Pedalboard presets don't work** (QA-Inventory walk runtime test) — preset save/load for `BaySickPedalsProcessor` either round-trips wrong slot configuration or doesn't restore parameters. Same surface family as REC-01 (engine-level state restoration). NOTE: this also expands QA-Verify scope to verify ALL preset paths across all engines (Harmless, BaySickPlayer, BaySickSynth, BaySickBass, BaySickPedals, BaySickVocal, BaySickGuitars, BaySickBasses, BaySickRustyDrums, BaySickNAMIR).
 - Scope: SINGLE coordinated batch because all touch the MixerPage spawn
   cascade + project XML restoration walker + StripRecorder finalize +
   bus DSP path. Splitting causes merge churn. Walk the full Vox/Inst
@@ -518,10 +523,13 @@ needed to find what you should pull up to review the work.
 - Scope: audit `BaySickVocalProcessor::processBlock` for FX-array pipeline
   wiring. DSP-02/03 likely co-occur. DSP-05 is a verification pass on
   warp markers reaching the phase vocoder path.
+  - **Folded in 2026-05-08 (QA-Inventory close via Rule 3)** — DSP-03 sub-scope expansion:
+    - **Formant Preserve + Throat Shift no-op stubs** in `PitchCorrectorDSP` (`Source/DSP/PitchCorrectorDSP.cpp:326-327`): code comment says *"Formant Preserve / Throat Shift toggles are stored but DSP is no-op for H-5 -- a follow-up batch will add cepstral envelope swap"*. The UI exposes the knobs with descriptive tooltips ("Keeps the vocal character intact while correction shifts pitch... pitch-shift artifacts (chipmunk-up, demon-down)") but the DSP literally `juce::ignoreUnused (mFormantPreserve, mThroatSemis);`. UI-promised, DSP-not-delivered. Wire actual cepstral-envelope swap. Affects both realtime path (BaySickVocals tab) and offline path (BaySickPitch).
+    - **BaySickVocal H-1..H-6 cluster review** (BLU-445 / BLU-608 / BLU-609 / BLU-610 / BLU-611 / BLU-612) — QA-Inventory walk reclassified all six from "claimed Done" to "Review" because the realtime pitch correction was confirmed broken at runtime (YIN tracker not detecting pitch despite live audio reaching the engine; granular shifter idles at ratio=1.0 producing "faint vibration" artifact only). Whole subsystem (skeleton + comp ext + de-esser + YIN + pitch correction + editor) needs end-to-end re-verification as part of QA-F's `BaySickVocalProcessor::processBlock` audit.
 - Risk: medium. Audio-thread DSP. MT-orthogonal at the inside-engine
   level (VoxStripTask calls engine.processBlock; the FX-array runs there).
 - Dependencies: QA-E (shares VoxInsertNode surface).
-- Effort: medium (~4-6 hours).
+- Effort: medium-large (~6-10 hours; folded items add 2-4 hours).
 
 #### **QA-Fa: BaySickPitch Audio Import (additive feature, split from QA-F)**
 - Items: DSP-04.
@@ -608,10 +616,11 @@ needed to find what you should pull up to review the work.
     streamer position management).  Fix likely advances streamer's
     expectedFilePos even when mute-gated, OR seeks on unmute to current
     project transport.
+  - **Folded in 2026-05-08 (QA-Inventory close via Rule 3)** — BLU-501 "Prune stale applicators on swap" (memory cleanliness in audio-thread automation applicator map; memory leak on engine swap). Same surface family as the audio-thread renderAudioClipsForRow restructure.
 - Risk: high. Architectural restructure, audio thread, MT-aware.
 - Dependencies: QA-0 (composite task pattern established) + QA-E
   (audio clip surface stability).
-- Effort: large (~8-12 hours; folded streamer-sync item adds ~1 hour).
+- Effort: large (~8-12 hours; folded streamer-sync + applicator cleanup adds ~2 hours).
 
 #### **QA-K: Audio Engine Polish**
 - Items: APP-04 (SetPriorityClass + MMCSS), APP-05 (Open ASIO Control
@@ -636,6 +645,13 @@ needed to find what you should pull up to review the work.
   player pages), NAV-04 (Piano Roll deep-link buttons), FILE-03
   (browser delete removes all duplicate-named instances — auto-numbering
   on duplicate drop).
+  - **Folded in 2026-05-08 (QA-Inventory close via Rule 3)** — UI-Polish scope expansion:
+    - **BLU-378** "Right-click Automate menu gap" (componentID on sliders) — UI-01 sub-item: sliders need stable `componentID` so the Automate menu can identify the target. PRESET-SAFE.
+    - **BLU-379** "A9 slider-sync verify" — verification that all editor sliders use `SliderAttachment` correctly so APVTS round-trips and sync paths are consistent.
+    - **LDT-394** "General UI Touch-ups (5F-8)" — Piano roll mouse accuracy + final spacing/alignment pass.
+    - **BLU-492** "Combo-box automation infrastructure" — make combo-box selections become APVTS params so they're automatable. PRESET-BREAK at preset-format level (combo selections currently aren't in preset state).
+    - **LDT-026** "D1.5 Per-drum MIDI input note + UI" — populate the MIDI Map placeholder in the per-drum context menu so pad-controllers can map to specific drums. Per-drum `mInputNote` field + UI.
+    - **FSW-123** "Picker-disable-during-playback for Clips" — UX polish: disable engine/sound pickers while transport is playing on Clips tabs to prevent mid-playback engine swaps.
 - Scope: collection of UI polish. Group so same surface touched once.
 - Risk: low-medium each.
 - Dependencies: independent.
@@ -653,6 +669,15 @@ needed to find what you should pull up to review the work.
 - Dependencies: independent.
 - Effort: medium (~4-6 hours).
 
+#### **QA-Drum-Polish: Per-drum MIDI Note Map (D1.5)** (added 2026-05-08 via Rule 3 — see §9)
+**Plan file:** TBD.
+- Items: LDT-026 (D1.5 Per-drum MIDI Note Map for pad-controller mapping).
+- Scope: implement per-drum `mInputNote` field that pad-controllers can map to. Populates the MIDI Map placeholder in the per-drum context menu (Phase D D1.4-fix(c) shipped placeholder; D1.5 wires it).
+- Risk: low. Per-drum APVTS param + MIDI dispatch routing.
+- Dependencies: QA-M (drum lifecycle stable).
+- Effort: small-medium (~2-4 hours).
+- Why this slot: drum-related work cluster.
+
 #### **QA-N: DSP Meter Sum-of-Cores (DIAG-02)**
 - Items: DIAG-02.
 - Scope: refine the DSP meter under MT to sum audio-thread + per-worker
@@ -661,6 +686,49 @@ needed to find what you should pull up to review the work.
 - Risk: low. Read-only measurement; no audio path changes.
 - Dependencies: independent.
 - Effort: small-medium (~3-5 hours).
+
+#### **QA-VibeSlider: App-wide juce::Slider → VibeSlider refactor** (added 2026-05-08 via Rule 3 — see §9)
+**Plan file:** TBD (silly-name file when batch starts).
+- Items: BLU-493 (App-wide refactor; PRESET-SAFE; ~150-300 sites).
+- Scope: replace every plain `juce::Slider` instance across the app with `VibeSlider` (defined in `Source/Standalone/SharedUI.h:956`), which swallows right-click events. Without this, right-clicking a `LinearVertical` slider with snap-to-mouse enabled snaps the value to the click Y — UX bug whenever the user is trying to right-click to reach the Automate menu. Currently only EQ widget + DynamicParamsPopout + MixerTrackStrip pan/width/fader use VibeSlider; everything else (Harmless / BaySickSynth / BaySickBass / VibePlayer / Pedals / NAMIR / Vocal editors + all effect panels) still uses raw `juce::Slider`.
+- Risk: low. Per-class subclass swap; `VibeSlider` inherits all `juce::Slider` API. Build verifies + per-page interactive sanity.
+- Dependencies: independent (could run alongside any other batch).
+- Effort: medium (~5-8 hours). 150-300 mechanical sites.
+- Why this slot: blocks the right-click Automate workflow being usable across the app; runs late in Phase 5 because nothing depends on it but it's needed before QA-RC's UX checklist verification.
+
+#### **QA-Verify: Phase 5A/5B/5C systems verification** (added 2026-05-08 via Rule 3 — see §9)
+**Plan file:** TBD.
+- Items: LDT-169 (5A Project Serialization), LDT-170 (5B Template System), LDT-171 (5C Per-Engine Preset System).
+- Scope: end-to-end verification that project save/load + templates + presets work correctly across every engine (Harmless, BaySickPlayer, BaySickSynth, BaySickBass, BaySickPedals, BaySickVocal, BaySickGuitars, BaySickBasses, BaySickRustyDrums, BaySickNAMIR). Includes the **pedalboard preset bug** confirmed in QA-Inventory walk runtime testing — `BaySickPedalsProcessor` preset save/load doesn't restore correctly. Per-engine: load every factory preset, verify all params restore + audio plays as expected; save user preset, reload, verify identical state; test save/load round-trip across project save/load.
+- Risk: medium. Touches every engine's preset state path; pedalboard preset bug is concrete known regression.
+- Dependencies: all preceding QA batches (must verify against final-state engines).
+- Effort: medium-large (~6-10 hours; one engine at a time).
+- Why this slot: late Phase 5 because final-state engines must be present. Feeds into QA-RC test plan.
+
+#### **QA-Export: Audio Export rebuild + Project Bundle** (added 2026-05-08 via Rule 3 — see §9)
+**Plan file:** TBD.
+- Items: FSW-065 (D-9 Export Audio rebuild — Ctrl+R, format/bitdepth/SR/tail; render path itself broken), LDT-172 (5D Audio Export — WAV/MP3/OGG codecs), BLU-529 (Project Bundle & Export — copy samples into target folder/.zip).
+- Scope: rebuild the song-mode audio export pipeline. Currently the only render-to-WAV path is per-pattern right-click in BrowserPanel (`BuilderPage.h/.cpp`); no song-mode export, no MP3/OGG, no format/bitdepth/SR/tail options. **Plus** Project Bundle & Export: zip-all-samples-and-project-into-shareable-archive. User confirmed in QA-Inventory walk that zip bundle is REQUIRED (not deferred per original 5D-BUNDLE plan).
+- Risk: medium. New audio-export code path. Bundle path involves filesystem operations on user samples.
+- Dependencies: QA-Verify (need confirmed-working preset/state restore so exported project restores intact on the receiving end).
+- Effort: large (~8-12 hours; export pipeline + bundle pipeline + format codecs + UI).
+- Why this slot: late Phase 5 because depends on stable preset/state from QA-Verify.
+
+#### **QA-RC: Pre-Release Test Plan + RC Build** (added 2026-05-08 via Rule 3 — see §9)
+**Plan file:** TBD.
+- Items: LDT-414 (Q&A clean build + 2nd clean build + testing plan + test to failure) — original Phase 5G work that was never executed; expanded with QA-Inventory walk findings (LDT-096 menu audit, LDT-097 keybinds audit, LDT-296 Global Tooltip System review, FSW-303 global FX bypass verify).
+- Scope:
+  - **2nd clean build**: delete entire `build/` directory, fresh Release+Debug rebuild from scratch, audit ALL compiler warnings.
+  - **Page-by-page test plan**: documented checklist covering every page (Builder, Mixer, Effects, Layers, Bass, Drums, Clips, Vox, Inst, Rusty, NAMIR) and every workflow (audio I/O, MIDI I/O, transport, effects, mixer routing, save/load, recording, automation, undo/redo). Execute the plan, log findings.
+  - **Test to failure**: long sessions, large projects, edge cases (100 tracks, 50 audio clips, 10 plugins routed sidechains, hours of continuous playback, sample-rate switches mid-session, ASIO buffer-size changes, project reload while recording).
+  - **Menu audit** (LDT-096): walk every menu (File menu / page menus / right-click menus / global menus) for completeness + correctness + keyboard shortcuts.
+  - **Keybind audit** (LDT-097): verify every keybind in the catalog actually fires + does what it says + doesn't conflict.
+  - **Tooltip review** (LDT-296): every UI control has tooltip, tooltip text accurate, tooltip explains action not implementation.
+  - **Global FX bypass verify** (FSW-303): the master strip's global FX bypass actually bypasses every bus's rack — verify per-bus with audible test.
+- Risk: zero (read-only verification). Findings spawn fixes via Rule 3 to other batches OR new follow-ups.
+- Dependencies: QA-Audit + QA-Cleanup-1..4 should land first (don't waste time testing code that's about to get cleaned up). QA-Verify + QA-Export.
+- Effort: large (~10-15 hours possibly multiple sessions). Bounded by app surface, not complexity.
+- Why this slot: AFTER all bug-fix + cleanup work lands. The whole point is verifying the cleaned-up build.
 
 ### Phase 6 — Pre-Release Cleanup Audit (its own phase, AFTER all 15 bug batches)
 
@@ -743,14 +811,55 @@ Every component in the build gets classified into:
 - Dependencies: independent of QA-Audit (could run alongside if desired).
 - Effort: small-medium (~2-4 hours).
 
+### Phase 7 — Documentation, Templates, Installer (added 2026-05-08 via QA-Inventory close — see §9)
+
+These four batches were planned in the original `lucky-discovering-tiger` Phase 6 (Documentation, Templates, Presets & Installer) but had no representation in the post-Batch-10 Main Plan. QA-Inventory close adds them as a dedicated phase. Runs AFTER Phase 6 cleanup so docs/installer reflect the final cleaned codebase.
+
+#### **QA-Manuals: 3 manuals (Quick Start + Music Tech + Design Tech)** (added 2026-05-08 via Rule 3 — see §9)
+**Plan file:** TBD.
+- Items: LDT-176 + LDT-415 (Manual 1 Quick Start, 10-15 pages, annotated screenshots), LDT-416 (Manual 2 Music Technical Reference, 40-50 pages, every knob/button/slider organized by page/engine), LDT-417 (Manual 3 Design Technical Document, formulas + signal flow + architecture diagrams).
+- Scope: write all three manuals. Image workflow per LDT-415 spec: Claude writes manual + detailed image descriptions, Jeff hands to Copilot for image generation, images returned for compilation. Update VibeDAW references to BaySickDAW.
+- Risk: low (no code changes).
+- Dependencies: QA-RC (need final stable feature set).
+- Effort: large (~30-50 hours, multi-session).
+- Why this slot: Phase 7 documentation runs after all features stable.
+
+#### **QA-Templates: Factory templates + AI-Assisted Skill** (added 2026-05-08 via Rule 3 — see §9)
+**Plan file:** TBD.
+- Items: LDT-177 + LDT-418 (in-app factory presets per engine + factory drum kits + 5 genre-specific starter templates: hip-hop / pop / electronic / lofi / orchestral) + LDT-419 (AI-Assisted Template & Preset Generation Claude Skill — separate skill document).
+- Scope: build out factory presets (quantities TBD after engines + tested) for every engine; ship genre-specific templates; create the Claude skill document for AI-assisted preset/template generation per the workflow spec in `lucky-discovering-tiger.md:3487-3502`.
+- Risk: low.
+- Dependencies: QA-Verify (need preset system verified working) + QA-RC.
+- Effort: medium-large (~10-20 hours).
+- Why this slot: factory presets + templates ship with the installer.
+
+#### **QA-Installer: NSIS Installer + TTF embed** (added 2026-05-08 via Rule 3 — see §9)
+**Plan file:** TBD.
+- Items: LDT-178 + LDT-420 (NSIS Installer with sample-package downloads — `vibedaw_installer.nsi`, 11 sample packs from GitHub) + **LDT-173** (5E Font & Asset Bundling — embed TTF in `BaySickDAWAssets` BinaryData so VibeLAF font choices render correctly on clean Windows installs without relying on system fonts).
+- Scope: build the installer; bundle TTFs alongside existing PNG/SVG assets; configure sample-pack download UI; update VibeDAW references to BaySickDAW; verify clean-machine install produces functional shipping bundle.
+- Risk: medium. Installer build = first time touching NSIS for this project; bundling decisions affect download size + first-run experience.
+- Dependencies: QA-Manuals + QA-Templates (installer ships them).
+- Effort: medium-large (~10-15 hours).
+- Why this slot: installer last; everything ships through it.
+
+#### **QA-Framework: Framework Document** (added 2026-05-08 via Rule 3 — see §9)
+**Plan file:** TBD.
+- Items: LDT-179 + LDT-421 (Framework Document — architecture patterns reusable blueprint for future projects).
+- Scope: distill BaySickDAW's architectural patterns (APVTS lazy registration, RetirementQueue<T>, closeAllDynamicTabs barrier, MT render-task DAG, source-mux engine wrappers, etc.) into a reusable framework document. Update VibeDAW references to BaySickDAW.
+- Risk: zero (documentation only).
+- Dependencies: independent (could parallel QA-Manuals).
+- Effort: medium (~6-10 hours).
+- Why this slot: meta-deliverable; ships as a separate document alongside the manuals.
+
 ---
 
 ## 6. Sequencing — Option A confirmed
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-B → QA-C → QA-D → QA-E → QA-F → QA-Fa → QA-G → QA-H
-                                                                                  → QA-I → QA-J → QA-K → QA-L → QA-M → QA-N
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-B → QA-C → QA-D → QA-E → QA-F → QA-Fa
+   → QA-G → QA-H → QA-I → QA-J → QA-K → QA-L → QA-M → QA-Drum-Polish**** → QA-N
+   → QA-VibeSlider**** → QA-Verify**** → QA-Export****
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -770,19 +879,47 @@ code changes. Populates the new `Plans & Specs/` doc skeletons
 (`Previously Implemented.md`, `Future State.md`) and routes
 still-needed work per Rule 3. See §9.
 
+\*\*\*\* Inserted 2026-05-08 at QA-Inventory close. **QA-Drum-Polish**
+(after QA-M) — beginner UX polish on Phase D dynamic-drum architecture
+(LDT-298 sound-pack ribbon, LDT-299 audition button, etc.). **QA-VibeSlider**
+(after QA-N) — refactor every right-click-swallowing slider in the codebase
+to the existing `VibeSlider` subclass (SharedUI.h:956); ~493 sliders flagged.
+**QA-Verify** (after QA-VibeSlider) — quick verification batch that walks
+every "Done-claimed-but-unverified" / E-bucket item flagged during the
+QA-Inventory triage; targeted Release smoke pass per item. **QA-Export**
+(after QA-Verify) — wire the Export Stems / Export Master flows that the
+ribbon/menu placeholders point at. See §9 QA-Inventory close entry.
+
 QA-0, QA-A, QA-B can run in **parallel** (different code surfaces, no
 audio-path overlap between QA-A UI work and QA-0 dispatcher fix).
 Everything Phase 2 onward is sequential per Option A.
 
-**Pre-release cleanup phase (6) — runs ONLY after all of QA-0..N have
-landed and verified:**
+**Pre-release cleanup phase (6) — runs ONLY after all of QA-0..N + the
+2026-05-08 QA-Inventory close additions have landed and verified:**
 ```
-QA-Audit  →  QA-Cleanup-1  →  QA-Cleanup-2  →  QA-Cleanup-3  →  QA-Cleanup-4
+QA-Audit  →  QA-Cleanup-1  →  QA-Cleanup-2  →  QA-Cleanup-3  →  QA-Cleanup-4  →  QA-RC****
 ```
 
 QA-Audit is the keystone — it produces the manifest that drives 1..3.
 QA-Cleanup-4 (dev-repo scaffolding) is independent and could ride
 alongside QA-Audit if the user prefers; default sequencing keeps it last.
+**QA-RC** (release-candidate verification) was added 2026-05-08 at
+QA-Inventory close as the gate before Phase 7 — a full project lifecycle
+sweep across the cleaned-up build to confirm nothing regressed during
+the cleanup phase.
+
+**Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
+```
+QA-Manuals****  →  QA-Templates****  →  QA-Installer****  →  QA-Framework****
+```
+
+All four added 2026-05-08 at QA-Inventory close. **QA-Manuals** — the
+beginner manual + in-app help screens (LDT-218, LDT-219, etc.). **QA-Templates**
+— factory project templates / starter packs (LDT-220, LDT-221). **QA-Installer**
+— Windows installer build with embedded TTF fonts (LDT-173) and licence /
+EULA flow. **QA-Framework** — final installable framework checks (icons,
+version stamping, registry keys, signed binary path). See §9 QA-Inventory
+close entry for the full per-batch source-trace.
 
 ---
 
@@ -1088,3 +1225,131 @@ batch scope expansions) + new batches if any, (e) §9 Forks has a
 "QA-Inventory close routings" entry chronicling all foldings/
 additions/deletions-to-Phase-6, (f) `Implemented Work Log.md` has
 the QA-Inventory closing entry.
+
+### 2026-05-08 — QA-Inventory close routings (1429 items triaged across 3 source docs)
+
+QA-Inventory closed 2026-05-08 after a multi-day triage pass.  Final
+counts: 1429 items extracted from the three source docs; 1089 routed
+to `Previously Implemented.md` after exact-title + cross-doc dedupe
+(31 rows merged across 29 clusters; report at
+`C:\Users\jeffm\.claude\plans\qa-inventory-dedupe-report.md`); 17
+walked-to-Drop entries + 6 walked-to-D-bucket entries written to
+`Future State.md`; 26 walked-to-Update entries (E→A reroute) folded
+into existing §5 batch scopes per Rule 3; 9 brand-new §5/§6/§7
+batches added for items with no existing surface match.
+
+**Cluster decisions (per dedupe report):**
+- Cluster 1 (BLU/FSW G-1.x parity) — keep all (FSW = primary; BLU
+  rows merged into single FSW entry).
+- Cluster 2 (BLU/FSW G-2 / G-3 / G-5 parity) — keep all (same
+  treatment as Cluster 1).
+- Cluster 3 (BLU/LDT D1.x dynamic-drum parity) — confirmed merge
+  (LDT = primary; BLU rows referenced LDT).
+- Cluster 4 (BLU/FSW F-1 per-pattern colour) — confirmed merge.
+- Cluster 5 (BLU/LDT/FSW EQ8 §12 cluster) — confirmed merge; 5d
+  (treble range-mapping bug) folded into §12 EQ8 entry rather than
+  living as separate row.
+- Cluster 6 (LDT L&F sprint cross-refs L1/L8/L9/L11) — keep all
+  (kept the duplicate row count rather than collapsing because L&F
+  sub-items shipped at different commits).
+- Cluster 7 (Project zip-bundle / lifecycle) — confirmed merge.
+- Cluster 8 (Mixer page review backlog) — confirmed merge.
+- Cluster 9 (Audition vs playback level mismatch) — confirmed merge.
+- Cluster 10 (Delete prompt UX) — keep both rows pending full
+  delete-prompt review (deferred sweep).
+- Cluster 11 (Browser panel collapsible) — confirmed merge.
+
+**Folded into existing not-yet-started §5 batches (Rule 3):**
+- **QA-A** ← STYLE-02 / LDT-167 (font + size sweep findings).
+- **QA-E** ← REC-01 cluster: BLU-470 (vox + inst recordings not
+  playing on Builder), pedalboard-preset round-trip (recording
+  finalize touches the same surface).
+- **QA-F** ← DSP-03 cluster: realtime pitch correction broken at
+  runtime (BaySickVocal `mPitchCorrector.process()` is in the chain
+  but YIN tracker never detects); Formant-Preserve / Throat-Sim
+  no-op confirmed (PitchCorrectorDSP.cpp:326 `juce::ignoreUnused`).
+  + BaySickVocal H-1..H-6 sub-items.
+- **QA-J** ← BLU-501 (per-row audio-clip rendering polish).
+- **QA-L** ← Clips/Browser cluster: BLU-378/379 (browser panel
+  state), LDT-394 (clip context-menu), BLU-492 (clips ribbon
+  badge), LDT-026 (clip rename), FSW-123 (picker-disable when no
+  clip selected).
+
+**New §5/§6/§7 batches added (no existing surface match):**
+
+| Batch | Position | Source-trace |
+|-------|----------|---------------|
+| **QA-Drum-Polish** | after QA-M | LDT-298 (sound-pack ribbon), LDT-299 (audition button), LDT-300 (per-drum locked-state polish), LDT-301..305 (Phase D polish backlog). |
+| **QA-VibeSlider** | after QA-N | ~493 sliders flagged across the codebase that swallow right-click; refactor each call site to `VibeSlider` (SharedUI.h:956). User-approved as own batch given scope. |
+| **QA-Verify** | after QA-VibeSlider | walks every E-bucket "Done-claimed-but-unverified" item flagged during inventory; Release smoke pass per item; reroutes any miss to a fresh §5 follow-up batch. |
+| **QA-Export** | after QA-Verify | wires the Export Stems / Export Master flows that the existing ribbon/menu placeholders point at (no audio path written yet). |
+| **QA-RC** | after QA-Cleanup-4 | release-candidate sweep across the cleaned-up build before Phase 7 documentation/installer work begins. |
+| **QA-Manuals** | Phase 7 | beginner manual + in-app help screens (LDT-218, LDT-219, etc.). |
+| **QA-Templates** | Phase 7 | factory project templates / starter packs (LDT-220, LDT-221). |
+| **QA-Installer** | Phase 7 | Windows installer with embedded TTF fonts (LDT-173) + EULA + signed binary path. |
+| **QA-Framework** | Phase 7 | final framework checks (icons, version stamping, registry keys). |
+
+**Walked-to-Drop (B bucket → `Future State.md` Considered & Dropped):**
+17 entries written to Section 3 of `Future State.md`. Highlights:
+12× Harmless UI polish items (cosmetic-only, decided against pre-v1.0);
+BLU-423 (legacy DrumsPage refactor — superseded by Phase D dynamic-drum);
+3× ambiguous spec items deferred from Phase 5F-5 / 5F-6; FSW-244 (Show
+Input Diagnostics dialog — verified at MixerPage.cpp:1886-1976 as not
+built, agreed to drop until proven needed); BLU-605 (voxRoll/instRoll
+infrastructure — kept; reclassified as Drop because it's NEEDED for
+Inst BaySickGuitars/Basses + reserved for future SFZ vocal, not work).
+
+**Walked-to-D-bucket (B bucket → `Future State.md` Section 4):**
+6 entries: BLU-088, BLU-146, BLU-147, BLU-407, FSW-121, FSW-330. Each
+is a plausible post-v1.0 idea the user wants kept on the radar but
+not in scope for the QA cycle.
+
+**Phase 6.1 dedupe stats (subagent ab7220a69335dc191):**
+- Input rows: 1120 (Done-claimed-and-verified across 3 docs).
+- Output rows: 1089.
+- Saved (rows removed): 31.
+- Clusters with 2+ source rows: 29.
+- Singletons: 1060.
+- Output: `C:\Users\jeffm\.claude\plans\qa-inventory-deduped-final.tsv`.
+
+**Side findings surfaced during walkthrough (routed at close, not
+held over):**
+- BaySickVocal realtime pitch correction broken at runtime — DSP path
+  exists, YIN doesn't fire (process is wired in chain but reports
+  "Detected --"). Routed to QA-F DSP-03 (existing surface) rather
+  than CL-024 fresh entry (CL-024 was for T-Pain hard-tune, which is
+  achievable via existing realtime params once DSP-03 lands).
+- Pedalboard preset round-trip broken — verified user side; routed
+  to QA-E REC-01 (recording lifecycle owns preset XML).
+- LDT-173 TTF embed (font in installer) is distinct from STYLE-02
+  font choices — kept as scope inside QA-Installer; not collapsed
+  into QA-A.
+
+**Inline back-refs:**
+- §5 entries gained "QA-Inventory fold-in 2026-05-08" sub-bullets
+  for QA-A / QA-E / QA-F / QA-J / QA-L.
+- §5 has new entries for QA-Drum-Polish, QA-VibeSlider, QA-Verify,
+  QA-Export, QA-RC, QA-Manuals, QA-Templates, QA-Installer,
+  QA-Framework.
+- §6 sequencing arrow rewritten with all 9 new batches; new `****`
+  footnote covers the close additions.
+- New Phase 7 section added in §6 between QA-RC and the §7 header.
+- §9 Forks: this entry (fifth — QA-Inventory close).
+
+**Plan files affected:**
+- `Plans & Specs/Previously Implemented.md` — populated with 1089
+  deduped entries (subagent output).
+- `Plans & Specs/Future State.md` — Section 3 populated (17 Drops);
+  Section 4 populated (6 D-bucket items).
+- `Plans & Specs/Implemented Work Log.md` — header convention
+  section added; existing entries bumped from `##` to `###` with
+  PT timestamps; QA-Inventory close entry appended (Phase 7 of
+  this batch).
+- `Plans & Specs/Main Plan.md` — this entry + scope expansions
+  noted above.
+- `CLAUDE.md` — post-close cleanup pass scheduled (stale OPEN BUG
+  drum-woofy entry, etc.).
+
+**Verification:** every (a)-(f) condition from the QA-Inventory
+insertion entry above met. Closure commit follows after Phase 6.5
+(per-chunk commits) + Phase 7 (Implemented Work Log entry).
