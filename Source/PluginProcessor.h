@@ -47,9 +47,7 @@ class VibeSynthProcessor : public juce::AudioProcessor,
     // public API with accessors used only by the engine layer.
     friend class VoxStripTask;
     friend class InstStripTask;
-    friend class ClipPageTask;            // Batch 5 -- removed in QA-0 Task 4
-    friend class AudioInsertTask;         // Batch 5 -- removed in QA-0 Task 4
-    friend class CompositeAudioInsertTask; // QA-0 (2026-05-07)
+    friend class CompositeAudioInsertTask; // QA-0 (2026-05-07): replaces old ClipPageTask + AudioInsertTask friends
     friend class RustyDrumsProducerTask;  // Batch 6
     friend class RustyInsertTask;         // Batch 6
     friend class PassiveStripTask;        // Batch 7
