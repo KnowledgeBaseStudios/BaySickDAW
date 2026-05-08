@@ -20,21 +20,25 @@ graduate to the active plan if priorities shift; that promotion gets a
 
 ## How to read this doc
 
-Sections:
+Two top-level sections:
 
-1. **Source-Doc Tier 3 / Future-State (167 items)** — items already in
-   the source docs as Tier 3 / post-v1.0 / deferred. Original IDs preserved
-   (`BLU-*`, `FSW-*`, `LDT-*`). Grouped by source-doc section.
-2. **Claude Fire-Hose Additions (108 items)** — proposals generated
-   2026-05-08 during QA-Inventory Phase 5. Prefixed `CL-*`. Grouped by
-   value category.
-3. **Considered & Dropped** — populated at QA-Inventory close from
-   walkthrough bucket B decisions. One-liner per item with reason.
-4. **Walked-to-Future-State (6 items)** — items the user re-routed
-   from B-bucket to D-bucket during the QA-Inventory walk; preserved
-   on the long-term radar.
+1. **Future Items by Domain (281 items)** — every post-V1 candidate
+   organised into the 10 canonical domain buckets defined in Main Plan
+   §0 ("Document Formatting Conventions").  Source-doc Tier 3 items
+   (`BLU-*`, `FSW-*`, `LDT-*`), Claude fire-hose additions (`CL-*`),
+   and walked-from-V1 items all live together under the bucket they
+   touch.  Re-organised 2026-05-08 from the original four-section
+   layout.
+2. **Considered & Dropped (18 items)** — items reviewed during
+   QA-Inventory walkthrough (or post-walk Phase-4 reclassify) and
+   confirmed dropped, with reason.  Stays grouped by drop reason
+   (not by domain) so we don't re-litigate; cross-reference if you
+   ever change your mind.
 
-Each entry is a one-liner: **`[ID / TAG] Title — short description.`**
+Each Future Items entry is a one-liner: **`[ID / TAG] Title — short
+description.`**  Domain answers "what part of the app this touches"
+(Effects, Players, etc.); value tag answers "why ship it" (AQ / PE /
+UT / WP / OT).
 
 Tags per category:
 
@@ -47,33 +51,43 @@ Tags per category:
 ## Header conventions
 
 Cross-doc rules live in [Main Plan.md](Main Plan.md) §0 "Document
-Formatting Conventions". Local layout for this doc:
+Formatting Conventions".  Local layout for this doc:
 
 - `#` — document title.
-- `# Section N — <Title>` — major band (Section 1 / Section 2 / Section 3 / Section 4).
-- `## <Cluster>` — group inside a section (e.g., `## Effect Modules (70)`,
-  `## Audio Quality (47)`).
-- `### §<chapter> <name>` — sub-cluster (e.g., `### §1 ChorusDSP`).
+- `# Section N — <Title>` — major band (Section 1 / Section 2).
+- `## <Bucket>` — top-level canonical domain bucket inside Section 1.
+  Every bucket from Main Plan §0 appears as a `## ` header here even
+  when the bucket has zero items in Future State (stubbed with a
+  one-liner) so cross-doc grep `^## <BucketName>` finds the section
+  in every doc.
+- `### <Sub-cluster>` — sub-cluster inside a bucket (`### §1 ChorusDSP`,
+  `### §P1 Harmless`, `### Fire-Hose net-new effect modules`, etc.).
 - `- **[<ID> / <TAG>]** <Title> — <description>.` — single-line entry.
 
 Grep patterns:
 
 - `^# Section ` finds all major bands.
-- `^## ` finds all clusters.
+- `^## ` finds all canonical buckets.
 - `^### ` finds all sub-clusters.
 - `^- \*\*\[` finds all entries.
 
-Append-only. New Drops continue Section 3 numbering; new fire-hose
-ideas continue Section 2 numbering; Section 1 entries stay frozen at
-their original source-doc IDs.
+Append-only.  New items go under their natural domain bucket alongside
+the existing source-doc + fire-hose + walked entries from the same
+domain.  Section 2 (Considered & Dropped) stays grouped by drop reason.
 
 ---
 
-# Section 1 — Source-Doc Tier 3 / Future-State Items
+# Section 1 — Future Items by Domain
 
-Total: 167 items, preserved in their original source-doc grouping for traceability back to the parent module / decision.
+Total: 281 items, organised into the 10 canonical domain buckets.
+Each entry preserves its original source ID (`BLU-*` from
+`vibedaw_blueprint.md`, `FSW-*` from `Final Stretch Work.txt`,
+`LDT-*` from `lucky-discovering-tiger.md`, `CL-*` from Claude
+fire-hose additions on 2026-05-08).
 
-## Effect Modules (70)
+## Effects
+
+DSP modules + FX rack mechanics + future / restoration effects.
 
 ### §1 ChorusDSP
 - **[BLU-016 / AQ]** Algorithm voicing presets — Chorus / Ensemble / Dimension-D preset chooser per voicing. PRESET-SAFE.
@@ -95,6 +109,7 @@ Total: 167 items, preserved in their original source-doc grouping for traceabili
 - **[BLU-068 / AQ]** Spectral delay (per-band delay times via FFT) — block-processing subsystem. PRESET-BREAK; APVTS scaffolding shipped in v1.
 
 ### §4 FlangerDSP
+- **[BLU-088 / AQ]** Dry / Wet / CrossLevel dB knobs (C5) — Flanger Tier 2 deferred. DSP exists but only Cross UI-exposed. PRESET-SAFE. _(walked from V1 backlog 2026-05-08.)_
 - **[BLU-089 / WP]** Pro mix section redesign — replace 0..1 Wet blend with WetDb+DryDb+CrossDb trims. PRESET-SAFE.
 - **[BLU-090 / AQ]** Through-zero (TZ) flanging mode — dual delay lines for jet-flanger character. PRESET-SAFE.
 - **[BLU-091 / AQ]** Secondary modulator (env follower → Rate/Depth) — per pro flangers like MXR 117. PRESET-SAFE.
@@ -115,6 +130,8 @@ Total: 167 items, preserved in their original source-doc grouping for traceabili
 - **[BLU-130 / AQ]** Character voicing presets — Tube / Fuzz / Distortion / BitCrush bundles. PRESET-SAFE.
 
 ### §7 PhaserDSP
+- **[BLU-146 / AQ]** C6 SmoothedValue crossfade on Stages count — Phaser Tier 2 deferred. §7b state-preserve covers in practice. PRESET-SAFE. _(walked from V1 backlog 2026-05-08.)_
+- **[BLU-147 / AQ]** Dry/Wet/CrossLevel dB knobs — Phaser Tier 2 deferred; consistency follow-on to §4 Flanger. PRESET-SAFE. _(walked from V1 backlog 2026-05-08.)_
 - **[BLU-148 / AQ]** Per-stage resonance LFO offset (T1) — Mu-Tron warble. PRESET-SAFE.
 - **[BLU-149 / AQ]** Secondary modulator env follower (T2) — mirror of §4 Flanger T3. PRESET-SAFE.
 - **[BLU-150 / AQ]** Feedback filter LP/HP/BP (T3) — mirrors §3 Delay FB filter. PRESET-SAFE.
@@ -168,10 +185,9 @@ Total: 167 items, preserved in their original source-doc grouping for traceabili
 - **[BLU-270 / AQ]** User-selectable FFT size for linear-phase (T17) — 256/512/1024/2048/4096/8192. PRESET-SAFE.
 - **[BLU-271 / AQ]** Linear-phase IR crossfade transitions (T18) — double-buffer IR crossfade. PRESET-SAFE.
 - **[BLU-273 / OT]** Extract shared `EQ8Defaults` header (T20) — single source of truth for default freqs. PRESET-SAFE.
+- **[BLU-494 / AQ]** Orfanidis analytical anti-cramping — replaces §12f oversampling. PRESET-SAFE.
 
-## Future Effect Modules (29)
-
-### Dynamics
+### Future Effect Modules — Dynamics
 - **[BLU-274 / AQ]** Gate / Downward Expander — inverted compression envelope. PRESET-SAFE.
 - **[BLU-275 / AQ]** Upward Compressor — OTT-style sound design. PRESET-SAFE.
 - **[BLU-276 / AQ]** Multi-band Compressor — `juce::dsp::LinkwitzRileyFilter` crossovers. PRESET-SAFE.
@@ -179,7 +195,7 @@ Total: 167 items, preserved in their original source-doc grouping for traceabili
 - **[BLU-278 / AQ]** Auto-Gain / Vocal Rider — `BallisticsFilter` for slow leveling. PRESET-SAFE.
 - **[BLU-279 / AQ]** Maximizer — mastering-grade limiter variation. PRESET-SAFE.
 
-### Harmonics
+### Future Effect Modules — Harmonics
 - **[BLU-280 / AQ]** Bitcrusher — bit-depth + sample-and-hold quantization. PRESET-SAFE.
 - **[BLU-281 / AQ]** Wavefolder — folds waveform back, metallic synth tones. PRESET-SAFE.
 - **[BLU-282 / AQ]** Exciter / Harmonic Enhancer — HPF + distortion blend. PRESET-SAFE.
@@ -187,14 +203,14 @@ Total: 167 items, preserved in their original source-doc grouping for traceabili
 - **[BLU-284 / AQ]** Subharmonic Generator (Octaver) — pitch tracker + sine/square octave below. PRESET-SAFE.
 - **[BLU-285 / AQ]** Comb Filter — short delay + heavy mix. PRESET-SAFE.
 
-### Time-Based
+### Future Effect Modules — Time-Based
 - **[BLU-286 / AQ]** Convolution (IR Loader) — `juce::dsp::Convolution` + WAV IRs. PRESET-SAFE.
 - **[BLU-287 / AQ]** Pitch Shifter — reuses existing `PhaseVocoder`. PRESET-SAFE.
 - **[BLU-288 / AQ]** Granular Processor — 10–100 ms grains. PRESET-SAFE.
 - **[BLU-289 / AQ]** Stereo Widener (Haas Effect) — tiny L/R delay. PRESET-SAFE.
 - **[BLU-290 / AQ]** Reverse Buffer — circular buffer with reverse read. PRESET-SAFE.
 
-### Modulation
+### Future Effect Modules — Modulation
 - **[BLU-291 / AQ]** Tremolo — LFO modulating amplitude. PRESET-SAFE.
 - **[BLU-292 / AQ]** Auto-Pan — LFO modulating `juce::dsp::Panner`. PRESET-SAFE.
 - **[BLU-293 / AQ]** Vibrato — chorus with dry muted. PRESET-SAFE.
@@ -210,7 +226,41 @@ Total: 167 items, preserved in their original source-doc grouping for traceabili
 - **[BLU-301 / OT]** Latency reporting — read plugin `getLatencySamples()`. ~1 day.
 - **[BLU-302 / OT]** Crash protection (sub-process hosting) — optional, ~3-6 weeks.
 
-## Player Engines (43)
+### New effect modules from §P3-CORE Cross-Apply (Round 4)
+- **[BLU-513 / AQ]** Ring Modulator effect (new module) — Round 4 §P3-CORE Cross-Apply.
+- **[BLU-514 / AQ]** Transient Injector effect (new module) — distinct from Transient Shaper.
+- **[BLU-515 / AQ]** Gate / Rhythmic Tremolo effect — multi-burst engine drives.
+- **[BLU-516 / AQ]** Analog Drift / Tape Pitch Wander effect — standalone subtle pitch-drift.
+
+### Effect-panel preset loader
+- **[BLU-499 / WP]** Effect-panel preset loader UI — 3 approach options. PRESET-SAFE.
+
+### Fire-Hose net-new effect modules
+- **[CL-015 / AQ]** Convolution body resonance — short IRs of guitar bodies / drum shells; per-engine optional.
+- **[CL-016 / AQ]** Multiband EQ-comp combo — single panel that does EQ + dynamic gain per band (Soothe/Pro-MB style).
+- **[CL-017 / AQ]** Multiband stereo widener — per-band M/S width control (distinct from BLU-289 Haas).
+- **[CL-018 / AQ]** Bass enhancer — psychoacoustic harmonics for perceived bass on small speakers (MaxxBass-style).
+- **[CL-019 / AQ]** Sub bass synthesis from kick — track kick transients, generate sine sub locked to fundamental.
+- **[CL-020 / AQ]** Multitrack tape emulation — full multitrack tape with crosstalk, head bump, per-track wear.
+- **[CL-021 / AQ]** Console emulation — master bus saturation modeling SSL/Neve/API character per channel.
+- **[CL-022 / AQ]** Spring reverb dedicated — Hammond-organ / Fender-amp style spring.
+- **[CL-023 / AQ]** Stutter / glitch effect — beat-divided stutter with random length, gate, retrigger.
+- **[CL-024 / AQ]** Auto-tune effect (T-Pain style) — colorful pitch-correction distinct from `BaySickPitch` precision tool.
+- **[CL-025 / AQ]** Chord harmonizer — key-aware harmony generator that adds 3rd/5th/7th to monophonic input.
+- **[CL-026 / AQ]** Vocal exciter — high-frequency harmonic generation specifically tuned for vocal presence.
+- **[CL-027 / AQ]** De-noise (adaptive spectral) — train on noise floor, subtract.
+- **[CL-028 / AQ]** De-reverb (adaptive) — phase-vocoder based reverb subtraction.
+- **[CL-029 / AQ]** De-clipper — reconstruct clipped audio waveform.
+- **[CL-030 / AQ]** Click/pop removal — transient detect + interpolate.
+- **[CL-031 / AQ]** Adaptive equalizer — multiband level-matching to a reference (extends BLU-255 Match-EQ to be runtime-adaptive).
+- **[CL-032 / AQ]** Dynamic resonance taming — Soothe-style auto-EQ-cut on resonant peaks.
+
+## Players
+
+Every sound-producing engine: Harmless, BaySickPlayer, BaySick family
+(Synth + Bass), dynamic-drum work (Phase D), BaySickVocal, BaySickPedals,
+BaySickRustyDrums, BaySickGuitars, BaySickBasses, BaySickNAM/IR + future
+engines (Wavetable / FM / Analog / Modal / Strings / Vocoder / etc.).
 
 ### §P1 Harmless
 - **[BLU-330 / AQ]** Harmonizer module (T3-Harm) — re-add 6 `harm_*` + Harmonizer panel + DSP. PRESET-SAFE.
@@ -250,6 +300,7 @@ Total: 167 items, preserved in their original source-doc grouping for traceabili
 - **[BLU-404 / AQ]** Per-note portamento via CC / pattern metadata — requires pattern-infra plumbing. PRESET-SAFE.
 - **[BLU-405 / AQ]** Aftertouch → cutoff / volume — aftertouch routing. PRESET-SAFE.
 - **[BLU-406 / AQ]** Waveform morph/blend knob — crossfade between two waveforms. PRESET-SAFE.
+- **[BLU-407 / AQ]** T3.7 Filter KB-track as cents/oct slider — BaySick family. _(walked from Considered & Dropped → future-state 2026-05-08; the Section 2 Drop entry is preserved for traceability.)_
 - **[BLU-408 / AQ]** LFO sync-to-host re-promotion if T2.1 picks remove later. PRESET-SAFE.
 
 ### §P4 DrumsPage (Discovery deferred)
@@ -267,46 +318,7 @@ Total: 167 items, preserved in their original source-doc grouping for traceabili
 ### §P8 VST3 Instrument Hosting
 - **[BLU-447 / OT]** VST3 Instrument Hosting — 3rd-party VST3 instruments per tab. ~1-2 weeks.
 
-## System Pages (3)
-- **[BLU-478 / WP]** TB-T1 LAT readout in ms — restore millisecond conversion. PRESET-SAFE.
-- **[BLU-480 / WP]** FX-1 Rack UI refactor — sidebar picker + detail pane. PRESET-SAFE.
-- **[BLU-487 / WP]** Sample Browser — real file-system tree, drag from disk. Post-Phase H/I.
-
-## Cross-cutting (8)
-- **[BLU-489 / WP]** T3-LRX5Vignette — global lens vignette gated on GL renderer. PRESET-SAFE.
-- **[BLU-490 / WP]** T3-LRX8GLSL GLSL shader realism pass — knob skirts, panel textures, spec highlights. PRESET-SAFE.
-- **[BLU-494 / AQ]** Orfanidis analytical anti-cramping — replaces §12f oversampling. PRESET-SAFE.
-- **[BLU-499 / WP]** Effect-panel preset loader UI — 3 approach options. PRESET-SAFE.
-- **[BLU-513 / AQ]** Ring Modulator effect (new module) — Round 4 §P3-CORE Cross-Apply.
-- **[BLU-514 / AQ]** Transient Injector effect (new module) — distinct from Transient Shaper.
-- **[BLU-515 / AQ]** Gate / Rhythmic Tremolo effect — multi-burst engine drives.
-- **[BLU-516 / AQ]** Analog Drift / Tape Pitch Wander effect — standalone subtle pitch-drift.
-
-## Other / Deferred from source docs (12)
-- **[FSW-334 / WP]** LRX-8 GLSL Shader pass — post-v1.0 GPU realism path.
-- **[LDT-139 / WP]** LRX-8 GLSL Shader (master checklist L&F).
-- **[LDT-219 / OT]** VST/AU hosting — post-v1.0 review.
-- **[LDT-231 / WP]** GLSL shaders — DEFERRED post-v1.0.
-- **[LDT-286 / WP]** GLSL Shader (Optional GPU Path) — OpenGL shader.
-- **[LDT-422 / WP]** GLSL/OpenGL shader rendering (LRX-8) — complexity + GPU compatibility.
-- **[LDT-423 / OT]** VST/AU plugin hosting — major separate effort.
-- **[LDT-424 / OT]** VST instrument builds — investigate making engines into standalone VSTs.
-- **[LDT-425 / OT]** Tablet DJ app — party DJing app for tablets.
-- **[LDT-426 / OT]** Multi-touch support — feeds into tablet DJ.
-- **[LDT-427 / AQ]** Surround sound (5.1/7.1) — niche.
-- **[LDT-428 / AQ]** Stem extraction (ML-based) — requires ML model.
-- **[LDT-429 / WP]** MIDI Export — standard MIDI file from piano roll.
-- **[LDT-430 / OT]** Hardware MIDI output routing — send MIDI to external synths.
-
----
-
-# Section 2 — Claude Fire-Hose Additions
-
-Generated 2026-05-08 during QA-Inventory Phase 5. Net-new beyond what's already in the source docs Tier 3. Grouped by value category. Comprehensive, intentionally unfiltered per user direction ("every plausible idea, not bounded — between 'cool ad' and 'I WISH WE HAD THIS NOW BUT I SHOULD FINALLY RELEASE'").
-
-## Audio Quality (47)
-
-### New synth engines (peer to Harmless / BaySickSynth / BaySickBass)
+### Fire-Hose new synth engines (peer to Harmless / BaySickSynth / BaySickBass)
 - **[CL-001 / AQ]** Wavetable synthesizer (`BaySickWavetable`) — full standalone engine with morph, harmonics editor, multi-frame wavetables, FFT-based distort/transform, drag-WAV-to-wavetable import.
 - **[CL-002 / AQ]** FM synthesizer (`BaySickFM`) — 4-op or 6-op DX-style with algorithm presets, ratio + fixed Hz operator modes, integrated envelopes per op.
 - **[CL-003 / AQ]** Subtractive analog synth (`BaySickAnalog`) — Minimoog-style 3-osc + LFO + filter envelope + amp envelope with character-specific drift modeling.
@@ -316,7 +328,7 @@ Generated 2026-05-08 during QA-Inventory Phase 5. Net-new beyond what's already 
 - **[CL-007 / AQ]** Vocoder engine (`BaySickVocoder`) — carrier/modulator vocoder with 16-32 bands, formant preservation, hold mode.
 - **[CL-008 / AQ]** Talkbox emulation — formant-shaping the carrier through tracked-formant filters.
 
-### Sample / sample manipulation
+### Fire-Hose sample / sample manipulation
 - **[CL-009 / AQ]** Pitched-sample mode for VibePlayer — auto-stretch a one-shot into a sustained instrument across the keyboard.
 - **[CL-010 / AQ]** Reslicer — auto-slice loops into per-transient slices, drum-machine playback.
 - **[CL-011 / AQ]** Granular FX module (rack effect, distinct from BLU-288 sampler) — apply granular to any audio bus.
@@ -324,27 +336,12 @@ Generated 2026-05-08 during QA-Inventory Phase 5. Net-new beyond what's already 
 - **[CL-013 / AQ]** Resynthesis (drag audio → harmonics) — distinct from BLU-332; standalone tool that produces a spectrum file usable by multiple engines.
 - **[CL-014 / AQ]** Pitch-correction for instruments — `BaySickPitch` extended to monophonic guitar/bass/horn input.
 
-### New effect modules / DSP coverage
-- **[CL-015 / AQ]** Convolution body resonance — short IRs of guitar bodies / drum shells; per-engine optional.
-- **[CL-016 / AQ]** Multiband EQ-comp combo — single panel that does EQ + dynamic gain per band (Soothe/Pro-MB style).
-- **[CL-017 / AQ]** Multiband stereo widener — per-band M/S width control (distinct from BLU-289 Haas).
-- **[CL-018 / AQ]** Bass enhancer — psychoacoustic harmonics for perceived bass on small speakers (MaxxBass-style).
-- **[CL-019 / AQ]** Sub bass synthesis from kick — track kick transients, generate sine sub locked to fundamental.
-- **[CL-020 / AQ]** Multitrack tape emulation — full multitrack tape with crosstalk, head bump, per-track wear.
-- **[CL-021 / AQ]** Console emulation — master bus saturation modeling SSL/Neve/API character per channel.
-- **[CL-022 / AQ]** Spring reverb dedicated — Hammond-organ / Fender-amp style spring.
-- **[CL-023 / AQ]** Stutter / glitch effect — beat-divided stutter with random length, gate, retrigger.
-- **[CL-024 / AQ]** Auto-tune effect (T-Pain style) — colorful pitch-correction distinct from `BaySickPitch` precision tool.
-- **[CL-025 / AQ]** Chord harmonizer — key-aware harmony generator that adds 3rd/5th/7th to monophonic input.
-- **[CL-026 / AQ]** Vocal exciter — high-frequency harmonic generation specifically tuned for vocal presence.
-- **[CL-027 / AQ]** De-noise (adaptive spectral) — train on noise floor, subtract.
-- **[CL-028 / AQ]** De-reverb (adaptive) — phase-vocoder based reverb subtraction.
-- **[CL-029 / AQ]** De-clipper — reconstruct clipped audio waveform.
-- **[CL-030 / AQ]** Click/pop removal — transient detect + interpolate.
-- **[CL-031 / AQ]** Adaptive equalizer — multiband level-matching to a reference (extends BLU-255 Match-EQ to be runtime-adaptive).
-- **[CL-032 / AQ]** Dynamic resonance taming — Soothe-style auto-EQ-cut on resonant peaks.
+## Mixer / Routing
 
-### Mixing / mastering / metering
+Mixer page, mixer strips, routing graph, sends + aux strips, cable
+overlay, mastering chain, metering.
+
+### Fire-Hose mixing / mastering / metering
 - **[CL-033 / AQ]** Spatial audio output (Dolby Atmos / binaural) — extends LDT-427 surround.
 - **[CL-034 / AQ]** Headphone monitor mode (HRTF crossfeed) — speaker-emulation on headphones.
 - **[CL-035 / AQ]** K-weighted LUFS metering on every bus — distinct from BLU-110 (limiter only).
@@ -361,7 +358,37 @@ Generated 2026-05-08 during QA-Inventory Phase 5. Net-new beyond what's already 
 - **[CL-046 / AQ]** Auto-mixing assist — AI suggests track levels + pan placement based on genre.
 - **[CL-047 / AQ]** Stem-from-audio (drag song in, get stems) — extends LDT-428 to in-app workflow.
 
-## Performance / Efficiency (15)
+## System Pages
+
+Builder, Effects Page, Audio Settings, Project Persistence, Keyboard /
+Mouse docs.
+
+### Source-doc backlog
+- **[BLU-478 / WP]** TB-T1 LAT readout in ms — restore millisecond conversion. PRESET-SAFE.
+- **[BLU-480 / WP]** FX-1 Rack UI refactor — sidebar picker + detail pane. PRESET-SAFE.
+- **[BLU-487 / WP]** Sample Browser — real file-system tree, drag from disk. Post-Phase H/I.
+
+## UI / L&F / Theming
+
+VibeLAF, palette, themes, layouts, pattern colours, ribbon visuals,
+knob styling, look-and-feel cross-cuts.
+
+### LRX-5 / LRX-8 — GLSL shader / vignette
+- **[BLU-489 / WP]** T3-LRX5Vignette — global lens vignette gated on GL renderer. PRESET-SAFE.
+- **[BLU-490 / WP]** T3-LRX8GLSL GLSL shader realism pass — knob skirts, panel textures, spec highlights. PRESET-SAFE.
+- **[FSW-334 / WP]** LRX-8 GLSL Shader pass — post-v1.0 GPU realism path.
+- **[LDT-139 / WP]** LRX-8 GLSL Shader (master checklist L&F).
+- **[LDT-231 / WP]** GLSL shaders — DEFERRED post-v1.0.
+- **[LDT-286 / WP]** GLSL Shader (Optional GPU Path) — OpenGL shader.
+- **[LDT-422 / WP]** GLSL/OpenGL shader rendering (LRX-8) — complexity + GPU compatibility.
+
+## Cross-cutting Infrastructure
+
+Engine (MT render path), `RenderGraphDispatcher`, BlockContext, audio
+device init, MIDI input, recording lifecycle, project persistence,
+audio-device infrastructure, performance / efficiency optimization.
+
+### Performance / Efficiency (Fire-Hose)
 - **[CL-048 / PE]** SIMD vectorization audit — across all DSP loops; `juce::dsp::SIMDRegister` where partial.
 - **[CL-049 / PE]** GPU offload for FFT-based effects — linear-phase EQ, reverb, granular via OpenGL compute shaders.
 - **[CL-050 / PE]** AVX2 / AVX-512 runtime detection + path selection.
@@ -378,7 +405,16 @@ Generated 2026-05-08 during QA-Inventory Phase 5. Net-new beyond what's already 
 - **[CL-061 / PE]** Async preset load — don't block UI on preset switch.
 - **[CL-062 / PE]** Lock-free everywhere — audit remaining locks in audio path; replace with atomic / RCU patterns.
 
-## User Tools / Learning Experience (24)
+### Audio-Device Infrastructure (walked)
+- **[FSW-121 / PE]** RAM-load <15MB clips — replaces AudioClipStreamer cold-start sputter. Post-V1 optimization (MT engine reduces but doesn't eliminate the symptom). _(walked from V1 backlog 2026-05-08.)_
+
+## User Tools / Learning
+
+AI helpers (Composer / Mixer / Master), tutorials, smart melody / chord
+/ drum / bass generators, hover-to-hear, scale picker, beat detection,
+sound-design guides.
+
+### Fire-Hose AI / smart features
 - **[CL-063 / UT]** AI assistant "Composer" — generate full song from text prompt.
 - **[CL-064 / UT]** AI assistant "Mixer" — auto-mix the current project.
 - **[CL-065 / UT]** AI assistant "Master" — auto-master to genre target.
@@ -404,7 +440,13 @@ Generated 2026-05-08 during QA-Inventory Phase 5. Net-new beyond what's already 
 - **[CL-085 / UT]** Visual EQ matching — drag reference track, EQ matches its spectral profile.
 - **[CL-086 / UT]** Built-in song idea library — hundreds of starting templates, browseable + filterable.
 
-## Workflow Polish (22)
+## Workflow Polish
+
+Multi-window, project snapshots / version control, cloud sync, sharing,
+comments, macros, performance pad, drum-pad mode, track grouping,
+section markers, action recorder.
+
+### Fire-Hose QoL
 - **[CL-087 / WP]** Multi-window UI — detach mixer / piano roll / browser to separate windows on second monitor.
 - **[CL-088 / WP]** Theme variants — light, dark, high-contrast, sepia.
 - **[CL-089 / WP]** Custom theme builder — user-defined color palettes for entire UI.
@@ -428,11 +470,43 @@ Generated 2026-05-08 during QA-Inventory Phase 5. Net-new beyond what's already 
 - **[CL-107 / WP]** Bookmark positions in Builder — jump-to keyboard shortcut.
 - **[CL-108 / WP]** Action recorder — record a sequence of UI actions, replay later (macro for repetitive workflows).
 
+### Routing (walked)
+- **[FSW-330 / WP]** Pre-fader sends in routing — currently all sends are treated as post-fader by audio path; pre-fader wiring deferred. _(walked from V1 backlog 2026-05-08.)_
+
+## Other / Platform / Deferred
+
+VST/AU plugin hosting (instrument + effect), surround / Atmos, tablet
+DJ app, multi-touch, hardware MIDI output, MIDI export.
+
+### VST / AU plugin hosting (post-v1.0 review)
+- **[LDT-219 / OT]** VST/AU hosting — post-v1.0 review.
+- **[LDT-423 / OT]** VST/AU plugin hosting — major separate effort.
+
+### VST instrument builds (separate target)
+- **[LDT-424 / OT]** VST instrument builds — investigate making engines into standalone VSTs.
+
+### Tablet DJ + multi-touch
+- **[LDT-425 / OT]** Tablet DJ app — party DJing app for tablets.
+- **[LDT-426 / OT]** Multi-touch support — feeds into tablet DJ.
+
+### Surround / stem extraction
+- **[LDT-427 / AQ]** Surround sound (5.1/7.1) — niche.
+- **[LDT-428 / AQ]** Stem extraction (ML-based) — requires ML model.
+
+### MIDI export / hardware MIDI
+- **[LDT-429 / WP]** MIDI Export — standard MIDI file from piano roll.
+- **[LDT-430 / OT]** Hardware MIDI output routing — send MIDI to external synths.
+
+## Meta
+
+_No future-state items in the Meta bucket — Sessions / Decisions /
+Standing Parallel Work are bookkeeping, not roadmap items._
+
 ---
 
-# Section 3 — Considered & Dropped
+# Section 2 — Considered & Dropped
 
-Items reviewed during QA-Inventory walkthrough (or post-walk Phase-4 reclassify) and confirmed dropped, with reason. Ensures we don't re-litigate.
+Items reviewed during QA-Inventory walkthrough (or post-walk Phase-4 reclassify) and confirmed dropped, with reason. Ensures we don't re-litigate. Grouped by drop reason (not by domain) — if you ever change your mind on a drop, that context lives here.
 
 ## Harmless UI items dropped during QA-A STYLE / Phase 5F-3 (12)
 
@@ -449,7 +523,7 @@ These were proposed in the source docs but explicitly dropped during the Harmles
 - **[BLU-637 / OT]** Global link/chain toggle (#53) — implicit via timbre_blend. PRESET-SAFE.
 - **[BLU-638 / OT]** LFO pre/post fx labels (#56) — no pre/post distinction in this DSP. PRESET-SAFE.
 - **[BLU-639 / OT]** Info Bar text area (#59) — removed as confusing per user direction. PRESET-SAFE.
-- **[BLU-407 / OT]** T3.7 Filter KB-track as cents/oct slider — DROPPED 2026-04-21 as synth-nerd feature. (Note: walked entry reclassified to Bucket D — see Section 1 walk additions; both routings preserved for traceability.)
+- **[BLU-407 / OT]** T3.7 Filter KB-track as cents/oct slider — DROPPED 2026-04-21 as synth-nerd feature. (Note: walked entry reclassified to Future State Section 1 → Players → §P3 BaySick family; both routings preserved for traceability.)
 
 ## Drum engine option dropped (1)
 
@@ -468,27 +542,6 @@ These were proposed in the source docs but explicitly dropped during the Harmles
 ## QA-Inventory walk reclassify-to-Drop (1)
 
 - **[BLU-605 / OT]** voxRoll/instRoll dead-code cleanup — originally proposed as Phase 6 cleanup. Per walk: piano-roll infrastructure is NEEDED for Inst (BaySickGuitars / BaySickBasses) and reserved for future SFZ vocal player. Not dead code; should not be removed.
-
----
-
-# Section 4 — QA-Inventory Walk Reclassifications to Future State (6)
-
-Items originally in source docs as Tier 2 deferred or active backlog (bucket A/B). During QA-Inventory walk, user reclassified them as future-state (post-V1).
-
-## Effect Modules (4)
-
-- **[BLU-088 / AQ]** Dry / Wet / CrossLevel dB knobs (C5) — Flanger Tier 2 deferred. DSP exists but only Cross UI-exposed. PRESET-SAFE.
-- **[BLU-146 / AQ]** C6 SmoothedValue crossfade on Stages count — Phaser Tier 2 deferred. §7b state-preserve covers in practice. PRESET-SAFE.
-- **[BLU-147 / AQ]** Dry/Wet/CrossLevel dB knobs — Phaser Tier 2 deferred; consistency follow-on to §4 Flanger. PRESET-SAFE.
-- **[BLU-407 / AQ]** T3.7 Filter KB-track as cents/oct slider — BaySick family. Reclassified from DROPPED to future-state.
-
-## Performance / Efficiency (1)
-
-- **[FSW-121 / PE]** RAM-load <15MB clips — replaces AudioClipStreamer cold-start sputter. Post-V1 optimization (MT engine reduces but doesn't eliminate the symptom).
-
-## Workflow Polish (1)
-
-- **[FSW-330 / WP]** Pre-fader sends in routing — currently all sends are treated as post-fader by audio path; pre-fader wiring deferred. Future-state per walk.
 
 ---
 
