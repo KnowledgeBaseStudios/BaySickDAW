@@ -17,6 +17,40 @@ routed at batch close.
 
 ---
 
+## Subagents (added 2026-05-08)
+
+Six BaySickDAW-specific subagents live at `.claude/agents/`, with slash
+commands at `.claude/commands/`. Use these instead of doing the work
+inline — they save context budget and produce more consistent output.
+
+| Slash command | Agent | When to use |
+|---------------|-------|-------------|
+| `/read-doc <query>` | `doc-reader` | Pull a section from a Plans & Specs doc without loading the full file (e.g., `Previously Implemented.md` is 262 KB — grep through the agent instead). |
+| `/draft-doc <mode> <context>` | `doc-drafter` | Compile batch close entries / §9 Forks entries / Future State additions. Returns proposed text in a code block; never autonomously edits Plans & Specs/. Modes: `running-notes` / `batch-close` / `forks-entry` / `future-state`. |
+| `/review-batch <batch-id>` | `batch-code-reviewer` | At batch close, before final commit. Checks diff against plan + CLAUDE.md rules + canonical conventions + memory-tracked gotchas. Outputs BLOCKER / NEEDS-FIX / NIT findings. |
+| `/test-signal <module>` | `dsp-test-signal` | Generate validation test plan for a DSP module. Useful during 5F-9 DSP Quality Pass batches and any new DSP work. |
+| `/preset-gaps` | `preset-coverage-mapper` | Audit factory + user preset library for genre / instrument-family gaps. Useful before QA-Templates batch. |
+| `/research [focus area]` | `competitive-research` | One-shot competitive sweep before milestones. Outputs draft Future State entries with verified-source confidence ratings. Run sparingly. |
+
+Six **cross-project** agents also available (live at `~/.claude/agents/`):
+
+| Slash command | Agent | When to use |
+|---------------|-------|-------------|
+| `/draft-commit` | `commit-drafter` | Before committing — drafts a message matching the project's existing commit style. |
+| `/diagnose-build [log]` | `build-error-diagnoser` | When `do_build.bat` fails. Identifies likely cause + ranked fix candidates. |
+| `/explain <concept>` | `concept-explainer` | Hit an unfamiliar concept. Returns explanation calibrated to the "I debug if walked through" learning style, with codebase examples where they exist. |
+| `/standup` | `standup-summarizer` | Session start / end of day. Done / Next / Blocked summary from git log + plan docs. |
+| `/extract-spec` | `spec-extractor` | After a long planning discussion — convert it to a structured spec doc. |
+| `/audit-licenses` | `license-auditor` | Pre-release sweep. Vendored libs + addons + asset attribution check. |
+
+**Key rule:** the doc-drafter operates in **drafter-only mode** — it
+returns proposed text, the main session reviews and applies via Edit.
+Same goes for any agent that touches Plans & Specs/. Past blast-radius
+incidents (the 6-of-10 buckets mistake on 2026-05-08) confirm this is
+the right boundary.
+
+---
+
 ## Project Overview
 JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone Windows app only** — no VST/plugin version planned; a legacy `juce_add_plugin` target still exists in CMake but is not shipped. Future platform plan: tablet "DJ Party" variant, still not a VST.
 **App name:** BaySickDAW by KnowledgeBase Studios
