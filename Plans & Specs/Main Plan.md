@@ -168,6 +168,39 @@ before writing.**
 | `Previously Implemented.md` | `## <Section>` (Header conventions, Sources surveyed, How to read, Entries) | `### Phase X - <Name>` grouping; `#### **<ID>: <Title>**` entries with uniform 5-line shape (Sources / Implemented / Source / Verified) |
 | `Future State.md` | `# Section N` major bands; `## <Cluster>` within | `- **[<ID> / <TAG>]** <Title> — <description>.` one-liner per item |
 
+**Folder-level scope (added 2026-05-08):**
+
+`Plans & Specs/` is the **umbrella for ALL durable project artifacts**,
+not just the literal "plans and specs" the folder name implies.  The
+name is preserved (renaming would break every existing link) but the
+scope is broader than the name suggests.  Anything that is:
+
+- a planning artifact (Main Plan, batch plans, Carry-Forward),
+- a record of what shipped (Previously Implemented, Implemented Work Log),
+- a roadmap or wishlist (Future State),
+- a research artifact (competitive sweeps, technical investigations),
+- a decision log or post-mortem,
+- a recurring report (smoke tests, audits),
+
+…lives under `Plans & Specs/` in an appropriate subfolder.  Subfolders
+are organized by artifact TYPE, not by topic / domain (the canonical
+domain buckets are inside the docs, not the folder structure).
+
+Current and approved subfolders:
+
+- `Plans & Specs/Batch Plans/` — per-batch implementation plan files (`<silly-name>.md`).
+- `Plans & Specs/Research Reports/` — output from competitive sweeps,
+  technical investigations, market scans (e.g., the dated competitive-
+  research aggregates that `competitive-research` agent produces).
+- (more subfolders added here as the need arises — decision logs,
+  post-mortems, audit reports, etc.; document each new subfolder here
+  when added so the structure stays discoverable).
+
+The five canonical top-level docs (`Main Plan.md`, `Carry-Forward
+Reference.md`, `Implemented Work Log.md`, `Previously Implemented.md`,
+`Future State.md`) stay at the root of `Plans & Specs/` regardless of
+how many subfolders accumulate.
+
 **Grep patterns (uniform across docs):**
 
 - `^### ` finds all sub-section / batch / phase / dated headers.

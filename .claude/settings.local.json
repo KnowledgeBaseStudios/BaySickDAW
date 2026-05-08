@@ -39,6 +39,8 @@
       "Bash(cp \"/c/Users/jeffm/Downloads/SKILL \\(1\\).md\" \"/c/Users/jeffm/.claude/skills/web-artifacts-builder/SKILL.md\")",
       "Bash(cp \"/c/Users/jeffm/Downloads/SKILL \\(2\\).md\" \"/c/Users/jeffm/.claude/skills/theme-factory/SKILL.md\")",
       "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:*)",
       "Bash(find . -name *.sln -o -name *.vcxproj)",
       "Bash(find /c/Users/jeffm/Documents/Vibesynth -maxdepth 5 -name *.sln)",
       "Bash(cmake --build . --target VibesynthStandalone --config Debug)",
@@ -278,7 +280,10 @@
       "Bash(grep -oE '\"text\":\"[^\"]{20,3000}\"')",
       "Read(//c/Users/jeffm/.claude/projects/C--Users-jeffm-Documents-BaySickDAW/memory//**)",
       "Read(//c/Users/jeffm/.claude/projects/C--Users-jeffm-Documents-Vibesynth/memory//**)",
-      "Bash(grep -n \"layoutScrollContent\\(\\)$\\\\|layoutScrollContent \\(\\)$\\\\|::layoutScrollContent\" \"C:\\\\Users\\\\jeffm\\\\Documents\\\\BaySickDAW\\\\Source\\\\Standalone\\\\MixerPage.cpp\")"
+      "Bash(grep -n \"layoutScrollContent\\(\\)$\\\\|layoutScrollContent \\(\\)$\\\\|::layoutScrollContent\" \"C:\\\\Users\\\\jeffm\\\\Documents\\\\BaySickDAW\\\\Source\\\\Standalone\\\\MixerPage.cpp\")",
+      "Bash(git add *)",
+      "Bash(sed -n '2700,2779p' \"Previously Implemented.md\")",
+      "Read(//tmp/**)"
     ]
   }
 }
