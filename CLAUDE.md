@@ -1,5 +1,22 @@
 # BaySickDAW — Claude Working Guide
 
+## Plans & Specs Location (READ FIRST)
+
+All planning documents live in `Plans & Specs/` at the repo root:
+- `Plans & Specs/Main Plan.md` — master sequencing of work, every batch and phase.
+- `Plans & Specs/Carry-Forward Reference.md` — frozen architectural snapshot from 2026-05-07.
+- `Plans & Specs/Implemented Work Log.md` — running ledger of QA-era execution (2026-05-07 onward).
+- `Plans & Specs/Previously Implemented.md` — historical record of pre-QA build work.
+- `Plans & Specs/Future State.md` — post-V1 roadmap.
+- `Plans & Specs/Batch Plans/<silly-name>.md` — per-batch implementation plans.
+
+Per the three-doc system in Main Plan §0, every per-batch session starts by
+reading Main Plan + Carry-Forward + Implemented Work Log.  See Main Plan §0
+Rule 3 for the convention on how findings discovered during execution get
+routed at batch close.
+
+---
+
 ## Project Overview
 JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone Windows app only** — no VST/plugin version planned; a legacy `juce_add_plugin` target still exists in CMake but is not shipped. Future platform plan: tablet "DJ Party" variant, still not a VST.
 **App name:** BaySickDAW by KnowledgeBase Studios
