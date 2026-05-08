@@ -353,6 +353,26 @@ needed to find what you should pull up to review the work.
 - Effort: small-medium (~3-5 hours). Composite shape is well-understood.
 - Verification: full DSP-12 verification matrix below.
 
+#### **QA-Inventory: Comprehensive Source-Doc Triage** (added 2026-05-07 via Rule 3 — see §9)
+**Plan file:** N/A — executed inline from chat breakdown (per user direction; no separate per-batch plan file in `Batch Plans/`).
+- Items: review + categorize every distinct entry across the three pre-QA source documents and route each per its bucket's rules.
+- Source docs:
+  - `Files For Claude/Final Stretch Work.txt` (~886 lines)
+  - `Files For Claude/vibedaw_blueprint.md` (~3333 lines)
+  - `C:/Users/jeffm/.claude/plans/lucky-discovering-tiger.md` (~3629 lines — original location preserved as historical record per user direction; Plans & Specs/ is forward-only).
+- Buckets:
+  - **A** — claimed not-done, still needed → walk one-by-one with user; route per Rule 3 (fold into existing §5 batch OR new dedicated §5 batch).
+  - **B** — claimed not-done, drop candidate → confirm with user; one-line entry in `Future State.md` "Considered & Dropped".
+  - **C** — claimed done + source-verified → entry in `Previously Implemented.md`.
+  - **D** — Claude future-state additions across Audio Quality / Performance / User Tools / Workflow Polish → entries in `Future State.md`. User direction: every plausible idea, not bounded.
+  - **E** — claimed done but unverified → walked with user alongside A; per-item Decision dropdown: Update (= reroute to A as work-to-do) / Archive (= reroute to C as verified) / Delete (= folds into Phase 6 cleanup carry-list).
+- Workflow: parse → initial bucket → create Google Sheet via Drive connector with all rows pre-filled + frozen-row legend of valid Decision values → walk A/B/E with user (checkpoint pings; Claude downloads CSV to read decisions back) → source-verify C in parallel → fire-hose D → apply decisions to Main Plan §5/§9 + `Previously Implemented.md` + `Future State.md` → close with §9 Forks routing entry.
+- Source verification depth: headline-verify every claim (file/class/function exists) + sample 20% of named sub-items per claim + escalate to full verification on any miss + skip anything already verified in Carry-Forward Reference.
+- Risk: zero — read-only triage + doc updates; no source code changes.
+- Dependencies: QA-0 closed (✓ 2026-05-07).
+- Effort: large (~10–15 hours, multi-session expected).
+- Why this slot: pre-QA source docs intermix shipped work, claimed-but-unverified work, abandoned work, and future-state ideas without disambiguation. Without the triage, every downstream batch's plan author re-parses the same ambiguity. Done as a dedicated batch (vs scattered across each downstream batch start) because the parse work is identical across docs and most efficient as a single sweep. Also populates the new `Plans & Specs/` doc skeletons (`Previously Implemented.md`, `Future State.md`) created in commit `c05ce61`.
+
 #### **QA-Md: MT Engine Debug-Build Investigation** (added 2026-05-07 via Rule 3 — see §9; promoted from Phase 5 to Phase 1 same day)
 **Plan file:** TBD (silly-name file when batch starts)
 - Items: QA-0a/QA-0 finding #9 — MT engine is a no-op under Debug
@@ -729,8 +749,8 @@ Every component in the build gets classified into:
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Md** → QA-A → QA-B → QA-C → QA-D → QA-E → QA-F → QA-Fa → QA-G → QA-H
-                                                                → QA-I → QA-J → QA-K → QA-L → QA-M → QA-N
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-B → QA-C → QA-D → QA-E → QA-F → QA-Fa → QA-G → QA-H
+                                                                                  → QA-I → QA-J → QA-K → QA-L → QA-M → QA-N
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -741,6 +761,14 @@ shipping-binary workflow. See §9 first entry.
 queued in Phase 5; promoted to Phase 1) — MT engine is a no-op in
 Debug per finding #9; downstream batches need working MT under Debug
 for diagnostic purposes. See §9.
+
+\*\*\* QA-Inventory inserted 2026-05-07 between QA-0 and QA-Md —
+comprehensive triage + bucket categorization across the three pre-QA
+source docs (`Final Stretch Work.txt`, `vibedaw_blueprint.md`,
+`.claude/plans/lucky-discovering-tiger.md`). Read-only; no source
+code changes. Populates the new `Plans & Specs/` doc skeletons
+(`Previously Implemented.md`, `Future State.md`) and routes
+still-needed work per Rule 3. See §9.
 
 QA-0, QA-A, QA-B can run in **parallel** (different code surfaces, no
 audio-path overlap between QA-A UI work and QA-0 dispatcher fix).
@@ -999,3 +1027,64 @@ QA-Md slot + footnote.
 - QA-0 plan: `composite-merging-rivers-twilight.md` (closed).
 - QA-Md plan: TBD silly-name file when batch starts (next).
 - §9 of this main plan: this entry (third Forks entry).
+
+### 2026-05-07 — QA-Inventory inserted between QA-0 and QA-Md (comprehensive source-doc triage)
+
+**Trigger:** post-QA-0 close, the three pre-QA source docs
+(`Files For Claude/Final Stretch Work.txt`,
+`Files For Claude/vibedaw_blueprint.md`,
+`C:/Users/jeffm/.claude/plans/lucky-discovering-tiger.md`) intermix
+shipped work, claimed-but-unverified work, abandoned work, and
+future-state ideas without disambiguation. Without a dedicated
+triage pass, every downstream batch's plan author re-parses the
+same ambiguity. Additionally, the new `Plans & Specs/` doc
+skeletons (`Previously Implemented.md`, `Future State.md`) created
+in commit `c05ce61` need to be populated with verified content.
+
+**Decision:** insert QA-Inventory between QA-0 (closed) and QA-Md
+(next). Comprehensive review + bucket categorization across the
+three docs:
+
+- **A** — claimed not-done, still needed → walk one-by-one with user;
+  route per Rule 3 (fold into existing §5 batch OR new dedicated §5 batch).
+- **B** — claimed not-done, drop candidate → confirm with user;
+  one-line entry in `Future State.md` "Considered & Dropped".
+- **C** — claimed done + source-verified → entry in
+  `Previously Implemented.md`.
+- **D** — Claude future-state additions across Audio Quality,
+  Performance, User Tools, Workflow Polish → entries in
+  `Future State.md`. User direction: every plausible idea, not bounded.
+- **E** — claimed done but unverified → walked with user alongside A;
+  per-item Decision dropdown: Update (reroute to A) / Archive (reroute
+  to C) / Delete (folds into Phase 6 cleanup carry-list).
+
+**Source verification depth (locked):** headline-verify every claim
+(file/class/function exists) + sample 20% of named sub-items per
+claim + escalate to full verification on any miss + skip anything
+already verified in the 2026-05-07 Carry-Forward Reference snapshot.
+
+**Walkthrough medium:** Google Sheet created via the user's Drive
+connector with all items pre-filled (`ID | Bucket | Source Doc |
+Section/Line | Title | Original Status Claim | Brief Context |
+Decision | Your Notes`); valid Decision values listed in a frozen
+first-row legend; user fills Decision column at own pace; Claude
+downloads sheet as CSV at checkpoints to apply decisions to plan
+docs.
+
+**Plan file:** N/A — executed inline from chat breakdown (per user
+direction; no separate per-batch plan file in `Batch Plans/`).
+
+**Inline back-refs:**
+- §5 has new QA-Inventory entry between QA-0 and QA-Md.
+- §6 sequencing arrow updated; new `***` footnote added.
+- §9 Forks: this entry (fourth).
+
+**Verification:** QA-Inventory closes when (a) every distinct item
+across all three source docs has a recorded bucket + decision, (b)
+`Previously Implemented.md` is populated for all bucket-C items, (c)
+`Future State.md` is populated for B "Considered & Dropped" + all
+D entries, (d) Main Plan §5 reflects all bucket-A foldings (existing
+batch scope expansions) + new batches if any, (e) §9 Forks has a
+"QA-Inventory close routings" entry chronicling all foldings/
+additions/deletions-to-Phase-6, (f) `Implemented Work Log.md` has
+the QA-Inventory closing entry.
