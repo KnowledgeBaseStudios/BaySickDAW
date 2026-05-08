@@ -20,7 +20,7 @@ graduate to the active plan if priorities shift; that promotion gets a
 
 ## How to read this doc
 
-Three sections:
+Sections:
 
 1. **Source-Doc Tier 3 / Future-State (167 items)** — items already in
    the source docs as Tier 3 / post-v1.0 / deferred. Original IDs preserved
@@ -30,6 +30,9 @@ Three sections:
    value category.
 3. **Considered & Dropped** — populated at QA-Inventory close from
    walkthrough bucket B decisions. One-liner per item with reason.
+4. **Walked-to-Future-State (6 items)** — items the user re-routed
+   from B-bucket to D-bucket during the QA-Inventory walk; preserved
+   on the long-term radar.
 
 Each entry is a one-liner: **`[ID / TAG] Title — short description.`**
 
@@ -40,6 +43,29 @@ Tags per category:
 - **UT** — User Tools / Learning Experience
 - **WP** — Workflow Polish
 - **OT** — Other / Platform / Cross-cutting
+
+## Header conventions
+
+Cross-doc rules live in [Main Plan.md](Main Plan.md) §0 "Document
+Formatting Conventions". Local layout for this doc:
+
+- `#` — document title.
+- `# Section N — <Title>` — major band (Section 1 / Section 2 / Section 3 / Section 4).
+- `## <Cluster>` — group inside a section (e.g., `## Effect Modules (70)`,
+  `## Audio Quality (47)`).
+- `### §<chapter> <name>` — sub-cluster (e.g., `### §1 ChorusDSP`).
+- `- **[<ID> / <TAG>]** <Title> — <description>.` — single-line entry.
+
+Grep patterns:
+
+- `^# Section ` finds all major bands.
+- `^## ` finds all clusters.
+- `^### ` finds all sub-clusters.
+- `^- \*\*\[` finds all entries.
+
+Append-only. New Drops continue Section 3 numbering; new fire-hose
+ideas continue Section 2 numbering; Section 1 entries stay frozen at
+their original source-doc IDs.
 
 ---
 

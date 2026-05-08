@@ -14,6 +14,9 @@ the table of contents below to jump to a batch.
 
 ## Header conventions
 
+Cross-doc rules live in [Main Plan.md](Main Plan.md) §0 "Document
+Formatting Conventions". Local layout for this doc:
+
 - `#` — document title
 - `##` — top-level section (How to read, Header conventions, Entry template, Table of contents, Entries)
 - `### YYYY-MM-DD HH:MM PT — <Batch ID> — <Summary>` — individual batch close entry header
@@ -25,6 +28,8 @@ Grep patterns:
 - `^## ` finds top-level sections
 
 Timestamps use 24-hour clock and `PT` (Pacific Time) generically — covers both PDT and PST without DST-overlap ambiguity.
+
+Append-only. Never edit prior entries — surprise findings later get their own new entry. Carry-forward contradictions are recorded as new entries, not as edits to the carry-forward.
 
 **Entry template** (paste at the bottom and fill in):
 

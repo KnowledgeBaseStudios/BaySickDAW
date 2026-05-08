@@ -10,6 +10,9 @@
 
 ## Header conventions
 
+Cross-doc rules live in [Main Plan.md](Main Plan.md) §0 "Document
+Formatting Conventions". Local layout for this doc:
+
 - `#` - document title
 - `##` - top-level section (How to read, Sources, Entries)
 - `### Phase X - <Name>` - grouping headers
@@ -20,6 +23,11 @@ Grep patterns:
 - `^### ` finds all phase / module headers
 - `^#### \*\*` finds all individual entries
 - `^## ` finds top-level sections
+
+Each entry follows a uniform 5-line shape (Sources / Implemented /
+Source / Verified). Append-only — manual edits to existing entries
+are intentionally rare. New pre-QA items surfacing later get appended
+in the matching grouping section.
 
 ## Sources surveyed
 

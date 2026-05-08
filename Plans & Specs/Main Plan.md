@@ -113,6 +113,85 @@ Net: §5 stays the planned-sequence map; §9 Forks is the canonical
 chronological execution ledger. Reviewing §9 gives you every fork +
 addition + post-close finding in one place.
 
+### Document Formatting Conventions (canonical for all `Plans & Specs/` docs)
+
+All five `Plans & Specs/` documents follow a shared formatting doctrine
+so that grep patterns, cross-references, and timestamp parsing stay
+uniform. Each doc has a brief local "Header conventions" section that
+points back here for the cross-doc rules and documents its own doc-
+specific layout. **When adding new content, match these conventions
+before writing.**
+
+**Heading hierarchy (universal):**
+
+- `#` — document title (one per doc).
+- `##` — top-level section.
+- `###` — sub-section / batch / phase / dated entry header.
+- `####` — item or sub-section within a sub-section.
+- `#####` — bullet group within an item (sparingly; prefer bold labels).
+
+**Timestamps:**
+
+- ISO date: `YYYY-MM-DD` (e.g., `2026-05-08`).
+- Time: 24-hour clock with `PT` (Pacific Time) suffix — covers both
+  PDT and PST without DST-overlap ambiguity. Example: `10:42 PT`.
+- Combined date+time header: `YYYY-MM-DD HH:MM PT — <Batch ID> — <Summary>`.
+
+**Cross-references:**
+
+- Section reference: `§N` (e.g., `§5`, `§9 fifth entry`).
+- File path link: `[Source/path/file.cpp](Source/path/file.cpp)` markdown
+  link, optionally with `:line` suffix (e.g.,
+  `[PluginProcessor.cpp:1737](Source/PluginProcessor.cpp:1737)`). Within
+  `Plans & Specs/` docs, the link target is repo-relative.
+- Sister doc reference: `[Main Plan.md](Main Plan.md)` (no path prefix
+  since they're co-located).
+- Commit hash: backticked 7-char short hash, e.g. `` `c05ce61` ``.
+
+**Item ID prefixes (used across all docs for the same logical work):**
+
+| Prefix | Source | Doc home |
+|--------|--------|----------|
+| `BLU-*` | `Files For Claude/vibedaw_blueprint.md` | `Previously Implemented.md` (Done) / `Future State.md` (Tier 3) |
+| `FSW-*` | `Files For Claude/Final Stretch Work.txt` | same as BLU |
+| `LDT-*` | `C:/Users/jeffm/.claude/plans/lucky-discovering-tiger.md` | same as BLU |
+| `CL-*` | Claude fire-hose proposals (QA-Inventory Phase 5) | `Future State.md` Section 2 |
+| `QA-*` | Active V1 batches | `Main Plan.md` §5 |
+
+**Per-doc layout patterns:**
+
+| Doc | Top-level section style | Entry style |
+|-----|-------------------------|-------------|
+| `Main Plan.md` | `## N. <Title>` numbered phases (§0-§9) | `### QA-<Letter> — <Title>` batch headers inside §5; `### YYYY-MM-DD — <Title>` entries inside §9 Forks |
+| `Carry-Forward Reference.md` | `## §N. <Title>` numbered (§1-§9); FROZEN | `### <Sub-topic>` clusters; `- <bullet>` items |
+| `Implemented Work Log.md` | `## <Section>` (Header conventions, How to read, Entries) | `### YYYY-MM-DD HH:MM PT — <Batch ID> — <Summary>` per batch close; `#### <Sub-section>` (Done, Found along the way, etc.) |
+| `Previously Implemented.md` | `## <Section>` (Header conventions, Sources surveyed, How to read, Entries) | `### Phase X - <Name>` grouping; `#### **<ID>: <Title>**` entries with uniform 5-line shape (Sources / Implemented / Source / Verified) |
+| `Future State.md` | `# Section N` major bands; `## <Cluster>` within | `- **[<ID> / <TAG>]** <Title> — <description>.` one-liner per item |
+
+**Grep patterns (uniform across docs):**
+
+- `^### ` finds all sub-section / batch / phase / dated headers.
+- `^#### ` finds all items / nested sub-sections.
+- `^## ` finds all top-level sections.
+- `^# ` finds the document title (or major section bands in
+  `Future State.md`).
+
+**Append-only / edit policy:**
+
+- `Carry-Forward Reference.md`: **frozen.** Never edit. Contradictions
+  are recorded as new entries in `Implemented Work Log.md`.
+- `Implemented Work Log.md`: **append-only.** Never edit prior entries.
+  New findings later get their own new entry.
+- `Previously Implemented.md`: **append-only.** Manual edits to existing
+  entries are intentionally rare; updates record changes over time in
+  the QA-era log instead of rewriting history.
+- `Main Plan.md`: **edit per Rule 3** (inline back-refs + master fork
+  log). Original §1-§8 content preserved; §9 Forks is the canonical
+  chronological log of changes since plan write.
+- `Future State.md`: **append-only**, organised by section. New Drops
+  go into Section 3; new fire-hose ideas continue Section 2 numbering;
+  source-doc Tier 3 items in Section 1 stay frozen at original IDs.
+
 **Initial carry-over for this plan (2026-05-07):**
 
 - **Completed**: Triage + verification + plan write + carry-forward

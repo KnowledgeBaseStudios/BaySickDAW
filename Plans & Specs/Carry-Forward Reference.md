@@ -13,6 +13,28 @@
 plan. Skim §4-§6 to confirm decisions and patterns. §7-§8 are reference
 sections you grep when needed.
 
+## Header conventions
+
+Cross-doc rules live in [Main Plan.md](Main Plan.md) §0 "Document
+Formatting Conventions". Local layout for this doc:
+
+- `#` — document title.
+- `## §N. <Title>` — top-level numbered section (§1-§9).
+- `### <Sub-topic>` — sub-cluster within a section.
+- `- <bullet>` — primitive entry (typically a file:line reference,
+  decision, or pattern). Inline backticks for symbols and paths.
+
+Grep patterns:
+
+- `^## §` finds all top-level sections.
+- `^### ` finds all sub-clusters.
+- File:line citations use `[Source/path:line](path)` markdown links
+  (relative paths from this doc's location, hence the `../Source/`
+  prefix in older entries).
+
+This doc is **frozen as of 2026-05-07**. Add nothing here — log new
+findings in [Implemented Work Log.md](Implemented Work Log.md) instead.
+
 ---
 
 ## §1. MT Render Path Primitives (file:line)
