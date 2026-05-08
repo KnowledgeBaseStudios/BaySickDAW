@@ -203,3 +203,64 @@ QA-Md promoted from Phase 5 to Phase 1 because Debug's diagnostic value depends 
 - QA-Md (MT Engine Debug-Build Investigation). Plan file: TBD silly-name when batch starts. Diagnostic-first: determine why MT path is no-op under Debug (workers not picking up tasks, runUntilOrTimeout returning immediately, or compile-time gate). Then fix scope.
 
 ---
+
+### 2026-05-08 10:42 PT — QA-Inventory — 1429 source-doc items triaged + plan docs populated
+
+#### Done
+- Parsed all three pre-QA source docs end to end (`Files For Claude/Final Stretch Work.txt`, `Files For Claude/vibedaw_blueprint.md`, `C:/Users/jeffm/.claude/plans/lucky-discovering-tiger.md`); 1429 distinct items extracted to a master TSV at `C:/Users/jeffm/.claude/plans/qa-inventory-master.tsv`.
+- Created Google-Sheet walkthrough via the user's Drive connector (auto-converted CSV upload). User filled the Decision column for buckets A/B/E (293 walked items) over a multi-day pass.
+- Phase-4 source verification on the C-bucket (claimed-Done items): headline + 20% sample + escalate-on-miss. 968 items confirmed Done at source. FSW-244 reclassified during this phase (`MixerPage::showInputChannelPicker` had no diagnostic submenu → walked-to-Drop).
+- Phase-5 fire-hose on bucket D: every plausible post-v1.0 idea captured to `Future State.md`.
+- Cluster dedupe via subagent: 1120 combined Done rows reduced to 1089 across 29 clusters (saved 31). Report at `C:/Users/jeffm/.claude/plans/qa-inventory-dedupe-report.md`. Walked through every multi-row cluster with the user; merge / keep-all decisions captured (Cluster 5d treble-bug folded into §12 EQ8; Cluster 10 delete prompts kept pending sweep; etc.).
+- Populated the new `Plans & Specs/` doc skeletons:
+  - `Previously Implemented.md` — 1089 deduped entries written by background subagent in uniform 5-line shape under 25 phase/module sections. 6,644 lines / 262 KB final.
+  - `Future State.md` — Section 3 (Considered & Dropped) populated with 17 walked-to-Drop entries; Section 4 populated with 6 walked-to-D-bucket entries.
+  - `Implemented Work Log.md` — header convention section added (this entry's family); existing Triage / QA-0a / QA-0 entries bumped from `##` to `###` with retroactive PT timestamps for chronological consistency.
+- Updated `Main Plan.md`:
+  - Scope expansions folded into existing batches (QA-A / QA-E / QA-F / QA-J / QA-L) per Rule 3.
+  - 9 new batches added (QA-Drum-Polish / QA-VibeSlider / QA-Verify / QA-Export / QA-RC / QA-Manuals / QA-Templates / QA-Installer / QA-Framework).
+  - §6 Sequencing arrow rewritten with new `****` footnote covering close additions; new Phase 7 section added between QA-RC and §7.
+  - §9 Forks fifth entry chronicles all routings, cluster decisions, dedupe stats, and side findings.
+
+#### Found along the way
+- **CL-024 / T-Pain hard-tune is achievable today** via existing realtime pitch-correction params (`RetuneSpeed=0` + `Strength=1` + `Chromatic`) — but the user's runtime test surfaced that **realtime pitch correction is broken**: YIN tracker reports "Detected --" forever even with `mPitchCorrector.process()` confirmed in the chain at `Source/BaySickVocal/BaySickVocalProcessor.cpp:317`. PitchCorrectorDSP defaults `bypass=true`, but the deeper bug is the YIN tracker not firing. Side finding routed to QA-F DSP-03 scope.
+- **Vox AND Inst recordings don't play back on Builder**, not just Vox. User test confirmed both surfaces are affected; same family as BLU-470. Routed to QA-E REC-01 scope.
+- **Pedalboard preset round-trip is broken** — user discovered while testing the recording flow. Save/load fails to restore the rack state. Routed to QA-E REC-01 (recording lifecycle owns preset XML).
+- **PitchCorrectorDSP Formant-Preserve + Throat-Sim parameters are no-op stubs** — `Source/DSP/PitchCorrectorDSP.cpp:326-327` `juce::ignoreUnused (mFormantPreserve, mThroatSemis);` confirms. Routed to QA-F DSP-03.
+- **BLU-605 voxRoll/instRoll** is NOT dead code — it's needed for Inst BaySickGuitars/Basses + reserved for future SFZ vocal. Reclassified from "Drop = remove" to "Drop = no work needed; keep infrastructure".
+- **LDT-173 TTF embed in installer** is distinct from STYLE-02 font choices. Kept as scope inside the new QA-Installer batch.
+- **Subagent dedupe initially over-counted** clusters (24 false dups including per-module DSP retrospectives like A1 ScopedNoDenormals × 9). Refined to 17 true clusters with module-key extraction.
+
+#### What was done about each finding
+| Finding | Routing |
+|---|---|
+| Realtime pitch correction broken at runtime | QA-F DSP-03 (existing surface) |
+| Vox + Inst recordings don't play on Builder | QA-E REC-01 (broadened from BLU-470) |
+| Pedalboard preset round-trip broken | QA-E REC-01 (preset round-trip cluster) |
+| Formant-Preserve / Throat-Sim no-op | QA-F DSP-03 |
+| BLU-605 voxRoll/instRoll | Drop (keep infra; not work) |
+| LDT-173 TTF embed | New QA-Installer batch |
+| Cluster dedupe corrections | Re-ran with module-key extraction; final 17 clusters approved |
+
+All routings + cluster decisions documented in [Main Plan.md](Main Plan.md) §9 Forks fifth entry.
+
+#### Carry-forward contradictions (if any)
+- **None.** Carry-forward §1-§3 architectural primitives stayed accurate. The QA-Inventory pass added new derivative documents (`Previously Implemented.md`, `Future State.md`) rather than contradicting the existing snapshot.
+
+#### Files touched
+- New: `Plans & Specs/Previously Implemented.md` (1089 entries, 262 KB).
+- Modified: `Plans & Specs/Future State.md` (+58 lines: Section 3 + Section 4).
+- Modified: `Plans & Specs/Implemented Work Log.md` (header convention + retroactive timestamps + this entry).
+- Modified: `Plans & Specs/Main Plan.md` (+279 lines: scope expansions, 9 new batches, Phase 7 section, §6 sequencing rewrite, §9 fifth entry).
+- No source code changes (read-only batch by spec).
+- Out-of-tree artifacts: `C:/Users/jeffm/.claude/plans/qa-inventory-master.tsv`, `qa-inventory-walked.csv`, `qa-inventory-deduped-final.tsv`, `qa-inventory-dedupe-report.md`, `qa-inventory-phase4-summary.md`.
+
+#### Commit(s)
+- `76b1442` QA-Inventory Phase 6: route 1429 source-doc items to plan docs.
+- `310672c` QA-Inventory Phase 6: Previously Implemented.md populated.
+- (this entry's commit appended after Phase 7 close.)
+
+#### Next action
+- CLAUDE.md cleanup pass (post-close, in this session): remove the stale `OPEN BUG carried into next session` BaySickSynth drum woofy entry (fixed weeks ago per memory `project_drum_woofy_bug_fixed.md`); audit "Next Steps" section against the 9 new batches; surface anything else stale. Then move to QA-Md (MT Engine Debug-Build Investigation) per the Phase 1 sequence.
+
+---
