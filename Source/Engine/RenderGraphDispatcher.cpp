@@ -52,8 +52,19 @@ void RenderGraphDispatcher::registerTask (RenderTask* task)
 
     // If something was already registered at this id, replace it. The caller
     // is responsible for the lifetime of the previous task.
+    //
+    // QA-0 (2026-05-07): for normal paths this branch is now unreachable -
+    // the per-row Composite at audioInsert(N) is registered exactly once
+    // by ensureAudioInsert; registerClipEngine sets a pointer on the
+    // existing Composite rather than registering a separate task.  jassert
+    // surfaces any future regression where a new task type re-introduces
+    // a multi-source channel without going through a composite shape;
+    // the silent fallback below stays as a safety net for release builds.
     if (mTasksByChannel[(size_t) chId] != nullptr)
+    {
+        jassertfalse;
         unregisterTask (chId);
+    }
 
     task->mOutputBuffer = mArena.getStripBuffer (chId);
     mTasksByChannel[(size_t) chId] = task;
