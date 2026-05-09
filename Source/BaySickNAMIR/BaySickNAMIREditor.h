@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "BaySickNAMIRProcessor.h"
 #include "../Standalone/SharedUI.h"
+#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickNAMIREditor - Phase G-1.4
@@ -55,7 +56,9 @@ private:
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     // ── Header ───────────────────────────────────────────────────────────────
-    juce::Label      mTitleLabel;
+    // QA-A (2026-05-09): unified title bar replaces the old juce::Label +
+    // custom header paint.  Accent = Mesa red (#E0303F) per Jeff's pick.
+    BaySickTitleBar  mTitleBar { "BaySickNAM/IR", juce::Colour (0xFFE0303F) };
     juce::TextButton mSlotABtn { "A" };
     juce::TextButton mSlotBBtn { "B" };
 

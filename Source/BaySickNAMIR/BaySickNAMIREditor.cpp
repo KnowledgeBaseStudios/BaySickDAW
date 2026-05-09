@@ -34,13 +34,14 @@ namespace
                   ? dir
                   : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
     }
-    constexpr int kHeaderH       = 28;
+    constexpr int kHeaderH       = BaySickTitleBar::kStandardHeight;   // 32, was 28 (QA-A 2026-05-09)
     constexpr int kFileRowH      = 50;
     constexpr int kKnobsRowH     = 130;
     constexpr int kPad           = 12;
     constexpr int kSlotABtnW     = 28;
-    constexpr int kSlotABtnY     = 4;
     constexpr int kSlotABtnH     = 20;
+    // QA-A (2026-05-09): kSlotABtnY removed; slots now vertically centered in
+    // the unified title bar via (kHeaderH - kSlotABtnH) / 2 inline below.
 
     constexpr juce::uint32 kAmpBgARGB    = 0xff222222;
     constexpr juce::uint32 kCabBgARGB    = 0xff181818;
@@ -82,13 +83,13 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
     setWantsKeyboardFocus (false);
 
     // ── Header ───────────────────────────────────────────────────────────────
-    addAndMakeVisible (mTitleLabel);
-    mTitleLabel.setText ("BaySickNAM/IR", juce::dontSendNotification);
-    mTitleLabel.setJustificationType (juce::Justification::centredLeft);
-    mTitleLabel.setColour (juce::Label::textColourId, juce::Colours::white);
-    mTitleLabel.setTooltip (
-        "BaySickNAM/IR - Neural Amp Modeler + IR cabinet engine.  "
-        "Loads .nam amp captures and .wav cabinet impulse responses.");
+    // QA-A (2026-05-09): unified title bar replaces juce::Label + custom paint.
+    // Original mTitleLabel had a hover tooltip explaining "Neural Amp Modeler
+    // + IR cabinet" -- dropped per Jeff (other engines don't have title-hover
+    // tooltips either, and adding SettableTooltipClient to BaySickTitleBar
+    // correlated with a slider-paint crash in Harmless that wasn't worth
+    // chasing).  Engine usage docs cover the acronym explanation.
+    addAndMakeVisible (mTitleBar);
 
     auto wireSlotBtn = [this] (juce::TextButton& btn, int slot,
                                juce::Button::ConnectedEdgeFlags edge,
@@ -394,22 +395,19 @@ void BaySickNAMIREditor::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (kCabBgARGB));   // single dark faceplate
 
-    // Header strip.
-    g.setColour (juce::Colour (kHeaderBgARGB));
-    g.fillRect (0, 0, getWidth(), kHeaderH);
-
-    // Header bottom divider only.
-    g.setColour (juce::Colour (kDividerARGB));
-    g.fillRect (0, kHeaderH, getWidth(), 1);
+    // QA-A (2026-05-09): header strip + divider moved to BaySickTitleBar::paint().
 }
 
 void BaySickNAMIREditor::resized()
 {
     // ── Header ───────────────────────────────────────────────────────────────
-    mTitleLabel.setBounds (8, 0, 240, kHeaderH);
-    const int slotsRight = getWidth() - kPad;
-    mSlotBBtn.setBounds (slotsRight - kSlotABtnW,         kSlotABtnY, kSlotABtnW, kSlotABtnH);
-    mSlotABtn.setBounds (slotsRight - 2 * kSlotABtnW,     kSlotABtnY, kSlotABtnW, kSlotABtnH);
+    // QA-A (2026-05-09): unified title bar + right-anchored A/B slot toggles.
+    mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);
+    const int slotClusterW = 2 * kSlotABtnW;
+    const auto trailing    = mTitleBar.getTrailingArea (slotClusterW);
+    const int  slotY       = (BaySickTitleBar::kStandardHeight - kSlotABtnH) / 2;
+    mSlotABtn.setBounds (trailing.getX(),               slotY, kSlotABtnW, kSlotABtnH);
+    mSlotBBtn.setBounds (trailing.getX() + kSlotABtnW,  slotY, kSlotABtnW, kSlotABtnH);
 
     // ── File rows ────────────────────────────────────────────────────────────
     constexpr int sectionLblW = 36;
