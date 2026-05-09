@@ -5,6 +5,7 @@
 #include "BaySickVisualizerScreen.h"
 #include "BssEditorComponents.h"
 #include "../Standalone/SharedUI.h"   // TaggedSliderAttachment
+#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // ── BaySickSynthEditor ────────────────────────────────────────────────────────
 // 5-tab AudioProcessorEditor for BaySickSynthProcessor.
@@ -80,6 +81,11 @@ private:
     BaySickSynthLAF mSynthLAF;
 
     // ── Header ────────────────────────────────────────────────────────────────
+    // QA-A (2026-05-09): unified title bar.  Accent = BaySickSynthLAF::kGreen
+    // (#A0DB2B FL green).  STYLE-06 spec: preset moves to RIGHT, title is the
+    // engine's green accent.
+    BaySickTitleBar  mTitleBar { "BAYSICKSYNTH",
+                                 juce::Colour (BaySickSynthLAF::kGreen) };
     juce::TextButton mPresetBtn { "Preset v" };
 
     // ── Visualizer ────────────────────────────────────────────────────────────
