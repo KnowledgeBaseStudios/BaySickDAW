@@ -315,24 +315,66 @@ EXS24 surfaces "data not read from disk in time" as user counter. BaySickDAW sil
 
 These are the architecture findings that should graduate to `Future State.md` as `[CL-XXX]` entries when we apply. Confidence ratings carry over from individual sweep methodology sections.
 
-| ID-to-be | Tag | Title | Bucket | Source sweep |
-|----------|-----|-------|--------|--------------|
-| TBD | PE | FftPlanCache keyed by order, owned by VibeGraph | Cross-cutting Infrastructure | FFT cache |
-| TBD | AQ | Voice-stealing tier hierarchy (Off > Release > Sustain > Decay > Attack) | Players | Voice mgmt |
-| TBD | AQ | Soft-stop on voiceCap eviction (3-10 ms fade or benchwarmer) | Players | Voice mgmt |
-| TBD | AQ | User-visible voice priority mode (Last / Highest / Lowest) | Players | Voice mgmt |
-| TBD | PE | SamplePool with refcount + preload-head | Cross-cutting Infrastructure | Streaming |
-| TBD | PE | Preload-head for streamed clips (256 KB always-in-RAM) | Cross-cutting Infrastructure | Streaming |
-| TBD | PE | MP3 decode-once cache (replaces FSW-121) | Cross-cutting Infrastructure | Streaming |
-| TBD | WP | Streaming telemetry (underrun counter + prefill-latency gauge) | Cross-cutting Infrastructure | Streaming |
-| TBD | PE | Sampler engines consume SamplePool (VibeSampleManager + Phase D drums) | Cross-cutting Infrastructure | Streaming |
+**Total: 20 entries** broken out granularly so each is triagable as a unit. Some may be folded into existing CL-* parents at apply time (noted in the table).
 
-**Drop / move to "Tech not yet feasible":**
-- CL-049 (GPU offload for FFT-based effects)
+## From FFT plan caching (3 entries)
 
-**No new entry needed (validation of current state):**
-- BLU-353 same-pitch preempt — keep, document under CL-053
-- Single-slot atomic for MIDI dispatch — keep, defer upgrade until use case appears
+| ID-to-be | Tag | Title | Bucket | Notes |
+|----------|-----|-------|--------|-------|
+| TBD | PE | FftPlanCache keyed by FFT order, owned by VibeGraph | Cross-cutting Infrastructure | Concrete 7-file impl sketch in §2 |
+| TBD | PE | Per-thread-pool FFT instances (MT engine fallback variant) | Cross-cutting Infrastructure | Only if tsan flags shared-FFT issues post-QA-Md; otherwise unused |
+| TBD | PE | FFTW wisdom file for deterministic startup | Cross-cutting Infrastructure | Only relevant if we ever swap juce::dsp::FFT → FFTW; deferred until then |
+
+## From Lock-free MIDI dispatch (3 entries)
+
+| ID-to-be | Tag | Title | Bucket | Notes |
+|----------|-----|-------|--------|-------|
+| TBD | AQ | Multi-event MIDI ring (juce::AbstractFifo or farbot::fifo) for chord-strum / paste-to-roll / arpeggio-from-UI-clock | Cross-cutting Infrastructure | Defer until use case lands; 3 atomics per engine consolidate to one POD ring |
+| TBD | AQ | MIDI ring backpressure signal (caller sees overflow vs silent drop) | Cross-cutting Infrastructure | Pairs with above |
+| TBD | AQ | farbot vendoring decision (alternative to in-tree AbstractFifo) | Cross-cutting Infrastructure | Spec call when above ships; farbot has overwrite-or-default semantics matching current pattern |
+
+## From Voice management (6 entries)
+
+| ID-to-be | Tag | Title | Bucket | Notes |
+|----------|-----|-------|--------|-------|
+| TBD | AQ | Voice-stealing tier hierarchy (Off > Release > Sustain > Decay > Attack with age tie-break) | Players | Replace oldest-active-only at VibePlayerDSP.cpp:944-960; mirror to BaySickSynth/Bass/Harmless |
+| TBD | AQ | Soft-stop on voiceCap eviction (3-10 ms fade) | Players | Replace hard-kill at VibePlayerDSP.cpp:960; force short release override on stolen voices if natural release is multi-second |
+| TBD | AQ | User-visible voice priority mode APVTS enum (Last / Highest / Lowest) | Players | Surge / Cherry vocabulary; per-engine |
+| TBD | AQ | Per-engine cap audit + revisit (1-16 default 16 vs Surge 64 / Pianoteq 256) | Players | Could fold into existing CL-053 (smarter voice management) |
+| TBD | PE | Pianoteq-style CPU-aware auto-polyphony (Optimistic 75% / Pessimistic 50% target) | Players | Could fold into existing CL-054 (per-engine CPU budgets) |
+| TBD | AQ | Benchwarmer pool (1-2 preallocated extra voices per engine for parallel fade-out) | Players | Pairs with soft-stop entry above |
+
+## From Sample streaming (8 entries)
+
+| ID-to-be | Tag | Title | Bucket | Notes |
+|----------|-----|-------|--------|-------|
+| TBD | PE | SamplePool with refcount + preload-head (process-wide, keyed by file path) | Cross-cutting Infrastructure | Concrete `class SamplePool` sketch in §5; foundation for the next 4 |
+| TBD | PE | Preload-head for streamed clips (256 KB always-in-RAM, eliminates 3.5s synchronous prefill) | Cross-cutting Infrastructure | Folds into SamplePool |
+| TBD | PE | MP3 decode-once cache (decode-to-PCM at clip-add time on message thread; cache result) | Cross-cutting Infrastructure | **Supersedes walked-state FSW-121** (RAM-load <15MB clips brute-force); more elegant solution to same problem |
+| TBD | WP | Streaming telemetry (atomic underrun counter + peak-prefill-latency-ms gauge + jassertfalse in Debug) | Cross-cutting Infrastructure | EXS24-style "data not read in time" UI counter |
+| TBD | PE | Sampler engines consume SamplePool (VibeSampleManager + Phase D drum engines) | Cross-cutting Infrastructure | **This is what unlocks Kontakt-scale (multi-GB) libraries**; per-tab and per-pad samplers stop full-RAM-loading |
+| TBD | PE | HISE-style auto-RAM-load fallback for big-pitch samples | Cross-cutting Infrastructure | Samples mapped across many octaves with high static pitch ratio bypass streaming |
+| TBD | PE | DrumGizmo multi-channel collapse (dedupe simultaneous reads of same file/position from different channels) | Cross-cutting Infrastructure | I/O-level optimization on top of SamplePool |
+| TBD | PE | Sfizz-style GC thread polling (separate thread, 5s polling for unreferenced sample cleanup) | Cross-cutting Infrastructure | Background GC, not on audio thread; pairs with SamplePool refcount |
+
+## Drops / migrations (1)
+
+- **CL-049** (GPU offload for FFT-based effects) → move to Considered & Dropped > "Tech not yet feasible." Strong negative evidence: GPU break-even is ~16K-point FFT, BaySickDAW uses 2048; 2× buffer-size latency tax + 100-200 µs kernel launch overhead consume 20% of audio budget at 96 kHz/96-sample buffer. KVR user reviews of GPU Audio's plugin show the integration risk is real (CPU spikes, dropouts, host crashes). Re-graduates if SDK / hardware / driver landscape changes.
+
+## Validations of current state (no new entry; cross-reference only)
+
+- **BLU-353** (same-pitch preempt + note-off strip) confirmed correct vs Surge "Reuse Single" + Massive X "Reassign." Document under CL-053 so the next maintainer doesn't undo it.
+- **Single-slot atomic MIDI dispatch** (mAuditionNote + mAuditionHoldOn + mAuditionHoldOff) confirmed correct as press-and-hold audition pattern. Vital + Surge XT delegate the same way (host MidiBuffer in processBlock). Don't preemptively rip out for the multi-event ring above; defer until chord-strum / paste-to-roll use cases hit.
+
+## Folding suggestions (decided at apply time)
+
+Some entries above are extensions of existing CL-* / FSW-* / BLU-* items rather than standalone:
+
+- Per-engine cap audit + benchwarmer pool → could fold into CL-053 (smarter voice management) as expanded scope
+- Pianoteq-style CPU-aware auto-polyphony → could fold into CL-054 (per-engine CPU budgets) as expanded scope
+- MP3 decode-once cache → supersedes walked-state FSW-121; mark FSW-121 as superseded vs deleting it (preserves history)
+
+Alternatively keep them granular — user-determined at apply time.
 
 ---
 
