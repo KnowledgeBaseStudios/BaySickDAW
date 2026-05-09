@@ -585,6 +585,16 @@ private:
 AriaControlPanel::AriaControlPanel (Binding binding)
     : mBinding (std::move (binding))
 {
+    // QA-A (2026-05-09): host an internal BaySickTitleBar when the binding
+    // supplies an engine name.  Used by InstPage (Guitars / Basses) and
+    // BaySickRustyDrumsPage to give each engine its own title bar through
+    // this shared kit-artwork panel.
+    if (mBinding.engineName.isNotEmpty())
+    {
+        mTitleBar = std::make_unique<BaySickTitleBar> (mBinding.engineName,
+                                                        mBinding.accentColor);
+        addAndMakeVisible (*mTitleBar);
+    }
 }
 
 AriaControlPanel::~AriaControlPanel() = default;
@@ -592,6 +602,28 @@ AriaControlPanel::~AriaControlPanel() = default;
 void AriaControlPanel::setEngine (Binding binding)
 {
     mBinding = std::move (binding);
+
+    // QA-A (2026-05-09): create / update / drop the internal title bar to
+    // match the new binding.
+    if (mBinding.engineName.isNotEmpty())
+    {
+        if (! mTitleBar)
+        {
+            mTitleBar = std::make_unique<BaySickTitleBar> (mBinding.engineName,
+                                                            mBinding.accentColor);
+            addAndMakeVisible (*mTitleBar);
+        }
+        else
+        {
+            mTitleBar->setEngineName  (mBinding.engineName);
+            mTitleBar->setAccentColor (mBinding.accentColor);
+        }
+    }
+    else
+    {
+        mTitleBar.reset();
+    }
+    resized();
 }
 
 void AriaControlPanel::clear()
@@ -862,7 +894,13 @@ static juce::Rectangle<float> computePanelDrawArea (juce::Rectangle<float> outer
 
 void AriaControlPanel::resized()
 {
-    const auto b = getLocalBounds().toFloat();
+    // QA-A (2026-05-09): if a title bar is present, anchor it at the top of
+    // the panel and trim the remainder for tab strip + kit artwork.
+    const int titleBarH = mTitleBar ? BaySickTitleBar::kStandardHeight : 0;
+    if (mTitleBar)
+        mTitleBar->setBounds (0, 0, getWidth(), titleBarH);
+
+    const auto b = getLocalBounds().withTrimmedTop (titleBarH).toFloat();
     if (b.isEmpty()) return;
 
     // K-5 fix #3: when there are no tab buttons (single-program kit), reclaim
@@ -910,7 +948,11 @@ void AriaControlPanel::resized()
 
 void AriaControlPanel::paint (juce::Graphics& g)
 {
-    const auto b = getLocalBounds().toFloat();
+    // QA-A (2026-05-09): mirror resized() -- if a title bar is present, trim
+    // its space off the top before computing the kit-artwork area.  The
+    // title bar itself paints separately as a child component.
+    const int titleBarH = mTitleBar ? BaySickTitleBar::kStandardHeight : 0;
+    const auto b = getLocalBounds().withTrimmedTop (titleBarH).toFloat();
     if (b.isEmpty() || mNativeW <= 0 || mNativeH <= 0) return;
 
     // K-5 fix #3: match resized() - no tab buttons → no reserved tab strip.

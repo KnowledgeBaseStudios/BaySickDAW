@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include <unordered_map>
 #include <functional>
+#include "BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // ── AriaControlPanel ─────────────────────────────────────────────────────────
 // J-8 stage 2 (2026-05-04): renders the kit's prebuilt ARIA control surface
@@ -31,12 +32,22 @@ public:
     // Engine-agnostic binding.  Every field except apvts may be left empty -
     // missing closures degrade gracefully (kit-default reset → 64; label →
     // empty string; param attachment → no-op).
+    //
+    // QA-A (2026-05-09): engineName + accentColor were added so the panel can
+    // host an internal BaySickTitleBar at the top of its area.  Both empty by
+    // default -- if engineName.isNotEmpty(), the panel renders the title bar
+    // and reserves BaySickTitleBar::kStandardHeight px from the top of the
+    // kit-artwork area.  Used by InstPage (BaySickGuitars / BaySickBasses)
+    // and BaySickRustyDrumsPage to give each engine its own title bar
+    // through the shared kit-artwork panel.
     struct Binding
     {
         juce::AudioProcessorValueTreeState* apvts { nullptr };
         std::function<juce::String(int cc)>  ccParamId;
         std::function<int(int cc)>           kitDefaultCc;
         std::function<juce::String(int cc)>  ccLabel;
+        juce::String                         engineName  {};
+        juce::Colour                         accentColor { juce::Colours::transparentBlack };
     };
 
     explicit AriaControlPanel (Binding binding);
@@ -113,6 +124,10 @@ private:
     std::vector<std::unique_ptr<juce::TextButton>> mTabButtons;
     int                                         mActiveTab { 0 };
     static constexpr int kTabBarHeight = 26;
+
+    // QA-A (2026-05-09): optional internal title bar.  Created when the
+    // Binding's engineName is non-empty; null otherwise.
+    std::unique_ptr<BaySickTitleBar> mTitleBar;
 
 
     // Parses a `#AARRGGBB` or `#RRGGBBAA` color string.  ARIA emits AARRGGBB
