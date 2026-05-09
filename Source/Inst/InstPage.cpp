@@ -1,6 +1,7 @@
 #include "InstPage.h"
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
 #include "../BaySickPedals/BaySickPedalsProcessor.h"
+#include "../BaySickPedals/BaySickPedalsEditor.h"           // QA-A 4.4 (2026-05-09): wire onPedalboardPresetMenu
 #include "../BaySickGuitars/BaySickGuitarsProcessor.h"   // K-2: sfizz Guitars front-end
 #include "../BaySickBasses/BaySickBassesProcessor.h"     // L-2: sfizz Basses front-end
 #include "../Standalone/AriaControlPanel.h"             // K-5: ARIA panel + Binding
@@ -11,7 +12,11 @@
 
 namespace
 {
-    constexpr int kHeaderRowH = 36;
+    // QA-A Phase 4.4 (2026-05-09): kHeaderRowH = 36 retired.  The page
+    // chrome strip it reserved is gone; BaySickPedalsEditor owns its own
+    // title bar (Phase 4.2) and AriaControlPanel hosts its own title bar for
+    // Guitars / Basses (Phase 4.3 + per-source-mode wiring below in
+    // rebuildPlayerPanel).
     constexpr int kPad        = 12;
     constexpr int kFilenameW  = 320;
 }
@@ -90,6 +95,12 @@ InstPage::InstPage (int pageIndex)
         mPedalsProc = std::move (pedals);
         mPedalsEditor.reset (mPedalsProc->createEditor());
         if (mPedalsEditor) addChildComponent (*mPedalsEditor);
+
+        // QA-A 4.4 (2026-05-09): hook the pedalboard preset button (now
+        // hosted in BaySickPedalsEditor's title bar trailing area) back to
+        // this page's existing showPedalboardPresetMenu() routing.
+        if (auto* pe = dynamic_cast<BaySickPedalsEditor*> (mPedalsEditor.get()))
+            pe->onPedalboardPresetMenu = [this] { showPedalboardPresetMenu(); };
     }
     // Placeholder is no longer used post-I-15 but the field stays declared so
     // the layoutContent() guarded path below still compiles.
@@ -122,20 +133,10 @@ InstPage::InstPage (int pageIndex)
     mProgramButton->setTooltip ("Pick a program - current selection shown on the file-name label");
     mProgramButton->onClick = [this] { showProgramPickerMenu(); };
 
-    // I-15 polish (2026-05-03): BaySickPedals sub-tab header chrome.  Lives
-    // in the 36-px page header strip; hidden on other sub-tabs.
-    mPedalsHeaderTitle.setText ("BaySickPedals", juce::dontSendNotification);
-    mPedalsHeaderTitle.setJustificationType (juce::Justification::centredLeft);
-    mPedalsHeaderTitle.setFont (juce::Font (16.0f, juce::Font::bold));
-    mPedalsHeaderTitle.setColour (juce::Label::textColourId, juce::Colour (0xffe0e0e0));
-    addChildComponent (mPedalsHeaderTitle);
-
-    mPedalsPresetBtn = std::make_unique<juce::TextButton>("Preset...");
-    mPedalsPresetBtn->setTooltip (
-        "Pedalboard preset library -- save / load the entire 8-slot rack "
-        "configuration as a single .xml under Documents/BaySickDAW/Presets/Pedalboards/");
-    mPedalsPresetBtn->onClick = [this] { showPedalboardPresetMenu(); };
-    addChildComponent (*mPedalsPresetBtn);
+    // QA-A 4.4 (2026-05-09): I-15 polish header chrome (mPedalsHeaderTitle +
+    // mPedalsPresetBtn) deleted -- the title now lives inside BaySickPedalsEditor's
+    // own BaySickTitleBar (Phase 4.2), and the pedalboard preset button migrated
+    // into the editor's title-bar trailing area, wired above via onPedalboardPresetMenu.
 
     // J-6 EQ unification (2026-05-03): buildEQTab removed; pre-rack EQ on Effects page only.
 
@@ -867,9 +868,23 @@ void InstPage::rebuildPlayerPanel()
         };
 
         if (mSource == Source::BaySickGuitars)
+        {
             bindToSfizzEngine (mFullProcessor->getBaySickGuitars (mPageIndex));
+            // QA-A 4.4 (2026-05-09): per-source-mode title bar inside
+            // AriaControlPanel.  Navy accent (#1C3A8A) is the Inst-tab active
+            // colour shared with BaySickBasses + BaySickPedals (decision D7
+            // confirmed via AskUserQuestion 2026-05-09).
+            binding.engineName  = "BaySickGuitars";
+            binding.accentColor = juce::Colour (0xFF1C3A8A);
+        }
         else if (mSource == Source::BaySickBasses)
+        {
             bindToSfizzEngine (mFullProcessor->getBaySickBasses  (mPageIndex));
+            // QA-A 4.4 (2026-05-09): per-source-mode title bar inside
+            // AriaControlPanel.  Same navy accent as BaySickGuitars per D7.
+            binding.engineName  = "BaySickBasses";
+            binding.accentColor = juce::Colour (0xFF1C3A8A);
+        }
     }
 
     mAriaPanel->setEngine (binding);
@@ -1100,8 +1115,10 @@ void InstPage::switchTab (int idx)
     if (mNamIrEditor)       mNamIrEditor     ->setVisible (isNamIr);
 
     // I-15 polish: BaySickPedals header chrome only on the Pedals sub-tab.
-    mPedalsHeaderTitle.setVisible (isPedals);
-    if (mPedalsPresetBtn) mPedalsPresetBtn->setVisible (isPedals);
+    // QA-A 4.4 (2026-05-09): mPedalsHeaderTitle + mPedalsPresetBtn deleted
+    // along with the page header chrome.  The pedalboard preset button
+    // (now inside BaySickPedalsEditor's title bar trailing area) inherits
+    // visibility from the editor itself, so no explicit setVisible call here.
 
     resized();
     repaint();
@@ -1192,10 +1209,9 @@ void InstPage::importInstState (const juce::String& xml)
 void InstPage::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff181818));
-    g.setColour (juce::Colour (0xff0a0a0a));
-    g.fillRect (0, 0, getWidth(), kHeaderRowH);
-    g.setColour (juce::Colour (0xff333333));
-    g.fillRect (0, kHeaderRowH, getWidth(), 1);
+    // QA-A 4.4 (2026-05-09): page header chrome (kHeaderRowH = 36 dark fill +
+    // 1 px divider) deleted.  Each engine UI now owns its own title bar at
+    // y = 0 of its content area, so the page only paints the body fill.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1226,7 +1242,7 @@ void InstPage::showPedalboardPresetMenu()
     m.addSeparator();
     m.addItem (2, "Reveal Folder...");
 
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (mPedalsPresetBtn.get()),
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (mPedalsEditor.get()),
         [this, pedals, presets] (int r)
         {
             if (r == 0) return;
@@ -1276,17 +1292,10 @@ void InstPage::showPedalboardPresetMenu()
 
 void InstPage::resized()
 {
-    auto r = getLocalBounds();
-
-    // I-15 polish (2026-05-03): BaySickPedals header chrome lives in the
-    // 36-px page header strip.  Title flush-left, preset button flush-right.
-    auto header = r.removeFromTop (kHeaderRowH);
-    if (mPedalsPresetBtn && mPedalsPresetBtn->isVisible())
-        mPedalsPresetBtn->setBounds (header.removeFromRight (90).reduced (8, 6));
-    if (mPedalsHeaderTitle.isVisible())
-        mPedalsHeaderTitle.setBounds (header.reduced (12, 4));
-
-    layoutContent (r);
+    // QA-A 4.4 (2026-05-09): no header chrome to lay out anymore -- the
+    // engine UIs fill the full page area.  Each engine owns its own title
+    // bar at y = 0 of its content rect.
+    layoutContent (getLocalBounds());
 }
 
 void InstPage::layoutContent (juce::Rectangle<int> r)

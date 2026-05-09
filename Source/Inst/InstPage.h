@@ -232,12 +232,13 @@ private:
     std::unique_ptr<juce::AudioProcessorEditor>  mPedalsEditor;
     std::unique_ptr<juce::Component>             mPedalsPlaceholder;
 
-    // I-15 polish (2026-05-03): header chrome for the BaySickPedals sub-tab.
-    // Lives in the 36-px page header strip, visible only when sub-tab 0 is
-    // active.  Title on the left, "Preset..." button on the right opening
-    // the pedalboard preset library popup (Save / Load / Reveal Folder).
-    juce::Label                                  mPedalsHeaderTitle;
-    std::unique_ptr<juce::TextButton>            mPedalsPresetBtn;
+    // QA-A Phase 4.4 (2026-05-09): the I-15 polish kHeaderRowH = 36 chrome
+    // strip is gone.  mPedalsHeaderTitle + mPedalsPresetBtn deleted along
+    // with it; the pedalboard preset button migrated into BaySickPedalsEditor's
+    // own title bar (trailing area), wired via onPedalboardPresetMenu callback
+    // hooked from this page in the constructor.  showPedalboardPresetMenu()
+    // stays as the popup-builder; the BaySickPedalsEditor preset button just
+    // routes back into it via the callback.
     void                                         showPedalboardPresetMenu();
 
     // BaySickNAM/IR stage (existing - unchanged).
