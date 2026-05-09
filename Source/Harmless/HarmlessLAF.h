@@ -249,6 +249,15 @@ public:
         if (style == juce::Slider::LinearVertical
          || style == juce::Slider::LinearBarVertical)
         {
+            // QA-A (2026-05-09): guard against zero-sized slider bounds.
+            // A slider that hasn't been laid out yet (bounds = 0) propagates
+            // NaN through the norm calc (fh == 0 -> divide-by-zero) and
+            // Direct2D asserts on the resulting NaN-coord rounded rects.
+            // Latent bug surfaced by the Phase 3.1 kHdrH 36->32 change which
+            // shifted body layout in HarmlessEditor.
+            if (width <= 0 || height <= 0)
+                return;
+
             const float fy = (float) y;
             const float fh = (float) height;
             const float cx = x + width * 0.5f;
