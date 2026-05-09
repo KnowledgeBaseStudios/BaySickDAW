@@ -154,6 +154,8 @@
 | `1a31aba` | Phase 4.1 | BaySickVocal cluster (Vocals + Align + Pitch via BaySickEngineLabel) |
 | `40c8be8` | running-notes | append Phase 4.1 close checkpoint |
 | `652998b` | Phase 4.2 | BaySickPedals editor adopts BaySickTitleBar (preset btn migrates into trailing area) |
+| `4fbe40d` | running-notes | append Phase 4.2 close checkpoint |
+| `21394d5` | Phase 4.3 | AriaControlPanel hosts optional BaySickTitleBar (plumbing-only; no callers wired yet) |
 
 ### Phases done / in flight / remaining
 
@@ -260,6 +262,32 @@ Phase 4.3 — extend `AriaControlPanel`'s `Binding` struct with optional
 BaySickBasses + BaySickRustyDrums can render their own title bars through
 the shared kit-artwork panel.  Unblocks Phase 4.4 (InstPage `kHeaderRowH`
 removal + per-source-mode title-bar wiring + Pedals preset-button hookup).
+
+---
+
+## 2026-05-09 16:24 PT — Phase 4.3 close — AriaControlPanel BaySickTitleBar plumbing
+
+> Checkpoint after the single commit closing Phase 4.3.  Plumbing-only
+> landing — `AriaControlPanel` now CAN host a `BaySickTitleBar` but no
+> caller exercises it yet, so visual output is unchanged.  Wiring lands
+> in Phase 4.4 (InstPage source-mode bindings) + Phase 4.5
+> (BaySickRustyDrumsPage).
+
+### Done since last checkpoint
+
+- **`21394d5` — QA-A Step 9: AriaControlPanel hosts optional BaySickTitleBar.**  Phase 4.3 close.  Two optional fields added to `AriaControlPanel::Binding`: `juce::String engineName {}` + `juce::Colour accentColor { juce::Colours::transparentBlack }`.  Private `std::unique_ptr<BaySickTitleBar> mTitleBar` member added; ctor / `setEngine` create / update / drop the bar based on whether `engineName` is non-empty.  `resized()` anchors it at `(0, 0, w, BaySickTitleBar::kStandardHeight)`; `paint()` trims the same `kStandardHeight` off the top before computing the kit-artwork drawing area.  Backward-compatible — every existing caller still passes an empty `engineName`, so `mTitleBar` stays null and the panel renders identically to before.  Files touched: `Source/Standalone/AriaControlPanel.h` + `.cpp`.
+
+### Findings / decisions added
+
+- **Finding 14 — InstPage-vs-VoxPage chrome distinction (refines finding 8).**  The "extra black bar" Jeff sees above BaySickNAM/IR is **only on the Inst page**, not the Vox page.  BaySickNAM/IR is hosted in either parent — InstPage spawns it as the source-mode FX-rack alternative; VoxPage spawns it under the BaySickVocal effect chain.  Per the comment block at `Source/Vox/VoxPage.cpp:572-577` ("page is just a thin host for BaySickVocalEditor; editor paints its own background.  No header bar anymore"), VoxPage is a thin wrapper with no parent chrome — so the BaySickNAM/IR instance there sits flush at the top.  InstPage carries its own `kHeaderRowH = 36` chrome strip with `mPedalsHeaderTitle` + `mPedalsPresetBtn` (per `Source/Inst/InstPage.cpp:1192-1199`), which is the actual source of the bar.  Phase 4.4 deletes that strip across all Inst-page sources (Pedals + Guitars + Basses + NAM/IR); VoxPage requires no work for the bar removal.  Refines finding 8 — the Vox-vs-Inst split wasn't explicit in the retrospective backfill.
+
+### In-flight
+
+- Working tree clean.  18 QA-A commits ahead of origin.
+
+### Next action
+
+Phase 4.4 — InstPage cleanup.  Removes the `kHeaderRowH = 36` parent chrome strip (deletes `mPedalsHeaderTitle` + `mPedalsPresetBtn` + the paint block at `Source/Inst/InstPage.cpp:1192-1199`) AND wires per-source-mode title configuration through the new `AriaControlPanel::Binding` fields for Pedals / Guitars / Basses (navy #1C3A8A per D7) and BaySickNAM/IR (Mesa red #E0303F per Phase 3.4).  Also hooks `mPedalsEditor->onPedalboardPresetMenu` from InstPage's side so the trailing-area button migrated in Phase 4.2 stops being a no-op.  Per finding 14, this is where the "extra black bar" finally goes away for every Inst-page engine.
 
 ---
 
