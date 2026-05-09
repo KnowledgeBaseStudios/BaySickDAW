@@ -2957,8 +2957,16 @@ void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int num
     const double elapsed  = (double)(t1 - t0Ticks)
                             / (double)juce::Time::getHighResolutionTicksPerSecond();
     const double bufDur   = numSamples / juce::jmax (1.0, mSampleRate);
+    // 2026-05-09 (QA-Md): cap raised from 2.f (200%) to 10.f (1000%) after
+    // diagnostic capture proved both Debug-MT-on (450%) and Debug-MT-off
+    // (870%) sit well above the original 200% cap, masking the true MT-vs-
+    // serial gap.  Display side already supports up to 999% via
+    // GlobalTransportBar's juce::jlimit(0, 999, ...).  HOLD-FOR-Phase-6-
+    // review: V1 release value is a UX call (200/500/1000) deferred to the
+    // QA-Audit "Pre-release decisions to revisit" docket -- see Main Plan
+    // §5 QA-Audit + Future State CL-291.
     const float  rawLoad  = (bufDur > 0.0)
-                                ? juce::jlimit (0.f, 2.f, (float)(elapsed / bufDur))
+                                ? juce::jlimit (0.f, 10.f, (float)(elapsed / bufDur))
                                 : 0.f;
 
     // Exponential smoothing - ~80 ms time constant at 512/44100 block rate

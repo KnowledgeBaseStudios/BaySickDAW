@@ -1075,6 +1075,23 @@ Every component in the build gets classified into:
     calls: third-party SDK vs OS-native WER; symbol-server hosting
     model; consent flow (prompt-per-crash vs EULA-blanket-consent).
     See Future State `CL-290`.
+  - **DSP meter cap V1 release value** — currently 10.0 (1000%) post-
+    QA-Md (was 2.0 = 200% pre-batch; raised after diagnostic capture
+    proved Debug overload was masked by the 200% cap). V1 release
+    value is a UX call: 2.0 (original; FL Studio convention; loses
+    diagnosis), 5.0 (middle ground; shows real overload to 500%),
+    or 10.0 (max diagnostic; may surprise novice users with "870%"
+    readings). Decide ideally with a few weeks of Release session-
+    load data. See Future State `CL-291`.
+  - **MT diagnostic compile-flag gate** — wrap MT diagnostic counters
+    + Mixer hamburger "Run MT Diagnostic" menu item behind
+    `#if BAYSICKDAW_MT_DIAGNOSTIC` so Release shipping builds don't
+    expose a developer-facing menu item to end users. Active during
+    development; compiled out of V1 Release. Touches CMakeLists.txt,
+    `RenderEngineFlags.h`, `VibeThreadPool.cpp`,
+    `RenderGraphDispatcher.cpp`, `StandaloneEditor.cpp`. Decision in
+    Phase 6 QA-Audit (also: should the menu item move to a "Help ->
+    Developer" submenu when present?). See Future State `CL-292`.
 - Risk: zero (read-only).
 - Dependencies: all 15 prior batches landed.
 - Effort: large (~10-15 hours, possibly multiple sessions). Bounded by
@@ -1804,6 +1821,11 @@ skip works when offline (no toast / dialog).
 
 ### 2026-05-08 — QA-Audit scope expanded with pre-release decisions docket (mid-QA-Md side findings)
 
+> **Note:** The 2026-05-09 QA-Md close (eighth Forks entry below) added
+> two further items to this same docket (`CL-291` DSP meter cap V1
+> release value + `CL-292` MT diagnostic compile-flag gate) bringing
+> the total to five.  See that entry for context.
+
 **Trigger:** during QA-Md Task 4 execution (adding the Run MT
 Diagnostic menu item to the Mixer hamburger), a side conversation
 surfaced three pre-release decisions worth capturing rather than
@@ -1872,3 +1894,88 @@ QA-Audit; outcomes route into QA-Cleanup-1 (if migrate), QA-Updater
 (if defer). Closure of this fork happens when all three items have a
 recorded decision in the QA-Audit close entry of
 `Implemented Work Log.md`.
+
+### 2026-05-09 — QA-Md outcome: original "MT no-op in Debug" premise was wrong; MT works in Debug
+
+**Trigger:** QA-Md Phase 2 diagnosis (Tasks 5-7) executed against the
+Phase 1 instrumentation (Steps 1-4 commits `d9ed843` / `7c4ba0b` /
+`6709fdb` / `830f103`).  Counter capture showed Debug+MT-on workers
+doing 91.8% of tasks, watchdog never firing, dispatcher fully engaged
+-- essentially identical to Release.  But the user's prior observation
+("DSP meter reads identical with MT toggle on vs off in Debug") still
+held against the in-app meter readings.
+
+**Diagnosis path:** initial reading was that this is the unanticipated
+Branch D from the per-batch plan -- "MT works but meter shows no
+difference".  Three plausible explanations: (a) Debug synchronization
+overhead exactly cancels parallelism gain, (b) DSP meter is broken in
+Debug, (c) meter resolution too coarse.  User then surfaced the
+critical pattern by capturing all four quadrants:
+
+| Build   | MT on | MT off |
+|---------|-------|--------|
+| Release | 33%   | 55%    |
+| Debug   | 200%  | 200%   | (capped)
+
+The 200%/200% in Debug looked like equivalence but was actually meter
+saturation -- both modes were above the 200% display cap.  Quick
+diagnostic edit raised the cap from 2.f to 10.f (display side already
+supports up to 999% via `GlobalTransportBar`'s `juce::jlimit(0,
+999, ...)`) and re-captured:
+
+| Build   | MT on | MT off | MT improvement |
+|---------|-------|--------|----------------|
+| Release | 33%   | 55%    | -40%           |
+| Debug   | 450%  | 870%   | -48%           |
+
+**MT works in Debug at full efficiency.**  Reduction ratio is
+essentially identical to Release; if anything Debug benefits SLIGHTLY
+MORE from parallelism (heavier per-task Debug work means more
+parallelism opportunity).  The original QA-0a finding #9 was a misread
+of the meter, not a bug in the MT engine.
+
+**Decision:** keep the meter cap raise (now 10.f) as the active-
+development value -- supports diagnostic visibility for downstream
+MT-touching batches; release value (2.f / 5.f / 10.f) deferred to
+Phase 6 QA-Audit decisions docket as `CL-291`.  Also fold "MT
+diagnostic compile-flag gate" (`CL-292`) into the same docket so
+Release ships without exposing the Mixer hamburger "Run MT
+Diagnostic" item to end users.  Five total items now live in the
+docket.
+
+**No fix shipped:** Phase 3 of the QA-Md plan (Branch A / B / C / D
+fix) is not needed.  There was nothing to fix in the MT engine
+itself.  Diagnostic value of QA-Md instead lives in the permanent
+instrumentation (counters + menu item) for future MT-related batches.
+
+**Carry-Forward contradictions:** carry-forward §1 says "MT engine is
+production, default ON".  Per QA-0a's earlier entry, this was true
+for Release but flagged as no-op under Debug.  After QA-Md: the
+carry-forward statement is now true for both Release AND Debug -- the
+Debug "no-op" was a meter-display artifact, not an engine issue.
+
+**Inline back-refs:**
+- §5 QA-Audit "Pre-release decisions to revisit" sub-section gains two
+  new items (`CL-291` DSP meter cap V1, `CL-292` MT diagnostic compile-
+  flag gate); count goes from 3 -> 5.
+- §5 QA-Md entry needs no annotation -- batch-close entry in Implemented
+  Work Log.md will chronicle the outcome.
+- `Future State.md` Cross-cutting Infrastructure gains two new sub-
+  clusters: "DSP meter UX" (`CL-291`) and "MT diagnostic compile-flag
+  gate" (`CL-292`).
+- §9 Forks: this entry (eighth).
+- Above seventh entry (2026-05-08 docket creation) gains a "Note"
+  pointer to this entry so future readers see the count evolution.
+
+**Plan files affected:**
+- `Source/PluginProcessor.cpp` — meter cap permanent edit (2.f -> 10.f) with HOLD-FOR-Phase-6-review comment.
+- `Plans & Specs/Main Plan.md` — this entry + §5 QA-Audit additions + seventh-entry pointer.
+- `Plans & Specs/Future State.md` — CL-291 + CL-292 added.
+- `Plans & Specs/Implemented Work Log.md` — QA-Md batch-close entry (next, Task 10).
+
+**Verification:** QA-Md closes when (a) meter cap permanent edit lands
+with comment that flags Phase 6 review, (b) plan-doc references for
+CL-291 + CL-292 are in place, (c) Implemented Work Log batch-close
+entry chronicles the diagnostic findings + outcome, (d) `/review-batch`
+flags no BLOCKERS, (e) QA-0a finding #9 marked resolved-as-misdiagnosed
+with pointer to this entry.
