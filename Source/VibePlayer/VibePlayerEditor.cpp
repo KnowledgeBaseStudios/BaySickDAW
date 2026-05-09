@@ -822,5 +822,5 @@ void VibePlayerEditor::setInfoText (const juce::String& text)
     // caller (BaySickDrumsEditor) was deleted in the Phase D dynamic-drum
     // refactor (2026-04-25); kept on the API for any future page-context
     // callers that want to override the displayed engine name.
-    mTitleBar.setEngineName (text.isEmpty() ? "BAYSICKPLAYER" : text.toUpperCase());
+    mTitleBar.setEngineName (text.isEmpty() ? "BaySickPlayer" : text);
 }

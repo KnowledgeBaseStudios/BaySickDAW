@@ -84,7 +84,7 @@ private:
     // QA-A (2026-05-09): unified title bar.  Accent = BaySickSynthLAF::kGreen
     // (#A0DB2B FL green).  STYLE-06 spec: preset moves to RIGHT, title is the
     // engine's green accent.
-    BaySickTitleBar  mTitleBar { "BAYSICKSYNTH",
+    BaySickTitleBar  mTitleBar { "BaySickSynth",
                                  juce::Colour (BaySickSynthLAF::kGreen) };
     juce::TextButton mPresetBtn { "Preset v" };
 

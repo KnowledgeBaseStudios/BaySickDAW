@@ -16,7 +16,7 @@ QA-A is the next batch in the post-Batch-10 QA plan after QA-Md (closed 2026-05-
 
 - **STYLE-01** — BaySickPlayer ribbon tab text clips (slot too narrow per Jeff's confirmation; the brand is "BaySickPlayer" singular, NOT plural).
 - **STYLE-02** — Standardize logo/font/size across player pages (folded LDT-167 from QA-Inventory close — see Main Plan §9 fifth Forks entry).
-- **STYLE-03** — `BaySickVocalEditor`'s `BaySickVocalsPanel` sub-panel section header reads "PAGE CONTROLS" at [Source/BaySickVocal/BaySickVocalEditor.cpp:294](Source/BaySickVocal/BaySickVocalEditor.cpp:294); should read "BAYSICKVOCALS".
+- **STYLE-03** — `BaySickVocalEditor`'s `BaySickVocalsPanel` sub-panel section header reads "PAGE CONTROLS" at [Source/BaySickVocal/BaySickVocalEditor.cpp:294](Source/BaySickVocal/BaySickVocalEditor.cpp:294); should read "BaySickVocals".
 - **STYLE-04** — `BaySickPedalsEditor` (Inst BaySickGuitars) currently has no engine title; needs "BaySickGuitars" label between player area and sub-tabs.
 - **STYLE-05** — `BaySickNAMIREditor` has an extra/redundant black bar in the title area.
 - **STYLE-06** — `BaySickSynthEditor` + `BaySickBassEditor`: preset dropdown should sit RIGHT (currently LEFT at `(6, 5, 88, 22)`); engine title should render in the engine's green accent (`BaySickSynthLAF::kGreen` 0xFFA0DB2B for Synth; `BaySickBassLAF::kGreen` 0xFF33FF88 for Bass).
@@ -37,8 +37,8 @@ QA-A is the next batch in the post-Batch-10 QA plan after QA-Md (closed 2026-05-
 
 | Editor | Header height | Title text now | Title color | Preset position |
 |--------|---------------|----------------|-------------|-----------------|
-| `HarmlessEditor` | `kHdrH = 36` ([:7](Source/Harmless/HarmlessEditor.cpp:7)) | "HARMLESS" (bloomed twice — paint at [:637-642](Source/Harmless/HarmlessEditor.cpp:637)) | `HarmlessLAF::kAccent = 0xFFFF6600` | RIGHT — `(getWidth()-92, 4, 86, kHdrH-8)` ([:773](Source/Harmless/HarmlessEditor.cpp:773)) |
-| `VibePlayerEditor` | `kHdrH = 36` ([:5](Source/VibePlayer/VibePlayerEditor.cpp:5)) | "BAYSICKPLAYER" via `juce::Label` ([:47-50](Source/VibePlayer/VibePlayerEditor.cpp:47)) | `0xFFE0E0E0` (white) | RIGHT — `(w-200-kPad, 7, 110, 22)` + help btn `(w-82-kPad, 7, 24, 22)` ([:404-406](Source/VibePlayer/VibePlayerEditor.cpp:404)) |
+| `HarmlessEditor` | `kHdrH = 36` ([:7](Source/Harmless/HarmlessEditor.cpp:7)) | "Harmless" (bloomed twice — paint at [:637-642](Source/Harmless/HarmlessEditor.cpp:637)) | `HarmlessLAF::kAccent = 0xFFFF6600` | RIGHT — `(getWidth()-92, 4, 86, kHdrH-8)` ([:773](Source/Harmless/HarmlessEditor.cpp:773)) |
+| `VibePlayerEditor` | `kHdrH = 36` ([:5](Source/VibePlayer/VibePlayerEditor.cpp:5)) | "BaySickPlayer" via `juce::Label` ([:47-50](Source/VibePlayer/VibePlayerEditor.cpp:47)) | `0xFFE0E0E0` (white) | RIGHT — `(w-200-kPad, 7, 110, 22)` + help btn `(w-82-kPad, 7, 24, 22)` ([:404-406](Source/VibePlayer/VibePlayerEditor.cpp:404)) |
 | `BaySickSynthEditor` | 32 (hardcoded) | none — only preset btn | n/a | **LEFT** — `(6, 5, 88, 22)` ([:537](Source/BaySickSynth/BaySickSynthEditor.cpp:537)) |
 | `BaySickBassEditor` | 32 (hardcoded) | none — only preset btn | n/a | **LEFT** — `(6, 5, 88, 22)` ([:529](Source/BaySickBass/BaySickBassEditor.cpp:529)) |
 | `BaySickNAMIREditor` | `kHeaderH = 28` ([:37](Source/BaySickNAMIR/BaySickNAMIREditor.cpp:37)) | "BaySickNAM/IR" via `juce::Label` ([:409](Source/BaySickNAMIR/BaySickNAMIREditor.cpp:409)) | label default | RIGHT — A/B slot toggles ([:411-412](Source/BaySickNAMIR/BaySickNAMIREditor.cpp:411)); 1px divider at `y=kHeaderH` ([:402-403](Source/BaySickNAMIR/BaySickNAMIREditor.cpp:402)) |
@@ -51,16 +51,18 @@ QA-A is the next batch in the post-Batch-10 QA plan after QA-Md (closed 2026-05-
 
 | Engine | Title text | Accent | Source |
 |--------|-----------|--------|--------|
-| Harmless | "HARMLESS" | `HarmlessLAF::kAccent` (#FF6600 orange) | Existing engine LAF. Bloom default flipped on at Step 1b so all engines get the halo. |
-| VibePlayer (BaySickPlayer) | "BAYSICKPLAYER" | `0xFFD4A017` (amber / gold) | Same as Clips + Builder tab active color (`VC::Warm`); see [RibbonTabBar.cpp:11,15](Source/Standalone/RibbonTabBar.cpp:11) and [SharedUI.h:26](Source/Standalone/SharedUI.h:26) |
-| BaySickSynth | "BAYSICKSYNTH" | `BaySickSynthLAF::kGreen` (#A0DB2B FL green) | Existing engine LAF (STYLE-06) |
-| BaySickBass | "BAYSICKBASS" | `BaySickBassLAF::kGreen` (#33FF88 B1 neon green) | Existing engine LAF (STYLE-06) |
+| Harmless | "Harmless" | `HarmlessLAF::kAccent` (#FF6600 orange) | Existing engine LAF. Bloom default flipped on at Step 1b so all engines get the halo. |
+| VibePlayer (BaySickPlayer) | "BaySickPlayer" | `0xFFD4A017` (amber / gold) | Same as Clips + Builder tab active color (`VC::Warm`); see [RibbonTabBar.cpp:11,15](Source/Standalone/RibbonTabBar.cpp:11) and [SharedUI.h:26](Source/Standalone/SharedUI.h:26) |
+| BaySickSynth | "BaySickSynth" | `BaySickSynthLAF::kGreen` (#A0DB2B FL green) | Existing engine LAF (STYLE-06) |
+| BaySickBass | "BaySickBass" | `BaySickBassLAF::kGreen` (#33FF88 B1 neon green) | Existing engine LAF (STYLE-06) |
 | BaySickNAMIR | "BaySickNAM/IR" | `0xFFE0303F` (Mesa red) | New — Jeff's pick |
-| BaySickVocal | "BAYSICKVOCALS" | `0xFF0FAFA5` (bright teal) | Same as Vox tab **active** color; see [RibbonTabBar.cpp:20](Source/Standalone/RibbonTabBar.cpp:20) |
-| BaySickPedals | **"BAYSICKPEDALS"** *(corrected 2026-05-09 — was "BAYSICKGUITARS" originally per STYLE-04 phrasing, but Pedals is a distinct engine from Guitars)* | `0xFF1C3A8A` (navy / royal blue) | Same as Inst tab **active** color; see [RibbonTabBar.cpp:21](Source/Standalone/RibbonTabBar.cpp:21) |
-| **BaySickGuitars** *(scope expansion 2026-05-09)* | "BAYSICKGUITARS" | `0xFF1C3A8A` (navy — shared with Pedals + Basses) | Inst tab active color; Jeff's pick |
-| **BaySickBasses** *(scope expansion 2026-05-09)* | "BAYSICKBASSES" | `0xFF1C3A8A` (navy — shared with Pedals + Guitars) | Inst tab active color; Jeff's pick |
-| **BaySickRustyDrums** *(scope expansion 2026-05-09)* | "BAYSICKRUSTYDRUMS" | `0xFFCC2222` (Drums tab red) | Same as Drums tab active color; Jeff's pick |
+| BaySickVocal | "BaySickVocals" | `0xFF0FAFA5` (bright teal) | Same as Vox tab **active** color; see [RibbonTabBar.cpp:20](Source/Standalone/RibbonTabBar.cpp:20) |
+| BaySickPedals | "BaySickPedals" *(corrected 2026-05-09 -- was "BaySickGuitars" originally per STYLE-04 phrasing, but Pedals is a distinct engine from Guitars)* | `0xFF1C3A8A` (navy / royal blue) | Same as Inst tab **active** color; see [RibbonTabBar.cpp:21](Source/Standalone/RibbonTabBar.cpp:21) |
+| **BaySickGuitars** *(scope expansion 2026-05-09)* | "BaySickGuitars" | `0xFF1C3A8A` (navy -- shared with Pedals + Basses) | Inst tab active color; Jeff's pick |
+| **BaySickBasses** *(scope expansion 2026-05-09)* | "BaySickBasses" | `0xFF1C3A8A` (navy -- shared with Pedals + Guitars) | Inst tab active color; Jeff's pick |
+| **BaySickRustyDrums** *(scope expansion 2026-05-09)* | "BaySickRustyDrums" | `0xFFCC2222` (Drums tab red) | Same as Drums tab active color; Jeff's pick |
+
+**Casing convention (locked 2026-05-09):** brand mixed-case throughout. Never up-case to ALL-CAPS even when a legacy source string had it that way. See memory `feedback_match_jeff_text_casing.md`.
 
 ---
 
@@ -76,8 +78,8 @@ QA-A is the next batch in the post-Batch-10 QA plan after QA-Md (closed 2026-05-
 - `Source/BaySickSynth/BaySickSynthEditor.h` + `.cpp` (STYLE-06: preset L→R, green accent).
 - `Source/BaySickBass/BaySickBassEditor.h` + `.cpp` (STYLE-06: preset L→R, green accent).
 - `Source/BaySickNAMIR/BaySickNAMIREditor.h` + `.cpp` (STYLE-05: black-bar removal via standardized paint).
-- `Source/BaySickVocal/BaySickVocalEditor.cpp` (STYLE-03: PAGE CONTROLS → BAYSICKVOCALS via TitleBar in inner `BaySickVocalsPanel` class).
-- `Source/BaySickPedals/BaySickPedalsEditor.h` + `.cpp` (introduce TitleBar above pedal grid; **title = "BAYSICKPEDALS"** per 2026-05-09 correction; pedalboard preset button migrates from InstPage chrome into the title bar's trailing widget slot).
+- `Source/BaySickVocal/BaySickVocalEditor.cpp` (STYLE-03: PAGE CONTROLS → BaySickVocals via TitleBar in inner `BaySickVocalsPanel` class).
+- `Source/BaySickPedals/BaySickPedalsEditor.h` + `.cpp` (introduce TitleBar above pedal grid; **title = "BaySickPedals"** per 2026-05-09 correction; pedalboard preset button migrates from InstPage chrome into the title bar's trailing widget slot).
 
 **Modify (scope expansion 2026-05-09 — sfizz-engine UIs that didn't exist as targets in the original plan):**
 - `Source/Standalone/AriaControlPanel.h` + `.cpp` — extend `Binding` struct with optional `engineName` + `accentColor` fields; render an internal `BaySickTitleBar` at the top of the panel when both are set. Title bar height is taken out of the kit-artwork area.
@@ -294,7 +296,7 @@ void BaySickTitleBar::resized()
 - Modify: `Source/VibePlayer/VibePlayerEditor.h`.
 
 - [ ] **Step 2.1.1:** Add `#include "../Standalone/BaySickTitleBar.h"` near the existing `#include "VibePlayerLAF.h"` line.
-- [ ] **Step 2.1.2:** Find the `juce::Label mTitleLbl;` member (private section). Replace it with `BaySickTitleBar mTitleBar { "BAYSICKPLAYER", juce::Colour (0xFFD4A017) };` initialized inline. (Colour is the amber / gold from `VC::Warm` — same hue as the Clips + Builder tab active color.)
+- [ ] **Step 2.1.2:** Find the `juce::Label mTitleLbl;` member (private section). Replace it with `BaySickTitleBar mTitleBar { "BaySickPlayer", juce::Colour (0xFFD4A017) };` initialized inline. (Colour is the amber / gold from `VC::Warm` — same hue as the Clips + Builder tab active color.)
 - [ ] **Step 2.1.3:** Leave `mPresetBtn` and `mHelpBtn` members untouched.
 
 #### Task 2.2: Refactor VibePlayerEditor.cpp constructor
@@ -305,7 +307,7 @@ void BaySickTitleBar::resized()
 Current code at [:46-63](Source/VibePlayer/VibePlayerEditor.cpp:46):
 ```cpp
 // ── Header ────────────────────────────────────────────────────────────────
-mTitleLbl.setText ("BAYSICKPLAYER", juce::dontSendNotification);
+mTitleLbl.setText ("BaySickPlayer", juce::dontSendNotification);
 mTitleLbl.setFont (juce::Font (16.f, juce::Font::bold));
 mTitleLbl.setColour (juce::Label::textColourId, juce::Colour (0xFFE0E0E0));
 addAndMakeVisible (mTitleLbl);
@@ -378,7 +380,7 @@ mHelpBtn.setBounds   (trailing.getX() + 110 + 8,     btnY,  24, 22);
 #### Task 2.5: Build + verify
 
 - [ ] **Step 2.5.1:** Tell Jeff to run `do_build.bat`. Confirm both exit codes 0.
-- [ ] **Step 2.5.2:** Tell Jeff to launch the **Debug** exe first, open a Layers tab with VibePlayer engine, screenshot the title bar. Title should read "BAYSICKPLAYER" left-aligned in white, preset dropdown + help button on the right, no `jassert` dialogs.
+- [ ] **Step 2.5.2:** Tell Jeff to launch the **Debug** exe first, open a Layers tab with VibePlayer engine, screenshot the title bar. Title should read "BaySickPlayer" left-aligned in white, preset dropdown + help button on the right, no `jassert` dialogs.
 - [ ] **Step 2.5.3:** Tell Jeff to launch the **Release** exe and confirm visually identical.
 - [ ] **Step 2.5.4:** If layout looks off (wrong height, text clipping, button overlap), iterate inline.
 
@@ -396,10 +398,10 @@ Each editor follows the same shape: replace the existing title row with `BaySick
 - Modify: `Source/Harmless/HarmlessEditor.h` (add member + include).
 - Modify: `Source/Harmless/HarmlessEditor.cpp` (delete bloomed paint, swap to TitleBar, route preset via `getTrailingArea`).
 
-Current paint at [:626-642](Source/Harmless/HarmlessEditor.cpp:626) draws header background + bottom border + bloomed "HARMLESS" text twice (alpha 0.15 underlay + full-alpha overlay). Standardize to single-pass via `BaySickTitleBar`. Bloom is sacrificed — accent color preserves the engine identity.
+Current paint at [:626-642](Source/Harmless/HarmlessEditor.cpp:626) draws header background + bottom border + bloomed "Harmless" text twice (alpha 0.15 underlay + full-alpha overlay). Standardize to single-pass via `BaySickTitleBar`. Bloom is sacrificed — accent color preserves the engine identity.
 
 - [ ] **Step 3.1.1:** Add `#include "../Standalone/BaySickTitleBar.h"` to `HarmlessEditor.h`.
-- [ ] **Step 3.1.2:** Add `BaySickTitleBar mTitleBar { "HARMLESS", juce::Colour (HarmlessLAF::kAccent), /*bloom*/ true };` member in `HarmlessEditor`. The `true` opts into the orange-glow bloom (17pt bold halo at 15% opacity behind the crisp 16pt text) so the long-standing Harmless visual signature is preserved.
+- [ ] **Step 3.1.2:** Add `BaySickTitleBar mTitleBar { "Harmless", juce::Colour (HarmlessLAF::kAccent), /*bloom*/ true };` member in `HarmlessEditor`. The `true` opts into the orange-glow bloom (17pt bold halo at 15% opacity behind the crisp 16pt text) so the long-standing Harmless visual signature is preserved.
 - [ ] **Step 3.1.3:** In ctor, `addAndMakeVisible (mTitleBar);`. (Find the section that adds existing widgets; place near `mPresetBtn`.)
 - [ ] **Step 3.1.4:** Update `kHdrH = 36` at [HarmlessEditor.cpp:7](Source/Harmless/HarmlessEditor.cpp:7) to `BaySickTitleBar::kStandardHeight` (32).
 - [ ] **Step 3.1.5:** In `paint()`, delete lines [:631-642](Source/Harmless/HarmlessEditor.cpp:631) (`// ── Header bar ──` block + bloomed title text). Keep the `g.fillAll (HarmlessLAF::kChassis)` body fill above it.
@@ -410,7 +412,7 @@ Current paint at [:626-642](Source/Harmless/HarmlessEditor.cpp:626) draws header
   const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
   mPresetBtn.setBounds (trailing.getX(), btnY, 86, 22);
   ```
-- [ ] **Step 3.1.8:** Tell Jeff to `do_build.bat` → Debug verify (open Harmless engine in a Layers tab → screenshot title bar → confirm "HARMLESS" in orange) → Release verify.
+- [ ] **Step 3.1.8:** Tell Jeff to `do_build.bat` → Debug verify (open Harmless engine in a Layers tab → screenshot title bar → confirm "Harmless" in orange) → Release verify.
 - [ ] **Step 3.1.9:** Surface git status, `/draft-commit`, commit only `Source/Harmless/HarmlessEditor.h` + `.cpp`.
 
 #### Task 3.2: BaySickSynthEditor (STYLE-06: preset L→R, green title)
@@ -420,7 +422,7 @@ Current paint at [:626-642](Source/Harmless/HarmlessEditor.cpp:626) draws header
 - Modify: `Source/BaySickSynth/BaySickSynthEditor.cpp`.
 
 - [ ] **Step 3.2.1:** Add `#include "../Standalone/BaySickTitleBar.h"` to `BaySickSynthEditor.h`.
-- [ ] **Step 3.2.2:** Add `BaySickTitleBar mTitleBar { "BAYSICKSYNTH", juce::Colour (BaySickSynthLAF::kGreen) };` member.
+- [ ] **Step 3.2.2:** Add `BaySickTitleBar mTitleBar { "BaySickSynth", juce::Colour (BaySickSynthLAF::kGreen) };` member.
 - [ ] **Step 3.2.3:** In ctor, `addAndMakeVisible (mTitleBar);`.
 - [ ] **Step 3.2.4:** In `paint()` at [:519-528](Source/BaySickSynth/BaySickSynthEditor.cpp:519), keep `g.fillAll (BaySickSynthLAF::kBgMain)` and the deck/divider lines. The TitleBar paints its own background — no header paint needed in the editor.
 - [ ] **Step 3.2.5:** In `resized()` at [:532-558](Source/BaySickSynth/BaySickSynthEditor.cpp:532), replace the header layout. Currently:
@@ -436,22 +438,22 @@ Current paint at [:626-642](Source/Harmless/HarmlessEditor.cpp:626) draws header
   const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
   mPresetBtn.setBounds (trailing.getX(), btnY, 88, 22);
   ```
-- [ ] **Step 3.2.6:** Tell Jeff to `do_build.bat` → Debug verify (open BaySickSynth → screenshot → confirm "BAYSICKSYNTH" in FL green on LEFT, preset dropdown on RIGHT) → Release verify.
+- [ ] **Step 3.2.6:** Tell Jeff to `do_build.bat` → Debug verify (open BaySickSynth → screenshot → confirm "BaySickSynth" in FL green on LEFT, preset dropdown on RIGHT) → Release verify.
 - [ ] **Step 3.2.7:** Surface git status, `/draft-commit`, commit only `Source/BaySickSynth/BaySickSynthEditor.h` + `.cpp`.
 
 #### Task 3.3: BaySickBassEditor (STYLE-06: preset L→R, green title)
 
-Identical structure to Task 3.2 with name="BAYSICKBASS" and accent=`BaySickBassLAF::kGreen`. Both `BaySickSynth` and `BaySickBass` use the SAME 32px header geometry.
+Identical structure to Task 3.2 with name="BaySickBass" and accent=`BaySickBassLAF::kGreen`. Both `BaySickSynth` and `BaySickBass` use the SAME 32px header geometry.
 
 **Files:**
 - Modify: `Source/BaySickBass/BaySickBassEditor.h`.
 - Modify: `Source/BaySickBass/BaySickBassEditor.cpp`.
 
 - [ ] **Step 3.3.1:** Add `#include "../Standalone/BaySickTitleBar.h"` to `BaySickBassEditor.h`.
-- [ ] **Step 3.3.2:** Add `BaySickTitleBar mTitleBar { "BAYSICKBASS", juce::Colour (BaySickBassLAF::kGreen) };` member.
+- [ ] **Step 3.3.2:** Add `BaySickTitleBar mTitleBar { "BaySickBass", juce::Colour (BaySickBassLAF::kGreen) };` member.
 - [ ] **Step 3.3.3:** In ctor, `addAndMakeVisible (mTitleBar);`.
 - [ ] **Step 3.3.4:** Apply the same `resized()` swap as Task 3.2.5 (line numbers offset to [:524-549](Source/BaySickBass/BaySickBassEditor.cpp:524)).
-- [ ] **Step 3.3.5:** Tell Jeff to `do_build.bat` → Debug verify (open BaySickBass → screenshot → confirm "BAYSICKBASS" in B1 neon green on LEFT, preset dropdown on RIGHT) → Release verify.
+- [ ] **Step 3.3.5:** Tell Jeff to `do_build.bat` → Debug verify (open BaySickBass → screenshot → confirm "BaySickBass" in B1 neon green on LEFT, preset dropdown on RIGHT) → Release verify.
 - [ ] **Step 3.3.6:** Surface git status, `/draft-commit`, commit only `Source/BaySickBass/BaySickBassEditor.h` + `.cpp`.
 
 #### Task 3.4: BaySickNAMIREditor (STYLE-05: extra black bar fix via standardized paint)
@@ -492,27 +494,27 @@ Identical structure to Task 3.2 with name="BAYSICKBASS" and accent=`BaySickBassL
 
 ### Phase 4 — Introduce title bars in editors that don't have one (5 editors after 2026-05-09 scope expansion)
 
-> **Scope expansion 2026-05-09:** Phase 4 originally covered only BaySickVocalEditor (Task 4.1) and BaySickPedalsEditor (Task 4.2).  Jeff's clarification mid-execution: every player engine needs its own title bar, including the three sfizz-based engines that share `AriaControlPanel` (BaySickGuitars + BaySickBasses) and the dedicated `BaySickRustyDrumsPage`.  Tasks 4.3 / 4.4 / 4.5 / 4.6 added at that point.  Task 4.2's title text also corrected from "BAYSICKGUITARS" to "BAYSICKPEDALS" because BaySickPedals is a distinct engine from BaySickGuitars (the original STYLE-04 phrasing conflated them).
+> **Scope expansion 2026-05-09:** Phase 4 originally covered only BaySickVocalEditor (Task 4.1) and BaySickPedalsEditor (Task 4.2).  Jeff's clarification mid-execution: every player engine needs its own title bar, including the three sfizz-based engines that share `AriaControlPanel` (BaySickGuitars + BaySickBasses) and the dedicated `BaySickRustyDrumsPage`.  Tasks 4.3 / 4.4 / 4.5 / 4.6 added at that point.  Task 4.2's title text also corrected from "BaySickGuitars" to "BaySickPedals" because BaySickPedals is a distinct engine from BaySickGuitars (the original STYLE-04 phrasing conflated them).
 
-#### Task 4.1: BaySickVocalEditor — STYLE-03 (PAGE CONTROLS → BAYSICKVOCALS)
+#### Task 4.1: BaySickVocalEditor — STYLE-03 (PAGE CONTROLS → BaySickVocals)
 
 The "PAGE CONTROLS" header lives inside an inner class `BaySickVocalsPanel` in `BaySickVocalEditor.cpp` (sub-tab content panel, not the editor's top). It's drawn via `g.drawText` at [:294](Source/BaySickVocal/BaySickVocalEditor.cpp:294) inside the panel's `paint()` override at [:282](Source/BaySickVocal/BaySickVocalEditor.cpp:282). Refactoring the section to use `BaySickTitleBar` keeps consistency with the rest of QA-A.
 
-The panel currently has a 2-section layout (top half = page controls, bottom half = realtime pitch correction). Replacing the section captions with TitleBars affects both top and bottom — but the spec only mentions the top one ("PAGE CONTROLS" → "BAYSICKVOCALS"). The bottom caption ("REALTIME PITCH CORRECTION") is descriptive of the section's contents, not an engine title — keep that as a `g.drawText` for now and leave it for a future polish pass.
+The panel currently has a 2-section layout (top half = page controls, bottom half = realtime pitch correction). Replacing the section captions with TitleBars affects both top and bottom — but the spec only mentions the top one ("PAGE CONTROLS" → "BaySickVocals"). The bottom caption ("REALTIME PITCH CORRECTION") is descriptive of the section's contents, not an engine title — keep that as a `g.drawText` for now and leave it for a future polish pass.
 
 **Files:**
 - Modify: `Source/BaySickVocal/BaySickVocalEditor.cpp`.
 
 - [ ] **Step 4.1.1:** Read the `BaySickVocalsPanel` inner class fully (around [:140-330](Source/BaySickVocal/BaySickVocalEditor.cpp:140)) before editing — confirm the panel's member list, layout assumptions, and where the top-half content lives.
 - [ ] **Step 4.1.2:** Add `#include "../Standalone/BaySickTitleBar.h"` near the top of `BaySickVocalEditor.cpp` (or in `BaySickVocalEditor.h` if shared).
-- [ ] **Step 4.1.3:** Add `BaySickTitleBar mTopTitleBar { "BAYSICKVOCALS", juce::Colour (0xFF0FAFA5) };` as a member of `BaySickVocalsPanel`. (Colour is the bright teal from the Vox tab's **active** state at [RibbonTabBar.cpp:20](Source/Standalone/RibbonTabBar.cpp:20).)
+- [ ] **Step 4.1.3:** Add `BaySickTitleBar mTopTitleBar { "BaySickVocals", juce::Colour (0xFF0FAFA5) };` as a member of `BaySickVocalsPanel`. (Colour is the bright teal from the Vox tab's **active** state at [RibbonTabBar.cpp:20](Source/Standalone/RibbonTabBar.cpp:20).)
 - [ ] **Step 4.1.4:** In `BaySickVocalsPanel`'s ctor, `addAndMakeVisible (mTopTitleBar);`.
 - [ ] **Step 4.1.5:** In `paint()` at [:282-298](Source/BaySickVocal/BaySickVocalEditor.cpp:282), delete the `g.drawText ("PAGE CONTROLS", ...)` at [:294-295](Source/BaySickVocal/BaySickVocalEditor.cpp:294). Keep the divider at [:288-289](Source/BaySickVocal/BaySickVocalEditor.cpp:288) and the bottom caption "REALTIME PITCH CORRECTION" at [:296-297](Source/BaySickVocal/BaySickVocalEditor.cpp:296).
 - [ ] **Step 4.1.6:** In `resized()` at [:300+](Source/BaySickVocal/BaySickVocalEditor.cpp:300), insert `mTopTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);` BEFORE existing top-half layout. Adjust the top-half content layout to start AT `BaySickTitleBar::kStandardHeight` instead of from the panel's top (was `top.removeFromTop(half).reduced(16, 24)` — adjust the reduced offset to skip the title bar).
-- [ ] **Step 4.1.7:** Tell Jeff to `do_build.bat` → Debug verify (open Vox tab, navigate to BaySickVocals sub-tab, screenshot top section — should read "BAYSICKVOCALS" instead of "PAGE CONTROLS") → Release verify.
+- [ ] **Step 4.1.7:** Tell Jeff to `do_build.bat` → Debug verify (open Vox tab, navigate to BaySickVocals sub-tab, screenshot top section — should read "BaySickVocals" instead of "PAGE CONTROLS") → Release verify.
 - [ ] **Step 4.1.8:** Surface git status, `/draft-commit`, commit only `Source/BaySickVocal/BaySickVocalEditor.cpp`.
 
-#### Task 4.2: BaySickPedalsEditor — introduce "BAYSICKPEDALS" title bar + migrate pedalboard preset button
+#### Task 4.2: BaySickPedalsEditor — introduce "BaySickPedals" title bar + migrate pedalboard preset button
 
 `BaySickPedalsEditor` currently has no engine title (it's a 4×2 grid of pedal slots). The InstPage's `kHeaderRowH` chrome holds the pedalboard preset button (`mPedalsPresetBtn`) today; that chrome goes away in Task 4.4 when each engine UI owns its own title bar. The pedalboard preset button migrates into BaySickPedalsEditor's title bar trailing slot.
 
@@ -522,12 +524,12 @@ The panel currently has a 2-section layout (top half = page controls, bottom hal
 
 - [ ] **Step 4.2.1:** Read `BaySickPedalsEditor.cpp` fully — understand the 4×2 grid layout in `resized()` and any top-of-component offset already in use.
 - [ ] **Step 4.2.2:** Add `#include "../Standalone/BaySickTitleBar.h"` to `BaySickPedalsEditor.h`.
-- [ ] **Step 4.2.3:** Add `BaySickTitleBar mTitleBar { "BAYSICKPEDALS", juce::Colour (0xFF1C3A8A) };` member. (Colour is the navy / royal blue from the Inst tab's **active** state at [RibbonTabBar.cpp:21](Source/Standalone/RibbonTabBar.cpp:21). Title text "BAYSICKPEDALS" — corrected 2026-05-09 from "BAYSICKGUITARS" since BaySickPedals is a distinct engine from BaySickGuitars.)
+- [ ] **Step 4.2.3:** Add `BaySickTitleBar mTitleBar { "BaySickPedals", juce::Colour (0xFF1C3A8A) };` member. (Colour is the navy / royal blue from the Inst tab's **active** state at [RibbonTabBar.cpp:21](Source/Standalone/RibbonTabBar.cpp:21). Title text "BaySickPedals" — corrected 2026-05-09 from "BaySickGuitars" since BaySickPedals is a distinct engine from BaySickGuitars.)
 - [ ] **Step 4.2.4:** Add `juce::TextButton mPresetBtn { "Preset v" };` member. This is the pedalboard preset button (saves the 8-slot rack as Documents/BaySickDAW/Presets/Pedalboards/{name}.xml). Currently lives in InstPage chrome at `mPedalsPresetBtn`.
 - [ ] **Step 4.2.5:** Add `std::function<void()> onPedalboardPresetMenu;` callback member. InstPage will set this callback to its `showPedalboardPresetMenu()` method so the button keeps its existing behavior.
 - [ ] **Step 4.2.6:** In ctor, `addAndMakeVisible (mTitleBar);` and `addAndMakeVisible (mPresetBtn);` and `mPresetBtn.onClick = [this] { if (onPedalboardPresetMenu) onPedalboardPresetMenu(); };`.
 - [ ] **Step 4.2.7:** In `resized()`, set `mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);`. Right-anchor the preset button via `const auto trailing = mTitleBar.getTrailingArea(88); const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2; mPresetBtn.setBounds(trailing.getX(), btnY, 88, 22);`. Then shift the pedal grid down by `BaySickTitleBar::kStandardHeight` (32px). The grid layout uses `kRows = 2, kCols = 4` near [BaySickPedalsEditor.cpp:54-55](Source/BaySickPedals/BaySickPedalsEditor.cpp:54). Subtract `kStandardHeight` from the available content height before computing tile sizes; offset the grid Y by `kStandardHeight`.
-- [ ] **Step 4.2.8:** Tell Jeff to `do_build.bat` → Debug verify (open an Inst tab → BaySickPedals, screenshot — should show "BAYSICKPEDALS" title bar above the 4×2 pedal grid, preset button right-anchored in the title bar) → Release verify. **NOTE:** the preset button won't yet trigger the menu because InstPage hasn't been wired to set `onPedalboardPresetMenu` — that happens in Task 4.4 (InstPage cleanup).
+- [ ] **Step 4.2.8:** Tell Jeff to `do_build.bat` → Debug verify (open an Inst tab → BaySickPedals, screenshot — should show "BaySickPedals" title bar above the 4×2 pedal grid, preset button right-anchored in the title bar) → Release verify. **NOTE:** the preset button won't yet trigger the menu because InstPage hasn't been wired to set `onPedalboardPresetMenu` — that happens in Task 4.4 (InstPage cleanup).
 - [ ] **Step 4.2.9:** Surface git status, `/draft-commit`, commit only `Source/BaySickPedals/BaySickPedalsEditor.h` + `.cpp`.
 
 #### Task 4.3: AriaControlPanel — extend Binding with engineName + accentColor + render internal TitleBar
@@ -560,9 +562,9 @@ InstPage currently paints a `kHeaderRowH = 36 px` dark chrome strip with `mPedal
 - [ ] **Step 4.4.3:** In `InstPage::resized()` ([:1283-1287](Source/Inst/InstPage.cpp:1283)), delete the header layout block (`auto header = r.removeFromTop(kHeaderRowH)` + the mPedalsPresetBtn / mPedalsHeaderTitle setBounds calls). Remove the `r.removeFromTop(kHeaderRowH)` call so engine UIs fill the full area.
 - [ ] **Step 4.4.4:** Delete `mPedalsHeaderTitle` member (no longer used). Delete `mPedalsPresetBtn` member — the button moved to BaySickPedalsEditor in Task 4.2.
 - [ ] **Step 4.4.5:** Find where InstPage instantiates BaySickPedalsEditor; wire `mPedalsEditor->onPedalboardPresetMenu = [this] { showPedalboardPresetMenu(); };` so the migrated preset button still routes to InstPage's existing menu.
-- [ ] **Step 4.4.6:** Find where InstPage configures the AriaControlPanel binding for BaySickGuitars (the source-mode-aware setup). Set `binding.engineName = "BAYSICKGUITARS"` and `binding.accentColor = juce::Colour (0xFF1C3A8A)`.
-- [ ] **Step 4.4.7:** Same for BaySickBasses: `binding.engineName = "BAYSICKBASSES"`, `binding.accentColor = juce::Colour (0xFF1C3A8A)`.
-- [ ] **Step 4.4.8:** Tell Jeff to `do_build.bat` → Debug verify: (a) Inst tab → BaySickPedals shows BAYSICKPEDALS title bar with working preset button; (b) Inst tab → BaySickGuitars shows BAYSICKGUITARS title bar above the kit artwork; (c) Inst tab → BaySickBasses shows BAYSICKBASSES title bar; (d) no leftover dark chrome strip from the old InstPage header. Release verify same.
+- [ ] **Step 4.4.6:** Find where InstPage configures the AriaControlPanel binding for BaySickGuitars (the source-mode-aware setup). Set `binding.engineName = "BaySickGuitars"` and `binding.accentColor = juce::Colour (0xFF1C3A8A)`.
+- [ ] **Step 4.4.7:** Same for BaySickBasses: `binding.engineName = "BaySickBasses"`, `binding.accentColor = juce::Colour (0xFF1C3A8A)`.
+- [ ] **Step 4.4.8:** Tell Jeff to `do_build.bat` → Debug verify: (a) Inst tab → BaySickPedals shows BaySickPedals title bar with working preset button; (b) Inst tab → BaySickGuitars shows BaySickGuitars title bar above the kit artwork; (c) Inst tab → BaySickBasses shows BaySickBasses title bar; (d) no leftover dark chrome strip from the old InstPage header. Release verify same.
 - [ ] **Step 4.4.9:** Surface git status, `/draft-commit`, commit only `Source/Inst/InstPage.h` + `.cpp`.
 
 #### Task 4.5: BaySickRustyDrumsPage — add title bar at top, re-anchor menu buttons below
@@ -576,11 +578,11 @@ InstPage currently paints a `kHeaderRowH = 36 px` dark chrome strip with `mPedal
 
 - [ ] **Step 4.5.1:** Read `BaySickRustyDrumsPage.h/.cpp` end-to-end — confirm where the existing menu bar lives (which member draws / hosts it; sub-tab buttons; etc.). Without knowing exactly which bar Jeff means, the diagnose-before-fixing rule applies: ask Jeff for a screenshot if the layout-edit target is ambiguous.
 - [ ] **Step 4.5.2:** Add `#include "BaySickTitleBar.h"` to `BaySickRustyDrumsPage.h`.
-- [ ] **Step 4.5.3:** Add `BaySickTitleBar mTitleBar { "BAYSICKRUSTYDRUMS", juce::Colour (0xFFCC2222) };` member. (Colour is the Drums tab active red.)
+- [ ] **Step 4.5.3:** Add `BaySickTitleBar mTitleBar { "BaySickRustyDrums", juce::Colour (0xFFCC2222) };` member. (Colour is the Drums tab active red.)
 - [ ] **Step 4.5.4:** In ctor, `addAndMakeVisible (mTitleBar);`.
 - [ ] **Step 4.5.5:** In `resized()` ([:76-91](Source/Standalone/BaySickRustyDrumsPage.cpp:76)), reserve the top 32 px for the title bar. Lay `mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight)`. Then position the existing menu-button bar (per Step 4.5.1's diagnosis) immediately below the title bar, against the top edge of the player area. Sub-tab content (mDrumKitTab / mPlayerTab / mPianoRollTab + AriaControlPanel inside Player) fills the area below.
 - [ ] **Step 4.5.6:** Note: AriaControlPanel will receive the engineName + accentColor via the binding for the Player sub-tab too — Task 4.3's plumbing covers it. Confirm the binding setup happens in BaySickRustyDrumsPage's AriaControlPanel ctor / setEngine call. If the engine title bar there is redundant with the page's title bar, set `binding.engineName = ""` so AriaControlPanel skips its internal title bar (only the page-level one shows).
-- [ ] **Step 4.5.7:** Tell Jeff to `do_build.bat` → Debug verify (open the Drums tab, screenshot — BAYSICKRUSTYDRUMS title bar in red at top, menu buttons immediately below against player area, sub-tab content fills the rest cleanly) → Release verify.
+- [ ] **Step 4.5.7:** Tell Jeff to `do_build.bat` → Debug verify (open the Drums tab, screenshot — BaySickRustyDrums title bar in red at top, menu buttons immediately below against player area, sub-tab content fills the rest cleanly) → Release verify.
 - [ ] **Step 4.5.8:** Surface git status, `/draft-commit`, commit only `Source/Standalone/BaySickRustyDrumsPage.h` + `.cpp`.
 
 ### Phase 5 — STYLE-01 ribbon truncation fix
@@ -681,7 +683,7 @@ End-to-end test after Phase 6:
 - ✓ Spec coverage: STYLE-01 (Phase 5) / STYLE-02 (Phase 1 component + accent palette + standardized 32px height across all editors) / STYLE-03 (Task 4.1) / STYLE-04 (Task 4.2) / STYLE-05 (Task 3.4) / STYLE-06 (Tasks 3.2 + 3.3).
 - ✓ No placeholders. Every step has concrete file path + line range + code or command.
 - ✓ Type consistency: `BaySickTitleBar` API (ctor / `kStandardHeight` / `getTrailingArea`) is used identically in every editor refactor task.
-- ✓ ASCII-only UI strings: "BAYSICKPLAYER" / "HARMLESS" / "BAYSICKSYNTH" / "BAYSICKBASS" / "BaySickNAM/IR" / "BAYSICKVOCALS" / "BAYSICKGUITARS" — all ASCII.
+- ✓ ASCII-only UI strings: "BaySickPlayer" / "Harmless" / "BaySickSynth" / "BaySickBass" / "BaySickNAM/IR" / "BaySickVocals" / "BaySickGuitars" — all ASCII.
 - ✓ Per-commit `/draft-commit` rule honored — every commit step says "dispatch `/draft-commit`".
 - ✓ "Surface FULL git status" rule honored — every commit step says "Surface git status".
 - ✓ "Stage specific files only" rule honored — every commit step lists the explicit file set.
