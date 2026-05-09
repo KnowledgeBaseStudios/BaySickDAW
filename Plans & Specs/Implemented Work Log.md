@@ -279,3 +279,71 @@ All routings + cluster decisions documented in [Main Plan.md](Main Plan.md) §9 
 - CLAUDE.md cleanup pass (post-close, in this session): remove the stale `OPEN BUG carried into next session` BaySickSynth drum woofy entry (fixed weeks ago per memory `project_drum_woofy_bug_fixed.md`); audit "Next Steps" section against the 9 new batches; surface anything else stale. Then move to QA-Md (MT Engine Debug-Build Investigation) per the Phase 1 sequence.
 
 ---
+
+### 2026-05-09 21:14 PT — QA-Md — MT engine works in Debug; original "no-op" was DSP meter cap saturation
+
+**Bucket:** Cross-cutting Infrastructure
+
+#### Done
+- Wrote QA-Md per-batch plan as a new file ([Batch Plans/glittery-tinkering-salamander.md](Batch Plans/glittery-tinkering-salamander.md)); updated [Main Plan.md](Main Plan.md) §5 QA-Md `**Plan file:**` pointer (Task 0, commit `087aebe`).
+- Added `MtDiagnostic` counter namespace to [Source/Engine/RenderEngineFlags.h](../Source/Engine/RenderEngineFlags.h) — 11 atomic counters (block count / leaves submitted / child submits / watchdog fires / main-thread tasks / worker tasks / worker spin finds / worker sleep finds / worker idle sleeps / worker wakes) + `Snapshot` POD + `reset()` + `snapshot()` helpers, all gated on `gCaptureOn` for zero hot-path cost when off (Task 1, commit `d9ed843`).
+- Wired counters into [Source/Engine/VibeThreadPool.cpp](../Source/Engine/VibeThreadPool.cpp): `runOneTask` child cascade (gChildSubmits), `runUntilOrTimeout` (gMainThreadTasks per pop + gWatchdogFires on timeout), `workerLoop` (gWorkerSpinFinds, gWorkerSleepFinds, gWorkerTasks, gWorkerIdleSleeps, gWorkerWakes) (Task 2, commit `7c4ba0b`).
+- Wired counters into [Source/Engine/RenderGraphDispatcher.cpp](../Source/Engine/RenderGraphDispatcher.cpp): gBlockCount at `dispatchBlock` entry, gLeavesSubmitted per leaf in seed loop (Task 3, commit `6709fdb`).
+- Added "Run MT Diagnostic (2s capture)" menu item (id 203) to the Mixer hamburger in [Source/Standalone/StandaloneEditor.cpp](../Source/Standalone/StandaloneEditor.cpp) — `showOkCancelBox` confirm → reset → set capture flag → 2s message-thread sleep → snapshot → `showMessageBoxAsync` with formatted body (build label / MT mode / per-counter values + percentages) (Task 4, commit `830f103`).
+- Smoke-tested in Release with a small Layers session: blocks=750, total submits=9750, total tasks run=9750 (perfect match), watchdog=0, main-thread=8.0% / workers=92.0%, wakes/idle-sleeps ratio = 99.96%. Confirmed instrumentation works end-to-end (Task 5).
+- Captured Debug + MT-on with same session: blocks=750, total submits=9752, total tasks run=9752 (perfect match), watchdog=0, main-thread=8.2% / workers=91.8%, wakes/idle-sleeps ratio = 99.96%. Essentially identical to Release pattern (Task 6 part 1).
+- Captured Debug + MT-off control: all counters at 0 — confirmed branch decision works correctly under Debug (serial path skips MT branch entirely) (Task 6 part 2).
+- Identified the four-quadrant DSP meter readings (small file SF + big file BF, Release + Debug, MT-on + MT-off) as the missing data needed to confirm the original "MT no-op" claim. User captured: Release MT-on/off SF=4/5, BF=33/55; Debug MT-on/off SF=33/33, BF=200/200 (Task 7 quadrant capture).
+- Diagnosed Debug-BF 200/200 as DSP-meter-cap saturation (`juce::jlimit(0.f, 2.f, ...)` at [PluginProcessor.cpp:2969](../Source/PluginProcessor.cpp)), not MT engine failure. Both modes were sitting above the 200% display ceiling.
+- Raised the meter cap from `2.f` to `10.f` as a quick definitive test; user re-captured Debug BF: MT-on=450%, MT-off=870%. **MT works in Debug at full efficiency.** Reduction ratio (~48%) essentially identical to Release (~40%).
+- Decided: keep meter cap permanent at `10.f` for active development with HOLD-FOR-Phase-6-review marker (V1 release value deferred to QA-Audit decisions docket).
+- Decided: keep MT diagnostic counters + Mixer hamburger menu item active during development; Phase 6 decides whether to wrap behind `#if BAYSICKDAW_MT_DIAGNOSTIC` for V1 release shipping builds.
+- Captured five total decisions in QA-Audit "Pre-release decisions to revisit" docket (extending the three from earlier mid-batch chore commit `399bb59`): CL-288 AlertWindow API migration, CL-289 audit-security agent, CL-290 crash-report + symbol-server pipeline, CL-291 DSP meter cap V1 value, CL-292 MT diagnostic compile-flag gate.
+- Updated [Main Plan.md](Main Plan.md) §9 Forks with eighth entry chronicling the QA-Md outcome.
+
+#### Found along the way
+- **The original QA-0a finding #9 ("MT engine no-op under Debug") was a misdiagnosis.** The MT engine has been functioning correctly in Debug all along; the symptom was DSP meter cap saturation. Both Debug-MT-on (450%) and Debug-MT-off (870%) sit above the original 200% cap, so the meter clipped both to "200%" and they appeared identical — looked like MT had no effect when in fact it cuts wall-clock by ~48% in Debug.
+- **JUCE AlertWindow API mismatch in original plan.** The plan-as-written used `bool ok = showOkCancelBox(...)` (synchronous-style) and `juce::AlertWindow::showAsync(MessageBoxOptions...)` (newer builder API). Pre-edit codebase audit found both wrong: `showOkCancelBox` returns void and is async-callback only; the codebase uses `showMessageBoxAsync(...)` exclusively (~25 sites) with zero builder-API call sites. Refactored Task 4 to async-callback + `showMessageBoxAsync` to maintain consistency.
+- **Older AlertWindow convenience wrappers vs newer builder API.** Side conversation surfaced the question of long-term migration (does the codebase want to standardise on `MessageBoxOptions` builder shape vs the current convenience wrappers?). Captured as `CL-288` Future State + Phase 6 review item.
+- **Security audit agent need.** User raised the question of whether to create a `/audit-security` agent for known-CVE scanning + file-parser hardening + DLL safety + auto-updater chain audit. Captured as `CL-289` Future State + Phase 6 review item.
+- **Crash-report + symbol-server pipeline.** Came up while explaining what ships on a user's computer (`.pdb` files map crash addresses back to source lines). Captured as `CL-290` Future State + Phase 6 review item; pairs with QA-Updater scope.
+- **DSP meter UX call for V1 release.** Active dev value of `10.f` (1000%) is right for diagnosis but may surprise novice users seeing 870% readings. Three plausible release values (2 / 5 / 10). Captured as `CL-291` Future State + Phase 6 review item.
+- **Phase 3 fix branch was unnecessary.** Plan pre-spec'd Branch A / B / C / D fixes for plausible failure modes. None applied — the engine wasn't broken. Phase 3 skipped entirely.
+- **Counter pattern proves wake protocol is healthy in Debug.** Worker wakes (20078) ≈ worker idle sleeps (20086) — 99.96% ratio. Workers in Debug spin-find tasks 99.5% of the time (8951/8952). No starvation, no race, no broken signal protocol.
+
+#### What was done about each finding
+
+| Finding | Routing |
+|---|---|
+| QA-0a finding #9 misdiagnosed | Marked resolved-as-misdiagnosed in §9 Forks eighth entry; carry-forward §1 statement now true for both Release AND Debug. |
+| AlertWindow API plan deviations | Documented inline in Task 4 commit message (`830f103`); larger AlertWindow migration captured as `CL-288`. |
+| `/audit-security` agent question | Captured as Future State `CL-289` + folded into QA-Audit "Pre-release decisions to revisit" docket. |
+| Crash-report + symbol-server pipeline | Captured as Future State `CL-290` + folded into QA-Audit docket. Pairs with QA-Updater scope. |
+| DSP meter cap V1 release value | Captured as Future State `CL-291` + folded into QA-Audit docket. Active-dev value (`10.f`) preserved with HOLD-FOR-Phase-6-review comment. |
+| MT diagnostic compile-flag gate | Captured as Future State `CL-292` + folded into QA-Audit docket. Active during dev; Phase 6 decides whether to wrap behind `#if BAYSICKDAW_MT_DIAGNOSTIC` for V1 release. |
+| Phase 3 fix unneeded | Plan section preserved as historical record; no Branch A/B/C/D commits shipped. |
+
+#### Carry-forward contradictions (if any)
+- **QA-0a's 2026-05-07 entry framed MT as "production, default ON" for Release but no-op for Debug (finding #9, contradicting Carry-Forward §1's MT primitive listing).** After QA-Md: the "production, default ON" statement now holds for both Release AND Debug. The Debug "no-op" was a meter-display artifact (cap saturation at 200%), not an engine issue. The earlier QA-0a contradiction is **resolved** by this entry — finding #9 was a misdiagnosis caused by the meter cap saturating at 200% on both MT-on and MT-off Debug readings. (Carry-Forward §1 itself never made the production claim; it indexes the file:line primitives. The production framing came from the QA-0a entry, which is what this resolution updates.)
+
+#### Files touched
+- New: [Plans & Specs/Batch Plans/glittery-tinkering-salamander.md](Batch Plans/glittery-tinkering-salamander.md) (QA-Md per-batch plan).
+- New: `~/.claude/projects/C--Users-jeffm-Documents-BaySickDAW/memory/feedback_every_commit_via_draft_commit.md` (memory entry capturing the per-commit `/draft-commit` rule).
+- Modified (source): [Source/Engine/RenderEngineFlags.h](../Source/Engine/RenderEngineFlags.h), [Source/Engine/VibeThreadPool.cpp](../Source/Engine/VibeThreadPool.cpp), [Source/Engine/RenderGraphDispatcher.cpp](../Source/Engine/RenderGraphDispatcher.cpp), [Source/Standalone/StandaloneEditor.cpp](../Source/Standalone/StandaloneEditor.cpp), [Source/PluginProcessor.cpp](../Source/PluginProcessor.cpp) (meter cap raise + comment).
+- Modified (plans): [Main Plan.md](Main Plan.md) (QA-Md plan-file pointer; QA-Audit "Pre-release decisions to revisit" docket additions; §9 Forks 7th entry with note pointer + new 8th entry), [Future State.md](Future State.md) (CL-288, CL-289, CL-290, CL-291, CL-292), [Implemented Work Log.md](Implemented Work Log.md) (this entry).
+- Modified (memory): `~/.claude/projects/C--Users-jeffm-Documents-BaySickDAW/memory/MEMORY.md` (added pointer for the new feedback file).
+
+#### Commit(s)
+- `087aebe` QA-Md: open batch with plan file reference. (Task 0 chore: plan file + Main Plan pointer.)
+- `d9ed843` QA-Md Step 1: add MtDiagnostic counters in RenderEngineFlags.h. (Task 1.)
+- `7c4ba0b` QA-Md Step 2: wire MtDiagnostic counters into VibeThreadPool. (Task 2.)
+- `6709fdb` QA-Md Step 3: wire MtDiagnostic counters into RenderGraphDispatcher. (Task 3.)
+- `399bb59` QA-Md side findings: route three pre-release items into Future State + QA-Audit docket. (Mid-batch chore: CL-288 + CL-289 + CL-290.)
+- `830f103` QA-Md Step 4: surface MtDiagnostic counters via Mixer hamburger. (Task 4.)
+- `eef899c` QA-Md decision capture: raise DSP meter cap to 1000% + log Phase 2 outcome. (Decision-capture chore: meter cap `2.f` -> `10.f` + CL-291 + CL-292 + §9 Forks 8th entry.)
+- (this entry's commit appended after `/review-batch` + close.)
+
+#### Next action
+- QA-A is the next batch in the §6 sequencing arrow (`QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → ...`). QA-A scope is the STYLE cluster — unified TitleBar component (STYLE-01..06). See [Main Plan.md](Main Plan.md) §5 QA-A entry. No carry-over from QA-Md needed (batch closes cleanly).
+
+---

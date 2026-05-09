@@ -662,6 +662,8 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Md: MT Engine Debug-Build Investigation** (added 2026-05-07 via Rule 3 — see §9; promoted from Phase 5 to Phase 1 same day)
 **Plan file:** `Plans & Specs/Batch Plans/glittery-tinkering-salamander.md`
+
+> **Outcome (2026-05-09 QA-Md close):** original "MT no-op under Debug" premise was a *misdiagnosis*.  MT engine works correctly in Debug at full efficiency (workers do 91.8% of tasks; ~48% wall-clock reduction with MT-on vs MT-off matching Release's ~40%).  The symptom that motivated the batch (DSP meter reads identical with MT on vs MT off in Debug) was DSP meter cap saturation -- both Debug-MT-on (450%) and Debug-MT-off (870%) sit above the original 200% cap and read as "200%".  No fix shipped to the MT engine itself; Phase 3 of the per-batch plan was skipped.  Diagnostic value lives in the permanent counters + Mixer hamburger menu item.  See §9 Forks 8th entry for full diagnosis chronology + the 2026-05-09 Implemented Work Log entry for execution detail.  The §5 scope description below is preserved as the historical framing the batch started from -- read it as "what we set out to investigate," not "what's still true."
 - Items: QA-0a/QA-0 finding #9 — MT engine is a no-op under Debug
   builds.  DSP meter reads identical with MT on vs MT off; settings.xml
   persistence works; toggle UI works; but the dispatcher isn't actually
