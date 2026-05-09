@@ -192,6 +192,15 @@ Current and approved subfolders:
 - `Plans & Specs/Research Reports/` — output from competitive sweeps,
   technical investigations, market scans (e.g., the dated competitive-
   research aggregates that `competitive-research` agent produces).
+- `Plans & Specs/Running Notes/` — per-batch running-notes log
+  (`<silly-name>.md` matching the paired `Batch Plans/<silly-name>.md`).
+  Append-only mid-batch artifact populated by `/draft-doc running-notes`
+  dispatches at every checkpoint (commit landed / sub-task verified /
+  finding captured / decision made / scope pivot / spec call resolved).
+  At batch close, `/draft-doc batch-close` reads this file as the
+  primary input when compiling the single Implemented Work Log entry.
+  Established 2026-05-09 mid-QA-A after the running-notes home gap was
+  flagged.
 - (more subfolders added here as the need arises — decision logs,
   post-mortems, audit reports, etc.; document each new subfolder here
   when added so the structure stays discoverable).
