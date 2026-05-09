@@ -16,3 +16,17 @@ master_output.xml
 
 # Auto-saved Untitled-project backups — runtime, not source.
 Backups/Unsaved/
+
+# Per-machine general settings (recent files, multi-core toggle, etc.) — modified every app launch.
+settings.xml
+
+# Claude agent worktrees — created by isolated-mode subagents; ephemeral, not source.
+.claude/worktrees/
+
+# Per-machine Claude Code permission grants — local-only by Claude convention (`*.local.*`).
+.claude/settings.local.json
+
+# User-created presets across every page / engine / effect — personal content, not stock.
+# Stock factory presets live alongside (e.g. "Presets/Effects/Reverb/Hall.xml"); only the
+# "My Presets" subfolders contain user-saved patches that shouldn't ship in the repo.
+Presets/**/My Presets/
