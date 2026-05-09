@@ -1129,6 +1129,15 @@ These four batches were planned in the original `lucky-discovering-tiger` Phase 
 - Effort: medium-large (~10-15 hours).
 - Why this slot: installer last; everything ships through it.
 
+#### **QA-Updater: WinSparkle auto-update integration** (added 2026-05-08 via user spec call — see §9 sixth Forks entry)
+**Plan file:** TBD.
+- Items: User-requested 2026-05-08 — auto-updater integration (no source-doc precedent in `lucky-discovering-tiger.md` / `Final Stretch Work.txt` / `vibedaw_blueprint.md`).
+- Scope: vendor WinSparkle (BSD-licensed Windows updater C++ library); link into app launch path; configure GitHub Releases as the appcast source (BaySickDAW repo's Releases tab hosts signed `BaySickDAW-Setup-X.Y.Z.exe` artifacts + an `appcast.xml` manifest); wire once-per-launch background check (with "Remind me later" / "Skip this version" buttons in the prompt) + manual `Help → Check for Updates` menu item; "Auto-check for updates" toggle lives in a **General Settings dialog** (sub-spec at execution time: extend an existing settings dialog or create a new one — current Audio Settings dialog is audio-device-only); silent-skip on no internet (no error UI when offline); update-available prompt offers in-app "Update Now" → WinSparkle downloads the new installer → app exits → NSIS handles the upgrade → app relaunches; **signature-verify** the downloaded installer before running (defends against MITM tampering); rebuild installer to bundle WinSparkle DLL alongside the app binary; stable channel only — beta channel deferred to Future State `CL-287`.
+- Risk: medium-high. First WinSparkle integration; cryptographic signing chain depends on QA-Framework's signed-binary path (signing key needs to exist for both the binary and the appcast manifest); testing requires a staged GitHub Release dry-run before V1.0 cuts. WinSparkle has good documentation but the full GitHub-Releases-as-appcast pattern requires a small custom helper to translate Releases JSON → appcast XML (or Sparkle-compatible RSS).
+- Dependencies: QA-Installer (NSIS skeleton + sample-pack download infra), QA-Framework signing setup (signature verify needs the signing certificate + key established).
+- Effort: medium-large (~10-15 hours).
+- Why this slot: layers WinSparkle onto QA-Installer's NSIS skeleton; rebuilds the installer to include the updater. Sequencing means V1.0.0 ships with auto-update from day one (post-QA-Framework cut).
+
 #### **QA-Framework: Framework Document** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** TBD.
 - Items: LDT-179 + LDT-421 (Framework Document — architecture patterns reusable blueprint for future projects).
@@ -1157,7 +1166,7 @@ cross-doc picture.
 | **Mixer / Routing** | QA-D (mute/solo dispatch), QA-E (recording-finalize → strip lifecycle), QA-Audit (routing graph), QA-Cleanup-3 (orphan strip cleanup) |
 | **System Pages** | QA-G (Builder UX cluster), QA-H (Builder UX cluster — drop / mute / loop / drag), QA-I, QA-J (per-row audio-clip), QA-K, QA-L (Clips / Browser / picker-disable), QA-Export (Export Stems / Master), QA-Manuals, QA-Templates |
 | **UI / L&F / Theming** | QA-A (STYLE / fonts), QA-B, QA-C, QA-VibeSlider (right-click-swallow refactor), QA-Audit (UI surface), QA-Manuals (in-app help screens) |
-| **Cross-cutting Infrastructure** | QA-0 (DSP-12 Composite RenderTask), QA-0a (Debug build workflow), QA-Md (MT engine Debug-build investigation), QA-Audit (manifest), QA-Cleanup-1..4 (dead-code cleanup phase), QA-RC (release-candidate sweep), QA-Installer (TTF embed + EULA + signing), QA-Framework (icons / version stamping / registry) |
+| **Cross-cutting Infrastructure** | QA-0 (DSP-12 Composite RenderTask), QA-0a (Debug build workflow), QA-Md (MT engine Debug-build investigation), QA-Audit (manifest), QA-Cleanup-1..4 (dead-code cleanup phase), QA-RC (release-candidate sweep), QA-Installer (TTF embed + EULA + signing), QA-Updater (WinSparkle auto-update + GitHub Releases appcast + signature verify), QA-Framework (icons / version stamping / registry) |
 | **User Tools / Learning** | QA-Manuals (beginner manual + in-app help), QA-Templates (factory project templates) |
 | **Workflow Polish** | QA-Verify (E-bucket walk), QA-RC (final QoL sweep) |
 | **Other / Platform / Deferred** | (no V1 batches — Section 9 of Future State holds these post-V1 candidates) |
@@ -1207,6 +1216,14 @@ QA-Inventory triage; targeted Release smoke pass per item. **QA-Export**
 (after QA-Verify) — wire the Export Stems / Export Master flows that the
 ribbon/menu placeholders point at. See §9 QA-Inventory close entry.
 
+\*\*\*\*\* QA-Updater inserted 2026-05-08 via user spec call (sixth
+Forks entry). Phase 7, between QA-Installer and QA-Framework. WinSparkle
+auto-update integration with GitHub Releases as the appcast source;
+once-per-launch + manual `Help → Check for Updates`; signature-verify on
+download; "Auto-check for updates" toggle in General Settings; stable
+channel only (beta channel deferred to Future State `CL-287`). See §9
+sixth Forks entry.
+
 QA-0, QA-A, QA-B can run in **parallel** (different code surfaces, no
 audio-path overlap between QA-A UI work and QA-0 dispatcher fix).
 Everything Phase 2 onward is sequential per Option A.
@@ -1227,16 +1244,22 @@ the cleanup phase.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
-QA-Manuals****  →  QA-Templates****  →  QA-Installer****  →  QA-Framework****
+QA-Manuals****  →  QA-Templates****  →  QA-Installer****  →  QA-Updater*****  →  QA-Framework****
 ```
 
-All four added 2026-05-08 at QA-Inventory close. **QA-Manuals** — the
-beginner manual + in-app help screens (LDT-218, LDT-219, etc.). **QA-Templates**
-— factory project templates / starter packs (LDT-220, LDT-221). **QA-Installer**
+Four added 2026-05-08 at QA-Inventory close + one (QA-Updater) added
+2026-05-08 via user spec call. **QA-Manuals** — the beginner manual +
+in-app help screens (LDT-218, LDT-219, etc.). **QA-Templates** — factory
+project templates / starter packs (LDT-220, LDT-221). **QA-Installer**
 — Windows installer build with embedded TTF fonts (LDT-173) and licence /
-EULA flow. **QA-Framework** — final installable framework checks (icons,
-version stamping, registry keys, signed binary path). See §9 QA-Inventory
-close entry for the full per-batch source-trace.
+EULA flow. **QA-Updater** — WinSparkle auto-update integration with
+GitHub Releases as the appcast source, once-per-launch + manual check,
+signature-verify on download, "Auto-check for updates" toggle in General
+Settings, stable channel only (see Future State `CL-287` for the beta
+channel deferral). **QA-Framework** — final installable framework
+checks (icons, version stamping, registry keys, signed binary path). See
+§9 QA-Inventory close entry + sixth Forks entry (QA-Updater) for the full
+per-batch source-trace.
 
 ---
 
@@ -1604,6 +1627,7 @@ batches added for items with no existing surface match.
 | **QA-Manuals** | Phase 7 | beginner manual + in-app help screens (LDT-218, LDT-219, etc.). |
 | **QA-Templates** | Phase 7 | factory project templates / starter packs (LDT-220, LDT-221). |
 | **QA-Installer** | Phase 7 | Windows installer with embedded TTF fonts (LDT-173) + EULA + signed binary path. |
+| **QA-Updater** | Phase 7 (after QA-Installer) | WinSparkle auto-update + GitHub Releases appcast + once-per-launch + manual `Help → Check for Updates` + signature-verify + Auto-check toggle in General Settings + stable channel only (beta channel = Future State `CL-287`). User-requested 2026-05-08; see sixth Forks entry. |
 | **QA-Framework** | Phase 7 | final framework checks (icons, version stamping, registry keys). |
 
 **Walked-to-Drop (B bucket → `Future State.md` Considered & Dropped):**
@@ -1670,3 +1694,85 @@ held over):**
 **Verification:** every (a)-(f) condition from the QA-Inventory
 insertion entry above met. Closure commit follows after Phase 6.5
 (per-chunk commits) + Phase 7 (Implemented Work Log entry).
+
+### 2026-05-08 — QA-Updater added to Phase 7 (auto-update infrastructure)
+
+**Trigger:** user spec call. After the v2 competitive sweep + DAW
+architecture research landed (commits `200d5cf` / `f9f7b89`), user
+requested an auto-update facility be added to the installer scope —
+"if the user is connected to the internet do a check for update files,
+prompt the user with an available update, preferably with a way to
+update from the prompt instead of a lazy prompt telling them to go
+somewhere."
+
+**Spec calls confirmed by user 2026-05-08 (in order):**
+
+1. **Hosting:** GitHub Releases (BaySickDAW repo's Releases tab; user
+   already plans to take repo public once design docs land).
+2. **Updater library:** WinSparkle (BSD-licensed, well-maintained,
+   integrates with NSIS + GitHub-Releases-as-appcast pattern).
+3. **Check timing:** combo — once-per-launch background check (with
+   "Remind me later" / "Skip this version" buttons in the prompt) plus
+   manual `Help → Check for Updates` menu item.
+4. **Install flow:** download new installer + app exits + NSIS handles
+   the upgrade + app relaunches (in-app prompt, not "go to website").
+5. **No-internet behavior:** silent skip (no error UI when offline).
+6. **Preference:** "Auto-check for updates" toggle in **General
+   Settings** (sub-spec at execution: extend an existing settings
+   dialog or create a new one — current Audio Settings dialog is
+   audio-device-only).
+7. **Channels:** stable only for V1 (would need installer infra
+   complete before all V1 features are finished to populate beta
+   cycle); beta channel deferred to Future State `CL-287`.
+8. **Signature verification:** YES — verify signature on downloaded
+   installer before running (defends against MITM tampering).
+9. **Scope placement:** new sibling batch QA-Updater in Phase 7
+   (after QA-Installer), NOT folded into QA-Installer or deferred to
+   Future State.
+
+**Decision:** insert QA-Updater between QA-Installer and QA-Framework
+in Phase 7. QA-Installer continues to own NSIS skeleton + sample-pack
+download infra + TTF embed + EULA flow. QA-Updater layers WinSparkle
+on top: vendors the library, integrates check + prompt UI, adds the
+General Settings toggle, configures GitHub Releases as the appcast
+source, signature-verifies downloads, and rebuilds the installer to
+bundle the WinSparkle DLL. QA-Framework still closes Phase 7 with
+final installable framework checks (icons / version stamping /
+registry / signed binary path); the signing key established in
+QA-Framework is what QA-Updater's signature-verify chain depends on
+(coordinate signing setup across both batches).
+
+**QA-Updater scope summary (full text in §5 Phase 7 entry):**
+WinSparkle vendor + link; GitHub Releases as appcast (custom helper
+for Releases JSON → appcast XML translation); once-per-launch +
+manual menu check; "Auto-check for updates" toggle in General
+Settings; silent-skip on no internet; download-and-run-installer
+flow; signature-verify before running downloaded installer; rebuild
+installer to bundle WinSparkle DLL; stable channel only.
+
+**Inline back-refs:**
+- §5 Phase 7 has new QA-Updater entry between QA-Installer and
+  QA-Framework.
+- §5.5 Cross-cutting Infrastructure row updated to include QA-Updater.
+- §6 Phase 7 sequencing arrow updated with QA-Updater slot + new
+  `*****` footnote covering the user-spec-call trigger.
+- §6 Phase 7 paragraph updated from "All four added 2026-05-08..."
+  to "Four added 2026-05-08 at QA-Inventory close + one (QA-Updater)
+  added 2026-05-08 via user spec call".
+- §9 batch summary table gained QA-Updater row.
+- §9 Forks: this entry (sixth).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 / §5.5 / §6 / §9
+  edits noted above.
+- `Plans & Specs/Future State.md` — `CL-287 / WP` Beta channel
+  opt-in entry added under Cross-cutting Infrastructure (new sub-cluster
+  "Auto-update infrastructure"); pairs with QA-Updater stable channel.
+
+**Verification:** QA-Updater closes when (a) WinSparkle vendored +
+linked + builds clean Release + Debug, (b) GitHub Releases dry-run
+serves a test appcast XML the app actually consumes, (c) update prompt
+fires on launch when remote version > local, (d) "Auto-check for
+updates" toggle persists across launches, (e) signature verify rejects
+a tampered test installer with a clear user-facing error, (f) silent
+skip works when offline (no toast / dialog).

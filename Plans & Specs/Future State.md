@@ -22,7 +22,7 @@ graduate to the active plan if priorities shift; that promotion gets a
 
 Two top-level sections:
 
-1. **Future Items by Domain (458 items)** — every post-V1 candidate
+1. **Future Items by Domain (459 items)** — every post-V1 candidate
    organised into the 10 canonical domain buckets defined in Main Plan
    §0 ("Document Formatting Conventions").  Source-doc Tier 3 items
    (`BLU-*`, `FSW-*`, `LDT-*`), Claude fire-hose additions (`CL-*`),
@@ -79,7 +79,7 @@ domain.  Section 2 (Considered & Dropped) stays grouped by drop reason.
 
 # Section 1 — Future Items by Domain
 
-Total: 458 items, organised into the 10 canonical domain buckets.
+Total: 459 items, organised into the 10 canonical domain buckets.
 Each entry preserves its original source ID (`BLU-*` from
 `vibedaw_blueprint.md`, `FSW-*` from `Final Stretch Work.txt`,
 `LDT-*` from `lucky-discovering-tiger.md`, `CL-*` from Claude
@@ -637,6 +637,9 @@ audio-device infrastructure, performance / efficiency optimization.
 - **[CL-284 / PE]** HISE-style auto-RAM-load fallback for big-pitch samples — samples mapped across many octaves with high static pitch ratio bypass streaming and stay in RAM. _(Source: daw-architecture-research-2026-05-08.md §5)_
 - **[CL-285 / PE]** DrumGizmo multi-channel collapse — dedupe simultaneous reads of same file/position from different channels; I/O-level optimization on top of CL-279 SamplePool. _(Source: daw-architecture-research-2026-05-08.md §5)_
 - **[CL-286 / PE]** Sfizz-style GC thread polling — separate `juce::Thread` polling `lastReleasedNs > NOW - 5s` for unreferenced sample cleanup; not on audio thread; pairs with CL-279 SamplePool refcount. _(Source: daw-architecture-research-2026-05-08.md §5)_
+
+### Auto-update infrastructure
+- **[CL-287 / WP]** Beta / pre-release update channel — opt-in toggle in General Settings adds a second appcast manifest (`appcast-beta.xml` in GitHub Releases) that points at pre-release tagged versions. Pairs with QA-Updater stable channel (V1 batch). Deferred from V1 because populating a beta cycle would require shipping the installer infra before all V1 features are finished. _(Source: user spec call 2026-05-08; see Main Plan §9 sixth Forks entry — QA-Updater addition.)_
 
 ## User Tools / Learning
 
