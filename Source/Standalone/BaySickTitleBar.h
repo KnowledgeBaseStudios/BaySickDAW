@@ -10,17 +10,19 @@
 
     No LAF coupling - accent is a `juce::Colour` parameter at construction.
 
-    Optional bloom (per-engine opt-in, decided 2026-05-09): paints the engine
-    name twice when enabled - 17pt bold underlay at 15% accent opacity, offset
-    by (-1, -1), creating a halo around the standard 16pt bold overlay. Used
-    today by HarmlessEditor to preserve its long-standing orange-glow signature;
-    other engines can opt in later if their visual identity calls for it. */
+    Bloom (default ON, decided 2026-05-09): renders the engine name as a
+    glyph path and strokes it with a 2.5px transparent line at 30% accent
+    alpha BEFORE filling the same path crisply.  The stroke radiates outward
+    from each glyph contour equally on every side, producing a true symmetric
+    halo (not a directional shadow).  Path-stroke + path-fill share the same
+    path so the halo and crisp text are guaranteed pixel-aligned.  Pass
+    `bloom = false` if a future engine wants flat single-pass text. */
 class BaySickTitleBar : public juce::Component
 {
 public:
     BaySickTitleBar (const juce::String& engineName,
                      juce::Colour accentColor,
-                     bool bloom = false);
+                     bool bloom = true);
     ~BaySickTitleBar() override = default;
 
     static constexpr int   kStandardHeight = 32;

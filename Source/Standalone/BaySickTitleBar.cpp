@@ -62,21 +62,42 @@ void BaySickTitleBar::paint (juce::Graphics& g)
 
     if (mBloom)
     {
-        // Halo underlay: 1pt larger font, 15% alpha, offset by (-1, -1).
-        // Mirrors the original HarmlessEditor bloom (16pt underlay + 15pt
-        // overlay) but pinned to standard 16pt visible text so all engines'
-        // crisp glyphs render at the same size.
-        g.setColour (mAccentColor.withAlpha (0.15f));
-        g.setFont   (juce::Font (kFontSizePx + 1.0f, juce::Font::bold));
-        g.drawText  (mEngineName,
-                     textRect.translated (-1, -1).withHeight (textRect.getHeight() + 2),
-                     juce::Justification::centredLeft, true);
-    }
+        // True symmetric halo: convert text to path and stroke it before
+        // filling the same path for the crisp overlay.  Stroking radiates
+        // outward from each glyph contour equally on every side (left, right,
+        // top, bottom), avoiding the directional-shadow look that a same-rect
+        // or single-direction-shifted larger font would produce when two
+        // text rendered via drawText share a left-aligned edge.  Halo + crisp
+        // text share the same path so they are guaranteed pixel-aligned.
+        juce::Font font (kFontSizePx, juce::Font::bold);
+        juce::GlyphArrangement glyphs;
+        const float baselineY = (float) textRect.getCentreY()
+                                + (font.getAscent() - font.getDescent()) * 0.5f;
+        glyphs.addJustifiedText (font, mEngineName,
+                                 (float) textRect.getX(),
+                                 baselineY,
+                                 (float) textRect.getWidth(),
+                                 juce::Justification::left);
+        juce::Path textPath;
+        glyphs.createPath (textPath);
 
-    // Crisp overlay (always).
-    g.setColour (mAccentColor);
-    g.setFont   (juce::Font (kFontSizePx, juce::Font::bold));
-    g.drawText  (mEngineName, textRect, juce::Justification::centredLeft, true);
+        g.setColour (mAccentColor.withAlpha (0.30f));
+        g.strokePath (textPath, juce::PathStrokeType (2.5f,
+                                                       juce::PathStrokeType::curved,
+                                                       juce::PathStrokeType::rounded));
+
+        g.setColour (mAccentColor);
+        g.fillPath (textPath);
+    }
+    else
+    {
+        // No-bloom engines render via the platform text rasterizer for the
+        // sharpest crisp text.  Path-based rendering is reserved for bloom
+        // engines so the halo + crisp text guarantee pixel alignment.
+        g.setColour (mAccentColor);
+        g.setFont   (juce::Font (kFontSizePx, juce::Font::bold));
+        g.drawText  (mEngineName, textRect, juce::Justification::centredLeft, true);
+    }
 }
 
 void BaySickTitleBar::resized()
