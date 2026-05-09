@@ -1050,6 +1050,31 @@ Every component in the build gets classified into:
     (memory says over-pruning sfizz broke configure on 2026-05-03 — be careful).
 - Output: manifest appended to the implemented-work doc, structured per
   top-level directory.
+- **Pre-release decisions to revisit** (added 2026-05-08 mid-QA-Md — see
+  §9): a small docket of "should we / shouldn't we" decisions surfaced
+  during prior batch execution that aren't covered by the dead/dormant/
+  active classification. Each gets a single decision call and a routing
+  note for the cleanup batches. Initial entries:
+  - **AlertWindow API migration** — currently using older
+    `showMessageBoxAsync` / `showOkCancelBox` convenience wrappers
+    (~25 sites). Newer `showAsync(MessageBoxOptions...)` builder API
+    is JUCE's currently-recommended pattern. Decision: migrate-as-sweep
+    in QA-Cleanup-1 / stay-until-deprecated / skip. See Future State
+    `CL-288`.
+  - **`/audit-security` agent creation** — pre-release / pre-public-repo
+    + pre-network-feature security sweep agent. Tier-1 scope (vendored
+    CVE scan + file-parser audit + DLL safety + save-file XXE) is
+    relevant for V1; Tier-2 (network code, appcast verify) becomes
+    relevant once QA-Updater lands. Decision: build-the-agent-now (so
+    QA-RC can run a security sweep before V1) vs build-when-network-
+    features-land (post-V1). See Future State `CL-289`.
+  - **Crash-report + symbol-server pipeline** — `.pdb` generation +
+    archival, in-app crash reporter (WER vs third-party), symbol
+    server, symbolication tooling. Pairs naturally with QA-Updater
+    scope — both are post-release support infrastructure. Decision
+    calls: third-party SDK vs OS-native WER; symbol-server hosting
+    model; consent flow (prompt-per-crash vs EULA-blanket-consent).
+    See Future State `CL-290`.
 - Risk: zero (read-only).
 - Dependencies: all 15 prior batches landed.
 - Effort: large (~10-15 hours, possibly multiple sessions). Bounded by
@@ -1776,3 +1801,74 @@ fires on launch when remote version > local, (d) "Auto-check for
 updates" toggle persists across launches, (e) signature verify rejects
 a tampered test installer with a clear user-facing error, (f) silent
 skip works when offline (no toast / dialog).
+
+### 2026-05-08 — QA-Audit scope expanded with pre-release decisions docket (mid-QA-Md side findings)
+
+**Trigger:** during QA-Md Task 4 execution (adding the Run MT
+Diagnostic menu item to the Mixer hamburger), a side conversation
+surfaced three pre-release decisions worth capturing rather than
+deciding inline:
+
+1. **JUCE AlertWindow API migration.** Task 4's plan-as-written used
+   `showAsync(MessageBoxOptions...)` (the newer builder-pattern API)
+   for the result popup. Pre-edit codebase audit found ~25 existing
+   call sites on the older convenience wrappers (`showMessageBoxAsync`
+   / `showOkCancelBox`) and zero on the newer builder. To preserve
+   pattern consistency, Task 4 was rewritten against the older
+   convention. The newer API has marginal advantages (forward-compat
+   with future JUCE-only features, alignment with current JUCE
+   tutorials) but is not technical debt in the strict sense -- the
+   wrappers compile to the same generated code. Decision deferred
+   to a single sweep batch, never one call at a time.
+
+2. **`/audit-security` agent creation.** User raised whether to
+   create a new agent for known-vulnerability scanning + file-parser
+   hardening + DLL safety review + auto-updater chain audit, mirroring
+   the `/audit-licenses` cadence. Tier-1 scope (vendored CVE +
+   file-parser + DLL + save-file XXE) is V1-relevant; Tier-2 (network
+   code + appcast verify + signature-verify chain) becomes relevant
+   when QA-Updater lands. Open question: build-now (so QA-RC includes
+   the security sweep) vs build-when-network-features-land.
+
+3. **Crash-report + symbol-server pipeline.** While explaining what
+   ships on a user's computer, user observed that `.pdb` files (which
+   map crash addresses back to source lines) are part of post-release
+   support infrastructure that needs scoping. Pairs naturally with
+   QA-Updater work since both deal with post-release flows. Four
+   moving parts: `.pdb` generation + archival; in-app crash reporter
+   (WER vs Sentry/Bugsnag/Crashpad); symbol-server hosting; sym-
+   bolication tooling. Decision calls: third-party SDK vs OS-native
+   WER; symbol-server hosting model; consent flow (prompt-per-crash
+   vs EULA-blanket-consent).
+
+**Decision:** capture all three as Future State entries (`CL-288`
+AlertWindow API migration, `CL-289` audit-security agent, `CL-290`
+crash-report + symbol-server pipeline) AND fold all three into
+QA-Audit's scope as a "Pre-release decisions to revisit" docket.
+QA-Audit is read-only and produces a manifest -- the decisions docket
+is a natural extension. Actual execution (if any decision lands as
+"do it") routes into QA-Cleanup-1, QA-Updater, or a new dedicated
+batch as appropriate. No new §5 batch row added; no §6 sequencing
+change.
+
+**Rationale for routing in QA-Audit (not new batches):** all three
+items are read-and-decide work that naturally couples with QA-Audit's
+manifest production. Creating separate batches would fragment Phase 6
+without adding clarity. Future similar side-findings can fold into
+the same docket via Rule 3.
+
+**Inline back-refs:**
+- §5 QA-Audit entry has new "Pre-release decisions to revisit" sub-section listing all three items.
+- `Future State.md` Cross-cutting Infrastructure has three new sub-clusters: "API consistency / migrations" (CL-288), "Security / Hardening" (CL-289), "Crash reporting / symbol-server infrastructure" (CL-290).
+- §9 Forks: this entry (seventh).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 QA-Audit scope expansion.
+- `Plans & Specs/Future State.md` — CL-288 + CL-289 + CL-290 added.
+
+**Verification:** decisions docket entries get processed during
+QA-Audit; outcomes route into QA-Cleanup-1 (if migrate), QA-Updater
+(if crash-reporter lands as scope), or stay as Future State items
+(if defer). Closure of this fork happens when all three items have a
+recorded decision in the QA-Audit close entry of
+`Implemented Work Log.md`.
