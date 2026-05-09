@@ -4,7 +4,7 @@
 // ── Layout constants ──────────────────────────────────────────────────────────
 static constexpr int kW       = 960;
 static constexpr int kH       = 620;
-static constexpr int kHdrH    = 36;
+static constexpr int kHdrH    = BaySickTitleBar::kStandardHeight;   // 32, was 36 (QA-A 2026-05-09)
 static constexpr int kGap     = 6;
 static constexpr int kKnob    = 44;
 static constexpr int kKnobSm  = 32;
@@ -320,6 +320,9 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     setupRotary (mStrumTns);       addAndMakeVisible (mStrumTns);
 
     // ── Header ────────────────────────────────────────────────────────────────
+    // QA-A (2026-05-09): mTitleBar replaces the bespoke g.drawText "HARMLESS"
+    // bloom + custom header paint.
+    addAndMakeVisible (mTitleBar);
     mPresetBtn.onClick = [this] { showPresetMenu(); };
     addAndMakeVisible (mPresetBtn);
 
@@ -627,19 +630,8 @@ void HarmlessEditor::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (HarmlessLAF::kChassis));
 
-    // ── Header bar ────────────────────────────────────────────────────────────
-    g.setColour (juce::Colour (0xFF111113));
-    g.fillRect  (0, 0, getWidth(), kHdrH);
-    g.setColour (juce::Colour (0xFF2E2E30));
-    g.fillRect  (0, kHdrH - 1, getWidth(), 1);
-
-    // Title with glow
-    g.setColour (juce::Colour (HarmlessLAF::kAccent).withAlpha (0.15f));
-    g.setFont   (juce::Font (16.0f, juce::Font::bold));
-    g.drawText  ("HARMLESS", 13, -1, 140, kHdrH + 2, juce::Justification::centredLeft);
-    g.setColour (juce::Colour (HarmlessLAF::kAccent));
-    g.setFont   (juce::Font (15.0f, juce::Font::bold));
-    g.drawText  ("HARMLESS", 14, 0, 140, kHdrH, juce::Justification::centredLeft);
+    // QA-A (2026-05-09): header bar paint moved to BaySickTitleBar::paint()
+    // (background + divider + bloomed "HARMLESS" via the bloom flag).
 
     // ── Major panel backgrounds (recessed) ────────────────────────────────────
     auto drawPanel = [&] (juce::Rectangle<int> r) {
@@ -769,8 +761,11 @@ void HarmlessEditor::resized()
     auto bounds = getLocalBounds();
     bounds.removeFromTop (kHdrH);
 
-    // Header row
-    mPresetBtn.setBounds (getWidth() - 92, 4, 86, kHdrH - 8);
+    // QA-A (2026-05-09): unified title bar (32 px) + right-anchored preset btn.
+    mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);
+    const auto trailing = mTitleBar.getTrailingArea (86);
+    const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
+    mPresetBtn.setBounds (trailing.getX(), btnY, 86, 22);
 
     bounds.reduce (kGap, 0);
     bounds.removeFromTop (kGap / 2);

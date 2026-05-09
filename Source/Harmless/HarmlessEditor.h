@@ -9,6 +9,7 @@
 #include "HarmlessModEditor.h"
 #include "VisualizerScreen.h"
 #include "../Standalone/SharedUI.h"   // TaggedSliderAttachment
+#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // ── HarmlessEditor ────────────────────────────────────────────────────────────
 // Full single-view dense layout: 960 × 620
@@ -49,6 +50,11 @@ private:
     HarmlessLAF mLAF;
 
     // ── Header ────────────────────────────────────────────────────────────────
+    // QA-A (2026-05-09): unified title bar.  Accent = HarmlessLAF::kAccent
+    // (#FF6600 orange).  Bloom is the default, so no need to pass it
+    // explicitly here; the long-standing orange-glow signature is preserved.
+    BaySickTitleBar  mTitleBar { "HARMLESS",
+                                 juce::Colour (HarmlessLAF::kAccent) };
     juce::TextButton mPresetBtn { "Preset v" };
 
     // ── Waveform buttons (visual selectors, synced to hidden sliders) ─────────
