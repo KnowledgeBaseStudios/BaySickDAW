@@ -2,7 +2,7 @@
 #include "../SampleLibrary.h"
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-static constexpr int   kHdrH         = 36;
+static constexpr int   kHdrH         = BaySickTitleBar::kStandardHeight;   // 32, was 36 (QA-A 2026-05-09)
 static constexpr int   kLblH         = 13;   // knob label height
 static constexpr int   kPad          = 6;
 static constexpr int   kKnobSz       = 55;   // knob diameter
@@ -44,10 +44,8 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     auto  pid  = [&] (const char* s) { return p.pid (s); };
 
     // ── Header ────────────────────────────────────────────────────────────────
-    mTitleLbl.setText ("BAYSICKPLAYER", juce::dontSendNotification);
-    mTitleLbl.setFont (juce::Font (16.f, juce::Font::bold));
-    mTitleLbl.setColour (juce::Label::textColourId, juce::Colour (0xFFE0E0E0));
-    addAndMakeVisible (mTitleLbl);
+    // QA-A (2026-05-09): mTitleBar replaces mTitleLbl + custom header paint.
+    addAndMakeVisible (mTitleBar);
 
     mPresetBtn.onClick = [this] { showPresetMenu(); };
     addAndMakeVisible (mPresetBtn);
@@ -351,11 +349,7 @@ void VibePlayerEditor::paint (juce::Graphics& g)
     // Background
     g.fillAll (juce::Colour (0xFF1A1C1F));
 
-    // Header bar
-    g.setColour (juce::Colour (0xFF141618));
-    g.fillRect  (0, 0, getWidth(), kHdrH);
-    g.setColour (juce::Colour (0xFF333537));
-    g.drawHorizontalLine (kHdrH, 0.f, (float) getWidth());
+    // QA-A (2026-05-09): header bar paint moved to BaySickTitleBar::paint().
 
     // 6 box section titles only - no box borders, no underlines, no fill.
     //   Kept flat matte to avoid the AA ghost-rings the rounded-rect outlines
@@ -401,9 +395,13 @@ void VibePlayerEditor::resized()
     const int w = getWidth();
 
     // ── Header ────────────────────────────────────────────────────────────────
-    mTitleLbl.setBounds  (kPad, 0,        100, kHdrH);
-    mPresetBtn.setBounds (w - 200 - kPad, 7,   110, 22);
-    mHelpBtn.setBounds   (w - 82 - kPad,  7,   24,  22);
+    // QA-A (2026-05-09): unified title bar (32 px) + right-anchored preset +
+    // help-button cluster (110 + 8 + 24 = 142 px).
+    mTitleBar.setBounds (0, 0, w, BaySickTitleBar::kStandardHeight);
+    const auto trailing = mTitleBar.getTrailingArea (110 + 8 + 24);
+    const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
+    mPresetBtn.setBounds (trailing.getX(),               btnY, 110, 22);
+    mHelpBtn.setBounds   (trailing.getX() + 110 + 8,     btnY,  24, 22);
 
     // ── Box layout helpers ───────────────────────────────────────────────────
     auto box = [&] (int i) { return boxRectFor (i, getWidth(), getHeight()); };
@@ -820,6 +818,9 @@ void VibePlayerEditor::loadPreset (const juce::File& f)
 
 void VibePlayerEditor::setInfoText (const juce::String& text)
 {
-    mTitleLbl.setText (text.isEmpty() ? "BAYSICKPLAYER" : text.toUpperCase(),
-                       juce::dontSendNotification);
+    // QA-A (2026-05-09): retargeted from mTitleLbl to mTitleBar.  Original
+    // caller (BaySickDrumsEditor) was deleted in the Phase D dynamic-drum
+    // refactor (2026-04-25); kept on the API for any future page-context
+    // callers that want to override the displayed engine name.
+    mTitleBar.setEngineName (text.isEmpty() ? "BAYSICKPLAYER" : text.toUpperCase());
 }

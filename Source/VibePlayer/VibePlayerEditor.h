@@ -3,6 +3,7 @@
 #include "VibePlayerProcessor.h"
 #include "VibePlayerLAF.h"
 #include "../Standalone/SharedUI.h"   // ChickenHeadSelector (S2 2026-04-21)
+#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // ── VibePlayerEditor (user-facing name: BaySickPlayer) ───────────────────────
 // 6-box grid layout (600 × 560):
@@ -55,7 +56,10 @@ private:
     VibePlayerLAF mLAF;
 
     // ── Header ────────────────────────────────────────────────────────────────
-    juce::Label      mTitleLbl;
+    // QA-A (2026-05-09): unified title bar.  Accent = VC::Warm (#D4A017),
+    // matching the Clips + Builder ribbon-tab active colour so the player
+    // page reads as one identity with its tab.
+    BaySickTitleBar  mTitleBar { "BAYSICKPLAYER", juce::Colour (0xFFD4A017) };
     juce::TextButton mPresetBtn { "Preset v" };
     juce::TextButton mHelpBtn   { "?" };
 
