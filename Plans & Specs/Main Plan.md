@@ -689,7 +689,8 @@ needed to find what you should pull up to review the work.
   depending on cause).
 
 #### **QA-A: STYLE Cluster — Unified TitleBar Component** (parallel with QA-0)
-- Items: STYLE-01 (BaySickPlayers truncated), STYLE-02 (logo size/font
+**Plan file:** `Plans & Specs/Batch Plans/twinkling-herding-twilight.md`
+- Items: STYLE-01 (BaySickPlayer ribbon tab text clips), STYLE-02 (logo size/font
   standardize), STYLE-03 (Vox "Page Controls" → "BaySickVocals"),
   STYLE-04 (Inst "BaySickGuitars" between player + sub-tabs),
   STYLE-05 (extra black bar on BaySickNAM/IR), STYLE-06 (Synth/Bass preset
