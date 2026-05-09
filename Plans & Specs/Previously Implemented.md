@@ -1714,6 +1714,7 @@ over time without rewriting history here.
 - **Implemented:** Rapid-retrigger voice cascading fix
 - **Source:** Player Engines > §P2 VibePlayer > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
+- **Cross-reference:** validated correct vs Surge XT "Reuse Single" + Massive X "Reassign" by `Plans & Specs/Research Reports/daw-architecture-research-2026-05-08.md` §4 (Voice management priorities). Documented under Future State CL-053 so the next maintainer doesn't undo it.
 
 #### **BLU-355: UI rewrite (6-box grid layout)**
 - **Sources:** BLU-355
