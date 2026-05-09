@@ -214,6 +214,9 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
         return;
     }
 
+    if (RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed))
+        RenderEngine::MtDiagnostic::gBlockCount.fetch_add (1, std::memory_order_relaxed);
+
     // ── Reset dep counters + assign ctx for every task ──────────────────────
     // Release ordering on the counter store pairs with the worker's acquire
     // when picking up a child whose deps just hit zero - guarantees the
@@ -230,9 +233,16 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
     // ── Seed leaves ─────────────────────────────────────────────────────────
     // Tasks with mInitialDeps == 0 are ready immediately.  In a typical
     // graph these are the engine inserts (no upstream predecessors).
-    for (auto* t : mTasks)
-        if (t != nullptr && t->mInitialDeps == 0)
-            mPool.submit (t);
+    {
+        const bool capture = RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed);
+        for (auto* t : mTasks)
+            if (t != nullptr && t->mInitialDeps == 0)
+            {
+                if (capture)
+                    RenderEngine::MtDiagnostic::gLeavesSubmitted.fetch_add (1, std::memory_order_relaxed);
+                mPool.submit (t);
+            }
+    }
 
     // ── Main thread participates as worker until master signals done ────────
     // This is the parallel pump.  Workers process tasks from the pool's
