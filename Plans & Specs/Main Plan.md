@@ -300,10 +300,14 @@ mirror the equivalents from that project's CLAUDE.md.
 | BaySickDAW | `/test-signal` | `dsp-test-signal` |
 | BaySickDAW | `/preset-gaps` | `preset-coverage-mapper` |
 | BaySickDAW | `/research` | `competitive-research` |
+| BaySickDAW | `/architecture` | `daw-architecture-research` |
+| BaySickDAW | `/perf-audit` | `performance-auditor` |
 | CotBB | `/write-scene` | `scene-script-writer` |
 | CotBB | `/build-dialog` | `dialog-tree-builder` |
 | CotBB | `/level-checklist` | `level-design-checklist` |
 | CotBB | `/validate-naming` | `asset-naming-validator` |
+| CotBB | `/architecture` | `godot-architecture-research` |
+| CotBB | `/perf-audit` | `performance-auditor` (Godot-specific, distinct from BaySickDAW's same-named agent — slash command resolves project-scoped) |
 
 #### Session lifecycle
 
@@ -347,6 +351,16 @@ mirror the equivalents from that project's CLAUDE.md.
   `reference_mixer_strip_pattern_audit.md` BEFORE the implementation
   diff lands; the audit checklist catches the ~15 sites a new strip
   type touches.
+- **Every 3 batches OR pre-milestone** → `/perf-audit`.  Recurring
+  scan of the codebase for performance opportunities; context-aware
+  (audio thread vs setup time) so prepare-time allocations don't get
+  flagged as audio-thread issues.  Findings either fold into the next
+  planned batch or get a dedicated `QA-Perf-Sweep-<N>` batch.
+- **Before architecture decision** (where multiple plausible approaches
+  exist) → `/architecture <topic>`.  Researches how other DAWs solve
+  the topic with a recommendation.  On-demand only; do NOT run
+  weekly.  Output saved to `Plans & Specs/Research Reports/
+  daw-architecture-<topic>-<date>.md` via drafter pattern.
 - **Pre-release sweep** (before tagging V1) → `/audit-licenses`.
   Vendored libs, plugin licenses, asset attribution, EULA scope.
 - **Pre-QA-Templates batch** → `/preset-gaps`.  Gap analysis informs

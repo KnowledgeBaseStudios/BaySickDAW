@@ -31,6 +31,8 @@ inline — they save context budget and produce more consistent output.
 | `/test-signal <module>` | `dsp-test-signal` | Generate validation test plan for a DSP module. Useful during 5F-9 DSP Quality Pass batches and any new DSP work. |
 | `/preset-gaps` | `preset-coverage-mapper` | Audit factory + user preset library for genre / instrument-family gaps. Useful before QA-Templates batch. |
 | `/research [focus area]` | `competitive-research` | One-shot competitive sweep before milestones. Outputs draft Future State entries with verified-source confidence ratings. Run sparingly. |
+| `/architecture <topic>` | `daw-architecture-research` | Research how other DAWs solve a specific audio-engine architecture problem (threading, FFT planning, voice mgmt, lock-free patterns, etc.). Returns comparative analysis with implementation recommendation. On-demand only — pre-architecture-decision or pre-milestone. |
+| `/perf-audit` | `performance-auditor` | Recurring scan of BaySickDAW codebase for performance opportunities (audio-thread allocations, SIMD candidates, lock contention, FFT plan reuse, APVTS dirty-flag compliance, etc.). Context-aware — won't flag prepare-time allocations as audio-thread issues. Run every 3 batches OR pre-milestone. |
 
 Six **cross-project** agents also available (live at `~/.claude/agents/`):
 
@@ -57,6 +59,8 @@ Highlights:
 - **Session open** → `/standup`
 - **Mid-batch checkpoint** → `/draft-doc running-notes`
 - **Build failure** → `/diagnose-build`
+- **Every 3 batches OR pre-milestone** → `/perf-audit`
+- **Before architecture decision** (multiple plausible approaches) → `/architecture <topic>`
 - **Concept blocker** → `/explain <concept>`
 - **Pre-commit** → `/draft-commit`
 - **Batch close (mandatory)** → `/draft-doc batch-close` → `/review-batch` → apply draft → commit
