@@ -661,7 +661,7 @@ needed to find what you should pull up to review the work.
 - Why this slot: pre-QA source docs intermix shipped work, claimed-but-unverified work, abandoned work, and future-state ideas without disambiguation. Without the triage, every downstream batch's plan author re-parses the same ambiguity. Done as a dedicated batch (vs scattered across each downstream batch start) because the parse work is identical across docs and most efficient as a single sweep. Also populates the new `Plans & Specs/` doc skeletons (`Previously Implemented.md`, `Future State.md`) created in commit `c05ce61`.
 
 #### **QA-Md: MT Engine Debug-Build Investigation** (added 2026-05-07 via Rule 3 — see §9; promoted from Phase 5 to Phase 1 same day)
-**Plan file:** TBD (silly-name file when batch starts)
+**Plan file:** `Plans & Specs/Batch Plans/glittery-tinkering-salamander.md`
 - Items: QA-0a/QA-0 finding #9 — MT engine is a no-op under Debug
   builds.  DSP meter reads identical with MT on vs MT off; settings.xml
   persistence works; toggle UI works; but the dispatcher isn't actually
