@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "BaySickPedalsProcessor.h"
+#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickPedalsEditor - Phase I-15 (2026-05-03)
@@ -48,6 +49,13 @@ public:
     int  getDropTargetSlot() const noexcept { return mDropTargetSlot; }
     void performMove (int fromSlot, int toSlot);
 
+    // QA-A (2026-05-09): pedalboard preset menu hook.  InstPage (the parent
+    // page hosting this editor) sets this callback to its existing
+    // showPedalboardPresetMenu() so the migrated preset button in the title
+    // bar's trailing area still routes to the right menu.  Phase 4.4 wires
+    // the InstPage side; this Phase 4.2 commit just ships the hook.
+    std::function<void()> onPedalboardPresetMenu;
+
 private:
     void timerCallback() override;
 
@@ -55,6 +63,13 @@ private:
     std::array<std::unique_ptr<PedalSlotComponent>, BaySickPedalsProcessor::kNumSlots> mTiles;
     EffectType mLastTypes[BaySickPedalsProcessor::kNumSlots] {};
     int        mDropTargetSlot { -1 };
+
+    // QA-A (2026-05-09): unified title bar at the top of the pedal grid.
+    // Accent = navy / royal blue (#1C3A8A), shared with BaySickGuitars +
+    // BaySickBasses (Inst tab active color per RibbonTabBar.cpp:21) since
+    // all three engines live inside Inst pages.
+    BaySickTitleBar  mTitleBar  { "BaySickPedals", juce::Colour (0xFF1C3A8A) };
+    juce::TextButton mPresetBtn { "Preset v" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPedalsEditor)
 };
