@@ -20,6 +20,34 @@ Backups/Unsaved/
 # Per-machine general settings (recent files, multi-core toggle, etc.) — modified every app launch.
 settings.xml
 
+# Python bytecode caches (Claude skill scripts).
+__pycache__/
+*.pyc
+
+# OS metadata files.
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# Editor backups + temp.
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+
+# Windows shortcuts — per-machine paths.
+*.lnk
+
+# Build / debug output at repo root (broader than the *_log.txt rule).
+/build_*.txt
+/configure_*.txt
+/startup_*.txt
+
+# Personal sample imports (mirrors the Presets/.../My Presets/ rule).
+My Samples/
+
 # Claude agent worktrees — created by isolated-mode subagents; ephemeral, not source.
 .claude/worktrees/
 
