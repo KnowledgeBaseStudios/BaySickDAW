@@ -47,17 +47,20 @@ QA-A is the next batch in the post-Batch-10 QA plan after QA-Md (closed 2026-05-
 
 **Standardize at 32 px height** — Harmless + VibePlayer shrink 4px (4px more body), BaySickNAMIR grows 4px (4px less body), BaySickSynth + BaySickBass unchanged.
 
-**Per-engine accent color (confirmed by Jeff via AskUserQuestion 2026-05-09):**
+**Per-engine accent color (confirmed by Jeff via AskUserQuestion 2026-05-09; expanded 2026-05-09 to cover BaySickGuitars / BaySickBasses / BaySickRustyDrums):**
 
-| Engine | Accent | Source |
-|--------|--------|--------|
-| Harmless | `HarmlessLAF::kAccent` (#FF6600 orange) + **bloom on** | Existing engine LAF; bloom param `true` preserves the orange-glow signature (decision 2026-05-09) |
-| VibePlayer (BaySickPlayer) | `0xFFD4A017` (amber / gold) | Same as Clips + Builder tab active color (`VC::Warm`); see [RibbonTabBar.cpp:11,15](Source/Standalone/RibbonTabBar.cpp:11) and [SharedUI.h:26](Source/Standalone/SharedUI.h:26) |
-| BaySickSynth | `BaySickSynthLAF::kGreen` (#A0DB2B FL green) | Existing engine LAF (STYLE-06) |
-| BaySickBass | `BaySickBassLAF::kGreen` (#33FF88 B1 neon green) | Existing engine LAF (STYLE-06) |
-| BaySickNAMIR | `0xFFE0303F` (Mesa red) | New — Jeff's pick |
-| BaySickVocal | `0xFF0FAFA5` (bright teal) | Same as Vox tab **active** color; see [RibbonTabBar.cpp:20](Source/Standalone/RibbonTabBar.cpp:20) |
-| BaySickPedals | `0xFF1C3A8A` (navy / royal blue) | Same as Inst tab **active** color; see [RibbonTabBar.cpp:21](Source/Standalone/RibbonTabBar.cpp:21) |
+| Engine | Title text | Accent | Source |
+|--------|-----------|--------|--------|
+| Harmless | "HARMLESS" | `HarmlessLAF::kAccent` (#FF6600 orange) | Existing engine LAF. Bloom default flipped on at Step 1b so all engines get the halo. |
+| VibePlayer (BaySickPlayer) | "BAYSICKPLAYER" | `0xFFD4A017` (amber / gold) | Same as Clips + Builder tab active color (`VC::Warm`); see [RibbonTabBar.cpp:11,15](Source/Standalone/RibbonTabBar.cpp:11) and [SharedUI.h:26](Source/Standalone/SharedUI.h:26) |
+| BaySickSynth | "BAYSICKSYNTH" | `BaySickSynthLAF::kGreen` (#A0DB2B FL green) | Existing engine LAF (STYLE-06) |
+| BaySickBass | "BAYSICKBASS" | `BaySickBassLAF::kGreen` (#33FF88 B1 neon green) | Existing engine LAF (STYLE-06) |
+| BaySickNAMIR | "BaySickNAM/IR" | `0xFFE0303F` (Mesa red) | New — Jeff's pick |
+| BaySickVocal | "BAYSICKVOCALS" | `0xFF0FAFA5` (bright teal) | Same as Vox tab **active** color; see [RibbonTabBar.cpp:20](Source/Standalone/RibbonTabBar.cpp:20) |
+| BaySickPedals | **"BAYSICKPEDALS"** *(corrected 2026-05-09 — was "BAYSICKGUITARS" originally per STYLE-04 phrasing, but Pedals is a distinct engine from Guitars)* | `0xFF1C3A8A` (navy / royal blue) | Same as Inst tab **active** color; see [RibbonTabBar.cpp:21](Source/Standalone/RibbonTabBar.cpp:21) |
+| **BaySickGuitars** *(scope expansion 2026-05-09)* | "BAYSICKGUITARS" | `0xFF1C3A8A` (navy — shared with Pedals + Basses) | Inst tab active color; Jeff's pick |
+| **BaySickBasses** *(scope expansion 2026-05-09)* | "BAYSICKBASSES" | `0xFF1C3A8A` (navy — shared with Pedals + Guitars) | Inst tab active color; Jeff's pick |
+| **BaySickRustyDrums** *(scope expansion 2026-05-09)* | "BAYSICKRUSTYDRUMS" | `0xFFCC2222` (Drums tab red) | Same as Drums tab active color; Jeff's pick |
 
 ---
 
@@ -74,7 +77,12 @@ QA-A is the next batch in the post-Batch-10 QA plan after QA-Md (closed 2026-05-
 - `Source/BaySickBass/BaySickBassEditor.h` + `.cpp` (STYLE-06: preset L→R, green accent).
 - `Source/BaySickNAMIR/BaySickNAMIREditor.h` + `.cpp` (STYLE-05: black-bar removal via standardized paint).
 - `Source/BaySickVocal/BaySickVocalEditor.cpp` (STYLE-03: PAGE CONTROLS → BAYSICKVOCALS via TitleBar in inner `BaySickVocalsPanel` class).
-- `Source/BaySickPedals/BaySickPedalsEditor.h` + `.cpp` (STYLE-04: introduce TitleBar above pedal grid).
+- `Source/BaySickPedals/BaySickPedalsEditor.h` + `.cpp` (introduce TitleBar above pedal grid; **title = "BAYSICKPEDALS"** per 2026-05-09 correction; pedalboard preset button migrates from InstPage chrome into the title bar's trailing widget slot).
+
+**Modify (scope expansion 2026-05-09 — sfizz-engine UIs that didn't exist as targets in the original plan):**
+- `Source/Standalone/AriaControlPanel.h` + `.cpp` — extend `Binding` struct with optional `engineName` + `accentColor` fields; render an internal `BaySickTitleBar` at the top of the panel when both are set. Title bar height is taken out of the kit-artwork area.
+- `Source/Inst/InstPage.h` + `.cpp` — wire BaySickGuitars + BaySickBasses source modes to set the AriaControlPanel binding's engine name + accent. Remove the `kHeaderRowH` page chrome (the dark `mPedalsHeaderTitle` strip) — each engine UI now owns its title bar.
+- `Source/Standalone/BaySickRustyDrumsPage.h` + `.cpp` — add a `BaySickTitleBar` at the top of the page's content area. The existing menu buttons (the black bar Jeff referenced) re-anchor against the top edge of the player area, with the title bar above them.
 
 **Modify (build + ribbon):**
 - `CMakeLists.txt` — add `Source/Standalone/BaySickTitleBar.cpp` to source list.
@@ -482,7 +490,9 @@ Identical structure to Task 3.2 with name="BAYSICKBASS" and accent=`BaySickBassL
 - [ ] **Step 3.4.10:** Release verify.
 - [ ] **Step 3.4.11:** Surface git status, `/draft-commit`, commit only `Source/BaySickNAMIR/BaySickNAMIREditor.h` + `.cpp`.
 
-### Phase 4 — Introduce title bars in editors that don't have one (2 editors)
+### Phase 4 — Introduce title bars in editors that don't have one (5 editors after 2026-05-09 scope expansion)
+
+> **Scope expansion 2026-05-09:** Phase 4 originally covered only BaySickVocalEditor (Task 4.1) and BaySickPedalsEditor (Task 4.2).  Jeff's clarification mid-execution: every player engine needs its own title bar, including the three sfizz-based engines that share `AriaControlPanel` (BaySickGuitars + BaySickBasses) and the dedicated `BaySickRustyDrumsPage`.  Tasks 4.3 / 4.4 / 4.5 / 4.6 added at that point.  Task 4.2's title text also corrected from "BAYSICKGUITARS" to "BAYSICKPEDALS" because BaySickPedals is a distinct engine from BaySickGuitars (the original STYLE-04 phrasing conflated them).
 
 #### Task 4.1: BaySickVocalEditor — STYLE-03 (PAGE CONTROLS → BAYSICKVOCALS)
 
@@ -502,9 +512,9 @@ The panel currently has a 2-section layout (top half = page controls, bottom hal
 - [ ] **Step 4.1.7:** Tell Jeff to `do_build.bat` → Debug verify (open Vox tab, navigate to BaySickVocals sub-tab, screenshot top section — should read "BAYSICKVOCALS" instead of "PAGE CONTROLS") → Release verify.
 - [ ] **Step 4.1.8:** Surface git status, `/draft-commit`, commit only `Source/BaySickVocal/BaySickVocalEditor.cpp`.
 
-#### Task 4.2: BaySickPedalsEditor — STYLE-04 (introduce "BaySickGuitars" title)
+#### Task 4.2: BaySickPedalsEditor — introduce "BAYSICKPEDALS" title bar + migrate pedalboard preset button
 
-`BaySickPedalsEditor` currently has no engine title (it's a 4×2 grid of pedal slots). STYLE-04 says "BaySickGuitars" label should sit between the player area and the sub-tabs. In code terms: add a TitleBar at `(0, 0, w, 32)` and shift the pedal grid down 32px.
+`BaySickPedalsEditor` currently has no engine title (it's a 4×2 grid of pedal slots). The InstPage's `kHeaderRowH` chrome holds the pedalboard preset button (`mPedalsPresetBtn`) today; that chrome goes away in Task 4.4 when each engine UI owns its own title bar. The pedalboard preset button migrates into BaySickPedalsEditor's title bar trailing slot.
 
 **Files:**
 - Modify: `Source/BaySickPedals/BaySickPedalsEditor.h`.
@@ -512,11 +522,66 @@ The panel currently has a 2-section layout (top half = page controls, bottom hal
 
 - [ ] **Step 4.2.1:** Read `BaySickPedalsEditor.cpp` fully — understand the 4×2 grid layout in `resized()` and any top-of-component offset already in use.
 - [ ] **Step 4.2.2:** Add `#include "../Standalone/BaySickTitleBar.h"` to `BaySickPedalsEditor.h`.
-- [ ] **Step 4.2.3:** Add `BaySickTitleBar mTitleBar { "BAYSICKGUITARS", juce::Colour (0xFF1C3A8A) };` member. (Colour is the navy / royal blue from the Inst tab's **active** state at [RibbonTabBar.cpp:21](Source/Standalone/RibbonTabBar.cpp:21).)
-- [ ] **Step 4.2.4:** In ctor, `addAndMakeVisible (mTitleBar);`.
-- [ ] **Step 4.2.5:** In `resized()`, set `mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);` and shift the pedal grid down by `BaySickTitleBar::kStandardHeight` (32px). The grid layout uses `kRows = 2, kCols = 4` near [BaySickPedalsEditor.cpp:54-55](Source/BaySickPedals/BaySickPedalsEditor.cpp:54). Subtract `kStandardHeight` from the available content height before computing tile sizes; offset the grid Y by `kStandardHeight`.
-- [ ] **Step 4.2.6:** Tell Jeff to `do_build.bat` → Debug verify (open an Inst tab → BaySickGuitars, screenshot — should show "BAYSICKGUITARS" title bar above the 4×2 pedal grid) → Release verify.
-- [ ] **Step 4.2.7:** Surface git status, `/draft-commit`, commit only `Source/BaySickPedals/BaySickPedalsEditor.h` + `.cpp`.
+- [ ] **Step 4.2.3:** Add `BaySickTitleBar mTitleBar { "BAYSICKPEDALS", juce::Colour (0xFF1C3A8A) };` member. (Colour is the navy / royal blue from the Inst tab's **active** state at [RibbonTabBar.cpp:21](Source/Standalone/RibbonTabBar.cpp:21). Title text "BAYSICKPEDALS" — corrected 2026-05-09 from "BAYSICKGUITARS" since BaySickPedals is a distinct engine from BaySickGuitars.)
+- [ ] **Step 4.2.4:** Add `juce::TextButton mPresetBtn { "Preset v" };` member. This is the pedalboard preset button (saves the 8-slot rack as Documents/BaySickDAW/Presets/Pedalboards/{name}.xml). Currently lives in InstPage chrome at `mPedalsPresetBtn`.
+- [ ] **Step 4.2.5:** Add `std::function<void()> onPedalboardPresetMenu;` callback member. InstPage will set this callback to its `showPedalboardPresetMenu()` method so the button keeps its existing behavior.
+- [ ] **Step 4.2.6:** In ctor, `addAndMakeVisible (mTitleBar);` and `addAndMakeVisible (mPresetBtn);` and `mPresetBtn.onClick = [this] { if (onPedalboardPresetMenu) onPedalboardPresetMenu(); };`.
+- [ ] **Step 4.2.7:** In `resized()`, set `mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);`. Right-anchor the preset button via `const auto trailing = mTitleBar.getTrailingArea(88); const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2; mPresetBtn.setBounds(trailing.getX(), btnY, 88, 22);`. Then shift the pedal grid down by `BaySickTitleBar::kStandardHeight` (32px). The grid layout uses `kRows = 2, kCols = 4` near [BaySickPedalsEditor.cpp:54-55](Source/BaySickPedals/BaySickPedalsEditor.cpp:54). Subtract `kStandardHeight` from the available content height before computing tile sizes; offset the grid Y by `kStandardHeight`.
+- [ ] **Step 4.2.8:** Tell Jeff to `do_build.bat` → Debug verify (open an Inst tab → BaySickPedals, screenshot — should show "BAYSICKPEDALS" title bar above the 4×2 pedal grid, preset button right-anchored in the title bar) → Release verify. **NOTE:** the preset button won't yet trigger the menu because InstPage hasn't been wired to set `onPedalboardPresetMenu` — that happens in Task 4.4 (InstPage cleanup).
+- [ ] **Step 4.2.9:** Surface git status, `/draft-commit`, commit only `Source/BaySickPedals/BaySickPedalsEditor.h` + `.cpp`.
+
+#### Task 4.3: AriaControlPanel — extend Binding with engineName + accentColor + render internal TitleBar
+
+`AriaControlPanel` is the shared kit-artwork renderer used by BaySickGuitars / BaySickBasses / BaySickRustyDrums. To give each of those engines a BaySickDAW-style title bar, the panel hosts an internal `BaySickTitleBar` at the top of its area when the parent supplies an engine name + accent color via the `Binding` struct.
+
+**Files:**
+- Modify: `Source/Standalone/AriaControlPanel.h`.
+- Modify: `Source/Standalone/AriaControlPanel.cpp`.
+
+- [ ] **Step 4.3.1:** Read `Source/Standalone/AriaControlPanel.h/.cpp` end-to-end — understand the existing `Binding` struct (apvts + ccParamId + kitDefaultCc + ccLabel closures), the `paint()` method (background fill + static text + tab strip), and `resized()` (panel sizing + tab bar layout). Identify where the kit-artwork rendering area starts in `resized()`.
+- [ ] **Step 4.3.2:** Add `#include "BaySickTitleBar.h"` to `AriaControlPanel.h`.
+- [ ] **Step 4.3.3:** Extend `Binding` struct with two new optional fields: `juce::String engineName {}; juce::Colour accentColor { juce::Colours::transparentBlack };`. Both empty by default — `setEngine()` callers can supply them or leave them unset.
+- [ ] **Step 4.3.4:** Add a `std::unique_ptr<BaySickTitleBar> mTitleBar;` member to `AriaControlPanel` (private). Use unique_ptr so it can be swapped in/out as the binding changes.
+- [ ] **Step 4.3.5:** In `setEngine(Binding binding)`, if `binding.engineName.isNotEmpty()`: create or update mTitleBar with name + color (use `setEngineName`/`setAccentColor` if exists, else recreate). `addAndMakeVisible(*mTitleBar)`. If engineName is empty: `mTitleBar.reset()`.
+- [ ] **Step 4.3.6:** In `resized()`, if `mTitleBar` is set: lay it at `(0, 0, getWidth(), BaySickTitleBar::kStandardHeight)`. Reduce the kit-artwork rendering rect's top by `kStandardHeight` so the kit content moves down 32 px.
+- [ ] **Step 4.3.7:** Tell Jeff to `do_build.bat` → Debug verify (no UI changes visible yet because no callers set the engineName field; this is just plumbing) → Release verify.
+- [ ] **Step 4.3.8:** Surface git status, `/draft-commit`, commit only `Source/Standalone/AriaControlPanel.h` + `.cpp`.
+
+#### Task 4.4: InstPage — remove kHeaderRowH chrome + wire BaySickGuitars / BaySickBasses / BaySickPedals titles
+
+InstPage currently paints a `kHeaderRowH = 36 px` dark chrome strip with `mPedalsHeaderTitle` (engine name label) + `mPedalsPresetBtn` (preset button visible only in Pedals mode). Each engine UI now owns its title bar (Pedals via Task 4.2, Guitars/Basses via Task 4.3 + this task), so the InstPage chrome becomes redundant.
+
+**Files:**
+- Modify: `Source/Inst/InstPage.h`.
+- Modify: `Source/Inst/InstPage.cpp`.
+
+- [ ] **Step 4.4.1:** Find and remove the `kHeaderRowH = 36` constant in `InstPage.cpp` (constexpr at line 14).
+- [ ] **Step 4.4.2:** In `InstPage::paint()` ([:1192-1199](Source/Inst/InstPage.cpp:1192)), delete the header fill + divider lines. Keep the body fill `g.fillAll(0xff181818)`.
+- [ ] **Step 4.4.3:** In `InstPage::resized()` ([:1283-1287](Source/Inst/InstPage.cpp:1283)), delete the header layout block (`auto header = r.removeFromTop(kHeaderRowH)` + the mPedalsPresetBtn / mPedalsHeaderTitle setBounds calls). Remove the `r.removeFromTop(kHeaderRowH)` call so engine UIs fill the full area.
+- [ ] **Step 4.4.4:** Delete `mPedalsHeaderTitle` member (no longer used). Delete `mPedalsPresetBtn` member — the button moved to BaySickPedalsEditor in Task 4.2.
+- [ ] **Step 4.4.5:** Find where InstPage instantiates BaySickPedalsEditor; wire `mPedalsEditor->onPedalboardPresetMenu = [this] { showPedalboardPresetMenu(); };` so the migrated preset button still routes to InstPage's existing menu.
+- [ ] **Step 4.4.6:** Find where InstPage configures the AriaControlPanel binding for BaySickGuitars (the source-mode-aware setup). Set `binding.engineName = "BAYSICKGUITARS"` and `binding.accentColor = juce::Colour (0xFF1C3A8A)`.
+- [ ] **Step 4.4.7:** Same for BaySickBasses: `binding.engineName = "BAYSICKBASSES"`, `binding.accentColor = juce::Colour (0xFF1C3A8A)`.
+- [ ] **Step 4.4.8:** Tell Jeff to `do_build.bat` → Debug verify: (a) Inst tab → BaySickPedals shows BAYSICKPEDALS title bar with working preset button; (b) Inst tab → BaySickGuitars shows BAYSICKGUITARS title bar above the kit artwork; (c) Inst tab → BaySickBasses shows BAYSICKBASSES title bar; (d) no leftover dark chrome strip from the old InstPage header. Release verify same.
+- [ ] **Step 4.4.9:** Surface git status, `/draft-commit`, commit only `Source/Inst/InstPage.h` + `.cpp`.
+
+#### Task 4.5: BaySickRustyDrumsPage — add title bar at top, re-anchor menu buttons below
+
+`BaySickRustyDrumsPage` currently fills its content area with one of three sub-tab components (DrumKit / Player / PianoRoll) at full bounds. The "menu buttons" Jeff referenced (the dark bar visible somewhere in the page) need to sit against the top edge of the player area, with a `BaySickTitleBar` above them.
+
+**Files:**
+- Read: `Source/Standalone/BaySickRustyDrumsPage.h` — confirm the existing layout members + identify the menu-button bar.
+- Modify: `Source/Standalone/BaySickRustyDrumsPage.h`.
+- Modify: `Source/Standalone/BaySickRustyDrumsPage.cpp`.
+
+- [ ] **Step 4.5.1:** Read `BaySickRustyDrumsPage.h/.cpp` end-to-end — confirm where the existing menu bar lives (which member draws / hosts it; sub-tab buttons; etc.). Without knowing exactly which bar Jeff means, the diagnose-before-fixing rule applies: ask Jeff for a screenshot if the layout-edit target is ambiguous.
+- [ ] **Step 4.5.2:** Add `#include "BaySickTitleBar.h"` to `BaySickRustyDrumsPage.h`.
+- [ ] **Step 4.5.3:** Add `BaySickTitleBar mTitleBar { "BAYSICKRUSTYDRUMS", juce::Colour (0xFFCC2222) };` member. (Colour is the Drums tab active red.)
+- [ ] **Step 4.5.4:** In ctor, `addAndMakeVisible (mTitleBar);`.
+- [ ] **Step 4.5.5:** In `resized()` ([:76-91](Source/Standalone/BaySickRustyDrumsPage.cpp:76)), reserve the top 32 px for the title bar. Lay `mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight)`. Then position the existing menu-button bar (per Step 4.5.1's diagnosis) immediately below the title bar, against the top edge of the player area. Sub-tab content (mDrumKitTab / mPlayerTab / mPianoRollTab + AriaControlPanel inside Player) fills the area below.
+- [ ] **Step 4.5.6:** Note: AriaControlPanel will receive the engineName + accentColor via the binding for the Player sub-tab too — Task 4.3's plumbing covers it. Confirm the binding setup happens in BaySickRustyDrumsPage's AriaControlPanel ctor / setEngine call. If the engine title bar there is redundant with the page's title bar, set `binding.engineName = ""` so AriaControlPanel skips its internal title bar (only the page-level one shows).
+- [ ] **Step 4.5.7:** Tell Jeff to `do_build.bat` → Debug verify (open the Drums tab, screenshot — BAYSICKRUSTYDRUMS title bar in red at top, menu buttons immediately below against player area, sub-tab content fills the rest cleanly) → Release verify.
+- [ ] **Step 4.5.8:** Surface git status, `/draft-commit`, commit only `Source/Standalone/BaySickRustyDrumsPage.h` + `.cpp`.
 
 ### Phase 5 — STYLE-01 ribbon truncation fix
 
