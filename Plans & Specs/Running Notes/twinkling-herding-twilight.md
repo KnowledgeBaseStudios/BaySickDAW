@@ -150,6 +150,10 @@
 | `c900f55` | meta-doc | establish Running Notes/ subfolder + §0 update + seed twinkling-herding-twilight.md |
 | `679af33` | source | guard HarmlessLAF::drawLinearSlider against zero-sized bounds |
 | `27a10bd` | Phase 3.4 | BaySickNAM/IR editor adopts BaySickTitleBar |
+| `8c5924c` | running-notes | append Phase 3 close checkpoint |
+| `1a31aba` | Phase 4.1 | BaySickVocal cluster (Vocals + Align + Pitch via BaySickEngineLabel) |
+| `40c8be8` | running-notes | append Phase 4.1 close checkpoint |
+| `652998b` | Phase 4.2 | BaySickPedals editor adopts BaySickTitleBar (preset btn migrates into trailing area) |
 
 ### Phases done / in flight / remaining
 
@@ -227,6 +231,35 @@ Phase 4.1 — BaySickVocalEditor STYLE-03 swap to BaySickTitleBar.
 ### Next action
 
 Phase 4.2 — BaySickPedalsEditor adopts `BaySickTitleBar` (navy accent #1C3A8A per D7) + pedalboard preset button migrates from InstPage chrome into the title bar's trailing area.  Unlocks Phase 4.4 (InstPage `kHeaderRowH` removal) per finding 8.
+
+---
+
+## 2026-05-09 15:38 PT — Phase 4.2 close — BaySickPedals editor adopts BaySickTitleBar
+
+> Checkpoint after the single commit closing Phase 4.2.  No spec pivots, no
+> new findings — Tasks 4.2.1-4.2.9 executed straight against the plan.
+> Coupled-batch wiring intentionally leaves a no-op preset button + visible
+> InstPage chrome strip until Phase 4.4 lands the wiring + chrome removal.
+
+### Done since last checkpoint
+
+- **`652998b` — QA-A Step 8: BaySickPedals editor adopts BaySickTitleBar.**  Phase 4.2 close.  `mTitleBar { "BaySickPedals", juce::Colour (0xFF1C3A8A) }` (navy — Inst-tab active color, per D7).  Hosted at the top of the 4x2 pedal grid; grid origin shifts down by `BaySickTitleBar::kStandardHeight` (32 px).  The pedalboard preset button migrated from InstPage's `kHeaderRowH = 36` chrome strip into the title bar's trailing area via `mTitleBar.getTrailingArea(88)`.  New `std::function<void()> onPedalboardPresetMenu` callback hook exposed on the editor; Phase 4.4 will set it from InstPage's side (`mPedalsEditor->onPedalboardPresetMenu = [this] { showPedalboardPresetMenu(); }`).  Until then the new preset button renders but its click is a no-op AND the legacy InstPage chrome strip with the original preset button still coexists above the editor (intentional visual duplication; both go away in Phase 4.4 per finding 8).  Title text "BaySickPedals" was corrected from STYLE-04's literal "BaySickGuitars" phrasing in plan-doc commit `0c4431d` per finding 6 / D10; this commit is the source-side application.
+
+### Findings / decisions added
+
+None new this checkpoint.  Phase 4.2 was small and aligned with the plan; all routings (callback wiring deferral, InstPage chrome coexistence, navy accent, title-text correction) were already captured in the retrospective backfill (findings 6, 8; decisions D7, D10) and the Phase 4.1 close.
+
+### In-flight
+
+- Working tree clean.  16 QA-A commits ahead of origin.
+
+### Next action
+
+Phase 4.3 — extend `AriaControlPanel`'s `Binding` struct with optional
+`engineName` + `accentColor` fields (per D6) so BaySickGuitars +
+BaySickBasses + BaySickRustyDrums can render their own title bars through
+the shared kit-artwork panel.  Unblocks Phase 4.4 (InstPage `kHeaderRowH`
+removal + per-source-mode title-bar wiring + Pedals preset-button hookup).
 
 ---
 
