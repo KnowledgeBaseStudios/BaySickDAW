@@ -1,5 +1,6 @@
 #include "BaySickPitchEditor.h"
 #include "BaySickVocalProcessor.h"
+#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickPitchEditor - H-6b (2026-05-02)
@@ -91,11 +92,12 @@ public:
         plain (mResetBtn,  "Reset",  "Reset all edits");
         plain (mCenterPRBtn, "->PR", "Send Selection to Piano Roll");
 
-        // Title + filename labels (top-left text strip)
+        // Title + filename labels (top-left text strip).
+        // QA-A (2026-05-09): mTitleLbl swapped to BaySickEngineLabel for
+        // matching BaySickVocals title styling (16pt bold, teal #0FAFA5,
+        // bloom halo).  Engine name + accent are set via the member
+        // initializer below; no setText/setFont/setColour needed here.
         addAndMakeVisible (mTitleLbl);
-        mTitleLbl.setText ("BaySickPitch", juce::dontSendNotification);
-        mTitleLbl.setColour (juce::Label::textColourId, kToolbarText);
-        mTitleLbl.setFont (juce::Font (14.0f, juce::Font::bold));
 
         addAndMakeVisible (mFileLbl);
         mFileLbl.setText ("(no recording loaded)", juce::dontSendNotification);
@@ -247,7 +249,8 @@ private:
     juce::TextButton mSlavedBtn, mAutoBtn;
     juce::TextButton mLoadBtn, mSaveBtn, mResetBtn, mCenterPRBtn;
 
-    juce::Label mTitleLbl, mFileLbl, mLengthLbl, mTempoLbl, mSyncLbl;
+    BaySickEngineLabel mTitleLbl { "BaySickPitch", juce::Colour (0xFF0FAFA5) };
+    juce::Label        mFileLbl, mLengthLbl, mTempoLbl, mSyncLbl;
 
     juce::Slider mCenter,    mVariation,    mTrans;
     juce::Label  mCenterLbl, mVariationLbl, mTransLbl;

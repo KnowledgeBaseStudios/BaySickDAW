@@ -46,10 +46,54 @@ public:
     void paint   (juce::Graphics& g) override;
     void resized () override;
 
+    /** Static engine-name painter shared with BaySickEngineLabel (and any
+        other caller that wants matching bloom + font + color but supplies its
+        own background / chrome). */
+    static void paintEngineName (juce::Graphics&        g,
+                                 const juce::String&    engineName,
+                                 juce::Colour           accentColor,
+                                 juce::Rectangle<int>   rect,
+                                 bool                   bloom        = true,
+                                 float                  fontSizePx   = kFontSizePx);
+
 private:
     juce::String mEngineName;
     juce::Colour mAccentColor;
     bool         mBloom;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickTitleBar)
+};
+
+
+/** Label-only variant of BaySickTitleBar -- paints just the engine name
+    (with optional bloom halo) and no background/divider chrome.  Use when an
+    existing toolbar / chrome strip already provides the background and just
+    needs the engine name painted in matching BaySickTitleBar font + color +
+    bloom (e.g. BaySickAlign + BaySickPitch sub-pages of BaySickVocal).
+    Shares the static paintEngineName helper with BaySickTitleBar so the
+    two visuals stay in lock-step. */
+class BaySickEngineLabel : public juce::Component
+{
+public:
+    BaySickEngineLabel (const juce::String& engineName,
+                        juce::Colour accentColor,
+                        bool bloom = true);
+    ~BaySickEngineLabel() override = default;
+
+    void setEngineName  (const juce::String& name);
+    void setAccentColor (juce::Colour c);
+    void setBloom       (bool enabled);
+
+    juce::String getEngineName  () const { return mEngineName; }
+    juce::Colour getAccentColor () const { return mAccentColor; }
+    bool         getBloom       () const { return mBloom; }
+
+    void paint (juce::Graphics& g) override;
+
+private:
+    juce::String mEngineName;
+    juce::Colour mAccentColor;
+    bool         mBloom;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickEngineLabel)
 };

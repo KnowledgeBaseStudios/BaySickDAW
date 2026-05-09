@@ -5,6 +5,7 @@
 #include "../BaySickNAMIR/BaySickNAMIREditor.h"
 #include "../Standalone/SlotComponent.h"
 #include "../Standalone/EffectEditorPanels.h"
+#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // H-6c (2026-05-01): createEffectEditor lives in EffectEditorPanels.cpp; the
 // VocalChainPanel uses it to materialise per-slot inline editors.  Declaration
@@ -142,6 +143,11 @@ class BaySickVocalEditor::BaySickVocalsPanel : public juce::Component,
 public:
     BaySickVocalsPanel (BaySickVocalProcessor& p) : mProc (p)
     {
+        // QA-A (2026-05-09): unified title bar at top of the panel, replacing
+        // the old "PAGE CONTROLS" g.drawText caption per STYLE-03.  Accent =
+        // bright teal (#0FAFA5), matching the Vox tab's active ribbon colour.
+        addAndMakeVisible (mTopTitleBar);
+
         // ── Page-wide controls (top half) ───────────────────────────────────
         addAndMakeVisible (mMixSlider);
         addAndMakeVisible (mMixSlider);
@@ -288,19 +294,33 @@ public:
         g.setColour (juce::Colours::white.withAlpha (0.08f));
         g.drawHorizontalLine (half, 0.0f, (float) getWidth());
 
-        // Section captions
+        // QA-A (2026-05-09): "PAGE CONTROLS" g.drawText caption removed --
+        // mTopTitleBar at y=0..32 now owns that role with engine name
+        // "BaySickVocals" instead of "PAGE CONTROLS" per STYLE-03.
+
+        // Bottom-half caption preserved -- this is descriptive of the
+        // section's contents (realtime correction widgets), not an engine
+        // title, so it stays as a g.drawText caption for now.
         g.setColour (juce::Colours::white.withAlpha (0.5f));
         g.setFont (juce::Font (12.0f, juce::Font::bold));
-        g.drawText ("PAGE CONTROLS", juce::Rectangle<int> (16, 4, 200, 18),
-                    juce::Justification::centredLeft);
         g.drawText ("REALTIME PITCH CORRECTION", juce::Rectangle<int> (16, half + 4, 280, 18),
                     juce::Justification::centredLeft);
     }
 
     void resized() override
     {
+        // QA-A (2026-05-09): title bar at the top of the panel.  Top-half
+        // content rect skips it via withTrimmedTop, then keeps the original
+        // 16-px horizontal margin and 8-px vertical breathing room (was 24
+        // before; reduced because the title bar now sits where "PAGE CONTROLS"
+        // used to be, providing its own visual chrome).
+        mTopTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);
+
         const int half = getHeight() / 2;
-        auto top = getLocalBounds().removeFromTop (half).reduced (16, 24);
+        auto top = getLocalBounds()
+                       .withTrimmedTop (BaySickTitleBar::kStandardHeight)
+                       .removeFromTop (half - BaySickTitleBar::kStandardHeight)
+                       .reduced (16, 8);
         auto bot = getLocalBounds().withTrimmedTop (half).reduced (16, 24);
 
         // Top half: Bypass | Mix knob | A/B combo
@@ -354,6 +374,11 @@ private:
     }
 
     BaySickVocalProcessor& mProc;
+
+    // QA-A (2026-05-09): unified title bar replaces the old "PAGE CONTROLS"
+    // g.drawText caption.  Accent = bright teal (#0FAFA5) -- same as the Vox
+    // tab's active ribbon colour at RibbonTabBar.cpp:20.
+    BaySickTitleBar mTopTitleBar { "BaySickVocals", juce::Colour (0xFF0FAFA5) };
 
     using SAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using BAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;

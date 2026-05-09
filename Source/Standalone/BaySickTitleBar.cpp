@@ -59,8 +59,22 @@ void BaySickTitleBar::paint (juce::Graphics& g)
     const auto textRect = juce::Rectangle<int> (kPaddingPx, 0,
                                                 getWidth() - 2 * kPaddingPx,
                                                 getHeight());
+    paintEngineName (g, mEngineName, mAccentColor, textRect, mBloom, kFontSizePx);
+}
 
-    if (mBloom)
+void BaySickTitleBar::resized()
+{
+    // Parent positions trailing widgets via getTrailingArea(); no internal layout.
+}
+
+void BaySickTitleBar::paintEngineName (juce::Graphics&       g,
+                                       const juce::String&   engineName,
+                                       juce::Colour          accentColor,
+                                       juce::Rectangle<int>  rect,
+                                       bool                  bloom,
+                                       float                 fontSizePx)
+{
+    if (bloom)
     {
         // True symmetric halo: convert text to path and stroke it before
         // filling the same path for the crisp overlay.  Stroking radiates
@@ -69,38 +83,85 @@ void BaySickTitleBar::paint (juce::Graphics& g)
         // or single-direction-shifted larger font would produce when two
         // text rendered via drawText share a left-aligned edge.  Halo + crisp
         // text share the same path so they are guaranteed pixel-aligned.
-        juce::Font font (kFontSizePx, juce::Font::bold);
+        juce::Font font (fontSizePx, juce::Font::bold);
         juce::GlyphArrangement glyphs;
-        const float baselineY = (float) textRect.getCentreY()
+        const float baselineY = (float) rect.getCentreY()
                                 + (font.getAscent() - font.getDescent()) * 0.5f;
-        glyphs.addJustifiedText (font, mEngineName,
-                                 (float) textRect.getX(),
+        glyphs.addJustifiedText (font, engineName,
+                                 (float) rect.getX(),
                                  baselineY,
-                                 (float) textRect.getWidth(),
+                                 (float) rect.getWidth(),
                                  juce::Justification::left);
         juce::Path textPath;
         glyphs.createPath (textPath);
 
-        g.setColour (mAccentColor.withAlpha (0.30f));
+        g.setColour (accentColor.withAlpha (0.30f));
         g.strokePath (textPath, juce::PathStrokeType (2.5f,
                                                        juce::PathStrokeType::curved,
                                                        juce::PathStrokeType::rounded));
 
-        g.setColour (mAccentColor);
+        g.setColour (accentColor);
         g.fillPath (textPath);
     }
     else
     {
-        // No-bloom engines render via the platform text rasterizer for the
+        // No-bloom callers render via the platform text rasterizer for the
         // sharpest crisp text.  Path-based rendering is reserved for bloom
-        // engines so the halo + crisp text guarantee pixel alignment.
-        g.setColour (mAccentColor);
-        g.setFont   (juce::Font (kFontSizePx, juce::Font::bold));
-        g.drawText  (mEngineName, textRect, juce::Justification::centredLeft, true);
+        // callers so the halo + crisp text guarantee pixel alignment.
+        g.setColour (accentColor);
+        g.setFont   (juce::Font (fontSizePx, juce::Font::bold));
+        g.drawText  (engineName, rect, juce::Justification::centredLeft, true);
     }
 }
 
-void BaySickTitleBar::resized()
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BaySickEngineLabel
+// ─────────────────────────────────────────────────────────────────────────────
+
+BaySickEngineLabel::BaySickEngineLabel (const juce::String& engineName,
+                                        juce::Colour accentColor,
+                                        bool bloom)
+    : mEngineName (engineName)
+    , mAccentColor (accentColor)
+    , mBloom (bloom)
 {
-    // Parent positions trailing widgets via getTrailingArea(); no internal layout.
+    // Label-only painter; never intercept clicks so existing toolbar widgets
+    // sitting in front of (or near) the label keep working.
+    setInterceptsMouseClicks (false, true);
+}
+
+void BaySickEngineLabel::setEngineName (const juce::String& name)
+{
+    if (mEngineName != name)
+    {
+        mEngineName = name;
+        repaint();
+    }
+}
+
+void BaySickEngineLabel::setAccentColor (juce::Colour c)
+{
+    if (mAccentColor != c)
+    {
+        mAccentColor = c;
+        repaint();
+    }
+}
+
+void BaySickEngineLabel::setBloom (bool enabled)
+{
+    if (mBloom != enabled)
+    {
+        mBloom = enabled;
+        repaint();
+    }
+}
+
+void BaySickEngineLabel::paint (juce::Graphics& g)
+{
+    // No background or divider -- caller's chrome is preserved.  Fill the
+    // entire local bounds with the engine name (with optional bloom halo).
+    BaySickTitleBar::paintEngineName (g, mEngineName, mAccentColor,
+                                       getLocalBounds(), mBloom);
 }

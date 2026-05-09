@@ -1,6 +1,7 @@
 #include "BaySickAlignEditor.h"
 #include "BaySickVocalProcessor.h"
 #include "../Standalone/StandaloneEditor.h"
+#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickAlignEditor - H-6c (2026-05-02)
@@ -51,10 +52,11 @@ class BaySickAlignEditor::Toolbar : public juce::Component
 public:
     Toolbar()
     {
+        // QA-A (2026-05-09): mTitleLbl swapped to BaySickEngineLabel for
+        // matching BaySickVocals title styling (16pt bold, teal #0FAFA5,
+        // bloom halo).  Engine name + accent are set via the member
+        // initializer below; no setText/setFont/setColour needed here.
         addAndMakeVisible (mTitleLbl);
-        mTitleLbl.setText ("BaySickAlign", juce::dontSendNotification);
-        mTitleLbl.setColour (juce::Label::textColourId, kText);
-        mTitleLbl.setFont (juce::Font (14.0f, juce::Font::bold));
 
         addAndMakeVisible (mPresetCombo);
         mPresetCombo.setTextWhenNothingSelected ("(no preset)");
@@ -131,7 +133,7 @@ public:
     }
 
 private:
-    juce::Label      mTitleLbl;
+    BaySickEngineLabel mTitleLbl { "BaySickAlign", juce::Colour (0xFF0FAFA5) };
     juce::ComboBox   mPresetCombo;
     juce::TextButton mUndoBtn, mRedoBtn, mAutoPreviewBtn;
 };
