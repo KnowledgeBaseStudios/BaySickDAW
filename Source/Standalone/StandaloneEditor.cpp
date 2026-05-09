@@ -4453,6 +4453,15 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 true,                  // enabled
                                 mtOn);                 // checked
 
+                    // 2026-05-08 (QA-Md): diagnostic capture for the
+                    // MT-no-op-in-Debug investigation.  Click triggers a
+                    // 2-second counter capture window and pops an
+                    // AlertWindow with the per-thread task distribution.
+                    m.addItem (203,
+                                "Run MT Diagnostic (2s capture)",
+                                true,                  // enabled
+                                false);                // not checkable
+
                     m.showMenuAsync (
                         juce::PopupMenu::Options().withTargetComponent (anchor),
                         [safeThis] (int r)
@@ -4494,6 +4503,79 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 const bool wasOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
                                 RenderEngine::gMultiThreadedEngineEnabled.store (! wasOn, std::memory_order_release);
                                 VibesynthStandaloneApp::saveMultiCoreRenderingPref();
+                                return;
+                            }
+                            if (r == 203)
+                            {
+                                // 2026-05-08 (QA-Md): 2-second diagnostic
+                                // capture.  OkCancel prompt -> on OK,
+                                // reset counters, set capture flag, sleep
+                                // 2 s on the message thread (UI freezes
+                                // briefly; audio thread keeps running),
+                                // then snapshot + AlertWindow with the
+                                // formatted body.
+                                juce::AlertWindow::showOkCancelBox (
+                                    juce::MessageBoxIconType::InfoIcon,
+                                    "MT Diagnostic",
+                                    "Start playback now, then click OK.\n"
+                                    "Capture runs for 2 seconds (UI freezes briefly).\n"
+                                    "(Cancel to abort.)",
+                                    "OK", "Cancel", nullptr,
+                                    juce::ModalCallbackFunction::create (
+                                        [safeThis] (int result)
+                                        {
+                                            if (! safeThis) return;
+                                            if (result != 1) return;  // 1 = OK, 0 = Cancel
+
+                                            RenderEngine::MtDiagnostic::reset();
+                                            RenderEngine::MtDiagnostic::gCaptureOn.store (true, std::memory_order_release);
+
+                                            juce::Thread::sleep (2000);
+
+                                            RenderEngine::MtDiagnostic::gCaptureOn.store (false, std::memory_order_release);
+                                            const auto snap = RenderEngine::MtDiagnostic::snapshot();
+
+                                            const bool      mtMode       = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
+                                            const long long totalSubmits = snap.leavesSubmitted + snap.childSubmits;
+                                            const long long totalRun     = snap.mainThreadTasks + snap.workerTasks;
+                                            const double    mainPct      = totalRun > 0
+                                                ? 100.0 * (double) snap.mainThreadTasks / (double) totalRun
+                                                : 0.0;
+                                            const double    workerPct    = totalRun > 0
+                                                ? 100.0 * (double) snap.workerTasks / (double) totalRun
+                                                : 0.0;
+
+                                            juce::String body;
+                                            body
+                                              << "Build: "
+                                            #if JUCE_DEBUG
+                                              << "Debug"
+                                            #else
+                                              << "Release"
+                                            #endif
+                                              << "    MT mode: " << (mtMode ? "ON" : "OFF") << "\n"
+                                              << "Capture window: 2 s\n\n"
+                                              << "Blocks processed:    " << snap.blockCount       << "\n"
+                                              << "Leaves submitted:    " << snap.leavesSubmitted  << "\n"
+                                              << "Child submits:       " << snap.childSubmits     << "\n"
+                                              << "Total submits:       " << totalSubmits          << "\n"
+                                              << "Watchdog fires:      " << snap.watchdogFires    << "\n\n"
+                                              << "Main-thread tasks:   " << snap.mainThreadTasks
+                                                  << "  (" << juce::String (mainPct,   1) << "%)\n"
+                                              << "Worker tasks (all):  " << snap.workerTasks
+                                                  << "  (" << juce::String (workerPct, 1) << "%)\n"
+                                              << "Total tasks run:     " << totalRun << "\n\n"
+                                              << "Worker spin finds:   " << snap.workerSpinFinds  << "\n"
+                                              << "Worker sleep finds:  " << snap.workerSleepFinds << "\n"
+                                              << "Worker idle sleeps:  " << snap.workerIdleSleeps << "\n"
+                                              << "Worker wakes:        " << snap.workerWakes      << "\n";
+
+                                            juce::AlertWindow::showMessageBoxAsync (
+                                                juce::MessageBoxIconType::InfoIcon,
+                                                "MT Diagnostic Result",
+                                                body,
+                                                "OK");
+                                        }));
                                 return;
                             }
                             // J-A2: master output selector handlers.
