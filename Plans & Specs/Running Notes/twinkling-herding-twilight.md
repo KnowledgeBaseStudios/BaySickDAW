@@ -156,6 +156,8 @@
 | `652998b` | Phase 4.2 | BaySickPedals editor adopts BaySickTitleBar (preset btn migrates into trailing area) |
 | `4fbe40d` | running-notes | append Phase 4.2 close checkpoint |
 | `21394d5` | Phase 4.3 | AriaControlPanel hosts optional BaySickTitleBar (plumbing-only; no callers wired yet) |
+| `662effb` | running-notes | append Phase 4.3 close checkpoint |
+| `1d0304d` | Phase 4.4 | InstPage chrome strip removed; per-source title bars wired (Pedals preset hookup + Guitars/Basses navy bars) |
 
 ### Phases done / in flight / remaining
 
@@ -288,6 +290,39 @@ removal + per-source-mode title-bar wiring + Pedals preset-button hookup).
 ### Next action
 
 Phase 4.4 — InstPage cleanup.  Removes the `kHeaderRowH = 36` parent chrome strip (deletes `mPedalsHeaderTitle` + `mPedalsPresetBtn` + the paint block at `Source/Inst/InstPage.cpp:1192-1199`) AND wires per-source-mode title configuration through the new `AriaControlPanel::Binding` fields for Pedals / Guitars / Basses (navy #1C3A8A per D7) and BaySickNAM/IR (Mesa red #E0303F per Phase 3.4).  Also hooks `mPedalsEditor->onPedalboardPresetMenu` from InstPage's side so the trailing-area button migrated in Phase 4.2 stops being a no-op.  Per finding 14, this is where the "extra black bar" finally goes away for every Inst-page engine.
+
+---
+
+## 2026-05-09 17:18 PT — Phase 4.4 close — InstPage cleanup, extra black bar gone
+
+> Checkpoint after the single source commit closing Phase 4.4.  The `kHeaderRowH = 36`
+> parent chrome strip is gone across every Inst-page source mode; the migrated
+> Pedals preset button is now functional; BaySickGuitars + BaySickBasses exercise
+> Phase 4.3's AriaControlPanel plumbing for the first time.  Closes finding 8 +
+> finding 14 (the "extra black bar" item) for InstPage.
+
+### Done since last checkpoint
+
+- **`1d0304d` — QA-A Step 10: InstPage drops chrome strip, wires per-source title bars.**  Phase 4.4 close.  Five interlocked edits in one commit:
+  - `kHeaderRowH = 36` constant deleted; dark-fill paint block at `Source/Inst/InstPage.cpp:1192-1199` deleted; the `resized()` reservation that gave it space is gone.  Each Inst-page engine UI now fills the full page area with its own title bar at y=0.
+  - `mPedalsHeaderTitle` (`juce::Label`) and `mPedalsPresetBtn` (`std::unique_ptr<juce::TextButton>`) members deleted from `Source/Inst/InstPage.h`.
+  - `mPedalsEditor->onPedalboardPresetMenu = [this] { showPedalboardPresetMenu(); }` wired in InstPage's constructor (`dynamic_cast<BaySickPedalsEditor*>` on `mPedalsEditor.get()`); the trailing-area preset button migrated in Phase 4.2 stops being a no-op.
+  - `showPedalboardPresetMenu`'s popup target switched from `mPedalsPresetBtn.get()` (deleted) to `mPedalsEditor.get()` (whole editor as anchor).
+  - `rebuildPlayerPanel()` now sets `binding.engineName = "BaySickGuitars"` / `"BaySickBasses"` + `binding.accentColor = juce::Colour (0xFF1C3A8A)` (navy per D7) — Phase 4.3's `AriaControlPanel::Binding` plumbing exercised by a real caller for the first time.  Both sfizz engines now render their own `BaySickTitleBar` at the top of the kit-artwork area.
+  - `#include "../BaySickPedals/BaySickPedalsEditor.h"` added to `InstPage.cpp` for the dynamic_cast.
+  - **Verification (Jeff confirmed Debug + Release):** all five Inst source modes pass — BaySickPedals (no extra bar; preset menu opens), BaySickNAM/IR (no extra bar; engine's own Phase-3.4 title bar flush at top), BaySickGuitars (new navy "BaySickGuitars" title bar over kit artwork), BaySickBasses (same with "BaySickBasses"), LiveInput (no engine UI; unchanged).
+
+### Findings / decisions added
+
+- **Finding 15 — Piano Roll deep-link button crash re-sighted (not a Phase 4.4 regression).**  Mid-Phase-4.4 testing, Jeff hit a crash on the Piano Roll button.  Stack: `StandaloneEditor::showPageForTab` line 4135's `<lambda_14>::operator()(int i)`.  This is the same crash family as findings 13 + 14 from QA-0a's cold-start triage (captured-raw `InstPage*` in lambda gets freed during engine swap or project reload; `juce::Component::SafePointer` or index-lookup fix queued).  Already routed to QA-E per §9 Forks 3rd entry "QA-0 close routings".  The crash path lives in `Source/Standalone/StandaloneEditor.cpp` and is **untouched** by the Phase 4.4 InstPage chrome refactor — captured here purely for traceability so the QA-A close drafter sees that the re-sighting landed during this batch's verification (no QA-A-side action required).
+
+### In-flight
+
+- Working tree clean.  20 QA-A commits ahead of origin.
+
+### Next action
+
+Phase 4.5 — `BaySickRustyDrumsPage` adds its own title bar above the existing menu buttons (Drums-tab red `#CC2222` per D7).  Last sub-phase of Phase 4 before Phase 5 (STYLE-01 ribbon truncation).
 
 ---
 
