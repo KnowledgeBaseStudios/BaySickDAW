@@ -198,6 +198,38 @@ Phase 4.1 — BaySickVocalEditor STYLE-03 swap to BaySickTitleBar.
 
 ---
 
+## 2026-05-09 14:55 PT — Phase 4.1 close — BaySickVocal cluster adopts BaySickTitleBar
+
+> Checkpoint after the single commit closing Phase 4.1.  Original scope was
+> BaySickVocalsPanel only (STYLE-03 caption swap); grew mid-phase to cover
+> BaySickAlign + BaySickPitch when Jeff flagged off-brand title styling on
+> the two sibling sub-pages.  All three Vox sub-pages now share the same
+> engine-name styling (font + color + bloom).
+
+### Done since last checkpoint
+
+- **`1a31aba` — QA-A Step 7: BaySickVocal cluster adopts BaySickTitleBar styling.**  Phase 4.1 close.  Three sub-pages updated in one commit:
+  - **BaySickVocalsPanel** — STYLE-03 swap.  "PAGE CONTROLS" `g.drawText` caption deleted; `BaySickTitleBar` adopted.
+  - **BaySickAlignEditor** — `mTitleLbl` (was 14 pt bold `juce::Label` with off-brand colors) swapped to `BaySickEngineLabel`.  Existing toolbar chrome (preset combo, save/reset/file labels) preserved.
+  - **BaySickPitchEditor** — same swap as Align; multi-label declaration line split so `mTitleLbl` becomes `BaySickEngineLabel`.
+  - **`BaySickTitleBar.h` / `.cpp` extensions** — added `BaySickEngineLabel` (thin `juce::Component` subclass painting just the engine name with optional bloom, no background/divider — drop-in replacement for `juce::Label` where existing chrome stays); added static `paintEngineName(g, name, accent, rect, bloom, fontSize)` helper called by both `BaySickTitleBar::paint` and `BaySickEngineLabel::paint` so bloom math stays in lock-step.  Default bloom = `true` on `BaySickEngineLabel` (matches Step 1b convention per D2).
+
+### Findings / decisions added
+
+- **Finding 13 — Phase 4.1 scope expansion.**  Original Phase 4.1 spec was BaySickVocalsPanel only (STYLE-03 caption swap).  After the initial work landed in the working tree but before committing, Jeff flagged that the two sibling sub-pages within BaySickVocal (BaySickAlign + BaySickPitch) already had `mTitleLbl` showing the engine name in 14 pt bold with off-brand colors.  He wanted them to match BaySickVocals's title styling (16 pt bold, teal #0FAFA5, bloom halo) without disrupting the rest of those toolbars (which have other widgets — preset combo, save/reset/file labels, etc.).  Phase 4.1 grew to cover all three Vox sub-pages; single commit covers them all.  Drove decisions D12 + D13.
+- **D12 — `BaySickEngineLabel` component added.**  Drop-in replacement for `juce::Label` that paints engine names in matching `BaySickTitleBar` style (font + color + bloom) without background/divider chrome.  Used by BaySickAlign + BaySickPitch toolbars where existing chrome stays.  Default bloom = `true` (matches D2 / Step 1b convention).  Lives alongside `BaySickTitleBar` in `Source/Standalone/BaySickTitleBar.h` + `.cpp`.
+- **D13 — `BaySickTitleBar::paintEngineName` static helper extracted.**  Shared between `BaySickTitleBar::paint` and `BaySickEngineLabel::paint` so bloom path-stroke logic (per D3) stays centralized — single source of truth for the GlyphArrangement -> Path -> stroke + fill pipeline.
+
+### In-flight
+
+- Working tree has only this running-notes append uncommitted (it'll commit immediately).  14 QA-A commits ahead of origin after this commit lands.
+
+### Next action
+
+Phase 4.2 — BaySickPedalsEditor adopts `BaySickTitleBar` (navy accent #1C3A8A per D7) + pedalboard preset button migrates from InstPage chrome into the title bar's trailing area.  Unlocks Phase 4.4 (InstPage `kHeaderRowH` removal) per finding 8.
+
+---
+
 ## Bucket assignment (for batch-close drafter at QA-A close)
 
 - **UI / L&F / Theming** (primary): the BaySickTitleBar component + every engine-editor refactor.
