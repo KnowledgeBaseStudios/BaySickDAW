@@ -92,7 +92,11 @@ void VibeThreadPool::runOneTask (RenderTask* task) noexcept
     {
         const int prev = child->mDeps.fetch_sub (1, std::memory_order_acq_rel);
         if (prev == 1)
+        {
+            if (RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed))
+                RenderEngine::MtDiagnostic::gChildSubmits.fetch_add (1, std::memory_order_relaxed);
             submit (child);
+        }
     }
 }
 
@@ -115,16 +119,23 @@ void VibeThreadPool::runUntil (std::atomic<bool>& done) noexcept
 bool VibeThreadPool::runUntilOrTimeout (std::atomic<bool>& done,
                                           double              deadlineMillisHiRes) noexcept
 {
+    const bool capture = RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed);
     while (! done.load (std::memory_order_acquire))
     {
         if (auto* task = tryPop())
         {
+            if (capture)
+                RenderEngine::MtDiagnostic::gMainThreadTasks.fetch_add (1, std::memory_order_relaxed);
             runOneTask (task);
         }
         else
         {
             if (juce::Time::getMillisecondCounterHiRes() >= deadlineMillisHiRes)
+            {
+                if (capture)
+                    RenderEngine::MtDiagnostic::gWatchdogFires.fetch_add (1, std::memory_order_relaxed);
                 return false;
+            }
             std::this_thread::yield();
         }
     }
@@ -144,6 +155,8 @@ void VibeThreadPool::workerLoop (int workerIndex) noexcept
 
     while (! mShutdown.load (std::memory_order_acquire))
     {
+        const bool capture = RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed);
+
         // Spin phase - tight loop, no yield. Typical inter-task gap is
         // microseconds; we'd rather burn a few cycles than pay a context
         // switch.
@@ -152,6 +165,11 @@ void VibeThreadPool::workerLoop (int workerIndex) noexcept
         {
             if (auto* task = tryPop())
             {
+                if (capture)
+                {
+                    RenderEngine::MtDiagnostic::gWorkerSpinFinds.fetch_add (1, std::memory_order_relaxed);
+                    RenderEngine::MtDiagnostic::gWorkerTasks    .fetch_add (1, std::memory_order_relaxed);
+                }
                 runOneTask (task);
                 gotTask = true;
                 break;
@@ -167,6 +185,11 @@ void VibeThreadPool::workerLoop (int workerIndex) noexcept
         if (auto* task = tryPop())
         {
             mImpl->activeWaiters.fetch_sub (1, std::memory_order_release);
+            if (capture)
+            {
+                RenderEngine::MtDiagnostic::gWorkerSleepFinds.fetch_add (1, std::memory_order_relaxed);
+                RenderEngine::MtDiagnostic::gWorkerTasks     .fetch_add (1, std::memory_order_relaxed);
+            }
             runOneTask (task);
             continue;
         }
@@ -174,7 +197,13 @@ void VibeThreadPool::workerLoop (int workerIndex) noexcept
         // Wait until a submit() signals us, or shutdown wakes everyone.
         // -1 = no timeout. juce::WaitableEvent::signal is sticky, so if a
         // signal raced ahead of this wait it returns immediately.
+        if (capture)
+            RenderEngine::MtDiagnostic::gWorkerIdleSleeps.fetch_add (1, std::memory_order_relaxed);
+
         waker.wait (-1);
+
+        if (capture)
+            RenderEngine::MtDiagnostic::gWorkerWakes.fetch_add (1, std::memory_order_relaxed);
 
         mImpl->activeWaiters.fetch_sub (1, std::memory_order_release);
     }
