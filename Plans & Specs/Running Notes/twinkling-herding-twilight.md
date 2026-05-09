@@ -147,15 +147,15 @@
 | `4a02615` | Phase 3.3 | BaySickBass editor adopts BaySickTitleBar |
 | `d529602` | plan-doc | expand plan scope to cover BaySickGuitars / BaySickBasses / BaySickRustyDrums |
 | `0c4431d` | plan-doc + source | correct engine title casing to brand mixed-case |
-| `<TBD-M>` | meta-doc | establish Running Notes/ subfolder + §0 update + memory entry update |
-| `<TBD-B>` | source | guard HarmlessLAF::drawLinearSlider against zero-sized bounds |
-| `<TBD-C>` | Phase 3.4 | BaySickNAMIR editor adopts BaySickTitleBar |
+| `c900f55` | meta-doc | establish Running Notes/ subfolder + §0 update + seed twinkling-herding-twilight.md |
+| `679af33` | source | guard HarmlessLAF::drawLinearSlider against zero-sized bounds |
+| `27a10bd` | Phase 3.4 | BaySickNAM/IR editor adopts BaySickTitleBar |
 
 ### Phases done / in flight / remaining
 
 - Phase 1 (component scaffold + bloom upgrade) — DONE.
 - Phase 2 (BaySickPlayer PoC) — DONE.
-- Phase 3 (sweep existing title bars: Harmless / BaySickSynth / BaySickBass / BaySickNAM/IR) — DONE except 3.4 NAMIR commit pending.
+- Phase 3 (sweep existing title bars: Harmless / BaySickSynth / BaySickBass / BaySickNAM/IR) — DONE.
 - Phase 4 (BaySickVocal STYLE-03 / BaySickPedalsEditor + preset btn migration / AriaControlPanel extension / InstPage cleanup / BaySickRustyDrumsPage) — ALL pending.
 - Phase 5 (STYLE-01 ribbon truncation) — pending.
 - Phase 6 (cross-engine consistency check) — pending.
@@ -166,6 +166,35 @@
 Commit the Running Notes infrastructure (this file + §0 update + memory entry update) as the meta-doc commit, then the HarmlessLAF defensive guard, then the Phase 3.4 NAMIR refactor.  After all three commits land, proceed to Phase 4.1 (BaySickVocalEditor STYLE-03).
 
 Going forward: every mid-batch checkpoint dispatches `/draft-doc running-notes` and the parent applies the returned text by appending a new `## YYYY-MM-DD HH:MM PT — <summary>` block to this file.
+
+---
+
+## 2026-05-09 14:12 PT — Phase 3 close + Running Notes infra landed
+
+> Checkpoint after the four commits closing Phase 3 of QA-A.  Phase 3 is now
+> fully done across Harmless / BaySickSynth / BaySickBass / BaySickNAM/IR.
+> Running Notes home is established and memory-locked.
+
+### Done since last checkpoint
+
+- **`0c4431d` — QA-A: correct engine title casing to brand mixed-case.**  Casing fix swept across the four already-shipped player editors (HARMLESS / BAYSICKPLAYER / BAYSICKSYNTH / BAYSICKBASS) plus the per-batch plan doc.  Convention locked 2026-05-09: brand mixed-case for every UI surface, never up-case unilaterally even when legacy source had it that way.  Memory file `feedback_match_jeff_text_casing.md` indexed.
+- **`c900f55` — QA-A: establish Running Notes subfolder + seed twinkling-herding-twilight.**  New `Plans & Specs/Running Notes/` subfolder added to §0's approved list; per-batch running-notes file paired with the batch plan by silly-name.  Initial entry in this file is the retrospective backfill committed in this commit.  Memory file `feedback_draft_doc_running_notes_every_checkpoint.md` updated with the concrete file location.
+- **`679af33` — QA-A: guard HarmlessLAF::drawLinearSlider against zero-sized bounds.**  Defensive early-return at top of the `LinearVertical` branch when `width <= 0 || height <= 0`.  Stops the NaN-coord Direct2D `coordsToRectangle` assert that surfaced after Phase 3.1's `kHdrH 36 -> 32` shift in HarmlessEditor body layout.  Latent root cause ("why is the slider 0 px in the first place") stays open as a Phase 6 follow-up per D9.
+- **`27a10bd` — QA-A Step 6: BaySickNAM/IR editor adopts BaySickTitleBar.**  Phase 3.4 close.  `mTitleBar { "BaySickNAM/IR", juce::Colour (0xFFE0303F) }` (Mesa red).  `kHeaderH` 28 -> 32 (4 px more chrome).  A/B slot toggles right-anchor via `getTrailingArea(2 * kSlotABtnW)`.  Old title-strip fill + divider lines deleted.  Tooltip dropped permanently per D8.
+
+### Findings / decisions added
+
+None new this checkpoint — all routings already captured in the retrospective backfill above (items 5, 8, 9, 12; decisions D4, D8, D9, D11).  Worth re-flagging for visibility:
+
+- **InstPage parent chrome black bar** (item 8) — Jeff sees an "extra black bar" above the new BaySickNAM/IR title bar.  Confirmed in commit `27a10bd` body: it's InstPage's own `kHeaderRowH = 36` chrome strip (paint at `Source/Inst/InstPage.cpp:1192-1199`).  Removal queued for Phase 4.4 (depends on Phase 4.2 migrating the pedalboard preset button into BaySickPedalsEditor first).
+
+### In-flight
+
+- Working tree clean.  12 QA-A commits ahead of origin.
+
+### Next action
+
+Phase 4.1 — BaySickVocalEditor STYLE-03 swap to BaySickTitleBar.
 
 ---
 
