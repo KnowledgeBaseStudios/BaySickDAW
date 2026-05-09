@@ -5,6 +5,7 @@
 #include "BaySickBassVisualizerScreen.h"
 #include "../BaySickSynth/BssEditorComponents.h"
 #include "../Standalone/SharedUI.h"   // TaggedSliderAttachment
+#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // ── BaySickBassEditor ─────────────────────────────────────────────────────────
 // 5-tab AudioProcessorEditor for BaySickBassProcessor.
@@ -65,6 +66,11 @@ private:
     BaySickBassLAF mBassLAF;
 
     // ── Header ────────────────────────────────────────────────────────────────
+    // QA-A (2026-05-09): unified title bar.  Accent = BaySickBassLAF::kGreen
+    // (#33FF88 B1 neon green) -- matches STYLE-06's "preset on right + green
+    // title logo" spec.
+    BaySickTitleBar  mTitleBar { "BAYSICKBASS",
+                                 juce::Colour (BaySickBassLAF::kGreen) };
     juce::TextButton mPresetBtn { "Preset v" };
 
     // ── Visualizer ────────────────────────────────────────────────────────────

@@ -55,6 +55,8 @@ BaySickBassEditor::BaySickBassEditor (BaySickBassProcessor& p)
     const juce::Colour ledCol (BaySickBassLAF::kGreen);
 
     // ── Header ────────────────────────────────────────────────────────────────
+    // QA-A (2026-05-09): unified title bar.
+    addAndMakeVisible (mTitleBar);
     addAndMakeVisible (mPresetBtn);
     mPresetBtn.onClick = [this] { showPresetMenu(); };
 
@@ -526,7 +528,11 @@ void BaySickBassEditor::resized()
     const int w = getWidth();
 
     // ── Header (32px) ─────────────────────────────────────────────────────────
-    mPresetBtn.setBounds (6, 5, 88, 22);
+    // QA-A (2026-05-09): unified title bar + STYLE-06 (preset moves to RIGHT).
+    mTitleBar.setBounds (0, 0, w, BaySickTitleBar::kStandardHeight);
+    const auto trailing = mTitleBar.getTrailingArea (88);
+    const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
+    mPresetBtn.setBounds (trailing.getX(), btnY, 88, 22);
 
     // ── Visualizer (120px) ────────────────────────────────────────────────────
     mVisualizer.setBounds (0, 32, w, 120);
