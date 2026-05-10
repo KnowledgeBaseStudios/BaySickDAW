@@ -3,6 +3,7 @@
 
 namespace
 {
+
 // ── Beginner-friendly tooltip descriptions ──────────────────────────────────
 // Big Rusty Drums (and most ARIA drum kits) label each knob with a terse 2–8
 // character abbreviation: "Close", "OH", "Punch", "Tune", "Dirt", "Btm", etc.
@@ -888,6 +889,14 @@ static juce::Rectangle<float> computePanelDrawArea (juce::Rectangle<float> outer
     const float fitW = juce::jmin (available.getWidth(),  available.getHeight() * aspect);
     const float fitH = juce::jmin (available.getHeight(), available.getWidth()  / aspect);
     const float originX = available.getCentreX() - fitW * 0.5f;
+    // Centre-anchor the ratio-locked artwork in the available area.  Earlier
+    // QA-A 4.5 work briefly top-anchored this, but the combination of
+    // top-anchor + tabBarH = 0 (overlay model, see resized()) pinned the
+    // artwork flush against the title bar with no breathing room, leaving
+    // nowhere to drag the tab strip without overlapping the kit's top row
+    // (kick / snare / toms labels).  Centre-anchor restores the original
+    // visual position; the draggable tab strip rides on top via
+    // mTabStripNativeOffset.
     const float originY = available.getCentreY() - fitH * 0.5f;
     return { originX, originY, fitW, fitH };
 }
@@ -895,35 +904,57 @@ static juce::Rectangle<float> computePanelDrawArea (juce::Rectangle<float> outer
 void AriaControlPanel::resized()
 {
     // QA-A (2026-05-09): if a title bar is present, anchor it at the top of
-    // the panel and trim the remainder for tab strip + kit artwork.
+    // the panel and trim the remainder for the kit artwork.
     const int titleBarH = mTitleBar ? BaySickTitleBar::kStandardHeight : 0;
     if (mTitleBar)
         mTitleBar->setBounds (0, 0, getWidth(), titleBarH);
 
     const auto b = getLocalBounds().withTrimmedTop (titleBarH).toFloat();
     if (b.isEmpty()) return;
+    if (mNativeW <= 0 || mNativeH <= 0) return;
 
-    // K-5 fix #3: when there are no tab buttons (single-program kit), reclaim
-    // the strip's vertical space for the panel.
-    const int activeTabBarH = mTabButtons.empty() ? 0 : kTabBarHeight;
+    // QA-A 4.5 (2026-05-09): kit artwork claims the full available area below
+    // the title bar; the tab strip overlays the artwork at a user-positioned
+    // anchor (mTabStripNativeOffset, expressed in native artwork coords so
+    // the placement survives window resizes).  Pass tabBarH = 0 so the
+    // artwork no longer reserves a strip-height band at the top.
+    const auto drawArea = computePanelDrawArea (b, mNativeW, mNativeH, 0);
+    const float sx = drawArea.getWidth()  / (float) mNativeW;
+    const float sy = drawArea.getHeight() / (float) mNativeH;
 
+    // Position the tab strip relative to the artwork:
+    //   X: artwork center + mTabStripNativeOffset.x (in native coords scaled
+    //      to pixels) -- centred on the artwork when offset is 0.
+    //   Y: artwork top + mTabStripNativeOffset.y (in native coords scaled
+    //      to pixels) -- flush at the top when offset is 0.
     if (! mTabButtons.empty())
     {
         const int n = (int) mTabButtons.size();
-        const int totalW = (int) b.getWidth();
         const int maxBtnW = 110;
-        const int btnW = juce::jmin (maxBtnW, juce::jmax (40, totalW / juce::jmax (1, n)));
-        const int stripW = btnW * n;
-        const int stripX = juce::jmax (0, (totalW - stripW) / 2);
+        const int btnW = juce::jmin (maxBtnW,
+                                      juce::jmax (40,
+                                                   (int) drawArea.getWidth()
+                                                       / juce::jmax (1, n)));
+        const int stripW  = btnW * n;
+        const int stripCx = (int) drawArea.getCentreX()
+                          + (int) std::lround ((float) mTabStripNativeOffset.x * sx);
+        const int stripX  = stripCx - stripW / 2;
+        const int stripY  = (int) drawArea.getY()
+                          + (int) std::lround ((float) mTabStripNativeOffset.y * sy);
         for (int i = 0; i < n; ++i)
             if (mTabButtons[(size_t) i])
-                mTabButtons[(size_t) i]->setBounds (stripX + i * btnW, 0, btnW - 2, kTabBarHeight);
+            {
+                mTabButtons[(size_t) i]->setBounds (stripX + i * btnW, stripY,
+                                                     btnW - 2, kTabBarHeight);
+                // QA-A 4.5: tab strip overlays kit artwork + widgets, so the
+                // buttons must paint on top of them.  Widgets are added to
+                // the child list AFTER tab buttons (rebuildTabBar() runs
+                // before parseGuiXml() in selectTab()), so by default they'd
+                // sit visually on top.  Move each tab button to the front
+                // here.  Buttons don't overlap each other.
+                mTabButtons[(size_t) i]->toFront (false);
+            }
     }
-
-    if (mNativeW <= 0 || mNativeH <= 0) return;
-    const auto drawArea = computePanelDrawArea (b, mNativeW, mNativeH, activeTabBarH);
-    const float sx = drawArea.getWidth()  / (float) mNativeW;
-    const float sy = drawArea.getHeight() / (float) mNativeH;
 
     auto toComp = [&] (juce::Rectangle<float> nr) -> juce::Rectangle<int>
     {
@@ -955,9 +986,9 @@ void AriaControlPanel::paint (juce::Graphics& g)
     const auto b = getLocalBounds().withTrimmedTop (titleBarH).toFloat();
     if (b.isEmpty() || mNativeW <= 0 || mNativeH <= 0) return;
 
-    // K-5 fix #3: match resized() - no tab buttons → no reserved tab strip.
-    const int activeTabBarH = mTabButtons.empty() ? 0 : kTabBarHeight;
-    const auto drawArea = computePanelDrawArea (b, mNativeW, mNativeH, activeTabBarH);
+    // QA-A 4.5 (2026-05-09): tab strip overlays the artwork (see resized()),
+    // so the artwork claims the full available area below the title bar.
+    const auto drawArea = computePanelDrawArea (b, mNativeW, mNativeH, 0);
     const float fitW = drawArea.getWidth();
     const float fitH = drawArea.getHeight();
     const float originX = drawArea.getX();

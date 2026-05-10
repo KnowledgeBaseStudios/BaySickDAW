@@ -129,6 +129,18 @@ private:
     // Binding's engineName is non-empty; null otherwise.
     std::unique_ptr<BaySickTitleBar> mTitleBar;
 
+    // QA-A 4.5 (2026-05-09): tab-strip position offset within the kit
+    // artwork's drawArea.  Coordinates are in NATIVE artwork space
+    // (mNativeW x mNativeH) so the position survives window resizes.
+    //   X: horizontal offset from the artwork's CENTER (always 0 -- strip
+    //      is locked to centred-on-artwork; see resized()).
+    //   Y: vertical offset from the artwork's TOP (negative = above the
+    //      artwork in the empty buffer between title bar and artwork).
+    // Value baked from a Debug-only Shift+drag positioning session against
+    // BaySickRustyDrums (775x335 artwork) on 2026-05-09 -- the strip sits
+    // 11 native units above the artwork's top edge.
+    juce::Point<int> mTabStripNativeOffset { 0, -11 };
+
 
     // Parses a `#AARRGGBB` or `#RRGGBBAA` color string.  ARIA emits AARRGGBB
     // (alpha-first) in some kits and RRGGBBAA in others; we autodetect by

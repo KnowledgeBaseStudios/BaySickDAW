@@ -70,7 +70,10 @@ BaySickRustyDrumsPage::~BaySickRustyDrumsPage() = default;
 
 void BaySickRustyDrumsPage::paint (juce::Graphics& g)
 {
-    g.fillAll (VC::Bg);
+    // QA-A 4.5 (2026-05-09): match BaySickTitleBar's bg (0xFF141618) so the
+    // page background and the title bar visually fuse.  VC::Bg (0xFF1C1C1E)
+    // was a slightly different charcoal that read as a colour mismatch.
+    g.fillAll (juce::Colour (0xFF141618));
 }
 
 void BaySickRustyDrumsPage::resized()
@@ -146,6 +149,11 @@ void BaySickRustyDrumsPage::buildPlayerTab()
         binding.kitDefaultCc = [engine](int cc) { return engine->getKitDefaultCc (cc); };
         binding.ccLabel      = [engine](int cc) { return engine->getCcLabel (cc); };
     }
+    // QA-A 4.5 (2026-05-09): set engineName + accentColor so AriaControlPanel
+    // hosts a "BaySickRustyDrums" title bar at the top (above its internal
+    // sub-tab strip).  Drums-tab red (#CC2222) per D7.
+    binding.engineName  = "BaySickRustyDrums";
+    binding.accentColor = juce::Colour (0xFFCC2222);
     mAriaPanel = std::make_unique<AriaControlPanel> (binding);
     mPlayerTab->addAndMakeVisible (*mAriaPanel);
 }
@@ -232,6 +240,9 @@ void BaySickRustyDrumsPage::loadAriaPanelForProgram (Program target)
         binding.kitDefaultCc = [engine](int cc) { return engine->getKitDefaultCc (cc); };
         binding.ccLabel      = [engine](int cc) { return engine->getCcLabel (cc); };
     }
+    // QA-A 4.5 (2026-05-09): preserve the title bar across program reloads.
+    binding.engineName  = "BaySickRustyDrums";
+    binding.accentColor = juce::Colour (0xFFCC2222);
     mAriaPanel->setEngine (binding);
 
     const auto kitRoot = SampleLibrary::getCoreLibraryDir().getChildFile ("Big Rusty Drums");
