@@ -710,6 +710,14 @@ needed to find what you should pull up to review the work.
 - Dependencies: none.
 - Effort: medium (~4-6 hours).
 
+#### **QA-PlayerRename: VibePlayer/* → BaySickPlayer/* internal rename** (forked in 2026-05-10 — see §9)
+- Items: QA-A finding #39 (close-time routing).
+- Scope: rename the `Source/VibePlayer/` directory to `Source/BaySickPlayer/`; rename `VibePlayerProcessor` / `VibePlayerEditor` / `VibePlayerDSP` / `VibePlayerLAF` and friends to their `BaySickPlayer*` counterparts; sweep every `#include`, every `dynamic_cast<VibePlayer...>`, every comment / doc reference; rename `vp_*` APVTS prefix where used; update CMakeLists target names; commit hygiene to use the new file paths in body text. User-facing brand ("BaySickPlayer") is already locked since QA-A; this batch closes the source-side / class-side gap.
+- Risk: low (mechanical rename across files). One careful pass; risk is missing a stray include / cast in an unrelated file.
+- Dependencies: none — no behavioural changes. Slot here so later batches don't add new `VibePlayer*` files that would need retroactive renaming.
+- Effort: medium (~2-3 hours, dominated by grep + careful sweep + project-load round-trip verification).
+- Why this slot: directly after QA-A. QA-A locked the user-facing brand-mixed-case rule (`feedback_match_jeff_text_casing.md`); this batch closes the matching internal-source rename. Doing it before QA-B / QA-C means later commit messages and patch citations use the final paths from day one.
+
 #### **QA-B: Verification Sweep** (parallel with QA-0 + QA-A)
 - Items: DSP-07 + DSP-12 verification matrix (post QA-0 lands).
 - Scope: NO code changes. Diagnostic session.
@@ -1104,6 +1112,18 @@ Every component in the build gets classified into:
     `RenderGraphDispatcher.cpp`, `StandaloneEditor.cpp`. Decision in
     Phase 6 QA-Audit (also: should the menu item move to a "Help ->
     Developer" submenu when present?). See Future State `CL-292`.
+  - **HarmlessLAF zero-px slider root cause** (added 2026-05-10 mid-QA-A
+    — see ninth Forks entry) — QA-A Phase 3.1's `kHdrH 36 -> 32` body-
+    layout shift surfaced a latent NaN-coord crash in the
+    `LinearVertical` branch of `HarmlessLAF::drawLinearSlider`: when a
+    vertical slider has zero-sized bounds, `fh = (float)height = 0`
+    makes `norm` divide by zero and NaN propagates into Direct2D's
+    `coordsToRectangle` clip-list assert. Symptom-side defensive
+    early-return shipped in QA-A commit `679af33`; upstream "why is
+    the slider 0 px in the first place?" question deferred to QA-Audit.
+    Investigate Harmless layout pass to find which slider is being
+    sized to zero (timer-based rebuild? null-guarded `setBounds`? early
+    `resized()` before children laid out?). See Future State `CL-293`.
 - Risk: zero (read-only).
 - Dependencies: all 15 prior batches landed.
 - Effort: large (~10-15 hours, possibly multiple sessions). Bounded by
@@ -1237,9 +1257,9 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-B → QA-C → QA-D → QA-E → QA-F → QA-Fa
-   → QA-G → QA-H → QA-I → QA-J → QA-K → QA-L → QA-M → QA-Drum-Polish**** → QA-N
-   → QA-VibeSlider**** → QA-Verify**** → QA-Export****
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-PlayerRename****** → QA-B → QA-C
+   → QA-D → QA-E → QA-F → QA-Fa → QA-G → QA-H → QA-I → QA-J → QA-K → QA-L → QA-M
+   → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-Verify**** → QA-Export****
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -1278,9 +1298,19 @@ download; "Auto-check for updates" toggle in General Settings; stable
 channel only (beta channel deferred to Future State `CL-287`). See §9
 sixth Forks entry.
 
+\*\*\*\*\*\* QA-PlayerRename inserted 2026-05-10 at QA-A close (ninth
+Forks entry). Phase 1, immediately after QA-A. Internal-source rename
+of `Source/VibePlayer/` directory + `VibePlayer*` classes / files to
+their `BaySickPlayer*` counterparts so the source side matches the
+already-locked user-facing brand name. Mechanical sweep; no behavioural
+changes. See §9 ninth Forks entry.
+
 QA-0, QA-A, QA-B can run in **parallel** (different code surfaces, no
 audio-path overlap between QA-A UI work and QA-0 dispatcher fix).
-Everything Phase 2 onward is sequential per Option A.
+QA-PlayerRename is sequential (depends on QA-A's brand-name lock and
+must complete before later batches add new `VibePlayer*` files that
+would need retroactive renaming). Everything Phase 2 onward is
+sequential per Option A.
 
 **Pre-release cleanup phase (6) — runs ONLY after all of QA-0..N + the
 2026-05-08 QA-Inventory close additions have landed and verified:**
@@ -1991,3 +2021,138 @@ CL-291 + CL-292 are in place, (c) Implemented Work Log batch-close
 entry chronicles the diagnostic findings + outcome, (d) `/review-batch`
 flags no BLOCKERS, (e) QA-0a finding #9 marked resolved-as-misdiagnosed
 with pointer to this entry.
+
+### 2026-05-10 — QA-A close routings (Rule 3 application)
+
+**Trigger:** QA-A (STYLE Cluster — Unified BaySickTitleBar Component)
+batch-close.  The visual-sweep + cross-engine-consistency work produced
+21 findings (#22-#42 in the QA-A close entry), most resolved inside the
+batch.  Three routings push work outside QA-A's scope and need plan-doc
+capture; three meta conventions / memory rules locked during the batch
+need surfacing here so future-batch authors see them in the canonical
+plan rather than only in the per-batch close entry.
+
+**Routings (Rule 3 — findings-during-execution that escape this batch):**
+
+- **#25 HarmlessLAF zero-px slider — defensive guard shipped, root
+  cause deferred.**  Phase 3.1's `kHdrH 36 -> 32` body-layout shift
+  surfaced a latent NaN-coord crash in the `LinearVertical` branch of
+  `HarmlessLAF::drawLinearSlider`: when a vertical slider has
+  zero-sized bounds (not yet laid out / computed to 0), `fh = (float)
+  height = 0` makes the `norm` calc divide by zero, NaN propagates
+  through `thumbY` + the cap rect, and Direct2D's `coordsToRectangle`
+  asserts.  Symptom-side fix shipped this batch (commit `679af33` —
+  early-return when `width <= 0 || height <= 0`).  Upstream "why is
+  the slider 0 px in the first place" deferred to **Phase 6 / QA-Audit
+  decisions docket** as `CL-293`.  Pairs with QA-Audit's existing
+  pre-release decisions cluster (CL-288 .. CL-292).
+
+- **#39 VibePlayer/* -> BaySickPlayer/* internal source rename —
+  routed to a new dedicated batch.**  User-facing brand
+  ("BaySickPlayer") is locked since QA-A; commit hygiene during this
+  batch already used "BaySickPlayer" in body text.  But internal
+  source files / class names still use `VibePlayer*` per CLAUDE.md's
+  longstanding "rename deferred" footnote.  At QA-A close, parent
+  elected a **dedicated batch (QA-PlayerRename) immediately after
+  QA-A** rather than folding into Phase 6 QA-Cleanup-1.  Rationale:
+  doing the rename sooner means later batches commit messages /
+  patch citations use the final paths from day one and avoids stray
+  `VibePlayer*` files accreting between QA-A and Phase 6.  See §5
+  Phase 1 QA-PlayerRename entry; §6 sequencing arrow updated.
+
+- **#40 Piano Roll deep-link button crash — already routed at QA-0
+  close; re-sighted only.**  Stack: `StandaloneEditor::showPageForTab`
+  line 4135 `<lambda_14>::operator()(int i)`.  Same crash family as
+  findings #13 + #14 (captured-raw `InstPage*` in lambda freed during
+  engine swap or project reload).  Routing into QA-E was decided in
+  the third Forks entry (2026-05-07 QA-0 close routings).  Phase 4.4's
+  InstPage chrome refactor is **untouched** by the crash path; no new
+  routing required.  Captured here for traceability so future readers
+  scanning the QA-A close don't re-route what's already routed.
+
+**Conventions / discipline locked during the batch (process-shaping):**
+
+- **`Plans & Specs/Running Notes/<silly-name>.md` subfolder
+  established** (commit `c900f55`).  Per-batch running notes paired
+  with `Batch Plans/<silly-name>.md` -- captures findings / decisions
+  / sub-task verifications across the lifetime of a batch so the
+  batch-close drafter has a single source to compile from.  §0
+  approved-subfolders list updated in the same commit.  Affects
+  every future batch; not a one-off.
+
+- **Memory rule
+  `feedback_draft_doc_running_notes_every_checkpoint.md` locked
+  mid-batch.**  `/draft-doc running-notes` fires at every checkpoint
+  (post-commit, post-sub-task, post-finding, post-spec-call,
+  post-scope-pivot), not "at the end".  Output goes to
+  `Plans & Specs/Running Notes/<silly-name>.md`.  Caught back-half
+  of QA-A after 11 commits with zero running-notes dispatches; the
+  retrospective backfill compiled the Phase 1-3 history; Phases 3-6
+  dispatched at every close checkpoint.
+
+- **Memory rule `feedback_plan_mirror_one_way.md` locked.**  Plan-mode
+  forces the planning file to `~/.claude/plans/<silly-name>.md` for
+  its UI; canonical project location is
+  `Plans & Specs/Batch Plans/<silly-name>.md`.  After ExitPlanMode
+  mirror, the home-dir copy is **deleted** so only one source of
+  truth exists; do not back-copy after canonical edits.
+
+- **Memory rule `feedback_match_jeff_text_casing.md` locked** (commit
+  `0c4431d`).  Engine names in user-facing UI strings render in brand
+  mixed-case ("Harmless", "BaySickPlayer", "BaySickSynth", "BaySickBass",
+  "BaySickNAM/IR", "BaySickVocals", "BaySickPedals", "BaySickGuitars",
+  "BaySickBasses", "BaySickRustyDrums") — never up-case unilaterally,
+  even when legacy paint code did so.  This memory rule is what
+  drives QA-PlayerRename's source-side scope: brand-mixed-case is now
+  the canonical convention and the `VibePlayer*` internal names
+  diverge from it.
+
+**Mid-batch plan edits:**
+
+- `d529602` — expanded QA-A Phase 4 scope to cover BaySickGuitars /
+  BaySickBasses / BaySickRustyDrums (the three sfizz-driven kit
+  engines that share `AriaControlPanel`).  Original plan only listed
+  Pedals.
+- `0c4431d` — engine title casing sweep (memory + plan + source
+  files).
+
+**Decision:** keep the QA-A close entry's Finding #39 row pointing at
+`QA-PlayerRename` (now a real §5 row) rather than the original "QA-
+Cleanup-1 or dedicated batch — parent decides at close" placeholder.
+QA-Audit's pre-release decisions docket gains `CL-293` (HarmlessLAF
+zero-px root cause).
+
+**Carry-forward contradictions:** none.  QA-A's scope was UI / theming
++ existing-component refactor; no architectural primitives in
+Carry-Forward §1-§3 changed shape.  The new `BaySickTitleBar` family
+is additive.  Memory rules locked during the batch are workflow
+discipline, not architectural facts (Carry-Forward §1-§3 unaffected).
+
+**Inline back-refs:**
+- §5 Phase 1 gains a new `QA-PlayerRename` entry between QA-A and
+  QA-B; §6 sequencing arrow updated with new `******` footnote.
+- §5 QA-Audit "Pre-release decisions to revisit" sub-section gains
+  `CL-293` (HarmlessLAF zero-px root cause).  Count goes from 5 -> 6.
+- §0 approved-subfolders list already updated by `c900f55`; no edit
+  needed here.
+- `Future State.md` Cross-cutting Infrastructure: optional `CL-293`
+  cluster pointer (parent decides at apply time -- Phase 6 / QA-Audit
+  routing is sufficient on its own).
+- §9 Forks: this entry (ninth).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 Phase 1 QA-
+  PlayerRename row + §5 QA-Audit `CL-293` addition + §6 sequencing
+  arrow + new `******` footnote.
+- `Plans & Specs/Implemented Work Log.md` — QA-A close entry's
+  Finding #39 row updated to point at QA-PlayerRename (was "parent
+  decides at close" placeholder).
+- `Plans & Specs/Future State.md` — `CL-293` (optional; parent
+  decides at apply time).
+
+**Verification:** QA-A's close commit lands with (a) `Implemented
+Work Log.md` close entry's Finding #39 row pointing at
+QA-PlayerRename, (b) this §9 Forks ninth entry, (c) §5 QA-PlayerRename
+row + §5 QA-Audit `CL-293` addition, (d) §6 sequencing arrow + new
+`******` footnote, (e) `/review-batch` already returned READY-TO-
+COMMIT (run prior to this entry's draft).
