@@ -58,3 +58,13 @@ My Samples/
 # Stock factory presets live alongside (e.g. "Presets/Effects/Reverb/Hall.xml"); only the
 # "My Presets" subfolders contain user-saved patches that shouldn't ship in the repo.
 Presets/**/My Presets/
+
+# Local-only planning notes from earlier in the project (when it was still
+# called Vibesynth). Personal scratch, not part of the public source.
+SaturdayNightMasacre.md
+
+# Stub JUCE-generated key-mapping XML at repo root. The 3 mappings in this
+# file are NOT the app's real keybinds (those live in KeyBindsWindow.cpp);
+# this is a leftover JUCE auto-generated artefact that escaped earlier
+# cleanup. Per-machine and not source.
+/keymap.xml
