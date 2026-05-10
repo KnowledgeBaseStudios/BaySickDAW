@@ -387,9 +387,10 @@ Pre-QA reference docs (`Files For Claude/Final Stretch Work.txt`, `Files For Cla
 - `loadSingleFile()` already initializes rootNote=60.
 
 ### Engine audition pattern
-- All 4 engine processors (BaySickSynth, BaySickBass, Harmless, VibePlayer) have `auditionNote(int midiNote)` + `std::atomic<int> mAuditionNote { -1 }`.
+- All 7 engine processors (BaySickSynth, BaySickBass, Harmless, VibePlayer, BaySickGuitars, BaySickBasses, BaySickRustyDrums) have `auditionNote(int midiNote)` + `std::atomic<int> mAuditionNote { -1 }`.
 - `processBlock` opens with `int n = mAuditionNote.exchange(-1); if (n >= 0) { ...noteOff-any, noteOn n... }`.
-- Page audition callbacks must cascade through all engine types: try BaySickSynth first, then Harmless, then VibePlayer (order doesn't matter, all silent on cast failure).
+- Page audition callbacks for Layers / Bass / Drums tabs cascade through the legacy 4 engine types: try BaySickSynth first, then Harmless, then VibePlayer (order doesn't matter, all silent on cast failure).  Inst tabs (BaySickGuitars / BaySickBasses) wire piano-roll keyboard clicks directly to `eng->auditionNote(n)` via `EngineConnection::auditionMomentary` (StandaloneEditor.cpp:7147-7165).  BaySickRustyDrums wires kit-graphic hitbox clicks the same way (BaySickRustyDrumsKitGraphic.cpp:665).
+- QA-C (2026-05-10) added a public `bool isAuditionPending() const noexcept` peek on the 3 sfizz engines (Guitars / Basses / RustyDrums) so the idle-suspend dispatcher predicates can wake the chain when an audition arrives.  Reads `mAuditionNote.load(std::memory_order_acquire) != -1`.
 - **Validated correct** by `Plans & Specs/Research Reports/daw-architecture-research-2026-05-08.md` §3 (Lock-free MIDI dispatch). Vital + Surge XT delegate UI→audio MIDI to host's `MidiBuffer` in `processBlock` and put their queue investment on parameter automation, NOT note dispatch — same baseline as us. **DO NOT** rip this out for `juce::MidiMessageCollector` — its source has a `CriticalSection midiCallbackLock` mutex (the very thing this pattern avoids). Multi-event ring upgrade lives in Future State CL-272..CL-274 and is deferred until chord-strum / paste-to-roll / arpeggio-from-UI-clock use cases land.
 
 ### Constructor Order / resized() Safety

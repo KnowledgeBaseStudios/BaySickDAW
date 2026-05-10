@@ -461,3 +461,68 @@ All routings + cluster decisions documented in [Main Plan.md](Main Plan.md) §9 
 - Per §6 sequencing arrow, **QA-B is the next batch** (`... QA-Md** → QA-A → QA-B → ...`). See [Main Plan.md](Main Plan.md) §5 QA-B entry for scope. Side finding #39 (VibePlayer/* -> BaySickPlayer/* rename) is routed to a dedicated **QA-PlayerRename** batch in Phase 6 after QA-Cleanup-1 (cleanup phase, where rename work belongs) — see ninth Forks entry.
 
 ---
+
+### 2026-05-10 12:30 PT — QA-C — Tiny One-Liners (DSP-10 idle-suspend audition wake + MIX-01 Vox-tab strip cleanup)
+
+**Bucket:** Cross-cutting Infrastructure, Mixer / Routing, Players
+
+#### Done
+- Two independent micro-bugs fixed in a single source commit per spec call C2 (DSP-10 idle-suspend audition wake + MIX-01 Vox-tab orphan strip), with the lightweight engine accessor needed by the DSP-10 fix added alongside.
+- **DSP-10 surface scope expanded mid-plan** from §5's two-site framing ("InstStripTask.cpp:115-119 + Rusty equivalent") to A2's four-site framing covering both MT and serial paths.  Same predicate gap (`midiEmpty && noVoices` missing the `!auditionPending` term promised by the idle-suspend dispatcher comment) shipped at all four sites; identical predicate shape adopted so future readers can grep one pattern and find every idle-suspend gate.  Sites:
+  - (1) [Source/Engine/Tasks/InstStripTask.cpp:115-119](../Source/Engine/Tasks/InstStripTask.cpp) — MT path, BaySickGuitars + BaySickBasses (peek both engines before predicate).
+  - (2) [Source/Engine/Tasks/RustyDrumsProducerTask.cpp:35-38](../Source/Engine/Tasks/RustyDrumsProducerTask.cpp) — MT path, BaySickRustyDrums (engine already in scope from the spinlock branch above).
+  - (3) [Source/PluginProcessor.cpp:2272-2292](../Source/PluginProcessor.cpp) — serial path, BaySickGuitars + BaySickBasses.
+  - (4) [Source/PluginProcessor.cpp:2032-2045](../Source/PluginProcessor.cpp) — serial path, BaySickRustyDrums.
+- **`isAuditionPending() const noexcept -> bool` accessor** added to [Source/BaySickGuitars/BaySickGuitarsProcessor.h](../Source/BaySickGuitars/BaySickGuitarsProcessor.h), [Source/BaySickBasses/BaySickBassesProcessor.h](../Source/BaySickBasses/BaySickBassesProcessor.h), and [Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.h](../Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.h).  Header-only inline; reads `mAuditionNote.load(std::memory_order_acquire) != -1`.  The acquire load pairs with the existing `exchange(-1)` (default seq_cst) in each engine's `processBlock` — seq_cst is strictly stronger than release, so the acquire-load synchronizes correctly.  Placed adjacent to `getNumActiveVoices()` so both inputs to the idle-suspend predicate sit together in each engine's public API.  Wait-free, audio-thread-safe.  Naming locked at pre-batch spec call to match codebase `is...()` state-flag convention (`isProcessingEnabled`, `isLocked`, `isHiHatPedalClosed`, etc).
+- Decided: only the three sfizz engines QA-C touches got the accessor.  The other four engines with audition state (BaySickPlayer / BaySickSynth / BaySickBass / Harmless) are not in any of the four predicate sites this batch fixes; parity-only addition deferred (no §9 entry — trivially recoverable if ever needed).
+- **MIX-01** — Vox-tab `onTabClosed` branch in [Source/Standalone/StandaloneEditor.cpp](../Source/Standalone/StandaloneEditor.cpp) was unregistering the audio engine but never calling `removeVoxChannel`, leaving the strip widget orphaned in `mVoxStrips` after the tab was gone.  Captured `voxStripIdx` mirroring the existing `instStripIdx` capture convention; mirrored the `removeInstChannel` call with `removeVoxChannel(voxStripIdx)` adjacent to its Inst counterpart.  `MixerPage::removeVoxChannel` already existed at `MixerPage.cpp:2331-2337` with the same shape as `removeInstChannel` — no MixerPage-side work needed.  Refreshed the pre-existing G-4 comment block to describe the new behavior accurately: strip widget drops on tab close; APVTS params + recordings stay alive (matches the post-2026-05-05 Inst convention; no-file-delete contract preserved).
+- **CLAUDE.md "Engine audition pattern" note refreshed** as a close-time NIT-1a fix flagged by `/review-batch`.  Pre-existing drift: note listed 4 engines with the audition primitive when reality is 7 (the 3 sfizz engines have it too).  Bumped engine count, added the 3 sfizz engines to the list, clarified that the legacy-4 cascade applies only to Layers / Bass / Drums tabs (Inst tabs + Rusty wire audition through different page-side paths), and documented the new `isAuditionPending()` accessor.
+- Manual verification (5 tests, Debug + Release exes, MT on + MT off):
+  1. BaySickRustyDrums kit-graphic hitbox click after >=1s idle silence — audible (was silent pre-fix).  Tests MT site (2) by default; MT-off repeat tests serial site (4).
+  2. BaySickGuitars piano-roll keyboard audition after >=1s idle silence — audible.  Tests sites (1) and (3).
+  3. BaySickBasses piano-roll keyboard audition after >=1s idle silence — audible.  Same engine pair as Guitars; tests sites (1) and (3).
+  4. All three audition tests repeated with MT engine OFF via Mixer hamburger -> "Use multi-threaded render" — same expected results.
+  5. Vox-tab close: strip widget drops from mixer; re-adding a Vox tab spawns cleanly at the next free idx (APVTS-for-closed-strips-stays-alive convention preserved).  Pre-fix: strip stayed orphaned in `mVoxStrips`.
+- Closes DSP-10 + MIX-01.  Phase 1 of the post-Batch-10 QA cycle ends with this batch (QA-B was deferred to after QA-E per §9 tenth Forks entry on 2026-05-10).
+
+#### Found along the way
+- **#43** Process slip — Task 0 commit ran without surfacing the drafted commit message + git status to Jeff for approval.  First time this happened in the QA cycle; previous QA batches (QA-Md, QA-A) routinely did surface drafted messages.  Caught mid-batch by Jeff.  Memory rule locked (`feedback_surface_drafted_commit_message_for_approval.md`) to codify the existing-but-unwritten convention.  Source commit + close commit followed the corrected protocol (surface drafted message + git status; wait for explicit approval; then commit).
+- **#44** Wrong-claim slip during test-list scoping — initial draft of the manual-test list (Task 6 in the plan) excluded BaySickGuitars + BaySickBasses, claiming "no clean UI audition path identified for these engines (audition reaches them via piano-roll input which wakes via `midiEmpty=false`, a different predicate term)."  Jeff pushed back; grep through `Source/Standalone/StandaloneEditor.cpp:7147-7165` showed the Inst-page piano-roll keyboard click handler is wired directly to `eng->auditionNote(n)` for both BaySickGuitars and BaySickBasses — the exact audition path the DSP-10 fix is patching.  The original claim was wrong on the code, not just the framing.  Test list expanded from 3 to 5 distinct tests; all five passed in both Debug and Release.
+- **#45** Plan §5 framing of QA-C surface area was incomplete (surfaced during pre-batch investigation, before Task 0).  §5 listed the InstStripTask + Rusty MT-path pair only.  Grep on the idle-suspend predicate pattern surfaced two additional sites in the serial-path branches of `PluginProcessor::processBlock` (lines 2272-2292 + 2032-2045).  Resolved at pre-batch via spec call A2 — fix all four sites so MT and serial paths agree on the same predicate shape.
+- **#46** `mAuditionNote` was private on every engine (no public read accessor on any of the 7).  Originally the QA-C plan assumed the four sfizz-engine predicate sites could read `mAuditionNote` directly.  Explore agent confirmed it's private with only the `auditionNote(int)` setter exposed publicly.  Drove the scope expansion to add the new `isAuditionPending()` accessor on the three sfizz engines QA-C touches (plan task 1).
+- **#47** CLAUDE.md "Engine audition pattern" note staleness flagged by `/review-batch` (NIT-1a).  Pre-existing drift, made slightly worse by QA-C adding `isAuditionPending()` to 3 engines without updating the note.  Refreshed inline as part of close (decision: fix-now over route-to-QA-Audit; doc drift is a 1-minute fix and "you touched it, you fix it" hygiene applies).
+
+#### What was done about each finding
+
+| Finding | Routing |
+|---|---|
+| #43 (Task 0 commit ran without surfacing drafted message + git status) | Memory rule `feedback_surface_drafted_commit_message_for_approval.md` locked.  Pairs with the existing `feedback_surface_full_git_status_before_commit.md` and `feedback_every_commit_via_draft_commit.md` rules.  Source + close commits in this batch followed the corrected surface-and-wait protocol. |
+| #44 (wrong-claim slip on Inst audition path) | Test list expanded from 3 to 5 manual tests; all five passed Debug + Release.  No memory rule (the `feedback_check_code_before_calling_it_expected.md` rule already covers "read code before defending behavior as expected" — this finding is one more instance of that pattern, not a new shape). |
+| #45 (§5 framing incomplete — 4 sites, not 2) | Resolved at pre-batch via spec call A2.  Plan written to cover all 4 sites; commit `0dd2f79` ships predicate fix at all 4. |
+| #46 (`isAuditionPending()` accessor net-new on 3 engines) | Added in Task 1 (folded into source commit `0dd2f79` per spec call C2).  Decision to limit the accessor to the 3 sfizz engines QA-C touches is recorded above; parity addition for BaySickPlayer / BaySickSynth / BaySickBass / Harmless deferred (trivially recoverable). |
+| #47 (CLAUDE.md audition-pattern note staleness, NIT-1a) | Refreshed inline as part of close commit.  Bumped engine count 4 → 7, expanded list, clarified legacy-4 cascade scope (Layers / Bass / Drums tabs), added `isAuditionPending()` documentation. |
+
+No findings routed outside this batch.  All five findings resolved in-batch; no §9 Forks entry required (no surface expansion to other batches, no §5 changes beyond the existing `**Plan file:**` pointer).
+
+#### Carry-forward contradictions (if any)
+- None.  Carry-Forward §1-§3 architectural primitives stayed accurate.  The four idle-suspend predicate sites + the Vox-tab close branch are well-scoped fixes; no architectural primitives changed shape.  The new `isAuditionPending()` accessor is additive — doesn't contradict the existing CLAUDE.md "Engine audition pattern" technical note (which now also documents the new accessor as part of the NIT-1a refresh).
+
+#### Files touched
+- Modified (source — engine accessors): [Source/BaySickGuitars/BaySickGuitarsProcessor.h](../Source/BaySickGuitars/BaySickGuitarsProcessor.h), [Source/BaySickBasses/BaySickBassesProcessor.h](../Source/BaySickBasses/BaySickBassesProcessor.h), [Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.h](../Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.h).
+- Modified (source — DSP-10 predicate sites): [Source/Engine/Tasks/InstStripTask.cpp](../Source/Engine/Tasks/InstStripTask.cpp), [Source/Engine/Tasks/RustyDrumsProducerTask.cpp](../Source/Engine/Tasks/RustyDrumsProducerTask.cpp), [Source/PluginProcessor.cpp](../Source/PluginProcessor.cpp).
+- Modified (source — MIX-01): [Source/Standalone/StandaloneEditor.cpp](../Source/Standalone/StandaloneEditor.cpp) (Vox close branch + G-4 comment refresh).
+- Modified (docs — close-time NIT-1a refresh): [CLAUDE.md](../CLAUDE.md) (Engine audition pattern note).
+- New: [Plans & Specs/Batch Plans/cozy-mend-ferret.md](Batch Plans/cozy-mend-ferret.md) (QA-C per-batch plan, mirrored from `~/.claude/plans/compressed-foraging-starfish.md` on ExitPlanMode + home-dir copy deleted).
+- New: [Plans & Specs/Running Notes/cozy-mend-ferret.md](Running Notes/cozy-mend-ferret.md) (running-notes file paired with this batch).
+- Modified (plans): [Main Plan.md](Main Plan.md) (§5 QA-C `**Plan file:**` pointer added), [Implemented Work Log.md](Implemented Work Log.md) (this entry).
+- New (memory): `~/.claude/projects/C--Users-jeffm-Documents-BaySickDAW/memory/feedback_surface_drafted_commit_message_for_approval.md`, indexed in `MEMORY.md`.
+
+#### Commit(s)
+- `03e12d6` QA-C open: plan file + Main Plan pointer (Tiny One-Liners batch).  (Task 0 chore.)
+- `0dd2f79` QA-C source: DSP-10 audition wake + MIX-01 Vox-tab strip cleanup.  (Tasks 1+2+3 bundled per spec call C2 — single source commit.)
+- (this entry's commit appended after `/review-batch` + close.)
+
+#### Next action
+- Per §6 sequencing arrow, **QA-D is the next batch** (`... QA-A → QA-C → QA-D → QA-E → ...`).  QA-B was deferred to after QA-E on 2026-05-10 (§9 tenth Forks entry).  See [Main Plan.md](Main Plan.md) §5 QA-D entry (Project State Reset — STATE-01/02/04) for scope.
+
+---
