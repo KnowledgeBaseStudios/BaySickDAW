@@ -144,9 +144,32 @@ public:
 
 private:
     static constexpr int kNumSlots = 10;  // 2026-04-28: +Vox +Inst (G-4)
-    static constexpr int kTabH     = 30;
+    // QA-A Phase 5 (2026-05-09): kTabH bumped 30 -> 40 so each tab fills the
+    // full vertical height of the parent transport bar (kBarH = 40 in
+    // StandaloneEditor::resized).  Eliminates the empty horizontal strip
+    // that previously sat below all tabs.
+    static constexpr int kTabH     = 40;
     static constexpr int kArrowW   = 22;   // hit-test width for ▾ region
     static constexpr int kBadgeR   = 8;    // badge circle radius
+
+    // QA-A Phase 5 / STYLE-01 (2026-05-09): variable-width slot constraints.
+    //   kMinFixed     -- width floor for fixed-label slots (Mixer / Effects /
+    //                     Builder / Piano Roll).  Short labels can shrink
+    //                     down to this (they never go below 60 px so the tab
+    //                     remains readable in narrow windows).
+    //   kMinVariable  -- width floor for variable-label slots (Clip / Vox /
+    //                     Inst / Layers / Bass / Drums).  Higher than the
+    //                     fixed floor since these slots need room for arrow
+    //                     + badge + a few characters of the active label.
+    //   kMaxSingleLine -- width cap above which a slot's label wraps to two
+    //                     lines instead of growing the slot further.  Tuned
+    //                     so every brand-default name (longest is
+    //                     "BaySickRustyDrums" at ~208 px natural) stays
+    //                     single-line; only user-renamed long custom labels
+    //                     trip the wrap.
+    static constexpr int kMinFixed      = 60;
+    static constexpr int kMinVariable   = 80;
+    static constexpr int kMaxSingleLine = 220;
 
     // Fixed slot order
     static TabType slotType(int slotIndex);
@@ -154,6 +177,23 @@ private:
     // Layout helpers
     juce::Rectangle<int> slotRect(int slotIndex) const;
     int hitTestSlot(juce::Point<int> pos, bool& hitArrow) const;
+
+    // QA-A Phase 5 / STYLE-01 (2026-05-09): variable-width + wrap support.
+    // - isFixedNameSlot:        true for Mixer / Effects / Builder /
+    //                            PianoRoll (slot label is a constant,
+    //                            never reflects user-renamed text).
+    // - naturalSingleLineWidth: pixel width the slot would need to display
+    //                            its current label single-line at 12pt bold,
+    //                            including arrow / badge / padding.  Pure
+    //                            measurement; no clamping to min/max.
+    // - slotWraps:              true when naturalSingleLineWidth exceeds
+    //                            kMaxSingleLine -- paint() then renders the
+    //                            label wrapped to two lines via JUCE's word
+    //                            wrap or (for camelCase brand names with no
+    //                            spaces) a manual mid-string split.
+    static bool isFixedNameSlot(TabType type);
+    int  naturalSingleLineWidth(int slotIndex) const;
+    bool slotWraps(int slotIndex) const;
 
     // Display helpers
     juce::String getSlotDisplayName(int slotIndex) const;

@@ -1,6 +1,37 @@
 #include "RibbonTabBar.h"
 #include "SharedUI.h"
 
+namespace
+{
+// QA-A Phase 5 / STYLE-01 (2026-05-09): mid-string camelCase splitter for
+// the wrap renderer.  JUCE's `drawFittedText` with `maxLines > 1` only
+// breaks at spaces / hyphens; brand names like "BaySickRustyDrums" or
+// "BaySickPlayer" have neither, so the engine treats them as a single
+// unbreakable word and just shrinks instead of wrapping.  This helper
+// finds the capital letter (after the first character) closest to the
+// midpoint of the string and inserts a newline there, giving the engine
+// a hard break point.  When no capital exists past position 0 (e.g. the
+// user typed "supercalifragilistic"), it returns the original string and
+// drawFittedText falls back to its single-line shrink behaviour.
+juce::String splitCamelCase (const juce::String& s)
+{
+    if (s.length() < 4) return s;
+    const int mid = s.length() / 2;
+    int bestCap     = -1;
+    int bestDelta   = std::numeric_limits<int>::max();
+    for (int i = 1; i < s.length(); ++i)
+    {
+        if (juce::CharacterFunctions::isUpperCase (s[i]))
+        {
+            const int d = std::abs (i - mid);
+            if (d < bestDelta) { bestDelta = d; bestCap = i; }
+        }
+    }
+    if (bestCap < 0) return s;
+    return s.substring (0, bestCap) + "\n" + s.substring (bestCap);
+}
+} // namespace
+
 // ── Colour helpers ───────────────────────────────────────────────────────────
 juce::Colour RibbonTabBar::tabColour(TabType type, bool active)
 {
@@ -231,8 +262,14 @@ int RibbonTabBar::getBadgeCount(TabType type) const
 {
     switch (type)
     {
-    case TabType::Effects: return 2;
-    case TabType::Builder: return 3;
+    // QA-A Phase 5 (2026-05-09): Effects + Builder previously showed
+    // hardcoded sub-page counters (Effects=2 for Rack/EQ; Builder=3 for
+    // Patterns/Audio Clips/Automation) for visual continuity with the
+    // instance-count badges on the variable-name slots.  Per Jeff the
+    // counters added no information ("the dropdown arrow already says
+    // there's a sub-menu"), and the badge region ate ~20 px of slot
+    // width that the new variable-width layout could otherwise hand to
+    // long-named tabs.  Both cases fall through to default = 0 now.
     case TabType::Clip:    // G-2 (2026-04-28): badge tracks instance count
     case TabType::Vox:     // G-4 (2026-04-28)
     case TabType::Inst:    // G-4 (2026-04-28)
@@ -308,16 +345,117 @@ void RibbonTabBar::moveTabOfType (TabType type, int srcRowOfType, int dstRowOfTy
     repaint();
 }
 
-// ── Layout ───────────────────────────────────────────────────────────────────
-juce::Rectangle<int> RibbonTabBar::slotRect(int slotIndex) const
+// ── Layout helpers (QA-A Phase 5 / STYLE-01, 2026-05-09) ─────────────────────
+bool RibbonTabBar::isFixedNameSlot (TabType type)
 {
-    int totalW = getWidth();
-    int w = totalW / kNumSlots;
-    int x = slotIndex * w;
-    // Last slot takes remainder to avoid 1px gaps
-    if (slotIndex == kNumSlots - 1)
-        w = totalW - x;
-    return { x, 0, w, kTabH };
+    return type == TabType::Mixer
+        || type == TabType::Effects
+        || type == TabType::Builder
+        || type == TabType::PianoRoll;
+}
+
+// Pure measurement: bold-font text width + arrow + badge + 16 px padding.
+// No clamping to min/max here -- callers (slotRect / slotWraps) apply the
+// per-slot floor and the wrap cap themselves.  Bold (the active-state
+// font) is the worst case so a slot never changes width when clicked
+// between active and inactive.
+int RibbonTabBar::naturalSingleLineWidth (int slotIndex) const
+{
+    const auto       type = slotType(slotIndex);
+    const auto       name = getSlotDisplayName(slotIndex);
+    const juce::Font font (12.0f, juce::Font::bold);
+    int w = font.getStringWidth(name) + 16;
+    if (hasDropdown(type))         w += kArrowW;
+    if (getBadgeCount(type) > 0)   w += kBadgeR * 2 + 4;
+    return w;
+}
+
+bool RibbonTabBar::slotWraps (int slotIndex) const
+{
+    return naturalSingleLineWidth(slotIndex) > kMaxSingleLine;
+}
+
+// QA-A Phase 5 / STYLE-01 (2026-05-09): constraint-based variable-width
+// layout with min floors and a max single-line cap that triggers wrap.
+//   1. desired_i = clamp(natural_i, minW_i, kMaxSingleLine).
+//      -- natural above kMaxSingleLine -> slot caps at the max and the
+//         label will paint as wrapped two-line text in paint().
+//      -- natural below the slot's per-type minimum -> floored to that
+//         minimum so short labels keep visual presence.
+//   2. If sum(desired) <= totalW: each slot gets desired plus an equal
+//      share of the leftover slack.
+//   3. Else (shrink case): redistribute the excess proportionally to each
+//      slot's "shrink room" (desired - minW), so no slot crosses its own
+//      floor until every slot has hit its floor together.  If even all-
+//      at-min still overflows totalW (very narrow window), fall back to
+//      pure proportional scaling -- drawFittedText in paint() picks up
+//      the slack on per-slot text fitting.
+juce::Rectangle<int> RibbonTabBar::slotRect (int slotIndex) const
+{
+    const int totalW = getWidth();
+    const int totalH = getHeight() > 0 ? getHeight() : kTabH;
+
+    int desired[kNumSlots];
+    int minW   [kNumSlots];
+    int sumDesired = 0;
+    for (int s = 0; s < kNumSlots; ++s)
+    {
+        const auto type = slotType(s);
+        int natural     = naturalSingleLineWidth(s);
+        if (natural > kMaxSingleLine) natural = kMaxSingleLine;
+
+        const int minS = isFixedNameSlot(type) ? kMinFixed : kMinVariable;
+        if (natural < minS) natural = minS;
+
+        desired[s] = natural;
+        minW   [s] = minS;
+        sumDesired += natural;
+    }
+
+    int widths[kNumSlots];
+    if (sumDesired <= totalW)
+    {
+        const int slack      = totalW - sumDesired;
+        const int slackPer   = slack / kNumSlots;
+        const int slackExtra = slack - slackPer * kNumSlots;
+        for (int s = 0; s < kNumSlots; ++s)
+            widths[s] = desired[s] + slackPer + (s < slackExtra ? 1 : 0);
+    }
+    else
+    {
+        const int excess = sumDesired - totalW;
+        int shrinkRoom = 0;
+        for (int s = 0; s < kNumSlots; ++s)
+            shrinkRoom += desired[s] - minW[s];
+
+        int sum = 0;
+        if (shrinkRoom >= excess && shrinkRoom > 0)
+        {
+            for (int s = 0; s < kNumSlots; ++s)
+            {
+                const int room = desired[s] - minW[s];
+                const int shrink = (excess * room + shrinkRoom / 2) / shrinkRoom;
+                widths[s] = desired[s] - shrink;
+                sum += widths[s];
+            }
+        }
+        else
+        {
+            // All slots already at min and still overflows -- proportional
+            // scale below min as last resort.  drawFittedText handles text.
+            for (int s = 0; s < kNumSlots; ++s)
+            {
+                widths[s] = (desired[s] * totalW + sumDesired / 2) / sumDesired;
+                sum += widths[s];
+            }
+        }
+        widths[kNumSlots - 1] += (totalW - sum);
+    }
+
+    int x = 0;
+    for (int s = 0; s < slotIndex; ++s)
+        x += widths[s];
+    return { x, 0, widths[slotIndex], totalH };
 }
 
 int RibbonTabBar::hitTestSlot(juce::Point<int> pos, bool& hitArrow) const
@@ -794,7 +932,25 @@ void RibbonTabBar::paint(juce::Graphics& g)
         juce::String name = getSlotDisplayName(s);
         g.setColour(juce::Colours::white.withAlpha(sel ? 1.0f : 0.75f));
         g.setFont(juce::Font(12.0f, sel ? juce::Font::bold : 0));
-        g.drawText(name, textR.reduced(8, 0), juce::Justification::centredLeft, true);
+        // QA-A Phase 5 / STYLE-01 (2026-05-09): single-line by default; if the
+        // slot's natural width exceeds kMaxSingleLine the layout caps the
+        // slot's allocated width and we render the label wrapped to two
+        // lines.  JUCE's `drawFittedText` word-wrap breaks at spaces /
+        // hyphens, so user-typed names with spaces wrap on their own.  For
+        // brand names without spaces ("BaySickRustyDrums" / "BaySickPlayer"),
+        // splitCamelCase() in the anonymous namespace at the top of this
+        // file injects a hard newline at the capital letter closest to the
+        // string midpoint so the text still wraps cleanly.  drawFittedText's
+        // 0.75f minScaleFactor handles the residual narrow-window case
+        // where even the wrapped two lines need a slight shrink.
+        const bool wraps = slotWraps(s);
+        const juce::String renderName =
+            (wraps && ! name.containsAnyOf (" -")) ? splitCamelCase (name) : name;
+        const int maxLines = wraps ? 2 : 1;
+        g.drawFittedText (renderName,
+                          textR.reduced (8, 0),
+                          juce::Justification::centredLeft,
+                          maxLines, 0.75f);
 
         // ── Badge circle (between text and arrow) ────────────────────────────
         if (badge > 0)
