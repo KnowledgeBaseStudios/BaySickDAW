@@ -710,14 +710,6 @@ needed to find what you should pull up to review the work.
 - Dependencies: none.
 - Effort: medium (~4-6 hours).
 
-#### **QA-PlayerRename: VibePlayer/* → BaySickPlayer/* internal rename** (forked in 2026-05-10 — see §9)
-- Items: QA-A finding #39 (close-time routing).
-- Scope: rename the `Source/VibePlayer/` directory to `Source/BaySickPlayer/`; rename `VibePlayerProcessor` / `VibePlayerEditor` / `VibePlayerDSP` / `VibePlayerLAF` and friends to their `BaySickPlayer*` counterparts; sweep every `#include`, every `dynamic_cast<VibePlayer...>`, every comment / doc reference; rename `vp_*` APVTS prefix where used; update CMakeLists target names; commit hygiene to use the new file paths in body text. User-facing brand ("BaySickPlayer") is already locked since QA-A; this batch closes the source-side / class-side gap.
-- Risk: low (mechanical rename across files). One careful pass; risk is missing a stray include / cast in an unrelated file.
-- Dependencies: none — no behavioural changes. Slot here so later batches don't add new `VibePlayer*` files that would need retroactive renaming.
-- Effort: medium (~2-3 hours, dominated by grep + careful sweep + project-load round-trip verification).
-- Why this slot: directly after QA-A. QA-A locked the user-facing brand-mixed-case rule (`feedback_match_jeff_text_casing.md`); this batch closes the matching internal-source rename. Doing it before QA-B / QA-C means later commit messages and patch citations use the final paths from day one.
-
 #### **QA-B: Verification Sweep** (parallel with QA-0 + QA-A)
 - Items: DSP-07 + DSP-12 verification matrix (post QA-0 lands).
 - Scope: NO code changes. Diagnostic session.
@@ -1140,6 +1132,13 @@ Every component in the build gets classified into:
 - Dependencies: QA-Audit.
 - Effort: medium-large (~6-10 hours).
 
+#### **QA-PlayerRename: VibePlayer/* → BaySickPlayer/* internal rename** (forked in 2026-05-10 — see §9)
+- Items: QA-A finding #39 (close-time routing).
+- Scope: rename the `Source/VibePlayer/` directory to `Source/BaySickPlayer/`; rename `VibePlayerProcessor` / `VibePlayerEditor` / `VibePlayerDSP` / `VibePlayerLAF` and friends to their `BaySickPlayer*` counterparts; sweep every `#include`, every `dynamic_cast<VibePlayer...>`, every comment / doc reference; rename `vp_*` APVTS prefix where used; update CMakeLists target names. User-facing brand ("BaySickPlayer") is already locked since QA-A; this batch closes the source-side / class-side gap.
+- Risk: low (mechanical rename across files). One careful pass; risk is missing a stray include / cast in an unrelated file.
+- Dependencies: QA-Cleanup-1 (deletes Dead source files first; no point renaming files that are about to be deleted).
+- Effort: medium (~2-3 hours, dominated by grep + careful sweep + project-load round-trip verification).
+
 #### **QA-Cleanup-2: Vendored libraries cleanup**
 - Items: execute the `libs/` section of the QA-Audit manifest.
 - Scope: prune unused vendored libs; for each kept lib, prune unused
@@ -1257,9 +1256,9 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-PlayerRename****** → QA-B → QA-C
-   → QA-D → QA-E → QA-F → QA-Fa → QA-G → QA-H → QA-I → QA-J → QA-K → QA-L → QA-M
-   → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-Verify**** → QA-Export****
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-B → QA-C → QA-D → QA-E → QA-F → QA-Fa
+   → QA-G → QA-H → QA-I → QA-J → QA-K → QA-L → QA-M → QA-Drum-Polish**** → QA-N
+   → QA-VibeSlider**** → QA-Verify**** → QA-Export****
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -1298,24 +1297,14 @@ download; "Auto-check for updates" toggle in General Settings; stable
 channel only (beta channel deferred to Future State `CL-287`). See §9
 sixth Forks entry.
 
-\*\*\*\*\*\* QA-PlayerRename inserted 2026-05-10 at QA-A close (ninth
-Forks entry). Phase 1, immediately after QA-A. Internal-source rename
-of `Source/VibePlayer/` directory + `VibePlayer*` classes / files to
-their `BaySickPlayer*` counterparts so the source side matches the
-already-locked user-facing brand name. Mechanical sweep; no behavioural
-changes. See §9 ninth Forks entry.
-
 QA-0, QA-A, QA-B can run in **parallel** (different code surfaces, no
 audio-path overlap between QA-A UI work and QA-0 dispatcher fix).
-QA-PlayerRename is sequential (depends on QA-A's brand-name lock and
-must complete before later batches add new `VibePlayer*` files that
-would need retroactive renaming). Everything Phase 2 onward is
-sequential per Option A.
+Everything Phase 2 onward is sequential per Option A.
 
 **Pre-release cleanup phase (6) — runs ONLY after all of QA-0..N + the
 2026-05-08 QA-Inventory close additions have landed and verified:**
 ```
-QA-Audit  →  QA-Cleanup-1  →  QA-Cleanup-2  →  QA-Cleanup-3  →  QA-Cleanup-4  →  QA-RC****
+QA-Audit  →  QA-Cleanup-1  →  QA-PlayerRename******  →  QA-Cleanup-2  →  QA-Cleanup-3  →  QA-Cleanup-4  →  QA-RC****
 ```
 
 QA-Audit is the keystone — it produces the manifest that drives 1..3.
@@ -1325,6 +1314,15 @@ alongside QA-Audit if the user prefers; default sequencing keeps it last.
 QA-Inventory close as the gate before Phase 7 — a full project lifecycle
 sweep across the cleaned-up build to confirm nothing regressed during
 the cleanup phase.
+
+\*\*\*\*\*\* **QA-PlayerRename** inserted 2026-05-10 at QA-A close
+(ninth Forks entry). Phase 6, after QA-Cleanup-1. Internal-source
+rename of `Source/VibePlayer/` directory + `VibePlayer*` classes /
+files to their `BaySickPlayer*` counterparts so the source side
+matches the already-locked user-facing brand name. Mechanical sweep;
+no behavioural changes. Sequenced after QA-Cleanup-1 so the
+rename only touches files that survived the Dead-source-file
+deletion pass. See §9 ninth Forks entry.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -2048,17 +2046,18 @@ plan rather than only in the per-batch close entry.
   pre-release decisions cluster (CL-288 .. CL-292).
 
 - **#39 VibePlayer/* -> BaySickPlayer/* internal source rename —
-  routed to a new dedicated batch.**  User-facing brand
+  routed to a new dedicated batch in Phase 6.**  User-facing brand
   ("BaySickPlayer") is locked since QA-A; commit hygiene during this
   batch already used "BaySickPlayer" in body text.  But internal
   source files / class names still use `VibePlayer*` per CLAUDE.md's
   longstanding "rename deferred" footnote.  At QA-A close, parent
-  elected a **dedicated batch (QA-PlayerRename) immediately after
-  QA-A** rather than folding into Phase 6 QA-Cleanup-1.  Rationale:
-  doing the rename sooner means later batches commit messages /
-  patch citations use the final paths from day one and avoids stray
-  `VibePlayer*` files accreting between QA-A and Phase 6.  See §5
-  Phase 1 QA-PlayerRename entry; §6 sequencing arrow updated.
+  elected a **dedicated batch (QA-PlayerRename) within Phase 6 —
+  cleanup phase — slotted after QA-Cleanup-1**.  Rationale: this is
+  cleanup work, belongs with the other cleanup batches; sequencing
+  after QA-Cleanup-1 means the rename only touches files that
+  survived the Dead-source deletion pass (no point renaming files
+  that were about to be deleted).  See §5 Phase 6 QA-PlayerRename
+  entry; §6 Phase-6 sequencing arrow updated.
 
 - **#40 Piano Roll deep-link button crash — already routed at QA-0
   close; re-sighted only.**  Stack: `StandaloneEditor::showPageForTab`
@@ -2129,8 +2128,8 @@ is additive.  Memory rules locked during the batch are workflow
 discipline, not architectural facts (Carry-Forward §1-§3 unaffected).
 
 **Inline back-refs:**
-- §5 Phase 1 gains a new `QA-PlayerRename` entry between QA-A and
-  QA-B; §6 sequencing arrow updated with new `******` footnote.
+- §5 Phase 6 gains a new `QA-PlayerRename` entry after QA-Cleanup-1;
+  §6 Phase-6 sequencing arrow updated with new `******` footnote.
 - §5 QA-Audit "Pre-release decisions to revisit" sub-section gains
   `CL-293` (HarmlessLAF zero-px root cause).  Count goes from 5 -> 6.
 - §0 approved-subfolders list already updated by `c900f55`; no edit
@@ -2141,9 +2140,10 @@ discipline, not architectural facts (Carry-Forward §1-§3 unaffected).
 - §9 Forks: this entry (ninth).
 
 **Plan files affected:**
-- `Plans & Specs/Main Plan.md` — this entry + §5 Phase 1 QA-
-  PlayerRename row + §5 QA-Audit `CL-293` addition + §6 sequencing
-  arrow + new `******` footnote.
+- `Plans & Specs/Main Plan.md` — this entry + §5 Phase 6 QA-
+  PlayerRename row (slotted after QA-Cleanup-1) + §5 QA-Audit
+  `CL-293` addition + §6 Phase-6 sequencing arrow + new `******`
+  footnote.
 - `Plans & Specs/Implemented Work Log.md` — QA-A close entry's
   Finding #39 row updated to point at QA-PlayerRename (was "parent
   decides at close" placeholder).

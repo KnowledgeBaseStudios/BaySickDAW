@@ -408,7 +408,7 @@ All routings + cluster decisions documented in [Main Plan.md](Main Plan.md) §9 
 | #36 (engine LAF leaks into shared components) | `BaySickPresetButton` ctor pins LAF to `VibeLAF::get()`; D28 locks the rule (refines D1's "no LAF coupling"). |
 | #37 (InstPage popup anchor) | New `BaySickPedalsEditor::getPedalboardPresetButton()` accessor; InstPage anchors to that. Resolved in Phase 6 commit. |
 | #38 (VibePlayer `?` help button) | Deleted in Phase 6 commit; D30 locks the spec-drift removal. |
-| #39 (VibePlayer/* -> BaySickPlayer/* rename) | **Routed at QA-A close per Rule 3** — dedicated batch **QA-PlayerRename** inserted into §5 Phase 1 immediately after QA-A; §6 sequencing arrow updated with new `******` footnote. Internal source rename + class renames; user-facing strings + commit-message hygiene already locked this batch. See ninth Forks entry. |
+| #39 (VibePlayer/* -> BaySickPlayer/* rename) | **Routed at QA-A close per Rule 3** — dedicated batch **QA-PlayerRename** inserted into §5 Phase 6 (cleanup phase) after QA-Cleanup-1; §6 Phase-6 sequencing arrow updated with new `******` footnote. Sequenced after QA-Cleanup-1 so the rename only touches files that survived the Dead-source deletion pass. User-facing strings + commit-message hygiene already locked this batch. See ninth Forks entry. |
 | #40 (Piano Roll deep-link crash) | Already routed to QA-E per §9 Forks 3rd entry "QA-0 close routings". Re-sighted during this batch's verification — no new action; captured for traceability. |
 | #41 (`/read-doc` underuse) | Behavioural rule reinforced; no new memory entry — folds into existing agent-orchestration discipline in Main Plan §0. |
 | #42 (running-notes not dispatched) | Memory rule `feedback_draft_doc_running_notes_every_checkpoint.md` locked (mid-batch). Retrospective backfill compiled the Phase 1-3 history; Phases 3-6 dispatched at every close checkpoint. |
@@ -458,6 +458,6 @@ All routings + cluster decisions documented in [Main Plan.md](Main Plan.md) §9 
 - (this entry's commit appended after `/review-batch` + close.)
 
 #### Next action
-- Per §6 sequencing arrow, QA-B is the next batch (`... QA-Md** → QA-A → QA-B → ...`). See [Main Plan.md](Main Plan.md) §5 QA-B entry for scope. Side finding #39 (VibePlayer/* -> BaySickPlayer/* rename) is parked on QA-Cleanup-1 in Phase 6 unless the parent elects a dedicated batch for it.
+- Per §6 sequencing arrow, **QA-B is the next batch** (`... QA-Md** → QA-A → QA-B → ...`). See [Main Plan.md](Main Plan.md) §5 QA-B entry for scope. Side finding #39 (VibePlayer/* -> BaySickPlayer/* rename) is routed to a dedicated **QA-PlayerRename** batch in Phase 6 after QA-Cleanup-1 (cleanup phase, where rename work belongs) — see ninth Forks entry.
 
 ---
