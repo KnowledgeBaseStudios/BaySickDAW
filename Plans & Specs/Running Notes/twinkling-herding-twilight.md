@@ -436,6 +436,66 @@ Phase 6 — cross-engine consistency check across every refactored editor + page
 
 ---
 
+## 2026-05-10 05:55 PT — Phase 6 close — Cross-engine consistency sweep + unified preset button
+
+> Checkpoint after the single source commit closing Phase 6.  Original
+> scope was "verification-only" — a visual sweep across every refactored
+> engine title bar to confirm parity, with the plan saying skip the
+> commit if all consistent.  In practice the sweep surfaced four real
+> inconsistencies across the five engine title bars (Harmless,
+> BaySickPlayer, BaySickSynth, BaySickBass, BaySickPedals), driving a
+> real Phase 6 commit and a new shared `BaySickPresetButton` component.
+> Test-on-Pedals approach per Jeff's request: applied the new chevron
+> technique to BaySickPedals only first, verified visually, then
+> propagated to the other four engines.
+
+### Done since last checkpoint
+
+- **`4689f0f` — QA-A Step 13: unify engine preset buttons via BaySickPresetButton.**  Phase 6 close.  Six interlocked edits in one commit:
+  - **New `BaySickPresetButton` class** in `Source/Standalone/BaySickTitleBar.h` + `.cpp`.  `juce::TextButton` subclass that paints a label ("Preset" by default; ctor takes a `juce::String`) on the left and a path-drawn 5x4 px filled down-chevron triangle on the right.  Triangle geometry matches `MetroArrowButton` (transport bar) pixel-for-pixel so all chevrons across the app render identically.  Pins itself to `VibeLAF::get()` via `setLookAndFeel(...)` in the ctor and clears the LAF pointer in the dtor (standard JUCE pattern when assigning a non-owned LookAndFeel).  Otherwise behaves exactly like `juce::TextButton` — onClick / setBounds / setTooltip / setColour all transparent.  Per D26 / D27 / D28.
+  - **Engine editor swaps (5 editors):**  Harmless / VibePlayer / BaySickSynth / BaySickBass / BaySickPedals each swapped their `juce::TextButton mPresetBtn { "Preset v" };` member for `BaySickPresetButton mPresetBtn { "Preset" };`.  Per-engine onClick / showPresetMenu / withTargetComponent wiring untouched per Jeff's guardrail "transferring look and feel only, since the preset boxes all have different setups" (per D31).
+  - **InstPage popup-anchor bug fix.**  `BaySickPedalsEditor::getPedalboardPresetButton() noexcept` accessor added returning the preset button as a `juce::Component*`.  `InstPage::showPedalboardPresetMenu` dynamic_casts the editor (matches existing pattern at `InstPage.cpp:102`) and anchors `withTargetComponent` to the button instead of the editor root.  Closes the bug where the popup opened at the app's top-left because the editor root component is pinned at the app's top-left.  Per finding 23.
+  - **VibePlayer `?` help button removed.**  `mHelpBtn { "?" }` member, ctor onClick lambda, addAndMakeVisible, resized() setBounds, and the hardcoded AlertWindow popup logic all deleted.  Trailing-area math in `resized()` reduced from `(110 + 8 + 24)` to `88`.  Was a leftover Jeff never asked for (spec drift).  Per D30.
+  - **Width unification.**  Preset button width fixed at 88 px across every engine title bar.  VibePlayer 110 -> 88; Harmless 86 -> 88; Synth/Bass/Pedals were already 88.  Per D29.
+  - **Verification (Jeff confirmed):** all five engines (Harmless / BaySickPlayer / BaySickSynth / BaySickBass / BaySickPedals) now show the path-drawn down-chevron, identical button color via `VibeLAF`, identical 88 px width.  No `?` button on BaySickPlayer.  No popup-position bug on BaySickPedals.
+
+### Findings / decisions added
+
+- **Finding 21 — Phase 6's "verification-only" framing was wrong.**  Plan said "if all consistent, skip the commit."  Cross-engine visual sweep surfaced four real inconsistencies that needed real code fixes, not zero.  Drove the Phase 6 commit (Step 13).  Going forward, "verification-only" phases should still budget for the possibility that the sweep finds work — never assume cross-engine parity until measured.
+- **Finding 22 — Engine LAF overrides leak into shared components.**  First-pass propagation of `BaySickPresetButton` rendered black on the four LAF-overriding engines (HarmlessLAF / BaySickSynthLAF / BaySickBassLAF / VibePlayerLAF) because each engine's local LAF propagates to its child components.  Pedals already rendered grey because InstPage uses the global VibeLAF.  Wrong fix attempt: self-paint with hardcoded VC palette colors (changed Pedals' look in the wrong direction).  Right fix: lock the button's LAF to `VibeLAF::get()` in the ctor so it renders the same way Pedals already did regardless of host page.  Drove D28.
+- **Finding 23 — InstPage anchored its preset popup to the editor root.**  `InstPage::showPedalboardPresetMenu` used `withTargetComponent (mPedalsEditor.get())` — the editor root component, which JUCE pins at the editor's top-left = the app's top-left.  Menu opened at the app's top-left instead of below the button.  Same pattern bug exists nowhere else in the engine editors (the four others anchor `withTargetComponent (mPresetBtn)` correctly because the menu logic lives inside the editor itself, not in the parent page).  Fix: new `getPedalboardPresetButton()` accessor; InstPage anchors to that instead.
+- **D26 — `BaySickPresetButton` shared component owns the standardized title-bar preset button visual.**  Subclass of `juce::TextButton`; preserves all standard Button API surfaces.  Lives alongside `BaySickTitleBar` + `BaySickEngineLabel` in `Source/Standalone/BaySickTitleBar.h` + `.cpp`.
+- **D27 — Path-drawn 5x4 px filled triangle replaces the UTF-8 down-chevron + the literal 'v' fake chevron everywhere on title-bar preset buttons.**  Matches `MetroArrowButton` geometry pixel-for-pixel.  Eliminates the unreliable UTF-8 glyph fallback that drove engine editors to use a literal lowercase 'v' as a fake chevron in their button text ("Preset v").
+- **D28 — Title-bar preset button is locked to `VibeLAF` via `setLookAndFeel(&VibeLAF::get())` in the ctor (cleared in dtor).**  Bypasses every engine editor's local LAF override (HarmlessLAF / BaySickSynthLAF / BaySickBassLAF / VibePlayerLAF) so the button always paints the same way regardless of host page.  Refines D1's "no LAF coupling" rule for `BaySickTitleBar` itself by carving out the preset button as the explicit exception — visual parity required pinning the LAF, not avoiding it.
+- **D29 — Title-bar preset button width is 88 px on every engine.**  Harmless 86 -> 88, VibePlayer 110 -> 88; the rest were already at 88.  88 px is the locked width going forward.
+- **D30 — VibePlayer's `?` help button removed.**  Was a leftover Jeff never asked for (popped a hardcoded AlertWindow about how to use the player).  Spec drift; deleted.
+- **D31 — Per-engine preset-menu wiring (onClick / showPresetMenu / withTargetComponent) is OUT of scope for the unification.**  Only the visual class is swapped.  Each engine keeps its own preset menu logic.  Per Jeff's instruction during the test-on-Pedals phase: "transferring look and feel only, since the preset boxes all have different setups."
+
+### In-flight
+
+- Working tree clean.  Commit `4689f0f` is the Phase 6 close; 26 QA-A commits ahead of origin (pending this running-notes append + the running-notes commit that follows).
+
+### Files touched this phase
+
+- `Source/Standalone/BaySickTitleBar.h` (+30 net)
+- `Source/Standalone/BaySickTitleBar.cpp` (+83 net)
+- `Source/Harmless/HarmlessEditor.h` (+2 / -2 net)
+- `Source/Harmless/HarmlessEditor.cpp` (+3 / -1 net)
+- `Source/VibePlayer/VibePlayerEditor.h` (+2 / -3 net)
+- `Source/VibePlayer/VibePlayerEditor.cpp` (+5 / -16 net)
+- `Source/BaySickSynth/BaySickSynthEditor.h` (+2 / -2 net)
+- `Source/BaySickBass/BaySickBassEditor.h` (+2 / -2 net)
+- `Source/BaySickPedals/BaySickPedalsEditor.h` (+8 / -2 net)
+- `Source/Inst/InstPage.cpp` (+15 / -1 net)
+
+Total: 10 files, 159 insertions / 32 deletions.
+
+### Next action
+
+Phase 7 — mandatory close sequence: `/draft-doc batch-close` -> `/review-batch QA-A` -> apply close to `Plans & Specs/Implemented Work Log.md` -> commit.  No source-side work remains for QA-A.
+
+---
+
 ## Bucket assignment (for batch-close drafter at QA-A close)
 
 - **UI / L&F / Theming** (primary): the BaySickTitleBar component + every engine-editor refactor.
