@@ -326,6 +326,54 @@ Phase 4.5 — `BaySickRustyDrumsPage` adds its own title bar above the existing 
 
 ---
 
+## 2026-05-09 17:41 PT — Phase 4.5 close — BaySickRustyDrums adopts BaySickTitleBar + tab-strip positioner
+
+> Checkpoint after the single source commit closing Phase 4.5.  Last
+> sub-phase of Phase 4.  Mid-phase scope iteration — tab strip layout
+> migrated from "reserved band above the kit artwork" to "draggable
+> overlay anchored in native artwork coords" after Jeff confirmed
+> Option B.  Debug-only positioner ran the bake, captured `{0, -11}`,
+> then the positioner code was stripped before commit so the shipping
+> binary carries only the literal offset.
+
+### Done since last checkpoint
+
+- **`e86a887` — QA-A Step 11: BaySickRustyDrums adopts BaySickTitleBar + tab strip overlay.**  Phase 4.5 close.  Three interlocked edits in one commit:
+  - `BaySickRustyDrumsPage` now passes `binding.engineName = "BaySickRustyDrums"` + `binding.accentColor = juce::Colour (0xFFCC2222)` (Drums-tab red per D7) into `AriaControlPanel`.  Page background `#141618` selected to fuse seamlessly with the title bar's own bg (per D15).  Phase 4.3's `AriaControlPanel::Binding` plumbing now exercised by all three intended callers (Guitars + Basses from Phase 4.4, RustyDrums from this phase).
+  - `AriaControlPanel` tab-strip positioning rewired: `mTabStripNativeOffset` (a `juce::Point<int>` stored in NATIVE artwork coords per D17) controls a Y-only overlay placement above the kit artwork.  `computePanelDrawArea` reverted to centre-anchor for the kit (top-anchor breaks breathing room — see finding 16).  Final baked offset = `{0, -11}` per D19; applied as the literal initializer in `AriaControlPanel.h`.
+  - All Debug-only positioner scaffolding stripped before commit: `DraggableTabButton` subclass (anonymous namespace) deleted, "Save Pos" trailing-area button member + helper deleted, `debugSaveTabStripPositionToFile()` impl + forward declaration deleted.  Shipping binary carries only the literal `{0, -11}` offset.
+  - **Verification (Jeff confirmed Debug + Release):** kit artwork breathes correctly (no flush-against-title-bar pinning); tab strip sits centred horizontally with the chosen Y nudge; title bar renders red over the dark page bg without seams.
+
+### Findings / decisions added
+
+- **Finding 16 — Top-anchor regression caught mid-phase.**  My initial implementation of `computePanelDrawArea` top-anchored the kit artwork to make room for the tab strip.  Combined with `tabBarH = 0` (since the strip moved to overlay rather than reserved-band layout), this pinned the kit flush against the title bar with no breathing room.  Jeff caught it ("you slid the player all the way up to the top beneath the title bar so there is no where to put the buttons").  Reverted to centre-anchor; the tab strip now overlays the artwork at the chosen Y offset rather than displacing it.  Drove D16 (overlay model, not reserved-band) and the final layout that survived bake.
+- **Finding 17 — Debug-only Y-axis lock improvement over Jeff's request.**  Jeff asked to centre-bake the strip horizontally because the Debug Shift+drag was choppy and X-positioning was hard.  Instead of just baking horizontally and shipping the X-free drag, I locked the drag itself to Y-axis-only (X force-zeroed each frame) so the strip stays auto-centred while Y remains user-tunable.  Net result: the bake step still produced a single `{x, y}` value but the `x` component is guaranteed zero by the positioner UX, not just by the user happening to pick zero.  Drove D18.
+- **D14 — BaySickRustyDrums accent = `#CC2222`.**  Drums-tab red per D7 (the original 2026-05-09 AskUserQuestion locked Pedals/Guitars/Basses to navy + RustyDrums to Drums-tab red).  Applied via `binding.accentColor = juce::Colour (0xFFCC2222)` in `BaySickRustyDrumsPage`.
+- **D15 — BaySickRustyDrums page background = `#141618`.**  Selected to fuse with `BaySickTitleBar`'s own bg so the title bar reads as part of the page rather than sitting on a contrasting seam.  Applied via the page's `paint()` fill.
+- **D16 — `AriaControlPanel` tab strip overlays kit artwork (Option B), not a reserved band above.**  After two interpretation iterations with Jeff (interpretation A then B), Jeff confirmed Option B = make tabs a draggable box that saves coordinates, like Rusty hitboxes.  Overlay model means the kit artwork stays centre-anchored and the tab buttons render on top at the user-chosen anchor.
+- **D17 — `mTabStripNativeOffset` stored in NATIVE artwork coords.**  Survives window resizes (the offset is in artwork-space, not panel-pixel-space, so the strip stays anchored to the same artwork feature regardless of how the panel scales).  Mirrors the existing Rusty hitbox coordinate convention.
+- **D18 — Tab strip positioner drag is Y-axis only.**  X locked to centre; X is force-zeroed each frame during Debug Shift+drag.  Refinement over Jeff's "centre horizontally because Debug drag is choppy" request — locking the drag axis is a stronger guarantee than baking a centre value.  Positioner stripped from shipping binary; rule applies to any future re-bake session in Debug.
+- **D19 — Final baked value: `mTabStripNativeOffset = {0, -11}`.**  Captured from Jeff's positioning session and frozen as the literal initializer in `AriaControlPanel.h`.  Re-bake (if ever needed) would re-introduce the Debug-only positioner scaffolding, run the Y-only drag, and re-strip before commit.
+
+### In-flight
+
+- Working tree clean.  22 QA-A commits ahead of origin.
+
+### Files touched this phase
+
+- `Source/Standalone/AriaControlPanel.cpp` (+65 / -18 net)
+- `Source/Standalone/AriaControlPanel.h` (+12)
+- `Source/Standalone/BaySickRustyDrumsPage.cpp` (+13)
+
+### Next action
+
+Phase 5 — STYLE-01 ribbon truncation fix.  Last source-side phase before
+Phase 6 (cross-engine consistency check) and Phase 7 (mandatory close
+sequence: `/draft-doc batch-close` -> `/review-batch` -> apply close ->
+commit).
+
+---
+
 ## Bucket assignment (for batch-close drafter at QA-A close)
 
 - **UI / L&F / Theming** (primary): the BaySickTitleBar component + every engine-editor refactor.
