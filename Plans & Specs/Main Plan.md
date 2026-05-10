@@ -732,6 +732,7 @@ needed to find what you should pull up to review the work.
 ### Phase 2 — Project state hardening
 
 #### **QA-D: Project State Reset**
+**Plan file:** `Plans & Specs/Batch Plans/federated-bouncing-cupcake.md`
 - Items: STATE-01 (dirty flag triggers on load), STATE-02 (Guitar/Bass
   counters don't reset on new project), STATE-04 (load while playing
   doesn't stop playback first).
