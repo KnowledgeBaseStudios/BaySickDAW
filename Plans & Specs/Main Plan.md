@@ -710,12 +710,13 @@ needed to find what you should pull up to review the work.
 - Dependencies: none.
 - Effort: medium (~4-6 hours).
 
-#### **QA-B: Verification Sweep** (parallel with QA-0 + QA-A)
-- Items: DSP-07 + DSP-12 verification matrix (post QA-0 lands).
+#### **QA-B: Verification Sweep** (deferred to after QA-E — see §9 tenth Forks entry)
+- Items: DSP-07 + DSP-12 verification matrix.
 - Scope: NO code changes. Diagnostic session.
 - Risk: zero.
-- Dependencies: QA-0 must land before DSP-12 matrix can be exercised.
+- Dependencies: QA-0 must land before DSP-12 matrix can be exercised. **As of 2026-05-10**: QA-E must also land first so mute-isolation testing of the DSP-12 simultaneous case is available (findings #16a / #16b / #21 — pattern row mute no-op, right-click block mute no-op, track row mute permanent — all routed to QA-E).
 - Effort: small (~1-2 hours).
+- **Sequencing note (2026-05-10):** Deferred from Phase 1 (after QA-A) to immediately after QA-E. Without QA-E's mute-dispatch fixes, the DSP-12 simultaneous case (Builder + piano roll both placed) can only be verified via "two distinct audio contents + meter inspection" rather than the canonical mute-A → only-B → unmute → both-sum → mute-B → only-A isolation check. Deferring buys methodologically-sound verification on a known-good substrate. DSP-07 (parked watch-item) defers with the rest of QA-B per user spec call — gives a longer observation window for any post-QA-E reproduction. See §9 tenth Forks entry.
 
 #### **QA-C: Tiny One-Liners**
 - Items: DSP-10 (idle-suspend audition wake — predicate fix at
@@ -1256,7 +1257,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-B → QA-C → QA-D → QA-E → QA-F → QA-Fa
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-B******* → QA-F → QA-Fa
    → QA-G → QA-H → QA-I → QA-J → QA-K → QA-L → QA-M → QA-Drum-Polish**** → QA-N
    → QA-VibeSlider**** → QA-Verify**** → QA-Export****
 ```
@@ -1297,9 +1298,11 @@ download; "Auto-check for updates" toggle in General Settings; stable
 channel only (beta channel deferred to Future State `CL-287`). See §9
 sixth Forks entry.
 
-QA-0, QA-A, QA-B can run in **parallel** (different code surfaces, no
+QA-0 and QA-A could run in **parallel** (different code surfaces, no
 audio-path overlap between QA-A UI work and QA-0 dispatcher fix).
-Everything Phase 2 onward is sequential per Option A.
+QA-B was originally in this parallel group but deferred 2026-05-10
+to after QA-E — see footnote *******. Everything Phase 2 onward is
+sequential per Option A.
 
 **Pre-release cleanup phase (6) — runs ONLY after all of QA-0..N + the
 2026-05-08 QA-Inventory close additions have landed and verified:**
@@ -1323,6 +1326,19 @@ matches the already-locked user-facing brand name. Mechanical sweep;
 no behavioural changes. Sequenced after QA-Cleanup-1 so the
 rename only touches files that survived the Dead-source-file
 deletion pass. See §9 ninth Forks entry.
+
+\*\*\*\*\*\*\* QA-B deferred 2026-05-10 from after QA-A to after QA-E.
+The DSP-12 verification matrix's simultaneous case (Builder + piano
+roll both placed, both play summed) is the architectural heart of
+QA-0's Composite RenderTask fix. Clean verification of that case
+requires mute-isolation testing — but findings #16a (pattern row
+mute no effect), #16b (right-click block mute no effect), #21 (track
+row mute permanent) are all routed to QA-E. Without those fixes,
+mute-isolation isn't available and the simultaneous-case verification
+can only lean on "two distinct audio contents + meter inspection,"
+which is materially weaker. Deferring QA-B until after QA-E gives a
+clean methodologically-sound verification on a known-good substrate.
+See §9 tenth Forks entry.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -2156,3 +2172,36 @@ QA-PlayerRename, (b) this §9 Forks ninth entry, (c) §5 QA-PlayerRename
 row + §5 QA-Audit `CL-293` addition, (d) §6 sequencing arrow + new
 `******` footnote, (e) `/review-batch` already returned READY-TO-
 COMMIT (run prior to this entry's draft).
+
+### 2026-05-10 — QA-B deferred from Phase 1 to after QA-E (mute-isolation dependency)
+
+**Trigger:** QA-B kickoff session (2026-05-10). Pre-batch read of Plans & Specs surfaced the DSP-12 verification matrix's simultaneous case ("Builder + piano roll both placed, both play summed") as the architectural heart of QA-0's Composite RenderTask fix. User flagged that clean verification of the simultaneous case requires mute-isolation testing, and that pattern-block mute / track-row mute don't work yet (QA-0 close findings #16a, #16b, #21 — all routed to QA-E).
+
+**Diagnosis:** QA-B's job is independent confirmation of DSP-12 + a watch-check on DSP-07. The DSP-12 matrix has 7 cells; 6 are single-flow cases (WAV/MP3 × Builder/Clips × MT-on/off) that don't depend on mute behavior. The 7th cell (simultaneous case) is the one cell that exercises the Composite RenderTask's summation logic — which is the entire reason the fix exists. Without mute, that cell can only be verified via "two distinct audio contents + meter inspection," materially weaker than the canonical mute-A → mute-B → both check.
+
+**Options surfaced:**
+- 6a. Run QA-B now with the workaround verification.
+- 6b. Run 6 single-flow cells now, defer simultaneous-case to a follow-up after QA-E.
+- 6c. Defer the entirety of QA-B (DSP-07 + all 7 DSP-12 cells) to after QA-E.
+
+**Decision:** 6c. Locks the verification batch onto a known-good substrate where the canonical isolation technique is available. Avoids the "run-once-now-then-rerun-after-QA-E" recursion that 6a / 6b would force.
+
+**Sub-spec calls resolved at 2026-05-10:**
+- **(A) Placement:** immediately after QA-E (new arrow segment `... → QA-D → QA-E → QA-B → QA-F → ...`). Earliest moment clean verification is possible; further delay only adds drift.
+- **(B) DSP-07 split-or-defer:** defer with the rest of QA-B. User wants extra observation window to attempt repro between now and QA-E landing; if it doesn't surface in that window, QA-B will close DSP-07 as parked-no-resurfacing. Post-launch user reports remain the long-term tripwire.
+
+**Time-decay risk assessment:** Low. None of the intermediate batches (QA-C one-liners — DSP-10 + MIX-01; QA-D Project State Reset — STATE-01/02/04; QA-E audio-row + tab-callback + mute-dispatch — findings #13/14/16a/16b/21) touch the audio-insert composite-task surface directly. Waiting doesn't expose the DSP-12 surface to silent regressions in the path of intermediate work.
+
+**Carry-forward contradictions:** None. Carry-Forward §1 indexes the file:line primitives; QA-B was always characterized as zero-risk diagnostic. Re-sequencing doesn't change the architectural facts.
+
+**Inline back-refs:**
+- §5 QA-B entry: header flagged with deferral pointer; Dependencies updated to reference QA-E mute fixes; new "Sequencing note (2026-05-10)" subsection.
+- §6 sequencing arrow: QA-B moved from after QA-A to after QA-E; existing parallel-callout (line ~1300) updated to drop QA-B from the parallel group; new footnote `*******` chronicling the deferral.
+- §9 Forks: this entry (tenth).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 QA-B sequencing note + §6 arrow / footnote edits.
+- No source code changes.
+- No new running-notes or batch-plan files (QA-B kickoff aborted; will resume after QA-E lands).
+
+**Verification:** This fork closes when QA-B actually runs (post-QA-E) and produces a normal Implemented Work Log close entry. Until then, the deferral itself is the active state.
