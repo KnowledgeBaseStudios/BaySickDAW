@@ -116,7 +116,19 @@ void InstStripTask::run()
                             && mCtx->instPageMidi[mIndex].getNumEvents() == 0;
         const bool noVoices  = activeVoices == 0;
 
-        if (midiEmpty && noVoices)
+        // QA-C DSP-10 (2026-05-10): peek audition state from any sfizz engine
+        // bound to this Inst index.  An audition queued via auditionNote(int)
+        // must wake the chain so processBlock can mAuditionNote.exchange(-1)
+        // and produce sound.  Without this, audition during idle-suspend is
+        // silently swallowed.
+        bool auditionPending = false;
+        if (auto* g = mProcessor->getBaySickGuitars (mIndex))
+            auditionPending = g->isAuditionPending();
+        if (! auditionPending)
+            if (auto* b = mProcessor->getBaySickBasses (mIndex))
+                auditionPending = b->isAuditionPending();
+
+        if (midiEmpty && noVoices && ! auditionPending)
         {
             auto& counter = mProcessor->mInstIdleBlocks[(size_t) mIndex];
             if (counter >= VibeSynthProcessor::kIdleSuspendBlocks)

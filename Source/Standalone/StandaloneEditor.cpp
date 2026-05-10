@@ -3525,13 +3525,21 @@ void StandaloneEditor::onTabClosed(int tabId)
             // G-4 (2026-04-28): Vox tab close - unregister the audio engine
             // so the audio thread stops processing it.  No piano-roll
             // unregister needed (Vox isn't registered with PianoRollPage).
-            // The mixer Vox strip and any bound recording stay intact
-            // (no-file-delete contract).
+            // QA-C MIX-01 (2026-05-10): mirror the 2026-05-05 Inst fix - drop
+            // the orphan mixer strip widget on close so the slot index is
+            // fully reusable.  APVTS params for the strip + any bound
+            // recording stay intact (no-file-delete contract preserved); only
+            // the strip widget + order entry drop, matching the post-2026-05-05
+            // Inst convention.
+            int voxStripIdx = -1;
             if (auto* vp = dynamic_cast<VoxPage*>(mPages[i]->component.get()))
             {
                 int idx = vp->getPageIndex();
                 if (idx >= 0)
+                {
                     mProcessor.unregisterVoxEngine (idx);
+                    voxStripIdx = idx;
+                }
             }
 
             // G-4 (2026-04-28): Inst tab close - same shape as Vox.
@@ -3630,6 +3638,11 @@ void StandaloneEditor::onTabClosed(int tabId)
             // the same idx restores prior fader/pan/sends.
             if (instStripIdx >= 0 && mMixerPage)
                 mMixerPage->removeInstChannel (instStripIdx);
+            // QA-C MIX-01 (2026-05-10): mirror the Inst removal so Vox tabs
+            // also drop their orphan strip on close.  APVTS params + recording
+            // links stay alive (matches Inst convention).
+            if (voxStripIdx >= 0 && mMixerPage)
+                mMixerPage->removeVoxChannel (voxStripIdx);
             resized();
             refreshAllKitViews();   // D2: drum row freed → kit view shrinks
 

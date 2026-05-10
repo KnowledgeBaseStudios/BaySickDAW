@@ -117,6 +117,12 @@ public:
     // 2026-05-06 (Option A idle suspend): see BaySickGuitars for rationale.
     int getNumActiveVoices() const noexcept;
 
+    // QA-C DSP-10 (2026-05-10): see BaySickGuitars for rationale.
+    bool isAuditionPending() const noexcept
+    {
+        return mAuditionNote.load (std::memory_order_acquire) != -1;
+    }
+
     // Project-level undo - editor wires Ctrl+Z to undo()/redo() so panel
     // edits, automation captures, and CC type-in entries are all reversible.
     juce::UndoManager& getUndoManager() noexcept { return mUndoManager; }

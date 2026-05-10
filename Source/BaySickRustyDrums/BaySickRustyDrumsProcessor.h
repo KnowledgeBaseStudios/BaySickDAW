@@ -139,6 +139,15 @@ public:
     // routing when the kit is silent.
     int                     getNumActiveVoices () const noexcept;
 
+    // QA-C DSP-10 (2026-05-10): audition-pending peek so the idle-suspend
+    // predicate wakes the chain when an audition note is queued via
+    // auditionNote(int) (e.g. kit-graphic hitbox click).  Without this,
+    // the dispatcher skips processStrips and the audition is swallowed.
+    bool                    isAuditionPending  () const noexcept
+    {
+        return mAuditionNote.load (std::memory_order_acquire) != -1;
+    }
+
     // J-8 stage 2 (2026-05-04): ARIA control surface CC dispatch.  Writes the
     // value (0..127) for `cc` through APVTS so the change is undoable, projectable,
     // and automatable.  The parameterChanged listener forwards to sfizz.

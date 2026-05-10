@@ -34,8 +34,12 @@ void RustyDrumsProducerTask::run()
 
     const bool midiEmpty = midi->getNumEvents() == 0;
     const bool noVoices  = engine->getNumActiveVoices() == 0;
+    // QA-C DSP-10 (2026-05-10): peek audition state so a queued audition
+    // (e.g. kit-graphic hitbox click) wakes the chain instead of being
+    // silently swallowed during idle-suspend.
+    const bool auditionPending = engine->isAuditionPending();
 
-    if (midiEmpty && noVoices)
+    if (midiEmpty && noVoices && ! auditionPending)
     {
         if (mProcessor->mRustyIdleBlocks >= VibeSynthProcessor::kIdleSuspendBlocks)
             return;   // suspended this block

@@ -2031,8 +2031,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // strips - each one runs an InsertNode pipeline per block.
             const bool midiEmpty = mRustyDrumsMidi.getNumEvents() == 0;
             const bool noVoices  = mRustyDrumsEngine->getNumActiveVoices() == 0;
+            // QA-C DSP-10 (2026-05-10): see RustyDrumsProducerTask.cpp for
+            // rationale.  Same predicate fix on the serial-path (MT engine
+            // off) mirror.
+            const bool auditionPending = mRustyDrumsEngine->isAuditionPending();
             bool suspended = false;
-            if (midiEmpty && noVoices)
+            if (midiEmpty && noVoices && ! auditionPending)
             {
                 if (mRustyIdleBlocks >= kIdleSuspendBlocks)
                     suspended = true;
@@ -2279,7 +2283,15 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     const bool midiEmpty = instPageMidi[ii].getNumEvents() == 0;
                     const bool noVoices  = activeVoices == 0;
 
-                    if (midiEmpty && noVoices)
+                    // QA-C DSP-10 (2026-05-10): see InstStripTask.cpp for
+                    // rationale.  Same predicate fix on the serial-path
+                    // (MT engine off) mirror.
+                    bool auditionPending = false;
+                    if (auto* g = getBaySickGuitars (ii)) auditionPending = g->isAuditionPending();
+                    if (! auditionPending)
+                        if (auto* b = getBaySickBasses (ii)) auditionPending = b->isAuditionPending();
+
+                    if (midiEmpty && noVoices && ! auditionPending)
                     {
                         if (mInstIdleBlocks[(size_t) ii] >= kIdleSuspendBlocks)
                             continue;   // suspended this block

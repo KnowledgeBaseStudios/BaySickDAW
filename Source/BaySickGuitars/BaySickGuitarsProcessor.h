@@ -120,6 +120,15 @@ public:
     // processing is disabled - safe default for the suspend gate.
     int getNumActiveVoices() const noexcept;
 
+    // QA-C DSP-10 (2026-05-10): audition-pending peek so the idle-suspend
+    // predicate wakes the chain when an audition note is queued via
+    // auditionNote(int).  Without this, the dispatcher skips processBlock
+    // and the audition is silently swallowed.
+    bool isAuditionPending() const noexcept
+    {
+        return mAuditionNote.load (std::memory_order_acquire) != -1;
+    }
+
     // Project-level undo - editor wires Ctrl+Z to undo()/redo() so panel
     // edits, automation captures, and CC type-in entries are all reversible.
     juce::UndoManager& getUndoManager() noexcept { return mUndoManager; }
