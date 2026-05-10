@@ -762,10 +762,12 @@ void HarmlessEditor::resized()
     bounds.removeFromTop (kHdrH);
 
     // QA-A (2026-05-09): unified title bar (32 px) + right-anchored preset btn.
+    // QA-A Phase 6 (2026-05-10): width 86 -> 88 to match every other engine
+    // title bar (BaySickPlayer / BaySickSynth / BaySickBass / BaySickPedals).
     mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);
-    const auto trailing = mTitleBar.getTrailingArea (86);
+    const auto trailing = mTitleBar.getTrailingArea (88);
     const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
-    mPresetBtn.setBounds (trailing.getX(), btnY, 86, 22);
+    mPresetBtn.setBounds (trailing.getX(), btnY, 88, 22);
 
     bounds.reduce (kGap, 0);
     bounds.removeFromTop (kGap / 2);

@@ -53,9 +53,9 @@ private:
     // QA-A (2026-05-09): unified title bar.  Accent = HarmlessLAF::kAccent
     // (#FF6600 orange).  Bloom is the default, so no need to pass it
     // explicitly here; the long-standing orange-glow signature is preserved.
-    BaySickTitleBar  mTitleBar { "Harmless",
-                                 juce::Colour (HarmlessLAF::kAccent) };
-    juce::TextButton mPresetBtn { "Preset v" };
+    BaySickTitleBar     mTitleBar  { "Harmless",
+                                     juce::Colour (HarmlessLAF::kAccent) };
+    BaySickPresetButton mPresetBtn { "Preset" };
 
     // ── Waveform buttons (visual selectors, synced to hidden sliders) ─────────
     HarmlessWaveformButton mTimbreWavA;   // Part A shape display/selector

@@ -59,9 +59,8 @@ private:
     // QA-A (2026-05-09): unified title bar.  Accent = VC::Warm (#D4A017),
     // matching the Clips + Builder ribbon-tab active colour so the player
     // page reads as one identity with its tab.
-    BaySickTitleBar  mTitleBar { "BaySickPlayer", juce::Colour (0xFFD4A017) };
-    juce::TextButton mPresetBtn { "Preset v" };
-    juce::TextButton mHelpBtn   { "?" };
+    BaySickTitleBar     mTitleBar  { "BaySickPlayer", juce::Colour (0xFFD4A017) };
+    BaySickPresetButton mPresetBtn { "Preset" };
 
     // ── 7-box grid layout (D.4-Q3 2026-05-01 - 7th box "Filter" added):
     //    Row 1: Sample Engine | Pitch & Voicing | Dynamics

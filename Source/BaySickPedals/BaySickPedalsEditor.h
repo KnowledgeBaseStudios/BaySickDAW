@@ -56,6 +56,12 @@ public:
     // the InstPage side; this Phase 4.2 commit just ships the hook.
     std::function<void()> onPedalboardPresetMenu;
 
+    // QA-A Phase 6 (2026-05-09): exposes the title-bar preset button so the
+    // parent page (InstPage) can anchor its preset PopupMenu to the button
+    // itself instead of the whole editor (which JUCE pins at the editor's
+    // top-left -- i.e. the app's top-left, not a button-relative location).
+    juce::Component* getPedalboardPresetButton() noexcept { return &mPresetBtn; }
+
 private:
     void timerCallback() override;
 
@@ -68,8 +74,8 @@ private:
     // Accent = navy / royal blue (#1C3A8A), shared with BaySickGuitars +
     // BaySickBasses (Inst tab active color per RibbonTabBar.cpp:21) since
     // all three engines live inside Inst pages.
-    BaySickTitleBar  mTitleBar  { "BaySickPedals", juce::Colour (0xFF1C3A8A) };
-    juce::TextButton mPresetBtn { "Preset v" };
+    BaySickTitleBar     mTitleBar  { "BaySickPedals", juce::Colour (0xFF1C3A8A) };
+    BaySickPresetButton mPresetBtn { "Preset" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPedalsEditor)
 };

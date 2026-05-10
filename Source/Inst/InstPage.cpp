@@ -1242,7 +1242,23 @@ void InstPage::showPedalboardPresetMenu()
     m.addSeparator();
     m.addItem (2, "Reveal Folder...");
 
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (mPedalsEditor.get()),
+    // QA-A Phase 6 (2026-05-09): anchor the menu to the title-bar preset
+    // button instead of the whole editor.  Targeting `mPedalsEditor.get()`
+    // pinned the menu at the editor's top-left = the app's top-left;
+    // targeting the button drops it from immediately below the click site.
+    // mPedalsEditor is typed as juce::AudioProcessorEditor* on this side, so
+    // the BaySickPedalsEditor-specific accessor needs a dynamic_cast --
+    // matches the existing pattern at InstPage.cpp:102.
+    auto* pedalsEditor = dynamic_cast<BaySickPedalsEditor*> (mPedalsEditor.get());
+    auto* presetBtn = pedalsEditor != nullptr
+                        ? pedalsEditor->getPedalboardPresetButton()
+                        : nullptr;
+    auto opts = juce::PopupMenu::Options();
+    if (presetBtn != nullptr)
+        opts = opts.withTargetComponent (presetBtn);
+    else
+        opts = opts.withTargetComponent (mPedalsEditor.get());
+    m.showMenuAsync (opts,
         [this, pedals, presets] (int r)
         {
             if (r == 0) return;

@@ -50,16 +50,6 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     mPresetBtn.onClick = [this] { showPresetMenu(); };
     addAndMakeVisible (mPresetBtn);
 
-    mHelpBtn.onClick = [this]
-    {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
-            "BaySickPlayer",
-            "Load a sample folder or SFZ via Preset menu.\n"
-            "MIDI input triggers sample playback.\n"
-            "A/B/C/D select articulation layers.");
-    };
-    addAndMakeVisible (mHelpBtn);
-
     // ── Box titles ────────────────────────────────────────────────────────────
     const char* kBoxTitles[7] = {
         "SAMPLE ENGINE", "PITCH & VOICING", "DYNAMICS",
@@ -395,13 +385,14 @@ void VibePlayerEditor::resized()
     const int w = getWidth();
 
     // ── Header ────────────────────────────────────────────────────────────────
-    // QA-A (2026-05-09): unified title bar (32 px) + right-anchored preset +
-    // help-button cluster (110 + 8 + 24 = 142 px).
+    // QA-A (2026-05-09): unified title bar (32 px) + right-anchored preset
+    // button.  Phase 6 (2026-05-10): help button removed (was a leftover Jeff
+    // never asked for) and preset width unified at 88 px to match every
+    // other engine title bar.
     mTitleBar.setBounds (0, 0, w, BaySickTitleBar::kStandardHeight);
-    const auto trailing = mTitleBar.getTrailingArea (110 + 8 + 24);
+    const auto trailing = mTitleBar.getTrailingArea (88);
     const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
-    mPresetBtn.setBounds (trailing.getX(),               btnY, 110, 22);
-    mHelpBtn.setBounds   (trailing.getX() + 110 + 8,     btnY,  24, 22);
+    mPresetBtn.setBounds (trailing.getX(), btnY, 88, 22);
 
     // ── Box layout helpers ───────────────────────────────────────────────────
     auto box = [&] (int i) { return boxRectFor (i, getWidth(), getHeight()); };

@@ -65,6 +65,36 @@ private:
 };
 
 
+/** Standardized "Preset ▾" button used in BaySickTitleBar trailing areas.
+
+    Paints a label + a path-drawn down-chevron triangle (the same triangle
+    technique MetroArrowButton uses in GlobalTransportBar) so we don't depend
+    on the platform font being able to render `▾` (U+25BE) at small sizes.
+    Earlier engines used a literal lowercase 'v' in the button text as a
+    stand-in arrow ("Preset v"); this replaces that across the board.
+
+    The button is a thin juce::TextButton subclass so caller code keeps using
+    `onClick`, `setBounds`, `setTooltip`, `setColour` (TextButton::buttonColourId
+    / textColourOffId) exactly as before.  Pass a custom label to the
+    constructor to override the default "Preset" text. */
+class BaySickPresetButton : public juce::TextButton
+{
+public:
+    explicit BaySickPresetButton (const juce::String& label = "Preset");
+    ~BaySickPresetButton() override;
+
+    void setLabelText (const juce::String& label);
+    juce::String getLabelText() const { return mLabel; }
+
+    void paintButton (juce::Graphics&, bool isMouseOverButton, bool isButtonDown) override;
+
+private:
+    juce::String mLabel;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPresetButton)
+};
+
+
 /** Label-only variant of BaySickTitleBar -- paints just the engine name
     (with optional bloom halo) and no background/divider chrome.  Use when an
     existing toolbar / chrome strip already provides the background and just

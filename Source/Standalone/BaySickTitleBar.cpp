@@ -1,4 +1,5 @@
 #include "BaySickTitleBar.h"
+#include "SharedUI.h"  // VC palette (Surface / Accent / Text) for standardized button paint
 
 BaySickTitleBar::BaySickTitleBar (const juce::String& engineName,
                                   juce::Colour accentColor,
@@ -112,6 +113,88 @@ void BaySickTitleBar::paintEngineName (juce::Graphics&       g,
         g.setFont   (juce::Font (fontSizePx, juce::Font::bold));
         g.drawText  (engineName, rect, juce::Justification::centredLeft, true);
     }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BaySickPresetButton
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-A Phase 6 (2026-05-09): standardized title-bar preset button.  Earlier
+// engines stuck a literal lowercase 'v' in the button text as a fake chevron
+// because the UTF-8 ▾ glyph was unreliable at small sizes (same issue
+// MetroArrowButton hit; it switched to a path-drawn triangle for the same
+// reason).  This class follows MetroArrowButton's path approach -- label
+// text on the left, filled triangle on the right -- so we don't depend on
+// platform font fallback for the chevron.
+
+BaySickPresetButton::BaySickPresetButton (const juce::String& label)
+    : juce::TextButton (""),
+      mLabel (label)
+{
+    setMouseClickGrabsKeyboardFocus (false);
+    setClickingTogglesState (false);
+
+    // QA-A Phase 6 (2026-05-09): lock the preset button to VibeLAF (the app-
+    // global LAF used by BaySickPedals + the rest of the chassis).  Engine
+    // editors that set their own LAF (HarmlessLAF, BaySickSynthLAF,
+    // BaySickBassLAF, VibePlayerLAF) propagate that LAF to their child
+    // components, which is what made the preset button look black on those
+    // engines and grey on Pedals.  Pinning to VibeLAF here means every
+    // preset button paints the same way Pedals' did before the propagation,
+    // regardless of which engine page hosts it.
+    setLookAndFeel (&VibeLAF::get());
+}
+
+BaySickPresetButton::~BaySickPresetButton()
+{
+    // Clear the LAF pointer before the base class destructor runs -- standard
+    // JUCE pattern when assigning a non-owned LookAndFeel via setLookAndFeel.
+    setLookAndFeel (nullptr);
+}
+
+void BaySickPresetButton::setLabelText (const juce::String& label)
+{
+    if (mLabel == label) return;
+    mLabel = label;
+    repaint();
+}
+
+void BaySickPresetButton::paintButton (juce::Graphics& g,
+                                        bool isMouseOverButton,
+                                        bool isButtonDown)
+{
+    // Background -- delegate to LookAndFeel (locked to VibeLAF in the ctor)
+    // so the button picks up the standard app chassis hover / pressed
+    // shading and matches Pedals' look exactly.
+    getLookAndFeel().drawButtonBackground (g, *this,
+        findColour (juce::TextButton::buttonColourId),
+        isMouseOverButton, isButtonDown);
+
+    auto bounds = getLocalBounds().toFloat().reduced (8.0f, 0.0f);
+
+    // Reserve a 14 px column on the right for the chevron triangle, then
+    // draw the label in whatever's left.
+    constexpr float kArrowAreaW = 14.0f;
+    auto arrowArea = bounds.removeFromRight (kArrowAreaW);
+    auto textArea  = bounds;
+
+    g.setColour (findColour (juce::TextButton::textColourOffId));
+    g.setFont   (juce::Font (12.0f));
+    g.drawText  (mLabel, textArea.toNearestInt(),
+                 juce::Justification::centredLeft, true);
+
+    // Down-chevron (filled triangle) -- same dimensions MetroArrowButton uses
+    // (5 px half-width x 4 px height) so all chevrons across the app match.
+    const float cx = arrowArea.getCentreX();
+    const float cy = arrowArea.getCentreY();
+    const float w  = 5.0f;
+    const float h  = 4.0f;
+    juce::Path tri;
+    tri.addTriangle (cx - w, cy - h * 0.5f,
+                     cx + w, cy - h * 0.5f,
+                     cx,     cy + h * 0.5f);
+    g.setColour (findColour (juce::TextButton::textColourOffId).withAlpha (0.85f));
+    g.fillPath (tri);
 }
 
 

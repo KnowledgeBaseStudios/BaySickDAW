@@ -69,9 +69,9 @@ private:
     // QA-A (2026-05-09): unified title bar.  Accent = BaySickBassLAF::kGreen
     // (#33FF88 B1 neon green) -- matches STYLE-06's "preset on right + green
     // title logo" spec.
-    BaySickTitleBar  mTitleBar { "BaySickBass",
-                                 juce::Colour (BaySickBassLAF::kGreen) };
-    juce::TextButton mPresetBtn { "Preset v" };
+    BaySickTitleBar     mTitleBar  { "BaySickBass",
+                                     juce::Colour (BaySickBassLAF::kGreen) };
+    BaySickPresetButton mPresetBtn { "Preset" };
 
     // ── Visualizer ────────────────────────────────────────────────────────────
     BaySickBassVisualizerScreen mVisualizer;
