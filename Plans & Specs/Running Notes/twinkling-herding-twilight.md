@@ -374,6 +374,68 @@ commit).
 
 ---
 
+## 2026-05-09 20:06 PT — Phase 5 close — STYLE-01 ribbon truncation fixed via variable-width tabs + two-line wrap
+
+> Checkpoint after the single source commit closing Phase 5.  Last
+> source-side phase before Phase 6 (cross-engine consistency check) and
+> Phase 7 (mandatory close sequence).  Mid-phase scope expansion: a
+> first-pass `drawFittedText` shrink-to-fit was insufficient (slot itself
+> too narrow), so the layout engine itself was rewritten as
+> constraint-based variable-width with per-slot floors + max-width caps,
+> two-line wrap above the cap, and a camelCase split helper for
+> no-space brand names.  `kTabH` 30 -> 40 cleanup folded in (filled the
+> empty strip below tabs).  Effects + Builder hardcoded sub-page badges
+> dropped (visual-noise; dropdown arrow already conveys sub-menu).
+> Closes STYLE-01.
+>
+> Per-slot natural widths use BOLD font weight regardless of active
+> state, so a slot's width doesn't twitch when the user clicks between
+> slots (the active-vs-inactive font swap no longer changes layout).
+>
+> All Phase 5 verification confirmed by Jeff visually — long brand names
+> stay single-line at typical widths; user-typed long custom names wrap
+> to 2 lines with mid-string camelCase split for no-space names; fixed
+> slots stay at floor (Mixer / Effects / Builder / Piano Roll never
+> collapse to "..."); tab bottoms flush with bar bottom.
+
+### Done since last checkpoint
+
+- **`9f30cfb` — QA-A Step 12: ribbon tabs adopt variable-width layout + two-line wrap.**  Phase 5 close.  Five interlocked edits in one commit:
+  - **Constraint-based variable-width slot layout.**  Replaces the previous equal-share `totalW / kNumSlots` formula (which gave every slot 192 px at 1920-wide window — too narrow for "BaySickRustyDrums" at ~150 px text width once arrow + badge + padding ate ~58 px overhead).  New algorithm: compute desired width per slot = `clamp(natural, kMinFixed_or_kMinVariable, kMaxSingleLine)`; if the sum of desireds <= `totalW`, distribute slack equally; else shrink proportionally to each slot's "shrink room" (`desired - min`) so no slot crosses its floor until they all hit floor together.  Per D20.
+  - **Per-slot min-width floors.**  `kMinFixed = 60` (Mixer, Effects, Builder, Piano Roll — fixed labels can never grow); `kMinVariable = 80` (Clip, Vox, Inst, Layers, Bass, Drums — engine-name labels need a baseline).  Per D21.
+  - **Per-slot max-width cap.**  `kMaxSingleLine = 220` is the cap above which a slot wraps to 2 lines instead of growing further.  Tuned so brand-default names (longest "BaySickRustyDrums" at ~208 px natural) stay single-line; only user-renamed long custom labels trip the wrap.  Per D22.
+  - **Two-line wrap rendering.**  Paint site swapped from `g.drawText(name, textR.reduced(8, 0), centredLeft, /*useEllipsesIfTooBig=*/true)` to `g.drawFittedText(name, textR, centredLeft, /*maxLines=*/2, /*minScaleFactor=*/0.75f)`.  `slotWraps(s)` predicate checks `naturalSingleLineWidth > kMaxSingleLine`.  JUCE's drawFittedText wraps user-typed names at spaces/hyphens; for brand names without spaces ("BaySickRustyDrums" / "BaySickPlayer"), new file-static `splitCamelCase` helper in anonymous namespace finds the capital letter closest to mid-string and injects `\n` so the engine has a hard break point.  Falls back to drawFittedText's 0.75f shrink for strings with no capitals after position 0.  Per D24.
+  - **`kTabH` 30 -> 40.**  Tabs now fill the parent transport bar's full vertical height (parent `kBarH = 40`); empty horizontal strip below every tab is gone.  Existing `+2.0f` overshoot on the tabPath still works (clipped to component bounds).  Per D23.
+  - **Effects + Builder hardcoded sub-page badge counters dropped.**  `getBadgeCount` for Effects (was returning 2 — Rack/EQ) and Builder (was returning 3 — Patterns/Audio Clips/Automation) deleted.  The dropdown arrow already conveys "this slot has a sub-menu"; the badge circles were pure visual noise eating ~20 px of slot width.  Per D25.
+  - **Verification (Jeff confirmed):** long brand names stay single-line at typical widths ("BaySickRustyDrums", "BaySickPlayer" — no truncation); user-typed long custom names wrap to 2 lines with mid-string camelCase split for no-space names; fixed slots stay at floor (Mixer / Effects / Builder / Piano Roll never collapse to "..."); tab bottoms flush with bar bottom; Effects + Builder render without badge circles.
+
+### Findings / decisions added
+
+- **Finding 18 — First-pass drawFittedText alone was insufficient.**  Step 5.2.1's initial fix swapped the truncating `drawText` for `drawFittedText` with `maxLines=1` + `minScaleFactor=0.75f`.  Visual verification still showed truncation: even with auto-shrink to 9pt floor, "BaySickRustyDrums" couldn't fit because the slot itself was too narrow (192 px equal-share at 1920-wide window, minus 58 px overhead = ~134 px text area; "BaySickRustyDrums" at 12pt bold needs ~150 px).  Drove the variable-width + wrap design that became the actual fix (D20-D22, D24).
+- **Finding 19 — Active-vs-inactive font weight changes width.**  Active tabs use bold; inactive use regular — same string measures wider in bold than regular.  If natural width were computed using current state, a slot's allocated width would twitch when the user clicks between slots (active slot grows, others shrink to fit).  Solution: always use bold-font width for the natural-width calc so slot allocation stays stable across click events.  Implementation lives in the natural-width helper inside the variable-width layout function.
+- **Finding 20 — Effects + Builder badge counters were pure visual noise.**  Surfaced post-build during Jeff's verification feedback: even with the variable-width fix in place, Effects + Builder still showed "..." truncation in some window widths.  Diagnosis: their hardcoded `getBadgeCount` returned 2 (Effects sub-pages: Rack / EQ) and 3 (Builder sub-pages: Patterns / Audio Clips / Automation), eating ~20 px of slot width per slot for visual continuity that the dropdown arrow already conveys.  Removed both.  Frees the natural width for the layout to redistribute.  Drove D25.
+- **D20 — Ribbon tabs use constraint-based variable-width layout.**  Not equal-share (which produces too-narrow slots for long brand names), not pure proportional (which produces unbounded shrinking when window is narrow).  Algorithm = clamp desired to [min, max], distribute slack equally if room, else shrink proportionally to each slot's shrink room.
+- **D21 — Per-slot min-width floors.**  `kMinFixed = 60` (Mixer, Effects, Builder, Piano Roll); `kMinVariable = 80` (Clip, Vox, Inst, Layers, Bass, Drums).
+- **D22 — `kMaxSingleLine = 220`.**  Cap above which slot labels wrap to 2 lines instead of growing further.  Tuned so brand-default names (longest "BaySickRustyDrums" at ~208 px natural) stay single-line; only user-renamed long custom labels trip the wrap.
+- **D23 — `kTabH = 40` (was 30).**  Matches parent transport bar height (`kBarH = 40`); tabs fill bar fully, no empty strip beneath.
+- **D24 — camelCase wrap split point = capital letter closest to mid-string.**  Helper injects `\n` so JUCE's text engine has a hard break point for no-space brand names ("BaySickRustyDrums" -> "BaySick\nRustyDrums").  Falls back to drawFittedText's 0.75f shrink for strings with no capitals after position 0.
+- **D25 — Effects + Builder badge counters dropped.**  Were hardcoded 2 and 3 for sub-page counts; dropdown arrow already conveys sub-menu.  Removal frees ~20 px slot width for the variable-width layout to redistribute.
+
+### In-flight
+
+- Working tree clean.  24 QA-A commits ahead of origin.
+
+### Files touched this phase
+
+- `Source/Standalone/RibbonTabBar.h` (+38 net)
+- `Source/Standalone/RibbonTabBar.cpp` (+158 net)
+
+### Next action
+
+Phase 6 — cross-engine consistency check across every refactored editor + page (Harmless, BaySickPlayer, BaySickSynth, BaySickBass, BaySickNAM/IR, BaySickVocal cluster, BaySickPedals, BaySickGuitars, BaySickBasses, BaySickRustyDrums + InstPage chrome) for title-bar visual parity, accent-color compliance with D7 / D14, and the new ribbon variable-width layout's behavior at window widths the bake didn't cover.  Phase 7 follows: mandatory close sequence (`/draft-doc batch-close` -> `/review-batch` -> apply close -> commit).
+
+---
+
 ## Bucket assignment (for batch-close drafter at QA-A close)
 
 - **UI / L&F / Theming** (primary): the BaySickTitleBar component + every engine-editor refactor.
