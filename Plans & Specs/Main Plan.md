@@ -719,6 +719,7 @@ needed to find what you should pull up to review the work.
 - **Sequencing note (2026-05-10):** Deferred from Phase 1 (after QA-A) to immediately after QA-E. Without QA-E's mute-dispatch fixes, the DSP-12 simultaneous case (Builder + piano roll both placed) can only be verified via "two distinct audio contents + meter inspection" rather than the canonical mute-A → only-B → unmute → both-sum → mute-B → only-A isolation check. Deferring buys methodologically-sound verification on a known-good substrate. DSP-07 (parked watch-item) defers with the rest of QA-B per user spec call — gives a longer observation window for any post-QA-E reproduction. See §9 tenth Forks entry.
 
 #### **QA-C: Tiny One-Liners**
+**Plan file:** `Plans & Specs/Batch Plans/cozy-mend-ferret.md`
 - Items: DSP-10 (idle-suspend audition wake — predicate fix at
   [InstStripTask.cpp:115-119](Source/Engine/Tasks/InstStripTask.cpp:115) +
   Rusty equivalent), MIX-01 (Vox-tab `onTabClosed` missing `removeVoxChannel`
