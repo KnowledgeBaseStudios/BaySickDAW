@@ -568,7 +568,9 @@ No findings routed outside this batch.  All five findings resolved in-batch; no 
 
 All findings either resolved in-batch (#48-#54) or already routed pre-batch with no new action (#55).  No new §5 entries, no new §9 Forks entries.  One new memory rule locked (#51).
 
-#### Deferred NITs (surfaced by `/review-batch` at close, pre-existing / harmless — routed forward)
+#### Deferred NITs (surfaced by `/review-batch` at close)
+
+**Amendment 2026-05-11 (mid-QA-E):** the bulk-defer below was premature per `feedback_qa_batches_fix_bugs_dont_defer.md` -- each NIT should have been individually surfaced to Jeff for fix-vs-defer call.  Corrected via §9 eleventh Forks entry (2026-05-11) in `Main Plan.md`: NIT-1 / NIT-2 / NIT-3 fold into QA-E as "Sub-Phase Z -- QA-D NIT corrections"; NIT-4 routes to QA-Cleanup-1 (Phase 6 source cleanup).  Original deferral text preserved below for traceability.
 
 - **NIT-1** `BaySickRustyDrumsPage` missing from `onTabRenamed` page-type dispatch — [Source/Standalone/StandaloneEditor.cpp:1263-1315](../Source/Standalone/StandaloneEditor.cpp).  Task 2.8 dispatch covers Layers / Bass / Drum / Inst / Clips / Vox.  `BaySickRustyDrumsPage` (a `TabType::Drums` ribbon tab whose component is NOT `DrumPage`) falls through silently — neither mixer-strip rename nor piano-roll-label propagation fires.  Pre-QA-D behavior was identical (only L/B/D branches existed); NOT a regression.  Defer to QA-Audit or a Rusty-cleanup batch.
 - **NIT-2** `restoreAudioStripsFromArrangement` `clearDirty()` assumes load-path-only callers — [Source/Standalone/StandaloneEditor.cpp `restoreAudioStripsFromArrangement`](../Source/Standalone/StandaloneEditor.cpp).  Inline comment correctly justifies that all 5 current callers are load paths so the unconditional `clearDirty()` at end is sound today.  Future trap if a non-load caller is added — `clearDirty()` would silently discard a real dirty edit.  Comment is sufficient mitigation; consider asserting all callers are load paths or guarding with a `loadContext` bool when this code is next touched.  Defer.

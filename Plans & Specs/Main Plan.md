@@ -765,26 +765,61 @@ needed to find what you should pull up to review the work.
   - **MIX-02 / MIX-04 / MIX-06** — Vox/Inst tab reload destroys mixer
     strip + phantom strips on reload (MIX-03 falls out as side effect).
   - **REC-01** — Vox/Inst recording library hand-off broken.
-  - **FILE-01** — Vox wet delete should land in browser bin, not OS delete
-    (tie to RetirementQueue / Browser bin).
+  - **FILE-01** — Vox wet + Vox dry + Inst dry recordings should appear
+    in the Audio browser panel (Vox / Inst categories) so the user can
+    drag any of them onto the Builder grid.  Currently none appear in
+    the browser because page-bound paths aren't `audioLibrary`-
+    registered (Vox wet, Inst dry) and Vox dry isn't page-bound at all.
+    Fix: extend `VoxPage` with a `dryClipPath` slot + setter; recording
+    finalize binds dry to the Vox page in addition to wet;
+    `addAudioToLibrary` called for every recorded file at finalize;
+    browser walk emits one `CategorizedAudioEntry` per non-empty
+    page-bound path (Vox = wet + dry, Inst = dry).  Wet/dry tag flows
+    naturally via the filename suffix ("- DRY.wav" / "- WET.wav" baked
+    at record time, [Source/PluginProcessor.cpp:3490](Source/PluginProcessor.cpp:3490)
+    / :3501); existing `renameAudioAt` + `ensureUniqueBrowserName`
+    titling system handles user-renames + uniqueness checks unchanged.
+    Drag-from-browser behavior: dry and wet are first-class audio
+    clips, both droppable on the grid, both routable to a Vox/Inst
+    page; multiple clips routed to the same page all pass through that
+    page's signal chain.  Reworded 2026-05-11 (original "Vox wet
+    delete should land in browser bin" framing was a wording drift
+    from the underlying Master QA Backlog entry "does not land in
+    browser panel"; no "browser bin" / `RetirementQueue` UI is being
+    introduced).
   - **DSP-09** — Bus solo: solo a bus → that bus + incoming strips plays;
     other buses silenced at master mix.
   - **FILE-02** — Multi-recording on a single player page via
     Properties-popup routing dropdown (Vox / Inst / Clips, defaulting to
     creating page; immediate rebuild on change).
   - **Dead Properties cleanup** — delete [BuilderPage.cpp:2561](Source/Standalone/BuilderPage.cpp:2561).
-  - **Folded in 2026-05-07 (QA-0a finding #13 via Rule 3)**: use-after-free
-    crash in `StandaloneEditor::showPageForTab` lambda at
-    `StandaloneEditor.cpp:4135` -- `[this, ip, syncPagePresetMenu, labels]`
-    capture stores a raw `InstPage*` that gets freed when the InstPage
-    destructs (engine swap / project reload).  Confirmed via
-    `0xDDDDDDDDDDDDDDDD` debug-fill marker.  Fix: capture by
-    `juce::Component::SafePointer<InstPage>` OR look up the page by index
-    inside the lambda each click.
-  - **Folded in 2026-05-07 (QA-0 finding #14 via Rule 3)**: same family as
-    #13 -- use-after-free on Clips player-page Piano Roll button at
-    `StandaloneEditor.cpp:4048` lambda __l41 / __l10.  Same SafePointer
-    or index-lookup fix.
+  - **Folded in 2026-05-07 (QA-0a finding #13 + QA-0 finding #14 via Rule 3); audit-expanded 2026-05-11 (Sub-Phase A -- see §9 twelfth Forks entry)**:
+    use-after-free crash family in `StandaloneEditor::showPageForTab`
+    lambdas.  Originally captured 2 sites (#13 InstPage at line 4135,
+    #14 ClipsPage Piano Roll button at line 4048).  Audit at QA-E open
+    2026-05-11 (triggered by user repro of the DrumPage "Drum Kit"
+    sub-tab crash, same family) expanded to **all 7 page-type branches**
+    in `showPageForTab`: LayersPage 4080, BassPage 4114, ClipsPage 4156,
+    VoxPage 4197, InstPage 4239, DrumPage 4300, BaySickRustyDrumsPage
+    4334.  Each branch's `mPageMenuBar->setTabSlots(...)` callback
+    captures the page's raw pointer into the onClick lambda; page
+    destruction between dispatch and fire (engine swap, project reload,
+    tab delete + re-add) leaves the lambda holding a dangling pointer
+    -- next click crashes.  Secondary finding: 5 of 7 branches have an
+    "inner SafePointer" pattern (ClipsPage 4144, LayersPage 4070,
+    BassPage 4104, VoxPage 4185, InstPage 4219, DrumPage 4287) that's
+    ALSO wrong -- the SafePointer is constructed inside the lambda body
+    from a raw `xp` that may already be dangling at fire time.  Fix
+    (locked 2026-05-11 as **C-i**, matches existing convention in the
+    same file): lift `juce::Component::SafePointer<XxxPage> safe (xp);`
+    to outer scope right after `dynamic_cast`; replace every
+    `[this, xp, ...]` capture with `[this, safe, ...]`; inside lambdas
+    use `if (auto* p = safe.getComponent()) { ... }`.  Mechanical,
+    branch-symmetric.  DrumPage repro user-confirmed 2026-05-11;
+    LayersPage / BassPage / VoxPage / BaySickRustyDrumsPage vulnerable
+    per audit but untested by Jeff yet.  Confirmed #40 (QA-A close
+    re-sighting) + #55 (QA-D close re-sighting) are the same family;
+    no new captures needed.
   - **Folded in 2026-05-07 (QA-0 findings #16a + #16b + #21 via Rule 3)**:
     pattern row-level mute + per-pattern-block right-click "mute" + audio
     track row mute (with audio clip) all have asymmetric / non-functional
@@ -797,7 +832,12 @@ needed to find what you should pull up to review the work.
     - **BLU-470** "Audio recording findings" — document master mix + per-track arm + debug pops; verify recording lifecycle works end-to-end.
     - **Vox recording not playing on Builder after recording** (QA-Inventory walk runtime test) — Vox strip records audio successfully, file lands in library, but builder grid playback shows the clip silent. Likely related to FilePlay routing (`mForcePitchBypass=true` set on FilePlay paths but never cleared after stop) OR the auto-spawned ClipsBus path stealing the audio (DSP-12 family).
     - **Inst recording not playing on Builder after recording** (same issue, also tested) — same surface as Vox; covers the parallel Inst path through `BaySickGuitars` / `BaySickBasses` / `BaySickPedals` chain.
-    - **Pedalboard presets don't work** (QA-Inventory walk runtime test) — preset save/load for `BaySickPedalsProcessor` either round-trips wrong slot configuration or doesn't restore parameters. Same surface family as REC-01 (engine-level state restoration). NOTE: this also expands QA-Verify scope to verify ALL preset paths across all engines (Harmless, BaySickPlayer, BaySickSynth, BaySickBass, BaySickPedals, BaySickVocal, BaySickGuitars, BaySickBasses, BaySickRustyDrums, BaySickNAMIR).
+    - **Pedalboard presets don't work** (QA-Inventory walk runtime test) — preset save/load for `BaySickPedalsProcessor` either round-trips wrong slot configuration or doesn't restore parameters. Same surface family as REC-01 (engine-level state restoration). NOTE: this also expands QA-Verify scope to verify ALL preset paths across all engines (Harmless, BaySickPlayer, BaySickSynth, BaySickBass, BaySickPedals, BaySickVocal, BaySickGuitars, BaySickBasses, BaySickRustyDrums, BaySickNAMIR).  **Re-routed 2026-05-11 to R3B-i:** all preset-related work (including the BaySickPedals fix) moves to QA-Verify; QA-E does not touch preset code.  REC-01's Vox+Inst-not-playing sub-items are R-2-a subsumed by FILE-01 (browser visibility fix resolves the playback path); BLU-470 sub-item is R-1-c (documentation + verify + fix anything verify surfaces) executed inside QA-E REC-01 surface as it touches the same recording lifecycle code.
+  - **Folded in 2026-05-11 (QA-D close NIT carry-forward via §9 eleventh Forks entry)** -- **Sub-Phase Z: QA-D NIT corrections**.  Three QA-D NITs returned by `/review-batch` at close on 2026-05-10 that were bulk-deferred without Jeff's per-finding call (violated `feedback_qa_batches_fix_bugs_dont_defer.md`).  Three are scope-completion gaps in QA-D's own commits and fold here as a final sub-phase sequenced after Dead Properties cleanup and before the close sequence:
+    - **NIT-1** `BaySickRustyDrumsPage` missing from `onTabRenamed` page-type dispatch ([Source/Standalone/StandaloneEditor.cpp:1263-1315](Source/Standalone/StandaloneEditor.cpp)); QA-D Task 2.8 dispatch landed for 6 page types but omitted this 7th.  Add the dispatch branch (1-line mechanical addition mirroring the other 6).
+    - **NIT-2** `restoreAudioStripsFromArrangement` `clearDirty()` assumes load-path-only callers; inline comment is documentation not a guard.  Add a `loadContext` bool parameter OR `jassert` that all callers are load paths (defensive guard against the trap if a non-load caller is ever added).
+    - **NIT-3** Legacy `"Drums"` / `"Layers"` / `"Bass"` tab names from pre-QA-D saved projects don't bump the STATE-02 monotonic counters; loading an old project leaves counter at 0 and next user-added tab collides.  Extend `advanceCountersFromRestoredTabs` parser to handle no-number-tail legacy names (bump counter to at-least-1 on each legacy match).
+    - NIT-4 (per-page `LayersPage::setTabName` dead-`mPianoRoll` writeback) is dead-code shape and routes to **QA-Cleanup-1** (Phase 6 source cleanup), NOT QA-E.
 - Scope: SINGLE coordinated batch because all touch the MixerPage spawn
   cascade + project XML restoration walker + StripRecorder finalize +
   bus DSP path. Splitting causes merge churn. Walk the full Vox/Inst
@@ -813,7 +853,11 @@ needed to find what you should pull up to review the work.
 - Dependencies: QA-0 (FILE-02's "fix Clips setup so they work in both
   places" depends on Composite RenderTask), QA-D (clean project load
   baseline).
-- Effort: large (~10-14 hours, possibly multiple sessions).
+- Effort: large (~12-16 hours, possibly multiple sessions; bumped from
+  ~10-14 hours per QA-E open scope expansion 2026-05-11 -- Sub-Phase A
+  crash family expanded from 2 to 7 sites adds ~1.5 hr, Sub-Phase Z
+  QA-D NIT corrections adds ~1-2 hr, BaySickPedals + all-engines preset
+  audit removed via R3B-i routing to QA-Verify).
 - Trade-off: COULD split into QA-E1 (Vox/Inst lifecycle MIX-02..06 + REC-01),
   QA-E2 (DSP-09 bus solo standalone), QA-E3 (FILE-02 multi-record routing).
   User confirmed bundled (Q6 Option A). Re-evaluate at start if scope feels
@@ -919,10 +963,11 @@ needed to find what you should pull up to review the work.
     expectedFilePos even when mute-gated, OR seeks on unmute to current
     project transport.
   - **Folded in 2026-05-08 (QA-Inventory close via Rule 3)** — BLU-501 "Prune stale applicators on swap" (memory cleanliness in audio-thread automation applicator map; memory leak on engine swap). Same surface family as the audio-thread renderAudioClipsForRow restructure.
+  - **Folded in 2026-05-11 (QA-E open-time finding via Rule 3; see §9 thirteenth Forks entry)** — FilePlay multi-clip restructure: extend the once-per-sum restructure to the FilePlay path (per-page engine + insert chain).  Two clips routed to the same Vox/Inst page should mix into one input buffer per page, then run the engine + insert chain once per page, rather than processing each clip sequentially through the shared engine state (which leaves compressor envelope / reverb tail / LFO phase from clip A bleeding into clip B's processing pass).  Touches Pass 1 loop at [Source/PluginProcessor.cpp:2415-2433](Source/PluginProcessor.cpp:2415), `renderFilePlayPlayer` at [Source/PluginProcessor.cpp:867-901](Source/PluginProcessor.cpp:867), and MT-path equivalents in [Source/Engine/Tasks/VoxStripTask.cpp](Source/Engine/Tasks/VoxStripTask.cpp) + [Source/Engine/Tasks/InstStripTask.cpp](Source/Engine/Tasks/InstStripTask.cpp).
 - Risk: high. Architectural restructure, audio thread, MT-aware.
 - Dependencies: QA-0 (composite task pattern established) + QA-E
   (audio clip surface stability).
-- Effort: large (~8-12 hours; folded streamer-sync + applicator cleanup adds ~2 hours).
+- Effort: large (~12-16 hours; folded streamer-sync + applicator cleanup adds ~2 hours; folded FilePlay restructure adds ~3-4 hours).
 
 #### **QA-K: Audio Engine Polish**
 - Items: APP-04 (SetPriorityClass + MMCSS), APP-05 (Open ASIO Control
@@ -1126,6 +1171,7 @@ Every component in the build gets classified into:
 
 #### **QA-Cleanup-1: Source code cleanup**
 - Items: execute the source-code section of the QA-Audit manifest.
+  - **Folded in 2026-05-11 (QA-D close NIT-4 carry-forward via §9 eleventh Forks entry)**: per-page `LayersPage::setTabName` writeback to dead `mPianoRoll` state ([Source/Standalone/LayersPage.cpp:321-325](Source/Standalone/LayersPage.cpp) + parallels in `BassPage` / `DrumPage`).  QA-D STATE-02 added the writeback path that lands at a now-dead piano-roll state member (`mPianoRoll` is allocated but not user-visible post-D-5; unified `PianoRollPage` is what the user sees).  Two fix shapes: (i) minimal symptom-fix — delete the `setTabName` writeback lines in each per-page; (ii) full per-page `mPianoRoll` drop — delete the dead member entirely + walk every reference.  Routes here because dead-code shape, not functional bug.
 - Scope: delete Dead source files; add `// HOLD-FOR-<reason>` comments
   for Dormant + one-line implemented-work entries for each; clean up
   stale comments referencing deleted code.
@@ -1133,7 +1179,7 @@ Every component in the build gets classified into:
 - Mitigation: build after every delete; full verification ladder
   (Section 7's per-batch list) after each meaningful chunk.
 - Dependencies: QA-Audit.
-- Effort: medium-large (~6-10 hours).
+- Effort: medium-large (~6-10 hours; folded NIT-4 adds ~15-90 min depending on fix shape chosen).
 
 #### **QA-PlayerRename: VibePlayer/* → BaySickPlayer/* internal rename** (forked in 2026-05-10 — see §9)
 - Items: QA-A finding #39 (close-time routing).
@@ -2207,3 +2253,335 @@ COMMIT (run prior to this entry's draft).
 - No new running-notes or batch-plan files (QA-B kickoff aborted; will resume after QA-E lands).
 
 **Verification:** This fork closes when QA-B actually runs (post-QA-E) and produces a normal Implemented Work Log close entry. Until then, the deferral itself is the active state.
+
+### 2026-05-11 — QA-D close NIT bulk-defer corrected mid-QA-E (Rule 3 routing + new process gate)
+
+**Trigger:** QA-E open session (2026-05-11).  Pre-batch read of the
+QA-D close entry surfaced that the 4 NITs returned by `/review-batch`
+on 2026-05-10 had been bulk-deferred into the close entry's
+"Deferred NITs" section without each finding being individually
+surfaced to Jeff for fix-vs-defer call.  That bulk-defer violates
+`feedback_qa_batches_fix_bugs_dont_defer.md` (locked mid-QA-D
+2026-05-10 — "real bugs surfaced mid-QA-batch get fixed in-batch by
+default; deferral requires explicit justification + Jeff's call").
+The QA-D close commit `d6c84c6` landed before Jeff had the chance to
+make the call per-finding.
+
+**Diagnosis:** of the 4 NITs, three are scope-completion gaps inside
+QA-D's own commits and one is dead-code shape that belongs with the
+Phase 6 cleanup pass:
+
+- **NIT-1 — `BaySickRustyDrumsPage` missing from `onTabRenamed`
+  dispatch** (`Source/Standalone/StandaloneEditor.cpp:1263-1315`).
+  QA-D Task 2.8's explicit success criterion was "ribbon-rename
+  propagates to piano-roll label."  The dispatch landed for 6 page
+  types but omitted `BaySickRustyDrumsPage` -- functional regression
+  on the kit-engine page, in scope of the task that shipped.
+
+- **NIT-2 — `restoreAudioStripsFromArrangement` `clearDirty()`
+  assumes load-path-only callers.**  QA-D Task 3 commit `6288e85`
+  introduced the `clearDirty()` call; the inline comment ("called
+  only on project load") is documentation, not a guard.  If a future
+  caller invokes the restore path outside load (rebuild / repair /
+  partial-merge), the dirty marker silently clears under user edits.
+
+- **NIT-3 — Legacy `"Drums"` / `"Layers"` / `"Bass"` tab names from
+  pre-QA-D saved projects don't bump the new monotonic counters.**
+  QA-D Task 2 commit `a8796c9` introduced the STATE-02 monotonic
+  counters but left the pre-QA-D-saved-project migration path
+  unaddressed; loading an older project leaves the next-suffix
+  counter at 0 and the next user-added tab collides.
+
+- **NIT-4 — Per-page `LayersPage::setTabName` writeback to dead
+  `mPianoRoll` state.**  QA-D Task 2.6 / 2.7 / 2.8 added the
+  writeback path that lands at a now-dead piano-roll state member.
+  Dead-code shape, not a functional bug.
+
+**Decision (R2 path — fix in current open batch + §9 Forks entry
+that back-refs the prior batch):**
+
+- **NIT-1 / NIT-2 / NIT-3** fold into QA-E as a new final sub-phase
+  ("Sub-Phase Z — QA-D NIT corrections"), sequenced after the Dead
+  Properties cleanup work and before the close sequence.  Functional
+  fixes, mechanical to apply, sit naturally with QA-E's existing
+  scope (tab-callback wiring + project-state correctness).
+- **NIT-4** routes to QA-Cleanup-1 (Phase 6 source-code cleanup) per
+  Jeff's call.  The per-page `mPianoRoll` dead-writeback is
+  dead-code cleanup, not a functional fix, and belongs with the
+  other dead-code-deletion work in QA-Cleanup-1.
+- QA-D's commits stay intact; **no rewrite**.  The QA-D close
+  entry's "Deferred NITs" section gets a small amendment note
+  pointing to this Forks entry so future readers see the correction
+  trail.
+
+**Process discipline locked mid-this-conversation
+(workflow-shaping):**
+
+- **New memory rule
+  `feedback_closed_batch_carryforward_via_forks.md`.**  Findings
+  discovered AFTER a previous batch's close (re-sighting of deferred
+  items, audits surfacing gaps, `/review-batch` outcomes at close
+  that weren't individually surfaced) get fixed in the current open
+  batch + recorded via a §9 Forks entry that back-refs the original
+  batch.  Never reopen the prior batch's commits.  Never leave
+  deferred without Jeff's call.
+- **Update to `feedback_qa_batches_fix_bugs_dont_defer.md`.**
+  Cross-ref pointer to the new memory rule so the existing
+  in-batch-fix-by-default rule explicitly covers both mid-batch AND
+  post-close cases.
+- **Going-forward gate:** every future `/review-batch` outcome
+  surfaces each finding individually with options before the close
+  entry is drafted.  No bulk "all deferred (pre-existing /
+  harmless)" framing.  Severity (BLOCKER / NEEDS-FIX / NIT) does
+  not collapse the surface-individually requirement.
+
+**Carry-forward contradictions:** none.  NITs are minor by
+definition; routing them through the canonical Forks mechanism
+doesn't change architectural facts in Carry-Forward §1-§3.  QA-D's
+shipped fixes (STATE-01/02/04 + MenuBarModel listener-dangle) remain
+correct as committed.
+
+**Inline back-refs:**
+- §5 QA-E entry: new "Sub-Phase Z — QA-D NIT corrections"
+  sub-section under the folded findings list; bullets NIT-1 / NIT-2
+  / NIT-3 with brief fix shape + back-ref to this Forks entry.
+- §5 QA-Cleanup-1 entry: scope list gains NIT-4 (per-page
+  `mPianoRoll` dead-writeback removal).
+- `Implemented Work Log.md` QA-D close entry: amendment note in the
+  "Deferred NITs" section reading "Premature bulk-defer; routing
+  corrected via §9 Forks entry 2026-05-11."
+- §9 Forks: this entry (eleventh).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 QA-E
+  "Sub-Phase Z" sub-section + §5 QA-Cleanup-1 scope addition.
+- `Plans & Specs/Implemented Work Log.md` — QA-D close entry
+  amendment note.
+- `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` (QA-E
+  plan file) — Sub-Phase Z entry routing to this Forks entry.
+- `C:\Users\jeffm\.claude\projects\C--Users-jeffm-Documents-BaySickDAW\memory\feedback_closed_batch_carryforward_via_forks.md`
+  (new memory file).
+- `C:\Users\jeffm\.claude\projects\C--Users-jeffm-Documents-BaySickDAW\memory\feedback_qa_batches_fix_bugs_dont_defer.md`
+  (cross-ref pointer added).
+
+**Verification:** fork closes when (a) §5 QA-E entry updated with
+Sub-Phase Z, (b) §5 QA-Cleanup-1 entry updated with NIT-4, (c)
+`Implemented Work Log.md` QA-D close amendment note added, (d) both
+memory rule files saved, (e) QA-E plan file
+(`phantom-recording-mongoose.md`) drafted with Sub-Phase Z routing
+correctly to this Forks entry, (f) Sub-Phase Z's three fixes
+verified by Jeff in Debug + Release at QA-E close.
+
+### 2026-05-11 — QA-E Sub-Phase A scope expanded: showPageForTab lambda crashes affect all 7 page-type branches, not 2
+
+**Trigger:** QA-E open (2026-05-11).  User repro'd one of the
+use-after-free crashes originally captured at QA-0 close (findings #13 +
+#14) by clicking the "Drum Kit" sub-tab button on a DrumPage's menu bar.
+The original captures had identified only TWO crash sites in
+`StandaloneEditor::showPageForTab` -- #13 InstPage at line 4135 + #14
+ClipsPage Piano Roll button at line 4048 -- on the implicit assumption
+that those were the surfaces actually exercised in normal use.  User
+asked the obvious follow-up: the deep-link sub-tab buttons are the same
+button class doing the same thing across page types, so why would only
+two of seven be vulnerable.
+
+**Diagnosis:** Source audit of `StandaloneEditor::showPageForTab`
+(`Source/Standalone/StandaloneEditor.cpp`) confirmed all SEVEN
+page-type branches contain the unsafe raw-page-pointer capture
+pattern.  Each branch's `mPageMenuBar->setTabSlots(...)` callback
+captures the page's raw pointer (`lp` / `bp` / `cp` / `vp` / `ip` /
+`dp` / `rp`) into the onClick lambda; sub-tab buttons (Player /
+Piano Roll / Drum Kit / FX Rack / etc.) dispatch through those
+lambdas.  When the page is destroyed between dispatch and fire
+(engine swap, project reload, tab delete + re-add), the lambda
+fires with a dangling pointer.
+
+Vulnerable branches (all in `Source/Standalone/StandaloneEditor.cpp`):
+
+| Page type             | setTabSlots callback line | Status                            |
+|-----------------------|---------------------------|-----------------------------------|
+| LayersPage            | 4080                      | suspected (untested)              |
+| BassPage              | 4114                      | suspected (untested)              |
+| ClipsPage             | 4156                      | original #14 finding              |
+| VoxPage               | 4197                      | not user-tested                   |
+| InstPage              | 4239                      | original #13 finding              |
+| DrumPage              | 4300                      | user repro confirmed 2026-05-11   |
+| BaySickRustyDrumsPage | 4334                      | not user-tested                   |
+
+Secondary finding: the existing "inner SafePointer" pattern in 5 of 7
+branches (ClipsPage 4144 / LayersPage 4070 / BassPage 4104 / VoxPage
+4185 / InstPage 4219 / DrumPage 4287) is itself wrong.  The
+`juce::Component::SafePointer<X> safe (xp)` line lives INSIDE the
+lambda body and is constructed from a raw `xp` that may already be
+dangling at fire time.  Constructing a SafePointer from a freed raw
+pointer is undefined behavior -- the surrounding code "looks like"
+it's using SafePointer correctly, but the protective primitive is
+created too late to do its job.  Correct pattern: lift the
+SafePointer construction to the OUTER scope of each branch (right
+after the `dynamic_cast`) and capture the SafePointer (not the raw
+pointer) into every lambda below.
+
+**Options surfaced:**
+- **C-i (SafePointer-at-outer-scope).**  Lift
+  `juce::Component::SafePointer<XxxPage> safe (xp);` to the outer
+  scope of each branch; replace every `[this, xp, ...]` capture
+  with `[this, safe, ...]`; inside lambdas use
+  `if (auto* p = safe.getComponent()) { ... }`.  Mechanical,
+  branch-symmetric, matches the convention used elsewhere in the
+  same file, silent no-op when the page is gone.
+- **C-ii (index-lookup at fire-time).**  Capture only the tab index
+  + page kind; re-resolve the live page from the tab manager when
+  the lambda fires.  Strictly safer (cannot dangle by construction)
+  but surprising UX after engine swap (sub-tab click could land on
+  a different engine instance than the one the user clicked from)
+  and adds a new lookup primitive that doesn't exist elsewhere.
+
+**Decision (Rule 3 + closed-batch carry-forward via Forks):**
+Expand QA-E Sub-Phase A scope from "InstPage + ClipsPage lambdas
+only" (findings #13 / #14 / #40 / #55) to **all seven page-type
+branches in `showPageForTab` plus their `setTabSlots` callbacks**.
+Capture pattern: **C-i (SafePointer-at-outer-scope)** -- matches the
+existing convention in the same file, most JUCE-idiomatic, safest
+fallback (silent no-op instead of crash), no new primitive
+introduced.  Index-lookup (C-ii) rejected for the post-swap UX
+surprise.
+
+Effort estimate for Sub-Phase A bumps from ~30 min (two branches)
+to ~1.5-2 hr (seven branches + the inner-SafePointer-too-late fix
+in 5 of those + verify), all confined to a single function.
+
+**Carry-forward contradictions:** None.  Carry-Forward §1-§3 doesn't
+describe this specific pattern; the fix is mechanical lambda-capture
+hygiene, not an architectural primitive change.  No new vocabulary
+or new file:line primitives need adding to Carry-Forward.
+
+**Inline back-refs:**
+- §5 QA-E entry: Sub-Phase A scope description rewritten -- "originally
+  captured 2 sites (#13 InstPage at line 4135, #14 ClipsPage at line
+  4048); audit at QA-E open 2026-05-11 expanded to all 7 page-type
+  branches (LayersPage 4080, BassPage 4114, ClipsPage 4156, VoxPage
+  4197, InstPage 4239, DrumPage 4300, BaySickRustyDrumsPage 4334) +
+  their inner-SafePointer-too-late fixes (ClipsPage 4144, LayersPage
+  4070, BassPage 4104, VoxPage 4185, InstPage 4219, DrumPage 4287)".
+  Effort estimate bumped from ~30 min to ~1.5-2 hr.  Capture pattern
+  locked as SafePointer-at-outer-scope.
+- §9 Forks: this entry (twelfth).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` -- this entry + §5 QA-E entry update
+  (Sub-Phase A scope + effort estimate + capture pattern).
+- No source code changes in this routing entry; the SafePointer
+  rewrite lands as part of QA-E Sub-Phase A execution.
+- No new running-notes or batch-plan files (QA-E plan + running-notes
+  files already exist; the scope expansion gets recorded there in
+  the normal QA-E flow).
+
+**Verification:** This fork closes when (a) §5 QA-E entry reflects
+the expanded scope + the C-i capture pattern call, (b) QA-E Sub-Phase
+A lands the SafePointer-at-outer-scope pattern across all 7 branches
++ removes the inner-SafePointer-too-late lines from the 5 affected
+branches, (c) user verifies in Debug + Release that the DrumPage
+"Drum Kit" sub-tab crash repro no longer fires + spot-checks the
+other 6 page types' sub-tab buttons show no regression.
+
+### 2026-05-11 — QA-J scope expanded with FilePlay multi-clip restructure (QA-E open-time finding)
+
+**Trigger:** at QA-E open (2026-05-11), the user was confirming
+FILE-01's intent — both Vox wet + dry rendered clips visible in the
+browser, both droppable on the Builder grid, both routable through the
+same Vox page.  Source-side verification of the multi-clip-to-one-page
+case at [Source/PluginProcessor.cpp:2415-2433](Source/PluginProcessor.cpp:2415)
+(the FilePlay Pass 1 loop) showed that the architecture does support
+that routing — but in a way that processes each clip SEQUENTIALLY
+through the same engine + insert chain within a single audio block,
+rather than mixing the inputs once and running the chain once on the
+sum.  User flagged that this was never spec'd in the Batch 9b Item 9
+FilePlay routing work and is unacceptable for v1.
+
+**Diagnosis:** the FilePlay Pass 1 loop iterates
+`mCurrentBlockClipSnapshot->players` and calls `renderFilePlayPlayer`
+once per FilePlay-routed clip.  Each call (Vox branch at
+[Source/PluginProcessor.cpp:867-901](Source/PluginProcessor.cpp:867))
+clears the engine scratch buffer, copies one clip's audio in, calls
+`eng->processBlock(...)`, then routes via `mVibeGraph.processInsert` +
+`routeInsertOutput`.  Engine state + insert chain state persist across
+calls.  Two clips routed to the same Vox page = engine processBlock +
+insert chain runs TWICE on the same engine instance, sequentially,
+with state carry-over between calls.
+
+User-facing intent (both clips through the chain → summed at the
+parent bus) is delivered.  Second-order behavioral correctness is
+wrong: compressor envelope follower from clip A leaks into clip B's
+processing pass; reverb tail builds in arrival order; LFO phase
+advances per call.  Stateful DSP nodes in the insert chain are not
+designed to be re-entered mid-block on overlapping inputs.
+
+Industry-standard pattern: traditional audio tracks (FL Studio,
+Ableton, Logic, Pro Tools) sum the contents of an audio track into one
+buffer first, then run the insert chain ONCE on the sum.  Per-clip
+processing belongs to ARA-style offline editors (Melodyne, Newtone),
+not the live render path.
+
+The same architectural shape — "rack/EQ runs once per clip instead of
+once on sum" — already has a routed batch in §5: QA-J
+(DSP-06 Multi-Clip Stacking).  QA-J's existing scope is to fix this
+pattern for NON-FilePlay clips (`renderAudioClipsForRow`, per-row
+rack/EQ).  The FilePlay path has the identical pattern on different
+code (per-page Vox/Inst engine + insert chain).
+
+Note: an agent dispatch during the diagnosis speculated about FL
+Studio's internal ordering and was overruled by the user (FL DOES
+support audio-clip playback through Vox/Inst-style setups, and FL
+doesn't process per-clip in that flow).  Per
+`feedback_dont_speculate_about_fl_studio.md`, agent dispatches that
+speculate about FL Studio should be caught before passing through.
+
+**Decision (OPT-A — fold into QA-J):** extend QA-J's scope to cover
+BOTH paths:
+
+- Non-FilePlay (existing): `renderAudioClipsForRow` per-row pre-pass
+  that mixes all row clips into one buffer before running the rack/EQ
+  once per row.
+- FilePlay (new): per-page pre-pass that mixes all clips routed to
+  the same Vox/Inst page into one buffer before running the engine +
+  insert chain once per page.  Touches the Pass 1 loop at
+  [Source/PluginProcessor.cpp:2415-2433](Source/PluginProcessor.cpp:2415),
+  `renderFilePlayPlayer` at
+  [Source/PluginProcessor.cpp:867-901](Source/PluginProcessor.cpp:867),
+  and the MT-path equivalents in
+  [Source/Engine/Tasks/VoxStripTask.cpp](Source/Engine/Tasks/VoxStripTask.cpp)
+  and [Source/Engine/Tasks/InstStripTask.cpp](Source/Engine/Tasks/InstStripTask.cpp).
+
+QA-J's effort estimate goes from ~8-12 hours to ~12-16 hours.  Risk
+stays "high — architectural restructure, audio thread, MT-aware"
+(same risk tier).  Dependencies unchanged: QA-0 (composite task
+pattern established) + QA-E (audio clip surface stability) per
+existing declarations.
+
+**Carry-forward contradictions:** None.  Carry-Forward Reference's MT
+primitive section (§1) describes the dispatcher + task subclasses
+architecturally; the per-clip-vs-per-page-summed distinction is a
+within-task design choice, not an architectural primitive change.
+
+**Inline back-refs:**
+- §5 QA-J entry: new sub-bullet under scope — "Folded in 2026-05-11
+  (QA-E open-time finding via Rule 3)" — extending the once-per-sum
+  restructure to the FilePlay path (per-page engine + insert chain).
+  Two clips routed to the same Vox/Inst page should mix into one
+  input buffer per page, then run the engine + insert chain once per
+  page, rather than processing each clip sequentially through the
+  shared engine state.  Effort estimate range updated to "~12-16
+  hours; folded FilePlay restructure adds ~3-4 hours".
+- §9 Forks: this entry (thirteenth).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 QA-J scope sub-bullet
+  + effort estimate bump.
+- No source code changes from this Forks entry itself; the fix lands
+  in QA-J (post-QA-E per existing dependency).
+
+**Verification:** fork closes when (a) §5 QA-J entry gains the folded
+sub-bullet + updated effort estimate, (b) QA-J actually runs (post-
+QA-E per existing dependency) and produces an Implemented Work Log
+close entry that covers BOTH the non-FilePlay and FilePlay
+restructures.
