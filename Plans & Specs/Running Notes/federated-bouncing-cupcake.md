@@ -431,3 +431,28 @@ Both are the same family as findings #13 / #14 / #40 — captured-raw page ptr i
 - Commit Task 4 (single commit per S6).
 - Release verify deferred to batch close per S7.
 - Then Task 5: close sequence (`/draft-doc batch-close` -> apply Implemented Work Log entry -> `/review-batch` -> close commit).
+
+---
+
+### 2026-05-10 — Task 4 committed at `97e2b5d`
+
+- Commit: `97e2b5d` — "QA-D Task 4 source: MenuBarModel listener-dangle fix (folded QA-0a finding #8)."
+- 7 files committed: PianoRoll.h + .cpp, BuilderPage.h + .cpp, DrumKitGrid.h + .cpp, and the running-notes file.
+- 114 insertions / 5 deletions.
+- Working tree clean post-commit.  9 commits ahead of `origin/main`; not pushing per standing convention.
+- **All 4 source commits of QA-D landed.**  Open `003cfb1`, Task 1 `dcd771f`, Task 3 `6288e85`, Task 2 `a8796c9`, Task 4 `97e2b5d`.
+- **Next:** Task 5 — close sequence.  Dispatch `/draft-doc batch-close` to compile the Implemented Work Log entry from this file + git log; apply via Edit; dispatch `/review-batch QA-D` for code-review audit; address BLOCKERs/NEEDS-FIX inline + defer NITs into close entry; surface drafted close-commit message; commit.
+
+---
+
+### 2026-05-10 — Task 5 close sequence applied (pre-commit)
+
+- `/draft-doc batch-close` dispatched and result applied to [Plans & Specs/Implemented Work Log.md](../Implemented Work Log.md) — QA-D entry covers Bucket / Done (per task) / Found along the way (#48-#55) / What was done about each finding (table) / Deferred NITs (NIT-1..NIT-4) / `/review-batch` outcome / Carry-forward contradictions / Files touched / Commit(s) / Next action.
+- `/review-batch QA-D` dispatched: **READY-TO-COMMIT.**  0 BLOCKERs, 0 NEEDS-FIX, 4 NITs (all pre-existing or harmless, deferred into close entry):
+  - **NIT-1** BaySickRustyDrumsPage missing from `onTabRenamed` page-type dispatch (StandaloneEditor.cpp:1263-1315) — pre-QA-D behavior identical; defer to QA-Audit or a Rusty-cleanup batch.
+  - **NIT-2** `restoreAudioStripsFromArrangement` `clearDirty()` assumes load-path-only callers — comment is mitigation; defer.
+  - **NIT-3** Legacy `"Drums"` / `"Layers"` / `"Bass"` tab names from pre-QA-D saved projects don't bump the new counters — cosmetic-only; defer.
+  - **NIT-4** Per-page `LayersPage::setTabName` writes to dead `mPianoRoll` state — harmless writeback; defer to the D-5 dead-state cleanup batch.
+- Memory rule locked at close: `feedback_no_full_release_reverify_at_batch_close.md`.  Established 2026-05-10 after I surfaced a full Release re-verify gate at close — Jeff overruled twice (first "we've never done that after batch close", then clarification "I'm also already checking both as you've been telling me to").  Jeff's per-task verify cycle ALREADY covers Debug + Release; no separate batch-close pass.
+- Close entry adjusted to drop "Release verify deferred to batch close" framing per the new memory rule.
+- **Next:** dispatch `/draft-commit` for the close commit; surface message + git status; commit on Jeff's approval.
