@@ -404,6 +404,7 @@ class DrumKitContainer : public juce::Component,
 {
 public:
     DrumKitContainer();
+    ~DrumKitContainer() override;   // QA-D Task 4: defensive MenuBarComponent teardown
     void resized()                                                          override;
     void paint   (juce::Graphics&)                                          override;
     bool keyPressed(const juce::KeyPress& key)                              override;
@@ -491,8 +492,10 @@ private:
 
     friend class DrumKitMenuBar;
 
-    std::unique_ptr<juce::MenuBarComponent> mMenuBar;
+    // QA-D Task 4 / QA-0a finding #8: model declared FIRST so it outlives
+    // the MenuBarComponent during reverse-order destruction.
     std::unique_ptr<DrumKitMenuBar>         mMenuBarModel;
+    std::unique_ptr<juce::MenuBarComponent> mMenuBar;
 
     bool mLaneVisible { true };
 

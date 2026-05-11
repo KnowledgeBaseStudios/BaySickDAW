@@ -746,9 +746,11 @@ private:
     std::unique_ptr<juce::Viewport>       mGridViewport;
     std::unique_ptr<ArrangementGrid>      mGrid;
 
-    // Menu bar (sits above toolbar, replaces ≡ popup)
-    std::unique_ptr<juce::MenuBarComponent> mMenuBar;
+    // Menu bar (sits above toolbar, replaces hamburger popup).
+    // QA-D Task 4 / QA-0a finding #8: model declared FIRST so it outlives
+    // the MenuBarComponent during reverse-order destruction.
     std::unique_ptr<BuilderMenuBar>         mMenuBarModel;
+    std::unique_ptr<juce::MenuBarComponent> mMenuBar;
     static constexpr int kMenuBarH = 20;
 
     friend class BuilderMenuBar;

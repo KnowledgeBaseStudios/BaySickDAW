@@ -4412,6 +4412,15 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
 
 BuilderPage::~BuilderPage()
 {
+    // QA-D Task 4 (QA-0a finding #8): defensive teardown of the MenuBarComponent
+    // before its model is destroyed.  See PianoRollContainer::~PianoRollContainer
+    // for the rationale.
+    if (mMenuBar)
+    {
+        mMenuBar->setModel (nullptr);
+        mMenuBar.reset();
+    }
+
     stopTimer();
     if (auto* top = getTopLevelComponent())
         top->removeKeyListener(this);

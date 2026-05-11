@@ -368,3 +368,66 @@ All Tests A-G pass in Debug:
 
 - Commit Task 2 (single commit per S6).
 - Then Task 4 — MenuBarModel listener-dangle fix (PianoRoll.h:645-646 / BuilderPage.h:750-751 / DrumKitGrid.h:494-495 declaration-order swap + defensive destructor cleanup).
+
+---
+
+### 2026-05-10 — Task 2 committed at `a8796c9`
+
+- Commit: `a8796c9` — "QA-D Task 2 source: STATE-02 monotonic tab-name counters + folded context-label fixes."
+- 5 files committed: [Source/Standalone/PianoRollPage.h](Source/Standalone/PianoRollPage.h), [Source/Standalone/PianoRollPage.cpp](Source/Standalone/PianoRollPage.cpp), [Source/Standalone/StandaloneEditor.h](Source/Standalone/StandaloneEditor.h), [Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp), running-notes file.
+- 536 insertions / 43 deletions.
+- Working tree clean post-commit.  8 commits ahead of `origin/main`; not pushing per standing convention.
+- **Next:** Task 4 — MenuBarModel listener-dangle fix.  Touches [Source/Standalone/PianoRoll.h:645-646](Source/Standalone/PianoRoll.h:645), [Source/Standalone/BuilderPage.h:750-751](Source/Standalone/BuilderPage.h:750), [Source/Standalone/DrumKitGrid.h:494-495](Source/Standalone/DrumKitGrid.h:494) — declaration-order swap (model declared FIRST -> destroyed LAST per RAII reverse-destruction-order), plus defensive `mMenuBar->setModel(nullptr); mMenuBar.reset();` at top of each container's destructor in the corresponding .cpp files.  Folded #8 (QA-0a finding) routes here via §9 Forks first entry.
+
+---
+
+### 2026-05-10 — Task 4 source edits applied + Jeff-verified in Debug (uncommitted)
+
+MenuBarModel listener-dangle fix shipped.  Folded #8 (QA-0a finding) — a shared MenuBarModel could be destroyed BEFORE all MenuBarComponents that reference it during the `closeAllDynamicTabs` cascade, firing a `removeListener` `jassert` (suppressed in vendored JUCE) when JUCE's MenuBarComponent destructor tries to call back into the dead model.
+
+#### Root cause
+
+In all three affected headers, the `mMenuBar` (MenuBarComponent) unique_ptr was declared FIRST and the `mMenuBarModel` unique_ptr was declared SECOND:
+
+- [Source/Standalone/PianoRoll.h:645-646](Source/Standalone/PianoRoll.h:645)
+- [Source/Standalone/BuilderPage.h:750-751](Source/Standalone/BuilderPage.h:750)
+- [Source/Standalone/DrumKitGrid.h:494-495](Source/Standalone/DrumKitGrid.h:494)
+
+C++ destroys members in REVERSE declaration order, so the model died first, then the component — leaving the component briefly referencing a dead model during its own destruction.
+
+#### Fix shipped (two layers — root-cause + belt-and-suspenders)
+
+- **Declaration-order swap** in all three headers: `mMenuBarModel` now declared FIRST (destroyed LAST), `mMenuBar` declared SECOND (destroyed FIRST).  RAII-correct.
+- **Explicit destructor + defensive teardown** in each container's .cpp.  `PianoRollContainer` + `DrumKitContainer` previously had implicit destructors — added explicit `~PianoRollContainer()` + `~DrumKitContainer()` declarations to the headers; `BuilderPage` already had `~BuilderPage()`.  Each destructor body now starts with `if (mMenuBar) { mMenuBar->setModel(nullptr); mMenuBar.reset(); }` — explicitly clears the model pointer on the component and destroys the component before the model auto-destructs.
+
+#### Files
+
+- [Source/Standalone/PianoRoll.h](Source/Standalone/PianoRoll.h) + [Source/Standalone/PianoRoll.cpp](Source/Standalone/PianoRoll.cpp)
+- [Source/Standalone/BuilderPage.h](Source/Standalone/BuilderPage.h) + [Source/Standalone/BuilderPage.cpp](Source/Standalone/BuilderPage.cpp)
+- [Source/Standalone/DrumKitGrid.h](Source/Standalone/DrumKitGrid.h) + [Source/Standalone/DrumKitGrid.cpp](Source/Standalone/DrumKitGrid.cpp)
+
+6 edits across the 3 paired header/cpp files.
+
+#### Verification
+
+- Jeff verified in Debug: ran the `closeAllDynamicTabs` cascade flows (File -> New Project, File -> Open Recent -> another project), cycled top-level ribbon tabs (Piano Roll / Builder / BaySickRustyDrums) — no `jassert` dialogs.
+- Sub-tab nav buttons on player pages NOT clicked during this verify pass — those trip the QA-E-routed `showPageForTab` use-after-free (lambda captures raw page ptr; freed during teardown).
+
+#### Routing notes — `showPageForTab` lambda crashes re-sighted
+
+Two `showPageForTab` lambda crashes re-sighted during Task 4 verify:
+
+- StandaloneEditor.cpp line ~4085 (LayersPage Piano Roll button).
+- StandaloneEditor.cpp line ~4305 (DrumPage Drum Kit button).
+
+Both are the same family as findings #13 / #14 / #40 — captured-raw page ptr in tab-click lambdas; already routed to QA-E per §9 Forks third entry (2026-05-07) and re-confirmed in the ninth entry (2026-05-10).  NOT introduced by Task 4 work; NOT folded into QA-D (already-routed pre-batch).
+
+#### Diff totals
+
+- ~61 insertions / ~5 deletions across 7 files (6 source files + this running-notes file).
+
+#### Next
+
+- Commit Task 4 (single commit per S6).
+- Release verify deferred to batch close per S7.
+- Then Task 5: close sequence (`/draft-doc batch-close` -> apply Implemented Work Log entry -> `/review-batch` -> close commit).

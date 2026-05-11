@@ -3470,6 +3470,18 @@ void DrumKitContainer::paint(Graphics& g)
     g.drawHorizontalLine(kMenuBarH + kToolbarH - 1, 0.f, (float) getWidth());
 }
 
+DrumKitContainer::~DrumKitContainer()
+{
+    // QA-D Task 4 (QA-0a finding #8): defensive teardown of the MenuBarComponent
+    // before its model is destroyed.  See PianoRollContainer::~PianoRollContainer
+    // for the rationale -- same shape, same justification.
+    if (mMenuBar)
+    {
+        mMenuBar->setModel (nullptr);
+        mMenuBar.reset();
+    }
+}
+
 void DrumKitContainer::resized()
 {
     auto b = getLocalBounds();

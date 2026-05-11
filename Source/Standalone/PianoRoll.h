@@ -462,6 +462,7 @@ class PianoRollContainer : public juce::Component,
 {
 public:
     PianoRollContainer();
+    ~PianoRollContainer() override;   // QA-D Task 4: defensive MenuBarComponent teardown
     void resized()    override;
     void paint   (juce::Graphics&) override;
     bool keyPressed(const juce::KeyPress& key) override;
@@ -641,9 +642,12 @@ private:
 
     friend class PianoRollMenuBar;
 
-    // Menu bar
-    std::unique_ptr<juce::MenuBarComponent> mMenuBar;
+    // Menu bar.  QA-D Task 4 / QA-0a finding #8: model declared FIRST so it
+    // outlives the MenuBarComponent (member destruction order is reverse of
+    // declaration order; mMenuBar dies first, then mMenuBarModel).  Required
+    // because juce::MenuBarComponent's destructor calls back into its model.
     std::unique_ptr<PianoRollMenuBar>       mMenuBarModel;
+    std::unique_ptr<juce::MenuBarComponent> mMenuBar;
 
     // Scale / chord state (was in toolbar combos, now menu-driven)
     bool  mScaleActive  { false };

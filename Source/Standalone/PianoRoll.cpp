@@ -3105,6 +3105,22 @@ void PianoRollContainer::paint(Graphics& g)
     //  provides its own visual separation between grid and control lane.)
 }
 
+PianoRollContainer::~PianoRollContainer()
+{
+    // QA-D Task 4 (QA-0a finding #8): defensive teardown of the MenuBarComponent
+    // before its model is destroyed.  Header reorders the unique_ptrs so the
+    // model outlives the component naturally (reverse-declaration destruction
+    // order), but the explicit setModel(nullptr) + reset() here is the
+    // belt-and-suspenders that survives any future reordering or JUCE-side
+    // destructor change that would otherwise re-enable the assertion-firing
+    // removeListener call from juce::MenuBarComponent's dtor.
+    if (mMenuBar)
+    {
+        mMenuBar->setModel (nullptr);
+        mMenuBar.reset();
+    }
+}
+
 void PianoRollContainer::resized()
 {
     auto b = getLocalBounds();
