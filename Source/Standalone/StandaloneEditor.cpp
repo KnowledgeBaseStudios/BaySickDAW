@@ -448,6 +448,20 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
     // P5: dirty tracking wiring.
     mProjectManager->onDirtyChanged = [this] { refreshWindowTitle(); };
+
+    // QA-D STATE-04: stop transport before any project-open load begins.
+    // Mirrors the existing stop-on-Pause pattern used elsewhere in this file
+    // (search "mPlayHead.stop"); without this, opening a project mid-playback
+    // streams silence (or partially torn-down engine state) until the load
+    // finishes.
+    mProjectManager->onBeforeOpenProject = [this]
+    {
+        if (mPlayHead.isPlaying())
+        {
+            mPlayHead.stop();
+            if (mTransport) mTransport->setPlayState (false, true);
+        }
+    };
     mProcessor.onAnyStateChange = [this]
     {
         if (mProjectManager) mProjectManager->markDirty();

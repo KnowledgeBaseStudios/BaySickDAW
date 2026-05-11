@@ -90,3 +90,25 @@ standard recommendations and approved them.
 ### Routing notes (Rule 3, opened)
 
 - (none yet — file held open for findings during execution)
+
+---
+
+### 2026-05-10 — Task 0 close — commit landed
+
+- Commit: `003cfb1` — "QA-D open: plan file + Main Plan pointer (Project State Reset batch)."
+- 3 files committed:
+  - `Plans & Specs/Main Plan.md` (modified — §5 QA-D entry repointed at canonical plan file)
+  - `Plans & Specs/Batch Plans/federated-bouncing-cupcake.md` (added — mirrored from plan-mode, home-dir copy deleted)
+  - `Plans & Specs/Running Notes/federated-bouncing-cupcake.md` (added — this file, seeded)
+- Working tree clean.
+- 5 commits ahead of `origin/main`; not pushing per standing convention (push happens at batch close or explicit request).
+- **Next:** Task 1 — STATE-04 (project-load transport stop).  Shape: `StandalonePlayHead::stop()` invoked at top of `ProjectManager::openProject` via a callback hook installed by `StandaloneEditor` (ProjectManager doesn't link against StandalonePlayHead; callback indirection keeps the dependency direction one-way).
+
+---
+
+### 2026-05-10 — Task 1 source edits applied (uncommitted)
+
+- Added `std::function<void()> onBeforeOpenProject` public field to [Source/ProjectManager.h:157](Source/ProjectManager.h:157) (between existing `onDirtyChanged` and `setAutosaveIntervalSeconds`).
+- Invoked `onBeforeOpenProject` at top of [Source/ProjectManager.cpp:285](Source/ProjectManager.cpp:285) — before file-existence check.
+- Wired the callback in [Source/Standalone/StandaloneEditor.cpp:454](Source/Standalone/StandaloneEditor.cpp:454) right after `onDirtyChanged`: lambda stops transport + clears play-state if playing.
+- Jeff verified in Debug: load while playing now stops transport cleanly before the load.  Release verify pending after Task 3 commit lands (paired build cycle).

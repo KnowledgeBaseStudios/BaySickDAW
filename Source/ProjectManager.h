@@ -154,6 +154,14 @@ public:
     // StandaloneEditor to update the title-bar asterisk.
     std::function<void()> onDirtyChanged;
 
+    // QA-D STATE-04: fires at the top of openProject() before any load work
+    // starts.  Wired by StandaloneEditor to stop the transport / playhead so
+    // a project loaded mid-playback halts cleanly instead of streaming silence
+    // (or worse, half-torn-down engine state) into the audio thread until the
+    // load finishes.  ProjectManager doesn't link against StandalonePlayHead,
+    // so the callback indirection keeps the dependency direction one-way.
+    std::function<void()> onBeforeOpenProject;
+
     // Autosave interval in seconds.  Default 15 minutes (900s) per the
     // project-persistence lock.  Setting 0 disables autosave entirely.
     void setAutosaveIntervalSeconds (int seconds);

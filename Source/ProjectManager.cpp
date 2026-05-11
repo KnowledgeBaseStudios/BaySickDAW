@@ -279,6 +279,11 @@ bool ProjectManager::newProject (const juce::String& name,
 
 bool ProjectManager::openProject (const juce::File& folderOrXml)
 {
+    // QA-D STATE-04: stop the transport before any load work begins so a
+    // project opened mid-playback halts cleanly.  Hook is wired by
+    // StandaloneEditor; no-op when null (e.g. headless tests).
+    if (onBeforeOpenProject) onBeforeOpenProject();
+
     juce::File folder = folderOrXml.isDirectory()
                           ? folderOrXml
                           : folderOrXml.getParentDirectory();
