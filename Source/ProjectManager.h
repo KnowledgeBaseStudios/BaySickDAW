@@ -150,6 +150,17 @@ public:
     void clearDirty();
     bool isDirty() const { return mDirty; }
 
+    // QA-D STATE-01: project-load suppression accessors.  openProject already
+    // wraps deserializeProject with mIgnoreDirty, but follow-up load work
+    // that runs after openProject returns (e.g.
+    // StandaloneEditor::restoreAudioStripsFromArrangement -> applyPendingRack
+    // States, which fires EffectRack::clearSlot lifecycle dirty hooks) sits
+    // outside that window and needs to gate dirty fires too.  isLoadingProject
+    // returns the gate state; setIgnoreDirty flips it -- callers stash the
+    // prior value so they nest safely.
+    bool isLoadingProject() const noexcept { return mIgnoreDirty; }
+    void setIgnoreDirty (bool flag) noexcept { mIgnoreDirty = flag; }
+
     // onDirtyChanged fires when dirty transitions true<->false.  Wired by
     // StandaloneEditor to update the title-bar asterisk.
     std::function<void()> onDirtyChanged;

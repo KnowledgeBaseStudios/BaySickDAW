@@ -112,3 +112,64 @@ standard recommendations and approved them.
 - Invoked `onBeforeOpenProject` at top of [Source/ProjectManager.cpp:285](Source/ProjectManager.cpp:285) — before file-existence check.
 - Wired the callback in [Source/Standalone/StandaloneEditor.cpp:454](Source/Standalone/StandaloneEditor.cpp:454) right after `onDirtyChanged`: lambda stops transport + clears play-state if playing.
 - Jeff verified in Debug: load while playing now stops transport cleanly before the load.  Release verify pending after Task 3 commit lands (paired build cycle).
+
+---
+
+### 2026-05-10 — Task 1 committed at `dcd771f`
+
+- Commit: `dcd771f` — "QA-D Task 1 source: STATE-04 stop transport on project open."
+- 4 files committed: ProjectManager.h, ProjectManager.cpp, StandaloneEditor.cpp, running-notes file.
+- Working tree clean post-commit.  6 commits ahead of origin/main.
+
+---
+
+### 2026-05-10 — Task 3 (STATE-01) scope pivot + diagnostic + fix
+
+#### Scope pivot
+
+- Initial pre-batch plan: Task 3 wraps the `mProjectManager->markDirty()` callback at every wiring site (12 sites in StandaloneEditor) with `if (! isLoadingProject())` checks.
+- During execution Claude noted that `ProjectManager::markDirty()` already short-circuits when `mIgnoreDirty` is true (line 100 — has been since original P5 implementation, not QA-C as initially recalled).  Surfaced to Jeff with option to drop Task 3.
+- Jeff confirmed the bug is real: loaded a project via File → Open Recent, the title-bar `*` fired.  Existing gate is being bypassed somewhere.
+- Memory rule `feedback_diagnose_before_fixing.md` applied: diagnose before shipping a speculative fix.
+
+#### Diagnostic shipped + reverted
+
+- **Shipped** (now reverted): added private members `mPostLoadDiagnosticUntilMs` + `mPostLoadDiagnosticFired` to ProjectManager; opened a 3-second window at end of `openProject`; in `setDirtyInternal`, popped a one-shot AlertWindow with `juce::SystemStats::getStackBacktrace()` when dirty transitioned FALSE → TRUE inside the window.
+- Jeff built Debug + reproduced via File → Open Recent.  AlertWindow popped with the trace.
+
+#### Bypass identified (verbatim trace, top → bottom = recent → oldest)
+
+```
+0:  juce::SystemStats::getStackBacktrace
+1:  ProjectManager::setDirtyInternal
+2:  ProjectManager::markDirty
+3:  StandaloneEditor::StandaloneEditor lambda_3      <- the dirty hook from line ~482
+... (lambda machinery)
+7:  VibeSynthProcessor::prepareToPlay lambda_1       <- processor's onAnyStateChange wrapper
+... (lambda machinery)
+11: VibeGraph::rebindAllRackHooks lambda_1           <- rack-lifecycle hook wire-up
+... (lambda machinery)
+15: EffectRack::clearSlot + 0x373                    <- the rack-state replay clears a slot,
+16: EffectRack::setStateInformation + 0xcb9             firing the lifecycle hook chain
+17: VibeGraph::applyRackStates lambda_2 + 0x29d
+18: VibeGraph::applyRackStates + 0x109
+19: VibeGraph::loadRackStates + 0x81
+20: VibeSynthProcessor::applyPendingRackStates + 0xd7
+21: StandaloneEditor::restoreAudioStripsFromArrangement + 0x3a3  <- runs OUTSIDE gate
+22-25: StandaloneEditor::menuItemSelected `20` lambda_1 (File → Open Recent handler)
+```
+
+#### Diagnosis
+
+`restoreAudioStripsFromArrangement` is called from 5 menu-handler sites (StandaloneEditor.cpp:7790, 8213, 8251, 8355, 8507) — all load paths — AFTER `ProjectManager::openProject` returns.  The 2026-04-24 design intentionally defers per-insert rack-state replay until after `deserializeUIState` creates the InsertNodes, but no one wrapped that deferred replay (`applyPendingRackStates`) in the dirty-suppression gate.  The rack-state replay fires `EffectRack::clearSlot` lifecycle hooks → which chain through `VibeGraph::rebindAllRackHooks` lambda → `VibeSynthProcessor`'s `onAnyStateChange` lambda → StandaloneEditor's `markDirty` lambda → setDirtyInternal fires (outside the gate).
+
+#### Fix shipped
+
+- **Reverted** the diagnostic in [ProjectManager.h](Source/ProjectManager.h) + [ProjectManager.cpp:setDirtyInternal](Source/ProjectManager.cpp) + [ProjectManager.cpp:openProject](Source/ProjectManager.cpp) (3 reverts, all done before Task 1 commit).
+- **Added** public accessors `isLoadingProject()` + `setIgnoreDirty(bool)` to [ProjectManager.h:153-163](Source/ProjectManager.h:153) so call sites can gate manually.
+- **Wrapped** [`StandaloneEditor::restoreAudioStripsFromArrangement`](Source/Standalone/StandaloneEditor.cpp:9469) body with stash-set-restore-clear: `wasIgnoring = isLoadingProject()`; `setIgnoreDirty(true)` at top; body runs; `setIgnoreDirty(wasIgnoring); if (! wasIgnoring) clearDirty();` at end.  Every caller is a load path, so the clearDirty at end is correct (unsaved-edit confirmation prompts run earlier in each menu handler).
+- Jeff verified in Debug: load via File → Open Recent no longer fires `*`; tweaking a knob after load still triggers `*` correctly.  Release verify deferred to next build cycle.
+
+#### Routing notes
+
+- (none new — STATE-01 contained in batch).

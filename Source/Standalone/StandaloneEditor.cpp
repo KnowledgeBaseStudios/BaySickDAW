@@ -9470,6 +9470,20 @@ void StandaloneEditor::restoreAudioStripsFromArrangement()
 {
     if (mPM == nullptr) return;
 
+    // QA-D STATE-01: this method runs after ProjectManager::openProject
+    // returns -- outside its mIgnoreDirty window.  applyPendingRackStates
+    // below fires EffectRack::clearSlot lifecycle dirty hooks that chain
+    // through to markDirty, leaving the freshly-loaded project marked
+    // dirty.  Suppress dirty fires for the duration of the restore so the
+    // user doesn't see a spurious title-bar `*` on load.  Every caller of
+    // this method is a load path (Open Recent / Open Project Browser /
+    // New From Template / Restore Backup), so the clearDirty at the end
+    // is also correct -- prior unsaved edits are already discarded by
+    // reaching this point in the load sequence.  Stash + restore wasIgnoring
+    // so nested calls (theoretical) don't flip the gate prematurely.
+    const bool wasIgnoring = mProjectManager && mProjectManager->isLoadingProject();
+    if (mProjectManager) mProjectManager->setIgnoreDirty (true);
+
     for (int i = 0; i < mPM->getNumBlocks(); ++i)
     {
         const auto& b = mPM->getBlock (i);
@@ -9503,6 +9517,12 @@ void StandaloneEditor::restoreAudioStripsFromArrangement()
     // full project has been restored.  Transport BPM field picks it up on
     // its next timer tick.
     syncTempoFromPatternManager (mPlayHead, mTransport.get(), mPM.get());
+
+    if (mProjectManager)
+    {
+        mProjectManager->setIgnoreDirty (wasIgnoring);
+        if (! wasIgnoring) mProjectManager->clearDirty();
+    }
 }
 
 // ── R5d (2026-04-24): post-stop recording routing ───────────────────────────
