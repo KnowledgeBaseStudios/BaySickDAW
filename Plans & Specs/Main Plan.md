@@ -168,6 +168,39 @@ before writing.**
 | `Previously Implemented.md` | `## <Section>` (Header conventions, Sources surveyed, How to read, Entries) | `### Phase X - <Name>` grouping; `#### **<ID>: <Title>**` entries with uniform 5-line shape (Sources / Implemented / Source / Verified) |
 | `Future State.md` | `# Section N` major bands; `## <Cluster>` within | `- **[<ID> / <TAG>]** <Title> — <description>.` one-liner per item |
 
+**Batch Plans + Running Notes layout (locked 2026-05-11):**
+
+Per-batch files (`Plans & Specs/Batch Plans/<silly-name>.md` + paired
+`Plans & Specs/Running Notes/<silly-name>.md`) follow a uniform structure
+so plan execution is mechanical + verifiable.  Reference exemplar:
+[`Plans & Specs/Batch Plans/federated-bouncing-cupcake.md`](Batch Plans/federated-bouncing-cupcake.md)
+(QA-D).  Structure every new batch plan + running notes pair to match.
+
+**Plan file (`Batch Plans/<silly-name>.md`) required sections:**
+- Title line: `# QA-<Letter> — <Scope summary> — Plan (<silly-name>)`
+- Canonical-path callout + "For execution" note at top
+- **Context** — why this batch, risk, effort estimate, dependencies
+- **Spec calls already locked** — table with ID / Decision / Reasoning columns
+- **Sub-spec calls surfaced for ExitPlanMode** (or "No sub-spec calls open" if all resolved)
+- **Files to modify** — per-task list with file:line references for every surface touched
+- **Tasks** — numbered `### Task N — <Name>` sections, each containing:
+  - `- [ ]` checkbox steps for every executable action
+  - Embedded code blocks (```` ```cpp ```` / ```` ```markdown ````) showing non-trivial fix patterns, before/after pairs where useful
+  - Explicit "Tell Jeff: ..." verify scripts with numbered test scenarios `(1)`, `(2)`, `(3)` ...
+  - `/draft-commit` → surface drafted message + full git status → Jeff approves → commit step (per `feedback_surface_drafted_commit_message_for_approval.md` + `feedback_surface_full_git_status_before_commit.md`)
+  - `/draft-doc running-notes` dispatch + apply step (per `feedback_draft_doc_running_notes_every_checkpoint.md`)
+- **Verification (end-to-end smoke)** — final integration test scenarios after all source tasks land
+- **Routing notes (Rule 3 application during execution)** — guidance for findings that surface mid-batch
+- **Carry-Forward Reference touch points** — which §-sections to read at which task start
+
+**Running notes file (`Running Notes/<silly-name>.md`) required sections:**
+- Title line: `# Running Notes — QA-<Letter> (<silly-name>)`
+- Purpose blockquote explaining append-only nature + checkpoint trigger + close-time consumption
+- Pair file reference + convention reference
+- `## YYYY-MM-DD — Task N — <name>` entries appended at every checkpoint (commit landed / sub-task verified / finding captured / spec call resolved / scope pivot) per `feedback_draft_doc_running_notes_every_checkpoint.md`
+
+**Why the rigid structure:** plan files are read mid-execution by tired humans + agents.  Checkboxes turn the plan into a literal punch-list.  Code blocks pre-resolve "how does this change look in source" questions before commit.  Numbered verify scripts let Jeff drive the test cycle without rebuilding context each time.  Embedded "Tell Jeff:" markers make it unambiguous when execution pauses for the build cycle.  Pre-QA-D plan files don't fully match this shape; the rule applies going forward.
+
 **Folder-level scope (added 2026-05-08):**
 
 `Plans & Specs/` is the **umbrella for ALL durable project artifacts**,
@@ -761,6 +794,7 @@ needed to find what you should pull up to review the work.
 ### Phase 3 — Vox/Inst lifecycle + DSP cluster (the big consolidated batch)
 
 #### **QA-E: Vox/Inst Lifecycle + Recording + DSP-09 + FILE-02**
+**Plan file:** `Plans & Specs/Batch Plans/phantom-recording-mongoose.md`
 - Items consolidated per user direction (Q6 = Option A bundling):
   - **MIX-02 / MIX-04 / MIX-06** — Vox/Inst tab reload destroys mixer
     strip + phantom strips on reload (MIX-03 falls out as side effect).
