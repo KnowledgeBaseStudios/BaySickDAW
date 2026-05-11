@@ -173,3 +173,198 @@ standard recommendations and approved them.
 #### Routing notes
 
 - (none new — STATE-01 contained in batch).
+
+---
+
+### 2026-05-10 — Task 3 committed at `6288e85`
+
+- Commit: `6288e85` — "QA-D Task 3 source: STATE-01 suppress dirty `*` on project load."
+- Files committed: [Source/ProjectManager.h](Source/ProjectManager.h) (public `isLoadingProject()` + `setIgnoreDirty(bool)` accessors added), [Source/ProjectManager.cpp](Source/ProjectManager.cpp) (3 diagnostic reverts), [Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp) (`restoreAudioStripsFromArrangement` wrapped with stash-set-restore-clear gate).
+- Working tree clean at commit time.  7 commits ahead of `origin/main`; not pushing per standing convention.
+- **Next:** Task 2 — STATE-02 (monotonic tab-name counters), starting with two pre-implementation sub-spec calls (Sub-D + Sub-E) before any source edits.
+
+---
+
+### 2026-05-10 — Task 2 pre-implementation sub-spec calls (Sub-D + Sub-E)
+
+Two ambiguities surfaced before Task 2 source edits could begin; both routed to Jeff for resolution per `feedback_dont_make_unilateral_spec_calls.md`.
+
+- **Sub-D — BaySickBasses Inst-tab prefix (plural disambiguation).**  The Inst-tab type covers two engines (BaySickGuitars + BaySickBasses).  Existing convention names Inst-LiveInput tabs `Inst N`, BaySickGuitars Inst-tabs `Guitar N`.  A literal "Bass" prefix for BaySickBasses Inst-tabs would collide with the Bass-slot tabs ("Bass N" — Layers/Bass page).  Decision: BaySickBasses Inst-tabs use plural `Basses N` prefix to disambiguate.  Counter `mNextBassesNameNum` is distinct from `mNextBassNameNum`.
+- **Sub-E — Drums-from-file fallback name.**  When a drum tab is created from a dropped audio file, the existing code branches on whether the file path yields a stem name (used directly) or not (legacy fallback was the literal "Drums").  With monotonic counters in place, the no-stem branch needs a numbered fallback.  Decision: use `nextDrumTabName()` for the no-stem fallback (yields the next `Drum N` like the rest of the type).
+
+Also approved at the same surface: **helper-method approach** for the 8 counters — each gets an inline `nextXxxTabName()` method on `StandaloneEditor` (advances counter + returns formatted name in one call), keeping all 15 addTab sites to single-line edits.
+
+---
+
+### 2026-05-10 — Task 2.1-2.5 source edits applied (uncommitted)
+
+Monotonic tab-name counters across all 8 dynamic-tab types.  Counter values reset to 1 on `closeAllDynamicTabs()`; advanced past `max(restored-name-numbers) + 1` after `deserializeUIState`.
+
+#### Header additions ([Source/Standalone/StandaloneEditor.h](Source/Standalone/StandaloneEditor.h))
+
+- 8 counter members added to private section (after existing `mUsedDrumIndices`): `mNextLayerNameNum`, `mNextBassNameNum`, `mNextDrumNameNum`, `mNextVoxNameNum`, `mNextInstNameNum`, `mNextGuitarNameNum`, `mNextBassesNameNum`, `mNextClipNameNum` — all `int { 1 }`.
+- 8 inline helper methods on `StandaloneEditor` — each `juce::String nextXxxTabName()` advances its counter + returns the formatted prefixed name.  Inlined in the header for single-line call-site clarity.
+- Two private member declarations added: `void resetProjectState()`, `void advanceCountersFromRestoredTabs()`.
+
+#### 15 `addTab` creation sites converted to helpers ([Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp))
+
+- 3 default-ctor sites: Layers (~1514), Bass (~1561), Drums (~1607).
+- 3 spawnDuplicate sites (Layer / Bass / Drum dropdown ▸ Duplicate).
+- 3 onAddTabRequest sites (switch case body — `name = nextXxxTabName()` for Layer/Bass/Drum branches).
+- 2 spawnTemplate sites (Layer + Bass — `spawnLayerTabFromTemplate` / `spawnBassTabFromTemplate`).
+- 1 Drums-from-file site — preserves stem-name branch; replaces literal "Drums" fallback with `nextDrumTabName()` per Sub-E.
+- 2 BaySick* sites: Guitars (~6505 — `nextGuitarTabName()`) + Basses (~6585 — `nextBassesTabName()`, **replacing the pre-existing scan-and-count loop** that walked `mPages` to find the next free `Basses N` slot).
+- 1 Vox site (replaces ad-hoc `voxIdx + 1` increment).
+- 1 Inst-LiveInput site (replaces ad-hoc `instIdx + 1` increment).
+- 1 Clips site (replaces `audioRow + 1` fallback only — primary clip-name path that uses file stem name is untouched).
+
+#### Sites left untouched
+
+- BaySickRustyDrums (singleton — fixed name `BaySickRustyDrums`, no counter).
+- 3 deserialize-restore paths (project-load creation uses the saved-XML `<Tab name="...">` attribute directly; counter advance happens after via `advanceCountersFromRestoredTabs`).
+
+#### Internal `mTabName` sync (Task 2.3)
+
+- `setTabName` syncs added at every Layer/Bass/Drum addTab call site (default + spawnDuplicate + spawnTemplate + onAddTabRequest paths) so each page's internal `mTabName` matches the ribbon label set by `addTab` (used by piano-roll context-label composition).  Pre-existing convention was to set `mTabName` separately from the ribbon label; this commit makes them set in lockstep.
+
+#### Lifecycle wiring
+
+- `void StandaloneEditor::resetProjectState()` added to .cpp after `closeAllDynamicTabs` — zeroes all 8 counters back to 1.
+- `void StandaloneEditor::advanceCountersFromRestoredTabs()` added to .cpp — scans `mPages` post-deserialize, parses the trailing numeric suffix from each tab's display name per type (handles `Layer N`, `Bass N`, `Drum N`, `Vox N`, `Clip N`; for `TabType::Inst` walks all three prefixes `Inst N` / `Guitar N` / `Basses N`), advances each counter to `max(found) + 1`.
+- `resetProjectState()` wired into `closeAllDynamicTabs` after the existing teardown loop, before `setProjectLoadInProgress(false)`.
+- `advanceCountersFromRestoredTabs()` wired into the end of `deserializeUIState` (after the final `mRibbon->selectTab(preferred)` call) so saved-project loads pick up restored numbering and resume monotonic past max.
+
+---
+
+### 2026-05-10 — Test E failure mid-Jeff-verify
+
+- Test E (from Task 2's verification plan): piano-roll context label should show `"{tabName} - {engineType}"` per CLAUDE.md 5F-6 design.
+- Tests A-D all passed (counter monotonicity post-delete, counter reset on new project, counter advance from saved-project load, Sub-D plural `Basses N` disambiguation).
+- Jeff observed Test E shows just `"{tabName}"` with no ` - engine` suffix.
+- **Diagnosis:** [`PianoRollPage::registerEngine`](Source/Standalone/PianoRollPage.cpp:91) calls `setContextLabel(conn.displayName)` with the bare display name.  [`PianoRollPage::setEngineDisplayName`](Source/Standalone/PianoRollPage.cpp:141) does the same.  The per-page `LayersPage`/`BassPage`/`DrumPage::refreshPianoRollContextLabel` helpers DO correctly compose `"{tabName} - {engineType-or-(no engine)}"` — but they operate on each page's INTERNAL `mPianoRoll`, which is dead state post-D-5 (the user sees the unified `PianoRollPage`'s container, not the per-page one).
+- **Origin:** pre-existing bug from the D-5 unified-piano-roll-page consolidation, not introduced by Task 2.  Surfaced now because Task 2's Test E paired tab-name changes with a piano-roll-label verification check.
+
+---
+
+### 2026-05-10 — Scope-pivot spec call + new memory rule
+
+- I (Claude) initially proposed routing Test E with three options: (a) new batch, (b) QA-Audit "Pre-release decisions to revisit" docket, (c) fold the fix into Task 2.  Recommended (b) as deferral with "cosmetic-only" framing.
+- Jeff overruled: *"QA is to find the bugs and take care of it, not suggest maybe in the future fixing the bug would be a cool idea."*  Folded fix into Task 2 (option c) — real bugs found mid-QA-batch get fixed in batch.
+- Memory rule locked: `feedback_qa_batches_fix_bugs_dont_defer.md` — the default for any real bug surfaced mid-QA-batch is fix-in-batch.  Deferral requires explicit justification + Jeff's call.
+
+---
+
+### 2026-05-10 — Task 2.6 (folded fix) source edits applied (uncommitted)
+
+Piano-roll context-label composition moved into the unified `PianoRollPage` so the engineType suffix appears on the label the user actually sees.
+
+#### `PianoRollPage.h` ([Source/Standalone/PianoRollPage.h](Source/Standalone/PianoRollPage.h))
+
+- Added `juce::String engineType` field to the `PianoRollConnection` struct.
+- Added public method declaration `void setEngineType(EngineId id, const juce::String& engineType)`.
+
+#### `PianoRollPage.cpp` ([Source/Standalone/PianoRollPage.cpp](Source/Standalone/PianoRollPage.cpp))
+
+- Added file-scope helper `static juce::String composeContextLabel(const PianoRollConnection& conn)` — returns `displayName + " - " + (engineType.isEmpty() ? "(no engine)" : engineType)`.
+- Updated `registerEngine` to use the helper.
+- Updated `setEngineDisplayName` to recompose the label using the stored `engineType`.
+- Added `setEngineType` method body — updates `engineType` on the stored connection + recomposes the label via the helper.
+
+#### `StandaloneEditor.cpp` ([Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp))
+
+- Wired 15 `onEngineSelected` callbacks (across default ctor, spawnDuplicate, onAddTabRequest, spawnTemplate, drums-from-file, deserialize-restore) to call `mPianoRollPage->setEngineType({EngineKind::Xxx, pageIdx}, p->getEngineType())` immediately after the existing `wireEngineDirtyHook` call.
+- Seeded initial `conn.engineType = lp->getEngineType()` (and `bp` + `dp` variants) inside `registerLayerPianoRoll` / `registerBassPianoRoll` / `registerDrumPianoRoll` so deserialize-restore paths (where the engine state is already set when register is called) pick up `engineType` at registration time, not on a later setEngineType callback.
+
+#### Diff totals
+
+- 4 files: PianoRollPage.h, PianoRollPage.cpp, StandaloneEditor.h, StandaloneEditor.cpp.
+- ~281 insertions / ~43 deletions combined across Tasks 2.1-2.6.
+
+#### Verification
+
+- Awaiting Jeff's build + Tests A/B/C/D regression check (must still pass) + Tests E/F re-verify (E: context label now shows engineType suffix; F: deserialize-restore path also picks it up).
+
+---
+
+### 2026-05-10 — Task 2.7 (folded fix) — Guitars/Basses context-label fix shipped + verified
+
+Jeff verified Task 2.6 in Debug.  Tests A-D + Test E for Layer/Bass passed; Test E for Guitars/Basses failed with two distinct issues:
+
+1. Tab name showed `Inst N` instead of `Guitar N` / `Basses N` in the piano-roll context label.
+2. The engineType suffix was missing entirely.
+
+#### Root cause
+
+- [`addBaySickGuitarsTab`](Source/Standalone/StandaloneEditor.cpp) and [`addBaySickBassesTab`](Source/Standalone/StandaloneEditor.cpp) call `registerInstSourcePianoRoll(ip)` BEFORE renaming the tab from `Inst N` -> `Guitar N` / `Basses N`, so `PianoRollPage` receives the stale `displayName` at registration time.
+- [`registerInstSourcePianoRoll`](Source/Standalone/StandaloneEditor.cpp:7178) wasn't setting `conn.engineType` at all — Task 2.6 only seeded the field in the Layer/Bass/Drum `register*` helpers; the Inst-source variant was missed.
+
+#### Fix shipped
+
+- [`registerInstSourcePianoRoll`](Source/Standalone/StandaloneEditor.cpp:7178) now sets `conn.engineType` to `"BaySickGuitars"` or `"BaySickBasses"` based on `ip->getSource()`.
+- In [`addBaySickGuitarsTab`](Source/Standalone/StandaloneEditor.cpp) and [`addBaySickBassesTab`](Source/Standalone/StandaloneEditor.cpp), after the post-register rename to `Guitar N` / `Basses N`, added a call to `mPianoRollPage->setEngineDisplayName({EngineKind::BaySickGuitars, newIdx}, tabName)` (or `EngineKind::BaySickBasses`) so the stored `displayName` updates to match the ribbon name and the label recomposes.
+
+#### Files
+
+- [Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp) (3 edits — `registerInstSourcePianoRoll` engineType seed + post-rename `setEngineDisplayName` push in both addBaySick* helpers).
+
+#### Verification
+
+- Jeff verified in Debug: `Guitar 1 - BaySickGuitars` and `Basses 1 - BaySickBasses` labels now render correctly post-add.
+
+---
+
+### 2026-05-10 — Task 2.8 (folded fix) — Ribbon-rename propagation to piano-roll context label shipped + verified
+
+Jeff verified Task 2.7; flagged a separate bug — when a tab is renamed via the ribbon's rename UI (right-click -> Rename -> type new name), the new name propagates to the ribbon + mixer strip + effects page, but NOT to the piano-roll context label.
+
+#### Root cause
+
+- The `onTabRenamed` ribbon handler at [Source/Standalone/StandaloneEditor.cpp:1221](Source/Standalone/StandaloneEditor.cpp:1221) had a comment at line 1252 saying it should sync to "mixer strip name AND piano-roll context label", but the implementation only did the mixer-strip half — the piano-roll-label sync was never wired.
+- The handler also only handled the Layer/Bass/Drum branches; Inst, Clip, and Vox branches were missing entirely.
+
+#### Fix shipped
+
+- The handler now calls `mPianoRollPage->setEngineDisplayName({EngineKind::Layer/Bass/Drum, pageIdx}, finalName)` for the Layer/Bass/Drum branches.
+- Added Inst branch — dispatches to `EngineKind::BaySickGuitars` or `EngineKind::BaySickBasses` based on `ip->getSource()`; LiveInput Inst tabs skip the piano-roll-label push (they don't register with `PianoRollPage`).
+- Added Clip branch — `EngineKind::Clip`.
+- Added Vox branch — only `vp->setTabName(finalName)`; Vox tabs don't register with `PianoRollPage` (per G-4 the Vox piano-roll registration was deleted).
+
+#### Scope-limit noted
+
+- [`MixerPage::renameChannel`](Source/Standalone/MixerPage.cpp) only supports `StripKind::Layer/Bass/Drum`.  Mixer-strip rename for Inst/Vox/Clip already works through a different path (Jeff confirmed post-rename behavior).  The `onTabRenamed` handler does NOT call `renameChannel` for those types because the enum doesn't expose them.  If a future audit finds that mixer-strip rename path is broken for Inst/Vox/Clip, the `StripKind` enum extension would be a separate task — not folded into QA-D.
+
+#### Files
+
+- [Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp) (1 edit covering all 5 page-type branches in the rename handler).
+
+#### Verification
+
+- Jeff verified in Debug: rename via right-click -> Rename now propagates to the piano-roll context label too, with the engineType suffix preserved.
+
+---
+
+### 2026-05-10 — Task 2 verify complete — ready for commit
+
+All Tests A-G pass in Debug:
+
+- **Test A** — counter monotonicity per type, delete-then-re-add does not reuse freed slot index.
+- **Test B** — counter reset on File -> New Project.
+- **Test C** — counter advance from saved-project load past max-restored.
+- **Test D** — Sub-D plural `Basses N` disambiguation from `Bass N`.
+- **Test E** — context-label engineType suffix across all 5 engine-bearing types: `Layer 1 - Harmless` / `Bass 1 - BaySickBass` / `Drum 1 - VibePlayer` / `Guitar 1 - BaySickGuitars` / `Basses 1 - BaySickBasses`.
+- **Test F** — saved-project restore preserves correct labels (engineType + tab name both round-trip).
+- **Test G** — ribbon-rename propagates to piano-roll context label with engineType suffix preserved.
+
+#### Diff totals
+
+- 5 files: PianoRollPage.h, PianoRollPage.cpp, StandaloneEditor.h, StandaloneEditor.cpp, and the running-notes file.
+- 451 insertions / 43 deletions across Tasks 2.1-2.8.
+
+#### Release verify
+
+- Deferred to batch close per S7 (paired Release-build verification at end-of-batch) + the QA-D plan.
+
+#### Next
+
+- Commit Task 2 (single commit per S6).
+- Then Task 4 — MenuBarModel listener-dangle fix (PianoRoll.h:645-646 / BuilderPage.h:750-751 / DrumKitGrid.h:494-495 declaration-order swap + defensive destructor cleanup).

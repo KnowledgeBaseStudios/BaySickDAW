@@ -1252,6 +1252,12 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         // Sync ribbon tab rename → mixer strip name AND piano-roll context label.
         // Mixer Layer/Bass strips are keyed by pageIndex (NOT ribbonTabId), so
         // translate via mPages first.
+        //
+        // QA-D STATE-02 follow-on: pre-fix this handler only renamed the mixer
+        // strip + page mTabName; the piano-roll context label stayed stale
+        // because no path called PianoRollPage::setEngineDisplayName.
+        // Layer/Bass/Drum/Guitars/Basses/Clips all register with PianoRollPage
+        // and need the label pushed through here.
         for (auto* entry : mPages)
         {
             if (!entry || entry->ribbonTabId != id) continue;
@@ -1259,16 +1265,53 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             {
                 if (mMixerPage) mMixerPage->renameChannel(MixerPage::StripKind::Layer, lp->getPageIndex(), finalName);
                 lp->setTabName(finalName);
+                if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Layer, lp->getPageIndex() }, finalName);
             }
             else if (auto* bp = dynamic_cast<BassPage*>(entry->component.get()))
             {
                 if (mMixerPage) mMixerPage->renameChannel(MixerPage::StripKind::Bass, bp->getPageIndex(), finalName);
                 bp->setTabName(finalName);
+                if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Bass, bp->getPageIndex() }, finalName);
             }
             else if (auto* dp = dynamic_cast<DrumPage*>(entry->component.get()))
             {
                 if (mMixerPage) mMixerPage->renameChannel(MixerPage::StripKind::Drum, dp->getPageIndex(), finalName);
                 dp->setTabName(finalName);
+                if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Drum, dp->getPageIndex() }, finalName);
+            }
+            else if (auto* ip = dynamic_cast<InstPage*>(entry->component.get()))
+            {
+                // Inst tabs cover three sources: LiveInput (no piano roll),
+                // BaySickGuitars, BaySickBasses.  No MixerPage::renameChannel
+                // overload for StripKind::Inst exists -- the enum only covers
+                // Layer/Bass/Drum -- so the mixer strip rename for Inst tabs
+                // routes through a different path (left untouched here).  The
+                // piano-roll-label push only fires for the two sfizz-source
+                // engines that register with PianoRollPage.
+                ip->setTabName(finalName);
+                if (mPianoRollPage)
+                {
+                    const auto src = ip->getSource();
+                    if (src == InstPage::Source::BaySickGuitars)
+                        mPianoRollPage->setEngineDisplayName ({ EngineKind::BaySickGuitars, ip->getPageIndex() }, finalName);
+                    else if (src == InstPage::Source::BaySickBasses)
+                        mPianoRollPage->setEngineDisplayName ({ EngineKind::BaySickBasses, ip->getPageIndex() }, finalName);
+                }
+            }
+            else if (auto* cp = dynamic_cast<ClipsPage*>(entry->component.get()))
+            {
+                // Clips strips: no MixerPage rename overload for the audio-row
+                // strip kind in the current enum; left untouched (same reason
+                // as Inst above).
+                cp->setTabName(finalName);
+                if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Clip, cp->getPageIndex() }, finalName);
+            }
+            else if (auto* vp = dynamic_cast<VoxPage*>(entry->component.get()))
+            {
+                // Vox tabs have a mixer strip + no piano-roll registration
+                // (per G-4 the Vox piano-roll was deleted).  Mixer rename
+                // routes through a different path (no enum entry here).
+                vp->setTabName(finalName);
             }
             break;
         }
@@ -1510,11 +1553,13 @@ void StandaloneEditor::addDefaultDynamicTabs()
         mPages.add (entry);
     };
 
-    int layersId = mRibbon->addTab (RibbonTabBar::TabType::Layers, "Layers");
+    const juce::String layersName = nextLayerTabName();
+    int layersId = mRibbon->addTab (RibbonTabBar::TabType::Layers, layersName);
     {
         auto lp = createLayersPage();
         if (auto* p = dynamic_cast<LayersPage*> (lp.get()))
         {
+            p->setTabName (layersName);   // QA-D STATE-02: sync internal mTabName to ribbon
             const int pageIdx = p->getPageIndex();
             p->onEngineSelected = [this, layersId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById (layersId);
@@ -1522,6 +1567,10 @@ void StandaloneEditor::addDefaultDynamicTabs()
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                 // 2026-05-05 dirty-flag wiring on the just-installed engine.
                 wireEngineDirtyHook (p->getEngineProcessor());
+                // QA-D STATE-02 follow-on: push engineType into the unified
+                // piano-roll's context label ("Layer N - <engineType>").
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Layer, pageIdx }, p->getEngineType());
             };
             // D1.4-fix (c): per-layer Delete + Duplicate.
             p->onDeleteRequested = [this, layersId] {
@@ -1555,11 +1604,13 @@ void StandaloneEditor::addDefaultDynamicTabs()
         addEntry (layersId, RibbonTabBar::TabType::Layers, std::move (lp));
     }
 
-    int bassId = mRibbon->addTab (RibbonTabBar::TabType::Bass, "Bass");
+    const juce::String bassName = nextBassTabName();
+    int bassId = mRibbon->addTab (RibbonTabBar::TabType::Bass, bassName);
     {
         auto bp = createBassPage();
         if (auto* p = dynamic_cast<BassPage*> (bp.get()))
         {
+            p->setTabName (bassName);   // QA-D STATE-02: sync internal mTabName to ribbon
             const int pageIdx = p->getPageIndex();
             p->onEngineSelected = [this, bassId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById (bassId);
@@ -1567,6 +1618,9 @@ void StandaloneEditor::addDefaultDynamicTabs()
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                 // 2026-05-05 dirty-flag wiring on the just-installed engine.
                 wireEngineDirtyHook (p->getEngineProcessor());
+                // QA-D STATE-02 follow-on: piano-roll context label.
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Bass, pageIdx }, p->getEngineType());
             };
             p->onDeleteRequested = [this, bassId] {
                 if (! mRibbon) return;
@@ -1599,11 +1653,13 @@ void StandaloneEditor::addDefaultDynamicTabs()
         addEntry (bassId, RibbonTabBar::TabType::Bass, std::move (bp));
     }
 
-    int drumsId = mRibbon->addTab (RibbonTabBar::TabType::Drums, "Drums");
+    const juce::String drumsName = nextDrumTabName();
+    int drumsId = mRibbon->addTab (RibbonTabBar::TabType::Drums, drumsName);
     {
         auto dp = createDrumPage();
         if (auto* p = dynamic_cast<DrumPage*> (dp.get()))
         {
+            p->setTabName (drumsName);   // QA-D STATE-02: sync internal mTabName to ribbon
             const int pageIdx = p->getPageIndex();
             p->onEngineSelected = [this, drumsId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById (drumsId);
@@ -1612,6 +1668,9 @@ void StandaloneEditor::addDefaultDynamicTabs()
                 refreshAllKitViews();
                 // 2026-05-05 dirty-flag wiring on the just-installed engine.
                 wireEngineDirtyHook (p->getEngineProcessor());
+                // QA-D STATE-02 follow-on: piano-roll context label.
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Drum, pageIdx }, p->getEngineType());
             };
             p->onSoundNameChanged = [this, drumsId, pageIdx, p] (const juce::String& nm) {
                 if (nm.isEmpty()) return;
@@ -1737,12 +1796,17 @@ void StandaloneEditor::spawnDuplicateLayerTab (const juce::String& clipboardXml)
     auto* lp = dynamic_cast<LayersPage*> (page.get());
     if (lp == nullptr) return;
     const int pageIdx = lp->getPageIndex();
-    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Layers, "Layers");
+    const juce::String layerName = nextLayerTabName();   // QA-D STATE-02
+    lp->setTabName (layerName);                          // sync internal mTabName
+    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Layers, layerName);
     lp->onEngineSelected = [this, newId, pageIdx, lp] {
         const auto* tab = mRibbon->getTabById (newId);
         if (mMixerPage)   mMixerPage->addLayerChannel (pageIdx, tab ? tab->name : "Layers");
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
         wireEngineDirtyHook (lp->getEngineProcessor());
+        // QA-D STATE-02 follow-on: piano-roll context label.
+        if (mPianoRollPage)
+            mPianoRollPage->setEngineType ({ EngineKind::Layer, pageIdx }, lp->getEngineType());
     };
     lp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
@@ -1783,12 +1847,17 @@ void StandaloneEditor::spawnDuplicateBassTab (const juce::String& clipboardXml)
     auto* bp = dynamic_cast<BassPage*> (page.get());
     if (bp == nullptr) return;
     const int pageIdx = bp->getPageIndex();
-    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Bass, "Bass");
+    const juce::String bassName = nextBassTabName();   // QA-D STATE-02
+    bp->setTabName (bassName);                         // sync internal mTabName
+    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Bass, bassName);
     bp->onEngineSelected = [this, newId, pageIdx, bp] {
         const auto* tab = mRibbon->getTabById (newId);
         if (mMixerPage)   mMixerPage->addBassChannel (pageIdx, tab ? tab->name : "Bass");
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
         wireEngineDirtyHook (bp->getEngineProcessor());
+        // QA-D STATE-02 follow-on: piano-roll context label.
+        if (mPianoRollPage)
+            mPianoRollPage->setEngineType ({ EngineKind::Bass, pageIdx }, bp->getEngineType());
     };
     bp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
@@ -1833,13 +1902,18 @@ void StandaloneEditor::spawnDuplicateDrumTab (const juce::String& clipboardXml)
     if (dp == nullptr) return;
 
     const int pageIdx = dp->getPageIndex();
-    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Drums, "Drums");
+    const juce::String drumName = nextDrumTabName();   // QA-D STATE-02
+    dp->setTabName (drumName);                         // sync internal mTabName
+    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Drums, drumName);
     dp->onEngineSelected = [this, newId, pageIdx, dp] {
         const auto* tab = mRibbon->getTabById (newId);
         if (mMixerPage)   mMixerPage->addDrumChannel (pageIdx, tab ? tab->name : "Drums");
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
         refreshAllKitViews();
         wireEngineDirtyHook (dp->getEngineProcessor());
+        // QA-D STATE-02 follow-on: piano-roll context label.
+        if (mPianoRollPage)
+            mPianoRollPage->setEngineType ({ EngineKind::Drum, pageIdx }, dp->getEngineType());
     };
     dp->onSoundNameChanged = [this, newId, pageIdx, dp] (const juce::String& nm) {
         if (nm.isEmpty()) return;
@@ -3259,17 +3333,17 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
     case RibbonTabBar::TabType::Layers:
         page = createLayersPage();
         if (!page) return;  // all 8 Layers slots occupied
-        name = "Layers";
+        name = nextLayerTabName();   // QA-D STATE-02
         break;
     case RibbonTabBar::TabType::Bass:
         page = createBassPage();
         if (!page) return;  // all 4 Bass slots occupied
-        name = "Bass";
+        name = nextBassTabName();   // QA-D STATE-02
         break;
     case RibbonTabBar::TabType::Drums:
         page = createDrumPage();
         if (!page) return;  // all 16 Drums slots occupied
-        name = "Drums";
+        name = nextDrumTabName();   // QA-D STATE-02
         break;
     default:
         return;
@@ -3282,12 +3356,16 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
     {
         if (auto* p = dynamic_cast<LayersPage*>(page.get()))
         {
+            p->setTabName (name);   // QA-D STATE-02: sync internal mTabName to ribbon
             const int pageIdx = p->getPageIndex();
             p->onEngineSelected = [this, newId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById(newId);
                 if (mMixerPage) mMixerPage->addLayerChannel(pageIdx, tab ? tab->name : "Layers");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                 wireEngineDirtyHook (p->getEngineProcessor());
+                // QA-D STATE-02 follow-on: piano-roll context label.
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Layer, pageIdx }, p->getEngineType());
             };
             p->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
@@ -3316,12 +3394,16 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
     {
         if (auto* p = dynamic_cast<BassPage*>(page.get()))
         {
+            p->setTabName (name);   // QA-D STATE-02: sync internal mTabName to ribbon
             const int pageIdx = p->getPageIndex();
             p->onEngineSelected = [this, newId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById(newId);
                 if (mMixerPage) mMixerPage->addBassChannel(pageIdx, tab ? tab->name : "Bass");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                 wireEngineDirtyHook (p->getEngineProcessor());
+                // QA-D STATE-02 follow-on: piano-roll context label.
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Bass, pageIdx }, p->getEngineType());
             };
             p->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
@@ -3350,6 +3432,7 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
     {
         if (auto* p = dynamic_cast<DrumPage*>(page.get()))
         {
+            p->setTabName (name);   // QA-D STATE-02: sync internal mTabName to ribbon
             const int pageIdx = p->getPageIndex();
             p->onEngineSelected = [this, newId, pageIdx, p] {
                 const auto* tab = mRibbon->getTabById(newId);
@@ -3357,6 +3440,9 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                 refreshAllKitViews();
                 wireEngineDirtyHook (p->getEngineProcessor());
+                // QA-D STATE-02 follow-on: piano-roll context label.
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Drum, pageIdx }, p->getEngineType());
             };
             p->onSoundNameChanged = [this, newId, pageIdx, p] (const juce::String& nm) {
                 if (nm.isEmpty()) return;
@@ -5028,6 +5114,7 @@ void StandaloneEditor::registerLayerPianoRoll (LayersPage* lp)
     };
     conn.noteColor   = lp->getPageColor();
     conn.displayName = lp->getTabName();
+    conn.engineType  = lp->getEngineType();   // QA-D STATE-02 follow-on (empty pre-pick)
     auto cast = [lp]() { return lp->getEngineProcessor(); };
     conn.auditionMomentary = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNote(n);
@@ -5063,6 +5150,7 @@ void StandaloneEditor::registerBassPianoRoll (BassPage* bp)
     };
     conn.noteColor   = bp->getPageColor();
     conn.displayName = bp->getTabName();
+    conn.engineType  = bp->getEngineType();   // QA-D STATE-02 follow-on (empty pre-pick)
     auto cast = [bp]() { return bp->getEngineProcessor(); };
     conn.auditionMomentary = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickBassProcessor*>(cast())) s->auditionNote(n);
@@ -5101,6 +5189,7 @@ void StandaloneEditor::registerDrumPianoRoll (DrumPage* dp)
     };
     conn.noteColor   = dp->getPageColor();
     conn.displayName = dp->getTabName();
+    conn.engineType  = dp->getEngineType();   // QA-D STATE-02 follow-on (empty pre-pick)
     auto cast = [dp]() { return dp->getEngineProcessor(); };
     conn.auditionMomentary = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNote(n);
@@ -5268,14 +5357,18 @@ juce::Component* StandaloneEditor::spawnLayerTabFromTemplate (const juce::String
     if (lp == nullptr) return nullptr;
 
     const int pageIdx = lp->getPageIndex();
-    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Layers,
-                                        "Layer " + juce::String (pageIdx + 1));
+    const juce::String layerName = nextLayerTabName();   // QA-D STATE-02
+    lp->setTabName (layerName);                          // sync internal mTabName
+    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Layers, layerName);
 
     lp->onEngineSelected = [this, newId, pageIdx, lp] {
         const auto* tab = mRibbon->getTabById (newId);
         if (mMixerPage)   mMixerPage->addLayerChannel (pageIdx, tab ? tab->name : "Layer");
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
         wireEngineDirtyHook (lp->getEngineProcessor());
+        // QA-D STATE-02 follow-on: piano-roll context label.
+        if (mPianoRollPage)
+            mPianoRollPage->setEngineType ({ EngineKind::Layer, pageIdx }, lp->getEngineType());
     };
     lp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
@@ -5322,14 +5415,18 @@ juce::Component* StandaloneEditor::spawnBassTabFromTemplate (const juce::String&
     if (bp == nullptr) return nullptr;
 
     const int pageIdx = bp->getPageIndex();
-    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Bass,
-                                        "Bass " + juce::String (pageIdx + 1));
+    const juce::String bassName = nextBassTabName();   // QA-D STATE-02
+    bp->setTabName (bassName);                         // sync internal mTabName
+    const int newId = mRibbon->addTab (RibbonTabBar::TabType::Bass, bassName);
 
     bp->onEngineSelected = [this, newId, pageIdx, bp] {
         const auto* tab = mRibbon->getTabById (newId);
         if (mMixerPage)   mMixerPage->addBassChannel (pageIdx, tab ? tab->name : "Bass");
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
         wireEngineDirtyHook (bp->getEngineProcessor());
+        // QA-D STATE-02 follow-on: piano-roll context label.
+        if (mPianoRollPage)
+            mPianoRollPage->setEngineType ({ EngineKind::Bass, pageIdx }, bp->getEngineType());
     };
     bp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
@@ -5845,10 +5942,12 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
                                         .upToLastOccurrenceOf (".", false, false);
             tabName = stem;
         }
-        const int newId = mRibbon->addTab (RibbonTabBar::TabType::Drums,
-                                           tabName.isNotEmpty() ? tabName : "Drums");
+        // QA-D STATE-02 (Sub-E): fall back to monotonic Drum counter so even
+        // unnamed loads get a sequential number instead of the literal "Drums".
+        if (tabName.isEmpty()) tabName = nextDrumTabName();
+        const int newId = mRibbon->addTab (RibbonTabBar::TabType::Drums, tabName);
         if (firstNewTabId < 0) firstNewTabId = newId;
-        if (tabName.isNotEmpty()) dp->setTabName (tabName);
+        dp->setTabName (tabName);
 
         const int pageIdx = slot;
         dp->onEngineSelected = [this, newId, pageIdx, dp] {
@@ -5857,6 +5956,9 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
             if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
             refreshAllKitViews();
             wireEngineDirtyHook (dp->getEngineProcessor());
+            // QA-D STATE-02 follow-on: piano-roll context label.
+            if (mPianoRollPage)
+                mPianoRollPage->setEngineType ({ EngineKind::Drum, pageIdx }, dp->getEngineType());
         };
         dp->onSoundNameChanged = [this, newId, pageIdx, dp] (const juce::String& nm) {
             if (nm.isEmpty()) return;
@@ -6492,20 +6594,19 @@ void StandaloneEditor::addBaySickGuitarsTab()
     // in the dropdown + the InstPage's "Piano Roll" sub-tab can nav-redirect.
     registerInstSourcePianoRoll (ip);
 
-    // Step 7: rename the tab "Guitar N" (1-based, human-friendly).  Counts
-    // existing Guitars-source tabs to pick N.
-    int guitarNum = 1;
-    for (auto* entry : mPages)
-    {
-        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
-        if (auto* p = dynamic_cast<InstPage*> (entry->component.get()))
-            if (p != ip && p->getSource() == InstPage::Source::BaySickGuitars)
-                ++guitarNum;
-    }
-    const juce::String tabName = "Guitar " + juce::String (guitarNum);
+    // QA-D STATE-02: monotonic counter -- never reuses a deleted Guitar
+    // number even when a slot is freed.  Replaces the prior scan-and-count
+    // that recomputed N from live tabs (which reused deleted numbers).
+    const juce::String tabName = nextGuitarTabName();
     ip->setTabName (tabName);
     if (mRibbon && ribbonId >= 0)
         mRibbon->renameTab (ribbonId, tabName);
+    // QA-D STATE-02 follow-on: registerInstSourcePianoRoll above ran with the
+    // pre-rename "Inst N" name (set by spawnInstTabIfMissing).  Push the new
+    // "Guitar N" name through PianoRollPage so the piano-roll context label
+    // reads "Guitar N - BaySickGuitars" instead of stale "Inst N".
+    if (mPianoRollPage)
+        mPianoRollPage->setEngineDisplayName ({ EngineKind::BaySickGuitars, newIdx }, tabName);
 
     // Step 8: select the new tab (user just asked to add it).
     if (mRibbon && ribbonId >= 0)
@@ -6574,18 +6675,18 @@ void StandaloneEditor::addBaySickBassesTab()
 
     registerInstSourcePianoRoll (ip);
 
-    int bassNum = 1;
-    for (auto* entry : mPages)
-    {
-        if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
-        if (auto* p = dynamic_cast<InstPage*> (entry->component.get()))
-            if (p != ip && p->getSource() == InstPage::Source::BaySickBasses)
-                ++bassNum;
-    }
-    const juce::String tabName = "Bass " + juce::String (bassNum);
+    // QA-D STATE-02 (Sub-D): monotonic counter + plural "Basses" prefix to
+    // disambiguate from Bass-slot tabs (which use "Bass N").  Replaces the
+    // prior scan-and-count that recomputed N from live tabs.
+    const juce::String tabName = nextBassesTabName();
     ip->setTabName (tabName);
     if (mRibbon && ribbonId >= 0)
         mRibbon->renameTab (ribbonId, tabName);
+    // QA-D STATE-02 follow-on: push the new "Basses N" name through
+    // PianoRollPage so the piano-roll context label reads
+    // "Basses N - BaySickBasses" instead of stale "Inst N".
+    if (mPianoRollPage)
+        mPianoRollPage->setEngineDisplayName ({ EngineKind::BaySickBasses, newIdx }, tabName);
 
     if (mRibbon && ribbonId >= 0)
     {
@@ -6879,9 +6980,11 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
             if (cp->getPageIndex() == audioRow) return;
     }
 
-    // Page name = the filename without extension (or "Clip N" fallback).
+    // Page name = the filename without extension (or "Clip N" fallback via
+    // QA-D STATE-02 monotonic counter).  Counter only increments when fallback
+    // fires, so named-clip loads don't burn counter numbers.
     juce::String tabName = juce::File (path).getFileNameWithoutExtension();
-    if (tabName.isEmpty()) tabName = "Clip " + juce::String (audioRow + 1);
+    if (tabName.isEmpty()) tabName = nextClipTabName();
 
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Clip, tabName);
 
@@ -7153,6 +7256,12 @@ void StandaloneEditor::registerInstSourcePianoRoll (InstPage* ip)
     };
     conn.noteColor   = juce::Colour (0xff1c3a8a);   // Inst navy
     conn.displayName = ip->getTabName();
+    // QA-D STATE-02 follow-on: engineType matches the user-facing brand-mixed-
+    // case name shown in the BaySick* family.  Picked from the source enum
+    // since Inst tabs don't have a getEngineType() accessor (the source IS
+    // the engine selection -- LiveInput / BaySickGuitars / BaySickBasses).
+    conn.engineType  = (src == InstPage::Source::BaySickGuitars) ? juce::String ("BaySickGuitars")
+                                                                  : juce::String ("BaySickBasses");
 
     // Audition routes directly to the per-instance sfizz processor.  PluginProcessor
     // owns the engine; query it each call so a kit-reload between clicks doesn't
@@ -7260,7 +7369,7 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
             if (vp->getPageIndex() == voxIdx) return;
     }
 
-    const juce::String tabName = "Vox " + juce::String (voxIdx + 1);
+    const juce::String tabName = nextVoxTabName();   // QA-D STATE-02
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Vox, tabName);
 
     auto cpHolder = std::make_unique<VoxPage> (voxIdx);
@@ -7357,7 +7466,7 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
             if (ip->getPageIndex() == instIdx) return;
     }
 
-    const juce::String tabName = "Inst " + juce::String (instIdx + 1);
+    const juce::String tabName = nextInstTabName();   // QA-D STATE-02
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Inst, tabName);
 
     auto cpHolder = std::make_unique<InstPage> (instIdx);
@@ -8815,8 +8924,101 @@ void StandaloneEditor::closeAllDynamicTabs()
     if (mRibbon)
         mRibbon->clearAllDynamicTabs();   // unconditional ribbon wipe
 
+    // QA-D STATE-02: reset monotonic tab-name counters so the next +Add
+    // (after a New Project or before a project-load deserialize replays
+    // saved tabs) starts at 1 instead of continuing from the prior project's
+    // count.  Saved-project loads call advanceCountersFromRestoredTabs at
+    // the end of deserializeUIState to bump each counter past max(restored).
+    resetProjectState();
+
     mProcessor.setProjectLoadInProgress (false);
 }
+
+// ── QA-D STATE-02: monotonic tab-name counter lifecycle ─────────────────────
+void StandaloneEditor::resetProjectState()
+{
+    mNextLayerNameNum   = 1;
+    mNextBassNameNum    = 1;
+    mNextDrumNameNum    = 1;
+    mNextVoxNameNum     = 1;
+    mNextInstNameNum    = 1;
+    mNextGuitarNameNum  = 1;
+    mNextBassesNameNum  = 1;
+    mNextClipNameNum    = 1;
+}
+
+void StandaloneEditor::advanceCountersFromRestoredTabs()
+{
+    // After deserializeUIState rebuilds all tabs from saved XML, scan the
+    // current ribbon (via mPages) and parse the trailing numeric suffix from
+    // each tab's display name.  Advance each counter to max(found) + 1 so a
+    // subsequent +Add doesn't collide with a restored tab number.
+    //
+    // Tabs whose saved name was user-renamed (e.g. "MyBass") contribute no
+    // suffix and don't move the counter; the counter advances only when a
+    // recognisable "Prefix N" pattern is found.
+    auto parseTail = [] (const juce::String& name, const juce::String& prefix) -> int
+    {
+        if (! name.startsWith (prefix)) return 0;
+        const auto tail = name.substring (prefix.length()).trim();
+        return tail.containsOnly ("0123456789") && tail.isNotEmpty()
+                   ? tail.getIntValue()
+                   : 0;
+    };
+
+    int maxLayer = 0, maxBass = 0, maxDrum = 0, maxVox = 0, maxInst = 0;
+    int maxGuitar = 0, maxBasses = 0, maxClip = 0;
+
+    if (mRibbon != nullptr)
+    {
+        for (auto* entry : mPages)
+        {
+            if (! entry) continue;
+            const auto* tab = mRibbon->getTabById (entry->ribbonTabId);
+            if (tab == nullptr) continue;
+            const auto& nm = tab->name;
+
+            switch (entry->type)
+            {
+                case RibbonTabBar::TabType::Layers:
+                    maxLayer = juce::jmax (maxLayer, parseTail (nm, "Layer "));
+                    break;
+                case RibbonTabBar::TabType::Bass:
+                    maxBass = juce::jmax (maxBass, parseTail (nm, "Bass "));
+                    break;
+                case RibbonTabBar::TabType::Drums:
+                    maxDrum = juce::jmax (maxDrum, parseTail (nm, "Drum "));
+                    break;
+                case RibbonTabBar::TabType::Vox:
+                    maxVox = juce::jmax (maxVox, parseTail (nm, "Vox "));
+                    break;
+                case RibbonTabBar::TabType::Inst:
+                    // Inst tabs may carry "Inst N" (LiveInput), "Guitar N"
+                    // (BaySickGuitars), or "Basses N" (BaySickBasses).  Try
+                    // each prefix.
+                    maxInst   = juce::jmax (maxInst,   parseTail (nm, "Inst "));
+                    maxGuitar = juce::jmax (maxGuitar, parseTail (nm, "Guitar "));
+                    maxBasses = juce::jmax (maxBasses, parseTail (nm, "Basses "));
+                    break;
+                case RibbonTabBar::TabType::Clip:
+                    maxClip = juce::jmax (maxClip, parseTail (nm, "Clip "));
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    mNextLayerNameNum   = juce::jmax (mNextLayerNameNum,   maxLayer  + 1);
+    mNextBassNameNum    = juce::jmax (mNextBassNameNum,    maxBass   + 1);
+    mNextDrumNameNum    = juce::jmax (mNextDrumNameNum,    maxDrum   + 1);
+    mNextVoxNameNum     = juce::jmax (mNextVoxNameNum,     maxVox    + 1);
+    mNextInstNameNum    = juce::jmax (mNextInstNameNum,    maxInst   + 1);
+    mNextGuitarNameNum  = juce::jmax (mNextGuitarNameNum,  maxGuitar + 1);
+    mNextBassesNameNum  = juce::jmax (mNextBassesNameNum,  maxBasses + 1);
+    mNextClipNameNum    = juce::jmax (mNextClipNameNum,    maxClip   + 1);
+}
+
 
 void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
 {
@@ -8856,6 +9058,9 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 if (mMixerPage)   mMixerPage->addLayerChannel (pageIndex, tab ? tab->name : "Layers");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                 wireEngineDirtyHook (lp->getEngineProcessor());
+                // QA-D STATE-02 follow-on: piano-roll context label.
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Layer, pageIndex }, lp->getEngineType());
             };
             lp->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
@@ -8908,6 +9113,9 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 if (mMixerPage)   mMixerPage->addBassChannel (pageIndex, tab ? tab->name : "Bass");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                 wireEngineDirtyHook (bp->getEngineProcessor());
+                // QA-D STATE-02 follow-on: piano-roll context label.
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Bass, pageIndex }, bp->getEngineType());
             };
             bp->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
@@ -9175,6 +9383,9 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                     if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                     refreshAllKitViews();
                     wireEngineDirtyHook (dp2->getEngineProcessor());
+                    // QA-D STATE-02 follow-on: piano-roll context label.
+                    if (mPianoRollPage)
+                        mPianoRollPage->setEngineType ({ EngineKind::Drum, pageIndex }, dp2->getEngineType());
                 };
                 dp2->onSoundNameChanged = [this, newId, pageIndex, dp2] (const juce::String& nm) {
                     if (nm.isEmpty()) return;
@@ -9444,6 +9655,13 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
     }
     if (mRibbon) mRibbon->selectTab (preferred);
     onTabSelected (preferred);
+
+    // QA-D STATE-02: scan restored tabs and advance each monotonic counter
+    // past max(parsed-name-suffix) so a subsequent +Add doesn't collide
+    // with a restored tab number.  Reset-then-advance: closeAllDynamicTabs
+    // zeroed every counter back to 1; this lifts each past any restored
+    // values it can recognise.
+    advanceCountersFromRestoredTabs();
 }
 
 // ── 2026-04-24: post-load tempo sync ────────────────────────────────────────

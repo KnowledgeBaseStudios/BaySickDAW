@@ -334,6 +334,46 @@ private:
     // D1.4: tracks which Drum page indices (0..kMaxDrumPages-1) are in use.
     std::array<bool, kMaxDrumPages> mUsedDrumIndices {};
 
+    // QA-D STATE-02: monotonic tab-name counters.  Unlike the slot-index
+    // trackers above (which reuse freed slots), these increment monotonically
+    // across the lifetime of a project so the user-visible numbering never
+    // reuses a deleted number ("delete Layer 2, add new" -> "Layer 4", not
+    // "Layer 2 again").  resetProjectState() zeroes them all back to 1 when
+    // closeAllDynamicTabs runs at project teardown;
+    // advanceCountersFromRestoredTabs() advances each past
+    // max(parsed-name-suffix) after deserializeUIState restores saved tabs,
+    // so the next +Add doesn't collide with a restored tab number.
+    int mNextLayerNameNum   { 1 };
+    int mNextBassNameNum    { 1 };
+    int mNextDrumNameNum    { 1 };
+    int mNextVoxNameNum     { 1 };
+    int mNextInstNameNum    { 1 };
+    int mNextGuitarNameNum  { 1 };
+    int mNextBassesNameNum  { 1 };
+    int mNextClipNameNum    { 1 };
+
+    // Helper accessors: each increments its counter and returns the next
+    // user-visible tab-name string (singular form, 1-based per QA-D Sub-A/B).
+    // "Basses" (plural) for the BaySickBasses-source Inst tabs disambiguates
+    // from "Bass" Bass-slot tabs per QA-D Sub-D.
+    juce::String nextLayerTabName()   { return "Layer "  + juce::String (mNextLayerNameNum++); }
+    juce::String nextBassTabName()    { return "Bass "   + juce::String (mNextBassNameNum++); }
+    juce::String nextDrumTabName()    { return "Drum "   + juce::String (mNextDrumNameNum++); }
+    juce::String nextVoxTabName()     { return "Vox "    + juce::String (mNextVoxNameNum++); }
+    juce::String nextInstTabName()    { return "Inst "   + juce::String (mNextInstNameNum++); }
+    juce::String nextGuitarTabName()  { return "Guitar " + juce::String (mNextGuitarNameNum++); }
+    juce::String nextBassesTabName()  { return "Basses " + juce::String (mNextBassesNameNum++); }
+    juce::String nextClipTabName()    { return "Clip "   + juce::String (mNextClipNameNum++); }
+
+    // QA-D STATE-02 lifecycle hooks (definitions in StandaloneEditor.cpp).
+    // resetProjectState: called from closeAllDynamicTabs after the existing
+    // teardown loop -- zeroes all 8 counters back to 1.
+    // advanceCountersFromRestoredTabs: called from end of deserializeUIState
+    // -- scans mPages for restored tabs, parses trailing numbers from each
+    // tab's display name, sets each counter to max(found-numbers) + 1.
+    void resetProjectState();
+    void advanceCountersFromRestoredTabs();
+
     // Currently visible page component
     juce::Component* mVisiblePage { nullptr };
 

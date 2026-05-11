@@ -2,6 +2,19 @@
 #include "SharedUI.h"
 #include "StandaloneApp.h"   // StandalonePlayHead
 
+// QA-D STATE-02 follow-on: shared composer for the piano-roll context label.
+// Format: "{displayName} - {engineType-or-(no engine)}".  Mirrors the
+// per-page LayersPage/BassPage/DrumPage::refreshPianoRollContextLabel format
+// so the visible label (owned by PianoRollPage post-D-5 unification) matches
+// the design documented in CLAUDE.md 5F-6.
+static juce::String composeContextLabel (const PianoRollConnection& conn)
+{
+    const juce::String engine = conn.engineType.isEmpty()
+                                    ? juce::String ("(no engine)")
+                                    : conn.engineType;
+    return conn.displayName + " - " + engine;
+}
+
 PianoRollPage::PianoRollPage()
 {
     mDrumKit = std::make_unique<DrumKitContainer>();
@@ -88,7 +101,7 @@ void PianoRollPage::registerEngine (EngineId id, PianoRollConnection conn)
         roll->setTimeSignature (n, d);
     }
     roll->setNoteColor (conn.noteColor);
-    roll->setContextLabel (conn.displayName);
+    roll->setContextLabel (composeContextLabel (conn));   // QA-D STATE-02 follow-on
     roll->setUndoContext (mUndoCtx);
     if (conn.rollMode != PianoRollContainer::RollMode::Standard)
         roll->setRollMode (conn.rollMode);
@@ -143,10 +156,25 @@ void PianoRollPage::setEngineDisplayName (EngineId id, const juce::String& name)
     auto cIt = mConns.find (id);
     if (cIt != mConns.end()) cIt->second.displayName = name;
     auto rIt = mRolls.find (id);
-    if (rIt != mRolls.end() && rIt->second)
-        rIt->second->setContextLabel (name);
+    if (rIt != mRolls.end() && rIt->second && cIt != mConns.end())
+        rIt->second->setContextLabel (composeContextLabel (cIt->second));   // QA-D STATE-02 follow-on
     if (mActive == id && onEngineSelected)
         onEngineSelected (mActive);   // refresh menu-bar pill label
+}
+
+// QA-D STATE-02 follow-on: engineType updates land via this entry point.
+// Wired by StandaloneEditor on every onEngineSelected callback for Layer /
+// Bass / Drum tabs.  Refreshes the context label to "{displayName} -
+// {engineType}".  Empty engineType reverts the label to "{displayName} -
+// (no engine)".
+void PianoRollPage::setEngineType (EngineId id, const juce::String& engineType)
+{
+    auto cIt = mConns.find (id);
+    if (cIt == mConns.end()) return;
+    cIt->second.engineType = engineType;
+    auto rIt = mRolls.find (id);
+    if (rIt != mRolls.end() && rIt->second)
+        rIt->second->setContextLabel (composeContextLabel (cIt->second));
 }
 
 PianoRollContainer* PianoRollPage::getActivePianoRoll() const

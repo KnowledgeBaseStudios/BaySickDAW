@@ -54,6 +54,13 @@ struct PianoRollConnection
     std::function<void(int& outNum, int& outDen)>  patternTimeSigProvider;
     juce::Colour                              noteColor;
     juce::String                              displayName;
+    // QA-D STATE-02 follow-on: per-CLAUDE.md 5F-6 design, the piano-roll
+    // context label shows "{tabName} - {engineType}" (e.g. "Layer 1 -
+    // Harmless", "Bass 2 - (no engine)").  engineType empty -> "(no engine)"
+    // is substituted.  StandaloneEditor populates engineType at registration
+    // (if engine already picked) and refreshes via PianoRollPage::setEngineType
+    // when the user picks/swaps an engine on the Layer/Bass/Drum tab.
+    juce::String                              engineType;
     std::function<void(int)>                  auditionMomentary;   // brief preview
     std::function<void(int)>                  auditionOn;          // press-and-hold on
     std::function<void(int)>                  auditionOff;         // press-and-hold off
@@ -90,6 +97,11 @@ public:
     void unregisterEngine  (EngineId id);
     void selectEngine      (EngineId id);
     void setEngineDisplayName (EngineId id, const juce::String& name);
+    // QA-D STATE-02 follow-on: update the engine-type half of the context
+    // label ("Layer 1 - <engineType>").  Wired by StandaloneEditor on every
+    // onEngineSelected callback for Layer/Bass/Drum.  Pass empty string to
+    // revert to the "(no engine)" placeholder.
+    void setEngineType        (EngineId id, const juce::String& engineType);
     EngineId getActiveEngineId () const { return mActive; }
     PianoRollContainer* getActivePianoRoll() const;   // null when DrumKit is active
     // Returns the currently visible PianoRollContainer if it's an engine roll
