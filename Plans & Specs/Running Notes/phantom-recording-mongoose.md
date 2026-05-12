@@ -116,4 +116,27 @@ See `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` "Spec calls alread
 
 ---
 
+## 2026-05-11 — Post-amendment — QA-B sequencing decision resolved
+
+### Spec calls resolved
+
+- **QA-B sequencing (Option A):** Jeff picked Option A — slide QA-B entirely to after QA-J close (vs. splitting into single-flow cells after QA-E + simultaneous case after QA-J).  Avoids two-pass execution; keeps QA-B atomic on unified-routing source.
+- **QA-J amendment confirmed:** Jeff confirmed the §9 13th Forks entry amendment + §5 QA-J / QA-B updates from commit `ec9c0b5`.
+
+### Done
+
+- §9 fourteenth Forks entry added: "QA-B second deferral resolved (after-QA-E → after-QA-J, Option A)".  Documents Trigger / Diagnosis / Options / Decision / Time-decay risk / Carry-forward contradictions / Inline back-refs / Plan files affected / Verification.
+- §6 sequencing arrow updated: `... QA-E → QA-F → ... → QA-J → QA-B → QA-K → ...` (was `... QA-E → QA-B → QA-F → ...`).
+- §6 footnote `*******` rewritten to chronicle both QA-B deferrals (2026-05-10 first deferral after-QA-A → after-QA-E; 2026-05-11 second deferral after-QA-E → after-QA-J).
+- §6 parallel-group note updated to mention both deferrals.
+- §5 QA-B "Test premise correction" line renamed to "Test premise correction + sequencing decision" and Option A locked.
+- §9 13th Forks entry "Test premise correction" section gains back-ref to the 14th Forks entry.
+
+### Next action
+
+- Commit boundary: bundle this sequencing-decision edit into a small standalone commit before resuming Task 1.  Diff is doc-only (Main Plan + this running-notes file).
+- After commit: resume Task 1 (Mute verify-and-close M1) per the Debug+Release test plan already surfaced.
+
+---
+
 (Subsequent entries appended below at every commit / sub-task verify / finding / spec call / scope pivot.)

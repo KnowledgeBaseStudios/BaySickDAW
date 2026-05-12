@@ -750,7 +750,7 @@ needed to find what you should pull up to review the work.
 - Dependencies: QA-0 must land before DSP-12 matrix can be exercised. **As of 2026-05-10**: QA-E must also land first so mute-isolation testing of the DSP-12 simultaneous case is available (findings #16a / #16b / #21 — pattern row mute no-op, right-click block mute no-op, track row mute permanent — all routed to QA-E).
 - Effort: small (~1-2 hours).
 - **Sequencing note (2026-05-10):** Deferred from Phase 1 (after QA-A) to immediately after QA-E. Without QA-E's mute-dispatch fixes, the DSP-12 simultaneous case (Builder + piano roll both placed) can only be verified via "two distinct audio contents + meter inspection" rather than the canonical mute-A → only-B → unmute → both-sum → mute-B → only-A isolation check. Deferring buys methodologically-sound verification on a known-good substrate. DSP-07 (parked watch-item) defers with the rest of QA-B per user spec call — gives a longer observation window for any post-QA-E reproduction. See §9 tenth Forks entry.
-- **Test premise correction (2026-05-11):** the original DSP-12 simultaneous-case verification ("Builder + piano roll both placed, both play summed") tested that both play simultaneously, but did NOT test that both play through the SAME chain.  Under the current implementation the two paths flow through different inserts (piano-roll-triggered Clips → Clips InsertNode; grid-placed Clips audio → row audio insert).  Intended design is unified routing — one clip, one chain regardless of trigger source.  Routing unification fix is folded into QA-J (see §9 thirteenth Forks entry, amended 2026-05-11).  **Open sequencing call (TBD — Jeff picks):** the corrected premise ("both play simultaneously THROUGH THE SAME Clips engine + InsertNode chain") can only be exercised against unified-routing source, which lands in QA-J.  Options for QA-B: (a) slide entirely to after QA-J close; (b) run other DSP-12 cells (single-flow cases) after QA-E close as originally planned, hold the simultaneous-case sub-test for after QA-J; (c) other.  Routing decision deferred to QA-J open or post-QA-E close, whichever surfaces first.
+- **Test premise correction + sequencing decision (2026-05-11):** the original DSP-12 simultaneous-case verification ("Builder + piano roll both placed, both play summed") tested that both play simultaneously, but did NOT test that both play through the SAME chain.  Under the current implementation the two paths flow through different inserts (piano-roll-triggered Clips → Clips InsertNode; grid-placed Clips audio → row audio insert).  Intended design is unified routing — one clip, one chain regardless of trigger source.  Routing unification fix is folded into QA-J (see §9 thirteenth Forks entry, amended 2026-05-11).  **Sequencing decision (resolved 2026-05-11 — Option A per user spec call):** QA-B slides entirely to after QA-J close (vs. splitting into single-flow cells after QA-E + simultaneous case after QA-J).  The corrected premise ("both play simultaneously THROUGH THE SAME Clips engine + InsertNode chain") requires unified-routing source which lands in QA-J.  Sequencing-arrow + footnote updated (§6 arrow + footnote *******).  See §9 fourteenth Forks entry.
 
 #### **QA-C: Tiny One-Liners**
 **Plan file:** `Plans & Specs/Batch Plans/cozy-mend-ferret.md`
@@ -1340,8 +1340,8 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-B******* → QA-F → QA-Fa
-   → QA-G → QA-H → QA-I → QA-J → QA-K → QA-L → QA-M → QA-Drum-Polish**** → QA-N
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-F → QA-Fa
+   → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L → QA-M → QA-Drum-Polish**** → QA-N
    → QA-VibeSlider**** → QA-Verify**** → QA-Export****
 ```
 
@@ -1384,8 +1384,9 @@ sixth Forks entry.
 QA-0 and QA-A could run in **parallel** (different code surfaces, no
 audio-path overlap between QA-A UI work and QA-0 dispatcher fix).
 QA-B was originally in this parallel group but deferred 2026-05-10
-to after QA-E — see footnote *******. Everything Phase 2 onward is
-sequential per Option A.
+to after QA-E, then deferred again 2026-05-11 to after QA-J — see
+footnote *******. Everything Phase 2 onward is sequential per
+Option A.
 
 **Pre-release cleanup phase (6) — runs ONLY after all of QA-0..N + the
 2026-05-08 QA-Inventory close additions have landed and verified:**
@@ -1410,7 +1411,9 @@ no behavioural changes. Sequenced after QA-Cleanup-1 so the
 rename only touches files that survived the Dead-source-file
 deletion pass. See §9 ninth Forks entry.
 
-\*\*\*\*\*\*\* QA-B deferred 2026-05-10 from after QA-A to after QA-E.
+\*\*\*\*\*\*\* QA-B has been deferred twice:
+
+**First deferral — 2026-05-10:** from after QA-A to after QA-E.
 The DSP-12 verification matrix's simultaneous case (Builder + piano
 roll both placed, both play summed) is the architectural heart of
 QA-0's Composite RenderTask fix. Clean verification of that case
@@ -1422,6 +1425,17 @@ can only lean on "two distinct audio contents + meter inspection,"
 which is materially weaker. Deferring QA-B until after QA-E gives a
 clean methodologically-sound verification on a known-good substrate.
 See §9 tenth Forks entry.
+
+**Second deferral — 2026-05-11:** from after QA-E to after QA-J.
+The Clips routing-unification fix (folded into QA-J per §9 thirteenth
+Forks entry, amended same day) changes the architectural premise of
+the DSP-12 simultaneous-case test from "both play simultaneously" to
+"both play simultaneously THROUGH THE SAME chain."  The corrected
+premise can only be exercised against unified-routing source, which
+lands in QA-J.  Per user spec call 2026-05-11 (Option A): slide QA-B
+entirely to after QA-J close (vs. splitting into single-flow cells
+after QA-E + simultaneous case after QA-J).  See §9 fourteenth
+Forks entry.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -2613,7 +2627,9 @@ intended design.  Once QA-J lands the Clips routing unification,
 QA-B's deferred DSP-12 simultaneous-case test re-verifies under the
 corrected premise: "both play simultaneously THROUGH THE SAME Clips
 engine + InsertNode chain, with the chain running once per block on
-the summed input."  See §5 QA-B entry test-premise addendum.
+the summed input."  QA-B sequencing decision (Option A — slide
+entirely to after QA-J close) resolved 2026-05-11 same-day; see §9
+fourteenth Forks entry + §5 QA-B test-premise addendum.
 
 QA-J's effort estimate goes from ~8-12 hours to ~12-16 hours (bumped
 2026-05-11 initial entry) and bumps further to ~13-18 hours with
@@ -2651,3 +2667,74 @@ sub-bullet + updated effort estimate, (b) QA-J actually runs (post-
 QA-E per existing dependency) and produces an Implemented Work Log
 close entry that covers BOTH the non-FilePlay and FilePlay
 restructures.
+
+### 2026-05-11 — QA-B second deferral resolved (after-QA-E → after-QA-J, Option A)
+
+**Trigger:** the §9 thirteenth Forks entry (amended same day) surfaced
+an open sequencing call for QA-B in light of the DSP-12 test premise
+correction.  The amended entry's "Test premise correction" section
+noted that the simultaneous-case test ("Builder + piano roll both
+placed, both play summed") couldn't be properly verified until QA-J
+landed the Clips routing unification, and surfaced three options for
+QA-B's sequencing without unilaterally picking one.
+
+**Diagnosis:** the architecturally-correct DSP-12 simultaneous-case
+test requires "both play simultaneously THROUGH THE SAME Clips engine
++ InsertNode chain."  Source for that unified routing lands in QA-J
+(§9 thirteenth Forks entry, amended same day).  Running QA-B against
+split-routing source produces a passing test against the wrong premise
+(the original 2026-05-10 first-deferral pattern that buys
+methodologically-sound verification doesn't help if the verification
+itself targets the wrong premise).  Three sequencing options were
+surfaced.
+
+**Options surfaced:**
+- **(a)** Slide QA-B entirely to after QA-J close.
+- **(b)** Run other DSP-12 cells (single-flow cases) after QA-E close
+  as originally planned; hold the simultaneous-case sub-test for after
+  QA-J close.  Two-pass execution.
+- **(c)** Other.
+
+**Decision (user spec call 2026-05-11):** Option (a).  Slide QA-B
+entirely to after QA-J close.  Avoids two-pass execution overhead;
+keeps QA-B as a single atomic verification batch on a known-good
+substrate (unified-routing source).  Aligns with the original
+zero-risk diagnostic framing of QA-B — better to run once against
+the corrected premise than fragment the batch.
+
+**Time-decay risk assessment:** Low.  None of the intermediate batches
+between QA-E and QA-J (QA-F / QA-Fa / QA-G / QA-H / QA-I) touch the
+audio-insert / FilePlay surface directly.  Waiting until after QA-J
+doesn't expose the DSP-12 architectural surface to silent regressions
+during intermediate work.
+
+**Carry-forward contradictions:** None.  Carry-Forward Reference's MT
+primitive section (§1) describes the dispatcher + task subclasses
+architecturally; QA-B's slot in the verification sequence is a
+sequencing decision, not an architectural change.
+
+**Inline back-refs:**
+- §6 sequencing arrow: QA-B moved from after-QA-E to after-QA-J
+  (between QA-J and QA-K).  Footnote `*******` updated to chronicle
+  both deferrals (2026-05-10 from after-QA-A to after-QA-E; 2026-05-11
+  from after-QA-E to after-QA-J).  Parallel-group note updated.
+- §5 QA-B entry: "Test premise correction + sequencing decision
+  (2026-05-11)" line now explicitly records Option A as resolved.
+  Dependencies clause already references QA-E mute fixes; updated to
+  also reference QA-J routing-unification fix.
+- §9 thirteenth Forks entry: "Test premise correction" section
+  back-refs this entry for the sequencing-decision close.
+- §9 Forks: this entry (fourteenth).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §6 arrow / footnote /
+  parallel-group note + §5 QA-B test-premise-line update + §9
+  thirteenth back-ref.
+- No source code changes.
+- No new running-notes or batch-plan files (QA-B kickoff aborted; will
+  resume after QA-J lands).
+
+**Verification:** fork closes when QA-B actually runs (post-QA-J) and
+produces a normal Implemented Work Log close entry validating the
+corrected DSP-12 simultaneous-case test premise on unified-routing
+source.  Until then, the deferral itself is the active state.
