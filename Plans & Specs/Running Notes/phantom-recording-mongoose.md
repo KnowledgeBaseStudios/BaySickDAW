@@ -139,4 +139,34 @@ See `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` "Spec calls alread
 
 ---
 
+## 2026-05-11 — Task 1 — Mute Verify-and-Close (M1) — PASS
+
+### Done
+
+- Task 1 verify executed by Jeff in BOTH Debug and Release across all 4 scenarios per the plan file's Task 1 "Tell Jeff:" section.
+- **Result: all 4 scenarios PASSED in Debug. All 4 scenarios PASSED in Release. 8/8 PASS.**
+  - (1) Pattern row mute via LED → pattern silences on click + resumes on second click. PASS.
+  - (2) Audio row mute via LED → audio silences on click + resumes on second click (no stick). PASS.
+  - (3) Right-click pattern block → Mute / Unmute → toggles cleanly. PASS.
+  - (4) Right-click audio block → Mute / Unmute → toggles cleanly. PASS.
+- Source-side context already captured at QA-E open + reconfirmed here: mute dispatch gates are present in current source.
+  - Pattern dispatch gate: [Source/PluginProcessor.cpp:1194-1195](../../Source/PluginProcessor.cpp) (`if (blk.muted) continue; if (!isRowAudible(blk.trackRow)) continue;`).
+  - Audio rendering gate: [Source/PluginProcessor.cpp:493-501](../../Source/PluginProcessor.cpp) (`if (rowMuted || builderRowMuted) continue;`).
+  - Block-level mute gate: [Source/Standalone/StandaloneEditor.cpp:2406](../../Source/Standalone/StandaloneEditor.cpp) (`if (block.muted) continue;`).
+  - LED click handler: [Source/Standalone/BuilderPage.cpp:4092](../../Source/Standalone/BuilderPage.cpp) (`mPM.setRowMuted(row, !mPM.isRowMuted(row));`).
+- `git log -L` traces confirm these gates date from `cc011e0` (MT engine batches) + initial commit `d595ee3` — both pre-date QA-0's #16a / #16b / #21 finding capture by months.
+
+### Disposition
+
+- **#16a / #16b / #21 no longer reproducible** in current source.  Runtime now verifies the dispatch gates work end-to-end across both build configs.  Either the original QA-0 captures were inaccurate, OR an unrelated commit since incidentally fixed them; root cause of original captures unidentified but moot given the clean 8/8 verify.
+- **No source commit.**  Task 1 closes as verify-only.
+- Final routing of #16a / #16b / #21 (§9 Forks entry vs Implemented Work Log close-routing table) deferred to the batch-close drafter step per the plan file.  The close drafter will pick the right form based on scope at close-time.
+
+### Next action
+
+- Task 1 close commit is running-notes-only (this entry).  Diff is doc-only — no source files touched.  Surface diff + dispatch `/draft-commit` next.
+- After commit: **Task 2 — Crash Family SafePointer Fix (Sub-Phase A).**  All 7 page-type branches in `StandaloneEditor::showPageForTab` (lines 4061-4345) get the C-i SafePointer-at-outer-scope pattern applied.  Mechanical; effort ~1.5-2 hr per plan.  I author the source change; Jeff verifies via `do_build.bat` + the test scenarios in plan Task 2's "Tell Jeff:" section (DrumPage Drum Kit sub-tab repro + spot-check the other 6 page types + normal-operation regression sweep).
+
+---
+
 (Subsequent entries appended below at every commit / sub-task verify / finding / spec call / scope pivot.)
