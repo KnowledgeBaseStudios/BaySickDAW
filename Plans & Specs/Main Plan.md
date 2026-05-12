@@ -750,6 +750,7 @@ needed to find what you should pull up to review the work.
 - Dependencies: QA-0 must land before DSP-12 matrix can be exercised. **As of 2026-05-10**: QA-E must also land first so mute-isolation testing of the DSP-12 simultaneous case is available (findings #16a / #16b / #21 — pattern row mute no-op, right-click block mute no-op, track row mute permanent — all routed to QA-E).
 - Effort: small (~1-2 hours).
 - **Sequencing note (2026-05-10):** Deferred from Phase 1 (after QA-A) to immediately after QA-E. Without QA-E's mute-dispatch fixes, the DSP-12 simultaneous case (Builder + piano roll both placed) can only be verified via "two distinct audio contents + meter inspection" rather than the canonical mute-A → only-B → unmute → both-sum → mute-B → only-A isolation check. Deferring buys methodologically-sound verification on a known-good substrate. DSP-07 (parked watch-item) defers with the rest of QA-B per user spec call — gives a longer observation window for any post-QA-E reproduction. See §9 tenth Forks entry.
+- **Test premise correction (2026-05-11):** the original DSP-12 simultaneous-case verification ("Builder + piano roll both placed, both play summed") tested that both play simultaneously, but did NOT test that both play through the SAME chain.  Under the current implementation the two paths flow through different inserts (piano-roll-triggered Clips → Clips InsertNode; grid-placed Clips audio → row audio insert).  Intended design is unified routing — one clip, one chain regardless of trigger source.  Routing unification fix is folded into QA-J (see §9 thirteenth Forks entry, amended 2026-05-11).  **Open sequencing call (TBD — Jeff picks):** the corrected premise ("both play simultaneously THROUGH THE SAME Clips engine + InsertNode chain") can only be exercised against unified-routing source, which lands in QA-J.  Options for QA-B: (a) slide entirely to after QA-J close; (b) run other DSP-12 cells (single-flow cases) after QA-E close as originally planned, hold the simultaneous-case sub-test for after QA-J; (c) other.  Routing decision deferred to QA-J open or post-QA-E close, whichever surfaces first.
 
 #### **QA-C: Tiny One-Liners**
 **Plan file:** `Plans & Specs/Batch Plans/cozy-mend-ferret.md`
@@ -997,11 +998,11 @@ needed to find what you should pull up to review the work.
     expectedFilePos even when mute-gated, OR seeks on unmute to current
     project transport.
   - **Folded in 2026-05-08 (QA-Inventory close via Rule 3)** — BLU-501 "Prune stale applicators on swap" (memory cleanliness in audio-thread automation applicator map; memory leak on engine swap). Same surface family as the audio-thread renderAudioClipsForRow restructure.
-  - **Folded in 2026-05-11 (QA-E open-time finding via Rule 3; see §9 thirteenth Forks entry)** — FilePlay multi-clip restructure: extend the once-per-sum restructure to the FilePlay path (per-page engine + insert chain).  Two clips routed to the same Vox/Inst page should mix into one input buffer per page, then run the engine + insert chain once per page, rather than processing each clip sequentially through the shared engine state (which leaves compressor envelope / reverb tail / LFO phase from clip A bleeding into clip B's processing pass).  Touches Pass 1 loop at [Source/PluginProcessor.cpp:2415-2433](Source/PluginProcessor.cpp:2415), `renderFilePlayPlayer` at [Source/PluginProcessor.cpp:867-901](Source/PluginProcessor.cpp:867), and MT-path equivalents in [Source/Engine/Tasks/VoxStripTask.cpp](Source/Engine/Tasks/VoxStripTask.cpp) + [Source/Engine/Tasks/InstStripTask.cpp](Source/Engine/Tasks/InstStripTask.cpp).
+  - **Folded in 2026-05-11 (QA-E open-time finding via Rule 3; see §9 thirteenth Forks entry — amended same day to include Clips routing unification + DSP-12 test premise correction)** — FilePlay multi-clip restructure + Clips routing unification: extend the once-per-sum restructure to the per-page engine + insert chain path across all three engine families (Vox + Inst + Clips).  Two clips routed to the same Vox/Inst/Clips page mix into one input buffer per page, then run the engine + insert chain once per page, rather than processing each clip sequentially through the shared engine state (which leaves compressor envelope / reverb tail / LFO phase from clip A bleeding into clip B's processing pass).  Touches Pass 1 loop at [Source/PluginProcessor.cpp:2415-2433](Source/PluginProcessor.cpp:2415), `renderFilePlayPlayer` at [Source/PluginProcessor.cpp:867-901](Source/PluginProcessor.cpp:867), and MT-path equivalents in [Source/Engine/Tasks/VoxStripTask.cpp](Source/Engine/Tasks/VoxStripTask.cpp) + [Source/Engine/Tasks/InstStripTask.cpp](Source/Engine/Tasks/InstStripTask.cpp).  **Clips routing unification:** Pass 1 loop's `isVox || isInst` filter expands to include Clips channels; grid-placed audio clips that reference Clips-page-loaded files default their `routeChannel` to that Clips page's channel ID (currently defaults to 0 / row audio insert).  Net result: a Clips file plays through the same Clips engine + InsertNode chain regardless of trigger source (piano roll OR Builder grid).  **Test premise correction:** DSP-12 simultaneous-case test premise updated from "both play simultaneously" to "both play simultaneously through the same chain"; QA-B's deferred re-verification runs under the corrected premise post-QA-J close.
 - Risk: high. Architectural restructure, audio thread, MT-aware.
 - Dependencies: QA-0 (composite task pattern established) + QA-E
   (audio clip surface stability).
-- Effort: large (~12-16 hours; folded streamer-sync + applicator cleanup adds ~2 hours; folded FilePlay restructure adds ~3-4 hours).
+- Effort: large (~13-18 hours; folded streamer-sync + applicator cleanup adds ~2 hours; folded FilePlay restructure adds ~3-4 hours; folded Clips routing unification adds ~1-2 hours).
 
 #### **QA-K: Audio Engine Polish**
 - Items: APP-04 (SetPriorityClass + MMCSS), APP-05 (Open ASIO Control
@@ -2571,22 +2572,53 @@ doesn't process per-clip in that flow).  Per
 speculate about FL Studio should be caught before passing through.
 
 **Decision (OPT-A — fold into QA-J):** extend QA-J's scope to cover
-BOTH paths:
+the per-clip-through-engine path across all three engine families
+that drive audio clips through their chains (Vox + Inst + Clips):
 
-- Non-FilePlay (existing): `renderAudioClipsForRow` per-row pre-pass
-  that mixes all row clips into one buffer before running the rack/EQ
-  once per row.
-- FilePlay (new): per-page pre-pass that mixes all clips routed to
-  the same Vox/Inst page into one buffer before running the engine +
-  insert chain once per page.  Touches the Pass 1 loop at
+- **Non-FilePlay (existing):** `renderAudioClipsForRow` per-row
+  pre-pass that mixes all row clips into one buffer before running
+  the rack/EQ once per row.
+- **FilePlay extended (new):** per-page pre-pass that mixes all
+  clips routed to the same Vox / Inst / Clips page into one buffer
+  before running the engine + insert chain once per page.  Touches
+  the Pass 1 loop at
   [Source/PluginProcessor.cpp:2415-2433](Source/PluginProcessor.cpp:2415),
   `renderFilePlayPlayer` at
   [Source/PluginProcessor.cpp:867-901](Source/PluginProcessor.cpp:867),
   and the MT-path equivalents in
   [Source/Engine/Tasks/VoxStripTask.cpp](Source/Engine/Tasks/VoxStripTask.cpp)
   and [Source/Engine/Tasks/InstStripTask.cpp](Source/Engine/Tasks/InstStripTask.cpp).
+- **Clips routing unification (new — amended 2026-05-11 same day as initial entry):**
+  Pass 1 loop's `isVox || isInst` filter expands to include Clips
+  channels.  Audio clips placed on the Builder grid that reference
+  clips loaded in a Clips page default their `routeChannel` to that
+  Clips page's channel ID (currently defaults to 0 / row audio
+  insert).  Net result: regardless of whether a Clips clip is
+  triggered via piano roll OR placed on the Builder grid, audio
+  flows through the same Clips engine + InsertNode chain.  This was
+  the intended design (user-stated 2026-05-11 — "regardless of where
+  you add it is available both in the piano roll and on the builder
+  page all playing through one place"); the current split routing
+  (piano-roll → Clips InsertNode; grid-placed → row audio insert) was
+  a Batch 9b Item 9 oversight that surfaced during QA-E open under
+  FILE-02 routing scoping.
 
-QA-J's effort estimate goes from ~8-12 hours to ~12-16 hours.  Risk
+**Test premise correction (amended 2026-05-11):** the DSP-12
+verification matrix's simultaneous case ("Builder + piano roll both
+placed, both play summed") was originally scoped to verify both
+play simultaneously.  It did NOT verify both play through the
+SAME chain.  Under the actual current implementation (split
+routing), the test passed against a premise that doesn't match the
+intended design.  Once QA-J lands the Clips routing unification,
+QA-B's deferred DSP-12 simultaneous-case test re-verifies under the
+corrected premise: "both play simultaneously THROUGH THE SAME Clips
+engine + InsertNode chain, with the chain running once per block on
+the summed input."  See §5 QA-B entry test-premise addendum.
+
+QA-J's effort estimate goes from ~8-12 hours to ~12-16 hours (bumped
+2026-05-11 initial entry) and bumps further to ~13-18 hours with
+the Clips routing unification work folded in (adds ~1-2 hours for
+Pass 1 filter extension + default-routeChannel logic).  Risk
 stays "high — architectural restructure, audio thread, MT-aware"
 (same risk tier).  Dependencies unchanged: QA-0 (composite task
 pattern established) + QA-E (audio clip surface stability) per

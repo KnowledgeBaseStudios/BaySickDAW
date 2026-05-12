@@ -67,7 +67,52 @@ See `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` "Spec calls alread
 - Main Plan §5 QA-E entry now points at the canonical plan file.
 - This running-notes file seeded.
 - **Batch Plans + Running Notes layout convention locked in Main Plan §0** (Document Formatting Conventions, new sub-section).  Jeff caught the gap when initial plan-mode draft came back prose-only instead of matching QA-D's `federated-bouncing-cupcake.md` exemplar shape (checkbox steps + embedded code blocks + numbered "Tell Jeff" verify scripts + per-task Files-to-modify section).  Convention applies to every future batch plan; pre-QA-D plan files don't retroactively match.  Folded into Task 0 commit (CB-A) so the convention lock + first batch using it land together.
-- Task 0 commit pending — `/draft-commit` + surface + approve + commit next.
+- Task 0 commit landed: `606ec15` — "QA-E open: plan file + Main Plan pointer + Sec 0 convention + running notes seed."
+- Files in commit: `Plans & Specs/Main Plan.md` (§5 QA-E **Plan file:** pointer + new §0 "Batch Plans + Running Notes layout (locked 2026-05-11)" sub-section), `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` (new — per-batch plan), `Plans & Specs/Running Notes/phantom-recording-mongoose.md` (new — this file, with pre-Task-0 section capturing the corrective + scoping work that preceded this batch open).
+- Branch now 12 commits ahead of `origin/main` (was 11 pre-commit).
+- Working tree clean post-commit.
+- Pre-open commit reference: `54c99dd` (yesterday's QA-E pre-open corrective + scoping work — §9 Forks 11th/12th/13th + §5 routing + QA-D NIT correction).
+
+### Convention lock — implications
+
+- The new Main Plan §0 "Batch Plans + Running Notes layout (locked 2026-05-11)" sub-section is now canonical.  Every batch plan + running-notes file authored from QA-E onward MUST match the documented shape: checkbox `- [ ]` task steps + embedded code blocks for non-trivial fix patterns + explicit "Tell Jeff: ..." verify scripts with numbered test scenarios + per-task Files-to-modify section.  Pre-QA-D plan files do not retroactively match; this is a forward-only convention.
+- `phantom-recording-mongoose.md` itself is the first plan file authored under the locked convention.
+
+### Next action
+
+- **Task 1 — Mute verify-and-close (M1).** Source review at QA-E open confirmed mute dispatch gates already present in source: pattern dispatch at [Source/PluginProcessor.cpp:1194-1195](../../Source/PluginProcessor.cpp) (`isRowAudible` + `blk.muted` checks); audio rendering at [Source/PluginProcessor.cpp:493-501](../../Source/PluginProcessor.cpp) (`rowMuted || builderRowMuted` gate); automation block mute at [Source/Standalone/StandaloneEditor.cpp:2406](../../Source/Standalone/StandaloneEditor.cpp); LED click handler at [Source/Standalone/BuilderPage.cpp:4092](../../Source/Standalone/BuilderPage.cpp).  `git log -L` confirms gates date from `cc011e0` (MT engine batches) + initial commit `d595ee3` — both pre-date QA-0's #16a / #16b / #21 finding capture by months.  Either the original findings were captured inaccurately, OR an unrelated commit since incidentally fixed them.
+- Jeff to run **Debug + Release** across the 4 verify scenarios in the plan file's Task 1 section:
+  - (1) Pattern row mute via LED — pattern silences on click, resumes on second click.
+  - (2) Audio row mute via LED — audio silences on click, resumes on second click (must NOT stick).
+  - (3) Right-click pattern block → Mute / Unmute — pattern silences then resumes.
+  - (4) Right-click audio block → Mute / Unmute — audio silences then resumes.
+- All 4 scenarios pass clean → close as no-longer-reproducible via close-time §9 Forks entry (or Implemented Work Log close-routing table if scope fits); no source commit.  Any scenario fails → escalate to M2 dig-deeper; surface root cause to Jeff with options before implementing fix.
+
+---
+
+## 2026-05-11 — Task 1 hold — Clips routing unification finding surfaced
+
+### Found along the way
+
+- **Architectural finding (pre-Task-1, surfaced during FILE-01 / FILE-02 / per-clip discussion):** Clips audio routing diverges from intended design.  Jeff stated intent — "regardless of where you add it is available both in the piano roll and on the builder page all playing through one place" (one clip, one chain regardless of trigger source).  Actual implementation: piano-roll-triggered Clips → Clips engine's InsertNode; Builder-grid-placed Clips audio → row audio insert (different chain).  Surfaced during the per-clip vs summed-input discussion when Jeff asked whether the FilePlay quirk also affects Clips simultaneous-trigger scenarios.  Source-grep confirmed split-routing: Pass 1 FilePlay loop at [Source/PluginProcessor.cpp:2415-2425](../../Source/PluginProcessor.cpp) filters to `isVox || isInst` only; Clips channels fall through to Pass 2 non-FilePlay rendering, which targets row audio insert rather than Clips InsertNode.  Likely a Batch 9b Item 9 oversight when FilePlay was added for live-input engines (Vox/Inst) without considering that Clips clips also benefit from engine-routed playback.
+- **Test invalidation:** the prior DSP-12 simultaneous-case verification ("Builder + piano roll both placed, both play summed") tested simultaneous playback but did NOT test "through the same chain."  Jeff was told the system matched the intended design and verified accordingly.  The test passed against a wrong premise.  Owning the misstatement — I should have grounded the design claim in source before telling Jeff the setup matched intent.
+
+### Routing decisions
+
+- **CL-A folded:** §9 thirteenth Forks entry (committed in `54c99dd`) amended same day to expand decision scope from "FilePlay path (Vox/Inst only)" to "FilePlay path (Vox/Inst/Clips) + Clips routing unification."  Pass 1 loop's `isVox || isInst` filter expands to include Clips channels; grid-placed audio clips referencing Clips-page-loaded files default `routeChannel` to that Clips page's channel ID (currently 0 / row audio insert).
+- **§5 QA-J entry updated:** folded sub-bullet rewritten to cover both FilePlay multi-clip restructure AND Clips routing unification; effort estimate bumped to ~13-18 hours.
+- **§5 QA-B entry updated:** new "Test premise correction (2026-05-11)" line added.  Open sequencing call surfaced (slide QA-B to after QA-J close vs split QA-B into two passes vs other) — Jeff decides at QA-J open or post-QA-E close.
+
+### Spec calls resolved
+
+- **CL-A** (route the Clips routing-unification fix to QA-J): confirmed.
+- **Intent** (one clip, one chain regardless of source): confirmed.
+- **Test premise correction routing** (fold into the same §9 amendment vs separate): fold into the §9 amendment.
+- **Task 1 hold:** mute verify-and-close held until QA-J update is approved + committed.
+
+### Next action
+
+- Surface the diff + dispatch `/draft-commit` for the amendment commit.  After Jeff approves + the commit lands, resume Task 1 (Mute verify-and-close M1).
 
 ---
 
