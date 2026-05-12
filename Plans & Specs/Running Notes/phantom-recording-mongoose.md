@@ -169,4 +169,48 @@ See `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` "Spec calls alread
 
 ---
 
+## 2026-05-11 — Task 2 — Crash Family SafePointer Fix (Sub-Phase A) — PASS
+
+### Done
+
+- Task 2 source change landed in [Source/Standalone/StandaloneEditor.cpp](../../Source/Standalone/StandaloneEditor.cpp) across all 7 page-type branches in `StandaloneEditor::showPageForTab` (LayersPage / BassPage / ClipsPage / VoxPage / InstPage / DrumPage / BaySickRustyDrumsPage).
+- **Pass 1 (C-i SafePointer-at-outer-scope — the planned pattern from §9 twelfth Forks entry):**
+  - Lifted `juce::Component::SafePointer<XxxPage> safe (xp);` to outer scope right after each branch's `dynamic_cast`.
+  - Replaced raw `xp` lambda captures with `safe`.
+  - Inside lambdas use `if (auto* p = safe.getComponent()) { ... }` guards.
+  - Deleted the inner-SafePointer-too-late lines from the 6 branches that previously had them (old pre-edit line refs: Layers 4070, Bass 4104, Clips 4144, Vox 4185, Inst 4219, Drum 4287).
+- **Pass 2 (second bug shape surfaced mid-Task — pre-capture into stack locals before destroying call):**
+  - First runtime crash (BaySickBasses Piano Roll click on big project) stack-traced to the InstPage redirect lambda at pre-edit line 4275 — the `if (mPianoRollPage)` access AFTER `onTabSelected(4)`.
+  - Diagnosis: `onTabSelected(4)` in the page-switch redirect destroys the source InstPage as a side effect AND triggers `mPageMenuBar->setTabSlots(...)`, which replaces the current lambda's callback slot and frees the lambda's heap-allocated capture struct mid-invocation.  Any access to `this->mPianoRollPage` (or `this->mRibbon`) AFTER `onTabSelected(4)` was reading freed memory.
+  - Initial first-pass fix: captured `p->getPageIndex()` (plus `p->getSource()` for InstPage) into local stack variables BEFORE `onTabSelected(4)` in the 5 piano-roll-redirect branches (Layers / Bass / Clips / InstPage / DrumPage i==2).  Build + verify reproduced the same stack trace at pre-edit line 4292 — same family, still freed.
+  - Second-pass fix (final): captured BOTH `mPianoRollPage` AND `mRibbon` into local stack variables BEFORE `onTabSelected(4)` in ALL 7 redirect paths (the 5 above PLUS DrumPage i==0 PLUS BaySickRustyDrumsPage i==2).  Pattern: `auto* prp = mPianoRollPage; auto* rbn = mRibbon.get();` BEFORE the state-mutating call; AFTER, only the locals are used: `if (prp != nullptr) prp->selectEngine(...)`.
+- **Compile error mid-Pass-2:** initial `auto* rbn = mRibbon;` failed because `mRibbon` is `std::unique_ptr<RibbonTabBar>`, not a raw pointer.  Fixed by extracting via `.get()`.  `mPianoRollPage` is already `class PianoRollPage*` raw, so no `.get()` needed there.  All 7 sites now use `auto* rbn = mRibbon.get();`.  Owning the slip — should have grounded the type in source before using `auto*` (per `feedback_check_code_before_calling_it_expected.md`).
+- Jeff verified Debug + Release: all deep-link buttons (Piano Roll / Drum Kit / Player sub-tabs) across all 7 page types work cleanly, no crashes, normal-operation regression sweep clean.
+
+### Architectural narrative — two distinct bug shapes in one function, both required fixing
+
+- **Shape 1 (the §9 twelfth Forks entry pattern, landed in Pass 1):** raw `xp` captured in lambdas survived past the source page's destruction.  Fix is `SafePointer<XxxPage>` at outer scope so `safe.getComponent()` returns null after destruction instead of dereferencing freed memory.  This is the C-i pattern locked in commit `54c99dd`'s §9 twelfth Forks entry.
+- **Shape 2 (surfaced during Task 2 verify, fixed in Pass 2):** even with SafePointer in place, `onTabSelected(4)` cascades through `mPageMenuBar->setTabSlots(...)` which replaces the active lambda's callback slot and frees its captures mid-invocation.  Reading `p->...` OR `this->...` AFTER that call is unsafe regardless of `p` validity — `this` itself isn't freed but the lambda's heap-allocated capture struct is.  SafePointer does not help here.  Fix is pre-capture into stack locals BEFORE the state-mutating call; the lambda body after the call uses only stack values that survive capture-struct destruction.
+- Both fixes had to land for the function to be crash-safe.  The §9 twelfth Forks entry should be amended at batch close to record that Sub-Phase A surfaced + closed this second shape — initial scope locked SafePointer-at-outer-scope only; the pre-capture-before-destroying-call discipline is now a second documented invariant for `showPageForTab` and any future function with the same lambda + setTabSlots structure.
+
+### Pre-existing finding spotted (NOT Task 2 regression, NOT QA-E scope)
+
+- Jeff reported a separate crash at **app close**: `BuilderPage::~BuilderPage` -> `TreeView::~TreeView` -> `TreeViewItem::setOwnerView` walks a dangling subItem pointer.  Source family identical in shape to the QA-D MenuBarModel listener-dangle fix but for `TreeView` + `TreeViewItem` destructor ordering.
+- Confirmed via grep this is **QA-0 finding #17, already folded into QA-H scope** per Main Plan §5 (QA-H entry, lines 945-950).  Pre-existing destructor-ordering bug.  Save-before-quit and the close-crash is cosmetic at shutdown; no data loss, no in-session impact.
+- **No new routing action.**  Mentioned here only so the trail is captured; QA-H already owns it.
+
+### Disposition
+
+- Source change for Sub-Phase A complete in working tree (uncommitted alongside this running-notes append).  Both files get committed in the Task 2 close commit.
+- **#13 / #14 / #40 / #55 (the original showPageForTab use-after-free family) are now fixed at source** across all 7 branches via the combined Pass 1 + Pass 2 patterns.
+
+### Next action
+
+- Surface diff (Source/Standalone/StandaloneEditor.cpp + this running-notes file) + full pre-commit git status per `feedback_surface_full_git_status_before_commit.md`.
+- Dispatch `/draft-commit` for the Task 2 close commit message.  Surface drafted message + git status to Jeff for explicit approval before any `git commit` runs.
+- After commit lands: **Task 3 — Vox / Inst Lifecycle (MIX-02 / MIX-04 / MIX-06).**  Per plan file Task 3 section.
+- Amendment to §9 twelfth Forks entry recording the second bug shape (pre-capture-before-destroying-call) deferred to batch close — the close drafter folds it into either an amendment line on the existing entry OR a new Forks entry depending on shape at close-time.
+
+---
+
 (Subsequent entries appended below at every commit / sub-task verify / finding / spec call / scope pivot.)

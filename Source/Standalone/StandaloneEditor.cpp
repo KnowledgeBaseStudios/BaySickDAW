@@ -4064,10 +4064,15 @@ void StandaloneEditor::showPageForTab(int tabId)
             // EQ live exclusively on the Effects page.  Piano Roll sub-tab (1)
             // remains a nav shortcut to PianoRollPage; Player (0) is the
             // local sub-page.
-            auto syncPagePresetMenu = [this, lp] (int /*subTabIdx*/)
+            // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope
+            // so deep-link sub-tab lambdas can't deref a dangling page pointer
+            // after engine swap / project reload / tab delete + re-add.
+            juce::Component::SafePointer<LayersPage> safe (lp);
+
+            auto syncPagePresetMenu = [this, safe] (int /*subTabIdx*/)
             {
-                if (! mPageMenuBar || lp == nullptr) return;
-                juce::Component::SafePointer<LayersPage> safe (lp);
+                if (! mPageMenuBar) return;
+                if (safe.getComponent() == nullptr) return;
                 mPageMenuBar->setMenuBuilder (
                     [safe] (juce::Component* anchor)
                     {
@@ -4077,16 +4082,28 @@ void StandaloneEditor::showPageForTab(int tabId)
             };
 
             mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
-                [this, lp, syncPagePresetMenu](int i) {
+                [this, safe, syncPagePresetMenu](int i) {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
                     if (i == 1)
                     {
-                        if (mRibbon) mRibbon->selectTab (4);
+                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                        // local stack variables BEFORE onTabSelected(4).  The page
+                        // switch can destroy both the source page (so `p` becomes
+                        // dangling) AND this lambda itself (mPageMenuBar replaces
+                        // its callbacks during showPageForTab, freeing the lambda's
+                        // capture struct mid-invocation), so any access to `this->X`
+                        // or `p->X` after the switch reads freed memory.
+                        const int pageIdx = p->getPageIndex();
+                        auto* prp = mPianoRollPage;
+                        auto* rbn = mRibbon.get();
+                        if (rbn != nullptr) rbn->selectTab (4);
                         onTabSelected (4);
-                        if (mPianoRollPage)
-                            mPianoRollPage->selectEngine ({ EngineKind::Layer, lp->getPageIndex() });
+                        if (prp != nullptr)
+                            prp->selectEngine ({ EngineKind::Layer, pageIdx });
                         return;
                     }
-                    lp->switchTab(i);
+                    p->switchTab(i);
                     mPageMenuBar->updateTabActive(i);
                     mPageMenuBar->setMidSideVisible(false);
                     syncPagePresetMenu (i);
@@ -4098,10 +4115,13 @@ void StandaloneEditor::showPageForTab(int tabId)
         {
             // J-6 EQ unification (2026-05-03): EQ sub-tab removed; pre+post EQ
             // on Effects page only.  Piano Roll sub-tab redirects to PianoRollPage.
-            auto syncPagePresetMenu = [this, bp] (int /*subTabIdx*/)
+            // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
+            juce::Component::SafePointer<BassPage> safe (bp);
+
+            auto syncPagePresetMenu = [this, safe] (int /*subTabIdx*/)
             {
-                if (! mPageMenuBar || bp == nullptr) return;
-                juce::Component::SafePointer<BassPage> safe (bp);
+                if (! mPageMenuBar) return;
+                if (safe.getComponent() == nullptr) return;
                 mPageMenuBar->setMenuBuilder (
                     [safe] (juce::Component* anchor)
                     {
@@ -4111,16 +4131,24 @@ void StandaloneEditor::showPageForTab(int tabId)
             };
 
             mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
-                [this, bp, syncPagePresetMenu](int i) {
+                [this, safe, syncPagePresetMenu](int i) {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
                     if (i == 1)
                     {
-                        if (mRibbon) mRibbon->selectTab (4);
+                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                        // locals before onTabSelected(4) -- see LayersPage branch
+                        // comment for full rationale.
+                        const int pageIdx = p->getPageIndex();
+                        auto* prp = mPianoRollPage;
+                        auto* rbn = mRibbon.get();
+                        if (rbn != nullptr) rbn->selectTab (4);
                         onTabSelected (4);
-                        if (mPianoRollPage)
-                            mPianoRollPage->selectEngine ({ EngineKind::Bass, bp->getPageIndex() });
+                        if (prp != nullptr)
+                            prp->selectEngine ({ EngineKind::Bass, pageIdx });
                         return;
                     }
-                    bp->switchTab(i);
+                    p->switchTab(i);
                     mPageMenuBar->updateTabActive(i);
                     mPageMenuBar->setMidSideVisible(false);
                     syncPagePresetMenu (i);
@@ -4137,11 +4165,14 @@ void StandaloneEditor::showPageForTab(int tabId)
             // G-7: Page Preset hamburger always installed (Save greys out
             // when no engine; Load Preset works regardless).  Pre EQ8 M/S
             // tab keeps the same menu since the EQ stub has no own menu.
-            auto syncPagePresetMenu = [this, cp] (int i)
+            // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
+            juce::Component::SafePointer<ClipsPage> safe (cp);
+
+            auto syncPagePresetMenu = [this, safe] (int i)
             {
                 juce::ignoreUnused (i);   // menu builder is the same on all sub-tabs
-                if (! mPageMenuBar || cp == nullptr) return;
-                juce::Component::SafePointer<ClipsPage> safe (cp);
+                if (! mPageMenuBar) return;
+                if (safe.getComponent() == nullptr) return;
                 mPageMenuBar->setMenuBuilder (
                     [safe] (juce::Component* anchor)
                     {
@@ -4153,16 +4184,24 @@ void StandaloneEditor::showPageForTab(int tabId)
             // J-6 EQ unification (2026-05-03): Pre EQ8 M/S sub-tab removed;
             // Audio insert pre-rack EQ now lives on the Effects page only.
             mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
-                [this, cp, syncPagePresetMenu](int i) {
+                [this, safe, syncPagePresetMenu](int i) {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
                     if (i == 1)
                     {
-                        if (mRibbon) mRibbon->selectTab (4);
+                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                        // locals before onTabSelected(4) -- see LayersPage branch
+                        // comment for full rationale.
+                        const int pageIdx = p->getPageIndex();
+                        auto* prp = mPianoRollPage;
+                        auto* rbn = mRibbon.get();
+                        if (rbn != nullptr) rbn->selectTab (4);
                         onTabSelected (4);
-                        if (mPianoRollPage)
-                            mPianoRollPage->selectEngine ({ EngineKind::Clip, cp->getPageIndex() });
+                        if (prp != nullptr)
+                            prp->selectEngine ({ EngineKind::Clip, pageIdx });
                         return;
                     }
-                    cp->switchTab (i);
+                    p->switchTab (i);
                     mPageMenuBar->updateTabActive (i);
                     mPageMenuBar->setMidSideVisible (false);
                     syncPagePresetMenu (i);
@@ -4178,11 +4217,14 @@ void StandaloneEditor::showPageForTab(int tabId)
             // since the EQ stub doesn't have its own menu.  Save Page Preset
             // greys out when there's no engine; Load Page Preset stays active
             // so users can apply a saved preset to an engineless Vox tab.
-            auto syncPagePresetMenu = [this, vp] (int i)
+            // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
+            juce::Component::SafePointer<VoxPage> safe (vp);
+
+            auto syncPagePresetMenu = [this, safe] (int i)
             {
                 juce::ignoreUnused (i);
-                if (! mPageMenuBar || vp == nullptr) return;
-                juce::Component::SafePointer<VoxPage> safe (vp);
+                if (! mPageMenuBar) return;
+                if (safe.getComponent() == nullptr) return;
                 mPageMenuBar->setMenuBuilder (
                     [safe] (juce::Component* anchor)
                     {
@@ -4194,8 +4236,10 @@ void StandaloneEditor::showPageForTab(int tabId)
             // H-6b (2026-05-01) / J-6 (2026-05-03): Vox page is BaySickVocal-only;
             // EQ unification dropped the "Pre Rack EQ" sub-tab so Vox now has 5 sub-tabs.
             mPageMenuBar->setTabSlots (VoxPage::getTabLabels(),
-                [this, vp, syncPagePresetMenu] (int i) {
-                    vp->switchTab (i);
+                [this, safe, syncPagePresetMenu] (int i) {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
+                    p->switchTab (i);
                     mPageMenuBar->updateTabActive (i);
                     mPageMenuBar->setMidSideVisible (false);
                     syncPagePresetMenu (i);
@@ -4212,11 +4256,14 @@ void StandaloneEditor::showPageForTab(int tabId)
             // (same reasoning as Vox).
             // G-7: Page Preset hamburger menu installed regardless of sub-tab
             // (same reasoning as Vox above).
-            auto syncPagePresetMenu = [this, ip] (int i)
+            // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
+            juce::Component::SafePointer<InstPage> safe (ip);
+
+            auto syncPagePresetMenu = [this, safe] (int i)
             {
                 juce::ignoreUnused (i);
-                if (! mPageMenuBar || ip == nullptr) return;
-                juce::Component::SafePointer<InstPage> safe (ip);
+                if (! mPageMenuBar) return;
+                if (safe.getComponent() == nullptr) return;
                 mPageMenuBar->setMenuBuilder (
                     [safe] (juce::Component* anchor)
                     {
@@ -4236,20 +4283,36 @@ void StandaloneEditor::showPageForTab(int tabId)
             // (K-5's Player tab) doesn't break the index-based nav.
             const auto labels = ip->getActiveTabLabels();
             mPageMenuBar->setTabSlots(labels,
-                [this, ip, syncPagePresetMenu, labels](int i) {
+                [this, safe, syncPagePresetMenu, labels](int i) {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
                     if (i >= 0 && i < (int) labels.size() && labels[i] == "Piano Roll")
                     {
-                        const auto src = ip->getSource();
-                        EngineKind k = (src == InstPage::Source::BaySickGuitars)
-                                        ? EngineKind::BaySickGuitars
-                                        : EngineKind::BaySickBasses;
-                        if (mRibbon) mRibbon->selectTab (4);
+                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                        // local stack variables BEFORE onTabSelected(4).  Two
+                        // destruction surfaces: (a) onTabSelected destroys this
+                        // page, so `p` becomes dangling; (b) onTabSelected calls
+                        // showPageForTab, which calls mPageMenuBar->setTabSlots,
+                        // which replaces THIS lambda's callback slot, freeing the
+                        // lambda's capture struct mid-invocation -- so `this->X`
+                        // access becomes a use-after-free too.  User-repro
+                        // 2026-05-11 BaySickBasses Piano Roll click crashed
+                        // initially at p->getPageIndex(); after that was
+                        // pre-captured it then crashed at this->mPianoRollPage.
+                        const auto src    = p->getSource();
+                        const int pageIdx = p->getPageIndex();
+                        const EngineKind k = (src == InstPage::Source::BaySickGuitars)
+                                              ? EngineKind::BaySickGuitars
+                                              : EngineKind::BaySickBasses;
+                        auto* prp = mPianoRollPage;
+                        auto* rbn = mRibbon.get();
+                        if (rbn != nullptr) rbn->selectTab (4);
                         onTabSelected (4);
-                        if (mPianoRollPage)
-                            mPianoRollPage->selectEngine ({ k, ip->getPageIndex() });
+                        if (prp != nullptr)
+                            prp->selectEngine ({ k, pageIdx });
                         return;
                     }
-                    ip->switchTab (i);
+                    p->switchTab (i);
                     mPageMenuBar->updateTabActive (i);
                     mPageMenuBar->setMidSideVisible (false);
                     syncPagePresetMenu (i);
@@ -4278,13 +4341,18 @@ void StandaloneEditor::showPageForTab(int tabId)
             // G-7: Page Preset hamburger menu - installed when sub-tab is
             // Player (1) only.  EQ (3) hands the menu off to ParametricEQDisplay
             // via syncEQHamburger; Drum Kit (0) + Piano Roll (2) are nav-only.
-            auto syncPagePresetMenu = [this, dp] (int subTabIdx)
+            // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
+            // User-reproduced crash on this branch's Drum Kit sub-tab click
+            // after engine swap / project reload; this is the canonical fix
+            // site for the page-type-branch use-after-free family.
+            juce::Component::SafePointer<DrumPage> safe (dp);
+
+            auto syncPagePresetMenu = [this, safe] (int subTabIdx)
             {
                 if (! mPageMenuBar) return;
                 const bool onPlayer = (subTabIdx == 1);
-                if (onPlayer && dp != nullptr)
+                if (onPlayer && safe.getComponent() != nullptr)
                 {
-                    juce::Component::SafePointer<DrumPage> safe (dp);
                     mPageMenuBar->setMenuBuilder (
                         [safe] (juce::Component* anchor)
                         {
@@ -4297,24 +4365,37 @@ void StandaloneEditor::showPageForTab(int tabId)
             // J-6 EQ unification (2026-05-03): Pre EQ8 M/S sub-tab removed.
             // Tabs: 0 Drum Kit (nav shortcut), 1 Player, 2 Piano Roll (nav shortcut).
             mPageMenuBar->setTabSlots({"Drum Kit", "Player", "Piano Roll"},
-                [this, dp, syncPagePresetMenu](int i) {
+                [this, safe, syncPagePresetMenu](int i) {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
                     if (i == 0)
                     {
-                        if (mRibbon) mRibbon->selectTab (4);
+                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                        // locals before onTabSelected(4) -- see LayersPage branch
+                        // comment for full rationale.
+                        auto* prp = mPianoRollPage;
+                        auto* rbn = mRibbon.get();
+                        if (rbn != nullptr) rbn->selectTab (4);
                         onTabSelected (4);
-                        if (mPianoRollPage)
-                            mPianoRollPage->selectEngine ({ EngineKind::DrumKit, 0 });
+                        if (prp != nullptr)
+                            prp->selectEngine ({ EngineKind::DrumKit, 0 });
                         return;
                     }
                     if (i == 2)
                     {
-                        if (mRibbon) mRibbon->selectTab (4);
+                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                        // locals before onTabSelected(4) -- see LayersPage branch
+                        // comment for full rationale.
+                        const int pageIdx = p->getPageIndex();
+                        auto* prp = mPianoRollPage;
+                        auto* rbn = mRibbon.get();
+                        if (rbn != nullptr) rbn->selectTab (4);
                         onTabSelected (4);
-                        if (mPianoRollPage)
-                            mPianoRollPage->selectEngine ({ EngineKind::Drum, dp->getPageIndex() });
+                        if (prp != nullptr)
+                            prp->selectEngine ({ EngineKind::Drum, pageIdx });
                         return;
                     }
-                    dp->switchTab(i);
+                    p->switchTab(i);
                     mPageMenuBar->updateTabActive(i);
                     mPageMenuBar->setMidSideVisible(false);
                     syncPagePresetMenu (i);
@@ -4330,17 +4411,27 @@ void StandaloneEditor::showPageForTab(int tabId)
             // control panel (placeholder until J-8 stage 2 ships); Piano
             // Roll (2) redirects to the unified PianoRollPage with this
             // engine selected.
+            // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
+            juce::Component::SafePointer<BaySickRustyDrumsPage> safe (rp);
+
             mPageMenuBar->setTabSlots({"Drum Kit", "Player", "Piano Roll"},
-                [this, rp](int i) {
+                [this, safe](int i) {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
                     if (i == 2)
                     {
-                        if (mRibbon) mRibbon->selectTab (4);   // 4 = PianoRoll ribbon slot
+                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                        // locals before onTabSelected(4) -- see LayersPage branch
+                        // comment for full rationale.
+                        auto* prp = mPianoRollPage;
+                        auto* rbn = mRibbon.get();
+                        if (rbn != nullptr) rbn->selectTab (4);   // 4 = PianoRoll ribbon slot
                         onTabSelected (4);
-                        if (mPianoRollPage)
-                            mPianoRollPage->selectEngine ({ EngineKind::BaySickRustyDrums, 0 });
+                        if (prp != nullptr)
+                            prp->selectEngine ({ EngineKind::BaySickRustyDrums, 0 });
                         return;
                     }
-                    rp->switchTab(i);
+                    p->switchTab(i);
                     mPageMenuBar->updateTabActive(i);
                     mPageMenuBar->setMidSideVisible(false);
                 }, rp->getActiveTab(), rp->getPageColor());
