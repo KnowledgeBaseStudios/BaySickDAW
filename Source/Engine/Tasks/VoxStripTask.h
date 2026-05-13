@@ -57,4 +57,15 @@ private:
     VibeGraph*             mGraph         = nullptr;
     VibeSynthProcessor*    mProcessor     = nullptr;
     juce::String           mPrefix;   // "mixer_vox_<i>"
+
+    // QA-E Task 3 follow-up (2026-05-12): per-task FilePlay scratch buffers.
+    // Replaces the previously-shared mProcessor->mAudioClipScratch +
+    // mProcessor->mVoxEngineScratch.  Pre-fix MT FilePlay was a no-op (flag
+    // never set); the Task 3 pre-scan move activated it AND surfaced the
+    // long-acknowledged race documented at the now-stale "race in MT mode
+    // but flag is constexpr false" comment.  Per-task ownership eliminates
+    // the cross-task data race that produced all-3-clips-mixed-into-every-
+    // strip on playback.
+    juce::AudioBuffer<float> mClipScratch;
+    juce::AudioBuffer<float> mEngineScratch;
 };

@@ -72,7 +72,11 @@ void InstStripTask::run()
         clipCtx.numOut       = blockView.getNumChannels();
         clipCtx.masterGain   = masterGain;
         clipCtx.mxState      = &mx;
-        clipCtx.clipScratch  = &mProcessor->mAudioClipScratch;   // see VoxStripTask note
+        // QA-E Task 3 follow-up (2026-05-12): per-task clip scratch (was
+        // shared mProcessor->mAudioClipScratch).  See VoxStripTask.cpp for
+        // the cross-pollution rationale + the size-before-read requirement.
+        mClipScratch.setSize (blockView.getNumChannels(), n, false, false, true);
+        clipCtx.clipScratch  = &mClipScratch;
 
         juce::MidiBuffer  emptyMidi;
         juce::MidiBuffer& engineMidi = (mCtx->instPageMidi != nullptr)
@@ -83,10 +87,12 @@ void InstStripTask::run()
         pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
         // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot.
+        // QA-E Task 3 follow-up (2026-05-12): pass per-task mEngineScratch
+        // (no race vs the previously-shared mProcessor->mInstEngineScratch).
         for (auto& player : mProcessor->mCurrentBlockClipSnapshot->players)
         {
             if (player.routeChannel != channelId) continue;
-            mProcessor->renderFilePlayPlayer (player, clipCtx, engineMidi, &blockView);
+            mProcessor->renderFilePlayPlayer (player, clipCtx, engineMidi, &blockView, mEngineScratch);
         }
         return;
     }

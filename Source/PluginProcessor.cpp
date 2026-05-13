@@ -671,7 +671,8 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
 bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             player,
                                                  const AudioClipBlockContext& ctx,
                                                  juce::MidiBuffer&            engineMidi,
-                                                 juce::AudioBuffer<float>*    mtDest)
+                                                 juce::AudioBuffer<float>*    mtDest,
+                                                 juce::AudioBuffer<float>&    engineScratch)
 {
     using int64 = juce::int64;
 
@@ -870,11 +871,11 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
         auto* eng = mVoxEngines[(size_t) vi];
         if (eng == nullptr) return false;
 
-        mVoxEngineScratch.setSize (numRenderCh, numSamples, false, false, true);
-        mVoxEngineScratch.clear();
-        const int copyCh = juce::jmin (numOut, mVoxEngineScratch.getNumChannels());
+        engineScratch.setSize (numRenderCh, numSamples, false, false, true);
+        engineScratch.clear();
+        const int copyCh = juce::jmin (numOut, engineScratch.getNumChannels());
         for (int ch = 0; ch < copyCh; ++ch)
-            mVoxEngineScratch.copyFrom (ch, 0, clipScratch, ch, 0, numSamples);
+            engineScratch.copyFrom (ch, 0, clipScratch, ch, 0, numSamples);
 
         // setForcePitchBypass(true) - realtime pitch was baked into the wet
         // recording at capture time, so don't double-apply on FilePlay.
@@ -882,21 +883,21 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
             vp->setForcePitchBypass (true);
 
         pushScToEng (eng, MixerChannelIds::voxInsert (vi));
-        eng->processBlock (mVoxEngineScratch, engineMidi);
+        eng->processBlock (engineScratch, engineMidi);
         mVibeGraph.processInsert (VibeGraph::InsertKind::Vox, vi,
-                                   mVoxEngineScratch, ctx.bpm, ctx.anySolo);
+                                   engineScratch, ctx.bpm, ctx.anySolo);
 
         if (mtDest == nullptr)
         {
             routeInsertOutput (MixerChannelIds::voxInsert (vi),
-                                mVoxEngineScratch, numSamples);
+                                engineScratch, numSamples);
         }
         else
         {
             const int nc = juce::jmin (mtDest->getNumChannels(),
-                                        mVoxEngineScratch.getNumChannels());
+                                        engineScratch.getNumChannels());
             for (int c = 0; c < nc; ++c)
-                mtDest->addFrom (c, 0, mVoxEngineScratch, c, 0, numSamples);
+                mtDest->addFrom (c, 0, engineScratch, c, 0, numSamples);
         }
     }
     else   // isInstRoute
@@ -905,28 +906,28 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
         auto* eng = mInstEngines[(size_t) ii];
         if (eng == nullptr) return false;
 
-        mInstEngineScratch.setSize (numRenderCh, numSamples, false, false, true);
-        mInstEngineScratch.clear();
-        const int copyCh = juce::jmin (numOut, mInstEngineScratch.getNumChannels());
+        engineScratch.setSize (numRenderCh, numSamples, false, false, true);
+        engineScratch.clear();
+        const int copyCh = juce::jmin (numOut, engineScratch.getNumChannels());
         for (int ch = 0; ch < copyCh; ++ch)
-            mInstEngineScratch.copyFrom (ch, 0, clipScratch, ch, 0, numSamples);
+            engineScratch.copyFrom (ch, 0, clipScratch, ch, 0, numSamples);
 
         pushScToEng (eng, MixerChannelIds::instInsert (ii));
-        eng->processBlock (mInstEngineScratch, engineMidi);
+        eng->processBlock (engineScratch, engineMidi);
         mVibeGraph.processInsert (VibeGraph::InsertKind::Inst, ii,
-                                   mInstEngineScratch, ctx.bpm, ctx.anySolo);
+                                   engineScratch, ctx.bpm, ctx.anySolo);
 
         if (mtDest == nullptr)
         {
             routeInsertOutput (MixerChannelIds::instInsert (ii),
-                                mInstEngineScratch, numSamples);
+                                engineScratch, numSamples);
         }
         else
         {
             const int nc = juce::jmin (mtDest->getNumChannels(),
-                                        mInstEngineScratch.getNumChannels());
+                                        engineScratch.getNumChannels());
             for (int c = 0; c < nc; ++c)
-                mtDest->addFrom (c, 0, mInstEngineScratch, c, 0, numSamples);
+                mtDest->addFrom (c, 0, engineScratch, c, 0, numSamples);
         }
     }
 
@@ -2431,7 +2432,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     ? voxPageMidi [(size_t)(rch - MixerChannelIds::kVoxBase)]
                     : instPageMidi[(size_t)(rch - MixerChannelIds::kInstBase)];
 
-                renderFilePlayPlayer (player, clipCtx, engineMidi, /*mtDest=*/ nullptr);
+                // QA-E Task 3 follow-up (2026-05-12): serial Pass 1 is single-
+                // threaded so processor-member scratches are safe -- pick the
+                // matching one based on this player's route.  MT path passes
+                // per-task scratches (see VoxStripTask / InstStripTask).
+                auto& engineScratch = isVox ? mVoxEngineScratch : mInstEngineScratch;
+
+                renderFilePlayPlayer (player, clipCtx, engineMidi, /*mtDest=*/ nullptr, engineScratch);
             }
 
             // ── Batch 5 Pass 2: non-FilePlay clips per-row ──────────────────

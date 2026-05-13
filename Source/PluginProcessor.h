@@ -607,10 +607,18 @@ public:
     //
     // Returns true if a clip portion was rendered (engine was driven).
     // Returns false if the clip is out of range / muted / EOF / etc.
+    //
+    // QA-E Task 3 follow-up (2026-05-12): engineScratch parameter added so
+    // the caller provides the engine-input buffer rather than the function
+    // touching shared mVoxEngineScratch / mInstEngineScratch members.  MT
+    // tasks (VoxStripTask / InstStripTask) pass their own per-task scratch
+    // (no race).  Serial Pass 1 picks mVoxEngineScratch or mInstEngineScratch
+    // based on the player's route (single-threaded, member-sharing safe).
     bool renderFilePlayPlayer (AudioClipPlayer&             player,
                                 const AudioClipBlockContext& ctx,
                                 juce::MidiBuffer&            engineMidi,
-                                juce::AudioBuffer<float>*    mtDest = nullptr);
+                                juce::AudioBuffer<float>*    mtDest,
+                                juce::AudioBuffer<float>&    engineScratch);
 
     // Per-row peak dB for audio strip meters (audio thread writes, UI timer reads).
     // kMaxAudioRows == 50 (matches MixerState::kMaxAudioRows).

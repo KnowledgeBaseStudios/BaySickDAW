@@ -53,4 +53,11 @@ private:
     VibeGraph*            mGraph     = nullptr;
     VibeSynthProcessor*   mProcessor = nullptr;
     juce::String          mPrefix;   // "mixer_inst_<i>"
+
+    // QA-E Task 3 follow-up (2026-05-12): per-task FilePlay scratch buffers.
+    // See VoxStripTask.h for full rationale -- per-task ownership eliminates
+    // the cross-task data race on the previously-shared processor-level
+    // scratches that produced all-clips-mixed-into-every-strip on MT playback.
+    juce::AudioBuffer<float> mClipScratch;
+    juce::AudioBuffer<float> mEngineScratch;
 };

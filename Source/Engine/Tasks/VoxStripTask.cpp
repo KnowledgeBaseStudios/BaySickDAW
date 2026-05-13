@@ -80,10 +80,15 @@ void VoxStripTask::run()
         clipCtx.numOut       = blockView.getNumChannels();
         clipCtx.masterGain   = masterGain;
         clipCtx.mxState      = &mx;
-        // mAudioClipScratch is shared across tasks - race in MT mode but flag
-        // is constexpr false; future fix tracked alongside the AudioClipPlayer
-        // snapshot work in 9c.
-        clipCtx.clipScratch  = &mProcessor->mAudioClipScratch;
+        // QA-E Task 3 follow-up (2026-05-12): per-task clip scratch (was
+        // shared mProcessor->mAudioClipScratch -- the documented race went
+        // live once the Task 3 pre-scan fix activated MT FilePlay, producing
+        // all-clips-mixed-into-every-strip cross-pollution on playback).
+        // Must size before renderFilePlayPlayer reads it; the function
+        // assumes the caller sized clipScratch (serial Pass 1 does so via
+        // mAudioClipScratch at processBlock top).
+        mClipScratch.setSize (blockView.getNumChannels(), n, false, false, true);
+        clipCtx.clipScratch  = &mClipScratch;
 
         juce::MidiBuffer  emptyMidi;
         juce::MidiBuffer& engineMidi = (mCtx->voxPageMidi != nullptr)
@@ -94,10 +99,12 @@ void VoxStripTask::run()
         pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
         // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot.
+        // QA-E Task 3 follow-up (2026-05-12): pass per-task mEngineScratch
+        // (no race vs the previously-shared mProcessor->mVoxEngineScratch).
         for (auto& player : mProcessor->mCurrentBlockClipSnapshot->players)
         {
             if (player.routeChannel != channelId) continue;
-            mProcessor->renderFilePlayPlayer (player, clipCtx, engineMidi, &blockView);
+            mProcessor->renderFilePlayPlayer (player, clipCtx, engineMidi, &blockView, mEngineScratch);
         }
         return;   // FilePlay handled; skip live-input + engine branch below
     }
