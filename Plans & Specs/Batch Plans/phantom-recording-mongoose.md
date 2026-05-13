@@ -90,6 +90,9 @@ All spec calls were resolved in the conversation before plan-mode entry. If anyt
 - [Source/Standalone/StandaloneEditor.h](Source/Standalone/StandaloneEditor.h) — `restoreAudioStripsFromArrangement` signature: add `bool isLoadContext` parameter (NIT-2)
 - [Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp) — `restoreAudioStripsFromArrangement` body: gate `clearDirty()` on `isLoadContext`; `advanceCountersFromRestoredTabs`: extend parser for legacy bare names (NIT-3)
 
+### Task 9 — Dirty-flag investigation (folded 2026-05-12 via §9 sixteenth Forks entry)
+- Files-to-modify TBD pending diagnostic trace.  Likely surface: [Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp) (`commitRecordingResult` `markDirty()` at line 9979 + deserialize cascades), [Source/PatternManager.cpp](Source/PatternManager.cpp) (`addAudioToLibrary` listener), [Source/ProjectManager.cpp](Source/ProjectManager.cpp) (`markDirty`/`clearDirty`/`setIgnoreDirty` semantics).
+
 ---
 
 ## Tasks
@@ -557,11 +560,28 @@ if (editor)
 
 Place the routing combo in the popup's layout alongside the existing pitch/stretch controls (label it "Routing" or "Plays through:" — pick one user-facing label).
 
+**Step 2b — "Add a new Page" entries in the Routing dropdown** (folded in 2026-05-12 via §9 sixteenth Forks entry, user feature request during QA-E Task 3 diagnostic):
+
+Append three "Add a new ___ Page" entries to the bottom of the dropdown (after the existing pages):
+- "Add a new Clip Page"
+- "Add a new Vox Page"
+- "Add a new Inst Page"
+
+Use sentinel IDs (e.g. `kAddNewClipId = -1`, `kAddNewVoxId = -2`, `kAddNewInstId = -3`) so the onChange handler distinguishes them from real channelIds.  On selection of any "Add new" entry:
+1. Call the corresponding +Add path (mirrors the ribbon "+Add Clip / +Add Vox / +Add Inst" actions — same accessor probably exposes `addClipsPage()` / `addVoxPage()` / `addInstPage()` or equivalent).  Returns the new page's channelId.
+2. Write the new channelId to `block.routeChannel`.
+3. `mProcessor.rebuildAudioClipPlayers()`.
+4. Optionally re-open the Properties popup with the new page now selected as the active entry (or just close it — UX call at execution time).
+
+Verify the +Add accessors exist or are easy to add cleanly.  If the ribbon's +Add path is tightly coupled to `RibbonTabBar` UI events, factor a free helper or accessor on `StandaloneEditor` that runs the same engine-register + page-spawn + strip-add cascade without going through the ribbon UI.
+
 **Steps:**
 - [ ] Delete line 2561 (`m.addItem(7, "Properties...");`).
 - [ ] Rename line 2558 label to `"Properties..."`.
 - [ ] Verify `showAudioClipProperties` already takes the audio-clip block index; it does (per Read at line 2625).
 - [ ] Add the routing ComboBox UI + onChange handler per the shape above.
+- [ ] Add the three "Add a new ___ Page" sentinel entries + onChange branches per Step 2b.
+- [ ] Verify the +Add accessor paths exist or add minimal accessors on `StandaloneEditor`.
 - [ ] Verify `mProcessor.rebuildAudioClipPlayers()` correctly picks up the new `block.routeChannel` value — Read [Source/PluginProcessor.cpp:3209-3232](Source/PluginProcessor.cpp:3209) confirms it does (it copies `blk.routeChannel` into the new player struct at line 3232).
 - [ ] If `getStandaloneEditorRaw` accessor doesn't exist on the processor, add a minimal accessor — or thread the page list in via a callback set at editor-construction time.
 - [ ] Tell Jeff: "Run `do_build.bat`. Test sequence in Debug:
@@ -648,7 +668,41 @@ for (auto* entry : mPages)
 - [ ] On pass: `/draft-commit`, surface, commit on approval. (Single commit covers all 3 NITs — they're mechanical + small.)
 - [ ] `/draft-doc running-notes` → apply.
 
-### Task 9 — Close sequence
+### Task 9 — Dirty-flag investigation (record-finalize side effect)
+
+(Folded into QA-E on 2026-05-12 via §9 sixteenth Forks entry.  User-observed mid-Task-3 verify.)
+
+**Symptom:** post-record + save still shows dirty on reopen.  Did NOT happen until the WAV files were on the Builder grid (i.e., post-`commitRecordingResult`'s `markDirty()` call at [Source/Standalone/StandaloneEditor.cpp:9979](Source/Standalone/StandaloneEditor.cpp:9979)).  Pattern resembles a QA-D STATE-01 regression — something re-flips dirty AFTER `saveProject` runs `clearDirty()`.
+
+**Hypothesis surface:**
+1. **Audio-clip rebuild cascade re-marks dirty.**  `rebuildAudioClipPlayers` or one of the downstream APVTS listeners might trigger `markDirty()` on a non-user state change.
+2. **`addAudioToLibrary` mutation re-marks dirty.**  `mPM->addAudioToLibrary` is called inside `dropWavAsClip` and might fire `markDirty` via PatternManager listener — but the explicit `markDirty()` at line 9979 already covers the user-visible state change.
+3. **Engine state save-cascade.**  Engine `setStateInformation` calls during deserialize cascading through APVTS listeners that fire `markDirty` — STATE-01 area.
+4. **`restoreAudioStripsFromArrangement` post-save call.**  If save → `clearDirty` → reload → restoreAudioStrips → markDirty (via mixer-strip APVTS register), dirty would re-appear.  NIT-2 in Sub-Phase Z added an `isLoadContext` gate to this function -- worth checking that gate is being honored in this path.
+
+**Steps:**
+- [ ] Reproduce: record + save + close + reopen.  Confirm dirty bit set on reload.  Document the exact sequence.
+- [ ] Add a temporary trace (per locked diagnostic catalog rule) at every `markDirty()` call site to identify which one fires after save.
+- [ ] Read code at the firing site + identify the root cause (probably one of the four hypotheses).
+- [ ] Fix the root cause.  Likely shape: a missing `if (! mProjectManager->isLoadingProject()) ...` guard on a specific markDirty call, OR a missing `clearDirty()` after a specific deserialize finishes.
+- [ ] Verify the fix works for all three record modes (Vox-only, Inst-only, Vox+Inst combined).
+- [ ] Tell Jeff: "Run `do_build.bat`. Test sequence in Debug:
+  - **(1) Vox-only record.** Open project (any).  Add Vox tab, arm, record + Play + sing + Stop.  Wait for the WAV to drop on the Builder grid.  File menu shows `*` (dirty).  Save (Ctrl+S).  Dirty `*` clears.  Close project.  Reopen.  Dirty `*` should NOT be present (project just loaded; not modified yet).
+  - **(2) Inst-only record.** Same sequence with an Inst-armed strip instead of Vox.  Same expected dirty behavior.
+  - **(3) Vox + 2 Inst record (Task 3 test scenario).** Same sequence with one Vox + two Inst strips armed simultaneously.  All three WAV blocks land on the grid.  Save, close, reopen.  Dirty should be clean on reopen.
+  - **All three pass?**"
+- [ ] Wait for Jeff's verify result.
+- [ ] On pass: surface drafted commit message + git status (per `feedback_surface_drafted_commit_message_for_approval.md`).  Commit on approval.
+- [ ] `/draft-doc running-notes` → apply.
+- [ ] Add the temporary trace sites to the Diagnostic Instrumentation Catalog (likely `Remove at Task 9 close` disposition).
+
+**Files-to-modify (likely):**
+- [Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp) — `commitRecordingResult` `markDirty()` call sites; `deserializeProject` / `deserializeUIState` cascades
+- [Source/PatternManager.cpp](Source/PatternManager.cpp) — `addAudioToLibrary` listener
+- [Source/ProjectManager.cpp](Source/ProjectManager.cpp) — `markDirty` / `clearDirty` / `setIgnoreDirty` semantics around save + load
+- Exact sites determined after diagnostic trace narrows the failing path.
+
+### Task 10 — Close sequence
 - [ ] Dispatch `/draft-doc batch-close` with a synthesis of the running-notes file.
 - [ ] Apply the close entry to `Plans & Specs/Implemented Work Log.md` via Edit.
 - [ ] Dispatch `/review-batch QA-E`.

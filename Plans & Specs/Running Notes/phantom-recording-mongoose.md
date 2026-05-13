@@ -213,4 +213,164 @@ See `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` "Spec calls alread
 
 ---
 
+## 2026-05-11 — Task 3 — Vox/Inst Lifecycle (MIX-02 / MIX-04 / MIX-06) — Vox K-6 mirror fix applied + Clips parallel investigated
+
+### Done
+
+- Task 3 investigation phase complete.  Diagnosis: MIX-02 root cause is an **asymmetric K-6 fix history** — Vox restore path is missing the parallel safety-net `addVoxChannelAtIndex(pageIndex)` call that the Inst restore path got on 2026-05-05.  Details:
+  - Two restore mechanisms feed mixer strips: `restoreStripNames("VoxNames"/"InstNames"/"AuxNames")` ([Source/Standalone/StandaloneEditor.cpp:9695-9703](../../Source/Standalone/StandaloneEditor.cpp)) only creates strips with non-default names (legacy "persist renames only" semantics, line 9690); and `spawnXxxTabIfMissing(pageIndex)` in the tab-restore loop creates page + ribbon tab but does NOT add the mixer strip.
+  - The K-6 fix at line 9323 ([2026-05-05 commit]) explicitly bridged the gap for Inst by adding `mMixerPage->addInstChannelAtIndex(pageIndex)` after `spawnInstTabIfMissing`.  Comment cites the legacy persist-renames-only semantics + the idempotency of the spawn helper.
+  - Vox restore at line 9285 was never updated with the parallel fix.  Result: unrenamed Vox tabs (which save no entry in `<VoxNames>`) get their strip dropped on every save/load cycle, leaving the VoxPage with no audio path to the bus.
+
+- **F-A applied:** added the parallel safety-net call after `spawnVoxTabIfMissing` in the Vox branch of `deserializeUIState`.  Single-line code change plus a comment block explaining the K-6 parallel.  Mechanical mirror of the established Inst pattern; risk very low (`addVoxChannelAtIndex` is idempotent, early-returns when the strip already exists).
+
+- **F-B audit completed (Clips parallel question):**
+  - **Architectural finding:** Clips mixer strips are arrangement-block-keyed (via `restoreAudioStripsFromArrangement` walking `ClipType::Audio` blocks), NOT page-keyed like Vox/Inst.  The K-6 parallel does not cleanly transfer.
+  - **Options surfaced:** F-B-a (mechanical mirror, risk: naming-source-of-truth conflict between tab name and block displayAlias), F-B-b (skip source fix + document via §9 Forks), F-B-c (defer F-B decision entirely).
+  - **Jeff's pick: F-B-b.**  Skip the source fix at QA-E Task 3; document the investigation result + routing decision in §9 Forks.  If a real Clips-strip-lifecycle bug surfaces in user testing, route to QA-J's Clips routing unification scope.
+
+- **§9 fifteenth Forks entry applied to Main Plan:** "Clips strip restore audit: no K-6 parallel fix needed (QA-E Task 3 spec call)" — full canonical shape (Trigger / Diagnosis / Options / Decision / Carry-forward contradictions / Inline back-refs / Plan files affected / Verification).  Documents the architectural distinction between Vox/Inst (page-keyed) and Clips (arrangement-block-keyed) strip restore paths so future readers find the routing decision in the canonical chronological log.
+
+### Spec calls resolved
+
+- **F-A** (apply K-6 mirror for Vox in `deserializeUIState`): applied as proposed.
+- **F-B** (Clips parallel investigation + Forks entry): F-B-b locked.  Source skipped; §9 fifteenth Forks entry documents the routing decision.
+
+### Next action
+
+- Surface diff + ask Jeff to `do_build.bat` and verify in **Debug + Release** per Task 3 verify script in the plan file (full Vox lifecycle walk: create → record → save → close → reopen → record → reload → delete; spot-check Inst parity; verify no phantom strips after delete).
+- After Jeff confirms verify clean: dispatch `/draft-commit`, surface drafted message + git status, commit on approval.
+- Task 3 close commit will include: `Source/Standalone/StandaloneEditor.cpp` (the F-A source change), `Plans & Specs/Main Plan.md` (the §9 fifteenth Forks entry), and this running notes file (Task 3 section).
+- After commit lands: dispatch `/draft-doc running-notes` post-verify per the locked memory rule.
+
+---
+
+## 2026-05-12 — Task 3 (cont.) — Vox K-6 verify surfaced MIX-03 (routeChannel persistence bug); W-2 audit + R-1 fix
+
+### Found along the way
+
+- **First verify attempt (Vox K-6 mirror fix alone) surfaced a deeper bug.** Jeff confirmed the Vox strip is now restored on project reload (F-A working), BUT clicking Play on the restored project routes Vox-recorded audio through an auto-spawned Clips strip rather than the Vox strip.  Both strips exist after reload but audio doesn't flow through the Vox engine's chain.
+- **Diagnosis:** `ArrangementBlock::routeChannel` (added 2026-05-03 for FilePlay routing per the "I-16 G-9" struct comment) is **NOT persisted** in `PatternManager::toValueTree` / `fromValueTree` ([Source/PatternManager.cpp:975-993](../../Source/PatternManager.cpp) + [:1330-1352](../../Source/PatternManager.cpp)).  On save the block writes 13 named fields + automationLane child node but skips routeChannel; on load the block deserializes with `routeChannel=0` (C++ default).  routeChannel=0 makes the FilePlay Pass 1 loop at [Source/PluginProcessor.cpp:2415-2425](../../Source/PluginProcessor.cpp) skip the block (`if (! isVox && ! isInst) continue;`), so the block falls through to Pass 2 (non-FilePlay) → row audio insert → `spawnClipsTabIfMissing` auto-spawns a Clips strip → audio plays through the Clips path.
+- **This is the actual MIX-03 root cause.**  Carry-Forward §5 predicted "MIX-03 fixes when MIX-02 fixes" — that prediction was wrong.  MIX-02 (Vox strip missing) and MIX-03 (audio routes through Clips strip) are two independent bugs: F-A fixes MIX-02 (Vox strip restored), routeChannel persistence fixes MIX-03 (audio routes through the right chain).  Both needed.
+
+### Spec calls resolved
+
+- **R-1 (routing for the routeChannel persistence fix):** Jeff picked R-1 — fold into Task 3's source commit alongside F-A.  Same coherent Task 3 unit: Vox/Inst lifecycle fixes.
+- **W-2 (full PatternManager save/load audit):** Jeff picked W-2 — audit every struct's fields against its serialize/deserialize before applying the routeChannel fix.
+
+### W-2 audit result
+
+Walked all 15 structs in [Source/PatternManager.h](../../Source/PatternManager.h) against `toValueTree` / `fromValueTree` in [Source/PatternManager.cpp](../../Source/PatternManager.cpp).  Total ~110 fields covered.
+
+**Single gap: `ArrangementBlock::routeChannel`.**  Every other field has matching save/load (or uses the intentional implicit-presence pattern, e.g. `BasicStep::active` / `ComplexStep::active` where only-active-steps-are-written; `PianoNote` optional fields only-written-if-non-default).
+
+Structs audited (all clean except ArrangementBlock):
+- `ArrangementBlock` (15 fields, 14/15 covered — **routeChannel missing**)
+- `PianoNote` (11/11)
+- `PianoRollData` (3/3)
+- `AutomationLane` (8/8)
+- `ControlPoint` (4/4)
+- `Pattern` (20/20 incl. all sub-rolls: layerRoll / bassRoll / drumRoll / drumRolls / clipRoll / voxRoll / instRoll / baySickRustyDrumsRoll)
+- `PageSequenceData` (7/7 incl. nested ComplexStep + ComplexEnvelope)
+- `BasicStep` (4 — implicit-presence pattern)
+- `ComplexStep` (5 — implicit-presence pattern)
+- `BasicEnvelope` (5/5)
+- `ComplexEnvelope` (7/7)
+- `TimeMarker` (2/2)
+- `TimeSigChange` (3/3)
+- `MixerState` (22/22 incl. all drumSlot / audioRow arrays as CSV)
+- `AudioLibraryEntry` (3/3)
+
+Codebase has good save/load discipline overall — `routeChannel` is the sole oversight, likely from when it was added on 2026-05-03 (FilePlay routing work) but the developer forgot to mirror the addition into the save/load pair.
+
+### Done
+
+- **routeChannel persistence fix applied** to [Source/PatternManager.cpp](../../Source/PatternManager.cpp).  Two-line change with explanatory comment blocks on both sides:
+  - Serialize: `bNode.setProperty("routeChannel", b.routeChannel, nullptr);` after the muted line at line ~989.
+  - Deserialize: `b.routeChannel = (int) bNode.getProperty("routeChannel", 0);` after the muted line at line ~1345.
+  - Default 0 on deserialize preserves backward compatibility — pre-fix saves load with `routeChannel=0` which matches the C++ struct default + the legacy "no Vox/Inst routing" behavior.
+
+### Disposition
+
+- Task 3 source change now covers TWO fixes:
+  - F-A: Vox K-6 mirror (`StandaloneEditor.cpp` `deserializeUIState` Vox branch — closes MIX-02)
+  - R-1: routeChannel persistence (`PatternManager.cpp` toValueTree + fromValueTree — closes MIX-03)
+- MIX-02 + MIX-03 + MIX-04 + MIX-06 all share the family.  Both fixes are required to restore the full Vox lifecycle end-to-end.
+
+### Next action
+
+- Surface diff + ask Jeff to `do_build.bat` and verify Debug + Release.  The verify sequence is now richer: F-A test (Vox strip exists post-reload) + R-1 test (audio routes through Vox chain post-reload, no auto-spawned Clips strip).
+- After verify clean: dispatch `/draft-commit`, surface drafted message + git status, commit on approval.
+
+---
+
+## 2026-05-12 — Task 3 verify failure → MT FilePlay root-cause diagnosis
+
+Verify cycle of F-A + R-1 failed: with both fixes applied, pre-save fresh-record was silent through Vox/Inst on playback, AND post-save + reload was silent (regression vs. pre-R-1 which played through phantom Clips strips).
+
+Multi-stage diagnosis with several wrong theories along the way (Pattern-mode gate, JUCE Optional<bool> semantics, project-load barrier stuck true, audio-thread dead).  Each theory ruled out by adding instrumentation that contradicted the hypothesis.  Final root cause:
+
+**The MT engine path (when `gMultiThreadedEngineEnabled = true`, the default) early-returns at [Source/PluginProcessor.cpp:1934](../../Source/PluginProcessor.cpp:1934) BEFORE reaching the FilePlay pre-scan at line 2143.  The pre-scan sets `mVoxFilePlayActive` / `mInstFilePlayActive`, which VoxStripTask + InstStripTask gate their FilePlay branch on.  Without the pre-scan running, those flags stay false → MT tasks take the live-input branch → recorded clip audio never decodes.**
+
+User A/B confirmed: toggling MT off via the Mixer hamburger menu makes audio play correctly through Vox + Inst strips on the same reloaded file.  Toggling MT back on reproduces the silence.
+
+CLAUDE.md's stale "MT no-op under Debug" note is misleading — MT engine works in both Debug and Release; the bug is the orphaned pre-scan, NOT MT itself being broken.  See §9 sixteenth Forks entry for full diagnosis chronology.
+
+### Done
+
+- **Fix 1 — Pre-scan move.**  Lifted the FilePlay pre-scan block from line 2143 (after MT early-return) to before the MT branch at line 1860 in [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp).  Mechanical move, no logic change.  Both serial AND MT paths now see correctly-populated `mVoxFilePlayActive` / `mInstFilePlayActive`.
+- **Fix 2 — Clips-strip route-guard.**  Added `if (b.routeChannel != 0) continue;` at line 9811 in [Source/Standalone/StandaloneEditor.cpp](../../Source/Standalone/StandaloneEditor.cpp) `deserializeUIState` block-loop.  Vox/Inst-routed blocks no longer spawn phantom Audio strips on reload.  Mirrors existing `if (routeChannel == 0)` guard inside `dropWavAsClip` at line 9912.
+- **Verify pass 2026-05-12:** with all four fixes applied (F-A + R-1 + Fix 1 + Fix 2) + MT-on, reload + Play routes audio through Vox + 2 Inst strips correctly.  No phantom Clips strips appear on the mixer.
+
+### Scope adds folded mid-Task-3
+
+- **Task 9 — Dirty-flag investigation** (new).  User observation during verify: post-record + save still shows dirty `*` on reopen.  Does NOT happen until WAV files land on the Builder grid (i.e., post-`commitRecordingResult`'s `markDirty()` call).  Inserted between Task 8 Sub-Phase Z and the close sequence (which renumbers to Task 10).  Per `feedback_qa_batches_fix_bugs_dont_defer.md`, real bugs surfaced mid-QA-batch get fixed in-batch.
+- **Task 7 fold-in — "Add a new Page" entries in Routing dropdown** (new sub-bullet).  User feature request during diagnostic: the FILE-02 Routing dropdown should include "Add a new Clip Page", "Add a new Vox Page", "Add a new Inst Page" entries so the user can route a clip to a NEWLY-created page without first navigating to the ribbon.
+
+### Main Plan §0 Rule 4 locked
+
+Main Plan §0 Rule 4 (2026-05-12) — every diagnostic addition (DBG, Logger, temp jassert, debug AlertWindow) gets logged in the per-batch Diagnostic Instrumentation Catalog below with disposition (`Remove at task/batch close` / `Keep`).  Established after I'd shipped ~15 `[QA-E DIAG]` sites with no running record.
+
+### Disposition
+
+- Task 3 source change now covers FOUR fixes:
+  - F-A: Vox K-6 mirror (`StandaloneEditor.cpp` `deserializeUIState` Vox branch — closes MIX-02)
+  - R-1: routeChannel persistence (`PatternManager.cpp` toValueTree + fromValueTree — closes MIX-03)
+  - Fix 1: pre-scan move (`PluginProcessor.cpp` lift to before MT branch — closes MT-side FilePlay gap, root cause of MIX-04/06)
+  - Fix 2: Clips-strip route-guard (`StandaloneEditor.cpp` deserialize block-loop — closes phantom Clips strip on reload)
+- All four fixes interdependent: R-1 produces correct routeChannel on reload, which Fix 1's pre-scan reads to set the FilePlay flags, which the MT tasks gate their FilePlay branch on.  F-A ensures the Vox mixer strip exists for routing graph wiring.  Fix 2 prevents the deserialize-side phantom strip.
+- §9 sixteenth Forks entry locked.  §5 QA-E entry updated with three fold-in notes (audio-routing fix family, Task 9 dirty-flag, Task 7 routing-dropdown sub-bullet).
+
+---
+
+## Diagnostic Instrumentation Catalog
+
+Per Main Plan §0 Rule 4.  Every diagnostic addition tracked here with disposition.  At task/batch close, walk the catalog and strip every `Remove` entry.
+
+| Site | Tag | Purpose | Disposition |
+|------|-----|---------|-------------|
+| [Source/Standalone/StandaloneEditor.cpp](../../Source/Standalone/StandaloneEditor.cpp) `~9908` in `commitRecordingResult` `dropWavAsClip` lambda | `[QA-E DIAG] commitRecord block added` | Verify recorded blocks land in PatternManager with correct routeChannel + path + trackRow at record-finalize time | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~3274` in `rebuildAudioClipPlayers` | `[QA-E DIAG] RACP skipped block` | Detect when a block's audio file fails `createReaderFor` on snapshot build | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~3322` in `rebuildAudioClipPlayers` | `[QA-E DIAG] RACP added player` | Verify each AudioClipPlayer's routeChannel + clip range + streamer on snapshot build | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~3333` in `rebuildAudioClipPlayers` | `[QA-E DIAG] RACP publishing snapshot` | Confirm snapshot size at publication | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~963` top of `processBlock` | `[QA-E DIAG] BARRIER transition` | Detect every `mProjectLoadInProgress` flag transition | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~972` in `processBlock` | `[QA-E DIAG] processBlock ENTRY heartbeat` | Confirm `processBlock` is alive (every 1024 blocks ~ 3s at 128/44.1kHz) | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~988` after barrier check | `[QA-E DIAG] processBlock PAST-BARRIER heartbeat` | Confirm `processBlock` runs past the barrier (every 1024 blocks) | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~1872` in pre-scan (post-fix location) | `[QA-E DIAG] PreScan enter` | Verify pre-scan reaches iteration phase + frame timing | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~1882` in pre-scan loop | `[QA-E DIAG] PreScan player` | Per-player route + overlap state during pre-scan | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~2412` before Pass 1/Pass 2 gate | `[QA-E DIAG] PreGate2396 heartbeat` | Live values of the three gate components (songMode, isPlaying, patternMgr) | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~2450` Pass 1 entry | `[QA-E DIAG] Pass1 enter` | Confirm Pass 1 entered (when serial path active) | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~2462` Pass 1 player iteration | `[QA-E DIAG] Pass1 iter` | Per-player Pass 1 iteration state | Remove at Task 3 close |
+| [Source/PluginProcessor.cpp](../../Source/PluginProcessor.cpp) `~685-960` in `renderFilePlayPlayer` (qaDiag lambda + tagged early-returns) | `[QA-E DIAG] renderFilePlay route=X <tag>` | Trace entry + every early-return path inside renderFilePlayPlayer with unique tag per return point | Remove at Task 3 close |
+| TBD (pre-existing — exact lines to be resolved during strip pass) | `[NAMIR]` state log | User-noted pre-existing diagnostic; long-term value confirmed by user 2026-05-12 | Keep |
+| TBD (pre-existing — exact lines to be resolved during strip pass) | `[Pedals]` state log | User-noted pre-existing diagnostic; long-term value confirmed by user 2026-05-12 | Keep |
+| TBD (pre-existing — exact lines to be resolved during strip pass) | Audio Setup log | User-noted pre-existing diagnostic; long-term value confirmed by user 2026-05-12 | Keep |
+| [Source/Standalone/StandaloneEditor.cpp:4660+](../../Source/Standalone/StandaloneEditor.cpp:4660) — Mixer hamburger menu item 203 | "Multi-core diagnostic capture" QA-Md MT thread distribution AlertWindow | QA-Md MT investigation diagnostic; long-term value | Keep |
+
+### Pre-existing diagnostic resolution at Task 3 close
+
+When stripping QA-E DIAG entries, also verify exact line numbers of the `Keep` entries (TBD locations) and add to catalog for completeness.  Don't auto-strip anything not explicitly tagged `Remove`.
+
+---
+
 (Subsequent entries appended below at every commit / sub-task verify / finding / spec call / scope pivot.)

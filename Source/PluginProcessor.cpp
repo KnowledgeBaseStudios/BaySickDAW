@@ -1818,6 +1818,44 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                 projStartSamp, numSamples, secPerBeatCh);
     }
 
+    // ── QA-E (2026-05-12): FilePlay pre-scan -- MUST run BEFORE the MT branch.
+    // Sets mVoxFilePlayActive / mInstFilePlayActive used by BOTH paths:
+    //   - Serial: live engine loop skips FilePlay-active pages; Pass 1 drives
+    //   - MT: VoxStripTask / InstStripTask gate their FilePlay branch on flag
+    // Previously located AFTER the MT early return -- meant MT never saw the
+    // flag set, so FilePlay clips never decoded under MT and arrangement
+    // playback through Vox/Inst pages was silent.  Originally I-16 G-9
+    // (2026-05-03) at the serial pre-scan site; moved here QA-E (2026-05-12).
+    mVoxFilePlayActive .fill (false);
+    mInstFilePlayActive.fill (false);
+    if (mSongMode.load (std::memory_order_relaxed) && pos.getIsPlaying() && mPatternManager)
+    {
+        const double secPerBeatPS = 60.0 / juce::jmax (20.0, pos.getBpm().orFallback (120.0));
+        const double beatStartPS  = pos.getPpqPosition().orFallback (0.0);
+        const int64  blockStart   = (int64)(beatStartPS * secPerBeatPS * mSampleRate);
+        const int64  blockEnd     = blockStart + numSamples;
+
+        for (auto& p : mCurrentBlockClipSnapshot->players)
+        {
+            if (p.routeChannel == 0 || p.streamer == nullptr) continue;
+            const int64 cs = (int64)(p.clipStartBeat * secPerBeatPS * mSampleRate);
+            const int64 ce = (int64)(p.clipEndBeat   * secPerBeatPS * mSampleRate);
+            if (blockEnd <= cs || blockStart >= ce) continue;
+
+            const int chId = p.routeChannel;
+            if (chId >= MixerChannelIds::kVoxBase
+                && chId <  MixerChannelIds::kVoxBase + kMaxVoxPages)
+            {
+                mVoxFilePlayActive[chId - MixerChannelIds::kVoxBase] = true;
+            }
+            else if (chId >= MixerChannelIds::kInstBase
+                     && chId <  MixerChannelIds::kInstBase + kMaxInstPages)
+            {
+                mInstFilePlayActive[chId - MixerChannelIds::kInstBase] = true;
+            }
+        }
+    }
+
     // ── Batch 9a (2026-05-06): MT engine branch, NEW location ───────────────
     // All inputs the MT path needs are now in scope: numSamples + pos +
     // anySolo + per-engine MidiBuffers + mLiveInputSnapshot + routing graph
@@ -2124,43 +2162,6 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── I-16 G-9 (2026-05-03): pre-scan clip players for FilePlay ───────────
-    // Determine which Vox / Inst pages have an active linked clip overlapping
-    // this block.  Pages flagged here are skipped by the engine loop below
-    // (the audio-clip rendering loop will drive their engines in the FilePlay
-    // branch instead, with realtime-pitch force-bypassed for single-pass).
-    mVoxFilePlayActive .fill (false);
-    mInstFilePlayActive.fill (false);
-    if (mSongMode.load (std::memory_order_relaxed) && pos.getIsPlaying() && mPatternManager)
-    {
-        const double secPerBeatPS = 60.0 / juce::jmax (20.0, pos.getBpm().orFallback (120.0));
-        const double beatStartPS  = pos.getPpqPosition().orFallback (0.0);
-        const int64  blockStart   = (int64)(beatStartPS * secPerBeatPS * mSampleRate);
-        const int64  blockEnd     = blockStart + numSamples;
-
-        // 2026-05-06 (Batch 9c B1): try-lock removed -- read the audio-thread
-        // snapshot captured at the top of processBlock.
-        for (auto& p : mCurrentBlockClipSnapshot->players)
-        {
-            if (p.routeChannel == 0 || p.streamer == nullptr) continue;
-            const int64 cs = (int64)(p.clipStartBeat * secPerBeatPS * mSampleRate);
-            const int64 ce = (int64)(p.clipEndBeat   * secPerBeatPS * mSampleRate);
-            if (blockEnd <= cs || blockStart >= ce) continue;
-
-            const int chId = p.routeChannel;
-            if (chId >= MixerChannelIds::kVoxBase
-                && chId <  MixerChannelIds::kVoxBase + kMaxVoxPages)
-            {
-                mVoxFilePlayActive[chId - MixerChannelIds::kVoxBase] = true;
-            }
-            else if (chId >= MixerChannelIds::kInstBase
-                     && chId <  MixerChannelIds::kInstBase + kMaxInstPages)
-            {
-                mInstFilePlayActive[chId - MixerChannelIds::kInstBase] = true;
-            }
-        }
-    }
-
     // ── G-4 (2026-04-28) / I-16 G-9 (2026-05-03): per-Vox / per-Inst engines.
     // Source mux: LiveASIO (armed) / Silence (else).  FilePlay-active pages
     // are skipped; the audio-clip loop below drives their engine with the
@@ -2360,6 +2361,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // Then: bus rack → bus fader/mute → passed into VibeGraph as audioClipsPreRendered
     double bpm = pos.getBpm().orFallback(120.0);
     juce::AudioBuffer<float>* audioClipsBusForGraph = nullptr;
+
 
     if (mSongMode.load(std::memory_order_relaxed) && pos.getIsPlaying() && mPatternManager)
     {

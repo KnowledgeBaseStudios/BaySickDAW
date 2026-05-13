@@ -113,6 +113,45 @@ Net: §5 stays the planned-sequence map; §9 Forks is the canonical
 chronological execution ledger. Reviewing §9 gives you every fork +
 addition + post-close finding in one place.
 
+**Rule 4 — Diagnostic instrumentation tracked in a per-batch
+catalog.** Adopted 2026-05-12 during QA-E Task 3 MT-FilePlay
+diagnosis after ~15 `[QA-E DIAG]` sites had been shipped across
+`PluginProcessor.cpp` + `StandaloneEditor.cpp` with no running
+record of what got added, where, or whether it was meant to stay.
+
+Every diagnostic addition (`DBG` / `juce::Logger::writeToLog` /
+temp `jassert` added for diagnosis / debug `juce::AlertWindow`
+popups / temp file logging / `std::cout`-style traces) gets logged
+in the batch's running notes file (`Plans & Specs/Running Notes/
+<silly-name>.md`) under a `## Diagnostic Instrumentation Catalog`
+section.  Catalog row format: markdown table with four columns --
+`Site` (file:line or symbolic tag if line is unstable), `Tag` (the
+literal log-string prefix used, e.g. `[QA-E DIAG]` or `[NAMIR]`),
+`Purpose` (one sentence), `Disposition` (`Remove at <task> close` /
+`Remove at batch close` / `Keep`).
+
+- **Append the catalog row WITH the code change**, not after the
+  fact.  The catalog row gets written in the same edit pass as the
+  diagnostic add.
+- **At task / batch close**, walk the catalog and strip every
+  `Remove` entry from the source.  Leave `Keep` entries alone.
+  Surface the strip list to the user for approval BEFORE running
+  the strip pass.
+- **Pre-existing diagnostics** (e.g., NAMIR / Pedals / Audio Setup
+  state logs / MT QA-Md hamburger menu item) get retro-added with
+  `Keep` when first surfaced during a batch so the catalog stays
+  complete across sessions.
+- **`Keep` vs `Remove` borderline calls** surface to the user.
+  Don't decide alone (cross-refs Rule 3 routing-spec-call discipline
+  and the "spec calls are the user's" convention).
+
+Why: diagnostic instrumentation accumulates silently.  Added during
+a bug hunt, then forgotten when the hunt closes.  Without a
+catalog, future sessions can't tell which sites have long-term
+value vs. one-shot trace noise -- either useful logging gets
+stripped accidentally or dead diagnostics bloat the runtime log
+forever.
+
 ### Document Formatting Conventions (canonical for all `Plans & Specs/` docs)
 
 All five `Plans & Specs/` documents follow a shared formatting doctrine
@@ -873,6 +912,9 @@ needed to find what you should pull up to review the work.
     - **NIT-2** `restoreAudioStripsFromArrangement` `clearDirty()` assumes load-path-only callers; inline comment is documentation not a guard.  Add a `loadContext` bool parameter OR `jassert` that all callers are load paths (defensive guard against the trap if a non-load caller is ever added).
     - **NIT-3** Legacy `"Drums"` / `"Layers"` / `"Bass"` tab names from pre-QA-D saved projects don't bump the STATE-02 monotonic counters; loading an old project leaves counter at 0 and next user-added tab collides.  Extend `advanceCountersFromRestoredTabs` parser to handle no-number-tail legacy names (bump counter to at-least-1 on each legacy match).
     - NIT-4 (per-page `LayersPage::setTabName` dead-`mPianoRoll` writeback) is dead-code shape and routes to **QA-Cleanup-1** (Phase 6 source cleanup), NOT QA-E.
+  - **Folded in 2026-05-12 (QA-E Task 3 verify finding via Rule 3; see §9 sixteenth Forks entry)** -- **Task 3 audio-routing root cause: MT pre-scan gap + Clips-strip restore guard.**  MIX-02/04/06 root cause is NOT page-lifecycle (F-A K-6 Vox mirror) NOR routeChannel persistence (R-1) alone -- it's the FilePlay pre-scan being orphaned by the MT branch insertion at [Source/PluginProcessor.cpp:1874](Source/PluginProcessor.cpp:1874).  Fix lifts the pre-scan BEFORE the MT branch.  Companion fix: Clips-strip route-guard at [Source/Standalone/StandaloneEditor.cpp:9811](Source/Standalone/StandaloneEditor.cpp:9811) prevents phantom Audio strips for Vox/Inst-routed blocks on reload.  All four fixes (F-A + R-1 + Fix 1 + Fix 2) verified working 2026-05-12.
+  - **Folded in 2026-05-12 (QA-E Task 3 mid-verify finding via Rule 3; see §9 sixteenth Forks entry)** -- **Task 9: Dirty-flag investigation (record-finalize side effect)**.  Post-record + save still shows dirty on reopen.  Did NOT happen until the WAV files were on the Builder grid (i.e., post-`commitRecordingResult`'s `markDirty()` call at [Source/Standalone/StandaloneEditor.cpp:9979](Source/Standalone/StandaloneEditor.cpp:9979)).  Pattern resembles a QA-D STATE-01 regression -- something re-flips dirty after save.  Scope: investigate root cause + fix + verify across all three record modes (Vox-only, Inst-only, Vox+Inst combined).  Inserted as Task 9 in the batch plan, between Task 8 Sub-Phase Z and the close sequence (which renumbers to Task 10).
+  - **Folded in 2026-05-12 (QA-E Task 3 user feature request; see §9 sixteenth Forks entry)** -- **Task 7 sub-bullet: "Add a new Page" options in Routing dropdown.**  FILE-02's Routing dropdown (Task 7 step 2) extends to include "Add a new Clip Page", "Add a new Vox Page", "Add a new Inst Page" entries so the user can route a clip to a newly-created page without first navigating to the ribbon to add a tab.
 - Scope: SINGLE coordinated batch because all touch the MixerPage spawn
   cascade + project XML restoration walker + StripRecorder finalize +
   bus DSP path. Splitting causes merge churn. Walk the full Vox/Inst
@@ -2738,3 +2780,261 @@ sequencing decision, not an architectural change.
 produces a normal Implemented Work Log close entry validating the
 corrected DSP-12 simultaneous-case test premise on unified-routing
 source.  Until then, the deferral itself is the active state.
+
+### 2026-05-11 — Clips strip restore audit: no K-6 parallel fix needed (QA-E Task 3 spec call)
+
+**Trigger:** at QA-E Task 3 diagnosis (2026-05-11), the root cause of
+MIX-02 (Vox/Inst tab reload destroys mixer strip) surfaced as an
+asymmetric K-6 fix -- the Vox restore path is missing the parallel
+safety-net `addVoxChannelAtIndex(pageIndex)` call that the Inst restore
+path got on 2026-05-05.  Once the Vox-side fix shape was clear, the
+obvious follow-up audit-question got raised: does the Clips restore
+path have the same parallel hole, and if so should QA-E Task 3 fold a
+matching fix in (F-B in the Task 3 spec-call list)?  User approved
+F-B as "folded in and added to forks" -- implying both the
+investigation should happen and a Forks entry should land documenting
+the result.
+
+**Diagnosis:** Clips mixer strips are architecturally different from
+Vox / Inst strips, so the K-6 parallel does not cleanly transfer:
+
+- **Vox / Inst strips are PAGE-KEYED.**  Page index N maps directly
+  to mixer strip prefix `mixer_vox_N` / `mixer_inst_N`.
+  `restoreStripNames("VoxNames" / "InstNames")` and the K-6 safety-net
+  `addVoxChannelAtIndex(pageIndex)` / `addInstChannelAtIndex(pageIndex)`
+  both feed into the page-keyed `mAudioStrips`.  Invariant: page
+  exists -> strip exists, independent of arrangement state.
+
+- **Clips strips are ARRANGEMENT-BLOCK-KEYED.**  Audio row R (where a
+  clip is placed on the Builder grid) maps to mixer strip prefix
+  `mixer_audio_R`.  Strips are created by
+  `restoreAudioStripsFromArrangement`
+  ([Source/Standalone/StandaloneEditor.cpp:9796-9811](Source/Standalone/StandaloneEditor.cpp:9796))
+  walking `mPM->getBlock(...)` for `ClipType::Audio` blocks.
+  ClipsPage exists at pageIndex P; audio row R might or might not
+  have a clip block.  Invariant: block exists -> strip exists; page
+  existence is independent.
+
+The natural case (ClipsPage created WITH a grid block, saved, reloaded)
+is correctly handled by `restoreAudioStripsFromArrangement`.  The edge
+case (orphan ClipsPage at pageIndex P with no block at row P) would
+result in a page without a strip -- but this is rare and recoverable
+(the user can drop a clip back on the grid, which fires
+`onAudioClipAdded` and creates the strip via the existing add path).
+
+**Options surfaced:**
+- **F-B-a (mechanical mirror).**  Apply a K-6-style safety-net call
+  in the Clips restore branch (`mMixerPage->addAudioChannel(pageIndex,
+  tabName)` after `spawnClipsTabIfMissing`).  Risk: silent
+  naming-source-of-truth conflict between the tab name (from XML
+  "name" attribute) and the block's `displayAlias` (from
+  PatternManager state).  The common case works fine without this;
+  the safety-net only helps the orphan-page case but costs naming
+  regressions for users who renamed strips but not tabs in old
+  projects.
+- **F-B-b (skip the source fix, document the investigation).**
+  Document the audit result + routing decision in §9 Forks.  If the
+  orphan-page case surfaces in user testing as a real bug, route to
+  a follow-up batch (QA-J already has Clips routing unification
+  scope per §9 thirteenth Forks entry -- natural home for any
+  Clips-strip-lifecycle fix).
+- **F-B-c (defer the F-B decision entirely).**  Capture as a §5
+  sub-item to investigate during Task 3 verify.
+
+**Decision (user spec call 2026-05-11):** **F-B-b.**  Skip the source
+fix at QA-E Task 3.  The naming-conflict risk in F-B-a is not
+justified by the narrow orphan-page case.  If a real
+Clips-strip-lifecycle bug surfaces in user testing, the right home
+for the fix is QA-J's Clips routing unification scope (per §9
+thirteenth Forks entry, amended same day) -- that batch already
+touches the Clips channel routing + page <-> insert wiring surface
+and is the natural place for any follow-on safety-net work.
+
+**Carry-forward contradictions:** None.  Carry-Forward Reference
+doesn't describe Clips strip lifecycle as page-keyed; the
+arrangement-block-keyed model is the canonical understanding.  This
+audit reinforces that distinction -- Vox / Inst are page-keyed,
+Clips are arrangement-block-keyed, and they have different correct
+restore patterns by design.
+
+**Inline back-refs:**
+- §5 QA-E entry: no change.  Clips strip restore is NOT in QA-E's
+  scoped list; Task 3 focuses on Vox MIX-02 / MIX-04 / MIX-06 only.
+  The Clips parallel was an audit-question, not a scoped item, and
+  the audit result is "no fix needed at this batch level."
+- §9 thirteenth Forks entry: the future home for any
+  Clips-strip-lifecycle fixes is QA-J (the Clips routing
+  unification batch).  Cross-ref helps future readers find the
+  natural follow-up batch if the orphan-page case becomes a real
+  bug.
+- §9 Forks: this entry (fifteenth).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` -- this entry only.
+- No source code changes.
+- No new running-notes or batch-plan files (QA-E Task 3 running
+  notes already capture the audit + decision separately as part of
+  the normal Task 3 flow).
+
+**Verification:** this fork closes when one of two things happens --
+(a) QA-E ships without any Clips-strip-related user-reported bug
+surfacing in subsequent testing (default: fork stays open as a
+"watch item" routed to QA-J's natural follow-up scope), OR (b) a
+real Clips orphan-page bug surfaces and gets routed to QA-J or a
+dedicated batch, at which point this Forks entry references the new
+batch and the F-B-b routing decision is superseded.
+
+### 2026-05-12 — QA-E Task 3 root-cause: MT pre-scan gap + Clips-strip restore guard + Task 9 added
+
+**Trigger:** at QA-E Task 3 verify (2026-05-12), the audio-routing
+fix that landed in working tree (F-A K-6 Vox mirror + R-1
+routeChannel persistence + 15th Forks F-B-b Clips audit no-fix
+decision) was tested.  Pre-save fresh-record + Play through Vox/Inst
+was silent.  Post-save + reload + Play was also silent (regression
+vs. pre-R-1, which played audio through phantom Clips strips).
+Diagnostic instrumentation added across `Source/PluginProcessor.cpp`
++ `Source/Standalone/StandaloneEditor.cpp` (~15 `[QA-E DIAG]` sites)
+traced the failure.
+
+**Diagnosis chain:**
+
+1. **Recording side is correct.**  `commitRecordingResult` creates
+   blocks with correct routes (Vox channelIds 600..605, Inst
+   700..719).  `rebuildAudioClipPlayers` adds them to the audio
+   snapshot with `streamer=ok`.
+2. **`processBlock` is running normally.**  ENTRY + PAST-BARRIER
+   heartbeats fire every ~3s with `barrier=0`.
+3. **Pass 1 / Pass 2 / `renderFilePlayPlayer` are NEVER REACHED in
+   MT mode.**  `processBlock` takes the MT branch at
+   [Source/PluginProcessor.cpp:1874](Source/PluginProcessor.cpp:1874)
+   and returns at line 1934 — skipping the serial Pass 1 path AND
+   the pre-scan that populates `mVoxFilePlayActive` /
+   `mInstFilePlayActive`.
+4. **MT-side FilePlay gating fails.**
+   [Source/Engine/Tasks/VoxStripTask.cpp:47](Source/Engine/Tasks/VoxStripTask.cpp:47)
+   + the InstStripTask equivalent gate their FilePlay branch on
+   `mProcessor->mVoxFilePlayActive[mIndex]`.  With the pre-scan
+   never running, those flags stay false → tasks fall through to
+   the live-input branch → recorded clip audio never decodes.
+5. **A/B confirmation.**  User toggled
+   `RenderEngine::gMultiThreadedEngineEnabled` off via the Mixer
+   hamburger menu (Multi-core Rendering).  Audio immediately played
+   through Vox + 2 Inst strips correctly.  Re-enabled MT → silence
+   returned.  Confirmed MT path is the failure mode; serial path
+   was correct all along.
+
+**Root cause:** the FilePlay pre-scan was located AFTER the MT
+branch's early-return.  Serial path saw the flag set correctly; MT
+path never ran the pre-scan.  Architectural gap introduced by
+Batch 9a (2026-05-06) when the MT branch was inserted at line 1874
+— the pre-scan at line 2143 wasn't lifted with it.
+
+**Separate Clips-strip restore bug surfaced during the diagnosis:**
+the project-load block-loop at
+[Source/Standalone/StandaloneEditor.cpp:9808-9824](Source/Standalone/StandaloneEditor.cpp:9808)
+unconditionally calls `addAudioRowChannel + ensureAudioInsert +
+addAudioChannel` for every `ClipType::Audio` block, with NO
+`routeChannel` check.  Vox/Inst-routed blocks (`routeChannel != 0`)
+trigger phantom Audio strips on reload.  DISTINCT from the F-B-b
+audit closed in §9 fifteenth Forks entry — that audit was about
+whether a K-6-style parallel safety-net was needed for Clips; this
+bug is the deserialize-side block-loop's missing route-guard.  Same
+class of fix but a different code path.
+
+**Fixes applied (this entry):**
+
+- **Fix 1 — Pre-scan move:** pre-scan block lifted from
+  [Source/PluginProcessor.cpp:2143](Source/PluginProcessor.cpp:2143)
+  (after MT early-return) to before the MT branch at line 1860.
+  Both serial and MT paths now see correctly-populated
+  `mVoxFilePlayActive` / `mInstFilePlayActive`.  Mechanical move,
+  no logic change.
+- **Fix 2 — Clips-strip route-guard:** `if (b.routeChannel != 0)
+  continue;` added at
+  [Source/Standalone/StandaloneEditor.cpp:9811](Source/Standalone/StandaloneEditor.cpp:9811)
+  in `deserializeUIState` block-loop.  Vox/Inst-routed blocks no
+  longer spawn phantom Audio strips on reload.  Mirrors existing
+  `if (routeChannel == 0)` guard inside `dropWavAsClip` at line 9912.
+- **Fix 3 — F-A (Vox K-6 mirror) retained:** still needed.  Ensures
+  Vox mixer strip exists for un-renamed Vox tabs on reload.
+- **Fix 4 — R-1 (routeChannel persistence) retained:** still
+  needed.  Without it, reloaded blocks default to routeChannel=0 —
+  the new pre-scan would NOT flag the right pages AND the new
+  Clips-strip guard would NOT skip the block.  Both new fixes
+  depend on R-1 producing correct routeChannel values on reload.
+
+**Verified working 2026-05-12:** with all four fixes applied + MT
+ON, project reload + Play routes audio through Vox + 2 Inst strips
+correctly; no phantom Clips strips on the mixer; no audio bleed
+through Audio rows.
+
+**Task 9 added — Dirty-flag investigation (record-finalize side effect):**
+
+User observation during diagnostic: post-record, the project shows
+dirty state.  Save clears it.  Reopen sometimes still shows dirty.
+Did NOT happen until the WAV files were on the Builder grid (i.e.,
+post-`commitRecordingResult`'s `markDirty()` call at
+[Source/Standalone/StandaloneEditor.cpp:9979](Source/Standalone/StandaloneEditor.cpp:9979)).
+Pattern resembles a QA-D STATE-01 regression — `markDirty` fires
+correctly post-record (state did change), but a follow-up cascade
+re-flips dirty after save.  Folded as a new **Task 9 — Dirty-flag
+investigation** in the QA-E batch plan (inserted between Task 8
+Sub-Phase Z and the close sequence, which renumbers to Task 10).
+Per `feedback_qa_batches_fix_bugs_dont_defer.md`, real bugs surfaced
+mid-QA-batch get fixed in-batch.  Scope: investigate root cause +
+fix + verify across all three record modes (Vox-only, Inst-only,
+combined Vox + Inst).
+
+**Task 7 fold-in — "Add a new Page" options in Routing dropdown:**
+
+User feature request surfaced during this diagnostic: the FILE-02
+Routing dropdown (Task 7 step 2) should include entries for "Add a
+new Clip Page", "Add a new Vox Page", "Add a new Inst Page" so the
+user can route a clip to a NEWLY-created page without first
+navigating to the ribbon to add a tab.  Folded as a sub-bullet under
+Task 7 step 2.
+
+**Rule 4 locked alongside this finding:**
+
+Main Plan §0 Rule 4 (2026-05-12) — every diagnostic addition gets
+logged in the per-batch Diagnostic Instrumentation Catalog in the
+running notes file, with disposition (`Remove at task/batch close`
+/ `Keep`).  Established after I'd shipped ~15 `[QA-E DIAG]` sites
+with no running record; catalog filled retroactively in the QA-E
+running notes.
+
+**Inline back-refs:**
+- §5 QA-E entry: scope expanded -- Task 9 (Dirty-flag investigation)
+  added + Task 7 routing-dropdown fold-in.  Audio-routing fix family
+  (Fixes 1-4) lands in Task 3.
+- §9 fifteenth Forks entry: F-B-b "no K-6 parallel fix needed for
+  Clips" stays valid as a K-6-shape decision, but does NOT cover the
+  deserialize-side block-loop guard fix that landed here -- different
+  bug shape, different code path.  Cross-ref this entry for the
+  actual Clips-strip restore fix.
+- §9 eighth Forks entry (QA-Md outcome): original "MT no-op under
+  Debug" premise was diagnosed wrong at QA-Md close.  This 16th
+  Forks entry adds a SECOND MT-related finding -- the FilePlay
+  pre-scan was orphaned by the MT branch insertion.  Together,
+  these suggest QA-Audit should sweep `processBlock` for other
+  state-setup code that needs to live BEFORE the MT/serial branch
+  fork.
+- §9 Forks: this entry (sixteenth).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` -- this entry + §5 QA-E scope update.
+- `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` -- Task 7
+  step 2 routing-dropdown sub-bullet, insert Task 9 (Dirty-flag
+  investigation), renumber close to Task 10, update Files-to-modify
+  summary.
+- Source files: `Source/PluginProcessor.cpp` (pre-scan moved) +
+  `Source/Standalone/StandaloneEditor.cpp` (Clips-strip guard).
+- `Plans & Specs/Running Notes/phantom-recording-mongoose.md` --
+  Task 3 verify pass entry + new "Diagnostic Instrumentation
+  Catalog" section.
+
+**Verification:** Fixes 1-4 verified working 2026-05-12 (MT-on +
+reload + play = audio through Vox + 2 Inst strips correctly; no
+phantom Clips strips).  Task 9 (Dirty-flag investigation)
+verification pending its own execution.  Task 7 fold-in
+verification deferred to Task 7 execution.

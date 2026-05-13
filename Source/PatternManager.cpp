@@ -987,6 +987,14 @@ juce::ValueTree PatternManager::toValueTree() const
         bNode.setProperty("originalBPM",    b.originalBPM,    nullptr);
         bNode.setProperty("stretchMode",    b.stretchMode,    nullptr);
         bNode.setProperty("muted",          b.muted,          nullptr);
+        // QA-E Task 3 (2026-05-12): persist routeChannel so Vox/Inst-recorded
+        // audio clips remember which engine's chain they should play through
+        // across save/load.  Added 2026-05-03 to ArrangementBlock for FilePlay
+        // routing but the save/load pair was forgotten -- on reload, blocks
+        // defaulted to routeChannel=0 and audio re-spawned a Clips strip
+        // instead of routing through the original Vox/Inst page.  Default 0
+        // on deserialize preserves backward compatibility with pre-fix saves.
+        bNode.setProperty("routeChannel",   b.routeChannel,   nullptr);
         if (b.clipType == ClipType::Automation)
             bNode.addChild(automationLaneToValueTree(b.automationLane), -1, nullptr);
         arrNode.addChild(bNode, -1, nullptr);
@@ -1343,6 +1351,10 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         b.originalBPM    = (float)(double)   bNode.getProperty("originalBPM",    120.0);
         b.stretchMode    = (bool)            bNode.getProperty("stretchMode",    true);
         b.muted          = (bool)            bNode.getProperty("muted",          false);
+        // QA-E Task 3 (2026-05-12): see toValueTree comment.  Default 0 on
+        // pre-fix saves -> legacy "no Vox/Inst routing" behavior.  New saves
+        // carry the field so Vox/Inst-recorded clips persist their route.
+        b.routeChannel   = (int)             bNode.getProperty("routeChannel",   0);
         if (b.clipType == ClipType::Automation)
         {
             auto la = bNode.getChildWithName("AutomationLane");

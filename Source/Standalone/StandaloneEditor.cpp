@@ -9283,6 +9283,18 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
         else if (type == "Vox")
         {
             spawnVoxTabIfMissing (pageIndex, /*selectAfter*/ false);
+
+            // QA-E MIX-02 (2026-05-11): parallel K-6 fix for Vox -- ensure the
+            // mixer strip exists at pageIndex.  restoreStripNames only creates
+            // strips that have a non-default name (legacy "persist renames
+            // only" semantics) -- unrenamed Vox tabs get their strip dropped
+            // on save/load, leaving the VoxPage with no audio path to the
+            // bus.  addVoxChannelAtIndex is idempotent (early-returns when
+            // the strip already exists), so calling it here is safe even
+            // when restoreStripNames already ran.  Mirror of the K-6
+            // follow-up landed for Inst on 2026-05-05.
+            if (mMixerPage) mMixerPage->addVoxChannelAtIndex (pageIndex);
+
             for (auto* entry : mPages)
             {
                 if (! entry) continue;
@@ -9797,6 +9809,12 @@ void StandaloneEditor::restoreAudioStripsFromArrangement()
     {
         const auto& b = mPM->getBlock (i);
         if (b.clipType != ClipType::Audio) continue;
+        // QA-E (2026-05-12): Vox/Inst-routed blocks (routeChannel != 0) play
+        // back through their originating page's chain via Pass 1 / VoxStripTask
+        // / InstStripTask -- they don't need an Audio row strip.  Pre-guard
+        // closes the bug where reloading a project with recorded Vox/Inst
+        // clips spawned phantom Clips strips on top of the Vox/Inst routing.
+        if (b.routeChannel != 0) continue;
         const int row = b.trackRow;
         if (row < 0 || row >= VibeSynthProcessor::kMaxAudioRows) continue;
 
