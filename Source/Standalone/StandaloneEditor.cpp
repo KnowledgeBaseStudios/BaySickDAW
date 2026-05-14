@@ -2143,7 +2143,15 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             // its full state.  Three possible page types (Clips / Vox /
             // Inst) - each has its own export* method.  We hold the saved
             // state as XML strings so we can apply after the new page exists.
-            juce::String savedClipState, savedVoxState, savedInstState;
+            // QA-E Task 4 (2026-05-12): Vox/Inst branches removed -- those
+            // pages no longer hold mClipPath (file-association moved to
+            // library entries via pageOwnerChannelId).  The downstream
+            // duplicate-spawn at line ~2207 only consumes savedClipState
+            // anyway; Vox/Inst savedState was captured but never applied
+            // (per the deferred-to-G-9 note that originally lived here).
+            // When Vox/Inst duplicate UX lands, it would loop the audio
+            // library by ownerChannelId + the source path, not per-page.
+            juce::String savedClipState;
             for (auto* entry : mPages)
             {
                 if (! entry || ! entry->component) continue;
@@ -2154,26 +2162,6 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                     if (pageAbs == sourceAbsPath || cp->getClipFilePath() == sourceAbsPath)
                     {
                         savedClipState = cp->exportClipState();
-                        break;
-                    }
-                }
-                else if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
-                {
-                    const juce::String pageAbs =
-                        mProcessor.resolveProjectFile (vp->getClipFilePath()).getFullPathName();
-                    if (pageAbs == sourceAbsPath || vp->getClipFilePath() == sourceAbsPath)
-                    {
-                        savedVoxState = vp->exportVoxState();
-                        break;
-                    }
-                }
-                else if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
-                {
-                    const juce::String pageAbs =
-                        mProcessor.resolveProjectFile (ip->getClipFilePath()).getFullPathName();
-                    if (pageAbs == sourceAbsPath || ip->getClipFilePath() == sourceAbsPath)
-                    {
-                        savedInstState = ip->exportInstState();
                         break;
                     }
                 }
@@ -2230,83 +2218,50 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             std::vector<CategorizedAudioEntry> out;
             if (! mPM) return out;
 
-            // Library paths are stored as RELATIVE strings (e.g.
-            // "Samples/file.wav" per P4's copy-on-drop flow), but page-side
-            // paths (cp->getClipFilePath() / vp / ip) are ABSOLUTE - resolved
-            // by spawn*TabIfMissing.  Normalize both to absolute via
-            // mProcessor.resolveProjectFile so the lookup matches regardless
-            // of storage form.
-            auto findLibIdx = [this](const juce::String& pagePath) -> int
+            // QA-E Task 4 (2026-05-12): library-driven enumeration.  Walk
+            // every AudioLibraryEntry once + group by pageOwnerChannelId
+            // range.  Replaces the old per-page mClipPath round-trip --
+            // Vox/Inst pages no longer hold mClipPath; their files live in
+            // the library tagged via pageOwnerChannelId.  Clips still has
+            // mClipPath (engine preload) but its drag handler now ALSO
+            // tags the library so multi-file Clips browser visibility works.
+            // See §9 17th Forks entry for the architectural rationale.
+            for (int libIdx = 0; libIdx < mPM->getNumAudioLibrary(); ++libIdx)
             {
-                if (pagePath.isEmpty()) return -1;
-                const juce::String pageAbs =
-                    mProcessor.resolveProjectFile (pagePath).getFullPathName();
-                for (int i = 0; i < mPM->getNumAudioLibrary(); ++i)
-                {
-                    const juce::String libRel = mPM->getAudioLibraryPath (i);
-                    if (libRel == pagePath) return i;   // identical strings
-                    const juce::String libAbs =
-                        mProcessor.resolveProjectFile (libRel).getFullPathName();
-                    if (libAbs.isNotEmpty() && libAbs == pageAbs) return i;
-                }
-                return -1;
-            };
+                const int owner          = mPM->getAudioLibraryPageOwner (libIdx);
+                const juce::String path  = mPM->getAudioLibraryPath  (libIdx);
+                const juce::String alias = mPM->getAudioLibraryAlias (libIdx);
 
-            for (auto* entry : mPages)
-            {
-                if (! entry || ! entry->component) continue;
+                CategorizedAudioEntry e;
+                e.audioLibIdx = libIdx;
+                e.fullPath    = mProcessor.resolveProjectFile (path).getFullPathName();
+                if (e.fullPath.isEmpty()) e.fullPath = path;
+                e.displayName = alias.isNotEmpty() ? alias : juce::File (path).getFileName();
 
-                if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+                if (owner >= MixerChannelIds::kVoxBase
+                    && owner <  MixerChannelIds::kVoxBase + MixerChannelIds::kMaxVoxStrips)
                 {
-                    const juce::String path = cp->getClipFilePath();
-                    if (path.isEmpty()) continue;
-                    const int libIdx = findLibIdx (path);
-                    if (libIdx < 0) continue;
-                    CategorizedAudioEntry e;
-                    e.audioLibIdx = libIdx;
-                    e.category    = "Clips";
-                    e.displayName = mPM->getAudioLibraryAlias (libIdx).isNotEmpty()
-                                       ? mPM->getAudioLibraryAlias (libIdx)
-                                       : juce::File (path).getFileName();
-                    e.fullPath    = mProcessor.resolveProjectFile (path).getFullPathName();
-                    if (e.fullPath.isEmpty()) e.fullPath = path;
-                    e.accent      = juce::Colour (0xffd4a017);   // Clips amber
-                    out.push_back (std::move (e));
+                    e.category = "Vox";
+                    e.accent   = juce::Colour (0xff0fafa5);
                 }
-                else if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+                else if (owner >= MixerChannelIds::kInstBase
+                         && owner <  MixerChannelIds::kInstBase + MixerChannelIds::kMaxInstStrips)
                 {
-                    const juce::String path = vp->getClipFilePath();
-                    if (path.isEmpty()) continue;   // empty until G-9 records
-                    const int libIdx = findLibIdx (path);
-                    if (libIdx < 0) continue;
-                    CategorizedAudioEntry e;
-                    e.audioLibIdx = libIdx;
-                    e.category    = "Vox";
-                    e.displayName = vp->getTabName().isNotEmpty()
-                                       ? vp->getTabName()
-                                       : juce::File (path).getFileName();
-                    e.fullPath    = mProcessor.resolveProjectFile (path).getFullPathName();
-                    if (e.fullPath.isEmpty()) e.fullPath = path;
-                    e.accent      = juce::Colour (0xff0fafa5);   // Vox teal
-                    out.push_back (std::move (e));
+                    e.category = "Inst";
+                    e.accent   = juce::Colour (0xff1c3a8a);
                 }
-                else if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+                else if (owner >= MixerChannelIds::kAudioBase
+                         && owner <  MixerChannelIds::kAudioBase + 50)
                 {
-                    const juce::String path = ip->getClipFilePath();
-                    if (path.isEmpty()) continue;   // empty until G-9 records
-                    const int libIdx = findLibIdx (path);
-                    if (libIdx < 0) continue;
-                    CategorizedAudioEntry e;
-                    e.audioLibIdx = libIdx;
-                    e.category    = "Inst";
-                    e.displayName = ip->getTabName().isNotEmpty()
-                                       ? ip->getTabName()
-                                       : juce::File (path).getFileName();
-                    e.fullPath    = mProcessor.resolveProjectFile (path).getFullPathName();
-                    if (e.fullPath.isEmpty()) e.fullPath = path;
-                    e.accent      = juce::Colour (0xff1c3a8a);   // Inst navy
-                    out.push_back (std::move (e));
+                    e.category = "Clips";
+                    e.accent   = juce::Colour (0xffd4a017);
                 }
+                else
+                {
+                    e.category = "Audio";
+                    e.accent   = juce::Colour (0xff808080);
+                }
+                out.push_back (std::move (e));
             }
             return out;
         };
@@ -4246,9 +4201,8 @@ void StandaloneEditor::showPageForTab(int tabId)
                 }, vp->getActiveTab(), vp->getPageColor());
             syncPagePresetMenu (vp->getActiveTab());
             mPageMenuBar->setMidSideVisible (false);
-            // H-6b: clip-name label hosted on the right of the PageMenuBar.
-            if (auto* lbl = vp->getClipFileLabel())
-                mPageMenuBar->addExtraRightComponent (lbl, 240);
+            // QA-E Task 4 (2026-05-12): mClipFileLabel removed from VoxPage;
+            // file-association lives in PatternManager AudioLibrary now.
         }
         else if (auto* ip = dynamic_cast<InstPage*>(mVisiblePage))
         {
@@ -9908,7 +9862,12 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
         // 2026-04-24 recorded-clip library registration: matches what
         // BuilderPage::importAudioFile does on user drop so the clip shows
         // up in the Builder's Audio tab and survives save/close/reopen.
-        mPM->addAudioToLibrary (block.audioFilePath);
+        // QA-E Task 4 (2026-05-12): tag the library entry's pageOwnerChannelId
+        // with the same routeChannel so the browser groups Vox/Inst-routed
+        // recordings under their originating page's category.  Master capture
+        // / generic drops (routeChannel == 0) land in the generic Audio
+        // category by default.
+        mPM->addAudioToLibrary (block.audioFilePath, {}, routeChannel);
         mPM->addBlock (block);
 
         // I-16 G-9: only spin up a new Audio row + InsertNode + mixer strip
@@ -9956,7 +9915,10 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
             const juce::String dryRel = "Samples/" + dryFile.getFileName();
             // Add DRY to Audio Browser only (it doesn't go on the grid; the
             // BaySickPitch offline editor loads it).
-            mPM->addAudioToLibrary (dryRel);
+            // QA-E Task 4 (2026-05-12): tag DRY with this Vox page's
+            // channel id so the browser groups it under the Vox category
+            // alongside the WET take (which dropWavAsClip tags below).
+            mPM->addAudioToLibrary (dryRel, {}, chId);
 
             if (wetFile.existsAsFile())
                 dropWavAsClip (wetFile, chId);     // WET on grid + linked to Vox page

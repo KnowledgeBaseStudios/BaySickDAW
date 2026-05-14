@@ -4,6 +4,8 @@
 #include "../Standalone/PagePresetIO.h"
 #include "../PluginProcessor.h"
 #include "../SampleLibrary.h"
+#include "../VibeGraph.h"           // QA-E Task 4: MixerChannelIds::audioInsert
+#include "../PatternManager.h"      // QA-E Task 4: addAudioToLibrary
 
 namespace
 {
@@ -568,6 +570,21 @@ void ClipsPage::setClipFilePath (const juce::String& p)
     if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
         if (p.isNotEmpty())
             vp->loadSampleFile (juce::File (p));
+
+    // QA-E Task 4 (2026-05-12): in addition to the engine preload above,
+    // tag the audio library entry's pageOwnerChannelId so the browser walk
+    // groups this file under the Clips category for this page.  mClipPath
+    // stays as the "currently preloaded sample for the engine" (deletable
+    // post-QA-J Clips routing unification); library tracks ALL N files
+    // routed to this page for multi-file browser visibility.
+    if (p.isNotEmpty() && mFullProcessor != nullptr)
+    {
+        if (auto* pm = mFullProcessor->getPatternManager())
+        {
+            const int ownerCh = MixerChannelIds::audioInsert (mPageIndex);
+            pm->addAudioToLibrary (p, {}, ownerCh);
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

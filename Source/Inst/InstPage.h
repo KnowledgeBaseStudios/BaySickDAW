@@ -78,16 +78,11 @@ public:
     // all read as the same channel identity.
     juce::Colour getPageColor() const noexcept { return juce::Colour (0xff1c3a8a); }
 
-    // I-0b: file-binding label retained for the page header chrome (BaySickNAM/IR
-    // re-amp will eventually consume audio files; for now the label is informational).
-    juce::String getClipFilePath() const                    { return mClipPath; }
-    void         setClipFilePath (const juce::String& p);
-
-    // I-16 G-9 (2026-05-03): linked recorded-clip file path (the audio that
-    // plays back through this page's chain on transport playback).  Set by
-    // StandaloneEditor::commitRecordingResult after a successful Inst take.
-    juce::String getLinkedClipPath() const                  { return mLinkedClipPath; }
-    void         setLinkedClipPath (const juce::String& p)  { mLinkedClipPath = p; }
+    // QA-E Task 4 (2026-05-12): getClipFilePath / setClipFilePath / mClipPath
+    // + mLinkedClipPath deleted.  Inst file-association now lives in
+    // PatternManager's AudioLibrary via pageOwnerChannelId tagging (per §9
+    // 17th Forks entry).  mClipFileLabel is RETAINED -- still used for sfizz
+    // kit name display by setSource() / updateSfizzKitLabel() paths.
 
     // Back-compat stub.  No-op in I-0b -- there's no engine picker; both engines
     // live as permanent sub-tabs.  Old StandaloneEditor save-load code calls this
@@ -183,7 +178,6 @@ private:
     int                                          mActiveTab { 0 };
     Source                                       mSource    { Source::LiveInput };
     juce::String                                 mTabName;
-    juce::String                                 mClipPath;
     bool                                         mLocked { false };
 
     // I-0b: page header label (informational).  Was previously parented to
@@ -249,13 +243,10 @@ private:
     // single processor; processBlock fans the buffer through Pedals -> NAM/IR.
     std::unique_ptr<EngineChainProcessor>        mChain;
 
-    // I-16 G-9 (2026-05-03): file path of the recorded clip linked to this
-    // page's strip.  Set by commitRecordingResult after a successful armed
-    // take.  Used by the engine loop to drive FilePlay during transport
-    // playback.  Empty when nothing is linked yet.
-    juce::String                                 mLinkedClipPath;
-
     // J-6 EQ unification (2026-05-03): mEQDisplay removed.
+    // QA-E Task 4 (2026-05-12): mLinkedClipPath removed (was scaffold for
+    // commitRecordingResult; never had any callers).  Replaced by library-
+    // driven ownership via AudioLibraryEntry.pageOwnerChannelId.
 
     // G-7: full processor + bus-active query for Page Preset save/load.
     VibeSynthProcessor*                          mFullProcessor { nullptr };

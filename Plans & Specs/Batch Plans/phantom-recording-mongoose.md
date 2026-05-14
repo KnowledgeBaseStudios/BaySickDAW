@@ -420,8 +420,7 @@ The old per-page-iteration branches (lines 2150-2310 area's Clips/Vox/Inst/Audio
   - **(5) Drop onto Clips tab.** Drag a WAV from the Builder grid onto a Clips tab in the ribbon (or from disk if drag-from-disk is supported).  The Clips engine preloads it.  Browser Clips category shows that file under that Clips page.
   - **(6) Save + reload.** File → Save.  Close + reopen project.  All Vox/Inst/Clips browser entries still appear under their correct categories.  `pageOwnerChannelId` round-tripped through XML.
   - **(7) Rename in browser.** Right-click a Vox entry → Rename → 'My Vocal Take 1'.  Display updates.  Other entries on the same Vox page keep their own names.  Persists across save+reload.
-  - **(8) Drag-onto-Vox-tab handler.** From a different tab's browser, drag any audio entry onto a Vox tab in the ribbon.  Entry's category should switch from its old category to that Vox page's category.  (Verifies the drag handler reroute.)
-  - **All eight pass?**"
+  - **All seven pass?**"
 - [ ] Wait for Jeff's verify result.
 - [ ] On pass: `/draft-commit`, surface, commit on approval.
 - [ ] `/draft-doc running-notes` → apply.

@@ -2661,9 +2661,21 @@ void ArrangementGrid::showAudioClipProperties(int blockIdx)
         }), true);
 }
 
-void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, float targetBar)
+void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, float targetBar, int routeChannel)
 {
     File f(path);
+    // QA-E Task 4 (2026-05-12): if the path is project-relative (e.g.
+    // "Samples/foo.wav" from the audio library), File(path) resolves it
+    // against CWD = the EXE's folder, not the project folder.  Fall through
+    // to onResolveStoredPath (VibeSynthProcessor::resolveProjectFile) when
+    // the as-is path doesn't exist, so library-relative paths from the
+    // browser drag work the same as absolute paths from external drops.
+    if (!f.existsAsFile() && onResolveStoredPath)
+    {
+        const File resolved = onResolveStoredPath (path);
+        if (resolved.existsAsFile())
+            f = resolved;
+    }
     if (!f.existsAsFile()) return;
 
     // Read file metadata to get actual duration.
@@ -2704,7 +2716,9 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     beginEdit("Import Audio");
     // Register the stored path in the persistent audio library so the Browser
     // keeps showing it even if every block referencing it gets deleted.
-    mPM.addAudioToLibrary(storedPath);
+    // QA-E Task 4 (2026-05-12): tag ownerChannelId so re-drag from browser
+    // continues to find the entry under the right category.
+    mPM.addAudioToLibrary(storedPath, {}, routeChannel);
     ArrangementBlock b;
     b.clipType       = ClipType::Audio;
     b.trackRow       = jlimit(0, kNumRows - 1, targetRow);
@@ -2713,6 +2727,7 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     b.audioFilePath  = storedPath;
     b.originalBPM    = originalBPM;
     b.stretchMode    = true;
+    b.routeChannel   = routeChannel;   // QA-E Task 4 (2026-05-12)
     mPM.addBlock(b);
     mSelection.clear();
     mSelection.push_back(mPM.getNumBlocks() - 1);
@@ -2723,7 +2738,11 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     getOrCreateThumbnail(storedPath);
     resized(); repaint();
 
-    if (onAudioClipAdded)
+    // QA-E Task 4 (2026-05-12): skip onAudioClipAdded for routed clips
+    // (Vox/Inst/Clips-page-routed) -- those play through the originating
+    // page's chain, not via an Audio strip.  Mirrors the routeChannel==0
+    // guard inside dropWavAsClip at StandaloneEditor.cpp.
+    if (routeChannel == 0 && onAudioClipAdded)
         onAudioClipAdded(b.trackRow, mRowNames[b.trackRow], storedPath);
 }
 
@@ -2908,11 +2927,15 @@ void ArrangementGrid::itemDropped(const SourceDetails& d)
     {
         // Resolve path from the persistent audio library (so drag works even
         // when no existing Audio block references the file).
+        // QA-E Task 4 (2026-05-12): pass the entry's pageOwnerChannelId so
+        // the new block routes through the originating Vox/Inst/Clips page
+        // (instead of defaulting to routeChannel=0 = generic Audio strip).
         if (idx >= 0 && idx < mPM.getNumAudioLibrary())
         {
             const String path = mPM.getAudioLibraryPath(idx);
+            const int    owner = mPM.getAudioLibraryPageOwner(idx);
             if (path.isNotEmpty())
-                importAudioFile(path, row, bar);
+                importAudioFile(path, row, bar, owner);
         }
     }
     else // auto

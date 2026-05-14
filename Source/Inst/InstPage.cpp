@@ -1124,14 +1124,10 @@ void InstPage::switchTab (int idx)
     repaint();
 }
 
-void InstPage::setClipFilePath (const juce::String& p)
-{
-    mClipPath = p;
-    mClipFileLabel.setText (p.isNotEmpty()
-                                ? juce::File (p).getFileName()
-                                : juce::String ("(no audio loaded)"),
-                            juce::dontSendNotification);
-}
+// QA-E Task 4 (2026-05-12): setClipFilePath deleted.  Inst file-association
+// lives in PatternManager AudioLibrary via pageOwnerChannelId tagging.
+// mClipFileLabel is RETAINED -- still driven by setSource() / updateSfizz
+// paths for kit name display.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): full-state export/import for Duplicate flow.
@@ -1202,8 +1198,9 @@ void InstPage::importInstState (const juce::String& xml)
 
     setLocked (parsed->getIntAttribute ("locked", 0) != 0);
 
-    if (mClipPath.isNotEmpty())
-        setClipFilePath (mClipPath);
+    // QA-E Task 4 (2026-05-12): removed dead `if (mClipPath.isNotEmpty())
+    // setClipFilePath(mClipPath)` -- mClipPath was never serialized so the
+    // field was always empty at this point; the call was dead.
 }
 
 void InstPage::paint (juce::Graphics& g)

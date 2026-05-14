@@ -430,16 +430,25 @@ public:
     // ── Audio file library (persists independently of blocks) ────────────
     // Items here survive deletion of all blocks that reference them so the
     // Browser's Audio tab doesn't empty when the user clears the arrangement.
+    //
+    // QA-E Task 4 (2026-05-12): pageOwnerChannelId tags each entry to a Vox /
+    // Inst / Clips page so the browser groups by ownerChannelId range instead
+    // of round-tripping through per-page mClipPath fields.  Default 0 = generic
+    // Audio category (master capture, untagged drops).  See §9 17th Forks entry.
     void                 addAudioToLibrary     (const juce::String& path,
-                                                const juce::String& alias = {});
+                                                const juce::String& alias = {},
+                                                int                 pageOwnerChannelId = 0);
     void                 removeAudioFromLibrary(const juce::String& path);
     int                  getNumAudioLibrary    () const { return (int)mAudioLibrary.size(); }
     const juce::String&  getAudioLibraryPath   (int idx) const { return mAudioLibrary[idx].path; }
     const juce::String&  getAudioLibraryAlias  (int idx) const { return mAudioLibrary[idx].alias; }
     int                  getAudioLibraryChokeGroup (int idx) const
         { return (idx >= 0 && idx < (int) mAudioLibrary.size()) ? mAudioLibrary[idx].chokeGroup : 0; }
+    int                  getAudioLibraryPageOwner (int idx) const
+        { return (idx >= 0 && idx < (int) mAudioLibrary.size()) ? mAudioLibrary[idx].pageOwnerChannelId : 0; }
     void                 setAudioLibraryAlias  (int idx, const juce::String& alias);
     void                 setAudioLibraryChokeGroup (int idx, int group);
+    void                 setAudioLibraryPageOwner (int idx, int channelId);
 
     // ── Automation template library (persists independently of blocks) ───
     void                    addAutomationTemplate   (const AutomationLane& lane);
@@ -525,7 +534,12 @@ private:
     // D3 (2026-04-25): chokeGroup is 0 = none, 1..16 = group id.  When this
     // clip starts playback, it chokes any other insert (synth or audio) on the
     // same group.  Set via the browser's right-click "Choke Group" submenu.
-    struct AudioLibraryEntry { juce::String path; juce::String alias; int chokeGroup { 0 }; };
+    struct AudioLibraryEntry {
+        juce::String path;
+        juce::String alias;
+        int chokeGroup         { 0 };
+        int pageOwnerChannelId { 0 };   // QA-E Task 4 (2026-05-12): 0 = generic Audio; else channel id (kVoxBase / kInstBase / kAudioBase range)
+    };
     std::vector<AudioLibraryEntry> mAudioLibrary;
     std::vector<AutomationLane>    mAutomationTemplates;
 };

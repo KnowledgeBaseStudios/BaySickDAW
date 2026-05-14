@@ -156,12 +156,25 @@ int PatternManager::duplicatePattern(int srcIndex)
 }
 
 // ── Audio file library ──────────────────────────────────────────────────────
+// QA-E Task 4 (2026-05-12): pageOwnerChannelId param tags each entry to a
+// Vox / Inst / Clips page.  If the path is already in the library, update
+// its ownerChannelId to the caller's value -- this lets re-tagging via
+// Properties-dropdown route assignment work without first removing the
+// entry.  Default 0 = generic Audio (no tag change on existing entries).
 void PatternManager::addAudioToLibrary(const juce::String& path,
-                                        const juce::String& alias)
+                                        const juce::String& alias,
+                                        int                 pageOwnerChannelId)
 {
-    for (const auto& e : mAudioLibrary)
-        if (e.path == path) return;   // already present
-    mAudioLibrary.push_back({ path, alias, 0 /* chokeGroup = none */ });
+    for (auto& e : mAudioLibrary)
+    {
+        if (e.path == path)
+        {
+            if (pageOwnerChannelId != 0)
+                e.pageOwnerChannelId = pageOwnerChannelId;
+            return;
+        }
+    }
+    mAudioLibrary.push_back({ path, alias, 0 /* chokeGroup = none */, pageOwnerChannelId });
 }
 
 void PatternManager::removeAudioFromLibrary(const juce::String& path)
@@ -180,6 +193,12 @@ void PatternManager::setAudioLibraryChokeGroup(int idx, int group)
 {
     if (idx < 0 || idx >= (int)mAudioLibrary.size()) return;
     mAudioLibrary[idx].chokeGroup = juce::jlimit(0, 16, group);
+}
+
+void PatternManager::setAudioLibraryPageOwner(int idx, int channelId)
+{
+    if (idx < 0 || idx >= (int)mAudioLibrary.size()) return;
+    mAudioLibrary[idx].pageOwnerChannelId = channelId;
 }
 
 // ── Automation template library ─────────────────────────────────────────────
@@ -1031,9 +1050,10 @@ juce::ValueTree PatternManager::toValueTree() const
         for (const auto& e : mAudioLibrary)
         {
             juce::ValueTree en("Entry");
-            en.setProperty("path",       e.path,       nullptr);
-            en.setProperty("alias",      e.alias,      nullptr);
-            en.setProperty("chokeGroup", e.chokeGroup, nullptr);   // D3
+            en.setProperty("path",               e.path,               nullptr);
+            en.setProperty("alias",              e.alias,              nullptr);
+            en.setProperty("chokeGroup",         e.chokeGroup,         nullptr);   // D3
+            en.setProperty("pageOwnerChannelId", e.pageOwnerChannelId, nullptr);   // QA-E Task 4
             lib.addChild(en, -1, nullptr);
         }
         root.addChild(lib, -1, nullptr);
@@ -1403,9 +1423,10 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
             auto e = lib.getChild(i);
             if (! e.hasType("Entry")) continue;
             mAudioLibrary.push_back({
-                e.getProperty("path",       juce::String()).toString(),
-                e.getProperty("alias",      juce::String()).toString(),
-                (int) e.getProperty("chokeGroup", 0)         // D3 (default 0 for legacy projects)
+                e.getProperty("path",               juce::String()).toString(),
+                e.getProperty("alias",              juce::String()).toString(),
+                (int) e.getProperty("chokeGroup",         0),    // D3 (default 0 for legacy projects)
+                (int) e.getProperty("pageOwnerChannelId", 0)     // QA-E Task 4 (default 0 = generic Audio for legacy)
             });
         }
     }

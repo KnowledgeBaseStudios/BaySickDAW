@@ -366,6 +366,9 @@ Per Main Plan §0 Rule 4.  Every diagnostic addition tracked here with dispositi
 | TBD (pre-existing — exact lines to be resolved during strip pass) | `[Pedals]` state log | User-noted pre-existing diagnostic; long-term value confirmed by user 2026-05-12 | Keep |
 | TBD (pre-existing — exact lines to be resolved during strip pass) | Audio Setup log | User-noted pre-existing diagnostic; long-term value confirmed by user 2026-05-12 | Keep |
 | [Source/Standalone/StandaloneEditor.cpp:4660+](../../Source/Standalone/StandaloneEditor.cpp:4660) — Mixer hamburger menu item 203 | "Multi-core diagnostic capture" QA-Md MT thread distribution AlertWindow | QA-Md MT investigation diagnostic; long-term value | Keep |
+| ~~[Source/Standalone/BuilderPage.cpp](../../Source/Standalone/BuilderPage.cpp) `parseBrowserDragDescription`~~ | ~~`[QA-E DIAG T4] parseBrowserDragDescription` (input + parsed)~~ | Diagnose why Vox-category browser drags reject on the Builder grid post-Task-4 library-driven model | **Stripped at Task 4 close 2026-05-14** (root cause found: `File(relative).existsAsFile()` resolves against CWD = Debug exe folder, not project folder; fixed via `onResolveStoredPath` fallback) |
+| ~~[Source/Standalone/BuilderPage.cpp](../../Source/Standalone/BuilderPage.cpp) `importAudioFile`~~ | ~~`[QA-E DIAG T4] importAudioFile` (path + existsAsFile)~~ | Confirm whether the incoming relative path resolves to an existing file | **Stripped at Task 4 close 2026-05-14** |
+| ~~[Source/Standalone/BuilderPage.cpp](../../Source/Standalone/BuilderPage.cpp) `itemDropped`~~ | ~~`[QA-E DIAG T4] itemDropped` (desc + localPos)~~ | Confirm drop event reaches the grid handler at all | **Stripped at Task 4 close 2026-05-14** |
 
 ### Pre-existing diagnostic resolution at Task 3 close
 
@@ -418,6 +421,35 @@ Fix (Option B per user spec call): each task owns `mClipScratch` + `mEngineScrat
 User-verified 2026-05-12: MT-on + 1 Vox + 2 Inst now plays each track through its own strip cleanly; no cross-pollution; mute test isolates correctly.  Landed as Commit A before this Task 4 doc-scope commit (seq-1 per user call).
 
 Task 3 conceptually now covers: F-A + R-1 + Fix 1 + Fix 2 (in `c0f57c9`) PLUS the MT race fix (in `54f41c8`).  No reopen of `c0f57c9`; the follow-up commit is the canonical Task 3 close.
+
+---
+
+## 2026-05-12 — Task 4 source implementation applied (awaiting verify)
+
+Library-driven page-owner model implemented per §9 17th Forks entry.  Source diff covers 7 files:
+
+### Done
+
+- **PatternManager.h** — `AudioLibraryEntry` struct gains `int pageOwnerChannelId { 0 };` 4th field.  `addAudioToLibrary` signature extends with `int pageOwnerChannelId = 0` optional param.  New `getAudioLibraryPageOwner(idx)` + `setAudioLibraryPageOwner(idx, channelId)` accessors.
+- **PatternManager.cpp** — `addAudioToLibrary` impl: when path already present, updates ownerChannelId if caller passes non-zero (this enables Properties-dropdown re-routing to retag entries without removing them).  New setter impl.  Serialize: writes `pageOwnerChannelId` attribute on `<Entry>`.  Deserialize: reads with default 0 (back-compat for pre-fix saves).
+- **VoxPage.h + VoxPage.cpp** — DELETED: `mClipPath`, `getClipFilePath`, `setClipFilePath`, `mClipFileLabel`, `getClipFileLabel`, `mLinkedClipPath` + accessors.  Constructor's mClipFileLabel setup deleted.  Also DELETED: the 2026-04-29 debug `isInterestedInFileDrag` + `filesDropped` drop-onto-Vox-tab handlers (debug scaffolding never intended as user surface; user caught the mistake when I'd initially rerouted them to library tagging).  Vox tabs no longer inherit from `FileDragAndDropTarget`.  Dead `if (mClipPath.isNotEmpty()) setClipFilePath(mClipPath)` re-bind at end of importVoxState deleted (mClipPath was never serialized so always empty here).
+- **InstPage.h + InstPage.cpp** — DELETED: `mClipPath`, `getClipFilePath`, `setClipFilePath`, `mLinkedClipPath` + accessors.  `mClipFileLabel` + `getClipFileLabel` RETAINED -- the label is dual-purpose, also driven by sfizz kit name display via setSource() (lines 915 + 937 in InstPage.cpp).  Inst has no file-drag handler (only Vox does), so no reroute needed.  Dead re-bind at end of importInstState deleted.
+- **ClipsPage.cpp** — `setClipFilePath` extended to ALSO tag the library entry with `audioInsert(mPageIndex)` after engine preload.  `mClipPath` RETAINED for engine preload (deletable post-QA-J Clips routing unification per §9 17th Forks entry).  Library tracks all N files routed to a Clips page; mClipPath is the "currently preloaded sample" for piano-roll trigger.
+- **StandaloneEditor.cpp** —
+  - `commitRecordingResult`: `dropWavAsClip` lambda's `mPM->addAudioToLibrary(...)` call extended with routeChannel as ownerChannelId (Vox/Inst routeChannels naturally match their voxInsert/instInsert channel ids; master/generic gets 0).  Explicit Vox DRY library add at line 9913 also passes chId as ownerChannelId so DRY appears under the Vox category alongside WET.
+  - Browser walk rewrite (~line 2228-2270): replaces per-page mClipPath round-trip with single library walk pass.  Iterates `mPM->getNumAudioLibrary()`, reads each entry's `pageOwnerChannelId`, groups by range (kVoxBase / kInstBase / kAudioBase / generic).  `findLibIdx` helper deleted (was only used by the old branches).  onDuplicateClipSpawn's Vox/Inst find branches deleted (they were no-ops -- savedVoxState/savedInstState captured but never applied downstream).
+  - Vox `getClipFileLabel` call site at line 4205 deleted (label is gone).  Inst `getClipFileLabel` call site at line 4279 RETAINED (label stays for kit display).
+- **Running notes** — this entry.
+
+### Disposition
+
+- Build pending Jeff verify.
+- All grep checks pass (no remaining `vp->getClipFilePath`, `vp->setClipFilePath`, `vp->getClipFileLabel`, `vp->getLinkedClipPath`, `vp->setLinkedClipPath`, `ip->getClipFilePath`, `ip->setClipFilePath`, `ip->getLinkedClipPath`, `ip->setLinkedClipPath` references anywhere in Source/).  `cp->getClipFilePath` references intentionally preserved -- Clips keeps its accessors.
+- Verify scenarios from the rewritten plan file Task 4 (7 tests covering single-take Vox + multi-take Vox + single-take Inst + multi-take Inst + drop onto Clips + save/reload + rename in browser) drive the verification cycle.  The 8th "drag-onto-Vox-tab" test in the earlier plan draft is removed -- that handler was 2026-04-29 debug scaffolding, never an intended user surface.
+
+### Next action
+
+- Surface diff + commit message draft.  Awaiting Jeff approval to commit.
 
 ---
 

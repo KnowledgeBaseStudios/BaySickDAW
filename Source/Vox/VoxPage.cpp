@@ -13,27 +13,13 @@ namespace
     constexpr int kFilenameW  = 320;
 }
 
-// 2026-04-29 DEBUG: drag-drop hook so we can drop WAV/MP3 onto a Vox tab and
-// see whether audio routes through the Vox InsertNode chain or bypasses it
-// (mirrors the bug report on Clips).  Only accepts a single file with an
-// audio-format extension we recognise.
-bool VoxPage::isInterestedInFileDrag (const juce::StringArray& files)
-{
-    if (files.isEmpty()) return false;
-    const juce::File f (files[0]);
-    const auto ext = f.getFileExtension().toLowerCase();
-    return ext == ".wav" || ext == ".mp3" || ext == ".aif" || ext == ".aiff"
-        || ext == ".flac" || ext == ".ogg";
-}
-
-void VoxPage::filesDropped (const juce::StringArray& files, int /*x*/, int /*y*/)
-{
-    if (files.isEmpty()) return;
-    // H-6b (2026-05-01): Vox tabs are always BaySickVocal.  Dropped files set
-    // the clip path; BaySickVocal's eventual file-play mode (G-9.1) will use
-    // it.  No engine swap.
-    setClipFilePath (files[0]);
-}
+// QA-E Task 4 (2026-05-12): the 2026-04-29 debug `isInterestedInFileDrag`
+// + `filesDropped` handlers (originally added to test whether dropping a WAV
+// onto a Vox tab routed through the Vox InsertNode) are removed.  Drag-and-
+// drop of audio entries is the Browser-panel-to-Builder-grid flow handled by
+// ArrangementGrid; per-page tab drag was never an intended user surface.
+// Library tagging for Vox recordings happens via commitRecordingResult, and
+// re-tagging via Task 7's Properties Routing dropdown (when it lands).
 
 VoxPage::VoxPage (int pageIndex)
     : mPageIndex (pageIndex),
@@ -46,20 +32,9 @@ VoxPage::VoxPage (int pageIndex)
 
     // J-6 EQ unification (2026-05-03): buildEQTab removed; pre-rack EQ on Effects page only.
 
-    // H-6b (2026-05-01): the clip-name label is now hosted in the PageMenuBar's
-    // far-right slot via StandaloneEditor's addExtraRightComponent call when
-    // this page becomes visible.  We don't addAndMakeVisible it on the page
-    // itself.  The Label still lives on this VoxPage so its text + tooltip
-    // properties persist across page hide/show cycles.
-    mClipFileLabel.setJustificationType (juce::Justification::centredLeft);
-    mClipFileLabel.setColour (juce::Label::textColourId,        juce::Colour (0xff66ffd4));
-    mClipFileLabel.setColour (juce::Label::backgroundColourId,  juce::Colour (0xff1a1a1a));
-    mClipFileLabel.setColour (juce::Label::outlineColourId,     juce::Colour (0xff333333));
-    mClipFileLabel.setBorderSize ({ 2, 6, 2, 6 });
-    mClipFileLabel.setText ("(no recording)", juce::dontSendNotification);
-    mClipFileLabel.setTooltip (
-        "Vocal recording or audio file bound to this Vox tab.  G-9 routes "
-        "this through BaySickVocal's file-play path on transport playback.");
+    // QA-E Task 4 (2026-05-12): mClipFileLabel deleted.  Browser visibility
+    // now driven by PatternManager AudioLibrary entries with pageOwnerChannelId
+    // tagging (see §9 17th Forks entry); per-page label is redundant.
 
     // H-6b (2026-05-01): Vox tabs are always BaySickVocal.  Pick on construction.
     selectEngine (EngineType::BaySickVocal);
@@ -501,16 +476,8 @@ void VoxPage::setProcessor (VibeSynthProcessor* p)
     // EQ is bound exclusively by EffectsPage (mixer_vox_<N>_preeq_*).
 }
 
-void VoxPage::setClipFilePath (const juce::String& p)
-{
-    mClipPath = p;
-    mClipFileLabel.setText (p.isNotEmpty()
-                                ? juce::File (p).getFileName()
-                                : juce::String ("(no recording)"),
-                            juce::dontSendNotification);
-    // H-6b: file-play through BaySickVocal lands with G-9.1's wrapper class.
-    // The clip path is just stored for now; G-9 reads it.
-}
+// QA-E Task 4 (2026-05-12): setClipFilePath deleted.  Vox file-association
+// lives in PatternManager AudioLibrary via pageOwnerChannelId tagging.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): full-state export/import for Duplicate flow.
@@ -565,8 +532,9 @@ void VoxPage::importVoxState (const juce::String& xml)
     // G-6: restore lock state.
     setLocked (parsed->getIntAttribute ("locked", 0) != 0);
 
-    if (mClipPath.isNotEmpty())
-        setClipFilePath (mClipPath);
+    // QA-E Task 4 (2026-05-12): removed dead `if (mClipPath.isNotEmpty())
+    // setClipFilePath(mClipPath)` -- mClipPath was never serialized so
+    // the field was always empty at this point; the call was dead.
 }
 
 void VoxPage::paint (juce::Graphics& g)

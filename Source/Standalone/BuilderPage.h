@@ -413,7 +413,13 @@ public:
     float getEffectiveRowH() const { return mEffectiveRowH; }
 
     // ── Public operations (called from BuilderPage) ───────────────────────────
-    void importAudioFile(const juce::String& path, int targetRow, float targetBar);
+    // QA-E Task 4 (2026-05-12): routeChannel param (default 0 = generic
+    // Audio behavior).  When non-zero, the dropped block is routed through
+    // the Vox/Inst/Clips page identified by that channel id, AND the
+    // onAudioClipAdded callback (which spawns a Clips strip) is skipped
+    // -- Vox/Inst-routed clips play through the page's chain, not an
+    // Audio strip.  Mirrors commitRecordingResult's dropWavAsClip pattern.
+    void importAudioFile(const juce::String& path, int targetRow, float targetBar, int routeChannel = 0);
 
     // ── Public coordinate helpers (used by BuilderPage zoom anchoring) ────
     int   barToX(float bar) const;

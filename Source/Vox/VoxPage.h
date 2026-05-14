@@ -15,15 +15,15 @@ class BaySickVocalEditor;
 // Strip" button - ribbon Vox dropdown is an instance switcher only.
 // ─────────────────────────────────────────────────────────────────────────────
 
-class VoxPage : public juce::Component,
-                public juce::FileDragAndDropTarget
+class VoxPage : public juce::Component
 {
 public:
     // 2026-04-29 DEBUG: drag-drop a WAV/MP3 onto the page to load it into the
-    // BaySickPlayer engine (auto-instantiated if not yet picked).  Lets Jeff
-    // test whether the audio-routing bug on Clips also affects Vox/Inst.
-    bool isInterestedInFileDrag (const juce::StringArray& files) override;
-    void filesDropped           (const juce::StringArray& files, int x, int y) override;
+    // QA-E Task 4 (2026-05-12): isInterestedInFileDrag + filesDropped
+    // overrides removed (debug-only scaffolding from 2026-04-29; never an
+    // intended user surface).  Drag-and-drop of audio is the Browser-to-
+    // Builder-grid flow handled by ArrangementGrid; library tagging for
+    // Vox recordings happens via commitRecordingResult.
 
     // H-6b (2026-05-01): Vox tabs are always BaySickVocal - no engine picker.
     // EngineType retained for save/load back-compat but only BaySickVocal is
@@ -54,20 +54,11 @@ public:
     // all read as the same channel identity.
     juce::Colour getPageColor() const noexcept { return juce::Colour (0xff0fafa5); }
 
-    juce::String getClipFilePath() const                    { return mClipPath; }
-    void         setClipFilePath (const juce::String& p);
-
-    // I-16 G-9 (2026-05-03): linked recorded-clip file path (the wet audio
-    // that plays back through this page's chain on transport playback).
-    // Set by StandaloneEditor::commitRecordingResult after a successful
-    // armed Vox take (always the WET file per Option C of the spec).
-    juce::String getLinkedClipPath() const                  { return mLinkedClipPath; }
-    void         setLinkedClipPath (const juce::String& p)  { mLinkedClipPath = p; }
-
-    // H-6b (2026-05-01): expose the clip-name label so StandaloneEditor can
-    // re-parent it into the PageMenuBar's far-right slot when this page is
-    // visible.  Label updates via setClipFilePath stay live across reparenting.
-    juce::Label* getClipFileLabel() noexcept { return &mClipFileLabel; }
+    // QA-E Task 4 (2026-05-12): getClipFilePath / setClipFilePath / mClipPath
+    // + mClipFileLabel + mLinkedClipPath deleted.  Vox file-association now
+    // lives in PatternManager's AudioLibrary via pageOwnerChannelId tagging
+    // (per §9 17th Forks entry).  Drop handler tags the dropped library entry
+    // directly; commitRecordingResult tags recorded library entries.
 
     void          selectEngine (EngineType e);
     EngineType    getEngineType() const noexcept { return mEngineType; }
@@ -136,18 +127,13 @@ private:
     int                                          mPageIndex { 0 };
     int                                          mActiveTab { 0 };
     juce::String                                 mTabName;
-    juce::String                                 mClipPath;
     bool                                         mLocked { false };
 
     RightClickEngineCombo                        mEnginePicker;
-    juce::Label                                  mClipFileLabel;
     EngineType                                   mEngineType { EngineType::None };
     std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor
     std::unique_ptr<juce::AudioProcessor>        mVocalProc;         // BaySickVocal (Phase H - null until then)
 
-    // I-16 G-9 (2026-05-03): file path of the wet recording linked to this
-    // page's strip.  Set by commitRecordingResult after a successful take.
-    juce::String                                 mLinkedClipPath;
     std::unique_ptr<juce::AudioProcessorEditor>  mPlayerEditor;
     std::unique_ptr<juce::AudioProcessorEditor>  mVocalEditor;
 
