@@ -66,10 +66,13 @@ All spec calls were resolved in the conversation before plan-mode entry. If anyt
 - [Source/Standalone/MixerPage.cpp](Source/Standalone/MixerPage.cpp) — Vox/Inst spawn cascade (Carry-Forward §3 lines 187-194)
 - [Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp) — `onTabClosed` Vox/Inst branches (Carry-Forward §3 lines 196-201) + XML restore walker (lines 203-209)
 
-### Task 4 — FILE-01 (Vox wet+dry + Inst dry browser visibility)
-- [Source/Vox/VoxPage.h](Source/Vox/VoxPage.h) — add `mDryClipPath` field + `setDryClipPath` setter + `getDryClipPath` getter
-- [Source/Standalone/StandaloneEditor.cpp:2255-2310](Source/Standalone/StandaloneEditor.cpp) — `onEnumerateAudio` Vox branch: emit two entries (wet + dry) per Vox page
-- [Source/Standalone/StandaloneEditor.cpp:9842-9866](Source/Standalone/StandaloneEditor.cpp) — recording finalize: register all recorded files in `audioLibrary`; bind Vox dry to VoxPage
+### Task 4 — FILE-01 (Library-driven multi-file-per-page browser visibility) — **scope expanded 2026-05-12 via §9 seventeenth Forks entry**
+- [Source/PatternManager.h](Source/PatternManager.h) — `AudioLibraryEntry` struct: add `int pageOwnerChannelId { 0 };` field; extend `addAudioToLibrary` signature with optional `int pageOwnerChannelId = 0`; add `getAudioLibraryPageOwner(int idx)` + `setAudioLibraryPageOwner(int idx, int channelId)` accessors.
+- [Source/PatternManager.cpp](Source/PatternManager.cpp) — `addAudioToLibrary` body: accept + store ownerChannelId; new accessor implementations; serialize/deserialize the new field (default 0 on read for back-compat).
+- [Source/Vox/VoxPage.h](Source/Vox/VoxPage.h) + [Source/Vox/VoxPage.cpp](Source/Vox/VoxPage.cpp) — DELETE `mClipPath` + `getClipFilePath` + `setClipFilePath` + `mClipFileLabel`.  Drop handler reroutes to tag library entry's ownerChannelId.
+- [Source/Inst/InstPage.h](Source/Inst/InstPage.h) + [Source/Inst/InstPage.cpp](Source/Inst/InstPage.cpp) — same deletion as VoxPage; drop handler reroute.
+- [Source/Clips/ClipsPage.cpp](Source/Clips/ClipsPage.cpp) — `mClipPath` RETAINED transitionally for engine preload (deletable post-QA-J).  Drop handler at line 382 + spawn cascade additionally tag library entry with `kAudioBase + pageIdx` ownerChannelId.
+- [Source/Standalone/StandaloneEditor.cpp](Source/Standalone/StandaloneEditor.cpp) — `commitRecordingResult`: Vox WET + DRY library entries tagged with `voxInsert(voxIdx)`; Inst DRY tagged with `instInsert(instIdx)`.  Browser walk (~lines 2150-2310): rewrite Vox / Inst / Clips branches to iterate `mAudioLibrary` filtered by ownerChannelId range.  Audio "generic" branch emits ownerChannelId == 0 entries.  ClipsPage spawn at ~line 7099 also tags ownerChannelId.
 
 ### Task 5 — REC-01 R-1-c (BLU-470 doc+verify+fix)
 - [Plans & Specs/Carry-Forward Reference.md](Plans & Specs/Carry-Forward Reference.md) — add §3 sub-section documenting recording lifecycle
@@ -259,160 +262,166 @@ For BaySickRustyDrumsPage (no current inner SafePointer line), the outer-scope c
 - [ ] On pass: `/draft-commit`, surface, commit on approval.
 - [ ] `/draft-doc running-notes` → apply.
 
-### Task 4 — FILE-01 (Vox wet+dry + Inst dry browser visibility)
+### Task 4 — FILE-01 (Library-driven multi-file-per-page browser visibility)
 
-**VoxPage extension:**
+(Scope expanded 2026-05-12 via §9 seventeenth Forks entry.  Original plan was single-take-per-page; user-surfaced architectural gap led to this library-driven model.  See §9 17 for the full diagnosis chronology.)
+
+**Architecture:** the AUDIO LIBRARY becomes the single source of truth for "files routed to a given page."  `AudioLibraryEntry` gets a new `int pageOwnerChannelId { 0 };` field.  Each library entry is tagged with the channel id of the page it belongs to:
+
+| Source | `pageOwnerChannelId` value |
+|---|---|
+| Recorded onto Vox page `i` (wet + dry) | `MixerChannelIds::voxInsert(i)` (kVoxBase + i = 600..) |
+| Recorded onto Inst page `i` (dry) | `MixerChannelIds::instInsert(i)` (kInstBase + i = 700..) |
+| Dropped onto Clips page at audioRow `r` | `MixerChannelIds::audioInsert(r)` (kAudioBase + r = 400..) |
+| Master capture / untagged drops | `0` (generic Audio category) |
+
+Browser walks iterate `mAudioLibrary` once and group by ownerChannelId range.  No more `vp->getClipFilePath()` round-trip; the binding lives in the library.
+
+**Per-page `mClipPath` disposition:**
+- `VoxPage::mClipPath` + `getClipFilePath` + `setClipFilePath` + `mClipFileLabel`: **DELETED**.  Engine never read them; label-only display before deletion.  Drag-onto-Vox-tab handler reroutes to tag the dropped audio library entry's ownerChannelId.
+- `InstPage::mClipPath` + accessors + label: **DELETED**.  Same shape as VoxPage.
+- `ClipsPage::mClipPath` + accessors: **RETAINED** transitionally.  Clips sample-player engine reads it at [Source/Clips/ClipsPage.cpp:510-511](Source/Clips/ClipsPage.cpp:510) (`vp->loadSampleFile(juce::File(mClipPath));`) for piano-roll-triggered playback.  Library still tracks ALL N files routed to that Clips page; `mClipPath` becomes a pointer into the library's set ("currently preloaded sample for the engine").  Deletable post-QA-J Clips routing unification.
+
+**PatternManager.h additions:**
 
 ```cpp
-// Source/Vox/VoxPage.h — additions inside the class declaration:
-public:
-    void  setDryClipPath (const juce::String& path) { mDryClipPath = path; }
-    const juce::String& getDryClipPath() const     { return mDryClipPath; }
-    // existing getClipFilePath() unchanged — still returns the WET path
+// Source/PatternManager.h — AudioLibraryEntry struct (line 528):
+struct AudioLibraryEntry {
+    juce::String path;
+    juce::String alias;
+    int chokeGroup       { 0 };
+    int pageOwnerChannelId { 0 };   // NEW: 0 = generic Audio; else channel id (kVoxBase/kInstBase/kAudioBase range)
+};
 
-private:
-    juce::String mDryClipPath;
+// Source/PatternManager.h — addAudioToLibrary signature (line 433): extend with optional owner.
+void addAudioToLibrary (const juce::String& path,
+                        const juce::String& alias = {},
+                        int pageOwnerChannelId = 0);
+
+// NEW accessors near getAudioLibraryChokeGroup (line 439):
+int  getAudioLibraryPageOwner (int idx) const
+    { return (idx >= 0 && idx < (int) mAudioLibrary.size()) ? mAudioLibrary[idx].pageOwnerChannelId : 0; }
+void setAudioLibraryPageOwner (int idx, int channelId);
 ```
 
-**Recording finalize at [Source/Standalone/StandaloneEditor.cpp:9842-9866](Source/Standalone/StandaloneEditor.cpp):**
+**PatternManager.cpp updates:**
 
 ```cpp
-// BEFORE — Vox branch (around line 9844):
-for (const auto& [chId, dryFile] : res.stripFiles)
+// Source/PatternManager.cpp — addAudioToLibrary impl (line 159):
+void PatternManager::addAudioToLibrary (const juce::String& path,
+                                         const juce::String& alias,
+                                         int pageOwnerChannelId)
 {
-    if (isVoxCh (chId))
-    {
-        const juce::File wetFile = findWet (chId);
-        const juce::String dryRel = "Samples/" + dryFile.getFileName();
-        mPM->addAudioToLibrary (dryRel);                          // DRY only
-        if (wetFile.existsAsFile())
-            dropWavAsClip (wetFile, chId);                        // WET on grid
-        else
-            dropWavAsClip (dryFile, chId);
-    }
-    else if (isInstCh (chId))
-    {
-        dropWavAsClip (dryFile, chId);                            // DRY on grid (no library add)
-    }
-    ...
+    for (const auto& e : mAudioLibrary)
+        if (e.path == path) return;
+    mAudioLibrary.push_back ({ path, alias, 0, pageOwnerChannelId });
 }
 
-// AFTER — Vox + Inst both register all files in library; Vox dry binds to page:
-for (const auto& [chId, dryFile] : res.stripFiles)
+// Source/PatternManager.cpp — new setter near setAudioLibraryChokeGroup (line 179):
+void PatternManager::setAudioLibraryPageOwner (int idx, int channelId)
 {
-    if (isVoxCh (chId))
-    {
-        const juce::File wetFile = findWet (chId);
-        const juce::String dryRel = "Samples/" + dryFile.getFileName();
-
-        // Register DRY in library (existing).
-        mPM->addAudioToLibrary (dryRel);
-
-        // NEW: register WET in library so browser walk's findLibIdx succeeds.
-        if (wetFile.existsAsFile())
-        {
-            const juce::String wetRel = "Samples/" + wetFile.getFileName();
-            mPM->addAudioToLibrary (wetRel);
-        }
-
-        if (wetFile.existsAsFile())
-            dropWavAsClip (wetFile, chId);                        // WET on grid + binds to Vox page via routeChannel
-        else
-            dropWavAsClip (dryFile, chId);                        // fallback
-
-        // NEW: bind DRY to the Vox page so browser walk emits a dry entry.
-        const int voxIdx = chId - MixerChannelIds::kVoxBase;
-        if (voxIdx >= 0 && voxIdx < kMaxVoxPages)
-        {
-            // Walk mPages to find the Vox page bound to this channel id and stamp dry path.
-            for (auto* entry : mPages)
-            {
-                if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
-                {
-                    if (vp->getPageIndex() == voxIdx)
-                    {
-                        vp->setDryClipPath (dryFile.getFullPathName());
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    else if (isInstCh (chId))
-    {
-        // NEW: register Inst dry in library.
-        const juce::String dryRel = "Samples/" + dryFile.getFileName();
-        mPM->addAudioToLibrary (dryRel);
-
-        dropWavAsClip (dryFile, chId);
-    }
-    ...
+    if (idx < 0 || idx >= (int) mAudioLibrary.size()) return;
+    mAudioLibrary[idx].pageOwnerChannelId = channelId;
 }
+
+// Source/PatternManager.cpp — serialize (line 1036): add the field.
+en.setProperty ("pageOwnerChannelId", e.pageOwnerChannelId, nullptr);
+
+// Source/PatternManager.cpp — deserialize (line 1405): read with default 0.
+mAudioLibrary.push_back ({
+    e.getProperty ("path",       juce::String()).toString(),
+    e.getProperty ("alias",      juce::String()).toString(),
+    (int) e.getProperty ("chokeGroup", 0),
+    (int) e.getProperty ("pageOwnerChannelId", 0)
+});
 ```
 
-**Browser walk at [Source/Standalone/StandaloneEditor.cpp:2276-2292](Source/Standalone/StandaloneEditor.cpp):**
+**VoxPage / InstPage deletion** (both files):
+- Remove `juce::String mClipPath;` member.
+- Remove `juce::String getClipFilePath() const`, `void setClipFilePath(...)`.
+- Remove `mClipFileLabel` component + its `setText` calls (label was the only consumer of the path).
+- Remove the load-restore branch that re-calls `setClipFilePath(mClipPath)` (VoxPage.cpp:567-569 + InstPage.cpp:1204-1206).
+- Drag handler at VoxPage.cpp:35 / InstPage.cpp similar: reroute.  Instead of `setClipFilePath(files[0])`, find the matching library entry by path and tag its `pageOwnerChannelId` to this page's voxInsert/instInsert channel id (creating the library entry first if needed via `mPM->addAudioToLibrary(rel, {}, channelId)`).
+
+**ClipsPage drag handler at [Source/Clips/ClipsPage.cpp:382](Source/Clips/ClipsPage.cpp:382)**: keep `setClipFilePath` (engine load), ALSO tag the library entry's `pageOwnerChannelId` to `MixerChannelIds::audioInsert(getPageIndex())`.  Mirrors the Vox/Inst tagging but additive (engine preload AND browser visibility).
+
+**StandaloneEditor.cpp commitRecordingResult** (around lines 9836-9975):
+
+For each Vox `stripFile`:
+- The existing `mPM->addAudioToLibrary(dryRel)` at line 9959 grows to `mPM->addAudioToLibrary(dryRel, {}, MixerChannelIds::voxInsert(voxIdx))`.
+- `dropWavAsClip(wetFile, chId)` already adds wet to library via its internal `mPM->addAudioToLibrary(block.audioFilePath)` call (at line 9912).  But that internal call doesn't know about ownerChannelId.  Two options: (a) extend `dropWavAsClip` lambda signature with ownerChannelId + plumb through, (b) post-hoc call `mPM->setAudioLibraryPageOwner(libIdx, channelId)` after dropWavAsClip returns.  Option (a) is cleaner; use it.
+
+For each Inst `stripFile`:
+- `dropWavAsClip(dryFile, chId)` with ownerChannelId = `MixerChannelIds::instInsert(instIdx)`.  No extra library call needed.
+
+For master capture / unknown / generic drops: ownerChannelId stays 0 (default).
+
+**StandaloneEditor.cpp ClipsPage spawn at line 7099**: when the spawn cascade ends with `cpRaw->setClipFilePath(resolvedPath)`, ALSO tag the library entry: walk `mPM->getNumAudioLibrary()` for the matching path, call `setAudioLibraryPageOwner(idx, MixerChannelIds::audioInsert(pageIdx))`.
+
+**Browser walk rewrite at [Source/Standalone/StandaloneEditor.cpp:2150-2310](Source/Standalone/StandaloneEditor.cpp)**: replace the per-page-walking branches with a single library-walk pass.  Shape:
 
 ```cpp
-// BEFORE — Vox branch emits one entry per Vox page:
-else if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+for (int libIdx = 0; libIdx < mPM->getNumAudioLibrary(); ++libIdx)
 {
-    const juce::String path = vp->getClipFilePath();
-    if (path.isEmpty()) continue;   // empty until G-9 records
-    const int libIdx = findLibIdx (path);
-    if (libIdx < 0) continue;
+    const int owner   = mPM->getAudioLibraryPageOwner (libIdx);
+    const juce::String path  = mPM->getAudioLibraryPath (libIdx);
+    const juce::String alias = mPM->getAudioLibraryAlias (libIdx);
+
     CategorizedAudioEntry e;
     e.audioLibIdx = libIdx;
-    e.category    = "Vox";
-    e.displayName = vp->getTabName().isNotEmpty()
-                       ? vp->getTabName()
-                       : juce::File (path).getFileName();
-    ...
-    out.push_back (std::move (e));
-}
+    e.fullPath    = mProcessor.resolveProjectFile (path).getFullPathName();
+    if (e.fullPath.isEmpty()) e.fullPath = path;
+    e.displayName = alias.isNotEmpty() ? alias : juce::File (path).getFileName();
 
-// AFTER — emit one entry per non-empty page-bound path (wet + dry separately):
-else if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
-{
-    // Helper lambda to emit one entry for a path, if registered + non-empty.
-    auto emitEntry = [&](const juce::String& path)
+    if (owner >= MixerChannelIds::kVoxBase
+        && owner <  MixerChannelIds::kVoxBase + MixerChannelIds::kMaxVoxStrips)
     {
-        if (path.isEmpty()) return;
-        const int libIdx = findLibIdx (path);
-        if (libIdx < 0) return;
-        CategorizedAudioEntry e;
-        e.audioLibIdx = libIdx;
-        e.category    = "Vox";
-        // Display: alias-if-set, else filename (filename carries -DRY/-WET suffix per record-time convention).
-        e.displayName = mPM->getAudioLibraryAlias (libIdx).isNotEmpty()
-                           ? mPM->getAudioLibraryAlias (libIdx)
-                           : juce::File (path).getFileName();
-        e.fullPath    = mProcessor.resolveProjectFile (path).getFullPathName();
-        if (e.fullPath.isEmpty()) e.fullPath = path;
-        e.accent      = juce::Colour (0xff0fafa5);   // Vox teal
-        out.push_back (std::move (e));
-    };
-
-    emitEntry (vp->getClipFilePath());      // WET (existing path)
-    emitEntry (vp->getDryClipPath());       // NEW — DRY
+        e.category = "Vox";
+        e.accent   = juce::Colour (0xff0fafa5);   // Vox teal
+    }
+    else if (owner >= MixerChannelIds::kInstBase
+             && owner <  MixerChannelIds::kInstBase + MixerChannelIds::kMaxInstStrips)
+    {
+        e.category = "Inst";
+        e.accent   = juce::Colour (0xff1c3a8a);   // Inst navy
+    }
+    else if (owner >= MixerChannelIds::kAudioBase
+             && owner <  MixerChannelIds::kAudioBase + 50)
+    {
+        e.category = "Clips";
+        e.accent   = juce::Colour (0xffd4a017);   // Clips amber
+    }
+    else
+    {
+        e.category = "Audio";   // generic / untagged
+        e.accent   = juce::Colour (0xff808080);
+    }
+    out.push_back (std::move (e));
 }
 ```
 
-**Inst branch:** unchanged (still emits one entry via existing `ip->getClipFilePath()`). The library registration fix at finalize makes `findLibIdx` succeed for the existing entry.
+The old per-page-iteration branches (lines 2150-2310 area's Clips/Vox/Inst/Audio sections), the `findLibIdx` helper, and the `savedClipState`/`savedVoxState`/`savedInstState` capture-side logic that depended on per-page paths all get reviewed and either deleted or rewired to use the library directly.
 
 **Steps:**
-- [ ] Add `mDryClipPath` field + `setDryClipPath` + `getDryClipPath` to VoxPage.h.
-- [ ] Modify recording finalize at StandaloneEditor.cpp:9842-9866 per the AFTER snippet above (Vox + Inst both `addAudioToLibrary`; Vox dry binds to page).
-- [ ] Rewrite Vox branch of browser walk at StandaloneEditor.cpp:2276-2292 per the AFTER snippet.
-- [ ] Verify `dropWavAsClip` doesn't already call `addAudioToLibrary` internally (audit the function). If it does, the explicit `addAudioToLibrary` calls in finalize are redundant; remove them. If it doesn't, the additions stand.
-- [ ] Tell Jeff: "Run `do_build.bat`. Test sequence in Debug:
-  - **(1) Record Vox.** Add a Vox tab. Arm it. Record + Play + sing/play + Stop. Open the Audio browser tab on the Builder page. Expand the Vox category. You should see TWO entries: one with `-WET.wav` suffix and one with `-DRY.wav` suffix.
-  - **(2) Drag wet to grid.** Drag the WET entry onto a Builder grid row. Hit Play. WET plays through the Vox page's signal chain.
-  - **(3) Drag dry to grid.** Drag the DRY entry onto a different Builder grid row. Hit Play. DRY also plays through the Vox page's chain.
-  - **(4) Both on grid simultaneously, same Vox page.** Drop both wet + dry onto grid rows both routed to the same Vox page. Both pass through the chain (note: sequential per-clip processing is a known quirk routed to QA-J — that's OK for now).
-  - **(5) Delete one from grid.** Right-click the wet block → Delete. WET disappears from grid but stays in browser (no-file-delete contract).
-  - **(6) Rename in browser.** Right-click WET entry in browser → Rename → 'My Vocal Take'. WET entry now displays 'My Vocal Take'. DRY entry still displays its filename.
-  - **(7) Record Inst.** Add an Inst tab. Arm. Record. Stop. Open browser → Inst category should show one entry (dry only, since Inst is dry-only by current design).
-  - **(8) Save + reload project.** File → Save. File → Open same project. Verify Vox wet + dry entries still appear in browser; rename persists."
+- [ ] PatternManager.h: add `pageOwnerChannelId` field to `AudioLibraryEntry`; extend `addAudioToLibrary` signature; add `getAudioLibraryPageOwner` + `setAudioLibraryPageOwner`.
+- [ ] PatternManager.cpp: update `addAudioToLibrary` impl; add new setter impl; serialize + deserialize the new field (default 0 on read).
+- [ ] VoxPage.h + VoxPage.cpp: delete `mClipPath`, `getClipFilePath`, `setClipFilePath`, `mClipFileLabel`, the restore-bind branch.  Reroute drag handler to tag library entry with `voxInsert(getPageIndex())`.
+- [ ] InstPage.h + InstPage.cpp: same deletion + drag handler reroute (uses `instInsert(getPageIndex())`).
+- [ ] ClipsPage.cpp: drag handler at line 382 ALSO tags library entry with `audioInsert(getPageIndex())` (mClipPath stays for engine preload).
+- [ ] StandaloneEditor.cpp commitRecordingResult: extend `dropWavAsClip` lambda to accept ownerChannelId; Vox + Inst branches pass their channel ids; existing `addAudioToLibrary(dryRel)` call extended with ownerChannelId.
+- [ ] StandaloneEditor.cpp ClipsPage spawn at line 7099: after `setClipFilePath`, call `setAudioLibraryPageOwner` for the matching entry.
+- [ ] StandaloneEditor.cpp browser walk (~lines 2150-2310): replace per-page branches with single library-walk pass.  Remove `findLibIdx` if no other callers remain.
+- [ ] Walk every other reader of the deleted Vox/Inst accessors (`getClipFilePath` on VoxPage/InstPage) and update or delete the caller.  Likely sites: project state serialize/deserialize for Vox/Inst (if they persisted `mClipPath`), engine state save flow.
+- [ ] Tell Jeff: "Run `do_build.bat`.  Test sequence in Debug:
+  - **(1) Single Vox record.** Open project.  Add a Vox tab.  Arm it.  Record + Play + sing + Stop.  Open the Audio browser tab on Builder.  Expand Vox category.  You see TWO entries for that Vox tab (wet + dry, suffixes visible in filenames).
+  - **(2) Multi-take Vox.** With the Vox tab still armed, Record again (different take).  Stop.  Browser Vox category now shows FOUR entries (2 takes × wet + dry).  Each take's takes appear under the same Vox 1 grouping (since they share `pageOwnerChannelId`).
+  - **(3) Single Inst record.** Add Inst tab + arm + record + stop.  Browser Inst category shows ONE entry (dry only, by design).
+  - **(4) Multi-take Inst.** Re-record.  Browser Inst category shows TWO entries.
+  - **(5) Drop onto Clips tab.** Drag a WAV from the Builder grid onto a Clips tab in the ribbon (or from disk if drag-from-disk is supported).  The Clips engine preloads it.  Browser Clips category shows that file under that Clips page.
+  - **(6) Save + reload.** File → Save.  Close + reopen project.  All Vox/Inst/Clips browser entries still appear under their correct categories.  `pageOwnerChannelId` round-tripped through XML.
+  - **(7) Rename in browser.** Right-click a Vox entry → Rename → 'My Vocal Take 1'.  Display updates.  Other entries on the same Vox page keep their own names.  Persists across save+reload.
+  - **(8) Drag-onto-Vox-tab handler.** From a different tab's browser, drag any audio entry onto a Vox tab in the ribbon.  Entry's category should switch from its old category to that Vox page's category.  (Verifies the drag handler reroute.)
+  - **All eight pass?**"
 - [ ] Wait for Jeff's verify result.
 - [ ] On pass: `/draft-commit`, surface, commit on approval.
 - [ ] `/draft-doc running-notes` → apply.

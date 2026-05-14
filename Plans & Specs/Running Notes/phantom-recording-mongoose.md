@@ -373,4 +373,52 @@ When stripping QA-E DIAG entries, also verify exact line numbers of the `Keep` e
 
 ---
 
+## 2026-05-12 — Task 3 closed (commit `c0f57c9`)
+
+Audio-routing fix family (F-A + R-1 + Fix 1 + Fix 2) landed in `c0f57c9` covering MIX-02 / MIX-03 / MIX-04 / MIX-06.  Diagnostic instrumentation stripped per Rule 4 catalog convention before commit.  Verified working 2026-05-12 by user (reload + Play with MT-on routes audio through Vox + 2 Inst strips correctly; no phantom Clips strips).
+
+Doc work bundled into the same commit: §9 sixteenth Forks entry, §5 QA-E fold-in notes, §0 Rule 4, plan-file Task 7 routing-dropdown sub-bullet, Task 9 (Dirty-flag investigation) inserted, Close renumbered to Task 10, Files-to-modify summary refreshed, running-notes Task 3 verify-pass entry + Diagnostic Instrumentation Catalog section.
+
+**Next: Task 4 (FILE-01 — Vox wet+dry + Inst dry browser visibility).**
+
+---
+
+## 2026-05-12 — Task 4 plan-review surfaced architectural gap → scope expansion (library-driven model)
+
+Started Task 4 plan walk-through with the user.  In confirming "what will the behavior be for multiple recordings on one page?", the original plan's single-`mClipPath`/`mDryClipPath` per page shape was identified as fundamentally incompatible with multi-take-per-page (each new take overwrites the bound paths; browser shows latest only).  Same gap blocks Task 7's "route multiple files to one source" intent — the planned `mClipPath` shape destroys any prior assignment on every re-route.
+
+User stated intent: "at every point I asked you to set it up so multiple files could be recorded to one player page and all played through the same page" + "Task 7's whole point is to route multiple files to one source so what was your plan there to let the new source just destroy the old one?"
+
+### Done
+
+Documentation-only commit lands the scope expansion:
+
+- **§9 seventeenth Forks entry** locked in [Plans & Specs/Main Plan.md](../../Plans%20%26%20Specs/Main%20Plan.md) — full diagnosis chronology + Option A (per-page list) vs Option B (library-driven) trade-off analysis + user spec call locking Option B + the three sub-spec-calls (delete mClipPath on Vox/Inst, retain on Clips for engine preload, no migration heuristic).
+- **Main Plan §5 QA-E entry** updated with fold-in note for the Task 4 scope expansion.
+- **Batch plan Task 4 detail rewritten** to library-driven model: `AudioLibraryEntry.pageOwnerChannelId` field, addAudioToLibrary overload, browser walk rewrite, Vox/Inst deletion, Clips transitional retention.
+- **Files-to-modify summary** at top of plan file updated to reflect new scope.
+
+### Disposition
+
+- Task 4 source implementation lands in the NEXT commit (this commit is doc-only to lock the spec).
+- Verify scenarios in the rewritten plan cover both single-take AND multi-take cases — multi-take is the regression-prevention check for this scope expansion.
+- Per spec call: VoxPage/InstPage mClipPath fully deleted; ClipsPage mClipPath retained transitionally (engine preloads from it); deletable post-QA-J's Clips routing unification.
+- No migration heuristic for legacy projects — user will make new test projects.
+
+### Memory rule reminder
+
+Per Main Plan §0 Rule 4: any diagnostic instrumentation added during Task 4 source implementation gets logged in the Diagnostic Instrumentation Catalog below at the moment of the code change, not after.
+
+### Task 3 follow-up landed (commit `54f41c8`)
+
+Mid-Task-4-plan-review verify of the existing Task 3 commit (`c0f57c9`) with MT-on + 1 Vox + 2 Inst takes surfaced a cross-strip pollution bug: all 3 clips' audio mixed into every strip's output.  Diagnosis: Task 3's pre-scan move activated MT FilePlay (previously a no-op behind a `constexpr false` flag), which turned a long-acknowledged race in `renderFilePlayPlayer` + `VoxStripTask` + `InstStripTask` on three shared processor-level scratches (`mAudioClipScratch`, `mVoxEngineScratch`, `mInstEngineScratch`) from latent to live.  `VoxStripTask.cpp:83-85` had a stale comment explicitly tracking the future fix.
+
+Fix (Option B per user spec call): each task owns `mClipScratch` + `mEngineScratch` members sized per-block; `renderFilePlayPlayer` signature gains a required `engineScratch` reference parameter; serial Pass 1 picks the matching processor member based on the per-player route (single-threaded, member-sharing safe).  Three options considered (A: SpinLock band-aid / B: per-task scratches via signature refactor / C: inline FilePlay code into each task) — Option B picked as architecturally cleanest (preserves MT parallelism, single source of truth for FilePlay decode + engine drive, no code duplication).
+
+User-verified 2026-05-12: MT-on + 1 Vox + 2 Inst now plays each track through its own strip cleanly; no cross-pollution; mute test isolates correctly.  Landed as Commit A before this Task 4 doc-scope commit (seq-1 per user call).
+
+Task 3 conceptually now covers: F-A + R-1 + Fix 1 + Fix 2 (in `c0f57c9`) PLUS the MT race fix (in `54f41c8`).  No reopen of `c0f57c9`; the follow-up commit is the canonical Task 3 close.
+
+---
+
 (Subsequent entries appended below at every commit / sub-task verify / finding / spec call / scope pivot.)

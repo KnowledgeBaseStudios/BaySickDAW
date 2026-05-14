@@ -915,6 +915,7 @@ needed to find what you should pull up to review the work.
   - **Folded in 2026-05-12 (QA-E Task 3 verify finding via Rule 3; see §9 sixteenth Forks entry)** -- **Task 3 audio-routing root cause: MT pre-scan gap + Clips-strip restore guard.**  MIX-02/04/06 root cause is NOT page-lifecycle (F-A K-6 Vox mirror) NOR routeChannel persistence (R-1) alone -- it's the FilePlay pre-scan being orphaned by the MT branch insertion at [Source/PluginProcessor.cpp:1874](Source/PluginProcessor.cpp:1874).  Fix lifts the pre-scan BEFORE the MT branch.  Companion fix: Clips-strip route-guard at [Source/Standalone/StandaloneEditor.cpp:9811](Source/Standalone/StandaloneEditor.cpp:9811) prevents phantom Audio strips for Vox/Inst-routed blocks on reload.  All four fixes (F-A + R-1 + Fix 1 + Fix 2) verified working 2026-05-12.
   - **Folded in 2026-05-12 (QA-E Task 3 mid-verify finding via Rule 3; see §9 sixteenth Forks entry)** -- **Task 9: Dirty-flag investigation (record-finalize side effect)**.  Post-record + save still shows dirty on reopen.  Did NOT happen until the WAV files were on the Builder grid (i.e., post-`commitRecordingResult`'s `markDirty()` call at [Source/Standalone/StandaloneEditor.cpp:9979](Source/Standalone/StandaloneEditor.cpp:9979)).  Pattern resembles a QA-D STATE-01 regression -- something re-flips dirty after save.  Scope: investigate root cause + fix + verify across all three record modes (Vox-only, Inst-only, Vox+Inst combined).  Inserted as Task 9 in the batch plan, between Task 8 Sub-Phase Z and the close sequence (which renumbers to Task 10).
   - **Folded in 2026-05-12 (QA-E Task 3 user feature request; see §9 sixteenth Forks entry)** -- **Task 7 sub-bullet: "Add a new Page" options in Routing dropdown.**  FILE-02's Routing dropdown (Task 7 step 2) extends to include "Add a new Clip Page", "Add a new Vox Page", "Add a new Inst Page" entries so the user can route a clip to a newly-created page without first navigating to the ribbon to add a tab.
+  - **Folded in 2026-05-12 (QA-E Task 4 plan-review architectural finding via Rule 3; see §9 seventeenth Forks entry)** -- **Task 4 scope expanded to library-driven page-owner model.**  Original plan's `mClipPath` + new `mDryClipPath` shape was single-take-per-page; user surfaced that multi-file-to-one-page was always the intent.  Expanded scope: add `pageOwnerChannelId` field to `AudioLibraryEntry` ([Source/PatternManager.h:528](Source/PatternManager.h:528)); library becomes single source of truth for "files routed to this page"; browser walk groups library entries by ownerChannelId.  Vox/Inst `mClipPath` deleted (engine-irrelevant).  Clips `mClipPath` retained transitionally for sample-player preload (deletable post-QA-J).  Same model unblocks Task 7's multi-route Properties dropdown intent + future multi-take recording.
 - Scope: SINGLE coordinated batch because all touch the MixerPage spawn
   cascade + project XML restoration walker + StripRecorder finalize +
   bus DSP path. Splitting causes merge churn. Walk the full Vox/Inst
@@ -3038,3 +3039,126 @@ reload + play = audio through Vox + 2 Inst strips correctly; no
 phantom Clips strips).  Task 9 (Dirty-flag investigation)
 verification pending its own execution.  Task 7 fold-in
 verification deferred to Task 7 execution.
+
+### 2026-05-12 — QA-E Task 4 scope expansion: library-driven page-owner model (multi-file per page)
+
+**Trigger:** at QA-E Task 4 plan review (2026-05-12), user surfaced a
+bug masked in the original plan: the planned `mClipPath` + new
+`mDryClipPath` shape on `VoxPage` / `InstPage` is a SINGLE pair of
+paths per page.  Recording two takes onto the same Vox page would
+overwrite the first take's bound paths -- only the most recent take
+would appear in the browser, even though all takes still exist in
+the audio library + on the Builder grid.  User stated intent: "at
+every point I asked you to set it up so multiple files could be
+recorded to one player page and all played through the same page."
+Same gap blocks Task 7's "route multiple files to one source"
+because the single-path-per-page shape destroys any prior assignment
+on every re-route.
+
+**Diagnosis:** the page itself is the wrong place to hold the
+file-association.  The `mClipPath` / `mDryClipPath` model is N=1.
+Multi-file requires N: per-page.  Two storage options:
+
+- **Option A (per-page list).**  `VoxPage` / `InstPage` /
+  `ClipsPage` each hold a `std::vector<juce::String>` (or pair list
+  for Vox wet+dry).  Browser walks the page's vector.  Requires
+  duplicating list mechanics across three classes + serialization +
+  drag handler reroute on three surfaces.
+- **Option B (library-driven).**  `AudioLibraryEntry` (in
+  [Source/PatternManager.h:528](Source/PatternManager.h:528)) gains a new
+  field `int pageOwnerChannelId { 0 };`.  Default 0 = generic /
+  unowned (existing behavior preserved).  Recording / drag-to-page
+  / Properties dialog route assignment all tag the library entry's
+  ownerChannelId.  Browser walk iterates `mAudioLibrary` once,
+  groups by ownerChannelId.  Single source of truth in
+  PatternManager.
+
+**Decision (user spec call 2026-05-12):** Option B (library-driven).
+User additionally specified:
+- **All three page types** (Vox / Inst / Clips) get the symmetric
+  library treatment.
+- **`VoxPage::mClipPath` + `InstPage::mClipPath`** are deleted
+  entirely (engine doesn't read them; label-only display
+  pre-deletion).  Drag-onto-page handlers reroute to tag the new
+  library `pageOwnerChannelId` field.
+- **`ClipsPage::mClipPath` is retained transitionally** because the
+  Clips sample-player engine reads it via
+  [Source/Clips/ClipsPage.cpp:510-511](Source/Clips/ClipsPage.cpp:510)
+  for piano-roll-triggered playback.  Until QA-J's Clips routing
+  unification refactors the Clips engine away from preload-on-load
+  to streaming-from-FilePlay, the field stays as "currently loaded
+  sample for the engine."  Library still tracks ALL N files routed
+  to that Clips page; `mClipPath` is the one currently preloaded.
+  Post-QA-J the field becomes deletable.
+- **No migration heuristic for pre-fix saved projects.**  User
+  stated they'll make new projects (test/recording session
+  artifacts from this batch will be discarded).  Default 0 on
+  deserialize means legacy library entries land in the generic
+  Audio category, not Vox / Inst / Clips.  Acceptable.
+
+**Scope this expands QA-E Task 4 to:**
+- `Source/PatternManager.h`: add `pageOwnerChannelId` field to
+  `AudioLibraryEntry`; extend `addAudioToLibrary` signature with
+  optional `int pageOwnerChannelId = 0`; add
+  `getAudioLibraryPageOwner(int idx)` + `setAudioLibraryPageOwner(int
+  idx, int channelId)` accessors.
+- `Source/PatternManager.cpp`: serialize / deserialize the new field
+  (default 0 on read for back-compat); implement the new
+  accessors.
+- `Source/Vox/VoxPage.h` + `.cpp`: delete `mClipPath` +
+  `getClipFilePath` + `setClipFilePath` + `mClipFileLabel` (the
+  label was the only consumer of the path).
+- `Source/Inst/InstPage.h` + `.cpp`: same deletion.
+- `Source/Clips/ClipsPage.{h,cpp}`: `mClipPath` retained; drag
+  handler at line 382 ALSO tags the dropped file's library entry
+  with `kAudioBase + pageIdx` (the existing pageIdx == audioRow
+  mapping).  `setClipFilePath` retained for engine preload.
+- `Source/Standalone/StandaloneEditor.cpp`:
+  - `commitRecordingResult`: Vox WET + DRY library entries get
+    `ownerChannelId = voxInsert(voxIdx)`; Inst DRY library entry
+    gets `ownerChannelId = instInsert(instIdx)`.
+  - Browser walk (~line 2150-2310): rewrite Vox / Inst / Clips
+    branches to iterate `mAudioLibrary` filtered by ownerChannelId
+    range.  Audio "generic" branch shows ownerChannelId == 0
+    entries.
+  - Drop-onto-page spawn cascade at line 7099 (Clips drop): tag the
+    library entry with `kAudioBase + audioRow` ownerChannelId.
+
+**Inline back-refs:**
+- §5 QA-E entry: scope expanded -- Task 4 grows from narrow
+  "browser visibility" fix to library-driven multi-file model that
+  also enables Task 7's multi-route intent + future multi-take
+  recording.
+- §9 thirteenth Forks entry (QA-J Clips routing unification + DSP-12
+  test premise correction): QA-J's scope absorbs the post-Task-4
+  ClipsPage engine refactor (sample-player → streaming-from-FilePlay).
+  Once that lands, `ClipsPage::mClipPath` becomes deletable.
+- §9 sixteenth Forks entry (Task 3 audio-routing fix family): the
+  `routeChannel` field added by R-1 persistence is the OTHER half of
+  the library-driven model -- block-level routing + library-level
+  ownership are paired bindings.  Task 4 (this entry) completes the
+  ownership side; routing was already done in Task 3.
+- §9 Forks: this entry (seventeenth).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` -- this entry + §5 QA-E scope update.
+- `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` -- Task 4
+  section rewritten to library-driven model; Files-to-modify
+  summary updated.
+- `Plans & Specs/Running Notes/phantom-recording-mongoose.md` -- new
+  "Task 4 scope expansion" entry.
+- Source files (in the subsequent commit): `Source/PatternManager.h`,
+  `Source/PatternManager.cpp`, `Source/Vox/VoxPage.h`,
+  `Source/Vox/VoxPage.cpp`, `Source/Inst/InstPage.h`,
+  `Source/Inst/InstPage.cpp`, `Source/Clips/ClipsPage.cpp`,
+  `Source/Standalone/StandaloneEditor.cpp`.
+
+**Verification:** the implementation commit's verify steps (in the
+rewritten plan-file Task 4 section) cover: (1) single-take Vox
+record produces 2 browser entries; (2) single-take Inst record
+produces 1 entry; (3) multi-take Vox record produces ALL takes'
+entries (this is the regression-prevention check); (4) Properties
+dialog route reassignment moves a library entry between Vox / Inst
+/ Clips categories; (5) drag-onto-Clips-tab tags a library entry
+correctly + Clips engine preloads it; (6) save + reload preserves
+all entries' ownerChannelId.
