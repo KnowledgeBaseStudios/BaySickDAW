@@ -941,27 +941,71 @@ needed to find what you should pull up to review the work.
   User confirmed bundled (Q6 Option A). Re-evaluate at start if scope feels
   off; the split is mechanical.
 
-#### **QA-F: Vox DSP Disconnect (Cluster 1, regression fixes only)**
+#### **QA-F: BaySickAlign Build-Out + Vox DSP Disconnect (Cluster 1)**
 - Items: DSP-02 (Vox FX bypassed), DSP-03 (Vox pitch correction does
-  nothing), DSP-05 (BaySickAlign review).
+  nothing), DSP-05 (BaySickAlign full build-out per redesign spec).
 - Scope: audit `BaySickVocalProcessor::processBlock` for FX-array pipeline
-  wiring. DSP-02/03 likely co-occur. DSP-05 is a verification pass on
-  warp markers reaching the phase vocoder path.
+  wiring + full BaySickAlign engine build-out (currently a paint-only
+  shell — `BaySickAlignDSP` exists but is never instantiated; editor
+  has no APVTS attachments and no DSP wiring; `applyWarp` is a
+  passthrough memcpy).  DSP-02/03 likely co-occur.  DSP-05 expands
+  from "verification pass on warp markers" to full editor + DSP build
+  per the locked redesign at running notes
+  `Plans & Specs/Running Notes/phantom-recording-mongoose.md` §13a-§13g.
   - **Folded in 2026-05-08 (QA-Inventory close via Rule 3)** — DSP-03 sub-scope expansion:
     - **Formant Preserve + Throat Shift no-op stubs** in `PitchCorrectorDSP` (`Source/DSP/PitchCorrectorDSP.cpp:326-327`): code comment says *"Formant Preserve / Throat Shift toggles are stored but DSP is no-op for H-5 -- a follow-up batch will add cepstral envelope swap"*. The UI exposes the knobs with descriptive tooltips ("Keeps the vocal character intact while correction shifts pitch... pitch-shift artifacts (chipmunk-up, demon-down)") but the DSP literally `juce::ignoreUnused (mFormantPreserve, mThroatSemis);`. UI-promised, DSP-not-delivered. Wire actual cepstral-envelope swap. Affects both realtime path (BaySickVocals tab) and offline path (BaySickPitch).
     - **BaySickVocal H-1..H-6 cluster review** (BLU-445 / BLU-608 / BLU-609 / BLU-610 / BLU-611 / BLU-612) — QA-Inventory walk reclassified all six from "claimed Done" to "Review" because the realtime pitch correction was confirmed broken at runtime (YIN tracker not detecting pitch despite live audio reaching the engine; granular shifter idles at ratio=1.0 producing "faint vibration" artifact only). Whole subsystem (skeleton + comp ext + de-esser + YIN + pitch correction + editor) needs end-to-end re-verification as part of QA-F's `BaySickVocalProcessor::processBlock` audit.
-- Risk: medium. Audio-thread DSP. MT-orthogonal at the inside-engine
-  level (VoxStripTask calls engine.processBlock; the FX-array runs there).
-- Dependencies: QA-E (shares VoxInsertNode surface).
-- Effort: medium-large (~6-10 hours; folded items add 2-4 hours).
+  - **Folded in 2026-05-14 (mid-QA-E BaySickAlign + BaySickPitch redesign detour close — see §9 eighteenth Forks entry)** — full BaySickAlign visual + DSP build-out.  Visual identity rebuild to escape VocAlign trade-dress (the editor source comment at `BaySickAlignEditor.cpp:8` literally reads `"VocAlign-clone visual + interaction model"`): 3-lane Leader / Follower / Output layout with Bass-green / Vox-teal / Drums-red lane colors; single always-visible right panel with Align + Pitch boxes; 6-preset combo (Loose-Align / Loose-Align+Pitch / Close-Align / Close-Align+Pitch / Tight-Align / Tight-Align+Pitch) + Save / Load Preset + preset-dirty green-dot; Mode dropdown (Loose / Close / Tight, renamed from VocAlign's ALIGNMENT RULE) drives Fine Tune knob base + Pitch box Range knob center+range.  DSP additions: `BaySickAlignDSP` instance on processor (currently never instantiated anywhere); channel-composite renderer (shared with QA-Fa + QA-Fb); `applyWarp` PhaseVocoder integration (currently passthrough memcpy); YIN pitch detection; PSOLA / Granular / Phase Vocoder pitch shifters; sync points data model; protected areas data model; render-to-bake (`Aligned/{name}_align_v{N}.wav`); render history persistence; ~20 APVTS params.  See running notes §13a-§13g for the full per-control spec.
+- **Fork-out (QA-J re-verify required):** verify scenarios in this batch use sequential audio clips on the same Vox row only.  Overlapping-same-row scenarios hit the multi-clip stacking bug (DSP-06) and are deferred to QA-J re-verify.  See §9 eighteenth Forks entry.
+- Risk: medium-high. Audio-thread DSP + full editor rebuild on what was a paint-only shell. MT-orthogonal at the inside-engine
+  level (VoxStripTask calls engine.processBlock; the FX-array runs there). Visual redesign is mechanical but extensive; DSP build-out is the bulk of the work.
+- Dependencies: QA-E (shares VoxInsertNode surface + clean recording surface).
+- Effort: large (~14-22 hours; folded DSP-03 items add 2-4 hours; full BaySickAlign redesign + DSP build-out adds 8-12 hours).
 
-#### **QA-Fa: BaySickPitch Audio Import (additive feature, split from QA-F)**
-- Items: DSP-04.
-- Scope: drag-and-drop file listener on BaySickPitch, wire to the
-  pitch-detection input path.
-- Risk: low. Additive feature; no regression surface.
-- Dependencies: QA-F (BaySickPitch must be functional first).
-- Effort: small-medium (~2-3 hours).
+#### **QA-Fa: BaySickPitch Build-Out + Audio Import**
+- Items: DSP-04 (BaySickPitch audio import) + full BaySickPitch build-out per locked redesign.
+- Scope: BaySickPitch moves from paint-only shell (no DSP class exists
+  at all — there is no `BaySickPitchDSP` in `Source/DSP/`; editor has
+  no APVTS attachments; CENTER / VARIATION / TRANS knobs do literally
+  nothing) to functional editor + DSP.  Composite-mode setup (confirmed
+  mid-detour): same channel-composite renderer as QA-F produces a mono
+  buffer; YIN runs once over the composite; note segmenter produces
+  note regions with absolute timeline positions; realtime applicator
+  (Mode C) applies edits live during playback; render-to-bake writes
+  `<project>/Pitched/{name}_pitch_v{N}.wav`.  Full per-control redesign
+  at running notes
+  `Plans & Specs/Running Notes/phantom-recording-mongoose.md` §14a-§14g.
+  - Visual identity rebuild to escape Newtone trade-dress (the editor source comment at `BaySickPitchEditor.cpp:8` literally reads `"Newtone-clone visual + interaction model"`): LENGTH info bar shows `X bars / M:SS.f` (+ `SEL` variant when selection active); 2-mode Slice / Edit setup (Vibrato + Formant + Volume become per-note sub-curves under selected note rather than separate mode toggles); Pills note region in Effects-purple fill with Vox-teal waveform interior; pitch curve overlay in Bass-green (replaces Newtone's orange `#e89c5a`); 3 global knobs renamed CENTER → **Focus** / VARIATION → **Mod** / TRANS → **Speed** (labels visible); Send Notes to popup target list (active Layers / Bass / Drums / Clips tabs; only MIDI sent, not vocal audio); 3 mode presets (Loose / Close / Tight) drive the three global knobs + Save / Load Preset + preset-dirty dot; all Newtone-specific toolbar bloat removed (Load button, Slaved Playback Mode, Loop button, internal Play / Stop transport).
+  - DSP additions: YIN pitch tracker; note segmentation; PSOLA / Granular / Phase Vocoder pitch shifters (shared with QA-F); vibrato analyze + synthesize; formant shifter per-note; volume envelope per-note; per-channel pitch-edit ValueTree storage; render-to-bake pipeline shared with QA-F; realtime applicator (Mode C); render history (per-channel list, separate from QA-F's); ~10-15 APVTS params.  DSP-04 (drag-and-drop file listener) lives within this redesigned editor.
+- **Fork-out (QA-J re-verify required):** same as QA-F — verify scenarios use sequential clips on the same Vox row only.  Overlapping-same-row scenarios deferred to QA-J re-verify.  See §9 eighteenth Forks entry.
+- Risk: medium. Editor + DSP build on a paint-only shell.  Composite-mode sharing with QA-F means architectural alignment risk if either batch diverges mid-implementation.
+- Dependencies: QA-F (composite renderer + YIN + pitch shifter shared infrastructure must land first; BaySickPitch consumes those).
+- Effort: medium-large (~8-14 hours).
+
+#### **QA-Fb: Recording Lifecycle + Channel-Composite Renderer** *(NEW — inserted 2026-05-14)*
+- Items: dual-buffer recording architecture; conditional WET tap; multi-take capture-bleed fix; audio-clip-resize-doesn't-stretch fix; dirty-flag investigation (page-creation + record-finalize triggers); channel-composite renderer (shared dependency with QA-F + QA-Fa, lives here as the foundational layer).
+- Scope: post-QA-F + QA-Fa architecture lift — the recording flow underneath the BaySickAlign + BaySickPitch DSP work.  Per running notes
+  `Plans & Specs/Running Notes/phantom-recording-mongoose.md` §2 + §3 + §7 + §8 + §9.
+  - **Dual-buffer recording** lets the recorder capture the live input pre-realtime-pitch AND the FilePlay playback simultaneously through separate taps.  Fixes multi-take capture-bleed: take 2 currently captures take 1's playback through the live input loop because the single-buffer recording flow can't distinguish "what's coming in fresh" from "what's playing back through the chain."
+  - **Conditional WET tap** skips the second buffer when realtime pitch is bypassed (no Vox pitch correction active → no WET to capture; saves the buffer-copy cost on every block).
+  - **Multi-take capture-bleed fix** lands as the recording-finalize-side complement to the dual-buffer architecture (lifecycle path: arm → record → finalize → reload).
+  - **Audio-clip-resize-doesn't-stretch fix** addresses block-state-not-propagating-to-backend-playback (same family of bug as the recording-lifecycle: visual feedback present in the UI, backend audio doesn't follow the visual state).
+  - **Channel-composite renderer** is the shared dependency for both QA-F (BaySickAlign needs Leader + Follower composites) and QA-Fa (BaySickPitch needs channel composite to detect notes across all clips on the channel).  Lives in this batch as the foundational layer that both upstream batches consume.
+  - **Dirty-flag investigation** covers BOTH triggers (page-creation AND record-finalize) per the Task 9 fold-out from QA-E.
+- **Fork-out (QA-J re-verify required):** verify scenarios use sequential clips on the same Vox row only.  Overlapping-same-row scenarios deferred to QA-J re-verify.  See §9 eighteenth Forks entry.
+- Risk: medium-high.  Recording-flow restructure + new shared composite renderer.  Affects every Vox / Inst recording path.  Test surfaces span recording-finalize, project save / reload, multi-take capture, and clip-resize.
+- Dependencies: QA-F + QA-Fa (composite renderer is consumed by both; QA-Fb is the cleanest home since QA-F's DSP-build-out + QA-Fa's editor-rebuild are independent of the recording-lifecycle work and the composite renderer needs both QA-F and QA-Fa to be functional consumers before its integration is verifiable).
+- Effort: large (~10-16 hours).
+
+#### **QA-Fc: BaySickNAMIR Dual-Mic Stack** *(NEW — inserted 2026-05-14)*
+- Items: dual mic-sim/placement path on BaySickNAMIR engine (new feature; lives on the audited-clean BaySickNAMIR foundation — see §9 eighteenth Forks entry's audit-outcome bullet).
+- Scope: simulate two microphones on the same source rather than the current single-mic chain.  Real-recording workflow — most pro recordings use 2+ mics on guitar cabs, vocals, drums, etc.; the two mics summed produce more energy and dimension than either alone.  Existing single-mic chain becomes Mic A; new parallel Mic B path mirrors Mic A's controls.  **Output is sum (Mic A + Mic B), not blend / crossfade.**  Per running notes
+  `Plans & Specs/Running Notes/phantom-recording-mongoose.md` §23 — parallel-paths-not-blend architecture is the central spec call (post-cab buffer copied to scratch; Mic A processes in-place on the main buffer; Mic B processes scratch through its own Mic Sim + Mic Placement chain; Mic B output sums back into main).  `nam_micb_active` toggle (default false) bypasses the entire Mic B path when off — byte-identical to today's single-mic chain.  Editor layout splits the existing Mic Sim + Mic Placement rows into Mic A | Mic B columns side-by-side; the existing single-mic UI squishes to half-width, second mic mirrors it on the right half.  Picks up automatically on both Vox + Inst pages (BaySickNAMIR is a shared engine module hosted as a sub-tab on each — `Source/BaySickNAMIR/`, audit confirmed clean wiring 2026-05-14).
+- APVTS additions: 8 new params with `_b_` infix (mirrors existing `nam_micsim_*` + `nam_placement_*`): `nam_micb_active`, `nam_micsim_b_mode`, `nam_micsim_b_model`, `nam_micsim_b_mix`, `nam_placement_b_distance_cm`, `nam_placement_b_angle_deg`, `nam_placement_b_polar`, `nam_placement_b_mix`.
+- DSP additions: 2 new `MicSimDSP` + `MicPlacementDSP` instances on the processor (Mic B path); 2 new scratch buffers (`mPreMicScratch` saves post-cab buffer state for Mic B input; `mMicBScratch` is Mic B's processing buffer that sums into main).  9 new fields in `SlotSnapshot` for per-A/B-slot Mic B state preservation.  State serialization extended for both the new SlotSnapshot fields and the new APVTS params.
+- Risk: medium.  New APVTS params + new DSP path on a heavily-used engine.  Worst case: Mic B bypass logic broken — either silent Mic B (zero impact, just an unused feature) or Mic B always active (changes Mic A's behavior — would be caught immediately by ear).  Verify scenarios listed in running notes §23.
+- Dependencies: clean BaySickNAMIR foundation — audit confirmed 2026-05-14 (running notes §20: all 18 existing APVTS params declared / read / wired; no follow-on wiring fixes needed, conditional QA-Fd batch dropped).  Sequencing-independent of QA-F + QA-Fa + QA-Fb (orthogonal surfaces) but slotted after QA-Fb so all engine-side dust has settled before adding a new DSP path.
+- Effort: medium-large (~7-12 hours; ~2-4 hours processor changes, ~3-5 hours editor layout, ~1 hour snapshot expansion, ~1-2 hours verify).
 
 ### Phase 4 — Builder + UX work
 
@@ -1042,10 +1086,11 @@ needed to find what you should pull up to review the work.
     project transport.
   - **Folded in 2026-05-08 (QA-Inventory close via Rule 3)** — BLU-501 "Prune stale applicators on swap" (memory cleanliness in audio-thread automation applicator map; memory leak on engine swap). Same surface family as the audio-thread renderAudioClipsForRow restructure.
   - **Folded in 2026-05-11 (QA-E open-time finding via Rule 3; see §9 thirteenth Forks entry — amended same day to include Clips routing unification + DSP-12 test premise correction)** — FilePlay multi-clip restructure + Clips routing unification: extend the once-per-sum restructure to the per-page engine + insert chain path across all three engine families (Vox + Inst + Clips).  Two clips routed to the same Vox/Inst/Clips page mix into one input buffer per page, then run the engine + insert chain once per page, rather than processing each clip sequentially through the shared engine state (which leaves compressor envelope / reverb tail / LFO phase from clip A bleeding into clip B's processing pass).  Touches Pass 1 loop at [Source/PluginProcessor.cpp:2415-2433](Source/PluginProcessor.cpp:2415), `renderFilePlayPlayer` at [Source/PluginProcessor.cpp:867-901](Source/PluginProcessor.cpp:867), and MT-path equivalents in [Source/Engine/Tasks/VoxStripTask.cpp](Source/Engine/Tasks/VoxStripTask.cpp) + [Source/Engine/Tasks/InstStripTask.cpp](Source/Engine/Tasks/InstStripTask.cpp).  **Clips routing unification:** Pass 1 loop's `isVox || isInst` filter expands to include Clips channels; grid-placed audio clips that reference Clips-page-loaded files default their `routeChannel` to that Clips page's channel ID (currently defaults to 0 / row audio insert).  Net result: a Clips file plays through the same Clips engine + InsertNode chain regardless of trigger source (piano roll OR Builder grid).  **Test premise correction:** DSP-12 simultaneous-case test premise updated from "both play simultaneously" to "both play simultaneously through the same chain"; QA-B's deferred re-verification runs under the corrected premise post-QA-J close.
+  - **Folded in 2026-05-14 (BaySickAlign + BaySickPitch redesign detour close — see §9 eighteenth Forks entry)** — re-verify scenarios deferred from QA-F + QA-Fa + QA-Fb.  Per the Option 1 spec call (running notes §16), those three batches' verify cycles use sequential clips on the same Vox row ONLY; overlapping-same-row scenarios (multiple takes recorded on top of each other on the same row, harmony stacks, etc.) hit the multi-clip stacking bug being fixed here and were deferred forward.  At QA-J close, re-verify the overlapping-same-row cases for: (1) BaySickAlign Leader / Follower composite rendering with stacked clips on the Vox row; (2) BaySickPitch composite-mode pitch detection across stacked clips on the Vox row; (3) recording-finalize behavior when a new take is recorded onto a row that already has overlapping clips; (4) audio-clip-resize-doesn't-stretch fix's interaction with the per-row sum (resize one clip in a stacked-clip layout, verify the sum re-renders correctly).
 - Risk: high. Architectural restructure, audio thread, MT-aware.
 - Dependencies: QA-0 (composite task pattern established) + QA-E
   (audio clip surface stability).
-- Effort: large (~13-18 hours; folded streamer-sync + applicator cleanup adds ~2 hours; folded FilePlay restructure adds ~3-4 hours; folded Clips routing unification adds ~1-2 hours).
+- Effort: large (~13-18 hours; folded streamer-sync + applicator cleanup adds ~2 hours; folded FilePlay restructure adds ~3-4 hours; folded Clips routing unification adds ~1-2 hours; folded QA-F/Fa/Fb overlapping-row re-verify adds ~1-2 hours).
 
 #### **QA-K: Audio Engine Polish**
 - Items: APP-04 (SetPriorityClass + MMCSS), APP-05 (Open ASIO Control
@@ -1384,8 +1429,8 @@ records the same set so cross-doc grep stays consistent.
 **Bug-fix phases (1-5):**
 ```
 QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-F → QA-Fa
-   → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L → QA-M → QA-Drum-Polish**** → QA-N
-   → QA-VibeSlider**** → QA-Verify**** → QA-Export****
+   → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
+   → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-Verify**** → QA-Export****
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -1479,6 +1524,18 @@ lands in QA-J.  Per user spec call 2026-05-11 (Option A): slide QA-B
 entirely to after QA-J close (vs. splitting into single-flow cells
 after QA-E + simultaneous case after QA-J).  See §9 fourteenth
 Forks entry.
+
+\*\*\*\*\*\*\*\* **QA-Fb + QA-Fc** inserted 2026-05-14 at the
+BaySickAlign + BaySickPitch redesign detour close (mid-QA-E).  Phase
+3, slotted after QA-Fa and before QA-G.  **QA-Fb** — Recording
+Lifecycle + Channel-Composite Renderer (dual-buffer recording, conditional
+WET tap, multi-take capture-bleed fix, audio-clip-resize-doesn't-stretch
+fix, dirty-flag investigation, channel-composite renderer shared with
+QA-F/QA-Fa).  **QA-Fc** — BaySickNAMIR Dual-Mic Stack (two parallel
+mic-sim paths summed rather than blended; new feature; sits on the
+audited-clean BaySickNAMIR foundation).  See §9 eighteenth Forks entry
+for the full four-decision package + the queued QA-Fd-dropped audit
+outcome.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -3162,3 +3219,37 @@ dialog route reassignment moves a library entry between Vox / Inst
 / Clips categories; (5) drag-onto-Clips-tab tags a library entry
 correctly + Clips engine preloads it; (6) save + reload preserves
 all entries' ownerChannelId.
+
+### 2026-05-14 — BaySickAlign + BaySickPitch redesign scope; QA-Fb + QA-Fc batches added; QA-J overlap-interaction fork
+
+**Trigger:** mid-QA-E (after Task 4 source commit `1d928fc`).  QA-E Task 4 verify surfaced a multi-take recording capture-bleed bug + opened a longer design discussion about why the BaySickAlign and BaySickPitch editors looked functional but produced no audio.  Source inspection during the detour confirmed both editors are **paint-only shells** at the source level: `BaySickAlignDSP` exists but is never instantiated anywhere; `applyWarp` is a passthrough `memcpy`; `BaySickPitchDSP` does not exist as a class at all; both editors hold a `BaySickVocalProcessor&` reference but never read from it; all UI controls are pure local component state with no APVTS attachments or DSP wiring.  Source comments inside the editors literally read `"VocAlign-clone visual + interaction model"` and `"Newtone-clone visual + interaction model"` — visual cloning was done before the underlying engines were built.
+
+**Decision package — four batch decisions, all locked 2026-05-14:**
+
+1. **QA-F scope expansion — BaySickAlign full visual + DSP build-out folded in.**  Prior QA-F was "Vox DSP Disconnect (Cluster 1, regression fixes only)" — focused on DSP-02 / DSP-03 / DSP-05 + the QA-Inventory-folded DSP-03 sub-scope.  Expanded to include the full BaySickAlign engine build-out per the locked redesign at running notes `Plans & Specs/Running Notes/phantom-recording-mongoose.md` §13a-§13g.  Visual identity rebuild to escape VocAlign trade-dress (3-lane Leader / Follower / Output layout, Bass-green / Vox-teal / Drums-red lane colors, single always-visible right panel with Align + Pitch boxes, 6-preset combo + Save / Load + preset-dirty dot, Mode dropdown driving Fine Tune + Range knobs, Algos dropdown PSOLA / Granular / Phase Vocoder).  DSP build-out: instantiate `BaySickAlignDSP` on processor, channel-composite renderer, real `applyWarp` PhaseVocoder integration, YIN pitch detection, three pitch shifters, sync points data model, protected areas data model, render-to-bake, render history, ~20 APVTS params.  Trade-dress framing: the concern is the cumulative bundle of identical layouts + identical control names + identical engine-name shapes — NOT literal trademark on terms or universal DAW idioms; the redesign breaks the visual + control-naming legs hard while keeping engine names + universal-DAW idioms.
+
+2. **QA-Fa scope expansion — BaySickPitch full visual + DSP build-out folded in.**  Prior QA-Fa was "BaySickPitch Audio Import (additive feature, split from QA-F)" — DSP-04 only (drag-and-drop file listener).  Expanded to include the full BaySickPitch engine build-out per the locked redesign at running notes §14a-§14g.  Composite-mode setup (corrected mid-detour — Pitch CAN use the same channel-composite as Align; sibling architecture, not unrelated tools).  Visual identity rebuild to escape Newtone trade-dress (LENGTH info bar `X bars / M:SS.f`, 2-mode Slice / Edit with Vibrato + Formant + Volume as per-note sub-curves, Pills note region in Effects-purple with Vox-teal waveform interior + Bass-green pitch curve, CENTER / VARIATION / TRANS renamed Focus / Mod / Speed, Send Notes to popup, 3 mode presets driving global knobs).  DSP build-out: YIN, note segmentation, three pitch shifters (shared with QA-F), vibrato + formant + volume per-note, per-channel ValueTree storage, render-to-bake, realtime applicator (Mode C), render history, ~10-15 APVTS params.
+
+3. **QA-Fb inserted — Recording Lifecycle + Channel-Composite Renderer.**  New dedicated batch slotted between QA-Fa and QA-G.  Scope: dual-buffer recording (live + FilePlay simultaneously, separate taps), conditional WET tap (skip when realtime pitch bypassed), multi-take capture-bleed fix (the trigger that opened the detour), audio-clip-resize-doesn't-stretch fix (block-state-not-propagating family), dirty-flag investigation (both page-creation + record-finalize triggers per Task 9 fold-out from QA-E), and the channel-composite renderer (shared dependency for QA-F + QA-Fa, lives here as the foundational layer).  Per running notes §17.  Slot pick was the owner's per `feedback_slot_placement_is_spec_call.md` — Fb between QA-Fa (DSP foundations) and QA-G (Builder UX assumes recordings land cleanly).
+
+4. **QA-Fc inserted — BaySickNAMIR Dual-Mic Stack.**  New dedicated batch slotted between QA-Fb and QA-G.  Scope: two parallel mic-sim paths (sum, not blend) on the BaySickNAMIR engine — real-recording workflow simulating two mics on the same source.  Per running notes §23.  Parallel-paths-not-blend architecture is the central spec call (post-cab buffer copied to scratch; Mic A processes in place; Mic B processes scratch through its own Mic Sim + Mic Placement chain; Mic B output sums back into main).  `nam_micb_active` toggle bypasses entire Mic B path when off (byte-identical to today's single-mic chain).  8 new APVTS params with `_b_` infix.  9 new SlotSnapshot fields.  Editor splits Mic Sim + Mic Placement rows into Mic A | Mic B columns side-by-side.  Picks up on both Vox + Inst pages automatically (BaySickNAMIR is shared engine hosted as a sub-tab on each).
+
+**Audit outcome — QA-Fd queued + dropped.**  Mid-detour the owner asked for a sanity-check pass on BaySickNAMIR and BaySickPedals to confirm every UI element is wired to a real APVTS param + actually does something.  Conditional QA-Fd batch was queued ("BaySickNAMIR + BaySickPedals wiring fixes — if either audit surfaces gaps").  Both audits came back **clean** (running notes §20 + §21): BaySickNAMIR has all 18 APVTS params declared / read in processBlock / wired (12 via JUCE attachment helpers, 6 manually-synced for custom selector widgets); BaySickPedals has the correct minimal 8-param surface (per-slot bypass bools only; per-pedal params owned by each `DSPBase` instance, mirroring the `EffectRack` pattern); zero dead UI elements in either engine.  **QA-Fd was dropped** — no follow-on wiring batch needed.  QA-Fc proceeds on the audited-clean foundation.
+
+**QA-J overlap-interaction fork — Option 1 picked.**  The new QA-F / QA-Fa / QA-Fb test scenarios involve overlapping audio clips on the same Vox row (multi-take recording is the trigger workflow for the whole detour).  Those scenarios hit the multi-clip stacking bug (DSP-06) being fixed in QA-J — currently the rack + EQ chain runs once per clip on overlapping clips, with comp envelope / reverb tail / LFO phase bleeding from clip A into clip B's processing pass.  Three options surfaced (running notes §16): Option 1 = design QA-F / QA-Fa / QA-Fb tests with sequential clips on the same row only, defer overlapping-same-row scenarios to QA-J re-verify; Option 2 = block QA-F / QA-Fa / QA-Fb on QA-J landing first; Option 3 = land knowing the overlap bug exists, re-verify post-QA-J.  **Owner picked Option 1** — verbatim: "i'll line clips back to back to test things".  Fork-note structure agreed: QA-F + QA-Fa + QA-Fb each get inline "QA-J re-verify required" notes (applied above this entry); QA-J gets a fork-in note for the re-verify scenarios (applied to QA-J entry); this Forks entry documents the fork itself.
+
+**APVTS attachment terminology clarification (mid-audit).**  Owner asked about whether the BaySickNAMIR Slot A / B buttons were automatable since I'd categorized them under "Non-APVTS UI elements."  That categorization was misleading.  APVTS-backed parameters are automatable regardless of whether the UI uses a standard JUCE attachment helper (`SliderAttachment` / `ButtonAttachment` / `ComboBoxAttachment`).  Manually-synced controls (chicken heads, radio-style TextButton pairs driving Choice params) call `setValueNotifyingHost` — same semantics, fully automatable.  The accurate distinction is "control uses a standard helper" vs. "control manually syncs to APVTS" vs. "action UI (truly non-parameter — file pickers, drag-drop)."  All 18 BaySickNAMIR params (including `ab_slot`) are real APVTS params and fully automatable.
+
+**Color palette correction (mid-detour).**  Owner clarified mid-conversation that Layers active = orange (NOT green) and Bass active = green.  This corrected an earlier Align Leader-lane assignment in the conversation from "Layers active green" to the actual color (Bass active green).  Applied to the consolidated QA-F entry above + QA-Fa pitch curve overlay color.
+
+**Plan files affected:**
+
+- §5 QA-F entry — scope-expanded to include full BaySickAlign build-out + 2026-05-14 fold bullet + QA-J fork-out note + Risk bumped medium → medium-high + Effort bumped to ~14-22 hours.
+- §5 QA-Fa entry — scope-expanded to include full BaySickPitch build-out + QA-J fork-out note + Risk + Effort bumped.
+- §5 QA-Fb entry — INSERTED (new batch).
+- §5 QA-Fc entry — INSERTED (new batch).
+- §5 QA-J entry — fork-in note added for QA-F / QA-Fa / QA-Fb overlapping-same-row re-verify scenarios + Effort delta noted.
+- §6 sequencing arrow — `→ QA-Fb → QA-Fc` inserted between `QA-Fa` and `QA-G`; new footnote `********` added for the two inserted batches.
+- §9 this entry.
+
+**Verification:** at QA-F / QA-Fa / QA-Fb close, the batch-close drafter confirms the no-stubs gate held (every UI line item ships functional code + UI together — no more paint-only shells), and the QA-J fork-out note flowed through to QA-J's re-verify list correctly.  At QA-Fc close, the batch-close drafter confirms the `nam_micb_active=false` regression check (byte-identical to today's single-mic chain) + the correlated-sum amplification check (Mic A + Mic B identical settings produces 2× Mic A amplitude).  At QA-J close, the four re-verify scenarios listed in QA-J's folded bullet are exercised against the unified stacking-fix surface.
