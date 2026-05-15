@@ -1259,3 +1259,170 @@ QA-Fc dual-mic sits after QA-Fb recording-lifecycle, before QA-G Builder UX.  Bo
 - Surface this running-notes diff + dispatch `/draft-commit` for the running-notes-only commit (now covering §11-§24 in a single commit).
 - After Jeff approves + the commit lands: apply the Main Plan consolidation pass (§5 QA-F / QA-Fa / new QA-Fb / new QA-Fc / QA-J updates + §6 sequencing arrow + §9 eighteenth Forks entry covering all four batch decisions).  Surface that diff + dispatch `/draft-commit` for the consolidation commit.
 - After the consolidation commit lands: resume QA-E Task 5 per the current QA-E plan file.
+
+## 2026-05-15 — Task 5 — REC-01 R-1-c (BLU-470 doc + verify) — verified-complete, pre-close capture
+
+QA-E execution RESUMED at Task 5 after the 2026-05-14 BaySickAlign/BaySickPitch design-lock detour closed (QA-F / QA-Fa / QA-Fb / QA-Fc spec work landed in `8784edf` + `9a10d59`; that detour did NOT touch QA-E Tasks 5-10 per §19 above).  Task 5 = "REC-01 R-1-c (BLU-470 documentation + verify + fix)".  Original Task 5 scope was a single doc deliverable + 5 recording-lifecycle verify scenarios.  Verify surfaced ~9 bugs; all fixed in-batch per the no-defer rule (`feedback_qa_batches_fix_bugs_dont_defer.md`), with Jeff explicitly picking Option A (full scope in-batch) for the largest sub-cluster (drag dedupe + delete cascade).  Task 5 is now verified-complete in Debug + Release; no source changed AFTER verify passed.  This running-notes capture precedes the close commit.
+
+### 25. Doc deliverable applied (original Task 5 scope)
+
+The stale `### Recording finalize (StandaloneEditor.cpp)` entry in [Plans & Specs/Carry-Forward Reference.md](../../Plans%20%26%20Specs/Carry-Forward%20Reference.md) §3 was REPLACED (not added-alongside) with a new `### Recording lifecycle (per-armed-strip WAV capture, post-FILE-01)` entry.
+
+**Why replace (Jeff picked Option B over Option A — add-alongside):**
+
+- The old entry's line refs were ALL stale: it cited `:9455`-`:9517` vs the actual current finalize span `StandaloneEditor.cpp:9842-9947`.
+- Its diagnostic claim ("Calls present, library doesn't show entries -- REC-01 bug is in `addAudioToLibrary` itself or browser refresh path") was a pre-QA-E diagnosis that Task 4's library-driven page-owner model (commit `1d928fc`) invalidated wholesale.  Keeping it alongside a correct entry would leave a contradicting stale diagnosis in a frozen reference doc.
+
+**New entry documents:**
+
+- `StripRecorder` struct location (`PluginProcessor.h:653-666`).
+- Tap helper entry points (`PluginProcessor.cpp:3581+`).
+- Finalize span (`StandaloneEditor.cpp:9842-9947`).
+- File-naming convention for per-armed-strip WAV capture.
+- The post-Task-4 `pageOwnerChannelId` page-binding model — explicitly noting the pre-Task-4 `VoxPage::setDryClipPath` API was removed in FILE-01 (so future readers don't go looking for it).
+
+### 26. Verify scenarios + the multi-take master-record investigation
+
+5 scenarios run in Debug (Jeff's standing per-task verify also covers Release):
+
+1. Full Vox record — PASS.
+2. Full Inst record — PASS.
+3. Master-mix fallback record — see Issues 1+2 below.
+4. Per-track arm — drove the arm/channel-select decouple cluster (§28).
+5. Debug pops — no Debug-only regression observed in the recording path.
+
+**Master-record "Issues 1+2" (ruled non-bugs):**
+
+- Issue 1: master-record produced a silent WAV.
+- Issue 2: master-record stopped after ~1 measure.
+- Both were transient — neither reproduced after an app restart.  Ruled non-bugs; most likely cause is stale Pattern/Song transport state left over from earlier testing in the same session (not a code defect in the recording path).
+- Pattern mode also rechecked clean after restart.
+
+**Issue 3 (real):** the drag/delete behavior cluster.  This became the bulk of Task 5's surfaced work — see §29.
+
+### 27. Bug fix — lengthBeats (drag-from-browser block sizing)
+
+`BuilderPage::importAudioFile` (and the new `placeAudioLibraryEntry`, §29) now set `block.lengthBeats` to the exact file-duration beat count instead of leaving it at `-1.f`.  The `-1.f` sentinel fell back to `lengthBars * 4` — bar-rounded, so a 2.3-bar clip rendered as a 3-bar block.  Fix mirrors the recording-finalize `dropWavAsClip` path, which already computed exact beats from file duration.
+
+### 28. Bug fix cluster — arm/channel-select decouple + monitor-without-arm
+
+**Arm rework (decouple input-channel picker from arm state):**
+
+- Right-click the Arm LED now opens the input-channel picker WITHOUT arming.
+- Left-click toggles `_arm` directly via a standard `ButtonAttachment`.
+- REMOVED the C3 (2026-05-04) manual parameter-listener workaround entirely: dead-code deleted from `MixerTrackStrip.h/.cpp` — `mApvtsForListener` + `mArmParamId` members gone, the `juce::AudioProcessorValueTreeState::Listener` base class dropped, `parameterChanged` override deleted.  The standard `ButtonAttachment` now does what the manual listener was hand-rolling.
+- `MixerLedButton` gained an `onRightClick` callback + `mouseDown` override (`SharedUI.h`) to support the new right-click-to-pick gesture.
+- `MixerPage::showInputChannelPicker` no longer auto-writes `_arm`.  `_arm` is only written by the explicit "Disarm" item in the picker.  The channel tick now reflects the current input-channel selection regardless of arm state (previously the picker conflated "pick a channel" with "arm").
+
+**Monitor-without-arm:**
+
+- Live input now flows through the Vox/Inst chain when EITHER `_arm` OR `_listen` is engaged (was armed-only).
+- Fixed across all 3 surfaces: `VoxStripTask.cpp`, `InstStripTask.cpp`, and the serial Vox+Inst path in `PluginProcessor.cpp`.
+- `tapDryRecorder` stays armed-only — monitoring produces no recording (monitor is audition, not capture).
+- Confirmed: master-mix-fallback now captures monitored input because a monitoring strip routes to master, so the master tap sees it.
+
+### 29. Bug fix cluster — drag dedupe + library schema + disk-dup prompt + delete cascade + tab-close cascade
+
+Jeff approved Proposal 1 + Proposal 2 + Option A (full scope in-batch) for this cluster after its size was surfaced and flagged (including the library schema change).
+
+**Library schema change (`PatternManager`):**
+
+- `addAudioToLibrary` dedup key changed from path-only to (path, `pageOwnerChannelId`).  One file can now route to multiple pages — this is what enables the "New page" prompt option below.
+- Legacy compat: re-adding with `channelId=0` still upgrades an existing entry's owner (preserves the Task 4 retag-on-reroute behavior).
+- New helpers: `findAudioLibraryIndexByPath`, `countAudioLibraryEntriesForChannel`, `removeAudioFromLibraryAt`.
+
+**Browser->grid bypass (kills the spurious duplicate-library-entry bug):**
+
+- `BuilderPage::itemDropped` "audio" branch now calls the new `placeAudioLibraryEntry` (resolves the stored path, reads metadata, drops a routed block) INSTEAD of `importAudioFile`.
+- Root cause of the spurious dup: `importSample`'s `(2)`-rename fallback fired because of a Windows `juce::File` stored-vs-resolved path-equality mismatch — the relative stored path and the resolved absolute path compared unequal, so the importer thought it was a brand-new file and minted a duplicate library entry with a `(2)` suffix.  `placeAudioLibraryEntry` reuses the existing entry instead of round-tripping through the importer.
+
+**Disk-dup prompt:**
+
+- `filesDropped` now detects a dropped file that already exists in the library (resolve-and-compare absolute paths) and fires a new `onDuplicateFileDrop` callback.
+- StandaloneEditor shows a "Use Existing / New Page / Cancel" prompt.
+  - Use Existing -> `placeAudioLibraryEntry` (reuse the existing routed entry).
+  - New Page -> spawn a forced-duplicate Clips tab + a second library entry tagged to the new channelId.
+  - Cancel -> no-op.
+
+**Browser delete cascade:**
+
+- New `BrowserPanel::confirmAndDeleteLibraryEntry` — confirmation prompt before any delete.
+- Last-file-out (the owning page owns ONLY this entry) closes the owning page via new `onClosePageForChannelId` (StandaloneEditor walks `mPages` -> `closeTab`).
+- Partial delete (page still owns other entries) keeps the page open.
+- Both browser-delete sites route through this; the flat-list site converts path -> libIdx first.
+
+**Tab-close library cascade:**
+
+- `onTabClosed` for Clips/Vox/Inst now removes owned library entries + their matching (path, channel) blocks.
+- This REPLACES the pre-Task-5 "no-file-delete contract": the audio file on disk is still preserved (we only remove library entries + blocks, never the file).
+- Prompt verbiage in `ClipsPage`/`VoxPage`/`InstPage` `requestDelete` updated to state that the library entries are removed.
+
+### 30. Bug fix — block coloring + relative-path resolve + disk-drop retag
+
+`drawAudioClip` now colours audio blocks by `routeChannel`:
+
+| Range | Channel | Colour |
+|---|---|---|
+| 400-449 | Clips | `0xffd4a017` (amber) |
+| 600-605 | Vox | `0xff0fafa5` (teal) |
+| 700-705 | Inst | `0xff1c3a8a` (navy) |
+| other / unrouted | generic | teal-grey |
+
+Ranges mirror `MixerChannelIds` (`Source/VibeGraph.h`: kAudioBase=400, kVoxBase=600, kInstBase=700) but are kept as literals in `BuilderPage` deliberately (avoids pulling the heavy header into BuilderPage just for 3 constant ranges).
+
+**Root cause #1 (spurious red on Vox/Inst + disk-drop blocks):**
+
+- The `missingFile` check ran `juce::File(b.audioFilePath).existsAsFile()` on RELATIVE paths (e.g. `"Samples/..."`), which resolve against the EXE CWD and therefore always fail -> the block got the red "missing file" treatment, which shadowed the route colour.
+- Fixed by resolving the stored path via `onResolveStoredPath` first (mirrors the lengthBeats fix §27 + `placeAudioLibraryEntry` §29).
+- Why Clips-from-browser worked "by accident": ClipsPage stores ABSOLUTE paths in the library, while Vox/Inst recordings + disk drops store RELATIVE — so only the relative-path producers hit the false-missing path.
+
+**Root cause #2 (disk-drop blocks coloured generic/blue):**
+
+- Disk-drop blocks are created with `routeChannel=0` BY REQUIREMENT — `routeChannel=0` is what makes the `onAudioClipAdded` callback fire and spawn the Clips page.  They were never retagged after the page spawned, so they stayed generic-coloured.
+- Fixed: after `spawnClipsTabIfMissing`, the handler retags matching `routeChannel==0` blocks to `audioInsert(row)`, guarded on a Clips page actually existing at that row.
+- This is functionally a no-op for playback — `routeChannel 0` and `audioInsert(row)` resolve to the same insert — it only makes the routing explicit and the colour correct.
+
+### 31. Bug fix — delete-last-page navigation
+
+- Symptom: deleting the last library entry of a page from the Builder browser closed the owning tab, and `onTabClosed`'s G-7 empty-state surfacing then yanked the view to the (now-empty) Clips/Vox/Inst empty-state page — disorienting because the user was on the Builder, not the page being closed.
+- Fix: capture `closedPageWasVisible` BEFORE `mPages.remove`, and only show the empty-state if the closed page was the one currently on screen.
+- Result: a browser-cascade close from the Builder now stays on the Builder.
+
+### 32. Design decisions / spec calls locked
+
+- **Live colour derivation.** Block colour is derived LIVE from `routeChannel` every paint — there is NO stored colour field.  Re-routing a block recolours it automatically.  Jeff confirmed this is intended: "colour follows routing, not creation origin."
+- **Future user-colour-override compatibility.** A future per-block user-colour override (Builder work) is compatible: the route logic becomes the auto fallback when no user colour is set.  Precedent exists (F-1 per-pattern user colours).  OPEN spec for later: does a user-set colour survive a re-route?  NOT decided now — flagged for whenever the Builder user-colour work is specced.
+- **Carry-Forward §3.** Replace (Option B) chosen over add-alongside (Option A) — see §25.
+- **Old-project recolour: Option A (no load-time migration).** Pre-fix saved blocks keep `routeChannel=0` -> they show cosmetic blue/generic on reopen; audio is CORRECT (`routeChannel 0` and `audioInsert(row)` hit the same insert).  Jeff accepted the cosmetic inconsistency over reopening Task 5 for a load migration.  A load migration (Option B) was specced but declined.
+- **Scope growth.** Task 5 grew from "doc + 5 verify" to ~9 in-batch fixes via the no-defer rule.  Jeff explicitly picked Option A (full scope in-batch) when the drag/delete cluster's size — including the library schema change — was surfaced and flagged.
+
+### 33. Files touched (16, all Task 5)
+
+- [Plans & Specs/Carry-Forward Reference.md](../../Plans%20%26%20Specs/Carry-Forward%20Reference.md)
+- Source/Clips/ClipsPage.cpp
+- Source/Engine/Tasks/InstStripTask.cpp
+- Source/Engine/Tasks/VoxStripTask.cpp
+- Source/Inst/InstPage.cpp
+- Source/PatternManager.cpp
+- Source/PatternManager.h
+- Source/PluginProcessor.cpp
+- Source/Standalone/BuilderPage.cpp
+- Source/Standalone/BuilderPage.h
+- Source/Standalone/MixerPage.cpp
+- Source/Standalone/MixerTrackStrip.cpp
+- Source/Standalone/MixerTrackStrip.h
+- Source/Standalone/SharedUI.h
+- Source/Standalone/StandaloneEditor.cpp
+- Source/Vox/VoxPage.cpp
+
+### Disposition
+
+- Task 5 verified-complete in Debug + Release (Jeff's standing per-task verify covers both — no separate Release re-verify gate at task close per `feedback_no_full_release_reverify_at_batch_close.md`).
+- No source code changed AFTER verify passed; this running-notes capture precedes the close commit.
+- Scope grew per the no-defer rule; all growth was surfaced + Jeff picked Option A (full scope in-batch).  No deferrals to Future State / new batch.
+- Carry-Forward §3 doc deliverable applied (replace, Option B).
+
+### Next action
+
+- /draft-commit -> surface drafted commit message + full pre-commit git status -> commit on Jeff's explicit approval (per `feedback_surface_drafted_commit_message_for_approval.md`).
+- Then QA-E Task 6 (DSP-09 Bus solo) is next.

@@ -2035,6 +2035,47 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             // import).  pageIdx = audioRow so the engine's audio mixes into
             // the matching mixer_audio_<row> insert.
             spawnClipsTabIfMissing (row, filePath);
+
+            // QA-E Task 5 (2026-05-15): the disk-drop block was created with
+            // routeChannel=0 (required so THIS callback fires + spawns the
+            // Clips page).  Now that the page exists, retag the block(s) so
+            // they route through -- and colour as -- the Clips page instead
+            // of staying stranded at routeChannel=0 (generic teal-grey).
+            // Functionally a no-op for playback (routeChannel 0 and
+            // audioInsert(row) both resolve to the same mixer_audio_<row>
+            // insert the Clips page uses) -- this just makes the stored
+            // routing explicit + correct so colouring + future explicit
+            // routing both work.  Guarded on a Clips page actually existing
+            // at this row (spawnClipsTabIfMissing is a no-op if the slot was
+            // already taken -- in that case generic routing is correct).
+            if (mPM)
+            {
+                bool clipsPageAtRow = false;
+                for (auto* e : mPages)
+                    if (e && e->type == RibbonTabBar::TabType::Clip)
+                        if (auto* cp = dynamic_cast<ClipsPage*> (e->component.get()))
+                            if (cp->getPageIndex() == row) { clipsPageAtRow = true; break; }
+
+                if (clipsPageAtRow)
+                {
+                    const int chId = MixerChannelIds::audioInsert (row);
+                    bool any = false;
+                    for (int b = 0; b < mPM->getNumBlocks(); ++b)
+                    {
+                        auto& blk = mPM->getBlock (b);
+                        if (blk.clipType    == ClipType::Audio
+                            && blk.trackRow == row
+                            && blk.routeChannel == 0
+                            && blk.audioFilePath == filePath)
+                        {
+                            blk.routeChannel = chId;
+                            any = true;
+                        }
+                    }
+                    if (any && mBuilderPage)
+                        mBuilderPage->notifyArrangementChanged();
+                }
+            }
         };
         grid->onArrangementChanged = [this]()
         {
@@ -2097,6 +2138,113 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                     grid->importAudioFile (src.getFullPathName(), row, bar);
                 });
         };
+        // QA-E Task 5 (2026-05-15): disk drop of a file already in the library
+        // -> "Use existing routing / New page / Cancel" prompt.  Existing
+        // routing calls placeAudioLibraryEntry (no new entry, no new page).
+        // New page spawns a fresh Clips tab (allowDuplicate=true), adds a
+        // second library entry tagged to the new page's channelId, then
+        // places a block routed to that new entry.
+        grid->onDuplicateFileDrop = [this, grid](const juce::File& dropped,
+                                                  int libIdx, int row, float bar)
+        {
+            if (! mPM) return;
+            const juce::String path          = mPM->getAudioLibraryPath (libIdx);
+            const int          existingOwner = mPM->getAudioLibraryPageOwner (libIdx);
+
+            // Resolve the owning page's display name for the prompt.
+            juce::String pageName = "an existing page";
+            for (auto* entry : mPages)
+            {
+                if (! entry) continue;
+                if (entry->type != RibbonTabBar::TabType::Clip) continue;
+                if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+                {
+                    const int chId = MixerChannelIds::audioInsert (cp->getPageIndex());
+                    if (chId == existingOwner)
+                    {
+                        pageName = cp->getTabName();
+                        break;
+                    }
+                }
+            }
+
+            auto* aw = new juce::AlertWindow (
+                "File Already in Library",
+                "\"" + dropped.getFileName() + "\" is already in your library on \""
+                  + pageName + "\".\n\n"
+                  "Use existing routing, or create a new page and strip?",
+                juce::AlertWindow::QuestionIcon);
+            aw->addButton ("Use Existing", 1);
+            aw->addButton ("New Page",     2);
+            aw->addButton ("Cancel",       0);
+
+            juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+            aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                [safeThis, grid, path, libIdx, row, bar] (int result)
+                {
+                    if (! safeThis) return;
+                    auto* self = safeThis.getComponent();
+                    if (! self || ! grid) return;
+
+                    if (result == 1)
+                    {
+                        // Existing routing: drop block routed to existing entry.
+                        grid->placeAudioLibraryEntry (libIdx, row, bar);
+                    }
+                    else if (result == 2)
+                    {
+                        // New page: find next free Clips page row, spawn the
+                        // Clips tab forcing duplicate, add new library entry
+                        // tagged to that page's channelId, then place block
+                        // routed to the new entry.
+                        int newPageRow = -1;
+                        for (int i = 0; i < kMaxClipPages; ++i)
+                        {
+                            bool taken = false;
+                            for (auto* e : self->mPages)
+                            {
+                                if (e && e->type == RibbonTabBar::TabType::Clip)
+                                    if (auto* cp = dynamic_cast<ClipsPage*> (e->component.get()))
+                                        if (cp->getPageIndex() == i) { taken = true; break; }
+                            }
+                            if (! taken) { newPageRow = i; break; }
+                        }
+                        if (newPageRow < 0)
+                        {
+                            juce::AlertWindow::showMessageBoxAsync (
+                                juce::AlertWindow::WarningIcon,
+                                "No free Clips page",
+                                "All " + juce::String (kMaxClipPages) + " Clips pages are in "
+                                "use.  Close one before adding another.");
+                            return;
+                        }
+                        self->spawnClipsTabIfMissing (newPageRow, path, /*allowDuplicate*/ true);
+
+                        const int newCh = MixerChannelIds::audioInsert (newPageRow);
+                        if (self->mPM)
+                            self->mPM->addAudioToLibrary (path, {}, newCh);
+
+                        // Find the just-added library entry (last entry whose
+                        // path + owner match).  Newest entries are at the end
+                        // since addAudioToLibrary push_backs.
+                        int newLibIdx = -1;
+                        for (int i = self->mPM->getNumAudioLibrary() - 1; i >= 0; --i)
+                        {
+                            if (self->mPM->getAudioLibraryPath (i) == path
+                                && self->mPM->getAudioLibraryPageOwner (i) == newCh)
+                            {
+                                newLibIdx = i;
+                                break;
+                            }
+                        }
+                        if (newLibIdx >= 0)
+                            grid->placeAudioLibraryEntry (newLibIdx, row, bar);
+                    }
+                    // result == 0 -> Cancel: no-op.
+                }),
+                true);
+        };
+
         // Display-name resolver so on-grid automation block labels use the
         // friendly "Channel - Effect - Param" format (honours userDisplayName).
         grid->onResolveDisplayName = [this](const AutomationLane& lane) -> juce::String
@@ -2113,6 +2261,43 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         panel->onResolveDisplayName = [this](const AutomationLane& lane) -> juce::String
         {
             return displayNameFor(lane);
+        };
+
+        // QA-E Task 5 (2026-05-15): browser Delete on the LAST library entry
+        // owned by a page -> close that page's ribbon tab.  Walk mPages,
+        // match by (page type, page index -> channelId), close the tab.
+        // closeTab fires the existing onTabClosed cascade which handles
+        // engine teardown + mixer strip removal + InsertNode unregister.
+        panel->onClosePageForChannelId = [this](int channelId)
+        {
+            using namespace MixerChannelIds;
+            int ribbonTabId = -1;
+
+            for (auto* entry : mPages)
+            {
+                if (! entry) continue;
+                if (entry->type == RibbonTabBar::TabType::Clip)
+                {
+                    if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+                        if (audioInsert (cp->getPageIndex()) == channelId)
+                        { ribbonTabId = entry->ribbonTabId; break; }
+                }
+                else if (entry->type == RibbonTabBar::TabType::Vox)
+                {
+                    if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+                        if (voxInsert (vp->getPageIndex()) == channelId)
+                        { ribbonTabId = entry->ribbonTabId; break; }
+                }
+                else if (entry->type == RibbonTabBar::TabType::Inst)
+                {
+                    if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+                        if (instInsert (ip->getPageIndex()) == channelId)
+                        { ribbonTabId = entry->ribbonTabId; break; }
+                }
+            }
+
+            if (ribbonTabId >= 0 && mRibbon)
+                mRibbon->closeTab (ribbonTabId);
         };
 
         // G-5 (2026-04-29): page-walk based enumeration of audio files for
@@ -3538,41 +3723,52 @@ void StandaloneEditor::onTabClosed(int tabId)
                     mPianoRollPage->unregisterEngine ({ EngineKind::Drum, idx });
             }
 
-            // G-3 (2026-04-28): Clips tab close - unregister both the audio
-            // engine (so the audio thread stops dispatching MIDI to it) and
-            // the piano-roll connection (so PianoRollPage drops the now-
-            // dangling closure).  The audio file stays in mAudioLibrary + the
-            // mixer audio insert stays intact - closing a Clips tab only
-            // removes the page, never the underlying clip data (no-file-
-            // delete contract).
-            // G-7 (2026-04-29): also sweep Builder arrangement blocks that
-            // point to this clip's audio file.  Without this, the blocks
-            // become orphaned (silent, since the engine is unregistered)
-            // but visually remain on the Builder grid.  Reported by Jeff.
+            // Clips tab close - unregister the audio engine + piano-roll
+            // connection so the audio thread + roll dropdown both drop the
+            // page cleanly.
+            //
+            // QA-E Task 5 (2026-05-15): library + block cascade replaces the
+            // pre-Task-5 "no-file-delete contract".  Walks every library
+            // entry owned by this page (channelId = audioInsert(idx)),
+            // removes the blocks routed to it (precise: path + routeChannel
+            // match, so blocks routed to OTHER pages survive multi-owner
+            // schema), then removes the library entries themselves.  Audio
+            // files on disk are still preserved -- we only touch library +
+            // grid.  Symmetric counterpart to the BrowserPanel last-file-out
+            // cascade (BuilderPage.cpp confirmAndDeleteLibraryEntry).
             if (auto* cp = dynamic_cast<ClipsPage*>(mPages[i]->component.get()))
             {
                 int idx = cp->getPageIndex();
-                const juce::String clipPath = cp->getClipFilePath();
                 if (idx >= 0)
                 {
                     mProcessor.unregisterClipEngine (idx);
                     if (mPianoRollPage)
                         mPianoRollPage->unregisterEngine ({ EngineKind::Clip, idx });
                 }
-                if (mPM && clipPath.isNotEmpty())
+                if (mPM && idx >= 0)
                 {
-                    bool anyRemoved = false;
-                    for (int b = mPM->getNumBlocks() - 1; b >= 0; --b)
+                    using namespace MixerChannelIds;
+                    const int chId = audioInsert (idx);
+                    bool anyChanged = false;
+                    for (int e = mPM->getNumAudioLibrary() - 1; e >= 0; --e)
                     {
-                        const auto& blk = mPM->getBlock (b);
-                        if (blk.clipType == ClipType::Audio
-                            && blk.audioFilePath == clipPath)
+                        if (mPM->getAudioLibraryPageOwner (e) != chId) continue;
+                        const juce::String entryPath = mPM->getAudioLibraryPath (e);
+                        for (int b = mPM->getNumBlocks() - 1; b >= 0; --b)
                         {
-                            mPM->removeBlock (b);
-                            anyRemoved = true;
+                            const auto& blk = mPM->getBlock (b);
+                            if (blk.clipType == ClipType::Audio
+                                && blk.audioFilePath == entryPath
+                                && blk.routeChannel  == chId)
+                            {
+                                mPM->removeBlock (b);
+                                anyChanged = true;
+                            }
                         }
+                        mPM->removeAudioFromLibraryAt (e);
+                        anyChanged = true;
                     }
-                    if (anyRemoved && mBuilderPage)
+                    if (anyChanged && mBuilderPage)
                         mBuilderPage->notifyArrangementChanged();
                 }
             }
@@ -3594,6 +3790,39 @@ void StandaloneEditor::onTabClosed(int tabId)
                 {
                     mProcessor.unregisterVoxEngine (idx);
                     voxStripIdx = idx;
+                }
+                // QA-E Task 5 (2026-05-15): library + block cascade for Vox
+                // tab close.  Walks every library entry owned by this Vox
+                // page (channelId = voxInsert(idx)) and removes the blocks
+                // routed to it (precise match on path + routeChannel), then
+                // removes the library entries.  Audio files on disk are
+                // preserved.  Symmetric counterpart to the BrowserPanel
+                // last-file-out cascade.
+                if (mPM && idx >= 0)
+                {
+                    using namespace MixerChannelIds;
+                    const int chId = voxInsert (idx);
+                    bool anyChanged = false;
+                    for (int e = mPM->getNumAudioLibrary() - 1; e >= 0; --e)
+                    {
+                        if (mPM->getAudioLibraryPageOwner (e) != chId) continue;
+                        const juce::String entryPath = mPM->getAudioLibraryPath (e);
+                        for (int b = mPM->getNumBlocks() - 1; b >= 0; --b)
+                        {
+                            const auto& blk = mPM->getBlock (b);
+                            if (blk.clipType == ClipType::Audio
+                                && blk.audioFilePath == entryPath
+                                && blk.routeChannel  == chId)
+                            {
+                                mPM->removeBlock (b);
+                                anyChanged = true;
+                            }
+                        }
+                        mPM->removeAudioFromLibraryAt (e);
+                        anyChanged = true;
+                    }
+                    if (anyChanged && mBuilderPage)
+                        mBuilderPage->notifyArrangementChanged();
                 }
             }
 
@@ -3629,6 +3858,35 @@ void StandaloneEditor::onTabClosed(int tabId)
                     unregisterInstSourcePianoRoll (ip);
                     instBassesIdx = idx;
                 }
+                // QA-E Task 5 (2026-05-15): library + block cascade for Inst
+                // tab close.  Same shape as Vox + Clips cascades.  Audio
+                // files on disk preserved; only library + grid touched.
+                if (mPM && idx >= 0)
+                {
+                    using namespace MixerChannelIds;
+                    const int chId = instInsert (idx);
+                    bool anyChanged = false;
+                    for (int e = mPM->getNumAudioLibrary() - 1; e >= 0; --e)
+                    {
+                        if (mPM->getAudioLibraryPageOwner (e) != chId) continue;
+                        const juce::String entryPath = mPM->getAudioLibraryPath (e);
+                        for (int b = mPM->getNumBlocks() - 1; b >= 0; --b)
+                        {
+                            const auto& blk = mPM->getBlock (b);
+                            if (blk.clipType == ClipType::Audio
+                                && blk.audioFilePath == entryPath
+                                && blk.routeChannel  == chId)
+                            {
+                                mPM->removeBlock (b);
+                                anyChanged = true;
+                            }
+                        }
+                        mPM->removeAudioFromLibraryAt (e);
+                        anyChanged = true;
+                    }
+                    if (anyChanged && mBuilderPage)
+                        mBuilderPage->notifyArrangementChanged();
+                }
             }
 
             // J-6 (2026-05-03): BaySickRustyDrums tab close - tear down the
@@ -3661,7 +3919,16 @@ void StandaloneEditor::onTabClosed(int tabId)
             if (mPages[i]->component.get() == mBuilderPage)
                 mBuilderPage = nullptr;
 
-            if (mVisiblePage == mPages[i]->component.get())
+            // QA-E Task 5 (2026-05-15): capture whether the closed page was
+            // the one on screen.  Used below to decide whether to surface the
+            // empty-state placeholder.  When the close was triggered by the
+            // browser last-file-out cascade (user is on Builder, NOT viewing
+            // the page being closed), we must NOT yank them to the empty-
+            // state page -- they should stay on the Builder browser.
+            const bool closedPageWasVisible =
+                (mVisiblePage == mPages[i]->component.get());
+
+            if (closedPageWasVisible)
                 mVisiblePage = nullptr;
 
             // G-7 (2026-04-29): track type before removing so we can decide
@@ -3717,20 +3984,28 @@ void StandaloneEditor::onTabClosed(int tabId)
                 return n;
             };
 
-            if (closedType == RibbonTabBar::TabType::Clip
-                && remainingOfType (RibbonTabBar::TabType::Clip) == 0)
+            // QA-E Task 5 (2026-05-15): only surface the empty-state when the
+            // user was actually viewing the page that just closed.  A
+            // browser last-file-out cascade closes a background Clips/Vox/
+            // Inst tab while the user is on the Builder browser -- in that
+            // case stay on Builder instead of navigating to the empty state.
+            if (closedPageWasVisible)
             {
-                showClipsEmptyState();
-            }
-            else if (closedType == RibbonTabBar::TabType::Vox
-                     && remainingOfType (RibbonTabBar::TabType::Vox) == 0)
-            {
-                showVoxEmptyState();
-            }
-            else if (closedType == RibbonTabBar::TabType::Inst
-                     && remainingOfType (RibbonTabBar::TabType::Inst) == 0)
-            {
-                showInstEmptyState();
+                if (closedType == RibbonTabBar::TabType::Clip
+                    && remainingOfType (RibbonTabBar::TabType::Clip) == 0)
+                {
+                    showClipsEmptyState();
+                }
+                else if (closedType == RibbonTabBar::TabType::Vox
+                         && remainingOfType (RibbonTabBar::TabType::Vox) == 0)
+                {
+                    showVoxEmptyState();
+                }
+                else if (closedType == RibbonTabBar::TabType::Inst
+                         && remainingOfType (RibbonTabBar::TabType::Inst) == 0)
+                {
+                    showInstEmptyState();
+                }
             }
             return;
         }

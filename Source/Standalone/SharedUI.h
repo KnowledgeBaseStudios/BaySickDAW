@@ -363,6 +363,19 @@ public:
 
     void setOnColour(juce::Colour c) { mOnColour = c; repaint(); }
 
+    // QA-E Task 5 (2026-05-15): right-click callback so an LED can pair a
+    // left-click toggle action with a separate right-click secondary action
+    // (e.g. Arm LED: left-click toggles _arm, right-click opens input picker)
+    // without subclassing.  Mirrors the pattern used for FilePickerButton in
+    // BaySickNAMIREditor + pedal tile preset button in BaySickPedalsEditor.
+    std::function<void()> onRightClick;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isRightButtonDown() && onRightClick) { onRightClick(); return; }
+        juce::Button::mouseDown (e);
+    }
+
     void paintButton(juce::Graphics& g, bool isOver, bool isDown) override
     {
         juce::ignoreUnused(isDown);

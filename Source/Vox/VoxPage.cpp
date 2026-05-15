@@ -350,10 +350,15 @@ void VoxPage::requestDelete()
             if (p->onDeleteRequested) p->onDeleteRequested();
     };
 
+    // QA-E Task 5 (2026-05-15): tab close now cascades library cleanup --
+    // every recording (dry + wet) made on this Vox tab gets removed from
+    // the audio library alongside the page.  Physical WAVs in the project's
+    // Samples folder stay on disk so the user can drag them back in later.
     const juce::String warning =
         "Deleting this vox tab removes its Player, Mixer Strip, "
-        "Effects Rack, and Piano Roll.\n"
-        "Audio files in your project's Audio folder will be kept.";
+        "Effects Rack, Piano Roll, and the audio library entries for "
+        "every recording made on this tab.\n"
+        "The audio files in your project's Samples folder stay on disk.";
 
     if (getEngineProcessor() != nullptr && isPatchDirty())
     {

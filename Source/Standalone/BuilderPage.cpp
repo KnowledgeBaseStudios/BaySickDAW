@@ -481,22 +481,87 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
             }
             if (result == kIdDelete)
             {
-                if (libIdx >= 0 && libIdx < mPM.getNumAudioLibrary())
-                {
-                    const String path = mPM.getAudioLibraryPath (libIdx);
-                    // Mirror flat-list flow: cascade-remove every block
-                    // referencing this file, then remove from library.
-                    for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
-                        if (mPM.getBlock (i).clipType == ClipType::Audio
-                            && mPM.getBlock (i).audioFilePath == path)
-                            mPM.removeBlock (i);
-                    mPM.removeAudioFromLibrary (path);
-                    rebuildAudioRows();
-                    if (onArrangementChanged) onArrangementChanged();
-                }
+                confirmAndDeleteLibraryEntry (libIdx);
                 return;
             }
         });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-E Task 5 (2026-05-15): browser Delete -> confirmation prompt + cascade.
+// See header.  Shared between tree (showAudioTreeContextMenu) + flat-list
+// right-click handlers so both deletion entry points behave identically.
+// ─────────────────────────────────────────────────────────────────────────────
+void BrowserPanel::confirmAndDeleteLibraryEntry (int libIdx)
+{
+    if (libIdx < 0 || libIdx >= mPM.getNumAudioLibrary()) return;
+
+    const String path       = mPM.getAudioLibraryPath (libIdx);
+    const int    owner      = mPM.getAudioLibraryPageOwner (libIdx);
+    const String fileName   = juce::File (path).getFileName();
+    // owner == 0 means "generic Audio category" (master capture / untagged
+    // drops) -- no owning page to close.
+    const int    ownerCount = (owner != 0)
+                                ? mPM.countAudioLibraryEntriesForChannel (owner)
+                                : 0;
+    const bool   isLastOnPage = (owner != 0) && (ownerCount <= 1);
+
+    int blockCount = 0;
+    for (int i = 0; i < mPM.getNumBlocks(); ++i)
+        if (mPM.getBlock (i).clipType == ClipType::Audio
+            && mPM.getBlock (i).audioFilePath == path
+            && mPM.getBlock (i).routeChannel  == owner)
+            ++blockCount;
+
+    juce::String msg = "Delete \"" + fileName + "\" from the library?\n\n";
+    if (isLastOnPage)
+        msg += "This is the last file routed through its owning page.  The page (and "
+             + juce::String (blockCount) + " grid block"
+             + (blockCount == 1 ? "" : "s") + " using it) will also be removed.";
+    else if (blockCount > 0)
+        msg += juce::String (blockCount) + " grid block"
+             + (blockCount == 1 ? "" : "s") + " using it will also be removed.";
+    else
+        msg += "No grid blocks reference it; only the library entry will be removed.";
+
+    auto* aw = new juce::AlertWindow (
+        "Delete from Library",
+        msg,
+        juce::AlertWindow::QuestionIcon);
+    aw->addButton ("Delete", 1);
+    aw->addButton ("Cancel", 0);
+
+    juce::Component::SafePointer<BrowserPanel> safeThis (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safeThis, libIdx, path, owner, isLastOnPage] (int r)
+        {
+            if (r != 1) return;
+            if (! safeThis) return;
+            auto* self = safeThis.getComponent();
+            if (! self) return;
+            auto& pm = self->mPM;
+
+            // Cascade-remove blocks matching (path, owner).  Blocks routed
+            // to a DIFFERENT page (different routeChannel) stay.
+            for (int i = pm.getNumBlocks() - 1; i >= 0; --i)
+                if (pm.getBlock (i).clipType == ClipType::Audio
+                    && pm.getBlock (i).audioFilePath == path
+                    && pm.getBlock (i).routeChannel  == owner)
+                    pm.removeBlock (i);
+
+            // Remove the specific library entry by index (precise -- post-
+            // Task-5 schema may have multiple entries with same path under
+            // different page owners).
+            pm.removeAudioFromLibraryAt (libIdx);
+
+            self->rebuildAudioRows();
+            if (self->onArrangementChanged) self->onArrangementChanged();
+
+            // Last file on the page -> close the owning Clips / Vox / Inst tab.
+            if (isLastOnPage && self->onClosePageForChannelId)
+                self->onClosePageForChannelId (owner);
+        }),
+        true);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -835,16 +900,17 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
                 case BrowserItem::Kind::Audio:
                     if (idx < mAudioPaths.size())
                     {
-                        const String path = mAudioPaths[idx];
-                        // Cascade-remove every block referencing this file,
-                        // THEN remove from the library so the entry disappears.
-                        for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
-                            if (mPM.getBlock(i).clipType == ClipType::Audio
-                                && mPM.getBlock(i).audioFilePath == path)
-                                mPM.removeBlock(i);
-                        mPM.removeAudioFromLibrary(path);
-                        rebuildAudioRows();
-                        if (onArrangementChanged) onArrangementChanged();
+                        // QA-E Task 5 (2026-05-15): convert flat-list idx to
+                        // library index by path lookup, then route through
+                        // the shared prompt+cascade helper.  findByPath
+                        // returns the FIRST matching entry; if multiple
+                        // entries share this path under different page
+                        // owners, only the first gets removed per Delete
+                        // click (V1 acceptable since the tree right-click
+                        // path uses precise libIdx).
+                        const int libIdx = mPM.findAudioLibraryIndexByPath (mAudioPaths[idx]);
+                        if (libIdx >= 0)
+                            confirmAndDeleteLibraryEntry (libIdx);
                     }
                     break;
                 case BrowserItem::Kind::Automation:
@@ -1593,16 +1659,46 @@ void ArrangementGrid::drawPatternClip(Graphics& g, const ArrangementBlock& b,
 void ArrangementGrid::drawAudioClip(Graphics& g, const ArrangementBlock& b,
                                     int x, int y, int w, int h, bool sel) const
 {
-    static const Colour kAudioBase   { 0xff4a8fa0 };
-    static const Colour kMissingBase { 0xffaa3030 };   // Batch E #3: dim red
+    static const Colour kAudioGeneric { 0xff4a8fa0 };   // unrouted / generic Audio row
+    static const Colour kMissingBase  { 0xffaa3030 };    // Batch E #3: dim red
 
     // Batch E #3 (2026-05-01): if the audio file path no longer resolves on
     // disk, render the clip in red instead of the standard teal so the user
     // can see at a glance that this clip is dead.  Empty path also counts as
     // missing (newly-dropped clips that haven't been resolved yet).
+    // QA-E Task 5 (2026-05-15): resolve project-relative paths via
+    // onResolveStoredPath BEFORE the existsAsFile() check.  Without this,
+    // a relative path like "Samples/foo.wav" resolves against the EXE's
+    // CWD (not the project folder), always fails existsAsFile(), and every
+    // relative-path block (disk drops + Vox/Inst recordings) paints red --
+    // shadowing the route-colour logic below.  Mirrors the resolve pattern
+    // already used by placeAudioLibraryEntry + getOrCreateThumbnail.
+    juce::File resolvedF (b.audioFilePath);
+    if (! resolvedF.existsAsFile() && onResolveStoredPath)
+        resolvedF = onResolveStoredPath (b.audioFilePath);
     const bool missingFile = b.audioFilePath.isEmpty()
-                          || ! juce::File (b.audioFilePath).existsAsFile();
-    Colour base = missingFile ? kMissingBase : kAudioBase;
+                          || ! resolvedF.existsAsFile();
+
+    // QA-E Task 5 (2026-05-15): colour audio blocks by their route type so
+    // the user can tell at a glance which page a block plays through:
+    //   Clips  (audioInsert 400..449) -> amber  0xffd4a017
+    //   Vox    (voxInsert   600..605) -> teal   0xff0fafa5
+    //   Inst   (instInsert  700..705) -> navy   0xff1c3a8a
+    //   unrouted / generic Audio row  -> the legacy teal-grey base
+    // Ranges mirror MixerChannelIds (Source/VibeGraph.h); kept as literals
+    // here so BuilderPage doesn't pull in the heavy graph header just for
+    // three int ranges.  Missing-file red still overrides everything.
+    Colour base;
+    if (missingFile)
+        base = kMissingBase;
+    else
+    {
+        const int rc = b.routeChannel;
+        if      (rc >= 600 && rc < 606)  base = Colour (0xff0fafa5);   // Vox
+        else if (rc >= 700 && rc < 706)  base = Colour (0xff1c3a8a);   // Inst
+        else if (rc >= 400 && rc < 450)  base = Colour (0xffd4a017);   // Clips
+        else                             base = kAudioGeneric;          // unrouted
+    }
 
     // Background
     g.setGradientFill(ColourGradient(
@@ -2684,15 +2780,23 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
 
-    // Compute bars from file duration at the assumed original BPM (120).
+    // Compute bars + precise beats from file duration at the assumed original BPM (120).
     // stretchMode will handle tempo differences at playback time.
+    // QA-E Task 5 (2026-05-15): set lengthBeats to the precise float beat count
+    // so playback / loop end match the source file's exact duration -- mirrors
+    // the recording-finalize dropWavAsClip path at StandaloneEditor.cpp:9853-9854.
+    // Prior bug: lengthBeats defaulted to -1.f, falling back to lengthBars * 4
+    // (rounded up to next bar boundary), so drag-from-browser blocks were
+    // longer than the underlying audio.
     int lengthBars = 4;  // fallback
     float originalBPM = 120.f;
+    float fileBeats = -1.f;
     if (reader && reader->sampleRate > 0 && reader->lengthInSamples > 0)
     {
         const double durationSecs = (double) reader->lengthInSamples / reader->sampleRate;
-        const double bars = durationSecs * (originalBPM / 60.0) / 4.0;
-        lengthBars = juce::jmax (1, (int) std::ceil (bars));
+        const double beats = durationSecs * (originalBPM / 60.0);
+        lengthBars = juce::jmax (1, (int) std::ceil (beats / 4.0));
+        fileBeats  = (float) beats;
     }
 
     // P4: copy-on-drop.  If a callback is wired, route the external file
@@ -2724,6 +2828,8 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     b.trackRow       = jlimit(0, kNumRows - 1, targetRow);
     b.startBar       = (int)snapBar(targetBar);
     b.lengthBars     = lengthBars;
+    b.lengthBeats    = fileBeats;      // QA-E Task 5 (2026-05-15): exact end so
+                                       // playback / loop match the source file
     b.audioFilePath  = storedPath;
     b.originalBPM    = originalBPM;
     b.stretchMode    = true;
@@ -2744,6 +2850,63 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     // guard inside dropWavAsClip at StandaloneEditor.cpp.
     if (routeChannel == 0 && onAudioClipAdded)
         onAudioClipAdded(b.trackRow, mRowNames[b.trackRow], storedPath);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-E Task 5 (2026-05-15): place an existing library entry on the grid
+// WITHOUT a fresh importSample/library-add/page-spawn cycle.  Used for
+// browser->grid drops + the disk-drag "Existing routing" prompt callback.
+// ─────────────────────────────────────────────────────────────────────────────
+void ArrangementGrid::placeAudioLibraryEntry(int libIdx, int targetRow, float targetBar)
+{
+    if (libIdx < 0 || libIdx >= mPM.getNumAudioLibrary()) return;
+    const juce::String path  = mPM.getAudioLibraryPath (libIdx);
+    const int          owner = mPM.getAudioLibraryPageOwner (libIdx);
+    if (path.isEmpty()) return;
+
+    // Resolve path to absolute (entries may be relative "Samples/foo.wav").
+    juce::File f (path);
+    if (! f.existsAsFile() && onResolveStoredPath)
+    {
+        const juce::File resolved = onResolveStoredPath (path);
+        if (resolved.existsAsFile()) f = resolved;
+    }
+    if (! f.existsAsFile()) return;
+
+    // Read file metadata for exact lengthBeats (mirrors importAudioFile).
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+    int   lengthBars  = 4;
+    const float originalBPM = 120.f;
+    float fileBeats   = -1.f;
+    if (reader && reader->sampleRate > 0 && reader->lengthInSamples > 0)
+    {
+        const double durationSecs = (double) reader->lengthInSamples / reader->sampleRate;
+        const double beats = durationSecs * (originalBPM / 60.0);
+        lengthBars = juce::jmax (1, (int) std::ceil (beats / 4.0));
+        fileBeats  = (float) beats;
+    }
+
+    beginEdit ("Place Audio Clip");
+    ArrangementBlock b;
+    b.clipType      = ClipType::Audio;
+    b.trackRow      = juce::jlimit (0, kNumRows - 1, targetRow);
+    b.startBar      = (int) snapBar (targetBar);
+    b.lengthBars    = lengthBars;
+    b.lengthBeats   = fileBeats;
+    b.audioFilePath = path;
+    b.originalBPM   = originalBPM;
+    b.stretchMode   = true;
+    b.routeChannel  = owner;
+    mPM.addBlock (b);
+    mSelection.clear();
+    mSelection.push_back (mPM.getNumBlocks() - 1);
+    commitEdit();
+
+    getOrCreateThumbnail (path);
+    resized();
+    repaint();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2810,18 +2973,37 @@ void ArrangementGrid::filesDropped(const StringArray& files, int x, int y)
 {
     mFileDragActive = false;
     mHasGhost = false;
-    // Multi-file drop: stagger each file onto its OWN row (baseRow, +1, +2, …)
+    // Multi-file drop: stagger each file onto its OWN row (baseRow, +1, +2, ...)
     // so every clip lives on its own track AND triggers its own mixer strip
-    // via importAudioFile → onAudioClipAdded. All start at the same bar.
+    // via importAudioFile -> onAudioClipAdded. All start at the same bar.
     const int baseRow = jlimit(0, kNumRows - 1, yToRow(y));
     const float bar   = xToBar(x);
     int placed = 0;
-    for (const auto& f : files) {
-        if (File(f).hasFileExtension("wav;mp3;aiff;flac;ogg;aif")) {
-            const int row = jmin(kNumRows - 1, baseRow + placed);
-            importAudioFile(f, row, bar);
-            ++placed;
+    for (const auto& fs : files) {
+        if (! File(fs).hasFileExtension("wav;mp3;aiff;flac;ogg;aif")) continue;
+        const int row = jmin(kNumRows - 1, baseRow + placed);
+
+        // QA-E Task 5 (2026-05-15): if the dropped file is already in the
+        // audio library, defer to StandaloneEditor's duplicate-drop prompt
+        // (Existing routing / New page / Cancel).  Resolve each library
+        // entry's stored path to an absolute File and compare against the
+        // dropped File so relative + absolute entries both match correctly.
+        const File droppedF (fs);
+        int existingLibIdx = -1;
+        for (int i = 0; i < mPM.getNumAudioLibrary(); ++i)
+        {
+            const String stored = mPM.getAudioLibraryPath (i);
+            File libFile;
+            if (onResolveStoredPath) libFile = onResolveStoredPath (stored);
+            else                     libFile = File (stored);
+            if (libFile == droppedF) { existingLibIdx = i; break; }
         }
+
+        if (existingLibIdx >= 0 && onDuplicateFileDrop)
+            onDuplicateFileDrop (droppedF, existingLibIdx, row, bar);
+        else
+            importAudioFile (fs, row, bar);
+        ++placed;
     }
 }
 
@@ -2925,18 +3107,14 @@ void ArrangementGrid::itemDropped(const SourceDetails& d)
     }
     else if (kind == "audio")
     {
-        // Resolve path from the persistent audio library (so drag works even
-        // when no existing Audio block references the file).
-        // QA-E Task 4 (2026-05-12): pass the entry's pageOwnerChannelId so
-        // the new block routes through the originating Vox/Inst/Clips page
-        // (instead of defaulting to routeChannel=0 = generic Audio strip).
-        if (idx >= 0 && idx < mPM.getNumAudioLibrary())
-        {
-            const String path = mPM.getAudioLibraryPath(idx);
-            const int    owner = mPM.getAudioLibraryPageOwner(idx);
-            if (path.isNotEmpty())
-                importAudioFile(path, row, bar, owner);
-        }
+        // QA-E Task 5 (2026-05-15): browser->grid is "place existing library
+        // entry" -- skip importSample / addAudioToLibrary / onAudioClipAdded.
+        // The file is by definition already in the library; calling
+        // importAudioFile here was the source of the spurious duplicate
+        // library entries (importSample's filename-collision fallback would
+        // copy the file to "<name> (2).wav" when juce::File equality failed
+        // for stored-vs-resolved path mismatches on Windows).
+        placeAudioLibraryEntry(idx, row, bar);
     }
     else // auto
     {

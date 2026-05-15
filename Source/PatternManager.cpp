@@ -165,12 +165,24 @@ void PatternManager::addAudioToLibrary(const juce::String& path,
                                         const juce::String& alias,
                                         int                 pageOwnerChannelId)
 {
+    // QA-E Task 5 (2026-05-15): dedup on (path, pageOwnerChannelId).  A single
+    // file can now exist in the library under multiple page owners (the
+    // "Use existing routing / New page" prompt creates a second entry with
+    // identical path but different channelId when user picks New).  Prior
+    // dedup-on-path-only forced a 1:1 file:page mapping and silently
+    // overwrote the page owner on re-add, blocking multi-page routing.
     for (auto& e : mAudioLibrary)
     {
-        if (e.path == path)
+        if (e.path == path && e.pageOwnerChannelId == pageOwnerChannelId)
+            return;   // exact duplicate -- no-op
+
+        // Legacy compat: when re-adding with channelId=0 (generic Audio
+        // category), upgrade the existing entry's owner to a real channel
+        // if one is provided.  This preserves the pre-Task-5 behavior for
+        // the recording-finalize path that always passes a real channelId.
+        if (e.path == path && e.pageOwnerChannelId == 0 && pageOwnerChannelId != 0)
         {
-            if (pageOwnerChannelId != 0)
-                e.pageOwnerChannelId = pageOwnerChannelId;
+            e.pageOwnerChannelId = pageOwnerChannelId;
             return;
         }
     }
@@ -181,6 +193,28 @@ void PatternManager::removeAudioFromLibrary(const juce::String& path)
 {
     for (auto it = mAudioLibrary.begin(); it != mAudioLibrary.end(); ++it)
         if (it->path == path) { mAudioLibrary.erase(it); return; }
+}
+
+// QA-E Task 5 (2026-05-15): library lookup helpers.  See header.
+int PatternManager::findAudioLibraryIndexByPath (const juce::String& path) const
+{
+    for (size_t i = 0; i < mAudioLibrary.size(); ++i)
+        if (mAudioLibrary[i].path == path) return (int) i;
+    return -1;
+}
+
+int PatternManager::countAudioLibraryEntriesForChannel (int channelId) const
+{
+    int n = 0;
+    for (const auto& e : mAudioLibrary)
+        if (e.pageOwnerChannelId == channelId) ++n;
+    return n;
+}
+
+void PatternManager::removeAudioFromLibraryAt (int idx)
+{
+    if (idx < 0 || idx >= (int) mAudioLibrary.size()) return;
+    mAudioLibrary.erase (mAudioLibrary.begin() + idx);
 }
 
 void PatternManager::setAudioLibraryAlias(int idx, const juce::String& alias)

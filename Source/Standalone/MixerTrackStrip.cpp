@@ -223,26 +223,8 @@ MixerTrackStrip::~MixerTrackStrip()
 {
     mFader.removeListener(this);
     mPanKnob.removeListener(this);
-    // C3 (2026-05-04): unregister the _arm listener (Vox/Inst strips only).
-    if (mApvtsForListener != nullptr && mArmParamId.isNotEmpty())
-        mApvtsForListener->removeParameterListener (mArmParamId, this);
-}
-
-// C3 (2026-05-04): drives the Arm LED's visual from the _arm APVTS value for
-// Vox/Inst strips (which don't get a ButtonAttachment because their click
-// opens the input picker instead of toggling).  Listener fires on whichever
-// thread wrote the param; bounce to the message thread before touching the
-// component.
-void MixerTrackStrip::parameterChanged (const juce::String& paramId, float newValue)
-{
-    if (paramId != mArmParamId) return;
-    const bool armed = newValue > 0.5f;
-    juce::Component::SafePointer<MixerTrackStrip> safe (this);
-    juce::MessageManager::callAsync ([safe, armed]
-    {
-        if (auto* p = safe.getComponent())
-            p->mArmBtn.setToggleState (armed, juce::dontSendNotification);
-    });
+    // QA-E Task 5 (2026-05-15): manual parameter listener removed -- arm
+    // visual sync now comes free from ButtonAttachment.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,45 +267,28 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
         mPolarityAtt = std::make_unique<ButtonAtt>(apvts, paramPrefix + "_polarity", mPolarityBtn);
     }
 
-    // Arm.  R2 (2026-04-23): for Vox / Inst strips the LED click opens the
-    // ASIO input picker (handled by MixerPage via onArmRequested), so we do
-    // NOT install a ButtonAttachment - that would auto-toggle _arm and steal
-    // the click.  Visual on/off state is driven by MixerPage writing _arm
-    // through APVTS + the timer-driven syncFromApvts already in place.  For
-    // any other strip type that still has _arm registered (legacy back-compat
-    // until R5 hides the LED), keep the old direct-toggle attachment.
+    // Arm.  QA-E Task 5 (2026-05-15): left-click is direct _arm toggle via
+    // ButtonAttachment for ALL strip types.  Vox/Inst additionally get a
+    // right-click hook that opens the input-channel picker WITHOUT arming
+    // -- lets users pick + monitor a channel without committing to record
+    // (the prior R2/C3 flow tied channel selection to arming, which blocked
+    // monitoring inputs while no strip was armed; surfaced by QA-E Task 5
+    // master-mix-fallback verify).  New flow:
+    //   * Left-click  -> toggle _arm (uses whichever channel is in _inputChannelIdx)
+    //   * Right-click -> open picker -> writes _inputChannelIdx only (no _arm)
     if (hasUtilityRow() && apvts.getParameter(paramPrefix + "_arm") != nullptr
         && ! mNoLiveInput)   // K-2: skip arm wiring entirely on sfizz-source strips
     {
+        mArmAtt = std::make_unique<ButtonAtt>(apvts, paramPrefix + "_arm", mArmBtn);
+
         if (mType == StripType::Vox || mType == StripType::Inst)
         {
-            mArmBtn.setClickingTogglesState (false);   // we own the click
             // Read mChannelId at click time - setChannelId runs AFTER setApvts
             // so a captured value would be stale (-1).
-            mArmBtn.onClick = [this]
+            mArmBtn.onRightClick = [this]
             {
                 if (onArmRequested) onArmRequested (mChannelId);
             };
-
-            // C3 (2026-05-04): the click writes _arm via the picker, but the
-            // LED visual still needs a path back from APVTS to the button.
-            // Register a parameter listener that calls setToggleState when
-            // _arm changes (writes from MixerPage::showInputChannelPicker, or
-            // any project-state restore path).  Also seed the initial visual
-            // from the current APVTS value.
-            if (mApvtsForListener != nullptr && mArmParamId.isNotEmpty())
-                mApvtsForListener->removeParameterListener (mArmParamId, this);
-            mApvtsForListener = &apvts;
-            mArmParamId       = paramPrefix + "_arm";
-            apvts.addParameterListener (mArmParamId, this);
-            const bool armedNow =
-                apvts.getRawParameterValue (mArmParamId) != nullptr
-                && apvts.getRawParameterValue (mArmParamId)->load() > 0.5f;
-            mArmBtn.setToggleState (armedNow, juce::dontSendNotification);
-        }
-        else
-        {
-            mArmAtt = std::make_unique<ButtonAtt>(apvts, paramPrefix + "_arm", mArmBtn);
         }
     }
 
@@ -360,17 +325,9 @@ void MixerTrackStrip::setNoLiveInput (bool b)
     mArmBtn.setVisible (show);
     mListenBtn.setVisible (show);
 
-    // Tear down the `_arm` parameter listener when suppressed; the LED is
-    // hidden so the listener has no work to do.  Setting back to false
-    // doesn't re-attach automatically - caller should re-run setApvts() if
-    // they need the listener restored.  In practice the source flag is set
-    // before setApvts on tab spawn, so the listener simply isn't installed.
-    if (mNoLiveInput && mApvtsForListener != nullptr && mArmParamId.isNotEmpty())
-    {
-        mApvtsForListener->removeParameterListener (mArmParamId, this);
-        mApvtsForListener = nullptr;
-        mArmParamId.clear();
-    }
+    // QA-E Task 5 (2026-05-15): the C3 (2026-05-04) parameter-listener
+    // teardown is no longer needed -- ButtonAttachment is the only path now
+    // and setApvts() rebuilds it.  Hidden LEDs simply ignore APVTS changes.
 
     if (getWidth() > 0) resized();
 }

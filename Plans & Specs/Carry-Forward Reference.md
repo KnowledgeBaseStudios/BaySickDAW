@@ -208,17 +208,35 @@ findings in [Implemented Work Log.md](Implemented Work Log.md) instead.
   downstream of spawn (post-spawn teardown OR guard fail in spawn helpers).
   **Don't fix the spawn; find the teardown.**
 
-### Recording finalize (StandaloneEditor.cpp)
+### Recording lifecycle (per-armed-strip WAV capture, post-FILE-01)
 
-- Master `addAudioToLibrary` — :9455
-- Master `dropWavAsClip` — :9478
-- Vox dry `addAudioToLibrary` — :9503
-- Vox wet `dropWavAsClip` — :9506
-- Inst `dropWavAsClip` — :9512
-- Fallback `dropWavAsClip` — :9517
-- Auto-spawn clips strip path — :9462-9473 (gated on `routeChannel == 0`).
-- **Calls present, library doesn't show entries** — REC-01 bug is in
-  `addAudioToLibrary` itself or browser refresh path.
+**StripRecorder** ([Source/PluginProcessor.h:653-666](Source/PluginProcessor.h:653))
+- One per armed Vox/Inst strip; per `_arm` APVTS flag scan in `startRecording` ([Source/PluginProcessor.cpp:3463-3539](Source/PluginProcessor.cpp:3463)).
+- Vox: dry writer (raw pre-chain ASIO input) + wet writer (post-realtime-pitch BaySickVocalProcessor tap pushed via `setWetRecorder` at [PluginProcessor.cpp:3514-3517](Source/PluginProcessor.cpp:3514)).
+- Inst: dry writer only (no realtime stage to bake into a wet capture).
+
+**Tap helpers** ([Source/PluginProcessor.cpp:3581-3625](Source/PluginProcessor.cpp:3581))
+- `tapDryRecorder(channelId, monoSource, numSamples)` writes raw mono into the dry file.
+- Called from the serial Vox/Inst armed paths in `processBlock` + (under MT flag) from `VoxStripTask` / `InstStripTask`.
+- Wet tap: `BaySickVocalProcessor::setWetRecorder(...)` pushed at `startRecording`; engine's `processBlock` writes post-realtime / pre-vocal-chain audio into the wet file.  Cleared BEFORE stopping the writer at `stopRecording` ([PluginProcessor.cpp:3555-3562](Source/PluginProcessor.cpp:3555)) so the audio thread can't push into a stopped recorder.
+
+**Finalize** ([Source/Standalone/StandaloneEditor.cpp:9842-9947](Source/Standalone/StandaloneEditor.cpp:9842))
+- `stopRecording()` returns `RecordResult` with `stripFiles` (dry) + `stripWetFiles` (wet, Vox only) maps + master fallback file + MIDI notes + start beat.
+- For each **Vox** strip: WET file goes on the grid + library via `dropWavAsClip(wetFile, chId)` ([:9924](Source/Standalone/StandaloneEditor.cpp:9924)); DRY file goes in audioLibrary only (not on grid) via `addAudioToLibrary(dryRel, {}, chId)` ([:9921](Source/Standalone/StandaloneEditor.cpp:9921)) so the BaySickPitch offline editor can load it.  Fallback: if WET capture failed, DRY also goes on the grid.
+- For each **Inst** strip: single DRY file → grid + library via `dropWavAsClip(dryFile, chId)` ([:9930](Source/Standalone/StandaloneEditor.cpp:9930)).
+- **Master fallback** (no Vox/Inst armed): the master capture lands via `dropWavAsClip(res.masterFile, /*routeChannel=*/0)` ([:9893](Source/Standalone/StandaloneEditor.cpp:9893)) and is treated as an Audio-row clip (auto-spawns a new Audio row + InsertNode + mixer strip).
+
+**File naming convention** ([Source/PluginProcessor.cpp:3498-3510](Source/PluginProcessor.cpp:3498))
+- Dry: `<project> - <Vox|Inst> N - <ts> - DRY.wav`
+- Wet: `<project> - <Vox|Inst> N - <ts> - WET.wav` (Vox only)
+- Master fallback: `<project> - Master - <ts>.wav`
+- `<ts>` is Windows-filename-safe `YYYY-MM-DD HH-MM-SS`.
+- Filename suffix is the wet/dry tag; browser display falls back to filename when no alias is set.
+
+**Page-binding (post-Task-4 library-driven model)** ([Source/Standalone/StandaloneEditor.cpp:9870 + :9921](Source/Standalone/StandaloneEditor.cpp:9870))
+- Recording finalize tags `pageOwnerChannelId` on the library entry via the 3rd arg to `addAudioToLibrary(path, {}, routeChannel)` (DRY entries on Vox) and via `dropWavAsClip(..., chId)` which calls `addAudioToLibrary(..., routeChannel)` internally (WET on Vox, DRY on Inst, master fallback).
+- The pre-Task-4 `VoxPage::setDryClipPath` direct-binding API was removed in the FILE-01 rewrite; the library entry's `pageOwnerChannelId` tag is now the single source of truth for "which page does this recording belong to."
+- Browser visibility walks the audioLibrary by `pageOwnerChannelId` range at `onEnumerateAudio` ([Source/Standalone/StandaloneEditor.cpp:2216-2310](Source/Standalone/StandaloneEditor.cpp:2216)) — entries are grouped by their owning page's channel id (Vox/Inst/Clips/Audio).
 
 ### Builder grid drop & block resize (BuilderPage.cpp)
 

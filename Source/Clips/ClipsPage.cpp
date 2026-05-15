@@ -440,10 +440,16 @@ void ClipsPage::requestDelete()
             if (p->onDeleteRequested) p->onDeleteRequested();
     };
 
+    // QA-E Task 5 (2026-05-15): tab close now cascades library cleanup --
+    // the audio library entry for this clip's file gets removed alongside
+    // the page (per the "last file out shuts it all down" rule).  The
+    // physical WAV in the project's Samples folder stays on disk so the
+    // user can drag it back in to re-create the entry + page later.
     const juce::String warning =
         "Deleting this clip removes its Player, Mixer Strip, "
-        "Effects Rack, and Piano Roll.\n"
-        "Audio files in your project's Audio folder will be kept.";
+        "Effects Rack, Piano Roll, and the audio library entry for the "
+        "attached file.\n"
+        "The audio file in your project's Samples folder stays on disk.";
 
     if (mPlayerProc != nullptr && isPatchDirty())
     {

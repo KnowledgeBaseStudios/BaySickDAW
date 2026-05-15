@@ -675,10 +675,15 @@ void InstPage::requestDelete()
             if (p->onDeleteRequested) p->onDeleteRequested();
     };
 
+    // QA-E Task 5 (2026-05-15): tab close now cascades library cleanup --
+    // every recording made on this Inst tab gets removed from the audio
+    // library alongside the page.  Physical WAVs in the project's Samples
+    // folder stay on disk so the user can drag them back in later.
     const juce::String warning =
         "Deleting this inst tab removes its BaySickPedals, BaySickNAM/IR, "
-        "Mixer Strip, and Effects Rack.\n"
-        "Audio files in your project's Audio folder will be kept.";
+        "Mixer Strip, Effects Rack, and the audio library entries for "
+        "every recording made on this tab.\n"
+        "The audio files in your project's Samples folder stay on disk.";
 
     if (getEngineProcessor() != nullptr && isPatchDirty())
     {

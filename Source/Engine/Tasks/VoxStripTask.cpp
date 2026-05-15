@@ -122,22 +122,29 @@ void VoxStripTask::run()
     const auto* snapshot = mCtx->liveInputSnapshot;
     const int   snapChs  = (snapshot != nullptr) ? snapshot->getNumChannels() : 0;
 
-    const bool armed = (armP != nullptr) && armP->load() > 0.5f
-                    && chIdx >= 0
-                    && chIdx <  snapChs;
+    const bool channelOK = (chIdx >= 0 && chIdx < snapChs);
+    const bool armed     = (armP    != nullptr) && armP   ->load() > 0.5f && channelOK;
+    const bool listen    = (listenP != nullptr) && listenP->load() > 0.5f;
+    // QA-E Task 5 (2026-05-15): live input flows through the chain whenever
+    // either arm OR listen is engaged (with a channel selected).  Prior
+    // behavior gated on armed-only, making "monitor without recording"
+    // impossible -- surfaced by master-mix-fallback test scenario.
+    const bool active    = channelOK && (armed || listen);
 
-    // ── Live-input copy (armed) ───────────────────────────────────────────────
-    if (armed)
+    // ── Live-input copy (active) ──────────────────────────────────────────────
+    if (active)
     {
         // 2026-05-06 (Batch 9b Item 8): dry-recorder tap (RAW pre-chain mono).
         // Mirrors the serial path's inline loop - captured here so the recorded
         // file is the unprocessed DI; chain runs ONCE on the dry source.
+        // Only fire when ARMED (monitor-only mode produces no recording).
         // Pre-existing race risk between this read of mStripRecorders and
         // message-thread mutation in startRecording / stopRecording is
         // documented at the helper site; not closed in 9b.
-        mProcessor->tapDryRecorder (channelId,
-                                     snapshot->getReadPointer (chIdx),
-                                     n);
+        if (armed)
+            mProcessor->tapDryRecorder (channelId,
+                                         snapshot->getReadPointer (chIdx),
+                                         n);
 
         const int rightCh = (isStereo && chIdx + 1 < snapChs) ? (chIdx + 1) : chIdx;
         if (blockView.getNumChannels() > 0)
@@ -182,11 +189,9 @@ void VoxStripTask::run()
 
     // ── Listen gate ───────────────────────────────────────────────────────────
     // Armed && !listen -> kill output (don't route to the bus).  Unarmed
-    // pages always route (engine may produce its own audio from MIDI).
-    if (armed)
-    {
-        const bool listen = (listenP != nullptr) && listenP->load() > 0.5f;
-        if (! listen)
-            blockView.clear();
-    }
+    // pages always route (engine may produce its own audio from MIDI;
+    // unarmed-listen-on routes the live input through naturally because the
+    // input was copied into blockView by the `active` branch above).
+    if (armed && ! listen)
+        blockView.clear();
 }

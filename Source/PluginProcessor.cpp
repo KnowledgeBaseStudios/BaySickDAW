@@ -2186,15 +2186,21 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 // (mono -> dual-mono).  Else silence (engine generates from MIDI
                 // or sits silent if it has no internal source).
                 const juce::String voxPrefix = "mixer_vox_" + juce::String (vi);
-                const auto* armP = apvts.getRawParameterValue (voxPrefix + "_arm");
-                const auto* idxP = apvts.getRawParameterValue (voxPrefix + "_inputChannelIdx");
+                const auto* armP    = apvts.getRawParameterValue (voxPrefix + "_arm");
+                const auto* idxP    = apvts.getRawParameterValue (voxPrefix + "_inputChannelIdx");
                 const auto* stereoP = apvts.getRawParameterValue (voxPrefix + "_inputChannelStereo");
-                const int   chIdx = (idxP != nullptr) ? (int) idxP->load() : -1;
+                const auto* listenP = apvts.getRawParameterValue (voxPrefix + "_listen");
+                const int   chIdx    = (idxP != nullptr) ? (int) idxP->load() : -1;
                 const bool  isStereo = (stereoP != nullptr) && stereoP->load() > 0.5f;
-                const bool  armed = (armP != nullptr) && armP->load() > 0.5f
-                                 && chIdx >= 0
-                                 && chIdx < mLiveInputSnapshot.getNumChannels();
-                if (armed)
+                const bool  channelOK = (chIdx >= 0 && chIdx < mLiveInputSnapshot.getNumChannels());
+                const bool  armed    = (armP    != nullptr) && armP   ->load() > 0.5f && channelOK;
+                const bool  listen   = (listenP != nullptr) && listenP->load() > 0.5f;
+                // QA-E Task 5 (2026-05-15): live input flows through the chain
+                // whenever EITHER arm OR listen is engaged (with a channel
+                // selected).  Prior behavior gated on armed-only, making
+                // "monitor without recording" impossible.
+                const bool  active   = channelOK && (armed || listen);
+                if (active)
                 {
                     const int n = numSamples;
                     // I-16 G-9: dry recorder tap (RAW pre-chain mono ASIO).
@@ -2204,9 +2210,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     // 2026-05-06 (Batch 9b Item 8): inline loop migrated to
                     // tapDryRecorder helper so VoxStripTask::run can call
                     // the same path under MT mode.
-                    tapDryRecorder (MixerChannelIds::voxInsert (vi),
-                                     mLiveInputSnapshot.getReadPointer (chIdx),
-                                     n);
+                    // QA-E Task 5 (2026-05-15): only fire when ARMED
+                    // (monitor-only mode produces no recording).
+                    if (armed)
+                        tapDryRecorder (MixerChannelIds::voxInsert (vi),
+                                         mLiveInputSnapshot.getReadPointer (chIdx),
+                                         n);
 
                     // B2 (2026-05-04): stereo input pair -> copy chIdx into L,
                     // chIdx+1 into R.  Falls back to dual-mono if the right
@@ -2228,16 +2237,10 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 mVoxEngines[vi]->processBlock(mVoxEngineScratch, voxPageMidi[vi]);
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Vox, vi,
                                           mVoxEngineScratch, bpmForInserts, anySolo);
-                // I-16 G-9: when armed, gate routing on _listen (monitor btn).
-                // Unarmed pages always route (engine may produce its own audio
-                // from MIDI input).
-                bool routeOutput = true;
-                if (armed)
-                {
-                    const auto* listenP = apvts.getRawParameterValue (voxPrefix + "_listen");
-                    routeOutput = (listenP != nullptr) && listenP->load() > 0.5f;
-                }
-                if (routeOutput)
+                // I-16 G-9 + QA-E Task 5: armed && !listen -> kill output.
+                // Unarmed + listen -> routes naturally (input copied above).
+                // Unarmed + !listen -> silent strip; routing zero-buffer is fine.
+                if (! armed || listen)
                     routeInsertOutput(MixerChannelIds::voxInsert(vi),
                                        mVoxEngineScratch, numSamples);
             }
@@ -2306,16 +2309,23 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 }
 
                 const juce::String instPrefix = "mixer_inst_" + juce::String (ii);
-                const auto* armP = apvts.getRawParameterValue (instPrefix + "_arm");
-                const auto* idxP = apvts.getRawParameterValue (instPrefix + "_inputChannelIdx");
+                const auto* armP    = apvts.getRawParameterValue (instPrefix + "_arm");
+                const auto* idxP    = apvts.getRawParameterValue (instPrefix + "_inputChannelIdx");
                 const auto* stereoP = apvts.getRawParameterValue (instPrefix + "_inputChannelStereo");
-                const int   chIdx = (idxP != nullptr) ? (int) idxP->load() : -1;
+                const auto* listenP = apvts.getRawParameterValue (instPrefix + "_listen");
+                const int   chIdx    = (idxP != nullptr) ? (int) idxP->load() : -1;
                 const bool  isStereo = (stereoP != nullptr) && stereoP->load() > 0.5f;
-                const bool  armed = ! sfizzActive
-                                 && (armP != nullptr) && armP->load() > 0.5f
-                                 && chIdx >= 0
-                                 && chIdx < mLiveInputSnapshot.getNumChannels();
-                if (armed)
+                const bool  channelOK = (chIdx >= 0 && chIdx < mLiveInputSnapshot.getNumChannels());
+                const bool  armed    = ! sfizzActive
+                                    && (armP    != nullptr) && armP   ->load() > 0.5f && channelOK;
+                const bool  listen   = ! sfizzActive
+                                    && (listenP != nullptr) && listenP->load() > 0.5f;
+                // QA-E Task 5 (2026-05-15): live input flows through the chain
+                // whenever EITHER arm OR listen is engaged (with a channel
+                // selected).  sfizz-source slots ignore both -- sfizz is the
+                // source, no live input.
+                const bool  active   = channelOK && (armed || listen);
+                if (active)
                 {
                     const int n = numSamples;
                     // I-16 G-9: dry recorder tap for Inst (single file -- no
@@ -2323,9 +2333,11 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     // 2026-05-06 (Batch 9b Item 8): inline loop migrated to
                     // tapDryRecorder helper so InstStripTask::run can call
                     // the same path under MT mode.
-                    tapDryRecorder (MixerChannelIds::instInsert (ii),
-                                     mLiveInputSnapshot.getReadPointer (chIdx),
-                                     n);
+                    // QA-E Task 5 (2026-05-15): only fire when ARMED.
+                    if (armed)
+                        tapDryRecorder (MixerChannelIds::instInsert (ii),
+                                         mLiveInputSnapshot.getReadPointer (chIdx),
+                                         n);
 
                     // B2 (2026-05-04): stereo input pair -> copy chIdx into L,
                     // chIdx+1 into R.  Falls back to dual-mono on the right
@@ -2342,15 +2354,11 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 mInstEngines[ii]->processBlock(mInstEngineScratch, instPageMidi[ii]);
                 mVibeGraph.processInsert(VibeGraph::InsertKind::Inst, ii,
                                           mInstEngineScratch, bpmForInserts, anySolo);
-                // I-16 G-9: armed -> gate routing on _listen.  Unarmed -> route.
-                // K-2: sfizz-source slots always route (no live-input gate).
-                bool routeOutput = true;
-                if (armed)
-                {
-                    const auto* listenP = apvts.getRawParameterValue (instPrefix + "_listen");
-                    routeOutput = (listenP != nullptr) && listenP->load() > 0.5f;
-                }
-                if (routeOutput)
+                // I-16 G-9 + QA-E Task 5: armed && !listen -> kill output.
+                // Unarmed + listen -> route naturally.  sfizz-source slots
+                // always route (armed is false, listen is false; falls into
+                // the "always route" else branch).
+                if (! armed || listen)
                     routeInsertOutput(MixerChannelIds::instInsert(ii),
                                        mInstEngineScratch, numSamples);
             }

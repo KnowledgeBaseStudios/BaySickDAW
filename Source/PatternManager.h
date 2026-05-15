@@ -439,6 +439,21 @@ public:
                                                 const juce::String& alias = {},
                                                 int                 pageOwnerChannelId = 0);
     void                 removeAudioFromLibrary(const juce::String& path);
+
+    // QA-E Task 5 (2026-05-15): library lookup helpers for drag dedupe +
+    // last-file-out delete cascade.
+    // findAudioLibraryIndexByPath: exact string match on stored path.
+    //   Returns -1 if not found.
+    // countAudioLibraryEntriesForChannel: how many entries the given page
+    //   channel owns (used to detect "deleting the LAST file -> cascade
+    //   page close").
+    int                  findAudioLibraryIndexByPath        (const juce::String& path) const;
+    int                  countAudioLibraryEntriesForChannel (int channelId) const;
+    // QA-E Task 5: remove a specific entry by index (precise: multiple
+    // entries may share a path post-schema-change).  removeAudioFromLibrary
+    // (by path) still removes the FIRST matching entry for legacy callers.
+    void                 removeAudioFromLibraryAt           (int idx);
+
     int                  getNumAudioLibrary    () const { return (int)mAudioLibrary.size(); }
     const juce::String&  getAudioLibraryPath   (int idx) const { return mAudioLibrary[idx].path; }
     const juce::String&  getAudioLibraryAlias  (int idx) const { return mAudioLibrary[idx].alias; }

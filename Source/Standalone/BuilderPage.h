@@ -170,6 +170,11 @@ public:
     std::function<void(int)>                  onRenderPattern;   // right-click → Render to WAV
     std::function<void(const juce::String&)>  onImportAudio;     // File → Import Audio (path)
     std::function<void()>                     onArrangementChanged; // delete-block triggers → rebuild
+    // QA-E Task 5 (2026-05-15): fires when the user deletes the LAST library
+    // entry owned by a page (Clips / Vox / Inst).  StandaloneEditor walks
+    // mPages to find the owning page by channelId and closes its ribbon tab.
+    // Unwired -> no page close happens; entry + blocks already removed.
+    std::function<void(int channelId)>        onClosePageForChannelId;
     // Resolves an AutomationLane to a display label (honors userDisplayName,
     // falls back to the auto-generated "Channel - Effect - Param" format).
     // Set by StandaloneEditor; null on construction.
@@ -230,6 +235,15 @@ private:
 
     void rebuildPatternRows();
     void rebuildAudioRows();         // G-5: now rebuilds the tree, not the flat list
+
+    // QA-E Task 5 (2026-05-15): browser Delete -> confirmation prompt +
+    // last-file-out cascade.  Shared between the tree right-click handler
+    // (showAudioTreeContextMenu) and the flat-list right-click handler.
+    // Prompts the user, on confirm cascade-removes matching blocks, removes
+    // the specific library entry by index, and (if this was the page's last
+    // file) fires onClosePageForChannelId so StandaloneEditor closes the
+    // owning Clips / Vox / Inst tab.
+    void confirmAndDeleteLibraryEntry (int libIdx);
     void rebuildAutomationRows();
     void switchTab(int t);
     void selectPattern(int idx);
@@ -382,6 +396,15 @@ public:
     // creates it, then re-invokes importAudioFile with the original args so
     // the drop completes after project creation.
     std::function<void(const juce::File& src, int row, float bar)> onDropWithoutProject;
+
+    // QA-E Task 5 (2026-05-15): fires when a disk drop's file is already in
+    // the audio library.  StandaloneEditor shows a "Use existing routing /
+    // New page and strip / Cancel" prompt and either calls back into
+    // placeAudioLibraryEntry (Existing) or spawns a forced-new Clips page
+    // and adds a block routed to it (New).  Unwired = fall back to the
+    // default importAudioFile path (existing pre-Task-5 behavior).
+    std::function<void(const juce::File& dropped, int libIdx, int row, float bar)>
+        onDuplicateFileDrop;
     // Resolves an AutomationLane to a display label. Used by drawAutomationClip
     // so on-grid blocks show "Channel - Effect - Param" (or the user's rename)
     // instead of the raw paramId. Null = fall back to paramId.
@@ -420,6 +443,16 @@ public:
     // -- Vox/Inst-routed clips play through the page's chain, not an
     // Audio strip.  Mirrors commitRecordingResult's dropWavAsClip pattern.
     void importAudioFile(const juce::String& path, int targetRow, float targetBar, int routeChannel = 0);
+
+    // QA-E Task 5 (2026-05-15): "place existing library entry on grid" helper.
+    // Used by:
+    //   * itemDropped browser->grid drop ("audio" kind) -- always uses this
+    //     path since the file is by definition already in the library.
+    //   * filesDropped disk-drop "Existing routing" prompt callback.
+    // SKIPS importSample (no copy), addAudioToLibrary (entry exists), and
+    // onAudioClipAdded (routed clip, page exists).  Just resolves the path,
+    // reads metadata, creates a routed block.
+    void placeAudioLibraryEntry(int libIdx, int targetRow, float targetBar);
 
     // ── Public coordinate helpers (used by BuilderPage zoom anchoring) ────
     int   barToX(float bar) const;

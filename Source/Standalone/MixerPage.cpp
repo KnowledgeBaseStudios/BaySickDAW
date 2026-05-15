@@ -1924,9 +1924,12 @@ void MixerPage::showInputChannelPicker(int channelId)
     for (const auto& g : groups)
     {
         const int itemId = g.isPair ? (200 + g.startIdx) : (100 + g.startIdx);
-        const bool ticked = curArmed
-            && curIdx == g.startIdx
-            && curStereo == g.isPair;
+        // QA-E Task 5 (2026-05-15): tick reflects the current channel
+        // selection regardless of arm state.  A user can have a channel
+        // assigned for monitoring without arming; the picker should still
+        // show which channel is the active assignment.
+        const bool ticked = (curIdx == g.startIdx)
+                          && (curStereo == g.isPair);
         menu.addItem (juce::PopupMenu::Item (g.label)
                         .setID (itemId)
                         .setTicked (ticked));
@@ -1957,8 +1960,15 @@ void MixerPage::showInputChannelPicker(int channelId)
                     p->getNormalisableRange().convertTo0to1 ((float) newIdx));
             if (auto* p = self->mProcessor.apvts.getParameter (prefix + "_inputChannelStereo"))
                 p->setValueNotifyingHost (disarm ? 0.f : (isStereoPick ? 1.f : 0.f));
-            if (auto* p = self->mProcessor.apvts.getParameter (prefix + "_arm"))
-                p->setValueNotifyingHost (disarm ? 0.f : 1.f);
+            // QA-E Task 5 (2026-05-15): picker no longer auto-arms.  Arm state
+            // is toggled by left-clicking the Arm LED; the picker (right-click)
+            // only changes the channel assignment.  "Disarm" menu item still
+            // clears _arm explicitly as an in-picker convenience.
+            if (disarm)
+            {
+                if (auto* p = self->mProcessor.apvts.getParameter (prefix + "_arm"))
+                    p->setValueNotifyingHost (0.f);
+            }
 
             // Display name: for stereo pairs, show "13/14: ..." composite.
             juce::String displayName;
