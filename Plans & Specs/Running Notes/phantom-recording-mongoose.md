@@ -453,4 +453,809 @@ Library-driven page-owner model implemented per §9 17th Forks entry.  Source di
 
 ---
 
+## 2026-05-14 — Post-Task-4-verify design decisions (recording-lifecycle + offline editors)
+
+Task 4 source verify cycle landed `1d928fc` (library-driven page-owner model: AudioLibraryEntry + browser walk rewrite + Vox/Inst mClipPath removal + Clips transitional retention).  Verify pass surfaced a recording-side architectural bug + opened a longer design discussion about how the recording lifecycle, BaySickPitch, and BaySickAlign should actually work end-to-end.  This entry captures the WHY behind each decision so the dedicated batches that pick this work up later have the full design context, not just bullet points.
+
+Two architectural bugs surfaced + got routed:
+
+1. Multi-take WET recording captures playback bleed (recording-lifecycle architecture batch).
+2. Audio-clip block resize is visual-only — backend doesn't time-stretch (routing TBD).
+
+Three offline-editor-shaped features got their design locked:
+
+3. BaySickPitch — Mode C (realtime applicator + Render/bake).
+4. BaySickAlign — channel-composite-driven, single warp map per channel pair.
+5. BaySickAlign existing editor needs full redesign with distinct visual identity + functional DSP wiring.
+
+Plus one prerequisite (channel-composite renderer) + one mid-batch clarification (Task 9 dirty-flag scope) + one sequencing note.
+
+### 1. Multi-take recording capture-bleed bug
+
+**What we agreed:** route to its own dedicated recording-lifecycle architecture batch.  NOT a quick fix; needs the dual-buffer model in §2 below to land first.
+
+**Symptom (surfaced during Task 4 verify):** record take 2 on a Vox page that already has take 1 on the grid → take 2's WET file captures take 1's playback bleed instead of fresh live mic input.
+
+**Root cause:** with take 1 on the grid, the FilePlay Pass 1 pre-scan sets `mVoxFilePlayActive[vi] = true` for that page during the overlap window.  Active FilePlay drives the BaySickVocal engine with the decoded take-1 audio → the engine's WET tap captures the FilePlay-decoded audio, not the live mic input.  In the same engine loop, the live-input branch is skipped while FilePlay is active.  DRY recorder is also broken in this state because `tapDryRecorder` lives in the now-skipped live branch.
+
+**Why it can't be a one-line patch:** the engine architecture currently picks ONE input source per processBlock call (live OR FilePlay), and recorder taps live inside that branch.  Fixing the bleed requires the engine to accept BOTH inputs simultaneously during armed recording AND to expose distinct pre-merge tap points for the recorder.  That's a signature / API change to BaySickVocalProcessor (and a parallel one for BaySickInst), not a flag flip.
+
+**Status:** open finding; dedicated batch to be named.  Not folded into QA-E.  QA-E Task 4 close stands; recording-lifecycle batch slots after the BaySickAlign-redesign-planning detour closes.
+
+### 2. Dual-buffer recording architecture (the model the recording-lifecycle batch implements)
+
+**What we agreed (Vox path during armed recording):**
+
+```
+live mic in ─┬─[DRY tap → DRY recorder]──┐
+             │                            │
+             └─[realtime pitch if         │
+                bsv_pitch_realtime_bypass │
+                is OFF]                   │
+                     │                    │
+                     └─[WET tap → WET     │
+                        recorder, only    │
+                        when realtime     │
+                        pitch is ON]      │
+                                          ├─ post-pitch-live ──┐
+                                                                │
+                                                                ├─ summed ─→ rack → EQ → out
+                                                                │
+existing FilePlay clip ─→ [decoded clip, bypasses realtime ────┘
+overlapping playhead       pitch entirely]
+```
+
+**Inst parallel (no pitch stage / no WET tap):**
+
+```
+live in ──[DRY tap → DRY recorder]──┐
+                                     ├─ summed ─→ BaySickPedals → BaySickNAMIR → out
+existing FilePlay clip ─────────────┘
+```
+
+**Why:** the user has to HEAR both live + already-recorded clips through the same channel during armed recording (so they can perform along to take 1 while recording take 2), AND the recorder MUST capture only fresh live audio (no bleed from playback).  The single-input branch architecture can't satisfy both.  Dual-buffer means the engine takes two input streams, runs pitch correction (Vox) on the live stream only, taps recorder OUTPUT at pre-merge live-only points, and only sums into one stream AFTER the recorder taps fire.
+
+**API shape:** BaySickVocalProcessor needs a new secondary-input setter or a new processBlock signature variant that accepts both buffers.  Same for BaySickInst.  Recorder taps move out of the (current) live-vs-FilePlay branch and into the pre-merge point on the live stream only.
+
+**Status:** design locked; implementation lives in the recording-lifecycle batch (S1-S6 series implied).
+
+### 3. Conditional WET recording
+
+**What we agreed:** `startRecording` reads `bsv_pitch_realtime_bypass` from APVTS; if pitch is bypassed, the WET recorder is never allocated.  Only DRY recording happens.
+
+**Why:** when realtime pitch is OFF the WET signal == the DRY signal (no pitch correction in the chain).  Writing two identical files is wasted disk + confusing semantics ("WET" implies post-effect; if no effect is applied there's no wet).  Storage win + correctness win.
+
+**Status:** design locked; folds into the recording-lifecycle batch.
+
+### 4. BaySickPitch — Mode C (realtime applicator + Render/bake)
+
+**What we agreed:**
+
+- **Default mode: realtime applicator.**  User opens a clip in the BaySickPitch editor, edits the pitch curve, hits Play; playback applies the edits per-block via PSOLA / PhaseVocoder DSP.  Iterative editing — try / listen / tweak without re-rendering each time.
+- **Render / Freeze action available:** user-triggered action bakes the edits into a new wav file at `<project>/Pitched/<name>_pitched_v<N>.wav` (path subject to spec call).  Per-clip `usesOfflineRender` flag set; subsequent playback loads the rendered wav directly, dropping the runtime DSP cost.
+- **Per-clip metadata storage as XML.**  Editor's file picker lists library entries filtered by `pageOwnerChannelId == this Vox page's voxInsert(pageIdx)`.  User picks any clip; editor loads that clip's saved edits.  Switching to a different clip in the picker loads that clip's edits.  Edits are per-clip-and-page, not global.
+- **CPU/DSP at playback:** ~10-30% per active clip with edits applied.  Same order of magnitude as our existing PhaseVocoder-driven BPM stretch on audio clips.  Lazy-activate: clips with zero edits cost zero — the applicator only spins up when a clip actually has stored edits.
+- **DSP not yet built.**  Editor + PitchTrackerYIN exist already from prior work; the realtime applicator DSP is net-new and lands in the BaySickPitch dedicated batch.
+
+**Why realtime-applicator-default vs render-default:** the iterative editing UX wins.  Users editing pitch curves want immediate audible feedback as they drag points around — render-default forces a bake/listen/edit/re-bake loop that breaks flow.  Render/Freeze is offered as an opt-in optimization for when the user is done editing AND the runtime cost matters (e.g., 8 simultaneous Pitched clips during mixdown).  `usesOfflineRender` flag is per-clip so freezing one clip doesn't lock the others out of further editing.
+
+**Why per-clip metadata vs global:** different clips need different edits.  A vocal take on bar 1 has different note targets than a vocal take on bar 32.  Per-clip storage scoped by `pageOwnerChannelId` keeps each Vox page's clip library independent.
+
+**Status:** design locked; implementation lives in the BaySickPitch dedicated batch.  Lands AFTER the recording-lifecycle batch (Pitch needs the dual-buffer recording semantics established first so it has well-defined DRY clips to edit).
+
+### 5. BaySickAlign — channel-composite-driven, single warp map per channel pair
+
+**What we agreed:**
+
+- **User picks Guide channel + Dub channel** (NOT clip-by-clip).  System renders both channels' grid composites — timeline-summed audio of every clip on each channel at its grid position.
+- **`BaySickAlignDSP::analyzeOffline(guideComposite, dubComposite, ...)` is pure offline function that already exists.**  Takes two mono buffers in, returns one `WarpMap` out.  We DO NOT do realtime-capture-while-playing because we already have all the audio on disk as clips — feeding the offline analyzer directly with channel composites is strictly better than re-recording in realtime.
+- **Single warp map per channel pair (NOT per-clip).**  Stored in project XML under the dub channel's state.  Per-clip timing variance is preserved naturally because each clip's onsets contribute anchors at their grid position; the warp curve at any timeline position reflects whatever clip(s) on the dub channel sit there.
+- **Pitch matching extends the warp map** with per-anchor pitch shift values.  At each anchor's time, YIN detects F0 on both buffers; the semitone delta gets stored alongside the time-warp ratio.  Same data structure (`WarpMap`), two values per anchor.
+- **Playback applicator:** when a dub-channel clip plays via FilePlay, look up the dub channel's warp map; for each block render, apply the slice corresponding to the current playhead position.  PhaseVocoder does both time-stretch (from warp ratio) AND pitch shift (from anchor semitones) in one pass.
+- **Render / Freeze action:** bakes aligned + pitch-matched output to `<project>/Aligned/<name>_aligned_v<N>.wav` (matches the existing Option C design in `BaySickAlignDSP.h`).
+- **Editor UI: three-lane composite display** — guide composite (top), dub composite (middle), aligned output preview (bottom).  Strength slider.  Analyze button.
+- **Stale handling:** when either guide channel or dub channel grid changes (clip added / removed / moved), the warp map's reference data is outdated.  Mark stale; show visible "re-analyze" button.  NOT auto-re-analyze (analysis is expensive + user-disrupting).
+- **Two-stage workflow with BaySickPitch:** BaySickAlign first (time alignment + coarse channel-level pitch match) → BaySickPitch second (fine note-level pitch correction on individual clips).
+
+**Why channel-composite vs clip-by-clip:** realistic backing-vocal alignment is across-the-whole-take, not clip-by-clip.  A dub take that's 30ms early on bar 5 and 50ms late on bar 12 needs ONE consistent warp curve, not 47 independent clip warps that fight each other at the boundaries.  Channel-composite analysis sees the full timeline and produces a single coherent warp.
+
+**Why offline-analyze (not realtime capture):** we own all the audio on disk before the user clicks Analyze.  Realtime capture is what you do when you don't have the data yet (live tracking session); offline analyze is strictly better when you do.  This is a real advantage of the in-box workflow.
+
+**Why single warp map per pair vs storing per-clip:** the warp map is keyed by timeline position, not clip identity.  Clip onsets contribute anchors; the resulting curve handles clip boundaries naturally.  Storing one map per pair (instead of N maps for N clips) also means re-rendering is O(channels), not O(clips), and stale-detection has one trigger surface, not N.
+
+**Status:** design locked; implementation lives in the BaySickAlign dedicated batch.
+
+### 6. BaySickAlign existing editor needs full redesign
+
+**What we agreed:**
+
+- The current `BaySickAlignEditor` is a non-functional UI shell.  The Match Pitch panel + all its controls (MATCH PITCH, MAX DIFFERENCE, TARGET MODE, PITCH TARGET, SMART PITCH, ALGORITHM, TRANSPOSE) have no DSP backing — paint-only widgets.
+- **Editor will be redesigned with a distinct visual identity AND distinct control names + layout.**  This is a design / scope decision: BaySickAlign is a BaySickDAW first-class feature and needs an editor whose visual + naming identity is its own.
+- **Every UI control must wire to actual DSP functionality before commit.**  No paint-only widgets ship.  "No stubs" gate applies to the entire dedicated batch: every line item ships functional code + UI together, end-to-end verifiable before that line item commits.
+- **Routed to its own dedicated batch.**  NOT folded into QA-E.  The redesign is significant enough scope that it deserves its own plan + close cycle.
+
+**Why distinct identity:** BaySickAlign is one of BaySickDAW's headline workflow features (in-box, channel-composite-driven, two-stage with BaySickPitch).  The editor's visual + naming language should match the rest of BaySickDAW's L&F so it feels native, not vestigial.
+
+**Why "no stubs" gate:** the current editor's paint-only widgets are exactly the trap we want to avoid going forward.  Shipping UI without DSP makes the feature look complete in screenshots but breaks when users actually try it.  Wiring DSP + UI in lockstep, per line item, keeps the demo and the product in sync.
+
+**Status:** design locked.  Inventory pass on the existing editor + cross-reference to the §5 BaySickAlign dedicated batch entry is the next-action work in §10 below.
+
+### 7. Composite renderer (prerequisite for both BaySickAlign and BaySickPitch)
+
+**What we agreed:** build a function that walks a channel's grid clips and renders their summed playback timeline into a single mono buffer (offline, message thread).  Same code path as the "individual track export" feature already on the main plan — build it once, use it everywhere.
+
+**Why shared:**
+
+- BaySickAlign needs guide-channel + dub-channel composites for `analyzeOffline`.
+- BaySickPitch (in non-default modes) may need a clip-summed buffer to bake against.
+- Individual track export needs the same thing for WAV-out.
+- Any future feature that operates on "this channel's playback as a single buffer" needs the same thing.
+
+Three-way duplication of the same walk + sum logic is the smell to avoid.  Centralizing once makes each consumer trivial.
+
+**Status:** prerequisite work; lands first in whichever dedicated batch needs it first (most likely BaySickAlign, since that's the next dedicated batch slotted).
+
+### 8. Audio-clip-resize-doesn't-stretch finding
+
+**What we agreed:** open finding; routing TBD by Jeff.
+
+**Symptom (surfaced separately during Task 4 verify):** user resizes an audio clip block on the Builder grid.  Visual stretches / compacts as expected.  Audio doesn't time-stretch — clip plays a different portion of itself instead of stretching its existing content.
+
+**Architectural gap:** block-resize event updates the visual representation + the block's `endBar` field, but doesn't propagate to the playback engine state.  AudioClipPlayer's stretch ratio isn't recomputed; PhaseVocoder isn't told the new target duration.
+
+**Pattern blocks have similar shape:** visual feedback present, backend doesn't follow.  Same family of bug.
+
+**Status:** captured here as a finding; routing decision (own dedicated batch / fold into existing audio-engine batch / Future State) is Jeff's call.  NOT inside QA-E.
+
+### 9. Dirty-flag scope clarification (Task 9 in current plan)
+
+**What we agreed:** the existing Task 9 (Dirty-flag investigation) verify steps should cover BOTH triggers — page-creation AND record-finalize — not be narrowed to one.
+
+**Why:** the original observation that surfaced Task 9 mid-Task-3 was "post-record + save still shows dirty `*` on reopen".  In tracing that I'd informally narrowed Task 9 to the record-finalize path.  Page-creation is the second trigger worth checking in the same investigation — same underlying machinery (`markDirty()`), worth confirming both paths once we're in there.
+
+**Status:** clarification only; folded into the existing Task 9 plan entry.  No new batch, no §9 Forks entry needed.
+
+### 10. Sequencing decision
+
+**What we agreed:**
+
+- Task 4 source committed at `1d928fc`.  Stands as-is.
+- The recording-lifecycle batch (dual-buffer architecture per §2 above, conditional WET per §3, all BaySickVocal API work) is a NEW dedicated batch — NOT folded into QA-E.
+- The BaySickAlign redesign batch (per §5 + §6 above) is ALSO a NEW dedicated batch — NOT folded into QA-E.
+- The BaySickPitch dedicated batch (per §4 above) is ALSO new.
+- **QA-E resumes at Task 5** after the current detour into BaySickAlign-redesign-planning closes.  The detour is short — inventory the existing editor + cross-reference to the §5 BaySickAlign dedicated batch entry — and then control returns to QA-E.
+
+**Why three separate batches not one mega-batch:**
+
+- Each has its own well-defined scope + verify cycle + risk profile.
+- Recording-lifecycle is mostly engine-API work; BaySickAlign is mostly editor + DSP wiring; BaySickPitch is mostly applicator DSP.  Different surface areas, different reviewers' mental models.
+- Sequencing matters: recording-lifecycle first (clean DRY clips established), THEN BaySickAlign (operates on the clean clips), THEN BaySickPitch (fine corrections on top).  Forcing one batch would couple them artificially.
+
+**Status:** sequencing decision locked.  Three new dedicated batches will appear in Main Plan §5 when their respective `/draft-doc forks-entry` + scoping passes complete.
+
+### Disposition
+
+- **QA-E open scope (still active):** Tasks 5-10 per the current plan file.  Resumes after the BaySickAlign-redesign-planning detour closes.
+- **Routed to new dedicated batches (NOT in QA-E):**
+  - Recording-lifecycle (dual-buffer + conditional WET + BaySickVocal API).
+  - BaySickAlign redesign (editor + DSP wiring + composite renderer + warp map).
+  - BaySickPitch (realtime applicator + Render/bake + per-clip XML metadata).
+- **Open finding, routing TBD:** audio-clip-resize-doesn't-stretch (§8 above).
+- **Task 9 scope clarified, no batch change:** dirty-flag investigation covers both page-creation AND record-finalize triggers.
+
+### Next action
+
+- Inventory the existing `BaySickAlignEditor` (current controls, current paint-only widgets, current DSP wiring or lack thereof) and cross-reference to the BaySickAlign-dedicated-batch §5 entry once that entry exists.  This is the BaySickAlign-redesign-planning detour that must close before QA-E Task 5 resumes.
+- After the detour closes: resume QA-E at Task 5.
+- The three new dedicated batches' `/draft-doc forks-entry` passes + Main Plan §5 entries are deferred until the BaySickAlign-redesign-planning detour produces enough scope clarity to write them.
+
+---
+
 (Subsequent entries appended below at every commit / sub-task verify / finding / spec call / scope pivot.)
+
+---
+
+## 2026-05-14 — Post-detour design lock-in: BaySickAlign + BaySickPitch redesigns; QA-Fb slotted; QA-J overlap interaction routed
+
+Continuation of the 2026-05-14 detour started in the previous entry.  Where the previous entry locked the high-level shapes (dual-buffer recording, conditional WET, BaySickPitch Mode C, BaySickAlign channel-composite + warp map, editor-redesign-needed, composite renderer, audio-clip-resize finding, dirty-flag scope, sequencing into three new batches), THIS entry captures the concrete per-control redesign specs, the trade-dress framing clarification, sequencing position calls (QA-Fb slot + QA-J overlap interaction), and the consolidation pass queued for the Main Plan.
+
+The previous entry's design narrative does NOT get re-captured here — it stands.  This entry appends what was decided AFTER it landed.
+
+### 11. Existing editors are paint-only shells — confirmed at source
+
+Sanity-checked the existing `BaySickAlignEditor` and `BaySickPitchEditor` against source before drafting redesigns.  Both editors hold a `BaySickVocalProcessor&` reference but never read from it.  Knobs / combos / toggles in both editors are pure local component state — no APVTS attachments, no DSP wiring, no parameter binding.
+
+- `Source/DSP/BaySickAlignDSP.h/.cpp` exists with a working `analyzeOffline` pure function (FFT spectral-flux onset detection + greedy pairing producing a `WarpMap`).  **The class is never instantiated anywhere.**  `BaySickVocalProcessor` has no `BaySickAlignDSP` member — the offline analyzer is dead code.
+- `applyWarp` in `BaySickAlignDSP.cpp` is a passthrough stub (`memcpy in → out`); no PhaseVocoder integration despite the file existing for weeks.
+- **No `BaySickPitchDSP` class exists at all** — not in `Source/DSP/`, not anywhere.  Editor draws a Newtone-style canvas with pitch curves but there is no DSP that produces those curves nor any DSP that consumes user edits.
+- `BaySickAlignEditor.cpp:8` source comment literally reads `"VocAlign-clone visual + interaction model"`.
+- `BaySickPitchEditor.cpp:8` source comment literally reads `"Newtone-clone visual + interaction model"`.
+
+Owner has flagged the paint-only-shell shape multiple times across prior sessions; this session confirmed at the source level before drafting the redesigns.  All UI in both editors is replaced or rewired in the dedicated batches.
+
+### 12. Trade-dress framing — not trademark, and not universal idioms
+
+Earlier in the conversation I used "trademark" loosely; clarified to the legally accurate framing.  The concern is **trade-dress** (visual + interaction identity creating a "passing off" appearance), NOT literal trademark on names or terms.
+
+What is NOT a concern (universal DAW idioms — every DAW has these):
+- Showing waveforms, pitch grids, piano keyboards, lane layouts.
+- Tool names like "Slice" (universal across Ableton / Logic / Reaper / Cubase / FL Studio).
+- Individual keybind reuse (Slice = S, etc. — universal).
+- Concept-level features (pitch curves, time alignment, sync points).
+
+What IS the concern (the cumulative bundle):
+- The two source comments literally name VocAlign and Newtone as the visual + interaction model.
+- Identical layout signatures + identical control names (MATCH PITCH / MAX DIFFERENCE / TARGET MODE / PITCH TARGET / SMART PITCH / ALGORITHM / TRANSPOSE on the Align side; the Newtone-style monospace bar at the top of Pitch with TEMPO / SYNC / Cut/Adv/Vib mode buttons).
+- The convergence of those signatures with our identical engine names ("BaySickAlign" feeling like a VocAlign rebrand; "BaySickPitch" feeling like a Newtone rebrand).
+
+Owner's framing: distinct visual identity + distinct control naming + identical engine names + identical keybinds together create the trade-dress risk.  Breaking ANY of those legs sufficiently neutralizes the cumulative bundle.  The redesigns below break the visual + control-naming legs hard while keeping the engine names + universal-DAW keybinds.
+
+### 13. BaySickAlign — full redesign locked (every per-control decision)
+
+#### 13a. Toolbar
+
+- BaySickAlign title (BaySickEngineLabel teal `#0FAFA5`) — **KEEP**.
+- Preset combo — **REPLACED** with 6 entries:
+  - Loose-Align
+  - Loose-Align+Pitch
+  - Close-Align
+  - Close-Align+Pitch
+  - Tight-Align
+  - Tight-Align+Pitch
+  - Selecting a preset sets Align Mode + Pitch ON/OFF together (the +Pitch variants enable the Pitch box).
+- **Save Preset + Load Preset — ADD**.  User presets save to `Documents/BaySickDAW/Presets/BaySickAlign/My Presets/{name}.xml`.  Mirrors the BaySickPlayer / BaySickSynth save-patch flow established in Phase D.
+- **Modified-indicator green dot** — **REPURPOSED** as preset-dirty flag.  Lights when current Align + Pitch param values diverge from the selected preset's stored values.  Tooltip: "Preset modified — save changes".  Same dot, new semantic.
+- **Auto-Preview button** — **REMOVED**.  No realtime auto-preview pass; analyze on user click.
+- **Settings button** (had been planned earlier in the session as a way to hide the right panel) — **DROPPED**.  Right panel stays always visible.  Reasoning: user picking a preset should see the knobs change immediately so they LEARN what each preset is doing.  Hiding the panel breaks that learning UX.
+- **Undo / Redo** — **KEEP**.
+
+#### 13b. Lanes
+
+- 3-lane vertical layout — **KEEP**.
+- Lane name renames:
+  - Guide → **Leader**.
+  - Dub → **Follower**.
+  - Output → **Output** (unchanged).
+- **Lane colors (palette CORRECTION applied mid-conversation):**
+  - Leader = **Bass active green**.
+  - Follower = **Vox active teal**.
+  - Output = **Drums active red**.
+  - Earlier in this session I'd written "Layers active green" for the Leader lane.  Owner corrected: Layers is actually **orange** and Bass is **green**.  Corrected here AND it propagates back to BaySickPitch's pitch-curve overlay color (see §14b below).  Hex values to be looked up in source when implementing.
+- **Capture buttons (Leader + Follower)** — **REMOVED**.  No realtime capture path; channel-composite renderer feeds the lanes from grid clips.
+- **Render button** (currently in toolbar / lane area) — **REMOVED as a separate button**.  Replaced by the DSP-side render-to-bake action — toolbar Render button + DSP function combined into a single Render that bakes aligned output.
+- **Sidechain picker** — **REMOVED**.  Channel-composite auto-resolves the source — user picks Leader channel + Follower channel, no sidechain wiring needed.
+- **Dub Process-Group combo** — **REMOVED**.  No group concept; channel-pair is the unit of work.
+- **Centerline-only paint** — **REPLACED** with real composite waveform rendering (uses the shared composite renderer per §7 in the prior entry).
+- **Time ruler** — **REDESIGNED**: shared across all 3 lanes (currently Guide-only).  Single ruler at top of the 3-lane stack synchronizes timeline reference across Leader / Follower / Output.
+
+#### 13c. Sync Points + Protected Areas
+
+- **Sync Points — KEEP.**  Functional spec:
+  - User-placed manual anchors that override auto-pairing.
+  - Click empty strip → drop marker at (Follower=X seconds, Leader=Y seconds).
+  - Drag handles to adjust either side's time independently.
+  - Right-click → delete.
+  - "Automatic Sync Points" menu item seeds high-confidence onset pairs as a starting baseline that user can then adjust.
+  - The pairing algorithm only auto-pairs onsets that fall BETWEEN user-placed sync points (sync points act as hard boundaries that segment the timeline into pairing regions).
+- **Protected Areas — KEEP.**  Drag-create regions on the Follower-side that exempt parts from time-warp / pitch-shift / both.  Right-click toggles which dimensions the area protects.
+
+#### 13d. Bottom controls
+
+- **ViewModeBar (Wave / Pitch / Energy buttons)** — **KEEP buttons, ADD rendering branches**.  Currently the buttons exist but only wave-mode renders.  Pitch mode renders YIN-detected F0 contour on each lane; Energy mode renders RMS envelope.
+- **HistoryScrubber (Del / + / - buttons)** — **KEEP**.
+- **HistoryScrubber render-list paint** — **ADD**.  Currently the buttons exist but the render list paints empty.  Each entry shows render version + date.
+
+#### 13e. Right-side panel — single panel, two boxes, always visible
+
+Replaces the existing Match Timing / Match Pitch / OTHER three-panel structure with a single always-visible two-box panel.
+
+**Box 1 — Align** (renamed from "Match Timing"):
+
+- **ON master toggle** — **KEEP**.  Master enable for the Align box.
+- **Mode dropdown** (renamed from ALIGNMENT RULE) — three options:
+  - Loose
+  - Close
+  - Tight
+  - This is the **single source of truth** that drives:
+    1. Fine Tune knob's base value (Loose=150ms / Close=100ms / Tight=50ms — see below).
+    2. Pitch box Range knob's center position + min/max travel (see §13f).
+    3. Pitch algorithm strength behavior at the current Range setting.
+- **Fine Tune knob** (renamed from MAX DIFFERENCE) — bipolar ±50ms travel from the Mode-set base value.  Total reach by Mode:
+  - Tight: 0-100ms (base 50ms).
+  - Close: 50-150ms (base 100ms).
+  - Loose: 100-200ms (base 150ms).
+  - Knob label visible.  Bipolar visual (12 o'clock = Mode base; left = tighter; right = looser).
+- **Smart Align toggle** — **REMOVED**.
+- **MAXIMUM SHIFT control** — **REMOVED**.
+- **High Resolution toggle** — **REMOVED**.
+
+**Box 2 — Pitch** (renamed from "Match Pitch"):
+
+- **ON master toggle** — **KEEP**.  Master enable for the Pitch box.  Independent of preset — user can toggle Pitch off/on after selecting a +Pitch preset.
+- **Range knob** (renamed from MAX DIFFERENCE) — mode-dependent center + range:
+  - Loose: default 0%, range 0-50%.
+  - Close: default 50%, range 25-75%.
+  - Tight: default 100%, range 50-100%.
+  - The Mode dropdown in Box 1 sets both the default position and the min/max travel of this knob.
+- **TARGET MODE** — **REMOVED**.
+- **PITCH TARGET** — **REMOVED**.
+- **SMART PITCH** — **REMOVED**.
+- **Algos dropdown** (renamed from ALGORITHM) — three options:
+  - PSOLA
+  - Granular
+  - Phase Vocoder
+- **Transpose** (-12..12 st) — **KEEP**.
+- **Formant Shift ON toggle + rotary** — **MOVED HERE** from the old OTHER panel.
+
+**OTHER panel** — **REMOVED ENTIRELY**.  Pitch Ranges combos dropped (replaced by Mode-driven Range knob behavior).  Formant Shift moved to the Pitch box.
+
+**SidePanelTabs (T/P/O glyphs)** — **REMOVED**.  Panel always visible per the no-Settings-button decision in §13a above.
+
+#### 13f. Pitch behavior per preset — algorithm spec captured verbatim from owner
+
+Per-preset pitch processing strength:
+
+- **Loose:** algorithm applies 0% of the Leader's localized pitch variations to the Follower.  Pitch box may be enabled but Range knob sits at 0% by default — minimum coercion.
+- **Close:** plugin interpolates the difference by pulling the Follower's pitch closer to the Leader's pitch center while flattening wild deviations and pulling flat/sharp notes toward the Leader, WITHOUT completely erasing the Follower's natural human variation.
+- **Tight:** overrides the Follower's pitch entirely — forces pitch envelope to match the Leader's pitch contour and every micro-variation, pitch scoop, and vibrato wave from the Leader vocal is mathematically mapped onto the Follower.
+
+These three strength bands are the algorithmic distinction the +Pitch presets target.  The Range knob lets the user fine-tune within the Mode's band.
+
+#### 13g. DSP additions confirmed for the BaySickAlign batch
+
+- **BaySickAlignDSP instance on processor** — new member on `BaySickVocalProcessor` (or wherever the channel-pair state lives).  Currently no instance exists anywhere.
+- **Composite renderer** — shared with BaySickPitch per §7 in the prior entry.  Walks a channel's grid clips and produces a single mono buffer.
+- **applyWarp PhaseVocoder integration** — current `applyWarp` stub gets replaced with real time-stretch + pitch-shift via PhaseVocoder.
+- **YIN pitch detection** — for the Pitch box's per-anchor semitone-delta computation.
+- **PSOLA / Granular / Phase Vocoder pitch shifters** — three algos per the Algos dropdown.  Shared with BaySickPitch.
+- **Formant-preserve** — for the Formant Shift rotary.  Shared with BaySickPitch.
+- **Sync points data model** — user-placed anchors persisted in project XML under the channel pair's state.
+- **Protected areas data model** — user-drawn regions persisted in project XML.
+- **Render-to-bake** — output writes `<project>/Aligned/{name}_align_v{N}.wav` matching the existing Option C design comment in `BaySickAlignDSP.h`.
+- **Render history persistence** — per-channel-pair list of bake versions stored in project XML.
+- **~20 APVTS params** — every Align box control + every Pitch box control + Mode dropdown + preset selection + dirty flag get APVTS-backed.
+
+### 14. BaySickPitch — full redesign locked (every per-control decision)
+
+#### 14a. Composite mode CORRECTION — works for Pitch too
+
+Earlier in the conversation I'd said composite-mode "can't" work for Pitch.  Corrected mid-conversation by owner:
+
+- Same channel-composite renderer as BaySickAlign produces a mono buffer of the channel's grid clips.
+- YIN runs once over the composite.
+- Note segmenter produces note regions with **absolute timeline positions** (bar.beat coordinates, not clip-relative).
+- User edits (pitch shifts, formant shifts, vibrato curves, volume curves) stored at the **channel level**, keyed by absolute timeline position.
+- Realtime applicator (Mode C from the prior entry §4) maps the running clips' audio to the composite slices during playback — when clip X is currently being played by FilePlay, the applicator looks up which note region(s) in the channel composite overlap with the clip's current playhead and applies the stored edits.
+- **Edits flow through to normal playback with no bake step required.**  Render/Freeze is still available as the opt-in optimization, but the default flow is realtime applicator on the channel composite.
+
+This makes BaySickPitch composite-driven in the same architectural shape as BaySickAlign.  Both editors are channel-level operations.  The two are siblings, not unrelated tools.
+
+#### 14b. Toolbar redesign (composite mode collapses Newtone-style bloat)
+
+- BaySickPitch title (BaySickEngineLabel teal `#0FAFA5`) — **KEEP**.
+- **File label** — **REMOVED**.
+- **TEMPO display** — **REMOVED**.
+- **SYNC info display** — **REMOVED**.
+- **LENGTH label** — **RETAINED** with format `X bars / M:SS.f`:
+  - Default: shows composite length in bars + minutes:seconds.fractional (e.g., `16 bars / 0:32.0`).
+  - When selection active: toggles to `SEL X bars / M:SS.f` showing selection extent.
+- **Preset combo + Save / Load + dirty dot** — **ADD**.  Mirrors the Align machinery from §13a above.  Presets save to `Documents/BaySickDAW/Presets/BaySickPitch/My Presets/{name}.xml`.  Independent preset library from Align (a "Loose" Pitch preset is not the same XML as the "Loose-Align+Pitch" Align preset).
+- **Undo / Redo** — **ADD**.
+- **Loop button** — **REMOVED**.  Internal-transport loop region UI removed.
+- **Play / Stop internal transport** — **REMOVED**.  Uses the global Builder transport — composite playback is sync'd to the global playhead, no separate transport.
+- **Cut / Adv / Vib edit modes** — **COLLAPSED to Slice / Edit (2 modes)**:
+  - Vibrato / Formant / Volume become per-note sub-curves drawn UNDERNEATH the note region.  Always visible when the parent note is selected.  Draggable depth / rate / value points on the sub-curves.  No mode toggle needed to access them.
+  - Slice mode: split a note region at click position.
+  - Edit mode: drag note regions vertically (pitch) or horizontally (start/end).  Drag sub-curve points (vibrato depth, formant amount, volume shape).
+- **Slice keybind** — safe (universal DAW term per §12 above).  Existing piano-roll / Builder Slice tool keybind shape is fine to reuse.
+- **Slaved Playback Mode** — **REMOVED**.  Composite is always sync'd to the global Builder transport — no slaved/free distinction.
+- **Auto-Scroll keybind (currently A)** — **KEEP** (individual keybinds not a legal concern per §12).
+- **Load button** — **REMOVED**.  Composite auto-resolves from the channel's grid clips — no manual file load.
+- **Save / Render button** — **KEEP function, RENAME to "Render"**.  Wires to the shared bake pipeline (writes to `<project>/Pitched/{name}_pitch_v{N}.wav`).
+- **Reset button** — **KEEP**.  Clears all edits on the composite.
+- **"→PR" button** — **REDESIGNED** to "Send Notes to..." popup:
+  - Target list = active Layers tabs + active Bass tabs + active Drums tabs + active Clips tabs.
+  - Clips appears as a target ONLY when an active Clips page exists (Clips supports MIDI playback through its sample-player mode).
+  - Only MIDI notes are sent to the target (the detected pitch contour quantized to notes), not the vocal audio itself.
+- **Three global knobs renamed with labels visible:**
+  - CENTER → **Focus**.
+  - VARIATION → **Mod**.
+  - TRANS → **Speed**.
+
+#### 14c. Canvas
+
+- **Vertical MIDI keyboard on the left edge** — **KEEP**.
+- **Bar + beat ruler on the top edge** — **KEEP**.
+- **Grid lines** — **KEEP**.
+- **Note regions = Pills (Option B from the 3-option matrix surfaced earlier in the conversation):**
+  - Rounded rectangles with subtle 4-6px corner radius.
+  - NOT the Newtone-style heavily-rounded blob shape.
+  - Fill color = **Effects page active purple**.
+- **Waveform drawn inside pills** — color = **Vox active teal**.
+- **Pitch curve overlay** — color = **Bass active green** (replaces Newtone's orange `#e89c5a`).  Same green as the Align Leader lane per §13b above.
+- **Playhead during composite playback** — **ADD**.  Currently no playhead visualization.
+- **Loop region UI** — **REMOVED** (Loop button gone per §14b).
+- **Per-edit-mode mouse interaction** — **ADD**:
+  - Slice mode: cursor splits note on click.
+  - Edit mode: drag note regions + sub-curve points.
+- **Per-note sub-curves below pills (Volume / Formant / Vibrato)** — **ADD**.  Always visible for the selected note.  Three sub-curves stacked under the pill.  Draggable depth / rate / shape points on each.
+
+#### 14d. InfoBar (bottom)
+
+- **Monospace readout (Pitch / Cents / Length)** — **KEEP concept, ADD population**.  Currently the bar exists but never populates.  Wire to detected pitch + cents-deviation + composite length at the hover/selection position.
+- **"Loop" field in the readout** — **DROP** (Loop button + region gone).
+
+#### 14e. Scroll / Zoom
+
+- **Horizontal + vertical scroll** — **KEEP** all (generic JUCE Viewport mechanisms).
+- **Zoom in / out** — **KEEP** (Ctrl+Scroll standard).
+
+#### 14f. Preset structure
+
+- **3 mode presets** — Loose / Close / Tight — drive the three global knobs (Focus / Mod / Speed).
+- **Save Preset + Load Preset + dirty dot** — same machinery as Align per §13a.
+
+#### 14g. DSP additions confirmed for the BaySickPitch batch
+
+- **Composite renderer** — shared with Align per §7 in the prior entry.
+- **YIN pitch tracker** — runs once over the composite at analyze time.
+- **Note segmentation** — produces note regions with absolute timeline positions.
+- **Pitch shifter (PSOLA / Granular / PhaseVocoder)** — shared with Align.
+- **Vibrato analyze + synthesize** — detect existing vibrato depth/rate per note, allow user override via sub-curve.
+- **Formant shifter per-note** — sub-curve drives per-note formant amount.
+- **Volume envelope per-note** — sub-curve drives per-note gain shape.
+- **Per-channel pitch-edit ValueTree storage** — edits stored under the channel's project XML state, keyed by absolute timeline position.
+- **Render-to-bake pipeline** — shared with Align.  Writes `<project>/Pitched/{name}_pitch_v{N}.wav`.
+- **Realtime applicator** (Mode C) — maps clip playback to composite slices.
+- **Render history** — separate list from Align's; per-channel list of bake versions in project XML.
+- **~10-15 APVTS params** — global knobs + preset selection + dirty flag + Mode-driven internals.
+
+### 15. Color palette correction — cross-references the BaySickAlign + BaySickPitch batches
+
+Earlier in this session I'd written "Layers active green" for the Align Leader lane.  Owner corrected mid-conversation: Layers is actually **orange**, Bass is **green**.
+
+Canonical color references for the redesign batches:
+
+| Bucket | Active color |
+|---|---|
+| Layers | **orange** |
+| Bass | **green** |
+| Vox | **teal** |
+| Drums | **red** |
+| Effects page | **purple** |
+
+This correction propagates to:
+
+- BaySickAlign Leader lane (§13b) = Bass active **green**.
+- BaySickAlign Follower lane (§13b) = Vox active **teal**.
+- BaySickAlign Output lane (§13b) = Drums active **red**.
+- BaySickPitch note pills (§14c) = Effects page active **purple**.
+- BaySickPitch waveform inside pills (§14c) = Vox active **teal**.
+- BaySickPitch pitch curve overlay (§14c) = Bass active **green** (same as Align Leader lane — both editors use Bass green for the "pitch" visual signal).
+
+Hex values for each active color to be looked up in source (VibeLAF palette constants) at implementation time.
+
+### 16. QA-J overlap interaction — Option 1 picked (test with sequential clips only)
+
+QA-J (Main Plan §5 line 1031, sequencing arrow line 1387) restructures per-row audio-clip rendering so that the rack + EQ chain runs ONCE on the SUM of overlapping clips on a row, instead of N times sequentially through shared engine state.
+
+The new BaySickAlign / BaySickPitch / recording-lifecycle test scenarios will involve overlapping audio clips on the same Vox row (multiple takes recorded on top of each other, or backing-vocal alignment of layered takes).  Those scenarios WILL hit the existing per-row pass-through-N-times bug — comp envelope / reverb tail / LFO phase will bleed from clip A into clip B's processing pass.
+
+Three options surfaced for handling the interaction:
+
+- **Option 1: Design QA-F / QA-Fa / QA-Fb tests with sequential clips on the same row only.**  Defer overlapping-same-row scenarios to QA-J re-verify.
+- **Option 2: Block QA-F / QA-Fa / QA-Fb on QA-J landing first.**  Forces QA-J ahead in the sequence.
+- **Option 3: Land QA-F / QA-Fa / QA-Fb knowing the overlap bug exists; re-verify those batches' overlap behavior post-QA-J.**
+
+**Owner's pick: Option 1.**  Confirmed verbatim: "i'll line clips back to back to test things".
+
+Implication for the verify cycles in QA-F / QA-Fa / QA-Fb plan files: every test scenario uses sequential clips on a row (back-to-back, no overlap).  Overlapping-same-row testing comes back as a QA-J re-verify scenario.
+
+#### Fork-note structure agreed
+
+- QA-F + QA-Fa §5 entries get inline "QA-J re-verify required for overlapping-same-row scenarios" notes.
+- QA-Fb §5 entry (when written) gets the same inline note.
+- QA-J §5 entry gets an inline "re-verify QA-F / QA-Fa / QA-Fb overlapping-same-row scenarios at close" note.
+- §9 Forks gets a new entry dated 2026-05-14 documenting the fork itself + the Option 1 decision + the cross-references.
+
+### 17. Recording-lifecycle batch slotted as QA-Fb
+
+The "dedicated recording-lifecycle batch" referenced in the prior entry's sequencing decision (§10) gets the slot **QA-Fb** in the Main Plan §6 sequencing arrow.
+
+Updated sequence: `... QA-E → QA-F → QA-Fa → QA-Fb → QA-G → ...`
+
+Scope (per the prior entry's §2 + §3 + §8 + §9 plus this entry's audio-clip-resize):
+
+- Channel-composite renderer (shared dependency for QA-F + QA-Fa, but its first home is the batch where it first ships — likely QA-F if implementation begins there, else QA-Fb).
+- Dual-buffer recording (live + FilePlay simultaneously) per the prior entry §2.
+- Conditional WET tap (skip when realtime pitch bypassed) per the prior entry §3.
+- Multi-take capture-bleed fix per the prior entry §1.
+- Audio-clip-resize-doesn't-stretch finding per the prior entry §8 (slotted into QA-Fb after this entry's sequencing pass — the audio-clip-resize bug shares the "block state doesn't propagate to backend playback" family with the recording-lifecycle work).
+- Dirty-flag investigation (page-creation + record-finalize) — per Task 9 fold-out from QA-E.  QA-E's Task 9 was inserted mid-Task-3; the dirty-flag work now lives in QA-Fb where the recording-lifecycle architecture is the right surface to investigate.
+
+**Slot rationale (owner's call):**
+
+- QA-F is the BaySickVocal DSP audit / regression fix cluster — fixes the BaySickAlign + BaySickPitch + realtime pitch correction DSP that was broken at QA-Inventory.
+- QA-Fa is the BaySickPitch audio-import additive feature.
+- QA-Fb sits between Fa and QA-G as the recording-lifecycle architecture lift.  Comes AFTER the DSP work in QA-F is functional (the dual-buffer model needs the DSP it's routing around to actually exist), and BEFORE QA-G's Builder UX work (which assumes recordings land cleanly).
+
+Per `feedback_slot_placement_is_spec_call.md`, the slot pick is the owner's, not mine.  Owner picked QA-Fb between QA-Fa and QA-G.
+
+### 18. Planned plan-doc consolidation pass (NOT YET APPLIED — running notes capture first)
+
+The following Main Plan edits are queued for the consolidation pass that lands AFTER this running-notes append commits:
+
+**§5 entries:**
+
+- **QA-F entry (line 944):** replace existing scope with consolidated BaySickAlign design from §13 above + add QA-J overlap-interaction fork-out note per §16.
+- **QA-Fa entry (line 958):** replace existing scope with consolidated BaySickPitch design from §14 above + add QA-J overlap-interaction fork-out note per §16.
+- **§5 INSERT new QA-Fb entry** after QA-Fa.  Scope per §17 above (channel-composite renderer / dual-buffer recording / conditional WET / multi-take capture-bleed fix / audio-clip-resize / dirty-flag).  Add QA-J overlap-interaction fork-out note per §16.
+- **QA-J entry (line 1031):** add fork-in note for "re-verify QA-F / QA-Fa / QA-Fb overlapping-same-row scenarios" per §16.
+
+**§6 sequencing arrow (line 1386):**
+
+- Insert `→ QA-Fb` between `QA-Fa` and `QA-G`.
+- Update §6 footnotes if any reference the QA-F / QA-Fa pair to also reference QA-Fb.
+
+**§9 Forks (new eighteenth entry dated 2026-05-14):**
+
+- Title: "BaySickAlign + BaySickPitch redesign scope + recording-lifecycle batch (QA-Fb) slot + QA-J overlap-interaction fork."
+- Trigger: QA-E Task 4 verify surfaced multi-take capture-bleed + opened a longer design discussion; this entry's §11-§17 are the consolidated locks.
+- Decision: scope-lock QA-F (BaySickAlign redesign) + QA-Fa (BaySickPitch redesign) + QA-Fb (recording-lifecycle), all three to follow the no-stubs gate (every UI line item ships functional code + UI together).
+- Plan files affected: Main Plan §5 (QA-F / QA-Fa / new QA-Fb / QA-J updates), §6 sequencing arrow.
+- Verification: at QA-F / QA-Fa / QA-Fb close, batch-close drafter confirms the no-stubs gate held + the overlap-interaction note flowed through to QA-J's re-verify list.
+
+Owner asked for this running-notes capture FIRST before the Main Plan consolidation pass.  Order: running-notes commit → Main Plan consolidation commit → resume QA-E Task 5.
+
+### 19. QA-E status — still paused at Task 5
+
+- QA-E Tasks 5-10 remain after this detour.
+- Task 5 onward in the current QA-E plan file is NOT touched by this detour — the BaySickAlign + BaySickPitch redesigns route entirely to QA-F / QA-Fa / QA-Fb.
+- After the Main Plan consolidation pass commits, control returns to QA-E Task 5.
+
+### 20. BaySickNAM/IR wiring audit — CLEAN
+
+Owner asked for a sanity-check pass on BaySickNAM/IR to confirm every UI element is wired to a real APVTS param + actually does something.  Audit was read-only; no source changes.
+
+**File ownership clarification (corrected mid-conversation):**
+
+- `BaySickNAMIR` lives at `Source/BaySickNAMIR/BaySickNAMIREditor.h/.cpp` + `BaySickNAMIRProcessor.h/.cpp`.
+- Used on **both Vox and Inst pages** (Inst hosts it as a sub-tab "BaySickNAM/IR" peer to BaySickPedals; Vox hosts it as a sub-tab in its chain — confirmed by `Source/Inst/InstPage.h:20`: "same setup as the Vox page's NAM/IR sub-tab").
+- I'd initially routed audit findings to QA-F (Vox DSP) which was wrong — BaySickNAM/IR is an independent engine module, not part of BaySickVocal.
+
+**APVTS layout — 18 params declared in `createLayout()`:**
+
+| Param | Type | Range | Default |
+|---|---|---|---|
+| `input_gain` | Float | -24..+24 dB | 0 |
+| `output` | Float | -24..+12 dB | 0 |
+| `gate_threshold` | Float | -60..0 dB | -50 |
+| `gate_release` | Float | 5..500 ms | 100 |
+| `nam_bypass` | Bool | — | false |
+| `cab_bypass` | Bool | — | false |
+| `low_cut` | Float | 20..500 Hz | 20 |
+| `high_cut` | Float | 3000..20000 Hz | 20000 |
+| `cab_mix` | Float | 0..100 % | 100 |
+| `oversampling` | Choice | 1x/2x/4x | 1x |
+| `ab_slot` | Choice | A/B | A |
+| `nam_micsim_mode` | Choice | None/Built-in/User IR | None |
+| `nam_micsim_model` | Choice | 10 archetypes | Live Vocal Dynamic |
+| `nam_micsim_mix` | Float | 0..100 % | 100 |
+| `nam_placement_distance_cm` | Float | 1..150 cm | 30 |
+| `nam_placement_angle_deg` | Float | -90..+90 deg | 0 |
+| `nam_placement_polar` | Choice | 5 patterns | Cardioid |
+| `nam_placement_mix` | Float | 0..100 % | 100 |
+
+**Editor → APVTS wiring — all 18 controls correctly bound:**
+
+- **Standard JUCE attachment helpers (12 controls)**: `mInGainKnob`, `mGateThreshKnob`, `mGateReleaseKnob`, `mLowCutKnob`, `mHighCutKnob`, `mCabMixKnob`, `mOutputKnob`, `mMicSimMixKnob`, `mMicPlacementDistanceKnob`, `mMicPlacementAngleKnob`, `mMicPlacementMixKnob`, `mNamBypassToggle.btn()`, `mCabBypassToggle.btn()` — `SliderAttachment` / `ButtonAttachment`.
+- **Manually-synced APVTS controls (6 controls)**: `mOSSelector` (chicken head ↔ `oversampling`), `mSlotABtn` / `mSlotBBtn` (radio TextButtons ↔ `ab_slot`), `mMicSimMode` (chicken head ↔ `nam_micsim_mode`), `mMicSimModelCombo` (ComboBox ↔ `nam_micsim_model`), `mMicPlacementPolar` (chicken head ↔ `nam_placement_polar`).  These use custom selector widgets where the stock JUCE attachment helpers don't fit (chicken head is custom; ButtonAttachment only works for `AudioParameterBool` + ToggleButton).  All 6 manually sync via `addParameterListener` + `onChange` callback that calls `setValueNotifyingHost` — equivalent semantics to the standard attachment, fully automatable.
+
+**Action UI (truly non-parameter — by design):**
+
+- `mNamBrowseBtn` / `mIrBrowseBtn` / `mMicSimUserIrBtn` — file pickers, call `loadNamModel` / `loadImpulseResponse` / `loadUserMicIr`.  Not automatable by design (you don't automate "load file X").
+- Recent-files popup (right-click on browse buttons) — reads `Documents/BaySickDAW/settings.xml`.
+- File drag-drop — handles `.nam` + `.wav` correctly via `FileDragAndDropTarget`.
+
+**Processor → APVTS reads in `processBlock`:**
+
+All 18 params are read via `apvts.getRawParameterValue(...)` in the per-block snapshot.  No dead params, no orphaned reads.  The 2026-05-06 DSP gate at the top of `processBlock` cleanly short-circuits the entire chain when no NAM model + no IR are loaded (CPU saver, semantically correct).
+
+**A/B per-slot snapshot system — fully wired:**
+
+`SlotSnapshot` struct captures 16 per-slot fields (knob values + bypass toggles + Mic Sim / Placement params + per-slot user IR path).  On `ab_slot` change, `captureSnapshotFromCurrent(outgoing)` + `applySnapshotToCurrent(incoming)` fire via `parameterChanged` listener.  Serialized as `<SlotA>` / `<SlotB>` children in `getStateInformation` / `setStateInformation`.  Pre-H-6d projects with no snapshot tags fall back to default-constructed snapshots without crashing.
+
+**Verdict:** zero dead UI elements, zero unwired params.  BaySickNAM/IR is in excellent shape.  No follow-on QA-Fd batch needed.
+
+### 21. BaySickPedals wiring audit — CLEAN
+
+Same audit pattern on `Source/BaySickPedals/BaySickPedalsEditor.h/.cpp` + `BaySickPedalsProcessor.h/.cpp`.  Inst-only engine (Vox does not have a pedals sub-tab — typical: vocal chains skip stomp-pedal stages).
+
+**APVTS layout — 8 params declared:**
+
+`bsp_slot0_bypass` through `bsp_slot7_bypass` — per-slot bypass `AudioParameterBool`s only.  Each pedal's internal params live inside its own `DSPBase` instance, not at the processor's APVTS level.  This is by-design and architecturally clean — mirrors the `EffectRack` pattern (per-effect params owned by each effect's APVTS, host APVTS holds only slot-level concerns like bypass).
+
+**Editor → APVTS wiring:**
+
+- Each `PedalSlotComponent` creates a `ButtonAttachment` from its bypass LED footswitch (`mBypassBtn`) to `bsp_slot{N}_bypass`.  8/8 bypass toggles correctly attached.
+- Per-pedal control panels are created via `createEffectEditor(dsp, type, EditorPanelBase::PanelMode::Pedal)` — each `DSPBase` subclass's own panel handles its internal param bindings.  The Pedals editor doesn't try to micromanage per-pedal params; it delegates to the established effect-panel system.
+
+**Processor → APVTS reads in `processBlock`:**
+
+For each slot, reads `isSlotBypassed(slotIdx)` which queries `bsp_slot{N}_bypass`.  Bypassed slots skip processing; active slots delegate to `eff->process(buffer)`.  Process order: 0 (Tuner) → 1..6 (user-adjustable) → 7 (EQ).
+
+**Action UI (non-parameter — by design):**
+
+- `mPresetBtn` (per-tile "..." menu) — per-pedal preset save/load via `EffectPresetIO`.
+- `mRemoveBtn` ("X") — clears slot via `mProc.clearSlot(mSlot)`.
+- `mUpBtn` / `mDownBtn` — drag-reorder via `mParent.performMove(...)`.
+- `mEqPicker` (slot 7 only) — ComboBox swaps EQ type via `onEqPickerChanged` → `loadEffect(7, newEqType)`.
+- Title-bar `mPresetBtn` (pedalboard-level Save/Load) — wired via `onPedalboardPresetMenu` callback that `InstPage` hooks up.
+- Drag-to-reorder (mouseDown on title bar) — for slots 1-6 only; locked-position slots 0 / 7 never move.
+
+**Per-slot locking enforcement:**
+
+`isEffectAllowedInSlot` correctly enforces:
+- Slot 0 (Tuner): only `EffectType::None` or `TunerStyle`.
+- Slot 7 (EQ): only `None` / `GraphicEQStyle` / `BassGraphicEQStyle` / `FurmanEQStyle`.
+- Slots 1-6: any `EffectType` EXCEPT the 4 slot-locked types above.
+
+**Snapshot capture / restore — fully wired:**
+
+`captureFullState` / `restoreFullState` round-trip via `kStateRootTag = "BaySickPedalsState"` with version 1.  Per-slot snapshot includes type + base64-encoded DSP state blob.  2026-05-05 Bug B fix: bulk-restore fires `onSlotsExternallyChanged` callback to force editor rebuild even when slot types match (DSP pointers swapped underneath).  Pedalboard preset library at `Documents/BaySickDAW/Presets/Pedalboards/{name}.xml`.
+
+**Verdict:** zero dead UI elements, zero unwired params.  The per-pedal-params-owned-by-DSPBase architecture is correct — keeps the BaySickPedalsProcessor APVTS surface minimal (8 params for 8 slots).  No follow-on QA-Fd batch needed.
+
+### 22. APVTS attachment terminology clarification
+
+Mid-audit owner asked about whether `ab_slot` was automatable since I'd categorized the Slot A / B buttons under "Non-APVTS UI elements."  That categorization was misleading.
+
+**The accurate framing:**
+
+- **APVTS-backed parameters** are those declared in `createLayout()` and accessible via `apvts.getRawParameterValue` / `apvts.getParameter`.  These are visible to DAW host automation, MIDI mapping, project serialization, etc.  Whether the UI uses a standard JUCE attachment helper is a separate concern.
+- **Standard attachment helpers** (`SliderAttachment` / `ButtonAttachment` / `ComboBoxAttachment`) are convenience wrappers for the common cases.  They only support specific control-to-param-type pairs (e.g., `ButtonAttachment` only binds `AudioParameterBool` to `ToggleButton`).
+- **Manually-synced controls** are UI widgets that bind to APVTS params without using a stock attachment helper — typically because the widget is custom (chicken head, radio-style TextButton) or the param type doesn't fit a stock helper (Choice param driven by 2 radio buttons instead of a ComboBox).  Manual sync uses `addParameterListener` + `onChange` callbacks that call `setValueNotifyingHost` — same semantics, fully automatable.
+
+**Applied to the NAM/IR audit:**
+
+All 18 params (including `ab_slot`) are APVTS-backed and automatable.  My earlier prose mixed "no standard attachment helper" with "non-APVTS" — those aren't the same thing.  The §20 audit table above uses the corrected framing.
+
+### 23. QA-Fc spec — BaySickNAMIR Dual-Mic Stack
+
+**Purpose:** simulate two microphones on the same source (the existing single-mic chain becomes Mic A; a parallel Mic B path is added).  Real-recording workflow — most pro recordings use 2+ mics on guitar cabs, vocals, drums, etc.  Each mic captures different spatial information; summed result has more energy + dimension than either alone.
+
+**Architecture — parallel paths, NOT a blend:**
+
+Current single-mic chain in `processBlock` (BaySickNAMIRProcessor.cpp:430-452):
+```
+post-cab buffer
+  → Mic Sim (mode + model + mix)
+  → Mic Placement (distance + angle + polar + mix)
+  → Master Output
+```
+
+New dual-mic chain:
+```
+post-cab buffer
+  ├── (copy to mPreMicScratch)
+  ├── Mic A path (in-place on buffer):
+  │     → Mic Sim A (mode + model + mix)
+  │     → Mic Placement A (distance + angle + polar + mix)
+  │
+  └── if Mic B Active:
+        copy mPreMicScratch → mMicBScratch
+        → Mic Sim B  (mode + model + mix)
+        → Mic Placement B (distance + angle + polar + mix)
+        sum mMicBScratch into buffer
+  → Master Output
+```
+
+The summing step amplifies correlated signal naturally (two mics on same source → +3 dB on perfectly correlated content, less on uncorrelated content, plus comb-filter colouration depending on the path differences — exactly how two real mics behave).  This is NOT crossfaded / blended; both mics contribute their full output and the result is additive.
+
+**New APVTS params — 8 total (mirrors existing Mic Sim + Placement, with `_b_` infix):**
+
+| Param | Type | Range | Default | Purpose |
+|---|---|---|---|---|
+| `nam_micb_active` | Bool | — | false | Master enable for Mic B path (off = identical to today's single-mic) |
+| `nam_micsim_b_mode` | Choice | None/Built-in/User IR | None | Mic Sim B mode |
+| `nam_micsim_b_model` | Choice | 10 archetypes | Live Vocal Dynamic | Mic Sim B model |
+| `nam_micsim_b_mix` | Float | 0..100 % | 100 | Mic Sim B wet/dry |
+| `nam_placement_b_distance_cm` | Float | 1..150 cm | 30 | Mic Placement B distance |
+| `nam_placement_b_angle_deg` | Float | -90..+90 deg | 0 | Mic Placement B off-axis angle |
+| `nam_placement_b_polar` | Choice | 5 patterns | Cardioid | Mic Placement B polar pattern |
+| `nam_placement_b_mix` | Float | 0..100 % | 100 | Mic Placement B wet/dry |
+
+When `nam_micb_active == false`, the entire Mic B path is bypassed in `processBlock` (zero CPU cost beyond the param read) and the chain behavior is byte-identical to the current single-mic chain.
+
+**Per-slot snapshot extension:**
+
+`SlotSnapshot` (BaySickNAMIRProcessor.h:139-168) currently has 16 fields.  Add 8 new fields mirroring the new APVTS params, plus serialize/deserialize:
+
+```cpp
+// Mic B (new in QA-Fc)
+bool         micbActive          { false };
+int          micSimBMode         { 0 };
+int          micSimBModel        { 0 };
+float        micSimBMix          { 100.0f };
+juce::String micbUserIrPath;
+float        placementBDistance  { 30.0f };
+float        placementBAngle     { 0.0f };
+int          placementBPolar     { 1 };
+float        placementBMix       { 100.0f };
+```
+
+`captureSnapshotFromCurrent` / `applySnapshotToCurrent` extended to handle the 9 new fields (8 APVTS params + the user IR path).  A/B slot switching preserves dual-mic settings independently per slot — slot A might use single-mic, slot B might use dual-mic with specific mic configs.
+
+**New processor members:**
+
+```cpp
+MicSimDSP        mMicSimB;         // parallel Mic Sim instance for Mic B path
+MicPlacementDSP  mMicPlacementB;   // parallel Mic Placement instance for Mic B path
+juce::AudioBuffer<float> mPreMicScratch;  // saves post-cab buffer state for Mic B input
+juce::AudioBuffer<float> mMicBScratch;    // Mic B processing buffer (summed into main at end)
+```
+
+`prepareToPlay` calls `prepare` on both new DSPs and sizes both scratch buffers to host block size × 2 channels.
+
+**Editor layout changes:**
+
+Current Mic Sim row (kMicSimRowH=100) + Mic Placement row (kMicPlaceRowH=100) span the full editor width.  In QA-Fc:
+
+- Add a "Mic A | Mic B" column split inside each row.  Each column takes ~half the editor width.
+- Mic A column = existing controls (Mode chickenhead, Model combo, User IR picker, Mix knob for Mic Sim row; Polar chickenhead, Distance / Angle / Mix knobs for Mic Placement row).
+- Mic B column = mirror of Mic A controls bound to the new `_b_` params.
+- New "Mic B Active" toggle (DualLabelToggle, same as nam_bypass / cab_bypass pattern) lives at the top of the Mic B column.  When OFF, Mic B controls dim/disable visually.
+- Owner's exact mental model: "the two mix knobs would need to be doubled so 2 knobs for each setup basically taking the current mix setup and squishing it to half the screen and adding second one right next to it."  Layout follows that mental model — current single-mic UI squished to half width, second mic mirrors it on the right half.
+
+Editor height may need a small bump (existing kEditorH=560) if the side-by-side layout doesn't fit the current row heights — calculate during implementation.
+
+**Picks up automatically on both Vox + Inst:**
+
+QA-Fc lives at the BaySickNAMIR engine surface.  Both Vox and Inst pages embed the editor unchanged — single batch of work; both pages get dual-mic for free.
+
+**Scope:** medium-large.  ~2-4 hours for processor changes, ~3-5 hours for editor layout work, ~1 hour for snapshot expansion + state migration testing, ~1-2 hours verify.  Total: ~7-12 hours.
+
+**Risk:** medium.  New APVTS params + new DSP path on a heavily-used engine.  Worst case: Mic B bypass logic broken → either silent Mic B (zero impact, just unused feature) or Mic B always active (changes Mic A's behavior — would be caught immediately by ear).
+
+**Dependencies:**
+
+- QA-F (BaySickVocal DSP fix) does NOT block QA-Fc — BaySickNAMIR is its own engine, audit just confirmed it's already cleanly wired.
+- QA-Fb (recording-lifecycle) does NOT block QA-Fc — orthogonal surfaces.
+- BUT: QA-Fc requires the audit to confirm dual-mic isn't being silently added on top of a broken single-mic.  Per §20 the audit is clean, so QA-Fc has a verified-functional foundation to build on.
+
+**Verify scenarios:**
+
+- Mic B Active OFF → byte-identical output to today's single-mic chain (regression check).
+- Mic B Active ON with identical settings to Mic A → output is 2× Mic A's amplitude (correlated sum) — sanity check for the parallel-paths-not-blend architecture.
+- Mic A Distance=30cm, Mic B Distance=120cm → audible comb-filter colouration from path difference (the natural reason dual-mic captures sound "fuller").
+- A/B slot switch with different Mic A vs Mic B configs per slot → tone snaps correctly to the new slot's stored dual-mic state.
+- Project save → reopen → all Mic B params + Mic B user IRs restore correctly (including per-slot snapshots).
+- Mic B Active toggle automation in DAW → smooth crossover into / out of dual-mic mode (per-block bypass, not click-prone).
+- CPU cost with Mic B Active vs OFF → measure delta; OFF should be ~zero added cost (single param read + branch).
+
+### 24. Updated sequencing — QA-Fd not needed, QA-Fc remains
+
+After the audits in §20 + §21 came back clean, the conditional QA-Fd batch (NAM/IR + Pedals wiring fixes) is **not needed**.  No follow-on wiring work surfaced.
+
+Updated sequence:
+
+```
+... QA-E → QA-F → QA-Fa → QA-Fb → QA-Fc → QA-G → QA-H → QA-I → QA-J → ...
+```
+
+QA-Fc dual-mic sits after QA-Fb recording-lifecycle, before QA-G Builder UX.  Both BaySickNAM/IR (engine surface for QA-Fc) and BaySickPedals (Inst-only sibling engine) are clean foundations; QA-Fc is additive feature work, not wiring repair.
+
+§9 Forks entry (eighteenth) implication: the entry already drafted in §18 above gets one additional sub-bullet noting the audits came back clean + QA-Fd was queued and dropped + QA-Fc remains.  Eighteenth Forks entry is now a four-decision package: BaySickAlign redesign + BaySickPitch redesign + QA-Fb slot + QA-Fc slot.
+
+### Disposition
+
+- Detour scope-lock complete.  **Four** dedicated batches' scope locked via this running-notes entry + the queued Main Plan consolidation pass (QA-F redesign, QA-Fa redesign, QA-Fb recording-lifecycle, QA-Fc dual-mic).
+- No source code changed in this detour — pure design + scoping work + read-only audits.
+- QA-E Task 4 close commit (`1d928fc`) + Task 3 follow-up commit (`54f41c8`) stand unchanged.
+- Task 5 (next QA-E task) resumes after the Main Plan consolidation pass commits.
+
+### Next action
+
+- Surface this running-notes diff + dispatch `/draft-commit` for the running-notes-only commit (now covering §11-§24 in a single commit).
+- After Jeff approves + the commit lands: apply the Main Plan consolidation pass (§5 QA-F / QA-Fa / new QA-Fb / new QA-Fc / QA-J updates + §6 sequencing arrow + §9 eighteenth Forks entry covering all four batch decisions).  Surface that diff + dispatch `/draft-commit` for the consolidation commit.
+- After the consolidation commit lands: resume QA-E Task 5 per the current QA-E plan file.
