@@ -833,7 +833,9 @@ needed to find what you should pull up to review the work.
 
 ### Phase 3 — Vox/Inst lifecycle + DSP cluster (the big consolidated batch)
 
-#### **QA-E: Vox/Inst Lifecycle + Recording + DSP-09 + FILE-02**
+#### **QA-E: Vox/Inst Lifecycle + Recording + FILE-02**
+
+*(DSP-09 struck 2026-05-15 — moved to new batch QA-Ea; see §9 nineteenth Forks entry + the DSP-09 line below.)*
 **Plan file:** `Plans & Specs/Batch Plans/phantom-recording-mongoose.md`
 - Items consolidated per user direction (Q6 = Option A bundling):
   - **MIX-02 / MIX-04 / MIX-06** — Vox/Inst tab reload destroys mixer
@@ -861,8 +863,15 @@ needed to find what you should pull up to review the work.
     from the underlying Master QA Backlog entry "does not land in
     browser panel"; no "browser bin" / `RetirementQueue` UI is being
     introduced).
-  - **DSP-09** — Bus solo: solo a bus → that bus + incoming strips plays;
-    other buses silenced at master mix.
+  - **DSP-09** — **MOVED to QA-Ea (2026-05-15; see §9 nineteenth Forks
+    entry + running-notes §34-§40).** Bus solo (solo a bus → that bus +
+    incoming strips play; other buses silenced at master mix) plus the
+    Layers/Bass/Drums bus-output-path unification are now QA-Ea's scope.
+    The Task 6 pre-task spec-call surfaced a Phase-1-vs-5F-4b legacy-split
+    topology (Layers/Bass/Drums use a bespoke dedicated-buffer master sum;
+    every other bus uses the generic routeInsertOutput→kMaster path) that
+    makes the correct fix a hot-path audio-engine refactor warranting its
+    own plan + its own /review-batch.  QA-E no longer touches bus-solo.
   - **FILE-02** — Multi-recording on a single player page via
     Properties-popup routing dropdown (Vox / Inst / Clips, defaulting to
     creating page; immediate rebuild on change).
@@ -939,7 +948,57 @@ needed to find what you should pull up to review the work.
 - Trade-off: COULD split into QA-E1 (Vox/Inst lifecycle MIX-02..06 + REC-01),
   QA-E2 (DSP-09 bus solo standalone), QA-E3 (FILE-02 multi-record routing).
   User confirmed bundled (Q6 Option A). Re-evaluate at start if scope feels
-  off; the split is mechanical.
+  off; the split is mechanical.  **2026-05-15: the QA-E2 (DSP-09) split was
+  actualized as the standalone batch QA-Ea below — DSP-09 is no longer in
+  QA-E.**
+
+#### **QA-Ea: Bus Solo + Layers/Bass/Drums Output-Path Unification (DSP-09)** *(NEW — inserted 2026-05-15)*
+- Items: **DSP-09** (bus solo) + **Layers/Bass/Drums bus-output-path
+  unification** (the architecturally-correct fix that removes the
+  bus-solo bug class, not just the instance).  Punted out of QA-E Task 6
+  at the Task 6 pre-task spec-call (see §9 nineteenth Forks entry +
+  running-notes §34-§40 for the full diagnosis).
+- Scope:
+  - **Bus-solo fix.** Replace the three scattered/inconsistent solo
+    formulas (BaySickGraph `BusNode::processBlock` triad at
+    `VibeGraph.cpp:355-363`/:522/:682; `processBus` `useGroupSolo` +
+    ClipsBus 6-bus + Rusty-standalone variants at :1698-1702/:1727-1728;
+    receive-group `busAnySolo` at `PluginProcessor.cpp:2572-2577` which
+    excludes layers/bass/drums) with ONE shared `VibeGraph::anyBusSoloed()`
+    helper reading **bus `_solo` params only** + a single formula
+    `silenced = thisMuted || (anyBusSoloed && !thisBusSoloed)`.  Locked
+    sub-calls: **A** mute-wins; **B1** direct-to-Master bypass routes are
+    NOT silenced by bus solo (gating `masterExtra` wholesale would zero
+    the soloed bus's own output — it routes through that same accumulator);
+    **C** multi-bus solo is additive; **D** per-strip `_solo` is already
+    global via `isAnyInsertSoloed()` and is NOT touched.
+  - **CRITICAL GUARDRAIL** (`/review-batch` must verify): the new helper
+    must NEVER read `isAnyInsertSoloed()` (strip-level) — prior serial
+    bug muted whole buses when one strip soloed; warned at
+    `VibeGraph.cpp:1876-1885`.
+  - **Output-path unification (Option 2).** Route Layers/Bass/Drums bus
+    outputs through `routeInsertOutput`→kMaster like every other bus;
+    delete the bespoke `layersBuf`/`bassBuf`/`drumsBuf` master sum
+    (`VibeGraph.cpp:1547-1570`).  This collapses the Phase-1-vs-5F-4b
+    legacy split so there is ONE output path + ONE gate site.
+- Own plan file (`Plans & Specs/Batch Plans/<silly-name>.md` when
+  started) + its OWN `/review-batch` pass specifically targeting the
+  hot-path safety surface.
+- Risk: **high** — hot-path audio-engine refactor.  Touches the
+  master-sum, the MT `MasterTask` structure, and the `BusNode` buffer
+  model.  Mandatory `/review-batch` before close per Jeff's safety call.
+- Dependencies: QA-E (same code area + same test material; clean
+  recording/strip surface from QA-E's MIX-02..06 + FILE-01/02 work).
+- Sequencing: **adjacent to QA-E** (Jeff's confirmed slot — runs right
+  after QA-E so it's tested with the same setup in a slightly different
+  order).  See §6 arrow.
+- Effort: medium-large (~8-14 hours; bus-solo helper ~3-4 hr, L/B/D
+  output-path unification + MT MasterTask rework ~4-7 hr, verify ~2-3 hr).
+- Verify (own plan file will detail): the 5 DSP-09 scenarios from the
+  old QA-E Task 6 list (solo Layers; unsolo; multi-bus solo; solo+mute
+  interaction = mute wins; persistence across save/load) + a regression
+  pass that the L/B/D output-path rewrite didn't change non-solo mix
+  output (bit-compare a no-solo render before/after).
 
 #### **QA-F: BaySickAlign Build-Out + Vox DSP Disconnect (Cluster 1)**
 - Items: DSP-02 (Vox FX bypassed), DSP-03 (Vox pitch correction does
@@ -1428,8 +1487,8 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-F → QA-Fa
-   → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-F
+   → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-Verify**** → QA-Export****
 ```
 
@@ -1536,6 +1595,18 @@ mic-sim paths summed rather than blended; new feature; sits on the
 audited-clean BaySickNAMIR foundation).  See §9 eighteenth Forks entry
 for the full four-decision package + the queued QA-Fd-dropped audit
 outcome.
+
+\*\*\*\*\*\*\*\*\* **QA-Ea** inserted 2026-05-15 at the QA-E Task 6
+(DSP-09) pre-task spec-call.  Slotted **immediately after QA-E, before
+QA-F** (Jeff's confirmed slot — same code area + same test material as
+QA-E, run in a slightly different order).  Scope: DSP-09 bus-solo fix +
+Layers/Bass/Drums bus-output-path unification (the Phase-1-vs-5F-4b
+legacy-split removal — the architecturally-correct fix that eliminates
+the bus-solo bug class).  DSP-09 was struck out of QA-E entirely; QA-E
+Task 6 is vacated and QA-E resumes at Task 7 (FILE-02).  QA-Ea gets its
+own plan file + its own mandatory /review-batch for the hot-path safety
+surface (master-sum, MT MasterTask, BusNode buffer model).  See §9
+nineteenth Forks entry + running-notes §34-§40 for the full diagnosis.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -3253,3 +3324,27 @@ all entries' ownerChannelId.
 - §9 this entry.
 
 **Verification:** at QA-F / QA-Fa / QA-Fb close, the batch-close drafter confirms the no-stubs gate held (every UI line item ships functional code + UI together — no more paint-only shells), and the QA-J fork-out note flowed through to QA-J's re-verify list correctly.  At QA-Fc close, the batch-close drafter confirms the `nam_micb_active=false` regression check (byte-identical to today's single-mic chain) + the correlated-sum amplification check (Mic A + Mic B identical settings produces 2× Mic A amplitude).  At QA-J close, the four re-verify scenarios listed in QA-J's folded bullet are exercised against the unified stacking-fix surface.
+
+### 2026-05-15 — QA-E Task 6 (DSP-09) pre-task spec-call → DSP-09 punted to new batch QA-Ea
+
+**Trigger:** QA-E Task 6 = "DSP-09 (Bus solo)".  The mandatory pre-task spec-call (read Carry-Forward §3 "Bus solo" + §4 Decisions Already Made, read `VibeGraph.cpp`/`PluginProcessor.cpp` bus-solo dispatch, surface still-open sub-calls) surfaced a topology finding that materially changed the implementation approach.  Full diagnosis is in running-notes `Plans & Specs/Running Notes/phantom-recording-mongoose.md` §34-§40.  No source changed in Task 6 — pure spec / diagnosis work; QA-E Task 5 close commit `6b044aa` stands.
+
+**Diagnosis:** the reported "Drums plays when Layers solos" bug is structural — bus-solo logic is scattered across THREE inconsistent sites: (1) `BusNode::processBlock` triad (`VibeGraph.cpp:355-363`/:522/:682) — correctly zeroes the Drums BusNode but isn't the leak; (2) `processBus` `useGroupSolo` + ClipsBus 6-bus + Rusty-standalone variants (`VibeGraph.cpp:1698-1702`/:1727-1728); (3) receive-group `busAnySolo` (`PluginProcessor.cpp:2572-2577`) which deliberately EXCLUDES layers/bass/drums bus solo.  Plus the master-sum stage (`VibeGraph.cpp:1547-1570`) sums `layersBuf+bassBuf+drumsBuf+audioClipsPreRendered+masterExtra` with zero solo gating; the `kMaster` accumulator is fully ungated.  Drum audio fanning into the ungated `masterExtra` or the excluded Site-3 formula bypasses the gate.
+
+**Topology finding (the key discovery):** bus *inputs* are uniform (every bus reads a per-channel accumulator fed by `routeInsertOutput`) but bus *outputs* are NOT — Layers/Bass/Drums bus outputs are hardcoded into dedicated `layersBuf`/`bassBuf`/`drumsBuf` and explicitly summed (`VibeGraph.cpp:1551-1553`), while Vox/Inst/Vox2/Inst2/Inst3/FX/Rusty bus outputs go through the generic `routeInsertOutput`→kMaster path (`PluginProcessor.cpp:2593`).  This is a Phase-1 (original AudioProcessorGraph shim) vs 5F-4b (April 2026 unified routing-accumulator model) **legacy split** — the expansion never retrofitted the original three.  This asymmetry IS the structural root of the scattered solo logic; a clean single-gate fix is only possible after the output paths are unified.
+
+**Sub-calls locked (Jeff's decisions):** **A** solo+mute same bus → mute wins.  **B1** direct-to-Master bypass routes are NOT silenced by bus solo (Jeff caught that gating `masterExtra` wholesale would zero the soloed bus's own output — it routes through that same accumulator; B2 "gate at routeInsertOutput source" rejected as re-spreading solo logic into the router).  **C** multi-bus solo is additive.  **D** (corrected from an earlier wrong "within their group" claim) per-strip `_solo` is ALREADY global via `isAnyInsertSoloed()` scanning all 8 insert maps — NOT touched by DSP-09; **critical guardrail:** the bus-solo gate must NEVER read `isAnyInsertSoloed()` (prior serial bug muted whole buses; warned at `VibeGraph.cpp:1876-1885`) — read bus `_solo` params only.  **E** persistence automatic via APVTS (factual).
+
+**Options analyzed:** Option 1 = shared `anyBusSoloed()` helper at both gate sites (fixes the user-visible bug, keeps the two output paths; medium risk).  Option 2 = Option 1 PLUS unify the Layers/Bass/Drums output path through `routeInsertOutput`→kMaster + delete the bespoke master sum (removes the bug CLASS; high risk — touches master-sum, MT MasterTask, BusNode buffer model).
+
+**Decision (Jeff):** Option 2 is what we actually want, but it gets its OWN batch **QA-Ea** with its own plan + its own mandatory `/review-batch` for the hot-path safety concerns.  BOTH the DSP-09 bus-solo fix AND the Option-2 Layers/Bass/Drums output-path unification are QA-Ea's scope.  DSP-09 is struck from QA-E entirely; QA-E Task 6 is vacated and QA-E resumes at Task 7 (FILE-02).  Rationale: same code area + same test material as QA-E, run in a slightly different order — QA-Ea slotted **immediately after QA-E, before QA-F** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`).  This is a scope-reduction + new-batch creation on the OPEN QA-E batch (NOT a closed-batch carry-forward), documented via this §9 entry per §0 Rule 3 — no prior commit reopened.
+
+**Plan files affected:**
+- §5 QA-E entry — title struck to remove DSP-09; DSP-09 line item annotated "MOVED to QA-Ea"; trade-off note updated (QA-E2 split actualized as QA-Ea).
+- §5 QA-Ea entry — INSERTED (new batch, before QA-F).
+- §6 sequencing arrow — `→ QA-Ea*********` inserted between `QA-E` and `QA-F`; new footnote `*********` added.
+- §9 this entry (nineteenth Forks entry).
+- `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` — Task 6 section annotated (DSP-09 moved to QA-Ea; Task 7 FILE-02 is next executable).
+- `Plans & Specs/Running Notes/phantom-recording-mongoose.md` — §34-§40 capture (the full diagnosis + decision).
+
+**Verification:** QA-Ea will run the 5 DSP-09 scenarios from the old QA-E Task 6 list (solo Layers; unsolo; multi-bus solo additive; solo+mute = mute wins; persistence across save/load) + a regression bit-compare that the L/B/D output-path rewrite didn't change non-solo mix output, and its mandatory `/review-batch` must verify the new helper never reads `isAnyInsertSoloed()`.

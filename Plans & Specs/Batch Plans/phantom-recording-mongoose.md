@@ -78,9 +78,16 @@ All spec calls were resolved in the conversation before plan-mode entry. If anyt
 - [Plans & Specs/Carry-Forward Reference.md](Plans & Specs/Carry-Forward Reference.md) — add §3 sub-section documenting recording lifecycle
 - Source files: only if verify surfaces actual bugs (likely none after Task 4 lands)
 
-### Task 6 — DSP-09 (Bus solo)
-- [Source/VibeGraph.cpp](Source/VibeGraph.cpp) — bus solo logic (Carry-Forward §3 lines 274-287 reference)
-- Possibly [Source/PluginProcessor.cpp](Source/PluginProcessor.cpp) — if solo dispatch lives there
+### Task 6 — DSP-09 (Bus solo) — **MOVED to new batch QA-Ea (2026-05-15)**
+- **DSP-09 is no longer in QA-E.** The Task 6 pre-task spec-call surfaced a
+  Phase-1-vs-5F-4b legacy-split topology making the correct fix a hot-path
+  audio-engine refactor. DSP-09 bus-solo + the Layers/Bass/Drums output-path
+  unification are now QA-Ea (own plan + own /review-batch). See Main Plan §5
+  QA-Ea entry + §9 nineteenth Forks entry + running-notes §34-§40.
+- **QA-E Task 6 slot is vacated. Next executable QA-E task = Task 7 (FILE-02).**
+- (Original files-to-modify, retained for QA-Ea's reference:
+  [Source/VibeGraph.cpp](Source/VibeGraph.cpp) — bus solo logic;
+  possibly [Source/PluginProcessor.cpp](Source/PluginProcessor.cpp).)
 
 ### Task 7 — FILE-02 (Properties dialog consolidation + Routing dropdown)
 - [Source/Standalone/BuilderPage.cpp:2543-2561](Source/Standalone/BuilderPage.cpp) — `showClipContextMenu`: delete dead item 7, rename item 6 label
@@ -467,9 +474,23 @@ The old per-page-iteration branches (lines 2150-2310 area's Clips/Vox/Inst/Audio
 - [ ] On pass (or after fixes): `/draft-commit`, surface, commit on approval.
 - [ ] `/draft-doc running-notes` → apply.
 
-### Task 6 — DSP-09 (Bus solo)
+### Task 6 — DSP-09 (Bus solo) — **CLOSED / MOVED to QA-Ea (2026-05-15)**
 
-**Pre-task spec call** — Carry-Forward §3 + §4 lock target behavior. Read them, then surface any still-open sub-calls to Jeff.
+> **This task is no longer executed in QA-E.** The pre-task spec-call below WAS
+> run (2026-05-15) and is preserved as the historical record. Its outcome:
+> DSP-09 surfaced a Phase-1-vs-5F-4b legacy-split topology (Layers/Bass/Drums
+> use a bespoke dedicated-buffer master sum; every other bus uses the generic
+> routeInsertOutput→kMaster path) that makes the architecturally-correct fix a
+> hot-path audio-engine refactor. Per Jeff's call, DSP-09 bus-solo + the
+> Layers/Bass/Drums output-path unification were punted to a NEW dedicated
+> batch **QA-Ea** (own plan file + own mandatory /review-batch for hot-path
+> safety), slotted immediately after QA-E before QA-F. Full diagnosis +
+> sub-call decisions (A mute-wins / B1 direct-master-not-silenced / C additive
+> / D strip-solo-untouched + isAnyInsertSoloed guardrail / E persistence) are
+> in running-notes §34-§40 + Main Plan §9 nineteenth Forks entry + the §5
+> QA-Ea entry. **QA-E Task 6 slot is vacated; QA-E resumes at Task 7 (FILE-02).**
+
+**Pre-task spec call** *(executed 2026-05-15 — outcome above; checklist retained for QA-Ea's reference)* — Carry-Forward §3 + §4 lock target behavior. Read them, then surface any still-open sub-calls to Jeff.
 
 - [ ] Read Carry-Forward Reference §3 "Bus solo" ([lines 274-287](Plans & Specs/Carry-Forward Reference.md)) + §4 Decisions Already Made for the locked DSP-09 target behavior.
 - [ ] Read [Source/VibeGraph.cpp](Source/VibeGraph.cpp) bus-solo dispatch logic + `processBus` for the existing per-strip `_solo` APVTS handling.
