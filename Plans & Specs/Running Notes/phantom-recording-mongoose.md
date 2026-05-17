@@ -369,6 +369,7 @@ Per Main Plan §0 Rule 4.  Every diagnostic addition tracked here with dispositi
 | ~~[Source/Standalone/BuilderPage.cpp](../../Source/Standalone/BuilderPage.cpp) `parseBrowserDragDescription`~~ | ~~`[QA-E DIAG T4] parseBrowserDragDescription` (input + parsed)~~ | Diagnose why Vox-category browser drags reject on the Builder grid post-Task-4 library-driven model | **Stripped at Task 4 close 2026-05-14** (root cause found: `File(relative).existsAsFile()` resolves against CWD = Debug exe folder, not project folder; fixed via `onResolveStoredPath` fallback) |
 | ~~[Source/Standalone/BuilderPage.cpp](../../Source/Standalone/BuilderPage.cpp) `importAudioFile`~~ | ~~`[QA-E DIAG T4] importAudioFile` (path + existsAsFile)~~ | Confirm whether the incoming relative path resolves to an existing file | **Stripped at Task 4 close 2026-05-14** |
 | ~~[Source/Standalone/BuilderPage.cpp](../../Source/Standalone/BuilderPage.cpp) `itemDropped`~~ | ~~`[QA-E DIAG T4] itemDropped` (desc + localPos)~~ | Confirm drop event reaches the grid handler at all | **Stripped at Task 4 close 2026-05-14** |
+| ~~[Source/ProjectManager.cpp](../../Source/ProjectManager.cpp) — file-local `t9DirtyLog` helper + `setDirtyInternal` (clean→dirty flip + `juce::SystemStats::getStackBacktrace()`) + `openProject`/`saveProject` clearDirty markers~~ | ~~`[QA-E DIAG T9]` → `Documents/BaySickDAW/qae_t9_dirty_trace.txt`~~ | Identify the EXACT call site that re-flips dirty after load + after save's clearDirty (Task 9 — fix-first callAsync guard was insufficient; static analysis inconclusive past this point) | **Stripped at Task 9 close 2026-05-17** (root cause found via the backtrace: `EffectRack::setSlotBypassed` fired `onSlotsChanged` unconditionally every audio block from `BaySickVocalProcessor::pushApvtsToDsp` → per-block `markDirty` storm; fixed via a value-change guard in `setSlotBypassed`. `ProjectManager.cpp` reverted fully clean — verified by user 2026-05-17 trace: load clean, save clears + stays clear, reopen clean.) |
 
 ### Pre-existing diagnostic resolution at Task 3 close
 
@@ -2118,3 +2119,322 @@ Refinements applied between §48 and the passed verify:
 - §45 dead-code → QA-Cleanup-1 routing STILL deferred to QA-E close
   (Task 10), unchanged.  M1 disposition + §45 Forks routing remain owed
   at QA-E close.
+
+---
+
+## 2026-05-17 — Task 9 (Dirty-flag investigation) — root-caused (Vox/Inst NAM/IR) + fix applied, awaiting verify
+
+> **Continuation note.**  Continues the QA-E running notes after the Task 8
+> close (§55-§58, same 2026-05-17 date); supersedes nothing.  Task 9 = the
+> "project marks dirty on reopen with zero user interaction" investigation.
+> Root cause traced statically to the Vox/Inst NAM/IR sub-processor's
+> deferred `parameterChanged` callAsync firing AFTER the project-load
+> dirty-suppression window closes.  Fix-first (restore-scoped guard)
+> applied per Jeff's spec call — 3 edits, all in `BaySickNAMIRProcessor`;
+> not committed; awaiting Jeff's 3-mode Debug verify.  **QA-E does NOT
+> close here** — Task 9 verify + Task 10 (close) remain.
+
+### 59. User correction — pivot from generic markDirty funnel to Vox/Inst path
+
+- Investigation opened on the generic `markDirty()` funnel + audio-block
+  path.  Jeff redirected mid-trace: *"Are you looking at vox or inst at
+  all? ... this seems to be connected to vox and inst as once they are
+  loaded it dirty flags no matter what."*
+- Direction confirmed; pivoted to the Vox/Inst engine path.  Pairs with
+  `feedback_check_code_before_calling_it_expected.md` /
+  `feedback_diagnose_before_fixing.md` — the symptom-to-component link
+  (dirty *only* when a Vox or Inst page exists) was the key the static
+  trace then confirmed.
+
+### 60. Root cause — Vox/Inst NAM/IR deferred parameterChanged outlives the load ignore-window
+
+Static trace, airtight:
+
+- Vox embeds a NAM/IR sub-processor
+  (`BaySickVocalProcessor::getNamIrProcessor`); Inst owns one.  Both get
+  the project-dirty hook wired via `StandaloneEditor::wireEngineDirtyHook`
+  ([Source/Standalone/StandaloneEditor.cpp](../../Source/Standalone/StandaloneEditor.cpp)
+  ~7806-7812 Vox, ~8096 Inst) →
+  [Source/Standalone/ApvtsDirtyTracker.h](../../Source/Standalone/ApvtsDirtyTracker.h)
+  :39-42 fires `markDirty()` on ANY engine-APVTS property change.
+- [Source/ProjectManager.cpp](../../Source/ProjectManager.cpp)
+  `openProject` :299-304 suppresses dirty ONLY around
+  `deserializeProject` (`mIgnoreDirty=true`) then `clearDirty()`.
+  `restoreAudioStripsFromArrangement` has its own ignore window +
+  clearDirty.  **Neither window spans the deferred callback below.**
+- Inside the load window,
+  [Source/BaySickNAMIR/BaySickNAMIRProcessor.cpp](../../Source/BaySickNAMIR/BaySickNAMIRProcessor.cpp)
+  `setStateInformation` (~910) calls `apvts.replaceState()` (~932).
+  This re-entrantly fires `parameterChanged` (registered listeners for
+  `oversampling` ~:48 + `ab_slot` ~:54) **synchronously** on the message
+  thread.
+- `parameterChanged` schedules a `juce::MessageManager::callAsync` for
+  `oversampling` (reResetNamForOversampling) and `ab_slot`
+  (captureSnapshotFromCurrent + applySnapshotToCurrent).
+  `setStateInformation` ALREADY restores the active slot + models
+  synchronously (`applySnapshotToCurrent(mLastSlot)` ~:1006), so the
+  deferred apply is **redundant on the load path**.
+- The load ignore-window closes + `clearDirty()` runs; THEN the queued
+  callAsync fires → `applySnapshotToCurrent` (~:792) →
+  `setValueNotifyingHost` on the snapshot params → ApvtsDirtyTracker →
+  markDirty hook → `mProjectManager->markDirty()` **ungated** → project
+  marked dirty.  Every reopen of any project containing a Vox or Inst
+  page, zero user interaction.  (Correlated with recorded WAVs only
+  because a recorded WAV requires an armed Vox/Inst strip, which is what
+  creates the NAM/IR-carrying page — the WAV itself is incidental.)
+- **Sync-vs-async dispatch uncertainty resolved by deduction:** the bug
+  reproduces reliably ONLY if `parameterChanged` fires synchronously
+  inside `replaceState`.  Were it async-after, the existing
+  `if (newSlot == mLastSlot) return;` (~:696) would already suppress it
+  (`mLastSlot` is updated before any async could run).  Reliable repro ⟹
+  synchronous dispatch ⟹ a flag spanning the full `setStateInformation`
+  body fully covers it.
+
+### 61. Spec call — fix-first (restore-scoped guard), Jeff's pick
+
+Options surfaced: **(A)** restore-scoped guard in `BaySickNAMIRProcessor`
+[recommended]; **(B)** re-clear dirty post-settle [fragile fallback];
+**(C)** trace-confirm-first then apply (A).  **Jeff chose (A).**
+Semantic preserved: runtime user A/B + oversampling edits SHOULD still
+mark the project dirty — the fix is scoped to the state-restore path
+ONLY, never to live user interaction.
+
+### 62. Fix applied (3 edits, BaySickNAMIRProcessor only)
+
+No project-load plumbing touched.  No diagnostic instrumentation added
+(no Rule-4 catalog row owed — pure code fix, not a `[QA-E DIAG]` site).
+
+- **[Source/BaySickNAMIR/BaySickNAMIRProcessor.h](../../Source/BaySickNAMIR/BaySickNAMIRProcessor.h)
+  :278:** new member `std::atomic<bool> mInSetState { false };` (near
+  `mLastSlot` / the A/B-snapshot section) with rationale comment.
+- **[Source/BaySickNAMIR/BaySickNAMIRProcessor.cpp](../../Source/BaySickNAMIR/BaySickNAMIRProcessor.cpp)
+  `parameterChanged` (~672):** first statement (~:682)
+  `if (mInSetState.load(std::memory_order_acquire)) return;` — skips both
+  the `oversampling` and `ab_slot` deferred `callAsync` during restore.
+  Only those two params are registered listeners, so skipping is complete
+  + safe; `setStateInformation` performs the synchronous equivalent.
+- **`BaySickNAMIRProcessor.cpp` `setStateInformation`:** arm
+  `mInSetState.store(true, release)` (~:930) immediately before
+  `apvts.replaceState` (~:932); disarm `store(false, release)` (~:1040)
+  as the LAST statement of the `if (xml->hasTagName(...))` block, after
+  the `onStateRestored` callAsync.  No early returns / exceptions between
+  arm and disarm, so a single reset covers the whole block.
+- Fix is **general** — also correct for engine duplicate / preset-import
+  round-trips that go through `setStateInformation` (same redundant-
+  deferred-apply shape, same suppression desired).
+
+### Disposition
+
+- Task 9 **root-caused** (§60, airtight; sync-vs-async closed by
+  deduction) + spec call **resolved** (§61, option A) + fix **applied**
+  (§62, `BaySickNAMIRProcessor.h/.cpp` only).
+- **NOT yet committed.**  Awaiting Jeff's verify.  **QA-E does NOT
+  close** — Task 9 verify + Task 10 remain.
+- No §9 Forks entry: in-scope execution of an already-planned QA-E task
+  (not a closed-batch carry-forward, not a new work area).
+- §45 dead-code → QA-Cleanup-1 routing + M1 disposition UNCHANGED —
+  still owed at QA-E close (Task 10): §9 Forks + Main Plan §5 line.
+
+### Next action
+
+- **Tell Jeff: run Debug build, 3 record modes, then Release** (per-task
+  cycle covers both per
+  `feedback_no_full_release_reverify_at_batch_close.md`):
+  - **(1) Vox-only:** new project, add Vox page, arm + record a WAV,
+    Save, close, reopen → title bar shows NO dirty `*`.
+  - **(2) Inst-only:** same with one Inst page.
+  - **(3) Vox + 2 Inst:** all three present, record, Save, close, reopen
+    → NO dirty `*`.
+  - **Negative check:** after reopen, change an A/B slot or oversampling
+    by hand → dirty `*` MUST appear (confirms restore-scoped, not
+    blanket suppression).
+- On verify PASS → `/draft-commit` → surface drafted message + full
+  pre-commit git status → commit on Jeff's explicit approval, staging
+  only `Source/BaySickNAMIR/BaySickNAMIRProcessor.h` + `.cpp`.
+- Then QA-E resumes at **Task 10** (close): /draft-doc batch-close →
+  /review-batch → apply → commit; settle the §45 dead-code →
+  QA-Cleanup-1 §9 Forks + Main Plan §5 line + the M1 disposition there.
+
+---
+
+## 2026-05-17 — Task 9 (Dirty-flag investigation) — PIVOT: NAM/IR hypothesis DISPROVEN by backtrace; real root cause = EffectRack::setSlotBypassed unconditional onSlotsChanged on the audio thread; real fix applied + NAM/IR change reverted
+
+> **Continuation note.**  Continues the QA-E running notes after the
+> §59-§62 NAM/IR fix-first attempt (same 2026-05-17 date).  **This entry
+> supersedes the §59-§62 conclusion** — that block stays verbatim as the
+> record of the disproven static-trace path; do NOT rewrite it.  The
+> §59-§62 NAM/IR hypothesis was DISPROVEN by a definitive runtime
+> backtrace: the fix-first `mInSetState` guard built clean but the
+> project STILL dirtied on load AND save still couldn't clear it.  Per
+> `feedback_diagnose_before_fixing.md` the investigation switched to the
+> definitive trace (the option Jeff had earlier declined — now justified
+> by the failed speculative fix), which found the true root cause in
+> `EffectRack::setSlotBypassed` firing on the AUDIO THREAD every block.
+> Real fix applied; speculative NAM/IR change reverted per Jeff's spec
+> call.  **QA-E does NOT close here** — Task 9 verify + Task 10 (close)
+> remain.
+
+### 63. §59-§62 NAM/IR hypothesis DISPROVEN — pivot to definitive trace
+
+- §61 spec call was fix-first (option A); the §62 `mInSetState` guard
+  (3 edits, `BaySickNAMIRProcessor.h/.cpp`) built clean.
+- **Result: still broken.**  After the fix the project STILL showed
+  dirty `*` on load, AND `saveProject`'s `clearDirty()` still could not
+  clear it.  The §60 static trace, although internally consistent, was
+  not the actual cause — the symptom was unchanged.
+- Per `feedback_diagnose_before_fixing.md`: a speculative fix that
+  turned out wrong is exactly the trigger to stop guessing and trace.
+  Switched to the definitive runtime backtrace — the option (C) Jeff
+  had declined in §61 in favor of fix-first.  The failed fix-first
+  attempt is the justification for spending the trace cost now.
+
+### 64. Definitive diagnostic added (catalogued — `Remove at Task 9 close`)
+
+- File-local `t9DirtyLog` in
+  [Source/ProjectManager.cpp](../../Source/ProjectManager.cpp): on every
+  clean -> dirty flip inside `setDirtyInternal`, log
+  `juce::SystemStats::getStackBacktrace()` to
+  `Documents/BaySickDAW/qae_t9_dirty_trace.txt`; also writes
+  `clearDirty` markers from `openProject` + `saveProject` so the
+  pre-load / post-load / post-save boundaries are visible in the trace.
+- Tag `[QA-E DIAG T9]`.  Catalog row already added to the Diagnostic
+  Instrumentation Catalog (Rule 4) with disposition `Remove at Task 9
+  close`.  Strip before the close commit.
+
+### 65. Trace result — DEFINITIVE root cause (audio-thread, rack-level)
+
+Both the post-load AND the post-save re-flips had the **identical
+backtrace**, on the **AUDIO THREAD**:
+
+```
+VibeSynthProcessor::processBlock
+  -> BaySickVocalProcessor::processBlock
+     -> BaySickVocalProcessor::pushApvtsToDsp        (~294 — called every block)
+        (~216-219 — the 4 setSlotBypassed calls)
+        -> EffectRack::setSlotBypassed               (Source/EffectRack.cpp ~268)
+           -> onSlotsChanged()                        (~278 — fired UNCONDITIONALLY)
+              -> BaySickVocal ctor lambda             (BaySickVocalProcessor.cpp ~133-138)
+                 -> mDirtyTracker.onAny
+                    -> wireEngineDirtyHook lambda
+                       -> ProjectManager::markDirty
+```
+
+- [Source/BaySickVocal/BaySickVocalProcessor.cpp](../../Source/BaySickVocal/BaySickVocalProcessor.cpp)
+  `pushApvtsToDsp` (~294) runs **every audio block** and unconditionally
+  issues 4 `setSlotBypassed` calls (~216-219).
+- [Source/EffectRack.cpp](../../Source/EffectRack.cpp)
+  `setSlotBypassed` (~268) stored the value and then fired
+  `onSlotsChanged()` (~278) **unconditionally — no value-change guard**.
+- `onSlotsChanged` is bound to the BaySickVocal ctor lambda
+  ([Source/BaySickVocal/BaySickVocalProcessor.cpp](../../Source/BaySickVocal/BaySickVocalProcessor.cpp)
+  ~133-138) → `mDirtyTracker.onAny` → `wireEngineDirtyHook` lambda →
+  `ProjectManager::markDirty`.
+- Net: the project was re-dirtied on **every audio block** (hundreds/sec)
+  the instant a Vox/Inst engine started processing.  `saveProject`'s
+  `clearDirty()` was overwritten by the very next block — explains why
+  save "couldn't clear it".  The trigger is **rack-level**, so it hits
+  **both Vox and Inst** — exactly matching Jeff's symptom *"vox and inst,
+  no matter what"* (§59).  The recorded-WAV correlation is incidental:
+  a recorded WAV requires an armed Vox/Inst strip, which is what creates
+  the engine that starts processing.
+- Textbook violation of the CPU-Safeguarding standing rule /
+  `feedback_apvts_dirty_flag_pattern.md`: an unconditional per-block
+  setter firing a notify callback.
+- The **first** trace entry was benign: `onTabClosed` during
+  `closeAllDynamicTabs` from the open-project / discard-changes menu
+  flow — **pre-load**, wiped by `openProject`'s `clearDirty()`.  Not
+  the bug.  Every trace entry AFTER the `openProject`/`saveProject`
+  clearDirty markers was the audio-block re-flip above.
+
+### 66. Real fix applied — value-change guard in EffectRack::setSlotBypassed
+
+- **[Source/EffectRack.cpp](../../Source/EffectRack.cpp)
+  `setSlotBypassed` (~268):** early-return when
+  `mSlots[slot].bypassed.load(std::memory_order_relaxed) == bypass` —
+  no store, no `onSlotsChanged()` when the value is unchanged.
+- Fix is at the **rack level** = the actual root cause, so it fixes
+  **ALL callers** (BaySickVocal's per-block `pushApvtsToDsp`, and any
+  other unconditional caller), not just the Vox path.
+- A genuine bypass change still stores + notifies as before, so
+  semantics are preserved: toggling an FX slot bypass SHOULD dirty the
+  project, and still does.
+- Thread-safety unchanged: the genuine-change notify path reaches
+  `refreshWindowTitle`, which **already self-marshals off the audio
+  thread** (Batch 9c B2 — its own comment documents this exact chain).
+  So the real-change path stays both thread-safe and semantically
+  correct.
+
+### 67. Spec call (Jeff) — revert the disproven NAM/IR change
+
+- Jeff's call: the §59-§62 NAM/IR hypothesis is disproven, so revert
+  it.  All 3 `BaySickNAMIRProcessor.h/.cpp` edits (§62) reverted to
+  original.  Git confirms both files are now clean.
+- Task 9 scope reduced to the **single proven** `EffectRack` fix.
+  §59-§62 remain in the record as the disproven path (this entry
+  supersedes only their conclusion, not their text).
+- Pairs with `feedback_diagnose_before_fixing.md` — a speculative fix
+  that proved wrong is reverted, not layered over.
+
+### 68. Working-tree note (surface at commit time)
+
+Per `feedback_surface_full_git_status_before_commit.md`, full
+disposition owed at the commit step:
+
+- **Modified — keep:** `Source/EffectRack.cpp` (the real fix);
+  `Plans & Specs/Running Notes/phantom-recording-mongoose.md`.
+- **Modified — keep through verify, strip at Task 9 close:**
+  `Source/ProjectManager.cpp` (the `[QA-E DIAG T9]` trace — catalog
+  disposition `Remove at Task 9 close`).
+- **Reverted (now clean):** `Source/BaySickNAMIR/BaySickNAMIRProcessor.h`
+  + `.cpp` (per §67).
+- **Stray, NOT ours:** `juce/modules/juce_gui_basics/widgets/juce_TreeView.cpp`
+  (+1 blank line; NOT in session-start git status; vendored noise) —
+  recommend revert, do NOT commit.
+- **Untracked, NEVER stage:** `qae_t9_dirty_trace.txt` (runtime
+  diagnostic output).
+
+### Disposition
+
+- §59-§62 NAM/IR hypothesis **DISPROVEN** (§63, fix built clean but
+  symptom unchanged).  Definitive backtrace found the true root cause
+  in `EffectRack::setSlotBypassed` firing `onSlotsChanged` on the audio
+  thread every block (§65, identical post-load + post-save backtrace).
+- Real fix **applied** (§66, rack-level value-change guard — fixes all
+  callers).  Speculative NAM/IR change **reverted** per Jeff (§67).
+- T9 trace instrumentation **catalogued** (§64, Rule 4, strip at close).
+- **NOT yet committed.**  Awaiting Jeff's rebuild + 3-mode verify.
+  **QA-E does NOT close** — Task 9 verify + Task 10 remain.
+- No §9 Forks entry: in-scope execution of an already-planned QA-E task
+  (not a closed-batch carry-forward, not a new work area).  The
+  disproven-then-corrected path is captured here in the running notes;
+  the batch-close Implemented Work Log entry will record the pivot.
+- §45 dead-code -> QA-Cleanup-1 routing + Main Plan §5 line + M1
+  disposition UNCHANGED — still owed at QA-E close (Task 10).
+
+### Next action
+
+- **Tell Jeff: rebuild (Debug + Release), then 3-mode verify** (per-task
+  cycle covers both per
+  `feedback_no_full_release_reverify_at_batch_close.md`):
+  - **(1) Vox-only:** new project, add Vox page, arm + record a WAV,
+    Save, close, reopen -> title bar shows NO dirty `*`.
+  - **(2) Inst-only:** same with one Inst page.
+  - **(3) Vox + 2 Inst:** all three present, record, Save, close,
+    reopen -> NO dirty `*`.
+  - **Trace check:** `qae_t9_dirty_trace.txt` should now show NO
+    `clean -> DIRTY` entries after the `openProject`/`saveProject`
+    clearDirty markers.
+  - **Negative check:** after reopen, toggle an FX-slot bypass by hand
+    -> dirty `*` MUST appear (confirms the guard suppresses only the
+    no-op per-block re-fire, not genuine bypass changes).
+- On verify PASS -> strip the `[QA-E DIAG T9]` trace from
+  `Source/ProjectManager.cpp` (per catalog) -> `/draft-commit` ->
+  surface drafted message + full pre-commit git status (including the
+  `juce_TreeView.cpp` stray + `qae_t9_dirty_trace.txt` disposition) ->
+  commit on Jeff's explicit approval, staging only `Source/EffectRack.cpp`
+  + the catalog/running-notes doc changes.
+- Then QA-E resumes at **Task 10** (close): /draft-doc batch-close ->
+  /review-batch -> apply -> commit; settle the §45 dead-code ->
+  QA-Cleanup-1 §9 Forks entry + Main Plan §5 line + M1 disposition.
+
+---

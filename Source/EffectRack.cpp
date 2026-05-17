@@ -268,6 +268,23 @@ void EffectRack::moveSlotDown(int slot)
 void EffectRack::setSlotBypassed(int slot, bool bypass)
 {
     if (slot < 0 || slot >= kNumSlots) return;
+
+    // QA-E Task 9 (2026-05-17): value-change guard.  pushApvtsToDsp() (and
+    // the per-engine APVTS->DSP sync paths) call this on EVERY audio block
+    // with the current bypass value.  Firing onSlotsChanged unconditionally
+    // chained through the engine dirty-hook -> ProjectManager::markDirty on
+    // every block: the project re-dirtied hundreds of times/sec, so the
+    // title-bar `*` appeared the instant a Vox/Inst engine started
+    // processing and saveProject's clearDirty() was overwritten by the very
+    // next block.  onSlotsChanged is a "slots changed" notifier -- a no-op
+    // store needn't notify.  Matches the CPU-safeguarding standing rule
+    // (guard every per-block setter with a value-change comparison).  A
+    // genuine bypass change still notifies; refreshWindowTitle already
+    // self-marshals off the audio thread (Batch 9c B2), so that path stays
+    // safe + correct.
+    if (mSlots[slot].bypassed.load (std::memory_order_relaxed) == bypass)
+        return;
+
     // Atomic store -- audio reads relaxed in process().  No spinlock; no
     // mLoadLock either since this is a single atomic write.  EffectRack short-
     // circuits before calling effect->process() based on Slot.bypassed, so
