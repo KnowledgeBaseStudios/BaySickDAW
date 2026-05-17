@@ -1935,8 +1935,10 @@ Refinements applied between §48 and the passed verify:
 
 ### 53. QA-Eb decision — window resizability becomes its own batch (Jeff, 2026-05-17)
 
-- Window resizability (the **NAV-01** area) becomes its **OWN new batch
-  QA-Eb**, slotted **adjacent to QA-E**.
+- Making the standalone app window **user-resizable** becomes its **OWN
+  new batch QA-Eb**, slotted **adjacent to QA-E**.  This is a NEW request
+  from Jeff (2026-05-17) and is **independent of the QA-L NAV-01 item**
+  (NAV-01 is a separate concern; QA-L is untouched).
 - **Rationale (Jeff):** doing it next to QA-E vastly speeds up HIS testing
   (no window-juggling during verify).  The two don't naturally group, but
   the testing-efficiency win justifies adjacency.

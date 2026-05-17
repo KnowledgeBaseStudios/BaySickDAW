@@ -1000,6 +1000,57 @@ needed to find what you should pull up to review the work.
   pass that the L/B/D output-path rewrite didn't change non-solo mix
   output (bit-compare a no-solo render before/after).
 
+#### **QA-Eb: Standalone App-Window Resizability** *(NEW — inserted 2026-05-17)*
+- Items: standalone app-window user-resizability (new feature; Jeff
+  request 2026-05-17 during the QA-E Task 7 verify session).  **NOT a
+  carve-out of QA-L's `NAV-01`** — this is a fresh independent request;
+  `NAV-01` is a separate concern and QA-L is untouched (see §9 twentieth
+  Forks entry + running-notes §53).
+- Scope:
+  - **Resizable window + maximize.** Make the standalone
+    `DocumentWindow` user-resizable with a working maximize button.
+  - **Min-size clamp.** A minimum-size constraint so the window cannot
+    shrink below the usable design size (content stays legible /
+    operable; no sub-design squash).
+  - **Outer `juce::Viewport` + scrollbars.** When the window is smaller
+    than the content's design size, wrap the main content in a
+    `juce::Viewport` that shows scrollbars so all controls remain
+    reachable at sub-design window sizes.
+  - **Self-scrolling pages opt out.** Pages that already own their own
+    scrollbars (Piano Roll, Builder grid) must NOT be double-wrapped and
+    must NOT fight the outer Viewport — special-case / opt those pages
+    out so there is exactly one scroll authority per surface.
+  - **OUT of scope (explicitly, post-V1):** any per-page proportional /
+    FlexBox / Grid relayout.  QA-Eb is window-chrome + outer-Viewport
+    only; it does not re-flow page internals.  A real responsive
+    per-page relayout is a separate post-V1 concern and is NOT folded
+    here.
+- Rationale: doing this adjacent to QA-E "vastly speeds up testing for
+  [Jeff] not having to go back and forth over and over again" — a
+  resizable window removes window-juggling overhead from the remaining
+  QA-E-adjacent verify passes.  QA-Eb and QA-E do NOT group by code
+  area; the adjacency is justified purely by testing efficiency, the
+  same justification basis as the QA-Ea adjacency precedent.
+- Dependencies: none functionally (UI-only window-chrome change).
+  Sequenced adjacent to QA-E for testing-efficiency, not a code
+  dependency.
+- Sequencing: **immediately after QA-Ea, before QA-F** (`QA-E → QA-Ea
+  → QA-Eb → QA-F`).  Jeff's confirmed slot per
+  `feedback_slot_placement_is_spec_call.md`, mirroring the QA-Ea
+  adjacency precedent.  See §6 arrow.
+- Risk: **low-medium** — UI-only window-chrome + outer-Viewport change.
+  No audio-thread / DSP / routing surface touched.  Main risk surface is
+  the self-scrolling-page opt-out (avoiding double-wrap / scroll-fight on
+  Piano Roll + Builder grid) and the min-size clamp value choice.
+- Effort: small-medium (~3-5 hours).
+- Verify (own plan file will detail): window drags to resize smoothly;
+  maximize works and restores; window will not shrink below the min-size
+  clamp; at sub-design window sizes the outer Viewport shows scrollbars
+  and every control is reachable; Piano Roll page scrolls via its own
+  scrollbars with no outer-Viewport double-scroll / fight; Builder grid
+  same; no per-page relayout regression (page internals unchanged — only
+  the outer window + Viewport behavior is new).
+
 #### **QA-F: BaySickAlign Build-Out + Vox DSP Disconnect (Cluster 1)**
 - Items: DSP-02 (Vox FX bypassed), DSP-03 (Vox pitch correction does
   nothing), DSP-05 (BaySickAlign full build-out per redesign spec).
@@ -1169,8 +1220,12 @@ needed to find what you should pull up to review the work.
   UI-02 (auto-lane "(deleted slot)" UUID — diagnose with UI-01), MIX-05
   (mixer strip overlap after delete — missing `resized()`/`repaint()`
   trigger), MIX-07 (Effects-page dropdown stale entries — verify why
-  the wired callback doesn't fire on tab-close), NAV-01 (window resize
-  layout — strict FlexBox/Grid + min size), NAV-03 (FX Rack button on
+  the wired callback doesn't fire on tab-close), NAV-01 (Builder grid
+  doesn't line up with the tracks when the grid is resized; meaning
+  clarified by Jeff 2026-05-17 — prior "window resize layout — strict
+  FlexBox/Grid + min size" wording was vague; see §9 twentieth Forks
+  entry.  NOT the QA-Eb app-window-resizability batch — separate item),
+  NAV-03 (FX Rack button on
   player pages), NAV-04 (Piano Roll deep-link buttons), FILE-03
   (browser delete removes all duplicate-named instances — auto-numbering
   on duplicate drop).
@@ -1487,7 +1542,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Eb********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-Verify**** → QA-Export****
 ```
@@ -1607,6 +1662,19 @@ Task 6 is vacated and QA-E resumes at Task 7 (FILE-02).  QA-Ea gets its
 own plan file + its own mandatory /review-batch for the hot-path safety
 surface (master-sum, MT MasterTask, BusNode buffer model).  See §9
 nineteenth Forks entry + running-notes §34-§40 for the full diagnosis.
+
+\*\*\*\*\*\*\*\*\*\* **QA-Eb** inserted 2026-05-17 during the QA-E
+Task 7 (FILE-02) verify session.  Slotted **immediately after QA-Ea,
+before QA-F** (Jeff's confirmed slot — adjacent to QA-E purely for
+testing efficiency: a resizable window removes window-juggling from the
+remaining QA-E-adjacent verify passes; QA-Eb and QA-E do NOT group by
+code area).  Scope: standalone app-window user-resizability — resizable
+window + maximize + min-size clamp + outer `juce::Viewport` scrollbars
+at sub-design size, with Piano Roll / Builder-grid self-scrolling pages
+opted out of double-wrap.  Per-page proportional / FlexBox / Grid
+relayout is explicitly OUT of scope (post-V1).  **NOT a carve-out of
+QA-L's `NAV-01`** — fresh independent request; `NAV-01` / QA-L
+untouched.  See §9 twentieth Forks entry + running-notes §53.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -3348,3 +3416,29 @@ all entries' ownerChannelId.
 - `Plans & Specs/Running Notes/phantom-recording-mongoose.md` — §34-§40 capture (the full diagnosis + decision).
 
 **Verification:** QA-Ea will run the 5 DSP-09 scenarios from the old QA-E Task 6 list (solo Layers; unsolo; multi-bus solo additive; solo+mute = mute wins; persistence across save/load) + a regression bit-compare that the L/B/D output-path rewrite didn't change non-solo mix output, and its mandatory `/review-batch` must verify the new helper never reads `isAnyInsertSoloed()`.
+
+### 2026-05-17 — QA-Eb inserted: standalone app-window resizability (new independent batch, NOT a NAV-01 carve-out)
+
+**Trigger:** QA-E Task 7 (FILE-02) verify session (Task 7 PASSED Debug + Release; see running-notes §50-§52).  During verify Jeff requested a new feature: make the standalone app window user-resizable.  Jeff's stated rationale (verbatim sense): doing it adjacent to QA-E "vastly speeds up testing for me not having to go back and forth over and over again" — a resizable window removes the window-juggling overhead from the remaining QA-E-adjacent verify passes.  No source changed by this routing decision — QA-E Task 7 close work stands; this is a pure new-batch creation + sequencing entry.
+
+**Decision (Jeff, 2026-05-17):** standalone app-window resizability becomes its **OWN new independent batch QA-Eb**.  This is a **fresh feature request from Jeff**, NOT a carve-out of any existing backlog item.  In particular it is **NOT** the QA-L `NAV-01` item.  Jeff clarified (2026-05-17, backlog authority) that he never previously requested app-window resizability and that `NAV-01` is a SEPARATE Builder-grid bug: the Builder grid doesn't line up with the tracks when the grid is resized.  QA-Eb does **NOT** carve out, rescope, or take over `NAV-01` — `NAV-01` stays in QA-L, owned by QA-L.  Per Jeff's instruction the QA-L §5 `NAV-01` line was corrected the same day to that accurate description (the prior "window resize layout — strict FlexBox/Grid + min size" wording was vague/misleading) — a wording-accuracy fix only, NOT a scope or ownership change.  QA-Eb is slotted **immediately after QA-Ea and before QA-F** (`... QA-E → QA-Ea → QA-Eb → QA-F ...`), mirroring the QA-Ea adjacency precedent.  QA-Eb and QA-E do not group by code area; the slot is justified purely by testing efficiency for Jeff's remaining QA-E-adjacent verify work.  Slot / placement is **Jeff's confirmed call** per `feedback_slot_placement_is_spec_call.md` (sequencing position is a spec call, not a unilateral pick).
+
+**§53 framing reconciliation:** an earlier in-conversation framing had described QA-Eb as living in the "NAV-01 area" / as a NAV-01 carve-out.  That was an unsubstantiated assumption, **corrected on 2026-05-17 at Jeff's instruction** — QA-Eb is a fresh independent request.  The committed running-notes §53 reflects the corrected framing ("independent of the QA-L NAV-01 item; NAV-01 is a separate concern; QA-L is untouched"); this §9 entry is the canonical record reconciling that and supersedes any earlier "NAV-01 carve-out" reading.
+
+**Scope (Jeff-locked 2026-05-17, running-notes §53):** ONLY:
+- Resizable standalone window + working maximize.
+- A min-size clamp so the window cannot shrink below the usable design size.
+- A `juce::Viewport` with scrollbars when the window is smaller than the content's design size.
+- Pages that already own scrollbars (Piano Roll, Builder grid) must NOT be double-wrapped and must NOT fight the outer Viewport (opt out / special-case those).
+- **Explicitly OUT of scope (post-V1):** any per-page proportional / FlexBox / Grid relayout.  QA-Eb is window-chrome + outer-Viewport only — it does not re-flow page internals.
+
+**Sequencing:** Phase 3, `QA-E → QA-Ea → QA-Eb → QA-F`.  Inserted between QA-Ea and QA-F per the QA-Ea adjacency precedent (Jeff's confirmed slot).
+
+**Plan files affected:**
+- §5 QA-Eb entry — INSERTED (new independent batch, after QA-Ea, before QA-F).
+- §6 sequencing arrow — `→ QA-Eb**********` inserted between `QA-Ea*********` and `QA-F`; new footnote added.
+- §9 this entry (twentieth Forks entry).
+- `Plans & Specs/Running Notes/phantom-recording-mongoose.md` — §53 (the committed decision capture; framing corrected to "independent of NAV-01").
+- **NOT touched:** §5 QA-L entry / `NAV-01` (separate concern, untouched per Jeff).
+
+**Verification:** n/a — this is a routing / sequencing entry, no source change.  QA-Eb's own §5 entry carries its verify list (resize behavior, maximize, min-size clamp, outer-Viewport scrollbars at sub-design-size, no double-wrap fight on Piano Roll / Builder grid).
