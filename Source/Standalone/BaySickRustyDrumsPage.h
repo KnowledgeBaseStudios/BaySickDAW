@@ -64,6 +64,12 @@ public:
     // just created.
     std::function<void()> onKitLoaded;
 
+    // QA-E Task 8 NIT-1 (engine-type half): fired AFTER mCurrentProgram is
+    // updated (loadProgram / reloadForProjectRestore) so listeners read the
+    // NEW program.  onKitLoaded fires mid-loadKit, BEFORE mCurrentProgram is
+    // set, so it can't be used for this (it returns the prior program).
+    std::function<void()> onProgramChanged;
+
     // Fired when the user requests removal of this page (ribbon right-click).
     std::function<void()> onDeleteRequested;
 
@@ -96,6 +102,10 @@ public:
 
     enum class Program { None = 0, Full = 1, Basic = 2 };
     Program getCurrentProgram() const noexcept { return mCurrentProgram; }
+    // QA-E Task 8 NIT-1 (engine-type half): mirrors LayersPage::getEngineType()
+    // so the piano-roll context label can show "{tab} - Full" / "{tab} -
+    // Basic" (empty -> "(no engine)" pre-load, consistent with other engines).
+    juce::String getEngineType() const;
 
 private:
     VibeSynthProcessor& mProcessor;

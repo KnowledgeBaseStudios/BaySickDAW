@@ -428,7 +428,11 @@ private:
     // projects with audio clips play silently (no routing) + have no mixer
     // strip for the row.  Safe to call repeatedly; ensureAudioInsert +
     // addAudioChannel are both idempotent.
-    void restoreAudioStripsFromArrangement();
+    // QA-E Task 8 NIT-2 (QA-D carry-forward): isLoadContext defaults true so
+    // the 5 existing (all load-path) callers are unchanged; a future non-load
+    // caller passes false to skip the end-of-restore clearDirty (defensive
+    // guard so it can never wrongly clear a user's unsaved-edit state).
+    void restoreAudioStripsFromArrangement (bool isLoadContext = true);
 
     // Single-shot timer that fires when the count-in period ends and starts the transport
     struct CountInTimer : public juce::Timer {

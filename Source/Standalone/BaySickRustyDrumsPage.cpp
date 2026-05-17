@@ -49,6 +49,17 @@ const char* programLabel (BaySickRustyDrumsPage::Program p)
 }
 }
 
+// QA-E Task 8 NIT-1 (engine-type half): the piano-roll context label's
+// engine portion = this string (empty -> "(no engine)").  None returns
+// empty (consistent with every other engine pre-load); Full/Basic return
+// their label so the label reads "{tab} - Full" / "{tab} - Basic".
+juce::String BaySickRustyDrumsPage::getEngineType() const
+{
+    return mCurrentProgram == Program::None
+               ? juce::String()
+               : juce::String (programLabel (mCurrentProgram));
+}
+
 BaySickRustyDrumsPage::BaySickRustyDrumsPage (VibeSynthProcessor& p)
     : mProcessor (p)
 {
@@ -207,6 +218,7 @@ bool BaySickRustyDrumsPage::reloadForProjectRestore (const juce::File& sfzPath)
     // (otherwise loadProgram → loadKit re-runs and the kit's set_cc directives
     // stomp the saved CC values that the caller is about to replaceState in).
     mCurrentProgram = target;
+    if (onProgramChanged) onProgramChanged();   // QA-E Task 8 NIT-1: new program now current
     if (mProgramCombo)
     {
         const int restoreId = (target == Program::Full)  ? kComboItemFull
@@ -560,6 +572,7 @@ bool BaySickRustyDrumsPage::loadProgram (Program target)
         return false;
 
     mCurrentProgram = target;
+    if (onProgramChanged) onProgramChanged();   // QA-E Task 8 NIT-1: new program now current
     loadAriaPanelForProgram (target);   // J-8 stage 2: render the ARIA control surface
     if (onSoundNameChanged) onSoundNameChanged (juce::String ("BaySickRustyDrums - ") + programLabel (target));
     return true;

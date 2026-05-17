@@ -1995,3 +1995,126 @@ Refinements applied between §48 and the passed verify:
   (Task 10), unchanged.
 - QA-E resumes at **Task 8** (Sub-Phase Z / QA-D NIT corrections) after
   this commit + QA-Eb bookkeeping.
+
+---
+
+## 2026-05-17 — Task 8 (Sub-Phase Z / QA-D NIT corrections) verified + closed
+
+> **Continuation note.**  This block continues the QA-E running notes after
+> the Task 7 close (§50-§54, same 2026-05-17 date).  It does NOT supersede
+> any prior block.  Task 8 = the three QA-D `/review-batch` NITs folded into
+> QA-E as Sub-Phase Z (per `feedback_closed_batch_carryforward_via_forks.md`
+> — the routing was recorded at QA-E open via the §9 eleventh Forks entry;
+> this block is the EXECUTION record, not a new carry-forward).  All three
+> verified PASS by Jeff in Debug on 2026-05-17.  Closes **Task 8 only** —
+> QA-E does NOT close here; Tasks 9 (dirty-flag investigation) and 10
+> (close) remain.  Compaction-critical — the next session works from §46+
+> plus §50-§54 plus this block.
+
+### 55. NIT-1 — BaySickRustyDrumsPage in onTabRenamed + engine-type-half completion
+
+- **Original NIT-1:** `onTabRenamed` had Layers / Bass / Drum / Inst /
+  Clips / Vox branches but NO BaySickRustyDrumsPage branch (Rusty was the
+  one page type left out) — renaming a Rusty tab left its piano-roll
+  context label stale.  Added the branch: `rp->setTabName` +
+  `mPianoRollPage->setEngineDisplayName({EngineKind::BaySickRustyDrums,0},
+  finalName)`.  Mixer-strip rename routes via a separate path (parallel to
+  Inst / Clips / Vox — no MixerPage StripKind for Rusty).
+- **Engine-type half surfaced during verify (same "Rusty was the only
+  engine left out" family; fixed in-batch, no-defer per
+  `feedback_qa_batches_fix_bugs_dont_defer.md`):** the context label is
+  `"{displayName} - {engineType-or-(no engine)}"`
+  (`PianoRollPage::composeContextLabel`).  Every other engine wires
+  `conn.engineType` (Layer / Bass / Drum via `getEngineType()` at register;
+  Inst).  Rusty NEVER did → always `"(no engine)"`.  Added
+  `BaySickRustyDrumsPage::getEngineType()` (returns `""` for
+  `Program::None` → `"(no engine)"`, consistent with other engines
+  pre-load; `"Full"` / `"Basic"` otherwise, via the file-local
+  `programLabel`).
+- **Off-by-one root-caused + corrected:** first attempt pushed
+  `setEngineType` from `onKitLoaded` — WRONG hook.  `loadKit()` fires
+  `onKitLoaded` at line 195 BEFORE the callers (`loadProgram` line 573,
+  `reloadForProjectRestore` line 220) set `mCurrentProgram`, so it pushed
+  the PREVIOUS program (Basic→`"(no engine)"`, Full→`"Basic"`,
+  Basic→`"Full"`).  Fix: added a dedicated `onProgramChanged` callback
+  fired AFTER `mCurrentProgram = target` in BOTH `loadProgram` and
+  `reloadForProjectRestore`; reverted the `onKitLoaded` push (back to
+  mixer-strips-only).  StandaloneEditor wires `onProgramChanged` →
+  `setEngineType({BaySickRustyDrums,0}, rawPage->getEngineType())`.
+  Verified: Basic→`"Basic"`, Full→`"Full"`, switch-back correct, rename
+  retains type.
+- **Known secondary edge flagged to Jeff (not yet specifically
+  verified):** project save+reload registration order — if
+  `reloadForProjectRestore` fires `onProgramChanged` before the Rusty
+  engine is registered with the piano roll, the label could show
+  `"(no engine)"` until a re-pick.  Fix in-batch if Jeff's later testing
+  surfaces it.
+
+### 56. NIT-2 — restoreAudioStripsFromArrangement defensive clearDirty guard
+
+- Signature gained `bool isLoadContext = true` (StandaloneEditor.h +
+  .cpp).  The end-of-restore `clearDirty()` is now gated
+  `if (isLoadContext && ! wasIgnoring)` — the existing `wasIgnoring` /
+  `setIgnoreDirty` logic is PRESERVED (the plan pseudocode had omitted it;
+  faithful adaptation keeps it).
+- All 5 callers (8458 / 8881 / 8919 / 9023 / 9175) are argless → default
+  `true` → behavior identical.
+- Defensive-only; verified by reasoned static analysis (no Debug repro
+  per plan).
+
+### 57. NIT-3 — advanceCountersFromRestoredTabs legacy bare-name migration (PLAN DEVIATION)
+
+- **Plan deviation:** the plan pseudocode
+  (`mNextLayerNameNum = jmax(mNextLayerNameNum, 1)`) is a NO-OP — the
+  counter defaults to 1, and the plan's own verify requires the next +Add
+  to be "Layer **2**".  Implemented the correct behavior instead: bare
+  `"Layers"` / `"Bass"` / `"Drums"` feed the existing `maxLayer` /
+  `maxBass` / `maxDrum` accumulators (`if (nm == "Layers")
+  maxLayer = jmax(maxLayer,1)` etc.), so the existing
+  `mNextLayerNameNum = jmax(..., maxLayer+1)` yields next = 2.
+- Verified PASS by Jeff (bare-named tab → +Add → "Layer 2" / "Bass 2" /
+  "Drum 2"; Jeff "nit 3 is good too").
+
+### 58. Files changed (Task 8, uncommitted, about to commit)
+
+- `Source/Standalone/StandaloneEditor.cpp` / `Source/Standalone/StandaloneEditor.h`
+  — NIT-1 dispatch branch, NIT-2 param + guard, NIT-3 bare-name
+  accumulators, `onProgramChanged` wiring; `onKitLoaded` reverted to
+  original (mixer-strips-only).
+- `Source/Standalone/BaySickRustyDrumsPage.cpp` / `Source/Standalone/BaySickRustyDrumsPage.h`
+  — `getEngineType()`; `onProgramChanged` callback + fires in `loadProgram`
+  and `reloadForProjectRestore`.
+
+### Disposition
+
+- Task 8 (Sub-Phase Z — the three QA-D `/review-batch` NIT corrections)
+  **COMPLETE and verified PASS** by Jeff in Debug 2026-05-17 ("Works" /
+  "nit 3 is good too").
+- NIT-1 engine-type-half completion is **in-scope per no-defer** (same
+  QA-D-NIT "Rusty was the only one left out" family;
+  `feedback_qa_batches_fix_bugs_dont_defer.md`).
+- NIT-3 was a **plan deviation** — plan pseudocode was a NO-OP; implemented
+  the behavior the plan's own verify required (§57).
+- One secondary edge flagged to Jeff, not yet specifically verified
+  (NIT-1 project save+reload registration order, §55) — fix in-batch if
+  later testing surfaces it.
+- Sub-Phase Z routing was already recorded at QA-E open (§9 eleventh Forks
+  entry) — no NEW §9 Forks entry needed for Task 8 (this is execution of
+  already-routed work; the NIT refinements are in-batch, captured here).
+- **QA-E does NOT close** — Tasks 9 (dirty-flag investigation) and 10
+  (close) remain; QA-E resumes at Task 9 after this commit.
+- §45 dead-code → QA-Cleanup-1 routing UNCHANGED — STILL deferred to QA-E
+  close (Task 10); formal §9 Forks + Main Plan §5 line owed there.
+- M1 disposition + the §45 Forks routing remain owed at QA-E close.
+
+### Next action
+
+- Dispatch `/draft-commit` → surface drafted commit message + full
+  pre-commit git status → commit on Jeff's explicit approval
+  (`feedback_surface_drafted_commit_message_for_approval.md`), staging
+  specific source files only.  Single commit covers all 3 NITs + the
+  NIT-1 engine-type completion (mechanical + small per plan).
+- Then QA-E resumes at **Task 9** (dirty-flag investigation).
+- §45 dead-code → QA-Cleanup-1 routing STILL deferred to QA-E close
+  (Task 10), unchanged.  M1 disposition + §45 Forks routing remain owed
+  at QA-E close.

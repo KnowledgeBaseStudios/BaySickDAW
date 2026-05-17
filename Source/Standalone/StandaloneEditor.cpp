@@ -1313,6 +1313,18 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                 // routes through a different path (no enum entry here).
                 vp->setTabName(finalName);
             }
+            else if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*>(entry->component.get()))
+            {
+                // QA-E Task 8 NIT-1 (QA-D carry-forward): Rusty was the only
+                // page type missing from this dispatch, so renaming a Rusty
+                // tab left its piano-roll context label stale.  Rusty is a
+                // singleton engine registered at index 0 (see registerEngine
+                // {EngineKind::BaySickRustyDrums, 0}).  Mixer-strip rename
+                // routes through a separate path (parallel to Drum handling).
+                rp->setTabName(finalName);
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineDisplayName ({ EngineKind::BaySickRustyDrums, 0 }, finalName);
+            }
             break;
         }
         refreshAllKitViews();   // D2: ribbon rename → kit row labels
@@ -7014,6 +7026,22 @@ void StandaloneEditor::addBaySickRustyDrumsTab()
         }
     };
 
+    // QA-E Task 8 NIT-1 (engine-type half): push the loaded program
+    // (Full/Basic) into the piano-roll context label so it reads
+    // "{tab} - Full" / "{tab} - Basic" (Rusty was the only engine that
+    // never wired conn.engineType -> showed "(no engine)").  Fired from
+    // onProgramChanged, NOT onKitLoaded: onKitLoaded fires mid-loadKit
+    // BEFORE mCurrentProgram updates, so it pushed the PREVIOUS program
+    // (off-by-one).  onProgramChanged fires after mCurrentProgram = target
+    // in loadProgram + reloadForProjectRestore, so getEngineType() is the
+    // NEW program.
+    rawPage->onProgramChanged = [this, rawPage]
+    {
+        if (mPianoRollPage)
+            mPianoRollPage->setEngineType ({ EngineKind::BaySickRustyDrums, 0 },
+                                           rawPage->getEngineType());
+    };
+
     // J-7a (2026-05-03): NO ribbon-rename hookup for this engine.
     // BaySickRustyDrums is a singleton - its ribbon tab name represents the
     // engine's identity, not the active kit/program.  Layer/Bass/Drum/Clip
@@ -9541,12 +9569,19 @@ void StandaloneEditor::advanceCountersFromRestoredTabs()
             {
                 case RibbonTabBar::TabType::Layers:
                     maxLayer = juce::jmax (maxLayer, parseTail (nm, "Layer "));
+                    // QA-E Task 8 NIT-3 (QA-D carry-forward): pre-QA-D saves
+                    // used bare "Layers"/"Bass"/"Drums" (no " N").  Count the
+                    // bare name as instance #1 so the next +Add becomes
+                    // "Layer 2" (not "Layer 1") via the maxLayer+1 line below.
+                    if (nm == "Layers") maxLayer = juce::jmax (maxLayer, 1);
                     break;
                 case RibbonTabBar::TabType::Bass:
                     maxBass = juce::jmax (maxBass, parseTail (nm, "Bass "));
+                    if (nm == "Bass") maxBass = juce::jmax (maxBass, 1);   // NIT-3
                     break;
                 case RibbonTabBar::TabType::Drums:
                     maxDrum = juce::jmax (maxDrum, parseTail (nm, "Drum "));
+                    if (nm == "Drums") maxDrum = juce::jmax (maxDrum, 1);  // NIT-3
                     break;
                 case RibbonTabBar::TabType::Vox:
                     maxVox = juce::jmax (maxVox, parseTail (nm, "Vox "));
@@ -10255,7 +10290,7 @@ static void syncTempoFromPatternManager (StandalonePlayHead& ph,
 }
 
 // ── R5d follow-up (2026-04-24): post-load audio-strip restore ───────────────
-void StandaloneEditor::restoreAudioStripsFromArrangement()
+void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
 {
     if (mPM == nullptr) return;
 
@@ -10316,7 +10351,11 @@ void StandaloneEditor::restoreAudioStripsFromArrangement()
     if (mProjectManager)
     {
         mProjectManager->setIgnoreDirty (wasIgnoring);
-        if (! wasIgnoring) mProjectManager->clearDirty();
+        // QA-E Task 8 NIT-2: gate the clearDirty on isLoadContext (defensive
+        // -- all current callers are load paths and pass the default true, so
+        // behavior is unchanged; a future non-load caller passing false will
+        // not wrongly discard the user's dirty state).
+        if (isLoadContext && ! wasIgnoring) mProjectManager->clearDirty();
     }
 }
 
