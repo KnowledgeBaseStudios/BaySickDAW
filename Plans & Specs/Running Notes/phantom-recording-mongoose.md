@@ -2257,6 +2257,46 @@ No project-load plumbing touched.  No diagnostic instrumentation added
 
 ---
 
+## 2026-05-17 — Task 10 — QA-E CLOSE
+
+> **Batch close.**  QA-E (Tasks 0-10) closed.  Full close record is in
+> `Plans & Specs/Implemented Work Log.md` (QA-E batch-close entry,
+> 2026-05-17); this is the running-notes stamp.
+
+### 69. Close sequence executed
+
+- **/draft-doc batch-close** → applied to Implemented Work Log (QA-E
+  entry, 6 buckets).
+- **/review-batch QA-E** → **READY-TO-COMMIT**: 0 BLOCKER, 0 NEEDS-FIX,
+  1 NIT (stray `qae_t9_dirty_trace.txt` runtime log).  NIT surfaced
+  individually (not bulk-deferred per
+  `feedback_closed_batch_carryforward_via_forks.md`); Jeff picked
+  option A → file deleted, working tree clean.
+- **M1 disposition** → Main Plan **§9 twenty-first Forks entry**: mute
+  findings #16a/#16b/#21 closed no-longer-reproducible (8/8 Debug+
+  Release; `git log -L` provenance: gates pre-date QA-0 captures;
+  verify-only commit `57f8edd`).
+- **§60 dead-code routing** → Main Plan **§9 twenty-second Forks entry**
+  + §5 QA-Cleanup-1 fold-in sub-bullet + Effort delta.  Source-verified
+  pre-delete guard recorded: `renameAudioAt` is SHARED by the live tree
+  path (`BuilderPage.cpp:411`) — QA-Cleanup-1 retains it, deletes ONLY
+  the dead `BrowserItem::Kind::Audio` flat-list case (~`:912`).
+- **§5 QA-E close annotations** (M1 + §60 reciprocal cross-refs) applied
+  per §0 Rule 3.
+
+### Disposition
+
+- QA-E **CLOSED**.  Pending: the close commit (Implemented Work Log
+  entry + Main Plan §9/§5 edits + this running-notes stamp) — surface
+  full git status + drafted message for Jeff's approval, commit on OK.
+- **§6 sequencing:** QA-Ea is next (DSP-09 bus-solo + L/B/D output-path
+  unification — own plan + own /review-batch).  QA-B deferred to after
+  QA-J (§9 fourteenth Forks).
+- No carry-forward owed beyond what the §9 entries route (M1 closed;
+  §60 → QA-Cleanup-1; #56/#57/#58/#59 already routed earlier in QA-E).
+
+---
+
 ## 2026-05-17 — Task 9 (Dirty-flag investigation) — PIVOT: NAM/IR hypothesis DISPROVEN by backtrace; real root cause = EffectRack::setSlotBypassed unconditional onSlotsChanged on the audio thread; real fix applied + NAM/IR change reverted
 
 > **Continuation note.**  Continues the QA-E running notes after the

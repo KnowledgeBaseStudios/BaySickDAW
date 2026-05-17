@@ -925,6 +925,8 @@ needed to find what you should pull up to review the work.
   - **Folded in 2026-05-12 (QA-E Task 3 mid-verify finding via Rule 3; see §9 sixteenth Forks entry)** -- **Task 9: Dirty-flag investigation (record-finalize side effect)**.  Post-record + save still shows dirty on reopen.  Did NOT happen until the WAV files were on the Builder grid (i.e., post-`commitRecordingResult`'s `markDirty()` call at [Source/Standalone/StandaloneEditor.cpp:9979](Source/Standalone/StandaloneEditor.cpp:9979)).  Pattern resembles a QA-D STATE-01 regression -- something re-flips dirty after save.  Scope: investigate root cause + fix + verify across all three record modes (Vox-only, Inst-only, Vox+Inst combined).  Inserted as Task 9 in the batch plan, between Task 8 Sub-Phase Z and the close sequence (which renumbers to Task 10).
   - **Folded in 2026-05-12 (QA-E Task 3 user feature request; see §9 sixteenth Forks entry)** -- **Task 7 sub-bullet: "Add a new Page" options in Routing dropdown.**  FILE-02's Routing dropdown (Task 7 step 2) extends to include "Add a new Clip Page", "Add a new Vox Page", "Add a new Inst Page" entries so the user can route a clip to a newly-created page without first navigating to the ribbon to add a tab.
   - **Folded in 2026-05-12 (QA-E Task 4 plan-review architectural finding via Rule 3; see §9 seventeenth Forks entry)** -- **Task 4 scope expanded to library-driven page-owner model.**  Original plan's `mClipPath` + new `mDryClipPath` shape was single-take-per-page; user surfaced that multi-file-to-one-page was always the intent.  Expanded scope: add `pageOwnerChannelId` field to `AudioLibraryEntry` ([Source/PatternManager.h:528](Source/PatternManager.h:528)); library becomes single source of truth for "files routed to this page"; browser walk groups library entries by ownerChannelId.  Vox/Inst `mClipPath` deleted (engine-irrelevant).  Clips `mClipPath` retained transitionally for sample-player preload (deletable post-QA-J).  Same model unblocks Task 7's multi-route Properties dropdown intent + future multi-take recording.
+  - **Closed at QA-E close 2026-05-17 (Task 1 / M1 disposition via §9 twenty-first Forks entry)** -- mute findings #16a / #16b / #21 verified **no-longer-reproducible** (8/8 Debug+Release PASS; `git log -L` provenance: dispatch gates pre-date the QA-0 captures by months; verify-only commit `57f8edd`, no source change).
+  - **Routed at QA-E close 2026-05-17 (Task 7 §60 finding via §9 twenty-second Forks entry)** -- dead flat-list `BrowserItem::Kind::Audio` choke / rename / switch paths in `BrowserPanel::showItemContextMenu` (found during Task 7 Choke-Group verify; pure dead code post-FILE-01) routed to **QA-Cleanup-1** with the source-verified `renameAudioAt` shared-use pre-delete guard.
 - Scope: SINGLE coordinated batch because all touch the MixerPage spawn
   cascade + project XML restoration walker + StripRecorder finalize +
   bus DSP path. Splitting causes merge churn. Walk the full Vox/Inst
@@ -1409,6 +1411,7 @@ Every component in the build gets classified into:
 #### **QA-Cleanup-1: Source code cleanup**
 - Items: execute the source-code section of the QA-Audit manifest.
   - **Folded in 2026-05-11 (QA-D close NIT-4 carry-forward via §9 eleventh Forks entry)**: per-page `LayersPage::setTabName` writeback to dead `mPianoRoll` state ([Source/Standalone/LayersPage.cpp:321-325](Source/Standalone/LayersPage.cpp) + parallels in `BassPage` / `DrumPage`).  QA-D STATE-02 added the writeback path that lands at a now-dead piano-roll state member (`mPianoRoll` is allocated but not user-visible post-D-5; unified `PianoRollPage` is what the user sees).  Two fix shapes: (i) minimal symptom-fix — delete the `setTabName` writeback lines in each per-page; (ii) full per-page `mPianoRoll` drop — delete the dead member entirely + walk every reference.  Routes here because dead-code shape, not functional bug.
+  - **Folded in 2026-05-17 (QA-E Task 7 close-routing via §9 twenty-second Forks entry)**: dead flat-list `BrowserItem::Kind::Audio` choke-group / rename / switch cases in `BrowserPanel::showItemContextMenu` ([Source/Standalone/BuilderPage.cpp](Source/Standalone/BuilderPage.cpp), dead `Audio` case ~line 912).  Post-FILE-01 (QA-E Task 4 library-driven model) no `Audio`-kind `BrowserItem` is ever constructed, so these are unreachable duplicates of the live audio-choke path in `showAudioTreeContextMenu` (choke value lives on `AudioLibraryEntry`; live tree path unaffected).  Pure dead code, no behavior change to remove.  **Source-verified pre-delete guard:** `renameAudioAt` (`BuilderPage.cpp:1117`) is SHARED — called from the live tree path (`BuilderPage.cpp:411`) AND the dead flat-list case — so retain `renameAudioAt`; delete ONLY the dead `BrowserItem::Kind::Audio` flat-list call site.  Routes here because dead-code shape, not functional bug.
 - Scope: delete Dead source files; add `// HOLD-FOR-<reason>` comments
   for Dormant + one-line implemented-work entries for each; clean up
   stale comments referencing deleted code.
@@ -1416,7 +1419,7 @@ Every component in the build gets classified into:
 - Mitigation: build after every delete; full verification ladder
   (Section 7's per-batch list) after each meaningful chunk.
 - Dependencies: QA-Audit.
-- Effort: medium-large (~6-10 hours; folded NIT-4 adds ~15-90 min depending on fix shape chosen).
+- Effort: medium-large (~6-10 hours; folded NIT-4 adds ~15-90 min depending on fix shape chosen; folded §60 dead flat-list audio paths add ~15-30 min — mechanical deletion of the dead `BrowserItem::Kind::Audio` case, `renameAudioAt` retained per the source-verified shared-use guard).
 
 #### **QA-PlayerRename: VibePlayer/* → BaySickPlayer/* internal rename** (forked in 2026-05-10 — see §9)
 - Items: QA-A finding #39 (close-time routing).
@@ -3442,3 +3445,52 @@ all entries' ownerChannelId.
 - **NOT touched:** §5 QA-L entry / `NAV-01` (separate concern, untouched per Jeff).
 
 **Verification:** n/a — this is a routing / sequencing entry, no source change.  QA-Eb's own §5 entry carries its verify list (resize behavior, maximize, min-size clamp, outer-Viewport scrollbars at sub-design-size, no double-wrap fight on Piano Roll / Builder grid).
+
+### 2026-05-17 — QA-E Task 1 (M1): mute findings #16a / #16b / #21 closed no-longer-reproducible (provenance trace, no source change)
+
+**Trigger:** QA-E Task 1 (M1) = "Mute Findings Verify-and-Close" for the three QA-0-captured mute findings #16a (pattern-row mute), #16b (audio-row mute), and #21 (right-click block-level mute behavior).  Scope was verify-and-close, not implement.
+
+**Diagnosis:** source review at QA-E open found every mute-dispatch gate ALREADY present and correct, no QA-E source change required: pattern-dispatch gate `Source/PluginProcessor.cpp:1194-1195`; audio-render gate `Source/PluginProcessor.cpp:493-501`; block-level gate `Source/Standalone/StandaloneEditor.cpp:2406`; LED handler `Source/Standalone/BuilderPage.cpp:4092`.  `git log -L` traced all four gates to commit `cc011e0` (MT-engine batch series) plus the initial commit `d595ee3` — both PRE-DATE QA-0's #16a / #16b / #21 capture by months.  Jeff verified all four mute scenarios in BOTH Debug and Release: 8/8 PASS (running-notes Task 1).  Verify-only commit `57f8edd` carries no source change.
+
+**Options considered:** (a) treat as still-open and write a fix anyway; (b) close as no-longer-reproducible with a provenance trace.
+
+**Decision (Jeff):** findings #16a / #16b / #21 are **no longer reproducible** in current source.  Either the original QA-0 captures were inaccurate, or an unrelated commit since the QA-0 snapshot incidentally fixed the behavior; root cause of the captures is unidentified but moot given the clean 8/8 verify plus the pre-dating provenance.  No source commit; closed via this Forks entry at QA-E close per §0 Rule 3.  Verify-only commit `57f8edd` stands.
+
+**Carry-forward contradictions:** the Carry-Forward Reference / QA-0 backlog listed #16a / #16b / #21 as open mute bugs.  This entry records they are NOT reproducible in current source.  Per the §0 three-doc discipline the Carry-Forward snapshot stays frozen as the 2026-05-07 record; this Forks entry IS the canonical contradiction record.  No Carry-Forward §1-§3 architectural facts change.
+
+**Inline back-refs:**
+- §5 QA-E entry — Task 1 (M1) annotated: mute findings #16a / #16b / #21 verified no-longer-reproducible, closed via §9 twenty-first Forks entry.
+- `Plans & Specs/Implemented Work Log.md` QA-E close entry — Task 1 under Done (8/8 mute PASS, no source change); disposition cross-refs this entry.
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 QA-E Task 1 annotation.
+- `Plans & Specs/Running Notes/phantom-recording-mongoose.md` — Task 1 section (8/8 verify + provenance).
+- **NOT touched:** `Plans & Specs/Carry-Forward Reference.md` (frozen — contradiction recorded here).
+
+**Verification:** Jeff verified all four mute scenarios (pattern-row, audio-row, right-click block, combined) in BOTH Debug and Release at QA-E Task 1 — 8/8 PASS (running-notes Task 1).  No regression check needed: no source changed (verify-only commit `57f8edd`).
+
+### 2026-05-17 — QA-E §60: dead flat-list BrowserItem::Kind::Audio choke/rename/switch paths routed to QA-Cleanup-1
+
+**Trigger:** QA-E Task 7, during Choke-Group verification (running-notes §45).  While confirming audio-clip Choke Group behavior, the dead flat-list `BrowserItem::Kind::Audio` browser paths in `BrowserPanel::showItemContextMenu` ([Source/Standalone/BuilderPage.cpp](Source/Standalone/BuilderPage.cpp), ~line 928; the dead `Audio` case ~line 912) were found unreachable.
+
+**Diagnosis:** post-FILE-01 (QA-E Task 4 library-driven browser model) no `Audio`-kind `BrowserItem` is ever constructed anywhere.  The orphaned Choke Group submenu plus the related switch / rename cases in `BrowserPanel::showItemContextMenu` are unreachable duplicates of the LIVE audio choke path in `BrowserPanel::showAudioTreeContextMenu` ([BuilderPage.cpp](Source/Standalone/BuilderPage.cpp):438).  Audio-clip choke grouping is NOT lost: the folder / tree menu is the live path and the choke value lives on the `AudioLibraryEntry`.  Pure dead code; deleting it has no behavior change.
+
+**Options considered:** (a) delete in-batch in QA-E (functional-bug-found → fix-in-batch default); (b) route to the established Phase-6 dead-code cleanup batch QA-Cleanup-1, since this is pure dead code (no functional bug — the live path works) and §0 Rule 3 reserves Phase 6 for dead/dormant code cleanup.
+
+**Decision (Jeff — S4 spec call locked 2026-05-11):** route the §60 dead-code item to **QA-Cleanup-1**.  Dead code, not a functional bug — the live `showAudioTreeContextMenu` path is correct and unaffected — so it falls under §0 Rule 3's Phase-6 carve-out, alongside the QA-D NIT-4 dead-writeback already folded there (§9 eleventh Forks entry).  Formal routing deferred to QA-E close (Task 10) per running-notes §45 / §49 / §54.
+
+**Cleanup-scope caveat (source-verified at QA-E close — carry into QA-Cleanup-1 execution):** `renameAudioAt` ([BuilderPage.cpp](Source/Standalone/BuilderPage.cpp):1117) IS shared — it is called from the LIVE tree path ([BuilderPage.cpp](Source/Standalone/BuilderPage.cpp):411) as well as the dead flat-list `BrowserItem::Kind::Audio` case (~`BuilderPage.cpp`:912).  QA-Cleanup-1 MUST retain `renameAudioAt` and delete ONLY the dead flat-list call site (the `BrowserItem::Kind::Audio` case in `showItemContextMenu`) — not the shared `renameAudioAt` itself.
+
+**Carry-forward contradictions:** none.  Post-FILE-01 dead code created by QA-E Task 4's own library-driven rewrite; does not contradict any Carry-Forward §1-§3 architectural fact.  Live audio-choke behavior unchanged.
+
+**Inline back-refs:**
+- §5 QA-E entry — Task 7 annotated: dead flat-list `BrowserItem::Kind::Audio` choke/rename/switch paths found during Choke-Group verify, routed to QA-Cleanup-1 via §9 twenty-second Forks entry.
+- §5 QA-Cleanup-1 entry — `- Items:` gains a folded sub-bullet for the §60 dead paths incl. the verified `renameAudioAt` shared-use note, cross-referencing this entry.
+- `Plans & Specs/Implemented Work Log.md` QA-E close entry — "Found along the way" #60 records finding + routing.
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 QA-E Task 7 annotation + §5 QA-Cleanup-1 scope addition.
+- `Plans & Specs/Running Notes/phantom-recording-mongoose.md` — §45 / §49 / §54 / §60.
+- `Plans & Specs/Implemented Work Log.md` — QA-E close "Found along the way" #60.
+
+**Verification:** n/a — routing decision, no QA-E source change.  QA-Cleanup-1's own verify ladder covers the eventual deletion; the source-verified `renameAudioAt` shared-use note is the explicit pre-delete guard.
