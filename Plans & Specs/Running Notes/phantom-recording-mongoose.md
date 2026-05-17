@@ -1609,3 +1609,387 @@ items are LOCKED inputs, not open questions.
 - After the bookkeeping commit lands: resume QA-E at **Task 7 — FILE-02**, running the
   standard mandatory pre-task spec-call read with the four locked §4 decisions above as
   fixed inputs.
+
+---
+
+## 2026-05-15 — Task 7 — FILE-02 (Properties dialog + Routing dropdown) — implemented as full two-level routing model
+
+QA-E resumed at **Task 7 — FILE-02** after the §40 plan-doc bookkeeping landed
+(Task 6 vacated -> QA-Ea).  The standard mandatory pre-task spec-call read ran
+with the four LOCKED §4 inputs from §40 ("FILE-02 locked §4 decisions") as
+fixed inputs (Vox+Inst+Clips options, cross-over allowed, remote-collab use
+case, immediate reassignment).  This entry is the durable mid-batch capture:
+the implementation is complete but UNCOMMITTED, awaiting Jeff's Debug-then-
+Release verify.  Compaction-critical — the next session works from this entry,
+not conversation memory.
+
+### 41. Task 7 spec calls locked (Jeff's calls during the Task 7 conversation)
+
+Per-clip **Audio Clip Properties dialog**:
+
+- New **"Routes to:"** dropdown (label string EXACTLY `Routes to:`).  Lists
+  every Vox / Inst / Clips page, plus 3 entries: `Add a new Clip Page`,
+  `Add a new Vox Page`, `Add a new Inst Page`.
+- The dialog's **"OK" button is renamed to "Apply"** — same apply-and-close
+  behavior; "Cancel" still discards.
+- Picking an `Add a new ___ Page` entry: creates the page, routes the clip to
+  it, and navigates to the newly created page.
+
+**Two-level routing model** (Jeff's design call — see §42 for the
+not-a-scope-expansion ruling):
+
+- The audio LIBRARY entry's `pageOwnerChannelId` is the **source-of-truth**
+  route.
+- Each grid block gains a new **`routeIsOverride`** flag (`PatternManager`).
+- **Per-block Properties** (the per-clip dialog) = override THIS copy only:
+  sets `routeIsOverride=true`, detaching that block from the library entry.
+- **Browser-entry Properties** (NEW `Properties...` context-menu item on the
+  audio tree) = source-of-truth edit: retags the library entry AND propagates
+  the new route to every grid copy still following (`routeIsOverride==false`).
+- New blocks default to **follow** (`routeIsOverride=false`).
+- **Deserialize defaults `routeIsOverride=true`** so pre-Task-7 projects keep
+  their exact saved routes on reopen — NO silent reroute of old projects.
+
+### 42. Spec ruling — two-level model is original FILE-02 intent, NOT scope expansion
+
+Jeff confirmed the two-level (library source-of-truth + per-block override)
+model was **FILE-02's original intent**, not a scope expansion.  Therefore
+**NO §9 Forks scope-expansion entry is created for this** — FILE-02 is being
+implemented as specced, not grown.
+
+### 43. Audio-thread safety — zero hot-path code touched
+
+- `PluginProcessor.cpp:3249` (`p.routeChannel = blk.routeChannel`) is
+  **unchanged**.  Playback-time route resolution is untouched.
+- "Follow" is **edit-time propagation**, not playback-time resolution — the
+  follower-propagation walk runs in the UI/edit domain via
+  `notifyArrangementChanged`, never on the audio thread.
+- The browser-level (source-of-truth) edit is **non-undoable**, matching the
+  adjacent **Choke Group** precedent in the same browser context menu.
+
+### 44. Files touched (Task 7 — implementation complete, uncommitted)
+
+- `Source/PatternManager.h` / `Source/PatternManager.cpp` — `routeIsOverride`
+  field + serialize / deserialize (deserialize defaults `true` per §41).
+- `Source/Standalone/BuilderPage.h` / `Source/Standalone/BuilderPage.cpp`:
+  - `RoutablePageInfo` struct relocated above `BrowserPanel`.
+  - Per-block **"Routes to:"** combo + **Apply** button on the per-clip
+    Properties dialog.
+  - Dead duplicate menu **item 7 deleted**; **item 6 renamed `Properties...`**.
+  - Browser `showAudioTreeContextMenu` gains a **`Properties...`** item +
+    new `showLibraryRoutingDialog`.
+  - `BrowserPanel` gains `onEnumerateRoutablePages` /
+    `onCreateRoutablePage` / `onApplyLibraryRouting` callbacks.
+- `Source/Standalone/StandaloneEditor.cpp` — grid `onEnumerateRoutablePages`
+  / `onCreateRoutablePage`; browser reuses them; `onApplyLibraryRouting`
+  drives the follower-propagation pass via `notifyArrangementChanged`.
+
+### 45. Side finding + routing decision — dead `BrowserItem::Kind::Audio` flat-list paths (Choke Group)
+
+Surfaced while verifying Jeff's choke-grouping concern; confirmed by code read:
+
+- The `BrowserItem::Kind::Audio` code paths in the **flat-list** browser menu
+  are **DEAD post-FILE-01**.  No Audio-kind `BrowserItem` is ever constructed
+  (only Pattern at `BuilderPage.cpp:317`, Automation at `BuilderPage.cpp:776`).
+- Therefore the orphaned **Choke Group submenu** inside
+  `BrowserPanel::showItemContextMenu` (`BuilderPage.cpp:911-920`, handler
+  `:935-938`) plus the related `kind == BrowserItem::Kind::Audio`
+  switch/rename cases (~`:863`, ~`:993`) are **unreachable duplicates** of the
+  LIVE audio choke path in `showAudioTreeContextMenu` (`:429-435`, applied
+  `:488`).
+- **Audio-clip choke grouping is NOT lost** — the folder-view (tree) menu is
+  the live path and the choke value lives on the library entry.
+- **Jeff's decision: route the dead-code item to QA-Cleanup-1** (Main Plan §5
+  "Source code cleanup", the established dead-code docket).  Slot/placement is
+  Jeff-decided, not unilateral (per `feedback_slot_placement_is_spec_call.md`).
+- **Cleanup scope note for QA-Cleanup-1:** before deleting the flat-list audio
+  call site, verify `renameAudioAt` is not still shared by the tree path.
+- Formal §9 Forks routing + the Main Plan §5 QA-Cleanup-1 scope line are
+  applied at **QA-E close** (Task 10 side-finding routing step).  This
+  running-notes entry is the durable mid-batch capture so the finding is not
+  lost to compaction.
+
+### Disposition
+
+- Task 7 FILE-02 implemented as the full two-level routing model per Jeff's
+  §41 spec calls.  Implementation complete; **no commit yet** — awaiting
+  Jeff's per-task Debug-then-Release verify (covers both per
+  `feedback_no_full_release_reverify_at_batch_close.md`).
+- Two-level model is original FILE-02 intent per §42 — **no §9 Forks
+  scope-expansion entry** for FILE-02 itself.
+- Zero audio-thread code touched (§43); browser-level edit non-undoable,
+  matching the Choke Group precedent.
+- Side finding (§45): dead flat-list `BrowserItem::Kind::Audio` Choke paths
+  routed to **QA-Cleanup-1** (Jeff's placement call); formal §9 Forks +
+  Main Plan §5 scope line deferred to QA-E close (Task 10), captured here
+  durably.
+
+### Next action
+
+- Jeff verifies Task 7 in Debug then Release.
+- Fix-in-batch anything surfaced (no-defer rule, `feedback_qa_batches_fix_bugs_dont_defer.md`).
+- On clean verify: dispatch `/draft-commit` -> surface drafted commit message
+  + full pre-commit git status -> commit on Jeff's explicit approval
+  (`feedback_surface_drafted_commit_message_for_approval.md`).
+- Carry the §45 dead-code item to **QA-E close** for formal §9 Forks routing +
+  the Main Plan §5 QA-Cleanup-1 scope line (Task 10 side-finding routing step).
+
+---
+
+## 2026-05-16 — Task 7 — FILE-02 redesigned to Move/Copy menu-tree model (supersedes §41-§45)
+
+> **Supersession note.**  §41-§45 (2026-05-15 header) described an EARLIER
+> INTERIM Task-7 model: one `routeIsOverride` flag + a per-clip "Routes to:"
+> combo + a browser `showLibraryRoutingDialog` that was routing-only.  That
+> model was iterated through a long design conversation with Jeff and is now
+> **REPLACED** by the final two-level Move/Copy menu-tree model below.  Where
+> §41-§45 and §46+ conflict, §46+ governs.  Items NOT superseded: the §42
+> ruling (two-level model is original FILE-02 intent, no §9 Forks
+> scope-expansion entry for FILE-02), the §43 audio-thread-safety stance, and
+> the §45 dead-code carry-forward to QA-Cleanup-1 (all re-affirmed below).
+> This is the durable compaction-critical capture — the next session works
+> from §46+, not conversation memory.
+
+### 46. Design evolution — Jeff's calls, in order (final model locked)
+
+The §41-§45 one-flag / whole-copy + routing-only-combo model evolved through
+the design conversation into the FINAL two-level Move/Copy menu-tree model.
+Spec calls Jeff locked, in order:
+
+- **Task-5 drop-existing prompt kept** — the existing Task-5 "file already in
+  library" prompt stays as-is; not removed by this rework.
+- **"One entry per file path"** — no two library entries share an identical
+  file path.  Achieved by **Copy producing an auto-numbered DISTINCT physical
+  file** (a new path), NOT by collapsing / de-duping identical-path entries.
+- **Routing control = menu-tree** — a button that opens a `PopupMenu`.  NOT a
+  combo box; NOT a second modal dialog.  (Supersedes §41's combo + §44's
+  `showLibraryRoutingDialog` second-modal approach.)
+- **Per-clip dialog routing = Copy only** — the acted-on grid block BECOMES
+  the renamed copy, carrying ALL its box props.  No Move from the per-clip
+  path.
+- **Browser dialog routing = per-target submenu {Move, Copy}**:
+  - **Move** = relocate the SINGLE library entry (owner + props); propagate to
+    every following block.  No new file.
+  - **Copy** = force an auto-numbered physical duplicate + a NEW library entry
+    on the target; the original entry + file are left untouched.
+- **Option (B) kept** — retain the per-block follow/detached flag
+  (`routeIsOverride` renamed to `isOverride` and broadened from route-only to
+  all source-of-truth props).
+- **Symmetric note + detached marker** mitigations:
+  - Per-clip box note, text EXACTLY: `These settings apply to this clip only.
+    Changing them stops this clip from following the file's master settings.`
+  - A detached-block marker (dot) on the grid for any `isOverride==true` block.
+- **Auto-rename = `ProjectManager` automatic " (N)" numbering** — reuse what
+  exists (Jeff's call); no new naming scheme.
+
+**Re-affirms §42:** Jeff confirmed this two-level model is FILE-02's original
+intent, NOT a scope expansion → **no §9 Forks scope-expansion entry for
+FILE-02 itself**.
+
+### 47. New bug folded in — browser rename didn't update connected grid block (no-defer)
+
+- **Symptom:** renaming an audio asset in the browser didn't update the name
+  on the connected grid block.
+- **Root cause:** `renameAudioAt` correctly stamps `b.displayAlias`, but the
+  grid audio-block label always re-derived from the file path
+  (`BuilderPage.cpp` audio-block paint) and never read `displayAlias`.
+- **Fix:** grid audio-block paint now prefers `displayAlias` (mirrors the
+  existing `StandaloneEditor.cpp:10242` pattern).  `displayAlias` is already
+  serialized — read-side-only fix.
+
+### 48. Files changed this rework (implementation complete, UNCOMMITTED)
+
+Awaiting Jeff's per-task Debug-then-Release verify.
+
+- `Source/ProjectManager.h/.cpp` — new `duplicateSample()`: ALWAYS forces a
+  fresh " (N)" auto-numbered copy (unlike `importSample`, which early-returns
+  when the asset already exists — that early-return is why a forced duplicate
+  wasn't possible before).
+- `Source/PatternManager.h/.cpp` — (earlier pass, RETAINED)
+  `ArrangementBlock::isOverride` + `AudioLibraryEntry` source-of-truth
+  pitch/BPM/stretch + accessors + serialize; deserialize defaults
+  `isOverride=true` (pre-Task-7 projects keep exact saved props/routes).
+- `Source/Standalone/BuilderPage.h` — `PendingRoute` (in .cpp); menu-tree
+  `buildAudioPropsControls` fwd decl; `onCopyFileForRoute` on ArrangementGrid
+  + BrowserPanel; `onApplyLibraryProperties`; `showLibraryPropertiesDialog`.
+- `Source/Standalone/BuilderPage.cpp` — menu-tree `buildAudioPropsControls`
+  (button→PopupMenu, `offerMove` param, shared_ptr out-params for modal
+  lifetime, `AlertWindow::addCustomComponent`); `showAudioClipProperties`
+  (note; Copy-on-route block-becomes-copy; prop-only = block+isOverride);
+  `showLibraryPropertiesDialog` (Move vs Copy); rename-bug fix; detached
+  marker dot.
+- `Source/Standalone/StandaloneEditor.cpp` — `onCopyFileForRoute` wired (grid
+  lambda: `duplicateSample`→`addAudioToLibrary` tagged→`setAudioLibraryClip
+  Defaults`→`notifyArrangementChanged`; browser reuses grid's);
+  `onApplyLibraryProperties` propagates all 4 to `!isOverride` followers;
+  Task-5 "New Page" path now `duplicateSample`s (kills last identical-path
+  dupe source).
+
+### 49. Architecture / safety notes
+
+- **Zero audio-thread code touched** — `PluginProcessor.cpp:3249` unchanged;
+  follower propagation is edit-time via `notifyArrangementChanged` (re-affirms
+  §43).
+- **Browser-level edit non-undoable** — matches the adjacent Choke Group
+  precedent (re-affirms §43).
+- **AlertWindow custom-component lifetime** — handled via `shared_ptr`
+  captured in the modal lambda; the built controls outlive the modal.
+
+### Disposition
+
+- Task 7 FILE-02 **redesigned** from the §41-§45 interim model to the final
+  two-level Move/Copy menu-tree model per Jeff's §46 calls; §41-§45
+  superseded.
+- One new bug folded in-batch, no-defer (§47).
+- Implementation **complete; UNCOMMITTED** — awaiting Jeff Debug-then-Release.
+- No §9 Forks scope-expansion entry for FILE-02 (§46/§42).
+- §45 dead-code carry-forward UNCHANGED — flat-list `BrowserItem::Kind::Audio`
+  → QA-Cleanup-1, formal §9 Forks + Main Plan §5 line still at QA-E close.
+
+### Next action
+
+- Jeff verifies redesigned Task 7 in Debug then Release.
+- Fix-in-batch anything surfaced (`feedback_qa_batches_fix_bugs_dont_defer.md`).
+- On clean verify: `/draft-commit` → surface message + full git status →
+  commit on Jeff's explicit approval.
+- Carry §45 dead-code to QA-E close (Task 10).
+
+---
+
+## 2026-05-17 — Task 7 FILE-02 verify-PASSED + late root-cause fixes + QA-Eb decision
+
+> **Continuation note.**  This block EXTENDS §46-§49 (the 2026-05-16 header,
+> which described the Move/Copy menu-tree implementation BEFORE verify and
+> before two late root-cause fixes).  It does NOT supersede §46-§49 — the
+> final model is unchanged; this records the PASSED verify, the two
+> root-cause fixes found during it, post-§48 refinements, and the QA-Eb
+> slotting decision.  Closes **Task 7 only** — QA-E is NOT closing; Tasks 8
+> (Sub-Phase Z / QA-D NIT corrections), 9 (dirty-flag investigation),
+> 10 (close) remain.  Compaction-critical — the next session works from
+> §46+ plus this block.
+
+### 50. Verify outcome — Task 7 FILE-02 PASSED (Debug + Release)
+
+Jeff ran the full Task 7 verify on his per-task cycle (Debug then Release,
+covers both per `feedback_no_full_release_reverify_at_batch_close.md`).
+Verdict: **"This all passes"** (2026-05-17).  Task 7 (FILE-02 — Properties
+consolidation + Routing + two-level Move/Copy menu-tree model) is
+**COMPLETE and verified**.
+
+- This closes **Task 7 only**.  **QA-E does NOT close here** — Tasks 8
+  (Sub-Phase Z / QA-D NIT corrections), 9 (dirty-flag investigation),
+  10 (close) still remain.  QA-E resumes at Task 8 after this commit.
+
+### 51. Late root-cause fixes found during verify (no-defer, fixed in-batch)
+
+Per `feedback_qa_batches_fix_bugs_dont_defer.md` — both surfaced during the
+verify pass and fixed in-batch, not deferred.
+
+**(a) Copy double-entry bug — "Copy to a new Clip Page" produced TWO
+library entries.**
+
+- **Root cause:** the Clips-page spawn (`spawnClipsTabIfMissing`) resolves
+  the path to ABSOLUTE, and `ClipsPage::setClipFilePath` registered the
+  library entry with that ABSOLUTE path.  Everything else — blocks, browser
+  walk, `PluginProcessor`, the Copy tag — uses the STORED / RELATIVE path.
+  `addAudioToLibrary` dedups by exact string match, so absolute != relative
+  → two distinct entries for one physical file.
+- **Fix (1) — Copy plumbing split:** the earlier single `onCopyFileForRoute`
+  is replaced by `onDuplicateFileForCopy` (physical auto-numbered copy
+  ONLY) + `onTagCopiedEntry` (dedup-safe register).  Copy now duplicates
+  FIRST, then creates the page bound to the duplicate.
+- **Fix (2) — ROOT-CAUSE fix:** `ClipsPage::setClipFilePath` gained a
+  defaulted `libraryPath` param.  The engine still loads from the resolved
+  ABSOLUTE path, but the library tag now uses the STORED / RELATIVE path;
+  `spawnClipsTabIfMissing` passes the original relative path.  The other 2
+  `setClipFilePath` callers use the default (no regression).  Side benefit:
+  the latent normal-Clips-drop pairing is now dedup-able too.
+
+**(b) Task-5 drop-existing prompt never fired + same-name multi-entry.**
+
+- **Root cause:** `filesDropped` detected "already in library" by exact
+  resolved-path equality, but copy-on-drop relocates imports into
+  `Samples/` — so the external drag path never equals the stored
+  `Samples/` path → the Use Existing / New Page / Cancel prompt was skipped,
+  and every re-drop silently re-imported (new page + duplicate same-name
+  entry).
+- **Fix (Jeff's call (a), 2026-05-17):** match by FILENAME
+  (case-insensitive, Windows) as well as exact path; the existing Use
+  Existing / New Page / Cancel prompt is the disambiguation.  Fixes both
+  symptoms (prompt now fires; no silent duplicate).
+
+### 52. Other Task 7 refinements landed (recap, post-§48)
+
+Refinements applied between §48 and the passed verify:
+
+- **Per-clip dialog:** gained a symmetric note + a new **"Reset to Browser
+  Entry"** button (re-attach: snap to library master, clear override).
+- **`isOverride` is now DERIVED on Apply** — matches-master auto-unflags
+  (green) and resumes following; no longer a one-way latch.
+- **Freshly-Copied block = green** (follows its own new entry).
+- **Detached marker dot** moved bottom-LEFT, always-shown:
+  **green = following / red = customized**.
+- **Pre-Task-7 projects load all-red** (accepted back-compat, Jeff's call).
+- **Rename-bug fix (§47)** + Task-5 New-Page → `duplicateSample` (§48)
+  verified working.
+
+### 53. QA-Eb decision — window resizability becomes its own batch (Jeff, 2026-05-17)
+
+- Window resizability (the **NAV-01** area) becomes its **OWN new batch
+  QA-Eb**, slotted **adjacent to QA-E**.
+- **Rationale (Jeff):** doing it next to QA-E vastly speeds up HIS testing
+  (no window-juggling during verify).  The two don't naturally group, but
+  the testing-efficiency win justifies adjacency.
+- Slot / placement is **Jeff's confirmed call**
+  (`feedback_slot_placement_is_spec_call.md`) — not unilateral.
+- **Scope sketch:** resizable window + min-size clamp + Viewport scrollbars
+  when smaller than design size (NOT a full per-page proportional
+  relayout); pages with their own scrollbars (Piano Roll, Builder grid)
+  must not double-wrap.
+- **Bookkeeping (pending, immediately after this commit):** Main Plan §5
+  QA-Eb entry + §6 sequencing arrow + §9 Forks entry.  Jeff: "we will at
+  that point update the main plan to add QA-Eb."
+
+### 54. Files changed since §48 (uncommitted, about to commit)
+
+- `Source/ProjectManager.h` / `Source/ProjectManager.cpp` — `duplicateSample`
+  (from §48, RETAINED).
+- `Source/Clips/ClipsPage.h` / `Source/Clips/ClipsPage.cpp` —
+  `setClipFilePath` `libraryPath` param (NEW root-cause fix, §51(a)).
+- `Source/PatternManager.h` / `Source/PatternManager.cpp` —
+  source-of-truth / override plumbing (continued).
+- `Source/Standalone/BuilderPage.h` / `Source/Standalone/BuilderPage.cpp` —
+  menu-tree, "Reset to Browser Entry" button, derived `isOverride`, marker,
+  filename-match detection, `onDuplicateFileForCopy` / `onTagCopiedEntry`.
+- `Source/Standalone/StandaloneEditor.cpp` — Copy wiring split,
+  `setClipFilePath` call (passes relative path), Task-5 New-Page
+  `duplicateSample`.
+
+### Disposition
+
+- Task 7 FILE-02 **COMPLETE and verified** (§50 — Jeff "This all passes",
+  Debug + Release, 2026-05-17).
+- **QA-E does NOT close** — Tasks 8 / 9 / 10 remain; QA-E resumes at Task 8
+  after this commit.
+- Two late root-cause fixes found during verify, fixed in-batch, no-defer
+  (§51 — Copy double-entry + Task-5 drop-existing prompt).
+- §46-§49 model UNCHANGED — this block extends, does not supersede.
+- No §9 Forks scope-expansion entry for FILE-02 (re-affirms §42 / §46).
+- QA-Eb slotted adjacent to QA-E (§53, Jeff's placement call); Main Plan
+  §5 / §6 / §9 bookkeeping pending immediately after this commit.
+- §45 dead-code carry-forward UNCHANGED — flat-list
+  `BrowserItem::Kind::Audio` → QA-Cleanup-1; formal §9 Forks + Main Plan
+  §5 line STILL at QA-E close (Task 10).
+
+### Next action
+
+- Dispatch `/draft-commit` → surface drafted commit message + full
+  pre-commit git status → commit on Jeff's explicit approval
+  (`feedback_surface_drafted_commit_message_for_approval.md`), staging
+  specific source files only (~1092-line diff across 10 files).
+- Then apply Main Plan **QA-Eb** bookkeeping — §5 entry + §6 arrow + §9
+  Forks — via `/draft-doc`, surfaced for review before apply (§53).
+- §45 dead-code → QA-Cleanup-1 routing STILL deferred to QA-E close
+  (Task 10), unchanged.
+- QA-E resumes at **Task 8** (Sub-Phase Z / QA-D NIT corrections) after
+  this commit + QA-Eb bookkeeping.

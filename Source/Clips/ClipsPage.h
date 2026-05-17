@@ -47,7 +47,15 @@ public:
 
     // ── Clip path access (set by drop-spawn flow) ────────────────────────────
     juce::String getClipFilePath() const                    { return mClipPath; }
-    void         setClipFilePath (const juce::String& p);
+    // QA-E Task 7 (FILE-02) root-cause fix: the engine must load from a
+    // RESOLVED ABSOLUTE path (p), but the audio-library tag must use the
+    // STORED/RELATIVE path so it matches every other library entry (blocks,
+    // browser walk, PluginProcessor all compare stored paths; addAudioTo
+    // Library dedups by exact string).  libraryPath is that stored form;
+    // when empty it falls back to p (preserves behavior for callers that
+    // already pass a stored path).
+    void         setClipFilePath (const juce::String& p,
+                                  const juce::String& libraryPath = {});
 
     // ── Engine accessors ─────────────────────────────────────────────────────
     // selectEngine remains as the activation entry-point so spawnClipsTabIfMissing

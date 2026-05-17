@@ -2081,6 +2081,180 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         {
             mProcessor.rebuildAudioClipPlayers();
         };
+
+        // QA-E Task 7 (FILE-02): enumerate every Vox/Inst/Clips page for the
+        // Audio Clip Properties "Routes to:" dropdown.  channelId mapping
+        // mirrors onClosePageForChannelId; display name = ribbon tab name.
+        grid->onEnumerateRoutablePages = [this]() -> std::vector<RoutablePageInfo>
+        {
+            using namespace MixerChannelIds;
+            std::vector<RoutablePageInfo> out;
+            for (auto* entry : mPages)
+            {
+                if (! entry) continue;
+                const auto* tab = mRibbon ? mRibbon->getTabById (entry->ribbonTabId)
+                                          : nullptr;
+                if (entry->type == RibbonTabBar::TabType::Clip)
+                {
+                    if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+                        out.push_back ({ audioInsert (cp->getPageIndex()),
+                                         tab ? tab->name
+                                             : ("Clip " + juce::String (cp->getPageIndex() + 1)) });
+                }
+                else if (entry->type == RibbonTabBar::TabType::Vox)
+                {
+                    if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+                        out.push_back ({ voxInsert (vp->getPageIndex()),
+                                         tab ? tab->name
+                                             : ("Vox " + juce::String (vp->getPageIndex() + 1)) });
+                }
+                else if (entry->type == RibbonTabBar::TabType::Inst)
+                {
+                    if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+                        out.push_back ({ instInsert (ip->getPageIndex()),
+                                         tab ? tab->name
+                                             : ("Inst " + juce::String (ip->getPageIndex() + 1)) });
+                }
+            }
+            return out;
+        };
+
+        // QA-E Task 7 (FILE-02): "Add a new ___ Page" sentinel handler.
+        // Vox/Inst: synchronous strip-add cascade (mirrors onAddTabRequest's
+        // Vox/Inst branch).  Clip: free-row spawn backed by this clip's own
+        // audio file (mirrors the duplicate-spawn "New page" free-row scan).
+        // Returns the new page's MixerChannelIds channel id (or -1).
+        grid->onCreateRoutablePage = [this](int kind, const juce::String& audioPath) -> int
+        {
+            using namespace MixerChannelIds;
+
+            if (kind == 1 || kind == 2)   // Vox / Inst
+            {
+                if (! mMixerPage) return -1;
+                const bool isVox = (kind == 1);
+                const int  cap   = isVox ? (int) kMaxVoxPages : (int) kMaxInstPages;
+
+                std::vector<bool> taken ((size_t) cap, false);
+                for (auto* entry : mPages)
+                {
+                    if (! entry) continue;
+                    if (isVox && entry->type == RibbonTabBar::TabType::Vox)
+                    {
+                        if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+                            if (vp->getPageIndex() >= 0 && vp->getPageIndex() < cap)
+                                taken[(size_t) vp->getPageIndex()] = true;
+                    }
+                    else if (! isVox && entry->type == RibbonTabBar::TabType::Inst)
+                    {
+                        if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+                            if (ip->getPageIndex() >= 0 && ip->getPageIndex() < cap)
+                                taken[(size_t) ip->getPageIndex()] = true;
+                    }
+                }
+                int newIdx = -1;
+                for (int i = 0; i < cap; ++i)
+                    if (! taken[(size_t) i]) { newIdx = i; break; }
+                if (newIdx < 0)
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon,
+                        isVox ? "No free Vox page" : "No free Inst page",
+                        "All pages of this type are in use.  Close one before "
+                        "adding another.");
+                    return -1;
+                }
+
+                if (isVox) mMixerPage->addVoxChannelAtIndex  (newIdx);
+                else       mMixerPage->addInstChannelAtIndex (newIdx);
+
+                const auto wantType = isVox ? RibbonTabBar::TabType::Vox
+                                            : RibbonTabBar::TabType::Inst;
+                for (auto* entry : mPages)
+                {
+                    if (! entry || entry->type != wantType) continue;
+                    int idx = -1;
+                    if (isVox) { if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get())) idx = vp->getPageIndex(); }
+                    else       { if (auto* ip = dynamic_cast<InstPage*> (entry->component.get())) idx = ip->getPageIndex(); }
+                    if (idx == newIdx && mRibbon)
+                    {
+                        mRibbon->selectTab (entry->ribbonTabId);
+                        onTabSelected (entry->ribbonTabId);
+                        break;
+                    }
+                }
+                return isVox ? voxInsert (newIdx) : instInsert (newIdx);
+            }
+
+            if (kind == 0)   // Clip
+            {
+                if (audioPath.isEmpty()) return -1;
+                int newRow = -1;
+                for (int i = 0; i < kMaxClipPages; ++i)
+                {
+                    bool taken = false;
+                    for (auto* e : mPages)
+                    {
+                        if (e && e->type == RibbonTabBar::TabType::Clip)
+                            if (auto* cp = dynamic_cast<ClipsPage*> (e->component.get()))
+                                if (cp->getPageIndex() == i) { taken = true; break; }
+                    }
+                    if (! taken) { newRow = i; break; }
+                }
+                if (newRow < 0)
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon,
+                        "No free Clips page",
+                        "All " + juce::String (kMaxClipPages) + " Clips pages "
+                        "are in use.  Close one before adding another.");
+                    return -1;
+                }
+                spawnClipsTabIfMissing (newRow, audioPath, /*allowDuplicate*/ true);
+
+                for (auto* entry : mPages)
+                {
+                    if (! entry || entry->type != RibbonTabBar::TabType::Clip) continue;
+                    if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+                        if (cp->getPageIndex() == newRow && mRibbon)
+                        {
+                            mRibbon->selectTab (entry->ribbonTabId);
+                            onTabSelected (entry->ribbonTabId);
+                            break;
+                        }
+                }
+                return audioInsert (newRow);
+            }
+
+            return -1;
+        };
+
+        // QA-E Task 7 (FILE-02): "Copy" action, split in two so "Copy to a
+        // new Clip Page" can't double-register.  onDuplicateFileForCopy ONLY
+        // makes the auto-numbered physical copy (no library entry, no page),
+        // so the caller can duplicate FIRST and then create the new Clips
+        // page bound to the DUPLICATE -- the Clips-page spawn's auto-register
+        // then IS the single entry, and onTagCopiedEntry's add dedups to a
+        // no-op.  For existing / Vox / Inst targets onTagCopiedEntry creates
+        // the one entry.
+        grid->onDuplicateFileForCopy = [this](const juce::String& src) -> juce::String
+        {
+            if (! mProjectManager) return {};
+            const juce::File srcAbs = mProcessor.resolveProjectFile (src);
+            if (! srcAbs.existsAsFile()) return {};
+            return mProjectManager->duplicateSample (srcAbs);   // np or {}
+        };
+        grid->onTagCopiedEntry = [this](const juce::String& np, int targetChannel,
+                                        float pitch, float bpm, bool stretch)
+        {
+            if (! mPM || np.isEmpty()) return;
+            // addAudioToLibrary dedups on (path, owner): if the Clips-page
+            // spawn already registered (np, targetChannel) this is a no-op.
+            mPM->addAudioToLibrary (np, {}, targetChannel);
+            const int idx = mPM->findAudioLibraryIndexByPath (np);
+            if (idx >= 0)
+                mPM->setAudioLibraryClipDefaults (idx, pitch, bpm, stretch);
+            if (mBuilderPage) mBuilderPage->notifyArrangementChanged();
+        };
         // P4: copy-on-drop.  When the user drops a WAV onto the arrangement,
         // ProjectManager::importSample copies it into <project>/Samples/ and
         // returns the relative "Samples/<filename>" string to store on the
@@ -2193,10 +2367,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                     }
                     else if (result == 2)
                     {
-                        // New page: find next free Clips page row, spawn the
-                        // Clips tab forcing duplicate, add new library entry
-                        // tagged to that page's channelId, then place block
-                        // routed to the new entry.
+                        // New page: find next free Clips page row.
                         int newPageRow = -1;
                         for (int i = 0; i < kMaxClipPages; ++i)
                         {
@@ -2218,19 +2389,37 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                                 "use.  Close one before adding another.");
                             return;
                         }
-                        self->spawnClipsTabIfMissing (newPageRow, path, /*allowDuplicate*/ true);
+
+                        // QA-E Task 7 (FILE-02): "New Page" must NOT create a
+                        // second identical-path library entry (the old dupe
+                        // bug).  Force an auto-numbered physical duplicate so
+                        // the new page is backed by a DISTINCT file with its
+                        // own single source-of-truth entry.
+                        const juce::File srcAbs =
+                            self->mProcessor.resolveProjectFile (path);
+                        const juce::String newStored =
+                            (self->mProjectManager && srcAbs.existsAsFile())
+                                ? self->mProjectManager->duplicateSample (srcAbs)
+                                : juce::String();
+                        if (newStored.isEmpty())
+                        {
+                            juce::AlertWindow::showMessageBoxAsync (
+                                juce::AlertWindow::WarningIcon,
+                                "Couldn't duplicate file",
+                                "The file could not be copied for the new page.");
+                            return;
+                        }
+
+                        self->spawnClipsTabIfMissing (newPageRow, newStored, /*allowDuplicate*/ true);
 
                         const int newCh = MixerChannelIds::audioInsert (newPageRow);
                         if (self->mPM)
-                            self->mPM->addAudioToLibrary (path, {}, newCh);
+                            self->mPM->addAudioToLibrary (newStored, {}, newCh);
 
-                        // Find the just-added library entry (last entry whose
-                        // path + owner match).  Newest entries are at the end
-                        // since addAudioToLibrary push_backs.
                         int newLibIdx = -1;
                         for (int i = self->mPM->getNumAudioLibrary() - 1; i >= 0; --i)
                         {
-                            if (self->mPM->getAudioLibraryPath (i) == path
+                            if (self->mPM->getAudioLibraryPath (i) == newStored
                                 && self->mPM->getAudioLibraryPageOwner (i) == newCh)
                             {
                                 newLibIdx = i;
@@ -2261,6 +2450,53 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         panel->onResolveDisplayName = [this](const AutomationLane& lane) -> juce::String
         {
             return displayNameFor(lane);
+        };
+
+        // QA-E Task 7 (FILE-02): browser-entry "Properties..." routing.
+        // Reuse the grid's enumerate/create callbacks (wired above in the
+        // page->getGrid() block, which runs before this one) so the per-clip
+        // and per-library "Routes to:" dialogs list identical targets -- no
+        // logic duplication.
+        if (auto* g = page->getGrid())
+        {
+            panel->onEnumerateRoutablePages = g->onEnumerateRoutablePages;
+            panel->onCreateRoutablePage     = g->onCreateRoutablePage;
+            panel->onDuplicateFileForCopy   = g->onDuplicateFileForCopy;
+            panel->onTagCopiedEntry         = g->onTagCopiedEntry;
+        }
+        // onApplyLibraryProperties = the source-of-truth edit.  Write pitch /
+        // BPM / stretch-mode + route onto the library entry, then propagate
+        // ALL FOUR into every grid copy still FOLLOWING the original
+        // (isOverride == false).  Copies the user customized individually are
+        // detached (isOverride == true) and left untouched.  Mirrors the QA-E
+        // Task 4 follower-retag pattern; notifyArrangementChanged() does the
+        // grid repaint + rebuildAudioClipPlayers + dirty-flag in one call.
+        panel->onApplyLibraryProperties = [this](int libIdx, float newPitch,
+                                                 float newBPM, bool newStretch,
+                                                 int newRoute)
+        {
+            if (! mPM) return;
+            if (libIdx < 0 || libIdx >= mPM->getNumAudioLibrary()) return;
+            mPM->setAudioLibraryPageOwner    (libIdx, newRoute);
+            mPM->setAudioLibraryClipDefaults (libIdx, newPitch, newBPM, newStretch);
+
+            const juce::File libFile =
+                mProcessor.resolveProjectFile (mPM->getAudioLibraryPath (libIdx));
+            for (int b = 0; b < mPM->getNumBlocks(); ++b)
+            {
+                auto& blk = mPM->getBlock (b);
+                if (blk.clipType != ClipType::Audio) continue;
+                if (blk.isOverride)                  continue;   // detached copy
+                if (mProcessor.resolveProjectFile (blk.audioFilePath) == libFile)
+                {
+                    // Follower inherits ALL source-of-truth props.
+                    blk.pitchSemitones = newPitch;
+                    blk.originalBPM    = juce::jmax (1.f, newBPM);
+                    blk.stretchMode    = newStretch;
+                    blk.routeChannel   = newRoute;
+                }
+            }
+            if (mBuilderPage) mBuilderPage->notifyArrangementChanged();
         };
 
         // QA-E Task 5 (2026-05-15): browser Delete on the LAST library entry
@@ -7325,7 +7561,10 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
         if (abs.existsAsFile())
             resolvedPath = abs.getFullPathName();
     }
-    cpRaw->setClipFilePath (resolvedPath);
+    // QA-E Task 7 (FILE-02) root-cause fix: engine loads from resolvedPath
+    // (absolute), but tag the library with the original STORED/RELATIVE
+    // `path` so it dedups against every other (relative) library entry.
+    cpRaw->setClipFilePath (resolvedPath, path);
 
     // G-3 (2026-04-28): dual-engine swap pattern - onEngineDestroying fires
     // BEFORE the active engine pointer changes, so we unregister with the

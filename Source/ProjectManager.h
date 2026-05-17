@@ -218,6 +218,13 @@ public:
     // caller should show "Create a project first" dialog.
     juce::String importSample (const juce::File& externalFile);
 
+    // QA-E Task 7 (FILE-02): ALWAYS make a fresh auto-numbered duplicate of
+    // src in Samples/ (never returns an existing path -- unlike importSample,
+    // which skips the copy when the asset is already present).  Used by the
+    // Properties "Copy" action.  Same " (N)" numbering scheme.  Empty return
+    // = no project / copy failed.
+    juce::String duplicateSample (const juce::File& src);
+
 private:
     VibeSynthProcessor& mProcessor;
     juce::File          mCurrentFolder;   // empty = no project open

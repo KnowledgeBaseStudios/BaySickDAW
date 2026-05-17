@@ -271,6 +271,19 @@ struct ArrangementBlock
     // for Inst) instead of through a new Audio row's mixer strip.  Zero
     // (default) = legacy "drop on Audio bus row" behavior.
     int routeChannel { 0 };
+    // QA-E Task 7 (FILE-02): two-level clip properties.  The audio library
+    // entry is the SOURCE OF TRUTH for a file's pitch / BPM / stretch-mode /
+    // route (AudioLibraryEntry pitchSemitones/originalBPM/stretchMode +
+    // pageOwnerChannelId).  isOverride == false (default for newly-created
+    // blocks) means "this copy FOLLOWS the library original" for ALL of those
+    // -- editing the original via the browser Properties dialog propagates
+    // the new values into this block.  isOverride == true means the user
+    // customized THIS copy via the grid clip's Properties dialog (one combined
+    // flag -- whole-copy detach: changing anything detaches pitch/BPM/mode/
+    // route together); the library original no longer drives it.  NOTE: on
+    // deserialize the default is true (see PatternManager.cpp) so pre-Task-7
+    // projects keep their exact saved values (no silent change on reopen).
+    bool isOverride { false };
 };
 
 // 2026-04-24: central helper for the "effective length in beats" of an
@@ -461,9 +474,21 @@ public:
         { return (idx >= 0 && idx < (int) mAudioLibrary.size()) ? mAudioLibrary[idx].chokeGroup : 0; }
     int                  getAudioLibraryPageOwner (int idx) const
         { return (idx >= 0 && idx < (int) mAudioLibrary.size()) ? mAudioLibrary[idx].pageOwnerChannelId : 0; }
+    // QA-E Task 7 (FILE-02): source-of-truth clip props (browser Properties
+    // edits these; followers inherit).  Safe defaults if idx out of range.
+    float                getAudioLibraryPitch      (int idx) const
+        { return (idx >= 0 && idx < (int) mAudioLibrary.size()) ? mAudioLibrary[idx].pitchSemitones : 0.f; }
+    float                getAudioLibraryBPM        (int idx) const
+        { return (idx >= 0 && idx < (int) mAudioLibrary.size()) ? mAudioLibrary[idx].originalBPM : 120.f; }
+    bool                 getAudioLibraryStretchMode (int idx) const
+        { return (idx >= 0 && idx < (int) mAudioLibrary.size()) ? mAudioLibrary[idx].stretchMode : true; }
     void                 setAudioLibraryAlias  (int idx, const juce::String& alias);
     void                 setAudioLibraryChokeGroup (int idx, int group);
     void                 setAudioLibraryPageOwner (int idx, int channelId);
+    // QA-E Task 7 (FILE-02): set the source-of-truth pitch / BPM / stretch
+    // (route source-of-truth stays setAudioLibraryPageOwner).
+    void                 setAudioLibraryClipDefaults (int idx, float pitch,
+                                                      float bpm, bool stretchMode);
 
     // ── Automation template library (persists independently of blocks) ───
     void                    addAutomationTemplate   (const AutomationLane& lane);
@@ -554,6 +579,14 @@ private:
         juce::String alias;
         int chokeGroup         { 0 };
         int pageOwnerChannelId { 0 };   // QA-E Task 4 (2026-05-12): 0 = generic Audio; else channel id (kVoxBase / kInstBase / kAudioBase range)
+        // QA-E Task 7 (FILE-02): the library entry is the SOURCE OF TRUTH for
+        // a file's clip properties.  Every grid copy with ArrangementBlock::
+        // isOverride == false inherits these (the browser "Properties..."
+        // dialog edits them here and propagates to followers).  pitch/BPM/
+        // stretchMode parallel pageOwnerChannelId (the source-of-truth route).
+        float pitchSemitones   { 0.f };
+        float originalBPM      { 120.f };
+        bool  stretchMode      { true };
     };
     std::vector<AudioLibraryEntry> mAudioLibrary;
     std::vector<AutomationLane>    mAutomationTemplates;

@@ -80,6 +80,17 @@ struct CategorizedAudioEntry
     juce::Colour accent;               // category accent color
 };
 
+// QA-E Task 7 (FILE-02): one routable target for the "Routes to:" dropdown
+// (used by BOTH the per-clip Audio Clip Properties dialog and the browser
+// entry Properties dialog).  channelId is a MixerChannelIds id (voxInsert /
+// instInsert / audioInsert); displayName is the page's ribbon tab name.
+// Declared here (ahead of BrowserPanel + ArrangementGrid) so both can use it.
+struct RoutablePageInfo
+{
+    int          channelId { 0 };
+    juce::String displayName;
+};
+
 // AudioBrowserItem - TreeViewItem leaf for a single audio file.  Replaces
 // the per-file BrowserItem in the flat-list world.  Drag descriptor matches
 // the existing format ("audio:<libIdx>") so ArrangementGrid::itemDropped
@@ -196,6 +207,34 @@ public:
     // both engines' APVTS state in the dual-engine A/B case).
     std::function<void(const juce::String& sourceAbsPath,
                        const juce::String& copiedAbsPath)> onDuplicateClipSpawn;
+    // QA-E Task 7 (FILE-02): browser-entry "Properties..." (full props box).
+    // onEnumerateRoutablePages / onCreateRoutablePage mirror ArrangementGrid's
+    // (StandaloneEditor wires both from the same logic so the per-clip and
+    // per-library dialogs list identical targets).  onApplyLibraryProperties
+    // commits a source-of-truth edit on the library entry: it writes pitch /
+    // BPM / stretch-mode + route onto the entry AND propagates all four into
+    // every grid copy still following the original (isOverride == false).
+    std::function<std::vector<RoutablePageInfo>()>                      onEnumerateRoutablePages;
+    std::function<int(int /*kind*/, const juce::String& /*audioPath*/)> onCreateRoutablePage;
+    std::function<void(int /*libIdx*/, float /*pitch*/, float /*bpm*/,
+                       bool /*stretchMode*/, int /*newRoute*/)>         onApplyLibraryProperties;
+    // QA-E Task 7 (FILE-02): "Copy" action.  Physically duplicates srcStored
+    // (ProjectManager::importSample auto-numbered de-conflict), adds a new
+    // library entry tagged to targetChannel carrying pitch/bpm/stretch, and
+    // returns the new stored path ({} on failure).
+    //
+    // Split into two so "Copy to a new Clip Page" doesn't double-register
+    // (the Clips-page spawn auto-adds an entry for its bound file; binding
+    // it to the duplicate makes that the single entry, and the explicit
+    // tag below dedups to a no-op):
+    //   onDuplicateFileForCopy(src) -> np : physical auto-numbered copy
+    //     only, NO library entry, NO page.  {} on failure.
+    //   onTagCopiedEntry(np, targetChannel, pitch, bpm, stretch) :
+    //     addAudioToLibrary(np, targetChannel) [dedup-safe] + clip defaults
+    //     + notifyArrangementChanged.
+    std::function<juce::String(const juce::String& /*src*/)>            onDuplicateFileForCopy;
+    std::function<void(const juce::String& /*np*/, int /*targetChannel*/,
+                       float /*pitch*/, float /*bpm*/, bool /*stretch*/)> onTagCopiedEntry;
 
 private:
     PatternManager&            mPM;
@@ -244,6 +283,14 @@ private:
     // file) fires onClosePageForChannelId so StandaloneEditor closes the
     // owning Clips / Vox / Inst tab.
     void confirmAndDeleteLibraryEntry (int libIdx);
+    // QA-E Task 7 (FILE-02): browser-entry "Properties..." dialog -- the SAME
+    // full Audio Properties box as the per-clip grid dialog (Pitch / BPM /
+    // Mode + Routes to:, built via the shared buildAudioPropsControls helper).
+    // Editing it is the source-of-truth edit: writes pitch/BPM/mode/route onto
+    // the library entry and propagates all four to every grid copy still
+    // following (via onApplyLibraryProperties).  Mirrors
+    // confirmAndDeleteLibraryEntry's shape (SafePointer + modal callback).
+    void showLibraryPropertiesDialog (int libIdx);
     void rebuildAutomationRows();
     void switchTab(int t);
     void selectPattern(int idx);
@@ -380,7 +427,25 @@ public:
     // the path from the row.
     std::function<void(int row, const juce::String& rowName, const juce::String& filePath)> onAudioClipAdded;
     std::function<void()>                              onArrangementChanged;    // any block move/resize/delete → rebuild audio clip players
-    // P4: copy-on-drop.  Called with the external source file; caller either
+    // QA-E Task 7 (FILE-02): "Routes to:" dropdown support.  Both wired by
+    // StandaloneEditor (mirrors onArrangementChanged / onAudioClipAdded).
+    // onEnumerateRoutablePages → one RoutablePageInfo per Vox/Inst/Clips page
+    // (channelId = MixerChannelIds id, displayName = ribbon tab name).
+    std::function<std::vector<RoutablePageInfo>()>     onEnumerateRoutablePages;
+    // onCreateRoutablePage → create a new routable page of the given kind
+    // (0=Clip, 1=Vox, 2=Inst), backed by audioPath (used for Clips; ignored
+    // for Vox/Inst), navigate to it, and return its channelId (or -1 on
+    // failure / no free slot).
+    std::function<int(int /*kind*/, const juce::String& /*audioPath*/)> onCreateRoutablePage;
+    // QA-E Task 7 (FILE-02): "Copy" action for the per-clip Properties menu.
+    // Split so "Copy to a new Clip Page" doesn't double-register (see
+    // BrowserPanel decl above for the rationale).  onDuplicateFileForCopy
+    // makes the auto-numbered physical copy only; onTagCopiedEntry registers
+    // it on the target (dedup-safe) + sets clip defaults + notifies.  The
+    // acted-on grid block is then repointed to the duplicate.
+    std::function<juce::String(const juce::String& /*src*/)>            onDuplicateFileForCopy;
+    std::function<void(const juce::String& /*np*/, int /*targetChannel*/,
+                       float /*pitch*/, float /*bpm*/, bool /*stretch*/)> onTagCopiedEntry;
     // copies it into the current project's Samples/ folder and returns the
     // relative string to store (e.g. "Samples/kick.wav"), or returns {} to
     // reject the drop (e.g. no project open - caller also shows the user an

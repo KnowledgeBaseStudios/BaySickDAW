@@ -565,7 +565,8 @@ void ClipsPage::switchTab (int idx)
     repaint();
 }
 
-void ClipsPage::setClipFilePath (const juce::String& p)
+void ClipsPage::setClipFilePath (const juce::String& p,
+                                 const juce::String& libraryPath)
 {
     mClipPath = p;
     mClipFileLabel.setText (p.isNotEmpty()
@@ -588,7 +589,14 @@ void ClipsPage::setClipFilePath (const juce::String& p)
         if (auto* pm = mFullProcessor->getPatternManager())
         {
             const int ownerCh = MixerChannelIds::audioInsert (mPageIndex);
-            pm->addAudioToLibrary (p, {}, ownerCh);
+            // QA-E Task 7 (FILE-02) root-cause fix: tag the library with the
+            // STORED/RELATIVE path (libraryPath), NOT the resolved absolute
+            // engine path -- otherwise this entry's string never matches the
+            // relative paths everything else stores, defeating addAudioTo
+            // Library's exact-string dedup and producing duplicate browser
+            // entries (the "Copy to a new Clip Page" double-entry bug).
+            const juce::String libTag = libraryPath.isNotEmpty() ? libraryPath : p;
+            pm->addAudioToLibrary (libTag, {}, ownerCh);
         }
     }
 }

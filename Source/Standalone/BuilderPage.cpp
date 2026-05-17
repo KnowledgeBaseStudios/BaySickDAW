@@ -2,6 +2,37 @@
 #include "PatternColorPicker.h"
 using namespace juce;
 
+// QA-E Task 7 (FILE-02): shared Audio Properties box.  PendingRoute is the
+// menu-tree result; buildAudioPropsControls builds the box (definition is an
+// anonymous-namespace function further down, next to
+// ArrangementGrid::showAudioClipProperties).  BrowserPanel::
+// showLibraryPropertiesDialog appears earlier in this file and also uses
+// both, so they're declared up here.  (All unnamed namespaces in one TU are
+// the same namespace, so these forward decls + the later definitions match.)
+namespace {
+    // Result of the "Routes to:" menu-tree button.  channelId is a resolved
+    // MixerChannelIds id when chosen and not an Add-new sentinel; createKind
+    // is -1 none / 0 Clip / 1 Vox / 2 Inst for the "Add a new ___ Page"
+    // entries (resolved to a real channel by onCreateRoutablePage at Apply).
+    // isCopy: true = Copy (duplicate file), false = Move (relocate entry).
+    // The per-clip dialog only ever produces Copy; the browser dialog offers
+    // both via per-target submenus.
+    struct PendingRoute
+    {
+        bool chosen     { false };
+        bool isCopy     { false };
+        int  channelId  { -1 };
+        int  createKind { -1 };
+    };
+
+    void buildAudioPropsControls (juce::AlertWindow&, float, float, bool,
+                                  const juce::String&,
+                                  const std::vector<RoutablePageInfo>&,
+                                  bool, bool,
+                                  std::shared_ptr<juce::TextButton>&,
+                                  std::shared_ptr<PendingRoute>&);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Local colour constants
 // ─────────────────────────────────────────────────────────────────────────────
@@ -412,6 +443,7 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
     constexpr int kIdRename     = 1;
     constexpr int kIdDuplicate  = 2;
     constexpr int kIdDelete     = 3;
+    constexpr int kIdProperties = 4;   // QA-E Task 7 (FILE-02)
     constexpr int kIdReveal     = 7;
     constexpr int kIdChokeBase  = 200;
 
@@ -419,6 +451,9 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
     m.addItem (kIdRename,    "Rename...");
     m.addItem (kIdDuplicate, "Duplicate...");
     m.addItem (kIdReveal,    "Reveal in Explorer");
+    // QA-E Task 7 (FILE-02): the library entry is the source of truth for
+    // routing.  Editing this moves every grid copy still following it.
+    m.addItem (kIdProperties, "Properties...");
     m.addSeparator();
 
     // Choke Group submenu - same model as the flat-list audio context menu.
@@ -472,6 +507,11 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
                     else if (f.getParentDirectory().exists())
                         f.getParentDirectory().revealToUser();   // fall back to folder
                 }
+                return;
+            }
+            if (result == kIdProperties)
+            {
+                showLibraryPropertiesDialog (libIdx);
                 return;
             }
             if (result >= kIdChokeBase && result <= kIdChokeBase + 16)
@@ -560,6 +600,108 @@ void BrowserPanel::confirmAndDeleteLibraryEntry (int libIdx)
             // Last file on the page -> close the owning Clips / Vox / Inst tab.
             if (isLastOnPage && self->onClosePageForChannelId)
                 self->onClosePageForChannelId (owner);
+        }),
+        true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-E Task 7 (FILE-02): browser-entry "Properties..." -> the SAME full Audio
+// Properties box as the per-clip grid dialog (Pitch / BPM / Mode + Routes to:),
+// built via the shared buildAudioPropsControls helper so the two never drift.
+// The library entry is the SOURCE OF TRUTH: applying writes the values onto
+// the entry AND propagates them to every grid copy still following the
+// original (ArrangementBlock::isOverride == false).  Per-copy customization is
+// done instead via the grid clip's own Properties dialog (one combined flag).
+// ─────────────────────────────────────────────────────────────────────────────
+void BrowserPanel::showLibraryPropertiesDialog (int libIdx)
+{
+    if (libIdx < 0 || libIdx >= mPM.getNumAudioLibrary()) return;
+
+    const juce::String libPath  = mPM.getAudioLibraryPath (libIdx);
+    const juce::String fileName = juce::File (libPath).getFileName();
+    const int          curOwner = mPM.getAudioLibraryPageOwner (libIdx);
+
+    juce::String curRouteName;
+    std::vector<RoutablePageInfo> pages;
+    if (onEnumerateRoutablePages) pages = onEnumerateRoutablePages();
+    for (const auto& pg : pages)
+        if (pg.channelId == curOwner) { curRouteName = pg.displayName; break; }
+
+    auto* aw = new juce::AlertWindow (
+        "Audio File Properties",
+        "File: " + fileName + "\n\n"
+        "Master settings for this file.  Every copy on the Builder grid\n"
+        "follows these, except copies you customized individually.",
+        juce::AlertWindow::NoIcon);
+
+    std::shared_ptr<juce::TextButton> routeBtn;
+    std::shared_ptr<PendingRoute>     pending;
+    // Browser dialog: offerMove == true -> each target gets a Move/Copy
+    // submenu.  Move relocates this single entry; Copy forks a renamed file.
+    buildAudioPropsControls (*aw,
+                             mPM.getAudioLibraryPitch (libIdx),
+                             mPM.getAudioLibraryBPM (libIdx),
+                             mPM.getAudioLibraryStretchMode (libIdx),
+                             curRouteName, pages,
+                             /*offerMove*/ true,
+                             /*offerResetToMaster*/ false,   // browser edits the master itself
+                             routeBtn, pending);
+
+    juce::Component::SafePointer<BrowserPanel> safeThis (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safeThis, aw, libIdx, libPath, curOwner, routeBtn, pending] (int r)
+        {
+            if (r != 1) return;
+            auto* self = safeThis.getComponent();
+            if (! self) return;
+
+            const float newPitch = aw->getTextEditorContents ("pitch").getFloatValue();
+            const float newBPM   = juce::jmax (1.f,
+                                     aw->getTextEditorContents ("bpm").getFloatValue());
+            bool        stretch  = true;
+            if (auto* cb = aw->getComboBoxComponent ("mode"))
+                stretch = (cb->getSelectedItemIndex() == 0);
+
+            // No routing pick -> just update the entry's master props +
+            // propagate to followers; owner unchanged.
+            if (! pending || ! pending->chosen)
+            {
+                if (self->onApplyLibraryProperties)
+                    self->onApplyLibraryProperties (libIdx, newPitch, newBPM,
+                                                    stretch, curOwner);
+                return;
+            }
+
+            if (pending->isCopy)
+            {
+                // Copy: duplicate FIRST, then create the new page bound to
+                // the DUPLICATE (so "Copy to a new Clip Page" registers only
+                // the one dupe entry), then tag it (dedup-safe).  The
+                // original entry is untouched.
+                if (! self->onDuplicateFileForCopy) return;
+                const juce::String np = self->onDuplicateFileForCopy (libPath);
+                if (np.isEmpty()) return;
+                int target = pending->channelId;
+                if (pending->createKind >= 0 && self->onCreateRoutablePage)
+                    target = self->onCreateRoutablePage (pending->createKind, np);
+                if (target < 0) return;
+                if (self->onTagCopiedEntry)
+                    self->onTagCopiedEntry (np, target, newPitch, newBPM, stretch);
+            }
+            else
+            {
+                // Move: relocate THIS entry's owner + props; following grid
+                // blocks follow (onApplyLibraryProperties propagation).
+                // (Move to a new page still creates it bound to the existing
+                // file.)
+                int target = pending->channelId;
+                if (pending->createKind >= 0 && self->onCreateRoutablePage)
+                    target = self->onCreateRoutablePage (pending->createKind, libPath);
+                if (target < 0) return;
+                if (self->onApplyLibraryProperties)
+                    self->onApplyLibraryProperties (libIdx, newPitch, newBPM,
+                                                    stretch, target);
+            }
         }),
         true);
 }
@@ -1730,7 +1872,14 @@ void ArrangementGrid::drawAudioClip(Graphics& g, const ArrangementBlock& b,
     if (w >= 24 && h >= 9) {
         g.setColour(Colours::white.withAlpha(0.9f));
         g.setFont(Font(9.f, Font::bold));
-        String fname = File(b.audioFilePath).getFileNameWithoutExtension();
+        // QA-E Task 7 (FILE-02) bug fix: honor the Browser rename.
+        // renameAudioAt stamps b.displayAlias on every matching block, but
+        // this label was always re-deriving from the file path so the rename
+        // never showed on the grid.  Mirror the displayAlias-first pattern
+        // already used at StandaloneEditor.cpp:10242.
+        String fname = b.displayAlias.isNotEmpty()
+                         ? b.displayAlias
+                         : File(b.audioFilePath).getFileNameWithoutExtension();
         g.drawText(fname, x + 4, y + 1, w - 8, h - 2, Justification::centredLeft, true);
     }
 
@@ -1740,6 +1889,24 @@ void ArrangementGrid::drawAudioClip(Graphics& g, const ArrangementBlock& b,
         g.setFont(Font(8.f));
         g.drawText((b.pitchSemitones > 0 ? "+" : "") + String(b.pitchSemitones, 1) + "st",
                    x + w - 36, y + 1, 34, 12, Justification::centredRight, false);
+    }
+
+    // QA-E Task 7 (FILE-02): per-copy "follows the file's master" indicator.
+    // NOT the project dirty flag (that is the title-bar asterisk).  Always
+    // shown on audio blocks: GREEN = this copy still follows the file's
+    // library master settings (not individually changed); RED = this copy
+    // was customized (isOverride) and no longer follows.  Bottom-LEFT so it
+    // never collides with the top-row filename / pitch labels.
+    if (b.clipType == ClipType::Audio && w >= 16 && h >= 10)
+    {
+        const float r  = 3.5f;
+        const float cx = (float) x + r + 3.f;
+        const float cy = (float) (y + h) - r - 3.f;
+        g.setColour (Colours::black.withAlpha (0.55f));
+        g.fillEllipse (cx - r - 1.f, cy - r - 1.f, (r + 1.f) * 2.f, (r + 1.f) * 2.f);
+        g.setColour (b.isOverride ? Colour (0xffe5453a)     // red   = customized
+                                  : Colour (0xff35c65a));   // green = following
+        g.fillEllipse (cx - r, cy - r, r * 2.f, r * 2.f);
     }
 
     // Muted overlay - 2026-04-26 (D-1): 30% black wash + diagonal hatch.
@@ -2651,10 +2818,13 @@ void ArrangementGrid::showClipContextMenu(int blockIdx)
     m.addItem(5, b.muted ? "Unmute" : "Mute");
     m.addSeparator();
     if (b.clipType == ClipType::Audio)
-        m.addItem(6, "Properties (pitch / stretch)...");
+        m.addItem(6, "Properties...");                 // QA-E Task 7 (FILE-02):
+                                                        // renamed; now also hosts
+                                                        // the Routing dropdown
     if (b.clipType == ClipType::Automation)
         m.addItem(8, "Open in Event Editor...");
-    m.addItem(7, "Properties...");
+    // QA-E Task 7 (FILE-02): dead duplicate item 7 deleted (no case 7 in the
+    // result switch below -- it never did anything).
 
     // C.5b: Pattern blocks get a "Set Time Signature" submenu that overrides
     // the referenced pattern's intrinsic TS (also lockable via this path).
@@ -2718,41 +2888,246 @@ void ArrangementGrid::showClipContextMenu(int blockIdx)
     });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-E Task 7 (FILE-02): the IDENTICAL Audio Properties box used by BOTH the
+// per-clip grid Properties (ArrangementGrid::showAudioClipProperties) and the
+// browser-entry Properties (BrowserPanel::showLibraryPropertiesDialog).  ONE
+// builder so the two dialogs can never drift.  Adds Pitch / Original BPM /
+// Mode + a "Routes to:" menu-tree button + Apply / Cancel.
+//
+// The routing control is a button that opens a PopupMenu of every Vox/Inst/
+// Clips page + 3 "Add a new ___ Page" entries.  offerMove == true (browser
+// dialog) gives each target a submenu { Move here / Copy here }; offerMove ==
+// false (per-clip dialog) gives each target a single "Copy to <name>" item
+// (per-clip only ever copies).  The pick is stored in outPending and shown
+// on the button; nothing happens until the caller's Apply reads it.  outBtn
+// / outPending are shared_ptr so the caller captures them in the modal lambda
+// (their lifetime spans the modal; the AlertWindow does NOT own the custom
+// component).
+// ─────────────────────────────────────────────────────────────────────────────
+namespace {
+struct RouteTarget { int channelId; juce::String name; };  // chId>=0 page; -1/-2/-3 = new Clip/Vox/Inst
+
+void buildAudioPropsControls (juce::AlertWindow& aw,
+                              float curPitch, float curBPM, bool curStretch,
+                              const juce::String& curRouteName,
+                              const std::vector<RoutablePageInfo>& pages,
+                              bool offerMove,
+                              bool offerResetToMaster,
+                              std::shared_ptr<juce::TextButton>& outBtn,
+                              std::shared_ptr<PendingRoute>& outPending)
+{
+    aw.addTextEditor ("pitch", juce::String (curPitch, 2), "Pitch shift (semitones):");
+    aw.addTextEditor ("bpm",   juce::String (curBPM, 1),   "Original BPM:");
+
+    aw.addComboBox ("mode", { "Stretch (pitch locked)", "Resample (pitch follows tempo)" }, "Mode:");
+    if (auto* cb = aw.getComboBoxComponent ("mode"))
+        cb->setSelectedItemIndex (curStretch ? 0 : 1, juce::dontSendNotification);
+
+    auto targets = std::make_shared<std::vector<RouteTarget>>();
+    for (const auto& pg : pages)
+        targets->push_back ({ pg.channelId, pg.displayName });
+    targets->push_back ({ -1, "a new Clip Page" });
+    targets->push_back ({ -2, "a new Vox Page" });
+    targets->push_back ({ -3, "a new Inst Page" });
+
+    outPending = std::make_shared<PendingRoute>();
+    outBtn     = std::make_shared<juce::TextButton>();
+    outBtn->setSize (360, 26);
+    const juce::String baseLabel = "Routes to: "
+        + (curRouteName.isNotEmpty() ? curRouteName : juce::String ("(unrouted)"));
+    outBtn->setButtonText (baseLabel);
+
+    juce::Component::SafePointer<juce::TextButton> btnSafe (outBtn.get());
+    auto pending = outPending;
+
+    outBtn->onClick = [targets, offerMove, btnSafe, pending, baseLabel]
+    {
+        juce::PopupMenu m;
+        // id encoding per target t: Move = 2t+1 (odd), Copy = 2t+2 (even).
+        for (int t = 0; t < (int) targets->size(); ++t)
+        {
+            const auto& tg = (*targets)[(size_t) t];
+            if (offerMove)
+            {
+                juce::PopupMenu sub;
+                sub.addItem (2 * t + 1, "Move here");
+                sub.addItem (2 * t + 2, "Copy here");
+                m.addSubMenu (tg.name, sub);
+            }
+            else
+            {
+                m.addItem (2 * t + 2, "Copy to " + tg.name);
+            }
+        }
+
+        m.showMenuAsync (juce::PopupMenu::Options(),
+            [targets, btnSafe, pending, baseLabel] (int res)
+            {
+                if (res <= 0) return;
+                const int  t     = (res - 1) / 2;
+                const bool isCpy = ((res % 2) == 0);   // Copy id = 2t+2 (even)
+                if (t < 0 || t >= (int) targets->size()) return;
+                const auto& tg = (*targets)[(size_t) t];
+
+                pending->chosen     = true;
+                pending->isCopy     = isCpy;
+                pending->channelId  = (tg.channelId >= 0) ? tg.channelId : -1;
+                pending->createKind = (tg.channelId >= 0)
+                                        ? -1
+                                        : (tg.channelId == -1 ? 0
+                                           : (tg.channelId == -2 ? 1 : 2));
+                if (auto* b = btnSafe.getComponent())
+                    b->setButtonText (baseLabel + "    [ "
+                        + (isCpy ? juce::String ("Copy to ") : juce::String ("Move to "))
+                        + tg.name + " ]");
+            });
+    };
+
+    aw.addCustomComponent (outBtn.get());
+
+    // "Apply" (not "OK") so it's clear nothing takes effect until pressed.
+    aw.addButton ("Apply",  1);
+    aw.addButton ("Cancel", 0);
+    // QA-E Task 7 (FILE-02): per-clip dialog only -- explicit re-attach.
+    // Snaps every setting back to the file's library (browser) master and
+    // clears the override so the clip follows again (dot -> green).
+    if (offerResetToMaster)
+        aw.addButton ("Reset to Browser Entry", 2);
+}
+} // namespace
+
 void ArrangementGrid::showAudioClipProperties(int blockIdx)
 {
     if (blockIdx < 0 || blockIdx >= mPM.getNumBlocks()) return;
-    auto& block = mPM.getBlock(blockIdx);
+    const auto& block = mPM.getBlock(blockIdx);
     if (block.clipType != ClipType::Audio) return;
 
+    juce::String curRouteName;
+    std::vector<RoutablePageInfo> pages;
+    if (onEnumerateRoutablePages) pages = onEnumerateRoutablePages();
+    for (const auto& pg : pages)
+        if (pg.channelId == block.routeChannel) { curRouteName = pg.displayName; break; }
+
     auto* aw = new AlertWindow("Audio Clip Properties",
-                               "File: " + File(block.audioFilePath).getFileName(),
+                               "File: " + File(block.audioFilePath).getFileName()
+                               + "\n\nThese settings apply to this clip only. "
+                                 "Changing them stops this clip from following "
+                                 "the file's master settings.",
                                AlertWindow::NoIcon);
 
-    aw->addTextEditor("pitch",  String(block.pitchSemitones, 2), "Pitch shift (semitones):");
-    aw->addTextEditor("bpm",    String(block.originalBPM, 1),    "Original BPM:");
+    std::shared_ptr<juce::TextButton> routeBtn;
+    std::shared_ptr<PendingRoute>     pending;
+    // Per-clip dialog: offerMove == false -> the menu offers "Copy to X" only
+    // (per-clip routing always forks a copy; the acted-on block becomes it).
+    buildAudioPropsControls (*aw, block.pitchSemitones, block.originalBPM,
+                             block.stretchMode, curRouteName, pages,
+                             /*offerMove*/ false,
+                             /*offerResetToMaster*/ true, routeBtn, pending);
 
-    aw->addComboBox("mode", {"Stretch (pitch locked)", "Resample (pitch follows tempo)"}, "Mode:");
-    if (auto* cb = aw->getComboBoxComponent("mode"))
-        cb->setSelectedItemIndex(block.stretchMode ? 0 : 1, dontSendNotification);
-
-    aw->addButton("OK", 1); aw->addButton("Cancel", 0);
     aw->enterModalState(true,
-        ModalCallbackFunction::create([this, blockIdx, aw](int r) {
-            if (r == 1 && blockIdx < mPM.getNumBlocks()) {
-                auto& b2 = mPM.getBlock(blockIdx);
-                float newPitch = aw->getTextEditorContents("pitch").getFloatValue();
-                float newBPM   = aw->getTextEditorContents("bpm").getFloatValue();
-                bool  stretch  = true;
-                if (auto* cb = aw->getComboBoxComponent("mode"))
-                    stretch = (cb->getSelectedItemIndex() == 0);
-                if (newPitch != b2.pitchSemitones || newBPM != b2.originalBPM || stretch != b2.stretchMode) {
-                    beginEdit("Audio Clip Properties");
-                    b2.pitchSemitones = newPitch;
-                    b2.originalBPM    = jmax(1.f, newBPM);
-                    b2.stretchMode    = stretch;
+        ModalCallbackFunction::create([this, blockIdx, aw, routeBtn, pending](int r) {
+            if (blockIdx < 0 || blockIdx >= mPM.getNumBlocks()) return;
+            if (r == 0) return;   // Cancel
+
+            // Snapshot by value: commitEdit() rebuilds the block list via
+            // applySnapshot (removeBlock/addBlock), so a block reference must
+            // NOT be held across a commit.  Re-fetch by index per edit.
+            const ArrangementBlock cur = mPM.getBlock(blockIdx);
+
+            // r == 2: "Reset to Browser Entry" -- snap every setting back to
+            // the file's library (browser) master and re-attach (follow
+            // again).  Ignores the typed fields + any pending route pick.
+            if (r == 2)
+            {
+                const int li = mPM.findAudioLibraryIndexByPath(cur.audioFilePath);
+                if (li >= 0)
+                {
+                    beginEdit("Follow File Master");
+                    auto& b = mPM.getBlock(blockIdx);
+                    b.pitchSemitones = mPM.getAudioLibraryPitch(li);
+                    b.originalBPM    = mPM.getAudioLibraryBPM(li);
+                    b.stretchMode    = mPM.getAudioLibraryStretchMode(li);
+                    b.routeChannel   = mPM.getAudioLibraryPageOwner(li);
+                    b.isOverride     = false;            // follows again -> green
                     commitEdit();
                     repaint();
                 }
+                return;
+            }
+
+            if (r != 1) return;   // defensive (only 0/1/2 expected)
+
+            const float newPitch  = aw->getTextEditorContents("pitch").getFloatValue();
+            const float bpmClamped = jmax(1.f, aw->getTextEditorContents("bpm").getFloatValue());
+            bool  stretch = true;
+            if (auto* cb = aw->getComboBoxComponent("mode"))
+                stretch = (cb->getSelectedItemIndex() == 0);
+
+            // QA-E Task 7 (FILE-02): per-clip routing pick = COPY (Jeff
+            // 2026-05-15).  Duplicate FIRST, THEN create the new page bound
+            // to the DUPLICATE (so "Copy to a new Clip Page" registers only
+            // the one dupe entry -- not the original too).  Then tag it
+            // (dedup-safe) + THIS block BECOMES the copy.
+            if (pending && pending->chosen && onDuplicateFileForCopy)
+            {
+                const juce::String np = onDuplicateFileForCopy(cur.audioFilePath);
+                if (np.isNotEmpty())
+                {
+                    int target = pending->channelId;
+                    if (pending->createKind >= 0 && onCreateRoutablePage)
+                        target = onCreateRoutablePage(pending->createKind, np);
+                    if (target >= 0)
+                    {
+                        if (onTagCopiedEntry)
+                            onTagCopiedEntry(np, target, newPitch, bpmClamped, stretch);
+                        if (blockIdx < mPM.getNumBlocks())
+                        {
+                            beginEdit("Audio Clip Copy");
+                            auto& b = mPM.getBlock(blockIdx);
+                            b.audioFilePath  = np;
+                            b.routeChannel   = target;
+                            b.pitchSemitones = newPitch;
+                            b.originalBPM    = bpmClamped;
+                            b.stretchMode    = stretch;
+                            b.displayAlias   = {};        // new file -> new name
+                            // The new library entry has exactly these props,
+                            // so the block matches its own new master -> it
+                            // FOLLOWS it (green), not detached.
+                            b.isOverride     = false;
+                            commitEdit();
+                            repaint();
+                        }
+                    }
+                }
+                return;   // a Copy was the action; don't also do an in-place edit
+            }
+
+            // Plain prop edit.  isOverride is DERIVED: this copy is detached
+            // (red) iff its resulting settings differ from the file's library
+            // master -- so typing the master values back (or pressing Apply
+            // when they already match) auto-re-attaches it (green) and it
+            // resumes following browser-entry edits.
+            const int li = mPM.findAudioLibraryIndexByPath(cur.audioFilePath);
+            const bool matchesMaster = (li >= 0)
+                && newPitch       == mPM.getAudioLibraryPitch(li)
+                && bpmClamped     == mPM.getAudioLibraryBPM(li)
+                && stretch        == mPM.getAudioLibraryStretchMode(li)
+                && cur.routeChannel == mPM.getAudioLibraryPageOwner(li);
+            const bool desiredOverride = ! matchesMaster;
+            const bool propsChanged = (newPitch   != cur.pitchSemitones
+                                       || bpmClamped != cur.originalBPM
+                                       || stretch  != cur.stretchMode);
+            if (propsChanged || desiredOverride != cur.isOverride)
+            {
+                beginEdit("Audio Clip Properties");
+                auto& b2 = mPM.getBlock(blockIdx);
+                b2.pitchSemitones = newPitch;
+                b2.originalBPM    = bpmClamped;
+                b2.stretchMode    = stretch;
+                b2.isOverride     = desiredOverride;
+                commitEdit();            // fires onArrangementChanged → rebuildAudioClipPlayers
+                repaint();
             }
         }), true);
 }
@@ -2983,20 +3358,31 @@ void ArrangementGrid::filesDropped(const StringArray& files, int x, int y)
         if (! File(fs).hasFileExtension("wav;mp3;aiff;flac;ogg;aif")) continue;
         const int row = jmin(kNumRows - 1, baseRow + placed);
 
-        // QA-E Task 5 (2026-05-15): if the dropped file is already in the
-        // audio library, defer to StandaloneEditor's duplicate-drop prompt
-        // (Existing routing / New page / Cancel).  Resolve each library
-        // entry's stored path to an absolute File and compare against the
-        // dropped File so relative + absolute entries both match correctly.
+        // QA-E Task 5 / Task 7 (FILE-02, 2026-05-17): if the dropped file is
+        // already in the audio library, defer to StandaloneEditor's
+        // duplicate-drop prompt (Use Existing / New Page / Cancel).
+        //
+        // Match by FILENAME (case-insensitive, Windows), not just resolved-
+        // path equality: copy-on-drop relocates imports into the project's
+        // Samples/ folder, so the external source path the user drags from
+        // is NEVER equal to the library entry's stored Samples/ path -- the
+        // old exact-path check therefore never fired the prompt and every
+        // re-drop silently re-imported (new page + duplicate same-name
+        // entry).  Filename match mirrors importSample's own collision
+        // keying; the prompt itself is the disambiguation (Jeff's call (a),
+        // 2026-05-17).
         const File droppedF (fs);
         int existingLibIdx = -1;
         for (int i = 0; i < mPM.getNumAudioLibrary(); ++i)
         {
             const String stored = mPM.getAudioLibraryPath (i);
+            if (stored.isEmpty()) continue;
             File libFile;
             if (onResolveStoredPath) libFile = onResolveStoredPath (stored);
             else                     libFile = File (stored);
-            if (libFile == droppedF) { existingLibIdx = i; break; }
+            if (libFile == droppedF
+                || libFile.getFileName().equalsIgnoreCase (droppedF.getFileName()))
+            { existingLibIdx = i; break; }
         }
 
         if (existingLibIdx >= 0 && onDuplicateFileDrop)

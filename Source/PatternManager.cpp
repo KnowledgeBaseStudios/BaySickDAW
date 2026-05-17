@@ -235,6 +235,17 @@ void PatternManager::setAudioLibraryPageOwner(int idx, int channelId)
     mAudioLibrary[idx].pageOwnerChannelId = channelId;
 }
 
+// QA-E Task 7 (FILE-02): set the source-of-truth pitch / BPM / stretch on the
+// library entry (browser "Properties..." applies here; followers inherit).
+void PatternManager::setAudioLibraryClipDefaults(int idx, float pitch,
+                                                 float bpm, bool stretchMode)
+{
+    if (idx < 0 || idx >= (int)mAudioLibrary.size()) return;
+    mAudioLibrary[idx].pitchSemitones = pitch;
+    mAudioLibrary[idx].originalBPM    = juce::jmax(1.f, bpm);
+    mAudioLibrary[idx].stretchMode    = stretchMode;
+}
+
 // ── Automation template library ─────────────────────────────────────────────
 void PatternManager::addAutomationTemplate(const AutomationLane& lane)
 {
@@ -1048,6 +1059,9 @@ juce::ValueTree PatternManager::toValueTree() const
         // instead of routing through the original Vox/Inst page.  Default 0
         // on deserialize preserves backward compatibility with pre-fix saves.
         bNode.setProperty("routeChannel",   b.routeChannel,   nullptr);
+        // QA-E Task 7 (FILE-02): persist the per-copy override flag (see
+        // ArrangementBlock::isOverride).  New saves always carry it.
+        bNode.setProperty("isOverride",     b.isOverride,      nullptr);
         if (b.clipType == ClipType::Automation)
             bNode.addChild(automationLaneToValueTree(b.automationLane), -1, nullptr);
         arrNode.addChild(bNode, -1, nullptr);
@@ -1088,6 +1102,10 @@ juce::ValueTree PatternManager::toValueTree() const
             en.setProperty("alias",              e.alias,              nullptr);
             en.setProperty("chokeGroup",         e.chokeGroup,         nullptr);   // D3
             en.setProperty("pageOwnerChannelId", e.pageOwnerChannelId, nullptr);   // QA-E Task 4
+            // QA-E Task 7 (FILE-02): source-of-truth clip props on the entry.
+            en.setProperty("libPitch",           e.pitchSemitones,     nullptr);
+            en.setProperty("libBPM",             e.originalBPM,        nullptr);
+            en.setProperty("libStretch",         e.stretchMode,        nullptr);
             lib.addChild(en, -1, nullptr);
         }
         root.addChild(lib, -1, nullptr);
@@ -1409,6 +1427,12 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         // pre-fix saves -> legacy "no Vox/Inst routing" behavior.  New saves
         // carry the field so Vox/Inst-recorded clips persist their route.
         b.routeChannel   = (int)             bNode.getProperty("routeChannel",   0);
+        // QA-E Task 7 (FILE-02): default TRUE on read.  Pre-Task-7 saves have
+        // no "isOverride" attribute -> treat every existing block as a fully
+        // customized copy so its saved pitch / BPM / mode / route are all
+        // preserved exactly and the library original does NOT silently change
+        // it on reopen (Jeff's call, 2026-05-15).  New saves carry the flag.
+        b.isOverride     = (bool)            bNode.getProperty("isOverride",     true);
         if (b.clipType == ClipType::Automation)
         {
             auto la = bNode.getChildWithName("AutomationLane");
@@ -1460,7 +1484,13 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
                 e.getProperty("path",               juce::String()).toString(),
                 e.getProperty("alias",              juce::String()).toString(),
                 (int) e.getProperty("chokeGroup",         0),    // D3 (default 0 for legacy projects)
-                (int) e.getProperty("pageOwnerChannelId", 0)     // QA-E Task 4 (default 0 = generic Audio for legacy)
+                (int) e.getProperty("pageOwnerChannelId", 0),    // QA-E Task 4 (default 0 = generic Audio for legacy)
+                // QA-E Task 7 (FILE-02): source-of-truth clip props.  Legacy
+                // projects have no lib* attrs -> neutral defaults; their grid
+                // blocks all deserialize isOverride=true so they don't follow.
+                (float) e.getProperty("libPitch",   0.0),
+                (float) e.getProperty("libBPM",     120.0),
+                (bool)  e.getProperty("libStretch", true)
             });
         }
     }

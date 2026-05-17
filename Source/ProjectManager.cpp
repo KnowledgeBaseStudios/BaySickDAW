@@ -513,6 +513,31 @@ juce::String ProjectManager::importSample (const juce::File& externalFile)
     return "Samples/" + target.getFileName();
 }
 
+// QA-E Task 7 (FILE-02): force a fresh auto-numbered duplicate.  Unlike
+// importSample, this never short-circuits to an existing path -- the
+// Properties "Copy" action must always produce a NEW distinct file (so its
+// own library entry is a separate source of truth, no identical-path dupes).
+juce::String ProjectManager::duplicateSample (const juce::File& src)
+{
+    if (! hasProject())       return {};
+    if (! src.existsAsFile()) return {};
+
+    auto samplesDir = getSamplesFolder();
+    samplesDir.createDirectory();
+
+    const auto stem = src.getFileNameWithoutExtension();
+    const auto ext  = src.getFileExtension();
+    juce::File target;
+    for (int n = 2; n < 100000; ++n)
+    {
+        target = samplesDir.getChildFile (stem + " (" + juce::String (n) + ")" + ext);
+        if (! target.exists()) break;
+    }
+    if (target == juce::File() || target.exists()) return {};
+    if (! src.copyFileTo (target))                 return {};
+    return "Samples/" + target.getFileName();
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Recent projects
 // ──────────────────────────────────────────────────────────────────────────────
