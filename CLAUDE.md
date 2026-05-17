@@ -92,7 +92,6 @@ JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone
 - **Header dependencies:** handled automatically by MSBuild. No manual `.obj` deletion after header edits - just re-run `do_build.bat`.
 - **Standing rule (verifying Claude fixes):** run the Debug exe FIRST. Any `jassert` that fires shows a Windows dialog with file path + line + condition - screenshot to share. Then re-run in Release as the actual user test. Debug runs slower; audio that glitches in Debug under heavy load may be fine in Release. Always confirm in Release before declaring a real performance regression.
 - **Don't run both simultaneously.** ASIO opens audio devices exclusively (second instance gets no audio). Both exes share `Documents\BaySickDAW\settings.xml` + `audio_settings.xml` - changes in one are seen by the other on next start.
-- **MT engine in Debug:** the multi-threaded render path is a no-op under Debug (real Debug-only bug; investigation owned by **QA-Md** in `Plans & Specs/Main Plan.md` §5). DSP meter readings in Debug always reflect single-thread cost. Use Release for any MT vs serial verification.
 
 ---
 

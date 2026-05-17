@@ -955,6 +955,8 @@ needed to find what you should pull up to review the work.
   QA-E.**
 
 #### **QA-Ea: Bus Solo + Layers/Bass/Drums Output-Path Unification (DSP-09)** *(NEW — inserted 2026-05-15)*
+
+**Plan file:** `Plans & Specs/Batch Plans/polished-snuggling-token.md`
 - Items: **DSP-09** (bus solo) + **Layers/Bass/Drums bus-output-path
   unification** (the architecturally-correct fix that removes the
   bus-solo bug class, not just the instance).  Punted out of QA-E Task 6
