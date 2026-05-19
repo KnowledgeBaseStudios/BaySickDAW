@@ -12,6 +12,8 @@ QA-Ea is the highest-risk batch of Phase 3: a hot-path audio-engine refactor. Th
 
 QA-Ea conforms the serial path to the already-correct MT model (**Part B**), then collapses all bus-solo logic into ONE shared `VibeGraph::anyBusSoloed()` helper + one formula (**Part A**). Owner-locked order: **Part B first, then Part A** (the §9 nineteenth Forks diagnosis: "a clean single-gate fix is only possible after the output paths are unified").
 
+**Pre-Part-B prerequisite (folded in 2026-05-18 — §9 twenty-fifth Forks entry).** Building the Part-B test rig surfaced an MT serial-tail divergence: the master recorder, MIDI recorder, and metronome/count-in are fed only in the serial tail (after the MT branch early-return at `PluginProcessor.cpp:1932`) and were never mirrored into MT — so a record-nothing-armed master capture in MT produces a 104-byte empty WAV (the Part-B 'before' reference is impossible in MT until fixed). Fix folds in as a new pre-Part-B source task (**Task 0b**): extract the post-mix tail (MIDI recorder + master recorder + metronome/count-in) into ONE shared helper called from BOTH the serial tail and the MT branch after `dispatchBlock` — the 5th instance of the proven extract pattern (`tapDryRecorder`, `drainMeterAtomicsForUI`, `measureDspLoadAndOverload`, `renderFilePlayPlayer`/`renderAudioClipsForRow`). The Part-B 'before' master is then captured **in MT, after Task 0b** (the extraction is behavior-preserving for the master output, so post-0b is still a valid pre-Part-B reference). ST deletion is its own gated batch QA-Ef; Issue 3 is its own batch QA-Ed; both out of QA-Ea scope (see §9 twenty-fifth Forks entry).
+
 - **Risk:** HIGH — touches master-sum, the MT `MasterTask` structure, the `BusNode` buffer model. Mandatory own `/review-batch` before close (Jeff's safety call).
 - **Effort:** medium-large (~8-14 h: Part B ~4-7 h, Part A bus-solo helper ~3-4 h, verify ~2-3 h).
 - **Dependencies:** QA-E (same code area + test material; clean recording/strip surface). Landed (closed 2026-05-17, `f903eaa`).
@@ -23,7 +25,7 @@ QA-Ea conforms the serial path to the already-correct MT model (**Part B**), the
 |----|----------|-----------|
 | SC1 | **Part B before Part A** (unify output path → one gate site, then add the single gate) | §9 19th Forks: clean single-gate fix only possible after outputs unified; high-risk surgery lands first, no throwaway 3-site solo code. Jeff-locked this session. |
 | SC2 | **All 11 buses uniformly soloable** (layers, bass, drums, fx, clipsbus, voxbus, instbus, voxbus2, instbus2, instbus3, rustybus) — soloing any one silences all others (subject to B1) | Matches the locked DSP-09 target (Carry-Forward:321) "every other bus silenced at master mix". Intended behavior changes: RustyDrumsBus gains a solo gate (was ungated); triad joins the unified set; ClipsBus moves from bespoke 6-bus group to uniform 11. Jeff-locked this session. |
-| SC3 | **Add an explicit serial↔MT bit-parity verify gate** (existing Mixer-hamburger "Multi-core Rendering" toggle + Render-to-WAV, metronome OFF), alongside the no-solo bit-compare + 5 DSP-09 scenarios | §5 flags the MT MasterTask surface; Carry-Forward "No dead wiring" mandates serial+MT both exercised; §5 verify list omitted an explicit parity check. Jeff-locked this session. (MT runs in Debug too — QA-Md closed 2026-05-09; the old "MT Debug no-op" was a meter-cap misdiagnosis.) |
+| SC3 | **Part B verified by an in-app null test; serial↔MT is a by-ear toggle check, NOT a bit-compare; Part A by-ear via the 5 DSP-09 scenarios.** Null test = a fixed pre-recorded song (bit-exact source anchor) + record-with-nothing-armed master capture (before vs after Part B) + per-strip polarity ("Reverse") null → dead silence = no regression. | **Methodology corrected 2026-05-17 (Jeff-directed).** Original draft used a fabricated `golden_*_preB.wav` / `fc /b` / serial↔MT-bit-parity ceremony — ungrounded (invented filenames, CLI hashing, not how Jeff verifies) and a false premise (MT reorders float summation → never bit-identical to serial even with zero behavior change). SC3's intent (don't let Part B silently regress the no-solo mix; keep serial AND MT correct) is preserved; only the method changed. Grounded in features verified in code: `masterFile` capture (PluginProcessor.h:670 / .cpp:3555), per-strip polarity (5F-4a), routing dropdown is Vox/Inst/Clips-only (BuilderPage.cpp:2898) so the song anchor must be paired with real Layers/Bass/Drums engine parts. |
 | A | Solo+mute same bus → **mute wins** | §9 19th Forks (Jeff). `muted ||` short-circuits the formula. |
 | B1 | Signals routed DIRECTLY to kMaster (the `masterExtra` accumulator) are **NOT** wholesale solo-gated | §9 19th Forks (Jeff). Gating the kMaster accumulator would zero the soloed bus's own output (it routes through the same accumulator). Preserved by construction: no `processBus` call gates kMaster. |
 | C | Multi-bus solo is **additive** | §9 19th Forks (Jeff). Per-bus formula `(absolo && !thisSolo)` → each soloed bus passes; OR-reduced helper makes it additive. |
@@ -31,6 +33,7 @@ QA-Ea conforms the serial path to the already-correct MT model (**Part B**), the
 | GUARD | `anyBusSoloed()` reads bus `_solo` params ONLY; **MUST NEVER** call `isAnyInsertSoloed()` (strip-level) | §9 19th Forks CRITICAL GUARDRAIL. Prior serial bug muted whole buses on strip solo (documented PluginProcessor.cpp:1883-1893). `/review-batch` must verify. |
 | OQ-1 | **RESOLVED this session by code read.** `processBus` returns early for the triad at VibeGraph.cpp:1642/1651/1660 (`mXNode->processChainOnly` + peak drain + `return;`); the shared formula at :1775 is receive-group-only; triad solo lives in `BusNode::processChainOnly` at :355-364. Task 4 therefore has TWO concrete edit sites (triad processChainOnly + the :1775 formula), no branching. | Read VibeGraph.cpp:325-369 + :1617-1784 this session. |
 | OQ-3 | **RESOLVED.** The 5 DSP-09 scenarios = Main Plan §5 canonical: (1) solo Layers; (2) unsolo; (3) multi-bus additive; (4) solo+mute=mute wins; (5) persistence across save/load. | Main Plan §5 QA-Ea entry verify list. |
+| SC4 | **MT serial-tail 3-bug fix folds in as pre-Part-B Task 0b; Part-B 'before' captured in MT after it.** Master recorder + MIDI recorder + metronome/count-in extracted into ONE shared helper called from both the serial tail and the MT branch. ST-path deletion split OUT to gated batch QA-Ef; Issue 3 split OUT to batch QA-Ed; standing rule: new audio-path code = single shared helper both paths, never hand-mirrored. | §9 twenty-fifth Forks entry. Master recorder is dead in MT (104-byte WAV) → Part-B 'before' capture impossible in MT until fixed; the fix is the QA-Ea-verification unblocker. Jeff-locked 2026-05-18. Sequencing of QA-Ed/QA-Ef + this fold = Jeff's confirmed call per `feedback_slot_placement_is_spec_call.md`. |
 
 ## Sub-spec calls surfaced for ExitPlanMode
 
@@ -42,6 +45,10 @@ QA-Ea conforms the serial path to the already-correct MT model (**Part B**), the
 - `~/.claude/plans/polished-snuggling-token.md` → mirror to `Plans & Specs/Batch Plans/polished-snuggling-token.md`; delete home copy.
 - `Plans & Specs/Main Plan.md` — §5 QA-Ea entry: add `**Plan file:**` pointer line.
 - `Plans & Specs/Running Notes/polished-snuggling-token.md` — seed (new file).
+
+### Task 0b — Pre-Part-B: MT serial-tail divergence shared-helper fix (3 bugs)
+- [Source/PluginProcessor.h](Source/PluginProcessor.h) — declare the post-mix-tail helper near the `drainMeterAtomicsForUI` / `measureDspLoadAndOverload` decls (same extracted-helper cluster, ~:706-727).
+- [Source/PluginProcessor.cpp](Source/PluginProcessor.cpp) — define the helper (MIDI recorder `:2697-2701` + master recorder `:2709-2710` + metronome/count-in `:2712-2857`); replace that serial-tail span with one helper call; add the same call in the MT branch after `dispatchBlock` (~:1914) and before `drainMeterAtomicsForUI` (~:1921). Preserve the D-5 invariant (recorder writes the pre-metronome master — in MT the post-`dispatchBlock` buffer is already pre-metronome).
 
 ### Task 1 — Part B: route triad+Clips via routeInsertOutput; neutralize bespoke sum
 - [Source/PluginProcessor.cpp](Source/PluginProcessor.cpp) — after `processBus(kClipsBus,...)` (~:2517) add `routeInsertOutput(kClipsBus,...)`; add triad generic loop before the `mVibeGraph.processBlock` call (~:2690).
@@ -75,13 +82,23 @@ QA-Ea conforms the serial path to the already-correct MT model (**Part B**), the
 - [ ] Mirror `~/.claude/plans/polished-snuggling-token.md` → `Plans & Specs/Batch Plans/polished-snuggling-token.md` (Write); delete the home-dir copy (per `feedback_plan_mirror_one_way.md`).
 - [ ] Add `**Plan file:** [Batch Plans/polished-snuggling-token.md](Batch Plans/polished-snuggling-token.md)` to the §5 QA-Ea header in Main Plan.
 - [ ] Seed `Plans & Specs/Running Notes/polished-snuggling-token.md` (title + purpose blockquote + pair ref + initial "Task 0: open" entry; per §0 running-notes required sections).
-- [ ] **Tell Jeff:** "Run `do_build.bat` on current `main` (Debug). Pick a deterministic test pattern for the golden capture: **metronome OFF**, no noise-oscillator synths (CLAUDE.md LCG gotcha). Then:
-  - **(1)** Mixer hamburger → uncheck **Multi-core Rendering** (serial). Render the pattern to WAV → save as `golden_serial_preB.wav`.
-  - **(2)** Mixer hamburger → check **Multi-core Rendering** (MT). Render the same pattern → `golden_mt_preB.wav`.
-  - Send both files (or their hashes via `certutil -hashfile <f> SHA256`)."
-- [ ] Record both hashes + the serial-vs-MT baseline delta in running notes (serial and MT need not be byte-identical historically; the invariant is "Part B does not regress that delta").
+- [ ] **Tell Jeff:** "Build the deterministic 8-bar test project: Layers+Bass+Drums engine parts (sampled / phase-reset patches, **NO noise-oscillator patches** per the CLAUDE.md LCG gotcha) + Vox+Inst+Rusty parts (for Part A solo listening) + a dropped **pre-recorded song** (the bit-exact source anchor; also covers the Clips/audio path). **Metronome OFF.** Keep/save this project — it is the QA-Ea test rig for every later task." (The Part-B 'before' master capture is **NOT** taken here — it moves to **Task 0b**, captured in MT *after* the 3-bug shared-helper fix, because the master recorder is dead in MT until then. §9 twenty-fifth Forks.)
+- [ ] Confirm the deterministic test project exists + is saved. The 'before' reference capture + its pre-Part-B confirmation are now Task 0b steps (post-0b, in MT, before any Task-1 source edit).
 - [ ] Recommend a `pre-QA-Ea` git tag at this commit (rollback boundary).
 - [ ] Surface full git status. Dispatch `/draft-commit`. Surface drafted message + git status to Jeff for approval. Commit on approval.
+- [ ] Dispatch `/draft-doc running-notes` post-commit and apply.
+
+### Task 0b — Pre-Part-B: MT serial-tail divergence shared-helper fix (3 bugs)
+
+Prerequisite for the Part-B 'before' capture (master recorder is dead in MT — §9 twenty-fifth Forks). Source change; lands before Task 1. The extraction is behavior-preserving for the master output itself (it only ALSO feeds the recorder + runs metro in MT), so the post-0b master is a valid pre-Part-B null reference.
+
+- [ ] Read the serial-tail recorder/MIDI/metronome span (`PluginProcessor.cpp:2697-2857`) + the MT branch (`:1872-1933`) + the extracted-helper decl cluster (`PluginProcessor.h:~706-727`) before editing.
+- [ ] Extract MIDI recorder (`:2697-2701`) + master recorder (`:2709-2710`) + metronome/count-in DSP (`:2712-2857`) into ONE shared helper (e.g. `applyPostMixRecordAndMetro(buffer, …)`), declared in `PluginProcessor.h` beside `drainMeterAtomicsForUI`/`measureDspLoadAndOverload`.
+- [ ] Replace the serial-tail span with a single call to the helper (same position — preserves the D-5 pre-metronome recorder ordering).
+- [ ] Add the same helper call in the MT branch after `dispatchBlock` (~:1914), before `drainMeterAtomicsForUI` (~:1921). The post-`dispatchBlock` buffer is the final master, pre-metronome — correct + click-free for the recorder.
+- [ ] **Tell Jeff:** "Build (Debug + Release). In **MT** (default): (1) song mode, nothing armed, Record → master WAV is non-empty + correct audio (not 104 bytes); (2) arm a strip / record with MIDI input if available → MIDI recorder captures notes; (3) metronome ON during playback → audible click; (4) count-in before record → audible 1-2-3-4. Then toggle Multi-core Rendering OFF (**ST**) and re-check all 4 still work (no regression). Tell me any that fail."
+- [ ] On Jeff's verify PASS: surface full git status. Dispatch `/draft-commit` (Task 0b own commit). Surface message + status to Jeff for approval. Commit on approval.
+- [ ] **Then the Part-B 'before' capture (now in MT):** Tell Jeff — "On the post-0b build, in **MT**, play the deterministic test project with **nothing armed** + Record → that master capture is the **Part-B 'before' reference**. Rename/keep that WAV (e.g. `qaEa_before`)." Confirm it exists, is non-empty, and is post-0b / pre-Task-1 (before any Part-B source edit). Record in running notes (filename + that it is the post-0b / pre-Part-B MT reference). No hashes — the WAV itself is the polarity-null reference.
 - [ ] Dispatch `/draft-doc running-notes` post-commit and apply.
 
 ### Task 1 — Part B: wire triad + Clips through routeInsertOutput; neutralize bespoke sum
@@ -133,14 +150,13 @@ sumBuf.addFrom(c, 0, drumsBuf,  c, 0, numSamples);
 - [ ] Add the Clips `routeInsertOutput` call.
 - [ ] Add the triad generic loop.
 - [ ] Comment out the triad + `audioClipsPreRendered` `addFrom`s in the bespoke sum.
-- [ ] **Tell Jeff:** "Run `do_build.bat`. Test in Debug, then Release:
-  - **(1) Serial no-solo bit-compare.** Hamburger → Multi-core Rendering OFF. Render the Task-0 test pattern → `t1_serial.wav`. Compare to `golden_serial_preB.wav` (`fc /b golden_serial_preB.wav t1_serial.wav` — must report 'no differences'). Bit-identical = behavior preserved.
-  - **(2) MT untouched.** Hamburger → Multi-core Rendering ON. Render → `t1_mt.wav`. `fc /b golden_mt_preB.wav t1_mt.wav` → no differences.
-  - **(3) Serial↔MT parity.** Note whether `t1_serial.wav` vs `t1_mt.wav` differ by the SAME delta as the Task-0 baseline (`golden_serial_preB` vs `golden_mt_preB`). Part B must not regress parity.
-  - **(4) Audible clips check.** Play the pattern in serial mode — audio clips still audible (Q2 sharp edge: if the kClipsBus→kMaster route is missing at runtime, clips go silent — (1) catches it since golden has clips)."
+- [ ] **Tell Jeff:** "Run `do_build.bat`. Verify in Debug, then Release:
+  - **(1) Part-B null test.** Open the test project. Record-nothing-armed → master 'after-T1' capture. Put 'after-T1' + the Task-0 'before' capture on two grid rows, flip per-strip polarity ('Reverse') on one, play together. **Dead silence = pass.** Loud/audible residual = a Part B regression (most likely the Q2 Clips route, or a double/drop on L/B/D) — tell me what you hear.
+  - **(2) Mix sanity (ear).** Play normally, no solo: full mix present — Layers/Bass/Drums + the song all audible, nothing obviously dropped or doubled/louder.
+  - **(3) Serial vs MT.** Toggle Mixer hamburger 'Multi-core Rendering' OFF then ON — sounds right both ways."
 - [ ] Wait for Jeff's Debug+Release verify result.
 - [ ] On pass: surface full git status; `/draft-commit`; surface message + status; commit on approval.
-- [ ] Dispatch `/draft-doc running-notes` and apply (record the 4 WAV hashes + parity delta).
+- [ ] Dispatch `/draft-doc running-notes` and apply (record the null-test outcome + any residual notes).
 
 ### Task 2 — Part B: delete bespoke buffers + dead PreRendered plumbing
 
@@ -164,19 +180,18 @@ processMasterBus (sumBuf, bpm);   // :1575 onward unchanged
 - [ ] Delete allocs/resizes for the 3 deleted buffers (VibeGraph.cpp:1451-1454, :1385-1390, :1497-1502); keep `mMasterSumBuf`.
 - [ ] PluginProcessor.cpp: delete `layersIn/bassIn/drumsIn/audioClipsBusForGraph` (:2686-2688, :2520, :2372); update the `processBlock` call to the new signature.
 - [ ] Grep `mLayersBuf|mBassBuf|mDrumsBuf|audioClipsPreRendered|layersPreRendered|bassPreRendered|drumsPreRendered` across `Source/` → must return zero.
-- [ ] **Tell Jeff:** "Run `do_build.bat`. Test in Debug, then Release:
+- [ ] **Tell Jeff:** "Run `do_build.bat`. Verify in Debug, then Release:
   - **(1) Compile clean.** Both Debug + Release green in `build_log.txt`.
-  - **(2) Serial no-solo bit-compare.** Serial render → `fc /b golden_serial_preB.wav t2_serial.wav` → no differences.
-  - **(3) MT untouched.** MT render → `fc /b golden_mt_preB.wav t2_mt.wav` → no differences.
-  - **(4) Serial↔MT parity delta == Task-0 baseline.**"
+  - **(2) Part-B null test.** Record-nothing-armed → master 'after-T2'. Null vs the Task-0 'before' (polarity-flip one, play together) → **dead silence = pass.** Residual = a regression in the buffer-deletion/signature change (isolated from Task 1's routing, which already nulled clean).
+  - **(3) Mix sanity (ear) + serial/MT toggle** both sound right (as Task 1)."
 - [ ] Wait for Jeff's Debug+Release verify result.
 - [ ] On pass: surface full git status; `/draft-commit`; surface; commit on approval.
 - [ ] `/draft-doc running-notes` → apply.
 
 ### Part B GATE (mandatory — do NOT start Task 3 until green)
 
-- [ ] Task 1 + Task 2 serial renders bit-identical to `golden_serial_preB.wav`.
-- [ ] Serial↔MT parity delta unchanged from Task-0 baseline (SC3 explicit parity gate executed + recorded).
+- [ ] Task 1 + Task 2 null tests vs the Task-0 'before' capture = dead silence (or only benign sub-audible block-size hiss — Jeff's judgment; a loud/obvious residual blocks the gate).
+- [ ] No-solo mix audibly unchanged; "Multi-core Rendering" ON and OFF both correct.
 - [ ] Owner sign-off recorded in running notes.
 
 ### Task 3 — Part A: add `anyBusSoloed()` helper + cached ptrs (no behavior change)
@@ -215,9 +230,9 @@ for (int i = 0; i < 11; ++i)
 - [ ] Declare `anyBusSoloed()` + `mBusSoloPtr[11]` in VibeGraph.h.
 - [ ] Define the helper + add binding to the rebind site. Confirm the rebind runs on every APVTS rebind (sample-rate change, state load) so ptrs never stale-null at audio time — inspect all callers.
 - [ ] Helper is bound but **not yet called** (one-task "no dead wiring" exception — immediately consumed by Task 4; noted, not a violation pattern).
-- [ ] **Tell Jeff:** "Run `do_build.bat`. Test in Debug, then Release:
+- [ ] **Tell Jeff:** "Run `do_build.bat`. Verify in Debug, then Release:
   - **(1) Compile clean.**
-  - **(2) Serial + MT no-solo bit-compare** vs `golden_*_preB.wav` → no differences (helper unused = zero behavior change)."
+  - **(2) Ear sanity:** play the test project (no solo) — sounds identical (helper is bound but unused → zero behavior change). Optionally re-null vs the Task-0 'before' → still silent."
 - [ ] Wait for Jeff's Debug+Release verify result.
 - [ ] On pass: surface git status; `/draft-commit`; surface; commit on approval.
 - [ ] `/draft-doc running-notes` → apply.
@@ -269,18 +284,18 @@ Thread `absolo` into the triad `processChainOnly(buf, bpm, absolo)` calls at :16
 - [ ] Edit the 3 triad `processChainOnly` formulas + add the `absolo` param.
 - [ ] Compute `absolo` once in `processBus`; delete `inGroupSolo`/`useGroupSolo` + ClipsBus 6-bus block + Rusty override; apply the single :1775 formula; thread `absolo` into triad calls.
 - [ ] Update `EffectsBusNode` FX gate to the single formula.
-- [ ] **Tell Jeff:** "Run `do_build.bat`. Test in Debug, then Release — full matrix:
-  - **(1) No-solo regression.** Serial + MT render (no solo) → `fc /b` vs `golden_*_preB.wav` → no differences.
-  - **(2) DSP-09 #1 — solo Layers.** Project with Layers + Bass + Drums + a Vox/Inst bus all audible. Solo the Layers BUS. Expect: ONLY Layers audible; Bass/Drums/Vox/Inst silent.
-  - **(3) DSP-09 #2 — unsolo.** Un-solo Layers. Expect: full mix returns.
-  - **(4) DSP-09 #3 — multi-bus additive.** Solo Layers AND VoxBus. Expect: BOTH Layers + Vox audible; others silent.
-  - **(5) DSP-09 #4 — solo+mute = mute wins.** Solo Drums, then also mute Drums. Expect: silence (mute wins over its own solo).
-  - **(6) DSP-09 #5 — persistence.** Solo Layers, Save project, close, reopen. Expect: Layers still soloed; mix state restored.
-  - **(7) RustyDrumsBus (NEW gate).** Add a BaySickRustyDrums tab (audible). Solo Layers. Expect: Rusty now SILENT (was ungated pre-QA-Ea — intended change). Solo Rusty alone → only Rusty audible.
-  - **(8) GUARDRAIL test.** Solo a single STRIP (one Layer insert, not the bus). Expect: the Layers bus is NOT wholesale silenced — only strip-level solo applies (Sub-call D path untouched).
-  - **(9) B1 test.** Route one insert's main-out directly to Master (Properties → Routing → Master), solo a DIFFERENT bus. Expect: the direct-to-master signal still plays; the soloed bus plays; non-soloed buses silent.
-  - **(10) Serial↔MT parity.** Repeat (2),(4),(5),(7) in serial vs MT (hamburger toggle) — results identical within Task-0 baseline delta.
-  - Note: RustyDrumsBus/ClipsBus solo-grouping changes are INTENDED (SC2)."
+- [ ] **Tell Jeff:** "Run `do_build.bat`. Verify in Debug, then Release — all by EAR with the test project:
+  - **(1) No-solo unchanged.** Play with no solo: mix sounds the same as before Part A. (Optionally re-null vs the Task-0 'before' → still silent; Part A must not change the no-solo path.)
+  - **(2) DSP-09 #1 — solo Layers.** Solo the Layers BUS → ONLY Layers audible; Bass/Drums/Vox/Inst/Rusty/song all silent.
+  - **(3) DSP-09 #2 — unsolo** → full mix returns.
+  - **(4) DSP-09 #3 — multi-bus additive.** Solo Layers AND VoxBus → BOTH audible, everything else silent.
+  - **(5) DSP-09 #4 — solo+mute = mute wins.** Solo Drums, then also mute Drums → silence.
+  - **(6) DSP-09 #5 — persistence.** Solo Layers, Save, close, reopen → Layers still soloed.
+  - **(7) RustyDrumsBus NEW gate.** Solo Layers → Rusty now SILENT (was ungated pre-QA-Ea — intended SC2 change). Solo Rusty alone → only Rusty audible.
+  - **(8) GUARDRAIL.** Solo a single STRIP (one Layer insert, NOT the bus) → the Layers bus is NOT wholesale silenced (strip-solo is the separate Sub-call D path, untouched).
+  - **(9) B1.** Route one insert's main-out directly to Master (Properties → Routes to → Master/Clips as available), solo a DIFFERENT bus → the direct-to-master signal still plays; the soloed bus plays; non-soloed buses silent.
+  - **(10) Serial vs MT.** Repeat (2),(4),(5),(7) with 'Multi-core Rendering' OFF then ON — same audible result both ways.
+  - Note: Rusty/ClipsBus solo-grouping changes are INTENDED (SC2)."
 - [ ] Wait for Jeff's Debug+Release verify result.
 - [ ] On pass: surface git status; `/draft-commit`; surface; commit on approval.
 - [ ] `/draft-doc running-notes` → apply (all scenario results + intended-change note).
@@ -292,8 +307,8 @@ Thread `absolo` into the triad `processChainOnly(buf, bpm, absolo)` calls at :16
 - [ ] Remove `ctx.busAnySolo` plumbing in `PassiveStripTask`; update `processBus`/`processEffectsBus` call sites consistently.
 - [ ] **Tell Jeff:** "Run `do_build.bat`. Test in Debug, then Release:
   - **(1) Compile clean.** Grep `busAnySolo` → none in `Source/`.
-  - **(2) Re-run DSP-09 #1/#3/#4/#7 + serial↔MT parity** — byte-identical to Task 4 results (pure dead-code removal, zero behavior delta).
-  - **(3) No-solo bit-compare** vs `golden_*_preB.wav` → no differences."
+  - **(2) Re-run DSP-09 #1 / #3 / #4 / #7 by ear** — identical audible result to Task 4 (pure dead-code removal, zero behavior delta).
+  - **(3) No-solo mix unchanged** (ear)."
 - [ ] Wait for Jeff's Debug+Release verify result.
 - [ ] On pass: surface git status; `/draft-commit`; surface; commit on approval.
 - [ ] `/draft-doc running-notes` → apply.
@@ -301,7 +316,7 @@ Thread `absolo` into the triad `processChainOnly(buf, bpm, absolo)` calls at :16
 ### Task 6 — Part A cleanup (only if strictly unused)
 
 - [ ] Grep-confirm the `anySolo` param of `processBus`/BusNode + `pSiblingBass`/`pSiblingDrum` are zero-use. If yes: remove. If any use remains: SKIP this task + note retention in running notes (do not force).
-- [ ] **Tell Jeff (only if edits made):** "Run `do_build.bat`. Debug then Release: compile clean; no-solo bit-compare vs golden (no differences); spot-check DSP-09 #1 serial↔MT."
+- [ ] **Tell Jeff (only if edits made):** "Run `do_build.bat`. Debug then Release: compile clean; no-solo mix unchanged (ear); spot-check DSP-09 #1 by ear."
 - [ ] Wait for verify; on pass: surface git status; `/draft-commit`; surface; commit on approval.
 - [ ] `/draft-doc running-notes` → apply.
 
@@ -315,15 +330,15 @@ Thread `absolo` into the triad `processChainOnly(buf, bpm, absolo)` calls at :16
 
 ## Verification (end-to-end smoke after all source tasks land)
 
-Build clean (Debug + Release). Using the Task-0 test pattern + hamburger Multi-core toggle, metronome OFF:
+Build clean (Debug + Release). One test project (8-bar loop: L/B/D engine parts + Vox/Inst/Rusty parts + dropped song, metronome OFF), all checks by ear / in-app:
 
-1. **No-solo bit-identity.** Serial render == `golden_serial_preB.wav`; MT render == `golden_mt_preB.wav` (Part B is behavior-preserving for the no-solo mix).
-2. **Serial↔MT parity** unchanged from Task-0 baseline delta across the DSP-09 scenarios.
-3. **DSP-09 1-5** (Main Plan §5 canonical): solo Layers → only Layers; unsolo → full mix; multi-bus additive; solo+mute = mute wins; persistence across save/load.
-4. **SC2 intended changes:** RustyDrumsBus now solo-gated; ClipsBus in the uniform 11-bus group; triad cross-interacts with receive-group buses.
-5. **GUARDRAIL:** single-strip solo does NOT wholesale-silence its bus.
-6. **B1:** direct-to-Master routes still play while a different bus is soloed.
-7. **No regressions** in normal playback (no solo/mute engaged): full mix audible, levels unchanged vs golden.
+1. **Part B no-regression (null test).** Record-nothing-armed master capture **in MT** after all source tasks; null vs the **Task-0b 'before' capture** (recorded in MT after the 3-bug shared-helper fix, before any Part-B source edit; polarity-flip one, play together) → dead silence (benign sub-audible hiss at worst). Part B is behavior-preserving for the no-solo mix. (Both captures in MT — serial↔MT cannot be bit-identical anyway; the null test is by-ear, per SC3 + §9 twenty-fifth Forks.)
+2. **DSP-09 1-5** (Main Plan §5 canonical, by ear): solo Layers → only Layers; unsolo → full mix; multi-bus additive; solo+mute = mute wins; persistence across save/reload.
+3. **SC2 intended changes (by ear):** RustyDrumsBus now solo-gated; ClipsBus in the uniform 11-bus group; triad cross-interacts with receive-group buses.
+4. **GUARDRAIL (by ear):** single-strip solo does NOT wholesale-silence its bus.
+5. **B1 (by ear):** direct-to-Master routes still play while a different bus is soloed.
+6. **Serial vs MT (by ear):** "Multi-core Rendering" ON and OFF both produce the correct result for the no-solo mix and the solo scenarios — toggle check, not a compare.
+7. **No regressions** in normal playback (no solo/mute): full mix audible, nothing dropped/doubled/level-shifted vs the 'before' capture.
 
 ## Routing notes (Rule 3 application during execution)
 

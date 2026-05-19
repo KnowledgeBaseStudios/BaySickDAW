@@ -998,11 +998,36 @@ needed to find what you should pull up to review the work.
   order).  See §6 arrow.
 - Effort: medium-large (~8-14 hours; bus-solo helper ~3-4 hr, L/B/D
   output-path unification + MT MasterTask rework ~4-7 hr, verify ~2-3 hr).
+- **Pre-Part-B prerequisite (folded in 2026-05-18 — see §9 twenty-fifth
+  Forks entry):** the MT serial-tail divergence 3-bug shared-helper fix
+  (master recorder + MIDI recorder + metronome/count-in extracted into
+  ONE helper called from both the serial tail and the MT branch).
+  Required because the Part-B 'before' master capture must work in MT;
+  lands as a new pre-Part-B source task before Part B Task 1.
 - Verify (own plan file will detail): the 5 DSP-09 scenarios from the
   old QA-E Task 6 list (solo Layers; unsolo; multi-bus solo; solo+mute
   interaction = mute wins; persistence across save/load) + a regression
   pass that the L/B/D output-path rewrite didn't change non-solo mix
-  output (bit-compare a no-solo render before/after).
+  output — the **in-app null test in MT** (record-nothing-armed master
+  capture before/after, per-strip polarity-flip one, play together →
+  dead silence = pass).  NOT a bit-compare: Part-B verifies in MT and
+  serial↔MT cannot be bit-identical (float summation order differs).
+
+#### **QA-Ed: Song-Mode Transport Integer-Sample Source-of-Truth (Issue 3)** *(NEW — inserted 2026-05-18)*
+
+**Plan file:** `Plans & Specs/Batch Plans/<silly-name>.md` (when started)
+- Items: **Issue 3** — intermittent first-note-drop / pattern-starts-later-than-clip in song mode.  Decoupled from the QA-Ea-session pattern-scheduler work: the Issue 2 viewport fix shipped in QA-Ea Task 0 carry-forward (§9 twenty-fourth Forks entry); Issue 3 is the deeper transport-timing root cause, deliberately NOT band-aided in Issue 2.  Surfaced 2026-05-17 while building the QA-Ea test rig; root cause is float slop in the playhead beat accumulator.
+- Scope:
+  - Replace the float beat accumulator (`StandalonePlayHead::advanceBlock` `beatsPerSample = bpm/(60·sr)` + `fmod` loop-wrap) with an **integer-sample transport source-of-truth** so block-boundary beat positions are exact and the song-mode scheduler's `>= beatStart && < beatEnd` gate stops dropping the first note on loop-wrap.
+  - Remove the `mPRLastBeatEnd` band-aid state once the integer-sample clock makes it unnecessary.
+  - Tick-vs-sample: integer **SAMPLES** are the source of truth (Jeff's call — ticks rejected because temp automation needs sample-accurate positions; full tradeoff captured in running notes).
+- Own §0-conformant plan file + own verification pass.
+- Risk: **high** — hot-path transport/scheduler; touches every song-mode playback path.
+- Dependencies: after QA-Ea (same scheduler code region as the Issue 2 fix; QA-Ea's 3-bug shared-helper extraction lands first).
+- Sequencing: **immediately after QA-Ea, before QA-Eb** (`QA-E → QA-Ea → QA-Ed → QA-Eb → QA-Ec → QA-Ef → QA-F`).  Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`.  See §6 arrow + §9 twenty-fifth Forks entry.
+- Effort: medium-large (transport clock rework + scheduler-gate audit + regression-verify across song/pattern modes).
+- **Bucket:** Cross-cutting Infrastructure
+- Verify (own plan file will detail): pattern + clip start sample-aligned every play; first note never dropped on loop-wrap; no drift over a long arrangement; pattern/song-mode parity.
 
 #### **QA-Eb: Standalone App-Window Resizability** *(NEW — inserted 2026-05-17)*
 - Items: standalone app-window user-resizability (new feature; Jeff
@@ -1038,10 +1063,11 @@ needed to find what you should pull up to review the work.
 - Dependencies: none functionally (UI-only window-chrome change).
   Sequenced adjacent to QA-E for testing-efficiency, not a code
   dependency.
-- Sequencing: **immediately after QA-Ea, before QA-F** (`QA-E → QA-Ea
-  → QA-Eb → QA-F`).  Jeff's confirmed slot per
+- Sequencing: **after QA-Ed, before QA-Ec** (`QA-E → QA-Ea → QA-Ed
+  → QA-Eb → QA-Ec → QA-Ef → QA-F`).  Jeff's confirmed slot per
   `feedback_slot_placement_is_spec_call.md`, mirroring the QA-Ea
-  adjacency precedent.  See §6 arrow.
+  adjacency precedent (re-slotted 2026-05-18 — QA-Ed inserted ahead of
+  QA-Eb per §9 twenty-fifth Forks entry).  See §6 arrow.
 - Risk: **low-medium** — UI-only window-chrome + outer-Viewport change.
   No audio-thread / DSP / routing surface touched.  Main risk surface is
   the self-scrolling-page opt-out (avoiding double-wrap / scroll-fight on
@@ -1054,6 +1080,42 @@ needed to find what you should pull up to review the work.
   scrollbars with no outer-Viewport double-scroll / fight; Builder grid
   same; no per-page relayout regression (page internals unchanged — only
   the outer window + Viewport behavior is new).
+
+#### **QA-Ec: Audio-Clip Resample/Stretch Follow-Tempo + Fit-to-Grid Build-Out** *(NEW — inserted 2026-05-17)*
+
+**Plan file:** `Plans & Specs/Batch Plans/<silly-name>.md` (when started)
+- Items: audio-clip Resample/Stretch "follow tempo / fit to grid" build-out (new finding, surfaced 2026-05-17 building the QA-Ea test rig). Currently a non-functional shell: abandoned Rubber Band stub (BuilderPage.cpp:4107-4111); Resample-follow has no code path; Stretch engages only on an accidental never-true condition. NOT a carve-out; NOT part of the QA-E cluster. Folds in the audio-clip silence defect (hardcoded-120 import default + PluginProcessor.cpp:533 outSamples<=0 guard → silent clip, no meter, on project-BPM change).
+- Scope (wiring + ratio-model + stub-replacement + guard-fix — DSP + persistence already exist; NOT from-scratch):
+  - One consistent fitRatio model (content-beats vs block-beats, beat-domain so master-BPM-follow is free).
+  - Resample seam: fitRatio → sample read rate (PluginProcessor.cpp:510-511); pitch follows (vinyl).
+  - Stretch seam: fitRatio → existing PhaseVocoder setStretchRatio (PluginProcessor.cpp:520-524); pitch locked; master-BPM change auto-re-fits. No new DSP, NOT Rubberband/SoundTouch.
+  - Replace the BuilderPage.cpp:4107-4111 Rubber Band stub.
+  - Real clip content-length reference replacing the hardcoded-120 import default (covers the silence defect).
+  - Harden PluginProcessor.cpp:533 outSamples<=0 (clamp/fall back, never silence).
+  - OUT of scope: song-mode pattern-scheduler issues (separate fix); only the audio-clip silence guard folds here.
+- Own §0-conformant plan file + own verification pass.
+- Risk: medium-high — hot-path clip render (renderAudioClipsForRow/renderFilePlayPlayer). Mitigated: DSP + persistence already exist.
+- Dependencies: none hard. Before QA-F (clip stretch must be real for QA-F vocals + along-the-way testing). QA-Ea NOT hard-blocked (its null anchor wants zero stretch anyway).
+- Sequencing: immediately after QA-Eb, before QA-Ef (`QA-E → QA-Ea → QA-Ed → QA-Eb → QA-Ec → QA-Ef → QA-F`). Jeff's confirmed slot (Option 1). Does not group with QA-E by theme; slot justified by "real before QA-F". (Arrow updated 2026-05-18 — QA-Ed/QA-Ef inserted per §9 twenty-fifth Forks entry; QA-Ec position unchanged relative to QA-Eb/QA-F.) See §6 + §9 twenty-third + twenty-fifth Forks entries.
+- Effort: medium (wiring/ratio/stub/guard; no engine build).
+- **Bucket:** System Pages, Cross-cutting Infrastructure
+- Verify (by ear): 2s WAV→4s block: Resample = half-speed+pitch down; Stretch = half-speed+pitch locked; Stretch + change master BPM → re-fits to grid; formerly-silent BPM-change case now plays w/ meter; degenerate ratio clamps not silences; save/reload preserves mode/length/pitch.
+
+#### **QA-Ef: Serial (ST) Render-Path Deletion — Single MT Path** *(NEW — inserted 2026-05-18)*
+
+**Plan file:** `Plans & Specs/Batch Plans/<silly-name>.md` (when started)
+- Items: delete the serial (ST) render path (`PluginProcessor.cpp` serial tail, ~960 lines after the MT branch early-return `:1932`) so MT is the single render path.  Root motivation: dual hand-maintained ST/MT parity is a proven recurring bug class (§9 twenty-fifth Forks MT-divergence finding — 3 serial-only feeds leaked: master recorder, MIDI recorder, metronome/count-in); sole-coder + session-fog risk makes a single path structurally safer.
+- Scope:
+  - Remove the serial render tail + the `gMultiThreadedEngineEnabled` branch; MT (`RenderGraphDispatcher`) becomes unconditional.
+  - Preserve the serial-execution diagnostic via a **1-worker MT pool mode** (not a duplicate code path) so the "is it the parallelism or the logic" bisect still exists.
+  - Pre-flight: confirm nothing is ST-only — the §9 twenty-fifth audit's mirrored/inert inventory is the starting checklist; re-verify at execution.
+- Own §0-conformant plan file + own **mandatory `/review-batch`** (hot-path rip-out).
+- Risk: **high** — deletes ~960 lines of the single hottest function; mitigated by the deliberate gate below + the §9 twenty-fifth mirrored-inventory.
+- Dependencies / **GATE**: gated on **"MT proven on all 3"** — the QA-Ea 3-bug shared-helper fix must be landed and the master recorder + MIDI recorder + metronome/count-in verified working in MT before this batch may start.
+- Sequencing: **immediately before QA-F** (`QA-E → QA-Ea → QA-Ed → QA-Eb → QA-Ec → QA-Ef → QA-F`).  Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; deliberate (not rushed mid-QA).  See §6 arrow + §9 twenty-fifth Forks entry.
+- Effort: medium-large (rip-out + 1-worker-mode diagnostic + full regression verify + mandatory `/review-batch`).
+- **Bucket:** Cross-cutting Infrastructure
+- Verify (own plan file will detail): every audio path (engines / buses / aux / master / recording / metronome / meters / DSP-load) works with ST gone; 1-worker MT mode reproduces serial-execution for diagnosis; no regression vs the MT-on baseline.
 
 #### **QA-F: BaySickAlign Build-Out + Vox DSP Disconnect (Cluster 1)**
 - Items: DSP-02 (Vox FX bypassed), DSP-03 (Vox pitch correction does
@@ -1547,7 +1609,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Eb********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ed************ → QA-Eb********** → QA-Ec*********** → QA-Ef************* → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-Verify**** → QA-Export****
 ```
@@ -1680,6 +1742,51 @@ opted out of double-wrap.  Per-page proportional / FlexBox / Grid
 relayout is explicitly OUT of scope (post-V1).  **NOT a carve-out of
 QA-L's `NAV-01`** — fresh independent request; `NAV-01` / QA-L
 untouched.  See §9 twentieth Forks entry + running-notes §53.
+
+\*\*\*\*\*\*\*\*\*\*\* **QA-Ec** inserted 2026-05-17 while building the
+QA-Ea test rig.  Slotted **immediately after QA-Eb, before QA-F**
+(Jeff's confirmed slot, Option 1 per
+`feedback_slot_placement_is_spec_call.md`).  Scope: audio-clip
+Resample / Stretch follow-tempo + fit-to-grid build-out — currently a
+non-functional shell (abandoned Rubber Band stub
+`BuilderPage.cpp:4107-4111`; Resample has no code path; Stretch's
+engage condition never true).  Wiring + ratio-model +
+stub-replacement + guard-fix only — the `PhaseVocoder` engine +
+stretchMode/originalBPM/pitch/length persistence already exist (NO new
+DSP, NOT Rubberband / SoundTouch).  Folds in the audio-clip *silence*
+defect (hardcoded-120 import default + `PluginProcessor.cpp:533`
+outSamples<=0 guard).  Does NOT group with QA-E by code area / theme
+(acknowledged) — slotted before QA-F so clip stretch/resample is real
+for the QA-F vocals work + ongoing testing; QA-Ea NOT hard-blocked
+(its null-test anchor wants zero time-stretch).  **NOT a carve-out of
+any backlog item; the song-mode pattern-scheduler issues are a
+SEPARATE fix, NOT folded here.**  See §9 twenty-third Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\* **QA-Ed** inserted 2026-05-18 off the QA-Ea
+MT serial-tail divergence investigation.  Slotted **immediately after
+QA-Ea, before QA-Eb** (Jeff's confirmed slot per
+`feedback_slot_placement_is_spec_call.md`).  Scope: song-mode transport
+**integer-sample source-of-truth** — replace the float beat accumulator
+(`StandalonePlayHead::advanceBlock` + `fmod` loop-wrap) so the scheduler
+gate stops the intermittent first-note-drop (Issue 3), remove the
+`mPRLastBeatEnd` band-aid.  Decoupled from the Issue 2 viewport fix
+(which shipped in QA-Ea Task 0 carry-forward — §9 twenty-fourth Forks
+entry); Issue 3 is the deeper transport-timing root cause, deliberately
+not band-aided.  Own §0-conformant plan file.  See §9 twenty-fifth
+Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-Ef** inserted 2026-05-18 off the same
+QA-Ea MT serial-tail divergence investigation.  Slotted **immediately
+before QA-F** (Jeff's confirmed slot per
+`feedback_slot_placement_is_spec_call.md`; deliberate, not rushed
+mid-QA).  Scope: delete the serial (ST) render path (~960-line serial
+tail after the MT branch early-return) so MT is the single render path;
+preserve the serial-execution diagnostic via a 1-worker MT pool mode
+(not a duplicate code path).  **GATE: gated on "MT proven on all 3"**
+— the QA-Ea 3-bug shared-helper fix must be landed + the master
+recorder / MIDI recorder / metronome+count-in verified working in MT
+before this batch may start.  Own §0-conformant plan file + mandatory
+`/review-batch`.  See §9 twenty-fifth Forks entry.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -3420,7 +3527,7 @@ all entries' ownerChannelId.
 - `Plans & Specs/Batch Plans/phantom-recording-mongoose.md` — Task 6 section annotated (DSP-09 moved to QA-Ea; Task 7 FILE-02 is next executable).
 - `Plans & Specs/Running Notes/phantom-recording-mongoose.md` — §34-§40 capture (the full diagnosis + decision).
 
-**Verification:** QA-Ea will run the 5 DSP-09 scenarios from the old QA-E Task 6 list (solo Layers; unsolo; multi-bus solo additive; solo+mute = mute wins; persistence across save/load) + a regression bit-compare that the L/B/D output-path rewrite didn't change non-solo mix output, and its mandatory `/review-batch` must verify the new helper never reads `isAnyInsertSoloed()`.
+**Verification:** QA-Ea will run the 5 DSP-09 scenarios from the old QA-E Task 6 list (solo Layers; unsolo; multi-bus solo additive; solo+mute = mute wins; persistence across save/load) + a regression bit-compare that the L/B/D output-path rewrite didn't change non-solo mix output, and its mandatory `/review-batch` must verify the new helper never reads `isAnyInsertSoloed()`.  *(SUPERSEDED 2026-05-18 by the §9 twenty-fifth Forks entry: "regression bit-compare" → the in-app null test (record-nothing-armed master capture + per-strip polarity null) performed in MT — serial↔MT cannot be bit-identical, float summation order differs.)*
 
 ### 2026-05-17 — QA-Eb inserted: standalone app-window resizability (new independent batch, NOT a NAV-01 carve-out)
 
@@ -3496,3 +3603,93 @@ all entries' ownerChannelId.
 - `Plans & Specs/Implemented Work Log.md` — QA-E close "Found along the way" #60.
 
 **Verification:** n/a — routing decision, no QA-E source change.  QA-Cleanup-1's own verify ladder covers the eventual deletion; the source-verified `renameAudioAt` shared-use note is the explicit pre-delete guard.
+
+### 2026-05-17 — QA-Ec inserted: audio-clip Resample/Stretch follow-tempo/fit-to-grid build-out (new independent batch)
+
+**Trigger:** while building a deterministic test rig for QA-Ea (bus-solo + L/B/D output-path unification), Jeff probed audio-clip Resample / Stretch "follow tempo / fit to grid" behavior and found it non-functional.  Source inspection this session confirmed it is a **non-functional shell**, not a regression: the grid-resize audio-stretch branch is a literal abandoned placeholder (`Source/Standalone/BuilderPage.cpp:4107-4111` — `if (mStretching) { // Store new length; actual time-stretching applied offline via Rubber Band  (void)mResizeOrigLen; }`); Resample-follow has no code path at all (`stretchRatio` is hard-forced to `1.0` unless `stretchMode`, `Source/PluginProcessor.cpp:520-524`); Stretch only engages on the accidental condition `stretchMode && originalBPM>0 && |projectBPM-originalBPM|>0.01` (`Source/PluginProcessor.cpp:540-543`), which never triggers because `originalBPM` is hardcoded `120.f` on dragged/imported clips (`Source/Standalone/BuilderPage.cpp:3167`/`:3209`/`:3256`/`:3274`) with no tempo detection while recorded clips capture live BPM (`Source/Standalone/StandaloneEditor.cpp:10412`).  No source changed by this routing decision — pure new-batch creation + sequencing entry; QA-Ea / QA-Eb / QA-E work all stand.
+
+**Diagnosis:** the feature is wiring-incomplete, NOT engine-missing.  Verified already-present and working (this materially reduces scope): `PhaseVocoder` (`Source/DSP/PhaseVocoder.h`/`.cpp`) is a functional Laroche-Dolson pitch-locked stretcher with RT-safe `setStretchRatio`, arbitrary ratio, 1536-sample latency — so QA-Ec needs NO new DSP and NOT Rubberband / SoundTouch.  All persistence + UI is already wired: `stretchMode` / `originalBPM` / `pitch` / `lengthBars` / `lengthBeats` on `ArrangementBlock` + `AudioLibraryEntry`, dialog I/O, serialization, library/override propagation.  `AudioClipStreamer::readAndMix` already accepts an arbitrary read ratio.  Grid length already drives clip duration/cutoff (`clipEndBeat = startBar*4 + effectiveLengthBeats`) — just not playback speed.  Two latent defects fold in: (1) the hardcoded-120 import default + the `if (outSamples <= 0) continue;` guard (`Source/PluginProcessor.cpp:533`) make a clip go **silent with no meter** when project BPM changes (this is the audio-clip *silence* issue — folds into QA-Ec); (2) a degenerate fit ratio can hit the same `outSamples<=0` guard, so the guard is hardened to clamp / fall back rather than silence.
+
+**Decision (Jeff, 2026-05-17):** audio-clip Resample/Stretch follow-tempo/fit-to-grid build-out becomes its **OWN new independent batch QA-Ec**.  This is a **fresh finding surfaced this session**, NOT a carve-out of any existing backlog item and NOT part of the QA-E lifecycle/recording cluster (Jeff explicitly acknowledged it does not thematically fit QA-E).  Per §0 Rule 3 "no surface match → new dedicated §5 batch row + §9 Forks entry."  Jeff's target spec (authoritative, do not re-interpret against FL behavior): grid clip length dictates a `fitRatio` (a 2s WAV dragged to a 4s block → 0.5× speed); **Resample mode** applies `fitRatio` to the sample read rate (speed changes, pitch moves with it — vinyl/varispeed); **Stretch mode** applies `fitRatio` through the existing pitch-locked `PhaseVocoder` (speed changes, pitch locked) AND, once a baseline tempo exists, changing master Project BPM auto-stretches the clip to stay locked to the grid.  Implementation shape: one consistent `fitRatio` model computed in the beat domain (content-beats vs block-beats — so master-BPM-follow falls out for free) routed into the two existing seams (read-rate at `Source/PluginProcessor.cpp:510-511` for Resample; vocoder `setStretchRatio` at `Source/PluginProcessor.cpp:520-524` for Stretch), replace the `BuilderPage.cpp:4107-4111` Rubber Band stub, establish a real clip content-length reference replacing the hardcoded-120 import default (covers the silence defect), harden the `PluginProcessor.cpp:533` `outSamples<=0` guard.  This is a wiring + ratio-model + stub-replacement + guard-fix batch, NOT a from-scratch build (DSP + persistence already exist).  QA-Ec gets its OWN §0-conformant per-batch plan + its OWN verification.
+
+**Out of scope — explicitly NOT conflated:** the song-mode pattern-scheduler issues (pattern-scheduler viewport / intermittent first-note-drop — "Issues 2 & 3") are a SEPARATE pattern-scheduler fix handled separately.  QA-Ec is audio-clip stretch/resample ONLY.  Only the audio-clip *silence* guard ("Issue 1") folds into QA-Ec.
+
+**Sequencing (Jeff's confirmed slot — Option 1):** Phase 3, `QA-E → QA-Ea → QA-Eb → QA-Ec → QA-F`.  Inserted **between QA-Eb and QA-F**.  Rationale: it does NOT group with QA-E by code area or theme (Jeff acknowledged this), but it must land before QA-F so audio-clip stretch/resample is real for the QA-F vocals work and for ongoing along-the-way testing.  QA-Ea is **not hard-blocked** by QA-Ec — QA-Ea's null-test anchor wants zero time-stretch anyway, so QA-Ea proceeds now with a no-stretch deterministic anchor.  Slot / placement is **Jeff's confirmed call** per `feedback_slot_placement_is_spec_call.md` (sequencing position is a spec call, not a unilateral pick).
+
+**Options considered (the slot — what was actually weighed):** a new dedicated batch was agreed; the open call was its sequencing position.  **Option 1** `QA-E → QA-Ea → QA-Eb → QA-Ec → QA-F` (natural lettering; QA-Ea proceeds now with a no-stretch deterministic anchor since its null-test anchor wants zero time-stretch anyway; QA-Ec lands before QA-F for the vocals + along-the-way testing).  **Option 2** `QA-E → QA-Ec → QA-Ea → QA-Eb → QA-F` (QA-Ec first — fully-correct clip playback before any other QA-E-adjacent testing, at the cost of delaying the QA-Ea bus-solo fix behind a batch-sized feature).  **Decision: Option 1** (Jeff, 2026-05-17).
+
+**Carry-forward contradictions:** none.  This is a newly-surfaced wiring gap in shipped audio-clip-stretch code; it does not contradict any Carry-Forward §1-§3 architectural fact.  **Does NOT touch QA-Ea or QA-Eb scope** — QA-Ea (bus-solo + L/B/D output-path) and QA-Eb (window resizability) are unaffected and unchanged.
+
+**Inline back-refs:**
+- §5 QA-Ec entry — INSERTED (new independent batch, after QA-Eb, before QA-F), back-refs this entry.
+- §6 sequencing arrow — `→ QA-Ec` inserted between `QA-Eb**********` and `QA-F`; new footnote `***********` added.
+- §9 this entry (twenty-third Forks entry).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 QA-Ec entry (INSERTED) + §6 arrow + new footnote.
+- `Plans & Specs/Running Notes/polished-snuggling-token.md` — QA-Ea running-notes capture of the QA-Ec finding + routing decision (surfaced while building the QA-Ea test rig).
+- **NOT touched:** §5 QA-Ea / §5 QA-Eb entries (separate concerns, unaffected); the pattern-scheduler Issues 2 & 3 (separate fix, not folded here).
+
+**Verification:** n/a — this is a routing / sequencing entry, no source change.  QA-Ec's own §5 entry carries its verify list (2s WAV → 4s block → Resample = half-speed + pitch down; Stretch = half-speed + pitch locked; change master Project BPM in Stretch → clip re-fits to grid, stays in time; degenerate-ratio clip clamps/falls back instead of silencing).
+
+### 2026-05-18 — QA-E carry-forward: strip-restore Audio-clip regression + Issue 2 pattern-clip viewport, fixed in open batch QA-Ea Task 0
+
+**Trigger:** two QA-E-region defects discovered AFTER QA-E closed.  (1) Jeff reloaded a project with a normal audio clip on the Builder page and found NO mixer strip restored for it.  (2) song-mode pattern-clip viewport behavior re-examined while building the QA-Ea test rig.
+
+**Finding:** both are defects in QA-E-era code, fixed in the currently-open batch **QA-Ea Task 0**, recorded here per the closed-batch-carry-forward rule (`feedback_closed_batch_carryforward_via_forks.md`) — fix in the open batch + a §9 Forks entry back-ref to the prior closed batch; never reopen closed-batch commits.
+- **Fix 1 — strip-restore regression.** `Source/Standalone/StandaloneEditor.cpp:~10314` (`restoreAudioStripsFromArrangement`).  The QA-E-era guard `if (b.routeChannel != 0) continue;` (added to stop phantom Vox/Inst strips — MIX-02/03/04/06) ALSO skipped generic Audio clips, because QA-E Task 5 retags generic Audio blocks routeChannel `0 → audioInsert(row)`.  Net: reloading a project with a normal audio clip restored NO mixer strip for it (Jeff hit this).  Fix: range-aware guard skipping ONLY genuine Vox/Inst routes (`kVoxBase..kVoxBase+kMaxVoxStrips`, `kInstBase..kInstBase+kMaxInstStrips`); routeChannel 0 or an Audio-range channel still gets its strip.
+- **Fix 2 — Issue 2 (song-mode pattern-clip viewport).** `Source/PluginProcessor.cpp` `scheduleRoll` lambda.  Removed the `for (double rep = 0.0; ; rep += patOwnLen)` re-loop + `patBpb`/`patOwnLen`: a pattern clip on the grid is a VIEWPORT onto the pattern timeline (each note plays once; clip width [blkStartBeat,blkEndBeat) masks; note-off clamped to clip end), not a looping container.
+
+Both build + verified by Jeff in Debug AND Release.  Committed `f59cd22` (with the running-notes update); Main Plan + plan-file held for the doc commit that carries THIS entry.
+
+**Decision (Jeff, 2026-05-18):** ONE combined entry covers both fixes.  No sequencing/scope change from this entry — pure carry-forward record.  Issue 3 is explicitly NOT here — decoupled to new batch QA-Ed (see the twenty-fifth entry).
+
+**Out of scope — explicitly NOT conflated:** Issue 3 (intermittent first-note-drop / transport float-slop) — decoupled into the new dedicated batch QA-Ed per the twenty-fifth Forks entry; not part of this carry-forward record.
+
+**Sequencing (Jeff's confirmed slot):** none — pure carry-forward record into the existing open QA-Ea Task 0.  No §5 batch-entry change, no §6 arrow change.
+
+**Options considered:** (a) one combined entry covering both QA-E-region carry-forward fixes; (b) two separate Forks entries.  **Decision: one combined entry** (Jeff, 2026-05-18).
+
+**Carry-forward contradictions:** none.  Both are defects in QA-E-era code, now fixed; no Carry-Forward §1-§3 architectural fact contradicted.
+
+**Inline back-refs:**
+- §5 — no batch-entry change (carry-forward into the existing open QA-Ea Task 0).
+- §6 — no arrow change.
+- §9 this entry (twenty-fourth Forks entry).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry.
+- `Plans & Specs/Running Notes/polished-snuggling-token.md` — Task-0 verified-fix checkpoint.
+- Source committed `f59cd22`.
+
+**Verification:** both fixes owner-verified Debug+Release (strip-restore: add audio clip → save → reload → strip present; Issue 2: pattern block plays its length then silence, no re-loop within the block).
+
+### 2026-05-18 — MT serial-tail divergence: 3-bug shared-helper fix folds into QA-Ea + QA-Ef (ST deletion) created + QA-Ed (transport) created + full reorder
+
+**Trigger:** building the QA-Ea Part-B test rig, Jeff recorded the master in song mode with nothing armed and got a 104-byte header-only (silent) WAV — MT only; serial (ST) records correctly.
+
+**Diagnosis (verified by full code read, not speculation):** exhaustive audit of the serial tail `Source/PluginProcessor.cpp:1933-2896` (the region after the MT branch early-return at `:1932`).  THREE confirmed serial-only operations never mirrored into the MT branch / dispatcher / tasks: master recorder `mMasterRecorder.writeBlock` (`:2709-2710`), MIDI recorder `mMidiRecorder.processBlock` (`:2697-2701`), metronome + record count-in DSP (`:2712-2857`).  MT's `RenderGraphDispatcher::dispatchBlock` produces a correct master (arena kMaster → host buffer, `Source/Engine/RenderGraphDispatcher.cpp:307-316`) but never feeds the recorder.  NOT a race, NOT transport-shutdown-before-flush (stop gate `mRequestStop`/songEnd at `:1177-1182` is common pre-split code; `AudioFileRecorder` is queue-backed on its own thread).  Everything else in the serial tail verified mirrored (engine loops via the *Task classes; bus pipelines via `PassiveStripTask`; `tapDryRecorder`/`drainMeterAtomicsForUI`/`measureDspLoadAndOverload` explicitly mirrored into the MT branch) or inert (`midiMessages.clear()` `:2884` inert in standalone — host supplies a fresh buffer, `allMidi` is a fresh copy at `:1038` pre-split).  Root cause: dual hand-maintained ST/MT parity with nothing enforcing it.  Confirmation: master recorder = the 104-byte WAV (Jeff); metronome/count-in confirmed by ear (Jeff, 2026-05-18); MIDI recorder accepted-as-fact (no MIDI keyboard on hand) + code-confirmed by serial-tail position.
+
+**Decision (Jeff, 2026-05-18):** (1) the 3-bug shared-helper fix folds INTO QA-Ea — it directly blocks QA-Ea Part-B verification (the master recorder must work in MT to capture the Part-B "before" master); Part-B now verifies in MT, not ST.  Fix shape: extract the post-mix tail (MIDI recorder + master recorder + metronome/count-in) into ONE shared helper called from BOTH the serial tail and the MT branch after `dispatchBlock` — the 5th instance of the proven extract pattern (`tapDryRecorder`, `drainMeterAtomicsForUI`, `measureDspLoadAndOverload`, `renderFilePlayPlayer`/`renderAudioClipsForRow`); a shared helper makes this class structurally un-divergeable.  (2) ST-path deletion becomes a NEW dedicated batch **QA-Ef**, gated on "MT proven on all 3"; ST's only enduring value (serial-execution bisect for parallelism bugs) is preserved by a 1-worker MT pool mode, not a duplicate code path; the rip-out (~960-line serial tail, hot path) is deliberate, not rushed mid-QA.  (3) Issue 3 (intermittent first-note-drop / transport float-slop) is decoupled into a NEW dedicated batch **QA-Ed** (integer-sample transport source-of-truth + remove `mPRLastBeatEnd`).  (4) Standing rule: any new audio-path code is written as a single shared helper called from both the serial tail and the MT branch — never hand-mirrored.
+
+**Out of scope — explicitly NOT conflated:** whether any master-output NaN guard exists at all — the NaN/Inf guards at `:1977-1989`/`:2015-2024` operate on the no-longer-consumed `mLayerEngineSum`/`mBassEngineBuf` (vestigial in BOTH paths, not an ST/MT divergence); logged as a separate open question, NOT QA-Ea scope.
+
+**Sequencing (Jeff's confirmed slot):** Jeff's confirmed call per `feedback_slot_placement_is_spec_call.md`.  New order Phase 3: `QA-E → QA-Ea → QA-Ed → QA-Eb → QA-Ec → QA-Ef → QA-F`.  QA-Ed inserted immediately after QA-Ea; QA-Ef inserted immediately before QA-F.  QA-Ec carve-out unaffected (still before QA-F).
+
+**Options considered:** (A) keep ST as a maintained dual path — rejected (proven leaked 3x; sole-coder / session-fog risk).  (B) fix the 3 bugs MT-side without the shared-helper extraction — rejected (doesn't kill the divergence class).  (C) rush ST deletion now — rejected (hot-path rip-out wants a stable baseline + an "MT-proven" gate, not mid-QA).  **Decision:** shared-helper fix folds into QA-Ea now; ST deletion = gated QA-Ef; Issue 3 = QA-Ed (Jeff, 2026-05-18).
+
+**Supersedes clause:** this entry SUPERSEDES the stale "bit-compare a no-solo render before/after" wording in the §5 QA-Ea Verify line AND the §9 nineteenth entry's "regression bit-compare" phrase — QA-Ea Part-B verification is the in-app null test (record-nothing-armed master capture + per-strip polarity null) performed in MT (serial↔MT cannot be bit-identical anyway — float summation order differs).
+
+**Carry-forward contradictions:** none architectural; supersedes the QA-Ea verify-method wording only.
+
+**Inline back-refs:**
+- §5 — QA-Ed entry INSERTED; QA-Ef entry INSERTED; QA-Ea Verify line corrected (bit-compare → in-app null test in MT) + the 3-bug shared-helper fix noted as a Part-B prerequisite; QA-Eb + QA-Ec Sequencing strings updated to the new order.
+- §6 — arrow rewritten to `QA-E → QA-Ea********* → QA-Ed************ → QA-Eb********** → QA-Ec*********** → QA-Ef************* → QA-F` (QA-Ed = 12 asterisks, QA-Ef = 13 asterisks); two new footnotes added after the QA-Ec (eleven-asterisk) footnote.
+- §9 this entry (twenty-fifth Forks entry).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 QA-Ed (INSERTED) + §5 QA-Ef (INSERTED) + QA-Ea Verify fix + QA-Eb/QA-Ec sequencing strings + §6 arrow + 2 footnotes.
+- `Plans & Specs/Batch Plans/polished-snuggling-token.md` — QA-Ea plan-file 3-bug scope note + Part-B-verifies-in-MT.
+- `Plans & Specs/Running Notes/polished-snuggling-token.md` — already captured this arc.
+
+**Verification:** n/a — routing/sequencing entry.  The 3-bug fix's own verification runs inside QA-Ea (master recorder records non-empty in MT; MIDI recorder captures notes in MT; metronome + record count-in audible in MT); QA-Ed and QA-Ef carry their own verify in their own §5 entries / plan files.
