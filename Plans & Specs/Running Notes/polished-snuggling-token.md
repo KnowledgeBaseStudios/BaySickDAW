@@ -81,3 +81,493 @@ concrete edit sites, no branching.
 **Status:** Task 0 open in progress; golden capture deferred to Task-1
 checkpoint; Task-0 open commit pending `/draft-commit` + Jeff approval. No
 source changed.
+
+### 2026-05-17 — Task 0 — open commit landed (`7cdc59c`)
+
+Follow-on to the `## 2026-05-17 — Task 0 — open` block above. The Task-0 open
+commit is on `main` and the working tree is clean. No source changed in this
+batch yet.
+
+**Commit landed.** `7cdc59c` — "QA-Ea Task 0 (batch open): plan + running-notes
+scaffold + Main Plan pointer + stale CLAUDE.md MT-Debug bullet removal." 4 files,
++424/-1. Docs/scaffolding only — zero source edits.
+
+- NEW `Plans & Specs/Batch Plans/polished-snuggling-token.md` — per-batch plan,
+  conformant to Main Plan §0:218-241 batch-plan required-sections rule.
+- NEW `Plans & Specs/Running Notes/polished-snuggling-token.md` — this file
+  (seeded with the Task-0 open block).
+- `Plans & Specs/Main Plan.md` +2 — §5 QA-Ea `**Plan file:**` pointer
+  (backticked-path form, matching existing §5 entries).
+- `CLAUDE.md` -1 — stale "MT engine in Debug = no-op" bullet (CLAUDE.md:95)
+  removed. Folded INTO this open commit per Jeff's explicit disposition call
+  (not a separate commit), as recorded in the Task-0 open block.
+
+**Rollback boundary.** Git tag `pre-QA-Ea` created at `7cdc59c` — the Part-B
+rollback boundary. Confirmed `7cdc59c` is the correct pre-Part-B baseline: it
+contains no QA-Ea source changes, so a golden capture taken against current
+`main` now is a true pre-Part-B reference.
+
+**Process compliance this checkpoint.**
+- Every-commit-via-`/draft-commit` honored (`feedback_every_commit_via_draft_commit.md`).
+- Full git status surfaced + explicit Jeff approval obtained before `git commit`
+  (`feedback_surface_full_git_status_before_commit.md` +
+  `feedback_surface_drafted_commit_message_for_approval.md`).
+- CLAUDE.md fold-in disposition was a Jeff spec call, not a unilateral pick
+  (`feedback_dont_make_unilateral_spec_calls.md`).
+- Memory saved earlier this session: `feedback_batch_plan_structure_follows_s0_rule.md`,
+  `feedback_read_governing_docs_yourself.md`, `project_mt_engine_works_in_debug.md`.
+- `Files For Claude/batch_session_boilerplate.md` updated (§0-full-self-read +
+  /read-doc-bulk-only + CLAUDE.md-cross-check + plan-check-branch-removed).
+  Gitignored — no commit; noted here for the close-entry trail.
+
+**Golden capture — NOW DUE (was deferred from the Task-0 checklist).** The
+Task-0 open block deferred golden capture so the scaffolding commit wasn't gated
+on Jeff's build cycle. That deferral is now resolved: `7cdc59c` is the correct
+pre-Part-B baseline (no QA-Ea source yet), so the capture must happen against
+current `main` BEFORE any Task-1 source edit.
+
+Jeff to:
+1. Build current `main` (`do_build.bat`).
+2. Render the deterministic QA-Ea test pattern twice — metronome OFF, no
+   LCG-noise synths in the project:
+   - Serial: Mixer hamburger "Multi-core Rendering" OFF → `golden_serial_preB.wav`.
+   - MT: "Multi-core Rendering" ON → `golden_mt_preB.wav`.
+3. Send SHA256 of both WAVs.
+
+Parent then records both hashes here + the serial-vs-MT baseline delta (expected:
+bit-identical, or the documented pre-existing delta if any) before Task 1 code
+work begins. Hashes pending — `<TBD — fill in after Jeff sends>`.
+
+**Status:** Task-0 open commit landed (`7cdc59c`); `pre-QA-Ea` tag set; working
+tree clean. **Resume action: golden capture (serial + MT) against `7cdc59c`
+`main` is the explicit blocker before any Task-1 source edit.** Record hashes +
+baseline delta in this file, then Task 1 proceeds.
+
+### 2026-05-17 — Task 0 — verification methodology pivot (Jeff-directed)
+
+Follow-on to the `### 2026-05-17 — Task 0 — open commit landed (`7cdc59c`)`
+sub-block above. **Supersedes the golden-WAV / bit-compare verification
+approach recorded there.** No source code changed in this batch yet; this
+checkpoint is a verification-methodology change only. Task 0 still open.
+
+**Why the pivot.** The plan's original verification design (fabricated
+`golden_serial_preB.wav` / `golden_mt_preB.wav`, `fc /b` binary diff,
+`certutil`/SHA256 hashing, an explicit serial↔MT bit-parity gate — see the
+prior sub-block's "Golden capture" steps + SC3) was scrapped at Jeff's
+direction. Two faults:
+1. **Ungrounded.** Invented filenames + CLI hashing is not how Jeff
+   verifies — he doesn't code; he verifies by ear / in-app.
+2. **False premise.** Multithreaded render reorders float summation, so
+   serial vs MT is *never* bit-identical even with zero behavior change.
+   A "serial↔MT bit-parity gate" therefore cannot exist — the SC3 gate as
+   written was unsatisfiable. The prior sub-block's "expected: bit-identical"
+   baseline-delta note is withdrawn for the same reason.
+
+**Replacement: in-app null test.** Grounded entirely in features verified
+in code this session.
+- **Source anchor.** A fixed pre-recorded song dropped on the Builder grid
+  — bit-exact every play (no RNG / voice / MIDI variance).
+- **Capture.** Record with nothing armed → captures the master bus to a
+  WAV (`masterFile`; "only when no strips armed" —
+  [PluginProcessor.h:670](Source/PluginProcessor.h:670) /
+  [PluginProcessor.cpp:3555](Source/PluginProcessor.cpp:3555); auto-drops
+  the result on the grid).
+- **Compare.** Capture master "before" (pre-Part-B, tagged `pre-QA-Ea` /
+  `7cdc59c`) vs "after"; put both clips on the grid, flip the existing
+  per-strip polarity ("Reverse") toggle on one, play together. Dead
+  silence = Part B changed nothing; audible residual = real regression.
+  Benign sub-audible block-size hiss is acceptable; loud/obvious residual
+  blocks the gate.
+- **Serial vs MT** = a by-ear toggle of the Mixer "Multi-core Rendering"
+  hamburger item (must sound right both ways), **never** a bit-compare.
+- **Part A** = by ear: the 5 DSP-09 scenarios + GUARDRAIL + B1 +
+  Rusty-new-gate.
+
+The "before" WAV artifact itself is now the null reference. **No hashes
+are recorded or pending** — the prior sub-block's `<TBD — fill in after
+Jeff sends>` hash placeholders are obsolete and not carried forward.
+
+**Test-project spec finalized.** An 8-bar loop containing:
+- **Layers + Bass + Drums engine parts** (sampled / phase-reset patches;
+  **NO noise-oscillator patches** per the CLAUDE.md LCG-overflow gotcha).
+  Required because the routing dropdown is **Vox/Inst/Clips-only**
+  (verified [BuilderPage.cpp:2892-2932](Source/Standalone/BuilderPage.cpp:2892)),
+  so a dropped song cannot be routed through the L/B/D buses — real engine
+  content is the only way to exercise the exact bus→master paths Part B
+  rewrites.
+- **Vox + Inst + Rusty parts** — needed only for Part A solo listening,
+  **not** for the Part B null (Part B does not touch those buses).
+- The dropped song anchor.
+- Metronome OFF.
+
+**Scope clarification captured this session.** Part B changes ONLY the
+Layers/Bass/Drums bus→master path + the serial Clips-routing gap (Q2).
+Vox/Inst/FX/Rusty buses already use the unified
+`routeInsertOutput`→`kMaster` path and are NOT modified by Part B. This is
+why the Part B null only needs L/B/D content.
+
+**Plan-file correction applied (targeted Edits, not a rewrite).** An
+earlier wholesale `Write` of the plan file was rejected by Jeff; the
+correction was redone surgically via targeted Edits to
+`Plans & Specs/Batch Plans/polished-snuggling-token.md` — SC3 row, Task-0
+baseline-capture step, Tasks 1/2/3/4/5/6 "Tell Jeff" scripts, Part B GATE,
+Verification section. 79 lines changed (37+/42−) against ~345 untouched.
+The SC3 row keeps a provenance note recording why the bit-compare ceremony
+was dropped, so it is not reintroduced. **Plan correction is uncommitted**
+— it will be surfaced in the next commit's git status per the
+surface-full-status discipline.
+
+**Process compliance this checkpoint.**
+- SC3 method change was Jeff-directed, not a unilateral spec change
+  (`feedback_dont_make_unilateral_spec_calls.md`).
+- Plan corrected via targeted Edits after a wholesale `Write` was rejected;
+  new memory `feedback_targeted_edits_not_wholesale_rewrite.md` saved
+  (+ index).
+- Memory saved earlier this session:
+  `feedback_read_governing_docs_yourself.md`,
+  `feedback_batch_plan_structure_follows_s0_rule.md`,
+  `project_mt_engine_works_in_debug.md`.
+
+**Open consistency item (surfaced to Jeff, not yet decided).** Main Plan §5
+QA-Ea verify line + §9 nineteenth Forks entry both say "bit-compare a
+no-solo render before/after". The in-app polarity-null test satisfies that
+*intent* (before/after sample-domain equivalence) but the literal
+"bit-compare" wording is now method-inaccurate. Pending Jeff: treat as
+in-batch execution detail (no Main Plan edit; batch plan + these notes are
+the record) vs a §5 wording tweak + §9 Rule-3 back-ref.
+
+**Status:** Task 0 still open; verification method now grounded
+(in-app null test, no hashes); no source changed; plan correction
+uncommitted. **Resume action: Jeff builds the 8-bar test project +
+captures the Part-B "before" master WAV (record-nothing-armed) on
+`pre-QA-Ea` / `7cdc59c`. That capture is the hard blocker before any
+Task-1 source edit** (replaces — and remains as strict as — the prior
+sub-block's golden-capture blocker).
+
+### 2026-05-17 — Task 0 — QA-Ec routed out (Main Plan updated)
+
+Follow-on to the `### 2026-05-17 — Task 0 — verification methodology pivot
+(Jeff-directed)` sub-block above. **No QA-Ea source code changed this
+checkpoint** — this is a Rule-3 finding-routing event plus the Main Plan
+edits that applied it. Task 0 still open.
+
+**What surfaced.** While building the QA-Ea deterministic test rig, three
+bugs were found. The first ("Issue 1") is the audio-clip Resample / Stretch
+"follow tempo / fit to grid" path being a non-functional shell:
+- Abandoned Rubber Band stub at
+  [BuilderPage.cpp:4107-4111](Source/Standalone/BuilderPage.cpp:4107).
+- Resample-follow has **no code path** at all.
+- Stretch engages only on a condition that is never true.
+- Hardcoded-120 import default + the
+  [PluginProcessor.cpp:533](Source/PluginProcessor.cpp:533)
+  `outSamples <= 0` guard → clip goes silent on a project-BPM change.
+
+**Verified in code, not assumed.** `PhaseVocoder` + clip persistence
+already exist in the codebase. Issue 1 is therefore a **wiring gap, not a
+missing engine** — the time-stretch DSP and the save/load state are present;
+nothing connects them through the follow-tempo / fit-to-grid UI path. This
+verification is why the routing is "build-out", not "new engine".
+
+**Rule-3 routing decision (Jeff's call).** Per §0 Rule 3 ("no surface match
+→ new dedicated §5 batch row + §9 Forks entry"), Issue 1 becomes its own
+**new independent batch QA-Ec**. Jeff-confirmed slot = Option 1:
+`QA-E → QA-Ea → QA-Eb → QA-Ec → QA-F`.
+- QA-Ec is sequenced **before QA-F** so clip stretch/resample is real for
+  QA-F vocals + along-the-way testing.
+- QA-Ea is **not hard-blocked** by QA-Ec: the null-test anchor wants zero
+  time-stretch anyway, so QA-Ea proceeds now with a no-stretch
+  deterministic anchor.
+- This is **not** a carve-out and does **not** touch QA-Ea / QA-Eb scope.
+- The song-mode pattern-scheduler bugs ("Issues 2 & 3") are explicitly
+  **NOT** folded into QA-Ec — separate fix (see Resume action below).
+
+**Main Plan edits applied this checkpoint** (four targeted Edits; anchors
+verified by direct read first; **not** a wholesale rewrite, per
+`feedback_targeted_edits_not_wholesale_rewrite.md`):
+- §9 twenty-third Forks entry appended —
+  `### 2026-05-17 — QA-Ec inserted: audio-clip Resample/Stretch
+  follow-tempo/fit-to-grid build-out (new independent batch)`.
+- §5 QA-Ec batch entry inserted between QA-Eb and QA-F.
+- §6 arrow updated to `... → QA-Eb********** → QA-Ec*********** → QA-F`.
+- §6 QA-Ec footnote (11 asterisks) inserted after the QA-Eb footnote.
+
+**Two Jeff decisions baked into the applied text** (drafter flagged both;
+parent surfaced both; Jeff confirmed):
+- **Bucket = "System Pages, Cross-cutting Infrastructure"** (both, per the
+  canonical-no-eliding rule `feedback_canonical_structure_no_eliding.md`):
+  QA-Ec touches `BuilderPage` (System Pages) **and** the
+  `PluginProcessor` hot-path render (Cross-cutting Infrastructure).
+- **§9 "Options considered" corrected** to record the REAL decision —
+  Option 1 slot (`E→Ea→Eb→Ec→F`) vs Option 2 (`E→Ec→Ea→Eb→F`) vs other —
+  replacing the drafter's invented fold-into-Eb / fold-into-F /
+  Phase-6-punt alternatives, which were not the alternatives Jeff actually
+  weighed.
+
+**Process compliance this checkpoint.**
+- Drafter-only honored: doc-drafter proposed; parent surfaced both flagged
+  decisions to Jeff; Jeff confirmed bucket + chose "apply now"; parent
+  verified anchors then applied via targeted Edits.
+- Slot/sequencing was Jeff's call, not a unilateral pick
+  (`feedback_slot_placement_is_spec_call.md`).
+- Memory saved earlier this session:
+  `feedback_targeted_edits_not_wholesale_rewrite.md`,
+  `feedback_read_governing_docs_yourself.md`,
+  `feedback_batch_plan_structure_follows_s0_rule.md`,
+  `project_mt_engine_works_in_debug.md`.
+
+**Uncommitted state (for the next commit's surface-status step).** Dirty /
+uncommitted: `Plans & Specs/Main Plan.md` (the four QA-Ec Edits), the QA-Ea
+plan file `Plans & Specs/Batch Plans/polished-snuggling-token.md` (earlier
+verification-methodology correction, still uncommitted from the prior
+sub-block), and this running-notes file. **No commit performed this
+checkpoint** — all three to be surfaced in the next commit's full git
+status per `feedback_surface_full_git_status_before_commit.md`.
+
+**Status:** Task 0 still open; QA-Ec routed out + Main Plan updated
+(§5/§6/§9, four targeted Edits applied); no QA-Ea source changed; Main
+Plan + QA-Ea plan file + this file uncommitted. **Resume action:**
+(1) Issues 2 & 3 (song-mode pattern-scheduler viewport + intermittent
+first-note-drop, same scheduler code region; Jeff authorized combining,
+"after the Main Plan slot") — surface the exact before/after diff for
+Jeff's approval, then implement. (2) Then resume QA-Ea Task 0: build the
+no-stretch deterministic test rig + capture the Part-B "before" master WAV
+(record-nothing-armed) on `pre-QA-Ea` / `7cdc59c`. QA-Ea Task 0 remains
+open; no source changed.
+
+### 2026-05-18 — Task 0 — Strip-restore guard + Issue 2 verified-fixed (pending commit-surface)
+
+Follow-on to the `### 2026-05-17 — Task 0 — QA-Ec routed out (Main Plan
+updated)` sub-block above. **The prior block's Resume-action item (1)
+("Issues 2 & 3 combined, fix after the Main Plan slot") was superseded by a
+Jeff spec call:** Issue 3 (intermittent first-note-drop / transport timing)
+was **decoupled into its own scoped batch QA-Ed** (integer-sample transport
+rework) and is NOT fixed here. Only **Issue 2** (pattern viewport / no
+re-loop) plus the **QA-E strip-restore regression guard** were implemented +
+verified this checkpoint. This is QA-E-region carry-forward (strip-restore
+guard + Issue 2), not QA-Ea Part B; QA-Ea Part-B scope still untouched.
+Task 0 still open.
+
+**What was fixed.**
+- **QA-E strip-restore regression guard.** Range-aware vox/inst guard at
+  [StandaloneEditor.cpp:10314](Source/Standalone/StandaloneEditor.cpp:10314).
+  Owner-confirmed build + verified.
+- **Issue 2 (pattern viewport / no re-loop).** Song-mode pattern-scheduler
+  viewport + re-loop fix in `PluginProcessor.cpp` `scheduleRoll`.
+  Owner-confirmed build + verified.
+
+Both build + verified by owner (Debug + Release per owner's standing
+per-task cycle — no separate close re-verify gate,
+`feedback_no_full_release_reverify_at_batch_close.md`).
+
+**Process compliance this checkpoint.**
+- Diff was surfaced for owner approval before implement per the prior
+  sub-block's Resume action; owner authorized Issue 2 + the strip-restore
+  guard, and made the explicit spec call to decouple Issue 3 → QA-Ed.
+- QA-batch-fixes-don't-defer honored for Issue 2 (fixed in the open batch).
+  Issue 3's deferral is **not a punt** — it is a Jeff spec call with
+  explicit justification (own scoped transport-rework batch QA-Ed), the
+  sanctioned form of deferral per
+  `feedback_qa_batches_fix_bugs_dont_defer.md`.
+- These are QA-E-region carry-forward fixes landing in the open QA-Ea
+  batch; the §9 Forks back-ref disposition for the closed-batch
+  carry-forward is an open consistency item carried to the next checkpoint
+  (`feedback_closed_batch_carryforward_via_forks.md`).
+
+**Uncommitted state (for the next commit's surface-status step).** Dirty /
+uncommitted now includes the two source fixes above
+(`Source/Standalone/StandaloneEditor.cpp`, `Source/PluginProcessor.cpp`)
+**plus** the still-uncommitted docs from prior sub-blocks: `Plans & Specs/
+Main Plan.md` (QA-Ec Edits), `Plans & Specs/Batch Plans/
+polished-snuggling-token.md` (verification-methodology correction), this
+running-notes file, and the untracked `qae_t9_dirty_trace.txt`. **No commit
+performed this checkpoint** — all to be surfaced in the next commit's full
+git status per `feedback_surface_full_git_status_before_commit.md`; commit
+message via `/draft-commit` + owner approval before `git commit`.
+
+**Status:** strip-restore guard + Issue 2 verified-fixed; Issue 3 decoupled
+to QA-Ed (Jeff spec call). Pending commit-surface for owner approval. QA-Ea
+Part-B scope still untouched. **Resume action:** surface the drafted commit
+message + full pre-commit git status for owner approval; then proceed to the
+MT-record-master diagnosis (next sub-block).
+
+### 2026-05-18 — Task 0 — MT master-recorder bug diagnosed + serial-tail divergence audit
+
+Follow-on to the `### 2026-05-18 — Task 0 — Strip-restore guard + Issue 2
+verified-fixed (pending commit-surface)` sub-block above. **No source code
+changed this checkpoint** — this is a diagnosis + exhaustive
+ST/MT-divergence audit plus the scope/sequencing spec calls owner made off
+the findings. Task 0 still open. This thread directly unblocks QA-Ea Part-B
+verification (the Part-B "before" master capture must work in MT).
+
+#### Diagnosis thread (the audit + the 3-bug finding are one investigation)
+
+**MT-record-master bug — root cause confirmed by code read, not assumed.**
+Owner hit a 104-byte header-only WAV when recording the master in song mode
+with nothing armed — **MT only**; serial (ST) records correctly. Verified
+crux: `mMasterRecorder.writeBlock(buffer)` lives ONLY in the serial tail at
+[PluginProcessor.cpp:2709-2710](Source/PluginProcessor.cpp:2709), which is
+**after** the MT branch early-return at
+[PluginProcessor.cpp:1932](Source/PluginProcessor.cpp:1932). MT's
+`RenderGraphDispatcher::dispatchBlock` copies the arena `kMaster` slot into
+the host buffer
+([RenderGraphDispatcher.cpp:307-316](Source/Engine/RenderGraphDispatcher.cpp:307))
+but never feeds the recorder.
+
+Explicitly ruled out (verified in code, not speculation —
+`feedback_diagnose_before_fixing.md`):
+- **NOT a race.** Pure buffer-ownership gap.
+- **NOT transport-shutdown-before-flush.** The stop gate
+  (`mRequestStop` / songEnd,
+  [PluginProcessor.cpp:1177-1182](Source/PluginProcessor.cpp:1177)) is in
+  common code **before** the ST/MT split, and `AudioFileRecorder` is
+  queue-backed on its own thread.
+
+The feed was added to the serial tail and never mirrored into the MT branch
+after `dispatchBlock`.
+
+**Exhaustive serial-tail audit — full read of
+[PluginProcessor.cpp:1933-2896](Source/PluginProcessor.cpp:1933), no
+excerpting.** Complete closed ST/MT-divergence inventory:
+
+- **Confirmed serial-only (real bugs, clustered 2697-2857):**
+  - Master recorder — `mMasterRecorder.writeBlock`
+    [PluginProcessor.cpp:2709-2710](Source/PluginProcessor.cpp:2709).
+  - MIDI recorder — `mMidiRecorder.processBlock`
+    [PluginProcessor.cpp:2697-2701](Source/PluginProcessor.cpp:2697).
+  - Metronome + record count-in DSP —
+    [PluginProcessor.cpp:2712-2857](Source/PluginProcessor.cpp:2712).
+- **Verified mirrored or inert (NOT divergences):**
+  - All engine render loops — mirrored via EngineInsertTask /
+    VoxStripTask / InstStripTask / RustyDrumsProducerTask + RustyInsertTask /
+    CompositeAudioInsertTask.
+  - Audio-clip playback — shared `renderFilePlayPlayer` /
+    `renderAudioClipsForRow` (called from both paths).
+  - Per-strip armed recording — `tapDryRecorder` (the one recorder feed
+    that WAS mirrored; called from Vox/InstStripTask).
+  - All bus pipelines (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / FX /
+    RustyDrums) — `PassiveStripTask` Kind::Bus →
+    `processBus` / `processEffectsBus`.
+  - Aux — `PassiveStripTask` Kind::Aux.
+  - Master mixdown — `MasterTask` + arena.
+  - `measureDspLoadAndOverload` + `drainMeterAtomicsForUI` — explicitly
+    called in the MT branch
+    ([PluginProcessor.cpp:1931](Source/PluginProcessor.cpp:1931) /
+    [PluginProcessor.cpp:1921](Source/PluginProcessor.cpp:1921)).
+  - `midiMessages.clear()` at
+    [PluginProcessor.cpp:2884](Source/PluginProcessor.cpp:2884) — not
+    mirrored but **inert in standalone**: the host supplies a fresh MIDI
+    buffer per callback, and `allMidi` is a fresh copy at
+    [PluginProcessor.cpp:1038](Source/PluginProcessor.cpp:1038) before the
+    split.
+- **Vestigial-in-both (not a divergence).** The NaN/Inf guards at
+  [PluginProcessor.cpp:1977-1989](Source/PluginProcessor.cpp:1977) /
+  [PluginProcessor.cpp:2015-2024](Source/PluginProcessor.cpp:2015) operate
+  on `mLayerEngineSum` / `mBassEngineBuf`, which the code's own comment at
+  [PluginProcessor.cpp:2682-2684](Source/PluginProcessor.cpp:2682) says are
+  no longer consumed — dead in serial too, so not an ST/MT divergence.
+  **Separate open question (logged, not in QA-Ea scope):** whether any
+  master-output NaN guard exists at all — a potential WASAPI-silence hazard
+  if a NaN reaches the master bus unguarded.
+
+**Empirical confirmation status of the 3 serial-only bugs:**
+- **Master recorder** — confirmed by owner earlier (the 104-byte WAV).
+- **Metronome / count-in** — confirmed by owner by ear, 2026-05-18.
+- **MIDI recorder** — accepted as fact (owner has no MIDI keyboard on hand)
+  + code-confirmed by its serial-tail position (same post-split region as
+  the other two, identical mirror gap).
+
+#### Strategy / scope / sequencing thread (owner spec calls)
+
+**Spec call — scope (owner): the 3-bug shared-helper fix folds INTO QA-Ea.**
+It directly blocks QA-Ea Part-B verification — the master recorder must work
+in MT to capture the Part-B "before" master (the in-app null reference
+established in the verification-methodology pivot sub-block). The QA-Ea knot
+is resolved: fix the master recorder in-batch, then Part-B verifies **in
+MT**, not ST (revises the originally-planned ST verification path).
+- **Fix shape (owner-confirmed direction).** Extract the post-mix tail
+  (MIDI recorder + master recorder + metronome / count-in) into ONE shared
+  helper called from BOTH the serial tail AND the MT branch after
+  `dispatchBlock`. This is the **5th instance of the proven extract
+  pattern** (prior 4: `tapDryRecorder`, `drainMeterAtomicsForUI`,
+  `measureDspLoadAndOverload`, `renderFilePlayPlayer` /
+  `renderAudioClipsForRow`). A shared helper makes this class of bug
+  structurally un-divergeable.
+- All 3 bugs fixed together via the one extraction (single un-mirrorable
+  call site), per `feedback_qa_batches_fix_bugs_dont_defer.md`.
+
+**Spec call — sequencing (owner): ST-path deletion = new batch QA-Ef.**
+Gated on "MT proven on all 3" (master recorder + MIDI recorder +
+metronome/count-in working in MT). New batch order:
+**QA-E → QA-Ea → QA-Ed → QA-Eb → QA-Ec → QA-Ef → QA-F**
+— QA-Ed moves up to immediately after QA-Ea; QA-Ef inserted before QA-F.
+Strategic rationale (owner):
+- Dual hand-maintained ST/MT parity **is the bug class** — proven leaked 3x
+  (master recorder, MIDI recorder, metronome/count-in).
+- Owner is sole coder + session-fog / context risk amplifies hand-mirror
+  drift.
+- Shared-helper extraction kills the class at the source.
+- Physical ST deletion is the end state but a **deliberate gated batch**
+  (hot-path rip-out, ~960-line serial tail), NOT rushed mid-QA.
+- ST's only enduring value (serial-execution bisect for parallelism bugs)
+  is preserved post-deletion by a **1-worker MT pool mode**, not a
+  duplicate code path.
+- Slot/sequencing was owner's call, not a unilateral pick
+  (`feedback_slot_placement_is_spec_call.md`); the QA-Ec carve-out is
+  unaffected (it stays before QA-F).
+
+**Standing rule established (owner-confirmed direction).** Any new
+audio-path code from now on is written as a **single shared helper called
+from both the serial tail and the MT branch — never hand-mirrored**. This
+is the durable root-cause fix for the session-fog dual-path divergence
+class (cross-refs `feedback_own_the_codebase_no_git_alibi.md` —
+divergence is owned + designed out, not attributed to sessions).
+
+**Process compliance this checkpoint.**
+- Diagnose-before-fixing honored — root cause confirmed by full code read
+  (serial tail + dispatcher) before any fix shape was proposed; all "not a
+  race / not a shutdown" alternatives ruled out in code
+  (`feedback_diagnose_before_fixing.md`).
+- Read code before calling anything expected — the full
+  [PluginProcessor.cpp:1933-2896](Source/PluginProcessor.cpp:1933) read
+  backs every "mirrored / inert / vestigial" classification
+  (`feedback_check_code_before_calling_it_expected.md`).
+- QA-batch-fixes-don't-defer — the 3-bug fix folds INTO QA-Ea, not punted
+  (`feedback_qa_batches_fix_bugs_dont_defer.md`).
+- Scope + slot/sequencing were owner spec calls, surfaced and decided by
+  owner, not unilateral (`feedback_dont_make_unilateral_spec_calls.md`,
+  `feedback_slot_placement_is_spec_call.md`).
+
+**Uncommitted state (for the next commit's surface-status step).**
+Unchanged from the prior sub-block — no source changed this checkpoint.
+Still dirty / uncommitted: the two Issue-2 + strip-restore source fixes
+(`Source/Standalone/StandaloneEditor.cpp`, `Source/PluginProcessor.cpp`),
+`Plans & Specs/Main Plan.md` (QA-Ec Edits), `Plans & Specs/Batch Plans/
+polished-snuggling-token.md`, this running-notes file, and untracked
+`qae_t9_dirty_trace.txt`. **No commit performed this checkpoint.**
+
+**Plan / Main Plan edits NOT YET applied (carry-forward for parent).** The
+new sequencing (QA-Ef batch + QA-Ed move-up: `QA-E → QA-Ea → QA-Ed →
+QA-Eb → QA-Ec → QA-Ef → QA-F`) requires Main Plan §5 (QA-Ef new entry +
+QA-Ed re-slot), §6 (arrow + footnotes), §9 (Rule-3 Forks entry for the
+MT-divergence finding + QA-Ef insertion, back-ref QA-Ea), and a QA-Ea
+plan-file scope note (3-bug shared-helper fix folded in, Part-B verifies
+in MT). These are **not applied yet** — they are the explicit next
+documentation action and go through targeted Edits + owner-confirmed
+buckets, per `feedback_targeted_edits_not_wholesale_rewrite.md` /
+`feedback_dont_make_unilateral_spec_calls.md`.
+
+**Status:** Task 0 still open. MT master-recorder bug root-caused;
+exhaustive serial-tail divergence audit complete (3 confirmed serial-only
+bugs, everything else mirrored/inert/vestigial); scope (3-bug shared-helper
+fix folds into QA-Ea, Part-B verifies in MT) and sequencing (ST deletion =
+new QA-Ef, gated on "MT proven on all 3"; order `QA-E → QA-Ea → QA-Ed →
+QA-Eb → QA-Ec → QA-Ef → QA-F`) decided by owner. No source changed this
+checkpoint. **Resume action:** (1) surface the drafted commit message +
+full pre-commit git status (Issue 2 + strip-restore source + all carried
+docs) for owner approval, then commit. (2) Apply the Main Plan §5/§6/§9 +
+QA-Ea plan-file edits for QA-Ef / QA-Ed re-slot / MT-divergence Forks entry
+(targeted Edits, owner-confirmed buckets). (3) Then implement the
+post-mix-tail shared-helper extraction (MIDI recorder + master recorder +
+metronome/count-in, 5th extract-pattern instance) inside QA-Ea. (4) Then
+resume the QA-Ea Part-B "before" master capture — now in MT, once the
+recorder works there.

@@ -1201,36 +1201,35 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     if (beatEnd <= blkStartBeat || beatStart >= blkEndBeat) continue;
 
                     const auto& sPat   = mPatternManager->getPattern(blk.patternIndex);
-                    // Pattern looping length uses pattern's intrinsic TS.
-                    const double patBpb = mPatternManager->getPatternBeatsPerBar (blk.patternIndex);
-                    double patOwnLen   = juce::jmax (1.0, (double) sPat.bars * patBpb);
-
-                    // Helper: schedule notes from a roll, repeating within the block if needed.
-                    // Also schedules note-offs into mPRPendingOffs so voices don't hang.
-                    // `target` is the mPRPendingOffs engine key (layer idx, or kBassPRTarget+bass idx).
+                    // Issue 2 fix (2026-05-17): a pattern clip on the grid is a
+                    // VIEWPORT onto the pattern's own timeline, not a looping
+                    // container.  Each note plays ONCE at its position; the clip
+                    // width [blkStartBeat, blkEndBeat) masks it (content at/after
+                    // the clip end = silence, NOT a re-loop; a note overrunning
+                    // the clip is cut at blkEndBeat by the note-off clamp).  The
+                    // old `rep += patOwnLen` re-loop + patBpb/patOwnLen are gone.
+                    // (The `>= beatStart && < beatEnd` boundary gate is intentionally
+                    // left strict — the intermittent loop-wrap missed-note is the
+                    // transport float-slop bug, fixed in the transport-rework batch,
+                    // NOT band-aided here.)
                     auto scheduleRoll = [&](const std::vector<PianoNote>& notes,
                                            juce::MidiBuffer& buf, int target)
                     {
                         for (const auto& note : notes)
                         {
                             if (note.muted) continue;
-                            for (double rep = 0.0; ; rep += patOwnLen)
+                            double absStart = blkStartBeat + note.startBeat;
+                            if (absStart >= blkEndBeat) continue;   // viewport mask (no re-loop)
+                            if (absStart >= beatStart && absStart < beatEnd)
                             {
-                                double absStart = blkStartBeat + rep + note.startBeat;
-                                if (absStart >= blkEndBeat) break;
-                                if (rep > blk.lengthBars * kBPB) break;  // safety
-                                if (absStart >= beatStart && absStart < beatEnd)
-                                {
-                                    int smp = juce::jlimit(0, numSamples - 1,
-                                        (int)juce::jmax(0.0, (absStart - beatStart) / bs));
-                                    emitPianoNoteOn (buf, note, smp);
-                                    // Schedule matching note-off; clamp to block end so a
-                                    // stretched-short block silences notes that would
-                                    // otherwise hang past it.
-                                    double offBeat = juce::jmin(absStart + note.durationBeats,
-                                                                blkEndBeat);
-                                    mPRPendingOffs.push_back({ offBeat, note.midiNote, target });
-                                }
+                                int smp = juce::jlimit(0, numSamples - 1,
+                                    (int)juce::jmax(0.0, (absStart - beatStart) / bs));
+                                emitPianoNoteOn (buf, note, smp);
+                                // Note-off clamped to the clip end so a note that
+                                // overruns the viewport is cut at the clip edge.
+                                double offBeat = juce::jmin(absStart + note.durationBeats,
+                                                            blkEndBeat);
+                                mPRPendingOffs.push_back({ offBeat, note.midiNote, target });
                             }
                         }
                     };

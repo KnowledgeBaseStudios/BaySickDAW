@@ -10312,12 +10312,21 @@ void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
     {
         const auto& b = mPM->getBlock (i);
         if (b.clipType != ClipType::Audio) continue;
-        // QA-E (2026-05-12): Vox/Inst-routed blocks (routeChannel != 0) play
-        // back through their originating page's chain via Pass 1 / VoxStripTask
-        // / InstStripTask -- they don't need an Audio row strip.  Pre-guard
-        // closes the bug where reloading a project with recorded Vox/Inst
-        // clips spawned phantom Clips strips on top of the Vox/Inst routing.
-        if (b.routeChannel != 0) continue;
+        // QA-E: Vox/Inst-routed blocks restore via their own page chain and
+        // must NOT spawn an Audio row strip (MIX-02/03/04/06 phantom-strip
+        // guard).  2026-05-18 §9 Forks fix: the old `routeChannel != 0` test
+        // also skipped generic Audio clips -- QA-E Task 5 retags those
+        // 0 -> audioInsert(row), so their strip was never restored on reload.
+        // Skip ONLY genuine Vox/Inst routes; 0 or an Audio-range channel
+        // still needs its Audio row strip.
+        {
+            using namespace MixerChannelIds;
+            const int rc = b.routeChannel;
+            const bool voxInstRouted =
+                   (rc >= kVoxBase  && rc < kVoxBase  + kMaxVoxStrips)
+                || (rc >= kInstBase && rc < kInstBase + kMaxInstStrips);
+            if (voxInstRouted) continue;
+        }
         const int row = b.trackRow;
         if (row < 0 || row >= VibeSynthProcessor::kMaxAudioRows) continue;
 
