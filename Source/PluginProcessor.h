@@ -726,6 +726,21 @@ public:
     // t0 tick captured at the very top of processBlock.
     void measureDspLoadAndOverload (juce::int64 t0Ticks, int numSamples);
 
+    // 2026-05-18 (QA-Ea Task 0b): post-mix recorders + metronome/count-in.
+    // Extracted from the serial tail so the MT branch (which returns early
+    // after dispatchBlock) feeds the master + MIDI recorders and runs the
+    // metronome / count-in identically.  Without this call from the MT
+    // branch a record-nothing-armed master capture is a 104-byte empty
+    // WAV, MIDI recording captures nothing, and there is no metronome /
+    // record count-in under MT (the 3 serial-only divergences; Forks #25).
+    // Order preserves the D-5 invariant: MIDI rec -> master rec (the
+    // pre-metronome buffer) -> metronome / count-in.  bpm derives from the
+    // passed playhead position so the two call sites can't diverge on it.
+    void applyPostMixRecordAndMetro (juce::AudioBuffer<float>& buffer,
+                                     const juce::MidiBuffer& allMidi,
+                                     const juce::AudioPlayHead::PositionInfo& pos,
+                                     int numSamples);
+
     bool isRecording() const
     {
         return mMidiRecorder.isRecording() || mMasterRecorder.isRecording()

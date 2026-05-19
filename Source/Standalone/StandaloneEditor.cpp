@@ -751,21 +751,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     };
     mTransport->onStop  = [this]
     {
-        // R5b: stop committing first so any in-flight buffer block lands in
-        // the recorder before playback halts.  Disarm Record on Stop too -
-        // matches FL Studio (one-shot record per Play) and prevents surprise
-        // re-records on the next Play press.
-        if (mRecordingActive)
-        {
-            auto res = mProcessor.stopRecording();
-            commitRecordingResult (res);
-            mRecordingActive = false;
-            mPlayHead.setRecording (false);   // 2026-04-30 playhead PositionInfo
-        }
-        mRecordArmed = false;
-        if (mTransport) mTransport->setRecordArmed (false);
-        stopPlayback();
-        mTransport->setPlayState (false, false);
+        stopTransportAndFinalizeRecording();
     };
     mTransport->onTempoChanged = [this](double bpm) {
         mPlayHead.setBPM(bpm);   // always update BPM so timer doesn't revert tap tempo
@@ -2779,7 +2765,12 @@ void StandaloneEditor::applyAutomationAtCurrentPosition()
     // Handle on the UI thread so we can safely call stopPlayback().
     if (mProcessor.mRequestStop.exchange(false, std::memory_order_acq_rel))
     {
-        if (mPlayHead.isPlaying()) stopPlayback();
+        // QA-Ea Task 0b (2026-05-18): song-end auto-stop must behave
+        // exactly like pressing Stop, including finalizing any active
+        // recording.  Was stopPlayback-only -> the recorder kept writing
+        // silence past song end until the user hit Stop manually.  Forks #25.
+        if (mPlayHead.isPlaying() || mRecordingActive)
+            stopTransportAndFinalizeRecording();
     }
 
     if (!mPM || !mPlayHead.isPlaying()) return;
@@ -6638,6 +6629,30 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
         juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
             "Kit Load Report", body);
     }
+}
+
+void StandaloneEditor::stopTransportAndFinalizeRecording()
+{
+    // R5b: stop committing first so any in-flight buffer block lands in
+    // the recorder before playback halts.  Disarm Record on Stop too -
+    // matches FL Studio (one-shot record per Play) and prevents surprise
+    // re-records on the next Play press.
+    // QA-Ea Task 0b (2026-05-18): shared by the manual Stop button AND the
+    // song-end auto-stop path (mRequestStop) so play-through end finalizes
+    // the recording exactly like pressing Stop - was stopPlayback-only, so
+    // the recorder kept writing silence past song end until manual Stop.
+    // Forks #25.
+    if (mRecordingActive)
+    {
+        auto res = mProcessor.stopRecording();
+        commitRecordingResult (res);
+        mRecordingActive = false;
+        mPlayHead.setRecording (false);   // 2026-04-30 playhead PositionInfo
+    }
+    mRecordArmed = false;
+    if (mTransport) mTransport->setRecordArmed (false);
+    stopPlayback();
+    if (mTransport) mTransport->setPlayState (false, false);
 }
 
 void StandaloneEditor::stopPlayback()

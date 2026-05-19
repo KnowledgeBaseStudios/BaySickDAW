@@ -571,3 +571,89 @@ post-mix-tail shared-helper extraction (MIDI recorder + master recorder +
 metronome/count-in, 5th extract-pattern instance) inside QA-Ea. (4) Then
 resume the QA-Ea Part-B "before" master capture — now in MT, once the
 recorder works there.
+
+### 2026-05-18 — Task 0 — QA-E carry-forward + MT-divergence reorg committed (`f59cd22` + `8af4205`)
+
+Follow-on to the `### 2026-05-18 — Task 0 — MT master-recorder bug diagnosed +
+serial-tail divergence audit` sub-block above. **The prior block's Resume
+actions (1) and (2) are now complete:** both pending commits landed and the
+full Main Plan / QA-Ea plan-file reorg was applied. This is a tight
+completion stamp — the MT-divergence diagnosis, serial-tail audit, and
+scope/sequencing spec calls are fully captured above and are not re-narrated.
+No QA-Ea Part-B source touched. Task 0 still open.
+
+**Commit #1 landed — `f59cd22`.** QA-E-region carry-forward fixes + the
+running-notes update. 3 files, +527/-29.
+- QA-E strip-restore regression guard — range-aware vox/inst guard at
+  [StandaloneEditor.cpp:10314](Source/Standalone/StandaloneEditor.cpp:10314).
+- Issue 2 — pattern-clip viewport scheduler fix in
+  `PluginProcessor.cpp` `scheduleRoll` (no re-loop / viewport).
+- Both source fixes owner-verified Debug + Release (standing per-task
+  cycle, no separate close re-verify gate,
+  `feedback_no_full_release_reverify_at_batch_close.md`).
+
+**Commit #2 landed — `8af4205`.** Doc-only reorg, zero source. 2 files,
++261/-49. Applied via targeted Edits with anchors verified by direct read
+first (`feedback_targeted_edits_not_wholesale_rewrite.md`).
+- `Plans & Specs/Main Plan.md`:
+  - §9 twenty-fourth Forks — QA-E carry-forward record (back-ref QA-E;
+    source = `f59cd22`).
+  - §9 twenty-fifth Forks — MT serial-tail divergence: 3-bug fold into
+    QA-Ea + QA-Ef created + QA-Ed created + reorder (back-ref QA-Ea).
+  - §9 nineteenth-entry SUPERSEDED back-pointer added.
+  - §5 — new QA-Ed + QA-Ef batch entries; **Bucket: Cross-cutting
+    Infrastructure** for both (owner-confirmed call).
+  - §5 QA-Ea Verify line corrected: bit-compare → in-app null test in MT;
+    pre-Part-B 3-bug prerequisite note added.
+  - §5 QA-Eb / QA-Ec sequencing strings updated to the new order.
+  - §6 arrow rewritten `QA-E → QA-Ea → QA-Ed → QA-Eb → QA-Ec →
+    QA-Ef → QA-F`; two new footnotes (QA-Ed 12-asterisk, QA-Ef
+    13-asterisk).
+- `Plans & Specs/Batch Plans/polished-snuggling-token.md` (QA-Ea plan):
+  - Context: pre-Part-B-prerequisite paragraph added.
+  - New locked spec-call row SC4.
+  - New Task 0b in both `## Files to modify` and `## Tasks` — the 3-bug
+    post-mix-tail shared-helper extraction.
+  - Task 0 baseline-capture re-pointed to Task 0b / MT.
+  - Verification #1 'before'-capture provenance corrected.
+- **§5 batch-header structure verified intact post-edit** — each QA-E*
+  header appears exactly once, in the correct order
+  (`feedback_canonical_structure_no_eliding.md` discipline applied to the
+  post-edit verify).
+
+**Process compliance this checkpoint.**
+- Both commits routed through `/draft-commit` and surfaced (drafted message
+  + full pre-commit git status) for owner approval before `git commit`
+  (`feedback_every_commit_via_draft_commit.md` +
+  `feedback_surface_drafted_commit_message_for_approval.md` +
+  `feedback_surface_full_git_status_before_commit.md`).
+- **Correction (owner-caught, both commits).** Self-authored "tightened"
+  alternatives were offered alongside the drafter output on BOTH commits.
+  Corrected: the drafter output IS the commit message verbatim — the
+  drafter exists for uniformity / git-log style match; review of drafter
+  output is factual / scope-error only, never restyle. New memory
+  `feedback_drafter_output_verbatim_no_restyle.md` saved + MEMORY.md index
+  updated.
+- §5 QA-Ed / QA-Ef bucket assignment was an owner spec call, not unilateral
+  (`feedback_dont_make_unilateral_spec_calls.md`).
+- All Main Plan / plan-file changes via targeted Edits, not a wholesale
+  rewrite (`feedback_targeted_edits_not_wholesale_rewrite.md`).
+
+**Uncommitted state.** Clean working tree — both commits landed; nothing
+dirty. The prior sub-blocks' carried docs (Main Plan QA-Ec Edits, QA-Ea
+plan-file verification-methodology correction, this running-notes file) are
+now committed across `f59cd22` / `8af4205`; the prior `qae_t9_dirty_trace.txt`
+note is no longer carried as a pending item.
+
+**Status:** Task 0 still open. QA-E-region carry-forward fixes committed
+(`f59cd22`); MT-divergence reorg fully applied + committed (`8af4205`,
+Main Plan §5/§6/§9 + QA-Ea plan-file); §5 batch-header structure verified
+intact; working tree clean; no QA-Ea Part-B source touched. **Resume
+action:** implement **Task 0b** — the 3-bug post-mix-tail shared-helper
+extraction in `PluginProcessor.cpp` / `.h` (extract MIDI recorder + master
+recorder + metronome / count-in into ONE helper called from BOTH the serial
+tail and the MT branch after `dispatchBlock`; preserve the D-5
+pre-metronome recorder ordering — 5th instance of the proven extract
+pattern). Surface the exact before/after to owner for approval before
+editing the hot path; then owner builds + verifies all 3 in MT and ST;
+then the Part-B 'before' capture in MT; then Part B Task 1.

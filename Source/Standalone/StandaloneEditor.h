@@ -76,6 +76,12 @@ public:
     // Audio transport
     void startPlayback(double bpm);
     void stopPlayback();
+    // QA-Ea Task 0b (2026-05-18): shared transport-halt + recording-finalize.
+    // Called by the manual Stop button AND the song-end auto-stop path so
+    // play-through end finalizes the recording exactly like pressing Stop
+    // (was stopPlayback-only -> recorder kept writing silence until manual
+    // Stop).  Forks #25.
+    void stopTransportAndFinalizeRecording();
 
     // Called by StandaloneApp after construction so the audio settings dialog
     // can safely unregister/re-register the callback around device switches.

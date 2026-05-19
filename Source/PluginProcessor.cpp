@@ -1766,6 +1766,20 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         mLiveMidiCollector.removeNextBlockOfMessages (liveMidi, numSamples);
         if (! liveMidi.isEmpty())
         {
+            // QA-Ea Task 0b (2026-05-18): hardware-MIDI recording fix.  The
+            // MIDI recorder reads `allMidi`, built only from host midiMessages
+            // (:1038) - it never contained the hardware keyboard (that flows
+            // via mLiveMidiCollector, dispatched per-page below), so hardware-
+            // MIDI recording captured nothing in BOTH ST and MT (never worked,
+            // build-independent).  Merge liveMidi into allMidi so the recorder
+            // sees the performance.  Double-trigger-safe: allMidi's only real
+            // consumer is the recorder (VibeGraph::processBlock does
+            // ignoreUnused(midi) at VibeGraph.cpp:1545; the MT dispatcher
+            // never receives allMidi); engines are driven by `dest` below.
+            // Forks #25.
+            for (const auto m : liveMidi)
+                allMidi.addEvent (m.getMessage(), m.samplePosition);
+
             const int kind = mLiveMidiTargetKind .load (std::memory_order_relaxed);
             const int idx  = mLiveMidiTargetIndex.load (std::memory_order_relaxed);
             juce::MidiBuffer* dest = nullptr;
@@ -1778,7 +1792,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 for (const auto m : liveMidi)
                     dest->addEvent (m.getMessage(), m.samplePosition);
             }
-            // else: drop (DrumKit grid / Clip / Vox / Inst / unset target).
+            // else: drop for ENGINE routing only (DrumKit grid / Clip / Vox /
+            // Inst / unset) - allMidi already has it above so the recorder
+            // still captures the performance.
         }
     }
 
@@ -1912,6 +1928,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         mtCtx.liveInputSnapshot  = &mLiveInputSnapshot;
 
         mRenderDispatcher.dispatchBlock (buffer, mtCtx);
+
+        // QA-Ea Task 0b (2026-05-18): MT serial-tail divergence fix - feed
+        // the master/MIDI recorders + run metronome/count-in in MT too.
+        // buffer here is the final master, pre-metronome (MT has no metro
+        // before this), so the recorder stays click-free exactly like the
+        // serial path's D-5 ordering.  Forks #25.
+        applyPostMixRecordAndMetro (buffer, allMidi, pos, numSamples);
 
         // 2026-05-07 (Batch 9c follow-up): drain UI meter atomics same as the
         // serial tail does, otherwise dBFS / VU / per-effect meters all sit
@@ -2693,6 +2716,65 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                             layersIn, bassIn, drumsIn,
                             audioClipsBusForGraph);
 
+    // QA-Ea Task 0b (2026-05-18): post-mix recorders + metronome/count-in
+    // extracted to applyPostMixRecordAndMetro so the MT branch (early
+    // return after dispatchBlock) runs the identical path.  Forks #25.
+    applyPostMixRecordAndMetro (buffer, allMidi, pos, numSamples);
+
+    // 2026-05-02: bus drainAndMerge moved to the very end of processBlock
+    // (right next to the insert snapshot promotion) so the entire UI-visible
+    // meter state updates as one back-to-back block.  See the unified call
+    // site at the bottom of this function.
+
+    // 2026-05-02: transport-stopped decay was needed under the old "atomic
+    // frozen at last value" model.  Under the new vsync architecture, UI
+    // exchange-and-resets the row mirrors each vblank -- when no audio
+    // writes them, the mirrors hold -inf (post-exchange).  The DBFSMeter's
+    // own UI-thread ballistics decay the displayed value to -60 on its own.
+    // No audio-side decay needed.
+
+    // F4 reverted 2026-04-24: the master-bus Play/Stop fade silenced audition
+    // when the transport wasn't running (audition produces audio without
+    // pos.getIsPlaying() ever going true).  Master passes through at unity;
+    // any Play/Stop click is small enough to live with, and engine voice
+    // envelopes already handle most of it.  mMasterFadeGain member kept in
+    // the header for now in case a smarter declick lands later (e.g. gated
+    // by "is any voice active" instead of transport state).
+
+    // 2026-04-26 (D-5 fix): mMasterRecorder.writeBlock moved up to before the
+    // metronome block so the click stays out of the recorded WAV.  Used to
+    // live here writing post-metronome buffer.
+
+    // Clear incoming MIDI so we don't double-trigger on next block
+    midiMessages.clear();
+
+    // ── 1M: DSP load measurement + overload protection ────────────────────────
+    // 2026-05-07 (Batch 10): extracted into measureDspLoadAndOverload so the
+    // MT branch (early return) calls the same path.  Without that, the in-
+    // app DSP meter reads 0% under MT.
+    measureDspLoadAndOverload (t0, numSamples);
+
+    // 2026-05-02: end-of-audio-block atomic snapshot for ALL meters.
+    // 2026-05-07: extracted into drainMeterAtomicsForUI so the MT branch
+    // (which returns early after dispatchBlock) can call the same path.
+    drainMeterAtomicsForUI();
+}
+
+// 2026-05-18 (QA-Ea Task 0b): post-mix recorders + metronome/count-in,
+// extracted from the serial tail so the MT branch (early return after
+// dispatchBlock) feeds the master + MIDI recorders and runs the
+// metronome/count-in identically.  Was serial-tail-only past the early
+// return -> 104-byte empty master WAV, no MIDI capture, no metro/count-in
+// under MT (Forks #25).  D-5 invariant preserved: MIDI rec -> master rec
+// (pre-metronome buffer) -> metronome/count-in.  bpm derives from the
+// passed playhead position so the serial + MT call sites can't diverge.
+void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& buffer,
+                                                     const juce::MidiBuffer& allMidi,
+                                                     const juce::AudioPlayHead::PositionInfo& pos,
+                                                     int numSamples)
+{
+    const double bpm = pos.getBpm().orFallback (120.0);
+
     // ── MIDI recording: capture note events sent to the graph this block ─
     if (mMidiRecorder.isRecording())
     {
@@ -2855,44 +2937,6 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             }
         }
     }
-
-    // 2026-05-02: bus drainAndMerge moved to the very end of processBlock
-    // (right next to the insert snapshot promotion) so the entire UI-visible
-    // meter state updates as one back-to-back block.  See the unified call
-    // site at the bottom of this function.
-
-    // 2026-05-02: transport-stopped decay was needed under the old "atomic
-    // frozen at last value" model.  Under the new vsync architecture, UI
-    // exchange-and-resets the row mirrors each vblank -- when no audio
-    // writes them, the mirrors hold -inf (post-exchange).  The DBFSMeter's
-    // own UI-thread ballistics decay the displayed value to -60 on its own.
-    // No audio-side decay needed.
-
-    // F4 reverted 2026-04-24: the master-bus Play/Stop fade silenced audition
-    // when the transport wasn't running (audition produces audio without
-    // pos.getIsPlaying() ever going true).  Master passes through at unity;
-    // any Play/Stop click is small enough to live with, and engine voice
-    // envelopes already handle most of it.  mMasterFadeGain member kept in
-    // the header for now in case a smarter declick lands later (e.g. gated
-    // by "is any voice active" instead of transport state).
-
-    // 2026-04-26 (D-5 fix): mMasterRecorder.writeBlock moved up to before the
-    // metronome block so the click stays out of the recorded WAV.  Used to
-    // live here writing post-metronome buffer.
-
-    // Clear incoming MIDI so we don't double-trigger on next block
-    midiMessages.clear();
-
-    // ── 1M: DSP load measurement + overload protection ────────────────────────
-    // 2026-05-07 (Batch 10): extracted into measureDspLoadAndOverload so the
-    // MT branch (early return) calls the same path.  Without that, the in-
-    // app DSP meter reads 0% under MT.
-    measureDspLoadAndOverload (t0, numSamples);
-
-    // 2026-05-02: end-of-audio-block atomic snapshot for ALL meters.
-    // 2026-05-07: extracted into drainMeterAtomicsForUI so the MT branch
-    // (which returns early after dispatchBlock) can call the same path.
-    drainMeterAtomicsForUI();
 }
 
 // 2026-05-07 (Batch 9c follow-up): UI-meter atomic drain.  Single boundary
