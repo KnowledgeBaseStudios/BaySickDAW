@@ -657,3 +657,124 @@ pre-metronome recorder ordering — 5th instance of the proven extract
 pattern). Surface the exact before/after to owner for approval before
 editing the hot path; then owner builds + verifies all 3 in MT and ST;
 then the Part-B 'before' capture in MT; then Part B Task 1.
+
+### 2026-05-19 — Task 0b — CLOSED (3-bug post-mix-tail shared-helper extraction committed `f28319e`)
+
+Follow-on to the `### 2026-05-18 — Task 0 — QA-E carry-forward + MT-divergence
+reorg committed (`f59cd22` + `8af4205`)` sub-block above. **That block's
+Resume action (implement Task 0b — the 3-bug post-mix-tail shared-helper
+extraction) is now complete.** Tight CLOSE stamp — the MT-divergence
+diagnosis, serial-tail audit, and scope/sequencing spec calls are fully
+captured in the prior sub-blocks and are NOT re-narrated; factual delta
+only. No QA-Ea Part-B source touched. QA-Ea Task 0 still open.
+
+**Commit landed — `f28319e`.** Task 0b: the 3-bug post-mix-tail shared-helper
+extraction. 6 files, +239/-55. Three fixes, all owner build + verified PASS
+in BOTH MT and ST (master record + play-through song-end auto-stop,
+metronome, count-in, hardware-MIDI record; ST showed no regression).
+
+- **Fix A — post-mix tail extracted into one shared helper.** Master
+  recorder + MIDI recorder + metronome / count-in lifted into
+  `VibeSynthProcessor::applyPostMixRecordAndMetro`
+  (`Source/PluginProcessor.cpp` / `Source/PluginProcessor.h`), called from
+  BOTH the serial tail AND the MT branch after `dispatchBlock`. Closes the
+  3 serial-only divergences (§9 twenty-fifth Forks / #25): MT no longer
+  yields a 104-byte empty master WAV, and MT now captures MIDI + runs
+  metronome / count-in. 5th instance of the proven extract pattern (prior 4:
+  `tapDryRecorder`, `drainMeterAtomicsForUI`, `measureDspLoadAndOverload`,
+  `renderFilePlayPlayer` / `renderAudioClipsForRow`).
+- **Fix B — song-end auto-stop now finalizes the recording.** `onStop`
+  teardown + halt extracted into shared
+  `StandaloneEditor::stopTransportAndFinalizeRecording`, called from `onStop`
+  AND the song-end `mRequestStop` auto-stop path. Owner-hit bug: play-through
+  to song-end stopped playback but the recorder kept writing silence until a
+  manual Stop — the auto-stop path was `stopPlayback`-only. Folded into
+  Task 0b per owner (it blocked Task 0b verification).
+- **Fix C — hardware-keyboard MIDI now reaches the MIDI recorder.** At the
+  `mLiveMidiCollector` drain
+  ([PluginProcessor.cpp:~1781](Source/PluginProcessor.cpp:1781)), `liveMidi`
+  is now merged into `allMidi` so the MIDI recorder sees the hardware
+  keyboard. Discovered during owner's keyboard test: the recorder reads
+  `allMidi` (host-only, [PluginProcessor.cpp:1038](Source/PluginProcessor.cpp:1038));
+  the hardware keyboard flows via `mLiveMidiCollector` and was never in
+  `allMidi`, so hardware-MIDI recording NEVER worked in EITHER ST or MT —
+  pre-existing, build-independent, NOT the MT-divergence and NOT a Task 0b
+  regression. Double-trigger-safe: `allMidi`'s only real consumer is the
+  recorder (`VibeGraph::processBlock` `ignoreUnused(midi)` at
+  [VibeGraph.cpp:1545](Source/VibeGraph.cpp:1545); the MT dispatcher never
+  receives `allMidi`); engines run off the per-page buffers. Folded into
+  Task 0b per owner.
+
+**Side findings logged in the QA-Ea plan-file Rule-3 Routing docket** (all
+"owner picks slot at Task 7 close, not picked here" — surfaced for slot
+decision, not unilaterally placed):
+- **FND-1** — master recordings appear on the Builder grid but NOT in the
+  Audio Clips browser; a phantom Clips strip exists (no Clips page); owner
+  wants a "Master Recordings" section + open-in-default-player.
+- **FND-2** — the 16-pad drum kit does not respond to MIDI-keyboard pads
+  (live keyboard works for Harmless / Bass piano rolls).
+- **FND-3** — velocity: the core MIDI↔internal formula already matches FL.
+  Capture [MidiRecorder.cpp:25](Source/MidiRecorder.cpp:25) `getFloatVelocity`
+  = MIDI/127; playback `emitPianoNoteOn`
+  [PluginProcessor.cpp:25](Source/PluginProcessor.cpp:25) = `(int)(vel*127)`;
+  piano-roll `ControlLane::getVal`
+  [PianoRoll.cpp:2170](Source/Standalone/PianoRoll.cpp:2170) returns raw 0-1
+  unscaled. So "hardest hit ~= halfway on the grid" is the KEYBOARD's
+  velocity curve, not a code bug. Minor FL-parity deviations only:
+  `(int)` truncation vs `round()`; default `0.8`
+  [PatternManager.h:51](Source/PatternManager.h:51) and inconsistent `0.75`
+  ([PianoRoll.cpp:3791](Source/Standalone/PianoRoll.cpp:3791) /
+  [PianoRoll.cpp:3810](Source/Standalone/PianoRoll.cpp:3810)) vs FL `0.7874`.
+  SEPARATE un-traced open item = the synth velocity→amplitude "too loud"
+  curve in `BaySickSynthVoice` / `AdditiveVoice` / `VibePlayerDSP`.
+
+**Process compliance this checkpoint.**
+- Velocity-findings scope + the Task-0b commit-proceed were owner spec
+  calls, not unilateral picks
+  (`feedback_dont_make_unilateral_spec_calls.md`,
+  `feedback_slot_placement_is_spec_call.md`).
+- Commit routed through `/draft-commit`; drafted message surfaced verbatim +
+  full pre-commit git status surfaced for owner approval before `git commit`
+  (`feedback_every_commit_via_draft_commit.md` +
+  `feedback_surface_drafted_commit_message_for_approval.md` +
+  `feedback_surface_full_git_status_before_commit.md`).
+- Drafter-output-verbatim discipline held — no self-authored restyle of the
+  drafter output (`feedback_drafter_output_verbatim_no_restyle.md`,
+  established earlier this session).
+
+**Uncommitted state.** Clean working tree post-`f28319e`. This running-notes
+file becomes dirty when this stamp is applied; it rides with the next commit
+per the plan's post-commit running-notes cadence.
+
+**Status:** **Task 0b CLOSED** — committed `f28319e`; owner-verified Fix
+A / B / C in BOTH MT and ST (ST no regression). QA-Ea Task 0 still open; no
+Part-B source touched. **Resume action:** (1) owner builds the deterministic
+QA-Ea test rig (8-bar L/B/D engine parts + Vox / Inst / Rusty + dropped
+song, metronome OFF, saved); (2) capture the Part-B 'before' master
+reference in MT (record-nothing-armed — now works post-Task-0b); (3) QA-Ea
+Part B Task 1 (route triad + Clips via `routeInsertOutput`; neutralize the
+bespoke sum).
+
+### 2026-05-19 — Task 0 — Post-Task-0b doc reconciliation + Task 0c (FL pre-roll record + non-destructive clip trim) added
+
+Follow-on to the `### 2026-05-19 — Task 0b — CLOSED (3-bug post-mix-tail shared-helper extraction committed `f28319e`)` sub-block above. Tight ADDENDUM stamp documenting post-`f28319e` plan-file reconciliation + a new owner-found bug routed as **Task 0c**. The Task 0b A/B/C fixes and the FND-1/2/3 docket are already captured above and are NOT re-narrated; factual delta only. No QA-Ea Part-B source touched. QA-Ea Task 0 still open.
+
+**Plan-file reconciliation — Vox/Inst/Rusty NOT required for Part B.** Owner caught a contradiction 2026-05-19 between my Task 0b commit-message handoff (which said to build "Vox+Inst+Rusty parts" up front) and what I'd told him verbally earlier (those parts aren't needed for Part B). Verified in code: Part B specifically unifies the Layers/Bass/Drums + Clips routing; Vox/Inst/Rusty already route through `routeInsertOutput` (the exact pattern Part B makes L/B/D match), so they are NOT exercised by Part B at all. Plan file [Batch Plans/polished-snuggling-token.md](Batch Plans/polished-snuggling-token.md) Task-0 "Tell Jeff" build script (line ~85) and Verification intro (line ~333) updated to make the rig **L/B/D + dropped song + metronome OFF only**; Vox/Inst/Rusty NOT required up front (optional, owner's call later if Part A SC2 bus-solo by-ear checks call for them). Reconciles the doc to the agreed scope.
+
+**Task 0c added — FL-pre-roll record + non-destructive clip trim.** Owner-found 2026-05-19 mid Task-0b post-verify (with the MIDI keyboard, while verifying hardware-MIDI record works post-Fix-C): with the 1-bar count-in enabled before Record, the recorded master WAV contains a head bar of pre-roll (silent — metronome click is added post-`writeBlock` per the D-5 invariant) AND the resulting Audio clip is misplaced by one bar on the Builder grid. **Pre-existing** — the recorder feed has always run on `mMasterRecorder.isRecording()` alone with no `countInActive` gate; visible only post-Task-0b in MT because MT recording was the 104-byte empty bug before.
+
+**Wrong-direction fix proposed and REJECTED by owner 2026-05-19 (important record).** I initially recommended a `!mMetro.countInActive` whole-block gate that would skip the recorder's `writeBlock` during count-in. Owner correctly identified this as a regression — cutting up to ~5 ms off the start of a recording slices drum transients and would generate "punchless / cut-off" bug reports. FL Studio does NOT gate; it writes the full pre-roll to the file and trims the visual clip non-destructively in the timeline. Owned per `feedback_diagnose_before_fixing.md` (owner is authoritative on FL behavior per `feedback_dont_speculate_about_fl_studio.md`).
+
+**Spec (FL Studio pre-roll model — owner-locked 2026-05-19).** Recorder writes EVERY block from Record-pressed → Stop-pressed (no count-in gate); capture the **transport-start sample offset** at the moment `mMetro.countInActive` flips false; plumb through `VibeSynthProcessor::RecordResult`; `StandaloneEditor::commitRecordingResult` uses the offset to place the visual Audio clip on the Builder grid so its content-start = transport-start sample (NOT file sample 0); add a content-offset / source-start-sample field on `ArrangementBlock`; the audio-clip playback path honors it; MIDI notes captured during count-in placed relative to the song downbeat (verify existing `beatStart` math handles this); slip-edit UI affordance so owner can drag clip's left edge backwards into the pre-roll to recover early transients / early MIDI hits. Multi-file feature, NOT a 1-line fix.
+
+**Task 0c sequencing (owner-locked 2026-05-19).** **After Task 0b commits (DONE, `f28319e`), before Task 1 Part B starts.** Per `feedback_slot_placement_is_spec_call.md`. Task 0c plan-file entries added in `## Files to modify` + `## Tasks` per `feedback_targeted_edits_not_wholesale_rewrite.md`. Detailed design + before/after surface required before any source edit, per Task 0b discipline.
+
+**Process compliance this checkpoint.**
+- Owner caught me re-introducing a contradiction (Vox/Inst/Rusty parts in the commit-message handoff after I'd verbally agreed they're not needed). Owned per `feedback_own_the_codebase_no_git_alibi.md` — corrected the plan file (Task-0 + Verification) instead of arguing.
+- Owner caught me recommending a wrong-direction fix (count-in whole-block gate would slice drum transients). Owned per `feedback_diagnose_before_fixing.md` — pivoted to FL's pre-roll model (owner-authoritative on FL behavior per `feedback_dont_speculate_about_fl_studio.md`).
+- Wrong inference about an attached WAV "being pre-Task-0b" based on filename timestamp — owned and corrected (both attached WAVs were post-Task-0b real captures; date-of-filename inference wasn't a reliable signal).
+- Task 0c scope (own follow-up vs fold vs FND-4) + the doc-commit proceed-now were owner spec calls, not unilateral picks (`feedback_dont_make_unilateral_spec_calls.md`).
+
+**Uncommitted state.** Plan file [Batch Plans/polished-snuggling-token.md](Batch Plans/polished-snuggling-token.md) dirty post-`f28319e` (Vox/Inst/Rusty correction + Task 0c Files-to-modify + Task 0c Tasks entries). This running-notes file becomes dirty when this addendum is applied. Both ride with the upcoming small doc-only follow-up commit. No source change.
+
+**Status:** **Task 0b CLOSED** (`f28319e`); plan-file reconciled post-commit; **Task 0c scheduled** (slot owner-locked, after Task 0b commits, before Part B Task 1). QA-Ea Task 0 still open. **Resume action:** (1) surface the small doc-only follow-up commit (plan-file Vox/Inst/Rusty correction + Task 0c stubs + this addendum) via `/draft-commit` for owner approval; (2) then owner builds the deterministic QA-Ea test rig (8-bar **L/B/D engine parts only** + dropped song, metronome OFF; Vox/Inst/Rusty NOT required — only added later if owner opts in for Part A SC2 by-ear checks); (3) Task 0c — design + surface FL-pre-roll plumbing diff for owner approval before any source edit; implement on approval + owner verify + own commit; (4) Part-B 'before' master capture in MT (record-nothing-armed, now works post-Task-0b); (5) Part B Task 1.

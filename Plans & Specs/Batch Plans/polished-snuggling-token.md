@@ -50,6 +50,9 @@ QA-Ea conforms the serial path to the already-correct MT model (**Part B**), the
 - [Source/PluginProcessor.h](Source/PluginProcessor.h) — declare the post-mix-tail helper near the `drainMeterAtomicsForUI` / `measureDspLoadAndOverload` decls (same extracted-helper cluster, ~:706-727).
 - [Source/PluginProcessor.cpp](Source/PluginProcessor.cpp) — define the helper (MIDI recorder `:2697-2701` + master recorder `:2709-2710` + metronome/count-in `:2712-2857`); replace that serial-tail span with one helper call; add the same call in the MT branch after `dispatchBlock` (~:1914) and before `drainMeterAtomicsForUI` (~:1921). Preserve the D-5 invariant (recorder writes the pre-metronome master — in MT the post-`dispatchBlock` buffer is already pre-metronome).
 
+### Task 0c — FL-pre-roll record + non-destructive clip trim (Jeff finding 2026-05-19, post-Task-0b verify)
+- Files **TBD at design time** (design + surface before editing per Task 0b discipline). Likely touches: `Source/PluginProcessor.cpp/.h` (transport-start sample-offset capture in/around `applyPostMixRecordAndMetro`; new offset field on `VibeSynthProcessor::RecordResult`); `Source/Standalone/StandaloneEditor.cpp` (`commitRecordingResult` consumes the offset for clip placement); `Source/PatternManager.h` (`ArrangementBlock` content-offset / source-start-sample field); audio-clip playback path to honor the offset; MIDI capture/placement; slip-edit UI affordance.
+
 ### Task 1 — Part B: route triad+Clips via routeInsertOutput; neutralize bespoke sum
 - [Source/PluginProcessor.cpp](Source/PluginProcessor.cpp) — after `processBus(kClipsBus,...)` (~:2517) add `routeInsertOutput(kClipsBus,...)`; add triad generic loop before the `mVibeGraph.processBlock` call (~:2690).
 - [Source/VibeGraph.cpp:1551-1561](Source/VibeGraph.cpp:1551) — comment out the triad + `audioClipsPreRendered` `addFrom`s (master-sum reads kMaster accumulator only).
@@ -82,7 +85,7 @@ QA-Ea conforms the serial path to the already-correct MT model (**Part B**), the
 - [ ] Mirror `~/.claude/plans/polished-snuggling-token.md` → `Plans & Specs/Batch Plans/polished-snuggling-token.md` (Write); delete the home-dir copy (per `feedback_plan_mirror_one_way.md`).
 - [ ] Add `**Plan file:** [Batch Plans/polished-snuggling-token.md](Batch Plans/polished-snuggling-token.md)` to the §5 QA-Ea header in Main Plan.
 - [ ] Seed `Plans & Specs/Running Notes/polished-snuggling-token.md` (title + purpose blockquote + pair ref + initial "Task 0: open" entry; per §0 running-notes required sections).
-- [ ] **Tell Jeff:** "Build the deterministic 8-bar test project: Layers+Bass+Drums engine parts (sampled / phase-reset patches, **NO noise-oscillator patches** per the CLAUDE.md LCG gotcha) + Vox+Inst+Rusty parts (for Part A solo listening) + a dropped **pre-recorded song** (the bit-exact source anchor; also covers the Clips/audio path). **Metronome OFF.** Keep/save this project — it is the QA-Ea test rig for every later task." (The Part-B 'before' master capture is **NOT** taken here — it moves to **Task 0b**, captured in MT *after* the 3-bug shared-helper fix, because the master recorder is dead in MT until then. §9 twenty-fifth Forks.)
+- [ ] **Tell Jeff:** "Build the deterministic 8-bar test project: Layers+Bass+Drums engine parts (sampled / phase-reset patches, **NO noise-oscillator patches** per the CLAUDE.md LCG gotcha) + a dropped **pre-recorded song** (the bit-exact source anchor; also covers the Clips/audio path). **Metronome OFF.** Keep/save this project — it is the QA-Ea test rig for every later task." **Vox/Inst/Rusty parts are NOT required** — Part B does not touch them (Vox/Inst/Rusty already route through `routeInsertOutput`, the exact pattern Part B makes Layers/Bass/Drums match). They are relevant only to Part A solo-listening *if* Jeff decides to verify the SC2 Vox/Inst/Rusty bus-solo changes by ear when Part A starts — added then, Jeff's call, not required up front. (The Part-B 'before' master capture is **NOT** taken here — it moves to **Task 0b**, captured in MT *after* the 3-bug shared-helper fix, because the master recorder is dead in MT until then. §9 twenty-fifth Forks.)
 - [ ] Confirm the deterministic test project exists + is saved. The 'before' reference capture + its pre-Part-B confirmation are now Task 0b steps (post-0b, in MT, before any Task-1 source edit).
 - [ ] Recommend a `pre-QA-Ea` git tag at this commit (rollback boundary).
 - [ ] Surface full git status. Dispatch `/draft-commit`. Surface drafted message + git status to Jeff for approval. Commit on approval.
@@ -100,6 +103,28 @@ Prerequisite for the Part-B 'before' capture (master recorder is dead in MT — 
 - [ ] On Jeff's verify PASS: surface full git status. Dispatch `/draft-commit` (Task 0b own commit). Surface message + status to Jeff for approval. Commit on approval.
 - [ ] **Then the Part-B 'before' capture (now in MT):** Tell Jeff — "On the post-0b build, in **MT**, play the deterministic test project with **nothing armed** + Record → that master capture is the **Part-B 'before' reference**. Rename/keep that WAV (e.g. `qaEa_before`)." Confirm it exists, is non-empty, and is post-0b / pre-Task-1 (before any Part-B source edit). Record in running notes (filename + that it is the post-0b / pre-Part-B MT reference). No hashes — the WAV itself is the polarity-null reference.
 - [ ] Dispatch `/draft-doc running-notes` post-commit and apply.
+
+### Task 0c — FL-pre-roll record + non-destructive clip trim (Jeff finding 2026-05-19, post-Task-0b verify)
+
+Pre-roll record bug (Jeff 2026-05-18/19 mid Task-0b verify): with the 1-bar count-in enabled before Record, the recorded master WAV contains a head bar of pre-roll (silent — the metronome click is added post-`writeBlock` per the D-5 invariant) and the resulting Audio clip is misplaced by one bar on the Builder grid.  **Pre-existing** — the recorder feed has always run on `mMasterRecorder.isRecording()` alone, no `countInActive` gate; visible only post-Task-0b in MT because MT recording was the 104-byte empty bug before.
+
+**NOT** a `!mMetro.countInActive` whole-block gate — rejected by Jeff 2026-05-19: cutting up to ~5 ms off the start would slice drum transients and is a regression for professional users.  FL Studio's actual pre-roll model is the spec.
+
+**Spec (FL Studio pre-roll model — Jeff-locked 2026-05-19):**
+- Recorder writes EVERY block from Record-pressed → Stop-pressed; **no count-in gate**.  Pre-roll audio AND any early MIDI hits remain captured in the file.
+- Capture the **transport-start sample offset** at the moment `mMetro.countInActive` flips false (the first sample where the song actually plays).
+- Plumb the offset through `VibeSynthProcessor::RecordResult`.
+- `StandaloneEditor::commitRecordingResult` uses the offset to place the visual Audio clip on the Builder grid so its content-start = transport-start sample (NOT file sample 0).
+- Add a **content-offset / source-start-sample** field on `ArrangementBlock` (audio clip).  The audio-clip playback path honors it (clip plays from sample N of the file, not 0).
+- MIDI: notes captured during count-in are placed relative to the song downbeat (verify the existing `beatStart` math handles this; possibly apply user quantize per FL behavior for slightly-early hits).
+- **Slip-edit UI affordance:** the user drags the clip's left edge backwards into the pre-roll to recover early transients / early MIDI hits (likely a later sub-step / its own surface).
+
+**Tasks (high-level — refined at design time):**
+- [ ] Design + surface the exact offset/plumbing diff + clip-placement logic for Jeff approval **before editing**, per Task 0b discipline (don't touch the hot path until owner has seen the before/after).
+- [ ] Implement on approval.  Jeff builds + verifies: (a) count-in record → WAV contains the full pre-roll bar; (b) clip on the Builder grid plays from the song downbeat, NOT from file sample 0; (c) slip-edit can drag the left edge backwards into the pre-roll to recover early audio; (d) MIDI hits during count-in land at correct positions; (e) non-count-in record path unchanged (no regression).
+- [ ] Own commit + running-notes stamp.
+
+**Sequencing:** **after Task 0b commits, before Task 1 Part B starts.**  Jeff's confirmed slot 2026-05-19 (`feedback_slot_placement_is_spec_call.md`).
 
 ### Task 1 — Part B: wire triad + Clips through routeInsertOutput; neutralize bespoke sum
 
@@ -330,7 +355,7 @@ Thread `absolo` into the triad `processChainOnly(buf, bpm, absolo)` calls at :16
 
 ## Verification (end-to-end smoke after all source tasks land)
 
-Build clean (Debug + Release). One test project (8-bar loop: L/B/D engine parts + Vox/Inst/Rusty parts + dropped song, metronome OFF), all checks by ear / in-app:
+Build clean (Debug + Release). One test project (8-bar loop: L/B/D engine parts + dropped song, metronome OFF; Vox/Inst/Rusty parts NOT required for Part B — optionally add for Part A SC2 bus-solo by-ear checks only if Jeff opts in when Part A starts), all checks by ear / in-app:
 
 1. **Part B no-regression (null test).** Record-nothing-armed master capture **in MT** after all source tasks; null vs the **Task-0b 'before' capture** (recorded in MT after the 3-bug shared-helper fix, before any Part-B source edit; polarity-flip one, play together) → dead silence (benign sub-audible hiss at worst). Part B is behavior-preserving for the no-solo mix. (Both captures in MT — serial↔MT cannot be bit-identical anyway; the null test is by-ear, per SC3 + §9 twenty-fifth Forks.)
 2. **DSP-09 1-5** (Main Plan §5 canonical, by ear): solo Layers → only Layers; unsolo → full mix; multi-bus additive; solo+mute = mute wins; persistence across save/reload.
