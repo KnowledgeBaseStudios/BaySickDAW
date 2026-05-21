@@ -249,6 +249,17 @@ struct ArrangementBlock
     // dropped by Record naturally end mid-bar).  -1 = use lengthBars * 4.
     // User resize in the arrangement snaps to bars + sets this back to -1.
     float lengthBeats { -1.f };
+    // QA-Ea Task 0c (2026-05-20 - Option A slip-edit + sub-bar precision):
+    // sub-bar precision for the clip's START position in beats.  Sentinel
+    // -1e6 = "use startBar * 4 (legacy int-bar precision)" for backwards-
+    // compatibility with every pre-Task-0c project.  When set, this
+    // overrides startBar*4 for visual rendering and audio scheduling, AND
+    // is allowed to be NEGATIVE (clip's left edge extends into negative-
+    // bar territory after slip-edit drag-left to expose pre-roll audio).
+    // The slip-edit drag updates this + lengthBeats together to keep the
+    // right-end of the clip fixed.  The move handler CLEARS this (resets
+    // to sentinel) so bar-aligned moves stay bar-aligned.
+    float startBeats  { -1.0e6f };
     bool layerTrack   { true };
 
     // Phase 4B - clip type + audio/automation fields
@@ -284,6 +295,18 @@ struct ArrangementBlock
     // deserialize the default is true (see PatternManager.cpp) so pre-Task-7
     // projects keep their exact saved values (no silent change on reopen).
     bool isOverride { false };
+    // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim).
+    // For ClipType::Audio: file-position offset added to every file-position
+    // read in the audio-clip render loop (direct-read filePos, phase-vocoder
+    // reference pvRefPos, file-EOF guard fileTotalSamples) so the clip plays
+    // from sample N of the file rather than 0.  Set by StandaloneEditor::
+    // commitRecordingResult to RecordResult::preRollSamples; movable
+    // non-destructively via Ctrl+Alt+Home slip-edit drag on ArrangementGrid
+    // (drag-left = decrement + grow lengthBeats; drag-right = increment +
+    // shrink lengthBeats).  Right-end of clip + startBar stay fixed.
+    // Default 0 = play from file sample 0 (every pre-Task-0c project /
+    // every non-count-in recording is backwards-compatible).
+    juce::int64 contentStartSamples { 0 };
 };
 
 // 2026-04-24: central helper for the "effective length in beats" of an
@@ -295,6 +318,23 @@ inline double effectiveLengthBeats (const ArrangementBlock& b) noexcept
 {
     return (b.lengthBeats > 0.f) ? (double) b.lengthBeats
                                  : (double) b.lengthBars * 4.0;
+}
+
+// QA-Ea Task 0c (2026-05-20): central helper for the "effective start in
+// beats" of an arrangement block.  Returns startBeats when set (sub-bar
+// precision, possibly negative for slip-edited clips); otherwise falls back
+// to startBar * 4 (legacy int-bar precision).  Everywhere that used to
+// compute `b.startBar * 4` directly should call this instead so slip-edited
+// clips render + play from their real sub-bar / negative start.
+inline double effectiveStartBeats (const ArrangementBlock& b) noexcept
+{
+    return (b.startBeats > -1.0e5f) ? (double) b.startBeats
+                                     : (double) b.startBar * 4.0;
+}
+
+inline double effectiveStartBars (const ArrangementBlock& b) noexcept
+{
+    return effectiveStartBeats (b) / 4.0;
 }
 
 // 2026-04-24: effective length in bars (fractional).  Use for visual width

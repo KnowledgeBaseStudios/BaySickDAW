@@ -1893,7 +1893,8 @@ void PianoRollGrid::paint(Graphics& g)
             g.setColour(VC::Accent.brighter(0.3f));
             g.drawVerticalLine(x, 0, (float)b.getHeight());
             g.setColour(VC::TextDim); g.setFont(Font(9));
-            g.drawText(String((int) std::round (beat / barBpb) + 1),
+            // QA-Ea Task 0c (2026-05-20): 0-indexed bar labels (song downbeat = "0").
+            g.drawText(String((int) std::round (beat / barBpb)),
                        x + 2, 2, 24, 10, Justification::centredLeft);
         }
     }
@@ -2123,7 +2124,8 @@ void PianoRollGrid::paint(Graphics& g)
             g.setColour(VC::Accent.brighter(0.5f));
             g.drawVerticalLine(rx, 0, (float)kRulerH);
             g.setColour(VC::Text); g.setFont(Font(9));
-            g.drawText(String((int) std::round (barFrac) + 1), rx + 2, 1, 20, kRulerH - 2,
+            // QA-Ea Task 0c (2026-05-20): 0-indexed bar labels (song downbeat = "0").
+            g.drawText(String((int) std::round (barFrac)), rx + 2, 1, 20, kRulerH - 2,
                        Justification::centredLeft, false);
         }
         else if (isBeat)

@@ -339,10 +339,28 @@ class ArrangementGrid : public juce::Component,
                         public juce::TooltipClient   // 2026-04-26 (D-2): ruler hover tooltips
 {
 public:
+    // QA-Ea Task 0c (2026-05-20): SlipEdit removed from the AGTool enum.
+    // It used to be a mutually-exclusive tool in the toolbar tool group; now
+    // it lives as a separate Slip/Stretch dropdown (see EditMode below) so
+    // the user can be in any tool AND have the slip / stretch mode set
+    // independently.  All references to AGTool::SlipEdit were removed
+    // alongside the tool button + 'S' keybind reassignment.
     enum class AGTool {
         Draw, Paint, Select, Delete, Mute,
-        SlipEdit, Slice, Zoom, PlaySelected
+        Slice, Zoom, PlaySelected
     };
+
+    // QA-Ea Task 0c (2026-05-20): edge-drag behavior mode.  Determines what
+    // a left or right edge drag on an Audio clip does.  Slip = our Option A
+    // semantics (left edge moves on timeline, contentStart shifts, right
+    // edge mirrors -- "slip-out").  Stretch = time-stretch the clip's
+    // content to fit (QA-Ec full impl; for Task 0c, stretch mode is dormant
+    // on the LEFT edge and falls back to the existing length-only resize on
+    // the RIGHT edge so today's right-edge resize UX is preserved).
+    // Pattern and Automation blocks are NEVER affected by this mode -- the
+    // dropdown's behavior is gated on clipType == Audio.  Default Stretch
+    // (matches today's pre-Task-0c right-edge resize UX).
+    enum class EditMode { Slip, Stretch };
 
     explicit ArrangementGrid(PatternManager& pm,
                              juce::AudioFormatManager& afm,
@@ -402,6 +420,14 @@ public:
     static constexpr int kLabelW     = 120;   // kept for external use (BuilderPage layout)
     static constexpr int kNumRows    = 50;
     static constexpr int kResizeZone = 8;
+    // QA-Ea Task 0c (2026-05-20 update): dynamic negative-bar viewport limit.
+    // Replaces the earlier hardcoded -8 floor.  Scans all Audio blocks for
+    // the max contentStartSamples > 0, converts to bars at project BPM, and
+    // returns that many bars of negative-viewport allowance.  If no clip has
+    // pre-roll captured, returns 0 (no negative scroll allowed).  Used by
+    // every user-initiated viewport scroll site (wheel / zoom anchor /
+    // centre zoom).  Auto-fit operations keep their own bar-0 floors.
+    double maxRevealableNegativeBars() const;
 
     // ── Undo / Redo ───────────────────────────────────────────────────────────
     void setUndoContext(const UndoContext& ctx) { mUndoCtx = ctx; }
@@ -456,6 +482,37 @@ public:
     // When unset, falls back to juce::File(stored) which treats the string
     // as an absolute path (pre-P4 behavior).
     std::function<juce::File(const juce::String& stored)> onResolveStoredPath;
+
+    // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim): three
+    // callbacks supporting the slip-edit drag.  Wired by BuilderPage to
+    // the transport / processor:
+    //   onGetBPM               -> transport's getBPM()
+    //   onGetSampleRate        -> processor's getSampleRate()
+    //   onRequestRebuildPlayers-> processor's rebuildAudioClipPlayers()
+    // (The slip-edit mode read used to be a callback to the editor's
+    // mSlipEditMode flag; replaced 2026-05-20 with internal mEditMode.)
+    std::function<double()> onGetBPM;
+    std::function<double()> onGetSampleRate;
+    std::function<void()>   onRequestRebuildPlayers;
+
+    // QA-Ea Task 0c (2026-05-20): edit-mode state + accessors + callbacks.
+    // mEditMode determines what a left or right edge drag does on an Audio
+    // clip (see EditMode enum above).  Default Stretch (preserves the
+    // pre-Task-0c right-edge resize UX).  setEditMode fires onEditModeChanged
+    // so the toolbar dropdown can update its button label in lockstep.
+    EditMode getEditMode() const noexcept { return mEditMode; }
+    void setEditMode (EditMode m)
+    {
+        if (m == mEditMode) return;
+        mEditMode = m;
+        if (onEditModeChanged) onEditModeChanged (m);
+    }
+    void toggleEditMode()
+    {
+        setEditMode (mEditMode == EditMode::Slip ? EditMode::Stretch
+                                                  : EditMode::Slip);
+    }
+    std::function<void(EditMode)> onEditModeChanged;
     // P4: called when onImportSampleRequest rejects the drop because no
     // project is open.  Caller prompts for a new project name (async),
     // creates it, then re-invokes importAudioFile with the original args so
@@ -531,9 +588,34 @@ private:
     // Thumbnail cache: filePath → AudioThumbnail (mutable so const draw methods can populate)
     mutable std::map<juce::String, std::unique_ptr<juce::AudioThumbnail>> mThumbnails;
 
+    // QA-Ea Task 0c (Rule 5 -- buttery-smooth slip-edit drag): cached
+    // off-screen Image per file path.  Bakes the FULL file waveform once
+    // into a fixed-size juce::Image (2048x64 ARGB, white-on-transparent
+    // so the brush-color tint works at draw time via
+    // fillAlphaChannelWithCurrentBrush).  Drawing computes a source sub-rect
+    // for [contentStartSamples, contentStartSamples + visibleLengthBeats]
+    // in file-time terms and lets JUCE scale-blit it into the clip's visible
+    // rect -- no per-frame drawChannels work during a slip-drag.  Cache
+    // invalidates when the AudioThumbnail finishes loading (partial -> full
+    // re-bake).  Path key avoids needing zoom-axis invalidation -- the blit
+    // scales the cached image at draw time.
+    struct WaveformImageCacheEntry
+    {
+        juce::Image image;
+        bool        wasFullyLoadedWhenBaked { false };
+    };
+    mutable std::map<juce::String, WaveformImageCacheEntry> mWaveformImages;
+    const juce::Image* getOrBakeWaveformImage (const juce::String& path,
+                                                juce::AudioThumbnail* thumb) const;
+
     // ── Tool + snap ───────────────────────────────────────────────────────────
     AGTool   mActiveTool    { AGTool::Draw };
-    SnapMode mSnapMode      { SnapMode::Bar };
+    // QA-Ea Task 0c (2026-05-20): default snap = Steps (1/16) instead of
+    // Bar.  Sub-bar precision is the norm for builder grid edits (drag,
+    // slip, stretch all honor snap mode); whole-bar was too coarse for
+    // typical workflows.  User can change via the snap-mode picker; new
+    // projects start at Steps.
+    SnapMode mSnapMode      { SnapMode::Steps };
     bool     mAltSnapActive { false };  // Alt held = snap override to None
 
     // ── Performance mode ──────────────────────────────────────────────────────
@@ -571,10 +653,42 @@ private:
     int   mPaintRow   { -1 };
     float mPaintLastBar { 0.f };
 
-    // Slip edit (shift audio content without moving block boundaries)
-    bool  mSlipping     { false };
-    int   mSlipIdx      { -1 };
-    int   mSlipDragX    { 0 };
+    // QA-Ea Task 0c (2026-05-20): legacy AGTool::SlipEdit stub state
+    // (mSlipping/mSlipIdx/mSlipDragX + the never-functional "Slip edit:
+    // visual only (stub - no audio data shift yet)" mouseDrag branch) is
+    // removed.  Replaced by the EditMode dropdown + mSlipEditing drag state
+    // (which does real work, not a stub).
+
+    // QA-Ea Task 0c (2026-05-20): persistent edit-mode for edge drags.
+    // Default Stretch (matches pre-Task-0c right-edge resize UX).  Toggled
+    // by 'S' (ApplicationCommandManager cmdToggleSlipStretchMode) or via
+    // the toolbar dropdown.  Audio-clip edge drags consult this; Pattern
+    // and Automation clips ignore it.
+    EditMode mEditMode { EditMode::Stretch };
+
+    // QA-Ea Task 0c (FL pre-roll record): slip-edit drag state.  Fires
+    // when EditMode == Slip AND the user clicks an Audio clip's edge.
+    // Drag adjusts contentStartSamples + lengthBeats; LEFT-edge slip:
+    // startBar + startBeats move, right-end stays fixed (Option A).
+    // RIGHT-edge slip: lengthBeats moves, contentStart + startBeats stay
+    // fixed (slip-out mirror).  Pattern + Automation clips bypass this
+    // entirely.  See running-notes 2026-05-19 design lock-in + 2026-05-20
+    // dropdown-mode redesign.
+    enum class SlipEdge { Left, Right };
+    bool          mSlipEditing             { false };
+    int           mSlipEditIdx             { -1 };
+    SlipEdge      mSlipEditEdge            { SlipEdge::Left };
+    int           mSlipEditDragOrigX       { 0 };
+    juce::int64   mSlipEditOrigContent     { 0 };
+    float         mSlipEditOrigLengthBeats { -1.f };
+    // QA-Ea Task 0c (2026-05-20 - Option A): origin start in beats (sub-bar
+    // precision; can be negative).  Drag delta is applied vs this snapshot.
+    float         mSlipEditOrigStartBeats  { 0.f };
+    // QA-Ea Task 0c (Option ii auto-scroll): origin mouse position in bars
+    // at mouseDown (xToBar(e.x)).  Drag uses bar-delta from this snapshot
+    // so the auto-scroll-during-drag correctly moves the edge with the
+    // viewport instead of being pinned to fixed component pixels.
+    float         mSlipEditOrigMouseBar    { 0.f };
 
     // Move
     bool              mMoving         { false };
@@ -638,6 +752,10 @@ private:
     // ── Hit testing ───────────────────────────────────────────────────────────
     int  blockAtPos     (int x, int y) const;
     bool nearRightEdge  (int blockIdx, int x) const;
+    // QA-Ea Task 0c (FL pre-roll record): mirror of nearRightEdge for the
+    // slip-edit mode's left-edge hit test.  Used by mouseDown + updateCursor
+    // when mEditMode == Slip.
+    bool nearLeftEdge   (int blockIdx, int x) const;
 
     // ── Selection helpers ─────────────────────────────────────────────────────
     bool isSelected (int idx) const;
@@ -749,6 +867,13 @@ public:
     std::function<void()>                        onUndo;
     std::function<void()>                        onRedo;
     std::function<void()>                        onShowHistory;   // 2026-04-26 (D-1b)
+    // QA-Ea Task 0c (2026-05-20): Slip/Stretch dropdown callback (fires
+    // when user picks a mode from the popup).  Wired by BuilderPage to
+    // ArrangementGrid::setEditMode.  setEditModeLabel is called by
+    // BuilderPage on ArrangementGrid::onEditModeChanged so the button
+    // label stays in sync with the grid's mEditMode.
+    std::function<void(ArrangementGrid::EditMode)> onEditModeRequested;
+    void setEditModeLabel (ArrangementGrid::EditMode m);
 
     void setActiveTool(ArrangementGrid::AGTool t);
     void setUndoEnabled(bool e) { if (mUndoBtn) mUndoBtn->setEnabled(e); }
@@ -763,9 +888,16 @@ public:
     static constexpr int kHeight = 30;
 
 private:
-    // Tool buttons (9 tools)
-    static constexpr int kNumTools = 9;
+    // Tool buttons (8 tools post-Task-0c; SlipEdit moved out to a dropdown)
+    static constexpr int kNumTools = 8;
     std::array<std::unique_ptr<juce::TextButton>, kNumTools> mToolBtns;
+
+    // QA-Ea Task 0c (2026-05-20): Slip/Stretch dropdown button placed
+    // flush after Play(Y).  Click pops a menu (Slip / Stretch); label
+    // reflects current mode + 'S' keybind hint, e.g. "Slip (S) v" or
+    // "Stretch (S) v".  Callback + label-setter are public (see top of
+    // class) so BuilderPage can wire them.
+    std::unique_ptr<juce::TextButton> mEditModeBtn;
 
     std::unique_ptr<juce::TextButton> mUndoBtn, mRedoBtn, mHistoryBtn;
     std::unique_ptr<juce::TextButton> mZoomInBtn, mZoomOutBtn;

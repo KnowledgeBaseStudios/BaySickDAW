@@ -411,6 +411,12 @@ private:
     bool mRecordArmed       { false };
     bool mRecordingActive   { false };   // true between actual capture start + stop
 
+    // QA-Ea Task 0c (2026-05-20): mSlipEditMode + isSlipEditModeOn() removed.
+    // Replaced by ArrangementGrid::mEditMode (Slip / Stretch dropdown).
+    // The 'S' command in the ApplicationCommandManager
+    // (cmdToggleSlipStretchMode) now calls into BuilderPage to toggle the
+    // dropdown directly; no editor-level state needed.
+
     // R5d-midi (2026-04-24): last-accessed piano roll tracking.  Updated
     // whenever the user switches to a Layers / Bass / Drums tab.  Used in
     // MIDI record mode so captured notes land in whichever roll the user

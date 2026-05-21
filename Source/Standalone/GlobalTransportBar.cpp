@@ -411,11 +411,32 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
             const auto cur = mRecordMode;
             m.addItem (1, "ASIO",                       true, cur == RecordMode::Audio);
             m.addItem (2, "MIDI (piano roll tabs only)", true, cur == RecordMode::Midi);
+
+            // QA-Ea Task 0c (FL pre-roll record): "Global Record-Quantize"
+            // submenu (added 2026-05-19).  Snap captured MIDI startBeats to
+            // the chosen grid divisor at commit time (after the FL Early-
+            // Strike clamp).  Off = no snap, raw timing kept.  Owner of the
+            // underlying APVTS param lives in StandaloneEditor; this menu
+            // reads + writes via the onGetRecordQuantizeDiv /
+            // onRecordQuantizeDivChanged callbacks.
+            const int curQ = onGetRecordQuantizeDiv ? onGetRecordQuantizeDiv() : 0;
+            juce::PopupMenu qSub;
+            qSub.addItem (100, "Off",  true, curQ == 0);
+            qSub.addItem (101, "1/4",  true, curQ == 1);
+            qSub.addItem (102, "1/8",  true, curQ == 2);
+            qSub.addItem (103, "1/16", true, curQ == 3);
+            qSub.addItem (104, "1/32", true, curQ == 4);
+            qSub.addItem (105, "1/64", true, curQ == 5);
+            m.addSeparator();
+            m.addSubMenu ("Global Record-Quantize", qSub);
+
             m.showMenuAsync (
                 juce::PopupMenu::Options().withTargetComponent (mRecBtn.get()),
                 [this](int r) {
                     if      (r == 1) setRecordMode (RecordMode::Audio);
                     else if (r == 2) setRecordMode (RecordMode::Midi);
+                    else if (r >= 100 && r <= 105 && onRecordQuantizeDivChanged)
+                        onRecordQuantizeDivChanged (r - 100);
                 });
         };
         addAndMakeVisible(*r);

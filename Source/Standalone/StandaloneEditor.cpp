@@ -913,6 +913,23 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     mTransport->onMetronomeToggle = [this](bool on) {
         mProcessor.mMetro.enabled.store(on, std::memory_order_relaxed);
     };
+    // QA-Ea Task 0c (FL pre-roll record): wire the GlobalTransportBar
+    // Record-button submenu's "Global Record-Quantize" picker to the
+    // APVTS param `record_quantize_div` (0=Off, 1=1/4, 2=1/8, 3=1/16,
+    // 4=1/32, 5=1/64).  Getter for tick rendering + setter for writing
+    // back through APVTS using the project's standard setValueNotifyingHost
+    // pattern (matches every other dropdown wiring in this file).
+    mTransport->onGetRecordQuantizeDiv = [this]() -> int {
+        if (auto* p = mProcessor.apvts.getRawParameterValue ("record_quantize_div"))
+            return (int) p->load();
+        return 0;
+    };
+    mTransport->onRecordQuantizeDivChanged = [this](int div) {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                mProcessor.apvts.getParameter ("record_quantize_div")))
+            p->setValueNotifyingHost (
+                p->getNormalisableRange().convertTo0to1 ((float) div));
+    };
     // 2026-04-24: tempo automation entry point.  Right-click on the BPM
     // field routes here; create an automation clip targeting "global_tempo"
     // (applicator registered in the ctor).
@@ -2268,6 +2285,25 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         grid->onResolveStoredPath = [this](const juce::String& stored)
         {
             return mProcessor.resolveProjectFile (stored);
+        };
+        // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim):
+        // wire the three slip-edit callbacks.  Project tempo, project sample
+        // rate, and audio-clip player rebuild request after each drag delta
+        // so the audio engine immediately reflects the new contentStartSamples
+        // / lengthBeats / startBeats.  See ArrangementGrid::mSlipEditing for
+        // the slip-in-point semantics.  (The slip-edit-mode read used to be
+        // a callback to mSlipEditMode; replaced 2026-05-20 by the dropdown's
+        // internal EditMode -- no callback needed anymore.)
+        grid->onGetBPM = [this]() -> double {
+            return mTransport ? mTransport->getBPM() : 120.0;
+        };
+        grid->onGetSampleRate = [this]() -> double {
+            const double sr = mProcessor.getSampleRate();
+            return sr > 0.0 ? sr : 44100.0;
+        };
+        grid->onRequestRebuildPlayers = [this]() {
+            mProcessor.rebuildAudioClipPlayers();
+            if (mProjectManager) mProjectManager->markDirty();
         };
         // P4: drop-without-project -> async New Project prompt, then retry
         // the drop so the audio file lands on the arrangement as intended.
@@ -6825,6 +6861,16 @@ bool StandaloneEditor::perform (const InvocationInfo& info)
             mPrecountEnabled = ! mPrecountEnabled;
             return true;
 
+        // ── Slip / Stretch edit-mode toggle (QA-Ea Task 0c) ─────────────
+        // 'S' flips the BuilderPage toolbar's Slip/Stretch dropdown between
+        // its two modes.  Mode determines what an edge drag does on an
+        // Audio clip.  Pattern / Automation blocks are unaffected.
+        case BSCommands::cmdToggleSlipStretchMode:
+            if (mBuilderPage)
+                if (auto* grid = mBuilderPage->getGrid())
+                    grid->toggleEditMode();
+            return true;
+
         default:
             return false;
     }
@@ -10401,7 +10447,8 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
         if (! wavFile.existsAsFile()) return;
 
         // Compute length in bars via file header (no re-read of audio data).
-        double fileSeconds = 0.0;
+        double fileSeconds    = 0.0;
+        double fileSampleRate = 44100.0;   // QA-Ea Task 0c: needed for pre-roll seconds
         {
             juce::AudioFormatManager fmt;
             fmt.registerBasicFormats();
@@ -10409,13 +10456,42 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
                     fmt.createReaderFor (wavFile)))
             {
                 if (reader->sampleRate > 0.0)
-                    fileSeconds = (double) reader->lengthInSamples / reader->sampleRate;
+                {
+                    fileSampleRate = reader->sampleRate;
+                    fileSeconds    = (double) reader->lengthInSamples / reader->sampleRate;
+                }
             }
         }
+
+        // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim):
+        // compute the visible content length (file duration minus pre-roll
+        // head).  The WAV contains the full pre-roll bar verbatim (no
+        // transient slicing -- the rejected whole-block-gate proposal);
+        // the visible clip on the grid starts at the song downbeat
+        // (res.startBeat) and its length is the post-pre-roll content.
+        // contentStartSamples on the block lets the audio render loop play
+        // from sample N of the file rather than 0; slip-edit on the grid
+        // lets the user later drag the left edge backward to reveal more
+        // of the pre-roll if they want the early transient.
+        const double preRollSeconds    = (fileSampleRate > 0.0)
+            ? (double) res.preRollSamples / fileSampleRate
+            : 0.0;
+        const double effContentSeconds = fileSeconds - preRollSeconds;
+        // QA-Ea Task 0c stop-during-count-in edge case: user pressed Stop
+        // before transport started -- WAV is all count-in head, no useful
+        // content (preRollSamples >= totalFileSamples).  WAV stays on disk
+        // for reference; no Audio-Library entry + no grid clip.  Both
+        // skipped so the browser doesn't accumulate empty-clip entries.
+        if (effContentSeconds <= 0.0) return;
+
         const double bpm        = juce::jmax (20.0, mTransport ? mTransport->getBPM() : 120.0);
-        const double fileBeats  = fileSeconds * bpm / 60.0;
+        // QA-Ea Task 0c: effContentBeats = the visible (post-pre-roll) beats.
+        // Both lengthBars (ceil'd) and lengthBeats (sub-bar precision) reflect
+        // the visible content, NOT the full file -- so the clip on the grid
+        // ends exactly at the take's audible end.
+        const double effContentBeats = effContentSeconds * bpm / 60.0;
         constexpr double kBeatsPerBar = 4.0;
-        const int lengthBars = juce::jmax (1, (int) std::ceil (fileBeats / kBeatsPerBar));
+        const int lengthBars = juce::jmax (1, (int) std::ceil (effContentBeats / kBeatsPerBar));
         const int startBar   = (int) std::floor (res.startBeat / kBeatsPerBar);
 
         // Find next free trackRow (scan existing blocks).
@@ -10428,14 +10504,20 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
         block.trackRow      = nextRow;
         block.startBar      = startBar;
         block.lengthBars    = lengthBars;                           // ceil'd bar count (for bar-aligned UI)
-        block.lengthBeats   = (float) fileBeats;                    // 2026-04-24: exact end so Song-end
-                                                                     // + playback + loop match the take
+        block.lengthBeats   = (float) effContentBeats;              // QA-Ea Task 0c: visible content beats
         block.patternIndex  = mPM->getCurrentPatternIndex();
         block.layerTrack    = false;
         block.audioFilePath = "Samples/" + wavFile.getFileName();   // relative to project
         block.originalBPM   = (float) bpm;
         block.stretchMode   = true;
         block.routeChannel  = routeChannel;                         // I-16 G-9: link to Vox/Inst page (0 = Audio row)
+        // QA-Ea Task 0c: stamp the FL pre-roll content-start offset (in
+        // file samples).  Zero when no count-in fired (existing pre-Task-0c
+        // behavior unchanged).  Same value applies to master + every strip
+        // block of this Record session per the strip-recorder scope (plan
+        // SC line 120).  Audio engine adds this to every file-position read
+        // in renderAudioClipsForRow / renderFilePlayPlayer (Component 5).
+        block.contentStartSamples = res.preRollSamples;
         // 2026-04-24 recorded-clip library registration: matches what
         // BuilderPage::importAudioFile does on user drop so the clip shows
         // up in the Builder's Audio tab and survives save/close/reopen.
@@ -10551,8 +10633,66 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
         }
         if (target != nullptr)
         {
-            for (const auto& n : res.midiNotes)
+            // QA-Ea Task 0c (FL pre-roll record): shift captured MIDI notes
+            // by the pre-roll offset (negative shift -> note startBeats now
+            // measured from the song downbeat).  Then apply the three FL
+            // rules locked 2026-05-19:
+            //   (a) NOODLING discard -- if endBeat <= 0 the note both
+            //       started AND ended before the downbeat (the user was
+            //       practicing during count-in); drop it.
+            //   (b) EARLY-STRIKE clamp -- if startBeat < 0 but endBeat > 0
+            //       the user struck early but held through the downbeat;
+            //       clamp startBeat to 0 and recompute durationBeats =
+            //       endBeat - 0.  The hard wall is the downbeat -- no
+            //       notes exist before beat 0 in the recorded pattern.
+            //   (c) INPUT-QUANTIZE snap (Component 8 param `record_quantize_div`)
+            //       -- when non-Off, snap the (post-clamp) startBeat to the
+            //       configured grid divisor.  Applied AFTER the Early-Strike
+            //       clamp so a clamped-to-0 note stays at 0 (round(0) = 0).
+            const double sampleRate    = mProcessor.getSampleRate();
+            const double bpmForMidi    = juce::jmax (20.0, mTransport
+                                                              ? mTransport->getBPM()
+                                                              : 120.0);
+            const double preRollBeats  = (sampleRate > 0.0)
+                ? (double) res.preRollSamples * bpmForMidi / (60.0 * sampleRate)
+                : 0.0;
+            // Component 8 param: 0=Off, 1=1/4, 2=1/8, 3=1/16, 4=1/32, 5=1/64.
+            // Beats per quantize-step: 1/4 note = 1 beat; halve per step.
+            double quantizeBeats = 0.0;
+            if (auto* qDiv = mProcessor.apvts.getRawParameterValue ("record_quantize_div"))
+            {
+                switch ((int) qDiv->load())
+                {
+                    case 1: quantizeBeats = 1.0;    break;   // 1/4
+                    case 2: quantizeBeats = 0.5;    break;   // 1/8
+                    case 3: quantizeBeats = 0.25;   break;   // 1/16
+                    case 4: quantizeBeats = 0.125;  break;   // 1/32
+                    case 5: quantizeBeats = 0.0625; break;   // 1/64
+                    default: break;                          // Off
+                }
+            }
+
+            for (auto n : res.midiNotes)   // mutable copy: shift + maybe clamp + maybe snap
+            {
+                n.startBeat -= preRollBeats;
+                const double endBeat = n.startBeat + n.durationBeats;
+
+                // (a) Noodling discard.
+                if (endBeat <= 0.0) continue;
+
+                // (b) Early-Strike clamp.
+                if (n.startBeat < 0.0)
+                {
+                    n.startBeat     = 0.0;
+                    n.durationBeats = endBeat;
+                }
+
+                // (c) Input quantize (snap-to-nearest grid divisor).
+                if (quantizeBeats > 0.0)
+                    n.startBeat = std::round (n.startBeat / quantizeBeats) * quantizeBeats;
+
                 target->notes.push_back (n);
+            }
             if (mProjectManager) mProjectManager->markDirty();
         }
     }

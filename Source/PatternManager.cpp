@@ -1062,6 +1062,18 @@ juce::ValueTree PatternManager::toValueTree() const
         // QA-E Task 7 (FILE-02): persist the per-copy override flag (see
         // ArrangementBlock::isOverride).  New saves always carry it.
         bNode.setProperty("isOverride",     b.isOverride,      nullptr);
+        // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim):
+        // persist the audio-clip content-start offset so reopened recordings
+        // + manual slip-edits survive save/load.  Default 0 on read leaves
+        // every pre-Task-0c project unchanged (see deserialize below).
+        bNode.setProperty("contentStartSamples",
+                          (juce::int64) b.contentStartSamples, nullptr);
+        // QA-Ea Task 0c (2026-05-20 - Option A slip-edit): persist sub-bar
+        // start ONLY when slip-edit has set it (sentinel > -1e5).  Skipping
+        // the property on bar-aligned blocks keeps the XML clean + makes
+        // every pre-Task-0c project byte-identical on round-trip.
+        if (b.startBeats > -1.0e5f)
+            bNode.setProperty("startBeats", b.startBeats, nullptr);
         if (b.clipType == ClipType::Automation)
             bNode.addChild(automationLaneToValueTree(b.automationLane), -1, nullptr);
         arrNode.addChild(bNode, -1, nullptr);
@@ -1433,6 +1445,17 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         // preserved exactly and the library original does NOT silently change
         // it on reopen (Jeff's call, 2026-05-15).  New saves carry the flag.
         b.isOverride     = (bool)            bNode.getProperty("isOverride",     true);
+        // QA-Ea Task 0c (FL pre-roll record): restore the audio-clip
+        // content-start offset.  Default 0 on read = play from file sample 0
+        // (every pre-Task-0c project is backwards-compatible; no silent
+        // shift on reopen).
+        b.contentStartSamples = (juce::int64) bNode.getProperty (
+            "contentStartSamples", (juce::int64) 0);
+        // QA-Ea Task 0c (2026-05-20): restore sub-bar start.  Sentinel -1e6
+        // default = "no sub-bar override; fall back to startBar * 4" -- every
+        // pre-Task-0c project keeps its exact bar-aligned position on reopen.
+        b.startBeats = (float) (double) bNode.getProperty (
+            "startBeats", (double) -1.0e6);
         if (b.clipType == ClipType::Automation)
         {
             auto la = bNode.getChildWithName("AutomationLane");

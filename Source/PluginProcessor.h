@@ -477,6 +477,15 @@ public:
         // current playback.  Reset to false each block when the playhead is
         // outside the clip range (so a fresh playthrough starts un-choked).
         bool   mutedByChoke   = false;
+        // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim):
+        // file-position offset added to every file-position read in the
+        // audio-clip render loop (direct-read filePos, phase-vocoder
+        // reference pvRefPos, file-EOF guard fileTotalSamples) so the clip
+        // plays from sample N of the file rather than 0.  Copied from
+        // ArrangementBlock::contentStartSamples at rebuildAudioClipPlayers
+        // time.  Default 0 = play from file sample 0 (every pre-Task-0c
+        // clip is unaffected; backwards-compatible).
+        juce::int64 contentStartSamples { 0 };
         // Disk-streaming reader - background thread pre-fetches, audio thread reads.
         std::unique_ptr<AudioClipStreamer> streamer;
         // Phase vocoder for BPM-aware time stretch (null when stretchMode=false).
@@ -672,6 +681,16 @@ public:
         std::vector<std::pair<int, juce::File>>   stripWetFiles;  // I-16 G-9: per-strip wet (Vox only)
         std::vector<PianoNote>                    midiNotes;      // from MidiRecorder
         double                                    startBeat { 0.0 };
+        // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim):
+        // count-in samples captured before transport-start (the FL pre-roll
+        // period).  commitRecordingResult uses this to set every resulting
+        // Audio block's contentStartSamples + shorten its lengthBeats so the
+        // visible clip starts at the song downbeat (not file sample 0) while
+        // the WAV still holds the full pre-roll bar.  MIDI commit shifts
+        // captured note startBeats by the beat-equivalent and applies the
+        // Noodling-discard + Early-Strike-clamp + input-quantize rules.
+        // Zero when no count-in fired (existing behavior unchanged).
+        juce::int64                               preRollSamples { 0 };
     };
 
     // Called from StandaloneEditor onPlay when Record is armed.  Allocates
@@ -752,6 +771,14 @@ private:
     std::vector<StripRecorder>     mStripRecorders;        // per-armed-strip WAVs
     std::atomic<RecordMode>        mRecordMode { RecordMode::Audio };
     double                         mRecordStartBeat { 0.0 };
+    // QA-Ea Task 0c (FL pre-roll record): count-in samples accumulated
+    // during the current Record session.  applyPostMixRecordAndMetro
+    // fetch_adds numSamples while isRecording() && mMetro.countInActive;
+    // startRecording zeros it; stopRecording exchanges it into
+    // RecordResult::preRollSamples.  One global counter applies to master
+    // AND every strip block created by the session (Task 0c strip-recorder
+    // scope, plan spec line 120).
+    std::atomic<juce::int64>       mPreRollSamples { 0 };
 public:
 
 private:

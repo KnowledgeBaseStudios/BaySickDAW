@@ -1348,7 +1348,10 @@ int ArrangementGrid::blockAtPos(int x, int y) const
     {
         const auto& b = mPM.getBlock(i);
         if (b.trackRow != row) continue;
-        int bx = barToX((float)b.startBar);
+        // QA-Ea Task 0c (2026-05-20): use effectiveStartBars so slip-edited
+        // clips (possibly negative-start, sub-bar precision) hit-test on
+        // their actual visible position, not the legacy int-bar startBar.
+        int bx = barToX((float) effectiveStartBars(b));
         int bw = (int)(effectiveLengthBars(b) * mPPBar);
         if (x >= bx && x < bx + bw) return i;
     }
@@ -1358,9 +1361,46 @@ int ArrangementGrid::blockAtPos(int x, int y) const
 bool ArrangementGrid::nearRightEdge(int blockIdx, int x) const
 {
     const auto& b = mPM.getBlock(blockIdx);
-    int bx = barToX((float)b.startBar);
+    int bx = barToX((float) effectiveStartBars(b));
     int bw = (int)(effectiveLengthBars(b) * mPPBar);
     return (x >= bx + bw - kResizeZone && x < bx + bw + 2);
+}
+
+// QA-Ea Task 0c (2026-05-20): how many bars of negative-bar viewport the
+// project can usefully expose, based on the largest contentStartSamples in
+// any Audio block.  Returns 0 when no clip has pre-roll captured (negative
+// viewport access disabled in that case).  Callers use the NEGATED return
+// as the lower clamp for mBarOff (e.g. mBarOff >= -maxRevealableNegativeBars()).
+// BPM / SR sourced from the wired callbacks with 120 / 44100 fallbacks for
+// early-init paths where callbacks haven't bound yet.
+double ArrangementGrid::maxRevealableNegativeBars() const
+{
+    const double bpm        = onGetBPM        ? onGetBPM()        : 120.0;
+    const double sampleRate = onGetSampleRate ? onGetSampleRate() : 44100.0;
+    if (bpm <= 0.0 || sampleRate <= 0.0) return 0.0;
+
+    juce::int64 maxContent = 0;
+    for (int i = 0; i < mPM.getNumBlocks(); ++i)
+    {
+        const auto& b = mPM.getBlock(i);
+        if (b.clipType != ClipType::Audio) continue;
+        if (b.contentStartSamples > maxContent)
+            maxContent = b.contentStartSamples;
+    }
+    if (maxContent <= 0) return 0.0;
+    // samples -> seconds -> beats -> bars (4 beats/bar at 4/4).
+    const double seconds = (double) maxContent / sampleRate;
+    const double beats   = seconds * bpm / 60.0;
+    return beats / 4.0;
+}
+
+// QA-Ea Task 0c (FL pre-roll record): mirror of nearRightEdge.  Resize zone
+// is the same `kResizeZone` pixels on the LEFT side of the block.
+bool ArrangementGrid::nearLeftEdge(int blockIdx, int x) const
+{
+    const auto& b = mPM.getBlock(blockIdx);
+    int bx = barToX((float) effectiveStartBars(b));
+    return (x >= bx - 2 && x < bx + kResizeZone);
 }
 
 bool ArrangementGrid::isSelected(int idx) const
@@ -1485,6 +1525,43 @@ AudioThumbnail* ArrangementGrid::getOrCreateThumbnail(const juce::String& path) 
     return mThumbnails.at(path).get();
 }
 
+// QA-Ea Task 0c (Rule 5): bake the FULL file waveform once into an off-screen
+// juce::Image so the slip-edit drag avoids per-frame drawChannels work.  Image
+// is white-on-transparent so the caller's brush color tints via
+// fillAlphaChannelWithCurrentBrush at blit time.  Re-bakes on partial -> fully-
+// loaded transition (so the user gets a full waveform once the audio file
+// finishes background-streaming into the thumbnail cache).  Returns nullptr
+// when the thumbnail isn't loaded yet -- caller falls back to direct
+// drawChannels with the visible time range so the user still sees partial data.
+const juce::Image* ArrangementGrid::getOrBakeWaveformImage (
+    const juce::String& path, juce::AudioThumbnail* thumb) const
+{
+    if (path.isEmpty() || thumb == nullptr) return nullptr;
+    const double totalSec = thumb->getTotalLength();
+    if (totalSec <= 0.0) return nullptr;       // thumb hasn't read header yet
+
+    auto& entry = mWaveformImages[path];
+    const bool nowLoaded = thumb->isFullyLoaded();
+
+    const bool needBake = ! entry.image.isValid()
+                        || (! entry.wasFullyLoadedWhenBaked && nowLoaded);
+    if (needBake)
+    {
+        constexpr int kImgW = 2048;
+        constexpr int kImgH = 64;
+        juce::Image bake (juce::Image::ARGB, kImgW, kImgH, true);
+        {
+            juce::Graphics ig (bake);
+            ig.fillAll (juce::Colours::transparentBlack);
+            ig.setColour (juce::Colours::white);
+            thumb->drawChannels (ig, bake.getBounds(), 0.0, totalSec, 1.f);
+        }
+        entry.image                   = std::move (bake);
+        entry.wasFullyLoadedWhenBaked = nowLoaded;
+    }
+    return &entry.image;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Paint helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1528,8 +1605,11 @@ void ArrangementGrid::drawRuler(Graphics& g) const
 
     // Bar lines + labels (always shown). No upper cap on bar number - the
     // ruler extends as far as the viewport reaches, regardless of song length.
+    // QA-Ea Task 0c (Option ii): use std::floor instead of (int) so negative
+    // mBarOff (viewport scrolled into negative-bar territory for slip-edited
+    // clips) doesn't lose the first label due to int-truncation-toward-zero.
     (void)totalBars;
-    for (int bar = (int)mBarOff; bar <= maxBar; ++bar)
+    for (int bar = (int)std::floor(mBarOff); bar <= maxBar; ++bar)
     {
         int rx = barToX((float)bar);
         if (rx < 0 || rx > b.getWidth()) continue;
@@ -1541,7 +1621,10 @@ void ArrangementGrid::drawRuler(Graphics& g) const
         if (isMajor || mPPBar >= 30) {
             g.setColour(VC::Text);
             g.setFont(Font(9));
-            g.drawText(String(bar + 1), rx + 2, 1, 24, kRulerH - 2,
+            // QA-Ea Task 0c (2026-05-20): ruler labels are 0-indexed so the
+            // song downbeat (bar 0 in code) shows as "0", and slip-edited
+            // clips in negative-bar territory show "-1", "-2", etc.
+            g.drawText(String(bar), rx + 2, 1, 24, kRulerH - 2,
                        Justification::centredLeft, false);
         }
     }
@@ -1849,13 +1932,116 @@ void ArrangementGrid::drawAudioClip(Graphics& g, const ArrangementBlock& b,
     g.fillRoundedRectangle((float)x, (float)y, (float)w, (float)h, 3.f);
 
     // Waveform thumbnail
+    // QA-Ea Task 0c: now honors contentStartSamples + lengthBeats so a
+    // slip-edited / FL-pre-roll clip shows only its visible (post-content-
+    // start) region of the underlying file -- not the full file packed into
+    // the visible width.  Rule 5: uses a cached Image blit (bake-once,
+    // scale-blit-many) for low-CPU drag rendering.  Fallback drawChannels
+    // path runs when the thumbnail isn't loaded yet so the user still sees
+    // partial data while audio finishes background-streaming.
     if (w >= 12 && h >= 6)
     {
         if (auto* thumb = getOrCreateThumbnail(b.audioFilePath))
         {
-            g.setColour(base.brighter(0.9f).withAlpha(0.7f));
-            thumb->drawChannels(g, Rectangle<int>(x + 2, y + 2, w - 4, h - 4),
-                                0.0, thumb->getTotalLength(), 1.f);
+            const Rectangle<int> destRect (x + 2, y + 2, w - 4, h - 4);
+            const double fileTotalSec = thumb->getTotalLength();
+            const double sampleRate   = onGetSampleRate
+                                          ? onGetSampleRate()
+                                          : 44100.0;
+            const double bpm          = onGetBPM
+                                          ? juce::jmax (20.0, onGetBPM())
+                                          : 120.0;
+            const double contentSec   = (sampleRate > 0.0)
+                ? (double) b.contentStartSamples / sampleRate
+                : 0.0;
+            const double visibleSec   = effectiveLengthBeats (b) * 60.0 / bpm;
+
+            const juce::Image* img = (fileTotalSec > 0.0)
+                ? getOrBakeWaveformImage (b.audioFilePath, thumb)
+                : nullptr;
+
+            g.setColour (base.brighter (0.9f).withAlpha (0.7f));
+
+            if (img != nullptr && fileTotalSec > 0.0 && visibleSec > 0.0)
+            {
+                // QA-Ea Task 0c (2026-05-20 A' mode-gate): visual blit mode
+                // depends on EditMode.
+                //   Slip mode  = fixed pixels-per-second.  Audible portion
+                //                paints at constant density; any dead space
+                //                (post-EOF or pre-content) leaves the clip's
+                //                background showing through.  With (B')
+                //                clamps the audible region == visible region
+                //                in practice, but the dead-space-friendly
+                //                math is kept for legacy / pre-clamp blocks.
+                //   Stretch    = proportional fill.  Audible portion stretches
+                //                to fill the ENTIRE block width edge-to-edge.
+                //                Visual placeholder for the QA-Ec time-stretch
+                //                DSP; audio path is untouched until QA-Ec
+                //                wires the real stretch.
+                // Audible portion = intersect [contentSec, contentSec+visibleSec]
+                // with [0, fileTotalSec].
+                const double audibleT0 = juce::jmax (0.0, contentSec);
+                const double audibleT1 = juce::jmin (fileTotalSec,
+                                                     contentSec + visibleSec);
+                if (audibleT1 > audibleT0)
+                {
+                    // Offsets within the clip (in seconds from clip left edge)
+                    // where the audible portion starts and ends.
+                    const double clipDestSec0 = audibleT0 - contentSec;
+                    const double clipDestSec1 = audibleT1 - contentSec;
+                    const float blkW = (float) destRect.getWidth();
+
+                    float destXStart, destXEnd;
+                    if (mEditMode == EditMode::Stretch)
+                    {
+                        // Stretch mode: audible region stretches to fill the
+                        // entire block, edge-to-edge.
+                        destXStart = (float) destRect.getX();
+                        destXEnd   = (float) destRect.getX() + blkW;
+                    }
+                    else
+                    {
+                        // Slip mode: fixed pixels-per-second.  Audible region
+                        // paints at constant density; dead space (if any)
+                        // shows the clip background through.
+                        destXStart = (float) destRect.getX()
+                                   + (float) (clipDestSec0 / visibleSec) * blkW;
+                        destXEnd   = (float) destRect.getX()
+                                   + (float) (clipDestSec1 / visibleSec) * blkW;
+                    }
+                    const int destW = juce::jmax (1,
+                                          juce::roundToInt (destXEnd - destXStart));
+
+                    const float imgW = (float) img->getWidth();
+                    const int srcX = juce::roundToInt ((audibleT0 / fileTotalSec) * imgW);
+                    const int srcW = juce::jmax (1, juce::roundToInt (
+                                        ((audibleT1 - audibleT0) / fileTotalSec) * imgW));
+                    g.drawImage (*img,
+                                 juce::roundToInt (destXStart), destRect.getY(),
+                                 destW, destRect.getHeight(),
+                                 srcX, 0,
+                                 srcW, img->getHeight(),
+                                 /*fillAlphaChannelWithCurrentBrush*/ true);
+                }
+            }
+            else
+            {
+                // Thumb not loaded yet -- direct drawChannels for partial data.
+                if (fileTotalSec > 0.0)
+                {
+                    const double drawT0 = juce::jlimit (0.0, fileTotalSec, contentSec);
+                    const double drawT1 = juce::jlimit (drawT0, fileTotalSec,
+                                                        contentSec + visibleSec);
+                    if (drawT1 > drawT0)
+                        thumb->drawChannels (g, destRect, drawT0, drawT1, 1.f);
+                    else
+                        thumb->drawChannels (g, destRect, 0.0, fileTotalSec, 1.f);
+                }
+                else
+                {
+                    thumb->drawChannels (g, destRect, 0.0, fileTotalSec, 1.f);
+                }
+            }
         }
     }
 
@@ -1907,6 +2093,32 @@ void ArrangementGrid::drawAudioClip(Graphics& g, const ArrangementBlock& b,
         g.setColour (b.isOverride ? Colour (0xffe5453a)     // red   = customized
                                   : Colour (0xff35c65a));   // green = following
         g.fillEllipse (cx - r, cy - r, r * 2.f, r * 2.f);
+    }
+
+    // QA-Ea Task 0c (FL pre-roll record): hidden-audio indicator.  When an
+    // Audio clip has contentStartSamples > 0 (post-record default with
+    // count-in, OR after a slip-edit drag-right) there is audio data in the
+    // underlying WAV before the visible left edge.  Render a small left-
+    // pointing triangle on the clip's left side so beginners know they can
+    // drag the left edge backward (with the Ctrl+Alt+Home slip-edit mode
+    // on) to reveal the pre-roll.  Min-width threshold so the arrow doesn't
+    // collide with the resize-handle area on very narrow clips.
+    if (b.clipType == ClipType::Audio && b.contentStartSamples > 0
+        && w >= 14 && h >= 12)
+    {
+        const float ax = (float) x + 2.f;            // 2 px in from the left edge
+        const float ayCenter = (float) y + (float) h * 0.5f;
+        const float aw = 5.f;                        // arrow width
+        const float ah = 7.f;                        // arrow height
+        Path arrow;
+        arrow.startNewSubPath (ax,        ayCenter);             // tip (pointing left)
+        arrow.lineTo          (ax + aw,   ayCenter - ah * 0.5f); // upper rear
+        arrow.lineTo          (ax + aw,   ayCenter + ah * 0.5f); // lower rear
+        arrow.closeSubPath();
+        g.setColour (Colours::black.withAlpha (0.65f));
+        g.fillPath (arrow);
+        g.setColour (Colours::white.withAlpha (0.85f));
+        g.strokePath (arrow, PathStrokeType (1.0f));
     }
 
     // Muted overlay - 2026-04-26 (D-1): 30% black wash + diagonal hatch.
@@ -2118,7 +2330,10 @@ void ArrangementGrid::drawBlocks(Graphics& g) const
     for (int i = 0; i < n; ++i)
     {
         const auto& b = mPM.getBlock(i);
-        int bx = barToX((float)b.startBar);
+        // QA-Ea Task 0c (2026-05-20): use effectiveStartBars so slip-edited
+        // clips render at their actual visual position (sub-bar precision +
+        // possibly negative for clips slipped into the pre-roll zone).
+        int bx = barToX((float) effectiveStartBars(b));
         int bw = jmax(4, (int)(effectiveLengthBars(b) * mPPBar) - 1);
         int by = rowToY(b.trackRow) + 2;
         int bh = rh - 4;
@@ -3538,7 +3753,9 @@ void ArrangementGrid::updateCursor()
         case AGTool::Select:    setMouseCursor(MouseCursor::NormalCursor);          break;
         case AGTool::Delete:    setMouseCursor(MouseCursor::CrosshairCursor);       break;
         case AGTool::Mute:      setMouseCursor(MouseCursor::NormalCursor);          break;
-        case AGTool::SlipEdit:  setMouseCursor(MouseCursor::LeftRightResizeCursor); break;
+        // QA-Ea Task 0c (2026-05-20): AGTool::SlipEdit removed (now the
+        // EditMode dropdown).  The hover-cursor for slip mode is set in
+        // mouseMove when EditMode == Slip + cursor over an Audio clip edge.
         case AGTool::Slice:     setMouseCursor(MouseCursor::CrosshairCursor);       break;
         case AGTool::Zoom:      setMouseCursor(MouseCursor::CrosshairCursor);       break;
         case AGTool::PlaySelected: setMouseCursor(MouseCursor::NormalCursor);       break;
@@ -3566,6 +3783,16 @@ void ArrangementGrid::modifierKeysChanged(const juce::ModifierKeys& mods)
 void ArrangementGrid::mouseMove(const MouseEvent& e)
 {
     int hit = blockAtPos(e.x, e.y);
+    // QA-Ea Task 0c (FL pre-roll record): when EditMode is Slip, an Audio
+    // clip's LEFT or RIGHT edge gets the horizontal-resize cursor hint so
+    // beginners know either edge is draggable.
+    if (hit >= 0 && mEditMode == EditMode::Slip
+        && mPM.getBlock (hit).clipType == ClipType::Audio
+        && (nearLeftEdge (hit, e.x) || nearRightEdge (hit, e.x)))
+    {
+        setMouseCursor (MouseCursor::LeftRightResizeCursor);
+        return;
+    }
     if (hit >= 0 && (mActiveTool == AGTool::Draw || mActiveTool == AGTool::Select)
         && nearRightEdge(hit, e.x))
         setMouseCursor(MouseCursor::LeftRightResizeCursor);
@@ -3724,6 +3951,55 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         }
     }
 
+    // QA-Ea Task 0c (FL pre-roll record): slip-mode edge drag.  Fires when
+    // mEditMode == Slip AND the user clicks an Audio clip's LEFT or RIGHT
+    // edge -- regardless of the active tool (Draw / Select / etc.).
+    // Mirrors the mouseMove cursor-hint logic above (also tool-agnostic).
+    // Must come BEFORE the tool-specific branches so the slip-mode wins.
+    //
+    // LEFT edge slip = Option A (slip-in): left edge moves on timeline,
+    // contentStart shifts, lengthBeats grows/shrinks to keep right end fixed.
+    //
+    // RIGHT edge slip = slip-out: right edge moves on timeline (via
+    // lengthBeats), contentStart + startBeats stay fixed.
+    //
+    // Pattern + Automation clips bypass this entirely (gated on Audio).
+    // Stretch mode left-edge = silent no-op; right-edge keeps falling
+    // through to the existing length-only resize (QA-Ec will replace).
+    if (mEditMode == EditMode::Slip)
+    {
+        int hit = blockAtPos (e.x, e.y);
+        if (hit >= 0
+            && mPM.getBlock (hit).clipType == ClipType::Audio
+            && (nearLeftEdge (hit, e.x) || nearRightEdge (hit, e.x)))
+        {
+            beginEdit ("Slip");
+            mSlipEditing             = true;
+            mSlipEditIdx             = hit;
+            mSlipEditEdge            = nearLeftEdge (hit, e.x) ? SlipEdge::Left
+                                                                : SlipEdge::Right;
+            mSlipEditDragOrigX       = e.x;
+            mSlipEditOrigContent     = mPM.getBlock (hit).contentStartSamples;
+            // QA-Ea Task 0c (2026-05-20): use effectiveLengthBeats so the
+            // origin captures sub-bar precision even when lengthBeats == -1
+            // (legacy bar-int-length blocks).
+            mSlipEditOrigLengthBeats = (float) effectiveLengthBeats (mPM.getBlock (hit));
+            // QA-Ea Task 0c (2026-05-20 - Option A semantic): snapshot the
+            // start position in beats (sub-bar precision) so drag delta
+            // anchors to the click-time state, NOT the in-progress mutating
+            // value.  Without this snapshot, repeated drag fires would
+            // accumulate floating-point drift.
+            mSlipEditOrigStartBeats  = (float) effectiveStartBeats (mPM.getBlock (hit));
+            // QA-Ea Task 0c (Option ii auto-scroll): origin mouse bar at
+            // click time.  Drag uses bar-delta from this so auto-scroll
+            // works correctly -- as the viewport scrolls, xToBar(e.x)
+            // returns a smaller bar value for the same component-x and
+            // the edge follows naturally.
+            mSlipEditOrigMouseBar    = xToBar (e.x);
+            return;
+        }
+    }
+
     // Zoom tool: click zooms in, Alt+click zooms out (anchored to cursor)
     if (mActiveTool == AGTool::Zoom)
     {
@@ -3735,7 +4011,10 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         const float anchorBar = xToBar(e.x);
         mPPBar = jlimit(minPP, maxPP, mPPBar * factor);
         // Restore the bar that was under the cursor to the cursor's x.
-        mBarOff = jmax(0.f, anchorBar - (float)e.x / jmax(1.f, mPPBar));
+        // QA-Ea Task 0c (Option ii): allow negative-bar viewport so slip-
+        // edited clips remain visible after the user drags left past bar 0.
+        mBarOff = jmax(-(float) maxRevealableNegativeBars(),
+                       anchorBar - (float)e.x / jmax(1.f, mPPBar));
         resized(); repaint();
         return;
     }
@@ -3964,18 +4243,16 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
     }
 
     // Select tool
-    if (mActiveTool == AGTool::Select || mActiveTool == AGTool::SlipEdit)
+    if (mActiveTool == AGTool::Select)
     {
         int hit = blockAtPos(e.x, e.y);
         if (hit >= 0)
         {
-            // Slip edit: track drag for content shift
-            if (mActiveTool == AGTool::SlipEdit) {
-                mSlipping = true;
-                mSlipIdx  = hit;
-                mSlipDragX = e.x;
-                return;
-            }
+            // QA-Ea Task 0c (2026-05-20): EditMode == Slip on Audio clip
+            // edges is handled BEFORE every tool-specific branch (see
+            // hoisted block above).  Legacy AGTool::SlipEdit + the
+            // mSlipping/mSlipIdx stub state were removed; the EditMode
+            // dropdown replaces them.
 
             if (e.mods.isShiftDown()) {
                 auto it = std::find(mSelection.begin(), mSelection.end(), hit);
@@ -4088,20 +4365,31 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
     {
         float endBar = snapBar(xToBar(e.x));
         auto& block  = mPM.getBlock(mResizeIdx);
-        float newLen = jmax(1.f, endBar - mResizeOrigStart);
-        block.lengthBars  = (int)newLen;
-        // 2026-04-24: manual resize is authoritative - clear the recorded
-        // clip's sub-bar length so effectiveLengthBars falls back to
-        // lengthBars going forward.
-        block.lengthBeats = -1.f;
+        // QA-Ea Task 0c (2026-05-20): sub-bar precision for the resize drag.
+        // Previously: (int)newLen truncated to whole bars + cleared
+        // lengthBeats=-1, so resize was bar-locked regardless of snap mode.
+        // Now: keep lengthBeats float (sub-bar precision) and only round
+        // lengthBars for display.  The snap mode picker (Bar / Beat / Cell /
+        // Steps / None) drives finer-than-bar snapping via snapBar().
+        float newLenBars = jmax (0.0625f, endBar - mResizeOrigStart);
+        block.lengthBeats = newLenBars * 4.f;
+        block.lengthBars  = jmax (1, (int) std::ceil (newLenBars));
 
-        // Automation: rescale timeTicks so control points stay at their absolute positions
+        // Automation: rescale timeTicks so control points stay at their absolute positions.
+        // QA-Ea Task 0c (2026-05-20): clamp removed.  Previously the
+        // jlimit(0.f, 1.f, ...) pinned out-of-range points to the new edge
+        // (so shrinking past a dot pulled it to the boundary).  Now dots
+        // keep their absolute timeline positions forever: shrinking past a
+        // dot just makes it invisible (timeTicks > 1 or < 0), and growing
+        // the block back brings it visually back at its original position.
+        // No data destroyed.  Drawing / hit-test / playback already skip
+        // out-of-range points naturally.
         if (block.clipType == ClipType::Automation && !mResizeOrigPoints.empty()
             && mResizeOrigLen > 0.f)
         {
             block.automationLane.points = mResizeOrigPoints;
             for (auto& pt : block.automationLane.points)
-                pt.timeTicks = jlimit(0.f, 1.f, pt.timeTicks * mResizeOrigLen / newLen);
+                pt.timeTicks = pt.timeTicks * mResizeOrigLen / newLenBars;
         }
 
         // For audio stretch: adjust originalBPM so the content duration stays proportional
@@ -4117,11 +4405,31 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
     {
         float dBars = (float)(e.x - mMoveDragOrigin.x) / mPPBar;
         int   dRows = (int)std::round((float)(e.y - mMoveDragOrigin.y) / mEffectiveRowH);
+        // QA-Ea Task 0c (2026-05-20 - perf): hoist maxRevealableNegativeBars
+        // out of the per-block loop.  The function does an O(num-blocks) scan
+        // and was previously called per selected block -- O(N*M) per drag
+        // fire for N selected blocks against M total blocks.  Now O(M) per
+        // drag fire regardless of selection size.
+        const int negFloor = -(int) std::ceil (maxRevealableNegativeBars());
         for (int i = 0; i < (int)mMoveIndices.size(); ++i) {
             int idx = mMoveIndices[i];
             if (idx >= mPM.getNumBlocks()) continue;
             auto& b = mPM.getBlock(idx);
-            b.startBar = jmax(0, (int)snapBar(mMoveOrigBars[i] + dBars));
+            // QA-Ea Task 0c (2026-05-20 - Option ii): allow moves into the
+            // negative-bar zone (mirror of the user-scroll clamp lift).  Floor
+            // matches the dynamic negative-bar viewport limit so users can
+            // park clips in the same negative space the viewport reveals
+            // after a slip-edit; auto-fit operations still keep their own
+            // bar-0 floors elsewhere.
+            b.startBar = jmax(negFloor,
+                              (int) snapBar(mMoveOrigBars[i] + dBars));
+            // QA-Ea Task 0c (2026-05-20): a user-initiated MOVE overrides any
+            // prior slip-edit sub-bar startBeats.  Clearing the sentinel
+            // resets the block to bar-aligned int-precision (effectiveStartBeats
+            // falls back to startBar * 4) so the moved clip lands exactly on
+            // its grid bar with no leftover sub-bar offset from a previous
+            // slip drag.
+            b.startBeats = -1.0e6f;
             b.trackRow = jlimit(0, kNumRows - 1, mMoveOrigRows[i] + dRows);
         }
         resized(); repaint();
@@ -4155,12 +4463,178 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
         return;
     }
 
-    if (mSlipping && mSlipIdx >= 0)
+    // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim).
+    // EITHER edge can be slip-dragged when EditMode == Slip (owner-locked
+    // 2026-05-20).
+    //
+    // LEFT EDGE slip (Option A): left edge moves on timeline, right edge
+    // stays fixed.  Drag-LEFT = left slides into negative-bar territory,
+    // lengthBeats grows, contentStartSamples decreases (pre-roll exposed).
+    // Drag-RIGHT = left moves right, lengthBeats shrinks, contentStart
+    // increases (leading audio trimmed).
+    //
+    // RIGHT EDGE slip (slip-out): right edge moves on timeline (via
+    // lengthBeats), left edge stays fixed.  ContentStartSamples + startBeats
+    // stay untouched.  Drag-RIGHT = clip grows; Drag-LEFT = clip shrinks.
+    //
+    // Sub-bar precision via snapBeats() (snapBar*4) honors the user's snap
+    // mode (Bar / Beat / Cell / Steps / None) so 1/16 / 1/32 steps are
+    // achievable when snap is set finer than Bar.
+    //
+    // Rule-4 UI floor: contentStartSamples never < 0 (audio thread also
+    // defensively floors -- belt+suspenders).  When floor hits, lock the
+    // remaining drag (further leftward mouse motion stops moving the edge).
+    if (mSlipEditing && mSlipEditIdx >= 0 && mSlipEditIdx < mPM.getNumBlocks())
     {
-        // Slip edit: visual only (stub - no audio data shift yet)
+        auto& blk = mPM.getBlock (mSlipEditIdx);
+        if (blk.clipType != ClipType::Audio)
+        {
+            mSlipEditing = false;
+            mSlipEditIdx = -1;
+            return;
+        }
+        const double bpm        = onGetBPM        ? onGetBPM()        : 120.0;
+        const double sampleRate = onGetSampleRate ? onGetSampleRate() : 44100.0;
+        // QA-Ea Task 0c (Option ii): bar-position-based drag (not pixel-delta).
+        // currentMouseBars uses xToBar(e.x) which reads mBarOff -- so when
+        // auto-scroll changes mBarOff during the drag, the bar-delta from
+        // the origMouseBar updates accordingly and the edge follows.
+        const double currentMouseBars = (double) xToBar (e.x);
+        const double dBarsRaw = currentMouseBars - (double) mSlipEditOrigMouseBar;
+
+        if (mSlipEditEdge == SlipEdge::Left)
+        {
+            // ── LEFT-edge slip-in (Option A) ─────────────────────────────
+            double newStartBeatsProposed = (double) mSlipEditOrigStartBeats
+                                         + dBarsRaw * 4.0;
+            // Apply the project snap mode (Bar / Beat / Cell / Steps / None).
+            // snapBar operates in BAR units, so divide-snap-multiply.
+            double newStartBars  = (double) snapBar ((float) (newStartBeatsProposed / 4.0));
+            double newStartBeats = newStartBars * 4.0;
+
+            // Sample-domain delta corresponding to the SNAPPED beats delta
+            // (so contentStartSamples stays in lockstep with the visible edge).
+            double dBeatsSnapped = newStartBeats - (double) mSlipEditOrigStartBeats;
+            juce::int64 dSamplesSnapped = (bpm > 0.0 && sampleRate > 0.0)
+                ? (juce::int64) (dBeatsSnapped * 60.0 / bpm * sampleRate)
+                : (juce::int64) 0;
+
+            juce::int64 newContent = mSlipEditOrigContent + dSamplesSnapped;
+
+            // QA-Ea Task 0c (2026-05-20 B' clamp): contentStartSamples can
+            // never go below 0 -- you can't reveal audio that doesn't exist
+            // in the file.  Option A has NO dead space on either edge of an
+            // Audio clip in Slip mode.  When the user drags the left edge
+            // past the file's sample-0 boundary, lock the edge by recomputing
+            // newStartBeats from the clamped sample delta.  Audio engine
+            // streamer-read sites also defensively floor (Rule-4 belt+
+            // suspenders) -- the clamp here makes that floor a dead branch.
+            if (newContent < 0)
+            {
+                newContent = 0;
+                if (sampleRate > 0.0 && bpm > 0.0)
+                {
+                    const double clampedDBeats = (double) (-mSlipEditOrigContent)
+                                                / sampleRate * bpm / 60.0;
+                    newStartBeats = (double) mSlipEditOrigStartBeats + clampedDBeats;
+                    newStartBars  = newStartBeats / 4.0;
+                }
+            }
+
+            // Right-end stays fixed at the click-time right edge.
+            const double origRightEndBeats = (double) mSlipEditOrigStartBeats
+                                           + (double) mSlipEditOrigLengthBeats;
+            double newLengthBeats = origRightEndBeats - newStartBeats;
+            if (newLengthBeats < 0.0625) newLengthBeats = 0.0625;
+
+            blk.contentStartSamples = newContent;
+            blk.startBeats          = (float) newStartBeats;
+            blk.startBar            = (int) std::floor (newStartBeats / 4.0);
+            blk.lengthBeats         = (float) newLengthBeats;
+            blk.lengthBars          = juce::jmax (1,
+                                                  (int) std::ceil (newLengthBeats / 4.0));
+
+            // Auto-scroll the viewport LEFT if the dragged edge has moved
+            // off the left side.  Floor at maxRevealableNegativeBars() so
+            // the viewport only opens up the negative space that actual
+            // pre-roll content can fill.
+            const float autoScrollMarginBars = 1.0f;
+            const double newStartBarsForScroll = newStartBeats / 4.0;
+            if ((float) newStartBarsForScroll < mBarOff + autoScrollMarginBars)
+            {
+                float scrolledBarOff = (float) newStartBarsForScroll - autoScrollMarginBars;
+                const float negFloor = -(float) maxRevealableNegativeBars();
+                if (scrolledBarOff < negFloor) scrolledBarOff = negFloor;
+                if (scrolledBarOff < mBarOff)
+                {
+                    mBarOff = scrolledBarOff;
+                    resized();
+                }
+            }
+        }
+        else
+        {
+            // ── RIGHT-edge slip-out ──────────────────────────────────────
+            // Right edge moves on timeline via lengthBeats; contentStart
+            // and startBeats stay fixed.  origRightEndBeats was captured at
+            // click time as origStart + origLength.
+            const double origRightEndBeats = (double) mSlipEditOrigStartBeats
+                                           + (double) mSlipEditOrigLengthBeats;
+            double newRightEndBeatsProposed = origRightEndBeats + dBarsRaw * 4.0;
+            // Apply the project snap mode.
+            double newRightEndBars  = (double) snapBar ((float) (newRightEndBeatsProposed / 4.0));
+            double newRightEndBeats = newRightEndBars * 4.0;
+
+            // lengthBeats = newRightEnd - origStart.
+            double newLengthBeats = newRightEndBeats - (double) mSlipEditOrigStartBeats;
+            // Floor at 1/64 note so the clip doesn't disappear.
+            if (newLengthBeats < 0.0625) newLengthBeats = 0.0625;
+
+            // QA-Ea Task 0c (2026-05-20 B' clamp): right edge can't extend
+            // past the file's actual end.  Mirror of the left-edge
+            // contentStart>=0 clamp -- Option A has NO dead space on either
+            // edge in Slip mode.  fileRemainingSec = fileTotalSec - contentSec
+            // (the playable audio from the current contentStart forward);
+            // convert to beats and cap newLengthBeats.  Best-effort: when the
+            // thumbnail isn't loaded yet, getTotalLength() returns 0 and the
+            // clamp is skipped (audio engine still EOF-protects).
+            if (auto* thumb = getOrCreateThumbnail (blk.audioFilePath))
+            {
+                const double fileTotalSec = thumb->getTotalLength();
+                const double contentSec   = (sampleRate > 0.0)
+                    ? (double) blk.contentStartSamples / sampleRate
+                    : 0.0;
+                const double fileRemainingSec = fileTotalSec - contentSec;
+                if (fileTotalSec > 0.0 && fileRemainingSec > 0.0 && bpm > 0.0)
+                {
+                    const double maxLengthBeats = fileRemainingSec * bpm / 60.0;
+                    if (newLengthBeats > maxLengthBeats)
+                        newLengthBeats = maxLengthBeats;
+                }
+            }
+
+            blk.lengthBeats = (float) newLengthBeats;
+            blk.lengthBars  = juce::jmax (1, (int) std::ceil (newLengthBeats / 4.0));
+            // contentStart + startBeats UNCHANGED.
+        }
+
         repaint();
+        // QA-Ea Task 0c (2026-05-20 chop fix): per-drag rebuildAudioClipPlayers
+        // was the chop cause -- each rebuild opens the audio file fresh +
+        // synchronously pre-fills a 2-second ring buffer per clip, stalling
+        // the message thread mid-drag.  Mirror the move-drag pattern: defer
+        // the rebuild to mouseUp's commitEdit() -> onArrangementChanged ->
+        // rebuildAudioClipPlayers chain (single rebuild per drag).  Visual
+        // updates smoothly per frame (independent of the audio snapshot);
+        // live-playback during an active slip-drag plays the OLD offset
+        // until mouseUp, then snaps -- same as move-drag.
         return;
     }
+
+    // QA-Ea Task 0c (2026-05-20): legacy mSlipping stub mouseDrag branch
+    // removed.  AGTool::SlipEdit + the dead "visual only (stub - no audio
+    // data shift yet)" repaint-only handler are gone.  The EditMode
+    // dropdown drives the real slip math via mSlipEditing above.
 
     if (mMarqueeActive)
     {
@@ -4237,7 +4711,20 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
 
     if (mResizing) { commitEdit(); mResizing = false; mStretching = false; mResizeIdx = -1; updateCursor(); return; }
     if (mMoving)   { commitEdit(); mMoving = false; mMoveIndices.clear(); updateCursor(); return; }
-    if (mSlipping) { mSlipping = false; mSlipIdx = -1; return; }
+    // QA-Ea Task 0c (FL pre-roll record): finalize the slip-edit drag.
+    // commitEdit() snapshots the new contentStartSamples / lengthBeats for
+    // undo + fires onArrangementChanged -> rebuildAudioClipPlayers so the
+    // audio engine picks up the new contentStartSamples + lengthBeats /
+    // clipStartBeat values.  Single rebuild per drag (chop fix 2026-05-20).
+    if (mSlipEditing) {
+        commitEdit();
+        mSlipEditing = false;
+        mSlipEditIdx = -1;
+        updateCursor();
+        return;
+    }
+    // QA-Ea Task 0c (2026-05-20): legacy mSlipping mouseUp handler removed
+    // alongside the AGTool::SlipEdit tool.
 
     if (mPainting) {
         commitEdit();
@@ -4289,7 +4776,8 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
             {
                 const float minPP = vpW / 32.f, maxPP = vpW / 8.f;
                 mPPBar  = jlimit(minPP, maxPP, vpW / (endBar - startBar));
-                mBarOff = jmax(0.f, startBar);
+                // QA-Ea Task 0c (Option ii): allow negative-bar zoom-to-rect.
+                mBarOff = jmax(-(float) maxRevealableNegativeBars(), startBar);
                 resized(); repaint();
             }
         }
@@ -4359,7 +4847,9 @@ void ArrangementGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetail
         float maxPP  = vpW / 8.f;
         const float anchorBar = xToBar(e.x);
         mPPBar = jlimit(minPP, maxPP, mPPBar * factor);
-        mBarOff = jmax(0.f, anchorBar - (float)e.x / jmax(1.f, mPPBar));
+        // QA-Ea Task 0c (Option ii): allow negative-bar zoom anchor.
+        mBarOff = jmax(-(float) maxRevealableNegativeBars(),
+                       anchorBar - (float)e.x / jmax(1.f, mPPBar));
         resized(); repaint();
     }
     else if (e.mods.isAltDown())
@@ -4378,7 +4868,9 @@ void ArrangementGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetail
         // wheel up = scroll right (toward later bars).  Sign is flipped vs.
         // the vertical-scroll branch because timeline scrolling reads as
         // "advance through" instead of "scroll the surface".
-        mBarOff = jmax(0.f, mBarOff + wheel.deltaY * 4.f);
+        // QA-Ea Task 0c (Option ii): allow negative-bar horizontal scroll.
+        mBarOff = jmax(-(float) maxRevealableNegativeBars(),
+                       mBarOff + wheel.deltaY * 4.f);
         resized(); repaint();
     }
     else
@@ -4411,7 +4903,10 @@ bool ArrangementGrid::keyPressed(const KeyPress& key)
         if (key == KeyPress('e')) { setTool(AGTool::Select);      return true; }
         if (key == KeyPress('d')) { setTool(AGTool::Delete);      return true; }
         if (key == KeyPress('t')) { setTool(AGTool::Mute);        return true; }
-        if (key == KeyPress('s')) { setTool(AGTool::SlipEdit);    return true; }
+        // QA-Ea Task 0c (2026-05-20): page-local 'S' keybind removed.  'S'
+        // now lives in the ApplicationCommandManager as
+        // cmdToggleSlipStretchMode and toggles the Slip/Stretch dropdown
+        // in the toolbar (see StandaloneEditor::perform + KeyBindings).
         if (key == KeyPress('c')) { setTool(AGTool::Slice);       return true; }
         if (key == KeyPress('y')) { setTool(AGTool::PlaySelected);return true; }
         // 2026-04-26 (B-4): bare Z = Zoom tool (was Shift+Z).
@@ -4776,14 +5271,17 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
 // ─────────────────────────────────────────────────────────────────────────────
 ArrangementToolbar::ArrangementToolbar()
 {
+    // QA-Ea Task 0c (2026-05-20): SlipEdit tool removed (8 tools now).  The
+    // slip-edit mode lives in a separate Slip/Stretch dropdown button placed
+    // flush after Play(Y), see mEditModeBtn below.
     static const char* kLabels[] = {
         "Draw(P)", "Paint(B)", "Select(E)", "Delete(D)",
-        "Mute(T)", "Slip(S)", "Slice(C)", "Zoom(Z)", "Play(Y)"
+        "Mute(T)", "Slice(C)", "Zoom(Z)", "Play(Y)"
     };
     static const ArrangementGrid::AGTool kTools[] = {
         ArrangementGrid::AGTool::Draw,   ArrangementGrid::AGTool::Paint,
         ArrangementGrid::AGTool::Select, ArrangementGrid::AGTool::Delete,
-        ArrangementGrid::AGTool::Mute,   ArrangementGrid::AGTool::SlipEdit,
+        ArrangementGrid::AGTool::Mute,
         ArrangementGrid::AGTool::Slice,  ArrangementGrid::AGTool::Zoom,
         ArrangementGrid::AGTool::PlaySelected
     };
@@ -4798,6 +5296,28 @@ ArrangementToolbar::ArrangementToolbar()
         addAndMakeVisible(*mToolBtns[i]);
     }
     mToolBtns[0]->setToggleState(true, dontSendNotification);
+
+    // QA-Ea Task 0c (2026-05-20): Slip/Stretch dropdown.  Placed flush after
+    // Play(Y) in the resized() layout (no preceding gap).  Click opens a
+    // PopupMenu (Slip / Stretch); label reflects current mode + 'S' hint.
+    // Default Stretch (matches today's right-edge resize UX before QA-Ec).
+    mEditModeBtn = std::make_unique<TextButton>("Stretch (S) v");
+    mEditModeBtn->setTooltip ("Toggle Slip/Stretch Editing -- 'S' to toggle. "
+                              "Slip: drag clip edge to expose/trim pre-roll. "
+                              "Stretch: drag right edge to resize (time-stretch "
+                              "coming in a future update).");
+    mEditModeBtn->onClick = [this] {
+        juce::PopupMenu m;
+        m.addItem (1, "Slip");
+        m.addItem (2, "Stretch");
+        m.showMenuAsync (
+            juce::PopupMenu::Options().withTargetComponent (mEditModeBtn.get()),
+            [this](int r) {
+                if (r == 1 && onEditModeRequested) onEditModeRequested (ArrangementGrid::EditMode::Slip);
+                else if (r == 2 && onEditModeRequested) onEditModeRequested (ArrangementGrid::EditMode::Stretch);
+            });
+    };
+    addAndMakeVisible (*mEditModeBtn);
 
     mUndoBtn = std::make_unique<TextButton>("Undo");
     mUndoBtn->onClick = [this] { if (onUndo) onUndo(); };
@@ -4861,7 +5381,7 @@ void ArrangementToolbar::setActiveTool(ArrangementGrid::AGTool t)
     static const ArrangementGrid::AGTool kTools[] = {
         ArrangementGrid::AGTool::Draw,    ArrangementGrid::AGTool::Paint,
         ArrangementGrid::AGTool::Select,  ArrangementGrid::AGTool::Delete,
-        ArrangementGrid::AGTool::Mute,    ArrangementGrid::AGTool::SlipEdit,
+        ArrangementGrid::AGTool::Mute,
         ArrangementGrid::AGTool::Slice,   ArrangementGrid::AGTool::Zoom,
         ArrangementGrid::AGTool::PlaySelected
     };
@@ -4872,6 +5392,18 @@ void ArrangementToolbar::setActiveTool(ArrangementGrid::AGTool t)
 void ArrangementToolbar::setContextText(const juce::String& text)
 {
     if (mContextLabel) mContextLabel->setText(text, juce::dontSendNotification);
+}
+
+// QA-Ea Task 0c (2026-05-20): refresh the dropdown button label after a
+// mode change.  Format mirrors the other tool buttons ("Draw(P)" / "Play(Y)")
+// for visual consistency.  ASCII-only ('v' chevron substitute) per the
+// ascii-only-ui-strings convention.
+void ArrangementToolbar::setEditModeLabel (ArrangementGrid::EditMode m)
+{
+    if (! mEditModeBtn) return;
+    mEditModeBtn->setButtonText (m == ArrangementGrid::EditMode::Slip
+                                     ? "Slip (S) v"
+                                     : "Stretch (S) v");
 }
 
 void ArrangementToolbar::paint(Graphics& g)
@@ -4886,6 +5418,12 @@ void ArrangementToolbar::resized()
     auto b = getLocalBounds().reduced(2);
     for (auto& btn : mToolBtns)
         btn->setBounds(b.removeFromLeft(62).reduced(1));
+    // QA-Ea Task 0c (2026-05-20): Slip/Stretch dropdown flush after Play(Y),
+    // no preceding gap.  Width 95 px to fit "Stretch (S) v" comfortably.
+    // The existing 8 px gap that separated the tool group from Undo now
+    // sits between this dropdown and Undo.
+    if (mEditModeBtn)
+        mEditModeBtn->setBounds(b.removeFromLeft(95).reduced(1));
     b.removeFromLeft(8);
     mUndoBtn ->setBounds(b.removeFromLeft(48).reduced(1));
     mRedoBtn ->setBounds(b.removeFromLeft(48).reduced(1));
@@ -4971,7 +5509,9 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
         const float anchorBar = mGrid->xToBar((int)centreGridX);
         mGrid->mPPBar = jlimit(minPP, maxPP, mGrid->mPPBar * factor);
         // Keep anchorBar at the same grid-local x by adjusting mBarOff.
-        mGrid->mBarOff = jmax(0.f, anchorBar - centreGridX / jmax(1.f, mGrid->mPPBar));
+        // QA-Ea Task 0c (Option ii): allow negative-bar viewport.
+        mGrid->mBarOff = jmax(-(float) mGrid->maxRevealableNegativeBars(),
+                              anchorBar - centreGridX / jmax(1.f, mGrid->mPPBar));
         mGrid->resized();
     };
     mToolbar->onUndo = [this] { if (mGrid) mGrid->undo(); };
@@ -4979,6 +5519,16 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
     // 2026-04-26 (D-1b): History button → open the global undo-history window
     // through the same UndoContext callable used by the piano-roll history btn.
     mToolbar->onShowHistory = [this] { if (mGrid) mGrid->showHistory(); };
+    // QA-Ea Task 0c (2026-05-20): Slip/Stretch dropdown wiring.  Click on
+    // a menu item -> set the grid's EditMode.  Grid fires onEditModeChanged
+    // -> toolbar refreshes its button label.  Initial label sync below.
+    mToolbar->onEditModeRequested = [this](ArrangementGrid::EditMode m) {
+        if (mGrid) mGrid->setEditMode(m);
+    };
+    mGrid->onEditModeChanged = [this](ArrangementGrid::EditMode m) {
+        if (mToolbar) mToolbar->setEditModeLabel(m);
+    };
+    mToolbar->setEditModeLabel (mGrid->getEditMode());   // initial label
     addAndMakeVisible(*mToolbar);
 
     // Menu bar (replaces ≡ popup)
@@ -5205,7 +5755,9 @@ void BuilderPage::doZoom(float factor)
     const float centreGridX = (float)mGridViewport->getViewPositionX() + centreVpX;
     const float anchorBar = mGrid->xToBar((int)centreGridX);
     mGrid->mPPBar = jlimit(minPP, maxPP, mGrid->mPPBar * factor);
-    mGrid->mBarOff = jmax(0.f, anchorBar - centreGridX / jmax(1.f, mGrid->mPPBar));
+    // QA-Ea Task 0c (Option ii): allow negative-bar viewport.
+    mGrid->mBarOff = jmax(-(float) mGrid->maxRevealableNegativeBars(),
+                          anchorBar - centreGridX / jmax(1.f, mGrid->mPPBar));
     mGrid->resized();
     resized();
 }
@@ -5425,7 +5977,9 @@ juce::PopupMenu BuilderMenuBar::getMenuForIndex(int index, const juce::String&)
         m.addItem(23, "Select\tE",        true, cur == AGTool::Select);
         m.addItem(24, "Delete\tD",        true, cur == AGTool::Delete);
         m.addItem(25, "Mute\tT",          true, cur == AGTool::Mute);
-        m.addItem(26, "Slip Edit\tS",     true, cur == AGTool::SlipEdit);
+        // QA-Ea Task 0c (2026-05-20): "Slip Edit\tS" tool menu item removed.
+        // Slip is now an edge-drag mode (the toolbar Slip/Stretch dropdown),
+        // not a tool selection.  Item id 26 is intentionally retired.
         m.addItem(27, "Slice\tC",         true, cur == AGTool::Slice);
         m.addItem(28, "Zoom\tZ",          true, cur == AGTool::Zoom);
         m.addItem(29, "Play Selected\tY", true, cur == AGTool::PlaySelected);
@@ -5475,7 +6029,7 @@ void BuilderMenuBar::menuItemSelected(int itemId, int /*topLevelIndex*/)
         case 23: if (o.mGrid) o.mGrid->setTool(AGTool::Select);       break;
         case 24: if (o.mGrid) o.mGrid->setTool(AGTool::Delete);       break;
         case 25: if (o.mGrid) o.mGrid->setTool(AGTool::Mute);         break;
-        case 26: if (o.mGrid) o.mGrid->setTool(AGTool::SlipEdit);     break;
+        // QA-Ea Task 0c (2026-05-20): case 26 (Slip Edit tool) removed.
         case 27: if (o.mGrid) o.mGrid->setTool(AGTool::Slice);        break;
         case 28: if (o.mGrid) o.mGrid->setTool(AGTool::Zoom);         break;
         case 29: if (o.mGrid) o.mGrid->setTool(AGTool::PlaySelected); break;

@@ -64,7 +64,15 @@ namespace BSCommands
         // ── General - recording precount (Phase D-5, 2026-04-26) ────────────
         cmdToggleRecordingPrecount = 0x10060,
 
-        // (later phases continue from 0x10070.)
+        // ── Builder - Slip / Stretch edit-mode toggle (QA-Ea Task 0c).
+        // Flips the BuilderPage toolbar's Slip/Stretch dropdown between
+        // its two modes.  Slip mode: Audio-clip edge drags slip the
+        // content (reveal pre-roll / trim leading).  Stretch mode: time-
+        // stretch (QA-Ec ships it; left-edge no-op for Task 0c, right-edge
+        // keeps existing length-resize UX).  Default keybind 'S'.
+        cmdToggleSlipStretchMode = 0x10070,
+
+        // (later phases continue from 0x10071.)
     };
 
     enum class Category : int

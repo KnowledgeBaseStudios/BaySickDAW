@@ -171,6 +171,15 @@ namespace
               "Toggle Recording Precount",
               "When recording is armed, plays a 1-bar (4-beat) lead-in click before the actual recording starts.",
               juce::KeyPress ('P', juce::ModifierKeys::ctrlModifier, 0) },
+
+            // ── Slip / Stretch edit-mode toggle (QA-Ea Task 0c, 2026-05-20)
+            // Lives in the Builder tab because the dropdown surfaces on
+            // the BuilderPage toolbar.  Default 'S'.  Toggles between the
+            // two modes; the toolbar button label updates in lockstep.
+            { cmdToggleSlipStretchMode, Category::Builder,
+              "Toggle Slip/Stretch Editing",
+              "Flips the Builder grid's Slip/Stretch dropdown between modes.  Slip: drag an Audio clip's left or right edge to expose pre-roll / trim leading or tail audio.  Stretch: drag an Audio clip's right edge to resize (time-stretching from the left edge ships in a later update).  Pattern and Automation blocks ignore this mode.",
+              juce::KeyPress ('s', 0, 0) },
         };
     }
 

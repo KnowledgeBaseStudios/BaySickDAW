@@ -96,6 +96,15 @@ VibeSynthProcessor::createParameterLayout()
     // the per-strip _pan param.  Default 0 matches FL's fresh-project default.
     addI("master_pan_law", "Pan Law", 0, 2, 0);
 
+    // QA-Ea Task 0c (FL pre-roll record): global record-quantize divisor.
+    //   0 = Off, 1 = 1/4, 2 = 1/8, 3 = 1/16, 4 = 1/32, 5 = 1/64.
+    // Surfaced via "Global Record-Quantize" submenu in the Record-button
+    // dropdown in GlobalTransportBar (alongside ASIO / MIDI mode toggles).
+    // Read by commitRecordingResult's MIDI commit loop (StandaloneEditor)
+    // to snap clamped startBeats to the grid divisor AFTER the FL
+    // Early-Strike clamp.  Off = no snap (raw clamped startBeats kept).
+    addI("record_quantize_div", "Record Quantize Divisor", 0, 5, 0);
+
     // §P4.3 B7 (2026-04-22): legacy bus-EQ param blocks removed.
     // Pre-rack Layers/Bass/Drums EQs are now per-strip on the InsertNode/BusNode
     // (mixer_{kind}_<i>_preeq_mid_eq* / _preeq_side_eq*, registered lazily via
@@ -508,9 +517,24 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
         const juce::int64 outPosInClip = (ctx.projectStart + bufOffset) - clipStart;
 
         const double readRatio = player.fileSampleRate / mSampleRate;
-        const juce::int64 filePos = (juce::int64) (outPosInClip * readRatio);
+        // QA-Ea Task 0c (FL pre-roll record): shift file reads by the
+        // content-start offset so the clip plays from sample N of the file
+        // rather than 0.  Zero default preserves every pre-Task-0c clip.
+        // Rule-4 defensive floor (belt+suspenders against a UI clamp miss):
+        // contentStartSamples is clamped >= 0 at the UI layer (slip-edit
+        // mouseDrag in BuilderPage.cpp -- Option A: no dead space on either
+        // edge in Slip mode); the floor here protects the streamer seek
+        // against the unlikely case of a stale / corrupt project value.
+        const juce::int64 contentStart = juce::jmax ((juce::int64) 0,
+                                                     player.contentStartSamples);
+        const juce::int64 filePos = (juce::int64) (outPosInClip * readRatio)
+                                    + contentStart;
 
         const juce::int64 fileTotalSamples = player.streamer->getTotalLength();
+        // EOF guard: clip extends past file end -> output silence.
+        // filePos < 0 is unreachable post-Rule-4 floor (outPosInClip * readRatio
+        // is always >= 0 and contentStart is floored >= 0), so a single >=
+        // check is sufficient.
         if (filePos >= fileTotalSamples)
         {
             mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
@@ -523,8 +547,11 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
             ? (double) player.originalBPM / ctx.bpm
             : 1.0;
 
+        // QA-Ea Task 0c: playable file length reduced by contentStart (the
+        // clip's first playable file frame is contentStart, not 0).
         const juce::int64 fileEOFOutput = clipStart
-            + (juce::int64) ((double) fileTotalSamples * stretchRatio / readRatio);
+            + (juce::int64) ((double) (fileTotalSamples - contentStart)
+                             * stretchRatio / readRatio);
         const juce::int64 effectiveClipEnd = juce::jmin (clipEnd, fileEOFOutput);
         const int outSamples = (int) juce::jmin (
             (juce::int64) (ctx.numSamples - bufOffset),
@@ -546,8 +573,12 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
         {
             player.vocoder->setStretchRatio (stretchRatio);
 
+            // QA-Ea Task 0c: stretch-aware file reference includes the
+            // content-start offset.  player.expectedFilePos / streamer->seek
+            // track the absolute file frame so subsequent reads stay aligned.
             const juce::int64 pvRefPos  = (juce::int64) ((double) outPosInClip
-                                                          * readRatio / stretchRatio);
+                                                          * readRatio / stretchRatio)
+                                          + contentStart;
             const juce::int64 pvReadPos = player.expectedFilePos;
 
             const bool seekNeeded =
@@ -719,9 +750,17 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
     const int   bufOffset    = (int) juce::jmax ((int64) 0, clipStart - ctx.projectStart);
     const int64 outPosInClip = (ctx.projectStart + bufOffset) - clipStart;
     const double readRatio   = player.fileSampleRate / mSampleRate;
-    const int64  filePos     = (int64)(outPosInClip * readRatio);
+    // QA-Ea Task 0c (FL pre-roll record): mirror of Site A direct-read
+    // offset (Vox/Inst FilePlay).  Rule-4 defensive floor: UI clamps
+    // contentStartSamples >= 0; floor here is belt+suspenders against a
+    // stale / corrupt project value.
+    const int64 contentStart = juce::jmax ((int64) 0, player.contentStartSamples);
+    const int64 filePos      = (int64)(outPosInClip * readRatio)
+                               + contentStart;
 
     const int64 fileTotalSamples = player.streamer->getTotalLength();
+    // EOF guard: clip extends past file end -> skip.  filePos < 0 is
+    // unreachable post-Rule-4 floor (mirror of Site A).
     if (filePos >= fileTotalSamples)
     {
         if (inRange) mAudioRowPeakDbRun[(size_t) row].store (-60.0f, std::memory_order_relaxed);
@@ -734,8 +773,10 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
         ? (double) player.originalBPM / ctx.bpm
         : 1.0;
 
+    // QA-Ea Task 0c: mirror of Site A EOF reduction (Vox/Inst FilePlay).
     const int64 fileEOFOutput = clipStart
-        + (int64) ((double) fileTotalSamples * stretchRatio / readRatio);
+        + (int64) ((double) (fileTotalSamples - contentStart)
+                   * stretchRatio / readRatio);
     const int64 effectiveClipEnd = juce::jmin (clipEnd, fileEOFOutput);
     const int outSamples = (int) juce::jmin (
         (int64)(numSamples - bufOffset),
@@ -759,7 +800,9 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
         // ── Phase vocoder path (BPM stretch + pitch preservation) ────────────
         player.vocoder->setStretchRatio (stretchRatio);
 
-        const int64 pvRefPos  = (int64) ((double) outPosInClip * readRatio / stretchRatio);
+        // QA-Ea Task 0c: mirror of Site A pvRefPos offset (Vox/Inst FilePlay).
+        const int64 pvRefPos  = (int64) ((double) outPosInClip * readRatio / stretchRatio)
+                                + contentStart;
         const int64 pvReadPos = player.expectedFilePos;
 
         const bool seekNeeded =
@@ -2783,6 +2826,20 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
         mMidiRecorder.processBlock(allMidi, beatStart, bps);
     }
 
+    // QA-Ea Task 0c (FL pre-roll record): accumulate count-in samples while
+    // a Record session is active.  The visible Audio clip + MIDI commit
+    // later shift content by preRollSamples so the visible clip starts at
+    // the song downbeat (not file sample 0) while the WAV still contains
+    // the full pre-roll bar -- this is the FL Studio model and avoids the
+    // drum-transient slicing of the rejected whole-block-gate proposal.
+    // Single global counter applies to master AND every strip block per
+    // the Task 0c strip-recorder scope (plan spec line 120).  Gate
+    // condition: isRecording() (master OR strips OR midi) AND countInActive
+    // -- ensures the counter never ticks during ordinary playback even if
+    // a future feature fires countInActive outside of a Record session.
+    if (isRecording() && mMetro.countInActive.load(std::memory_order_relaxed))
+        mPreRollSamples.fetch_add ((juce::int64) numSamples, std::memory_order_relaxed);
+
     // 2026-04-26 (D-5 fix): write the master-output recorder BEFORE the
     // metronome adds its click samples to the buffer - otherwise the
     // recorded WAV contains the metronome click on every recorded beat.
@@ -3283,16 +3340,30 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         if (!rawReader) continue;
 
         AudioClipPlayer p;
-        p.clipStartBeat  = blk.startBar * kBPB;
+        // QA-Ea Task 0c (2026-05-20 - Option A slip-edit + sub-bar):
+        // effectiveStartBeats prefers blk.startBeats when set (sub-bar
+        // precision, possibly negative) and falls back to startBar * 4 for
+        // every pre-Task-0c block.  The audio loop math at PluginProcessor.cpp
+        // :485-785 already handles negative clipStartBeat correctly
+        // (outPosInClip = projectStart - clipStart works for clipStart < 0;
+        // the (un)played pre-bar portion is naturally skipped by the
+        // projectStart >= 0 transport).
+        p.clipStartBeat  = effectiveStartBeats (blk);
         // 2026-04-24: prefer block.lengthBeats when set (sub-bar precision
         // from recordings) so playback ends at the real audio end, not the
         // ceil'd bar count.
-        p.clipEndBeat    = blk.startBar * kBPB + effectiveLengthBeats (blk);
+        p.clipEndBeat    = effectiveStartBeats (blk) + effectiveLengthBeats (blk);
         p.trackRow       = blk.trackRow;
         p.routeChannel   = blk.routeChannel;   // I-16 G-9: Vox/Inst page link
         p.originalBPM    = (blk.originalBPM > 0.f) ? blk.originalBPM : 120.f;
         p.stretchMode    = blk.stretchMode;
         p.fileSampleRate = rawReader->sampleRate;
+        // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim):
+        // copy the block's file-position offset to the player so the audio
+        // thread can read it without a back-pointer into ArrangementBlock.
+        // Component 5 (below) consumes this in the file-position computation
+        // sites in renderAudioClipsForRow + renderFilePlayPlayer.
+        p.contentStartSamples = blk.contentStartSamples;
         // D3: look up the source clip's choke group from the library.
         p.chokeGroup     = 0;
         for (int li = 0; li < mPatternManager->getNumAudioLibrary(); ++li)
@@ -3519,6 +3590,12 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
     mRecordMode.store (mode, std::memory_order_relaxed);
     mRecordStartBeat = startBeat;
     mStripRecorders.clear();
+    // QA-Ea Task 0c (FL pre-roll record): zero the pre-roll sample counter
+    // at the start of every Record session.  Accumulates count-in samples in
+    // applyPostMixRecordAndMetro; drained into RecordResult::preRollSamples
+    // by stopRecording for commitRecordingResult's non-destructive clip-trim
+    // placement + MIDI Noodling/Early-Strike/quantize rules.
+    mPreRollSamples.store (0, std::memory_order_relaxed);
 
     const auto now = juce::Time::getCurrentTime();
     // Windows-filename-safe: YYYY-MM-DD HH-MM-SS
@@ -3594,6 +3671,10 @@ VibeSynthProcessor::RecordResult VibeSynthProcessor::stopRecording()
     RecordResult out;
     out.startBeat = mRecordStartBeat;
     out.midiNotes = mMidiRecorder.stopRecording();
+    // QA-Ea Task 0c (FL pre-roll record): drain the pre-roll counter into
+    // the result.  exchange(0) leaves the counter clean for the next
+    // session so startRecording's defensive zero is belt+suspenders.
+    out.preRollSamples = mPreRollSamples.exchange (0, std::memory_order_relaxed);
 
     if (mMasterRecorder.isRecording())
         out.masterFile = mMasterRecorder.stopRecording();
