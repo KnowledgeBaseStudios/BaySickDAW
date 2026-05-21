@@ -584,6 +584,19 @@ public:
     // Called once per audio block by PluginProcessor; O(N) over insert nodes.
     bool isAnyInsertSoloed() const noexcept;
 
+    // QA-Ea Part A (2026-05-21): true if any of the 11 bus _solo params is on.
+    // GUARDRAIL (per §9 nineteenth Forks): reads BUS _solo ONLY.  MUST NEVER
+    // call isAnyInsertSoloed() (strip-level) -- the prior serial bug muted
+    // whole buses when one strip soloed (warned at PluginProcessor.cpp:1876-
+    // 1885 too).  Per-strip _solo is a separate axis owned by InsertNodes and
+    // is untouched.
+    //
+    // O(11) cached-atomic loads per call; safe to call from the audio thread.
+    // Cached pointers bound in rebindBusApvts(); rebound on every APVTS
+    // rebind (sample-rate change, project state load) so pointers never
+    // stale.
+    bool anyBusSoloed() const noexcept;
+
     // 5F-4a Batch 6: apply audio-clips-bus polarity + M/S width in-place on buf.
     // Called by PluginProcessor on the audio thread after the clips bus rack runs.
     void applyAudioClipsBusPolarityWidth(juce::AudioBuffer<float>& buf);
@@ -689,6 +702,14 @@ private:
     std::unique_ptr<MasterBusNode>  mMasterNode;
     std::unique_ptr<EffectsBusNode> mEffectsBusNode;
     std::unique_ptr<InstrChannelNode> mAudioClipsBusNode;  // rack+EQ for all audio clips (ID 6)
+
+    // QA-Ea Part A (2026-05-21): cached bus _solo atomic pointers for the
+    // anyBusSoloed() helper.  Bound in rebindBusApvts().  Order matches
+    // kBusSoloPrefixes[11] in VibeGraph.cpp (layers / bass / drums / fx /
+    // clipsbus / voxbus / instbus / voxbus2 / instbus2 / instbus3 / rustybus).
+    // CPU-safeguarding standing rule: avoid string-keyed getRawParameterValue
+    // lookups per audio block; cache the raw atomic ptrs once + reuse.
+    std::array<std::atomic<float>*, 11> mBusSoloPtr {};
 
     // Instrument channel nodes: keyed by the ID returned by addInstrChannel().
     // Insertion order preserved via mInstrChannelOrder for dropdown display.

@@ -320,7 +320,12 @@ struct VibeGraph::LayersBusNode
         // so VibeGraph::processBus (MT mode) can run the chain on a buffer
         // that already contains the pre-summed input from PassiveStripTask.
         // Serial path identical - same chain, same order, same comments.
-        processChainOnly(buf, bpm);
+        // QA-Ea Part A (2026-05-21): synth-fallback path is dead per the
+        // comment at VibeGraph.cpp:1517-1520 (modern callers always supply
+        // an accumulator); pass false here since the caller chain doesn't
+        // reach anyBusSoloed().  If this path is ever revived, the caller
+        // must pass the real anyBusSoloed() value.
+        processChainOnly(buf, bpm, /*anyBusSoloed*/ false);
     }
 
     // 2026-05-06 (Batch 9b): runs the bus DSP chain on `buf` in-place.
@@ -329,7 +334,16 @@ struct VibeGraph::LayersBusNode
     // in MT mode).  Steps: pre-rack EQ -> rack (with bypass logic) ->
     // post-rack EQ -> fader x mute x in-group solo -> polarity + M/S width
     // -> pan -> latency-compensated comp delay -> peak meter publish.
-    void processChainOnly(juce::AudioBuffer<float>& buf, double bpm)
+    //
+    // QA-Ea Part A (2026-05-21): anyBusSoloed parameter replaces the legacy
+    // 3-bus (L/B/D-only) sibling solo formula.  Caller computes
+    // VibeGraph::anyBusSoloed() once per block + passes the same value to
+    // every bus's processChainOnly so the solo gate is uniform across all
+    // 11 buses.  pSiblingBass / pSiblingDrum members are now dead state
+    // (kept for minimal-churn until QA-Ef ST deletion clears the surrounding
+    // code).
+    void processChainOnly(juce::AudioBuffer<float>& buf, double bpm,
+                          bool anyBusSoloed)
     {
         // §P4.3: pre-rack bus EQ (was historically removed from Layers; now
         // restored uniformly across every bus + insert).
@@ -352,15 +366,18 @@ struct VibeGraph::LayersBusNode
         // values stay in sync via the strip's onFaderChanged callbacks
         // for legacy code paths but are no longer the audio source of
         // truth for these three params.
-        const bool  thisSolo  = loadParam(pSolo,        0.f) > 0.5f;
-        const bool  bassSolo  = loadParam(pSiblingBass, 0.f) > 0.5f;
-        const bool  drumSolo  = loadParam(pSiblingDrum, 0.f) > 0.5f;
-        const bool  anySolo   = thisSolo || bassSolo || drumSolo;
+        //
+        // QA-Ea Part A (2026-05-21): anySolo now comes from the caller's
+        // VibeGraph::anyBusSoloed() (all 11 buses) instead of the legacy
+        // 3-bus L+B+D sibling sum.  Canonical formula:
+        //   silenced = thisMuted || (anyBusSoloed && !thisSolo)
+        // applied uniformly across every bus.  Per-strip _solo is a separate
+        // axis and is untouched (GUARDRAIL).
+        const bool  thisSolo  = loadParam(pSolo, 0.f) > 0.5f;
         const bool  thisMuted = loadParam(pMute, 0.f) > 0.5f;
         const float fadDb     = loadParam(pLevel, 0.f);
         const float fadLin    = juce::Decibels::decibelsToGain(fadDb, -60.f);
-        // calcBusGain returns 0 when muted or (anySolo && !soloed); else fadLin.
-        const float g = (thisMuted || (anySolo && ! thisSolo)) ? 0.f : fadLin;
+        const float g = (thisMuted || (anyBusSoloed && ! thisSolo)) ? 0.f : fadLin;
         if (g != 1.f) buf.applyGain(g);
 
         // 5F-4a Batch 6: polarity + M/S width
@@ -496,13 +513,16 @@ struct VibeGraph::BassBusNode
         // 2026-05-06 (Batch 9b): post-render DSP factored into processChainOnly
         // so VibeGraph::processBus (MT mode) can run the chain on a buffer
         // that already contains the pre-summed input from PassiveStripTask.
-        processChainOnly(buf, bpm);
+        // QA-Ea Part A (2026-05-21): synth-fallback path is dead; pass false.
+        processChainOnly(buf, bpm, /*anyBusSoloed*/ false);
     }
 
     // 2026-05-06 (Batch 9b): runs the bus DSP chain on `buf` in-place. See
     // LayersBusNode::processChainOnly for the per-step rationale; signal
-    // path is identical except `pSiblingLayers` replaces `pSiblingBass`.
-    void processChainOnly(juce::AudioBuffer<float>& buf, double bpm)
+    // path is identical.  QA-Ea Part A (2026-05-21): unified anyBusSoloed
+    // parameter replaces the legacy L+B+D-sibling formula.
+    void processChainOnly(juce::AudioBuffer<float>& buf, double bpm,
+                          bool anyBusSoloed)
     {
         // §P4.3: pre-rack bus EQ.
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside process)
@@ -519,14 +539,14 @@ struct VibeGraph::BassBusNode
         if (buf.getNumChannels() >= 2) busEq.process(buf);   // post-rack bus EQ (identity short-circuit + spectrum feed inside)
 
         // 2026-04-30 (audit B.3): direct APVTS read - see LayersBusNode.
-        const bool  thisSolo  = loadParam(pSolo,           0.f) > 0.5f;
-        const bool  layerSolo = loadParam(pSiblingLayers,  0.f) > 0.5f;
-        const bool  drumSolo  = loadParam(pSiblingDrum,    0.f) > 0.5f;
-        const bool  anySolo   = thisSolo || layerSolo || drumSolo;
+        // QA-Ea Part A (2026-05-21): unified anyBusSoloed (11 buses) replaces
+        // the legacy L+layer+drum sibling sum; canonical formula identical
+        // to LayersBusNode + DrumsBusNode.
+        const bool  thisSolo  = loadParam(pSolo, 0.f) > 0.5f;
         const bool  thisMuted = loadParam(pMute, 0.f) > 0.5f;
         const float fadDb     = loadParam(pLevel, 0.f);
         const float fadLin    = juce::Decibels::decibelsToGain(fadDb, -60.f);
-        const float g = (thisMuted || (anySolo && ! thisSolo)) ? 0.f : fadLin;
+        const float g = (thisMuted || (anyBusSoloed && ! thisSolo)) ? 0.f : fadLin;
         if (g != 1.f) buf.applyGain(g);
 
         // 5F-4a Batch 6: polarity + M/S width
@@ -656,13 +676,16 @@ struct VibeGraph::DrumsBusNode
         // 2026-05-06 (Batch 9b): post-render DSP factored into processChainOnly
         // so VibeGraph::processBus (MT mode) can run the chain on a buffer
         // that already contains the pre-summed input from PassiveStripTask.
-        processChainOnly(buf, bpm);
+        // QA-Ea Part A (2026-05-21): pre-rendered-fallback path passes false.
+        processChainOnly(buf, bpm, /*anyBusSoloed*/ false);
     }
 
     // 2026-05-06 (Batch 9b): runs the bus DSP chain on `buf` in-place.
     // See LayersBusNode::processChainOnly for per-step rationale; signal
-    // path is identical except `pSiblingBass` is the third sibling solo.
-    void processChainOnly(juce::AudioBuffer<float>& buf, double bpm)
+    // path is identical.  QA-Ea Part A (2026-05-21): unified anyBusSoloed
+    // parameter replaces the legacy L+B+D-sibling formula.
+    void processChainOnly(juce::AudioBuffer<float>& buf, double bpm,
+                          bool anyBusSoloed)
     {
         // §P4.3 pre-rack EQ (legacy pageEq retired in B7).
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // identity short-circuit + spectrum feed inside process
@@ -679,14 +702,14 @@ struct VibeGraph::DrumsBusNode
         if (buf.getNumChannels() >= 2) busEq.process(buf);   // post-rack bus EQ (identity short-circuit + spectrum feed inside)
 
         // 2026-04-30 (audit B.3): direct APVTS read - see LayersBusNode.
-        const bool  thisSolo  = loadParam(pSolo,           0.f) > 0.5f;
-        const bool  layerSolo = loadParam(pSiblingLayers,  0.f) > 0.5f;
-        const bool  bassSolo  = loadParam(pSiblingBass,    0.f) > 0.5f;
-        const bool  anySolo   = thisSolo || layerSolo || bassSolo;
+        // QA-Ea Part A (2026-05-21): unified anyBusSoloed (11 buses) replaces
+        // the legacy L+layer+bass sibling sum; canonical formula identical
+        // to LayersBusNode + BassBusNode.
+        const bool  thisSolo  = loadParam(pSolo, 0.f) > 0.5f;
         const bool  thisMuted = loadParam(pMute, 0.f) > 0.5f;
         const float fadDb     = loadParam(pLevel, 0.f);
         const float fadLin    = juce::Decibels::decibelsToGain(fadDb, -60.f);
-        const float g = (thisMuted || (anySolo && ! thisSolo)) ? 0.f : fadLin;
+        const float g = (thisMuted || (anyBusSoloed && ! thisSolo)) ? 0.f : fadLin;
         if (g != 1.f) buf.applyGain(g);
 
         // 5F-4a Batch 6: polarity + M/S width
@@ -1508,57 +1531,39 @@ void VibeGraph::processBlock(juce::AudioBuffer<float>& outputBuf,
     juce::AudioBuffer<float> drumsBuf (mDrumsBuf .getArrayOfWritePointers(), numCh, numSamples);
     juce::AudioBuffer<float> sumBuf   (mSumBuf   .getArrayOfWritePointers(), numCh, numSamples);
 
-    // ── Render each bus node ──────────────────────────────────────────────────
-    // 2026-05-06 (Batch 9b): bus DSP now flows through VibeGraph::processBus,
-    // which internally calls each BusNode's new processChainOnly helper +
-    // pushes SC arrays + drains peak atomics into the VibeGraph-level mirrors
-    // (layersPeakDb/bassPeakDb/drumsPeakDb).  Caller pre-fills the scratch
-    // buffer (layersBuf/bassBuf/drumsBuf) with the bus input from the matching
-    // accumulator - same pattern the legacy BusNode::processBlock used to
-    // do internally via its preRendered param.  Synth-fallback paths in
-    // LayersBusNode/BassBusNode (legacy when preRendered was null) are no
-    // longer reachable here; modern callers always pass an accumulator.
-    auto fillFromPreRendered = [] (juce::AudioBuffer<float>& dest,
-                                    juce::AudioBuffer<float>* preRendered)
-    {
-        dest.clear();
-        if (preRendered == nullptr) return;
-        if (preRendered->getNumSamples() < dest.getNumSamples()) return;
-        const int srcCh = juce::jmin(dest.getNumChannels(),
-                                      preRendered->getNumChannels());
-        for (int c = 0; c < srcCh; ++c)
-            dest.addFrom(c, 0, *preRendered, c, 0, dest.getNumSamples());
-    };
-
-    fillFromPreRendered(layersBuf, layersPreRendered);
-    processBus(MixerChannelIds::kLayersBus, layersBuf, bpm,
-               /*anySolo (BusNode reads APVTS siblings internally)*/ false,
-               /*panLaw (BusNode reads APVTS pPanLaw internally)*/ 0);
-
-    fillFromPreRendered(bassBuf, bassPreRendered);
-    processBus(MixerChannelIds::kBassBus, bassBuf, bpm,
-               /*anySolo*/ false, /*panLaw*/ 0);
-
-    fillFromPreRendered(drumsBuf, drumsPreRendered);
-    processBus(MixerChannelIds::kDrumsBus, drumsBuf, bpm,
-               /*anySolo*/ false, /*panLaw*/ 0);
+    // QA-Ea Part B Task 1 (2026-05-21): the legacy fillFromPreRendered +
+    // processBus calls for L/B/D have been removed.  The triad bus processing
+    // moved to PluginProcessor::processBlock (the new for-loop right before
+    // mVibeGraph.processBlock), calling processBus on the bus accumulator
+    // directly and routing to kMaster via routeInsertOutput.  Leaving the
+    // legacy calls here would double-process the buses (state-advance
+    // BusNode::processChainOnly's compDelay / peak-meter / smoothed-params /
+    // EQ filter state) per block, producing audible drift vs. the pre-Task-1
+    // path.  Task 2 deletes the now-unused layersBuf/bassBuf/drumsBuf +
+    // PreRendered params from the signature; for Task 1 we just stop the
+    // duplicate processBus work and let those buffers sit dead.
     juce::ignoreUnused(midi);   // legacy synth-fallback path no longer used here
 
     // ── Sum buses into master input ───────────────────────────────────────────
     sumBuf.clear();
-    for (int c = 0; c < numCh; ++c)
-    {
-        sumBuf.addFrom(c, 0, layersBuf, c, 0, numSamples);
-        sumBuf.addFrom(c, 0, bassBuf,   c, 0, numSamples);
-        sumBuf.addFrom(c, 0, drumsBuf,  c, 0, numSamples);
-    }
-    // Audio clips bus (post-rack, post-fader) summed here so master rack sees it
-    if (audioClipsPreRendered != nullptr)
-    {
-        const int srcCh = juce::jmin(numCh, audioClipsPreRendered->getNumChannels());
-        for (int c = 0; c < numCh; ++c)
-            sumBuf.addFrom(c, 0, *audioClipsPreRendered, c % srcCh, 0, numSamples);
-    }
+    // QA-Ea Part B Task 1: triad + Clips now arrive via the kMaster accumulator
+    // (masterExtra block below).  These addFroms are dead -- Task 2 deletes the
+    // buffers + this block entirely.  Commented out (not removed) so Task 1
+    // isolates the routing change from the signature/buffer-deletion change.
+    // for (int c = 0; c < numCh; ++c)
+    // {
+    //     sumBuf.addFrom(c, 0, layersBuf, c, 0, numSamples);
+    //     sumBuf.addFrom(c, 0, bassBuf,   c, 0, numSamples);
+    //     sumBuf.addFrom(c, 0, drumsBuf,  c, 0, numSamples);
+    // }
+    // // Audio clips bus (post-rack, post-fader) summed here so master rack sees it
+    // if (audioClipsPreRendered != nullptr)
+    // {
+    //     const int srcCh = juce::jmin(numCh, audioClipsPreRendered->getNumChannels());
+    //     for (int c = 0; c < numCh; ++c)
+    //         sumBuf.addFrom(c, 0, *audioClipsPreRendered, c % srcCh, 0, numSamples);
+    // }
+    juce::ignoreUnused (layersBuf, bassBuf, drumsBuf, audioClipsPreRendered);
 
     // 5F-4b B1b: also sum any signals routed DIRECTLY to Master (insert → Master
     // main-cable drops, or sends targeting kMaster). Accumulator contents are
@@ -1619,10 +1624,27 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
 {
     using namespace MixerChannelIds;
 
+    // QA-Ea Part A (2026-05-21): unified bus-solo gate.  Computed ONCE here
+    // and shared across every bus's chain (L/B/D + FxBus + generic Clips/Vox/
+    // Inst/Vox2/Inst2/Inst3/Rusty).  Replaces the 3 prior scattered formulas:
+    // (1) per-BusNode L+B+D-sibling sums in processChainOnly,
+    // (2) the generic-path `useGroupSolo` 6-bus formula at the Clips/Vox/
+    //     Inst switch below + the ClipsBus 6-bus override,
+    // (3) PluginProcessor.cpp's receive-group busAnySolo that excluded L/B/D.
+    // GUARDRAIL: anyBusSoloed reads BUS _solo ONLY -- never strip-level.
+    // Per-strip _solo is a separate axis (InsertNode's own gate); untouched.
+    // Caller's `anySolo` parameter becomes redundant (it was the in-group
+    // 6-bus subset); kept in the signature to avoid touching every caller
+    // until QA-Ef cleanup -- the local `anyBus` below overrides it.
+    const bool anyBus = anyBusSoloed();
+    juce::ignoreUnused (anySolo);   // QA-Ea Part A: superseded by anyBus
+
     // Pre-existing helpers handle Master + FxBus.  These already push SC,
     // run their own DSP chain, and drain peaks; processBus just delegates.
+    // QA-Ea Part A (2026-05-21): pass anyBus to processEffectsBus instead of
+    // the now-dead caller anySolo so FxBus gates uniformly with the other 10.
     if (busChId == kMaster)  { processMasterBus(buf, bpm);                       return; }
-    if (busChId == kFxBus)   { processEffectsBus(buf, bpm, anySolo, panLaw);     return; }
+    if (busChId == kFxBus)   { processEffectsBus(buf, bpm, anyBus, panLaw);      return; }
 
     // Push SC array before any DSP so source-side fanout reaches consumer DSP.
     pushScArrayToStrip(busChId);
@@ -1635,7 +1657,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     if (busChId == kLayersBus)
     {
         if (mLayersNode == nullptr) return;
-        mLayersNode->processChainOnly(buf, bpm);
+        mLayersNode->processChainOnly(buf, bpm, anyBus);
         layersPeakDb .store(mLayersNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         layersPeakDbL.store(mLayersNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         layersPeakDbR.store(mLayersNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
@@ -1644,7 +1666,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     if (busChId == kBassBus)
     {
         if (mBassNode == nullptr) return;
-        mBassNode->processChainOnly(buf, bpm);
+        mBassNode->processChainOnly(buf, bpm, anyBus);
         bassPeakDb .store(mBassNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         bassPeakDbL.store(mBassNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         bassPeakDbR.store(mBassNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
@@ -1653,7 +1675,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     if (busChId == kDrumsBus)
     {
         if (mDrumsNode == nullptr) return;
-        mDrumsNode->processChainOnly(buf, bpm);
+        mDrumsNode->processChainOnly(buf, bpm, anyBus);
         drumsPeakDb .store(mDrumsNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         drumsPeakDbL.store(mDrumsNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         drumsPeakDbR.store(mDrumsNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
@@ -1674,8 +1696,12 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     EffectRack* rack   = nullptr;
     EQ8MsDSP*  postEq = nullptr;
     juce::String prefix;
-    bool inGroupSolo = false;       // does this bus participate in the receive-group solo gate?
-    bool useGroupSolo = anySolo;    // 7-bus formula from caller; ClipsBus overrides below
+    // QA-Ea Part A (2026-05-21): inGroupSolo + useGroupSolo retired.  Every
+    // bus shares the unified canonical formula `silenced = muted || (anyBus
+    // && !soloed)`.  Previously: 6-bus subsets (different per-bus depending
+    // on Clips override / Rusty standalone) excluded L/B/D + FX inconsistently
+    // -- the root cause of "solo dead on 7 of 11 buses".  Now: anyBus is
+    // computed once at top of processBus via anyBusSoloed() (all 11 buses).
 
     switch (busChId)
     {
@@ -1684,48 +1710,30 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             rack   = getAudioClipsBusRack();
             postEq = getAudioClipsBusEQ();
             prefix = "mixer_clipsbus";
-            inGroupSolo = true;
-            // Pre-existing 6-bus formula (FX not included in receive-group set).
-            // Preserved bug-for-bug from the inline ClipsBus code: the Vox/Inst
-            // BusSet[] loop's busAnySolo includes mixer_fx_solo (added in C.1)
-            // but ClipsBus's localAnySolo did not pick that up.  Latent
-            // inconsistency, not a 9b fix.
-            {
-                auto soloOfLocal = [this] (const char* p) -> bool {
-                    const auto* v = mApvts->getRawParameterValue (juce::String(p) + "_solo");
-                    return v && v->load() > 0.5f;
-                };
-                useGroupSolo =
-                       soloOfLocal ("mixer_clipsbus")
-                    || soloOfLocal ("mixer_voxbus")  || soloOfLocal ("mixer_instbus")
-                    || soloOfLocal ("mixer_voxbus2") || soloOfLocal ("mixer_instbus2")
-                    || soloOfLocal ("mixer_instbus3");
-            }
             break;
         case kVoxBus:
             preEq  = getVoxBusPreEQ();   rack = getVoxBusRack();   postEq = getVoxBusEQ();
-            prefix = "mixer_voxbus";     inGroupSolo = true;
+            prefix = "mixer_voxbus";
             break;
         case kInstBus:
             preEq  = getInstBusPreEQ();  rack = getInstBusRack();  postEq = getInstBusEQ();
-            prefix = "mixer_instbus";    inGroupSolo = true;
+            prefix = "mixer_instbus";
             break;
         case kVoxBus2:
             preEq  = getVoxBus2PreEQ();  rack = getVoxBus2Rack();  postEq = getVoxBus2EQ();
-            prefix = "mixer_voxbus2";    inGroupSolo = true;
+            prefix = "mixer_voxbus2";
             break;
         case kInstBus2:
             preEq  = getInstBus2PreEQ(); rack = getInstBus2Rack(); postEq = getInstBus2EQ();
-            prefix = "mixer_instbus2";   inGroupSolo = true;
+            prefix = "mixer_instbus2";
             break;
         case kInstBus3:
             preEq  = getInstBus3PreEQ(); rack = getInstBus3Rack(); postEq = getInstBus3EQ();
-            prefix = "mixer_instbus3";   inGroupSolo = true;
+            prefix = "mixer_instbus3";
             break;
         case kRustyDrumsBus:
             preEq  = getRustyDrumsBusPreEQ(); rack = getRustyDrumsBusRack(); postEq = getRustyDrumsBusEQ();
-            prefix = "mixer_rustybus";        inGroupSolo = false;          // standalone bus
-            useGroupSolo = false;
+            prefix = "mixer_rustybus";
             break;
         default:
             jassertfalse;
@@ -1764,7 +1772,11 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         default: break;
     }
 
-    // Fader * mute * (in-group solo for receive-group buses only).
+    // Fader * mute * unified bus-solo gate.
+    // QA-Ea Part A (2026-05-21): canonical formula across every bus:
+    //   silenced = muted || (anyBus && !soloed)
+    // anyBus = VibeGraph::anyBusSoloed() (all 11 bus _solo params).
+    // Identical formula to L/B/D BusNode::processChainOnly above.
     {
         const auto* lvlP   = mApvts->getRawParameterValue (prefix + "_level");
         const auto* muteP  = mApvts->getRawParameterValue (prefix + "_mute");
@@ -1772,7 +1784,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         const float dB     = lvlP ? lvlP->load() : 0.0f;
         const bool  muted  = muteP && muteP->load() > 0.5f;
         const bool  soloed = soloP && soloP->load() > 0.5f;
-        const bool  silenced = muted || (inGroupSolo && useGroupSolo && ! soloed);
+        const bool  silenced = muted || (anyBus && ! soloed);
         const float gain   = silenced ? 0.0f : juce::Decibels::decibelsToGain (dB, -60.0f);
         if (gain != 1.0f) buf.applyGain (gain);
     }
@@ -2683,6 +2695,21 @@ void VibeGraph::rebindBusApvts()
     if (mInstBus3Node)      mInstBus3Node      ->rebindApvts(*mApvts, "mixer_instbus3");
     if (mRustyDrumsBusNode) mRustyDrumsBusNode ->rebindApvts(*mApvts, "mixer_rustybus");
     if (mMasterNode)        mMasterNode        ->rebindApvts(*mApvts, "mixer_master");
+
+    // QA-Ea Part A (2026-05-21): cache bus _solo atomic pointers for the
+    // anyBusSoloed() helper.  Order matches mBusSoloPtr[11] declaration in
+    // VibeGraph.h.  CPU-safeguarding standing rule: cache the raw atomic
+    // ptrs once + reuse, avoid 11 string-keyed getRawParameterValue lookups
+    // per audio block.  Master is excluded -- it has no _solo param + no
+    // sibling to solo against.
+    static constexpr const char* kBusSoloPrefixes[11] = {
+        "mixer_layers", "mixer_bass", "mixer_drums", "mixer_fx", "mixer_clipsbus",
+        "mixer_voxbus", "mixer_instbus", "mixer_voxbus2", "mixer_instbus2",
+        "mixer_instbus3", "mixer_rustybus"
+    };
+    for (int i = 0; i < 11; ++i)
+        mBusSoloPtr[(size_t) i] = mApvts->getRawParameterValue (
+            juce::String (kBusSoloPrefixes[i]) + "_solo");
 }
 
 bool VibeGraph::isAnyInsertSoloed() const noexcept
@@ -2691,6 +2718,25 @@ bool VibeGraph::isAnyInsertSoloed() const noexcept
         for (const auto& [i, node] : *m)
             if (node->isSoloed())
                 return true;
+    return false;
+}
+
+// QA-Ea Part A (2026-05-21): unified bus-solo helper.
+//
+// GUARDRAIL: reads BUS _solo params ONLY via the cached mBusSoloPtr array.
+// MUST NEVER call isAnyInsertSoloed() (strip-level) -- the prior serial bug
+// muted whole buses when one strip soloed, warned at
+// PluginProcessor.cpp:1876-1885 + recorded in §9 nineteenth Forks.  Per-strip
+// _solo is a separate axis owned by InsertNodes and is untouched.
+//
+// Called at audio rate (every block in every bus's processChainOnly path);
+// cached-atomic loads keep it O(11) per call with no per-block string-keyed
+// APVTS lookups.
+bool VibeGraph::anyBusSoloed() const noexcept
+{
+    for (auto* p : mBusSoloPtr)
+        if (p != nullptr && p->load (std::memory_order_relaxed) > 0.5f)
+            return true;
     return false;
 }
 

@@ -1938,6 +1938,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         // useGroupSolo = anySolo formula would otherwise mute the bus
         // whenever any STRIP is soloed -- the serial bug surfaced under MT
         // because PassiveStripTask was passing strip-level anySolo).
+        // QA-Ea Part A (2026-05-21): busAnySolo here is now DEAD STATE.
+        // VibeGraph::processBus computes its own anyBus via the unified
+        // anyBusSoloed() helper (all 11 bus _solo params) and ignores the
+        // caller-passed anySolo param.  Kept compiled to avoid touching every
+        // call site + every BlockContext field; QA-Ef ST deletion + the MT
+        // BlockContext slim-down will drop this and the mtCtx.busAnySolo
+        // field entirely.
         auto soloOfBus = [this] (const char* prefix) -> bool
         {
             const auto* p = apvts.getRawParameterValue (juce::String (prefix) + "_solo");
@@ -2581,6 +2588,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                    bpmForInserts, /*anySolo (ignored)*/ false,
                                    clipsPanLaw);
 
+            // QA-Ea Part B (Q2): serial currently reaches master for Clips ONLY
+            // via the bespoke audioClipsPreRendered sum.  Route kClipsBus →
+            // kMaster like every other bus (the kClipsBus→kMaster edge already
+            // exists; MT/MasterTask uses it).
+            routeInsertOutput (MixerChannelIds::kClipsBus, clipsBus, numSamples);
+
             // Hand the bus buffer to VibeGraph for the master rack.
             audioClipsBusForGraph = &clipsBus;
         }
@@ -2629,6 +2642,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         // (Audio Clips, Vox, Inst, Vox2, Inst2, Inst3).  When ANY bus in this
         // group is soloed, all non-soloed buses in the group go silent
         // (matches Layers/Bass/Drums in-group solo).  C.1: FX joins the group.
+        // QA-Ea Part A (2026-05-21): busAnySolo here is now DEAD STATE -- the
+        // 7-bus subset was the root cause of "solo dead on 7 of 11 buses".
+        // VibeGraph::processBus now computes its own anyBus via the unified
+        // anyBusSoloed() helper (all 11 buses) and ignores the caller-passed
+        // anySolo param.  Kept compiled to avoid touching every processBus
+        // call site; QA-Ef ST deletion will drop this entirely along with
+        // the rest of the serial tail.
         auto soloOf = [&] (const char* prefix) -> bool
         {
             const auto* p = apvts.getRawParameterValue (juce::String (prefix) + "_solo");
@@ -2740,6 +2760,20 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 routeInsertOutput (MixerChannelIds::kRustyDrumsBus, *accum, numSamples);
             }
         }
+    }
+
+    // QA-Ea Part B: route Layers/Bass/Drums through the generic path so the
+    // serial path matches the MT MasterTask model.  Inserts already fan into
+    // these accumulators (PluginProcessor.cpp:1972/2011/2047).
+    for (int busChId : { MixerChannelIds::kLayersBus,
+                         MixerChannelIds::kBassBus,
+                         MixerChannelIds::kDrumsBus })
+    {
+        auto* accum = mVibeGraph.getChannelAccumulator (busChId);
+        if (accum == nullptr || accum->getNumChannels() < 2) continue;
+        mVibeGraph.processBus (busChId, *accum, bpmForInserts,
+                               /*anySolo unused post-Part-A*/ false, /*panLaw*/ 0);
+        routeInsertOutput (busChId, *accum, numSamples);
     }
 
     // 5F-4b B1b: feed the Layer/Bass/Drums bus accumulators (populated above
