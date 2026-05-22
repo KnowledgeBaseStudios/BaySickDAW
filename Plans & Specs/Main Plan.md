@@ -1122,7 +1122,7 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Ef: Serial (ST) Render-Path Deletion — Single MT Path** *(NEW — inserted 2026-05-18)*
 
-**Plan file:** `Plans & Specs/Batch Plans/<silly-name>.md` (when started)
+**Plan file:** `Plans & Specs/Batch Plans/synchronous-dreaming-hummingbird.md`
 - Items: delete the serial (ST) render path (`PluginProcessor.cpp` serial tail, ~960 lines after the MT branch early-return `:1932`) so MT is the single render path.  Root motivation: dual hand-maintained ST/MT parity is a proven recurring bug class (§9 twenty-fifth Forks MT-divergence finding — 3 serial-only feeds leaked: master recorder, MIDI recorder, metronome/count-in); sole-coder + session-fog risk makes a single path structurally safer.
 - Scope:
   - Remove the serial render tail + the `gMultiThreadedEngineEnabled` branch; MT (`RenderGraphDispatcher`) becomes unconditional.
