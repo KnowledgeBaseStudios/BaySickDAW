@@ -592,9 +592,11 @@ public:
     // is untouched.
     //
     // O(11) cached-atomic loads per call; safe to call from the audio thread.
-    // Cached pointers bound in rebindBusApvts(); rebound on every APVTS
-    // rebind (sample-rate change, project state load) so pointers never
-    // stale.
+    // Cached pointers bound in rebindBusApvts() (called from prepareToPlay, so
+    // rebound on sample-rate / block-size change).  Pointers stay valid across
+    // project state loads by JUCE contract: replaceState swaps the ValueTree
+    // but the RangedAudioParameter objects (whose internal atomics these point
+    // at) persist for the APVTS lifetime -- so no rebind on load is needed.
     bool anyBusSoloed() const noexcept;
 
     // 5F-4a Batch 6: apply audio-clips-bus polarity + M/S width in-place on buf.

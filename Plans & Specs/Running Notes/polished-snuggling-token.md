@@ -1147,3 +1147,114 @@ Plan file + running notes file (2 files):
 - Commit message goes through `/draft-commit` per `feedback_every_commit_via_draft_commit.md`; drafted message surfaced verbatim for owner approval per `feedback_drafter_output_verbatim_no_restyle.md` + `feedback_surface_drafted_commit_message_for_approval.md`. No self-restyle.
 
 **Status:** Task 0c implementation COMPLETE in tree; chop fix + (A') + (B') + (C') + (D') all owner-verified; diagnostic instrumentation stripped; plan-file reconciled; ready for source-landing commit. QA-Ea Task 0 still open. **Resume action:** dispatch `/draft-commit` for the Task 0c source-landing commit; surface drafted message + full git status for owner approval; commit on green-light.
+
+### 2026-05-21 — Task 0c → Part B Task 1 — applied; Part-B null test FAILED (L/B/D residual, both paths)
+
+Follow-on to the `### 2026-05-20 — Task 0c — Ready for source-landing commit (16 files dirty atop `fd6c62f`)` sub-block above. **Two committed milestones intervene between that stamp and this one and are NOT re-narrated here** (no running-notes stamp was cut for either at the time; flagged for the close entry's commit trail): the Task 0c source-landing commit `c5c5deb` (the readiness stamp's `/draft-commit` work, post-amend cleanup), and the QA-Ee batch-open doc commit `537a0ba` (Main Plan §5/§6/§9 96-PPQ entries). This stamp picks up at the first QA-Ea Part-B source work. Task 0c is landed; QA-Ea Task 0 closes into Part B here.
+
+**Part B Task 1 applied (interim output-routing refactor).** Per the long-standing §6 plan, Layers/Bass/Drums + Clips bus outputs were re-pointed to route through `routeInsertOutput` -> `kMaster` (the modern pattern the MT path already uses) instead of the legacy bespoke `addFrom` sum in `VibeGraph::processBlock`. Edits:
+- New L/B/D for-loop in `PluginProcessor::processBlock` (before the `mVibeGraph.processBlock` call) + a Clips `routeInsertOutput` call carrying the routing.
+- Legacy `fillFromPreRendered` + `processBus` L/B/D calls removed in `VibeGraph::processBlock`; the bespoke `addFrom`s commented out (Task 2 was to delete the dead buffers + signature params).
+
+**Owner null test — Part-B 'before' vs 'after' master capture FAILED on L/B/D content.** Per the in-app null-test method locked in the verification-methodology pivot sub-block (record-nothing-armed master capture, one polarity-flipped, summed against the pre-Part-B reference): the song / Clips portion cancelled clean, but the **L/B/D portion left an audible residual** — a real divergence introduced by Task 1's routing change. **Reproduces in BOTH MT and ST** (not the serial-only class). Diagnose-before-fixing engaged rather than guess at a routing patch (`feedback_diagnose_before_fixing.md`).
+
+**Process compliance this checkpoint.**
+- Null test run exactly per the locked in-app method (no fabricated WAV / bit-compare ceremony), per the verification-methodology pivot sub-block.
+- Regression caught at the gate, not waved through — the residual blocks the Part-B GATE as written.
+
+**Uncommitted state.** Task 1 source edits (`Source/PluginProcessor.cpp`, `Source/VibeGraph.cpp`) dirty in tree on top of `c5c5deb` / `537a0ba`. No commit cut this checkpoint — the gate is red. This running-notes stamp becomes dirty when applied.
+
+**Status:** Part B Task 1 applied; Part-B null test FAILED with an audible L/B/D residual in BOTH MT and ST; root not yet isolated. QA-Ea Task 0 closing into Part B. **Resume action:** diagnose the residual before any fix — see next entry.
+
+### 2026-05-21 — Part B — Residual diagnosed (double-processBus ruled out as cause); strategic-pivot question surfaced
+
+Follow-on to the `### 2026-05-21 — Task 0c → Part B Task 1 — applied; Part-B null test FAILED (L/B/D residual, both paths)` sub-block above. Diagnosis stamp — no fix applied; root NOT fully isolated before the strategic pivot decided the matter (see next entry). Diagnose-before-fixing held (`feedback_diagnose_before_fixing.md`).
+
+**First hypothesis — double-`processBus` per block — fixed but NOT the cause.** Task 1's new L/B/D for-loop AND the legacy `VibeGraph::processBlock` L/B/D calls were both running the bus chain → a double state-advance per block. Removed the legacy `fillFromPreRendered` + `processBus` L/B/D calls. **Did NOT resolve the residual.**
+
+**Why double-process is inaudible here (verified, not assumed).** With no effects + all-default bus settings, the bus chain short-circuits at every stage — flat-EQ identity, gain == 1.0, compDelay == 0 — so a redundant state-advance produces no audible delta. That means the residual is **Task 1's routing change itself diverging**, not the double-process. Root cause was NOT fully isolated to a specific line before the pivot below superseded the investigation.
+
+**Strategic-pivot insight (owner).** QA-Ef deletes the ENTIRE ST render path (~960-line serial tail). Task 1 was changing the *doomed* ST path's routing to match what the MT path already does — i.e., the residual lives on a code path slated for deletion, and Task 1 itself is pure duplication of an existing-correct MT behavior. This reframed "root-cause the residual" into "should Part B exist at all?" — resolved in the next entry.
+
+**Process compliance this checkpoint.**
+- Did NOT ship a guessed routing fix — the double-process hypothesis was tested + falsified, and the divergence localized to "Task 1 routing vs the doomed ST path" before any further code (`feedback_diagnose_before_fixing.md`).
+- Short-circuit reasoning verified against the actual bus-chain stages (flat-EQ / unity-gain / zero-compDelay), not asserted (`feedback_check_code_before_calling_it_expected.md`).
+
+**Status:** double-`processBus` fixed but ruled out as the residual's cause; root not fully isolated; owner's QA-Ef-deletion insight reframed the whole of Part B. QA-Ea Task 0 closing into Part B. **Resume action:** owner strategic spec call on Part B's existence — see next entry.
+
+### 2026-05-21 — Part B — STRUCK as redundant with QA-Ef (owner spec call); Task 1 left in tree
+
+Follow-on to the `### 2026-05-21 — Part B — Residual diagnosed` sub-block above. Owner strategic spec call resolving the reframed question. No new source this checkpoint beyond the prior double-process removal already in tree; this is a scope decision + a solo-scope correction.
+
+**Spec call — Part B (Tasks 1 + 2) STRUCK as redundant (owner, 2026-05-21).** The original premise was that L/B/D + Clips routing had to be unified to *enable* the solo fix. That premise is false: the solo fix lives entirely in the shared `VibeGraph::processBus` helper and never needed the routing refactor (see the Part A entry below). With QA-Ef slated to delete the ST path, Part B unifying the ST path's routing to match the already-correct MT path is pure duplication of work the deletion makes moot. **Part A (the single solo gate) is the surviving value of the QA-Ea batch.**
+
+**Spec call — Task 1's source LEFT in tree, NOT reverted (owner).** ST is not the production binary, there is no current release, and QA-Ef deletes the ST path wholesale — so reverting Task 1's edits is wasted churn against code about to be deleted. Task 1 stays in tree carrying a **known interim ST-only L/B/D routing regression** (the un-root-caused null residual). MT (the surviving + default path) is unaffected: every Task-1 edit lives *after* the MT early-return in `PluginProcessor::processBlock`. Per `feedback_slot_placement_is_spec_call.md` + `feedback_dont_make_unilateral_spec_calls.md` — the leave-in-tree call was the owner's, surfaced with the revert alternative, not a unilateral pick.
+
+**Solo-scope correction (owner testing, worse than the original SC2 framing).** The batch-open SC2 framing assumed a partially-working solo system. Owner testing found the real pre-fix state was worse: only **Layers / Bass / Drums** solo buttons did anything at all — and even those only **muted each other**, never affecting Clips / Vox / Inst / etc. The other **8 of 11** bus solo buttons (FX, Clips, Vox, Inst, Vox2, Inst2, Inst3, Rusty) were dead **no-ops**. This is the accurate pre-fix baseline the Part A fix is measured against; the original "partially soloable" framing is corrected here. Owned per `feedback_own_the_codebase_no_git_alibi.md` (the wrong-count framing was mine; corrected when owner's testing surfaced the real state).
+
+**Process compliance this checkpoint.**
+- Part-B strike + Task-1-leave-in-tree were owner spec calls with alternatives surfaced (revert vs leave; struck vs root-cause-then-keep), not unilateral picks (`feedback_dont_make_unilateral_spec_calls.md`).
+- The reframe did not bull-charge into a fix — the pivot was decided as a scope question and confirmed by owner before any further code (`feedback_plan_and_wait_for_explicit_confirm_on_semantics_changes.md`).
+- Solo-scope miscount owned + corrected against owner's hands-on testing (`feedback_own_the_codebase_no_git_alibi.md`).
+
+**Status:** Part B (Tasks 1 + 2) STRUCK as redundant with QA-Ef; Task 1 source left in tree with a known interim ST-only regression (MT unaffected); solo-scope corrected to 8-of-11-dead. QA-Ea reduced to Part A as the surviving value. **Resume action:** implement Part A — the single canonical solo gate in the shared `processBus` helper (next entry).
+
+### 2026-05-21 — Part A — Bus-solo unification implemented + committed `c648fb7`
+
+Follow-on to the `### 2026-05-21 — Part B — STRUCK as redundant with QA-Ef` sub-block above. Part A — the single canonical solo gate — implemented, owner-verified, and committed together with the (struck-but-left-in-tree) Task 1 source per the owner's bundle call. This is the surviving value of QA-Ea.
+
+**Root cause (three scattered inconsistent solo formulas, each covering a different bus subset).**
+- Per-`BusNode` L+B+D-sibling-only sums inside `LayersBusNode` / `BassBusNode` / `DrumsBusNode::processChainOnly`.
+- Generic-path `useGroupSolo` 6-bus formula in `VibeGraph::processBus` (Clips / Vox / Inst / Vox2 / Inst2 / Inst3) plus a ClipsBus 6-bus override + a Rusty standalone special-case.
+- `PluginProcessor.cpp`'s receive-group `busAnySolo` (a 7-bus subset that excluded L/B/D entirely).
+
+**Fix — one canonical formula, computed once, shared.**
+- New `VibeGraph::anyBusSoloed()` ([VibeGraph.h](Source/VibeGraph.h) decl + [VibeGraph.cpp](Source/VibeGraph.cpp) def) reads ALL 11 bus `_solo` params via cached `mBusSoloPtr[11]` atomic pointers bound in `rebindBusApvts()` (order matches the new `kBusSoloPrefixes[11]` = layers / bass / drums / fx / clipsbus / voxbus / instbus / voxbus2 / instbus2 / instbus3 / rustybus).
+- Canonical formula `silenced = thisMuted || (anyBusSoloed && !thisSolo)`, computed once per block at the top of `VibeGraph::processBus` and shared, now applied uniformly to every bus:
+  - L/B/D `BusNode::processChainOnly` signatures gained a `bool anyBusSoloed` param (legacy 3-sibling sums deleted; `pSiblingBass` / `pSiblingDrum` / `pSiblingLayers` members left as dead state for minimal churn).
+  - FxBus's `processEffectsBus` now receives `anyBus` instead of the dead caller `anySolo`.
+  - The generic Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty path drops `inGroupSolo` / `useGroupSolo` / the ClipsBus override / the Rusty standalone special-case and uses `anyBus` directly.
+
+**GUARDRAIL held (per §9 nineteenth Forks).** `anyBusSoloed()` reads BUS `_solo` ONLY — never strip / insert-level `isAnyInsertSoloed()` (the prior serial bug that muted whole buses when a single strip soloed). Per-strip `_solo` is a separate axis owned by `InsertNode` and is untouched.
+
+**Both render paths covered for free.** Because the fix lives in the shared `VibeGraph::processBus`, it covers BOTH the serial AND the MT (`PassiveStripTask`) render paths from one site. `PluginProcessor.cpp`'s two old `busAnySolo` computations are left dead-but-harmless (documented inline; die with the QA-Ef ST deletion).
+
+**Owner verification.** Owner verified 8 of 11 buses hands-on in BOTH Debug and Release; Vox2 / Inst2 / Inst3 confirmed by identical code-path equivalence (same generic `switch` branch as the verified Vox / Inst / etc.).
+
+**Commit landed — `c648fb7`.** "QA-Ea Part A bus-solo unification + Part B Task 1 interim output-routing refactor." 3 source files, +204 / -103 (`Source/VibeGraph.cpp` +252/-103, `Source/VibeGraph.h` +21, `Source/PluginProcessor.cpp` +34); no docs touched. **Two changes bundled deliberately per owner's Option B:** Part A (the real owner-verified value) + Part B Task 1 (interim-broken in ST). Rationale: the ST path dies in QA-Ef and there is no current release, so Task 1's interim ST regression is acceptable to land alongside Part A rather than churn a revert.
+
+**Two side findings flagged for the §9 Forks entry at batch close (NOT fixed in `c648fb7`).**
+- Old pre-Task-0c projects load with empty Builder grid + empty Audio Clips + dirty-on-load (a Task 0c regression).
+- The Task 1 ST null-test residual itself (moot post-QA-Ef).
+
+**Process compliance this checkpoint.**
+- GUARDRAIL (bus `_solo` only, never strip-level) honored exactly per the §9 nineteenth Forks lock — not re-litigated.
+- Commit routed through `/draft-commit`; drafted message surfaced verbatim + full pre-commit git status surfaced for owner approval before `git commit` (`feedback_every_commit_via_draft_commit.md` + `feedback_surface_drafted_commit_message_for_approval.md` + `feedback_surface_full_git_status_before_commit.md` + `feedback_drafter_output_verbatim_no_restyle.md`).
+- The bundle-both-changes decision was the owner's call, not unilateral (`feedback_dont_make_unilateral_spec_calls.md`).
+
+**Status:** Part A bus-solo unification committed `c648fb7` + owner-verified (8 of 11 hands-on, 3 by code-path equivalence) in Debug + Release; covers serial + MT from the shared `processBus`; Task 1 bundled in (interim ST-only regression, MT unaffected). Two side findings flagged for the close §9 Forks entry. **Resume action:** mandatory `/review-batch` (hot-path) before close — see next entry.
+
+### 2026-05-21 — QA-Ea — CLOSED — `/review-batch` clean + close paperwork (QA-Ef re-slotted up)
+
+Follow-on to the `### 2026-05-21 — Part A — Bus-solo unification implemented + committed `c648fb7`` sub-block above. Batch-close stamp — mandatory `/review-batch`, the §9 / §5 / §6 close paperwork, and the QA-Ef re-slot. No new source this checkpoint.
+
+**Mandatory `/review-batch` (hot-path) — READY-TO-COMMIT.** Zero BLOCKER, zero NEEDS-FIX. All 6 audio-thread-safety + correctness items passed; the GUARDRAIL (bus `_solo` only, never strip-level `isAnyInsertSoloed()`) confirmed held. One NIT — a [VibeGraph.h](Source/VibeGraph.h) doc comment overstated the rebind-on-state-load lifecycle (the cached `mBusSoloPtr[11]` pointers stay valid by JUCE's APVTS contract regardless, so no runtime bug) — **fixed in-place** before close.
+
+**QA-Ef re-slotted up to immediately after QA-Ea** (was: before QA-F). Rationale: deleting the ST path now clears Task 1's interim regression AND the ST/MT dual-maintenance burden before QA-Ed / QA-Ee / QA-Eb / QA-Ec land, so those batches build on a single render path. The gate "MT proven on all 3" (master recorder + MIDI recorder + metronome / count-in working in MT) is satisfied by Task 0b `f28319e`.
+
+**Close paperwork applied** (the drafter proposes; parent applies via targeted Edits, anchors verified by direct read first, per `feedback_targeted_edits_not_wholesale_rewrite.md`):
+- §9 twenty-seventh Forks entry — the Part-B strike + Task-1-left-in-tree + the two side findings, back-ref QA-Ea (source `c648fb7`).
+- Main Plan §5 — QA-Ea STATUS banner (Part A done, Part B struck) + the QA-Ef gate / re-slot note.
+- §6 arrow updated for the QA-Ef move-up + the QA-Ef footnote.
+- This batch plan's CLOSE STATUS banner.
+
+**Side finding NOT fixed (owner's call).** Old pre-Task-0c projects load with empty Builder + empty Audio Clips (a Task 0c regression). Deferred per owner — no current release, and the affected projects are the owner's scratch test files. Recorded in the §9 twenty-seventh Forks entry; this is a Jeff spec call with explicit justification, the sanctioned form of deferral per `feedback_qa_batches_fix_bugs_dont_defer.md` (not a unilateral punt).
+
+**Process compliance this checkpoint.**
+- `/review-batch` run before close (hot-path mandatory per the §0 batch-close sequence); the one NIT fixed in-place, not deferred.
+- No separate Release re-verify gate surfaced at close — owner's per-task Debug + Release cycle on `c648fb7` already covered both (`feedback_no_full_release_reverify_at_batch_close.md`).
+- All four classes of spec call this arc — Part-B strike, Task-1-leave-in-tree, QA-Ef re-slot, old-project-load-defer — were owner calls surfaced with alternatives, not unilateral picks (`feedback_dont_make_unilateral_spec_calls.md` + `feedback_slot_placement_is_spec_call.md`).
+- Diagnose-before-fixing held across the whole arc — no guessed routing fix shipped; the pivot was made because the root wasn't isolatable AND the code was slated for deletion (`feedback_diagnose_before_fixing.md`).
+- Owned the wrong-count solo-scope miscount + the dramatized "Task 0c much bigger problem" framing when owner corrected, leading with diagnosis not deflection (`feedback_own_the_codebase_no_git_alibi.md`).
+
+**Status:** **QA-Ea CLOSED.** Part A bus-solo fix done (`c648fb7`) + `/review-batch` clean (one NIT fixed in-place); Part B (Tasks 1 + 2) struck as redundant with QA-Ef; Task 0 / 0b / 0c done; close paperwork (§9 twenty-seventh Forks + §5 STATUS banner + §6 arrow / footnote + plan CLOSE banner) applied. **Resume action:** open **QA-Ef** (delete the ST render path) — its own §0-conformant per-batch plan file + mandatory `/review-batch`; the "MT proven on all 3" gate is satisfied (Task 0b `f28319e`).

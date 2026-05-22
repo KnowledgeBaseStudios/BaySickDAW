@@ -1,5 +1,13 @@
 # QA-Ea — Bus Solo + Layers/Bass/Drums Output-Path Unification (DSP-09) — Plan (polished-snuggling-token)
 
+> **CLOSE STATUS (2026-05-21):**
+> - **Task 0 / 0b / 0c — DONE** (Issue 2 viewport carry-forward; MT serial-tail 3-bug shared-helper fix `f28319e`; FL pre-roll record + non-destructive clip trim + slip/stretch `c5c5deb`).
+> - **Part A (bus-solo fix) — DONE** `c648fb7`: unified `VibeGraph::anyBusSoloed()` + canonical `silenced = thisMuted || (anyBusSoloed && !thisSolo)` across all 11 buses (pre-fix: dead on 8 of 11).  `/review-batch` clean.  Owner-verified 8/11 hands-on + 3 by code-path equivalence.  This is Tasks 3 + 4 below.
+> - **Part B (output-path unification — Tasks 1 + 2 below) — STRUCK.**  Redundant with QA-Ef ST-path deletion (the solo fix lives in the shared `processBus`, never needed the routing refactor).  Task 1 source left in tree as a KNOWN interim ST-only routing regression (MT unaffected — all Task-1 edits are after the MT early-return); it dies in QA-Ef.  Task 2 not done.
+> - **Side finding NOT fixed** (owner's call — no release, owner's own scratch files): old pre-Task-0c projects load with empty Builder + Audio Clips + dirty-on-load (Task 0c regression).
+> - **QA-Ef re-slotted up next** to delete the ST path + clear the Task-1 regression.
+> - See Main Plan §9 twenty-seventh Forks entry for the full close record.
+
 > **Canonical path** (mirrored after ExitPlanMode + approval):
 > `Plans & Specs/Batch Plans/polished-snuggling-token.md`
 > Paired running notes: `Plans & Specs/Running Notes/polished-snuggling-token.md`

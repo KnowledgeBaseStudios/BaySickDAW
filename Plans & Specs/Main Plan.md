@@ -956,6 +956,8 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Ea: Bus Solo + Layers/Bass/Drums Output-Path Unification (DSP-09)** *(NEW — inserted 2026-05-15)*
 
+> **STATUS (2026-05-21 close):** **Part A (bus-solo fix) DONE** — landed `c648fb7`; unified `VibeGraph::anyBusSoloed()` + one canonical formula across all 11 buses (was dead on 8 of 11); `/review-batch` clean.  **Part B (output-path unification — Tasks 1 + 2) STRUCK** as redundant with QA-Ef ST-path deletion (the solo fix lives in the shared `processBus`, never needed the routing refactor).  Task 1's interim source left in tree (known ST-only routing regression; MT unaffected; dies in QA-Ef).  Earlier Task 0/0b/0c work (MT serial-tail 3-bug fix, FL pre-roll record + non-destructive clip trim) shipped under this batch too.  Side finding NOT fixed (owner's call, no release): old pre-Task-0c projects load with empty Builder + Audio Clips.  See §9 twenty-seventh Forks entry.
+
 **Plan file:** `Plans & Specs/Batch Plans/polished-snuggling-token.md`
 - Items: **DSP-09** (bus solo) + **Layers/Bass/Drums bus-output-path
   unification** (the architecturally-correct fix that removes the
@@ -1128,8 +1130,8 @@ needed to find what you should pull up to review the work.
   - Pre-flight: confirm nothing is ST-only — the §9 twenty-fifth audit's mirrored/inert inventory is the starting checklist; re-verify at execution.
 - Own §0-conformant plan file + own **mandatory `/review-batch`** (hot-path rip-out).
 - Risk: **high** — deletes ~960 lines of the single hottest function; mitigated by the deliberate gate below + the §9 twenty-fifth mirrored-inventory.
-- Dependencies / **GATE**: gated on **"MT proven on all 3"** — the QA-Ea 3-bug shared-helper fix must be landed and the master recorder + MIDI recorder + metronome/count-in verified working in MT before this batch may start.
-- Sequencing: **immediately before QA-F** (`QA-E → QA-Ea → QA-Ed → QA-Eb → QA-Ec → QA-Ef → QA-F`).  Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; deliberate (not rushed mid-QA).  See §6 arrow + §9 twenty-fifth Forks entry.
+- Dependencies / **GATE**: gated on **"MT proven on all 3"** — **SATISFIED 2026-05-21**: the QA-Ea 3-bug shared-helper fix landed at Task 0b (`f28319e`) and the master recorder + MIDI recorder + metronome/count-in were verified working in MT.  Gate met → QA-Ef may start.
+- Sequencing: **RE-SLOTTED 2026-05-21 to immediately after QA-Ea** (was: immediately before QA-F).  New order: `QA-E → QA-Ea → QA-Ef → QA-Ed → QA-Ee → QA-Eb → QA-Ec → QA-F`.  Jeff's confirmed call per `feedback_slot_placement_is_spec_call.md`: QA-Ea Part B Task 1 left a known interim ST-only routing regression in tree, so deleting the ST path NEXT clears it + the ST/MT dual-maintenance burden before QA-Ed/Ee/Eb/Ec touch the audio path.  See §6 arrow + §9 twenty-fifth + twenty-seventh Forks entries.
 - Effort: medium-large (rip-out + 1-worker-mode diagnostic + full regression verify + mandatory `/review-batch`).
 - **Bucket:** Cross-cutting Infrastructure
 - Verify (own plan file will detail): every audio path (engines / buses / aux / master / recording / metronome / meters / DSP-load) works with ST gone; 1-worker MT mode reproduces serial-execution for diagnosis; no regression vs the MT-on baseline.
@@ -1626,7 +1628,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-Ef************* → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-Verify**** → QA-Export****
 ```
@@ -1793,17 +1795,20 @@ not band-aided.  Own §0-conformant plan file.  See §9 twenty-fifth
 Forks entry.
 
 \*\*\*\*\*\*\*\*\*\*\*\*\* **QA-Ef** inserted 2026-05-18 off the same
-QA-Ea MT serial-tail divergence investigation.  Slotted **immediately
-before QA-F** (Jeff's confirmed slot per
-`feedback_slot_placement_is_spec_call.md`; deliberate, not rushed
-mid-QA).  Scope: delete the serial (ST) render path (~960-line serial
-tail after the MT branch early-return) so MT is the single render path;
-preserve the serial-execution diagnostic via a 1-worker MT pool mode
-(not a duplicate code path).  **GATE: gated on "MT proven on all 3"**
-— the QA-Ea 3-bug shared-helper fix must be landed + the master
-recorder / MIDI recorder / metronome+count-in verified working in MT
-before this batch may start.  Own §0-conformant plan file + mandatory
-`/review-batch`.  See §9 twenty-fifth Forks entry.
+QA-Ea MT serial-tail divergence investigation.  **RE-SLOTTED 2026-05-21
+to immediately after QA-Ea (was: immediately before QA-F)** — Jeff's
+confirmed call: QA-Ea Part B Task 1 left a known interim ST-only routing
+regression in tree (deliberately, since it dies here), so deleting the
+ST path NEXT clears that regression + the ST/MT dual-maintenance burden
+before QA-Ed / QA-Ee / QA-Eb / QA-Ec touch the audio path.  Scope:
+delete the serial (ST) render path (~960-line serial tail after the MT
+branch early-return) so MT is the single render path; preserve the
+serial-execution diagnostic via a 1-worker MT pool mode (not a duplicate
+code path).  **GATE: "MT proven on all 3" — SATISFIED**: the QA-Ea
+3-bug shared-helper fix landed at Task 0b (`f28319e`) + the master
+recorder / MIDI recorder / metronome+count-in were verified working in
+MT, so the gate is met and QA-Ef may start.  Own §0-conformant plan file
++ mandatory `/review-batch`.  See §9 twenty-fifth + [next] Forks entries.
 
 \*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-Ee** inserted 2026-05-20 off the QA-Ea
 Task 0c Component 8 surface.  Slotted **immediately after QA-Ed, before
@@ -3778,3 +3783,41 @@ Per `feedback_slot_placement_is_spec_call.md` + `feedback_dont_make_unilateral_s
 - **NOT created (the unauthorized fabrications):** `Plans & Specs/Batch Plans/rhythmic-counting-octopus.md` (per-batch plan file — will be drafted when QA-Ee opens, NOT now) + `Plans & Specs/Running Notes/rhythmic-counting-octopus.md` (running notes seed — created when QA-Ee opens).
 
 **Verification:** n/a — routing / sequencing entry, no source change.  QA-Ee's own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-Ee opens): 10-label snap on each surface produces correct tick-aligned positions; existing saved-project loads correctly migrate; audio playback post-migration still plays from the right offset; MIDI recording with each of 10 quantize values commits at expected tick boundaries; triplet divisions don't drift on long projects.
+
+### 2026-05-21 — QA-Ea close: Part A bus-solo unified (landed); Part B output-path unification STRUCK (redundant with QA-Ef); QA-Ef re-slotted up next
+
+**Trigger:** QA-Ea Part B Task 1 (route Layers/Bass/Drums + Clips through `routeInsertOutput`→kMaster, neutralize the bespoke master sum) was applied + owner-tested 2026-05-21.  A record-nothing-armed master null test (post-Task-1 capture vs the pre-Task-1 2026-05-19 master WAV, one polarity-flipped, summed) left an **audible L/B/D residual** (the song/Clips portion cancelled cleanly; the Layers/Bass/Drums portion did not).  Owner confirmed the residual reproduces in BOTH MT and ST.
+
+**Diagnosis (what was + wasn't the cause):**
+- First hypothesis (double-`processBus` per block — my new PluginProcessor for-loop + the legacy `VibeGraph::processBlock` calls both running the bus chain) was real + fixed (removed the legacy L/B/D `fillFromPreRendered`+`processBus` calls), but did NOT resolve the residual.
+- With no effects + all-default bus settings, the bus chain short-circuits at every stage (flat-EQ identity, gain==1.0, comp-delay==0), so the state-advance of a double-process is inaudible — confirming Task 1's routing change itself is the divergence, not the double-process.  Root cause NOT fully pinned (the `routeInsertOutput`→kMaster→masterExtra path vs the legacy bespoke `addFrom` should be arithmetically equal; the actual divergence was not isolated before the strategic pivot below).
+- Owner's decisive insight: QA-Ef is slated to **delete the entire ST render path**.  Task 1 was making the doomed ST path's routing match what MT already does — fixing code about to be deleted.  Pure duplication.
+
+**Decision (Jeff, 2026-05-21):**
+1. **Part B (output-path unification — plan Tasks 1 + 2) STRUCK.**  Its only purpose was to enable a single solo gate; the solo fix turned out to live entirely in the shared `VibeGraph::processBus` helper and never needed the routing refactor.  With ST dying in QA-Ef, Part B is redundant.
+2. **Task 1's source left in tree, NOT reverted** (owner's call — ST is not the production binary, there is no current release, and QA-Ef deletes it; reverting is wasted churn on dying code).  It carries a **known interim ST-only L/B/D routing regression**; MT (the surviving + default path) is unaffected because every Task-1 edit lives after the MT early-return.  Committed `c648fb7` documents it as interim.
+3. **Part A (bus-solo fix) is the surviving value — LANDED `c648fb7`.**  New `VibeGraph::anyBusSoloed()` (cached `mBusSoloPtr[11]` atomics) + one canonical formula `silenced = thisMuted || (anyBusSoloed && !thisSolo)` applied uniformly to all 11 buses in the shared `processBus`, replacing the 3 scattered subset-formulas.  Mandatory `/review-batch` ran READY-TO-COMMIT (one doc-accuracy NIT fixed in `VibeGraph.h`; zero BLOCKER/NEEDS-FIX; GUARDRAIL confirmed — bus `_solo` only, never strip-level).
+4. **QA-Ef re-slotted up to immediately after QA-Ea** (was: immediately before QA-F) so the ST deletion clears the Task-1 regression + the ST/MT dual-maintenance burden before QA-Ed / QA-Ee / QA-Eb / QA-Ec touch the audio path.  The "MT proven on all 3" gate is SATISFIED (Task 0b `f28319e`).
+
+**Solo-scope correction (recorded fact):** the original SC2 framing assumed L/B/D solo each other + the receive-group buses solo each other.  Owner testing 2026-05-21 found the real pre-fix state was worse — **only Layers/Bass/Drums did anything (and only muted each other, never Clips), the other 8 of 11 bus solo buttons (FX, Clips, Vox, Inst, Vox2, Inst2, Inst3, Rusty) were dead no-ops.**  The unified `anyBusSoloed()` fixes all 11.  Owner verified 8 of 11 hands-on (Debug + Release); Vox2/Inst2/Inst3 confirmed by identical generic-`switch` code-path equivalence.
+
+**Side findings (flagged, NOT fixed — owner's call):**
+- **Old pre-Task-0c projects load with empty Builder grid + empty Audio Clips + dirty-on-load.**  A Task 0c (`c5c5deb`) regression — likely the new `ArrangementBlock` tick/contentStart XML serdes or the `effectiveStartBeats`/`effectiveLengthBeats` sentinel semantics affecting block interpretation.  **NOT fixed:** owner directed (no release, these are owner's own scratch files, new projects are unaffected; owner can recreate).  Not routed to a fix batch; recorded here for the record.
+- **Task 1 ST null-test residual** itself — moot once QA-Ef deletes the ST path; no separate fix.
+
+**Options considered:** (a) revert Task 1 + commit solo fix clean — rejected (churn on dying code); (b) commit Part A + Task 1 together, leave Task 1 interim-broken, delete ST next via re-slotted QA-Ef — **accepted**; (c) root-cause the Task 1 residual first — rejected (fixing soon-to-be-deleted code).
+
+**Carry-forward contradictions:** supersedes the QA-Ea §5 scope's "Part B output-path unification (Option 2)" line (now struck) + the §5 QA-Ef "immediately before QA-F" sequencing (now immediately after QA-Ea).  No Carry-Forward Reference §1-§3 architectural facts change.  The CLAUDE.md "5 buses" mixer-strip note is stale (code registers 11) — noted by `/review-batch`, not edited here (separate doc-accuracy pass).
+
+**Inline back-refs:**
+- §5 — QA-Ea entry: Part B struck + Part A done (`c648fb7`); QA-Ef entry: re-slotted up + gate marked satisfied.
+- §6 — arrow re-ordered to `… QA-Ea********* → QA-Ef************* → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F`; QA-Ef footnote updated (re-slot + gate-satisfied).
+- §9 this entry (twenty-seventh Forks entry).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — this entry + §5 QA-Ea/QA-Ef edits + §6 arrow + QA-Ef footnote.
+- `Plans & Specs/Batch Plans/polished-snuggling-token.md` — QA-Ea Part B struck + Part A done annotations.
+- `Plans & Specs/Running Notes/polished-snuggling-token.md` — solo-fix arc + close.
+- `Plans & Specs/Implemented Work Log.md` — QA-Ea close entry (Part A solo fix; Part B struck; side findings).
+
+**Verification:** Part A solo fix owner-verified (8/11 buses hands-on in Debug + Release, 3 by code-path equivalence) + `/review-batch` clean.  Part B + the old-project-load finding are explicitly NOT verified (struck / deferred).  QA-Ef carries its own verify ladder in its §5 entry / plan file when it opens.
