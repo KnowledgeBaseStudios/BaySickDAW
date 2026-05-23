@@ -459,6 +459,78 @@ required sections (locked 2026-05-11) + Rule 4 (Diagnostic Instrumentation Catal
   actual Inst bus audio + UI flow (Inst is a live-input bus like Vox; the
   partial-read trap will re-apply if I just grep symbols).
 
+## 2026-05-23 — Task 5 — Inst + Inst2 + Inst3 buses migration (commit `34d51eb`)
+
+- **Commit:** `34d51eb` (top of `main`, 8 ahead of `origin/main`). 5 files,
+  104 insertions / 33 deletions.
+- **Files in commit:** 4 source — `Source/VibeGraph.h` (+9), `Source/VibeGraph.cpp`
+  (+24 — 3 dispatcher cases + 3 exchange-store branches), `Source/PluginProcessor.cpp`
+  (+9 G1 drains / -12 G2 + registerBusPeakAtomics), `Source/PluginProcessor.h`
+  (-9 *Run decls) — + 1 doc — `Plans & Specs/Running Notes/squishy-scribbling-flurry.md`
+  (+62 Task 4 close catch-up).
+
+#### Source changes (3 buses mechanically mirrored from Tasks 3 + 4)
+
+- **VibeGraph.h** — added 9 atomics: `instBusPeakDb / L / R` + `instBus2PeakDb /
+  L / R` + `instBus3PeakDb / L / R` after `voxBus2PeakDbR`.
+- **VibeGraph.cpp `processBus` switch** — `kInstBus / kInstBus2 / kInstBus3`
+  cases each set `node = mInstBus(2/3)Node.get();`.
+- **VibeGraph.cpp `processBus` exchange-store block** — 3 else-if branches
+  added for each Inst bus (exchange-stores node-internal peak atomics into
+  VibeGraph member atomics).
+- **PluginProcessor.cpp `drainMeterAtomicsForUI`** — +9 G1 drain lines for
+  Inst + Inst2 + Inst3, -9 G2 promotion lines, "Group 2:" comment updated
+  to Rusty + per-row only.
+- **PluginProcessor.cpp `prepareToPlay`** — -3 `registerBusPeakAtomics` calls
+  (`kInstBus`, `kInstBus2`, `kInstBus3`). 1 remaining: `kRustyDrumsBus` for
+  Task 6.
+- **PluginProcessor.h** — -9 `*Run` declarations.
+- **Net:** Inst + Inst2 + Inst3 meters now G1-shaped end-to-end. `*Run`
+  indirection survives only on Rusty (Task 6 ends it).
+
+#### In-task build break + same-commit fix
+
+- **Issue:** initial Task 5 edit deleted all 9 `*Run` declarations from
+  PluginProcessor.h but my `drainMeterAtomicsForUI` G2-promotion-removal
+  edit only caught the InstBus lines (3 of 9). 6 stale `mInstBus(2/3)PeakDb*Run`
+  promotion lines remained at `PluginProcessor.cpp:2112-2117`. Build failed
+  both Release + Debug with `error C2065: undeclared identifier` on all 6.
+- **Fix:** same-commit Edit deleted the 6 stale promotion lines. `grep`
+  confirmed zero remaining `mInstBus(2/3)PeakDb*Run / mInstBusPeakDb*Run`
+  references anywhere in `Source/`. Build clean on re-run.
+- **Process note:** my G2-line-removal Edit's `old_string` was scoped to
+  the InstBus block only, not the full Inst + Inst2 + Inst3 promotion
+  block. Should have scoped to ALL the G2 lines I was eliminating before
+  the Edit. Owning the build break per `feedback_own_the_codebase_no_git_alibi.md`.
+
+#### Verify (PASSED, 2026-05-23, Jeff's own rig)
+
+- Jeff ran his own Inst test rig. PASSED. Plus regression scan of
+  prior-migrated buses (FX / AudioClips / Vox / Vox2) all still reading
+  correctly.
+
+#### Process notes
+
+- **Verify-rig pivot (continued from Task 4).** I proposed live-input-only
+  verify scenarios for Inst before Jeff corrected ("To clarify I tested
+  vox by running a prerecorded vocal through the page as its not just a
+  live platform as you stated"). Saved a new project memory
+  `project_vox_inst_accept_prerecorded_audio.md` — Vox / Inst pages
+  accept prerecorded audio playback as an audio source, not just live mic
+  / line-in / sfizz engines. Indexed in `MEMORY.md`.
+- **Pre-commit surface.** Drafted commit message + full `git status`
+  surfaced to Jeff; approved.
+- **No diagnostic instrumentation added this task.**
+
+#### Next action
+
+- **Task 6 — Rusty bus migration.** Final per-bus task. Same mechanical
+  pattern as Tasks 3-5 applied to `kRustyDrumsBus`. Before surfacing the
+  verify rig: dispatch Explore agent to trace the actual BaySickRustyDrums
+  + Rusty bus audio + UI flow (Rusty is a sfizz-engine-backed page; the
+  partial-read + live-input-only assumption traps both re-apply if I just
+  grep symbols).
+
 ## Diagnostic Instrumentation Catalog
 
 (per Main Plan §0 Rule 4 — append a row WITH the diagnostic add, walk + strip

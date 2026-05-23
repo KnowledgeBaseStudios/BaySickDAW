@@ -1645,6 +1645,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             break;
         case kRustyDrumsBus:
             preEq  = getRustyDrumsBusPreEQ(); rack = getRustyDrumsBusRack(); postEq = getRustyDrumsBusEQ();
+            node   = mRustyDrumsBusNode.get();
             prefix = "mixer_rustybus";
             break;
         default:
@@ -1781,6 +1782,12 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         instBus3PeakDb .store(mInstBus3Node->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         instBus3PeakDbL.store(mInstBus3Node->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         instBus3PeakDbR.store(mInstBus3Node->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    }
+    else if (busChId == kRustyDrumsBus && mRustyDrumsBusNode != nullptr)
+    {
+        rustyDrumsBusPeakDb .store(mRustyDrumsBusNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        rustyDrumsBusPeakDbL.store(mRustyDrumsBusNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        rustyDrumsBusPeakDbR.store(mRustyDrumsBusNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
     }
 }
 

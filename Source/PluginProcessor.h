@@ -442,10 +442,6 @@ public:
     // this block" case promotes nothing (skip-on-INF inside the promote
     // helper) and the existing snapshot keeps decaying via UI ballistics.
     static constexpr float kPeakAtomicNegInf = -std::numeric_limits<float>::infinity();
-    // J-7b: RustyDrums Bus running atomics (companion to mRustyDrumsBusPeakDb*).
-    std::atomic<float> mRustyDrumsBusPeakDbRun  { kPeakAtomicNegInf };
-    std::atomic<float> mRustyDrumsBusPeakDbLRun { kPeakAtomicNegInf };
-    std::atomic<float> mRustyDrumsBusPeakDbRRun { kPeakAtomicNegInf };
 
     // ── 1M: Audio DSP load monitoring (audio thread writes, UI timer reads) ──
     // mAudioDspLoad : smoothed fraction of buffer window used by processBlock (0..1)

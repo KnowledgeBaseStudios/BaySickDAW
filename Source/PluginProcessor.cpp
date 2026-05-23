@@ -285,10 +285,6 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // need registration.  Idempotent - registerBusPeakAtomics overwrites the
     // table entry, so repeated prepareToPlay calls (block-size / sample-rate
     // changes) just rewrite the same pointers.
-    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kRustyDrumsBus,
-                                       &mRustyDrumsBusPeakDbRun,
-                                       &mRustyDrumsBusPeakDbLRun,
-                                       &mRustyDrumsBusPeakDbRRun);
 
     // 2026-05-05 dirty-flag wiring: route every VibeGraph rack's lifecycle
     // events into the editor's project-dirty hook the same way main-APVTS
@@ -2103,12 +2099,12 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     drainAndMerge (mInstBus3PeakDb,  mVibeGraph.instBus3PeakDb);
     drainAndMerge (mInstBus3PeakDbL, mVibeGraph.instBus3PeakDbL);
     drainAndMerge (mInstBus3PeakDbR, mVibeGraph.instBus3PeakDbR);
+    drainAndMerge (mRustyDrumsBusPeakDb,  mVibeGraph.rustyDrumsBusPeakDb);
+    drainAndMerge (mRustyDrumsBusPeakDbL, mVibeGraph.rustyDrumsBusPeakDbL);
+    drainAndMerge (mRustyDrumsBusPeakDbR, mVibeGraph.rustyDrumsBusPeakDbR);
 
-    // Group 2: Run -> snapshot promotion for Rusty + per-row audio clip
-    // mirrors.  Shrinks each task as more buses migrate.
-    drainAndMerge (mRustyDrumsBusPeakDb,  mRustyDrumsBusPeakDbRun);   // J-7b
-    drainAndMerge (mRustyDrumsBusPeakDbL, mRustyDrumsBusPeakDbLRun);  // J-7b
-    drainAndMerge (mRustyDrumsBusPeakDbR, mRustyDrumsBusPeakDbRRun);  // J-7b
+    // Group 2: per-row audio clip mirrors only (all 8 bus G2 mirrors gone;
+    // per-row deferred to a separate batch per S2).
     for (int r = 0; r < kMaxAudioRows; ++r)
     {
         drainAndMerge (mAudioRowPeakDb [r], mAudioRowPeakDbRun [r]);
