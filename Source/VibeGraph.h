@@ -659,6 +659,9 @@ public:
     std::atomic<float> drumsPeakDbR  { -60.f };
     std::atomic<float> masterPeakDbL { -60.f };
     std::atomic<float> masterPeakDbR { -60.f };
+    std::atomic<float> fxBusPeakDb   { -60.f };
+    std::atomic<float> fxBusPeakDbL  { -60.f };
+    std::atomic<float> fxBusPeakDbR  { -60.f };
 
     // ── Phase-2 instrument node registry ─────────────────────────────────────
     // Nodes registered here will be integrated into the processing graph in a

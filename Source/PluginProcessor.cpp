@@ -2106,31 +2106,15 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     drainAndMerge (mMasterPeakDb,  mVibeGraph.masterPeakDb);
     drainAndMerge (mMasterPeakDbL, mVibeGraph.masterPeakDbL);
     drainAndMerge (mMasterPeakDbR, mVibeGraph.masterPeakDbR);
+    drainAndMerge (mFxBusPeakDb,   mVibeGraph.fxBusPeakDb);
+    drainAndMerge (mFxBusPeakDbL,  mVibeGraph.fxBusPeakDbL);
+    drainAndMerge (mFxBusPeakDbR,  mVibeGraph.fxBusPeakDbR);
 
-    // Group 2: Run -> snapshot promotion for AudioClipsBus / FxBus / Vox /
-    // Inst / secondary buses + per-row audio clip mirrors.
+    // Group 2: Run -> snapshot promotion for AudioClipsBus / Vox / Inst /
+    // secondary buses + per-row audio clip mirrors.
     drainAndMerge (mAudioClipsBusPeakDb,  mAudioClipsBusPeakDbRun);
     drainAndMerge (mAudioClipsBusPeakDbL, mAudioClipsBusPeakDbLRun);
     drainAndMerge (mAudioClipsBusPeakDbR, mAudioClipsBusPeakDbRRun);
-    // The FX bus carries its peak on EffectsBusNode (like L/B/D/Master), but it
-    // isn't in the Group 1 node-drains above.  CAS-max its node peak into the
-    // Run mirrors here so the Run->snapshot promotion below feeds the FX-bus
-    // meter (the only feeder used to be the now-deleted serial tail).
-    {
-        const auto [fxL, fxR] = mVibeGraph.drainEffectsBusPeakDbStereo();
-        auto casMaxRun = [kPeakNegInf] (std::atomic<float>& m, float v) noexcept
-        {
-            if (v == kPeakNegInf) return;
-            float cur = m.load (std::memory_order_relaxed);
-            while (cur < v && ! m.compare_exchange_weak (cur, v, std::memory_order_relaxed)) {}
-        };
-        casMaxRun (mFxBusPeakDbLRun, fxL);
-        casMaxRun (mFxBusPeakDbRRun, fxR);
-        casMaxRun (mFxBusPeakDbRun,  juce::jmax (fxL, fxR));
-    }
-    drainAndMerge (mFxBusPeakDb,    mFxBusPeakDbRun);
-    drainAndMerge (mFxBusPeakDbL,   mFxBusPeakDbLRun);
-    drainAndMerge (mFxBusPeakDbR,   mFxBusPeakDbRRun);
     drainAndMerge (mVoxBusPeakDb,   mVoxBusPeakDbRun);
     drainAndMerge (mVoxBusPeakDbL,  mVoxBusPeakDbLRun);
     drainAndMerge (mVoxBusPeakDbR,  mVoxBusPeakDbRRun);

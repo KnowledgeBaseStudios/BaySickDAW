@@ -1522,13 +1522,24 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     // GUARDRAIL: anyBusSoloed reads BUS _solo ONLY -- never strip-level.
     // Per-strip _solo is a separate axis (InsertNode's own gate); untouched.
     const bool anyBus = anyBusSoloed();
+    constexpr float kBusNegInf = -std::numeric_limits<float>::infinity();
 
     // Pre-existing helpers handle Master + FxBus.  These already push SC,
     // run their own DSP chain, and drain peaks; processBus just delegates.
     // QA-Ea Part A (2026-05-21): pass anyBus to processEffectsBus instead of
     // the now-dead caller anySolo so FxBus gates uniformly with the other 10.
     if (busChId == kMaster)  { processMasterBus(buf, bpm);                       return; }
-    if (busChId == kFxBus)   { processEffectsBus(buf, bpm, anyBus, panLaw);      return; }
+    if (busChId == kFxBus)
+    {
+        processEffectsBus(buf, bpm, anyBus, panLaw);
+        if (mEffectsBusNode != nullptr)
+        {
+            fxBusPeakDb .store(mEffectsBusNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+            fxBusPeakDbL.store(mEffectsBusNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+            fxBusPeakDbR.store(mEffectsBusNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        }
+        return;
+    }
 
     // Push SC array before any DSP so source-side fanout reaches consumer DSP.
     pushScArrayToStrip(busChId);
@@ -1537,7 +1548,6 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     // Caller is responsible for ensuring `buf` already contains the pre-summed
     // input (PassiveStripTask predecessor sum of upstream Layer/Bass/Drum
     // InsertNode outputs).
-    constexpr float kBusNegInf = -std::numeric_limits<float>::infinity();
     if (busChId == kLayersBus)
     {
         if (mLayersNode == nullptr) return;

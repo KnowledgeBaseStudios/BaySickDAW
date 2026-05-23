@@ -33,12 +33,13 @@ QA-Eg is the next Phase 1 batch after QA-Ef per the §6 sequencing arrow (`... �
 | S3 | **Task structure = per-bus tasks** (FX → Clips → Vox+Vox2 → Inst+Inst2+Inst3 → Rusty → comment sweep) | Jeff 2026-05-23: each task individually verifiable by ear (one bus meter at a time); clean rollback boundaries; matches `feedback_commit_at_checkpoints.md`. FX first because EffectsBusNode already G1-shaped — smallest verification scope to validate the migration pattern before scaling. |
 | S4 | **Publishing primitive = match L/B/D/Master exactly** — `publishPeakReading()` with the per-block latency-comp ring buffer (`peakRingL/R/Idx`) | Jeff 2026-05-23: the whole point of standardizing is uniformity across all 11 buses. The simpler raw CAS-max approach (G2's current pattern) would re-introduce a subtle split in per-block meter ballistics. ~5-10 extra lines per bus migration is acceptable for the uniformity gain. |
 | S5 | **Silly-name = `squishy-scribbling-flurry`** (runtime-assigned by plan-mode) | My pick per `feedback_silly_name_is_my_pick.md` (not a spec call). |
+| S6 | **`peakDecayDbPerBlock` dead field — skip on new, clean up the 5 existing** | Jeff 2026-05-23 mid-Task-1: Task 1 inventory surfaced that `peakDecayDbPerBlock` is initialised + recalculated in `prepare()` on every G1 BusNode (Layers / Bass / Drums / Master / FX) but NEVER read — dead state left behind from the pre-2026-05-02 meter-ballistics model that the lock-free publish rewrite obsoleted. Decision: do NOT add the field to `InstrChannelNode` in Task 3 (no point copying dead state); also DELETE the dead field + its prepare-time recalc lines from the 5 existing G1 BusNodes in Task 7 cleanup. Net post-batch: all 11 buses carry a uniform LIVE field set with no dead carry-over. |
 
 ---
 
 ## Sub-spec calls surfaced for ExitPlanMode
 
-No sub-spec calls open. All four (S1-S4) locked pre-plan-mode by Jeff. Plan-mode entered with full scope locked.
+No sub-spec calls open at plan-mode exit. All four (S1-S4) locked pre-plan-mode by Jeff. **S6 added mid-Task-1 (2026-05-23)** when the inventory surfaced the dead `peakDecayDbPerBlock` field on the 5 G1 BusNodes; decision locked same day.
 
 ---
 
@@ -116,7 +117,7 @@ No sub-spec calls open. All four (S1-S4) locked pre-plan-mode by Jeff. Plan-mode
 
 ### Task 3 — AudioClips bus migration (first InstrChannelNode-backed; adds peakDb to InstrChannelNode itself)
 - [ ] **InstrChannelNode peakDb plumbing** (one-time structural change; the remaining 6 buses inherit it):
-  - In [VibeGraph.cpp:1276-1332](Source/VibeGraph.cpp:1276), extend `struct VibeGraph::InstrChannelNode` with the same atomic + ring-buffer field set the L/B/D/Master BusNodes carry (confirmed in Task 1):
+  - In [VibeGraph.cpp:1276-1332](Source/VibeGraph.cpp:1276), extend `struct VibeGraph::InstrChannelNode` with the LIVE-only field set the L/B/D/Master BusNodes carry (confirmed in Task 1; explicitly EXCLUDES `peakDecayDbPerBlock` per S6 — that field is dead carry-over on the existing 5 G1 nodes and gets stripped in Task 7):
     ```cpp
     std::atomic<float> peakDb  { -60.f };
     std::atomic<float> peakDbL { -60.f };
@@ -201,6 +202,7 @@ No sub-spec calls open. All four (S1-S4) locked pre-plan-mode by Jeff. Plan-mode
 - [ ] Wait for verify, commit on approval, running-notes update.
 
 ### Task 7 — Infrastructure cleanup + comment sweep + final smoke
+- [ ] **S6 dead-field cleanup**: delete `peakDecayDbPerBlock` field + its prepare-time recalc lines from the 5 existing G1 BusNodes (LayersBusNode `:233 + :293`, BassBusNode `:435 + :488`, DrumsBusNode `:602 + :653`, MasterBusNode `:766 + :816`, EffectsBusNode `:916 + :954`). Confirmed dead via Task 1 grep (only InsertNode `:1095 + :1134 + :1261-1262` consumes its OWN copy of the field; the 5 BusNode copies have no readers). Also delete the `kDecayDbPerSec` constant if it's no longer referenced after the 5 BusNode deletions.
 - [ ] If no remaining caller of `VibeGraph::registerBusPeakAtomics` / `mBusPeakRefs` / the `BusPeakRefs` struct (confirmed via grep), DELETE all three from `VibeGraph.h/.cpp`. Otherwise leave dormant + add a TODO comment.
 - [ ] If no remaining caller of `drainEffectsBusPeakDbStereo()` (the QA-Ef interim accessor at [VibeGraph.cpp:1784-1789](Source/VibeGraph.cpp:1784)) and its non-exchange sibling at `:1775-1777`, DELETE both. Otherwise leave with a "QA-Eg leftover — TODO grep" comment.
 - [ ] Comment sweep: grep for "G2", "Group 2", "running-max mirror", "*Run" comments referencing the deleted G2 architecture. Update or delete. Particular hot spots:

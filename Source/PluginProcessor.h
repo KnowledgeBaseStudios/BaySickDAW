@@ -451,9 +451,6 @@ public:
     std::atomic<float> mInstBusPeakDbRun        { kPeakAtomicNegInf };
     std::atomic<float> mInstBusPeakDbLRun       { kPeakAtomicNegInf };
     std::atomic<float> mInstBusPeakDbRRun       { kPeakAtomicNegInf };
-    std::atomic<float> mFxBusPeakDbRun          { kPeakAtomicNegInf };
-    std::atomic<float> mFxBusPeakDbLRun         { kPeakAtomicNegInf };
-    std::atomic<float> mFxBusPeakDbRRun         { kPeakAtomicNegInf };
     std::atomic<float> mVoxBus2PeakDbRun        { kPeakAtomicNegInf };
     std::atomic<float> mVoxBus2PeakDbLRun       { kPeakAtomicNegInf };
     std::atomic<float> mVoxBus2PeakDbRRun       { kPeakAtomicNegInf };
