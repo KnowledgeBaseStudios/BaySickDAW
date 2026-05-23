@@ -259,6 +259,144 @@ required sections (locked 2026-05-11) + Rule 4 (Diagnostic Instrumentation Catal
   `kClipsBus`. Tasks 4-6 then ride the now-extended `InstrChannelNode` to
   migrate the remaining 6 buses.
 
+## 2026-05-23 — Task 3 — AudioClips bus migration + InstrChannelNode peakDb plumbing (commit `2c66bdc`)
+
+- **Commit:** `2c66bdc` (top of `main`, 6 ahead of `origin/main`). 5 files, 123
+  insertions / 15 deletions.
+- **Files in commit:** 4 source — `Source/VibeGraph.h` (+3), `Source/VibeGraph.cpp`
+  (+38 — InstrChannelNode struct extension + processBus refactor), `Source/PluginProcessor.cpp`
+  (-4 net), `Source/PluginProcessor.h` (-3) — + 1 doc — `Plans & Specs/Running Notes/squishy-scribbling-flurry.md`
+  (+80 Task 2 close catch-up).
+
+#### Source changes (one-time InstrChannelNode extension + AudioClips per-bus wire-up)
+
+- **`InstrChannelNode` struct extension** ([VibeGraph.cpp:1276-1332](Source/VibeGraph.cpp:1276))
+  — added the LIVE peak-meter field set parallel to L/B/D/Master/FX BusNodes:
+  `peakDb / peakDbL / peakDbR` atomics + `peakRingL / peakRingR` arrays +
+  `peakRingIdx int`. **EXCLUDES** `peakDecayDbPerBlock` per S6. One-time
+  structural change; all 7 InstrChannelNode-backed buses inherit it.
+- **`processBus` dispatcher refactor** ([VibeGraph.cpp:~1592-1631](Source/VibeGraph.cpp:1592))
+  — added `InstrChannelNode* node = nullptr;` in the variable-decl block;
+  `kClipsBus` case sets `node = mAudioClipsBusNode.get();`. Other generic-bus
+  cases leave node null (Tasks 4-6 add their lines).
+- **`processBus` peak-publish block** ([VibeGraph.cpp:~1694-1715](Source/VibeGraph.cpp:1694))
+  — refactored from unconditional CAS-max-into-`mBusPeakRefs` to conditional:
+  if `node != nullptr`, call shared `publishPeakReading` into node's peak fields;
+  else fall back to existing CAS-max (for non-migrated buses).
+- **`processBus` exchange-store block** added at end of function — for
+  `kClipsBus`, exchange-stores `mAudioClipsBusNode->peakDb*` into
+  `VibeGraph::audioClipsPeakDb*` member atomics. Tasks 4-6 extend with else-ifs.
+- **`Source/VibeGraph.h`** — added `audioClipsPeakDb / audioClipsPeakDbL /
+  audioClipsPeakDbR` after `fxBusPeakDbR`.
+- **`Source/PluginProcessor.cpp` `drainMeterAtomicsForUI`** — added 3
+  `drainAndMerge` lines for AudioClips in G1 loop; DELETED 3 G2 promotion
+  lines for AudioClips; updated "Group 2:" comment.
+- **`Source/PluginProcessor.cpp` `prepareToPlay`** — DELETED
+  `registerBusPeakAtomics(kClipsBus, ...)` call.
+- **`Source/PluginProcessor.h`** — DELETED 3 `mAudioClipsBusPeakDb*Run`
+  declarations. KEPT the snapshot mirrors `mAudioClipsBusPeakDb / L / R`.
+- **Net behaviour:** AudioClips bus meter publishes via the identical
+  end-to-end path as L/B/D/Master/FX. No intermediate `*Run` mirror.
+
+#### Verify (PASSED, Debug, 2026-05-23)
+
+- Scenarios derived from source-reads of `BuilderPage.cpp:3437-3442`
+  (audio-clip-added callback) + `MixerPage.cpp:1155 / 1227` (Clips Bus strip
+  always-visible) per `feedback_verify_scenarios_read_app_first.md`:
+  1. New project + drop WAV on Builder grid + play → Clips Bus meter reads
+     activity matching the audio's loudness vs Master. PASSED.
+  2. Stop playback → Clips Bus meter decays cleanly. PASSED.
+  3. Multi-core OFF → repeat (1) → meter still reads. PASSED.
+  4. FX Bus regression (Task 2 rig) → still reads correctly post-Task-3
+     structural change. PASSED.
+- **L/B/D/Master regression scan:** PASSED.
+
+#### Side finding to route at batch close (per Rule 3) — Dirty-flag refactor (new dedicated batch)
+
+- **Finding (surfaced by Jeff 2026-05-23 mid-Task-3 testing):** clicking a
+  solo button and unclicking it marks the project dirty even though the net
+  state matches the saved file. Verified by code-read: `ApvtsDirtyTracker`
+  ([Source/Standalone/ApvtsDirtyTracker.h:39-42](Source/Standalone/ApvtsDirtyTracker.h:39))
+  is a `ValueTree::Listener` that fires `onAny` on every property write
+  regardless of old-vs-new equality; `ProjectManager::markDirty`
+  ([Source/ProjectManager.cpp:98-102](Source/ProjectManager.cpp:98)) just sets
+  `mDirty = true` unconditionally. The flag tracks "anything touched since
+  load" — NOT "state differs from file." No before-vs-after comparison.
+- **Jeff's routing call (2026-05-23):** new dedicated batch at end of Phase
+  5. Full spec text (verbatim from Jeff, to be carried into the per-batch
+  plan file when the new batch opens):
+
+  > We are refactoring BaySickDAW's dirty state tracking to mimic major DAWs.
+  > Currently, ProjectManager::mDirty is a simple boolean triggered by an
+  > APVTS ValueTree::Listener. We need to replace this with an Undo-aware
+  > transaction pointer system so that if the user hits Ctrl+Z to return to
+  > the exact state of the last save, the dirty flag clears automatically.
+  >
+  > **Strict UndoManager Plumbing:**
+  > Audit the entire codebase for state mutations and enforce strict
+  > UndoManager registration. Ensure the global UndoManager is correctly
+  > passed into the AudioProcessorValueTreeState (APVTS) constructor. Audit
+  > all direct ValueTree writes. Any instance of setProperty(id, val,
+  > nullptr) must be rewritten to pass the global UndoManager*. Ensure all
+  > custom UI components either use JUCE's ParameterAttachments (which handle
+  > undo grouping automatically) or explicitly call
+  > undoManager->beginNewTransaction() before modifying parameters.
+  >
+  > **Implement the Transaction Pointer:**
+  > Since JUCE's UndoManager does not expose a native state ID, implement a
+  > TransactionTracker to act as the source of truth for the project's
+  > modification state. Create an integer tracking system: `int
+  > currentUndoStep = 0;` and `int savedUndoStep = 0;`. Wrap the DAW's global
+  > Undo and Redo commands. Triggering an Undo decrements currentUndoStep,
+  > and triggering a Redo increments it. Whenever a new edit is registered,
+  > increment currentUndoStep. **CRITICAL EDGE CASE:** If a new edit is made
+  > while `currentUndoStep < savedUndoStep`, the user has branched the undo
+  > history and destroyed the previously saved future. You must set
+  > `savedUndoStep = -1` (or an unreachable constant) so the project
+  > correctly remains dirty indefinitely until the next save.
+  >
+  > **Dynamic Dirty State Evaluation:**
+  > Remove the static `mDirty = true` logic inside ProjectManager and
+  > ApvtsDirtyTracker. The project is now considered dirty only if
+  > `currentUndoStep != savedUndoStep`. When ProjectManager::save()
+  > successfully writes to disk, sync the pointer: `savedUndoStep =
+  > currentUndoStep;`. Update the UI header to observe this dynamic
+  > evaluation so the dirty asterisk instantly vanishes when Ctrl+Z lands
+  > exactly on savedUndoStep.
+  >
+  > **Reference:** Vars, Values and ValueTrees: State Management in JUCE
+  > (ADC23) — architectural overview of keeping JUCE application state
+  > synchronized across the UI, UndoManager, and project saves.
+
+- **Slot region locked (Jeff 2026-05-23):** end of Phase 5. Exact slot
+  relative to QA-ProjectSave (the consolidated save/template/sample batch
+  currently at end-of-Phase-1-5-chain) to be surfaced for spec call at QA-Eg
+  Task 8 batch close — proposing before/after QA-ProjectSave + sequencing
+  rationale for each, Jeff picks.
+- **Routing artifacts to draft at Task 8 close (per Rule 3):** §9 Forks
+  entry recording this finding + decision; new §5 batch entry with the
+  spec text above + slot rationale; §6 arrow update.
+- **Working name for the new batch:** to surface for spec call at Task 8
+  close (proposing `QA-DirtyFlag` matching the QA-NativeDialogs / QA-VibeSlider
+  naming pattern; Jeff picks final).
+
+#### Process notes
+
+- **Pre-commit surface.** Drafted commit message + full `git status`
+  surfaced to Jeff. Jeff caught one factual error in the "Next:" line
+  (drafter said "Task 4 (Vox bus migration...)" — actual Task 4 = Vox +
+  Vox2 buses in one task); proposed fix, approved-with-fix, fix landed in
+  the committed message.
+- **No diagnostic instrumentation added this task.**
+
+#### Next action
+
+- **Task 4 — Vox + Vox2 buses migration.** First per-bus wire-up onto the
+  InstrChannelNode field set landed here; both primary Vox bus and
+  secondary Vox bus migrated in one task. Mechanical mirror of Task 3's
+  dispatcher + drain + prepareToPlay + header pattern. No new structural
+  change (InstrChannelNode already extended).
+
 ## Diagnostic Instrumentation Catalog
 
 (per Main Plan §0 Rule 4 — append a row WITH the diagnostic add, walk + strip

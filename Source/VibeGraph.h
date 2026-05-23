@@ -665,6 +665,12 @@ public:
     std::atomic<float> audioClipsPeakDb  { -60.f };
     std::atomic<float> audioClipsPeakDbL { -60.f };
     std::atomic<float> audioClipsPeakDbR { -60.f };
+    std::atomic<float> voxBusPeakDb      { -60.f };
+    std::atomic<float> voxBusPeakDbL     { -60.f };
+    std::atomic<float> voxBusPeakDbR     { -60.f };
+    std::atomic<float> voxBus2PeakDb     { -60.f };
+    std::atomic<float> voxBus2PeakDbL    { -60.f };
+    std::atomic<float> voxBus2PeakDbR    { -60.f };
 
     // ── Phase-2 instrument node registry ─────────────────────────────────────
     // Nodes registered here will be integrated into the processing graph in a

@@ -1620,6 +1620,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             break;
         case kVoxBus:
             preEq  = getVoxBusPreEQ();   rack = getVoxBusRack();   postEq = getVoxBusEQ();
+            node   = mVoxBusNode.get();
             prefix = "mixer_voxbus";
             break;
         case kInstBus:
@@ -1628,6 +1629,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             break;
         case kVoxBus2:
             preEq  = getVoxBus2PreEQ();  rack = getVoxBus2Rack();  postEq = getVoxBus2EQ();
+            node   = mVoxBus2Node.get();
             prefix = "mixer_voxbus2";
             break;
         case kInstBus2:
@@ -1746,6 +1748,18 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         audioClipsPeakDb .store(mAudioClipsBusNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         audioClipsPeakDbL.store(mAudioClipsBusNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         audioClipsPeakDbR.store(mAudioClipsBusNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    }
+    else if (busChId == kVoxBus && mVoxBusNode != nullptr)
+    {
+        voxBusPeakDb .store(mVoxBusNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        voxBusPeakDbL.store(mVoxBusNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        voxBusPeakDbR.store(mVoxBusNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    }
+    else if (busChId == kVoxBus2 && mVoxBus2Node != nullptr)
+    {
+        voxBus2PeakDb .store(mVoxBus2Node->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        voxBus2PeakDbL.store(mVoxBus2Node->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        voxBus2PeakDbR.store(mVoxBus2Node->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
     }
 }
 

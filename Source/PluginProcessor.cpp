@@ -285,18 +285,10 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // need registration.  Idempotent - registerBusPeakAtomics overwrites the
     // table entry, so repeated prepareToPlay calls (block-size / sample-rate
     // changes) just rewrite the same pointers.
-    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kVoxBus,
-                                       &mVoxBusPeakDbRun,
-                                       &mVoxBusPeakDbLRun,
-                                       &mVoxBusPeakDbRRun);
     mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kInstBus,
                                        &mInstBusPeakDbRun,
                                        &mInstBusPeakDbLRun,
                                        &mInstBusPeakDbRRun);
-    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kVoxBus2,
-                                       &mVoxBus2PeakDbRun,
-                                       &mVoxBus2PeakDbLRun,
-                                       &mVoxBus2PeakDbRRun);
     mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kInstBus2,
                                        &mInstBus2PeakDbRun,
                                        &mInstBus2PeakDbLRun,
@@ -2108,21 +2100,21 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     drainAndMerge (mAudioClipsBusPeakDb,  mVibeGraph.audioClipsPeakDb);
     drainAndMerge (mAudioClipsBusPeakDbL, mVibeGraph.audioClipsPeakDbL);
     drainAndMerge (mAudioClipsBusPeakDbR, mVibeGraph.audioClipsPeakDbR);
+    drainAndMerge (mVoxBusPeakDb,    mVibeGraph.voxBusPeakDb);
+    drainAndMerge (mVoxBusPeakDbL,   mVibeGraph.voxBusPeakDbL);
+    drainAndMerge (mVoxBusPeakDbR,   mVibeGraph.voxBusPeakDbR);
+    drainAndMerge (mVoxBus2PeakDb,   mVibeGraph.voxBus2PeakDb);
+    drainAndMerge (mVoxBus2PeakDbL,  mVibeGraph.voxBus2PeakDbL);
+    drainAndMerge (mVoxBus2PeakDbR,  mVibeGraph.voxBus2PeakDbR);
 
-    // Group 2: Run -> snapshot promotion for Vox / Inst / secondary buses +
-    // per-row audio clip mirrors.  Shrinks each task as more buses migrate.
-    drainAndMerge (mVoxBusPeakDb,   mVoxBusPeakDbRun);
-    drainAndMerge (mVoxBusPeakDbL,  mVoxBusPeakDbLRun);
-    drainAndMerge (mVoxBusPeakDbR,  mVoxBusPeakDbRRun);
+    // Group 2: Run -> snapshot promotion for Inst / secondary Inst buses +
+    // Rusty + per-row audio clip mirrors.  Shrinks each task as more buses migrate.
     drainAndMerge (mInstBusPeakDb,  mInstBusPeakDbRun);
     drainAndMerge (mInstBusPeakDbL, mInstBusPeakDbLRun);
     drainAndMerge (mInstBusPeakDbR, mInstBusPeakDbRRun);
     drainAndMerge (mRustyDrumsBusPeakDb,  mRustyDrumsBusPeakDbRun);   // J-7b
     drainAndMerge (mRustyDrumsBusPeakDbL, mRustyDrumsBusPeakDbLRun);  // J-7b
     drainAndMerge (mRustyDrumsBusPeakDbR, mRustyDrumsBusPeakDbRRun);  // J-7b
-    drainAndMerge (mVoxBus2PeakDb,  mVoxBus2PeakDbRun);
-    drainAndMerge (mVoxBus2PeakDbL, mVoxBus2PeakDbLRun);
-    drainAndMerge (mVoxBus2PeakDbR, mVoxBus2PeakDbRRun);
     drainAndMerge (mInstBus2PeakDb, mInstBus2PeakDbRun);
     drainAndMerge (mInstBus2PeakDbL,mInstBus2PeakDbLRun);
     drainAndMerge (mInstBus2PeakDbR,mInstBus2PeakDbRRun);
