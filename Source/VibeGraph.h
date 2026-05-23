@@ -671,6 +671,15 @@ public:
     std::atomic<float> voxBus2PeakDb     { -60.f };
     std::atomic<float> voxBus2PeakDbL    { -60.f };
     std::atomic<float> voxBus2PeakDbR    { -60.f };
+    std::atomic<float> instBusPeakDb     { -60.f };
+    std::atomic<float> instBusPeakDbL    { -60.f };
+    std::atomic<float> instBusPeakDbR    { -60.f };
+    std::atomic<float> instBus2PeakDb    { -60.f };
+    std::atomic<float> instBus2PeakDbL   { -60.f };
+    std::atomic<float> instBus2PeakDbR   { -60.f };
+    std::atomic<float> instBus3PeakDb    { -60.f };
+    std::atomic<float> instBus3PeakDbL   { -60.f };
+    std::atomic<float> instBus3PeakDbR   { -60.f };
 
     // ── Phase-2 instrument node registry ─────────────────────────────────────
     // Nodes registered here will be integrated into the processing graph in a

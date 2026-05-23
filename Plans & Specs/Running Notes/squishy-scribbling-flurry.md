@@ -397,6 +397,68 @@ required sections (locked 2026-05-11) + Rule 4 (Diagnostic Instrumentation Catal
   dispatcher + drain + prepareToPlay + header pattern. No new structural
   change (InstrChannelNode already extended).
 
+## 2026-05-23 — Task 4 — Vox + Vox2 buses migration (commit `02a0a5b`)
+
+- **Commit:** `02a0a5b` (top of `main`, 7 ahead of `origin/main`). 5 files,
+  167 insertions / 23 deletions (running notes Task 3 close catch-up is the
+  bulk; actual source change is +26 / -23 across 4 files).
+- **Files in commit:** 4 source — `Source/VibeGraph.h` (+6), `Source/VibeGraph.cpp`
+  (+14), `Source/PluginProcessor.cpp` (+6/-13 net), `Source/PluginProcessor.h`
+  (-6) — + 1 doc — `Plans & Specs/Running Notes/squishy-scribbling-flurry.md`
+  (+138 Task 3 close + S6 forward-ref + dirty-flag finding routed to Task 8).
+
+#### Source changes (mechanical mirror of Task 3 applied to Vox + Vox2)
+
+- **VibeGraph.h** — added 6 atomics: `voxBusPeakDb / voxBusPeakDbL /
+  voxBusPeakDbR` + `voxBus2PeakDb / voxBus2PeakDbL / voxBus2PeakDbR` after
+  `audioClipsPeakDbR`.
+- **VibeGraph.cpp `processBus` switch** — `kVoxBus` case sets
+  `node = mVoxBusNode.get();`, `kVoxBus2` case sets `node = mVoxBus2Node.get();`.
+- **VibeGraph.cpp `processBus` exchange-store block** — 2 else-if branches
+  added for Vox + Vox2 (exchange-stores node-internal peak atomics into
+  VibeGraph member atomics).
+- **PluginProcessor.cpp `drainMeterAtomicsForUI`** — +6 G1 drain lines for
+  Vox + Vox2, -6 G2 promotion lines, "Group 2:" comment updated.
+- **PluginProcessor.cpp `prepareToPlay`** — -2 `registerBusPeakAtomics` calls
+  (`kVoxBus`, `kVoxBus2`). 4 remaining for Tasks 5 + 6.
+- **PluginProcessor.h** — -6 `*Run` declarations. KEPT snapshot mirrors.
+- **Net:** Vox + Vox2 meters now G1-shaped end-to-end. *Run hop gone for
+  Vox + Vox2; survives only on the 4 remaining G2 buses (Inst / Inst2 /
+  Inst3 / Rusty).
+
+#### Verify (PASSED, 2026-05-23, Jeff's own rig)
+
+- I proposed two verify options (cable-drag-from-Layer-to-Vox-Bus + the
+  Add-Vox-Strip + speak-into-mic flow). Jeff overruled both: "Both of these
+  options show you don't know how the program functions, I'll test vox
+  myself thanx." Jeff ran his own Vox + Vox2 test rig and reported PASSED.
+- **Process correction this task:** even after saving the
+  `feedback_verify_scenarios_read_app_first.md` rule at Task 2 close, I
+  surfaced verify options based on a 20-line `addVoxChannel|kVoxBus` grep
+  without actually tracing the audio flow into / out of the Vox strip.
+  Memory file extended with the partial-read-trap refinement (see Process
+  notes below).
+
+#### Process notes
+
+- **Memory update.** Extended `feedback_verify_scenarios_read_app_first.md`
+  with the partial-read-trap addition: "read the app code" means trace the
+  full audio + UI flow for the feature being tested, NOT grep one symbol
+  and infer. Buses backed by live input (Vox / Inst) behave differently
+  from pattern-playback (L/B/D) / Builder-drop (AudioClips) buses; don't
+  assume cross-applicability.
+- **Pre-commit surface.** Drafted commit message + full `git status`
+  surfaced to Jeff; approved.
+- **No diagnostic instrumentation added this task.**
+
+#### Next action
+
+- **Task 5 — Inst + Inst2 + Inst3 buses migration.** Three buses in one
+  task (parallel to Task 4 doing two Vox buses). Same mechanical pattern.
+  Before surfacing the verify rig: dispatch Explore agent to trace the
+  actual Inst bus audio + UI flow (Inst is a live-input bus like Vox; the
+  partial-read trap will re-apply if I just grep symbols).
+
 ## Diagnostic Instrumentation Catalog
 
 (per Main Plan §0 Rule 4 — append a row WITH the diagnostic add, walk + strip

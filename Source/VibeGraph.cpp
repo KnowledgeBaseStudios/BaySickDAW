@@ -1625,6 +1625,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             break;
         case kInstBus:
             preEq  = getInstBusPreEQ();  rack = getInstBusRack();  postEq = getInstBusEQ();
+            node   = mInstBusNode.get();
             prefix = "mixer_instbus";
             break;
         case kVoxBus2:
@@ -1634,10 +1635,12 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             break;
         case kInstBus2:
             preEq  = getInstBus2PreEQ(); rack = getInstBus2Rack(); postEq = getInstBus2EQ();
+            node   = mInstBus2Node.get();
             prefix = "mixer_instbus2";
             break;
         case kInstBus3:
             preEq  = getInstBus3PreEQ(); rack = getInstBus3Rack(); postEq = getInstBus3EQ();
+            node   = mInstBus3Node.get();
             prefix = "mixer_instbus3";
             break;
         case kRustyDrumsBus:
@@ -1760,6 +1763,24 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         voxBus2PeakDb .store(mVoxBus2Node->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         voxBus2PeakDbL.store(mVoxBus2Node->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         voxBus2PeakDbR.store(mVoxBus2Node->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    }
+    else if (busChId == kInstBus && mInstBusNode != nullptr)
+    {
+        instBusPeakDb .store(mInstBusNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        instBusPeakDbL.store(mInstBusNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        instBusPeakDbR.store(mInstBusNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    }
+    else if (busChId == kInstBus2 && mInstBus2Node != nullptr)
+    {
+        instBus2PeakDb .store(mInstBus2Node->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        instBus2PeakDbL.store(mInstBus2Node->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        instBus2PeakDbR.store(mInstBus2Node->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    }
+    else if (busChId == kInstBus3 && mInstBus3Node != nullptr)
+    {
+        instBus3PeakDb .store(mInstBus3Node->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        instBus3PeakDbL.store(mInstBus3Node->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        instBus3PeakDbR.store(mInstBus3Node->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
     }
 }
 

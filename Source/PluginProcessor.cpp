@@ -285,18 +285,6 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // need registration.  Idempotent - registerBusPeakAtomics overwrites the
     // table entry, so repeated prepareToPlay calls (block-size / sample-rate
     // changes) just rewrite the same pointers.
-    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kInstBus,
-                                       &mInstBusPeakDbRun,
-                                       &mInstBusPeakDbLRun,
-                                       &mInstBusPeakDbRRun);
-    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kInstBus2,
-                                       &mInstBus2PeakDbRun,
-                                       &mInstBus2PeakDbLRun,
-                                       &mInstBus2PeakDbRRun);
-    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kInstBus3,
-                                       &mInstBus3PeakDbRun,
-                                       &mInstBus3PeakDbLRun,
-                                       &mInstBus3PeakDbRRun);
     mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kRustyDrumsBus,
                                        &mRustyDrumsBusPeakDbRun,
                                        &mRustyDrumsBusPeakDbLRun,
@@ -2106,21 +2094,21 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     drainAndMerge (mVoxBus2PeakDb,   mVibeGraph.voxBus2PeakDb);
     drainAndMerge (mVoxBus2PeakDbL,  mVibeGraph.voxBus2PeakDbL);
     drainAndMerge (mVoxBus2PeakDbR,  mVibeGraph.voxBus2PeakDbR);
+    drainAndMerge (mInstBusPeakDb,   mVibeGraph.instBusPeakDb);
+    drainAndMerge (mInstBusPeakDbL,  mVibeGraph.instBusPeakDbL);
+    drainAndMerge (mInstBusPeakDbR,  mVibeGraph.instBusPeakDbR);
+    drainAndMerge (mInstBus2PeakDb,  mVibeGraph.instBus2PeakDb);
+    drainAndMerge (mInstBus2PeakDbL, mVibeGraph.instBus2PeakDbL);
+    drainAndMerge (mInstBus2PeakDbR, mVibeGraph.instBus2PeakDbR);
+    drainAndMerge (mInstBus3PeakDb,  mVibeGraph.instBus3PeakDb);
+    drainAndMerge (mInstBus3PeakDbL, mVibeGraph.instBus3PeakDbL);
+    drainAndMerge (mInstBus3PeakDbR, mVibeGraph.instBus3PeakDbR);
 
-    // Group 2: Run -> snapshot promotion for Inst / secondary Inst buses +
-    // Rusty + per-row audio clip mirrors.  Shrinks each task as more buses migrate.
-    drainAndMerge (mInstBusPeakDb,  mInstBusPeakDbRun);
-    drainAndMerge (mInstBusPeakDbL, mInstBusPeakDbLRun);
-    drainAndMerge (mInstBusPeakDbR, mInstBusPeakDbRRun);
+    // Group 2: Run -> snapshot promotion for Rusty + per-row audio clip
+    // mirrors.  Shrinks each task as more buses migrate.
     drainAndMerge (mRustyDrumsBusPeakDb,  mRustyDrumsBusPeakDbRun);   // J-7b
     drainAndMerge (mRustyDrumsBusPeakDbL, mRustyDrumsBusPeakDbLRun);  // J-7b
     drainAndMerge (mRustyDrumsBusPeakDbR, mRustyDrumsBusPeakDbRRun);  // J-7b
-    drainAndMerge (mInstBus2PeakDb, mInstBus2PeakDbRun);
-    drainAndMerge (mInstBus2PeakDbL,mInstBus2PeakDbLRun);
-    drainAndMerge (mInstBus2PeakDbR,mInstBus2PeakDbRRun);
-    drainAndMerge (mInstBus3PeakDb, mInstBus3PeakDbRun);
-    drainAndMerge (mInstBus3PeakDbL,mInstBus3PeakDbLRun);
-    drainAndMerge (mInstBus3PeakDbR,mInstBus3PeakDbRRun);
     for (int r = 0; r < kMaxAudioRows; ++r)
     {
         drainAndMerge (mAudioRowPeakDb [r], mAudioRowPeakDbRun [r]);
