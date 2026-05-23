@@ -182,12 +182,90 @@ required sections (locked 2026-05-11) + Rule 4 (Diagnostic Instrumentation Catal
   `PluginProcessor.cpp:2115-2133`, delete `mFxBusPeakDb*Run` declarations +
   initialisers.
 
+## 2026-05-23 — Task 2 — FX bus migration to G1 (commit `0b33ffe`)
+
+- **Commit:** `0b33ffe` (top of `main`, 5 ahead of `origin/main`). 6 files, 121
+  insertions / 28 deletions.
+- **Files in commit:** 4 source — `Source/VibeGraph.h` (+3), `Source/VibeGraph.cpp`
+  (+14/-1), `Source/PluginProcessor.cpp` (-19/+3), `Source/PluginProcessor.h`
+  (-3) — + 2 docs — `Plans & Specs/Batch Plans/squishy-scribbling-flurry.md`
+  (+6/-1 S6 catch-up), `Plans & Specs/Running Notes/squishy-scribbling-flurry.md`
+  (+97 Task 0 commit-landed + Task 1 catch-up).
+
+#### Source changes (FX bus on G1, no `*Run` hop)
+
+- **Added `fxBusPeakDb / fxBusPeakDbL / fxBusPeakDbR` VibeGraph public-member
+  atomics** ([VibeGraph.h:661](Source/VibeGraph.h:661), after `masterPeakDbR`).
+- **Rewrote `kFxBus` dispatch in `processBus`** ([VibeGraph.cpp:1531-1547](Source/VibeGraph.cpp:1531))
+  from single-line into multi-line block with 3 exchange-stores parallel to
+  L/B/D — same shape as `:1545-1547 / :1554-1556 / :1563-1565`.
+- **Moved `constexpr float kBusNegInf` declaration UP** ([VibeGraph.cpp:1540](Source/VibeGraph.cpp:1540))
+  out of the L/B/D-specific scope so FX shares the same declaration.
+- **PluginProcessor.cpp** — added 3 `drainAndMerge` lines to the G1 loop after
+  `masterPeakDbR` drain + DELETED the entire QA-Ef interim FX-bus drain block
+  at `:2115-2133` + updated Group 2 comment to remove "FxBus" mention.
+- **PluginProcessor.h** — deleted `mFxBusPeakDbRun / mFxBusPeakDbLRun /
+  mFxBusPeakDbRRun` declarations.
+- **Net behaviour:** FX bus meter publishes via the identical end-to-end path
+  as L/B/D/Master. No intermediate `*Run` mirror. QA-Ef's interim Group-2-style
+  fix is gone.
+
+#### Verify (PASSED, Debug, 2026-05-23)
+
+- Scenarios derived from source-reads of MixerPage + cable + aux code per the
+  new `feedback_verify_scenarios_read_app_first.md` rule (saved this task —
+  see process notes below). The 4-scenario rig:
+  1. New project + Layer with sound + Mixer "Add Aux Strip" (auto-routes to
+     FX Bus per 5F-4b) + Layer's "+" → Send → click aux → trigger sound →
+     FX Bus meter reads activity matching L/B/D/Master ballistics. PASSED.
+  2. Stop sound → FX Bus meter decays cleanly. PASSED.
+  3. Multi-core OFF (Mixer hamburger toggle) → repeat (1) → meter still
+     reads. PASSED.
+  4. Multi-core ON, save + reload project → meter still reads post-reload.
+     PASSED.
+- **Regression check** — L/B/D/Master meters untouched + verified still
+  reading on the same project. PASSED.
+
+#### Process notes
+
+- **Verify-rig pivot.** Initial surface to Jeff was a fabricated
+  cable-drag-to-FX-Bus workflow that did not match how the app routes to FX.
+  Jeff overruled ("No like this isn't at all how this app functions" + "The
+  simplest is for you to do your job. Look at how it actually works and tell
+  me what I need to test"). New memory `feedback_verify_scenarios_read_app_first.md`
+  saved — every verify rig comes from source reads, not a generic DAW mental
+  model. Explore agent then derived the real workflow above from MixerPage +
+  cable + aux code, which is what's recorded in the commit message body.
+- **Pre-commit surface.** Drafted commit message + full `git status` surfaced
+  to Jeff per `feedback_surface_drafted_commit_message_for_approval.md`. Jeff
+  caught one factual error in the message's "Next:" line (referenced
+  BaySickGuitars/BaySickBasses as if buses — they're engine processors);
+  proposed fix (Task 3 = AudioClips bus migration + InstrChannelNode peakDb
+  plumbing), approved-with-fix, fix landed in the committed message.
+- **No diagnostic instrumentation added this task.** Catalog stays empty
+  post-Task-2.
+
+#### Next action
+
+- **Task 3 — AudioClips bus migration.** Task 3 carries the one-time
+  structural addition that all 7 InstrChannelNode-backed buses inherit:
+  extend `InstrChannelNode` ([VibeGraph.cpp:1276-1332](Source/VibeGraph.cpp:1276))
+  with `peakDb / peakDbL / peakDbR` atomics + `peakRingL / peakRingR` arrays +
+  `peakRingIdx int` — matching the 5 G1 BusNodes' field set EXCLUDING
+  `peakDecayDbPerBlock` per S6. On top of that one-time extension Task 3 then
+  wires the AudioClips bus only: `audioClipsPeakDb*` VibeGraph members +
+  `processBus` exchange-store branch + `drainAndMerge` wiring + delete the
+  AudioClips `*Run` mirror + delete the `registerBusPeakAtomics` call for
+  `kClipsBus`. Tasks 4-6 then ride the now-extended `InstrChannelNode` to
+  migrate the remaining 6 buses.
+
 ## Diagnostic Instrumentation Catalog
 
 (per Main Plan §0 Rule 4 — append a row WITH the diagnostic add, walk + strip
 at task/batch close. Format: Site / Tag / Purpose / Disposition.)
 
-No diagnostics added yet (Task 0 = docs-only, no source touched).
+No diagnostics added through Task 2 (FX bus migration was a pure exchange-store
++ drain rewire — no instrumentation needed).
 
 **Pre-existing Keep entries** (retro-added per Rule 4 "pre-existing diagnostics
 get retro-added with Keep when first surfaced"):

@@ -442,9 +442,6 @@ public:
     // this block" case promotes nothing (skip-on-INF inside the promote
     // helper) and the existing snapshot keeps decaying via UI ballistics.
     static constexpr float kPeakAtomicNegInf = -std::numeric_limits<float>::infinity();
-    std::atomic<float> mAudioClipsBusPeakDbRun  { kPeakAtomicNegInf };
-    std::atomic<float> mAudioClipsBusPeakDbLRun { kPeakAtomicNegInf };
-    std::atomic<float> mAudioClipsBusPeakDbRRun { kPeakAtomicNegInf };
     std::atomic<float> mVoxBusPeakDbRun         { kPeakAtomicNegInf };
     std::atomic<float> mVoxBusPeakDbLRun        { kPeakAtomicNegInf };
     std::atomic<float> mVoxBusPeakDbRRun        { kPeakAtomicNegInf };

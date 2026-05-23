@@ -285,10 +285,6 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // need registration.  Idempotent - registerBusPeakAtomics overwrites the
     // table entry, so repeated prepareToPlay calls (block-size / sample-rate
     // changes) just rewrite the same pointers.
-    mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kClipsBus,
-                                       &mAudioClipsBusPeakDbRun,
-                                       &mAudioClipsBusPeakDbLRun,
-                                       &mAudioClipsBusPeakDbRRun);
     mVibeGraph.registerBusPeakAtomics(MixerChannelIds::kVoxBus,
                                        &mVoxBusPeakDbRun,
                                        &mVoxBusPeakDbLRun,
@@ -2109,12 +2105,12 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     drainAndMerge (mFxBusPeakDb,   mVibeGraph.fxBusPeakDb);
     drainAndMerge (mFxBusPeakDbL,  mVibeGraph.fxBusPeakDbL);
     drainAndMerge (mFxBusPeakDbR,  mVibeGraph.fxBusPeakDbR);
+    drainAndMerge (mAudioClipsBusPeakDb,  mVibeGraph.audioClipsPeakDb);
+    drainAndMerge (mAudioClipsBusPeakDbL, mVibeGraph.audioClipsPeakDbL);
+    drainAndMerge (mAudioClipsBusPeakDbR, mVibeGraph.audioClipsPeakDbR);
 
-    // Group 2: Run -> snapshot promotion for AudioClipsBus / Vox / Inst /
-    // secondary buses + per-row audio clip mirrors.
-    drainAndMerge (mAudioClipsBusPeakDb,  mAudioClipsBusPeakDbRun);
-    drainAndMerge (mAudioClipsBusPeakDbL, mAudioClipsBusPeakDbLRun);
-    drainAndMerge (mAudioClipsBusPeakDbR, mAudioClipsBusPeakDbRRun);
+    // Group 2: Run -> snapshot promotion for Vox / Inst / secondary buses +
+    // per-row audio clip mirrors.  Shrinks each task as more buses migrate.
     drainAndMerge (mVoxBusPeakDb,   mVoxBusPeakDbRun);
     drainAndMerge (mVoxBusPeakDbL,  mVoxBusPeakDbLRun);
     drainAndMerge (mVoxBusPeakDbR,  mVoxBusPeakDbRRun);

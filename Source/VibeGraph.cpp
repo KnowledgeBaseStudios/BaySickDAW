@@ -1284,6 +1284,17 @@ struct VibeGraph::InstrChannelNode
     std::atomic<float>* pPolarity { nullptr };
     std::atomic<float>* pWidth    { nullptr };
 
+    // QA-Eg: G1-pattern peak fields (parallel to L/B/D/Master/EffectsBusNode).
+    // publishPeakReading writes peakDb/L/R + ring; processBus exchange-stores
+    // into VibeGraph member atomics; drainMeterAtomicsForUI G1 loop drains
+    // those into PluginProcessor snapshot mirrors.  S6: NO peakDecayDbPerBlock
+    // (dead carry-over on the 5 existing G1 nodes; stripped in Task 7).
+    std::atomic<float> peakDb  { -60.f };
+    std::atomic<float> peakDbL { -60.f };
+    std::atomic<float> peakDbR { -60.f };
+    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
+    int peakRingIdx { 0 };
+
     explicit InstrChannelNode(const juce::String& displayName) : name(displayName) {}
 
     void prepare(double sr, int blockSize)
@@ -1589,6 +1600,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     EQ8MsDSP*  preEq  = nullptr;
     EffectRack* rack   = nullptr;
     EQ8MsDSP*  postEq = nullptr;
+    InstrChannelNode* node = nullptr;
     juce::String prefix;
     // QA-Ea Part A (2026-05-21): inGroupSolo + useGroupSolo retired.  Every
     // bus shares the unified canonical formula `silenced = muted || (anyBus
@@ -1603,6 +1615,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             preEq  = getAudioClipsBusPreEQ();
             rack   = getAudioClipsBusRack();
             postEq = getAudioClipsBusEQ();
+            node   = mAudioClipsBusNode.get();
             prefix = "mixer_clipsbus";
             break;
         case kVoxBus:
@@ -1691,8 +1704,18 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             applyStereoPan (buf, pan, panLaw);
     }
 
-    // Peak meter - CAS-max into PluginProcessor's running-max atomics via the
-    // registry; drainAndMerge end-of-block promotes them to the UI snapshots.
+    // Peak meter.  Migrated buses (node != nullptr) publish into their
+    // InstrChannelNode's G1 peak fields via publishPeakReading; the
+    // exchange-store at the end of this function lifts them to VibeGraph
+    // member atomics, parallel to the L/B/D pattern above.  Buses still on
+    // the G2 path CAS-max into PluginProcessor's *Run mirrors via mBusPeakRefs.
+    if (node != nullptr)
+    {
+        publishPeakReading (buf,
+                            node->peakRingL, node->peakRingR, node->peakRingIdx,
+                            node->peakDbL, node->peakDbR, node->peakDb);
+    }
+    else
     {
         const auto& refs = mBusPeakRefs[(size_t) busChId];
         const float pkLin_L = buf.getMagnitude (0, 0, n);
@@ -1712,6 +1735,17 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         casMax (refs.peakL, thisL);
         casMax (refs.peakR, thisR);
         casMax (refs.peak,  thisM);
+    }
+
+    // Exchange-store the migrated buses' node-internal peak atomics into
+    // VibeGraph member atomics (parallel to L/B/D pattern at the top of this
+    // function).  Tasks 4-6 extend with else-if branches for the remaining
+    // InstrChannelNode-backed buses.
+    if (busChId == kClipsBus && mAudioClipsBusNode != nullptr)
+    {
+        audioClipsPeakDb .store(mAudioClipsBusNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        audioClipsPeakDbL.store(mAudioClipsBusNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        audioClipsPeakDbR.store(mAudioClipsBusNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
     }
 }
 
