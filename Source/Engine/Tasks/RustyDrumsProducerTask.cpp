@@ -15,7 +15,7 @@ void RustyDrumsProducerTask::run()
     const int n = mCtx->numSamples;
     if (n <= 0) return;
 
-    // Engine + active flag check (same gate as the serial path).
+    // Engine + active flag check.
     if (! mProcessor->mRustyDrumsActive.load (std::memory_order_acquire)) return;
 
     juce::SpinLock::ScopedTryLockType lk (mProcessor->mRustyDrumsEngineLock);

@@ -28,11 +28,10 @@ class VibeSynthProcessor;
 //   PluginProcessor and this task call.  Internally switches on channelId
 //   to the right per-bus chain (Layers/Bass/Drums via BusNode helpers,
 //   Clips/Vox/Inst/Vox2/Inst2/Inst3/Rusty inlined, FxBus → processEffectsBus,
-//   Master → processMasterBus).  No more "bus bypass" caveat when the
-//   engine flag flips.
+//   Master → processMasterBus).
 //
-// Phase 7 scaffolding: dead at runtime while kEnableMultiThreadedEngine
-// is constexpr false.
+// QA-Ef (2026-05-21): this is the live audio plumbing -- the dispatcher is
+// the single render path.
 class PassiveStripTask : public RenderTask
 {
 public:

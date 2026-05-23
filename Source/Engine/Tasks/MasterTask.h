@@ -32,10 +32,9 @@ class VibeSynthProcessor;
 //      pairs with the dispatcher's acquire on the same flag and publishes
 //      our writes to the arena slot.
 //
-// Phase 8 scaffolding: dead at runtime while kEnableMultiThreadedEngine
-// is constexpr false.  The full pump (reset counters → seed leaves →
-// runUntil → master signals done → copy to host buffer) is wired in
-// dispatchBlock as part of this batch.
+// QA-Ef (2026-05-21): this is the live render terminal.  The full pump
+// (reset counters -> seed leaves -> runUntil -> master signals done -> copy
+// to host buffer) is wired in dispatchBlock.
 class MasterTask : public RenderTask
 {
 public:

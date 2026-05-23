@@ -2,26 +2,36 @@
 
 #include <atomic>
 
-// Multi-threaded render engine flags + tunables.
+// Render engine flags + tunables.
 //
 // 2026-05-07 (Batch 10): the master flag was promoted from `constexpr bool`
-// to `std::atomic<bool>`.  The audio thread now reads it once at the top of
-// every processBlock (acquire) and routes either to the MT dispatcher or
-// the serial path.  Both branches live in the compiled binary now -- the
-// compiler can no longer elide the unused side -- so flipping the flag at
-// runtime is a hot-swap: toggle from the message thread (release-store
-// from the Mixer hamburger menu) and the very next audio block picks the
-// new path with no glitches and no restart.
+// to `std::atomic<bool>`.
+//
+// QA-Ef (2026-05-21): the serial render path was deleted and the dispatcher
+// became the single, unconditional render path.  The flag now gates the
+// WORKER THREADS, not the audio thread: workers acquire-load it at the top
+// of VibeThreadPool::workerLoop and either run the graph in parallel (true)
+// or park immediately (false) so the audio thread drains the entire graph
+// itself via runUntilOrTimeout -- genuine serial execution through the
+// IDENTICAL dispatcher / task code, no duplicate path.  Flipping at runtime
+// is still a hot-swap: toggle from the message thread (release-store from
+// the Mixer "Multi-core Rendering" menu) and the very next audio block
+// picks the new mode (parallel vs single-core diagnostic) with no glitches
+// and no restart.
 namespace RenderEngine
 {
-    // Master switch for the multi-threaded render path.
+    // Master switch for render-engine parallelism.  Read by the worker threads
+    // (acquire) in VibeThreadPool::workerLoop; written by the message thread
+    // (release) from the Mixer "Multi-core Rendering" toggle.
     //
-    //   false  -> PluginProcessor::processBlock runs the serial loop.
-    //   true   -> dispatcher takes over the block.  ALL strips must have
-    //             RenderTask wrappers registered, otherwise audio is silent
-    //             or partial.  (rebuildLinks fires every block regardless,
-    //             so toggling from false->true sees fresh predecessor /
-    //             child / mInitialDeps state on the very next block.)
+    //   true   -> worker threads run the render graph in parallel (production
+    //             default).
+    //   false  -> SERIAL-DIAGNOSTIC mode: all workers park and the audio thread
+    //             runs the entire graph itself via the dispatcher's
+    //             runUntilOrTimeout.  Identical dispatcher + task code, zero
+    //             parallelism -- the bisect tool for "parallelism bug vs logic
+    //             bug".  NOT a separate serial code path (QA-Ef deleted that
+    //             2026-05-21); the dispatcher is always the single render path.
     //
     // Default true: MT validated as the production-quality path during
     // Batch 9c (flag flip + watchdog + meter drain + SC pull + bus solo
@@ -31,16 +41,12 @@ namespace RenderEngine
     // (kWatchdogTimeoutMillis below) catches any remaining deadlocks
     // loudly instead of letting the audio thread hang.
     //
-    // Audio thread reads:    .load (std::memory_order_acquire)
-    // Message thread writes: .store (newValue, std::memory_order_release)
+    // Worker threads read:   .load (std::memory_order_acquire)
+    // Message thread writes:  .store (newValue, std::memory_order_release)
     //
-    // The acquire/release pair publishes any preceding state-edits the
-    // message thread did before flipping the flag (e.g. a settings UI
-    // change) so the audio thread sees a consistent view.  In practice
-    // there's nothing else for the message thread to publish here -- the
-    // dispatcher's tasks + arena are always live regardless of flag --
-    // but using release/acquire keeps the protocol future-proof and
-    // matches the rest of the engine's atomic conventions.
+    // The acquire/release pair publishes the message thread's preceding state
+    // edits before the flip so the workers see a consistent view, and matches
+    // the rest of the engine's atomic conventions.
     inline std::atomic<bool> gMultiThreadedEngineEnabled { true };
 
     // Hard cap on worker threads. The 5950X (16C/32T) saturates well below

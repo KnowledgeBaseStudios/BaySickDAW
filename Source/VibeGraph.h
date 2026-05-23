@@ -308,36 +308,25 @@ public:
     // §P4.3 B7 (2026-04-22): all external page-EQ refs dropped.  Every bus now
     // owns its own preEq (pre-rack) and busEq (post-rack) directly.
     // 2026-04-25: DrumSynth removed.  Drums-bus content now exclusively
-    // comes from per-drum-tab InsertNode outputs via routeInsertOutput.
+    // comes from per-drum-tab InsertNode outputs.
     void buildFixedTopology(juce::Synthesiser&                  synth,
                             BassSynth&                          bass,
                             juce::AudioProcessorValueTreeState& apvts);
 
-    // ── Main audio call (replaces direct mixing in PluginProcessor) ───────────
-    // midi:  piano-roll MIDI destined for the Layers synth
-    // bpm:   current host BPM, forwarded to time-based effects
-    void processBlock(juce::AudioBuffer<float>& outputBuffer,
-                      juce::MidiBuffer&         midi,
-                      double                    bpm,
-                      juce::AudioBuffer<float>* layersPreRendered      = nullptr,
-                      juce::AudioBuffer<float>* bassPreRendered        = nullptr,
-                      juce::AudioBuffer<float>* drumsPreRendered       = nullptr,
-                      juce::AudioBuffer<float>* audioClipsPreRendered  = nullptr);
-
-    // 2026-05-06 (Batch 9b): unified bus DSP dispatcher used by both the serial
-    // path and the MT path's PassiveStripTask Bus mode.  `buf` is treated as
-    // in/out - caller must have it pre-filled with the bus's input signal
-    // (sum of upstream contributions) before calling.  Internally switches on
-    // busChId to the right per-bus DSP path: Layers/Bass/Drums delegate to
-    // the existing BusNodes via processChainOnly; Clips / Vox / Inst /
-    // Vox2 / Inst2 / Inst3 / Rusty run their inline DSP migrated from
-    // PluginProcessor; FxBus calls processEffectsBus; Master calls
-    // processMasterBus.  `anySolo` and `panLaw` are forwarded as needed -
+    // 2026-05-06 (Batch 9b): unified bus DSP dispatcher used by
+    // PassiveStripTask's Bus mode.  `buf` is treated as in/out - caller must
+    // have it pre-filled with the bus's input signal (sum of upstream
+    // contributions) before calling.  Internally switches on busChId to the
+    // right per-bus DSP path: Layers/Bass/Drums delegate to the existing
+    // BusNodes via processChainOnly; Clips / Vox / Inst / Vox2 / Inst2 /
+    // Inst3 / Rusty run their inline DSP migrated from PluginProcessor; FxBus
+    // calls processEffectsBus; Master calls processMasterBus.  `anySolo` and
+    // `panLaw` are forwarded as needed -
     // unused for buses that read solo/pan directly via APVTS.  Caller is
-    // responsible for routing the processed output downstream
-    // (e.g. routeInsertOutput) - processBus does DSP only.
+    // responsible for routing the processed output downstream - processBus
+    // does DSP only.
     void processBus(int busChId, juce::AudioBuffer<float>& buf,
-                    double bpm, bool anySolo, int panLaw);
+                    double bpm, int panLaw);
 
     // 2026-05-06 (Batch 9b): peak-meter atomic registration for the buses
     // whose DSP migrated from PluginProcessor into processBus.  Layers/Bass/
@@ -359,8 +348,8 @@ public:
 
     // C.1 (2026-04-30): runs the FX Bus pipeline on its accumulator buffer
     // (preEq -> rack -> postEq -> polarity -> M/S width -> fader x mute x
-    // solo -> pan -> peak meter).  Caller must subsequently routeInsertOutput
-    // from kFxBus to fan the result downstream (default = Master).  busAnySolo
+    // solo -> pan -> peak meter).  Caller must subsequently route the kFxBus
+    // result downstream (default = Master).  busAnySolo
     // participates in the receive-group solo gate; panLaw matches the project-
     // level master_pan_law convention used by the Vox/Inst bus loop.
     void processEffectsBus(juce::AudioBuffer<float>& buf, double bpm,
@@ -549,7 +538,7 @@ public:
     std::pair<float, float> drainInsertPeakDbStereo (InsertKind kind, int index);
 
     // 2026-05-02: end-of-audio-block promotion of all insert peak snapshots.
-    // PluginProcessor::processBlock calls this AFTER VibeGraph::processBlock
+    // PluginProcessor::processBlock calls this after the render dispatch
     // returns, so every insert's snapshot reflects the same just-completed
     // audio block before any UI vblank can read.  Eliminates the layer-vs-
     // bus ping-pong where one meter pulses one frame after the other due to
@@ -569,10 +558,9 @@ public:
                                   double bpm, bool anySolo);
 
     // Batch 8 (2026-05-06): run the master bus DSP in-place on sumBuf.
-    // Extracted from VibeGraph::processBlock so MasterTask can call the same
-    // path as the serial code (avoids drift).  Pushes SC array, runs the
-    // master node's processBlock, drains peak meters into the VibeGraph-
-    // level mirror atomics.  No-op if the master node hasn't been built.
+    // Called by MasterTask.  Pushes SC array, runs the master node's
+    // processBlock, drains peak meters into the VibeGraph-level mirror
+    // atomics.  No-op if the master node hasn't been built.
     void        processMasterBus(juce::AudioBuffer<float>& sumBuf, double bpm);
 
     // 5F-4a Batch 6: cache APVTS pointers inside bus + master nodes. Call after
@@ -586,9 +574,9 @@ public:
 
     // QA-Ea Part A (2026-05-21): true if any of the 11 bus _solo params is on.
     // GUARDRAIL (per §9 nineteenth Forks): reads BUS _solo ONLY.  MUST NEVER
-    // call isAnyInsertSoloed() (strip-level) -- the prior serial bug muted
-    // whole buses when one strip soloed (warned at PluginProcessor.cpp:1876-
-    // 1885 too).  Per-strip _solo is a separate axis owned by InsertNodes and
+    // call isAnyInsertSoloed() (strip-level) -- the prior bug muted whole
+    // buses when one strip soloed.  Per-strip _solo is a separate axis owned
+    // by InsertNodes and
     // is untouched.
     //
     // O(11) cached-atomic loads per call; safe to call from the audio thread.
@@ -612,15 +600,6 @@ public:
     // J-4: BaySickRustyDrums bus polarity/width.
     void applyRustyDrumsBusPolarityWidth(juce::AudioBuffer<float>& buf);
 
-    // 5F-4b B1b: per-channel input accumulator buffers. PluginProcessor sums
-    // each InsertNode's output into the correct channel's accumulator based on
-    // the strip's _sendTo + _sendN APVTS params. Bus + master nodes then process
-    // their accumulator. Keyed by MixerChannelIds. Sized in prepare().
-    juce::AudioBuffer<float>* getChannelAccumulator(int channelId);
-
-    // Clear all accumulator buffers to zero at top of each block.
-    void clearChannelAccumulators();
-
     // C.4 Phase 1 (2026-04-30): per-strip SC receive buffer set.  Each strip
     // can hold up to kMaxScRecvsPerStrip stereo SC inputs from upstream
     // sources; consumed by DSP modules on the strip via setSidechainBuffers.
@@ -634,11 +613,12 @@ public:
     // The array itself is owned by VibeGraph; do not free.
     using ScRecvArray = std::array<juce::AudioBuffer<float>*, kMaxScRecvSlots>;
     ScRecvArray getScRecvArray (int channelId);
-    // Clear all SC receive buffers (call alongside clearChannelAccumulators).
+    // Clear all SC receive buffers (call at the top of each block).
     void clearScRecvBuffers();
     // Push the strip's SC array to its preEq + rack + postEq DSP modules.
     // Address-only push -- the actual buffer contents are filled by upstream
-    // routeInsertOutput SC fanout, AFTER topo-sorted source strips process.
+    // SC fanout (pullSidechainPredecessorsToGraph under MT), AFTER topo-sorted
+    // source strips process.
     // Called by VibeGraph internally for inserts + buses + master, and by
     // PluginProcessor for the Vox/Inst bus loop strips.
     void pushScArrayToStrip (int channelId);
@@ -651,16 +631,18 @@ public:
     // APVTS. Called by PluginProcessor at the top of each processBlock.
     void rebuildRoutingFromApvts();
 
-    // 5F-4b B2: process all registered aux inserts. Each aux's input is already
-    // summed into its channel accumulator by upstream routeInsertOutput calls.
-    // For each aux: run InsertNode::processBlock on the accumulator in-place,
-    // then invoke `fanout(auxChannelId, processedBuf)` so the caller can route
-    // the aux's output downstream via RoutingGraph edges.
-    void processAuxInserts(double bpm, bool anySolo,
-                           const std::function<void(int, juce::AudioBuffer<float>&)>& fanout);
-
     // 5F-4b B2: list the ids of currently-registered aux inserts (for UI iter).
     std::vector<int> getAuxIndices() const;
+
+    // QA-Ef #4 (2026-05-22): clear every registered aux InsertNode.  Called on
+    // project load via VibeSynthProcessor::clearAllAuxInserts from the three
+    // load-entry points (deserializeProject / setStateInformation / doFileNew /
+    // loadTemplate) BEFORE restoreAuxStripsFromState rebuilds from the loaded
+    // project -- without this, auxes from the prior project's session persist
+    // and the load layers the new project's auxes on top of them ("open 16
+    // auxes, load another project, all 16 still there").  Safe under the load
+    // shield; audio thread bails before iterating tasks.
+    void clearAuxInserts();
 
     // ── Level meters (written by audio thread, read by UI timer) ─────────────
     std::atomic<float> layersPeakDb  { -60.f };
@@ -768,12 +750,6 @@ private:
     juce::ValueTree mPendingRackState;
     void applyRackStates(const juce::ValueTree& parent);
 
-    // ── Pre-allocated scratch buffers (avoid per-block heap allocs) ───────────
-    juce::AudioBuffer<float> mLayersBuf;
-    juce::AudioBuffer<float> mBassBuf;
-    juce::AudioBuffer<float> mDrumsBuf;
-    juce::AudioBuffer<float> mSumBuf;
-
     double mSampleRate    { 44100.0 };
     int    mBlockSize     { 512 };
     bool   mTopologyBuilt { false };
@@ -788,7 +764,6 @@ private:
 
     // 5F-4b B1b: routing state
     RoutingGraph                                       mRoutingGraph;
-    std::unordered_map<int, juce::AudioBuffer<float>>  mChannelAccum;
 
     // C.4 Phase 1: per-channel SC receive buffer set (4 stereo bufs per strip).
     // Each ScSet is allocated lazily on first ensureScRecvBuffers() / getScRecvBuffer.

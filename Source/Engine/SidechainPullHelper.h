@@ -10,29 +10,17 @@
 // pullSidechainPredecessorsToGraph (Batch 9c follow-up, 2026-05-07)
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Under serial mode, VibeSynthProcessor::routeInsertOutput is called per-source
-// after each strip processes; it walks the routing graph's SC edges and copies
-// the source's output into every consumer's SC receive slot via
-// VibeGraph::getScRecvBuffer(dstId, dstSlot).copyFrom(...).  The consumer's
-// processInsert / processBus then calls VibeGraph::pushScArrayToStrip(chId)
-// internally, which reads those populated buffers and forwards them to the
-// strip's preEq + rack + postEq via setSidechainBuffers.
+// A strip's rack / preEq / postEq can contain SC-capable DSP (compressors,
+// dynamic-EQ bands, etc.) that read from VibeGraph's per-strip scRecv buffers
+// (via pushScArrayToStrip -> setSidechainBuffers).  The engine-level
+// ISidechainEngine push only covers ENGINE SC, not the strip's internal
+// rack/EQ DSP -- so something must fill those scRecv buffers.
 //
-// Under MT, routeInsertOutput sits in serial code below the early `return;`
-// at the top of processBlock, so the SC accumulator never gets populated.
-// EngineInsertTask / VoxStripTask / etc DO push SC predecessors directly to
-// the engine via the ISidechainEngine setSidechainBuffers call -- but that
-// only covers ENGINE-level SC.  Compressors, dynamic-EQ bands, and other
-// SC-capable DSP that live INSIDE the strip's rack / preEq / postEq read
-// from the VibeGraph accumulator that nobody is filling.
-//
-// This helper is the consumer-side equivalent of routeInsertOutput's SC
-// fanout: each task calls it BEFORE its processInsert / processBus, walking
-// its own mPredecessors and copyFrom-ing each SC source's mOutputBuffer
-// into the strip's SC receive slot.  Mirrors routeInsertOutput's copy-
-// replaces semantics -- the encoding contract guarantees at most one source
-// per (dst, slot) per block, and clearScRecvBuffers() is called per-block
-// at the top of processBlock so the buffers start clean.
+// This helper does it: each task calls it BEFORE its processInsert /
+// processBus, walking its own mPredecessors and copyFrom-ing each SC source's
+// mOutputBuffer into the strip's SC receive slot.  Copy-replaces semantics --
+// the encoding contract guarantees at most one source per (dst, slot) per
+// block, and clearScRecvBuffers() runs per-block so the buffers start clean.
 //
 // channelId is the consumer strip's MixerChannelIds value (e.g.
 // MixerChannelIds::layerInsert(idx) for an EngineInsertTask handling a Layer

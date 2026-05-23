@@ -317,23 +317,23 @@ struct VibeGraph::LayersBusNode
             synth.renderNextBlock(buf, midi, 0, n);
         }
         // 2026-05-06 (Batch 9b): post-render DSP factored into processChainOnly
-        // so VibeGraph::processBus (MT mode) can run the chain on a buffer
-        // that already contains the pre-summed input from PassiveStripTask.
-        // Serial path identical - same chain, same order, same comments.
+        // so VibeGraph::processBus can run the chain on a buffer that already
+        // contains the pre-summed input from PassiveStripTask.
         // QA-Ea Part A (2026-05-21): synth-fallback path is dead per the
-        // comment at VibeGraph.cpp:1517-1520 (modern callers always supply
-        // an accumulator); pass false here since the caller chain doesn't
-        // reach anyBusSoloed().  If this path is ever revived, the caller
-        // must pass the real anyBusSoloed() value.
+        // comment at the legacy VibeGraph::processBlock site (deleted by
+        // QA-Ef; modern callers always supply an accumulator); pass false
+        // here since the caller chain doesn't reach anyBusSoloed().  If this
+        // path is ever revived, the caller must pass the real anyBusSoloed()
+        // value.
         processChainOnly(buf, bpm, /*anyBusSoloed*/ false);
     }
 
     // 2026-05-06 (Batch 9b): runs the bus DSP chain on `buf` in-place.
-    // `buf` must already contain the bus input (sum of upstream Layer
-    // InsertNode outputs in serial mode, PassiveStripTask predecessor sum
-    // in MT mode).  Steps: pre-rack EQ -> rack (with bypass logic) ->
-    // post-rack EQ -> fader x mute x in-group solo -> polarity + M/S width
-    // -> pan -> latency-compensated comp delay -> peak meter publish.
+    // `buf` must already contain the bus input (PassiveStripTask predecessor
+    // sum of upstream Layer InsertNode outputs).  Steps: pre-rack EQ -> rack
+    // (with bypass logic) -> post-rack EQ -> fader x mute x in-group solo ->
+    // polarity + M/S width -> pan -> latency-compensated comp delay -> peak
+    // meter publish.
     //
     // QA-Ea Part A (2026-05-21): anyBusSoloed parameter replaces the legacy
     // 3-bus (L/B/D-only) sibling solo formula.  Caller computes
@@ -511,8 +511,8 @@ struct VibeGraph::BassBusNode
             bass.renderNextBlock(buf, 0, n);
         }
         // 2026-05-06 (Batch 9b): post-render DSP factored into processChainOnly
-        // so VibeGraph::processBus (MT mode) can run the chain on a buffer
-        // that already contains the pre-summed input from PassiveStripTask.
+        // so VibeGraph::processBus can run the chain on a buffer that already
+        // contains the pre-summed input from PassiveStripTask.
         // QA-Ea Part A (2026-05-21): synth-fallback path is dead; pass false.
         processChainOnly(buf, bpm, /*anyBusSoloed*/ false);
     }
@@ -674,8 +674,8 @@ struct VibeGraph::DrumsBusNode
         // 2026-04-25: legacy DrumSynth fallback removed - buf stays cleared
         // when no preRendered (drum bus is silent until tabs route into it).
         // 2026-05-06 (Batch 9b): post-render DSP factored into processChainOnly
-        // so VibeGraph::processBus (MT mode) can run the chain on a buffer
-        // that already contains the pre-summed input from PassiveStripTask.
+        // so VibeGraph::processBus can run the chain on a buffer that already
+        // contains the pre-summed input from PassiveStripTask.
         // QA-Ea Part A (2026-05-21): pre-rendered-fallback path passes false.
         processChainOnly(buf, bpm, /*anyBusSoloed*/ false);
     }
@@ -895,7 +895,7 @@ struct VibeGraph::MasterBusNode
 // -> fader x mute x solo -> pan -> peak).  Driven each block by
 // VibeGraph::processEffectsBus, called from PluginProcessor after the
 // Vox/Inst bus loop so every upstream send has fanned in by then.  Output
-// fans downstream via routeInsertOutput (default _sendTo = Master).
+// fans downstream via the routing graph (default _sendTo = Master).
 // Pre-C.1 (2026-04-30) this struct existed but its processBlock was never
 // invoked -- the FX Bus was completely silent.
 struct VibeGraph::EffectsBusNode
@@ -1403,25 +1403,6 @@ void VibeGraph::prepare(double sampleRate, int maxBlockSize)
         for (auto& [i, node] : *m)
             node->prepare(sampleRate, maxBlockSize);
 
-    // Keep scratch buffers large enough
-    const int ch = 2;
-    if (mLayersBuf.getNumSamples() < maxBlockSize || mLayersBuf.getNumChannels() < ch)
-    {
-        mLayersBuf.setSize(ch, maxBlockSize, false, true, true);
-        mBassBuf  .setSize(ch, maxBlockSize, false, true, true);
-        mDrumsBuf .setSize(ch, maxBlockSize, false, true, true);
-        mSumBuf   .setSize(ch, maxBlockSize, false, true, true);
-    }
-
-    // 5F-4b B1b: seed / resize accumulator buffers for master + 5 buses.
-    // Insert accumulators allocate lazily on first getChannelAccumulator() call.
-    using namespace MixerChannelIds;
-    for (int id : { kMaster, kLayersBus, kBassBus, kDrumsBus, kFxBus, kClipsBus, kVoxBus, kInstBus })
-    {
-        auto& buf = mChannelAccum[id];
-        if (buf.getNumSamples() < maxBlockSize || buf.getNumChannels() < ch)
-            buf.setSize(ch, maxBlockSize, false, true, true);
-    }
 }
 
 // ── reset ─────────────────────────────────────────────────────────────────────
@@ -1469,12 +1450,6 @@ void VibeGraph::buildFixedTopology(juce::Synthesiser&                  synth,
     mMasterNode     = std::make_unique<MasterBusNode> (apvts, busMix);
     mEffectsBusNode = std::make_unique<EffectsBusNode>();
 
-    // Allocate stereo scratch buffers
-    const int ch = 2;
-    mLayersBuf.setSize(ch, mBlockSize, false, true, true);
-    mBassBuf  .setSize(ch, mBlockSize, false, true, true);
-    mDrumsBuf .setSize(ch, mBlockSize, false, true, true);
-    mSumBuf   .setSize(ch, mBlockSize, false, true, true);
 
     // Prepare all nodes with the current sample rate (may already be set)
     if (mSampleRate > 0.0)
@@ -1496,93 +1471,6 @@ void VibeGraph::buildFixedTopology(juce::Synthesiser&                  synth,
         applyRackStates(mPendingRackState);
         mPendingRackState = juce::ValueTree{};
     }
-}
-
-// ── processBlock ──────────────────────────────────────────────────────────────
-void VibeGraph::processBlock(juce::AudioBuffer<float>& outputBuf,
-                              juce::MidiBuffer&         midi,
-                              double                    bpm,
-                              juce::AudioBuffer<float>* layersPreRendered,
-                              juce::AudioBuffer<float>* bassPreRendered,
-                              juce::AudioBuffer<float>* drumsPreRendered,
-                              juce::AudioBuffer<float>* audioClipsPreRendered)
-{
-    if (!mTopologyBuilt)
-    {
-        outputBuf.clear();
-        return;
-    }
-
-    const int numSamples = outputBuf.getNumSamples();
-    const int numCh      = juce::jmin(2, outputBuf.getNumChannels());
-
-    // Grow scratch buffers if needed (rare - only on unexpected block-size increase)
-    if (mLayersBuf.getNumSamples() < numSamples)
-    {
-        mLayersBuf.setSize(numCh, numSamples, false, true, true);
-        mBassBuf  .setSize(numCh, numSamples, false, true, true);
-        mDrumsBuf .setSize(numCh, numSamples, false, true, true);
-        mSumBuf   .setSize(numCh, numSamples, false, true, true);
-    }
-
-    // Create zero-copy sub-view wrappers for the current block
-    juce::AudioBuffer<float> layersBuf(mLayersBuf.getArrayOfWritePointers(), numCh, numSamples);
-    juce::AudioBuffer<float> bassBuf  (mBassBuf  .getArrayOfWritePointers(), numCh, numSamples);
-    juce::AudioBuffer<float> drumsBuf (mDrumsBuf .getArrayOfWritePointers(), numCh, numSamples);
-    juce::AudioBuffer<float> sumBuf   (mSumBuf   .getArrayOfWritePointers(), numCh, numSamples);
-
-    // QA-Ea Part B Task 1 (2026-05-21): the legacy fillFromPreRendered +
-    // processBus calls for L/B/D have been removed.  The triad bus processing
-    // moved to PluginProcessor::processBlock (the new for-loop right before
-    // mVibeGraph.processBlock), calling processBus on the bus accumulator
-    // directly and routing to kMaster via routeInsertOutput.  Leaving the
-    // legacy calls here would double-process the buses (state-advance
-    // BusNode::processChainOnly's compDelay / peak-meter / smoothed-params /
-    // EQ filter state) per block, producing audible drift vs. the pre-Task-1
-    // path.  Task 2 deletes the now-unused layersBuf/bassBuf/drumsBuf +
-    // PreRendered params from the signature; for Task 1 we just stop the
-    // duplicate processBus work and let those buffers sit dead.
-    juce::ignoreUnused(midi);   // legacy synth-fallback path no longer used here
-
-    // ── Sum buses into master input ───────────────────────────────────────────
-    sumBuf.clear();
-    // QA-Ea Part B Task 1: triad + Clips now arrive via the kMaster accumulator
-    // (masterExtra block below).  These addFroms are dead -- Task 2 deletes the
-    // buffers + this block entirely.  Commented out (not removed) so Task 1
-    // isolates the routing change from the signature/buffer-deletion change.
-    // for (int c = 0; c < numCh; ++c)
-    // {
-    //     sumBuf.addFrom(c, 0, layersBuf, c, 0, numSamples);
-    //     sumBuf.addFrom(c, 0, bassBuf,   c, 0, numSamples);
-    //     sumBuf.addFrom(c, 0, drumsBuf,  c, 0, numSamples);
-    // }
-    // // Audio clips bus (post-rack, post-fader) summed here so master rack sees it
-    // if (audioClipsPreRendered != nullptr)
-    // {
-    //     const int srcCh = juce::jmin(numCh, audioClipsPreRendered->getNumChannels());
-    //     for (int c = 0; c < numCh; ++c)
-    //         sumBuf.addFrom(c, 0, *audioClipsPreRendered, c % srcCh, 0, numSamples);
-    // }
-    juce::ignoreUnused (layersBuf, bassBuf, drumsBuf, audioClipsPreRendered);
-
-    // 5F-4b B1b: also sum any signals routed DIRECTLY to Master (insert → Master
-    // main-cable drops, or sends targeting kMaster). Accumulator contents are
-    // populated by PluginProcessor before this call via routeInsertOutput.
-    if (auto* masterExtra = getChannelAccumulator(MixerChannelIds::kMaster))
-    {
-        for (int c = 0; c < numCh; ++c)
-            sumBuf.addFrom(c, 0, *masterExtra, c, 0, numSamples);
-    }
-
-    // ── Master bus (rack + masterGain × masterFader) ──────────────────────────
-    // Batch 8 (2026-05-06): extracted into processMasterBus so MasterTask
-    // (MT mode) can call the same path.
-    processMasterBus(sumBuf, bpm);
-
-    // ── Write master output to the output buffer ──────────────────────────────
-    outputBuf.clear();
-    for (int c = 0; c < numCh; ++c)
-        outputBuf.copyFrom(c, 0, sumBuf, c, 0, numSamples);
 }
 
 void VibeGraph::processMasterBus(juce::AudioBuffer<float>& sumBuf, double bpm)
@@ -1620,7 +1508,7 @@ void VibeGraph::registerBusPeakAtomics(int busChId,
 }
 
 void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
-                            double bpm, bool anySolo, int panLaw)
+                            double bpm, int panLaw)
 {
     using namespace MixerChannelIds;
 
@@ -1633,11 +1521,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     // (3) PluginProcessor.cpp's receive-group busAnySolo that excluded L/B/D.
     // GUARDRAIL: anyBusSoloed reads BUS _solo ONLY -- never strip-level.
     // Per-strip _solo is a separate axis (InsertNode's own gate); untouched.
-    // Caller's `anySolo` parameter becomes redundant (it was the in-group
-    // 6-bus subset); kept in the signature to avoid touching every caller
-    // until QA-Ef cleanup -- the local `anyBus` below overrides it.
     const bool anyBus = anyBusSoloed();
-    juce::ignoreUnused (anySolo);   // QA-Ea Part A: superseded by anyBus
 
     // Pre-existing helpers handle Master + FxBus.  These already push SC,
     // run their own DSP chain, and drain peaks; processBus just delegates.
@@ -1651,8 +1535,8 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
 
     // Layers / Bass / Drums delegate to BusNode::processChainOnly + drain peaks.
     // Caller is responsible for ensuring `buf` already contains the pre-summed
-    // input (sum of upstream Layer/Bass/Drum InsertNode outputs in serial mode,
-    // PassiveStripTask predecessor sum in MT mode).
+    // input (PassiveStripTask predecessor sum of upstream Layer/Bass/Drum
+    // InsertNode outputs).
     constexpr float kBusNegInf = -std::numeric_limits<float>::infinity();
     if (busChId == kLayersBus)
     {
@@ -1873,7 +1757,7 @@ EffectRack* VibeGraph::getEffectsBusRack()    { return mEffectsBusNode   ? &mEff
 // C.1 (2026-04-30): public wrapper - drives the FX Bus pipeline once per
 // block.  Called from PluginProcessor after the Vox/Inst bus loop, i.e.
 // after every upstream send / aux / bus has had a chance to fan into the
-// FX Bus accumulator via routeInsertOutput.  Pre-C.1 this was never
+// FX Bus accumulator.  Pre-C.1 this was never
 // invoked anywhere - the accumulator filled but nothing read it back.
 void VibeGraph::processEffectsBus(juce::AudioBuffer<float>& buf, double bpm,
                                    bool busAnySolo, int panLaw)
@@ -2457,7 +2341,7 @@ void VibeGraph::processInsert(InsertKind kind, int index,
         // C.4 Phase 1: push SC array to this strip's preEq + rack + postEq
         // before processing.  Topo order ensures any SOURCE feeding this
         // strip's SC has already populated the receive buffers via
-        // routeInsertOutput SC fanout.
+        // the upstream SC fanout.
         using namespace MixerChannelIds;
         int chId = -1;
         switch (kind)
@@ -2934,30 +2818,6 @@ bool RoutingGraph::computeTopo(const std::vector<int>& ids)
     return false;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  5F-4b B1b: per-channel accumulator + routing orchestration
-// ═══════════════════════════════════════════════════════════════════════════════
-
-juce::AudioBuffer<float>* VibeGraph::getChannelAccumulator(int channelId)
-{
-    auto it = mChannelAccum.find(channelId);
-    if (it == mChannelAccum.end())
-    {
-        // Lazy-allocate with the current block size (prepared or default).
-        auto& buf = mChannelAccum[channelId];
-        const int blockSize = mBlockSize > 0 ? mBlockSize : 512;
-        buf.setSize(2, blockSize, false, true, false);
-        return &buf;
-    }
-    return &it->second;
-}
-
-void VibeGraph::clearChannelAccumulators()
-{
-    for (auto& [id, buf] : mChannelAccum)
-        buf.clear();
-}
-
 // C.4 Phase 1 (2026-04-30): per-strip SC receive buffer accessors.  Lazy
 // allocation matches the channel-accumulator pattern.  Slot 0..3 maps to
 // _sc_recv{N}_from APVTS / _sc_pick lookups in DSP modules.
@@ -2995,7 +2855,7 @@ void VibeGraph::clearScRecvBuffers()
     // in place -- this gives cross-order SC (where the source strip's
     // hardcoded process order is AFTER the target's) a one-block-latency
     // signal rather than silence.  Same-order SC (source processes before
-    // target) overwrites the buffer in this block via routeInsertOutput's
+    // target) overwrites the buffer in this block via the upstream
     // SC fan, so the latency window only applies when the audio order
     // can't satisfy the SC dependency directly (e.g. Drum -> Bass duck).
     //
@@ -3137,24 +2997,6 @@ void VibeGraph::rebuildRoutingFromApvts()
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  5F-4b B2: Aux insert processing
-// ═══════════════════════════════════════════════════════════════════════════════
-
-void VibeGraph::processAuxInserts(double bpm, bool anySolo,
-                                   const std::function<void(int, juce::AudioBuffer<float>&)>& fanout)
-{
-    for (auto& [idx, node] : mAuxInserts)
-    {
-        const int chId = MixerChannelIds::auxStrip(idx);
-        if (auto* buf = getChannelAccumulator(chId))
-        {
-            // Input already summed into accumulator by upstream routeInsertOutput.
-            // InsertNode::processBlock processes in-place; no preRendered copy.
-            node->processBlock(*buf, bpm, anySolo);
-            fanout(chId, *buf);
-        }
-    }
-}
-
 std::vector<int> VibeGraph::getAuxIndices() const
 {
     std::vector<int> result;
@@ -3162,4 +3004,9 @@ std::vector<int> VibeGraph::getAuxIndices() const
     for (const auto& [idx, node] : mAuxInserts)
         result.push_back(idx);
     return result;
+}
+
+void VibeGraph::clearAuxInserts()
+{
+    mAuxInserts.clear();
 }

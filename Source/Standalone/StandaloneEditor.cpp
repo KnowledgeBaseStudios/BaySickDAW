@@ -2026,8 +2026,8 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             // the strip's fader/mute/solo/width attachments silently failed
             // to bind, so strip controls did nothing and the strip meter
             // stayed dead.  WAV audio still played because the per-clip
-            // path's routeInsertOutput fans the buffer to the ClipsBus
-            // accumulator regardless of whether the InsertNode chain ran,
+            // path's output fans to the ClipsBus accumulator regardless
+            // of whether the InsertNode chain ran,
             // hence the symptom: clip plays, ClipsBus controls work, strip
             // controls and master mute don't.
             mProcessor.mVibeGraph.addAudioRowChannel(row, name);
@@ -5151,10 +5151,12 @@ void StandaloneEditor::showPageForTab(int tabId)
 
                     // 2026-05-07 (Batch 10): hot-swappable multi-core rendering
                     // toggle.  Click flips RenderEngine::gMultiThreadedEngineEnabled
-                    // immediately; the next audio block sees the new value via
-                    // its acquire-load at the top of processBlock and routes to
-                    // either the parallel dispatcher or the serial loop without
-                    // glitching.  No restart needed.
+                    // immediately.  QA-Ef (2026-05-21): the worker threads
+                    // acquire-load this at the top of VibeThreadPool::workerLoop
+                    // -- true = full parallel, false = workers park and the audio
+                    // thread drains the whole graph itself (single-core diagnostic;
+                    // identical dispatcher / task code, zero parallelism).  No
+                    // restart needed; the very next audio block picks the new mode.
                     const bool mtOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
                     m.addItem (202,
                                 "Multi-core Rendering",
@@ -5198,16 +5200,16 @@ void StandaloneEditor::showPageForTab(int tabId)
                             if (r == 202)
                             {
                                 // 2026-05-07 (Batch 10): hot-swap multi-core
-                                // rendering.  release-store pairs with the
-                                // audio thread's acquire-load at the top of
-                                // processBlock; next block picks the new
-                                // path.  Phase 3 (2026-05-07): persist the
-                                // new state to settings.xml so it survives
-                                // restarts.  Save runs synchronously on
-                                // message thread -- file I/O is brief
-                                // (settings.xml is small, ~1 KB) and we'd
-                                // rather lose the toggle change than the
-                                // file under an abrupt shutdown.
+                                // rendering.  QA-Ef (2026-05-21): release-store
+                                // pairs with the worker threads' acquire-load
+                                // in VibeThreadPool::workerLoop; next block
+                                // picks the new mode (workers park vs run).
+                                // Phase 3 (2026-05-07): persist the new state
+                                // to settings.xml so it survives restarts.
+                                // Save runs synchronously on the message thread
+                                // -- file I/O is brief (settings.xml is small,
+                                // ~1 KB) and we'd rather lose the toggle change
+                                // than the file under an abrupt shutdown.
                                 const bool wasOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
                                 RenderEngine::gMultiThreadedEngineEnabled.store (! wasOn, std::memory_order_release);
                                 VibesynthStandaloneApp::saveMultiCoreRenderingPref();
@@ -5261,7 +5263,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                                             #else
                                               << "Release"
                                             #endif
-                                              << "    MT mode: " << (mtMode ? "ON" : "OFF") << "\n"
+                                              << "    Multi-core: " << (mtMode ? "ON" : "OFF (single-core diagnostic)") << "\n"
                                               << "Capture window: 2 s\n\n"
                                               << "Blocks processed:    " << snap.blockCount       << "\n"
                                               << "Leaves submitted:    " << snap.leavesSubmitted  << "\n"
@@ -6064,6 +6066,24 @@ void StandaloneEditor::loadTemplate (const juce::File& templateXml)
     auto parsed = juce::XmlDocument::parse (templateXml);
     if (! parsed || ! parsed->hasTagName ("BaySickTemplate")) return;
 
+    // QA-Ef (2026-05-22): shield the whole template apply -- this is a load-type
+    // rebuild (loadKitImpl + spawn*FromTemplate register ~13 render tasks) and
+    // runs while the audio device is live (e.g. apply-template mid-playback, or
+    // the default New Project below).  Nest-aware: when doFileNew already raised
+    // the shield this inherits it (no double-drain, no premature clear); the
+    // standalone "Load Template" menu path (the other caller) is its outermost
+    // owner.  closeAllDynamicTabs + the inner helpers run under this shield.
+    const bool shieldWasUp = mProcessor.isProjectLoadInProgress();
+    mProcessor.setProjectLoadInProgress (true);
+    if (! shieldWasUp)
+        juce::Thread::sleep (30);
+
+    // QA-Ef #4 (2026-05-22): tear down prior-project aux inserts under the
+    // shield, before the rebuild.  Pairs with the same call in
+    // deserializeProject and doFileNew -- aux strips have no per-tab teardown
+    // hook so we clear them explicitly at each load-type entry point.
+    mProcessor.clearAllAuxInserts();
+
     // 1. Tear down everything dynamic - Layers, Bass, Drums tabs all go.
     closeAllDynamicTabs();
     if (mMixerPage) mMixerPage->clearDynamicStrips();
@@ -6121,6 +6141,10 @@ void StandaloneEditor::loadTemplate (const juce::File& templateXml)
 
     refreshAllKitViews();
     if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+
+    // QA-Ef (2026-05-22): rebuild complete -- restore prior shield state (clears
+    // it only when this call was the outermost owner).
+    mProcessor.setProjectLoadInProgress (shieldWasUp);
 }
 
 void StandaloneEditor::saveTemplateAs ()
@@ -8925,10 +8949,6 @@ void StandaloneEditor::doFileNew()
                         [this] (int) { doFileNew(); }));
                 return;
             }
-            // 2026-04-26: default template is now an XML file (kit + 8 layers
-            // + 4 basses), not a project folder.  Always create a blank
-            // project, then apply the template via loadTemplate().
-            const auto tpl = mProjectManager->getDefaultTemplate();
             if (! mProjectManager->newProject (name, juce::File()))
             {
                 juce::AlertWindow::showMessageBoxAsync (
@@ -8937,39 +8957,49 @@ void StandaloneEditor::doFileNew()
                     "Check that the Projects folder is writable and try again.");
                 return;
             }
+            // QA-Ef (2026-05-22): shield the New Project rebuild -- File > New is
+            // a load-type op that tears down + rebuilds the project graph (the
+            // default-template loadTemplate, or addDefaultDynamicTabs below) and
+            // can run while a prior project is playing.  Nest-aware so the inner
+            // loadTemplate / closeAllDynamicTabs inherit it; restored at the end.
+            const bool shieldWasUp = mProcessor.isProjectLoadInProgress();
+            mProcessor.setProjectLoadInProgress (true);
+            if (! shieldWasUp)
+                juce::Thread::sleep (30);
+
+            // QA-Ef #4 (2026-05-22): tear down prior-project aux inserts under
+            // the shield, before the rebuild.  Pairs with the same call in
+            // deserializeProject and loadTemplate -- aux strips have no per-
+            // tab teardown hook so we clear them explicitly at each load-type
+            // entry point.
+            mProcessor.clearAllAuxInserts();
+
             // 2026-04-24 File > New reset: wipe in-memory state from prior
             // project before applying any template content.
             closeAllDynamicTabs();
             if (mMixerPage) mMixerPage->clearDynamicStrips();
             mProcessor.resetToBlankState();
 
-            // Apply template XML if set - populates kit + layers + basses.
-            if (tpl.existsAsFile() && tpl.hasFileExtension ("xml"))
-                loadTemplate (tpl);
-
-            // Rebuild the three default Layers / Bass / Drums tabs.  When we
-            // seeded from a template, deserializeUIState already added the
-            // template's tabs (and closeAllDynamicTabs inside that call
-            // cleared our stub); mPages.isEmpty() check guards against
-            // double-adding.
-            bool needDefaults = true;
-            for (auto& e : mPages)
-            {
-                if (e->type == RibbonTabBar::TabType::Layers
-                    || e->type == RibbonTabBar::TabType::Bass
-                    || e->type == RibbonTabBar::TabType::Drums)
-                { needDefaults = false; break; }
-            }
-            if (needDefaults)
-            {
-                addDefaultDynamicTabs();
-                if (mRibbon) { mRibbon->selectTab (3); }
-                onTabSelected (3);   // land on Builder
-            }
+            // QA-Ef #6 (2026-05-22): File > New now ALWAYS loads blank, matching
+            // app startup -- the editor ctor (around line 1551) also calls
+            // addDefaultDynamicTabs() and nothing else.  Default-template
+            // application has moved to the dedicated "New from Default
+            // Template" menu item (QA-Ef #7's submenu restructure), so a user's
+            // set default no longer auto-applies on plain File > New.  This
+            // also sidesteps a separate template-loading bug where the kit's
+            // drum tabs come back partially broken (name missing, contents
+            // empty except for + New Drum / + Rusty) -- noted as a finding to
+            // address when #7 wires the "New from Default Template" action.
+            addDefaultDynamicTabs();
+            if (mRibbon) { mRibbon->selectTab (3); }
+            onTabSelected (3);   // land on Builder
 
             restoreAudioStripsFromArrangement();
             mProjectManager->saveProject();
             refreshWindowTitle();
+
+            // QA-Ef (2026-05-22): rebuild complete -- restore prior shield state.
+            mProcessor.setProjectLoadInProgress (shieldWasUp);
         });
     });   // close confirmDiscardChanges continuation
 }
@@ -9540,10 +9570,19 @@ void StandaloneEditor::closeAllDynamicTabs()
     // 2026-05-06: project-load barrier.  Set BEFORE teardown so the audio
     // thread bails on the next callback while we're tearing down engines +
     // pages.  Sleep ~30ms to let any in-flight processBlock complete (covers
-    // up to 1024-sample buffers at 44.1kHz).  Cleared at the end so audio
-    // resumes when the new project finishes loading.
+    // up to 1024-sample buffers at 44.1kHz).
+    //
+    // QA-Ef (2026-05-22): nest-aware.  When a project load already raised the
+    // shield (deserializeProject), leave it raised on exit so the tab/engine
+    // REBUILD that follows this teardown stays protected too -- only the
+    // outermost owner clears it.  Standalone callers (New Project, editor
+    // teardown) still set+clear it themselves (wasLoading == false).  The drain
+    // sleep only fires for the outermost owner; nested calls skip it because
+    // deserializeProject already drained.
+    const bool wasLoading = mProcessor.isProjectLoadInProgress();
     mProcessor.setProjectLoadInProgress (true);
-    juce::Thread::sleep (30);
+    if (! wasLoading)
+        juce::Thread::sleep (30);
 
     // 2026-05-06: extended scope to ALL dynamic tab types (was Layers/Bass/
     // Drums only).  Inst/Vox/Clip/Rusty all hold engines that need teardown
@@ -9579,7 +9618,10 @@ void StandaloneEditor::closeAllDynamicTabs()
     // the end of deserializeUIState to bump each counter past max(restored).
     resetProjectState();
 
-    mProcessor.setProjectLoadInProgress (false);
+    // QA-Ef (2026-05-22): restore the prior shield state -- clears it only when
+    // this call was the outermost owner (wasLoading == false); leaves it raised
+    // when a project load wraps us so its rebuild stays shielded.
+    mProcessor.setProjectLoadInProgress (wasLoading);
 }
 
 // ── QA-D STATE-02: monotonic tab-name counter lifecycle ─────────────────────
@@ -10268,6 +10310,18 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             setName (idx, value);
         }
     };
+    // QA-Ef: recreate every aux UI strip from the engine's restored aux nodes.
+    // restoreAuxStripsFromState (in deserializeProject) rebuilds the aux engine
+    // InsertNodes, but on a project load into the already-open app the MixerPage
+    // constructor (which rebuilds UI strips from getAuxIndices()) does NOT re-run,
+    // and AuxNames below only carries USER-RENAMED strips -- so a default-named
+    // aux strip was restored in the engine yet never got a UI strip (its incoming
+    // send param survived, leaving a dangling cable on the source strip).  Rebuild
+    // from the authoritative engine state here (idempotent); AuxNames just
+    // overlays the custom names afterward.
+    if (mMixerPage != nullptr)
+        for (int idx : mProcessor.mVibeGraph.getAuxIndices())
+            mMixerPage->addAuxChannelAtIndex (idx);
     restoreStripNames ("AuxNames",
                        [this](int i) { mMixerPage->addAuxChannelAtIndex  (i); },
                        [this](int i, const juce::String& n) { mMixerPage->setAuxStripName  (i, n); });
@@ -10355,6 +10409,21 @@ void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
 {
     if (mPM == nullptr) return;
 
+    // QA-Ef (2026-05-22): shield the audio-row rebuild on load paths.  This runs
+    // just after deserializeProject returns (its shield already lowered), and
+    // ensureAudioInsert below calls registerTask while applyPendingRackStates
+    // hot-swaps InsertNode racks -- both race the audio thread's render-graph
+    // walk if audio is live.  Nest-aware + outermost-only drain, matching
+    // deserializeProject / closeAllDynamicTabs.  Gated on isLoadContext so a
+    // future non-load caller doesn't needlessly mute audio.
+    const bool shieldWasUp = isLoadContext && mProcessor.isProjectLoadInProgress();
+    if (isLoadContext)
+    {
+        mProcessor.setProjectLoadInProgress (true);
+        if (! shieldWasUp)
+            juce::Thread::sleep (30);
+    }
+
     // QA-D STATE-01: this method runs after ProjectManager::openProject
     // returns -- outside its mIgnoreDirty window.  applyPendingRackStates
     // below fires EffectRack::clearSlot lifecycle dirty hooks that chain
@@ -10427,6 +10496,11 @@ void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
         // not wrongly discard the user's dirty state).
         if (isLoadContext && ! wasIgnoring) mProjectManager->clearDirty();
     }
+
+    // QA-Ef (2026-05-22): lower the load shield (restore prior state; clears
+    // only when we were the outermost owner).  Audio resumes here.
+    if (isLoadContext)
+        mProcessor.setProjectLoadInProgress (shieldWasUp);
 }
 
 // ── R5d (2026-04-24): post-stop recording routing ───────────────────────────
@@ -10730,9 +10804,18 @@ void StandaloneEditor::refreshWindowTitle()
     }
 
     juce::String title = "BaySickDAW";
-    if (mProjectManager && mProjectManager->hasProject())
+    if (mProjectManager)
     {
-        title += " - " + mProjectManager->getCurrentName();
+        // QA-Ef #5 (2026-05-22): show "Untitled" + the dirty marker even when no
+        // project folder has been opened/created yet, so a fresh-app-launch edit
+        // (e.g. add an aux strip before doing File > New / Open) still surfaces
+        // the unsaved indicator.  Previously the title only added " - name *"
+        // inside the hasProject() branch, so markDirty fired but the user saw
+        // no visible change on a fresh launch.
+        if (mProjectManager->hasProject())
+            title += " - " + mProjectManager->getCurrentName();
+        else
+            title += " - Untitled";
         if (mProjectManager->isDirty()) title += " *";
     }
     // QA-0a (2026-05-07): Debug builds append " [DEBUG]" so the user can

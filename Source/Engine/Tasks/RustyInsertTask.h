@@ -22,8 +22,7 @@ class BaySickRustyDrumsProcessor;
 // the 13 inserts can run in parallel - each reads its own strip from the
 // engine's internal buffer and runs the per-strip insert chain.
 //
-// Phase 6 scaffolding: dead at runtime while kEnableMultiThreadedEngine
-// is constexpr false.
+// QA-Ef (2026-05-21): this is the live audio plumbing.
 class RustyInsertTask : public RenderTask
 {
 public:

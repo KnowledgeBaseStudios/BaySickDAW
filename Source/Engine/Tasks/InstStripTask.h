@@ -29,12 +29,9 @@ class VibeSynthProcessor;
 //   8. VibeGraph::processInsert(Inst, index, ...).
 //   9. Listen gate (live-input case) -> silence if monitor off.
 //
-// Phase 4 scaffolding: code is dead at runtime while
-// kEnableMultiThreadedEngine is false.
-//
-// Deferred to Batch 5/9:
-//   - Dry-recorder tap (mStripRecorders): same rationale as VoxStripTask.
-//   - FilePlay routing: AudioInsertTask (Batch 5).
+// QA-Ef (2026-05-21): this is the live audio plumbing.  Dry-recorder tap is
+// wired via VibeSynthProcessor::tapDryRecorder (see ::run); FilePlay routing
+// is wired via VibeSynthProcessor::renderFilePlayPlayer.
 class InstStripTask : public RenderTask
 {
 public:

@@ -1122,6 +1122,8 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Ef: Serial (ST) Render-Path Deletion — Single MT Path** *(NEW — inserted 2026-05-18)*
 
+> **STATUS (2026-05-23 close):** **CLOSED.** Code work complete: (1) serial render tail + `gMultiThreadedEngineEnabled` branch deleted (~830 lines), MT is the single unconditional render path; (2) `routeInsertOutput` deleted + the two shared helpers (`renderAudioClipsForRow` + `renderFilePlayPlayer`) collapsed to MT-only (Option B "leave no serial ghost", Jeff overruled the half-measure 2026-05-21); (3) serial-execution diagnostic preserved via a `VibeThreadPool::workerLoop` park-when-OFF gate (reuses the Mixer "Multi-core Rendering" toggle — OFF = all workers park, audio thread runs the whole graph through the identical dispatcher/task code); (4) VibeGraph half — `processBlock` + `mChannelAccum` + `processAuxInserts` + `mLayers/Bass/Drums/SumBuf` removed (the cleanup the struck QA-Ea Part B Task 2 left behind); (5) Task 3 dead-code sweep (`BlockContext.busAnySolo` + `mLayerEngineSum/Scratch` + `mBassEngineBuf/Scratch`). **Plus six bugs surfaced + fixed in-batch** (per `feedback_qa_batches_fix_bugs_dont_defer.md` — bugs uncovered by cleanup get fixed, not handed off): (a) **project-load crash on the single MT path** — latent rebuild race unmasked by deleting the serial path that previously ran during loads; fix = `RenderGraphDispatcher` `mTasks.reserve(kMaxStripChannels+64)` + `mSyntheticDeps.reserve(256)` (universal floor) + extend `mProjectLoadInProgress` shield through the REBUILD half of a load, nest-aware (`deserializeProject` raises + lowers around the full body; `closeAllDynamicTabs` only drains/clears when outermost owner; `restoreAudioStripsFromArrangement` shields the post-load audio-row rebuild when `isLoadContext`); SC-loadcrash = (C) Both. (b) **Shield scope extension** — `loadTemplate` + `doFileNew` rebuild paths added to the same nest-aware shield (New Project / apply-template are load-type rebuilds while audio is live); SC-loadcrash-scope = (A) shield all load-type rebuilds. (c) **Aux cable persistence** — `serializeProject` was missing nodes for lazily-registered params (auxes added mid-session); root cause diagnosed via Save Diag instrumentation as a JUCE `replaceState` rebind-reset (the empty `<PARAM>` node `appendChild` fires `valueTreeChildAdded` -> `setNewState` -> resets the live param to default); fix v2 = manual node-creation with current live value pre-set in `serializeProject` (no destructive rebind). (d) **Aux strips leaking across project loads** — `mAuxInserts` + `mAuxRenderTasks` had no teardown hook (`ensureAuxInsert`'s comment literally said "auxes persist for the project lifetime"); fix = new `VibeGraph::clearAuxInserts()` + `PluginProcessor::clearAllAuxInserts()` called from the three load-entry points (`deserializeProject` / `doFileNew` / `loadTemplate`) each under their own load shield; plus `restoreAuxStripsFromState` takes a `const juce::ValueTree& sourceState` (deep-copy snapshot taken BEFORE `replaceState`) so the scan only finds auxes actually in the saved file (not the phantom empty rebind nodes for previously-registered-but-not-in-this-file aux ids). (e) **Adding an aux didn't flag dirty** — `MixerPage::addAuxChannel()` now fires `onAnyStateChange`; load path uses `addAuxChannelAtIndex` and bypasses the flag. Follow-up: `refreshWindowTitle` was suppressing the " *" marker on a fresh launch (only added the suffix inside the `hasProject()` branch) — now shows `BaySickDAW - Untitled` if no project + appends ` *` whenever `isDirty()` regardless. (f) **File > New wasn't blank** — auto-applied default template (which then partial-loaded with broken Drums on the load side); `doFileNew` now unconditionally calls `addDefaultDynamicTabs()` matching the editor ctor's first-launch state. Default-template setting remains in `settings.xml` (still surfaced under Options > Set Default Template); it just no longer auto-applies on plain File > New. **Side findings flagged + interim landed (not the surviving value of the batch):** (i) FX-bus meter was dead under MT (peak mirrors populated only by the serial tail's `drainEffectsBusPeakDbStereo()` + CAS-max) — interim Group-2-style fix landed (`drainMeterAtomicsForUI` now drains FX bus into the Run mirrors), full unification routed to **QA-Eg** (new dedicated batch at this close — see §9). (ii) **#7 (template menu + load functionality) FULLY DEFERRED to QA-ProjectSave** — investigation surfaced that `saveTemplateAs` saves only L/B/D (no vox/inst/clip/rusty/aux/samples) AND `loadTemplate` destructively tears down every dynamic tab type before restoring only L/B/D, so loading any template DESTROYS vox/inst/clip/rusty tabs in the destination project; plus the drum inline-load bug (`loadTemplate` only handles `<Kit path="..."/>` factory references, skips inline `<Drum>` children that `saveTemplateAs` writes); plus the wrong-folder bug on "New from Template..." (opens projects folder, not templates) — full scope (menu restructure, scope expansion, non-destructive teardown, drum inline-load, sample retention / FL-Studio-style file handling, removals of `doFileNewFromTemplate` + `showTemplateMenu` + the duplicate Save Template As) routed to **QA-ProjectSave** (new dedicated batch at this close — see §9). (iii) **Native OS file dialogs everywhere** — Jeff's testing during QA-Ef surfaced the issue ("the button opens a windows style file opener... we don't use this style of window for opening files and instead have these kind of old and clunky looking internal windows that pop up... never asked about this nor would I want that"); pure UX swap routed to **QA-NativeDialogs** (new dedicated batch at this close — see §9). See §9 twenty-eighth + twenty-ninth + thirtieth Forks entries for the three new batch routings.
+
 **Plan file:** `Plans & Specs/Batch Plans/synchronous-dreaming-hummingbird.md`
 - Items: delete the serial (ST) render path (`PluginProcessor.cpp` serial tail, ~960 lines after the MT branch early-return `:1932`) so MT is the single render path.  Root motivation: dual hand-maintained ST/MT parity is a proven recurring bug class (§9 twenty-fifth Forks MT-divergence finding — 3 serial-only feeds leaked: master recorder, MIDI recorder, metronome/count-in); sole-coder + session-fog risk makes a single path structurally safer.
 - Scope:
@@ -1135,6 +1137,26 @@ needed to find what you should pull up to review the work.
 - Effort: medium-large (rip-out + 1-worker-mode diagnostic + full regression verify + mandatory `/review-batch`).
 - **Bucket:** Cross-cutting Infrastructure
 - Verify (own plan file will detail): every audio path (engines / buses / aux / master / recording / metronome / meters / DSP-load) works with ST gone; 1-worker MT mode reproduces serial-execution for diagnosis; no regression vs the MT-on baseline.
+
+#### **QA-Eg: Bus-Meter Draining Unification (G1 standardization)** *(NEW — inserted 2026-05-23)*
+
+**Plan file:** `<silly-name>.md (when started)`
+- Items: bus peak metering currently uses **TWO ad-hoc mechanisms** with no deliberate decision behind the split (architectural finding surfaced during QA-Ef's FX-bus meter fix):
+  - **G1** (Layers / Bass / Drums / Master): the node owns its peak, published as a `VibeGraph` member atomic that `drainMeterAtomicsForUI` reads directly (node -> UI snapshot).
+  - **G2** (Clips / Vox / Inst / Rusty / FX): a centralized `PluginProcessor` running-max mirror that `processBus` CAS-maxes into during the block; the drain then promotes mirror -> snapshot.
+  Origin: I (codebase author) introduced G1, then G2 when later buses were added, and never surfaced "which do we standardize on" as a spec call — unilateral architectural choice (`feedback_dont_make_unilateral_spec_calls.md`).  The QA-Ef FX-bus meter fix is an interim Group-2-style piece for the FX bus (dead-under-MT root cause: serial-only mirror population); this batch migrates the remaining G2 buses to G1 alongside it.
+- Scope:
+  - Standardize on **G1** — each bus node owns its peak, the UI polls nodes directly (the FL Studio mixer model).  G2's centralized mirror is a VST/AU plugin-segregation workaround unnecessary for a standalone that owns the whole graph.
+  - Migrate the G2 buses (**Clips / Vox / Inst / Rusty + FX**) off the `PluginProcessor` running-max mirror onto node-owned atomics with a `drainBusPeakDbStereo()` accessor mirroring L/B/D/Master.
+  - Update `drainMeterAtomicsForUI` to drain every bus uniformly via node accessors; delete the `mFxBusPeakDb*Run` + `mClips*Run` + `mVox*Run` + `mInst*Run` + `mRusty*Run` mirror state + the QA-Ef interim FX-bus drain (replaced by the unified path).
+  - Update `processBus` to publish into node atomics instead of the centralized mirror (one publish per bus per block; lock-free seqlock or relaxed-store-with-fence as already used by L/B/D/Master).
+  - Sweep stale comments referencing the old mirror mechanism.
+- Risk: **low-medium** — meter / UI-state only; audio path arithmetic unaffected.  Touches `VibeGraph.cpp` (per-bus publish sites + new accessors), `VibeGraph.h` (new node-owned atomic fields + accessor signatures), `PluginProcessor.cpp` (`drainMeterAtomicsForUI` rewrite + mirror-state deletion + the QA-Ef FX-bus interim removal), `PluginProcessor.h` (mirror field declarations stripped).
+- Dependencies: QA-Ef closed — the interim FX-bus meter fix shipped under QA-Ef as a Group-2-style piece; this batch supersedes it as part of the unification.  No hard dependency on QA-Ed / QA-Ee / QA-Eb / QA-Ec.
+- Sequencing: **immediately after QA-Ef, before QA-Ed** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 twenty-eighth Forks entry).  Slot rationale: the FX-bus meter fix landed in QA-Ef as an interim G2-style fix; doing the unification next (before QA-Ed / Ee / Eb / Ec touch the audio path) means the meter surface is consistent before any further refactors layer on top.
+- Effort: medium (~4-7 hours; per-bus publish-site migration ~2-3 hr, accessor wiring + `drainMeterAtomicsForUI` rewrite ~1-2 hr, verify ~1-2 hr).
+- **Bucket:** Cross-cutting Infrastructure, Mixer / Routing
+- Verify (own plan file will detail): on a stress-test arrangement with audio on every bus (Layers + Bass + Drums + Clips + Vox + Inst + Rusty + FX + Master), every bus meter reads correctly in both MT (production default) and 1-worker serial-diagnostic mode; FX-bus meter (the QA-Ef interim case) still reads correctly post-unification; no meter glitch / drop / lag vs the pre-batch MT baseline; G2 mirror state is fully gone from `PluginProcessor.h/.cpp` (grep clean).
 
 #### **QA-F: BaySickAlign Build-Out + Vox DSP Disconnect (Cluster 1)**
 - Items: DSP-02 (Vox FX bypassed), DSP-03 (Vox pitch correction does
@@ -1365,6 +1387,23 @@ needed to find what you should pull up to review the work.
 - Effort: medium (~5-8 hours). 150-300 mechanical sites.
 - Why this slot: blocks the right-click Automate workflow being usable across the app; runs late in Phase 5 because nothing depends on it but it's needed before QA-RC's UX checklist verification.
 
+#### **QA-NativeDialogs: Native OS File Dialogs Everywhere** *(NEW — inserted 2026-05-23)*
+
+**Plan file:** `<silly-name>.md (when started)`
+- Items: replace every custom internal browser / file-picker UI in the app with native Windows file/folder dialogs (`juce::FileChooser` with native dialog enabled), each routed to the correct default folder for its context.  Origin: Jeff's testing during QA-Ef surfaced both the visual mismatch ("the button opens a windows style file opener... we don't use this style of window for opening files and instead have these kind of old and clunky looking internal windows that pop up... never asked about this nor would I want that") and the wrong-default-folder behavior (the "New from Template..." item opens the projects folder, not the templates folder).  Jeff's call: "can be addressed in a separate batch."  See §9 twenty-ninth Forks entry.
+- Scope:
+  - Audit every on-disk file-open / file-save / folder-pick surface in the app: project open, project save-as, project save-bundle (when wired by QA-ProjectSave), template open, template save-as, sample/audio import (browser drag-from-disk + Library "Add Folder"), preset open / save-as across every engine (Harmless / BaySickPlayer / BaySickSynth / BaySickBass / BaySickPedals / BaySickVocal / BaySickGuitars / BaySickBasses / BaySickRustyDrums / BaySickNAMIR), Pedals preset, BaySickAlign / BaySickPitch render-target picks, audio export (when wired by QA-Export), etc.
+  - Replace each custom internal browser dialog with `juce::FileChooser` configured for native Windows dialogs (the `useOSNativeDialogBox` ctor flag).
+  - Route each call to its **correct default folder** — projects -> `Documents/BaySickDAW/Projects/`, templates -> `Documents/BaySickDAW/Templates/`, factory presets -> factory preset dir, user presets -> `Documents/BaySickDAW/Presets/<EngineName>/My Presets/`, samples -> `Documents/BaySickDAW/Samples/` (or last-used-per-context if a memory-of-last-folder pattern is preferred — Jeff to spec at batch open).
+  - Preserve file-extension filters per surface (`.xml` for projects/templates/presets, audio formats for sample/audio import, etc.).
+  - Sweep dead code from custom-browser components that become unused post-swap (likely candidates: any `Source/Standalone/*Browser*.h/.cpp` files exclusive to in-app file picking — verify at batch open before deletion).
+- Risk: **low-medium** — pure UX swap; no audio-thread / DSP / routing surface touched.  Main risk surface is missed call-sites (a file-picker entry not migrated still shows the old internal browser) and incorrect default-folder routing (would open the wrong context).
+- Dependencies: independent — could run alongside any other batch.  Does NOT depend on QA-ProjectSave (each batch operates on whatever file-picker surfaces exist at its execution time; QA-ProjectSave adds new save-as / open surfaces that this batch's pattern propagates to naturally if it lands first, or that QA-ProjectSave picks up the native-dialog pattern from if QA-NativeDialogs lands first).
+- Sequencing: **immediately after QA-VibeSlider, before QA-Verify** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 twenty-ninth Forks entry).  Slot rationale: late Phase 5 UI-polish cluster (sits naturally with QA-VibeSlider's app-wide widget refactor — both are mechanical sweeps over many call-sites); lands before QA-Verify so the per-engine preset-state verify uses native dialogs.
+- Effort: medium (~4-7 hours; per-surface audit ~1-2 hr, mechanical swap across ~15-25 sites ~2-3 hr, default-folder wiring ~1 hr, verify ~1-2 hr).
+- **Bucket:** UI / L&F / Theming, System Pages
+- Verify (own plan file will detail): every file-open / file-save / folder-pick surface in the app shows the native Windows dialog (not a custom internal one); each surface opens to the correct default folder for its context; file-extension filters work; Save replaces existing files cleanly; Cancel returns without state change; no missed call-sites (grep `juce::FileChooser` for any remaining non-native instances; grep for the deleted custom-browser class names returns no live references).
+
 #### **QA-Verify: Phase 5A/5B/5C systems verification** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** TBD.
 - Items: LDT-169 (5A Project Serialization), LDT-170 (5B Template System), LDT-171 (5C Per-Engine Preset System).
@@ -1382,6 +1421,26 @@ needed to find what you should pull up to review the work.
 - Dependencies: QA-Verify (need confirmed-working preset/state restore so exported project restores intact on the receiving end).
 - Effort: large (~8-12 hours; export pipeline + bundle pipeline + format codecs + UI).
 - Why this slot: late Phase 5 because depends on stable preset/state from QA-Verify.
+
+#### **QA-ProjectSave: Project Save / Template / Sample Handling** *(NEW — inserted 2026-05-23)*
+
+**Plan file:** `<silly-name>.md (when started)`
+- Items: consolidated batch absorbing all of QA-Ef's deferred #7 work + sample-retention / FL-Studio-style file handling + the related save-format / migration questions.  Origin: initially issue 5 from Jeff's earlier triage (templates save channels but not clips/samples); scope expanded mid-QA-Ef when the #7 deferral surfaced that the L/B/D-only template scope is fundamentally incomplete for what "template" means AND `loadTemplate`'s destructive teardown is functional brokenness (not a tradeoff); plus the sample-retention discussion was parked here; plus the full original-#7 menu/restructure work moved here so it's only built once the underlying templates are functional ("no point wiring a polished menu to a fundamentally broken target").  See §9 thirtieth Forks entry.
+- Scope:
+  - **Template scope expansion** — `saveTemplateAs` (`Source/Standalone/StandaloneEditor.cpp:6148-6224`) and the template XML format extended to save **vox / inst / clip / rusty / aux / samples** in addition to L/B/D.  Mirrors the project-save shape so any template is a complete project skeleton (just without arrangement content).
+  - **`loadTemplate` non-destructive teardown** — only tear down what the template will replace.  Either restrict teardown to L/B/D when template is L/B/D-only (transitional) or, post-expansion, make teardown symmetric to the expanded scope (i.e., teardown matches what the loaded template restores).
+  - **Drum inline-load fix** — `loadTemplate` currently only handles `<Kit path="..."/>` factory references and skips the inline `<Drum>` children that `saveTemplateAs` writes for user templates; iterate inline `<Drum>` children as a parallel code path.  (Bug confirmed mid-QA-Ef #6; root cause why "blank New" via default template loaded a partial-state with broken Drums.)
+  - **New-from-Template submenu** — replaces both menu items 102 (`New from Template...` -> the old `doFileNewFromTemplate` with the wrong-folder bug) AND 109 (`Load Template...` -> the existing `showTemplateMenu` popup).  Submenu shape: `New from Default Template` (greyed when no default set; label suffix = current default's name when one is) / `Premade Templates ▸` (recursive walk of `factoryTemplatesDir()`) / `My Templates ▸` (recursive walk of `userTemplatesDir()`).  Each pick runs the unified Load Template flow below.
+  - **Unified Load Template dirty-check flow** — Blank / clean current project -> load template directly into current state (no new-project prompt).  Dirty current project -> discard / save / cancel prompt then load.  Replaces the current asymmetric flow (one entry tied to "new project", the other tied to in-place "load template").
+  - **Removals** — `doFileNewFromTemplate` function + menu item 102; `showTemplateMenu` function + menu item 109; the duplicate `kIdSaveAs` "Save Template As..." entry inside `showTemplateMenu` (the top-level item 106 "Save as Template..." stays).
+  - **Save Template As dialog text update** — currently reads "saved kit + layers + basses" (matches the L/B/D-only scope); update to reflect the expanded scope post-scope-expansion.
+  - **Sample retention / FL-Studio-style file handling** — the parked discussion.  Design space: reference-by-path (low disk, fragile to source moves) vs per-project copy (current model, duplicates samples across projects) vs **source-aware hybrid (Factory + user library = reference, volatile drops = copy)**.  Plus an explicit "Pack project" action for portability (zips project + all referenced samples into one bundle, FL Studio's "Zip Looped" / "Export to ZIP" equivalent).  Plus migration story for existing per-project copies.  Plus UI indicators (reference vs copy in the audio browser).  **Lean from the QA-Ef close discussion:** source-aware hybrid + Pack action (matches FL Studio expectations; Jeff to confirm at batch open).
+- Risk: **high** — touches project XML save/load (the data layer the entire app deserializes from), template format (XML schema change), audio-library state, sample-path resolution (every audio-clip / sample-load site), and three menu surfaces.  Migration story for existing per-project-copy samples is the highest-risk sub-item (touches user data on disk).
+- Dependencies: should land **AFTER anything that could affect saves or add things that should be saved**, so the consolidated batch captures everything.  Specifically: QA-Verify (per-engine preset state must be solid first) + QA-Export (export pipeline + bundle path may share infrastructure with Pack project) + every preceding QA batch that adds saveable state.
+- Sequencing: **at the end of the Phase 1-5 chain, after QA-Export** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 thirtieth Forks entry).  Slot rationale per Jeff: this batch must come AFTER anything that could affect saves or add things that should be saved, so we capture everything.
+- Effort: large (~12-18 hours; template scope expansion ~3-4 hr, non-destructive teardown ~2-3 hr, drum inline-load + menu restructure ~2-3 hr, unified dirty-check flow ~1-2 hr, sample retention / source-aware hybrid + Pack action ~3-5 hr, migration story ~1-2 hr, verify ~2-3 hr).
+- **Bucket:** System Pages, Cross-cutting Infrastructure
+- Verify (own plan file will detail): saving a template with full project state (L/B/D + vox/inst/clip/rusty/aux/samples) round-trips through Load Template intact; loading a template into a project with other-type tabs leaves those tabs untouched (non-destructive teardown); user templates with inline `<Drum>` children load correctly (drum inline-load fix); the New-from-Template submenu shows Default / Premade / My Templates in the correct folders; dirty-check flow prompts on dirty project and loads directly on clean; sample reference-vs-copy behavior matches the source-aware hybrid spec; Pack project produces a portable zip with all referenced samples resolved correctly on the receiving end; existing per-project-copy samples migrate cleanly (no orphaned files, no broken references); Save Template As dialog text accurately describes the expanded scope.
 
 #### **QA-RC: Pre-Release Test Plan + RC Build** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** TBD.
@@ -1628,9 +1687,9 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
-   → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-Verify**** → QA-Export****
+   → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave*****************
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -1824,6 +1883,55 @@ overhaul (triplet divisions missing from straight-time spec).  Two
 source-of-truth refactors in sequence: sample-domain (QA-Ed) ->
 musical-domain (QA-Ee).  Own §0-conformant plan file + mandatory
 `/review-batch`.  See §9 [next] Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-Eg** inserted 2026-05-23 at QA-Ef close.
+Slotted **immediately after QA-Ef, before QA-Ed** (Jeff's confirmed slot
+per `feedback_slot_placement_is_spec_call.md`).  Scope: bus-meter
+draining unification — standardize on G1 (each node owns its peak; UI
+polls nodes directly, FL Studio mixer model) across the G2 buses (Clips
+/ Vox / Inst / Rusty + FX) that currently use the centralized
+`PluginProcessor` running-max mirror (a VST/AU plugin-segregation
+workaround unnecessary for a standalone).  Origin: architectural
+finding surfaced during QA-Ef's FX-bus meter fix (FX bus's mirror was
+populated only by the serial tail -> dead under MT).  QA-Ef's FX-bus
+meter fix is an interim Group-2-style piece; QA-Eg supersedes it as
+part of the unification.  Risk: low-medium (meter / UI-state only;
+audio path unaffected).  See §9 twenty-eighth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-NativeDialogs** inserted 2026-05-23 at
+QA-Ef close.  Slotted **immediately after QA-VibeSlider, before
+QA-Verify** (Jeff's confirmed slot per
+`feedback_slot_placement_is_spec_call.md`).  Scope: replace every
+custom internal browser / file-picker in the app with native Windows
+file/folder dialogs (`juce::FileChooser` with `useOSNativeDialogBox`),
+each routed to its correct default folder (projects / templates /
+presets / samples).  Origin: Jeff's testing during QA-Ef surfaced both
+the visual mismatch ("we don't use this style of window for opening
+files and instead have these kind of old and clunky looking internal
+windows that pop up... never asked about this nor would I want that")
+and the wrong-default-folder behavior (the "New from Template..." item
+opens the projects folder, not the templates folder).  Pure UX swap;
+independent of templates / samples.  Slot rationale: late Phase 5
+UI-polish cluster (sits naturally with QA-VibeSlider's app-wide widget
+refactor — both are mechanical sweeps over many call-sites); lands
+before QA-Verify so the per-engine preset-state verify uses native
+dialogs.  See §9 twenty-ninth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-ProjectSave** inserted 2026-05-23 at
+QA-Ef close.  Slotted **at the end of the Phase 1-5 chain, after
+QA-Export** (Jeff's confirmed slot per
+`feedback_slot_placement_is_spec_call.md`).  Scope: consolidated batch
+absorbing all of QA-Ef's deferred #7 work (template scope expansion,
+`loadTemplate` non-destructive teardown, drum inline-load fix,
+New-from-Template submenu, unified Load Template dirty-check flow,
+removals of `doFileNewFromTemplate` + `showTemplateMenu` + duplicate
+Save Template As) + sample retention / FL-Studio-style file handling
+(source-aware hybrid + Pack project action; migration story for
+existing per-project-copy samples) + the related save-format /
+migration questions.  Slot rationale (Jeff): "must come AFTER anything
+that could affect saves or add things that should be saved, so we
+capture everything" — every preceding batch that adds saveable state
+has landed by this point.  See §9 thirtieth Forks entry.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -3821,3 +3929,133 @@ Per `feedback_slot_placement_is_spec_call.md` + `feedback_dont_make_unilateral_s
 - `Plans & Specs/Implemented Work Log.md` — QA-Ea close entry (Part A solo fix; Part B struck; side findings).
 
 **Verification:** Part A solo fix owner-verified (8/11 buses hands-on in Debug + Release, 3 by code-path equivalence) + `/review-batch` clean.  Part B + the old-project-load finding are explicitly NOT verified (struck / deferred).  QA-Ef carries its own verify ladder in its §5 entry / plan file when it opens.
+
+### 2026-05-23 — QA-Eg inserted: bus-meter draining unification (G1 standardization) — new dedicated batch at QA-Ef close
+
+**Trigger:** QA-Ef Task 2 verify pass (2026-05-22).  Two preexisting aux bugs surfaced during the VibeGraph-half verify (audio-routing untouched by the QA-Ef serial-only removal); Bug A was aux strips not restored on project load (fixed in-batch — root cause `writeStripNames` only saved AuxNames for user-renamed strips), Bug B was the **FX-bus meter dead under MT** (`drainMeterAtomicsForUI`).  Root-cause diagnosis of Bug B surfaced the deeper architectural finding behind this entry: the FX bus carries its peak on `EffectsBusNode` (like L/B/D/Master) but is absent from Group-1 node-drains; its Group-2 `mFxBusPeakDb*Run` mirrors were populated only by the serial tail (`drainEffectsBusPeakDbStereo()` + CAS-max) -> serial-only -> dead under MT all along (i.e., the FX bus had been silently mis-metered since MT became the production default).  The interim FX-bus meter fix landed in QA-Ef as a Group-2-style piece (`drainMeterAtomicsForUI` now drains FX bus into the Run mirrors so the existing Run -> snapshot promotion feeds the meter).  Jeff explicitly flagged the underlying G1-vs-G2 split as needing its own batch: "the split is arbitrary as I never asked for this, you made one and then when you started adding stuff you made another and never confirmed with me which of these two should be implemented or which one I want to use."
+
+**Diagnosis:** bus peak metering uses TWO mechanisms with no deliberate decision behind the split:
+- **G1** (Layers / Bass / Drums / Master): the node owns its peak, published as a `VibeGraph` member atomic that `drainMeterAtomicsForUI` reads directly (node -> UI snapshot).
+- **G2** (Clips / Vox / Inst / Rusty / FX): a centralized `PluginProcessor` running-max mirror that `processBus` CAS-maxes into during the block; the drain then promotes mirror -> snapshot.
+
+Origin: I (codebase author) introduced G1, then G2 when later buses were added, and never surfaced "which do we standardize on" as a spec call — unilateral architectural choice (`feedback_dont_make_unilateral_spec_calls.md`).  G2's centralized mirror is a VST/AU plugin-segregation workaround unnecessary for a standalone that owns the whole graph.
+
+**Decision (Jeff, 2026-05-22):** standardize on **G1** — each node owns its peak, the UI polls nodes directly (the FL Studio mixer model).  Migrate the G2 buses (Clips / Vox / Inst / Rusty + FX) off the mirror.  Routing call (per Jeff's "fix small in-batch / plan big to its own batch", 2026-05-22): this is the "big" kind -> **NEW dedicated batch**, NOT folded into QA-Ef (which would have re-churned the in-flight verify).  Formalize at QA-Ef close: this §9 Forks entry + new §5 batch row + §6 slot — slot SURFACED to Jeff per `feedback_slot_placement_is_spec_call.md`.  QA-Ef's FX-bus meter fix stays as the interim G2-style piece (the unification batch migrates FX + the other G2 buses to G1 together).
+
+**Sequencing (Jeff's confirmed slot, 2026-05-23):** **immediately after QA-Ef, before QA-Ed.**  Slot rationale: the FX-bus meter fix landed in QA-Ef as an interim G2-style fix; doing the unification next (before QA-Ed / Ee / Eb / Ec touch the audio path) means the meter surface is consistent before any further refactors layer on top.
+
+**Scope (Jeff-locked 2026-05-23 — full per-batch plan file deferred until QA-Eg opens):**
+- Standardize on G1 — each bus node owns its peak; UI polls nodes directly.
+- Migrate the G2 buses (Clips / Vox / Inst / Rusty + FX) off the centralized `PluginProcessor` running-max mirror onto node-owned atomics with a `drainBusPeakDbStereo()` accessor mirroring L/B/D/Master.
+- Update `drainMeterAtomicsForUI` to drain every bus uniformly via node accessors; delete the `mFxBusPeakDb*Run` + `mClips*Run` + `mVox*Run` + `mInst*Run` + `mRusty*Run` mirror state + the QA-Ef interim FX-bus drain (replaced by the unified path).
+- Update `processBus` to publish into node atomics instead of the centralized mirror (one publish per bus per block; lock-free seqlock or relaxed-store-with-fence as already used by L/B/D/Master).
+- Sweep stale comments referencing the old mirror mechanism.
+
+**Risk:** **low-medium** — meter / UI-state only; audio path arithmetic unaffected.
+
+**Dependencies:** QA-Ef closed (interim FX-meter piece landed there; this batch supersedes it).  No hard dependency on QA-Ed / QA-Ee / QA-Eb / QA-Ec.
+
+**Effort:** medium (~4-7 hours).
+
+**Options considered:** (a) fold into QA-Ef — rejected (would re-churn the in-flight verify; "big" kind per Jeff's routing rule); (b) standardize on G2 instead of G1 — rejected (G2 is the VST/AU plugin-segregation workaround; standalone owns the whole graph, so G1 is the architecturally honest choice + matches FL Studio); (c) **standardize on G1 in a dedicated batch — accepted**.
+
+**Carry-forward contradictions:** none architectural.  QA-Ef's interim FX-bus meter fix is in-tree as a transitional piece (Group-2-style); QA-Eg supersedes it.
+
+**Inline back-refs:**
+- §5 — new QA-Eg entry INSERTED between QA-Ef and QA-Ed (cross-refs this entry).
+- §6 — arrow updated to `... → QA-Ef************* → QA-Eg*************** → QA-Ed************...`; new 15-asterisk QA-Eg footnote added (cross-refs this entry).
+- §9 this entry (twenty-eighth Forks entry).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-Eg entry INSERTED; §6 arrow updated; §6 QA-Eg footnote INSERTED; §9 this entry.
+- `Plans & Specs/Running Notes/synchronous-dreaming-hummingbird.md` — already captured this finding + Jeff's decision (the "Finding routed to a NEW batch — bus-meter draining is two ad-hoc mechanisms" entry).
+- **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (per-batch plan file — drafted when QA-Eg opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (running notes seed — created when QA-Eg opens).
+
+**Verification:** n/a — routing / sequencing entry, no source change.  QA-Eg's own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-Eg opens): on a stress-test arrangement with audio on every bus, every bus meter reads correctly in both MT and 1-worker serial-diagnostic mode; FX-bus meter (the QA-Ef interim case) still reads correctly post-unification; no meter glitch / drop / lag vs the pre-batch MT baseline; G2 mirror state is fully gone from `PluginProcessor.h/.cpp` (grep clean).
+
+### 2026-05-23 — QA-NativeDialogs inserted: native OS file dialogs everywhere (new independent batch at QA-Ef close)
+
+**Trigger:** QA-Ef #7 scoping investigation (2026-05-23).  Jeff's testing during QA-Ef surfaced two distinct file-picker issues on the same surface: (1) the visual mismatch — "the button opens a windows style file opener... we don't use this style of window for opening files and instead have these kind of old and clunky looking internal windows that pop up... never asked about this nor would I want that"; (2) the wrong-default-folder behavior — the "New from Template..." menu item opens the projects folder, not the templates folder.  Jeff explicitly routed it: "can be addressed in a separate batch."
+
+**Diagnosis:** the app uses custom internal browsers (juce::Component subclasses presented as modal popups) for most on-disk file picking — project open, project save-as, template open, template save-as, sample/audio import, preset open / save-as across every engine, etc.  Each of those surfaces is a separate call-site (~15-25 across the app, exact count surfaces at batch open).  Two failure modes co-occur: visual mismatch (the custom browsers don't match Windows native dialog styling, which is jarring on a standalone app that otherwise looks like a normal Windows app), and routing failures (each custom-browser call-site has its own default-folder argument; the "New from Template..." instance is one example where the wrong folder is passed; others may exist).  The fix is a uniform swap to `juce::FileChooser` with `useOSNativeDialogBox` enabled per call-site, paired with a correctness pass on the default-folder argument per call-site.
+
+**Decision (Jeff, 2026-05-23):** **NEW dedicated batch QA-NativeDialogs** — pure UX swap; independent of templates / samples / project-save mechanics.  Slot SURFACED to Jeff per `feedback_slot_placement_is_spec_call.md`.
+
+**Sequencing (Jeff's confirmed slot, 2026-05-23):** **immediately after QA-VibeSlider, before QA-Verify.**  Slot rationale: late Phase 5 UI-polish cluster (sits naturally with QA-VibeSlider's app-wide widget refactor — both are mechanical sweeps over many call-sites); lands before QA-Verify so the per-engine preset-state verify uses native dialogs (avoids re-running the per-engine matrix after the dialog swap).
+
+**Scope (Jeff-locked 2026-05-23 — full per-batch plan file deferred until QA-NativeDialogs opens):**
+- Audit every on-disk file-open / file-save / folder-pick surface in the app (project / template / preset / sample / audio-import / render-target / export, etc.).
+- Replace each custom internal browser dialog with `juce::FileChooser` configured for native Windows dialogs (`useOSNativeDialogBox`).
+- Route each call to its **correct default folder** — projects -> `Documents/BaySickDAW/Projects/`, templates -> `Documents/BaySickDAW/Templates/`, factory presets -> factory preset dir, user presets -> per-engine User Presets dir, samples -> `Documents/BaySickDAW/Samples/` (or last-used-per-context — Jeff to spec at batch open).
+- Preserve file-extension filters per surface.
+- Sweep dead code from custom-browser components that become unused post-swap.
+
+**Risk:** **low-medium** — pure UX swap; no audio-thread / DSP / routing surface touched.
+
+**Dependencies:** independent.  Could run alongside any other batch.  Does NOT depend on QA-ProjectSave (each batch operates on whatever file-picker surfaces exist at its execution time).
+
+**Effort:** medium (~4-7 hours).
+
+**Options considered:** (a) fold into QA-ProjectSave (since one of the surfaces is "New from Template...") — rejected (QA-ProjectSave is already large; native-dialog swap is mechanically independent of the template-format work; bundling would obscure both scopes); (b) per-surface piecemeal fixes as they're touched by other batches — rejected (would leave half the app on custom browsers indefinitely; Jeff wants the uniform swap); (c) **dedicated batch — accepted**.
+
+**Carry-forward contradictions:** none architectural.  The QA-Ef interim — "New from Template..." stays on the current internal browser until QA-NativeDialogs lands — is the in-tree state.
+
+**Inline back-refs:**
+- §5 — new QA-NativeDialogs entry INSERTED between QA-VibeSlider and QA-Verify (cross-refs this entry).
+- §6 — arrow updated to `... → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify****...`; new 16-asterisk QA-NativeDialogs footnote added (cross-refs this entry).
+- §9 this entry (twenty-ninth Forks entry).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-NativeDialogs entry INSERTED; §6 arrow updated; §6 QA-NativeDialogs footnote INSERTED; §9 this entry.
+- `Plans & Specs/Running Notes/synchronous-dreaming-hummingbird.md` — already captured this routing (the "Three deferred batches identified for close-time Main Plan §5/§6 entries" entry).
+- **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (per-batch plan file — drafted when QA-NativeDialogs opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (running notes seed — created when QA-NativeDialogs opens).
+
+**Verification:** n/a — routing / sequencing entry, no source change.  QA-NativeDialogs' own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-NativeDialogs opens): every file-open / file-save / folder-pick surface in the app shows the native Windows dialog (not a custom internal one); each surface opens to the correct default folder for its context; file-extension filters work; no missed call-sites.
+
+### 2026-05-23 — QA-ProjectSave inserted: project save / template / sample handling (consolidated batch at QA-Ef close — absorbs full #7 deferral + sample-retention discussion)
+
+**Trigger:** QA-Ef #7 (template menu + load functionality) — originally scoped as the New-from-Template menu restructure + the wrong-folder bug + the submenu shape + the drum-inline-load bug surfaced during #6 — was fully DEFERRED to a project-save batch at QA-Ef close (2026-05-23).  Two findings drove the deferral.  (1) `saveTemplateAs` (`Source/Standalone/StandaloneEditor.cpp:6148-6224`) saves only `<Drum>` (inside `<Kit>`), `<Layer>`, and `<Bass>` entries — **no vox / inst / clip / rusty / aux**.  (2) `loadTemplate` calls `closeAllDynamicTabs()` which tears down **every** dynamic tab type (Layers/Bass/Drums/Inst/Vox/Clip/Rusty), then restores only what the template contains (L/B/D) — net effect: loading any template DESTROYS vox/inst/clip/rusty tabs in the destination project.  I initially framed the choice as a 3-option spec call (leave-as-is / preserve-other-tabs / expand-template-scope); Jeff overruled the framing — "the L/B/D-only template scope was fundamentally incomplete for what 'template' means, the destructive teardown is functional brokenness (not a tradeoff), and option (3) — templates save everything — was the right shape from the start."  Pattern feedback from Jeff: "this is yet another perfect example of you not following up on all the places things need to be updated."  Plus the sample-retention / FL-Studio-style file handling discussion was parked into this batch's scope as well — there's no point wiring a polished menu + a complete template format to a sample-retention model that doesn't match the real workflow.
+
+**Diagnosis:** four orthogonal but interlocking problems all rooted in the project-save / template-save subsystem:
+1. **Template scope is incomplete** — saves only L/B/D, ignores vox/inst/clip/rusty/aux/samples.  Fundamentally incomplete for what "template" means in a multi-tab DAW.
+2. **`loadTemplate` is destructive** — tears down every dynamic tab type before restoring only L/B/D.  Functional brokenness (vox/inst/clip/rusty tabs in the destination project are destroyed).
+3. **Drum inline-load skips inline children** — `loadTemplate` only handles `<Kit path="..."/>` factory references and skips inline `<Drum>` children that `saveTemplateAs` writes for user templates.  Net effect: user templates with inline drums load partial state with broken drum tabs (root cause why QA-Ef #6 "blank New" via default template showed broken Drums).
+4. **Sample retention model is unspecified** — the app currently per-project copies all samples (duplicates samples across projects, large project folders, slow project loads on big sample sets); FL Studio uses a source-aware hybrid (Factory + user library = reference, volatile drops = copy) + an explicit "Pack project" action for portability.  No deliberate decision on which model BaySickDAW uses; "Pack project" doesn't exist.
+
+Plus the original-#7 menu/restructure work (replace items 102 + 109 with a New-from-Template submenu; unified Load Template dirty-check flow; removals of `doFileNewFromTemplate` + `showTemplateMenu` + the duplicate Save Template As) — all of which only makes sense once the underlying template format is functional.
+
+**Decision (Jeff, 2026-05-23):** **NEW dedicated batch QA-ProjectSave** — consolidates the full #7 deferral + the sample-retention discussion + the related save-format / migration questions.  "No point wiring a polished menu to a fundamentally broken target."  Slot SURFACED to Jeff per `feedback_slot_placement_is_spec_call.md`.
+
+**Sequencing (Jeff's confirmed slot, 2026-05-23):** **at the end of the Phase 1-5 chain, after QA-Export.**  Slot rationale (Jeff): "must come AFTER anything that could affect saves or add things that should be saved, so we capture everything" — every preceding batch that adds saveable state has landed by this point.
+
+**Scope (Jeff-locked 2026-05-23 — full per-batch plan file deferred until QA-ProjectSave opens):**
+- **Template scope expansion** — `saveTemplateAs` + template XML format extended to save vox/inst/clip/rusty/aux/samples in addition to L/B/D.
+- **`loadTemplate` non-destructive teardown** — only tear down what the template will replace (symmetric to the expanded scope).
+- **Drum inline-load fix** — iterate inline `<Drum>` children that `saveTemplateAs` writes for user templates.
+- **New-from-Template submenu** — `New from Default Template` (greyed when no default set; label suffix = default's name when set) / `Premade Templates ▸` / `My Templates ▸`.  Each pick runs the unified Load Template flow.
+- **Unified Load Template dirty-check flow** — Blank/clean -> direct load (no new-project prompt); dirty -> discard/save/cancel prompt -> load.
+- **Removals** — `doFileNewFromTemplate` + menu item 102; `showTemplateMenu` + menu item 109; duplicate `kIdSaveAs` "Save Template As..." entry inside `showTemplateMenu` (top-level item 106 stays).
+- **Save Template As dialog text update** — reflect the expanded scope (currently reads "saved kit + layers + basses").
+- **Sample retention / FL-Studio-style file handling** — source-aware hybrid (Factory + user library = reference, volatile drops = copy) + explicit "Pack project" action for portability + migration story for existing per-project-copy samples + UI indicators (reference vs copy in the audio browser).  Lean from the QA-Ef close discussion: source-aware hybrid + Pack action, matching FL Studio expectations.  Jeff to confirm spec at batch open.
+
+**Risk:** **high** — touches project XML save/load (the data layer the entire app deserializes from), template format (XML schema change), audio-library state, sample-path resolution (every audio-clip / sample-load site), and three menu surfaces.  Migration story for existing per-project-copy samples is the highest-risk sub-item (touches user data on disk).
+
+**Dependencies:** every preceding QA batch that adds saveable state.  Specifically: QA-Verify (per-engine preset state must be solid first) + QA-Export (export pipeline + bundle path may share infrastructure with Pack project) + every Phase 1-5 batch (each adds saveable state that QA-ProjectSave must cover).
+
+**Effort:** large (~12-18 hours).
+
+**Options considered:** (a) leave-as-is — rejected (functionally broken: load template destroys other-type tabs); (b) preserve-other-tabs in load (without expanding save scope) — rejected (preserves the partial template, doesn't fix the underlying incompleteness); (c) split into separate batches (template-scope + sample-retention + menu) — rejected (the three are interlocking: template scope can't be expanded without addressing where samples land, menu restructure can't ship until the underlying load is non-destructive); (d) **consolidated batch at end of Phase 1-5 — accepted**.
+
+**Carry-forward contradictions:** none architectural.  Interim in-tree state from QA-Ef close: (i) #7 work fully deferred; (ii) Save Template As dialog text still says "saved kit + layers + basses" matching the unchanged L/B/D scope; (iii) `doFileNewFromTemplate` + menu item 102 + `showTemplateMenu` + menu item 109 + duplicate "Save Template As" inside the popup all still in tree (untouched by QA-Ef); (iv) sample-retention model is unchanged (per-project copy).  All of the above are intentional — QA-ProjectSave inherits the in-tree state and supersedes it.
+
+**Inline back-refs:**
+- §5 — new QA-ProjectSave entry INSERTED at the end of the Phase 1-5 chain, after QA-Export (cross-refs this entry).
+- §6 — arrow updated to `... → QA-Verify**** → QA-Export**** → QA-ProjectSave*****************`; new 17-asterisk QA-ProjectSave footnote added (cross-refs this entry).
+- §9 this entry (thirtieth Forks entry).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-ProjectSave entry INSERTED; §6 arrow updated; §6 QA-ProjectSave footnote INSERTED; §9 this entry.
+- `Plans & Specs/Running Notes/synchronous-dreaming-hummingbird.md` — already captured this routing (the "Project save batch — consolidated scope (for close-time Main Plan §5 entry)" entry + the "#7 (template menu + load functionality) DEFERRED in full to the project-save batch" entry).
+- **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (per-batch plan file — drafted when QA-ProjectSave opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (running notes seed — created when QA-ProjectSave opens).
+
+**Verification:** n/a — routing / sequencing entry, no source change.  QA-ProjectSave's own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-ProjectSave opens): saving a template with full project state round-trips through Load Template intact; loading a template into a project with other-type tabs leaves those tabs untouched (non-destructive teardown); user templates with inline `<Drum>` children load correctly; New-from-Template submenu shows Default / Premade / My Templates in the correct folders; dirty-check flow prompts on dirty + loads directly on clean; sample reference-vs-copy behavior matches the source-aware hybrid spec; Pack project produces a portable zip with all referenced samples resolved correctly on the receiving end; existing per-project-copy samples migrate cleanly.

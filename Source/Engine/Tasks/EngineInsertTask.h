@@ -28,10 +28,9 @@ namespace VibeGraphInsertKindBridge { enum class Kind { Layer, Bass, Drum }; }
 // post-everything output. Downstream tasks pull from it via their
 // mPredecessors entries.
 //
-// Phase 3 scaffolding: this code is dead at runtime while
-// kEnableMultiThreadedEngine is constexpr false. Tasks register/unregister
-// in lockstep with engine create/destroy so when the flag flips in Batch 9
-// every active Layer/Bass/Drum has a wrapper ready.
+// QA-Ef (2026-05-21): this is the live audio plumbing.  Tasks register /
+// unregister in lockstep with engine create/destroy so every active Layer /
+// Bass / Drum has a wrapper.
 class EngineInsertTask : public RenderTask
 {
 public:

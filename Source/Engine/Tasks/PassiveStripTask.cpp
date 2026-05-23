@@ -70,38 +70,9 @@ void PassiveStripTask::run()
         // for routing the result downstream - handled by the dispatcher's
         // pull model: consumer tasks read mOutputBuffer directly.
         //
-        // 2026-05-07 (Batch 9c follow-up): pick the correct solo flag per
-        // bus, matching the serial path's contract:
-        //   * Layers/Bass/Drums + Master + FxBus -- processBus ignores the
-        //     anySolo parameter (delegates to processChainOnly /
-        //     processMasterBus / processEffectsBus which read solo state
-        //     internally from APVTS).  Pass false to make this explicit.
-        //   * ClipsBus + RustyDrumsBus -- processBus computes useGroupSolo
-        //     locally inside processBus (overriding the parameter), so the
-        //     value passed here is irrelevant.  Pass false (matches
-        //     PluginProcessor.cpp:2448 + :2605).
-        //   * Vox/Inst/Vox2/Inst2/Inst3 -- processBus uses the parameter
-        //     directly for the in-group solo formula.  Pass busAnySolo
-        //     (bus-level _solo states only), NOT mCtx->anySolo (strip-
-        //     level), otherwise the bus mutes whenever any STRIP is
-        //     soloed.  Mirrors PluginProcessor.cpp:2524.
-        using namespace MixerChannelIds;
-        bool soloFlag = false;
-        switch (channelId)
-        {
-            case kVoxBus:
-            case kInstBus:
-            case kVoxBus2:
-            case kInstBus2:
-            case kInstBus3:
-                soloFlag = mCtx->busAnySolo;
-                break;
-            default:
-                soloFlag = false;   // L/B/D, FX, Clips, Rusty, Master ignore param
-                break;
-        }
-        mGraph->processBus (channelId, blockView,
-                             mCtx->bpm, soloFlag, mCtx->panLaw);
+        // QA-Ef: processBus computes the bus-solo gate itself (anyBusSoloed(),
+        // all 11 buses); no solo flag is passed from here.
+        mGraph->processBus (channelId, blockView, mCtx->bpm, mCtx->panLaw);
         juce::ignoreUnused (mProcessor);
     }
 }

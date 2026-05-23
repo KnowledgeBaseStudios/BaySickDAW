@@ -47,9 +47,9 @@ juce::MidiBuffer* EngineInsertTask::resolveMidiBuffer() const noexcept
 
 void EngineInsertTask::run()
 {
-    // Defensive: while kEnableMultiThreadedEngine is false this is dead code,
-    // but once the flag flips we want any partially-wired state to fail safely
-    // (silence) rather than crash.
+    // Defensive: if any of the wired-state pointers are null (race during
+    // engine create/destroy at message-thread teardown vs audio-thread
+    // execution), fail safely (silence) rather than crash.
     if (mEngine == nullptr || mOutputBuffer == nullptr || mCtx == nullptr || mGraph == nullptr)
         return;
 
@@ -69,7 +69,7 @@ void EngineInsertTask::run()
     // ── Sidechain push ────────────────────────────────────────────────────────
     // Pull from each SC predecessor's mOutputBuffer (already written by the
     // upstream task - guaranteed by mDeps reaching zero before we run). Feed
-    // into the engine via ISidechainEngine the same way the serial path does.
+    // into the engine via ISidechainEngine.
     if (mScEngine != nullptr)
     {
         juce::AudioBuffer<float>* scBufs[VibeGraph::kMaxScRecvSlots] = {};

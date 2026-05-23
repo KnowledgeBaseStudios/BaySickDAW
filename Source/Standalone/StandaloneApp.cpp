@@ -234,9 +234,12 @@ void VibesynthStandaloneApp::loadMultiCoreRenderingPref()
     if (auto* node = root->getChildByName ("MultiCoreRendering"))
     {
         const bool on = node->getBoolAttribute ("on", true);
-        // release-store pairs with the audio thread's acquire-load at the top
-        // of processBlock.  Called before mDeviceManager->initialise so the
-        // very first audio callback already sees the persisted value.
+        // release-store pairs with the worker threads' acquire-load in
+        // VibeThreadPool::workerLoop (QA-Ef, 2026-05-21).  Called before
+        // mDeviceManager->initialise so the very first audio callback already
+        // sees the persisted value -- workers either run the graph in parallel
+        // (true) or park immediately so the audio thread drains it itself
+        // (false; single-core diagnostic).
         RenderEngine::gMultiThreadedEngineEnabled.store (on, std::memory_order_release);
     }
 }

@@ -16,22 +16,6 @@ struct BlockContext
     int    numSamples = 0;
     double bpm        = 120.0;
     bool   anySolo    = false;
-    // 2026-05-07 (Batch 9c follow-up): bus-level "any solo" flag.  Distinct
-    // from `anySolo` above which is true when ANY INSERT (strip) is soloed.
-    // `busAnySolo` is true only when one of the receive-group BUSES (Clips /
-    // Vox / Inst / Vox2 / Inst2 / Inst3 / FX) has its own _solo enabled --
-    // this is what processBus's in-group solo formula actually wants for
-    // muting decisions on those buses (see VibeGraph::processBus line ~1775
-    // `silenced = muted || (inGroupSolo && useGroupSolo && !soloed)`).
-    //
-    // Serial mode passes `busAnySolo` to processBus for Vox/Inst/etc (see
-    // PluginProcessor.cpp:2524) and `false` for ClipsBus + RustyDrumsBus
-    // (whose solo formulas are computed locally inside processBus from
-    // their own bus-prefix lookups).  PassiveStripTask under MT must do
-    // the same -- previously it passed `mCtx->anySolo` (strip-level)
-    // which incorrectly muted Vox/Inst buses whenever any strip was
-    // soloed.
-    bool   busAnySolo = false;
     // 2026-05-06 (Batch 9b): project-level master_pan_law (0=-3dB constant
     // power / 1=linear / 2=-6dB).  Read once by PluginProcessor at the top
     // of the dispatch block; bus tasks pass it to VibeGraph::processBus.

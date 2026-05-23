@@ -28,10 +28,8 @@ class VibeSynthProcessor;
 //
 // Order B inside run(): clear blockView once -> clip-engine flow
 // (if engine set) -> arrangement-clip flow (if song mode + has clips).
-// Both contributions accumulate in mOutputBuffer.  Restores parity with
-// serial mode (where both PluginProcessor.cpp:2082-2118 and the audio-
-// clip players Pass 2 independently routeInsertOutput into the routing
-// accumulator at audioInsert(row)).
+// Both contributions (clip-engine flow + arrangement-clip flow) accumulate
+// in mOutputBuffer at audioInsert(row) for the row's downstream consumers.
 //
 // Lifecycle (Strategy 1a):
 //   - One instance per audio row, created by

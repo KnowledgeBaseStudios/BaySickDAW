@@ -155,6 +155,19 @@ void VibeThreadPool::workerLoop (int workerIndex) noexcept
 
     while (! mShutdown.load (std::memory_order_acquire))
     {
+        // QA-Ef: serial-diagnostic mode. When multi-core rendering is OFF,
+        // workers park here so the audio thread (runUntilOrTimeout) runs the
+        // whole graph itself -- genuinely serial through the identical
+        // dispatcher/task code, no duplicate path. The existing waiter/waker
+        // bookkeeping lets submit() wake parked workers when parallel resumes.
+        if (! RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire))
+        {
+            mImpl->activeWaiters.fetch_add (1, std::memory_order_release);
+            waker.wait (-1);
+            mImpl->activeWaiters.fetch_sub (1, std::memory_order_release);
+            continue;
+        }
+
         const bool capture = RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed);
 
         // Spin phase - tight loop, no yield. Typical inter-task gap is

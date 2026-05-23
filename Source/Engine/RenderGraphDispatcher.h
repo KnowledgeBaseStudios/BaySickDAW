@@ -44,7 +44,6 @@ public:
     // Register a non-owning task pointer. Called from the message thread
     // when an engine is created / a strip is added. The dispatcher hooks
     // up the task's mOutputBuffer to the arena slot for its channelId.
-    // Has no effect on audio while kEnableMultiThreadedEngine is false.
     //
     // Special case: tasks with channelId == -1 (producer-style tasks that
     // drive engine state without publishing to a channel - e.g.
@@ -90,8 +89,9 @@ public:
     // dispatchBlock resets it to mInitialDeps at the top of every block.
     void rebuildLinks (const RoutingGraph& routing);
 
-    // Run one block.  PluginProcessor's processBlock calls this when
-    // kEnableMultiThreadedEngine is true.  Caller MUST fully populate ctx
+    // Run one block.  PluginProcessor's processBlock calls this once per
+    // block; the dispatcher is the single render path (QA-Ef, 2026-05-21).
+    // Caller MUST fully populate ctx
     // (numSamples, bpm, anySolo, posInfo, per-engine MIDI buffer pointers,
     // liveInputSnapshot) before this call - Batch 9a moved that
     // responsibility to the caller so each task sees consistent context

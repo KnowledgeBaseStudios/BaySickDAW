@@ -1469,6 +1469,17 @@ void MixerPage::addDrumChannel(int slot, const juce::String& name)
 void MixerPage::addAuxChannel()
 {
     addAuxChannelAtIndex(mNextAuxIdx);
+
+    // QA-Ef #5 (2026-05-22): flag the project dirty so the user gets the unsaved
+    // marker / save prompt after adding an aux.  createAndAddParameter for the
+    // strip's APVTS params doesn't fire a value-change, so the normal APVTS
+    // dirty hook never sees this edit.  onAnyStateChange is wired to
+    // ProjectManager::markDirty by StandaloneEditor and markDirty itself
+    // respects mIgnoreDirty -- so the same callback no-ops harmlessly during
+    // a load (which calls addAuxChannelAtIndex directly, never this user-
+    // initiated entry).
+    if (mProcessor.onAnyStateChange)
+        mProcessor.onAnyStateChange();
 }
 
 // R1 (2026-04-23): Vox + Inst strip creators.  Mirror of addAuxChannel /

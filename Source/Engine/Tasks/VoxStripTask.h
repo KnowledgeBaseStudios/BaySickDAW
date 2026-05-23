@@ -27,17 +27,9 @@ class BaySickVocalProcessor;
 //   8. If armed && !listen, write silence to mOutputBuffer (do not route).
 //      Else mOutputBuffer's storage holds the strip's final output.
 //
-// Phase 4 scaffolding: code is dead at runtime while
-// kEnableMultiThreadedEngine is false.
-//
-// Deferred to Batch 5/9:
-//   - Dry-recorder tap (mStripRecorders): the serial path writes raw mono
-//     input to recorders during armed playback. Reproducing this in the
-//     task requires touching mStripRecorders from a worker thread. Will be
-//     re-evaluated when AudioInsertTask ships in Batch 5 and recording is
-//     end-to-end re-validated for the parallel path.
-//   - FilePlay routing (clip drives engine): handled by AudioInsertTask in
-//     Batch 5. Until then, the task writes silence when FilePlay is active.
+// QA-Ef (2026-05-21): this is the only render path now; the serial fallback
+// was deleted.  Dry-recorder tap is wired via VibeSynthProcessor::tapDryRecorder
+// (see ::run); FilePlay routing is wired via VibeSynthProcessor::renderFilePlayPlayer.
 class VoxStripTask : public RenderTask
 {
 public:

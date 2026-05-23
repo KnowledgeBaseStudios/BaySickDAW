@@ -18,13 +18,12 @@ class VibeSynthProcessor;
 // and have a synthetic dep on this producer registered with the dispatcher
 // so they finish-after the producer.
 //
-// Idle suspend (mirrors serial behavior): if MIDI is empty AND the engine
-// reports 0 active voices for kIdleSuspendBlocks consecutive blocks, skip
-// processStrips entirely.  Wakes immediately on next block where any gate
-// fails.  Counter lives in VibeSynthProcessor::mRustyIdleBlocks.
+// Idle suspend: if MIDI is empty AND the engine reports 0 active voices for
+// kIdleSuspendBlocks consecutive blocks, skip processStrips entirely.  Wakes
+// immediately on next block where any gate fails.  Counter lives in
+// VibeSynthProcessor::mRustyIdleBlocks.
 //
-// Phase 6 scaffolding: dead at runtime while kEnableMultiThreadedEngine
-// is constexpr false.
+// QA-Ef (2026-05-21): this is the live audio plumbing.
 class RustyDrumsProducerTask : public RenderTask
 {
 public:

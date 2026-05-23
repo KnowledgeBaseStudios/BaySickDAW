@@ -40,6 +40,15 @@ tool: "is this bug in the *parallelism* or in the *logic*?" That is preserved
 all worker threads so the audio thread runs the entire graph itself through the
 identical dispatcher/task code.
 
+**Leave no serial ghost (Jeff, 2026-05-21).** The batch's purpose is single-path
+clarity — a future session (or the doc-reader on its next grep) must never mistake
+leftover serial code/comments for live, maintainable behavior. So every serial
+artifact is removed or rewritten, never left as "dead but harmless": the serial
+tail, the `gMultiThreadedEngineEnabled` *branch*, `routeInsertOutput` + the
+now-dead serial branches inside the surviving MT helpers, and every comment that
+implies a live serial path. The ONLY surviving "serial" concept is the worker-park
+*diagnostic* mode, explicitly labeled as such.
+
 **Risk: HIGH** — deletes the tail of the single hottest function. Mitigated by:
 (1) a read-only pre-flight inventory re-verify (Task 1) before any cut; (2) the
 serial-diagnostic mode landing *before* the deletion so the bisect tool never
@@ -62,6 +71,7 @@ silence.
 | SC-diag-ui | **Reuse the Mixer hamburger "Multi-core Rendering" toggle** for the serial diagnostic. ON = full parallel; OFF = serial diagnostic. Keep the existing `<MultiCoreRendering>` settings.xml persistence. | Jeff 2026-05-21 (Q1). User-facing meaning of the toggle is unchanged ("use all cores or not"); only the *implementation* of OFF changes (park workers instead of a separate code path). Reuses UI + persistence + the sibling "Run MT Diagnostic" readout. |
 | SC-serial-meaning | **Fully serial** — when OFF, ALL workers park and the audio thread does 100% of render work. | Jeff 2026-05-21 (Q2, answered "which most resembles the setup we are removing"). The deleted serial path ran with **zero** worker threads; fully-serial reproduces exactly that. "Keep one worker" would be *less* like the removed setup. |
 | SC-cleanup-scope | **Both cleanups** fold into QA-Ef: (1) dead `busAnySolo` + `BlockContext.busAnySolo` slim-down; (2) orphaned L/B/D buffers (`mLayerEngineSum`/`mBassEngineBuf`) + QA-Ea Part B Task 2 leftover signature params. | Jeff 2026-05-21 (Q3). Both are dead *only because* the serial path is gone — this is their natural home. (1) was explicitly deferred to "QA-Ef ST deletion + MT BlockContext slim-down" by a QA-Ea code comment. |
+| SC-routeinsert | **Option B — full removal ("leave no serial ghost").** Delete `routeInsertOutput`; collapse the two MT-shared helpers (`renderAudioClipsForRow`/`renderFilePlayPlayer`) to a single MT-only behavior (drop the `mtDest==null` serial branch + make the destination a required non-null buffer); sweep every stale serial-referencing comment. Folded into Task 2. | Jeff 2026-05-21 (Task 1 surface). A-style "dead but harmless" leftovers would re-surface to a future session / the doc-reader (which greps "serial"/"routeInsertOutput") as if serial were still live — defeating the batch's purpose. Cannot guarantee A is confusion-free, so B. |
 | SC-slot | QA-Ef immediately after QA-Ea. | Jeff (§9 twenty-seventh Forks); already reflected in §5/§6. Not re-litigated here. |
 | SC-name | Plan silly-name `synchronous-dreaming-hummingbird`. | My pick (`feedback_silly_name_is_my_pick.md`); fittingly on-theme. |
 
@@ -92,10 +102,12 @@ silence.
 - `Source/Engine/RenderGraphDispatcher.cpp` — confirm MT master-publish path intact.
 - Output → running notes (deletion map + dead-symbol list). Surface to Jeff before Task 2.
 
-### Task 2 — Collapse to single MT path + serial-diagnostic park gate
+### Task 2 — Collapse to single MT path + serial-diagnostic park gate + leave no serial ghost
 - `Source/Engine/VibeThreadPool.cpp` (`workerLoop`, ~line 156) — **NEW** park-when-OFF gate (the one net-new code block).
 - `Source/Engine/RenderEngineFlags.h:17-44` — update `gMultiThreadedEngineEnabled` doc-comment (false now = workers park / serial diagnostic, not "serial loop").
-- `Source/PluginProcessor.cpp:1918-2005` + serial tail (~2008 to processBlock close) — remove the `if (gMultiThreadedEngineEnabled...)` wrapper + the `return;` (:2005); **delete the serial tail**; dedent the dispatch body to unconditional. Delete serial-only dead symbols that die with the tail (`mLayerEngineScratch`/`mBassEngineScratch`, `mLayerEngineLock`/`mBassEngineLock`, the `pushScToEngine` lambda, the serial-side `busAnySolo` at ~:2504, `routeInsertOutput` *iff* Task 1 confirms it's serial-only).
+- `Source/PluginProcessor.cpp` — (2b) remove the `if` wrapper (:1931) + `return;` (:2005); **delete the serial tail :2008-2837**; dedent the dispatch body. Delete serial-only dead symbols (`mLayerEngineScratch`/`mBassEngineScratch`, `pushScToEngine` lambda, serial-tail lock usages, serial `busAnySolo`). (2c) delete `routeInsertOutput` (:403 def / :579 decl); collapse `renderAudioClipsForRow` + `renderFilePlayPlayer` to MT-only (drop serial branch + nullable `mtDest`).
+- `Source/Engine/Tasks/CompositeAudioInsertTask.cpp:154`, `Source/Engine/Tasks/VoxStripTask.cpp:107`, `Source/Engine/Tasks/InstStripTask.cpp:95` — (2c) update the 3 helper callers for the new non-null destination signature.
+- `Source/Engine/SidechainPullHelper.h`, `Source/Engine/UpstreamLink.h`, `Source/DSP/EngineSidechainHelper.h`, `Source/VibeGraph.cpp`/`.h`, `Source/PluginProcessor.h` — (2c) serial-ghost comment sweep (rewrite/remove comments naming `routeInsertOutput` or implying a live serial path).
 - `Source/Standalone/StandaloneEditor.cpp:5152-5214` — keep menu item 202 + its handler; update the now-stale ST/MT comments (no behavior change). Keep item 203 "Run MT Diagnostic" (CL-292).
 - `Source/Standalone/StandaloneApp.cpp:228-267` — persistence unchanged; verify doc-comments still accurate.
 
@@ -158,11 +170,16 @@ BEFORE:                              AFTER:
                                      }
 ```
 - [ ] Remove the `if (RenderEngine::gMultiThreadedEngineEnabled...)` wrapper (:1931) + the `return;` (:2005); dedent the dispatch body.
-- [ ] Delete the serial tail (Task 1's exact bounds) + the serial-only dead symbols Task 1 classified as dies-with-tail.
+- [ ] Delete the serial tail — **confirmed bounds `PluginProcessor.cpp:2008-2837`** (function closes :2838) — + the serial-only dead symbols that vanish with it: `mLayerEngineScratch`/`mBassEngineScratch`, the `pushScToEngine` stack lambda, the serial-tail engine spin-lock *usages* (`:2027`/`:2068` — the lock OBJECTS survive: used by prepareToPlay :238/:243 + engine add/remove :4280+), the serial `busAnySolo` (`:2657`+).
 - [ ] Update stale comments: `RenderEngineFlags.h:17-44` (false = workers park, not "serial loop"); `PluginProcessor.cpp:1918-1930` (no more branch); `StandaloneEditor.cpp:5152-5157,5200-5210` (toggle now parks workers).
 - [ ] Keep menu items 202 (toggle) + 203 (Run MT Diagnostic) + the `<MultiCoreRendering>` persistence intact.
+
+**2c — leave no serial ghost** (SC-routeinsert = B; after 2b the two helpers are MT-only-called, so this is safe):
+- [ ] Delete `routeInsertOutput` (def `PluginProcessor.cpp:403`, decl `:579`).
+- [ ] Collapse the two MT-shared helpers to MT-only: `renderAudioClipsForRow` (serial branch `:683-694`) + `renderFilePlayPlayer` (serial branches `:933-944` / `:963-...`) — drop each `if (mtDest == nullptr) routeInsertOutput(...)` branch; make the destination a required buffer (`mtDest` pointer → reference, rename `dest`); update the 3 MT callers (`CompositeAudioInsertTask.cpp:154`, `VoxStripTask.cpp:107`, `InstStripTask.cpp:95`).
+- [ ] Serial-ghost comment sweep: grep `routeInsertOutput` + live-serial-path references across `Source/` (VibeGraph.cpp/.h, SidechainPullHelper.h, UpstreamLink.h, EngineSidechainHelper.h, the helper headers, StandaloneEditor.cpp) and rewrite/remove every comment naming the deleted function or implying a live serial path. Surface the sweep list in running notes; if large, show Jeff before applying.
 - [ ] **Tell Jeff to build** (`do_build.bat`), Debug first. Verify scripts:
-  - (1) Default (parallel, toggle ON): build a pattern with Layers + Bass + Drums + one audio clip; confirm correct playback.
+  - (1) Default (parallel, toggle ON): an arrangement exercising Layers + Bass + Drums + an audio-clip row (CompositeAudioInsertTask) + a Vox page + an Inst page (the `renderFilePlayPlayer`/`renderAudioClipsForRow` helpers edited in 2c); confirm all play correctly.
   - (2) Mixer hamburger → uncheck "Multi-core Rendering" during playback → audio stays correct (now fully serial: workers parked).
   - (3) With it OFF, "Run MT Diagnostic (2s capture)" during playback → AlertWindow shows ~100% main-thread / ~0% worker tasks (proves serial). Re-check ON → re-run → work distributes across workers.
   - (4) Toggle ON/OFF several times mid-playback → no glitches/dropouts on flip.

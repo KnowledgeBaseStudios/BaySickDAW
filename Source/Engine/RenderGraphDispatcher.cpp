@@ -11,6 +11,17 @@ RenderGraphDispatcher::RenderGraphDispatcher (VibeThreadPool& pool,
                                               ChannelBufferArena& arena)
     : mPool (pool), mArena (arena)
 {
+    // QA-Ef (2026-05-22): pre-size both task lists so registerTask /
+    // addSyntheticDep never reallocate while the audio thread is mid-iteration.
+    // dispatchBlock's leaf-seed loop and rebuildLinks both walk these every
+    // block; a project load into a freshly-started app appends many tasks at
+    // once, and a reallocation there would move the backing store out from
+    // under the audio thread's pointer -> use-after-free crash in dispatchBlock
+    // (the observed save-file-load crash signature).  channelId space is
+    // 0..kMaxStripChannels-1; the +64 headroom covers producer-style tasks
+    // (channelId == -1) that don't occupy a channel slot.
+    mTasks.reserve (RenderEngine::kMaxStripChannels + 64);
+    mSyntheticDeps.reserve (256);
 }
 
 RenderGraphDispatcher::~RenderGraphDispatcher()

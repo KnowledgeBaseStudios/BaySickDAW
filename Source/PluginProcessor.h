@@ -197,6 +197,22 @@ public:
     // Default main-out = FX Bus. Safe to call repeatedly for the same idx.
     void ensureAuxInsert(int idx, const juce::String& displayName);
 
+    // QA-Ef #4 (2026-05-22): tear down EVERY registered aux insert -- unregister
+    // each PassiveStripTask from the render dispatcher, reset the task slot, and
+    // clear the VibeGraph aux InsertNodes.  Called from the three load-entry
+    // points BEFORE restoreAuxStripsFromState rebuilds from the loaded project,
+    // so auxes from the prior session don't leak across loads:
+    //   - VibeSynthProcessor::deserializeProject (project open)
+    //   - VibeSynthProcessor::setStateInformation (VST3 host load)
+    //   - StandaloneEditor::doFileNew (File > New)
+    //   - StandaloneEditor::loadTemplate (apply template)
+    // Each caller raises mProjectLoadInProgress + sleeps 30 ms BEFORE calling
+    // this so the audio thread is bailing while we mutate the render-task list
+    // (processBlock bails to silence while the shield is up).  Mirrors how
+    // onTabClosed tears down per-tab engines; aux strips have no per-tab
+    // teardown because they aren't tabs.
+    void clearAllAuxInserts();
+
     // R1 (2026-04-23): Vox / Inst strip registration for live-input recording.
     // Up to 6 of each; default main-out = their respective bus (VoxBus / InstBus).
     // R1 registers params + InsertNode only; R2+R3 wire the ASIO input source.
@@ -261,9 +277,17 @@ public:
                                        const juce::String& name);
     juce::String getInputChannelName (const juce::String& stripPrefix) const;
 
-    // 5F-4b B7: scan APVTS saved state for any mixer_aux_N params and
-    // re-register their InsertNodes. Called from setStateInformation.
-    void restoreAuxStripsFromState();
+    // 5F-4b B7 / QA-Ef #4 (2026-05-22): scan a SAVED-FILE state tree for
+    // mixer_aux_N_level params and re-register their InsertNodes.  The caller
+    // MUST pass a deep copy of the saved tree taken BEFORE apvts.replaceState,
+    // not apvts.state itself -- replaceState's rebind appends stale empty
+    // <PARAM> nodes for any params that were registered in a prior session but
+    // are missing from this file (e.g. open AT1 with 3 auxes, then open AT2
+    // with 1 -- apvts.state ends up with mixer_aux_1/2_level nodes too because
+    // those adapters are still registered).  Scanning apvts.state would
+    // recreate phantom auxes; scanning the pre-rebind file copy only finds
+    // auxes that were ACTUALLY saved.
+    void restoreAuxStripsFromState (const juce::ValueTree& sourceState);
 
     // ── C.3 (2026-04-30): Hardware MIDI input ────────────────────────────────
     // The MIDI input thread (StandaloneApp::handleIncomingMidiMessage) pushes
@@ -572,20 +596,12 @@ public:
         juce::AudioBuffer<float>* clipScratch = nullptr;   // shared decode buffer
     };
 
-    // 5F-4b B1b: fan a source channel's output out to all destinations listed
-    // in the RoutingGraph (main-out + sends + sidechain taps).  Was a stack
-    // lambda inside processBlock until Batch 5 promoted it to a member so
-    // helpers / tasks outside that scope can call it.
-    void routeInsertOutput (int srcChannelId,
-                            const juce::AudioBuffer<float>& buf,
-                            int numSamples);
-
     // Render all non-FilePlay audio clips on `row` through the row's Audio
-    // InsertNode.  Serial path passes mtDest=nullptr (output fans via
-    // routeInsertOutput).  AudioInsertTask passes its mOutputBuffer so the
-    // pull-model task graph can consume.  FilePlay clips (clip routed to a
-    // Vox/Inst page) are skipped - they're handled by the inline FilePlay
-    // pass in processBlock for now (deferred to Batch 9 redesign).
+    // InsertNode, adding each clip's processed output into `mtDest` (the row
+    // InsertNode's pull-model output buffer; always non-null).  Called per
+    // audio row by CompositeAudioInsertTask::run.  FilePlay clips (clip routed
+    // to a Vox/Inst page) are skipped - handled by the FilePlay pass in
+    // processBlock.
     void renderAudioClipsForRow (int row,
                                  const AudioClipBlockContext& ctx,
                                  juce::AudioBuffer<float>* mtDest);
@@ -604,25 +620,19 @@ public:
     // must be a Vox or Inst id).
     //
     // engineMidi: per-page MIDI buffer for the Vox/Inst page identified by
-    // player.routeChannel (e.g. voxPageMidi[vi] in serial code, or
-    // mCtx->voxPageMidi[mIndex] from a VoxStripTask in MT mode).
+    // player.routeChannel (e.g. mCtx->voxPageMidi[mIndex] from a VoxStripTask).
     //
-    // mtDest:
-    //   nullptr  : serial mode - engine output is fanned via routeInsertOutput
-    //              into the routing graph (main-out + sends).
-    //   non-null : MT mode - engine output is addFrom'd into mtDest so the
-    //              task's downstream pull-model consumers see it on this
-    //              strip's mOutputBuffer.
+    // mtDest: the strip's pull-model output buffer (always non-null).  Engine
+    //         output is addFrom'd into it so the task graph's downstream
+    //         consumers see it on this strip's mOutputBuffer.
     //
     // Returns true if a clip portion was rendered (engine was driven).
     // Returns false if the clip is out of range / muted / EOF / etc.
     //
     // QA-E Task 3 follow-up (2026-05-12): engineScratch parameter added so
     // the caller provides the engine-input buffer rather than the function
-    // touching shared mVoxEngineScratch / mInstEngineScratch members.  MT
-    // tasks (VoxStripTask / InstStripTask) pass their own per-task scratch
-    // (no race).  Serial Pass 1 picks mVoxEngineScratch or mInstEngineScratch
-    // based on the player's route (single-threaded, member-sharing safe).
+    // touching shared members.  VoxStripTask / InstStripTask each pass their
+    // own per-task scratch (no cross-strip race).
     bool renderFilePlayPlayer (AudioClipPlayer&             player,
                                 const AudioClipBlockContext& ctx,
                                 juce::MidiBuffer&            engineMidi,
@@ -708,53 +718,44 @@ public:
 
     // 2026-05-06 (Batch 9b Item 8): dry-recorder tap helper.  Locates the
     // StripRecorder whose channelId matches and writes one block of mono
-    // input (typically a single channel of mLiveInputSnapshot).  Called
-    // from BOTH the serial Vox/Inst armed paths in processBlock and (when
-    // kEnableMultiThreadedEngine flips) VoxStripTask / InstStripTask::run.
-    // Pre-existing race hazard between iteration here and message-thread
-    // mutation in startRecording / stopRecording - same shape as pre-9b
-    // serial code, not closed in 9b.  Future hardening would either move
-    // mStripRecorders to shared_ptr-backed entries or use a small
-    // SpinLock around iteration; deferred to 9c+.
+    // input (typically a single channel of mLiveInputSnapshot).  Called from
+    // VoxStripTask / InstStripTask::run on the audio thread when those strips
+    // are armed.  Pre-existing race hazard between iteration here and
+    // message-thread mutation in startRecording / stopRecording - documented
+    // in 9b, not closed.  Future hardening would either move mStripRecorders
+    // to shared_ptr-backed entries or use a small SpinLock around iteration;
+    // deferred.
     //
     // monoSource: read-only mono input pointer.  Typical usage:
-    //   serial: tapDryRecorder(channelId, snapshot.getReadPointer(chIdx), n)
-    //   MT:     mProcessor->tapDryRecorder(channelId,
-    //                                       ctx->liveInputSnapshot
-    //                                          ->getReadPointer(chIdx), n)
+    //   mProcessor->tapDryRecorder (channelId,
+    //                               ctx->liveInputSnapshot->getReadPointer (chIdx),
+    //                               n)
     void tapDryRecorder (int channelId, const float* monoSource, int numSamples);
 
     // 2026-05-07 (Batch 9c follow-up): end-of-block UI-meter atomic drain.
     // Promotes per-node / per-bus / per-row peak atomics into the UI-visible
-    // mirror atomics that the editor's timer reads.  Called from the tail
-    // of processBlock in serial mode AND from the MT branch right before
-    // `return;` so meters work identically under both paths.  Without this
-    // call from the MT branch, every dBFS / VU / per-effect meter sits at
-    // its initial -inf because the audio path's peak writes never reach
-    // the UI mirrors.
+    // mirror atomics that the editor's timer reads.  Called once per block
+    // from processBlock (after dispatchBlock returns) so dBFS / VU / per-
+    // effect meters get fed from the worker-thread peak writes.
     void drainMeterAtomicsForUI();
 
     // 2026-05-07 (Batch 10): DSP-load measurement + overload protection.
-    // Extracted from end-of-processBlock so the MT branch (which returns
-    // early after dispatchBlock) calls the same path.  Without this call
-    // from the MT branch, mAudioDspLoad sits at 0% (the t1-t0 deltaT is
-    // never computed) and the in-app DSP meter reads 0% even when the
-    // audio thread is busy running worker tasks via runUntilOrTimeout.
-    // Voice-stealing on sustained 85% overload also lives here so the
-    // protection fires under MT just like serial.  Caller passes the
-    // t0 tick captured at the very top of processBlock.
+    // Called once per block from processBlock after dispatchBlock returns,
+    // so mAudioDspLoad reflects the actual cost of running worker tasks via
+    // runUntilOrTimeout.  Voice-stealing on sustained 85% overload also
+    // lives here.  Caller passes the t0 tick captured at the very top of
+    // processBlock.
     void measureDspLoadAndOverload (juce::int64 t0Ticks, int numSamples);
 
     // 2026-05-18 (QA-Ea Task 0b): post-mix recorders + metronome/count-in.
-    // Extracted from the serial tail so the MT branch (which returns early
-    // after dispatchBlock) feeds the master + MIDI recorders and runs the
-    // metronome / count-in identically.  Without this call from the MT
-    // branch a record-nothing-armed master capture is a 104-byte empty
-    // WAV, MIDI recording captures nothing, and there is no metronome /
-    // record count-in under MT (the 3 serial-only divergences; Forks #25).
+    // Called once per block from processBlock after dispatchBlock returns;
+    // feeds master + MIDI recorders and runs the metronome / count-in.
+    // Pre-QA-Ef the 3 hardware-MIDI / master-rec / metronome paths lived
+    // only in the deleted serial tail; the extraction landed during QA-Ea
+    // Task 0b so the single render path inherits them (Forks #25 close-out).
     // Order preserves the D-5 invariant: MIDI rec -> master rec (the
     // pre-metronome buffer) -> metronome / count-in.  bpm derives from the
-    // passed playhead position so the two call sites can't diverge on it.
+    // passed playhead position.
     void applyPostMixRecordAndMetro (juce::AudioBuffer<float>& buffer,
                                      const juce::MidiBuffer& allMidi,
                                      const juce::AudioPlayHead::PositionInfo& pos,
@@ -794,11 +795,6 @@ private:
     std::array<juce::AudioProcessor*, kMaxLayerPages>      mLayerEngines {};
     juce::SpinLock                                         mBassEngineLock;
     std::array<juce::AudioProcessor*, kMaxBassPages>       mBassEngines {};
-    // Pre-allocated scratch buffers for engine rendering (sized in prepareToPlay)
-    juce::AudioBuffer<float>                               mLayerEngineSum;
-    juce::AudioBuffer<float>                               mLayerEngineScratch;
-    juce::AudioBuffer<float>                               mBassEngineBuf;
-    juce::AudioBuffer<float>                               mBassEngineScratch;
     juce::AudioBuffer<float>                               mAudioRowScratch;    // bus accumulation (all clips summed)
     juce::AudioBuffer<float>                               mAudioClipScratch;   // single-clip scratch for per-clip rack
 
@@ -930,6 +926,14 @@ public:
     // audio-thread access.  Without this, project re-open while audio is
     // running can crash inside a half-destroyed sub-engine (e.g. NAMIR /
     // MicPlacement IIR filter dereferences after the processor was freed).
+    //
+    // QA-Ef (2026-05-22): the shield now spans the WHOLE load -- teardown AND
+    // the tab/engine REBUILD -- via deserializeProject raising it for its full
+    // body and closeAllDynamicTabs being nest-aware (leaves it raised when an
+    // outer load owns it).  Previously only the teardown half was shielded, so
+    // registerTask during rebuild raced the audio thread's render-task-list
+    // iteration (use-after-free in RenderGraphDispatcher::dispatchBlock on a
+    // save-file load).  Pairs with the dispatcher pre-sizing its task lists.
     std::atomic<bool> mProjectLoadInProgress { false };
     void setProjectLoadInProgress (bool b) noexcept
         { mProjectLoadInProgress.store (b, std::memory_order_release); }

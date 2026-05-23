@@ -7,9 +7,8 @@ class RenderTask;
 //
 // Pull-model design: when a task runs, it iterates its mPredecessors and reads
 // each `source->mOutputBuffer` (which has already been written by the upstream
-// task - guaranteed by the dependency-counter semantics). This replaces the
-// existing serial `routeInsertOutput → addFrom into shared accumulator`
-// pattern, which would race under parallel execution.
+// task - guaranteed by the dependency-counter semantics).  A push-model
+// (writing into a shared accumulator) would race under parallel execution.
 //
 // Encoding rules
 //   - Audio (main-out / send) edge: `isSc = false`. Use `gainDb` for level

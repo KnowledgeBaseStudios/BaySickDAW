@@ -28,8 +28,8 @@ public:
 // internal modulation source on the engine can sample.
 //
 // Address-only push: the actual sample data is owned by VibeGraph's per-strip
-// scRecv buffers, filled by routeInsertOutput's SC fanout from upstream
-// sources earlier in the topo-sorted process order.
+// scRecv buffers, filled by each task's pullSidechainPredecessorsToGraph from
+// upstream sources earlier in the topo-sorted process order.
 //
 // Per-engine internal consumers (UI routing, modulation depth, etc.) are
 // out of scope for this phase - this helper is the primitive only.
