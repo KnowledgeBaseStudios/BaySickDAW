@@ -1140,7 +1140,7 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Eg: Bus-Meter Draining Unification (G1 standardization)** *(NEW — inserted 2026-05-23)*
 
-**Plan file:** `<silly-name>.md (when started)`
+**Plan file:** `Plans & Specs/Batch Plans/squishy-scribbling-flurry.md`
 - Items: bus peak metering currently uses **TWO ad-hoc mechanisms** with no deliberate decision behind the split (architectural finding surfaced during QA-Ef's FX-bus meter fix):
   - **G1** (Layers / Bass / Drums / Master): the node owns its peak, published as a `VibeGraph` member atomic that `drainMeterAtomicsForUI` reads directly (node -> UI snapshot).
   - **G2** (Clips / Vox / Inst / Rusty / FX): a centralized `PluginProcessor` running-max mirror that `processBus` CAS-maxes into during the block; the drain then promotes mirror -> snapshot.
