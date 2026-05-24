@@ -328,10 +328,6 @@ public:
     void processBus(int busChId, juce::AudioBuffer<float>& buf,
                     double bpm, int panLaw);
 
-    // 2026-05-06 (Batch 9b): peak-meter atomic registration for the buses
-    // whose DSP migrated from PluginProcessor into processBus.  Layers/Bass/
-    // Drums/Master/FxBus carry their own peak atomics on their BusNode; the
-    // remaining buses (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty)
     // C.1 (2026-04-30): runs the FX Bus pipeline on its accumulator buffer
     // (preEq -> rack -> postEq -> polarity -> M/S width -> fader x mute x
     // solo -> pan -> peak meter).  Caller must subsequently route the kFxBus

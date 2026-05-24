@@ -85,7 +85,7 @@ public:
     // displayed smoothed value (FL-style ballistic-filtered max of L/R).
     // Routing through DBFSMeter gives cables the same visual smoothness as
     // the meter LEDs - no separate smoothing layer, no double-smoothing
-    // artefacts, cables and meters stay in perfect visual sync.
+    // artifacts, cables and meters stay in perfect visual sync.
     float getCurrentPeakDb() const noexcept { return mMeter.getCurrentDisplayedDb(); }
 
     // ── Model sync (does NOT fire callbacks) ─────────────────────────────────

@@ -1636,7 +1636,7 @@ public:
     // Returns max(mDisplayDbL, mDisplayDbR) - the FL-parity ballistic-smoothed
     // value the meter LEDs are currently rendering.  Cables reading this stay
     // in perfect visual sync with the meter bars (no separate smoothing layer
-    // in MixerTrackStrip, no double-smoothing artefacts).
+    // in MixerTrackStrip, no double-smoothing artifacts).
     float getCurrentDisplayedDb() const noexcept
     {
         return juce::jmax(mDisplayDbL, mDisplayDbR);

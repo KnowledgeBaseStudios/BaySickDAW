@@ -556,3 +556,268 @@ get retro-added with Keep when first surfaced"):
 |------|-----|---------|-------------|
 | `PluginProcessor.cpp:1857-1885` (DSP-load meter, MT-Md hamburger readout) | n/a | "Run MT Diagnostic" + DSP-load smoothing/cap | Keep (V1 release fixture; surfaces under the Mixer hamburger). |
 | `RenderEngine::gMultiThreadedEngineEnabled` toggle | n/a | Multi-core Rendering ON/OFF runtime gate | Keep (Production toggle, persisted to settings.xml; ON = parallel render, OFF = serial-diagnostic mode with workers parked). |
+
+## 2026-05-24 — Task 8 close pass: /review-batch + /perf-audit + fix-up + routing
+
+- **`/draft-doc batch-close`** produced the initial Work Log entry; applied as
+  the Task 8 close paperwork seed.
+
+- **`/review-batch QA-Eg`** dispatched against the QA-Eg source diff
+  (`6594b3a..1942ae2`).  Returned **no BLOCKER**, **5 NEEDS-FIX**, **7 NITs**:
+  - NEEDS-FIX: orphan `VibeGraph.h:331-334` comment fragment (leftover from
+    deleted `registerBusPeakAtomics` declaration); stale
+    `drainMeterAtomicsForUI` function-header comment at
+    `PluginProcessor.cpp:2038-2061` (still described the pre-batch "Three
+    groups" model with Run mirrors); en-GB spellings x5 ("greyed" x3 +
+    "artefacts" x2 in QA-Eg-added code per
+    `feedback_us_english_spelling.md`); send-cable hit-zone offset bug at
+    `MixerPage.cpp:886-911` (real functional — `hitTestCablesAll` used
+    un-offset `src.x` while paint applies `kSendOffsets[idx]`; sends 2/3/4
+    missed by up to 16 px); stale `mLastViewportX` member comment at
+    `MixerPage.h:337-339` (referenced "(now buffered-to-image) overlay" but
+    `setBufferedToImage(true)` was removed this batch).
+  - NITs: 300/0.25 doc-comments (function-doc + class-doc said the
+    pre-spec numbers); leftover REMOVAL rationale block at
+    `MixerPage.cpp:118-120`; stale `onVBlank` "now pumps a repaint every
+    frame" comment (obsolete after delta-gate); stale `CableMainOutPopup`
+    reference at `MixerPage.cpp:1037` (class deleted but comment said
+    "Reuse"); `mTopScrollBar` rename to `mHScrollBar` (scrollbar relocated
+    to bottom this batch); snapshot comment overstated `-inf`/NaN behavior
+    (the floor is `-60.f` not `-inf`); `findStripByChannelId` perf note
+    flagged for `/perf-audit` follow-through.
+
+- **Initial misclassification corrected.** First surface listed "4
+  NEEDS-FIX" but the actual review returned 5 distinct items.  Corrected
+  during apply (`5 NEEDS-FIX` everywhere in the close paperwork).
+
+- **Initial routing call corrected.** First proposal at surface time was
+  to defer the `mTopScrollBar` rename + the `findStripByChannelId`
+  finding ("route forward to next `/perf-audit`").  Jeff overruled both:
+  "You said already that you were gonna rename it, then didn't and are
+  now suggesting to just not do it.  Also you haven't been running this
+  audit every 3 batches or so AT ALL and instead have been running it
+  every batch as you did in this batch.  Why aren't we doing all of it?"
+  Two corrections: (i) rename was surfaced as either/or in the NIT then
+  unilaterally proposed for skip (the spec-call pattern I am not
+  supposed to do per `feedback_dont_make_unilateral_spec_calls.md`);
+  (ii) `/perf-audit` cadence is actually every batch in practice, not
+  the CLAUDE.md "every 3 batches OR pre-milestone" claim — so deferring
+  the perf finding to "next run" was wrong, the audit happens here.
+  Revised disposition: fix all 5 NEEDS-FIX + all 7 NITs (including the
+  rename) + dispatch `/perf-audit` so the perf finding gets a concrete
+  fix proposal that folds into the same Task 8 fix-up commit.
+
+- **`/perf-audit`** dispatched against `HEAD = 1942ae2`.  Returned **8
+  findings** across the standard 10 perf categories:
+  - **H1 (HIGH)**: `VibeGraph::processInsert` does 4x `std::map::find()`
+    per insert per audio block (`Source/VibeGraph.cpp:2337` +
+    `:2889`).  ~30k+ red-black-tree walks/sec on busy session; cache-
+    unfriendly heap-scattered nodes.  Architectural inconsistency with
+    `RenderGraphDispatcher::mTasksByChannel` (already a flat array
+    indexed by ChannelId in-tree).
+  - **H2 (HIGH)**: `findStripByChannelId` walked O(N) per cable per
+    paint (`Source/Standalone/MixerPage.cpp:1121`).  19-step linear
+    scan (11 unique_ptr bus checks + 8 std::map iterations) called
+    3x per cable per paint via `cableTelemetry` + `getSocketPosition`
+    + the flash + chooser code.
+  - **H3 (HIGH)**: `VibeVoice::startNote` heap-allocates per note-on
+    (`Source/VibePlayer/VibePlayerDSP.cpp:581-583 + :607`).  Plus
+    `findRegion` (`:573`) heap-allocates `std::vector<int>
+    candidates`.  Audio-thread allocation on every drum hit / key
+    press / audition.
+  - **H4 (HIGH)**: `EffectRack::process` scalar peak loops, SIMD
+    candidate (`Source/EffectRack.cpp:444-449 + :513-518`).  ~92k
+    samples scanned per block on busy session.
+  - **M1 (MEDIUM)**: `MixerPage::onVBlank` heap-allocates fresh
+    `std::vector<float>` every 60Hz vblank (the snapshot buffer the
+    Task 7 idle-flicker fix landed).
+  - **M2 (MEDIUM)**: 4 engine processors miss APVTS dirty-flag pattern
+    (Harmless + VibePlayer + BaySickSynth + BaySickBass) per
+    `feedback_apvts_dirty_flag_pattern.md`.
+  - **M3 (MEDIUM)**: UI-side `getInsertPeakDb` / `getInsertPeakDbStereo`
+    `std::map::find` per vblank (mirror of H1 on the drain side).
+  - **L1 (LOW)**: 3-pass paint of `RoutingGraph::edges()` — skip
+    unless hot.
+
+- **Disposition (Jeff 2026-05-24):** fold H2 + M1 + H4 into Task 8
+  fix-up; route H1 + H3 + M2 forward as new dedicated batches in a
+  perf-audit cluster (Jeff explicit "Let's route H1, H3, and M2 forward
+  as new §5 batches.").  H1 spec call resolved verbatim: "we will
+  absolutely go with Option 2 (flattening to std::array). The audio
+  thread should never touch a std::map."  H3 spec resolved with Jeff's
+  verbatim 4-section Voice Pool blueprint (pre-allocate in
+  prepareToPlay + fat voices internal reuse + lock-free `std::atomic<bool>
+  isActive` + voice stealing fallback with 10-20 sample fade-out).  M3
+  absorbed by H1 / QA-InsertMaps (same flat-array migration eliminates
+  the UI-side `std::map::find`).  L1 deferred as low-priority.
+
+- **Codenames + slots (Jeff-approved 2026-05-24):**
+  - **QA-InsertMaps** (H1) — immediately after QA-AudioMeters.
+  - **QA-VoicePool** (H3) — immediately after QA-InsertMaps.
+  - **QA-EngineApvts** (M2) — immediately after QA-VoicePool, before
+    QA-Ed.
+
+- **Task 8 fix-up edits applied (single SHA pending commit):**
+  - `/review-batch` 5 NEEDS-FIX + 7 NITs (12 fixes total): orphan
+    comment delete (`VibeGraph.h`), `drainMeterAtomicsForUI` header
+    rewrite (`PluginProcessor.cpp`), en-GB → en-US x5 (`MixerPage.cpp`
+    x3 + `MixerTrackStrip.h` + `SharedUI.h`), send-cable hit-zone
+    offset fix (`MixerPage.cpp` `hitTestCablesAll` mains/sends split
+    + `kSendOffsets[idx]` application + `kSendOffsets` moved to
+    file-scope), stale `mLastViewportX` comment update, 300/0.25 →
+    200/0.4 doc-comment update x2, REMOVAL rationale block delete,
+    `onVBlank` "every frame" comment update, `CableMainOutPopup`
+    reference update, `mTopScrollBar` → `mHScrollBar` rename
+    (replace_all in `.cpp` + targeted Edit in `.h` + comment update;
+    14 sites), `syncTopScrollBar` → `syncHScrollBar` rename
+    (replace_all in `.cpp` + targeted Edit in `.h`; 4 sites),
+    snapshot NaN-clause comment update.
+  - `/perf-audit` H2 fold-in: added `mutable std::unordered_map<int,
+    MixerTrackStrip*> mStripByChannelId` + `mutable bool
+    mStripCacheDirty { true }` to `MixerPage` (private members);
+    new `void rebuildStripCache() const;` private method walks all
+    11 bus pointers + 8 std::map containers once and populates the
+    cache; `findStripByChannelId` rewritten to lazy-rebuild on
+    dirty + single `unordered_map::find` lookup; cache invalidated
+    via `mStripCacheDirty = true;` at every structural change site
+    (top of `layoutScrollContent` for broad coverage + 5 erase
+    sites + `clearDynamicStrips` + `clearAllRustyChannels` + 5
+    `removeXChannel` methods; 9 total invalidation sites covering
+    both add (via layout) and remove (via explicit pre-erase
+    invalidation)).
+  - `/perf-audit` M1 fold-in: added `std::vector<float>
+    mPeakSnapshotScratch;` member to `MixerPage`; `onVBlank` now
+    `clear()`s scratch and `push_back`s into it, then `std::swap`s
+    with `mLastPeakSnapshot` at end — both vectors retain capacity
+    across frames, no heap alloc on UI vblank after warm-up.
+  - `/perf-audit` H4 fold-in: `EffectRack::process` input peak
+    (`:444-449`) + output peak (`:513-518`) loops swapped from
+    scalar `for (int i = 0; i < numSamples; ++i) jmax(peak,
+    std::abs(d[i]))` to `juce::FloatVectorOperations::findMinAndMax(d,
+    numSamples)` + `std::max(std::abs(range.getStart()),
+    std::abs(range.getEnd()))` — vectorizes to SSE/AVX where
+    available.
+
+- **Close paperwork applied:**
+  - Main Plan §5 QA-Eg STATUS banner expanded with `/review-batch` +
+    `/perf-audit` close-pass + the 5-batch routings.
+  - Main Plan §5 new entries inserted: QA-InsertMaps + QA-VoicePool +
+    QA-EngineApvts (between QA-AudioMeters and QA-F).
+  - Main Plan §6 arrow updated with QA-InsertMaps + QA-VoicePool +
+    QA-EngineApvts threaded between QA-AudioMeters and QA-Ed (20 / 21
+    / 22 asterisks).
+  - Main Plan §6 footnotes for QA-InsertMaps / QA-VoicePool /
+    QA-EngineApvts INSERTED between QA-AudioMeters (18) and
+    QA-DirtyFlag (19) in arrow-order.
+  - Main Plan §9 Forks entries thirty-third / thirty-fourth /
+    thirty-fifth appended.
+  - Implemented Work Log entry expanded: Task 8 bullet rewritten +
+    5-batch routings + `/review-batch` outcome filled + `/perf-audit`
+    outcome added + FND-8 through FND-15 appended to Found-along-the-
+    way section + corresponding rows added to What-was-done-about-
+    each-finding table + Modified-docs-at-close line expanded +
+    Modified-source-Task-8-fix-up line added + Commit(s) section
+    expanded with two TBD-SHA Task 8 entries (fix-up + close) + Next-
+    action expanded with the cluster sequence.
+
+- **Pending:** Task 8 fix-up commit (Debug + Release build-verify pending
+  Jeff's run + commit message via `/draft-commit` + final commit) + Task
+  8 close commit (the doc-only close paperwork).
+
+## 2026-05-24 — Task 8 close-pass addendum: FND-16 Master cable cutout fix (owner-verification finding)
+
+- **Trigger.** During owner-verification of the `/review-batch` +
+  `/perf-audit` fix-up build, Jeff noticed cables bleeding over Master
+  strip + dimming as source strips scrolled out of viewport + right-click
+  chooser missing cables whose sources had scrolled away.
+
+- **Specs from Jeff (verbatim, captured for the durable record):**
+  > "EVERY AND I MEAN EVERY FUCKING STRIP should have it's send side
+  > disappear as it goes behind the master strip while scrolling and
+  > EVERY strip that goes into the master should still have THE
+  > RECEIVING SIDE ON THE MASTER SHOWING"
+  >
+  > "The master should show the same color depth and list all the cables
+  > connected no matter where you scroll."
+
+- **Iteration 1 (path-derived carve-out): failed.** Initial fix tried a
+  carve-out where the cable's own bezier path is the shape of the
+  clip-region exclusion exception (cable visible only along its own
+  stroked path inside Master).  Worked for cables whose source was still
+  on-screen, but FAILED when a source strip scrolled fully behind
+  Master: the cable's entire bezier path then lived inside Master's
+  bounds, and the carve-out (which IS the path) exposed the whole
+  cable.  Jeff caught it: bus-strip cables to Master kept showing as
+  bus strips scrolled past.
+
+- **Iteration 2 (rectangle cutout): correct.** Switched to a fixed
+  rectangle centered on Master's destination-socket position.  Scroll-
+  safe because the rectangle pins to the destination socket regardless
+  of where the source has scrolled to.  Render path: Phase A clips
+  Master entirely (cables hidden everywhere on Master); Phase B re-
+  renders cables-to-Master with the clip narrowed to the small
+  destination-socket rectangle (visible only at the socket).
+
+- **Calibration UI (transient, mirrored Rusty kit hitbox editor).**
+  Added a "Tune Master Cutout" toggle + "Save Cutout Layout" button
+  pair to the Mixer page's PageMenuBar right-side (next to Add Aux /
+  Add Vox / Add Inst Strip buttons).  Calib mode draws an orange editor
+  rectangle on Master at the cutout position with 8 drag handles
+  (corners + edge midpoints).  Drag handles to resize, drag body to
+  reposition.  Save button writes current dimensions to
+  `Documents/BaySickDAW/mixer_master_cutout.txt` in paste-able C++ form
+  (`constexpr MasterCutout kMasterCutout = { w, h, xOff, yOff };`).
+  All built into the Release exe per Jeff's request ("can you do it in
+  release as every time I've done this stuff in dev it makes it way to
+  laggy").
+
+- **Tuned values (Jeff 2026-05-24, paste-back from saved log):**
+  W=5.0, H=14.0, XOff=0.5, YOff=5.0 — baked in as file-scope `static
+  constexpr float kMasterCutoutW / kMasterCutoutH / kMasterCutoutXOff /
+  kMasterCutoutYOff` in `Source/Standalone/MixerPage.cpp`.
+
+- **Dimming + right-click chooser fixes (Jeff's follow-up findings
+  after the cutout sizing was right):** cables dimmed progressively as
+  source strips scrolled out of viewport because `renderMasterStub`'s
+  `src.x < 0` skip conflated the `(-1, -1)` sentinel (strip
+  gone/hidden) with real-but-very-negative coordinates from valid
+  strips scrolled off-screen.  Right-click chooser missed cables whose
+  sources had scrolled away for the same reason.  Fixes:
+  - `renderMasterStub` skip condition changed to exact sentinel match
+    (`src.x == -1.f && src.y == -1.f`) so off-screen-source cables
+    still render through the cutout at full color-depth.
+  - Pass B2 sends loop pre-check removed (renderMasterStub does the
+    filter itself).
+  - `hitTestCablesAll` got a Master-cutout pass at the end: when the
+    click point falls inside the cutout rectangle, every cable
+    terminating at Master is added to hits (with de-dupe against
+    bezier-hit entries).
+
+- **Calibration UI removal (owner request post-tune).** After Jeff
+  confirmed the cutout values were correct + the dimming + chooser
+  fixes worked, he asked: "Looks good can we remove the buttons you
+  added though and any diag that goes with it".  Stripped:
+  `mTuneMasterCutoutBtn` + `mSaveMasterCutoutBtn` button members +
+  creation; `toggleMasterCutoutCalibMode()` + `saveMasterCutoutLayout()`
+  methods; `CutoutDragMode` enum + drag-state members on
+  `CableOverlay`; `mMasterCutoutCalibMode` flag; Phase C editor-
+  rectangle painting; calibration-mode branches in `hitTest` +
+  `mouseDown` + `mouseDrag` + `mouseUp`; two `StandaloneEditor`
+  reparenting calls.  Working tuned values became file-scope `static
+  constexpr` in `MixerPage.cpp`.  Diagnostic log file
+  `Documents/BaySickDAW/mixer_master_cutout.txt` deleted.
+
+- **Owner-verified PASSED 2026-05-24** ("We're good").
+
+- **Files touched (this FND-16 work, all part of Task 8 combined
+  commit alongside the `/review-batch` + `/perf-audit` work):**
+  `Source/Standalone/MixerPage.cpp` (Phase A + Phase B clip-region
+  cutout, sentinel-only skip, Master-cutout hit-test pass, file-scope
+  constants — all that's left after the calibration UI removal),
+  `Source/Standalone/MixerPage.h` (clean — calibration UI decls + the
+  cutout member variables all removed; the only addition that
+  persisted was the `#include <unordered_map>` from the H2 fix, which
+  was already noted earlier),
+  `Source/Standalone/StandaloneEditor.cpp` (unchanged from earlier
+  Task 8 fix-up state — the two reparenting calls added then removed
+  net to zero diff).

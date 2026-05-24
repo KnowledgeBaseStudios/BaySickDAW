@@ -1140,6 +1140,8 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Eg: Bus-Meter Draining Unification (G1 standardization)** *(NEW — inserted 2026-05-23)*
 
+> **STATUS (2026-05-24 close):** **CLOSED.** All 8 G2 buses migrated to G1 in one task each (Tasks 2-6) atop a one-time `InstrChannelNode` structural extension (Task 3); Task 7 swept the dead G2 infrastructure entirely (`BusPeakRefs` + `registerBusPeakAtomics` + `getEffectsBusPeakDbStereo` + `processBus` G2 fallback else-branch + per-bus `peakDecayDbPerBlock` field) + absorbed a mid-batch Mixer UX bundle (scrollbar relocation, full-page Master strip, dual-stub Bezier cable, `cableTelemetry` alpha/warning-color, multi-cable PopupMenu chooser, hot-pink send cable, `DBFSMeter` delta-time ballistics) + closed the idle-state "dying lightbulb" cable flicker (root cause: unconditional `mCableOverlay->repaint()` every vblank; fix: gate on per-frame peak-snapshot delta > 0.1 dB).  Task 8 close pass ran `/review-batch QA-Eg` (5 NEEDS-FIX + 7 NITs, all fixed in-batch per `feedback_closed_batch_carryforward_via_forks.md`) and `/perf-audit` (8 findings — 3 folded into Task 8: H2 `findStripByChannelId` unordered_map cache, M1 `onVBlank` scratch+swap vector reuse, H4 `EffectRack` peak-loop SIMD via `juce::FloatVectorOperations::findMinAndMax`; 3 routed forward as new dedicated batches in a perf-audit cluster: H1 = QA-InsertMaps (InsertNode std::map -> std::array flatten), H3 = QA-VoicePool (pre-allocated VibePlayer voice pool + voice stealing), M2 = QA-EngineApvts (dirty-flag pattern compliance for 4 engine processors); 2 minor findings — M3 absorbed by H1 / QA-InsertMaps, L1 deferred as low-priority).  **Five side findings routed at close** — **QA-AudioMeters** (per-row Builder audio meters G1 migration, same architectural smell; §9 thirty-first Forks; immediately after QA-Eg), **QA-DirtyFlag** (UndoManager-aware project dirty tracking, surfaced mid-Task-3 solo-button-net-zero observation; §9 thirty-second Forks; after QA-ProjectSave with Jeff's verbatim transaction-pointer spec carried into §5), **QA-InsertMaps** (`/perf-audit` H1; §9 thirty-third Forks; immediately after QA-AudioMeters), **QA-VoicePool** (`/perf-audit` H3; §9 thirty-fourth Forks; immediately after QA-InsertMaps, with Jeff's verbatim 4-section blueprint carried into §5), **QA-EngineApvts** (`/perf-audit` M2; §9 thirty-fifth Forks; immediately after QA-VoicePool, before QA-Ed).
+
 **Plan file:** `Plans & Specs/Batch Plans/squishy-scribbling-flurry.md`
 - Items: bus peak metering currently uses **TWO ad-hoc mechanisms** with no deliberate decision behind the split (architectural finding surfaced during QA-Ef's FX-bus meter fix):
   - **G1** (Layers / Bass / Drums / Master): the node owns its peak, published as a `VibeGraph` member atomic that `drainMeterAtomicsForUI` reads directly (node -> UI snapshot).
@@ -1157,6 +1159,93 @@ needed to find what you should pull up to review the work.
 - Effort: medium (~4-7 hours; per-bus publish-site migration ~2-3 hr, accessor wiring + `drainMeterAtomicsForUI` rewrite ~1-2 hr, verify ~1-2 hr).
 - **Bucket:** Cross-cutting Infrastructure, Mixer / Routing
 - Verify (own plan file will detail): on a stress-test arrangement with audio on every bus (Layers + Bass + Drums + Clips + Vox + Inst + Rusty + FX + Master), every bus meter reads correctly in both MT (production default) and 1-worker serial-diagnostic mode; FX-bus meter (the QA-Ef interim case) still reads correctly post-unification; no meter glitch / drop / lag vs the pre-batch MT baseline; G2 mirror state is fully gone from `PluginProcessor.h/.cpp` (grep clean).
+
+#### **QA-AudioMeters: Per-Row Builder Audio Meters G1 Migration** *(NEW — inserted 2026-05-24)*
+
+**Plan file:** `<silly-name>.md (when started)`
+- Items: per-row Builder audio meters (`PluginProcessor.h:645-654 + :620-622 + CompositeAudioInsertTask.cpp:113-115`) carry the SAME dual-mirror G2 architecture as the 8 buses QA-Eg just migrated.  Origin: surfaced during QA-Eg Task 1 pre-flight inventory as spec call S2; routed to a dedicated batch at QA-Eg close rather than folded in (would have inflated QA-Eg scope to `kMaxAudioRows` rows + the `CompositeAudioInsertTask` test surface).  See §9 thirty-first Forks entry.
+- Scope:
+  - Apply the same G1 pattern QA-Eg landed across the 8 buses: node-internal `peakDb / peakDbL / peakDbR` atomics exchange-stored into `VibeGraph` public-member atomics, drained directly via `drainMeterAtomicsForUI`'s G1 loop.
+  - Migrate the per-row Builder audio meters off the centralized `PluginProcessor` running-max mirror onto the appropriate audio-row node-owned atomics.  Touches `kMaxAudioRows` rows.
+  - Update `CompositeAudioInsertTask::run` (`Source/Engine/Tasks/CompositeAudioInsertTask.cpp:113-115`) to publish into node atomics directly instead of CAS-maxing into the mirror.
+  - Remove the per-row dual mirrors from `PluginProcessor.h` (`:645-654 + :620-622`).
+  - Sweep stale comments referencing the old mirror mechanism.
+- Risk: **low-medium** — meter / UI-state only; audio path arithmetic unaffected; same migration pattern as QA-Eg (well-established by 8 buses migrated one at a time across QA-Eg Tasks 2-6).
+- Dependencies: QA-Eg closed (the migration pattern + cleanup of the central mirror infrastructure landed there; this batch consumes the same pattern).
+- Sequencing: **immediately after QA-Eg, before QA-Ed** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 thirty-first Forks entry).  Slot rationale: same architectural origin as QA-Eg; earlier-better since `CompositeAudioInsertTask` may be touched by later batches and entrenching the smell raises future migration cost.
+- Effort: medium (~3-5 hours; per-row publish-site migration ~1-2 hr, `VibeGraph` member array + `drainMeterAtomicsForUI` G1-loop wiring ~1 hr, verify across `kMaxAudioRows` rows ~1-2 hr).
+- **Bucket:** Cross-cutting Infrastructure, Mixer / Routing, System Pages
+- Verify (own plan file will detail): on a stress-test arrangement with audio on every Builder row, every per-row meter reads correctly in both MT (production default) and 1-worker serial-diagnostic mode; no meter glitch / drop / lag vs the pre-batch MT baseline; per-row mirror state is fully gone from `PluginProcessor.h/.cpp` (grep clean); `CompositeAudioInsertTask` publishes directly into node atomics (no intermediate mirror).
+
+#### **QA-InsertMaps: Flatten InsertNode std::map to std::array (perf-audit H1)** *(NEW — inserted 2026-05-24)*
+
+**Plan file:** `<silly-name>.md (when started)`
+- Items: flatten the 8 `std::map<int, std::unique_ptr<InsertNode>>` tables that back the 8 `InsertKind`s (`Layer / Bass / Drum / Audio / Aux / Vox / Inst / Rusty`) into a single `std::array<InsertNode*, kMaxStripChannels>` indexed directly by ChannelId.  Origin: surfaced 2026-05-24 by `/perf-audit` at QA-Eg close as H1 (HIGH-PRIORITY); confirmed by source-trace.  Hot-path lookup tax — `VibeGraph::processInsert` (`Source/VibeGraph.cpp:2337`) + `pushScArrayToStrip` (`VibeGraph.cpp:2889`) do 4x `std::map::find()` per insert per audio block: the outer dispatcher path through `selectInsertMap` switch + red-black-tree walk for the `InsertNode`, then 3 more inside `pushScArrayToStrip` (`getInsertPreEQ` + `getInsertRack` + `getInsertEQ`).  On a busy session ~50 inserts at ~6 ms cadence = 30k+ map lookups/sec on the audio thread.  Mirrors `RenderGraphDispatcher::mTasksByChannel`'s existing flat-array-by-ChannelId pattern (the same architectural choice on the dispatcher side already).  Also absorbs the related M3 finding (UI-side `getInsertPeakDb` / `getInsertPeakDbStereo` `std::map::find` per vblank) — same flattening eliminates both lookups.  See §9 thirty-third Forks entry.
+- Scope (Jeff-locked Option 2, 2026-05-24):
+  - Flatten all 8 `InsertKind` `std::map<int, std::unique_ptr<InsertNode>>` member declarations into a single owning storage + a flat `std::array<InsertNode*, kMaxStripChannels>` lookup indexed directly by ChannelId.  Eliminates the red-black-tree entirely; lookups become single-pointer indirection.
+  - Migrate every InsertNode access site to the new accessor: `getInsertNode(channelId)` -> `mInsertsByChannel[channelId]`.  Touches `processInsert` + `pushScArrayToStrip` + `ensureInsertNode` + `selectInsertMap` (the switch becomes a no-op + dies) + the 8 map declarations in `VibeGraph.h`.
+  - Keep `kMaxStripChannels` sized to the existing `MixerChannelIds` allocation (0..999) -- the array is sparsely populated; `nullptr` slots are the "no insert at this id" signal that callers already null-check via the existing `if (auto* node = getInsertNode(...))` pattern.
+  - Sweep stale `std::map`-specific call sites (no `.find() / .end()` comparison left; no iteration over the map for "all inserts" -- replaced with iteration over a small `mLiveInsertChannels` companion list for the cases that need it).
+- Risk: **medium** -- audio-thread hot-path refactor; needs careful migration of every InsertNode access site.  No behavioral change to audio path arithmetic -- the std::map -> array swap is mechanical and the lookups it replaces are by-id-only.  Worst case: a migration site missed by the audit silently still does map lookups (would be caught by `grep` for remaining `mInserts[A-Z]*.find(` post-refactor) OR a null-check site missed (would manifest as crash on undeclared-channel access -- caught by Debug build).
+- Dependencies: QA-AudioMeters closed (sits ahead in the perf-audit cluster; QA-AudioMeters touches `CompositeAudioInsertTask` which calls into `VibeGraph` insert accessors -- running QA-InsertMaps after QA-AudioMeters means the meter-publish surface is settled before the lookup-path refactor; running it earlier would force a re-migration of any access sites QA-AudioMeters touches).
+- Sequencing: **immediately after QA-AudioMeters, before QA-VoicePool** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 thirty-third Forks entry).  Slot rationale: same architectural origin as QA-AudioMeters (audio-thread hot-path optimization spawned by the QA-Eg close cluster); earlier-better since later batches may touch `processInsert` call sites and entrenching the std::map indirection raises future migration cost.
+- Effort: medium (~5-8 hours; member-declaration flattening + accessor implementation ~1-2 hr, per-call-site migration sweep ~2-3 hr, `selectInsertMap` / `ensureInsertNode` rewrite ~1 hr, verify across the 8 InsertKinds ~1-2 hr).
+- Estimated CPU win: ~1-3% on a busy session (per `/perf-audit` H1 estimate; red-black-tree walk replaced with single pointer-load at ~30k+ lookups/sec).
+- **Bucket:** Cross-cutting Infrastructure, Mixer / Routing
+- Verify (own plan file will detail): on a busy stress-test session (~50 inserts spread across the 8 InsertKinds), every insert is reachable + audible + correctly metered in both MT (production default) and 1-worker serial-diagnostic mode; no behavioral change vs pre-batch baseline; `grep` confirms zero remaining `mInsertsLayer.find(` / `mInsertsBass.find(` / ... call sites (post-flatten the std::maps are gone); CPU-load measurement on the busy-session rig shows the expected ~1-3% drop on the audio thread.
+
+#### **QA-VoicePool: Pre-allocated VibePlayer Voice Pool / Object Pool (perf-audit H3)** *(NEW — inserted 2026-05-24)*
+
+**Plan file:** `<silly-name>.md (when started)`
+- Items: eliminate audio-thread heap allocation on every note-on by moving `VibeVoice::startNote` (`Source/VibePlayer/VibePlayerDSP.cpp:581-583 + :607`) off the `new MemoryAudioSource` + `new ResamplingAudioSource` per-note-on pattern onto a pre-allocated fixed-size voice pool with lock-free atomic occupancy flags + voice stealing.  Also remove the `std::vector<int> candidates` heap allocation in `findRegion` (`VibePlayerDSP.cpp:573`).  Origin: surfaced 2026-05-24 by `/perf-audit` at QA-Eg close as H3 (HIGH-PRIORITY); confirmed by source-trace.  Audio-thread allocation fires on every drum hit / key press / audition.  See §9 thirty-fourth Forks entry.
+- Scope (Jeff's verbatim blueprint, locked 2026-05-24):
+
+  > **1. Pre-allocate in prepareToPlay**
+  > Move all object creation to the UI/Main thread before audio processing begins.
+  > Your synth/sampler class (VibePlayerDSP) will own a fixed-size array of voices: `std::array<std::unique_ptr<VibeVoice>, 16> voicePool;`
+  > Inside `prepareToPlay()`, you initialize all 16 voices.
+  >
+  > **2. Fat Voices (Internal Reuse)**
+  > Right now, your code calls `new MemoryAudioSource` and `new ResamplingAudioSource` every time a note plays. We need to make the voice "fat" -- meaning it owns these objects permanently.
+  > Each VibeVoice creates its resampler and memory source once in its constructor.
+  > When a new drum hit or sample needs to play, you don't destroy the resampler. You simply point the existing MemoryAudioSource to the new sample buffer, reset its read pointer to 0, and clear the ADSR envelope.
+  >
+  > **3. The Lock-Free State (std::atomic)**
+  > Because the audio thread cannot wait for locks (like std::mutex), you manage the pool using atomic booleans.
+  > Every voice gets a flag: `std::atomic<bool> isActive{false};`
+  > To start a note: The audio thread loops through the array looking for a voice where `isActive.load() == false`. Once found, it instantly flips it to true, feeds it the MIDI note, and breaks the loop.
+  > To end a note: When the ADSR envelope finishes its release phase and hits absolute zero, the voice itself sets its flag back to `isActive.store(false)`.
+  >
+  > **4. Voice Stealing (The Fallback)**
+  > What happens if the user plays a massive chord and all 16 voices are currently true? If you do nothing, the 17th note is dropped.
+  > Pro DAWs implement Voice Stealing. If no free voice is found, the engine loops through the array to find the "best" voice to steal.
+  > Usually, this is the oldest voice currently in its "Release" phase (the quietest decaying tail). You instantly fade it out over 10-20 samples (to prevent a click) and hijack it for the new note.
+
+- Risk: **medium-high** -- touches `VibeVoice` lifecycle + reverse/forward source switching + ADSR-release-finish callback for self-deactivation + voice-stealing fade-out.  `ResamplingAudioSource` may need an SR-aware reset path (point-to-new-buffer + read-pointer reset + ratio recompute).  Worst case: a voice mis-steals an active note (caught immediately by ear) OR the self-deactivation callback fires before audible tail decays (caught immediately by ear -- premature voice cutoff).  No audio-thread allocation surface left.
+- Dependencies: QA-InsertMaps closed (sits ahead in the perf-audit cluster; running this batch after the map-flatten lookup refactor means the per-voice access pattern from upstream is settled before voice-lifecycle changes).
+- Sequencing: **immediately after QA-InsertMaps, before QA-EngineApvts** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 thirty-fourth Forks entry).  Slot rationale: same architectural origin as QA-InsertMaps + QA-AudioMeters (perf-audit-cluster spawned at QA-Eg close); QA-VoicePool touches VibePlayer voice lifecycle (independent of InsertMaps as a code surface, but logically clusters with the perf work and the same `/perf-audit` H-priority severity).
+- Effort: large (~8-12 hours; pool member declaration + `prepareToPlay` allocation ~1-2 hr, fat-voice internal reuse refactor ~2-3 hr, atomic occupancy flag plumbing ~1-2 hr, voice-stealing implementation + fade-out ~2-3 hr, ADSR-release self-deactivation callback ~1 hr, `findRegion` candidates heap-alloc removal ~30 min, verify across drum / key / audition surfaces in both MT and 1-worker mode ~1-2 hr).
+- Estimated CPU win: per-note-on heap-allocation cost eliminated (variable benefit -- high on busy chord / drum stress; low on sparse single-note playback).  Bigger benefit: removes a class of audio-thread allocation that's been a long-standing concern.
+- **Bucket:** Players, Cross-cutting Infrastructure
+- Verify (own plan file will detail): on a stress-test session -- playing 16+ simultaneous notes through `VibePlayer` (chord stack + drum roll + audition gestures), every note triggers + sustains + releases cleanly with zero clicks at voice steal; ADSR release phase ends cleanly with no audible tail truncation; the 17th note correctly steals the oldest-release voice (verified by listening for the 10-20 sample fade-out); `findRegion` no longer heap-allocates (`grep` confirms zero `std::vector<int> candidates` calls remaining); both MT (production default) and 1-worker serial-diagnostic mode show identical voice behavior; no behavioral regression on sparse-note workflows.
+
+#### **QA-EngineApvts: Engine processors APVTS dirty-flag pattern compliance (perf-audit M2)** *(NEW — inserted 2026-05-24)*
+
+**Plan file:** `<silly-name>.md (when started)`
+- Items: bring the 4 engine processors (`HarmlessProcessor / VibePlayerProcessor / BaySickSynthProcessor / BaySickBassProcessor`) into compliance with the documented BaySickDAW APVTS dirty-flag pattern (`feedback_apvts_dirty_flag_pattern.md`).  Origin: surfaced 2026-05-24 by `/perf-audit` at QA-Eg close as M2 (MEDIUM-PRIORITY); confirmed by source-trace.  The 4 engine processors call `updateFromApvts` unconditionally per block, each reading ~30-50 parameters via `apvts.getRawParameterValue(id)->load()` regardless of whether anything changed since the last block.  The current pattern guards SETTER work with value-change comparisons but doesn't avoid the LOAD work.  Per the memory rule, the documented pattern pairs a process-side `isIdentity()` short-circuit with a sync-side `ValueTree::Listener`-driven dirty flag.  Pattern is wired in `PluginProcessor` (`Source/PluginProcessor.cpp:178`) but missing from the 4 engine processors.  See §9 thirty-fifth Forks entry.
+- Scope (Jeff-locked 2026-05-24):
+  - Add `std::atomic<bool> mApvtsDirty { true };` member to each of: `HarmlessProcessor`, `VibePlayerProcessor`, `BaySickSynthProcessor`, `BaySickBassProcessor`.
+  - Wire `apvts.state.addListener(this)` + `valueTreePropertyChanged` override that sets `mApvtsDirty.store(true, std::memory_order_release)`.
+  - At `processBlock` top: `if (mApvtsDirty.exchange(false, std::memory_order_acquire)) updateFromApvts();`
+  - Pattern lifted verbatim from `PluginProcessor.cpp:178` -- reference implementation is already in-tree and proven.
+  - Initial dirty=true so the first block syncs all params correctly.
+- Risk: **low** -- well-established pattern; 4 processors to apply it to; reference impl already in PluginProcessor.  Worst case: a `valueTreePropertyChanged` callback edge case causes a missed dirty flag (silent -- params don't update; caught immediately on the first verify gesture per processor).  No audio path arithmetic change; no thread-safety concern (atomic exchange is the same pattern used elsewhere).
+- Dependencies: QA-VoicePool closed (sits ahead in the perf-audit cluster; QA-VoicePool touches `VibePlayerDSP` voice lifecycle which interacts with `VibePlayerProcessor::updateFromApvts` -- running QA-EngineApvts after means the voice-pool refactor is settled before the dirty-flag listener wires up).
+- Sequencing: **immediately after QA-VoicePool, before QA-Ed** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 thirty-fifth Forks entry).  Slot rationale: same architectural origin as QA-InsertMaps + QA-VoicePool + QA-AudioMeters (perf-audit-cluster spawned at QA-Eg close); ordered by impact (M2 is the lowest CPU win in the cluster -- finishes the cluster before resuming bug-fix sequencing at QA-Ed).
+- Effort: medium (~4-6 hours; ~1-1.5 hr per processor including verify pass -- mechanical pattern apply x4).
+- Estimated CPU win: ~1-2% cumulative across the 4 engines on busy sessions (per `/perf-audit` M2 estimate; the per-block LOAD-everything path becomes a near-zero-cost atomic exchange when state is unchanged).
+- **Bucket:** Cross-cutting Infrastructure, Players
+- Verify (own plan file will detail): per engine -- change every APVTS-bound control (knob, button, combo, slider) + verify the new value takes effect on the next block (the dirty flag fired); leave every APVTS-bound control alone + verify CPU drops on idle (the per-block `updateFromApvts` path is skipped); both MT (production default) and 1-worker serial-diagnostic mode show identical behavior; `grep` confirms 4 new `mApvtsDirty` members + 4 new `valueTreePropertyChanged` overrides + 4 new `addListener(this)` call sites + 4 new `exchange(false, ...)` call sites at processBlock top.
 
 #### **QA-F: BaySickAlign Build-Out + Vox DSP Disconnect (Cluster 1)**
 - Items: DSP-02 (Vox FX bypassed), DSP-03 (Vox pitch correction does
@@ -1442,6 +1531,61 @@ needed to find what you should pull up to review the work.
 - **Bucket:** System Pages, Cross-cutting Infrastructure
 - Verify (own plan file will detail): saving a template with full project state (L/B/D + vox/inst/clip/rusty/aux/samples) round-trips through Load Template intact; loading a template into a project with other-type tabs leaves those tabs untouched (non-destructive teardown); user templates with inline `<Drum>` children load correctly (drum inline-load fix); the New-from-Template submenu shows Default / Premade / My Templates in the correct folders; dirty-check flow prompts on dirty project and loads directly on clean; sample reference-vs-copy behavior matches the source-aware hybrid spec; Pack project produces a portable zip with all referenced samples resolved correctly on the receiving end; existing per-project-copy samples migrate cleanly (no orphaned files, no broken references); Save Template As dialog text accurately describes the expanded scope.
 
+#### **QA-DirtyFlag: UndoManager-Aware Project Dirty Tracking** *(NEW — inserted 2026-05-24)*
+
+**Plan file:** `<silly-name>.md (when started)`
+- Items: refactor BaySickDAW's project dirty state tracking from the current "anything touched since load" model to a transaction-pointer system mimicking major DAWs.  Origin: surfaced 2026-05-23 mid-QA-Eg-Task-3 testing — clicking a solo button and unclicking it marks the project dirty even though net state matches the saved file.  Verified by code-read: `ApvtsDirtyTracker` (`Source/Standalone/ApvtsDirtyTracker.h:39-42`) is a `ValueTree::Listener` that fires `onAny` on every property write regardless of old-vs-new equality; `ProjectManager::markDirty` (`Source/ProjectManager.cpp:98-102`) sets `mDirty=true` unconditionally.  The flag tracks "anything touched since load" — NOT "state differs from file."  See §9 thirty-second Forks entry.
+- Scope (Jeff's verbatim spec, locked 2026-05-23):
+
+  > We are refactoring BaySickDAW's dirty state tracking to mimic major DAWs.
+  > Currently, ProjectManager::mDirty is a simple boolean triggered by an
+  > APVTS ValueTree::Listener. We need to replace this with an Undo-aware
+  > transaction pointer system so that if the user hits Ctrl+Z to return to
+  > the exact state of the last save, the dirty flag clears automatically.
+  >
+  > **Strict UndoManager Plumbing:**
+  > Audit the entire codebase for state mutations and enforce strict
+  > UndoManager registration. Ensure the global UndoManager is correctly
+  > passed into the AudioProcessorValueTreeState (APVTS) constructor. Audit
+  > all direct ValueTree writes. Any instance of setProperty(id, val,
+  > nullptr) must be rewritten to pass the global UndoManager*. Ensure all
+  > custom UI components either use JUCE's ParameterAttachments (which handle
+  > undo grouping automatically) or explicitly call
+  > undoManager->beginNewTransaction() before modifying parameters.
+  >
+  > **Implement the Transaction Pointer:**
+  > Since JUCE's UndoManager does not expose a native state ID, implement a
+  > TransactionTracker to act as the source of truth for the project's
+  > modification state. Create an integer tracking system: `int
+  > currentUndoStep = 0;` and `int savedUndoStep = 0;`. Wrap the DAW's global
+  > Undo and Redo commands. Triggering an Undo decrements currentUndoStep,
+  > and triggering a Redo increments it. Whenever a new edit is registered,
+  > increment currentUndoStep. **CRITICAL EDGE CASE:** If a new edit is made
+  > while `currentUndoStep < savedUndoStep`, the user has branched the undo
+  > history and destroyed the previously saved future. You must set
+  > `savedUndoStep = -1` (or an unreachable constant) so the project
+  > correctly remains dirty indefinitely until the next save.
+  >
+  > **Dynamic Dirty State Evaluation:**
+  > Remove the static `mDirty = true` logic inside ProjectManager and
+  > ApvtsDirtyTracker. The project is now considered dirty only if
+  > `currentUndoStep != savedUndoStep`. When ProjectManager::save()
+  > successfully writes to disk, sync the pointer: `savedUndoStep =
+  > currentUndoStep;`. Update the UI header to observe this dynamic
+  > evaluation so the dirty asterisk instantly vanishes when Ctrl+Z lands
+  > exactly on savedUndoStep.
+  >
+  > **Reference:** Vars, Values and ValueTrees: State Management in JUCE
+  > (ADC23) — architectural overview of keeping JUCE application state
+  > synchronized across the UI, UndoManager, and project saves.
+
+- Risk: **medium-high** — every `ValueTree::setProperty` call site touched (codebase-wide audit); every custom UI component that mutates parameters reviewed for `ParameterAttachment` use or explicit `beginNewTransaction()` call; the `ApvtsDirtyTracker` listener model is removed entirely.  Worst case: a state-mutation site missed by the audit silently fails to register undo + the dirty flag wrongly clears on Ctrl+Z (would be caught by an explicit verify of every page's state-mutation surface).
+- Dependencies: should land **AFTER every preceding Phase 1-5 batch that adds state-mutation sites** — codebase-wide audit naturally covers QA-ProjectSave's new save/load + every preceding batch's UI/audio state-mutation surface; running this batch earlier would force a re-audit every time a new state-mutation site landed.
+- Sequencing: **at the end of the Phase 1-5 chain, after QA-ProjectSave** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 thirty-second Forks entry).  Slot rationale per Jeff: orthogonal to QA-ProjectSave (DirtyFlag is a control-flow change — UndoManager-plumbing audit; ProjectSave is a data-layer change — XML format + sample retention); DirtyFlag-after-ProjectSave means its codebase-wide audit naturally covers ProjectSave's new save/load code (the `savedUndoStep = currentUndoStep` sync point lives at `ProjectManager::save()` which ProjectSave touches).
+- Effort: large (~10-16 hours; codebase audit of `setProperty(id, val, nullptr)` call sites ~3-5 hr, APVTS constructor verify + custom-UI-component review ~2-3 hr, `TransactionTracker` implementation + Undo/Redo command wrappers ~2-3 hr, UI header re-wire to observe dynamic evaluation ~1-2 hr, verify ~2-3 hr across every page's state-mutation surface).
+- **Bucket:** Cross-cutting Infrastructure, System Pages, UI / L&F / Theming
+- Verify (own plan file will detail): clicking a state-mutation control + reverting to original net state leaves the project clean (no dirty asterisk); Ctrl+Z to the exact state of the last save clears the dirty asterisk; a new edit after Ctrl+Z'ing past `savedUndoStep` correctly destroys the saved future (`savedUndoStep = -1`); every page's state mutations participate in undo correctly; every `setProperty(id, val, nullptr)` call site rewritten or explicitly justified; no `ApvtsDirtyTracker` `onAny` regressions (the listener is gone); UI header observes `currentUndoStep != savedUndoStep` dynamically; saves correctly sync the pointer.
+
 #### **QA-RC: Pre-Release Test Plan + RC Build** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** TBD.
 - Items: LDT-414 (Q&A clean build + 2nd clean build + testing plan + test to failure) — original Phase 5G work that was never executed; expanded with QA-Inventory walk findings (LDT-096 menu audit, LDT-097 keybinds audit, LDT-296 Global Tooltip System review, FSW-303 global FX bypass verify).
@@ -1687,9 +1831,9 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-EngineApvts********************** → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
-   → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave*****************
+   → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-DirtyFlag*******************
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -1932,6 +2076,111 @@ migration questions.  Slot rationale (Jeff): "must come AFTER anything
 that could affect saves or add things that should be saved, so we
 capture everything" — every preceding batch that adds saveable state
 has landed by this point.  See §9 thirtieth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-AudioMeters** inserted 2026-05-24 at
+QA-Eg close.  Slotted **immediately after QA-Eg, before QA-Ed** (Jeff's
+confirmed slot per `feedback_slot_placement_is_spec_call.md`).  Scope:
+per-row Builder audio meters (`PluginProcessor.h:645-654 + :620-622 +
+CompositeAudioInsertTask.cpp:113-115`) carry the SAME dual-mirror G2
+architecture as the 8 buses QA-Eg just migrated; apply the same G1
+pattern QA-Eg landed — node-internal `peakDb / peakDbL / peakDbR`
+exchange-store + `VibeGraph` public-member atomics +
+`drainMeterAtomicsForUI` G1-loop drain; remove the per-row dual
+mirrors from `PluginProcessor.h`.  Origin: surfaced during QA-Eg Task 1
+pre-flight inventory as spec call S2; routed to a dedicated batch at
+QA-Eg close rather than folded in (would have inflated QA-Eg scope to
+`kMaxAudioRows` rows + the `CompositeAudioInsertTask` test surface).
+Slot rationale: same architectural origin as QA-Eg; earlier-better
+since `CompositeAudioInsertTask` may be touched by later batches and
+entrenching the smell raises future migration cost.  Risk low-medium,
+effort ~3-5 hours.  See §9 thirty-first Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-InsertMaps** inserted 2026-05-24 at
+QA-Eg close.  Slotted **immediately after QA-AudioMeters, before
+QA-VoicePool** (Jeff's confirmed slot per
+`feedback_slot_placement_is_spec_call.md`).  Scope: flatten the 8
+`std::map<int, std::unique_ptr<InsertNode>>` tables that back the 8
+`InsertKind`s (`Layer / Bass / Drum / Audio / Aux / Vox / Inst /
+Rusty`) into a single `std::array<InsertNode*, kMaxStripChannels>`
+indexed directly by ChannelId; eliminates the red-black-tree entirely;
+lookups become single-pointer indirection; mirrors
+`RenderGraphDispatcher::mTasksByChannel`'s existing flat-array pattern.
+Origin: `/perf-audit` H1 at QA-Eg close (`Source/VibeGraph.cpp:2337 +
+:2889` — 4x `std::map::find()` per insert per block; ~50 inserts on a
+busy session at ~6 ms cadence = 30k+ map lookups/sec on the audio
+thread).  Slot rationale: same architectural origin as QA-AudioMeters
+(audio-thread hot-path optimization); earlier-better since later
+batches may touch `processInsert` call sites.  Risk medium, effort
+~5-8 hours, estimated win ~1-3% on busy sessions.  See §9 thirty-third
+Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-VoicePool** inserted
+2026-05-24 at QA-Eg close.  Slotted **immediately after QA-InsertMaps,
+before QA-EngineApvts** (Jeff's confirmed slot per
+`feedback_slot_placement_is_spec_call.md`).  Scope: eliminate
+audio-thread heap allocation on every note-on in `VibePlayer` — move
+`VibeVoice::startNote`'s `new MemoryAudioSource` + `new
+ResamplingAudioSource` per-note-on pattern onto a pre-allocated
+fixed-size `std::array<std::unique_ptr<VibeVoice>, 16> voicePool` with
+fat voices owning resampler + memory source permanently, lock-free
+`std::atomic<bool> isActive{false}` occupancy flags, and voice-stealing
+fallback (oldest-release voice with 10-20 sample fade-out).  Also
+remove `std::vector<int> candidates` heap allocation in `findRegion`.
+Origin: `/perf-audit` H3 at QA-Eg close
+(`Source/VibePlayer/VibePlayerDSP.cpp:581-583 + :607 + :573`).
+Jeff-locked verbatim 4-section blueprint carried into the §5 entry +
+§9 thirty-fourth Forks entry.  Slot rationale: same perf-audit-cluster
+origin; touches VibePlayer voice lifecycle (independent of InsertMaps
+as a code surface, but logically clusters).  Risk medium-high, effort
+large (~8-12 hours).  See §9 thirty-fourth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-EngineApvts** inserted
+2026-05-24 at QA-Eg close.  Slotted **immediately after QA-VoicePool,
+before QA-Ed** (Jeff's confirmed slot per
+`feedback_slot_placement_is_spec_call.md`).  Scope: bring the 4 engine
+processors (`HarmlessProcessor / VibePlayerProcessor /
+BaySickSynthProcessor / BaySickBassProcessor`) into compliance with
+the documented BaySickDAW APVTS dirty-flag pattern
+(`feedback_apvts_dirty_flag_pattern.md`) — add `std::atomic<bool>
+mApvtsDirty { true };` member to each, wire
+`apvts.state.addListener(this)` + `valueTreePropertyChanged` override
+setting `mApvtsDirty.store(true, std::memory_order_release)`, gate
+`updateFromApvts()` at `processBlock` top via `if
+(mApvtsDirty.exchange(false, std::memory_order_acquire))`.  Pattern
+lifted verbatim from `PluginProcessor.cpp:178`.  Origin: `/perf-audit`
+M2 at QA-Eg close (the 4 engine processors call `updateFromApvts`
+unconditionally per block, each reading ~30-50 parameters; the
+current pattern guards SETTER work with value-change comparisons but
+doesn't avoid the LOAD work).  Slot rationale: finishes the
+perf-audit cluster before resuming bug-fix sequencing at QA-Ed; M2
+is the lowest CPU win in the cluster (~1-2% cumulative across the 4
+engines on busy sessions).  Risk low, effort ~4-6 hours.  See §9
+thirty-fifth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-DirtyFlag** inserted 2026-05-24
+at QA-Eg close.  Slotted **at the end of the Phase 1-5 chain, after
+QA-ProjectSave** (Jeff's confirmed slot per
+`feedback_slot_placement_is_spec_call.md`).  Scope: refactor BaySickDAW's
+project dirty state tracking from the current "anything touched since
+load" model (`ApvtsDirtyTracker` `ValueTree::Listener` firing `onAny`
+on every property write + `ProjectManager::markDirty` setting
+`mDirty=true` unconditionally) to a transaction-pointer system
+mimicking major DAWs: strict UndoManager plumbing (every
+`setProperty(id, val, nullptr)` rewritten to pass the global
+UndoManager*; every custom UI component uses `ParameterAttachment` or
+explicit `beginNewTransaction()`) + `TransactionTracker` with
+`currentUndoStep` / `savedUndoStep` integer pointers + dynamic dirty
+evaluation (`currentUndoStep != savedUndoStep`); critical edge case
+covered (new edit while `currentUndoStep < savedUndoStep` sets
+`savedUndoStep = -1` so the project remains dirty until the next save).
+Origin: surfaced 2026-05-23 mid-QA-Eg-Task-3 testing (clicking a solo
+button and unclicking it wrongly marks the project dirty).  Slot
+rationale (Jeff): orthogonal to QA-ProjectSave (DirtyFlag is a
+control-flow change — UndoManager-plumbing audit; ProjectSave is a
+data-layer change — XML format + sample retention); DirtyFlag-after-
+ProjectSave means its codebase-wide audit naturally covers ProjectSave's
+new save/load code.  Risk medium-high, effort large (~10-16 hours;
+codebase-wide audit).  See §9 thirty-second Forks entry.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -4059,3 +4308,235 @@ Plus the original-#7 menu/restructure work (replace items 102 + 109 with a New-f
 - **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (per-batch plan file — drafted when QA-ProjectSave opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (running notes seed — created when QA-ProjectSave opens).
 
 **Verification:** n/a — routing / sequencing entry, no source change.  QA-ProjectSave's own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-ProjectSave opens): saving a template with full project state round-trips through Load Template intact; loading a template into a project with other-type tabs leaves those tabs untouched (non-destructive teardown); user templates with inline `<Drum>` children load correctly; New-from-Template submenu shows Default / Premade / My Templates in the correct folders; dirty-check flow prompts on dirty + loads directly on clean; sample reference-vs-copy behavior matches the source-aware hybrid spec; Pack project produces a portable zip with all referenced samples resolved correctly on the receiving end; existing per-project-copy samples migrate cleanly.
+
+### 2026-05-24 — QA-AudioMeters inserted: per-row Builder audio meters G1 migration — new dedicated batch at QA-Eg close
+
+**Trigger:** QA-Eg Task 1 pre-flight inventory (2026-05-23).  Read-only source-trace of the QA-Eg deletion + addition map turned up an adjacent architectural smell: the per-row Builder audio meters (`PluginProcessor.h:645-654 + :620-622 + CompositeAudioInsertTask.cpp:113-115`) carry the SAME dual-mirror G2 architecture as the 8 buses QA-Eg was about to migrate.  Surfaced as spec call S2 at QA-Eg open.
+
+**Diagnosis:** the per-row Builder audio meters use the same centralized `PluginProcessor` running-max mirror pattern as the now-deprecated G2 buses — `CompositeAudioInsertTask::run` CAS-maxes into per-row mirror state in `PluginProcessor.h:645-654`; the drain promotes mirror -> snapshot via the per-row Group-2 promotion lines in `drainMeterAtomicsForUI` (`:620-622`).  Same lock-free protocol; same dead-under-MT failure mode as the FX bus had been silently exhibiting before QA-Ef's interim fix; same root architectural concern that drove the G1 standardization decision in §9 twenty-eighth Forks (the centralized mirror is a VST/AU plugin-segregation workaround unnecessary for a standalone that owns the whole graph).  The fix is the same as QA-Eg: lift the publish-site into the audio-row node, expose `VibeGraph` public-member atomics, drain via the G1 loop in `drainMeterAtomicsForUI`.
+
+**Decision (Jeff, 2026-05-23 + slot confirmed 2026-05-24):** **NEW dedicated batch QA-AudioMeters** — apply the same G1 pattern QA-Eg landed.  Folding into QA-Eg would have inflated scope to `kMaxAudioRows` rows + cross-tested the `CompositeAudioInsertTask` surface (the DSP-12 surface) inside an already 9-task batch — would have re-churned the QA-Eg verify pass and obscured the per-bus rollback boundaries Jeff explicitly wanted (S3).  Slot SURFACED to Jeff per `feedback_slot_placement_is_spec_call.md`.
+
+**Sequencing (Jeff's confirmed slot, 2026-05-24):** **immediately after QA-Eg, before QA-Ed.**  Slot rationale: same architectural origin as QA-Eg (the G1/G2 split surfaced during QA-Ef's FX-bus meter fix + carried through QA-Eg's 8-bus migration); earlier-better since `CompositeAudioInsertTask` may be touched by later batches (QA-Ed transport refactor, QA-Ec Resample/Stretch build-out, QA-Fb recording lifecycle restructure) and entrenching the smell raises future migration cost.
+
+**Scope (Jeff-locked 2026-05-24 — full per-batch plan file deferred until QA-AudioMeters opens):**
+- Apply the same G1 pattern QA-Eg landed across the 8 buses: node-internal `peakDb / peakDbL / peakDbR` atomics exchange-stored into `VibeGraph` public-member atomics, drained directly via `drainMeterAtomicsForUI`'s G1 loop.
+- Migrate the per-row Builder audio meters off the centralized `PluginProcessor` running-max mirror onto audio-row node-owned atomics.  Touches `kMaxAudioRows` rows.
+- Update `CompositeAudioInsertTask::run` (`Source/Engine/Tasks/CompositeAudioInsertTask.cpp:113-115`) to publish into node atomics directly instead of CAS-maxing into the mirror.
+- Remove the per-row dual mirrors from `PluginProcessor.h` (`:645-654 + :620-622`).
+- Sweep stale comments referencing the old mirror mechanism.
+
+**Risk:** **low-medium** — meter / UI-state only; audio path arithmetic unaffected; same migration pattern as QA-Eg (well-established by 8 buses migrated one at a time across QA-Eg Tasks 2-6).
+
+**Dependencies:** QA-Eg closed (the migration pattern + cleanup of the central mirror infrastructure landed there; this batch consumes the same pattern).
+
+**Effort:** medium (~3-5 hours).
+
+**Options considered:** (a) fold into QA-Eg — rejected (Jeff's S2 decision at QA-Eg open; would have inflated scope to `kMaxAudioRows` rows + cross-tested the `CompositeAudioInsertTask` / DSP-12 surface inside the bus-migration batch and re-churned the verify pass; the per-bus rollback boundaries QA-Eg locked at S3 would have been lost); (b) defer as low-priority (could ride along with another batch that touches `CompositeAudioInsertTask`) — rejected (low-priority status doesn't match the equivalent severity of the QA-Ef FX-bus-dead-under-MT root cause; the per-row meters have been silently mis-metered the same way for the same reason since MT became the production default); (c) **dedicated batch immediately after QA-Eg — accepted**.
+
+**Carry-forward contradictions:** none architectural.  The Carry-Forward §1 implicit documentation of the G2 mirror pattern (via the `PluginProcessor.h` per-row mirror fields) is the same in-tree state as the QA-Eg buses had pre-migration; this batch finishes the cleanup that QA-Eg started.
+
+**Inline back-refs:**
+- §5 — new QA-AudioMeters entry INSERTED between QA-Eg and QA-Ed (cross-refs this entry).
+- §6 — arrow updated to `... → QA-Eg*************** → QA-AudioMeters****************** → QA-Ed************...`; new 18-asterisk QA-AudioMeters footnote added (cross-refs this entry).
+- §9 this entry (thirty-first Forks entry).
+- QA-Eg Task 1 S2 spec call resolution — recorded in `Plans & Specs/Running Notes/squishy-scribbling-flurry.md`.
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-AudioMeters entry INSERTED; §6 arrow updated; §6 QA-AudioMeters footnote INSERTED; §9 this entry.
+- `Plans & Specs/Running Notes/squishy-scribbling-flurry.md` — already captured this routing (the Task 1 S2 spec call + the per-row architecture-smell finding).
+- `Plans & Specs/Implemented Work Log.md` — QA-Eg batch-close entry references this routing in its "What was done about each finding" table.
+- **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (per-batch plan file — drafted when QA-AudioMeters opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (running notes seed — created when QA-AudioMeters opens).
+
+**Verification:** n/a — routing / sequencing entry, no source change.  QA-AudioMeters' own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-AudioMeters opens): on a stress-test arrangement with audio on every Builder row, every per-row meter reads correctly in both MT (production default) and 1-worker serial-diagnostic mode; no meter glitch / drop / lag vs the pre-batch MT baseline; per-row mirror state is fully gone from `PluginProcessor.h/.cpp` (grep clean); `CompositeAudioInsertTask` publishes directly into node atomics (no intermediate mirror).
+
+### 2026-05-24 — QA-DirtyFlag inserted: UndoManager-aware project dirty tracking — new dedicated batch at QA-Eg close
+
+**Trigger:** QA-Eg Task 3 verify pass (2026-05-23).  During AudioClips bus migration owner-verification on the 4-scenario rig, Jeff noticed that clicking a solo button and unclicking it (net zero state change vs the saved file) was marking the project dirty.  Code-read traced the root cause to the project dirty subsystem itself, not anything QA-Eg touched.
+
+**Diagnosis:** the project dirty flag tracks "anything touched since load" — NOT "state differs from file."  Two interlocking sites:
+1. **`ApvtsDirtyTracker` (`Source/Standalone/ApvtsDirtyTracker.h:39-42`)** — a `ValueTree::Listener` that fires `onAny` on every property write regardless of old-vs-new equality.  No before-vs-after comparison.  Any APVTS-bound control flipping any property at all sets the flag.
+2. **`ProjectManager::markDirty` (`Source/ProjectManager.cpp:98-102`)** — sets `mDirty = true` unconditionally.  No reference to a saved-state baseline; the flag is a one-way trapdoor.
+
+Net effect: every state-mutation site permanently marks the project dirty even when the net change is zero.  No Ctrl+Z-aware clearing; no save-baseline comparison.  Distinct from a "value changed?" guard at the listener — Jeff's spec calls for the full transaction-pointer architecture that major DAWs use (the integer-pointer pattern from the ADC23 "Vars, Values and ValueTrees" talk).
+
+**Decision (Jeff, 2026-05-23 + slot confirmed 2026-05-24):** **NEW dedicated batch QA-DirtyFlag** — refactor BaySickDAW's project dirty state tracking from the current `ApvtsDirtyTracker`-listener-fires-`onAny` + `mDirty=true`-unconditional model to a transaction-pointer system: strict UndoManager plumbing (every `setProperty(id, val, nullptr)` rewritten to pass the global UndoManager*; every custom UI component uses `ParameterAttachment` or explicit `beginNewTransaction()`) + `TransactionTracker` with `currentUndoStep` / `savedUndoStep` integer pointers + dynamic dirty evaluation (`currentUndoStep != savedUndoStep`); critical edge case covered (new edit while `currentUndoStep < savedUndoStep` sets `savedUndoStep = -1` so the project remains dirty until the next save).  Slot SURFACED to Jeff per `feedback_slot_placement_is_spec_call.md`.  Full verbatim spec from Jeff carried into the §5 entry (the running-notes capture at `Plans & Specs/Running Notes/squishy-scribbling-flurry.md` lines 329-369 is the source of truth).
+
+**Sequencing (Jeff's confirmed slot, 2026-05-24):** **at the end of the Phase 1-5 chain, after QA-ProjectSave.**  Slot rationale per Jeff: orthogonal to QA-ProjectSave (DirtyFlag is a control-flow change — UndoManager-plumbing audit; ProjectSave is a data-layer change — XML format + sample retention); DirtyFlag-after-ProjectSave means its codebase-wide audit naturally covers ProjectSave's new save/load code (the `savedUndoStep = currentUndoStep` sync point lives at `ProjectManager::save()` which ProjectSave touches; running DirtyFlag earlier would force a re-audit once ProjectSave landed new save/load surface).
+
+**Scope (Jeff-locked 2026-05-23, verbatim spec carried into §5 entry — full per-batch plan file deferred until QA-DirtyFlag opens):**
+- **Strict UndoManager Plumbing** — audit the entire codebase for state mutations; ensure the global UndoManager is correctly passed into the APVTS constructor; audit all direct ValueTree writes; every `setProperty(id, val, nullptr)` rewritten to pass the global UndoManager*; every custom UI component uses JUCE's `ParameterAttachment` (which handles undo grouping automatically) or explicitly calls `undoManager->beginNewTransaction()` before modifying parameters.
+- **TransactionTracker** — implement integer tracking system: `int currentUndoStep = 0;` + `int savedUndoStep = 0;`.  Wrap the DAW's global Undo and Redo commands.  Undo decrements `currentUndoStep`, Redo increments it.  Every new edit registered increments `currentUndoStep`.  **CRITICAL EDGE CASE:** if a new edit is made while `currentUndoStep < savedUndoStep`, the user has branched the undo history and destroyed the previously saved future — set `savedUndoStep = -1` (or an unreachable constant) so the project remains dirty indefinitely until the next save.
+- **Dynamic Dirty State Evaluation** — remove the static `mDirty = true` logic inside `ProjectManager` and `ApvtsDirtyTracker`.  The project is dirty only if `currentUndoStep != savedUndoStep`.  When `ProjectManager::save()` successfully writes to disk, sync the pointer: `savedUndoStep = currentUndoStep;`.  Update the UI header to observe this dynamic evaluation so the dirty asterisk instantly vanishes when Ctrl+Z lands exactly on `savedUndoStep`.
+- **Reference:** Vars, Values and ValueTrees: State Management in JUCE (ADC23) — architectural overview.
+
+**Risk:** **medium-high** — every `ValueTree::setProperty` call site touched (codebase-wide audit); every custom UI component that mutates parameters reviewed for `ParameterAttachment` use or explicit `beginNewTransaction()` call; the `ApvtsDirtyTracker` listener model removed entirely.  Worst case: a state-mutation site missed by the audit silently fails to register undo + the dirty flag wrongly clears on Ctrl+Z (would be caught by an explicit verify of every page's state-mutation surface).
+
+**Dependencies:** every preceding Phase 1-5 batch that adds state-mutation sites — codebase-wide audit naturally covers QA-ProjectSave's new save/load + every preceding batch's UI/audio state-mutation surface; running this batch earlier would force a re-audit every time a new state-mutation site landed.
+
+**Effort:** large (~10-16 hours; codebase audit of `setProperty(id, val, nullptr)` call sites ~3-5 hr, APVTS constructor verify + custom-UI-component review ~2-3 hr, `TransactionTracker` implementation + Undo/Redo command wrappers ~2-3 hr, UI header re-wire to observe dynamic evaluation ~1-2 hr, verify ~2-3 hr across every page's state-mutation surface).
+
+**Options considered:** (a) fold into QA-ProjectSave (since both touch save/load lifecycle) — rejected (orthogonal mechanics: ProjectSave is a data-layer change to XML format + sample retention, DirtyFlag is a control-flow change to UndoManager plumbing; bundling would obscure both scopes); (b) lightweight fix — add an old-vs-new equality guard to `ApvtsDirtyTracker` `onAny` + a saved-state baseline comparison to `ProjectManager::markDirty` — rejected (doesn't match the locked spec; the `ApvtsDirtyTracker` listener model is being removed entirely in favor of the transaction-pointer architecture; an equality-guard band-aid would still leave dirty-flag-tracking decoupled from the undo history, which is the central design goal); (c) **dedicated batch at end of Phase 1-5 — accepted**.
+
+**Carry-forward contradictions:** none architectural.  The Carry-Forward Reference does not lock the current `ApvtsDirtyTracker`-listener + `mDirty` boolean as a primitive; QA-DirtyFlag's refactor is additive to the file:line index and replaces the implicit pattern.  The in-tree state up to this batch — dirty flag tracks "anything touched since load" — is intentional and supersedes at QA-DirtyFlag landing.
+
+**Inline back-refs:**
+- §5 — new QA-DirtyFlag entry INSERTED at the end of the Phase 1-5 chain, after QA-ProjectSave (cross-refs this entry).  Verbatim Jeff spec text included.
+- §6 — arrow updated to `... → QA-ProjectSave***************** → QA-DirtyFlag*******************`; new 19-asterisk QA-DirtyFlag footnote added (cross-refs this entry).
+- §9 this entry (thirty-second Forks entry).
+- QA-Eg Task 3 finding — recorded in `Plans & Specs/Running Notes/squishy-scribbling-flurry.md` lines ~314-369 (the solo-button-net-zero observation + Jeff's verbatim spec).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-DirtyFlag entry INSERTED; §6 arrow updated; §6 QA-DirtyFlag footnote INSERTED; §9 this entry.
+- `Plans & Specs/Running Notes/squishy-scribbling-flurry.md` — already captured this routing (the Task 3 finding + Jeff's verbatim spec text, lines 314-369).
+- `Plans & Specs/Implemented Work Log.md` — QA-Eg batch-close entry references this routing in its "What was done about each finding" table.
+- **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (per-batch plan file — drafted when QA-DirtyFlag opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (running notes seed — created when QA-DirtyFlag opens).
+
+**Verification:** n/a — routing / sequencing entry, no source change.  QA-DirtyFlag's own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-DirtyFlag opens): clicking a state-mutation control + reverting to original net state leaves the project clean (no dirty asterisk); Ctrl+Z to the exact state of the last save clears the dirty asterisk; a new edit after Ctrl+Z'ing past `savedUndoStep` correctly destroys the saved future (`savedUndoStep = -1`); every page's state mutations participate in undo correctly; every `setProperty(id, val, nullptr)` call site rewritten or explicitly justified; no `ApvtsDirtyTracker` `onAny` regressions (the listener is gone); UI header observes `currentUndoStep != savedUndoStep` dynamically; saves correctly sync the pointer.
+
+### 2026-05-24 — QA-InsertMaps inserted: flatten InsertNode std::map to std::array (perf-audit H1) — new dedicated batch at QA-Eg close
+
+**Trigger:** `/perf-audit` pass at QA-Eg close (2026-05-24).  Recurring perf scan dispatched per Main Plan §0 surfaced 8 findings; 3 folded into Task 8 (H2 `findStripByChannelId` unordered_map cache + M1 `onVBlank` scratch+swap vector reuse + H4 `EffectRack` peak-loop SIMD via `juce::FloatVectorOperations::findMinAndMax`) and 3 routed forward as new dedicated batches in the same perf-audit cluster (H1 = QA-InsertMaps; H3 = QA-VoicePool; M2 = QA-EngineApvts).  H1 is the highest-priority finding in the audit pass.  Also absorbs M3 (UI-side `getInsertPeakDb` `std::map::find` per vblank) — the same flat-array migration eliminates both lookups.
+
+**Diagnosis:** `VibeGraph::processInsert` (`Source/VibeGraph.cpp:2337`) and `pushScArrayToStrip` (`VibeGraph.cpp:2889`) do 4x `std::map<int, std::unique_ptr<InsertNode>>::find()` per insert per audio block: the outer dispatcher path through `selectInsertMap` (switch over `InsertKind` selecting one of 8 std::maps) + a red-black-tree walk on the selected map for the InsertNode, then 3 more inside `pushScArrayToStrip` (`getInsertPreEQ` + `getInsertRack` + `getInsertEQ`).  On a busy session ~50 inserts at ~6 ms block cadence = 30k+ map lookups/sec on the audio thread.  Each lookup is a red-black-tree walk (O(log n)) with the cache-unfriendly memory layout of a `std::map<int, std::unique_ptr<...>>` (heap-allocated nodes scattered across the heap; pointer-chase per tree level).  The architectural alternative — flat array indexed by ChannelId — already exists in the codebase: `RenderGraphDispatcher::mTasksByChannel` is a `std::array<...>` indexed directly by ChannelId (the same key space `MixerChannelIds` 0..999 the std::maps key on).  The std::map choice on the InsertNode side is an unforced artifact of how InsertNode plumbing grew incrementally per `InsertKind`; nobody surfaced "flat array vs std::map" as a spec call.
+
+**Decision (Jeff, 2026-05-24):** **NEW dedicated batch QA-InsertMaps** — Option 2 (flatten to flat array).  Other options considered: (a) leave the std::maps and call it acceptable cost — rejected (`/perf-audit` H1 priority + the architectural inconsistency with `mTasksByChannel` already in-tree); (b) per-`InsertKind` flat array (8 small arrays instead of 8 std::maps) — rejected (still has the `selectInsertMap` switch + per-kind indirection; doesn't reach single-pointer-load); (c) **Option 2 — single `std::array<InsertNode*, kMaxStripChannels>` indexed directly by ChannelId, mirroring `mTasksByChannel` — accepted**.  Slot SURFACED to Jeff per `feedback_slot_placement_is_spec_call.md`.
+
+**Sequencing (Jeff's confirmed slot, 2026-05-24):** **immediately after QA-AudioMeters, before QA-VoicePool.**  Slot rationale: same architectural origin as QA-AudioMeters (audio-thread hot-path optimization spawned by the QA-Eg close cluster); earlier-better since later batches may touch `processInsert` call sites and entrenching the std::map indirection raises future migration cost.  The perf-audit cluster (QA-AudioMeters meter migration + QA-InsertMaps lookup refactor + QA-VoicePool voice-pool + QA-EngineApvts dirty-flag) runs as a 4-batch sequence before resuming bug-fix sequencing at QA-Ed.
+
+**Scope (Jeff-locked 2026-05-24 — full per-batch plan file deferred until QA-InsertMaps opens):**
+- Flatten all 8 `InsertKind` `std::map<int, std::unique_ptr<InsertNode>>` member declarations into a single owning storage + a flat `std::array<InsertNode*, kMaxStripChannels>` lookup indexed directly by ChannelId.  Eliminates the red-black-tree entirely; lookups become single-pointer indirection.
+- Migrate every InsertNode access site to the new accessor: `getInsertNode(channelId)` -> `mInsertsByChannel[channelId]`.  Touches `processInsert` + `pushScArrayToStrip` + `ensureInsertNode` + `selectInsertMap` (the switch becomes a no-op + dies) + the 8 map declarations in `VibeGraph.h`.
+- Keep `kMaxStripChannels` sized to the existing `MixerChannelIds` allocation (0..999) — the array is sparsely populated; `nullptr` slots are the "no insert at this id" signal that callers already null-check via the existing `if (auto* node = getInsertNode(...))` pattern.
+- Sweep stale `std::map`-specific call sites (no `.find() / .end()` comparison left; no iteration over the map for "all inserts" — replaced with iteration over a small `mLiveInsertChannels` companion list for the cases that need it).
+
+**Risk:** **medium** — audio-thread hot-path refactor.  No behavioral change to audio path arithmetic — the std::map -> array swap is mechanical and the lookups it replaces are by-id-only.  Worst case: a migration site missed by the audit silently still does map lookups (would be caught by `grep` for remaining `mInserts[A-Z]*.find(` post-refactor) OR a null-check site missed (would manifest as crash on undeclared-channel access — caught by Debug build).
+
+**Dependencies:** QA-AudioMeters closed (sits ahead in the perf-audit cluster; QA-AudioMeters touches `CompositeAudioInsertTask` which calls into `VibeGraph` insert accessors — running QA-InsertMaps after means the meter-publish surface is settled before the lookup-path refactor).
+
+**Effort:** medium (~5-8 hours).
+
+**Estimated CPU win:** ~1-3% on a busy session (per `/perf-audit` H1 estimate; red-black-tree walk replaced with single pointer-load at ~30k+ lookups/sec).
+
+**Options considered:** (a) leave the std::maps — rejected (`/perf-audit` H1 priority + the architectural inconsistency with `mTasksByChannel` already in-tree); (b) per-`InsertKind` flat array (8 small arrays instead of 8 std::maps) — rejected (still has the `selectInsertMap` switch + per-kind indirection; doesn't reach single-pointer-load); (c) **single `std::array<InsertNode*, kMaxStripChannels>` indexed directly by ChannelId — accepted**.
+
+**Carry-forward contradictions:** none architectural.  The Carry-Forward §1 file:line index for `mInsertsLayer` / `mInsertsBass` / `mInsertsDrum` / `mInsertsAudio` / `mInsertsAux` / `mInsertsVox` / `mInsertsInst` / `mInsertsRusty` member declarations becomes stale post-batch; this batch finishes the architectural alignment that `RenderGraphDispatcher::mTasksByChannel` already established on the dispatcher side.
+
+**Inline back-refs:**
+- §5 — new QA-InsertMaps entry INSERTED between QA-AudioMeters and QA-VoicePool (cross-refs this entry).
+- §6 — arrow updated to `... → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool*********************...`; new 20-asterisk QA-InsertMaps footnote added (cross-refs this entry).
+- §9 this entry (thirty-third Forks entry).
+- QA-Eg `/perf-audit` close pass — recorded in `Plans & Specs/Running Notes/squishy-scribbling-flurry.md` (Task 8 close-pass section).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-InsertMaps entry INSERTED; §6 arrow updated; §6 QA-InsertMaps footnote INSERTED; §9 this entry.
+- `Plans & Specs/Running Notes/squishy-scribbling-flurry.md` — Task 8 close-pass section captures the `/perf-audit` H1 finding + Jeff's Option 2 decision + slot lock.
+- `Plans & Specs/Implemented Work Log.md` — QA-Eg batch-close entry references this routing in its "What was done about each finding" table.
+- **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (per-batch plan file — drafted when QA-InsertMaps opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (running notes seed — created when QA-InsertMaps opens).
+
+**Verification:** n/a — routing / sequencing entry, no source change.  QA-InsertMaps' own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-InsertMaps opens): on a busy stress-test session (~50 inserts spread across the 8 InsertKinds), every insert is reachable + audible + correctly metered in both MT (production default) and 1-worker serial-diagnostic mode; no behavioral change vs pre-batch baseline; `grep` confirms zero remaining `mInsertsLayer.find(` / `mInsertsBass.find(` / ... call sites (post-flatten the std::maps are gone); CPU-load measurement on the busy-session rig shows the expected ~1-3% drop on the audio thread.
+
+### 2026-05-24 — QA-VoicePool inserted: pre-allocated VibePlayer voice pool / object pool (perf-audit H3) — new dedicated batch at QA-Eg close
+
+**Trigger:** `/perf-audit` pass at QA-Eg close (2026-05-24).  Same scan that surfaced QA-InsertMaps + QA-EngineApvts; H3 is the second-highest HIGH-priority finding in the audit pass (paired with H1 / QA-InsertMaps as the two audio-thread hot-path findings; H2 / H4 folded into Task 8).
+
+**Diagnosis:** `VibeVoice::startNote` (`Source/VibePlayer/VibePlayerDSP.cpp:581-583 + :607`) heap-allocates `new MemoryAudioSource` + `new ResamplingAudioSource` per note-on.  `findRegion` (`VibePlayerDSP.cpp:573`) also heap-allocates a `std::vector<int> candidates`.  Audio-thread allocation on every drum hit / key press / audition gesture.  No pool, no fat voices, no voice stealing — every note-on is a fresh `new` pair + the 17th simultaneous note in the current pattern would silently drop or trigger a reallocation.  The architectural alternative is the standard pro-DAW pattern: pre-allocate a fixed pool of voices in `prepareToPlay`, make each voice "fat" (owning its resampler + memory source permanently for re-pointing instead of re-allocation), manage occupancy with atomic flags, and implement voice stealing as the fallback when the pool is full.
+
+**Decision (Jeff, 2026-05-24):** **NEW dedicated batch QA-VoicePool** — apply the standard pre-allocated voice pool + fat voices + lock-free atomic occupancy + voice stealing pattern.  Jeff provided the verbatim 4-section blueprint at close time (pre-allocate in prepareToPlay + fat voices internal reuse + lock-free `std::atomic<bool> isActive` + voice stealing fallback with 10-20 sample fade-out).  Slot SURFACED to Jeff per `feedback_slot_placement_is_spec_call.md`.
+
+**Sequencing (Jeff's confirmed slot, 2026-05-24):** **immediately after QA-InsertMaps, before QA-EngineApvts.**  Slot rationale: same architectural origin as QA-InsertMaps + QA-AudioMeters (perf-audit-cluster spawned at QA-Eg close); QA-VoicePool touches VibePlayer voice lifecycle (independent of InsertMaps as a code surface, but logically clusters with the perf work and the same `/perf-audit` H-priority severity); running it after QA-InsertMaps means the lookup-path refactor is settled before the voice-lifecycle changes layer on top.
+
+**Scope (Jeff-locked 2026-05-24 verbatim blueprint — full per-batch plan file deferred until QA-VoicePool opens):**
+
+> **1. Pre-allocate in prepareToPlay**
+> Move all object creation to the UI/Main thread before audio processing begins.
+> Your synth/sampler class (VibePlayerDSP) will own a fixed-size array of voices: `std::array<std::unique_ptr<VibeVoice>, 16> voicePool;`
+> Inside `prepareToPlay()`, you initialize all 16 voices.
+>
+> **2. Fat Voices (Internal Reuse)**
+> Right now, your code calls `new MemoryAudioSource` and `new ResamplingAudioSource` every time a note plays. We need to make the voice "fat" — meaning it owns these objects permanently.
+> Each VibeVoice creates its resampler and memory source once in its constructor.
+> When a new drum hit or sample needs to play, you don't destroy the resampler. You simply point the existing MemoryAudioSource to the new sample buffer, reset its read pointer to 0, and clear the ADSR envelope.
+>
+> **3. The Lock-Free State (std::atomic)**
+> Because the audio thread cannot wait for locks (like std::mutex), you manage the pool using atomic booleans.
+> Every voice gets a flag: `std::atomic<bool> isActive{false};`
+> To start a note: The audio thread loops through the array looking for a voice where `isActive.load() == false`. Once found, it instantly flips it to true, feeds it the MIDI note, and breaks the loop.
+> To end a note: When the ADSR envelope finishes its release phase and hits absolute zero, the voice itself sets its flag back to `isActive.store(false)`.
+>
+> **4. Voice Stealing (The Fallback)**
+> What happens if the user plays a massive chord and all 16 voices are currently true? If you do nothing, the 17th note is dropped.
+> Pro DAWs implement Voice Stealing. If no free voice is found, the engine loops through the array to find the "best" voice to steal.
+> Usually, this is the oldest voice currently in its "Release" phase (the quietest decaying tail). You instantly fade it out over 10-20 samples (to prevent a click) and hijack it for the new note.
+
+Additionally: `findRegion`'s `std::vector<int> candidates` heap allocation removed (replaced with a fixed-size `std::array` or pool-side stack buffer).
+
+**Risk:** **medium-high** — touches `VibeVoice` lifecycle + reverse/forward source switching + ADSR-release-finish callback for self-deactivation + voice-stealing fade-out.  `ResamplingAudioSource` may need an SR-aware reset path (point-to-new-buffer + read-pointer reset + ratio recompute).  Worst case: a voice mis-steals an active note (caught immediately by ear) OR the self-deactivation callback fires before audible tail decays (caught immediately by ear — premature voice cutoff).  No audio-thread allocation surface left.
+
+**Dependencies:** QA-InsertMaps closed (sits ahead in the perf-audit cluster; running QA-VoicePool after means the lookup-path refactor is settled before the voice-pool refactor layers on top).
+
+**Effort:** large (~8-12 hours; pool member declaration + `prepareToPlay` allocation ~1-2 hr, fat-voice internal reuse refactor ~2-3 hr, atomic occupancy flag plumbing ~1-2 hr, voice-stealing implementation + fade-out ~2-3 hr, ADSR-release self-deactivation callback ~1 hr, `findRegion` candidates heap-alloc removal ~30 min, verify across drum / key / audition surfaces in both MT and 1-worker mode ~1-2 hr).
+
+**Estimated CPU win:** per-note-on heap-allocation cost eliminated (variable benefit — high on busy chord / drum stress; low on sparse single-note playback).  Bigger benefit: removes a class of audio-thread allocation that's been a long-standing concern.
+
+**Options considered:** (a) leave the per-note-on heap allocations and call it acceptable cost — rejected (`/perf-audit` H3 priority + the audio-thread allocation surface is the kind of issue that compounds with project complexity); (b) lighter-weight fix — pool only the `MemoryAudioSource` allocations and leave `ResamplingAudioSource` per-note-on — rejected (incomplete; the resampler is the heavier allocation of the pair); (c) **full pre-allocated fat-voice pool + lock-free atomic occupancy + voice stealing per Jeff's blueprint — accepted**.
+
+**Carry-forward contradictions:** none architectural.  The Carry-Forward §1 file:line index for `VibeVoice::startNote` documents the current allocation behavior implicitly via the function reference; this batch replaces that behavior with the pre-allocated-pool pattern and the implicit documentation becomes stale.  No new architectural primitive contradicts existing Carry-Forward locks; this is additive cleanup.
+
+**Inline back-refs:**
+- §5 — new QA-VoicePool entry INSERTED between QA-InsertMaps and QA-EngineApvts (cross-refs this entry).
+- §6 — arrow updated to `... → QA-InsertMaps******************** → QA-VoicePool********************* → QA-EngineApvts**********************...`; new 21-asterisk QA-VoicePool footnote added (cross-refs this entry).
+- §9 this entry (thirty-fourth Forks entry).
+- QA-Eg `/perf-audit` close pass — recorded in `Plans & Specs/Running Notes/squishy-scribbling-flurry.md` (Task 8 close-pass section).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-VoicePool entry INSERTED; §6 arrow updated; §6 QA-VoicePool footnote INSERTED; §9 this entry.
+- `Plans & Specs/Running Notes/squishy-scribbling-flurry.md` — Task 8 close-pass section captures the `/perf-audit` H3 finding + Jeff's verbatim 4-section blueprint + slot lock.
+- `Plans & Specs/Implemented Work Log.md` — QA-Eg batch-close entry references this routing in its "What was done about each finding" table.
+- **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (per-batch plan file — drafted when QA-VoicePool opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (running notes seed — created when QA-VoicePool opens).
+
+**Verification:** n/a — routing / sequencing entry, no source change.  QA-VoicePool's own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-VoicePool opens): on a stress-test session — playing 16+ simultaneous notes through `VibePlayer` (chord stack + drum roll + audition gestures), every note triggers + sustains + releases cleanly with zero clicks at voice steal; ADSR release phase ends cleanly with no audible tail truncation; the 17th note correctly steals the oldest-release voice (verified by listening for the 10-20 sample fade-out); `findRegion` no longer heap-allocates (`grep` confirms zero `std::vector<int> candidates` calls remaining); both MT (production default) and 1-worker serial-diagnostic mode show identical voice behavior; no behavioral regression on sparse-note workflows.
+
+### 2026-05-24 — QA-EngineApvts inserted: engine processors APVTS dirty-flag pattern compliance (perf-audit M2) — new dedicated batch at QA-Eg close
+
+**Trigger:** `/perf-audit` pass at QA-Eg close (2026-05-24).  Same scan that surfaced QA-InsertMaps + QA-VoicePool; M2 is the highest MEDIUM-priority finding in the audit pass (paired with M1 folded into Task 8 + M3 absorbed by QA-InsertMaps).
+
+**Diagnosis:** the 4 engine processors (`HarmlessProcessor / VibePlayerProcessor / BaySickSynthProcessor / BaySickBassProcessor`) call `updateFromApvts` unconditionally per block, each reading ~30-50 parameters via `apvts.getRawParameterValue(id)->load()` regardless of whether anything has changed since the previous block.  The current pattern guards SETTER work (DSP coefficient recomputation) with value-change comparisons (per the standing rule "Every DSP update function MUST guard numeric setters with value-change comparisons"), but it doesn't avoid the LOAD work — every block still reads every parameter atomically.  Per the documented memory rule `feedback_apvts_dirty_flag_pattern.md`, the canonical BaySickDAW pattern pairs a process-side `isIdentity()` short-circuit with a sync-side `ValueTree::Listener`-driven dirty flag.  Pattern is wired in `PluginProcessor` (`Source/PluginProcessor.cpp:178`) but missing from the 4 engine processors.  Net effect: per-block LOAD-everything path runs on every block in 4 processors even when nothing has changed (e.g., a static patch playing back through a piano roll — zero parameter changes for thousands of blocks but `updateFromApvts` still LOADs ~30-50 atomics x 4 engines = ~120-200 atomic loads / block / engine surface).
+
+**Decision (Jeff, 2026-05-24):** **NEW dedicated batch QA-EngineApvts** — apply the documented dirty-flag pattern to the 4 engine processors.  Pattern lifted verbatim from `PluginProcessor.cpp:178` — reference implementation is already in-tree and proven.  Slot SURFACED to Jeff per `feedback_slot_placement_is_spec_call.md`.
+
+**Sequencing (Jeff's confirmed slot, 2026-05-24):** **immediately after QA-VoicePool, before QA-Ed.**  Slot rationale: finishes the perf-audit cluster (QA-AudioMeters meter migration + QA-InsertMaps lookup refactor + QA-VoicePool voice-pool + QA-EngineApvts dirty-flag) before resuming bug-fix sequencing at QA-Ed; M2 is the lowest CPU win in the cluster (~1-2% cumulative across the 4 engines) so it tail-ends the cluster naturally; running it after QA-VoicePool means the voice-pool refactor is settled before the dirty-flag listener wires up (QA-VoicePool touches `VibePlayerDSP` which `VibePlayerProcessor::updateFromApvts` reads from).
+
+**Scope (Jeff-locked 2026-05-24 — full per-batch plan file deferred until QA-EngineApvts opens):**
+- Add `std::atomic<bool> mApvtsDirty { true };` member to each of: `HarmlessProcessor`, `VibePlayerProcessor`, `BaySickSynthProcessor`, `BaySickBassProcessor`.
+- Wire `apvts.state.addListener(this)` + `valueTreePropertyChanged` override that sets `mApvtsDirty.store(true, std::memory_order_release)`.
+- At `processBlock` top: `if (mApvtsDirty.exchange(false, std::memory_order_acquire)) updateFromApvts();`
+- Pattern lifted verbatim from `PluginProcessor.cpp:178` — reference implementation is already in-tree and proven.
+- Initial dirty=true so the first block syncs all params correctly.
+
+**Risk:** **low** — well-established pattern; 4 processors to apply it to; reference impl already in PluginProcessor.  Worst case: a `valueTreePropertyChanged` callback edge case causes a missed dirty flag (silent — params don't update; caught immediately on the first verify gesture per processor).  No audio path arithmetic change; no thread-safety concern (atomic exchange is the same pattern used elsewhere).
+
+**Dependencies:** QA-VoicePool closed (sits ahead in the perf-audit cluster; QA-VoicePool touches `VibePlayerDSP` voice lifecycle which interacts with `VibePlayerProcessor::updateFromApvts` — running QA-EngineApvts after means the voice-pool refactor is settled before the dirty-flag listener wires up).
+
+**Effort:** medium (~4-6 hours; ~1-1.5 hr per processor including verify pass — mechanical pattern apply x4).
+
+**Estimated CPU win:** ~1-2% cumulative across the 4 engines on busy sessions (per `/perf-audit` M2 estimate; the per-block LOAD-everything path becomes a near-zero-cost atomic exchange when state is unchanged).
+
+**Options considered:** (a) leave the per-block LOAD-everything path — rejected (`/perf-audit` M2 priority + the existing documented pattern + reference impl already in-tree make this a low-cost compliance gap); (b) value-change comparison on the LOAD side (read all params then compare against cached values before calling setters) — rejected (still does the LOAD work every block; doesn't reach the near-zero idle-cost the listener-driven pattern reaches); (c) per-processor lazy-rebuild on dirty-flag toggle — would re-architect the engine processors' update flow significantly — rejected (the documented pattern already solves this with a smaller surface change); (d) **apply the documented `feedback_apvts_dirty_flag_pattern.md` pattern to the 4 engine processors — accepted**.
+
+**Carry-forward contradictions:** none architectural.  The Carry-Forward §1 file:line index for `HarmlessProcessor::updateFromApvts` / `VibePlayerProcessor::updateFromApvts` / `BaySickSynthProcessor::updateFromApvts` / `BaySickBassProcessor::updateFromApvts` documents the current per-block call pattern implicitly via the function references; this batch wraps those calls in a dirty-flag gate without changing their internal behavior.
+
+**Inline back-refs:**
+- §5 — new QA-EngineApvts entry INSERTED between QA-VoicePool and QA-Ed (cross-refs this entry).
+- §6 — arrow updated to `... → QA-VoicePool********************* → QA-EngineApvts********************** → QA-Ed************...`; new 22-asterisk QA-EngineApvts footnote added (cross-refs this entry).
+- §9 this entry (thirty-fifth Forks entry).
+- QA-Eg `/perf-audit` close pass — recorded in `Plans & Specs/Running Notes/squishy-scribbling-flurry.md` (Task 8 close-pass section).
+- Memory `feedback_apvts_dirty_flag_pattern.md` — the documented pattern this batch enforces compliance with.
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-EngineApvts entry INSERTED; §6 arrow updated; §6 QA-EngineApvts footnote INSERTED; §9 this entry.
+- `Plans & Specs/Running Notes/squishy-scribbling-flurry.md` — Task 8 close-pass section captures the `/perf-audit` M2 finding + Jeff's routing decision.
+- `Plans & Specs/Implemented Work Log.md` — QA-Eg batch-close entry references this routing in its "What was done about each finding" table.
+- **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (per-batch plan file — drafted when QA-EngineApvts opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (running notes seed — created when QA-EngineApvts opens).
+
+**Verification:** n/a — routing / sequencing entry, no source change.  QA-EngineApvts' own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-EngineApvts opens): per engine — change every APVTS-bound control (knob, button, combo, slider) + verify the new value takes effect on the next block (the dirty flag fired); leave every APVTS-bound control alone + verify CPU drops on idle (the per-block `updateFromApvts` path is skipped); both MT (production default) and 1-worker serial-diagnostic mode show identical behavior; `grep` confirms 4 new `mApvtsDirty` members + 4 new `valueTreePropertyChanged` overrides + 4 new `addListener(this)` call sites + 4 new `exchange(false, ...)` call sites at processBlock top.

@@ -441,11 +441,16 @@ void EffectRack::process(juce::AudioBuffer<float>& buffer)
         // visual response than RMS (a transient pinging the meter is what
         // the user wants to see).  Spring-damper still smooths the needle
         // motion so the visual looks like classic VU ballistics.
+        //
+        // QA-Eg fix-up (perf-audit H4): juce::FloatVectorOperations::findMinAndMax
+        // vectorizes to SSE/AVX (where available) instead of the prior scalar
+        // loop.  Peak absolute value derived from the signed min/max range.
         float inPeak = 0.f;
         for (int ch = 0; ch < numCh; ++ch) {
             const float* d = buffer.getReadPointer(ch);
-            for (int i = 0; i < numSamples; ++i)
-                inPeak = juce::jmax(inPeak, std::abs(d[i]));
+            const auto range = juce::FloatVectorOperations::findMinAndMax(d, numSamples);
+            inPeak = juce::jmax(inPeak,
+                                std::max(std::abs(range.getStart()), std::abs(range.getEnd())));
         }
         casMaxFloat (s.inputLevelRmsRun, juce::jlimit (0.f, 1.f, inPeak));
 
@@ -510,11 +515,14 @@ void EffectRack::process(juce::AudioBuffer<float>& buffer)
         }
 
         // Output peak dBFS -- CAS-max only; UI exchange-and-resets each vblank.
+        // QA-Eg fix-up (perf-audit H4): juce::FloatVectorOperations::findMinAndMax
+        // vectorizes to SSE/AVX instead of the prior scalar loop.
         float peak = 0.f;
         for (int ch = 0; ch < numCh; ++ch) {
             const float* d = buffer.getReadPointer(ch);
-            for (int i = 0; i < numSamples; ++i)
-                peak = juce::jmax(peak, std::abs(d[i]));
+            const auto range = juce::FloatVectorOperations::findMinAndMax(d, numSamples);
+            peak = juce::jmax(peak,
+                              std::max(std::abs(range.getStart()), std::abs(range.getEnd())));
         }
         const float peakDbThisBlock = peak > 1e-6f ? 20.f * std::log10(peak) : -96.f;
         casMaxFloat (s.outputLevelDbRun, peakDbThisBlock);

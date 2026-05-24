@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <map>
+#include <unordered_map>
 #include "../PluginProcessor.h"
 #include "../PatternManager.h"
 #include "MixerTrackStrip.h"
@@ -164,6 +165,7 @@ public:
     juce::Component* getAddVoxBusBtn() const { return mAddVoxBusBtn.get(); }
     juce::Component* getAddInstBusBtn() const { return mAddInstBusBtn.get(); }
 
+
     // G-6 (2026-04-29): activate a secondary Vox/Inst bus - creates the
     // strip on Mixer + flags the bus active for route-picker / cable
     // filtering.  Idempotent (no-op if already active).  Returns true on
@@ -229,16 +231,15 @@ private:
     std::unique_ptr<MixerTrackStrip> mMasterStrip;
 
     // ── Scrollable console area ───────────────────────────────────────────────
-    // Horizontal scrollbar is a SEPARATE widget placed at the TOP of the
-    // page (above the strips) so the cable overlay never covers it. The
-    // Viewport's own scrollbars are hidden; we drive `mViewport` directly
-    // via scrollBarMoved() → setViewPosition().
+    // Horizontal scrollbar is a SEPARATE widget placed below the strips so the
+    // cable overlay never covers it. The Viewport's own scrollbars are hidden;
+    // we drive `mViewport` directly via scrollBarMoved() → setViewPosition().
     std::unique_ptr<juce::Viewport>  mViewport;
-    std::unique_ptr<juce::ScrollBar> mTopScrollBar;
+    std::unique_ptr<juce::ScrollBar> mHScrollBar;
 
     // ScrollBar::Listener
     void scrollBarMoved(juce::ScrollBar* sb, double newRangeStart) override;
-    void syncTopScrollBar();
+    void syncHScrollBar();
 
     // Neon vertical line drawn on top of the strip row to separate members of
     // a bus group. Bright = between bus strip and first member. Dimmed = between
@@ -318,6 +319,7 @@ private:
     std::unique_ptr<juce::TextButton>               mAddInstBtn;
     int                                             mNextInstIdx { 0 };
 
+
     // J-5 (2026-05-03): BaySickRustyDrums strips.  Spawned/destroyed in
     // batches of 13 by PluginProcessor::loadBaySickRustyDrumsKit /
     // destroyBaySickRustyDrums.  No "Add Rusty" UI button - strip lifecycle
@@ -334,17 +336,31 @@ private:
     // compares every tick; any delta triggers layoutScrollContent() so strips
     // visually move when their main-out cable is rerouted.
     std::map<int, int>                              mLastSendToCache;
-    // R3.5 (2026-04-23): cable-overlay flicker fix.  Repaint the (now buffered-
-    // to-image) overlay only when the viewport scroll position changed.
+    // R3.5 (2026-04-23): cable-overlay scroll-detection cache.  Drives a
+    // repaint when the viewport scroll position changed since the last
+    // timerCallback tick (cable sockets follow strips that scrolled).
     int                                             mLastViewportX { -1 };
 
     // QA-Eg (2026-05-24): cable-overlay idle-flicker fix.  Snapshot of each
     // strip's displayed peak dB from the previous vblank, used to gate the
     // overlay's repaint -- only dirty the overlay when at least one value
-    // changed by > kCableRepaintEpsilonDb.  Eliminates the dying-lightbulb
-    // flicker caused by transparent-overlay clear-then-redraw running every
-    // frame even when nothing visible changed.
+    // changed by > kCableRepaintEpsilonDb (0.1 dB).  On idle every meter
+    // sits at the floor (-60 dB) so the snapshot stays identical frame-to-
+    // frame and no repaint fires; on playback values move every frame so
+    // the overlay repaints every vblank as before.  mPeakSnapshotScratch is
+    // the scratch buffer onVBlank fills each frame -- swapped with
+    // mLastPeakSnapshot at end so both vectors retain their capacity (no
+    // per-frame heap alloc, perf-audit M1).
     std::vector<float>                              mLastPeakSnapshot;
+    std::vector<float>                              mPeakSnapshotScratch;
+
+    // QA-Eg fix-up (perf-audit H2): channelId -> strip cache.  Replaces a
+    // linear scan of 12 bus pointers + 8 std::map containers on every
+    // findStripByChannelId call.  Lazily rebuilt when the dirty flag is
+    // set (every strip add / remove / clear).  Mutable so the cache can be
+    // populated from a const member function.
+    mutable std::unordered_map<int, MixerTrackStrip*> mStripByChannelId;
+    mutable bool                                      mStripCacheDirty { true };
 
     // 5F-4b B3+B4: cable overlay - paints green beziers + handles cable drag.
     struct CableOverlay : public juce::Component, private juce::Timer
@@ -418,7 +434,7 @@ private:
         std::vector<CableHit> hitTestCablesAll(juce::Point<float> pt) const;
         void showCablePopup(juce::Point<float> screenPt, const CableHit& hit);
 
-        // QA-Eg: deep dual-stub cable path - 300 px base drop + 0.25 *
+        // QA-Eg: deep dual-stub cable path - 200 px base drop + 0.4 *
         // horizontal-distance multiplier so the cable's middle section
         // descends below the visible page area, producing a patch-bay
         // aesthetic where each end visually dangles down and slightly
@@ -437,6 +453,10 @@ private:
 
     // Find the strip component for a given MixerChannelIds value (or nullptr).
     MixerTrackStrip* findStripByChannelId(int channelId) const;
+    // QA-Eg fix-up (perf-audit H2): rebuild the channelId -> strip cache from
+    // current data structures.  Called lazily on cache-miss when the dirty
+    // flag is set.  Cheap: walks 12 bus pointers + 8 std::map containers once.
+    void rebuildStripCache() const;
 
     // Get the socket position (page coords) for the bottom-center of a strip.
     // Returns {-1,-1} if the strip isn't found or isn't visible.

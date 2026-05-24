@@ -2035,16 +2035,22 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
     }
 }
 
-// 2026-05-07 (Batch 9c follow-up): UI-meter atomic drain.  Single boundary
-// point where every UI-visible peak atomic gets updated, called once per
-// processBlock after dispatchBlock.  Three groups:
-//   1. Layers/Bass/Drums/Master bus mirrors -- drained from VibeGraph
-//      mirror atomics (which were drained from node atomics earlier).
-//   2. Audio rows + AudioClipsBus + FxBus + Vox/Inst (incl. secondary)
-//      -- promoted from Run companion atomics (audio CAS-maxes Run during
-//      processBlock; promotion lifts Run -> snapshot).
-//   3. Inserts in every node + slot atomics in every rack -- promoted by
+// QA-Eg (2026-05-24): UI-meter atomic drain.  Single boundary point where
+// every UI-visible peak atomic gets updated, called once per processBlock
+// after dispatchBlock.  Three parts:
+//   1. Bus mirrors -- every bus (Layers / Bass / Drums / Master / FX /
+//      AudioClips / Vox / Vox2 / Inst / Inst2 / Inst3 / Rusty) drains via
+//      the same G1 loop: drainAndMerge from VibeGraph public-member
+//      atomics that the corresponding BusNode exchange-stored during the
+//      block.  Post-QA-Eg there is no longer a Run-mirror intermediate
+//      stage -- every bus uses the same node-owned -> VibeGraph-atomic ->
+//      mirror promotion path.
+//   2. Inserts in every node + slot atomics in every rack -- promoted by
 //      VibeGraph::promoteAllInsertPeakSnapshots().
+//   3. Per-row Builder audio meters retain the pre-QA-Eg dual-mirror G2
+//      architecture (CompositeAudioInsertTask CAS-maxes into Run companion
+//      atomics; this drain promotes Run -> snapshot).  Routed to
+//      QA-AudioMeters for migration to G1.
 // All three happen back-to-back so a UI vblank firing anywhere outside
 // this small window catches a coherent snapshot across every meter.
 void VibeSynthProcessor::drainMeterAtomicsForUI()
