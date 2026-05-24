@@ -279,13 +279,6 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // 5F-4a Batch 6: cache APVTS pointers in bus + master nodes (needs params registered).
     mVibeGraph.rebindBusApvts();
 
-    // 2026-05-06 (Batch 9b): register peak-meter atomic refs for the buses
-    // whose DSP migrated into VibeGraph::processBus.  Layers/Bass/Drums/
-    // Master/FxBus carry their own peak atomics on their BusNode and don't
-    // need registration.  Idempotent - registerBusPeakAtomics overwrites the
-    // table entry, so repeated prepareToPlay calls (block-size / sample-rate
-    // changes) just rewrite the same pointers.
-
     // 2026-05-05 dirty-flag wiring: route every VibeGraph rack's lifecycle
     // events into the editor's project-dirty hook the same way main-APVTS
     // edits do.  Effects-page slot type swap / move-up/down / clear / bypass

@@ -332,20 +332,6 @@ public:
     // whose DSP migrated from PluginProcessor into processBus.  Layers/Bass/
     // Drums/Master/FxBus carry their own peak atomics on their BusNode; the
     // remaining buses (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty)
-    // store their running-max mirror atomics on PluginProcessor and register
-    // pointers here so processBus can CAS-max into them in-place - keeps
-    // PluginProcessor::drainAndMerge promotion path unchanged.
-    struct BusPeakRefs
-    {
-        std::atomic<float>* peak  = nullptr;   // mono = max(L,R)
-        std::atomic<float>* peakL = nullptr;
-        std::atomic<float>* peakR = nullptr;
-    };
-    void registerBusPeakAtomics(int busChId,
-                                std::atomic<float>* peak,
-                                std::atomic<float>* peakL,
-                                std::atomic<float>* peakR);
-
     // C.1 (2026-04-30): runs the FX Bus pipeline on its accumulator buffer
     // (preEq -> rack -> postEq -> polarity -> M/S width -> fader x mute x
     // solo -> pan -> peak meter).  Caller must subsequently route the kFxBus
@@ -354,16 +340,6 @@ public:
     // level master_pan_law convention used by the Vox/Inst bus loop.
     void processEffectsBus(juce::AudioBuffer<float>& buf, double bpm,
                             bool busAnySolo, int panLaw);
-
-    // C.1 (2026-04-30): post-pipeline FX Bus peak (dBFS), written by
-    // processEffectsBus each block.  Returns -60 if EffectsBusNode hasn't
-    // been built yet.
-    std::pair<float, float> getEffectsBusPeakDbStereo() const;
-    // 2026-05-02: drain variant -- exchanges the FxBus node atomics with -inf
-    // and returns the running-max pair.  Used by the audio thread per block to
-    // reset the per-block window cleanly.  UI should NOT call this -- the
-    // const load() variant is the read-only path for UI.
-    std::pair<float, float> drainEffectsBusPeakDbStereo();
 
     // ── Bus EffectRack access (Effects Page / Mixer UI) ───────────────────────
     EffectRack* getLayersBusRack();
@@ -760,14 +736,6 @@ private:
     // kit's 13 strips are registered via ensureRustyInsertNode.
     std::unique_ptr<InstrChannelNode> mRustyDrumsBusNode;
     std::map<int, std::unique_ptr<InsertNode>> mRustyInserts;
-
-    // 2026-05-06 (Batch 9b): per-bus peak-meter atomic refs, indexed by busChId.
-    // Populated by registerBusPeakAtomics() during PluginProcessor construction.
-    // processBus CAS-maxes through these pointers in-place so the existing
-    // PluginProcessor::drainAndMerge promotion path stays unchanged.
-    // Sized to cover MixerChannelIds 0..15 (current bus IDs run 1..12).
-    static constexpr int kBusPeakRefsTableSize = 16;
-    std::array<BusPeakRefs, kBusPeakRefsTableSize> mBusPeakRefs {};
 
     // Deferred rack state: set by loadRackStates() if topology not yet built;
     // applied at the end of buildFixedTopology().

@@ -338,6 +338,14 @@ private:
     // to-image) overlay only when the viewport scroll position changed.
     int                                             mLastViewportX { -1 };
 
+    // QA-Eg (2026-05-24): cable-overlay idle-flicker fix.  Snapshot of each
+    // strip's displayed peak dB from the previous vblank, used to gate the
+    // overlay's repaint -- only dirty the overlay when at least one value
+    // changed by > kCableRepaintEpsilonDb.  Eliminates the dying-lightbulb
+    // flicker caused by transparent-overlay clear-then-redraw running every
+    // frame even when nothing visible changed.
+    std::vector<float>                              mLastPeakSnapshot;
+
     // 5F-4b B3+B4: cable overlay - paints green beziers + handles cable drag.
     struct CableOverlay : public juce::Component, private juce::Timer
     {
@@ -403,7 +411,21 @@ private:
             bool isSidechain= false;
         };
         CableHit hitTestCable(juce::Point<float> pt) const;
+        // QA-Eg: returns ALL cables within hit-zone of pt, in paint order
+        // (SC first, then mains + sends).  Right-click uses this to pop a
+        // chooser menu when multiple cables overlap; hitTestCable is the
+        // convenience that returns just the first.
+        std::vector<CableHit> hitTestCablesAll(juce::Point<float> pt) const;
         void showCablePopup(juce::Point<float> screenPt, const CableHit& hit);
+
+        // QA-Eg: deep dual-stub cable path - 300 px base drop + 0.25 *
+        // horizontal-distance multiplier so the cable's middle section
+        // descends below the visible page area, producing a patch-bay
+        // aesthetic where each end visually dangles down and slightly
+        // toward the other end.  Used by every cable + ghost-cable site
+        // in paint() so the math stays in one place.
+        juce::Path getMixerCablePath(float startX, float startY,
+                                     float destX,  float destY) const;
     };
     std::unique_ptr<CableOverlay> mCableOverlay;
 

@@ -107,12 +107,17 @@ void MixerPage::ScrollContent::paintOverChildren(juce::Graphics& g)
 // ─────────────────────────────────────────────────────────────────────────────
 MixerPage::CableOverlay::CableOverlay(MixerPage& o) : owner(o)
 {
+    // QA-Eg: setBufferedToImage was REMOVED here.  The cable overlay now
+    // repaints every vblank (telemetry-driven cable animation), so caching
+    // the bitmap adds overhead AND caused the unison-flicker pattern where
+    // every cable strobed in lockstep (all cables share the same cached
+    // bitmap; per-frame invalidation thrashed the cache).  Paint directly
+    // each frame instead.
     // hitTest() gates click-through: only intercepts near sockets or while dragging.
     setInterceptsMouseClicks(true, false);
     // R3.5 (2026-04-23): cache the bezier render in a bitmap so sibling strip
     // repaints (meter ticks 30 Hz x ~20 strips) don't force the cable overlay
     // to re-rasterize.  Cables flicker without this once enough strips exist.
-    setBufferedToImage(true);
 }
 
 bool MixerPage::CableOverlay::hitTest(int x, int y)
@@ -129,6 +134,28 @@ bool MixerPage::CableOverlay::hitTest(int x, int y)
     return findSocketNear(pt, 14.f, true) >= 0;
 }
 
+// QA-Eg: deep dual-stub cable path - 300 px base drop scaled by 0.25 *
+// horizontal distance.  Bezier control points are at (start.x, start.y +
+// tension) and (dest.x, dest.y + tension) so the cable's middle section
+// descends well below the visible page area (CableOverlay clips to page
+// bounds), producing a patch-bay aesthetic where each end drops down with
+// a slight lean toward the other.  Solves the cable-cut-off-behind-Master
+// problem naturally without conditional per-cable math.
+juce::Path MixerPage::CableOverlay::getMixerCablePath(float startX, float startY,
+                                                      float destX,  float destY) const
+{
+    constexpr float baseStubLength = 200.0f;
+    const float distanceMultiplier = std::abs(destX - startX) * 0.4f;
+    const float tension = baseStubLength + distanceMultiplier;
+
+    juce::Path path;
+    path.startNewSubPath(startX, startY);
+    path.cubicTo(startX, startY + tension,
+                 destX,  destY  + tension,
+                 destX,  destY);
+    return path;
+}
+
 void MixerPage::CableOverlay::paint(juce::Graphics& g)
 {
     // C.4 Phase 1 (2026-04-30): cable color palette per Jeff's spec -
@@ -136,68 +163,99 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
     //   Send cable: pink (was green-with-alpha)
     //   Sidechain cable: white
     constexpr juce::uint32 kCableMain = 0xff33ff88;   // green
-    constexpr juce::uint32 kCableSend = 0xffce3f8e;   // pink (matches kEffectsTabPink)
+    constexpr juce::uint32 kCableSend = 0xffff33b0;   // hot pink (perceptual parity with the green main)
     constexpr juce::uint32 kCableSc   = 0xffeeeeee;   // white
 
-    auto strokeBezier = [&g](juce::Point<float> src, juce::Point<float> dst)
+    // QA-Eg telemetry helper: map source-strip peak dBFS to (alpha, color).
+    // Base alpha 0.55 so silent cables stay clearly visible.  dB-normalized
+    // mapping (-60..0 dB linear interpolation) so perceived brightness tracks
+    // perceived loudness instead of compressing into the top 10 dB.  Warning
+    // color lerps toward red when the linear peak crosses 0.95 (~ -0.45 dB).
+    auto cableTelemetry = [this](int srcChannelId, juce::Colour baseColor)
+        -> juce::Colour
     {
-        const float hDist = std::abs(dst.x - src.x);
-        const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
-        juce::Path path;
-        path.startNewSubPath(src);
-        path.cubicTo(src.x, src.y + sag, dst.x, dst.y + sag, dst.x, dst.y);
-        g.strokePath(path, juce::PathStrokeType(2.5f,
-            juce::PathStrokeType::curved,
-            juce::PathStrokeType::rounded));
+        float peakDb = -60.0f;
+        if (auto* srcStrip = owner.findStripByChannelId(srcChannelId))
+            peakDb = srcStrip->getCurrentPeakDb();
+        const float peakNorm = juce::jlimit(0.0f, 1.0f, (peakDb + 60.0f) / 60.0f);
+        const float alpha    = 0.55f + 0.45f * peakNorm;
+        const float peakLin  = juce::jlimit(0.0f, 1.0f,
+            juce::Decibels::decibelsToGain(peakDb, -60.0f));
+        juce::Colour col = baseColor;
+        if (peakLin >= 0.95f)
+        {
+            const float warn = juce::jlimit(0.0f, 1.0f, (peakLin - 0.95f) / 0.05f);
+            col = baseColor.interpolatedWith(juce::Colours::red, warn);
+        }
+        return col.withAlpha(alpha);
     };
+
+    // QA-Eg: send slot fan-out - first send anchored at the socket (0 offset),
+    // additional sends fan out symmetrically so a single-send strip's cable
+    // lands EXACTLY at the socket dot.
+    constexpr int kSendOffsets[4] = { 0, 8, -8, 16 };
+
+    const auto mainStroke = juce::PathStrokeType(2.5f,
+        juce::PathStrokeType::curved,
+        juce::PathStrokeType::rounded);
+    // Sends use a slightly thicker stroke so they read clearly when stacked
+    // alongside the main-out cable from the same source.
+    const auto sendStroke = juce::PathStrokeType(3.0f,
+        juce::PathStrokeType::curved,
+        juce::PathStrokeType::rounded);
 
     const auto& edges   = owner.mProcessor.mVibeGraph.getRoutingGraph().edges();
     const auto& scEdges = owner.mProcessor.mVibeGraph.getRoutingGraph().scEdges();
 
-    // Main + send cables
+    // Pass 1: main-out cables (paint underneath sends).
     for (const auto& e : edges)
     {
-        // While dragging a main-out, hide the source's existing main-out cable
-        if (mDragging && e.srcId == mDragSrcId && e.isMainOut)
-            continue;
+        if (! e.isMainOut) continue;
+        if (mDragging && e.srcId == mDragSrcId) continue;
 
         auto src = owner.getSocketPosition(e.srcId);
         auto dst = owner.getSocketPosition(e.dstId);
         if (src.x < 0 || dst.x < 0) continue;
 
-        g.setColour(juce::Colour(e.isMainOut ? kCableMain : kCableSend));
-        strokeBezier(src, dst);
+        g.setColour(cableTelemetry(e.srcId, juce::Colour(kCableMain)));
+        g.strokePath(getMixerCablePath(src.x, src.y, dst.x, dst.y), mainStroke);
     }
 
-    // C.4 Phase 1: SC cables (white).  Drawn on top of send/main so SC stands
-    // out visually when overlapping with sends.
+    // Pass 2: send cables (paint on top of mains).
+    std::map<int, int> sendSlotIndex;
+    for (const auto& e : edges)
+    {
+        if (e.isMainOut) continue;
+
+        auto src = owner.getSocketPosition(e.srcId);
+        auto dst = owner.getSocketPosition(e.dstId);
+        if (src.x < 0 || dst.x < 0) continue;
+
+        const int idx = sendSlotIndex[e.srcId]++;
+        src.x += (float) kSendOffsets[idx % 4];
+
+        g.setColour(cableTelemetry(e.srcId, juce::Colour(kCableSend)));
+        g.strokePath(getMixerCablePath(src.x, src.y, dst.x, dst.y), sendStroke);
+    }
+
+    // Pass 3: SC cables (white) - on top of mains + sends.
     for (const auto& sce : scEdges)
     {
         auto src = owner.getSocketPosition(sce.srcId);
         auto dst = owner.getSocketPosition(sce.dstId);
         if (src.x < 0 || dst.x < 0) continue;
 
-        g.setColour(juce::Colour(kCableSc));
-        strokeBezier(src, dst);
+        g.setColour(cableTelemetry(sce.srcId, juce::Colour(kCableSc)));
+        g.strokePath(getMixerCablePath(src.x, src.y, dst.x, dst.y), mainStroke);
     }
 
-    // Ghost cable while dragging the main-out
+    // Ghost cable while dragging the main-out (no telemetry: no committed source)
     if (mDragging)
     {
         g.setColour(juce::Colour(kCableMain).withAlpha(0.45f));
-
-        const float hDist = std::abs(mDragMousePos.x - mDragSrcSocket.x);
-        const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
-
-        juce::Path ghost;
-        ghost.startNewSubPath(mDragSrcSocket);
-        ghost.cubicTo(mDragSrcSocket.x, mDragSrcSocket.y + sag,
-                      mDragMousePos.x,  mDragMousePos.y + sag,
-                      mDragMousePos.x,  mDragMousePos.y);
-
-        g.strokePath(ghost, juce::PathStrokeType(2.5f,
-            juce::PathStrokeType::curved,
-            juce::PathStrokeType::rounded));
+        g.strokePath(getMixerCablePath(mDragSrcSocket.x, mDragSrcSocket.y,
+                                       mDragMousePos.x,  mDragMousePos.y),
+                     mainStroke);
     }
 
     // B5: ghost cable in send-placement mode (follows cursor) - pink.
@@ -207,18 +265,9 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
         if (srcSock.x >= 0)
         {
             g.setColour(juce::Colour(kCableSend).withAlpha(0.40f));
-
-            const float hDist = std::abs(mDragMousePos.x - srcSock.x);
-            const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
-
-            juce::Path ghost;
-            ghost.startNewSubPath(srcSock);
-            ghost.cubicTo(srcSock.x, srcSock.y + sag,
-                          mDragMousePos.x, mDragMousePos.y + sag,
-                          mDragMousePos.x, mDragMousePos.y);
-
-            g.strokePath(ghost, juce::PathStrokeType(2.0f),
-                         juce::AffineTransform{});
+            g.strokePath(getMixerCablePath(srcSock.x, srcSock.y,
+                                           mDragMousePos.x, mDragMousePos.y),
+                         juce::PathStrokeType(2.0f));
         }
     }
 
@@ -229,18 +278,9 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
         if (srcSock.x >= 0)
         {
             g.setColour(juce::Colour(kCableSc).withAlpha(0.45f));
-
-            const float hDist = std::abs(mDragMousePos.x - srcSock.x);
-            const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
-
-            juce::Path ghost;
-            ghost.startNewSubPath(srcSock);
-            ghost.cubicTo(srcSock.x, srcSock.y + sag,
-                          mDragMousePos.x, mDragMousePos.y + sag,
-                          mDragMousePos.x, mDragMousePos.y);
-
-            g.strokePath(ghost, juce::PathStrokeType(2.0f),
-                         juce::AffineTransform{});
+            g.strokePath(getMixerCablePath(srcSock.x, srcSock.y,
+                                           mDragMousePos.x, mDragMousePos.y),
+                         juce::PathStrokeType(2.0f));
         }
     }
 
@@ -271,12 +311,51 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
 
 void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
 {
-    // B6: right-click → show cable property popup
+    // B6: right-click -> show cable property popup.  QA-Eg: when multiple
+    // cables sit near the click (e.g., a send + sidechain + main all from
+    // the same source going to the same area), pop a chooser menu first so
+    // the user can pick which cable's properties to edit.
     if (e.mods.isRightButtonDown())
     {
-        auto hit = hitTestCable(e.position);
-        if (hit.srcId >= 0)
-            showCablePopup(e.getScreenPosition().toFloat(), hit);
+        auto hits = hitTestCablesAll(e.position);
+        if (hits.empty()) return;
+        const auto screenPt = e.getScreenPosition().toFloat();
+        if (hits.size() == 1)
+        {
+            // QA-Eg: skip popup for single-hit mains (no editable props).
+            if (! hits.front().isMainOut)
+                showCablePopup(screenPt, hits.front());
+            return;
+        }
+
+        juce::PopupMenu chooser;
+        for (size_t i = 0; i < hits.size(); ++i)
+        {
+            const auto& h = hits[i];
+            auto* srcStrip = owner.findStripByChannelId(h.srcId);
+            auto* dstStrip = owner.findStripByChannelId(h.dstId);
+            const juce::String srcName = srcStrip ? srcStrip->getName() : juce::String("?");
+            const juce::String dstName = dstStrip ? dstStrip->getName() : juce::String("?");
+            juce::String label;
+            if (h.isSidechain)
+                label = "Sidechain: " + srcName + " -> " + dstName;
+            else if (h.isMainOut)
+                label = "Main: " + srcName + " -> " + dstName;
+            else
+                label = "Send " + juce::String(h.sendSlot + 1) + ": "
+                      + srcName + " -> " + dstName;
+            // QA-Eg: main entries are greyed-out (no popup behind them); they
+            // appear in the chooser for visibility only.
+            const bool isActive = ! h.isMainOut;
+            chooser.addItem((int) i + 1, label, isActive);
+        }
+        chooser.showMenuAsync(juce::PopupMenu::Options{},
+            [this, hits, screenPt](int r)
+            {
+                if (r > 0 && r <= (int) hits.size()
+                    && ! hits[(size_t)(r - 1)].isMainOut)
+                    showCablePopup(screenPt, hits[(size_t)(r - 1)]);
+            });
         return;
     }
 
@@ -767,26 +846,27 @@ void MixerPage::onAddCableRequestedFor(int srcChannelId)
 //  5F-4b B6: cable hit-testing + right-click popup
 // ═══════════════════════════════════════════════════════════════════════════════
 
-MixerPage::CableOverlay::CableHit
-MixerPage::CableOverlay::hitTestCable(juce::Point<float> pt) const
+std::vector<MixerPage::CableOverlay::CableHit>
+MixerPage::CableOverlay::hitTestCablesAll(juce::Point<float> pt) const
 {
+    std::vector<CableHit> hits;
     const auto& edges   = owner.mProcessor.mVibeGraph.getRoutingGraph().edges();
     const auto& scEdges = owner.mProcessor.mVibeGraph.getRoutingGraph().scEdges();
 
-    auto cableHits = [&pt](juce::Point<float> src, juce::Point<float> dst) -> bool
+    // QA-Eg: hit-test path now matches the rendered path (getMixerCablePath
+    // with 200 px tension).  Previously this used a shallow inline bezier
+    // that no longer matched what was drawn, so click positions on the
+    // visible cables often missed the hit zone entirely.
+    auto cableHits = [&pt, this](juce::Point<float> src, juce::Point<float> dst) -> bool
     {
-        const float hDist = std::abs(dst.x - src.x);
-        const float sag   = juce::jlimit(15.f, 60.f, hDist * 0.15f);
-        juce::Path bezier;
-        bezier.startNewSubPath(src);
-        bezier.cubicTo(src.x, src.y + sag, dst.x, dst.y + sag, dst.x, dst.y);
+        juce::Path bezier = getMixerCablePath(src.x, src.y, dst.x, dst.y);
         juce::Path hitZone;
         juce::PathStrokeType(10.f).createStrokedPath(hitZone, bezier);
         return hitZone.contains(pt);
     };
 
-    // C.4 Phase 1 (2026-04-30): SC cables hit-tested first so they "win" when
-    // overlapping with sends visually (matches paint order: SC drawn on top).
+    // C.4 Phase 1 (2026-04-30): SC cables collected first so they appear at
+    // the TOP of the chooser when sends + SC overlap (matches paint order).
     for (const auto& sce : scEdges)
     {
         auto src = owner.getSocketPosition(sce.srcId);
@@ -799,7 +879,7 @@ MixerPage::CableOverlay::hitTestCable(juce::Point<float> pt) const
             hit.dstId       = sce.dstId;
             hit.scRecvSlot  = sce.dstSlot;
             hit.isSidechain = true;
-            return hit;
+            hits.push_back(hit);
         }
     }
 
@@ -826,10 +906,17 @@ MixerPage::CableOverlay::hitTestCable(juce::Point<float> pt) const
                         if ((int) p->load() == e.dstId) { hit.sendSlot = s; break; }
                 }
             }
-            return hit;
+            hits.push_back(hit);
         }
     }
-    return {};   // no cable hit
+    return hits;
+}
+
+MixerPage::CableOverlay::CableHit
+MixerPage::CableOverlay::hitTestCable(juce::Point<float> pt) const
+{
+    auto all = hitTestCablesAll(pt);
+    return all.empty() ? CableHit{} : all.front();
 }
 
 // ── CableSendPopup ───────────────────────────────────────────────────────────
@@ -906,27 +993,10 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mPrePostAtt;
 };
 
-// Minimal popup for main-out cables (info only, not editable)
-class CableMainOutPopup : public juce::Component
-{
-public:
-    CableMainOutPopup(const juce::String& srcName, const juce::String& dstName)
-    {
-        mLabel.setText(srcName + " " + juce::String(juce::CharPointer_UTF8("\xe2\x86\x92")) + " " + dstName + "  (main out)",
-                       juce::dontSendNotification);
-        mLabel.setFont(juce::Font(11.f, juce::Font::bold));
-        mLabel.setColour(juce::Label::textColourId, juce::Colour(0xff33ff88));
-        mLabel.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(mLabel);
-        setSize(200, 28);
-    }
-
-    void resized() override { mLabel.setBounds(getLocalBounds().reduced(4)); }
-    void paint(juce::Graphics& g) override { g.fillAll(juce::Colour(0xff1e2024)); }
-
-private:
-    juce::Label mLabel;
-};
+// QA-Eg: CableMainOutPopup class removed - main cables have no editable
+// properties; the popup was just a glorified tooltip.  Main cables now
+// appear as greyed-out entries in the right-click chooser (visibility
+// only) and have no popup behavior on single-hit right-click either.
 }  // anon namespace
 
 void MixerPage::CableOverlay::showCablePopup(juce::Point<float> screenPt,
@@ -1013,8 +1083,10 @@ void MixerPage::CableOverlay::showCablePopup(juce::Point<float> screenPt,
     }
     else if (hit.isMainOut)
     {
-        content = std::make_unique<CableMainOutPopup>(getStripName(hit.srcId),
-                                                       getStripName(hit.dstId));
+        // QA-Eg: main cables have no popup.  User drags the cable to move/
+        // remove the routing.  Chooser shows them greyed-out for visibility;
+        // single-hit right-click on a main does nothing.
+        return;
     }
     else if (hit.sendSlot >= 0)
     {
@@ -2829,12 +2901,10 @@ void MixerPage::timerCallback()
     // change detection + (via base class) flash decay -- none of which need
     // monitor-refresh precision.
 
-    // 5F-4b B3: repaint cable overlay only when scroll position changes - the
-    // bezier path itself only depends on socket positions, which only move on
-    // scroll or layout.  The overlay is setBufferedToImage(true) so sibling
-    // strip-meter repaints don't force a re-rasterize.  Drag / flash / send-
-    // placement modes self-trigger repaints via the overlay's own timer +
-    // mouseDrag handlers, so we don't need to pump them here.
+    // QA-Eg: scroll-driven repaint kept here even though onVBlank now pumps
+    // a repaint every frame (for telemetry-driven cable animation).  This
+    // immediate repaint on scroll avoids one frame of stale-cable visuals
+    // during fast scroll bursts.
     const int curViewportX = mViewport ? mViewport->getViewPositionX() : 0;
     if (mCableOverlay && curViewportX != mLastViewportX)
     {
@@ -2924,6 +2994,10 @@ void MixerPage::onVBlank()
     drainStereoBus (mVoxBusStrip       .get(), mProcessor.mVoxBusPeakDbL,        mProcessor.mVoxBusPeakDbR);
     drainStereoBus (mInstBusStrip      .get(), mProcessor.mInstBusPeakDbL,       mProcessor.mInstBusPeakDbR);
     drainStereoBus (mRustyDrumsBusStrip.get(), mProcessor.mRustyDrumsBusPeakDbL, mProcessor.mRustyDrumsBusPeakDbR);   // J-7b
+    // QA-Eg: cable overlay reads each strip's cached peak (MixerTrackStrip::
+    // getCurrentPeakDb) for telemetry-driven alpha + warning-color animation.
+    // Repaint here so cable updates land in the same vblank as the strip
+    // meters they're sourced from -- no race between cable read and strip drain.
 
     // Per-insert peak: drain InsertNode atomics directly via the new exchange
     // variant on VibeGraph.  Audio CAS-maxes into them; UI exchange-and-resets
@@ -2965,6 +3039,63 @@ void MixerPage::onVBlank()
     if (mVoxBus2Strip)  drainStereoBus (mVoxBus2Strip .get(), mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
     if (mInstBus2Strip) drainStereoBus (mInstBus2Strip.get(), mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);
     if (mInstBus3Strip) drainStereoBus (mInstBus3Strip.get(), mProcessor.mInstBus3PeakDbL, mProcessor.mInstBus3PeakDbR);
+
+    // QA-Eg (2026-05-24): cable overlay repaint is delta-gated against a
+    // snapshot of every strip's displayed peak dB from the previous vblank.
+    // At idle (every meter at floor) the snapshot is stable -> no repaint ->
+    // the transparent overlay's clear-then-redraw cycle (the dying-lightbulb
+    // flicker source) is skipped entirely.  During playback every strip moves
+    // each frame -> repaint every frame -> smooth telemetry animation as
+    // before.  Threshold is 0.1 dB -- small enough that any user-visible
+    // alpha change in cableTelemetry's -60..0 dB mapping crosses it.
+    constexpr float kCableRepaintEpsilonDb = 0.1f;
+    std::vector<float> snapshot;
+    snapshot.reserve(mLastPeakSnapshot.size() + 8);
+
+    auto pushPeak = [&] (const MixerTrackStrip* strip)
+    {
+        if (strip) snapshot.push_back(strip->getCurrentPeakDb());
+    };
+
+    pushPeak(mMasterStrip       .get());
+    pushPeak(mLayersBusStrip    .get());
+    pushPeak(mBassBusStrip      .get());
+    pushPeak(mDrumsBusStrip     .get());
+    pushPeak(mFXBusStrip        .get());
+    pushPeak(mAudioClipsBusStrip.get());
+    pushPeak(mVoxBusStrip       .get());
+    pushPeak(mInstBusStrip      .get());
+    pushPeak(mRustyDrumsBusStrip.get());
+    pushPeak(mVoxBus2Strip      .get());
+    pushPeak(mInstBus2Strip     .get());
+    pushPeak(mInstBus3Strip     .get());
+
+    for (auto& kv : mLayerStrips) pushPeak(kv.second.get());
+    for (auto& kv : mBassStrips)  pushPeak(kv.second.get());
+    for (auto& kv : mDrumStrips)  pushPeak(kv.second.get());
+    for (auto& kv : mAudioStrips) pushPeak(kv.second.get());
+    for (auto& kv : mAuxStrips)   pushPeak(kv.second.get());
+    for (auto& kv : mVoxStrips)   pushPeak(kv.second.get());
+    for (auto& kv : mInstStrips)  pushPeak(kv.second.get());
+    for (auto& kv : mRustyStrips) pushPeak(kv.second.get());
+
+    bool cableDirty = (snapshot.size() != mLastPeakSnapshot.size());
+    if (! cableDirty)
+    {
+        for (size_t i = 0; i < snapshot.size(); ++i)
+        {
+            if (std::abs(snapshot[i] - mLastPeakSnapshot[i]) > kCableRepaintEpsilonDb)
+            {
+                cableDirty = true;
+                break;
+            }
+        }
+    }
+
+    mLastPeakSnapshot = std::move(snapshot);
+
+    if (cableDirty && mCableOverlay)
+        mCableOverlay->repaint();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3208,35 +3339,36 @@ void MixerPage::scrollBarMoved(juce::ScrollBar* sb, double newRangeStart)
 
 void MixerPage::resized()
 {
-    constexpr int kTopScrollH = 10;   // top scrollbar height - always visible
+    constexpr int kHScrollBarH = 10;   // horizontal scrollbar height - always visible
     auto b = getLocalBounds();
 
-    // ── Top scrollbar strip (above everything, spans the console area) ────
-    auto topBar = b.removeFromTop(kTopScrollH);
+    // Horizontal scrollbar strip (bottom of the scrollable strips area).
+    auto scrollBarRow = b.removeFromBottom(kHScrollBarH);
 
-    // Master strip (fixed, full remaining height)
-    mMasterStrip->setBounds(0, b.getY(), kFixedPanelW, b.getHeight());
+    // Master strip (fixed, full page height - stationary, so no scrollbar
+    // space is reserved on its column).
+    mMasterStrip->setBounds(0, 0, kFixedPanelW, getHeight());
 
     int vpX = kFixedPanelW + 2;
     mViewport->setBounds(vpX, b.getY(), b.getWidth() - vpX, b.getHeight());
 
     if (mTopScrollBar)
-        mTopScrollBar->setBounds(vpX, topBar.getY(),
-                                 b.getWidth() - vpX, kTopScrollH);
+        mTopScrollBar->setBounds(vpX, scrollBarRow.getY(),
+                                 b.getWidth() - vpX, kHScrollBarH);
 
     mScrollContent->setSize(mScrollContent->getWidth(), mViewport->getHeight());
     layoutScrollContent();
     syncTopScrollBar();
 
-    // 5F-4b B3: cable overlay covers full page, paints on top of all strips.
+    // Cable overlay covers the full page and paints on top of every strip +
+    // the horizontal scrollbar.  CableOverlay::hitTest is transparent off
+    // cables / sockets, so the scrollbar stays draggable underneath the
+    // visual overlap.
     if (mCableOverlay)
     {
         mCableOverlay->setBounds(getLocalBounds());
         mCableOverlay->toFront(false);
     }
-    // Keep the permanent top scrollbar above the cable overlay so cables
-    // drawn over the console never cover it.
-    if (mTopScrollBar) mTopScrollBar->toFront(false);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

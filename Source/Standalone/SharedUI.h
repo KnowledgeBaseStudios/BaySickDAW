@@ -1632,6 +1632,16 @@ public:
     // Stereo entry point - independent L and R levels.
     void setStereoLevel (float dBFS_L, float dBFS_R);
 
+    // QA-Eg: smoothed visual value exposed for CableOverlay telemetry.
+    // Returns max(mDisplayDbL, mDisplayDbR) - the FL-parity ballistic-smoothed
+    // value the meter LEDs are currently rendering.  Cables reading this stay
+    // in perfect visual sync with the meter bars (no separate smoothing layer
+    // in MixerTrackStrip, no double-smoothing artefacts).
+    float getCurrentDisplayedDb() const noexcept
+    {
+        return juce::jmax(mDisplayDbL, mDisplayDbR);
+    }
+
     // Back-compat no-op.  All strips now use the FL-parity range below.
     void setCompact (bool) {}
 

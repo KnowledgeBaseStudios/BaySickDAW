@@ -81,6 +81,13 @@ public:
     // nodes get split into peakDbL+peakDbR, callers switch to this method.
     void setStereoLevel(float dBFS_L, float dBFS_R);
 
+    // QA-Eg: cable-overlay telemetry feed.  Returns the DBFSMeter's currently-
+    // displayed smoothed value (FL-style ballistic-filtered max of L/R).
+    // Routing through DBFSMeter gives cables the same visual smoothness as
+    // the meter LEDs - no separate smoothing layer, no double-smoothing
+    // artefacts, cables and meters stay in perfect visual sync.
+    float getCurrentPeakDb() const noexcept { return mMeter.getCurrentDisplayedDb(); }
+
     // ── Model sync (does NOT fire callbacks) ─────────────────────────────────
     // Use these to push state from PatternManager into the UI.
     void setFaderDb (float db,   bool notify = false);

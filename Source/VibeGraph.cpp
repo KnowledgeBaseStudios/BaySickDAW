@@ -229,9 +229,6 @@ struct VibeGraph::LayersBusNode
     // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
     std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
     int                    peakRingIdx { 0 };
-    // Peak-hold decay (set in prepare) - see InsertNode for rationale.
-    float                  peakDecayDbPerBlock { 0.35f };
-
     juce::Synthesiser&       synth;
     VibeGraph::BusMix&       busMix;
     // 12i: spectrum feeds now live inside each EQ8MsDSP (preFeed/postFeed members).
@@ -289,9 +286,6 @@ struct VibeGraph::LayersBusNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         busEq.prepare(sr, blockSize);
-        constexpr float kDecayDbPerSec = 30.0f;
-        peakDecayDbPerBlock = kDecayDbPerSec * (float) blockSize
-                              / (float) (sr > 0.0 ? sr : 44100.0);
     }
     void reset()
     {
@@ -432,8 +426,6 @@ struct VibeGraph::BassBusNode
     // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
     std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
     int                    peakRingIdx { 0 };
-    float                  peakDecayDbPerBlock { 0.35f };
-
     BassSynth&               bass;
     VibeGraph::BusMix&       busMix;
     // 12i: spectrum feeds now live inside each EQ8MsDSP.
@@ -484,9 +476,6 @@ struct VibeGraph::BassBusNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         busEq.prepare(sr, blockSize);
-        constexpr float kDecayDbPerSec = 30.0f;
-        peakDecayDbPerBlock = kDecayDbPerSec * (float) blockSize
-                              / (float) (sr > 0.0 ? sr : 44100.0);
     }
     void reset()
     {
@@ -599,8 +588,6 @@ struct VibeGraph::DrumsBusNode
     // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
     std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
     int                    peakRingIdx { 0 };
-    float                  peakDecayDbPerBlock { 0.35f };
-
     // 2026-04-25: DrumSynth ref removed - drum bus now ALWAYS uses preRendered
     // path (per-drum-tab InsertNode outputs).  Silent fallback if no preRendered.
     VibeGraph::BusMix&       busMix;
@@ -649,9 +636,6 @@ struct VibeGraph::DrumsBusNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         busEq.prepare(sr, blockSize);
-        constexpr float kDecayDbPerSec = 30.0f;
-        peakDecayDbPerBlock = kDecayDbPerSec * (float) blockSize
-                              / (float) (sr > 0.0 ? sr : 44100.0);
     }
     void reset()
     {
@@ -763,8 +747,6 @@ struct VibeGraph::MasterBusNode
     // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
     std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
     int                    peakRingIdx { 0 };
-    float                  peakDecayDbPerBlock { 0.35f };
-
     juce::AudioProcessorValueTreeState& apvts;
     VibeGraph::BusMix&                  busMix;
 
@@ -812,9 +794,6 @@ struct VibeGraph::MasterBusNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         busEq.prepare(sr, blockSize);
-        constexpr float kDecayDbPerSec = 30.0f;
-        peakDecayDbPerBlock = kDecayDbPerSec * (float) blockSize
-                              / (float) (sr > 0.0 ? sr : 44100.0);
     }
     void reset()
     {
@@ -913,8 +892,6 @@ struct VibeGraph::EffectsBusNode
     // Per-node peak ring for latency-compensated meter publish (2026-05-02).
     std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
     int                peakRingIdx { 0 };
-    float              peakDecayDbPerBlock { 0.35f };
-
     // 5F-4a Batch 6: APVTS pointers for polarity + width
     std::atomic<float>* pPolarity { nullptr };
     std::atomic<float>* pWidth    { nullptr };
@@ -950,9 +927,6 @@ struct VibeGraph::EffectsBusNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         busEq.prepare(sr, blockSize);
-        constexpr float kDecayDbPerSec = 30.0f;
-        peakDecayDbPerBlock = kDecayDbPerSec * (float) blockSize
-                              / (float) (sr > 0.0 ? sr : 44100.0);
     }
     void reset()
     {
@@ -1499,25 +1473,6 @@ void VibeGraph::processMasterBus(juce::AudioBuffer<float>& sumBuf, double bpm)
     masterPeakDbR.store(mMasterNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
 }
 
-// 2026-05-06 (Batch 9b): unified bus DSP entry point - see VibeGraph.h header
-// comment for invariants.  PluginProcessor registers the running-max peak
-// atomics for every bus that doesn't carry its own (Clips / Vox / Inst /
-// Vox2 / Inst2 / Inst3 / Rusty); processBus CAS-maxes through them in-place.
-void VibeGraph::registerBusPeakAtomics(int busChId,
-                                        std::atomic<float>* peak,
-                                        std::atomic<float>* peakL,
-                                        std::atomic<float>* peakR)
-{
-    if (busChId < 0 || busChId >= kBusPeakRefsTableSize)
-    {
-        jassertfalse;
-        return;
-    }
-    mBusPeakRefs[(size_t) busChId].peak  = peak;
-    mBusPeakRefs[(size_t) busChId].peakL = peakL;
-    mBusPeakRefs[(size_t) busChId].peakR = peakR;
-}
-
 void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
                             double bpm, int panLaw)
 {
@@ -1592,7 +1547,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     //   preEq -> rack (with bypass) -> postEq -> polarity/width -> fader x mute
     //   x in-group solo (where applicable) -> pan -> peak meter.
     // Per-bus state: prefix string + EQ/rack getters + polarity/width method
-    // + in-group solo formula + peak atomic refs from mBusPeakRefs.
+    // + in-group solo formula.
     if (mApvts == nullptr)        return;
     if (buf.getNumChannels() < 2) return;
     const int n = buf.getNumSamples();
@@ -1710,37 +1665,16 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             applyStereoPan (buf, pan, panLaw);
     }
 
-    // Peak meter.  Migrated buses (node != nullptr) publish into their
-    // InstrChannelNode's G1 peak fields via publishPeakReading; the
-    // exchange-store at the end of this function lifts them to VibeGraph
-    // member atomics, parallel to the L/B/D pattern above.  Buses still on
-    // the G2 path CAS-max into PluginProcessor's *Run mirrors via mBusPeakRefs.
+    // Peak meter.  Each bus's InstrChannelNode (or BusNode for L/B/D/Master/FX)
+    // owns the G1 peak fields; publishPeakReading writes them inside this
+    // block, and the exchange-store at the end of this function lifts the
+    // node-internal peak atomics into VibeGraph member atomics parallel to
+    // the L/B/D pattern above.
     if (node != nullptr)
     {
         publishPeakReading (buf,
                             node->peakRingL, node->peakRingR, node->peakRingIdx,
                             node->peakDbL, node->peakDbR, node->peakDb);
-    }
-    else
-    {
-        const auto& refs = mBusPeakRefs[(size_t) busChId];
-        const float pkLin_L = buf.getMagnitude (0, 0, n);
-        const float pkLin_R = buf.getMagnitude (1, 0, n);
-        const float thisL = juce::Decibels::gainToDecibels (pkLin_L, -60.0f);
-        const float thisR = juce::Decibels::gainToDecibels (pkLin_R, -60.0f);
-        const float thisM = juce::jmax (thisL, thisR);
-        auto casMax = [] (std::atomic<float>* a, float v) noexcept
-        {
-            if (! a) return;
-            if (v == -std::numeric_limits<float>::infinity()) return;
-            float cur = a->load (std::memory_order_relaxed);
-            while (cur < v
-                   && ! a->compare_exchange_weak (cur, v, std::memory_order_relaxed))
-            {}
-        };
-        casMax (refs.peakL, thisL);
-        casMax (refs.peakR, thisR);
-        casMax (refs.peak,  thisM);
     }
 
     // Exchange-store the migrated buses' node-internal peak atomics into
@@ -1856,24 +1790,6 @@ void VibeGraph::processEffectsBus(juce::AudioBuffer<float>& buf, double bpm,
     }
 }
 
-std::pair<float, float> VibeGraph::getEffectsBusPeakDbStereo() const
-{
-    if (! mEffectsBusNode) return { -60.f, -60.f };
-    return { mEffectsBusNode->peakDbL.load(std::memory_order_relaxed),
-             mEffectsBusNode->peakDbR.load(std::memory_order_relaxed) };
-}
-
-// 2026-05-02: drain variant -- exchange the FxBus node atomics with -inf and
-// return the running-max pair.  Audio thread calls this once per block after
-// processEffectsBus so the node's per-block window resets cleanly; the caller
-// CAS-maxes the returned values into the cross-block PluginProcessor mirror.
-std::pair<float, float> VibeGraph::drainEffectsBusPeakDbStereo()
-{
-    if (! mEffectsBusNode) return { -60.f, -60.f };
-    constexpr float kNegInf = -std::numeric_limits<float>::infinity();
-    return { mEffectsBusNode->peakDbL.exchange(kNegInf, std::memory_order_relaxed),
-             mEffectsBusNode->peakDbR.exchange(kNegInf, std::memory_order_relaxed) };
-}
 EffectRack* VibeGraph::getAudioClipsBusRack() { return mAudioClipsBusNode ? &mAudioClipsBusNode->rack : nullptr; }
 EffectRack* VibeGraph::getVoxBusRack()        { return mVoxBusNode        ? &mVoxBusNode       ->rack : nullptr; }
 EffectRack* VibeGraph::getInstBusRack()       { return mInstBusNode       ? &mInstBusNode      ->rack : nullptr; }

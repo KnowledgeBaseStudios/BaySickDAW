@@ -536,8 +536,18 @@ required sections (locked 2026-05-11) + Rule 4 (Diagnostic Instrumentation Catal
 (per Main Plan §0 Rule 4 — append a row WITH the diagnostic add, walk + strip
 at task/batch close. Format: Site / Tag / Purpose / Disposition.)
 
-No diagnostics added through Task 2 (FX bus migration was a pure exchange-store
-+ drain rewire — no instrumentation needed).
+**Log file:** `Documents/BaySickDAW/cable_diag.log` (appended via
+`cableDiagLog()` helper; direct `juce::FileOutputStream` writes per call,
+bypassing `juce::Logger` whose `writeToLog` is a static routing to the
+current global logger -- nullptr in this app -- which silently dropped
+the first attempt's instance-method calls).
+
+| Site | Tag | Purpose | Disposition |
+|------|-----|---------|-------------|
+| `Source/Standalone/MixerPage.cpp` `cableDiagLog()` helper | `[CABLE-DIAG]` | Direct file-append writer to `cable_diag.log`; called by the 3 diagnostic sites below. | Remove at QA-Eg close (with all callers). |
+| `Source/Standalone/MixerPage.cpp` `CableOverlay::paint()` top of function | `[CABLE-DIAG]` | Log `paint()` fire count per second to detect phantom repaint sources (mid-Task-7 flicker investigation, no audio playing). | Remove at QA-Eg close. |
+| `Source/Standalone/MixerPage.cpp` `cableTelemetry` lambda inside `CableOverlay::paint` | `[CABLE-DIAG]` | Log per-cable alpha-change events when delta > 0.02 between frames to detect data oscillation (suggests strip peak instability). | Remove at QA-Eg close. |
+| `Source/Standalone/MixerPage.cpp` `MixerPage::onVBlank()` end of function | `[CABLE-DIAG]` | Log `onVBlank` fire count per second to confirm vblank rate matches monitor refresh + compare to `paint()` rate. | Remove at QA-Eg close. |
 
 **Pre-existing Keep entries** (retro-added per Rule 4 "pre-existing diagnostics
 get retro-added with Keep when first surfaced"):

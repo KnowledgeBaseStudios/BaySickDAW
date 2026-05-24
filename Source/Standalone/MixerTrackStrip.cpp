@@ -412,6 +412,8 @@ void MixerTrackStrip::setAccentColor(juce::Colour c)
 
 void MixerTrackStrip::setLevel(float dBFS)
 {
+    // QA-Eg: smoothing now lives in DBFSMeter (delta-time attack + release).
+    // Cable overlay reads the smoothed value via getCurrentPeakDb -> mMeter.
     mMeter.setLevel(dBFS);
 }
 

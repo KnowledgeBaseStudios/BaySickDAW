@@ -6478,17 +6478,28 @@ void DBFSMeter::onVBlank()
     const float clampedL = (incomingL <= kFloor) ? kFloor : incomingL;
     const float clampedR = (incomingR <= kFloor) ? kFloor : incomingR;
 
-    // Delta-time decay -- ballistics scale with frame interval so 60/120/144
-    // Hz monitors all see the same dB-per-second fall rate.
+    // Delta-time ballistics -- both attack and release scale with frame
+    // interval so 60/120/144 Hz monitors all see the same time constants.
     const double nowMs = juce::Time::getMillisecondCounterHiRes();
     const double dt    = juce::jlimit (0.001, 0.100, (nowMs - mLastVBlankMs) * 0.001);
     mLastVBlankMs = nowMs;
     const float decayDb = (float) (kDecayDbPerSec * dt);
 
+    // QA-Eg: smooth attack via exponential filter (FL-style visual low-pass).
+    // Time constant ~20 ms = fast enough to register transients clearly, slow
+    // enough that bursty audio doesn't strobe the bar (or any cables routed
+    // through getCurrentDisplayedDb()).  Peak-hold marker keeps INSTANT attack
+    // below so the per-channel peak indicator still snaps to actual peaks.
+    constexpr float kAttackTimeConstSec = 0.020f;
+    const float alphaAttack = juce::jlimit (0.0f, 1.0f,
+        1.0f - std::exp (-(float)dt / kAttackTimeConstSec));
+
     auto step = [&] (float incoming, float& display, float& peak, double& holdUntil)
     {
-        if (incoming > display) display = incoming;
-        else                    display = juce::jmax (kFloor, display - decayDb);
+        if (incoming > display)
+            display += (incoming - display) * alphaAttack;
+        else
+            display = juce::jmax (kFloor, display - decayDb);
 
         if (incoming >= peak) { peak = incoming; holdUntil = nowMs + kPeakHoldMs; }
         else if (nowMs > holdUntil)
