@@ -1162,7 +1162,7 @@ needed to find what you should pull up to review the work.
 
 #### **QA-AudioMeters: Per-Row Builder Audio Meters G1 Migration** *(NEW — inserted 2026-05-24)*
 
-**Plan file:** `<silly-name>.md (when started)`
+**Plan file:** `Plans & Specs/Batch Plans/mellow-bubbling-pancake.md`
 - Items: per-row Builder audio meters (`PluginProcessor.h:645-654 + :620-622 + CompositeAudioInsertTask.cpp:113-115`) carry the SAME dual-mirror G2 architecture as the 8 buses QA-Eg just migrated.  Origin: surfaced during QA-Eg Task 1 pre-flight inventory as spec call S2; routed to a dedicated batch at QA-Eg close rather than folded in (would have inflated QA-Eg scope to `kMaxAudioRows` rows + the `CompositeAudioInsertTask` test surface).  See §9 thirty-first Forks entry.
 - Scope:
   - Apply the same G1 pattern QA-Eg landed across the 8 buses: node-internal `peakDb / peakDbL / peakDbR` atomics exchange-stored into `VibeGraph` public-member atomics, drained directly via `drainMeterAtomicsForUI`'s G1 loop.
