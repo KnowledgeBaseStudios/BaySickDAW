@@ -167,3 +167,157 @@ required sections (locked 2026-05-11) + Rule 4 (Diagnostic Instrumentation Catal
   save / restore tag-label preservation requirement (`addInsertMap` /
   `restoreInsert` per-kind name string), and InsertNode's current constructor
   signature for the `chId` parameter addition.
+
+---
+
+## 2026-05-24 — Task 1 — Pre-flight inventory (read-only)
+
+- **Scope.** Read-only inventory pass per Sub-F / L11 6-task structure: enumerate
+  every `std::map<int, std::unique_ptr<InsertNode>>` access surface across
+  `VibeGraph.cpp` (call sites + iteration sites + .find/.size/.clear sites),
+  verify the §5-entry + Task-0-grep claims against actual code, lock the
+  rewrite map for Task 2's structural one-shot, and surface any asymmetries /
+  ambiguities as Task-2 spec-call candidates per
+  `feedback_dont_make_unilateral_spec_calls.md`.  Zero source touches; the
+  output is this inventory table.
+
+- **Complete VibeGraph.cpp call-site inventory (sorted by line).**
+
+  | Line | Kind | What it does | Iteration shape | Post-batch replacement |
+  |------|------|--------------|-----------------|------------------------|
+  | [1364-1366](Source/VibeGraph.cpp:1364) | range-for | `prepare()` sweep over per-insert nodes -- ONLY 7 KINDS, NO Rusty | pointer-init-list `{ &mLayerInserts, &mBassInserts, &mDrumInserts, &mAudioInserts, &mAuxInserts, &mVoxInserts, &mInstInserts }` then range-for | `for (int chId : mLiveInsertChannels) mInsertsByChannel[chId]->prepare(...)` -- naturally covers Rusty too (asymmetry fix) |
+  | [1409-1411](Source/VibeGraph.cpp:1409) | range-for | `reset()` sweep -- ONLY 5 KINDS, NO Vox/Inst/Rusty | pointer-init-list `{ &mLayerInserts, &mBassInserts, &mDrumInserts, &mAudioInserts, &mAuxInserts }` then range-for | same shape -- but flag for Task 2 spec call: keep filter (preserve current behavior) or include all kinds (cleaner end state)? See Finding B below. |
+  | [1755-1762](Source/VibeGraph.cpp:1755) | lambda + 8 calls | `walkInserts` for FX-bypass chain walk -- all 8 kinds | helper lambda, called per kind | single `for (int chId : mLiveInsertChannels) walkInserts(mInsertsByChannel[chId].get())` |
+  | [1798](Source/VibeGraph.cpp:1798) | direct `.find()` | Legacy Layer-rack fallback lookup | `mLayerInserts.find(idx)` | `mInsertsByChannel[MixerChannelIds::layerInsert(idx)].get()` |
+  | [1805](Source/VibeGraph.cpp:1805) | direct `.find()` | Legacy Bass-rack fallback lookup | `mBassInserts.find(idx)` | `mInsertsByChannel[MixerChannelIds::bassInsert(idx)].get()` |
+  | [1813](Source/VibeGraph.cpp:1813) | direct `.find()` | Aux-rack lookup | `mAuxInserts.find(idx)` | `mInsertsByChannel[MixerChannelIds::auxStrip(idx)].get()` |
+  | [1964-1990](Source/VibeGraph.cpp:1964) | lambda + 8 calls | `addInsertMap` for XML state save -- per-kind string label preserved as `"Layer" / "Bass" / "Drum" / "Audio" / "Aux" / "Vox" / "Inst" / "Rusty"` in `<InsertRack kind="...">` XML attribute (MUST preserve labels for project load compat) | helper lambda, 8 calls with per-kind label arg | rewrite lambda to iterate `mLiveInsertChannels` + derive kind label from `node->kind` enum via helper `kindString(InsertKind)` |
+  | [2014-2018](Source/VibeGraph.cpp:2014) | range-for | Rack-wipe sweep post-`wipe(node->rack)` -- all 8 kinds | pointer-init-list `{ &mLayerInserts, ... &mRustyInserts }` then range-for + null-check | single `for (int chId : mLiveInsertChannels) if (auto* n = mInsertsByChannel[chId].get()) wipe(n->rack)` |
+  | [2107-2133](Source/VibeGraph.cpp:2107) | lambda + 8 calls | `restoreInsert` for XML state restore -- per-kind label-matched against saved `kind` attribute (MUST preserve label semantics) | helper lambda, 8 calls with per-kind label arg | rewrite lambda to iterate `mLiveInsertChannels` filtered by per-kind label (or by `node->kind` enum match against label string) |
+  | [2195](Source/VibeGraph.cpp:2195) | direct `.find()` | Audio-row rack lookup (5F-4a Batch 6) | `mAudioInserts.find(row)` | `mInsertsByChannel[MixerChannelIds::audioInsert(row)].get()` |
+  | [2207](Source/VibeGraph.cpp:2207) | direct `.find()` | Audio-row EQ lookup (5F-4a Batch 6) | `mAudioInserts.find(row)` | same as :2195 |
+  | [2253-2277](Source/VibeGraph.cpp:2253) | `selectInsertMap` definition | anon-namespace helper -- 8-way kind switch, returns map pointer | switch + 8 cases | DELETE entirely -- replaced by `computeChannelId(kind, index)` |
+  | [2281-2314](Source/VibeGraph.cpp:2281) | `ensureInsertNode` | `selectInsertMap` + `map.find` + `map.insert` | uses `selectInsertMap` | rewrite: `chId = computeChannelId`; if `mInsertsByChannel[chId]` exists rebind + return; else construct new InsertNode (pass chId to ctor for L9 cache), push chId onto `mLiveInsertChannels`, install in `mInsertsByChannel[chId]` |
+  | [2316-2320](Source/VibeGraph.cpp:2316) | `removeInsertNode` | `selectInsertMap` + `map.erase` | uses `selectInsertMap` | rewrite: `chId = computeChannelId`; `mInsertsByChannel[chId].reset()`; erase `chId` from `mLiveInsertChannels` |
+  | [2322-2329](Source/VibeGraph.cpp:2322) | `getInsertNode` | `selectInsertMap` + `map.find` | uses `selectInsertMap` | rewrite: `return mInsertsByChannel[computeChannelId(kind, index)].get()` |
+  | [2331-2424](Source/VibeGraph.cpp:2331) | `processInsert` | THE audio-thread hot path; 8-way kind->chId switch at :2343-2353 dies post-batch (uses `node->chId`); rest of function (CAS-max `storeAxes` for QA-AudioMeters meter publish) untouched | switch + 8 cases + `getInsertNode` + `pushScArrayToStrip` + `node->processBlock` + `storeAxes` CAS-max | rewrite: `auto* node = mInsertsByChannel[computeChannelId(kind, index)].get(); if (! node) return; pushScArrayToStrip(node->chId); node->processBlock(...); storeAxes(...)` -- switch dies |
+  | [2425-2447](Source/VibeGraph.cpp:2425) | `getInsertRack` / `getInsertEQ` / `getInsertPreEQ` | thin wrappers around `getInsertNode` (each calls it) | no change post-batch | thanks to L7/Sub-B keep-API, these wrappers stay unchanged externally; internally each becomes a single array-index load via the rewritten `getInsertNode` |
+  | [2472-2484](Source/VibeGraph.cpp:2472) | lambda + 8 calls | `promoteRacksInMap` for QA-AudioMeters rack-promotion sweep (per-kind) | helper lambda, 8 calls | single `for (int chId : mLiveInsertChannels) promoteRacksInMap(mInsertsByChannel[chId].get())` |
+  | [2507-2526](Source/VibeGraph.cpp:2507) | `getInsertChokeGroup` with 2nd `selectInsertMap`-style switch at :2509-2520 then `map.find` at :2522 -- NEW FINDING; this is the §5 entry's "2512-2514" line reference; D3 drum-choke feature | local switch + 8 cases + `map.find` | rewrite: `if (auto* node = mInsertsByChannel[computeChannelId(kind, index)].get()) if (auto* p = node->pChokeGroup) return ...; return 0` |
+  | [2566-2572](Source/VibeGraph.cpp:2566) | `isAnyInsertSoloed` -- NEW FINDING beyond initial 12+ count; pointer-init-list range-for over all 8 maps + nested for-each + early-return on first soloed insert | pointer-init-list `{ &mLayerInserts, ... &mRustyInserts }` + nested range-for | rewrite: `for (int chId : mLiveInsertChannels) if (auto* n = mInsertsByChannel[chId].get()) if (n->isSoloed()) return true; return false` |
+  | [2853-2890](Source/VibeGraph.cpp:2853) | `pushScArrayToStrip` | takes channelId DIRECTLY; internal switch on chId range decodes to (kind, index) to call `push3(getInsertPreEQ, getInsertRack, getInsertEQ)` -- 3 more `map.find`s per call via the wrappers | takes chId; calls 3 (kind, index)-keyed wrappers internally | the function itself doesn't change (it takes chId already); the wrappers it calls become single-load via L7/Sub-B; net 3 `.find()`s -> 3 array-index loads per call |
+  | [2899-2962](Source/VibeGraph.cpp:2899) | `rebuildRoutingFromApvts` -- NEW FINDING; uses `.size()` on all 8 maps at :2905-2908 for `reserve` + 8 separate range-for blocks at :2930-2952 to `emplace_back` per-kind chId + apvtsPrefix into `mActiveChannels` | `.size()` chain + 8 per-kind range-for | rewrite: `mActiveChannels.reserve(13 + mLiveInsertChannels.size())` + single `for (int chId : mLiveInsertChannels) { auto* n = mInsertsByChannel[chId].get(); if (n) mActiveChannels.emplace_back(chId, n->apvtsPrefix); }` -- no per-kind chId helpers needed (chId already known) |
+  | [2930-2951](Source/VibeGraph.cpp:2930) | `drainMeterAtomicsForUI` G1 8-per-kind blocks (QA-AudioMeters) | 8 separate per-kind range-for blocks each emplacing chId via per-kind helper | single loop over `mLiveInsertChannels` with switch on `node->kind` for per-kind PluginProcessor mirror routing |
+  | [2966-2972](Source/VibeGraph.cpp:2966) | `getAuxIndices()` -- NEW FINDING; range-for over `mAuxInserts` to collect aux indices into vector | range-for over `mAuxInserts` | rewrite: `for (int chId : mLiveInsertChannels) if (chId >= kAuxBase && chId < kAuxBase + kMaxAuxStrips) result.push_back(chId - kAuxBase)` -- filter by chId range (or by `node->kind == Aux`) |
+  | [2975-2978](Source/VibeGraph.cpp:2975) | `clearAuxInserts()` -- NEW FINDING; `.clear()` on `mAuxInserts` | `.clear()` | rewrite: iterate `mLiveInsertChannels` filtered to Aux, reset each in `mInsertsByChannel`, erase from `mLiveInsertChannels` (or simpler: iterate + `std::erase_if`) |
+
+- **selectInsertMap callers -- confirmed exactly 3 (matches §5 entry).**
+  - [:2285](Source/VibeGraph.cpp:2285) -- `ensureInsertNode`
+  - [:2318](Source/VibeGraph.cpp:2318) -- `removeInsertNode`
+  - [:2325](Source/VibeGraph.cpp:2325) -- `getInsertNode`
+
+- **pushScArrayToStrip callers -- 4 internal-to-VibeGraph + 1 doc comment
+  (CONFIRMED no Engine/Tasks/ direct callers).**
+  - [VibeGraph.cpp:1461](Source/VibeGraph.cpp:1461) -- `processMasterBus` (passes `MixerChannelIds::kMaster`)
+  - [VibeGraph.cpp:1505](Source/VibeGraph.cpp:1505) -- `processBus` (passes `busChId` from caller)
+  - [VibeGraph.cpp:1782](Source/VibeGraph.cpp:1782) -- FX-bus processing (passes `MixerChannelIds::kFxBus`)
+  - [VibeGraph.cpp:2354](Source/VibeGraph.cpp:2354) -- `processInsert` (passes `chId` computed from kind+index switch)
+  - [VibeGraph.h:592](Source/VibeGraph.h:592) -- public method declaration
+  - [MasterTask.cpp:60](Source/Engine/Tasks/MasterTask.cpp:60) -- doc comment only
+
+- **Engine/Tasks/ verification -- CONFIRMED no direct accessor calls.**  Grep
+  for `(getInsertNode|getInsertRack|getInsertEQ|getInsertPreEQ|ensureInsertNode|removeInsertNode|processInsert|pushScArrayToStrip)`
+  in `Source/Engine/` matched only doc comments in `EngineInsertTask.h:23`,
+  `InstStripTask.h:29`, `PassiveStripTask.h:21`, `VoxStripTask.h:26` -- all
+  describing what the task ultimately calls via the synth/graph instance, NOT
+  actually calling.  The Engine/Tasks/* layer is untouched by this batch.
+
+- **InsertNode full definition** ([VibeGraph.cpp:1033+](Source/VibeGraph.cpp:1033)):
+  ```cpp
+  struct VibeGraph::InsertNode
+  {
+      // Identity
+      juce::String          name;
+      juce::String          apvtsPrefix;
+      VibeGraph::InsertKind kind  { VibeGraph::InsertKind::Layer };
+      int                   index { 0 };
+      // [NEW for L9/Sub-D: add int chId { -1 }; member here]
+
+      // Audio DSP
+      EQ8MsDSP              preEq;       // P4.3 pre-rack
+      EffectRack            rack;
+      EQ8MsDSP              eq;          // post-rack
+      CompDelayLine         compDelay;
+
+      // QA-AudioMeters G1-pattern peak fields
+      std::atomic<float>    peakDb  { -60.f };
+      std::atomic<float>    peakDbL { -60.f };
+      std::atomic<float>    peakDbR { -60.f };
+      // [...more fields below, including pChokeGroup, fader smoothing, cached APVTS ptrs]
+  };
+  ```
+  Constructor signature (per call at [:2299](Source/VibeGraph.cpp:2299)):
+  `InsertNode(kind, index, displayName, apvtsPrefix)` -- for L9/Sub-D add a
+  `chId` parameter OR compute internally from kind+index.  The latter requires
+  InsertNode to include `MixerChannelIds.h`; the former keeps InsertNode
+  dependency-light + `ensureInsertNode` passes the chId it already computed.
+  Recommendation surfaced for Task 2: ctor-parameter form (matches Sub-D's
+  "InsertNode caches its own chId at construction" wording from ExitPlanMode
+  approval).
+
+- **Counts summary.**
+  - **Total `.find()` sites in `VibeGraph.cpp`:** 8 (3 via selectInsertMap-routed
+    accessors at :2287 / :2325 / :2326 + the `ensureInsertNode` existence check;
+    5 direct at :1798 / :1805 / :1813 / :2195 / :2207; 1 in `getInsertChokeGroup`
+    at :2522).
+  - **Total iteration sites in `VibeGraph.cpp`:** 14 (was 12+ in initial Task 0
+    count; added `isAnyInsertSoloed` and `rebuildRoutingFromApvts` blocks):
+    :1364, :1409, :1755-1762, :1983-1990, :2014, :2126-2133, :2477-2484, :2567,
+    :2930-2952, :2970 (10 distinct iteration blocks; some block-counts have
+    multiple per-kind calls within).
+  - **Total `.size()` sites:** 1 at :2904-2908 (`mActiveChannels.reserve` sum).
+  - **Total `.clear()` sites:** 1 at :2977 (`mAuxInserts.clear()` in
+    `clearAuxInserts`).
+  - **External call sites in other files** (5 .cpp + 1 .h comment-only):
+    unchanged from §5 entry -- `PluginProcessor.cpp` x12, `EffectsPage.cpp` x22,
+    `StandaloneEditor.cpp` x5, `MixerPage.cpp` x1, `ClipsPage.cpp` comment-only
+    refs, `PluginProcessor.h` comment-only refs.
+
+- **Asymmetry findings (Task 2 spec-call candidates).**
+
+  - **Finding A -- `prepare()` at :1364-1366 excludes Rusty.**  Likely defensive
+    (Rusty inserts get prepared on construction via `ensureInsertNode` at
+    :2300-2302 if `mSampleRate > 0.0`; the `prepare()` sweep is a fallback for
+    inserts that existed before `prepareToPlay`).  Recommendation for Task 2:
+    include all 8 kinds via `mLiveInsertChannels` iteration (cleaner end state,
+    no behavior risk since the duplicate prepare is safe).  Non-risk; Task 2
+    will silently fix.
+
+  - **Finding B -- `reset()` at :1409-1411 excludes Vox/Inst/Rusty.**  More
+    concerning -- reset is project-load critical.  Could be intentional
+    (Vox/Inst/Rusty handled by a separate reset path elsewhere -- needs further
+    verify) OR pre-existing oversight when R1 (Vox/Inst, 2026-04-23) and J-4
+    (Rusty, 2026-05-03) extended the InsertKind enum without updating the
+    5F-4a reset loop.  Spec-call surface for Task 2:
+    1. preserve original 5-kind filter (zero behavior change risk, but the
+       asymmetry persists post-batch);
+    2. include all 8 kinds via `mLiveInsertChannels` (cleaner; if reset wasn't
+       reaching Vox/Inst/Rusty before, fixing it might surface latent state-
+       retention bugs but those are arguably real bugs the fix exposes);
+    3. keep the original 5-kind filter post-batch but route the asymmetry
+       investigation to a separate §9 Forks entry for follow-up.
+
+    My recommendation: surface (1)/(2)/(3) to Jeff at Task 2 plan-finalize per
+    `feedback_dont_make_unilateral_spec_calls.md` -- slot/scope call, not mine
+    to pick.
+
+- **Rule 4 Diagnostic Instrumentation Catalog:** nil for Task 1 (read-only
+  inventory; no source touches; no DBG / Logger / temp jassert / debug
+  AlertWindow added).
+
+- **Next action.** Task 2 -- structural one-shot.  Open with a Task 2 plan-
+  finalize that surfaces Finding B's `reset()` asymmetry decision to Jeff (the
+  only spec call Task 1 surfaced; Finding A's `prepare()` asymmetry is non-risk
+  and Task 2 will silently fix).  Then edit `VibeGraph.h` + `VibeGraph.cpp` per
+  the rewrite map above; build verify Debug+Release; commit single structural
+  commit per L11/Sub-F task structure.
