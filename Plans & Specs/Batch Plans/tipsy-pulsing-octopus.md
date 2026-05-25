@@ -65,13 +65,30 @@ Jeff's blueprint §3 specifies `std::atomic<bool> isActive{false}` per voice wit
 - **(a)** Add the atomic flag per Jeff's blueprint §3. ADSR-release-end sets `mIsActive.store(false, release)`. Voice stealing's free-voice scan uses `mIsActive.load(acquire)` for cheap atomic check (no `dynamic_cast` loop). Explicit cross-system clarity + future-proofing if MT semantics ever change.
 - **(b)** Rely on JUCE's existing voice-active state. Free-voice detection uses `mSynth.getVoice(i)->isVoiceActive()` + `dynamic_cast<VibeVoice*>` loop. ADSR-release-end calls `clearCurrentNote()` (existing pattern at [VibePlayerDSP.cpp:680-682](Source/VibePlayer/VibePlayerDSP.cpp:680)). Smaller surface change; one less atomic on the audio thread; literal blueprint §3 not implemented.
 
-### Sub-B — `juce::MemoryAudioSource` fat-mode implementation
+### Sub-B — fat-source ownership + resampler wiring model (REVISED 2026-05-25 post-Task-1 inventory)
 
-`juce::MemoryAudioSource`'s public API doesn't expose a re-point-at-new-buffer method (constructor takes `AudioBuffer<float>&` and stores internally; no `setBuffer()` accessor). To make the forward source "fat" (owned permanently, re-pointed at `startNote` without heap allocation) one of these approaches is needed:
+**Task 1 inventory PIVOT:** `juce::ResamplingAudioSource::setSource()` does NOT exist — the input source pointer is fixed at construction (`OptionalScopedPointer<AudioSource> input;` private member at [juce_ResamplingAudioSource.h:90](juce/modules/juce_audio_basics/sources/juce_ResamplingAudioSource.h:90)). Public lifecycle methods are `setResamplingRatio` / `flushBuffers` / `prepareToPlay` / `releaseResources` / `getNextAudioBlock` only. The original Sub-B(a) framing (custom forward source class + own one of each; assumed the permanent resampler could be re-pointed) is invalid because we still can't re-target the resampler at the chosen direction at `startNote` without re-constructing it. The original Sub-B(b) JUCE-adapter path is also dead — `juce::MemoryAudioSource` has no setter either. Revised options:
 
-- **(a)** Write a small custom `VibeForwardMemoryAudioSource` class (~30 lines) mirroring `juce::MemoryAudioSource`'s `getNextAudioBlock` + `setNextReadPosition` semantics + adding `setBuffer(const juce::AudioBuffer<float>&)`. Extend the existing `ReversedMemoryAudioSource` ([VibePlayerDSP.cpp:463-512](Source/VibePlayer/VibePlayerDSP.cpp:463)) with the same `setBuffer()` pattern. VibeVoice owns one instance of each. Pairs cleanly with L4(a).
-- **(b)** Wrap `juce::MemoryAudioSource` in an adapter that does internal placement-new on `setBuffer()` (re-allocates inside pre-sized aligned storage). Fewer source lines but more fragile (manual destructor calls + alignment hazards). Defeats the no-allocation goal if the placement-new technically allocates.
-- **(c)** Different approach (you propose).
+- **(a) Custom forward source + dual permanent `juce::ResamplingAudioSource`** (one per direction). VibeVoice owns:
+  - `VibeForwardMemoryAudioSource mForwardSrc` (custom ~30-line `juce::PositionableAudioSource` subclass with `setBuffer(juce::AudioBuffer<float>*)` + `setNextReadPosition` / `getNextAudioBlock` reading from the buffer pointer; pure forward delegation).
+  - `ReversedMemoryAudioSource mReverseSrc` (existing class + new `setBuffer(juce::AudioBuffer<float>*)` member).
+  - `juce::ResamplingAudioSource mForwardResamp` (permanent, ctor-bound to `&mForwardSrc`).
+  - `juce::ResamplingAudioSource mReverseResamp` (permanent, ctor-bound to `&mReverseSrc`).
+  - `juce::ResamplingAudioSource* mActiveResamp` (pointer to whichever direction is live this note).
+  - At `startNote`: set `mActiveResamp` to the chosen direction's resampler, call `mActiveResamp->flushBuffers()` + `mActiveResamp->setResamplingRatio(ratio)`, set the chosen source's buffer pointer via `setBuffer()`.
+  - Memory cost: ~2x ResamplingAudioSource state per voice (each resampler's internal `AudioBuffer<float> buffer` sized to `samplesPerBlockExpected * ratio` headroom — ~8-15 KB extra per voice × 16 voices = ~128-240 KB per engine instance). Not free but small relative to sample-data RAM.
+  - Code complexity: 1 new small custom class (`VibeForwardMemoryAudioSource`, ~30 lines, pure delegation).
+
+- **(b) Custom forward source + custom `VibeSourceFork` wrapper + single `juce::ResamplingAudioSource`**. VibeVoice owns:
+  - `VibeForwardMemoryAudioSource mForwardSrc` (same ~30-line custom class as (a)).
+  - `ReversedMemoryAudioSource mReverseSrc` (same existing-class extension as (a)).
+  - `VibeSourceFork mFork` (NEW custom ~25-line `juce::PositionableAudioSource` subclass holding pointers to both `mForwardSrc` + `mReverseSrc` + a `bool mUseReverse` flag; `getNextAudioBlock` delegates to whichever is selected; `setNextReadPosition` / `prepareToPlay` / `releaseResources` forward to both).
+  - `juce::ResamplingAudioSource mResampSrc` (permanent, ctor-bound to `&mFork`).
+  - At `startNote`: set `mFork.setUseReverse(reverseMode)` + set the chosen source's buffer pointer, call `mResampSrc.flushBuffers()` + `mResampSrc.setResamplingRatio(ratio)`.
+  - Memory cost: single resampler per voice (~half the resampler-state RAM of (a)).
+  - Code complexity: 2 new small custom classes (`VibeForwardMemoryAudioSource` + `VibeSourceFork`, both pure delegation, zero DSP logic — explicitly NOT the "risky custom DSP logic" Jeff was avoiding when locking L4(a)).
+
+- **(c)** Different approach Jeff proposes.
 
 ### Sub-C — Dummy buffer location for fat-source pre-allocation
 

@@ -95,6 +95,18 @@ JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone
 
 ---
 
+## Git Commit Mechanics
+
+- **Long commit messages (this project's multi-paragraph technical-narrative style): use `git commit -F <file>`, NEVER bash heredoc.**
+  - Write the message to `.git/COMMIT_EDITMSG_<batch>-<task>.txt` (under .git/, automatically out of working tree).
+  - `git commit -F <that file>`.
+  - `rm <that file>` after the commit.
+- **Why:** the Bash tool harness's outer command wrapping has a quoting layer that collides with the ~30+ apostrophes per long message (`Jeff's blueprint` / `framework's stealing` / `JUCE's MemoryAudioSource` / etc.), producing "unexpected EOF while looking for matching `'`" parser errors. File-based commit bypasses all shell parsing of the message body — apostrophes, backticks, `$`, `&`, `<`, `>` in the file are inert.
+- **Heredoc still fine for short commits.** `git commit -m "$(cat <<'EOF' ... EOF)"` works for single-paragraph commits without apostrophe-dense narrative. The Build System "Standing rule" precedent of using heredoc for the Co-Authored-By trailer is still fine since those messages are short.
+- **Convention adopted 2026-05-25** mid-QA-VoicePool Task 1 after two failed heredoc attempts in the same batch (Task 0 + Task 1 both hit `unexpected EOF while looking for matching '`'). Mirrored in Main Plan §0 Agent Orchestration Rules > Batch lifecycle so future sessions see it whether they read CLAUDE.md or Main Plan first.
+
+---
+
 ## Source Layout
 
 ```

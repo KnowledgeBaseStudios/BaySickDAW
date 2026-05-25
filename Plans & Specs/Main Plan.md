@@ -415,6 +415,22 @@ mirror the equivalents from that project's CLAUDE.md.
   <concept>`.  Don't bluff or web-search inline; route to the agent.
 - **Pre-commit** → `/draft-commit`.  Show the user the proposed
   message; commit only after explicit approval.
+- **Long commit messages (this project's multi-paragraph
+  technical-narrative style): use `git commit -F <file>`, NOT
+  bash heredoc.**  Write the message to
+  `.git/COMMIT_EDITMSG_<batch>-<task>.txt`, run
+  `git commit -F <that file>`, then `rm` the temp file.  Reason:
+  the Bash tool harness's outer command wrapping collides with
+  the dozens of apostrophes per long message (`Jeff's blueprint`
+  / `framework's stealing` / etc.), tripping bash with
+  "unexpected EOF while looking for matching `'`".  File-based
+  bypasses all shell quoting interaction with the message body.
+  Heredoc (`git commit -m "$(cat <<'EOF' ... EOF)"`) is fine for
+  short single-paragraph commits without apostrophes/backticks
+  but fragile for this project's style.  Convention adopted
+  2026-05-25 mid-QA-VoicePool Task 1 after two failed heredoc
+  attempts in the same batch (Task 0 + Task 1 commits both hit
+  the same parser error).
 - **Batch close (mandatory sequence):**
   1. `/draft-doc batch-close` — compile the Implemented Work Log
      entry from running notes.
