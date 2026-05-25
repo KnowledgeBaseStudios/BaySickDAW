@@ -40,7 +40,7 @@ QA-AudioMeters is the next Phase 1 batch after QA-Eg per the §6 sequencing arro
 | L3 | **Surface inventory: 8 publishing sites + 1 promotion loop + 6 `*Run` arrays + 6 initialiser-store lines + 1 comment block** | Source-confirmed pre-batch. Files to modify section lists each. §5 entry called out 1 site (`CompositeAudioInsertTask.cpp:113-115`); my grep surfaced the other 7 — preserves the per-flow + force-reset semantics in the migration. |
 | L4 | **Sequencing = immediately after QA-Eg, before QA-InsertMaps** | Per Main Plan §6 arrow + §9 thirty-first Forks entry. Jeff-confirmed slot at QA-Eg close per `feedback_slot_placement_is_spec_call.md`. |
 | L5 | **Silly-name = `mellow-bubbling-pancake`** (plan-mode runtime) | My pick per `feedback_silly_name_is_my_pick.md` (not a spec call). |
-| L6 | **Task structure = 10-task** (Task 0 open / Task 1 read-only pre-flight inventory / Task 2 structural one-shot / Task 3 Layer verify / Task 4 Bass verify / Task 5 Drum verify / Task 6 Audio verify [Builder + Mixer strip] / Task 7 Aux+Vox+Inst+Rusty bundle verify / Task 8 cleanup + comment sweep / Task 9 close) — **REVISED 2026-05-24 mid-Task-1** from the original 5-task structure after the L7 pivot expanded scope to all 8 InsertKinds. | Jeff 2026-05-24 mid-Task-1 re-spec (L6-revised). Mirrors QA-Eg's per-bus verify rhythm (Tasks 2-6 in QA-Eg verified each bus separately) — gives clean per-kind rollback boundaries on a structural change that touches ~140 insert slots. Task 2 lands the entire structural one-shot in one commit (so the system is internally consistent post-Task-2); Tasks 3-7 are verify-only checkpoints (Jeff drives each verify; commit-per-task gives bisect boundaries on UX regression per kind). |
+| L6 | **Task structure = 6-task** (Task 0 open / Task 1 read-only pre-flight inventory / Task 2 structural one-shot / Task 3 all-kinds end-to-end stress-file verify / Task 4 cleanup + comment sweep / Task 5 close) — **RE-COLLAPSED 2026-05-24 post-Task-2** from the previously revised 10-task structure when Jeff pointed out that the per-kind verify (Tasks 3-7) would require constant tab-switching between piano-roll auditioning + Mixer-page meter watching, making the verify workflow awkward. Stress-file approach (one big test arrangement exercising all 8 kinds + 13 buses + Builder grid + slot meters in parallel) covers everything Tasks 3-7 were splitting up + runs once. Bisect boundary tradeoff acknowledged: if regression surfaces in stress-file verify, isolation is per-kind by ear (which kind's meters mis-meter) + per-symptom rather than per-commit. | Jeff 2026-05-24 post-Task-2 re-spec (L6-re-collapsed). The 10-task structure assumed per-kind verify could be done in isolation; in practice the verify is mostly "watch the Mixer page while real audio plays" which is naturally an all-kinds-at-once activity. Single Task 3 stress-file verify matches the actual verify workflow + is closer to QA-Eg's pattern (which used realistic per-bus test rigs, not contrived isolation). Previously revised from the original 5-task structure mid-Task-1 (after the L7 pivot expanded scope) -- see prior revision history in this row's edit log. |
 | L7 | **Per-insert publish architecture = Option 2 restructure** — REVISED 2026-05-24 mid-Task-1 from the original Option B. InsertNode::process rewritten to use the bus-pattern `publishPeakReading` (CAS-max + latency-comp ring) instead of the current load-decay-max-store at `:1231-1242`. The peakDbSnap / peakDbLSnap / peakDbRSnap snapshot-promotion layer is REMOVED entirely from InsertNode struct. At end of `VibeGraph::processInsert`, exchange-store from InsertNode peakDb/L/R into new `VibeGraph::<kind>InsertPeakDb*[index]` public-member arrays (parallel to existing `<bus>PeakDb` atomics). All 8 InsertKinds (Layer / Bass / Drum / Audio / Aux / Vox / Inst / Rusty) adopt this standard. | Jeff 2026-05-24 mid-Task-1 re-spec (L7-revised). The original Option B assumption — "InsertNode publish at `:1241` needs a CAS-max upgrade then single exchange-store at end of CompositeAudioInsertTask::run" — turned out to NOT fit because the existing publish IS already an accumulator (load-decay-max-store, not simple-store) AND because the per-row Builder consumer drains the peakDbSnap layer (NOT peakDb directly), and peakDbSnap has TWO consumers (per-row Builder + per-insert Mixer strip) — exchange-resetting it from one consumer breaks the other. Option 2 restructures the entire insert publish to mirror the bus pattern exactly, ending the bus-vs-insert architectural inconsistency that QA-Eg's bus migration left exposed. Jeff: "Let's embrace the scope and get the architecture right." |
 | L8 | **Force-reset path handling = B2** — DELETE all 6 force-reset stores at PluginProcessor.cpp:415/420/448/642/647/668. Per-row Builder audio meters decay naturally over ~20ms (DBFSMeter ballistic) on mute / choke / file-end — same visible behavior as every bus meter + every other InsertKind. | Jeff 2026-05-24 ExitPlanMode (Sub-C). Aligns per-row audio meter behavior to bus meter behavior + every other insert kind's meter behavior (none of the other 7 InsertKinds have force-reset paths — only the audio-row consumer had them, layered onto the *Run mirror). Eliminates the per-row-specific instant-silent-on-mute branch that was a leftover from the G2 mirror era; under L7-revised the entire force-reset machinery is unnecessary because publishPeakReading + drainAndMerge + DBFSMeter handle the decay end-to-end. |
 | L9 | **Snapshot mirror location = PluginProcessor parallel mirrors** — add 8 sets of `std::array<std::atomic<float>, max_for_kind>` × 3 axes on PluginProcessor (mirroring the existing `mLayersPeakDb` etc. bus pattern + the existing `mAudioRowPeakDb*` per-row pattern). Naming: `mLayerInsertPeakDb` / `mBassInsertPeakDb` / `mDrumInsertPeakDb` / `mAudioRowPeakDb` (KEPT — existing name preserved for Builder grid backward compat; semantically equivalent to `mAudioInsertPeakDb`) / `mAuxInsertPeakDb` / `mVoxInsertPeakDb` / `mInstInsertPeakDb` / `mRustyInsertPeakDb`. `drainMeterAtomicsForUI` adds 8 per-kind drain loops drainAndMerge'ing `mVibeGraph.<kind>InsertPeakDb*[index]` → `m<Kind>InsertPeakDb*[index]`. UI consumers (Builder grid, Mixer page per-strip meter) poll PluginProcessor mirrors directly. | Jeff 2026-05-24 mid-Task-1 re-spec (L9-new). Matches the bus pattern exactly (every existing bus mirror lives on PluginProcessor as the UI poll target). VibeGraph-as-UI-poll-target would break this consistency (which would create a new bus-vs-insert inconsistency in the opposite direction). The mAudioRowPeakDb name is preserved because (a) it's the Builder grid's natural label and (b) renaming would force a sweep of every Builder consumer for no architectural gain. |
@@ -52,6 +52,8 @@ QA-AudioMeters is the next Phase 1 batch after QA-Eg per the §6 sequencing arro
 No sub-spec calls open at ExitPlanMode. All three (Sub-A / Sub-B / Sub-C) locked pre-exit by Jeff and recorded as L6 / L7 / L8 above.
 
 **Post-ExitPlanMode re-spec (2026-05-24 mid-Task-1):** Task 1's read-only inventory surfaced that L7's Option B structural assumption was wrong (see Task 1 running-notes entry for details). Jeff re-spec'd L6 + L7 + added L9; original locks for L1-L5 + L8 stand. Updated table above is the authoritative locked set; all spec calls remain closed.
+
+**Post-Task-2 re-spec (2026-05-24 post-Task-2 commit `0fd9b91`):** Jeff observed that the per-kind verify workflow (Tasks 3-7) required constant tab-switching between piano-roll auditioning + Mixer-page meter watching, breaking the verify rhythm. Re-spec'd L6 to collapse Tasks 3-7 into a single Task 3 stress-file verify (one big test arrangement exercising all 8 InsertKinds + 13 buses + Builder grid + EffectRack slot meters in parallel). Old Tasks 8/9 renumbered to Tasks 4/5. L1-L5, L7-L9 unchanged. Plan file's Files-to-modify + Tasks sections updated to match.
 
 ---
 
@@ -138,22 +140,10 @@ No sub-spec calls open at ExitPlanMode. All three (Sub-A / Sub-B / Sub-C) locked
 **MixerTrackStrip / Mixer page consumer rewire:**
 - Find every `mProcessor->mVibeGraph.drainInsertPeakDbStereo(...)` call site (or equivalent VibeGraph::drainInsertPeakDbStereo direct call); replace with `mProcessor->getInsertPeakDbStereo(kind, index)`. Likely lives in MixerTrackStrip's meter-feed code path.
 
-### Task 3 — Layer kind end-to-end verify
-**No source edits.** Verify Layer InsertKind meters: Mixer page per-strip meter on Layer 1/2 tabs reads activity for Harmless / BaySickSynth / BaySickPlayer engines; decays correctly; MT ON + MT OFF parity. `/draft-commit` per task (Task 3 verify commit) + `/draft-doc running-notes`.
+### Task 3 — All-kinds end-to-end stress-file verify (collapsed per L6 re-collapse 2026-05-24)
+**No source edits.** Jeff plays his big stress-test arrangement on the Mixer page and watches all meters in parallel. Single verify session covers everything Tasks 3-7 previously split up: 8 InsertKinds' per-strip meters (Layer / Bass / Drum / Audio / Aux / Vox / Inst / Rusty) + 13 G1 bus regression check + Builder grid per-row meter (Audio kind's second consumer, should agree with Mixer page Audio insert strip) + EffectRack slot meter spot-check (surviving `promoteAllRackSlotSnapshots` path) + mute-decay ~20ms check (L8 / B2 alignment) + MT ON + MT OFF parity + save+reload. On pass: single `/draft-commit` for the Task 3 verify checkpoint commit (includes plan-file L6 collapse edit + Task 2 running-notes carry-forward + new Task 3 running-notes entry) + transition to Task 4 cleanup.
 
-### Task 4 — Bass kind end-to-end verify
-**No source edits.** Same pattern as Task 3 for Bass InsertKind (Bass 1/2 tabs).
-
-### Task 5 — Drum kind end-to-end verify
-**No source edits.** Same pattern for Drum InsertKind (Drums tabs + per-drum strips).
-
-### Task 6 — Audio kind end-to-end verify (Builder grid + Mixer per-strip)
-**No source edits.** The original §5 scope: Builder grid per-row meter + Mixer page per-audio-insert strip meter, both consumers verified. Mute / choke / file-end edge cases (decay ~20ms per L8). MT ON + MT OFF parity.
-
-### Task 7 — Aux + Vox + Inst + Rusty bundle end-to-end verify
-**No source edits.** Smaller surfaces bundled: Aux strips, Vox/Inst tabs (live input + prerecorded audio sources per `project_vox_inst_accept_prerecorded_audio.md`), Rusty kit. Mixer per-strip meter for each.
-
-### Task 8 — Cleanup + comment sweep + grep cleanliness
+### Task 4 — Cleanup + comment sweep + grep cleanliness
 - Grep cleanliness: `grep -rn "mAudioRowPeakDbRun\|mAudioRowPeakDbLRun\|mAudioRowPeakDbRRun\|peakDbSnap\|peakDbLSnap\|peakDbRSnap" Source/` — result must be empty post-Task-2.
 - Comment sweep: grep for "Group 2" / "Group 3" / "running-max companion" / "deferred to a separate batch per S2" / "peakDbSnap" / "layer-vs-bus ping-pong" / "promoteAllInsertPeakSnapshots" / `getInsertPeakDbStereoExchange` — update or delete remaining references:
   - The stale inline comment at PluginProcessor.cpp:2067 "Group 1: bus mirrors (Layers/Bass/Drums/Master)" — covers 13 buses post-QA-Eg.
@@ -161,7 +151,7 @@ No sub-spec calls open at ExitPlanMode. All three (Sub-A / Sub-B / Sub-C) locked
   - The `drainMeterAtomicsForUI` function-header comment at PluginProcessor.cpp:2038-2055 — update from "three parts" model to reflect that per-row drain is unified with bus drain.
   - The `mAudioRowPeakDb` declaration comment at PluginProcessor.h:617-619 — update to reflect the publishing path now writes into VibeGraph member arrays via processInsert exchange-store (no more *Run).
 
-### Task 9 — Close sequence
+### Task 5 — Close sequence
 - No source edits. `/draft-doc batch-close` + `/review-batch QA-AudioMeters` + apply + `/draft-commit` + close commit.
 
 ---
@@ -274,53 +264,23 @@ No sub-spec calls open at ExitPlanMode. All three (Sub-A / Sub-B / Sub-C) locked
 - [ ] On clean build: dispatch `/draft-commit`, surface drafted message + full git status, commit on approval.
 - [ ] Dispatch `/draft-doc running-notes` → apply.
 
-### Task 3 — Layer kind end-to-end verify
-- [ ] Tell Jeff: "Run `do_build.bat` if not already built; then in Debug:
-  - **(1)** New project (default Layer 1 tab present). Add Harmless / BaySickSynth / BaySickPlayer engine on Layer 1. Audition or trigger sound (piano roll click). Verify Layer 1 per-strip meter on Mixer page reads activity.
-  - **(2)** Add Layer 2 tab; assign different engine; play. Verify both Layer 1 and Layer 2 strips meter independently.
-  - **(3)** Stop. Verify both Layer meters decay to silent over ~20ms.
-  - **(4)** Multi-core OFF; repeat (1)+(2). Verify Layer meters still read in serial-diagnostic mode.
-  - **(5)** Multi-core ON. Save project. Reload. Play. Verify Layer meters still read post-reload."
+### Task 3 — All-kinds end-to-end stress-file verify (collapsed per L6 re-collapse 2026-05-24)
+*Tasks 3-7 from the prior 10-task structure collapsed into this single Task 3 after Jeff observed that per-kind verify required constant tab-switching between piano-roll auditioning + Mixer-page meter watching. Stress-file approach (one big test arrangement exercising all 8 kinds + 13 buses + Builder grid + slot meters in parallel) covers everything in one verify session.*
+
+- [ ] Tell Jeff: "Open your big stress-test arrangement. Hit play. Watch the Mixer page + Builder grid simultaneously. Verify:
+  - **(1) Per-strip meters (8 InsertKinds — the surface this batch touched).** Every Layer strip / Bass strip / Drum strip / Audio insert strip / Aux strip / Vox strip / Inst strip / Rusty strip reads activity matching its source signal. Decays smoothly when the signal stops.
+  - **(2) Builder grid per-row meters (Audio kind's second consumer).** For each Audio row playing, the Builder-grid row meter AND the Mixer-page Audio insert strip meter show the same level (cross-consumer agreement).
+  - **(3) Bus regression check (13 G1 buses from QA-Eg).** Every bus meter (Layers / Bass / Drums / Master / FX / AudioClips / Vox / Vox2 / Inst / Inst2 / Inst3 / Rusty) still reads correctly. The InsertNode `publishPeakReading` rewrite is the cross-surface touch — any bus mis-meter is a regression.
+  - **(4) Mute decay (L8 / B2 alignment).** Mute any strip mid-playback. Meter decays over ~20ms matching how bus mutes decay. No instant-snap-to-silent anywhere now.
+  - **(5) MT-on/off parity.** Mixer hamburger → toggle Multi-core Rendering. Re-play. Meters should look identical.
+  - **(6) Save+reload.** Save (or save-as), close, reopen, play. Meters still work.
+  - **(7) EffectRack slot meter spot-check (surviving `promoteAllRackSlotSnapshots` path).** Open the effect panel on any rack (any kind). Slot DBFSMeter + VU input meters still update normally."
 - [ ] Wait for Jeff's verify result.
-- [ ] On pass: `/draft-commit` + surface + commit on approval.
+- [ ] **If any of (1)-(7) regresses**, isolate by-kind-or-symptom + fix in-batch per `feedback_qa_batches_fix_bugs_dont_defer.md` (Task 3 stays open until the regression is closed).
+- [ ] On full pass: `/draft-commit` + surface drafted message + full git status (includes Task 2 running-notes carry-forward + the plan-file L6 collapse edits + the new Task 3 running-notes entry) + commit on approval.
 - [ ] `/draft-doc running-notes` → apply.
 
-### Task 4 — Bass kind end-to-end verify
-- [ ] Tell Jeff: "Same shape as Task 3 verify but on Bass tabs (Bass 1 / Bass 2 with BaySickBass / Harmless / BaySickPlayer engines). Mixer page per-strip meter, Multi-core ON + OFF, save+reload."
-- [ ] Wait for verify; `/draft-commit` on pass; `/draft-doc running-notes` → apply.
-
-### Task 5 — Drum kind end-to-end verify
-- [ ] Tell Jeff: "Same shape on Drums tabs (per-drum strips on Mixer page). Verify each drum strip meter reads when its drum hits. Multi-core ON + OFF, save+reload."
-- [ ] Wait for verify; `/draft-commit` on pass; `/draft-doc running-notes` → apply.
-
-### Task 6 — Audio kind end-to-end verify (Builder grid + Mixer per-strip)
-*The original §5 scope. Both consumer surfaces verified together since they share the Audio kind's mirror.*
-
-- [ ] Tell Jeff: "Run `do_build.bat` if not already built; then in Debug:
-  - **(1)** Drop a WAV onto Builder grid row 0. Drop a second WAV onto row 1. Play. Verify Builder-grid per-row meter on both rows reads activity AND Mixer-page Audio insert per-strip meter for those rows reads activity (cross-check both consumers show the same level on the same row).
-  - **(2)** Stop. Verify both consumers decay to silent over ~20ms (DBFSMeter ballistic — matches bus and other-kind meters).
-  - **(3)** Mute row 0 via the row mute toggle while playing. Verify both consumers (Builder-grid + Mixer-strip) decay to silent over ~20ms. Row 1 still active.
-  - **(4)** Trigger a choke-group case (or set up overlapping clips that choke). Verify the choked row decays cleanly on both consumers.
-  - **(5)** Audio clip past file end: a clip whose playhead runs past its file length. Verify both consumers decay cleanly when the clip exhausts.
-  - **(6)** Multi-core OFF; repeat (1)+(3). Verify both consumers still read correctly in serial-diagnostic mode.
-  - **(7)** Multi-core ON. Save project. Reload. Play. Verify post-reload."
-- [ ] Wait for Jeff's verify result.
-- [ ] On pass: `/draft-commit` + surface + commit on approval.
-- [ ] `/draft-doc running-notes` → apply.
-
-### Task 7 — Aux + Vox + Inst + Rusty bundle end-to-end verify
-- [ ] Tell Jeff: "Bundle verify on the smaller insert surfaces:
-  - **(1) Aux**: Add an Aux strip on Mixer page; route a Layer's sends to it; trigger Layer sound. Verify Aux strip meter reads activity.
-  - **(2) Vox** (live + prerecorded per `project_vox_inst_accept_prerecorded_audio.md`): Add Vox tab; arm + speak (live input); verify Vox bus strip meter. Then point Vox at a prerecorded vocal clip; play; verify meter again.
-  - **(3) Inst**: Same dual scenario — live input + prerecorded source per the same project memory.
-  - **(4) Rusty**: Add a BaySickRustyDrums tab; trigger a drum hit (audition the kit graphic). Verify each Rusty insert strip meter (the kit's 13 drums show as individual strips on Mixer page) reads when its drum hits.
-  - **(5)** Multi-core OFF; spot-check each of the 4 kinds quickly.
-  - **(6)** Multi-core ON. Project save+reload."
-- [ ] Wait for verify result.
-- [ ] On pass: `/draft-commit` + surface + commit on approval.
-- [ ] `/draft-doc running-notes` → apply.
-
-### Task 8 — Cleanup + comment sweep + grep cleanliness
+### Task 4 — Cleanup + comment sweep + grep cleanliness
 - [ ] Grep cleanliness: `grep -rn "mAudioRowPeakDbRun\|mAudioRowPeakDbLRun\|mAudioRowPeakDbRRun\|peakDbSnap\|peakDbLSnap\|peakDbRSnap\|drainInsertPeakDbStereo\|promoteAllInsertPeakSnapshots\|getInsertPeakDbStereoExchange" Source/` — result must be empty (or limited to expected post-rename hits).
 - [ ] Comment sweep: grep for "Group 2" / "Group 3" / "running-max companion" / "deferred to a separate batch per S2" / "peakDbSnap" / "layer-vs-bus ping-pong" — update or delete:
   - The stale inline comment at PluginProcessor.cpp:2067 "Group 1: bus mirrors (Layers/Bass/Drums/Master)" — covers 13 buses post-QA-Eg + 8 insert kinds post-this-batch.
@@ -336,7 +296,7 @@ No sub-spec calls open at ExitPlanMode. All three (Sub-A / Sub-B / Sub-C) locked
 - [ ] On pass: `/draft-commit` + surface + commit on approval.
 - [ ] `/draft-doc running-notes` → apply.
 
-### Task 9 — Close sequence
+### Task 5 — Close sequence (was Task 9 in 10-task structure)
 - [ ] Dispatch `/draft-doc batch-close` with a synthesis of the running-notes file.
 - [ ] Apply the close entry to `Plans & Specs/Implemented Work Log.md` via Edit per `feedback_targeted_edits_not_wholesale_rewrite.md`.
 - [ ] Dispatch `/review-batch QA-AudioMeters`.
@@ -351,10 +311,10 @@ No sub-spec calls open at ExitPlanMode. All three (Sub-A / Sub-B / Sub-C) locked
 
 ## Verification (end-to-end smoke)
 
-After Task 8 commit lands (cleanup + comment sweep + grep cleanliness) and before the close commit (Task 9):
+After Task 4 commit lands (cleanup + comment sweep + grep cleanliness; was Task 8 in 10-task structure) and before the close commit (Task 5; was Task 9):
 
 1. **Build clean.** `do_build.bat` Release + Debug both green; no new warnings.
-2. **Per-kind meter sanity (MT ON)** — verified per Task 3-7 already; final smoke is a single arrangement with audio on every kind (Layer / Bass / Drum / Audio rows / Aux / Vox / Inst / Rusty + every bus) and every per-strip + per-row meter on Mixer page + Builder grid reads correctly.
+2. **Per-kind meter sanity (MT ON)** — verified per Task 3 stress-file already; final smoke is a single arrangement with audio on every kind (Layer / Bass / Drum / Audio rows / Aux / Vox / Inst / Rusty + every bus) and every per-strip meter on Mixer page reads correctly. NOTE: there's no Builder-grid per-row DBFS meter today — the "per-row" naming in §5 / §9 refers to the per-row backing storage (`mAudioRowPeakDb*[row]`), and the display surface is the Mixer-page Audio insert per-strip meter. A Builder-grid meter add was routed to Future State at [CL-293](../Future State.md) per Jeff's QA-AudioMeters Task 3 surface call (out of scope for this batch).
 3. **Per-kind meter sanity (MT OFF / serial-diagnostic)** — same arrangement, Multi-core OFF; every meter still reads correctly.
 4. **20ms-decay coverage** (L8 / B2 alignment to bus behavior — applies to all 8 kinds, not just Audio):
    - **Muted by choke / row mute / file-end**: Audio row meters decay over ~20ms (DBFSMeter ballistic).

@@ -134,3 +134,83 @@ required sections (locked 2026-05-11) + Rule 4 (Diagnostic Instrumentation Catal
 #### Next action
 
 - Surface a Task 1 docs commit (plan-file revisions per the edit map above + THIS running-notes entry) for Jeff's approval via `/draft-commit`. Once landed, proceed to Task 2 structural one-shot.
+
+---
+
+## 2026-05-24 — Task 2 — Structural one-shot landed (0fd9b91)
+
+- **Commit.** `0fd9b91` — QA-AudioMeters Task 2 structural one-shot. 6 source files, +362 / -283. Drafted via `/draft-commit` per `feedback_every_commit_via_draft_commit.md`; surfaced verbatim for Jeff's approval per `feedback_drafter_output_verbatim_no_restyle.md` + full pre-commit git status surfaced per `feedback_surface_full_git_status_before_commit.md`. Release + Debug both clean, 0 new warnings — Jeff confirmed.
+
+#### Source-file summary (6 files, per the Task 2 plan)
+
+- **[Source/VibeGraph.h](Source/VibeGraph.h)** — added 24 per-kind public-member `std::array<std::atomic<float>, N>` arrays (8 InsertKinds x 3 axes mono/L/R) + `kMaxAudioInserts` constant; deleted 3 legacy accessor decls (`drainInsertPeakDbStereo` + `getInsertPeakDbStereo` + `getInsertPeakDb`); renamed `promoteAllInsertPeakSnapshots` -> `promoteAllRackSlotSnapshots` (the rack-promotion half is what survives; the insert-peak-snapshot half is folded into the new G1 drain).
+- **[Source/VibeGraph.cpp](Source/VibeGraph.cpp)** — deleted `InsertNode::peakDbSnap` / `peakDbLSnap` / `peakDbRSnap` fields + the `peakDecayDbPerBlock` field + the per-block decay machinery from `InsertNode::process`; replaced the open-coded inline publish (load-decay-max-store at the old `:1231-1242` site) with a single `publishPeakReading(...)` helper call (matches the bus pattern); added per-kind exchange-stores in `processInsert` so each of the 8 InsertKinds writes into the new VibeGraph public-member arrays; split + renamed `promoteAllInsertPeakSnapshots` (rack-promotion half kept, insert-peak-snapshot half removed); deleted 3 legacy accessor bodies; updated `publishPeakReading`'s documentation comment to reference the new flow; added `prepare()` init loops for the 24 new arrays (all initialized to `-60.f` matching the existing bus atomic in-class init pattern).
+- **[Source/PluginProcessor.h](Source/PluginProcessor.h)** — added 21 per-kind mirror array decls (`mLayerInsertPeakDb*` / `mBassInsertPeakDb*` / `mDrumInsertPeakDb*` / `mAuxInsertPeakDb*` / `mVoxInsertPeakDb*` / `mInstInsertPeakDb*` / `mRustyInsertPeakDb*` x 3 axes; Audio reuses the existing `mAudioRowPeakDb*` arrays per the L9 backward-compat naming); deleted the 3 `mAudioRowPeakDb*Run` mirror decls; added the new `drainInsertPeakDbStereo(InsertKind, int)` accessor decl.
+- **[Source/PluginProcessor.cpp](Source/PluginProcessor.cpp)** — rewrote the `:155-163` initialiser loop to seed all 8 sets of per-kind mirrors with `-60.0f` (UI poll target floor); added a `static_assert` that `VibeGraph::kMaxAudioInserts == kMaxAudioRows` (since VibeGraph.cpp doesn't include PluginProcessor.h — avoids circular include); added the ~55-line `drainInsertPeakDbStereo` accessor body (per-kind switch + bounds-check + exchange-reset of the matching `m<Kind>InsertPeakDb*L/R[index]` mirror pair, sentinel `-inf`); deleted the old `arCasMax` lambda + the per-flow drain block at `:583-587` of `renderAudioClipsForRow`; deleted all 6 force-reset stores per L8 / Sub-C B2 (Audio-row meters now decay over ~20ms via DBFSMeter ballistic, aligning per-row to per-bus visible behavior); rewrote `drainMeterAtomicsForUI`'s G3 per-row loop into 8 per-kind drainAndMerge loops; renamed the `promoteAll*` call to match `VibeGraph.h`.
+- **[Source/Engine/Tasks/CompositeAudioInsertTask.cpp](Source/Engine/Tasks/CompositeAudioInsertTask.cpp)** — deleted the ~17-line Flow A drain block at `:100-116`; replaced with an explanatory comment that points at the new `processInsert` publish path + the G1 drain in `PluginProcessor::drainMeterAtomicsForUI` (so a future reader doesn't re-add the per-flow drain).
+- **[Source/Standalone/MixerPage.cpp](Source/Standalone/MixerPage.cpp)** — rewired the `drainStereoInsert` lambda at `:3278-3283` to call `mProcessor.drainInsertPeakDbStereo` (dropped the `mVibeGraph.` middle — accessor moved off VibeGraph onto PluginProcessor) and unified the Audio-row drain with the other 7 kinds (single call shape, no per-kind branching at the consumer side).
+
+#### Build + grep cleanliness
+
+- **Release + Debug both clean, 0 new warnings.** Per `feedback_no_full_release_reverify_at_batch_close.md` no separate Release re-verify gate — Jeff's per-task verify cycle covers both configs.
+- **Post-edit grep sweep clean.** Zero remaining source references to `mAudioRowPeakDb*Run` / `peakDbSnap` / `peakDbLSnap` / `peakDbRSnap` / `mVibeGraph.drainInsertPeakDbStereo` (old signature) / `mVibeGraph.getInsertPeakDb*` — all remaining hits are inside updated documentation comments.
+
+#### Heredoc-with-apostrophes commit-mechanics gotcha (recovery noted)
+
+- Initial `git commit -m "$(cat <<'EOF' ... EOF)"` failed bash parse on Windows for the multi-paragraph drafted message containing embedded apostrophes; the heredoc closed early at one of the inner quote runs. Recovered by writing the drafted message to a temp file `.commit-msg.tmp` -> `git commit -F .commit-msg.tmp` -> delete temp file. No source impact, no message content change — pure commit-mechanics workaround. Surface noted here so the pattern is captured for future multi-paragraph drafted-commit messages on Windows bash.
+
+#### Task 8 cleanup carry-forward
+
+- **Stale `promoteAllInsertPeakSnapshots` reference** at [EffectRack.h:230](Source/EffectRack.h:230) — comment-only mention of the old function name (function itself was renamed to `promoteAllRackSlotSnapshots` in Task 2). No compile impact; folded into Task 8 cleanup sweep alongside any other stale-comment hits discovered during Tasks 3-7 verify passes.
+
+#### Diagnostic Instrumentation Catalog (Rule 4)
+
+- **Nil entry.** No new instrumentation added this task — all changes are structural code edits (field deletions / helper additions / per-kind array wiring / drain-loop restructure). No `DBG`, no `juce::Logger::writeToLog`, no temp `jassert`, no diagnostic `AlertWindow`. Catalog remains empty post-Task-2.
+
+#### Next action
+
+- Jeff runs **Task 3** — Layer kind end-to-end runtime verify per the 5-scenario script from the plan: (1) Debug new project, (2) Layer 1 with engine picked, (3) audition note -> Mixer per-strip Layer meter reads the post-rack peak, (4) meter decays smoothly on note-off matching bus DBFSMeter ballistic + MT-on / MT-off parity intact, (5) save -> reload -> re-audition still reads correctly. On pass: dispatch `/draft-commit` for the Task 3 verify checkpoint commit (docs-only — this running-notes file appends a "verified clean" Task 3 entry, no source edits) then transition to **Task 4** (Bass kind verify, same 5-scenario shape against the Bass insert tree).
+
+---
+
+## 2026-05-24 — Task 3 — Stress-file verify PASS + L6 re-collapse + Future State routing
+
+- **Verify rhythm pivot (Jeff, mid-Task-3 setup).** The per-kind verify workflow locked into the L7-pivot's 10-task structure required constant tab-switching between piano-roll auditioning + Mixer-page meter watching per InsertKind (Layer / Bass / Drum / Audio / Aux+Vox+Inst+Rusty). Jeff observed that this broke the rhythm — his preference is to use his existing big stress-file test arrangement that already exercises all 8 InsertKinds + the 13 G1 buses in parallel in one verify session. Resolution: collapse Tasks 3-7 (per-kind verify) into a single Task 3 stress-file verify covering all 8 kinds at once. Mirrors how every prior batch verified at the end of structural one-shots rather than per-component.
+
+#### Watchlist correction — fabricated Builder-grid agreement point
+
+- **My fabricated claim caught.** My initial Task 3 verify watchlist included "Builder grid per-row meters (Audio kind's other consumer) — should agree with Mixer-page Audio strip meters." Jeff caught this — there is **NO DBFS strip on Builder tracks today.** Post-call grep verified: `mAudioRowPeakDb*` is consumed ONLY by [MixerPage.cpp](Source/Standalone/MixerPage.cpp) (the Audio insert per-strip meter); zero references in [BuilderPage.cpp](Source/Standalone/BuilderPage.cpp) or anywhere else under `Source/Standalone/`. The §5 / §9 "per-row Builder audio meters" naming refers to per-row STORAGE indexed by Builder row number, not a Builder-grid display widget. I apologized + acknowledged the error in chat. Point dropped from the watchlist + from the plan-file Verification section.
+
+#### L6 re-collapse to 6-task structure
+
+- **Decision (Jeff, 2026-05-24).** Tasks 3-7 from the L7-pivot's 10-task structure collapsed into a single **Task 3 all-kinds stress-file verify.** Old Tasks 8 / 9 renumbered to **Task 4 (cleanup + sweep)** + **Task 5 (close).** Final structure: Task 0 open / Task 1 inventory / Task 2 structural / Task 3 stress-file verify / Task 4 cleanup / Task 5 close.
+
+#### Task 3 stress-file verify PASS
+
+- **Result — Jeff confirmed "these all pass" running his stress-test arrangement.** 6 corrected watchlist points (Builder-grid agreement removed):
+  1. **Per-strip meters on Mixer page (8 InsertKinds).** Layer / Bass / Drum / Audio insert / Aux / Vox / Inst / Rusty — all read activity matching source, decay smoothly.
+  2. **Bus regression (13 G1 buses from QA-Eg).** All still read correctly post-structural rewrite.
+  3. **Mute decay (L8 / B2 alignment).** ~20ms ballistic on any strip mute, matches bus mute behavior.
+  4. **MT-on / MT-off parity.** Identical behavior both modes.
+  5. **Save + reload.** Meters still work post-reload.
+  6. **EffectRack slot meter spot-check.** The surviving `promoteAllRackSlotSnapshots` path still updates slot meters correctly.
+
+#### Future State routing — [CL-293 / WP] Builder-grid per-row DBFS meter
+
+- **Routed to Future State, NOT in-scope for QA-AudioMeters.** Backing storage already plumbed by this batch (Audio-row mirrors live in PluginProcessor + drain through the unified G1 path); remaining work is a Builder-side widget add. New `### Batch-surfaced (QA-AudioMeters 2026-05-24)` sub-cluster under `## System Pages` in [Future State.md](Future State.md), entry `**[CL-293 / WP]** Builder-grid per-row DBFS meter`, priority MEDIUM.
+
+#### Plan-file edits (targeted per `feedback_targeted_edits_not_wholesale_rewrite.md`)
+
+- **Spec calls table.** L6 row re-collapsed to the 6-task shape.
+- **Sub-spec calls section.** Post-Task-2 re-spec note added documenting the verify-rhythm pivot + Builder-grid fabrication correction.
+- **Files to modify section.** Task 3 collapsed to a single sub-section (was 5 per-kind sub-sections); Task 4 / Task 5 renumbered (was Task 8 / Task 9).
+- **Tasks section.** Same collapse + renumber with the single-Task-3 stress-file verify shape.
+- **Verification section.** Dropped the Builder-grid agreement claim; renumbered references to Task 4 / Task 5; added a pointer to Future State CL-293.
+
+#### Diagnostic Instrumentation Catalog (Rule 4)
+
+- **Nil entry.** Task 3 is verify-only — no instrumentation added. Catalog remains empty post-Task-3.
+
+#### Next action
+
+- Surface a Task 3 docs commit (Task 2 running-notes entry + plan-file L6 collapse + Verification correction + Future State CL-293 add + THIS Task 3 running-notes entry) for Jeff's approval via `/draft-commit`. Once landed, transition to **Task 4 (cleanup + comment sweep + grep cleanliness)** — carry-forward items include the stale `promoteAllInsertPeakSnapshots` reference at [EffectRack.h:230](Source/EffectRack.h:230) + any stale-comment hits surfaced during the stress-file verify pass.

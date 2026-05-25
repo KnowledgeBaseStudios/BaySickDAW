@@ -573,6 +573,9 @@ Mouse docs.
 - **[BLU-480 / WP]** FX-1 Rack UI refactor — sidebar picker + detail pane. PRESET-SAFE.
 - **[BLU-487 / WP]** Sample Browser — real file-system tree, drag from disk. Post-Phase H/I.
 
+### Batch-surfaced (QA-AudioMeters 2026-05-24)
+- **[CL-293 / WP]** Builder grid per-row DBFS meter — add a small DBFSMeter widget to each Builder-grid audio-row strip showing the same peak-dB data as the Mixer-page Audio insert per-strip meter. Backing storage (`mAudioRowPeakDb*[row]`) already populated post-QA-AudioMeters via the unified G1 chain (`InsertNode publishPeakReading` -> `VibeGraph.audioInsertPeakDb*[row]` -> `drainAndMerge` -> `mAudioRowPeakDb*[row]`); the Builder side just needs a meter widget wired into each audio-row paint code path + a `mProcessor.drainInsertPeakDbStereo(VibeGraph::InsertKind::Audio, row)` poll per vblank in `BuilderPage::onVBlank` (or equivalent). Surfaced during QA-AudioMeters Task 3 verify when Jeff observed there's no DBFS strip on Builder tracks today + the §5/§9 "per-row Builder audio meters" naming refers only to the per-row backing storage, not to a Builder-grid display. Not in current QA-AudioMeters scope (the batch closes the bus-vs-insert architectural inconsistency; this would be a new UI feature on the data the batch already plumbs). MEDIUM.
+
 ## UI / L&F / Theming
 
 VibeLAF, palette, themes, layouts, pattern colours, ribbon visuals,
