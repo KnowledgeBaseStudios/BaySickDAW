@@ -497,25 +497,21 @@ public:
     // arms ensureInsertNode to wire any future InsertNode rack the same way.
     void rebindAllRackHooks();
 
-    // Peak dB atomic for UI (one per slot, per kind). Returns -60 if node doesn't exist.
-    float       getInsertPeakDb (InsertKind kind, int index) const;
-    // 2026-04-30: stereo L/R peak for split DBFSMeter.  Returns {-60, -60} if
-    // node doesn't exist.  Wait-free - both atomics read with relaxed ordering.
-    std::pair<float, float> getInsertPeakDbStereo  (InsertKind kind, int index) const;
-    // 2026-05-02: drain variant for vblank-locked metering -- exchanges the
-    // insert's snapshot atomics with -inf and returns the running max.  UI
-    // thread calls this once per vblank; the snapshot is updated by audio
-    // ONCE per audio block via promoteAllInsertPeakSnapshots() so UI reads
-    // are always consistent across every insert (no mid-block race window).
-    std::pair<float, float> drainInsertPeakDbStereo (InsertKind kind, int index);
+    // QA-AudioMeters (2026-05-24): per-insert peak readers moved to
+    // VibeSynthProcessor::drainInsertPeakDbStereo() — UI consumers exchange-
+    // reset the per-kind PluginProcessor mirrors (m<Kind>InsertPeakDb*).  The
+    // VibeGraph-side per-insert getters / drainers + the peakDbSnap layer are
+    // gone (replaced by InsertNode publishPeakReading + processInsert
+    // exchange-store + drainMeterAtomicsForUI 8-per-kind G1 drain).
 
-    // 2026-05-02: end-of-audio-block promotion of all insert peak snapshots.
-    // PluginProcessor::processBlock calls this after the render dispatch
-    // returns, so every insert's snapshot reflects the same just-completed
-    // audio block before any UI vblank can read.  Eliminates the layer-vs-
-    // bus ping-pong where one meter pulses one frame after the other due to
-    // UI sampling between the audio thread's per-node atomic writes.
-    void promoteAllInsertPeakSnapshots();
+    // QA-AudioMeters (2026-05-24): end-of-audio-block promotion of every rack's
+    // slot peak snapshots (one per slot per rack across every InsertNode + every
+    // BusNode).  PluginProcessor::processBlock calls this after the render
+    // dispatch returns.  Pre-batch this function ALSO promoted per-insert
+    // peakDb -> peakDbSnap; the peakDbSnap layer was removed when InsertNode
+    // adopted the bus-pattern publishPeakReading + processInsert end-of-call
+    // exchange-store, so only the rack-slot promotion remains.
+    void promoteAllRackSlotSnapshots();
 
     // D3: read this insert's choke group (0 = none, 1..16 = group id).
     // Returns 0 if the node doesn't exist or the param isn't bound.
@@ -655,6 +651,23 @@ public:
     std::atomic<float> rustyDrumsBusPeakDb  { -60.f };
     std::atomic<float> rustyDrumsBusPeakDbL { -60.f };
     std::atomic<float> rustyDrumsBusPeakDbR { -60.f };
+
+    // QA-AudioMeters (2026-05-24): per-kind insert peak atomics, parallel to the
+    // per-bus atomics above.  InsertNode::process publishes via publishPeakReading;
+    // processInsert exchange-stores node->peakDb*/L/R into the per-kind array slot;
+    // drainMeterAtomicsForUI drains them into PluginProcessor mirrors that the UI
+    // polls.  All 8 InsertKinds adopt this unified G1 pattern (ends the bus-vs-
+    // insert architectural split QA-Eg's bus migration left exposed).
+    static constexpr int kMaxAudioInserts = 50;  // matches VibeSynthProcessor::kMaxAudioRows + MixerState::kMaxAudioRows (static_assert in .cpp)
+
+    std::array<std::atomic<float>, kMaxLayerPages>                    layerInsertPeakDb  {}, layerInsertPeakDbL  {}, layerInsertPeakDbR  {};
+    std::array<std::atomic<float>, kMaxBassPages>                     bassInsertPeakDb   {}, bassInsertPeakDbL   {}, bassInsertPeakDbR   {};
+    std::array<std::atomic<float>, kMaxDrumPages>                     drumInsertPeakDb   {}, drumInsertPeakDbL   {}, drumInsertPeakDbR   {};
+    std::array<std::atomic<float>, kMaxAudioInserts>                  audioInsertPeakDb  {}, audioInsertPeakDbL  {}, audioInsertPeakDbR  {};
+    std::array<std::atomic<float>, MixerChannelIds::kMaxAuxStrips>    auxInsertPeakDb    {}, auxInsertPeakDbL    {}, auxInsertPeakDbR    {};
+    std::array<std::atomic<float>, MixerChannelIds::kMaxVoxStrips>    voxInsertPeakDb    {}, voxInsertPeakDbL    {}, voxInsertPeakDbR    {};
+    std::array<std::atomic<float>, MixerChannelIds::kMaxInstStrips>   instInsertPeakDb   {}, instInsertPeakDbL   {}, instInsertPeakDbR   {};
+    std::array<std::atomic<float>, MixerChannelIds::kMaxRustyStrips>  rustyInsertPeakDb  {}, rustyInsertPeakDbL  {}, rustyInsertPeakDbR  {};
 
     // ── Phase-2 instrument node registry ─────────────────────────────────────
     // Nodes registered here will be integrated into the processing graph in a

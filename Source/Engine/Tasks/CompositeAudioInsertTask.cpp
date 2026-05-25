@@ -94,26 +94,12 @@ void CompositeAudioInsertTask::run()
         mGraph->processInsert (VibeGraph::InsertKind::Audio, mIndex,
                                blockView, mCtx->bpm, mCtx->anySolo);
 
-        // Drain audio-row peaks (engine-flow contribution).  The
-        // arrangement-clip flow below will CAS-max its own contributions
-        // into the same mirrors via renderAudioClipsForRow.
-        if (mIndex >= 0 && mIndex < VibeSynthProcessor::kMaxAudioRows)
-        {
-            const auto [pkL, pkR] = mGraph->drainInsertPeakDbStereo (
-                VibeGraph::InsertKind::Audio, mIndex);
-
-            auto casMax = [] (std::atomic<float>& a, float v) noexcept
-            {
-                if (v == -std::numeric_limits<float>::infinity()) return;
-                float cur = a.load (std::memory_order_relaxed);
-                while (cur < v
-                       && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed)) {}
-            };
-
-            casMax (mProcessor->mAudioRowPeakDbLRun[mIndex], pkL);
-            casMax (mProcessor->mAudioRowPeakDbRRun[mIndex], pkR);
-            casMax (mProcessor->mAudioRowPeakDbRun [mIndex], juce::jmax (pkL, pkR));
-        }
+        // QA-AudioMeters (2026-05-24): no per-flow drain needed -- processInsert
+        // exchange-stores the InsertNode peak into VibeGraph's audioInsertPeakDb*
+        // per-call, and consecutive processInsert calls within this task
+        // (Flow A here + Flow B inside renderAudioClipsForRow below) both
+        // contribute via that per-call store, so the published peak captures
+        // the maximum across both flows.
     }
 
     // -- Flow B: arrangement-clip (timeline decode) ---------------------

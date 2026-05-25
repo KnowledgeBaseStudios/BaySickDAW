@@ -3272,13 +3272,15 @@ void MixerPage::onVBlank()
     // Repaint here so cable updates land in the same vblank as the strip
     // meters they're sourced from -- no race between cable read and strip drain.
 
-    // Per-insert peak: drain InsertNode atomics directly via the new exchange
-    // variant on VibeGraph.  Audio CAS-maxes into them; UI exchange-and-resets
-    // each vblank to capture every block since the last frame.
+    // QA-AudioMeters (2026-05-24): unified per-insert drain via the new
+    // VibeSynthProcessor::drainInsertPeakDbStereo accessor.  Reads + exchange-
+    // resets the m<Kind>InsertPeakDb*L/R[index] mirror that drainMeterAtomicsForUI
+    // populates from VibeGraph's per-kind public-member arrays.  Audio kind
+    // shares this path (no more inline mAudioRowPeakDb*L/R exchange-reset).
     auto drainStereoInsert = [&] (VibeGraph::InsertKind kind, int idx, MixerTrackStrip* strip)
     {
         if (! strip) return;
-        const auto [pkL, pkR] = mProcessor.mVibeGraph.drainInsertPeakDbStereo (kind, idx);
+        const auto [pkL, pkR] = mProcessor.drainInsertPeakDbStereo (kind, idx);
         strip->setStereoLevel (pkL, pkR);
     };
 
@@ -3288,17 +3290,8 @@ void MixerPage::onVBlank()
         drainStereoInsert (VibeGraph::InsertKind::Bass, pageIdx, strip.get());
     for (auto& [slot, strip] : mDrumStrips)
         drainStereoInsert (VibeGraph::InsertKind::Drum, slot, strip.get());
-
-    // Audio row strips have their own per-row processor atomics (not in
-    // VibeGraph).  Drain them via exchange-and-reset.
     for (auto& [row, strip] : mAudioStrips)
-    {
-        if (row < 0 || row >= VibeSynthProcessor::kMaxAudioRows) continue;
-        const float vL = mProcessor.mAudioRowPeakDbL[row].exchange (kNegInf, std::memory_order_relaxed);
-        const float vR = mProcessor.mAudioRowPeakDbR[row].exchange (kNegInf, std::memory_order_relaxed);
-        strip->setStereoLevel (vL, vR);
-    }
-
+        drainStereoInsert (VibeGraph::InsertKind::Audio, row, strip.get());
     for (auto& [idx, strip] : mAuxStrips)
         drainStereoInsert (VibeGraph::InsertKind::Aux, idx, strip.get());
     for (auto& [idx, strip] : mVoxStrips)

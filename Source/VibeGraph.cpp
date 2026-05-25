@@ -109,10 +109,15 @@ namespace
 
         // CAS-max: each audio block, raise the running max in the node's
         // atomic if this block's compensated peak is louder.  The atomic is
-        // drained either by the PluginProcessor mirror sync (for buses --
-        // exchange-and-merge into the cross-block mirror once per block) or
-        // by the UI vblank (for inserts -- direct exchange-and-reset each
-        // frame via getInsertPeakDbStereoExchange).
+        // drained by the PluginProcessor mirror sync once per block:
+        //   - buses: BusNode peakDb -> VibeGraph member atomic (exchange-store
+        //     in processBus) -> PluginProcessor mirror (drainAndMerge in
+        //     drainMeterAtomicsForUI) -> UI poll (exchange-and-reset).
+        //   - inserts (QA-AudioMeters 2026-05-24): InsertNode peakDb -> VibeGraph
+        //     per-kind public-member array (exchange-store in processInsert) ->
+        //     PluginProcessor m<Kind>InsertPeakDb* mirror (drainAndMerge in
+        //     drainMeterAtomicsForUI) -> UI poll via VibeSynthProcessor::
+        //     drainInsertPeakDbStereo (exchange-and-reset).
         auto casMax = [] (std::atomic<float>& a, float v) noexcept
         {
             float cur = a.load (std::memory_order_relaxed);
@@ -1043,30 +1048,20 @@ struct VibeGraph::InsertNode
     EffectRack            rack;
     EQ8MsDSP              eq;         // post-rack
     CompDelayLine         compDelay;  // per-insert PDC
-    // 2026-04-30: stereo L/R peak atomics for the strip's split DBFSMeter.
-    // peakDb (mono = max(L, R)) is kept for back-compat with any reader
-    // that hasn't switched to the stereo getters yet.
+    // QA-AudioMeters (2026-05-24): G1-pattern peak fields (parallel to L/B/D/
+    // Master/FX/AudioClips/Vox/Inst/Rusty BusNodes).  InsertNode::processBlock
+    // calls publishPeakReading which CAS-maxes into peakDb/L/R via the
+    // latency-comp ring; VibeGraph::processInsert exchange-stores these into
+    // its per-kind public-member arrays at end of every processInsert call;
+    // drainMeterAtomicsForUI drains those into PluginProcessor mirrors that
+    // the UI polls.  peakDbSnap layer + peakDecayDbPerBlock field removed --
+    // the per-block decay used to be applied here; ballistic decay now lives
+    // entirely on the UI side (DBFSMeter widget).
     std::atomic<float>    peakDb  { -60.f };
     std::atomic<float>    peakDbL { -60.f };
     std::atomic<float>    peakDbR { -60.f };
-    // 2026-05-02: snapshot atomics promoted at END of every audio block from
-    // the running-max atomics above.  UI exchange-and-resets these (NOT the
-    // running-max), which guarantees the UI sees consistent block-boundary
-    // state across every insert: a vblank firing mid-audio-block reads
-    // SOMETHING from every snapshot (last block's data) instead of partial
-    // mid-block writes from some inserts and stale data from others.  This
-    // is what eliminates the layer-vs-bus meter ping-pong where the bus
-    // pulses one frame after the insert because UI captured the insert
-    // before the bus's audio-side write completed.
-    std::atomic<float>    peakDbSnap  { -60.f };
-    std::atomic<float>    peakDbLSnap { -60.f };
-    std::atomic<float>    peakDbRSnap { -60.f };
-    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
     std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
     int                   peakRingIdx { 0 };
-    // Peak-hold decay (set in prepare) so transient hits don't get missed
-    // between UI polls (30 Hz) when audio runs at 86+ blocks/sec.
-    float                 peakDecayDbPerBlock { 0.35f };
 
     // F5 (2026-04-24): per-insert fader-gain smoothing.  Starts at 1.0 after
     // prepare; processBlock applies applyGainRamp(mLastFaderGain -> newGain)
@@ -1102,11 +1097,6 @@ struct VibeGraph::InsertNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         eq   .prepare(sr, blockSize);
-        // ~30 dB/sec decay - standard peak-meter ballistics. Scaled to the
-        // current block duration so decay feels consistent across SR/BS.
-        constexpr float kDecayDbPerSec = 30.0f;
-        peakDecayDbPerBlock = kDecayDbPerSec * (float) blockSize
-                              / (float) (sr > 0.0 ? sr : 44100.0);
     }
     void reset()
     {
@@ -1219,27 +1209,15 @@ struct VibeGraph::InsertNode
         // Per-insert PDC alignment
         compDelay.process(buf);
 
-        // Peak meter with hold+decay. Audio runs at ~86 blocks/sec, UI polls
-        // at ~30 Hz - without hold, 2 in 3 blocks get missed and transient
-        // peaks never reach the UI. max(thisBlockPeak, previousPeak - decay)
-        // keeps the meter responsive to transients and decays smoothly over
-        // ~1 second to the -60 dB floor.
-        // 2026-04-30: stereo L/R peaks for the new split DBFSMeter.  Compute
-        // per-channel peaks from the buffer; store mono (max of L+R) for
-        // back-compat with legacy readers that haven't switched to the
-        // stereo getters yet.
-        {
-            const auto [thisL, thisR] = bufferPeakDbStereo(buf);
-            const float prevL = peakDbL.load(std::memory_order_relaxed);
-            const float prevR = peakDbR.load(std::memory_order_relaxed);
-            const float decayedL = juce::jmax(-60.0f, prevL - peakDecayDbPerBlock);
-            const float decayedR = juce::jmax(-60.0f, prevR - peakDecayDbPerBlock);
-            const float newL = juce::jmax(thisL, decayedL);
-            const float newR = juce::jmax(thisR, decayedR);
-            peakDbL.store(newL, std::memory_order_relaxed);
-            peakDbR.store(newR, std::memory_order_relaxed);
-            peakDb .store(juce::jmax(newL, newR), std::memory_order_relaxed);
-        }
+        // QA-AudioMeters (2026-05-24): unified G1 publish via publishPeakReading
+        // (CAS-max + latency-comp ring) -- same helper every BusNode uses.
+        // Per-block decay used to live here as an open-coded load-decay-max-store;
+        // ballistic decay now happens UI-side in DBFSMeter.  processInsert
+        // exchange-stores peakDb/L/R into VibeGraph's per-kind public-member
+        // arrays at end of every processInsert call; drainMeterAtomicsForUI
+        // drains those into PluginProcessor mirrors that UI polls.
+        publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
+                            peakDbL, peakDbR, peakDb);
     }
 };
 
@@ -1388,6 +1366,22 @@ void VibeGraph::prepare(double sampleRate, int maxBlockSize)
         for (auto& [i, node] : *m)
             node->prepare(sampleRate, maxBlockSize);
 
+    // QA-AudioMeters (2026-05-24): initialise the per-kind public-member peak
+    // arrays to -60 dB.  std::atomic<float> default-construction leaves value
+    // unspecified pre-C++20; explicit init here matches the existing bus atomic
+    // pattern (which uses in-class { -60.f } initializers).
+    auto initArray = [] (auto& arr) noexcept
+    {
+        for (auto& a : arr) a.store (-60.f, std::memory_order_relaxed);
+    };
+    initArray (layerInsertPeakDb);  initArray (layerInsertPeakDbL);  initArray (layerInsertPeakDbR);
+    initArray (bassInsertPeakDb);   initArray (bassInsertPeakDbL);   initArray (bassInsertPeakDbR);
+    initArray (drumInsertPeakDb);   initArray (drumInsertPeakDbL);   initArray (drumInsertPeakDbR);
+    initArray (audioInsertPeakDb);  initArray (audioInsertPeakDbL);  initArray (audioInsertPeakDbR);
+    initArray (auxInsertPeakDb);    initArray (auxInsertPeakDbL);    initArray (auxInsertPeakDbR);
+    initArray (voxInsertPeakDb);    initArray (voxInsertPeakDbL);    initArray (voxInsertPeakDbR);
+    initArray (instInsertPeakDb);   initArray (instInsertPeakDbL);   initArray (instInsertPeakDbR);
+    initArray (rustyInsertPeakDb);  initArray (rustyInsertPeakDbL);  initArray (rustyInsertPeakDbR);
 }
 
 // ── reset ─────────────────────────────────────────────────────────────────────
@@ -2359,6 +2353,56 @@ void VibeGraph::processInsert(InsertKind kind, int index,
         }
         if (chId >= 0) pushScArrayToStrip(chId);
         node->processBlock(buf, bpm, anySolo);
+
+        // QA-AudioMeters (2026-05-24): per-kind exchange-store of the InsertNode's
+        // freshly published peak into VibeGraph's public-member array for the
+        // (kind, index) slot.  drainMeterAtomicsForUI's per-kind G1 loop drains
+        // this into PluginProcessor mirrors that the UI polls.  Mirror-store
+        // pattern parallel to the bus exchange-stores in processBus.
+        constexpr float kNI = -std::numeric_limits<float>::infinity();
+        auto storeAxes = [&] (std::atomic<float>& dM,
+                              std::atomic<float>& dL,
+                              std::atomic<float>& dR) noexcept
+        {
+            dM.store (node->peakDb .exchange (kNI, std::memory_order_relaxed), std::memory_order_relaxed);
+            dL.store (node->peakDbL.exchange (kNI, std::memory_order_relaxed), std::memory_order_relaxed);
+            dR.store (node->peakDbR.exchange (kNI, std::memory_order_relaxed), std::memory_order_relaxed);
+        };
+        switch (kind)
+        {
+            case InsertKind::Layer:
+                if (index >= 0 && index < kMaxLayerPages)
+                    storeAxes (layerInsertPeakDb [index], layerInsertPeakDbL [index], layerInsertPeakDbR [index]);
+                break;
+            case InsertKind::Bass:
+                if (index >= 0 && index < kMaxBassPages)
+                    storeAxes (bassInsertPeakDb  [index], bassInsertPeakDbL  [index], bassInsertPeakDbR  [index]);
+                break;
+            case InsertKind::Drum:
+                if (index >= 0 && index < kMaxDrumPages)
+                    storeAxes (drumInsertPeakDb  [index], drumInsertPeakDbL  [index], drumInsertPeakDbR  [index]);
+                break;
+            case InsertKind::Audio:
+                if (index >= 0 && index < kMaxAudioInserts)
+                    storeAxes (audioInsertPeakDb [index], audioInsertPeakDbL [index], audioInsertPeakDbR [index]);
+                break;
+            case InsertKind::Aux:
+                if (index >= 0 && index < MixerChannelIds::kMaxAuxStrips)
+                    storeAxes (auxInsertPeakDb   [index], auxInsertPeakDbL   [index], auxInsertPeakDbR   [index]);
+                break;
+            case InsertKind::Vox:
+                if (index >= 0 && index < MixerChannelIds::kMaxVoxStrips)
+                    storeAxes (voxInsertPeakDb   [index], voxInsertPeakDbL   [index], voxInsertPeakDbR   [index]);
+                break;
+            case InsertKind::Inst:
+                if (index >= 0 && index < MixerChannelIds::kMaxInstStrips)
+                    storeAxes (instInsertPeakDb  [index], instInsertPeakDbL  [index], instInsertPeakDbR  [index]);
+                break;
+            case InsertKind::Rusty:
+                if (index >= 0 && index < MixerChannelIds::kMaxRustyStrips)
+                    storeAxes (rustyInsertPeakDb [index], rustyInsertPeakDbL [index], rustyInsertPeakDbR [index]);
+                break;
+        }
     }
 }
 
@@ -2384,123 +2428,27 @@ EQ8MsDSP* VibeGraph::getInsertPreEQ(InsertKind kind, int index)
     return nullptr;
 }
 
-float VibeGraph::getInsertPeakDb(InsertKind kind, int index) const
-{
-    // Local const-ptr lookup (can't reuse selectInsertMap because of const)
-    const std::map<int, std::unique_ptr<InsertNode>>* m = nullptr;
-    switch (kind)
-    {
-        case InsertKind::Layer: m = &mLayerInserts; break;
-        case InsertKind::Bass:  m = &mBassInserts;  break;
-        case InsertKind::Drum:  m = &mDrumInserts;  break;
-        case InsertKind::Audio: m = &mAudioInserts; break;
-        case InsertKind::Aux:   m = &mAuxInserts;   break;
-        case InsertKind::Vox:   m = &mVoxInserts;   break;
-        case InsertKind::Inst:  m = &mInstInserts;  break;
-        case InsertKind::Rusty: m = &mRustyInserts; break;
-    }
-    if (m)
-        if (auto it = m->find(index); it != m->end())
-            return it->second->peakDb.load(std::memory_order_relaxed);
-    return -60.f;
-}
-
-// 2026-04-30: stereo peak getter for the new split DBFSMeter.  Returns
-// {peakDbL, peakDbR}.  Falls back to {-60, -60} when the insert doesn't
-// exist (matches mono getter behaviour).
-std::pair<float, float> VibeGraph::getInsertPeakDbStereo(InsertKind kind, int index) const
-{
-    const std::map<int, std::unique_ptr<InsertNode>>* m = nullptr;
-    switch (kind)
-    {
-        case InsertKind::Layer: m = &mLayerInserts; break;
-        case InsertKind::Bass:  m = &mBassInserts;  break;
-        case InsertKind::Drum:  m = &mDrumInserts;  break;
-        case InsertKind::Audio: m = &mAudioInserts; break;
-        case InsertKind::Aux:   m = &mAuxInserts;   break;
-        case InsertKind::Vox:   m = &mVoxInserts;   break;
-        case InsertKind::Inst:  m = &mInstInserts;  break;
-        case InsertKind::Rusty: m = &mRustyInserts; break;
-    }
-    if (m)
-        if (auto it = m->find(index); it != m->end())
-            return { it->second->peakDbL.load(std::memory_order_relaxed),
-                     it->second->peakDbR.load(std::memory_order_relaxed) };
-    return { -60.f, -60.f };
-}
-
-// 2026-05-02: drain variant -- exchanges the insert's SNAPSHOT atomics with
-// -inf and returns the values.  The snapshot is updated by audio at every
-// block boundary via promoteAllInsertPeakSnapshots(), so a UI vblank firing
-// mid-audio-block reads consistent block-boundary state across every insert
-// (no partial-write race).  This is what fixes the layer-vs-bus ping-pong.
-std::pair<float, float> VibeGraph::drainInsertPeakDbStereo(InsertKind kind, int index)
-{
-    std::map<int, std::unique_ptr<InsertNode>>* m = nullptr;
-    switch (kind)
-    {
-        case InsertKind::Layer: m = &mLayerInserts; break;
-        case InsertKind::Bass:  m = &mBassInserts;  break;
-        case InsertKind::Drum:  m = &mDrumInserts;  break;
-        case InsertKind::Audio: m = &mAudioInserts; break;
-        case InsertKind::Aux:   m = &mAuxInserts;   break;
-        case InsertKind::Vox:   m = &mVoxInserts;   break;
-        case InsertKind::Inst:  m = &mInstInserts;  break;
-        case InsertKind::Rusty: m = &mRustyInserts; break;
-    }
-    if (m)
-        if (auto it = m->find(index); it != m->end())
-        {
-            constexpr float kNegInf = -std::numeric_limits<float>::infinity();
-            return { it->second->peakDbLSnap.exchange(kNegInf, std::memory_order_relaxed),
-                     it->second->peakDbRSnap.exchange(kNegInf, std::memory_order_relaxed) };
-        }
-    return { -60.f, -60.f };
-}
+// QA-AudioMeters (2026-05-24): getInsertPeakDb / getInsertPeakDbStereo /
+// drainInsertPeakDbStereo (the per-insert UI peak readers) are gone.  The UI
+// drain now lives on VibeSynthProcessor::drainInsertPeakDbStereo reading the
+// per-kind PluginProcessor mirrors (m<Kind>InsertPeakDb*L/R[index]).  Audio
+// publishes via InsertNode::process -> publishPeakReading -> peakDb/L/R, then
+// processInsert exchange-stores into VibeGraph's per-kind public-member arrays
+// (see above), and drainMeterAtomicsForUI drains those into the PluginProcessor
+// mirrors at end-of-block.
 
 // 2026-05-02: end-of-audio-block snapshot promotion.  Called once per audio
 // block from PluginProcessor::processBlock AFTER all VibeGraph processing
-// completes.  For every insert, drains the running-max atomic via exchange
-// (resets to -inf so audio's next block starts fresh) and CAS-maxes into the
-// snapshot atomic so cross-block running max accumulates until UI drains.
-//
-// This single boundary point is what makes UI reads consistent: a vblank
-// firing mid-block sees stable last-block data on every insert, not a mix
-// of "this block written" / "this block not yet written" across siblings.
-void VibeGraph::promoteAllInsertPeakSnapshots()
+// completes.  QA-AudioMeters (2026-05-24): the per-insert peakDb -> peakDbSnap
+// promotion half was removed (peakDbSnap layer deleted -- InsertNode now uses
+// the bus-pattern publishPeakReading + processInsert end-of-call exchange-
+// store + drainMeterAtomicsForUI 8-per-kind G1 drain, same single boundary
+// point as buses).  The rack-slot promotion half stays -- effect-panel
+// DBFSMeter + VU input meters on every slot in every rack across every node
+// (InsertNode + BusNode) still rely on this end-of-block promotion to update
+// coherently with the rest of the meter chain.
+void VibeGraph::promoteAllRackSlotSnapshots()
 {
-    constexpr float kNegInf = -std::numeric_limits<float>::infinity();
-    auto promoteOne = [] (std::atomic<float>& runMax, std::atomic<float>& snap) noexcept
-    {
-        const float v = runMax.exchange (kNegInf, std::memory_order_relaxed);
-        if (v == kNegInf) return;
-        float cur = snap.load (std::memory_order_relaxed);
-        while (cur < v && ! snap.compare_exchange_weak (cur, v, std::memory_order_relaxed))
-        {}
-    };
-    auto promoteMap = [&] (std::map<int, std::unique_ptr<InsertNode>>& m)
-    {
-        for (auto& [idx, node] : m)
-        {
-            if (! node) continue;
-            promoteOne (node->peakDbL, node->peakDbLSnap);
-            promoteOne (node->peakDbR, node->peakDbRSnap);
-            promoteOne (node->peakDb,  node->peakDbSnap);
-        }
-    };
-    promoteMap (mLayerInserts);
-    promoteMap (mBassInserts);
-    promoteMap (mDrumInserts);
-    promoteMap (mAudioInserts);
-    promoteMap (mAuxInserts);
-    promoteMap (mVoxInserts);
-    promoteMap (mInstInserts);
-    promoteMap (mRustyInserts);   // J-7b (2026-05-04): meters were dead without this
-
-    // 2026-05-02: also promote every rack's slot atomics so the effect-panel
-    // DBFSMeter + VU input meter on every slot in every rack across every
-    // node update coherently with the rest of the meter chain at the audio
-    // block boundary.  Walks: every InsertNode rack + every bus node rack.
     auto promoteRack = [] (EffectRack* r)
     {
         if (r) r->promoteSlotPeakSnapshots();

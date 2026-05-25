@@ -614,19 +614,45 @@ public:
                                 juce::AudioBuffer<float>*    mtDest,
                                 juce::AudioBuffer<float>&    engineScratch);
 
-    // Per-row peak dB for audio strip meters (audio thread writes, UI timer reads).
-    // kMaxAudioRows == 50 (matches MixerState::kMaxAudioRows).
+    // QA-AudioMeters (2026-05-24): per-kind insert peak snapshot mirrors -- the
+    // UI poll target for all 8 InsertKinds.  Audio thread writes via
+    // drainMeterAtomicsForUI's 8-per-kind drainAndMerge loop (which drains
+    // mVibeGraph.<kind>InsertPeakDb*[index] -> these mirrors); UI vblank
+    // exchange-and-resets to start a fresh max-since-last-frame window.
+    // mAudioRowPeakDb* keeps its existing name (Audio kind) for Builder grid
+    // backward compat; the other 7 kinds use the m<Kind>InsertPeakDb* naming.
     static constexpr int kMaxAudioRows = 50;
     std::atomic<float> mAudioRowPeakDb [kMaxAudioRows];
-    // 2026-04-30: stereo L/R for split DBFSMeter (UI reads via mProcessor).
     std::atomic<float> mAudioRowPeakDbL[kMaxAudioRows];
     std::atomic<float> mAudioRowPeakDbR[kMaxAudioRows];
-    // 2026-05-02: running-max companion atomics for audio rows.  Audio
-    // thread CAS-maxes during processBlock; promotion at end of block lifts
-    // them into the UI-visible atomics above so all meters update coherently.
-    std::atomic<float> mAudioRowPeakDbRun [kMaxAudioRows];
-    std::atomic<float> mAudioRowPeakDbLRun[kMaxAudioRows];
-    std::atomic<float> mAudioRowPeakDbRRun[kMaxAudioRows];
+
+    std::atomic<float> mLayerInsertPeakDb [kMaxLayerPages];
+    std::atomic<float> mLayerInsertPeakDbL[kMaxLayerPages];
+    std::atomic<float> mLayerInsertPeakDbR[kMaxLayerPages];
+    std::atomic<float> mBassInsertPeakDb  [kMaxBassPages];
+    std::atomic<float> mBassInsertPeakDbL [kMaxBassPages];
+    std::atomic<float> mBassInsertPeakDbR [kMaxBassPages];
+    std::atomic<float> mDrumInsertPeakDb  [kMaxDrumPages];
+    std::atomic<float> mDrumInsertPeakDbL [kMaxDrumPages];
+    std::atomic<float> mDrumInsertPeakDbR [kMaxDrumPages];
+    std::atomic<float> mAuxInsertPeakDb   [MixerChannelIds::kMaxAuxStrips];
+    std::atomic<float> mAuxInsertPeakDbL  [MixerChannelIds::kMaxAuxStrips];
+    std::atomic<float> mAuxInsertPeakDbR  [MixerChannelIds::kMaxAuxStrips];
+    std::atomic<float> mVoxInsertPeakDb   [MixerChannelIds::kMaxVoxStrips];
+    std::atomic<float> mVoxInsertPeakDbL  [MixerChannelIds::kMaxVoxStrips];
+    std::atomic<float> mVoxInsertPeakDbR  [MixerChannelIds::kMaxVoxStrips];
+    std::atomic<float> mInstInsertPeakDb  [MixerChannelIds::kMaxInstStrips];
+    std::atomic<float> mInstInsertPeakDbL [MixerChannelIds::kMaxInstStrips];
+    std::atomic<float> mInstInsertPeakDbR [MixerChannelIds::kMaxInstStrips];
+    std::atomic<float> mRustyInsertPeakDb [MixerChannelIds::kMaxRustyStrips];
+    std::atomic<float> mRustyInsertPeakDbL[MixerChannelIds::kMaxRustyStrips];
+    std::atomic<float> mRustyInsertPeakDbR[MixerChannelIds::kMaxRustyStrips];
+
+    // QA-AudioMeters: UI-side exchange-and-reset drain for any insert kind.
+    // Returns the running max-since-last-call for the (kind, index) pair from
+    // the appropriate m<Kind>InsertPeakDb*L/R mirror; resets to -inf so the
+    // next vblank window starts fresh.  Wait-free; safe to call from UI thread.
+    std::pair<float, float> drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int index) noexcept;
 
     // ── Graph infrastructure (Phase 1A) ───────────────────────────────────────
     VibeGraph mVibeGraph;

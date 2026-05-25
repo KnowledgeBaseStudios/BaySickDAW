@@ -150,18 +150,46 @@ VibeSynthProcessor::VibeSynthProcessor()
 
     mAudioFormatManager.registerBasicFormats();  // WAV, AIFF, MP3, OGG, FLAC
 
-    for (int i = 0; i < kMaxAudioRows; ++i)
+    // QA-AudioMeters (2026-05-24): init all 8 per-kind insert peak mirror sets to
+    // -60 dB.  These are the UI poll targets; audio thread writes via
+    // drainMeterAtomicsForUI's per-kind drainAndMerge loops (which drain
+    // mVibeGraph.<kind>InsertPeakDb*[index]); UI vblank exchange-and-resets via
+    // drainInsertPeakDbStereo() to start a fresh max-since-last-frame window.
+    auto initMirrorArr = [] (auto& arr, int n) noexcept
     {
-        mAudioRowPeakDb [i].store(-60.0f, std::memory_order_relaxed);
-        mAudioRowPeakDbL[i].store(-60.0f, std::memory_order_relaxed);
-        mAudioRowPeakDbR[i].store(-60.0f, std::memory_order_relaxed);
-        // 2026-05-02: running-max variants start at -inf so a "no audio
-        // wrote this block" case skips promotion (snapshot keeps decaying).
-        constexpr float kNI = -std::numeric_limits<float>::infinity();
-        mAudioRowPeakDbRun [i].store(kNI, std::memory_order_relaxed);
-        mAudioRowPeakDbLRun[i].store(kNI, std::memory_order_relaxed);
-        mAudioRowPeakDbRRun[i].store(kNI, std::memory_order_relaxed);
-    }
+        for (int i = 0; i < n; ++i)
+            arr[i].store (-60.0f, std::memory_order_relaxed);
+    };
+    initMirrorArr (mAudioRowPeakDb,     kMaxAudioRows);
+    initMirrorArr (mAudioRowPeakDbL,    kMaxAudioRows);
+    initMirrorArr (mAudioRowPeakDbR,    kMaxAudioRows);
+    initMirrorArr (mLayerInsertPeakDb,  kMaxLayerPages);
+    initMirrorArr (mLayerInsertPeakDbL, kMaxLayerPages);
+    initMirrorArr (mLayerInsertPeakDbR, kMaxLayerPages);
+    initMirrorArr (mBassInsertPeakDb,   kMaxBassPages);
+    initMirrorArr (mBassInsertPeakDbL,  kMaxBassPages);
+    initMirrorArr (mBassInsertPeakDbR,  kMaxBassPages);
+    initMirrorArr (mDrumInsertPeakDb,   kMaxDrumPages);
+    initMirrorArr (mDrumInsertPeakDbL,  kMaxDrumPages);
+    initMirrorArr (mDrumInsertPeakDbR,  kMaxDrumPages);
+    initMirrorArr (mAuxInsertPeakDb,    MixerChannelIds::kMaxAuxStrips);
+    initMirrorArr (mAuxInsertPeakDbL,   MixerChannelIds::kMaxAuxStrips);
+    initMirrorArr (mAuxInsertPeakDbR,   MixerChannelIds::kMaxAuxStrips);
+    initMirrorArr (mVoxInsertPeakDb,    MixerChannelIds::kMaxVoxStrips);
+    initMirrorArr (mVoxInsertPeakDbL,   MixerChannelIds::kMaxVoxStrips);
+    initMirrorArr (mVoxInsertPeakDbR,   MixerChannelIds::kMaxVoxStrips);
+    initMirrorArr (mInstInsertPeakDb,   MixerChannelIds::kMaxInstStrips);
+    initMirrorArr (mInstInsertPeakDbL,  MixerChannelIds::kMaxInstStrips);
+    initMirrorArr (mInstInsertPeakDbR,  MixerChannelIds::kMaxInstStrips);
+    initMirrorArr (mRustyInsertPeakDb,  MixerChannelIds::kMaxRustyStrips);
+    initMirrorArr (mRustyInsertPeakDbL, MixerChannelIds::kMaxRustyStrips);
+    initMirrorArr (mRustyInsertPeakDbR, MixerChannelIds::kMaxRustyStrips);
+
+    // QA-AudioMeters: VibeGraph::kMaxAudioInserts must match this processor's
+    // kMaxAudioRows (both 50 = MixerState::kMaxAudioRows).  Static-asserted here
+    // since VibeGraph.cpp doesn't include PluginProcessor.h (circular include).
+    static_assert (VibeGraph::kMaxAudioInserts == kMaxAudioRows,
+                   "VibeGraph::kMaxAudioInserts must equal VibeSynthProcessor::kMaxAudioRows");
 
     // G-7 polish (2026-04-29): bumped low → normal.  At low priority the bg
     // thread was getting heavily preempted on Windows during the first few
@@ -374,14 +402,6 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
     const auto& mx = *ctx.mxState;
     auto& clipScratch = *ctx.clipScratch;
 
-    auto arCasMax = [] (std::atomic<float>& a, float v) noexcept
-    {
-        if (v == -std::numeric_limits<float>::infinity()) return;
-        float cur = a.load (std::memory_order_relaxed);
-        while (cur < v
-               && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed)) {}
-    };
-
     // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot captured
     // at the top of processBlock.  CompositeAudioInsertTask calls this helper
     // after the audio thread published mCurrentBlockClipSnapshot, so the
@@ -412,12 +432,10 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
 
         if (player.mutedByChoke)
         {
-            mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
             continue;
         }
         if (rowMuted || builderRowMuted)
         {
-            mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
             continue;
         }
 
@@ -445,7 +463,6 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
         // check is sufficient.
         if (filePos >= fileTotalSamples)
         {
-            mAudioRowPeakDbRun[row].store (-60.0f, std::memory_order_relaxed);
             continue;
         }
 
@@ -575,16 +592,13 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
 
         // 5F-4a Batch 6: route per-clip scratch through Audio InsertNode
         // (polarity → width → rack → post-rack EQ → fader × mute × solo → PDC → peak).
+        // QA-AudioMeters (2026-05-24): the InsertNode now CAS-max's its peakDb via
+        // publishPeakReading, and processInsert exchange-stores into VibeGraph's
+        // audioInsertPeakDb*[row] array; consecutive processInsert calls within
+        // one CompositeAudioInsertTask::run accumulate (Flow A + Flow B both
+        // contribute via the per-call exchange-store).  No per-flow drain needed.
         mVibeGraph.processInsert (VibeGraph::InsertKind::Audio, row,
                                    clipScratch, ctx.bpm, ctx.anySolo);
-
-        // 2026-05-02: drain-and-merge - exchange the InsertNode's L/R peaks
-        // and CAS-max into the audio-row mirror.
-        const auto [pkL, pkR] = mVibeGraph.drainInsertPeakDbStereo (
-            VibeGraph::InsertKind::Audio, row);
-        arCasMax (mAudioRowPeakDbLRun[row], pkL);
-        arCasMax (mAudioRowPeakDbRRun[row], pkR);
-        arCasMax (mAudioRowPeakDbRun [row], juce::jmax (pkL, pkR));
 
         // Publish: add the clip's processed output into the row InsertNode's
         // pull-model buffer (additive so multiple clips on the row sum).
@@ -639,12 +653,10 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
 
     if (player.mutedByChoke)
     {
-        if (inRange) mAudioRowPeakDbRun[(size_t) row].store (-60.0f, std::memory_order_relaxed);
         return false;
     }
     if (rowMuted || builderRowMuted)
     {
-        if (inRange) mAudioRowPeakDbRun[(size_t) row].store (-60.0f, std::memory_order_relaxed);
         return false;
     }
 
@@ -665,7 +677,6 @@ bool VibeSynthProcessor::renderFilePlayPlayer (AudioClipPlayer&             play
     // unreachable post-Rule-4 floor (mirror of Site A).
     if (filePos >= fileTotalSamples)
     {
-        if (inRange) mAudioRowPeakDbRun[(size_t) row].store (-60.0f, std::memory_order_relaxed);
         return false;
     }
 
@@ -2035,24 +2046,81 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
     }
 }
 
-// QA-Eg (2026-05-24): UI-meter atomic drain.  Single boundary point where
-// every UI-visible peak atomic gets updated, called once per processBlock
-// after dispatchBlock.  Three parts:
+// QA-AudioMeters (2026-05-24): UI-facing per-insert peak drain.  Exchange-resets
+// the appropriate m<Kind>InsertPeakDb*L/R mirror to -inf and returns the running
+// max-since-last-call.  MixerTrackStrip / Mixer page poll this once per vblank.
+// Wait-free; safe from any thread but typically called from the UI thread.
+std::pair<float, float>
+VibeSynthProcessor::drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int index) noexcept
+{
+    constexpr float kNI = -std::numeric_limits<float>::infinity();
+    auto drainPair = [] (std::atomic<float>& l, std::atomic<float>& r) noexcept
+    {
+        return std::pair<float, float> {
+            l.exchange (kNI, std::memory_order_relaxed),
+            r.exchange (kNI, std::memory_order_relaxed)
+        };
+    };
+    switch (kind)
+    {
+        case VibeGraph::InsertKind::Layer:
+            if (index >= 0 && index < kMaxLayerPages)
+                return drainPair (mLayerInsertPeakDbL[index], mLayerInsertPeakDbR[index]);
+            break;
+        case VibeGraph::InsertKind::Bass:
+            if (index >= 0 && index < kMaxBassPages)
+                return drainPair (mBassInsertPeakDbL[index], mBassInsertPeakDbR[index]);
+            break;
+        case VibeGraph::InsertKind::Drum:
+            if (index >= 0 && index < kMaxDrumPages)
+                return drainPair (mDrumInsertPeakDbL[index], mDrumInsertPeakDbR[index]);
+            break;
+        case VibeGraph::InsertKind::Audio:
+            if (index >= 0 && index < kMaxAudioRows)
+                return drainPair (mAudioRowPeakDbL[index], mAudioRowPeakDbR[index]);
+            break;
+        case VibeGraph::InsertKind::Aux:
+            if (index >= 0 && index < MixerChannelIds::kMaxAuxStrips)
+                return drainPair (mAuxInsertPeakDbL[index], mAuxInsertPeakDbR[index]);
+            break;
+        case VibeGraph::InsertKind::Vox:
+            if (index >= 0 && index < MixerChannelIds::kMaxVoxStrips)
+                return drainPair (mVoxInsertPeakDbL[index], mVoxInsertPeakDbR[index]);
+            break;
+        case VibeGraph::InsertKind::Inst:
+            if (index >= 0 && index < MixerChannelIds::kMaxInstStrips)
+                return drainPair (mInstInsertPeakDbL[index], mInstInsertPeakDbR[index]);
+            break;
+        case VibeGraph::InsertKind::Rusty:
+            if (index >= 0 && index < MixerChannelIds::kMaxRustyStrips)
+                return drainPair (mRustyInsertPeakDbL[index], mRustyInsertPeakDbR[index]);
+            break;
+    }
+    return { -60.f, -60.f };
+}
+
+// QA-AudioMeters (2026-05-24): UI-meter atomic drain.  Single boundary point
+// where every UI-visible peak atomic gets updated, called once per processBlock
+// after dispatchBlock.  Two parts (post-QA-AudioMeters):
 //   1. Bus mirrors -- every bus (Layers / Bass / Drums / Master / FX /
 //      AudioClips / Vox / Vox2 / Inst / Inst2 / Inst3 / Rusty) drains via
-//      the same G1 loop: drainAndMerge from VibeGraph public-member
-//      atomics that the corresponding BusNode exchange-stored during the
-//      block.  Post-QA-Eg there is no longer a Run-mirror intermediate
-//      stage -- every bus uses the same node-owned -> VibeGraph-atomic ->
-//      mirror promotion path.
-//   2. Inserts in every node + slot atomics in every rack -- promoted by
-//      VibeGraph::promoteAllInsertPeakSnapshots().
-//   3. Per-row Builder audio meters retain the pre-QA-Eg dual-mirror G2
-//      architecture (CompositeAudioInsertTask CAS-maxes into Run companion
-//      atomics; this drain promotes Run -> snapshot).  Routed to
-//      QA-AudioMeters for migration to G1.
-// All three happen back-to-back so a UI vblank firing anywhere outside
-// this small window catches a coherent snapshot across every meter.
+//      the unified G1 loop: drainAndMerge from VibeGraph public-member atomics
+//      that the corresponding BusNode exchange-stored during the block.
+//   2. Insert mirrors -- every InsertKind (Layer / Bass / Drum / Audio / Aux /
+//      Vox / Inst / Rusty) drains the same way: drainAndMerge from
+//      mVibeGraph.<kind>InsertPeakDb*[index] -> m<Kind>InsertPeakDb*[index].
+//      (Audio kind drains into the existing mAudioRowPeakDb* arrays, kept under
+//      that name for Builder grid backward compat.)  Audio publishes via
+//      InsertNode::process -> publishPeakReading; processInsert exchange-stores
+//      InsertNode peakDb/L/R into the VibeGraph per-kind array; this drain
+//      moves it into the PluginProcessor mirror that UI polls.
+// Pre-QA-AudioMeters there was also a Group 3 step -- per-insert peakDbSnap
+// promotion via promoteAllInsertPeakSnapshots -- that's gone (peakDbSnap layer
+// removed entirely).  promoteAllRackSlotSnapshots is still called for the
+// effect-rack-slot peak meters in every InsertNode + every BusNode (separate
+// surface; effect-panel DBFSMeter + VU input meters).
+// All parts happen back-to-back so a UI vblank firing anywhere outside this
+// small window catches a coherent snapshot across every meter.
 void VibeSynthProcessor::drainMeterAtomicsForUI()
 {
     constexpr float kPeakNegInf = -std::numeric_limits<float>::infinity();
@@ -2102,17 +2170,62 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     drainAndMerge (mRustyDrumsBusPeakDbL, mVibeGraph.rustyDrumsBusPeakDbL);
     drainAndMerge (mRustyDrumsBusPeakDbR, mVibeGraph.rustyDrumsBusPeakDbR);
 
-    // Group 2: per-row audio clip mirrors only (all 8 bus G2 mirrors gone;
-    // per-row deferred to a separate batch per S2).
-    for (int r = 0; r < kMaxAudioRows; ++r)
+    // QA-AudioMeters (2026-05-24): per-kind insert mirror drain.  Same
+    // drainAndMerge primitive as the bus loop above; 8 InsertKinds.  Audio
+    // kind drains into the pre-existing mAudioRowPeakDb* arrays (kept under
+    // that name for Builder grid backward compat per L9).
+    for (int i = 0; i < kMaxLayerPages; ++i)
     {
-        drainAndMerge (mAudioRowPeakDb [r], mAudioRowPeakDbRun [r]);
-        drainAndMerge (mAudioRowPeakDbL[r], mAudioRowPeakDbLRun[r]);
-        drainAndMerge (mAudioRowPeakDbR[r], mAudioRowPeakDbRRun[r]);
+        drainAndMerge (mLayerInsertPeakDb [i], mVibeGraph.layerInsertPeakDb [i]);
+        drainAndMerge (mLayerInsertPeakDbL[i], mVibeGraph.layerInsertPeakDbL[i]);
+        drainAndMerge (mLayerInsertPeakDbR[i], mVibeGraph.layerInsertPeakDbR[i]);
     }
-    // Group 3: insert atomics + every slot atomic in every rack across all
-    // nodes (Layers/Bass/Drums/Master/FxBus/AudioClipsBus + every InsertNode).
-    mVibeGraph.promoteAllInsertPeakSnapshots();
+    for (int i = 0; i < kMaxBassPages; ++i)
+    {
+        drainAndMerge (mBassInsertPeakDb [i], mVibeGraph.bassInsertPeakDb [i]);
+        drainAndMerge (mBassInsertPeakDbL[i], mVibeGraph.bassInsertPeakDbL[i]);
+        drainAndMerge (mBassInsertPeakDbR[i], mVibeGraph.bassInsertPeakDbR[i]);
+    }
+    for (int i = 0; i < kMaxDrumPages; ++i)
+    {
+        drainAndMerge (mDrumInsertPeakDb [i], mVibeGraph.drumInsertPeakDb [i]);
+        drainAndMerge (mDrumInsertPeakDbL[i], mVibeGraph.drumInsertPeakDbL[i]);
+        drainAndMerge (mDrumInsertPeakDbR[i], mVibeGraph.drumInsertPeakDbR[i]);
+    }
+    for (int i = 0; i < kMaxAudioRows; ++i)
+    {
+        drainAndMerge (mAudioRowPeakDb [i], mVibeGraph.audioInsertPeakDb [i]);
+        drainAndMerge (mAudioRowPeakDbL[i], mVibeGraph.audioInsertPeakDbL[i]);
+        drainAndMerge (mAudioRowPeakDbR[i], mVibeGraph.audioInsertPeakDbR[i]);
+    }
+    for (int i = 0; i < MixerChannelIds::kMaxAuxStrips; ++i)
+    {
+        drainAndMerge (mAuxInsertPeakDb [i], mVibeGraph.auxInsertPeakDb [i]);
+        drainAndMerge (mAuxInsertPeakDbL[i], mVibeGraph.auxInsertPeakDbL[i]);
+        drainAndMerge (mAuxInsertPeakDbR[i], mVibeGraph.auxInsertPeakDbR[i]);
+    }
+    for (int i = 0; i < MixerChannelIds::kMaxVoxStrips; ++i)
+    {
+        drainAndMerge (mVoxInsertPeakDb [i], mVibeGraph.voxInsertPeakDb [i]);
+        drainAndMerge (mVoxInsertPeakDbL[i], mVibeGraph.voxInsertPeakDbL[i]);
+        drainAndMerge (mVoxInsertPeakDbR[i], mVibeGraph.voxInsertPeakDbR[i]);
+    }
+    for (int i = 0; i < MixerChannelIds::kMaxInstStrips; ++i)
+    {
+        drainAndMerge (mInstInsertPeakDb [i], mVibeGraph.instInsertPeakDb [i]);
+        drainAndMerge (mInstInsertPeakDbL[i], mVibeGraph.instInsertPeakDbL[i]);
+        drainAndMerge (mInstInsertPeakDbR[i], mVibeGraph.instInsertPeakDbR[i]);
+    }
+    for (int i = 0; i < MixerChannelIds::kMaxRustyStrips; ++i)
+    {
+        drainAndMerge (mRustyInsertPeakDb [i], mVibeGraph.rustyInsertPeakDb [i]);
+        drainAndMerge (mRustyInsertPeakDbL[i], mVibeGraph.rustyInsertPeakDbL[i]);
+        drainAndMerge (mRustyInsertPeakDbR[i], mVibeGraph.rustyInsertPeakDbR[i]);
+    }
+
+    // Effect-rack slot atomics on every InsertNode + every BusNode (separate
+    // surface; effect-panel DBFSMeter + VU input meters).
+    mVibeGraph.promoteAllRackSlotSnapshots();
 }
 
 // 2026-05-07 (Batch 10): DSP-load measurement + overload protection.
