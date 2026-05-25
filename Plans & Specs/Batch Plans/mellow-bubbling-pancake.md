@@ -23,11 +23,11 @@ QA-AudioMeters is the next Phase 1 batch after QA-Eg per the §6 sequencing arro
 - **InsertNode primitives (already in place)** — audio rows ARE InsertNodes (`InsertKind::Audio`, `mInsertsAudio[row]`). InsertNode has `peakDb / peakDbL / peakDbR` atomics (confirmed via [VibeGraph.cpp:1241](Source/VibeGraph.cpp:1241) — the publish site inside `processInsert` stores `juce::jmax(newL, newR)` into `peakDb`). `mGraph->drainInsertPeakDbStereo(InsertKind::Audio, row)` is the existing exchange-drain accessor both publishing sites already use.
 - **VibeGraph public-member atomics (existing G1 pattern)** — [VibeGraph.h:634-672](Source/VibeGraph.h:634): each migrated bus has 3 atomics (`fxBusPeakDb / fxBusPeakDbL / fxBusPeakDbR` etc.). Per-row equivalent needs `std::array<std::atomic<float>, kMaxAudioRows>` × 3 axes added in the same block.
 
-**Risk:** **low-medium** — meter / UI-state only; audio path arithmetic unaffected. Same migration pattern as QA-Eg (well-established by 8 buses migrated one at a time across Tasks 2-6). Three structural twists vs the bus migration: (i) per-row indexing means VibeGraph members are arrays not scalars; (ii) under L7 / Sub-B Option B, the InsertNode `:1241` publish site needs a one-line CAS-max upgrade — this site is shared across ALL `InsertKind`s (Layer / Bass / Drum / Audio / Aux / Vox / Inst / Rusty), so Task 1 must confirm the upgrade is mechanically safe for every kind, not just `Audio`; (iii) under L8 / Sub-C B2, deleting the 6 force-reset stores changes the per-row meter's mute decay from 1-block-snap to 20ms-ballistic — visible behavioral change that Jeff approved as desirable (aligns to bus behavior).
+**Risk:** **medium-high** (scope-up from L7-revised below). The original §5-entry's "per-row Builder audio meters only" risk envelope (low-medium, meter/UI-state only) expanded post-Task-1 inventory when the L7 / Option B assumption proved structurally wrong. Jeff locked the pivot to L7-revised Option 2 (restructure InsertNode publish entirely to bus-pattern) — affecting all 8 InsertKinds (~140 slots total) + both consumer surfaces (per-row Builder + per-insert Mixer strip). Structural twists vs original plan: (i) InsertNode::process rewritten to use publishPeakReading (CAS-max + latency-comp ring) — replaces the existing load-decay-max-store at `:1231-1242`; (ii) peakDbSnap snapshot-promotion layer removed entirely from InsertNode struct + promoteAllInsertPeakSnapshots; (iii) 8 sets of `VibeGraph::<kind>InsertPeakDb*` public-member arrays added (parallel to the existing `<bus>PeakDb` pattern); (iv) 8 sets of `PluginProcessor::m<Kind>InsertPeakDb*` snapshot mirrors added per L9 (parallel to existing `m<Bus>PeakDb`); (v) `drainInsertPeakDbStereo` either rewritten to read from new mirror or replaced with a new accessor; (vi) MixerTrackStrip per-strip meter consumer rewired to new accessor; (vii) Builder grid consumer reads `mAudioRowPeakDb` (or renamed `mAudioInsertPeakDb`) which is now one of the 8 mirror arrays; (viii) L8 / Sub-C B2 still applies — 6 force-reset stores deleted; per-row meters now decay over ~20ms (DBFSMeter ballistic) matching all other meters (no kind has per-block force-reset post-batch). Net: every per-strip meter on Mixer page + every per-row meter on Builder grid + every EffectRack slot meter goes through the unified G1 pattern (publishPeakReading → VibeGraph member atomic → PluginProcessor mirror → UI poll), ending the bus-vs-insert architectural inconsistency that QA-Eg's bus migration left exposed.
 
-**Effort estimate:** ~3-5 hours (§5 entry's estimate; matches my source-read).
+**Effort estimate:** ~12-18 hours (scope-up from original 3-5 hours). Task 2 structural one-shot ~6-9 hr (InsertNode publish rewrite + new VibeGraph arrays + new PluginProcessor mirrors + drainMeterAtomicsForUI extension + consumer rewiring + force-reset deletions + *Run deletion). Tasks 3-7 per-kind verify ~3-5 hr (Jeff drives each verify; my work is `/draft-commit` + `/draft-doc running-notes` + commit per task). Task 8 cleanup + grep sweep ~1 hr. Task 9 close + `/review-batch` ~2-3 hr (the bigger surface raises the review-batch detail count).
 
-**Dependencies:** QA-Eg closed (`888a01b`). The migration pattern + cleanup of the central mirror infrastructure landed in QA-Eg; this batch consumes the same pattern.
+**Dependencies:** QA-Eg closed (`888a01b`). The G1 pattern + publishPeakReading + drainAndMerge primitives all landed in QA-Eg; this batch extends them to the insert surface.
 
 ---
 
@@ -40,15 +40,18 @@ QA-AudioMeters is the next Phase 1 batch after QA-Eg per the §6 sequencing arro
 | L3 | **Surface inventory: 8 publishing sites + 1 promotion loop + 6 `*Run` arrays + 6 initialiser-store lines + 1 comment block** | Source-confirmed pre-batch. Files to modify section lists each. §5 entry called out 1 site (`CompositeAudioInsertTask.cpp:113-115`); my grep surfaced the other 7 — preserves the per-flow + force-reset semantics in the migration. |
 | L4 | **Sequencing = immediately after QA-Eg, before QA-InsertMaps** | Per Main Plan §6 arrow + §9 thirty-first Forks entry. Jeff-confirmed slot at QA-Eg close per `feedback_slot_placement_is_spec_call.md`. |
 | L5 | **Silly-name = `mellow-bubbling-pancake`** (plan-mode runtime) | My pick per `feedback_silly_name_is_my_pick.md` (not a spec call). |
-| L6 | **Task structure = 5-task** (Task 0 open / Task 1 read-only pre-flight inventory / Task 2 per-row migration bundle / Task 3 cleanup + comment sweep + grep cleanliness / Task 4 close) | Jeff 2026-05-24 ExitPlanMode (Sub-A). QA-Eg's Task 1 caught the S6 dead-field surprise before code landed; this batch has equivalent inventory questions (InsertNode publish-site CAS-max upgrade feasibility under L7, `drainAndMerge` semantic, `peakDecayDbPerBlock`-equivalent dead state on InsertNode). 30 min of read-time vs the cost of mid-batch surprise rework. |
-| L7 | **Per-row accumulator semantics = Option B** — single exchange-store at end of `CompositeAudioInsertTask::run`; both flows publish into InsertNode peakDb via `processInsert`; per-flow drains at CompositeAudioInsertTask:113-115 + PluginProcessor:585-587 are REMOVED. Requires upgrading the InsertNode publish site at [VibeGraph.cpp:1241](Source/VibeGraph.cpp:1241) from `peakDb.store(juce::jmax(newL, newR), ...)` to a CAS-max so consecutive publishes within one task accumulate correctly. | Jeff 2026-05-24 ExitPlanMode (Sub-B). Cleaner architectural match to the bus migration; eliminates the per-flow drain pattern entirely; ends QA-Eg's bus-vs-row architectural inconsistency. Task 1 confirms the InsertNode publish-site CAS-max upgrade is mechanically safe before code lands. |
-| L8 | **Force-reset path handling = B2** — DELETE all 6 force-reset stores at PluginProcessor.cpp:415/420/448/642/647/668. Per-row meters decay naturally over ~20ms (DBFSMeter ballistic) on mute / choke / file-end — same visible behavior as every bus meter. | Jeff 2026-05-24 ExitPlanMode (Sub-C). Aligns per-row meter behavior to bus meter behavior (which DBFSMeter ballistic decay already covers). Eliminates the per-row-specific instant-silent-on-mute branch that was a leftover from the G2 mirror era; the 20ms decay is what every bus meter already does and what the user is already familiar with. |
+| L6 | **Task structure = 10-task** (Task 0 open / Task 1 read-only pre-flight inventory / Task 2 structural one-shot / Task 3 Layer verify / Task 4 Bass verify / Task 5 Drum verify / Task 6 Audio verify [Builder + Mixer strip] / Task 7 Aux+Vox+Inst+Rusty bundle verify / Task 8 cleanup + comment sweep / Task 9 close) — **REVISED 2026-05-24 mid-Task-1** from the original 5-task structure after the L7 pivot expanded scope to all 8 InsertKinds. | Jeff 2026-05-24 mid-Task-1 re-spec (L6-revised). Mirrors QA-Eg's per-bus verify rhythm (Tasks 2-6 in QA-Eg verified each bus separately) — gives clean per-kind rollback boundaries on a structural change that touches ~140 insert slots. Task 2 lands the entire structural one-shot in one commit (so the system is internally consistent post-Task-2); Tasks 3-7 are verify-only checkpoints (Jeff drives each verify; commit-per-task gives bisect boundaries on UX regression per kind). |
+| L7 | **Per-insert publish architecture = Option 2 restructure** — REVISED 2026-05-24 mid-Task-1 from the original Option B. InsertNode::process rewritten to use the bus-pattern `publishPeakReading` (CAS-max + latency-comp ring) instead of the current load-decay-max-store at `:1231-1242`. The peakDbSnap / peakDbLSnap / peakDbRSnap snapshot-promotion layer is REMOVED entirely from InsertNode struct. At end of `VibeGraph::processInsert`, exchange-store from InsertNode peakDb/L/R into new `VibeGraph::<kind>InsertPeakDb*[index]` public-member arrays (parallel to existing `<bus>PeakDb` atomics). All 8 InsertKinds (Layer / Bass / Drum / Audio / Aux / Vox / Inst / Rusty) adopt this standard. | Jeff 2026-05-24 mid-Task-1 re-spec (L7-revised). The original Option B assumption — "InsertNode publish at `:1241` needs a CAS-max upgrade then single exchange-store at end of CompositeAudioInsertTask::run" — turned out to NOT fit because the existing publish IS already an accumulator (load-decay-max-store, not simple-store) AND because the per-row Builder consumer drains the peakDbSnap layer (NOT peakDb directly), and peakDbSnap has TWO consumers (per-row Builder + per-insert Mixer strip) — exchange-resetting it from one consumer breaks the other. Option 2 restructures the entire insert publish to mirror the bus pattern exactly, ending the bus-vs-insert architectural inconsistency that QA-Eg's bus migration left exposed. Jeff: "Let's embrace the scope and get the architecture right." |
+| L8 | **Force-reset path handling = B2** — DELETE all 6 force-reset stores at PluginProcessor.cpp:415/420/448/642/647/668. Per-row Builder audio meters decay naturally over ~20ms (DBFSMeter ballistic) on mute / choke / file-end — same visible behavior as every bus meter + every other InsertKind. | Jeff 2026-05-24 ExitPlanMode (Sub-C). Aligns per-row audio meter behavior to bus meter behavior + every other insert kind's meter behavior (none of the other 7 InsertKinds have force-reset paths — only the audio-row consumer had them, layered onto the *Run mirror). Eliminates the per-row-specific instant-silent-on-mute branch that was a leftover from the G2 mirror era; under L7-revised the entire force-reset machinery is unnecessary because publishPeakReading + drainAndMerge + DBFSMeter handle the decay end-to-end. |
+| L9 | **Snapshot mirror location = PluginProcessor parallel mirrors** — add 8 sets of `std::array<std::atomic<float>, max_for_kind>` × 3 axes on PluginProcessor (mirroring the existing `mLayersPeakDb` etc. bus pattern + the existing `mAudioRowPeakDb*` per-row pattern). Naming: `mLayerInsertPeakDb` / `mBassInsertPeakDb` / `mDrumInsertPeakDb` / `mAudioRowPeakDb` (KEPT — existing name preserved for Builder grid backward compat; semantically equivalent to `mAudioInsertPeakDb`) / `mAuxInsertPeakDb` / `mVoxInsertPeakDb` / `mInstInsertPeakDb` / `mRustyInsertPeakDb`. `drainMeterAtomicsForUI` adds 8 per-kind drain loops drainAndMerge'ing `mVibeGraph.<kind>InsertPeakDb*[index]` → `m<Kind>InsertPeakDb*[index]`. UI consumers (Builder grid, Mixer page per-strip meter) poll PluginProcessor mirrors directly. | Jeff 2026-05-24 mid-Task-1 re-spec (L9-new). Matches the bus pattern exactly (every existing bus mirror lives on PluginProcessor as the UI poll target). VibeGraph-as-UI-poll-target would break this consistency (which would create a new bus-vs-insert inconsistency in the opposite direction). The mAudioRowPeakDb name is preserved because (a) it's the Builder grid's natural label and (b) renaming would force a sweep of every Builder consumer for no architectural gain. |
 
 ---
 
 ## Sub-spec calls surfaced for ExitPlanMode
 
 No sub-spec calls open at ExitPlanMode. All three (Sub-A / Sub-B / Sub-C) locked pre-exit by Jeff and recorded as L6 / L7 / L8 above.
+
+**Post-ExitPlanMode re-spec (2026-05-24 mid-Task-1):** Task 1's read-only inventory surfaced that L7's Option B structural assumption was wrong (see Task 1 running-notes entry for details). Jeff re-spec'd L6 + L7 + added L9; original locks for L1-L5 + L8 stand. Updated table above is the authoritative locked set; all spec calls remain closed.
 
 ---
 
@@ -57,58 +60,108 @@ No sub-spec calls open at ExitPlanMode. All three (Sub-A / Sub-B / Sub-C) locked
 ### Task 1 — Read-only pre-flight inventory
 **No edits.** Pure read pass. Inventory output is captured in running notes + surfaced to Jeff before Task 2.
 
-### Task 2 — Per-row migration (single source-touching bundle, Sub-B Option B + Sub-C B2)
-- [Source/VibeGraph.h](Source/VibeGraph.h) — add three `std::array<std::atomic<float>, kMaxAudioRows>` public-member arrays parallel to the existing per-bus atomics block at `:634-672`. Naming: `audioRowPeakDb / audioRowPeakDbL / audioRowPeakDbR`. Sizing: introduce a `static constexpr int VibeGraph::kMaxAudioRows = 50;` (Task 1 confirms whether to mirror the value or include `VibeSynthProcessor::kMaxAudioRows` — circular-include risk is real); add a single `static_assert(VibeGraph::kMaxAudioRows == VibeSynthProcessor::kMaxAudioRows)` in a `.cpp` that includes both headers.
-- [Source/VibeGraph.cpp](Source/VibeGraph.cpp):
-  - **`:1241` InsertNode peakDb publish site** (per L7 / Sub-B Option B): upgrade from `peakDb.store(juce::jmax(newL, newR), std::memory_order_relaxed)` to a CAS-max so consecutive `processInsert` calls within one `CompositeAudioInsertTask::run` accumulate correctly. Pattern:
-    ```cpp
-    const float newPeak = juce::jmax(newL, newR);
-    float cur = peakDb.load(std::memory_order_relaxed);
-    while (cur < newPeak
-           && ! peakDb.compare_exchange_weak(cur, newPeak, std::memory_order_relaxed)) {}
-    ```
-    Task 1 confirms this is the only InsertNode peakDb write site + verifies the bus nodes' equivalent publishes already CAS-max (or whether the buses get away with simple-store because they only publish once per block).
-  - **VibeGraph::prepare()** init loop: add per-element `-60.0f` init for the three new `audioRowPeakDb*` arrays. Pattern parallel to how bus public-member atomics get their init (Task 1 confirms whether the bus atomics rely on `{ -60.f }` aggregate-init or a `prepare`-time loop).
-- [Source/PluginProcessor.h](Source/PluginProcessor.h) — DELETE the `*Run` declarations at `:624-629` (the three `mAudioRowPeakDb*Run [kMaxAudioRows]` arrays + the 5-line "2026-05-02: running-max companion" comment block). KEEP the snapshot mirrors at `:619-623` (UI poll target). `kMaxAudioRows` constant at `:619` stays.
-- [Source/PluginProcessor.cpp](Source/PluginProcessor.cpp):
-  - **`:155-163` initialiser loop**: DELETE the three `*Run` initialiser-store lines (`:161-163`) + the surrounding "running-max variants" comment lines; KEEP the snapshot mirror initialisers (`:155-157`).
-  - **`:415 / :420 / :448` force-reset sites inside `renderAudioClipsForRow`**: per L8 / Sub-C B2, **DELETE these three force-reset stores entirely** (each is `mAudioRowPeakDbRun[row].store (-60.0f, ...)` on a single line; surrounding `if`/`continue` logic stays). 3 lines deleted.
-  - **`:585-587` per-flow drain + CAS-max site inside `renderAudioClipsForRow` (Flow B)**: per L7 / Sub-B Option B, **DELETE the three `arCasMax` lines + the `drainInsertPeakDbStereo` call at `:583-584` that feeds them**. The `pkL` / `pkR` locals + the `arCasMax` lambda definition above this block also become dead — delete the lambda definition too. ~7 lines deleted.
-  - **`:642 / :647 / :668` force-reset sites inside `renderFilePlayPlayer`**: per L8 / Sub-C B2, **DELETE these three force-reset stores entirely** (same pattern as the renderAudioClipsForRow force-resets — single-line stores; surrounding logic stays). 3 lines deleted.
-  - **`:2107-2112` G3 promotion loop inside `drainMeterAtomicsForUI`**: change the per-row drain to source from the VibeGraph arrays:
-    ```cpp
-    // Before:
-    drainAndMerge (mAudioRowPeakDb [r], mAudioRowPeakDbRun [r]);
-    // After:
-    drainAndMerge (mAudioRowPeakDb [r], mVibeGraph.audioRowPeakDb [r]);
-    ```
-    The loop body becomes a structural G1 drain (matches the bus G1 loop at `:2096-2108` post-QA-Eg). Update the surrounding comment block to drop the "per-row deferred to a separate batch per S2" note and reflect the unified G1 drain that now covers per-row alongside the 13 buses.
-- [Source/Engine/Tasks/CompositeAudioInsertTask.cpp](Source/Engine/Tasks/CompositeAudioInsertTask.cpp:113):
-  - **`:100-116` Flow A per-flow drain + CAS-max block**: per L7 / Sub-B Option B, **DELETE this entire block** (the `if (mIndex >= 0 && mIndex < VibeSynthProcessor::kMaxAudioRows)` guard + the `drainInsertPeakDbStereo` call + the `casMax` lambda definition + the three `casMax` calls into `mProcessor->mAudioRowPeakDb*Run`). ~17 lines deleted.
-  - **End-of-`run` body** (after Flow B's `renderAudioClipsForRow` call at `:154`): add a single exchange-store from InsertNode peakDb into the VibeGraph public-member array. Pattern (parallel to the bus exchange-stores at [VibeGraph.cpp:1471 / :1503 / :1521 / ...](Source/VibeGraph.cpp:1471)):
-    ```cpp
-    if (mIndex >= 0 && mIndex < VibeGraph::kMaxAudioRows)
-    {
-        // Drain InsertNode peakDb into VibeGraph public-member array for the UI drain loop.
-        if (auto* node = mGraph->getInsertNode(VibeGraph::InsertKind::Audio, mIndex))
-        {
-            constexpr float kNI = -std::numeric_limits<float>::infinity();
-            mGraph->audioRowPeakDb [mIndex].store(node->peakDb .exchange(kNI, std::memory_order_relaxed), std::memory_order_relaxed);
-            mGraph->audioRowPeakDbL[mIndex].store(node->peakDbL.exchange(kNI, std::memory_order_relaxed), std::memory_order_relaxed);
-            mGraph->audioRowPeakDbR[mIndex].store(node->peakDbR.exchange(kNI, std::memory_order_relaxed), std::memory_order_relaxed);
-        }
-    }
-    ```
-    Task 1 confirms whether VibeGraph exposes a `getInsertNode(InsertKind, index)` accessor returning the InsertNode reference (or whether the existing `drainInsertPeakDbStereo` is the only accessor and we need a new public getter). If accessor doesn't exist, add a minimal `InsertNode* getInsertNode(InsertKind, int)` public method in `VibeGraph.h`.
+### Task 2 — Structural one-shot (L7-revised Option 2: full InsertNode publish refactor, all 8 InsertKinds)
+*Single commit landing the entire architectural restructure. After Task 2 commit, the system is internally consistent — all 8 InsertKinds use the bus-pattern G1 publish chain; the peakDbSnap layer is gone; the *Run mirror is gone; consumers are wired to the new mirrors. Tasks 3-7 verify per-kind.*
 
-### Task 3 — Cleanup + comment sweep + grep cleanliness
-- Comment sweep: grep for `*Run` / "running-max" / "2026-05-02" / "Group 3" referencing the deleted per-row mirror surface. Update or delete:
-  - The "Group 3" comment block above `drainMeterAtomicsForUI`'s former G3 loop (at the line range just above `:2107` post-Task-2; was the QA-Eg Task 8 NEEDS-FIX-2 rewrite). Update to reflect that the unified G1 drain now covers per-row alongside the 13 buses.
-  - The `Source/PluginProcessor.h:617-619` comment block "Per-row peak dB for audio strip meters..." stays correct in spirit but should reflect that the publishing path now writes into VibeGraph atomics (the snapshot mirror is the UI poll target only).
-- Grep cleanliness check: `grep -rn "mAudioRowPeakDbRun\|mAudioRowPeakDbLRun\|mAudioRowPeakDbRRun" Source/` — result must be empty post-Task-2.
-- Cross-check that no other reader of `mAudioRowPeakDb*Run` exists outside the migrated sites (Task 1 inventory output confirms this).
+**InsertNode struct rewrite ([Source/VibeGraph.cpp:1037-1244](Source/VibeGraph.cpp:1037)):**
+- DELETE: `peakDbSnap`, `peakDbLSnap`, `peakDbRSnap` (3 atomics).
+- DELETE: `peakDecayDbPerBlock` field + the `kDecayDbPerSec` constant + the prepare-time computation (the load-decay-max-store machinery is replaced by publishPeakReading + DBFSMeter ballistic).
+- KEEP: `peakDb`, `peakDbL`, `peakDbR` (now CAS-max written by publishPeakReading).
+- KEEP: `peakRingL`, `peakRingR`, `peakRingIdx` (publishPeakReading consumes these).
+- REPLACE the inline publish at `:1231-1242` (load-decay-max-store) with a single `publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx, peakDbL, peakDbR, peakDb);` call — mirrors the bus pattern at `:407 / :569 / :727 / :864 / :1012`.
 
-### Task 4 — Close sequence
+**VibeGraph member additions ([Source/VibeGraph.h:634-672](Source/VibeGraph.h:634)):**
+- Add 8 sets × 3 axes = 24 public-member `std::array<std::atomic<float>, max_for_kind>` arrays after the existing bus block:
+  ```cpp
+  std::array<std::atomic<float>, kMaxLayerInserts>  layerInsertPeakDb,  layerInsertPeakDbL,  layerInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxBassInserts>   bassInsertPeakDb,   bassInsertPeakDbL,   bassInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxDrumInserts>   drumInsertPeakDb,   drumInsertPeakDbL,   drumInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxAudioInserts>  audioInsertPeakDb,  audioInsertPeakDbL,  audioInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxAuxInserts>    auxInsertPeakDb,    auxInsertPeakDbL,    auxInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxVoxInserts>    voxInsertPeakDb,    voxInsertPeakDbL,    voxInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxInstInserts>   instInsertPeakDb,   instInsertPeakDbL,   instInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxRustyInserts>  rustyInsertPeakDb,  rustyInsertPeakDbL,  rustyInsertPeakDbR;
+  ```
+- Introduce `kMax<Kind>Inserts` constants inside `VibeGraph` (50 for Audio matching `VibeSynthProcessor::kMaxAudioRows`; 16 for Layer/Bass/Drum/Aux matching existing slot limits; 6 for Vox/Inst matching `kMaxVoxPages`/`kMaxInstPages`; ~13 for Rusty matching `kMaxRustySlots`). Add a single `.cpp` static_assert tying VibeGraph::kMaxAudioInserts == VibeSynthProcessor::kMaxAudioRows.
+
+**VibeGraph::processInsert exchange-store ([Source/VibeGraph.cpp:processInsert body](Source/VibeGraph.cpp)):**
+- After InsertNode::process completes (the chain returns), add an exchange-store from InsertNode peakDb/L/R into the VibeGraph member array indexed by (kind, index). Pattern parallel to bus exchange-stores at [VibeGraph.cpp:1471 / :1503 / :1521 / ...](Source/VibeGraph.cpp:1471):
+  ```cpp
+  constexpr float kNI = -std::numeric_limits<float>::infinity();
+  auto storePeak = [&] (std::atomic<float>& dst, std::atomic<float>& src) noexcept {
+      dst.store(src.exchange(kNI, std::memory_order_relaxed), std::memory_order_relaxed);
+  };
+  // Select per-kind array and write at [index]:
+  switch (kind) {
+      case InsertKind::Layer:
+          storePeak (layerInsertPeakDb [index], node->peakDb);
+          storePeak (layerInsertPeakDbL[index], node->peakDbL);
+          storePeak (layerInsertPeakDbR[index], node->peakDbR);
+          break;
+      // ... 7 more cases
+  }
+  ```
+
+**peakDbSnap layer removal ([Source/VibeGraph.cpp:2470 promoteAllInsertPeakSnapshots](Source/VibeGraph.cpp:2470)):**
+- DELETE the insert-promotion half (the `promoteMap` calls at `:2491-2498`). The peakDbSnap atomics no longer exist.
+- KEEP the rack-promotion half (the `promoteRack` / `promoteRacksInMap` calls at `:2513-` end of function). EffectRack slot atomics are a SEPARATE surface (effect-panel meters) and still need this promotion.
+- RENAME the function to `promoteAllRackSlotSnapshots()` to reflect its slimmer scope. Update the call site at [PluginProcessor.cpp:2115](Source/PluginProcessor.cpp:2115) accordingly.
+
+**Consumer rewiring — drainInsertPeakDbStereo ([Source/VibeGraph.cpp:2437](Source/VibeGraph.cpp:2437)):**
+- Rewrite body to read from the new VibeGraph member arrays (the kind+index-indexed atomics). Since this is the per-block UI drain target (called by Mixer-page per-strip meter), it exchange-reads `<kind>InsertPeakDb*[index]` and returns the values. Wait — actually under the new architecture, the UI consumer reads PluginProcessor mirrors directly per L9, NOT VibeGraph member atomics. The `drainInsertPeakDbStereo` function may be DELETED entirely if its only consumer (MixerTrackStrip) is rewired to read PluginProcessor mirrors. Task 1 surfaced that drainInsertPeakDbStereo is the only audio-side path that was draining peakDbSnap — under L7-revised, this function's role disappears.
+- **Plan**: DELETE `drainInsertPeakDbStereo` from VibeGraph.h + .cpp. Replace MixerTrackStrip consumer with a new `VibeSynthProcessor::getInsertPeakDbStereo(InsertKind, int)` accessor that reads from `m<Kind>InsertPeakDb*[index]` mirrors.
+
+**PluginProcessor.h additions ([Source/PluginProcessor.h](Source/PluginProcessor.h)):**
+- Add 8 sets × 3 axes = 24 snapshot mirror arrays after the existing per-row mirror block at `:620-629`:
+  ```cpp
+  std::atomic<float> mLayerInsertPeakDb  [kMaxLayerInserts];
+  std::atomic<float> mLayerInsertPeakDbL [kMaxLayerInserts];
+  std::atomic<float> mLayerInsertPeakDbR [kMaxLayerInserts];
+  // ... 7 more kind blocks
+  ```
+- KEEP the existing `mAudioRowPeakDb / mAudioRowPeakDbL / mAudioRowPeakDbR [kMaxAudioRows]` arrays as the Audio kind's mirror (preserves Builder grid consumer's naming per L9; semantically equivalent to `mAudioInsertPeakDb`).
+- DELETE the `*Run` declarations at `:624-629` (the three `mAudioRowPeakDb*Run [kMaxAudioRows]` arrays + the 5-line "2026-05-02: running-max companion" comment block).
+- Add public accessor: `std::pair<float, float> getInsertPeakDbStereo (InsertKind, int) const noexcept;` reading from the appropriate `m<Kind>InsertPeakDb*L/R[index]`. Returns `{-60, -60}` for out-of-range or inactive indices.
+
+**PluginProcessor.cpp updates ([Source/PluginProcessor.cpp](Source/PluginProcessor.cpp)):**
+- **`:155-163` initialiser loop**: DELETE the three `*Run` initialiser lines (`:161-163`) + the surrounding "running-max variants" comment lines. Add per-kind initialiser loops for the 8 new mirror sets (init to `-60.0f`).
+- **`:415 / :420 / :448` force-reset sites inside `renderAudioClipsForRow`**: per L8 / B2, **DELETE all three force-reset stores**.
+- **`:583-587` per-flow drain + CAS-max site inside `renderAudioClipsForRow` (Flow B)**: per L7-revised, **DELETE the entire block** (the `drainInsertPeakDbStereo` call + the three `arCasMax` lines + the `arCasMax` lambda definition).
+- **`:642 / :647 / :668` force-reset sites inside `renderFilePlayPlayer`**: per L8 / B2, **DELETE all three force-reset stores**.
+- **`:2107-2112` G3 promotion loop inside `drainMeterAtomicsForUI`**: REPLACE with 8 per-kind drain loops draining `mVibeGraph.<kind>InsertPeakDb*[index]` → `m<Kind>InsertPeakDb*[index]`. The Audio kind's loop preserves the `mAudioRowPeakDb*[r]` snapshot mirror target.
+- **`:2115` `promoteAllInsertPeakSnapshots` call**: RENAME to `promoteAllRackSlotSnapshots()` (matches the function's slimmed scope).
+
+**CompositeAudioInsertTask.cpp ([Source/Engine/Tasks/CompositeAudioInsertTask.cpp:113](Source/Engine/Tasks/CompositeAudioInsertTask.cpp:113)):**
+- **`:100-116` Flow A per-flow drain + CAS-max block**: **DELETE this entire block** (the `drainInsertPeakDbStereo` call + the `casMax` lambda + the three casMax calls into `mProcessor->mAudioRowPeakDb*Run`). The exchange-store at end of `processInsert` (added above in VibeGraph.cpp) handles the publish for both Flow A and Flow B.
+- No new end-of-task exchange-store needed — `processInsert` (called by both Flow A at `:94` and Flow B inside `renderAudioClipsForRow`) does the publish.
+
+**MixerTrackStrip / Mixer page consumer rewire:**
+- Find every `mProcessor->mVibeGraph.drainInsertPeakDbStereo(...)` call site (or equivalent VibeGraph::drainInsertPeakDbStereo direct call); replace with `mProcessor->getInsertPeakDbStereo(kind, index)`. Likely lives in MixerTrackStrip's meter-feed code path.
+
+### Task 3 — Layer kind end-to-end verify
+**No source edits.** Verify Layer InsertKind meters: Mixer page per-strip meter on Layer 1/2 tabs reads activity for Harmless / BaySickSynth / BaySickPlayer engines; decays correctly; MT ON + MT OFF parity. `/draft-commit` per task (Task 3 verify commit) + `/draft-doc running-notes`.
+
+### Task 4 — Bass kind end-to-end verify
+**No source edits.** Same pattern as Task 3 for Bass InsertKind (Bass 1/2 tabs).
+
+### Task 5 — Drum kind end-to-end verify
+**No source edits.** Same pattern for Drum InsertKind (Drums tabs + per-drum strips).
+
+### Task 6 — Audio kind end-to-end verify (Builder grid + Mixer per-strip)
+**No source edits.** The original §5 scope: Builder grid per-row meter + Mixer page per-audio-insert strip meter, both consumers verified. Mute / choke / file-end edge cases (decay ~20ms per L8). MT ON + MT OFF parity.
+
+### Task 7 — Aux + Vox + Inst + Rusty bundle end-to-end verify
+**No source edits.** Smaller surfaces bundled: Aux strips, Vox/Inst tabs (live input + prerecorded audio sources per `project_vox_inst_accept_prerecorded_audio.md`), Rusty kit. Mixer per-strip meter for each.
+
+### Task 8 — Cleanup + comment sweep + grep cleanliness
+- Grep cleanliness: `grep -rn "mAudioRowPeakDbRun\|mAudioRowPeakDbLRun\|mAudioRowPeakDbRRun\|peakDbSnap\|peakDbLSnap\|peakDbRSnap" Source/` — result must be empty post-Task-2.
+- Comment sweep: grep for "Group 2" / "Group 3" / "running-max companion" / "deferred to a separate batch per S2" / "peakDbSnap" / "layer-vs-bus ping-pong" / "promoteAllInsertPeakSnapshots" / `getInsertPeakDbStereoExchange` — update or delete remaining references:
+  - The stale inline comment at PluginProcessor.cpp:2067 "Group 1: bus mirrors (Layers/Bass/Drums/Master)" — covers 13 buses post-QA-Eg.
+  - The publishPeakReading comment at VibeGraph.cpp:113-115 referencing the stale `getInsertPeakDbStereoExchange` name (current name is `drainInsertPeakDbStereo`, deleted entirely under L7-revised).
+  - The `drainMeterAtomicsForUI` function-header comment at PluginProcessor.cpp:2038-2055 — update from "three parts" model to reflect that per-row drain is unified with bus drain.
+  - The `mAudioRowPeakDb` declaration comment at PluginProcessor.h:617-619 — update to reflect the publishing path now writes into VibeGraph member arrays via processInsert exchange-store (no more *Run).
+
+### Task 9 — Close sequence
 - No source edits. `/draft-doc batch-close` + `/review-batch QA-AudioMeters` + apply + `/draft-commit` + close commit.
 
 ---
@@ -137,89 +190,153 @@ No sub-spec calls open at ExitPlanMode. All three (Sub-A / Sub-B / Sub-C) locked
 - [ ] Wait for Jeff's confirm.
 - [ ] Dispatch `/draft-doc running-notes` → apply to running-notes file (Task 1 entry: pre-flight findings + Jeff's green-light + any L7-blocker re-spec).
 
-### Task 2 — Per-row migration (single source-touching bundle, L7 Option B + L8 B2)
-*Single bundle: all 50 rows behave identically — no per-row variance to split into multiple tasks (unlike QA-Eg's per-bus per-task structure).*
+### Task 2 — Structural one-shot (L7-revised Option 2: full InsertNode publish refactor, all 8 InsertKinds)
+*Single commit landing the entire architectural restructure. After Task 2 commit, the system is internally consistent — all 8 InsertKinds use the bus-pattern G1 publish chain; peakDbSnap layer gone; *Run mirror gone; consumers wired to new mirrors. Tasks 3-7 verify per-kind.*
 
-- [ ] **VibeGraph.h additions**: add `static constexpr int kMaxAudioRows = 50;` inside the `VibeGraph` class. Add the three public-member arrays parallel to the existing bus block at `:634-672`:
+- [ ] **InsertNode struct rewrite ([VibeGraph.cpp:1049-1110](Source/VibeGraph.cpp:1049))** — DELETE `peakDbSnap / peakDbLSnap / peakDbRSnap` fields + `peakDecayDbPerBlock` + `kDecayDbPerSec` constant + the prepare-time decay computation at `:1107-1109`. KEEP `peakDb / peakDbL / peakDbR / peakRingL / peakRingR / peakRingIdx`.
+- [ ] **InsertNode::process publish rewrite ([VibeGraph.cpp:1231-1242](Source/VibeGraph.cpp:1231))** — REPLACE the entire load-decay-max-store block with a single call:
   ```cpp
-  std::array<std::atomic<float>, kMaxAudioRows> audioRowPeakDb  {};
-  std::array<std::atomic<float>, kMaxAudioRows> audioRowPeakDbL {};
-  std::array<std::atomic<float>, kMaxAudioRows> audioRowPeakDbR {};
+  publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx, peakDbL, peakDbR, peakDb);
   ```
-- [ ] **VibeGraph.cpp `:1241` InsertNode peakDb publish site** (L7 / Option B's structural change — confirms Task 1 finding): upgrade simple-store to CAS-max so consecutive `processInsert` calls within one task accumulate:
+  Mirrors the bus pattern at `:407 / :569 / :727 / :864 / :1012`.
+- [ ] **VibeGraph member additions ([VibeGraph.h:634-672](Source/VibeGraph.h:634))** — add 8 sets × 3 axes (`<kind>InsertPeakDb / L / R`) parallel to existing bus block:
   ```cpp
-  // Before (line 1241):
-  peakDb.store(juce::jmax(newL, newR), std::memory_order_relaxed);
-  // After:
-  const float newPeak = juce::jmax(newL, newR);
-  float cur = peakDb.load(std::memory_order_relaxed);
-  while (cur < newPeak
-         && ! peakDb.compare_exchange_weak(cur, newPeak, std::memory_order_relaxed)) {}
+  static constexpr int kMaxLayerInserts = 16;
+  static constexpr int kMaxBassInserts  = 16;
+  static constexpr int kMaxDrumInserts  = 16;
+  static constexpr int kMaxAudioInserts = 50;
+  static constexpr int kMaxAuxInserts   = 16;
+  static constexpr int kMaxVoxInserts   = 6;   // matches kMaxVoxPages
+  static constexpr int kMaxInstInserts  = 6;   // matches kMaxInstPages
+  static constexpr int kMaxRustyInserts = 13;  // matches kMaxRustySlots
+
+  std::array<std::atomic<float>, kMaxLayerInserts>  layerInsertPeakDb,  layerInsertPeakDbL,  layerInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxBassInserts>   bassInsertPeakDb,   bassInsertPeakDbL,   bassInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxDrumInserts>   drumInsertPeakDb,   drumInsertPeakDbL,   drumInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxAudioInserts>  audioInsertPeakDb,  audioInsertPeakDbL,  audioInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxAuxInserts>    auxInsertPeakDb,    auxInsertPeakDbL,    auxInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxVoxInserts>    voxInsertPeakDb,    voxInsertPeakDbL,    voxInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxInstInserts>   instInsertPeakDb,   instInsertPeakDbL,   instInsertPeakDbR;
+  std::array<std::atomic<float>, kMaxRustyInserts>  rustyInsertPeakDb,  rustyInsertPeakDbL,  rustyInsertPeakDbR;
   ```
-- [ ] **VibeGraph: getInsertNode accessor** (if Task 1 confirmed it doesn't exist): add `InsertNode* getInsertNode(InsertKind, int) noexcept;` to `VibeGraph.h` public API + minimal body in `.cpp` that returns the pointer from the appropriate map (or nullptr if no such insert).
-- [ ] **VibeGraph: `static_assert` tying `VibeGraph::kMaxAudioRows == VibeSynthProcessor::kMaxAudioRows`** — place in a `.cpp` that includes both headers (e.g., `VibeGraph.cpp` if it already includes `PluginProcessor.h` for processor access; otherwise add the include).
-- [ ] **VibeGraph::prepare()** init: add a per-element `-60.0f` store loop for the three new arrays (Task 1 confirms whether bus atomics rely on aggregate-init or a prepare-time loop; match that pattern).
-- [ ] **PluginProcessor.h**: DELETE the `*Run` declarations at `:624-629` (the three `mAudioRowPeakDb*Run [kMaxAudioRows]` arrays + the 5-line "2026-05-02: running-max companion" comment block). KEEP the snapshot mirrors at `:619-623`.
-- [ ] **PluginProcessor.cpp `:155-163` initialiser loop**: DELETE the three `*Run` initialiser-store lines at `:161-163` + the surrounding "running-max variants" comment lines. KEEP the snapshot mirror initialisers at `:155-157`.
-- [ ] **PluginProcessor.cpp `:415 / :420 / :448` force-reset sites** (inside `renderAudioClipsForRow`): per L8 / B2, **DELETE these three force-reset stores entirely**. Each is a single `mAudioRowPeakDbRun[row].store(-60.0f, ...)` line; the surrounding `if`/`continue` early-return logic stays intact. Per-row meter decays naturally over ~20ms via DBFSMeter ballistic (matching bus behavior).
-- [ ] **PluginProcessor.cpp `:583-587` per-flow drain + CAS-max block** (inside `renderAudioClipsForRow`, Flow B): per L7 / Option B, **DELETE this entire block**. Specifically: delete the `const auto [pkL, pkR] = mVibeGraph.drainInsertPeakDbStereo(...)` call at `:583-584`; delete the three `arCasMax (mAudioRowPeakDb*Run[row], ...)` calls at `:585-587`; delete the `arCasMax` lambda definition that feeds them (if it lives nearby — Task 1 confirms its scope). The InsertNode peakDb now stays populated until end of `CompositeAudioInsertTask::run`'s single exchange-store.
-- [ ] **PluginProcessor.cpp `:642 / :647 / :668` force-reset sites** (inside `renderFilePlayPlayer`): per L8 / B2, **DELETE these three force-reset stores entirely**. Same pattern as `:415 / :420 / :448` — single-line stores; surrounding logic stays.
-- [ ] **PluginProcessor.cpp `:2107-2112` G3 promotion loop** (inside `drainMeterAtomicsForUI`): rewrite to drain from VibeGraph public-member arrays:
+  Add `static_assert(VibeGraph::kMaxAudioInserts == VibeSynthProcessor::kMaxAudioRows)` in a `.cpp` that includes both headers.
+- [ ] **VibeGraph::prepare()** init: per-element `-60.0f` store loops for all 24 new arrays.
+- [ ] **VibeGraph::processInsert exchange-store** — after `InsertNode::process` completes (chain returns), add an exchange-store from InsertNode peakDb/L/R into `<kind>InsertPeakDb*[index]`. Switch on `kind` to select the right array. Pattern parallel to bus exchange-stores at [VibeGraph.cpp:1471 etc.](Source/VibeGraph.cpp:1471):
   ```cpp
-  // After:
-  for (int r = 0; r < kMaxAudioRows; ++r)
-  {
-      drainAndMerge (mAudioRowPeakDb [r], mVibeGraph.audioRowPeakDb [r]);
-      drainAndMerge (mAudioRowPeakDbL[r], mVibeGraph.audioRowPeakDbL[r]);
-      drainAndMerge (mAudioRowPeakDbR[r], mVibeGraph.audioRowPeakDbR[r]);
+  constexpr float kNI = -std::numeric_limits<float>::infinity();
+  auto storeAxes = [&] (std::atomic<float>& dM, std::atomic<float>& dL, std::atomic<float>& dR) noexcept {
+      dM.store(node->peakDb .exchange(kNI, std::memory_order_relaxed), std::memory_order_relaxed);
+      dL.store(node->peakDbL.exchange(kNI, std::memory_order_relaxed), std::memory_order_relaxed);
+      dR.store(node->peakDbR.exchange(kNI, std::memory_order_relaxed), std::memory_order_relaxed);
+  };
+  switch (kind) {
+      case InsertKind::Layer: storeAxes(layerInsertPeakDb [index], layerInsertPeakDbL [index], layerInsertPeakDbR [index]); break;
+      case InsertKind::Bass:  storeAxes(bassInsertPeakDb  [index], bassInsertPeakDbL  [index], bassInsertPeakDbR  [index]); break;
+      // ... 6 more cases
   }
   ```
-  Update the surrounding comment block to drop the "per-row deferred to a separate batch per S2" note + reflect the unified G1 drain that now covers per-row alongside the 13 buses.
-- [ ] **CompositeAudioInsertTask.cpp `:100-116` Flow A per-flow drain + CAS-max block**: per L7 / Option B, **DELETE the entire block** (the `if (mIndex >= 0 && mIndex < VibeSynthProcessor::kMaxAudioRows)` guard, the `drainInsertPeakDbStereo` call, the `casMax` lambda definition, and the three `casMax` calls into `mProcessor->mAudioRowPeakDb*Run`). ~17 lines deleted.
-- [ ] **CompositeAudioInsertTask.cpp `run()` end-of-body** (after Flow B's `renderAudioClipsForRow` call at `:154`): add a single exchange-store from InsertNode peakDb into the VibeGraph public-member array. Pattern parallel to bus exchange-stores at [VibeGraph.cpp:1471 / :1503 / :1521 / ...](Source/VibeGraph.cpp:1471):
+- [ ] **peakDbSnap layer removal ([VibeGraph.cpp:2470 promoteAllInsertPeakSnapshots](Source/VibeGraph.cpp:2470))** — DELETE the `promoteMap` insert-promotion calls at `:2491-2498`. KEEP the rack-promotion half (`promoteRack` / `promoteRacksInMap` at `:2513-` through end of function). RENAME the function to `promoteAllRackSlotSnapshots()` (matches its slimmer scope). Update the call site at [PluginProcessor.cpp:2115](Source/PluginProcessor.cpp:2115).
+- [ ] **VibeGraph::drainInsertPeakDbStereo** ([VibeGraph.cpp:2437](Source/VibeGraph.cpp:2437)) — DELETE the function entirely (along with its declaration in `VibeGraph.h`). Confirmed safe by Task 1 inventory: under L7-revised, the only audio-thread consumer (Flow A/B in CompositeAudioInsertTask + renderAudioClipsForRow) is deleted; the UI consumer (Mixer per-strip meter) rewires to a new PluginProcessor accessor (below).
+- [ ] **VibeGraph::getInsertPeakDbStereo** ([VibeGraph.cpp:2411](Source/VibeGraph.cpp:2411)) — non-exchange variant — likely also unused post-refactor. Grep for callers; delete if dead.
+- [ ] **PluginProcessor.h additions** — add 8 sets × 3 axes = 24 snapshot mirror arrays parallel to existing `mAudioRowPeakDb*` at `:619-623`:
   ```cpp
-  if (mIndex >= 0 && mIndex < VibeGraph::kMaxAudioRows)
-  {
-      if (auto* node = mGraph->getInsertNode(VibeGraph::InsertKind::Audio, mIndex))
-      {
-          constexpr float kNI = -std::numeric_limits<float>::infinity();
-          mGraph->audioRowPeakDb [mIndex].store(node->peakDb .exchange(kNI, std::memory_order_relaxed), std::memory_order_relaxed);
-          mGraph->audioRowPeakDbL[mIndex].store(node->peakDbL.exchange(kNI, std::memory_order_relaxed), std::memory_order_relaxed);
-          mGraph->audioRowPeakDbR[mIndex].store(node->peakDbR.exchange(kNI, std::memory_order_relaxed), std::memory_order_relaxed);
-      }
+  std::atomic<float> mLayerInsertPeakDb  [VibeGraph::kMaxLayerInserts], mLayerInsertPeakDbL [VibeGraph::kMaxLayerInserts], mLayerInsertPeakDbR [VibeGraph::kMaxLayerInserts];
+  // ... 7 more kinds (Bass / Drum / Audio uses existing mAudioRowPeakDb / Aux / Vox / Inst / Rusty)
+  ```
+  KEEP the existing `mAudioRowPeakDb / mAudioRowPeakDbL / mAudioRowPeakDbR [kMaxAudioRows]` arrays as the Audio kind's mirror (preserves Builder grid consumer's naming per L9).
+  Add public accessor declaration: `std::pair<float, float> getInsertPeakDbStereo (VibeGraph::InsertKind, int) const noexcept;`.
+- [ ] **PluginProcessor.h DELETE** — remove the `*Run` declarations at `:624-629` (the three `mAudioRowPeakDb*Run [kMaxAudioRows]` arrays + the 5-line "2026-05-02: running-max companion" comment block).
+- [ ] **PluginProcessor.cpp accessor body** — implement `VibeSynthProcessor::getInsertPeakDbStereo(VibeGraph::InsertKind kind, int index)`: switch on kind, bounds-check index, return `{m<Kind>InsertPeakDbL[index].load(), m<Kind>InsertPeakDbR[index].load()}`. Fallback `{-60.f, -60.f}` for out-of-range.
+- [ ] **PluginProcessor.cpp `:155-163` initialiser loop** — DELETE the three `*Run` initialiser lines + surrounding comment. ADD per-kind initialiser loops for the 8 new mirror sets (init to `-60.0f`).
+- [ ] **PluginProcessor.cpp `:415 / :420 / :448` force-reset sites** (inside `renderAudioClipsForRow`): per L8 / B2, **DELETE the three force-reset stores entirely**. Surrounding `if`/`continue` logic stays intact.
+- [ ] **PluginProcessor.cpp `:583-587` per-flow drain + CAS-max block** (inside `renderAudioClipsForRow`, Flow B): per L7-revised, **DELETE the entire block** — the `drainInsertPeakDbStereo` call at `:583-584`, the three `arCasMax` calls at `:585-587`, AND the `arCasMax` lambda definition. The exchange-store in `processInsert` (added above) handles the publish.
+- [ ] **PluginProcessor.cpp `:642 / :647 / :668` force-reset sites** (inside `renderFilePlayPlayer`): per L8 / B2, **DELETE the three force-reset stores entirely**.
+- [ ] **PluginProcessor.cpp `:2107-2112` G3 promotion loop** (inside `drainMeterAtomicsForUI`): REPLACE with 8 per-kind drain loops:
+  ```cpp
+  for (int r = 0; r < VibeGraph::kMaxLayerInserts; ++r) {
+      drainAndMerge (mLayerInsertPeakDb [r], mVibeGraph.layerInsertPeakDb [r]);
+      drainAndMerge (mLayerInsertPeakDbL[r], mVibeGraph.layerInsertPeakDbL[r]);
+      drainAndMerge (mLayerInsertPeakDbR[r], mVibeGraph.layerInsertPeakDbR[r]);
+  }
+  // ... 6 more kind loops, with the Audio loop draining into mAudioRowPeakDb* (kept name)
+  for (int r = 0; r < VibeGraph::kMaxAudioInserts; ++r) {
+      drainAndMerge (mAudioRowPeakDb [r], mVibeGraph.audioInsertPeakDb [r]);
+      drainAndMerge (mAudioRowPeakDbL[r], mVibeGraph.audioInsertPeakDbL[r]);
+      drainAndMerge (mAudioRowPeakDbR[r], mVibeGraph.audioInsertPeakDbR[r]);
   }
   ```
-  (Task 1's `getInsertNode` decision determines whether this is `mGraph->getInsertNode(...)` or a direct lookup via existing API.)
-- [ ] Tell Jeff: "Run `do_build.bat`. Then in Debug:
-  - **(1)** New project. Drop a WAV onto the Builder grid (creates an audio clip row 0). Drop a second WAV onto a different row (row 1). Play the arrangement. Verify the **per-row meters on the Builder grid** read activity on both rows (compare to the Clips Bus meter on Mixer page for sanity).
-  - **(2)** Stop. Verify both per-row meters decay to silent over ~20ms (DBFSMeter ballistic — same as bus meter decay).
-  - **(3)** Mute row 0 via the row mute toggle while playing. Verify row 0's meter decays over ~20ms (no longer instant-silent under L8 / B2; matches bus behavior). Row 1's meter still reads activity.
-  - **(4)** Set up a choke-group case (two rows with overlapping triggers; one chokes the other). Trigger the choke. Verify the choked row's meter decays over ~20ms (no longer instant-silent).
-  - **(5)** Trigger a file-position-out-of-range case (an audio clip whose playhead runs past its file length). Verify the row meter decays over ~20ms when the clip ends.
-  - **(6)** Switch Multi-core Rendering OFF (Mixer hamburger → 'Multi-core Rendering' toggle). Repeat (1) + (3). Verify per-row meters still read correctly + decay correctly in serial-diagnostic mode.
-  - **(7)** Switch Multi-core Rendering ON. Save the project. Reload. Play. Verify per-row meters still read correctly post-reload.
-  - **(8)** Regression check: confirm every bus meter (Layers / Bass / Drums / Master / FX / AudioClips / Vox / Inst / Rusty / Vox2 / Inst2 / Inst3) still reads correctly post-migration. The InsertNode `:1241` CAS-max upgrade touches the per-insert publish surface — bus paths don't use it directly, but the sanity-eyeball matters."
-- [ ] Wait for Jeff's verify result.
-- [ ] If verify passes: dispatch `/draft-commit`, surface drafted message + full git status, commit on approval.
-- [ ] Dispatch `/draft-doc running-notes` → apply to running-notes file.
+  Update the surrounding comment block (was QA-Eg Task 8 NEEDS-FIX-2 rewrite) to reflect the now-unified G1 drain covering 13 buses + 8 insert kinds.
+- [ ] **PluginProcessor.cpp `:2115` `promoteAllInsertPeakSnapshots` call** — RENAME to `promoteAllRackSlotSnapshots()` (matches the function's slimmed scope).
+- [ ] **CompositeAudioInsertTask.cpp `:100-116` Flow A per-flow drain + CAS-max block** — per L7-revised, **DELETE the entire block**. No new end-of-task exchange-store needed (the per-call exchange-store in `processInsert` handles it).
+- [ ] **MixerTrackStrip consumer rewire** — find every call site that reads insert peaks (likely calls something like `mProcessor->mVibeGraph.drainInsertPeakDbStereo(...)` or the equivalent direct accessor). Replace with `mProcessor->getInsertPeakDbStereo(kind, index)`. Grep for call sites; update each. Possible sites: MixerTrackStrip.cpp / MixerPage.cpp / EffectsPage.cpp.
+- [ ] Tell Jeff: "Run `do_build.bat`. Build-only verify this task — Task 2 is the structural one-shot. If the build is clean, proceed to Task 3 (Layer kind verify). If the build fails: `/diagnose-build` + fix in-batch."
+- [ ] Wait for Jeff's build result.
+- [ ] On clean build: dispatch `/draft-commit`, surface drafted message + full git status, commit on approval.
+- [ ] Dispatch `/draft-doc running-notes` → apply.
 
-### Task 3 — Cleanup + comment sweep + grep cleanliness
-- [ ] Grep cleanliness check: `grep -rn "mAudioRowPeakDbRun\|mAudioRowPeakDbLRun\|mAudioRowPeakDbRRun" Source/` — result must be empty post-Task-2. If any site remains, fix in this task before the close.
-- [ ] Comment sweep: grep for `Group 3` / `running-max companion` / `2026-05-02` (the per-row `*Run`-introduction date) / "deferred to a separate batch per S2" — update or delete remaining references:
-  - The "Group 3" header comment above `drainMeterAtomicsForUI`'s former G3 loop (location TBD post-Task-2 — likely just above the rewritten per-row loop). Update to reflect that per-row drain is now part of the unified G1 path (post-QA-Eg + QA-AudioMeters, all 13 buses + the per-row surface drain through a single G1-style loop).
-  - The QA-Eg Task 8 NEEDS-FIX-2 sweep rewrote the `drainMeterAtomicsForUI` function-header comment to describe "the unified G1 drain that all 13 buses now share" — verify this comment is updated to include the per-row surface too post-Task-2.
-  - The `PluginProcessor.h:617-623` comment block "Per-row peak dB for audio strip meters (audio thread writes, UI timer reads)" should stay accurate — verify nothing in the snapshot mirror's role changed (it's still the UI poll target).
-- [ ] InsertNode `peakDecayDbPerBlock`-equivalent dead-state check (if Task 1 inventory surfaced one): delete the field + its prepare-time recalc lines. **Surface to Jeff at Task 1 finding-time, not in this task** (S6-style spec call).
-- [ ] Tell Jeff: "Run `do_build.bat`. Then in Debug + Release:
-  - **(1)** Full end-to-end stress: project with audio playing on every Builder row that has audio (≥4 rows ideally — kicks / hats / bass-line / pad / vocal sample). Multi-core ON. Verify every per-row meter reads correctly with no glitch / drop / lag vs the pre-batch MT baseline. Cross-verify the Clips Bus meter (the parent bus) shows the summed activity matching what the rows show.
-  - **(2)** Toggle Multi-core OFF (serial-diagnostic mode). Verify the same stress arrangement: every per-row meter still reads correctly under serial execution.
-  - **(3)** Toggle Multi-core back ON. Save the project. Close. Reopen. Confirm every per-row meter still reads correctly post-reload.
-  - **(4)** 20ms-decay subjective comparison (L8 / B2 verify): from any state with active per-row meters, trigger each early-return condition (mute / choke / file-out-of-range) and verify the affected row's meter **decays over ~20ms** matching the bus meter ballistic — not the pre-batch instant-silent-in-1-block behavior. Compare side-by-side: hit mute on the row strip vs hit mute on the Clips Bus strip — the decay rate should look identical."
+### Task 3 — Layer kind end-to-end verify
+- [ ] Tell Jeff: "Run `do_build.bat` if not already built; then in Debug:
+  - **(1)** New project (default Layer 1 tab present). Add Harmless / BaySickSynth / BaySickPlayer engine on Layer 1. Audition or trigger sound (piano roll click). Verify Layer 1 per-strip meter on Mixer page reads activity.
+  - **(2)** Add Layer 2 tab; assign different engine; play. Verify both Layer 1 and Layer 2 strips meter independently.
+  - **(3)** Stop. Verify both Layer meters decay to silent over ~20ms.
+  - **(4)** Multi-core OFF; repeat (1)+(2). Verify Layer meters still read in serial-diagnostic mode.
+  - **(5)** Multi-core ON. Save project. Reload. Play. Verify Layer meters still read post-reload."
 - [ ] Wait for Jeff's verify result.
-- [ ] On pass: `/draft-commit`, surface, commit on approval.
+- [ ] On pass: `/draft-commit` + surface + commit on approval.
 - [ ] `/draft-doc running-notes` → apply.
 
-### Task 4 — Close sequence
+### Task 4 — Bass kind end-to-end verify
+- [ ] Tell Jeff: "Same shape as Task 3 verify but on Bass tabs (Bass 1 / Bass 2 with BaySickBass / Harmless / BaySickPlayer engines). Mixer page per-strip meter, Multi-core ON + OFF, save+reload."
+- [ ] Wait for verify; `/draft-commit` on pass; `/draft-doc running-notes` → apply.
+
+### Task 5 — Drum kind end-to-end verify
+- [ ] Tell Jeff: "Same shape on Drums tabs (per-drum strips on Mixer page). Verify each drum strip meter reads when its drum hits. Multi-core ON + OFF, save+reload."
+- [ ] Wait for verify; `/draft-commit` on pass; `/draft-doc running-notes` → apply.
+
+### Task 6 — Audio kind end-to-end verify (Builder grid + Mixer per-strip)
+*The original §5 scope. Both consumer surfaces verified together since they share the Audio kind's mirror.*
+
+- [ ] Tell Jeff: "Run `do_build.bat` if not already built; then in Debug:
+  - **(1)** Drop a WAV onto Builder grid row 0. Drop a second WAV onto row 1. Play. Verify Builder-grid per-row meter on both rows reads activity AND Mixer-page Audio insert per-strip meter for those rows reads activity (cross-check both consumers show the same level on the same row).
+  - **(2)** Stop. Verify both consumers decay to silent over ~20ms (DBFSMeter ballistic — matches bus and other-kind meters).
+  - **(3)** Mute row 0 via the row mute toggle while playing. Verify both consumers (Builder-grid + Mixer-strip) decay to silent over ~20ms. Row 1 still active.
+  - **(4)** Trigger a choke-group case (or set up overlapping clips that choke). Verify the choked row decays cleanly on both consumers.
+  - **(5)** Audio clip past file end: a clip whose playhead runs past its file length. Verify both consumers decay cleanly when the clip exhausts.
+  - **(6)** Multi-core OFF; repeat (1)+(3). Verify both consumers still read correctly in serial-diagnostic mode.
+  - **(7)** Multi-core ON. Save project. Reload. Play. Verify post-reload."
+- [ ] Wait for Jeff's verify result.
+- [ ] On pass: `/draft-commit` + surface + commit on approval.
+- [ ] `/draft-doc running-notes` → apply.
+
+### Task 7 — Aux + Vox + Inst + Rusty bundle end-to-end verify
+- [ ] Tell Jeff: "Bundle verify on the smaller insert surfaces:
+  - **(1) Aux**: Add an Aux strip on Mixer page; route a Layer's sends to it; trigger Layer sound. Verify Aux strip meter reads activity.
+  - **(2) Vox** (live + prerecorded per `project_vox_inst_accept_prerecorded_audio.md`): Add Vox tab; arm + speak (live input); verify Vox bus strip meter. Then point Vox at a prerecorded vocal clip; play; verify meter again.
+  - **(3) Inst**: Same dual scenario — live input + prerecorded source per the same project memory.
+  - **(4) Rusty**: Add a BaySickRustyDrums tab; trigger a drum hit (audition the kit graphic). Verify each Rusty insert strip meter (the kit's 13 drums show as individual strips on Mixer page) reads when its drum hits.
+  - **(5)** Multi-core OFF; spot-check each of the 4 kinds quickly.
+  - **(6)** Multi-core ON. Project save+reload."
+- [ ] Wait for verify result.
+- [ ] On pass: `/draft-commit` + surface + commit on approval.
+- [ ] `/draft-doc running-notes` → apply.
+
+### Task 8 — Cleanup + comment sweep + grep cleanliness
+- [ ] Grep cleanliness: `grep -rn "mAudioRowPeakDbRun\|mAudioRowPeakDbLRun\|mAudioRowPeakDbRRun\|peakDbSnap\|peakDbLSnap\|peakDbRSnap\|drainInsertPeakDbStereo\|promoteAllInsertPeakSnapshots\|getInsertPeakDbStereoExchange" Source/` — result must be empty (or limited to expected post-rename hits).
+- [ ] Comment sweep: grep for "Group 2" / "Group 3" / "running-max companion" / "deferred to a separate batch per S2" / "peakDbSnap" / "layer-vs-bus ping-pong" — update or delete:
+  - The stale inline comment at PluginProcessor.cpp:2067 "Group 1: bus mirrors (Layers/Bass/Drums/Master)" — covers 13 buses post-QA-Eg + 8 insert kinds post-this-batch.
+  - The publishPeakReading comment at VibeGraph.cpp:112-115 referencing stale `getInsertPeakDbStereoExchange` name + the obsolete "buses vs inserts have different drain paths" model.
+  - The `drainMeterAtomicsForUI` function-header comment at PluginProcessor.cpp:2038-2055 — update from "three parts" model to reflect that bus + insert + rack-slot all use unified G1 chain.
+  - The `mAudioRowPeakDb` declaration comment at PluginProcessor.h:617-619 — update to reflect publishing now flows through VibeGraph member arrays (no *Run intermediate).
+- [ ] Tell Jeff: "Run `do_build.bat`. Then in Debug + Release:
+  - **(1)** Full end-to-end stress: project with audio on every kind (Layers + Bass + Drums + Audio rows + Aux + Vox + Inst + Rusty + every bus). Multi-core ON. Verify every meter on every surface (Builder grid + Mixer page per-strip + per-bus) reads correctly with no glitch / drop / lag.
+  - **(2)** Multi-core OFF. Same arrangement; confirm serial-diagnostic mode reads correctly.
+  - **(3)** Project save+reload + post-reload spot-check.
+  - **(4)** Bus meter regression: every bus meter (13 G1 buses landed by QA-Eg) still reads identically to pre-batch behavior — the InsertNode publishPeakReading rewrite is the cross-surface touch point worth eyeballing here too."
+- [ ] Wait for verify result.
+- [ ] On pass: `/draft-commit` + surface + commit on approval.
+- [ ] `/draft-doc running-notes` → apply.
+
+### Task 9 — Close sequence
 - [ ] Dispatch `/draft-doc batch-close` with a synthesis of the running-notes file.
 - [ ] Apply the close entry to `Plans & Specs/Implemented Work Log.md` via Edit per `feedback_targeted_edits_not_wholesale_rewrite.md`.
 - [ ] Dispatch `/review-batch QA-AudioMeters`.
@@ -234,39 +351,49 @@ No sub-spec calls open at ExitPlanMode. All three (Sub-A / Sub-B / Sub-C) locked
 
 ## Verification (end-to-end smoke)
 
-After Task 3 commit lands (cleanup + comment sweep + grep cleanliness) and before the close commit (Task 4):
+After Task 8 commit lands (cleanup + comment sweep + grep cleanliness) and before the close commit (Task 9):
 
-1. **Build clean.** `do_build.bat` Release + Debug both green.
-2. **Per-row meter sanity (MT ON).** Project with audio on every Builder row that has audio (≥4 rows). Every row's per-row meter reads activity matching its source signal. No stuck peaks; clean ~20ms ballistic decay to silence on stop (matches bus meter decay).
-3. **Per-row meter sanity (MT OFF / serial-diagnostic).** Same arrangement, Multi-core OFF. Every row meter still reads correctly under serial execution.
-4. **20ms-decay coverage** (L8 / B2 alignment to bus behavior — replaces the pre-batch instant-silent-on-mute behavior). All three early-return predicates exercised:
-   - **Muted by choke**: choke group hits → muted row's meter decays over ~20ms (DBFSMeter ballistic).
-   - **Row muted / Builder-row muted**: mute toggle → row meter decays over ~20ms.
-   - **File-position out of range**: clip past file end → row meter decays over ~20ms.
-   - **Subjective comparison**: hit mute on a bus strip vs hit mute on a Builder-row strip — the decay rate should look identical post-batch (same DBFSMeter ballistic on both).
-5. **Project save/reload.** Save the stress arrangement; close project; reopen; per-row meters still read correctly post-reload.
-6. **Grep cleanliness.** `grep -rn "mAudioRowPeakDbRun\|mAudioRowPeakDbLRun\|mAudioRowPeakDbRRun" Source/` shows zero hits.
-7. **Bus regression check.** Every bus meter (the 13 G1 buses landed by QA-Eg) still reads correctly — no spillover from the per-row migration into the bus surface (the InsertNode `:1241` CAS-max upgrade is the cross-surface touch point worth eyeballing).
-8. **Build-log clean.** No new warnings introduced by the VibeGraph array additions, the InsertNode publish-site upgrade, or the per-site migration.
+1. **Build clean.** `do_build.bat` Release + Debug both green; no new warnings.
+2. **Per-kind meter sanity (MT ON)** — verified per Task 3-7 already; final smoke is a single arrangement with audio on every kind (Layer / Bass / Drum / Audio rows / Aux / Vox / Inst / Rusty + every bus) and every per-strip + per-row meter on Mixer page + Builder grid reads correctly.
+3. **Per-kind meter sanity (MT OFF / serial-diagnostic)** — same arrangement, Multi-core OFF; every meter still reads correctly.
+4. **20ms-decay coverage** (L8 / B2 alignment to bus behavior — applies to all 8 kinds, not just Audio):
+   - **Muted by choke / row mute / file-end**: Audio row meters decay over ~20ms (DBFSMeter ballistic).
+   - **Mute toggle on any per-strip meter** (any kind): decays identically to bus mute behavior.
+   - **Subjective comparison**: hit mute on a bus strip vs hit mute on a Layer/Bass/Drum/Audio/etc strip — decay rate visually identical.
+5. **Project save/reload** — save the stress arrangement; close project; reopen; every meter reads correctly post-reload.
+6. **Grep cleanliness** — `grep -rn "mAudioRowPeakDbRun\|peakDbSnap\|drainInsertPeakDbStereo\|promoteAllInsertPeakSnapshots\|getInsertPeakDbStereoExchange" Source/` shows zero hits (or limited to renamed `promoteAllRackSlotSnapshots` only).
+7. **Bus regression check** — every bus meter (the 13 G1 buses from QA-Eg) reads identically to pre-batch behavior. The InsertNode publishPeakReading rewrite is the cross-surface change to eyeball.
+8. **EffectRack slot meter regression check** — open an effect panel on any kind's rack (Layer / Bass / Drum / etc.); verify the slot meter still works post-`promoteAllRackSlotSnapshots` rename. The rack-promotion half stayed; this is a sanity check.
 
 ---
 
 ## MT-awareness static-analysis
 
-The batch is meter / UI-state only. No audio-thread arithmetic changes. Under L7 / Option B, the migration adopts the exact same threading shape as the QA-Eg bus migration: the InsertNode publish site at [VibeGraph.cpp:1241](Source/VibeGraph.cpp:1241) gets a one-line CAS-max upgrade (so consecutive `processInsert` calls within one `CompositeAudioInsertTask::run` accumulate); end-of-task exchange-store moves InsertNode peakDb into the `VibeGraph::audioRowPeakDb*` public-member arrays; `drainMeterAtomicsForUI` drains them at end-of-block. Same primitives (`std::atomic<float>` + `exchange` + `compare_exchange_weak`), same memory ordering (`memory_order_relaxed`), same threading shape (audio thread or worker thread writes during the block; audio thread drains end-of-block). `CompositeAudioInsertTask::run` is already MT-validated (it runs on worker threads under MT and on the audio thread under 1-worker serial-diagnostic — the same dual mode every existing bus migration already proved). No new races introduced.
+The batch is meter / UI-state only. No audio-thread arithmetic changes. Under L7-revised Option 2, the migration adopts the exact same threading shape as the QA-Eg bus migration, applied uniformly across all 8 InsertKinds:
 
-The InsertNode `:1241` CAS-max upgrade is the cross-surface touch point — every InsertKind (Layer / Bass / Drum / Audio / Aux / Vox / Inst / Rusty) goes through `processInsert` and hits that site. Task 1 confirms the change is mechanically safe for ALL kinds, not just `InsertKind::Audio`.
+1. **Publish (per insert per `processInsert` call)** — `publishPeakReading` writes to `peakDb*` (running-max atomics, CAS-max + latency-comp ring). Runs on whichever thread executes the insert's PassiveStripTask (worker under MT, audio under 1-worker serial). Identical to bus publish today.
+2. **Exchange-store (end of `processInsert`)** — moves InsertNode peakDb*/L/R into VibeGraph's `<kind>InsertPeakDb*[index]` member atomic. Single exchange per axis. Identical primitive to bus exchange-stores at [VibeGraph.cpp:1471 etc.](Source/VibeGraph.cpp:1471).
+3. **Drain (end-of-block, audio thread)** — `drainMeterAtomicsForUI`'s 8 new per-kind loops drainAndMerge VibeGraph member atomic → PluginProcessor mirror. Identical to bus drain loops at `:2068-2103`.
+4. **UI poll** — `getInsertPeakDbStereo(kind, index)` accessor on PluginProcessor reads from `m<Kind>InsertPeakDb*L/R[index]`. Plain atomic load; no exchange (UI doesn't reset).
+
+Same primitives (`std::atomic<float>` + `exchange` + `compare_exchange_weak`), same memory ordering (`memory_order_relaxed`), same threading shape. `processInsert` runs on worker threads under MT and on the audio thread under 1-worker serial-diagnostic — every existing bus migration already proved this dual-mode pattern. No new races introduced.
+
+**The peakDbSnap layer removal** is safe because: (a) the snapshot-promotion at end-of-block was the OLD mechanism for atomicity across consumer reads; under the new pattern, the audio-thread drain happens once per block in `drainMeterAtomicsForUI` (same single boundary point as buses use), and UI consumers poll the resulting mirror at their own cadence — no mid-block partial-write race because there's no consumer reading mid-block atomics; (b) the bus pattern has been MT-validated against the same property for the 13 buses already on G1 — no per-bus "ping-pong" reported post-QA-Eg.
+
+**The promoteAllInsertPeakSnapshots → promoteAllRackSlotSnapshots split** is safe because: (a) the insert-promotion half is removed entirely (peakDbSnap is gone), so the function no longer touches insert atomics; (b) the rack-promotion half (EffectRack slot atomics for effect-panel meters) is preserved as-is — same call site at the end of `drainMeterAtomicsForUI`, same surface, just a slimmer function body and a clearer name.
 
 ---
 
 ## Routing notes (Rule 3 application during execution)
 
-- Findings about meter behavior on **other surfaces** (per-insert meters on tabs, per-strip meters that aren't bus or row, master-output bus meter) → log in running notes; route at close per Rule 3 (most likely outside-batch since this is per-row scope).
-- Findings about **publishPeakReading or InsertNode `:1241` publish-site CAS-max semantics** that don't match the L7 assumption — surface to Jeff as an L7 re-spec call per `feedback_dont_make_unilateral_spec_calls.md`; do NOT silently pivot. If the InsertNode CAS-max upgrade has a hidden side effect on the bus path, that's a real blocker that needs the Sub-B Option A fallback re-considered.
-- Findings about **MT-vs-serial parity** (anything where Multi-core OFF doesn't produce the same meter behavior as Multi-core ON) → investigate in-batch per `feedback_qa_batches_fix_bugs_dont_defer.md`; same diagnostic instinct as QA-Eg.
-- Findings about **`peakDecayDbPerBlock`-equivalent dead-state** on InsertNode → surface at Task 1 inventory; fix in Task 3 cleanup if applicable (mirrors QA-Eg's S6).
-- Findings about **CompositeAudioInsertTask hot-path performance** (the migration touches a hot per-block site; if the end-of-task exchange-store + the InsertNode `:1241` CAS-max upgrade are observably slower than the pre-batch CAS-max-into-`*Run`) → route to `/perf-audit` for follow-up; minor regression is acceptable (the bus migration showed no measurable delta).
-- Findings about **other QA-Eg-adjacent architectural smells** (any `*Run`-style mirror anywhere else not previously surfaced) → log + surface to Jeff; route per Rule 3 at close.
+- Findings about meter behavior on **per-insert surfaces** (the per-strip Mixer-page meters that are now restructured by this batch) → in-batch per `feedback_qa_batches_fix_bugs_dont_defer.md`. Tasks 3-7's per-kind verify is where regressions surface.
+- Findings about **EffectRack slot meters** (the surviving half of `promoteAllRackSlotSnapshots`) → in-batch if regression is caused by the rename / split; outside-batch if it's an unrelated finding (effect-panel UX is separate scope).
+- Findings about **publishPeakReading semantics** that don't match the L7-revised assumption (e.g., a hidden side-effect when the call frequency increases — `processInsert` is called more often than the bus equivalents) → in-batch per `feedback_qa_batches_fix_bugs_dont_defer.md`; surface to Jeff as a structural re-spec if needed.
+- Findings about **MT-vs-serial parity** (Multi-core OFF doesn't produce the same meter behavior as Multi-core ON) → in-batch; same diagnostic instinct as QA-Eg.
+- Findings about **dead state** on InsertNode after the L7-revised cleanup (any field that's left orphaned after `peakDecayDbPerBlock` + `peakDbSnap*` are deleted, e.g., the `kDecayDbPerSec` constant in `InsertNode::prepare`) → fix in Task 8 cleanup; surface for inclusion in the close routing.
+- Findings about **hot-path performance** (the structural change adds an exchange-store per `processInsert` call — ~140 inserts × ~86 blocks/sec = ~12k exchange-stores/sec on the audio thread) → route to `/perf-audit` for follow-up; minor regression is acceptable (relaxed-order exchange is sub-ns; the bus migration showed no measurable delta).
+- Findings about **other QA-Eg-adjacent architectural smells** (any other `*Run` or `*Snap` intermediate mirror anywhere else not previously surfaced) → log + surface to Jeff; route per Rule 3 at close.
+- Findings about **Builder grid consumer** (the `mAudioRowPeakDb*` name preservation per L9) — if the Builder grid's reader code path needs to change for a non-naming reason, fix in-batch; if it's just naming, leave the existing name and document in close.
 
 ---
 
