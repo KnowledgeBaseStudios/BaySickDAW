@@ -660,14 +660,17 @@ public:
     // insert architectural split QA-Eg's bus migration left exposed).
     static constexpr int kMaxAudioInserts = 50;  // matches VibeSynthProcessor::kMaxAudioRows + MixerState::kMaxAudioRows (static_assert in .cpp)
 
-    std::array<std::atomic<float>, kMaxLayerPages>                    layerInsertPeakDb  {}, layerInsertPeakDbL  {}, layerInsertPeakDbR  {};
-    std::array<std::atomic<float>, kMaxBassPages>                     bassInsertPeakDb   {}, bassInsertPeakDbL   {}, bassInsertPeakDbR   {};
-    std::array<std::atomic<float>, kMaxDrumPages>                     drumInsertPeakDb   {}, drumInsertPeakDbL   {}, drumInsertPeakDbR   {};
-    std::array<std::atomic<float>, kMaxAudioInserts>                  audioInsertPeakDb  {}, audioInsertPeakDbL  {}, audioInsertPeakDbR  {};
-    std::array<std::atomic<float>, MixerChannelIds::kMaxAuxStrips>    auxInsertPeakDb    {}, auxInsertPeakDbL    {}, auxInsertPeakDbR    {};
-    std::array<std::atomic<float>, MixerChannelIds::kMaxVoxStrips>    voxInsertPeakDb    {}, voxInsertPeakDbL    {}, voxInsertPeakDbR    {};
-    std::array<std::atomic<float>, MixerChannelIds::kMaxInstStrips>   instInsertPeakDb   {}, instInsertPeakDbL   {}, instInsertPeakDbR   {};
-    std::array<std::atomic<float>, MixerChannelIds::kMaxRustyStrips>  rustyInsertPeakDb  {}, rustyInsertPeakDbL  {}, rustyInsertPeakDbR  {};
+    // QA-AudioMeters fix-up (2026-05-24): mono <kind>InsertPeakDb members
+    // deleted as dead writes (no UI consumer ever read them; the UI reads L/R
+    // only via VibeSynthProcessor::drainInsertPeakDbStereo).
+    std::array<std::atomic<float>, kMaxLayerPages>                    layerInsertPeakDbL  {}, layerInsertPeakDbR  {};
+    std::array<std::atomic<float>, kMaxBassPages>                     bassInsertPeakDbL   {}, bassInsertPeakDbR   {};
+    std::array<std::atomic<float>, kMaxDrumPages>                     drumInsertPeakDbL   {}, drumInsertPeakDbR   {};
+    std::array<std::atomic<float>, kMaxAudioInserts>                  audioInsertPeakDbL  {}, audioInsertPeakDbR  {};
+    std::array<std::atomic<float>, MixerChannelIds::kMaxAuxStrips>    auxInsertPeakDbL    {}, auxInsertPeakDbR    {};
+    std::array<std::atomic<float>, MixerChannelIds::kMaxVoxStrips>    voxInsertPeakDbL    {}, voxInsertPeakDbR    {};
+    std::array<std::atomic<float>, MixerChannelIds::kMaxInstStrips>   instInsertPeakDbL   {}, instInsertPeakDbR   {};
+    std::array<std::atomic<float>, MixerChannelIds::kMaxRustyStrips>  rustyInsertPeakDbL  {}, rustyInsertPeakDbR  {};
 
     // ── Phase-2 instrument node registry ─────────────────────────────────────
     // Nodes registered here will be integrated into the processing graph in a

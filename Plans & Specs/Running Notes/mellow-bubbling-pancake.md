@@ -214,3 +214,78 @@ required sections (locked 2026-05-11) + Rule 4 (Diagnostic Instrumentation Catal
 #### Next action
 
 - Surface a Task 3 docs commit (Task 2 running-notes entry + plan-file L6 collapse + Verification correction + Future State CL-293 add + THIS Task 3 running-notes entry) for Jeff's approval via `/draft-commit`. Once landed, transition to **Task 4 (cleanup + comment sweep + grep cleanliness)** — carry-forward items include the stale `promoteAllInsertPeakSnapshots` reference at [EffectRack.h:230](Source/EffectRack.h:230) + any stale-comment hits surfaced during the stress-file verify pass.
+
+---
+
+## 2026-05-24 — Task 4 — Cleanup + comment sweep + grep cleanliness landed (11b4fe7)
+
+- **Commit.** `11b4fe7` — Task 4 cleanup. 3 comment-only source edits, +22/-12. Release + Debug both clean (Jeff confirmed). No semantic code change but 2 of 3 edits are in headers ([EffectRack.h](Source/EffectRack.h) + [PluginProcessor.h](Source/PluginProcessor.h)) so dependent `.cpp` files recompiled.
+
+#### Stale-comment carry-forwards closed (3 sites)
+
+- **[EffectRack.h:230-235](Source/EffectRack.h:230)** — `promoteSlotPeakSnapshots()`'s declaration-preceding comment referenced the deleted `VibeGraph::promoteAllInsertPeakSnapshots()` (renamed to `promoteAllRackSlotSnapshots` in Task 2 when the per-insert peakDbSnap promotion half was removed). Updated to reference the new name + parenthetical noting the rename history (so rename archaeology lands in the right spot without commit-log spelunking).
+- **[PluginProcessor.cpp:2135](Source/PluginProcessor.cpp:2135)** — inline label inside `drainMeterAtomicsForUI` said "Group 1: bus mirrors (Layers/Bass/Drums/Master)". Pre-QA-Eg the loop covered 4 buses; post-QA-Eg it covers 12 (Layers / Bass / Drums / Master / FX / AudioClips / Vox / Vox2 / Inst / Inst2 / Inst3 / Rusty). QA-Eg Task 8 NEEDS-FIX-2 rewrote the function-header docstring but missed this inline label — Task 4 closes the miss. Label updated to "Unified G1 bus drain" + the 12-bus enumeration + a short chain note (BusNode peakDb -> VibeGraph member atomic -> mirror via drainAndMerge). Bus count side-note: QA-Eg's close commit messages framed the count as "13 buses now share" — same miscount frozen in commit history (Master is in the 12, not separate); Task 4's new comment uses the accurate 12.
+- **[PluginProcessor.h:436-444](Source/PluginProcessor.h:436)** — comment block above `kPeakAtomicNegInf` described the pre-batch "running-max companion atomics" model (the *Run mirrors that no longer exist post-Task-2). Block rewritten as "unified G1 meter snapshot sentinel" documenting the post-batch publish chain end-to-end (audio publishPeakReading -> VibeGraph atomic exchange-store -> drainAndMerge into mirror -> UI poll) covering both buses (12) + 8 InsertKinds. Sentinel name `kPeakAtomicNegInf` retained (used by drainAndMerge's skip-on-INF clause).
+
+#### Grep cleanliness verified
+
+- ZERO remaining live source references to `mAudioRowPeakDb*Run` / live `peakDbSnap*` fields / `mVibeGraph.drainInsertPeakDbStereo` / `mVibeGraph.getInsertPeakDb*` / "Group 1: bus mirrors" / "Group 2:" / "Group 3:" / "running-max companion" / stale `getInsertPeakDbStereoExchange`.
+- 2 remaining `promoteAllInsertPeakSnapshots` hits are in MY intentional explanatory rename comments (`EffectRack.h:231` + `PluginProcessor.cpp:2118` history note) — documenting what changed for future archaeologists.
+
+#### Diagnostic Instrumentation Catalog (Rule 4)
+
+- **Nil entry.** Task 4 is cleanup-only — no instrumentation added. Catalog remains empty across the entire batch (Tasks 0-4 all nil).
+
+#### Next action
+
+- Begin **Task 5 close sequence**: dispatch `/draft-doc batch-close` (synthesizes the Implemented Work Log entry from this running-notes file) + `/review-batch QA-AudioMeters` (audits diff vs plan + CLAUDE.md rules + memory gotchas) in parallel; apply the batch-close draft to `Plans & Specs/Implemented Work Log.md` via Edit; address any BLOCKER / NEEDS-FIX from `/review-batch` in-batch (defer NITs into the close-entry routing table); surface full git status + drafted close commit message; commit on approval.
+
+---
+
+## 2026-05-24 — Task 5 — `/review-batch` BLOCKER + NEEDS-FIX fix-up (pre-close)
+
+- **`/review-batch QA-AudioMeters` outcome.** 1 BLOCKER + 3 NEEDS-FIX + 5 NITs surfaced post-Task-4.  All 4 mandatory fixes landed in this fix-up commit; all 5 NITs deferred into the close-entry routing table per `feedback_closed_batch_carryforward_via_forks.md`.
+
+#### BLOCKER — multi-call-per-block peak metering regression
+
+- **Surface:** `VibeGraph::processInsert`'s new `storeAxes` lambda did a **plain `.store`** of the exchanged InsertNode peak into the per-kind VibeGraph atomic.  For InsertKinds called multiple times per block (**Audio** via Flow A + Flow B inside `CompositeAudioInsertTask::run`; **Vox** / **Inst** via per-FilePlay-player loops in `VoxStripTask` / `InstStripTask`), each subsequent call overwrote the prior call's published peak.  Pre-batch the deleted load-decay-max-store chain accumulated correctly across calls because the InsertNode's own `peakDb` retained state.  Post-batch the `exchange(-inf)` resets InsertNode peakDb between calls AND the lambda's plain `.store` overwrites the VibeGraph mirror.
+- **Fix:** changed `storeAxes` from plain `.store` to a **CAS-max merge** using `compare_exchange_weak` + skip-on-INF clause (same shape as `drainAndMerge` + the existing `casMax` inside `publishPeakReading`).  ~10 lines added; preserves max-across-calls within a single audio block.  C++26's `std::atomic<T>::fetch_max` isn't available in MSVC/JUCE 7, so the CAS loop is portable.
+- **Verify status — UNVERIFIED-BY-EAR, QA-J re-verify required.**  The natural observable test (two overlapping clips on the same audio row) hits **DSP-06 (the multi-clip stacking bug deferred to QA-J)** which silences the summed audio today; the meter has no signal to measure regardless of the storeAxes path semantics.  **QA-AudioMeters BLOCKER fix is architecturally correct per the `/review-batch` analysis but unverified-by-ear in QA-AudioMeters because the observable test (overlapping clips on same row) hits DSP-06; QA-J re-verify required** -- matches the existing `Fork-out (QA-J re-verify required)` pattern QA-F / QA-Fa / QA-Fb use for the same DSP-06 dependency.  Jeff's stress-file regression check on the original 6-point watchlist PASSED post-fix (no observable regression from the cleanup).
+
+#### N1 — `kPeakAtomicNegInf` constant comment lied about usage
+
+- **Surface:** `PluginProcessor.h:436-444` had a comment block above `kPeakAtomicNegInf` claiming "drainAndMerge's skip-on-INF clause uses this sentinel".  Grep confirms the constant was never referenced — every site (`drainAndMerge`, `storeAxes`, bus exchange-stores, `drainInsertPeakDbStereo`) defines its own local `kNI` / `kPeakNegInf` / `kBusNegInf`.  The constant was already dead pre-batch (introduced by QA-Eg) but Task 4's cleanup-pass rewrite confirmed the false claim rather than fixing it.
+- **Fix:** deleted the constant + the comment block entirely.  Replaced with a brief explanatory comment noting the deletion + reasoning.
+
+#### N2 — 8 mono `m<Kind>InsertPeakDb` mirror atomics were dead writes
+
+- **Surface:** the 8 mono per-kind mirrors I added in Task 2 (`mAudioRowPeakDb` + 7 `m<Kind>InsertPeakDb`) were never read by any UI consumer — `VibeSynthProcessor::drainInsertPeakDbStereo` only returns L/R from the `*L/R` mirrors.  ~21 atomic stores per audio block of wasted work (8 from `drainAndMerge` + 8 from `storeAxes` exchange-stores + 8 init writes in ctor).  Bus mono mirrors (pre-existing pre-batch) have the same dead-write pattern; out-of-scope for QA-AudioMeters fix-up but a candidate for a separate cleanup batch.
+- **Fix:** deleted all 8 mono mirror decls from `PluginProcessor.h` (lines 629, 633, 636, 639, 642, 645, 648, 651) + the matching 8 mono `initMirrorArr` calls from the ctor + the 8 mono `drainAndMerge` lines from `drainMeterAtomicsForUI`'s per-kind loops + the 8 mono VibeGraph `std::array` members from `VibeGraph.h` + the 8 mono `initArray` calls from `VibeGraph::prepare()` + the mono branch from the `storeAxes` lambda (the `dM` parameter + the matching mono store).  InsertNode `peakDb` mono atomic kept (still written by `publishPeakReading`, which is shared with BusNodes — full deletion would require restructuring the shared helper, out of scope).
+
+#### N3 — `drainInsertPeakDbStereo` doc-comment was too permissive
+
+- **Surface:** `PluginProcessor.h:655-658` doc-comment said "Wait-free; safe to call from UI thread."  The accessor IS technically wait-free + `noexcept` + relaxed-order, BUT it also exchange-resets the mirror to `-inf` — a second concurrent caller would receive `-inf` as the first call's exchange already cleared the mirror.
+- **Fix:** rewrote the doc-comment to call out the single-consumer assumption: "**Single-consumer (UI vblank); concurrent callers race on the exchange-reset** -- a second concurrent caller would receive -inf as the first call's exchange already cleared the mirror.  Currently the only consumer is MixerPage::onVBlank."
+
+#### NITs deferred (5)
+
+Per `feedback_closed_batch_carryforward_via_forks.md` (NITs default to deferred into the close-entry routing table unless explicit fix-now call):
+
+1. **Em-dash (U+2014) in source comment** at `PluginProcessor.cpp:2135` (`// Unified G1 bus drain — every bus...`).  Code-comment scope; em-dashes already used in other source comments; ASCII-only rule per `feedback_ascii_only_ui_strings.md` is user-facing-strings scope.  Deferred.
+2. **Empty `if () { continue; }` style** at `PluginProcessor.cpp:433-440 / :654-661` left by L8 force-reset removal.  Pre-existing braces style; cosmetic.  Deferred.
+3. **`bufferPeakDb` (mono) pre-existing C4505 unreferenced warning** at `VibeGraph.cpp:24`.  Pre-existing pre-batch via the stereo helper.  Deferred.
+4. **One-sided `QA-AudioMeters` tagging in `publishPeakReading` comment** at `VibeGraph.cpp:113-120` (bus branch untagged; insert branch tagged).  Cosmetic.  Deferred.
+5. **Redundant in-class `peakDb { -60.f }` initializers** on `InsertNode` now that `VibeGraph::prepare()` explicit-inits the same atomic.  Belt-and-suspenders; harmless.  Deferred.
+
+#### Build + regression check
+
+- **Release + Debug both clean** post-fix-up (Jeff confirmed "We're good").  No new warnings.
+- **Original 6-point stress-file watchlist regression check PASSED** — re-ran stress arrangement post-fix; per-strip meters on all 8 InsertKinds + 12 G1 bus regression + mute decay + MT parity + save+reload + EffectRack slot meter spot-check all still read correctly.  Mono-mirror deletions don't affect any observable behavior (consumers were L/R-only).
+
+#### Diagnostic Instrumentation Catalog (Rule 4)
+
+- **Nil entry.** Fix-up commit is structural code + comment edits only — no instrumentation added.  Catalog remains empty across the entire batch (Tasks 0-5 all nil).
+
+#### Next action
+
+- Surface full git status + dispatch `/draft-commit` for the fix-up commit (4 source files + Task 4 running-notes entry already in tree + THIS Task 5 fix-up entry).  Once landed: apply the Implemented Work Log batch-close entry via Edit + update Main Plan §5 QA-AudioMeters STATUS banner with CLOSE summary + add Task 5 close-pass running-notes section (if any final notes needed) + `/draft-commit` for the final close commit.

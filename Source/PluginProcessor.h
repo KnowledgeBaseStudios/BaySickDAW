@@ -433,19 +433,13 @@ public:
     std::atomic<float> mRustyDrumsBusPeakDbL    { -60.0f };
     std::atomic<float> mRustyDrumsBusPeakDbR    { -60.0f };
 
-    // QA-AudioMeters (2026-05-24): unified G1 meter snapshot sentinel.  Post-
-    // batch the per-bus + per-insert publish chain is uniform: audio thread
-    // writes into the node's peakDb via publishPeakReading (CAS-max + latency-
-    // comp ring); processBus / processInsert exchange-stores into the matching
-    // VibeGraph public-member atomic at end-of-call (sentinel -inf so a
-    // "no-audio-this-block" exchange returns -inf for the drainAndMerge skip);
-    // drainMeterAtomicsForUI runs drainAndMerge once per processBlock to CAS-
-    // max the VibeGraph atomic into the per-bus / per-insert PluginProcessor
-    // snapshot mirror above.  Result: every meter (12 buses + 8 InsertKinds)
-    // is end-of-block coherent so a UI vblank firing at any time sees a
-    // consistent snapshot across all of them.  drainAndMerge's skip-on-INF
-    // clause uses this sentinel.
-    static constexpr float kPeakAtomicNegInf = -std::numeric_limits<float>::infinity();
+    // QA-AudioMeters fix-up (2026-05-24): kPeakAtomicNegInf constant deleted.
+    // It was introduced in QA-Eg but never referenced -- every drainAndMerge /
+    // exchange-store / casMax site defines its own local kNI / kPeakNegInf /
+    // kBusNegInf constexpr.  The Task 4 cleanup-pass comment wrongly claimed
+    // "drainAndMerge's skip-on-INF clause uses this sentinel"; in reality
+    // drainAndMerge captures its own sentinel via lambda.  Removed to avoid
+    // future readers wondering why the constant exists.
 
     // ── 1M: Audio DSP load monitoring (audio thread writes, UI timer reads) ──
     // mAudioDspLoad : smoothed fraction of buffer window used by processBlock (0..1)
@@ -625,37 +619,37 @@ public:
     // exchange-and-resets to start a fresh max-since-last-frame window.
     // mAudioRowPeakDb* keeps its existing name (Audio kind) for Builder grid
     // backward compat; the other 7 kinds use the m<Kind>InsertPeakDb* naming.
+    // QA-AudioMeters fix-up (2026-05-24): mono m<Kind>InsertPeakDb mirrors
+    // (one per kind) deleted as dead writes -- no UI consumer ever read them;
+    // drainInsertPeakDbStereo only returns L/R.  Bus mono mirrors above are
+    // also dead (pre-existing pre-batch); left for a separate cleanup batch.
     static constexpr int kMaxAudioRows = 50;
-    std::atomic<float> mAudioRowPeakDb [kMaxAudioRows];
     std::atomic<float> mAudioRowPeakDbL[kMaxAudioRows];
     std::atomic<float> mAudioRowPeakDbR[kMaxAudioRows];
 
-    std::atomic<float> mLayerInsertPeakDb [kMaxLayerPages];
     std::atomic<float> mLayerInsertPeakDbL[kMaxLayerPages];
     std::atomic<float> mLayerInsertPeakDbR[kMaxLayerPages];
-    std::atomic<float> mBassInsertPeakDb  [kMaxBassPages];
     std::atomic<float> mBassInsertPeakDbL [kMaxBassPages];
     std::atomic<float> mBassInsertPeakDbR [kMaxBassPages];
-    std::atomic<float> mDrumInsertPeakDb  [kMaxDrumPages];
     std::atomic<float> mDrumInsertPeakDbL [kMaxDrumPages];
     std::atomic<float> mDrumInsertPeakDbR [kMaxDrumPages];
-    std::atomic<float> mAuxInsertPeakDb   [MixerChannelIds::kMaxAuxStrips];
     std::atomic<float> mAuxInsertPeakDbL  [MixerChannelIds::kMaxAuxStrips];
     std::atomic<float> mAuxInsertPeakDbR  [MixerChannelIds::kMaxAuxStrips];
-    std::atomic<float> mVoxInsertPeakDb   [MixerChannelIds::kMaxVoxStrips];
     std::atomic<float> mVoxInsertPeakDbL  [MixerChannelIds::kMaxVoxStrips];
     std::atomic<float> mVoxInsertPeakDbR  [MixerChannelIds::kMaxVoxStrips];
-    std::atomic<float> mInstInsertPeakDb  [MixerChannelIds::kMaxInstStrips];
     std::atomic<float> mInstInsertPeakDbL [MixerChannelIds::kMaxInstStrips];
     std::atomic<float> mInstInsertPeakDbR [MixerChannelIds::kMaxInstStrips];
-    std::atomic<float> mRustyInsertPeakDb [MixerChannelIds::kMaxRustyStrips];
     std::atomic<float> mRustyInsertPeakDbL[MixerChannelIds::kMaxRustyStrips];
     std::atomic<float> mRustyInsertPeakDbR[MixerChannelIds::kMaxRustyStrips];
 
     // QA-AudioMeters: UI-side exchange-and-reset drain for any insert kind.
     // Returns the running max-since-last-call for the (kind, index) pair from
     // the appropriate m<Kind>InsertPeakDb*L/R mirror; resets to -inf so the
-    // next vblank window starts fresh.  Wait-free; safe to call from UI thread.
+    // next vblank window starts fresh.  Wait-free, noexcept, relaxed memory
+    // ordering.  **Single-consumer (UI vblank); concurrent callers race on the
+    // exchange-reset** -- a second concurrent caller would receive -inf as the
+    // first call's exchange already cleared the mirror.  Currently the only
+    // consumer is MixerPage::onVBlank.
     std::pair<float, float> drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int index) noexcept;
 
     // ── Graph infrastructure (Phase 1A) ───────────────────────────────────────

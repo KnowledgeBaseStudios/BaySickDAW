@@ -160,28 +160,20 @@ VibeSynthProcessor::VibeSynthProcessor()
         for (int i = 0; i < n; ++i)
             arr[i].store (-60.0f, std::memory_order_relaxed);
     };
-    initMirrorArr (mAudioRowPeakDb,     kMaxAudioRows);
     initMirrorArr (mAudioRowPeakDbL,    kMaxAudioRows);
     initMirrorArr (mAudioRowPeakDbR,    kMaxAudioRows);
-    initMirrorArr (mLayerInsertPeakDb,  kMaxLayerPages);
     initMirrorArr (mLayerInsertPeakDbL, kMaxLayerPages);
     initMirrorArr (mLayerInsertPeakDbR, kMaxLayerPages);
-    initMirrorArr (mBassInsertPeakDb,   kMaxBassPages);
     initMirrorArr (mBassInsertPeakDbL,  kMaxBassPages);
     initMirrorArr (mBassInsertPeakDbR,  kMaxBassPages);
-    initMirrorArr (mDrumInsertPeakDb,   kMaxDrumPages);
     initMirrorArr (mDrumInsertPeakDbL,  kMaxDrumPages);
     initMirrorArr (mDrumInsertPeakDbR,  kMaxDrumPages);
-    initMirrorArr (mAuxInsertPeakDb,    MixerChannelIds::kMaxAuxStrips);
     initMirrorArr (mAuxInsertPeakDbL,   MixerChannelIds::kMaxAuxStrips);
     initMirrorArr (mAuxInsertPeakDbR,   MixerChannelIds::kMaxAuxStrips);
-    initMirrorArr (mVoxInsertPeakDb,    MixerChannelIds::kMaxVoxStrips);
     initMirrorArr (mVoxInsertPeakDbL,   MixerChannelIds::kMaxVoxStrips);
     initMirrorArr (mVoxInsertPeakDbR,   MixerChannelIds::kMaxVoxStrips);
-    initMirrorArr (mInstInsertPeakDb,   MixerChannelIds::kMaxInstStrips);
     initMirrorArr (mInstInsertPeakDbL,  MixerChannelIds::kMaxInstStrips);
     initMirrorArr (mInstInsertPeakDbR,  MixerChannelIds::kMaxInstStrips);
-    initMirrorArr (mRustyInsertPeakDb,  MixerChannelIds::kMaxRustyStrips);
     initMirrorArr (mRustyInsertPeakDbL, MixerChannelIds::kMaxRustyStrips);
     initMirrorArr (mRustyInsertPeakDbR, MixerChannelIds::kMaxRustyStrips);
 
@@ -2180,49 +2172,41 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     // that name for Builder grid backward compat per L9).
     for (int i = 0; i < kMaxLayerPages; ++i)
     {
-        drainAndMerge (mLayerInsertPeakDb [i], mVibeGraph.layerInsertPeakDb [i]);
         drainAndMerge (mLayerInsertPeakDbL[i], mVibeGraph.layerInsertPeakDbL[i]);
         drainAndMerge (mLayerInsertPeakDbR[i], mVibeGraph.layerInsertPeakDbR[i]);
     }
     for (int i = 0; i < kMaxBassPages; ++i)
     {
-        drainAndMerge (mBassInsertPeakDb [i], mVibeGraph.bassInsertPeakDb [i]);
         drainAndMerge (mBassInsertPeakDbL[i], mVibeGraph.bassInsertPeakDbL[i]);
         drainAndMerge (mBassInsertPeakDbR[i], mVibeGraph.bassInsertPeakDbR[i]);
     }
     for (int i = 0; i < kMaxDrumPages; ++i)
     {
-        drainAndMerge (mDrumInsertPeakDb [i], mVibeGraph.drumInsertPeakDb [i]);
         drainAndMerge (mDrumInsertPeakDbL[i], mVibeGraph.drumInsertPeakDbL[i]);
         drainAndMerge (mDrumInsertPeakDbR[i], mVibeGraph.drumInsertPeakDbR[i]);
     }
     for (int i = 0; i < kMaxAudioRows; ++i)
     {
-        drainAndMerge (mAudioRowPeakDb [i], mVibeGraph.audioInsertPeakDb [i]);
         drainAndMerge (mAudioRowPeakDbL[i], mVibeGraph.audioInsertPeakDbL[i]);
         drainAndMerge (mAudioRowPeakDbR[i], mVibeGraph.audioInsertPeakDbR[i]);
     }
     for (int i = 0; i < MixerChannelIds::kMaxAuxStrips; ++i)
     {
-        drainAndMerge (mAuxInsertPeakDb [i], mVibeGraph.auxInsertPeakDb [i]);
         drainAndMerge (mAuxInsertPeakDbL[i], mVibeGraph.auxInsertPeakDbL[i]);
         drainAndMerge (mAuxInsertPeakDbR[i], mVibeGraph.auxInsertPeakDbR[i]);
     }
     for (int i = 0; i < MixerChannelIds::kMaxVoxStrips; ++i)
     {
-        drainAndMerge (mVoxInsertPeakDb [i], mVibeGraph.voxInsertPeakDb [i]);
         drainAndMerge (mVoxInsertPeakDbL[i], mVibeGraph.voxInsertPeakDbL[i]);
         drainAndMerge (mVoxInsertPeakDbR[i], mVibeGraph.voxInsertPeakDbR[i]);
     }
     for (int i = 0; i < MixerChannelIds::kMaxInstStrips; ++i)
     {
-        drainAndMerge (mInstInsertPeakDb [i], mVibeGraph.instInsertPeakDb [i]);
         drainAndMerge (mInstInsertPeakDbL[i], mVibeGraph.instInsertPeakDbL[i]);
         drainAndMerge (mInstInsertPeakDbR[i], mVibeGraph.instInsertPeakDbR[i]);
     }
     for (int i = 0; i < MixerChannelIds::kMaxRustyStrips; ++i)
     {
-        drainAndMerge (mRustyInsertPeakDb [i], mVibeGraph.rustyInsertPeakDb [i]);
         drainAndMerge (mRustyInsertPeakDbL[i], mVibeGraph.rustyInsertPeakDbL[i]);
         drainAndMerge (mRustyInsertPeakDbR[i], mVibeGraph.rustyInsertPeakDbR[i]);
     }

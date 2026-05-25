@@ -1374,14 +1374,14 @@ void VibeGraph::prepare(double sampleRate, int maxBlockSize)
     {
         for (auto& a : arr) a.store (-60.f, std::memory_order_relaxed);
     };
-    initArray (layerInsertPeakDb);  initArray (layerInsertPeakDbL);  initArray (layerInsertPeakDbR);
-    initArray (bassInsertPeakDb);   initArray (bassInsertPeakDbL);   initArray (bassInsertPeakDbR);
-    initArray (drumInsertPeakDb);   initArray (drumInsertPeakDbL);   initArray (drumInsertPeakDbR);
-    initArray (audioInsertPeakDb);  initArray (audioInsertPeakDbL);  initArray (audioInsertPeakDbR);
-    initArray (auxInsertPeakDb);    initArray (auxInsertPeakDbL);    initArray (auxInsertPeakDbR);
-    initArray (voxInsertPeakDb);    initArray (voxInsertPeakDbL);    initArray (voxInsertPeakDbR);
-    initArray (instInsertPeakDb);   initArray (instInsertPeakDbL);   initArray (instInsertPeakDbR);
-    initArray (rustyInsertPeakDb);  initArray (rustyInsertPeakDbL);  initArray (rustyInsertPeakDbR);
+    initArray (layerInsertPeakDbL);  initArray (layerInsertPeakDbR);
+    initArray (bassInsertPeakDbL);   initArray (bassInsertPeakDbR);
+    initArray (drumInsertPeakDbL);   initArray (drumInsertPeakDbR);
+    initArray (audioInsertPeakDbL);  initArray (audioInsertPeakDbR);
+    initArray (auxInsertPeakDbL);    initArray (auxInsertPeakDbR);
+    initArray (voxInsertPeakDbL);    initArray (voxInsertPeakDbR);
+    initArray (instInsertPeakDbL);   initArray (instInsertPeakDbR);
+    initArray (rustyInsertPeakDbL);  initArray (rustyInsertPeakDbR);
 }
 
 // ── reset ─────────────────────────────────────────────────────────────────────
@@ -2354,53 +2354,69 @@ void VibeGraph::processInsert(InsertKind kind, int index,
         if (chId >= 0) pushScArrayToStrip(chId);
         node->processBlock(buf, bpm, anySolo);
 
-        // QA-AudioMeters (2026-05-24): per-kind exchange-store of the InsertNode's
-        // freshly published peak into VibeGraph's public-member array for the
-        // (kind, index) slot.  drainMeterAtomicsForUI's per-kind G1 loop drains
-        // this into PluginProcessor mirrors that the UI polls.  Mirror-store
-        // pattern parallel to the bus exchange-stores in processBus.
+        // QA-AudioMeters fix-up (2026-05-24): CAS-max MERGE (not plain store) of
+        // the InsertNode's freshly published peak into VibeGraph's per-kind
+        // public-member array for the (kind, index) slot.  CAS-max is required
+        // because processInsert is called MULTIPLE TIMES PER BLOCK for some
+        // InsertKinds: Audio (Flow A clip-engine in CompositeAudioInsertTask +
+        // per-clip Flow B inside renderAudioClipsForRow), Vox + Inst (per-
+        // FilePlay-player loop in VoxStripTask / InstStripTask).  A plain
+        // store would overwrite each prior call's peak with the latest; CAS-
+        // max preserves the maximum across all calls within a single audio
+        // block.  drainMeterAtomicsForUI's per-kind G1 loop drains the
+        // accumulated mirror into the PluginProcessor mirror that the UI
+        // polls.  Mono branch removed -- the m<Kind>InsertPeakDb mono mirrors
+        // have no UI consumer (per-batch dead-write cleanup); InsertNode->
+        // peakDb mono is still written by publishPeakReading (shared with
+        // BusNodes) but is no longer extracted here.
         constexpr float kNI = -std::numeric_limits<float>::infinity();
-        auto storeAxes = [&] (std::atomic<float>& dM,
-                              std::atomic<float>& dL,
+        auto storeAxes = [&] (std::atomic<float>& dL,
                               std::atomic<float>& dR) noexcept
         {
-            dM.store (node->peakDb .exchange (kNI, std::memory_order_relaxed), std::memory_order_relaxed);
-            dL.store (node->peakDbL.exchange (kNI, std::memory_order_relaxed), std::memory_order_relaxed);
-            dR.store (node->peakDbR.exchange (kNI, std::memory_order_relaxed), std::memory_order_relaxed);
+            auto casMax = [] (std::atomic<float>& a, float v) noexcept
+            {
+                if (v == kNI) return;
+                float cur = a.load (std::memory_order_relaxed);
+                while (cur < v
+                       && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+                {}
+            };
+            casMax (dL, node->peakDbL.exchange (kNI, std::memory_order_relaxed));
+            casMax (dR, node->peakDbR.exchange (kNI, std::memory_order_relaxed));
         };
         switch (kind)
         {
             case InsertKind::Layer:
                 if (index >= 0 && index < kMaxLayerPages)
-                    storeAxes (layerInsertPeakDb [index], layerInsertPeakDbL [index], layerInsertPeakDbR [index]);
+                    storeAxes (layerInsertPeakDbL [index], layerInsertPeakDbR [index]);
                 break;
             case InsertKind::Bass:
                 if (index >= 0 && index < kMaxBassPages)
-                    storeAxes (bassInsertPeakDb  [index], bassInsertPeakDbL  [index], bassInsertPeakDbR  [index]);
+                    storeAxes (bassInsertPeakDbL  [index], bassInsertPeakDbR  [index]);
                 break;
             case InsertKind::Drum:
                 if (index >= 0 && index < kMaxDrumPages)
-                    storeAxes (drumInsertPeakDb  [index], drumInsertPeakDbL  [index], drumInsertPeakDbR  [index]);
+                    storeAxes (drumInsertPeakDbL  [index], drumInsertPeakDbR  [index]);
                 break;
             case InsertKind::Audio:
                 if (index >= 0 && index < kMaxAudioInserts)
-                    storeAxes (audioInsertPeakDb [index], audioInsertPeakDbL [index], audioInsertPeakDbR [index]);
+                    storeAxes (audioInsertPeakDbL [index], audioInsertPeakDbR [index]);
                 break;
             case InsertKind::Aux:
                 if (index >= 0 && index < MixerChannelIds::kMaxAuxStrips)
-                    storeAxes (auxInsertPeakDb   [index], auxInsertPeakDbL   [index], auxInsertPeakDbR   [index]);
+                    storeAxes (auxInsertPeakDbL   [index], auxInsertPeakDbR   [index]);
                 break;
             case InsertKind::Vox:
                 if (index >= 0 && index < MixerChannelIds::kMaxVoxStrips)
-                    storeAxes (voxInsertPeakDb   [index], voxInsertPeakDbL   [index], voxInsertPeakDbR   [index]);
+                    storeAxes (voxInsertPeakDbL   [index], voxInsertPeakDbR   [index]);
                 break;
             case InsertKind::Inst:
                 if (index >= 0 && index < MixerChannelIds::kMaxInstStrips)
-                    storeAxes (instInsertPeakDb  [index], instInsertPeakDbL  [index], instInsertPeakDbR  [index]);
+                    storeAxes (instInsertPeakDbL  [index], instInsertPeakDbR  [index]);
                 break;
             case InsertKind::Rusty:
                 if (index >= 0 && index < MixerChannelIds::kMaxRustyStrips)
-                    storeAxes (rustyInsertPeakDb [index], rustyInsertPeakDbL [index], rustyInsertPeakDbR [index]);
+                    storeAxes (rustyInsertPeakDbL [index], rustyInsertPeakDbR [index]);
                 break;
         }
     }
