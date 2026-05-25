@@ -227,9 +227,11 @@ public:
     float drainSlotOutputLevel(int slot);       // dBFS
 
     // 2026-05-02: end-of-audio-block promotion of all slot atomics.  Called
-    // by VibeGraph::promoteAllInsertPeakSnapshots() once per audio block,
-    // walking every rack across every node + insert so the entire app's
-    // meter state ends each block coherent.
+    // by VibeGraph::promoteAllRackSlotSnapshots() once per audio block (renamed
+    // from promoteAllInsertPeakSnapshots in QA-AudioMeters 2026-05-24 when the
+    // per-insert peakDbSnap layer was removed; rack-slot promotion is the
+    // surviving half), walking every rack across every node + insert so the
+    // entire app's effect-panel meter state ends each block coherent.
     void promoteSlotPeakSnapshots();
 
     // FX master switch - bypasses entire rack without destroying slot data

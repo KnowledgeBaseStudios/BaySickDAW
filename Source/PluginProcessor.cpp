@@ -2132,7 +2132,11 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
         while (cur < v && ! mirror.compare_exchange_weak (cur, v, std::memory_order_relaxed))
         {}
     };
-    // Group 1: bus mirrors (Layers/Bass/Drums/Master).
+    // Unified G1 bus drain — every bus (12 total: Layers / Bass / Drums /
+    // Master / FX / AudioClips / Vox / Vox2 / Inst / Inst2 / Inst3 / Rusty)
+    // follows the same chain post-QA-Eg: BusNode peakDb (audio-thread
+    // publishPeakReading) -> VibeGraph member atomic (processBus exchange-
+    // store) -> mirror (this drainAndMerge).
     drainAndMerge (mLayersPeakDb,  mVibeGraph.layersPeakDb);
     drainAndMerge (mLayersPeakDbL, mVibeGraph.layersPeakDbL);
     drainAndMerge (mLayersPeakDbR, mVibeGraph.layersPeakDbR);

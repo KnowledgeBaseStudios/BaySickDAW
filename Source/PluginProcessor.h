@@ -433,14 +433,18 @@ public:
     std::atomic<float> mRustyDrumsBusPeakDbL    { -60.0f };
     std::atomic<float> mRustyDrumsBusPeakDbR    { -60.0f };
 
-    // 2026-05-02: running-max companion atomics.  Audio thread CAS-maxes into
-    // these during processBlock; a single end-of-block promotion lifts them
-    // into the UI-visible atomics above.  Result: every meter (every bus,
-    // every audio row) is end-of-block coherent so a UI vblank firing at any
-    // time sees a consistent snapshot across all of them, not "this bus
-    // updated, that one not yet".  Default to -inf so a "no audio writes
-    // this block" case promotes nothing (skip-on-INF inside the promote
-    // helper) and the existing snapshot keeps decaying via UI ballistics.
+    // QA-AudioMeters (2026-05-24): unified G1 meter snapshot sentinel.  Post-
+    // batch the per-bus + per-insert publish chain is uniform: audio thread
+    // writes into the node's peakDb via publishPeakReading (CAS-max + latency-
+    // comp ring); processBus / processInsert exchange-stores into the matching
+    // VibeGraph public-member atomic at end-of-call (sentinel -inf so a
+    // "no-audio-this-block" exchange returns -inf for the drainAndMerge skip);
+    // drainMeterAtomicsForUI runs drainAndMerge once per processBlock to CAS-
+    // max the VibeGraph atomic into the per-bus / per-insert PluginProcessor
+    // snapshot mirror above.  Result: every meter (12 buses + 8 InsertKinds)
+    // is end-of-block coherent so a UI vblank firing at any time sees a
+    // consistent snapshot across all of them.  drainAndMerge's skip-on-INF
+    // clause uses this sentinel.
     static constexpr float kPeakAtomicNegInf = -std::numeric_limits<float>::infinity();
 
     // ── 1M: Audio DSP load monitoring (audio thread writes, UI timer reads) ──
