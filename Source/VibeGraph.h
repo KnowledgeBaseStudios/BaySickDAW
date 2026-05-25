@@ -715,8 +715,11 @@ private:
 
     // Per-page instrument EffectRacks - always live, prepared with the graph.
     // Applied after per-page EQ, before the bus sum, in PluginProcessor::processBlock.
-    // DEPRECATED 5F-4a: being migrated into InsertNode. Kept compiling through
-    // Batch 1–2; Batch 3 removes these and routes to mLayerInserts/mBassInserts.
+    // DEPRECATED 5F-4a: migrated into InsertNode storage (now in mInsertsByChannel
+    // below post-QA-InsertMaps 2026-05-24).  Kept as the legacy fallback path used
+    // by getLayerPageRack / getBassPageRack when no InsertNode has been ensured at
+    // the corresponding chId yet (e.g. on a fresh project before any Layer / Bass
+    // strip is auditioned).
     std::array<EffectRack, kMaxLayerPages> mLayerPageRacks;
     std::array<EffectRack, kMaxBassPages>  mBassPageRacks;
 

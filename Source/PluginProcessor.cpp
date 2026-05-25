@@ -4367,7 +4367,8 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
 
 void VibeSynthProcessor::destroyBaySickRustyDrums()
 {
-    // Remove all 13 InsertNodes first (audio thread will see empty mRustyInserts
+    // Remove all 13 InsertNodes first (audio thread will see the Rusty chId range
+    // [kRustyBase..kRustyBase+kMaxRustyStrips) emptied in mInsertsByChannel
     // immediately even if the engine teardown takes another instant).
     // removeRustyInsert also unregisters the per-strip RustyInsertTask and
     // drops any synthetic deps the dispatcher had pointing at it.
