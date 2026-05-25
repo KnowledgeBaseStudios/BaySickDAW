@@ -6,6 +6,38 @@
 #include <algorithm>
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  QA-InsertMaps (2026-05-24): InsertKind + index -> MixerChannelIds chId helper.
+//  Hoisted to the top of the translation unit so every call site sees it,
+//  including the XML restore path (restoreInsert at the project-load
+//  loadRackStates helper, ~line 2150) which lives BEFORE the per-insert
+//  node registry section where the helper was originally added in place of
+//  selectInsertMap.  Used by ensureInsertNode / removeInsertNode /
+//  getInsertNode / restoreInsert / getInsertChokeGroup for the flat-array
+//  lookup, and cached on InsertNode::chId at construction so the audio-
+//  thread processInsert path reads it directly (skipping the per-block
+//  kind->chId switch).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+namespace {
+    static inline int computeChannelId(VibeGraph::InsertKind kind, int index) noexcept
+    {
+        using namespace MixerChannelIds;
+        switch (kind)
+        {
+            case VibeGraph::InsertKind::Layer: return layerInsert(index);
+            case VibeGraph::InsertKind::Bass:  return bassInsert (index);
+            case VibeGraph::InsertKind::Drum:  return drumInsert (index);
+            case VibeGraph::InsertKind::Audio: return audioInsert(index);
+            case VibeGraph::InsertKind::Aux:   return auxStrip   (index);
+            case VibeGraph::InsertKind::Vox:   return voxInsert  (index);
+            case VibeGraph::InsertKind::Inst:  return instInsert (index);
+            case VibeGraph::InsertKind::Rusty: return rustyInsert(index);
+        }
+        return -1;  // unreachable; defensive
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  Bus node struct definitions
 //  These are nested inside VibeGraph (forward-declared in VibeGraph.h).
 //  Each node:
@@ -1035,8 +1067,13 @@ struct VibeGraph::InsertNode
     // ── Identity ──────────────────────────────────────────────────────────────
     juce::String          name;
     juce::String          apvtsPrefix;
-    VibeGraph::InsertKind kind { VibeGraph::InsertKind::Layer };
+    VibeGraph::InsertKind kind  { VibeGraph::InsertKind::Layer };
     int                   index { 0 };
+    // QA-InsertMaps (2026-05-24): cached MixerChannelIds chId; set by
+    // ensureInsertNode via computeChannelId(kind, index).  Lets processInsert
+    // skip the per-block kind->chId switch (the switch dies as a natural
+    // consequence of the flat-array migration).
+    int                   chId  { -1 };
 
     // ── Audio DSP ─────────────────────────────────────────────────────────────
     // §P4.3: pre-rack EQ runs at the very start of the chain, before polarity /
@@ -1086,11 +1123,11 @@ struct VibeGraph::InsertNode
     // every block alongside pPan so the user can pick FL-style pan curve.
     std::atomic<float>* pPanLaw { nullptr };
 
-    InsertNode(VibeGraph::InsertKind k, int i,
+    InsertNode(VibeGraph::InsertKind k, int i, int channelId,
                juce::String displayName, juce::String prefix)
         : name(std::move(displayName))
         , apvtsPrefix(std::move(prefix))
-        , kind(k), index(i) {}
+        , kind(k), index(i), chId(channelId) {}
 
     void prepare(double sr, int blockSize)
     {
@@ -1360,11 +1397,14 @@ void VibeGraph::prepare(double sampleRate, int maxBlockSize)
     for (auto& [id, node] : mInstrChannelNodes)
         node->prepare(sampleRate, maxBlockSize);
 
-    // 5F-4a: per-insert nodes - R3 includes Vox / Inst inserts.
-    for (auto* m : { &mLayerInserts, &mBassInserts, &mDrumInserts, &mAudioInserts,
-                     &mAuxInserts, &mVoxInserts, &mInstInserts })
-        for (auto& [i, node] : *m)
-            node->prepare(sampleRate, maxBlockSize);
+    // 5F-4a: per-insert nodes.  QA-InsertMaps (2026-05-24): single sweep over
+    // mLiveInsertChannels covers all 8 InsertKinds (the original pointer-init-
+    // list at this site excluded Rusty -- Finding A in QA-InsertMaps Task 1
+    // inventory; defensive since ensureInsertNode already calls prepare() at
+    // construction when mSampleRate > 0.0, but symmetric end state).
+    for (int chId : mLiveInsertChannels)
+        if (auto* n = mInsertsByChannel[(size_t) chId].get())
+            n->prepare(sampleRate, maxBlockSize);
 
     // QA-AudioMeters (2026-05-24): initialise the per-kind public-member peak
     // arrays to -60 dB.  std::atomic<float> default-construction leaves value
@@ -1405,10 +1445,18 @@ void VibeGraph::reset()
     mEffectsBusNode->reset();
     for (auto& [id, node] : mInstrChannelNodes)
         node->reset();
-    // 5F-4a: per-insert nodes
-    for (auto* m : { &mLayerInserts, &mBassInserts, &mDrumInserts, &mAudioInserts, &mAuxInserts })
-        for (auto& [i, node] : *m)
-            node->reset();
+    // 5F-4a: per-insert nodes.  QA-InsertMaps (2026-05-24): single sweep over
+    // mLiveInsertChannels covers all 8 InsertKinds (the original pointer-init-
+    // list at this site only covered 5 kinds -- Finding B in QA-InsertMaps
+    // Task 1 inventory; pre-existing oversight when R1 / J-4 extended
+    // InsertKind without updating this sweep; Sub-G Option 2 resolution
+    // includes Vox / Inst / Rusty for symmetric end state.  NOTE: VibeGraph::
+    // reset() itself is currently dead code -- no caller in the source tree;
+    // future-batch routing via §9 Forks 2026-05-24 entry to wire it up to
+    // transport Stop.
+    for (int chId : mLiveInsertChannels)
+        if (auto* n = mInsertsByChannel[(size_t) chId].get())
+            n->reset();
 }
 
 // ── buildFixedTopology ────────────────────────────────────────────────────────
@@ -1747,19 +1795,11 @@ void VibeGraph::rebindAllRackHooks()
     for (int i = 0; i < (int) mLayerPageRacks.size(); ++i)  chain (&mLayerPageRacks[(size_t) i]);
     for (int i = 0; i < (int) mBassPageRacks.size();  ++i)  chain (&mBassPageRacks[(size_t) i]);
 
-    auto walkInserts = [&chain] (auto& m)
-    {
-        for (auto& [k, v] : m)
-            if (v) chain (&v->rack);
-    };
-    walkInserts (mLayerInserts);
-    walkInserts (mBassInserts);
-    walkInserts (mDrumInserts);
-    walkInserts (mAudioInserts);
-    walkInserts (mAuxInserts);
-    walkInserts (mVoxInserts);
-    walkInserts (mInstInserts);
-    walkInserts (mRustyInserts);
+    // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels
+    // replaces the walkInserts lambda + 8 per-kind calls.
+    for (int chId : mLiveInsertChannels)
+        if (auto* n = mInsertsByChannel[(size_t) chId].get())
+            chain (&n->rack);
 }
 
 EffectRack* VibeGraph::getLayersBusRack()     { return mLayersNode       ? &mLayersNode      ->rack : nullptr; }
@@ -1794,24 +1834,27 @@ EffectRack* VibeGraph::getRustyDrumsBusRack() { return mRustyDrumsBusNode ? &mRu
 
 EffectRack* VibeGraph::getLayerPageRack(int idx)
 {
-    // 5F-4a Batch 6: prefer the InsertNode's rack; fall back to the legacy array
-    if (auto it = mLayerInserts.find(idx); it != mLayerInserts.end())
-        return &it->second->rack;
+    // 5F-4a Batch 6: prefer the InsertNode's rack; fall back to the legacy array.
+    // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
+    if (auto* node = getInsertNode(InsertKind::Layer, idx))
+        return &node->rack;
     if (idx < 0 || idx >= kMaxLayerPages) return nullptr;
     return &mLayerPageRacks[idx];
 }
 EffectRack* VibeGraph::getBassPageRack(int idx)
 {
-    if (auto it = mBassInserts.find(idx); it != mBassInserts.end())
-        return &it->second->rack;
+    // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
+    if (auto* node = getInsertNode(InsertKind::Bass, idx))
+        return &node->rack;
     if (idx < 0 || idx >= kMaxBassPages) return nullptr;
     return &mBassPageRacks[idx];
 }
 
 EffectRack* VibeGraph::getAuxRack(int idx)
 {
-    if (auto it = mAuxInserts.find(idx); it != mAuxInserts.end())
-        return &it->second->rack;
+    // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
+    if (auto* node = getInsertNode(InsertKind::Aux, idx))
+        return &node->rack;
     return nullptr;
 }
 
@@ -1961,33 +2004,41 @@ void VibeGraph::saveRackStates(juce::ValueTree& parent)
     // user effect choices on any of those strips were lost on save.
     // 2026-05-05: also captures the §P4.3 pre-rack EQ (`preEq`) so per-page
     // presets round-trip both EQs.
-    auto addInsertMap = [&](const char* kindStr,
-                             const std::map<int, std::unique_ptr<InsertNode>>& m)
+    // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels with
+    // node->kind dispatch to the XML kind label.  Replaces the per-kind
+    // addInsertMap lambda + 8 calls.  XML tag labels MUST be preserved for
+    // project load compat (restoreInsert below matches against them).
+    auto kindString = [] (InsertKind k) -> const char*
     {
-        for (const auto& [idx, node] : m)
+        switch (k)
         {
-            if (node == nullptr) continue;
-            juce::ValueTree rec ("InsertRack");
-            rec.setProperty ("kind",  kindStr, nullptr);
-            rec.setProperty ("index", idx,     nullptr);
-            juce::MemoryBlock rackData, preEqData, eqData;
-            node->rack .getStateInformation (rackData);
-            node->preEq.getStateInformation (preEqData);
-            node->eq   .getStateInformation (eqData);
-            rec.setProperty ("rack",  encodeBlock (rackData),  nullptr);
-            rec.setProperty ("preEq", encodeBlock (preEqData), nullptr);
-            rec.setProperty ("eq",    encodeBlock (eqData),    nullptr);
-            parent.addChild (rec, -1, nullptr);
+            case InsertKind::Layer: return "Layer";
+            case InsertKind::Bass:  return "Bass";
+            case InsertKind::Drum:  return "Drum";
+            case InsertKind::Audio: return "Audio";
+            case InsertKind::Aux:   return "Aux";
+            case InsertKind::Vox:   return "Vox";
+            case InsertKind::Inst:  return "Inst";
+            case InsertKind::Rusty: return "Rusty";   // J-9 (2026-05-05)
         }
+        return "Unknown";   // defensive; unreachable for any valid kind
     };
-    addInsertMap ("Layer", mLayerInserts);
-    addInsertMap ("Bass",  mBassInserts);
-    addInsertMap ("Drum",  mDrumInserts);
-    addInsertMap ("Audio", mAudioInserts);
-    addInsertMap ("Aux",   mAuxInserts);
-    addInsertMap ("Vox",   mVoxInserts);
-    addInsertMap ("Inst",  mInstInserts);
-    addInsertMap ("Rusty", mRustyInserts);   // J-9 (2026-05-05)
+    for (int chId : mLiveInsertChannels)
+    {
+        auto* node = mInsertsByChannel[(size_t) chId].get();
+        if (node == nullptr) continue;
+        juce::ValueTree rec ("InsertRack");
+        rec.setProperty ("kind",  kindString(node->kind), nullptr);
+        rec.setProperty ("index", node->index,            nullptr);
+        juce::MemoryBlock rackData, preEqData, eqData;
+        node->rack .getStateInformation (rackData);
+        node->preEq.getStateInformation (preEqData);
+        node->eq   .getStateInformation (eqData);
+        rec.setProperty ("rack",  encodeBlock (rackData),  nullptr);
+        rec.setProperty ("preEq", encodeBlock (preEqData), nullptr);
+        rec.setProperty ("eq",    encodeBlock (eqData),    nullptr);
+        parent.addChild (rec, -1, nullptr);
+    }
 }
 
 void VibeGraph::clearAllRackStates()
@@ -2012,10 +2063,10 @@ void VibeGraph::clearAllRackStates()
     if (mRustyDrumsBusNode) wipe (mRustyDrumsBusNode->rack);
 
     for (auto& [id, node] : mInstrChannelNodes) if (node) wipe (node->rack);
-    for (auto* m : { &mLayerInserts, &mBassInserts, &mDrumInserts,
-                     &mAudioInserts, &mAuxInserts,   &mVoxInserts,  &mInstInserts,
-                     &mRustyInserts })
-        for (auto& [idx, node] : *m) if (node) wipe (node->rack);
+    // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels.
+    for (int chId : mLiveInsertChannels)
+        if (auto* n = mInsertsByChannel[(size_t) chId].get())
+            wipe (n->rack);
 }
 
 void VibeGraph::loadRackStates(const juce::ValueTree& parent)
@@ -2104,33 +2155,42 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
 
     // 2026-04-24: per-insert rack / EQ restore.  Match by kind string + index.
     // 2026-05-05: also restores the §P4.3 pre-rack EQ when `preEq` is present.
-    auto restoreInsert = [&](const juce::String& kindStr,
-                              std::map<int, std::unique_ptr<InsertNode>>& m)
+    // QA-InsertMaps (2026-05-24): single walk through XML children with
+    // kindFromString helper.  Replaces the per-kind restoreInsert lambda + 8
+    // calls (the original walked parent.getNumChildren() 8 times, once per
+    // kind; this version walks it once and dispatches on each child's kind
+    // label).  XML tag labels must match those produced by addInsertMap above.
+    auto kindFromString = [] (const juce::String& s) -> InsertKind
     {
-        for (int i = 0; i < parent.getNumChildren(); ++i)
-        {
-            auto child = parent.getChild (i);
-            if (! child.hasType ("InsertRack")) continue;
-            if (child.getProperty ("kind").toString() != kindStr) continue;
-            const int idx = (int) child.getProperty ("index", -1);
-            auto it = m.find (idx);
-            if (it == m.end() || it->second == nullptr) continue;
-
-            juce::MemoryBlock rackData;
-            if (decodeBlock (child.getProperty ("rack").toString(), rackData))
-                it->second->rack.setStateInformation (rackData.getData(), (int) rackData.getSize());
-
-            restoreEqs (child, it->second->preEq, it->second->eq);
-        }
+        if (s == "Layer") return InsertKind::Layer;
+        if (s == "Bass")  return InsertKind::Bass;
+        if (s == "Drum")  return InsertKind::Drum;
+        if (s == "Audio") return InsertKind::Audio;
+        if (s == "Aux")   return InsertKind::Aux;
+        if (s == "Vox")   return InsertKind::Vox;
+        if (s == "Inst")  return InsertKind::Inst;
+        if (s == "Rusty") return InsertKind::Rusty;   // J-9 (2026-05-05)
+        return InsertKind::Layer;   // defensive default; unrecognised labels skip below
     };
-    restoreInsert ("Layer", mLayerInserts);
-    restoreInsert ("Bass",  mBassInserts);
-    restoreInsert ("Drum",  mDrumInserts);
-    restoreInsert ("Audio", mAudioInserts);
-    restoreInsert ("Aux",   mAuxInserts);
-    restoreInsert ("Vox",   mVoxInserts);
-    restoreInsert ("Inst",  mInstInserts);
-    restoreInsert ("Rusty", mRustyInserts);   // J-9 (2026-05-05)
+    for (int i = 0; i < parent.getNumChildren(); ++i)
+    {
+        auto child = parent.getChild (i);
+        if (! child.hasType ("InsertRack")) continue;
+        const juce::String kindStr = child.getProperty ("kind").toString();
+        const int idx = (int) child.getProperty ("index", -1);
+        if (idx < 0) continue;
+
+        const int chId = computeChannelId(kindFromString(kindStr), idx);
+        if (chId < 0 || chId >= kMaxStripChannels) continue;
+        auto* node = mInsertsByChannel[(size_t) chId].get();
+        if (node == nullptr) continue;
+
+        juce::MemoryBlock rackData;
+        if (decodeBlock (child.getProperty ("rack").toString(), rackData))
+            node->rack.setStateInformation (rackData.getData(), (int) rackData.getSize());
+
+        restoreEqs (child, node->preEq, node->eq);
+    }
 }
 
 // ── Instrument channel registry (dynamic, one rack+EQ per non-bus channel) ───
@@ -2191,9 +2251,10 @@ void VibeGraph::addAudioRowChannel(int row, const juce::String& displayName)
 
 EffectRack* VibeGraph::getAudioRowRack(int row)
 {
-    // 5F-4a Batch 6: prefer Audio InsertNode; fall back to legacy InstrChannelNode
-    if (auto it2 = mAudioInserts.find(row); it2 != mAudioInserts.end())
-        return &it2->second->rack;
+    // 5F-4a Batch 6: prefer Audio InsertNode; fall back to legacy InstrChannelNode.
+    // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
+    if (auto* node = getInsertNode(InsertKind::Audio, row))
+        return &node->rack;
     auto it = mInstrChannelNodes.find(400 + row);
     return it != mInstrChannelNodes.end() ? &it->second->rack : nullptr;
 }
@@ -2204,8 +2265,9 @@ EQ8MsDSP* VibeGraph::getAudioRowEQ(int row)
     // legacy InstrChannelNode. Mirrors the getAudioRowRack dual-path pattern.
     // Previously legacy-only, which caused the audio-row EQ tab in EffectsPage
     // to bind null when the node lived in the new InsertNode registry.
-    if (auto it2 = mAudioInserts.find(row); it2 != mAudioInserts.end())
-        return &it2->second->eq;
+    // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
+    if (auto* node = getInsertNode(InsertKind::Audio, row))
+        return &node->eq;
     auto it = mInstrChannelNodes.find(400 + row);
     return it != mInstrChannelNodes.end() ? &it->second->eq : nullptr;
 }
@@ -2248,43 +2310,27 @@ bool VibeGraph::hasNode(int trackId) const
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  5F-4a: Per-insert node registry
+//  QA-InsertMaps (2026-05-24): the `selectInsertMap` anon-namespace helper
+//  that lived here pre-batch has been deleted; replaced by `computeChannelId`
+//  defined near the top of this file (hoisted so the XML restore path can
+//  see it).  See the comment block at the top of the file for the helper +
+//  rationale.
 // ═══════════════════════════════════════════════════════════════════════════════
-
-namespace {
-    std::map<int, std::unique_ptr<VibeGraph::InsertNode>>*
-    selectInsertMap(VibeGraph::InsertKind kind,
-                    std::map<int, std::unique_ptr<VibeGraph::InsertNode>>& layerMap,
-                    std::map<int, std::unique_ptr<VibeGraph::InsertNode>>& bassMap,
-                    std::map<int, std::unique_ptr<VibeGraph::InsertNode>>& drumMap,
-                    std::map<int, std::unique_ptr<VibeGraph::InsertNode>>& audioMap,
-                    std::map<int, std::unique_ptr<VibeGraph::InsertNode>>& auxMap,
-                    std::map<int, std::unique_ptr<VibeGraph::InsertNode>>& voxMap,
-                    std::map<int, std::unique_ptr<VibeGraph::InsertNode>>& instMap,
-                    std::map<int, std::unique_ptr<VibeGraph::InsertNode>>& rustyMap)
-    {
-        switch (kind)
-        {
-            case VibeGraph::InsertKind::Layer: return &layerMap;
-            case VibeGraph::InsertKind::Bass:  return &bassMap;
-            case VibeGraph::InsertKind::Drum:  return &drumMap;
-            case VibeGraph::InsertKind::Audio: return &audioMap;
-            case VibeGraph::InsertKind::Aux:   return &auxMap;
-            case VibeGraph::InsertKind::Vox:   return &voxMap;
-            case VibeGraph::InsertKind::Inst:  return &instMap;
-            case VibeGraph::InsertKind::Rusty: return &rustyMap;
-        }
-        return &layerMap;
-    }
-}
 
 VibeGraph::InsertNode*
 VibeGraph::ensureInsertNode(InsertKind kind, int index,
                              const juce::String& displayName,
                              const juce::String& apvtsPrefix)
 {
-    auto* m = selectInsertMap(kind, mLayerInserts, mBassInserts, mDrumInserts, mAudioInserts, mAuxInserts, mVoxInserts, mInstInserts, mRustyInserts);
+    // QA-InsertMaps (2026-05-24): flat-array lookup by ChannelId.  ChId is
+    // computed once here for both the lookup AND the cached `node->chId`
+    // field (see L9/Sub-D); processInsert reads node->chId directly so the
+    // audio-thread kind->chId switch dies.
+    const int chId = computeChannelId(kind, index);
+    jassert(chId >= 0 && chId < kMaxStripChannels);
+    if (chId < 0 || chId >= kMaxStripChannels) return nullptr;
 
-    if (auto it = m->find(index); it != m->end())
+    if (auto& slot = mInsertsByChannel[(size_t) chId]; slot)
     {
         // 2026-04-29: defensive re-bind.  If the node was first created before
         // mApvts was set (i.e. before buildFixedTopology), or before the strip's
@@ -2292,11 +2338,11 @@ VibeGraph::ensureInsertNode(InsertKind kind, int index,
         // forever - strip fader/mute/meter would silently no-op.  Re-binding on
         // every ensure call keeps pointers fresh.
         if (mApvts != nullptr)
-            it->second->rebindApvts(*mApvts);
-        return it->second.get();
+            slot->rebindApvts(*mApvts);
+        return slot.get();
     }
 
-    auto node = std::make_unique<InsertNode>(kind, index, displayName, apvtsPrefix);
+    auto node = std::make_unique<InsertNode>(kind, index, chId, displayName, apvtsPrefix);
     if (mSampleRate > 0.0)
         node->prepare(mSampleRate, mBlockSize);
     if (mApvts != nullptr)
@@ -2309,23 +2355,29 @@ VibeGraph::ensureInsertNode(InsertKind kind, int index,
     node->rack.onSlotsChanged = [this] { if (onAnyRackChanged) onAnyRackChanged(); };
 
     auto* raw = node.get();
-    (*m)[index] = std::move(node);
+    mInsertsByChannel[(size_t) chId] = std::move(node);
+    mLiveInsertChannels.push_back(chId);
     return raw;
 }
 
 void VibeGraph::removeInsertNode(InsertKind kind, int index)
 {
-    auto* m = selectInsertMap(kind, mLayerInserts, mBassInserts, mDrumInserts, mAudioInserts, mAuxInserts, mVoxInserts, mInstInserts, mRustyInserts);
-    m->erase(index);
+    // QA-InsertMaps (2026-05-24): flat-array reset + companion-list erase.
+    const int chId = computeChannelId(kind, index);
+    if (chId < 0 || chId >= kMaxStripChannels) return;
+    mInsertsByChannel[(size_t) chId].reset();
+    auto it = std::find(mLiveInsertChannels.begin(), mLiveInsertChannels.end(), chId);
+    if (it != mLiveInsertChannels.end())
+        mLiveInsertChannels.erase(it);
 }
 
 VibeGraph::InsertNode*
 VibeGraph::getInsertNode(InsertKind kind, int index)
 {
-    auto* m = selectInsertMap(kind, mLayerInserts, mBassInserts, mDrumInserts, mAudioInserts, mAuxInserts, mVoxInserts, mInstInserts, mRustyInserts);
-    if (auto it = m->find(index); it != m->end())
-        return it->second.get();
-    return nullptr;
+    // QA-InsertMaps (2026-05-24): flat-array lookup by ChannelId.
+    const int chId = computeChannelId(kind, index);
+    if (chId < 0 || chId >= kMaxStripChannels) return nullptr;
+    return mInsertsByChannel[(size_t) chId].get();
 }
 
 void VibeGraph::processInsert(InsertKind kind, int index,
@@ -2338,20 +2390,10 @@ void VibeGraph::processInsert(InsertKind kind, int index,
         // before processing.  Topo order ensures any SOURCE feeding this
         // strip's SC has already populated the receive buffers via
         // the upstream SC fanout.
-        using namespace MixerChannelIds;
-        int chId = -1;
-        switch (kind)
-        {
-            case InsertKind::Layer: chId = layerInsert(index); break;
-            case InsertKind::Bass:  chId = bassInsert (index); break;
-            case InsertKind::Drum:  chId = drumInsert (index); break;
-            case InsertKind::Audio: chId = audioInsert(index); break;
-            case InsertKind::Aux:   chId = auxStrip   (index); break;
-            case InsertKind::Vox:   chId = voxInsert  (index); break;
-            case InsertKind::Inst:  chId = instInsert (index); break;
-            case InsertKind::Rusty: chId = rustyInsert(index); break;
-        }
-        if (chId >= 0) pushScArrayToStrip(chId);
+        // QA-InsertMaps (2026-05-24): chId is cached on the node at
+        // construction; the per-block kind->chId switch that used to live
+        // here died with selectInsertMap.
+        if (node->chId >= 0) pushScArrayToStrip(node->chId);
         node->processBlock(buf, bpm, anySolo);
 
         // QA-AudioMeters fix-up (2026-05-24): CAS-max MERGE (not plain store) of
@@ -2469,19 +2511,11 @@ void VibeGraph::promoteAllRackSlotSnapshots()
     {
         if (r) r->promoteSlotPeakSnapshots();
     };
-    auto promoteRacksInMap = [&] (std::map<int, std::unique_ptr<InsertNode>>& m)
-    {
-        for (auto& [idx, node] : m)
-            if (node) promoteRack (&node->rack);
-    };
-    promoteRacksInMap (mLayerInserts);
-    promoteRacksInMap (mBassInserts);
-    promoteRacksInMap (mDrumInserts);
-    promoteRacksInMap (mAudioInserts);
-    promoteRacksInMap (mAuxInserts);
-    promoteRacksInMap (mVoxInserts);
-    promoteRacksInMap (mInstInserts);
-    promoteRacksInMap (mRustyInserts);
+    // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels
+    // replaces the promoteRacksInMap lambda + 8 per-kind calls.
+    for (int chId : mLiveInsertChannels)
+        if (auto* n = mInsertsByChannel[(size_t) chId].get())
+            promoteRack (&n->rack);
     promoteRack (getLayersBusRack());
     promoteRack (getBassBusRack());
     promoteRack (getDrumsBusRack());
@@ -2504,24 +2538,16 @@ void VibeGraph::promoteAllRackSlotSnapshots()
 }
 
 // D3: read the insert's choke group (0 = none).  Wait-free.
+// QA-InsertMaps (2026-05-24): flat-array lookup via computeChannelId.  The
+// 2nd selectInsertMap-style switch that used to live here died with
+// selectInsertMap itself.
 int VibeGraph::getInsertChokeGroup(InsertKind kind, int index) const
 {
-    const std::map<int, std::unique_ptr<InsertNode>>* m = nullptr;
-    switch (kind)
-    {
-        case InsertKind::Layer: m = &mLayerInserts; break;
-        case InsertKind::Bass:  m = &mBassInserts;  break;
-        case InsertKind::Drum:  m = &mDrumInserts;  break;
-        case InsertKind::Audio: m = &mAudioInserts; break;
-        case InsertKind::Aux:   m = &mAuxInserts;   break;
-        case InsertKind::Vox:   m = &mVoxInserts;   break;
-        case InsertKind::Inst:  m = &mInstInserts;  break;
-        case InsertKind::Rusty: m = &mRustyInserts; break;
-    }
-    if (m)
-        if (auto it = m->find(index); it != m->end())
-            if (auto* p = it->second->pChokeGroup)
-                return juce::jlimit(0, 16, (int) std::round(p->load(std::memory_order_relaxed)));
+    const int chId = computeChannelId(kind, index);
+    if (chId < 0 || chId >= kMaxStripChannels) return 0;
+    if (auto* node = mInsertsByChannel[(size_t) chId].get())
+        if (auto* p = node->pChokeGroup)
+            return juce::jlimit(0, 16, (int) std::round(p->load(std::memory_order_relaxed)));
     return 0;
 }
 
@@ -2564,9 +2590,12 @@ void VibeGraph::rebindBusApvts()
 
 bool VibeGraph::isAnyInsertSoloed() const noexcept
 {
-    for (const auto* m : { &mLayerInserts, &mBassInserts, &mDrumInserts, &mAudioInserts, &mAuxInserts, &mVoxInserts, &mInstInserts, &mRustyInserts })
-        for (const auto& [i, node] : *m)
-            if (node->isSoloed())
+    // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels with
+    // early-return on first soloed insert.  Replaces the pointer-init-list
+    // range-for over all 8 maps + nested for-each.
+    for (int chId : mLiveInsertChannels)
+        if (auto* n = mInsertsByChannel[(size_t) chId].get())
+            if (n->isSoloed())
                 return true;
     return false;
 }
@@ -2902,10 +2931,11 @@ void VibeGraph::rebuildRoutingFromApvts()
 
     using namespace MixerChannelIds;
     mActiveChannels.clear();
-    mActiveChannels.reserve(6 + mLayerInserts.size() + mBassInserts.size()
-                           + mDrumInserts.size() + mAudioInserts.size()
-                           + mAuxInserts.size() + mVoxInserts.size()
-                           + mInstInserts.size() + mRustyInserts.size());
+    // QA-InsertMaps (2026-05-24): reserve 13 buses (master + 12 buses) +
+    // live-insert count.  ChId already known on the node so the per-kind
+    // chId helpers (layerInsert / bassInsert / ...) aren't needed in the
+    // per-insert loop -- node->chId is the source of truth.
+    mActiveChannels.reserve(13 + mLiveInsertChannels.size());
 
     mActiveChannels.emplace_back(kMaster,    juce::String("mixer_master"));
     mActiveChannels.emplace_back(kLayersBus, juce::String("mixer_layers"));
@@ -2927,29 +2957,16 @@ void VibeGraph::rebuildRoutingFromApvts()
     // to an incomplete channel set.
     mActiveChannels.emplace_back(kRustyDrumsBus, juce::String("mixer_rustybus"));
 
-    for (auto& [idx, node] : mLayerInserts)
-        mActiveChannels.emplace_back(layerInsert(idx), node->apvtsPrefix);
-    for (auto& [idx, node] : mBassInserts)
-        mActiveChannels.emplace_back(bassInsert(idx), node->apvtsPrefix);
-    for (auto& [idx, node] : mDrumInserts)
-        mActiveChannels.emplace_back(drumInsert(idx), node->apvtsPrefix);
-    for (auto& [idx, node] : mAudioInserts)
-        mActiveChannels.emplace_back(audioInsert(idx), node->apvtsPrefix);
-    for (auto& [idx, node] : mAuxInserts)
-        mActiveChannels.emplace_back(auxStrip(idx), node->apvtsPrefix);
-    // R1 (2026-04-23): Vox + Inst inserts must be in active channels so the
-    // routing graph picks up their _sendN_to APVTS values when sends are
-    // placed on aux destinations.  Without this, send cables visually fail
-    // to attach because the edge never enters the graph.
-    for (auto& [idx, node] : mVoxInserts)
-        mActiveChannels.emplace_back(voxInsert(idx), node->apvtsPrefix);
-    for (auto& [idx, node] : mInstInserts)
-        mActiveChannels.emplace_back(instInsert(idx), node->apvtsPrefix);
-    // J-5 (2026-05-03): RustyDrums per-strip inserts.  Same pattern - must
-    // be in the active list so each strip's _sendTo (default kRustyDrumsBus)
-    // becomes a routing edge → CableOverlay draws green main-out cables.
-    for (auto& [idx, node] : mRustyInserts)
-        mActiveChannels.emplace_back(rustyInsert(idx), node->apvtsPrefix);
+    // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels
+    // replaces 8 per-kind emplace_back blocks (Layer / Bass / Drum / Audio /
+    // Aux / Vox / Inst / Rusty -- see commit history for each block's
+    // historical comment context).  All 8 InsertKinds register their
+    // _sendTo / _sendN_to APVTS values into the routing graph through this
+    // unified pass; Vox / Inst / Rusty inclusion is preserved (was added
+    // R1 + J-5 with their own comment blocks; consolidated here).
+    for (int chId : mLiveInsertChannels)
+        if (auto* n = mInsertsByChannel[(size_t) chId].get())
+            mActiveChannels.emplace_back(chId, n->apvtsPrefix);
 
     mRoutingGraph.rebuildFromApvts(*mApvts, mActiveChannels);
 
@@ -2965,14 +2982,31 @@ void VibeGraph::rebuildRoutingFromApvts()
 //  5F-4b B2: Aux insert processing
 std::vector<int> VibeGraph::getAuxIndices() const
 {
+    // QA-InsertMaps (2026-05-24): filter mLiveInsertChannels to Aux range
+    // (kAuxBase..kAuxBase+kMaxAuxStrips); return per-Aux idx (chId - base).
+    using namespace MixerChannelIds;
     std::vector<int> result;
-    result.reserve(mAuxInserts.size());
-    for (const auto& [idx, node] : mAuxInserts)
-        result.push_back(idx);
+    for (int chId : mLiveInsertChannels)
+        if (chId >= kAuxBase && chId < kAuxBase + kMaxAuxStrips)
+            result.push_back(chId - kAuxBase);
     return result;
 }
 
 void VibeGraph::clearAuxInserts()
 {
-    mAuxInserts.clear();
+    // QA-InsertMaps (2026-05-24): reset every Aux slot in the flat array +
+    // erase the corresponding chIds from the companion live-list.
+    using namespace MixerChannelIds;
+    for (auto it = mLiveInsertChannels.begin(); it != mLiveInsertChannels.end(); )
+    {
+        if (*it >= kAuxBase && *it < kAuxBase + kMaxAuxStrips)
+        {
+            mInsertsByChannel[(size_t) *it].reset();
+            it = mLiveInsertChannels.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
 }

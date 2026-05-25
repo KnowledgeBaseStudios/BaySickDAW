@@ -721,16 +721,22 @@ private:
     std::array<EffectRack, kMaxBassPages>  mBassPageRacks;
 
     // ── 5F-4a: Per-insert node storage (keyed by insert index) ───────────────
-    // Created lazily via ensureInsertNode(). Each kind has its own map for O(1)
-    // lookup and independent lifecycle. Defined in VibeGraph.cpp alongside
-    // InsertNode's full definition.
-    std::map<int, std::unique_ptr<InsertNode>> mLayerInserts;
-    std::map<int, std::unique_ptr<InsertNode>> mBassInserts;
-    std::map<int, std::unique_ptr<InsertNode>> mDrumInserts;
-    std::map<int, std::unique_ptr<InsertNode>> mAudioInserts;
-    std::map<int, std::unique_ptr<InsertNode>> mAuxInserts;   // 5F-4b B2
-    std::map<int, std::unique_ptr<InsertNode>> mVoxInserts;   // R1 (2026-04-23): live-vocal strips
-    std::map<int, std::unique_ptr<InsertNode>> mInstInserts;  // R1: live-instrument strips
+    // QA-InsertMaps (2026-05-24): flat-array storage by ChannelId.  Replaces
+    // the 8 per-kind `std::map<int, std::unique_ptr<InsertNode>>` tables
+    // (Layer / Bass / Drum / Audio / Aux / Vox / Inst / Rusty).  Lookups
+    // become single-pointer indirection -- the selectInsertMap kind-switch +
+    // red-black-tree walks die.  Sparsely populated (chId range 0..812
+    // currently used; ~187 nullptr slots at full capacity).  Companion
+    // mLiveInsertChannels list is iterated by every site that used to walk
+    // the per-kind maps (addInsertMap XML save, restoreInsert XML restore,
+    // walkInserts, promoteRacksInMap, isAnyInsertSoloed,
+    // rebuildRoutingFromApvts, prepare / reset sweeps).  ChId computed via
+    // `computeChannelId(kind, index)` helper in VibeGraph.cpp; cached on
+    // `InsertNode::chId` at construction so the audio-thread `processInsert`
+    // path reads it directly.  See §5 QA-InsertMaps + §9 thirty-third Forks.
+    static constexpr int kMaxStripChannels = 1000;
+    std::array<std::unique_ptr<InsertNode>, kMaxStripChannels> mInsertsByChannel;
+    std::vector<int>                                            mLiveInsertChannels;
 
     // R1: new bus nodes for live-input strip routing.  Same shape as existing
     // Effects/Clips bus nodes - Fx rack + pre/post EQ + fader + meter.  Vox
@@ -747,7 +753,8 @@ private:
     // BaySickRustyDrums instance exists - bus sums silence cheaply until a
     // kit's 13 strips are registered via ensureRustyInsertNode.
     std::unique_ptr<InstrChannelNode> mRustyDrumsBusNode;
-    std::map<int, std::unique_ptr<InsertNode>> mRustyInserts;
+    // mRustyInserts std::map removed by QA-InsertMaps 2026-05-24 (flattened into
+    // mInsertsByChannel above; chId range 800..812 for Rusty kit strips).
 
     // Deferred rack state: set by loadRackStates() if topology not yet built;
     // applied at the end of buildFixedTopology().

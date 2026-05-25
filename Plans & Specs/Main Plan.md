@@ -4542,3 +4542,41 @@ Additionally: `findRegion`'s `std::vector<int> candidates` heap allocation remov
 - **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (per-batch plan file — drafted when QA-EngineApvts opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (running notes seed — created when QA-EngineApvts opens).
 
 **Verification:** n/a — routing / sequencing entry, no source change.  QA-EngineApvts' own per-batch verify ladder (locked in this §9 entry's Scope bullets + carried into the eventual per-batch plan file when QA-EngineApvts opens): per engine — change every APVTS-bound control (knob, button, combo, slider) + verify the new value takes effect on the next block (the dirty flag fired); leave every APVTS-bound control alone + verify CPU drops on idle (the per-block `updateFromApvts` path is skipped); both MT (production default) and 1-worker serial-diagnostic mode show identical behavior; `grep` confirms 4 new `mApvtsDirty` members + 4 new `valueTreePropertyChanged` overrides + 4 new `addListener(this)` call sites + 4 new `exchange(false, ...)` call sites at processBlock top.
+
+### 2026-05-24 — Wire up `VibeGraph::reset()` to transport Stop (fix "infinite-tail" bug) — surfaced as Finding C in QA-InsertMaps Task 2 Sub-G sanity check
+
+**Title:** Wire up `VibeGraph::reset()` to Transport Stop (Fix "Infinite Tail" Bug)
+
+**Context:** Finding C in the QA-InsertMaps batch revealed that `VibeGraph::reset()` is dead code (never called).
+
+**Impact:** Because the reset is never called, hitting 'Stop' on the DAW transport stops new audio but fails to flush the internal memory buffers of time-based plugins (Reverbs, Delays). The audio engine continues feeding them silence, resulting in infinite, decaying DSP tails that never properly clear.
+
+**Action:** In a dedicated future batch, investigate wiring the transport 'Stop' hook (and potentially project load/unload) directly to `VibeGraph::reset()` to ensure all DSP buffers and envelopes are cleanly flushed when playback halts.
+
+**Decision (Jeff, 2026-05-24):** Sub-G resolved as Option 2 + §9 Forks routing.  QA-InsertMaps Task 2 includes all 8 InsertKinds in the now-symmetric `reset()` loop body (Sub-G Option 2) so the dead code is cleanly structured + symmetric for whenever the future batch wires it up.  Do NOT delete the `VibeGraph::reset()` function itself in QA-InsertMaps — scope-creep avoidance per Jeff's instruction ("we want to avoid scope creep in this batch").  Investigation of wiring vs deletion routed to this future batch.
+
+**Scope of the future batch (TBD when opened):**
+- Identify the right hook points: transport 'Stop' callback in `StandalonePlayHead` / `GlobalTransportBar` / `StandaloneApp`; project load / unload (`closeAllDynamicTabs` / `ProjectManager::openProject`); JUCE's `prepareToPlay` / `releaseResources` lifecycle.
+- Decide whether `VibeGraph::reset()` is the right unified entry point OR whether per-component reset (BusNodes + InsertNodes + EffectRack + EQ + RetirementQueue drain) needs a different orchestration.
+- Verify audible behavior: reverb / delay / chorus tails clear cleanly on transport Stop, no clicks / pops on subsequent Play, no project-load regression (closeAllDynamicTabs barrier + ProjectManager::openProject's playhead-stop callback continue to work).
+- Consider whether to delete `VibeGraph::reset()` if no wiring point is appropriate (orthogonal end-state).
+
+**Sequencing (Jeff, 2026-05-24):** TBD — slot/placement surfaced to Jeff when the future batch opens per `feedback_slot_placement_is_spec_call.md`.
+
+**Risk (future batch):** medium.  Transport callback ordering matters (must run AFTER all in-flight processBlock calls complete to avoid mid-block reset).  Reset behavior interacts with the QA-AudioMeters G1 peak-publish chain + the QA-Eg bus G1 meters (resetting effect tails should NOT zero the meter atomics — those are UI-snapshot state, not DSP state).
+
+**Effort (future batch):** small-medium (~2-4 hours; instrumentation + verify cycle bulk; the actual wiring change is small).
+
+**Carry-forward contradictions:** none architectural.  Carry-Forward §1 (Render Engine Primitives) does not mention `VibeGraph::reset()` as a primitive (because it's dead — never invoked).  This entry records the dead-code state + the future investigation plan.
+
+**Inline back-refs:**
+- §9 this entry (thirty-sixth Forks entry).
+- QA-InsertMaps batch — Task 2 plan-finalize Finding C discovery; Sub-G Option 2 + §9 Forks routing resolution.
+- `Plans & Specs/Running Notes/zany-wandering-russell.md` — Task 2 plan-finalize entry capturing the Finding C grep + sanity-check decision.
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §9 this entry.
+- `Plans & Specs/Running Notes/zany-wandering-russell.md` — Task 2 entry references this routing.
+- **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** future-batch plan file + running notes (created when the future batch opens).
+
+**Verification:** n/a — routing / sequencing entry, no source change.  Future batch's own per-batch verify ladder (locked when the future batch opens): on a session with active reverb / delay / chorus on any strip — hit Play, build up audible tail, hit Stop, verify the tail clears within one block (~6 ms) instead of decaying naturally for seconds; subsequent Play starts cleanly with no carry-over click; project load mid-playback continues to work (closeAllDynamicTabs barrier + STATE-04 playhead-stop callback both still fire correctly); MT (production default) + 1-worker serial-diagnostic mode show identical behavior.
