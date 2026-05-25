@@ -1200,7 +1200,7 @@ needed to find what you should pull up to review the work.
 
 #### **QA-VoicePool: Pre-allocated VibePlayer Voice Pool / Object Pool (perf-audit H3)** *(NEW — inserted 2026-05-24)*
 
-**Plan file:** `<silly-name>.md (when started)`
+**Plan file:** `Plans & Specs/Batch Plans/tipsy-pulsing-octopus.md`
 - Items: eliminate audio-thread heap allocation on every note-on by moving `VibeVoice::startNote` (`Source/VibePlayer/VibePlayerDSP.cpp:581-583 + :607`) off the `new MemoryAudioSource` + `new ResamplingAudioSource` per-note-on pattern onto a pre-allocated fixed-size voice pool with lock-free atomic occupancy flags + voice stealing.  Also remove the `std::vector<int> candidates` heap allocation in `findRegion` (`VibePlayerDSP.cpp:573`).  Origin: surfaced 2026-05-24 by `/perf-audit` at QA-Eg close as H3 (HIGH-PRIORITY); confirmed by source-trace.  Audio-thread allocation fires on every drum hit / key press / audition.  See §9 thirty-fourth Forks entry.
 - Scope (Jeff's verbatim blueprint, locked 2026-05-24):
 

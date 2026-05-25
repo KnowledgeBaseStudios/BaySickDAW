@@ -59,6 +59,10 @@ My Samples/
 # "My Presets" subfolders contain user-saved patches that shouldn't ship in the repo.
 Presets/**/My Presets/
 
+# User-created project templates — personal content, not stock.  Mirrors the
+# Presets/.../My Presets/ rule for the Templates/ folder.
+Templates/My Templates/
+
 # Local-only planning notes from earlier in the project (when it was still
 # called Vibesynth). Personal scratch, not part of the public source.
 SaturdayNightMasacre.md
