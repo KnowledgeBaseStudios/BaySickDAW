@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
+#include <optional>
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  QA-InsertMaps (2026-05-24): InsertKind + index -> MixerChannelIds chId helper.
@@ -46,18 +47,13 @@ namespace {
 //    • writes a post-processing peak dB to an atomic for the UI meter
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ── Shared solo/mute gain helper ──────────────────────────────────────────────
-static float calcBusGain(float gain, bool muted, bool soloed, bool anySolo) noexcept
-{
-    if (muted || (anySolo && !soloed)) return 0.f;
-    return gain;
-}
-
-static float bufferPeakDb(const juce::AudioBuffer<float>& buf) noexcept
-{
-    float peak = buf.getMagnitude(0, buf.getNumSamples());
-    return juce::Decibels::gainToDecibels(peak, -60.f);
-}
+// QA-InsertMaps Task 5 close (2026-05-25): deleted dead static helpers
+// `calcBusGain` + `bufferPeakDb` (C4505 cleanup).  Both orphaned by earlier
+// refactors -- `calcBusGain` by QA-Ea Part A (unified bus-solo via
+// `anyBusSoloed()` cached-atomic helper replaced the muted/soloed/anySolo
+// per-block-arg shape) + `bufferPeakDb` (mono) by QA-Eg / QA-AudioMeters
+// G1 publish chain (every publish site now uses `bufferPeakDbStereo` below
+// + `publishPeakReading` with the L/R-aware peak ring).
 
 // 2026-04-30: per-channel peak helper for stereo L/R split meters.  Returns
 // {peakDbL, peakDbR}.  Mono buffers fan to L=R; >2-channel buffers only
@@ -1592,7 +1588,10 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     // + in-group solo formula.
     if (mApvts == nullptr)        return;
     if (buf.getNumChannels() < 2) return;
-    const int n = buf.getNumSamples();
+    // QA-InsertMaps Task 5 close (2026-05-25): pre-existing unused `const int
+    // n = buf.getNumSamples();` removed (C4189 cleanup; processBus uses buf
+    // directly via preEq/rack/postEq/applyXxxPolarityWidth/applyStereoPan/
+    // publishPeakReading and never needed n).
 
     EQ8MsDSP*  preEq  = nullptr;
     EffectRack* rack   = nullptr;
@@ -2160,7 +2159,7 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
     // calls (the original walked parent.getNumChildren() 8 times, once per
     // kind; this version walks it once and dispatches on each child's kind
     // label).  XML tag labels must match those produced by addInsertMap above.
-    auto kindFromString = [] (const juce::String& s) -> InsertKind
+    auto kindFromString = [] (const juce::String& s) -> std::optional<InsertKind>
     {
         if (s == "Layer") return InsertKind::Layer;
         if (s == "Bass")  return InsertKind::Bass;
@@ -2170,7 +2169,13 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
         if (s == "Vox")   return InsertKind::Vox;
         if (s == "Inst")  return InsertKind::Inst;
         if (s == "Rusty") return InsertKind::Rusty;   // J-9 (2026-05-05)
-        return InsertKind::Layer;   // defensive default; unrecognised labels skip below
+        // QA-InsertMaps Task 5 close (2026-05-25): unknown kind label -> nullopt
+        // -> skipped at call site.  Restores pre-batch drop-unknown behavior
+        // (pre-batch's 8 per-kind iterations dropped unrecognised labels by
+        // never matching them); prevents Layer[idx] data corruption when a
+        // future version adds a 9th InsertKind that older versions don't
+        // recognise on project load.
+        return std::nullopt;
     };
     for (int i = 0; i < parent.getNumChildren(); ++i)
     {
@@ -2180,7 +2185,10 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
         const int idx = (int) child.getProperty ("index", -1);
         if (idx < 0) continue;
 
-        const int chId = computeChannelId(kindFromString(kindStr), idx);
+        const auto kind = kindFromString(kindStr);
+        if (! kind) continue;   // unknown kind label; drop (pre-batch parity)
+
+        const int chId = computeChannelId(*kind, idx);
         if (chId < 0 || chId >= kMaxStripChannels) continue;
         auto* node = mInsertsByChannel[(size_t) chId].get();
         if (node == nullptr) continue;
@@ -2931,11 +2939,14 @@ void VibeGraph::rebuildRoutingFromApvts()
 
     using namespace MixerChannelIds;
     mActiveChannels.clear();
-    // QA-InsertMaps (2026-05-24): reserve 13 buses (master + 12 buses) +
-    // live-insert count.  ChId already known on the node so the per-kind
-    // chId helpers (layerInsert / bassInsert / ...) aren't needed in the
-    // per-insert loop -- node->chId is the source of truth.
-    mActiveChannels.reserve(13 + mLiveInsertChannels.size());
+    // QA-InsertMaps (2026-05-24): reserve 12 buses (Master + 11 other buses:
+    // Layers / Bass / Drums / Fx / Clips / Vox / Inst / Vox2 / Inst2 / Inst3 /
+    // RustyDrums) + live-insert count.  ChId already known on the node so the
+    // per-kind chId helpers (layerInsert / bassInsert / ...) aren't needed in
+    // the per-insert loop -- node->chId is the source of truth.  (Task 5
+    // close cleanup: comment + reserve hint previously said "13 buses (master
+    // + 12 buses)" which double-counted Master.)
+    mActiveChannels.reserve(12 + mLiveInsertChannels.size());
 
     mActiveChannels.emplace_back(kMaster,    juce::String("mixer_master"));
     mActiveChannels.emplace_back(kLayersBus, juce::String("mixer_layers"));

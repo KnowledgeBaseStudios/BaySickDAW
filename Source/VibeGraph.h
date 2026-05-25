@@ -57,7 +57,7 @@ namespace MixerChannelIds
     constexpr int kAudioBase = 400;  // Audio insert 0..49 → 400..449
     constexpr int kDrumBase  = 500;  // Drum insert 0..15 → 500..515
     constexpr int kVoxBase   = 600;  // R1: Vox insert 0..5 → 600..605
-    constexpr int kInstBase  = 700;  // R1: Inst insert 0..5 → 700..705
+    constexpr int kInstBase  = 700;  // R1: Inst insert 0..19 → 700..719 (kMaxInstStrips bumped 6→10 in G-4 2026-04-28, 10→20 in G-6 2026-04-29)
     constexpr int kRustyBase = 800;  // J-4: BaySickRustyDrums insert 0..12 → 800..812
 
     constexpr int kMaxVoxStrips   = 6;   // R1
