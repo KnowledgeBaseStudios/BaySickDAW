@@ -517,3 +517,49 @@ Task 5 — stress-file verify (NO commit per L8(b) split + QA-InsertMaps Task 3 
 3. NEW §5 QA-SfzGroup batch entry — scope + slot.
 4. §5 STATUS banner update for Task 3's Correction 1 / 2 / 3 deviations from the literal L1-L10 spec calls (per Task 3 Section 4 lock).
 5. §6 sequencing arrow update to insert QA-SfzGroup between QA-VoicePool and QA-EngineApvts.
+
+---
+
+## 2026-05-25 — Task 6 — Cleanup + grep sweep (no source changes; all sweep targets clean)
+
+Cleanup + grep sweep pass per the plan's task-split discipline. Zero source diffs in this task; build status carries forward unchanged from Task 5's last clean Release + Debug build. Task 6's deliverable is the formal sweep + this running-notes entry — sweep results captured for the close-pass Implemented Work Log compilation + the §5 STATUS banner reference at close. Six targeted greps run across `Source/` (or `Source/VibePlayer/` where the scope is engine-local); all six returned ZERO hits. The audio-thread per-note heap-alloc surface for VibePlayer is confirmed fully closed by the grep evidence + the structural Tasks 2-4 commits are confirmed fully internally consistent (no orphaned references to the killed members / classes / patterns lingering anywhere in the codebase).
+
+### Section 1 — Grep sweep results (all six clean)
+
+Six sweeps run; ZERO hits on all six. Each grep maps to a specific structural deliverable across Tasks 2-4 and confirms the no-stale-references invariant at close.
+
+- **Sweep 1: pre-batch unique_ptr source members** — `grep -rn "mResampSrc\|mMemSrc" Source/` returns ZERO matches. The pre-batch VibeVoice unique_ptr members (`std::unique_ptr<juce::PositionableAudioSource> mMemSrc;` + `std::unique_ptr<juce::ResamplingAudioSource> mResampSrc;`) are fully gone, replaced by Task 2's fat-voice members (`mForwardSrc` / `mReverseSrc` / `mForwardResamp` / `mReverseResamp` / `mActiveSrc` / `mActiveResamp`). No stale documentation references or carry-over comments anywhere in `Source/`.
+
+- **Sweep 2: hot-path `dynamic_cast<VibeVoice*>`** — `grep -rn "dynamic_cast<VibeVoice" Source/` returns ZERO matches. All hot-path voice scans use the `mVoices[]` direct pointer cache per Task 3's Sub-A=(a) realization (cache populated alongside each `mSynth.addVoice(v)` in the VibeSynth ctor; read on the audio thread at `forEachVoice` template + same-pitch preemption loop + voiceCap-stealing branch + look-ahead noteOff pre-scan). RTTI cost stripped from the entire audio thread per Sub-A's hot-path optimization intent.
+
+- **Sweep 3: pre-batch `findRegion` vector allocation** — `grep -rn "std::vector<int> candidates\|candidates.push_back\|candidates.empty\|candidates.reserve" Source/VibePlayer/` returns ZERO matches. The pre-batch `std::vector<int> candidates; candidates.reserve(8);` + the 3 call-site uses (`candidates.push_back` / `candidates.empty()` / range-fors) are fully gone, replaced by Task 4's L5=(a) `std::array<int, 32>` stack-alloc + `numCandidates` count + bounded-write push + index-counted iteration. Heap-alloc surface 4 of 4 closed by grep evidence.
+
+- **Sweep 4: per-note-on `make_unique` sites** — `grep -rn "make_unique<juce::MemoryAudioSource>\|make_unique<juce::ResamplingAudioSource>\|make_unique<ReversedMemoryAudioSource>" Source/` returns ZERO matches. The 3 pre-batch per-note-on heap-alloc sites at [VibePlayerDSP.cpp:581 / :583 / :607](../../Source/VibePlayer/VibePlayerDSP.cpp:581) are fully gone, replaced by Task 2's fat-voice re-pointing pattern (`setBuffer` + `flushBuffers` + `setResamplingRatio` on the active resampler). Heap-alloc surface 1-3 of 4 closed by grep evidence.
+
+- **Sweep 5: pre-Task-3 `kMaxVoices` literal** — `grep -rn "kMaxVoices\s*=\s*16" Source/VibePlayer/` returns ZERO matches. Constant was raised 16 -> 24 in Task 3's Correction 1 over-provisioning (8 reserve voices for stolen-voice ADSR-quick-release fade-out overflow); the old `16` literal value should not survive anywhere as a hardcoded reference. The user-facing `kLogicalCap = 16` is the right post-batch sentinel for user-visible polyphony defaulting; existing `voiceCap` APVTS range (1..16) unchanged.
+
+- **Sweep 6: diagnostic instrumentation residue** — `grep -rn "DBG(\|juce::Logger::writeToLog\|temp_jassert\|temporary.*jassert" Source/VibePlayer/` returns ZERO matches. No `DBG` / `juce::Logger::writeToLog` / temp `jassert` / debug `juce::AlertWindow` added during any of Tasks 0-4 — confirms the running-tally of "nil for Task N" in every prior Rule 4 Diagnostic Instrumentation Catalog section across all tasks. This sweep is the formal "nothing accumulated" close-out per the Rule 4 expectation that the catalog is walked + strip list surfaced before close; the catalog table at the top of this file remains empty as locked, no strip pass needed.
+
+### Section 2 — Comments / breadcrumbs intentionally preserved (KEEP decisions)
+
+Audit pass on every in-source comment / tag added during Tasks 0-4 to decide KEEP-or-STRIP at close. All preserved verbatim — the in-source provenance markers pair with the §5 entry + the running notes for full traceability and cost nothing in line count.
+
+- **`Source/VibePlayer/VibePlayerDSP.cpp:466-469`** — the four-line `"QA-VoicePool Task 2 (2026-05-25): ReversedMemoryAudioSource + new sibling VibeForwardMemoryAudioSource moved to VibePlayerDSP.h..."` comment sits in dead space between `findRegion` and `VibeVoice` ctor. The breadcrumb is the intentional Task 2 navigational pointer so external readers searching `ReversedMemoryAudioSource` in the cpp see the rename history without bouncing to the header. **Decision: KEEP.** The breadcrumb is short + tag-prefixed + lives between functions where it costs nothing. Removing it would leave grep'ers looking for the class definition in the cpp confused with no signal that the class moved.
+
+- **All `// QA-VoicePool Task N: ...` tag prefixes on the new headers + impl blocks** — `// QA-VoicePool Task 2: ...` on the new fat-voice members + resampler ctor-init in the VibeVoice header; `// QA-VoicePool Task 3: ...` on the new atomic / flag / params members + `findStealCandidate` + `initiateSteal` + look-ahead pre-scan body + the over-provisioning constants in both header and cpp; `// QA-VoicePool Task 4 (L5=(a)): ...` on the `findRegion` constexpr cap + array declaration. **Decision: KEEP all verbatim.** These are the in-source provenance markers for the post-batch reader; they pair with §5 + the running notes for full traceability and follow the same pattern as the QA-InsertMaps / QA-AudioMeters / QA-Ea / QA-Eg in-tree precedent.
+
+### Section 3 — Rule 4 Diagnostic Instrumentation Catalog
+
+Nil for Task 6 (no source touched; no instrumentation to strip). Sweep 6 above is the formal walk + strip-list surface per the Rule 4 close expectation — the running-tally across Tasks 0-4 already confirmed zero instrumentation accumulated; the catalog table at the top of this file remains empty as locked, no strip pass needed. The Rule 4 close discipline is satisfied with the grep evidence.
+
+### Section 4 — Next action
+
+Task 7 — close sequence. Five docs deliverables per Task 4 Section 5:
+
+1. §9 Forks entry for the BaySickSynth `mOsc.reset()` finding routed to QA-EngineApvts (per Task 2 Section 4 lock).
+2. §9 Forks entry for the SFZ `<group>` parser finding routed to NEW QA-SfzGroup (per Task 4 Section 3 routing).
+3. NEW §5 QA-SfzGroup batch entry — scope + slot.
+4. §5 QA-VoicePool STATUS banner update for Task 3's Correction 1 / 2 / 3 deviations from the literal L1-L10 spec calls (per Task 3 Section 4 lock).
+5. §6 sequencing arrow update to insert QA-SfzGroup between QA-VoicePool and QA-EngineApvts.
+
+Plus the standard close-pass: `/draft-doc batch-close` -> Implemented Work Log append + `/review-batch QA-VoicePool` -> address any BLOCKER / NEEDS-FIX (NITs per `feedback_qa_batches_fix_bugs_dont_defer.md` -> fix-or-reframe canon) + `/draft-commit` -> close commit landing all five docs touches + the running-notes close-pass section.
