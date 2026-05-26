@@ -141,3 +141,121 @@ Two heredoc-based commit attempts in this same batch (Task 0 + Task 1) both hit 
 5. [.claude/agents/commit-drafter.md](../../.claude/agents/commit-drafter.md) (NEW project-specific override) — full self-contained agent file derived from the global with BaySickDAW-specific additions: title line explicitly references CLAUDE.md "## Git Commit Mechanics", in-tree commit-hash exemplars (`3587ade`, `e9fe545`, `68050a8`, `eb718bf`, `cb40412`, `fbdc0e0`, `a1211cd`) for the drafter to match style against, brand-casing rule (`BaySickPlayer` not `VibePlayer` per `feedback_match_jeff_text_casing.md`), ASCII-only rule, and the `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>` trailer locked. Project file takes precedence over the global when both exist (Claude Code agent resolution: project-scope overrides global-scope same-named agents).
 
 Mirrored across docs + agents so future sessions see the rule no matter where they enter: every batch open reads CLAUDE.md + Main Plan §0 + the boilerplate; every `/draft-commit` dispatch loads the project-scope agent file; any future project loads the global agent file. Per Jeff's directive 2026-05-25: "update the rules on the main plan so that you are aware every time what needs to be done" + "1 and 2 [project + global agent updates] as this will likely be the same problem once I start working more on the game [CotBB]". Convention spans the BaySickDAW + CotBB toolchain.
+
+---
+
+## 2026-05-25 — Task 2 — Fat-voice structural refactor (L4(a) + Sub-B(a) + Sub-C(c) wiring)
+
+Structural one-shot per L8(b) split's first half. Two source files modified (`Source/VibePlayer/VibePlayerDSP.h` + `.cpp`); the 3 per-note `make_unique` sites at the pre-batch [:581 / :583 / :607](../../Source/VibePlayer/VibePlayerDSP.cpp:581) and their `mMemSrc` / `mResampSrc` unique_ptr members are fully gone. VibeVoice now owns forward + reverse `juce::PositionableAudioSource` subclass instances + their dedicated `juce::ResamplingAudioSource` permanently as members; `startNote` re-points an active-source / active-resampler pointer pair instead of allocating. Lock-free occupancy flag (Sub-A's `mIsActive` atomic), L7(b) hybrid stealing, and L6 64-sample fade-out are NOT in Task 2 (Task 3 per the split). L5(a) `std::array<int, 32>` `findRegion` swap is NOT in Task 2 (Task 4 per the plan). Both Release + Debug build clean. Jeff-verified PASS on all 6 BaySickPlayer scenarios after one misdirected first-attempt BaySickSynth verify surfaced a separate pre-existing bug (routed to QA-EngineApvts per Rule 3 — see Section 4).
+
+### Section 1 — Sub-spec calls resolved at Task 2 plan-finalize
+
+All three Task 1-surfaced sub-spec calls locked by Jeff 2026-05-25 immediately before Task 2 source work began. Plan file's Sub-A / Sub-B / Sub-C sections will be updated at close to reflect the resolutions; recording verbatim here so Task 3 (Sub-A wiring) doesn't re-litigate:
+
+- **Sub-A = (a)** Add explicit `std::atomic<bool> mIsActive { false };` per voice (supplemental to JUCE's `SynthesiserVoice::isVoiceActive()`, not a replacement). Jeff: "We absolutely want to avoid dynamic_cast loops on the hot audio path. Scanning the atomic flags will be vastly faster for voice stealing." **NOTE: Sub-A is Task 3 implementation territory** — the flag is not added in Task 2 (would be dead state without the stealing-loop reader); locked here so Task 3 has the resolution in hand.
+
+- **Sub-B = (a)** Dual permanent `juce::ResamplingAudioSource` (one per direction). Jeff: "We are happy to trade 240 KB of RAM to avoid adding extra virtual dispatch/abstraction layers (VibeSourceFork) to the audio thread." VibeVoice owns `VibeForwardMemoryAudioSource mForwardSrc` + `ReversedMemoryAudioSource mReverseSrc` + `mForwardResamp` ctor-bound to `&mForwardSrc` + `mReverseResamp` ctor-bound to `&mReverseSrc` + an `mActiveSrc` / `mActiveResamp` per-note pointer pair that startNote swings to the chosen direction. Sub-B(b)'s `VibeSourceFork` wrapper path was eliminated on RAM-vs-virtual-dispatch tradeoff: extra ~120 KB per engine instance is a clean exchange for one fewer virtual-dispatch layer in `getNextAudioBlock` on the audio thread, and the dual-resampler shape leaves the door open to future per-direction crossfade should the engine ever want it (Section 3 of Task 1's pivot writeup flagged this future-proof advantage).
+
+- **Sub-C = (c)** No dummy buffer. Both custom source classes implement `if (mBuf == nullptr) { info.clearActiveBufferRegion(); return; }` null-guard in `getNextAudioBlock`. Jeff: "If there is no buffer, they should just clearActiveBufferRegion() and return." Pairs cleanly with Sub-B(a) — both `VibeForwardMemoryAudioSource` and `ReversedMemoryAudioSource` get the same null-guard pattern so pre-`setBuffer` construction-time `getNextAudioBlock` calls (if the resampler's `prepareToPlay` does any pre-fill from its internal headroom buffer) are silent rather than UB on a null pointer dereference.
+
+### Section 2 — Task 2 source edits landed (fat-voice structural one-shot)
+
+Two source files modified per Sub-B(a) + Sub-C(c) + L4(a) (fat-voice ownership). Diff total: 2 files changed, +202 insertions, -80 deletions (net +122 lines, mostly the new `VibeForwardMemoryAudioSource` class + the moved `ReversedMemoryAudioSource` in the header).
+
+#### `Source/VibePlayer/VibePlayerDSP.h` (+165 lines, +5 new VibeVoice members, 2 source classes hoisted to header for direct membership)
+
+- **NEW** `class VibeForwardMemoryAudioSource : public juce::PositionableAudioSource` (~70 lines, file-scope in header). Mirrors `juce::MemoryAudioSource` semantics (delegates to a `juce::AudioBuffer<float>` for read; tracks `mPos` for `setNextReadPosition` / `getNextReadPosition`; reports `getTotalLength` from the buffer's sample count). Adds the load-bearing `void setBuffer(const juce::AudioBuffer<float>& buf) noexcept` member that re-points the internal buffer pointer + resets `mPos = 0`. Implements the Sub-C(c) null-guard short-circuit at the top of `getNextAudioBlock`: `if (mBuf == nullptr) { info.clearActiveBufferRegion(); return; }`. Hoisted to header (file-scope class, not anon-namespace) because it's a direct VibeVoice member and anon-namespace classes can't be members of a header-declared class.
+
+- **MOVED** `class ReversedMemoryAudioSource` from the pre-batch `Source/VibePlayer/VibePlayerDSP.cpp` anon-namespace at `:461-513` to header file-scope. Extended with three additions: a `void setBuffer(const juce::AudioBuffer<float>& buf) noexcept` member (mirrors `VibeForwardMemoryAudioSource::setBuffer`); a default constructor (the existing const-reference-taking ctor required a buffer at construction time, which doesn't fit fat-voice ownership where the voice is constructed before any sample is loaded); the same Sub-C(c) null-guard short-circuit in `getNextAudioBlock`. Original const-ref constructor preserved against future need (currently unused now that startNote uses `setBuffer`); kept rather than deleted to avoid forcing a churn-pass on any future caller that might construct a one-shot reversed source.
+
+- **REMOVED** VibeVoice members: `std::unique_ptr<juce::PositionableAudioSource> mMemSrc;` + `std::unique_ptr<juce::ResamplingAudioSource> mResampSrc;` (the OLD per-note heap-allocated pair killed by this batch's whole point).
+
+- **ADDED** VibeVoice members per Sub-B(a):
+  - `VibeForwardMemoryAudioSource mForwardSrc;`
+  - `ReversedMemoryAudioSource mReverseSrc;`
+  - `juce::ResamplingAudioSource mForwardResamp { &mForwardSrc, false, 2 };`
+  - `juce::ResamplingAudioSource mReverseResamp { &mReverseSrc, false, 2 };`
+  - `juce::PositionableAudioSource* mActiveSrc { nullptr };`
+  - `juce::ResamplingAudioSource* mActiveResamp { nullptr };`
+
+  **Declaration order matters** — `mForwardSrc` / `mReverseSrc` are declared BEFORE their respective resamplers so the resamplers' ctor-bound input pointers (`&mForwardSrc` / `&mReverseSrc`) reference fully-constructed objects. C++ member initialization order is declaration order within the same access section (C++ standard), independent of init-list order; got this right on the first pass by laying the sources out above the resamplers in the header rather than relying on init-list ordering.
+
+#### `Source/VibePlayer/VibePlayerDSP.cpp` (-117 / +85 net, 5 surgical edits)
+
+- **DELETED** the anon-namespace `ReversedMemoryAudioSource` class at the pre-batch `:461-513` (moved to header per above). The cpp now has a one-paragraph "moved to header for direct VibeVoice membership per QA-VoicePool Sub-B(a)" pointer comment at the old location so external readers searching the cpp see the rename history without bouncing to the header.
+
+- `VibeVoice::prepareForPlayback(int blockSize)` at `:525-529` — added `mForwardResamp.prepareToPlay(blockSize, mSampleRate); mReverseResamp.prepareToPlay(blockSize, mSampleRate);`. This is the Section 2 / Task 1 inventory hoist: the resampler's `prepareToPlay` allocates `AudioBuffer<float> buffer` (sized to `samplesPerBlockExpected * ratio` headroom) + three `HeapBlock` allocations for filter state + dest/src buffer pointer tables; running it per-note as the pre-batch `:609` effectively did would re-allocate every note-on. Hoisting to the message-thread `prepareForPlayback` setup point makes every per-note resampler reuse those allocations.
+
+- `VibeVoice::releaseResources()` at `:534-540` — stripped per-note source resets; now only clears `mActiveSrc = nullptr; mActiveResamp = nullptr; mSampleBuffer.reset(); mIsPlaying = false;`. Fat sources stay allocated permanently (the whole point of fat-voice ownership); per-note state is the active-pointer pair + the `shared_ptr<AudioBuffer<float>>` to the region's audio buffer that gets reset on note-off. No source object construction or destruction on the audio thread.
+
+- `VibeVoice::startNote` at `:566-645` — source-block rewrite. Replaced the 3 `make_unique` calls at the pre-batch `:581-583` + `:607` with the fat-voice re-pointing pattern:
+
+  ```cpp
+  if (mReverse)
+  {
+      mReverseSrc.setBuffer(*mSampleBuffer);
+      mActiveSrc = &mReverseSrc;
+      mActiveResamp = &mReverseResamp;
+  }
+  else
+  {
+      mForwardSrc.setBuffer(*mSampleBuffer);
+      mActiveSrc = &mForwardSrc;
+      mActiveResamp = &mForwardResamp;
+  }
+  ```
+
+  Sample-start positioning now uses `mActiveSrc->setNextReadPosition(startPos)` (replaces the pre-batch source-ctor-time positioning). Per-note resampler reset uses `mActiveResamp->flushBuffers(); mActiveResamp->setResamplingRatio(resampRatio);` (replaces the pre-batch per-note resampler construction). NO per-note `prepareToPlay` call — hoisted to `prepareForPlayback` per the previous bullet.
+
+- `VibeVoice::renderNextBlock` at `:662+` — `!mResampSrc` guard replaced with `mActiveResamp == nullptr` guard (active-pointer pair is the new "no live source" sentinel); `mResampSrc->getNextAudioBlock(info)` replaced with `mActiveResamp->getNextAudioBlock(info)`. No other body changes — filter / ADSR / treble-shelf / stereo-width are unchanged.
+
+#### Grep cleanliness post-edits
+
+- `grep -rn "mResampSrc|mMemSrc" Source/VibePlayer/` returns ZERO matches. The unique_ptr members + every per-note use site are fully gone.
+- `grep -rn "make_unique<juce::MemoryAudioSource>|make_unique<juce::ResamplingAudioSource>|make_unique<ReversedMemoryAudioSource>" Source/` returns ZERO matches. The 3 per-note heap-alloc sites are fully gone.
+- L5(a) `findRegion` `std::vector<int> candidates` swap is **NOT** done in Task 2 — that's Task 4 (kept separate per the plan's task split so the structural fat-voice work is a clean independently-reviewable commit before the orthogonal `findRegion` tweak lands).
+
+#### Build status
+
+Both Release + Debug build clean: `RELEASE_EXIT_CODE=0`, `DEBUG_EXIT_CODE=0`. Only pre-existing warnings (C4100 unreferenced formal parameter / C4996 deprecation / C4324 structure-padded / etc.) survive — no new warnings introduced by Task 2.
+
+### Section 3 — Verify PASS (Jeff, 2026-05-25)
+
+**First verify attempt was on BaySickSynth** (out of Task 2 scope; QA-VoicePool is BaySickPlayer-only per L1=(a) + the §5 entry's scope). Chord variation observed there + recorded master at `Projects/Fresh Test/Samples/Fresh Test - Master - 2026-05-25 15-03-07.wav` shows waveform varies between consecutive chord hits. Initially handwaved as "pre-existing behavior" — Jeff overruled correctly. Real bug, not Task 2's. Diagnosis + routing in Section 4. Process lesson: `feedback_check_code_before_calling_it_expected.md` applies — should have asked which engine BEFORE handwaving.
+
+**Re-test on BaySickPlayer (Task 2 surface): all 6 scenarios PASS:**
+
+- **(1)** 3-6 note chord — all notes sound, no dropouts, no clicks.
+- **(2)** Rapid individual notes (drum-roll pace) — each triggers cleanly, no allocation hiccups.
+- **(3)** Reverse ON — `mReverseSrc.setBuffer` + `mActiveResamp = &mReverseResamp` swing correct; sample plays backwards as before.
+- **(4)** Reverse OFF — `mForwardSrc.setBuffer` + `mActiveResamp = &mForwardResamp` swing back; forward identical to pre-batch.
+- **(5)** Engine swap mid-playback — `releaseResources` correctly clears active-pointer pair without touching fat sources; teardown + new sample load clean.
+- **(6)** 1-2 min sustained playback — audio identical to pre-batch; no dropouts; memory stable.
+
+Per L10 verify-cadence (Debug-then-Release per QA-InsertMaps norm + QA-Md MT-works-in-Debug fact). Task 2 verifies clean. Rollback boundary intact: if Task 3's lock-free occupancy needs revert, this commit stands alone as the fat-voice refactor.
+
+### Section 4 — BaySickSynth side-finding (routed to QA-EngineApvts per Rule 3 + Jeff's scope call)
+
+Diagnosed during the BaySickSynth misdirected first verify attempt. NOT Task 2's fat-voice refactor; pre-existing missing-oscillator-reset bug in `BaySickSynthVoice::startNote`:
+
+- `BaySickSynthVoice` owns two `WavetableOscillator` members `mOsc` + `mOsc2` at [BaySickSynthVoice.h:122-123](../../Source/BaySickSynth/BaySickSynthVoice.h:122).
+- `WavetableOscillator` has internal `float mPhase { 0.0f };` at [WavetableOscillator.h:38](../../Source/WavetableOscillator.h:38) + exposed `void reset();` at [WavetableOscillator.h:20](../../Source/WavetableOscillator.h:20).
+- `BaySickSynthVoice::startNote` at [BaySickSynthVoice.cpp:36-123](../../Source/BaySickSynth/BaySickSynthVoice.cpp:36) resets inline phase accumulators (`mPhase1` / `mPhase2` / `mPhase3` / `mFMCarrierPhase` / `mFMModPhase` / `mDeafSawState` at `:72-77`) but does NOT call `mOsc.reset()` or `mOsc2.reset()`. Wavetable phase persists across notes — same MIDI note replayed on same voice slot → different starting wavetable phase → different waveform shape → audibly different sound per hit.
+- **Affected waveforms** (use `mOsc` / `mOsc2`): SAW (default), SAW+SAW, SAW+SQUARE, SQUARE+SQUARE, SUPERSAW. **Inline-phase waveforms** (PULSE, BELL, DEAF SAW, SPREAD OCT, SPREAD 5TH, SINE) reset deterministically — unaffected.
+
+Spec-call surface: (1) new dedicated batch / (2) fold into QA-EngineApvts / (3) fold into QA-VoicePool close-routing / (4) §9 Forks entry only, slot later.
+
+Jeff's decision 2026-05-25: **Option (2) — fold into QA-EngineApvts.** Rationale (verbatim): "We need to strictly enforce our rollback boundaries. QA-VoicePool is about lock-free memory allocation for the sample player. I do not want to introduce synth DSP state changes into this commit." Scope-discipline lock — QA-VoicePool stays scope-pure.
+
+**Action at QA-VoicePool close (per Rule 3 routing-at-close):**
+- Write §9 Forks entry recording the finding + QA-EngineApvts routing + Jeff's rollback-boundary rationale.
+- Expand §5 QA-EngineApvts entry to add the 2-line `mOsc.reset(); mOsc2.reset();` source-edit alongside the dirty-flag pattern work.
+- No source change in QA-VoicePool itself.
+
+### Section 5 — Rule 4 Diagnostic Instrumentation Catalog
+
+Nil for Task 2 (structural refactor; no `DBG` / `juce::Logger::writeToLog` / temp `jassert` / debug `juce::AlertWindow` added).
+
+### Section 6 — Next action
+
+Task 3 — lock-free occupancy + L7(b) hybrid stealing + L6 64-sample fade-out (per L8(b) split's second half). Adds: `std::atomic<bool> mIsActive { false }` per Sub-A(a) + `bool mInRelease { false }` + `int mStealFadeOutSamplesLeft { 0 }` + `float mStealFadeOutGainStart { 1.0f }` + `VibeVoice::initiateSteal()` + fade-out application in `renderNextBlock` + `VibeSynth::findStealCandidate(int newPitch)` hybrid logic + voiceCap-stealing branch rewire at [VibePlayerDSP.cpp:944-960](../../Source/VibePlayer/VibePlayerDSP.cpp:944). Estimated 3-4 hour cycle. Blocked on Jeff's commit of Task 2 → commit lands → Task 3 begin.

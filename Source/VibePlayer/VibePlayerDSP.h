@@ -101,6 +101,148 @@ struct VibeSynthSound : public juce::SynthesiserSound
     bool appliesToChannel (int) override { return true; }
 };
 
+// ── VibeForwardMemoryAudioSource ──────────────────────────────────────────────
+// Fat forward reader of a shared AudioBuffer (QA-VoicePool Task 2: replaces the
+// per-note-on `new juce::MemoryAudioSource` allocation).  Owned permanently by
+// VibeVoice; startNote re-points at the new region's buffer via setBuffer().
+// Null buffer is the resting state (between notes) - getNextAudioBlock clears
+// the destination region and returns when mBuf is null.
+class VibeForwardMemoryAudioSource : public juce::PositionableAudioSource
+{
+public:
+    VibeForwardMemoryAudioSource() noexcept = default;
+
+    void setBuffer (const juce::AudioBuffer<float>& buf) noexcept
+    {
+        mBuf = &buf;
+        mPos = 0;
+    }
+
+    void prepareToPlay (int, double) override {}
+    void releaseResources ()          override {}
+
+    void getNextAudioBlock (const juce::AudioSourceChannelInfo& info) override
+    {
+        if (mBuf == nullptr)
+        {
+            info.clearActiveBufferRegion();
+            return;
+        }
+
+        const int total   = mBuf->getNumSamples();
+        const int srcChs  = mBuf->getNumChannels();
+        const int dstChs  = info.buffer->getNumChannels();
+        if (srcChs <= 0) return;
+
+        for (int i = 0; i < info.numSamples; ++i)
+        {
+            const juce::int64 readIdx = mPos + i;
+            if (readIdx >= (juce::int64) total)
+            {
+                for (int c = 0; c < dstChs; ++c)
+                    info.buffer->setSample (c, info.startSample + i, 0.f);
+            }
+            else
+            {
+                for (int c = 0; c < dstChs; ++c)
+                {
+                    const int srcChan = c % srcChs;   // wrap mono -> L+R (matches juce::MemoryAudioSource)
+                    info.buffer->setSample (c, info.startSample + i,
+                                            mBuf->getSample (srcChan, (int) readIdx));
+                }
+            }
+        }
+        mPos = juce::jmin ((juce::int64) total, mPos + info.numSamples);
+    }
+
+    juce::int64 getNextReadPosition () const override                 { return mPos; }
+    void        setNextReadPosition (juce::int64 p)      override
+    {
+        mPos = (mBuf != nullptr)
+            ? juce::jlimit ((juce::int64) 0, (juce::int64) mBuf->getNumSamples(), p)
+            : 0;
+    }
+    juce::int64 getTotalLength      () const override                 { return mBuf != nullptr ? mBuf->getNumSamples() : 0; }
+    bool        isLooping           () const override                 { return false; }
+
+private:
+    const juce::AudioBuffer<float>* mBuf { nullptr };
+    juce::int64 mPos { 0 };
+};
+
+// ── ReversedMemoryAudioSource ─────────────────────────────────────────────────
+// Fat reverse reader of a shared AudioBuffer (QA-VoicePool Task 2 moved this
+// from VibePlayerDSP.cpp anon-namespace to enable direct VibeVoice membership;
+// original implementation S1 Incr3 2026-04-21).  Position semantics match the
+// forward source (0 = start of playback = last sample of buffer), so
+// sample-start seek works without special-casing the caller.
+class ReversedMemoryAudioSource : public juce::PositionableAudioSource
+{
+public:
+    ReversedMemoryAudioSource() noexcept = default;
+
+    explicit ReversedMemoryAudioSource (const juce::AudioBuffer<float>& buf) noexcept
+        : mBuf (&buf), mPosFwd (0) {}
+
+    void setBuffer (const juce::AudioBuffer<float>& buf) noexcept
+    {
+        mBuf = &buf;
+        mPosFwd = 0;
+    }
+
+    void prepareToPlay (int, double) override {}
+    void releaseResources ()          override {}
+
+    void getNextAudioBlock (const juce::AudioSourceChannelInfo& info) override
+    {
+        if (mBuf == nullptr)
+        {
+            info.clearActiveBufferRegion();
+            return;
+        }
+
+        const int total   = mBuf->getNumSamples();
+        const int srcChs  = mBuf->getNumChannels();
+        const int dstChs  = info.buffer->getNumChannels();
+        if (srcChs <= 0) return;
+
+        for (int i = 0; i < info.numSamples; ++i)
+        {
+            const juce::int64 fwdPos  = mPosFwd + i;
+            const juce::int64 readIdx = (juce::int64) total - 1 - fwdPos;
+            if (readIdx < 0 || fwdPos >= (juce::int64) total)
+            {
+                for (int c = 0; c < dstChs; ++c)
+                    info.buffer->setSample (c, info.startSample + i, 0.f);
+            }
+            else
+            {
+                for (int c = 0; c < dstChs; ++c)
+                {
+                    const int srcChan = c % srcChs;   // wrap mono -> L+R
+                    info.buffer->setSample (c, info.startSample + i,
+                                            mBuf->getSample (srcChan, (int) readIdx));
+                }
+            }
+        }
+        mPosFwd = juce::jmin ((juce::int64) total, mPosFwd + info.numSamples);
+    }
+
+    juce::int64 getNextReadPosition () const override                 { return mPosFwd; }
+    void        setNextReadPosition (juce::int64 p)      override
+    {
+        mPosFwd = (mBuf != nullptr)
+            ? juce::jlimit ((juce::int64) 0, (juce::int64) mBuf->getNumSamples(), p)
+            : 0;
+    }
+    juce::int64 getTotalLength      () const override                 { return mBuf != nullptr ? mBuf->getNumSamples() : 0; }
+    bool        isLooping           () const override                 { return false; }
+
+private:
+    const juce::AudioBuffer<float>* mBuf { nullptr };
+    juce::int64 mPosFwd { 0 };   // forward-time position (0 = first sample emitted)
+};
+
 // ── VibeVoice ─────────────────────────────────────────────────────────────────
 // One polyphonic voice.
 //
@@ -170,11 +312,24 @@ private:
 
     VibeSampleManager& mManager;
 
-    // ── Playback sources (message thread writes on startNote, audio thread reads)
-    // Using shared_ptr for the AudioBuffer keeps it alive until the voice finishes.
-    std::shared_ptr<juce::AudioBuffer<float>>  mSampleBuffer;  // region's pre-loaded data
-    std::unique_ptr<juce::PositionableAudioSource> mMemSrc;    // forward OR reversed reader
-    std::unique_ptr<juce::ResamplingAudioSource> mResampSrc;
+    // ── Playback sources (QA-VoicePool Task 2: fat voices owned permanently)
+    // shared_ptr to the region's AudioBuffer keeps the sample alive while playing.
+    std::shared_ptr<juce::AudioBuffer<float>>  mSampleBuffer;
+
+    // Forward + reverse source readers owned as direct members.  startNote
+    // re-points the chosen one at the new region's buffer via setBuffer() -
+    // no per-note heap allocation.
+    VibeForwardMemoryAudioSource mForwardSrc;
+    ReversedMemoryAudioSource    mReverseSrc;
+
+    // Dual permanent resamplers - one per direction.  juce::ResamplingAudioSource
+    // has no setSource() so its input pointer is fixed at construction; the
+    // fat-voice design ties one resampler to each direction's source and lets
+    // startNote pick which to feed via mActiveResamp.
+    juce::ResamplingAudioSource  mForwardResamp { &mForwardSrc, false, 2 };
+    juce::ResamplingAudioSource  mReverseResamp { &mReverseSrc, false, 2 };
+    juce::PositionableAudioSource* mActiveSrc    { nullptr };
+    juce::ResamplingAudioSource*   mActiveResamp { nullptr };
 
     bool   mIsPlaying   { false };
     double mSampleRate  { 44100.0 };
