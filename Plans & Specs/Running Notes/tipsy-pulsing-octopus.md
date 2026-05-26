@@ -390,3 +390,130 @@ Nil for Task 3 (no `DBG` / `juce::Logger::writeToLog` / temp `jassert` / debug `
 ### Section 6 — Next action
 
 Task 4 — `findRegion` `std::vector<int> candidates` → `std::array<int, 32>` stack-alloc per L5(a). Small orthogonal task (~30 min). Touches only `VibeSampleManager::findRegion` at [VibePlayerDSP.cpp:415-416](../../Source/VibePlayer/VibePlayerDSP.cpp:415) + the 4 read sites. After Task 4: Task 5 stress-file verify (no commit per QA-InsertMaps Task 3 precedent) → Task 6 cleanup + grep sweep → Task 7 close (the §9 Forks entry for the BaySickSynth `mOsc.reset()` finding routed to QA-EngineApvts per Jeff's Task 2 scope-discipline lock + the Section 4 L6 / L7(b) refinements captured as accepted-design notes vs literal-blueprint deviations both land in the close routing).
+
+---
+
+## 2026-05-25 — Task 4 — findRegion stack-alloc + SFZ <group> parser bug surfaced + routed to QA-SfzGroup
+
+L5(a) source edit — small orthogonal task per the plan's task split. Single file modified ([VibePlayerDSP.cpp](../../Source/VibePlayer/VibePlayerDSP.cpp)); diff total +22 / -11 net, fully contained inside `VibeSampleManager::findRegion`. The fourth and final heap-alloc site identified at Task 1 inventory Section 1 is now closed; the audio-thread per-note allocation surface for VibePlayer is fully zero per the original §9 thirty-fourth Forks entry blueprint. Both Release + Debug build clean. Jeff-verified PASS via smoke test (Tuba-KS.sfz loaded, played across the keymap, no crash + audio works) — and the verify surfaced a load-bearing pre-existing bug in the SFZ `<group>` parser that is OUT of QA-VoicePool's scope but routed at Jeff's call to a new dedicated batch (QA-SfzGroup) slotted as the very next batch after this one closes.
+
+### Section 1 — Task 4 source edit landed (L5(a) `std::array<int, 32>` stack-alloc replacement)
+
+Single file modified ([VibePlayerDSP.cpp](../../Source/VibePlayer/VibePlayerDSP.cpp)). One surgical block + three loop-body conversions. No header touches.
+
+#### `Source/VibePlayer/VibePlayerDSP.cpp` (+22 / -11)
+
+- **Allocation site at the pre-batch [:415-416](../../Source/VibePlayer/VibePlayerDSP.cpp:415)** — replaced `std::vector<int> candidates; candidates.reserve(8);` with:
+
+  ```cpp
+  // Gather all candidates matching note + velocity + artic.  Use indices to
+  // avoid iterator invalidation concerns.
+  //
+  // QA-VoicePool Task 4 (L5=(a)): std::array<int, kMaxCandidates> stack-alloc
+  // replaces the pre-batch std::vector<int> + reserve(8), eliminating the
+  // per-note-on heap allocation on the audio thread.  Cap of 32 covers every
+  // realistic sample mapping (typical SFZ packs ship 2-8 RR variations per
+  // (note, velocity, articGroup) tuple; heavily-layered packs rarely exceed
+  // 16).  Overflow silently drops the 33rd+ candidate per Jeff's L5=(a) lock
+  // at Task 0 ExitPlanMode ("UX-acceptable degradation for an edge case that
+  // should never fire on Jeff's libraries").
+  constexpr int kMaxCandidates = 32;
+  std::array<int, kMaxCandidates> candidates {};
+  int numCandidates = 0;
+  ```
+
+- **Push site** — `candidates.push_back(i);` replaced with bounded `if (numCandidates < kMaxCandidates) candidates[numCandidates++] = i;`. The bounded guard implements the Sub-overflow disposition Jeff locked at Task 0 ExitPlanMode: the 33rd+ candidate is silently dropped (no jassert, no log) per the "UX-acceptable degradation for an edge case that should never fire on Jeff's libraries" rationale. The 32-cap sufficiency was sanity-checked at Task 1 inventory Section 5 — worst-case region density for a single `(midiNote, velocity, articGroup)` tuple is the round-robin sample stack; typical SFZ packs ship 2-8 RR variations per zone, heavily-layered packs rarely exceed 16, 32 has comfortable headroom.
+
+- **Emptiness check** — `candidates.empty()` replaced with `numCandidates == 0`.
+
+- **Iteration sites (two)** — both `for (int idx : candidates)` range-fors (the hasRR pre-scan loop + the round-robin selection loop) replaced with index-counted `for (int j = 0; j < numCandidates; ++j) { int idx = candidates[j]; ... }`. The std::array's full storage is never iterated — only the populated prefix `[0, numCandidates)` — matching the pre-batch std::vector behavior exactly. No spurious work on the unused tail.
+
+#### Grep cleanliness post-edits
+
+- `grep -rn "std::vector<int> candidates" Source/VibePlayer/` returns ZERO matches. Heap-alloc kill complete.
+- `grep -rn "candidates.push_back\|candidates.empty\|candidates.reserve" Source/VibePlayer/` returns ZERO matches. All vector-API call sites are gone.
+
+#### Build status
+
+Both Release + Debug build clean: `RELEASE_EXIT_CODE=0`, `DEBUG_EXIT_CODE=0`. Only pre-existing warnings survive — no new warnings introduced by Task 4.
+
+#### Scope discipline
+
+Task 4 is purely orthogonal to Task 2 (no fat-voice state touched) and Task 3 (no `dynamic_cast` involved, no voice-pool or stealing logic touched). The L5(a) `findRegion` swap lands as its own clean small commit per L8(b)'s split-task discipline — heap-alloc surface 4 of 4 closed independently from the structural voice-pool work. With Task 4 in, the original §9 thirty-fourth Forks entry blueprint's heap-alloc-elimination scope is fully realized: zero heap allocations on the audio thread per VibePlayer note-on.
+
+### Section 2 — Verify PASS (Jeff, 2026-05-25)
+
+**Test setup**: loaded `Tuba-KS.sfz` (Core Library / Brass Pack) into BaySickPlayer. Played across the keymap. Smoke-test-level — no extended polyphony stress (that's Task 5 territory).
+
+**Result**: PASS. No crash. Audio works. No functional regression vs pre-batch.
+
+**Load-bearing secondary finding from this verify**: round-robin variation was **NOT clearly audible** when the same key was struck repeatedly on Tuba-KS — Jeff reported "they all sound the same though and I've never noticed it making any sort of variation like that". This pulled at a thread that turned into the Section 3 finding — the L5(a) `findRegion` swap is functioning correctly, the RR rotation counter is iterating correctly, the candidate list is populated correctly, but the candidate list itself is degenerate (length 1 per `(note, velocity, artic)` tuple instead of length 4 as the SFZ file specifies). The verify was correct for Task 4's scope; the absent RR variation is a pre-existing SFZ parser bug that the verify-time inspection uncovered.
+
+Per L10 verify-cadence (Debug-then-Release per QA-InsertMaps norm + QA-Md MT-works-in-Debug fact). Task 4 verifies clean.
+
+### Section 3 — Pre-existing SFZ `<group>` parser bug surfaced (routed to NEW QA-SfzGroup batch per Rule 3 + Jeff's scope call)
+
+The verify-time absent-RR observation triggered a two-track investigation Jeff explicitly asked for ("To confirm I don't just mean missing in the SFZ file but in how we are reading them so check both"). Both tracks landed concrete findings; the second is the load-bearing bug.
+
+#### Track 1 — SFZ file inspection (Tuba-KS.sfz under Core Library)
+
+Inspected the file directly. The file DOES specify 4-variant round-robin cycling via `<group>`-scoped `seq_length` + `seq_position` opcodes per the SFZ v1 spec:
+
+```
+<group>
+seq_length=4
+seq_position=1
+...
+<region> sample=tuba_C2_v1.wav ... </region>
+
+<group>
+seq_length=4
+seq_position=2
+...
+<region> sample=tuba_C2_v2.wav ... </region>
+```
+
+Each `<group>` block declares its own `seq_position` (1, 2, 3, 4); the following `<region>` is meant to inherit that group-scoped opcode per SFZ v1 inheritance rules. So the file content is correct — the RR cycling IS specified in the source data.
+
+#### Track 2 — Parser source inspection (`VibePlayerDSP.cpp` `parseSFZ`)
+
+The bug is in our parser, not the file. The line-walking state machine in [`parseSFZ` at :90](../../Source/VibePlayer/VibePlayerDSP.cpp:90) sets `inRegion = true` only on `<region>` headers (at [:120](../../Source/VibePlayer/VibePlayerDSP.cpp:120)); on `<group>` headers it resets `inRegion = false` (at [:106](../../Source/VibePlayer/VibePlayerDSP.cpp:106)). The per-line opcode-extraction block contains an early-return `if (!inRegion) continue;` at [:148](../../Source/VibePlayer/VibePlayerDSP.cpp:148) BEFORE any opcode-write to the current region. Result: **every opcode inside a `<group>` block (including `seq_length` / `seq_position` and any other group-scoped inherited setting) is silently dropped**. Per the SFZ v1 spec, opcodes inside `<group>` are supposed to be inherited by every `<region>` that follows until the next `<group>` or EOF — our parser implements zero of this inheritance.
+
+For Tuba-KS specifically: every region's `seq_position` is dropped → every region defaults to `seq_position=0` (no rotation gate) → `findRegion` sees one candidate per `(note, velocity, artic)` tuple → no rotation possible → the 4-variant cycling specified in the file never reaches the audio thread. Audible result is "they all sound the same".
+
+This is a **pre-existing bug, NOT a Task 4 regression**. The early-return predates QA-VoicePool entirely; Task 4 only touched `findRegion`, not `parseSFZ`. It's also completely independent of QA-VoicePool's scope — the parser runs on the message thread (file load time), not the audio thread (heap-alloc territory). The reason Task 4's verify caught it is that the verify exercised the candidate list directly: the new stack-alloc populates the same data the old vector did, but with the data corrupted upstream by the missing inheritance, the populated list is degenerate.
+
+#### Spec-call surface and Jeff's routing decision
+
+Spec-call surface: (1) new dedicated batch (e.g. QA-SfzGroup) / (2) fold into QA-VoicePool close-routing / (3) fold into a downstream batch (QA-EngineApvts, etc.) / (4) §9 Forks entry only, slot later.
+
+Jeff's decision 2026-05-25, verbatim: **"Incredible catch... We are going with Option 1: New dedicated batch (e.g., QA-SfzGroup). I want this fixed, but our strict rollback boundaries must remain intact. This current batch is strictly about real-time audio-thread heap allocations. The SFZ loader is a text parser running on the message thread. Let's queue up QA-SfzGroup to be our very next batch after we close QA-VoicePool. That batch will cover fixing the `<group>` state-machine inheritance and investigating the Aria/sfizz RR loss."**
+
+Rollback-boundary discipline lock — same scope-purity reasoning Jeff applied at Task 2's BaySickSynth `mOsc.reset()` finding (Section 4 of Task 2's entry). QA-VoicePool stays scope-pure: real-time audio-thread heap allocations only, no parser changes, no DSP state changes.
+
+#### QA-SfzGroup batch scope (locked at this surface for the §5 entry that lands at QA-VoicePool close)
+
+- Fix the `<group>` opcode-inheritance state machine in `parseSFZ`. The `if (!inRegion) continue;` early-return at [VibePlayerDSP.cpp:148](../../Source/VibePlayer/VibePlayerDSP.cpp:148) is wrong; opcodes inside a `<group>` should accumulate into a group-default state that the next `<region>` inherits as its baseline. Implementation outline: track a `VibeRegion mGroupDefaults` accumulator; on `<group>` header reset the accumulator; on `<region>` header copy the accumulator into the new region; route opcode writes to the accumulator while `!inRegion` and to the current region while `inRegion`.
+- Investigate the Aria-player + sfizz-driven engines (BaySickRustyDrums, BaySickGuitars, BaySickBasses) for the same RR-loss symptom Jeff has noticed historically. Confirm whether the sfizz code path has its own equivalent state-machine gap or whether the issue is in the file content / loader handoff. Two independent investigations — VibePlayer's hand-rolled parser vs sfizz's library parser — bundled into the same batch because they share the symptom even if not the cause.
+- Slot: very next batch after QA-VoicePool close. Sequencing arrow update at close: `... -> QA-VoicePool -> QA-SfzGroup -> QA-EngineApvts -> QA-Ed -> ...`.
+
+#### Action at QA-VoicePool close (per Rule 3 routing-at-close)
+
+- Write §9 Forks entry recording the SFZ `<group>` finding + QA-SfzGroup routing + Jeff's rollback-boundary rationale (mirrors the Task 2 Section 4 BaySickSynth `mOsc.reset()` routing pattern; both close-routings cite the same scope-discipline reasoning).
+- Write NEW §5 QA-SfzGroup batch entry — scope (the two-part state-machine-fix + sfizz-investigation surface above) + slot (next-batch-after-QA-VoicePool).
+- Update §6 sequencing arrow to insert QA-SfzGroup between QA-VoicePool and QA-EngineApvts.
+- **No source change in QA-VoicePool itself.** Parser source stays untouched this batch.
+
+### Section 4 — Rule 4 Diagnostic Instrumentation Catalog
+
+Nil for Task 4 (no `DBG` / `juce::Logger::writeToLog` / temp `jassert` / debug `juce::AlertWindow` added — the `findRegion` swap is a pure data-structure change, the SFZ parser finding was diagnosed via static reads of the source + the file, not via in-source instrumentation).
+
+### Section 5 — Next action
+
+Task 5 — stress-file verify (NO commit per L8(b) split + QA-InsertMaps Task 3 precedent). Heavy SFZ libraries, long sustained sessions, voice-pool stress to confirm no audible regressions vs pre-batch across Task 2 + Task 3 + Task 4 combined. After Task 5: Task 6 cleanup + grep sweep -> Task 7 close. Close-routing pass lands five docs touches:
+
+1. §9 Forks entry for the BaySickSynth `mOsc.reset()` finding routed to QA-EngineApvts (per Task 2 Section 4 lock).
+2. §9 Forks entry for the SFZ `<group>` parser finding routed to NEW QA-SfzGroup (per Section 3 above).
+3. NEW §5 QA-SfzGroup batch entry — scope + slot.
+4. §5 STATUS banner update for Task 3's Correction 1 / 2 / 3 deviations from the literal L1-L10 spec calls (per Task 3 Section 4 lock).
+5. §6 sequencing arrow update to insert QA-SfzGroup between QA-VoicePool and QA-EngineApvts.

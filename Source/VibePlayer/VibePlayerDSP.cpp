@@ -410,10 +410,20 @@ VibeSampleManager::loadFile (const juce::File& f,
 const VibeRegion* VibeSampleManager::findRegion (int midiNote, int velocity,
                                                    int articulationGroup)
 {
-    // Gather all candidates matching note + velocity + artic
-    // Use indices to avoid iterator invalidation concerns
-    std::vector<int> candidates;
-    candidates.reserve (8);
+    // Gather all candidates matching note + velocity + artic.  Use indices to
+    // avoid iterator invalidation concerns.
+    //
+    // QA-VoicePool Task 4 (L5=(a)): std::array<int, kMaxCandidates> stack-alloc
+    // replaces the pre-batch std::vector<int> + reserve(8), eliminating the
+    // per-note-on heap allocation on the audio thread.  Cap of 32 covers every
+    // realistic sample mapping (typical SFZ packs ship 2-8 RR variations per
+    // (note, velocity, articGroup) tuple; heavily-layered packs rarely exceed
+    // 16).  Overflow silently drops the 33rd+ candidate per Jeff's L5=(a) lock
+    // at Task 0 ExitPlanMode ("UX-acceptable degradation for an edge case that
+    // should never fire on Jeff's libraries").
+    constexpr int kMaxCandidates = 32;
+    std::array<int, kMaxCandidates> candidates {};
+    int numCandidates = 0;
 
     for (int i = 0; i < (int) mRegions.size(); ++i)
     {
@@ -421,15 +431,16 @@ const VibeRegion* VibeSampleManager::findRegion (int midiNote, int velocity,
         if (midiNote  < r.loNote || midiNote  > r.hiNote)  continue;
         if (velocity  < r.loVel  || velocity  > r.hiVel)   continue;
         if (r.articulationGroup != articulationGroup)        continue;
-        candidates.push_back (i);
+        if (numCandidates < kMaxCandidates)
+            candidates[numCandidates++] = i;
     }
 
-    if (candidates.empty()) return nullptr;
+    if (numCandidates == 0) return nullptr;
 
     // Check if regions have round-robin markers
     bool hasRR = false;
-    for (int idx : candidates)
-        if (mRegions[idx].roundRobinTotal > 0) { hasRR = true; break; }
+    for (int j = 0; j < numCandidates; ++j)
+        if (mRegions[candidates[j]].roundRobinTotal > 0) { hasRR = true; break; }
 
     if (!hasRR)
         return &mRegions[candidates[0]]; // single region or no RR
@@ -443,9 +454,9 @@ const VibeRegion* VibeSampleManager::findRegion (int midiNote, int velocity,
     int rrTotal = mRegions[candidates[0]].roundRobinTotal;
     counter = (counter % rrTotal) + 1;  // SFZ seq_position is 1-based
 
-    for (int idx : candidates)
-        if (mRegions[idx].roundRobinIndex == counter)
-            return &mRegions[idx];
+    for (int j = 0; j < numCandidates; ++j)
+        if (mRegions[candidates[j]].roundRobinIndex == counter)
+            return &mRegions[candidates[j]];
 
     // Fallback: first candidate
     return &mRegions[candidates[0]];
