@@ -1,5 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
+#include <array>
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -307,6 +309,31 @@ public:
     // Age tracking for voiceCap-based stealing
     juce::uint32 getNoteStartCounter() const noexcept           { return mNoteStartCounter; }
 
+    // ── QA-VoicePool Task 3 — lock-free occupancy + L7(b) hybrid stealing ─────
+    // mIsActive is the supplemental atomic flag scanned by VibeSynth::findStealCandidate
+    // to avoid dynamic_cast loops on the hot audio path (Sub-A=(a)).  Set true at
+    // startNote, cleared at ADSR-end or hard stopNote.  mInRelease tracks whether the
+    // voice's amp envelope is in its release phase (used by L7(b) hybrid: prefer
+    // release-phase oldest as steal victim, fallback to overall-oldest).
+    bool isActive()        const noexcept { return mIsActive.load (std::memory_order_acquire); }
+    bool isInRelease()     const noexcept { return mInRelease; }
+    // QA-VoicePool Task 3 look-ahead fix (2026-05-25): VibeSynth::renderNextBlock
+    // pre-scans the MIDI buffer for noteOffs that WILL be delivered this block
+    // (i.e., not stripped by a same-pitch later noteOn) and flips this flag on
+    // voices playing those pitches.  findStealCandidate's L7(b) 3-tier classifier
+    // demotes flagged voices to Tier 1 so a looping chord pattern's about-to-
+    // release voices don't get treated as "still key-down" alongside a held lead -
+    // which would let the lead become the oldest Tier 2 victim.  Cleared at the
+    // top of every renderNextBlock pre-scan (transient per-block flag).
+    bool isNoteOffQueued() const noexcept { return mNoteOffQueued; }
+    void setNoteOffQueued (bool v) noexcept { mNoteOffQueued = v; }
+    // initiateSteal: override the amp ADSR's release to ~1.5 ms (64 samples @ 44.1 kHz)
+    // and save the user's original params so the next startNote can restore them.
+    // Caller (VibeSynth voiceCap branch) follows with stopNote(0.f, true) so the
+    // voice enters its quick-release phase naturally inside renderNextBlock.
+    // Idempotent: re-stealing an already-overridden voice is a no-op.
+    void initiateSteal() noexcept;
+
 private:
     void releaseResources();
 
@@ -384,16 +411,52 @@ private:
     // Temp buffer used inside renderNextBlock
     juce::AudioBuffer<float> mTmpBuffer;
 
+    // ── QA-VoicePool Task 3 — lock-free occupancy + steal-aware ADSR override ──
+    // Sub-A=(a) explicit atomic isActive: supplements juce::SynthesiserVoice::isVoiceActive()
+    // so VibeSynth::findStealCandidate can scan voices without dynamic_cast per voice.
+    std::atomic<bool> mIsActive { false };
+    // L7(b) hybrid stealing predicate: true between stopNote(allowTailOff=true) and
+    // ADSR-end; cleared on startNote / hard stopNote / releaseResources.
+    bool              mInRelease { false };
+    // ADSR override state for steal quick-release.  initiateSteal saves the user's
+    // ADSR params here and overrides mAdsr's release to ~1.5 ms.  startNote restores
+    // the saved params on the next note allocation.  setAdsr re-routes user-driven
+    // param changes during an active override into mPreStealAdsrParams so the new
+    // user setting takes effect on the next note (rather than disturbing the
+    // in-flight quick-release).
+    juce::ADSR::Parameters mPreStealAdsrParams {};
+    bool                   mAdsrOverridden     { false };
+    // QA-VoicePool Task 3 look-ahead fix: set by VibeSynth::renderNextBlock's
+    // pre-scan when a noteOff for this voice's pitch is queued for delivery this
+    // block (and not stripped by a same-pitch later noteOn).  Transient - cleared
+    // at the top of the pre-scan every block.  Audio-thread-only; plain bool is
+    // sufficient (no cross-thread access).
+    bool                   mNoteOffQueued      { false };
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibeVoice)
 };
 
 // ── VibeSynth ─────────────────────────────────────────────────────────────────
-// Polyphonic sample player: up to 16 voices, articulation group switching.
+// Polyphonic sample player: up to 24 physical voices, articulation group switching.
 // Wraps juce::Synthesiser + VibeSampleManager.
+//
+// QA-VoicePool Task 3: physical pool over-provisioned to 24 voices.  The user-facing
+// polyphony limit stays at 16 (enforced by the voiceCap APVTS param + the steal-on-
+// cap-exceeded branch in renderNextBlock).  The extra 8 reserve voices give the
+// stealing path a safe landing zone: when a steal is required, the victim voice is
+// flipped into a ~1.5 ms quick-release via initiateSteal() + stopNote(0.f, true);
+// it continues fading inside JUCE's normal renderNextBlock for ~64 samples while
+// the new note's mSynth.noteOn() allocates to one of the 8 reserve voices.  No
+// custom fade-buffer rendering, no synchronous writes past the audio block boundary.
 class VibeSynth
 {
 public:
-    static constexpr int kMaxVoices = 16;
+    static constexpr int kMaxVoices  = 24;
+    // QA-VoicePool Task 3: user-facing polyphony default.  Stealing fires when
+    // active voices >= kLogicalCap (or the APVTS voiceCap override), NOT when
+    // active >= kMaxVoices; the (kMaxVoices - kLogicalCap) = 8 reserve voices
+    // are the safe landing zone for the new note while the stolen voice fades.
+    static constexpr int kLogicalCap = 16;
 
     VibeSynth();
 
@@ -491,10 +554,27 @@ private:
     template <typename Fn>
     void forEachVoice (Fn&& fn)
     {
-        for (int i = 0; i < mSynth.getNumVoices(); ++i)
-            if (auto* v = dynamic_cast<VibeVoice*> (mSynth.getVoice (i)))
-                fn (*v);
+        // QA-VoicePool Task 3: iterate the cached mVoices[] pointer array
+        // instead of dynamic_cast'ing mSynth.getVoice(i) per call - forEachVoice
+        // is invoked from the voiceCap-stealing branch on every unison fan-out
+        // iteration of every note-on, so the dynamic_cast cost matters.
+        for (int i = 0; i < kMaxVoices; ++i)
+            if (mVoices[i] != nullptr)
+                fn (*mVoices[i]);
     }
+
+    // ── QA-VoicePool Task 3 — direct VibeVoice pointer cache + steal candidate scan ──
+    // mVoices is populated in the ctor at addVoice time so the audio-thread voiceCap
+    // branch can iterate the pool without dynamic_cast per voice (Sub-A=(a) rationale).
+    std::array<VibeVoice*, kMaxVoices> mVoices {};
+
+    // findStealCandidate implements L7(b) hybrid: scan mVoices for active candidates,
+    // prefer the oldest-by-mNoteStartCounter that's also in release phase; fall back
+    // to overall oldest if no release-phase voice is found.  Returns nullptr only
+    // if no active voices exist (shouldn't happen at steal time since activeCount
+    // >= cap is the precondition).  newPitch is reserved for future "don't steal a
+    // voice playing the same pitch" logic; unused for now.
+    VibeVoice* findStealCandidate (int newPitch) const noexcept;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibeSynth)
 };

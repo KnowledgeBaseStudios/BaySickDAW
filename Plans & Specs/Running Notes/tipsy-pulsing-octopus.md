@@ -259,3 +259,134 @@ Nil for Task 2 (structural refactor; no `DBG` / `juce::Logger::writeToLog` / tem
 ### Section 6 — Next action
 
 Task 3 — lock-free occupancy + L7(b) hybrid stealing + L6 64-sample fade-out (per L8(b) split's second half). Adds: `std::atomic<bool> mIsActive { false }` per Sub-A(a) + `bool mInRelease { false }` + `int mStealFadeOutSamplesLeft { 0 }` + `float mStealFadeOutGainStart { 1.0f }` + `VibeVoice::initiateSteal()` + fade-out application in `renderNextBlock` + `VibeSynth::findStealCandidate(int newPitch)` hybrid logic + voiceCap-stealing branch rewire at [VibePlayerDSP.cpp:944-960](../../Source/VibePlayer/VibePlayerDSP.cpp:944). Estimated 3-4 hour cycle. Blocked on Jeff's commit of Task 2 → commit lands → Task 3 begin.
+
+---
+
+## 2026-05-25 — Task 3 — Lock-free occupancy + L7(b) 3-tier hybrid stealing + L6 ADSR quick-release via physical over-provisioning + look-ahead noteOff pre-scan
+
+Structural one-shot per L8(b) split's second half. Task 3's deliverable shape evolved through three Jeff-driven course corrections during execution — initial 2-tier-hybrid + synchronous-render-fade design became 3-tier-with-isKeyDown-protection + physical-over-provisioning + look-ahead-noteOff-pre-scan by the time Release verify PASSed. The corrections matter to record verbatim because they're the load-bearing pro-DAW-engineering judgment that future readers (and future me) need to be able to reconstruct without re-living the same diagnosis. Two source files modified ([VibePlayerDSP.h](../../Source/VibePlayer/VibePlayerDSP.h) + [VibePlayerDSP.cpp](../../Source/VibePlayer/VibePlayerDSP.cpp)); diff total +247 / -23 net. Both Release + Debug build clean. Jeff-verified PASS on 6 scenarios (A: 16-chord-loop+lead, B: 4-chord-loop+lead, C: release-phase-preferred regression, D: all-keys-held fallback regression, E: Reverse-mode parity, F: MT parity) per L10 Debug-then-Release cadence.
+
+### Section 1 — Design journey (3-correction narrative — load-bearing)
+
+#### Correction 1: synchronous-render fade-out → physical over-provisioning + ADSR quick-release
+
+Initial Task 3 implementation prepared `VibeVoice::initiateSteal()` as a 64-sample synchronous render INTO the output buffer at MIDI-dispatch time — the literal reading of L6 = (d) 64 samples fade-out. Jeff caught the fundamental safety flaw at design-surface time, verbatim: "Rendering 64 samples forward synchronously during an event callback is fundamentally unsafe. If the audio block size is small (e.g., 32 samples) and a steal happens near the end of the block, writing 64 samples will cause a buffer overflow and crash the DAW."
+
+Pivot to **physical over-provisioning + ADSR quick-release**. The mechanism:
+
+- `kMaxVoices` in [VibePlayerDSP.h:241](../../Source/VibePlayer/VibePlayerDSP.h:241) raised 16 → 24. The juce::Synthesiser pool now holds 24 fat voices, NOT 16.
+- New `static constexpr int kLogicalCap = 16;` added — the user-facing polyphony default. Existing `voiceCap` APVTS unchanged (still 1..16 range; default 16). The 8 reserve voices (`kMaxVoices - kLogicalCap`) are invisible to the user — they exist solely as overflow slots for stolen-voice fade-outs.
+- `VibeVoice::initiateSteal()` overrides the voice's `mAdsr.release` to 0.0015 sec (~1.5 ms = ~66 samples @ 44.1 kHz, ~72 samples @ 48 kHz; matches the L6 = (d) 64-sample target closely). Saves the user's pre-steal `juce::ADSR::Parameters` into a new `mPreStealAdsrParams` member + sets `mAdsrOverridden = true` so the next `startNote` can restore.
+- After `initiateSteal()` fires, the voiceCap-stealing branch calls `victim->stopNote(0.f, true)` — `allowTailOff=true` lets the voice enter its (now quick) ADSR release naturally. The fade-out runs sample-accurately inside the subsequent `juce::Synthesiser::renderNextBlock` call's standard per-voice render loop. Zero buffer-overflow risk: JUCE's render loop bounds writes to the actual buffer length, the fade-out continues across blocks as needed, `clearCurrentNote()` fires at ADSR end exactly as it does for any natural noteOff release.
+- The new note allocates to one of the 8 reserve voices via `juce::Synthesiser::findFreeVoice` (the just-stolen voice is still `isVoiceActive() == true` during its fade-out, so JUCE picks a different free voice). No custom allocation path needed; JUCE's standard framework handles it.
+
+Tradeoff captured: 8 extra VibeVoice instances cost ~50% more pool memory per VibePlayer engine instance (each VibeVoice now carries dual permanent resamplers per Task 2's Sub-B(a)). At ~15 KB per voice for the resampler-state RAM alone, 8 extra voices = ~120 KB per engine. Across N engine instances in a session, the cost is small relative to sample-data RAM and entirely acceptable for the safety property gained.
+
+#### Correction 2: 2-tier hybrid → 3-tier with `isKeyDown()` protection
+
+Initial L7(b) implementation was the literal L7(b) wording — "hybrid stealing: prefer release-phase oldest, fallback to overall-oldest". 2 tiers. Jeff identified the "held lead + looping chord" pathology at verify time, verbatim:
+
+> "If I hold down a sustained lead note (a 5th note), and let a 4-note chord sequence loop repeatedly in the background, my sustained lead note is eventually stolen. Because it was held down across multiple bars, it becomes the 'oldest active note,' so the engine kills it to make room for the newer chords. The Pro DAW Standard: voice stealing is based on a hierarchy that respects physical key state (Note-On vs. Note-Off). An actively held note should almost never be stolen by newer notes that have already received their Note-Off commands."
+
+Upgraded to **3-tier hybrid** using JUCE's built-in `juce::SynthesiserVoice::isKeyDown()` accessor (verified public at `juce/modules/juce_audio_basics/synthesisers/juce_Synthesiser.h:233` — no need for VibeVoice to track its own physical-key-state flag). Tier definitions:
+
+- **Tier 0** = `isInRelease()` — voice already in ADSR release phase (`mInRelease == true`). Released voices are by definition on their way out; stealing them first matches the "least-disruptive-to-the-mix" principle the original L7(b) was reaching for.
+- **Tier 1** = `isNoteOffQueued() || !isKeyDown()` — voice has received noteOff (so `isKeyDown() == false`) but is not yet in release (sustain pedal holds it). OR voice has a noteOff queued for this block per Correction 3's look-ahead pre-scan. These are "the user has lifted the key but the voice is still sustaining" candidates.
+- **Tier 2** = `isKeyDown() == true` AND `!isNoteOffQueued()` — physically held key, no queued noteOff. PROTECTED. Only stolen as last resort when no Tier 0 / Tier 1 candidate exists.
+
+Within each tier, picks the oldest by `mNoteStartCounter` (preserves the original "oldest-first" intuition). The 3-tier scan walks lowest-priority tier first, returns from the first populated tier found.
+
+#### Correction 3: MIDI-event-ordering issue at loop boundaries → look-ahead noteOff pre-scan
+
+With the 3-tier implementation, Jeff re-verified and reported: "my 17th note is still getting stolen after 2 bars and a 5th note with 4 voices set still gets stolen after 2 bars. please think out what is happening before proceeding and let me confirm." The bug isn't in `findStealCandidate` — it's in the MIDI event ordering at piano-roll loop boundaries.
+
+Diagnosis trace: at a piano-roll loop boundary, the old chord's noteOffs and the new chord's noteOns land in the same MIDI buffer (the loop wraparound delivers both events in the same block). `VibeSynth::renderNextBlock` already dispatches noteOns IMMEDIATELY via `mSynth.noteOn` — which is what fires the voiceCap-stealing branch. But noteOffs are DEFERRED into `filteredMidi` for later dispatch via `mSynth.renderNextBlock(buffer, filteredMidi)` at the bottom of the function (the same buffer is used for same-pitch-strip filtering elsewhere). At the moment of the new-chord-note voiceCap decision, the old chord voices are STILL `isKeyDown() == true` (their noteOff event hasn't been dispatched to `juce::Synthesiser` yet — it's sitting in `filteredMidi` waiting for the renderNextBlock at the end of the function). All voices appear as Tier 2 to `findStealCandidate`; the protection layer protects no one; findStealCandidate picks the genuinely oldest = the held lead (older `mNoteStartCounter` than the chord notes that turn over each loop iteration).
+
+Jeff confirmed via test setup: "16 sustained 1 bar notes over 4 bars (16notes each bar) and one played key continuously" (Scenario A) and "4 note looping pattern + 5th sustained" (Scenario B). Both reproduce the lead-stolen pathology on the 3-tier implementation.
+
+Fix: **look-ahead noteOff pre-scan** that flips a transient `bool mNoteOffQueued` flag on voices whose noteOffs will be delivered this block, BEFORE the noteOn dispatch loop runs. `findStealCandidate`'s Tier 1 check picks up `isNoteOffQueued()` alongside `!isKeyDown()` — flagged voices become Tier 1 candidates even though `isKeyDown()` is still true at the moment of the check.
+
+Two alternatives surfaced (pre-pass-rewrite vs look-ahead-flag). Jeff's verbatim decision: "We absolutely must go with the Look-Ahead Pre-Scan. Losing sample-accurate MIDI timing (the pre-pass alternative) introduces MIDI jitter, which is unacceptable for a pro DAW. Preserving sub-block timing is entirely worth the extra ~25 lines of code." The pre-scan does NOT reorder events; the actual MIDI dispatch order is unchanged, so sample-accurate timing of every noteOn + noteOff is preserved. The pre-scan only annotates voices with "noteOff is coming for you this block" so the stealing logic can make a more informed Tier 1 decision.
+
+The look-ahead pre-scan mirrors the existing same-pitch-strip logic — it walks the MIDI buffer ONCE before the noteOn dispatch loop, marking voices whose noteOffs are pending. It correctly handles the same-pitch-strip case: if a later same-pitch noteOn would strip the noteOff (cancel it via the existing same-pitch preemption path), the flag is NOT set on that voice (no actual noteOff will be delivered, so the voice doesn't deserve the Tier 1 promotion).
+
+### Section 2 — Task 3 source edits landed (final shape after all 3 corrections)
+
+Two source files modified. Diff total: +247 insertions, -23 deletions, net +224 lines.
+
+#### `Source/VibePlayer/VibePlayerDSP.h`
+
+- **Includes**: `<atomic>` + `<array>` added explicitly (both transitive via JuceHeader but explicit improves clarity at the top of the new state member declarations).
+- **VibeVoice new public accessors** (read-only predicates for `findStealCandidate` + the look-ahead pre-scan):
+  - `bool isActive() const noexcept` — atomic load of `mIsActive` (`std::memory_order_acquire`). Sub-A = (a) public surface for dynamic_cast-free voice scans.
+  - `bool isInRelease() const noexcept` — returns `mInRelease`. Tier 0 predicate.
+  - `bool isNoteOffQueued() const noexcept` + `void setNoteOffQueued(bool v) noexcept` — Correction 3 look-ahead flag accessor pair.
+  - `void initiateSteal() noexcept` — Correction 1 entry point for the ADSR quick-release override.
+- **VibeVoice new private members**:
+  - `std::atomic<bool> mIsActive { false };` — Sub-A = (a) explicit-atomic occupancy flag. Set true in `startNote` / cleared in `releaseResources` with release semantics. Read by `findStealCandidate`'s voice scan loop on the audio thread without acquiring locks.
+  - `bool mInRelease { false };` — Tier 0 predicate state. Set true in `stopNote(velocity, allowTailOff=true)` BEFORE `mAdsr.noteOff()`; cleared in `startNote`. Read by `isInRelease()`.
+  - `juce::ADSR::Parameters mPreStealAdsrParams {};` — Correction 1 save/restore buffer for the user's ADSR params when `initiateSteal()` overrides release to 1.5 ms.
+  - `bool mAdsrOverridden { false };` — Correction 1 sentinel. True after `initiateSteal()`; cleared in `startNote` (after the user's params are restored).
+  - `bool mNoteOffQueued { false };` — Correction 3 transient flag. Reset to false at the top of every `VibeSynth::renderNextBlock` (look-ahead pre-scan); set true for voices whose noteOff will be delivered this block.
+- **VibeSynth changes**:
+  - `kMaxVoices = 24` (was 16) — Correction 1 over-provisioning. 8 reserve voices for stolen-voice fade-out overflow.
+  - `static constexpr int kLogicalCap = 16;` NEW — user-facing polyphony default. Existing voiceCap APVTS range (1..16) unchanged.
+  - `std::array<VibeVoice*, kMaxVoices> mVoices {};` NEW — direct VibeVoice* cache populated alongside each `mSynth.addVoice(v)` in the ctor. Replaces every audio-thread `dynamic_cast<VibeVoice*>(mSynth.getVoice(i))` with a single pointer-array read. Sub-A = (a) hot-path optimization fully realized.
+  - `VibeVoice* findStealCandidate(int newPitch) const noexcept;` NEW private — L7(b) 3-tier hybrid scan (see Section 1 Correction 2).
+  - `forEachVoice` template refactored to iterate `mVoices[]` instead of dynamic_casting. Hot — called from every APVTS parameter change broadcast + every unison fan-out iteration.
+
+#### `Source/VibePlayer/VibePlayerDSP.cpp`
+
+- **VibeSynth ctor**: populate `mVoices[i] = v` alongside each `mSynth.addVoice(v)`. Direct pointer cache per Sub-A = (a).
+- **`VibeVoice::setAdsr`**: routes new user setting into `mPreStealAdsrParams` (instead of `mAdsr.setParameters` directly) when `mAdsrOverridden == true`. Preserves the in-flight 1.5 ms quick-release; applies the new user setting on the next `startNote` via the restore path below. Without this guard, a user-driven ADSR change during a steal-in-progress would stomp the quick-release and either extend the fade-out indefinitely or cut it short audibly.
+- **`VibeVoice::startNote` (top of body, after `releaseResources()` call)**: restore user's ADSR params if `mAdsrOverridden == true`, then clear `mAdsrOverridden`. End of body: `mIsActive.store(true, std::memory_order_release)` + `mInRelease = false`. Marks the voice as freshly active for the steal-candidate scan + restores the user's release time so the new note has its expected envelope shape.
+- **`VibeVoice::stopNote(velocity, allowTailOff=true)`**: set `mInRelease = true` BEFORE `mAdsr.noteOff()` so `findStealCandidate` sees the Tier 0 state correctly on any same-block subsequent voice scan.
+- **`VibeVoice::releaseResources()`**: clear `mIsActive` (`std::memory_order_release`) + clear `mInRelease`. `mAdsrOverridden` + `mPreStealAdsrParams` persist across `releaseResources` — they're cleared / restored in `startNote` instead. (Reasoning: `releaseResources` fires at fade-out end, but the next `startNote` is the natural restore point so `setAdsr` calls between fade-out-end and next-startNote still route correctly through the override guard.)
+- **`VibeVoice::initiateSteal()` NEW**: idempotent override of the voice's ADSR release to 0.0015 sec. Saves the user's pre-steal `juce::ADSR::Parameters` into `mPreStealAdsrParams` + sets `mAdsrOverridden = true`. Calls `mAdsr.setParameters` with the override params. Idempotent on the "already overridden" case (saves again would clobber the saved user params with the quick-release params — the early-return prevents that).
+- **`VibeSynth::findStealCandidate()` NEW**: 3-tier scan over `mVoices[]`. Within each tier, picks the oldest by `mNoteStartCounter`. Returns from the lowest-priority populated tier.
+- **`VibeSynth::renderNextBlock` top of body NEW look-ahead pre-scan**: ~25 lines. Clear all `mNoteOffQueued` flags via `for (auto* v : mVoices) v->setNoteOffQueued(false)`. Walk the MIDI buffer; for each noteOff event, check if a later same-pitch noteOn would strip it (mirrors the existing same-pitch-strip logic) — if NOT stripped, find the voice currently playing that pitch and set `mNoteOffQueued = true`. Resets every block (transient flag; no cross-block state).
+- **`VibeSynth::renderNextBlock` same-pitch preemption loop** at the pre-batch `:899-906`: replaced `dynamic_cast<VibeVoice*>(mSynth.getVoice(vi))` with `mVoices[vi]` iteration. Hot — fires on every note-on. Sub-A = (a) hot-path optimization.
+- **`VibeSynth::renderNextBlock` voiceCap-stealing branch** at the pre-batch `:944-960`: full rewrite. Replaced the pre-batch oldest-first dynamic_cast loop + `oldest->stopNote(0.f, false)` (hard stop, no tail) with: (1) active-voice count scan over `mVoices[]` reading `mIsActive` atomics; (2) if count >= cap, call `findStealCandidate(note)`; (3) if a victim is found, `victim->initiateSteal(); victim->stopNote(0.f, true)` — the `allowTailOff=true` lets the quick ADSR release run naturally during subsequent renderNextBlock calls. Quick-release tails do NOT stack — multiple stolen voices fade out independently in their own slots.
+- **`cap` calculation**: `const int cap = mLastVoiceCap > 0 ? mLastVoiceCap : kLogicalCap;` (was `kMaxVoices`). Critical fix-as-you-go: with `kMaxVoices=24` post-Correction-1, leaving `cap = kMaxVoices` would have given cap=24 by default, defeating the entire over-provisioning intent (the 8 reserve voices would be available for user-facing polyphony, not for stealing-fade-out overflow). `kLogicalCap=16` is the right default sentinel; user-set `voiceCap` still respects 1..16 as before.
+
+#### Grep cleanliness post-edits
+
+- `grep -rn "dynamic_cast<VibeVoice" Source/VibePlayer/` returns ZERO matches. All hot-path voice scans use `mVoices[]` per Sub-A = (a).
+- All four new flag members + `mPreStealAdsrParams` accounted for in header.
+- No `juce::ADSR::isInRelease()` calls anywhere — that API doesn't exist (Task 1 inventory Section 2 finding); `mInRelease` member tracking is the load-bearing replacement.
+
+#### Build status
+
+Both Release + Debug build clean. Only pre-existing warnings.
+
+### Section 3 — Verify PASS (Jeff, 2026-05-25) across 3 successive rounds
+
+**Round 1** — after over-provisioning + 2-tier + ADSR quick-release (Correction 1 only). Jeff reported the held-lead pathology: lead-note-held-across-looping-chord scenario steals the lead after 2 bars. Round 1 verify FAILED — surfaced the need for Correction 2.
+
+**Round 2** — after 3-tier with `isKeyDown()` protection (Correction 1 + Correction 2). Jeff re-tested with the looping-chord-at-loop-boundary scenario. Lead still stolen "after 2 bars". Round 2 verify FAILED — surfaced the diagnosis that led to Correction 3 (MIDI-event-ordering at loop boundaries).
+
+**Round 3** — after look-ahead noteOff pre-scan (Correction 1 + Correction 2 + Correction 3). Jeff confirmed his test setup matched the diagnosis: "16 sustained 1 bar notes over 4 bars (16notes each bar) and one played key continuously" (Scenario A) and "4 note looping pattern + 5th sustained" (Scenario B). Round 3 verify PASS — all scenarios cleared:
+
+- **Scenario A** (16-chord-loop + held lead, default voiceCap=16): held lead survives all loop iterations. The 16 chord notes' noteOffs at the loop boundary flag the chord voices as `mNoteOffQueued = true` (Tier 1) BEFORE the next-loop chord's noteOns dispatch; new-chord noteOns steal the Tier 1 chord-voices via `findStealCandidate`; held lead stays in Tier 2 untouched.
+- **Scenario B** (4-chord-loop + held lead, voiceCap=4): held lead survives all iterations. Same mechanism with 4 instead of 16 looping voices.
+- **Scenario C regression check** (release-phase-preferred order at voiceCap=4 + 5 short-duration notes): 5th note's voiceCap-steal picks the oldest Tier 0 voice before any Tier 1 / Tier 2. Tier ordering preserved correctly.
+- **Scenario D regression check** (all-keys-held fallback at voiceCap=4): hold 4 physical keys + tap a 5th. No Tier 0 or Tier 1 candidate available — `findStealCandidate` falls back to Tier 2, picks the oldest held key. Confirms the protection isn't infinite.
+- **Scenario E** (Reverse mode + Scenarios A or B): reverse playback still works + steal still click-free.
+- **Scenario F** (MT parity, MT-on vs MT-off): identical voice behavior across both transport-thread settings.
+
+### Section 4 — Sub-spec calls + Lx clarifications captured during execution (worth re-noting in §5 STATUS banner at close)
+
+Task 3's final shape includes four refinements to the original L1-L10 + Sub-A/B/C plan locks. None are blockers for batch close — Task 3 ships exactly as Jeff approved — but they ARE the as-shipped behavior and should be documented at QA-VoicePool close so the deliverable is recorded against the L1-L10 plan accurately:
+
+- **L6 "64-sample fade-out" reinterpreted** — original blueprint-literal reading was "render 64 samples of fade audio synchronously". Final implementation is **ADSR quick-release with release=1.5 ms** (matches the 64-sample target at 44.1 kHz). Per Jeff's Correction 1 decision.
+- **L7(b) "hybrid release-preferred fallback to overall-oldest" upgraded to 3-tier with key-down protection** — same release-preferred bias as locked, but adds the Tier 2 protect-held-keys layer that wasn't in the original L7(b) wording. The 3-tier ordering (release → noteOff-queued-or-key-released → key-down) matches the pro-DAW standard Jeff articulated mid-Correction-2. The original 2-tier "fallback overall-oldest" becomes Tier 2 within-tier ordering (still oldest-first), so L7(b) behavior is a strict superset of the locked spec.
+- **NEW: physical over-provisioning** — `kMaxVoices=24`, `kLogicalCap=16`, 8 reserve voices. Not in the original L1-L10 spec calls; emerged from Correction 1 as the safe alternative to synchronous-render fade-out. The user-facing polyphony default and APVTS range are UNCHANGED.
+- **NEW: noteOff look-ahead pre-scan** — `mNoteOffQueued` flag + ~25-line pre-scan loop at the top of `VibeSynth::renderNextBlock`. Not in the original L1-L10 spec calls; emerged from Correction 3. Preserves sample-accurate MIDI timing — does NOT reorder events; only annotates voices with "noteOff is coming this block".
+
+### Section 5 — Rule 4 Diagnostic Instrumentation Catalog
+
+Nil for Task 3 (no `DBG` / `juce::Logger::writeToLog` / temp `jassert` / debug `juce::AlertWindow` added during execution; all 3 design pivots resolved via static analysis + Jeff's verify rounds, no in-source diagnostics needed).
+
+### Section 6 — Next action
+
+Task 4 — `findRegion` `std::vector<int> candidates` → `std::array<int, 32>` stack-alloc per L5(a). Small orthogonal task (~30 min). Touches only `VibeSampleManager::findRegion` at [VibePlayerDSP.cpp:415-416](../../Source/VibePlayer/VibePlayerDSP.cpp:415) + the 4 read sites. After Task 4: Task 5 stress-file verify (no commit per QA-InsertMaps Task 3 precedent) → Task 6 cleanup + grep sweep → Task 7 close (the §9 Forks entry for the BaySickSynth `mOsc.reset()` finding routed to QA-EngineApvts per Jeff's Task 2 scope-discipline lock + the Section 4 L6 / L7(b) refinements captured as accepted-design notes vs literal-blueprint deviations both land in the close routing).

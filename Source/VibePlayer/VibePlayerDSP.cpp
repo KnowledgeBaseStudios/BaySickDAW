@@ -492,6 +492,12 @@ void VibeVoice::releaseResources()
     mActiveResamp = nullptr;
     mSampleBuffer.reset();
     mIsPlaying    = false;
+
+    // QA-VoicePool Task 3: per-note steal-state flags also clear here.  mAdsr
+    // override state (mAdsrOverridden + mPreStealAdsrParams) is preserved across
+    // releaseResources - startNote restores it on the next note allocation.
+    mIsActive.store (false, std::memory_order_release);
+    mInRelease = false;
 }
 
 //==============================================================================
@@ -523,6 +529,16 @@ void VibeVoice::startNote (int midiNote, float velocity,
                             int /*pitchWheelPos*/)
 {
     releaseResources();
+
+    // QA-VoicePool Task 3: restore user's ADSR params if the previous note was
+    // stolen with a quick-release override.  mPreStealAdsrParams holds either the
+    // params at steal time OR any user-driven setAdsr updates that arrived during
+    // the override (see VibeVoice::setAdsr).
+    if (mAdsrOverridden)
+    {
+        mAdsr.setParameters (mPreStealAdsrParams);
+        mAdsrOverridden = false;
+    }
 
     const int velInt = juce::roundToInt (velocity * 127.f);
     const VibeRegion* region = mManager.findRegion (midiNote, velInt, mArticGroup);
@@ -605,6 +621,11 @@ void VibeVoice::startNote (int midiNote, float velocity,
     mReductStep = 0;
     mIsPlaying  = true;
 
+    // QA-VoicePool Task 3: flip supplemental active flag (Sub-A=(a)) for
+    // findStealCandidate's atomic scan; clear release predicate (fresh note).
+    mIsActive.store (true, std::memory_order_release);
+    mInRelease = false;
+
     // S1 Incr3: monotonic age stamp for voiceCap-based oldest-first stealing.
     static juce::uint32 sGlobalNoteCounter = 0;
     mNoteStartCounter = ++sGlobalNoteCounter;
@@ -615,12 +636,16 @@ void VibeVoice::stopNote (float, bool allowTailOff)
 {
     if (allowTailOff)
     {
+        // QA-VoicePool Task 3: flip release predicate so findStealCandidate's
+        // L7(b) hybrid can prefer this voice (release-phase oldest).  Cleared
+        // at ADSR-end via releaseResources in renderNextBlock's idle path.
+        mInRelease = true;
         mAdsr.noteOff();
     }
     else
     {
         clearCurrentNote();
-        releaseResources();
+        releaseResources();  // also clears mIsActive + mInRelease (Task 3)
     }
 }
 
@@ -778,7 +803,33 @@ void VibeVoice::setAdsr (float a, float d, float s, float r) noexcept
     p.decay   = juce::jmax (0.001f, d);
     p.sustain = juce::jlimit (0.f, 1.f, s);
     p.release = juce::jmax (0.001f, r);
-    mAdsr.setParameters (p);
+    // QA-VoicePool Task 3: if a steal-quick-release override is active, don't
+    // disturb mAdsr's in-flight 1.5 ms release - save the new user setting so
+    // startNote can restore it on the next note allocation instead.
+    if (mAdsrOverridden)
+        mPreStealAdsrParams = p;
+    else
+        mAdsr.setParameters (p);
+}
+
+// QA-VoicePool Task 3: initiateSteal saves the user's ADSR params and overrides
+// mAdsr's release to ~1.5 ms (~64 samples @ 44.1 kHz / ~72 @ 48 kHz - "instantly
+// fade it out" per Jeff's verbatim blueprint).  Caller (VibeSynth voiceCap branch)
+// follows with stopNote(0.f, true) so the voice enters its quick-release naturally
+// inside renderNextBlock - no synchronous render past the audio block boundary.
+// Idempotent: re-stealing an already-overridden voice is a no-op (the in-flight
+// quick-release continues without disturbance).
+void VibeVoice::initiateSteal() noexcept
+{
+    if (mAdsrOverridden)
+        return;
+
+    mPreStealAdsrParams = mAdsr.getParameters();
+    mAdsrOverridden     = true;
+
+    juce::ADSR::Parameters quick = mPreStealAdsrParams;
+    quick.release = 0.0015f;  // 1.5 ms - matches L6 64-sample target at 44.1 kHz
+    mAdsr.setParameters (quick);
 }
 
 
@@ -796,8 +847,16 @@ VibeSynth::VibeSynth()
     // overwrites with the real rate before any audio processing.
     mSynth.setCurrentPlaybackSampleRate (44100.0);
     mSynth.addSound (new VibeSynthSound());
+    // QA-VoicePool Task 3: physical pool over-provisioned to kMaxVoices (24) so
+    // the steal quick-release fade-out lands on reserve slots; cache the
+    // VibeVoice* into mVoices alongside mSynth.addVoice so the audio-thread
+    // voiceCap scan can iterate without dynamic_cast per voice (Sub-A=(a)).
     for (int i = 0; i < kMaxVoices; ++i)
-        mSynth.addVoice (new VibeVoice (mManager));
+    {
+        auto* v = new VibeVoice (mManager);
+        mSynth.addVoice (v);
+        mVoices[i] = v;
+    }
 }
 
 //==============================================================================
@@ -811,6 +870,69 @@ void VibeSynth::prepare (double sampleRate, int maxBlockSize)
     {
         v.prepareForPlayback (maxBlockSize);
     });
+}
+
+// QA-VoicePool Task 3: L7(b) 3-tier hybrid steal selection (refined 2026-05-25
+// after Jeff caught the 2-tier original's "held lead note stolen by looping
+// chord" pathology - the overall-oldest fallback eventually picked the
+// sustained lead because it was the oldest active voice, even though it was
+// still being physically held).  Scans cached mVoices[] (no dynamic_cast per
+// voice - Sub-A=(a) rationale) with a 3-tier priority hierarchy.  Within each
+// tier, pick the oldest-by-mNoteStartCounter.  Return from the lowest-priority
+// tier that has a candidate (Tier 0 first, falling back to Tier 2 only if
+// neither Tier 0 nor Tier 1 yielded a victim):
+//
+//   Tier 0 (steal first): mInRelease == true  - voice is in ADSR release phase,
+//                         fading out anyway; cheapest steal.
+//   Tier 1 (medium):      ! isKeyDown()       - key has been physically released
+//                         but voice is still active (sustain pedal holding the
+//                         note in sustain phase, or rare attack/decay-with-key-up
+//                         cases).  juce::SynthesiserVoice::isKeyDown() is managed
+//                         by JUCE's Synthesiser::startVoice (sets true) +
+//                         noteOff/sustain-pedal handling (sets false).
+//   Tier 2 (protect):     isKeyDown() == true - key physically held; pro-DAW
+//                         convention is to almost never steal these.  Only
+//                         stolen if no Tier 0 or Tier 1 candidate exists (the
+//                         pathological all-keys-held scenario).
+//
+// newPitch is reserved for future "don't steal a voice playing the same pitch"
+// logic; unused for now.  Returns nullptr only if zero active voices exist
+// (shouldn't happen at steal-time since activeCount >= cap is the precondition).
+VibeVoice* VibeSynth::findStealCandidate (int /*newPitch*/) const noexcept
+{
+    VibeVoice*   victims[3] = { nullptr, nullptr, nullptr };
+    juce::uint32 ages   [3] = {
+        std::numeric_limits<juce::uint32>::max(),
+        std::numeric_limits<juce::uint32>::max(),
+        std::numeric_limits<juce::uint32>::max()
+    };
+
+    for (int vi = 0; vi < kMaxVoices; ++vi)
+    {
+        auto* vv = mVoices[vi];
+        if (vv == nullptr || ! vv->isActive())
+            continue;
+
+        const auto age = vv->getNoteStartCounter();
+        int tier;
+        if (vv->isInRelease())
+            tier = 0;   // Tier 0: release phase
+        else if (vv->isNoteOffQueued() || ! vv->isKeyDown())
+            tier = 1;   // Tier 1: about-to-release this block (look-ahead) OR key
+                        // released but voice still sustaining (sustain pedal held)
+        else
+            tier = 2;   // Tier 2: key physically held + no queued noteOff (protect)
+
+        if (age < ages[tier])
+        {
+            victims[tier] = vv;
+            ages[tier]    = age;
+        }
+    }
+
+    if (victims[0] != nullptr) return victims[0];
+    if (victims[1] != nullptr) return victims[1];
+    return victims[2];
 }
 
 //==============================================================================
@@ -844,6 +966,47 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // QA-VoicePool Task 3 look-ahead fix (2026-05-25): pre-scan MIDI for
+    // noteOffs that WILL be delivered this block (not stripped by a same-pitch
+    // later noteOn) and flip mNoteOffQueued on the voices playing those pitches.
+    // Reason: noteOns are dispatched synchronously via mSynth.noteOn in the main
+    // loop below (which fires voiceCap stealing), but noteOffs are deferred to
+    // filteredMidi and only delivered via mSynth.renderNextBlock at the bottom
+    // of this function.  Without this look-ahead, the voiceCap-stealing
+    // findStealCandidate sees about-to-release voices as still-key-down (their
+    // noteOff hasn't fired yet), classifies them as Tier 2 alongside a held lead,
+    // and picks the lead as the oldest Tier 2 victim.  With the look-ahead flag,
+    // those voices demote to Tier 1 and the lead stays protected.
+    //
+    // Clear all flags first (transient per-block), then mark voices about to
+    // receive a non-stripped noteOff.
+    for (int vi = 0; vi < kMaxVoices; ++vi)
+        if (mVoices[vi] != nullptr)
+            mVoices[vi]->setNoteOffQueued (false);
+
+    for (const auto m : midi)
+    {
+        const auto msg = m.getMessage();
+        if (! msg.isNoteOff())
+            continue;
+        const int p = msg.getNoteNumber();
+        if (p < 0 || p >= 128)
+            continue;
+        // Mirror the same-pitch note-off strip logic below: a noteOff at
+        // sample <= lastNoteOnPerPitch[p] gets stripped (dropped from
+        // filteredMidi) and never fires - skip marking voices in that case.
+        if (lastNoteOnPerPitch[p] >= 0 && m.samplePosition <= lastNoteOnPerPitch[p])
+            continue;
+        // noteOff will be delivered this block.  Mark any voice playing this
+        // pitch so findStealCandidate sees it as Tier 1 (about-to-release).
+        for (int vi = 0; vi < kMaxVoices; ++vi)
+        {
+            auto* vv = mVoices[vi];
+            if (vv != nullptr && vv->isVoiceActive() && vv->getCurrentlyPlayingNote() == p)
+                vv->setNoteOffQueued (true);
+        }
+    }
+
     juce::MidiBuffer filteredMidi;
 
     for (const auto metadata : midi)
@@ -863,13 +1026,16 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
             // juce::Synthesiser's note-off matching from cascading onto a
             // newly allocated voice for the same pitch. Standard sampler
             // behaviour (Kontakt / HALion / FL Sampler all do this).
-            for (int vi = 0; vi < mSynth.getNumVoices(); ++vi)
+            //
+            // QA-VoicePool Task 3: iterate cached mVoices[] (no dynamic_cast
+            // per voice per Sub-A=(a) rationale - this loop fires on every
+            // note-on so the dynamic_cast cost was on the hot path).
+            for (int vi = 0; vi < kMaxVoices; ++vi)
             {
-                if (auto* vv = dynamic_cast<VibeVoice*> (mSynth.getVoice (vi)))
-                {
-                    if (vv->isVoiceActive() && vv->getCurrentlyPlayingNote() == note)
-                        vv->stopNote (0.f, true);   // soft stop (ADSR release)
-                }
+                auto* vv = mVoices[vi];
+                if (vv != nullptr && vv->isVoiceActive()
+                    && vv->getCurrentlyPlayingNote() == note)
+                    vv->stopNote (0.f, true);   // soft stop (ADSR release)
             }
 
             // ── Cut-self: hard-stop ALL voices (any pitch) before the new note ──
@@ -881,7 +1047,11 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
             const float detCents    = mLastDetune  == 9999.f ? 0.f : mLastDetune;
             const int   detMode     = juce::jlimit (0, 2, mLastDetuneMode < 0 ? 0 : mLastDetuneMode);
             const float spreadCents = mUnisonSpread;
-            const int   cap         = mLastVoiceCap > 0 ? mLastVoiceCap : kMaxVoices;
+            // QA-VoicePool Task 3: cap is the LOGICAL polyphony limit (user-facing,
+            // default kLogicalCap=16).  Stealing fires when active >= cap, NOT when
+            // active >= kMaxVoices (=24).  The (kMaxVoices - kLogicalCap) = 8 reserve
+            // voices give the steal-quick-release path a safe landing zone.
+            const int   cap         = mLastVoiceCap > 0 ? mLastVoiceCap : kLogicalCap;
 
             for (int i = 0; i < N; ++i)
             {
@@ -907,24 +1077,27 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
 
                 const float cents_i = detPart + spreadPart;
 
-                // Voice-cap enforcement: steal oldest active voice if at capacity
-                int           activeCount = 0;
-                VibeVoice*    oldest      = nullptr;
-                juce::uint32  oldestAge   = std::numeric_limits<juce::uint32>::max();
-                for (int vi = 0; vi < mSynth.getNumVoices(); ++vi)
+                // QA-VoicePool Task 3: voice-cap enforcement via mIsActive atomic
+                // scan + findStealCandidate's L7(b) hybrid (prefer release-phase
+                // oldest; fall back to overall-oldest).  Victim enters a ~1.5 ms
+                // quick-release via initiateSteal + stopNote(0.f, true); it
+                // continues fading inside JUCE's renderNextBlock while the new
+                // note's mSynth.noteOn allocates to one of the reserve voices
+                // (kMaxVoices=24 - kLogicalCap=16 = 8 reserves), so the fade-out
+                // and the new note never collide on the same slot in the same block.
+                int activeCount = 0;
+                for (int vi = 0; vi < kMaxVoices; ++vi)
+                    if (mVoices[vi] != nullptr && mVoices[vi]->isActive())
+                        ++activeCount;
+
+                if (activeCount >= cap)
                 {
-                    if (auto* vv = dynamic_cast<VibeVoice*> (mSynth.getVoice (vi)))
+                    if (auto* victim = findStealCandidate (note))
                     {
-                        if (vv->isVoiceActive())
-                        {
-                            ++activeCount;
-                            const auto age = vv->getNoteStartCounter();
-                            if (age < oldestAge) { oldestAge = age; oldest = vv; }
-                        }
+                        victim->initiateSteal();
+                        victim->stopNote (0.f, true);  // enter quick-release naturally
                     }
                 }
-                if (activeCount >= cap && oldest)
-                    oldest->stopNote (0.f, false);
 
                 // Pre-tag all voices with cents_i - juce::Synthesiser::noteOn will
                 // allocate exactly one idle voice and call startNote synchronously,
