@@ -152,6 +152,48 @@ value vs. one-shot trace noise -- either useful logging gets
 stripped accidentally or dead diagnostics bloat the runtime log
 forever.
 
+**Rule 5 — Sub-spec calls discovered during planning surface via
+chat BEFORE landing in the plan body.** Adopted 2026-05-26
+mid-QA-SfzGroup plan-mode after recurring violations across
+QA-VoicePool / QA-InsertMaps / QA-SfzGroup plans where new sub-spec
+calls discovered during plan-mode drafting were pre-picked, baked
+into task bodies as if locked, and only listed as table rows in the
+"Sub-spec calls surfaced for ExitPlanMode" section of the plan file.
+
+During plan mode, ANY new sub-spec call discovered while drafting the
+plan body (task count split, implementation shape, commit boundaries,
+file-edit pattern choices, etc.) MUST be surfaced to the user via
+chat (`AskUserQuestion` or message) and EXPLICITLY ANSWERED BEFORE
+landing in the plan body.
+
+The "Sub-spec calls surfaced for ExitPlanMode" table in the canonical
+plan-file structure (per `federated-bouncing-cupcake.md` exemplar)
+is for spec calls genuinely DEFERRED until later in execution -- e.g.
+a slot/placement decision that depends on a later finding.  It is
+NOT for picks the agent wants to make.
+
+- **Pre-picking a "recommendation" + writing the plan body as if
+  it's locked** is the canonical violation pattern.  Caught three
+  batches in a row at QA-VoicePool / QA-InsertMaps / QA-SfzGroup
+  plans.  Jeff verbatim 2026-05-26: "instead of posing any of them
+  to me have just included your suggestions as truth and you've
+  done that on the last 3 plans, This needs to never happen again."
+- **Correct flow:** pause mid-planning -> pose the sub-spec call in
+  chat with concrete options (NOT a recommendation, just options)
+  -> wait for the user's pick -> bake the pick into the plan body
+  -> continue planning OR pose the next discovered sub-spec call.
+- **Cross-refs:** `feedback_dont_make_unilateral_spec_calls.md`
+  (the general principle) + this rule (the plan-mode-specific
+  enforcement) + `Files For Claude/batch_session_boilerplate.md`
+  step 5b + standing-rules section (the session-open injection).
+
+Why: pre-picking + baking-into-plan-body + table-listing is
+indistinguishable from picking outright.  By the time the user sees
+the plan via ExitPlanMode, the plan body assumes the agent's picks
+-- overriding a pick means rewriting Task 2 / Task 3 / etc. bodies.
+Surfacing via chat first keeps the plan body honest: every plan-body
+line reflects a user-confirmed decision, not an agent default.
+
 ### Document Formatting Conventions (canonical for all `Plans & Specs/` docs)
 
 All five `Plans & Specs/` documents follow a shared formatting doctrine
@@ -1253,11 +1295,11 @@ needed to find what you should pull up to review the work.
 
 #### **QA-SfzGroup: SFZ `<group>` opcode-inheritance state machine + Aria/sfizz RR loss investigation** *(NEW — inserted 2026-05-26)*
 
-**Plan file:** `<silly-name>.md (when started)`
+**Plan file:** `Plans & Specs/Batch Plans/magical-petting-dijkstra.md`
 - Items: fix `VibeSampleManager::parseSFZ`'s `<group>`-scoped opcode-inheritance state machine + investigate the parallel sfizz code path for the same round-robin variation loss symptom across BaySickRustyDrums + BaySickGuitars + BaySickBasses.  Origin: surfaced 2026-05-26 during QA-VoicePool Task 4 Tuba-KS.sfz fallback smoke test (FND-2 in the QA-VoicePool Implemented Work Log entry).  Jeff observed that Tuba-KS played the same variant every time the same key was struck, contradicting the file's 4-variant `<group>`-scoped `seq_length=4` + `seq_position=1..4` round-robin specification.  Two-track investigation confirmed the bug is in our hand-rolled SFZ parser, not the file: per-line opcode-extraction at [`Source/VibePlayer/VibePlayerDSP.cpp:148`](../../Source/VibePlayer/VibePlayerDSP.cpp:148) has an early-return `if (!inRegion) continue;` BEFORE any opcode-write — every opcode inside a `<group>` block is silently dropped before reaching a `<region>`.  Per the SFZ v1 spec, opcodes inside `<group>` are supposed to be inherited by every `<region>` that follows until the next `<group>` or EOF; our parser implements ZERO of this inheritance.  Pre-existing bug — predates QA-VoicePool; surfaced only because Task 4's L5(a) `findRegion` swap exercised the candidate list directly + the populated list was degenerate (one candidate per `(note, velocity, artic)` tuple instead of 4).  Affected engines: BaySickPlayer (hand-rolled parser; the QA-VoicePool surface case); BaySickRustyDrums + BaySickGuitars + BaySickBasses (sfizz library parser; Jeff has historically noticed the same RR-loss symptom on Aria-player content and assumed it was "just how it works" — needs investigation to confirm whether sfizz has its own equivalent state-machine gap or whether the issue is in file-content / loader-handoff).  See §9 thirty-eighth Forks entry.
 - Scope (Jeff-locked verbatim 2026-05-26 at QA-VoicePool Task 4 surface): "fixing the `<group>` state-machine inheritance and investigating the Aria/sfizz RR loss":
   - **Track 1: fix `<group>` opcode-inheritance in `VibeSampleManager::parseSFZ`** (`Source/VibePlayer/VibePlayerDSP.cpp:90`).  Implementation outline: track a `VibeRegion mGroupDefaults` accumulator inside `parseSFZ`; on `<group>` header, reset the accumulator to defaults; on `<region>` header, copy the accumulator into the new region as its baseline; route opcode writes to `mGroupDefaults` while `!inRegion` and to the current region while `inRegion`.  The early-return `if (!inRegion) continue;` at `:148` is replaced with conditional dispatch (group-default accumulator vs current region).  Verify on Tuba-KS.sfz + every other Core Library `.sfz` that uses `<group>`-scoped opcodes — 4-variant rotation must be audible on repeated key strikes.
-  - **Track 2: investigate Aria/sfizz RR loss across BaySickRustyDrums + BaySickGuitars + BaySickBasses**.  Read sfizz's group/region inheritance implementation (vendored at `Source/sfizz/`); confirm whether sfizz implements the inheritance correctly (in which case the symptom is file-content / loader-handoff) OR whether sfizz has its own equivalent state-machine gap (in which case the symptom is sfizz parser).  If sfizz is correct, profile actual Aria-player content load paths in BaySickRustyDrums + BaySickGuitars + BaySickBasses to find where the RR opcodes get lost.  If sfizz is broken, scope the fix vs the upstream patch decision (vendored library; could patch in-tree or upstream).  Two independent investigations bundled into the same batch because they share the same audible symptom even if the cause differs.
+  - **Track 2: investigate Aria/sfizz RR loss across BaySickRustyDrums + BaySickGuitars + BaySickBasses**.  Read sfizz's group/region inheritance implementation (vendored at `libs/sfizz/`); confirm whether sfizz implements the inheritance correctly (in which case the symptom is file-content / loader-handoff) OR whether sfizz has its own equivalent state-machine gap (in which case the symptom is sfizz parser).  If sfizz is correct, profile actual Aria-player content load paths in BaySickRustyDrums + BaySickGuitars + BaySickBasses to find where the RR opcodes get lost.  If sfizz is broken, scope the fix vs the upstream patch decision (vendored library; could patch in-tree or upstream).  Two independent investigations bundled into the same batch because they share the same audible symptom even if the cause differs.
   - Sweep stale comments referencing the pre-batch broken-inheritance behavior anywhere in the SFZ loading path.
   - Optional polish: any opcode-coverage gap surfaced during the investigation (e.g. other group-scoped opcodes we drop silently — `volume` / `pan` / `loop_mode` / etc.) gets a small bullet here rather than a separate batch routing, since the structural state-machine fix in Track 1 enables them all in one shot.
 - Risk: **low-medium** -- parser-only change on the message thread (file load time); audio path unaffected.  Worst case: the new accumulator-baseline-into-region copy introduces an unexpected per-region behavior delta (caught by ear immediately on any existing Core Library file that doesn't use `<group>` opcodes — should sound identical to pre-batch); sfizz investigation could surface vendored-library scope creep (mitigated by surfacing the scope decision to Jeff before any sfizz source touches).
@@ -4687,7 +4729,7 @@ Pairs cleanly with QA-EngineApvts's primary scope (dirty-flag pattern compliance
 
 **Scope of QA-SfzGroup (Jeff-locked 2026-05-26 verbatim — full per-batch plan file deferred until QA-SfzGroup opens):**
 - **Track 1: fix `<group>` opcode-inheritance in `VibeSampleManager::parseSFZ`.**  The `if (!inRegion) continue;` early-return at [`Source/VibePlayer/VibePlayerDSP.cpp:148`](../../Source/VibePlayer/VibePlayerDSP.cpp:148) is wrong; opcodes inside a `<group>` should accumulate into a group-default state that the next `<region>` inherits as its baseline.  Implementation outline: track a `VibeRegion mGroupDefaults` accumulator inside `parseSFZ`; on `<group>` header, reset the accumulator to defaults; on `<region>` header, copy the accumulator into the new region as its baseline; route opcode writes to the accumulator while `!inRegion` and to the current region while `inRegion`.
-- **Track 2: investigate Aria/sfizz RR loss across BaySickRustyDrums + BaySickGuitars + BaySickBasses.**  Read sfizz's group/region inheritance implementation (vendored at `Source/sfizz/`); confirm whether sfizz implements the inheritance correctly (in which case the symptom is file-content / loader-handoff) OR whether sfizz has its own equivalent state-machine gap (in which case the symptom is sfizz parser); profile actual Aria-player content load paths if needed; scope the fix vs upstream-patch decision if sfizz is broken.  Two independent investigations bundled into the same batch because they share the audible symptom even if the cause differs.
+- **Track 2: investigate Aria/sfizz RR loss across BaySickRustyDrums + BaySickGuitars + BaySickBasses.**  Read sfizz's group/region inheritance implementation (vendored at `libs/sfizz/`); confirm whether sfizz implements the inheritance correctly (in which case the symptom is file-content / loader-handoff) OR whether sfizz has its own equivalent state-machine gap (in which case the symptom is sfizz parser); profile actual Aria-player content load paths if needed; scope the fix vs upstream-patch decision if sfizz is broken.  Two independent investigations bundled into the same batch because they share the audible symptom even if the cause differs.
 
 **Sequencing (Jeff, 2026-05-26):** **immediately after QA-VoicePool, before QA-EngineApvts** (Jeff's verbatim "very next batch after we close QA-VoicePool" per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + the new 23-asterisk QA-SfzGroup footnote at §6).  Slot rationale: close-spawned detour from FND-2 surfaced during QA-VoicePool Task 4 Tuba-KS.sfz verify; the rollback-boundary discipline that kept QA-VoicePool scope-pure (real-time audio-thread heap allocations only) means the parser fix needs its own dedicated batch rather than getting folded into the next perf-audit-cluster batch.
 
