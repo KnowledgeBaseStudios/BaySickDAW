@@ -27,6 +27,13 @@ public:
     // the default name.  Used by BaySickRustyDrums to label the full kit
     // keymap; ignored in drum-row-label mode.
     void setNoteLabelProvider(std::function<juce::String(int)> provider);
+    // QA-SfzGroup Sub-Q (2026-05-27): keyswitch label provider.  When non-null
+    // AND returns non-empty for a given MIDI note, that key is rendered with
+    // a distinct visual (amber highlight + label) to signal it's a keyswitch
+    // (not a playable note).  Takes priority over setNoteLabelProvider in
+    // PianoKeyboard::paint - keyswitch keys get the special render even if
+    // the engine also sets a regular note-label provider.
+    void setKeyswitchLabelProvider(std::function<juce::String(int)> provider);
     // J-7b: render every key as white (no black-key strips) so labels are
     // legible across the full range.  Used by BaySickRustyDrums where the
     // sharp/flat distinction has no musical meaning (it's a drum kit).
@@ -46,6 +53,7 @@ private:
     bool mAllKeysWhite { false };
     std::vector<juce::String> mDrumRowLabels;  // top-to-bottom row labels
     std::function<juce::String(int)> mNoteLabelProvider;
+    std::function<juce::String(int)> mKeyswitchLabelProvider;
 
     int noteToY  (int note) const;
     int yToNote  (int y)    const;
@@ -504,6 +512,8 @@ public:
     void setDrumRowLabels(const std::vector<juce::String>& labels);
     // J-7b: forward a per-MIDI-note label provider to the keyboard widget.
     void setNoteLabelProvider(std::function<juce::String(int)> provider);
+    // QA-SfzGroup Sub-Q: forward keyswitch label provider to keyboard.
+    void setKeyswitchLabelProvider(std::function<juce::String(int)> provider);
     // J-7b: paint every keyboard row as a white key (BaySickRustyDrums).
     void setAllKeysWhiteMode(bool enabled);
     // J-7b: scroll the view so `topNote` is the highest visible MIDI note.

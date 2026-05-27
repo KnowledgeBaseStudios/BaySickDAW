@@ -99,6 +99,12 @@ private:
     std::atomic<int> mAuditionHoldOff { -1 };
     EngineSidechainHelper mScHelper;   // C.4 Phase 2.2 SC primitive
 
+    // Sub-M: scratch MIDI buffer for the keyswitch pre-scan filter.  Reused
+    // across blocks - clear() at top of processBlock, addEvent to rebuild,
+    // swapWith back into the input buffer.  No per-block allocation in steady
+    // state (juce::MidiBuffer reuses capacity after clear()).
+    juce::MidiBuffer mKeyswitchFilteredMidi;
+
     // ── CPU guard cache ───────────────────────────────────────────────────────
     struct ParamCache
     {

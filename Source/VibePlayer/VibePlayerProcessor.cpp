@@ -55,6 +55,37 @@ void VibePlayerProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (holdOnNote  >= 0 && holdOnNote  <= 127)
         midi.addEvent (juce::MidiMessage::noteOn  (1, holdOnNote, (juce::uint8) 100), 0);
 
+    // Sub-M: keyswitch pre-scan.  Walk the MIDI buffer once; for every
+    // note-on/note-off whose MIDI note is a keyswitch (per the loaded SFZ's
+    // sw_lokey..sw_hikey range), route to the manager's keyswitch state
+    // handlers + STRIP the event from the buffer.  VibeSynth never sees
+    // keyswitch events - no voice-stealing trigger, no wasted cycles.
+    // Non-keyswitch events copy through unchanged.  When no SFZ is loaded
+    // (or no regions declare sw_lokey/sw_hikey), isKeyswitchNote returns
+    // false for every note and the buffer passes through identically.
+    {
+        auto& mgr = mSynth.getManager();
+        mKeyswitchFilteredMidi.clear();
+        for (const auto meta : midi)
+        {
+            const auto msg = meta.getMessage();
+            if (msg.isNoteOn() || msg.isNoteOff())
+            {
+                const int note = msg.getNoteNumber();
+                if (mgr.isKeyswitchNote (note))
+                {
+                    if (msg.isNoteOn())
+                        mgr.handleKeyswitchNoteOn  (note);
+                    else
+                        mgr.handleKeyswitchNoteOff (note);
+                    continue;   // strip
+                }
+            }
+            mKeyswitchFilteredMidi.addEvent (msg, meta.samplePosition);
+        }
+        midi.swapWith (mKeyswitchFilteredMidi);
+    }
+
     mSynth.renderNextBlock (buffer, midi);
 
     // Flush NaN/Inf - prevents Windows WASAPI from permanently silencing the device.

@@ -70,6 +70,14 @@ struct PianoRollConnection
     // (used by BaySickRustyDrums to show "Snare Center", "Hi-hat Tight Closed",
     // etc.).  Returning empty falls back to the default JUCE note name.
     std::function<juce::String(int midiNote)>  noteLabelProvider;
+    // QA-SfzGroup Sub-Q (2026-05-27): optional keyswitch-label provider.
+    // BaySickPlayer engines hosting an SFZ with sw_lokey/sw_hikey + sw_label
+    // opcodes return the human-readable keyswitch label ("C6 Sustain",
+    // "C#6 Staccato") for the matching MIDI note.  PianoKeyboard renders
+    // these keys with a distinct visual (amber highlight + label) so users
+    // can discover the keyswitch range without inspecting the SFZ file.
+    // Empty string for non-keyswitch notes or engines without keyswitching.
+    std::function<juce::String(int midiNote)>  keyswitchLabelProvider;
     // J-7b: top-of-view default MIDI note when this engine is first selected.
     // -1 = no preference (use the page's existing default).
     int                                        defaultTopNote { -1 };

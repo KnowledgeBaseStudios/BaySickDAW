@@ -80,6 +80,12 @@ void PianoKeyboard::setNoteLabelProvider(std::function<juce::String(int)> provid
     repaint();
 }
 
+void PianoKeyboard::setKeyswitchLabelProvider(std::function<juce::String(int)> provider)
+{
+    mKeyswitchLabelProvider = std::move(provider);
+    repaint();
+}
+
 void PianoKeyboard::setAllKeysWhiteMode(bool enabled)
 {
     if (mAllKeysWhite == enabled) return;
@@ -102,6 +108,14 @@ juce::String PianoKeyboard::getTooltip()
 {
     if (mDrumLabelMode || mHoverNote < 0)
         return {};
+    // QA-SfzGroup Sub-Q: keyswitch label takes priority over the regular note
+    // label, so hovering over a keyswitch key shows "C6 Sustain" etc.
+    if (mKeyswitchLabelProvider)
+    {
+        const auto kl = mKeyswitchLabelProvider(mHoverNote);
+        if (kl.isNotEmpty())
+            return kl;
+    }
     if (mNoteLabelProvider)
     {
         const auto label = mNoteLabelProvider(mHoverNote);
@@ -162,6 +176,35 @@ void PianoKeyboard::paint(Graphics& g)
     for (int note = loNote; note <= hiNote; ++note)
     {
         int y  = noteToY(note);
+
+        // QA-SfzGroup Sub-Q (2026-05-27): keyswitch key takes priority - render
+        // with amber-highlighted full-width background + label, regardless of
+        // black/white pitch class.  Allows users to visually discover which
+        // notes are keyswitches (rather than playable notes) on an SFZ piano
+        // roll loaded with sw_lokey/sw_hikey + sw_label opcodes (e.g. Tuba-KS
+        // shows "C6 Sustain" on C7 and "C#6 Staccato" on C#7 — file's IPN
+        // c6/c#6 → MIDI 84/85 → app-C7/C#7 in FL display convention).
+        juce::String keyswitchLabel;
+        if (mKeyswitchLabelProvider)
+            keyswitchLabel = mKeyswitchLabelProvider(note);
+        if (keyswitchLabel.isNotEmpty())
+        {
+            const juce::Colour amber = (note == mPreviewNote)
+                ? juce::Colour(0xfff5d690)    // brighter when previewed
+                : juce::Colour(0xffe8c060);   // amber for keyswitch resting
+            g.setColour(amber);
+            g.fillRect(0, y, bw, mNoteH - 1);
+            g.setColour(juce::Colour(0xff5a4010));
+            g.drawHorizontalLine(y + mNoteH - 1, 0, (float)bw);
+            if (mNoteH >= 8)
+            {
+                g.setColour(juce::Colour(0xff3a2810));
+                g.setFont(juce::Font(juce::jmin(10.f, (float)(mNoteH - 2)), juce::Font::bold));
+                g.drawText(keyswitchLabel, 4, y, bw - 6, mNoteH - 1,
+                           juce::Justification::centredLeft, true);
+            }
+            continue;
+        }
 
         // J-7b: in all-keys-white mode (BaySickRustyDrums), paint every row
         // as a full-width white key so engine labels are legible regardless
@@ -2856,6 +2899,11 @@ void PianoRollContainer::setDrumRowLabels(const std::vector<juce::String>& label
 void PianoRollContainer::setNoteLabelProvider(std::function<juce::String(int)> provider)
 {
     if (mKeyboard) mKeyboard->setNoteLabelProvider(std::move(provider));
+}
+
+void PianoRollContainer::setKeyswitchLabelProvider(std::function<juce::String(int)> provider)
+{
+    if (mKeyboard) mKeyboard->setKeyswitchLabelProvider(std::move(provider));
 }
 
 void PianoRollContainer::setAllKeysWhiteMode(bool enabled)

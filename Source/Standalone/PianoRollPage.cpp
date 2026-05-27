@@ -109,6 +109,7 @@ void PianoRollPage::registerEngine (EngineId id, PianoRollConnection conn)
     if (conn.auditionOn)        roll->onNoteAuditionOn  = conn.auditionOn;
     if (conn.auditionOff)       roll->onNoteAuditionOff = conn.auditionOff;
     if (conn.noteLabelProvider) roll->setNoteLabelProvider (conn.noteLabelProvider);
+    if (conn.keyswitchLabelProvider) roll->setKeyswitchLabelProvider (conn.keyswitchLabelProvider);
     if (conn.defaultTopNote >= 0) roll->setTopNote (conn.defaultTopNote);
     if (conn.allKeysWhite) roll->setAllKeysWhiteMode (true);
     if (mPlayHead)

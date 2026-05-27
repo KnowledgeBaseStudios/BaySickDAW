@@ -5728,6 +5728,14 @@ void StandaloneEditor::registerLayerPianoRoll (LayersPage* lp)
         else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNoteOff(n);
         else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNoteOff(n);
     };
+    // QA-SfzGroup Sub-Q (2026-05-27): BaySickPlayer engines hosting an SFZ
+    // with keyswitches expose human-readable labels via VibeSampleManager;
+    // returns empty for non-BaySickPlayer engines or non-keyswitch notes.
+    conn.keyswitchLabelProvider = [cast](int n) -> juce::String {
+        if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast()))
+            return v->getSynth().getManager().getKeyswitchLabel(n);
+        return {};
+    };
     mPianoRollPage->registerEngine ({ EngineKind::Layer, lp->getPageIndex() }, std::move (conn));
 }
 
@@ -5767,6 +5775,13 @@ void StandaloneEditor::registerBassPianoRoll (BassPage* bp)
         else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNoteOff(n);
         else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNoteOff(n);
     };
+    // QA-SfzGroup Sub-Q (2026-05-27): BaySickPlayer engines hosting an SFZ
+    // with keyswitches expose human-readable labels via VibeSampleManager.
+    conn.keyswitchLabelProvider = [cast](int n) -> juce::String {
+        if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast()))
+            return v->getSynth().getManager().getKeyswitchLabel(n);
+        return {};
+    };
     mPianoRollPage->registerEngine ({ EngineKind::Bass, bp->getPageIndex() }, std::move (conn));
 }
 
@@ -5799,6 +5814,13 @@ void StandaloneEditor::registerDrumPianoRoll (DrumPage* dp)
     conn.auditionOff = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNoteOff(n);
         else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNoteOff(n);
+    };
+    // QA-SfzGroup Sub-Q (2026-05-27): BaySickPlayer engines hosting an SFZ
+    // with keyswitches expose human-readable labels via VibeSampleManager.
+    conn.keyswitchLabelProvider = [cast](int n) -> juce::String {
+        if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast()))
+            return v->getSynth().getManager().getKeyswitchLabel(n);
+        return {};
     };
     mPianoRollPage->registerEngine ({ EngineKind::Drum, dp->getPageIndex() }, std::move (conn));
 }
@@ -7862,6 +7884,14 @@ void StandaloneEditor::registerClipPianoRoll (int idx, ClipsPage* cp)
             vp->auditionNoteOff (n);
     };
     conn.rollMode = PianoRollContainer::RollMode::Standard;
+
+    // QA-SfzGroup Sub-Q (2026-05-27): BaySickPlayer engines hosting an SFZ
+    // with keyswitches expose human-readable labels via VibeSampleManager.
+    conn.keyswitchLabelProvider = [cp](int n) -> juce::String {
+        if (auto* v = dynamic_cast<VibePlayerProcessor*>(cp->getEngineProcessor()))
+            return v->getSynth().getManager().getKeyswitchLabel(n);
+        return {};
+    };
 
     mPianoRollPage->registerEngine ({ EngineKind::Clip, idx }, conn);
 }

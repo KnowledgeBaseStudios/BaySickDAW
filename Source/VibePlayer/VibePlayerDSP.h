@@ -24,6 +24,16 @@ struct VibeRegion
     float  tuneOffset        { 0.0f }; // cents (can be fractional)
     float  volumeOffset      { 0.0f }; // dB
 
+    // SFZ keyswitching (sw_*).  Default -1 = not set; an unset field doesn't
+    // filter (region is candidate-eligible regardless of that condition).
+    int    swLokey           { -1 };   // sw_lokey: keyswitch range low (MIDI note)
+    int    swHikey           { -1 };   // sw_hikey: keyswitch range high (MIDI note)
+    int    swLast            { -1 };   // sw_last: region active when active keyswitch == swLast
+    int    swDown            { -1 };   // sw_down: region active while swDown note is held
+    int    swUp              { -1 };   // sw_up: region active while swUp note is NOT held
+    int    swDefault         { -1 };   // sw_default: initial keyswitch (priority init in parseSFZ)
+    juce::String swLabel;              // sw_label: human-readable name for this region's keyswitch
+
     // Pre-loaded audio (shared_ptr so voices can safely outlive a reload)
     std::shared_ptr<juce::AudioBuffer<float>> audioData;
     double fileSampleRate    { 44100.0 };
@@ -70,6 +80,22 @@ public:
     // AudioFormatManager (shared with voices for creating readers)
     juce::AudioFormatManager& getFormatManager() { return mFormatManager; }
 
+    // ── SFZ keyswitching (Sub-N: keyswitch state lives here) ──────────────────
+    // Engine queries isKeyswitchNote() on every incoming MIDI note in
+    // VibePlayerProcessor::processBlock; if true, the event is stripped from
+    // the MIDI buffer + routed to handleKeyswitchNoteOn/Off instead of being
+    // dispatched to the synth.  Single-threaded (audio thread only).
+    bool isKeyswitchNote        (int midiNote) const noexcept;
+    void handleKeyswitchNoteOn  (int midiNote)       noexcept;
+    void handleKeyswitchNoteOff (int midiNote)       noexcept;
+
+    // Sub-Q: human-readable label for a keyswitch note (from the SFZ file's
+    // sw_label opcode).  Returns empty string for non-keyswitch notes or
+    // unlabeled keyswitches.  Used by the piano keyboard to render highlight
+    // + label on the keyswitch keys (BaySickRustyDrumsKitGraphic.cpp:665
+    // precedent for visual style).
+    juce::String getKeyswitchLabel (int midiNote) const noexcept;
+
 private:
     // Load one file into an AudioBuffer and return its sample rate.
     static std::shared_ptr<juce::AudioBuffer<float>>
@@ -91,6 +117,19 @@ private:
 
     // Per-[note][artic] round-robin counter (audio thread only)
     int mRRCounters[128][4] {};
+
+    // ── SFZ keyswitching state (Sub-N) ────────────────────────────────────────
+    // mIsKeyswitch is populated at SFZ load time from the union of sw_lokey..
+    // sw_hikey ranges across all loaded regions.  mActiveSwLast tracks the most
+    // recent keyswitch note pressed (for sw_last filtering in findRegion).
+    // mSwDownHeld tracks per-note "is this keyswitch currently held" state for
+    // sw_down / sw_up filtering.  All single-threaded (audio thread only).
+    int                          mActiveSwLast     { -1 };
+    std::array<bool, 128>        mSwDownHeld       {};
+    std::array<bool, 128>        mIsKeyswitch      {};
+    std::array<juce::String, 128> mKeyswitchLabels {};
+
+    void resetKeyswitchState() noexcept;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibeSampleManager)
 };

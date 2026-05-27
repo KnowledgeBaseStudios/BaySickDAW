@@ -20,6 +20,7 @@ void VibeSampleManager::clear()
     mRegions.clear();
     mLoadedFolder = juce::File{};
     std::memset (mRRCounters, 0, sizeof (mRRCounters));
+    resetKeyswitchState();
 }
 
 //==============================================================================
@@ -84,8 +85,11 @@ void VibeSampleManager::loadSFZ (const juce::File& sfzFile)
 }
 
 //==============================================================================
-// SFZ parser - handles the most common opcodes.
-// Format: opcodes as key=value pairs after a <region> header.
+// SFZ parser - 4-level cascading inheritance per SFZ v1 spec.
+// Format: opcodes as key=value pairs after a <global>/<master>/<group>/<region>
+// header.  Opcodes inside a parent scope accumulate into that scope's default
+// state and are inherited by every <region> that follows until the next
+// same-or-higher scope header.  <control> is orthogonal (default_path only).
 // Comments: // to end of line.
 void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
 {
@@ -93,18 +97,94 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
     juce::StringArray lines;
     lines.addLines (sfzFile.loadFileAsString());
 
-    VibeRegion current;
-    bool inRegion  = false;
-    bool inControl = false;
-    juce::String defaultPath;   // from <control> default_path= - prepended to all sample= values
+    enum class Scope { None, Global, Master, Group, Region };
 
-    auto flushRegion = [&]()
+    struct SfzParseState
     {
-        if (inRegion && current.audioData)
-            mRegions.push_back (current);
-        current = VibeRegion{};
-        inRegion = false;
+        Scope scope { Scope::None };
+        bool  inControl { false };
+        VibeRegion globalDefaults;
+        VibeRegion masterDefaults;
+        VibeRegion groupDefaults;
+        VibeRegion current;
+
+        // Sub-O scope-priority sw_default init: first-wins per scope.
+        // captureExplicitSwDefault writes here when sw_default appears in the
+        // opcode stream; getInitialSwLast resolves the priority chain at
+        // end-of-parseSFZ to seed VibeSampleManager::mActiveSwLast.
+        int explicitGlobalSwDefault { -1 };
+        int explicitMasterSwDefault { -1 };
+        int explicitGroupSwDefault  { -1 };
+        int firstRegionSwDefault    { -1 };
+
+        void enterGlobal()  { globalDefaults = VibeRegion{};
+                              masterDefaults = globalDefaults;
+                              groupDefaults  = masterDefaults;
+                              scope = Scope::Global;  inControl = false; }
+        void enterMaster()  { masterDefaults = globalDefaults;
+                              groupDefaults  = masterDefaults;
+                              scope = Scope::Master;  inControl = false; }
+        void enterGroup()   { groupDefaults = masterDefaults;
+                              scope = Scope::Group;   inControl = false; }
+        void enterRegion()  { current = groupDefaults;
+                              scope = Scope::Region;  inControl = false; }
+        void enterControl() { scope = Scope::None;    inControl = true;  }
+        void exitOther()    { scope = Scope::None;    inControl = false; }
+
+        // Push the current region into the output vector if it has audio data,
+        // then reset current.  Safe to call on any header transition.
+        void tryFlushRegion (std::vector<VibeRegion>& regions)
+        {
+            if (scope == Scope::Region && current.audioData)
+                regions.push_back (current);
+            current = VibeRegion{};
+        }
+
+        // Return pointer to the VibeRegion that subsequent opcodes should write
+        // to, based on current scope.  Returns nullptr outside any scope (e.g.
+        // bare opcodes before the first header, or while inControl).
+        VibeRegion* currentTarget()
+        {
+            switch (scope)
+            {
+                case Scope::Region: return &current;
+                case Scope::Group:  return &groupDefaults;
+                case Scope::Master: return &masterDefaults;
+                case Scope::Global: return &globalDefaults;
+                default:            return nullptr;
+            }
+        }
+
+        // Sub-O: record sw_default at the current scope.  First-wins per scope:
+        // subsequent same-scope sw_default opcodes don't override (so multiple
+        // <group> blocks with their own sw_default leave the first-set value
+        // intact for the post-parse priority lookup).
+        void captureExplicitSwDefault (int n)
+        {
+            switch (scope)
+            {
+                case Scope::Global: if (explicitGlobalSwDefault == -1) explicitGlobalSwDefault = n; break;
+                case Scope::Master: if (explicitMasterSwDefault == -1) explicitMasterSwDefault = n; break;
+                case Scope::Group:  if (explicitGroupSwDefault  == -1) explicitGroupSwDefault  = n; break;
+                case Scope::Region: if (firstRegionSwDefault    == -1) firstRegionSwDefault    = n; break;
+                default: break;
+            }
+        }
+
+        // Sub-O: post-parse priority resolution.  Global > Master > Group >
+        // first Region.  -1 if no sw_default set anywhere.
+        int getInitialSwLast() const
+        {
+            if (explicitGlobalSwDefault != -1) return explicitGlobalSwDefault;
+            if (explicitMasterSwDefault != -1) return explicitMasterSwDefault;
+            if (explicitGroupSwDefault  != -1) return explicitGroupSwDefault;
+            if (firstRegionSwDefault    != -1) return firstRegionSwDefault;
+            return -1;
+        }
     };
+
+    SfzParseState state;
+    juce::String defaultPath;   // from <control> default_path= - prepended to all sample= values
 
     for (const auto& rawLine : lines)
     {
@@ -112,32 +192,49 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
         juce::String line = rawLine.upToFirstOccurrenceOf ("//", false, false).trim();
         if (line.isEmpty()) continue;
 
-        // Check for section headers
+        // Header dispatch.  Order matters: check <region> first because the
+        // string "<region>" trivially contains '<'.  Same for the others.
         if (line.containsIgnoreCase ("<region>"))
         {
-            flushRegion();
-            inControl = false;
-            inRegion  = true;
+            state.tryFlushRegion (mRegions);
+            state.enterRegion();
             // Opcodes can be on same line as <region>
             line = line.fromFirstOccurrenceOf ("<region>", false, true).trim();
         }
+        else if (line.containsIgnoreCase ("<group>"))
+        {
+            state.tryFlushRegion (mRegions);
+            state.enterGroup();
+            continue;
+        }
+        else if (line.containsIgnoreCase ("<master>"))
+        {
+            state.tryFlushRegion (mRegions);
+            state.enterMaster();
+            continue;
+        }
+        else if (line.containsIgnoreCase ("<global>"))
+        {
+            state.tryFlushRegion (mRegions);
+            state.enterGlobal();
+            continue;
+        }
         else if (line.containsIgnoreCase ("<control>"))
         {
-            // Read default_path from this section
-            flushRegion();
-            inControl = true;
+            state.tryFlushRegion (mRegions);
+            state.enterControl();
             continue;
         }
         else if (line.startsWithChar ('<'))
         {
-            // <group>, <global>, etc. - flush current region, stop accumulating
-            flushRegion();
-            inControl = false;
+            // Unknown header - flush + clear scope so subsequent opcodes are ignored
+            state.tryFlushRegion (mRegions);
+            state.exitOther();
             continue;
         }
 
         // Inside <control>: only care about default_path (may contain spaces)
-        if (inControl)
+        if (state.inControl)
         {
             auto v = sfzOpcode (line, "default_path", true);
             if (v.isNotEmpty())
@@ -145,9 +242,14 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
             continue;
         }
 
-        if (!inRegion) continue;
+        // Opcode dispatch - single target-pointer per line via helper.
+        // Writes go to current region OR the active scope's defaults
+        // accumulator; on the next enterRegion() the accumulator is copied
+        // into current as the new region's baseline (the inheritance step).
+        auto* t = state.currentTarget();
+        if (! t) continue;
 
-        // ── sample= (read to EOL - path may contain spaces) ──────────────────
+        // sample= (read to EOL - path may contain spaces)
         {
             auto v = sfzOpcode (line, "sample", true);
             if (v.isNotEmpty())
@@ -158,82 +260,161 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
                 if (f.existsAsFile())
                 {
                     double sr = 44100.0;
-                    current.audioData      = loadFile (f, mFormatManager, sr);
-                    current.sampleFile     = f;
-                    current.fileSampleRate = sr;
+                    t->audioData      = loadFile (f, mFormatManager, sr);
+                    t->sampleFile     = f;
+                    t->fileSampleRate = sr;
                 }
             }
         }
 
-        // ── key= (shorthand: sets lokey, hikey, pitch_keycenter) ─────────────
+        // key= (shorthand: sets lokey, hikey, pitch_keycenter)
         {
             auto v = sfzOpcode (line, "key");
             if (v.isNotEmpty())
             {
                 int n = sfzNote (v);
-                current.loNote   = n;
-                current.hiNote   = n;
-                current.rootNote = n;
+                t->loNote   = n;
+                t->hiNote   = n;
+                t->rootNote = n;
             }
         }
 
-        // ── lokey / hikey ─────────────────────────────────────────────────────
+        // lokey / hikey
         {
             auto v = sfzOpcode (line, "lokey");
-            if (v.isNotEmpty()) current.loNote = sfzNote (v);
+            if (v.isNotEmpty()) t->loNote = sfzNote (v);
         }
         {
             auto v = sfzOpcode (line, "hikey");
-            if (v.isNotEmpty()) current.hiNote = sfzNote (v);
+            if (v.isNotEmpty()) t->hiNote = sfzNote (v);
         }
 
-        // ── pitch_keycenter ───────────────────────────────────────────────────
+        // pitch_keycenter
         {
             auto v = sfzOpcode (line, "pitch_keycenter");
-            if (v.isNotEmpty()) current.rootNote = sfzNote (v);
+            if (v.isNotEmpty()) t->rootNote = sfzNote (v);
         }
 
-        // ── lovel / hivel ─────────────────────────────────────────────────────
+        // lovel / hivel
         {
             auto v = sfzOpcode (line, "lovel");
-            if (v.isNotEmpty()) current.loVel = v.getIntValue();
+            if (v.isNotEmpty()) t->loVel = v.getIntValue();
         }
         {
             auto v = sfzOpcode (line, "hivel");
-            if (v.isNotEmpty()) current.hiVel = v.getIntValue();
+            if (v.isNotEmpty()) t->hiVel = v.getIntValue();
         }
 
-        // ── tune= (cents) ─────────────────────────────────────────────────────
+        // tune= (cents -> semitones)
         {
             auto v = sfzOpcode (line, "tune");
-            if (v.isNotEmpty()) current.tuneOffset = v.getFloatValue() / 100.f; // cents→semitones
+            if (v.isNotEmpty()) t->tuneOffset = v.getFloatValue() / 100.f;
         }
 
-        // ── volume= (dB) ──────────────────────────────────────────────────────
+        // volume= (dB)
         {
             auto v = sfzOpcode (line, "volume");
-            if (v.isNotEmpty()) current.volumeOffset = v.getFloatValue();
+            if (v.isNotEmpty()) t->volumeOffset = v.getFloatValue();
         }
 
-        // ── group= (maps to articulationGroup 0-3) ────────────────────────────
+        // group= (maps to articulationGroup 0-3)
         {
             auto v = sfzOpcode (line, "group");
             if (v.isNotEmpty())
-                current.articulationGroup = juce::jlimit (0, 3, v.getIntValue() - 1);
+                t->articulationGroup = juce::jlimit (0, 3, v.getIntValue() - 1);
         }
 
-        // ── seq_position / seq_length (round-robin) ───────────────────────────
+        // seq_position / seq_length (round-robin)
         {
             auto v = sfzOpcode (line, "seq_position");
-            if (v.isNotEmpty()) current.roundRobinIndex = v.getIntValue();
+            if (v.isNotEmpty()) t->roundRobinIndex = v.getIntValue();
         }
         {
             auto v = sfzOpcode (line, "seq_length");
-            if (v.isNotEmpty()) current.roundRobinTotal = v.getIntValue();
+            if (v.isNotEmpty()) t->roundRobinTotal = v.getIntValue();
+        }
+
+        // Sub-L: SFZ keyswitching opcodes.  sw_lokey/sw_hikey define the
+        // explicit keyswitch range (used to populate mIsKeyswitch at end of
+        // parseSFZ).  sw_last/sw_down/sw_up are the per-region active-state
+        // filters (read by findRegion).  sw_default is the initial active
+        // keyswitch (resolved via Sub-O scope-priority post-parse).
+        {
+            auto v = sfzOpcode (line, "sw_lokey");
+            if (v.isNotEmpty()) t->swLokey = sfzNote (v);
+        }
+        {
+            auto v = sfzOpcode (line, "sw_hikey");
+            if (v.isNotEmpty()) t->swHikey = sfzNote (v);
+        }
+        {
+            auto v = sfzOpcode (line, "sw_last");
+            if (v.isNotEmpty()) t->swLast = sfzNote (v);
+        }
+        {
+            auto v = sfzOpcode (line, "sw_down");
+            if (v.isNotEmpty()) t->swDown = sfzNote (v);
+        }
+        {
+            auto v = sfzOpcode (line, "sw_up");
+            if (v.isNotEmpty()) t->swUp = sfzNote (v);
+        }
+        {
+            auto v = sfzOpcode (line, "sw_default");
+            if (v.isNotEmpty())
+            {
+                const int n = sfzNote (v);
+                t->swDefault = n;
+                state.captureExplicitSwDefault (n);
+            }
+        }
+        // sw_label: human-readable name for the keyswitch (read to EOL since
+        // the value can contain spaces, e.g. sw_label=C6 Sustain).
+        {
+            auto v = sfzOpcode (line, "sw_label", true);
+            if (v.isNotEmpty()) t->swLabel = v;
         }
     }
 
-    flushRegion(); // final region
+    state.tryFlushRegion (mRegions); // final region
+
+    // Sub-L/N post-parse: populate mIsKeyswitch from the union of
+    // sw_lokey..sw_hikey ranges across all loaded regions.  Engine queries
+    // isKeyswitchNote(midiNote) on every incoming MIDI note in
+    // VibePlayerProcessor::processBlock to decide whether to dispatch to the
+    // synth (playable note) or update keyswitch state (keyswitch note).
+    for (const auto& r : mRegions)
+    {
+        if (r.swLokey >= 0 && r.swHikey >= 0)
+        {
+            const int lo = juce::jlimit (0, 127, r.swLokey);
+            const int hi = juce::jlimit (0, 127, r.swHikey);
+            for (int n = lo; n <= hi; ++n)
+                mIsKeyswitch[(size_t) n] = true;
+        }
+    }
+
+    // Sub-O scope-priority sw_default init.  Global > Master > Group > first
+    // Region.  -1 if no sw_default set anywhere (keyswitching effectively
+    // inert until the user presses a keyswitch note explicitly).
+    mActiveSwLast = state.getInitialSwLast();
+
+    // Sub-Q: populate mKeyswitchLabels from each region's (swLast/swDown/swUp,
+    // swLabel) pair.  First-wins per keyswitch note - multiple regions can
+    // share the same keyswitch (e.g. 4 staccato regions all with sw_last=c#6
+    // + sw_label="C#6 Staccato"); the label they share is recorded once.
+    for (const auto& r : mRegions)
+    {
+        if (r.swLabel.isEmpty()) continue;
+        auto recordIfEmpty = [&] (int note)
+        {
+            if (note >= 0 && note < 128 && mKeyswitchLabels[(size_t) note].isEmpty())
+                mKeyswitchLabels[(size_t) note] = r.swLabel;
+        };
+        recordIfEmpty (r.swLast);
+        recordIfEmpty (r.swDown);
+        recordIfEmpty (r.swUp);
+    }
 }
 
 //==============================================================================
@@ -428,6 +609,16 @@ const VibeRegion* VibeSampleManager::findRegion (int midiNote, int velocity,
     for (int i = 0; i < (int) mRegions.size(); ++i)
     {
         const auto& r = mRegions[i];
+
+        // Sub-N: keyswitch filtering BEFORE note/velocity/articulationGroup.
+        // Isolates sustain vs staccato candidate pools so the RR cycling logic
+        // below sees a single-articulation pool only (natural divide-by-zero
+        // fix for the mixed-pool crash that surfaced 2026-05-27 before
+        // keyswitching landed).
+        if (r.swLast != -1 && mActiveSwLast        != r.swLast) continue;
+        if (r.swDown != -1 && ! mSwDownHeld[(size_t) r.swDown]) continue;
+        if (r.swUp   != -1 &&   mSwDownHeld[(size_t) r.swUp])   continue;
+
         if (midiNote  < r.loNote || midiNote  > r.hiNote)  continue;
         if (velocity  < r.loVel  || velocity  > r.hiVel)   continue;
         if (r.articulationGroup != articulationGroup)        continue;
@@ -460,6 +651,46 @@ const VibeRegion* VibeSampleManager::findRegion (int midiNote, int velocity,
 
     // Fallback: first candidate
     return &mRegions[candidates[0]];
+}
+
+//==============================================================================
+// SFZ keyswitching API (Sub-N: state lives on VibeSampleManager).
+// Single-threaded - all calls come from the audio thread (processBlock or the
+// findRegion-adjacent code paths).
+
+bool VibeSampleManager::isKeyswitchNote (int midiNote) const noexcept
+{
+    if (midiNote < 0 || midiNote > 127) return false;
+    return mIsKeyswitch[(size_t) midiNote];
+}
+
+void VibeSampleManager::handleKeyswitchNoteOn (int midiNote) noexcept
+{
+    if (midiNote < 0 || midiNote > 127) return;
+    mActiveSwLast = midiNote;          // sw_last: last keyswitch pressed wins
+    mSwDownHeld[(size_t) midiNote] = true;
+}
+
+void VibeSampleManager::handleKeyswitchNoteOff (int midiNote) noexcept
+{
+    if (midiNote < 0 || midiNote > 127) return;
+    mSwDownHeld[(size_t) midiNote] = false;
+    // sw_last is NOT cleared on release (sticky per SFZ v1 semantics - the
+    // last-pressed keyswitch remains active until a new one is pressed).
+}
+
+void VibeSampleManager::resetKeyswitchState() noexcept
+{
+    mActiveSwLast    = -1;
+    mSwDownHeld      = {};
+    mIsKeyswitch     = {};   // parseSFZ rebuilds this on every load
+    for (auto& s : mKeyswitchLabels) s.clear();
+}
+
+juce::String VibeSampleManager::getKeyswitchLabel (int midiNote) const noexcept
+{
+    if (midiNote < 0 || midiNote > 127) return {};
+    return mKeyswitchLabels[(size_t) midiNote];
 }
 
 
