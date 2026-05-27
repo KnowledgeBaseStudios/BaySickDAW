@@ -182,8 +182,8 @@ void PianoKeyboard::paint(Graphics& g)
         // black/white pitch class.  Allows users to visually discover which
         // notes are keyswitches (rather than playable notes) on an SFZ piano
         // roll loaded with sw_lokey/sw_hikey + sw_label opcodes (e.g. Tuba-KS
-        // shows "C6 Sustain" on C7 and "C#6 Staccato" on C#7 — file's IPN
-        // c6/c#6 → MIDI 84/85 → app-C7/C#7 in FL display convention).
+        // shows "C6 Sustain" on C7 and "C#6 Staccato" on C#7 - file's IPN
+        // c6/c#6 -> MIDI 84/85 -> app-C7/C#7 in FL display convention).
         juce::String keyswitchLabel;
         if (mKeyswitchLabelProvider)
             keyswitchLabel = mKeyswitchLabelProvider(note);

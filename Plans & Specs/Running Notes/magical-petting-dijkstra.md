@@ -365,3 +365,115 @@ Task 4 — cleanup grep sweep per Sub-I (a) 6-task lock.  Sweep `Source/VibePlay
 - [`Plans & Specs/Running Notes/magical-petting-dijkstra.md`](magical-petting-dijkstra.md) — this Task 3 entry appended.
 
 Total source: 2 vendored sfizz files, +19 / -3 net.  Total docs: 2 plan/running-notes files.
+
+---
+
+## Task 4 — Cleanup grep sweep (no-op outcome)
+
+Sub-I(a) 6-task lock dictated a cleanup grep sweep at Task 4.  Goals:
+
+1. Sweep for stale comments referencing pre-batch broken-inheritance behavior anywhere in the SFZ loading path.
+2. Verify zero diagnostic instrumentation in source post-batch (Rule 4 catalog should remain empty).
+3. Apply any cleanup edits + commit if changes (else skip commit, fold cleanup result into Task 5 close commit).
+
+### Section 1 — Sweep outcome: NO source edits required
+
+`Source/VibePlayer/VibePlayerDSP.{cpp,h}` — read post-Task-2 + Task-3 final state.  The early-return `if (!inRegion) continue;` at the pre-batch `:148` was replaced by Sub-K(c)'s helper-struct rewrite at Task 2 — the line itself no longer exists; per-line dispatch now uses `auto* t = state.currentTarget(); if (! t) continue;` which is a structural improvement, NOT a stale comment.  No comment touches `<group>` inheritance behavior at all post-Task-2; the helper-struct's enter-scope methods (`enterGlobal` / `enterMaster` / `enterGroup` / `enterRegion`) are self-documenting through their function names.
+
+Broader `Source/` grep for: `inRegion` / `seq_length` / `seq_position` / `roundRobinTotal` / `parseSFZ` references — all matches are in the rewritten `VibePlayerDSP.{cpp,h}` code itself or in `Source/VibePlayer/VibePlayerProcessor.{cpp,h}` (Sub-M pre-scan) or in `Source/Standalone/StandaloneEditor.cpp` (keyswitch label closures) or in `Source/Standalone/PianoRoll.{cpp,h}` + `Source/Standalone/PianoRollPage.{cpp,h}` (keyswitch label provider plumbing).  No stale comments referencing pre-batch behavior surface anywhere.
+
+`libs/sfizz/src/sfizz/Layer.{h,cpp}` — the Sub-R/S patch comments are intentional + accurate (documenting the QA-SfzGroup local-patch + the C++ memory ordering rationale).  No stale comments.
+
+### Section 2 — Diagnostic instrumentation catalog: confirmed empty
+
+Per Rule 4 catalog discipline, Section 9 entries across Task 0 → Task 3 are all "Nil."  No `DBG` / `juce::Logger::writeToLog` / temp `jassert` / debug `juce::AlertWindow` / temp file logging added during this batch.  Confirmed via grep across all touched files — no diagnostic instrumentation remains.
+
+### Section 3 — Task 4 commit decision
+
+Per L10 commit cadence + the Sub-I(a) 6-task lock: cleanup tasks that produce zero source edits do NOT get standalone commits.  Task 4's no-op outcome folds into Task 5 close commit as documentation-only material (this Task 4 entry + the close-pass section below).  Matches QA-VoicePool Task 5 (stress-file verify PASS, no commit) precedent + QA-InsertMaps Task 3 (verify-only, no commit) precedent.
+
+### Section 4 — NIT 1 fix-up (PianoRoll.cpp em-dash + arrow ASCII conversion)
+
+`/review-batch QA-SfzGroup` close-pass surfaced NIT 1: em-dash (`—`) + Unicode arrow (`→`) characters in [`Source/Standalone/PianoRoll.cpp:185-186`](../../Source/Standalone/PianoRoll.cpp:185) comment added during Sub-P (keyswitch tooltip surfacing) violate `feedback_ascii_only_ui_strings.md` (extended by precedent to source comments).  Fix: replace em-dash with ASCII hyphen `-` + replace Unicode arrow with ASCII `->`.  Applied in-batch per `feedback_qa_batches_fix_bugs_dont_defer.md` extended to close-pass NITs (QA-InsertMaps Task 5 fix-up at e9fe545 precedent).  Single 2-character touch + zero behavior change.
+
+---
+
+## Task 5 — CLOSE: docs + close commit
+
+### Section 1 — /review-batch QA-SfzGroup outcome
+
+`/review-batch QA-SfzGroup` dispatched at close-pass review.  Outcome: **READY-TO-COMMIT** with 2 NITs.
+
+- **NIT 1 (FIXED in-batch at Task 4 Section 4):** em-dash + Unicode arrow in `Source/Standalone/PianoRoll.cpp:185-186` comment.  Fixed per `feedback_ascii_only_ui_strings.md`.
+- **NIT 2 (REFRAMED as accepted design):** Sub-A's original Track 2 investigation-only lock now reads slightly misleadingly post-Sub-R/S amendment — the Spec-calls table shows Sub-A with the original investigation-only wording AND Sub-R/S amending it, but the plan body Task 3 description still reads as investigation-only.  Reframed because (a) Spec-calls table is the canonical record per Task 3 Section 8 + the close commit documents the Sub-R/S amendment explicitly; (b) editing the plan body Task 3 description post-hoc would violate `feedback_targeted_edits_not_wholesale_rewrite.md` (the task description was correct at lock time + has been superseded structurally not edited); (c) the §9 thirty-ninth Forks entry's "Trigger" section explicitly walks the Sub-A → Sub-R/S amendment chain.  No source / plan edit; accepted as a documentation layering pattern that's already well-served by the existing Spec-calls table + Forks entry.
+
+0 BLOCKER + 0 NEEDS-FIX + 2 NITs (1 FIXED + 1 REFRAMED).  Recommendation: READY-TO-COMMIT.
+
+### Section 2 — Three findings routed to NEW QA-Sfizz batch + slot lock
+
+Per Jeff's verbatim 2026-05-27 mid-Task-3 close: "We are going with Option (b): Keep the atomic patch + route the deep investigation to the follow-up batch... Halt the Investigation... Please proceed with the remaining Task 4 cleanup sweep and prepare the final close-out steps."  + Item 2 routing follow-up: "we are gonna route that batch to immediately after this one so that we are all done with the sfz aria stuff all in 'one' go".
+
+Three findings routed to NEW **QA-Sfizz** follow-up batch:
+
+1. **Item 1: keyswitch label discoverability for BaySickRustyDrums + BaySickGuitars + BaySickBasses piano rolls.**  QA-SfzGroup Sub-P=(a) limited amber-highlight + `sw_label` text rendering to BaySickPlayer engines only.
+2. **Item 2: Guitars / Basses round-robin loss diagnosis.**  Profile the actual Aria-player content load path; verify whether Karoryfer big-rusty-drums-style content parses correctly through sfizz's `loadSfzFile` path.
+3. **Item 3: BaySickRustyDrums MT-mode bit-crusher diagnosis + fix.**  Sub-R/S atomic patch landed but DID NOT resolve the bit-crusher symptom; actual MT-only race source is elsewhere in sfizz.
+
+**Slot (Jeff-locked 2026-05-27):** immediately after QA-SfzGroup, before QA-EngineApvts (closes the Aria/sfizz cluster in one continuous sweep).
+
+### Section 3 — NEW §0 Rule 5 codified at Task 0 commit `a92f55a`
+
+QA-SfzGroup plan-finalize surfaced an `feedback_dont_make_unilateral_spec_calls.md` violation: I drafted the plan with Sub-I/J/K recommendations BAKED INTO the task bodies as truth rather than surfacing them to Jeff.  Jeff caught: "instead of posing any of them to me have just included your suggestions as truth and you've done that on the last 3 plans."
+
+Resolution shipped at QA-SfzGroup Task 0 commit `a92f55a`:
+
+- **Main Plan §0 Rule 5 ADDED:** "Sub-spec calls discovered during planning surface via chat BEFORE landing in the plan body."
+- **`feedback_dont_make_unilateral_spec_calls.md`** — "Plan-mode discovery rule" section appended.
+- **`Files For Claude/batch_session_boilerplate.md`** — step 5b strengthened + standing rule added.
+
+Discipline locks at planning time (not just execution time) so the surface-then-wait pattern fires consistently across both phases.
+
+### Section 4 — Close-pass plan-doc edits applied at Task 5
+
+- `Plans & Specs/Main Plan.md` §5 — QA-SfzGroup STATUS banner ADDED ("CLOSED.  Twenty-one spec calls Sub-A through Sub-T executed...") at the existing QA-SfzGroup entry header.
+- `Plans & Specs/Main Plan.md` §5 — NEW QA-Sfizz entry INSERTED between QA-SfzGroup and QA-EngineApvts with full scope (Items 1-3), Risk/Dependencies/Sequencing/Effort/Bucket/Verify fields.
+- `Plans & Specs/Main Plan.md` §5 — QA-EngineApvts Sequencing field updated: "immediately after QA-SfzGroup, before QA-Ed" → "immediately after QA-Sfizz, before QA-Ed".
+- `Plans & Specs/Main Plan.md` §6 — arrow updated to insert `→ QA-Sfizz************************` between QA-SfzGroup*********************** and QA-EngineApvts**********************.
+- `Plans & Specs/Main Plan.md` §6 — NEW 24-asterisk QA-Sfizz footnote ADDED between QA-SfzGroup footnote and QA-EngineApvts footnote.
+- `Plans & Specs/Main Plan.md` §6 — QA-EngineApvts footnote updated from "after QA-SfzGroup" to "after QA-Sfizz".
+- `Plans & Specs/Main Plan.md` §9 — thirty-ninth Forks entry APPENDED covering QA-SfzGroup close + Sub-A amendment via Sub-R/S + Sub-T 3-finding routing + NEW §0 Rule 5 codification + 2x mid-batch scope expansions.
+- `Plans & Specs/Implemented Work Log.md` — QA-SfzGroup batch-close entry appended (was applied earlier in Task 5 sequence per the standing batch-close protocol).
+- `Plans & Specs/Running Notes/magical-petting-dijkstra.md` — Task 4 + this Task 5 close-pass section appended (this section).
+
+### Section 5 — Carry-Forward §1 contradictions
+
+None architectural.  Carry-Forward §1 (Render Engine Primitives) doesn't document SFZ `<group>` opcode-inheritance, keyswitching, or sfizz MT-execution behavior.  All three are bug-fix / feature-build territory, not architectural-primitive territory.  Note: Carry-Forward §1 also doesn't document the now-fixed BaySickPlayer parser inheritance behavior — the pre-QA-SfzGroup broken-inheritance state was the de-facto state for the entire history of `parseSFZ`; QA-SfzGroup brought it into SFZ v1 spec compliance.
+
+### Section 6 — Process meta-findings
+
+**FND-M1 (plan-mode discipline lock):** the Rule 5 codification was a process-side fix triggered by my plan-finalize unilateral-pick error.  Captures a pattern where the unilateral-pick rule (already in feedback memory) needed an EXPLICIT plan-mode extension since plan-mode is a distinct execution phase from per-task work.  Locked at Task 0 commit + the boilerplate update means future batches see this discipline whether they read CLAUDE.md or Main Plan §0 or the boilerplate.
+
+**FND-M2 (diagnostic miss owned):** Sub-R/S atomic patch hypothesis was wrong (bit-crusher MT race is NOT in `sequenceCounter_`).  Owned at Task 3 close per `feedback_own_the_codebase_no_git_alibi.md`.  Patch still ships as defense-in-depth (plain-int RMW under MT is UB per C++ spec) + the actual race investigation routes to QA-Sfizz.  Lesson: when hypothesizing a race source, ground it in empirical observation BEFORE committing source changes — "it's the most obvious shared-state RMW" is not the same as "this is the race that causes this specific symptom."
+
+**FND-M3 (scope expansion via Rule 5 + canon precedents):** 2x mid-batch scope expansions (Sub-L/M/N/O keyswitching engine; Sub-P/Q UI discoverability) + 1 Sub-A amendment (Sub-R/S atomic patch) all surfaced via chat per Rule 5 + answered with verbatim Jeff quotes captured in running notes BEFORE any source touch.  Pattern works.
+
+### Section 7 — Effort: actual vs estimate
+
+- Estimate at Task 0 batch-open: ~4-6 hours (Track 1 parser fix ~1-2 hr + Track 2 sfizz investigation ~1-2 hr + verify ~1-2 hr).
+- Actual: ~12-16 hours (2x mid-batch scope expansions + Sub-R/S amendment + diagnostic-miss cycle on bit-crusher + 2-track verify ladder + 2 plan-finalize re-drafts + 5-commit cadence).
+
+Over by ~2.5-3x.  Bulk of the overage was the scope expansions (keyswitching engine + UI discoverability ~4-6 hr) + the Sub-R/S diagnostic-miss cycle (~2-3 hr) + the Rule 5 surface + plan re-draft (~1-2 hr).  Estimate at Task 0 framed the batch as pure parser-fix-plus-investigation; the audible RR-loss gating on keyswitching + the UI surface need + the bit-crusher discovery were all out-of-frame.
+
+### Section 8 — Commits
+
+| # | SHA | Task | Scope |
+|---|---|---|---|
+| 1 | `a92f55a` | Task 0 | Batch-open: plan-file mirror + running-notes seed + Main Plan §5 plan-pointer flip + §5/§9 `Source/sfizz/` → `libs/sfizz/` path-typo fix + NEW Main Plan §0 Rule 5 codification (sub-spec calls discovered during planning surface via chat BEFORE landing in the plan body). |
+| 2 | `196d72e` | Task 1 | Pre-flight inventory (docs-only): parseSFZ 12-opcode coverage confirmed + VibeRegion struct copy-semantics validated for Sub-K(c) helper-struct + Tuba-KS.sfz §9 thirty-eighth Forks diagnosis verified at the file level + MAJOR Track 3 finding (BaySickRustyDrums wrapper-synthesis asymmetry) + sfizz parser landmarks captured. |
+| 3 | `5cd5f17` | Task 2 | Structural source (2x scope expansion mid-task per Sub-P(a) in-batch fold): Full `<group>` opcode-inheritance state machine + 6-opcode keyswitching engine + 7th opcode `sw_label` + piano-roll UI discoverability.  11 files, +595 / -55 net. |
+| 4 | `821b561` | Task 3 | sfizz parser/state-builder inheritance code review (read-only) + BaySickRustyDrums wrapper synthesis opcode-preservation audit + BaySickGuitars/BaySickBasses loader-handoff confirmation + CoreLibrary content sample verification + live test session that surfaced a catastrophic MT-mode bit-crusher on BaySickRustyDrums cymbals/hi-hats + Sub-R/S atomic patch (targeted vendored-sfizz fix: `int sequenceCounter_` → `std::atomic<int>` + `fetch_add(1, std::memory_order_relaxed)` at both call sites).  4 files, +123 / -3 net.  Diagnostic-miss outcome owned (patch is semantically correct + ships as defense-in-depth but empirical verification post-clean-rebuild confirmed the bit-crusher symptom UNCHANGED). |
+| 5 | TBD | Task 5 | CLOSE: docs (§5 + §6 + §9 + Running Notes + Implemented Work Log) + NIT 1 fix-up (PianoRoll.cpp em-dash + arrow ASCII conversion).  No source changes beyond NIT 1.  Task 4 (cleanup grep sweep) was no-op outcome — folded into this close commit. |
+
+### Section 9 — Next action
+
+QA-SfzGroup CLOSED.  Next batch per the updated §6 sequencing arrow: **QA-Sfizz** (Items 1-3 routed at this close per Sub-T + Jeff's "we are gonna route that batch to immediately after this one so that we are all done with the sfz aria stuff all in 'one' go" lock).  Per-batch plan file + running-notes seed deferred until QA-Sfizz opens per `feedback_plan_mirror_one_way.md` discipline.
