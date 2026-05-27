@@ -682,3 +682,27 @@ Nil for Task 7 NIT fix-up (no `DBG` / `juce::Logger::writeToLog` / temp `jassert
 ### Section 6 — Next action
 
 QA-VoicePool close commit lands the five docs deliverables per Task 6 Section 4 + the running-notes close-pass section appended below this entry. Drafters fire in parallel for the five touches: §9 Forks entry for BaySickSynth `mOsc.reset()` -> QA-EngineApvts (per Task 2 Section 4 lock); §9 Forks entry for SFZ `<group>` parser -> NEW QA-SfzGroup (per Task 4 Section 3 routing); NEW §5 QA-SfzGroup batch entry (scope + slot); §5 QA-VoicePool STATUS banner update for Task 3's Correction 1 / 2 / 3 deviations from the literal L1-L10 spec calls (per Task 3 Section 4 lock); §6 sequencing arrow update to insert QA-SfzGroup between QA-VoicePool and QA-EngineApvts. Plus the Implemented Work Log batch-close entry compiled by `/draft-doc batch-close` reading this file as primary input. Surface all five drafts + the commit message draft to Jeff for approval; commit via `git commit -F <file>` per the CLAUDE.md Git Commit Mechanics rule.
+
+---
+
+## 2026-05-26 — Close-pass — QA-VoicePool batch closed
+
+Close commit landed all five docs deliverables in a single commit (SHA TBD — recorded post-commit by the parent session):
+
+1. **`Plans & Specs/Implemented Work Log.md`** — full QA-VoicePool batch-close entry appended at the bottom of the chronological log (oldest-first per file convention).  Entry covers all 7 executable tasks (`a1211cd` open / `bddcaa6` Task 1 / `c42e729` Task 2 / `0dcfe50` Task 3 / `add0bfc` Task 4 / Task 5 verify-only / `f49fbe4` Task 6 / `36fe7fb` Task 7 NIT fix-up) + the close commit + all 10 findings (FND-1 through FND-10) with routing dispositions + the 6-NIT close-pass disposition table (3 FIXED, 3 REFRAMED, 0 deferred) + Carry-Forward §1 contradiction recording for the fat-voice architectural change.
+
+2. **`Plans & Specs/Main Plan.md` §5 QA-VoicePool STATUS banner** — inserted between the `#### **QA-VoicePool: ...** *(NEW — inserted 2026-05-24)*` heading and the `**Plan file:**` line.  Documents L1-L10 + Sub-A/B/C executed; Task 3 Correction 1 / 2 / 3 deviations from literal L1-L10 wording captured as as-shipped behavior (L6 reinterpreted from synchronous-render-fade to ADSR quick-release via physical over-provisioning kMaxVoices 16->24 + kLogicalCap=16; L7(b) upgraded from 2-tier to 3-tier with isKeyDown protection; NEW look-ahead noteOff pre-scan emerged from MIDI-event-ordering diagnosis at loop boundaries); 6-NIT close-pass disposition table; the 4-of-4 audio-thread heap-alloc surface closed declaration; effort actual ~12-15 hours vs ~8-12 hour estimate.
+
+3. **`Plans & Specs/Main Plan.md` NEW §5 QA-SfzGroup batch entry** — inserted between QA-VoicePool and QA-EngineApvts.  Scope per FND-2 routing: (1) fix `<group>` opcode-inheritance state machine in `VibeSampleManager::parseSFZ`; (2) investigate Aria/sfizz RR loss across BaySickRustyDrums + BaySickGuitars + BaySickBasses.  Slot: very next batch after QA-VoicePool close per Jeff's verbatim "very next batch".
+
+4. **`Plans & Specs/Main Plan.md` §6 sequencing arrow update** — `QA-VoicePool*********************` followed by NEW `QA-SfzGroup***********************` (23-asterisk footnote) followed by `QA-EngineApvts**********************`.  New 23-asterisk QA-SfzGroup footnote inserted between QA-VoicePool's and QA-EngineApvts's footnotes in the post-arrow footnote list.  QA-EngineApvts §5 entry's Sequencing field + QA-EngineApvts footnote text updated from "after QA-VoicePool" to "after QA-SfzGroup" + cross-ref to §9 thirty-eighth Forks entry.
+
+5. **`Plans & Specs/Main Plan.md` §9 thirty-seventh + thirty-eighth Forks entries** — thirty-seventh records the BaySickSynth `mOsc.reset()` finding routing to QA-EngineApvts (FND-1 in the Work Log batch-close entry); thirty-eighth records the SFZ `<group>` parser inheritance bug routing to NEW QA-SfzGroup (FND-2).  Both back-ref this running-notes file at Task 2 Section 4 (FND-1) + Task 4 Section 3 (FND-2).  QA-EngineApvts §5 Scope bullet list expanded with the 2-line `mOsc.reset(); mOsc2.reset();` fix per the thirty-seventh Forks entry's fold-in directive.
+
+6. **`Plans & Specs/Running Notes/tipsy-pulsing-octopus.md`** — this close-pass section appended at end of file; pairs with the Implemented Work Log entry as the canonical post-batch record per `feedback_draft_doc_running_notes_every_checkpoint.md`.
+
+**Next batch:** QA-SfzGroup (close-spawned per FND-2 routing).  After QA-SfzGroup closes, sequencing returns to QA-EngineApvts (the fourth batch in the QA-Eg close-spawned perf-audit cluster; also absorbs FND-1's BaySickSynth `mOsc.reset()` 2-line fix per the thirty-seventh Forks entry fold-in).
+
+**Rule 4 Diagnostic Instrumentation Catalog:** nil for the close pass (no source diffs landed in the close commit — docs-only across Main Plan + Implemented Work Log + this Running Notes file).  Running tally across Tasks 0-7 + this close: all nil.  Catalog table at top of file remains empty as locked; no strip pass needed; Rule 4 close discipline satisfied.
+
+**Batch closed.**
