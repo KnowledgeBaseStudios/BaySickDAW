@@ -563,3 +563,122 @@ Task 7 — close sequence. Five docs deliverables per Task 4 Section 5:
 5. §6 sequencing arrow update to insert QA-SfzGroup between QA-VoicePool and QA-EngineApvts.
 
 Plus the standard close-pass: `/draft-doc batch-close` -> Implemented Work Log append + `/review-batch QA-VoicePool` -> address any BLOCKER / NEEDS-FIX (NITs per `feedback_qa_batches_fix_bugs_dont_defer.md` -> fix-or-reframe canon) + `/draft-commit` -> close commit landing all five docs touches + the running-notes close-pass section.
+
+---
+
+## 2026-05-26 — Task 7 — NIT fix-up (NITs 1 / 3 / 6 fixed; NITs 2 / 4 / 5 reframed as accepted design)
+
+`/review-batch QA-VoicePool` close-pass pass surfaced six NITs with zero BLOCKER + zero NEEDS-FIX; recommendation **READY-TO-COMMIT**. Per `feedback_qa_batches_fix_bugs_dont_defer.md` extended to close-pass NITs (QA-InsertMaps Task 5 fix-up at `e9fe545` established the precedent — close-pass NITs follow the same fix-or-reframe canon as mid-batch findings, no bulk-defer-to-routing-table anti-pattern that QA-AudioMeters Task 5 fix-up at `2cba7b7` originally set), each NIT got Jeff's explicit fix-or-reframe disposition. **Three FIXES landed** as a Task 7 fix-up commit (NITs 1 / 3 / 6 — all source-comment / clamp-symbol-swap, no behavior changes); **three REFRAMES** captured here as accepted-design rationale for the post-batch reader (NITs 2 / 4 / 5 — all small academic memory-hygiene smells where the as-shipped behavior is intentional and the alternative would be worse UX). Diff total for the fix-up commit: 2 files changed, +20 / -3 net. Both Release + Debug build clean post-fix-up. No verify needed — all three FIXES are comment additions + one clamp-symbol swap with no observable runtime behavior change.
+
+### Section 1 — `/review-batch` close-pass results summary
+
+`/review-batch QA-VoicePool` dispatched 2026-05-26 (Sonnet). Recommendation: **READY-TO-COMMIT**. Findings:
+
+- **BLOCKER**: 0.
+- **NEEDS-FIX**: 0.
+- **NIT**: 6 total. NIT 1 (voiceCap clamp upper bound = kMaxVoices instead of kLogicalCap — forward-compat hazard for the 8 reserve voices). NIT 2 (`juce::Synthesiser::findVoiceToSteal` fallback may run in 24-voice catastrophic-overflow scenario + pick a different victim than L7(b)). NIT 3 (declaration-order subtle dependency in VibeVoice header — `mForwardSrc` / `mReverseSrc` MUST precede `mForwardResamp` / `mReverseResamp` because the resampler member-init expressions take their addresses). NIT 4 (`mAdsrOverridden` + `mPreStealAdsrParams` survive `releaseResources()` — startNote is the natural restore point, existing source comment terse). NIT 5 (`mAdsrOverridden` cleared only in `startNote` — stays true forever if voice is stolen + faded + never re-triggered). NIT 6 (stale lifecycle comment at VibePlayerDSP.h:251 saying "create MemoryAudioSource + ResamplingAudioSource" — post-Task-2 the lifecycle re-points fat sources rather than creating anything).
+
+Jeff's dispositions (full verbatim approval of my proposed picks 2026-05-26): **FIX NIT 1 / NIT 3 / NIT 6** (all surgical comment / clamp-symbol touches, no behavior risk, all guard against latent future hazards or stale documentation); **REFRAME NIT 2 / NIT 4 / NIT 5** as accepted design (NIT 2: disabling JUCE fallback would drop notes, worse UX than imperfect-victim selection in 25-note catastrophic overflow; NIT 4 + NIT 5: purely academic memory hygiene; startNote state reconciliation handles it safely). All three reframes have running-notes-grade rationale recorded in Section 3 below so the deeper reasoning survives close.
+
+### Section 2 — NITs 1 / 3 / 6 — FIXES applied (source touches)
+
+Three surgical edits across two files: VibePlayerDSP.cpp (+9 / -1) for NIT 1, VibePlayerDSP.h (+11 / -1) for NIT 3 + NIT 6. Net +20 / -3. No new code paths, no behavior changes — all three fixes are documentation hardening (NITs 3 + 6 are source-comment touches; NIT 1 is a single-symbol swap that has no observable effect today since the APVTS range never triggers the difference, but closes a latent forward-compat hazard).
+
+#### NIT 1 — `VibeSynth::setVoiceCap` clamp upper bound: kMaxVoices -> kLogicalCap
+
+**Hazard**: clamp at [Source/VibePlayer/VibePlayerDSP.cpp:1360](../../Source/VibePlayer/VibePlayerDSP.cpp:1360) wrote `juce::jlimit(1, kMaxVoices, cap)` where `kMaxVoices = 24` post-Task-3-Correction-1 over-provisioning. The APVTS `voiceCap` range is currently 1..16 (registered with the existing VibePlayerProcessor range; no public path drives the clamp upper bound beyond it). So today the clamp never actually fires — every legal `cap` is already <=16 by the time it reaches `setVoiceCap`. But if the APVTS range ever bumps OR a saved-state `voiceCap=20` from a future version loads into the current binary, the clamp would silently let `mLastVoiceCap=20` through, and the voiceCap-stealing branch's `cap` calculation would consume 4 of the 8 reserve voices for user-facing polyphony. The fade-out mechanic per Task 3's Correction 1 physical over-provisioning depends on those 8 reserve voices being available for stolen-voice ADSR-quick-release overflow — consuming any of them for user-visible polyphony breaks the safety guarantee.
+
+Jeff verbatim 2026-05-26: "We absolutely must protect those 8 reserve voices to ensure the fade-out mechanic never breaks."
+
+**FIX applied**: clamp upper bound changed `kMaxVoices` -> `kLogicalCap`. Added 7-line explanatory comment above the clamp documenting the kMaxVoices vs kLogicalCap distinction + why kLogicalCap is the right value here even though kMaxVoices is the physical pool size.
+
+```cpp
+void VibeSynth::setVoiceCap (int cap) noexcept
+{
+    // Enforcement happens in renderNextBlock manual dispatch (oldest-first steal).
+    // QA-VoicePool Task 7 NIT 1 fix-up: clamp upper bound is kLogicalCap (16),
+    // NOT kMaxVoices (24).  The user-facing polyphony range is 1..16; the 8
+    // reserve voices (kMaxVoices - kLogicalCap) are RESERVED for stolen-voice
+    // ADSR-quick-release fade-out overflow per Task 3 Correction 1 physical
+    // over-provisioning.  Clamping at kMaxVoices here would let a future APVTS
+    // range bump (or a saved-state voiceCap=20 from a future version) silently
+    // consume the reserve voices and break the fade-out mechanic.
+    if (cap == mLastVoiceCap) return;
+    mLastVoiceCap = juce::jlimit (1, kLogicalCap, cap);
+}
+```
+
+#### NIT 3 — Declaration-order subtle dependency in VibeVoice header (strict-warning comment)
+
+**Hazard**: resampler member-init expressions at [Source/VibePlayer/VibePlayerDSP.h:349-357](../../Source/VibePlayer/VibePlayerDSP.h:349) read `mForwardResamp { &mForwardSrc, false, 2 }` + `mReverseResamp { &mReverseSrc, false, 2 }` — they take the address of `mForwardSrc` / `mReverseSrc` declared above. C++ member-initialization order is declaration order within the same access section (independent of init-list order); for the address-taking to reference a fully-constructed object, the source members must precede the resamplers in declaration order. The Task 2 entry's Section 2 already flagged this constraint internally ("Declaration order matters — `mForwardSrc` / `mReverseSrc` are declared BEFORE their respective resamplers...") but there was no in-source warning at the actual class declaration site. A drive-by alphabetize pass (running through the alphabet would order `mForwardResamp` BEFORE `mForwardSrc`) or an accident-of-refactor reorder during a future audit would silently produce a use-of-uninitialized-member at VibeVoice construction and segfault on the first note-on. No compiler warning would catch the reorder — the resamplers' ctor takes a pointer, and a pointer to an uninitialized class member is valid C++ syntax at construction time.
+
+Jeff verbatim 2026-05-26: "We don't want anyone alphabetizing the header and causing a segfault."
+
+**FIX applied**: 8-line strict warning comment added in the source-class declaration block above `mForwardSrc`:
+
+```cpp
+// IMPORTANT (QA-VoicePool Task 7 NIT 3 fix-up): mForwardSrc + mReverseSrc
+// MUST be declared BEFORE mForwardResamp + mReverseResamp.  The resampler
+// member-init expressions below take `&mForwardSrc` / `&mReverseSrc` at
+// construction time; C++ requires the referenced member to be fully
+// constructed before the reference is taken, which means strict
+// declaration order matters.  Do NOT reorder.  A drive-by alphabetize or
+// accident-of-refactor reorder will silently produce a use-of-uninitialized-
+// member at VibeVoice construction and segfault on the first note-on.
+```
+
+#### NIT 6 — Stale lifecycle comment at VibePlayerDSP.h:251 (single-line rewrite)
+
+**Hazard**: lifecycle comment at [Source/VibePlayer/VibePlayerDSP.h:251](../../Source/VibePlayer/VibePlayerDSP.h:251) read `// startNote -> find region -> create MemoryAudioSource + ResamplingAudioSource`. Post-Task-2 the lifecycle does NOT "create" anything per note — it re-points the fat sources via `setBuffer` + flushes + re-targets the active resampler via `flushBuffers` / `setResamplingRatio`. The "create" language survived from the pre-batch heap-alloc-per-note pattern and is now misleading to a fresh reader. Task 6 grep sweep missed it because the stale comment text doesn't match any of the swept patterns (Sweep 1: `mResampSrc` / `mMemSrc` / Sweep 2: `dynamic_cast<VibeVoice` / Sweep 3: `std::vector<int>` / Sweep 4: `make_unique<*>` / Sweep 5: `kMaxVoices = 16` / Sweep 6: `DBG(`) — the words "create MemoryAudioSource" weren't in any sweep target.
+
+**FIX applied**: single-line comment rewrite:
+
+```cpp
+//   startNote   -> find region -> re-point fat sources -> reset ADSR / filter / LFO
+```
+
+### Section 3 — NITs 2 / 4 / 5 — REFRAMED as accepted design
+
+Three NITs that surface real-but-minor edge cases where the spec-call surfaces would either degrade UX (NIT 2) or be purely cosmetic memory-hygiene cleanup with no observable behavior change (NITs 4 / 5). All three reframed by Jeff with explicit rationale; documented here so the post-batch reader sees the design intent + understands why the as-shipped code is not "missing a fix" but is "intentionally chosen behavior".
+
+#### NIT 2 — JUCE's `findVoiceToSteal` fallback may run in 25-note 24-voice catastrophic overflow
+
+**Scenario**: 24 voices all mid-fade (all 16 user voices were just stolen + the 8 reserve voices got stolen too). 25th note arrives. L7(b)'s `findStealCandidate` picks a Tier 0 victim. The stolen victim still reports `isVoiceActive() == true` until ADSR-end + `clearCurrentNote()` in a future renderNextBlock. JUCE's `findFreeVoice` runs next + finds zero inactive voices. JUCE then falls back to its OWN `findVoiceToSteal` algorithm (protect highest/lowest pitches + steal oldest among the rest) which MAY pick a different voice than ours did.
+
+**Spec-call surface**: (1) disable JUCE's fallback via `mSynth.setNoteStealingEnabled(false)` in VibeSynth ctor — guarantees L7(b) is the sole stealing path; the 25th note in a 24-fading scenario gets DROPPED instead of taking a slightly-different victim / (2) REFRAME as accepted design.
+
+**Jeff's call: REFRAME.** Verbatim: "Disabling JUCE's fallback (NIT 2) would result in dropped notes, which is worse UX than an imperfect steal in a 25-note catastrophic overflow."
+
+**Accepted-design rationale**: In the realistic worst case (16-note voiceCap, 8 reserve voices, all 24 mid-fade), the 25th note IS rare + audibly indistinguishable between L7(b)-picked victim and JUCE-picked victim. Both algorithms steal "the oldest" within their respective populations; the only divergence is L7(b)'s 3-tier ordering (release > noteOff-queued > key-down with oldest-within-tier) vs JUCE's protect-highest/lowest bias. At the point where the user has 24 mid-fade voices in flight, they are already past graceful behavior — the engine is buying them a note, any note, in preference to silence. The choice here prioritizes hearing the new note over hearing the user's "perfect" steal. Aligns with Jeff's L7(b) lock at Task 0 ExitPlanMode: "We never want to drop a new note."
+
+#### NIT 4 — `mAdsrOverridden` + `mPreStealAdsrParams` survive `releaseResources()`
+
+**Scenario**: voice gets stolen via Task 3 path — `initiateSteal()` sets `mAdsrOverridden = true` + saves the user's ADSR params into `mPreStealAdsrParams`. Voice plays out its 1.5 ms quick-release. At fade-end, `clearCurrentNote()` calls `releaseResources()`. Task 3's `releaseResources()` body clears `mIsActive` + `mInRelease` but does NOT clear `mAdsrOverridden` + does NOT restore `mPreStealAdsrParams` to `mAdsr`. The save/restore happens in `startNote` instead at [Source/VibePlayer/VibePlayerDSP.cpp:548](../../Source/VibePlayer/VibePlayerDSP.cpp:548). Existing source comment at cpp:507-509 is accurate but terse.
+
+**Spec-call surface**: (1) expand the source comment to capture the running-notes deeper reasoning / (2) REFRAME as accepted design.
+
+**Jeff's call: REFRAME.** Verbatim: "NIT 4... [is] purely academic memory hygiene; startNote state reconciliation handles it safely."
+
+**Accepted-design rationale**: The state persists harmlessly across `releaseResources` because the next `startNote` is the natural restore point. `setAdsr` calls between fade-out-end and next-startNote route correctly through the `mAdsrOverridden`-guarded path in `setAdsr` itself — incoming user-driven param changes get diverted to `mPreStealAdsrParams` (not stomping the in-flight quick-release params) when `mAdsrOverridden == true`. The behavior is deterministic + already documented in this running-notes file at Task 3 Section 2.
+
+#### NIT 5 — `mAdsrOverridden` cleared only in `startNote` — dangles forever if voice never re-triggered
+
+**Scenario**: voice gets stolen, plays out its 1.5 ms quick-release, hits `clearCurrentNote()` + `releaseResources()`. Per NIT 4, `mAdsrOverridden` stays true post-`releaseResources()`. User changes engines or stops playback for hours. `mAdsrOverridden` stays true forever (the voice is never re-triggered, so the `startNote` restore path never fires). Memory cost: one bool + one `juce::ADSR::Parameters` struct per voice. Already accounted for in the per-voice RAM budget.
+
+**Spec-call surface**: (1) clear `mAdsrOverridden` in `releaseResources` instead of waiting for next `startNote` / (2) REFRAME as accepted design.
+
+**Jeff's call: REFRAME.** Verbatim: "NIT 4 and 5 are purely academic memory hygiene; startNote state reconciliation handles it safely."
+
+**Accepted-design rationale**: Same shape as NIT 4 — `mAdsrOverridden` + `mPreStealAdsrParams` form a save/restore pair. If the next `startNote` never fires, the saved state is never observed, so the dangling-true flag has zero observable effect. The "clear in startNote on next-note-on" pattern is also slightly more defensive: if any future code path were to read `mAdsrOverridden` between fade-out-end + next-startNote, the flag would correctly report "yes, this voice's ADSR has been overridden" — which is true until the next startNote restores it.
+
+### Section 4 — Build status
+
+Both Release + Debug build clean after the 3 NIT fixes. `RELEASE_EXIT_CODE=0`, `DEBUG_EXIT_CODE=0`. Only pre-existing warnings survive. Jeff-confirmed `do_build.bat` post-fix-up: "Builds clean". No runtime verify needed for this fix-up — all three FIXES are non-behavioral: NIT 1 swaps a clamp upper-bound symbol that the current APVTS range never triggers (no observable runtime change); NIT 3 adds a strict-warning comment (no code touched); NIT 6 rewrites a comment line (no code touched).
+
+### Section 5 — Rule 4 Diagnostic Instrumentation Catalog
+
+Nil for Task 7 NIT fix-up (no `DBG` / `juce::Logger::writeToLog` / temp `jassert` / debug `juce::AlertWindow` added — all 3 fixes are comment additions + one symbol swap; no runtime instrumentation surface). Cross-task running tally across Tasks 0-4 + Task 6 was already nil per the prior Rule 4 sections + Sweep 6 confirmation; Task 7 NIT fix-up continues the nil tally.
+
+### Section 6 — Next action
+
+QA-VoicePool close commit lands the five docs deliverables per Task 6 Section 4 + the running-notes close-pass section appended below this entry. Drafters fire in parallel for the five touches: §9 Forks entry for BaySickSynth `mOsc.reset()` -> QA-EngineApvts (per Task 2 Section 4 lock); §9 Forks entry for SFZ `<group>` parser -> NEW QA-SfzGroup (per Task 4 Section 3 routing); NEW §5 QA-SfzGroup batch entry (scope + slot); §5 QA-VoicePool STATUS banner update for Task 3's Correction 1 / 2 / 3 deviations from the literal L1-L10 spec calls (per Task 3 Section 4 lock); §6 sequencing arrow update to insert QA-SfzGroup between QA-VoicePool and QA-EngineApvts. Plus the Implemented Work Log batch-close entry compiled by `/draft-doc batch-close` reading this file as primary input. Surface all five drafts + the commit message draft to Jeff for approval; commit via `git commit -F <file>` per the CLAUDE.md Git Commit Mechanics rule.

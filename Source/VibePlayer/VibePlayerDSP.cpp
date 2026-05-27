@@ -1356,8 +1356,15 @@ void VibeSynth::setLfoRate (float hz) noexcept
 void VibeSynth::setVoiceCap (int cap) noexcept
 {
     // Enforcement happens in renderNextBlock manual dispatch (oldest-first steal).
+    // QA-VoicePool Task 7 NIT 1 fix-up: clamp upper bound is kLogicalCap (16),
+    // NOT kMaxVoices (24).  The user-facing polyphony range is 1..16; the 8
+    // reserve voices (kMaxVoices - kLogicalCap) are RESERVED for stolen-voice
+    // ADSR-quick-release fade-out overflow per Task 3 Correction 1 physical
+    // over-provisioning.  Clamping at kMaxVoices here would let a future APVTS
+    // range bump (or a saved-state voiceCap=20 from a future version) silently
+    // consume the reserve voices and break the fade-out mechanic.
     if (cap == mLastVoiceCap) return;
-    mLastVoiceCap = juce::jlimit (1, kMaxVoices, cap);
+    mLastVoiceCap = juce::jlimit (1, kLogicalCap, cap);
 }
 
 void VibeSynth::setCutSelf (bool on) noexcept

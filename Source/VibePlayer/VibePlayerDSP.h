@@ -248,7 +248,7 @@ private:
 // ── VibeVoice ─────────────────────────────────────────────────────────────────
 // One polyphonic voice.
 //
-//   startNote   → find region → create MemoryAudioSource + ResamplingAudioSource
+//   startNote   → find region → re-point fat sources → reset ADSR / filter / LFO
 //   renderNextBlock → get audio → ADSR → drive → SVF filter → mix into output
 //   stopNote    → ADSR note-off (tail-off) or immediate clear
 //
@@ -346,6 +346,15 @@ private:
     // Forward + reverse source readers owned as direct members.  startNote
     // re-points the chosen one at the new region's buffer via setBuffer() -
     // no per-note heap allocation.
+    //
+    // IMPORTANT (QA-VoicePool Task 7 NIT 3 fix-up): mForwardSrc + mReverseSrc
+    // MUST be declared BEFORE mForwardResamp + mReverseResamp.  The resampler
+    // member-init expressions below take `&mForwardSrc` / `&mReverseSrc` at
+    // construction time; C++ requires the referenced member to be fully
+    // constructed before the reference is taken, which means strict
+    // declaration order matters.  Do NOT reorder.  A drive-by alphabetize or
+    // accident-of-refactor reorder will silently produce a use-of-uninitialized-
+    // member at VibeVoice construction and segfault on the first note-on.
     VibeForwardMemoryAudioSource mForwardSrc;
     ReversedMemoryAudioSource    mReverseSrc;
 
