@@ -10,6 +10,7 @@
 #include "utility/NumericId.h"
 #include "utility/LeakDetector.h"
 #include <absl/strings/string_view.h>
+#include <atomic>
 #include <utility>
 #include <string>
 #include <vector>
@@ -148,7 +149,14 @@ public:
     bool aftertouchSwitched_ {};
     std::bitset<config::numCCs> ccSwitched_;
 
-    int sequenceCounter_ { 0 };
+    // BaySickDAW QA-SfzGroup local patch (2026-05-27, Sub-R/S):
+    // std::atomic<int> with relaxed memory ordering to fix the MT-mode RR race
+    // that produced multiple-region overlay on cymbals/hi-hats (high RR variant
+    // count amplifies the race window).  Counter is monotonic + isn't ordering
+    // any other state, so relaxed is sufficient.  Call sites in Layer.cpp use
+    // fetch_add(1, std::memory_order_relaxed) explicitly (operator++ on atomic
+    // defaults to seq_cst, which would be overkill for this use).
+    std::atomic<int> sequenceCounter_ { 0 };
 
     Region region_;
 

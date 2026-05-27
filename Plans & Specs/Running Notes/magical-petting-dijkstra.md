@@ -263,3 +263,105 @@ Task 3 — Track 2 sfizz parser + BaySick* loader-handoff investigation (BaySick
 - [`Source/Standalone/StandaloneEditor.cpp`](../../Source/Standalone/StandaloneEditor.cpp) — +30: 4 piano-roll registration-site closures (Layer / Bass / Drum / Clip).
 
 Total: 10 source files, +473 / -56 net.
+
+---
+
+## 2026-05-27 — Task 3 — Track 2 sfizz investigation + targeted sfizz atomic patch (Sub-R/S amendment)
+
+Read-only investigation per Sub-A (Track 2 investigation-only) that surfaced two unforeseen findings mid-task: (1) the BaySickRustyDrums MT-mode bit-crusher symptom on cymbals/hi-hats, which Jeff flagged as catastrophic + in-scope for QA-SfzGroup's RR mandate; (2) a discoverability blocker on BaySickGuitars + BaySickBasses preventing meaningful in-app RR verification.  Triggered a Sub-A scope amendment (Sub-R locked: targeted vendored-sfizz patches allowed when the fix is bounded; Sub-S locked: `std::memory_order_relaxed`) + a 1-symbol-type-change patch landed in `libs/sfizz/src/sfizz/Layer.{h,cpp}` to convert `int sequenceCounter_` to `std::atomic<int>` with `fetch_add(1, relaxed)` at both call sites.  Patch is a real correctness improvement (plain-int RMW under MT is UB) + ships as defense-in-depth, but **did NOT resolve the bit-crusher symptom** — empirical verification confirmed the patch is in the binary (clean rebuild after deleting `build/sfizz_build/`) but Jeff still hears bit-crusher under MT-on Rusty cymbals.  Hypothesis-was-wrong outcome owned per `feedback_diagnose_before_fixing.md` + `feedback_own_the_codebase_no_git_alibi.md`; per Jeff's call (verbatim "We are going with Option (b): Keep the atomic patch + route the deep investigation to the follow-up batch"), the actual root cause + fix routes to the Track 2 follow-up batch alongside discoverability + Guitars/Basses RR-loss investigation.
+
+### Section 1 — sfizz parser/state-builder code review — INHERITANCE WORKING
+
+Via Explore agent trace (read-only): sfizz correctly cascades `<group>`-scoped `seq_position` / `seq_length` opcodes into child `<region>` blocks.  Code path:
+
+- [`libs/sfizz/src/sfizz/parser/Parser.cpp`](../../libs/sfizz/src/sfizz/parser/Parser.cpp) `processHeader()` (line 218) + `processOpcode()` (line 257) tokenize SFZ + emit `onParseFullBlock` listener events.
+- [`libs/sfizz/src/sfizz/Synth.cpp`](../../libs/sfizz/src/sfizz/Synth.cpp) `Synth::Impl::onParseFullBlock()` (lines 91-142) caches opcodes per-scope: `globalOpcodes_ = members` (:104), `masterOpcodes_ = members` (:115), `groupOpcodes_ = members` (:122).
+- [`libs/sfizz/src/sfizz/Synth.cpp:156-180`](../../libs/sfizz/src/sfizz/Synth.cpp:156) `Synth::Impl::buildRegion()` performs the **4-layer parseOpcodes cascade** (global → master → group → region; lines 177-180 in order) on each `<region>` header.  Each parseOpcodes call writes opcodes into the region's struct fields via `Region::parseOpcode()`.
+- [`libs/sfizz/src/sfizz/Region.cpp:376-381`](../../libs/sfizz/src/sfizz/Region.cpp:376) `Region::parseOpcode()` `case hash("seq_length")` + `case hash("seq_position")` assign directly to `sequenceLength` + `sequencePosition` (single per-Region uint8 fields per [`Region.h:306-307`](../../libs/sfizz/src/sfizz/Region.h:306)).
+- [`libs/sfizz/src/sfizz/Layer.cpp:60-61`](../../libs/sfizz/src/sfizz/Layer.cpp:60) `Layer::registerNoteOn()` runtime activation reads the inherited values via `sequenceSwitched_ = ((sequenceCounter_++ % region.sequenceLength) == region.sequencePosition - 1);`.
+
+Validation: sfizz explicitly collects `groupOpcodes_` (Synth.cpp:122) and replays them during every `buildRegion()` call (Synth.cpp:179) — the parse order ensures region-scoped opcodes correctly override group defaults.  **No equivalent of BaySickPlayer's pre-batch `if (!inRegion) continue;` gap in sfizz.**
+
+### Section 2 — BaySickRustyDrums wrapper synthesis review — opcode-preserving
+
+[`Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:485-504`](../../Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:485) `loadKit()` calls `buildOutputRoutedSfzWrapper(sfzPath, kitRoot)` at line 492 (declared at `.h:202`; defined at [`.cpp:623`](../../Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:623)) which:
+
+- Walks every line of the top-level SFZ; for `<master>` / `<group>` headers, APPENDS `output=N` to the same line (line 670 in `annotateMastersWithOutput()`, line 692 in the top-level walk).  Does NOT strip, reorder, or modify any other opcode lines.
+- Inlines `#include` piece-file content via `annotateMastersWithOutput()` (line 720) which applies the same header-append-only treatment.
+- Passes all other content (control blocks, opcodes, comments, blank lines) through unchanged at line 738.
+
+The resulting wrapper string preserves every opcode including `<group>`-scoped `seq_position` / `seq_length`.  Wrapper-synthesized SFZ is parsed by sfizz via `loadSfzString()` (line 497) using the same parser as the plain `loadSfzFile()` path.  **Verdict: wrapper synthesis is correct + opcode-preserving; not the source of any RR or articulation bug.**
+
+### Section 3 — BaySickGuitars + BaySickBasses loader-handoff confirmed asymmetric but both correct
+
+[`Source/BaySickGuitars/BaySickGuitarsProcessor.cpp:255-261`](../../Source/BaySickGuitars/BaySickGuitarsProcessor.cpp:255) `loadKit()` uses plain `mSfizz->loadSfzFile(sfzPath.getFullPathName().toStdString())` — no wrapper synthesis, no opcode transformation.  [`Source/BaySickBasses/BaySickBassesProcessor.cpp:246-252`](../../Source/BaySickBasses/BaySickBassesProcessor.cpp:246) `loadKit()` identical pattern.  Both engines hand the on-disk SFZ file directly to sfizz; sfizz's inheritance cascade (Section 1) handles opcode propagation correctly.
+
+### Section 4 — CoreLibrary content sample confirmation (sfizz-driven engines DO have RR + keyswitches)
+
+Sampled the actual content files on disk:
+
+- **Black&Blue Basses** at `AppData/Local/BaySickDAW/CoreLibrary/Black&Blue Basses/Programs/` — 11 numbered `.sfz` programs.  `01-darkblack_keysw.sfz` + `02-darkblack_keysw_warm.sfz` declare keyswitches at `<global>` scope (`sw_lokey=27 sw_hikey=31 sw_default=31` = MIDI 27-31 = app-D#3 to G3 in FL convention).  Multiple `<master>` blocks for sw_last=27/28/29/30/31 with `sw_label=Pluck` / `sw_label=Ghost` / etc.  Map files (`maps/babyblue_fake_det_ff_map.sfz` + others) contain **49 per-region `seq_position` declarations** with up to 8-way RR per pitched note.
+- **Black&Green Guitars** at `AppData/Local/BaySickDAW/CoreLibrary/Black&Green Guitars/Programs/` — 3 keyswitch programs (`01-green_keyswitch.sfz` / `02-black_keyswitch.sfz` / `03-combo_keyswitch.sfz`) + 8 single-articulation programs.  Map files (`modules/maps_black/btb.sfz` + others) contain **33+ per-region `seq_position` declarations** with 2-way RR per pitched note.
+
+**Conclusion:** content fully RR-equipped + keyswitch-equipped on disk.  No file-content issue.
+
+### Section 5 — Live test results (Jeff, 2026-05-27)
+
+- **Rusty (initial test, pre-Sub-R/S patch):** RR variation HEARD on snare-style hits.  Jeff confirmed audible cycling.
+- **Guitars / Basses (initial test):** NO RR variation heard.  Jeff also reported "Guitars and Basses have keyswitch setups but i have no idea where those buttons are and they aren't labeled" — confirming the discoverability blocker (Sub-A locked sfizz-engine keyswitch labels out of Sub-P/Q's scope, so those engines have no amber-key UI).
+- **Bit-crusher discovery (mid-test on Rusty cymbals + hi-hats):** Jeff reported "almost seems like it might be playing multiple files at once crashing into each other" + diagnostic answers locked the pattern: MT-only, scales with RR variant count (cymbals/hi-hats with 6-8 RR slots affected; kick/snare with fewer slots clean), single-hit reproducible.  Symptom = textbook race-on-RR-counter signature.
+
+### Section 6 — Sub-R/S scope amendment + atomic patch applied (diagnostic miss)
+
+Per `feedback_qa_batches_fix_bugs_dont_defer.md` (real bugs surfaced mid-batch get fixed in-batch by default) + Jeff verbatim 2026-05-27 ("A targeted, 1-line type change to fix a thread-safety RR bug absolutely belongs in this QA-SfzGroup batch"), two sub-spec calls surfaced via chat per Rule 5 + answered:
+
+- **Sub-R = (a)** — Sub-A scope amendment: targeted vendored-sfizz patches ALLOWED in QA-SfzGroup when the fix is bounded (single-symbol type change, no state-machine logic rewrite).  Spirit of Sub-A's "no full sfizz state-machine patching mixed with parser work" preserved.
+- **Sub-S = (a)** — `std::memory_order_relaxed` for the `sequenceCounter_` atomic increment (monotonic counter, not synchronizing other state); call sites use `sequenceCounter_.fetch_add(1, std::memory_order_relaxed)` explicitly (NOT `sequenceCounter_++` which on atomic defaults to `seq_cst`).
+
+Patch applied:
+
+- [`libs/sfizz/src/sfizz/Layer.h:11`](../../libs/sfizz/src/sfizz/Layer.h:11) — added `#include <atomic>`.
+- [`libs/sfizz/src/sfizz/Layer.h:151`](../../libs/sfizz/src/sfizz/Layer.h:151) — `int sequenceCounter_ { 0 };` → `std::atomic<int> sequenceCounter_ { 0 };` + QA-SfzGroup local-patch comment.
+- [`libs/sfizz/src/sfizz/Layer.cpp:63`](../../libs/sfizz/src/sfizz/Layer.cpp:63) (registerNoteOn) — `sequenceCounter_++` → `const int counter = sequenceCounter_.fetch_add(1, std::memory_order_relaxed);` + modulo check against `counter` local.
+- [`libs/sfizz/src/sfizz/Layer.cpp:191`](../../libs/sfizz/src/sfizz/Layer.cpp:191) (registerCC) — identical pattern.
+
+**Empirical verification (Jeff, 2026-05-27):**
+
+- Initial post-patch test: Jeff reported "All pass" — but later clarified he was testing under MT-OFF (he thought MT was on but it was off).  MT-off has always been clean; that wasn't a meaningful patch-effect verification.
+- Bass program transient artifact: Jeff observed a "tiny plucked note" on `01-darkblack_keysw` post-patch that he attributed to my work — diagnostic check via MT-off revealed it as a one-off glitch (not reproducible); no source change connection.
+- Clean rebuild verification (deleted `build/sfizz_build/` + ran `do_build.bat`): patch IS compiled into the binary, but **the bit-crusher symptom UNCHANGED under MT-on Rusty cymbals**.  Patch did not fix the symptom.
+
+**Diagnostic conclusion:** the hypothesis that `sequenceCounter_` was the race source was wrong.  The atomic patch removes a real data race (plain-int RMW under MT is UB per C++ spec) + improves codebase correctness as defense-in-depth, but the actual MT-only bit-crusher root cause is elsewhere in sfizz (likely voice allocation / dispatch / sample buffer access — areas I haven't investigated yet).  Per `feedback_own_the_codebase_no_git_alibi.md`, miss owned.
+
+### Section 7 — Three findings routed to Track 2 follow-up batch
+
+Per Jeff's verbatim "We are going with Option (b): Keep the atomic patch + route the deep investigation to the follow-up batch" + "I am not letting a deep-dive MT hunt into a vendored library derail our current close-out trajectory", three sfizz-engine findings route to a new dedicated batch (slot is Jeff's call at QA-SfzGroup close per `feedback_slot_placement_is_spec_call.md`).  Working title for the routing recommendation: tentative `QA-SfizzFollowup` (final naming + slot at close).
+
+**Routing-recommended scope for the follow-up batch:**
+
+1. **Keyswitch label discoverability for sfizz-driven engines** (BaySickRustyDrums + BaySickGuitars + BaySickBasses).  Extend Sub-P/Q's amber-highlight + label rendering to those engines' piano keyboards.  Requires extracting keyswitch labels from sfizz's parsed Region/Layer data structures (the parsed `sw_label` opcode + `sw_lokey..sw_hikey` range data are accessible via sfizz's existing public API once a kit is loaded).  Wire the existing `PianoRollConnection::keyswitchLabelProvider` field (already added in Task 2) at the BaySickRustyDrums + BaySickGuitars + BaySickBasses piano-roll registration sites in `StandaloneEditor.cpp` with closures that pull labels from each engine's `mSfizz` instance.  Estimated effort: medium (~2-3 hr — sfizz API navigation + closure plumbing).
+2. **Guitars/Basses RR-loss diagnosis** — most likely resolved by item 1 (Jeff can engage articulations + test at consistent velocity once labels are visible).  If RR still doesn't audibly cycle post-discoverability-fix, dive deeper (sfizz `Default::sequence` value semantics, sample-data inspection, etc.).  Estimated effort: small (~1-2 hr) IF item 1 resolves it; medium (~3-4 hr) if separate fix needed.
+3. **Bit-crusher MT race fix** — the catastrophic bug.  Atomic patch in `libs/sfizz/Layer.{h,cpp}` is in place as defense-in-depth but does NOT resolve the symptom.  Actual root cause needs investigation: instrumentation via file-logging (since DBG / OutputDebugString is invisible in Release without DebugView), capture per-voice / per-Layer / per-noteOn state during a multi-voice cymbal hit, identify the racing state (candidates: voice allocation in `Synth::Impl::startVoice` at `Synth.cpp:1300`, voice manager state, sample buffer concurrent access, polyphony manager, or some other non-atomic shared state in `Voice.cpp` / `RegionStateful.cpp`).  Estimated effort: medium-large (~3-6 hr investigation + 1-2 hr fix).
+
+**Total estimated effort for the follow-up batch:** ~6-12 hours.
+
+### Section 8 — Sub-spec calls discovered + resolved this task (Rule 5 compliance)
+
+Sub-R + Sub-S surfaced via chat at the mid-Task-3 bit-crusher discovery + answered before any source touch.  No unilateral picks.  Plan file Spec-calls table amended once during the task: Sub-R + Sub-S rows added (Sub-A is amended in-place via Sub-R's text rather than re-edited).  Plan body Task 2 scope description was NOT updated for Sub-R/S since the patch landed during Task 3 — Sub-R/S table rows are the canonical record.
+
+### Section 9 — Diagnostic Instrumentation Catalog
+
+Nil for Task 3 (no `DBG` / `juce::Logger::writeToLog` / temp `jassert` / debug `juce::AlertWindow` / temp file logging added during the task — the atomic patch is a real fix attempt + ships as defense-in-depth, NOT diagnostic instrumentation).
+
+### Section 10 — Next action
+
+Task 4 — cleanup grep sweep per Sub-I (a) 6-task lock.  Sweep `Source/VibePlayer/VibePlayerDSP.{cpp,h}` + broader `Source/` for stale comments referencing pre-batch broken-inheritance behavior; verify zero diagnostic instrumentation in source post-batch (Rule 4 catalog should remain empty); apply any cleanup edits + commit if changes (else skip commit, fold cleanup result into Task 5 close commit).
+
+### Section 11 — Files modified summary
+
+- [`libs/sfizz/src/sfizz/Layer.h`](../../libs/sfizz/src/sfizz/Layer.h) — +9 / -1 (Sub-R/S patch: `<atomic>` include + `std::atomic<int>` type change for `sequenceCounter_` + QA-SfzGroup local-patch comment).
+- [`libs/sfizz/src/sfizz/Layer.cpp`](../../libs/sfizz/src/sfizz/Layer.cpp) — +10 / -2 (Sub-R/S patch: `fetch_add(1, std::memory_order_relaxed)` at both call sites in `registerNoteOn` + `registerCC` + QA-SfzGroup local-patch comments).
+- [`Plans & Specs/Batch Plans/magical-petting-dijkstra.md`](../Batch%20Plans/magical-petting-dijkstra.md) — Sub-R + Sub-S rows added to Spec-calls table (amends Sub-A scope, locks `std::memory_order_relaxed` semantics + call-site `fetch_add` requirement).
+- [`Plans & Specs/Running Notes/magical-petting-dijkstra.md`](magical-petting-dijkstra.md) — this Task 3 entry appended.
+
+Total source: 2 vendored sfizz files, +19 / -3 net.  Total docs: 2 plan/running-notes files.

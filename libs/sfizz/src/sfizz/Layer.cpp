@@ -57,8 +57,12 @@ bool Layer::registerNoteOn(int noteNumber, float velocity, float randValue) noex
     const bool keyOk = region.keyRange.containsWithEnd(noteNumber);
     if (keyOk) {
         // Sequence activation
+        // BaySickDAW QA-SfzGroup local patch (2026-05-27, Sub-S): relaxed
+        // fetch_add replaces ++ to keep MT noteOn dispatch race-free without
+        // paying for seq_cst on a monotonic counter.
+        const int counter = sequenceCounter_.fetch_add(1, std::memory_order_relaxed);
         sequenceSwitched_ =
-            ((sequenceCounter_++ % region.sequenceLength) == region.sequencePosition - 1);
+            ((counter % region.sequenceLength) == region.sequencePosition - 1);
     }
 
     const bool polyAftertouchActive =
@@ -181,8 +185,12 @@ bool Layer::registerCC(int ccNumber, float ccValue, float randValue, int extende
             return false;
         }
 
+        // BaySickDAW QA-SfzGroup local patch (2026-05-27, Sub-S): relaxed
+        // fetch_add replaces ++ to keep MT CC dispatch race-free without
+        // paying for seq_cst on a monotonic counter.
+        const int counter = sequenceCounter_.fetch_add(1, std::memory_order_relaxed);
         sequenceSwitched_ =
-            ((sequenceCounter_++ % region.sequenceLength) == region.sequencePosition - 1);
+            ((counter % region.sequenceLength) == region.sequencePosition - 1);
 
         if (isSwitchedOn() && (ccNumber == ExtendedCCs::polyphonicAftertouch || ccValue != midiState_.getCCValue(ccNumber)))
             return true;
