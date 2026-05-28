@@ -399,6 +399,12 @@ const std::vector<std::pair<uint16_t, std::string>>& sfz::Sfizz::getCCLabels() c
     return synth->synth.getCCLabels();
 }
 
+// QA-Sfizz Task 2A 2026-05-27: BaySickDAW local-patch - see sfizz.hpp declaration.
+const std::vector<std::pair<uint8_t, std::string>>& sfz::Sfizz::getKeyswitchLabels() const noexcept
+{
+    return synth->synth.getKeyswitchLabels();
+}
+
 void sfz::Sfizz::ClientDeleter::operator()(Client *client) const noexcept
 {
     delete client;

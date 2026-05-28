@@ -148,6 +148,12 @@ public:
         return mAuditionNote.load (std::memory_order_acquire) != -1;
     }
 
+    // QA-Sfizz Task 2A: keyswitch label accessor for piano-roll discoverability.
+    // Iterates sfizz's parsed sw_label storage (populated at SFZ load time from
+    // <region>/<group> sw_label opcodes); returns the label for the given MIDI
+    // note if it's a keyswitch in the currently loaded kit, else empty.
+    juce::String           getKeyswitchLabel (int midiNote) const noexcept;
+
     // J-8 stage 2 (2026-05-04): ARIA control surface CC dispatch.  Writes the
     // value (0..127) for `cc` through APVTS so the change is undoable, projectable,
     // and automatable.  The parameterChanged listener forwards to sfizz.

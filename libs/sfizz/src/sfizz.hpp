@@ -1035,6 +1035,12 @@ public:
     const std::vector<std::pair<uint16_t, std::string>>& getCCLabels() const noexcept;
 
     /**
+     * @brief Get the keyswitch labels, if any.
+     * @since (BaySickDAW local-patch - QA-Sfizz Task 2A 2026-05-27)
+     */
+    const std::vector<std::pair<uint8_t, std::string>>& getKeyswitchLabels() const noexcept;
+
+    /**
      * @brief Export a MIDI Name document describing the currently loaded SFZ file.
      * @since 1.0.0
      *

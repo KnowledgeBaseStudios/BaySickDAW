@@ -713,6 +713,19 @@ public:
     const std::vector<CCNamePair>& getCCLabels() const noexcept;
 
     /**
+     * @brief Get the keyswitch labels, if any
+     *
+     * @return const std::vector<NoteNamePair>&
+     */
+    // QA-Sfizz Task 2A 2026-05-27: BaySickDAW local-patch - read-only public
+    // accessor exposing impl->keyswitchLabels_ for piano-roll discoverability
+    // on the 3 sfizz-driven engines (BaySickRustyDrums + BaySickGuitars +
+    // BaySickBasses).  Mirrors getKeyLabels()/getCCLabels() pattern; no
+    // logic/threading change.  See Plans & Specs/Batch Plans/
+    // amber-tracking-mongoose.md.
+    const std::vector<NoteNamePair>& getKeyswitchLabels() const noexcept;
+
+    /**
      * @brief Get the used CCs
      *
      * @return const std::bitset<config::numCCs>&

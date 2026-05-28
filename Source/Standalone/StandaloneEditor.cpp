@@ -5892,6 +5892,17 @@ void StandaloneEditor::registerBaySickRustyDrumsPianoRoll()
     // Tight Closed, etc.) are readable across the full kit range.
     conn.allKeysWhite = true;
 
+    // QA-Sfizz Task 2A: keyswitch label provider for sfizz-driven engine.
+    // Mirrors the BaySickPlayer pattern at registerLayerPianoRoll (:5734-5738) /
+    // registerBassPianoRoll (:5780-5784) / registerDrumPianoRoll (:5820-5824) /
+    // registerClipPianoRoll (:7890-7894).
+    conn.keyswitchLabelProvider = [this](int n) -> juce::String
+    {
+        if (auto* eng = mProcessor.getBaySickRustyDrums())
+            return eng->getKeyswitchLabel (n);
+        return {};
+    };
+
     mPianoRollPage->registerEngine ({ EngineKind::BaySickRustyDrums, 0 }, std::move (conn));
 }
 

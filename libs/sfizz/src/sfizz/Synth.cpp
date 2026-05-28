@@ -2403,6 +2403,13 @@ const std::vector<CCNamePair>& Synth::getCCLabels() const noexcept
     return impl.ccLabels_;
 }
 
+// QA-Sfizz Task 2A 2026-05-27: BaySickDAW local-patch - see Synth.h declaration.
+const std::vector<NoteNamePair>& Synth::getKeyswitchLabels() const noexcept
+{
+    Impl& impl = *impl_;
+    return impl.keyswitchLabels_;
+}
+
 Resources& Synth::getResources() noexcept
 {
     Impl& impl = *impl_;
