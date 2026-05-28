@@ -106,7 +106,12 @@ int BaySickRustyDrumsProcessor::getKitDefaultCc (int cc) const
     const juce::SpinLock::ScopedLockType lk (mCcKitDefaultLock);
     if (auto it = mCcKitDefault.find (cc); it != mCcKitDefault.end())
         return it->second;
-    return 0;   // unset CC → 0 (matches SFZ spec; double-click resets to 0)
+    // QA-Sfizz Sub-E (2026-05-28): unset CC → 64 (MIDI center, Aria-host
+    // convention these 3 sfizz-driven engines emulate).  Pre-Sub-E "unset
+    // → 0" (K-5, 2026-05-05) silently disabled CC-gated <master> blocks in
+    // Karoryfer kits → "thin sound" perception.  Double-click reset returns
+    // here for CCs the kit author didn't explicitly set_cc.
+    return 64;
 }
 
 juce::String BaySickRustyDrumsProcessor::getCcLabel (int cc) const
@@ -126,11 +131,20 @@ BaySickRustyDrumsProcessor::createLayout()
 
     // J-8 stage 2 (2026-05-04): register one Int param per MIDI CC the ARIA
     // surface might address.
-    // K-5 fix (2026-05-05): default 0 (matches SFZ-spec "unset CC = 0" that
-    // sfizz uses internally) instead of 64.  Kit-author `set_cc<N>=<int>`
-    // directives override during loadKit.  Without this, sliders for CCs
-    // the kit doesn't explicitly set sit at midpoint visually but sfizz
-    // hears 0 internally - visual mismatch.
+    // QA-Sfizz Sub-E (2026-05-28): default 64 (MIDI center, Aria-host
+    // convention) - reverts the K-5 (2026-05-05) "default 0 matches
+    // SFZ-spec" choice for these 3 sfizz-driven engines.  Rusty + Guitars
+    // + Basses emulate Aria hosts that Karoryfer kits are designed around;
+    // kit <master>/<group> blocks gate on CC ranges expecting CC=64 default
+    // for unset CCs (e.g. hi-hat-pedal CC4 gates 88 masters in Big Rusty
+    // Drums; unison/tailpiece/feedback masters in Guitars/Basses gate on
+    // CC100/CC118/CC29 respectively).  Under K-5's CC=0 default, those
+    // gated <master> blocks silently didn't fire → "thin sound" perception
+    // across all 3 sfizz-driven engines.  Kit-author `set_cc<N>=<int>`
+    // directives still override during loadKit (e.g. Big Rusty Drums
+    // set_cc101=100 wins over 64).  Slider visual baseline now matches
+    // sfizz's Aria-emulating CC=64 internal state (no slider/audio
+    // mismatch since both sit at midpoint).
     // 2026-05-05 audit: range lifted to kCcCount=512 so kit "extended CCs"
     // >= 128 (e.g. Big Rusty Drums CC400/401) get APVTS-bound the same way.
     // IDs `brd_cc0..(kCcCount-1)`.
@@ -138,7 +152,7 @@ BaySickRustyDrumsProcessor::createLayout()
         params.push_back (std::make_unique<juce::AudioParameterInt> (
             "brd_cc" + juce::String (cc),
             "CC " + juce::String (cc),
-            0, 127, 0));
+            0, 127, 64));
 
     return { params.begin(), params.end() };
 }
@@ -585,14 +599,20 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
         const juce::SpinLock::ScopedLockType lk (mCcLabelLock);
         mCcLabel = kitLabels;
     }
-    // K-5 fix (2026-05-05): reset every CC to 0 before applying the kit's
-    // set_cc overrides.  Without this, switching programs (e.g. Full → Basic)
-    // leaks the previous program's user-tweaked CC values into the new program.
+    // QA-Sfizz Sub-E (2026-05-28): reset every CC to 64 (MIDI center, Aria-
+    // host convention) before applying the kit's set_cc overrides - reverts
+    // the K-5 (2026-05-05) reset-to-0 choice for these 3 sfizz-driven
+    // engines.  Baseline 64 + kit set_cc overrides = Aria-emulating final
+    // state (kit set_cc=0 still wins for CCs the author explicitly zeroes).
+    // Reset is still required (vs leaving prior values) because switching
+    // programs (e.g. Full → Basic) would otherwise leak the previous
+    // program's user-tweaked CC values into the new program.  The reset
+    // hits sfizz too via setValueNotifyingHost → parameterChanged.
     for (int cc = 0; cc < kCcCount; ++cc)
     {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                 apvts.getParameter ("brd_cc" + juce::String (cc))))
-            p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (0.0f));
+            p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (64.0f));
     }
 
     // Push kit defaults through APVTS - this drives the parameterChanged
