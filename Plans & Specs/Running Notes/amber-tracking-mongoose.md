@@ -51,4 +51,65 @@ Three sub-spec calls deferred until Task 4 surfaces a root cause (NOT picks I wa
 
 **No source changes in Task 0.** All source work begins at Task 2A (sfizz public accessor patch + BaySickRustyDrums label provider closure).
 
-Next: surface full git status → `/draft-commit` → surface drafted message + git status for Jeff approval → commit on approval via `git commit -F .git/COMMIT_EDITMSG_QA-Sfizz-Task0.txt`.
+**Outcome:** Task 0 commit landed at `828f6b9` (3 files changed, 510 insertions / 1 deletion - 2 docs new + 1 doc edited per files-touched list above). Drafter output reviewed + 2 minor factual fixes applied before commit (`keyswitchLabelMap_` -> `keyswitchLabelsMap_` per Phase 1 research at SynthPrivate.h:289; effort estimate `~5-8 hours` -> `~6-12 hours` to align with §5 entry). Clean working tree post-commit. Branch ahead of origin/main by 25 commits.
+
+**Next:** Task 1 — read-only inventory pass confirming the Phase 1 research findings + surfacing any remaining sfizz keyswitch-state plumbing gaps before Task 2A's sfizz public accessor patch lands.
+
+---
+
+## 2026-05-27 — Task 1 — Inventory (read-only)
+
+Read-only confirmation pass per the plan's Task 1 checklist. All Phase 1 research findings re-verified by direct Read against current HEAD (post-`828f6b9` baseline); no new sub-spec call surfaced (Rule 5 gate clear for Task 2 progression).
+
+**SC-4 sfizz public accessor patch shape verified line-by-line:**
+
+- `Synth::getKeyLabels()` impl at [libs/sfizz/src/sfizz/Synth.cpp:2394-2398](../../libs/sfizz/src/sfizz/Synth.cpp:2394) uses `Impl& impl = *impl_; return impl.keyLabels_;` pattern (NOT a single-line return; the local-ref unwrap is explicit).
+- `Synth::getCCLabels()` impl at [Synth.cpp:2400-2404](../../libs/sfizz/src/sfizz/Synth.cpp:2400) same pattern.
+- Patch insertion point: after :2404 (before `Synth::getResources()` at :2406). Patch body mirrors the `Impl& impl = *impl_;` lead so the new accessor matches the existing pair exactly — no logic divergence, no shortcut.
+- `sfz::Sfizz::getKeyLabels()` wrapper forward at [libs/sfizz/src/sfizz/sfizz.cpp:392-395](../../libs/sfizz/src/sfizz/sfizz.cpp:392) — single-line `return synth->synth.getKeyLabels();`.
+- `sfz::Sfizz::getCCLabels()` at [sfizz.cpp:397-400](../../libs/sfizz/src/sfizz/sfizz.cpp:397) same shape.
+- Patch insertion point: after :400 (before `ClientDeleter::operator()` at :402).
+- [SynthPrivate.h:283-289](../../libs/sfizz/src/sfizz/SynthPrivate.h:283) storage confirmed: `keyLabels_` at :283 + `keyLabelsMap_` at :284 (existing pair); `keyswitchLabels_` at :288 + `keyswitchLabelsMap_` at :289 (the new pair that SC-4's public accessor exposes).
+
+**3 sfizz engine processor mSfizz members verified:**
+
+- [BaySickRustyDrumsProcessor.h:185](../../Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.h:185) — `std::unique_ptr<sfz::Sfizz> mSfizz;` (private; J-7b multi-output wrapper SFZ - "single sfizz instance with `output=N`-routed wrapper SFZ" per comment at :179-184).
+- [BaySickGuitarsProcessor.h:146](../../Source/BaySickGuitars/BaySickGuitarsProcessor.h:146) — same private field shape.
+- [BaySickBassesProcessor.h:140](../../Source/BaySickBasses/BaySickBassesProcessor.h:140) — same private field shape.
+
+Each will gain a public `juce::String getKeyswitchLabel(int midiNote) const noexcept;` declaration (placement: alongside the existing public `setOnAnyStateChange()` / `getUndoManager()` accessor cluster, BEFORE the `private:` keyword that begins the `mSfizz` etc. cluster) + a .cpp implementation that iterates `mSfizz->getKeyswitchLabels()` and returns the matching label by midiNote.
+
+**Item 3 instrumentation file landscape (Task 4 scope clarification):**
+
+The plan-body's "polyphony manager" abstract reference resolves to THREE separate sfizz files (not one) plus the orchestrator + per-voice paths. The §5 entry's Item 3 scope ("dig into sfizz's MT execution model: worker pool / lock-free queues / shared state") already covers any of these files — the file split isn't a new spec call, just a finding that expands Task 4's instrumentation candidate list:
+
+- [libs/sfizz/src/sfizz/PolyphonyGroup.h](../../libs/sfizz/src/sfizz/PolyphonyGroup.h) + [.cpp](../../libs/sfizz/src/sfizz/PolyphonyGroup.cpp) — small class; `registerVoice` / `removeVoice` / `removeAllVoices` / `numPlayingVoices` / `setPolyphonyLimit`. Per-group voice tracking.
+- [libs/sfizz/src/sfizz/VoiceManager.h](../../libs/sfizz/src/sfizz/VoiceManager.h) + [.cpp](../../libs/sfizz/src/sfizz/VoiceManager.cpp) — separate file; voice scheduler / lifecycle. Holds `voiceManager_` in `Synth::Impl` (referenced from [Synth.cpp:221](../../libs/sfizz/src/sfizz/Synth.cpp:221) + :389 `voiceManager_.ensureNumPolyphonyGroups(...)`).
+- [libs/sfizz/src/sfizz/VoiceStealing.h](../../libs/sfizz/src/sfizz/VoiceStealing.h) + [.cpp](../../libs/sfizz/src/sfizz/VoiceStealing.cpp) — separate file; stealing algorithm.
+- `Synth::Impl::startVoice` orchestrator at [Synth.cpp:1300](../../libs/sfizz/src/sfizz/Synth.cpp:1300) (declared at [SynthPrivate.h:166](../../libs/sfizz/src/sfizz/SynthPrivate.h:166)) — calls `selectedVoice->startVoice(layer, delay, triggerEvent)` at :1310; recursive sister-voice ring builder at :1344 + :1380.
+- `Voice::startVoice` at [Voice.cpp:408](../../libs/sfizz/src/sfizz/Voice.cpp:408) (declared at [Voice.h:117](../../libs/sfizz/src/sfizz/Voice.h:117)) — per-voice startup.
+- [Region.cpp](../../libs/sfizz/src/sfizz/Region.cpp) + [RegionSet.cpp](../../libs/sfizz/src/sfizz/RegionSet.cpp) + [RegionStateful.cpp](../../libs/sfizz/src/sfizz/RegionStateful.cpp) — region-state lifecycle (Stateful = per-load mutable layer; the non-stateful Region is parse-once shared state).
+- [Layer.cpp](../../libs/sfizz/src/sfizz/Layer.cpp) — already touched by QA-SfzGroup Sub-R/S `sequenceCounter_` atomic patch; Task 4 may revisit for additional state capture.
+
+Task 4 will land Rule-4-cataloged `juce::FileLogger` calls at whichever candidate sites the trace-capture cycle implicates; the expanded file landscape doesn't change the SC-3=(b) bounded-patch envelope authorization.
+
+**3 sfizz-engine piano-roll registration sites + Task 2 closure insertion points:**
+
+Confirmed at Phase 1; re-verified at Task 0 (Reads at StandaloneEditor.cpp:5825-5896 + :7930-8004 during plan-mode + the Task 0 plan-pointer Edit pass). No source drift since QA-SfzGroup close at `42f7253`.
+
+- [StandaloneEditor.cpp:5832-5895](../../Source/Standalone/StandaloneEditor.cpp:5832) `registerBaySickRustyDrumsPianoRoll()` — BaySickRustyDrums singleton. Task 2A closure inserts after `conn.allKeysWhite = true;` at :5893 and before `mPianoRollPage->registerEngine(...)` at :5895.
+- [StandaloneEditor.cpp:7972-7980](../../Source/Standalone/StandaloneEditor.cpp:7972) `EngineKind::BaySickGuitars` branch inside `registerInstSourcePianoRoll(InstPage*)` at :7934. Task 2B Guitars closure inserts after `conn.auditionOff = [](int) {};` at :7980 and before the branch's closing `}`.
+- [StandaloneEditor.cpp:7982-7994](../../Source/Standalone/StandaloneEditor.cpp:7982) `EngineKind::BaySickBasses` branch inside same function. Task 2B Basses closure inserts after `conn.defaultTopNote = 48;` at :7993 and before the branch's closing `}`.
+
+**Plan-body fix landed (Task 0 close flag resolved):** the Task 1 section's "**No commit on Task 1**" inverted line replaced with "**Commit Task 1 on completion**" + corrected precedent framing (inventory commits exist at QA-SfzGroup `196d72e` + QA-VoicePool `bddcaa6`; verify-only no-commit pattern is QA-InsertMaps Task 5 / QA-AudioMeters Task 3, NOT inventory tasks). Single targeted Edit per `feedback_targeted_edits_not_wholesale_rewrite.md` folded into this Task 1 commit.
+
+**No new sub-spec calls surfaced.** Rule 5 gate clear for Task 2A progression.
+
+**Files touched in Task 1 commit (docs-only):**
+
+- `Plans & Specs/Running Notes/amber-tracking-mongoose.md` — this Task 1 entry appended + the Task 0 "Outcome" line from the post-Task-0 in-progress edit (already in working tree pre-commit; both fold into the same Task 1 commit).
+- `Plans & Specs/Batch Plans/amber-tracking-mongoose.md` — Task 1 plan-body line "No commit on Task 1" → "Commit Task 1 on completion" single-line fix.
+
+**No source changes in Task 1.** Source work begins at Task 2A (sfizz public accessor patch + BaySickRustyDrums label provider closure).
+
+Next: surface full git status → `/draft-commit` → surface drafted message + git status for Jeff approval → commit on approval via `git commit -F .git/COMMIT_EDITMSG_QA-Sfizz-Task1.txt`.

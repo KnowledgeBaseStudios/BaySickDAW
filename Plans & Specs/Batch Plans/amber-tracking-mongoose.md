@@ -160,7 +160,7 @@ Confirm Phase 1 research findings + surface additional sfizz internals needed fo
    - Search `libs/sfizz/src/sfizz/` for "Polyphony" / "VoiceManager" / "VoiceList" — locate polyphony manager file path.
 - [ ] If Task 1 surfaces any new sub-spec call (e.g. sfizz internal accessor not callable from public `Sfizz` wrapper; or polyphony-manager surface different from expected), pose to Jeff in chat per Main Plan §0 Rule 5 BEFORE proceeding to Task 2.
 - [ ] Dispatch `/draft-doc running-notes` and apply.
-- [ ] **No commit on Task 1** (docs-only inventory pass; mirrors QA-VoicePool Task 1 docs-only precedent at `bddcaa6` + QA-SfzGroup Task 1 docs-only precedent at `196d72e`; per QA-InsertMaps Task 3 verify-only no-commit pattern).
+- [ ] **Commit Task 1 on completion** (docs-only inventory commit capturing the running-notes findings; mirrors QA-SfzGroup Task 1 commit `196d72e` + QA-VoicePool Task 1 commit `bddcaa6` docs-only-inventory precedent — distinct from the verify-only no-commit pattern at QA-InsertMaps Task 5 / QA-AudioMeters Task 3). Fix-up note: this plan-body line was inverted at Task 0 close ("No commit on Task 1" wrongly cited inventory commits as no-commit precedents); the correction lands in Task 1's commit; cf. running-notes Task 1 entry.
 
 ### Task 2 — Item 1: keyswitch label discoverability for the 3 sfizz-driven engines (2 sub-commits per SC-2)
 
