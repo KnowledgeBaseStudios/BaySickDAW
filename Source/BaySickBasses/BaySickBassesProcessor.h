@@ -133,6 +133,12 @@ public:
     // title-bar "*" reflects engine-internal state changes.
     void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
+    // QA-Sfizz Task 2B: keyswitch label accessor for piano-roll discoverability.
+    // Iterates sfizz's parsed sw_label storage (populated at SFZ load time from
+    // <region>/<group> sw_label opcodes); returns the label for the given MIDI
+    // note if it's a keyswitch in the currently loaded kit, else empty.
+    juce::String           getKeyswitchLabel (int midiNote) const noexcept;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout (const juce::String& prefix);
     void updateFromApvts();

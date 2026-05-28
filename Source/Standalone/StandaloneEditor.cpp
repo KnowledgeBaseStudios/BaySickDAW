@@ -7989,6 +7989,15 @@ void StandaloneEditor::registerInstSourcePianoRoll (InstPage* ip)
         };
         conn.auditionOn  = conn.auditionMomentary;
         conn.auditionOff = [](int) {};
+        // QA-Sfizz Task 2B: keyswitch label provider for BaySickGuitars.
+        // Mirrors BaySickRustyDrums Task 2A pattern at :5895; per-instance
+        // engine access via proc->getBaySickGuitars(idx) (vs Rusty's singleton).
+        conn.keyswitchLabelProvider = [proc, idx](int n) -> juce::String
+        {
+            if (auto* eng = proc->getBaySickGuitars (idx))
+                return eng->getKeyswitchLabel (n);
+            return {};
+        };
     }
     else if (kind == EngineKind::BaySickBasses)
     {
@@ -8002,6 +8011,15 @@ void StandaloneEditor::registerInstSourcePianoRoll (InstPage* ip)
         // L-4 (2026-05-05): bass range - default top of view to C4 (MIDI 48)
         // so the user lands on the playable register on first open.
         conn.defaultTopNote = 48;
+        // QA-Sfizz Task 2B: keyswitch label provider for BaySickBasses.
+        // Mirrors BaySickRustyDrums Task 2A pattern at :5895; per-instance
+        // engine access via proc->getBaySickBasses(idx) (vs Rusty's singleton).
+        conn.keyswitchLabelProvider = [proc, idx](int n) -> juce::String
+        {
+            if (auto* eng = proc->getBaySickBasses (idx))
+                return eng->getKeyswitchLabel (n);
+            return {};
+        };
     }
 
     conn.rollMode = PianoRollContainer::RollMode::Standard;

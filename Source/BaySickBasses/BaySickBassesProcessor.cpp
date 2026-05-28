@@ -66,6 +66,18 @@ int BaySickBassesProcessor::getNumActiveVoices() const noexcept
     return mSfizz ? mSfizz->getNumActiveVoices() : 0;
 }
 
+// QA-Sfizz Task 2B (2026-05-27): iterates sfizz's public keyswitch-label
+// vector (exposed via the BaySickDAW local-patch accessor on sfz::Sfizz
+// from Task 2A) and returns the matching label by midiNote; empty if no match.
+juce::String BaySickBassesProcessor::getKeyswitchLabel (int midiNote) const noexcept
+{
+    if (! mSfizz) return {};
+    for (const auto& pair : mSfizz->getKeyswitchLabels())
+        if (static_cast<int> (pair.first) == midiNote)
+            return juce::String::fromUTF8 (pair.second.c_str());
+    return {};
+}
+
 int BaySickBassesProcessor::getCcValue (int cc) const
 {
     // L-5 fix (2026-05-05): unknown CC fallback is 0 (matches SFZ-spec
