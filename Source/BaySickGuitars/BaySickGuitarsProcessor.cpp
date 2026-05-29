@@ -83,8 +83,10 @@ juce::String BaySickGuitarsProcessor::getKeyswitchLabel (int midiNote) const noe
 
 int BaySickGuitarsProcessor::getCcValue (int cc) const
 {
-    // K-5 fix (2026-05-05): unknown CC fallback is 0 (matches SFZ-spec
-    // "unset = 0") rather than 64.  Same change below for getKitDefaultCc.
+    // K-5 fix (2026-05-05) + Sub-E reversal (2026-05-28 QA-Sfizz): invalid CC
+    // index fallback is 0; Sub-E flipped the APVTS-registered default +
+    // getKitDefaultCc for unset CCs to 64 (Aria-host convention).  The 0 here
+    // is for invalid (out-of-range) indices, distinct from unset-CC semantics.
     if (cc < 0 || cc >= kCcCount) return 0;
     if (auto* raw = apvts.getRawParameterValue (mCcParamRoot + juce::String (cc)))
         return juce::jlimit (0, 127, (int) std::round (raw->load()));
