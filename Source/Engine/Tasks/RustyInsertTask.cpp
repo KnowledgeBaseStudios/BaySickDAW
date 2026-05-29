@@ -13,6 +13,18 @@ RustyInsertTask::RustyInsertTask (int                 stripIndex,
       mProcessor (&processor)
 {
     this->channelId = channelIdIn;
+
+    // QA-Sfizz Sub-K Serial Fallback (2026-05-28): pin to the audio thread.
+    // Inherits the producer's pin rationale (see RustyDrumsProducerTask.cpp).
+    // The 13 RustyInsertTasks read their strip from mMultiOutScratch via
+    // getStripBuffer; the read-write race across block boundaries with the
+    // producer's processStrips write was the Candidate A hypothesis for the
+    // MT-mode bit-crusher on long-sustaining cymbals/hi-hats.  Pinning all 14
+    // tasks (1 producer + 13 inserts) to the audio thread serializes them
+    // sequentially within the dispatcher graph, eliminating both that race
+    // and the suspected thread-local-state migration affecting voice
+    // continuity.  Retired by QA-DispatcherAffinity.
+    this->mAudioThreadOnly = true;
 }
 
 void RustyInsertTask::run()

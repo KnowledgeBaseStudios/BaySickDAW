@@ -13,7 +13,25 @@
 
 struct VibeThreadPool::Impl
 {
+    // Worker-eligible task queue (MPMC).  Workers tryPop this in workerLoop.
+    // Audio thread also drains it via runUntilOrTimeout (main-as-worker).
     moodycamel::ConcurrentQueue<RenderTask*>           queue;
+
+    // QA-Sfizz Sub-L = (impl-1) (2026-05-28): audio-thread-only task queue
+    // (MPSC — multiple producers via runOneTask's child fanning + dispatcher
+    // leaf seeding, single consumer = audio thread).  Tasks with
+    // RenderTask::mAudioThreadOnly == true are enqueued here instead of the
+    // worker queue; workers never see them.  Only runUntilOrTimeout drains
+    // this queue (audio thread).  Used by the Sub-K Serial Fallback to pin
+    // the 3 sfizz-driven engine task families (RustyDrumsProducerTask + 13
+    // RustyInsertTasks + InstStripTasks whose engine kind is BaySickGuitars
+    // or BaySickBasses) to the audio thread until QA-DispatcherAffinity
+    // ships the proper dispatcher barriers / instance-affinity rewrite.
+    // Implementation uses moodycamel::ConcurrentQueue (MPMC-capable) — MPSC
+    // usage is a subset that works correctly and avoids vendoring a separate
+    // queue type for one consumer.
+    moodycamel::ConcurrentQueue<RenderTask*>           audioThreadQueue;
+
     std::vector<std::thread>                           workers;
     std::vector<std::unique_ptr<juce::WaitableEvent>>  wakers;
     std::atomic<int>                                   activeWaiters { 0 };
@@ -51,6 +69,20 @@ void VibeThreadPool::submit (RenderTask* task) noexcept
 {
     if (task == nullptr)
         return;
+
+    // QA-Sfizz Sub-L = (impl-1) (2026-05-28): route by task's audio-thread
+    // affinity flag.  Audio-thread-only tasks go to the dedicated audio
+    // thread queue (only runUntilOrTimeout drains it; workers never see
+    // it); regular tasks go to the existing worker queue + wake any
+    // sleeping worker.  Worker wake-up is intentionally skipped for
+    // audio-thread tasks since no worker can run them anyway — the
+    // audio thread will pick them up on its next runUntilOrTimeout
+    // iteration via the audioThreadQueue.try_dequeue priority pop.
+    if (task->mAudioThreadOnly)
+    {
+        mImpl->audioThreadQueue.enqueue (task);
+        return;
+    }
 
     // moodycamel::ConcurrentQueue::enqueue() never blocks; it allocates a
     // new block internally if the producer's local block is full. The
@@ -104,7 +136,17 @@ void VibeThreadPool::runUntil (std::atomic<bool>& done) noexcept
 {
     while (! done.load (std::memory_order_acquire))
     {
-        if (auto* task = tryPop())
+        // QA-Sfizz Sub-L = (impl-1) (2026-05-28): audio-thread-only queue
+        // gets priority — those tasks have nowhere else to run.  Falls
+        // through to the worker queue (main-as-worker) if the audio queue
+        // is empty.
+        RenderTask* task = nullptr;
+        if (mImpl->audioThreadQueue.try_dequeue (task))
+        {
+            runOneTask (task);
+            continue;
+        }
+        if ((task = tryPop()) != nullptr)
             runOneTask (task);
         else
             std::this_thread::yield();
@@ -122,6 +164,23 @@ bool VibeThreadPool::runUntilOrTimeout (std::atomic<bool>& done,
     const bool capture = RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed);
     while (! done.load (std::memory_order_acquire))
     {
+        // QA-Sfizz Sub-L = (impl-1) (2026-05-28): audio-thread-only queue
+        // gets priority pop ahead of the worker queue.  Those tasks have
+        // nowhere else to run — workers never touch the audioThreadQueue,
+        // so any audio-thread-only task that's ready (deps hit zero) sits
+        // there waiting strictly for this audio-thread drain.  Diagnostic
+        // counter `gMainThreadTasks` covers both queues equally (it
+        // counts "task ran on audio thread", not "audio-thread-only").
+        {
+            RenderTask* task = nullptr;
+            if (mImpl->audioThreadQueue.try_dequeue (task))
+            {
+                if (capture)
+                    RenderEngine::MtDiagnostic::gMainThreadTasks.fetch_add (1, std::memory_order_relaxed);
+                runOneTask (task);
+                continue;
+            }
+        }
         if (auto* task = tryPop())
         {
             if (capture)
@@ -146,6 +205,11 @@ void VibeThreadPool::clearQueues() noexcept
 {
     RenderTask* drained = nullptr;
     while (mImpl->queue.try_dequeue (drained))
+        ; // discard
+    // QA-Sfizz Sub-L = (impl-1) (2026-05-28): drain the audio-thread-only
+    // queue too so a sample-rate / block-size change can't leak stale
+    // task pointers from one block configuration into the next.
+    while (mImpl->audioThreadQueue.try_dequeue (drained))
         ; // discard
 }
 

@@ -3768,6 +3768,27 @@ void VibeSynthProcessor::registerInstEngine(int pageIdx, juce::AudioProcessor* e
         auto task = std::make_unique<InstStripTask>(
             eng, pageIdx, MixerChannelIds::instInsert(pageIdx),
             mVibeGraph, *this);
+
+        // QA-Sfizz Sub-M = (eng-b) (2026-05-28): pin this Inst page's task
+        // to the audio thread when the engine kind is one of the 2 sfizz-
+        // backed melodic engines (BaySickGuitars / BaySickBasses) so it
+        // bypasses the MT bit-crusher race (see RenderTask.h
+        // mAudioThreadOnly comment + RustyDrumsProducerTask.cpp constructor
+        // for the full rationale).  Set strictly on the message thread at
+        // engine-swap time — Jeff's anti-pattern lock on doing the
+        // dynamic_cast at per-block dispatch in the audio thread (would
+        // cost RTTI hits every block and risk non-deterministic latency).
+        // The unregisterInstEngine → registerInstEngine sequence on
+        // every engine swap means a new InstStripTask is built with the
+        // current engine kind, so the flag stays in lockstep with the
+        // active engine.  LiveInput + audio-clip + other source modes
+        // leave the flag false (worker-eligible).
+        if (dynamic_cast<BaySickGuitarsProcessor*> (eng) != nullptr
+            || dynamic_cast<BaySickBassesProcessor*> (eng) != nullptr)
+        {
+            task->mAudioThreadOnly = true;
+        }
+
         mRenderDispatcher.registerTask(task.get());
         mInstRenderTasks[(size_t) pageIdx] = std::move(task);
     }

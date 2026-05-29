@@ -43,6 +43,22 @@ public:
     // Strip identity. Matches MixerChannelIds for diagnostics + bookkeeping.
     int channelId = -1;
 
+    // QA-Sfizz Sub-K Serial Fallback (2026-05-28): when true, this task is
+    // PINNED to the audio thread - the dispatcher submits it to a separate
+    // MPSC queue that only the audio thread's runUntilOrTimeout drains.
+    // Workers never see it.  Used to bypass the bit-crusher MT race on the
+    // 3 sfizz-driven engine task families (RustyDrumsProducerTask + 13
+    // RustyInsertTasks + InstStripTasks whose engine is BaySickGuitars or
+    // BaySickBasses) - their vendored sfizz engine isn't thread-safe for
+    // the cross-block work-stealing the unified dispatcher currently does
+    // (mMultiOutScratch read-write race + suspected thread-local-state
+    // migration across workers).  Retired by QA-DispatcherAffinity proper
+    // dispatcher barriers / instance affinity rewrite.  Read/written only
+    // from the message thread (PluginProcessor at task registration time
+    // or at engine-swap callsites for InstStripTask) - never from the
+    // audio thread, so a plain bool is sufficient (no atomic needed).
+    bool mAudioThreadOnly = false;
+
     // Runtime-mutable: count of upstream tasks not yet finished. Reset to
     // mInitialDeps at the top of each block by the dispatcher.
     alignas (64) std::atomic<int> mDeps { 0 };

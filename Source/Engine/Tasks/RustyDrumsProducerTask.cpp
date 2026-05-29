@@ -6,6 +6,16 @@ RustyDrumsProducerTask::RustyDrumsProducerTask (VibeSynthProcessor& processor)
     : mProcessor (&processor)
 {
     // channelId stays at -1 (default) - producer-style task with no arena slot.
+
+    // QA-Sfizz Sub-K Serial Fallback (2026-05-28): pin to the audio thread.
+    // The vendored sfizz library isn't safe for the cross-block work-stealing
+    // the unified dispatcher currently does on this engine's producer +
+    // RustyInsertTask family (mMultiOutScratch read-write race across block
+    // boundaries + suspected thread-local-state migration across workers
+    // breaking voice continuity on long sustains).  See QA-DispatcherAffinity
+    // §9 Forks entry for the proper dispatcher-barrier fix that retires this
+    // pin.  Workers will never see this task; only runUntilOrTimeout runs it.
+    mAudioThreadOnly = true;
 }
 
 void RustyDrumsProducerTask::run()
