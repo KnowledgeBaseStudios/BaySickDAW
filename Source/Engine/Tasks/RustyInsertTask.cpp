@@ -3,6 +3,7 @@
 #include "../../PluginProcessor.h"
 #include "../../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
 #include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
+#include "../RenderEngineFlags.h"     // QA-DispatcherAffinity TraceScope
 
 RustyInsertTask::RustyInsertTask (int                 stripIndex,
                                   int                 channelIdIn,
@@ -29,6 +30,13 @@ RustyInsertTask::RustyInsertTask (int                 stripIndex,
 
 void RustyInsertTask::run()
 {
+    // QA-DispatcherAffinity (2026-05-28): entry+exit timestamp trace.
+    // engineInstance = the BaySickRustyDrumsProcessor singleton (matches
+    // RustyDrumsProducerTask's trace so the analyzer can correlate the
+    // 14 Rusty tasks by engine).
+    RenderEngine::MtDiagnostic::TraceScope qaTrace (channelId,
+        (mProcessor != nullptr) ? (const void*) mProcessor->mRustyDrumsEngine.get() : nullptr);
+
     if (mOutputBuffer == nullptr || mCtx == nullptr
         || mGraph == nullptr || mProcessor == nullptr)
         return;

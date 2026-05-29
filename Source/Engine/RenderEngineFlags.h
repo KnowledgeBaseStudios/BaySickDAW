@@ -1,6 +1,11 @@
 #pragma once
 
 #include <atomic>
+#include <array>
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <thread>
 
 // Render engine flags + tunables.
 //
@@ -142,5 +147,131 @@ namespace RenderEngine
                 gWorkerWakes     .load()
             };
         }
+
+        // QA-DispatcherAffinity (2026-05-28): per-task entry+exit timestamp
+        // trace.  When gTraceTaskTimestamps is true, instrumented task::run()
+        // bodies (the 3 sfizz-driven engine task families:
+        // RustyDrumsProducerTask + RustyInsertTask + sfizz-engine
+        // InstStripTask) record entry + exit nanosecond timestamps + thread
+        // ID hash + engine-instance pointer + per-block index into the
+        // lock-free ring gTraceRing.  Audio-thread-safe -- only an atomic
+        // fetch_add + struct-by-value write per event; no allocation, no
+        // lock, no OS calls.  Drained from the message thread (Mixer
+        // hamburger "QA-DispatcherAffinity Trace" toggle off) into
+        // Documents/BaySickDAW/qa-dispatcheraffinity-trace.log via the
+        // dump code inlined in StandaloneEditor's menu handler.  Stripped
+        // at QA-DispatcherAffinity Task 4 close (if Task 3 cure-verify
+        // passes; else batch close).  The dual entry+exit timestamps are
+        // the load-bearing improvement over QA-Sfizz Task 4's Sub-F=(e)
+        // entry-only trace, which couldn't discriminate concurrent vs
+        // sequential overlap and cost two failed empirical fix cycles
+        // (Sub-G + Sub-I).
+
+        struct TraceEvent
+        {
+            std::uint64_t entryNs       { 0 };
+            std::uint64_t exitNs        { 0 };
+            int           channelId     { -1 };
+            const void*   engineInstance { nullptr };
+            std::uint32_t threadIdHash  { 0 };
+            std::uint32_t blockIndex    { 0 };
+        };
+
+        // Power of 2 (2^16 = 65536).  At ~14 sfizz tasks per block and ~170
+        // blocks/sec (1024 samples @ 44.1 kHz wall time) the ring covers
+        // ~27 seconds of trace history before wrapping -- comfortably above
+        // the ~6-second 6-cymbal crash MT-on reproducer.  Sized at compile
+        // time as std::array -- ~2.5 MB BSS allocation; zero runtime alloc.
+        static constexpr std::size_t kTraceRingCapacity = 65536;
+        static_assert ((kTraceRingCapacity & (kTraceRingCapacity - 1)) == 0,
+                       "kTraceRingCapacity must be a power of 2 for mask-based slot indexing");
+
+        inline std::atomic<bool>          gTraceTaskTimestamps { false };
+        inline std::atomic<std::uint64_t> gTraceWriteIndex     { 0 };
+        inline std::atomic<std::uint32_t> gBlockIndex          { 0 };
+        inline std::array<TraceEvent, kTraceRingCapacity> gTraceRing {};
+
+        // Steady-clock nanoseconds since epoch.  Used as the trace
+        // timestamp source -- monotonic, no NTP adjustment, sub-microsecond
+        // precision on Windows.  Not wall-clock time; only deltas matter
+        // for race-window analysis.
+        inline std::uint64_t traceNowNs() noexcept
+        {
+            return (std::uint64_t) std::chrono::duration_cast<std::chrono::nanoseconds> (
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+        }
+
+        // Lower 32 bits of std::hash<std::thread::id>{}(current).  Sufficient
+        // to discriminate the ~9 entities that can run a task (8 workers +
+        // audio thread) without collisions; full 64-bit hash would inflate
+        // the trace event size.
+        inline std::uint32_t traceThreadHash() noexcept
+        {
+            return (std::uint32_t) (std::hash<std::thread::id> {} (std::this_thread::get_id()) & 0xFFFFFFFFu);
+        }
+
+        inline void recordTraceEvent (int           channelId,
+                                       const void*   engineInst,
+                                       std::uint64_t entryNs,
+                                       std::uint64_t exitNs,
+                                       std::uint32_t blockIndex) noexcept
+        {
+            const std::uint64_t idx = gTraceWriteIndex.fetch_add (1, std::memory_order_relaxed);
+            const std::size_t   slot = (std::size_t) (idx & (kTraceRingCapacity - 1));
+            TraceEvent& ev = gTraceRing[slot];
+            ev.entryNs        = entryNs;
+            ev.exitNs         = exitNs;
+            ev.channelId      = channelId;
+            ev.engineInstance = engineInst;
+            ev.threadIdHash   = traceThreadHash();
+            ev.blockIndex     = blockIndex;
+        }
+
+        // Reset the trace ring.  Called by the Mixer menu handler before
+        // flipping gTraceTaskTimestamps to true -- gives a fresh capture
+        // window with a known starting index.  Doesn't zero the ring slots
+        // themselves (fresh writes overwrite); the wrap-vs-no-wrap branch
+        // in the dump path handles uninitialized tail slots after a fresh
+        // reset.
+        inline void resetTrace() noexcept
+        {
+            gTraceWriteIndex.store (0, std::memory_order_relaxed);
+            gBlockIndex     .store (0, std::memory_order_relaxed);
+        }
+
+        // RAII helper for task::run() entry/exit timestamp capture.
+        // Construct at the top of run() with the task's channelId + engine
+        // instance pointer; destructor emits the trace event with the
+        // elapsed exit timestamp + current block index.  When
+        // gTraceTaskTimestamps is false, construction is trivial (one
+        // relaxed atomic load + 3 stack assignments) and the destructor is
+        // a single branch-and-return.  Hot path overhead is negligible.
+        // Pass shouldTrace=false to opt a specific run() invocation out
+        // (e.g. InstStripTask with a non-sfizz engine -- only sfizz
+        // instances are in scope for the Candidate B investigation).
+        struct TraceScope
+        {
+            bool          trace;
+            int           channelId;
+            const void*   engineInst;
+            std::uint64_t entryNs;
+
+            TraceScope (int ch, const void* eng, bool shouldTrace = true) noexcept
+                : trace        (shouldTrace && gTraceTaskTimestamps.load (std::memory_order_relaxed)),
+                  channelId    (ch),
+                  engineInst   (eng),
+                  entryNs      (trace ? traceNowNs() : 0)
+            {}
+
+            ~TraceScope() noexcept
+            {
+                if (! trace) return;
+                recordTraceEvent (channelId, engineInst, entryNs, traceNowNs(),
+                                  gBlockIndex.load (std::memory_order_relaxed));
+            }
+
+            TraceScope (const TraceScope&) = delete;
+            TraceScope& operator= (const TraceScope&) = delete;
+        };
     }
 }

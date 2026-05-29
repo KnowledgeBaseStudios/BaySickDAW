@@ -1,6 +1,7 @@
 #include "RustyDrumsProducerTask.h"
 #include "../../PluginProcessor.h"
 #include "../../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
+#include "../RenderEngineFlags.h"   // QA-DispatcherAffinity TraceScope
 
 RustyDrumsProducerTask::RustyDrumsProducerTask (VibeSynthProcessor& processor)
     : mProcessor (&processor)
@@ -20,6 +21,15 @@ RustyDrumsProducerTask::RustyDrumsProducerTask (VibeSynthProcessor& processor)
 
 void RustyDrumsProducerTask::run()
 {
+    // QA-DispatcherAffinity (2026-05-28): entry+exit timestamp trace.
+    // RAII captures entry tick on construction; destructor emits the trace
+    // event with the exit tick on every return path.  Zero overhead when
+    // gTraceTaskTimestamps is false.  engineInstance = the BaySickRusty-
+    // DrumsProcessor singleton (constant across all 14 Rusty tasks; lets
+    // the analyzer group them by engine).
+    RenderEngine::MtDiagnostic::TraceScope qaTrace (channelId,
+        (mProcessor != nullptr) ? (const void*) mProcessor->mRustyDrumsEngine.get() : nullptr);
+
     if (mCtx == nullptr || mProcessor == nullptr) return;
 
     const int n = mCtx->numSamples;

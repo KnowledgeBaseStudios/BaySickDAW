@@ -5172,6 +5172,22 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 true,                  // enabled
                                 false);                // not checkable
 
+                    // QA-DispatcherAffinity (2026-05-28): per-task entry+exit
+                    // timestamp trace toggle.  ON arms the trace ring on the
+                    // 14 sfizz tasks (RustyDrumsProducerTask + 13 RustyInsert-
+                    // Task + sfizz-engine InstStripTasks); OFF drains the ring
+                    // to Documents\BaySickDAW\qa-dispatcheraffinity-trace.log
+                    // as CSV for offline analysis of the Candidate B sub-
+                    // mechanism investigation (B.1 thread-local-state
+                    // continuity / B.2 non-atomic RR voice swap / B.3 false
+                    // sharing / B.4 disk streaming).  Stripped at Task 4 close
+                    // if Task 3 cure verify passes.
+                    const bool traceOn = RenderEngine::MtDiagnostic::gTraceTaskTimestamps.load (std::memory_order_acquire);
+                    m.addItem (204,
+                                "QA-DispatcherAffinity Trace",
+                                true,                  // enabled
+                                traceOn);              // checked
+
                     m.showMenuAsync (
                         juce::PopupMenu::Options().withTargetComponent (anchor),
                         [safeThis] (int r)
@@ -5286,6 +5302,96 @@ void StandaloneEditor::showPageForTab(int tabId)
                                                 body,
                                                 "OK");
                                         }));
+                                return;
+                            }
+                            if (r == 204)
+                            {
+                                // QA-DispatcherAffinity (2026-05-28): trace toggle.
+                                // ON: reset ring + arm trace.  OFF: disarm + brief
+                                // settle window for in-flight ring writes + dump
+                                // sorted CSV to Documents\BaySickDAW\.
+                                const bool wasOn = RenderEngine::MtDiagnostic::gTraceTaskTimestamps.load (std::memory_order_acquire);
+                                if (! wasOn)
+                                {
+                                    RenderEngine::MtDiagnostic::resetTrace();
+                                    RenderEngine::MtDiagnostic::gTraceTaskTimestamps.store (true, std::memory_order_release);
+                                    juce::AlertWindow::showMessageBoxAsync (
+                                        juce::MessageBoxIconType::InfoIcon,
+                                        "QA-DispatcherAffinity Trace",
+                                        "Trace ARMED.  Play the 6-cymbal crash MT-on test for ~6 seconds, "
+                                        "then toggle this menu item OFF to dump the ring to "
+                                        "Documents\\BaySickDAW\\qa-dispatcheraffinity-trace.log.",
+                                        "OK");
+                                    return;
+                                }
+
+                                RenderEngine::MtDiagnostic::gTraceTaskTimestamps.store (false, std::memory_order_release);
+                                juce::Thread::sleep (20);   // settle window for in-flight ring writes
+
+                                const std::uint64_t total = RenderEngine::MtDiagnostic::gTraceWriteIndex.load (std::memory_order_relaxed);
+                                const std::size_t   cap   = RenderEngine::MtDiagnostic::kTraceRingCapacity;
+                                const bool          wrapped = total >= cap;
+                                const std::size_t   numEvents = wrapped ? cap : (std::size_t) total;
+
+                                std::vector<RenderEngine::MtDiagnostic::TraceEvent> events;
+                                events.reserve (numEvents);
+                                if (wrapped)
+                                {
+                                    const std::size_t startSlot = (std::size_t) (total & (cap - 1));
+                                    for (std::size_t i = 0; i < cap; ++i)
+                                        events.push_back (RenderEngine::MtDiagnostic::gTraceRing[(startSlot + i) & (cap - 1)]);
+                                }
+                                else
+                                {
+                                    for (std::size_t i = 0; i < numEvents; ++i)
+                                        events.push_back (RenderEngine::MtDiagnostic::gTraceRing[i]);
+                                }
+
+                                std::sort (events.begin(), events.end(),
+                                    [] (const RenderEngine::MtDiagnostic::TraceEvent& a,
+                                        const RenderEngine::MtDiagnostic::TraceEvent& b)
+                                    { return a.entryNs < b.entryNs; });
+
+                                auto dest = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                                .getChildFile ("BaySickDAW")
+                                                .getChildFile ("qa-dispatcheraffinity-trace.log");
+                                dest.getParentDirectory().createDirectory();
+                                dest.deleteFile();
+
+                                juce::FileOutputStream fos (dest);
+                                if (! fos.openedOk())
+                                {
+                                    juce::AlertWindow::showMessageBoxAsync (
+                                        juce::MessageBoxIconType::WarningIcon,
+                                        "QA-DispatcherAffinity Trace",
+                                        "Failed to open trace dump file:\n" + dest.getFullPathName(),
+                                        "OK");
+                                    return;
+                                }
+
+                                fos.writeString ("blockIndex,channelId,engineInstance,threadIdHash,entryNs,exitNs,durationNs\n");
+                                for (const auto& e : events)
+                                {
+                                    const std::uint64_t duration = (e.exitNs >= e.entryNs) ? (e.exitNs - e.entryNs) : 0;
+                                    juce::String row;
+                                    row << (juce::int64) e.blockIndex << ','
+                                        << e.channelId               << ','
+                                        << "0x" << juce::String::toHexString ((juce::int64) (std::uintptr_t) e.engineInstance) << ','
+                                        << "0x" << juce::String::toHexString ((juce::int64) e.threadIdHash) << ','
+                                        << (juce::int64) e.entryNs   << ','
+                                        << (juce::int64) e.exitNs    << ','
+                                        << (juce::int64) duration    << '\n';
+                                    fos.writeString (row);
+                                }
+                                fos.flush();
+
+                                juce::AlertWindow::showMessageBoxAsync (
+                                    juce::MessageBoxIconType::InfoIcon,
+                                    "QA-DispatcherAffinity Trace",
+                                    "Trace DUMPED.  " + juce::String ((juce::int64) numEvents) + " events written to:\n"
+                                        + dest.getFullPathName()
+                                        + (wrapped ? "\n\nNote: ring wrapped (more events than capacity " + juce::String ((juce::int64) cap) + ").  Earlier events lost." : ""),
+                                    "OK");
                                 return;
                             }
                             // J-A2: master output selector handlers.

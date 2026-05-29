@@ -228,6 +228,12 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
     if (RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed))
         RenderEngine::MtDiagnostic::gBlockCount.fetch_add (1, std::memory_order_relaxed);
 
+    // QA-DispatcherAffinity (2026-05-28): per-block index for the per-task
+    // entry+exit timestamp trace.  Bumped once per dispatchBlock when the
+    // trace is on so the trace events can correlate by block boundary.
+    if (RenderEngine::MtDiagnostic::gTraceTaskTimestamps.load (std::memory_order_relaxed))
+        RenderEngine::MtDiagnostic::gBlockIndex.fetch_add (1, std::memory_order_relaxed);
+
     // ── Reset dep counters + assign ctx for every task ──────────────────────
     // Release ordering on the counter store pairs with the worker's acquire
     // when picking up a child whose deps just hit zero - guarantees the
