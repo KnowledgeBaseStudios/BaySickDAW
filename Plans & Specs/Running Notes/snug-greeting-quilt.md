@@ -67,9 +67,100 @@ Per the plan's Task 1 checklist, the entry+exit timestamp trace ring + 14-task i
 - TraceScope ctor on the false-flag path: one relaxed atomic load + 3 stack assignments + dtor early-return.  Negligible hot-path overhead when the trace is off.
 - Dump uses `juce::FileOutputStream` on the message thread; sort by entryNs for analysis ergonomics; CSV columns `blockIndex,channelId,engineInstance,threadIdHash,entryNs,exitNs,durationNs`.
 
-**Task 1 commit:** TBD (after Jeff's Debug + Release verify pass + `/draft-commit` + approval).
+**Task 1 commit:** landed at `c81aff4` (2026-05-29).  `git commit -F .git/COMMIT_EDITMSG_QA-DispatcherAffinity-task-1.txt`; temp file `rm`'d post-commit.  Staged scope = 8 files (7 source + 1 doc; +331 / -2).  /draft-commit drafted body surfaced verbatim for approval; one factual-error fix applied pre-commit (drafter hallucinated "matching the existing gWorkerStartTimes ring's discipline" — grepped + confirmed gWorkerStartTimes doesn't exist in tree; dropped the false clause + corrected `& 0xFFFF` → `& (capacity-1)` for accuracy).  Per `feedback_drafter_output_verbatim_no_restyle.md` review = factual/scope errors only; the surfaced correction qualifies.  Branch now 33 commits ahead of `origin/main`.
 
-**Build hand-off:** verify script in plan Task 1 step 11 (8 numbered scenarios).
+**Build hand-off:** verify script in plan Task 1 step 11 (8 numbered scenarios).  Verify PASSED both configs.
+
+---
+
+## 2026-05-29 — Task 1 — Stage A baseline verify PASS + commit landed
+
+Trace dump statistics (Release: 22,596 events / 1,615 blocks; Debug: 25,694 events / 3,527 blocks): single thread ID per config (0x4b855ce3 Release / 0xfab1ec5b Debug), single engine instance pointer per config (0x28155636b70 Release / 0x2e1dc7154f0 Debug), 14 unique channelIds (-1 producer + 800..812 inserts) — exact match to the expected 14-task Rusty topology, ZERO within-block overlap events across 20,982 Release + 22,168 Debug transitions — Sub-K Serial Fallback confirmed enforcing serial execution across the 14-task sfizz family.  Producer (sfizz `renderBlock`) avg 321 µs Release / 1,124 µs Debug; InsertTask avg 0.9-2.1 µs Release / ~5 µs Debug; inter-task gap avg 255 ns Release / 765 ns Debug.  Debug/Release event-count ratio 1.14 reflects Debug's slower per-block throughput.
+
+**Next:** Task 2 Stage B — disable Sub-K Serial Fallback + re-capture trace under MT-on parallel execution to characterize which Candidate B sub-mechanism (B.1/B.2/B.3/B.4) is firing.  Stage B implementation shape (hard comment-out vs runtime toggle) is a sub-spec call to surface to Jeff before any source touch.
+
+---
+
+## 2026-05-29 — Task 2 Stage B — Sub-K runtime override mechanism landed
+
+**Sub-spec call resolved:** Stage B implementation shape = Option (b) runtime override toggle (Jeff verbatim "real-time A/B test in real-time within the exact same session state is invaluable.  Rebuilding and restarting the DAW introduces too many variables and ruins the rapid feedback loop").  No-rebuild same-session A/B between Sub-K-on (production) and Sub-K-off (Stage B trace).
+
+**Design choice surfaced before edit:** Override gate lives in `VibeThreadPool::submit()` (one-line) rather than at the 3 construction sites Jeff named.  Reason: tasks are constructed once on the message thread (at kit-load / engine-swap); if I gated at construction, the override would only affect FUTURE tasks — runtime toggling would not affect already-built tasks.  Submit-time gate honors Jeff's "real-time" requirement by reading the override on every dispatch.  The 3 sites Jeff named get **comment updates** pointing at the new mechanism (Rusty producer ctor / Rusty insert ctor / `registerInstEngine` Sub-M=(eng-b) tag) so future readers understand the indirection; they keep their `mAudioThreadOnly = true` tagging as the "wants pinning" intent and the override decides per-submit whether to honor it.
+
+**Files touched (Task 2 Stage B):**
+- `Source/Engine/RenderEngineFlags.h` — added `MtDiagnostic::gSubKOverride` atomic<bool> {false} alongside the trace infrastructure (+19 lines including the multi-line comment block explaining the override semantics).  Default false = Sub-K active (production); true = override engaged (Stage B test).
+- `Source/Engine/VibeThreadPool.cpp` — `submit()` now reads `gSubKOverride` with relaxed ordering and routes to `audioThreadQueue` only when `mAudioThreadOnly && !gSubKOverride`.  One-line semantic change + a multi-line comment block documenting the QA-DispatcherAffinity Task 2 Stage B annotation.
+- `Source/Engine/Tasks/RustyDrumsProducerTask.cpp` — comment update at the Sub-K Serial Fallback constructor block; points at the override mechanism + Rust references.
+- `Source/Engine/Tasks/RustyInsertTask.cpp` — same comment-only update at the inserts constructor.
+- `Source/PluginProcessor.cpp` — comment update at the Sub-M=(eng-b) `registerInstEngine` `dynamic_cast` flag-set block; points at the override mechanism.
+- `Source/Standalone/StandaloneEditor.cpp` — Mixer hamburger menu item 205 "Sub-K Serial Fallback" (checkable; checked = Sub-K active = production state) + handler that flips `gSubKOverride` + AlertWindow surfacing the new state with a Stage B trace usage hint.
+
+**Stage B workflow:**
+1. Enable QA-DispatcherAffinity Trace via menu item 204.
+2. Disable "Sub-K Serial Fallback" via menu item 205.  Expected: AlertWindow says "OVERRIDE engaged".  At this point the 3 sfizz task families return to MT parallel execution.
+3. Play the 6-cymbal pattern.  Expected: bit-crusher distortion on long cymbals/hi-hats (the QA-Sfizz Item 3 symptom the Sub-K band-aid bypassed).
+4. Stop playback.  Disable trace via menu item 204.  Confirm trace dump file lands; send to Claude for Stage C characterization.
+5. Re-enable "Sub-K Serial Fallback" via menu item 205.  Production state restored.
+
+**Task 2 Stage B commit:** TBD (after Jeff's Debug + Release verify pass; trace dump sent for Stage C analysis).
+
+**Follow-up fix folded into the Stage B mechanism commit:** dump function null-byte bug.  JUCE's `FileOutputStream::writeString` appends a null terminator after each write, polluting the CSV (every row got a leading null byte from the previous row's terminator + the header's trailing null made some tools — including bash `grep` — treat the file as binary).  Symptom: `awk -F, '$1+0 == 100'` returns nothing on the Stage B dumps until you preface with `tr -d '\000'`.  Fix: switch to raw-byte `fos.write(text.toRawUTF8(), text.getNumBytesAsUTF8())` for each row + a literal `const char*` write for the header.  Surfaced + fixed in the StandaloneEditor menu handler that does the dump (single 4-line change).  Stage A's Sub-K-baseline traces (Release 22596 + Debug 25694 events) were captured with the buggy dump but still analyzable via the same `tr -d '\000'` workaround; Stage C analysis below uses the fixed-parse approach.
+
+---
+
+## 2026-05-29 — Task 2 Stage C — Sub-K-disabled trace analysis + Sub-A spec call surface
+
+**Stage C trace dumps received from Jeff (Sub-K override engaged for the entirety of each capture):**
+
+| Metric | Release | Debug |
+|---|---|---|
+| Total events | 38,570 | 42,127 |
+| Total blocks captured | 2,755 | 3,009 |
+| Unique worker threads | **9** | **9** |
+| Unique engine instances | 1 (0x1ab47d75020) | 1 (0x19ddca54bb0) |
+| Cross-thread overlapping intervals (same block) | **26,912** | **42,683** |
+| Producer-vs-insert overlap (cross-thread) | **0** | **0** |
+| Producer (-1) avg duration | 512 µs (vs 321 µs Stage A baseline; 1.6× slower) | 6,102 µs (vs 1,124 µs Stage A; 5.4× slower) |
+| Insert avg duration | 0.7-2.4 µs (similar to Stage A) | 1.9-13.6 µs (slower than Stage A's 5 µs) |
+| Insert zero-duration events (try-lock failures) | many (varies per channel) | 4-84 per channel |
+
+**Stage C key findings:**
+
+1. **9 unique worker threads spread across all 14 sfizz task channelIds** — Sub-K override is engaged + the MT worker pool is actively executing the previously-pinned tasks.  Sub-K mechanism confirmed working at runtime via Mixer menu toggle.
+
+2. **Producer-vs-insert cross-thread overlap = 0** — the dispatcher's synthetic dep `addSyntheticDep(producer, insert)` at `PluginProcessor.cpp:4142` is honored.  No race between producer's `processStrips` write to `mMultiOutScratch` and inserts' reads via `getStripBuffer`.  Validates the §9 fortieth Forks entry's Pivot #2 finding (dispatcher already implements dep-driven DAG topological execution).
+
+3. **Within-block cross-thread overlap = 26,912 Release / 42,683 Debug** — multiple worker threads concurrently inside the SAME engine instance running InsertTask::run() bodies in overlapping time windows.  ALL overlaps are insert-vs-insert (not producer-vs-insert).
+
+4. **The bit-crusher mechanism (NEW — not in QA-Sfizz §9 fortieth B.1/B.2/B.3/B.4 catalog):** the per-insert engine spin lock `mRustyDrumsEngineLock` causes try-lock failures under MT contention.  Each RustyInsertTask::run() does:
+   ```cpp
+   juce::SpinLock::ScopedTryLockType lk (mProcessor->mRustyDrumsEngineLock);
+   if (! lk.isLocked()) { mOutputBuffer->clear(); return; }   // strip silences!
+   ```
+   Under MT execution, 13 InsertTasks dispatch concurrently across workers; they all compete for the engine spin lock; whoever wins the try-lock executes; the losers clear their output buffer (silence) and return.  The trace shows this directly: most inserts have normal 1-4 µs durations (successful try-lock + copy), but a noticeable population has sub-µs / 0 ns durations (try-lock FAIL → clear + return).  Over a ~6-second cymbal-crash test, intermittent silencing of different strips per block produces the audible "bit-crusher / gritty / digital" distortion the QA-Sfizz Item 3 symptom describes.  Call it **B.5 — try-lock-failure strip silencing** for catalog parity.
+
+5. **Producer slowdown** — Producer duration grows 1.6× Release / 5.4× Debug under MT-on.  Secondary effect on top of the strip-silencing.  Likely B.3 (false sharing on cache lines containing engine state shared with concurrent insert readers) OR thread-affinity migration cost.  Not the primary symptom but real.
+
+**Sub-A fix shape options for Jeff (per Rule 5 plan-mode discipline — no pre-pick):**
+
+| ID | Approach | Pros | Cons |
+|----|----------|------|------|
+| (i) | **Remove the spin lock from InsertTasks entirely.**  After the producer finishes (synthetic dep), `mMultiOutScratch` is stable for the block's duration; engine swap only happens at kit-load on the message thread, which is already gated by `mProjectLoadInProgress` barrier.  Audit the kit-load path to confirm no concurrent-read window with InsertTasks.  Inserts proceed lock-free. | Eliminates lock contention + try-lock drops entirely.  Full parallelism on InsertTasks (13 concurrent strip copies).  Best per-block CPU efficiency. | Risks reintroducing a kit-load race if the audit misses something.  Requires careful review of every `mRustyDrumsEngine.reset(...)` / `swap(...)` call site to confirm gating. |
+| (ii) | **Replace `ScopedTryLockType` with blocking `ScopedLockType`.**  Each InsertTask blocks until it can acquire the engine lock.  No drops.  Total work for the 13 inserts serializes via the lock (~25 µs per block worst case in Release; ~100 µs Debug). | Smallest code change (`Try` → `` removal at 14 sites).  Zero risk of race (lock provides identical safety to before).  Audio drops eliminated. | Effective behavior equivalent to Sub-K (serialized) but with extra spin-lock overhead vs Sub-K's queue-pop overhead.  Marginal CPU win over Sub-K; not "true MT parallelism for sfizz". |
+| (iii) | **RCU pattern on the engine pointer.**  `std::atomic<BaySickRustyDrumsProcessor*> mActiveRustyEngine` with acquire-load on every read; kit-load atomically `exchange()` + retires old via `RetirementQueue<BaySickRustyDrumsProcessor>`.  Inserts read the pointer lock-free + use it for the duration of the block (RCU snapshot).  Matches the existing `AudioClipSnapshot` + `RetirementQueue` patterns from QA-9c. | Cleanest "real solution" — proper lock-free + safe kit-load.  Reusable pattern (could also apply to BaySickGuitars / BaySickBasses).  Full MT parallelism. | Largest code surface (new RetirementQueue<T> instantiation + every engine access site touched + kit-load path refactor).  Risk medium — touches the engine lifecycle code. |
+| (iv) | **Accept Sub-K as permanent for sfizz engines.**  Document that the vendored sfizz library's per-instance lock model doesn't benefit from MT execution at the BaySickDAW dispatcher level (because lock contention serializes anyway), so Sub-K Serial Fallback stays permanent for the 3 sfizz engine families.  Task 4 retirement of `mAudioThreadOnly` is SKIPPED. | Zero code change.  Honest description of the architectural reality the trace data revealed. | Doesn't actually fix anything — kicks the can on "real MT parallelism for sfizz".  Future work (e.g. multi-instance Rusty kits, BaySickGuitars + BaySickBasses tabs concurrent) won't benefit. |
+
+**Recommendation deferred per Rule 5 — Jeff picks (i) / (ii) / (iii) / (iv) / hybrid.**
+
+**Sub-A resolution (Jeff 2026-05-29): Option (i) — Remove the spin lock from InsertTasks entirely.**
+
+Jeff verbatim: "This trace data is the exact reason we ran the investigation first.  Incredible catch on the spin-lock contention (B.5).  The 'try-lock lottery' causing rapid-fire buffer clearing explains the bit-crusher artifact perfectly.  We are going with Option (i) Remove the spin lock from InsertTasks entirely.  Because the DAG already guarantees the ProducerTask has finished writing to mMultiOutScratch before the 13 InsertTasks are dispatched, the inserts are strictly concurrent readers.  Multiple threads reading a static buffer is perfectly safe.  We do not need, and should not have, an audio-thread lock here.  For lifecycle safety (like engine swapping or kit loading), we will rely on the existing mProjectLoadInProgress barrier on the message thread.  This gives us the maximum multi-core parallelism the engine was designed for."
+
+**Task 3 scope (locked by Sub-A = (i)):**
+- Remove the `juce::SpinLock::ScopedTryLockType lk (mProcessor->mRustyDrumsEngineLock)` block from `RustyInsertTask::run()` ([Source/Engine/Tasks/RustyInsertTask.cpp:50-55](Source/Engine/Tasks/RustyInsertTask.cpp:50)) plus the related early-return-on-fail (`if (! lk.isLocked()) { mOutputBuffer->clear(); return; }`).  The 13 inserts proceed as strict concurrent readers of `mMultiOutScratch` post-producer-finish.
+- **Audit kit-load + engine-swap paths** to confirm the `mProjectLoadInProgress` barrier (or equivalent message-thread gate) keeps inserts from running concurrently with a `mRustyDrumsEngine.reset(...)` / engine swap.  Identify every site that mutates `mProcessor->mRustyDrumsEngine`; confirm each is gated by a barrier that holds the audio thread out of `run()` while the swap is in flight.
+- Re-test under MT-on with Sub-K disabled: bit-crusher should be absent (no try-lock failures since the lock is gone); all 13 inserts complete their copies in parallel.
+- If Task 3 cure verifies → Task 4 cleanly retires the entire Sub-K Serial Fallback infrastructure (mAudioThreadOnly flag + audioThreadQueue MPSC + 4 task-family flag-set sites + gSubKOverride debug flag + Mixer menu item 205 + trace infrastructure per Rule 4 catalog Disposition).
 
 ## Diagnostic Instrumentation Catalog
 
@@ -83,3 +174,6 @@ Per the plan's Task 1 checklist, the entry+exit timestamp trace ring + 14-task i
 | `Source/Engine/Tasks/InstStripTask.cpp` constructor — `dynamic_cast<BaySickGuitarsProcessor*>` / `<BaySickBassesProcessor*>` setter for mIsSfizzEngine | `QA-DispatcherAffinity (2026-05-28)` | Sfizz-engine detection at construction (message thread, one-shot per task) | Remove at Task 4 close (if Task 3 cure verify passes; else Remove at batch close) |
 | `Source/Engine/Tasks/InstStripTask.cpp` top of `run()` — TraceScope qaTrace (shouldTrace=mIsSfizzEngine) | `QA-DispatcherAffinity (2026-05-28)` | Entry+exit ticks for BaySickGuitars / BaySickBasses InstStripTasks; non-sfizz Inst tasks construct trivial-no-op TraceScope | Remove at Task 4 close (if Task 3 cure verify passes; else Remove at batch close) |
 | `Source/Standalone/StandaloneEditor.cpp` ~line 5175 — Mixer hamburger menu item 204 "QA-DispatcherAffinity Trace" + handler | `QA-DispatcherAffinity (2026-05-28)` | Runtime arm/disarm toggle + CSV dump to `Documents\BaySickDAW\qa-dispatcheraffinity-trace.log` | Remove at Task 4 close (if Task 3 cure verify passes; else Remove at batch close) |
+| `Source/Engine/RenderEngineFlags.h` MtDiagnostic namespace — `gSubKOverride` atomic<bool> | `QA-DispatcherAffinity Task 2 Stage B (2026-05-29)` | Runtime override for Sub-K Serial Fallback mAudioThreadOnly pinning (Stage B re-capture support) | Remove at Task 4 close (if Task 3 cure verify passes; else Remove at batch close) |
+| `Source/Engine/VibeThreadPool.cpp` `submit()` — `&& !gSubKOverride.load(relaxed)` gate on the audioThreadQueue route | `QA-DispatcherAffinity Task 2 Stage B (2026-05-29)` | Runtime gate that lets `gSubKOverride` toggle which queue Sub-K-tagged tasks land in | Remove at Task 4 close (if Task 3 cure verify passes; else Remove at batch close) |
+| `Source/Standalone/StandaloneEditor.cpp` ~line 5188 — Mixer hamburger menu item 205 "Sub-K Serial Fallback" + handler | `QA-DispatcherAffinity Task 2 Stage B (2026-05-29)` | Runtime toggle for Sub-K override + AlertWindow surface with Stage B usage hint | Remove at Task 4 close (if Task 3 cure verify passes; else Remove at batch close) |

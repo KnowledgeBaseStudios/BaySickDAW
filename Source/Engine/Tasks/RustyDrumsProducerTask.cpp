@@ -16,6 +16,14 @@ RustyDrumsProducerTask::RustyDrumsProducerTask (VibeSynthProcessor& processor)
     // breaking voice continuity on long sustains).  See QA-DispatcherAffinity
     // §9 Forks entry for the proper dispatcher-barrier fix that retires this
     // pin.  Workers will never see this task; only runUntilOrTimeout runs it.
+    //
+    // QA-DispatcherAffinity Task 2 Stage B (2026-05-29): the runtime override
+    // gSubKOverride (Mixer hamburger "Sub-K Serial Fallback" toggle) gates
+    // this pin at VibeThreadPool::submit() time, not at this construction
+    // site -- the task stays tagged mAudioThreadOnly=true (the "wants
+    // pinning" intent) and the override decides at submit() whether to honor
+    // it.  Lets the same session A/B Sub-K-on vs Sub-K-off without a kit
+    // reload.  See MtDiagnostic namespace in RenderEngineFlags.h.
     mAudioThreadOnly = true;
 }
 

@@ -5188,6 +5188,19 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 true,                  // enabled
                                 traceOn);              // checked
 
+                    // QA-DispatcherAffinity Task 2 Stage B (2026-05-29):
+                    // runtime override for the Sub-K Serial Fallback
+                    // mAudioThreadOnly pinning.  Checked = Sub-K active
+                    // (production shipping band-aid; 14 sfizz tasks pinned
+                    // to the audio thread).  Unchecked = override engaged
+                    // (sfizz tasks return to MT worker pool for Stage B
+                    // trace re-capture).
+                    const bool subKActive = ! RenderEngine::MtDiagnostic::gSubKOverride.load (std::memory_order_acquire);
+                    m.addItem (205,
+                                "Sub-K Serial Fallback",
+                                true,                  // enabled
+                                subKActive);           // checked when Sub-K is on
+
                     m.showMenuAsync (
                         juce::PopupMenu::Options().withTargetComponent (anchor),
                         [safeThis] (int r)
@@ -5369,7 +5382,18 @@ void StandaloneEditor::showPageForTab(int tabId)
                                     return;
                                 }
 
-                                fos.writeString ("blockIndex,channelId,engineInstance,threadIdHash,entryNs,exitNs,durationNs\n");
+                                // QA-DispatcherAffinity Task 2 Stage B follow-up:
+                                // use fos.write(raw, len) NOT writeString -- the
+                                // latter appends a null terminator after each
+                                // write, which pollutes the CSV (every row gets
+                                // a leading null byte from the previous row's
+                                // terminator + the header gets a trailing null
+                                // that makes some tools treat the file as
+                                // binary).  Raw byte write preserves clean ASCII.
+                                {
+                                    const char* hdr = "blockIndex,channelId,engineInstance,threadIdHash,entryNs,exitNs,durationNs\n";
+                                    fos.write (hdr, std::strlen (hdr));
+                                }
                                 for (const auto& e : events)
                                 {
                                     const std::uint64_t duration = (e.exitNs >= e.entryNs) ? (e.exitNs - e.entryNs) : 0;
@@ -5381,7 +5405,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                                         << (juce::int64) e.entryNs   << ','
                                         << (juce::int64) e.exitNs    << ','
                                         << (juce::int64) duration    << '\n';
-                                    fos.writeString (row);
+                                    fos.write (row.toRawUTF8(), (size_t) row.getNumBytesAsUTF8());
                                 }
                                 fos.flush();
 
@@ -5391,6 +5415,33 @@ void StandaloneEditor::showPageForTab(int tabId)
                                     "Trace DUMPED.  " + juce::String ((juce::int64) numEvents) + " events written to:\n"
                                         + dest.getFullPathName()
                                         + (wrapped ? "\n\nNote: ring wrapped (more events than capacity " + juce::String ((juce::int64) cap) + ").  Earlier events lost." : ""),
+                                    "OK");
+                                return;
+                            }
+                            if (r == 205)
+                            {
+                                // QA-DispatcherAffinity Task 2 Stage B (2026-05-29):
+                                // toggle the Sub-K Serial Fallback runtime override.
+                                const bool wasOverride = RenderEngine::MtDiagnostic::gSubKOverride.load (std::memory_order_acquire);
+                                RenderEngine::MtDiagnostic::gSubKOverride.store (! wasOverride, std::memory_order_release);
+                                juce::AlertWindow::showMessageBoxAsync (
+                                    juce::MessageBoxIconType::InfoIcon,
+                                    "Sub-K Serial Fallback",
+                                    wasOverride
+                                      ? juce::String ("Sub-K Serial Fallback ACTIVE.\n\n")
+                                          + "The 3 sfizz-driven engine task families "
+                                          + "(BaySickRustyDrums producer + 13 insert tasks; "
+                                          + "BaySickGuitars + BaySickBasses InstStripTasks) "
+                                          + "are pinned to the audio thread (production "
+                                          + "shipping band-aid)."
+                                      : juce::String ("Sub-K Serial Fallback OVERRIDE engaged.\n\n")
+                                          + "The 3 sfizz-driven engine task families return "
+                                          + "to the MT worker pool.  Use this with "
+                                          + "QA-DispatcherAffinity Trace ON to capture the "
+                                          + "Stage B Sub-K-disabled trace; expect potential "
+                                          + "bit-crusher distortion on long-sustaining "
+                                          + "BaySickRustyDrums cymbals/hi-hats per the "
+                                          + "QA-Sfizz Item 3 symptom.",
                                     "OK");
                                 return;
                             }

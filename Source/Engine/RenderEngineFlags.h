@@ -191,6 +191,25 @@ namespace RenderEngine
         inline std::atomic<std::uint32_t> gBlockIndex          { 0 };
         inline std::array<TraceEvent, kTraceRingCapacity> gTraceRing {};
 
+        // QA-DispatcherAffinity Task 2 Stage B (2026-05-29): runtime override
+        // for the Sub-K Serial Fallback `mAudioThreadOnly` pinning.  When
+        // gSubKOverride is true, VibeThreadPool::submit() ignores the per-task
+        // mAudioThreadOnly flag and routes EVERY task to the worker MPMC queue
+        // -- the 3 sfizz-driven engine task families (RustyDrumsProducerTask +
+        // RustyInsertTask + sfizz-engine InstStripTask) return to the MT
+        // worker pool for the Stage B re-capture trace.  Default false = Sub-K
+        // active (production shipping band-aid).  Toggled from the Mixer
+        // hamburger menu item "Sub-K Serial Fallback" so the same session can
+        // A/B between Sub-K-on (production) and Sub-K-off (Stage B test) with
+        // no rebuild + no kit reload + no engine re-registration.
+        // Audio-thread read in submit() uses relaxed ordering -- one block of
+        // wrong routing across the toggle boundary is acceptable for the
+        // diagnostic test (subsequent blocks settle to the new state via the
+        // x86 hardware total-store-order even with relaxed memory).
+        // Stripped at Task 4 close (if Task 3 cure verify passes; else batch
+        // close) alongside the rest of the trace infrastructure.
+        inline std::atomic<bool> gSubKOverride { false };
+
         // Steady-clock nanoseconds since epoch.  Used as the trace
         // timestamp source -- monotonic, no NTP adjustment, sub-microsecond
         // precision on Windows.  Not wall-clock time; only deltas matter

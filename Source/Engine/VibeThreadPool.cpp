@@ -78,7 +78,15 @@ void VibeThreadPool::submit (RenderTask* task) noexcept
     // audio-thread tasks since no worker can run them anyway — the
     // audio thread will pick them up on its next runUntilOrTimeout
     // iteration via the audioThreadQueue.try_dequeue priority pop.
-    if (task->mAudioThreadOnly)
+    //
+    // QA-DispatcherAffinity Task 2 Stage B (2026-05-29): gSubKOverride
+    // runtime gate.  When the override is engaged (Mixer hamburger "Sub-K
+    // Serial Fallback" toggled OFF), audio-thread-only tasks fall through
+    // to the worker queue -- the 3 sfizz engine task families return to
+    // MT parallel execution for the Stage B re-capture trace.  Stripped
+    // at Task 4 close alongside the rest of the override infrastructure.
+    if (task->mAudioThreadOnly
+        && ! RenderEngine::MtDiagnostic::gSubKOverride.load (std::memory_order_relaxed))
     {
         mImpl->audioThreadQueue.enqueue (task);
         return;

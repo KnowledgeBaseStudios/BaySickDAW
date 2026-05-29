@@ -25,6 +25,11 @@ RustyInsertTask::RustyInsertTask (int                 stripIndex,
     // sequentially within the dispatcher graph, eliminating both that race
     // and the suspected thread-local-state migration affecting voice
     // continuity.  Retired by QA-DispatcherAffinity.
+    //
+    // QA-DispatcherAffinity Task 2 Stage B (2026-05-29): gated by the
+    // runtime gSubKOverride at VibeThreadPool::submit() time -- see the
+    // matching comment on RustyDrumsProducerTask.cpp + the MtDiagnostic
+    // namespace in RenderEngineFlags.h.
     this->mAudioThreadOnly = true;
 }
 

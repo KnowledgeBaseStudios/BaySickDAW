@@ -3783,6 +3783,11 @@ void VibeSynthProcessor::registerInstEngine(int pageIdx, juce::AudioProcessor* e
         // current engine kind, so the flag stays in lockstep with the
         // active engine.  LiveInput + audio-clip + other source modes
         // leave the flag false (worker-eligible).
+        //
+        // QA-DispatcherAffinity Task 2 Stage B (2026-05-29): gated by the
+        // runtime gSubKOverride at VibeThreadPool::submit() time -- see the
+        // matching comment on RustyDrumsProducerTask.cpp + the MtDiagnostic
+        // namespace in RenderEngineFlags.h.
         if (dynamic_cast<BaySickGuitarsProcessor*> (eng) != nullptr
             || dynamic_cast<BaySickBassesProcessor*> (eng) != nullptr)
         {
