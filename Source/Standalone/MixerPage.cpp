@@ -3248,25 +3248,33 @@ void MixerPage::onVBlank()
 {
     constexpr float kNegInf = -std::numeric_limits<float>::infinity();
 
-    auto drainStereoBus = [] (MixerTrackStrip* strip,
-                               std::atomic<float>& l,
-                               std::atomic<float>& r)
+    // QA-RustyMeter part 2 (2026-05-30): drainStereoBus now also feeds the bus
+    // split meter's scrolling RMS top half via drainBusRmsDbStereo(busChId).
+    // Master passes kMaster -> returns -inf (Full layout, no RMS) -> harmless
+    // setRmsStereo no-op on a Full meter.
+    auto drainStereoBus = [this] (MixerTrackStrip* strip, int busChId,
+                                   std::atomic<float>& l,
+                                   std::atomic<float>& r)
     {
         if (! strip) return;
         const float vL = l.exchange (kNegInf, std::memory_order_relaxed);
         const float vR = r.exchange (kNegInf, std::memory_order_relaxed);
         strip->setStereoLevel (vL, vR);
+        const auto [rmL, rmR] = mProcessor.drainBusRmsDbStereo (busChId);
+        strip->setRmsStereo (rmL, rmR);
     };
 
-    drainStereoBus (mMasterStrip       .get(), mProcessor.mMasterPeakDbL,        mProcessor.mMasterPeakDbR);
-    drainStereoBus (mLayersBusStrip    .get(), mProcessor.mLayersPeakDbL,        mProcessor.mLayersPeakDbR);
-    drainStereoBus (mBassBusStrip      .get(), mProcessor.mBassPeakDbL,          mProcessor.mBassPeakDbR);
-    drainStereoBus (mDrumsBusStrip     .get(), mProcessor.mDrumsPeakDbL,         mProcessor.mDrumsPeakDbR);
-    drainStereoBus (mFXBusStrip        .get(), mProcessor.mFxBusPeakDbL,         mProcessor.mFxBusPeakDbR);
-    drainStereoBus (mAudioClipsBusStrip.get(), mProcessor.mAudioClipsBusPeakDbL, mProcessor.mAudioClipsBusPeakDbR);
-    drainStereoBus (mVoxBusStrip       .get(), mProcessor.mVoxBusPeakDbL,        mProcessor.mVoxBusPeakDbR);
-    drainStereoBus (mInstBusStrip      .get(), mProcessor.mInstBusPeakDbL,       mProcessor.mInstBusPeakDbR);
-    drainStereoBus (mRustyDrumsBusStrip.get(), mProcessor.mRustyDrumsBusPeakDbL, mProcessor.mRustyDrumsBusPeakDbR);   // J-7b
+    using namespace MixerChannelIds;   // bus-id constants for drainBusRmsDbStereo
+
+    drainStereoBus (mMasterStrip       .get(), kMaster,        mProcessor.mMasterPeakDbL,        mProcessor.mMasterPeakDbR);
+    drainStereoBus (mLayersBusStrip    .get(), kLayersBus,     mProcessor.mLayersPeakDbL,        mProcessor.mLayersPeakDbR);
+    drainStereoBus (mBassBusStrip      .get(), kBassBus,       mProcessor.mBassPeakDbL,          mProcessor.mBassPeakDbR);
+    drainStereoBus (mDrumsBusStrip     .get(), kDrumsBus,      mProcessor.mDrumsPeakDbL,         mProcessor.mDrumsPeakDbR);
+    drainStereoBus (mFXBusStrip        .get(), kFxBus,         mProcessor.mFxBusPeakDbL,         mProcessor.mFxBusPeakDbR);
+    drainStereoBus (mAudioClipsBusStrip.get(), kClipsBus,      mProcessor.mAudioClipsBusPeakDbL, mProcessor.mAudioClipsBusPeakDbR);
+    drainStereoBus (mVoxBusStrip       .get(), kVoxBus,        mProcessor.mVoxBusPeakDbL,        mProcessor.mVoxBusPeakDbR);
+    drainStereoBus (mInstBusStrip      .get(), kInstBus,       mProcessor.mInstBusPeakDbL,       mProcessor.mInstBusPeakDbR);
+    drainStereoBus (mRustyDrumsBusStrip.get(), kRustyDrumsBus, mProcessor.mRustyDrumsBusPeakDbL, mProcessor.mRustyDrumsBusPeakDbR);   // J-7b
     // QA-Eg: cable overlay reads each strip's cached peak (MixerTrackStrip::
     // getCurrentPeakDb) for telemetry-driven alpha + warning-color animation.
     // Repaint here so cable updates land in the same vblank as the strip
@@ -3305,9 +3313,9 @@ void MixerPage::onVBlank()
     for (auto& [idx, strip] : mRustyStrips)
         drainStereoInsert (VibeGraph::InsertKind::Rusty, idx, strip.get());
 
-    if (mVoxBus2Strip)  drainStereoBus (mVoxBus2Strip .get(), mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
-    if (mInstBus2Strip) drainStereoBus (mInstBus2Strip.get(), mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);
-    if (mInstBus3Strip) drainStereoBus (mInstBus3Strip.get(), mProcessor.mInstBus3PeakDbL, mProcessor.mInstBus3PeakDbR);
+    if (mVoxBus2Strip)  drainStereoBus (mVoxBus2Strip .get(), kVoxBus2,  mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
+    if (mInstBus2Strip) drainStereoBus (mInstBus2Strip.get(), kInstBus2, mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);
+    if (mInstBus3Strip) drainStereoBus (mInstBus3Strip.get(), kInstBus3, mProcessor.mInstBus3PeakDbL, mProcessor.mInstBus3PeakDbR);
 
     // QA-Eg (2026-05-24): cable overlay repaint is delta-gated against a
     // snapshot of every strip's displayed peak dB from the previous vblank.

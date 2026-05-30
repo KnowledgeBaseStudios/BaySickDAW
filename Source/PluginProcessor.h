@@ -654,6 +654,10 @@ public:
     // QA-RustyMeter (2026-05-30): RMS sibling for the split meter; thin passthrough
     // to mVibeGraph.drainInsertNodeRms (no mirror -- RMS is read off the node).
     std::pair<float, float> drainInsertRmsDbStereo (VibeGraph::InsertKind kind, int index) noexcept;
+    // QA-RustyMeter part 2 (2026-05-30): bus RMS sibling; thin passthrough to
+    // mVibeGraph.drainBusRms.  busChId is a MixerChannelIds bus id; kMaster (and
+    // any unknown id) returns {-inf,-inf} (Master keeps a full peak bar, no RMS).
+    std::pair<float, float> drainBusRmsDbStereo (int busChId) noexcept;
 
     // ── Graph infrastructure (Phase 1A) ───────────────────────────────────────
     VibeGraph mVibeGraph;

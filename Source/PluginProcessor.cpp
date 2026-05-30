@@ -2047,6 +2047,16 @@ VibeSynthProcessor::drainInsertRmsDbStereo (VibeGraph::InsertKind kind, int inde
     return mVibeGraph.drainInsertNodeRms (kind, index);
 }
 
+// QA-RustyMeter part 2 (2026-05-30): bus RMS sibling for the split meter.  Thin
+// passthrough to mVibeGraph.drainBusRms -- like the insert RMS, the bus RMS is a
+// current value read straight off VibeGraph's per-bus atoms + exchange-reset
+// there, so there is no PluginProcessor mirror (unlike the bus peak path).
+std::pair<float, float>
+VibeSynthProcessor::drainBusRmsDbStereo (int busChId) noexcept
+{
+    return mVibeGraph.drainBusRms (busChId);
+}
+
 std::pair<float, float>
 VibeSynthProcessor::drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int index) noexcept
 {

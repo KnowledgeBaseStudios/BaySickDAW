@@ -5,7 +5,7 @@
 > Paired running notes: `Plans & Specs/Running Notes/sorted-whistling-shannon.md`
 > LUFS research: `Plans & Specs/Research Reports/daw-architecture-lufs-momentary-shortterm-metering-2026-05-29.md`
 
-> **For execution:** `superpowers:executing-plans` inline. `- [ ]` checkbox steps. Builds run by Jeff (`do_build.bat`) — never by Claude. Verify Debug FIRST, then Release. **RE-SCOPE of an open batch** (Task 0 + Task 1 already landed). The original per-layer-volume "bug" diagnosed as **not a bug** (expected peak-meter behavior); Jeff pivoted to a metering-architecture upgrade. Tasks continue: **Task 2 (Split meter) → Task 3 (Master LUFS) → Task 4 (Close)**.
+> **For execution:** `superpowers:executing-plans` inline. `- [ ]` checkbox steps. Builds run by Jeff (`do_build.bat`) — never by Claude. Verify Debug FIRST, then Release. **RE-SCOPE of an open batch** (Task 0 + Task 1 already landed). The original per-layer-volume "bug" diagnosed as **not a bug** (expected peak-meter behavior); Jeff pivoted to a metering-architecture upgrade. Tasks continue: **Task 2 (Split meter) → Task 3 (Master LUFS) → Task 4 (dedup fix) → Task 5 (bus collapse UI) → Task 6 (Close)**.
 >
 > **Code blocks below are implementation sketches** — codebase-consistent and concrete enough to build from, but exact JUCE sign conventions (IIR `a1/a2`), field names (`BlockContext`/`posInfo`), and the full per-site plumbing enumeration are verified/refined at build. The K-weighting coeffs have a hard acceptance test (the 48 kHz sanity table).
 
@@ -325,7 +325,31 @@ if (masterRow) { mLufsBox.setBounds (x, y, w, kLufsH); y += kLufsH + kPadV; }   
 - [ ] Tell Jeff (verify): (1) open a project with samples → File > New → drop a previously-used file → NO false "already in library" prompt. (2) Drop a true duplicate WITHIN one project → the prompt still fires correctly. Debug then Release.
 - [ ] On pass: `/draft-commit` → surface + commit. `/draft-doc running-notes` → apply.
 
-### Task 5 — Close
+### Task 5 — Bus collapse/expand UI (end-batch cleanup; folded in 2026-05-30)
+> Out-of-scope UI add requested by Jeff right after Task 2 part-2 verify (2026-05-30); folded into this batch's cleanup per §0 Rule 3 + the QA-batches-fix convention. A per-bus collapse toggle so a busy mixer can hide a bus's grouped strips without removing them. NOT audio — pure view state. Spec confirmed by Jeff (4 answers below).
+
+**Confirmed spec (Jeff 2026-05-30):**
+- Small arrow button (sized like the RibbonTabBar tab dropdown arrows) on each BUS strip's top row, to the right of the name label. **Buses only — NOT Master** (#1).
+- Default = arrow points DOWN, group expanded (looks exactly as today). Click → arrow flips UP → that bus's grouped member strips collapse/hide + the layout closes their gap. Click again → expand. The bus strip itself stays.
+- Each bus collapses ONLY its own group (Vox collapsing doesn't touch Vox Bus 2).
+- **Persists through save** (#3) — collapsed/expanded state saved in project state, restored on load.
+- Name label shrinks slightly to make room for the arrow → **tooltip change on ALL strips** (#2): the full displayed name on the top line + "Double-click to rename" below (names truncate when narrow).
+- Arrow **greyed out / disabled** when the bus has no member strips to collapse (#4).
+
+**Implementation pointers (grounded in the layout read 2026-05-30):**
+- Layout: `MixerPage` `laidOutBus` (`:3529`) + `layoutGroup` (`:3494`) lay each bus strip then its members = `buckets[busChId]` flush to its right, then `kGroupSep`. Collapse = when a bus's flag is set, skip `layoutGroup` for its members (`setVisible(false)`) and DON'T advance `x` for them — just the bus + the gap. Members stay constructed + audio-live (only hidden). `mScrollContent` width recomputed from the new `x`.
+- Toggle plumbing: `MixerTrackStrip` gets a collapse arrow button (buses only) + an `onCollapseToggled` callback; `MixerPage` owns the per-bus flag, flips it in the callback, re-runs the strip layout (`:3490-3592`) + `syncHScrollBar`. Arrow up/down driven by the flag; disabled when `buckets[busChId]` is empty.
+- Persistence: per-bus `_collapsed` bool — APVTS per-bus param (mirrors the lazily-registered `_mute`/`_solo`, auto-persists with project) OR a MixerState field; invisible-to-user impl detail, settled at build.
+- Tooltip (ALL strips): `MixerTrackStrip` ctor (`:52`) sets `mNameLabel` tooltip to `name + "\nDouble-click to rename"` (renamable) / `name` (non-renamable); refresh in `onTextChange` (`:53`) + on programmatic rename so it tracks the current name.
+
+- [ ] Arrow button on bus strips (RibbonTabBar arrow style), right of the shrunk name label; down=expanded / up=collapsed; disabled when no members.
+- [ ] `MixerPage` per-bus collapsed flag + `onCollapseToggled` → skip-members-in-layout + relayout + scrollbar sync.
+- [ ] Persist the collapsed flag per-project (restore on load).
+- [ ] Tooltip on ALL strips: full name (top) + "Double-click to rename" (below); tracks renames.
+- [ ] **Tell Jeff (verify):** "Run `do_build.bat`. Debug: (1) every bus strip has a small down-arrow right of its name; click → it flips up + that bus's strips collapse/hide + the row closes the gap; click again → they return. (2) Master has NO arrow. (3) a bus with no strips shows the arrow greyed/disabled. (4) hover any strip's name → tooltip shows the full name + 'Double-click to rename'; long truncated names still show full in the tooltip. (5) collapse some buses, save + reload the project → collapsed state restored. (6) no audio change: a collapsed bus's hidden strips still play + meter. Repeat Release."
+- [ ] On pass: `/draft-commit` → surface + commit. `/draft-doc running-notes` → apply.
+
+### Task 6 — Close
 - [ ] `/draft-doc batch-close` → apply to `Implemented Work Log.md` (`**Bucket:** Mixer / Routing, UI / L&F / Theming, Cross-cutting Infrastructure`).
 - [ ] `/review-batch QA-RustyMeter` → address BLOCKER/NEEDS-FIX; defer NITs into the entry.
 - [ ] Strip temp diagnostics (Rule 4) — none expected (static investigation); surface list if any.

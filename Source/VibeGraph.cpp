@@ -1578,6 +1578,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             fxBusPeakDb .store(mEffectsBusNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
             fxBusPeakDbL.store(mEffectsBusNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
             fxBusPeakDbR.store(mEffectsBusNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+            publishRms (buf, fxBusRmsDbL, fxBusRmsDbR);   // QA-RustyMeter split-meter RMS feed
         }
         return;
     }
@@ -1596,6 +1597,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         layersPeakDb .store(mLayersNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         layersPeakDbL.store(mLayersNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         layersPeakDbR.store(mLayersNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        publishRms (buf, layersRmsDbL, layersRmsDbR);   // QA-RustyMeter split-meter RMS feed
         return;
     }
     if (busChId == kBassBus)
@@ -1605,6 +1607,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         bassPeakDb .store(mBassNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         bassPeakDbL.store(mBassNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         bassPeakDbR.store(mBassNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        publishRms (buf, bassRmsDbL, bassRmsDbR);   // QA-RustyMeter split-meter RMS feed
         return;
     }
     if (busChId == kDrumsBus)
@@ -1614,6 +1617,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         drumsPeakDb .store(mDrumsNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         drumsPeakDbL.store(mDrumsNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         drumsPeakDbR.store(mDrumsNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        publishRms (buf, drumsRmsDbL, drumsRmsDbR);   // QA-RustyMeter split-meter RMS feed
         return;
     }
 
@@ -1635,6 +1639,11 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     EQ8MsDSP*  postEq = nullptr;
     InstrChannelNode* node = nullptr;
     juce::String prefix;
+    // QA-RustyMeter part 2 (2026-05-30): per-bus split-meter RMS target atoms,
+    // set alongside node in the switch below; publishRms CAS-maxes into them
+    // after publishPeakReading (parallel to the peak exchange-store).
+    std::atomic<float>* rmsL = nullptr;
+    std::atomic<float>* rmsR = nullptr;
     // QA-Ea Part A (2026-05-21): inGroupSolo + useGroupSolo retired.  Every
     // bus shares the unified canonical formula `silenced = muted || (anyBus
     // && !soloed)`.  Previously: 6-bus subsets (different per-bus depending
@@ -1650,36 +1659,43 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             postEq = getAudioClipsBusEQ();
             node   = mAudioClipsBusNode.get();
             prefix = "mixer_clipsbus";
+            rmsL = &audioClipsRmsDbL; rmsR = &audioClipsRmsDbR;
             break;
         case kVoxBus:
             preEq  = getVoxBusPreEQ();   rack = getVoxBusRack();   postEq = getVoxBusEQ();
             node   = mVoxBusNode.get();
             prefix = "mixer_voxbus";
+            rmsL = &voxBusRmsDbL; rmsR = &voxBusRmsDbR;
             break;
         case kInstBus:
             preEq  = getInstBusPreEQ();  rack = getInstBusRack();  postEq = getInstBusEQ();
             node   = mInstBusNode.get();
             prefix = "mixer_instbus";
+            rmsL = &instBusRmsDbL; rmsR = &instBusRmsDbR;
             break;
         case kVoxBus2:
             preEq  = getVoxBus2PreEQ();  rack = getVoxBus2Rack();  postEq = getVoxBus2EQ();
             node   = mVoxBus2Node.get();
             prefix = "mixer_voxbus2";
+            rmsL = &voxBus2RmsDbL; rmsR = &voxBus2RmsDbR;
             break;
         case kInstBus2:
             preEq  = getInstBus2PreEQ(); rack = getInstBus2Rack(); postEq = getInstBus2EQ();
             node   = mInstBus2Node.get();
             prefix = "mixer_instbus2";
+            rmsL = &instBus2RmsDbL; rmsR = &instBus2RmsDbR;
             break;
         case kInstBus3:
             preEq  = getInstBus3PreEQ(); rack = getInstBus3Rack(); postEq = getInstBus3EQ();
             node   = mInstBus3Node.get();
             prefix = "mixer_instbus3";
+            rmsL = &instBus3RmsDbL; rmsR = &instBus3RmsDbR;
             break;
         case kRustyDrumsBus:
             preEq  = getRustyDrumsBusPreEQ(); rack = getRustyDrumsBusRack(); postEq = getRustyDrumsBusEQ();
             node   = mRustyDrumsBusNode.get();
             prefix = "mixer_rustybus";
+            rmsL = &rustyDrumsBusRmsDbL; rmsR = &rustyDrumsBusRmsDbR;
             break;
         default:
             jassertfalse;
@@ -1753,6 +1769,11 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         publishPeakReading (buf,
                             node->peakRingL, node->peakRingR, node->peakRingIdx,
                             node->peakDbL, node->peakDbR, node->peakDb);
+        // QA-RustyMeter part 2 (2026-05-30): bus split-meter RMS feed.  rmsL/rmsR
+        // were set alongside node in the switch above, so node != nullptr implies
+        // they're valid for every generic bus.
+        if (rmsL != nullptr && rmsR != nullptr)
+            publishRms (buf, *rmsL, *rmsR);
     }
 
     // Exchange-store the migrated buses' node-internal peak atomics into
@@ -2531,6 +2552,36 @@ std::pair<float, float> VibeGraph::drainInsertNodeRms (InsertKind kind, int inde
         return { node->rmsDbL.exchange (kNI, std::memory_order_relaxed),
                  node->rmsDbR.exchange (kNI, std::memory_order_relaxed) };
     return { kNI, kNI };
+}
+
+// QA-RustyMeter part 2 (2026-05-30): UI-thread RMS drain for a bus strip's split
+// meter.  exchange-resets the per-bus rms member atoms (CAS-maxed audio-side by
+// publishRms in processBus/processEffectsBus); returns "max RMS since the last
+// call".  Master + unknown ids return {-inf,-inf} (Master is Full-layout, no RMS
+// top).  Direct VibeGraph read mirrored from drainInsertNodeRms -- no mirror.
+std::pair<float, float> VibeGraph::drainBusRms (int busChId) noexcept
+{
+    using namespace MixerChannelIds;
+    constexpr float kNI = -std::numeric_limits<float>::infinity();
+    std::atomic<float>* l = nullptr;
+    std::atomic<float>* r = nullptr;
+    switch (busChId)
+    {
+        case kLayersBus:     l = &layersRmsDbL;        r = &layersRmsDbR;        break;
+        case kBassBus:       l = &bassRmsDbL;          r = &bassRmsDbR;          break;
+        case kDrumsBus:      l = &drumsRmsDbL;         r = &drumsRmsDbR;         break;
+        case kFxBus:         l = &fxBusRmsDbL;         r = &fxBusRmsDbR;         break;
+        case kClipsBus:      l = &audioClipsRmsDbL;    r = &audioClipsRmsDbR;    break;
+        case kVoxBus:        l = &voxBusRmsDbL;        r = &voxBusRmsDbR;        break;
+        case kVoxBus2:       l = &voxBus2RmsDbL;       r = &voxBus2RmsDbR;       break;
+        case kInstBus:       l = &instBusRmsDbL;       r = &instBusRmsDbR;       break;
+        case kInstBus2:      l = &instBus2RmsDbL;      r = &instBus2RmsDbR;      break;
+        case kInstBus3:      l = &instBus3RmsDbL;      r = &instBus3RmsDbR;      break;
+        case kRustyDrumsBus: l = &rustyDrumsBusRmsDbL; r = &rustyDrumsBusRmsDbR; break;
+        default:             return { kNI, kNI };   // kMaster (Full) + anything else
+    }
+    return { l->exchange (kNI, std::memory_order_relaxed),
+             r->exchange (kNI, std::memory_order_relaxed) };
 }
 
 EQ8MsDSP* VibeGraph::getInsertEQ(InsertKind kind, int index)

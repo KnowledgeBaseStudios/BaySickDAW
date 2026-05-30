@@ -154,7 +154,20 @@ Jeff verified part 1 in Debug + Release: **4 tests PASS** (split meter renders, 
 - **"Doesn't wave"** (two near-static lines unless quiet — RMS is a near-constant loudness for sustained audio): shortened the UI smoothing `kRmsTimeConstSec` 200 ms → **50 ms** so the wave tracks the music's dynamics. Offered Jeff a switch to **peak-excursion** plotting if he wants true-waveform wiggle on every transient (one-line change, keeps the rest).
 - **"Just lines — fill the middle":** rewrote `paintRmsWaveform` from two stroked traces to a **filled** stereo-waveform path (R deflects right of centre, L deflects left, band spans the centre line) with a **symmetric** dBFS-palette gradient (green centre → yellow → orange → red at both outer edges, #8).
 
-**Jeff verified 2026-05-30: "this all looks good"** — the 65/35 split + filled gradient waveform + dynamics-tracking wave are all approved. Part 1 (inserts) visual + functional = DONE.
+**Jeff verified 2026-05-30: "this all looks good"** — the 65/35 split + filled gradient waveform + dynamics-tracking wave are all approved. Part 1 (inserts) visual + functional = DONE. Committed at `6a2e35e` (11 files, +257/-17, working tree clean). Part 2 (bus-node RMS + flip buses to Split, incl. Vox Bus 2 / Inst Bus 2 / Inst Bus 3) starting.
+
+---
+
+## 2026-05-30 — Task 2 (part 2) — bus-RMS architecture map (for implementation)
+
+Mapped the bus meter path (12 buses; Master stays Full so 11 need RMS):
+- **VibeGraph per-bus PEAK member atomics** (`VibeGraph.h:621-658`): `layers/bass/drums/master/fxBus/audioClips/voxBus/voxBus2/instBus/instBus2/instBus3/rustyDrumsBus` each `PeakDb`/`PeakDbL`/`PeakDbR`.
+- **5 dedicated bus NODES** drained in `processBus`/`processMasterBus` branches (`VibeGraph.cpp:1536-1618`): `mLayersNode`/`mBassNode`/`mDrumsNode` (`processChainOnly` → exchange-store into `<bus>PeakDb*`), `mMasterNode` (`processMasterBus`), `mEffectsBusNode` (`processEffectsBus`, kFxBus branch).
+- **7 generic buses** via the shared path (`processBus` :1620-1742+), `switch(busChId)` sets `preEq/rack/postEq/node/prefix` where `node` = `InstrChannelNode*` (`mAudioClipsBusNode`/`mVoxBusNode`/`mInstBusNode`/`mVoxBus2Node`/`mInstBus2Node`/`mInstBus3Node`/`mRustyDrumsBusNode`); chain → `publishPeakReading` → exchange-store into the per-bus member (peak store + busChId switch live just past :1742).
+- **MixerPage::onVBlank** (`:3261-3269`) drains the CORE 9 buses via `drainStereoBus(strip, mProcessor.m<Bus>PeakDbL, ...R)`. **Vox2/Inst2/Inst3 are NOT in that loop** (created on-demand at MixerPage `:1842/1906/1968`) — their meter drain is elsewhere; part 2 must locate + wire it (Jeff's flag).
+
+**Lean approach (mirrors part-1 direct-read, no PluginProcessor mirrors):** add 22 VibeGraph per-bus RMS member atomics (11 buses × L/R; Master excluded). CAS-max the per-block RMS into them via `publishRms(buf, <bus>RmsDbL, <bus>RmsDbR)` in each dedicated branch (Layers/Bass/Drums/FX) + ONE call in the generic path using a switch-set `std::atomic<float>* rmsL/rmsR`. Audio thread never resets them; UI exchange-resets via new `VibeGraph::drainBusRms(busChId)` → `PluginProcessor::drainBusRmsDbStereo` passthrough → MixerPage bus drain (pass `busChId`, add `setRmsStereo`). Construction: flip `Bus → Split` (change the ctor check from `(Master||Bus)?Full:Split` to `Master?Full:Split`). Find + wire the Vox2/Inst2/Inst3 drain. Est. ~25-30 edits across VibeGraph.h/.cpp, PluginProcessor.h/.cpp, MixerPage.cpp, MixerTrackStrip.cpp.
+
 
 ## 2026-05-30 — Task 2 — OUT-OF-SCOPE bug surfaced during testing: false "File Already in Library" prompt on a NEW empty project
 
@@ -166,6 +179,56 @@ Jeff (while testing the meter): opened a project containing multiple copies of h
 **Possible build nits flagged to Jeff:** `<utility>` in VibeGraph.h (std::pair) + `<cmath>` in VibeGraph.cpp (std::sqrt) — both almost certainly already pulled via JUCE; easy add if the build complains.
 
 **Files:** SharedUI.h/.cpp, VibeGraph.h/.cpp, PluginProcessor.h/.cpp, MixerPage.cpp, MixerTrackStrip.h/.cpp. Pre-build; awaiting Jeff's Debug+Release verify.
+
+---
+
+## 2026-05-30 — Task 2 (part 2) — bus RMS implemented (pre-build)
+
+**Followed the part-2 architecture map exactly, lean direct-node-read (NO PluginProcessor mirror)** — same shape as part 1's insert RMS. Note the asymmetry vs the bus PEAK path: bus peak is an audio-side two-hop (node atom → VibeGraph member via `processBus` exchange-store → PluginProcessor mirror via `drainMeterAtomicsForUI`); bus RMS is a current value the UI reads straight off VibeGraph's per-bus atoms (the mirror exists for peak only because its drain runs audio-side). **6 source files, +119/-19.**
+
+- **VibeGraph.h:** 22 new per-bus RMS member atomics (11 non-master buses × L/R, default −60) right after the per-bus PeakDb atoms — `layers/bass/drums/fxBus/audioClips/voxBus/voxBus2/instBus/instBus2/instBus3/rustyDrumsBus` each `RmsDbL/RmsDbR`; NO mono sibling (RMS has no legacy reader). Plus a `drainBusRms(int busChId)` decl next to `drainInsertNodeRms`.
+- **VibeGraph.cpp:** reused the part-1 anon-namespace `publishRms` helper (per-block `sqrt(mean-square)` → dB, CAS-max into the atoms, audio thread never resets). Added a `publishRms(buf, <bus>RmsDbL/R)` in each of the 4 DEDICATED branches (Layers/Bass/Drums in `processBus` after their peak exchange-store; FX inside the kFxBus `if (mEffectsBusNode != nullptr)` block after its peak stores). For the 7 GENERIC buses (Clips/Vox/Inst/Vox2/Inst2/Inst3/Rusty via the `InstrChannelNode` shared path), added `std::atomic<float>* rmsL/rmsR` locals set per-bus in the existing switch (alongside node/prefix), then ONE `if (rmsL && rmsR) publishRms(buf, *rmsL, *rmsR);` inside the existing `if (node != nullptr)` peak block. Added the `drainBusRms(busChId)` definition (switch over the 11 bus channel ids; kMaster + unknown → {−inf,−inf}; exchange-resets the pair).
+- **PluginProcessor.h/.cpp:** `drainBusRmsDbStereo(int busChId)` thin passthrough to `mVibeGraph.drainBusRms` (sibling of `drainInsertRmsDbStereo`; no mirror).
+- **MixerPage.cpp:** `drainStereoBus` lambda gained a `busChId` param + `[this]` capture; after `setStereoLevel` it now drains `mProcessor.drainBusRmsDbStereo(busChId)` → `strip->setRmsStereo`. All 12 call sites pass the bus id (9 core in the `onVBlank` loop + the 3 on-demand Vox Bus 2 / Inst Bus 2 / Inst Bus 3 conditional drains lower down — explicitly wired per Jeff's part-1 flag). Master passes kMaster → returns −inf → harmless no-op on the Full meter.
+- **MixerTrackStrip.cpp:** ctor layout flip — was `(Master || Bus) ? Full : Split`, now `Master ? Full : Split`, so every Bus strip is now Split (Master alone stays Full; it carries the LUFS box in Task 3).
+
+**SharedUI.h/.cpp + MixerTrackStrip.h NOT touched** — the meter rendering + `setRmsStereo` already landed in part 1; part 2 is pure plumbing + the ctor flip.
+
+**Verified statically (pre-build):** all 22 RMS atoms appear exactly 3× each (decl + publish site + drain switch); the `drainBusRms`/`drainBusRmsDbStereo` chain is wired across all 5 files; no leftover `StripType::Bus` Full check remains.
+
+**Build nits to watch (same as part 1, likely already pulled via JUCE):** `std::pair` (VibeGraph.h already uses it via `drainInsertNodeRms`), `std::sqrt` + CAS in `publishRms` (already compiled in part 1).
+
+**Still pre-build; awaiting Jeff's Debug-then-Release verify:** all 11 non-master bus strips show the split meter now (bottom peak bar + top scrolling RMS waveform reacting to bus level); Master stays a full peak bar; no regression on insert-strip meters or peak readings.
+
+**Open offer still standing (carry from part 1):** the RMS top-half plots windowed RMS (~50 ms UI smoothing); a one-line switch to peak-excursion plotting is available if Jeff wants more per-transient "waveform" wiggle — to confirm at verify.
+
+---
+
+## 2026-05-30 — Task 2 (part 2) verified + Task 5 (bus collapse UI) folded in
+
+### (A) Task 2 (part 2) — VERIFIED
+
+**Jeff verified the bus-RMS build in Debug + Release 2026-05-30: "Everything passes."** All 11 non-master bus strips now show the split meter (bottom dBFS peak bar + top scrolling RMS waveform reacting to bus level); Master stays a full peak bar; no regression on the part-1 insert-strip meters or the peak readings. Part 2 = functionally + visually DONE.
+
+**Open offer from part 1 (RMS top-half windowed-RMS → peak-excursion switch) — CLOSED / DECLINED.** Jeff: leave it as-is. The windowed RMS looks fine on individual tracks; the near-static "two lines" look that prompted the original offer was an artifact of Jeff monitoring a FULL SONG mastered to ~-10 LUFS (the loudness genuinely IS that loud + constant, so the wave correctly reads near-flat). No code change — the one-line peak-excursion path is retired as an option, not taken.
+
+**Ready to commit (hash TBD — filled in by the commit that bundles this entry).** Part 2 = 6 source files (VibeGraph.h/.cpp, PluginProcessor.h/.cpp, MixerPage.cpp, MixerTrackStrip.cpp), +119/-19, per the prior pre-build entry. SharedUI.h/.cpp + MixerTrackStrip.h untouched (meter render + `setRmsStereo` landed in part 1).
+
+### (B) NEW out-of-scope feature folded into end-batch cleanup — bus collapse/expand UI (plan Task 5; Close renumbered Task 5 → Task 6)
+
+Jeff requested this right after the part-2 verify. Spec surfaced + confirmed in plain-English design terms BEFORE any plan/notes edit (per `feedback_plan_and_wait_for_explicit_confirm_on_semantics_changes.md`). Confirmed spec of record:
+
+- **Arrow button placement (Jeff answer #1):** a small arrow button in the RibbonTabBar tab-arrow style on each BUS strip's top row, to the RIGHT of the name label. **BUSES ONLY — no arrow on the Master strip.**
+- **Behavior:** default arrow DOWN = expanded (looks exactly as today). Click → flips UP → that bus's grouped member strips collapse/hide AND the layout closes the gap (member strips sit flush-right of their bus, so removing them pulls everything left). Click again → expand. The bus strip itself ALWAYS stays visible. Each bus collapses ONLY its own group (e.g. Vox != Vox Bus 2 — independent groups). Pure VIEW state — hidden member strips still process + meter; NO audio change.
+- **Persistence (Jeff answer #3):** collapsed/expanded state PERSISTS THROUGH SAVE (per-project state).
+- **Tooltip change on ALL strips (Jeff answer #2):** because the name label shrinks to make room for the arrow (and truncates when narrow), every strip's tooltip now shows the full displayed name on the top line + "Double-click to rename" on the line below.
+- **Disabled state (Jeff answer #4):** the arrow is greyed-out / disabled when a bus has NO members to collapse.
+
+**Layout grounding (read, not assumed):** `MixerPage::laidOutBus` (MixerPage.cpp:3529) + `layoutGroup` (:3494) lay each bus strip then its members so `buckets[busChId]` members render flush to the right of their bus. Collapse = skip the member strips in the layout pass + don't advance the x cursor past them. Persistence will most likely be a lazily-registered per-bus APVTS `_collapsed` bool (mirrors the existing lazy `_mute`/`_solo` registration) — exact impl settled at build. Tooltip set in the `MixerTrackStrip` ctor (MixerTrackStrip.cpp:52) + refreshed in `onTextChange` (:53).
+
+**Slot (Jeff accepted):** new **Task 5 — Bus collapse/expand UI**, sequenced AFTER the dedup-fix Task 4; Close moved to **Task 6**. IN-BATCH resolution → recorded in the batch-close routing table at close, NOT a §9 cross-batch route (same disposition as the Task 4 dedup fold). No §9 Forks entry needed; the plan already carries the new Task 5.
+
+**Net plan task list now:** Task 2 Split meter (part 1 inserts DONE `6a2e35e` + part 2 buses VERIFIED, commit TBD) → Task 3 Master LUFS readout → Task 4 Project-lifecycle dedup fix → Task 5 Bus collapse/expand UI → Task 6 Close.
 
 
 

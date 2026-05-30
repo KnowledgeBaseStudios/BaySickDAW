@@ -57,10 +57,11 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
 
     // ── DBFSMeter ─────────────────────────────────────────────────────────────
     mMeter.setCompact(true);
-    // QA-RustyMeter (2026-05-30): insert/channel strips get the Split layout
-    // (peak bar + scrolling RMS waveform); Master + Bus keep a full-height peak
-    // bar (Master carries the LUFS box; bus RMS lands in a follow-up).
-    mMeter.setMeterLayout ((type == StripType::Master || type == StripType::Bus)
+    // QA-RustyMeter (2026-05-30): every non-master strip gets the Split layout
+    // (peak bar + scrolling RMS waveform).  Part 1 = insert/channel strips; part 2
+    // (2026-05-30) flips the Bus strips too (their per-bus RMS is now published).
+    // Only Master keeps a full-height peak bar -- it carries the LUFS box instead.
+    mMeter.setMeterLayout (type == StripType::Master
                            ? DBFSMeter::Layout::Full : DBFSMeter::Layout::Split);
     addAndMakeVisible(mMeter);
 

@@ -485,6 +485,13 @@ public:
     // atoms; returns {-inf,-inf} if absent.  No PluginProcessor mirror needed.
     std::pair<float, float> drainInsertNodeRms (InsertKind kind, int index) noexcept;
 
+    // QA-RustyMeter part 2 (2026-05-30): UI-thread RMS drain for a BUS strip's
+    // split meter.  exchange-resets the per-bus rms member atoms below (CAS-maxed
+    // audio-side by publishRms in processBus/processEffectsBus); returns
+    // {-inf,-inf} for kMaster (Full layout, no RMS) or an unknown id.  Direct
+    // VibeGraph read -- no PluginProcessor mirror, parallel to drainInsertNodeRms.
+    std::pair<float, float> drainBusRms (int busChId) noexcept;
+
     // Return the post-rack EQ owned by an InsertNode (or nullptr). Parallels
     // getInsertRack - same opaque-InsertNode reason.
     EQ8MsDSP*   getInsertEQ     (InsertKind kind, int index);
@@ -656,6 +663,25 @@ public:
     std::atomic<float> rustyDrumsBusPeakDb  { -60.f };
     std::atomic<float> rustyDrumsBusPeakDbL { -60.f };
     std::atomic<float> rustyDrumsBusPeakDbR { -60.f };
+
+    // QA-RustyMeter part 2 (2026-05-30): per-bus windowed-RMS atoms for the
+    // split meter's scrolling top half.  11 non-master buses x L/R (Master keeps
+    // a full peak bar, no RMS).  CAS-maxed audio-side by publishRms in processBus
+    // / processEffectsBus (never reset there); the UI exchange-resets via
+    // drainBusRms.  No mono sibling + no PluginProcessor mirror -- the UI reads
+    // these directly off VibeGraph, parallel to the InsertNode rms atoms.  The
+    // ~50 ms window smoothing lives UI-side in DBFSMeter::onVBlank.
+    std::atomic<float> layersRmsDbL        { -60.f }, layersRmsDbR        { -60.f };
+    std::atomic<float> bassRmsDbL          { -60.f }, bassRmsDbR          { -60.f };
+    std::atomic<float> drumsRmsDbL         { -60.f }, drumsRmsDbR         { -60.f };
+    std::atomic<float> fxBusRmsDbL         { -60.f }, fxBusRmsDbR         { -60.f };
+    std::atomic<float> audioClipsRmsDbL    { -60.f }, audioClipsRmsDbR    { -60.f };
+    std::atomic<float> voxBusRmsDbL        { -60.f }, voxBusRmsDbR        { -60.f };
+    std::atomic<float> voxBus2RmsDbL       { -60.f }, voxBus2RmsDbR       { -60.f };
+    std::atomic<float> instBusRmsDbL       { -60.f }, instBusRmsDbR       { -60.f };
+    std::atomic<float> instBus2RmsDbL      { -60.f }, instBus2RmsDbR      { -60.f };
+    std::atomic<float> instBus3RmsDbL      { -60.f }, instBus3RmsDbR      { -60.f };
+    std::atomic<float> rustyDrumsBusRmsDbL { -60.f }, rustyDrumsBusRmsDbR { -60.f };
 
     // QA-AudioMeters (2026-05-24): per-kind insert peak atomics, parallel to the
     // per-bus atomics above.  InsertNode::process publishes via publishPeakReading;
