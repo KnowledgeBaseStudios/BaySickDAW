@@ -309,6 +309,24 @@ Implementing now in this order: param → MixerTrackStrip → MixerPage. Pre-bui
 
 **VERIFIED (Jeff, Debug + Release 2026-05-30): "All pass."** All 6 scenarios confirmed — arrow collapse/expand + gap-close, Master arrow-less, empty-bus arrow greyed, full-name tooltip on all strips, collapse state persists through save+reload, and no audio change on hidden strips. Task 5 = DONE; ready to commit. This was the LAST build task — only Task 6 (close) remains.
 
+Task 5 committed at `db423b5` (6 files, +189/-9).
+
+---
+
+## 2026-05-30 — Task 6 — CLOSE: Rule 4 clean + /review-batch (1 NEEDS-FIX fixed)
+
+**Rule 4 (diagnostic instrumentation):** NONE added across the batch (grep of the batch source diff for DBG/Logger/writeToLog/`[QA-RustyMeter` = empty). No Diagnostic Instrumentation Catalog needed; nothing to strip.
+
+**`/draft-doc batch-close`:** compiled the full QA-RustyMeter Implemented Work Log entry (Bucket: Mixer/Routing, UI/L&F/Theming, Cross-cutting Infrastructure, Effects, Players; full Task 0-5 arc; FND-1..FND-5 routing table). Held for apply at the close commit (after the review fix below + the T-f Future State route).
+
+**`/review-batch QA-RustyMeter`:** **no BLOCKERS.** The reviewer confirmed the load-bearing safety paths: K-weighting JUCE a-sign convention correct (passes natural a1/a2; JUCE subtracts internally), alloc-free Integrated histogram, null-coefficient lifecycle (prepare before process), audio→UI atomic thread-safety (CAS-max audio / exchange-reset UI, -inf clamped before EMA), and the -70/-10 gate math. 
+- **NEEDS-FIX (fixed in-batch):** the RMS history ring (`mRmsHistL/R`) value-initialized to `0.0f`, but `dbToNorm(0 dB)` ~= 0.925 deflection, so on a Split meter the not-yet-written slots painted a misleading near-full-width "loud" band for the first ~4 s (ring fill) on every non-master strip at launch. Jeff's verifies missed it because he tested with audio playing (ring fills with real values fast), not staring at a silent meter at launch. Verified the finding against the code (ring is 0.0f-init while mRmsIn/Disp are kFloor-init), then fixed: `mRmsHistL.fill(kFloor); mRmsHistR.fill(kFloor);` in the `DBFSMeter` ctor so unfilled slots render flat/silent. **VERIFIED good by Jeff 2026-05-30** ("The fix is good").
+
+**FND-6 (Jeff noticed during the RMS-fix verify) — peak (dBFS) bars flash full then drop on first load.** Investigated: NOT the same class as the RMS-ring bug. The peak meter's own state is correctly floor-initialized (`mLevelDbL/R` = −inf at `SharedUI.h:1716`; `mDisplayDbL/R`/`mPeakDbL/R` = −60 at `:1723-1724`; `onVBlank` clamps −inf→floor) — so the bar can only show full if the audio-driven publish path (`publishPeakReading` → node atom → mirror → `setStereoLevel`) genuinely fed it a high peak. I.e. the meter is honestly catching a brief real peak on load (engine/graph spin-up transient or an un-cleared first-block buffer), held ~1 s by the peak-hold, then decaying = "full then drop". **Pre-existing** (the peak path + its publish predate QA-RustyMeter; this batch added the RMS waveform + LUFS box, not the peak bar) — surfaced only because the close verify had Jeff watch a silent fresh launch. Jeff's read: "seems like a load transient"; he can't easily A/B the blank-project case since the Mixer isn't the page that loads. **Decision (Jeff 2026-05-30): move forward + commit** — out-of-scope for QA-RustyMeter (pre-existing, not the RMS/LUFS this batch touched), not chasing it in this batch. Routed to Future State as a candidate follow-up (investigate the on-load peak transient / first-block buffer clear) at this close.
+- **NITs (no action / record-only):** (1) `LufsReadoutBox` is a value member on every strip though only shown on Master — harmless, matches the existing `mType`-gated member pattern; deferred. (2) spec #10 locked 50/50 but shipped **35/65** (Jeff-approved at part-1 verify) — not a drift; the Work Log close entry records 35/65 as the shipped value so plan + log don't contradict.
+
+**Remaining close steps:** Jeff verifies the RMS-ring fix → commit the fix → apply the Work Log entry + route T-f (true-peak / Integrated LRA / per-strip LUFS) to Future State (slot = Jeff's call) + Main Plan §5 STATUS close-banner + §9 close route entry → close commit.
+
 
 
 

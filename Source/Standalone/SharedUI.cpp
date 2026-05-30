@@ -6507,6 +6507,13 @@ void LufsReadoutBox::paint (juce::Graphics& g)
 // ============================================================ DBFSMeter
 DBFSMeter::DBFSMeter()
 {
+    // QA-RustyMeter close fix (2026-05-30, /review-batch NEEDS-FIX): pre-fill the
+    // RMS history ring to kFloor.  Value-init left it at 0.0f (= 0 dB ~= 0.925
+    // deflection), so on a Split meter the not-yet-written slots painted a
+    // misleading near-full-width "loud" band for the first ~4 s (until the ring
+    // fills) on every non-master strip at launch.  kFloor renders flat (silent).
+    mRmsHistL.fill (kFloor);
+    mRmsHistR.fill (kFloor);
     // Vblank attachment is created in parentHierarchyChanged once the
     // component is on a peer.  Until then nothing fires; safe.
 }
