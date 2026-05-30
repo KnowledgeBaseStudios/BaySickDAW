@@ -1355,7 +1355,7 @@ needed to find what you should pull up to review the work.
 
 #### **QA-RustyMeter: BaySickRustyDrums per-layer-volume CC sliders not reflected in per-strip dbfs meter** *(NEW — inserted 2026-05-29 via §9 forty-second Forks entry)*
 
-**Plan file:** `<silly-name>.md (when started)`
+**Plan file:** `Plans & Specs/Batch Plans/sorted-whistling-shannon.md`
 - Items: AriaControlPanel per-layer-volume CC sliders inside the BaySickRustyDrums kit player UI (e.g. KICK section's Kick/OH/Punch sliders + SNARE section's Btm/Top/OH/Snap/Punch/Epic + likely other channels' equivalent sliders) audibly affect the rendered output but the per-strip dbfs meter on the Mixer page does NOT reflect the change.  Origin: surfaced 2026-05-29 by Jeff at QA-DispatcherAffinity Task 3 Verify 2 (kit-swap stability test); confirmed pre-existing (present under Sub-K-on production state pre-Task-3); confirmed BaySickRustyDrums-specific (BaySickGuitars + BaySickBasses volume knobs DO update their dbfs meters correctly).  See §9 forty-second Forks entry.
 - Scope (Jeff-locked 2026-05-29):
   - Investigate the per-layer-volume CC mapping path: AriaControlPanel slider → MIDI CC value → sfizz engine → multi-output `output=N` extraction → `mMultiOutScratch` → `RustyInsertTask::run()` → `InsertNode::processBlock` → `publishPeakReading` → `drainMeterAtomicsForUI` → UI poll.
