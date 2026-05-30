@@ -65,6 +65,11 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
                            ? DBFSMeter::Layout::Full : DBFSMeter::Layout::Split);
     addAndMakeVisible(mMeter);
 
+    // QA-RustyMeter Task 3 (2026-05-30): master strip carries the LUFS box
+    // (between width knob + fader, positioned in resized()).  Master only.
+    if (type == StripType::Master)
+        addAndMakeVisible(mLufsBox);
+
     // ── Mute LED ──────────────────────────────────────────────────────────────
     mMuteBtn.setButtonText("M");
     mMuteBtn.setClickingTogglesState(true);
@@ -648,6 +653,18 @@ void MixerTrackStrip::resized()
         mWidthKnob.setBounds(x + (w - widthSize) / 2, y, widthSize, kWidthH);
     }
     y += kWidthH + kPadV;
+
+    // ── Master LUFS box (Master strip only) — between width knob and fader ───
+    // Stacked value-over-title layout (spec #1, confirmed by Jeff 2026-05-30 over
+    // #9's ~18-20 px single-line note): taller box for the LUFS value on top +
+    // the full mode title underneath.  Per Jeff, the fader thumb may overlap it
+    // above unity (>0 dB); acceptable.
+    if (masterRow)
+    {
+        constexpr int kLufsH = 30;
+        mLufsBox.setBounds(x, y, w, kLufsH);
+        y += kLufsH + kPadV;
+    }
 
     // ── Fader ───────────────────────────────────────────────────────────────
     // C-overlap: fader's BOUNDS extend kFaderBottomGuard (~18 px) below the

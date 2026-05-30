@@ -969,6 +969,21 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         if (auto optPos = ph->getPosition())
             pos = *optPos;
 
+    // QA-RustyMeter Task 3 (2026-05-30): reset the master LUFS Integrated window
+    // on transport play-from-top / loop-start.  Edge = stopped->playing, OR a
+    // backward ppq jump while playing (loop wrap / relocate-to-start).  Done
+    // before the graph runs so this block opens a fresh Integrated window.
+    // Momentary + Short-Term keep tracking continuously (inside LufsMeterDSP).
+    {
+        const bool   lufsPlaying = pos.getIsPlaying();
+        const double lufsPpq     = pos.getPpqPosition().orFallback (0.0);
+        if ((lufsPlaying && ! mLufsWasPlaying)
+            || (lufsPlaying && lufsPpq + 1.0e-6 < mLufsLastPpq))
+            mVibeGraph.resetMasterLufsIntegrated();
+        mLufsWasPlaying = lufsPlaying;
+        mLufsLastPpq    = lufsPpq;
+    }
+
     // ── Layers piano roll: build MIDI from piano roll + incoming MIDI ─────
     juce::MidiBuffer allMidi;
     allMidi.addEvents(midiMessages, 0, numSamples, 0);
@@ -2055,6 +2070,13 @@ std::pair<float, float>
 VibeSynthProcessor::drainBusRmsDbStereo (int busChId) noexcept
 {
     return mVibeGraph.drainBusRms (busChId);
+}
+
+// QA-RustyMeter Task 3 (2026-05-30): master LUFS readout passthrough.  mode
+// 0=Momentary / 1=Short-Term / 2=Integrated.  Read once per UI vblank.
+float VibeSynthProcessor::getMasterLufs (int mode) const noexcept
+{
+    return mVibeGraph.getMasterLufs (mode);
 }
 
 std::pair<float, float>

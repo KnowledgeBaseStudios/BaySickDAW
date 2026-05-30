@@ -1,5 +1,6 @@
 #include "VibeGraph.h"
 #include "BassSynth.h"
+#include "DSP/LufsMeterDSP.h"   // QA-RustyMeter Task 3: master-bus EBU R128 LUFS
 // DrumSynth.h removed from graph (2026-04-25) - no longer references the class.
 #include <unordered_map>
 #include <unordered_set>
@@ -810,6 +811,10 @@ struct VibeGraph::MasterBusNode
     // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
     std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
     int                    peakRingIdx { 0 };
+    // QA-RustyMeter Task 3 (2026-05-30): EBU R128 loudness on the master sum
+    // (Momentary / Short-Term / Integrated).  Fed post fader/pan/width each
+    // block; read by the UI via VibeGraph::getMasterLufs.
+    LufsMeterDSP           mLufs;
     juce::AudioProcessorValueTreeState& apvts;
     VibeGraph::BusMix&                  busMix;
 
@@ -857,6 +862,7 @@ struct VibeGraph::MasterBusNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         busEq.prepare(sr, blockSize);
+        mLufs.prepareToPlay(sr);        // QA-RustyMeter Task 3: derive K-weighting + bin ring
     }
     void reset()
     {
@@ -916,6 +922,11 @@ struct VibeGraph::MasterBusNode
                 R[s] = m - side;
             }
         }
+
+        // QA-RustyMeter Task 3 (2026-05-30): EBU R128 loudness on the final
+        // master sum (post fader/pan/width).  Cheap (2 biquads + bin math on the
+        // master bus only); broadcasts M/S/I atoms read by the UI LUFS box.
+        mLufs.process (buf);
 
         {
             // 2026-05-02: lock-free max + latency-compensated publish.  The UI
@@ -1546,6 +1557,27 @@ void VibeGraph::processMasterBus(juce::AudioBuffer<float>& sumBuf, double bpm)
     masterPeakDb .store(mMasterNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
     masterPeakDbL.store(mMasterNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
     masterPeakDbR.store(mMasterNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+}
+
+// QA-RustyMeter Task 3 (2026-05-30): UI read of the master LUFS (mode 0=Momentary
+// / 1=Short-Term / 2=Integrated).  Returns -120 if the master node isn't built.
+float VibeGraph::getMasterLufs (int mode) const noexcept
+{
+    if (mMasterNode == nullptr) return -120.f;
+    switch (mode)
+    {
+        case 1:  return mMasterNode->mLufs.shortTerm();
+        case 2:  return mMasterNode->mLufs.integrated();
+        default: return mMasterNode->mLufs.momentary();
+    }
+}
+
+// QA-RustyMeter Task 3 (2026-05-30): clear the Integrated accumulation (Momentary
+// / Short-Term keep tracking).  Called by PluginProcessor on transport
+// play-from-top / loop-start.  Audio-thread safe (histogram fill, no alloc).
+void VibeGraph::resetMasterLufsIntegrated() noexcept
+{
+    if (mMasterNode != nullptr) mMasterNode->mLufs.resetIntegrated();
 }
 
 void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,

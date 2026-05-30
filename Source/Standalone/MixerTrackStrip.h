@@ -82,6 +82,13 @@ public:
     void setStereoLevel(float dBFS_L, float dBFS_R);
     // QA-RustyMeter (2026-05-30): windowed-RMS feed for the split meter top half.
     void setRmsStereo(float dBFS_L, float dBFS_R);
+    // QA-RustyMeter Task 3 (2026-05-30): master-strip LUFS feed (Momentary /
+    // Short-Term / Integrated).  MixerPage pushes all three each vblank; the box
+    // displays the selected one.  No-op on non-master strips (box hidden).
+    void setMasterLufs(float momentary, float shortTerm, float integrated)
+    {
+        mLufsBox.setValues(momentary, shortTerm, integrated);
+    }
 
     // QA-Eg: cable-overlay telemetry feed.  Returns the DBFSMeter's currently-
     // displayed smoothed value (FL-style ballistic-filtered max of L/R).
@@ -263,6 +270,11 @@ private:
     // when toggled, every effects rack in the app is bypassed regardless of
     // its per-strip bypass. Attaches to APVTS `master_fx_bypass`.
     MixerLedButton   mMasterFXBypassBtn;
+
+    // QA-RustyMeter Task 3 (2026-05-30): master LUFS readout. Master strip ONLY
+    // (added to the component + positioned in resized() only when mType==Master).
+    // Sits between the width knob and the fader; fed by MixerPage::onVBlank.
+    LufsReadoutBox   mLufsBox;
 
     // Attachments (constructed in setApvts, torn down on destroy / rebind)
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;

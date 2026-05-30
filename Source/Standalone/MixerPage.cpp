@@ -3267,6 +3267,12 @@ void MixerPage::onVBlank()
     using namespace MixerChannelIds;   // bus-id constants for drainBusRmsDbStereo
 
     drainStereoBus (mMasterStrip       .get(), kMaster,        mProcessor.mMasterPeakDbL,        mProcessor.mMasterPeakDbR);
+    // QA-RustyMeter Task 3 (2026-05-30): feed the master LUFS box (M/S/I); the
+    // box displays the user-selected mode.  Master strip only.
+    if (mMasterStrip)
+        mMasterStrip->setMasterLufs (mProcessor.getMasterLufs (0),
+                                     mProcessor.getMasterLufs (1),
+                                     mProcessor.getMasterLufs (2));
     drainStereoBus (mLayersBusStrip    .get(), kLayersBus,     mProcessor.mLayersPeakDbL,        mProcessor.mLayersPeakDbR);
     drainStereoBus (mBassBusStrip      .get(), kBassBus,       mProcessor.mBassPeakDbL,          mProcessor.mBassPeakDbR);
     drainStereoBus (mDrumsBusStrip     .get(), kDrumsBus,      mProcessor.mDrumsPeakDbL,         mProcessor.mDrumsPeakDbR);

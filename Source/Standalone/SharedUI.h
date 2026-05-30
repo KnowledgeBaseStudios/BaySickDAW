@@ -1620,6 +1620,36 @@ private:
 //    use setLevel(); strip callers now use setStereoLevel().
 //  - setCompact() kept as a no-op for back-compat (legacy callers may still
 //    call it; the FL-parity range above is now the only mode).
+// QA-RustyMeter Task 3 (2026-05-30): master-strip LUFS readout.  Shows ONE of
+// Momentary / Short-Term / Integrated at a time (small dropdown selector); all
+// three are fed each vblank by MixerPage from VibeSynthProcessor::getMasterLufs.
+// Sits between the master width knob and fader.  The strip holds no processor
+// ref, so values are pushed in (not polled) -- same as the strip's DBFSMeter.
+// Selected mode persists to settings.xml.  Layout (spec #1): the LUFS value on
+// top (with a down-caret on the right) + the full mode title underneath
+// ("Momentary" / "Short Term" / "Integrated").  Click anywhere -> mode popup.
+class LufsReadoutBox : public juce::Component, public juce::SettableTooltipClient {
+public:
+    LufsReadoutBox();
+    ~LufsReadoutBox() override = default;
+
+    // UI thread (MixerPage::onVBlank): latest Momentary / Short-Term / Integrated.
+    void setValues (float momentary, float shortTerm, float integrated);
+
+    void paint     (juce::Graphics&)         override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+private:
+    static juce::String modeName   (int mode);   // "Momentary" / "Short Term" / "Integrated"
+    void  applyMode      (int mode, bool persist);
+    void  refreshTooltip ();
+
+    int   mMode { 0 };                           // 0=Momentary 1=Short-Term 2=Integrated
+    float mVals[3] { -120.f, -120.f, -120.f };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LufsReadoutBox)
+};
+
 class DBFSMeter : public juce::Component, public juce::SettableTooltipClient {
 public:
     DBFSMeter();

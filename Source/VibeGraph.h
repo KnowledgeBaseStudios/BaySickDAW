@@ -492,6 +492,13 @@ public:
     // VibeGraph read -- no PluginProcessor mirror, parallel to drainInsertNodeRms.
     std::pair<float, float> drainBusRms (int busChId) noexcept;
 
+    // QA-RustyMeter Task 3 (2026-05-30): master-bus EBU R128 LUFS readout.
+    // getMasterLufs(mode): 0=Momentary, 1=Short-Term, 2=Integrated (-120 floor).
+    // resetMasterLufsIntegrated(): clear the gated Integrated accumulation on
+    // transport play-from-top / loop (M/S keep running).  Owned by MasterBusNode.
+    float getMasterLufs (int mode) const noexcept;
+    void  resetMasterLufsIntegrated() noexcept;
+
     // Return the post-rack EQ owned by an InsertNode (or nullptr). Parallels
     // getInsertRack - same opaque-InsertNode reason.
     EQ8MsDSP*   getInsertEQ     (InsertKind kind, int index);

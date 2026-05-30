@@ -230,6 +230,36 @@ Jeff requested this right after the part-2 verify. Spec surfaced + confirmed in 
 
 **Net plan task list now:** Task 2 Split meter (part 1 inserts DONE `6a2e35e` + part 2 buses VERIFIED, commit TBD) → Task 3 Master LUFS readout → Task 4 Project-lifecycle dedup fix → Task 5 Bus collapse/expand UI → Task 6 Close.
 
+> Reconcile (post prior entry): Task 2 part 2 committed at `58e3caa` (the "commit TBD" above predated the commit; append-only, so noted here).
+
+---
+
+## 2026-05-30 — Task 3 — Master LUFS readout implemented (pre-build)
+
+**Master LUFS readout (Momentary / Short-Term / Integrated + selector) implemented per the locked design (#1 M/S/I selectable, #9 ~18-20 px box).** 11 modified + 2 new files. Owns a new EBU R128 / BS.1770 LUFS DSP on the master sum, broadcasts M/S/I via 3 relaxed atomics, and renders a click-to-select box between the master width knob and fader. Pre-build; statically cross-checked, not yet built/verified.
+
+- **NEW DSP — `Source/DSP/LufsMeterDSP.{h,cpp}`:** EBU R128 / BS.1770 on the stereo master sum. K-weighting derived bilinear-from-constants per `prepareToPlay` (exact at any fs — Stage 1 high-shelf targets a1=-1.69066/a2=0.73248, Stage 2 RLB high-pass a1=-1.99005/a2=0.99007; constants + the 48 kHz acceptance table taken from the LUFS research report `Research Reports/daw-architecture-lufs-momentary-shortterm-metering-2026-05-29.md`). **Momentary (400 ms) + Short-Term (3 s) = ungated sliding windows** over a 50 ms per-bin energy ring (`kBinsPerSec=20`, `kShortTermBins=60`). **Integrated = gated.** 3 relaxed atomics (M/S/I) broadcast to the UI; `resetIntegrated()` zeroes the histogram (M/S keep running).
+- **DESIGN REFINEMENT vs the plan's growing-`std::vector` sketch (my call, not a spec change — same LUFS numbers, invisible to user):** the Integrated gate is a **FIXED 751-bin loudness histogram** (libebur128's method) — -70 LUFS absolute gate at insert + -10 LU relative gate recomputed over the histogram each 100 ms gating block (75% overlap). This is **allocation-free on the audio thread** (standing project rule) and **O(bins) regardless of song length**, vs a per-block-growing vector. The histogram constants block precedes the array members in the header (static-verified).
+- **AUDIO WIRING — `MasterBusNode` owns `LufsMeterDSP mLufs` (VibeGraph.cpp):** `prepareToPlay` in `MasterBusNode::prepare`; `mLufs.process(buf)` in `processBlock` **AFTER the fader/pan/width stage** (post-everything master sum, where the LUFS node was specced to attach per the Task 1 code map) **before the peak publish**. New `VibeGraph::getMasterLufs(mode 0/1/2)` + `resetMasterLufsIntegrated()` read/reset the node's `mLufs` — no header include needed (the struct is .cpp-defined). `PluginProcessor::getMasterLufs` passthrough. `CMakeLists.txt` += `Source/DSP/LufsMeterDSP.cpp`.
+- **TRANSPORT RESET — lives in `PluginProcessor::processBlock`, NOT a graph node:** there is NO transport/posInfo plumbed into the graph nodes (they only get bpm), so the Integrated reset-detect uses the `pos` (`AudioPlayHead::PositionInfo`) already read in `processBlock`. New plain audio-thread members `mLufsWasPlaying`/`mLufsLastPpq`; on **stopped→playing OR a backward ppq jump while playing** (loop wrap / relocate-to-start) it calls `mVibeGraph.resetMasterLufsIntegrated()` — done BEFORE the graph runs so the block opens a fresh Integrated window. Uses the codebase's standard `pos.getPpqPosition().orFallback(0.0)` idiom (matches the existing reads; static-verified).
+- **UI — new `LufsReadoutBox` in SharedUI.h/.cpp** (`juce::Component` + `SettableTooltipClient`). **KEY ARCHITECTURE NOTE — PUSH not poll:** `MixerTrackStrip` holds NO processor ref (only `setApvts`), so the plan's `LufsReadoutBox { mProcessor }` poll model was replaced with a PUSH model matching the existing meter drain — `MixerPage::onVBlank` feeds all 3 values via `mMasterStrip->setMasterLufs(getMasterLufs(0/1/2))`, the box displays the selected mode. Box visuals: dark recessed panel; value (selected mode) in 11px mono + a right tag column showing the mode letter (M/S/I) over a down-caret; click anywhere → `PopupMenu` (Momentary / Short Term / Integrated) → persists the mode to settings.xml via the `PatternColorPicker` preserve-other-sections idiom (`<MasterLufsMode mode="N"/>` under the root, `ProjectManager::getSettingsFile()`). Full mode name + LUFS value in the tooltip.
+- **LAYOUT RESOLVED (Jeff 2026-05-30, before build):** the box layout was surfaced as a choice — compact (value + M/S/I letter + caret) vs spec #1's stacked value-over-title. Jeff chose **(b) stacked, "the thing I actually asked for"** — there's room in the ~44 px column both horizontally and vertically. Rebuilt before any build: value on top (13 px mono) + a small down-caret on the value row + the **full mode title underneath** ("Momentary" / "Short Term" / "Integrated", `drawFittedText` so it never clips); box height bumped `kLufsH` 20 → **30** (revises #9's ~18-20 px single-line note — superseded by Jeff's explicit stacked request). The compact-letter draft + the now-unused `modeAbbrev` helper were removed.
+- **LAYOUT — `MixerTrackStrip`:** `LufsReadoutBox mLufsBox` member (master-only `addAndMakeVisible` in ctor); positioned in `resized()` between the width knob and the fader (`kLufsH=20`, masterRow only — matching #9's ~18-20 px and the Task 1 code map's "NEW inserted row between width knob + fader, push fader down"); the fader shifts down (thumb may overlap above unity — acceptable per Jeff's 2026-05-29 decision). `setMasterLufs` forwarder.
+
+**Static cross-checks done (pre-build):** all Task 3 symbols (`getMasterLufs` / `resetMasterLufsIntegrated` / `mLufs` / `LufsReadoutBox` / `setMasterLufs` / `mLufsBox`) resolve across the files; the `orFallback` idiom matches the codebase; the histogram constants block precedes the array members in the header.
+
+**Gitignore:** added `audio_settings_pending.xml` (runtime artifact) per Jeff; folds into the Task 3 commit.
+
+**Possible build nits to watch (likely harmless):** `juce::Font(...)` ctors emit C4996 (harmless per CLAUDE.md); `LufsReadoutBox` is constructed for EVERY strip (reads settings.xml in ctor) though only shown on master — cheap, one-time at mixer build.
+
+**Still pre-build; awaiting Jeff's Debug-then-Release verify:** master shows the LUFS box between width knob + fader; sane values for a loud master (~-10..-14); M lively / S steady / I climbs + resets on play-from-top/loop; mode selectable via the dropdown + persists across restart; no regression on the split meters or peak readings.
+
+---
+
+## 2026-05-30 — Task 3 — VERIFIED (Debug + Release)
+
+**Jeff verified Task 3 in Debug + Release 2026-05-30: "We're good."** The master LUFS readout (stacked value-over-title box with the M/S/I dropdown) works: sane values for a loud master, the three modes behave (Momentary lively / Short-Term steady / Integrated accumulates + resets on play-from-top/loop), the selected mode persists across restart, and no regression on the Task 2 split meters or the peak bars. K-weighting math confirmed correct in practice (sane LUFS = the acceptance proxy for the 48 kHz coefficient table). Task 3 = DONE; ready to commit (DSP + audio wiring + LufsReadoutBox UI + the `.gitignore` line). Next: Task 4 (project-lifecycle dedup fix) → Task 5 (bus collapse UI) → Task 6 (close).
+
 
 
 

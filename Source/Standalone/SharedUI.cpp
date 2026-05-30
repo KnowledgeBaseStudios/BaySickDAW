@@ -1,4 +1,5 @@
 #include "SharedUI.h"
+#include "../ProjectManager.h"   // QA-RustyMeter Task 3: getSettingsFile (LUFS mode persistence)
 
 // ── Filmstrip rendering ────────────────────────────────────────────────────────
 namespace Filmstrips
@@ -6400,6 +6401,107 @@ void VUMeter::paint(juce::Graphics& g)
         paintHorizontal(g);
     else
         paintVerticalVU(g);
+}
+
+// ============================================================ LufsReadoutBox
+LufsReadoutBox::LufsReadoutBox()
+{
+    // Load the persisted mode from settings.xml (preserve other sections).
+    auto f = ProjectManager::getSettingsFile();
+    if (f.existsAsFile())
+        if (auto xml = juce::XmlDocument::parse (f))
+            if (auto* node = xml->getChildByName ("MasterLufsMode"))
+                mMode = juce::jlimit (0, 2, node->getIntAttribute ("mode", 0));
+    refreshTooltip();
+}
+
+void LufsReadoutBox::setValues (float momentary, float shortTerm, float integrated)
+{
+    if (mVals[0] == momentary && mVals[1] == shortTerm && mVals[2] == integrated)
+        return;
+    mVals[0] = momentary; mVals[1] = shortTerm; mVals[2] = integrated;
+    refreshTooltip();
+    repaint();
+}
+
+juce::String LufsReadoutBox::modeName (int mode)
+{
+    return mode == 1 ? "Short Term" : mode == 2 ? "Integrated" : "Momentary";
+}
+
+void LufsReadoutBox::refreshTooltip()
+{
+    const float v = mVals[juce::jlimit (0, 2, mMode)];
+    const juce::String vs = (v <= -100.f) ? juce::String ("--") : juce::String (v, 1);
+    setTooltip (modeName (mMode) + " loudness: " + vs + " LUFS  (click to change mode)");
+}
+
+void LufsReadoutBox::applyMode (int mode, bool persist)
+{
+    mMode = juce::jlimit (0, 2, mode);
+    if (persist)
+    {
+        // Preserve other sections written by ProjectManager / other UI.
+        auto f = ProjectManager::getSettingsFile();
+        f.getParentDirectory().createDirectory();
+        std::unique_ptr<juce::XmlElement> root;
+        if (f.existsAsFile())
+            root = juce::XmlDocument::parse (f);
+        if (root == nullptr)
+            root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
+        root->removeChildElement (root->getChildByName ("MasterLufsMode"), true);
+        root->createNewChildElement ("MasterLufsMode")->setAttribute ("mode", mMode);
+        root->writeTo (f);
+    }
+    refreshTooltip();
+    repaint();
+}
+
+void LufsReadoutBox::mouseDown (const juce::MouseEvent&)
+{
+    juce::PopupMenu m;
+    m.addItem (1, "Momentary",  true, mMode == 0);
+    m.addItem (2, "Short Term", true, mMode == 1);
+    m.addItem (3, "Integrated", true, mMode == 2);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+                     [this] (int r) { if (r > 0) applyMode (r - 1, true); });
+}
+
+void LufsReadoutBox::paint (juce::Graphics& g)
+{
+    auto b = getLocalBounds().toFloat();
+
+    // Recessed housing (matches the dark LUFS / meter panel palette).
+    g.setColour (juce::Colour (0xff0A0C0E));
+    g.fillRoundedRectangle (b, 2.0f);
+    g.setColour (juce::Colour (0xff2A2E30));
+    g.drawRoundedRectangle (b.reduced (0.5f), 2.0f, 1.0f);
+
+    auto inner = b.reduced (3.0f, 2.0f);
+
+    // Top row: the LUFS value (prominent), with a small down-caret on the right.
+    auto valueRow = inner.removeFromTop (inner.getHeight() * 0.56f);
+    {
+        auto caretArea = valueRow.removeFromRight (9.0f);
+        auto cr = caretArea.withSizeKeepingCentre (7.0f, 4.0f);
+        juce::Path tri;
+        tri.addTriangle (cr.getX(), cr.getY(),
+                         cr.getRight(), cr.getY(),
+                         cr.getCentreX(), cr.getBottom());
+        g.setColour (juce::Colour (0xff9AA0A2));
+        g.fillPath (tri);
+    }
+    const float v = mVals[juce::jlimit (0, 2, mMode)];
+    const juce::String valueStr = (v <= -100.f) ? juce::String ("--") : juce::String (v, 1);
+    g.setColour (juce::Colours::white);
+    g.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::bold));
+    g.drawText (valueStr, valueRow, juce::Justification::centred, false);
+
+    // Bottom row: the full mode title underneath (spec #1).  drawFittedText so
+    // "Short Term" / "Integrated" never clip in the ~44 px column.
+    g.setColour (juce::Colour (0xff9AA0A2));
+    g.setFont (juce::Font (10.0f, juce::Font::plain));
+    g.drawFittedText (modeName (mMode), inner.toNearestInt(), juce::Justification::centred, 1);
 }
 
 // ============================================================ DBFSMeter

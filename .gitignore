@@ -9,6 +9,9 @@ Projects/
 
 # Per-machine audio settings (different audio interfaces per workstation).
 audio_settings.xml
+# Transient sibling written by the Audio Settings dialog's Apply (consumed on
+# restart to switch the device) — runtime, never source.
+audio_settings_pending.xml
 master_output.xml
 
 # Runtime diagnostic logs — regenerated each launch, not source.

@@ -349,6 +349,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/EQ8DSP.cpp
     Source/DSP/EQ8MsDSP.cpp
     Source/DSP/EqLinearPhaseProcessor.cpp
+    Source/DSP/LufsMeterDSP.cpp
     Source/DSP/SaturationDSP.cpp
     Source/DSP/FlangerDSP.cpp
     Source/DSP/OverdriveDSP.cpp

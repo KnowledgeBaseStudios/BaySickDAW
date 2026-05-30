@@ -161,6 +161,13 @@ public:
     // default in `GlobalTransportBar::mSongLoopBtn`.
     std::atomic<bool>   mSongLoopMode { true };
 
+    // QA-RustyMeter Task 3 (2026-05-30): transport-edge tracking for the master
+    // LUFS Integrated reset.  Audio-thread-only (processBlock), so plain members.
+    // Reset the gated Integrated accumulation on stopped->playing and on a
+    // backward ppq jump (play-from-top / loop-start).  M/S keep tracking.
+    bool   mLufsWasPlaying { false };
+    double mLufsLastPpq    { 0.0 };
+
     // Mixer state -- read by processBlock from PatternManager when available
     // Also settable directly for VST mode (no PatternManager)
     struct MixLevels {
@@ -658,6 +665,9 @@ public:
     // mVibeGraph.drainBusRms.  busChId is a MixerChannelIds bus id; kMaster (and
     // any unknown id) returns {-inf,-inf} (Master keeps a full peak bar, no RMS).
     std::pair<float, float> drainBusRmsDbStereo (int busChId) noexcept;
+    // QA-RustyMeter Task 3 (2026-05-30): master LUFS readout for the LufsReadoutBox.
+    // mode 0=Momentary / 1=Short-Term / 2=Integrated.  Passthrough to mVibeGraph.
+    float getMasterLufs (int mode) const noexcept;
 
     // ── Graph infrastructure (Phase 1A) ───────────────────────────────────────
     VibeGraph mVibeGraph;
