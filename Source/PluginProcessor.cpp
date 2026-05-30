@@ -2038,6 +2038,15 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
 // the appropriate m<Kind>InsertPeakDb*L/R mirror to -inf and returns the running
 // max-since-last-call.  MixerTrackStrip / Mixer page poll this once per vblank.
 // Wait-free; safe from any thread but typically called from the UI thread.
+// QA-RustyMeter (2026-05-30): RMS sibling of drainInsertPeakDbStereo for the
+// split meter's scrolling top half.  No PluginProcessor mirror -- the RMS is a
+// current value read straight off the insert node + exchange-reset there.
+std::pair<float, float>
+VibeSynthProcessor::drainInsertRmsDbStereo (VibeGraph::InsertKind kind, int index) noexcept
+{
+    return mVibeGraph.drainInsertNodeRms (kind, index);
+}
+
 std::pair<float, float>
 VibeSynthProcessor::drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int index) noexcept
 {

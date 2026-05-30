@@ -129,7 +129,44 @@ Locked design of record for the QA-RustyMeter metering upgrade (feeds the re-pla
 
 **Re-scope bookkeeping applied to Main Plan:** §5 QA-RustyMeter entry rewritten (header + Origin/diagnosis + Items + Scope + Risk + Effort + Bucket + Verify → metering upgrade); §6 footnote Scope updated; §9 forty-fourth Forks entry appended (diagnosis = not-a-bug + pivot). LUFS research report saved at `Research Reports/daw-architecture-lufs-momentary-shortterm-metering-2026-05-29.md`.
 
-**Re-scope docs commit (Task 2 step 0):** surfacing git status + `/draft-commit` (docs only). Then Task 2 source = split meter.
+**Re-scope docs commit (Task 2 step 0):** landed at `217b9cf` (4 files, +556/-140; docs only). Working tree clean. Task 2 source (split meter) starting.
+
+---
+
+## 2026-05-30 — Task 2 (part 1) — split meter + insert-strip RMS implemented (pre-build)
+
+**DBFSMeter (SharedUI.h/.cpp):** `Layout {Full, Split}` + `setMeterLayout`; RMS history ring (`kRmsHist=256`) + `mRmsHead`; `setRmsStereo` (raw per-frame in) + `onVBlank` EMA-smooth (~200 ms, `kRmsTimeConstSec`) → push to ring (Split only); `paintBars` (extracted L/R peak bars) + `paintRmsWaveform` (centered, L-left/R-right, `dbToNorm` deflection, smooth dBFS-palette gradient green-center → red-edge); `paint()` splits 50/50 (Split top RMS + bottom bars) or full bar (Full).
+
+**RMS publish — SIMPLIFIED vs the plan (direct-node-read, NO mirror):** `publishRms` helper (per-block `sqrt(mean-square)` dB, CAS-max into node `rmsDbL/R` — multi-call safe like peak; audio thread never resets, UI exchange-resets). `InsertNode` + `rmsDbL/R` + `publishRms` call. `VibeGraph::drainInsertNodeRms` (exchange-reset node rms via `getInsertNode` — message-thread safe; insert nodes create/destroy on the message thread, so no race). `PluginProcessor::drainInsertRmsDbStereo` passthrough. `MixerPage::onVBlank` `drainStereoInsert` += RMS drain → `setRmsStereo`. `MixerTrackStrip::setRmsStereo` → `mMeter`. **No per-kind RMS arrays, no PluginProcessor mirrors, no `drainMeterAtomicsForUI` change** — RMS is a current value the UI reads off the node directly (the peak's two-hop mirror exists only because its drain runs audio-side). The ~200 ms windowing moved UI-side (vs the plan's audio-thread EMA) for multi-call correctness + zero sample-rate plumbing.
+
+**Layout assignment:** all insert/channel strips = Split (verified: Layer=`LayerChannel`, Bass=`BassChannel`, Drum=`DrumChannel`, Audio=`LayerChannel`, Rusty=`DrumChannel`, Aux/Vox/Inst); Master + all `Bus` strips = Full (no empty split).
+
+**Staging (part 1 of 2):** Task 2's RMS plumbing split into 2 builds (the buses use a different named-member peak path than the indexed inserts). Part 1 (this build) = split meter + RMS on all insert strips; buses keep their full peak bar. Part 2 = bus-node RMS + switch buses to Split.
+
+**Part 2 MUST cover ALL bus strips (Jeff flag 2026-05-30), not just the core 8 in the `MixerPage::onVBlank` drain loop (Master/Layers/Bass/Drums/FX/Clips/Vox/Inst/RustyDrums):** there are also **Vox Bus 2 (`mVoxBus2Strip`, :1842), Inst Bus 2 (`mInstBus2Strip`, :1906), Inst Bus 3 (`mInstBus3Strip`, :1968)** — all `StripType::Bus` (so part 1 correctly gives them Full). These 3 are created in separate on-demand blocks; part 2 must confirm where they get peak-drained and wire their RMS + Split there too. Part-1 layout is type-based (`Master||Bus → Full`), so it already covers them correctly — but the part-2 RMS wiring needs each one explicitly.
+
+---
+
+## 2026-05-30 — Task 2 (part 1) — visual iteration after Jeff's first verify (4 tests PASS)
+
+Jeff verified part 1 in Debug + Release: **4 tests PASS** (split meter renders, centered L/R, color gradient, scrolls). Feedback → 3 visual fixes applied (pre-rebuild):
+- **Split ratio 50/50 → 65/35** (dBFS peak bar = 65% bottom, RMS wave = 35% top); `kRmsTopFrac = 0.35`.
+- **"Doesn't wave"** (two near-static lines unless quiet — RMS is a near-constant loudness for sustained audio): shortened the UI smoothing `kRmsTimeConstSec` 200 ms → **50 ms** so the wave tracks the music's dynamics. Offered Jeff a switch to **peak-excursion** plotting if he wants true-waveform wiggle on every transient (one-line change, keeps the rest).
+- **"Just lines — fill the middle":** rewrote `paintRmsWaveform` from two stroked traces to a **filled** stereo-waveform path (R deflects right of centre, L deflects left, band spans the centre line) with a **symmetric** dBFS-palette gradient (green centre → yellow → orange → red at both outer edges, #8).
+
+**Jeff verified 2026-05-30: "this all looks good"** — the 65/35 split + filled gradient waveform + dynamics-tracking wave are all approved. Part 1 (inserts) visual + functional = DONE.
+
+## 2026-05-30 — Task 2 — OUT-OF-SCOPE bug surfaced during testing: false "File Already in Library" prompt on a NEW empty project
+
+Jeff (while testing the meter): opened a project containing multiple copies of his song → confusing → File > New (fresh empty project, no samples in the sample folder) → dropped the same `.mp3` → got the **"File Already in Library — already in your library on 'an existing page'"** prompt (Use Existing / New Page / Cancel) despite the new project being empty. The per-project dedup check is consulting STALE state — the previously-open project's page/library index NOT cleared on File > New (or a global library index that should be per-project). Same family as the QA-D STATE-* project-lifecycle reset bugs (New-Project-doesn't-reset-X). **UNRELATED to metering.** Routing surfaced to Jeff (fix-now vs own batch) per Main Plan §0 Rule 3 + `feedback_qa_batches_fix_bugs_dont_defer.md`. Captured here so it is not lost regardless of routing.
+
+**Resolution (Jeff 2026-05-30): fix IN this batch as END-BATCH CLEANUP** (after the metering tasks; do not stop the current work). Added to the plan as **Task 4 — Project-lifecycle dedup fix**; Close renumbered to Task 5. In-batch resolution → recorded in the close-entry routing table at batch close (NOT a §9 cross-batch route).
+
+
+**Possible build nits flagged to Jeff:** `<utility>` in VibeGraph.h (std::pair) + `<cmath>` in VibeGraph.cpp (std::sqrt) — both almost certainly already pulled via JUCE; easy add if the build complains.
+
+**Files:** SharedUI.h/.cpp, VibeGraph.h/.cpp, PluginProcessor.h/.cpp, MixerPage.cpp, MixerTrackStrip.h/.cpp. Pre-build; awaiting Jeff's Debug+Release verify.
+
 
 
 

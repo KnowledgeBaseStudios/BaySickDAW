@@ -6511,6 +6511,26 @@ void DBFSMeter::onVBlank()
     step (clampedL, mDisplayDbL, mPeakDbL, mPeakHoldUntilL);
     step (clampedR, mDisplayDbR, mPeakDbR, mPeakHoldUntilR);
 
+    // QA-RustyMeter: EMA-smooth the incoming per-frame RMS (~50 ms window, #5b)
+    // then push it into the scrolling history ring (Split layout only).  Newest
+    // at mRmsHead-1; paintRmsWaveform reads back.  The audio thread publishes a
+    // per-block RMS (CAS-max, multi-call safe like the peak); the window
+    // smoothing lives here so it stays correct for the multi-call InsertKinds.
+    {
+        const float alphaRms = juce::jlimit (0.f, 1.f,
+            1.f - std::exp (-(float) dt / kRmsTimeConstSec));
+        const float inL = (mRmsInL <= kFloor) ? kFloor : mRmsInL;
+        const float inR = (mRmsInR <= kFloor) ? kFloor : mRmsInR;
+        mRmsDispL += (inL - mRmsDispL) * alphaRms;
+        mRmsDispR += (inR - mRmsDispR) * alphaRms;
+        if (mLayout == Layout::Split)
+        {
+            mRmsHistL[(size_t) mRmsHead] = mRmsDispL;
+            mRmsHistR[(size_t) mRmsHead] = mRmsDispR;
+            mRmsHead = (mRmsHead + 1) % kRmsHist;
+        }
+    }
+
     repaint();
 }
 
@@ -6624,6 +6644,70 @@ void DBFSMeter::paintBar(juce::Graphics& g, juce::Rectangle<float> r,
     }
 }
 
+// QA-RustyMeter: paint the L/R peak bars into rect r (extracted from paint() so
+// the Split layout can render them in the bottom half).
+void DBFSMeter::paintBars (juce::Graphics& g, juce::Rectangle<float> r) const
+{
+    const float halfW  = (r.getWidth() - 1.f) * 0.5f;
+    const auto  leftR  = juce::Rectangle<float> (r.getX(),               r.getY(), halfW, r.getHeight());
+    const auto  rightR = juce::Rectangle<float> (r.getX() + halfW + 1.f, r.getY(), halfW, r.getHeight());
+    paintBar (g, leftR,  mDisplayDbL, mPeakDbL, /*drawLabels*/ true);
+    paintBar (g, rightR, mDisplayDbR, mPeakDbR, /*drawLabels*/ false);
+    // Center gutter - thin black line so the L|R split reads.
+    g.setColour (juce::Colour (0xff000000));
+    g.fillRect (r.getX() + halfW, r.getY(), 1.f, r.getHeight());
+}
+
+// QA-RustyMeter: centered scrolling RMS-history waveform for the top half of a
+// Split meter.  L deflects left of centre, R deflects right; smooth dBFS-palette
+// gradient by deflection (green centre -> red edge, same colours/thresholds as
+// the peak bar); newest at top, scrolling down as the ring advances each vblank.
+void DBFSMeter::paintRmsWaveform (juce::Graphics& g, juce::Rectangle<float> r) const
+{
+    if (r.getWidth() < 2.f || r.getHeight() < 2.f) return;
+
+    g.setColour (juce::Colour (0xff0A0C0E));   // recessed housing for the RMS zone
+    g.fillRect (r);
+
+    const float cx   = r.getCentreX();
+    const float half = r.getWidth() * 0.5f - 1.f;
+    const int   rows = juce::jmax (1, (int) r.getHeight());
+
+    auto deflect = [&] (const std::array<float, (size_t) kRmsHist>& h, int row)
+    {
+        const int back = (int) ((float) row / (float) rows * (float) kRmsHist);
+        const int j    = (mRmsHead - 1 - back + 2 * kRmsHist) % kRmsHist;
+        return dbToNorm (h[(size_t) j]);          // 0..1 deflection (newest at top)
+    };
+
+    // Filled stereo waveform: R deflects right of centre, L deflects left.  The
+    // band always spans the centre line, so it reads as one filled waveform
+    // rather than two thin traces (Jeff 2026-05-30).
+    juce::Path fill;
+    for (int row = 0; row < rows; ++row)                 // right boundary, top -> bottom
+    {
+        const float x = cx + deflect (mRmsHistR, row) * half;
+        const float y = r.getY() + (float) row;
+        row == 0 ? fill.startNewSubPath (x, y) : fill.lineTo (x, y);
+    }
+    for (int row = rows - 1; row >= 0; --row)            // left boundary, bottom -> top
+        fill.lineTo (cx - deflect (mRmsHistL, row) * half, r.getY() + (float) row);
+    fill.closeSubPath();
+
+    // Symmetric dBFS-palette gradient across the width: green at the centre line,
+    // through yellow/orange, to red at both outer edges (#8, smooth gradient).
+    const float yMid = r.getCentreY();
+    juce::ColourGradient grad (juce::Colour (0xffFF2020), r.getX(),     yMid,
+                               juce::Colour (0xffFF2020), r.getRight(), yMid, false);
+    grad.addColour (0.12, juce::Colour (0xffFF6020));
+    grad.addColour (0.26, juce::Colour (0xffFFCC00));
+    grad.addColour (0.50, juce::Colour (0xff22EE44));
+    grad.addColour (0.74, juce::Colour (0xffFFCC00));
+    grad.addColour (0.88, juce::Colour (0xffFF6020));
+    g.setGradientFill (grad);
+    g.fillPath (fill);
+}
+
 void DBFSMeter::paint(juce::Graphics& g)
 {
     auto b = getLocalBounds().toFloat();
@@ -6641,21 +6725,20 @@ void DBFSMeter::paint(juce::Graphics& g)
         g.fillRect(b.withBottom(b.getY() + 5.f));
     }
 
-    // Single bar split into two halves: LEFT = L channel, RIGHT = R channel.
-    // 1 px gutter between halves so the split is readable but the bar still
-    // reads as a single piece (Jeff's spec - option B, not separated bars).
-    const float halfW   = (b.getWidth() - 1.f) * 0.5f;
-    const auto  leftR   = juce::Rectangle<float>(b.getX(),                   b.getY(), halfW, b.getHeight());
-    const auto  rightR  = juce::Rectangle<float>(b.getX() + halfW + 1.f,     b.getY(), halfW, b.getHeight());
-
-    // Labels on the LEFT half only - they span across (drawText box width is
-    // 2x half-width so digits are readable across both halves).
-    paintBar(g, leftR,  mDisplayDbL, mPeakDbL, /*drawLabels*/ true);
-    paintBar(g, rightR, mDisplayDbR, mPeakDbR, /*drawLabels*/ false);
-
-    // Center gutter - paint thin black line so the L|R split is visible.
-    g.setColour(juce::Colour(0xff000000));
-    g.fillRect(b.getX() + halfW, b.getY(), 1.f, b.getHeight());
+    // QA-RustyMeter: Split layout (non-master) = scrolling RMS waveform on the
+    // top 35% + the L/R peak bars on the bottom 65%.  Full layout
+    // (master) = the peak bars across the whole height (the LUFS box carries
+    // loudness for the master strip instead).
+    if (mLayout == Layout::Split)
+    {
+        const float splitY = b.getY() + b.getHeight() * kRmsTopFrac;
+        paintRmsWaveform (g, b.withBottom (splitY));   // top 35% = RMS wave
+        paintBars        (g, b.withTop    (splitY));   // bottom 65% = peak bar
+    }
+    else
+    {
+        paintBars (g, b);
+    }
 
     // Outer frame / bezel.
     g.setColour(juce::Colour(0xff2A2E30));

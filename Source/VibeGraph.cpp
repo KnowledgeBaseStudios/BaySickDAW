@@ -157,6 +157,36 @@ namespace
         casMax (peakDbR,    dispR);
         casMax (peakDbMono, juce::jmax (dispL, dispR));
     }
+
+    // QA-RustyMeter (2026-05-30): per-block RMS publish for the split meter's
+    // scrolling top half.  Computes sqrt(mean-square) in dB and CAS-maxes it
+    // into the node's rms atoms.  The audio thread NEVER resets these (unlike
+    // peak, which processInsert exchange-stores) -- the UI exchange-resets them
+    // via VibeGraph::drainInsertNodeRms, so the value is "max RMS since the last
+    // UI read".  That makes it multi-call safe (Audio/Vox/Inst call processInsert
+    // several times per block) exactly like publishPeakReading.  The ~50 ms
+    // window smoothing lives UI-side in DBFSMeter::onVBlank.
+    inline void publishRms (const juce::AudioBuffer<float>& buf,
+                            std::atomic<float>& rmsDbL,
+                            std::atomic<float>& rmsDbR) noexcept
+    {
+        const int n  = buf.getNumSamples();
+        const int nc = buf.getNumChannels();
+        if (n <= 0 || nc <= 0) return;
+        const float* L = buf.getReadPointer (0);
+        const float* R = (nc >= 2) ? buf.getReadPointer (1) : L;
+        double sL = 0.0, sR = 0.0;
+        for (int s = 0; s < n; ++s) { sL += (double) L[s] * L[s]; sR += (double) R[s] * R[s]; }
+        const float dbL = juce::Decibels::gainToDecibels ((float) std::sqrt (sL / (double) n), -60.f);
+        const float dbR = juce::Decibels::gainToDecibels ((float) std::sqrt (sR / (double) n), -60.f);
+        auto casMax = [] (std::atomic<float>& a, float v) noexcept
+        {
+            float cur = a.load (std::memory_order_relaxed);
+            while (cur < v && ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed)) {}
+        };
+        casMax (rmsDbL, dbL);
+        casMax (rmsDbR, dbR);
+    }
 }
 
 // ── Pan law helper (2026-04-29) ──────────────────────────────────────────────
@@ -1096,6 +1126,12 @@ struct VibeGraph::InsertNode
     std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
     int                   peakRingIdx { 0 };
 
+    // QA-RustyMeter (2026-05-30): per-block RMS accumulator for the split meter.
+    // CAS-maxed by publishRms (audio thread); exchange-reset by the UI via
+    // VibeGraph::drainInsertNodeRms.  Not touched by processInsert (unlike peak).
+    std::atomic<float>    rmsDbL { -60.f };
+    std::atomic<float>    rmsDbR { -60.f };
+
     // F5 (2026-04-24): per-insert fader-gain smoothing.  Starts at 1.0 after
     // prepare; processBlock applies applyGainRamp(mLastFaderGain -> newGain)
     // so fader moves + mute toggles don't zipper.
@@ -1251,6 +1287,7 @@ struct VibeGraph::InsertNode
         // drains those into PluginProcessor mirrors that UI polls.
         publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
                             peakDbL, peakDbR, peakDb);
+        publishRms (buf, rmsDbL, rmsDbR);   // QA-RustyMeter split-meter RMS feed
     }
 };
 
@@ -2477,6 +2514,23 @@ EffectRack* VibeGraph::getInsertRack(InsertKind kind, int index)
     if (auto* node = getInsertNode(kind, index))
         return &node->rack;
     return nullptr;
+}
+
+// QA-RustyMeter (2026-05-30): UI-thread drain of an insert node's RMS for the
+// split meter's scrolling top half.  exchange-resets the node's rms atoms (the
+// audio thread only CAS-maxes them via publishRms), so this returns "max RMS
+// since the last call".  Unlike the peak path there is no PluginProcessor mirror
+// + no audio-thread snapshot -- the RMS is a current value the UI reads off the
+// node directly.  Called from MixerPage::onVBlank (message thread); insert nodes
+// are created/destroyed on the message thread too, so getInsertNode can't race a
+// destroy here.
+std::pair<float, float> VibeGraph::drainInsertNodeRms (InsertKind kind, int index) noexcept
+{
+    constexpr float kNI = -std::numeric_limits<float>::infinity();
+    if (auto* node = getInsertNode (kind, index))
+        return { node->rmsDbL.exchange (kNI, std::memory_order_relaxed),
+                 node->rmsDbR.exchange (kNI, std::memory_order_relaxed) };
+    return { kNI, kNI };
 }
 
 EQ8MsDSP* VibeGraph::getInsertEQ(InsertKind kind, int index)

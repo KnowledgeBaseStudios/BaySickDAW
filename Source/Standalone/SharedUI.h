@@ -1632,6 +1632,16 @@ public:
     // Stereo entry point - independent L and R levels.
     void setStereoLevel (float dBFS_L, float dBFS_R);
 
+    // Split-layout meter (2026-05-30, QA-RustyMeter): non-master strips show a
+    // peak bar (bottom half) + a scrolling RMS-history waveform (top half).
+    // Master uses Full (peak bar only) since it carries the LUFS box instead.
+    enum class Layout { Full, Split };
+    void setMeterLayout (Layout l) { mLayout = l; }
+    // Latest windowed RMS (dB) per channel, fed from the strip drain on the UI
+    // thread (parallel to setStereoLevel's peak feed).  onVBlank pushes these
+    // into the scrolling history ring.
+    void setRmsStereo (float dBFS_L, float dBFS_R) { mRmsInL = dBFS_L; mRmsInR = dBFS_R; }
+
     // QA-Eg: smoothed visual value exposed for CableOverlay telemetry.
     // Returns max(mDisplayDbL, mDisplayDbR) - the FL-parity ballistic-smoothed
     // value the meter LEDs are currently rendering.  Cables reading this stay
@@ -1667,6 +1677,10 @@ private:
                    float displayDb, float peakDb, bool drawLabels) const;
     static float dbToNorm (float dB) noexcept;   // log-style mapping
 
+    // Split-layout helpers (QA-RustyMeter).
+    void paintBars        (juce::Graphics& g, juce::Rectangle<float> r) const;   // L/R peak bars into r
+    void paintRmsWaveform (juce::Graphics& g, juce::Rectangle<float> r) const;   // centered scrolling RMS
+
     // Per-channel running-max atomic.  Audio thread CAS-loops the max-since-
     // last-read into here; UI exchanges with -inf on each vblank.
     std::atomic<float> mLevelDbL { -std::numeric_limits<float>::infinity() };
@@ -1693,6 +1707,19 @@ private:
     // Piecewise log: top 30 % of bar covers -18..+6 dB (where it matters).
     static constexpr float kBreakDb           = -18.f;
     static constexpr float kBreakNorm         =  0.7f;
+
+    // Split-layout state (QA-RustyMeter).  mLayout = Full (peak bar only, master)
+    // vs Split (peak bar + scrolling RMS, all other strips).  The RMS ring holds
+    // the most-recent windowed-RMS dB per channel (newest at mRmsHead-1);
+    // paintRmsWaveform maps it across the top half, newest at top.
+    Layout mLayout { Layout::Split };
+    float  mRmsInL   { kFloor }, mRmsInR   { kFloor };   // raw per-frame RMS in (UI thread, strip drain)
+    float  mRmsDispL { kFloor }, mRmsDispR { kFloor };   // EMA-smoothed value pushed to the ring
+    static constexpr float kRmsTimeConstSec = 0.05f;      // RMS UI smoothing (~50 ms) - short so the wave tracks the music's dynamics
+    static constexpr float kRmsTopFrac      = 0.35f;      // top 35% = RMS wave, bottom 65% = dBFS peak bar (Jeff 2026-05-30)
+    static constexpr int kRmsHist = 256;          // ~3.5 s @ 60 Hz vblank (tunable)
+    std::array<float, (size_t) kRmsHist> mRmsHistL { }, mRmsHistR { };
+    int    mRmsHead { 0 };
 
     // VBlank attachment is constructed in parentHierarchyChanged once the
     // component has a peer.  Optional so we can null it out cleanly when

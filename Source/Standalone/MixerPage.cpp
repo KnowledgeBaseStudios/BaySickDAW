@@ -3282,6 +3282,9 @@ void MixerPage::onVBlank()
         if (! strip) return;
         const auto [pkL, pkR] = mProcessor.drainInsertPeakDbStereo (kind, idx);
         strip->setStereoLevel (pkL, pkR);
+        // QA-RustyMeter: feed the split meter's scrolling RMS top half.
+        const auto [rmL, rmR] = mProcessor.drainInsertRmsDbStereo (kind, idx);
+        strip->setRmsStereo (rmL, rmR);
     };
 
     for (auto& [pageIdx, strip] : mLayerStrips)

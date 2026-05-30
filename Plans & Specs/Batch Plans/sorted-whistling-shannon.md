@@ -318,7 +318,14 @@ if (masterRow) { mLufsBox.setBounds (x, y, w, kLufsH); y += kLufsH + kPadV; }   
 - [ ] **Tell Jeff (verify):** "Run `do_build.bat`. Debug: (1) Master shows a LUFS box between width knob + fader: value, mode label under, `▾`. (2) Play a loud mix → sane LUFS (−20..−6); `▾` switch M/S/I — Momentary lively, Short-Term steadier, Integrated climbs toward an overall value. (3) Stop + play-from-top (or loop) → **Integrated resets**; M/S keep tracking. (4) Selected mode persists across restart. Repeat Release."
 - [ ] On pass: `/draft-commit` → surface + commit. `/draft-doc running-notes` → apply.
 
-### Task 4 — Close
+### Task 4 — Project-lifecycle dedup fix (end-batch cleanup; folded in 2026-05-30)
+> Out-of-scope bug surfaced during Task 2 testing (Jeff): on File > New (fresh empty project), dropping a previously-used audio file falsely prompts "File Already in Library — already in your library on 'an existing page'". The dedup is consulting stale prior-project page/library state not reset on New Project (or a global index that should be per-project). Same family as the QA-D STATE-* resets. Jeff: fix in THIS batch as end-batch cleanup, after the metering.
+- [ ] Diagnose: find the "already in your library" dedup check + what index it consults; confirm File > New / project-create doesn't reset it (or the check is global, not per-project).
+- [ ] Fix: reset the library/page dedup index on New Project (or scope the check to the current project's samples).
+- [ ] Tell Jeff (verify): (1) open a project with samples → File > New → drop a previously-used file → NO false "already in library" prompt. (2) Drop a true duplicate WITHIN one project → the prompt still fires correctly. Debug then Release.
+- [ ] On pass: `/draft-commit` → surface + commit. `/draft-doc running-notes` → apply.
+
+### Task 5 — Close
 - [ ] `/draft-doc batch-close` → apply to `Implemented Work Log.md` (`**Bucket:** Mixer / Routing, UI / L&F / Theming, Cross-cutting Infrastructure`).
 - [ ] `/review-batch QA-RustyMeter` → address BLOCKER/NEEDS-FIX; defer NITs into the entry.
 - [ ] Strip temp diagnostics (Rule 4) — none expected (static investigation); surface list if any.

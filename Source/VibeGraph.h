@@ -480,6 +480,11 @@ public:
     // in a given insert slot without touching the forward-declared struct.
     EffectRack* getInsertRack   (InsertKind kind, int index);
 
+    // QA-RustyMeter (2026-05-30): UI-thread RMS drain for the split meter's
+    // scrolling top half.  exchange-resets the (kind,index) insert node's rms
+    // atoms; returns {-inf,-inf} if absent.  No PluginProcessor mirror needed.
+    std::pair<float, float> drainInsertNodeRms (InsertKind kind, int index) noexcept;
+
     // Return the post-rack EQ owned by an InsertNode (or nullptr). Parallels
     // getInsertRack - same opaque-InsertNode reason.
     EQ8MsDSP*   getInsertEQ     (InsertKind kind, int index);

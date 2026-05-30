@@ -80,6 +80,8 @@ public:
     // on setLevel() (mono fans to L=R inside DBFSMeter).  As bus / insert
     // nodes get split into peakDbL+peakDbR, callers switch to this method.
     void setStereoLevel(float dBFS_L, float dBFS_R);
+    // QA-RustyMeter (2026-05-30): windowed-RMS feed for the split meter top half.
+    void setRmsStereo(float dBFS_L, float dBFS_R);
 
     // QA-Eg: cable-overlay telemetry feed.  Returns the DBFSMeter's currently-
     // displayed smoothed value (FL-style ballistic-filtered max of L/R).

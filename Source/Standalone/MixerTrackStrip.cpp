@@ -57,6 +57,11 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
 
     // ── DBFSMeter ─────────────────────────────────────────────────────────────
     mMeter.setCompact(true);
+    // QA-RustyMeter (2026-05-30): insert/channel strips get the Split layout
+    // (peak bar + scrolling RMS waveform); Master + Bus keep a full-height peak
+    // bar (Master carries the LUFS box; bus RMS lands in a follow-up).
+    mMeter.setMeterLayout ((type == StripType::Master || type == StripType::Bus)
+                           ? DBFSMeter::Layout::Full : DBFSMeter::Layout::Split);
     addAndMakeVisible(mMeter);
 
     // ── Mute LED ──────────────────────────────────────────────────────────────
@@ -420,6 +425,11 @@ void MixerTrackStrip::setLevel(float dBFS)
 void MixerTrackStrip::setStereoLevel(float dBFS_L, float dBFS_R)
 {
     mMeter.setStereoLevel(dBFS_L, dBFS_R);
+}
+
+void MixerTrackStrip::setRmsStereo(float dBFS_L, float dBFS_R)
+{
+    mMeter.setRmsStereo(dBFS_L, dBFS_R);   // QA-RustyMeter split-meter RMS top half
 }
 
 void MixerTrackStrip::setFaderDb(float db, bool notify)

@@ -651,6 +651,9 @@ public:
     // first call's exchange already cleared the mirror.  Currently the only
     // consumer is MixerPage::onVBlank.
     std::pair<float, float> drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int index) noexcept;
+    // QA-RustyMeter (2026-05-30): RMS sibling for the split meter; thin passthrough
+    // to mVibeGraph.drainInsertNodeRms (no mirror -- RMS is read off the node).
+    std::pair<float, float> drainInsertRmsDbStereo (VibeGraph::InsertKind kind, int index) noexcept;
 
     // ── Graph infrastructure (Phase 1A) ───────────────────────────────────────
     VibeGraph mVibeGraph;
