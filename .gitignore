@@ -14,6 +14,13 @@ master_output.xml
 # Runtime diagnostic logs — regenerated each launch, not source.
 *_log.txt
 
+# QA-DispatcherAffinity trace dumps — one-shot diagnostic CSV captures from
+# the (now-stripped) Mixer "QA-DispatcherAffinity Trace" menu item.  The
+# feature that wrote them was removed at the QA-DispatcherAffinity Task 4
+# strip; this pattern is belt-and-suspenders so any stray captures (or a
+# future re-run of an equivalent trace) never get swept into a commit.
+qa-dispatcheraffinity-trace*.log
+
 # Auto-saved Untitled-project backups — runtime, not source.
 Backups/Unsaved/
 

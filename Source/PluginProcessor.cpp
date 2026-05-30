@@ -4419,15 +4419,16 @@ void VibeSynthProcessor::destroyBaySickRustyDrums()
     // execution; the shield closes the use-after-free window that would
     // otherwise open if destroy fired mid-audio-block.  shieldWasUp
     // refcounting matches the existing pattern at StandaloneEditor's
-    // closeAllDynamicTabs (:6266-6269) + project-load entry points.
+    // closeAllDynamicTabs + project-load entry points.
     const bool shieldWasUp = isProjectLoadInProgress();
     setProjectLoadInProgress (true);
     if (! shieldWasUp) juce::Thread::sleep (30);
 
     // QA-DispatcherAffinity Task 3 (2026-05-29): clear the Rusty piano roll
     // on every pattern.  Matches the destroy-confirmation dialog's promise
-    // ("clear the Rusty piano roll on every pattern" -- see
-    // StandaloneEditor.cpp:7342) which was previously undelivered: only
+    // ("clear the Rusty piano roll on every pattern" -- the
+    // "Delete BaySickRustyDrums?" onDeleteRequested AlertWindow in
+    // StandaloneEditor.cpp) which was previously undelivered: only
     // BaySickRustyDrumsPage::tearDownCurrentProgram (program-change path)
     // did the clear; the tab-delete path did not.  Moved into
     // destroyBaySickRustyDrums so both call sites (tab delete +
