@@ -797,6 +797,17 @@ void PatternManager::reset()
     mCurrentPattern = 0;
     mGlobalTempo    = 120.0;
     mArrangement.clear();
+    // QA-RustyMeter Task 4 (2026-05-30): clear the audio library on blank-reset.
+    // reset() is the "wipe to empty project" path (resetToBlankState -> here, hit
+    // by all File > New / New-from-template entry points); it cleared patterns /
+    // arrangement / mixer / automation but NOT mAudioLibrary, so a previously-used
+    // sample dropped onto a fresh File > New project still matched
+    // findAudioLibraryIndexByPath and fired a false "File Already in Library"
+    // prompt.  fromValueTree (the project-load path) already clears it; reset()
+    // was simply missing the same clear (QA-D STATE-* family).  In-project dedup
+    // is unaffected -- entries still accumulate via addAudioLibraryEntry within a
+    // project, so a true duplicate drop still prompts correctly.
+    mAudioLibrary.clear();
     mMixer = {};
     mDrumEnabled.fill (true);
     for (auto& m : mRowMuted)  m.store (false, std::memory_order_relaxed);

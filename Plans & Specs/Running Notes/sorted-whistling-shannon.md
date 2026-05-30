@@ -260,6 +260,22 @@ Jeff requested this right after the part-2 verify. Spec surfaced + confirmed in 
 
 **Jeff verified Task 3 in Debug + Release 2026-05-30: "We're good."** The master LUFS readout (stacked value-over-title box with the M/S/I dropdown) works: sane values for a loud master, the three modes behave (Momentary lively / Short-Term steady / Integrated accumulates + resets on play-from-top/loop), the selected mode persists across restart, and no regression on the Task 2 split meters or the peak bars. K-weighting math confirmed correct in practice (sane LUFS = the acceptance proxy for the 48 kHz coefficient table). Task 3 = DONE; ready to commit (DSP + audio wiring + LufsReadoutBox UI + the `.gitignore` line). Next: Task 4 (project-lifecycle dedup fix) → Task 5 (bus collapse UI) → Task 6 (close).
 
+Task 3 committed at `63be14d` (14 files, +526).
+
+---
+
+## 2026-05-30 — Task 4 — Project-lifecycle dedup fix: diagnosis + one-line fix (pre-build)
+
+**Root cause (static diagnosis, conclusive):** the false "File Already in Library" prompt on a fresh File > New is a missing reset, not a logic bug in the dedup itself. The dedup is `PatternManager::findAudioLibraryIndexByPath` (exact path match over `std::vector<AudioLibraryEntry> mAudioLibrary`, PatternManager.cpp:199); the disk-drop handler (`grid->onDuplicateFileDrop`, StandaloneEditor.cpp:2355) fires the prompt when that lookup hits. The audio library is cleared in exactly ONE place — `PatternManager::fromValueTree` (the project-LOAD path, :1139) — but **NOT in `PatternManager::reset()`** (:793), which clears `mPatterns` / `mArrangement` / `mMixer` / drum flags / `mAutomationTemplates` but omitted `mAudioLibrary`. `reset()` is the canonical "wipe to blank project" call, invoked ONLY via `VibeSynthProcessor::resetToBlankState()` (PluginProcessor.cpp:3181), which is itself the wipe path for all 4 File > New / New-from-template entry points (StandaloneEditor.cpp:8621/9040/9192/9344) + `mVibeGraph.clearAllRackStates()` + APVTS-defaults. So after File > New, `mAudioLibrary` still held the prior project's entries → a previously-used sample matched → false prompt. Textbook QA-D STATE-* family (New-Project-doesn't-reset-X); `reset()` was simply incomplete vs `fromValueTree`.
+
+**Fix (one line):** added `mAudioLibrary.clear();` to `PatternManager::reset()` (PatternManager.cpp:~800), mirroring the clear `fromValueTree` already does. Well-scoped: `reset()` only runs on blank-reset, so in-project dedup is unaffected — entries still accumulate via `addAudioLibraryEntry` within a live project, and dropping a true duplicate still matches `findAudioLibraryIndexByPath` and prompts correctly. No spec call (one correct minimal fix; the plan's "reset the library index on New Project" option).
+
+**Diagnosis method:** static code read only (grep the prompt string → trace the dedup lookup → compare the clear sites in `reset()` vs `fromValueTree` → confirm `reset()`'s single caller chain). Not an audio bug, so no runtime A/B needed — the root cause is unambiguous in the source.
+
+**Files:** PatternManager.cpp (1 line + comment). **Pre-build; awaiting Jeff's Debug-then-Release verify:** (1) open a project with samples → File > New → drop a previously-used file → NO false "already in library" prompt (normal import). (2) Drop a true duplicate WITHIN one project → the prompt STILL fires (Use Existing / New Page / Cancel).
+
+**VERIFIED (Jeff, Debug + Release 2026-05-30):** "Fixed and the real use case still works fine." Both scenarios pass — the false prompt on File > New is gone, and legitimate in-project duplicate detection still fires. Task 4 = DONE; ready to commit. Next: Task 5 (bus collapse/expand UI) → Task 6 (close).
+
 
 
 
