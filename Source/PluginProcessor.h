@@ -837,7 +837,14 @@ private:
     // instance per project.  Owned here so PluginProcessor can orchestrate
     // strip lifecycle on kit load/unload.  The class is forward-declared so
     // PluginProcessor.h doesn't pull sfizz headers into every TU.
-    juce::SpinLock                                         mRustyDrumsEngineLock;
+    // QA-DispatcherAffinity Task 4 (2026-05-29): the mRustyDrumsEngineLock
+    // SpinLock that previously guarded engine pointer access was removed
+    // as part of the Sub-K Serial Fallback retirement.  Lifecycle safety
+    // is now provided exclusively by the mProjectLoadInProgress shield
+    // raised at destroyBaySickRustyDrums + loadBaySickRustyDrumsKit (the
+    // shield bails the audio thread at processBlock top during the ~30 ms
+    // mutation window, so engine pointer reads on the audio path are
+    // guaranteed stable for the block).
     std::unique_ptr<class BaySickRustyDrumsProcessor>      mRustyDrumsEngine;
     std::atomic<bool>                                      mRustyDrumsActive { false };
     juce::AudioBuffer<float>                               mRustyDrumsScratch; // J-7a: per-block render target

@@ -5,7 +5,6 @@
 #include "../../BaySickGuitars/BaySickGuitarsProcessor.h"   // getNumActiveVoices
 #include "../../BaySickBasses/BaySickBassesProcessor.h"     // getNumActiveVoices
 #include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
-#include "../RenderEngineFlags.h"     // QA-DispatcherAffinity TraceScope
 
 InstStripTask::InstStripTask (juce::AudioProcessor* engine,
                               int                   index,
@@ -20,26 +19,10 @@ InstStripTask::InstStripTask (juce::AudioProcessor* engine,
       mPrefix ("mixer_inst_" + juce::String (index))
 {
     this->channelId = channelIdIn;
-
-    // QA-DispatcherAffinity (2026-05-28): cache sfizz-engine detection for
-    // the trace gate.  Mirrors the Sub-M=(eng-b) dynamic_cast used at
-    // registerInstEngine time but stored separately so the trace continues
-    // to fire on sfizz instances even when Sub-K's mAudioThreadOnly flag
-    // is overridden at Task 2 Stage B.
-    mIsSfizzEngine = (dynamic_cast<BaySickGuitarsProcessor*> (engine) != nullptr
-                  || dynamic_cast<BaySickBassesProcessor*>  (engine) != nullptr);
 }
 
 void InstStripTask::run()
 {
-    // QA-DispatcherAffinity (2026-05-28): entry+exit timestamp trace
-    // gated on mIsSfizzEngine -- only the BaySickGuitars/BaySickBasses
-    // instances are in scope for the Candidate B sub-mechanism
-    // investigation.  Non-sfizz Inst tasks (live-input, FilePlay-driven
-    // non-sfizz engines) construct TraceScope with shouldTrace=false; the
-    // ctor + dtor become trivial (no atomic load, no ring write).
-    RenderEngine::MtDiagnostic::TraceScope qaTrace (channelId, mEngine, mIsSfizzEngine);
-
     if (mEngine == nullptr || mOutputBuffer == nullptr || mCtx == nullptr
         || mGraph == nullptr || mProcessor == nullptr)
         return;

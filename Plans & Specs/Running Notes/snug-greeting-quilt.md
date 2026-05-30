@@ -250,6 +250,74 @@ Implementation:
 
 **Task 3 commit scope (final):** lock removal + shield-raise at destroy/load + piano-roll-clear fix + the 4 plan-doc routing edits above.  Per the §9-routing-in-source-commit precedent at QA-Sfizz Task 5 follow-up `0e57fc5`.
 
+---
+
+## 2026-05-29 — Task 4 — Sub-K Serial Fallback retirement (full strip pass)
+
+**Sub-spec resolution (Jeff verbatim 2026-05-29):** "We are going with Option (1) Strip A + B + C + D (full clean).  Keeping a redundant SpinLock in the audio hot-path as 'belt-and-suspenders' defeats the purpose of the lock-free architecture we just built.  The mProjectLoadInProgress shield is our deterministic barrier; the SpinLock is now dead weight and potential future confusion."  Categories A (Task 1 trace infrastructure) + B (Task 2 Sub-K override mechanism) + C (QA-Sfizz Sub-K Serial Fallback infrastructure from commit `0e57fc5`) + D (mRustyDrumsEngineLock SpinLock full removal) all stripped per Main Plan §0 Rule 4 catalog Disposition + audit-driven safety analysis.
+
+**Strip pass executed (single-commit scope, net -505 lines across 11 files):**
+
+### Category A — Task 1 trace infrastructure (Disposition: `Remove at Task 4 close`)
+- `Source/Engine/RenderEngineFlags.h` — REVERTED to pre-Task-1 state.  Removed: `<array>` + `<chrono>` + `<cstdint>` + `<functional>` + `<thread>` includes; `TraceEvent` POD struct; `kTraceRingCapacity` constexpr + static_assert; `gTraceTaskTimestamps` atomic flag; `gTraceWriteIndex` + `gBlockIndex` counters; `gTraceRing` fixed-size array; `traceNowNs()` + `traceThreadHash()` helpers; `recordTraceEvent()` writer; `resetTrace()` helper; `TraceScope` RAII struct.  Kept the entire existing `MtDiagnostic` counter namespace (gCaptureOn / gBlockCount / etc.) -- those pre-date Task 1.
+- `Source/Engine/RenderGraphDispatcher.cpp` — REVERTED the gBlockIndex.fetch_add bump at the existing gBlockCount.fetch_add site.
+- `Source/Engine/Tasks/RustyDrumsProducerTask.cpp` — REVERTED: `#include "../RenderEngineFlags.h"`; TraceScope at top of run().
+- `Source/Engine/Tasks/RustyInsertTask.cpp` — same revert.
+- `Source/Engine/Tasks/InstStripTask.h` — REVERTED: `bool mIsSfizzEngine` field + multi-line comment.
+- `Source/Engine/Tasks/InstStripTask.cpp` — REVERTED: `#include "../RenderEngineFlags.h"`; dynamic_cast<BaySickGuitarsProcessor*> / <BaySickBassesProcessor*> probe in constructor setting `mIsSfizzEngine`; TraceScope at top of run().
+- `Source/Standalone/StandaloneEditor.cpp` — REVERTED: Mixer hamburger menu item 204 "QA-DispatcherAffinity Trace" addition + the full handler (arm/disarm + ring snapshot + sort + CSV dump + AlertWindow).
+
+### Category B — Task 2 Sub-K override mechanism
+- `Source/Engine/RenderEngineFlags.h` — REVERTED: `gSubKOverride` atomic flag + multi-line comment.  (Same file as Category A; bundled in the same edit pass.)
+- `Source/Engine/VibeThreadPool.cpp::submit()` — REVERTED the `&& !gSubKOverride.load(relaxed)` gate.  (Bundled with Category C's audioThreadQueue routing branch removal in the same edit -- the entire `if (task->mAudioThreadOnly...)` block is gone, falling through to the simple worker MPMC enqueue.)
+- `Source/Standalone/StandaloneEditor.cpp` — REVERTED: Mixer hamburger menu item 205 "Sub-K Serial Fallback" addition + the full handler (gSubKOverride toggle + AlertWindow with Stage B usage hint).
+
+### Category C — QA-Sfizz Sub-K Serial Fallback infrastructure (source-reverse of `0e57fc5`)
+- `Source/Engine/RenderTask.h` — REVERTED: `bool mAudioThreadOnly` field + the entire QA-Sfizz Sub-K Serial Fallback comment block (lines 46-60 pre-Task-4).  RenderTask is back to its pre-`0e57fc5` shape.
+- `Source/Engine/VibeThreadPool.cpp` — REVERTED: `audioThreadQueue` MPSC declaration + comment block in `Impl`; the `if (task->mAudioThreadOnly...)` routing branch in `submit()` (with the gSubKOverride gate bundled in); the priority-pop branch + comment block in `runUntil()`; the priority-pop branch + comment block in `runUntilOrTimeout()`; the audioThreadQueue drain + comment block in `clearQueues()`.  All 5 sites cleanly stripped.
+- `Source/Engine/Tasks/RustyDrumsProducerTask.cpp` constructor — REVERTED: `mAudioThreadOnly = true` line + the Sub-K Serial Fallback comment block + the Task 2 cross-ref comment block.
+- `Source/Engine/Tasks/RustyInsertTask.cpp` constructor — same revert.
+- `Source/PluginProcessor.cpp::registerInstEngine` — REVERTED: the `dynamic_cast<BaySickGuitarsProcessor*>` / `<BaySickBassesProcessor*>` flag-set block + Sub-M=(eng-b) comment block + Task 2 cross-ref comment block.
+
+### Category D — mRustyDrumsEngineLock SpinLock (full removal)
+- `Source/PluginProcessor.h:840` — REMOVED `juce::SpinLock mRustyDrumsEngineLock;` declaration.  Added a multi-line comment block explaining the removal + the shield-based safety chain that replaces it.
+- `Source/PluginProcessor.cpp::prepareToPlay` (line ~287 pre-Task-4) — REMOVED `ScopedLockType` block.  Comment notes JUCE's prepareToPlay contract (audio callback stopped before prepareToPlay is called on the processor; no audio-thread race).
+- `Source/PluginProcessor.cpp` processBlock song-mode MIDI schedule (line ~1254 pre-Task-4) — REMOVED `ScopedTryLockType rlk` + `rlk.isLocked() && ...` condition; simplified to `mRustyDrumsActive.load(acquire) && mRustyDrumsEngine` predicate.  Multi-line comment notes shield-based safety.
+- `Source/PluginProcessor.cpp` processBlock pattern-mode MIDI schedule (line ~1529 pre-Task-4) — same revert.
+- `Source/PluginProcessor.cpp::loadBaySickRustyDrumsKit` (line ~4335 pre-Task-4) — REMOVED `ScopedLockType sl` wrapping the engine `make_unique` block; engine create proceeds directly under the shield window.  Removed the "kept for now -- Task 4 cleanup item" comment.
+- `Source/PluginProcessor.cpp::destroyBaySickRustyDrums` (line ~4455 pre-Task-4) — REMOVED `ScopedLockType sl` wrapping the `mRustyDrumsEngine.reset()` call; reset proceeds directly under the shield window.
+
+### Verify scope (Task 4 cure-still-holds + no-regression):
+- Build clean Debug + Release.  Confirm zero compile errors (no orphaned `mAudioThreadOnly` / `audioThreadQueue` / `gSubKOverride` / `gTraceTaskTimestamps` / `TraceScope` / `mIsSfizzEngine` / `mRustyDrumsEngineLock` references).
+- 6-cymbal MT-on test: bit-crusher ABSENT (the Task 3 cure still holds with all Sub-K infrastructure gone -- the lock-free MT execution path is now the ONLY path).
+- Kit-swap stability: ~30ms shield-window dropout + no crash on tab close / program change / re-load (the mProjectLoadInProgress shield does ALL the safety work now; SpinLock fallback is gone).
+- Sub-K menu item 205 + Trace menu item 204 should be GONE from the Mixer hamburger menu.
+- Mixer hamburger should still show "Multi-core Rendering" (gMultiThreadedEngineEnabled, untouched) + "Run MT Diagnostic (2s capture)" (gCaptureOn-based, untouched).
+- Non-sfizz engines (Harmless / BaySickSynth / BaySickPlayer / BaySickBass) should still work normally (they never touched the Sub-K infrastructure).
+- BaySickGuitars + BaySickBasses sfizz engines should work in MT (Sub-M=(eng-b) pinning gone; they're back on the worker pool).
+- Same in Release.
+
+**Task 4 commit:** TBD (after Jeff's full verify ladder PASS Debug + Release).
+
+**Task 4 verify outcome (Jeff PASS 2026-05-29):** all 6 verify scenarios PASS Debug + Release.
+
+- **Verify 1 (Mixer hamburger menu cleanup):** PASS — items 201 "Latency-compensate meters" + 202 "Multi-core Rendering" + 203 "Run MT Diagnostic (2s capture)" still present; items 204 "QA-DispatcherAffinity Trace" + 205 "Sub-K Serial Fallback" GONE.  Jeff confirmed by asking about 201 + 203 specifically (both visible to him in the post-strip menu).
+- **Verify 2 (cure verify):** PASS — 6-cymbal MT-on test, bit-crusher ABSENT with lock-free MT execution as the ONLY production path (no Sub-K fallback available).
+- **Verify 3 (kit-swap stability):** PASS — close + reopen Rusty tab + program change while audio playing → ~30 ms shield-window dropout + clean resume + no crash + no use-after-free.  The mProjectLoadInProgress shield does ALL the safety work now; SpinLock fallback is gone.
+- **Verify 4 (non-sfizz engines):** PASS — Harmless / BaySickSynth / BaySickPlayer / BaySickBass all play normally.  No regression vs Stage A baseline.
+- **Verify 5 (sfizz Guitars + Basses on MT pool):** PASS — BaySickGuitars + BaySickBasses tabs run on the worker pool (Sub-M=(eng-b) pinning gone); clean audio + normal CPU.
+- **Verify 6 (Release parity):** PASS — scenarios 1-5 repeated in Release; all PASS.
+
+Mid-Task-4 finding (Jeff surfaced 2026-05-29 post-strip menu inspection): asked whether the QA-Md "Run MT Diagnostic (2s capture)" item 203 + the MtDiagnostic counter namespace should also be retired since the QA-Md investigation closed 2026-05-09 with no-bug-found.  Per Main Plan §0 Rule 4 the item was retro-classified `Keep`.  Jeff confirmed QA-Cleanup-1 (`Main Plan.md:1836`) is the natural retirement home (already has 2 fold-ins for dead-code shape items: QA-D NIT-4 `setTabName` writeback + QA-E §60 dead BrowserItem::Kind::Audio paths).  Surfaced 3 routing options (1 fold into Task 4 commit / 2 separate routing commit pre-Task-5 / 3 fold at Task 5 batch-close per Rule 3 default).  Jeff resolved verbatim: "3" (route at Task 5 batch-close).  Carry-forward: at Task 5 close-pass routing review, fold the MT Diag retirement into QA-Cleanup-1's Items section + add §9 forty-third Forks entry routing the fold-in (per same precedent as QA-D NIT-4 fold-in at `Main Plan.md:1838`).  Out of Task 4 commit scope.
+
+## Diagnostic Instrumentation Catalog — POST-STRIP STATE (Task 4)
+
+All catalog rows from Task 1 + Task 2 entries have been **STRIPPED** per their Disposition column.  The catalog below is preserved for historical reference but every entry is now removed from source.  Pre-strip catalog state captured in Task 1 + Task 2 running notes sections above.
+
+| Site (PRE-STRIP) | Tag | Purpose | Disposition |
+|------|-----|---------|-------------|
+| All 8 Task 1 trace rows + all 3 Task 2 override rows | `QA-DispatcherAffinity (2026-05-28)` / `QA-DispatcherAffinity Task 2 Stage B (2026-05-29)` | Trace infrastructure + Sub-K runtime override | **STRIPPED at Task 4 (2026-05-29) -- net -505 lines across 11 files** |
+
 ## Diagnostic Instrumentation Catalog
 
 | Site | Tag | Purpose | Disposition |

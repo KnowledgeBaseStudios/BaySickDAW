@@ -57,14 +57,4 @@ private:
     // scratches that produced all-clips-mixed-into-every-strip on MT playback.
     juce::AudioBuffer<float> mClipScratch;
     juce::AudioBuffer<float> mEngineScratch;
-
-    // QA-DispatcherAffinity (2026-05-28): true when mEngine is a sfizz-driven
-    // engine (BaySickGuitarsProcessor or BaySickBassesProcessor).  Gates the
-    // per-task entry+exit timestamp trace -- only sfizz instances are in
-    // scope for the Candidate B sub-mechanism investigation.  Cached at
-    // construction via dynamic_cast; stable for the task's lifetime.
-    // Decoupled from the existing mAudioThreadOnly flag (which Sub-K may be
-    // overridden during Task 2 Stage B) so the trace continues to fire on
-    // sfizz instances regardless of Sub-K's runtime state.
-    bool mIsSfizzEngine = false;
 };

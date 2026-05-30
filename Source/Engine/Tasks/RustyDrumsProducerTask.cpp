@@ -1,43 +1,15 @@
 #include "RustyDrumsProducerTask.h"
 #include "../../PluginProcessor.h"
 #include "../../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
-#include "../RenderEngineFlags.h"   // QA-DispatcherAffinity TraceScope
 
 RustyDrumsProducerTask::RustyDrumsProducerTask (VibeSynthProcessor& processor)
     : mProcessor (&processor)
 {
     // channelId stays at -1 (default) - producer-style task with no arena slot.
-
-    // QA-Sfizz Sub-K Serial Fallback (2026-05-28): pin to the audio thread.
-    // The vendored sfizz library isn't safe for the cross-block work-stealing
-    // the unified dispatcher currently does on this engine's producer +
-    // RustyInsertTask family (mMultiOutScratch read-write race across block
-    // boundaries + suspected thread-local-state migration across workers
-    // breaking voice continuity on long sustains).  See QA-DispatcherAffinity
-    // §9 Forks entry for the proper dispatcher-barrier fix that retires this
-    // pin.  Workers will never see this task; only runUntilOrTimeout runs it.
-    //
-    // QA-DispatcherAffinity Task 2 Stage B (2026-05-29): the runtime override
-    // gSubKOverride (Mixer hamburger "Sub-K Serial Fallback" toggle) gates
-    // this pin at VibeThreadPool::submit() time, not at this construction
-    // site -- the task stays tagged mAudioThreadOnly=true (the "wants
-    // pinning" intent) and the override decides at submit() whether to honor
-    // it.  Lets the same session A/B Sub-K-on vs Sub-K-off without a kit
-    // reload.  See MtDiagnostic namespace in RenderEngineFlags.h.
-    mAudioThreadOnly = true;
 }
 
 void RustyDrumsProducerTask::run()
 {
-    // QA-DispatcherAffinity (2026-05-28): entry+exit timestamp trace.
-    // RAII captures entry tick on construction; destructor emits the trace
-    // event with the exit tick on every return path.  Zero overhead when
-    // gTraceTaskTimestamps is false.  engineInstance = the BaySickRusty-
-    // DrumsProcessor singleton (constant across all 14 Rusty tasks; lets
-    // the analyzer group them by engine).
-    RenderEngine::MtDiagnostic::TraceScope qaTrace (channelId,
-        (mProcessor != nullptr) ? (const void*) mProcessor->mRustyDrumsEngine.get() : nullptr);
-
     if (mCtx == nullptr || mProcessor == nullptr) return;
 
     const int n = mCtx->numSamples;

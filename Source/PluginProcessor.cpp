@@ -282,11 +282,10 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
             if (mInstEngines[i]) mInstEngines[i]->prepareToPlay(sampleRate, samplesPerBlock);
     }
     // J-7a (2026-05-03): re-prepare the BaySickRustyDrums singleton on
-    // host SR / block-size change.
-    {
-        juce::SpinLock::ScopedLockType lk(mRustyDrumsEngineLock);
-        if (mRustyDrumsEngine) mRustyDrumsEngine->prepareToPlay(sampleRate, samplesPerBlock);
-    }
+    // host SR / block-size change.  prepareToPlay runs on the message
+    // thread (JUCE stops the audio callback before calling it on the
+    // processor); no audio-thread race possible here.
+    if (mRustyDrumsEngine) mRustyDrumsEngine->prepareToPlay(sampleRate, samplesPerBlock);
     mVibeGraph.prepare(sampleRate, samplesPerBlock);
 
     // Build the fixed bus topology the first time; no-op on subsequent calls.
@@ -1248,14 +1247,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     }
 
                     // J-7b (2026-05-03): BaySickRustyDrums singleton roll.
-                    // Same fast-path bypass + try-lock pattern as the engine arrays.
-                    if (mRustyDrumsActive.load(std::memory_order_acquire))
-                    {
-                        juce::SpinLock::ScopedTryLockType rlk(mRustyDrumsEngineLock);
-                        if (rlk.isLocked() && mRustyDrumsEngine)
-                            scheduleRoll(sPat.baySickRustyDrumsRoll.notes,
-                                         mRustyDrumsMidi, kRustyPRTarget);
-                    }
+                    // QA-DispatcherAffinity Task 4 (2026-05-29): try-lock
+                    // removed; engine pointer read is safe under the
+                    // mProjectLoadInProgress shield (audio thread bails at
+                    // processBlock top during destroy/load mutation windows).
+                    if (mRustyDrumsActive.load(std::memory_order_acquire) && mRustyDrumsEngine)
+                        scheduleRoll(sPat.baySickRustyDrumsRoll.notes,
+                                     mRustyDrumsMidi, kRustyPRTarget);
 
                     // 2026-04-25: legacy sPat.drumRoll dispatch removed -
                     // notes are now in sPat.drumRolls[di] and dispatched
@@ -1524,26 +1522,24 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
             // J-7b (2026-05-03): BaySickRustyDrums singleton roll - pattern mode.
             // Mirrors the per-engine loops above; bypass via mRustyDrumsActive.
-            if (mRustyDrumsActive.load(std::memory_order_acquire))
+            // QA-DispatcherAffinity Task 4 (2026-05-29): try-lock removed; engine
+            // pointer read safe under mProjectLoadInProgress shield.
+            if (mRustyDrumsActive.load(std::memory_order_acquire) && mRustyDrumsEngine)
             {
-                juce::SpinLock::ScopedTryLockType rlk(mRustyDrumsEngineLock);
-                if (rlk.isLocked() && mRustyDrumsEngine)
+                for (const auto& note : pat.baySickRustyDrumsRoll.notes)
                 {
-                    for (const auto& note : pat.baySickRustyDrumsRoll.notes)
+                    if (note.muted) continue;
+                    double baseLoop = std::floor(beatStart / patLen) * patLen;
+                    double absStart = baseLoop + note.startBeat;
+                    if (absStart < beatStart - kWrapSlop) absStart += patLen;
+                    if (absStart >= patLen && beatEnd > patLen) continue;
+                    if (absStart >= windowStart && absStart < beatEnd)
                     {
-                        if (note.muted) continue;
-                        double baseLoop = std::floor(beatStart / patLen) * patLen;
-                        double absStart = baseLoop + note.startBeat;
-                        if (absStart < beatStart - kWrapSlop) absStart += patLen;
-                        if (absStart >= patLen && beatEnd > patLen) continue;
-                        if (absStart >= windowStart && absStart < beatEnd)
-                        {
-                            int smp = juce::jlimit(0, numSamples - 1,
-                                                   (int)std::max(0.0, (absStart - beatStart) / bs));
-                            emitPianoNoteOn (mRustyDrumsMidi, note, smp);
-                            mPRPendingOffs.push_back(
-                                { absStart + note.durationBeats, note.midiNote, kRustyPRTarget });
-                        }
+                        int smp = juce::jlimit(0, numSamples - 1,
+                                               (int)std::max(0.0, (absStart - beatStart) / bs));
+                        emitPianoNoteOn (mRustyDrumsMidi, note, smp);
+                        mPRPendingOffs.push_back(
+                            { absStart + note.durationBeats, note.midiNote, kRustyPRTarget });
                     }
                 }
             }
@@ -3769,31 +3765,6 @@ void VibeSynthProcessor::registerInstEngine(int pageIdx, juce::AudioProcessor* e
             eng, pageIdx, MixerChannelIds::instInsert(pageIdx),
             mVibeGraph, *this);
 
-        // QA-Sfizz Sub-M = (eng-b) (2026-05-28): pin this Inst page's task
-        // to the audio thread when the engine kind is one of the 2 sfizz-
-        // backed melodic engines (BaySickGuitars / BaySickBasses) so it
-        // bypasses the MT bit-crusher race (see RenderTask.h
-        // mAudioThreadOnly comment + RustyDrumsProducerTask.cpp constructor
-        // for the full rationale).  Set strictly on the message thread at
-        // engine-swap time — Jeff's anti-pattern lock on doing the
-        // dynamic_cast at per-block dispatch in the audio thread (would
-        // cost RTTI hits every block and risk non-deterministic latency).
-        // The unregisterInstEngine → registerInstEngine sequence on
-        // every engine swap means a new InstStripTask is built with the
-        // current engine kind, so the flag stays in lockstep with the
-        // active engine.  LiveInput + audio-clip + other source modes
-        // leave the flag false (worker-eligible).
-        //
-        // QA-DispatcherAffinity Task 2 Stage B (2026-05-29): gated by the
-        // runtime gSubKOverride at VibeThreadPool::submit() time -- see the
-        // matching comment on RustyDrumsProducerTask.cpp + the MtDiagnostic
-        // namespace in RenderEngineFlags.h.
-        if (dynamic_cast<BaySickGuitarsProcessor*> (eng) != nullptr
-            || dynamic_cast<BaySickBassesProcessor*> (eng) != nullptr)
-        {
-            task->mAudioThreadOnly = true;
-        }
-
         mRenderDispatcher.registerTask(task.get());
         mInstRenderTasks[(size_t) pageIdx] = std::move(task);
     }
@@ -4353,18 +4324,13 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     setProjectLoadInProgress (true);
     if (! shieldWasUp) juce::Thread::sleep (30);
 
-    // Create the singleton on first call.  The SpinLock here is now
-    // redundant relative to the shield raised above (audio thread isn't
-    // running tasks), but kept for now -- removing it is a Task 4
-    // cleanup item alongside the rest of the Sub-K infrastructure.
+    // Create the singleton on first call.  Shield raised above bails the
+    // audio thread at processBlock top, so no concurrent reader exists.
+    if (! mRustyDrumsEngine)
     {
-        const juce::SpinLock::ScopedLockType sl (mRustyDrumsEngineLock);
-        if (! mRustyDrumsEngine)
-        {
-            mRustyDrumsEngine = std::make_unique<BaySickRustyDrumsProcessor>();
-            mRustyDrumsEngine->prepareToPlay (getSampleRate() > 0.0 ? getSampleRate() : 48000.0,
-                                              getBlockSize()  > 0   ? getBlockSize()  : 512);
-        }
+        mRustyDrumsEngine = std::make_unique<BaySickRustyDrumsProcessor>();
+        mRustyDrumsEngine->prepareToPlay (getSampleRate() > 0.0 ? getSampleRate() : 48000.0,
+                                          getBlockSize()  > 0   ? getBlockSize()  : 512);
     }
 
     // Batch 6 (2026-05-06): create the producer task on first kit load.
@@ -4476,10 +4442,9 @@ void VibeSynthProcessor::destroyBaySickRustyDrums()
             mPatternManager->getPattern (i).baySickRustyDrumsRoll.notes.clear();
     }
 
-    {
-        const juce::SpinLock::ScopedLockType sl (mRustyDrumsEngineLock);
-        mRustyDrumsEngine.reset();
-    }
+    // Shield raised above bails the audio thread at processBlock top, so
+    // no concurrent reader exists when we reset the engine pointer.
+    mRustyDrumsEngine.reset();
 
     setProjectLoadInProgress (shieldWasUp);
 
