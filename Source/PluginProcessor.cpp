@@ -3939,6 +3939,13 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
     // FX Bypass on ALL strip types (master/bus/insert) - each has its own rack.
     addB(prefix + "_bypass", prefix + " FX Bypass", false);
 
+    // QA-RustyMeter Task 5 (2026-05-30): bus collapse/expand view state.  Buses
+    // ONLY (master + inserts have no member group beneath them to collapse).
+    // UI-only -- no audio path reads it; registered here so it serializes with
+    // the project's APVTS state and the collapsed buses restore on load.
+    if (kind == MixerStripKind::Bus)
+        addB(prefix + "_collapsed", prefix + " Collapsed", false);
+
     // Batch E #6 (2026-05-01): _arm only meaningful on Vox/Inst inserts
     // (record-arm for live audio capture).  Layer/Bass/Drum/Audio/Aux strips
     // never read it, so registering it on every Insert kind was zombie state

@@ -464,6 +464,11 @@ private:
 
     // ── Internal helpers ──────────────────────────────────────────────────────
     void layoutScrollContent();
+    // QA-RustyMeter Task 5 (2026-05-30): bus collapse/expand.  isBusCollapsed
+    // reads the per-bus _collapsed APVTS bool; onBusCollapseToggled (fired by a
+    // bus strip's arrow) flips it + relayouts.
+    bool isBusCollapsed (int channelId) const;
+    void onBusCollapseToggled (int channelId);
     void timerCallback() override;
     // 2026-05-02: meter polling moved to a vblank-locked callback so the
     // upstream sync (audio peak atomic -> DBFSMeter) runs in lockstep with

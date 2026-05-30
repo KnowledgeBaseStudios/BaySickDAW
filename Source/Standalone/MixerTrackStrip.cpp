@@ -49,11 +49,24 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
                       || type == StripType::Vox
                       || type == StripType::Inst);
     mNameLabel.setEditable(canRename, canRename, false);
-    if (canRename) mNameLabel.setTooltip("Double-click to rename");
+    // QA-RustyMeter Task 5 (2026-05-30): tooltip on ALL strips shows the full
+    // (possibly truncated) name, plus the rename hint where editable.
+    refreshNameTooltip();
     mNameLabel.onTextChange = [this] {
+        refreshNameTooltip();
         if (onNameChanged) onNameChanged(mNameLabel.getText());
     };
     addAndMakeVisible(mNameLabel);
+
+    // QA-RustyMeter Task 5 (2026-05-30): bus collapse/expand arrow (Bus strips
+    // only; positioned in resized() right of the shrunk name label).  Fires
+    // onCollapseToggled with this strip's channel id (set later via setChannelId).
+    if (type == StripType::Bus)
+    {
+        mCollapseBtn.onClick = [this] { if (onCollapseToggled) onCollapseToggled(mChannelId); };
+        mCollapseBtn.setTooltip("Collapse / expand this bus's channel strips");
+        addAndMakeVisible(mCollapseBtn);
+    }
 
     // ── DBFSMeter ─────────────────────────────────────────────────────────────
     mMeter.setCompact(true);
@@ -557,10 +570,14 @@ void MixerTrackStrip::resized()
     const bool utilRow   = hasUtilityRow();
     const bool masterRow = (mType == StripType::Master);
 
-    // ── Top: name label, full strip width ────────────────────────────────────
+    // ── Top: name label (+ bus collapse arrow on the right) ─────────────────
     {
-        auto top = outer.removeFromTop(kNameH);
-        mNameLabel.setBounds(top.reduced(3, 0));
+        auto top = outer.removeFromTop(kNameH).reduced(3, 0);
+        // QA-RustyMeter Task 5 (2026-05-30): Bus strips reserve a small arrow on
+        // the right of the name (tab-dropdown style); the name shrinks to fit.
+        if (mType == StripType::Bus)
+            mCollapseBtn.setBounds(top.removeFromRight(14).reduced(0, 2));
+        mNameLabel.setBounds(top);
     }
     outer.removeFromTop(kPadV);
 

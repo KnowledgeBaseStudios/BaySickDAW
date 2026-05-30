@@ -276,6 +276,39 @@ Task 3 committed at `63be14d` (14 files, +526).
 
 **VERIFIED (Jeff, Debug + Release 2026-05-30):** "Fixed and the real use case still works fine." Both scenarios pass — the false prompt on File > New is gone, and legitimate in-project duplicate detection still fires. Task 4 = DONE; ready to commit. Next: Task 5 (bus collapse/expand UI) → Task 6 (close).
 
+Task 4 committed at `dc965ef` (2 files, +27).
+
+---
+
+## 2026-05-30 — Task 5 — Bus collapse/expand UI: architecture + integration map (pre-implementation)
+
+**Persistence decision (my call — invisible impl detail):** per-bus collapse state = a new **APVTS `_collapsed` bool** registered on Bus strips in `addParamsForMixerStrip` (PluginProcessor.cpp:~3921, the Bus block). Chosen over a project-XML `<MixerView>` element because the APVTS state tree already serializes with the project (so it "persists through save" + restores on load with zero new serialization plumbing), matching the existing `_mute`/`_solo`/`_polarity` per-strip pattern. It's UI-only (no audio path reads it) — a slight category bend (a view flag in the param tree) accepted for the lean auto-persist.
+
+**Integration map (~15 sites per `reference_mixer_strip_pattern_audit.md`):**
+- **PluginProcessor** `addParamsForMixerStrip`: + `_collapsed` bool, `kind==Bus` only.
+- **MixerTrackStrip** (.h/.cpp): a collapse arrow button (Bus strips only) in the top row right of a slightly-shrunk name label, RibbonTabBar tab-arrow style, **down=expanded / up=collapsed**, greyed/disabled when the bus has no members; `onCollapseToggled(channelId)` callback; `setCollapsed(bool)` + `setCollapseEnabled(bool)`; **tooltip-on-ALL-strips** (full name + "Double-click to rename", refreshed in ctor + `onTextChange` + `setTrackName`); resized() arrow placement on Bus strips.
+- **MixerPage** (.cpp): wire each bus strip's `onCollapseToggled` → flip the bus's `_collapsed` param + `setCollapsed` + relayout (re-run the strip layout fn `:3490-3592` + `syncHScrollBar`); in `laidOutBus` (`:3529`) read the bus's `_collapsed` param → if collapsed, skip `layoutGroup` for its members (`setVisible(false)`) + don't advance `x`; set each bus's collapsed + arrow-enabled (has-members = `buckets[busChId]` non-empty) at layout time so it restores on load. MUST cover the on-demand Vox Bus 2 / Inst Bus 2 / Inst Bus 3 (`:1842/1906/1968`) too.
+- Master gets NO arrow (Jeff #1).
+
+Implementing now in this order: param → MixerTrackStrip → MixerPage. Pre-build entry to follow once it compiles-clean statically.
+
+---
+
+## 2026-05-30 — Task 5 — Bus collapse/expand UI implemented (pre-build)
+
+**Implemented per the locked spec + the architecture above.** 6 files; statically cross-checked (all symbols resolve; `prefixFromChannelId` confirmed to return the exact registered bus prefixes so `prefix + "_collapsed"` looks up correctly).
+
+- **Param (PluginProcessor.cpp:~3946):** `addB(prefix + "_collapsed", ...)` gated to `kind==MixerStripKind::Bus` in `addParamsForMixerStrip` — registered for all 11 buses at startup via `ensureMixerBusAndMasterParams` (incl. voxbus2 / instbus2 / instbus3). UI-only; persists with the project's APVTS state.
+- **MixerTrackStrip:** new `MixerCollapseArrow` button class (paints a down triangle = expanded / up = collapsed; greyed when `!isEnabled()`; subtle hover). Members/API: `mCollapseBtn`, `onCollapseToggled(channelId)`, `setCollapsed(bool)`, `setCollapseEnabled(bool)`, `refreshNameTooltip()`. Ctor adds the arrow + click handler ONLY for `StripType::Bus` (fires `onCollapseToggled(mChannelId)` — channelId is set post-ctor, read at click time). `resized()` reserves 14 px on the right of the name row for the arrow (Bus only) so the name shrinks. **Tooltip-on-ALL-strips:** `refreshNameTooltip` sets the label tooltip to the full name (+ "Double-click to rename" where editable), called from ctor + `onTextChange` + `setTrackName` + `setRenameable` (replaces the old rename-only-tooltip).
+- **MixerPage:** `isBusCollapsed(chId)` reads the `_collapsed` raw param; `onBusCollapseToggled(chId)` flips it (`setValueNotifyingHost`) + calls `layoutScrollContent()`. In `layoutScrollContent`, the `laidOutBus` lambda (10 buses incl. on-demand Vox2/Inst2/Inst3) + the inline FX-bus block both: wire `onCollapseToggled`, set `setCollapseEnabled(hasMembers)` + `setCollapsed(collapsed)`, and when collapsed hide the bus's member strips (`setVisible(false)`) + DON'T advance `x` (gap closes); when expanded `setVisible(true)` + `layoutGroup`. Master has no arrow (not a `laidOutBus` bus). Restore-on-load is implicit: the param is restored by `setStateInformation`, and `layoutScrollContent` re-reads it whenever the mixer relays out (insert strips are recreated on load → relayout).
+- **FX bus nuance:** collapses its own `kFxBus` member group only; the aux-to-aux main-out chains (separate aux groups visually in the FX family) are left always-laid-out.
+
+**Possible build nits (likely harmless):** `juce::Font`/`juce::Button` usage is all standard; `mNameLabel.isEditableOnDoubleClick()` is a real juce::Label getter; `BuilderPage`'s unrelated `mCollapseBtn`/`setCollapsed` is a different class (no collision).
+
+**Still pre-build; awaiting Jeff's Debug-then-Release verify:** (1) every bus strip shows a small down-arrow right of its name; click → flips up + that bus's strips hide + the row closes the gap; click again → they return. (2) Master has NO arrow. (3) a bus with no member strips shows the arrow greyed/disabled. (4) hover any strip's name → tooltip shows the full name (+ rename hint where editable); long truncated names read fully in the tooltip. (5) collapse some buses, save + reload the project → collapsed state restored. (6) no audio change — a collapsed bus's hidden strips still play + meter.
+
+**VERIFIED (Jeff, Debug + Release 2026-05-30): "All pass."** All 6 scenarios confirmed — arrow collapse/expand + gap-close, Master arrow-less, empty-bus arrow greyed, full-name tooltip on all strips, collapse state persists through save+reload, and no audio change on hidden strips. Task 5 = DONE; ready to commit. This was the LAST build task — only Task 6 (close) remains.
+
 
 
 

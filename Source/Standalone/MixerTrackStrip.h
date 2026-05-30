@@ -30,6 +30,42 @@ public:
     }
 };
 
+// ── MixerCollapseArrow (QA-RustyMeter Task 5) ────────────────────────────────
+// Tiny triangle button on a Bus strip's name row: points DOWN when the bus's
+// channel strips are expanded (shown), UP when collapsed (hidden) -- the
+// RibbonTabBar tab-dropdown idiom.  Greyed + non-interactive (disabled) when the
+// bus has no member strips to collapse.
+// ─────────────────────────────────────────────────────────────────────────────
+class MixerCollapseArrow : public juce::Button
+{
+public:
+    MixerCollapseArrow() : juce::Button("collapse") {}
+    bool collapsed = false;   // false = expanded (arrow down) / true = collapsed (arrow up)
+
+    void paintButton(juce::Graphics& g, bool isOver, bool /*isDown*/) override
+    {
+        auto b = getLocalBounds().toFloat();
+        const bool en = isEnabled();
+        if (isOver && en)
+        {
+            g.setColour(juce::Colour(0x22ffffff));
+            g.fillRoundedRectangle(b.reduced(0.5f), 2.0f);
+        }
+        auto tri = b.reduced(b.getWidth() * 0.24f, b.getHeight() * 0.34f);
+        juce::Path p;
+        if (collapsed)   // up-pointing = collapsed
+            p.addTriangle(tri.getX(), tri.getBottom(),
+                          tri.getRight(), tri.getBottom(),
+                          tri.getCentreX(), tri.getY());
+        else             // down-pointing = expanded
+            p.addTriangle(tri.getX(), tri.getY(),
+                          tri.getRight(), tri.getY(),
+                          tri.getCentreX(), tri.getBottom());
+        g.setColour(en ? juce::Colour(0xffBFC4C6) : juce::Colour(0xff44484A));
+        g.fillPath(p);
+    }
+};
+
 // ── MixerTrackStrip ────────────────────────────────────────────────────────────
 // One vertical channel strip in the mixer console.
 //
@@ -115,6 +151,7 @@ public:
     void setTrackName(const juce::String& name)
     {
         mNameLabel.setText(name, juce::dontSendNotification);
+        refreshNameTooltip();   // QA-RustyMeter Task 5: keep the hover tooltip current
     }
 
     // G-6 (2026-04-29): opt Bus-type strips into rename.  By default Bus
@@ -123,8 +160,17 @@ public:
     void setRenameable (bool canRename)
     {
         mNameLabel.setEditable (canRename, canRename, false);
-        mNameLabel.setTooltip (canRename ? "Double-click to rename" : juce::String());
+        refreshNameTooltip();   // QA-RustyMeter Task 5: name + rename hint where editable
     }
+
+    // ── QA-RustyMeter Task 5: bus collapse/expand ────────────────────────────
+    // Fired when the bus collapse arrow is clicked; passes this strip's channel
+    // id.  MixerPage flips the persisted state + relayouts.  (Bus strips only.)
+    std::function<void(int channelId)> onCollapseToggled;
+    // Drive the arrow direction (false = expanded / down, true = collapsed / up).
+    void setCollapsed (bool c) { mCollapseBtn.collapsed = c; mCollapseBtn.repaint(); }
+    // Grey out + disable the arrow when the bus has no member strips to collapse.
+    void setCollapseEnabled (bool e) { mCollapseBtn.setEnabled (e); }
 
     // 5F-4b B3: channel ID for cable routing (MixerChannelIds value)
     void setChannelId(int id) { mChannelId = id; }
@@ -276,6 +322,10 @@ private:
     // Sits between the width knob and the fader; fed by MixerPage::onVBlank.
     LufsReadoutBox   mLufsBox;
 
+    // QA-RustyMeter Task 5 (2026-05-30): bus collapse arrow.  Bus strips ONLY
+    // (added + positioned only when mType==Bus); fires onCollapseToggled.
+    MixerCollapseArrow mCollapseBtn;
+
     // Attachments (constructed in setApvts, torn down on destroy / rebind)
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -299,6 +349,16 @@ private:
     void sliderDragEnded     (juce::Slider* s) override;
 
     void updateDbLabel();
+
+    // QA-RustyMeter Task 5 (2026-05-30): hover tooltip = the full (possibly
+    // truncated) name, plus a "Double-click to rename" line where editable.
+    // Refreshed on construct / rename / setTrackName.  All strip types.
+    void refreshNameTooltip()
+    {
+        const juce::String nm = mNameLabel.getText();
+        mNameLabel.setTooltip (mNameLabel.isEditableOnDoubleClick()
+                               ? nm + "\nDouble-click to rename" : nm);
+    }
 
     // Visibility helpers - driven by mType
     bool hasPolarityRow() const noexcept

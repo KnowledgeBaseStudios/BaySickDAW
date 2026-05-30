@@ -3388,6 +3388,28 @@ void MixerPage::onVBlank()
 // ─────────────────────────────────────────────────────────────────────────────
 // Layout
 // ─────────────────────────────────────────────────────────────────────────────
+// QA-RustyMeter Task 5 (2026-05-30): bus collapse/expand view state.  The
+// per-bus _collapsed APVTS bool is the source of truth (it persists with the
+// project + restores on load).  isBusCollapsed reads it; onBusCollapseToggled
+// (fired by a bus strip's arrow) flips it + relayouts.
+bool MixerPage::isBusCollapsed (int channelId) const
+{
+    const juce::String prefix = MixerChannelIds::prefixFromChannelId (channelId);
+    if (prefix.isEmpty()) return false;
+    if (auto* v = mProcessor.apvts.getRawParameterValue (prefix + "_collapsed"))
+        return v->load() > 0.5f;
+    return false;
+}
+
+void MixerPage::onBusCollapseToggled (int channelId)
+{
+    const juce::String prefix = MixerChannelIds::prefixFromChannelId (channelId);
+    if (prefix.isEmpty()) return;
+    if (auto* p = mProcessor.apvts.getParameter (prefix + "_collapsed"))
+        p->setValueNotifyingHost (p->getValue() > 0.5f ? 0.0f : 1.0f);   // flip
+    layoutScrollContent();   // re-reads the param: hide/show members + close the gap
+}
+
 void MixerPage::layoutScrollContent()
 {
     using namespace MixerChannelIds;
@@ -3536,18 +3558,54 @@ void MixerPage::layoutScrollContent()
     {
         busStrip.setBounds(x, 0, busW, stripH);
         busStrip.setAccentColor(busAccent);
+        // QA-RustyMeter Task 5 (2026-05-30): wire the collapse arrow (idempotent)
+        // + apply the persisted collapse state.  Collapsed -> hide this bus's
+        // member strips + don't advance x, so the group's gap closes.  Arrow
+        // greyed/disabled when the bus has no members.
+        busStrip.onCollapseToggled = [this](int chId) { onBusCollapseToggled(chId); };
         x += busW;
-        if (auto it = buckets.find(busChId); it != buckets.end())
-            layoutGroup(it->second, x, busAccent, busChId);
+        auto it = buckets.find(busChId);
+        const bool hasMembers = (it != buckets.end() && ! it->second.empty());
+        const bool collapsed  = hasMembers && isBusCollapsed(busChId);
+        busStrip.setCollapseEnabled(hasMembers);
+        busStrip.setCollapsed(collapsed);
+        if (hasMembers)
+        {
+            if (collapsed)
+                for (auto& m : it->second) { if (m.strip) m.strip->setVisible(false); }
+            else
+            {
+                for (auto& m : it->second) { if (m.strip) m.strip->setVisible(true); }
+                layoutGroup(it->second, x, busAccent, busChId);
+            }
+        }
         x += kGroupSep;
     };
 
     // ── FX Bus group ─────────────────────────────────────────────────
     mFXBusStrip->setBounds(x, 0, busW, stripH);
     mFXBusStrip->setAccentColor(juce::Colour(kEffectsTabPink));
+    // QA-RustyMeter Task 5 (2026-05-30): FX bus collapse (its own member group
+    // only; the aux-to-aux chains below are separate aux groups, left as-is).
+    mFXBusStrip->onCollapseToggled = [this](int chId) { onBusCollapseToggled(chId); };
     x += busW;
-    if (auto it = buckets.find(kFxBus); it != buckets.end())
-        layoutGroup(it->second, x, juce::Colour(kEffectsTabPink), kFxBus);
+    {
+        auto it = buckets.find(kFxBus);
+        const bool hasMembers = (it != buckets.end() && ! it->second.empty());
+        const bool collapsed  = hasMembers && isBusCollapsed(kFxBus);
+        mFXBusStrip->setCollapseEnabled(hasMembers);
+        mFXBusStrip->setCollapsed(collapsed);
+        if (hasMembers)
+        {
+            if (collapsed)
+                for (auto& m : it->second) { if (m.strip) m.strip->setVisible(false); }
+            else
+            {
+                for (auto& m : it->second) { if (m.strip) m.strip->setVisible(true); }
+                layoutGroup(it->second, x, juce::Colour(kEffectsTabPink), kFxBus);
+            }
+        }
+    }
     // Aux-to-aux main-out chains still live visually in the FX family
     for (auto& [dst, members] : buckets)
     {
