@@ -1353,21 +1353,18 @@ needed to find what you should pull up to review the work.
 - **Bucket:** Cross-cutting Infrastructure
 - Verify (own plan file will detail): post-fix timestamped Sub-F=(e)-style trace capture shows clean cross-block separation between producer writes + InsertTask reads (Candidate A) OR confirms instance affinity across worker rotations (Candidate B); bit-crusher symptom on BaySickRustyDrums under MT-on remains absent (Sub-K Serial Fallback retired + dispatcher fix engaged); no MT performance regression on non-sfizz engines (Harmless / BaySickSynth / BaySickPlayer / BaySickBass) vs pre-batch baseline; `audioThreadQueue` infrastructure + `mAudioThreadOnly` flag removed from VibeThreadPool + RenderTask cleanly.
 
-#### **QA-RustyMeter: BaySickRustyDrums per-layer-volume CC sliders not reflected in per-strip dbfs meter** *(NEW — inserted 2026-05-29 via §9 forty-second Forks entry)*
+#### **QA-RustyMeter: Metering architecture upgrade — split Peak/RMS meters (all strips) + Master LUFS readout** *(NEW — inserted 2026-05-29 via §9 forty-second Forks entry; RE-SCOPED 2026-05-30 via §9 forty-fourth Forks entry — the original per-layer-volume CC meter investigation diagnosed not-a-bug)*
 
 **Plan file:** `Plans & Specs/Batch Plans/sorted-whistling-shannon.md`
-- Items: AriaControlPanel per-layer-volume CC sliders inside the BaySickRustyDrums kit player UI (e.g. KICK section's Kick/OH/Punch sliders + SNARE section's Btm/Top/OH/Snap/Punch/Epic + likely other channels' equivalent sliders) audibly affect the rendered output but the per-strip dbfs meter on the Mixer page does NOT reflect the change.  Origin: surfaced 2026-05-29 by Jeff at QA-DispatcherAffinity Task 3 Verify 2 (kit-swap stability test); confirmed pre-existing (present under Sub-K-on production state pre-Task-3); confirmed BaySickRustyDrums-specific (BaySickGuitars + BaySickBasses volume knobs DO update their dbfs meters correctly).  See §9 forty-second Forks entry.
-- Scope (Jeff-locked 2026-05-29):
-  - Investigate the per-layer-volume CC mapping path: AriaControlPanel slider → MIDI CC value → sfizz engine → multi-output `output=N` extraction → `mMultiOutScratch` → `RustyInsertTask::run()` → `InsertNode::processBlock` → `publishPeakReading` → `drainMeterAtomicsForUI` → UI poll.
-  - **Prime investigation target: `buildOutputRoutedSfzWrapper`** (the wrapper SFZ synthesis that injects `output=N` per `<master>`/`<group>` line before `loadSfzString`).  Unique to BaySickRustyDrums (BaySickGuitars + BaySickBasses use plain `loadSfzFile` and do NOT exhibit the bug).  Hypothesis: the wrapper synthesis may extract the per-channel audio (via `output=N`) BEFORE the per-layer-volume CC scaling is applied at the SFZ-defined amplitude points; the multi-output channel reflects raw sample audio without the CC scaling while the FINAL stereo mix-down (which sfizz produces alongside the multi-outputs) DOES get the CC scaling — but the per-strip path bypasses that final stereo mix.
-  - **Alternative hypothesis:** the CC mapping in the Big Rusty Drums kit's SFZ file itself may bind the layer-volume knobs to a parameter that bypasses the per-output amplitude (e.g. a global volume CC that the wrapper's `output=N` extraction sidesteps).  Both hypotheses are testable via a focused wrapper-SFZ trace at investigation time.
-  - Design + implement the fix per investigation findings: wrapper-synthesis-level patch (post-process the synthesized SFZ to ensure per-output amplitude reflects the CCs) OR sfizz-internal patch (CC interpretation order) OR alternative SFZ wrapper construction.
-- Risk: **medium** — sfizz parser + wrapper-synthesis territory possibly; investigation depth uncertain pending wrapper SFZ trace.
-- Dependencies: QA-DispatcherAffinity closed.
-- Sequencing: **immediately after QA-DispatcherAffinity close, before QA-EngineApvts** (Jeff's slot pick 2026-05-29 per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 forty-second Forks entry).  Slot rationale: BaySickRustyDrums-specific bug + investigation surface overlaps `buildOutputRoutedSfzWrapper` which the QA-Sfizz cluster touched; addressing it before the QA-EngineApvts perf-audit work keeps the sfizz-engine cluster work contiguous.
-- Effort: medium (~4-8 hours; investigation depth dominates the estimate; if it's a wrapper-synthesis-level patch then small + bounded; if sfizz-internal then larger).
-- **Bucket:** Players, Mixer / Routing
-- Verify (own plan file will detail): turning a BaySickRustyDrums per-layer-volume CC slider (KICK Kick/OH/Punch, SNARE Btm/Top/OH/Snap/Punch/Epic, etc.) audibly increases/decreases the channel's output AND the per-strip dbfs meter on the Mixer page reflects the change in real-time; no regression on BaySickGuitars + BaySickBasses volume-knob-to-meter behavior; no regression on the Stage D Sub-K-disabled MT test (bit-crusher remains absent post-QA-DispatcherAffinity).
+- **Origin + pivot:** opened 2026-05-29 to investigate the BaySickRustyDrums per-layer-volume CC sliders that audibly affect output but don't move the per-strip dbfs meter (surfaced by Jeff at QA-DispatcherAffinity Task 3 Verify 2; see §9 forty-second Forks entry).  **Task 1 diagnosis (2026-05-30) settled it as NOT a bug:** the kit SFZ + `buildOutputRoutedSfzWrapper` route the per-layer-volume `amplitude_cc` correctly to each piece's strip output (verified kick + snare; the prime hypothesis "wrapper strips CC scaling before output extraction" is DISPROVED); every meter is a PEAK meter (`bufferPeakDbStereo`→`getMagnitude`, unified by QA-AudioMeters), and Rusty's per-layer faders are mic-mix controls (overhead/room/body mics + decorrelated summing raise loudness/RMS without raising the peak transient), so the peak meter correctly shows ~no change.  Jeff pivoted the batch to a metering-architecture upgrade, in place (see §9 forty-fourth Forks entry).
+- Items (Jeff-locked 2026-05-30): (1) **Split Peak/RMS meter on all non-master strips** — `DBFSMeter` height split 50/50: bottom = existing dbfs peak bar; top = a centered scrolling RMS-history "waveform" (L deflects left / R deflects right from a centerline; smooth dBFS-palette color keyed to deflection: green center → red edge; ~3.5 s history scrolling top→bottom; windowed ~200 ms RMS).  (2) **Master-strip LUFS readout** — a box between the stereo width knob and the master fader showing one of Momentary (400 ms) / Short-Term (3 s) / Integrated (gated, resets on play-from-top/loop); all three compute continuously, one displayed, `▾` dropdown selector.  Master keeps a full-height peak bar (no split).
+- Scope: new `LufsMeterDSP` master node (EBU R128 K-weighting + M/S/I windows + gating + transport reset); per-strip windowed-RMS publish (~200 ms EMA) mirrored across the meter plumbing (all insert kinds + buses); `DBFSMeter` split-mode (Full=master / Split=others) + `paintRmsWaveform` + RMS history ring; `LufsReadoutBox` UI + master-strip row insertion.  3-task structure (Option A, Jeff 2026-05-30): Task 2 Split meter / Task 3 Master LUFS / Task 4 Close.  LUFS recipe in `Plans & Specs/Research Reports/daw-architecture-lufs-momentary-shortterm-metering-2026-05-29.md`.
+- Risk: **medium-high** — shared `DBFSMeter` (every strip), broad meter-publish plumbing, net-new master DSP + transport hook + new UI.
+- Dependencies: QA-DispatcherAffinity closed (`5e830e2`).
+- Sequencing: **immediately after QA-DispatcherAffinity close, before QA-EngineApvts** (unchanged; re-scope is in place per Jeff 2026-05-30 — investigation + metering-code mapping + LUFS research already done in this batch).
+- Effort: **large** (~12-20 hours across Tasks 2-3).
+- **Bucket:** Mixer / Routing, UI / L&F / Theming, Cross-cutting Infrastructure
+- Verify (plan file details): all non-master strips show peak bar (bottom) + scrolling RMS waveform (top, centered L-left/R-right, green-center→red-edge, ~3.5 s scroll, reacts to level); master shows a full peak bar + the LUFS box between width knob and fader; LUFS M/S/I selectable via `▾` with sane values (Momentary lively / Short-Term steady / Integrated accumulates + resets on play/loop), selected mode persists; no regression on peak readings, non-Rusty engines, or the QA-DispatcherAffinity 6-cymbal MT test.
 
 #### **QA-EngineApvts: Engine processors APVTS dirty-flag pattern compliance (perf-audit M2)** *(NEW — inserted 2026-05-24)*
 
@@ -2345,19 +2342,19 @@ fortieth Forks entry.
 2026-05-29 at QA-DispatcherAffinity Task 3 verify finding.  Slotted
 **immediately after QA-DispatcherAffinity close, before QA-EngineApvts**
 (Jeff's slot pick per `feedback_slot_placement_is_spec_call.md`).
-Scope: investigate + fix the BaySickRustyDrums per-layer-volume CC
-slider audibly-affects-output-but-not-per-strip-dbfs-meter disconnect
-surfaced by Jeff at QA-DispatcherAffinity Task 3 Verify 2 (kit-swap
-stability test).  Pre-existing bug confirmed present under Sub-K-on
-production state pre-Task-3; BaySickRustyDrums-specific (BaySickGuitars
-+ BaySickBasses verified unaffected -- their volume knobs DO update
-their per-strip dbfs meters correctly).  Prime investigation target:
-`buildOutputRoutedSfzWrapper` (wrapper SFZ synthesis with `output=N`
-injection unique to BaySickRustyDrums).  Hypotheses: wrapper synthesis
-may extract per-channel audio before per-layer-volume CC scaling is
-applied OR the SFZ kit's CC mapping itself binds layer volumes to a
-parameter the `output=N` extraction sidesteps.  Risk medium, effort
-medium (~4-8 hours).  See §9 forty-second Forks entry.
+Scope (RE-SCOPED 2026-05-30, in place): Task 1 diagnosed the
+per-layer-volume CC vs per-strip-meter disconnect as NOT a bug (every
+meter is a PEAK meter; Rusty's per-layer faders are mic-mix controls
+that raise loudness/RMS without raising the peak transient; the wrapper
+routes the CC correctly).  Jeff pivoted the batch to a
+metering-architecture upgrade: split Peak/RMS meters on all non-master
+strips (bottom dbfs peak bar + top centered scrolling RMS waveform,
+L-left/R-right, green-center -> red-edge) + a Master-strip LUFS readout
+(Momentary 400 ms / Short-Term 3 s / Integrated gated, selectable via a
+dropdown) between the stereo width knob and the master fader; master
+keeps a full peak bar.  New `LufsMeterDSP` (EBU R128) + per-strip
+windowed-RMS publish.  Risk medium-high, effort large (~12-20 hours).
+See §9 forty-second + forty-fourth Forks entries.
 
 \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-EngineApvts** inserted
 2026-05-24 at QA-Eg close.  Slotted **immediately after QA-RustyMeter,
@@ -5131,3 +5128,35 @@ Removing these eliminates the per-block `gCaptureOn` relaxed-loads on the audio 
 - `Plans & Specs/Implemented Work Log.md` — QA-DispatcherAffinity close entry FND-9 + routing table reference this fold-in.
 
 **Verification:** n/a for this §9 entry — routing decision artifact, not a source change.  The actual MT Diagnostic strip + its verify happen when QA-Cleanup-1 executes (Phase 6); QA-Cleanup-1's per-delete build-after-every-delete ladder covers it.
+
+---
+
+### 2026-05-30 — QA-RustyMeter Task 1 diagnosis (per-layer-volume CC vs per-strip meter = NOT a bug) → batch RE-SCOPED in place to a metering architecture upgrade (split Peak/RMS meters + Master LUFS readout)
+
+**Status:** SETTLED RE-SCOPE.  QA-RustyMeter's Task 1 investigation (static, no source change) closed the original finding as NOT a bug; Jeff pivoted the open batch (in place) to a metering-architecture upgrade.
+
+**Diagnosis (Task 1, 2026-05-30):** the BaySickRustyDrums per-layer-volume CC sliders audibly change output but don't move the per-strip dbfs meter because: (1) the kit SFZ defines each per-layer-volume CC as an `amplitude_cc<N>` at the `<master>` level in the per-piece mapping file, and `buildOutputRoutedSfzWrapper` annotates those `<master>` blocks with the correct `output=N` — so the CC scaling DOES reach the right strip output (verified for kick `kick_24_map.sfz` cc70/71/72/74 + snare `snare_14_map.sfz` cc80-85; the §5 / §9-forty-second prime hypothesis "wrapper strips CC scaling before output extraction" is DISPROVED).  (2) Every meter in the app is a PEAK meter (`bufferPeakDbStereo`→`getMagnitude`, unified by QA-AudioMeters); a peak meter tracks pure-gain controls but NOT loudness-only changes.  Rusty's per-layer faders are mic-mix controls — boosting overhead/room/body mics, or summing decorrelated mics, raises perceived loudness + RMS without raising the peak transient, so the peak meter correctly shows ~no change.  Rusty is the only engine with mic-mix faders, which is why the symptom looked Rusty-specific (BaySickGuitars/BaySickBasses volume knobs are pure gain → their peak meters DO move).  Jeff verbatim 2026-05-30: "I want to take it much further to give the UI a dense, professional feel similar to FL Studio's advanced metering and oscilloscope aesthetics."
+
+**Re-scope (Jeff-locked 2026-05-30):** QA-RustyMeter becomes a metering-architecture upgrade, in place (Jeff: the investigation + metering-code mapping + LUFS research were all done in this batch; a new batch would reload that context = wasted tokens).  New scope:
+- **Split Peak/RMS meter (all non-master strips):** `DBFSMeter` height split 50/50 — bottom = existing dbfs peak bar; top = a centered scrolling RMS-history "waveform" (per-channel: L deflects left, R deflects right; smooth dBFS-palette color keyed to deflection — green center → red edge; ~3.5 s history scrolling top→bottom; windowed ~200 ms RMS).  Per-strip RMS published across the meter plumbing (all insert kinds + buses), mirroring the existing peak publish.
+- **Master-strip LUFS readout:** new `LufsMeterDSP` (EBU R128 K-weighting + Momentary 400 ms + Short-Term 3 s + Integrated gated, transport reset on play-from-top/loop) on the master bus; a `LufsReadoutBox` UI (value + mode-title + `▾` selector for M/S/I; all 3 compute, one shown; selected mode persisted) placed between the stereo width knob and the master fader.  Master keeps a full-height peak bar.
+
+**Design decisions (Jeff, 2026-05-30):** task structure = Option A 3 tasks (Split meter / Master LUFS / Close); master meter = full peak bar (#2b); all non-master strips split this batch (#3a); centered scope trace with L-left/R-right (#4a/#7a); windowed RMS ~150-300 ms (#5b); ~3-4 s history (#6b); color = smooth gradient through the dBFS palette keyed to deflection, green center → red edge (#8); LUFS box ~18-20 px (#9); split 50/50 (#10).
+
+**Original Sub-A superseded:** the original fix-shape spec call (wrapper-synthesis / sfizz-internal / alternative wrapper construction) is moot — there is no routing bug to fix.  True-peak (dBTP), Integrated LRA, and per-strip LUFS are explicitly out of scope → Future State (routed at QA-RustyMeter close).
+
+**LUFS research:** `Plans & Specs/Research Reports/daw-architecture-lufs-momentary-shortterm-metering-2026-05-29.md` (K-weighting bilinear-from-constants + M/S/I windows + ungated/gated semantics + the 48 kHz acceptance table; produced by the QA-RustyMeter "Understand" workflow).
+
+**Inline back-refs:**
+- §5 — QA-RustyMeter entry header + Items + Scope + Risk + Effort + Bucket + Verify REWRITTEN to the metering-upgrade scope (Origin bullet records the diagnosis).  Bucket changed Players, Mixer/Routing → Mixer/Routing, UI/L&F/Theming, Cross-cutting Infrastructure.
+- §6 — QA-RustyMeter footnote Scope sentences updated to the metering upgrade + the diagnosis pivot (slot unchanged).
+- §9 this entry (forty-fourth Forks entry).
+- QA-RustyMeter batch — running notes `sorted-whistling-shannon.md` Task 1 sections capture the diagnosis + the design spec calls; plan file `Batch Plans/sorted-whistling-shannon.md` rewritten to the metering upgrade (with code sketches).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-RustyMeter entry rewritten; §6 footnote updated; §9 this entry.
+- `Plans & Specs/Batch Plans/sorted-whistling-shannon.md` — plan rewritten to the metering upgrade.
+- `Plans & Specs/Running Notes/sorted-whistling-shannon.md` — Task 1 diagnosis + scope pivot + design spec calls.
+- `Plans & Specs/Research Reports/daw-architecture-lufs-momentary-shortterm-metering-2026-05-29.md` — NEW (LUFS recipe).
+
+**Verification:** n/a for this §9 entry — re-scope artifact.  QA-RustyMeter's own per-task verify ladder (plan file) covers the metering upgrade.

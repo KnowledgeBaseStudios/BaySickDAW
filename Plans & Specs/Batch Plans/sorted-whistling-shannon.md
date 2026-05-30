@@ -1,146 +1,344 @@
-# QA-RustyMeter — BaySickRustyDrums per-layer-volume CC vs per-strip dBFS meter — Plan (sorted-whistling-shannon)
+# QA-RustyMeter — Metering architecture upgrade: split Peak/RMS meters + Master LUFS readout — Plan (sorted-whistling-shannon)
 
-> **Canonical path** (mirrored after ExitPlanMode + approval):
+> **Canonical path** (mirrored over the existing file after ExitPlanMode + approval):
 > `Plans & Specs/Batch Plans/sorted-whistling-shannon.md`
 > Paired running notes: `Plans & Specs/Running Notes/sorted-whistling-shannon.md`
+> LUFS research: `Plans & Specs/Research Reports/daw-architecture-lufs-momentary-shortterm-metering-2026-05-29.md`
 
-> **For execution:** use `superpowers:executing-plans` inline. Steps use `- [ ]` checkbox syntax. Builds run by Jeff (`do_build.bat`) — never by Claude. Verify in the Debug exe FIRST, then Release (CLAUDE.md Build System standing rule). **Investigation-first batch** (Jeff-locked S1): Task 1 diagnoses + PAUSES for Jeff's root-cause review + fix-shape pick; Task 2 implements the chosen fix; Task 3 closes. The **fix shape is a genuinely deferred spec call** (Sub-A) — it is NOT pre-picked anywhere in this plan.
+> **For execution:** `superpowers:executing-plans` inline. `- [ ]` checkbox steps. Builds run by Jeff (`do_build.bat`) — never by Claude. Verify Debug FIRST, then Release. **RE-SCOPE of an open batch** (Task 0 + Task 1 already landed). The original per-layer-volume "bug" diagnosed as **not a bug** (expected peak-meter behavior); Jeff pivoted to a metering-architecture upgrade. Tasks continue: **Task 2 (Split meter) → Task 3 (Master LUFS) → Task 4 (Close)**.
+>
+> **Code blocks below are implementation sketches** — codebase-consistent and concrete enough to build from, but exact JUCE sign conventions (IIR `a1/a2`), field names (`BlockContext`/`posInfo`), and the full per-site plumbing enumeration are verified/refined at build. The K-weighting coeffs have a hard acceptance test (the 48 kHz sanity table).
+
+---
 
 ## Context
 
-QA-RustyMeter fixes a pre-existing, BaySickRustyDrums-specific bug surfaced by Jeff at QA-DispatcherAffinity Task 3 Verify 2 (the kit-swap stability test) and routed forward as its own batch (§9 forty-second Forks entry; slotted after QA-DispatcherAffinity, before QA-EngineApvts).
+**Origin + pivot.** QA-RustyMeter opened (Task 0, `8e27a31`) to investigate the BaySickRustyDrums per-layer-volume CC sliders that audibly change output but don't move the per-strip dBFS meter. **Task 1 (no source change) settled it as NOT a bug:** the kit SFZ + `buildOutputRoutedSfzWrapper` route the `amplitude_cc` correctly to each piece's strip (verified kick + snare); every meter is a **PEAK** meter (`bufferPeakDbStereo`→`getMagnitude`), and Rusty's per-layer faders are **mic-mix** controls (overhead/room/body mics + decorrelated summing raise loudness/RMS without raising the peak transient), so the peak meter correctly shows ~no change.
 
-**The bug:** the AriaControlPanel per-layer-volume CC sliders inside the BaySickRustyDrums kit player (KICK section Kick/OH/Punch, SNARE section Btm/Top/OH/Snap/Punch/Epic, and the equivalent level sliders on every other channel) audibly change the rendered output, but the per-strip dBFS meter on the Mixer page does NOT move. Confirmed pre-existing (present under Sub-K-on, before any QA-DispatcherAffinity Task 3 change). Confirmed BaySickRustyDrums-specific: BaySickGuitars + BaySickBasses volume knobs DO move their per-strip meters.
+**The new work (Jeff pivot, 2026-05-30):** a dense, FL-style metering upgrade:
+1. **Split Peak/RMS meter (all non-master strips):** 50/50 — bottom = existing dBFS peak bar; top = a centered scrolling RMS "waveform" (L left / R right, color-graded green-center → red-edge by the dBFS palette), scrolling down ~3.5 s.
+2. **Master-strip LUFS readout:** a box between the width knob and master fader showing one of Momentary / Short-Term / Integrated (all 3 computed, one shown, `▾` selector). Master keeps a **full-height peak bar**.
 
-**Why BaySickRustyDrums is the odd one out:** it is the only engine that loads via `buildOutputRoutedSfzWrapper` (a synthesized wrapper SFZ that injects `output=N` per `<master>`/`<group>` line so each kit piece routes to its own sfizz output bus → its own per-strip InsertNode). BaySickGuitars + BaySickBasses use plain `loadSfzFile` (single stereo out, no multi-out wrapper) and don't exhibit the bug.
-
-**Code-grounded findings from pre-batch mapping (read, not assumed):**
-- Per-layer sliders write APVTS `brd_cc<N>` params → `parameterChanged` → `mSfizz->cc(0, cc, v)` ([BaySickRustyDrumsProcessor.cpp:53](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:53)). sfizz applies the CC internally.
-- There is exactly ONE sfizz render — `mSfizz->renderBlock(mMultiOutPtrs.data(), …, stripCount)` into `mMultiOutScratch` ([:273](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:273)). There is NO separate stereo-mix render. One global `outVol` is then applied to all channels ([:277](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:277)).
-- The per-strip meter AND the audible path both read the same `getStripBuffer` view into `mMultiOutScratch` ([:281-295](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:281)) via [RustyInsertTask.cpp:68](Source/Engine/Tasks/RustyInsertTask.cpp:68) → `VibeGraph::processInsert` → `InsertNode::processBlock` → `publishPeakReading`.
-- **Tension that defines the investigation:** because audible + metered share one buffer, the §9 "final stereo mix-down also gets CC scaling but the per-strip path bypasses it" hypothesis is suspect — there is no second mix to bypass. The likelier mechanism is in `buildOutputRoutedSfzWrapper` ([:656-776](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:656)): it injects `output=N` ONLY into `<master>`/`<group>` tags, via a sticky `currentPieceOutput` tracker (top-level control blocks before any piece context get `currentPieceOutput = -1` → NO output= → route to output 0), and never annotates `<global>`/`<control>`/`<region>`/`<effect>` blocks ([:770-772](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:770)). If the kit defines a per-layer-volume CC as a level control at a block level the wrapper mis-routes (sticky) or never routes (output 0), the CC scaling can land on a different sfizz output than the metered strip. The actual Big Rusty Drums kit SFZ is in-repo (`Files For Claude/karoryfer.big-rusty-drums-1.100/Programs/`), so this is confirmable statically.
-
-**Risk:** medium (sfizz parser + wrapper-synthesis territory; investigation depth uncertain until the static SFZ read lands). **Effort:** ~4-8h (investigation dominates; a wrapper-synthesis patch is small + bounded, a sfizz-internal patch is larger). **Dependencies:** QA-DispatcherAffinity closed (`5e830e2`). **Bucket:** Players + Mixer / Routing.
+**Risk:** medium-high (shared `DBFSMeter`, broad meter-publish plumbing, net-new master DSP + transport hook + new UI). **Effort:** large (~12-20 h, Tasks 2-3). **Dependencies:** QA-DispatcherAffinity closed (`5e830e2`). **Bucket:** Mixer / Routing (primary), UI / L&F / Theming, Cross-cutting Infrastructure.
 
 ---
 
 ## Spec calls already locked (with reasoning)
 
-| ID | Decision | Reasoning |
-|----|----------|-----------|
-| S1 | Task structure = 3 tasks (Investigate → Fix → Close). Task 1 diagnoses + PAUSES for Jeff's root-cause review + fix-shape pick; Task 2 implements; Task 3 closes. | Jeff 2026-05-29 (AskUserQuestion). Investigation-first batch — fix shape unknown until the trace lands; the pause gives a clean root-cause review + a separate commit boundary for diagnosis vs fix. |
-| S2 | Investigation methodology = static-first (read the in-repo kit SFZ + reproduce the wrapper `output=N` synthesis); escalate to a runtime per-strip peak-trace ONLY if the static read is inconclusive; surface the confirmed root cause + fix-shape options to Jeff before any fix code is written. | Locked in the S1 question framing Jeff accepted. Cheapest decisive diagnostic first; aligns with `feedback_diagnose_before_fixing.md` (diagnose with Jeff's A/B before shipping a fix). |
-| S3 | Silly-name = `sorted-whistling-shannon`. | Assigned by the plan-mode runtime (per the `federated-bouncing-cupcake` S8 precedent: "assigned by plan-mode runtime"); adopted for the canonical mirror + running-notes filename so one consistent name is used. |
-| S4 | Verify ladder = §5's locked 3 scenarios: (1) per-layer-volume slider audibly changes output AND the per-strip dBFS meter tracks it in real-time; (2) no regression on BaySickGuitars + BaySickBasses volume-knob-to-meter; (3) no regression on the Stage D Sub-K-disabled MT test (6-cymbal bit-crusher stays absent). Debug first, then Release. | §5 QA-RustyMeter entry + §9 forty-second Forks entry. |
+| ID | Decision | Source |
+|----|----------|--------|
+| S1 | Task structure = **Option A, 3 tasks** (Split meter / Master LUFS / Close). | Jeff 2026-05-30 (context economy). |
+| S2 | Diagnosis settled: meter-vs-knob disconnect is **not a bug** (peak-vs-loudness + mic-mix). Original wrapper/sfizz Sub-A superseded. | Task 1. |
+| S3 | `sorted-whistling-shannon`; **re-scope in place**. | Jeff 2026-05-30 (#11). |
+| #1 | LUFS box: **M+S+I all compute; ONE displayed**; [value / mode-title] + `▾` selector. Integrated gated + **resets on play-from-top / loop**. | Jeff (#1). |
+| #2 | **Master keeps a FULL peak bar** → `DBFSMeter::Layout {Full, Split}` (master=Full, others=Split). | Jeff (#2=b). |
+| #3 | **All non-master strips split this batch** (full per-strip RMS publish across insert kinds + buses). | Jeff (#3=a). |
+| #4/#7 | **Centered scope trace; L deflects left, R deflects right** from the centerline. | Jeff. |
+| #5 | RMS = **windowed ~150-300 ms** (EMA). | Jeff (#5=b). |
+| #6 | History **~3-4 s**; scroll derived. | Jeff (#6=b). |
+| #8 | Color = **smooth gradient, dBFS palette keyed to deflection**: green center → `#FFCC00` → `#FF6020` → `#FF2020` edge. | Jeff ("exactly what I want"). |
+| #9 | LUFS box **~18-20 px** (single mode). | Jeff. |
+| #10 | Split **50/50**. | Jeff. |
+
+## Sub-spec calls surfaced for ExitPlanMode (minor tunables — proposed defaults; confirm at review or Task 2/3 verify)
+
+| ID | Tunable | Default (within Jeff's ranges) |
+|----|---------|--------------------------------|
+| T-a | RMS EMA time constant | **~200 ms** |
+| T-b | History depth / ring size | **~3.5 s**, `kRmsHist = 256` |
+| T-c | LUFS bins/sec | **20** |
+| T-d | Selected-mode persistence | **persist to `settings.xml`**; default Momentary |
+| T-e | RMS stroke | two `juce::Path`s, ~1.6 px (optional 3-layer neon) |
+| T-f | True-peak (dBTP) + Integrated LRA + per-strip LUFS | **out of scope → Future State** |
+
+> §0 Rule 5: S1-S3 + #1-#10 were each surfaced + Jeff-answered in chat before landing. T-a..T-f are points within already-chosen ranges, flagged not pre-locked.
 
 ---
 
-## Sub-spec calls surfaced for ExitPlanMode (genuinely deferred — resolved mid-batch, NOT pre-picked)
+## Class outline + implementation sketches
 
-| ID | Question | Resolves when | Option space (no recommendation — Jeff picks) |
-|----|----------|---------------|-----------------------------------------------|
-| Sub-A | **Fix shape.** | Task 1 close, after the root cause is confirmed (static read, or Jeff's A/B if a runtime trace was needed). | (1) Wrapper-synthesis-level patch — fix `buildOutputRoutedSfzWrapper` so the block(s) carrying each per-layer-volume CC receive the correct `output=N` (e.g. annotate the un-/mis-routed control block, or fix the sticky tracker). (2) sfizz-internal patch — change CC interpretation / output-routing order inside vendored sfizz. (3) Alternative SFZ wrapper construction — restructure how the wrapper assigns outputs. (4) A shape the investigation surfaces. Per §5 + §9. |
-| Sub-B | **Runtime-trace style** — only arises IF the static SFZ read is inconclusive. | Task 1, if/when the runtime phase is reached. | (a) Diagnostic `juce::AlertWindow` showing per-strip `mMultiOutScratch` peaks (Jeff-doesn't-code → a readable on-screen surface; constraint noted, not a pick). (b) `juce::Logger` line to `build_log.txt`. (c) Temp-file dump to `Documents/BaySickDAW/` (existing folder convention). Jeff picks if/when reached. |
+### A. `LufsMeterDSP` — NEW `Source/DSP/LufsMeterDSP.{h,cpp}` (the meaty net-new DSP)
 
-> Per Main Plan §0 Rule 5: both rows above are genuinely deferred decisions that depend on a later finding — not picks staged as truth. Nothing in the Task 2 body assumes a particular Sub-A outcome.
+```cpp
+// LufsMeterDSP.h  — EBU R128 / BS.1770 on a stereo bus.
+// M (400 ms) + S (3 s) = ungated sliding windows; I = gated (-70 abs, -10 rel),
+// resets on transport play-from-top / loop.  Recipe: Research Reports/daw-architecture-lufs-*.
+class LufsMeterDSP
+{
+public:
+    void prepareToPlay (double sr, int /*blk*/)
+    {
+        mSr = sr; designKWeighting (sr);
+        mSamplesPerBin = juce::jmax (1, (int) std::lround (sr / kBinsPerSec));
+        mBinEL.assign (kShortTermBins, 0.0); mBinER.assign (kShortTermBins, 0.0);
+        mBinHead = mSampleInBin = 0; mCurL = mCurR = 0.0;
+        resetIntegrated();
+        mShelfL.reset(); mShelfR.reset(); mHpL.reset(); mHpR.reset();
+    }
+
+    void process (const juce::AudioBuffer<float>& buf)   // audio thread; post-fader/width stereo
+    {
+        const int n = buf.getNumSamples(); const int nc = buf.getNumChannels();
+        const float* L = buf.getReadPointer (0);
+        const float* R = nc > 1 ? buf.getReadPointer (1) : L;
+        for (int s = 0; s < n; ++s)
+        {
+            const float kl = mHpL.processSample (mShelfL.processSample (L[s]));
+            const float kr = mHpR.processSample (mShelfR.processSample (R[s]));
+            mCurL += (double) kl * kl; mCurR += (double) kr * kr;
+            if (++mSampleInBin >= mSamplesPerBin) closeBin();
+        }
+    }
+
+    void resetIntegrated() noexcept
+    { mIntegBlocks.clear(); mIntegratedLufs.store (-120.f, std::memory_order_relaxed); }
+
+    float momentary()  const noexcept { return mM.load (std::memory_order_relaxed); }
+    float shortTerm()  const noexcept { return mS.load (std::memory_order_relaxed); }
+    float integrated() const noexcept { return mIntegratedLufs.load (std::memory_order_relaxed); }
+
+private:
+    static constexpr int    kBinsPerSec = 20, kMomentaryBins = 8, kShortTermBins = 60;
+    static constexpr double  kOffset = -0.691;
+
+    void closeBin()
+    {
+        mBinEL[mBinHead] = mCurL; mBinER[mBinHead] = mCurR;
+        mCurL = mCurR = 0.0; mSampleInBin = 0;
+        mBinHead = (mBinHead + 1) % kShortTermBins;
+        mM.store (windowLufs (kMomentaryBins), std::memory_order_relaxed);
+        mS.store (windowLufs (kShortTermBins), std::memory_order_relaxed);
+        accumulateIntegrated();   // 400 ms blocks @ 75% overlap -> gated histogram
+    }
+    float windowLufs (int bins) const
+    {
+        double eL = 0, eR = 0;
+        for (int i = 0; i < bins; ++i)
+        { const int j = (mBinHead - 1 - i + 2*kShortTermBins) % kShortTermBins;
+          eL += mBinEL[j]; eR += mBinER[j]; }
+        const double ms = (eL + eR) / ((double) mSamplesPerBin * bins);  // G_L=G_R=1
+        return ms > 1e-12 ? (float) (kOffset + 10.0 * std::log10 (ms)) : -120.f;
+    }
+    void accumulateIntegrated();   // .cpp: -70 abs gate + -10 LU relative gate over stored blocks
+    void designKWeighting (double fs);
+
+    juce::dsp::IIR::Filter<float> mShelfL, mShelfR, mHpL, mHpR;
+    double mSr = 48000; int mSamplesPerBin = 2400, mSampleInBin = 0, mBinHead = 0;
+    double mCurL = 0, mCurR = 0; std::vector<double> mBinEL, mBinER, mIntegBlocks;
+    std::atomic<float> mM { -120.f }, mS { -120.f }, mIntegratedLufs { -120.f };
+};
+```
+
+```cpp
+// LufsMeterDSP.cpp — K-weighting, bilinear-from-constants (exact at any fs).
+// ACCEPTANCE TEST @48k: shelf ~ {1.53512,-2.69170,1.19839, a1=-1.69066,a2=0.73248};
+//                       RLB  ~ {1,-2,1, a1=-1.99005,a2=0.99007}.  Verify JUCE a-sign at build.
+void LufsMeterDSP::designKWeighting (double fs)
+{
+    auto mk = [] (double b0,double b1,double b2,double a1,double a2)
+    { return new juce::dsp::IIR::Coefficients<float> ((float)b0,(float)b1,(float)b2,1.0f,(float)a1,(float)a2); };
+    {   const double f0=1681.9744509555319, G=3.99984385397, Q=0.7071752369554193;
+        const double K=std::tan(juce::MathConstants<double>::pi*f0/fs);
+        const double Vh=std::pow(10.0,G/20.0), Vb=std::pow(Vh,0.4996667741545416), a0=1+K/Q+K*K;
+        auto* c = mk((Vh+Vb*K/Q+K*K)/a0, 2*(K*K-Vh)/a0, (Vh-Vb*K/Q+K*K)/a0, 2*(K*K-1)/a0, (1-K/Q+K*K)/a0);
+        mShelfL.coefficients = c; mShelfR.coefficients = c; }
+    {   const double f0=38.13547087613982, Q=0.5003270373253953;
+        const double K=std::tan(juce::MathConstants<double>::pi*f0/fs), a0=1+K/Q+K*K;
+        auto* c = mk(1/a0,-2/a0,1/a0, 2*(K*K-1)/a0, (1-K/Q+K*K)/a0);
+        mHpL.coefficients = c; mHpR.coefficients = c; }
+}
+```
+
+**Owner/site:** `MasterBusNode` member; `process()` in `MasterBusNode::processBlock` after the M/S width stage (`VibeGraph.cpp:~887`), before peak publish (`~:897`). **Transport reset** (self-contained, `BlockContext::posInfo`):
+```cpp
+const double ppq = mCtx->posInfo.ppqPosition; const bool playing = mCtx->posInfo.isPlaying;
+if ((playing && ! mWasPlaying) || (playing && ppq + 1e-6 < mLastPpq)) mLufs.resetIntegrated();
+mWasPlaying = playing; mLastPpq = ppq;
+mLufs.process (buf);
+```
+**Accessor:** `float VibeSynthProcessor::getMasterLufs (int mode)` → reads the master node's M/S/I atom by mode.
+
+### B. `DBFSMeter` split + scrolling RMS (`Source/Standalone/SharedUI.h:1623`, `.cpp:6405-6663`)
+
+```cpp
+// SharedUI.h additions
+enum class Layout { Full, Split };
+void setMeterLayout (Layout l) { mLayout = l; }
+void setRmsStereo (float dbL, float dbR) { mRmsInL = dbL; mRmsInR = dbR; }  // UI thread (MixerPage drain)
+private:
+    Layout mLayout { Layout::Split };
+    float  mRmsInL { kFloor }, mRmsInR { kFloor };
+    static constexpr int kRmsHist = 256;                       // ~3.5 s @ vblank (T-b)
+    std::array<float, kRmsHist> mRmsHistL {}, mRmsHistR {};
+    int    mRmsHead { 0 };
+    void paintRmsWaveform (juce::Graphics&, juce::Rectangle<float>) const;
+    void paintBars        (juce::Graphics&, juce::Rectangle<float>) const;  // refactor of current L/R bar block
+```
+```cpp
+// onVBlank() — after the existing ballistics step(), before repaint():
+if (mLayout == Layout::Split) {
+    mRmsHistL[mRmsHead] = mRmsInL; mRmsHistR[mRmsHead] = mRmsInR;
+    mRmsHead = (mRmsHead + 1) % kRmsHist;
+}
+```
+```cpp
+// paint() — replace the single bar block:
+if (mLayout == Layout::Split) {
+    const float splitY = b.getY() + b.getHeight() * 0.5f;
+    paintRmsWaveform (g, b.withBottom (splitY));   // top half
+    paintBars        (g, b.withTop   (splitY));    // bottom half = existing LED bars
+} else
+    paintBars (g, b);                              // master: full-height bar
+```
+```cpp
+void DBFSMeter::paintRmsWaveform (juce::Graphics& g, juce::Rectangle<float> r) const
+{
+    g.setColour (juce::Colour (0xff0A0C0E)); g.fillRect (r);     // recessed housing
+    const float cx = r.getCentreX(), half = r.getWidth() * 0.5f - 1.f;
+    auto buildPath = [&] (const std::array<float,kRmsHist>& h, bool leftSide) {
+        juce::Path p; const int rows = juce::jmax (1, (int) r.getHeight());
+        for (int row = 0; row < rows; ++row) {
+            const int j = (mRmsHead - 1 - row + 2*kRmsHist) % kRmsHist;   // newest at top
+            const float nrm = dbToNorm (h[j]);                            // 0..1 deflection
+            const float x = leftSide ? cx - nrm * half : cx + nrm * half;
+            const float y = r.getY() + (float) row;
+            row == 0 ? p.startNewSubPath (x, y) : p.lineTo (x, y);
+        }
+        return p;
+    };
+    for (bool leftSide : { true, false }) {
+        // smooth dBFS-palette gradient: green at centre -> red at the outer edge (#8)
+        juce::ColourGradient grad (juce::Colour (0xff22EE44), cx, r.getY(),
+                                   juce::Colour (0xffFF2020), leftSide ? r.getX() : r.getRight(), r.getY(), false);
+        grad.addColour (0.72, juce::Colour (0xffFFCC00));
+        grad.addColour (0.85, juce::Colour (0xffFF6020));
+        g.setGradientFill (grad);
+        g.strokePath (buildPath (leftSide ? mRmsHistL : mRmsHistR, leftSide), juce::PathStrokeType (1.6f));
+    }
+    g.setColour (juce::Colour (0xff2A2E30)); g.drawRect (r, 1.f);
+}
+```
+
+### C. Per-strip windowed-RMS publish (mirror the peak path — pattern once, all insert kinds + buses)
+
+```cpp
+// Each node (InsertNode :1168 / *BusNode :330) gains:
+std::atomic<float> rmsDbL { -60.f }, rmsDbR { -60.f };
+float msEmaL { 0.f }, msEmaR { 0.f };   // audio-thread running mean-square
+// ...and calls, right after publishPeakReading(...):
+publishRms (buf, msEmaL, msEmaR, rmsDbL, rmsDbR, mSampleRate);
+```
+```cpp
+// VibeGraph.cpp — sibling of publishPeakReading (block sum-of-squares -> ~200 ms EMA -> dB)
+inline void publishRms (const juce::AudioBuffer<float>& buf, float& emaL, float& emaR,
+                        std::atomic<float>& outL, std::atomic<float>& outR, double sr) noexcept
+{
+    const int n = buf.getNumSamples(); if (n <= 0) return;
+    const float* L = buf.getReadPointer (0);
+    const float* R = buf.getNumChannels() > 1 ? buf.getReadPointer (1) : L;
+    double sL = 0, sR = 0; for (int s = 0; s < n; ++s) { sL += (double)L[s]*L[s]; sR += (double)R[s]*R[s]; }
+    const float a = 1.f - std::exp (-(float) n / (0.200f * (float) sr));     // ~200 ms (T-a)
+    emaL += ((float)(sL / n) - emaL) * a;  emaR += ((float)(sR / n) - emaR) * a;
+    outL.store (juce::Decibels::gainToDecibels (std::sqrt (emaL), -60.f), std::memory_order_relaxed);
+    outR.store (juce::Decibels::gainToDecibels (std::sqrt (emaR), -60.f), std::memory_order_relaxed);
+}
+```
+Then mirror the **existing peak handoff** at the same sites with **store/load** (current value, not CAS-max): per-kind RMS arrays in `VibeGraph` (beside `<Kind>InsertPeakDb*`) via `processInsert` (`:2391-2473`) + `processBus`; PluginProcessor mirrors + `drainInsertRmsDbStereo` (beside `drainInsertPeakDbStereo` `:2042`) + RMS loop in `drainMeterAtomicsForUI` (`:2112`); `MixerPage` drain (`:3251-3284`):
+```cpp
+auto [rL, rR] = mProcessor.drainInsertRmsDbStereo (kind, idx);   // mirror of the peak drain
+strip->setRmsStereo (rL, rR);                                    // -> DBFSMeter::setRmsStereo
+```
+Master is **excluded** (Full layout, no RMS top).
+
+### D. `LufsReadoutBox` — NEW UI (in `Source/Standalone/SharedUI.{h,cpp}`)
+
+```cpp
+class LufsReadoutBox : public juce::Component, private juce::Timer {
+public:
+    explicit LufsReadoutBox (VibeSynthProcessor& p) : mProc (p) { mMode = loadModeFromSettings(); startTimerHz (30); }
+    void paint (juce::Graphics& g) override {
+        auto b = getLocalBounds().toFloat();
+        g.setColour (juce::Colour (0xff0A0C0E)); g.fillRoundedRectangle (b, 2.f);
+        g.setColour (juce::Colours::white);
+        g.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 13.f, juce::Font::bold));
+        g.drawText (juce::String (mProc.getMasterLufs (mMode), 1), valueArea(), juce::Justification::centred);
+        g.setColour (juce::Colour (0xff7A7E80)); g.setFont (8.f);
+        g.drawText (modeName (mMode), titleArea(), juce::Justification::centred);  // "Momentary"/"Short Term"/"Integrated"
+        paintCaret (g, caretArea());                                              // the dropdown triangle (right)
+    }
+    void mouseDown (const juce::MouseEvent&) override {
+        juce::PopupMenu m; m.addItem (1,"Momentary"); m.addItem (2,"Short Term"); m.addItem (3,"Integrated");
+        m.showMenuAsync ({}, [this] (int r) { if (r) { mMode = r - 1; saveModeToSettings (mMode); repaint(); } });
+    }
+    void timerCallback() override { repaint(); }
+private:
+    VibeSynthProcessor& mProc; int mMode { 0 };   // 0=M 1=S 2=I
+};
+```
+
+### E. Master strip layout (`Source/Standalone/MixerTrackStrip.{h,cpp}`)
+
+```cpp
+// member: LufsReadoutBox mLufsBox { mProcessor };   // master only
+// construction:
+mMeter.setMeterLayout (mType == StripType::Master ? DBFSMeter::Layout::Full : DBFSMeter::Layout::Split);
+if (mType == StripType::Master) addAndMakeVisible (mLufsBox);
+
+// resized() — after the width-knob row (y ~ 178), before the fader:
+y += kWidthH + kPadV;
+if (masterRow) { mLufsBox.setBounds (x, y, w, kLufsH); y += kLufsH + kPadV; }   // kLufsH ~18-20 (#9)
+// existing fader setBounds now starts at the (lower) y; thumb may overlap above unity — fine per Jeff.
+```
 
 ---
 
 ## Files to modify
-
-### Task 0 — Open
-- `Plans & Specs/Main Plan.md` — §5 QA-RustyMeter entry: replace the `**Plan file:** \`<silly-name>.md (when started)\`` placeholder with `**Plan file:** \`Plans & Specs/Batch Plans/sorted-whistling-shannon.md\``.
-- `Plans & Specs/Batch Plans/sorted-whistling-shannon.md` — mirror of this plan (Write).
-- `Plans & Specs/Running Notes/sorted-whistling-shannon.md` — seed (Write).
-- Delete `~/.claude/plans/sorted-whistling-shannon.md` after mirroring.
-
-### Task 1 — Investigate (READ-ONLY; source-modifying ONLY if the runtime trace phase is reached)
-- READ (no edit): the kit SFZ `Files For Claude/karoryfer.big-rusty-drums-1.100/Programs/01-full.sfz` + its `#include` chain (`mappings/*_map.sfz`, per-piece files, `keymap/`, `default/`, the `sn_stir_mute_groups.sfz` / `t18_stir_mute_groups.sfz` CC-crossfade blocks); the AriaControlPanel per-layer-volume slider→CC binding (locate: `Source/Standalone/AriaControlPanel.cpp` parse path + `ccLabel`/`ccParamId`, and the kit's control-GUI definition); `buildOutputRoutedSfzWrapper` ([BaySickRustyDrumsProcessor.cpp:656-776](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:656)); the CC dispatch ([:41-75](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:41)); the render + meter path ([processStrips :196-279](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:196), [getStripBuffer :281-295](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:281), [RustyInsertTask.cpp:18-88](Source/Engine/Tasks/RustyInsertTask.cpp:18), `InsertNode::processBlock` + `publishPeakReading` in `Source/VibeGraph.cpp`).
-- CONDITIONAL edit (only if static read inconclusive): temp diagnostic trace at the candidate site — per-strip peak of `mMultiOutScratch` before + after `outVol` at [BaySickRustyDrumsProcessor.cpp ~276-278](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:276). Style = Sub-B. Cataloged per Rule 4; stripped at close.
-
-### Task 2 — Fix (candidate surfaces — PINNED once Sub-A resolves at Task 1 close)
-- If Sub-A = (1) or (3): `Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp` — `buildOutputRoutedSfzWrapper` ([:656-776](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:656)) and/or `loadKit` ([:498-535](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:498)).
-- If Sub-A = (2): `libs/sfizz/src/...` (VENDORED — caution: vendored-lib edit; re-check the /MD runtime-library match per memory `reference_msvc_runtime_md_md_match.md`; don't over-prune per `feedback_dont_overprune_vendored_libs.md`; flag rebuild-cost + future-merge implications to Jeff before landing).
-- Exact files/lines recorded in the running notes when Sub-A resolves.
+- **Task 2:** `SharedUI.h/.cpp` (DBFSMeter split + RMS ring + `paintRmsWaveform`/`paintBars` + `setRmsStereo`/`setMeterLayout`); `VibeGraph.h/.cpp` (`publishRms`, per-node `rmsDbL/R`, per-kind RMS arrays, `processInsert`/`processBus` store, master→Full); `PluginProcessor.h/.cpp` (RMS mirrors + `drainInsertRmsDbStereo` + drain loop); `MixerPage.cpp` (RMS drain → `setRmsStereo`); `MixerTrackStrip.h/.cpp` (`setRmsStereo` passthrough; Full/Split at construction). *Pattern repeats across insert kinds + buses — representative sites cited in §C; full enumeration at execution.*
+- **Task 3:** NEW `Source/DSP/LufsMeterDSP.h/.cpp`; `VibeGraph.h/.cpp` (MasterBusNode owns + calls + transport-reset detect + 3 atomics); `PluginProcessor.h/.cpp` (`getMasterLufs`); `SharedUI.h/.cpp` (`LufsReadoutBox`); `MixerTrackStrip.h/.cpp` (master LUFS row); `CMakeLists.txt` (+`LufsMeterDSP.cpp`); settings path (persist mode, T-d).
 
 ---
 
 ## Tasks
 
-### Task 0 — Open commit
-- [ ] Mirror `~/.claude/plans/sorted-whistling-shannon.md` → `Plans & Specs/Batch Plans/sorted-whistling-shannon.md` (Write); delete the home-dir copy (one-copy hygiene per `feedback_plan_mirror_one_way.md`).
-- [ ] Update Main Plan §5 QA-RustyMeter entry's `**Plan file:**` pointer (targeted Edit, not a rewrite — `feedback_targeted_edits_not_wholesale_rewrite.md`).
-- [ ] Seed `Plans & Specs/Running Notes/sorted-whistling-shannon.md` (title / purpose blockquote / pair ref / convention ref / `## 2026-05-29 — Task 0 — open` entry) per §0 running-notes required sections.
-- [ ] Surface FULL git status — including the 3 pre-existing CRLF-residue files (`BaySick{Basses,Guitars,RustyDrums}Processor.h`, zero content diff per `git diff --ignore-all-space`). Propose disposition: leave as-is (harmless, same as the prior 6 QA-DispatcherAffinity + QA-Sfizz commits) OR `git checkout --` them — Jeff's call.
-- [ ] `/draft-commit` → surface drafted message + status to Jeff → commit on approval. Stage ONLY the plan docs (Main Plan.md + the two new Batch Plans / Running Notes files); never `git add -A`.
-- [ ] Mark Task 0 done.
+> Tasks 0 (open, `8e27a31`) + 1 (investigate — diagnosis closed) COMPLETE.
 
-### Task 1 — Investigate (diagnose root cause; PAUSE for the fix-shape pick)
+### Task 2 — Split Peak/RMS meter (all non-master strips)
+- [ ] **Re-scope docs commit (first, own commit):** mirror this plan over `Batch Plans/sorted-whistling-shannon.md` (+ delete home copy); rewrite Main Plan §5 QA-RustyMeter to the metering-upgrade scope (note original "bug" → not-a-bug); add §9 Forks pivot entry; update §6 footnote. Surface git status + `/draft-commit` → approve → commit (docs only).
+- [ ] DBFSMeter §B: `Layout` + `setMeterLayout`; RMS ring + `setRmsStereo`; `paintRmsWaveform`; refactor bar block into `paintBars`; split `paint()` 50/50.
+- [ ] RMS publish §C: `publishRms` (~200 ms EMA) on each node; mirror the peak handoff (store/load) across insert kinds + buses → mirrors → `drainInsertRmsDbStereo` → MixerPage drain → `strip->setRmsStereo`.
+- [ ] Construction: master = `Full`, others = `Split`.
+- [ ] **Tell Jeff (verify):** "Run `do_build.bat`. Debug: (1) Mixer — every non-master strip's meter is split: bottom LED peak bar + a top scrolling waveform; play audio → the wave scrolls downward + reacts. (2) Centered: L fills the left half, R the right; quiet = thin green near center, loud = blooms outward to red tips. (3) **Master** keeps one full-height peak bar. (4) No regression: peak bars read correctly everywhere; CPU steady. Repeat Release."
+- [ ] On pass: `/draft-commit` → surface + commit. `/draft-doc running-notes` → apply.
 
-**Static phase (no build):**
-- [ ] Read Carry-Forward §1 (RustyDrumsProducerTask + RustyInsertTask 1-to-13 fan-out) for dispatcher context. Note the meter publish path + the wrapper synthesis are NOT in Carry-Forward (frozen 2026-05-07, pre-Phase-J).
-- [ ] Enumerate every per-layer-volume slider → CC number (KICK Kick/OH/Punch; SNARE Btm/Top/OH/Snap/Punch/Epic; every other section's level sliders) from the AriaControlPanel control-GUI definition.
-- [ ] In the kit SFZ + its `#include` chain, grep each per-layer-volume CC number → identify the level opcode (`amplitude_oncc<N>` / `gain_oncc<N>` / `volume_oncc<N>`) AND the block level (`<global>` / `<control>` / `<master>` / `<group>` / `<region>`) it sits in.
-- [ ] Reproduce the wrapper transform on the program SFZ; for each per-layer-volume CC's carrying block, classify the `output=N` outcome:
-  - (a) un-annotated → routes to sfizz output 0 / strip 0 only;
-  - (b) sticky-mis-annotated → inherits the last-seen piece's output, not its own;
-  - (c) correctly annotated → CC reaches the metered strip; root cause is downstream (peak/meter path or a routing-expectation mismatch).
-- [ ] Form the root-cause hypothesis; decide if it's confirmable from the static read alone.
+### Task 3 — Master LUFS readout (M/S/I + selector + transport reset)
+- [ ] `LufsMeterDSP` §A: K-weighting (verify the 48 k acceptance table + JUCE a-sign); M/S/I windows; `accumulateIntegrated` gating; `resetIntegrated`; 3 atomics.
+- [ ] Wire into `MasterBusNode`: own + `prepareToPlay` + `process()` after width; ppq-backward / stopped→playing → `resetIntegrated()`. `getMasterLufs` accessor.
+- [ ] `LufsReadoutBox` §D + master row §E (between width knob + fader; fader shifts down). Persist selected mode (T-d).
+- [ ] `CMakeLists.txt` += `LufsMeterDSP.cpp`.
+- [ ] **Tell Jeff (verify):** "Run `do_build.bat`. Debug: (1) Master shows a LUFS box between width knob + fader: value, mode label under, `▾`. (2) Play a loud mix → sane LUFS (−20..−6); `▾` switch M/S/I — Momentary lively, Short-Term steadier, Integrated climbs toward an overall value. (3) Stop + play-from-top (or loop) → **Integrated resets**; M/S keep tracking. (4) Selected mode persists across restart. Repeat Release."
+- [ ] On pass: `/draft-commit` → surface + commit. `/draft-doc running-notes` → apply.
 
-**Runtime phase (ONLY if the static read is inconclusive):**
-- [ ] Resolve Sub-B with Jeff. Add the temp per-strip-peak diagnostic at [BaySickRustyDrumsProcessor.cpp ~276-278](Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp:276). Add the Rule 4 `## Diagnostic Instrumentation Catalog` row in the SAME running-notes edit pass (Site / Tag / Purpose / Disposition = Remove at batch close).
-- [ ] Tell Jeff: "Run `do_build.bat`. In Debug: load Big Rusty Drums (Full kit). Play a kick+snare pattern. Open the diagnostic. Move the KICK 'Kick' per-layer-volume slider up; report which per-strip peak changes (kick strip / a different strip / none). Repeat for SNARE 'Top'."
-- [ ] Interpret the A/B → confirm root cause.
-
-**Pause for the fix-shape pick (Sub-A):**
-- [ ] Surface to Jeff IN PLAIN ENGLISH (`feedback_design_approval_in_plain_english.md`): the confirmed root cause + the candidate fix shapes (Sub-A option space) with the user-visible behavior trade-off of each. Jeff picks → resolves Sub-A.
-- [ ] `/draft-doc running-notes` → apply (finding + A/B outcome + Sub-A resolution + any Rule 4 catalog rows).
-- [ ] Task 1 commit — CONDITIONAL: if a runtime trace was added, it stays in (cataloged → stripped at close) or is reverted now; if pure static investigation (no source change), there is NO Task 1 source commit (the running-notes checkpoint is the artifact). Any commit routes via `/draft-commit` + surface + approve.
-
-### Task 2 — Fix (shape per Sub-A; implement + verify)
-- [ ] Pin the concrete fix surface from Sub-A (files/lines) into the running notes.
-- [ ] Implement the fix. (If it somehow introduces a new APVTS-synced DSP path — unlikely for a routing/synthesis fix — apply `isIdentity()` + dirty-flag per memory; most likely N/A.)
-- [ ] If the fix touches vendored sfizz: re-check the /MD runtime-library match + don't over-prune (memories above); flag blast radius to Jeff.
-- [ ] Tell Jeff (verify ladder, S4): "Run `do_build.bat`. In Debug:
-  - **(1)** Load Big Rusty Drums. Play a kick+snare pattern. Turn a per-layer-volume slider up/down (KICK Kick/OH/Punch; SNARE Btm/Top/OH/Snap/Punch/Epic). Verify: audible level change AND the per-strip dBFS meter on the Mixer page moves in real-time in the same direction.
-  - **(2)** Open a BaySickGuitars tab + a BaySickBasses tab. Turn their volume knobs. Verify their per-strip meters still move (no regression).
-  - **(3)** 6-cymbal MT-on test (Stage D Sub-K-disabled): play sustained cymbals/hi-hats under MT. Verify the bit-crusher is still ABSENT.
-  - Repeat (1)-(3) in Release."
-- [ ] Wait for Jeff's verify result (Debug then Release).
-- [ ] On pass: `/draft-commit` → surface message + FULL git status → commit on approval. Commit body uses `BaySickRustyDrums` (engine path strings in the diff are unavoidable).
-- [ ] `/draft-doc running-notes` → apply.
-
-### Task 3 — Close sequence
-- [ ] `/draft-doc batch-close` (synthesize from the running notes).
-- [ ] Apply the close entry to `Plans & Specs/Implemented Work Log.md` via Edit (`**Bucket:** Players, Mixer / Routing`).
-- [ ] `/review-batch QA-RustyMeter` — audit diff vs plan + CLAUDE.md rules + memory gotchas. Address BLOCKER / NEEDS-FIX in-batch; defer NITs into the close entry.
-- [ ] Strip any remaining diagnostic instrumentation (Rule 4 catalog Remove rows) — surface the strip list to Jeff for approval FIRST.
-- [ ] Route side findings (Rule 3): in-scope → close-entry routing table; out-of-scope → §9 Forks entry + §5/§6/Future State edits (surface slot options to Jeff; don't pick).
-- [ ] Surface FULL git status. `/draft-commit` for the close commit → surface + approve → commit (separate from the Task 2 source commit — clean rollback boundary).
+### Task 4 — Close
+- [ ] `/draft-doc batch-close` → apply to `Implemented Work Log.md` (`**Bucket:** Mixer / Routing, UI / L&F / Theming, Cross-cutting Infrastructure`).
+- [ ] `/review-batch QA-RustyMeter` → address BLOCKER/NEEDS-FIX; defer NITs into the entry.
+- [ ] Strip temp diagnostics (Rule 4) — none expected (static investigation); surface list if any.
+- [ ] Route side findings (Rule 3): in-scope → close table; out-of-scope (T-f true-peak / Integrated LRA / per-strip LUFS) → §9 + Future State (surface slot options).
+- [ ] Full git status. `/draft-commit` close → surface + approve → commit (separate).
 
 ---
 
 ## Verification (end-to-end smoke)
+1. Build clean (Release + Debug).
+2. Split meters on all non-master strips: peak bar + scrolling RMS top; centered L-left/R-right; green-center→red-edge; ~3.5 s scroll; reacts.
+3. Master = full peak bar + LUFS box between width knob and fader.
+4. LUFS M/S/I selectable; sane values; Momentary lively / Short-Term steady / Integrated accumulates + resets on play/loop; mode persists.
+5. No regression: peak readings unchanged; non-Rusty engines + the QA-DispatcherAffinity 6-cymbal MT test clean; CPU steady (RMS = 1 EMA/block/node; LUFS = 2 biquads on master only).
 
-After Task 2 lands:
-1. **Build clean** — `do_build.bat` Release + Debug both green.
-2. **Core fix** — per-layer-volume slider → audible change AND the per-strip dBFS meter tracks it in real-time, same direction.
-3. **No sfizz-sibling regression** — BaySickGuitars + BaySickBasses volume-knob-to-meter still works.
-4. **No dispatcher regression** — 6-cymbal MT-on test: bit-crusher absent (QA-DispatcherAffinity cure holds).
-5. **Kit lifecycle** — load Full, load Basic, program-change while playing: no crash, meters behave.
-
----
-
-## Routing notes (Rule 3 application during execution)
-
-- If the investigation surfaces the SAME wrapper bug affecting OTHER CCs (per-note pan CC10, filter CC74, etc.) → fold if it's the same root cause + same fix; else route to §9 + a follow-up batch (surface slot options to Jeff, don't pick).
-- If the fix needs a vendored-sfizz change with broad blast radius → surface to Jeff before landing (rebuild cost, future-merge, licensing).
-- If a BaySickGuitars/BaySickBasses meter issue appears during regression → it contradicts the "unaffected" premise; diagnose, then route (likely fold if same root cause).
-- Diagnostic instrumentation (Rule 4): every trace gets a running-notes catalog row in the SAME edit pass; strip all Remove rows at close (surface the list to Jeff first); Keep/Remove borderline calls are Jeff's.
-
----
+## Routing notes (Rule 3)
+- True-peak (dBTP) + Integrated LRA + per-strip LUFS → Future State (T-f), §9 at close.
+- If a peak+RMS single-publish unify refactor surfaces → fold if low-risk, else follow-up.
+- Rule 4: any temp trace → running-notes catalog row same edit pass; strip at close.
 
 ## Carry-Forward Reference touch points
-
-- **Task 1 start:** Carry-Forward §1 (Render Engine Primitives — RustyDrumsProducerTask + RustyInsertTask 1-to-13 fan-out) for dispatcher context only. The meter publish path (`publishPeakReading → drainMeterAtomicsForUI`) + `buildOutputRoutedSfzWrapper` `output=N` synthesis are NOT documented in Carry-Forward (frozen 2026-05-07, pre-Phase-J; confirmed by the QA-DispatcherAffinity + QA-Sfizz carry-forward-contradiction notes). QA-RustyMeter surfaces them as new Implemented Work Log entries at close.
-- No other §-sections apply (the wrapper synthesis + per-strip metering are post-freeze surfaces).
+- Task 2: none binding — the meter publish path + `DBFSMeter` are post-2026-05-07-freeze (not in Carry-Forward; confirmed Task 1).
+- Task 3: `juce::dsp::IIR` precedent `EQ8DSP.cpp:501-520`; LUFS recipe in `Research Reports/daw-architecture-lufs-momentary-shortterm-metering-2026-05-29.md`.
