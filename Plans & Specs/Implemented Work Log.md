@@ -1774,3 +1774,91 @@ Two routings at this close per Rule 3:
 Per the §6 sequencing arrow update at this close, **QA-RustyMeter is the next batch** — slot immediately after QA-DispatcherAffinity, before QA-EngineApvts (Jeff slot pick 2026-05-29 per `feedback_slot_placement_is_spec_call.md`).  Scope: investigate + fix the BaySickRustyDrums per-layer-volume CC slider → per-strip dbfs meter disconnect (prime suspect `buildOutputRoutedSfzWrapper`'s `output=N` extraction order vs the per-layer-volume CC amplitude scaling).  After QA-RustyMeter closes, sequencing returns to **QA-EngineApvts** (Sequencing field updated to "after QA-RustyMeter" at this close).
 
 ---
+
+### 2026-05-30 18:00 PT — QA-RustyMeter — Metering architecture upgrade: split Peak/RMS meters (all non-master strips) + Master LUFS readout (M/S/I); origin per-layer-volume "bug" diagnosed not-a-bug then re-scoped in place
+
+**Bucket:** Mixer / Routing, UI / L&F / Theming, Cross-cutting Infrastructure, Effects, Players
+
+#### Done
+
+QA-RustyMeter opened (`8e27a31`) as the close-spawned follow-up from QA-DispatcherAffinity to investigate the BaySickRustyDrums per-layer-volume CC sliders that audibly change the rendered output but do NOT move the per-strip dBFS meter.  **Task 1 (no source change) settled it as NOT a bug:** static reads of the in-repo Big Rusty Drums kit SFZ + `buildOutputRoutedSfzWrapper` confirmed the per-layer `amplitude_cc<N>` scaling and the `output=N` strip routing sit on the SAME `<master>` block (verified kick + snare), so routing is correct.  The actual mechanism is meter SEMANTICS: every meter is a PEAK meter (`bufferPeakDbStereo`→`getMagnitude`→`publishPeakReading`→`DBFSMeter`, unified by QA-AudioMeters), and Rusty is the only engine with mic-mix faders (close / OH / room / punch) — boosting overhead/room/body mics or summing decorrelated mics raises perceived loudness + RMS while raising the instantaneous PEAK little, so the peak meter correctly shows ~no change.  Jeff's "it's what the meter reads" hypothesis was correct.
+
+**Re-scope in place (Jeff pivot 2026-05-30; §9 forty-fourth Forks entry, landed `217b9cf`).**  Rather than open a new batch, Jeff pivoted the OPEN batch — same name, same plan file — to a dense FL-style metering-architecture upgrade.  Net result: every non-master strip (all insert kinds + all 11 non-master buses) now carries a two-zone `DBFSMeter` (bottom 65% existing L/R peak bar + top 35% centered filled-stereo scrolling RMS-history waveform, L-left/R-right, smooth dBFS-palette gradient green-centre → red-edge), while the Master strip keeps a full-height peak bar and gains a live EBU R128 LUFS box (Momentary / Short-Term / Integrated, one shown via a `▾` selector) between its width knob and fader.  Five source commits + two doc commits, plus two folded-in end-batch cleanups + a close review-fix.
+
+- **Task 0 — batch-open (docs only)** (`8e27a31`): plan mirrored to `Batch Plans/sorted-whistling-shannon.md` (home copy deleted); §5 STATUS pointer; Running Notes seed.
+- **Task 1 — investigate (diagnosis closed; docs/re-scope)** (`217b9cf`): the not-a-bug diagnosis + the peak-vs-loudness reframe; §5 rewrite + §6 footnote + §9 forty-fourth Forks entry + the LUFS research report.
+- **Task 2 part 1 — split meter + insert-strip RMS** (`6a2e35e`): `DBFSMeter` `Layout {Full,Split}` + RMS history ring + `paintBars`/`paintRmsWaveform` + split `paint()`; per-insert RMS published DIRECT-NODE-READ (no PluginProcessor mirror) via `publishRms` → `InsertNode::rmsDbL/R` → `drainInsertNodeRms` → `drainInsertRmsDbStereo` → `MixerPage::onVBlank` → `setRmsStereo`.  Post-verify refinements: split 50/50 → **65/35** (`kRmsTopFrac=0.35`), UI smoothing 200 → **50 ms**, stroked → filled symmetric-gradient waveform.
+- **Task 2 part 2 — bus-node RMS + flip all 11 non-master buses to Split** (`58e3caa`): 22 VibeGraph per-bus RMS atoms + `publishRms` in the 4 dedicated branches + 1 generic-path call + `drainBusRms` → `drainBusRmsDbStereo` → `MixerPage` drain at all 12 sites (incl. the on-demand Vox Bus 2 / Inst Bus 2 / Inst Bus 3); ctor flip `(Master||Bus)?Full:Split` → `Master?Full:Split`.  The part-1 windowed-RMS→peak-excursion offer was DECLINED (Jeff: the near-static look was a full-song-at-−10-LUFS artifact, not a defect).
+- **Task 3 — Master LUFS readout (M/S/I + selector + transport reset)** (`63be14d`): NEW `Source/DSP/LufsMeterDSP.{h,cpp}` — EBU R128 K-weighting bilinear-from-constants (exact at any fs; 48 kHz acceptance table) + Momentary 400 ms + Short-Term 3 s ungated + Integrated gated via a **fixed 751-bin loudness histogram** (libebur128 method; allocation-free on the audio thread, O(bins) — a design refinement over the plan's growing-`std::vector` sketch, same LUFS numbers).  `MasterBusNode` owns + processes it after fader/pan/width; `getMasterLufs`/`resetMasterLufsIntegrated`; the Integrated reset-on-play-from-top/loop lives in `PluginProcessor::processBlock` (no transport is plumbed into the nodes).  `LufsReadoutBox` UI fed PUSH-not-poll via `MixerPage::onVBlank` (the strip holds no processor ref); stacked value-over-title (Jeff chose this over a compact-letter draft; `kLufsH=30`, revising spec #9) + `▾` M/S/I selector persisted to settings.xml.
+- **Task 4 — File>New audio-library dedup fix (folded per §0 Rule 3)** (`dc965ef`): one-line `mAudioLibrary.clear()` added to `PatternManager::reset()` — the canonical blank-project wipe omitted the clear that `fromValueTree` does, so a previously-used sample dropped on a fresh File>New falsely prompted "File Already in Library".  Well-scoped; in-project dedup unaffected.
+- **Task 5 — bus collapse/expand UI + tooltip-on-all-strips (folded per §0 Rule 3)** (`db423b5`): `MixerCollapseArrow` on each BUS strip (down=expanded/up=collapsed; greyed when no members; buses only, not Master) collapses that bus's grouped strips + closes the layout gap; per-bus `_collapsed` APVTS bool persists with the project.  Tooltip-on-ALL-strips (full name + "Double-click to rename" where editable) since the name label shrank for the arrow.
+- **Task 6 review-fix** (`02dde22`): `/review-batch` NEEDS-FIX — the RMS history ring value-initialized to 0.0f painted a startup "loud" band on every non-master Split meter; fixed via `mRmsHistL/R.fill(kFloor)` in the `DBFSMeter` ctor.
+
+#### Spec calls realized
+
+S1-S3 + design #1-#11 + tunables T-a..T-f, each surfaced + Jeff-answered per §0 Rule 5 (see the plan file's locked-spec tables + the Running Notes):
+- **S2** diagnosis = not-a-bug (peak-vs-loudness + mic-mix); original Sub-A fix-shape space superseded.  **S3/#11** re-scope IN PLACE.
+- **#1** LUFS box = M+S+I compute, one shown, `▾` selector, Integrated gated + resets on play/loop.  **#2(b)** Master = full peak bar + LUFS box → `DBFSMeter::Layout {Full,Split}`.  **#3(a)** all non-master strips split this batch.  **#4/#7(a)** centred L-left/R-right scope trace.  **#5(b)** windowed RMS (landed ~50 ms UI smoothing).  **#6(b)** ~3.5 s history (`kRmsHist=256`).  **#8** smooth dBFS-palette gradient green-centre→red-edge ("exactly what I want").
+- **#9** LUFS box height specced ~18-20 px single-line → SUPERSEDED by Jeff's explicit stacked value-over-title request (`kLufsH=30`).  **#10** specced 50/50 → REVISED to **65/35** at part-1 verify (Jeff).  **Task breakdown** Option A (3 tasks) + 2 folded cleanups (Task 4 + Task 5).
+- **My-call refinements surfaced where they bent a convention:** RMS publish = direct-node-read, no PluginProcessor mirror (both inserts + buses); LUFS Integrated = fixed histogram (alloc-free) vs growing vector; LufsReadoutBox = push-not-poll; bus-collapse persistence = APVTS `_collapsed` bool.  RMS windowed→peak-excursion offer DECLINED.  T-f → Future State.
+
+#### Found along the way
+
+- **FND-1 (Task 1) — the original per-layer-volume "bug" is NOT a bug** (peak-vs-loudness + Rusty mic-mix faders).  Drove the in-place re-scope (§9 forty-fourth Forks entry).
+- **FND-2 (Task 2 testing) — false "File Already in Library" on File>New.**  `PatternManager::reset()` omitted `mAudioLibrary.clear()` that `fromValueTree` does.  QA-D STATE-* family.  Jeff: fix in-batch (Task 4).
+- **FND-3 (Task 2 part-2 verify) — bus collapse/expand UI request** + tooltip-on-all-strips.  Jeff: fold into cleanup (Task 5).
+- **FND-4 (Task 2 part 1) — RMS reads near-static on a mastered full song.**  Diagnosed expected (a song at ~−10 LUFS has near-constant loudness → windowed RMS correctly near-flat); the peak-excursion alternative was offered then declined.
+- **FND-5 (metering design) — true-peak (dBTP), Integrated LRA, per-strip LUFS** (plan T-f) recognized as natural follow-ons held out of V1 scope → Future State at close.
+- **FND-6 (Task 6 close verify) — peak (dBFS) bars flash full then drop on first load.**  Investigated: NOT a meter-init bug — the peak meter's own state is correctly floor-initialized, so it is honestly catching a real brief peak on load (engine/graph spin-up transient or an un-cleared first-block buffer), held ~1 s by the peak-hold.  Pre-existing (the peak path predates this batch).  Jeff: "seems like a load transient"; move forward + route to Future State (out-of-scope for this batch).
+
+#### What was done about each finding
+
+| Finding | Routing |
+|---|---|
+| FND-1 (original "bug" = not-a-bug) | Closed as not-a-bug in Task 1 → batch re-scoped IN PLACE (§9 forty-fourth Forks entry, `217b9cf`). |
+| FND-2 (false "File Already in Library") | Fixed in-batch (Task 4 `dc965ef`) per `feedback_qa_batches_fix_bugs_dont_defer.md`; in-batch resolution, not a §9 route. |
+| FND-3 (bus collapse/expand request) | Implemented in-batch (Task 5 `db423b5`) per §0 Rule 3; in-batch resolution, not a §9 route. |
+| FND-4 (RMS near-static on a mastered song) | No code change — diagnosed expected; the windowed→peak-excursion offer DECLINED by Jeff. |
+| FND-5 (true-peak / Integrated LRA / per-strip LUFS) | Routed to Future State **CL-294 / CL-295 / CL-296** (§9 forty-fifth Forks entry); kept distinct from CL-035/CL-036 per Jeff. |
+| FND-6 (on-load peak-meter transient) | Routed to Future State **CL-297** (§9 forty-fifth Forks entry); pre-existing, out-of-scope, Jeff's "move forward" call. |
+
+#### /review-batch outcome
+
+`/review-batch QA-RustyMeter` (diff `5e830e2..db423b5`) — **no BLOCKERS.**  The reviewer confirmed the load-bearing safety paths correct: K-weighting JUCE a-sign convention (passes natural a1/a2; JUCE subtracts internally), the alloc-free Integrated histogram, the null-coefficient lifecycle (prepare before process), the audio→UI atomic thread-safety (CAS-max audio / exchange-reset UI, −inf clamped before the EMA), and the −70/−10 gate math.
+- **1 NEEDS-FIX (fixed in-batch `02dde22`, verified by Jeff):** the RMS history ring (`mRmsHistL/R`) value-initialized to 0.0f → `dbToNorm(0 dB)` ≈ 0.925 deflection → a misleading near-full-width "loud" band on every non-master Split meter for the first ~4 s at launch until the ring filled.  Fix: `mRmsHistL/R.fill(kFloor)` in the `DBFSMeter` ctor.
+- **2 record-only NITs:** (1) `LufsReadoutBox` is a value member on every strip though only shown on Master — harmless, matches the existing `mType`-gated member pattern; (2) spec #10 locked 50/50 but shipped **65/35** by Jeff's part-1 verify call — recorded as the shipped value so plan + log don't contradict.
+- **Rule 4:** no diagnostic instrumentation added this batch (grep of the batch source diff for DBG/Logger/writeToLog empty) — nothing to strip.
+
+#### Carry-forward contradictions
+
+- **`DBFSMeter` is now layout-aware (`Full` vs `Split`).**  The single peak-bar renderer QA-AudioMeters/QA-Eg standardized now carries a two-zone Split mode on every non-master strip; Master alone renders the legacy full-height peak bar.  Post-2026-05-07-freeze (not in Carry-Forward).
+- **RMS published direct-node-read with NO PluginProcessor mirror** (both per-insert `InsertNode::rmsDbL/R`→`drainInsertNodeRms` and per-bus 22 VibeGraph atoms→`drainBusRms`) — deliberately asymmetric with the peak path's audio-side two-hop mirror.
+- **NEW master DSP `Source/DSP/LufsMeterDSP.{h,cpp}` owned by `MasterBusNode`** — first LUFS DSP in the codebase; Integrated transport-reset lives in `PluginProcessor::processBlock` (no transport plumbed into the nodes).
+
+#### Files touched
+
+- **Source (Task 2 part 1 `6a2e35e`):** SharedUI.h/.cpp, VibeGraph.h/.cpp, PluginProcessor.h/.cpp, MixerPage.cpp, MixerTrackStrip.h/.cpp.
+- **Source (Task 2 part 2 `58e3caa`):** VibeGraph.h/.cpp, PluginProcessor.h/.cpp, MixerPage.cpp, MixerTrackStrip.cpp.
+- **Source + NEW (Task 3 `63be14d`):** NEW Source/DSP/LufsMeterDSP.h/.cpp; VibeGraph.h/.cpp, PluginProcessor.h/.cpp, SharedUI.h/.cpp, MixerTrackStrip.h/.cpp, MixerPage.cpp, CMakeLists.txt, .gitignore.
+- **Source (Task 4 `dc965ef`):** PatternManager.cpp (1 line).
+- **Source (Task 5 `db423b5`):** PluginProcessor.cpp, MixerTrackStrip.h/.cpp, MixerPage.h/.cpp.
+- **Source (Task 6 review-fix `02dde22`):** SharedUI.cpp (DBFSMeter ctor).
+- **Docs:** Main Plan.md (§5 STATUS banner + scope rewrite + §6 footnote + §9 forty-fourth + forty-fifth Forks entries); Implemented Work Log.md (this entry); Future State.md (CL-294..297); Batch Plans/ + Running Notes/sorted-whistling-shannon.md; NEW Research Reports/daw-architecture-lufs-momentary-shortterm-metering-2026-05-29.md.
+
+#### Commit(s)
+
+- `8e27a31` Task 0 batch-open (docs).
+- `217b9cf` Task 1 diagnosis-close + re-scope (docs).
+- `6a2e35e` Task 2 part 1 — split meter + insert RMS.
+- `58e3caa` Task 2 part 2 — bus RMS + flip buses to Split.
+- `63be14d` Task 3 — Master LUFS readout (LufsMeterDSP + LufsReadoutBox).
+- `dc965ef` Task 4 — File>New audio-library dedup fix.
+- `db423b5` Task 5 — bus collapse/expand UI + tooltip-on-all-strips.
+- `02dde22` Task 6 review-fix — RMS history ring pre-fill to kFloor.
+- `<TBD — Task 6 close commit SHA appended after commit>` Task 6 CLOSE: this Work Log entry + §5 STATUS banner + §9 forty-fifth Forks entry + Future State CL-294..297 + Running Notes close-pass.
+
+#### Next action
+
+Per the §6 sequencing arrow, **QA-EngineApvts is the next batch** (immediately after QA-RustyMeter, before QA-Ed) — the perf-audit M2 fold-in: bring the 4 engine processors (`HarmlessProcessor` / `VibePlayerProcessor` / `BaySickSynthProcessor` / `BaySickBassProcessor`) into compliance with the documented APVTS dirty-flag pattern (process-side `isIdentity()` short-circuit + sync-side `ValueTree::Listener` dirty flag; reference impl at `PluginProcessor.cpp:178`), plus the QA-VoicePool-folded `BaySickSynthVoice::startNote` osc-reset.  Risk low, ~4-6 hr, ~1-2% cumulative CPU on busy sessions.
+
+---

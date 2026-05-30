@@ -327,6 +327,14 @@ Task 5 committed at `db423b5` (6 files, +189/-9).
 
 **Remaining close steps:** Jeff verifies the RMS-ring fix → commit the fix → apply the Work Log entry + route T-f (true-peak / Integrated LRA / per-strip LUFS) to Future State (slot = Jeff's call) + Main Plan §5 STATUS close-banner + §9 close route entry → close commit.
 
+---
+
+## 2026-05-30 — Task 6 — CLOSE COMPLETE
+
+Review-fix `02dde22` verified by Jeff + committed. Jeff's call on the Future State deferrals: **keep distinct** (not merged into CL-035/CL-036). Close docs applied + committed: Implemented Work Log QA-RustyMeter close entry; Main Plan §5 `STATUS (2026-05-30 close): CLOSED` banner + §9 forty-fifth Forks entry; Future State **CL-294** (true-peak dBTP) / **CL-295** (Integrated LUFS + LRA) / **CL-296** (per-strip LUFS) / **CL-297** (FND-6 on-load peak transient). §6 arrow already carried QA-RustyMeter → QA-EngineApvts from the insert (no close edit needed). Rule 4: no diagnostic instrumentation added (nothing to strip).
+
+**QA-RustyMeter CLOSED** — 8 commits total (Task 0 `8e27a31` open / Task 1 `217b9cf` diagnosis+re-scope / Task 2 part 1 `6a2e35e` / part 2 `58e3caa` / Task 3 `63be14d` Master LUFS / Task 4 `dc965ef` dedup / Task 5 `db423b5` bus collapse + tooltip / Task 6 review-fix `02dde22`) + the close doc commit (SHA TBD). The metering-architecture upgrade shipped: split Peak/RMS meters on every non-master strip + a Master EBU R128 LUFS readout, plus two folded cleanups. **Next batch: QA-EngineApvts.**
+
 
 
 

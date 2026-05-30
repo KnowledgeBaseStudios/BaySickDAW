@@ -1355,6 +1355,8 @@ needed to find what you should pull up to review the work.
 
 #### **QA-RustyMeter: Metering architecture upgrade — split Peak/RMS meters (all strips) + Master LUFS readout** *(NEW — inserted 2026-05-29 via §9 forty-second Forks entry; RE-SCOPED 2026-05-30 via §9 forty-fourth Forks entry — the original per-layer-volume CC meter investigation diagnosed not-a-bug)*
 
+> **STATUS (2026-05-30 close):** **CLOSED.**  Metering-architecture upgrade shipped across 6 source commits (Task 0 open `8e27a31` / Task 1 diagnosis-close + re-scope `217b9cf` / Task 2 part 1 split meter + insert RMS `6a2e35e` / Task 2 part 2 bus RMS + Split flip `58e3caa` / Task 3 Master LUFS readout `63be14d` / Task 4 File>New dedup fix `dc965ef` / Task 5 bus collapse UI + tooltip-on-all-strips `db423b5` / Task 6 review-fix `02dde22` / close commit SHA TBD).  The original per-layer-volume-CC-vs-per-strip-meter "bug" diagnosed NOT a bug at Task 1 (peak-vs-loudness + Rusty mic-mix faders) → Jeff re-scoped the open batch IN PLACE to the metering upgrade (§9 forty-fourth Forks entry): a split Peak/RMS meter on every non-master strip (bottom 65% existing peak bar + top 35% scrolling filled-stereo RMS-history waveform) + a Master-strip EBU R128 LUFS readout (Momentary / Short-Term / Integrated, `▾` selector, new `Source/DSP/LufsMeterDSP`), plus two folded-in end-batch cleanups (Task 4 File>New audio-library dedup fix; Task 5 bus collapse/expand UI + tooltip-on-all-strips).  `/review-batch` clean — 1 NEEDS-FIX (RMS-ring startup loud-band) fixed `02dde22`; 2 record-only NITs.  T-f (true-peak / Integrated LRA / per-strip LUFS) + FND-6 (on-load peak transient) routed to Future State CL-294..297 (§9 forty-fifth Forks entry).  Verified PASS Debug + Release across all tasks.  See the Implemented Work Log close entry + §9 forty-fourth + forty-fifth Forks entries.
+
 **Plan file:** `Plans & Specs/Batch Plans/sorted-whistling-shannon.md`
 - **Origin + pivot:** opened 2026-05-29 to investigate the BaySickRustyDrums per-layer-volume CC sliders that audibly affect output but don't move the per-strip dbfs meter (surfaced by Jeff at QA-DispatcherAffinity Task 3 Verify 2; see §9 forty-second Forks entry).  **Task 1 diagnosis (2026-05-30) settled it as NOT a bug:** the kit SFZ + `buildOutputRoutedSfzWrapper` route the per-layer-volume `amplitude_cc` correctly to each piece's strip output (verified kick + snare; the prime hypothesis "wrapper strips CC scaling before output extraction" is DISPROVED); every meter is a PEAK meter (`bufferPeakDbStereo`→`getMagnitude`, unified by QA-AudioMeters), and Rusty's per-layer faders are mic-mix controls (overhead/room/body mics + decorrelated summing raise loudness/RMS without raising the peak transient), so the peak meter correctly shows ~no change.  Jeff pivoted the batch to a metering-architecture upgrade, in place (see §9 forty-fourth Forks entry).
 - Items (Jeff-locked 2026-05-30): (1) **Split Peak/RMS meter on all non-master strips** — `DBFSMeter` height split 50/50: bottom = existing dbfs peak bar; top = a centered scrolling RMS-history "waveform" (L deflects left / R deflects right from a centerline; smooth dBFS-palette color keyed to deflection: green center → red edge; ~3.5 s history scrolling top→bottom; windowed ~200 ms RMS).  (2) **Master-strip LUFS readout** — a box between the stereo width knob and the master fader showing one of Momentary (400 ms) / Short-Term (3 s) / Integrated (gated, resets on play-from-top/loop); all three compute continuously, one displayed, `▾` dropdown selector.  Master keeps a full-height peak bar (no split).
@@ -5160,3 +5162,27 @@ Removing these eliminates the per-block `gCaptureOn` relaxed-loads on the audio 
 - `Plans & Specs/Research Reports/daw-architecture-lufs-momentary-shortterm-metering-2026-05-29.md` — NEW (LUFS recipe).
 
 **Verification:** n/a for this §9 entry — re-scope artifact.  QA-RustyMeter's own per-task verify ladder (plan file) covers the metering upgrade.
+
+### 2026-05-30 — QA-RustyMeter CLOSE: metering-architecture upgrade shipped (split Peak/RMS meters on all non-master strips + Master LUFS readout) + 2 folded cleanups; T-f + FND-6 routed to Future State
+
+**Status:** CLOSED (forty-fifth Forks entry).  QA-RustyMeter — the in-place re-scope of the per-layer-volume-CC investigation into a metering-architecture upgrade (§9 forty-fourth Forks entry) — shipped across 6 source commits + the close.  Full detail in the Implemented Work Log close entry; this entry records the close routing per §0 Rule 3.
+
+**What shipped:** a split Peak/RMS meter on every non-master strip — Task 2 part 1 inserts `6a2e35e` + part 2 buses `58e3caa` (bottom 65% existing L/R peak bar + top 35% scrolling filled-stereo RMS-history waveform); a Master-strip EBU R128 LUFS readout — Momentary / Short-Term / Integrated, `▾` selector, new `Source/DSP/LufsMeterDSP` (Task 3 `63be14d`); + two end-batch cleanups folded per §0 Rule 3 — File>New audio-library dedup fix (Task 4 `dc965ef`) + bus collapse/expand UI + tooltip-on-all-strips (Task 5 `db423b5`); + a `/review-batch` NEEDS-FIX (RMS-ring startup loud-band) fixed at close (`02dde22`).
+
+**Routing at close (Rule 3):**
+- **In-scope folds (recorded in the close entry, NOT new §5 rows):** Task 4 dedup fix + Task 5 bus collapse UI — both out-of-scope findings Jeff folded into this batch's cleanup (FND-2 + FND-3 in the Work Log close entry).
+- **Out-of-scope → Future State (kept distinct from the overlapping CL-035 / CL-036 wishes per Jeff 2026-05-30, with cross-refs):** true-peak (dBTP) **CL-294**, Integrated LUFS + LRA **CL-295**, per-strip LUFS **CL-296** (the plan's T-f deferrals); + the on-load peak-meter transient **CL-297** (FND-6 — a pre-existing brief full-scale flash on the dBFS PEAK bars at load; the peak meter is correctly floor-initialized so it is honestly catching a real load transient, NOT the meter-init bug the RMS-ring fix `02dde22` addressed; Jeff's call: move forward + route, out-of-scope for this batch).
+
+**Sequencing:** unchanged — **QA-EngineApvts is next** (immediately after QA-RustyMeter, before QA-Ed; §6 arrow).
+
+**Inline back-refs:**
+- §5 — QA-RustyMeter entry gains the `STATUS (2026-05-30 close): CLOSED` banner.
+- §9 — this entry (forty-fifth); cross-refs the forty-fourth (re-scope) + forty-second (original insert).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 STATUS banner; §9 this entry.
+- `Plans & Specs/Implemented Work Log.md` — QA-RustyMeter close entry (append).
+- `Plans & Specs/Future State.md` — CL-294..297 added.
+- `Plans & Specs/Running Notes/sorted-whistling-shannon.md` — close-pass sections.
+
+**Verification:** per-task Debug + Release PASS (Jeff) across Tasks 2-5 + the review-fix; `/review-batch` clean (1 NEEDS-FIX fixed `02dde22`, 2 record-only NITs); Rule 4 — no diagnostic instrumentation added this batch (nothing to strip).
