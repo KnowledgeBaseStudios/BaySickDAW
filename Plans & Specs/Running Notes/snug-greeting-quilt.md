@@ -152,6 +152,10 @@ Trace dump statistics (Release: 22,596 events / 1,615 blocks; Debug: 25,694 even
 
 **Recommendation deferred per Rule 5 — Jeff picks (i) / (ii) / (iii) / (iv) / hybrid.**
 
+---
+
+## 2026-05-29 — Task 3 — Lock removal + mProjectLoadInProgress shield raise (Option A) implementation
+
 **Sub-A resolution (Jeff 2026-05-29): Option (i) — Remove the spin lock from InsertTasks entirely.**
 
 Jeff verbatim: "This trace data is the exact reason we ran the investigation first.  Incredible catch on the spin-lock contention (B.5).  The 'try-lock lottery' causing rapid-fire buffer clearing explains the bit-crusher artifact perfectly.  We are going with Option (i) Remove the spin lock from InsertTasks entirely.  Because the DAG already guarantees the ProducerTask has finished writing to mMultiOutScratch before the 13 InsertTasks are dispatched, the inserts are strictly concurrent readers.  Multiple threads reading a static buffer is perfectly safe.  We do not need, and should not have, an audio-thread lock here.  For lifecycle safety (like engine swapping or kit loading), we will rely on the existing mProjectLoadInProgress barrier on the message thread.  This gives us the maximum multi-core parallelism the engine was designed for."
@@ -161,6 +165,90 @@ Jeff verbatim: "This trace data is the exact reason we ran the investigation fir
 - **Audit kit-load + engine-swap paths** to confirm the `mProjectLoadInProgress` barrier (or equivalent message-thread gate) keeps inserts from running concurrently with a `mRustyDrumsEngine.reset(...)` / engine swap.  Identify every site that mutates `mProcessor->mRustyDrumsEngine`; confirm each is gated by a barrier that holds the audio thread out of `run()` while the swap is in flight.
 - Re-test under MT-on with Sub-K disabled: bit-crusher should be absent (no try-lock failures since the lock is gone); all 13 inserts complete their copies in parallel.
 - If Task 3 cure verifies → Task 4 cleanly retires the entire Sub-K Serial Fallback infrastructure (mAudioThreadOnly flag + audioThreadQueue MPSC + 4 task-family flag-set sites + gSubKOverride debug flag + Mixer menu item 205 + trace infrastructure per Rule 4 catalog Disposition).
+
+**Audit findings (2026-05-29):**
+
+`mRustyDrumsEngine` mutated at 2 message-thread sites; neither raised `mProjectLoadInProgress` pre-Task-3:
+
+1. `VibeSynthProcessor::loadBaySickRustyDrumsKit` (`PluginProcessor.cpp:4327-4391`) — `mRustyDrumsEngine = std::make_unique<...>()` on first call (held under `mRustyDrumsEngineLock` ScopedLockType) + `mRustyDrumsEngine->loadKit(sfzPath)` UNLOCKED (mutates sfizz internal state for seconds) + `ensureRustyInsert(...)` loop registering 13 InsertTasks (dispatcher task-list mutations).  Gated by `mRustyDrumsActive=false` for the duration, but did NOT raise the shield → audio-thread in-flight blocks (which observed active=true before the flip) could still be inside `engine->processStrips()` when `loadKit` started mutating sfizz state.  **Latent race the pre-Task-3 code tolerated.**
+2. `VibeSynthProcessor::destroyBaySickRustyDrums` (`PluginProcessor.cpp:4394-4441`) — `mRustyDrumsEngine.reset()` under `mRustyDrumsEngineLock` ScopedLockType.  The blocking lock waited for any in-flight try-lock holder to release → made the reset safe AS LONG AS readers also took the try-lock.  Once Sub-A = (i) removes the reader try-locks, that safety chain breaks.  Call sites: `StandaloneEditor.cpp:4217` (tab close) + `BaySickRustyDrumsPage.cpp:606` (program change via Rusty page UI); neither raises the shield.
+
+**Audit-driven scope expansion (Jeff verbatim 2026-05-29: "Option (A) Recommended: Lock removal + barrier raising at destroy/load sites... It is perfectly acceptable to have a ~30ms audio dropout when a user explicitly swaps a kit or closes a plugin tab"):**
+
+Add the shield-raise pattern (mirrors `PluginProcessor.cpp:2948`/`:3183` + `StandaloneEditor.cpp:6266-6269`/`:9182-9184`/`:9799-9801`/`:10638-10640` precedent) inside both `destroyBaySickRustyDrums` AND `loadBaySickRustyDrumsKit`:
+```cpp
+const bool shieldWasUp = isProjectLoadInProgress();
+setProjectLoadInProgress (true);
+if (! shieldWasUp) juce::Thread::sleep (30);
+// ... mutation ...
+setProjectLoadInProgress (shieldWasUp);
+```
+The `shieldWasUp` refcounting preserves nesting safety (if destroy/load is called from within an outer closeAllDynamicTabs cascade that already raised the shield, we leave it up on the way out).
+
+**Files touched (Task 3 implementation):**
+
+- `Source/Engine/Tasks/RustyInsertTask.cpp` (−12, +18 net) — removed try-lock + early-return-on-fail block (lines 58-68 pre-Task-3); replaced with a multi-line comment explaining the lock removal rationale + the shield-based safety chain.  The `engine == nullptr` null check stays as a defensive guard.
+- `Source/Engine/Tasks/RustyDrumsProducerTask.cpp` (−3, +8 net) — same try-lock removal + comment update.  Producer + 13 inserts now both run lock-free.
+- `Source/PluginProcessor.cpp::destroyBaySickRustyDrums` (+15) — added shield-raise + 30ms sleep + shieldWasUp restore around the existing engine-reset block.  The `mRustyDrumsEngineLock` ScopedLockType remains for now (harmless extra protection; cleanup at Task 4).
+- `Source/PluginProcessor.cpp::loadBaySickRustyDrumsKit` (+20) — added shield-raise + 30ms sleep + shieldWasUp restore around the entire engine-mutation window (create + loadKit + ensureRustyInsert loop).  Early-return on `loadKit` failure restores the shield before returning.  Fixes the pre-Task-3 latent loadKit race as a bonus.
+
+**Verify scope (Jeff drives):**
+- Build `do_build.bat`.  Confirm clean Debug + Release.
+- Debug run, MT on, Sub-K Serial Fallback OFF via menu item 205 (override engaged): play the 6-cymbal pattern.  Expect **bit-crusher ABSENT** (lock-free inserts running parallel on MT pool; no try-lock failures → no strip silencing).
+- Same test with Sub-K Serial Fallback ON (override disengaged): expect no regression vs Stage A baseline.
+- Kit-swap test: while playing, close + reopen the Rusty tab.  Expect ~30 ms audio dropout (the shield window) followed by clean playback.  Expect no crash, no use-after-free.
+- Same in Release.
+
+**Task 3 commit:** TBD (after Jeff verify-PASS).
+
+---
+
+## 2026-05-29 — Task 3 verify outcome + piano-roll-clear bug folded into Task 3 commit
+
+**Cure verify PASSED (Jeff 2026-05-29 + Stage D trace dump confirms):** all 4 verify scenarios PASS in Debug + Release.  Stage D trace (Sub-K override engaged, lock removed, lock-free MT execution): 22,121 events / 1,580 blocks / 9 unique worker threads / **ZERO zero-duration insert events across all 14 channels** (vs Stage B's 4-84 per channel) -- B.5 try-lock-failure strip silencing ELIMINATED at the trace layer.  Producer avg 3.8 ms (improved from Stage B's 6.1 ms -- no more cache thrashing from spinning losers).  Insert avg 13-22 µs (up from Stage A's 1-2 µs as expected for genuine MT execution + occasional stalls; absolute durations still well within audio-block budget).  Audibly clean per Jeff's verify.
+
+**Bug found at Task 3 Verify 2 (Jeff 2026-05-29):** the tab-delete confirmation dialog at `StandaloneEditor.cpp:7339-7343` promises "clear the Rusty piano roll on every pattern" but the destroy flow doesn't actually clear the piano roll.  Code-trace: `closeTab(ribbonId)` → `onTabClosed` → `destroyBaySickRustyDrums()` -- the destroy function tears down engine + strips + bus + effects but never touches `pm->getPattern(i).baySickRustyDrumsRoll.notes`.  Only `BaySickRustyDrumsPage::tearDownCurrentProgram` (program-change path, NOT tab-delete) did the clear.  Pre-existing bug (not a Task 3 regression); per `feedback_qa_batches_fix_bugs_dont_defer.md` real bugs found mid-QA-batch get fixed in-batch.
+
+**Sub-spec resolution (Jeff 2026-05-29): fix shape = (A) move clear into destroyBaySickRustyDrums; meta = (1) fold into this Task 3 commit.**
+
+Implementation:
+- `Source/PluginProcessor.cpp::destroyBaySickRustyDrums` — added `if (mPatternManager != nullptr) { for (int i = 0; i < mPatternManager->getNumPatterns(); ++i) mPatternManager->getPattern(i).baySickRustyDrumsRoll.notes.clear(); }` inside the shield-up window, before the engine reset.  Multi-line comment cross-refs the dialog promise + the surfacing context (Jeff's Task 3 Verify 2) + the safety analysis (shield gates audio thread out so a concurrent MIDI-schedule read can't fire against half-cleared notes).
+- `Source/Standalone/BaySickRustyDrumsPage.cpp::tearDownCurrentProgram` — removed the previously-inline piano-roll-clear loop (now redundant; the `mProcessor.destroyBaySickRustyDrums()` call below does it).  Multi-line comment explains the consolidation.
+
+**Verify scope (mini, post-fix):**
+- Build clean.
+- In Debug: load a pattern with notes on the Rusty piano roll.  Delete the Rusty tab via X button → click "Yes, delete" on the confirm dialog.  Verify: piano roll is now empty across all patterns.
+- Sanity: program-change still clears the piano roll (the `tearDownCurrentProgram` path still calls destroyBaySickRustyDrums which now does the clear).
+- Same in Release.
+
+**Task 3 commit (now expanded to include piano-roll fix):** TBD after Jeff's mini-verify PASS.
+
+---
+
+## 2026-05-29 — Task 3 Verify 2 routing: BaySickRustyDrums per-layer-volume CC vs per-strip meter disconnect → QA-RustyMeter batch routed forward
+
+**Finding (Jeff observation 2026-05-29 mid-Task-3 Verify 2):** AriaControlPanel per-layer-volume CC sliders inside the BaySickRustyDrums kit player UI (KICK section's Kick/OH/Punch sliders + SNARE section's Btm/Top/OH/Snap/Punch/Epic + likely other channels' equivalent sliders) audibly affect the rendered output but the per-strip dbfs meter on the Mixer page does NOT reflect the change.  Jeff verbatim: "When I say have a kick and snare pattern and turn the knobs up in the player for those sections, the sound gets louder but the dbfs meter stays the same."
+
+**Diagnostic data:**
+- **Pre-existing bug confirmed:** Jeff verbatim "this was something I noticed with sub k on I just hadn't brought it up yet since we were figuring out the bit crusher issue" — bug present under Sub-K-on production state before any QA-DispatcherAffinity Task 3 changes landed.  NOT a Task 3 regression.
+- **BaySickRustyDrums-specific:** Jeff verbatim "I just was checking if the same issue happens on guitars or basses but it looks like the knobs that make it louder do increase their dbfs" — BaySickGuitars + BaySickBasses verified unaffected.
+- Visual confirmation: 2 images of AriaControlPanel KICK + SNARE per-layer-volume sliders showing before/after positions.
+
+**Out-of-scope for QA-DispatcherAffinity:** This batch is "dispatcher MT race + Sub-K retirement", not "sfizz CC routing vs meter publish path".  Bug existed pre-batch and would still exist after Task 4 retires Sub-K.
+
+**Routing decision (Jeff verbatim 2026-05-29):**
+- Fix shape: **(2) new dedicated batch** (per Rule 3 "No surface match → new dedicated §5 batch row, slotted into the appropriate phase").
+- Slot: **(a) immediately after QA-DispatcherAffinity, before QA-EngineApvts**.
+- Batch name: `QA-RustyMeter` (Jeff verbatim "RustyMeter is fine").
+
+**Prime investigation target (carried into the QA-RustyMeter plan file):** `buildOutputRoutedSfzWrapper` (the wrapper SFZ synthesis with `output=N` injection unique to BaySickRustyDrums; BaySickGuitars + BaySickBasses use plain `loadSfzFile` and don't go through the wrapper path).  Hypothesis: wrapper synthesis may extract per-channel audio via `output=N` BEFORE per-layer-volume CC scaling is applied; multi-output channel reflects raw sample audio without CC scaling while the final stereo mix-down (bypassed by the per-strip path) DOES get the CC scaling.
+
+**Main Plan edits landed (in this Task 3 commit per the QA-Sfizz Sub-K Task 5 follow-up `0e57fc5` precedent of mid-batch §9-routing + source landing in one commit):**
+- §5 — new `QA-RustyMeter` entry INSERTED between QA-DispatcherAffinity and QA-EngineApvts (cross-refs §9 forty-second Forks entry); QA-EngineApvts Sequencing field updated from "after QA-DispatcherAffinity" to "after QA-RustyMeter".
+- §6 — arrow updated: `... → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts**********************...`; new 26-asterisk QA-RustyMeter footnote ADDED; QA-EngineApvts footnote updated.
+- §9 — forty-second Forks entry APPENDED documenting the finding + routing decision + Jeff's verbatim quotes + the investigation hypotheses for QA-RustyMeter's plan author.
+
+**Task 3 commit scope (final):** lock removal + shield-raise at destroy/load + piano-roll-clear fix + the 4 plan-doc routing edits above.  Per the §9-routing-in-source-commit precedent at QA-Sfizz Task 5 follow-up `0e57fc5`.
 
 ## Diagnostic Instrumentation Catalog
 

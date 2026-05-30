@@ -580,13 +580,15 @@ bool BaySickRustyDrumsPage::loadProgram (Program target)
 
 void BaySickRustyDrumsPage::tearDownCurrentProgram()
 {
-    // Clear baySickRustyDrumsRoll on every pattern (full reset across the
-    // project, since the new program may have a different kit).
-    if (auto* pm = mProcessor.getPatternManager())
-    {
-        for (int i = 0; i < pm->getNumPatterns(); ++i)
-            pm->getPattern (i).baySickRustyDrumsRoll.notes.clear();
-    }
+    // QA-DispatcherAffinity Task 3 (2026-05-29): the piano-roll clear that
+    // was previously inline here moved into
+    // VibeSynthProcessor::destroyBaySickRustyDrums (called below via
+    // mProcessor.destroyBaySickRustyDrums()).  Single source of truth for
+    // "destroy Rusty completely" so the tab-delete path inherits the same
+    // behavior automatically -- previously the tab-delete path's
+    // destroy-confirmation dialog at StandaloneEditor.cpp:7339-7343 promised
+    // the clear but it was only performed here on program change.  Surfaced
+    // by Jeff at Task 3 Verify 2 (kit-swap test).
 
     // Reset Rusty mixer-strip + bus APVTS params to default.  PluginProcessor
     // exposes a helper that walks all `mixer_rusty_*` and `mixer_rustybus_*`

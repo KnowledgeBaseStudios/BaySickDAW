@@ -1351,6 +1351,22 @@ needed to find what you should pull up to review the work.
 - **Bucket:** Cross-cutting Infrastructure
 - Verify (own plan file will detail): post-fix timestamped Sub-F=(e)-style trace capture shows clean cross-block separation between producer writes + InsertTask reads (Candidate A) OR confirms instance affinity across worker rotations (Candidate B); bit-crusher symptom on BaySickRustyDrums under MT-on remains absent (Sub-K Serial Fallback retired + dispatcher fix engaged); no MT performance regression on non-sfizz engines (Harmless / BaySickSynth / BaySickPlayer / BaySickBass) vs pre-batch baseline; `audioThreadQueue` infrastructure + `mAudioThreadOnly` flag removed from VibeThreadPool + RenderTask cleanly.
 
+#### **QA-RustyMeter: BaySickRustyDrums per-layer-volume CC sliders not reflected in per-strip dbfs meter** *(NEW — inserted 2026-05-29 via §9 forty-second Forks entry)*
+
+**Plan file:** `<silly-name>.md (when started)`
+- Items: AriaControlPanel per-layer-volume CC sliders inside the BaySickRustyDrums kit player UI (e.g. KICK section's Kick/OH/Punch sliders + SNARE section's Btm/Top/OH/Snap/Punch/Epic + likely other channels' equivalent sliders) audibly affect the rendered output but the per-strip dbfs meter on the Mixer page does NOT reflect the change.  Origin: surfaced 2026-05-29 by Jeff at QA-DispatcherAffinity Task 3 Verify 2 (kit-swap stability test); confirmed pre-existing (present under Sub-K-on production state pre-Task-3); confirmed BaySickRustyDrums-specific (BaySickGuitars + BaySickBasses volume knobs DO update their dbfs meters correctly).  See §9 forty-second Forks entry.
+- Scope (Jeff-locked 2026-05-29):
+  - Investigate the per-layer-volume CC mapping path: AriaControlPanel slider → MIDI CC value → sfizz engine → multi-output `output=N` extraction → `mMultiOutScratch` → `RustyInsertTask::run()` → `InsertNode::processBlock` → `publishPeakReading` → `drainMeterAtomicsForUI` → UI poll.
+  - **Prime investigation target: `buildOutputRoutedSfzWrapper`** (the wrapper SFZ synthesis that injects `output=N` per `<master>`/`<group>` line before `loadSfzString`).  Unique to BaySickRustyDrums (BaySickGuitars + BaySickBasses use plain `loadSfzFile` and do NOT exhibit the bug).  Hypothesis: the wrapper synthesis may extract the per-channel audio (via `output=N`) BEFORE the per-layer-volume CC scaling is applied at the SFZ-defined amplitude points; the multi-output channel reflects raw sample audio without the CC scaling while the FINAL stereo mix-down (which sfizz produces alongside the multi-outputs) DOES get the CC scaling — but the per-strip path bypasses that final stereo mix.
+  - **Alternative hypothesis:** the CC mapping in the Big Rusty Drums kit's SFZ file itself may bind the layer-volume knobs to a parameter that bypasses the per-output amplitude (e.g. a global volume CC that the wrapper's `output=N` extraction sidesteps).  Both hypotheses are testable via a focused wrapper-SFZ trace at investigation time.
+  - Design + implement the fix per investigation findings: wrapper-synthesis-level patch (post-process the synthesized SFZ to ensure per-output amplitude reflects the CCs) OR sfizz-internal patch (CC interpretation order) OR alternative SFZ wrapper construction.
+- Risk: **medium** — sfizz parser + wrapper-synthesis territory possibly; investigation depth uncertain pending wrapper SFZ trace.
+- Dependencies: QA-DispatcherAffinity closed.
+- Sequencing: **immediately after QA-DispatcherAffinity close, before QA-EngineApvts** (Jeff's slot pick 2026-05-29 per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 forty-second Forks entry).  Slot rationale: BaySickRustyDrums-specific bug + investigation surface overlaps `buildOutputRoutedSfzWrapper` which the QA-Sfizz cluster touched; addressing it before the QA-EngineApvts perf-audit work keeps the sfizz-engine cluster work contiguous.
+- Effort: medium (~4-8 hours; investigation depth dominates the estimate; if it's a wrapper-synthesis-level patch then small + bounded; if sfizz-internal then larger).
+- **Bucket:** Players, Mixer / Routing
+- Verify (own plan file will detail): turning a BaySickRustyDrums per-layer-volume CC slider (KICK Kick/OH/Punch, SNARE Btm/Top/OH/Snap/Punch/Epic, etc.) audibly increases/decreases the channel's output AND the per-strip dbfs meter on the Mixer page reflects the change in real-time; no regression on BaySickGuitars + BaySickBasses volume-knob-to-meter behavior; no regression on the Stage D Sub-K-disabled MT test (bit-crusher remains absent post-QA-DispatcherAffinity).
+
 #### **QA-EngineApvts: Engine processors APVTS dirty-flag pattern compliance (perf-audit M2)** *(NEW — inserted 2026-05-24)*
 
 **Plan file:** `<silly-name>.md (when started)`
@@ -1364,7 +1380,7 @@ needed to find what you should pull up to review the work.
   - **NEW (folded in at QA-VoicePool close 2026-05-26 per FND-1 / §9 thirty-seventh Forks entry):** add 2-line `mOsc.reset(); mOsc2.reset();` call to `BaySickSynthVoice::startNote` (`Source/BaySickSynth/BaySickSynthVoice.cpp:36-123`) alongside the inline phase accumulator resets at the pre-batch `:72-77`.  Same file surface as `BaySickSynthProcessor`'s dirty-flag pattern work; trivial 2-line fix for wavetable-phase persistence across notes (affects SAW / SAW+SAW / SAW+SQUARE / SQUARE+SQUARE / SUPERSAW waveforms).  Jeff's scope-discipline lock kept this out of QA-VoicePool (which was strictly about audio-thread heap allocations); folds here because QA-EngineApvts already touches `BaySickSynthProcessor` for the dirty-flag work — single small commit at the appropriate task.
 - Risk: **low** -- well-established pattern; 4 processors to apply it to; reference impl already in PluginProcessor.  Worst case: a `valueTreePropertyChanged` callback edge case causes a missed dirty flag (silent -- params don't update; caught immediately on the first verify gesture per processor).  No audio path arithmetic change; no thread-safety concern (atomic exchange is the same pattern used elsewhere).
 - Dependencies: QA-VoicePool closed (sits ahead in the perf-audit cluster; QA-VoicePool touches `VibePlayerDSP` voice lifecycle which interacts with `VibePlayerProcessor::updateFromApvts` -- running QA-EngineApvts after means the voice-pool refactor is settled before the dirty-flag listener wires up).
-- Sequencing: **immediately after QA-DispatcherAffinity, before QA-Ed** (per the QA-DispatcherAffinity close-spawned insertion at QA-Sfizz Task 5 routing 2026-05-28 — see §6 arrow + §9 fortieth Forks entry; was "after QA-Sfizz" pre-QA-DispatcherAffinity insertion; was "after QA-SfzGroup" pre-QA-Sfizz insertion; was "after QA-VoicePool" pre-QA-SfzGroup insertion).  Slot rationale: same architectural origin as QA-InsertMaps + QA-VoicePool + QA-AudioMeters (perf-audit-cluster spawned at QA-Eg close); ordered by impact (M2 is the lowest CPU win in the cluster -- finishes the cluster (now extended with QA-SfzGroup + QA-Sfizz + QA-DispatcherAffinity) before resuming bug-fix sequencing at QA-Ed).
+- Sequencing: **immediately after QA-RustyMeter, before QA-Ed** (per the QA-RustyMeter close-spawned insertion at QA-DispatcherAffinity Task 3 verify finding 2026-05-29 — see §6 arrow + §9 forty-second Forks entry; was "after QA-DispatcherAffinity" pre-QA-RustyMeter insertion; was "after QA-Sfizz" pre-QA-DispatcherAffinity insertion; was "after QA-SfzGroup" pre-QA-Sfizz insertion; was "after QA-VoicePool" pre-QA-SfzGroup insertion).  Slot rationale: same architectural origin as QA-InsertMaps + QA-VoicePool + QA-AudioMeters (perf-audit-cluster spawned at QA-Eg close); ordered by impact (M2 is the lowest CPU win in the cluster -- finishes the cluster (now extended with QA-SfzGroup + QA-Sfizz + QA-DispatcherAffinity + QA-RustyMeter) before resuming bug-fix sequencing at QA-Ed).
 - Effort: medium (~4-6 hours; ~1-1.5 hr per processor including verify pass -- mechanical pattern apply x4).
 - Estimated CPU win: ~1-2% cumulative across the 4 engines on busy sessions (per `/perf-audit` M2 estimate; the per-block LOAD-everything path becomes a near-zero-cost atomic exchange when state is unchanged).
 - **Bucket:** Cross-cutting Infrastructure, Players
@@ -1954,7 +1970,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-EngineApvts********************** → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-DirtyFlag*******************
 ```
@@ -2322,13 +2338,32 @@ re-engage MT worker-pool parallel execution on the 3 sfizz engines.
 Risk medium-high, effort medium-large (~12-17 hours).  See §9
 fortieth Forks entry.
 
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-RustyMeter** inserted
+2026-05-29 at QA-DispatcherAffinity Task 3 verify finding.  Slotted
+**immediately after QA-DispatcherAffinity close, before QA-EngineApvts**
+(Jeff's slot pick per `feedback_slot_placement_is_spec_call.md`).
+Scope: investigate + fix the BaySickRustyDrums per-layer-volume CC
+slider audibly-affects-output-but-not-per-strip-dbfs-meter disconnect
+surfaced by Jeff at QA-DispatcherAffinity Task 3 Verify 2 (kit-swap
+stability test).  Pre-existing bug confirmed present under Sub-K-on
+production state pre-Task-3; BaySickRustyDrums-specific (BaySickGuitars
++ BaySickBasses verified unaffected -- their volume knobs DO update
+their per-strip dbfs meters correctly).  Prime investigation target:
+`buildOutputRoutedSfzWrapper` (wrapper SFZ synthesis with `output=N`
+injection unique to BaySickRustyDrums).  Hypotheses: wrapper synthesis
+may extract per-channel audio before per-layer-volume CC scaling is
+applied OR the SFZ kit's CC mapping itself binds layer volumes to a
+parameter the `output=N` extraction sidesteps.  Risk medium, effort
+medium (~4-8 hours).  See §9 forty-second Forks entry.
+
 \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-EngineApvts** inserted
-2026-05-24 at QA-Eg close.  Slotted **immediately after QA-DispatcherAffinity,
-before QA-Ed** (per the QA-DispatcherAffinity close-spawned insertion at
-QA-Sfizz Task 5 routing 2026-05-28; was "after QA-Sfizz" pre-QA-DispatcherAffinity
-insertion; was "after QA-SfzGroup" pre-QA-Sfizz insertion; was "after
-QA-VoicePool" pre-QA-SfzGroup insertion; Jeff's confirmed slot per
-`feedback_slot_placement_is_spec_call.md`).  Scope: bring the 4 engine
+2026-05-24 at QA-Eg close.  Slotted **immediately after QA-RustyMeter,
+before QA-Ed** (per the QA-RustyMeter close-spawned insertion at
+QA-DispatcherAffinity Task 3 verify finding 2026-05-29; was "after
+QA-DispatcherAffinity" pre-QA-RustyMeter insertion; was "after QA-Sfizz"
+pre-QA-DispatcherAffinity insertion; was "after QA-SfzGroup" pre-QA-Sfizz
+insertion; was "after QA-VoicePool" pre-QA-SfzGroup insertion; Jeff's
+confirmed slot per `feedback_slot_placement_is_spec_call.md`).  Scope: bring the 4 engine
 processors (`HarmlessProcessor / VibePlayerProcessor /
 BaySickSynthProcessor / BaySickBassProcessor`) into compliance with
 the documented BaySickDAW APVTS dirty-flag pattern
@@ -5026,3 +5061,38 @@ Batch task structure:
 - `Plans & Specs/Running Notes/snug-greeting-quilt.md` — running notes seed (title / purpose blockquote / pair ref / convention ref / Task 0 entry).
 
 **Verification:** n/a for this §9 entry — framing-pivot artifact, not a source change.  The Task 1 trace instrumentation lands in QA-DispatcherAffinity Task 1 commit with its own verify ladder (Sub-K baseline: all 14 sfizz tasks on single thread ID); the Task 3 fix lands with its own cure verify (6-cymbal crash MT-on test, bit-crusher absent); Task 4 Sub-K retirement lands with the full multi-engine smoke (Rusty + Guitars + Basses + Harmless + Synth + Player + Bass MT-on no-regression).
+
+### 2026-05-29 — QA-DispatcherAffinity Task 3 Verify 2 finding: BaySickRustyDrums per-layer-volume CC slider audibly-louder-but-meter-unchanged → new QA-RustyMeter batch routed forward (slot 2a)
+
+**Status:** SETTLED ROUTING — pre-existing bug surfaced by Jeff during QA-DispatcherAffinity Task 3 Verify 2 (the kit-swap stability test that confirmed the Sub-A = (i) lock removal works correctly).  BaySickRustyDrums-specific (BaySickGuitars + BaySickBasses verified unaffected — their volume knobs DO update their per-strip dbfs meters correctly).  Confirmed pre-existing: present under Sub-K-on production state before QA-DispatcherAffinity Task 3 changes landed.  Routed forward to a new dedicated QA-RustyMeter batch slotted immediately after QA-DispatcherAffinity close, before QA-EngineApvts.
+
+**Trigger:** Jeff observation 2026-05-29 mid-QA-DispatcherAffinity Task 3 Verify 2.  Verbatim: "I do see one oddity.  When I say have a kick and snare pattern and turn the knobs up in the player for those sections, the sound gets louder but the dbfs meter stays the same."  Follow-up after I asked the diagnostics (which knobs / which meters / Sub-K A/B / non-Rusty comparison): "this was something I noticed with sub k on I just hadn't brought it up yet since we were figuring out the bit crusher issue" (confirming pre-existing) + 2 images of the AriaControlPanel KICK + SNARE per-layer-volume sliders showing before/after positions + "I just was checking if the same issue happens on guitars or basses but it looks like the knobs that make it louder do increase their dbfs" (confirming BaySickRustyDrums-specific).
+
+**Bug characterization:** AriaControlPanel per-layer-volume CC sliders inside the BaySickRustyDrums kit player UI (e.g. KICK section's Kick/OH/Punch sliders + SNARE section's Btm/Top/OH/Snap/Punch/Epic) send MIDI CC values to the sfizz engine.  Turning them up audibly increases the channel's rendered output.  The per-strip dbfs meter on the Mixer page (which reads from `InsertNode::processBlock`'s `publishPeakReading` call after the insert chain runs on the audio extracted from `mMultiOutScratch` for that strip's channel) does NOT reflect the change.
+
+**Prime investigation target — `buildOutputRoutedSfzWrapper`:**
+
+BaySickRustyDrums uses `buildOutputRoutedSfzWrapper` to synthesize a wrapper SFZ that rewrites the kit's SFZ content + injects `output=N` per `<master>`/`<group>` line before calling `loadSfzString`.  This wrapper synthesis is UNIQUE to BaySickRustyDrums — BaySickGuitars + BaySickBasses use plain `loadSfzFile` which doesn't go through the wrapper path.  Hypothesis: the wrapper synthesis may extract the per-channel audio (via `output=N`) BEFORE the per-layer-volume CC scaling is applied at the SFZ-defined amplitude points, so the multi-output channel reflects the raw sample audio without the CC scaling, while the FINAL stereo mix-down (which sfizz also produces alongside the multi-outputs) DOES get the CC scaling — but the per-strip path bypasses that final stereo mix.
+
+**Alternative hypothesis:** the CC mapping in the Big Rusty Drums kit's SFZ file itself may bind the layer-volume knobs to a parameter that bypasses the per-output amplitude (e.g. a global volume CC that the wrapper's `output=N` extraction sidesteps).
+
+Both hypotheses are testable via a focused wrapper-SFZ trace at investigation time.  Fix shape depends on which hypothesis verifies: wrapper-synthesis-level patch (post-process the synthesized SFZ to ensure per-output amplitude reflects the CCs) OR sfizz-internal patch (CC interpretation order) OR alternative SFZ wrapper construction.
+
+**Routing decision (Jeff verbatim 2026-05-29):**
+
+When surfaced for routing — fix shape (1) fold into Task 3 commit / (2) new dedicated batch + slot / (3) fold into upcoming planned batch — Jeff picked "2a" (new dedicated batch slotted immediately after QA-DispatcherAffinity, before QA-EngineApvts).  Batch name picked "RustyMeter is fine" → `QA-RustyMeter`.  Slot rationale: BaySickRustyDrums-specific bug + investigation surface overlaps `buildOutputRoutedSfzWrapper` which the QA-Sfizz cluster touched; addressing it before the QA-EngineApvts perf-audit work keeps the sfizz-engine cluster work contiguous.  Risk medium, effort medium (~4-8 hours), Bucket Players + Mixer / Routing.
+
+**Carry-forward contradictions:** none.  Carry-Forward §1 (Render Engine Primitives) + §2 (Lock-Free + Lifecycle Primitives) don't document the meter publish path or the wrapper SFZ synthesis logic; QA-RustyMeter will surface concrete findings as new entries in the Implemented Work Log at its close.
+
+**Inline back-refs:**
+- §5 — new QA-RustyMeter entry INSERTED between QA-DispatcherAffinity (this entry's parent batch) and QA-EngineApvts (cross-refs this entry); QA-EngineApvts Sequencing field updated from "after QA-DispatcherAffinity" to "after QA-RustyMeter".
+- §6 — arrow updated to `... → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts**********************...`; new 26-asterisk QA-RustyMeter footnote ADDED + QA-EngineApvts footnote updated from "after QA-DispatcherAffinity" to "after QA-RustyMeter".
+- §9 this entry (forty-second Forks entry).
+- QA-DispatcherAffinity batch — running notes `snug-greeting-quilt.md` Task 3 Verify section captures the finding origin + the routing decision; Implemented Work Log close entry will reference this §9 entry.
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-RustyMeter entry ADDED; §5 QA-EngineApvts Sequencing field updated; §6 arrow updated; §6 26-asterisk QA-RustyMeter footnote ADDED + QA-EngineApvts footnote updated; §9 this entry.
+- `Plans & Specs/Running Notes/snug-greeting-quilt.md` — QA-DispatcherAffinity running notes captures the Task 3 Verify finding + the routing decision.
+- **NOT created (per `feedback_plan_mirror_one_way.md` discipline):** `Plans & Specs/Batch Plans/<silly-name>.md` (QA-RustyMeter per-batch plan file — drafted when QA-RustyMeter opens, NOT now) + `Plans & Specs/Running Notes/<silly-name>.md` (QA-RustyMeter running notes seed — created when QA-RustyMeter opens).
+
+**Verification:** n/a for this §9 entry — routing decision artifact, not a source change.  QA-RustyMeter's own per-batch verify ladder (locked in this entry's Scope bullets + carried into the eventual per-batch plan file when QA-RustyMeter opens): turning a BaySickRustyDrums per-layer-volume CC slider audibly increases/decreases the channel's output AND the per-strip dbfs meter on the Mixer page reflects the change in real-time; no regression on BaySickGuitars + BaySickBasses volume-knob-to-meter behavior; no regression on the Stage D Sub-K-disabled MT test (bit-crusher remains absent post-QA-DispatcherAffinity).

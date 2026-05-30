@@ -4337,8 +4337,26 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     // load completes.
     mRustyDrumsActive.store (false, std::memory_order_release);
 
-    // Create the singleton on first call.  Locked because the audio thread
-    // may also access mRustyDrumsEngine via getBaySickRustyDrums().
+    // QA-DispatcherAffinity Task 3 (2026-05-29): raise the message-thread
+    // shield around the entire engine mutation window -- create +
+    // prepareToPlay + producer-task register + loadKit + dispatcher
+    // task-list mutations + ensureRustyInsert loop.  Audit during Task 3
+    // surfaced a latent race in loadKit() (which mutates sfizz internal
+    // state for seconds while the audio thread could still be inside an
+    // in-flight processStrips against the same engine) that the pre-Task-3
+    // engine SpinLock did NOT actually cover (the lock was only held for
+    // the pointer assignment, not for loadKit itself).  The shield closes
+    // both that latent race AND the new race window that opens with
+    // Sub-A = (i)'s removal of the per-insert try-locks.  shieldWasUp
+    // refcounting matches the existing project-load entry-point pattern.
+    const bool shieldWasUp = isProjectLoadInProgress();
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) juce::Thread::sleep (30);
+
+    // Create the singleton on first call.  The SpinLock here is now
+    // redundant relative to the shield raised above (audio thread isn't
+    // running tasks), but kept for now -- removing it is a Task 4
+    // cleanup item alongside the rest of the Sub-K infrastructure.
     {
         const juce::SpinLock::ScopedLockType sl (mRustyDrumsEngineLock);
         if (! mRustyDrumsEngine)
@@ -4359,7 +4377,13 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     }
 
     if (! mRustyDrumsEngine->loadKit (sfzPath))
+    {
+        // QA-DispatcherAffinity Task 3 (2026-05-29): early-return must
+        // restore the shield to its prior state so the caller doesn't get
+        // stuck with audio bailed indefinitely.
+        setProjectLoadInProgress (shieldWasUp);
         return false;
+    }
 
     // Tear down any existing strips from a prior kit before spawning the new
     // ones - protects against accidental double-creation if the user loads a
@@ -4384,6 +4408,11 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     const auto& channels = mRustyDrumsEngine->getChannels();
     for (size_t i = 0; i < channels.size() && i < (size_t) MixerChannelIds::kMaxRustyStrips; ++i)
         ensureRustyInsert ((int) i, channels[i].name);
+
+    // QA-DispatcherAffinity Task 3 (2026-05-29): lower the shield now that
+    // the engine + tasks + strips are fully built.  Audio thread can begin
+    // rendering on the next block.
+    setProjectLoadInProgress (shieldWasUp);
 
     // J-7b: now safe - the engine is fully loaded, output buses sized,
     // strip InsertNodes registered.  Audio thread can begin rendering.
@@ -4414,10 +4443,45 @@ void VibeSynthProcessor::destroyBaySickRustyDrums()
     // touching the engine pointer, so flip the active flag before freeing.
     mRustyDrumsActive.store (false, std::memory_order_release);
 
+    // QA-DispatcherAffinity Task 3 (2026-05-29): raise the message-thread
+    // shield around the engine destroy.  Audio thread bails at processBlock
+    // top while we reset (see PluginProcessor::processBlock guard at the
+    // mProjectLoadInProgress check) + the 30 ms sleep gives any in-flight
+    // block time to drain.  This replaces the safety the per-insert
+    // ScopedTryLockType previously provided -- Sub-A = (i) removed those
+    // try-locks so 13 RustyInsertTasks can run lock-free under MT
+    // execution; the shield closes the use-after-free window that would
+    // otherwise open if destroy fired mid-audio-block.  shieldWasUp
+    // refcounting matches the existing pattern at StandaloneEditor's
+    // closeAllDynamicTabs (:6266-6269) + project-load entry points.
+    const bool shieldWasUp = isProjectLoadInProgress();
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) juce::Thread::sleep (30);
+
+    // QA-DispatcherAffinity Task 3 (2026-05-29): clear the Rusty piano roll
+    // on every pattern.  Matches the destroy-confirmation dialog's promise
+    // ("clear the Rusty piano roll on every pattern" -- see
+    // StandaloneEditor.cpp:7342) which was previously undelivered: only
+    // BaySickRustyDrumsPage::tearDownCurrentProgram (program-change path)
+    // did the clear; the tab-delete path did not.  Moved into
+    // destroyBaySickRustyDrums so both call sites (tab delete +
+    // program change) inherit the same behavior automatically -- single
+    // source of truth for "destroy Rusty completely".  Safe to do inside
+    // the shield window: the audio thread is bailed out at processBlock
+    // top, so a concurrent MIDI-schedule read against half-cleared notes
+    // can't fire.  Surfaced by Jeff at Task 3 Verify 2 (kit-swap test).
+    if (mPatternManager != nullptr)
+    {
+        for (int i = 0; i < mPatternManager->getNumPatterns(); ++i)
+            mPatternManager->getPattern (i).baySickRustyDrumsRoll.notes.clear();
+    }
+
     {
         const juce::SpinLock::ScopedLockType sl (mRustyDrumsEngineLock);
         mRustyDrumsEngine.reset();
     }
+
+    setProjectLoadInProgress (shieldWasUp);
 
     // Reset bus-level mixer params to defaults so a future re-create starts
     // clean (mixer_rustybus_* params persist as APVTS zombies, harmless).

@@ -55,18 +55,22 @@ void RustyInsertTask::run()
         return;
     }
 
-    // The producer (RustyDrumsProducerTask) holds the engine's spin lock
-    // briefly while it calls processStrips.  By the time we run, the
-    // synthetic dep guarantees the producer has finished.  We still
-    // try-lock here defensively in case of a kit-load race; on miss we
-    // produce silence rather than risk reading half-loaded engine state.
-    juce::SpinLock::ScopedTryLockType lk (mProcessor->mRustyDrumsEngineLock);
-    if (! lk.isLocked())
-    {
-        mOutputBuffer->clear();
-        return;
-    }
-
+    // QA-DispatcherAffinity Task 3 (2026-05-29): try-lock REMOVED per Sub-A
+    // = (i) resolution.  The 13 RustyInsertTasks are strict concurrent
+    // readers of mMultiOutScratch -- the producer→13-insert synthetic dep
+    // guarantees mMultiOutScratch is fully written before any insert reads
+    // it, and concurrent reads of a static buffer are safe.  Pre-Task-3 the
+    // try-lock here caused B.5 "try-lock-failure strip silencing" under MT
+    // execution: 13 inserts racing for the engine spin lock + losers
+    // clearing their output buffer = intermittent strip drops audible as
+    // the bit-crusher distortion characterized in QA-DispatcherAffinity
+    // Stage C analysis.  Lifecycle safety for engine swap / kit load is now
+    // provided by the mProjectLoadInProgress shield raised at
+    // destroyBaySickRustyDrums + loadBaySickRustyDrumsKit (audit-driven
+    // additions in this same commit); the audio thread bails at
+    // processBlock top during those mutations + sleeps 30 ms for in-flight
+    // blocks to drain, so when this code runs the engine pointer is
+    // guaranteed stable for the block.
     auto* engine = mProcessor->mRustyDrumsEngine.get();
     if (engine == nullptr)
     {

@@ -46,9 +46,13 @@ void RustyDrumsProducerTask::run()
     // Engine + active flag check.
     if (! mProcessor->mRustyDrumsActive.load (std::memory_order_acquire)) return;
 
-    juce::SpinLock::ScopedTryLockType lk (mProcessor->mRustyDrumsEngineLock);
-    if (! lk.isLocked()) return;
-
+    // QA-DispatcherAffinity Task 3 (2026-05-29): try-lock REMOVED per Sub-A
+    // = (i) resolution.  Same rationale as RustyInsertTask::run() -- the
+    // mProjectLoadInProgress shield raised at destroyBaySickRustyDrums +
+    // loadBaySickRustyDrumsKit (in this same commit) keeps the engine
+    // pointer stable for the audio block.  The producer was the sole
+    // upstream of the 13 insert tasks (via synthetic dep) so its lock-free
+    // dispatch is the prerequisite for the inserts running lock-free.
     auto* engine = mProcessor->mRustyDrumsEngine.get();
     if (engine == nullptr) return;
 
