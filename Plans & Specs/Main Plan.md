@@ -1370,7 +1370,7 @@ needed to find what you should pull up to review the work.
 
 #### **QA-EngineApvts: Engine processors APVTS dirty-flag pattern compliance (perf-audit M2)** *(NEW — inserted 2026-05-24)*
 
-**Plan file:** `<silly-name>.md (when started)`
+**Plan file:** `Plans & Specs/Batch Plans/shimmering-noodling-simon.md`
 - Items: bring the 4 engine processors (`HarmlessProcessor / VibePlayerProcessor / BaySickSynthProcessor / BaySickBassProcessor`) into compliance with the documented BaySickDAW APVTS dirty-flag pattern (`feedback_apvts_dirty_flag_pattern.md`).  Origin: surfaced 2026-05-24 by `/perf-audit` at QA-Eg close as M2 (MEDIUM-PRIORITY); confirmed by source-trace.  The 4 engine processors call `updateFromApvts` unconditionally per block, each reading ~30-50 parameters via `apvts.getRawParameterValue(id)->load()` regardless of whether anything changed since the last block.  The current pattern guards SETTER work with value-change comparisons but doesn't avoid the LOAD work.  Per the memory rule, the documented pattern pairs a process-side `isIdentity()` short-circuit with a sync-side `ValueTree::Listener`-driven dirty flag.  Pattern is wired in `PluginProcessor` (`Source/PluginProcessor.cpp:178`) but missing from the 4 engine processors.  See §9 thirty-fifth Forks entry.
 - Scope (Jeff-locked 2026-05-24 + 2026-05-26 fold-in):
   - Add `std::atomic<bool> mApvtsDirty { true };` member to each of: `HarmlessProcessor`, `VibePlayerProcessor`, `BaySickSynthProcessor`, `BaySickBassProcessor`.
