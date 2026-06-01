@@ -31,6 +31,27 @@ Net user symptom: a CC-gated `<master>` articulation behaves as if the CC were *
 
 ---
 
+## Pivot (2026-06-01 — Test-1 verify finding: the real bug is Sub-E's blanket-64 default, NOT undispatched CCs)
+
+**This section supersedes the dispatch-helper approach described in "The fix (SC-4)" above, "Files to modify", and "Task 1" below.** They are retained for audit trail.
+
+Jeff's Debug Test-1 (Black&Green Guitars) with the helper live revealed the original premise was a misdiagnosis. The helper correctly dispatched the stored CC values — but for the 10 exposed-but-UNSET Guitars CCs (Feedback CC29, Muting CC70, Unison CC100, Unison detune CC102, vibratos CC111/112/113/116/117, Tailpiece bends CC118) the stored value is **64** (Sub-E's blanket default) = half-ON -> sounds wrong. Before this batch those CCs were never dispatched, so sfizz held them at **0 (OFF)** = correct. Jeff verbatim: "before ... acting as 0 and sounded correct, now its at 64 and actually at 64 and sounds wrong."
+
+**Root cause:** QA-Sfizz Sub-E's blanket "default every CC to 64." A CC the kit leaves unset means OFF (sfizz's natural 0); explicit non-zero defaults come via the kit's `set_cc<N>` directives. The dispatch gap had been harmlessly masking Sub-E's wrong default until this batch made it audible. (Sub-E's "fuller sound" justification was already a documented diagnostic miss in the QA-Sfizz close.)
+
+**Corrected approach (Jeff confirmed 2026-06-01 "proceed"; manual knob check validated: Guitars at 27=31/101=127/114=40 with the other 10 exposed CCs at 0 sounds right):**
+1. **Default unset CCs to 0, not 64** — revert Sub-E's `64` in the three spots per engine: the `createLayout` CC-param default, the `loadKit` reset-loop value, and the `getKitDefaultCc` fallback. The kit's `set_cc` directives stay the only non-zero defaults (applied by the existing kit-defaults loop). Control display, sfizz state, and audible default now all agree (0 = off), fixing FND-2 with no dispatch.
+2. **Resolve SFZ `#define` macros in the `loadKit` scanner** — `getIntValue("$ht_lo_hi_init")` returned 0, so Big Rusty Drums' `set_cc4=$ht_lo_hi_init` (hi-hat position, intended **127** = Fully open) was mis-read as 0. The scanner now captures `#define $name value` and substitutes when a `set_cc` RHS starts with `$`.
+3. **The dispatch helper (SC-4) is REMOVED** — redundant once the default is 0 (the existing kit-defaults loop dispatches `set_cc` values; `replaceState` dispatches saved values on restore). The "undispatched CC" framing was the misdiagnosis.
+
+**FND-4 ("Cool bass riff loads silent"):** re-test under the corrected fix. If still silent, diagnose the restore / `sfizzEngineData` path separately (do NOT reintroduce a blanket dispatch).
+
+**Files actually changed (3 `.cpp`, not 6):** `BaySickGuitarsProcessor.cpp`, `BaySickBassesProcessor.cpp`, `BaySickRustyDrumsProcessor.cpp` — 5 edits each (createLayout default 64->0, getKitDefaultCc fallback 64->0, loadKit reset 64->0, scan `#define` capture + `$`-resolution, getCcValue comment cleanup), all with comment updates. No header changes; no helper. `git restore` reset the 6 files to the committed Sub-E-64 baseline (helper was never committed) before applying.
+
+**Re-verify script (current):** (1) fresh Guitars/Black&Green + (2) fresh Basses/Black&Blue -> correct on load, no control touch, knobs *show* the true defaults (effects 0; set_cc CCs at kit values). (3) fresh RustyDrums/Big Rusty Drums -> correct; hi-hat "Position" dropdown now defaults to **Fully open** (CC4=127, the kit's macro default; was mis-read as ~Closed). (4) Cool bass riff loads audible (FND-4). (5) another saved sfizz project loads correct. (6) regression: CC move / double-click reset (->0 for effects, kit value for set_cc) / Rusty Full<->Basic program switch (no leaks). (7) no hung notes. (8) MT == serial.
+
+---
+
 ## Spec calls already locked (with reasoning)
 
 | ID | Decision | Reasoning |
@@ -43,6 +64,8 @@ Net user symptom: a CC-gated `<master>` articulation behaves as if the CC were *
 | SC-6 | **Silly-name = `linear-fluttering-spark`** (adopted the plan-mode runtime assignment). | My pick per `feedback_silly_name_is_my_pick.md`; adopting the assigned name keeps plan/running-notes/mirror filenames consistent. |
 | SC-7 | **Verify cadence = Debug-then-Release per task** (Jeff drives `do_build.bat`). | Standing rule (CLAUDE.md Build System; `feedback_no_full_release_reverify_at_batch_close.md`). |
 
+> **Post-pivot (2026-06-01):** SC-1 / SC-2 / SC-3 / SC-6 / SC-7 stand. **SC-4 and SC-5 are SUPERSEDED** — see the Pivot section above. The fix no longer dispatches a CC set; it reverts Sub-E's blanket-64 default to 0 and resolves SFZ `#define` macros. SC-2's intent (assert state only over kit-declared controls, never a blanket) is realized more directly: a default of 0 asserts nothing unless the kit `set_cc`'s it.
+
 ---
 
 ## Sub-spec calls surfaced for ExitPlanMode
@@ -52,6 +75,8 @@ Net user symptom: a CC-gated `<master>` articulation behaves as if the CC were *
 ---
 
 ## Files to modify
+
+> **SUPERSEDED by the Pivot section (2026-06-01).** The actual change is 3 `.cpp` files (no headers, no helper): default 64->0 in three spots per engine + `#define` resolution in the scanner. The original 6-file dispatch-helper plan below is retained for audit trail.
 
 **Task 1 — the single consolidated source commit (6 files: 3 processors + 3 headers).**
 
@@ -78,6 +103,8 @@ No other files change. No APVTS params added (the CC params already exist). No e
 - [ ] Mark Task 0 done.
 
 ### Task 1 — sfizz CC dispatch-at-init (the one consolidated source commit)
+
+> **SUPERSEDED by the Pivot section (2026-06-01).** Task 1 actually shipped as the Sub-E-default revert (64->0) + `#define` resolution across the 3 `.cpp` files; the dispatch helper below was implemented, failed Test-1, and was removed via `git restore`. The current re-verify script lives in the Pivot section + running notes. The helper outline below is retained for audit trail.
 
 **The helper (identical in all three processors; ASCII-only comment per the standing rule):**
 
@@ -148,7 +175,7 @@ After Task 1 lands, the full smoke is scenarios (1)-(8) under Task 1 above. Pass
 
 ## Routing notes (Rule 3 application during execution)
 
-- **Hi-hat CC4 default change (RustyDrums):** dispatching CC4 at its Aria-64 (half-open) value is the direct consequence of SC-1 + SC-2 (CC4 is a labeled/exposed control). If Jeff's verify shows the default should be closed (0) instead, that's a kit-default decision (his call) — handle in-batch if small, else route per Rule 3. Flagged in verify scenario (3).
+- **Hi-hat CC4 default (RustyDrums):** post-pivot, CC4 ("Hi-hat position" — a discrete OptionMenu: Closed / Loosely closed / Quarter open / Half open / Fully open) defaults to the kit's own `set_cc4=$ht_lo_hi_init` = **127** (Fully open) once the `#define` resolver lands; it was previously mis-read as 0 (~Closed). If Jeff's verify shows a different default is wanted, that's a kit-default decision (his call). Confirmed APVTS-backed + automatable.
 - **A kit needing CCs beyond its `label_cc` set:** not the case for the three shipping kits (SC-5 cross-check), but if a future/third-party kit gates an articulation on an unlabeled CC, that's a scope extension — surface to Jeff, route per Rule 3 (do not silently widen to a blanket push, which SC-2 rejected).
 - **`/review-batch` NITs:** record in the close entry (do not bulk-defer; `feedback_closed_batch_carryforward_via_forks.md`).
 - Real bugs found mid-batch get fixed in-batch by default (`feedback_qa_batches_fix_bugs_dont_defer.md`).

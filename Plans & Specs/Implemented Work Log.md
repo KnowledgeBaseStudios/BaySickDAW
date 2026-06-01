@@ -1933,3 +1933,72 @@ L1-L8, each surfaced + Jeff-locked across 4 chat rounds (per §0 Rule 5; see the
 Per the §6 sequencing arrow updated at this close, **QA-Sfizz-Followup is the next batch** (the FND-2 route — slotted immediately after QA-EngineApvts, before QA-Ed; Jeff's slot pick 2026-05-31).  Scope: sfizz CC dispatch-at-init — the Aria CC=64 default (QA-Sfizz Sub-E) is applied to the engine's APVTS CC params but never sent to sfizz at init/load, so a CC-gated articulation behaves as if at 0 until the control is moved (BaySickGuitars / BaySickBasses); covers the "Cool bass riff loads silent" symptom (FND-4, same root).  Bucket = Players.
 
 ---
+
+### 2026-06-01 14:10 PT — QA-Sfizz-Followup — FND-2/FND-4 root-caused to QA-Sfizz Sub-E's blanket CC=64 default (not undispatched CCs); reverted to 0 + SFZ `#define` resolution across the three sfizz engine processors (pivoted from the Task-0-locked dispatch-helper)
+
+**Bucket:** Players
+
+#### Done
+
+QA-Sfizz-Followup opened (`be6fd7e`) as the FND-2 route out of QA-EngineApvts verify (Jeff, 2026-05-31; §9 forty-sixth Forks entry), slotted immediately after QA-EngineApvts, before QA-Ed (Jeff's slot pick per `feedback_slot_placement_is_spec_call.md`).  **Pre-existing bug from QA-Sfizz Sub-E (`f477e39`, 2026-05-28) — NOT a QA-EngineApvts regression.**  The three sfizz-driven engines — `BaySickGuitarsProcessor`, `BaySickBassesProcessor`, `BaySickRustyDrumsProcessor` — loaded their kit-exposed `<master>` articulations behaving as if their gating CC were 0 until the control was physically moved (FND-2), and an older saved BaySickBasses project loaded silent (FND-4).  The fix reverts QA-Sfizz Sub-E's blanket "default every engine CC to 64" back to **0** (sfizz's natural OFF) and resolves SFZ `#define` macros in the `loadKit` scanner so a macro-defined `set_cc` lands at its real value.  **One consolidated source commit** (`7695f4e`, 3 source files, +173/-114; the churn is mostly comment rewrites — the logic delta is 3 value flips + 1 scanner branch per engine) per the Jeff-locked SC-3.
+
+- **Task 0 — batch-open (docs only)** (`be6fd7e`): plan mirrored to `Batch Plans/linear-fluttering-spark.md` (home-dir copy deleted); §5 `**Plan file:**` pointer; Running Notes seed.  Spec Jeff-locked SC-1..SC-7 in chat 2026-06-01 before the plan body was written; no source touched (clean rollback boundary per §0).
+- **Task 1 — implementation (single consolidated source commit)** (`7695f4e`): the Sub-E default-revert (64 -> 0) + `#define` resolution across the 3 `.cpp` files.  See the pivot detail below.  Verified by Jeff in Debug + Release 2026-06-01: all 8 re-verify scenarios pass.
+
+**The root-cause pivot (the defining event of this batch).**  Task 0 locked a `dispatchExposedCcsToSfizz()` helper (SC-4/SC-5): push each kit's UI-exposed `label_cc` controls' current APVTS values directly into sfizz at the end of `loadKit` and after `replaceState` in `setStateInformation`, on the premise that Sub-E's CC=64 default was correct but never reached sfizz (the only CC path being `parameterChanged -> mSfizz->cc()`, which no-ops when `setValueNotifyingHost` writes a value equal to the current one).  The helper was implemented across all three engines (12 edits — impl + 2 call sites + header decl, x3), then **fully REVERTED via `git restore` and re-done** when Jeff's Debug Test-1 (Black&Green Guitars) showed it faithfully dispatching the WRONG value: for the 10 exposed-but-UNSET Guitars CCs (Feedback CC29, Muting CC70, Unison CC100, Unison detune CC102, vibratos CC111/112/113/116/117, Tailpiece bends CC118) the stored value is 64 (Sub-E's blanket default) = half-ON -> sounded wrong, whereas before this batch those CCs were never dispatched so sfizz held them at 0 (OFF) = correct (Jeff verbatim: "before ... acting as 0 and sounded correct, now its at 64 and actually at 64 and sounds wrong").  The true root cause is Sub-E's blanket-64 default ITSELF, not undispatched CCs — a kit leaves a CC unset to mean OFF (sfizz's natural 0), with explicit non-zero defaults arriving via the kit's own `set_cc<N>` directives; the dispatch gap had merely been masking Sub-E's wrong default until the helper made it audible.  (Sub-E's "fuller sound"/Aria-emulation justification was already a documented diagnostic miss in the QA-Sfizz close.)  The dispatch helper was never committed (HEAD stayed at the Sub-E-64 baseline), so `git restore` of the 6 files was the zero-risk reset before applying the corrected fix.
+
+**What actually shipped (the corrected fix, 3 `.cpp`, no headers):**
+- **Default unset CCs to 0, not 64 (the load-bearing change).**  Reverts Sub-E's `64` in the three spots per engine: the `createLayout` CC-param default, the `loadKit` reset-loop value, and the `getKitDefaultCc` fallback.  Control display, sfizz state, and audible default now all agree (0 = off).  The kit's `set_cc` directives stay the only non-zero defaults, applied by the existing kit-defaults loop (unchanged) — e.g. Guitars 27=31 (Release vol) / 101=127 (Unison width) / 114=40 (Vibrato speed).  Fixes FND-2 with no dispatch helper.
+- **Resolve SFZ `#define` macros in the `loadKit` scanner.**  Big Rusty Drums' `set_cc4=$ht_lo_hi_init` (hi-hat position, intended 127 = Fully open) was mis-read as 0 by `getIntValue("$...")`; the scanner now captures `#define $name value` and substitutes when a `set_cc` RHS starts with `$`.  Hi-hat "Position" now defaults to Fully open instead of Closed.
+- No header changes; no `dispatchExposedCcsToSfizz` helper; no APVTS params added; no editor/UI/CMake changes; no diagnostic instrumentation (Rule 4 catalog stayed empty — this was a known-root-cause fix verified by Jeff's audio testing, not a log-trace hunt).
+
+#### Spec calls realized
+
+SC-1..SC-7, each surfaced + locked per §0 Rule 5 (see the plan file's locked-spec table + the Running Notes):
+- **SC-1** engine scope = all three sfizz engines (Guitars + Basses + RustyDrums — identical CC architecture + identical load-time bug; "leaving known, identical bugs in parallel modules creates technical debt").  **SC-3** one consolidated source commit across all three.  **SC-6** silly-name = `linear-fluttering-spark` (my pick per `feedback_silly_name_is_my_pick.md`).  **SC-7** verify cadence = Debug-then-Release per task (Jeff drives `do_build.bat`).
+- **SC-2** dispatch breadth = only the kit's UI-exposed controls (a blanket push would assert CC64/CC7/CC10 -> stuck notes + volume/pan cut).  Its intent is realized MORE directly by the pivot: a default of 0 asserts nothing unless the kit `set_cc`'s it.
+- **SC-4 / SC-5 — SUPERSEDED by the pivot (2026-06-01).**  SC-4 (direct `mSfizz->cc()` push) + SC-5 (dispatch the `mCcLabel` set) were the dispatch-helper mechanism; they were correct given the original (wrong) premise.  Once Test-1 showed the real bug was the 64 default, the helper became redundant — the existing kit-defaults loop already dispatches `set_cc` values and `replaceState` dispatches saved values on restore — and was removed.  Both supersessions are annotated in the plan's locked-spec table + the Pivot section.
+
+#### Found along the way
+
+- **The corrected-direction Test-1 finding IS the pivot** (recorded above): with the SC-4 helper live, the 10 exposed-but-UNSET Guitars CCs reached sfizz at Sub-E's 64 = half-ON and sounded wrong, where they had previously held at 0 (OFF) = correct.  This inverted the batch's root-cause model from "CCs aren't dispatched" to "Sub-E's blanket-64 default is wrong."
+- **`#define`-mis-parse bug (new, mid-batch).**  While reverting the default, the `loadKit` scanner was found to mis-read macro-defined `set_cc` values: Big Rusty Drums' `set_cc4=$ht_lo_hi_init` (intended 127 = Fully open) parsed as 0 by `getIntValue("$...")`, so the hi-hat "Position" defaulted to Closed instead of the kit's intended Fully open.  Surfaced only because correcting the CC-default model exposed every other kit-default path.
+- **FND-2 + FND-4 are BOTH resolved by the default-revert alone.**  FND-4 ("Cool bass riff loads silent") needed no separate restore-path / `sfizzEngineData` diagnosis after all — once unset CCs default to 0, the saved riff loads audible (verified independent of any dispatch helper).
+
+#### What was done about each finding
+
+| Finding | Routing |
+|---|---|
+| FND-2 (sfizz articulation behaves as CC=0 until moved) | Resolved IN-batch by the default-revert (64 -> 0).  Root-caused to QA-Sfizz Sub-E's blanket-64 default, not the undispatched-CC framing the batch opened on. |
+| FND-4 ("Cool bass riff" loads silent, routed in from QA-EngineApvts) | Resolved IN-batch by the same default-revert — no separate restore-path work needed.  Shares the FND-2 root; the kit's saved articulation content now loads correct because unset CCs default to OFF. |
+| `#define`-mis-parse (hi-hat CC4 defaulted Closed not Fully open) | Real bug found mid-batch; FIXED in-batch per §0 Rule 3 + `feedback_qa_batches_fix_bugs_dont_defer.md` (Jeff's call) as part of the corrected fix.  The scanner now resolves `$`-prefixed `set_cc` RHS via captured `#define`s.  Hi-hat default = kit-intended Fully open; APVTS-backed + automatable (a kit-default decision, Jeff's call, confirmed). |
+| Dispatch helper (`dispatchExposedCcsToSfizz`, SC-4/SC-5) | Implemented, failed Test-1, REMOVED via `git restore` (never committed).  The "undispatched CC" premise was the misdiagnosis; redundant once the default is 0. |
+
+#### /review-batch outcome
+
+`/review-batch QA-Sfizz-Followup` — **READY-TO-COMMIT, no BLOCKERs / no NEEDS-FIX.**
+- **1 NIT (recorded, not fixed):** `int resolved;` is declared then assigned in both branches of the `set_cc` `$`-resolution (all 3 engines) — no UB (both paths assign before read), purely a style preference for an initializer.  Left as-is to avoid re-touching the verified source for a non-functional change; fold into a future sfizz cleanup if one occurs.
+- **1 informational behavioral note:** with the baseline now 0, a kit `set_cc<N>=0` no longer dispatches an explicit 0 (the reset-to-0 leaves the param at 0, so `setValueNotifyingHost(0)` no-ops).  Harmless — sfizz's natural default is already 0, and none of the three shipping kits uses `set_cc=0`; identical audible result to the prior 64->0 forced delta.
+- **Plan-vs-diff:** matches the plan's Pivot spec exactly (64 -> 0 in all three spots x three engines + identical `#define` resolver; no `64` remnant; helper correctly absent; three engines genuinely parallel — RustyDrums `brd_cc` literal vs Guitars/Basses `mCcParamRoot` is the expected per-engine difference).  ASCII-clean, US spelling, brand casing correct.
+
+#### Carry-forward contradictions
+
+- **QA-Sfizz Sub-E's blanket "default every engine CC to 64" (set 2026-05-28) is REVERTED to 0 by this batch.**  Unset engine CCs now default to OFF (sfizz's natural 0) across all three sfizz engines (`createLayout` default, `loadKit` reset value, `getKitDefaultCc` fallback); the kit's own `set_cc` directives — including `#define`-resolved ones — are the only non-zero defaults.  Sub-E's "fuller sound" / Aria-host-emulation premise was the misdiagnosis (control display, sfizz state, and audible default now all agree at 0).  Post-2026-05-07-freeze (not in Carry-Forward); supersedes the QA-Sfizz Work Log close's Sub-E CC=64 note.
+- **The `loadKit` SFZ scanner now resolves `#define` macros for `set_cc` values** (`$name` RHS substituted from a captured `#define $name value`) — it previously parsed `$`-prefixed values as 0, silently defeating any macro-defined kit default (e.g. Big Rusty Drums hi-hat CC4=127).
+
+#### Files touched
+
+- **Source (Task 1 `7695f4e`, +173/-114; logic delta = 3 value flips + 1 scanner branch per engine, remainder comment rewrites):** Source/BaySickGuitars/BaySickGuitarsProcessor.cpp, Source/BaySickBasses/BaySickBassesProcessor.cpp, Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp.  No headers; the dispatch-helper headers + impl from earlier in the task were `git restore`d (never committed).
+- **Docs:** Main Plan.md (§5 QA-Sfizz-Followup STATUS:CLOSED banner; §5 QA-Sfizz Sub-E reverted-to-0 annotation; §9 forty-seventh Forks close entry; §6 footnote CLOSED note); Implemented Work Log.md (this entry); Batch Plans/ + Running Notes/linear-fluttering-spark.md (pivot recorded in place + close pass).
+
+#### Commit(s)
+
+- `be6fd7e` Task 0 batch-open (docs only).
+- `7695f4e` Task 1 — the ONE consolidated source commit (SC-3): revert QA-Sfizz Sub-E's blanket CC=64 default to 0 across the three sfizz-driven engine processors + resolve SFZ `#define` macros in the `loadKit` scanner.  3 source files, +173/-114.  Verified by Jeff in Debug + Release 2026-06-01: all 8 re-verify scenarios pass.
+- `<TBD — close commit SHA appended after commit>` Task 2 CLOSE (docs only): this Work Log entry + §5 STATUS:CLOSED banner + the QA-Sfizz Sub-E reverted-to-0 annotation + §9 forty-seventh Forks close entry + §6 footnote CLOSED note + Running Notes close pass.
+
+#### Next action
+
+Per the §6 sequencing arrow, **QA-Ed is the next batch** (QA-Sfizz-Followup was the FND-2 route slotted between QA-EngineApvts and QA-Ed).
+
+---
