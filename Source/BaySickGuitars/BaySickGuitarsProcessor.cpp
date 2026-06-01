@@ -83,10 +83,9 @@ juce::String BaySickGuitarsProcessor::getKeyswitchLabel (int midiNote) const noe
 
 int BaySickGuitarsProcessor::getCcValue (int cc) const
 {
-    // K-5 fix (2026-05-05) + Sub-E reversal (2026-05-28 QA-Sfizz): invalid CC
-    // index fallback is 0; Sub-E flipped the APVTS-registered default +
-    // getKitDefaultCc for unset CCs to 64 (Aria-host convention).  The 0 here
-    // is for invalid (out-of-range) indices, distinct from unset-CC semantics.
+    // Invalid (out-of-range) CC index -> 0.  Valid-but-unset CCs also default
+    // to 0 (QA-Sfizz-Followup reverted Sub-E's blanket 64), but that is enforced
+    // by the APVTS layout + getKitDefaultCc, not here.
     if (cc < 0 || cc >= kCcCount) return 0;
     if (auto* raw = apvts.getRawParameterValue (mCcParamRoot + juce::String (cc)))
         return juce::jlimit (0, 127, (int) std::round (raw->load()));
@@ -98,12 +97,10 @@ int BaySickGuitarsProcessor::getKitDefaultCc (int cc) const
     const juce::SpinLock::ScopedLockType lk (mCcKitDefaultLock);
     if (auto it = mCcKitDefault.find (cc); it != mCcKitDefault.end())
         return it->second;
-    // QA-Sfizz Sub-E (2026-05-28): unset CC → 64 (MIDI center, Aria-host
-    // convention these 3 sfizz-driven engines emulate).  Pre-Sub-E "unset
-    // → 0" (K-5, 2026-05-05) silently disabled CC-gated <master> blocks in
-    // Karoryfer kits → "thin sound" perception.  Double-click reset returns
-    // here for CCs the kit author didn't explicitly set_cc.
-    return 64;
+    // QA-Sfizz-Followup (2026-06-01): unset CC -> 0 (off), reverting Sub-E's
+    // blanket 64.  Double-click reset returns here for CCs the kit author did
+    // not set_cc; 0 matches sfizz's natural default + the createLayout baseline.
+    return 0;
 }
 
 juce::String BaySickGuitarsProcessor::getCcLabel (int cc) const
@@ -121,26 +118,22 @@ BaySickGuitarsProcessor::createLayout (const juce::String& prefix)
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         prefix + "outVol", "Output Volume", 0.0f, 1.0f, 0.8f));
 
-    // QA-Sfizz Sub-E (2026-05-28): default 64 (MIDI center, Aria-host
-    // convention) - reverts the K-5 (2026-05-05) "default 0 matches SFZ-spec"
-    // choice for these 3 sfizz-driven engines.  BaySickGuitars + BaySickBasses
-    // + BaySickRustyDrums emulate Aria hosts that Karoryfer kits are designed
-    // around; kit <master>/<group> blocks gate on CC ranges expecting CC=64
-    // default for unset CCs (e.g. unison locc100=1, tailpiece locc118=64,
-    // feedback locc29=1 - all silently inactive under K-5's CC=0 default).
-    // Under K-5, those gated <master> blocks didn't fire → "thin sound"
-    // perception across all 3 sfizz-driven engines.  Kit-author
-    // `set_cc<N>=<int>` directives still override during loadKit.  Slider
-    // visual baseline now matches sfizz's Aria-emulating CC=64 internal
-    // state (no slider/audio mismatch since both sit at midpoint).
-    // 2026-05-05 audit: range lifted to kCcCount=512 (matches Rusty) so kit
-    // "extended CCs" >= 128 get APVTS-bound the same way.
+    // QA-Sfizz-Followup (2026-06-01): default 0, NOT 64 - reverts QA-Sfizz
+    // Sub-E's blanket CC=64 default.  Sub-E forced every unset CC to 64 on the
+    // theory that Karoryfer kits expect the Aria host's CC=64 default; in
+    // practice that turns "amount" controls (feedback / muting / unison /
+    // vibrato) half-on by default and sounds wrong.  A CC the kit leaves unset
+    // means OFF (sfizz's natural 0); explicit non-zero defaults come via the
+    // kit's `set_cc<N>` directives, which loadKit applies on top of this 0
+    // baseline (including macro-defined ones like Rusty's set_cc4=$ht_lo_hi_init).
+    // 2026-05-05 audit: range is kCcCount=512 so kit "extended CCs" >= 128 get
+    // APVTS-bound the same way.
     const juce::String ccRoot = prefix + "cc";
     for (int cc = 0; cc < kCcCount; ++cc)
         params.push_back (std::make_unique<juce::AudioParameterInt> (
             ccRoot + juce::String (cc),
             "CC " + juce::String (cc),
-            0, 127, 64));
+            0, 127, 0));
 
     return { params.begin(), params.end() };
 }
@@ -297,6 +290,7 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
     // paint at the right initial position).  Direct port of Rusty's scan.
     std::map<int, int>          kitDefaults;
     std::map<int, juce::String> kitLabels;
+    std::map<juce::String, int> defines;   // SFZ `#define $name value` macros
     {
         std::function<void (const juce::File&, int)> scan;
         scan = [&] (const juce::File& f, int depth)
@@ -308,13 +302,39 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
             for (const auto& raw : ls)
             {
                 const auto t = raw.trim();
-                if (t.startsWithIgnoreCase ("set_cc"))
+                if (t.startsWithIgnoreCase ("#define"))
+                {
+                    // SFZ macro `#define $name value`.  Captured so set_cc lines
+                    // that reference $name resolve to the kit author's value
+                    // (e.g. Big Rusty Drums' set_cc4=$ht_lo_hi_init).  Commented
+                    // `//#define` lines are skipped - they do not start with '#'.
+                    const auto rest = t.substring (7).trim();
+                    const int  sp   = rest.indexOfChar (' ');
+                    if (sp > 0)
+                    {
+                        const auto name = rest.substring (0, sp).trim();
+                        if (name.startsWith ("$"))
+                            defines[name] = rest.substring (sp + 1).trim().getIntValue();
+                    }
+                }
+                else if (t.startsWithIgnoreCase ("set_cc"))
                 {
                     const int eq = t.indexOfChar ('=');
                     if (eq > 6)
                     {
                         const int cc  = t.substring (6, eq).getIntValue();
-                        const int val = juce::jlimit (0, 127, t.substring (eq + 1).getIntValue());
+                        const auto rhs = t.substring (eq + 1).trim();
+                        // Resolve an SFZ `#define $macro` reference; a literal int
+                        // passes straight through.  Unknown macro -> 0.
+                        int resolved;
+                        if (rhs.startsWith ("$"))
+                        {
+                            const auto it = defines.find (rhs);
+                            resolved = (it != defines.end()) ? it->second : 0;
+                        }
+                        else
+                            resolved = rhs.getIntValue();
+                        const int val = juce::jlimit (0, 127, resolved);
                         if (cc >= 0 && cc < kCcCount) kitDefaults[cc] = val;
                     }
                 }
@@ -354,21 +374,21 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
         const juce::SpinLock::ScopedLockType lk (mCcLabelLock);
         mCcLabel = kitLabels;
     }
-    // QA-Sfizz Sub-E (2026-05-28): reset every CC to 64 (MIDI center, Aria-
-    // host convention) before applying the kit's set_cc overrides - reverts
-    // the K-5 (2026-05-05) reset-to-0 choice for these 3 sfizz-driven
-    // engines.  Baseline 64 + kit set_cc overrides = Aria-emulating final
-    // state (kit set_cc=0 still wins for CCs the author explicitly zeroes).
-    // Reset is still required (vs leaving prior values) because switching
-    // programs leaks values from the previous kit - e.g. user adjusts CC100
-    // on Green to 90, switches to Black (which never set_cc100), CC100 would
-    // stay at 90 from Green's session.  The reset hits sfizz too via
-    // setValueNotifyingHost → parameterChanged.
+    // QA-Sfizz-Followup (2026-06-01): reset every CC to 0 (off) before applying
+    // the kit's set_cc overrides - reverts Sub-E's reset-to-64.  Baseline 0 +
+    // kit set_cc overrides = the kit author's intended state: unset CCs OFF
+    // (sfizz's natural default), set_cc CCs at their declared value.  Sub-E's
+    // blanket 64 turned "amount" controls (feedback / muting / unison / vibrato)
+    // half-on by default and sounded wrong.  Reset is still required (vs leaving
+    // prior values) because switching programs leaks values from the previous
+    // kit - e.g. user adjusts CC100 on Green to 90, switches to Black (which
+    // never set_cc100); without the reset CC100 would stay at 90.  The reset
+    // reaches sfizz via setValueNotifyingHost -> parameterChanged.
     for (int cc = 0; cc < kCcCount; ++cc)
     {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                 apvts.getParameter (mCcParamRoot + juce::String (cc))))
-            p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (64.0f));
+            p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (0.0f));
     }
 
     // Push kit defaults through APVTS - drives the parameterChanged listener
