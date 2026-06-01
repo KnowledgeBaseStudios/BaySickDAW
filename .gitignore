@@ -77,6 +77,10 @@ Templates/My Templates/
 # called Vibesynth). Personal scratch, not part of the public source.
 SaturdayNightMasacre.md
 
+# Jeff's personal issue-tracker log inside the Plans & Specs/ tree — a local
+# scratch file where he jots items to relay to Claude.  Local-only, not source.
+Plans & Specs/Issue Tracker.txt
+
 # Stub JUCE-generated key-mapping XML at repo root. The 3 mappings in this
 # file are NOT the app's real keybinds (those live in KeyBindsWindow.cpp);
 # this is a leftover JUCE auto-generated artefact that escaped earlier
