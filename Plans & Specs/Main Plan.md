@@ -1391,7 +1391,7 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Sfizz-Followup: sfizz CC dispatch-at-init — Aria CC=64 default applied to the param but never sent to sfizz** *(NEW — inserted 2026-05-31 at QA-EngineApvts close via §9 forty-sixth Forks entry)*
 
-**Plan file:** `<silly-name>.md (when started)`
+**Plan file:** `Plans & Specs/Batch Plans/linear-fluttering-spark.md`
 - Items: fix the sfizz CC dispatch-at-init gap surfaced during QA-EngineApvts verify (FND-2).  The Aria CC=64 default (set in QA-Sfizz Sub-E) is applied to the engine's APVTS CC params, but the value is never DISPATCHED to sfizz at init/load — so the control reads 64 while sfizz uses its internal 0/unset, and the articulation behaves as if at 0 until the user moves the control (returning to 64 then differs from the "original 64", which actually sounded like 0; you have to move to 0 to match the original).  Affects BaySickGuitars / BaySickBasses (any sfizz engine with CC-gated `<master>` articulation).  Pre-existing (predates QA-EngineApvts; from QA-Sfizz Sub-E) — NOT a QA-EngineApvts regression.  Origin: QA-EngineApvts FND-2 (Jeff's verify, 2026-05-31).  See §9 forty-sixth Forks entry.
 - Scope:
   - Ensure every sfizz CC param's saved/default value is actually DISPATCHED to the sfizz instrument at engine init + at preset / project / kit load (not just stored in the APVTS).  Likely a forced first-dispatch (the QA-Sfizz `setValueNotifyingHost`-forces-a-delta pattern, generalized to init) so the CC reaches sfizz even when the value equals the current/default.
