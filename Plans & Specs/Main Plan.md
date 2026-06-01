@@ -1075,7 +1075,7 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Ed: Song-Mode Transport Integer-Sample Source-of-Truth (Issue 3)** *(NEW — inserted 2026-05-18)*
 
-**Plan file:** `Plans & Specs/Batch Plans/<silly-name>.md` (when started)
+**Plan file:** `Plans & Specs/Batch Plans/virtual-moseying-cocoa.md`
 - Items: **Issue 3** — intermittent first-note-drop / pattern-starts-later-than-clip in song mode.  Decoupled from the QA-Ea-session pattern-scheduler work: the Issue 2 viewport fix shipped in QA-Ea Task 0 carry-forward (§9 twenty-fourth Forks entry); Issue 3 is the deeper transport-timing root cause, deliberately NOT band-aided in Issue 2.  Surfaced 2026-05-17 while building the QA-Ea test rig; root cause is float slop in the playhead beat accumulator.
 - Scope:
   - Replace the float beat accumulator (`StandalonePlayHead::advanceBlock` `beatsPerSample = bpm/(60·sr)` + `fmod` loop-wrap) with an **integer-sample transport source-of-truth** so block-boundary beat positions are exact and the song-mode scheduler's `>= beatStart && < beatEnd` gate stops dropping the first note on loop-wrap.
