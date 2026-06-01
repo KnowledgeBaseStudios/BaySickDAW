@@ -75,7 +75,7 @@ private:
     }
 
     juce::AudioProcessorValueTreeState& mApvts;
-    std::atomic<bool>                   mDirty { true };
+    std::atomic<bool>                   mDirty { true };   // armed at ctor so the first block runs updateFromApvts() (initial param sync)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ApvtsDirtyTracker)
 };

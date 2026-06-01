@@ -1370,6 +1370,8 @@ needed to find what you should pull up to review the work.
 
 #### **QA-EngineApvts: Engine processors APVTS dirty-flag pattern compliance (perf-audit M2)** *(NEW — inserted 2026-05-24)*
 
+**STATUS (2026-05-31 close): CLOSED.** Shipped via **Option-A direct-attach** (pivoted mid-execution from the originally-locked `replaceApvtsState()` choke-point + 17 reroutes + self-heal): `ApvtsDirtyTracker` attaches DIRECTLY to `apvts.state` so JUCE's `ValueTree::operator=` migrates the listener across `replaceState` (`valueTreeRedirected`) — immunizing **all 10** `ApvtsDirtyTracker` engines against the orphaning natively; `std::atomic<bool> mDirty` + lock-free `hasChangedSinceLastBlock()`; the 4 legacy `processBlock`s gate `updateFromApvts()` (BaySickSynth/Bass tempo-aware via `mLastSyncedBpm`); + the `BaySickSynthVoice::startNote` osc-reset fold-in.  Source `b3cb0b6` (8 files, +60/-9) + close NIT comment; open `eca72fb`.  See the Implemented Work Log close entry + §9 forty-sixth Forks entry.
+
 **Plan file:** `Plans & Specs/Batch Plans/shimmering-noodling-simon.md`
 - Items: bring the 4 engine processors (`HarmlessProcessor / VibePlayerProcessor / BaySickSynthProcessor / BaySickBassProcessor`) into compliance with the documented BaySickDAW APVTS dirty-flag pattern (`feedback_apvts_dirty_flag_pattern.md`).  Origin: surfaced 2026-05-24 by `/perf-audit` at QA-Eg close as M2 (MEDIUM-PRIORITY); confirmed by source-trace.  The 4 engine processors call `updateFromApvts` unconditionally per block, each reading ~30-50 parameters via `apvts.getRawParameterValue(id)->load()` regardless of whether anything changed since the last block.  The current pattern guards SETTER work with value-change comparisons but doesn't avoid the LOAD work.  Per the memory rule, the documented pattern pairs a process-side `isIdentity()` short-circuit with a sync-side `ValueTree::Listener`-driven dirty flag.  Pattern is wired in `PluginProcessor` (`Source/PluginProcessor.cpp:178`) but missing from the 4 engine processors.  See §9 thirty-fifth Forks entry.
 - Scope (Jeff-locked 2026-05-24 + 2026-05-26 fold-in):
@@ -1386,6 +1388,19 @@ needed to find what you should pull up to review the work.
 - Estimated CPU win: ~1-2% cumulative across the 4 engines on busy sessions (per `/perf-audit` M2 estimate; the per-block LOAD-everything path becomes a near-zero-cost atomic exchange when state is unchanged).
 - **Bucket:** Cross-cutting Infrastructure, Players
 - Verify (own plan file will detail): per engine -- change every APVTS-bound control (knob, button, combo, slider) + verify the new value takes effect on the next block (the dirty flag fired); leave every APVTS-bound control alone + verify CPU drops on idle (the per-block `updateFromApvts` path is skipped); both MT (production default) and 1-worker serial-diagnostic mode show identical behavior; `grep` confirms 4 new `mApvtsDirty` members + 4 new `valueTreePropertyChanged` overrides + 4 new `addListener(this)` call sites + 4 new `exchange(false, ...)` call sites at processBlock top.
+
+#### **QA-Sfizz-Followup: sfizz CC dispatch-at-init — Aria CC=64 default applied to the param but never sent to sfizz** *(NEW — inserted 2026-05-31 at QA-EngineApvts close via §9 forty-sixth Forks entry)*
+
+**Plan file:** `<silly-name>.md (when started)`
+- Items: fix the sfizz CC dispatch-at-init gap surfaced during QA-EngineApvts verify (FND-2).  The Aria CC=64 default (set in QA-Sfizz Sub-E) is applied to the engine's APVTS CC params, but the value is never DISPATCHED to sfizz at init/load — so the control reads 64 while sfizz uses its internal 0/unset, and the articulation behaves as if at 0 until the user moves the control (returning to 64 then differs from the "original 64", which actually sounded like 0; you have to move to 0 to match the original).  Affects BaySickGuitars / BaySickBasses (any sfizz engine with CC-gated `<master>` articulation).  Pre-existing (predates QA-EngineApvts; from QA-Sfizz Sub-E) — NOT a QA-EngineApvts regression.  Origin: QA-EngineApvts FND-2 (Jeff's verify, 2026-05-31).  See §9 forty-sixth Forks entry.
+- Scope:
+  - Ensure every sfizz CC param's saved/default value is actually DISPATCHED to the sfizz instrument at engine init + at preset / project / kit load (not just stored in the APVTS).  Likely a forced first-dispatch (the QA-Sfizz `setValueNotifyingHost`-forces-a-delta pattern, generalized to init) so the CC reaches sfizz even when the value equals the current/default.
+  - Covers the "Cool bass riff loads silent" one-off (QA-EngineApvts FND-4 — same undispatched-CC=64 root: a saved BaySickBasses keyswitch kit loads silent because the articulation CC never reaches sfizz).
+- Risk: medium — touches sfizz CC dispatch on the load path (QA-Sfizz domain); must respect the Aria-host CC=64 convention (QA-Sfizz FND-5).
+- Effort: TBD at plan time (~2-4 hr est.).
+- Sequencing: **immediately after QA-EngineApvts, before QA-Ed** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 forty-sixth Forks entry).
+- **Bucket:** Players
+- Verify (own plan file will detail): on a fresh BaySickGuitars/Basses tab the CC-gated articulation sounds correct immediately (matches the moved-to-64 sound) with no control touch; load a saved sfizz project (incl. the "Cool bass riff" repro) and confirm it plays (not silent); both MT + serial identical.
 
 #### **QA-F: BaySickAlign Build-Out + Vox DSP Disconnect (Cluster 1)**
 - Items: DSP-02 (Vox FX bypassed), DSP-03 (Vox pitch correction does
@@ -1661,6 +1676,7 @@ needed to find what you should pull up to review the work.
   - **Drum inline-load fix** — `loadTemplate` currently only handles `<Kit path="..."/>` factory references and skips the inline `<Drum>` children that `saveTemplateAs` writes for user templates; iterate inline `<Drum>` children as a parallel code path.  (Bug confirmed mid-QA-Ef #6; root cause why "blank New" via default template loaded a partial-state with broken Drums.)
   - **New-from-Template submenu** — replaces both menu items 102 (`New from Template...` -> the old `doFileNewFromTemplate` with the wrong-folder bug) AND 109 (`Load Template...` -> the existing `showTemplateMenu` popup).  Submenu shape: `New from Default Template` (greyed when no default set; label suffix = current default's name when one is) / `Premade Templates ▸` (recursive walk of `factoryTemplatesDir()`) / `My Templates ▸` (recursive walk of `userTemplatesDir()`).  Each pick runs the unified Load Template flow below.
   - **Unified Load Template dirty-check flow** — Blank / clean current project -> load template directly into current state (no new-project prompt).  Dirty current project -> discard / save / cancel prompt then load.  Replaces the current asymmetric flow (one entry tied to "new project", the other tied to in-place "load template").
+  - **Page-save-prompt-on-delete uniformity (FND-1, folded from QA-EngineApvts close 2026-05-31 — see §9 forty-sixth Forks entry):** deleting a Layers or Bass page prompts to save the page; no other closeable page type (Drums / Inst / Vox / Clips / Guitars / Basses / RustyDrums) does, but all should — mirror the Layers/Bass save-prompt pattern across every closeable page type.  Pre-existing inconsistency (NOT a QA-EngineApvts regression — that batch touched the engine project-dirty *tracker*, not page `isPatchDirty`/save-prompt); slotted here per Jeff so it lands once project setup/save is known-good.
   - **Removals** — `doFileNewFromTemplate` function + menu item 102; `showTemplateMenu` function + menu item 109; the duplicate `kIdSaveAs` "Save Template As..." entry inside `showTemplateMenu` (the top-level item 106 "Save as Template..." stays).
   - **Save Template As dialog text update** — currently reads "saved kit + layers + basses" (matches the L/B/D-only scope); update to reflect the expanded scope post-scope-expansion.
   - **Sample retention / FL-Studio-style file handling** — the parked discussion.  Design space: reference-by-path (low disk, fragile to source moves) vs per-project copy (current model, duplicates samples across projects) vs **source-aware hybrid (Factory + user library = reference, volatile drops = copy)**.  Plus an explicit "Pack project" action for portability (zips project + all referenced samples into one bundle, FL Studio's "Zip Looped" / "Export to ZIP" equivalent).  Plus migration story for existing per-project copies.  Plus UI indicators (reference vs copy in the audio browser).  **Lean from the QA-Ef close discussion:** source-aware hybrid + Pack action (matches FL Studio expectations; Jeff to confirm at batch open).
@@ -1972,7 +1988,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-DirtyFlag*******************
 ```
@@ -2384,6 +2400,20 @@ perf-audit cluster before resuming bug-fix sequencing at QA-Ed; M2
 is the lowest CPU win in the cluster (~1-2% cumulative across the 4
 engines on busy sessions).  Risk low, effort ~4-6 hours.  See §9
 thirty-fifth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-Sfizz-Followup**
+inserted 2026-05-31 at QA-EngineApvts close (verify finding).  Slotted
+**immediately after QA-EngineApvts, before QA-Ed** (Jeff's confirmed
+slot per `feedback_slot_placement_is_spec_call.md`).  Scope: fix the
+sfizz CC dispatch-at-init gap surfaced during QA-EngineApvts verify --
+the Aria CC=64 default (QA-Sfizz Sub-E) is applied to the engine's
+APVTS CC params but never DISPATCHED to sfizz at init / load, so the
+articulation behaves as if at 0 until the user moves the control.
+Affects BaySickGuitars / BaySickBasses (any sfizz engine with CC-gated
+`<master>` articulation); also covers the "Cool bass riff loads silent"
+one-off (same undispatched-CC root).  Pre-existing (predates
+QA-EngineApvts; from QA-Sfizz Sub-E) -- NOT a QA-EngineApvts regression.
+Risk medium, effort ~2-4 hours.  See §9 forty-sixth Forks entry.
 
 \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-DirtyFlag** inserted 2026-05-24
 at QA-Eg close.  Slotted **at the end of the Phase 1-5 chain, after
@@ -5186,3 +5216,29 @@ Removing these eliminates the per-block `gCaptureOn` relaxed-loads on the audio 
 - `Plans & Specs/Running Notes/sorted-whistling-shannon.md` — close-pass sections.
 
 **Verification:** per-task Debug + Release PASS (Jeff) across Tasks 2-5 + the review-fix; `/review-batch` clean (1 NEEDS-FIX fixed `02dde22`, 2 record-only NITs); Rule 4 — no diagnostic instrumentation added this batch (nothing to strip).
+
+### 2026-05-31 — QA-EngineApvts CLOSE: APVTS dirty-flag perf gate shipped via Option-A direct-attach pivot (all 10 engines immunized) + BaySickSynthVoice osc-reset fold-in; FND-1 → QA-ProjectSave, FND-2 + FND-4 → new QA-Sfizz-Followup batch
+
+**Status:** CLOSED (forty-sixth Forks entry).  QA-EngineApvts — bring the 4 legacy engine processors (`HarmlessProcessor / VibePlayerProcessor / BaySickSynthProcessor / BaySickBassProcessor`) into APVTS dirty-flag compliance so `updateFromApvts()` is skipped on idle blocks (`/perf-audit` M2; §9 thirty-fifth Forks entry) — shipped in one consolidated source commit + the close.  Full detail in the Implemented Work Log close entry; this entry records the close routing per §0 Rule 3.
+
+**What shipped:** the per-block `updateFromApvts()` load is now gated across the 4 engines — but via a **mid-batch architecture pivot** from the originally-locked spec.  The locked plan was Option B (a `replaceApvtsState()` choke-point + ~17 call-site reroutes + a self-heal), to work around `apvts.replaceState()` orphaning a tracker attached to a *copy* of `apvts.state`.  Jeff's blast-radius question during execution surfaced the real root cause: a tracker attached **directly** to `apvts.state` is migrated by JUCE's `ValueTree::operator=` across the swap (the `valueTreeRedirected` callback — the same framework contract the engine editors + pages already rely on).  So the batch pivoted to **Option A — direct-attach**: `ApvtsDirtyTracker` now attaches to `apvts.state` directly, immunizing **all 10** `ApvtsDirtyTracker` engines (not just the 4 in scope) against the orphaning natively, with zero per-call-site bookkeeping and no choke-point.  Each of the 4 `processBlock`s gates `updateFromApvts()` behind `mDirtyTracker.hasChangedSinceLastBlock()` (lock-free `std::atomic<bool>` exchange-acquire); BaySickSynth + BaySickBass additionally gate on a tempo delta (`mLastSyncedBpm`) since their `updateFromApvts` consumes host BPM.  Folded in per the §9 thirty-seventh Forks entry: the `BaySickSynthVoice::startNote` `mOsc.reset() / mOsc2.reset()` 2-line add (alongside the inline phase-accumulator resets).  Source `b3cb0b6` (8 source files, +60/-9, one consolidated commit because the shared `ApvtsDirtyTracker.h` moves under multiple consumers — L5); the close commit adds a one-line WHY comment on `mDirty`'s ctor-armed default (the `/review-batch` NIT) + the §5/§6/§9 + Work-Log paperwork.  Plan / Task-0 open `eca72fb`.
+
+**Routing at close (Rule 3):**
+- **In-scope folds (recorded in the close entry, NOT new §5 rows):** the BaySickSynthVoice osc-reset (already pre-routed into this batch via the §9 thirty-seventh Forks entry); + the `/review-batch` NIT (a one-line WHY comment on `ApvtsDirtyTracker::mDirty`'s ctor-armed default) fixed in the close commit.
+- **FND-1 page-save-prompt-on-delete uniformity → QA-ProjectSave (folded as a Scope item, NOT a new batch):** deleting a Layers or Bass page prompts to save the page; no other closeable page type (Drums / Inst / Vox / Clips / Guitars / Basses / RustyDrums) does, but all should.  Pre-existing inconsistency (predates this batch — QA-EngineApvts touched the engine project-dirty *tracker*, not page save-prompts) — NOT a regression.  Jeff's call (2026-05-31): route to QA-ProjectSave so it lands once project setup/save is known-good.
+- **FND-2 sfizz CC dispatch-at-init + FND-4 "Cool bass riff loads silent" → new QA-Sfizz-Followup batch (Bucket: Players; slotted immediately after QA-EngineApvts, before QA-Ed):** the Aria CC=64 default (QA-Sfizz Sub-E) is applied to the engine's APVTS CC params but never DISPATCHED to sfizz at init / load, so a CC-gated articulation behaves as if at 0 until the user moves the control (BaySickGuitars / BaySickBasses); the saved "Cool bass riff" kit loads silent for the same undispatched-CC root.  Pre-existing (from QA-Sfizz Sub-E) — NOT a QA-EngineApvts regression (the off-page-silence scare during verify was a stale-incremental-build artifact, not the Option-A change; confirmed by a clean rebuild).  Jeff's calls (2026-05-31): fix in a dedicated batch (not deferred to Future State, per `feedback_qa_batches_fix_bugs_dont_defer.md`), slotted next per `feedback_slot_placement_is_spec_call.md`.
+
+**Sequencing:** **QA-Sfizz-Followup is now next** (immediately after QA-EngineApvts, before QA-Ed; §6 arrow + new footnote).  QA-Ed follows.
+
+**Inline back-refs:**
+- §5 — QA-EngineApvts entry gains the `STATUS (2026-05-31 close): CLOSED` banner; QA-ProjectSave gains the FND-1 page-save-prompt-uniformity Scope item; new QA-Sfizz-Followup batch row inserted (after QA-EngineApvts, before QA-F).
+- §6 — arrow gains `→ QA-Sfizz-Followup` (27-asterisk marker) between QA-EngineApvts + QA-Ed; new matching footnote.
+- §9 — this entry (forty-sixth); cross-refs the thirty-fifth (insert) + thirty-seventh (osc-reset fold-in).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 STATUS banner + QA-ProjectSave FND-1 fold + new QA-Sfizz-Followup row; §6 arrow + footnote; §9 this entry.
+- `Plans & Specs/Implemented Work Log.md` — QA-EngineApvts close entry (append).
+- `Plans & Specs/Batch Plans/shimmering-noodling-simon.md` — plan (Option-A pivot recorded in place).
+- `Plans & Specs/Running Notes/shimmering-noodling-simon.md` — close-pass sections.
+
+**Verification:** per-task Debug + Release PASS (Jeff) — dirty-gate takes effect on edit, CPU drops on idle, preset/project reattach survives `replaceState`, tempo-sync holds, and the SAW-chord phase-reset is audible; `/review-batch` READY-TO-COMMIT (1 NIT — the `mDirty` ctor-arm comment — fixed at close).  Rule 4 — temp `InstDiag` instrumentation (in `InstStripTask` / `PluginProcessor` / `StandaloneEditor`, added during the FND-2 off-page-silence investigation) STRIPPED via `git restore` before close; 4-row catalog in the running notes.
