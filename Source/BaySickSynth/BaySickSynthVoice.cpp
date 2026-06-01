@@ -75,6 +75,8 @@ void BaySickSynthVoice::startNote (int midiNote, float velocity,
     mFMCarrierPhase = 0.0;
     mFMModPhase     = 0.0;
     mDeafSawState   = 0.0f;
+    mOsc.reset();    // QA-EngineApvts fold-in: wavetable phase zero at every note-on
+    mOsc2.reset();   // (SAW / SAW+SAW / SAW+SQUARE / SQUARE+SQUARE / SUPERSAW consistency)
 
     mFilter.reset();
     mLastEffCutoff = -1.0f;

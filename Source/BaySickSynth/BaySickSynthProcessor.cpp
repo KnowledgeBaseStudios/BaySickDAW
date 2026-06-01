@@ -41,7 +41,15 @@ void BaySickSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             if (auto bpm = pos->getBpm())
                 mHostBPM = (float) *bpm;
 
-    updateFromApvts();
+    // QA-EngineApvts: skip the per-block param LOAD when idle; a host-tempo change
+    // counts as a change so the synced LFO keeps tracking (L4 tempo handling).
+    const bool paramsChanged = mDirtyTracker.hasChangedSinceLastBlock();
+    const bool tempoChanged  = (mHostBPM != mLastSyncedBpm);
+    if (paramsChanged || tempoChanged)
+    {
+        mLastSyncedBpm = mHostBPM;
+        updateFromApvts();
+    }
 
     // C.4 Phase 2.2: refresh engine-level SC RMS for any internal mod source.
     mScHelper.updateLevel (buffer.getNumSamples());

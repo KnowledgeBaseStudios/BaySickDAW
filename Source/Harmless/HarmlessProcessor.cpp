@@ -73,7 +73,8 @@ void HarmlessProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 {
     juce::ScopedNoDenormals noDenormals;
     buffer.clear();
-    updateFromApvts();
+    if (mDirtyTracker.hasChangedSinceLastBlock())   // QA-EngineApvts: skip per-block param LOAD when idle
+        updateFromApvts();
 
     // C.4 Phase 2.2: refresh engine-level SC RMS for any internal mod source.
     mScHelper.updateLevel (buffer.getNumSamples());

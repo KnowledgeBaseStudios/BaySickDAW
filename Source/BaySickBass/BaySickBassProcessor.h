@@ -81,6 +81,7 @@ private:
     std::atomic<int>   mAuditionHoldOn     { -1 };
     std::atomic<int>   mAuditionHoldOff    { -1 };
     float              mHostBPM            { 120.0f };
+    float              mLastSyncedBpm      { -1.0f };   // QA-EngineApvts: tempo-change detect for the gate
     std::atomic<float> mEffectiveLfoRate   { 1.0f };
     EngineSidechainHelper mScHelper;   // C.4 Phase 2.2 SC primitive
 
