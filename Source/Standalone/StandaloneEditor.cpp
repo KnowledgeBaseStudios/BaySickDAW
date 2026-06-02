@@ -791,6 +791,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                 if (endBeats > startBeats)
                 {
                     mPlayHead.setLoopStart(startBeats);
+                    mProcessor.mLoopStartBeats.store(startBeats, std::memory_order_relaxed);   // QA-Ed: scheduler loop-seam window
                     mProcessor.mCachedPatternLoopBeats.store(endBeats, std::memory_order_relaxed);
                     mProcessor.mSongEndBeats.store(0.0, std::memory_order_relaxed);
                     return endBeats;
@@ -808,6 +809,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                     if (endBeats > startBeats)
                     {
                         mPlayHead.setLoopStart(startBeats);
+                        mProcessor.mLoopStartBeats.store(startBeats, std::memory_order_relaxed);   // QA-Ed: scheduler loop-seam window
                         mProcessor.mCachedPatternLoopBeats.store(endBeats, std::memory_order_relaxed);
                         mProcessor.mSongEndBeats.store(0.0, std::memory_order_relaxed);
                         return endBeats;
@@ -818,6 +820,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
         // ── No time-selection: clear loop start so wrap goes to 0 ───────
         mPlayHead.setLoopStart(0.0);
+        mProcessor.mLoopStartBeats.store(0.0, std::memory_order_relaxed);   // QA-Ed: scheduler loop-seam window
 
         if (songMode)
         {
@@ -2790,6 +2793,35 @@ void StandaloneEditor::openEventEditor(int blockIdx)
                 return mProcessor.apvts.getParameter(pid) == nullptr;
             };
         }
+
+        // QA-Ed (Problem 1): value format/parse hooks on the grid -- the editor
+        // reads out + accepts the param's REAL units.  Per the JUCE tip, APVTS
+        // lanes use the parameter's own getText()/getValueForText() (identical
+        // math to its knob + host automation lanes); "global_tempo" is the one
+        // non-APVTS lane (project tempo range 20..300 BPM, as in the applicator).
+        if (auto* grid = content->getGrid())
+        {
+            grid->onFormatValue = [this](const juce::String& pid, float v01) -> juce::String
+            {
+                if (auto* p = mProcessor.apvts.getParameter(pid))
+                    return p->getText(juce::jlimit(0.0f, 1.0f, v01), 24);
+                if (pid == "global_tempo")
+                    return juce::String(juce::roundToInt(20.0 + (double) juce::jlimit(0.0f, 1.0f, v01) * (300.0 - 20.0)))
+                           + " BPM";
+                return juce::String(v01, 3);
+            };
+            grid->onParseValue = [this](const juce::String& pid, const juce::String& text) -> float
+            {
+                if (auto* p = mProcessor.apvts.getParameter(pid))
+                    return juce::jlimit(0.0f, 1.0f, p->getValueForText(text));
+                if (pid == "global_tempo")
+                {
+                    const double bpm = juce::jlimit(20.0, 300.0, (double) text.getFloatValue());
+                    return (float) juce::jlimit(0.0, 1.0, (bpm - 20.0) / (300.0 - 20.0));
+                }
+                return juce::jlimit(0.0f, 1.0f, text.getFloatValue());
+            };
+        }
     }
 
     mEventEditors.add(ed);
@@ -2809,10 +2841,19 @@ void StandaloneEditor::applyAutomationAtCurrentPosition()
             stopTransportAndFinalizeRecording();
     }
 
-    if (!mPM || !mPlayHead.isPlaying()) return;
+    if (!mPM) return;
 
     const double beatsPerBar   = 4.0;   // TODO: read from PatternManager time signature
     const double currentBeats  = mPlayHead.getCurrentBeat();
+    const bool   playing       = mPlayHead.isPlaying();
+
+    // QA-Ed (Problem 3): apply automation whenever the playhead POSITION changes
+    // -- continuously during playback, OR a one-shot when you seek/scrub/place the
+    // playhead while stopped -- so any param sitting on an active automation snaps
+    // to that automation's value at the playhead's beat.  Skip only when stopped
+    // AND static, so a hand-nudged value isn't re-overridden every timer tick.
+    if (! playing && std::abs (currentBeats - mLastAutomationBeat) < 1.0e-6) return;
+    mLastAutomationBeat = currentBeats;
 
     for (int i = 0; i < mPM->getNumBlocks(); ++i)
     {
@@ -2829,21 +2870,26 @@ void StandaloneEditor::applyAutomationAtCurrentPosition()
         const auto& lane = block.automationLane;
         if (lane.paramId.isEmpty()) continue;
 
-        // Batch E #4 (2026-05-01): the audio-thread automation pass
-        // (PluginProcessor::processBlock, around line 902) already writes
-        // every APVTS-backed automation lane via param->setValue() which
-        // eventually fires APVTS listeners on the message thread.  Doing it
-        // again here would be a redundant write; UI applicator now only
-        // handles non-APVTS lanes (e.g. "global_tempo" which mutates the
-        // PlayHead + PatternManager directly and must run on the UI thread).
-        if (mProcessor.apvts.getParameter(lane.paramId) != nullptr) continue;
-
         // Normalised position within clip (0..1)
         const float pos01 = (float)((currentBeats - blockStart) / clipLenBeats);
         const float value = lane.evaluateAt(pos01);
 
+        // APVTS-backed lanes: during playback the audio-thread automation pass
+        // (PluginProcessor::processBlock) writes these, so skip here to avoid a
+        // double write.  But that pass only runs WHILE PLAYING -- so when STOPPED
+        // we apply them here, so seeking/placing the playhead reflects the
+        // automation on every automated knob, not just the tempo (Problem 3).
+        if (auto* rap = mProcessor.apvts.getParameter(lane.paramId))
+        {
+            if (! playing)
+                rap->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, value));
+            continue;
+        }
+
+        // Non-APVTS lane (e.g. "global_tempo"): mutates the PlayHead +
+        // PatternManager directly via the applicator; runs on the UI thread.
         auto it = mAutomationApplicators.find(lane.paramId);
-        if (it != mAutomationApplicators.end())
+        if (it != mAutomationApplicators.end() && it->second)
             it->second(value);
     }
 }

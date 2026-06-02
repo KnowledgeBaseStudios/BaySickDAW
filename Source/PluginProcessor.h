@@ -161,6 +161,16 @@ public:
     // default in `GlobalTransportBar::mSongLoopBtn`.
     std::atomic<bool>   mSongLoopMode { true };
 
+    // QA-Ed: loop-start beat (set by onGetLoopBeats alongside
+    // mCachedPatternLoopBeats = loop-end) so the scheduler can build the
+    // sample-accurate loop-seam windows.  0 except for time-selection loops.
+    std::atomic<double> mLoopStartBeats { 0.0 };
+    // QA-Ed: the playhead's backward-seek discontinuity flag, wired at startup
+    // via setSeekDiscontinuityFlag().  Consumed once per block by the scheduler
+    // to flush pending note-offs on a backward seek (cut held notes on a scrub).
+    std::atomic<bool>*  mSeekDiscontinuity { nullptr };
+    void setSeekDiscontinuityFlag (std::atomic<bool>* f) noexcept { mSeekDiscontinuity = f; }
+
     // QA-RustyMeter Task 3 (2026-05-30): transport-edge tracking for the master
     // LUFS Integrated reset.  Audio-thread-only (processBlock), so plain members.
     // Reset the gated Integrated accumulation on stopped->playing and on a
@@ -1011,7 +1021,9 @@ private:
         int    target;    // 0..7 = layer page; kBassPRTarget+0..3 (8..11) = bass page index
     };
     std::vector<PRPendingOff> mPRPendingOffs;
-    double mPRLastBeatEnd { -1.0 }; // end-of-last-block for jump detection
+    // QA-Ed: the float `mPRLastBeatEnd` jump-heuristic + the kWrapSlop / jumped
+    // / windowStart band-aid are removed; the int-sample clock + the exact
+    // loop-seam windows (mLoopStartBeats + mSeekDiscontinuity above) replace it.
 
     // ── Internal helpers ──────────────────────────────────────────────────
     void updateDrumMixLevels();

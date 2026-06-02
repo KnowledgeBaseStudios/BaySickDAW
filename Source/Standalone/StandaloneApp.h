@@ -19,9 +19,14 @@ public:
     bool   isRecording()         const { return mRecording.load(); }
     void   setRecording(bool r)        { mRecording.store(r); }
     double getBPM()              const { return mBPM.load(); }
-    void   setBPM(double bpm)          { mBPM.store(bpm); }
-    double getCurrentBeat()      const { return mPPQPos.load(); }
+    void   setBPM(double bpm);                          // re-anchors the tempo anchor (message thread)
+    double getCurrentBeat()      const { return deriveBeat(mSamplePos.load()); }
     void   seekTo(double beat);
+
+    // QA-Ed: backward-seek discontinuity signal.  Set by seekTo() on a
+    // backward seek; the scheduler consumes it once per block to flush
+    // pending note-offs (cut held notes on a backward scrub, as before).
+    std::atomic<bool>* getSeekDiscontinuityFlag() noexcept { return &mSeekDiscontinuity; }
 
     // Set by PluginProcessor each block so the playhead wraps at the pattern loop point.
     // 0 = no wrap (unlimited advance).
@@ -43,15 +48,37 @@ public:
     juce::Optional<PositionInfo> getPosition() const override;
 
 private:
-    std::atomic<bool>   mPlaying    { false };
-    std::atomic<bool>   mRecording  { false };
-    std::atomic<double> mBPM        { 120.0 };
-    std::atomic<double> mPPQPos     { 0.0 };
-    std::atomic<double> mLoopBeats  { 0.0 };
-    std::atomic<double> mLoopStart  { 0.0 };
-    std::atomic<int>    mTsNum      { 4 };
-    std::atomic<int>    mTsDen      { 4 };
-    double              mSampleRate { 44100.0 };
+    // QA-Ed: int64 ABSOLUTE sample counter is the transport source-of-truth.
+    // Sole audio-thread writer = advanceBlock().  Beat position is DERIVED
+    // from it via the tempo anchor below, so the float beat-accumulation drift
+    // that caused Issue 3 is gone while the public API stays in beats.
+    std::atomic<bool>    mPlaying    { false };
+    std::atomic<bool>    mRecording  { false };
+    std::atomic<double>  mBPM        { 120.0 };
+    std::atomic<int64_t> mSamplePos  { 0 };
+    std::atomic<double>  mLoopBeats  { 0.0 };
+    std::atomic<double>  mLoopStart  { 0.0 };
+    std::atomic<int>     mTsNum      { 4 };
+    std::atomic<int>     mTsDen      { 4 };
+    std::atomic<double>  mSampleRate { 44100.0 };
+    std::atomic<bool>    mSeekDiscontinuity { false };
+
+    // Tempo anchor: beat = mAnchorBeat + (sample - mAnchorSample) * bpm/(60*sr).
+    // Re-based on every BPM change / seek so derived beats stay continuous
+    // across tempo automation.  Because the formula is linear in the sample
+    // count, a constant-tempo loop-wrap of mSamplePos derives the exact
+    // wrapped beat with NO anchor write on the audio thread (loopStartSamp
+    // maps to loopStartBeat by construction).  The three fields are published
+    // as a group via a SEQLOCK (mAnchorSeq): single writer = the message
+    // thread (setBPM/seekTo/start/reset); readers (audio getPosition +
+    // message-thread UI cursor) retry on a torn read.
+    std::atomic<uint32_t> mAnchorSeq    { 0 };
+    std::atomic<double>   mAnchorBeat   { 0.0 };
+    std::atomic<int64_t>  mAnchorSample { 0 };
+    std::atomic<double>   mAnchorBpm    { 120.0 };
+
+    double deriveBeat (int64_t sample) const;
+    void   publishAnchor (double beat, int64_t sample, double bpm);
 };
 
 // J-A2 (2026-05-04): master-output routing globals.  Atomics live here so the

@@ -59,6 +59,15 @@ public:
     // val01 is 0..1 range. Caller uses for hover status bar.
     std::function<void(float beat, float val01)> onHoverChanged;
 
+    // QA-Ed (Problem 1): map a normalised 0..1 point value <-> the param's real
+    // units, so the editor reads out e.g. "140 BPM" / "-6.0 dB" and the new
+    // right-click "Set Value..." accepts typed real-unit input.  Wired by
+    // StandaloneEditor: APVTS lanes use the parameter's own getText()/
+    // getValueForText() (identical to its knob + host automation); "global_tempo"
+    // is the one non-APVTS lane (its 20..300 BPM mapping).
+    std::function<juce::String(const juce::String& paramId, float val01)>      onFormatValue;
+    std::function<float(const juce::String& paramId, const juce::String& text)> onParseValue;
+
     void paint   (juce::Graphics&) override;
     void resized ()                override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -133,6 +142,10 @@ private:
     void updateCursor();
     void commitEdit(const juce::String& label, const AutomationLane& before,
                     const AutomationLane& after);
+
+    // QA-Ed (Problem 1): right-click "Set Value..." -> modal text entry that maps
+    // typed real-unit input back to the point's 0..1 value via onParseValue.
+    void promptSetPointValue(int hit);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EEAutomationGrid)
 };
@@ -225,6 +238,10 @@ public:
     // Accessor so StandaloneEditor can wire the display-name resolver through
     // to the browser pane after the content has been built.
     AutomationBrowserPane* getBrowserPane() { return mBrowserPane.get(); }
+
+    // Accessor so StandaloneEditor can wire the value format/parse hooks (QA-Ed
+    // Problem 1) onto the grid after the content has been built.
+    EEAutomationGrid* getGrid() { return mGrid.get(); }
 
 private:
     VibeSynthProcessor& mProcessor;

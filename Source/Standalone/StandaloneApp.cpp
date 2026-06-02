@@ -133,31 +133,114 @@ namespace MasterOutputRouting
 }
 
 // ── StandalonePlayHead ────────────────────────────────────────────────────────
+// QA-Ed: position is an int64 ABSOLUTE sample count (mSamplePos), advanced by
+// exact integer addition each block; the loop-wrap is an exact integer-sample
+// modulo (no float fmod).  Beat is DERIVED from the sample count through a
+// seqlock-published tempo anchor, so per-block float accumulation drift (the
+// Issue 3 root cause) is eliminated and the public API stays in beats.
+
+double StandalonePlayHead::deriveBeat (int64_t sample) const
+{
+    // Fence-based seqlock read of the (beat, sample, bpm) anchor tuple.  Spins
+    // only while a message-thread writer is mid-publish (rare; bounded).
+    double ab, bpm; int64_t as; uint32_t s1, s2;
+    do {
+        s1  = mAnchorSeq.load (std::memory_order_acquire);
+        ab  = mAnchorBeat  .load (std::memory_order_relaxed);
+        as  = mAnchorSample.load (std::memory_order_relaxed);
+        bpm = mAnchorBpm   .load (std::memory_order_relaxed);
+        std::atomic_thread_fence (std::memory_order_acquire);
+        s2  = mAnchorSeq.load (std::memory_order_relaxed);
+    } while ((s1 & 1u) != 0u || s1 != s2);
+
+    const double sr = mSampleRate.load();
+    return ab + (double) (sample - as) * bpm / (60.0 * (sr > 0.0 ? sr : 44100.0));
+}
+
+void StandalonePlayHead::publishAnchor (double beat, int64_t sample, double bpm)
+{
+    // Single writer (message thread): setBPM / seekTo / start / reset.
+    const uint32_t s = mAnchorSeq.load (std::memory_order_relaxed);
+    mAnchorSeq.store (s + 1, std::memory_order_relaxed);            // odd = write in progress
+    std::atomic_thread_fence (std::memory_order_release);
+    mAnchorBeat  .store (beat,   std::memory_order_relaxed);
+    mAnchorSample.store (sample, std::memory_order_relaxed);
+    mAnchorBpm   .store (bpm,    std::memory_order_relaxed);
+    std::atomic_thread_fence (std::memory_order_release);
+    mAnchorSeq.store (s + 2, std::memory_order_relaxed);            // even = published
+}
+
 void StandalonePlayHead::advanceBlock(int numSamples, double sampleRate)
 {
-    mSampleRate = sampleRate;
+    mSampleRate.store (sampleRate);
     if (!mPlaying.load()) return;
-    double bpm = mBPM.load();
-    double beatsPerSample = bpm / (60.0 * sampleRate);
-    double newPos = mPPQPos.load() + numSamples * beatsPerSample;
 
-    double loopEnd   = mLoopBeats.load();
-    double loopStart = mLoopStart.load();
-    if (loopEnd > 0.0 && newPos >= loopEnd)
-        newPos = loopStart + std::fmod(newPos - loopStart, loopEnd - loopStart);
+    const int64_t oldPos = mSamplePos.load();
+    int64_t pos = oldPos + numSamples;                  // exact integer advance
 
-    mPPQPos.store(newPos);
+    const double loopEndBeat = mLoopBeats.load();
+    if (loopEndBeat > 0.0)
+    {
+        // Measure the loop's sample bounds from the playhead's CURRENT point on
+        // the tempo-anchor line, NOT from beat 0.  Under a mid-loop tempo change
+        // the anchor re-bases away from the origin, so a from-zero
+        // llround(loopEndBeat*spb) no longer maps to loopEndBeat -- the loop
+        // wrapped early, the derived beat went negative, and each pass got
+        // shorter.  Anchoring the bounds to (oldPos, curBeat) keeps them exact at
+        // any tempo (and is identical to the from-zero math at constant tempo,
+        // where curBeat == oldPos/spb).
+        const double  curBeat       = deriveBeat (oldPos);
+        const double  spb           = 60.0 * sampleRate / juce::jmax (1e-6, mBPM.load());
+        const int64_t loopEndSamp   = oldPos + (int64_t) std::llround ((loopEndBeat       - curBeat) * spb);
+        const int64_t loopStartSamp = oldPos + (int64_t) std::llround ((mLoopStart.load() - curBeat) * spb);
+        const int64_t span          = loopEndSamp - loopStartSamp;
+        // Exact integer wrap, overshoot PRESERVED (carries into the next pass)
+        // so looped content stays sample-locked to absolute time -> no drift.
+        if (span > 0 && pos >= loopEndSamp)
+            pos = loopStartSamp + ((pos - loopStartSamp) % span);
+    }
+    mSamplePos.store (pos);
 }
-void StandalonePlayHead::start(double bpm)  { mBPM.store(bpm); mPlaying.store(true); }
-void StandalonePlayHead::stop()             { mPlaying.store(false); }
-void StandalonePlayHead::reset()            { mPPQPos.store(0.0); mPlaying.store(false); }
-void StandalonePlayHead::seekTo(double beat){ mPPQPos.store(juce::jmax(0.0, beat)); }
+
+void StandalonePlayHead::start(double bpm)
+{
+    // Re-anchor at the current position under the new bpm, then play.
+    publishAnchor (deriveBeat (mSamplePos.load()), mSamplePos.load(), bpm);
+    mBPM.store (bpm);
+    mPlaying.store (true);
+}
+void StandalonePlayHead::stop()  { mPlaying.store (false); }
+void StandalonePlayHead::reset()
+{
+    mSamplePos.store (0);
+    publishAnchor (0.0, 0, mBPM.load());
+    mSeekDiscontinuity.store (false);
+    mPlaying.store (false);
+}
+void StandalonePlayHead::setBPM(double bpm)
+{
+    // Re-anchor so the derived beat stays continuous across the tempo change,
+    // then derive from the new bpm going forward.
+    publishAnchor (deriveBeat (mSamplePos.load()), mSamplePos.load(), bpm);
+    mBPM.store (bpm);
+}
+void StandalonePlayHead::seekTo(double beat)
+{
+    beat = juce::jmax (0.0, beat);
+    const double  oldBeat = deriveBeat (mSamplePos.load());
+    const double  spb     = 60.0 * mSampleRate.load() / juce::jmax (1e-6, mBPM.load());
+    const int64_t s       = (int64_t) std::llround (beat * spb);
+    mSamplePos.store (s);
+    publishAnchor (beat, s, mBPM.load());                 // getCurrentBeat()==beat right after
+    if (beat < oldBeat) mSeekDiscontinuity.store (true);  // backward seek -> scheduler off-flush
+}
 
 juce::Optional<juce::AudioPlayHead::PositionInfo> StandalonePlayHead::getPosition() const
 {
     PositionInfo info;
     info.setBpm(mBPM.load());
-    info.setPpqPosition(mPPQPos.load());
+    info.setPpqPosition(deriveBeat (mSamplePos.load()));
+    info.setTimeInSamples(mSamplePos.load());   // exact integer clock the scheduler shares
     info.setIsPlaying(mPlaying.load());
     info.setIsRecording(mRecording.load());
     info.setTimeSignature (juce::AudioPlayHead::TimeSignature{ mTsNum.load(), mTsDen.load() });
@@ -340,6 +423,7 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     mProcessor    = std::make_unique<VibeSynthProcessor>();
     mPlayHead     = std::make_unique<StandalonePlayHead>();
     mProcessor->setPlayHead(mPlayHead.get());
+    mProcessor->setSeekDiscontinuityFlag(mPlayHead->getSeekDiscontinuityFlag());   // QA-Ed: backward-seek note-off flush
 
     mDeviceManager = std::make_unique<juce::AudioDeviceManager>();
 

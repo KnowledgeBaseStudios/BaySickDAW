@@ -1056,7 +1056,6 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 }
                 mPRPendingOffs.clear();
             }
-            mPRLastBeatEnd = -1.0;
         }
         else if (mPatternManager)
         {
@@ -1065,60 +1064,126 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             double beatStart = pos.getPpqPosition().orFallback(0.0);
             double beatEnd   = beatStart + numSamples * bs;
 
+            // ── QA-Ed: exact integer clock + sample-accurate loop-seam windows ─
+            // mSamplePos is the playhead's exact int64 sample count; we share its
+            // wrap point (computed from the SAME loopEnd beat + bpm + sr) so the
+            // straddle test is integer-exact and can never disagree with the
+            // playhead by a block.  A block that crosses the loop boundary builds
+            // TWO windows: [beatStart, loopEnd) at sample 0, and the wrapped tail
+            // [loopStart, loopStart+overshoot) starting at the exact in-block wrap
+            // sample.  A note fires in at most one (disjoint, half-open) window,
+            // so there is no double-trigger.  This replaces the float kWrapSlop /
+            // jumped / windowStart / mPRLastBeatEnd band-aid entirely.
+            const int64_t samplePos     = pos.getTimeInSamples().orFallback ((int64_t) 0);
+            const double  loopStartBeat = mLoopStartBeats.load (std::memory_order_relaxed);
+            const double  loopEndBeat   = mCachedPatternLoopBeats.load (std::memory_order_relaxed);
+            const double  spb           = 60.0 * mSampleRate / juce::jmax (1e-6, bpmVal);
+            // Loop sample-bounds measured from the CURRENT (samplePos, beatStart)
+            // point on the playhead's tempo-anchor line, NOT from beat 0 -- matches
+            // advanceBlock so the scheduler + playhead share the exact same wrap
+            // point under any tempo (identical to from-zero at constant tempo).
+            const int64_t loopEndSamp   = loopEndBeat > 0.0 ? samplePos + (int64_t) std::llround ((loopEndBeat   - beatStart) * spb) : 0;
+            const int64_t loopStartSamp = loopEndBeat > 0.0 ? samplePos + (int64_t) std::llround ((loopStartBeat - beatStart) * spb) : 0;
+            const int64_t loopSpanSamp  = loopEndSamp - loopStartSamp;
+
+            struct RollWindow { double winStart; double winEnd; int sampleBase; };
+            RollWindow windows[2];
+            int nWin    = 0;
+            int wrapSmp = numSamples;   // off-pass sentinel = "no wrap in this block"
+            // Sub-block-loop guard: a loop shorter than one block (span <
+            // numSamples) spans >1 iteration per block, which the 2-window model
+            // can't represent -> fall back to one window + the off clamp so
+            // nothing hangs (degenerate; documented limitation).
+            const bool straddle = loopEndBeat > 0.0 && loopSpanSamp >= (int64_t) numSamples
+                               && samplePos < loopEndSamp && samplePos + numSamples > loopEndSamp;
+            if (straddle)
+            {
+                wrapSmp = (int) juce::jlimit<int64_t> (0, numSamples - 1, loopEndSamp - samplePos);
+                windows[nWin++] = { beatStart,     loopEndBeat,                            0 };
+                windows[nWin++] = { loopStartBeat, loopStartBeat + (beatEnd - loopEndBeat), wrapSmp };
+            }
+            else
+            {
+                windows[nWin++] = { beatStart, beatEnd, 0 };
+            }
+
+            // Decode a pending-off's target -> per-engine buffer + emit a noteOff.
+            auto emitOff = [&] (const PRPendingOff& off, int smp)
+            {
+                if (off.target < kMaxLayerPages)
+                    layerPageMidi[off.target].addEvent (juce::MidiMessage::noteOff (1, off.midiNote), smp);
+                else if (off.target >= kBassPRTarget && off.target < kBassPRTarget + kMaxBassPages)
+                    bassPageMidi[off.target - kBassPRTarget].addEvent (juce::MidiMessage::noteOff (1, off.midiNote), smp);
+                else if (off.target >= kDrumPRTarget && off.target < kDrumPRTarget + kMaxDrumPages)
+                    drumPageMidi[off.target - kDrumPRTarget].addEvent (juce::MidiMessage::noteOff (1, off.midiNote), smp);
+                else if (off.target >= kClipPRTarget && off.target < kClipPRTarget + kMaxClipPages)
+                    clipPageMidi[off.target - kClipPRTarget].addEvent (juce::MidiMessage::noteOff (1, off.midiNote), smp);
+                else if (off.target >= kVoxPRTarget && off.target < kVoxPRTarget + kMaxVoxPages)
+                    voxPageMidi[off.target - kVoxPRTarget].addEvent (juce::MidiMessage::noteOff (1, off.midiNote), smp);
+                else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
+                    instPageMidi[off.target - kInstPRTarget].addEvent (juce::MidiMessage::noteOff (1, off.midiNote), smp);
+                else if (off.target == kRustyPRTarget)
+                    mRustyDrumsMidi.addEvent (juce::MidiMessage::noteOff (1, off.midiNote), smp);
+            };
+
+            // ── Pending note-off handling (shared by song + pattern) ────────
+            // A backward seek (consumed once/block) cuts held notes at sample 0.
+            // Past-due offs fire at 0; on a straddle, offs at/after loopEnd
+            // (overrunning notes) fire at the exact wrap sample so they are cut
+            // precisely at the loop boundary (no leak); in-block offs fire at
+            // their sample; the rest are kept for a later block.
+            const bool seekFlush = (mSeekDiscontinuity != nullptr
+                                    && mSeekDiscontinuity->exchange (false, std::memory_order_acq_rel));
+            {
+                std::vector<PRPendingOff> keep;
+                for (auto& off : mPRPendingOffs)
+                {
+                    if (seekFlush)                              { emitOff (off, 0);       continue; }
+                    if (off.beatOff <= beatStart)               { emitOff (off, 0);       continue; }
+                    if (straddle && off.beatOff >= loopEndBeat) { emitOff (off, wrapSmp); continue; }
+                    if (off.beatOff < beatEnd)
+                    {
+                        emitOff (off, juce::jlimit (0, numSamples - 1, (int) ((off.beatOff - beatStart) / bs)));
+                        continue;
+                    }
+                    keep.push_back (off);
+                }
+                mPRPendingOffs = std::move (keep);
+            }
+
+            // ── Note-on scheduler (shared by both modes) ────────────────────
+            // absOffset: pattern -> 0 (note.startBeat is loop-local); song ->
+            // blkStartBeat (absolute song beat).  contentHi: song viewport end
+            // (a note past the clip edge = silence) else +inf.  offHi: clamp the
+            // note-off so an overrun is cut at the loop / clip boundary.
+            auto scheduleRollWindows = [&] (const std::vector<PianoNote>& notes,
+                                            juce::MidiBuffer& buf, int target,
+                                            double absOffset, double contentHi, double offHi)
+            {
+                for (const auto& note : notes)
+                {
+                    if (note.muted) continue;
+                    const double absStart = absOffset + note.startBeat;
+                    if (absStart >= contentHi) continue;
+                    for (int w = 0; w < nWin; ++w)
+                    {
+                        if (absStart >= windows[w].winStart && absStart < windows[w].winEnd)
+                        {
+                            const int smp = juce::jlimit (0, numSamples - 1,
+                                windows[w].sampleBase + (int) ((absStart - windows[w].winStart) / bs));
+                            emitPianoNoteOn (buf, note, smp);
+                            double off = absStart + note.durationBeats;
+                            if (off > offHi) off = offHi;
+                            mPRPendingOffs.push_back ({ off, note.midiNote, target });
+                            break;   // a note fires in at most one window
+                        }
+                    }
+                }
+            };
+
             // ── SONG MODE ─────────────────────────────────────────────────
             if (mSongMode.load(std::memory_order_relaxed))
             {
-                // Fire pending note-offs in this block's window BEFORE scheduling new ons.
-                // (Same pattern as pattern-mode branch - prevents stuck notes when
-                // blocks end mid-note.)
-                {
-                    std::vector<PRPendingOff> keep;
-                    for (auto& off : mPRPendingOffs)
-                    {
-                        if (off.beatOff <= beatStart)
-                        {
-                            if (off.target < kMaxLayerPages)
-                                layerPageMidi[off.target].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                            else if (off.target >= kBassPRTarget && off.target < kBassPRTarget + kMaxBassPages)
-                                bassPageMidi[off.target - kBassPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                            else if (off.target >= kDrumPRTarget && off.target < kDrumPRTarget + kMaxDrumPages)
-                                drumPageMidi[off.target - kDrumPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                            else if (off.target >= kClipPRTarget && off.target < kClipPRTarget + kMaxClipPages)
-                                clipPageMidi[off.target - kClipPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                            else if (off.target >= kVoxPRTarget && off.target < kVoxPRTarget + kMaxVoxPages)
-                                voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                            else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
-                                instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                            else if (off.target == kRustyPRTarget)
-                                mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                            continue;
-                        }
-                        if (off.beatOff < beatEnd)
-                        {
-                            int smp = juce::jlimit(0, numSamples - 1,
-                                                   (int)((off.beatOff - beatStart) / bs));
-                            if (off.target < kMaxLayerPages)
-                                layerPageMidi[off.target].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                            else if (off.target >= kBassPRTarget && off.target < kBassPRTarget + kMaxBassPages)
-                                bassPageMidi[off.target - kBassPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                            else if (off.target >= kDrumPRTarget && off.target < kDrumPRTarget + kMaxDrumPages)
-                                drumPageMidi[off.target - kDrumPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                            else if (off.target >= kClipPRTarget && off.target < kClipPRTarget + kMaxClipPages)
-                                clipPageMidi[off.target - kClipPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                            else if (off.target >= kVoxPRTarget && off.target < kVoxPRTarget + kMaxVoxPages)
-                                voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                            else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
-                                instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                            else if (off.target == kRustyPRTarget)
-                                mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                        }
-                        else
-                        {
-                            keep.push_back(off);
-                        }
-                    }
-                    mPRPendingOffs = std::move(keep);
-                }
 
                 // Detect song end - request transport stop (or let playhead
                 // wrap via mLoopBeats, which is set by the UI when loop mode is on).
@@ -1132,13 +1197,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     mRequestStop.store(true, std::memory_order_release);
                 }
 
-                // Schedule notes from all Pattern arrangement blocks that overlap current beat range.
-                // No loop wrap - playhead advances linearly until stop.
-                // C.5b (post-revert): Builder grid is uniform 4-beat-per-bar
-                // (song-level TS markers are decorative-only).  Block start/end
-                // are simple bar*4.  Pattern's own loop length uses the
-                // pattern's INTRINSIC TS (FL-style), so a 3/4 pattern in an
-                // 8-bar block plays for 3-beat-bars and loops within the block.
+                // Schedule notes from every Pattern arrangement block that
+                // overlaps this block's window(s).  Each block is a VIEWPORT
+                // onto its pattern (Issue 2): notes play once at their absolute
+                // song beat, masked by [blkStartBeat, blkEndBeat); note-offs
+                // clamp to the clip end (and to loopEnd in a song-loop).  The
+                // loop-seam window split handles a song-loop wrap sample-exactly.
+                // C.5b: Builder grid is uniform 4-beat-per-bar.
                 constexpr double kBPB = 4.0;
                 for (int blkIdx = 0; blkIdx < mPatternManager->getNumBlocks(); ++blkIdx)
                 {
@@ -1149,416 +1214,131 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
                     double blkStartBeat = blk.startBar * kBPB;
                     double blkEndBeat   = (blk.startBar + blk.lengthBars) * kBPB;
-                    if (beatEnd <= blkStartBeat || beatStart >= blkEndBeat) continue;
+                    // Relevant iff the block overlaps either active window.
+                    bool relevant = false;
+                    for (int w = 0; w < nWin; ++w)
+                        if (blkStartBeat < windows[w].winEnd && blkEndBeat > windows[w].winStart)
+                        { relevant = true; break; }
+                    if (!relevant) continue;
 
-                    const auto& sPat   = mPatternManager->getPattern(blk.patternIndex);
-                    // Issue 2 fix (2026-05-17): a pattern clip on the grid is a
-                    // VIEWPORT onto the pattern's own timeline, not a looping
-                    // container.  Each note plays ONCE at its position; the clip
-                    // width [blkStartBeat, blkEndBeat) masks it (content at/after
-                    // the clip end = silence, NOT a re-loop; a note overrunning
-                    // the clip is cut at blkEndBeat by the note-off clamp).  The
-                    // old `rep += patOwnLen` re-loop + patBpb/patOwnLen are gone.
-                    // (The `>= beatStart && < beatEnd` boundary gate is intentionally
-                    // left strict — the intermittent loop-wrap missed-note is the
-                    // transport float-slop bug, fixed in the transport-rework batch,
-                    // NOT band-aided here.)
-                    auto scheduleRoll = [&](const std::vector<PianoNote>& notes,
-                                           juce::MidiBuffer& buf, int target)
-                    {
-                        for (const auto& note : notes)
-                        {
-                            if (note.muted) continue;
-                            double absStart = blkStartBeat + note.startBeat;
-                            if (absStart >= blkEndBeat) continue;   // viewport mask (no re-loop)
-                            if (absStart >= beatStart && absStart < beatEnd)
-                            {
-                                int smp = juce::jlimit(0, numSamples - 1,
-                                    (int)juce::jmax(0.0, (absStart - beatStart) / bs));
-                                emitPianoNoteOn (buf, note, smp);
-                                // Note-off clamped to the clip end so a note that
-                                // overruns the viewport is cut at the clip edge.
-                                double offBeat = juce::jmin(absStart + note.durationBeats,
-                                                            blkEndBeat);
-                                mPRPendingOffs.push_back({ offBeat, note.midiNote, target });
-                            }
-                        }
-                    };
+                    const double offHi = (loopEndBeat > 0.0) ? juce::jmin (blkEndBeat, loopEndBeat) : blkEndBeat;
+                    const auto& sPat = mPatternManager->getPattern(blk.patternIndex);
+                    auto sched = [&] (const std::vector<PianoNote>& notes, juce::MidiBuffer& buf, int target)
+                    { scheduleRollWindows (notes, buf, target, blkStartBeat, blkEndBeat, offHi); };
 
                     for (int pi = 0; pi < kMaxLayerPages; ++pi)
-                        scheduleRoll(sPat.layerRoll[pi].notes, layerPageMidi[pi], pi);
+                        sched (sPat.layerRoll[pi].notes, layerPageMidi[pi], pi);
                     for (int bi2 = 0; bi2 < kMaxBassPages; ++bi2)
-                        scheduleRoll(sPat.bassRoll[bi2].notes, bassPageMidi[bi2],
-                                     kBassPRTarget + bi2);
-                    // D1.2: per-drum-page rolls (dynamic-drum model).  Bypass
-                    // when no DrumPage tabs exist (D1.3+).
-                    // D1.4-fix (c) revert: NO transpose compensation.  Preset
-                    // transpose IS the sound design - it positions the drum's
-                    // acoustic frequency relative to the C5 trigger.  Sending
-                    // the raw pitch lets each drum play its native voice when
-                    // triggered from C5; pitches above/below C5 retune from
-                    // there (standard drum-machine semantics).
+                        sched (sPat.bassRoll[bi2].notes, bassPageMidi[bi2], kBassPRTarget + bi2);
+
+                    // D1.2: per-drum-page rolls.  No transpose compensation -
+                    // preset transpose IS the sound design.
                     if (mAnyDrumPageActive.load(std::memory_order_acquire))
                     {
                         juce::SpinLock::ScopedTryLockType dlk(mDrumEngineLock);
                         if (dlk.isLocked())
-                        {
                             for (int di = 0; di < kMaxDrumPages; ++di)
                                 if (mDrumEngines[di])
-                                    scheduleRoll(sPat.drumRolls[di].notes, drumPageMidi[di],
-                                                 kDrumPRTarget + di);
-                        }
+                                    sched (sPat.drumRolls[di].notes, drumPageMidi[di], kDrumPRTarget + di);
                     }
-
-                    // G-3 (2026-04-28): per-clip-page rolls.  Same fast-path
-                    // bypass + try-lock pattern as the drum branch above.
+                    // G-3: per-clip-page rolls.
                     if (mAnyClipPageActive.load(std::memory_order_acquire))
                     {
                         juce::SpinLock::ScopedTryLockType clk(mClipEngineLock);
                         if (clk.isLocked())
-                        {
                             for (int ci = 0; ci < kMaxClipPages; ++ci)
                                 if (mClipEngines[ci])
-                                    scheduleRoll(sPat.clipRoll[ci].notes, clipPageMidi[ci],
-                                                 kClipPRTarget + ci);
-                        }
+                                    sched (sPat.clipRoll[ci].notes, clipPageMidi[ci], kClipPRTarget + ci);
                     }
-
-                    // G-4 (2026-04-28): per-Vox / per-Inst-page rolls (same shape).
+                    // G-4: per-Vox / per-Inst-page rolls.
                     if (mAnyVoxPageActive.load(std::memory_order_acquire))
                     {
                         juce::SpinLock::ScopedTryLockType vlk(mVoxEngineLock);
                         if (vlk.isLocked())
-                        {
                             for (int vi = 0; vi < kMaxVoxPages; ++vi)
                                 if (mVoxEngines[vi])
-                                    scheduleRoll(sPat.voxRoll[vi].notes, voxPageMidi[vi],
-                                                 kVoxPRTarget + vi);
-                        }
+                                    sched (sPat.voxRoll[vi].notes, voxPageMidi[vi], kVoxPRTarget + vi);
                     }
                     if (mAnyInstPageActive.load(std::memory_order_acquire))
                     {
                         juce::SpinLock::ScopedTryLockType ilk(mInstEngineLock);
                         if (ilk.isLocked())
-                        {
                             for (int ii = 0; ii < kMaxInstPages; ++ii)
                             {
                                 if (! mInstEngines[ii]) continue;
-                                // K-3 / L-2 (2026-05-05): only dispatch the Inst
-                                // piano roll for sfizz-source pages (Guitars /
-                                // Basses).  Live-input Inst pages have no MIDI-
-                                // driven engine - the chain is fed by ASIO +
-                                // recorded clips, so notes scheduled into
-                                // instPageMidi[ii] would just be dropped by
-                                // Pedals/NAMIR.
-                                const bool sourceActive =
-                                    mGuitarsActive[ii].load(std::memory_order_acquire)
-                                    || mBassesActive[ii].load(std::memory_order_acquire);
-                                if (! sourceActive) continue;
-                                scheduleRoll(sPat.instRoll[ii].notes, instPageMidi[ii],
-                                             kInstPRTarget + ii);
+                                // K-3 / L-2: only sfizz-source Inst pages (Guitars /
+                                // Basses) take MIDI; live-input chains drop it.
+                                if (! mGuitarsActive[ii].load(std::memory_order_acquire)
+                                    && ! mBassesActive[ii].load(std::memory_order_acquire)) continue;
+                                sched (sPat.instRoll[ii].notes, instPageMidi[ii], kInstPRTarget + ii);
                             }
-                        }
                     }
-
-                    // J-7b (2026-05-03): BaySickRustyDrums singleton roll.
-                    // QA-DispatcherAffinity Task 4 (2026-05-29): try-lock
-                    // removed; engine pointer read is safe under the
-                    // mProjectLoadInProgress shield (audio thread bails at
-                    // processBlock top during destroy/load mutation windows).
+                    // J-7b: BaySickRustyDrums singleton roll.
                     if (mRustyDrumsActive.load(std::memory_order_acquire) && mRustyDrumsEngine)
-                        scheduleRoll(sPat.baySickRustyDrumsRoll.notes,
-                                     mRustyDrumsMidi, kRustyPRTarget);
-
-                    // 2026-04-25: legacy sPat.drumRoll dispatch removed -
-                    // notes are now in sPat.drumRolls[di] and dispatched
-                    // through D1.2 per-drum loop above.
+                        sched (sPat.baySickRustyDrumsRoll.notes, mRustyDrumsMidi, kRustyPRTarget);
                 }
-                mPRLastBeatEnd = beatEnd;
             }
             else
             {
-            // ── PATTERN MODE (existing loop-based scheduling) ─────────────
-            auto& pat     = mPatternManager->currentPattern();
-            double patLen = juce::jmax(1.0, mCachedPatternLoopBeats.load(std::memory_order_relaxed));
+                // ── PATTERN MODE ──────────────────────────────────────────
+                // The current pattern loops [0, patLen) (or a time-selection
+                // [loopStart, loopEnd)).  Notes are loop-local (absOffset = 0);
+                // the loop-seam window split fires the wrapped first note at the
+                // exact in-block sample, and note-offs clamp to loopEnd so an
+                // overrun is cut at the boundary.  No band-aid, no double-fire.
+                auto& pat = mPatternManager->currentPattern();
+                const double offHi = (loopEndBeat > 0.0) ? loopEndBeat : 1.0e18;
+                constexpr double kInf = 1.0e18;   // pattern has no viewport mask
 
-            // kWrapSlop = one block's worth of beats.  After a loop wrap, beatStart lands
-            // slightly past 0 (e.g. 0.021 beats) due to fmod float arithmetic, so a note
-            // at beat 0 would be missed without extending the window backward.
-            // We ONLY extend the window on jumped (post-wrap) blocks - applying it to every
-            // block would create a double-trigger: block N bumps beat-0's absStart to patLen
-            // (falls in upper window) AND block N+1 catches it via the slop (lower window).
-            const double kWrapSlop = beatEnd - beatStart;
-            bool jumped = (mPRLastBeatEnd >= 0.0 && beatStart < mPRLastBeatEnd - 0.1);
-            const double windowStart = jumped ? (beatStart - kWrapSlop) : beatStart;
+                for (int i = 0; i < kMaxLayerPages; ++i)
+                    scheduleRollWindows (pat.layerRoll[i].notes, layerPageMidi[i], i, 0.0, kInf, offHi);
+                for (int bi = 0; bi < kMaxBassPages; ++bi)
+                    scheduleRollWindows (pat.bassRoll[bi].notes, bassPageMidi[bi], kBassPRTarget + bi, 0.0, kInf, offHi);
 
-            if (jumped)
-            {
-                // Loop restart (seek or wrap) - fire per-note offs for each pending voice
-                // so their release envelopes play naturally.  allNotesOff() does a hard
-                // kill on ALL channel-1 voices (click + cuts layer/bass cross-page) -
-                // per-note offs only affect voices we actually started.
-                for (auto& off : mPRPendingOffs)
+                // D1.2: per-drum-page rolls.
+                if (mAnyDrumPageActive.load(std::memory_order_acquire))
                 {
-                    if (off.target < kMaxLayerPages)
-                        layerPageMidi[off.target].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                    else if (off.target >= kBassPRTarget && off.target < kBassPRTarget + kMaxBassPages)
-                        bassPageMidi[off.target - kBassPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                    else if (off.target >= kDrumPRTarget && off.target < kDrumPRTarget + kMaxDrumPages)
-                        drumPageMidi[off.target - kDrumPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                    else if (off.target >= kClipPRTarget && off.target < kClipPRTarget + kMaxClipPages)
-                        clipPageMidi[off.target - kClipPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                    else if (off.target >= kVoxPRTarget && off.target < kVoxPRTarget + kMaxVoxPages)
-                        voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                    else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
-                        instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                    else if (off.target == kRustyPRTarget)
-                        mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
+                    juce::SpinLock::ScopedTryLockType dlk(mDrumEngineLock);
+                    if (dlk.isLocked())
+                        for (int di = 0; di < kMaxDrumPages; ++di)
+                            if (mDrumEngines[di])
+                                scheduleRollWindows (pat.drumRolls[di].notes, drumPageMidi[di], kDrumPRTarget + di, 0.0, kInf, offHi);
                 }
-                mPRPendingOffs.clear();
-            }
-            mPRLastBeatEnd = beatEnd;
-
-            // Fire pending note-offs that fall within this block
-            {
-                std::vector<PRPendingOff> keep;
-                for (auto& off : mPRPendingOffs)
+                // G-3: per-clip-page rolls.
+                if (mAnyClipPageActive.load(std::memory_order_acquire))
                 {
-                    // Past-due: fire at sample 0 instead of silently leaking.
-                    // This prevents stuck voices when patLen changes mid-playback.
-                    if (off.beatOff <= beatStart)
-                    {
-                        if (off.target < kMaxLayerPages)
-                            layerPageMidi[off.target].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                        else if (off.target >= kBassPRTarget && off.target < kBassPRTarget + kMaxBassPages)
-                            bassPageMidi[off.target - kBassPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                        else if (off.target >= kDrumPRTarget && off.target < kDrumPRTarget + kMaxDrumPages)
-                            drumPageMidi[off.target - kDrumPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                        else if (off.target >= kClipPRTarget && off.target < kClipPRTarget + kMaxClipPages)
-                            clipPageMidi[off.target - kClipPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                        else if (off.target >= kVoxPRTarget && off.target < kVoxPRTarget + kMaxVoxPages)
-                            voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                        else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
-                            instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                        else if (off.target == kRustyPRTarget)
-                            mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), 0);
-                        continue;
-                    }
-                    if (off.beatOff < beatEnd)
-                    {
-                        int smp = juce::jlimit(0, numSamples - 1,
-                                               (int)((off.beatOff - beatStart) / bs));
-                        if (off.target < kMaxLayerPages)
-                            layerPageMidi[off.target].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                        else if (off.target >= kBassPRTarget && off.target < kBassPRTarget + kMaxBassPages)
-                            bassPageMidi[off.target - kBassPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                        else if (off.target >= kDrumPRTarget && off.target < kDrumPRTarget + kMaxDrumPages)
-                            drumPageMidi[off.target - kDrumPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                        else if (off.target >= kClipPRTarget && off.target < kClipPRTarget + kMaxClipPages)
-                            clipPageMidi[off.target - kClipPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                        else if (off.target >= kVoxPRTarget && off.target < kVoxPRTarget + kMaxVoxPages)
-                            voxPageMidi[off.target - kVoxPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                        else if (off.target >= kInstPRTarget && off.target < kInstPRTarget + kMaxInstPages)
-                            instPageMidi[off.target - kInstPRTarget].addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                        else if (off.target == kRustyPRTarget)
-                            mRustyDrumsMidi.addEvent(juce::MidiMessage::noteOff(1, off.midiNote), smp);
-                    }
-                    else
-                    {
-                        keep.push_back(off);
-                    }
+                    juce::SpinLock::ScopedTryLockType clk(mClipEngineLock);
+                    if (clk.isLocked())
+                        for (int ci = 0; ci < kMaxClipPages; ++ci)
+                            if (mClipEngines[ci])
+                                scheduleRollWindows (pat.clipRoll[ci].notes, clipPageMidi[ci], kClipPRTarget + ci, 0.0, kInf, offHi);
                 }
-                mPRPendingOffs = std::move(keep);
-            }
-
-            // Trigger note-ons from layer piano rolls (up to 8 pages)
-            for (int i = 0; i < kMaxLayerPages; ++i)
-            {
-                for (const auto& note : pat.layerRoll[i].notes)
+                // G-4: per-Vox / per-Inst-page rolls.
+                if (mAnyVoxPageActive.load(std::memory_order_acquire))
                 {
-                    if (note.muted) continue;
-                    double baseLoop = std::floor(beatStart / patLen) * patLen;
-                    double absStart = baseLoop + note.startBeat;
-                    // Bump notes that fall behind the bump threshold into this cycle.
-                    if (absStart < beatStart - kWrapSlop) absStart += patLen;
-                    // If absStart landed AT or past patLen in a straddling block, skip it -
-                    // the next (jumped) block will catch it via the windowStart slop.
-                    if (absStart >= patLen && beatEnd > patLen) continue;
-                    if (absStart >= windowStart && absStart < beatEnd)
-                    {
-                        int smp = juce::jlimit(0, numSamples - 1,
-                                               (int)std::max(0.0, (absStart - beatStart) / bs));
-                        emitPianoNoteOn (layerPageMidi[i], note, smp);
-                        mPRPendingOffs.push_back(
-                            { absStart + note.durationBeats, note.midiNote, i });
-                    }
+                    juce::SpinLock::ScopedTryLockType vlk(mVoxEngineLock);
+                    if (vlk.isLocked())
+                        for (int vi = 0; vi < kMaxVoxPages; ++vi)
+                            if (mVoxEngines[vi])
+                                scheduleRollWindows (pat.voxRoll[vi].notes, voxPageMidi[vi], kVoxPRTarget + vi, 0.0, kInf, offHi);
                 }
-            }
-
-            // Trigger note-ons from bass piano rolls (up to kMaxBassPages pages)
-            for (int bi = 0; bi < kMaxBassPages; ++bi)
-            {
-                for (const auto& note : pat.bassRoll[bi].notes)
+                if (mAnyInstPageActive.load(std::memory_order_acquire))
                 {
-                    if (note.muted) continue;
-                    double baseLoop = std::floor(beatStart / patLen) * patLen;
-                    double absStart = baseLoop + note.startBeat;
-                    if (absStart < beatStart - kWrapSlop) absStart += patLen;
-                    if (absStart >= patLen && beatEnd > patLen) continue;
-                    if (absStart >= windowStart && absStart < beatEnd)
-                    {
-                        int smp = juce::jlimit(0, numSamples - 1,
-                                               (int)std::max(0.0, (absStart - beatStart) / bs));
-                        emitPianoNoteOn (bassPageMidi[bi], note, smp);
-                        mPRPendingOffs.push_back(
-                            { absStart + note.durationBeats, note.midiNote, kBassPRTarget + bi });
-                    }
-                }
-            }
-
-            // D1.2: per-drum-page rolls (dynamic-drum model).  Bypass when
-            // no DrumPage tabs exist (D1.3+).  No transpose compensation -
-            // see song-mode block above for rationale.
-            if (mAnyDrumPageActive.load(std::memory_order_acquire))
-            {
-                juce::SpinLock::ScopedTryLockType dlk(mDrumEngineLock);
-                const bool drumLockHeld = dlk.isLocked();
-                for (int di = 0; di < kMaxDrumPages; ++di)
-                {
-                    if (! drumLockHeld || ! mDrumEngines[di]) continue;
-                    for (const auto& note : pat.drumRolls[di].notes)
-                    {
-                        if (note.muted) continue;
-                        double baseLoop = std::floor(beatStart / patLen) * patLen;
-                        double absStart = baseLoop + note.startBeat;
-                        if (absStart < beatStart - kWrapSlop) absStart += patLen;
-                        if (absStart >= patLen && beatEnd > patLen) continue;
-                        if (absStart >= windowStart && absStart < beatEnd)
+                    juce::SpinLock::ScopedTryLockType ilk(mInstEngineLock);
+                    if (ilk.isLocked())
+                        for (int ii = 0; ii < kMaxInstPages; ++ii)
                         {
-                            int smp = juce::jlimit(0, numSamples - 1,
-                                                   (int)std::max(0.0, (absStart - beatStart) / bs));
-                            emitPianoNoteOn (drumPageMidi[di], note, smp);
-                            mPRPendingOffs.push_back(
-                                { absStart + note.durationBeats, note.midiNote, kDrumPRTarget + di });
+                            if (! mInstEngines[ii]) continue;
+                            // K-3 / L-2: only sfizz-source Inst pages take MIDI.
+                            if (! mGuitarsActive[ii].load(std::memory_order_acquire)
+                                && ! mBassesActive[ii].load(std::memory_order_acquire)) continue;
+                            scheduleRollWindows (pat.instRoll[ii].notes, instPageMidi[ii], kInstPRTarget + ii, 0.0, kInf, offHi);
                         }
-                    }
                 }
+                // J-7b: BaySickRustyDrums singleton roll.
+                if (mRustyDrumsActive.load(std::memory_order_acquire) && mRustyDrumsEngine)
+                    scheduleRollWindows (pat.baySickRustyDrumsRoll.notes, mRustyDrumsMidi, kRustyPRTarget, 0.0, kInf, offHi);
             }
-
-            // 2026-04-25: legacy pat.drumRoll dispatch removed -
-            // notes are now in pat.drumRolls[di] and dispatched
-            // through D1.2 per-drum loop above.
-
-            // G-3 (2026-04-28): per-clip-page rolls - pattern mode.  Mirrors
-            // the drum loop above; bypass when no Clips tabs are active.
-            if (mAnyClipPageActive.load(std::memory_order_acquire))
-            {
-                juce::SpinLock::ScopedTryLockType clk(mClipEngineLock);
-                const bool clipLockHeld = clk.isLocked();
-                for (int ci = 0; ci < kMaxClipPages; ++ci)
-                {
-                    if (! clipLockHeld || ! mClipEngines[ci]) continue;
-                    for (const auto& note : pat.clipRoll[ci].notes)
-                    {
-                        if (note.muted) continue;
-                        double baseLoop = std::floor(beatStart / patLen) * patLen;
-                        double absStart = baseLoop + note.startBeat;
-                        if (absStart < beatStart - kWrapSlop) absStart += patLen;
-                        if (absStart >= patLen && beatEnd > patLen) continue;
-                        if (absStart >= windowStart && absStart < beatEnd)
-                        {
-                            int smp = juce::jlimit(0, numSamples - 1,
-                                                   (int)std::max(0.0, (absStart - beatStart) / bs));
-                            emitPianoNoteOn (clipPageMidi[ci], note, smp);
-                            mPRPendingOffs.push_back(
-                                { absStart + note.durationBeats, note.midiNote, kClipPRTarget + ci });
-                        }
-                    }
-                }
-            }
-
-            // G-4 (2026-04-28): per-Vox / per-Inst-page rolls - pattern mode.
-            if (mAnyVoxPageActive.load(std::memory_order_acquire))
-            {
-                juce::SpinLock::ScopedTryLockType vlk(mVoxEngineLock);
-                const bool vlkHeld = vlk.isLocked();
-                for (int vi = 0; vi < kMaxVoxPages; ++vi)
-                {
-                    if (! vlkHeld || ! mVoxEngines[vi]) continue;
-                    for (const auto& note : pat.voxRoll[vi].notes)
-                    {
-                        if (note.muted) continue;
-                        double baseLoop = std::floor(beatStart / patLen) * patLen;
-                        double absStart = baseLoop + note.startBeat;
-                        if (absStart < beatStart - kWrapSlop) absStart += patLen;
-                        if (absStart >= patLen && beatEnd > patLen) continue;
-                        if (absStart >= windowStart && absStart < beatEnd)
-                        {
-                            int smp = juce::jlimit(0, numSamples - 1,
-                                                   (int)std::max(0.0, (absStart - beatStart) / bs));
-                            emitPianoNoteOn (voxPageMidi[vi], note, smp);
-                            mPRPendingOffs.push_back(
-                                { absStart + note.durationBeats, note.midiNote, kVoxPRTarget + vi });
-                        }
-                    }
-                }
-            }
-            if (mAnyInstPageActive.load(std::memory_order_acquire))
-            {
-                juce::SpinLock::ScopedTryLockType ilk(mInstEngineLock);
-                const bool ilkHeld = ilk.isLocked();
-                for (int ii = 0; ii < kMaxInstPages; ++ii)
-                {
-                    if (! ilkHeld || ! mInstEngines[ii]) continue;
-                    // K-3 / L-2 (2026-05-05): only dispatch instRoll notes when
-                    // the page's source is sfizz-driven (Guitars / Basses).
-                    // Live input chains discard MIDI; skip the schedule for them.
-                    if (! mGuitarsActive[ii].load(std::memory_order_acquire)
-                        && ! mBassesActive[ii].load(std::memory_order_acquire))
-                        continue;
-                    for (const auto& note : pat.instRoll[ii].notes)
-                    {
-                        if (note.muted) continue;
-                        double baseLoop = std::floor(beatStart / patLen) * patLen;
-                        double absStart = baseLoop + note.startBeat;
-                        if (absStart < beatStart - kWrapSlop) absStart += patLen;
-                        if (absStart >= patLen && beatEnd > patLen) continue;
-                        if (absStart >= windowStart && absStart < beatEnd)
-                        {
-                            int smp = juce::jlimit(0, numSamples - 1,
-                                                   (int)std::max(0.0, (absStart - beatStart) / bs));
-                            emitPianoNoteOn (instPageMidi[ii], note, smp);
-                            mPRPendingOffs.push_back(
-                                { absStart + note.durationBeats, note.midiNote, kInstPRTarget + ii });
-                        }
-                    }
-                }
-            }
-
-            // J-7b (2026-05-03): BaySickRustyDrums singleton roll - pattern mode.
-            // Mirrors the per-engine loops above; bypass via mRustyDrumsActive.
-            // QA-DispatcherAffinity Task 4 (2026-05-29): try-lock removed; engine
-            // pointer read safe under mProjectLoadInProgress shield.
-            if (mRustyDrumsActive.load(std::memory_order_acquire) && mRustyDrumsEngine)
-            {
-                for (const auto& note : pat.baySickRustyDrumsRoll.notes)
-                {
-                    if (note.muted) continue;
-                    double baseLoop = std::floor(beatStart / patLen) * patLen;
-                    double absStart = baseLoop + note.startBeat;
-                    if (absStart < beatStart - kWrapSlop) absStart += patLen;
-                    if (absStart >= patLen && beatEnd > patLen) continue;
-                    if (absStart >= windowStart && absStart < beatEnd)
-                    {
-                        int smp = juce::jlimit(0, numSamples - 1,
-                                               (int)std::max(0.0, (absStart - beatStart) / bs));
-                        emitPianoNoteOn (mRustyDrumsMidi, note, smp);
-                        mPRPendingOffs.push_back(
-                            { absStart + note.durationBeats, note.midiNote, kRustyPRTarget });
-                    }
-                }
-            }
-            } // end pattern mode else
         }
     }
 

@@ -585,6 +585,12 @@ private:
     // Maps paramId → function that reads the current 0..1 value from the live control.
     // Used when creating automation blocks to seed the initial control points.
     std::map<juce::String, std::function<float()>>     mAutomationValueReaders;
+
+    // QA-Ed (Problem 3): last beat at which automation was applied.  The 30 Hz
+    // timer re-applies automation whenever the playhead beat changes -- playback
+    // OR a stopped seek/scrub -- so any param on an active automation snaps to
+    // the playhead position.  -1e9 = "not yet applied" so the first tick runs.
+    double mLastAutomationBeat { -1.0e9 };
     void applyAutomationAtCurrentPosition();
 
     // 30 Hz timer that drives automation playback application

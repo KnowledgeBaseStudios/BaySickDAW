@@ -674,6 +674,45 @@ void EEAutomationGrid::mouseMove(const MouseEvent& e)
     }
 }
 
+void EEAutomationGrid::promptSetPointValue(int hit)
+{
+    auto* l = lanePtr();
+    if (!l || hit < 0 || hit >= (int)l->points.size()) return;
+
+    const juce::String paramId = l->paramId;
+    const float        cur01   = l->points[hit].value01;
+    const juce::String preset  = (onFormatValue && paramId.isNotEmpty())
+                                     ? onFormatValue (paramId, cur01)
+                                     : juce::String (cur01, 3);
+
+    auto* aw = new juce::AlertWindow ("Set Value",
+                                       "Enter a value for this point:",
+                                       juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("value", preset);
+    aw->addButton ("OK",     1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<EEAutomationGrid> safeThis (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safeThis, aw, hit, paramId] (int r)
+        {
+            std::unique_ptr<juce::AlertWindow> own (aw);
+            if (r != 1 || ! safeThis) return;
+            auto* g  = safeThis.getComponent();
+            auto* l2 = g->lanePtr();
+            if (!l2 || hit < 0 || hit >= (int)l2->points.size()) return;
+            const juce::String txt = aw->getTextEditorContents ("value").trim();
+            float new01 = (g->onParseValue && paramId.isNotEmpty())
+                             ? g->onParseValue (paramId, txt)
+                             : txt.getFloatValue();
+            new01 = juce::jlimit (0.0f, 1.0f, new01);
+            AutomationLane before = *l2;
+            l2->points[hit].value01 = new01;
+            g->commitEdit ("Set Point Value", before, *l2);
+            if (g->onChanged) g->onChanged();
+            g->repaint();
+        }), false);
+}
+
 void EEAutomationGrid::mouseDown(const MouseEvent& e)
 {
     auto* lane = lanePtr();
@@ -694,12 +733,14 @@ void EEAutomationGrid::mouseDown(const MouseEvent& e)
         if (hit >= 0)
         {
             juce::PopupMenu m;
-            m.addItem(1, "Reset to midpoint");
+            m.addItem(3, "Set Value...");
             m.addSeparator();
+            m.addItem(1, "Reset to midpoint");
             m.addItem(2, "Delete");
             m.showMenuAsync(juce::PopupMenu::Options{}.withTargetComponent(this),
                 [this, hit](int result)
                 {
+                    if (result == 3) { promptSetPointValue(hit); return; }   // QA-Ed Problem 1: type-in
                     auto* l = lanePtr();
                     if (!l || hit < 0 || hit >= (int)l->points.size()) return;
                     AutomationLane before = *l;
@@ -1288,10 +1329,16 @@ EventEditorContent::EventEditorContent(VibeSynthProcessor& p, UndoManager& um)
     // Wire grid hover → status bar
     mGrid->onHoverChanged = [this](float beat, float val01)
     {
-        if (mStatusBar)
-            mStatusBar->setText(
-                "Beat " + juce::String(beat, 2) + "   Value " + juce::String(val01, 3),
-                juce::dontSendNotification);
+        if (! mStatusBar) return;
+        // QA-Ed (Problem 1): show the hovered value in the param's real units.
+        juce::String pid;
+        if (mPM && mBlockIdx >= 0 && mBlockIdx < mPM->getNumBlocks())
+            pid = mPM->getBlock(mBlockIdx).automationLane.paramId;
+        const juce::String vs = (mGrid->onFormatValue && pid.isNotEmpty())
+                                    ? mGrid->onFormatValue(pid, val01)
+                                    : juce::String(val01, 3);
+        mStatusBar->setText("Beat " + juce::String(beat, 2) + "   " + vs,
+                            juce::dontSendNotification);
     };
 
     updateTabStyles();
@@ -1464,7 +1511,12 @@ void EventEditorContent::updateValueDisplay()
 
     // Show value of first point, or midpoint if empty
     float val = lane.points.empty() ? 0.5f : lane.points[0].value01;
-    mValueDisplay->setText(String(val, 3), dontSendNotification);
+    // QA-Ed (Problem 1): show the param's real units (BPM / dB / Hz / ...) via the
+    // grid's format hook; fall back to the raw 0..1 value when unwired.
+    const juce::String valTxt = (mGrid && mGrid->onFormatValue && lane.paramId.isNotEmpty())
+                                    ? mGrid->onFormatValue(lane.paramId, val)
+                                    : String(val, 3);
+    mValueDisplay->setText(valTxt, dontSendNotification);
 }
 
 void EventEditorContent::onKnobChanged()
