@@ -1075,6 +1075,8 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Ed: Song-Mode Transport Integer-Sample Source-of-Truth (Issue 3)** *(NEW — inserted 2026-05-18)*
 
+> **STATUS (2026-06-01 close):** **CLOSED.**  Int64-sample transport source-of-truth + seqlock tempo anchor + sample-accurate scheduler loop-seam shipped (`ffc6dc7`); the `mPRLastBeatEnd`/`kWrapSlop`/`jumped`/`windowStart` float band-aid removed.  Three tempo-automation verify-round fixes folded in (Problem 2 anchor-relative loop bounds; Problem 1 Event Editor real-unit display + "Set Value..." type-in; Problem 3 automation-follows-playhead-on-any-placement).  See §9 forty-eighth Forks entry + the Implemented Work Log close entry.
+
 **Plan file:** `Plans & Specs/Batch Plans/virtual-moseying-cocoa.md`
 - Items: **Issue 3** — intermittent first-note-drop / pattern-starts-later-than-clip in song mode.  Decoupled from the QA-Ea-session pattern-scheduler work: the Issue 2 viewport fix shipped in QA-Ea Task 0 carry-forward (§9 twenty-fourth Forks entry); Issue 3 is the deeper transport-timing root cause, deliberately NOT band-aided in Issue 2.  Surfaced 2026-05-17 while building the QA-Ea test rig; root cause is float slop in the playhead beat accumulator.
 - Scope:
@@ -1088,6 +1090,17 @@ needed to find what you should pull up to review the work.
 - Effort: medium-large (transport clock rework + scheduler-gate audit + regression-verify across song/pattern modes).
 - **Bucket:** Cross-cutting Infrastructure
 - Verify (own plan file will detail): pattern + clip start sample-aligned every play; first note never dropped on loop-wrap; no drift over a long arrangement; pattern/song-mode parity.
+
+#### **QA-ClipDrop: Audio-Clip Drag-Drop Path Fix** *(NEW — inserted 2026-06-01 at QA-Ed close)*
+- Items: the WAV / audio-clip drag-drop bug surfaced 2026-06-01 during QA-Ed test-rig setup — a pre-existing clip-path issue in the audio-clip drag-drop flow.  NOT a QA-Ed regression (the transport rework doesn't touch the clip-drop path); "definitely not like this before," so a regression from a recent clip/library rework — the open-time investigation pins the commit.
+- Scope (the 5 observed symptoms): (1) dragging a WAV creates **two** browser entries; (2) dragging a second file → no clip + no page created; (3) dragging that second file again → "already exists in the project" prompt, yet it is not in the clips list and has no page (so the first drag half-registered it without creating the clip/page); (4) **"Use existing"** drops an unattached clip (not in the listing, not the clips color block) but does create a strip + plays; (5) **"New page"** adds it correctly (as the first drag should have) but as though it already existed.
+- Own §0-conformant plan file + own verification pass.
+- Risk: TBD at batch open.
+- Dependencies: none (independent of the transport rework).
+- Sequencing: **immediately after QA-Ed, before QA-Ee** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 forty-eighth Forks entry).
+- Effort: TBD at batch open.
+- **Bucket:** System Pages
+- Verify (own plan file will detail): each of the 5 drag-drop symptoms resolved; an audio clip drops as one browser entry + creates its page/strip + plays from the correct path.
 
 #### **QA-Ee: 96 PPQ Universal Timebase + Decoupled Snap Params** *(NEW — inserted 2026-05-20)*
 
@@ -1105,6 +1118,17 @@ needed to find what you should pull up to review the work.
 - Effort: medium-large (~10-16 hours; data model + migration ~3-4 hr, BuilderPage refactor ~2-3 hr, PianoRoll refactor ~2-3 hr, APVTS + submenu + consumer ~2 hr, verify ~2-3 hr, `/review-batch` ~1 hr).
 - **Bucket:** Cross-cutting Infrastructure
 - Verify (own plan file will detail): the 10-label snap on each of Builder + PianoRoll + Record-Quantize produces correct tick-aligned positions; existing saved-project loads correctly migrate `startBeats * 96 → startTicks`; audio-clip playback in the post-migration state still plays from the right offset; MIDI recording with each of the 10 quantize values commits notes at the expected tick boundaries; triplet divisions don't drift on long projects.
+
+#### **QA-TempoMap: Audio-Thread Sample-Indexed Tempo Map** *(NEW — inserted 2026-06-01 at QA-Ed close)*
+- Items: a full audio-thread sample-indexed tempo map — the SC-1 deferral from QA-Ed.  QA-Ed shipped the int64-sample transport source-of-truth + a single re-basing tempo anchor, but explicitly deferred a sample↔tick tempo MAP (Jeff's SC-1 lock — scope-creep rejected for that batch).
+- Scope: replace the single re-basing tempo anchor with an audio-thread sample-indexed tempo map so tempo changes are positioned sample-accurately across the arrangement (samples ↔ ticks resolved through the map at any sample position).  Capstone bridging QA-Ed's sample-domain clock + QA-Ee's musical-domain 96-PPQ tick clock.  Full DSP / data-model scope set at batch open.
+- Own §0-conformant plan file + own verification pass.
+- Risk: high — hot-path transport; touches the playhead clock + scheduler + the tick timebase.
+- Dependencies: QA-Ed (int64-sample transport source-of-truth) + QA-Ee (96-PPQ tick clock) both land first — the tempo map indexes samples ↔ ticks, so it sits on top of both source-of-truth refactors.
+- Sequencing: **immediately after QA-Ee, before QA-Eb** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 forty-eighth Forks entry).
+- Effort: TBD at batch open.
+- **Bucket:** Cross-cutting Infrastructure
+- Verify (own plan file will detail): tempo changes land sample-accurately across a long arrangement; samples ↔ ticks round-trip through the map; existing tempo-automation behavior preserved or improved (no regression vs QA-Ed).
 
 #### **QA-Eb: Standalone App-Window Resizability** *(NEW — inserted 2026-05-17)*
 - Items: standalone app-window user-resizability (new feature; Jeff
@@ -1992,7 +2016,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-Ee************** → QA-Eb********** → QA-Ec*********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-DirtyFlag*******************
 ```
@@ -2447,6 +2471,22 @@ data-layer change — XML format + sample retention); DirtyFlag-after-
 ProjectSave means its codebase-wide audit naturally covers ProjectSave's
 new save/load code.  Risk medium-high, effort large (~10-16 hours;
 codebase-wide audit).  See §9 thirty-second Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-ClipDrop** inserted
+2026-06-01 at the QA-Ed close — the WAV / audio-clip drag-drop bug
+surfaced during QA-Ed test-rig setup (pre-existing clip-path issue, NOT a
+transport regression).  Slotted **immediately after QA-Ed, before QA-Ee**
+(Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`).
+Bucket: System Pages.  See §9 forty-eighth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-TempoMap** inserted
+2026-06-01 at the QA-Ed close — the SC-1 deferral (audio-thread
+sample-indexed tempo map; QA-Ed shipped the int-sample clock + a single
+re-basing tempo anchor but deferred a full tempo MAP as scope creep).
+Slotted **immediately after QA-Ee, before QA-Eb** (Jeff's call per
+`feedback_slot_placement_is_spec_call.md`); capstone bridging QA-Ed's
+sample clock + QA-Ee's tick clock.  Bucket: Cross-cutting Infrastructure.
+See §9 forty-eighth Forks entry.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -5276,3 +5316,36 @@ Removing these eliminates the per-block `gCaptureOn` relaxed-loads on the audio 
 - `Plans & Specs/Running Notes/linear-fluttering-spark.md` — close-pass sections.
 
 **Verification:** per-task Debug + Release PASS (Jeff 2026-06-01) — all 8 re-verify scenarios: fresh Guitars/Basses/RustyDrums correct on load with no control touch + knobs show true defaults; RustyDrums hi-hat defaults Fully open (CC4=127 via the `#define` resolver); Cool bass riff loads audible; another saved sfizz project correct; CC move / double-click reset / Full<->Basic program switch behave; no hung notes; MT == serial.  `/review-batch` READY-TO-COMMIT (1 style NIT recorded, not fixed; 1 informational `set_cc=0`-no-dispatch behavioral note — harmless).  Rule 4 — no diagnostic instrumentation added this batch (catalog empty; nothing to strip).
+
+### 2026-06-01 — QA-Ed CLOSE: int64-sample transport source-of-truth + seqlock tempo anchor + sample-accurate scheduler seam shipped (Issue 3 fixed); 3 tempo-automation fixes folded in; WAV-clip-drag → new QA-ClipDrop, deferred tempo map → new QA-TempoMap
+
+**Status:** CLOSED (forty-eighth Forks entry).  QA-Ed — the Issue-3 batch (intermittent first-note-drop on loop-wrap + pattern-drifts-later-than-clip in song mode; §9 twenty-fifth Forks entry, decoupled 2026-05-18 from the QA-Ea pattern-scheduler work) — shipped in one consolidated source commit + the close.  Full detail in the Implemented Work Log close entry; this entry records the close routing per §0 Rule 3.
+
+**What shipped:** `StandalonePlayHead` reworked to an **int64 absolute-sample source-of-truth** with a **seqlock-published tempo anchor** (single message-thread writer; re-bases on every BPM change / seek / start / reset), an **exact integer loop-wrap** preserving overshoot (no `fmod`), and `getPosition` publishing `timeInSamples`; the public playhead API stays in beats (SC-5).  The song + pattern schedulers are refactored onto a shared `RollWindow[2]` + `scheduleRollWindows` helper with a **sample-accurate loop seam** (SC-4 = option B — integer straddle off `timeInSamples`, two-window split, overrun-cut at the exact wrap sample, backward-seek flush, sub-block-loop guard); the `mPRLastBeatEnd` / `kWrapSlop` / `jumped` / `windowStart` float band-aid is removed.  Source `ffc6dc7` (8 source files, +483/-459), one atomic commit per SC-2 (band-aid removal is only safe once the clock is exact).  Plan / Task-0 open `acde514`.
+
+**Three tempo-automation fixes folded in (verify-round, all in `ffc6dc7`).**  The test-5 (tempo-automation) verify pass surfaced three problems, all fixed IN-batch per `feedback_qa_batches_fix_bugs_dont_defer.md` (Jeff's call — I had wrongly proposed routing 1 + 3 out and was overruled):
+- **Problem 2 (a QA-Ed regression):** under a mid-loop tempo change the loop wrapped early because `advanceBlock` + the scheduler measured loop sample-bounds from beat 0, but the anchor re-bases away from origin on a BPM change.  Fixed by measuring the bounds **relative to the current (sample, beat) anchor point** — the corrected form of the plan's dropped "loop-regime anchoring."  No-op at constant tempo.
+- **Problem 1 (pre-existing UX gap):** the Event Editor showed normalized 0-1 with no type-in.  Fixed: real-unit value display (footer + value label) + a right-click "Set Value..." type-in routing through the parameter's own `getText()` / `getValueForText()` for APVTS lanes (`global_tempo` is the one non-APVTS lane).
+- **Problem 3 (pre-existing UX gap):** automation didn't follow the playhead on placement.  Fixed: `applyAutomationAtCurrentPosition` now applies on any position change (playback or a stopped seek), applying APVTS lanes when stopped, so a param snaps to the active automation's value at the placed beat.
+
+The initial "1/8-note-late" report was diagnosed to **TV audio output latency** (~250 ms hardware-monitoring artifact, NOT the transport — confirmed by switching to a headset); no code change.
+
+**Routing at close (Rule 3):**
+- **In-batch (recorded in the close entry, NOT new §5 rows):** Problems 1 / 2 / 3 — all three tempo-automation fixes landed in the one atomic source commit `ffc6dc7`.
+- **WAV / audio-clip drag-drop bug → new QA-ClipDrop batch (Bucket: System Pages; slotted immediately after QA-Ed, before QA-Ee):** a pre-existing clip-path issue in the audio-clip drag-drop flow, surfaced during QA-Ed testing — NOT a QA-Ed regression (the transport rework doesn't touch the clip-drop path).  Not fixed in QA-Ed (out of the transport scope).  Jeff's calls (2026-06-01): fix in a dedicated batch (not deferred to Future State, per `feedback_qa_batches_fix_bugs_dont_defer.md`), slotted next per `feedback_slot_placement_is_spec_call.md`.
+- **Sample-accurate tempo map (deferred at SC-1) → new QA-TempoMap batch (Bucket: Cross-cutting Infrastructure; slotted immediately after QA-Ee, before QA-Eb):** QA-Ed's SC-1 locked the int64-sample clock + a re-basing tempo anchor but explicitly deferred a full audio-thread sample-indexed tempo MAP (scope-creep rejected for this batch).  Slot rationale (Jeff delegated the placement): QA-TempoMap is the capstone bridging QA-Ed's sample clock and QA-Ee's tick clock — the tempo map indexes samples ↔ ticks across tempo changes, so it wants BOTH source-of-truth refactors landed first (sample-domain QA-Ed, then musical-domain QA-Ee) before it lays the sample↔tick tempo bridge on top.
+
+**Sequencing:** QA-Ed closed; **QA-ClipDrop is now next** (slotted immediately after QA-Ed, before QA-Ee).  New Phase 3 order: `… QA-Sfizz-Followup → QA-Ed → QA-ClipDrop → QA-Ee → QA-TempoMap → QA-Eb → QA-Ec → QA-F …`.
+
+**Inline back-refs:**
+- §5 — QA-Ed entry gains the `STATUS (2026-06-01 close): CLOSED` banner; NEW QA-ClipDrop row INSERTED (after QA-Ed, before QA-Ee); NEW QA-TempoMap row INSERTED (after QA-Ee, before QA-Eb).
+- §6 — arrow updated to `… QA-Sfizz-Followup → QA-Ed → QA-ClipDrop → QA-Ee → QA-TempoMap → QA-Eb → QA-Ec → QA-F …` (QA-ClipDrop = 28 asterisks, QA-TempoMap = 29); two new footnotes added after the QA-DirtyFlag footnote.
+- §9 — this entry (forty-eighth); cross-refs the twenty-fifth (QA-Ed insert) + the forty-seventh (QA-Sfizz-Followup close, the prior batch slotted before QA-Ed).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-Ed STATUS:CLOSED banner + NEW QA-ClipDrop row + NEW QA-TempoMap row; §6 arrow + 2 footnotes; §9 this entry.
+- `Plans & Specs/Implemented Work Log.md` — QA-Ed close entry (append).
+- `Plans & Specs/Batch Plans/virtual-moseying-cocoa.md` — plan (loop-regime-anchoring refinement + Problem-2 corrected form recorded in the running notes).
+- `Plans & Specs/Running Notes/virtual-moseying-cocoa.md` — close-pass sections.
+
+**Verification:** per-task Debug + Release PASS (Jeff 2026-06-01) — all 8 plan scenarios (drift/clip-sync over a long arrangement, pattern + song-loop first-note across buffer sizes + awkward BPM, time-selection loop, tempo automation across the seam, seek/scrub, held-note-across-loop voice-count, pattern/song parity + record count-in) + the 3 tempo-automation fixes.  `/review-batch QA-Ed` — **READY-TO-COMMIT**: no blockers, no source changes; the one NEEDS-FIX (capture Problems 1 + 3 as explicit in-batch finds) is satisfied by this entry + the close-entry routing table; 3 NITs deferred (the running-notes "commit-split TBD" line reconciled — landed as one atomic commit per SC-2, Jeff's call; a benign stale backward-seek flag across a stopped period — idempotent flush, no stuck note; an AlertWindow-idiom consistency note).  Rule 4 — no diagnostic instrumentation added this batch (catalog empty; nothing to strip).

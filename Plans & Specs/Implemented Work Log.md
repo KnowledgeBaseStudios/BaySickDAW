@@ -2002,3 +2002,72 @@ SC-1..SC-7, each surfaced + locked per §0 Rule 5 (see the plan file's locked-sp
 Per the §6 sequencing arrow, **QA-Ed is the next batch** (QA-Sfizz-Followup was the FND-2 route slotted between QA-EngineApvts and QA-Ed).
 
 ---
+
+### 2026-06-01 23:30 PT — QA-Ed — Song-mode transport int64-sample source-of-truth + seqlock tempo anchor + sample-accurate scheduler loop seam (Issue 3); float beat-accumulator band-aid removed; 3 tempo-automation verify fixes folded in
+
+**Bucket:** Cross-cutting Infrastructure, System Pages
+
+#### Done
+
+QA-Ed opened (`acde514`) as the Issue-3 batch (§9 twenty-fifth Forks entry — decoupled 2026-05-18 from the QA-Ea pattern-scheduler work, slotted immediately after QA-Sfizz-Followup, before QA-Ee): in song mode the transport intermittently (1) dropped the first note on a loop-wrap and (2) let pattern notes start later than sample-positioned audio clips (drift over a long arrangement).  Root cause, code-confirmed: `StandalonePlayHead::advanceBlock` held the playhead as a **float beat accumulator** (`mPPQPos += n·bpm/(60·sr)` every block, `fmod` loop-wrap) — float rounding accumulated (pattern beats drift off sample-exact clips) and the `fmod` wrap landed `beatStart` a fraction past the loop point (boundary note missed), papered over by the `mPRLastBeatEnd`/`kWrapSlop`/`jumped`/`windowStart` band-aid in the scheduler.  The fix makes an **int64 absolute sample counter** the transport source-of-truth, derives beat via a **seqlock-published tempo anchor** that re-bases on each BPM change / seek / start / reset, turns the wrap into an **exact integer-sample** operation (overshoot preserved, no `fmod`), and refactors the song + pattern schedulers onto a shared `RollWindow[2]` + `scheduleRollWindows` helper with a sample-accurate loop seam (Jeff's SC-4 = option B).  Public playhead API stays in **beats** (SC-5) so every consumer (UI cursors, scheduler, MT render tasks) is untouched; `getPosition` additionally publishes `timeInSamples` so the scheduler shares the exact integer wrap point.  **One atomic source commit** (`ffc6dc7`, 8 source files, +483/-459) per the Jeff-locked SC-2 (band-aid removal is only safe once the clock is exact — interdependent, clean broken→fixed boundary).
+
+- **Task 0 — batch-open (docs only)** (`acde514`): plan mirrored to `Batch Plans/virtual-moseying-cocoa.md` (home-dir copy deleted); §5 `**Plan file:**` pointer; Running Notes seed.  Spec Jeff-locked SC-1..SC-7 in chat 2026-06-01 before the plan body was written (incl. the seam-precision fork resolved to sample-accurate B); no source touched (clean rollback boundary per §0).
+- **Task 1 — implementation (single consolidated source commit)** (`ffc6dc7`): the int64-sample clock + seqlock anchor + sample-accurate scheduler + band-aid removal, PLUS the 3 tempo-automation verify-round fixes (below).  Verified by Jeff in Debug + Release 2026-06-01: all 8 plan scenarios + the 3 fixes pass.
+
+**What actually shipped (Task 1):**
+- **`StandalonePlayHead` int64-sample clock + seqlock anchor (`StandaloneApp.h/.cpp`).**  `mPPQPos` removed; `int64 mSamplePos` is the source-of-truth (sole audio-thread writer = `advanceBlock`).  Beat is derived from a **seqlock-protected anchor tuple** `{mAnchorBeat, mAnchorSample, mAnchorBpm}` (single writer = message thread; fence-based atomic publish, mirroring the `SpectrumFeed` seqlock idiom).  `advanceBlock` writes **only** `mSamplePos` and applies an exact integer loop-wrap preserving overshoot (`lS + (pos-lS)%span`, never snap-to-start); no `fmod`.  `setBPM` / `seekTo` / `start` / `reset` are message-thread anchor writers through the seqlock; `seekTo` raises `mSeekDiscontinuity` on a backward seek.  `getPosition` publishes `setPpqPosition(getCurrentBeat())` **and** `setTimeInSamples(mSamplePos)`.
+- **Design refinement vs the plan's "loop-regime anchoring" sketch.**  The plan sketched re-anchoring on loop (re)config to keep the anchor single-writer.  In implementation that proved unnecessary at constant tempo because `deriveBeat` is linear in `mSamplePos`, so `advanceBlock` never touches the anchor — side-stepping the two-writer seqlock-corruption concern entirely.  Under a mid-loop BPM change this did NOT self-heal (Problem 2, below); the loop-bounds-relative-to-anchor fix is the corrected form of the plan's dropped loop-regime idea.
+- **Scheduler rewrite (`PluginProcessor.h/.cpp`).**  `mPRLastBeatEnd` removed; `mLoopStartBeats` + `mSeekDiscontinuity` ptr + `setSeekDiscontinuityFlag` added.  Straddle test is now **integer**, off `pos.getTimeInSamples()` (shares the playhead's exact wrap point — kills the float-vs-int seam disagreement that was the original double-fire/gap source).  A shared `scheduleRollWindows` helper over a `RollWindow[2]` (1 normal, 2 on a straddle) replaces the song-mode `scheduleRoll` lambda **and** the 7 pattern-mode inline note-on loops; a note fires in at most one window (the `break` is the structural cure for the old double-fire).  Shared note-off pass: past-due offs + a straddle **overrun-cut at the exact wrap sample** + a backward-seek flush (consuming `mSeekDiscontinuity`).  Sub-block-loop guard (`span < numSamples` → window0-only fallback, documented limitation).  The `kWrapSlop` / `jumped` / `windowStart` band-aid is gone.
+- **Wiring.**  `setSeekDiscontinuityFlag` wired at startup after `setPlayHead` (`StandaloneApp.cpp`); `mLoopStartBeats` mirrored at the 3 `onGetLoopBeats` loop-start sites (`StandaloneEditor.cpp`).
+
+**The 3 tempo-automation verify-round fixes (folded in per `feedback_qa_batches_fix_bugs_dont_defer.md`, Jeff's call — they blocked tempo-automation testing; I had wrongly proposed routing 1 + 3 out and was overruled).  All in `ffc6dc7`.**
+- **Problem 2 (MAJOR — my QA-Ed regression).**  Under a mid-loop tempo change the loop wrapped early, the derived beat went negative, and each pass got shorter.  Root cause: `advanceBlock` + the scheduler computed loop sample bounds as `llround(loopBeat·spb)` **from beat 0**, but the anchor re-bases away from origin on a BPM change.  Fix: measure `loopEndSamp` / `loopStartSamp` **relative to the current (sample, beat) point on the anchor line** — `oldPos + llround((loopBeat - curBeat)·spb)` in `advanceBlock`, `samplePos + llround((loopBeat - beatStart)·spb)` in the scheduler.  No-op at constant tempo.
+- **Problem 1 (Event Editor showed 0-1 normalized, no type-in).**  Value readouts (footer + value label) + a new right-click **"Set Value..."** type-in now route through `EEAutomationGrid::onFormatValue` / `onParseValue`, wired in `StandaloneEditor`: APVTS lanes use the parameter's own `getText()` / `getValueForText()` (identical math to the knob + host automation); `global_tempo` is the one non-APVTS lane (20..300 BPM).
+- **Problem 3 (automation didn't follow the playhead).**  `applyAutomationAtCurrentPosition` now applies on any playhead position change (playback OR a stopped seek/scrub) via `mLastAutomationBeat` change-detection, and applies APVTS lanes when STOPPED (the audio-thread automation pass only runs while playing).  Skips only when stopped + static.
+
+#### Found along the way
+
+- **The 3 tempo-automation problems** surfaced during the test-5 verify pass.  Problem 2 was a QA-Ed regression (the from-zero loop-bounds bug introduced by the anchor rework); Problems 1 + 3 were pre-existing tempo-automation UX gaps that blocked test-5.  All three fixed IN-batch (Jeff's call).
+- **The "1/8-note-late" first report = TV audio output latency, NOT a code bug.**  Jeff's initial test was monitored through his TV; ~250 ms of TV output latency ≈ a 1/8 note @ 120 BPM (the buffer is only ~10 ms), so notes sounded late.  Confirmed by switching to a headset — tests 1-4 then passed with no change.  I had wrongly claimed (a) the audio was on time and only the piano-roll cursor was off, and (b) the Builder cursor wouldn't show it — both wrong; owned + corrected (no code change).
+- **WAV / audio-clip drag-drop bug (out of scope, NOT a QA-Ed regression).**  A pre-existing clip-path issue in the audio-clip drag-drop flow, surfaced during testing; NOT touched by the transport rework.  NOT fixed in this batch — routed OUT to a new batch (QA-ClipDrop; see routing table).
+
+#### What was done about each finding
+
+| Finding | Routing |
+|---|---|
+| Problem 1 (Event Editor real-unit display + "Set Value..." type-in) | Resolved IN-batch (`ffc6dc7`).  Tempo-automation UX gap that blocked test-5 verify; fixed per `feedback_qa_batches_fix_bugs_dont_defer.md` (Jeff overruled my route-out proposal). |
+| Problem 2 (loop-wrap under tempo automation — loop bounds relative to the current anchor point, not beat 0) | Resolved IN-batch (`ffc6dc7`).  My QA-Ed regression; fixed in the same atomic commit. |
+| Problem 3 (automation follows the playhead on any placement, incl. stopped seek) | Resolved IN-batch (`ffc6dc7`).  Tempo-automation UX gap that blocked test-5 verify; fixed per `feedback_qa_batches_fix_bugs_dont_defer.md`. |
+| WAV / audio-clip drag-drop bug | Pre-existing, NOT a QA-Ed regression, NOT fixed here.  Routed OUT per §0 Rule 3 → **NEW batch `QA-ClipDrop`, slotted immediately after QA-Ed (before QA-Ee)**.  New §5 row + §6 arrow/footnote + §9 forty-eighth Forks entry.  Bucket = System Pages.  (Jeff's slot pick 2026-06-01 per `feedback_slot_placement_is_spec_call.md`.) |
+| Sample-accurate tempo map (deferred at SC-1) | Out of scope by SC-1 (scope-creep rejected).  Routed OUT per §0 Rule 3 → **NEW batch `QA-TempoMap`, slotted immediately after QA-Ee (before QA-Eb)**.  New §5 row + §6 arrow/footnote + §9 forty-eighth Forks entry.  Bucket = Cross-cutting Infrastructure.  (Jeff delegated the placement; capstone bridging QA-Ed's sample clock + QA-Ee's tick clock.) |
+| "1/8-note-late" first report | No code change — diagnosed to TV audio output latency (~250 ms hardware-monitoring artifact), confirmed by switching to a headset. |
+
+#### /review-batch outcome
+
+**READY-TO-COMMIT.**  No blockers, no source changes.  The reviewer independently verified the seqlock single-writer invariant, the shared advanceBlock↔scheduler wrap point (so the beat-0 drop can no longer happen), the window helper (both modes, 7 engines, no double-trigger / leak), the `AlertWindow` lifecycle, and the automation-apply change; ASCII + US-spelling clean; no dangling band-aid symbols; diff matches the plan's 8-file scope.  The one NEEDS-FIX (capture Problems 1 + 3 as explicit in-batch finds) is satisfied by the routing table above + Found-along-the-way.  3 NITs deferred: (a) the running-notes "commit-split TBD" line reconciled — landed as one atomic commit per SC-2 (Jeff's call); (b) a benign stale backward-seek flag across a stopped period (idempotent flush, no stuck note); (c) an `AlertWindow`-idiom consistency note.
+
+#### Carry-forward contradictions
+
+- **`StandalonePlayHead` is now an int64 absolute-sample clock with a seqlock-published tempo anchor; `mPPQPos` (the float beat accumulator) is gone.**  Beat is derived (`mAnchorBeat + (mSamplePos - mAnchorSample)·bpm/(60·sr)`), re-anchored on every BPM change / seek / start / reset; `getPosition` now also publishes `timeInSamples`.  Carry-Forward §1 BlockContext's `posInfo` now carries a populated `timeInSamples`; §2 STATE-04 "playhead keeps ticking unless stopped" confirmed to still hold (Verify #6).  Post-2026-05-07-freeze (transport/scheduler were greenfield in the frozen snapshot — source is the authority).
+- **The loop-wrap is an exact integer-sample operation preserving overshoot** (`%span`), and loop sample-bounds are measured **relative to the current anchor point** (not from beat 0) so they hold under tempo automation.  Replaces the `fmod` wrap.
+- **The song + pattern schedulers now share one `RollWindow[2]` + `scheduleRollWindows` helper with an integer straddle test off `timeInSamples` and a sample-accurate loop seam.**  The `mPRLastBeatEnd` / `kWrapSlop` / `jumped` / `windowStart` float band-aid is removed.  Replaces the ~14 per-engine inline note-on loops + the float-slop wrap workaround.
+- **`applyAutomationAtCurrentPosition` now applies on any playhead position change** (playback or a stopped seek/scrub) and applies APVTS lanes when stopped — automation snaps a param to the active automation's value at the placed beat, not only on reset-to-0.
+
+#### Files touched
+
+- **Source (Task 1 `ffc6dc7`, +483/-459):** Source/Standalone/StandaloneApp.h, Source/Standalone/StandaloneApp.cpp, Source/PluginProcessor.h, Source/PluginProcessor.cpp, Source/Standalone/StandaloneEditor.h, Source/Standalone/StandaloneEditor.cpp, Source/Standalone/EventEditor.h, Source/Standalone/EventEditor.cpp.
+- **Docs:** Main Plan.md (§5 QA-Ed STATUS:CLOSED banner; NEW §5 QA-ClipDrop row + NEW §5 QA-TempoMap row; §6 arrow + 2 footnotes; §9 forty-eighth Forks entry); Implemented Work Log.md (this entry); Running Notes/virtual-moseying-cocoa.md (close pass).
+
+#### Commit(s)
+
+- `acde514` Task 0 batch-open (docs only).
+- `ffc6dc7` Task 1 — the ONE consolidated source commit (SC-2): int64-sample transport source-of-truth + seqlock tempo anchor + exact integer loop-wrap + shared `RollWindow[2]`/`scheduleRollWindows` scheduler with a sample-accurate loop seam + band-aid removal, PLUS the 3 verify-round fixes (Problem 1 Event Editor real-unit display/type-in, Problem 2 anchor-relative loop bounds, Problem 3 automation-follows-playhead).  8 source files, +483/-459.  Verified by Jeff in Debug + Release 2026-06-01.
+- `<TBD — close commit SHA appended after commit>` Task 2 CLOSE (docs only): this Work Log entry + §5 STATUS:CLOSED banner + the 2 new §5 rows (QA-ClipDrop after QA-Ed + QA-TempoMap after QA-Ee) + §6 arrow/2 footnotes + §9 forty-eighth Forks entry + Running Notes close pass.
+
+#### Next action
+
+Per the §6 sequencing arrow updated at this close, **QA-ClipDrop is the next batch** (the WAV / audio-clip drag-drop route — slotted immediately after QA-Ed, before QA-Ee; Jeff's slot pick 2026-06-01).  Bucket = System Pages.  QA-Ee (96-PPQ universal timebase) follows, then QA-TempoMap (sample-indexed audio-thread tempo map — the SC-1 deferral), then QA-Eb.
+
+**Rule 4:** no diagnostic instrumentation added this batch (verified by ear / by the Event Editor readout); the catalog stayed empty — nothing to strip at close.
+
+---
