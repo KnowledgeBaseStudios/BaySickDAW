@@ -1,5 +1,6 @@
 #include "ProjectManager.h"
 #include "PluginProcessor.h"
+#include "ClipDropDiag.h"            // QA-ClipDrop: diagnostic trap (2026-06-02)
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Path helpers
@@ -483,15 +484,19 @@ std::vector<ProjectManager::Listing> ProjectManager::listProjects()
 // ──────────────────────────────────────────────────────────────────────────────
 juce::String ProjectManager::importSample (const juce::File& externalFile)
 {
-    if (! hasProject())         return {};
-    if (! externalFile.existsAsFile()) return {};
+    if (! hasProject())                { ClipDropDiag::log ("importSample BAIL", "no project open; src=" + externalFile.getFullPathName()); return {}; }
+    if (! externalFile.existsAsFile()) { ClipDropDiag::log ("importSample BAIL", "src does not exist; src=" + externalFile.getFullPathName()); return {}; }
 
     auto samplesDir = getSamplesFolder();
     samplesDir.createDirectory();
 
     auto target = samplesDir.getChildFile (externalFile.getFileName());
     // If same path, no copy needed.
-    if (target == externalFile) return "Samples/" + externalFile.getFileName();
+    if (target == externalFile)
+    {
+        ClipDropDiag::log ("importSample OK", "src already in Samples/; rel=Samples/" + externalFile.getFileName());
+        return "Samples/" + externalFile.getFileName();
+    }
 
     // Filename collision: if the existing file has identical size + modtime,
     // assume it's the same asset and skip the copy.  Otherwise append " (N)".
@@ -499,7 +504,10 @@ juce::String ProjectManager::importSample (const juce::File& externalFile)
     {
         if (target.getSize() == externalFile.getSize()
             && target.getLastModificationTime() == externalFile.getLastModificationTime())
+        {
+            ClipDropDiag::log ("importSample OK", "collision, same size+modtime, reuse; rel=Samples/" + externalFile.getFileName());
             return "Samples/" + externalFile.getFileName();
+        }
 
         const auto stem = externalFile.getFileNameWithoutExtension();
         const auto ext  = externalFile.getFileExtension();
@@ -509,7 +517,15 @@ juce::String ProjectManager::importSample (const juce::File& externalFile)
         target = samplesDir.getChildFile (stem + " (" + juce::String (n) + ")" + ext);
     }
 
-    if (! externalFile.copyFileTo (target)) return {};
+    if (! externalFile.copyFileTo (target))
+    {
+        ClipDropDiag::log ("importSample BAIL", "copyFileTo FAILED; src=" + externalFile.getFullPathName()
+                            + " target=" + target.getFullPathName()
+                            + " samplesDir=" + samplesDir.getFullPathName()
+                            + " samplesDirExists=" + (samplesDir.isDirectory() ? juce::String ("Y") : juce::String ("N")));
+        return {};
+    }
+    ClipDropDiag::log ("importSample OK", "copied to Samples/; rel=Samples/" + target.getFileName());
     return "Samples/" + target.getFileName();
 }
 

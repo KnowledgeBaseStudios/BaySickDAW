@@ -6,9 +6,10 @@ Paired running notes: `Plans & Specs/Running Notes/fancy-kindling-dongarra.md`.
 
 **For execution:** read alongside Main Plan §5 QA-ClipDrop entry (line ~1094) + §0
 (Rule 2 carry-over, Rule 3 findings routing, Rule 4 diagnostic catalog, Rule 5
-sub-spec discipline) + Carry-Forward §1/§2/§3 clip-path entries. This is a
-**long-running diagnostic batch** — Task 1 lands a trap, the batch is then held
-open while later batches proceed, and reactivates only when the trap fires.
+sub-spec discipline) + Carry-Forward §1/§2/§3 clip-path entries. This batch is a
+**diagnostic trap (Task 1) + a deterministic clip-coupling fix (Tasks 2/3, SC-G..J)**,
+then **held open** for the intermittent saved-project copy-failure (Task 4) — see
+"Diagnosis outcome" below.
 
 ---
 
@@ -75,6 +76,33 @@ reproduced"** (with a Rule-4 strip/keep decision on the probes at that point).
 
 ---
 
+## Diagnosis outcome (2026-06-02 — trap fired, fix scoped)
+
+The trap armed + caught evidence immediately, splitting the original report into **two
+distinct problems**:
+
+1. **Deterministic clip ↔ grid-row coupling (the "huge issue" Jeff surfaced) — FIXED in
+   Tasks 2/3.** Clips are keyed to their Builder grid row: strips named "Track N",
+   "+ Add New Clip" drops a block on row 0, and moving a clip to a row with no strip
+   silences it. Verified mechanism: `renderAudioClipsForRow` routes by `trackRow`
+   (PluginProcessor.cpp:405); a block move changes only `trackRow` with no routing/strip
+   update (BuilderPage.cpp:4451). NOT a QA-E regression and NOT the cosmetic retag — the
+   coupling is present in the earliest visible commit (the 2026-04-28 re-baseline
+   `d595ee3`); the independent-clip behavior Jeff remembers predates the re-baseline
+   (squashed, un-bisectable — stated honestly, not used to deflect). Spec: SC-G..SC-J.
+   **Affects clips only** — Vox/Inst WAVs already route by their page (`routeChannel`),
+   independent of the grid (renderFilePlayPlayer:623 / pre-scan:1564, verified 2026-06-02).
+2. **Intermittent saved-project copy-failure (the ORIGINAL report) — STILL HELD OPEN
+   (Task 4).** "+ Add New Clip does nothing" that cleared on restart, in a SAVED project
+   (Jeff, 2026-06-02). The trap has only caught the no-project skip so far (log line 49:
+   copy-empty with NO `importSample` call = `hasProject()` false); the saved-project
+   copy-fail mode has NOT recurred. The shared `importSample` probe stays in to catch it.
+
+Jeff's call (2026-06-02): fix #1 in-batch now (Tasks 2/3), keep the batch held-open for
+#2 (Task 4).
+
+---
+
 ## Spec calls already locked
 
 | ID | Decision | Reasoning |
@@ -85,6 +113,10 @@ reproduced"** (with a Rule-4 strip/keep decision on the probes at that point).
 | SC-D | Diag form: **AlertWindow popup + append-to-log** in `Documents/BaySickDAW/`, active in **Debug AND Release** | Jeff 2026-06-02. Popup only fires on an already-failed / anomalous drop, so it never interrupts working audio. |
 | SC-E | Diag coverage: **full drop cascade** (copy-on-drop + library-add + block-add + page/strip spawn) | Jeff 2026-06-02; avoids instrumenting only the leading suspect and catching nothing. |
 | SC-F | Lifecycle: held open until evidence OR close-as-not-reproduced by end of QA | Jeff 2026-06-02. |
+| SC-G | "+ Add New Clip" → browser listing + Clips page + strip, **no grid block** | Jeff 2026-06-02. It currently routes through the drag-drop importer (which places a block on row 0). |
+| SC-H | Clip mixer-strip name follows the **Clips page/tab name** (synced like Layers/Bass/Drums) | Jeff 2026-06-02. Today named from the grid row label ("Track N"); Clips has no tab→strip rename wiring. |
+| SC-I | **Route a clip by its owning Clips-page strip, NOT its grid row** — nothing auto-attaches to a grid track; moving a clip never breaks playback. Both drag-drop + "+ Add New Clip" | Jeff 2026-06-02 (emphatic). Brings clips in line with how Vox/Inst WAVs already route (by page, not row). |
+| SC-J | No-project case: keep the "name your project first" prompt | Jeff 2026-06-02. |
 
 ---
 
@@ -107,7 +139,7 @@ I am making now:
 
 ---
 
-## Files to modify (Task 1 only — fix files TBD at Task 2)
+## Files to modify (Task 1 diagnostic; Task 2/3 fix)
 
 - **NEW `Source/ClipDropDiag.h`** — shared diagnostic helper (`log()` + `alert()`),
   mirroring `namirLog()` ([BaySickNAMIRProcessor.cpp:18](Source/BaySickNAMIR/BaySickNAMIRProcessor.cpp:18))
@@ -131,6 +163,13 @@ I am making now:
   (dedup-by-path / row-taken) vs new-page-created — **`alert()` if an explicit
   `+ Add New Clip` produced no new page AND no new library entry** ("nothing
   happened" anomaly).
+
+**Task 2/3 fix files (deterministic clip-coupling fix, SC-G..J):**
+- `Source/PluginProcessor.cpp` — `renderAudioClipsForRow` filter → route by owner ([:405](Source/PluginProcessor.cpp:405)); key the row mute on the owner row.
+- `Source/PatternManager.cpp` — block deserialize migration ([:1452](Source/PatternManager.cpp:1452)): `routeChannel==0 && Audio → audioInsert(trackRow)`.
+- `Source/Standalone/StandaloneEditor.cpp` — rewrite `onAddTabRequest` Clip branch (no block); extract `createClipStripAndPage` helper from `onAudioClipAdded` ([:2036](Source/Standalone/StandaloneEditor.cpp:2036)); wire ClipsPage `onTabRenamed`→strip rename ([:1308](Source/Standalone/StandaloneEditor.cpp:1308)); reload strip name from the Clips tab.
+- `Source/Standalone/MixerPage.h/.cpp` — add `StripKind::Audio` + `renameChannel` case (or `renameAudioChannel`) ([MixerPage.cpp:2909](Source/Standalone/MixerPage.cpp:2909)).
+- `Source/Standalone/BuilderPage.cpp` — confirm `placeAudioLibraryEntry` owner stamp ([:3502](Source/Standalone/BuilderPage.cpp:3502)); no move-handler change (routeChannel preserved on move).
 
 **Diag helper sketch:**
 
@@ -211,11 +250,49 @@ if (storedPath.isEmpty()) {
 - [ ] `/draft-doc running-notes` → apply.
 - [ ] **On Task 1 commit: QA-ClipDrop → HELD-OPEN. Proceed to QA-Ee per §6.** Jeff watches for the trap during normal work across later batches.
 
-### Task 2+ — Root-cause + fix (CONDITIONAL — only when the trap fires)
-- [ ] On Jeff reporting the popup/log fired: read `clipdrop_diag_log.txt` → identify the exact bail step + reason (most-likely: importSample copy-failed → stale `mCurrentFolder`/`Samples/`).
-- [ ] Surface the fix scope as a fresh sub-spec (DS-3) before implementing.
-- [ ] Implement fix → **Tell Jeff verify** the now-known repro, Debug then Release.
-- [ ] `/draft-commit` + commit. `/draft-doc running-notes`.
+### Task 2 — SC-I: route clips by their owning Clips-page strip, not the grid row (audio hot path)
+
+**Goal:** a clip's audio renders into its owning Clips-page strip regardless of which Builder
+grid row the block sits on. A block move changes only `trackRow`, which no longer affects routing
+→ nothing attaches to a grid track; moving never breaks playback. (Matches Vox/Inst, which already
+route by page via `routeChannel`.) **HIGH-RISK — audio hot path + saved-project compatibility.**
+
+- [ ] **Render by owner, not trackRow.** In `renderAudioClipsForRow` ([PluginProcessor.cpp:405](Source/PluginProcessor.cpp:405)), replace the `trackRow` filter, placed AFTER the existing Vox/Inst skip ([:408-414](Source/PluginProcessor.cpp:408)) so Vox/Inst still go via the FilePlay path:
+  ```cpp
+  // was: if (player.trackRow != row) continue;
+  const int ownerRow =
+      (player.routeChannel >= MixerChannelIds::kAudioBase
+    && player.routeChannel <  MixerChannelIds::kAudioBase + kMaxAudioRows)
+          ? (player.routeChannel - MixerChannelIds::kAudioBase)   // route by owning Clips-page strip
+          : player.trackRow;                                      // legacy/unset (routeChannel 0) → grid row
+  if (ownerRow != row) continue;
+  ```
+  Verified safe vs the FilePlay path: Audio-range `routeChannel` (400–449) is disjoint from Vox (600)/Inst (700); `renderFilePlayPlayer` returns false for non-Vox/Inst ([:623](Source/PluginProcessor.cpp:623)) and the pre-scan ([:1564](Source/PluginProcessor.cpp:1564)) only flags Vox/Inst.
+- [ ] **Owner stamped at creation** (mostly already true): the grid-drop retag (`onAudioClipAdded`, [StandaloneEditor.cpp:2071-2097](Source/Standalone/StandaloneEditor.cpp:2071)) sets `blk.routeChannel = audioInsert(addRow)` — it stops being cosmetic and becomes the authoritative owner; `placeAudioLibraryEntry` ([BuilderPage.cpp:3502](Source/Standalone/BuilderPage.cpp:3502)) already stamps `routeChannel = owner`. Moves leave `routeChannel` untouched.
+- [ ] **Old-project migration (one-time load fixup).** In the block deserialize ([PatternManager.cpp:1452](Source/PatternManager.cpp:1452), after reading `routeChannel`) — or a post-load fixup if include-layering blocks it (MixerChannelIds is in VibeGraph.h):
+  ```cpp
+  if (b.clipType == ClipType::Audio && b.routeChannel == 0)
+      b.routeChannel = MixerChannelIds::audioInsert (b.trackRow);   // legacy clips → owner-routing
+  ```
+  Pre-fix projects keep playing AND gain move-survival (the exact equivalence the old code relied on).
+- [ ] **Mute follows the clip's strip.** Where `renderAudioClipsForRow` applies row mute / `isRowAudible`, key it on the owner row, so a clip's mute matches its strip (verify against the current mute logic).
+- [ ] **Tell Jeff — build, verify Debug then Release:** (1) drag a WAV onto the grid → plays; **move the block to another row → still plays**; (2) move it to a never-used row → still plays; (3) open an OLD project (TESTIES) → existing clips play, strips unchanged; (4) Vox/Inst WAVs unaffected (drag/move still play through their page strip). Trap log shows clips routing to their owner row.
+- [ ] `/draft-commit` → surface drafted message + FULL git status → Jeff approves → commit Task 2 (source; `git commit -F`).
+- [ ] `/draft-doc running-notes` → apply.
+
+### Task 3 — SC-G + SC-H + SC-J: "+ Add New Clip" makes no grid block; strip named from the clip
+
+- [ ] **SC-G — extract a shared strip+page helper** from `onAudioClipAdded` (the trio `addAudioRowChannel` + `ensureAudioInsert` + `mMixerPage->addAudioChannel`, [StandaloneEditor.cpp:2036-2044](Source/Standalone/StandaloneEditor.cpp:2036)) into a reusable `createClipStripAndPage(row, path, name)`. Used by both `onAudioClipAdded` (drag-drop) and the new "+ Add New Clip" path.
+- [ ] **SC-G — rewrite `onAddTabRequest` Clip branch** ([StandaloneEditor.cpp:3704](Source/Standalone/StandaloneEditor.cpp:3704)): on file pick → copy the sample via the same copy-on-drop step (keeping `onDropWithoutProject` → New-Project prompt + retry, **SC-J**) → find next free Clips slot `P` → `addAudioToLibrary(storedPath, {}, audioInsert(P))` (owner = P) → `createClipStripAndPage(P, storedPath, name)` (page + strip, **no** `addBlock`). Replaces the current `importAudioFile(f, 0, 0)` call.
+- [ ] **SC-H — name the strip from the clip/page** (not the row label). In the helper, name the strip from the sample/Clips-tab name (`File(path).getFileNameWithoutExtension()` / `cp->getTabName()`), not `mRowNames[row]` / "Track N". On reload, name the Audio strip from the restored Clips tab (today `restoreAudioStripsFromArrangement` uses `displayAlias`/"Audio N" — reconcile so the page name wins).
+- [ ] **SC-H — tab→strip rename sync.** Add `Audio` to `MixerPage::StripKind` ([MixerPage.h:186](Source/Standalone/MixerPage.h:186)) + a `case StripKind::Audio: → mAudioStrips[pageIdx]->setTrackName(name)` in `renameChannel` ([MixerPage.cpp:2909](Source/Standalone/MixerPage.cpp:2909)) — or a dedicated `renameAudioChannel`. Wire the ClipsPage `onTabRenamed` branch ([StandaloneEditor.cpp:1308](Source/Standalone/StandaloneEditor.cpp:1308), currently "left untouched") to call it. Persistence: add Audio strip names to `writeStripNames` ([:9508](Source/Standalone/StandaloneEditor.cpp:9508)) OR push the (already-persisted) Clips tab name to the strip on restore.
+- [ ] **Tell Jeff — build, verify Debug then Release:** (1) "+ Add New Clip" in a saved project → Clips page + sample-named strip + browser listing, **nothing on the Builder grid**; (2) same in a brand-new/unsaved project → New-Project prompt → name it → clip added (still no grid block); (3) rename the Clips tab → its mixer strip renames too; (4) drag that clip from the browser onto the grid → block plays through the same strip, survives a move.
+- [ ] `/draft-commit` → surface + FULL git status → Jeff approves → commit Task 3 (source; `git commit -F`).
+- [ ] `/draft-doc running-notes` → apply.
+
+### Task 4 — Held open: the intermittent saved-project copy-failure (the 2nd case) — CONDITIONAL
+- [ ] The original report was a "+ Add New Clip does nothing" in a SAVED project that cleared on restart — a copy-fail-WITH-project mode the trap has NOT yet caught (only the no-project skip was seen 2026-06-02). The trap (esp. the shared `importSample copyFileTo FAILED` probe) stays in across Tasks 2/3 + later batches to catch it.
+- [ ] On Jeff reporting the trap fired WITH a project open: read `clipdrop_diag_log.txt` → identify the exact reason (`copyFileTo` failed + samplesDir state, OR `hasProject()` flipped false mid-session) → surface fix scope (fresh sub-spec, DS-3) → fix → verify Debug+Release → commit.
 
 ### Task N — Close (one of two paths)
 - [ ] `/draft-doc batch-close` → apply to Implemented Work Log.
@@ -235,8 +312,14 @@ if (storedPath.isEmpty()) {
   Release**; popup wiring confirmed via the temp forced-alert (removed before commit);
   **no popup on success**. This proves the trap is live without needing the
   (intermittent) bug.
-- **Task 2 (when it lands):** under the now-known repro the captured failure no longer
-  occurs, verified Debug then Release.
+- **Task 2 (routing decouple):** drag a clip → move it across grid rows (incl. a never-used
+  row) → keeps playing; an OLD project (TESTIES) loads with clips playing + strips unchanged;
+  Vox/Inst WAVs unaffected (drag/move still play through their page strip).
+- **Task 3 ("+ Add New Clip" + naming):** "+ Add New Clip" → Clips page + sample-named strip +
+  browser listing, **nothing on the Builder grid** (saved + brand-new project); Clips tab rename
+  → strip renames; browser-drag of that clip onto the grid → plays + survives a move.
+- **Task 4 (held-open 2nd case):** when the trap fires with a project open, the captured
+  copy-failure no longer reproduces after its fix, Debug + Release.
 
 ---
 

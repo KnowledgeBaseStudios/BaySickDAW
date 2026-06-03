@@ -48,9 +48,92 @@ Plans / Running Notes required-sections rule (locked 2026-05-11; exemplar
 - Reuse found for Task 1: `namirLog()` / `pedalsLog()` one-off file-logger convention
   (append to `Documents/BaySickDAW/*.txt`, Debug + Release); `ProjectManager::getSettingsFile()`
   canonical Documents/BaySickDAW resolver.
+- **Task 0 committed:** `122ff3f` (docs only — Main Plan §5 reframe + Plan-file pointer +
+  STATUS/Risk/Effort fill; plan file + this Running Notes seed).  Working tree clean.
+
+## 2026-06-02 — Task 1 — Diagnostic trap implemented (awaiting build + arm-verify)
+
+- Added `Source/ClipDropDiag.h` — shared helper: `log()` (append to
+  `Documents/BaySickDAW/clipdrop_diag_log.txt`, timestamped, Debug + Release) +
+  `alert()` (log + `AlertWindow::showMessageBoxAsync` popup).  Mirrors
+  `namirLog()` / `pedalsLog()`.  `#include <JuceHeader.h>` (project umbrella).
+- Full-cascade probes (SC-E) across the convergence path:
+  - `importSample` (ProjectManager.cpp) — logs every return reason incl. the
+    `copyFileTo` bail with samplesDir/target/dir-exists.  **The key WHY probe.**
+  - `importAudioFile` (BuilderPage.cpp) — enter; `alert()` on the file-missing +
+    copy-on-drop-empty bails; library-add; onAudioClipAdded-fired/DONE.
+  - `filesDropped` (BuilderPage.cpp) — drag entry + duplicate-vs-import branch.
+  - `onAddTabRequest` Clip branch (StandaloneEditor.cpp) — `+ Add New Clip` pick;
+    `alert()` when it produces no NEW library entry (libCount unchanged).
+  - `onAudioClipAdded` + `spawnClipsTabIfMissing` (StandaloneEditor.cpp) —
+    page/strip-spawn outcome (bail / dedup / row-taken / create).
+- Popup-wiring verifies on demand benignly: `+ Add New Clip` -> pick a file already
+  in the library -> dedup -> "no new library entry" popup fires (log shows it was a
+  dedup, NOT a bail).  No throwaway forced-alert line / extra build cycle needed.
+- 4 source files touched (1 new + 3 instrumented), no behavior change (append-only
+  logging + popup-on-anomaly).  Awaiting Jeff's Debug + Release arm-verify before
+  the Task 1 source commit.
+
+## 2026-06-02 — Task 1 verify + diagnosis: trap caught the bug; SC-G..SC-J locked
+
+**Trap armed + verified** (Jeff, 2026-06-02): popups fired + the log wrote in Debug. Arm-verify
+effectively passed via live capture.
+
+**What the trap caught (log `clipdrop_diag_log.txt`):**
+- The "+ Add New Clip does nothing" failure THIS session = **no project open** (log line 49:
+  `importAudioFile BAIL: copy-on-drop returned empty` with **no `importSample` line before it** →
+  `onImportSampleRequest` returned empty from its `hasProject()==false` branch). The New-Project
+  prompt fires + the retry succeeds (lines 51-56).
+- Jeff surfaced a **deterministic regression cluster**: "+ Add New Clip" routes through
+  `importAudioFile(f, row 0)` → drops a grid block + names the strip after the Builder row
+  ("Track 1") + (post-QA-E) pins routing to that row → move-breaks-playback + stray "Track 1"
+  strips. In TESTIES (row 0 page already existed) → `spawnClips ROW-TAKEN`: no new page but a
+  stray block + "Track 1" strip (log lines 61-68).
+
+**Root causes (git-traced):**
+- Row-coupling (move-breaks-playback) = **QA-E Task 5 `6b044aa`** retag (`blk.routeChannel =
+  audioInsert(row)`), built on **Task 4 `1d928fc`** (routeChannel param). The commit's
+  "functionally a no-op for playback" assumption is the bug — only true while the block never moves.
+- "+ Add New Clip" → grid routing = G-6 mega-commit `16037a4` (2026-04-30); strip naming "Track N"
+  = `mRowNames` default label (BuilderPage.cpp:1275) fed to `onAudioClipAdded`. Both trace into the
+  **2026-04-28 git re-baseline** (`d595ee3`, 203 commits, joke-named early commits) — the exact
+  pre-re-baseline flip is not bisectable; mechanism identified regardless. (Own-the-codebase: cause
+  found in current code, not deflected to the re-baseline.)
+
+**Spec calls locked (Jeff, 2026-06-02):**
+- **SC-G = (a):** "+ Add New Clip" → browser listing + Clips page + strip, **no grid block**.
+- **SC-H = (c):** clip strip name follows the **Clips page/tab name** (synced like Layers/Bass/Drums).
+- **SC-I = (a), emphatic:** **NOTHING auto-attaches to any Builder grid row**; clip audio routes by
+  its own Clips page, never pinned to a row; applies to BOTH drag-drop and "+ Add New Clip".
+- **SC-J = (a):** keep the New-Project prompt for the no-project case.
+
+**Lifecycle (Jeff confirmed):** fix the deterministic bugs (SC-G..SC-J) in-batch as **Task 2**, AND
+keep the batch **held open + trap in** to catch the SECOND case — the original failure was in a
+**SAVED project** (Jeff, 2026-06-02), so there's a copy-fail-WITH-project mode the trap hasn't caught
+yet (only the no-project skip seen). The shared `importSample` `copyFileTo FAILED` probe will catch
+it. Close when the 2nd case is caught+fixed OR end-of-QA (not-reproduced).
+- **Vox/Inst confirmed UNAFFECTED** (Jeff's scoping Q, 2026-06-02): Vox/Inst WAVs route by
+  `routeChannel` (Vox/Inst range) via `renderFilePlayPlayer` (PluginProcessor.cpp:623),
+  independent of the grid row — they already do what we're fixing clips to do. The fix touches
+  the clips path ONLY. Also verified: clips carrying an Audio-range `routeChannel` (400-449)
+  won't collide with the Vox/Inst FilePlay path (disjoint ranges 400/600/700).
+- **Plan expanded with the deterministic fix (Tasks 2/3, code in plan)** per Jeff's "proceed"
+  (2026-06-02): SC-G..J + render-by-owner (PluginProcessor.cpp:405) + load migration
+  (PatternManager.cpp:1452) + no-block "+ Add New Clip" + strip naming/rename. Held open for the
+  2nd case (Task 4). Next: commit the trap, then implement Task 2.
+- **Provenance (honest):** the grid-row coupling is present in the earliest visible commit (the
+  2026-04-28 re-baseline `d595ee3`); the trackRow filter line was authored at `cc011e0` (MT-engine,
+  2026-05-06) but only re-expressed pre-existing coupling. The independent-clip era Jeff remembers
+  predates the re-baseline (squashed) — un-bisectable, stated plainly, not used to deflect.
 
 ## Diagnostic Instrumentation Catalog
 
 | Site | Tag | Purpose | Disposition |
 |------|-----|---------|-------------|
-| _(populated at Task 1)_ | `[QA-ClipDrop DIAG]` | full-cascade clip-drop trap (popup + log) | Remove at batch close (or Keep per DS-2) |
+| `Source/ClipDropDiag.h` (NEW file) | `[QA-ClipDrop DIAG]` | Diagnostic helper: `log()` append-to-file + `alert()` popup+log (Debug + Release) | Remove at batch close (or Keep per DS-2) |
+| `ProjectManager.cpp` `importSample` (all return paths) | `[QA-ClipDrop DIAG]` | Log WHY copy-on-drop returns empty (no-project / src-missing / copyFileTo-failed) + samplesDir/target | Remove at batch close (or Keep per DS-2) |
+| `BuilderPage.cpp` `importAudioFile` (enter / 2 `alert()` bails / library-add / callback) | `[QA-ClipDrop DIAG]` | Trace the drop convergence point; popup on file-missing + copy-empty bails | Remove at batch close (or Keep per DS-2) |
+| `BuilderPage.cpp` `filesDropped` (enter / dup-vs-import branch) | `[QA-ClipDrop DIAG]` | Trace the drag-drop entry + branch | Remove at batch close (or Keep per DS-2) |
+| `StandaloneEditor.cpp` `onAddTabRequest` Clip branch (picked / anomaly `alert()` / OK) | `[QA-ClipDrop DIAG]` | `+ Add New Clip` entry; popup when it produces no new library entry | Remove at batch close (or Keep per DS-2) |
+| `StandaloneEditor.cpp` `onAudioClipAdded` (enter) | `[QA-ClipDrop DIAG]` | Confirm the strip/page cascade fired | Remove at batch close (or Keep per DS-2) |
+| `StandaloneEditor.cpp` `spawnClipsTabIfMissing` (bail / dedup / row-taken / create) | `[QA-ClipDrop DIAG]` | Which page-spawn outcome (or no-op reason) | Remove at batch close (or Keep per DS-2) |

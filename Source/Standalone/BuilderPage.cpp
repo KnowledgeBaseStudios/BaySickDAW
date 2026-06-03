@@ -1,5 +1,6 @@
 #include "BuilderPage.h"
 #include "PatternColorPicker.h"
+#include "../ClipDropDiag.h"        // QA-ClipDrop: diagnostic trap (2026-06-02)
 using namespace juce;
 
 // QA-E Task 7 (FILE-02): shared Audio Properties box.  PendingRoute is the
@@ -3349,6 +3350,8 @@ void ArrangementGrid::showAudioClipProperties(int blockIdx)
 
 void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, float targetBar, int routeChannel)
 {
+    ClipDropDiag::log ("importAudioFile ENTER", "path=" + path + " row=" + juce::String (targetRow)
+                        + " bar=" + juce::String (targetBar) + " routeChannel=" + juce::String (routeChannel));
     File f(path);
     // QA-E Task 4 (2026-05-12): if the path is project-relative (e.g.
     // "Samples/foo.wav" from the audio library), File(path) resolves it
@@ -3362,7 +3365,7 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
         if (resolved.existsAsFile())
             f = resolved;
     }
-    if (!f.existsAsFile()) return;
+    if (!f.existsAsFile()) { ClipDropDiag::alert ("importAudioFile BAIL: file not found", "path=" + path + " (drop produced no clip/page/entry)"); return; }
 
     // Read file metadata to get actual duration.
     // Use a local AudioFormatManager - message thread, so file I/O is fine.
@@ -3401,6 +3404,8 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
         storedPath = onImportSampleRequest (f);
         if (storedPath.isEmpty())
         {
+            ClipDropDiag::alert ("importAudioFile BAIL: copy-on-drop returned empty",
+                                  "path=" + path + " (drop produced no clip/page/entry; see the importSample reason just above in the log)");
             if (onDropWithoutProject)
                 onDropWithoutProject (f, targetRow, targetBar);
             return;
@@ -3413,6 +3418,7 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     // QA-E Task 4 (2026-05-12): tag ownerChannelId so re-drag from browser
     // continues to find the entry under the right category.
     mPM.addAudioToLibrary(storedPath, {}, routeChannel);
+    ClipDropDiag::log ("importAudioFile library-add", "storedPath=" + storedPath + " routeChannel=" + juce::String (routeChannel) + " libCount=" + juce::String (mPM.getNumAudioLibrary()));
     ArrangementBlock b;
     b.clipType       = ClipType::Audio;
     b.trackRow       = jlimit(0, kNumRows - 1, targetRow);
@@ -3439,7 +3445,12 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     // page's chain, not via an Audio strip.  Mirrors the routeChannel==0
     // guard inside dropWavAsClip at StandaloneEditor.cpp.
     if (routeChannel == 0 && onAudioClipAdded)
+    {
+        ClipDropDiag::log ("importAudioFile -> onAudioClipAdded", "firing cascade; row=" + juce::String (b.trackRow) + " storedPath=" + storedPath);
         onAudioClipAdded(b.trackRow, mRowNames[b.trackRow], storedPath);
+    }
+    else
+        ClipDropDiag::log ("importAudioFile DONE", "routeChannel=" + juce::String (routeChannel) + " (routed clip; no Clips-page spawn) storedPath=" + storedPath);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3561,6 +3572,7 @@ void ArrangementGrid::fileDragExit(const StringArray&)
 
 void ArrangementGrid::filesDropped(const StringArray& files, int x, int y)
 {
+    ClipDropDiag::log ("filesDropped ENTER", "numFiles=" + juce::String (files.size()) + " (drag-drop path)");
     mFileDragActive = false;
     mHasGhost = false;
     // Multi-file drop: stagger each file onto its OWN row (baseRow, +1, +2, ...)
@@ -3601,9 +3613,15 @@ void ArrangementGrid::filesDropped(const StringArray& files, int x, int y)
         }
 
         if (existingLibIdx >= 0 && onDuplicateFileDrop)
+        {
+            ClipDropDiag::log ("filesDropped -> duplicate prompt", "file=" + droppedF.getFileName() + " matches libIdx=" + juce::String (existingLibIdx));
             onDuplicateFileDrop (droppedF, existingLibIdx, row, bar);
+        }
         else
+        {
+            ClipDropDiag::log ("filesDropped -> importAudioFile", "file=" + droppedF.getFileName() + " (not in library)");
             importAudioFile (fs, row, bar);
+        }
         ++placed;
     }
 }

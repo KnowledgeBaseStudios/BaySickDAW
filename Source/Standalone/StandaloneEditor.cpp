@@ -31,6 +31,7 @@
 // 2026-05-05: RustyDrumsPagePresetIO + AriaPagePresetIO consolidated into
 // PagePresetIO.h.  Rusty's Save/Load Page Preset now uses PageKind::RustyDrums.
 #include "PagePresetIO.h"
+#include "../ClipDropDiag.h"                   // QA-ClipDrop: diagnostic trap (2026-06-02)
 #include "../Clips/ClipsPage.h"                       // G-2: Clips page + empty state
 #include "../Vox/VoxPage.h"                           // G-4: Vox page + empty state
 #include "../Inst/InstPage.h"                         // G-4: Inst page + empty state
@@ -2019,6 +2020,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
 
         grid->onAudioClipAdded = [this](int row, const juce::String& rowName, const juce::String& filePath)
         {
+            ClipDropDiag::log ("onAudioClipAdded ENTER", "row=" + juce::String (row) + " name=" + rowName + " path=" + filePath);
             juce::String name = rowName.isNotEmpty() ? rowName
                                                      : "Audio " + juce::String(row + 1);
 
@@ -3714,9 +3716,21 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
         chooser->launchAsync (flags, [this, chooser] (const juce::FileChooser& fc)
         {
             const juce::File f = fc.getResult();
-            if (f == juce::File()) return;
+            if (f == juce::File()) { ClipDropDiag::log ("AddNewClip", "picker cancelled (no file)"); return; }
+            ClipDropDiag::log ("AddNewClip PICKED", "file=" + f.getFullPathName());
             if (mBuilderPage && mBuilderPage->getGrid())
+            {
+                const int libBefore = mPM ? mPM->getNumAudioLibrary() : -1;
                 mBuilderPage->getGrid()->importAudioFile (f.getFullPathName(), 0, 0.0f);
+                const int libAfter = mPM ? mPM->getNumAudioLibrary() : -1;
+                if (libBefore >= 0 && libAfter == libBefore)
+                    ClipDropDiag::alert ("AddNewClip: no new library entry",
+                                          "'+ Add New Clip' produced no NEW browser/library entry (libCount stayed " + juce::String (libAfter)
+                                          + "). Either the drop bailed (copy-on-drop failed = the bug) OR the file was already in the library (benign dedup). "
+                                            "See Documents/BaySickDAW/clipdrop_diag_log.txt for the cascade trace + which one it was.");
+                else
+                    ClipDropDiag::log ("AddNewClip OK", "libCount " + juce::String (libBefore) + " -> " + juce::String (libAfter));
+            }
         });
         return;
     }
@@ -7697,8 +7711,8 @@ void StandaloneEditor::showClipsEmptyState()
 void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String& path,
                                                bool allowDuplicate)
 {
-    if (path.isEmpty()) return;
-    if (audioRow < 0 || audioRow >= kMaxClipPages) return;
+    if (path.isEmpty()) { ClipDropDiag::log ("spawnClips BAIL", "empty path"); return; }
+    if (audioRow < 0 || audioRow >= kMaxClipPages) { ClipDropDiag::log ("spawnClips BAIL", "row out of range; row=" + juce::String (audioRow) + " max=" + juce::String (kMaxClipPages)); return; }
 
     // Idempotent (default): skip if a Clips tab already exists for this audio
     // file (file-based dedup; the same file dropped on multiple Builder rows
@@ -7714,7 +7728,7 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
             if (entry->type != RibbonTabBar::TabType::Clip) continue;
             if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
             {
-                if (cp->getClipFilePath() == path) return;
+                if (cp->getClipFilePath() == path) { ClipDropDiag::log ("spawnClips DEDUP", "ClipsPage already exists for path=" + path + " (no new page created)"); return; }
             }
         }
     }
@@ -7725,8 +7739,11 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
         if (! entry) continue;
         if (entry->type != RibbonTabBar::TabType::Clip) continue;
         if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
-            if (cp->getPageIndex() == audioRow) return;
+            if (cp->getPageIndex() == audioRow)
+            { ClipDropDiag::log ("spawnClips ROW-TAKEN", "row=" + juce::String (audioRow) + " already owned by a ClipsPage (no new page created)"); return; }
     }
+
+    ClipDropDiag::log ("spawnClips CREATE", "creating new ClipsPage; row=" + juce::String (audioRow) + " path=" + path);
 
     // Page name = the filename without extension (or "Clip N" fallback via
     // QA-D STATE-02 monotonic counter).  Counter only increments when fallback
