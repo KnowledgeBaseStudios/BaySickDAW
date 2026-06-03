@@ -1226,8 +1226,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     if (!mPatternManager->isRowAudible(blk.trackRow)) continue;
                     if (blk.patternIndex < 0 || blk.patternIndex >= mPatternManager->getNumPatterns()) continue;
 
-                    double blkStartBeat = blk.startBar * kBPB;
-                    double blkEndBeat   = (blk.startBar + blk.lengthBars) * kBPB;
+                    // QA-Ee: play the block's EXACT (sub-bar) span, not the
+                    // ceil'd whole-bar count -- a sub-bar-resized pattern block
+                    // now plays the length it is drawn (length of block ==
+                    // length of playback).  effective* fall back to startBar*4 /
+                    // lengthBars*4 for bar-aligned blocks, so this is a no-op there.
+                    double blkStartBeat = effectiveStartBeats (blk);
+                    double blkEndBeat   = effectiveStartBeats (blk) + effectiveLengthBeats (blk);
                     // Relevant iff the block overlaps either active window.
                     bool relevant = false;
                     for (int w = 0; w < nWin; ++w)
@@ -1405,11 +1410,14 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             if (blk.automationLane.paramId.isEmpty())   continue;
             if (blk.automationLane.points.empty())      continue;
 
-            double clipStart = (double)blk.startBar;
-            double clipEnd   = clipStart + (double)blk.lengthBars;
+            // QA-Ee: honor the clip's exact (sub-bar) span for the automation
+            // window + relPos, matching the drawn length (effective* fall back
+            // to the bar fields for bar-aligned clips, so bar-aligned is a no-op).
+            double clipStart = effectiveStartBars (blk);
+            double clipEnd   = clipStart + effectiveLengthBars (blk);
             if (autoBar < clipStart || autoBar >= clipEnd) continue;
 
-            float relPos = (float)((autoBar - clipStart) / (double)blk.lengthBars);
+            float relPos = (float)((autoBar - clipStart) / effectiveLengthBars (blk));
             relPos = juce::jlimit(0.f, 1.f, relPos);
 
             // Interpolate control points (assume sorted by timeTicks)

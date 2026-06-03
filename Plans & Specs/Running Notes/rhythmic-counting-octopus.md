@@ -100,3 +100,57 @@ before commit. No diagnostic instrumentation added (Catalog stays empty).
 - **Migration confirmed (Jeff): all Stage-1 verify scenarios passed**, including opening pre-QA-Ee
   projects (old->tick migration of arrangement-grid blocks loaded correctly) + fresh-project
   drop-WAV + save/reload. Stage 1 cleared for commit.
+
+## 2026-06-03 — Task 1b — Playback-length precision fix (issues 1 + 2; pre-build)
+
+Two PRE-EXISTING playback bugs surfaced during Stage-1 verify (Jeff), both "playback length !=
+the precise/displayed length." Fixed in-batch (qa-fix-bugs-dont-defer) as a dedicated commit BEFORE
+Stage 2 (Jeff's option A, "fix both now" — he is actively hitting issue 1). Awaiting Jeff's
+Debug+Release verify before commit. No diagnostic instrumentation added (Catalog stays empty).
+
+- **Spec resolved (Jeff):** pattern blocks ARE sub-bar adjustable and STAY that way (NOT
+  snap-to-whole-bar — I wrongly floated that option; scrapped). Playback must HONOR the sub-bar
+  length. Sequencing: fix both now (option A); issue 1 gets an interim tick-snap, Stage 3 makes it
+  native.
+- **Issue 1 (pattern-mode loop point):** `getEffectivePatternLoopBeats` -> `ceilToBarStart`
+  ([PatternManager.cpp:596](Source/PatternManager.cpp:596)) ceil'd the furthest note/step end (a
+  float) to the next bar with a too-small `1e-9` guard; a note end that float-drifted a hair PAST a
+  bar boundary (invisible on screen) ceil'd up an extra bar -> pattern loops a bar late (Jeff's two
+  screenshots: same "note short of the line," one loops 1 bar, the other 2). FIX: snap `endBeat` to
+  the 96 PPQ tick grid (`ticksToBeats(beatsToTicks(endBeat))`) before the ceil -> deterministic.
+  Interim; Stage 3 (note->tick) makes note ends native ticks so the snap becomes a no-op.
+- **Issue 2 (song-mode block playback length):** the pattern-block scheduler
+  ([PluginProcessor.cpp:1229-1230](Source/PluginProcessor.cpp:1229)) + the automation-clip window
+  ([:1408-1412](Source/PluginProcessor.cpp:1408)) computed the play span from the ceil'd integer
+  `startBar`/`lengthBars`, ignoring the sub-bar `effective*` length the UI draws. FIX: use
+  `effectiveStartBeats`/`effectiveLengthBeats` (block scheduler) + `effectiveStartBars`/
+  `effectiveLengthBars` (automation) -> a sub-bar block plays its exact drawn length. Bar-aligned
+  blocks unchanged (effective* fall back to the bar fields). The audio-clip path already used
+  effective* (line 2334/2338) -- this brings pattern + automation blocks in line.
+- **Route at close:** both are in-batch-resolved pre-existing-bug findings -> close routing table.
+- Files: `PatternManager.cpp` (ceilToBarStart) + `PluginProcessor.cpp` (block scheduler +
+  automation window).
+
+## 2026-06-03 — Task 1b verify PASS + loop-seam stuck-note found (-> Task 1c)
+
+- **Task 1b verified (Jeff):** issue 1 (pattern loop) now loops at the bar line with no phantom
+  extra bar; issue 2 (song-mode block playback) exercised in song mode (pattern block from the piano
+  roll on the Builder grid). Committing Task 1b now (Jeff chose option A: commit Task 1b, fix the
+  new stuck-note as its own focused task).
+- **New finding -> Task 1c (intermittent loop-seam stuck note):** a note ending exactly at the loop
+  point occasionally hangs (held until the next loop re-fires it), repro'd in BOTH pattern + song
+  mode. NOT created by Task 1b -- pre-existing QA-Ed scheduler edge case, EXPOSED by Task 1b (the
+  loop-tightening puts notes on the seam). Mechanism (code-traced): the straddle test
+  ([PluginProcessor.cpp:1111](Source/PluginProcessor.cpp:1111)) uses strict `>` so a wrap landing
+  exactly on a block boundary is NOT a straddle; the off at loopEnd then matches no off-pass case
+  ([:1156-1163](Source/PluginProcessor.cpp:1156)) -- not past-due (`<= beatStart`), not straddle,
+  not strictly `< beatEnd` (it is equal) -- so it is stranded, held until a later mid-block-wrap
+  iteration fires it. Intermittent because the wrap aligns to a block boundary only periodically
+  (loop length in samples is not a whole multiple of the audio buffer).
+  - **Fix direction (Task 1c):** flush the stranded loop-end off in the FIRST post-wrap block
+    (likely a one-shot "just wrapped" signal); soak-test verify (intermittent). MUST preserve
+    QA-Ed's integer-exact playhead/scheduler wrap agreement -- canNOT just loosen `>` to `>=`
+    (that would make the scheduler straddle a block the playhead does not wrap in = the desync
+    QA-Ed was built to remove).
+  - **Cross-ref QA-Ed at close** (carry-forward-via-§9-Forks): QA-Ed scheduler edge case exposed by
+    QA-Ee; fixed in-batch as Task 1c.

@@ -596,6 +596,14 @@ double PatternManager::getEffectivePatternLoopBeats() const
     auto ceilToBarStart = [patBpb](double endBeat) -> double
     {
         if (endBeat <= 0.0) return 0.0;
+        // QA-Ee (96 PPQ): snap to the tick grid first so a note/step end that
+        // float-drifted a hair PAST a bar boundary (invisible on screen) does
+        // not ceil up an extra bar -- the bug behind the "note short of the line
+        // but the pattern loops a bar late" report.  beatsToTicks rounds to the
+        // nearest 1/96 beat; an exact-tick end then ceils deterministically.
+        // Stage 3 makes note ends native ticks, at which point this snap is a
+        // no-op (already grid-aligned).
+        endBeat = ticksToBeats (beatsToTicks (endBeat));
         const double bars = std::ceil (endBeat / patBpb - 1e-9);
         return bars * patBpb;
     };
