@@ -183,7 +183,10 @@ public:
     // signature took only an index and searched maps in order Layer -> Bass
     // -> Drum, stopping at first match -- which collided when Bass[0] and
     // Drum[0] coexisted (renaming the Drum hit Bass's strip first).
-    enum class StripKind { Layer, Bass, Drum };
+    // QA-ClipDrop Task 3 (SC-H, 2026-06-03): Audio added so a Clips ribbon-tab
+    // rename syncs through to its mixer strip (strips live in mAudioStrips keyed
+    // by the owning Clips-page row index) -- parity with Layer/Bass/Drum.
+    enum class StripKind { Layer, Bass, Drum, Audio };
     void renameChannel(StripKind kind, int pageIdx, const juce::String& newName);
 
     // Connect to the global undo system.

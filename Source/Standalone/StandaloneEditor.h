@@ -497,6 +497,18 @@ private:
     // Default false preserves drag-drop import semantics (one page per file).
     void spawnClipsTabIfMissing (int audioRow, const juce::String& path,
                                  bool allowDuplicate = false);
+    // QA-ClipDrop Task 3 (SC-G/H, 2026-06-03): create the mixer strip + Clips
+    // page for an audio clip at `row`, named from the SAMPLE (not the Builder
+    // row label "Track N").  Shared by drag-drop (onAudioClipAdded),
+    // "+ Add New Clip" (onAddTabRequest), and project reload.  The strip trio
+    // (addAudioRowChannel + ensureAudioInsert + addAudioChannel) is idempotent,
+    // so repeat calls at an existing row are safe no-ops.
+    void createClipStripAndPage (int row, const juce::String& path);
+    // QA-ClipDrop Task 3 (SC-G/J, 2026-06-03): "+ Add New Clip" handler -- copy
+    // the picked file into the project (prompting to create one first if there
+    // is none, then retrying), register it in the audio library, and spawn its
+    // Clips page + strip with NO grid block.
+    void addClipPageFromFile (const juce::File& src);
     // G-3 (2026-04-28): wires a Clips tab into the unified PianoRollPage so
     // its piano roll appears in the engine dropdown alongside layers / bass /
     // drums.  The PianoRollConnection's dataAccessor closure points at

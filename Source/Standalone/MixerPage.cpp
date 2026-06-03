@@ -2926,6 +2926,14 @@ void MixerPage::renameChannel(StripKind kind, int pageIdx, const juce::String& n
             if (auto it = mDrumStrips.find(pageIdx); it != mDrumStrips.end())
                 it->second->setTrackName(newName);
             break;
+        // QA-ClipDrop Task 3 (SC-H, 2026-06-03): Clips/Audio-row strips are keyed
+        // in mAudioStrips by their owning Clips-page row index, so a ribbon tab
+        // rename can now sync through to the mixer strip the same way Layer/Bass/
+        // Drum do (previously left untouched -- no enum entry existed).
+        case StripKind::Audio:
+            if (auto it = mAudioStrips.find(pageIdx); it != mAudioStrips.end())
+                it->second->setTrackName(newName);
+            break;
     }
 }
 

@@ -1307,9 +1307,12 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             }
             else if (auto* cp = dynamic_cast<ClipsPage*>(entry->component.get()))
             {
-                // Clips strips: no MixerPage rename overload for the audio-row
-                // strip kind in the current enum; left untouched (same reason
-                // as Inst above).
+                // QA-ClipDrop Task 3 (SC-H, 2026-06-03): a Clips ribbon-tab
+                // rename now syncs to its mixer strip via StripKind::Audio (the
+                // strip is keyed in mAudioStrips by the Clips-page row index) --
+                // parity with Layer/Bass/Drum above (previously left untouched
+                // because the enum had no audio-row entry).
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Audio, cp->getPageIndex(), finalName);
                 cp->setTabName(finalName);
                 if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Clip, cp->getPageIndex() }, finalName);
             }
@@ -2021,40 +2024,20 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         grid->onAudioClipAdded = [this](int row, const juce::String& rowName, const juce::String& filePath)
         {
             ClipDropDiag::log ("onAudioClipAdded ENTER", "row=" + juce::String (row) + " name=" + rowName + " path=" + filePath);
-            juce::String name = rowName.isNotEmpty() ? rowName
-                                                     : "Audio " + juce::String(row + 1);
+            // QA-ClipDrop Task 3 (SC-G/H, 2026-06-03): the strip trio +
+            // Effects-dropdown rebuild + Clips-page spawn now live in the shared
+            // createClipStripAndPage helper (reused by "+ Add New Clip" and
+            // project reload).  SC-H: the strip + page are named from the SAMPLE,
+            // not the Builder grid row label `rowName` ("Track N").  The helper
+            // keeps the 2026-04-29 order-fix (InsertNode + APVTS params before the
+            // strip so setApvts binds the fader/mute/solo/width controls).
+            createClipStripAndPage (row, filePath);
 
-            // 2026-04-29 ORDER FIX: register APVTS params + create the Audio
-            // InsertNode FIRST.  addAudioChannel below calls setApvts which
-            // only attaches sliders/buttons if the APVTS params already exist
-            // - with the prior order (strip first, then ensureAudioInsert)
-            // the strip's fader/mute/solo/width attachments silently failed
-            // to bind, so strip controls did nothing and the strip meter
-            // stayed dead.  WAV audio still played because the per-clip
-            // path's output fans to the ClipsBus accumulator regardless
-            // of whether the InsertNode chain ran,
-            // hence the symptom: clip plays, ClipsBus controls work, strip
-            // controls and master mute don't.
-            mProcessor.mVibeGraph.addAudioRowChannel(row, name);
-            mProcessor.ensureAudioInsert(row, name);
-
-            // Create mixer strip for this row if not already present.  setApvts
-            // now finds every param registered by ensureAudioInsert above.
-            if (mMixerPage)
-                mMixerPage->addAudioChannel(row, name);
-
-            // Rebuild the Effects dropdown to include the new clip channel
-            if (mEffectsPage)
-                mEffectsPage->rebuildChannelDropdown();
-
-            // Rebuild audio readers so the new clip plays back immediately
+            // Rebuild audio readers so the just-dropped clip plays back
+            // immediately.  Order vs the helper's spawnClipsTabIfMissing is
+            // irrelevant -- spawnClips creates only the page/engine/InsertNode and
+            // never touches the clip players (verified 2026-06-03).
             mProcessor.rebuildAudioClipPlayers();
-
-            // 2026-04-28 (G-2/G-3): spawn a Clips ribbon tab + page for this
-            // audio file if one doesn't already exist (idempotent on re-
-            // import).  pageIdx = audioRow so the engine's audio mixes into
-            // the matching mixer_audio_<row> insert.
-            spawnClipsTabIfMissing (row, filePath);
 
             // QA-E Task 5 (2026-05-15): the disk-drop block was created with
             // routeChannel=0 (required so THIS callback fires + spawns the
@@ -3708,7 +3691,13 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
     // fires uniformly with drag-drop.
     if (type == RibbonTabBar::TabType::Clip)
     {
-        if (! mBuilderPage || ! mBuilderPage->getGrid()) return;
+        // QA-ClipDrop Task 3 (SC-G/J, 2026-06-03): "+ Add New Clip" no longer
+        // routes through the Builder grid's importAudioFile (which dropped a
+        // block on row 0 and named the strip after that grid row).  It opens the
+        // file picker, then addClipPageFromFile copies the file + registers it in
+        // the audio library + spawns a Clips page + mixer strip named from the
+        // SAMPLE, with NO grid block.  No-project case still prompts to create a
+        // project first, then retries (SC-J).
         SampleLibrary::ensureUserSamplesDir();
         auto chooser = std::make_shared<juce::FileChooser> (
             "Choose an audio file to add as a Clip",
@@ -3721,18 +3710,7 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
             const juce::File f = fc.getResult();
             if (f == juce::File()) { ClipDropDiag::log ("AddNewClip", "picker cancelled (no file)"); return; }
             ClipDropDiag::log ("AddNewClip PICKED", "file=" + f.getFullPathName());
-            if (mBuilderPage && mBuilderPage->getGrid())
-            {
-                const int libBefore = mPM ? mPM->getNumAudioLibrary() : -1;
-                mBuilderPage->getGrid()->importAudioFile (f.getFullPathName(), 0, 0.0f);
-                const int libAfter = mPM ? mPM->getNumAudioLibrary() : -1;
-                if (libBefore >= 0 && libAfter == libBefore)
-                    ClipDropDiag::log ("AddNewClip: no new library entry",
-                                        "'+ Add New Clip' produced no NEW browser/library entry (libCount stayed " + juce::String (libAfter)
-                                        + "). Either copy-on-drop failed (alerted in importSample), no project open (New-Project prompt), or a benign dedup - see the log trace.");
-                else
-                    ClipDropDiag::log ("AddNewClip OK", "libCount " + juce::String (libBefore) + " -> " + juce::String (libAfter));
-            }
+            addClipPageFromFile (f);
         });
         return;
     }
@@ -7710,6 +7688,138 @@ void StandaloneEditor::showClipsEmptyState()
     resized();   // make sure the empty state has its bounds
 }
 
+void StandaloneEditor::createClipStripAndPage (int row, const juce::String& path)
+{
+    // QA-ClipDrop Task 3 (SC-G/H, 2026-06-03): shared strip + Clips-page
+    // creation, reused by drag-drop (onAudioClipAdded), "+ Add New Clip", and
+    // project reload.  SC-H: the strip is named from the SAMPLE (matching the
+    // Clips tab, which spawnClipsTabIfMissing also derives from the filename),
+    // NOT the Builder grid row label ("Track N").
+    juce::String name = juce::File (path).getFileNameWithoutExtension();
+    if (name.isEmpty())
+        name = "Audio " + juce::String (row + 1);
+
+    // 2026-04-29 ORDER FIX (carried from onAudioClipAdded): register the Audio
+    // InsertNode + APVTS params BEFORE creating the strip, so addAudioChannel's
+    // setApvts finds every param and binds the fader/mute/solo/width controls.
+    // addAudioRowChannel / ensureAudioInsert / addAudioChannel are all
+    // idempotent at an existing row, so repeat calls (reload, re-import) no-op.
+    mProcessor.mVibeGraph.addAudioRowChannel (row, name);
+    mProcessor.ensureAudioInsert (row, name);
+    if (mMixerPage)
+        mMixerPage->addAudioChannel (row, name);
+    if (mEffectsPage)
+        mEffectsPage->rebuildChannelDropdown();
+
+    // Spawn the Clips ribbon tab + page (idempotent: no-op if a ClipsPage
+    // already owns this row).
+    spawnClipsTabIfMissing (row, path);
+}
+
+void StandaloneEditor::addClipPageFromFile (const juce::File& src)
+{
+    if (mPM == nullptr) return;
+
+    // SC-J: no project open -> prompt to create one, then retry once it exists
+    // (mirror of the drag-drop onDropWithoutProject flow at createBuilderPage).
+    if (! (mProjectManager && mProjectManager->hasProject()))
+    {
+        ClipDropDiag::log ("AddNewClip: NO PROJECT OPEN",
+                           "src=" + src.getFullPathName() + " (New-Project prompt follows; clip added on retry)");
+        promptForProjectName (
+            "New Project",
+            "To save your audio, give this project a name.\n\n"
+            "A folder will be created at:\n"
+            + ProjectManager::getDefaultProjectsRoot().getFullPathName()
+            + "\\<name>\\\n\n"
+              "Your audio file will be copied into that project's Samples\n"
+              "folder automatically.",
+            "Untitled Project",
+            [this, src] (juce::String name)
+            {
+                if (! ProjectManager::isValidProjectName (name))
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Invalid project name",
+                        "Project names can't contain < > : \" / \\ | ? * or be\n"
+                        "reserved device names (CON, PRN, AUX, NUL, COM1-9,\n"
+                        "LPT1-9).  Try adding the clip again.");
+                    return;
+                }
+                if (! mProjectManager->newProject (name))
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Could not create project",
+                        "Check that the Projects folder is writable and try again.");
+                    return;
+                }
+                mProjectManager->saveProject();
+                refreshWindowTitle();
+                addClipPageFromFile (src);   // retry -- hasProject() is now true
+            });
+        return;
+    }
+
+    // Copy the picked file into <project>/Samples/ (returns a project-relative
+    // "Samples/<file>" path).  importSample alerts on a genuine copyFileTo
+    // failure while a project is open (the held-open 2nd-case trap), so an empty
+    // return here means that fired -- log + bail without a second popup.
+    const juce::String storedPath = mProjectManager->importSample (src);
+    if (storedPath.isEmpty())
+    {
+        ClipDropDiag::log ("AddNewClip BAIL: copy returned empty",
+                           "src=" + src.getFullPathName() + " (project IS open -> copy failed; see importSample reason in log)");
+        return;
+    }
+
+    // Find the next free Clips page row (mirror onCreateRoutablePage + the
+    // onDuplicateFileDrop "New Page" scan).
+    int newRow = -1;
+    for (int i = 0; i < kMaxClipPages; ++i)
+    {
+        bool taken = false;
+        for (auto* e : mPages)
+            if (e && e->type == RibbonTabBar::TabType::Clip)
+                if (auto* cp = dynamic_cast<ClipsPage*> (e->component.get()))
+                    if (cp->getPageIndex() == i) { taken = true; break; }
+        if (! taken) { newRow = i; break; }
+    }
+    if (newRow < 0)
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::AlertWindow::WarningIcon,
+            "No free Clips page",
+            "All " + juce::String (kMaxClipPages) + " Clips pages are in use.  "
+            "Close one before adding another.");
+        return;
+    }
+
+    // SC-G: register the library entry owned by the new Clips page, then create
+    // the page + strip -- NO grid block.  The Builder browser repopulates via
+    // its diff-based timer once the audio library changes.
+    const int ownerCh = MixerChannelIds::audioInsert (newRow);
+    mPM->addAudioToLibrary (storedPath, {}, ownerCh);
+    if (mBuilderPage) mBuilderPage->notifyArrangementChanged();
+
+    createClipStripAndPage (newRow, storedPath);
+
+    // User explicitly clicked "+ Add New Clip" -> navigate to the new tab.
+    for (auto* entry : mPages)
+        if (entry && entry->type == RibbonTabBar::TabType::Clip)
+            if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+                if (cp->getPageIndex() == newRow && mRibbon)
+                {
+                    mRibbon->selectTab (entry->ribbonTabId);
+                    onTabSelected (entry->ribbonTabId);
+                    break;
+                }
+
+    ClipDropDiag::log ("AddNewClip OK",
+                       "row=" + juce::String (newRow) + " storedPath=" + storedPath + " (page + strip, no grid block)");
+}
+
 void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String& path,
                                                bool allowDuplicate)
 {
@@ -9991,8 +10101,45 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
         // serialized engine state on top.  Mirror of Layer/Bass/Drum.
         else if (type == "Clips")
         {
-            const juce::String clipPath = rec->getStringAttribute ("clipPath");
-            spawnClipsTabIfMissing (pageIndex, clipPath);
+            juce::String clipPath = rec->getStringAttribute ("clipPath");
+            // QA-ClipDrop Task 3 dup-fix (2026-06-03): the saved clipPath is the
+            // absolute engine path, but the audio-library entry stores the
+            // project-relative path ("Samples/<file>").  Hand the Clips page the
+            // RELATIVE library path so its library re-tag (ClipsPage::setClipFilePath
+            // -> addAudioToLibrary) dedups against the already-deserialized entry by
+            // exact string -- otherwise the absolute tag never matches and a
+            // DUPLICATE browser entry appears on every reload.  Both forms point at
+            // the same Samples-folder copy and the engine resolves the relative form
+            // back to absolute on load, so playback is unchanged.  Match the library
+            // entry for this page's owner channel (resolved-path equality so
+            // multi-file pages pick the right clip; first-for-owner fallback; saved
+            // attribute if the library has no entry).  Backward-compatible -- uses
+            // whatever the library stored, so older absolute-library projects match.
+            if (mPM != nullptr && mPM->getNumAudioLibrary() > 0)
+            {
+                const int        ownerCh  = MixerChannelIds::audioInsert (pageIndex);
+                const juce::File savedAbs = mProcessor.resolveProjectFile (clipPath);
+                int match = -1, firstForOwner = -1;
+                for (int i = 0; i < mPM->getNumAudioLibrary(); ++i)
+                {
+                    if (mPM->getAudioLibraryPageOwner (i) != ownerCh) continue;
+                    if (firstForOwner < 0) firstForOwner = i;
+                    if (mProcessor.resolveProjectFile (mPM->getAudioLibraryPath (i)) == savedAbs)
+                        { match = i; break; }
+                }
+                const int use = (match >= 0) ? match : firstForOwner;
+                if (use >= 0) clipPath = mPM->getAudioLibraryPath (use);
+            }
+            // QA-ClipDrop Task 3 (SC-G/H reload, 2026-06-03): create the mixer
+            // strip alongside the page here -- mirror of the Vox/Inst restore
+            // branches below, which call addVoxChannelAtIndex / addInstChannelAtIndex
+            // because their strips are not block-driven either.  A no-block
+            // "+ Add New Clip" clip has no arrangement block, so the block-driven
+            // restoreAudioStripsFromArrangement would never make its strip.
+            // createClipStripAndPage's strip trio is idempotent, and
+            // restoreAudioStripsFromArrangement is now owner-keyed (below), so a
+            // block-backed clip lands on the SAME row -> exactly one strip.
+            createClipStripAndPage (pageIndex, clipPath);
             for (auto* entry : mPages)
             {
                 if (! entry) continue;
@@ -10003,6 +10150,10 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 {
                     cp->setTabName (name);
                     if (mRibbon) mRibbon->renameTab (entry->ribbonTabId, name);
+                    // SC-H: the saved Clips tab name wins on reload -> push it to
+                    // the mixer strip (createClipStripAndPage seeded the strip
+                    // from the filename a moment ago).
+                    if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Audio, pageIndex, name);
                 }
                 if (engine.isNotEmpty())
                     cp->selectEngine ((ClipsPage::EngineType) engine.getIntValue());
@@ -10581,7 +10732,21 @@ void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
                 || (rc >= kInstBase && rc < kInstBase + kMaxInstStrips);
             if (voxInstRouted) continue;
         }
-        const int row = b.trackRow;
+        // QA-ClipDrop Task 3 (SC-I reload parity, 2026-06-03): key the strip on
+        // the clip's OWNING Clips-page row (derived from routeChannel), NOT the
+        // grid row it currently sits on.  Identical owner-derivation to
+        // renderAudioClipsForRow (PluginProcessor.cpp): a clip moved to another
+        // grid row before saving keeps its strip at the owner row, and matches
+        // the strip createClipStripAndPage made at the Clips restore branch
+        // (idempotent -> exactly one strip, no stray strip at the moved row).
+        // Legacy/unset routeChannel (0) falls back to trackRow, so projects from
+        // before owner-routing are unchanged.
+        const int routeCh = b.routeChannel;
+        const int row =
+            (routeCh >= MixerChannelIds::kAudioBase
+          && routeCh <  MixerChannelIds::kAudioBase + VibeSynthProcessor::kMaxAudioRows)
+                ? (routeCh - MixerChannelIds::kAudioBase)
+                : b.trackRow;
         if (row < 0 || row >= VibeSynthProcessor::kMaxAudioRows) continue;
 
         const juce::String stripName =

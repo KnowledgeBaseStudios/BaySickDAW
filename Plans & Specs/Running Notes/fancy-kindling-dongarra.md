@@ -165,6 +165,161 @@ it. Close when the 2nd case is caught+fixed OR end-of-QA (not-reproduced).
   unaffected; the trap is quiet on no-project drags (New-Project prompt only, no popup). Ready to
   commit Task 2 + the trap refinement.
 
+## 2026-06-02 — Session pause — Task 3 carry-over (Rule 2)
+
+**State at pause:** Tasks 0-2 committed + Debug+Release verified. Task 1 trap `4a9342c`; Task 2
+SC-I routing decouple + old-project migration + trap refinement `c616f0d`. The deterministic
+clip<->grid-row coupling (the "huge issue") is **FIXED** — clips route by their owning Clips-page
+strip, survive grid moves, old projects load clean, Vox/Inst unaffected. Working tree clean except
+this carry-over edit.
+
+**Held open for the 2nd case:** the intermittent saved-project copy-failure (the original report).
+The trap's `importSample copyFileTo FAILED` `alert()` (popup, Debug+Release) is the armed watch.
+If it fires WITH a project open → that's the catch → Task 4 (diagnose + fix).
+
+**Task 3 — NOT started.** SC-G (no-block "+ Add New Clip") + SC-H (strip named from clip + tab->strip
+rename) + SC-J (keep New-Project prompt). Sites read. Plan has the code. Pieces:
+- `createClipStripAndPage(row, path)` helper extracted from `onAudioClipAdded` (StandaloneEditor.cpp:2021):
+  strip trio (addAudioRowChannel + ensureAudioInsert + addAudioChannel, named from the SAMPLE, not the
+  row label "Track N") + rebuildChannelDropdown + spawnClipsTabIfMissing. onAudioClipAdded calls it
+  (keep rebuildAudioClipPlayers + the retag).
+- Rewrite `onAddTabRequest` Clip branch (StandaloneEditor.cpp:3709) off `importAudioFile`: copy
+  (importSample; no-project → promptForProjectName + retry, mirror onDropWithoutProject :2318-2356)
+  → free Clips slot (mirror :2412-2424) → addAudioToLibrary(storedPath, {}, audioInsert(freeRow)) →
+  createClipStripAndPage. NO grid block.
+- MixerPage (MixerPage.h:186 + MixerPage.cpp:2909): add `Audio` to `StripKind` + a renameChannel case
+  (`mAudioStrips[pageIdx]->setTrackName`). Wire onTabRenamed Clip branch (StandaloneEditor.cpp:1308)
+  → `renameChannel(StripKind::Audio, cp->getPageIndex(), finalName)`.
+
+**NEW FINDING — reload-strip (must handle in Task 3):** a no-block Clips page needs its mixer strip
+CREATED + NAMED on project RELOAD. On load, Clips pages restore via `spawnClipsTabIfMissing`
+(StandaloneEditor.cpp:9995) which makes the page + engine + InsertNode but NOT the mixer strip; the
+strip is normally restored from the grid BLOCK (`restoreAudioStripsFromArrangement`), and a
+"+ Add New Clip" clip has no block. Fix: at :9995 use `createClipStripAndPage(pageIndex, clipPath)`
++ after the restore sets the saved tab name, sync the strip via `renameChannel(Audio, pageIndex,
+savedName)`. `addAudioChannel` is idempotent so block-clips are unaffected.
+
+**ADJACENT FINDING — route, do NOT fix in Task 3 (Rule 3):** the "Add a new Clip Page"
+(`onCreateRoutablePage` Clip, :2232) + duplicate-clip (:2455 / :7676 / :7906) flows also call
+`spawnClipsTabIfMissing` WITHOUT creating a mixer strip = pre-existing strip-less-Clips-page gap.
+Route at close.
+
+**Resume action:** read this carry-over + the plan's Task 3 (with code) + Main Plan §0; commit this
+carry-over edit first (a Task-3-open docs commit); implement Task 3 per the plan + the reload-strip
+finding; per-task verify Debug+Release; surface the commit for approval.
+
+## 2026-06-03 — Task 3 — SC-G + SC-H + SC-J implemented (awaiting build + Debug/Release verify)
+
+**Resume.** Tasks 0-2 committed + Debug+Release verified (Task 1 trap `4a9342c`; Task 2 SC-I
+routing decouple + old-project migration + trap refinement `c616f0d`). Task 3 = SC-G (no-block
+"+ Add New Clip") + SC-H (strip named from the clip + tab->strip rename) + SC-J (keep the
+New-Project prompt). The uncommitted Task-3 carry-over edit above rides WITH the Task 3 source
+commit (Jeff's call, 2026-06-03 — it does NOT get its own docs commit).
+
+**Spec call resolved — reload-strip / SC-I parity (surfaced to Jeff, 2026-06-03).** The
+carry-over's one-line reload fix interacts with Task 2 owner-routing. On reload, TWO sites build a
+clip's strip: the Clips-page restore branch in `deserializeUIState` (keyed to the owning Clips
+page) and the older block-based `restoreAudioStripsFromArrangement` (keyed to the grid row the
+block currently sits on). For an unmoved clip the two agree (one strip); for a clip MOVED before
+saving they diverge -> a stray empty strip at the moved row. Options surfaced: (A) leave the
+block path row-keyed, accept the stray strip, route at close; (B) fix it fully now. **Jeff chose
+Option B** — key `restoreAudioStripsFromArrangement` on the OWNING Clips-page row too, using the
+same owner-derivation Task 2 uses in `renderAudioClipsForRow` (Audio-range `routeChannel` -> owner
+row; legacy/0 -> `trackRow` fallback so pre-owner-routing projects are unchanged). Result: exactly
+one strip at the owner row, moved or not.
+
+**Implementation — 5 sites, 4 files (source delta only; the carry-over doc edit is separate):**
+- `Source/Standalone/MixerPage.h` + `MixerPage.cpp`: added `Audio` to `MixerPage::StripKind`
+  + an `Audio` case in `renameChannel` (finds `mAudioStrips[pageIdx]` -> `setTrackName`). The
+  only `switch` on `StripKind` is `renameChannel`, so it is exhaustive again.
+- `Source/Standalone/StandaloneEditor.h` + `.cpp` — new member
+  `createClipStripAndPage(int row, const juce::String& path)`, extracted from `onAudioClipAdded`:
+  the strip trio (`addAudioRowChannel` + `ensureAudioInsert` + `addAudioChannel`) named from the
+  SAMPLE (`File(path).getFileNameWithoutExtension()`), NOT the Builder row label "Track N", +
+  `rebuildChannelDropdown` + `spawnClipsTabIfMissing`. `onAudioClipAdded` (drag-drop) now calls
+  the helper then `rebuildAudioClipPlayers` (the post-Task-5 retag block is unchanged). The
+  `rebuildAudioClipPlayers` <-> `spawnClips` reorder is safe — `spawnClips` creates only the
+  page/engine/InsertNode, never the clip players (verified 2026-06-03).
+- New member `addClipPageFromFile(const juce::File& src)` — the "+ Add New Clip" handler. No
+  project -> `promptForProjectName` + retry (SC-J; mirrors the drag-drop `onDropWithoutProject`
+  flow). With a project -> `importSample` copy -> free Clips slot scan (mirrors
+  `onCreateRoutablePage`) -> `addAudioToLibrary(stored, {}, audioInsert(row))` +
+  `notifyArrangementChanged` (the Builder browser repopulates via its diff-based timer) ->
+  `createClipStripAndPage` -> select the new tab. NO grid block (SC-G). The `onAddTabRequest`
+  Clip branch is rewritten to call it (was `importAudioFile(f, 0, 0)`, which dropped a row-0 block
+  + named the strip after grid row 0).
+- `onTabRenamed` Clip branch: now calls
+  `renameChannel(StripKind::Audio, cp->getPageIndex(), finalName)` (was "left untouched — no enum
+  entry"). SC-H tab->strip sync.
+- Reload Clips branch in `deserializeUIState`: `spawnClipsTabIfMissing` ->
+  `createClipStripAndPage` (so the strip is created too, mirroring the Vox/Inst reload branches
+  which call `addVox`/`addInstChannelAtIndex` because their strips are not block-driven); after
+  the saved tab name is applied, `renameChannel(StripKind::Audio, pageIndex, name)` so the SAVED
+  tab name wins. `restoreAudioStripsFromArrangement` is now owner-keyed (Option B above).
+
+**Findings captured.**
+- **Idempotency confirmed (load-bearing for the two-site reload strip build).** All three
+  creation calls early-return at an existing row: `addAudioRowChannel`
+  (`VibeGraph.cpp:2342` `if (mInstrChannelNodes.count(id) > 0) return;`), `ensureAudioInsert`
+  (`ensureMixerStripParams`/`ensureInsertNode` + `if (! mAudioRenderTasks[row])` task guard),
+  `addAudioChannel` (`MixerPage.cpp:2873` `if (mAudioStrips.count(row) > 0) return;`). So the
+  Clips-restore branch + owner-keyed `restoreAudioStripsFromArrangement` hitting the same owner
+  row is a safe no-op (exactly one strip).
+- **Name precedence on reload.** For clips WITH a Clips page the saved tab name now wins (SC-H);
+  non-Clips-page clips (e.g. recordings restored only from a block) still use `displayAlias`.
+  Direct mixer-strip rename was never persisted for audio strips (`onAudioStripRenamed` only
+  rebuilds the Effects dropdown), so there is no regression from the tab name taking precedence.
+- **Reload-strip creation safety.** Creating the strip in `deserializeUIState` mirrors the proven
+  Vox/Inst reload pattern (same `deserializeUIState` loop, same `registerTask` race class the
+  existing `spawnClipsTabIfMissing` already carried there) — no new race surface.
+
+**Still routed, NOT fixed (Rule 3 — at close).** The ADJACENT strip-less-Clips-page gap in the
+`onCreateRoutablePage` Clip + duplicate-clip flows (they call `spawnClipsTabIfMissing` WITHOUT
+creating a strip) is unchanged in Task 3 and routes at close per the carry-over's adjacent
+finding.
+
+**No new diagnostic instrumentation.** The existing `ClipDropDiag` log lines in `onAddTabRequest`
+/ `addClipPageFromFile` are preserved/adapted (the `addClipPageFromFile` path logs
+NO-PROJECT-OPEN / BAIL: copy returned empty / OK); the Diagnostic Instrumentation Catalog is
+unchanged. **Status:** code landed, awaiting Jeff's Debug + Release verify before the Task 3
+commit.
+
+## 2026-06-03 — Task 3 — reload duplicate-browser-entry fix (Jeff caught during verify)
+
+**Symptom (Jeff, 2026-06-03 verify).** On RELOAD of a saved project a Clips clip showed TWO browser
+entries -- both for an existing save with 1 mp3 AND for a freshly "+ Add New Clip"-ed clip that was
+saved then reloaded. Everything else verified right; the duplicate only appeared on load.
+
+**Root cause (diagnosed via the diag log + code, not guessed).** A path-format mismatch defeats the
+audio-library exact-string dedup (`PatternManager.cpp:176`):
+- Save: the Clips tab `clipPath` attribute is the ABSOLUTE engine path (`StandaloneEditor.cpp:9722`
+  -> `getClipFilePath()` returns `mClipPath` = resolved absolute, set by QA-E Task 7 FILE-02).
+- Library: the audio-library entry stores the project-RELATIVE path (`Samples/<file>`) since
+  `importSample` returns relative.
+- Reload: the absolute `clipPath` flows into `ClipsPage::setClipFilePath` ->
+  `addAudioToLibrary(libTag=ABSOLUTE, owner)` (`ClipsPage.cpp:599`). The dedup is an exact string
+  compare, so ABSOLUTE never matches the already-deserialized RELATIVE entry -> a 2nd entry.
+- Both forms point at the SAME `Samples/` copy; the engine resolves the relative form back to
+  absolute on load, so playback is unaffected, and the original source path is never involved
+  post-import.
+- **Pre-existing** (latent since QA-E Task 7 made the saved path absolute); surfaced now by Task 3
+  reload testing of freshly-saved Clips pages. Did not show on the Task 2 TESTIES reload (that older
+  project's library happened to store matching paths).
+
+**Fix (one localized spot, no save-format change).** In the reload Clips branch (`deserializeUIState`),
+before `createClipStripAndPage`, look up the page's own audio-library entry (by owner channel
+`audioInsert(pageIndex)`; resolved-path equality to pick the right clip on multi-file pages;
+first-for-owner fallback; saved attribute if the library has no entry) and hand the Clips page the
+library's stored RELATIVE path. The page's re-tag then matches the existing entry by exact string ->
+dedups -> one browser entry. Backward-compatible: uses whatever the library stored, so older
+absolute-library projects still match. Load order verified: the library deserializes
+(`PluginProcessor.cpp:3085` `fromValueTree`) BEFORE `onDeserializeUIState` (`:3092`), so the entry is
+present when the reload branch runs.
+
+**Routing.** Pre-existing bug fixed in-batch (QA "fix bugs found" + own-the-codebase); record a §9
+Forks back-ref at close. **Status:** code landed, awaiting Jeff's Debug + Release re-verify (reload no
+longer duplicates the browser entry, plus the full Task 3 verify list).
+
 ## Diagnostic Instrumentation Catalog
 
 | Site | Tag | Purpose | Disposition |
