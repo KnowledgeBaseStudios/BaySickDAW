@@ -10867,7 +10867,7 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
         block.trackRow      = nextRow;
         block.startBar      = startBar;
         block.lengthBars    = lengthBars;                           // ceil'd bar count (for bar-aligned UI)
-        block.lengthBeats   = (float) effContentBeats;              // QA-Ea Task 0c: visible content beats
+        block.setLengthBeats (effContentBeats);                     // QA-Ea Task 0c: visible content beats
         block.patternIndex  = mPM->getCurrentPatternIndex();
         block.layerTrack    = false;
         block.audioFilePath = "Samples/" + wavFile.getFileName();   // relative to project

@@ -3424,7 +3424,7 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     b.trackRow       = jlimit(0, kNumRows - 1, targetRow);
     b.startBar       = (int)snapBar(targetBar);
     b.lengthBars     = lengthBars;
-    b.lengthBeats    = fileBeats;      // QA-E Task 5 (2026-05-15): exact end so
+    b.setLengthBeats (fileBeats);      // QA-E Task 5 (2026-05-15): exact end so
                                        // playback / loop match the source file
     b.audioFilePath  = storedPath;
     b.originalBPM    = originalBPM;
@@ -3495,7 +3495,7 @@ void ArrangementGrid::placeAudioLibraryEntry(int libIdx, int targetRow, float ta
     b.trackRow      = juce::jlimit (0, kNumRows - 1, targetRow);
     b.startBar      = (int) snapBar (targetBar);
     b.lengthBars    = lengthBars;
-    b.lengthBeats   = fileBeats;
+    b.setLengthBeats (fileBeats);
     b.audioFilePath = path;
     b.originalBPM   = originalBPM;
     b.stretchMode   = true;
@@ -4390,7 +4390,7 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
         // lengthBars for display.  The snap mode picker (Bar / Beat / Cell /
         // Steps / None) drives finer-than-bar snapping via snapBar().
         float newLenBars = jmax (0.0625f, endBar - mResizeOrigStart);
-        block.lengthBeats = newLenBars * 4.f;
+        block.setLengthBeats ((double) newLenBars * 4.0);
         block.lengthBars  = jmax (1, (int) std::ceil (newLenBars));
 
         // Automation: rescale timeTicks so control points stay at their absolute positions.
@@ -4447,7 +4447,7 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
             // falls back to startBar * 4) so the moved clip lands exactly on
             // its grid bar with no leftover sub-bar offset from a previous
             // slip drag.
-            b.startBeats = -1.0e6f;
+            b.startTicks = ArrangementBlock::kStartTicksUnset;
             b.trackRow = jlimit(0, kNumRows - 1, mMoveOrigRows[i] + dRows);
         }
         resized(); repaint();
@@ -4566,9 +4566,9 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
             if (newLengthBeats < 0.0625) newLengthBeats = 0.0625;
 
             blk.contentStartSamples = newContent;
-            blk.startBeats          = (float) newStartBeats;
+            blk.setStartBeats (newStartBeats);
             blk.startBar            = (int) std::floor (newStartBeats / 4.0);
-            blk.lengthBeats         = (float) newLengthBeats;
+            blk.setLengthBeats (newLengthBeats);
             blk.lengthBars          = juce::jmax (1,
                                                   (int) std::ceil (newLengthBeats / 4.0));
 
@@ -4631,9 +4631,9 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
                 }
             }
 
-            blk.lengthBeats = (float) newLengthBeats;
+            blk.setLengthBeats (newLengthBeats);
             blk.lengthBars  = juce::jmax (1, (int) std::ceil (newLengthBeats / 4.0));
-            // contentStart + startBeats UNCHANGED.
+            // contentStart + startTicks UNCHANGED.
         }
 
         repaint();

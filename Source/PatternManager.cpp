@@ -1053,7 +1053,7 @@ juce::ValueTree PatternManager::toValueTree() const
         bNode.setProperty("patternIndex",   b.patternIndex,   nullptr);
         bNode.setProperty("startBar",       b.startBar,       nullptr);
         bNode.setProperty("lengthBars",     b.lengthBars,     nullptr);
-        bNode.setProperty("lengthBeats",    b.lengthBeats,    nullptr);   // 2026-04-24: sub-bar precision
+        bNode.setProperty("lengthTicks",    b.lengthTicks,    nullptr);   // QA-Ee: 96 PPQ tick length (-1 = unset)
         bNode.setProperty("layerTrack",     b.layerTrack,     nullptr);
         bNode.setProperty("clipType",       (int) b.clipType, nullptr);
         bNode.setProperty("audioFilePath",  b.audioFilePath,  nullptr);
@@ -1079,12 +1079,12 @@ juce::ValueTree PatternManager::toValueTree() const
         // every pre-Task-0c project unchanged (see deserialize below).
         bNode.setProperty("contentStartSamples",
                           (juce::int64) b.contentStartSamples, nullptr);
-        // QA-Ea Task 0c (2026-05-20 - Option A slip-edit): persist sub-bar
-        // start ONLY when slip-edit has set it (sentinel > -1e5).  Skipping
-        // the property on bar-aligned blocks keeps the XML clean + makes
-        // every pre-Task-0c project byte-identical on round-trip.
-        if (b.startBeats > -1.0e5f)
-            bNode.setProperty("startBeats", b.startBeats, nullptr);
+        // QA-Ee (96 PPQ): persist the sub-bar start in TICKS only when set
+        // (startTicks != kStartTicksUnset).  Skipping the property on bar-
+        // aligned blocks keeps the XML clean.  New format is tick-only; the
+        // old float "startBeats" prop is migrated on load (downgrade unsupported).
+        if (b.startTicks != ArrangementBlock::kStartTicksUnset)
+            bNode.setProperty("startTicks", b.startTicks, nullptr);
         if (b.clipType == ClipType::Automation)
             bNode.addChild(automationLaneToValueTree(b.automationLane), -1, nullptr);
         arrNode.addChild(bNode, -1, nullptr);
@@ -1437,7 +1437,15 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         b.patternIndex   = (int)             bNode.getProperty("patternIndex",   0);
         b.startBar       = (int)             bNode.getProperty("startBar",       0);
         b.lengthBars     = (int)             bNode.getProperty("lengthBars",     4);
-        b.lengthBeats    = (float)           bNode.getProperty("lengthBeats",    -1.f);   // 2026-04-24
+        // QA-Ee (96 PPQ): prefer the tick property; else migrate the legacy
+        // float "lengthBeats" (beats x 96 -> ticks).  Absent/unset -> bars.
+        if (bNode.hasProperty ("lengthTicks"))
+            b.lengthTicks = (juce::int64) bNode.getProperty ("lengthTicks", (juce::int64) ArrangementBlock::kLengthTicksUnset);
+        else
+        {
+            const float lb = (float) bNode.getProperty ("lengthBeats", -1.f);
+            b.lengthTicks  = (lb > 0.f) ? beatsToTicks ((double) lb) : ArrangementBlock::kLengthTicksUnset;
+        }
         b.layerTrack     = (bool)            bNode.getProperty("layerTrack",     true);
         b.clipType       = (ClipType)(int)   bNode.getProperty("clipType",       (int) ClipType::Pattern);
         b.audioFilePath  =                   bNode.getProperty("audioFilePath",  juce::String()).toString();
@@ -1462,11 +1470,17 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         // shift on reopen).
         b.contentStartSamples = (juce::int64) bNode.getProperty (
             "contentStartSamples", (juce::int64) 0);
-        // QA-Ea Task 0c (2026-05-20): restore sub-bar start.  Sentinel -1e6
-        // default = "no sub-bar override; fall back to startBar * 4" -- every
-        // pre-Task-0c project keeps its exact bar-aligned position on reopen.
-        b.startBeats = (float) (double) bNode.getProperty (
-            "startBeats", (double) -1.0e6);
+        // QA-Ee (96 PPQ): restore the sub-bar start.  Prefer the tick property;
+        // else migrate the legacy float "startBeats" (beats x 96 -> ticks),
+        // resolving the old -1e6 sentinel to kStartTicksUnset (fall back to
+        // startBar * 4) so every pre-QA-Ee project keeps its exact position.
+        if (bNode.hasProperty ("startTicks"))
+            b.startTicks = (juce::int64) bNode.getProperty ("startTicks", (juce::int64) ArrangementBlock::kStartTicksUnset);
+        else
+        {
+            const double sb = (double) bNode.getProperty ("startBeats", (double) -1.0e6);
+            b.startTicks    = (sb > -1.0e5) ? beatsToTicks (sb) : ArrangementBlock::kStartTicksUnset;
+        }
         if (b.clipType == ClipType::Automation)
         {
             auto la = bNode.getChildWithName("AutomationLane");

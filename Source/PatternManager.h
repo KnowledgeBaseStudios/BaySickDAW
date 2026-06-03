@@ -1,6 +1,20 @@
 #pragma once
 #include <JuceHeader.h>
 #include "VibesynthConstants.h"
+#include <cmath>
+#include <limits>
+
+// QA-Ee (96 PPQ): beats<->ticks converters.  kTicksPerBeat (a plain int) lives
+// in VibesynthConstants.h; these need juce::int64 so they live here, where every
+// tick consumer already includes PatternManager.h.
+inline juce::int64 beatsToTicks (double beats) noexcept
+{
+    return (juce::int64) std::llround (beats * (double) kTicksPerBeat);
+}
+inline double ticksToBeats (juce::int64 ticks) noexcept
+{
+    return (double) ticks / (double) kTicksPerBeat;
+}
 
 // ── Automation data ───────────────────────────────────────────────────────────
 enum class CurveType { Linear, Stepped, Spline };
@@ -241,25 +255,36 @@ enum class ClipType { Pattern, Audio, Automation };
 // ── Arrangement block ─────────────────────────────────────────────────────────
 struct ArrangementBlock
 {
+    // QA-Ee (96 PPQ): tick-domain sentinels for the start/length fields below.
+    // kStartTicksUnset = "use startBar * 4" (legacy bar precision); a real
+    // slip-edited start may be negative but is never INT64_MIN.  kLengthTicksUnset
+    // (-1) = "use lengthBars * 4".
+    static constexpr juce::int64 kStartTicksUnset  = std::numeric_limits<juce::int64>::min();
+    static constexpr juce::int64 kLengthTicksUnset = -1;
+
     int  trackRow     { 0 };   // which row this block sits on (free-form, user assigns)
     int  patternIndex { 0 };
     int  startBar     { 0 };
     int  lengthBars   { 4 };
-    // 2026-04-24: exact length in beats for sub-bar precision (audio clips
-    // dropped by Record naturally end mid-bar).  -1 = use lengthBars * 4.
-    // User resize in the arrangement snaps to bars + sets this back to -1.
-    float lengthBeats { -1.f };
-    // QA-Ea Task 0c (2026-05-20 - Option A slip-edit + sub-bar precision):
-    // sub-bar precision for the clip's START position in beats.  Sentinel
-    // -1e6 = "use startBar * 4 (legacy int-bar precision)" for backwards-
-    // compatibility with every pre-Task-0c project.  When set, this
-    // overrides startBar*4 for visual rendering and audio scheduling, AND
-    // is allowed to be NEGATIVE (clip's left edge extends into negative-
-    // bar territory after slip-edit drag-left to expose pre-roll audio).
-    // The slip-edit drag updates this + lengthBeats together to keep the
-    // right-end of the clip fixed.  The move handler CLEARS this (resets
-    // to sentinel) so bar-aligned moves stay bar-aligned.
-    float startBeats  { -1.0e6f };
+    // QA-Ee (96 PPQ): exact length in TICKS for sub-bar precision (audio clips
+    // dropped by Record naturally end mid-bar).  kLengthTicksUnset (-1) = use
+    // lengthBars * 4.  setLengthBeats() bridges a beats value -> ticks; a user
+    // resize wanting bar precision sets lengthTicks back to kLengthTicksUnset.
+    juce::int64 lengthTicks { kLengthTicksUnset };
+    // QA-Ee (96 PPQ): sub-bar precision for the clip's START position, in TICKS.
+    // kStartTicksUnset = "use startBar * 4 (legacy bar precision)" for every
+    // pre-Task-0c project.  When set, this overrides startBar*4 for visual
+    // rendering + audio scheduling, AND is allowed to be NEGATIVE (left edge
+    // extends into negative-bar territory after slip-edit drag-left to expose
+    // pre-roll audio).  The slip-edit drag updates this + lengthTicks together
+    // to keep the right-end fixed.  A move CLEARS this (back to kStartTicksUnset)
+    // so bar-aligned moves stay bar-aligned.
+    juce::int64 startTicks { kStartTicksUnset };
+
+    // QA-Ee (96 PPQ): bridge setters so callers keep passing beats while the
+    // stored value is ticks.  setLengthBeats(<= 0) -> unset (fall back to bars).
+    void setStartBeats  (double beats) noexcept { startTicks  = beatsToTicks (beats); }
+    void setLengthBeats (double beats) noexcept { lengthTicks = (beats > 0.0) ? beatsToTicks (beats) : kLengthTicksUnset; }
     bool layerTrack   { true };
 
     // Phase 4B - clip type + audio/automation fields
@@ -316,8 +341,8 @@ struct ArrangementBlock
 // should call this instead so recorded audio clips end at their real length.
 inline double effectiveLengthBeats (const ArrangementBlock& b) noexcept
 {
-    return (b.lengthBeats > 0.f) ? (double) b.lengthBeats
-                                 : (double) b.lengthBars * 4.0;
+    return (b.lengthTicks > 0) ? ticksToBeats (b.lengthTicks)
+                               : (double) b.lengthBars * 4.0;
 }
 
 // QA-Ea Task 0c (2026-05-20): central helper for the "effective start in
@@ -328,8 +353,8 @@ inline double effectiveLengthBeats (const ArrangementBlock& b) noexcept
 // clips render + play from their real sub-bar / negative start.
 inline double effectiveStartBeats (const ArrangementBlock& b) noexcept
 {
-    return (b.startBeats > -1.0e5f) ? (double) b.startBeats
-                                     : (double) b.startBar * 4.0;
+    return (b.startTicks != ArrangementBlock::kStartTicksUnset) ? ticksToBeats (b.startTicks)
+                                                                : (double) b.startBar * 4.0;
 }
 
 inline double effectiveStartBars (const ArrangementBlock& b) noexcept

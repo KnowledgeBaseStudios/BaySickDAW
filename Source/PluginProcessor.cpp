@@ -2324,7 +2324,7 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
 
         AudioClipPlayer p;
         // QA-Ea Task 0c (2026-05-20 - Option A slip-edit + sub-bar):
-        // effectiveStartBeats prefers blk.startBeats when set (sub-bar
+        // effectiveStartBeats prefers blk.startTicks when set (sub-bar
         // precision, possibly negative) and falls back to startBar * 4 for
         // every pre-Task-0c block.  The audio loop math at PluginProcessor.cpp
         // :485-785 already handles negative clipStartBeat correctly
@@ -2332,7 +2332,7 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         // the (un)played pre-bar portion is naturally skipped by the
         // projectStart >= 0 transport).
         p.clipStartBeat  = effectiveStartBeats (blk);
-        // 2026-04-24: prefer block.lengthBeats when set (sub-bar precision
+        // 2026-04-24: prefer block.lengthTicks when set (sub-bar precision
         // from recordings) so playback ends at the real audio end, not the
         // ceil'd bar count.
         p.clipEndBeat    = effectiveStartBeats (blk) + effectiveLengthBeats (blk);

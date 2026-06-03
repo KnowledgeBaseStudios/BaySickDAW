@@ -31,6 +31,13 @@ static constexpr int DEFAULT_STEPS     = 16;   // 4 bars x 4 steps/bar
 static constexpr int DEFAULT_BARS      = 4;
 static constexpr int DEFAULT_SPB       = 4;    // steps per bar
 
+// QA-Ee (96 PPQ): authoritative musical-domain resolution.  One beat (one
+// quarter-note) = 96 ticks.  Every straight AND triplet division lands on an
+// integer tick count (Bar=384, Beat=96, 1/8=48, 1/8-triplet=32, 1/16=24,
+// 1/32=12, 1/32-triplet=8, 1/64=6, 1/64-triplet=4).  Rides ABOVE QA-Ed's
+// int64-sample transport.  beats<->ticks converters live in PatternManager.h.
+static constexpr int kTicksPerBeat = 96;
+
 // ── Bass sounds ───────────────────────────────────────────────────────────────
 static constexpr int NUM_BASS_SOUNDS   = 15;
 

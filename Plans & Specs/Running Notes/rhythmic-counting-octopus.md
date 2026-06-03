@@ -46,3 +46,57 @@ _None yet._
   before QA-Eb" (the §6 arrow + the inserted QA-ClipDrop / QA-TempoMap rows are authoritative;
   actual slot is after QA-ClipDrop, before QA-TempoMap). Jeff approved the one-line coherence fix;
   corrected in the Task 0 commit (kept the SC-i = (b) provenance + noted the original slot).
+
+## 2026-06-03 — Task 1 — Stage 1 source landed (pre-build/verify)
+
+Block data-model migration source complete; awaiting Jeff's Debug-then-Release build + verify
+before commit. No diagnostic instrumentation added (Catalog stays empty).
+
+- **Foundation:** `kTicksPerBeat = 96` in `VibesynthConstants.h`; `beatsToTicks` / `ticksToBeats`
+  converters in `PatternManager.h` (need `juce::int64`, so not in the JUCE-free constants header).
+- **`ArrangementBlock`:** `float startBeats` / `lengthBeats` -> `juce::int64 startTicks` /
+  `lengthTicks`, authoritative.  Sentinels `kStartTicksUnset` (INT64_MIN) / `kLengthTicksUnset`
+  (-1).  `effectiveStartBeats` / `effectiveLengthBeats` rewritten to derive beats from ticks (so
+  every existing reader -- audio snapshot, UI render, hit-test, slip-edit capture -- is unchanged).
+  Bridge setters `setStartBeats(double)` / `setLengthBeats(double)` added.
+- **Serdes (`PatternManager.cpp`):** save writes `startTicks` (only when set) + `lengthTicks`
+  (always); load prefers the tick props, else migrates legacy float `startBeats` / `lengthBeats`
+  (`beats x 96 -> ticks`), resolving the old -1e6 / -1 sentinels.  New format is tick-only
+  (downgrade unsupported).
+- **Writer swaps -> setters:** `BuilderPage.cpp` x7 (import x2 / resize / move-clear-to-unset /
+  left-slip x2 / right-slip) + `StandaloneEditor.cpp` x1 (`commitRecordingResult` Option-Y).
+  `PluginProcessor.cpp` = audit-only (snapshot reads the `effective*` getters, unchanged) + 2
+  stale comments updated to the tick field names.
+- **Audit confirmed:** zero `.startBeats` / `.lengthBeats` field accesses remain tree-wide (only
+  comments + the intentional legacy XML-property-string reads in the migration path).
+- **Notes untouched** this stage (still beat fields + beat serdes; beat-scheduled playback) -
+  migrate in Stage 3 (PianoRoll).
+- Files: `VibesynthConstants.h`, `PatternManager.h`, `PatternManager.cpp`,
+  `Standalone/BuilderPage.cpp`, `Standalone/StandaloneEditor.cpp`, `PluginProcessor.cpp` (comments).
+
+## 2026-06-03 — Task 1 — Stage 1 verify round (findings; commit pending migration confirm)
+
+- **Jeff's Stage-1 verify: "everything passed"** (fresh-project drop-WAV played + survived
+  save/reload -> exercises the new tick block path + serdes round-trip).
+- **Finding A (NOT Stage 1; resolved by Jeff; move-forward per Jeff):** an old project
+  (`Projects/hARD BASS`) loaded with badly broken playback (first note held, notes firing wrong,
+  distorted, playback progressively slower than the 60 BPM set tempo). Deep file-diff (general-
+  purpose agent) vs a working faithful remake (`Untitled Project (65)`) found IDENTICAL note data
+  (40 notes each), tempo, patterns, routing (no feedback loops), and empty effect racks -- the only
+  difference was engine count (broken: 3 sfizz [Guitars+Basses+RustyDrums] + 2 NAM/IR chains + 8
+  Inst strips; working: 1 sfizz [Basses] + 1 NAM). My first hypothesis (extra-engine audio-thread
+  overload) was DISPROVEN by Jeff's tab-delete test (deleting Guitars + RustyDrums tabs changed
+  nothing). Jeff root-caused it: the broken **Basses sfizz PLAYER STATE / CC settings were wrong**
+  (tied to the recent QA-Sfizz / QA-Sfizz-Followup CC-default adjustments); loading a working
+  page-save onto it fixed it. NOT a QA-Ee surface (file has zero arrangement blocks + byte-identical
+  notes -> Stage 1 code never runs on it). Resolved; no saves in the wild can hit it (single-user
+  pre-release). **Route at close:** out-of-scope-resolved row in the close routing table; cross-ref
+  QA-Sfizz (old sfizz player-state may load wrong post-CC-adjustment) -- Jeff's call whether it
+  warrants a §9 Forks back-ref or stays a logged-and-closed verify finding.
+- **Finding B (NOT Stage 1; QA-ClipDrop-adjacent):** drop-fresh-WAV failed inside the troubled
+  `hARD BASS` file but worked cleanly in a fresh project (+ survived save/reload). Consistent with
+  the QA-ClipDrop held-open intermittent clip-drop bug, not Stage 1. Data point for the QA-ClipDrop
+  watch if it recurs.
+- **Migration confirmed (Jeff): all Stage-1 verify scenarios passed**, including opening pre-QA-Ee
+  projects (old->tick migration of arrangement-grid blocks loaded correctly) + fresh-project
+  drop-WAV + save/reload. Stage 1 cleared for commit.
