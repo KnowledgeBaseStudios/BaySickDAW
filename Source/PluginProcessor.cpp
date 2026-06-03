@@ -1148,11 +1148,19 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // their sample; the rest are kept for a later block.
             const bool seekFlush = (mSeekDiscontinuity != nullptr
                                     && mSeekDiscontinuity->exchange (false, std::memory_order_acq_rel));
+            // QA-Ee Task 1c: one-shot loop-wrap flush.  When the loop wrap landed
+            // exactly on a block boundary the prior block was NOT a straddle, so a
+            // note-off sitting at loopEnd matched none of the cases below and the
+            // note hung until the next loop.  In the first post-wrap block, fire
+            // those loop-end offs at sample 0 (mirrors the backward-seek flush).
+            const bool loopFlush = (mLoopWrapped != nullptr
+                                    && mLoopWrapped->exchange (false, std::memory_order_acq_rel));
             {
                 std::vector<PRPendingOff> keep;
                 for (auto& off : mPRPendingOffs)
                 {
                     if (seekFlush)                              { emitOff (off, 0);       continue; }
+                    if (loopFlush && off.beatOff >= loopEndBeat) { emitOff (off, 0);       continue; }
                     if (off.beatOff <= beatStart)               { emitOff (off, 0);       continue; }
                     if (straddle && off.beatOff >= loopEndBeat) { emitOff (off, wrapSmp); continue; }
                     if (off.beatOff < beatEnd)

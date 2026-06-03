@@ -170,6 +170,11 @@ public:
     // to flush pending note-offs on a backward seek (cut held notes on a scrub).
     std::atomic<bool>*  mSeekDiscontinuity { nullptr };
     void setSeekDiscontinuityFlag (std::atomic<bool>* f) noexcept { mSeekDiscontinuity = f; }
+    // QA-Ee Task 1c: the playhead's one-shot loop-wrap flag, wired at startup via
+    // setLoopWrappedFlag().  Consumed once per block by the scheduler to flush a
+    // note-off stranded on the loop point when the wrap landed on a block boundary.
+    std::atomic<bool>*  mLoopWrapped { nullptr };
+    void setLoopWrappedFlag (std::atomic<bool>* f) noexcept { mLoopWrapped = f; }
 
     // QA-RustyMeter Task 3 (2026-05-30): transport-edge tracking for the master
     // LUFS Integrated reset.  Audio-thread-only (processBlock), so plain members.

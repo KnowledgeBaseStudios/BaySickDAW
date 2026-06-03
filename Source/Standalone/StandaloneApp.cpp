@@ -197,7 +197,14 @@ void StandalonePlayHead::advanceBlock(int numSamples, double sampleRate)
         // Exact integer wrap, overshoot PRESERVED (carries into the next pass)
         // so looped content stays sample-locked to absolute time -> no drift.
         if (span > 0 && pos >= loopEndSamp)
+        {
             pos = loopStartSamp + ((pos - loopStartSamp) % span);
+            // QA-Ee Task 1c: signal the scheduler a loop wrap occurred this block
+            // so it flushes any note-off stranded exactly on the loop point in the
+            // first post-wrap block (covers the wrap-on-a-block-boundary case the
+            // scheduler's straddle test misses).
+            mLoopWrapped.store (true);
+        }
     }
     mSamplePos.store (pos);
 }
@@ -215,6 +222,7 @@ void StandalonePlayHead::reset()
     mSamplePos.store (0);
     publishAnchor (0.0, 0, mBPM.load());
     mSeekDiscontinuity.store (false);
+    mLoopWrapped.store (false);   // QA-Ee Task 1c
     mPlaying.store (false);
 }
 void StandalonePlayHead::setBPM(double bpm)
@@ -424,6 +432,7 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     mPlayHead     = std::make_unique<StandalonePlayHead>();
     mProcessor->setPlayHead(mPlayHead.get());
     mProcessor->setSeekDiscontinuityFlag(mPlayHead->getSeekDiscontinuityFlag());   // QA-Ed: backward-seek note-off flush
+    mProcessor->setLoopWrappedFlag(mPlayHead->getLoopWrappedFlag());               // QA-Ee Task 1c: loop-seam note-off flush
 
     mDeviceManager = std::make_unique<juce::AudioDeviceManager>();
 

@@ -154,3 +154,29 @@ Debug+Release verify before commit. No diagnostic instrumentation added (Catalog
     QA-Ed was built to remove).
   - **Cross-ref QA-Ed at close** (carry-forward-via-§9-Forks): QA-Ed scheduler edge case exposed by
     QA-Ee; fixed in-batch as Task 1c.
+
+## 2026-06-03 — Task 1c — loop-seam stuck-note fix (pre-build/soak-verify)
+
+Implemented (Jeff: skip the design gate, proceed -- the change is additive + mirrors an established
+pattern). Verified by Jeff (soak test, Debug + Release): zero hangs over several minutes of looping in both
+pattern + song mode; normal loops + mid-bar notes unaffected. Committing now. No diagnostic
+instrumentation added.
+
+- **Approach:** a one-shot `mLoopWrapped` flag on `StandalonePlayHead`, set the block the playhead
+  wraps and consumed once by the scheduler -- a direct mirror of QA-Ed's `mSeekDiscontinuity`
+  backward-seek flush. In the first post-wrap block the scheduler fires any pending note-off sitting
+  at the loop point (`off.beatOff >= loopEndBeat`) at sample 0, so a note ending on the loop point
+  is released at the seam whether the wrap lands mid-block (straddle, already handled) or exactly on
+  a block boundary (the bug).
+- **Additive / low-risk:** does NOT touch the straddle test, the wrap math, or QA-Ed's
+  integer-exact playhead<->scheduler agreement. New flag + one new off-pass release line. The new
+  release only matches offs at the loop point (same set the straddle rule fires), so it can't cut a
+  legitimate in-progress note early. No double-fire: in the straddle case the off already fired at
+  `wrapSmp` so the post-wrap flush finds nothing; in the boundary case the off was stranded so the
+  flush releases it.
+- **7 edits, 4 files** (mirrors `mSeekDiscontinuity` one-for-one): `StandaloneApp.h` (+`mLoopWrapped`
+  + `getLoopWrappedFlag`), `StandaloneApp.cpp` (set in `advanceBlock` wrap branch + clear in
+  `reset`), `PluginProcessor.h` (+ptr + `setLoopWrappedFlag`), `StandaloneApp.cpp` startup (wire),
+  `PluginProcessor.cpp` off-pass (consume + flush).
+- **Verify = soak test** (intermittent): loop a note sitting on the loop seam for a few minutes in
+  pattern mode AND song mode, confirm zero hangs; plus a normal-loop regression check.

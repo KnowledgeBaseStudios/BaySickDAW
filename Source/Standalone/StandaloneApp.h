@@ -28,6 +28,12 @@ public:
     // pending note-offs (cut held notes on a backward scrub, as before).
     std::atomic<bool>* getSeekDiscontinuityFlag() noexcept { return &mSeekDiscontinuity; }
 
+    // QA-Ee Task 1c: one-shot "just looped" signal.  Set by advanceBlock() the
+    // block the playhead wraps; the scheduler consumes it once to flush a
+    // note-off stranded exactly on the loop point when the wrap landed on a
+    // block boundary (so the prior block was not flagged a straddle).
+    std::atomic<bool>* getLoopWrappedFlag() noexcept { return &mLoopWrapped; }
+
     // Set by PluginProcessor each block so the playhead wraps at the pattern loop point.
     // 0 = no wrap (unlimited advance).
     void   setLoopBeats(double beats)  { mLoopBeats.store(juce::jmax(0.0, beats)); }
@@ -62,6 +68,7 @@ private:
     std::atomic<int>     mTsDen      { 4 };
     std::atomic<double>  mSampleRate { 44100.0 };
     std::atomic<bool>    mSeekDiscontinuity { false };
+    std::atomic<bool>    mLoopWrapped       { false };   // QA-Ee Task 1c: set on loop wrap, consumed by the scheduler
 
     // Tempo anchor: beat = mAnchorBeat + (sample - mAnchorSample) * bpm/(60*sr).
     // Re-based on every BPM change / seek so derived beats stay continuous
