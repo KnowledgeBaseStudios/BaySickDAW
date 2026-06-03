@@ -3365,7 +3365,7 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
         if (resolved.existsAsFile())
             f = resolved;
     }
-    if (!f.existsAsFile()) { ClipDropDiag::alert ("importAudioFile BAIL: file not found", "path=" + path + " (drop produced no clip/page/entry)"); return; }
+    if (!f.existsAsFile()) { ClipDropDiag::log ("importAudioFile BAIL: file not found", "path=" + path + " (drop produced no clip/page/entry)"); return; }
 
     // Read file metadata to get actual duration.
     // Use a local AudioFormatManager - message thread, so file I/O is fine.
@@ -3404,8 +3404,8 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
         storedPath = onImportSampleRequest (f);
         if (storedPath.isEmpty())
         {
-            ClipDropDiag::alert ("importAudioFile BAIL: copy-on-drop returned empty",
-                                  "path=" + path + " (drop produced no clip/page/entry; see the importSample reason just above in the log)");
+            ClipDropDiag::log ("importAudioFile BAIL: copy-on-drop returned empty",
+                                "path=" + path + " (no project = expected, New-Project prompt follows; a real copy-fail WITH a project is alerted in importSample)");
             if (onDropWithoutProject)
                 onDropWithoutProject (f, targetRow, targetBar);
             return;

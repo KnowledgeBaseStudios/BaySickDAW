@@ -126,12 +126,52 @@ it. Close when the 2nd case is caught+fixed OR end-of-QA (not-reproduced).
   2026-05-06) but only re-expressed pre-existing coupling. The independent-clip era Jeff remembers
   predates the re-baseline (squashed) — un-bisectable, stated plainly, not used to deflect.
 
+## 2026-06-02 — Task 2 — SC-I routing decouple (code landed, awaiting build + verify)
+
+- **Render by owner, not trackRow** (`PluginProcessor.cpp` `renderAudioClipsForRow`): removed
+  `if (player.trackRow != row) continue;`; after the Vox/Inst skip, compute `ownerRow` from
+  `routeChannel` (audioInsert range 400-449 → owner page row; legacy/0 → `trackRow` fallback) and
+  `if (ownerRow != row) continue;`. A clip now renders into its owning Clips-page strip regardless
+  of grid row → moving a block never breaks playback. `row` is now the owner row, so the existing
+  mute checks (`audioRowMute[row]` / `isRowAudible(row)`) key on the clip's own strip automatically;
+  unmoved clips (the common case) are byte-identical.
+- **Owner stamped at creation — NO code change:** the post-Task-5 retag (`onAudioClipAdded`) already
+  stamps `blk.routeChannel = audioInsert(row)`; `placeAudioLibraryEntry` stamps `routeChannel = owner`.
+  These become functional (were cosmetic). Block moves leave `routeChannel` untouched → owner preserved.
+- **Old-project load migration** (`PluginProcessor.cpp` `rebuildAudioClipPlayers`): for Audio clips
+  with `routeChannel==0` (pre-retag saves), stamp `blk.routeChannel = audioInsert(trackRow)` ONCE
+  (`auto& blk`, non-const `getBlock`, message-thread mutate; idempotent — once non-zero it never
+  re-derives, so a later move preserves the owner). Placed here, not in `PatternManager` deserialize,
+  to avoid a data-model→VibeGraph include (`MixerChannelIds` is already in scope in PluginProcessor.cpp).
+- **Vox/Inst untouched** — they route via `routeChannel` (600/700) through `renderFilePlayPlayer`,
+  excluded from this path; the Audio (400) / Vox (600) / Inst (700) ranges are disjoint.
+- **Trap refinement (responding to Jeff's no-project-popup finding, 2026-06-02):** Jeff dragged a
+  clip with NO project open and got the copy-empty popup again (log 22:01:31: copy-empty bail with
+  no `importSample` line = `hasProject()` false; the New-Project prompt + retry at 22:01:40 then
+  succeeded — SC-J working). The popup on the EXPECTED no-project case is noise for the long
+  held-open watch, so the popup is now scoped to the genuine 2nd case ONLY: `importSample`
+  `copyFileTo` FAILED while a project is open (`log()`→`alert()`). Demoted to `log()` (no popup):
+  the importAudioFile copy-empty bail, the file-missing bail, the "+ Add New Clip no-new-entry"
+  anomaly. Added an explicit "NO PROJECT OPEN" `log()` in the `onImportSampleRequest` lambda so the
+  no-project case is unambiguous in the log AND flags the case-(b) tell (if it fires while a project
+  IS open, that's the 2nd case = project handle lost mid-session). Net: quiet on normal no-project
+  drags; pops only when the real saved-project copy-failure recurs.
+- Files: `Source/PluginProcessor.cpp` (Task 2 routing) + `Source/ProjectManager.cpp` +
+  `Source/Standalone/BuilderPage.cpp` + `Source/Standalone/StandaloneEditor.cpp` (trap refinement).
+  Awaiting Jeff's Debug+Release verify (drag / move / move-to-unused-row / old-project / Vox-Inst,
+  **with a project OPEN**) before the Task 2 commit. **HIGH-risk hot path.**
+- **VERIFIED PASS (Jeff, Debug + Release, 2026-06-02):** drag + move a clip across grid rows (incl.
+  a never-used row) keeps playing; old project (TESTIES) clips play + strips unchanged; Vox/Inst
+  unaffected; the trap is quiet on no-project drags (New-Project prompt only, no popup). Ready to
+  commit Task 2 + the trap refinement.
+
 ## Diagnostic Instrumentation Catalog
 
 | Site | Tag | Purpose | Disposition |
 |------|-----|---------|-------------|
 | `Source/ClipDropDiag.h` (NEW file) | `[QA-ClipDrop DIAG]` | Diagnostic helper: `log()` append-to-file + `alert()` popup+log (Debug + Release) | Remove at batch close (or Keep per DS-2) |
-| `ProjectManager.cpp` `importSample` (all return paths) | `[QA-ClipDrop DIAG]` | Log WHY copy-on-drop returns empty (no-project / src-missing / copyFileTo-failed) + samplesDir/target | Remove at batch close (or Keep per DS-2) |
+| `ProjectManager.cpp` `importSample` (all return paths) | `[QA-ClipDrop DIAG]` | Log every return path; **`alert()` popup on `copyFileTo` FAILED while a project is open** (the genuine 2nd-case catch) | Remove at batch close (or Keep per DS-2) |
+| `StandaloneEditor.cpp` `onImportSampleRequest` lambda | `[QA-ClipDrop DIAG]` | Explicit "NO PROJECT OPEN" log (copy skipped, New-Project prompt follows); flags the case-(b) tell if it fires with a project open | Remove at batch close (or Keep per DS-2) |
 | `BuilderPage.cpp` `importAudioFile` (enter / 2 `alert()` bails / library-add / callback) | `[QA-ClipDrop DIAG]` | Trace the drop convergence point; popup on file-missing + copy-empty bails | Remove at batch close (or Keep per DS-2) |
 | `BuilderPage.cpp` `filesDropped` (enter / dup-vs-import branch) | `[QA-ClipDrop DIAG]` | Trace the drag-drop entry + branch | Remove at batch close (or Keep per DS-2) |
 | `StandaloneEditor.cpp` `onAddTabRequest` Clip branch (picked / anomaly `alert()` / OK) | `[QA-ClipDrop DIAG]` | `+ Add New Clip` entry; popup when it produces no new library entry | Remove at batch close (or Keep per DS-2) |

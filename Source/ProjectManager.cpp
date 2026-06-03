@@ -519,7 +519,8 @@ juce::String ProjectManager::importSample (const juce::File& externalFile)
 
     if (! externalFile.copyFileTo (target))
     {
-        ClipDropDiag::log ("importSample BAIL", "copyFileTo FAILED; src=" + externalFile.getFullPathName()
+        ClipDropDiag::alert ("importSample: copyFileTo FAILED (project OPEN = the 2nd case)",
+                             "src=" + externalFile.getFullPathName()
                             + " target=" + target.getFullPathName()
                             + " samplesDir=" + samplesDir.getFullPathName()
                             + " samplesDirExists=" + (samplesDir.isDirectory() ? juce::String ("Y") : juce::String ("N")));

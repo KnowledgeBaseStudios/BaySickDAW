@@ -2284,6 +2284,9 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         {
             if (mProjectManager && mProjectManager->hasProject())
                 return mProjectManager->importSample (src);
+            ClipDropDiag::log ("onImportSampleRequest: NO PROJECT OPEN",
+                               "src=" + src.getFullPathName() + " (copy skipped; New-Project prompt follows. "
+                               "If you DO have a project open and still see this, that IS the 2nd case - flag it.)");
             return {};
         };
         // P4: path resolver for stored (possibly relative) audioFilePath.
@@ -3724,10 +3727,9 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
                 mBuilderPage->getGrid()->importAudioFile (f.getFullPathName(), 0, 0.0f);
                 const int libAfter = mPM ? mPM->getNumAudioLibrary() : -1;
                 if (libBefore >= 0 && libAfter == libBefore)
-                    ClipDropDiag::alert ("AddNewClip: no new library entry",
-                                          "'+ Add New Clip' produced no NEW browser/library entry (libCount stayed " + juce::String (libAfter)
-                                          + "). Either the drop bailed (copy-on-drop failed = the bug) OR the file was already in the library (benign dedup). "
-                                            "See Documents/BaySickDAW/clipdrop_diag_log.txt for the cascade trace + which one it was.");
+                    ClipDropDiag::log ("AddNewClip: no new library entry",
+                                        "'+ Add New Clip' produced no NEW browser/library entry (libCount stayed " + juce::String (libAfter)
+                                        + "). Either copy-on-drop failed (alerted in importSample), no project open (New-Project prompt), or a benign dedup - see the log trace.");
                 else
                     ClipDropDiag::log ("AddNewClip OK", "libCount " + juce::String (libBefore) + " -> " + juce::String (libAfter));
             }

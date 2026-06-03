@@ -402,7 +402,6 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
     for (auto& player : mCurrentBlockClipSnapshot->players)
     {
         if (player.streamer == nullptr) continue;
-        if (player.trackRow != row) continue;
 
         // FilePlay clips are handled by the inline pass in processBlock.
         const int routeCh = player.routeChannel;
@@ -412,6 +411,21 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
                               && routeCh <  MixerChannelIds::kInstBase + kMaxInstPages;
         if (isVoxRoute || isInstRoute)
             continue;
+
+        // QA-ClipDrop Task 2 (SC-I): route a clip by its OWNING Clips-page strip
+        // (the audioInsert range == the page's audio row), NOT the grid row it sits
+        // on, so moving the block never breaks playback and nothing attaches to a
+        // grid track.  routeChannel is stamped to audioInsert(ownerPage) at creation
+        // (onAudioClipAdded retag / placeAudioLibraryEntry) and migrated for legacy
+        // projects on load.  Legacy/unset routeChannel (0) falls back to trackRow.
+        // `row` is therefore the owner row below, so the mute/strip checks already
+        // key on the clip's own strip.
+        const int ownerRow =
+            (routeCh >= MixerChannelIds::kAudioBase
+          && routeCh <  MixerChannelIds::kAudioBase + kMaxAudioRows)
+                ? (routeCh - MixerChannelIds::kAudioBase)
+                : player.trackRow;
+        if (ownerRow != row) continue;
 
         const juce::int64 clipStart = (juce::int64) (player.clipStartBeat * ctx.secPerBeat * mSampleRate);
         const juce::int64 clipEnd   = (juce::int64) (player.clipEndBeat   * ctx.secPerBeat * mSampleRate);
@@ -2285,11 +2299,20 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
     auto& newPlayers = newSnap->players;
     for (int i = 0; i < mPatternManager->getNumBlocks(); ++i)
     {
-        const auto& blk = mPatternManager->getBlock(i);
+        auto& blk = mPatternManager->getBlock(i);
         if (blk.clipType != ClipType::Audio || blk.audioFilePath.isEmpty() || blk.muted)
             continue;
         // NOTE: no isRowAudible() gate here - runtime mute/solo is handled in the
         // live render loop so toggling mute does not require a player rebuild.
+
+        // QA-ClipDrop Task 2 (SC-I) load migration: legacy Audio clips saved with
+        // routeChannel==0 routed by their grid row.  Stamp them ONCE with their
+        // owning Clips-page strip (== audioInsert of the row they were created on)
+        // so they route by owner and survive a block move.  Idempotent: once
+        // non-zero it never re-derives, so a later move preserves the owner (the
+        // post-Task-5 retag and placeAudioLibraryEntry already stamp new clips).
+        if (blk.routeChannel == 0)
+            blk.routeChannel = MixerChannelIds::audioInsert (blk.trackRow);
 
         // P4: resolve relative paths like "Samples/kick.wav" against the
         // current project folder.  Absolute paths fall through unchanged
