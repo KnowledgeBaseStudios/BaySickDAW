@@ -199,6 +199,7 @@ public:
     std::function<void(double beatStart,
                        double beatEnd)>           onZoomTo;
     std::function<void()>                         onZoomToggle;
+    std::function<int()>                          onGetSnapDiv; // QA-Ee Stage 3: live read of the global snap div
     std::function<void(double beat)>              onSeek;
 
     std::function<void(int rowIdx)>               onRowAuditionOn;
@@ -300,6 +301,7 @@ private:
     int         rowToY               (int row)      const;
     int         yToRow               (int y)        const;
     double      snapBeat             (double beat)  const;
+    double      snapUnitBeats        ()             const;   // QA-Ee Stage 3: snap unit in beats
     NoteRef     noteAtPos            (int x, int y) const;
     NoteRef     noteNearRightEdge    (int x, int y) const;
     void        eraseAt              (int x, int y);
@@ -442,6 +444,9 @@ public:
     void applyZoom     (float factor);
     void applyZoomAnchored (float factor, int anchorX);   // QA-Ee: cursor-anchored wheel zoom
     void applyVZoom    (float factor);
+
+    // QA-Ee Stage 3: GLOBAL snap accessors (provided by PianoRollPage).
+    void setSnapAccessors (std::function<int()> getter, std::function<void(int)> setter);
     // QA-Ee Stage 2: content-bound dynamic zoom limits (scans all drum rows' notes).
     float contentMaxBars() const;
     float minZoomPPB (float vpW) const;
@@ -490,6 +495,9 @@ private:
     double mBeatOff    { 0.0 };
     int    mSnapDenom  { 16 };
     bool   mSnapEnabled { true };
+    std::function<int()>     mOnGetSnapDiv;   // QA-Ee Stage 3: global snap read
+    std::function<void(int)> mOnSetSnapDiv;   // QA-Ee Stage 3: global snap write
+    int                      mLastSnapDiv { 1 };  // QA-Ee Stage 3: restore-to div for the on/off toggle
     DrumKitGrid::PRTool mActiveTool { DrumKitGrid::PRTool::Draw };
 
     float  mPreZoomPPB     { 80.f };

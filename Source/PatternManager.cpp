@@ -696,9 +696,13 @@ namespace
     juce::ValueTree noteToValueTree (const PianoNote& n)
     {
         juce::ValueTree t ("Note");
-        t.setProperty ("m",  n.midiNote,      nullptr);
-        t.setProperty ("s",  n.startBeat,     nullptr);
-        t.setProperty ("d",  n.durationBeats, nullptr);
+        t.setProperty ("m",  n.midiNote,                     nullptr);
+        // QA-Ee Stage 3b: tick-authoritative timebase (96 PPQ).  Write ticks only,
+        // computed from the tick-aligned editing beats; the legacy `s`/`d` float-beat
+        // props are dropped -- new format is tick-only (downgrade unsupported), matching
+        // the block serdes.
+        t.setProperty ("st", beatsToTicks (n.startBeat),     nullptr);
+        t.setProperty ("dt", beatsToTicks (n.durationBeats), nullptr);
         t.setProperty ("v",  n.velocity,      nullptr);
         if (n.panning      != 0.0f)                  t.setProperty ("p",  n.panning,      nullptr);
         if (n.finePitch    != 0.0f)                  t.setProperty ("f",  n.finePitch,    nullptr);
@@ -714,8 +718,12 @@ namespace
     {
         PianoNote n;
         n.midiNote      = (int)           t.getProperty ("m",  60);
-        n.startBeat     = (double)        t.getProperty ("s",  0.0);
-        n.durationBeats = (double)        t.getProperty ("d",  0.25);
+        // QA-Ee Stage 3b: prefer tick props (`st`/`dt`); else migrate legacy float
+        // beats (`s`/`d`) to the nearest tick.  Both representations land consistent.
+        if (t.hasProperty ("st")) { n.startTicks    = (juce::int64) t.getProperty ("st", (juce::int64) 0);  n.startBeat     = ticksToBeats (n.startTicks); }
+        else                      { n.startBeat     = (double)      t.getProperty ("s",  0.0);              n.startTicks    = beatsToTicks (n.startBeat); }
+        if (t.hasProperty ("dt")) { n.durationTicks = (juce::int64) t.getProperty ("dt", (juce::int64) 24); n.durationBeats = ticksToBeats (n.durationTicks); }
+        else                      { n.durationBeats = (double)      t.getProperty ("d",  0.25);             n.durationTicks = beatsToTicks (n.durationBeats); }
         n.velocity      = (float)(double) t.getProperty ("v",  0.8);
         n.panning       = (float)(double) t.getProperty ("p",  0.0);
         n.finePitch     = (float)(double) t.getProperty ("f",  0.0);

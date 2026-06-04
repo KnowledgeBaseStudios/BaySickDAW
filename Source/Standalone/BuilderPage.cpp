@@ -1768,35 +1768,24 @@ void ArrangementGrid::drawGrid(Graphics& g) const
     int  yTop = kRulerH;
     int  yBot = jmin(yTop + (int)(kNumRows * mEffectiveRowH), b.getHeight());
 
-    // QA-Ee Stage 2: the grid follows the snap mode + zoom so you see exactly the
-    // lines you snap to (Builder is uniform 4-beat-per-bar => 1 bar = 384 ticks).
-    //  - Off (0) / Line (1): the dynamic straight ladder (Bar..1/64); each rung
-    //    is drawn only while its on-screen spacing >= kMinLinePx (lock-to-view,
-    //    the same test Line snap uses).
-    //  - fixed (2..10): Bar + Beat for context + the chosen division (drawn while
-    //    it clears kMinLinePx).  Triplet lines render solid, like straight ones.
-    // Divisions are collected fine -> coarse so the bar line (brightest) draws
-    // last and overdraws finer lines at shared x positions.
+    // QA-Ee Stage 3: the grid is DECOUPLED from the snap division -- it always draws
+    // every ladder rung that clears kMinLinePx, so zooming in reveals down to 1/64
+    // (straight) or 1/6 Step (triplet) regardless of how coarse the snap is.  The
+    // snap TYPE only flips which ladder is used (straight kDynamicSnapLadder vs
+    // kTripletGridLadder); the snap DIVISION is pure magnetism and never caps the
+    // visual.  Builder is uniform 4-beat-per-bar => 1 bar = 384 ticks, so the bar
+    // rung is drawn straight from the ladder here.  Iterated fine -> coarse so the
+    // bar line (brightest) draws last and overdraws finer lines at shared x.
     const int div = onGetSnapDiv ? onGetSnapDiv() : 1;   // default Line
 
-    int divs[8]; int nDivs = 0;
-    if (div >= 2)
-    {
-        const int fg = snapDivToTicks (div);
-        if (fg > 0 && fg != 96 && fg != 384) divs[nDivs++] = fg;   // chosen (finer than a beat)
-        divs[nDivs++] = 96;                                        // Beat context
-        divs[nDivs++] = 384;                                       // Bar
-    }
-    else
-    {
-        for (int i = 5; i >= 0; --i) divs[nDivs++] = kDynamicSnapLadder[i];  // 6,12,24,48,96,384
-    }
+    int        nLad   = 0;
+    const int* ladder = gridLadderForSnap (div, nLad);
 
     int maxBar = (int)mBarOff + b.getWidth() / jmax(1, (int)mPPBar) + 2;
 
-    for (int i = 0; i < nDivs; ++i)
+    for (int i = nLad - 1; i >= 0; --i)
     {
-        const int    gTicks    = divs[i];
+        const int    gTicks    = ladder[i];
         const double spacingPx = (double) gTicks / 384.0 * (double) mPPBar;
         if (spacingPx < (double) kMinLinePx) continue;   // sub-threshold (incl. Bar): declutter at macro zoom-out
 

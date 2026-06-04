@@ -185,6 +185,7 @@ public:
     std::function<void(double beatStart,
                        double beatEnd)>           onZoomTo;     // zoom-to-rect
     std::function<void()>                         onZoomToggle; // RMB in Zoom tool
+    std::function<int()>                          onGetSnapDiv; // QA-Ee Stage 3: live read of the global snap div
     std::function<void(double beat)>              onSeek;       // ruler click → seek playhead
     std::function<void(int midiNote)>             onNoteAudition; // legacy one-shot (kept for callers)
 
@@ -361,6 +362,7 @@ private:
     int         noteToY              (int note)     const;
     int         yToNote              (int y)        const;
     double      snapBeat             (double beat)  const;
+    double      snapUnitBeats        ()             const;   // QA-Ee Stage 3: snap unit in beats
     int         noteIndexAtPos       (int x, int y) const;
     PianoNote*  noteAtPos            (int x, int y) const;
     int         noteIndexNearRightEdge(int x, int y) const;
@@ -561,6 +563,10 @@ public:
     void applyZoomAnchored (float factor, int anchorX);   // QA-Ee: cursor-anchored wheel zoom
     void applyVZoom    (float factor);
     void applyVZoomAnchored (float factor, int anchorY);  // QA-Ee: cursor-anchored vertical zoom
+
+    // QA-Ee Stage 3: wire the GLOBAL Piano Roll snap accessors (provided by
+    // PianoRollPage).  getter -> live div for the grid's snapBeat; setter -> menu writes.
+    void setSnapAccessors (std::function<int()> getter, std::function<void(int)> setter);
     // QA-Ee Stage 2: content-bound dynamic zoom limits (active pattern's notes).
     float contentMaxBars() const;
     float minZoomPPB (float vpW) const;
@@ -640,6 +646,9 @@ private:
     int    mSnapDenom  { 32 };
     int    mNumBars    { 2 };
     bool   mSnapEnabled { true };
+    std::function<int()>     mOnGetSnapDiv;   // QA-Ee Stage 3: global snap read (PianoRollPage)
+    std::function<void(int)> mOnSetSnapDiv;   // QA-Ee Stage 3: global snap write
+    int                      mLastSnapDiv { 1 };  // QA-Ee Stage 3: restore-to div for the on/off toggle
     PianoRollGrid::PRTool mActiveTool { PianoRollGrid::PRTool::Draw };
 
     // Zoom-to-rect undo state

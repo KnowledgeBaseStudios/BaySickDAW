@@ -111,6 +111,11 @@ VibeSynthProcessor::createParameterLayout()
     // grid).  Read live by the BuilderPage grid via onGetSnapDiv.
     addI("Unified_BuilderSnapDiv", "Builder Snap Division", 0, 10, 1);
 
+    // QA-Ee Stage 3: GLOBAL Piano Roll snap division (Int 0..10, same 11-label
+    // scheme).  ONE param drives EVERY piano roll instance (SC-B global snap) --
+    // each grid reads it live via onGetSnapDiv.  Default 1 = Line (matches Builder).
+    addI("Unified_PianoRollSnapDiv", "Piano Roll Snap Division", 0, 10, 1);
+
     // §P4.3 B7 (2026-04-22): legacy bus-EQ param blocks removed.
     // Pre-rack Layers/Bass/Drums EQs are now per-strip on the InsertNode/BusNode
     // (mixer_{kind}_<i>_preeq_mid_eq* / _preeq_side_eq*, registered lazily via

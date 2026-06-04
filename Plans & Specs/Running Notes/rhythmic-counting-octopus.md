@@ -397,3 +397,129 @@ normal scrolling (offset only exceeds content when you deliberately zoom into em
 **Build pending.**  Verify: Ctrl+scroll on Piano Roll + drum kit now holds the beat under the cursor
 (no snap to bar 0), including when anchoring on empty space right of the last note; normal H-scroll +
 the Builder unaffected.
+
+## 2026-06-03 — Task 2 / Stage 3a — Piano Roll + drum kit GLOBAL tick snap (param + grids + wiring)
+
+Stage 3 decisions (Jeff, AskUserQuestion 2026-06-03): Piano Roll snap goes GLOBAL (SC-B) on the same
+11-label scheme as the Builder; Line mode INCLUDED; default = Line; the drum kit grid SHARES the same
+global snap (it's a notes editor on the same page).  Split into 3a (snap) + 3b (note tick serdes).
+Sub-commits per SC-A.
+
+**3a (this pass) -- the global tick snap:**
+- New APVTS Int param `Unified_PianoRollSnapDiv` (0..10, default 1 = Line), registered next to
+  `Unified_BuilderSnapDiv`.
+- Both grids (PianoRollGrid + DrumKitGrid): `snapBeat` rewritten to tick-based reading the live div
+  via a new `onGetSnapDiv` callback (div 0 Off / 1 Line=`dynamicSnapTicks(mPPB*4)` / 2..10 fixed
+  `snapDivToTicks`) -- tick-exact, so triplets land precisely (no 1/3 float drift).  New
+  `snapUnitBeats()` helper; every `4.0/mSnapDenom` site (note length + nudge/quantize/arp/randomize)
+  routed through it (replace_all, 7 PianoRoll + 5 drum-kit sites, all grid methods).
+- Both containers: magnet right-click menu rewritten to the 11-label unified list writing the GLOBAL
+  param via `onSetSnapDiv`; the legacy quantize submenu's `setSnapDenomAndQuantize(denom)` maps the
+  old 4/8/16/32 -> unified div + writes the global param.  New `setSnapAccessors(getter,setter)`
+  stores the accessors + pushes the getter into `mGrid->onGetSnapDiv`.
+- GLOBAL is automatic: every grid reads the SAME param live, so no per-instance push needed.
+  `PianoRollPage::setSnapAccessors` fans the accessors into `mDrumKit` + every roll in `mRolls`, and
+  `registerEngine` wires future rolls.  StandaloneEditor provides the apvts read/write (mirrors the
+  Builder's `Unified_BuilderSnapDiv` wiring).  `mSnapDenom` + `mSnapEnabled` are now dead (left in
+  place, harmless).
+
+**On/off is GLOBAL too (Jeff, AskUserQuestion 2026-06-03):** the Snap button's left-click toggles the
+GLOBAL div (Off <-> the last non-Off div, stored in `mLastSnapDiv`) instead of a local `mSnapEnabled`
+-- so on/off AND resolution are both global + agree with the menu's "Off" (idx 0).  `snapBeat` drops
+the `mSnapEnabled` check (div 0 = the single global on/off).  The button's lit state is set from the
+div on click / menu / `setSnapAccessors`.  KNOWN NIT: a roll you switch TO may show a stale lit state
+until you click/menu its Snap button (no becomes-visible refresh wired) -- the snap itself is always
+correct + global; flagged for a quick follow-up if it bugs.
+
+**Build pending (3a).**  Verify: snap menu on any piano roll OR the drum kit shows the 11 labels
+(Off / Line / Bar / Beat / 1/2 Beat / 1/3 Beat / Step / 1/2 Step / 1/3 Step / 1/4 Step / 1/6 Step),
+default Line; changing it on ONE roll changes ALL of them (global); finer placement (down to 1/64 /
+triplets / Off=any tick); Line follows the zoom.  3b (note `st`/`dt` tick serdes + old-project
+migration) follows after this verifies.
+
+**3a follow-up (Jeff verify):** notes couldn't be made smaller than 1/32 -- a pre-existing hardcoded
+`4.0/32.0` (1/32-note) floor on note resize / draw / slice in BOTH grids (left over from before the
+finer snap).  First pass flat-lowered all 6 to 1 tick -- but Jeff caught that snap ON then let you
+resize BELOW one step (the floor collapsed to 1 tick when the snapped edge hit the note start).  Fix:
+the resize + drag-draw floors are now CONDITIONAL -- snap ON (not Alt, div > 0) -> `snapUnitBeats()`
+(one snap step, so snap-on can't go sub-step); free (Alt-drag or div 0 = Off) -> 1 tick
+(`1.0/kTicksPerBeat`).  The slice min-fragment stays 1 tick (its point already snaps to the grid, so
+the snap governs fragment size).  LEFT as-is: the two `kGraceLen = 1/32` flam grace-note lengths
+(intentional) + the arpeggiate note-duration floor (`jmax(0.125,..)`, an auto-tool default).
+
+## 2026-06-04 — Task 2 / Stage 3 — Grid renderer unified on snap ladders (decoupled from snap) + triplet even-scaling
+
+**Problem (Jeff verify):** the Piano Roll + Drum Kit grids never drew finer than 1/32 in ANY snap
+mode -- they used a hardcoded `{8,4,2,1}` per-beat subdivision table totally separate from the snap
+engine, so a note could snap to 1/64 (or finer) with no grid line under it ("snap to open space").
+
+**Spec evolution (Jeff, this session):** first idea (cap the grid AT the snap division) was REVERTED
+-- wrong.  Final spec: the visual grid is fully DECOUPLED from the snap.  Snap = pure magnetism (where
+notes/blocks land); the grid draws straight subdivisions Bar->1/64 purely by zoom/pixel room,
+independent of the snap division.  The snap TYPE (straight vs triplet) picks which ladder is drawn;
+the snap DIVISION never caps the visual.
+
+**Implemented -- single source of truth in `VibesynthConstants.h`:**
+- `kTripletGridLadder = {384,96,32,16,8,4}` (triplet ladder, ticks) beside the straight
+  `kDynamicSnapLadder = {384,96,48,24,12,6}`.
+- `isTripletSnapDiv(div)` (1/3 Beat=5, 1/3 Step=8, 1/6 Step=10) + `gridLadderForSnap(div, count)` ->
+  returns the straight or triplet ladder for the active snap.  All three grids + the snap key off these.
+- `BuilderPage::drawGrid`: dropped the fixed-snap cap; iterates `gridLadderForSnap()` (full ladder,
+  zoom-gated).  `PianoRoll` + `DrumKitGrid`: dropped their `{8,4,2,1}` tables; same shared-ladder loop
+  (skip the 384 bar rung -- bars are a separate TS-aware pass; the Builder draws bar from the ladder
+  since it's uniform 4/4).
+
+**Jeff calls this session:**
+- Builder LEFT AS-IS -- its straight grid caps at 16 cells/bar (`kMinLinePx=12`); Jeff confirmed FL's
+  playlist caps at 16/bar, so that's correct.  Did NOT lower the Builder grid threshold.  Snap
+  thresholds untouched (Line snap stays `kMinLinePx=12`); grid + snap stay decoupled.
+- Triplet even-scaling: the first triplet ladder `{384,96,32,8,4}` jumped 3->12 lines/beat (4x --
+  "split into 4, not triplets").  Added the 1/16-triplet rung (16t) -> `{384,96,32,16,8,4}` so it
+  doubles evenly 3->6->12->24/beat.  The 16t rung is grid-only (no snap target; snap set is
+  1/8T/1/32T/1/64T) -- every actual snap target still lands on a drawn line.  Jeff: per-bar counts now
+  correct; accepts the visual sub-split, moving on.
+
+**No separate commit yet** -- bundles with Stage 3a for the Stage 3 source commit.
+
+## Out-of-scope findings — discovered during QA-Ee, ROUTE AT BATCH CLOSE (placement = Jeff's call)
+
+Not QA-Ee scope (grid/snap).  Jeff flagged 2026-06-04 to route at close (§9 Forks -> batch(es); slot
+is a spec call):
+1. **Quit save-prompt dialog is draggable.**  On app close, click-and-hold grabs the save-confirmation
+   box and drags it around.  Should be a fixed, centered modal -- not movable.  (Likely the
+   close-confirm AlertWindow/DialogWindow needs its movable behavior disabled + centered.)
+2. **"Cut Self" doesn't work on Layers or Bass.**  Works on drum-kit grid entries; not on Layers/Bass.
+   Needs program-wide investigation (confirm the exact feature + why it's drum-kit-only) when routed.
+3. **Layers don't auto-name from the loaded patch.**  Patch name not propagating to (a) the Layers tab
+   dropdown, (b) the piano-roll picker dropdown, or (c) the piano-roll top-right patch/player name tag.
+   Drums already auto-rename on sound load; Layers should match.
+
+## 2026-06-04 — Task 3 / Stage 3b — PianoNote tick serdes + legacy migration (pre-build)
+
+Completes Stage 3 (3a global snap + the grid-renderer unification already landed this session).  Mirrors
+the Stage 1 block tick serdes, for notes.
+- `PianoNote` (PatternManager.h): added `int64 startTicks {0}` / `durationTicks {24}` -- the 96 PPQ
+  on-disk representation.  startBeat/durationBeats remain the in-memory editing authority (tick-aligned
+  by the snap engine); the tick fields are filled on load, and `st`/`dt` are derived from the live beats
+  at save.
+- `noteToValueTree` (PatternManager.cpp): writes `st = beatsToTicks(startBeat)` / `dt =
+  beatsToTicks(durationBeats)`; legacy float-beat `s`/`d` props dropped -- new format is tick-only
+  (downgrade unsupported, matching the block serdes).
+- `noteFromValueTree`: tick-first (`st`/`dt` -> ticks + beats) else legacy (`s`/`d` float beats ->
+  nearest tick via beatsToTicks).  So pre-QA-Ee projects migrate to the nearest 96 PPQ tick on load, and
+  re-saving upgrades them to tick format.
+- `PianoRollData.snapDenominator` serdes LEFT as-is (dead per SC-B global snap; harmless; removing it is
+  out of scope).
+
+**Build pending (3b).**  Verify: (1) load a pre-QA-Ee project -- notes appear at the same positions +
+play correctly (grid-aligned notes unchanged; free-placed notes land on the nearest tick); (2) make +
+save + reload a new pattern -- notes round-trip exactly.  After verify, the whole Stage 3 (3a + grid
+unification + 3b) commits as one via /draft-commit.
+
+**3b build fix (build round 1 failed):** first pass put `startTicks`/`durationTicks` in the MIDDLE of
+`PianoNote` (right after `durationBeats`), which shifted its positional aggregate-initializers -- 4 sites
+in PianoRoll.cpp (388 / 1382 / 1546 / 1736), shape `PianoNote{ midiNote, startBeat, durationBeats,
+velocity, ... }` -- so `velocity` landed in the int64 slot (C2397 narrowing) and `NoteType` in a float
+slot (C2665).  Fix: relocated both fields to the END of the struct (trailing fields just take defaults in
+those brace-inits; the serdes sets them by name, position-independent) + a KEEP-LAST comment so they're
+not moved back.  Rebuild pending.

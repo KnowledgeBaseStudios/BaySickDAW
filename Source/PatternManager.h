@@ -75,6 +75,16 @@ struct PianoNote
     //   (51 - midiNote); C2 full-roll mode will use slotIndex independently
     //   from midiNote so a slot can play any pitch.
     int      slotIndex     { -1 };
+    // QA-Ee Stage 3b: 96 PPQ tick representation, authoritative on disk (serialized as
+    // `st`/`dt`).  startBeat/durationBeats remain the in-memory editing values (kept
+    // tick-aligned by the snap engine); `st`/`dt` are derived from them at save, and
+    // these fields are filled from `st`/`dt` (or migrated legacy beats) on load.
+    // KEEP THESE LAST: positional aggregate-inits elsewhere init the leading fields
+    // (PianoNote{ midiNote, startBeat, durationBeats, velocity, ... }); trailing fields
+    // just take their defaults there.  Inserting mid-struct breaks those brace-inits.
+    // Defaults mirror startBeat 0 / durationBeats 0.25 (24t = 1/16 note).
+    juce::int64 startTicks    { 0 };
+    juce::int64 durationTicks { 24 };
 };
 
 struct PianoRollData

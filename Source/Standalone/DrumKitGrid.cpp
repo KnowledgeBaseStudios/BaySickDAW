@@ -440,9 +440,26 @@ int    DrumKitGrid::yToRow (int y)       const
 
 double DrumKitGrid::snapBeat(double beat) const
 {
-    if (! mSnapEnabled) return beat;
-    double snap = 4.0 / mSnapDenom;
-    return std::round(beat / snap) * snap;
+    // QA-Ee Stage 3: tick-based snap on the global Unified_PianoRollSnapDiv.
+    // div 0 = Off, 1 = Line (finest visible rung at this zoom), 2..10 = fixed.
+    const int div = onGetSnapDiv ? onGetSnapDiv() : 1;
+    if (div <= 0) return beat;   // div 0 = Off (the single GLOBAL on/off)
+    const int divTicks = (div == 1) ? dynamicSnapTicks ((double) mPPB * 4.0)
+                                    : snapDivToTicks (div);
+    if (divTicks <= 0) return beat;
+    const double t = beat * (double) kTicksPerBeat;
+    return std::round (t / (double) divTicks) * (double) divTicks / (double) kTicksPerBeat;
+}
+
+// QA-Ee Stage 3: current snap unit in beats (new-hit length + tool spacing).
+double DrumKitGrid::snapUnitBeats() const
+{
+    const int div = onGetSnapDiv ? onGetSnapDiv() : 1;
+    int divTicks = (div == 1) ? dynamicSnapTicks ((double) mPPB * 4.0)
+                 : (div >= 2) ? snapDivToTicks (div)
+                 : kTicksPerBeat / 4;                       // Off -> 1/16 note
+    if (divTicks <= 0) divTicks = kTicksPerBeat / 4;
+    return (double) divTicks / (double) kTicksPerBeat;
 }
 
 void DrumKitGrid::setSnapEnabled(bool b) { mSnapEnabled = b; }
@@ -903,7 +920,7 @@ void DrumKitGrid::nudgeSelection(int snapUnits, int rowDelta)
 {
     if (mPM == nullptr || mSelection.empty()) return;
     beginEdit("Nudge");
-    const double snap = 4.0 / mSnapDenom;
+    const double snap = snapUnitBeats();
 
     // Snapshot original (row, beat, midi, vel, dur, ...) so we can rebuild.
     struct Tmp { int oldRow, newRow; PianoNote n; };
@@ -1032,7 +1049,7 @@ void DrumKitGrid::sliceNotesOnLine(Point<int> start, Point<int> end)
             if (lineX > x1 + 2 && lineX < x2 - 2)
             {
                 const double sliceBeat = snapBeat(xToBeat(lineX));
-                const double minDur    = 4.0 / 32.0;
+                const double minDur    = 1.0 / (double) kTicksPerBeat;  // QA-Ee Stage 3: min slice fragment = 1 tick
                 if (sliceBeat > n.startBeat + minDur
                     && sliceBeat < n.startBeat + n.durationBeats - minDur)
                 {
@@ -1572,7 +1589,7 @@ void DrumKitGrid::mouseDrag(const MouseEvent& e)
             PianoNote n;
             n.midiNote      = kKitMidiNote;
             n.startBeat     = curBeat;
-            n.durationBeats = 4.0 / mSnapDenom;
+            n.durationBeats = snapUnitBeats();
             n.velocity      = 0.8f;
             n.type          = mNewNoteType;
             notes.push_back(n);
@@ -1690,7 +1707,10 @@ void DrumKitGrid::mouseDrag(const MouseEvent& e)
         if (roll != nullptr && mResizeRef.idx < (int) roll->notes.size())
         {
             auto& n = roll->notes[mResizeRef.idx];
-            const double minDur = 4.0 / 32.0;
+            // QA-Ee Stage 3: snap ON -> min one snap step; free (Alt / Off) -> 1 tick.
+            const int    rSnapDiv = onGetSnapDiv ? onGetSnapDiv() : 1;
+            const double minDur   = (e.mods.isAltDown() || rSnapDiv <= 0)
+                                      ? (1.0 / (double) kTicksPerBeat) : snapUnitBeats();
             if (mResizingFromLeft)
             {
                 // 2026-04-26 (D-7): drag the LEFT edge - origEnd stays put.
@@ -1784,8 +1804,11 @@ void DrumKitGrid::mouseUp(const MouseEvent&)
             // 2026-04-26 (D-7): click memory - click-only placement uses the
             // remembered duration; drag-to-place uses the dragged length.
             // Drum hits don't carry slide / portamento so type isn't tracked.
+            // QA-Ee Stage 3: snap ON -> min one snap step; Off -> 1 tick.
+            const double drawMin = (onGetSnapDiv && onGetSnapDiv() <= 0)
+                                     ? (1.0 / (double) kTicksPerBeat) : snapUnitBeats();
             const double dur = mDrawHasDragged
-                ? jmax(4.0 / 32.0, mDrawEnd - mDrawStart)
+                ? jmax(drawMin, mDrawEnd - mDrawStart)
                 : mClickMemoryDur;
             // 2026-04-26 (D-7 sub-4 EC-1, revised): drawing a new hit INSIDE
             // an active ruler time-range clears the existing selection but
@@ -2075,27 +2098,36 @@ void DrumKitGrid::paint(Graphics& g)
         g.drawHorizontalLine(y + rowH - 1, 0.f, (float) b.getWidth());
     }
 
-    // Multi-level vertical grid (zoom-adaptive subdivisions).
+    // QA-Ee Stage 3: shared straight/triplet ladder, zoom-adaptive depth (same rule
+    // as Piano Roll + Builder -- one source of truth).  Snap TYPE picks the ladder;
+    // the snap DIVISION never caps depth (every rung clearing 5px is drawn, down to
+    // 1/64 straight / 1/6 Step triplet).  Bar lines are the separate TS-aware pass
+    // below, so the 384t bar rung is skipped.  Fine -> coarse so coarser overdraw.
     static constexpr float kMinLineSpacing = 5.f;
-    struct GridLevel { int perBeat; Colour col; };
-    const GridLevel gridLevels[] = {
-        { 8, VC::Accent.withAlpha(0.10f) },
-        { 4, VC::Accent.withAlpha(0.18f) },
-        { 2, VC::Accent.withAlpha(0.30f) },
-        { 1, VC::Accent.withAlpha(0.50f) },
-    };
-    for (const auto& lv : gridLevels)
     {
-        const float spacing = mPPB / (float) lv.perBeat;
-        if (spacing < kMinLineSpacing) continue;
-        const double step      = 1.0 / lv.perBeat;
-        const double startBeat = std::floor(mBeatOff * lv.perBeat) / lv.perBeat;
-        g.setColour(lv.col);
-        for (double beat = startBeat; beat <= mBeatOff + b.getWidth() / mPPB + step; beat += step)
+        const int  snapDiv = onGetSnapDiv ? onGetSnapDiv() : 1;
+        int        nLad    = 0;
+        const int* ladder  = gridLadderForSnap(snapDiv, nLad);
+        for (int i = nLad - 1; i >= 0; --i)
         {
-            const int x = beatToX(beat);
-            if (x < 0 || x > b.getWidth()) continue;
-            g.drawVerticalLine(x, (float) rowsTop, (float) b.getHeight());
+            const int gt = ladder[i];
+            if (gt >= 384) continue;                                  // bar => separate TS-aware pass
+            const double stepBeats = (double) gt / (double) kTicksPerBeat;
+            const float  spacing   = mPPB * (float) stepBeats;
+            if (spacing < kMinLineSpacing) continue;
+            const float alpha = (gt >= 96) ? 0.50f
+                              : (gt >= 32) ? 0.30f
+                              : (gt >= 24) ? 0.18f
+                              : (gt >= 8)  ? 0.10f
+                              :              0.07f;
+            g.setColour(VC::Accent.withAlpha(alpha));
+            const double startBeat = std::floor(mBeatOff / stepBeats) * stepBeats;
+            for (double beat = startBeat; beat <= mBeatOff + b.getWidth() / mPPB + stepBeats; beat += stepBeats)
+            {
+                const int x = beatToX(beat);
+                if (x < 0 || x > b.getWidth()) continue;
+                g.drawVerticalLine(x, (float) rowsTop, (float) b.getHeight());
+            }
         }
     }
     // Bar lines (every patternBpb PPQ beats - pattern's intrinsic TS).
@@ -2348,7 +2380,7 @@ void DrumKitGrid::toolQuantize()
     auto targets = getWorkingSet();
     if (targets.empty()) return;
     beginEdit("Quantize");
-    const double snap = 4.0 / mSnapDenom;
+    const double snap = snapUnitBeats();
     for (auto ref : targets)
     {
         const int pi = rowToPageIndex(ref.row);
@@ -2771,7 +2803,7 @@ void DrumKitGrid::toolRandomize()
     if (targets.empty()) return;
     beginEdit("Randomize");
     Random rng;
-    const double snap = 4.0 / mSnapDenom;
+    const double snap = snapUnitBeats();
     for (auto ref : targets)
     {
         const int pi = rowToPageIndex(ref.row);
@@ -3111,20 +3143,31 @@ DrumKitContainer::DrumKitContainer()
     mMagnetBtn->setToggleState(true, dontSendNotification);
     mMagnetBtn->setTooltip("Snap on/off - right-click to set resolution");
     mMagnetBtn->onClick = [this] {
-        mSnapEnabled = mMagnetBtn->getToggleState();
-        if (mGrid) mGrid->setSnapEnabled(mSnapEnabled);
+        // QA-Ee Stage 3: the Snap button toggles the GLOBAL snap (Off <-> last div).
+        if (mMagnetBtn->getToggleState()) {
+            if (mOnSetSnapDiv) mOnSetSnapDiv(mLastSnapDiv > 0 ? mLastSnapDiv : 1);
+        } else {
+            const int cur = mOnGetSnapDiv ? mOnGetSnapDiv() : 1;
+            if (cur != 0) mLastSnapDiv = cur;
+            if (mOnSetSnapDiv) mOnSetSnapDiv(0);
+        }
         if (mGrid) mGrid->grabKeyboardFocus();
     };
     mMagnetBtn->onRightMouseDown = [this](const MouseEvent&) {
+        // QA-Ee Stage 3: the 11-label unified scheme writes the GLOBAL snap div.
         PopupMenu m;
-        m.addItem(4,  "1/4");
-        m.addItem(8,  "1/8");
-        m.addItem(16, "1/16");
-        m.addItem(32, "1/32");
+        const int cur = mOnGetSnapDiv ? mOnGetSnapDiv() : 1;
+        for (int i = 0; i < kNumUnifiedSnapDivs; ++i)
+            m.addItem(i + 1, kUnifiedSnapLabels[i], true, i == cur);
         m.showMenuAsync(PopupMenu::Options().withTargetComponent(mMagnetBtn.get()),
             [this](int r) {
-                if (r > 0) { mSnapDenom = r; syncScrollState(); }
-                if (mGrid) mGrid->grabKeyboardFocus();
+                if (r > 0 && mOnSetSnapDiv) {
+                    const int d = r - 1;
+                    if (d != 0) mLastSnapDiv = d;
+                    mOnSetSnapDiv(d);
+                    if (mMagnetBtn) mMagnetBtn->setToggleState(d != 0, juce::dontSendNotification);
+                }
+                if (mGrid) { mGrid->repaint(); mGrid->grabKeyboardFocus(); }
             });
     };
     addAndMakeVisible(*mMagnetBtn);
@@ -3503,9 +3546,27 @@ void DrumKitContainer::setLaneVisible(bool v)
 
 void DrumKitContainer::setSnapDenomAndQuantize(int denom)
 {
-    mSnapDenom = denom;
-    syncScrollState();
+    // QA-Ee Stage 3: legacy quantize-submenu denom (4/8/16/32) -> unified div,
+    // written to the GLOBAL snap; then quantize the selection to it.
+    const int div = (denom <= 4) ? 3 : (denom <= 8) ? 4 : (denom <= 16) ? 6 : 7;
+    if (mOnSetSnapDiv) mOnSetSnapDiv(div);
     if (mGrid) mGrid->toolQuantize();
+}
+
+// QA-Ee Stage 3: PianoRollPage wires these so the grid reads the global snap
+// param live (snapBeat) + the magnet menu writes it.
+void DrumKitContainer::setSnapAccessors (std::function<int()> getter,
+                                         std::function<void(int)> setter)
+{
+    mOnGetSnapDiv = std::move (getter);
+    mOnSetSnapDiv = std::move (setter);
+    if (mGrid) mGrid->onGetSnapDiv = mOnGetSnapDiv;
+    if (mOnGetSnapDiv)
+    {
+        const int cur = mOnGetSnapDiv();
+        if (cur != 0) mLastSnapDiv = cur;
+        if (mMagnetBtn) mMagnetBtn->setToggleState (cur != 0, juce::dontSendNotification);
+    }
 }
 
 void DrumKitContainer::paint(Graphics& g)

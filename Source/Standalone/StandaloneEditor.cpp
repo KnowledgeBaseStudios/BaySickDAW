@@ -1459,6 +1459,19 @@ void StandaloneEditor::buildDefaultTabs()
     {
         mPianoRollPage->setPlayHead    (&mPlayHead);
         mPianoRollPage->isSongMode     = [this] { return mProcessor.isSongMode(); };
+        // QA-Ee Stage 3: GLOBAL Piano Roll snap (Unified_PianoRollSnapDiv) read/write,
+        // fanned into every roll + the drum kit so all share one snap.
+        mPianoRollPage->setSnapAccessors (
+            [this]() -> int {
+                if (auto* p = mProcessor.apvts.getRawParameterValue ("Unified_PianoRollSnapDiv"))
+                    return (int) p->load();
+                return 1;
+            },
+            [this](int div) {
+                if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                        mProcessor.apvts.getParameter ("Unified_PianoRollSnapDiv")))
+                    p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 ((float) div));
+            });
         mPianoRollPage->setUndoContext (makeUndoContext());
         wirePianoRollPageKitView (mPianoRollPage);
 
