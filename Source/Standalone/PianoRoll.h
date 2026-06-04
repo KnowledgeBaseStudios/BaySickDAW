@@ -174,9 +174,11 @@ public:
 
     // ── Callbacks back up to container ────────────────────────────────────
     std::function<void(float deltaPPB)>          onZoom;
+    std::function<void(float factor, int anchorX)> onZoomAnchored; // QA-Ee: cursor-anchored wheel zoom
     std::function<void(double dBeats)>            onHScroll;
     std::function<void(int dNotes)>               onVScroll;
     std::function<void(float factor)>             onVZoom;      // Alt+scroll → vertical zoom
+    std::function<void(float factor, int anchorY)> onVZoomAnchored; // QA-Ee: cursor-anchored vertical zoom
     std::function<void()>                         onNotesChanged;
     std::function<void(PRTool)>                   onToolChanged;
     std::function<void()>                         onUndoRedoStateChanged;
@@ -556,7 +558,13 @@ public:
     // ── Tool / zoom (also invoked by menu bar) ────────────────────────────
     void setActiveTool (PianoRollGrid::PRTool t);
     void applyZoom     (float factor);
+    void applyZoomAnchored (float factor, int anchorX);   // QA-Ee: cursor-anchored wheel zoom
     void applyVZoom    (float factor);
+    void applyVZoomAnchored (float factor, int anchorY);  // QA-Ee: cursor-anchored vertical zoom
+    // QA-Ee Stage 2: content-bound dynamic zoom limits (active pattern's notes).
+    float contentMaxBars() const;
+    float minZoomPPB (float vpW) const;
+    float maxZoomPPB (float vpW) const;
 
     // ── Edit actions (invoked by menu bar) ────────────────────────────────
     void transposeSelection     (int semitones);

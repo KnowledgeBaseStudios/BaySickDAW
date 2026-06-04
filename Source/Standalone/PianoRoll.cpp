@@ -1834,14 +1834,16 @@ void PianoRollGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails&
     if (e.mods.isAltDown() && !e.mods.isCtrlDown())
     {
         float factor = (wheel.deltaY > 0.f) ? 1.15f : (1.f / 1.15f);
-        if (onVZoom) onVZoom(factor);
+        if (onVZoomAnchored) onVZoomAnchored(factor, e.y);   // anchor vertical zoom to cursor
+        else if (onVZoom)    onVZoom(factor);
         return;
     }
 
     if (e.mods.isCtrlDown())
     {
         float factor = (wheel.deltaY > 0.f) ? 1.15f : (1.f / 1.15f);
-        if (onZoom) onZoom(mPPB * factor - mPPB);
+        if (onZoomAnchored) onZoomAnchored(factor, e.x);   // anchor zoom to cursor
+        else if (onZoom)    onZoom(mPPB * factor - mPPB);
     }
     else if (e.mods.isShiftDown())
     {
@@ -1921,9 +1923,12 @@ void PianoRollGrid::paint(Graphics& g)
             g.drawVerticalLine(x, (float)mNoteYOffset, (float)b.getHeight());
         }
     }
-    // C.5b: Bar lines at multiples of (tsNum * 4 / tsDen) PPQ beats - always
-    // shown, drawn on top.  4/4 = 4-beat bars, 3/4 = 3, 6/8 = 3, 5/4 = 5, 7/8 = 3.5.
+    // C.5b: Bar lines at multiples of (tsNum * 4 / tsDen) PPQ beats, drawn on
+    // top.  4/4 = 4-beat bars, 3/4 = 3, 6/8 = 3, 5/4 = 5, 7/8 = 3.5.
+    // QA-Ee Stage 2: declutter -- stop drawing bar lines once they fall below
+    // kMinLinePx (Line snap stays active; only rendering is culled).
     const double barBpb = (double) juce::jmax (1, mTsNum) * 4.0 / (double) juce::jmax (1, mTsDen);
+    if ((double) mPPB * barBpb >= (double) kMinLinePx)
     {
         const double startBar = std::floor (mBeatOff / barBpb);
         double startBeat = startBar * barBpb;
@@ -2667,7 +2672,9 @@ PianoRollContainer::PianoRollContainer()
 
     // ── Wire grid callbacks ───────────────────────────────────────────────
     mGrid->onZoom    = [this](float delta) { applyZoom((mPPB + delta) / mPPB); };
+    mGrid->onZoomAnchored = [this](float f, int x) { applyZoomAnchored(f, x); };
     mGrid->onVZoom   = [this](float factor) { applyVZoom(factor); };
+    mGrid->onVZoomAnchored = [this](float f, int y) { applyVZoomAnchored(f, y); };
     mGrid->onHScroll = [this](double dB)   { mBeatOff = jmax(0.0, mBeatOff + dB); syncScrollState(); };
     mGrid->onVScroll = [this](int dN) {
         if (mFixedRange) return;
@@ -2703,10 +2710,10 @@ PianoRollContainer::PianoRollContainer()
         mPreZoomBeatOff = mBeatOff;
         mZoomedIn       = true;
         double range = jmax(0.01, beatEnd - beatStart);
-        // Match applyZoom limits: 8 bars full-out, 1 bar full-in.
+        // QA-Ee Stage 2: match applyZoom's content-bound dynamic limits.
         const float vpW    = (float)jmax(1, mGrid->getWidth());
-        const float minPPB = vpW / (4.f * 8.f);
-        const float maxPPB = vpW / (4.f * 1.f);
+        const float minPPB = minZoomPPB (vpW);
+        const float maxPPB = maxZoomPPB (vpW);
         mPPB     = jlimit(minPPB, maxPPB, vpW / (float)range);
         mBeatOff = beatStart;
         syncScrollState();
@@ -2938,14 +2945,52 @@ void PianoRollContainer::setPlayheadBeat(double beat)
     mGrid->setPlayheadBeat(beat);
 }
 
+// QA-Ee Stage 2 (content-bound dynamic zoom): furthest-right note edge in the
+// active pattern, in bars (4 beats/bar).  Drives the zoom-OUT minimum.
+float PianoRollContainer::contentMaxBars() const
+{
+    double maxBeats = 0.0;
+    if (mData)
+        for (const auto& n : mData->notes)
+            maxBeats = jmax(maxBeats, n.startBeat + n.durationBeats);
+    return (float) jmax(0.0, maxBeats / 4.0);
+}
+
+// Zoom-OUT minimum (px/beat).  Empty baseline = vpW / kDefaultPianoRollEmptyPx
+// (monitor-dependent); grows with notes + a 1-bar pad.  4 beats/bar.
+float PianoRollContainer::minZoomPPB (float vpW) const
+{
+    const float defaultBars = vpW / kDefaultPianoRollEmptyPx;
+    const float maxBars     = jmax (defaultBars, contentMaxBars() + kPianoRollZoomPadBars);
+    return vpW / (4.f * jmax (1.f, maxBars));
+}
+
+// Zoom-IN maximum (px/beat) -- tick-level micro-editing (kMaxZoomInBeatsAcross
+// beats fill the viewport at deepest zoom).
+float PianoRollContainer::maxZoomPPB (float vpW) const
+{
+    return vpW / jmax (0.01f, kMaxZoomInBeatsAcross);
+}
+
 void PianoRollContainer::applyZoom(float factor)
 {
-    // Viewport-relative limits: full out = 8 bars, full in = 1 bar.
-    // mPPB is pixels per beat; 4 beats per bar in 4/4.
+    // QA-Ee Stage 2: content-bound dynamic limits.  Zoom-out expands with the
+    // furthest note (+1-bar pad), floored at a monitor-dependent empty baseline;
+    // zoom-in reaches tick level.  mPPB is pixels per beat; 4 beats per bar.
     float vpW = mGrid ? (float)jmax(1, mGrid->getWidth()) : 800.f;
-    float minPPB = vpW / (4.f * 8.f);   // 8 bars fill the viewport
-    float maxPPB = vpW / (4.f * 1.f);   // 1 bar fills the viewport
+    float minPPB = minZoomPPB (vpW);
+    float maxPPB = maxZoomPPB (vpW);
     mPPB = jlimit(minPPB, maxPPB, mPPB * factor);
+    syncScrollState();
+}
+
+// QA-Ee: cursor-anchored zoom -- keeps the beat under the mouse fixed (FL Ctrl+scroll feel).
+void PianoRollContainer::applyZoomAnchored(float factor, int anchorX)
+{
+    const float vpW = mGrid ? (float)jmax(1, mGrid->getWidth()) : 800.f;
+    const double anchorBeat = mBeatOff + (double) anchorX / jmax(1.f, mPPB);
+    mPPB = jlimit(minZoomPPB(vpW), maxZoomPPB(vpW), mPPB * factor);
+    mBeatOff = jmax(0.0, anchorBeat - (double) anchorX / jmax(1.f, mPPB));
     syncScrollState();
 }
 
@@ -2960,6 +3005,21 @@ void PianoRollContainer::applyVZoom(float factor)
     if (minScale > maxScale) minScale = maxScale * 0.5f;
     mNoteHScale = jlimit(minScale, maxScale, mNoteHScale * factor);
     syncScrollState();
+}
+
+// QA-Ee: vertical zoom anchored to cursor -- the pitch under the mouse stays fixed.
+void PianoRollContainer::applyVZoomAnchored(float factor, int anchorY)
+{
+    if (mFixedRange || mGrid == nullptr) { applyVZoom(factor); return; }
+    // Pitch under the cursor (mirrors PianoRollGrid::yToNote; mNoteYOffset = kRulerH).
+    const int dy         = anchorY - PianoRollGrid::kRulerH;
+    const int oldNoteH   = jmax (4, (int) (PianoRollGrid::kNoteH * mNoteHScale));
+    const int noteBefore = mTopNote - dy / jmax (1, oldNoteH);
+    applyVZoom (factor);                        // clamps mNoteHScale + syncs (note height updated)
+    const int newNoteH   = jmax (4, (int) (PianoRollGrid::kNoteH * mNoteHScale));
+    const int noteAfter  = mTopNote - dy / jmax (1, newNoteH);
+    if (noteBefore != noteAfter)
+        onVScroll (noteBefore - noteAfter);     // shift mTopNote so the pitch returns to the cursor
 }
 
 void PianoRollContainer::onHScroll(double dBeats)
@@ -3023,7 +3083,10 @@ void PianoRollContainer::pushScrollStateToBars()
         }
     }
     constexpr double kBeatsPerBar = 4.0;
-    const double totalBeats   = jmax(lastNoteEnd + kBeatsPerBar, visibleBeats0);
+    // QA-Ee: include the current scroll offset so a cursor-anchored zoom that lands
+    // past the last note stays representable -- otherwise the H-scrollbar clamps the
+    // thumb to 0 and its (async) scrollBarMoved snaps mBeatOff back to bar 0.
+    const double totalBeats   = jmax(lastNoteEnd + kBeatsPerBar, mBeatOff + visibleBeats0);
     const double visibleBeats = jmin(totalBeats, visibleBeats0);
     mHScroll->setRangeLimits(0.0, totalBeats);
     mHScroll->setCurrentRange(jlimit(0.0, jmax(0.0, totalBeats - visibleBeats), mBeatOff),

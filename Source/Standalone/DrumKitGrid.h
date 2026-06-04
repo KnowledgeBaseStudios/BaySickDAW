@@ -190,6 +190,7 @@ public:
     void setSnapEnabled(bool b);
 
     std::function<void(float deltaPPB)>           onZoom;
+    std::function<void(float factor, int anchorX)> onZoomAnchored; // QA-Ee: cursor-anchored wheel zoom
     std::function<void(double dBeats)>            onHScroll;
     std::function<void(float factor)>             onVZoom;
     std::function<void()>                         onNotesChanged;
@@ -439,7 +440,12 @@ public:
 
     void setActiveTool (DrumKitGrid::PRTool t);
     void applyZoom     (float factor);
+    void applyZoomAnchored (float factor, int anchorX);   // QA-Ee: cursor-anchored wheel zoom
     void applyVZoom    (float factor);
+    // QA-Ee Stage 2: content-bound dynamic zoom limits (scans all drum rows' notes).
+    float contentMaxBars() const;
+    float minZoomPPB (float vpW) const;
+    float maxZoomPPB (float vpW) const;
 
     void scrollToPlayhead       ();
     void setLaneVisible         (bool v);

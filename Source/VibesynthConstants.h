@@ -38,6 +38,68 @@ static constexpr int DEFAULT_SPB       = 4;    // steps per bar
 // int64-sample transport.  beats<->ticks converters live in PatternManager.h.
 static constexpr int kTicksPerBeat = 96;
 
+// QA-Ee Stage 2 (Builder snap: 11-label scheme + dynamic "Line" grid).  Shared
+// by Builder / PianoRoll / Record-Quantize so the APVTS Int index 0..10 maps
+// identically everywhere.  (Label array static-in-header per the CLAUDE.md C++17
+// const-char*[] gotcha -- never define it out-of-line in a .cpp.)
+static const char* kUnifiedSnapLabels[11] = {
+    "Off", "Line", "Bar", "Beat", "1/2 Beat", "1/3 Beat",
+    "Step", "1/2 Step", "1/3 Step", "1/4 Step", "1/6 Step"
+};
+static constexpr int kNumUnifiedSnapDivs = 11;
+
+// Fixed tick grid for the FIXED divisions (param idx 2..10).  idx 0 (Off) +
+// idx 1 (Line) are not fixed values -> return 0 (the caller handles them).
+inline int snapDivToTicks (int idx) noexcept
+{
+    switch (idx)
+    {
+        case 2:  return kTicksPerBeat * 4;   // Bar      = 384
+        case 3:  return kTicksPerBeat;       // Beat     = 96
+        case 4:  return kTicksPerBeat / 2;   // 1/2 Beat = 48
+        case 5:  return kTicksPerBeat / 3;   // 1/3 Beat = 32  (eighth triplet)
+        case 6:  return kTicksPerBeat / 4;   // Step     = 24  (1/16)
+        case 7:  return kTicksPerBeat / 8;   // 1/2 Step = 12  (1/32)
+        case 8:  return kTicksPerBeat / 12;  // 1/3 Step = 8   (1/32 triplet)
+        case 9:  return kTicksPerBeat / 16;  // 1/4 Step = 6   (1/64)
+        case 10: return kTicksPerBeat / 24;  // 1/6 Step = 4   (1/64 triplet)
+        default: return 0;                   // 0 Off / 1 Line: not a fixed grid
+    }
+}
+
+// Dynamic "Line" snap ladder (straight-time, coarse->fine, in ticks): Bar, Beat,
+// 1/8, 1/16, 1/32, 1/64.  A rung is "live" when its on-screen spacing
+// (g/384 * pixelsPerBar) >= kMinLinePx.  Line snap AND the dynamic grid both use
+// this so they lock to the exact same set of visible lines.
+static constexpr int kDynamicSnapLadder[6] = { 384, 96, 48, 24, 12, 6 };
+static constexpr int kMinLinePx = 12;   // min on-screen px between grid/snap lines
+
+// Finest live ladder rung (ticks) at the given pixels-per-bar zoom.  Floor = Bar
+// (384) so a zoomed-way-out Line snap still locks to bars.
+inline int dynamicSnapTicks (double pixelsPerBar) noexcept
+{
+    int finest = kDynamicSnapLadder[0];   // Bar floor
+    for (int g : kDynamicSnapLadder)
+        if ((double) g / 384.0 * pixelsPerBar >= (double) kMinLinePx)
+            finest = g;
+    return finest;
+}
+
+// QA-Ee Stage 2 (content-bound dynamic zoom).  The zoom-OUT minimum (px/bar or
+// px/beat) is computed per-window as vpW / maxThings, where the span is
+// max(emptyBaseline, furthestContent + pad).  The empty baseline is
+// monitor-dependent (vpW / kDefault*EmptyPx) so an empty project restricts
+// zoom-out to a sensible workspace -- not hundreds of empty bars -- and expands
+// incrementally as clips / markers / notes are added (FL playlist behavior).
+static constexpr float kDefaultPlaylistEmptyPx  = 24.f;   // Builder: px/bar at empty zoom-out baseline (~vpW/24 bars on screen)
+static constexpr float kDefaultPianoRollEmptyPx = 160.f;  // Piano Roll: tighter px/bar baseline for micro work (~vpW/160 bars)
+static constexpr float kBuilderZoomPadBars      = 8.f;    // Builder: bars of headroom past the furthest content edge
+static constexpr float kPianoRollZoomPadBars    = 1.f;    // Piano Roll: bars of headroom past the furthest note edge
+// Max zoom-IN: the musical span (in beats) that fills the viewport at deepest
+// zoom.  0.5 beat across -> tick-level editing (~16 px/tick on an 800px view).
+// Shared by both windows so micro-editing depth is consistent.
+static constexpr float kMaxZoomInBeatsAcross    = 0.5f;
+
 // ── Bass sounds ───────────────────────────────────────────────────────────────
 static constexpr int NUM_BASS_SOUNDS   = 15;
 

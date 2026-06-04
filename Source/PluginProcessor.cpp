@@ -105,6 +105,12 @@ VibeSynthProcessor::createParameterLayout()
     // Early-Strike clamp.  Off = no snap (raw clamped startBeats kept).
     addI("record_quantize_div", "Record Quantize Divisor", 0, 5, 0);
 
+    // QA-Ee Stage 2 (Builder snap): unified snap-division param, Int 0..10 on the
+    // shared 11-label scheme (0=Off, 1=Line dynamic, 2=Bar ... 10=1/6 Step).
+    // Default 1 = Line (FL-style dynamic grid that locks snap to the visible zoom
+    // grid).  Read live by the BuilderPage grid via onGetSnapDiv.
+    addI("Unified_BuilderSnapDiv", "Builder Snap Division", 0, 10, 1);
+
     // §P4.3 B7 (2026-04-22): legacy bus-EQ param blocks removed.
     // Pre-rack Layers/Bass/Drums EQs are now per-strip on the InsertNode/BusNode
     // (mixer_{kind}_<i>_preeq_mid_eq* / _preeq_side_eq*, registered lazily via

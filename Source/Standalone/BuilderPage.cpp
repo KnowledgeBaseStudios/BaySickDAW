@@ -1311,17 +1311,18 @@ float ArrangementGrid::snapBar(float bar) const
 
 float ArrangementGrid::snapBarAlt(float bar) const
 {
-    switch (mSnapMode)
-    {
-        case SnapMode::Bar:    return std::round(bar);
-        case SnapMode::Beat:   return std::round(bar * (float)mTimeSig.numerator) / (float)mTimeSig.numerator;
-        case SnapMode::Cell:   return std::round(bar * 2.f) / 2.f;
-        case SnapMode::Steps:  return std::round(bar * 16.f) / 16.f;
-        case SnapMode::Events: return bar;   // snap to existing events -- simplify to no-snap
-        case SnapMode::Line:
-        case SnapMode::None:   return bar;
-        default:               return std::round(bar);
-    }
+    // QA-Ee Stage 2: snap to the unified tick grid.  div 0 = Off (no snap),
+    // div 1 = Line (finest grid rung live at the current zoom -> FL-style
+    // lock-to-view), div 2..10 = a fixed division.  Builder is uniform
+    // 4-beat-per-bar, so 1 bar = 384 ticks.
+    const int div = onGetSnapDiv ? onGetSnapDiv() : 1;   // default Line
+    if (div == 0) return bar;                            // Off
+    const int g = (div == 1) ? dynamicSnapTicks ((double) mPPBar)
+                             : snapDivToTicks (div);
+    if (g <= 0) return bar;
+    const double ticks   = (double) bar * 384.0;                          // bar -> ticks
+    const double snapped = std::round (ticks / (double) g) * (double) g;  // nearest grid tick
+    return (float) (snapped / 384.0);                                     // ticks -> bar
 }
 
 int ArrangementGrid::totalVisibleBars() const
@@ -1393,6 +1394,40 @@ double ArrangementGrid::maxRevealableNegativeBars() const
     const double seconds = (double) maxContent / sampleRate;
     const double beats   = seconds * bpm / 60.0;
     return beats / 4.0;
+}
+
+// QA-Ee Stage 2 (content-bound dynamic zoom): furthest-right content edge in
+// bars -- the max of every clip's right edge, every time marker, and every TS
+// change.  Drives the zoom-OUT minimum so the playlist expands as content grows.
+float ArrangementGrid::contentMaxBars() const
+{
+    double maxBars = 0.0;
+    for (int i = 0; i < mPM.getNumBlocks(); ++i)
+    {
+        const auto& b = mPM.getBlock(i);
+        maxBars = jmax(maxBars, effectiveStartBars(b) + effectiveLengthBars(b));
+    }
+    for (int i = 0; i < mPM.getNumTimeMarkers(); ++i)
+        maxBars = jmax(maxBars, (double) (mPM.getTimeMarker(i).bar + 1));
+    for (int i = 0; i < mPM.getNumTimeSigChanges(); ++i)
+        maxBars = jmax(maxBars, (double) (mPM.getTimeSigChange(i).bar + 1));
+    return (float) jmax(0.0, maxBars);
+}
+
+// Zoom-OUT minimum (px/bar).  Empty baseline = vpW / kDefaultPlaylistEmptyPx
+// (monitor-dependent); grows with content + an 8-bar pad.
+float ArrangementGrid::minZoomPPBar (float vpW) const
+{
+    const float defaultBars = vpW / kDefaultPlaylistEmptyPx;
+    const float maxBars     = jmax (defaultBars, contentMaxBars() + kBuilderZoomPadBars);
+    return vpW / jmax (1.f, maxBars);
+}
+
+// Zoom-IN maximum (px/bar) -- tick-level micro-editing (kMaxZoomInBeatsAcross
+// beats fill the viewport at deepest zoom).
+float ArrangementGrid::maxZoomPPBar (float vpW) const
+{
+    return vpW * 4.f / jmax (0.01f, kMaxZoomInBeatsAcross);
 }
 
 // QA-Ea Task 0c (FL pre-roll record): mirror of nearRightEdge.  Resize zone
@@ -1696,12 +1731,6 @@ void ArrangementGrid::drawRuler(Graphics& g) const
         }
     }
 
-    // Zoom hint in ruler
-    g.setColour(VC::TextDim.withAlpha(0.35f));
-    g.setFont(Font(8.f));
-    g.drawText("Ctrl+Scroll=zoom  Alt+Scroll=vZoom  P=Draw  B=Paint  E=Select  D=Delete  T=Mute",
-               4, 1, 500, kRulerH - 2, Justification::centredLeft);
-
     // Playhead triangle arrow - drawn last so it's always on top of ruler content
     if (mPlayheadBar >= 0.0)
     {
@@ -1739,34 +1768,53 @@ void ArrangementGrid::drawGrid(Graphics& g) const
     int  yTop = kRulerH;
     int  yBot = jmin(yTop + (int)(kNumRows * mEffectiveRowH), b.getHeight());
 
-    // Adaptive subdivisions: show finer lines as you zoom in.
-    // A level is shown when its pixel spacing >= 5 px.
-    // Draw finest first; coarser lines overdraw at the same pixel.
-    static constexpr float kMinSpacing = 5.f;
-    struct Level { int denom; Colour col; };
-    const Level levels[] = {
-        { 32, kGridLine.withAlpha(0.10f)  },  // 1/32 note  (8 per beat)
-        { 16, kGridLine.withAlpha(0.18f)  },  // 1/16 note
-        {  8, kGridLine.withAlpha(0.28f)  },  // 1/8 note
-        {  4, kGridLine.withAlpha(0.50f)  },  // quarter-note / beat
-        {  1, kGridLineMj.withAlpha(0.85f)},  // bar line (always shown)
-    };
+    // QA-Ee Stage 2: the grid follows the snap mode + zoom so you see exactly the
+    // lines you snap to (Builder is uniform 4-beat-per-bar => 1 bar = 384 ticks).
+    //  - Off (0) / Line (1): the dynamic straight ladder (Bar..1/64); each rung
+    //    is drawn only while its on-screen spacing >= kMinLinePx (lock-to-view,
+    //    the same test Line snap uses).
+    //  - fixed (2..10): Bar + Beat for context + the chosen division (drawn while
+    //    it clears kMinLinePx).  Triplet lines render solid, like straight ones.
+    // Divisions are collected fine -> coarse so the bar line (brightest) draws
+    // last and overdraws finer lines at shared x positions.
+    const int div = onGetSnapDiv ? onGetSnapDiv() : 1;   // default Line
+
+    int divs[8]; int nDivs = 0;
+    if (div >= 2)
+    {
+        const int fg = snapDivToTicks (div);
+        if (fg > 0 && fg != 96 && fg != 384) divs[nDivs++] = fg;   // chosen (finer than a beat)
+        divs[nDivs++] = 96;                                        // Beat context
+        divs[nDivs++] = 384;                                       // Bar
+    }
+    else
+    {
+        for (int i = 5; i >= 0; --i) divs[nDivs++] = kDynamicSnapLadder[i];  // 6,12,24,48,96,384
+    }
 
     int maxBar = (int)mBarOff + b.getWidth() / jmax(1, (int)mPPBar) + 2;
 
-    for (const auto& lv : levels)
+    for (int i = 0; i < nDivs; ++i)
     {
-        float spacing = mPPBar / (float)lv.denom;
-        if (lv.denom > 1 && spacing < kMinSpacing) continue;
+        const int    gTicks    = divs[i];
+        const double spacingPx = (double) gTicks / 384.0 * (double) mPPBar;
+        if (spacingPx < (double) kMinLinePx) continue;   // sub-threshold (incl. Bar): declutter at macro zoom-out
 
-        float step     = 1.f / (float)lv.denom;
-        float startBar = std::floor(mBarOff * (float)lv.denom) / (float)lv.denom;
-        g.setColour(lv.col);
-        for (float bar = startBar; bar <= (float)(maxBar + 1); bar += step)
+        const bool  isBar = (gTicks == 384);
+        const float alpha = isBar        ? 0.85f
+                          : gTicks >= 96 ? 0.50f
+                          : gTicks >= 48 ? 0.28f
+                          : gTicks >= 24 ? 0.18f
+                          :                0.10f;
+        g.setColour (isBar ? kGridLineMj.withAlpha (alpha) : kGridLine.withAlpha (alpha));
+
+        const double stepBars = (double) gTicks / 384.0;
+        double startBar = std::floor (mBarOff / stepBars) * stepBars;
+        for (double bar = startBar; bar <= (double)(maxBar + 1); bar += stepBars)
         {
-            int x = barToX(bar);
+            int x = barToX ((float) bar);
             if (x < 0 || x > b.getWidth()) continue;
-            g.drawVerticalLine(x, (float)yTop, (float)yBot);
+            g.drawVerticalLine (x, (float) yTop, (float) yBot);
         }
     }
 }
@@ -2813,7 +2861,7 @@ void ArrangementGrid::fitBlockToViewport(int blockIdx)
     float vpW = 800.f;
     if (auto* vp = findParentComponentOfClass<juce::Viewport>())
         vpW = (float)jmax(1, vp->getWidth());
-    const float minPP = vpW / 32.f, maxPP = vpW / 8.f;
+    const float minPP = minZoomPPBar (vpW), maxPP = maxZoomPPBar (vpW);
     mPPBar  = jlimit(minPP, maxPP, vpW / lenBars);
     mBarOff = jmax(0.f, (float) b.startBar);
     resized(); repaint();
@@ -4021,11 +4069,11 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
     // Zoom tool: click zooms in, Alt+click zooms out (anchored to cursor)
     if (mActiveTool == AGTool::Zoom)
     {
-        float factor = e.mods.isAltDown() ? (1.f / 1.25f) : 1.25f;
+        float factor = e.mods.isAltDown() ? (1.f / 1.15f) : 1.15f;
         float vpW = 800.f;
         if (auto* vp = findParentComponentOfClass<juce::Viewport>())
             vpW = (float)jmax(1, vp->getWidth());
-        const float minPP = vpW / 32.f, maxPP = vpW / 8.f;
+        const float minPP = minZoomPPBar (vpW), maxPP = maxZoomPPBar (vpW);
         const float anchorBar = xToBar(e.x);
         mPPBar = jlimit(minPP, maxPP, mPPBar * factor);
         // Restore the bar that was under the cursor to the cursor's x.
@@ -4792,7 +4840,7 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
             const float endBar   = xToBar(mZoomRect.getRight());
             if (endBar > startBar)
             {
-                const float minPP = vpW / 32.f, maxPP = vpW / 8.f;
+                const float minPP = minZoomPPBar (vpW), maxPP = maxZoomPPBar (vpW);
                 mPPBar  = jlimit(minPP, maxPP, vpW / (endBar - startBar));
                 // QA-Ea Task 0c (Option ii): allow negative-bar zoom-to-rect.
                 mBarOff = jmax(-(float) maxRevealableNegativeBars(), startBar);
@@ -4859,10 +4907,10 @@ void ArrangementGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetail
     if (e.mods.isCtrlDown())
     {
         // Horizontal zoom anchored to cursor: bar under mouse stays under
-        // mouse. Limits: full out = 32 bars in viewport, full in = 8 bars.
+        // mouse. Limits: full out = 512 bars in viewport, full in = 1 bar.
         float factor = (wheel.deltaY > 0.f) ? 1.15f : (1.f / 1.15f);
-        float minPP  = vpW / 32.f;
-        float maxPP  = vpW / 8.f;
+        float minPP  = minZoomPPBar (vpW);
+        float maxPP  = maxZoomPPBar (vpW);
         const float anchorBar = xToBar(e.x);
         mPPBar = jlimit(minPP, maxPP, mPPBar * factor);
         // QA-Ea Task 0c (Option ii): allow negative-bar zoom anchor.
@@ -4872,12 +4920,22 @@ void ArrangementGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetail
     }
     else if (e.mods.isAltDown())
     {
-        // Alt+scroll = vertical zoom: full out = all kNumRows fill viewport, full in = 8 rows
+        // Alt+scroll = vertical zoom anchored to the cursor: the row under the
+        // mouse stays under the mouse.  full out = all kNumRows fill viewport, full in = 8 rows.
         float factor = (wheel.deltaY > 0.f) ? 1.15f : (1.f / 1.15f);
         float minRH  = vpH / (float)kNumRows;
         float maxRH  = vpH / 8.f;
+        const float oldRH = mEffectiveRowH;
         mEffectiveRowH = jlimit(minRH, maxRH, mEffectiveRowH * factor);
-        resized(); repaint();
+        resized();
+        if (auto* vp = findParentComponentOfClass<juce::Viewport>())
+        {
+            const float actual  = (oldRH > 0.f) ? mEffectiveRowH / oldRH : 1.f;
+            const int   newVpY  = (int) std::round ((float) vp->getViewPositionY()
+                                      + (float) (e.y - kRulerH) * (actual - 1.f));
+            vp->setViewPosition (vp->getViewPositionX(), jmax (0, newVpY));
+        }
+        repaint();
         if (onRowHeightChanged) onRowHeightChanged();
     }
     else if (e.mods.isShiftDown())
@@ -4991,7 +5049,13 @@ bool ArrangementGrid::keyPressed(const KeyPress& key)
         if (shift) {
             static const float kZoomPresets[] = { 20.f, 40.f, 80.f, 120.f, 200.f, 300.f };
             for (int i = 0; i < 6; ++i)
-                if (kc == '1' + i) { mPPBar = kZoomPresets[i]; resized(); repaint(); return true; }
+                if (kc == '1' + i) {
+                    float vpW = 800.f;
+                    if (auto* vp = findParentComponentOfClass<juce::Viewport>())
+                        vpW = (float)jmax(1, vp->getWidth());
+                    mPPBar = jlimit(minZoomPPBar(vpW), maxZoomPPBar(vpW), kZoomPresets[i]);
+                    resized(); repaint(); return true;
+                }
         }
     }
 
@@ -5022,8 +5086,8 @@ bool ArrangementGrid::keyPressed(const KeyPress& key)
                 float vpW = 800.f;
                 if (auto* vp = findParentComponentOfClass<Viewport>())
                     vpW = (float)jmax(1, vp->getWidth());
-                const float minPP = vpW / 32.f, maxPP = vpW / 8.f;
-                const float factor = zoomIn ? 1.25f : (1.f / 1.25f);
+                const float minPP = minZoomPPBar (vpW), maxPP = maxZoomPPBar (vpW);
+                const float factor = zoomIn ? 1.15f : (1.f / 1.15f);
                 mPPBar = jlimit(minPP, maxPP, mPPBar * factor);
                 resized(); repaint();
                 return true;
@@ -5355,8 +5419,8 @@ ArrangementToolbar::ArrangementToolbar()
 
     mZoomInBtn  = std::make_unique<TextButton>("+");
     mZoomOutBtn = std::make_unique<TextButton>("-");
-    mZoomInBtn ->onClick = [this] { if (onZoom) onZoom(1.25f); };
-    mZoomOutBtn->onClick = [this] { if (onZoom) onZoom(1.f / 1.25f); };
+    mZoomInBtn ->onClick = [this] { if (onZoom) onZoom(1.15f); };
+    mZoomOutBtn->onClick = [this] { if (onZoom) onZoom(1.f / 1.15f); };
     addAndMakeVisible(*mZoomInBtn);
     addAndMakeVisible(*mZoomOutBtn);
 
@@ -5366,22 +5430,15 @@ ArrangementToolbar::ArrangementToolbar()
     addAndMakeVisible(*mSnapLabel);
 
     mSnapCombo = std::make_unique<ComboBox>();
-    mSnapCombo->addItem("Bar",    1);
-    mSnapCombo->addItem("Beat",   2);
-    mSnapCombo->addItem("Cell",   3);
-    mSnapCombo->addItem("Line",   4);
-    mSnapCombo->addItem("Steps",  5);
-    mSnapCombo->addItem("Events", 6);
-    mSnapCombo->addItem("None",   7);
-    mSnapCombo->setSelectedId(1, dontSendNotification);
+    // QA-Ee Stage 2: 11-label unified snap scheme.  ComboBox item id = paramIdx+1
+    // (ids are 1-based; getSelectedItemIndex() gives the 0-based param index).
+    // Default selection = Line (param idx 1).
+    for (int i = 0; i < kNumUnifiedSnapDivs; ++i)
+        mSnapCombo->addItem (kUnifiedSnapLabels[i], i + 1);
+    mSnapCombo->setSelectedId (1 + 1, dontSendNotification);   // idx 1 = Line
     mSnapCombo->onChange = [this] {
-        if (!onSnapChanged) return;
-        static const SnapMode kModes[] = {
-            SnapMode::Bar, SnapMode::Beat, SnapMode::Cell, SnapMode::Line,
-            SnapMode::Steps, SnapMode::Events, SnapMode::None
-        };
-        int idx = mSnapCombo->getSelectedItemIndex();
-        if (idx >= 0 && idx < 7) onSnapChanged(kModes[idx]);
+        if (onSnapChanged)
+            onSnapChanged (mSnapCombo->getSelectedItemIndex());   // 0..10
     };
     addAndMakeVisible(*mSnapCombo);
 
@@ -5513,13 +5570,16 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
     mToolbar->onToolSelected = [this](ArrangementGrid::AGTool t) {
         if (mGrid) mGrid->setTool(t);
     };
-    mToolbar->onSnapChanged = [this](SnapMode s) {
-        if (mGrid) mGrid->setSnapMode(s);
+    mToolbar->onSnapChanged = [this](int snapDiv) {
+        // QA-Ee Stage 2: write the unified param (the grid reads it live) +
+        // repaint so the grid lines follow the new division immediately.
+        if (mGrid && mGrid->onSnapDivChanged) mGrid->onSnapDivChanged (snapDiv);
+        if (mGrid) mGrid->repaint();
     };
     mToolbar->onZoom = [this](float factor) {
         if (!mGrid || !mGridViewport) return;
         float vpW  = (float)jmax(1, mGridViewport->getWidth());
-        float minPP = vpW / 32.f, maxPP = vpW / 8.f;
+        float minPP = mGrid->minZoomPPBar (vpW), maxPP = mGrid->maxZoomPPBar (vpW);
         // Anchor zoom around the bar currently at viewport center so content
         // doesn't slide off-screen on each click.
         const float centreVpX = vpW * 0.5f;
@@ -5768,7 +5828,7 @@ void BuilderPage::doZoom(float factor)
 {
     if (!mGrid || !mGridViewport) return;
     const float vpW = (float)jmax(1, mGridViewport->getWidth());
-    const float minPP = vpW / 32.f, maxPP = vpW / 8.f;
+    const float minPP = mGrid->minZoomPPBar (vpW), maxPP = mGrid->maxZoomPPBar (vpW);
     const float centreVpX = vpW * 0.5f;
     const float centreGridX = (float)mGridViewport->getViewPositionX() + centreVpX;
     const float anchorBar = mGrid->xToBar((int)centreGridX);
@@ -6061,8 +6121,8 @@ void BuilderMenuBar::menuItemSelected(int itemId, int /*topLevelIndex*/)
                      o.renderPatternToWav(o.mPM.getCurrentPatternIndex()); break;
 
         // View
-        case 51: o.doZoom(1.25f);            break;
-        case 52: o.doZoom(1.f / 1.25f);      break;
+        case 51: o.doZoom(1.15f);            break;
+        case 52: o.doZoom(1.f / 1.15f);      break;
         case 53: o.doToggleBrowser();        break;
         case 54: o.doPerformanceModeToggle(); break;
 

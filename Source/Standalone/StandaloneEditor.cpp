@@ -2296,6 +2296,21 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             mProcessor.rebuildAudioClipPlayers();
             if (mProjectManager) mProjectManager->markDirty();
         };
+        // QA-Ee Stage 2 (Builder snap): the grid reads the unified snap-division
+        // index live for snap + grid rendering; the combo writes it back.  Mirrors
+        // the record_quantize_div getter/setter pattern (default 1 = Line).
+        grid->onGetSnapDiv = [this]() -> int {
+            if (auto* p = mProcessor.apvts.getRawParameterValue ("Unified_BuilderSnapDiv"))
+                return (int) p->load();
+            return 1;
+        };
+        grid->onSnapDivChanged = [this](int div) {
+            if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                    mProcessor.apvts.getParameter ("Unified_BuilderSnapDiv")))
+                p->setValueNotifyingHost (
+                    p->getNormalisableRange().convertTo0to1 ((float) div));
+        };
+        if (mBuilderPage) mBuilderPage->syncSnapComboFromParam();   // show the param's value in the combo
         // P4: drop-without-project -> async New Project prompt, then retry
         // the drop so the audio file lands on the arrangement as intended.
         grid->onDropWithoutProject = [this, grid](const juce::File& src,

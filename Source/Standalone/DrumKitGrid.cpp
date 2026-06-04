@@ -2033,17 +2033,13 @@ void DrumKitGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails& w
         return;
     }
 
-    if (e.mods.isAltDown() && ! e.mods.isCtrlDown())
-    {
-        const float factor = (wheel.deltaY > 0.f) ? 1.15f : (1.f / 1.15f);
-        if (onVZoom) onVZoom(factor);
-        return;
-    }
-
+    // QA-Ee: no vertical zoom on the drum kit -- the 16 rows are fixed by design.
+    // Alt+scroll falls through to horizontal scroll like the bare wheel.
     if (e.mods.isCtrlDown())
     {
         const float factor = (wheel.deltaY > 0.f) ? 1.15f : (1.f / 1.15f);
-        if (onZoom) onZoom(mPPB * factor - mPPB);
+        if (onZoomAnchored) onZoomAnchored(factor, e.x);   // anchor zoom to cursor
+        else if (onZoom)    onZoom(mPPB * factor - mPPB);
     }
     else if (e.mods.isShiftDown())
     {
@@ -2109,19 +2105,23 @@ void DrumKitGrid::paint(Graphics& g)
             ? mPM->getPatternBeatsPerBar (mPM->getCurrentPatternIndex())
             : 4.0;
         const double safeBpb = juce::jmax (1.0, barBpb);
-        const double startBeat = std::floor(mBeatOff / safeBpb) * safeBpb;
-        for (double beat = startBeat;
-             beat <= mBeatOff + b.getWidth() / mPPB + safeBpb;
-             beat += safeBpb)
+        // QA-Ee Stage 2: declutter -- cull bar lines once they fall below kMinLinePx.
+        if ((double) mPPB * safeBpb >= (double) kMinLinePx)
         {
-            const int x = beatToX(beat);
-            if (x < 0 || x > b.getWidth()) continue;
-            g.setColour(VC::Accent.brighter(0.3f));
-            g.drawVerticalLine(x, 0, (float) b.getHeight());
-            g.setColour(VC::TextDim); g.setFont(Font(9));
-            // QA-Ea Task 0c (2026-05-20): 0-indexed bar labels (song downbeat = "0").
-            g.drawText(String((int) std::round (beat / safeBpb)),
-                       x + 2, 2, 24, 10, Justification::centredLeft);
+            const double startBeat = std::floor(mBeatOff / safeBpb) * safeBpb;
+            for (double beat = startBeat;
+                 beat <= mBeatOff + b.getWidth() / mPPB + safeBpb;
+                 beat += safeBpb)
+            {
+                const int x = beatToX(beat);
+                if (x < 0 || x > b.getWidth()) continue;
+                g.setColour(VC::Accent.brighter(0.3f));
+                g.drawVerticalLine(x, 0, (float) b.getHeight());
+                g.setColour(VC::TextDim); g.setFont(Font(9));
+                // QA-Ea Task 0c (2026-05-20): 0-indexed bar labels (song downbeat = "0").
+                g.drawText(String((int) std::round (beat / safeBpb)),
+                           x + 2, 2, 24, 10, Justification::centredLeft);
+            }
         }
     }
 
@@ -3196,6 +3196,7 @@ DrumKitContainer::DrumKitContainer()
 
     // Wire grid callbacks.
     mGrid->onZoom    = [this](float delta) { applyZoom((mPPB + delta) / mPPB); };
+    mGrid->onZoomAnchored = [this](float f, int x) { applyZoomAnchored(f, x); };
     mGrid->onVZoom   = [this](float factor) { applyVZoom(factor); };
     mGrid->onHScroll = [this](double dB)   { mBeatOff = jmax(0.0, mBeatOff + dB); syncScrollState(); };
     mGrid->onNotesChanged = [this] { if (mLane) mLane->repaint(); };
@@ -3214,8 +3215,8 @@ DrumKitContainer::DrumKitContainer()
         mZoomedIn       = true;
         const double range = jmax(0.01, beatEnd - beatStart);
         const float vpW    = (float) jmax(1, mGrid->getWidth());
-        const float minPPB = vpW / (4.f * 8.f);
-        const float maxPPB = vpW / (4.f * 1.f);
+        const float minPPB = minZoomPPB (vpW);
+        const float maxPPB = maxZoomPPB (vpW);
         mPPB     = jlimit(minPPB, maxPPB, vpW / (float) range);
         mBeatOff = beatStart;
         syncScrollState();
@@ -3353,12 +3354,53 @@ void DrumKitContainer::setPlayheadBeat(double beat)
     if (mGrid) mGrid->setPlayheadBeat(beat);
 }
 
+// QA-Ee Stage 2 (content-bound dynamic zoom): furthest-right note edge across
+// ALL drum rows in the current pattern, in bars (4 beats/bar).
+float DrumKitContainer::contentMaxBars() const
+{
+    double maxBeats = 0.0;
+    if (mPM)
+    {
+        const auto& pat = mPM->currentPattern();
+        for (int pi = 0; pi < kMaxDrumPages; ++pi)
+            for (const auto& n : pat.drumRolls[pi].notes)
+                maxBeats = jmax(maxBeats, n.startBeat + n.durationBeats);
+    }
+    return (float) jmax(0.0, maxBeats / 4.0);
+}
+
+// Zoom-OUT minimum (px/beat).  Empty baseline = vpW / kDefaultPianoRollEmptyPx
+// (monitor-dependent); grows with notes + a 1-bar pad.  4 beats/bar.
+float DrumKitContainer::minZoomPPB (float vpW) const
+{
+    const float defaultBars = vpW / kDefaultPianoRollEmptyPx;
+    const float maxBars     = jmax (defaultBars, contentMaxBars() + kPianoRollZoomPadBars);
+    return vpW / (4.f * jmax (1.f, maxBars));
+}
+
+// Zoom-IN maximum (px/beat) -- tick-level micro-editing.
+float DrumKitContainer::maxZoomPPB (float vpW) const
+{
+    return vpW / jmax (0.01f, kMaxZoomInBeatsAcross);
+}
+
 void DrumKitContainer::applyZoom(float factor)
 {
+    // QA-Ee Stage 2: content-bound dynamic limits (matches the Piano Roll).
     const float vpW    = mGrid ? (float) jmax(1, mGrid->getWidth()) : 800.f;
-    const float minPPB = vpW / (4.f * 8.f);
-    const float maxPPB = vpW / (4.f * 1.f);
+    const float minPPB = minZoomPPB (vpW);
+    const float maxPPB = maxZoomPPB (vpW);
     mPPB = jlimit(minPPB, maxPPB, mPPB * factor);
+    syncScrollState();
+}
+
+// QA-Ee: cursor-anchored zoom -- keeps the beat under the mouse fixed (FL Ctrl+scroll feel).
+void DrumKitContainer::applyZoomAnchored(float factor, int anchorX)
+{
+    const float vpW = mGrid ? (float) jmax(1, mGrid->getWidth()) : 800.f;
+    const double anchorBeat = mBeatOff + (double) anchorX / jmax(1.f, mPPB);
+    mPPB = jlimit(minZoomPPB(vpW), maxZoomPPB(vpW), mPPB * factor);
+    mBeatOff = jmax(0.0, anchorBeat - (double) anchorX / jmax(1.f, mPPB));
     syncScrollState();
 }
 
@@ -3417,8 +3459,11 @@ void DrumKitContainer::pushScrollStateToBars()
                 if (end > last) last = end;
             }
     }
+    // QA-Ee: include the current scroll offset so a cursor-anchored zoom that lands
+    // past the content stays representable -- otherwise the H-scrollbar clamps the
+    // thumb to 0 and its (async) scrollBarMoved snaps mBeatOff back to bar 0.
     const double totalBeats   = jmax((double) patternBars * bpb,
-                                     jmax(last + bpb, visibleBeats0));
+                                     jmax(last + bpb, mBeatOff + visibleBeats0));
     const double visibleBeats = jmin(totalBeats, visibleBeats0);
     mHScroll->setRangeLimits(0.0, totalBeats);
     mHScroll->setCurrentRange(jlimit(0.0, jmax(0.0, totalBeats - visibleBeats), mBeatOff),
@@ -3595,8 +3640,6 @@ juce::PopupMenu DrumKitMenuBar::getMenuForIndex(int idx, const juce::String&)
     {
         menu.addItem(51, "Zoom In");
         menu.addItem(52, "Zoom Out");
-        menu.addItem(53, "Zoom In Vertical");
-        menu.addItem(54, "Zoom Out Vertical");
         menu.addSeparator();
         menu.addItem(55, "Scroll to Playhead");
         menu.addSeparator();
@@ -3628,8 +3671,6 @@ void DrumKitMenuBar::menuItemSelected(int id, int)
     }
     else if (id == 51) { o.applyZoom(1.3f); }
     else if (id == 52) { o.applyZoom(1.f / 1.3f); }
-    else if (id == 53) { o.applyVZoom(1.3f); }
-    else if (id == 54) { o.applyVZoom(1.f / 1.3f); }
     else if (id == 55) { o.scrollToPlayhead(); }
     else if (id == 57) { o.setLaneVisible(! o.isLaneVisible()); }
 

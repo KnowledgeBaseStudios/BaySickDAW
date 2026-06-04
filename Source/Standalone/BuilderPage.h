@@ -321,7 +321,9 @@ private:
 };
 
 // ── SnapMode ──────────────────────────────────────────────────────────────────
-enum class SnapMode { Bar, Beat, Cell, Line, Steps, Events, None };
+// QA-Ee Stage 2: SnapMode enum removed -- Builder snap is now the unified Int
+// 0..10 scheme (param Unified_BuilderSnapDiv), read live by the grid via
+// onGetSnapDiv().  See VibesynthConstants.h kUnifiedSnapLabels / snapDivToTicks.
 
 // ── ArrangementGrid ───────────────────────────────────────────────────────────
 // Piano-roll-style arrangement editor.
@@ -395,8 +397,8 @@ public:
     void setTool(AGTool t);
     AGTool getTool() const { return mActiveTool; }
 
-    void setSnapMode(SnapMode s) { mSnapMode = s; }
-    SnapMode getSnapMode() const { return mSnapMode; }
+    // (setSnapMode/getSnapMode removed QA-Ee Stage 2 -- the grid reads the snap
+    //  index live via onGetSnapDiv(); the combo writes it via onSnapDivChanged.)
 
     void setPlayheadBar(double bar) { mPlayheadBar = bar; repaint(); }
     void setPerformanceMode(bool on) { mPerfMode = on; repaint(); }
@@ -428,6 +430,13 @@ public:
     // every user-initiated viewport scroll site (wheel / zoom anchor /
     // centre zoom).  Auto-fit operations keep their own bar-0 floors.
     double maxRevealableNegativeBars() const;
+
+    // QA-Ee Stage 2: content-bound dynamic zoom (single source of truth for the
+    // zoom clamp -- every zoom path calls these).  minZoomPPBar expands as
+    // content grows; maxZoomPPBar is the tick-level zoom-in ceiling.
+    float  contentMaxBars() const;
+    float  minZoomPPBar (float vpW) const;
+    float  maxZoomPPBar (float vpW) const;
 
     // ── Undo / Redo ───────────────────────────────────────────────────────────
     void setUndoContext(const UndoContext& ctx) { mUndoCtx = ctx; }
@@ -494,6 +503,12 @@ public:
     std::function<double()> onGetBPM;
     std::function<double()> onGetSampleRate;
     std::function<void()>   onRequestRebuildPlayers;
+    // QA-Ee Stage 2 (Builder snap): the grid reads the unified snap-division
+    // index (0..10) LIVE from the Unified_BuilderSnapDiv APVTS param via this
+    // getter (used by snapBar/snapBarAlt + drawGrid) and writes it via the setter
+    // when the snap combo changes.  Both wired in StandaloneEditor.
+    std::function<int()>     onGetSnapDiv;
+    std::function<void(int)> onSnapDivChanged;
 
     // QA-Ea Task 0c (2026-05-20): edit-mode state + accessors + callbacks.
     // mEditMode determines what a left or right edge drag does on an Audio
@@ -615,7 +630,8 @@ private:
     // slip, stretch all honor snap mode); whole-bar was too coarse for
     // typical workflows.  User can change via the snap-mode picker; new
     // projects start at Steps.
-    SnapMode mSnapMode      { SnapMode::Steps };
+    // mSnapMode removed (QA-Ee Stage 2): the grid reads the unified snap index
+    // live via onGetSnapDiv() (param Unified_BuilderSnapDiv, default 1 = Line).
     bool     mAltSnapActive { false };  // Alt held = snap override to None
 
     // ── Performance mode ──────────────────────────────────────────────────────
@@ -861,8 +877,12 @@ class ArrangementToolbar : public juce::Component
 public:
     ArrangementToolbar();
 
+    // QA-Ee Stage 2: set the snap combo's selection silently (no onChange fire),
+    // for initial + project-load sync from the Unified_BuilderSnapDiv param.
+    void setSnapDivIndex (int idx) { if (mSnapCombo) mSnapCombo->setSelectedId (idx + 1, juce::dontSendNotification); }
+
     std::function<void(ArrangementGrid::AGTool)> onToolSelected;
-    std::function<void(SnapMode)>                onSnapChanged;
+    std::function<void(int)>                     onSnapChanged;   // QA-Ee Stage 2: snap-div index 0..10
     std::function<void(float factor)>            onZoom;
     std::function<void()>                        onUndo;
     std::function<void()>                        onRedo;
@@ -954,6 +974,12 @@ public:
     // Grid accessor (used by StandaloneEditor to wire EventEditor callback)
     ArrangementGrid* getGrid() { return mGrid.get(); }
     BrowserPanel*    getBrowserPanel() { return mBrowser.get(); }
+
+    // QA-Ee Stage 2: push the current Unified_BuilderSnapDiv param value into the
+    // snap combo's display (combo state isn't auto-refreshed).  Call after the
+    // grid's onGetSnapDiv is wired + on project load so the combo reflects the
+    // restored snap.  Snap itself always reads the param live; this is display-only.
+    void syncSnapComboFromParam() { if (mGrid && mGrid->onGetSnapDiv && mToolbar) mToolbar->setSnapDivIndex (mGrid->onGetSnapDiv()); }
 
     // G-7 (2026-04-29): public hook for callers (StandaloneEditor) that
     // mutate the arrangement directly (e.g. closing a Clips tab sweeps the
