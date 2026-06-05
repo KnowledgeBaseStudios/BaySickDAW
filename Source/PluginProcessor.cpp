@@ -96,14 +96,21 @@ VibeSynthProcessor::createParameterLayout()
     // the per-strip _pan param.  Default 0 matches FL's fresh-project default.
     addI("master_pan_law", "Pan Law", 0, 2, 0);
 
-    // QA-Ea Task 0c (FL pre-roll record): global record-quantize divisor.
-    //   0 = Off, 1 = 1/4, 2 = 1/8, 3 = 1/16, 4 = 1/32, 5 = 1/64.
+    // QA-Ea Task 0c (FL pre-roll record) + QA-Ee Stage 4 (unified snap scheme):
+    // global record-quantize divisor, now on the shared 11-label scheme (Int
+    // 0..10, same kUnifiedSnapLabels / snapDivToTicks as Builder + Piano Roll):
+    //   0 Off, 1 Line, 2 Bar, 3 Beat, 4 1/2 Beat, 5 1/3 Beat, 6 Step,
+    //   7 1/2 Step, 8 1/3 Step, 9 1/4 Step, 10 1/6 Step.
     // Surfaced via "Global Record-Quantize" submenu in the Record-button
     // dropdown in GlobalTransportBar (alongside ASIO / MIDI mode toggles).
-    // Read by commitRecordingResult's MIDI commit loop (StandaloneEditor)
-    // to snap clamped startBeats to the grid divisor AFTER the FL
-    // Early-Strike clamp.  Off = no snap (raw clamped startBeats kept).
-    addI("record_quantize_div", "Record Quantize Divisor", 0, 5, 0);
+    // Read by commitRecordingResult's MIDI commit loop (StandaloneEditor) to
+    // snap clamped startBeats to the grid tick AFTER the FL Early-Strike clamp.
+    // Off (0) and Line (1) both = no snap (Line has no fixed grid -- there is no
+    // zoom canvas at record-commit time -- so raw clamped startBeats are kept).
+    // Renamed from `record_quantize_div` (old 0..5 = Off/1/4/1/8/1/16/1/32/1/64);
+    // old projects reset this global setting to Off on load (old indices do not
+    // map onto the new scheme and Off is the safe default).
+    addI("Unified_RecordQuantizeDiv", "Record Quantize Division", 0, 10, 0);
 
     // QA-Ee Stage 2 (Builder snap): unified snap-division param, Int 0..10 on the
     // shared 11-label scheme (0=Off, 1=Line dynamic, 2=Bar ... 10=1/6 Step).

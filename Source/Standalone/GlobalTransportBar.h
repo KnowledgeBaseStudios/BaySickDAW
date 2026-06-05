@@ -44,13 +44,13 @@ public:
     void       setRecordMode(RecordMode m);
     std::function<void(RecordMode)> onRecordModeChanged;
 
-    // QA-Ea Task 0c (FL pre-roll record): global record-quantize divisor.
-    // Surfaced as a "Global Record-Quantize" submenu in the Record-button
-    // dropdown alongside ASIO / MIDI mode.  Owner of the underlying state
-    // (APVTS param `record_quantize_div`) lives in StandaloneEditor /
-    // VibeSynthProcessor; this bar just reads the current value (for tick
-    // rendering in the submenu) and writes new picks via the setter
-    // callback.  Divisor values: 0=Off, 1=1/4, 2=1/8, 3=1/16, 4=1/32, 5=1/64.
+    // QA-Ea Task 0c (FL pre-roll record) + QA-Ee Stage 4: global record-quantize
+    // division.  Surfaced as a "Global Record-Quantize" submenu in the Record-
+    // button dropdown alongside ASIO / MIDI mode.  Owner of the underlying state
+    // (APVTS param `Unified_RecordQuantizeDiv`) lives in StandaloneEditor /
+    // VibeSynthProcessor; this bar just reads the current value (for the menu
+    // tick) and writes new picks via the setter callback.  Values are the shared
+    // 11-label snap scheme (0=Off, 1=Line, 2=Bar ... 10=1/6 Step).
     std::function<int()>      onGetRecordQuantizeDiv;
     std::function<void(int)>  onRecordQuantizeDivChanged;
     std::function<void(bool)>   onMetronomeToggle;  // true = on

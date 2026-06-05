@@ -523,3 +523,235 @@ velocity, ... }` -- so `velocity` landed in the int64 slot (C2397 narrowing) and
 slot (C2665).  Fix: relocated both fields to the END of the struct (trailing fields just take defaults in
 those brace-inits; the serdes sets them by name, position-independent) + a KEEP-LAST comment so they're
 not moved back.  Rebuild pending.
+
+## 2026-06-04 — Stage 3 committed + 2 more out-of-scope findings (effects regressions)
+
+Stage 3 committed as `56ecc38` (13 files, +453/-112) -- 3a global snap + grid unification + 3b note
+serdes, all verified by Jeff in Debug + Release.  Batch stays open for Stage 4 (Record-Quantize) + close.
+
+**Two more out-of-scope findings (Jeff, 2026-06-04) -- ADD TO CLOSE ROUTING (join findings 1-3 above):**
+4. **Compressor: multiple types broken -- gain reduction only in a narrow band.**  Jeff: "small band
+   shows reduction but further down or up no reduction at all."  GR works in a narrow range, not above/below.
+5. **Flanger BPM button is one-way.**  Turns BPM/sync mode ON but won't turn it OFF (the toggle won't
+   release).
+
+**Regression lead (git trace, NOT a deliberate edit):** Jeff reports both worked for a long time with
+nobody touching the effects.  `git log` on the cores: CompressorDSP.cpp + FlangerDSP.cpp UNCHANGED since
+the pre-QA commit `984466e`; EffectEditorPanels.cpp (UI for both -- flanger BPM button + compressor type
+controls) last changed only by `a472a44` (QA-0a em-dash sweep, 217 files).  An em-dash sweep can only
+touch string literals + comments (em-dashes aren't legal in C++ code outside those), so it cannot have
+altered the toggle/compressor logic -- almost certainly innocent.  => the breakage is most likely in a
+SHARED dependency the effects use but that lives in another file (EffectRack, per-insert effect
+processing in VibeGraph/PluginProcessor, APVTS effect-param wiring, a LAF) or a DELETED helper.  Jeff's
+"did deleting ST remove shared logic?" hypothesis is plausible IF ST was a shared dependency -- pending
+Jeff confirming what "ST" refers to so its removal commit can be checked against the effects' code path.
+
+**Jeff wants a broad review sweep** -- silent multi-feature breakage with no deliberate edit to the
+feature is exactly the signal for one.  PROPOSED at close: a dedicated correctness/regression sweep,
+distinct from the mandatory QA-Ee /review-batch (covers only the QA-Ee diff -- won't catch pre-existing
+regressions) and from /perf-audit (perf-only).  Scope = the 12 effect modules + their panels + the shared
+rack/insert/param/LAF code they depend on + a pass over recent deletions for collateral.  Slot/scope =
+Jeff's call at close.
+
+**ST clarified (Jeff, 2026-06-04): ST = SINGLE THREAD.**  The app's original single-threaded render path;
+the build then moved to a multi-thread render engine (Engine/Tasks/ -- RenderTask / RenderGraphDispatcher
+/ MasterTask / *StripTask, the very files throwing the C4324 padding warnings in the Stage-3 build log),
+and the dedicated single-thread path was DELETED, replaced by a "single worker mode" (the multi-thread
+engine run with 1 worker) to test ST-like scenarios.  This reframes the sweep: the leading hypothesis is
+now a single->multi-thread MIGRATION regression in how EffectRack inserts (+ the pedal-board effects,
+which share the rack connection) get their per-block STATE + PARAMETERS across the worker boundary -- not
+a generic shared-dep issue.  The compressor symptom (GR only in a narrow band) is consistent with an
+envelope-follower whose state isn't carried across blocks (a reset-per-block detector reacts only to
+instantaneous level); the flanger BPM toggle-won't-release is consistent with a per-block parameter
+snapshot not picking up the OFF state.  (Both are hypotheses -- not yet verified in code.)
+
+**Cheap diagnostic for Jeff (before any code dig):** run the broken compressor + flanger in SINGLE-WORKER
+mode vs MULTI-WORKER mode.  Different behavior -> the threading migration is the culprit (state/param per
+worker; multi-worker-only = a parallelism / state-split issue).  Same broken in both -> the migration
+changed effect processing fundamentally (not parallelism-specific).  Works in single-worker only -> a
+parallelism race / state split.  This A/B narrows the whole sweep before reading a line of engine code.
+
+**Revised sweep scope:** the multi-thread render engine <-> EffectRack / InsertNode processing handoff
+(per-block effect STATE + PARAMETER continuity across workers); EVERY stateful effect (all 12 modules) +
+the pedal-board effects (BaySickPedals -- shares the rack connection) for state-continuity; + the git diff
+of the single-thread-deletion / multi-thread-migration commit(s) as the regression window.
+
+**A/B result (Jeff ran it): NO CHANGE single-worker vs multi-worker.**  Jeff correctly anticipated this --
+"single worker mode" is the MT engine with all-but-one worker PARKED running the IDENTICAL dispatcher/task
+code (QA-Ef's workerLoop park-when-OFF gate), NOT the deleted ST path.  So the A/B can't isolate ST-vs-MT;
+what it DOES establish: the bug is NOT parallelism (no race / worker state-split) -- present with 1 worker
+OR N, so it lives in the MT effect-processing LOGIC itself.
+
+**Regression window IDENTIFIED: QA-Ef** (silly-name `synchronous-dreaming-hummingbird`, closed 2026-05-23,
+plan `Plans & Specs/Batch Plans/synchronous-dreaming-hummingbird.md`) -- the Serial (ST) Render-Path
+Deletion.  Deleted the serial render tail + collapsed the shared insert/clip helpers (`routeInsertOutput`,
+`renderAudioClipsForRow`, `renderFilePlayPlayer`) to MT-only, making MT the single unconditional render
+path.  Leading read: the compressor/flanger were already DIVERGENT (broken) under MT and worked under the
+ST tail; QA-Ef removing the ST fallback EXPOSED the MT breakage -- consistent with QA-Ef's own §9-25
+finding that 3 feeds had leaked ST-only (master/MIDI recorders + metronome).  This is more MT divergence.
+
+**Compressor detail (Jeff): NOT all modes -- Vintage-knee + FET + Opto broken; cleaner modes OK.**  Those
+three are the program-dependent / state-heavy / time-constant detector modes -- strong signature of the MT
+path not carrying per-block detector STATE (or a wrong prepare / sample-rate / block-size feeding the time
+constants).  Flanger BPM-toggle-won't-release is a separate param/latch issue on the same path.
+
+**Investigation dispatched** (read-only agent): QA-Ef commit diffs + the live MT EffectRack / InsertNode /
+StripTask insert-processing + CompressorDSP modes + FlangerDSP/panel toggle.  Findings land here + scope
+the routed sweep.
+
+**MAP RESULT (investigation complete 2026-06-04) -- OVERTURNS the ST-deletion hypothesis.**
+- **ST->MT render parity is CLEAN.**  No audio/feed behavior the deleted ST tail did is unreplicated by MT
+  beyond the 4 QA-Ef already caught (master/MIDI recorders, metro, FX-bus meter).  VERIFIED by main session:
+  QA-Ef close commit `ad956bf` touched ZERO effect-DSP/rack/panel LOGIC (only a 2-line comment in
+  `Source/DSP/EngineSidechainHelper.h`).  CompressorDSP/FlangerDSP/EffectRack/EffectEditorPanels are
+  UNCHANGED in the QA era (git: last touched pre-QA `984466e`).  So the ST deletion did NOT directly break
+  these -- the relevant effect code is untouched by it.
+- **Flanger BPM -- VERIFIED root cause, pre-existing (NOT ST):** `FlangerDSP::setSyncBPM(true)` recomputes +
+  snaps the rate; `setSyncBPM(false)` clears the flag but NEVER restores mRate/mRateSmooth -> LFO stays at
+  the last synced rate (off-in-flag, stuck-by-ear).  Same one-directional pattern in DelayDSP + PhaserDSP
+  `setSyncBPM`.  (FlangerDSP.cpp:49-66.)  OPEN for Jeff: is "won't turn off" the audible rate stuck (code
+  predicts this) vs the button visually refusing to un-toggle (the widget is symmetric in code, so a visual
+  refusal would be a separate UI bug)?
+- **Compressor -- UNCONFIRMED; render path EXCLUDED.**  State continuity intact (single contiguous block per
+  callback; no per-block `rack.reset()` -- reset() is dead code), sidechain replicated, instance identity
+  preserved.  Candidates (pre-existing, not QA-Ef): Vintage-knee narrow-band BY DESIGN (ratio tapers ->1.0
+  over 12 dB above threshold, CompressorDSP.cpp:247-254); FET tanh GR cap (~:482-493); Opto release-blend +
+  meter ballistics; + per-panel threshold REMAPPING (FET Input->-60..0; Opto PeakRed 0..100->0..-40) makes
+  cross-mode A/B misleading.  THE decider: WHERE is the broken compressor?  On Audio/Vox/Inst strips,
+  stateful effects get `processInsert` called MULTIPLE times per block (partial sub-buffers) -> envelope
+  corruption -> exactly the "narrow band" symptom; Layer/Bass/Drum/Bus inserts are single-call / safe.
+  (VibeGraph.cpp:2497-2511.)  Need Jeff's strip location + a fixed-sine GR-per-mode bench test.
+- **GENUINE NEW HAZARD (real engine bug):** stateful effects (compressor envelope, reverb tail, delay
+  feedback, chorus/phaser/flanger LFO) on Audio/Vox/Inst inserts processed multiple times per block.
+
+**Batch reframed (still warranted):** NOT "restore ST/MT parity" (clean) -> an EFFECTS-CORRECTNESS batch:
+(1) flanger/delay/phaser one-directional un-sync (verified); (2) multi-call-per-block for stateful effects
+on Audio/Vox/Inst strips (real); (3) compressor per-mode bench-test confirm + fix real bug / misleading
+meters + threshold remap.  Distinct from QA-Eg (bus-meter G1/G2 split, already routed at QA-Ef close).
+Slot: immediately after QA-Ee (Jeff).  Silly-name: mine, TBD at draft.  Optional hardening: pull the actual
+deleted-ST diff (agent's session was blocked from git) to confirm parity + whether the audio-clip
+multi-call is itself an ST->MT divergence.
+
+**UPDATE (2026-06-04, post-strip-location + ST-diff verify):**
+- **Jeff: the broken compressor is on a LAYER strip.**  VERIFIED: Layer inserts are SINGLE-CALL in MT --
+  `EngineInsertTask::run` renders the engine once + calls `processInsert(Layer, i)` once per block
+  (EngineInsertTask.cpp:92,102-103).  AND the deleted ST tail processed Layer inserts IDENTICALLY -- one
+  `processInsert(InsertKind::Layer, i)` per block (ad956bf diff, removed line ~447).  => the multi-call
+  hazard does NOT apply to a Layer compressor, and the ST deletion did NOT change Layer-insert processing.
+  Both the render path and the ST deletion are EXCLUDED for the Layer compressor.  (My earlier "multi-call
+  is probably your culprit" was premature -- it assumed an Audio/Vox/Inst strip.)
+- **The multi-call (Audio/Vox/Inst) is PRE-EXISTING, not an ST->MT regression.**  The deleted ST tail also
+  looped per-clip-page for Audio (`for ci < kMaxClipPages` -> processInsert(Audio, ci)) + called
+  `renderAudioClipsForRow` (per-clip) + `renderFilePlayPlayer` per player; QA-Ef only swapped the OUTPUT
+  routing (routeInsertOutput -> mtDest), not the per-clip looping.  So it's a long-standing trait -- still a
+  real bug for stateful effects on those strips, but QA-Ef did not introduce it.
+- **CONCLUSION on the Layer compressor:** NOT the render path, NOT the ST deletion (both verified single-
+  call + unchanged), and CompressorDSP/panel code is unchanged in the QA era.  Remaining: a latent bug in
+  the Opto/FET/Vintage mode DSP, OR intended per-mode behavior (Vintage knee narrow-band by design) + the
+  per-panel threshold mapping (FET/Opto emulate different hardware controls -> cross-mode A/B by knob
+  position is misleading).  DECIDER: (1) read the Opto/FET/Vintage mode math + FET/Opto threshold mapping
+  (agent flagged a FET mapping comment that contradicts the code -- bug smell); (2) fixed-sine GR-per-mode
+  bench at identical settings.
+
+**COMPRESSOR ROOT CAUSES FOUND (2026-06-04 code read by main session) -- 2 real bugs + Opto cleared:**
+- **Vintage knee (kneeType 2/6) -- REAL BUG, CompressorDSP.cpp:245-254 (`computeGainDb`).**  The "optical"
+  model fades effectiveRatio -> 1.0 linearly over 12 dB above threshold, so GR = overshoot*(1/effRatio - 1)
+  becomes a HUMP: 0 at threshold, peaks mid, back to 0 at >= 12 dB over.  => compresses only in a ~12 dB
+  band and NOTHING above it.  Exactly Jeff's "reduction in a narrow band, none above."  Intentional in code
+  (comment "mimicking electro-optical behavior") but the math is wrong -- real optos don't stop compressing
+  at high level.  Pedal-board-era (file unchanged since pre-QA `984466e`).
+- **FET (mType FET) -- REAL BUG, EffectEditorPanels.cpp:402-407 (FET panel knob[0] wiring).**  The "Input"
+  knob maps slider dB DIRECTLY to threshold, meaning inverted: top of knob (0 dB) -> setThreshold(0) =
+  threshold 0 dBFS = ~no compression; the code comment literally claims "0 dB = aggressive threshold; -60 =
+  no comp" which is backwards (threshold 0 = no comp; -60 = max comp).  So turning Input UP (expecting more
+  squash, 1176-style) gives LESS/none; only behaves near the default (-12).  Exact slider orientation to pin
+  at fix, but the threshold semantics are definitely wrong.  Pedal-board-era (panel logic unchanged).
+- **Opto (mType Opto) -- DSP is CORRECT, NOT an amount bug.**  Threshold map (PeakRed 0..100 -> 0..-40 dB,
+  EffectEditorPanels.cpp:559-563) correct; release coefs `exp(-1/(0.060/0.500/1.000 * sr))` = 60/500/1000 ms
+  (CompressorDSP.cpp:220-222) correct; history-weighted fast/slow release blend (:460-461) correct.  So
+  Opto's "broken" is NOT compression-amount -- suspect the Opto panel's separate timer-driven GR meter, or
+  its slow LA-2A release reading as "barely compressing" next to the others.  Needs the Opto panel meter
+  checked OR Jeff's exact Opto symptom (sound vs meter).
+
+=> Batch docket (effects-correctness) now CONCRETE: (1) Vintage-knee GR-hump; (2) FET inverted Input->
+threshold map; (3) Opto meter/behavior verify; (4) flanger/delay/phaser one-way un-sync; (5) Audio/Vox/Inst
+multi-call-per-block for stateful effects.  All pre-QA / pedal-board-era origin (none introduced by the QA
+batches incl. QA-Ef).
+
+## 2026-06-05 — Stage 4 + recording-displacement fix verified; 2 more out-of-scope findings (piano-roll UI)
+
+**RECORDING-DISPLACEMENT FIX (MIDI count-in pre-roll) — surfaced in Stage 4 verify, fixed in QA-Ee, verified.**
+Symptom (Jeff): with a count-in, recorded MIDI notes land a full measure early + a held full-bar note
+collapses to a 1/64.  Present with snap ON and OFF -> NOT the Stage 4 quantize (the quantize block is
+skipped when snap is off, so it's provably inert here).
+- **Root cause (confirmed in code):** the MIDI recorder timestamps notes from `pos.getPpqPosition()`
+  (PluginProcessor.cpp:1706).  The count-in defers `mPlayHead.start()` to a msg-thread timer
+  (StandaloneEditor.cpp:5459-5474 + CountInTimer .h:450-458), so the playhead is NOT "playing" during the
+  count-in.  Post-QA-Ed `advanceBlock` gates on `mPlaying` (StandaloneApp.cpp:176) -> `mSamplePos`/PPQ
+  FREEZE during the count-in.  The old float `mPPQPos` advanced through the count-in; the new int64 clock
+  doesn't.  So the count-in dropped out of the recorded timeline, but the commit still subtracts one bar
+  (`startBeat -= preRollBeats`) -> everything a measure too negative; downbeat notes go negative + the
+  early-strike clamp shears their length.  QA-Ed (ffc6dc7) changed ONLY the playhead internals
+  (startPlayback/count-in/preRoll untouched per `git show`) -- its int64 rebuild EXPOSED the QA-Ea pre-roll
+  assumption.
+- **Audio (Inst/Vox/master) UNAFFECTED — verified:** audio recording never reads the playhead (real-time
+  WAV capture + `preRollSamples` sample-count + arm-position placement + `contentStartSamples` trim = the
+  slip-editable negative space).  `git diff | grep` confirmed my change touches ZERO contentStart /
+  slip-edit / audio-recorder code.  That asymmetry is WHY MIDI broke and audio didn't (MIDI needed a
+  per-note beat number from the frozen playhead; audio just records samples).
+- **Fix (MIDI recorder only, 3 files):** the recorder keeps its OWN count-in-inclusive beat clock
+  (`mElapsedBeats`, advanced by numSamples*bps every block from arm) instead of the frozen playhead.  The
+  count-in re-occupies [0, preRollBeats) of the recorded timeline; the commit's `-= preRollBeats` lands the
+  downbeat on bar 0 and pushes the count-in into negative space (bar -1 -> 0) where the locked (a)/(b)
+  noodling-discard + early-strike rules handle it -- design RESTORED, not amputated.  MidiRecorder.h/.cpp
+  (`processBlock` arg `beatStart`->`numSamples` + new `mElapsedBeats`, reset in startRecording) +
+  PluginProcessor.cpp:1711 (caller passes numSamples).  Brings MIDI in line with how audio already
+  self-times.  (Rejected the 1-line "stop subtracting preRoll for MIDI" -- it would delete the
+  noodling-discard feature; Jeff overruled, correctly.)
+- **VERIFIED (Jeff, Debug+Release 2026-06-05):** count-in take lands where played; full-bar note stays full;
+  noodling-discard + early-strike intact; Stage 4 quantize works on top.
+- **Routing:** spans QA-Ed (closed, the playhead change) -> fix lands in QA-Ee.  §9 Forks back-ref to QA-Ed
+  at close.
+
+**STAGE 4 — Record-Quantize (`Unified_RecordQuantizeDiv`) — VERIFIED.**
+- `record_quantize_div` (Int 0..5) -> `Unified_RecordQuantizeDiv` (Int 0..10, default 0=Off) on the shared
+  11-label scheme (PluginProcessor.cpp).
+- GlobalTransportBar "Global Record-Quantize" submenu built from `kUnifiedSnapLabels` (11 items, ids
+  100..110) -- identical to the Builder/PianoRoll snap pickers; handler range widened.
+- StandaloneEditor: getter/setter repointed; MIDI-commit consumer rewritten from the beat-halving switch to
+  96-PPQ tick-grid snapping (`snapDivToTicks` -> round startBeat to nearest grid tick), triplet-aware for
+  free.  Guard on the TICK value (`g>0`), NOT the index -> Off (0) AND Line (1) are both no-snap (Line has
+  no fixed grid at record-commit; the plan's literal `div>0` would div-by-zero on Line in the 11-label
+  scheme -- a real correction over the plan snippet).  Old projects reset record-quantize to Off on load
+  (id change; old indices don't map; Off is the safe default).  Stale `record_quantize_div` refs cleaned
+  (GlobalTransportBar.h + the Stage-2 Builder-snap comment).
+- **VERIFIED (Jeff, Debug+Release 2026-06-05):** 11 menu labels; Step->1/16, 1/3 Beat->eighth-triplet,
+  Off->raw timing.
+
+**TWO MORE OUT-OF-SCOPE FINDINGS (Jeff, 2026-06-05) — ADD TO CLOSE ROUTING (join findings 1-5; piano-roll
+UI layout, not grid/snap scope):**
+6. **Piano Roll — fold the Tools BUTTON into the Tools MENU; drop the duplicate tool-selectors.**
+   - The menu-bar "Tools" entry (PianoRoll.cpp:4036-4050, menu idx 1) lists Draw/Paint/Delete/Mute/Slice/
+     Select/Zoom == the `mToolBtns[]` toolbar buttons (PianoRoll.cpp:2658) -> REMOVE those from the menu
+     (the buttons already cover them, right there on the bar).
+   - Move the Tools BUTTON's tools (the wrench `mWrenchBtn`, PianoRoll.cpp:2600 -> `mGrid->showToolsMenu()`:
+     Quantize / Strum / Glue / Chop / Randomize / Articulate...) INTO the menu-bar "Tools" entry, then
+     REMOVE the wrench button.
+   - Net: menu-bar Tools = the wrench's advanced tools; the per-tool selectors leave the menu; the wrench
+     button is gone.
+7. **Piano Roll — snap button -> Builder-style dropdown + reposition; kit button to the bar's right end.**
+   - Replace the snap TOGGLE button with a BuilderPage-style snap DROPDOWN (the `mSnapCombo` 11-label combo)
+     on BOTH toolbars: the engine-roll `PianoRollContainer` toolbar (`mMagnetBtn`, PianoRoll.cpp:2608) AND
+     the Drum Kit `DrumKitContainer` toolbar (DrumKitGrid.*).
+   - Position the snap dropdown where the kit button currently sits.  The kit button exists ONLY on the Drum
+     Kit roll's toolbar; on that toolbar, move it to the RIGHT END of the bar.
+   - (The snap -> dropdown change applies to BOTH toolbars per Jeff; only the Drum Kit toolbar has a kit
+     button to relocate.)
+
+**Effects-docket correction (Opto):** the earlier line "Opto DSP is correct" is SUPERSEDED -- Jeff's
+screenshots show Opto humping like Vintage (3 dB GR mid-knob, none above/below).  FET + Opto panels expose
+NO knee control, and all modes share the same `computeGainDb` knee/ratio computer, so the Vintage-knee
+GR-hump (CompressorDSP.cpp:245-254) is the prime shared suspect for all three (Vintage / FET / Opto).
+Docket items (1) Vintage-knee hump + (2) FET inverted Input->threshold map stand; (3) "Opto verify" folds
+into (1).  Exact wiring (why FET/Opto exhibit the Vintage-style hump) TBD in the dedicated
+effects-correctness batch.

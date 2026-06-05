@@ -419,14 +419,14 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
             // underlying APVTS param lives in StandaloneEditor; this menu
             // reads + writes via the onGetRecordQuantizeDiv /
             // onRecordQuantizeDivChanged callbacks.
+            // QA-Ee Stage 4: 11-label unified snap scheme (ids 100..110), built
+            // from the shared kUnifiedSnapLabels so this picker stays identical
+            // to the Builder + Piano Roll snap menus.  "Line" appears for parity
+            // but is a no-snap no-op here (no zoom grid at record-commit time).
             const int curQ = onGetRecordQuantizeDiv ? onGetRecordQuantizeDiv() : 0;
             juce::PopupMenu qSub;
-            qSub.addItem (100, "Off",  true, curQ == 0);
-            qSub.addItem (101, "1/4",  true, curQ == 1);
-            qSub.addItem (102, "1/8",  true, curQ == 2);
-            qSub.addItem (103, "1/16", true, curQ == 3);
-            qSub.addItem (104, "1/32", true, curQ == 4);
-            qSub.addItem (105, "1/64", true, curQ == 5);
+            for (int i = 0; i < kNumUnifiedSnapDivs; ++i)
+                qSub.addItem (100 + i, kUnifiedSnapLabels[i], true, curQ == i);
             m.addSeparator();
             m.addSubMenu ("Global Record-Quantize", qSub);
 
@@ -435,7 +435,7 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
                 [this](int r) {
                     if      (r == 1) setRecordMode (RecordMode::Audio);
                     else if (r == 2) setRecordMode (RecordMode::Midi);
-                    else if (r >= 100 && r <= 105 && onRecordQuantizeDivChanged)
+                    else if (r >= 100 && r < 100 + kNumUnifiedSnapDivs && onRecordQuantizeDivChanged)
                         onRecordQuantizeDivChanged (r - 100);
                 });
         };

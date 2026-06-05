@@ -917,20 +917,21 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     mTransport->onMetronomeToggle = [this](bool on) {
         mProcessor.mMetro.enabled.store(on, std::memory_order_relaxed);
     };
-    // QA-Ea Task 0c (FL pre-roll record): wire the GlobalTransportBar
-    // Record-button submenu's "Global Record-Quantize" picker to the
-    // APVTS param `record_quantize_div` (0=Off, 1=1/4, 2=1/8, 3=1/16,
-    // 4=1/32, 5=1/64).  Getter for tick rendering + setter for writing
-    // back through APVTS using the project's standard setValueNotifyingHost
-    // pattern (matches every other dropdown wiring in this file).
+    // QA-Ea Task 0c (FL pre-roll record) + QA-Ee Stage 4: wire the
+    // GlobalTransportBar Record-button submenu's "Global Record-Quantize"
+    // picker to the APVTS param `Unified_RecordQuantizeDiv` (Int 0..10 on the
+    // shared 11-label snap scheme -- see kUnifiedSnapLabels).  Getter for the
+    // menu tick + setter for writing back through APVTS using the project's
+    // standard setValueNotifyingHost pattern (matches every other dropdown
+    // wiring in this file).
     mTransport->onGetRecordQuantizeDiv = [this]() -> int {
-        if (auto* p = mProcessor.apvts.getRawParameterValue ("record_quantize_div"))
+        if (auto* p = mProcessor.apvts.getRawParameterValue ("Unified_RecordQuantizeDiv"))
             return (int) p->load();
         return 0;
     };
     mTransport->onRecordQuantizeDivChanged = [this](int div) {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
-                mProcessor.apvts.getParameter ("record_quantize_div")))
+                mProcessor.apvts.getParameter ("Unified_RecordQuantizeDiv")))
             p->setValueNotifyingHost (
                 p->getNormalisableRange().convertTo0to1 ((float) div));
     };
@@ -2311,7 +2312,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         };
         // QA-Ee Stage 2 (Builder snap): the grid reads the unified snap-division
         // index live for snap + grid rendering; the combo writes it back.  Mirrors
-        // the record_quantize_div getter/setter pattern (default 1 = Line).
+        // the Unified_RecordQuantizeDiv getter/setter pattern (default 1 = Line).
         grid->onGetSnapDiv = [this]() -> int {
             if (auto* p = mProcessor.apvts.getRawParameterValue ("Unified_BuilderSnapDiv"))
                 return (int) p->load();
@@ -11036,10 +11037,12 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
             //       clamp startBeat to 0 and recompute durationBeats =
             //       endBeat - 0.  The hard wall is the downbeat -- no
             //       notes exist before beat 0 in the recorded pattern.
-            //   (c) INPUT-QUANTIZE snap (Component 8 param `record_quantize_div`)
-            //       -- when non-Off, snap the (post-clamp) startBeat to the
-            //       configured grid divisor.  Applied AFTER the Early-Strike
-            //       clamp so a clamped-to-0 note stays at 0 (round(0) = 0).
+            //   (c) INPUT-QUANTIZE snap (param `Unified_RecordQuantizeDiv`, the
+            //       shared 11-label snap scheme) -- when the division has a fixed
+            //       tick grid (Bar..1/6 Step), snap the (post-clamp) startBeat to
+            //       the nearest grid tick.  Applied AFTER the Early-Strike clamp
+            //       so a clamped-to-0 note stays at 0.  Off (0) and Line (1) have
+            //       no fixed grid -> no snap (raw timing kept).
             const double sampleRate    = mProcessor.getSampleRate();
             const double bpmForMidi    = juce::jmax (20.0, mTransport
                                                               ? mTransport->getBPM()
@@ -11047,21 +11050,13 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
             const double preRollBeats  = (sampleRate > 0.0)
                 ? (double) res.preRollSamples * bpmForMidi / (60.0 * sampleRate)
                 : 0.0;
-            // Component 8 param: 0=Off, 1=1/4, 2=1/8, 3=1/16, 4=1/32, 5=1/64.
-            // Beats per quantize-step: 1/4 note = 1 beat; halve per step.
-            double quantizeBeats = 0.0;
-            if (auto* qDiv = mProcessor.apvts.getRawParameterValue ("record_quantize_div"))
-            {
-                switch ((int) qDiv->load())
-                {
-                    case 1: quantizeBeats = 1.0;    break;   // 1/4
-                    case 2: quantizeBeats = 0.5;    break;   // 1/8
-                    case 3: quantizeBeats = 0.25;   break;   // 1/16
-                    case 4: quantizeBeats = 0.125;  break;   // 1/32
-                    case 5: quantizeBeats = 0.0625; break;   // 1/64
-                    default: break;                          // Off
-                }
-            }
+            // Record-quantize grid in TICKS (96 PPQ).  snapDivToTicks maps the
+            // FIXED divisions (Bar=384 .. 1/6 Step=4); Off (0) and Line (1)
+            // return 0 -> no snap (Line has no fixed grid: there is no zoom
+            // canvas at record-commit time, so raw timing is kept).
+            int quantizeTicks = 0;
+            if (auto* qDiv = mProcessor.apvts.getRawParameterValue ("Unified_RecordQuantizeDiv"))
+                quantizeTicks = snapDivToTicks ((int) qDiv->load());
 
             for (auto n : res.midiNotes)   // mutable copy: shift + maybe clamp + maybe snap
             {
@@ -11078,9 +11073,12 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
                     n.durationBeats = endBeat;
                 }
 
-                // (c) Input quantize (snap-to-nearest grid divisor).
-                if (quantizeBeats > 0.0)
-                    n.startBeat = std::round (n.startBeat / quantizeBeats) * quantizeBeats;
+                // (c) Input quantize (snap startBeat to nearest grid tick).
+                if (quantizeTicks > 0)
+                {
+                    const juce::int64 t = beatsToTicks (n.startBeat);
+                    n.startBeat = ticksToBeats (((t + quantizeTicks / 2) / quantizeTicks) * quantizeTicks);
+                }
 
                 target->notes.push_back (n);
             }
