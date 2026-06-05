@@ -91,7 +91,6 @@ struct PianoRollData
 {
     std::vector<PianoNote> notes;
     int  numBars       { 2 };
-    int  snapDenominator { 32 };   // snap quantization: 1/snapDenominator note
 };
 
 // ── Basic sequence step (on-page grid) ───────────────────────────────────────

@@ -289,10 +289,10 @@ PianoRollGrid::PianoRollGrid()
 }
 
 void PianoRollGrid::setScrollState(float ppb, double beatOff, int topNote,
-                                   int noteH, int numBars, int snapDenom)
+                                   int noteH, int numBars)
 {
     mPPB = ppb; mBeatOff = beatOff; mTopNote = topNote;
-    mNoteH = noteH; mNumBars = numBars; mSnapDenom = snapDenom;
+    mNoteH = noteH; mNumBars = numBars;
     repaint();
 }
 
@@ -2973,7 +2973,7 @@ void PianoRollContainer::setTopNote(int topNote)
 void PianoRollContainer::setData(PianoRollData* data)
 {
     mData = data;
-    if (mData) { mNumBars = mData->numBars; mSnapDenom = mData->snapDenominator; }
+    if (mData) { mNumBars = mData->numBars; }
     mGrid->setData(data);
     mLane->setData(data);
     syncScrollState();
@@ -3098,7 +3098,7 @@ void PianoRollContainer::syncScrollState()
     }
     int bars = mData ? mData->numBars : mNumBars;
     mKeyboard->setScrollState(mTopNote, noteH);
-    mGrid->setScrollState(mPPB, mBeatOff, mTopNote, noteH, bars, mSnapDenom);
+    mGrid->setScrollState(mPPB, mBeatOff, mTopNote, noteH, bars);
     mLane->setScrollState(mPPB, mBeatOff);
     pushScrollStateToBars();
     repaint();

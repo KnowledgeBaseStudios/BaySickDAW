@@ -739,7 +739,6 @@ namespace
     {
         juce::ValueTree t (tag);
         t.setProperty ("numBars",         r.numBars,         nullptr);
-        t.setProperty ("snapDenominator", r.snapDenominator, nullptr);
         for (const auto& n : r.notes) t.addChild (noteToValueTree (n), -1, nullptr);
         return t;
     }
@@ -749,7 +748,6 @@ namespace
         if (! t.isValid()) return;
         r.notes.clear();
         r.numBars         = (int) t.getProperty ("numBars",         2);
-        r.snapDenominator = (int) t.getProperty ("snapDenominator", 32);
         for (int i = 0; i < t.getNumChildren(); ++i)
         {
             auto c = t.getChild (i);

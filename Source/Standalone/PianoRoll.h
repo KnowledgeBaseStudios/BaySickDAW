@@ -76,7 +76,7 @@ public:
     bool keyPressed    (const juce::KeyPress&)                                    override;
 
     void setScrollState(float ppb, double beatOff, int topNote, int noteH,
-                        int numBars, int snapDenom);
+                        int numBars);
     // C.5b: pattern's intrinsic time signature drives bar-line spacing +
     // sub-grid count.  Bar PPQ width = num * (4/den).  Sub-grid count = num.
     void setTimeSignature(int num, int den);
@@ -223,7 +223,6 @@ private:
     int    mTopNote   { 96 };
     int    mNoteH     { kNoteH };
     int    mNumBars   { 2 };
-    int    mSnapDenom { 32 };
     double mPlayhead  { -1.0 };
     // C.5b: pattern intrinsic TS used for bar-line spacing.
     int    mTsNum     { 4 };
@@ -643,7 +642,6 @@ private:
     float  mNoteHScale {  1.f };   // vertical zoom multiplier
     double mBeatOff    { 0.0 };
     int    mTopNote    { 96 };
-    int    mSnapDenom  { 32 };
     int    mNumBars    { 2 };
     bool   mSnapEnabled { true };
     std::function<int()>     mOnGetSnapDiv;   // QA-Ee Stage 3: global snap read (PianoRollPage)

@@ -141,7 +141,7 @@ public:
     void mouseDoubleClick(const juce::MouseEvent&)                                override;
     bool keyPressed    (const juce::KeyPress&)                                    override;
 
-    void setScrollState   (float ppb, double beatOff, int rowH, int snapDenom);
+    void setScrollState   (float ppb, double beatOff, int rowH);
     void setPatternManager(PatternManager* pm);
     void setKitRowProvider(std::function<std::vector<DrumKitRowInfo>()> fn);
     // Re-fetch the row info from the provider.  Call when the drum list
@@ -223,7 +223,6 @@ private:
     float  mPPB        { 80.f };
     double mBeatOff    { 0.0 };
     int    mRowH       { kDefaultRowH };
-    int    mSnapDenom  { 16 };
     double mPlayhead   { -1.0 };
     int    mRowYOffset { kRulerH };
 
@@ -493,7 +492,6 @@ private:
     float  mPPB        { 80.f };
     float  mRowHScale  { 1.f };
     double mBeatOff    { 0.0 };
-    int    mSnapDenom  { 16 };
     bool   mSnapEnabled { true };
     std::function<int()>     mOnGetSnapDiv;   // QA-Ee Stage 3: global snap read
     std::function<void(int)> mOnSetSnapDiv;   // QA-Ee Stage 3: global snap write

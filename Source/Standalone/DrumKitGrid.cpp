@@ -393,12 +393,11 @@ DrumKitGrid::DrumKitGrid()
     setWantsKeyboardFocus(true);
 }
 
-void DrumKitGrid::setScrollState(float ppb, double beatOff, int rowH, int snapDenom)
+void DrumKitGrid::setScrollState(float ppb, double beatOff, int rowH)
 {
     mPPB = ppb;
     mBeatOff = beatOff;
     mRowH = jmax(1, rowH);
-    mSnapDenom = snapDenom;
     repaint();
 }
 
@@ -3316,10 +3315,6 @@ void DrumKitContainer::setPatternManager(PatternManager* pm)
     mPM = pm;
     if (mGrid) mGrid->setPatternManager(pm);
     if (mLane) mLane->setPatternManager(pm);
-    if (mPM)
-    {
-        mSnapDenom = jmax(1, mPM->currentPattern().drumRolls[0].snapDenominator);
-    }
     syncScrollState();
 }
 
@@ -3473,7 +3468,7 @@ void DrumKitContainer::syncScrollState()
     rowH = jlimit(DrumKitGrid::kMinRowH, DrumKitGrid::kMaxRowH,
                   (int) (rowH * mRowHScale));
 
-    mGrid->setScrollState(mPPB, mBeatOff, rowH, mSnapDenom);
+    mGrid->setScrollState(mPPB, mBeatOff, rowH);
     mGrid->setRowYOffset(DrumKitGrid::kRulerH);
     mLane->setScrollState(mPPB, mBeatOff);
     mSidebar->setRowMetrics(DrumKitGrid::kRulerH, rowH);

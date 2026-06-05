@@ -755,3 +755,50 @@ GR-hump (CompressorDSP.cpp:245-254) is the prime shared suspect for all three (V
 Docket items (1) Vintage-knee hump + (2) FET inverted Input->threshold map stand; (3) "Opto verify" folds
 into (1).  Exact wiring (why FET/Opto exhibit the Vintage-style hump) TBD in the dedicated
 effects-correctness batch.
+
+## 2026-06-05 (cont.) — dead `snapDenominator` removed IN-BATCH + close routing finalized
+
+**`snapDenominator` chain REMOVED in-batch** (was on the route-to-later list as "remove the dead
+`PianoRollData.snapDenominator`" -- Jeff overruled: clean your OWN batch's dead code in-batch, do NOT
+defer it).  QA-Ee Stage 3 moved piano-roll + drum-kit snap to the GLOBAL `Unified_PianoRollSnapDiv` (read
+live via `onGetSnapDiv()`), which orphaned the per-roll `PianoRollData.snapDenominator` field + the
+`mSnapDenom` locals it fed (set, never read).  The Stage-3b note "left as-is, out of scope" was wrong --
+it's THIS batch's garbage, so it's gone now:
+- `PatternManager.h`: dropped the `PianoRollData::snapDenominator` field.  `PatternManager.cpp`: dropped
+  its save + load serdes (old projects' `<snapDenominator>` property is now harmlessly ignored on load --
+  load-compatible, no migration).
+- `PianoRoll.cpp/.h` + `DrumKitGrid.cpp/.h`: dropped both `mSnapDenom` members per file, the
+  `setScrollState(..., int snapDenom)` param (def + decl + the single caller each), the `setData`/reader
+  assignment from the field, and the now-empty drum-kit `if (mPM)` reader block.  `setSnapDenomAndQuantize`
+  (the Edit-menu Quantize submenu) is LIVE + UNTOUCHED -- Stage 3 already rewired it to the global snap; it
+  never referenced `snapDenominator`/`mSnapDenom`.
+- 6 files, +8/-20 (pure removal).  Zero behavior change (all removed state was set-but-never-read).
+  Verified by Jeff (Debug + Release 2026-06-05): snap still works in piano roll + drum kit, Edit>Quantize
+  still works, a pre-QA-Ee project loads intact.  Grep confirms zero `snapDenominator` / `mSnapDenom` /
+  `snapDenom`-param remain.
+
+**CLOSE ROUTING FINALIZED (Jeff, 2026-06-05).**  Three NEW batches, IN THIS ORDER, immediately after QA-Ee
+(silly-names are mine; formalized at close in Main Plan §5 dockets + §6 sequencing + §9 Forks rationale):
+1. **QA-EffectsReview** (1st) -- effects-correctness docket (all pre-QA / pedal-board-era origin):
+   (a) Compressor Vintage-knee GR-hump (`CompressorDSP.cpp:245-254`) -- narrow-band reduction (finding #4);
+   FET + Opto inherit it via the shared `computeGainDb` path.  (b) FET inverted Input->threshold knob map
+   (`EffectEditorPanels.cpp:402-407`).  (c) Flanger/Delay/Phaser one-way un-sync (`FlangerDSP.cpp:49-66` +
+   Delay + Phaser) -- sync won't turn off (finding #5).  (d) Audio/Vox/Inst multi-call-per-block hazard for
+   stateful effects (delicate -- regression-test vs live + playback).
+2. **QA-CutSelfReview** (2nd) -- "Cut Self" broken on Layers/Bass (works on the drum-kit grid) (finding #2).
+3. **QA-UICleanup** (3rd) -- piano-roll + misc UI:
+   - Quit save-prompt dialog draggable -> fixed centered modal (finding #1).
+   - Layers don't auto-name from the loaded patch (finding #3).
+   - Fold the Piano-Roll Tools BUTTON's advanced tools into the menu-bar "Tools" entry + drop the menu's
+     duplicate per-tool selectors + remove the wrench button (finding #6).
+   - Snap button -> Builder-style snap DROPDOWN on BOTH the engine-roll + Drum-Kit toolbars; kit button ->
+     right end of the Drum-Kit toolbar (finding #7).
+   - **NEW (Jeff 2026-06-05) "Quantize Settings":** move the Edit-menu Quantize submenu (1/4..1/32) into the
+     Tools menu, rename it "Quantize Settings", and make it the quantize-RESOLUTION SETTING -- it configures
+     how quantize works; it no longer quantizes on the spot.
+   - **NEW (Jeff 2026-06-05) Tools-menu "Quantize" action:** the Quantize tool moved over from the wrench/
+     Tools button (finding #6) quantizes to whatever "Quantize Settings" is set to.
+
+(Finding #N = the "Out-of-scope findings" list earlier in this doc: #1 quit-prompt, #2 Cut Self, #3 Layers
+auto-name, #4 compressor, #5 flanger, #6 Tools->menu, #7 snap dropdown.  The old "remove dead
+snapDenominator" item is DONE in-batch above -- no longer routed.)
