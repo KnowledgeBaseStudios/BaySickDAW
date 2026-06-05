@@ -8,7 +8,7 @@
 //
 // Usage (all calls on audio thread except start/stop):
 //   startRecording(currentBeat)             - arm, called from message thread
-//   processBlock(midi, beatStart, bps)      - called every block while recording
+//   processBlock(midi, numSamples, bps)     - called every block while recording
 //   stopRecording()  → vector<PianoNote>    - called from message thread; clears state
 // ─────────────────────────────────────────────────────────────────────────────
 class MidiRecorder
@@ -20,11 +20,16 @@ public:
     void startRecording(double startBeat);
     bool isRecording() const { return mRecording.load(); }
 
-    // Audio thread: call every processBlock while armed
-    // beatStart = PPQ position at the start of this block
+    // Audio thread: call every processBlock while armed.
+    // numSamples     = this block's length.  The recorder advances its own
+    //                  count-in-inclusive beat clock by numSamples*bps each
+    //                  block.  Do NOT feed the transport PPQ here -- post-QA-Ed
+    //                  the playhead freezes during the count-in (it isn't
+    //                  "playing" yet), which dropped the count-in bar out of
+    //                  recorded note positions.
     // beatsPerSample = bpm / (60 * sampleRate)
     void processBlock(const juce::MidiBuffer& midi,
-                      double beatStart,
+                      int numSamples,
                       double beatsPerSample);
 
     // Message thread: stop and return all completed notes.
@@ -33,6 +38,14 @@ public:
 
 private:
     std::atomic<bool> mRecording { false };
+
+    // Free-running beat position since startRecording, advanced every block
+    // (INCLUDING the count-in).  This is the recorder's OWN clock so note
+    // timestamps stay correct even though the transport playhead freezes
+    // during the count-in (QA-Ee record-displacement fix).  Audio-thread
+    // write; reset on the message thread in startRecording before mRecording
+    // is published, same as mActive/mCompleted.
+    double mElapsedBeats { 0.0 };
 
     // Pending note (waiting for matching note-off)
     struct ActiveNote

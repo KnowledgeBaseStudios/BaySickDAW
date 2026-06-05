@@ -1695,9 +1695,13 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
     // ── MIDI recording: capture note events sent to the graph this block ─
     if (mMidiRecorder.isRecording())
     {
+        // QA-Ee: feed the recorder this block's length, NOT pos.getPpqPosition().
+        // The recorder runs its own count-in-inclusive clock; the transport PPQ
+        // freezes during the count-in (post-QA-Ed advanceBlock gates on mPlaying,
+        // false until the count-in timer fires), which dropped the count-in bar
+        // out of recorded note positions (notes a measure early + sheared length).
         double bps = bpm / (60.0 * mSampleRate);
-        double beatStart = pos.getPpqPosition().orFallback(0.0);
-        mMidiRecorder.processBlock(allMidi, beatStart, bps);
+        mMidiRecorder.processBlock(allMidi, numSamples, bps);
     }
 
     // QA-Ea Task 0c (FL pre-roll record): accumulate count-in samples while

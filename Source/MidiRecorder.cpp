@@ -4,16 +4,18 @@ void MidiRecorder::startRecording(double startBeat)
 {
     mActive.clear();
     mCompleted.clear();
+    mElapsedBeats = 0.0;   // restart the recorder's count-in-inclusive clock
     mRecording.store(true, std::memory_order_release);
     (void)startBeat;
 }
 
 void MidiRecorder::processBlock(const juce::MidiBuffer& midi,
-                                 double beatStart,
+                                 int numSamples,
                                  double beatsPerSample)
 {
     if (!mRecording.load(std::memory_order_acquire)) return;
 
+    const double beatStart = mElapsedBeats;   // recorder's own clock, not the playhead
     for (const auto& meta : midi)
     {
         const auto msg = meta.getMessage();
@@ -44,6 +46,11 @@ void MidiRecorder::processBlock(const juce::MidiBuffer& midi,
             }
         }
     }
+
+    // Advance the recorder's clock by this block.  Runs every block from arm,
+    // so the count-in bar occupies [0, preRollBeats) of the recorded timeline
+    // and the commit's pre-roll trim + noodling/early-strike rules line up.
+    mElapsedBeats += (double) numSamples * beatsPerSample;
 }
 
 std::vector<PianoNote> MidiRecorder::stopRecording()
