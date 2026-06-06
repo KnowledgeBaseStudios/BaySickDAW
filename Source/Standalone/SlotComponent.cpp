@@ -47,6 +47,43 @@ SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
     mPresetBtn->setVisible(false);
     mPresetBtn->onClick = [this] { showPresetMenu(); };
     addChildComponent(*mPresetBtn);
+
+    // QA-EffectsReview Task 1: Basic/Advanced disclosure toggle.  Same chrome
+    // styling as mPresetBtn.  Hidden until setEditor() shows it for a panel that
+    // reports hasAdvancedControls().  Click flips Basic<->Advanced + re-lays-out
+    // the panel in place.
+    mBasicBtn = std::make_unique<juce::TextButton>("Basic");
+    mBasicBtn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3b3b));
+    mBasicBtn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd6d6d6));
+    mBasicBtn->setTooltip("Basic / Advanced controls -- Advanced reveals power-user knobs");
+    mBasicBtn->setVisible(false);
+    mBasicBtn->onClick = [this] { toggleBasicMode(); };
+    addChildComponent(*mBasicBtn);
+}
+
+// QA-EffectsReview Task 1: Basic/Advanced toggle helpers.  The flag is owned by
+// the EffectRack slot (persisted with the project); the inline panel mirrors it
+// via EditorPanelBase::mBasicMode.  Toggling re-applies the panel layout IN PLACE
+// (no editor re-mount, so slider SafePointers / automation stay valid) and
+// notifies the host so the project dirty bit picks it up.
+void SlotComponent::refreshBasicBtnLabel()
+{
+    if (!mBasicBtn || !mRack) return;
+    mBasicBtn->setButtonText(mRack->getSlotBasicMode(mSlotIndex) ? "Basic" : "Advanced");
+}
+
+void SlotComponent::toggleBasicMode()
+{
+    if (!mRack) return;
+    const bool nb = ! mRack->getSlotBasicMode(mSlotIndex);
+    mRack->setSlotBasicMode(mSlotIndex, nb);
+    if (onBasicModeChanged) onBasicModeChanged(mSlotIndex, nb);
+    if (auto* base = dynamic_cast<EditorPanelBase*>(mEditor.get()))
+    {
+        base->mBasicMode = nb;
+        base->applyBasicMode();
+    }
+    refreshBasicBtnLabel();
 }
 
 SlotComponent::~SlotComponent()
@@ -161,6 +198,19 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
             show = (mRack->getSlotEffect(mSlotIndex) != nullptr && s.type != EffectType::None);
         }
         mPresetBtn->setVisible(show);
+    }
+
+    // QA-EffectsReview Task 1: Basic/Advanced toggle shown ONLY when the loaded
+    // panel actually has advanced (non-reference) controls to hide -- a panel
+    // with only reference controls (e.g. a Wah in the rack) reports false and
+    // gets no button.  Label reflects the slot's current Basic/Advanced state.
+    if (mBasicBtn)
+    {
+        bool show = false;
+        if (auto* base = dynamic_cast<EditorPanelBase*>(mEditor.get()))
+            show = base->hasAdvancedControls();
+        mBasicBtn->setVisible(show);
+        if (show) refreshBasicBtnLabel();
     }
 
     resized();
@@ -348,6 +398,8 @@ void SlotComponent::paint(juce::Graphics& g)
             nameRight = juce::jmin (nameRight, mModeBtn->getX() - 4);
         if (mPresetBtn != nullptr && mPresetBtn->isVisible())
             nameRight = juce::jmin (nameRight, mPresetBtn->getX() - 4);
+        if (mBasicBtn != nullptr && mBasicBtn->isVisible())
+            nameRight = juce::jmin (nameRight, mBasicBtn->getX() - 4);
         int nameW = juce::jmax(0, nameRight - nameX);
         g.setFont(juce::Font(12.0f, juce::Font::bold));
         g.setColour(VC::Text);
@@ -417,6 +469,14 @@ void SlotComponent::resized()
     if (mPresetBtn && mPresetBtn->isVisible())
     {
         mPresetBtn->setBounds(header.removeFromRight(60).withSizeKeepingCentre(58, 20));
+        header.removeFromRight(4);
+    }
+
+    // QA-EffectsReview Task 1: Basic/Advanced toggle sits immediately LEFT of the
+    // Preset button (next removeFromRight after Preset).  ~72 px so "Advanced" fits.
+    if (mBasicBtn && mBasicBtn->isVisible())
+    {
+        mBasicBtn->setBounds(header.removeFromRight(72).withSizeKeepingCentre(70, 20));
         header.removeFromRight(4);
     }
 

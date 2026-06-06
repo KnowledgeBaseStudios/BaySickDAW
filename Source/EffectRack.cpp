@@ -550,6 +550,19 @@ int EffectRack::getSlotSidechainPick (int slot) const noexcept
 {
     return (slot >= 0 && slot < kNumSlots) ? mSlots[slot].scPick : -1;
 }
+
+// QA-EffectsReview Task 1: per-slot Basic/Advanced UI disclosure state.
+void EffectRack::setSlotBasicMode (int slot, bool basic) noexcept
+{
+    if (slot < 0 || slot >= kNumSlots) return;
+    if (mSlots[slot].basicMode == basic) return;   // skip dirty fire on no-op
+    mSlots[slot].basicMode = basic;
+    if (onSlotsChanged) onSlotsChanged();
+}
+bool EffectRack::getSlotBasicMode (int slot) const noexcept
+{
+    return (slot >= 0 && slot < kNumSlots) ? mSlots[slot].basicMode : true;
+}
 void EffectRack::setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept
 {
     const int n = juce::jmin(count, (int) mScArrCopy.size());
@@ -677,6 +690,8 @@ void EffectRack::getStateInformation(juce::MemoryBlock& dest)
         slotTree.setProperty("uuid",     mSlots[i].uuid,                 nullptr);
         // C.4 Phase 1: per-slot SC pick (-1 = no SC, 0..3 = strip SC line).
         slotTree.setProperty("scPick",   mSlots[i].scPick,               nullptr);
+        // QA-EffectsReview Task 1: per-slot Basic/Advanced UI state (default Basic).
+        slotTree.setProperty("basicMode", (int) mSlots[i].basicMode,     nullptr);
 
         if (eff)
         {
@@ -722,6 +737,8 @@ void EffectRack::setStateInformation(const void* data, int sz)
             juce::String uuid = child.getProperty("uuid", "").toString();
             // C.4 Phase 1: restore per-slot SC pick (default -1 = no SC).
             int scPick = (int) child.getProperty("scPick", -1);
+            // QA-EffectsReview Task 1: restore Basic/Advanced (default 1=Basic for old projects).
+            bool basicMode = ((int) child.getProperty("basicMode", 1)) != 0;
 
             if (type != EffectType::None)
             {
@@ -779,6 +796,7 @@ void EffectRack::setStateInformation(const void* data, int sz)
                 setSlotBypassed(slotIdx, byp);
                 setSlotOutputGain(slotIdx, vol);
                 setSlotSidechainPick(slotIdx, scPick);
+                setSlotBasicMode(slotIdx, basicMode);
             }
             else
             {

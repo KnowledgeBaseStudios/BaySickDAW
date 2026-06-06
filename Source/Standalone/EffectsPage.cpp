@@ -94,6 +94,12 @@ void EffectsPage::buildRackTab()
         mSlots[i]->onEffectChosen  = [this](int idx, EffectType t) { onEffectChosen(idx, t); };
         mSlots[i]->onEffectRemoved = [this](int idx) { onEffectRemoved(idx); };
         mSlots[i]->onMoveRequested = [this](int idx, bool up) { onMoveRequested(idx, up); };
+        // QA-EffectsReview Task 1: persist Basic/Advanced choice with the project
+        // (setSlotBasicMode fires onSlotsChanged -> markDirty; idempotent if the
+        // SlotComponent already wrote it via toggleBasicMode).
+        mSlots[i]->onBasicModeChanged = [this](int idx, bool basic) {
+            if (mRack) mRack->setSlotBasicMode(idx, basic);
+        };
         mRackTab->addAndMakeVisible(*mSlots[i]);
     }
 
@@ -832,7 +838,13 @@ void EffectsPage::rebuildSlotEditor(int slotIndex)
         // Stamp automation paramIds on all knobs before handing off to the slot.
         // C13: keyed by slot UUID, not index, so reorder preserves automation.
         if (auto* base = dynamic_cast<EditorPanelBase*>(editor.get()))
+        {
             base->setSlotContext(getChannelPrefix(), mRack->getSlotUuid(slotIndex));
+            // QA-EffectsReview Task 1: stamp the panel's Basic/Advanced flag from
+            // the slot's persisted state BEFORE setEditor() (which runs the first
+            // resized()), so the initial layout matches the saved choice.
+            base->mBasicMode = mRack->getSlotBasicMode(slotIndex);
+        }
 
         // C.4 Phase 1 (2026-04-30): push the strip's mixer APVTS prefix +
         // a source-name resolver so the slot's SC dropdown can enumerate

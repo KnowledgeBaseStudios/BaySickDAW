@@ -56,6 +56,11 @@ public:
     // newType is the int value of the effect's Type enum.
     std::function<void(int slot, int newType)>     onModeChanged;
 
+    // QA-EffectsReview Task 1: fired when the user flips Basic/Advanced on a
+    // rack slot.  EffectsPage wires this to EffectRack::setSlotBasicMode so the
+    // choice persists with the project.  basic == true means Basic mode.
+    std::function<void(int slot, bool basic)>      onBasicModeChanged;
+
     // C.4 Phase 1 (2026-04-30): SC source dropdown context.  EffectsPage wires
     // this when a slot's editor is rebuilt.  channelMixerPrefix is the strip's
     // mixer APVTS prefix (e.g. "mixer_layer_0") -- the dropdown scans
@@ -112,12 +117,22 @@ private:
     // effect is loaded.  Pop-up menu offers Save / Load / Restore / etc.
     std::unique_ptr<juce::TextButton>                  mPresetBtn;
 
+    // QA-EffectsReview Task 1: Basic/Advanced disclosure toggle.  Sits in the
+    // header immediately LEFT of mPresetBtn.  Visible ONLY when the loaded panel
+    // reports hasAdvancedControls() == true (a reference-only panel -- e.g. a
+    // Wah loaded into the rack -- gets no button).  Label reads "Basic" or
+    // "Advanced"; click flips the panel's mBasicMode + the slot's persisted
+    // basicMode, then re-lays-out the inline editor in place.
+    std::unique_ptr<juce::TextButton>                  mBasicBtn;
+
     void showAddMenu();
     void showScMenu();
     void showModeMenu();
     void showPresetMenu();
     void refreshScBtnLabel();
     void refreshModeBtnLabel();
+    void toggleBasicMode();        // QA-EffectsReview Task 1
+    void refreshBasicBtnLabel();   // QA-EffectsReview Task 1
 
     // 2026-05-02: vblank-locked level feed.  Replaces the old 30 Hz Timer so
     // every effect panel's input VU + output dBFS update in lockstep with

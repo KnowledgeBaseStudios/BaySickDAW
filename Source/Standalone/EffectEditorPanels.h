@@ -28,6 +28,27 @@ struct EditorPanelBase : public juce::Component
 
     PanelMode mPanelMode { PanelMode::Full };
 
+    // QA-EffectsReview Task 1: Basic/Advanced disclosure flag (mirrors
+    // mPanelMode).  When true the panel hides its "advanced" knobs/toggles and
+    // re-flows; when false it shows the full control set.  Per-slot, persisted
+    // with the project (default Basic).  Stamped by EffectsPage::rebuildSlotEditor
+    // before the first resized(); flipped at runtime by the SlotComponent
+    // Basic/Advanced header button, which then calls applyBasicMode().  Panels
+    // with NO advanced controls (and the *PedalPanel board panels) ignore it.
+    bool mBasicMode { true };
+
+    // Re-apply mBasicMode: default just re-lays-out (a panel with no advanced
+    // controls looks identical either way).  Panels with advanced controls
+    // override to setVisible(false) on those children first, then resized().
+    virtual void applyBasicMode() { resized(); }
+
+    // QA-EffectsReview Task 1: does this panel have any "advanced" (non-reference)
+    // controls to hide behind the Basic/Advanced toggle?  Default false -> the
+    // SlotComponent shows NO toggle button (an effect with only reference
+    // controls -- e.g. a Wah loaded into the rack -- gets no button).  Panels
+    // override to true ONLY when they tag advanced knobs (Tasks 3-8).
+    virtual bool hasAdvancedControls() const { return false; }
+
     std::vector<std::unique_ptr<VKnob>>            knobs;
     std::vector<std::unique_ptr<juce::TextButton>> toggles;
     std::unique_ptr<juce::ComboBox>                combo;

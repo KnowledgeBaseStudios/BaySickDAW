@@ -110,6 +110,11 @@ public:
         // Slot rather than APVTS because routing config is static (not
         // automatable).  Persisted in get/setStateInformation.
         int                      scPick   { -1 };
+        // QA-EffectsReview Task 1: Basic/Advanced disclosure for the inline
+        // editor panel (true = Basic -> advanced knobs hidden).  UI-only
+        // per-slot config (not automatable); persisted in get/setStateInformation;
+        // travels with the slot via the move ctor/assign below.  Default Basic.
+        bool                     basicMode { true };
         // Level feeds for meters (written audio thread, read UI thread).
         // 2026-05-02: split into Run + Snapshot pair so the UI sees end-of-
         // audio-block coherent state across every slot (no mid-rack-process
@@ -139,6 +144,7 @@ public:
             : active(std::move(o.active)), pending(std::move(o.pending)),
               type(o.type),
               outputGainDb(o.outputGainDb), uuid(std::move(o.uuid)), scPick(o.scPick),
+              basicMode(o.basicMode),
               bypassRampValue(o.bypassRampValue),
               dryScratch(std::move(o.dryScratch))
         {
@@ -157,6 +163,7 @@ public:
                 type = o.type; outputGainDb = o.outputGainDb;
                 uuid = std::move(o.uuid);
                 scPick = o.scPick;
+                basicMode = o.basicMode;
                 bypassRampValue = o.bypassRampValue;
                 dryScratch = std::move(o.dryScratch);
                 swapPending     .store(o.swapPending     .load());
@@ -210,6 +217,12 @@ public:
     // each block by setSidechainContext().
     void setSlotSidechainPick (int slot, int pickIdx) noexcept;
     int  getSlotSidechainPick (int slot) const noexcept;
+
+    // QA-EffectsReview Task 1: per-slot Basic/Advanced UI disclosure state
+    // (true = Basic, default).  UI-only; never pushed to the DSP.  setter fires
+    // onSlotsChanged so the project dirty bit flips (mirrors setSlotOutputGain).
+    void setSlotBasicMode (int slot, bool basic) noexcept;
+    bool getSlotBasicMode (int slot) const noexcept;
     // Push the strip's SC receive array to the rack.  Stored and forwarded to
     // every loaded slot's effect each process() call.  bufs may contain
     // nullptr entries for unused slots; count is RoutingGraph::kMaxScRecvsPerStrip.
