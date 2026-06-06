@@ -802,3 +802,56 @@ it's THIS batch's garbage, so it's gone now:
 (Finding #N = the "Out-of-scope findings" list earlier in this doc: #1 quit-prompt, #2 Cut Self, #3 Layers
 auto-name, #4 compressor, #5 flanger, #6 Tools->menu, #7 snap dropdown.  The old "remove dead
 snapDenominator" item is DONE in-batch above -- no longer routed.)
+
+## 2026-06-05 (cont.) — /review-batch follow-up (1 fix + dead-code sweep) + 2 more routing items
+
+**/review-batch QA-Ee: READY-TO-COMMIT, zero blockers.**  Validated all four stages against plan +
+conventions (tick math integer-exact, migration sound, audio-thread atomics correct, no ASCII / casing /
+aggregate-init violations).  Surfaced 1 NEEDS-FIX + dead-code NITs + 1 default-confirm -- all resolved
+in-batch (Jeff 2026-06-05):
+
+**FIX (NEEDS-FIX) -- Line snap now reaches the finest visible grid line on the piano roll + drum kit.**  The
+grid drew rungs down to 5px (`kMinLineSpacing`) but Line snap (`dynamicSnapTicks`) only targeted >= 12px
+(`kMinLinePx`), so at zooms where a rung sat 5-12px you saw a finer line that Line snap skipped (the inverse
+of the "snap to open space" bug Stage 3 killed).  Builder was already consistent (12px on both sides -- its
+FL 16-cell cap).  Fix (Jeff: "fix to 5px"): new shared `kMinGridLinePx = 5` (VibesynthConstants.h);
+`dynamicSnapTicks(pixelsPerBar, minLinePx = kMinLinePx)` parameterized; the piano-roll + drum-kit snap calls
+pass `kMinGridLinePx`, and their grid `kMinLineSpacing` now sources from it too -- so grid + Line snap lock
+to the same finest line (down to 1/64).  Builder's call (`dynamicSnapTicks((double) mPPBar)`) takes the
+default 12 -- unchanged.
+
+**DEAD-CODE SWEEP (NITs, cleaned in-batch per Jeff's standing directive).**  More QA-Ee orphans removed:
+`mSnapEnabled` / `setSnapEnabled` (snap on/off is now the global param = 0; never read) on both grids +
+containers; the drum-kit `onVZoom` / `applyVZoom` vertical-zoom path (dead after Stage 2's 16-fixed-rows
+change pulled Alt-scroll + menu items 53/54); and the now-vestigial `mRowHScale` (its only writer was
+`applyVZoom`; `rowH` is int so the x1.0 collapsed to `rowH`).  PianoRoll's `onVZoom`/`applyVZoom` + Harmless'
+own `mSnapEnabled` are LIVE -- untouched.  Zero behavior change.
+
+**DEFAULT (confirm) -- PianoRoll snap default = Line (idx 1), ACCEPTED.**  Shipped as Line, not the SC-def
+1/2 Step (1/32); old projects reopen at Line, not their prior 1/32.  Jeff 2026-06-05: "I don't care about
+this at all as nothing has released" -> Line stays; recorded as accepted (the SC-def deviation gets a §9
+note, no behavior change).
+
+Fix + sweep verified by Jeff in Debug + Release 2026-06-05 (Line snap reaches the fine lines on both
+editors; Builder still caps at 16 cells/bar; snap on/off + piano-roll vertical zoom still work).
+
+**TWO MORE ROUTING ITEMS (Jeff, 2026-06-05):**
+- **-> QA-UICleanup:** the piano-roll transpose menu -- (i) the items render non-ASCII arrow glyphs (the
+  boxes); (ii) the two "Transpose Octave" entries show the wrong shortcut vs the Key Binds window (which
+  lists Transpose Octave = Ctrl + Up/Down); (iii) move ALL FOUR transpose options (Up / Down / Up Octave /
+  Down Octave) from the Edit menu into the Tools menu.
+- **-> NEW batch QA-Chords (4th / last of the new batches, after QA-UICleanup):** the Chord Stamp tool --
+  (a) a stamped chord can't be stretched / resized (places as-is only); (b) dual-mode Root/Scale/Snap-to-
+  Scale behavior (Jeff's spec):
+    - Mode 1 (Snap-to-Scale OFF): chord dropdown (Major/Minor/Sus2/...) must NOT use static hardcoded
+      semitone intervals -- it reads the globally active Root + Scale and, on click, generates a
+      context-aware chord that natively fits the selected scale degrees relative to the clicked note.
+    - Mode 2 (Snap-to-Scale ON): strict scale compliance; if interval snapping collides (two chord notes
+      forced onto the same MIDI note number), run an Octave Resolution Pass -- detect the duplicate and
+      shift it up to the next valid scale degree in the next octave up, preserving harmonic thickness
+      (not stacking, not deleting).
+    - Deliverable for that batch: clean JUCE-compatible C++ data structures + algorithm separating the two
+      modes, the MIDI-note generation array for the 96 PPQ grid, and the octave-collision resolver.
+
+**UPDATED new-batch order: QA-EffectsReview -> QA-CutSelfReview -> QA-UICleanup -> QA-Chords** (all
+immediately after QA-Ee).  Formalized in the close docs (§5 dockets + §6 sequencing + §9 Forks).

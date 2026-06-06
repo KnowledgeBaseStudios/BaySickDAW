@@ -187,12 +187,9 @@ public:
     bool canUndo() const { return mUndoCtx.isValid() && mUndoCtx.manager->canUndo(); }
     bool canRedo() const { return mUndoCtx.isValid() && mUndoCtx.manager->canRedo(); }
 
-    void setSnapEnabled(bool b);
-
     std::function<void(float deltaPPB)>           onZoom;
     std::function<void(float factor, int anchorX)> onZoomAnchored; // QA-Ee: cursor-anchored wheel zoom
     std::function<void(double dBeats)>            onHScroll;
-    std::function<void(float factor)>             onVZoom;
     std::function<void()>                         onNotesChanged;
     std::function<void(PRTool)>                   onToolChanged;
     std::function<void()>                         onUndoRedoStateChanged;
@@ -292,7 +289,6 @@ private:
     };
     std::vector<ClipboardCell> mClipboard;
 
-    bool                 mSnapEnabled   { true  };
     NoteType             mNewNoteType   { NoteType::Standard };
 
     double      xToBeat              (int x)        const;
@@ -442,7 +438,6 @@ public:
     void setActiveTool (DrumKitGrid::PRTool t);
     void applyZoom     (float factor);
     void applyZoomAnchored (float factor, int anchorX);   // QA-Ee: cursor-anchored wheel zoom
-    void applyVZoom    (float factor);
 
     // QA-Ee Stage 3: GLOBAL snap accessors (provided by PianoRollPage).
     void setSnapAccessors (std::function<int()> getter, std::function<void(int)> setter);
@@ -490,9 +485,7 @@ private:
     UndoContext     mUndoCtx;
 
     float  mPPB        { 80.f };
-    float  mRowHScale  { 1.f };
     double mBeatOff    { 0.0 };
-    bool   mSnapEnabled { true };
     std::function<int()>     mOnGetSnapDiv;   // QA-Ee Stage 3: global snap read
     std::function<void(int)> mOnSetSnapDiv;   // QA-Ee Stage 3: global snap write
     int                      mLastSnapDiv { 1 };  // QA-Ee Stage 3: restore-to div for the on/off toggle

@@ -169,9 +169,6 @@ public:
     bool canUndo() const { return mUndoCtx.isValid() && mUndoCtx.manager->canUndo(); }
     bool canRedo() const { return mUndoCtx.isValid() && mUndoCtx.manager->canRedo(); }
 
-    // ── Snap toggle ───────────────────────────────────────────────────────
-    void setSnapEnabled(bool b);
-
     // ── Callbacks back up to container ────────────────────────────────────
     std::function<void(float deltaPPB)>          onZoom;
     std::function<void(float factor, int anchorX)> onZoomAnchored; // QA-Ee: cursor-anchored wheel zoom
@@ -330,9 +327,6 @@ private:
     // 2026-04-26 (D-7 sub-4): static so all Piano-Roll tabs share one
     // clipboard.  Last copy anywhere wins.  Beats are relative to first note.
     static std::vector<PianoNote> sClipboard;
-
-    // ── Snap ──────────────────────────────────────────────────────────────
-    bool                 mSnapEnabled   { true  };
 
     // ── Marquee ctrl-state ────────────────────────────────────────────────
     bool                 mMarqueeWasCtrl { false };
@@ -643,7 +637,6 @@ private:
     double mBeatOff    { 0.0 };
     int    mTopNote    { 96 };
     int    mNumBars    { 2 };
-    bool   mSnapEnabled { true };
     std::function<int()>     mOnGetSnapDiv;   // QA-Ee Stage 3: global snap read (PianoRollPage)
     std::function<void(int)> mOnSetSnapDiv;   // QA-Ee Stage 3: global snap write
     int                      mLastSnapDiv { 1 };  // QA-Ee Stage 3: restore-to div for the on/off toggle

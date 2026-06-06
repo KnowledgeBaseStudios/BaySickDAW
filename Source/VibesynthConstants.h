@@ -69,18 +69,22 @@ inline int snapDivToTicks (int idx) noexcept
 
 // Dynamic "Line" snap ladder (straight-time, coarse->fine, in ticks): Bar, Beat,
 // 1/8, 1/16, 1/32, 1/64.  A rung is "live" when its on-screen spacing
-// (g/384 * pixelsPerBar) >= kMinLinePx.  Line snap AND the dynamic grid both use
-// this so they lock to the exact same set of visible lines.
+// (g/384 * pixelsPerBar) >= the caller's min-line-px threshold.  Within each
+// editor, Line snap AND the dynamic grid use the SAME threshold so they lock to
+// the exact same set of visible lines: Builder uses kMinLinePx (its FL 16-cell
+// cap); the Piano Roll + Drum Kit use kMinGridLinePx so their grid + Line snap
+// both reach down to 1/64.
 static constexpr int kDynamicSnapLadder[6] = { 384, 96, 48, 24, 12, 6 };
-static constexpr int kMinLinePx = 12;   // min on-screen px between grid/snap lines
+static constexpr int kMinLinePx     = 12;  // Builder grid + Line-snap threshold (on-screen px)
+static constexpr int kMinGridLinePx = 5;   // Piano Roll + Drum Kit grid + Line-snap threshold (px) -- finer, down to 1/64
 
 // Finest live ladder rung (ticks) at the given pixels-per-bar zoom.  Floor = Bar
 // (384) so a zoomed-way-out Line snap still locks to bars.
-inline int dynamicSnapTicks (double pixelsPerBar) noexcept
+inline int dynamicSnapTicks (double pixelsPerBar, int minLinePx = kMinLinePx) noexcept
 {
     int finest = kDynamicSnapLadder[0];   // Bar floor
     for (int g : kDynamicSnapLadder)
-        if ((double) g / 384.0 * pixelsPerBar >= (double) kMinLinePx)
+        if ((double) g / 384.0 * pixelsPerBar >= (double) minLinePx)
             finest = g;
     return finest;
 }

@@ -413,7 +413,7 @@ double PianoRollGrid::snapBeat(double beat) const
     // divisions.  Tick-exact -> triplets land precisely (no 1/3 float drift).
     const int div = onGetSnapDiv ? onGetSnapDiv() : 1;
     if (div <= 0) return beat;   // div 0 = Off (the single GLOBAL on/off)
-    const int divTicks = (div == 1) ? dynamicSnapTicks ((double) mPPB * 4.0)
+    const int divTicks = (div == 1) ? dynamicSnapTicks ((double) mPPB * 4.0, kMinGridLinePx)
                                     : snapDivToTicks (div);
     if (divTicks <= 0) return beat;
     const double t = beat * (double) kTicksPerBeat;
@@ -425,14 +425,12 @@ double PianoRollGrid::snapBeat(double beat) const
 double PianoRollGrid::snapUnitBeats() const
 {
     const int div = onGetSnapDiv ? onGetSnapDiv() : 1;
-    int divTicks = (div == 1) ? dynamicSnapTicks ((double) mPPB * 4.0)
+    int divTicks = (div == 1) ? dynamicSnapTicks ((double) mPPB * 4.0, kMinGridLinePx)
                  : (div >= 2) ? snapDivToTicks (div)
                  : kTicksPerBeat / 4;                       // Off -> 1/16 note (24 ticks)
     if (divTicks <= 0) divTicks = kTicksPerBeat / 4;
     return (double) divTicks / (double) kTicksPerBeat;
 }
-
-void PianoRollGrid::setSnapEnabled(bool b) { mSnapEnabled = b; }
 
 int PianoRollGrid::noteIndexAtPos(int x, int y) const
 {
@@ -1930,7 +1928,7 @@ void PianoRollGrid::paint(Graphics& g)
     // reveals down to 1/64 (straight) or 1/6 Step (triplet) regardless of the snap.
     // Bar lines are a separate time-signature-aware pass below, so the 384t bar rung
     // is skipped here.  Iterated fine -> coarse so coarser lines overdraw at shared x.
-    static constexpr float kMinLineSpacing = 5.f;
+    static constexpr float kMinLineSpacing = (float) kMinGridLinePx;
     {
         const int  snapDiv = onGetSnapDiv ? onGetSnapDiv() : 1;
         int        nLad    = 0;

@@ -443,7 +443,7 @@ double DrumKitGrid::snapBeat(double beat) const
     // div 0 = Off, 1 = Line (finest visible rung at this zoom), 2..10 = fixed.
     const int div = onGetSnapDiv ? onGetSnapDiv() : 1;
     if (div <= 0) return beat;   // div 0 = Off (the single GLOBAL on/off)
-    const int divTicks = (div == 1) ? dynamicSnapTicks ((double) mPPB * 4.0)
+    const int divTicks = (div == 1) ? dynamicSnapTicks ((double) mPPB * 4.0, kMinGridLinePx)
                                     : snapDivToTicks (div);
     if (divTicks <= 0) return beat;
     const double t = beat * (double) kTicksPerBeat;
@@ -454,14 +454,12 @@ double DrumKitGrid::snapBeat(double beat) const
 double DrumKitGrid::snapUnitBeats() const
 {
     const int div = onGetSnapDiv ? onGetSnapDiv() : 1;
-    int divTicks = (div == 1) ? dynamicSnapTicks ((double) mPPB * 4.0)
+    int divTicks = (div == 1) ? dynamicSnapTicks ((double) mPPB * 4.0, kMinGridLinePx)
                  : (div >= 2) ? snapDivToTicks (div)
                  : kTicksPerBeat / 4;                       // Off -> 1/16 note
     if (divTicks <= 0) divTicks = kTicksPerBeat / 4;
     return (double) divTicks / (double) kTicksPerBeat;
 }
-
-void DrumKitGrid::setSnapEnabled(bool b) { mSnapEnabled = b; }
 
 double DrumKitGrid::totalBeats() const
 {
@@ -2102,7 +2100,7 @@ void DrumKitGrid::paint(Graphics& g)
     // the snap DIVISION never caps depth (every rung clearing 5px is drawn, down to
     // 1/64 straight / 1/6 Step triplet).  Bar lines are the separate TS-aware pass
     // below, so the 384t bar rung is skipped.  Fine -> coarse so coarser overdraw.
-    static constexpr float kMinLineSpacing = 5.f;
+    static constexpr float kMinLineSpacing = (float) kMinGridLinePx;
     {
         const int  snapDiv = onGetSnapDiv ? onGetSnapDiv() : 1;
         int        nLad    = 0;
@@ -3239,7 +3237,6 @@ DrumKitContainer::DrumKitContainer()
     // Wire grid callbacks.
     mGrid->onZoom    = [this](float delta) { applyZoom((mPPB + delta) / mPPB); };
     mGrid->onZoomAnchored = [this](float f, int x) { applyZoomAnchored(f, x); };
-    mGrid->onVZoom   = [this](float factor) { applyVZoom(factor); };
     mGrid->onHScroll = [this](double dB)   { mBeatOff = jmax(0.0, mBeatOff + dB); syncScrollState(); };
     mGrid->onNotesChanged = [this] { if (mLane) mLane->repaint(); };
     mGrid->onToolChanged = [this](DrumKitGrid::PRTool t) {
@@ -3442,15 +3439,6 @@ void DrumKitContainer::applyZoomAnchored(float factor, int anchorX)
     syncScrollState();
 }
 
-void DrumKitContainer::applyVZoom(float factor)
-{
-    const float gridHf  = mGrid ? (float) jmax(1, mGrid->getHeight()) : 600.f;
-    const float minScale = gridHf / (DrumKitSidebar::kNumRows * (float) DrumKitGrid::kMaxRowH);
-    const float maxScale = gridHf / (DrumKitSidebar::kNumRows * (float) DrumKitGrid::kMinRowH);
-    mRowHScale = jlimit(minScale, maxScale, mRowHScale * factor);
-    syncScrollState();
-}
-
 void DrumKitContainer::onHScrollDelta(double dBeats)
 {
     mBeatOff = jmax(0.0, mBeatOff + dBeats);
@@ -3465,8 +3453,7 @@ void DrumKitContainer::syncScrollState()
     const int gridH = mGrid->getHeight();
     int rowH = jmax(DrumKitGrid::kMinRowH,
                     (gridH - DrumKitGrid::kRulerH) / DrumKitSidebar::kNumRows);
-    rowH = jlimit(DrumKitGrid::kMinRowH, DrumKitGrid::kMaxRowH,
-                  (int) (rowH * mRowHScale));
+    rowH = jlimit(DrumKitGrid::kMinRowH, DrumKitGrid::kMaxRowH, rowH);
 
     mGrid->setScrollState(mPPB, mBeatOff, rowH);
     mGrid->setRowYOffset(DrumKitGrid::kRulerH);
