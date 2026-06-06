@@ -35,7 +35,7 @@ default; advanced users reveal extras via a Basic/Advanced toggle.
 | SC-fidelity | Max-clone everywhere; **big build on all 4 heavy units** (De-Esser, SY-1, AD-2, Tape). | "As close to a clone as possible." |
 | SC-console | Console = **Clean/Dirty toggle**: Clean=SSL (drive-scaled 2nd-harmonic), Dirty=Neve (LF-weighted sat + 2nd≈3rd + LF bloom), reusing the Tube band-split + shapers. Folds in the dead-Color fix. | Both, cheaply — Tube engine already has the parts. |
 | SC-extras | **Basic/Advanced toggle button in the FULL-mode FX-rack slot header** (next to Preset; panels reuse the `mPanelMode`-style show/hide). Default **Basic** = reference-clone set. **Per-slot, saved with project, default Basic.** | Progressive disclosure serves beginner + advanced. |
-| SC-extras-scope | Toggle = full FX-rack panels ONLY. NOT pedals, NOT the simplified board panels (`*PedalPanel` + Overdrive Type::Pedal + Compressor-forced-CS). Board untouched. | Verified: board uses dedicated basic panels. |
+| SC-extras-scope | Toggle lives in the FX-rack `SlotComponent` only, shown ONLY when the loaded panel reports `hasAdvancedControls()` (a rack panel with only reference controls — e.g. Wah-in-rack — gets NO button). Pedal-`*Style*` effects DO load into the rack (they get a SlotComponent); the `hasAdvancedControls()` gate, not effect-category, suppresses the button on no-extras panels. Board tiles + `*PedalPanel` board panels have no SlotComponent → never get a button. Board basic panels untouched. | Corrected 2026-06-06 (Wah-in-rack: gate on actual extras, not category). |
 | SC-c | (c) c1 manual-rate shadow restored on un-sync (Flanger + Phaser). Delay verified correct, untouched. | Bug lives in the effects' `setSyncBPM`. |
 | SC-refs | Pedals=BOSS (except Pro Parametric EQ=Furman PQ-3). Rack=FL Studio, except Sat Tube=Waves BB Tubes, Tape=Caelum Tape Cassette 2, Console=SSL/Neve, Overdrive-rack=FL Fruity Blood Overdrive, Transient=FL Transient Processor, De-Esser=Waves Sibilance. | Confirmed 2026-06-06. |
 
@@ -48,7 +48,7 @@ Surfaced to Jeff **as each unit is implemented**, not pre-picked:
 
 ## Files to modify (by area)
 
-DSP: `Source/DSP/{CompressorDSP,NoiseGateStyleDSP,BassCompressorStyleDSP,OverdriveDSP,BluesDriveStyleDSP,DistortionStyleDSP,FuzzStyleDSP,HighGainStyleDSP,SaturationDSP,ChorusDSP,FlangerDSP,PhaserDSP,AcousticSimulatorStyleDSP,GraphicEQStyleDSP,BassGraphicEQStyleDSP,FurmanEQStyleDSP,LimiterDSP,TransientShaperDSP,DeEsserDSP,TunerStyleDSP,PitchTrackerYIN,AcousticPreampStyleDSP,EQ8DSP,SynthStyleDSP}.{h,cpp}` + new `SibilanceSpectralProcessor.{h,cpp}`, `PolyPitchTracker.{h,cpp}`.
+DSP: `Source/DSP/{CompressorDSP,NoiseGateStyleDSP,BassCompressorStyleDSP,OverdriveDSP,BluesDriveStyleDSP,DistortionStyleDSP,FuzzStyleDSP,HighGainStyleDSP,OctaveStyleDSP,BassDriverStyleDSP,BassOverdriveStyleDSP,SaturationDSP,ChorusDSP,FlangerDSP,PhaserDSP,AcousticSimulatorStyleDSP,SynthStyleDSP,DelayDSP,ReverbDSP,AcousticPreampStyleDSP,GraphicEQStyleDSP,BassGraphicEQStyleDSP,FurmanEQStyleDSP,TransientShaperDSP,LimiterDSP,DeEsserDSP,TunerStyleDSP,PitchTrackerYIN}.{h,cpp}` + new `SibilanceSpectralProcessor.{h,cpp}`, `PolyPitchTracker.{h,cpp}`. (EQ8DSP is OUT — bus/insert M-S EQ, not a rack/pedal copy.)
 UI/infra: `Source/Standalone/{EffectEditorPanels,SlotComponent,EffectsPage}.{h,cpp}`, `Source/EffectRack.{h,cpp}`.
 
 ---
@@ -57,7 +57,7 @@ UI/infra: `Source/Standalone/{EffectEditorPanels,SlotComponent,EffectsPage}.{h,c
 
 **Per-task ritual:** implement → **Tell Jeff** numbered Debug-then-Release verify (incl. extras core/advanced line + value-picks) → on PASS `/draft-doc running-notes` (apply) → `/draft-commit` → surface message + full `git status` → Jeff approves → commit (one focused commit per unit; long msgs via `git commit -F`). Diagnostics → §0 Rule 4 catalog row.
 
-**Sequencing:** 0→1→2 first (open, infra, doc fixes), then per-family tasks 3-8; the four ⚠ builds run last in their family.
+**Sequencing:** 0→1→2 first (open, infra, doc fixes), then the seven per-family tasks 3-9 (= the master matrix's seven groups, one task each: EQ / Modulation / Drives+Octave / Compressors / Saturation / Utility / Time), then Task 10 close; the ⚠ heavy builds run within their family task. EQ8 is OUT of scope entirely (bus/insert M-S EQ, faithful+, not a rack/pedal copy).
 
 ## Commit structure
 
@@ -71,7 +71,7 @@ sequencing order above:
 | C0 | open | plan mirror + §5/§6/§9 edits + running-notes seed + Research Report (Task 0) |
 | C1 | toggle infra | Task 1 (EditorPanelBase flag + SlotComponent button + EffectRack persistence + EffectsPage wiring) — land + verify BEFORE any extras tagging, since every later panel task depends on it |
 | C2 | doc fixes | Task 2 (the 3 header comments) |
-| C3..Cn | one per unit | each effect's fidelity rework + its Advanced-tagging + any in-effect bug, in family order (Tasks 3-8). Trivially-related siblings (e.g. GraphicEQ + BassGraphicEQ Level range) may share a commit ONLY when verified together. |
+| C3..Cn | one per unit | each effect's fidelity rework + its Advanced-tagging + any in-effect bug, in family order (Tasks 3-9). Trivially-related siblings (e.g. GraphicEQ + BassGraphicEQ Level range) may share a commit ONLY when verified together. |
 | (heavy ⚠) | staged | each big build may split across 2 commits at a natural seam — e.g. **De-Esser** (i) surface hidden Mode/MS/Listen, then (ii) spectral build; **SY-1** (i) 11 types + Guitar/Bass, then (ii) polyphony; **Console** (i) dead-Color fix + Clean/SSL, then (ii) Dirty/Neve; **Tape** (i) Low-Pass, then (ii) IR + sampled hiss. |
 | Cclose | close | docs-only (Implemented Work Log + §5 CLOSED + §9) — separate commit, clean rollback boundary |
 
@@ -91,8 +91,9 @@ Pattern mirrors `mPanelMode` + the `mModeBtn` chrome button. Five touch points:
 ```cpp
     bool mBasicMode { true };                 // per-slot, persisted; default Basic
     virtual void applyBasicMode() { resized(); }  // panels w/ extras override to setVisible(false) then relayout
+    virtual bool hasAdvancedControls() const { return false; }  // SlotComponent shows the toggle ONLY when true; panels that tag advanced knobs override to true
 ```
-**1b `SlotComponent` header button** (`.h` add `std::unique_ptr<juce::TextButton> mBasicBtn;` + `std::function<void(int,bool)> onBasicModeChanged;` + `void toggleBasicMode(); void refreshBasicBtnLabel();`). In `.cpp` ctor (after `mPresetBtn` around :49) create `mBasicBtn` ("Basic"/"Advanced", same chrome colours, `addChildComponent`, onClick→`toggleBasicMode`); show it in `setEditor()` under the same non-empty gate as `mPresetBtn` (around :164); lay out in `resized()` immediately LEFT of `mPresetBtn` (around :416, `header.removeFromRight(72)`); extend the `paint()` name-shrink (around :350) with the `mBasicBtn` clause.
+**1b `SlotComponent` header button** (`.h` add `std::unique_ptr<juce::TextButton> mBasicBtn;` + `std::function<void(int,bool)> onBasicModeChanged;` + `void toggleBasicMode(); void refreshBasicBtnLabel();`). In `.cpp` ctor (after `mPresetBtn` around :49) create `mBasicBtn` ("Basic"/"Advanced", same chrome colours, `addChildComponent`, onClick→`toggleBasicMode`); show it in `setEditor()` ONLY when `dynamic_cast<EditorPanelBase*>(mEditor.get())->hasAdvancedControls()` is true (around :164 — NOT the generic non-empty gate, so Wah-in-rack + any reference-only panel gets no button); lay out in `resized()` immediately LEFT of `mPresetBtn` (around :416, `header.removeFromRight(72)`); extend the `paint()` name-shrink (around :350) with the `mBasicBtn` clause.
 ```cpp
 void SlotComponent::toggleBasicMode() {
     if (!mRack) return;
@@ -106,12 +107,12 @@ void SlotComponent::toggleBasicMode() {
 **1c persistence on `EffectRack::Slot`** (`EffectRack.h`): add `bool basicMode { true };` to `struct Slot` (next to `scPick`), carry it in the Slot move-ctor + move-assign, add `set/getSlotBasicMode`. `.cpp`: `setSlotBasicMode` skips no-op then fires `onSlotsChanged`; serialize `slotTree.setProperty("basicMode",(int)..)` in get-state, restore `getProperty("basicMode",1)` (default 1=Basic for old projects) and call `setSlotBasicMode` in the `type != None` branch.
 **1d wire + stamp** (`EffectsPage.cpp`): in `buildRackTab` set `mSlots[i]->onBasicModeChanged = [this](int idx,bool b){ if(mRack) mRack->setSlotBasicMode(idx,b); }`; in `rebuildSlotEditor`, BEFORE `setEditor()`, `if (auto* b=dynamic_cast<EditorPanelBase*>(editor.get())) b->mBasicMode = mRack->getSlotBasicMode(slotIndex);` (so the first `resized()` picks the right layout).
 **1e confirm excluded:** `mBasicBtn` lives only in `SlotComponent`; pedal tiles + `*PedalPanel` board panels never get it and don't override `applyBasicMode()`.
-- [ ] Tell Jeff: (1) toggle on EQ8/Modern-comp shows/hides extras + reflows; (2) save+reload → per-slot state sticks, fresh slot = Basic; (3) BOSS pedal + board Compressor = no toggle, unchanged.
+- [ ] Tell Jeff (mechanism only — NO panel tags advanced knobs yet, so NO button appears yet; that's correct; first live button = the first family task that tags extras): (1) build clean; no Basic/Advanced button on ANY effect incl. Wah-in-rack; (2) save+reload → the per-slot `basicMode` field persists (default Basic on fresh/old projects); (3) BOSS pedal + board Compressor unchanged; no crash.
 
 ### Task 2 — Documentation-comment fixes (comment-only, one commit)
 - [ ] `BassDriverStyleDSP.h:9-10` "SansAmp" → BOSS BB-1X. `BassGraphicEQStyleDSP.h:9` "MXR M-108" → BOSS GEB-7. `OverdriveDSP.h:8-13` `atan` → `x/(1+|x|)`. Build-only verify.
 
-### Task 3 — EQ family
+### Task 3 — EQ family (EQ8 excluded — bus/insert M-S EQ, not a rack/pedal copy)
 **GraphicEQ (GE-7)** `GraphicEQStyleDSP.cpp:27` — top band (idx 6) peak→high-shelf:
 ```cpp
     auto coefs = (idx == kNumBands - 1)
@@ -121,10 +122,9 @@ void SlotComponent::toggleBasicMode() {
 Level range −60..+12 → **±15** (`setLevelDb` clamp `:53`; drop the dead −∞ kill at `:73-77` → `if(!approximatelyEqual(mLevelDb,0)) buffer.applyGain(decibelsToGain(mLevelDb));`); panel fader `EffectEditorPanels.cpp:4298` `setRange(-15,15,0.1)` + tooltip; band-6 fader tooltip `:4280` "peaking"→"high shelf"; header doc `:13-14,:34`.
 **BassGraphicEQ (GEB-7)** — all-peaking is correct (no rebuildBand change); Level ±15 mirror (`BassGraphicEQStyleDSP.cpp:53,:73`; panel `:4399`; header `:14`).
 **Furman (PQ-3)** — gain structure: cap preamp `setInputVolDb` clamp `0..86`→`0..kInputMaxDb(26)` (`FurmanEQStyleDSP.cpp:91`, add `static constexpr float kInputMaxDb=26.0f;`); the three +20 dB bands stack to ≈86 in the mid (header doc `:23-25` updated). **Hi/Lo switch:** add `enum class GainRange{Lo,Hi}` + `set/getGainRange` + member (default Lo); in `process()` after the bands, `if(mGainRange==Hi) buffer.applyGain(decibelsToGain(20.0f));`; serialize `gainRange` (default 0); panel `hiLoBtn` TextButton in the right cluster. **Overload LED:** `std::atomic<float> mClipLevel{0}` + `getClipLevel()`; in the preamp loop track `blockPeak=jmax(blockPeak,|driven|)` (pre-tanh) then `mClipLevel.store(blockPeak)`; panel becomes a `juce::Timer`, LED lights when `getClipLevel()>1.0f`. **Q clamp** `setQ` `0.1..10`→**0.2..3.8** (`:65`; panel Q range `:4518`; doc `:21,:48`).
-**EQ8** — faithful+; tag **Advanced**: Dynamic EQ (per-band threshold/ratio/atk/rel/range/upward + GR readouts), per-band sidechain, Tilt type, HQ phase modes + linear-phase precision + anti-cramping, L/R channel routing, proportional-Q + IIR mod speed, compare banks (save/swap/lock spare). Basic: per-band Freq/Gain/Q/Type/Slope/On/Mute/Solo + Main Level.
-- [ ] Tell Jeff: shelf audible on GE-7 top; ±15 ranges; Furman 86 dB now emergent + Hi/Lo + overload LED; EQ8 Advanced line.
+- [ ] Tell Jeff: shelf audible on GE-7 top; ±15 ranges on GE-7 + GEB-7; Furman 86 dB now emergent + Hi/Lo + overload LED + Q range. (EQ8 untouched — out of scope.)
 
-### Task 4 — Modulation
+### Task 4 — Modulation (⚠ SY-1)
 **(c) Flanger** (`FlangerDSP`): add `float mManualRate{0.5f};` (`:42`); `setRate` records it + yields to sync; `setSyncBPM(false)` restores it.
 ```cpp
 void FlangerDSP::setRate (float hz){ const float n=juce::jlimit(0.05f,5.0f,hz); mManualRate=n; if(mSyncBPM) return; if(n!=mRate){mRate=n; mRateSmooth.setTargetValue(n);} }
@@ -143,16 +143,21 @@ void PhaserDSP::setSyncBPM (bool sync){ if(sync==mSyncBPM) return; mSyncBPM=sync
 **Flanger Damp** (value-pick: remap UI to 0–1, keep Hz DSP): panel knob `EffectEditorPanels.cpp:1987` → `{"Damp",0,1,0,0.01,...}`; onChange `:2046` maps `amt`→`fc=20000*pow(1000/20000,amt)`→`setDampHz(fc)`; init-sync `:2058` inverts. (Preset back-compat preserved — DSP/serialization untouched.)
 **Chorus / Acoustic Sim** — faithful; tag Advanced (Chorus: Voices 3/6 + LFO waves Triangle/Organic; AcousticSim: User/IR mode).
 **Phaser Advanced:** BPM-sync + division, LFO-wave selector, CrossFB.
-- [ ] Tell Jeff: set manual rate → sync ON → OFF restores it, on both Flanger + Phaser; Damp 0–1 feel.
+**Wah (PW-3)** — faithful; no change, no extras → no toggle (verify-only A/B vs reference).
+**⚠ SY-1 (BOSS SY-1)** — (a) Types 4→**11** (enum + `kProfiles[11]` extended `TypeProfile` w/ lfoTarget/Q/detune/brightness/additivePartials; `variationMix` + triangle term in `waveSample`; clamp bump). (c) Guitar/Bass switch (`mInstrument` + range push to tracker; bass caps poly to 1-2). (b ⚠ big) **Polyphony**: new `PolyPitchTracker.{h,cpp}` (FFT harmonic-sum + iterative spectral subtraction, ≤6 notes, temporal hysteresis, double-buffered wait-free publish — mirrors `PitchTrackerYIN` threading); replace single phase accumulator with `SynthVoice mVoices[8]` pool + `updateVoiceAllocation` (match/assign/steal/release) + per-voice env+VCF; keep `mEnvelope` as global dynamics; Mono fallback retains the current path. Poly/Instrument toggles + state.
+- [ ] Tell Jeff: set manual rate → sync ON → OFF restores it, on both Flanger + Phaser (c); Damp 0–1 feel; Chorus/Phaser/AcousticSim Advanced toggles; SY-1 11 types + poly + Guitar/Bass; Wah verified faithful (no toggle).
 
-### Task 5 — Drives / distortion / fuzz
+### Task 5 — Drive / distortion / fuzz / octave
 **Overdrive RACK (Blood Overdrive)** `OverdriveDSP.cpp` — in-series, no clean residual: in the pre-filter loop (`:319`) drop `mResidualBuf`, write only the filtered band to `mBandBuf`; in recombine (`:406`) `float out = shaped;` (no residual add). Post Gain attenuate-only: `setPostGain` clamp `-18..18`→**`-18..0`** (`:151`) + panel range. Advanced: Bias/Parallel/Wet/OS.
 **Overdrive PEDAL (OD-3)** — add `mPedalNotch{L,R}` (≈500 Hz, −4.5 dB peak) + `mPedalDriveHpf{L,R}` (720 Hz 1st-order) (`.h:133`); prepare/reset them; apply notch pre-clip (1x) then the 720 Hz HPF between stage-1 and stage-2 inside the OS loop; raise drive `1 + preAmp*4`→`1 + preAmp*13` (≈+43 dB) (`:260-280`).
 **Blues Drive (BD-2)** — add `mBodyPeak` (≈100 Hz +3.5 dB, `.h:54`, fixed coefs in prepare); replace the single tanh (`:88-103`) with an envelope-driven dual stage (stage-1 asym tanh; cross-fade into a cubic soft-clip `1.5a-0.5a^3` as `|s1|` rises → 2nd→3rd harmonic shift); insert `mBodyPeak.process(ctx)` after the tone LPF (`:108`).
 **Distortion (DS-1)** `DistortionStyleDSP.cpp:13` — scoop recenter: `kToneLpfHz 400→250`, `kToneHpfHz 2000→1000` (geo-mean ≈500 Hz).
 **Fuzz (FZ-5)** — add **Boost** knob: `setBoost`/`mBoost{0}` (`.h:45`, 0..+20 dB), apply `drive=(1+mFuzz*49)*decibelsToGain(mBoost)` (`:50`), serialize `boost` (default 0), panel: insert `{"Boost",0,20,0,0.1,...}` knob between Fuzz/Level + reindex handlers (`:3405,:3422`), header "3 controls"→"4".
 **High-Gain (MT-2)** `HighGainStyleDSP` — pre-clip boost `700/+9`→**`1000/+36`** (`:3-15`); replace single post-clip scoop with two-notch V: `mFixedScoopLo`(≈100 Hz −12) + `mFixedScoopHi`(≈5 kHz −12) (`.h:64`, prepare/reset/initFixedEqCoefs/process all updated). **Caution:** +36 dB into `drive=1+mDist*999` is hot — `/test-signal` for stability; narrow boost Q if fizzy.
-- [ ] Tell Jeff: per-pedal A/B vs reference; MT-2 stability check.
+**Octave (OC-5)** `OctaveStyleDSP` — Faithful; no extras → no toggle. Only gap = granular poly-tracking quality (inherent to the grain shifter). **Fix-vs-accept at task (Jeff):** accept faithful (default), or upgrade to a pitch-synchronous/FFT shifter (large, ⚠-scale). Default = verify faithful, no change.
+**Bass Driver (BB-1X)** `BassDriverStyleDSP` — header doc-fix already in Task 2. Gap = static vs MDP-adaptive drive. **Fix-vs-accept at task (Jeff):** accept static (faithful enough, default), or build a frequency-adaptive drive (a real build, ⚠-scale like AD-2). No extras → no toggle.
+**Bass Overdrive (ODB-3)** `BassOverdriveStyleDSP` — Faithful; only gap = clean at Gain=0 vs the real pedal's grit-floor. Optional small 2nd-stage grit-floor tweak; default = verify faithful. No extras → no toggle.
+- [ ] Tell Jeff: per-pedal A/B vs reference; MT-2 stability check; Octave / Bass Driver / Bass Overdrive fix-vs-accept calls.
 
 ### Task 6 — Compressor family (incl. a + b)
 **(a) Vintage-knee monotonic** `CompressorDSP.cpp:245` — taper toward a 2:1 floor, never 1:1 (keeps slope <1 → GR monotonic):
@@ -195,16 +200,20 @@ Call sites (`:519`) pass `mConsoleColor, mConsoleMode==Dirty, isLow`; Dirty inve
 **⚠ Tape (Caelum TC2)** — (i) **Low-Pass** 5–22 kHz: `mTapeLpHz/Coef` + `setTapeLpHz` + 1-pole in Phase-3 post-de-emphasis; panel knob. (ii) **Cassette IR**: `juce::dsp::Convolution mTapeConv` + `mTapeIrOn` + `loadCassetteIR()` (mirror `AcousticPreampStyleDSP`'s convolution load/prepare; **IR asset** `Resources/IRs/Tape/CassetteCaelum2.wav`, identity fallback if missing); block-based `process` after output gain when on; panel toggle. (iii) **Sampled hiss**: `mTapeHissSampled` + `mTapeHissSample` looped (asset `Resources/Samples/Tape/CassetteHiss.wav`, synthetic-pink fallback) branched in the hiss block; panel toggle. Tape Advanced: Bias/Hyst/Vibe/Speed/pre-emphasis. (Convolution load on prepare/message thread only; all new keys default-preserve old presets.)
 - [ ] Tell Jeff: Clean vs Dirty distinct + Color live in both; Tape LP + IR + hiss.
 
-### Task 8 — Utility + ⚠ heavy builds
+### Task 8 — Utility / remaining dynamics (⚠ De-Esser)
 **Limiter (FL Fruity Limiter)** `LimiterDSP` — ceiling clamp `-24..0`→**`-24..+12`** (`setCeilingDb:496`; panel `:2921`; header `:48`); add **SUSTAIN** RMS window: `setSustainMs(0..1000)` + `mSusCoef` (in `recalcCoefs`) + per-sample mean-square smoother blended `peak=jmax(rawPeak, sqrt(susMs))` (keeps true-peak guarantee); serialize `sustainMs`; panel: insert "Sustain" knob in row2 + reindex. Advanced: SC-HPF, Ahead, RelCv, SatTh, SatCv, AutoRel, AutoMU, Link.
 **Transient (FL Transient Processor)** — Attack default +50→**0** (panel `:2456` + DSP `mAttack{0.5}`→`{0.0}` `.h:90`); rename internal `mSustain`→`mRelease` (+ smoother), **keep XML key `"sustain"`** (no migration); panel "Release" label already correct. Advanced: Sens/Wet/FastRel/SlowAtt/OS/StereoDetect/sidechain (Basic: Attack/Release + Attack/Release Shape; Split/Balance/Drive/Gain Basic).
 **Tuner (TU-3)** — Option A (bounded): `PitchTrackerYIN.h:44` `kMinFreqHz 40→30` (B0), `kMaxFreqHz 1500→4186` (C8); `TunerStyleDSP.cpp:66` gate uses the constants. (Option B = 4096 window for true 16 Hz — flag, heavier.) `/test-signal` ±1 cent validation (high octave precision is the risk). Advanced: 432 mode + Strobe (keep; LED-Bar default).
 **⚠ De-Esser (Waves Sibilance)** — (1a low-effort, do first) surface the built-but-hidden Mode(Wide/Split)/MidSide/Listen in `DeEsserPanel` (3 controls; DSP+setters+serialize already exist; black label colour for the cream panel); relabel Q→**Detection** (label only, `setQ` unchanged). (1c ⚠ big) add `Mode::Spectral` + new `SibilanceSpectralProcessor.{h,cpp}` (STFT de-esser scaffolded on `PhaseVocoder`: 2048/512 75%-overlap, identity OLA, per-bin sibilance mask = in-band-energy-ratio + per-bin floor EMA + selectivity-shaped reduction, magnitude-only scale keeping phase; latency 1536 via `getLatencySamples()`); `DeEsserDSP` owns `mSpectral`, dispatches block-based in `process()` when `Mode::Spectral && !mListen`, widened mode clamp. Advanced: Atk/Rel/Mix/Lookahead (Lookahead N/A in Spectral). `/test-signal`: sibilant-burst-over-vowel, pink-noise selectivity, latency, null test.
-**⚠ SY-1 (BOSS SY-1)** — (a) Types 4→**11** (enum + `kProfiles[11]` extended `TypeProfile` w/ lfoTarget/Q/detune/brightness/additivePartials; `variationMix` + triangle term in `waveSample`; clamp bump). (c) Guitar/Bass switch (`mInstrument` + range push to tracker; bass caps poly to 1-2). (b ⚠ big) **Polyphony**: new `PolyPitchTracker.{h,cpp}` (FFT harmonic-sum + iterative spectral subtraction, ≤6 notes, temporal hysteresis, double-buffered wait-free publish — mirrors `PitchTrackerYIN` threading); replace single phase accumulator with `SynthVoice mVoices[8]` pool + `updateVoiceAllocation` (match/assign/steal/release) + per-voice env+VCF; keep `mEnvelope` as global dynamics; Mono fallback retains the current path. Poly/Instrument toggles + state.
-**⚠ AD-2 (Acoustic Preamp)** — replace static body-IR resonance with **adaptive**: `DynamicsAnalyzer` (fast/slow env + transient, lift the pattern from `AcousticSimulatorStyleDSP`) drives a `BodyResonanceBank` (3 `ModalResonator` biquads seeded from the existing `kRes[]` air/top/body freqs; depth←level, bloom←transient modulate Q+gain per block); Resonance knob = ceiling of dynamic depth. Replace the convolution block (`:241-259`); keep `mConv` only for `Body::User` (static, no regression). Add **Notch defeat** (`mNotchEnabled` + wrap `:296-312`; panel toggle). Advanced: Level/Body-selector/User-IR.
-- [ ] Tell Jeff: per-unit verify; heavy builds get fuller A/B + the achievable-target confirmation + `/test-signal` where noted.
+- [ ] Tell Jeff: Transient default/rename + Advanced toggle; Limiter +12 ceiling + SUSTAIN; De-Esser hidden Mode/MS/Listen surfaced + spectral mode (selectivity/latency/null); Tuner range + ±1 cent. (De-Esser ⚠ gets fuller A/B + achievable-target confirmation.)
 
-### Task 9 — Batch close (mandatory §0 sequence, in order)
+### Task 9 — Time (⚠ AD-2)
+**Delay (FL Fruity Delay 3)** `DelayDSP` — Faithful. Advanced-tag the **Vocal-Doubler** mode + the duck params + the Slapback button (standard `hasAdvancedControls()`/`applyBasicMode()` pattern on `DelayPanel`); add an **"Off"** entry to the FB-filter selector; keep the Time 1–2000 ms superset (flag the 1–1000 ms ref delta, no clamp). Basic = Time/Feedback/Wet (+ Sync).
+**Reverb (FL Fruity Reeverb 2)** `ReverbDSP` — Partial. **Wire the built-but-hidden Ducking** (Amount/Threshold/Attack/Release already in DSP, no panel control) into `ReverbPanel`; Advanced-tag the **5-algorithm** selector + HFRatio + WetTone + Freeze + TailShape. Base reverb controls (Size/Decay/Damp/Wet/Pre-delay) stay Basic.
+**⚠ AD-2 (Acoustic Preamp)** — replace static body-IR resonance with **adaptive**: `DynamicsAnalyzer` (fast/slow env + transient, lift the pattern from `AcousticSimulatorStyleDSP`) drives a `BodyResonanceBank` (3 `ModalResonator` biquads seeded from the existing `kRes[]` air/top/body freqs; depth←level, bloom←transient modulate Q+gain per block); Resonance knob = ceiling of dynamic depth. Replace the convolution block (`:241-259`); keep `mConv` only for `Body::User` (static, no regression). Add **Notch defeat** (`mNotchEnabled` + wrap `:296-312`; panel toggle). Advanced: Level/Body-selector/User-IR.
+- [ ] Tell Jeff: Delay doubler/duck/Slapback behind Advanced + FB "Off"; Reverb ducking now reachable + algos/extras behind Advanced; AD-2 resonance responds to playing dynamics + notch defeat.
+
+### Task 10 — Batch close (mandatory §0 sequence, in order)
 - [ ] `/draft-doc batch-close` → compile the Implemented Work Log entry from the running notes; apply via Edit to `Plans & Specs/Implemented Work Log.md` (with `**Bucket:** Effects`).
 - [ ] `/review-batch QA-EffectsReview` → audit the full diff vs this plan + CLAUDE.md rules + memory-tracked gotchas. Address BLOCKER / NEEDS-FIX in-batch; defer NITs into the close entry.
 - [ ] Rule 4: walk the running-notes Diagnostic Instrumentation Catalog and strip every `Remove`-disposition site (surface the strip list to Jeff first; Keep/Remove borderline = Jeff's call).
