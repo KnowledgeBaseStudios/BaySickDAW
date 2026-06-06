@@ -1122,17 +1122,27 @@ needed to find what you should pull up to review the work.
 - **Bucket:** Cross-cutting Infrastructure
 - Verify (own plan file will detail): the 10-label snap on each of Builder + PianoRoll + Record-Quantize produces correct tick-aligned positions; existing saved-project loads correctly migrate `startBeats * 96 → startTicks`; audio-clip playback in the post-migration state still plays from the right offset; MIDI recording with each of the 10 quantize values commits notes at the expected tick boundaries; triplet divisions don't drift on long projects.
 
-#### **QA-EffectsReview: Effects-Correctness Sweep** *(NEW — inserted 2026-06-05 at QA-Ee close)*
+#### **QA-EffectsReview: Effects-Correctness Sweep → Full Effects Fidelity Sweep** *(NEW — inserted 2026-06-05 at QA-Ee close; STATUS:OPEN + RE-SCOPED 2026-06-06)*
+- **STATUS: OPEN (2026-06-06).**  **Plan file:** [`Plans & Specs/Batch Plans/composed-foraging-rose.md`](Batch Plans/composed-foraging-rose.md).
+- **RE-SCOPED at open (2026-06-06):** expanded from the 4-bug sweep below to a full effects-subsystem **max-clone fidelity rework** — every rack effect + every BaySickPedals pedal graded + reworked vs its reference (BOSS / FL Studio / Furman PQ-3 / Waves BB Tubes / Caelum Tape Cassette 2 / SSL+Neve console), a per-slot **Basic/Advanced** control toggle (FX-rack panels only), **Console Clean(SSL)/Dirty(Neve)**, big builds on the 4 heavy units (De-Esser→Sibilance / SY-1 / AD-2 / Tape), plus original bugs (a)/(b)/(c).  Item **(d) multi-call SPLIT OUT** to new batch **QA-MultiBlockHazard** (engine/hot-path, not effect fidelity), directly after.  Step-1 audit: `Research Reports/effects-fidelity-audit-2026-06-06.md`.  See §9 2026-06-06 Forks entry.
 - Items: (a) compressor Vintage-knee GR-hump (`CompressorDSP.cpp:245-254`) — the ratio tapers to 1.0 over 12 dB above threshold, so GR humps then zeroes; hits Vintage + FET + Opto (shared `computeGainDb` path); (b) FET inverted Input->threshold knob map (`EffectEditorPanels.cpp:402-407`); (c) Flanger/Delay/Phaser one-way un-sync — `setSyncBPM(false)` never restores the rate (`FlangerDSP.cpp:49-66` + Delay + Phaser); (d) Audio/Vox/Inst multi-call-per-block hazard for stateful effects.
 - Scope: all pre-QA / pedal-board-era origin (verified NOT introduced by QA-Ef's ST-path deletion — that close commit `ad956bf` touched zero effect-DSP logic).  The multi-call (d) is delicate — must be regression-tested against live + playback on Vox/Inst.
 - Sequencing: **immediately after QA-Ee, before QA-CutSelfReview** (Jeff's confirmed slot 2026-06-05 per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 forty-ninth Forks entry).
 - Effort: TBD at batch open.
 - **Bucket:** Effects
 
+#### **QA-MultiBlockHazard: Audio/Vox/Inst Multi-Call-Per-Block Stateful-Effect Hazard** *(NEW — inserted 2026-06-06 at QA-EffectsReview open; split from QA-EffectsReview item (d))*
+- Items: on Audio / Vox / Inst mixer strips an insert effect's `process()` runs once PER audio clip / per source in a block instead of once, so stateful effects (delay lines, LFO phase, compressor envelopes, reverb tails) advance 2-3x per block and corrupt.  The engine compensates only for peak metering (CAS-max, `VibeGraph.cpp:2500`), NOT DSP state.
+- Scope: engine-layer restructure — sum each strip's sources into one buffer, run the rack exactly ONCE per block.  Touches the render tasks (`CompositeAudioInsertTask` / `VoxStripTask` / `InstStripTask`) + `renderFilePlayPlayer` / `renderAudioClipsForRow` + `routeInsertOutput`.  NOT effect-DSP fidelity (that is QA-EffectsReview).
+- Risk: HIGH — hot audio path under MT.  **Mandatory full live-input + playback regression pass on Audio/Vox/Inst before close.**
+- Sequencing: **immediately after QA-EffectsReview, before QA-CutSelfReview** (Jeff's confirmed slot 2026-06-06 per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 2026-06-06 Forks entry).
+- Effort: TBD at batch open.
+- **Bucket:** Cross-cutting Infrastructure
+
 #### **QA-CutSelfReview: "Cut Self" on Layers/Bass** *(NEW — inserted 2026-06-05 at QA-Ee close)*
 - Items: "Cut Self" (self-choke) works on the drum-kit grid but not on Layers or Bass piano rolls.
 - Scope: program-wide investigation — confirm the exact feature + why it's drum-kit-only.
-- Sequencing: **immediately after QA-EffectsReview, before QA-UICleanup** (Jeff 2026-06-05; see §6 arrow + §9 forty-ninth Forks entry).
+- Sequencing: **immediately after QA-MultiBlockHazard, before QA-UICleanup** (Jeff 2026-06-05; re-pointed 2026-06-06 when QA-MultiBlockHazard inserted between; see §6 arrow + §9 forty-ninth + 2026-06-06 Forks entries).
 - Effort: TBD at batch open.
 - **Bucket:** System Pages
 
@@ -2047,7 +2057,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-EffectsReview****************************** → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-DirtyFlag*******************
 ```
@@ -2526,6 +2536,14 @@ one-way un-sync, Audio/Vox/Inst multi-call-per-block hazard); all pre-QA /
 pedal-board-era origin.  Slotted **immediately after QA-Ee, before
 QA-CutSelfReview** (Jeff 2026-06-05).  Bucket: Effects.  See §9 forty-ninth
 Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-MultiBlockHazard** inserted
+2026-06-06 at the QA-EffectsReview open — split from QA-EffectsReview item (d):
+on Audio/Vox/Inst strips a stateful effect's process() runs once per clip/source
+per block instead of once, corrupting delay lines / LFO phase / compressor
+envelopes; engine-layer sum-then-process restructure.  Slotted **immediately
+after QA-EffectsReview, before QA-CutSelfReview** (Jeff 2026-06-06).  Bucket:
+Cross-cutting Infrastructure.  See §9 2026-06-06 Forks entry.
 
 \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-CutSelfReview** inserted
 2026-06-05 at the QA-Ee close — "Cut Self" (self-choke) works on the drum-kit
@@ -5433,3 +5451,31 @@ The initial "1/8-note-late" report was diagnosed to **TV audio output latency** 
 - `Plans & Specs/Running Notes/rhythmic-counting-octopus.md` — full per-stage record + close routing (rode along with each source commit per SC-A).
 
 **Verification:** per-stage Debug + Release PASS (Jeff 2026-06-03 / 04 / 05) — block + note tick migration + round-trip; global snap across Builder/PianoRoll/DrumKit; straight + triplet grids; Record-Quantize 11 labels (Step→1/16, 1/3 Beat→eighth-triplet, Off→raw); count-in recording lands where played (+ noodling-discard / early-strike intact); Line snap reaches the finest visible line on PianoRoll/DrumKit.  `/review-batch QA-Ee` — **READY-TO-COMMIT**, zero blockers; the one NEEDS-FIX (Line-snap threshold) + the dead-code NITs fixed in-batch (`779fcee`); the PianoRoll default=Line deviation accepted.  Rule 4 — no diagnostic instrumentation added this batch (nothing to strip).
+
+### 2026-06-06 — QA-EffectsReview OPEN: re-scoped 4-bug sweep → full effects-subsystem fidelity rework; item (d) split to new QA-MultiBlockHazard batch (fiftieth Forks entry)
+
+**Status:** OPEN.  QA-EffectsReview (forty-ninth Forks origin; slotted after QA-Ee) opened 2026-06-06.  At open it was **re-scoped** from the 4-bug effects-correctness sweep to a **full effects-subsystem max-clone fidelity rework**, and item (d) was **split out** to a dedicated new batch.
+
+**Step-1 fidelity audit (read-only).**  Before any code, an 8-pass read-only research audit graded every rack effect + every BaySickPedals pedal against its real reference (BOSS pedals; FL Studio effects; Furman PQ-3; Waves BB Tubes; Caelum Tape Cassette 2; SSL + Neve console).  Roughly 13 Faithful/Faithful+, 14 Partial, 5 Divergent; plus 2 real bugs (Console dead-Color knob, Flanger/Phaser one-way sync = item c), 3 doc-comment defects, 4 built-but-hidden DSP features.  Findings written to `Plans & Specs/Research Reports/effects-fidelity-audit-2026-06-06.md`.
+
+**Locked spec calls (Jeff, 2026-06-06):**
+- **(SC-scope/structure)** ONE cohesive fidelity batch (a + b + c + every per-effect fidelity rework + the 2 bugs + 3 doc fixes + hidden-feature wiring + a Basic/Advanced toggle infra).  Splitting the *effects* loses things at the seams (Jeff); a batch is not a commit (one focused commit per unit preserves rollback granularity).
+- **(SC-fidelity)** Max-clone fidelity on every unit; **big build on all 4 heavy units** — De-Esser→Waves Sibilance (spectral/ORS-class), SY-1 (11 types + polyphony), AD-2 (adaptive resonance), Tape (Low-Pass + Cassette IR + sampled hiss).  Proprietary refs (Sibilance ORS / SY-1 COSM / AD-2 adaptive) = faithful same-class, not bit-exact.
+- **(SC-console)** Console saturation gains a **Clean/Dirty toggle** — Clean = SSL (drive-scaled 2nd-harmonic), Dirty = Neve (LF-weighted saturation + 2nd≈3rd + LF bloom) — reusing the existing Tube engine's 350 Hz band-split + dual shapers; folds in the dead-Color-knob fix.
+- **(SC-extras)** Non-reference extra knobs go behind a per-slot **Basic/Advanced** toggle button in the FX-rack slot header (default Basic = reference-clone control set; saved with the project).  **FX-rack panels ONLY** — the actual BOSS pedals + the simplified `*PedalPanel` board panels (incl. Compressor-forced-CS) are untouched.
+- **(SC-refs)** the four open reference ambiguities resolved: Overdrive-rack = FL Fruity Blood Overdrive; Console = SSL/Neve; Transient = FL Transient Processor; De-Esser = Waves Sibilance.
+
+**(d) SPLIT — new batch QA-MultiBlockHazard.**  The Audio/Vox/Inst multi-call-per-block stateful-effect hazard is an engine/hot-path restructure (sum each strip's sources, run the rack once per block), NOT effect-DSP fidelity — so it splits to a dedicated **QA-MultiBlockHazard** batch, slotted **immediately after QA-EffectsReview, before QA-CutSelfReview** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`).  High risk (hot path under MT); mandatory live + playback regression pass before its close.
+
+**Inline back-refs:**
+- §5 — QA-EffectsReview entry gains STATUS:OPEN + Plan-file pointer + the re-scope note (original 4-bug content preserved below it); NEW QA-MultiBlockHazard docket inserted after it; QA-CutSelfReview Sequencing re-pointed to follow QA-MultiBlockHazard.
+- §6 — arrow gains `→ QA-MultiBlockHazard` (34 asterisks) between QA-EffectsReview (30) and QA-CutSelfReview (31); one footnote added after the QA-EffectsReview footnote.
+- §9 — this entry (fiftieth); cross-refs the forty-ninth (QA-EffectsReview origin at the QA-Ee close).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-EffectsReview STATUS:OPEN + re-scope + NEW QA-MultiBlockHazard docket + QA-CutSelfReview re-point; §6 arrow + footnote; §9 this entry.
+- `Plans & Specs/Batch Plans/composed-foraging-rose.md` — the §0-conformant code-complete batch plan.
+- `Plans & Specs/Running Notes/composed-foraging-rose.md` — seeded.
+- `Plans & Specs/Research Reports/effects-fidelity-audit-2026-06-06.md` — Step-1 audit findings.
+
+**Close routing** comes later, per Rule 3 at QA-EffectsReview close.
