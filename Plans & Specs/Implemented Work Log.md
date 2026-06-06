@@ -2071,3 +2071,33 @@ Per the §6 sequencing arrow updated at this close, **QA-ClipDrop is the next ba
 **Rule 4:** no diagnostic instrumentation added this batch (verified by ear / by the Event Editor readout); the catalog stayed empty — nothing to strip at close.
 
 ---
+
+### 2026-06-05 18:00 PT — QA-Ee — 96 PPQ universal musical timebase + the whole snap surface (Builder / Piano Roll / Drum Kit / Record-Quantize) unified on one 11-label triplet-aware scheme with the visual grid decoupled from snap + content-bound zoom; 3 in-batch playback/record fixes; 2 in-batch dead-code sweeps; close → 4 new batches
+
+**Bucket:** Cross-cutting Infrastructure, System Pages, UI / L&F / Theming, Effects
+
+#### Done
+
+- 96 PPQ tick timebase (`kTicksPerBeat=96`): ArrangementBlock (Stage 1, `1840380`) + PianoNote (Stage 3, `56ecc38`) gain authoritative int64 tick storage + a beats<->ticks bridge + tick serdes + old-project float-beats migration.  The audio engine + serdes run on ticks; the public playhead/beat API stays beats (SC-3 defensive bridge).
+- Unified **11-label** snap scheme (Int 0..10: Off / Line / Bar / Beat / 1/2 Beat / 1/3 Beat / Step / 1/2 Step / 1/3 Step / 1/4 Step / 1/6 Step) on ONE `kUnifiedSnapLabels` / `snapDivToTicks` source of truth, across all four snap surfaces: Builder (Stage 2, `9adbfe8` — `Unified_BuilderSnapDiv` + FL-style dynamic "Line" + universal content-bound zoom), Piano Roll + Drum Kit (Stage 3, `56ecc38` — global `Unified_PianoRollSnapDiv` + unified straight/triplet grid renderers, the visual grid decoupled from snap), Record-Quantize (Stage 4, `69e909b` — `Unified_RecordQuantizeDiv` + triplet-aware 96 PPQ tick-grid snapping).
+- Folded-in playback/record fixes: Task 1b (`6cd615f`) playback-length (pattern-loop ceil + song-block sub-bar end); Task 1c (`1bdc155`) loop-seam stuck-note flush; the MIDI count-in record-displacement fix (`427ee34`) — the recorder now self-times on its own count-in-inclusive clock instead of the transport PPQ that QA-Ed's int64 rebuild froze during the count-in (it exposed a QA-Ea pre-roll assumption the old float playhead satisfied).
+- `/review-batch` follow-up (`779fcee`): Line-snap/grid-render threshold consistency fix — the Piano Roll + Drum Kit Line snap now reaches the finest visible grid line (down to 1/64) via a shared `kMinGridLinePx`; Builder's FL 16-cell cap unchanged.
+- In-batch dead-code sweeps (cleaned in-batch per Jeff, not routed forward): the `snapDenominator` chain (`6da4f9e`); `mSnapEnabled`/`setSnapEnabled` + drum-kit `onVZoom`/`applyVZoom` + `mRowHScale` (`779fcee`) — all orphaned by this batch's own stages.
+
+#### Found along the way
+
+- 7 out-of-scope findings (quit save-prompt draggable; Cut Self on Layers/Bass; Layers don't auto-name from patch; compressor multi-mode GR; flanger BPM one-way; Tools button -> menu; snap -> dropdown) + 2 later (piano-roll transpose menu; Chord Stamp stretch + Root/Scale/Snap dual-mode).
+- The effects regressions traced to pre-QA / pedal-board-era DSP, NOT the QA-Ef ST-path deletion (verified: that close commit `ad956bf` touched zero effect-DSP logic).
+- `/review-batch QA-Ee` surfaced 1 NEEDS-FIX (the Line-snap threshold, fixed in `779fcee`) + the dead-code NITs (swept in `779fcee`) + 1 accepted default deviation (PianoRoll snap default = Line, not the SC-def 1/2 Step).
+
+#### What was done about each finding
+
+- Fixed IN-batch: the count-in record displacement (`427ee34`), the Line-snap threshold (`779fcee`), all dead-code orphans (`6da4f9e` + `779fcee`).
+- Routed OUT to 4 new batches immediately after QA-Ee (§5 dockets + §6 arrow + §9 forty-ninth Forks entry): **QA-EffectsReview** (effects correctness), **QA-CutSelfReview** (Cut Self on Layers/Bass), **QA-UICleanup** (piano-roll + misc UI, incl. the Tools-menu / snap-dropdown / transpose-menu work), **QA-Chords** (Chord Stamp stretch + scale-aware dual-mode).
+- PianoRoll snap default = Line accepted (Jeff: nothing released).
+
+#### Commit(s)
+
+`e5e71dd` (open, docs) · `1840380` Stage 1 · `6cd615f` Task 1b · `1bdc155` Task 1c · `9adbfe8` Stage 2 · `56ecc38` Stage 3 · `427ee34` count-in record-displacement fix · `69e909b` Stage 4 · `6da4f9e` in-batch dead-code cleanup · `779fcee` /review-batch follow-up · `<TBD — close commit SHA appended after commit>` CLOSE (docs).  Verified by Jeff in Debug + Release per stage (2026-06-03 / 04 / 05).
+
+---

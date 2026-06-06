@@ -1105,6 +1105,7 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Ee: 96 PPQ Universal Timebase + Decoupled Snap Params** *(NEW — inserted 2026-05-20)*
 
+- **STATUS (2026-06-05 close): CLOSED** (forty-ninth Forks entry).  Shipped the 96 PPQ tick timebase + the unified `Unified_*` snap convention across Builder / Piano Roll / Drum Kit / Record-Quantize, with the visual grid decoupled from snap + FL-style content-bound zoom.  **NOTE — shipped as 11 labels (Int 0..10), not the plan's original 10-label/0..9 below:** Off / Line / Bar / Beat / 1/2 Beat / 1/3 Beat / Step / 1/2 Step / 1/3 Step / 1/4 Step / 1/6 Step — the dynamic "Line" snap + the 1/16-triplet grid rung + the 1/6-Step label were added mid-Stage-2 (Jeff-approved for FL triplet parity).  3 playback/record fixes + 2 dead-code sweeps folded in; 4 close-routed batches follow (QA-EffectsReview → QA-CutSelfReview → QA-UICleanup → QA-Chords).  Full detail in the Implemented Work Log close entry.
 - Items: **96 PPQ tick foundation** for the entire app + **APVTS `Unified_*` param convention** establishment (3 new params) + **decoupled snap UI** (Builder + PianoRoll + Record-Quantize all on the same 10-label triplet-aware scheme).  Originated 2026-05-20 mid QA-Ea Task 0c source-landing surface — the Component 8 `record_quantize_div` rename + range-bump was reframed as an architectural pivot (Option iii) when Jeff identified the missing triplet divisions fundamental to FL-parity workflow.  See §9 [next] Forks entry.
 - Scope:
   - **96 PPQ foundation.**  `kTicksPerBeat = 96` constant established as the project's musical-domain authoritative clock.  Clip / note / automation-point start + length positions store as int64 ticks; float-beat (`startBeats` / `lengthBeats`) becomes a derived read-only view via getter helpers.  Old saved projects migrate on load: `startBeats * 96 → startTicks` when the new field is absent.  Per Jeff's SC-3 = (a) defensive bridge — UI keeps reading float beats while the audio engine + serdes runs cleanly on ticks; no app-breaking simultaneous rewrite.
@@ -1120,6 +1121,34 @@ needed to find what you should pull up to review the work.
 - Effort: medium-large (~10-16 hours; data model + migration ~3-4 hr, BuilderPage refactor ~2-3 hr, PianoRoll refactor ~2-3 hr, APVTS + submenu + consumer ~2 hr, verify ~2-3 hr, `/review-batch` ~1 hr).
 - **Bucket:** Cross-cutting Infrastructure
 - Verify (own plan file will detail): the 10-label snap on each of Builder + PianoRoll + Record-Quantize produces correct tick-aligned positions; existing saved-project loads correctly migrate `startBeats * 96 → startTicks`; audio-clip playback in the post-migration state still plays from the right offset; MIDI recording with each of the 10 quantize values commits notes at the expected tick boundaries; triplet divisions don't drift on long projects.
+
+#### **QA-EffectsReview: Effects-Correctness Sweep** *(NEW — inserted 2026-06-05 at QA-Ee close)*
+- Items: (a) compressor Vintage-knee GR-hump (`CompressorDSP.cpp:245-254`) — the ratio tapers to 1.0 over 12 dB above threshold, so GR humps then zeroes; hits Vintage + FET + Opto (shared `computeGainDb` path); (b) FET inverted Input->threshold knob map (`EffectEditorPanels.cpp:402-407`); (c) Flanger/Delay/Phaser one-way un-sync — `setSyncBPM(false)` never restores the rate (`FlangerDSP.cpp:49-66` + Delay + Phaser); (d) Audio/Vox/Inst multi-call-per-block hazard for stateful effects.
+- Scope: all pre-QA / pedal-board-era origin (verified NOT introduced by QA-Ef's ST-path deletion — that close commit `ad956bf` touched zero effect-DSP logic).  The multi-call (d) is delicate — must be regression-tested against live + playback on Vox/Inst.
+- Sequencing: **immediately after QA-Ee, before QA-CutSelfReview** (Jeff's confirmed slot 2026-06-05 per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 forty-ninth Forks entry).
+- Effort: TBD at batch open.
+- **Bucket:** Effects
+
+#### **QA-CutSelfReview: "Cut Self" on Layers/Bass** *(NEW — inserted 2026-06-05 at QA-Ee close)*
+- Items: "Cut Self" (self-choke) works on the drum-kit grid but not on Layers or Bass piano rolls.
+- Scope: program-wide investigation — confirm the exact feature + why it's drum-kit-only.
+- Sequencing: **immediately after QA-EffectsReview, before QA-UICleanup** (Jeff 2026-06-05; see §6 arrow + §9 forty-ninth Forks entry).
+- Effort: TBD at batch open.
+- **Bucket:** System Pages
+
+#### **QA-UICleanup: Piano-Roll + Misc UI Cleanup** *(NEW — inserted 2026-06-05 at QA-Ee close)*
+- Items: (1) quit save-prompt dialog is draggable -> fixed centered modal; (2) Layers don't auto-name from the loaded patch (tab / picker / name-tag); (3) fold the Piano-Roll Tools BUTTON's advanced tools (Quantize/Strum/Glue/Chop/Randomize/Articulate) into the menu-bar "Tools" entry + drop that menu's duplicate per-tool selectors + remove the wrench button; (4) snap button -> Builder-style snap DROPDOWN on BOTH the engine-roll + Drum-Kit toolbars + move the Drum-Kit kit button to the bar's right end; (5) "Quantize Settings" — move the Edit-menu Quantize submenu (1/4..1/32) into the Tools menu, renamed, as the quantize-RESOLUTION setting (no longer quantizing on the spot); (6) Tools-menu "Quantize" action honors whatever Quantize Settings is set to; (7) the transpose menu — items render non-ASCII arrow glyphs; the two "Transpose Octave" entries show the wrong shortcut vs the Key Binds window (which lists Ctrl+Up/Down); move all four transpose options (Up / Down / Up Octave / Down Octave) from the Edit menu into the Tools menu.
+- Scope: piano-roll menu + toolbar consolidation; no DSP.
+- Sequencing: **immediately after QA-CutSelfReview, before QA-Chords** (Jeff 2026-06-05; see §6 arrow + §9 forty-ninth Forks entry).
+- Effort: TBD at batch open.
+- **Bucket:** UI / L&F / Theming
+
+#### **QA-Chords: Chord Stamp Stretch + Scale-Aware Dual-Mode** *(NEW — inserted 2026-06-05 at QA-Ee close)*
+- Items: (1) a stamped chord can't be stretched/resized (places as-is only); (2) dual-mode Root/Scale/Snap-to-Scale behavior.
+- Scope: Mode 1 (Snap-to-Scale OFF) — the chord dropdown (Major/Minor/Sus2/...) reads the globally active Root + Scale and generates a context-aware chord that fits the selected scale degrees relative to the clicked note (NOT static hardcoded semitone intervals).  Mode 2 (Snap-to-Scale ON) — strict scale compliance + an Octave Resolution Pass: a same-MIDI-note collision shifts the duplicate up to the next valid scale degree an octave up (preserving harmonic thickness, not stacking / deleting).  Deliverable = JUCE-compatible C++ data structures + algorithm for both modes + the MIDI-note array for the 96 PPQ grid + the octave-collision resolver.
+- Sequencing: **immediately after QA-UICleanup, before QA-TempoMap** (Jeff 2026-06-05 — last of the four new batches; see §6 arrow + §9 forty-ninth Forks entry).
+- Effort: TBD at batch open.
+- **Bucket:** System Pages
 
 #### **QA-TempoMap: Audio-Thread Sample-Indexed Tempo Map** *(NEW — inserted 2026-06-01 at QA-Ed close)*
 - Items: a full audio-thread sample-indexed tempo map — the SC-1 deferral from QA-Ed.  QA-Ed shipped the int64-sample transport source-of-truth + a single re-basing tempo anchor, but explicitly deferred a sample↔tick tempo MAP (Jeff's SC-1 lock — scope-creep rejected for that batch).
@@ -2018,7 +2047,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-EffectsReview****************************** → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-DirtyFlag*******************
 ```
@@ -2489,6 +2518,34 @@ Slotted **immediately after QA-Ee, before QA-Eb** (Jeff's call per
 `feedback_slot_placement_is_spec_call.md`); capstone bridging QA-Ed's
 sample clock + QA-Ee's tick clock.  Bucket: Cross-cutting Infrastructure.
 See §9 forty-eighth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-EffectsReview** inserted
+2026-06-05 at the QA-Ee close — effects-correctness sweep (compressor
+Vintage-knee GR-hump, FET inverted Input->threshold map, Flanger/Delay/Phaser
+one-way un-sync, Audio/Vox/Inst multi-call-per-block hazard); all pre-QA /
+pedal-board-era origin.  Slotted **immediately after QA-Ee, before
+QA-CutSelfReview** (Jeff 2026-06-05).  Bucket: Effects.  See §9 forty-ninth
+Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-CutSelfReview** inserted
+2026-06-05 at the QA-Ee close — "Cut Self" (self-choke) works on the drum-kit
+grid but not on Layers/Bass; program-wide investigation.  Slotted **immediately
+after QA-EffectsReview, before QA-UICleanup** (Jeff 2026-06-05).  Bucket: System
+Pages.  See §9 forty-ninth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-UICleanup** inserted
+2026-06-05 at the QA-Ee close — piano-roll + misc UI (quit-prompt modal, Layers
+patch auto-name, Tools button->menu consolidation, snap->dropdown + kit
+reposition, Quantize Settings, transpose menu->Tools + glyph/shortcut fixes).
+Slotted **immediately after QA-CutSelfReview, before QA-Chords** (Jeff
+2026-06-05).  Bucket: UI / L&F / Theming.  See §9 forty-ninth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-Chords** inserted
+2026-06-05 at the QA-Ee close — Chord Stamp tool: can't stretch a stamped chord
++ scale-aware dual-mode (Snap-OFF context-aware chord from global Root+Scale;
+Snap-ON strict compliance + octave-collision resolver).  Slotted **immediately
+after QA-UICleanup, before QA-TempoMap** (Jeff 2026-06-05 — last of the four).
+Bucket: System Pages.  See §9 forty-ninth Forks entry.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
@@ -5351,3 +5408,28 @@ The initial "1/8-note-late" report was diagnosed to **TV audio output latency** 
 - `Plans & Specs/Running Notes/virtual-moseying-cocoa.md` — close-pass sections.
 
 **Verification:** per-task Debug + Release PASS (Jeff 2026-06-01) — all 8 plan scenarios (drift/clip-sync over a long arrangement, pattern + song-loop first-note across buffer sizes + awkward BPM, time-selection loop, tempo automation across the seam, seek/scrub, held-note-across-loop voice-count, pattern/song parity + record count-in) + the 3 tempo-automation fixes.  `/review-batch QA-Ed` — **READY-TO-COMMIT**: no blockers, no source changes; the one NEEDS-FIX (capture Problems 1 + 3 as explicit in-batch finds) is satisfied by this entry + the close-entry routing table; 3 NITs deferred (the running-notes "commit-split TBD" line reconciled — landed as one atomic commit per SC-2, Jeff's call; a benign stale backward-seek flag across a stopped period — idempotent flush, no stuck note; an AlertWindow-idiom consistency note).  Rule 4 — no diagnostic instrumentation added this batch (catalog empty; nothing to strip).
+
+### 2026-06-05 — QA-Ee CLOSE: 96 PPQ universal timebase + unified Unified_* snap surface (Builder / Piano Roll / Drum Kit / Record-Quantize) shipped; 3 playback/record fixes + 2 dead-code sweeps folded in; close routing → 4 new batches
+
+**Status:** CLOSED (forty-ninth Forks entry).  QA-Ee — the 96 PPQ universal-timebase + decoupled-snap batch (§9 twenty-sixth Forks origin, slotted immediately after QA-ClipDrop, before QA-TempoMap) — shipped across 8 staged source commits + 2 in-batch cleanups + the close.  Full detail in the Implemented Work Log close entry; this entry records the close routing per §0 Rule 3.
+
+**Sub-routings (a)-(e):**
+- **(a) SCOPE-UP 10 → 11 labels.**  The plan's 10-label / `Int 0..9` snap scheme grew to **11 labels / `Int 0..10`** (added the dynamic "Line" + the 1/16-triplet grid rung + the 1/6-Step label) mid-Stage-2, Jeff-approved for FL-style triplet parity.
+- **(b) CROSS-BATCH FIX (back-ref QA-Ed).**  The MIDI count-in record-displacement fix (`427ee34`) root-caused to QA-Ed's (closed) int64 playhead `advanceBlock` `mPlaying`-gate freezing PPQ during the count-in, which exposed a QA-Ea pre-roll assumption the old float playhead satisfied.  Fixed in QA-Ee per the closed-batch carry-forward rule (`feedback_closed_batch_carryforward_via_forks.md`).
+- **(c) BUILDER LEFT AS-IS.**  Builder snap/grid intentionally NOT deepened — FL playlist caps at 16 cells/bar (`kMinLinePx` = 12); Jeff confirmed.  The Piano Roll + Drum Kit go finer (`kMinGridLinePx` = 5, down to 1/64).
+- **(d) IN-BATCH DEAD-CODE.**  `snapDenominator` chain (`6da4f9e`) + `mSnapEnabled`/`onVZoom`/`applyVZoom`/`mRowHScale` (`779fcee`) removed in-batch per Jeff's directive (`feedback_clean_own_batch_dead_code_in_batch.md`) — clean this batch's own orphans, don't route forward.
+- **(e) ACCEPTED DEFAULT DEVIATION.**  PianoRoll snap default shipped as Line (idx 1), not the SC-def 1/2 Step; old projects reopen at Line.  Jeff accepted (nothing released).
+
+**Sequencing:** QA-Ee closed; **FOUR new batches insert immediately after it**, in order — QA-EffectsReview → QA-CutSelfReview → QA-UICleanup → QA-Chords.  New Phase 3 order: `… QA-ClipDrop → QA-Ee → QA-EffectsReview → QA-CutSelfReview → QA-UICleanup → QA-Chords → QA-TempoMap → QA-Eb → QA-Ec → QA-F …`.
+
+**Inline back-refs:**
+- §5 — QA-Ee entry gains the `STATUS:CLOSED` banner + the 10 → 11-label correction note; four NEW dockets INSERTED (after QA-Ee, before QA-TempoMap): QA-EffectsReview, QA-CutSelfReview, QA-UICleanup, QA-Chords.
+- §6 — arrow updated to `… QA-Ee → QA-EffectsReview → QA-CutSelfReview → QA-UICleanup → QA-Chords → QA-TempoMap …` (QA-EffectsReview = 30 asterisks, QA-CutSelfReview = 31, QA-UICleanup = 32, QA-Chords = 33); four footnotes added after the QA-TempoMap footnote.
+- §9 — this entry (forty-ninth); cross-refs the twenty-sixth (QA-Ee origin) + the forty-eighth (QA-Ed close, the prior neighbor).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-Ee STATUS:CLOSED banner + 10→11 correction + 4 NEW dockets; §6 arrow + 4 footnotes; §9 this entry.
+- `Plans & Specs/Implemented Work Log.md` — QA-Ee close entry (append).
+- `Plans & Specs/Running Notes/rhythmic-counting-octopus.md` — full per-stage record + close routing (rode along with each source commit per SC-A).
+
+**Verification:** per-stage Debug + Release PASS (Jeff 2026-06-03 / 04 / 05) — block + note tick migration + round-trip; global snap across Builder/PianoRoll/DrumKit; straight + triplet grids; Record-Quantize 11 labels (Step→1/16, 1/3 Beat→eighth-triplet, Off→raw); count-in recording lands where played (+ noodling-discard / early-strike intact); Line snap reaches the finest visible line on PianoRoll/DrumKit.  `/review-batch QA-Ee` — **READY-TO-COMMIT**, zero blockers; the one NEEDS-FIX (Line-snap threshold) + the dead-code NITs fixed in-batch (`779fcee`); the PianoRoll default=Line deviation accepted.  Rule 4 — no diagnostic instrumentation added this batch (nothing to strip).
