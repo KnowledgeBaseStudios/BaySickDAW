@@ -2226,7 +2226,11 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                         "are in use.  Close one before adding another.");
                     return -1;
                 }
-                spawnClipsTabIfMissing (newRow, audioPath, /*allowDuplicate*/ true);
+                // QA-EffectsReview side-fix (2026-06-06): canonical helper so the
+                // routable Clip page gets its mixer strip + InsertNode -- the bare
+                // spawnClipsTabIfMissing made the page only, so the audioInsert()
+                // channel returned below had no node to route to (and no strip).
+                createClipStripAndPage (newRow, audioPath, /*allowDuplicate*/ true);
 
                 for (auto* entry : mPages)
                 {
@@ -2464,7 +2468,11 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                             return;
                         }
 
-                        self->spawnClipsTabIfMissing (newPageRow, newStored, /*allowDuplicate*/ true);
+                        // QA-EffectsReview side-fix (2026-06-06): create the strip
+                        // AND the page via the canonical helper -- the old bare
+                        // spawnClipsTabIfMissing made the page but skipped the
+                        // mixer-strip trio, so "New Page" yielded a strip-less page.
+                        self->createClipStripAndPage (newPageRow, newStored, /*allowDuplicate*/ true);
 
                         const int newCh = MixerChannelIds::audioInsert (newPageRow);
                         if (self->mPM)
@@ -4080,12 +4088,19 @@ void StandaloneEditor::onTabClosed(int tabId)
             // files on disk are still preserved -- we only touch library +
             // grid.  Symmetric counterpart to the BrowserPanel last-file-out
             // cascade (BuilderPage.cpp confirmAndDeleteLibraryEntry).
+            // QA-EffectsReview side-fix (2026-06-06): capture the Clips strip
+            // index so the orphan Audio mixer strip is dropped on close -- mirrors
+            // the Inst (2026-05-05) + Vox (QA-C MIX-01) fixes.  removeClipChannel
+            // existed in MixerPage but was never wired into any close path, so
+            // deleting a Clips page left its strip in the live mixer until reload.
+            int clipStripIdx = -1;
             if (auto* cp = dynamic_cast<ClipsPage*>(mPages[i]->component.get()))
             {
                 int idx = cp->getPageIndex();
                 if (idx >= 0)
                 {
                     mProcessor.unregisterClipEngine (idx);
+                    clipStripIdx = idx;
                     if (mPianoRollPage)
                         mPianoRollPage->unregisterEngine ({ EngineKind::Clip, idx });
                 }
@@ -4309,6 +4324,12 @@ void StandaloneEditor::onTabClosed(int tabId)
             // links stay alive (matches Inst convention).
             if (voxStripIdx >= 0 && mMixerPage)
                 mMixerPage->removeVoxChannel (voxStripIdx);
+            // QA-EffectsReview side-fix (2026-06-06): mirror Inst/Vox for Clips
+            // pages -- removeClipChannel (MixerPage) was defined but never called,
+            // so a deleted Clips page's Audio strip lingered in the live mixer
+            // until reload.  APVTS params stay (matches the Inst/Vox/Aux convention).
+            if (clipStripIdx >= 0 && mMixerPage)
+                mMixerPage->removeClipChannel (clipStripIdx);
             resized();
             refreshAllKitViews();   // D2: drum row freed → kit view shrinks
 
@@ -7680,7 +7701,9 @@ void StandaloneEditor::spawnAndLoadFromEmptyState (PagePresetIO::PageKind kind,
         }
         if (row < 0) return;
 
-        spawnClipsTabIfMissing (row, clipFile.getFullPathName(), /*allowDuplicate*/ true);
+        // QA-EffectsReview side-fix (2026-06-06): canonical helper so the preset-
+        // loaded Clip page gets its mixer strip too (was a strip-less page).
+        createClipStripAndPage (row, clipFile.getFullPathName(), /*allowDuplicate*/ true);
         for (auto* e : mPages)
         {
             if (e && e->type == RibbonTabBar::TabType::Clip)
@@ -7717,7 +7740,7 @@ void StandaloneEditor::showClipsEmptyState()
     resized();   // make sure the empty state has its bounds
 }
 
-void StandaloneEditor::createClipStripAndPage (int row, const juce::String& path)
+void StandaloneEditor::createClipStripAndPage (int row, const juce::String& path, bool allowDuplicate)
 {
     // QA-ClipDrop Task 3 (SC-G/H, 2026-06-03): shared strip + Clips-page
     // creation, reused by drag-drop (onAudioClipAdded), "+ Add New Clip", and
@@ -7741,8 +7764,9 @@ void StandaloneEditor::createClipStripAndPage (int row, const juce::String& path
         mEffectsPage->rebuildChannelDropdown();
 
     // Spawn the Clips ribbon tab + page (idempotent: no-op if a ClipsPage
-    // already owns this row).
-    spawnClipsTabIfMissing (row, path);
+    // already owns this row).  allowDuplicate lets the "New Page"/Duplicate flows
+    // reuse this canonical helper (bypass the per-path dedup, keep the strip trio).
+    spawnClipsTabIfMissing (row, path, allowDuplicate);
 }
 
 void StandaloneEditor::addClipPageFromFile (const juce::File& src)
@@ -8042,7 +8066,9 @@ void StandaloneEditor::spawnDuplicateClipsTab (ClipsPage* sourceCp)
         if (! rowHasPage[(size_t) r]) { targetRow = r; break; }
     if (targetRow < 0) return;   // Clip cap reached
 
-    spawnClipsTabIfMissing (targetRow, sourcePath, /*allowDuplicate*/ true);
+    // QA-EffectsReview side-fix (2026-06-06): create the strip AND page via the
+    // canonical helper (was a bare spawnClipsTabIfMissing -> strip-less duplicate).
+    createClipStripAndPage (targetRow, sourcePath, /*allowDuplicate*/ true);
 
     // Find the freshly-spawned page and apply cloned state.
     for (auto* entry : mPages)

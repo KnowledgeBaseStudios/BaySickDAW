@@ -2703,10 +2703,18 @@ void MixerPage::removeVoxChannel(int idx)
 
 void MixerPage::removeClipChannel(int idx)
 {
-    // Clip strips live in mAudioStrips (keyed by arrangement row index;
-    // there's no separate order vector - they're laid out in row order).
+    // QA-EffectsReview side-fix (2026-06-06): Clip strips ARE order-tracked in
+    // mAudioRowOrder (addAudioChannel push_backs the row; the layout + cable
+    // scan iterate it).  The earlier "no separate order vector" note was wrong.
+    // Drop BOTH the strip widget AND the order entry -- else the stale row leaves
+    // a blank slot in the packed layout (and a re-add duplicates the index).
+    // Mirrors removeInstChannel / removeVoxChannel.  The InsertNode + APVTS params
+    // stay alive so re-adding the same idx restores prior settings (Aux/Inst/Vox
+    // convention).
     mStripCacheDirty = true;   // perf-audit H2: erase invalidates the strip cache.
     mAudioStrips.erase(idx);
+    mAudioRowOrder.erase(std::remove(mAudioRowOrder.begin(), mAudioRowOrder.end(), idx),
+                         mAudioRowOrder.end());
     if (getWidth() > 0) resized();
 }
 

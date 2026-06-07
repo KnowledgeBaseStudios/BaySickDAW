@@ -503,7 +503,11 @@ private:
     // "+ Add New Clip" (onAddTabRequest), and project reload.  The strip trio
     // (addAudioRowChannel + ensureAudioInsert + addAudioChannel) is idempotent,
     // so repeat calls at an existing row are safe no-ops.
-    void createClipStripAndPage (int row, const juce::String& path);
+    // allowDuplicate (QA-EffectsReview side-fix 2026-06-06): forwarded to
+    // spawnClipsTabIfMissing so the "New Page"/Duplicate flows route through this
+    // canonical helper too -- they used to call spawnClipsTabIfMissing directly
+    // and skip the strip trio, yielding a page with no mixer strip.
+    void createClipStripAndPage (int row, const juce::String& path, bool allowDuplicate = false);
     // QA-ClipDrop Task 3 (SC-G/J, 2026-06-03): "+ Add New Clip" handler -- copy
     // the picked file into the project (prompting to create one first if there
     // is none, then retrying), register it in the audio library, and spawn its
