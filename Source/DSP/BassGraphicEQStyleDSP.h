@@ -6,12 +6,12 @@
 // BassGraphicEQStyleDSP - Phase I-12 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
 // GEB Style Bass Graphic EQ.  7 fixed peaking biquads at the classic
-// MXR M-108-style bass 7-band frequencies + master output fader.
+// Boss GEB-7 bass 7-band frequencies + master output fader.
 //
 // Bands: 50 / 120 / 400 / 500 / 800 / 4.5k / 10k Hz
 // Q:     1.4 fixed
 // Gain:  +/-15 dB per band
-// Level: -inf to +12 dB master fader (8th slider)
+// Level: +/-15 dB master fader (8th slider; matches GEB-7)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BassGraphicEQStyleDSP : public DSPBase

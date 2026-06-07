@@ -52,7 +52,8 @@ float BassGraphicEQStyleDSP::getBandDb (int idx) const
 
 void BassGraphicEQStyleDSP::setLevelDb (float db)
 {
-    mLevelDb = juce::jlimit (-60.0f, 12.0f, db);
+    // QA-EffectsReview Task 3: GEB-7 Level slider is +/-15 dB (no -inf kill).
+    mLevelDb = juce::jlimit (-15.0f, 15.0f, db);
 }
 
 void BassGraphicEQStyleDSP::process (juce::AudioBuffer<float>& buffer)
@@ -70,10 +71,9 @@ void BassGraphicEQStyleDSP::process (juce::AudioBuffer<float>& buffer)
 
     for (auto& b : mBands) b.process (ctx);
 
-    if (mLevelDb <= -59.99f)
-        buffer.clear();
-    else if (! juce::approximatelyEqual (mLevelDb, 0.0f))
-        buffer.applyGain (juce::Decibels::decibelsToGain (mLevelDb, -60.0f));
+    // Master level (+/-15 dB, matching the GEB-7 Level slider; no -inf kill).
+    if (! juce::approximatelyEqual (mLevelDb, 0.0f))
+        buffer.applyGain (juce::Decibels::decibelsToGain (mLevelDb));
 }
 
 void BassGraphicEQStyleDSP::getStateInformation (juce::MemoryBlock& dest)

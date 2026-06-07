@@ -28,8 +28,11 @@ void GraphicEQStyleDSP::rebuildBand (int idx)
 {
     if (idx < 0 || idx >= kNumBands) return;
     const float gain = juce::Decibels::decibelsToGain (mGainsDb[idx]);
-    auto coefs = juce::dsp::IIR::Coefficients<float>::makePeakFilter
-                    (mSampleRate, kFreqs[idx], 1.4f, gain);
+    // QA-EffectsReview Task 3: GE-7 top band (6.4 kHz) is a treble shelf, not a
+    // bell; the lower 6 stay mid-narrow peaks (Q 1.4).
+    auto coefs = (idx == kNumBands - 1)
+        ? juce::dsp::IIR::Coefficients<float>::makeHighShelf (mSampleRate, kFreqs[idx], 0.707f, gain)
+        : juce::dsp::IIR::Coefficients<float>::makePeakFilter (mSampleRate, kFreqs[idx], 1.4f, gain);
     *mBands[idx].state = *coefs;
 }
 
@@ -52,7 +55,8 @@ float GraphicEQStyleDSP::getBandDb (int idx) const
 
 void GraphicEQStyleDSP::setLevelDb (float db)
 {
-    mLevelDb = juce::jlimit (-60.0f, 12.0f, db);
+    // QA-EffectsReview Task 3: GE-7 Level slider is +/-15 dB (no -inf kill).
+    mLevelDb = juce::jlimit (-15.0f, 15.0f, db);
 }
 
 void GraphicEQStyleDSP::process (juce::AudioBuffer<float>& buffer)
@@ -70,11 +74,9 @@ void GraphicEQStyleDSP::process (juce::AudioBuffer<float>& buffer)
 
     for (auto& b : mBands) b.process (ctx);
 
-    // Master level (-inf treated as -60 dB floor).
-    if (mLevelDb <= -59.99f)
-        buffer.clear();
-    else if (! juce::approximatelyEqual (mLevelDb, 0.0f))
-        buffer.applyGain (juce::Decibels::decibelsToGain (mLevelDb, -60.0f));
+    // Master level (+/-15 dB, matching the GE-7 Level slider; no -inf kill).
+    if (! juce::approximatelyEqual (mLevelDb, 0.0f))
+        buffer.applyGain (juce::Decibels::decibelsToGain (mLevelDb));
 }
 
 void GraphicEQStyleDSP::getStateInformation (juce::MemoryBlock& dest)

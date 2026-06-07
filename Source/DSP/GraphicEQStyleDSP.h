@@ -5,13 +5,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // GraphicEQStyleDSP - Phase I-12 (2026-05-03)
 // ─────────────────────────────────────────────────────────────────────────────
-// GE Style Graphic EQ (guitar).  7 fixed peaking biquads at the classic
-// guitar 7-band Boss/MXR pedal frequencies + master output fader.
+// GE Style Graphic EQ (guitar).  7 fixed biquads (6 peaks + a high-shelf top
+// band) at the classic guitar 7-band Boss GE-7 pedal frequencies + master fader.
 //
 // Bands: 100 / 200 / 400 / 800 / 1.6k / 3.2k / 6.4k Hz
-// Q:     1.4 fixed (mid-narrow peak character)
+// Q:     1.4 peaks; 6.4k band is a high-shelf (QA-EffectsReview Task 3)
 // Gain:  +/-15 dB per band
-// Level: -inf to +12 dB master fader (8th slider)
+// Level: +/-15 dB master fader (8th slider; matches GE-7)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class GraphicEQStyleDSP : public DSPBase
@@ -31,7 +31,7 @@ public:
 
     void  setBandDb (int bandIdx, float db);  // -15..+15
     float getBandDb (int bandIdx) const;
-    void  setLevelDb (float db);              // -60..+12 (-60 acts as -inf)
+    void  setLevelDb (float db);              // -15..+15 (GE-7 Level slider)
     float getLevelDb() const { return mLevelDb; }
 
     // Frequencies are public + const for the panel to label sliders.

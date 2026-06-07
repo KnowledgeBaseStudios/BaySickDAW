@@ -4277,7 +4277,8 @@ struct GraphicEQStylePanel : public EditorPanelBase
             f->setRange (-15.0, 15.0, 0.1);
             f->setValue (dsp ? dsp->getBandDb (i) : 0.0, juce::dontSendNotification);
             f->onValueChange = [this, i] { if (mDsp) mDsp->setBandDb (i, (float) faders[i]->getValue()); };
-            f->setTooltip (juce::String ((int) GraphicEQStyleDSP::kFreqs[i]) + " Hz - +/-15 dB peaking band");
+            f->setTooltip (juce::String ((int) GraphicEQStyleDSP::kFreqs[i]) + " Hz - +/-15 dB "
+                           + (i == GraphicEQStyleDSP::kNumBands - 1 ? "high-shelf band" : "peaking band"));
             addAndMakeVisible (*f);
             faders[i] = std::move (f);
 
@@ -4292,14 +4293,14 @@ struct GraphicEQStylePanel : public EditorPanelBase
             labels[i] = std::move (l);
         }
 
-        // Master Level fader (-inf..+12).
+        // Master Level fader (+/-15 dB, matching the GE-7 Level slider).
         {
             auto f = std::make_unique<EQFader>();
-            f->setRange (-60.0, 12.0, 0.1);
+            f->setRange (-15.0, 15.0, 0.1);
             f->setSkewFactorFromMidPoint (0.0);
             f->setValue (dsp ? dsp->getLevelDb() : 0.0, juce::dontSendNotification);
             f->onValueChange = [this] { if (mDsp) mDsp->setLevelDb ((float) faders[GraphicEQStyleDSP::kNumBands]->getValue()); };
-            f->setTooltip ("Master output level (-inf..+12 dB).  Center detent at 0 dB.");
+            f->setTooltip ("Master output level (+/-15 dB).  Center detent at 0 dB.");
             addAndMakeVisible (*f);
             faders[GraphicEQStyleDSP::kNumBands] = std::move (f);
 
@@ -4396,11 +4397,11 @@ struct BassGraphicEQStylePanel : public EditorPanelBase
 
         {
             auto f = std::make_unique<EQFader>();
-            f->setRange (-60.0, 12.0, 0.1);
+            f->setRange (-15.0, 15.0, 0.1);
             f->setSkewFactorFromMidPoint (0.0);   // 0 dB sits at visual midpoint
             f->setValue (dsp ? dsp->getLevelDb() : 0.0, juce::dontSendNotification);
             f->onValueChange = [this] { if (mDsp) mDsp->setLevelDb ((float) faders[BassGraphicEQStyleDSP::kNumBands]->getValue()); };
-            f->setTooltip ("Master output level (-inf..+12 dB).  Center detent at 0 dB.");
+            f->setTooltip ("Master output level (+/-15 dB).  Center detent at 0 dB.");
             addAndMakeVisible (*f);
             faders[BassGraphicEQStyleDSP::kNumBands] = std::move (f);
 
@@ -4462,7 +4463,8 @@ struct BassGraphicEQStylePanel : public EditorPanelBase
 // Per band (Low / Mid / High): Freq knob + Boost slider + Q knob.
 // Plus master Input Volume knob + Bypass toggle.
 // ─────────────────────────────────────────────────────────────────────────────
-struct FurmanEQStylePanel : public EditorPanelBase
+struct FurmanEQStylePanel : public EditorPanelBase,
+                            private juce::Timer
 {
     FurmanEQStyleDSP* mDsp { nullptr };
 
@@ -4477,6 +4479,9 @@ struct FurmanEQStylePanel : public EditorPanelBase
 
     std::unique_ptr<VKnob>            inputVol;
     std::unique_ptr<juce::TextButton> bypassBtn;
+    std::unique_ptr<juce::TextButton> hiLoBtn;     // QA-EffectsReview Task 3: Hi/Lo gain range
+    bool                 mOverload { false };       // Task 3: preamp overload LED state
+    juce::Rectangle<int> mLedBounds;                // Task 3: overload LED rect (set in resized)
 
     explicit FurmanEQStylePanel (FurmanEQStyleDSP* dsp) : mDsp (dsp)
     {
@@ -4515,7 +4520,7 @@ struct FurmanEQStylePanel : public EditorPanelBase
             s.q = std::make_unique<VKnob>("Q",
                 dsp ? dsp->getQ (i) : 0.7f,
                 "Bandwidth (Q): low values = wider, high values = narrower");
-            s.q->slider.setRange (0.1, 10.0, 0.01);
+            s.q->slider.setRange (0.2, 3.8, 0.01);   // QA-EffectsReview Task 3: PQ-3 Q range
             s.q->slider.setSkewFactorFromMidPoint (0.7);
             s.q->slider.setValue (dsp ? dsp->getQ (i) : 0.7, juce::dontSendNotification);
             s.q->slider.onValueChange = [this, i] { if (mDsp) mDsp->setQ (i, (float) strips[i].q->slider.getValue()); };
@@ -4531,9 +4536,9 @@ struct FurmanEQStylePanel : public EditorPanelBase
 
         inputVol = std::make_unique<VKnob>("Input",
             dsp ? dsp->getInputVolDb() : 0.0f,
-            "Master Input Volume (0 to +86 dB).  Above ~+12 dB the soft-clipper engages -- emulates the Furman PQ-3 preamp's analog clipping.");
-        inputVol->slider.setRange (0.0, 86.0, 0.1);
-        inputVol->slider.setSkewFactorFromMidPoint (24.0);
+            "Master Input Volume preamp (0 to +26 dB).  Above ~+12 dB the soft-clipper engages; the overload LED (top-right) lights when it clips.  The PQ-3's full range emerges by combining this with the boost bands + the Hi switch.");
+        inputVol->slider.setRange (0.0, 26.0, 0.1);
+        inputVol->slider.setSkewFactorFromMidPoint (12.0);
         inputVol->slider.setValue (dsp ? dsp->getInputVolDb() : 0.0, juce::dontSendNotification);
         inputVol->slider.onValueChange = [this] { if (mDsp) mDsp->setInputVolDb ((float) inputVol->slider.getValue()); };
         addAndMakeVisible (*inputVol);
@@ -4544,13 +4549,51 @@ struct FurmanEQStylePanel : public EditorPanelBase
         bypassBtn->setToggleState (dsp && dsp->isEqBypassed(), juce::dontSendNotification);
         bypassBtn->onClick = [this] { if (mDsp) mDsp->setEqBypassed (bypassBtn->getToggleState()); };
         addAndMakeVisible (*bypassBtn);
+
+        // QA-EffectsReview Task 3: Hi/Lo output gain-range switch (+20 dB in Hi).
+        hiLoBtn = std::make_unique<juce::TextButton>();
+        hiLoBtn->setClickingTogglesState (true);
+        hiLoBtn->setTooltip ("Hi/Lo output gain range -- Hi adds +20 dB (PQ-3 gain-range switch)");
+        const bool hi = (dsp && dsp->getGainRange() == FurmanEQStyleDSP::GainRange::Hi);
+        hiLoBtn->setToggleState (hi, juce::dontSendNotification);
+        hiLoBtn->setButtonText (hi ? "Hi +20" : "Lo");
+        hiLoBtn->onClick = [this]
+        {
+            const bool on = hiLoBtn->getToggleState();
+            if (mDsp) mDsp->setGainRange (on ? FurmanEQStyleDSP::GainRange::Hi
+                                             : FurmanEQStyleDSP::GainRange::Lo);
+            hiLoBtn->setButtonText (on ? "Hi +20" : "Lo");
+        };
+        addAndMakeVisible (*hiLoBtn);
+
+        startTimerHz (20);   // poll the preamp overload level for the LED
     }
 
-    ~FurmanEQStylePanel() override { setLookAndFeel (nullptr); }
+    ~FurmanEQStylePanel() override { stopTimer(); setLookAndFeel (nullptr); }
+
+    void timerCallback() override
+    {
+        const bool ov = (mDsp && mDsp->getClipLevel() > 1.0f);
+        if (ov != mOverload) { mOverload = ov; repaint (mLedBounds); }
+    }
 
     void paint (juce::Graphics& g) override
     {
         TimeLAF::paintPultecPanel (g, getLocalBounds());
+
+        // QA-EffectsReview Task 3: preamp overload LED (+ "OL" micro-label).
+        if (! mLedBounds.isEmpty())
+        {
+            auto led = mLedBounds.toFloat().reduced (1.5f);
+            g.setColour (mOverload ? juce::Colour (0xffff3030) : juce::Colour (0xff3a1414));
+            g.fillEllipse (led);
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawEllipse (led, 1.0f);
+            g.setColour (VC::Text.withAlpha (0.75f));
+            g.setFont (juce::Font (8.0f));
+            g.drawText ("OL", mLedBounds.getX() - 18, mLedBounds.getY(), 16, mLedBounds.getHeight(),
+                        juce::Justification::centredRight);
+        }
     }
 
     void resized() override
@@ -4564,14 +4607,17 @@ struct FurmanEQStylePanel : public EditorPanelBase
             b.removeFromRight (4);
         }
 
-        // Right cluster: Input Volume knob (top) + Bypass button (below).
+        // Right cluster: Input Volume knob (top, with overload LED) + Bypass + Hi/Lo.
         const int rightW = kKnobSz + 14;
         auto rightCol = b.removeFromRight (rightW);
+        auto inputCell = rightCol.removeFromTop (kKnobSz + 14);
         if (inputVol)
-            inputVol->setBounds (rightCol.removeFromTop (kKnobSz + 14)
-                                            .withSizeKeepingCentre (kKnobSz, kKnobSz + 14));
+            inputVol->setBounds (inputCell.withSizeKeepingCentre (kKnobSz, kKnobSz + 14));
+        mLedBounds = juce::Rectangle<int> (inputCell.getRight() - 13, inputCell.getY() + 1, 12, 12);
         rightCol.removeFromTop (4);
         if (bypassBtn) bypassBtn->setBounds (rightCol.removeFromTop (22).reduced (2, 0));
+        rightCol.removeFromTop (3);
+        if (hiLoBtn)   hiLoBtn->setBounds (rightCol.removeFromTop (22).reduced (2, 0));
 
         b.removeFromRight (4);
 

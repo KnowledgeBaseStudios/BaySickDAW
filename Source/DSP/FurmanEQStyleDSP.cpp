@@ -65,7 +65,7 @@ void FurmanEQStyleDSP::setBoostDb (int idx, float db)
 void FurmanEQStyleDSP::setQ (int idx, float q)
 {
     if (idx < 0 || idx >= kNumBands) return;
-    q = juce::jlimit (0.1f, 10.0f, q);
+    q = juce::jlimit (0.2f, 3.8f, q);   // QA-EffectsReview Task 3: PQ-3 Q range
     if (! juce::approximatelyEqual (mQ[idx], q))
     {
         mQ[idx] = q;
@@ -90,12 +90,19 @@ float FurmanEQStyleDSP::getQ (int idx) const
 
 void FurmanEQStyleDSP::setInputVolDb (float db)
 {
-    mInputVolDb = juce::jlimit (0.0f, 86.0f, db);
+    // QA-EffectsReview Task 3: preamp capped at +26 dB (was +86); the full PQ-3
+    // range emerges from preamp + boost bands + Hi switch.
+    mInputVolDb = juce::jlimit (0.0f, kInputMaxDb, db);
 }
 
 void FurmanEQStyleDSP::setEqBypassed (bool yes)
 {
     mEqBypassed = yes;
+}
+
+void FurmanEQStyleDSP::setGainRange (GainRange r)
+{
+    mGainRange = r;   // QA-EffectsReview Task 3: Hi/Lo output gain-range switch
 }
 
 void FurmanEQStyleDSP::process (juce::AudioBuffer<float>& buffer)
@@ -108,22 +115,30 @@ void FurmanEQStyleDSP::process (juce::AudioBuffer<float>& buffer)
     if (numCh == 0 || n == 0) return;
 
     // ── Preamp: master input volume + sigmoid soft-clip ─────────────────────
-    // Hardware emulates +86 dB total gain via op-amp cascade; we split that
-    // into a linear pre-gain and a tanh saturation stage so high gain still
-    // produces audible output without uncontrolled clipping.
+    // QA-EffectsReview Task 3: the +86 dB total range emerges from this preamp
+    // (now capped at +26 dB) PLUS the boost bands + the Hi switch, not the
+    // preamp alone.  We track the pre-tanh peak for the overload LED.
     if (mInputVolDb > 0.001f)
     {
         const float preGain = juce::Decibels::decibelsToGain (mInputVolDb);
+        float blockPeak = 0.0f;
         for (int ch = 0; ch < numCh; ++ch)
         {
             float* p = buffer.getWritePointer (ch);
             for (int i = 0; i < n; ++i)
             {
+                const float driven = p[i] * preGain;                 // pre-tanh drive
+                blockPeak = juce::jmax (blockPeak, std::abs (driven));
                 // tanh smoothly limits the boosted signal.  At low gain
                 // tanh(x) ~= x so this is transparent below ~0 dBFS.
-                p[i] = std::tanh (p[i] * preGain);
+                p[i] = std::tanh (driven);
             }
         }
+        mClipLevel.store (blockPeak, std::memory_order_relaxed);
+    }
+    else
+    {
+        mClipLevel.store (0.0f, std::memory_order_relaxed);          // no preamp -> no overload
     }
 
     // ── 3 parametric bands (only if EQ-bypass switch is OFF) ────────────────
@@ -135,6 +150,12 @@ void FurmanEQStyleDSP::process (juce::AudioBuffer<float>& buffer)
 
         for (auto& b : mBands) b.process (ctx);
     }
+
+    // ── Hi/Lo output gain-range switch (+20 dB in Hi) ───────────────────────
+    // QA-EffectsReview Task 3.  Applied to the whole output regardless of the
+    // EQ-bypass switch (it is an output gain stage, not part of the band block).
+    if (mGainRange == GainRange::Hi)
+        buffer.applyGain (juce::Decibels::decibelsToGain (20.0f));
 }
 
 void FurmanEQStyleDSP::getStateInformation (juce::MemoryBlock& dest)
@@ -148,6 +169,7 @@ void FurmanEQStyleDSP::getStateInformation (juce::MemoryBlock& dest)
     }
     state.setProperty ("input",     mInputVolDb,   nullptr);
     state.setProperty ("eqBypass",  (int) mEqBypassed, nullptr);
+    state.setProperty ("gainRange", (int) mGainRange,  nullptr);   // QA-EffectsReview Task 3
     state.setProperty ("bypassed",  (int) bypassed,    nullptr);
     if (auto xml = state.createXml())
         juce::AudioProcessor::copyXmlToBinary (*xml, dest);
@@ -167,5 +189,6 @@ void FurmanEQStyleDSP::setStateInformation (const void* data, int sz)
     }
     setInputVolDb ((float)(double) state.getProperty ("input", 0.0));
     setEqBypassed (((int) state.getProperty ("eqBypass", 0)) != 0);
+    setGainRange  (((int) state.getProperty ("gainRange", 0)) != 0 ? GainRange::Hi : GainRange::Lo);  // Task 3
     bypassed = ((int) state.getProperty ("bypassed", 0)) != 0;
 }
