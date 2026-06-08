@@ -6,7 +6,7 @@ class BaySickVocalProcessor;
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickPitchEditor - H-6b (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
-// Full-page Newtone-clone offline pitch editor.  Layout (top to bottom):
+// Full-page Newtone-style offline pitch editor.  Layout (top to bottom):
 //
 //   - Toolbar (~70 px): playback + edit-mode buttons + the 3 global knobs
 //                       (CENTER / VARIATION / TRANS) + render + save

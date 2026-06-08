@@ -374,6 +374,8 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/BassCompressorStyleDSP.cpp
     # Phase I-9 — SY Style Polyphonic Synth (YIN pitch tracker + oscillator voice)
     Source/DSP/SynthStyleDSP.cpp
+    # QA-EffectsReview Task 4 — SY-1 polyphonic pitch tracker (FFT harmonic-sum)
+    Source/DSP/PolyPitchTracker.cpp
     # Phase I-10 — PW Style Wah (TPT resonant bandpass + parallel bass LP)
     Source/DSP/WahStyleDSP.cpp
     # Phase I-11 — AD Style Acoustic Preamp (body convolution + Schroeder + notch)

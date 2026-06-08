@@ -17,6 +17,8 @@ const FlangerDSP::SyncDiv FlangerDSP::kSyncDivisions[FlangerDSP::kNumSyncDivisio
 void FlangerDSP::setRate (float hz)
 {
     const float n = juce::jlimit (0.05f, 5.0f, hz);
+    mManualRate = n;            // (c) shadow for un-sync restore
+    if (mSyncBPM) return;       // while synced, the BPM derivation owns mRate
     if (n != mRate) { mRate = n; mRateSmooth.setTargetValue (n); }
 }
 void FlangerDSP::setDepth (float ms)
@@ -61,6 +63,13 @@ void FlangerDSP::setSyncBPM (bool sync)
             const double periodSec = noteFrac * 4.0 * (60.0 / mHostBPM);
             mRate = (float) (1.0 / std::max (1e-6, periodSec));
             mRateSmooth.setCurrentAndTargetValue (mRate);   // F5: snap on toggle
+        }
+        else if (! mSyncBPM)
+        {
+            // (c) un-sync: restore the manual rate the user set before sync
+            // (was a no-op, leaving mRate stuck at the synced value).
+            mRate = juce::jlimit (0.05f, 5.0f, mManualRate);
+            mRateSmooth.setCurrentAndTargetValue (mRate);
         }
     }
 }
@@ -343,6 +352,7 @@ void FlangerDSP::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::ValueTree state ("FlangerDSP");
     state.setProperty ("rate",           mRate,           nullptr);
+    state.setProperty ("manualRate",     mManualRate,     nullptr);   // (c)
     state.setProperty ("depth",          mDepth,          nullptr);
     state.setProperty ("delay",          mDelay,          nullptr);
     state.setProperty ("feedback",       mFeedback,       nullptr);
@@ -366,6 +376,7 @@ void FlangerDSP::setStateInformation (const void* data, int sz)
     auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
     if (!xml || xml->getTagName() != "FlangerDSP") return;
     mRate           = (float) xml->getDoubleAttribute ("rate",           mRate);
+    mManualRate     = (float) xml->getDoubleAttribute ("manualRate",     mRate);   // (c) default to rate for pre-fix projects
     mDepth          = (float) xml->getDoubleAttribute ("depth",          mDepth);
     mDelay          = (float) xml->getDoubleAttribute ("delay",          mDelay);
     mFeedback       = (float) xml->getDoubleAttribute ("feedback",       mFeedback);

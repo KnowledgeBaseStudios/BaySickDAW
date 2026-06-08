@@ -49,6 +49,8 @@ void PhaserDSP::reapplyBpmSync()
 void PhaserDSP::setRate (float hz)
 {
     const float n = juce::jlimit (0.05f, getRateMaxHz(), hz);
+    mManualRate = n;            // (c) shadow for un-sync restore
+    if (mSyncBPM) return;       // while synced, reapplyBpmSync owns mRate/mSweepHz
     if (n == mRate && n == mSweepHz) return;
     mRate     = n;
     mSweepHz  = n;
@@ -85,6 +87,14 @@ void PhaserDSP::setSyncBPM (bool sync)
     if (sync == mSyncBPM) return;
     mSyncBPM = sync;
     if (mSyncBPM) reapplyBpmSync();
+    else
+    {
+        // (c) un-sync: restore the manual rate the user set before sync
+        // (was a no-op, leaving mRate/mSweepHz stuck at the synced value).
+        const float n = juce::jlimit (0.05f, getRateMaxHz(), mManualRate);
+        mRate = n; mSweepHz = n;
+        mRateSmooth.setCurrentAndTargetValue (n);
+    }
 }
 
 void PhaserDSP::setFreqRange (int range)
@@ -108,6 +118,8 @@ void PhaserDSP::setSweepFreq (float hz)
 {
     // C1: clamped by current Range (not by fixed 0-10).
     const float n = juce::jlimit (0.0f, getRateMaxHz(), hz);
+    mManualRate = n;            // (c) shadow for un-sync restore
+    if (mSyncBPM) return;       // while synced, reapplyBpmSync owns mRate/mSweepHz
     if (n == mSweepHz && n == mRate) return;
     mSweepHz = n;
     mRate    = n;
@@ -386,6 +398,7 @@ void PhaserDSP::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::ValueTree state ("PhaserDSP");
     state.setProperty ("rate",           mRate,           nullptr);
+    state.setProperty ("manualRate",     mManualRate,     nullptr);   // (c)
     state.setProperty ("depth",          mDepth,          nullptr);
     state.setProperty ("feedback",       mFeedback,       nullptr);
     state.setProperty ("wet",            mWet,            nullptr);
@@ -411,6 +424,7 @@ void PhaserDSP::setStateInformation (const void* data, int sz)
     if (!xml || xml->getTagName() != "PhaserDSP") return;
 
     mRate           = (float) xml->getDoubleAttribute ("rate",           mRate);
+    mManualRate     = (float) xml->getDoubleAttribute ("manualRate",     mRate);   // (c) default to rate for pre-fix projects
     mDepth          = (float) xml->getDoubleAttribute ("depth",          mDepth);
     mFeedback       = (float) xml->getDoubleAttribute ("feedback",       mFeedback);
     mWet            = (float) xml->getDoubleAttribute ("wet",            mWet);

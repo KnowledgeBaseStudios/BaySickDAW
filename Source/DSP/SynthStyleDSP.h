@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "DSPBase.h"
 #include "PitchTrackerYIN.h"
+#include "PolyPitchTracker.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SynthStyleDSP - Phase I-9 (2026-05-03)
@@ -45,13 +46,20 @@
 class SynthStyleDSP : public DSPBase
 {
 public:
+    // QA-EffectsReview Task 4: the BOSS SY-1's 11 TYPE categories (each pairs
+    // with the Variation 1-11 sub-knob -> 121 sounds).  The original 4 keep
+    // their enum values (0/1/2/3) so pre-existing patches map to the same slot;
+    // the 7 new types take 4..10.
     enum class Type : int
     {
-        Lead = 0,
-        Pad  = 1,
-        Bass = 2,
-        Seq  = 3
+        Lead1 = 0, Pad = 1, Bass = 2, Seq1 = 3,
+        Lead2 = 4, Str = 5, Organ = 6, Bell = 7, Sfx1 = 8, Sfx2 = 9, Seq2 = 10
     };
+    static constexpr int kNumTypes = 11;
+
+    // QA-EffectsReview Task 4: input instrument -> sets the poly tracker's
+    // frequency range (Bass tracks an octave lower + caps polyphony to 1-2).
+    enum class Instrument : int { Guitar = 0, Bass = 1 };
 
     SynthStyleDSP() = default;
     ~SynthStyleDSP() override = default;
@@ -62,8 +70,9 @@ public:
     void releaseResources()
     {
         // Caller (audio engine) typically doesn't invoke this on DSPBase,
-        // but if the YIN worker should be torn down explicitly we expose it.
+        // but if the trackers' workers should be torn down explicitly we expose it.
         mYin.releaseResources();
+        mPoly.releaseResources();
     }
 
     void getStateInformation (juce::MemoryBlock& dest)  override;
@@ -76,17 +85,37 @@ public:
     void setDepth       (float v01); // 0..1 LFO depth
     void setEffectLevel (float v01); // 0..1
     void setDirectLevel (float v01); // 0..1
+    void setPolyMode    (bool  poly);   // false = mono YIN voice, true = poly FFT voices
+    void setInstrument  (int   inst);   // 0 = Guitar, 1 = Bass
 
-    Type  mType        { Type::Lead };
+    Type  mType        { Type::Lead1 };
     int   mVariation   { 1 };
     float mTone        { 0.6f };
     float mRate        { 0.3f };
     float mDepth       { 0.4f };
     float mEffectLevel { 0.5f };
     float mDirectLevel { 1.0f };
+    bool       mPolyMode   { false };
+    Instrument mInstrument { Instrument::Guitar };
 
 private:
-    PitchTrackerYIN mYin;
+    PitchTrackerYIN  mYin;
+    PolyPitchTracker mPoly;
+
+    // QA-EffectsReview Task 4: poly voice pool (each voice tracks one detected note).
+    struct Voice
+    {
+        double phase    { 0.0 };
+        double phaseInc { 0.0 };
+        float  freq     { 0.0f };   // assigned note Hz (0 = free)
+        float  env      { 0.0f };   // per-voice envelope
+        bool   gate     { false };  // note present this frame
+    };
+    static constexpr int kMaxVoices = 8;
+    Voice mVoices[kMaxVoices];
+
+    void updateInstrumentRange();
+    void allocateVoices (const PolyPitchTracker::NoteSet& ns);
 
     // Phase-accumulator oscillator state (single voice).
     double mPhase     { 0.0 };

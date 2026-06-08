@@ -40,6 +40,7 @@ public:
     void setCrossLevel     (float dB);        // cross-channel wet mix (L->R, R->L) in dB
 
     float mRate           { 0.5f };
+    float mManualRate     { 0.5f };   // (c) shadow of last manual rate; restored on un-sync
     float mDepth          { 5.0f };
     float mDelay          { 0.0f };   // base delay ms
     float mFeedback       { 0.5f };

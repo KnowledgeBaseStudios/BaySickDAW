@@ -72,6 +72,7 @@ public:
     static const SyncDiv kSyncDivisions[kNumSyncDivisions];
 
     float mRate       { 0.5f };
+    float mManualRate { 0.5f };   // (c) shadow of last manual rate; restored on un-sync
     float mDepth      { 0.8f };
     float mFeedback   { 0.5f };
     float mWet        { 0.5f };

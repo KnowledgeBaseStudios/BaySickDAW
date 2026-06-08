@@ -117,3 +117,31 @@ close after surfacing the strip list to Jeff.
 - File: `Source/Standalone/MixerPage.cpp` (1 edit). Folds into the same clip-strip-lifecycle side-fix → ONE commit (now Parts 1-3: `StandaloneEditor.cpp`/`.h` + `MixerPage.cpp`).
 - **Next:** Jeff builds + verifies (delete + re-add a clip strip → no blank slot, strips pack against the bus; mid-list delete packs the rest; Inst/Vox unaffected) → on PASS commit the whole side-fix.
 - Diagnostic catalog: none added.
+- **LANDED — side-fix committed `13cf8ea`** (4 files incl. this running-notes doc, +100/-10) after Jeff verified PASS.
+
+## 2026-06-06 — Task 4 (Modulation) sub-chunk 1 — (c) Flanger + Phaser un-sync fix (code complete; awaiting build/verify)
+
+- **(c) bug confirmed in code:** both `FlangerDSP::setSyncBPM` and `PhaserDSP::setSyncBPM` only handled turning sync ON (derive rate from BPM); neither had an `else` for turning sync OFF, so `mRate` stayed stuck at the synced value and the user's pre-sync manual rate was lost.
+- **Fix (manual-rate shadow, plan SC-c):** added `float mManualRate` to both DSPs. `setRate` (both) + `setSweepFreq` (Phaser's 2nd rate alias) now record `mManualRate` and yield to sync (`if (mSyncBPM) return;` — while synced the BPM derivation / `reapplyBpmSync` owns the rate). `setSyncBPM(false)` now restores `mRate` (Flanger) / `mRate`+`mSweepHz` (Phaser) from `mManualRate`. `mManualRate` is persisted in get/setStateInformation (defaults to the loaded `rate` for pre-fix projects → back-compatible).
+- Files: `FlangerDSP.h/.cpp`, `PhaserDSP.h/.cpp` (DSP-only; 11 edits). `reapplyBpmSync` unchanged.
+- Self-reviewed: compile-clean (`mManualRate` declared in both headers; no signature changes); while-synced the rate knob shadows (correct FL behavior) and restores on un-sync; host-BPM-change + sync-division paths unaffected.
+- **Next:** Jeff builds + verifies on Flanger + Phaser (set manual rate → Sync ON locks to BPM → Sync OFF restores the manual rate; save/reload keeps it; sync-on still locks) → on PASS commit. Then sub-chunk 2 (Flanger Damp remap + Chorus/Phaser/AcousticSim Advanced toggles — first live Basic/Advanced button) → sub-chunk 3 (⚠ SY-1).
+- Diagnostic catalog: none added.
+
+## 2026-06-07 — Task 4 (Modulation) — full rework complete + brand-safety pass
+
+- **Remainder of Task 4** beyond sub-chunk 1 (the (c) un-sync fix above — final shape unchanged): the modulation panels' Basic/Advanced toggles + the SY-style poly rework, plus a brand-safety pass that fired mid-task.
+- **Chorus panel — Basic/Advanced toggle:** `hasAdvancedControls()` = true. Basic = the exact reference control set; Advanced reveals only our additions (Voices selector + Wet knob). First live toggle button (Task-1 infra).
+- **Phaser panel — Basic/Advanced toggle:** Basic = reference set; Advanced reveals our additions (Cross knob + Wave / SyncDiv / InvFB / BPM-sync).
+- **Flanger Damp remap:** DampHz knob (200..20000 Hz) reworked to a 0-1 "Damp" control (0 = off/bright, 1 = max-warm); panel maps 0-1 UI to Hz DSP exponentially, DSP API/range unchanged.
+- **SY-style synth pedal (`SynthStyleDSP`):** TYPE 4 -> 11 (`kProfiles[11]`; original 4 keep enum values 0/1/2/3 = patch-stable, 7 new take 4..10; panel `kSynthTypeOrder[]` + `synthTypeValueToDisplay()` keep TYPE-knob display order vs value-stable persistence); Guitar/Bass range switch (tracker freq range + poly cap); 8-voice polyphony via NEW `PolyPitchTracker` (FFT harmonic-sum + greedy iterative spectral subtraction, seqlock publish, AbstractFifo SPSC ring + background worker; mirrors PitchTrackerYIN threading); voice pool match/free/steal; `process()` mono(YIN)/poly branch; poly+instrument persisted. Panel: 11-option ChickenHeadSelector (2-char marks) in a row above the knobs; Mono/Poly + Gtr/Bass DualLabelToggles. SharedUI: setOptions cap 10->12, letterPad 10->13. NEW `Source/DSP/PolyPitchTracker.cpp/.h` -> CMakeLists.
+- **BRAND-SAFETY PASS (fired mid-task — Jeff caught a real brand name in a shipped tooltip):**
+  - **Rule:** real gear/product/model names must NOT appear in user-facing strings (the trademark exposure); code comments + commit messages are nominative fair use and stay. Repo is open source, public since first commit; UI/branding stays brand-free, internal docs keep factual references (Jeff's legal research 2026-06-07). New memory: `feedback_no_brand_names_in_user_facing_strings.md`.
+  - **14 user-facing brand strings scrubbed** across the effects UI (Synth / Flanger / Furman / FET-comp / Opto-comp / NAM tooltips + EQ8 prop-Q menu) -> brand-safe generic terms (FET-style / Opto-style / analog console / amp capture / aggressive crush). Fuzz pedal's 3 VISIBLE mode labels renamed by circuit character: Gated / Germanium / Octave (Jeff picked).
+  - **6 BaySickVocal comments** softened "X-clone" -> "X-style".
+  - **Verified clean:** semantic agent sweep of the effects UI + grep for literal-copying phrasing -> no other brand names in shipped strings; the only remaining "port/clone" hits are internal self-references to our own legacy code (TapeDSP / ArrangementBlock).
+  - **Routed:** the BaySickVocal *UI* brand pass -> future **QA-F** batch (§9 Forks + Main Plan §5 docket at batch close; slot is Jeff's call).
+- Files (beyond sub-chunk 1): `SynthStyleDSP.cpp/.h`, `PolyPitchTracker.cpp/.h` (new), `EffectEditorPanels.cpp`, `SharedUI.cpp`, `CMakeLists.txt` + comment-only edits in 4 BaySickVocal headers.
+- **Verify status:** Task-4 DSP/panels verified by Jeff in Debug+Release; the brand-safety string/comment + Fuzz-label edits are text-only, awaiting a confirm build before commit.
+- Diagnostic catalog: none added.
+- **Next:** build-confirm the brand-safety/Fuzz edits -> one combined Task-4 commit -> Task 5 (Drive + Octave).

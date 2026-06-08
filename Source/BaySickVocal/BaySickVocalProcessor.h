@@ -19,8 +19,8 @@
 // Editor (H-6) - 6 sub-tabs:
 //   1. BaySickVocals      (realtime pitch + page-wide controls)
 //   2. Vocal Chain        (de-esser / compressor / saturation / limiter rack)
-//   3. BaySickPitch       (Newtone-clone offline pitch editor)
-//   4. BaySickAlign       (VocAlign-clone offline time-alignment editor)
+//   3. BaySickPitch       (Newtone-style offline pitch editor)
+//   4. BaySickAlign       (VocAlign-style offline time-alignment editor)
 //   5. BaySickNAM/IR      (existing engine hosted as a sub-tab)
 //   6. Pre Rack EQ        (strip's existing Pre EQ8 M/S)
 //

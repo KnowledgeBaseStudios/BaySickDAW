@@ -7,48 +7,55 @@ namespace
     constexpr float kRateMinHz = 0.1f;
     constexpr float kRateMaxHz = 10.0f;
 
-    // Per-Type envelope-follower attack/release (ms).
+    // Per-Type voice profile.  QA-EffectsReview Task 4: extended with `brightness`
+    // (a tone-cutoff bias multiplier) so the 11 SY-1 types read as distinct.
     struct TypeProfile
     {
         float envAttackMs;
         float envReleaseMs;
         float octaveShift;     // semitones; -12 = down 1 oct
-        bool  lfoModulatesAmp; // true => LFO multiplies synth amp (Seq)
+        bool  lfoModulatesAmp; // true => LFO multiplies synth amp (Organ rotary / Seq stutter)
+        float brightness;      // tone-cutoff bias multiplier (lower = darker)
     };
 
-    constexpr TypeProfile kProfiles[4] =
+    // Ordered by enum value: Lead1(0) Pad(1) Bass(2) Seq1(3) Lead2(4) Str(5)
+    // Organ(6) Bell(7) Sfx1(8) Sfx2(9) Seq2(10).
+    constexpr TypeProfile kProfiles[SynthStyleDSP::kNumTypes] =
     {
-        // Lead: fast env, LFO -> filter
-        { 5.0f,   80.0f,   0.0f,    false },
-        // Pad: slow env, LFO -> filter
-        { 80.0f,  300.0f,  0.0f,    false },
-        // Bass: fast env, -1 oct, no LFO
-        { 5.0f,   60.0f,  -12.0f,   false },
-        // Seq: fast env, LFO -> amp
-        { 5.0f,   60.0f,   0.0f,    true  },
+        /* Lead1 */ {   5.0f,  80.0f,   0.0f, false, 1.00f },
+        /* Pad   */ {  80.0f, 300.0f,   0.0f, false, 0.60f },
+        /* Bass  */ {   5.0f,  60.0f, -12.0f, false, 0.45f },
+        /* Seq1  */ {   5.0f,  60.0f,   0.0f, false, 0.90f },
+        /* Lead2 */ {   5.0f,  90.0f,   0.0f, false, 1.30f },
+        /* Str   */ { 120.0f, 400.0f,   0.0f, false, 0.70f },
+        /* Organ */ {   3.0f,  90.0f,   0.0f, true,  0.85f },   // amp LFO = rotary
+        /* Bell  */ {   1.0f,  45.0f,  12.0f, false, 1.45f },   // bright, fast decay, +1 oct
+        /* Sfx1  */ {   8.0f, 180.0f,   0.0f, false, 1.05f },
+        /* Sfx2  */ {   5.0f, 140.0f,   0.0f, false, 1.15f },
+        /* Seq2  */ {   5.0f,  60.0f,   0.0f, true,  0.70f },   // amp LFO = stutter
     };
 
     // Variation maps to a wave-mix within each Type.  Returns three
-    // crossfading weights for {sine, saw, square} that sum to 1.
+    // crossfading weights for {sine, saw, square}.
     struct WaveMix { float sine, saw, sqr; };
 
     WaveMix variationMix (SynthStyleDSP::Type t, int variation)
     {
-        const float v01 = juce::jlimit (0.0f, 1.0f, (float) (variation - 1) / 10.0f);
+        const float v = juce::jlimit (0.0f, 1.0f, (float) (variation - 1) / 10.0f);
+        using T = SynthStyleDSP::Type;
         switch (t)
         {
-            case SynthStyleDSP::Type::Lead:
-                // Saw <-> Square (brighter/edgier as variation rises)
-                return { 0.0f, 1.0f - v01, v01 };
-            case SynthStyleDSP::Type::Pad:
-                // Sine <-> Sine+Saw (more harmonic content as variation rises)
-                return { 1.0f - 0.5f * v01, 0.5f * v01, 0.0f };
-            case SynthStyleDSP::Type::Bass:
-                // Square <-> Saw (smoother as variation rises)
-                return { 0.0f, v01, 1.0f - v01 };
-            case SynthStyleDSP::Type::Seq:
-                // Saw <-> Square+Sine
-                return { 0.3f * v01, 1.0f - v01, 0.7f * v01 };
+            case T::Lead1: return { 0.0f, 1.0f - v, v };                        // saw -> square
+            case T::Pad:   return { 1.0f - 0.5f * v, 0.5f * v, 0.0f };          // sine -> sine+saw
+            case T::Bass:  return { 0.0f, v, 1.0f - v };                        // square -> saw
+            case T::Seq1:  return { 0.0f, 1.0f - v, v };                        // rhythmic saw -> square
+            case T::Lead2: return { 0.0f, 0.4f * (1.0f - v), 0.6f + 0.4f * v }; // edgier square lead
+            case T::Str:   return { 0.15f, 0.85f, 0.0f };                       // saw ensemble
+            case T::Organ: return { 1.0f, 0.0f, 0.0f };                         // sine (rotary via amp LFO)
+            case T::Bell:  return { 0.7f, 0.0f, 0.3f };                         // sine + metallic edge
+            case T::Sfx1:  return { 0.0f, 1.0f - v, v };                        // sweep
+            case T::Sfx2:  return { 0.3f * v, 1.0f - v, 0.7f * v };             // animated
+            case T::Seq2:  return { 0.3f * v, 1.0f - v, 0.7f * v };             // stutter
         }
         return { 0.0f, 1.0f, 0.0f };
     }
@@ -70,6 +77,8 @@ void SynthStyleDSP::prepare (double sampleRate, int maxBlockSize)
     mMaxBlock   = maxBlockSize;
 
     mYin.prepare (sampleRate);
+    mPoly.prepare (sampleRate);
+    updateInstrumentRange();
 
     juce::dsp::ProcessSpec spec { sampleRate,
                                    (juce::uint32) juce::jmax (1, maxBlockSize),
@@ -99,6 +108,8 @@ void SynthStyleDSP::prepare (double sampleRate, int maxBlockSize)
 void SynthStyleDSP::reset()
 {
     mYin.reset();
+    mPoly.reset();
+    for (auto& v : mVoices) v = Voice{};
     mLpf.reset();
     mPhase = mLfoPhase = 0.0;
     mEnvelope = 0.0f;
@@ -118,7 +129,8 @@ void SynthStyleDSP::updateToneCutoff (float lfoMod)
     if (mSampleRate <= 0.0) return;
     // Tone knob log-mapped + LFO modulation around it (depth scales the swing).
     const float t   = juce::jlimit (0.0f, 1.0f, mTone);
-    const float baseHz = kToneMinHz * std::pow (kToneMaxHz / kToneMinHz, t);
+    const float baseHz = kToneMinHz * std::pow (kToneMaxHz / kToneMinHz, t)
+                       * kProfiles[(int) mType].brightness;   // Task 4: per-type tone bias
     // LFO sweeps cutoff up to +/- 1 octave at full depth.
     const float octaves = juce::jlimit (-1.0f, 1.0f, lfoMod) * mDepth;
     const float modHz   = baseHz * std::pow (2.0f, octaves);
@@ -129,7 +141,7 @@ void SynthStyleDSP::updateToneCutoff (float lfoMod)
 
 void SynthStyleDSP::setType (int t)
 {
-    const Type newType = static_cast<Type> (juce::jlimit (0, 3, t));
+    const Type newType = static_cast<Type> (juce::jlimit (0, kNumTypes - 1, t));
     if (mType == newType) return;
     mType = newType;
     if (mSampleRate > 0.0)
@@ -176,6 +188,80 @@ void SynthStyleDSP::setDirectLevel (float v01)
     if (mDirectLevel != v01) mDirectLevel = v01;
 }
 
+void SynthStyleDSP::setPolyMode (bool poly)
+{
+    if (mPolyMode == poly) return;
+    mPolyMode = poly;
+    for (auto& v : mVoices) v = Voice{};   // clear voices on mode change
+}
+
+void SynthStyleDSP::setInstrument (int inst)
+{
+    const Instrument n = (inst == 1) ? Instrument::Bass : Instrument::Guitar;
+    if (mInstrument == n) return;
+    mInstrument = n;
+    updateInstrumentRange();
+}
+
+void SynthStyleDSP::updateInstrumentRange()
+{
+    if (mInstrument == Instrument::Bass)
+    {
+        mPoly.setFreqRange (35.0f, 400.0f);   // ~B0..G4
+        mPoly.setMaxNotes  (2);               // bass: mono / low poly
+    }
+    else
+    {
+        mPoly.setFreqRange (70.0f, 1300.0f);  // ~D2..E6 guitar range
+        mPoly.setMaxNotes  (PolyPitchTracker::kMaxNotes);
+    }
+}
+
+// Block-rate voice allocation: keep ringing voices for held notes, assign free/
+// stolen voices for new notes, release the rest.  Per-sample envelope ramping +
+// synthesis happen in process().
+void SynthStyleDSP::allocateVoices (const PolyPitchTracker::NoteSet& ns)
+{
+    for (auto& v : mVoices) v.gate = false;
+
+    const float profOct = std::pow (2.0f, kProfiles[(int) mType].octaveShift / 12.0f);
+
+    for (int k = 0; k < ns.count; ++k)
+    {
+        const float f = ns.freqs[k];
+        if (f <= 0.0f) continue;
+
+        int vi = -1;
+        // a) a voice already on this note (within ~3%)?
+        for (int j = 0; j < kMaxVoices; ++j)
+            if (mVoices[j].freq > 0.0f && std::abs (mVoices[j].freq - f) < f * 0.03f) { vi = j; break; }
+        // b) else a free (released) voice?
+        if (vi < 0)
+            for (int j = 0; j < kMaxVoices; ++j)
+                if (mVoices[j].env < 1.0e-3f && ! mVoices[j].gate) { vi = j; break; }
+        // c) else steal the quietest.
+        if (vi < 0)
+        {
+            float lowest = 1.0e9f;
+            for (int j = 0; j < kMaxVoices; ++j)
+                if (mVoices[j].env < lowest) { lowest = mVoices[j].env; vi = j; }
+        }
+
+        if (vi >= 0)
+        {
+            Voice& v = mVoices[vi];
+            if (v.env < 1.0e-3f) v.phase = 0.0;   // fresh voice: restart phase (no click on held)
+            v.freq     = f;
+            v.phaseInc = (double) (f * profOct) / mSampleRate;
+            v.gate     = true;
+        }
+    }
+
+    // Fully-decayed, un-gated voices free up.
+    for (auto& v : mVoices)
+        if (! v.gate && v.env < 1.0e-4f) v.freq = 0.0f;
+}
+
 void SynthStyleDSP::process (juce::AudioBuffer<float>& buffer)
 {
     if (bypassed) return;
@@ -197,55 +283,85 @@ void SynthStyleDSP::process (juce::AudioBuffer<float>& buffer)
         for (int i = 0; i < n; ++i)
             mono[i] = 0.5f * (l[i] + r[i]);
     }
-    mYin.pushAudio (mMonoIn.getReadPointer (0), n);
-
-    // 2. Compute pitch + phase increment for the synth voice.
-    const float trackedHz = mYin.getFrequencyHz();
-    const float confidence = mYin.getConfidence();
-    const auto& profile = kProfiles[(int) mType];
-    if (trackedHz > 0.0f && confidence > 0.2f)
-    {
-        const float shifted = trackedHz * std::pow (2.0f, profile.octaveShift / 12.0f);
-        mPhaseInc = (double) shifted / mSampleRate;
-    }
-    // Else: keep last mPhaseInc (continues last note for a bit, then envelope decays).
-
-    // 3. Synthesise voice + apply envelope follower.
-    const WaveMix mix = variationMix (mType, mVariation);
+    // 2-3. QA-EffectsReview Task 4: mono (YIN, 1 voice) vs poly (FFT tracker + voice pool).
+    const auto&  profile = kProfiles[(int) mType];
+    const WaveMix mix    = variationMix (mType, mVariation);
     float* synthL = mSynthBuf.getWritePointer (0);
     float* synthR = (numCh > 1) ? mSynthBuf.getWritePointer (1) : synthL;
     const float* monoIn = mMonoIn.getReadPointer (0);
 
-    for (int i = 0; i < n; ++i)
+    if (mPolyMode)
     {
-        // Envelope follower (asymmetric attack/release).
-        const float absX = std::abs (monoIn[i]);
-        const float coef = (absX > mEnvelope) ? mEnvCoefAtt : mEnvCoefRel;
-        mEnvelope = coef * mEnvelope + (1.0f - coef) * absX;
+        mPoly.pushAudio (monoIn, n);
+        allocateVoices (mPoly.getNotes());
 
-        // LFO update (always advance).
-        mLfoPhase += mLfoPhaseInc;
-        if (mLfoPhase >= 1.0) mLfoPhase -= 1.0;
-
-        // Generate waveform sample.
-        float s = waveSample (mPhase, mix);
-        mPhase += mPhaseInc;
-        if (mPhase >= 1.0) mPhase -= 1.0;
-
-        // Apply envelope (synth amp tracks input dynamics).
-        s *= mEnvelope;
-
-        // Seq type: LFO modulates amplitude (tremolo/stutter character).
-        if (profile.lfoModulatesAmp)
+        for (int i = 0; i < n; ++i)
         {
-            const float lfo01  = 0.5f * (1.0f + std::sin ((float) mLfoPhase
-                                                            * juce::MathConstants<float>::twoPi));
-            const float ampMod = 1.0f - mDepth + mDepth * lfo01;
-            s *= ampMod;
-        }
+            const float absX  = std::abs (monoIn[i]);
+            const float ecoef = (absX > mEnvelope) ? mEnvCoefAtt : mEnvCoefRel;
+            mEnvelope = ecoef * mEnvelope + (1.0f - ecoef) * absX;
 
-        synthL[i] = s;
-        if (numCh > 1) synthR[i] = s;
+            mLfoPhase += mLfoPhaseInc;
+            if (mLfoPhase >= 1.0) mLfoPhase -= 1.0;
+
+            float s = 0.0f;
+            for (auto& v : mVoices)
+            {
+                if (v.env < 1.0e-4f && ! v.gate) continue;
+                const float target = v.gate ? 1.0f : 0.0f;
+                const float vcoef  = v.gate ? mEnvCoefAtt : mEnvCoefRel;
+                v.env = vcoef * v.env + (1.0f - vcoef) * target;
+                s += waveSample (v.phase, mix) * v.env;
+                v.phase += v.phaseInc;
+                if (v.phase >= 1.0) v.phase -= 1.0;
+            }
+            s *= 0.4f * mEnvelope;   // poly headroom + input-dynamics scaling
+
+            if (profile.lfoModulatesAmp)
+            {
+                const float lfo01 = 0.5f * (1.0f + std::sin ((float) mLfoPhase
+                                                              * juce::MathConstants<float>::twoPi));
+                s *= (1.0f - mDepth + mDepth * lfo01);
+            }
+            synthL[i] = s;
+            if (numCh > 1) synthR[i] = s;
+        }
+    }
+    else
+    {
+        mYin.pushAudio (monoIn, n);
+        const float trackedHz  = mYin.getFrequencyHz();
+        const float confidence = mYin.getConfidence();
+        if (trackedHz > 0.0f && confidence > 0.2f)
+        {
+            const float shifted = trackedHz * std::pow (2.0f, profile.octaveShift / 12.0f);
+            mPhaseInc = (double) shifted / mSampleRate;
+        }
+        // Else: keep last mPhaseInc (note rings on, then the envelope decays).
+
+        for (int i = 0; i < n; ++i)
+        {
+            const float absX = std::abs (monoIn[i]);
+            const float coef = (absX > mEnvelope) ? mEnvCoefAtt : mEnvCoefRel;
+            mEnvelope = coef * mEnvelope + (1.0f - coef) * absX;
+
+            mLfoPhase += mLfoPhaseInc;
+            if (mLfoPhase >= 1.0) mLfoPhase -= 1.0;
+
+            float s = waveSample (mPhase, mix);
+            mPhase += mPhaseInc;
+            if (mPhase >= 1.0) mPhase -= 1.0;
+            s *= mEnvelope;
+
+            if (profile.lfoModulatesAmp)
+            {
+                const float lfo01 = 0.5f * (1.0f + std::sin ((float) mLfoPhase
+                                                              * juce::MathConstants<float>::twoPi));
+                s *= (1.0f - mDepth + mDepth * lfo01);
+            }
+            synthL[i] = s;
+            if (numCh > 1) synthR[i] = s;
+        }
     }
 
     // 4. Filter sweep.  LFO modulation is applied at block boundary (not
@@ -307,6 +423,8 @@ void SynthStyleDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("depth",     mDepth,         nullptr);
     state.setProperty ("effect",    mEffectLevel,   nullptr);
     state.setProperty ("direct",    mDirectLevel,   nullptr);
+    state.setProperty ("poly",       (int) mPolyMode,   nullptr);
+    state.setProperty ("instrument", (int) mInstrument, nullptr);
     state.setProperty ("bypassed",  (int) bypassed, nullptr);
     if (auto xml = state.createXml())
         juce::AudioProcessor::copyXmlToBinary (*xml, dest);
@@ -317,12 +435,14 @@ void SynthStyleDSP::setStateInformation (const void* data, int sz)
     auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
     if (! xml || ! xml->hasTagName ("SynthStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
-    setType        ((int)            state.getProperty ("type",      (int) Type::Lead));
+    setType        ((int)            state.getProperty ("type",      (int) Type::Lead1));
     setVariation   ((int)            state.getProperty ("variation", 1));
     setTone        ((float)(double) state.getProperty ("tone",       0.6));
     setRate        ((float)(double) state.getProperty ("rate",       0.3));
     setDepth       ((float)(double) state.getProperty ("depth",      0.4));
     setEffectLevel ((float)(double) state.getProperty ("effect",     0.5));
     setDirectLevel ((float)(double) state.getProperty ("direct",     1.0));
+    setPolyMode    (((int) state.getProperty ("poly", 0)) != 0);
+    setInstrument  ( (int) state.getProperty ("instrument", 0));
     bypassed = ((int) state.getProperty ("bypassed", 0)) != 0;
 }

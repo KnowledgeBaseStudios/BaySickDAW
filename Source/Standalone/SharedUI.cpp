@@ -1844,7 +1844,11 @@ ChickenHeadSelector::ChickenHeadSelector()
 void ChickenHeadSelector::setOptions(const std::vector<Option>& opts)
 {
     mOptions = opts;
-    if ((int) mOptions.size() > 10) mOptions.resize(10);  // asset caps at 10
+    // QA-EffectsReview Task 4: raised 10 -> 12 for the BOSS SY-1's 11 TYPE knob.
+    // The 10-frame chicken-head asset is just the knob's rotation graphic (drawn
+    // from a continuous t = idx/(n-1)), so it does NOT limit the option count;
+    // the bezel-letter layout (angleForIndex) already scales to any N.
+    if ((int) mOptions.size() > 12) mOptions.resize(12);
     mSelectedIdx = juce::jlimit(0, juce::jmax(0, (int) mOptions.size() - 1), mSelectedIdx);
     repaint();
 }
@@ -1865,7 +1869,7 @@ juce::Rectangle<float> ChickenHeadSelector::getKnobBounds() const noexcept
 {
     // Knob fills the central square; letters arc around outside this.
     auto b = getLocalBounds().toFloat().reduced(2.0f);
-    const float letterPad = 10.0f;  // reserved radius for letter marks
+    const float letterPad = 13.0f;  // reserved radius for letter marks (QA-EffectsReview Task 4: 10->13 so denser/longer label rings like the SY-1's 11 TYPEs don't overhang the bezel)
     float side = juce::jmin(b.getWidth(), b.getHeight()) - 2.0f * letterPad;
     side = juce::jmax(16.0f, side);
     return juce::Rectangle<float>(0, 0, side, side).withCentre(b.getCentre());
@@ -5609,7 +5613,7 @@ void ParametricEQDisplay::showEQOptionsMenu(juce::Component* anchor)
         // Proportional Q toggle.
         const bool propQ = directDsp ? directDsp->getProportionalQ()
                                      : msDsp->mid().getProportionalQ();
-        menu.addItem (30, "Proportional Q (SSL/Neve hardware feel)", true, propQ);
+        menu.addItem (30, "Proportional Q (analog console feel)", true, propQ);
     }
 
     menu.showMenuAsync(

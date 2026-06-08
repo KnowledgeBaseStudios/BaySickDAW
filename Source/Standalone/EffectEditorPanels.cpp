@@ -74,6 +74,21 @@ static void layoutKnobsH(juce::Rectangle<int> b,
         k->setBounds(b.removeFromLeft(w).withSizeKeepingCentre(sz, sz));
 }
 
+// QA-EffectsReview Task 4: overload that lays out a hand-picked list of knobs
+// (raw pointers).  Basic/Advanced panels build the list of VISIBLE knobs for the
+// current mode and reflow around the ones hidden in Basic -- the full-vector
+// version above always reserves a slot per knob, so it can't skip individuals.
+static void layoutKnobsH(juce::Rectangle<int> b,
+                          const std::vector<VKnob*>& knobs,
+                          int maxSz = kKnobSz)
+{
+    if (knobs.empty()) return;
+    int w = b.getWidth() / (int)knobs.size();
+    int sz = juce::jmin(w, b.getHeight(), maxSz);
+    for (auto* k : knobs)
+        if (k) k->setBounds(b.removeFromLeft(w).withSizeKeepingCentre(sz, sz));
+}
+
 // Pink = active (engaged), dark = off - Change C colors
 static void setPink(juce::TextButton& btn)
 {
@@ -367,9 +382,9 @@ struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
             { "8",   "8 : 1",        "Medium compression" },
             { "12",  "12 : 1",       "Heavy compression" },
             { "20",  "20 : 1",       "Limiting / heavy" },
-            { "All", "All-buttons in", "All-buttons-in mode -- the famous UREI sound (~30:1 with bias shift)" },
+            { "All", "All-buttons in", "All-buttons-in mode -- the famous aggressive crush sound (~30:1 with bias shift)" },
         });
-        ratioSel->setBodyTooltip ("Ratio (1176 face plate)");
+        ratioSel->setBodyTooltip ("Ratio (FET-style face plate)");
         ratioSel->setDefaultLabelColour (juce::Colours::black);
         const float r = dsp ? dsp->ratio : 4.0f;
         const int initIdx = (r < 6.f)  ? 0
@@ -523,8 +538,8 @@ struct OptoCompressorPanel : public EditorPanelBase, public juce::Timer
         // Internal mapping inside the onValueChange lambdas converts that
         // 0..100 user-facing scale to the DSP's threshold/gain dB.
         buildKnobs (*this, knobs, {
-            { "Peak Reduction", 0.f, 100.f, 30.f, 0.5f, "Peak Reduction -- more = more compression (LA-2A face plate scale)" },
-            { "Gain",           0.f, 100.f, 50.f, 0.5f, "Output gain (LA-2A face plate scale)" },
+            { "Peak Reduction", 0.f, 100.f, 30.f, 0.5f, "Peak Reduction -- more = more compression (Opto-style face plate scale)" },
+            { "Gain",           0.f, 100.f, 50.f, 0.5f, "Output gain (Opto-style face plate scale)" },
         });
         for (auto& k : knobs)
             k->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
@@ -533,7 +548,7 @@ struct OptoCompressorPanel : public EditorPanelBase, public juce::Timer
         compLimitTog = std::make_unique<DualLabelToggle>();
         compLimitTog->setupNamed (
             "Comp",  "Compress mode (3:1 ratio)",
-            "Limit", "Limit mode (effectively infinity:1 -- LA-2A 'limit' position)");
+            "Limit", "Limit mode (effectively infinity:1 -- Opto 'limit' position)");
         compLimitTog->btn().setToggleState (dsp && dsp->ratio > 50.f, juce::dontSendNotification);
         compLimitTog->btn().onClick = [dsp, this]
         {
@@ -1402,6 +1417,12 @@ struct ChorusPanel : public EditorPanelBase
         return v;
     }
 
+    // QA-EffectsReview Task 4: Basic = the exact FL Fruity Chorus control set
+    // (Delay/Depth/Stereo + 3 LFO Freq + 3 LFO Wave + Cross Type/Cutoff + Wet
+    // Only).  Our ONLY additions = the 3/6 Voices toggle + the continuous Wet
+    // level knob -> those hide in Basic.  resized() does the show/hide + reflow.
+    bool hasAdvancedControls() const override { return true; }
+
     // Modulation panels use default VC::Panel background
     ~ChorusPanel() override { setLookAndFeel(nullptr); }
 
@@ -1502,10 +1523,16 @@ struct ChorusPanel : public EditorPanelBase
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
         b.removeFromRight(4);
 
+        // QA-EffectsReview Task 4: Basic = the exact Fruity Chorus set; Advanced
+        // adds the 3/6 Voices toggle + the continuous Wet level knob (r2knobs[4]).
+        const bool adv = ! mBasicMode;
+        if (voicesTog) voicesTog->setVisible (adv);
+        if (r2knobs.size() > 4 && r2knobs[4]) r2knobs[4]->setVisible (adv);   // Wet level knob
+
         auto r1 = b.removeFromTop(b.getHeight() / 2);
         auto r2 = b;
 
-        // Row 1: left 50% = freq knobs, right 50% = wave selectors
+        // Row 1: LFO freq knobs (left) + LFO wave selectors (right) -- all Fruity.
         int half = r1.getWidth() / 2;
         auto freqArea = r1.removeFromLeft(half);
         layoutKnobsH(freqArea, lfoFreqKnobs);
@@ -1513,15 +1540,24 @@ struct ChorusPanel : public EditorPanelBase
         for (int i = 0; i < 3; ++i)
             lfoWaveSel[i]->setBounds(r1.removeFromLeft(cw).reduced(2));
 
-        // Row 2: right side stack = WetOnly (on/off) | CrossType (named) | Voices (named)
+        // Row 2: WetOnly | CrossType always (Fruity); Voices (addition) Advanced only.
         const int togW = 66;
         auto wo  = r2.removeFromRight(togW); r2.removeFromRight(2);
         if (wetOnlyTog)   wetOnlyTog  ->setBounds(wo.reduced(1));
         auto ctc = r2.removeFromRight(togW); r2.removeFromRight(2);
         if (crossTypeTog) crossTypeTog->setBounds(ctc.reduced(1));
-        auto vc  = r2.removeFromRight(togW); r2.removeFromRight(2);
-        if (voicesTog)    voicesTog   ->setBounds(vc.reduced(1));
-        layoutKnobsH(r2, r2knobs);
+        if (adv)
+        {
+            auto vc  = r2.removeFromRight(togW); r2.removeFromRight(2);
+            if (voicesTog) voicesTog   ->setBounds(vc.reduced(1));
+        }
+        // Row-2 knobs: Delay/Depth/Stereo/CrossHz always (Fruity); Wet (idx 4, our
+        // addition) only in Advanced.
+        std::vector<VKnob*> r2vis;
+        for (int i = 0; i < (int) r2knobs.size(); ++i)
+            if (adv || i != 4)
+                if (r2knobs[i]) r2vis.push_back (r2knobs[i].get());
+        layoutKnobsH(r2, r2vis);
     }
 };
 
@@ -1984,7 +2020,7 @@ struct FlangerPanel : public EditorPanelBase
             { "Feed",   0.f,    100.f, 50.f,   1.f,   "Feedback (%) - negative via InvFB toggle" },
             { "Phase",  0.f,    360.f,  0.f,   1.f,   "Stereo R-channel LFO offset (deg)" },
             { "Shape",  0.f,      1.f,  0.f,   0.01f, "LFO shape morph (0 = pure sine, 1 = pure triangle)" },
-            { "DampHz", 200.f,20000.f,20000.f, 10.f,  "Feedback-damp low-pass cutoff (Hz). 20 kHz = off (transparent); lower = warmer feedback, tames harshness" },
+            { "Damp",   0.f,     1.f,  0.f,   0.01f, "Feedback damping: 0 = off/bright, 1 = max (warm, tames harshness)" },
             { "Wet",    0.f,      1.f,  0.5f,  0.01f, "Wet / dry blend" },
             { "Cross",-96.f,      0.f,-96.f,   0.5f,  "Cross-channel wet mix in dB (L->R, R->L). -96 = off; raise for stereo 'spinning' width" },
         });
@@ -2043,7 +2079,9 @@ struct FlangerPanel : public EditorPanelBase
         knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setFeed   ((float)knobs[3]->slider.getValue()); };
         knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setPhase  ((float)knobs[4]->slider.getValue()); };
         knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setShape  ((float)knobs[5]->slider.getValue()); };
-        knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setDampHz ((float)knobs[6]->slider.getValue()); };
+        knobs[6]->slider.onValueChange = [dsp,this]{   // 0-1 UI (FL domain) -> Hz DSP, full 200..20000 range
+            const float amt = (float) knobs[6]->slider.getValue();
+            dsp->setDampHz (20000.0f * std::pow (200.0f / 20000.0f, amt)); };
         knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setWet    ((float)knobs[7]->slider.getValue()); };
         knobs[8]->slider.onValueChange = [dsp,this]{ dsp->setCrossLevel((float)knobs[8]->slider.getValue()); };
 
@@ -2055,7 +2093,9 @@ struct FlangerPanel : public EditorPanelBase
         knobs[3]->slider.setValue(dsp->mFeedback * 100.0f,  juce::sendNotificationSync);
         knobs[4]->slider.setValue(dsp->mStereoPhase,        juce::sendNotificationSync);
         knobs[5]->slider.setValue(dsp->mShape,              juce::sendNotificationSync);
-        knobs[6]->slider.setValue(dsp->mDampHz,             juce::sendNotificationSync);
+        knobs[6]->slider.setValue(juce::jlimit (0.0f, 1.0f,    // Hz DSP -> 0-1 UI (inverse of the onChange map)
+            std::log (juce::jmax (1.0f, dsp->mDampHz) / 20000.0f) / std::log (200.0f / 20000.0f)),
+            juce::sendNotificationSync);
         knobs[7]->slider.setValue(dsp->mWet,                juce::sendNotificationSync);
         knobs[8]->slider.setValue(dsp->mCrossLevelDb,       juce::sendNotificationSync);
 
@@ -2249,6 +2289,12 @@ struct PhaserPanel : public EditorPanelBase
     // Modulation panels use default VC::Panel background
     ~PhaserPanel() override { setLookAndFeel(nullptr); }
 
+    // QA-EffectsReview Task 4: Basic = the exact FL Fruity Phaser control set
+    // (Rate / Min / Max / Feedback / Stereo / Dry-Wet / Out-Gain + Range +
+    // Stages).  Our additions = Cross knob + BPM sync + Sync division + LFO-wave
+    // selector + Invert FB -> hidden in Basic.  resized() does show/hide + reflow.
+    bool hasAdvancedControls() const override { return true; }
+
     explicit PhaserPanel(PhaserDSP* dsp)
     {
         disableVU();   // Phaser has no input VU - full knob width
@@ -2402,27 +2448,38 @@ struct PhaserPanel : public EditorPanelBase
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
         b.removeFromRight(4);
 
-        // Right sidebar, taken right-to-left so visual order (left-to-right) =
-        // SyncDiv | Wave | Range | Stages | InvFB | BPM
+        // QA-EffectsReview Task 4: Basic = the exact Fruity Phaser set; Advanced
+        // adds Cross (knob idx 6) + BPM + Sync division + LFO wave + Invert FB.
+        const bool adv = ! mBasicMode;
+        if (bpmTog)     bpmTog    ->setVisible(adv);
+        if (syncDivSel) syncDivSel->setVisible(adv);
+        if (waveSel)    waveSel   ->setVisible(adv);
+        if (invFbTog)   invFbTog  ->setVisible(adv);
+        if (knobs.size() > 6 && knobs[6]) knobs[6]->setVisible(adv);   // Cross
+
+        // Right sidebar: Range + Stages always (Fruity); Wave/SyncDiv/InvFB/BPM Advanced.
         auto rc = b.removeFromRight(56); b.removeFromRight(2);
         if (rangeTog) rangeTog->setBounds(rc.reduced(1));
         auto sc = b.removeFromRight(60); b.removeFromRight(2);
         if (stagesSel) stagesSel->setBounds(sc.reduced(2));
-        auto wc = b.removeFromRight(60); b.removeFromRight(2);
-        if (waveSel) waveSel->setBounds(wc.reduced(2));
-        auto sd = b.removeFromRight(60); b.removeFromRight(2);
-        if (syncDivSel) syncDivSel->setBounds(sd.reduced(2));
-        if (invFbTog)
+        if (adv)
         {
+            auto wc = b.removeFromRight(60); b.removeFromRight(2);
+            if (waveSel) waveSel->setBounds(wc.reduced(2));
+            auto sd = b.removeFromRight(60); b.removeFromRight(2);
+            if (syncDivSel) syncDivSel->setBounds(sd.reduced(2));
             auto it = b.removeFromRight(52); b.removeFromRight(2);
-            invFbTog->setBounds(it.reduced(1));
-        }
-        if (bpmTog)
-        {
+            if (invFbTog) invFbTog->setBounds(it.reduced(1));
             auto bt = b.removeFromRight(52); b.removeFromRight(2);
-            bpmTog->setBounds(bt.reduced(1));
+            if (bpmTog) bpmTog->setBounds(bt.reduced(1));
         }
-        layoutKnobsH(b, knobs);
+
+        // Knobs: all Fruity knobs always; Cross (idx 6, our addition) Advanced only.
+        std::vector<VKnob*> vis;
+        for (int i = 0; i < (int) knobs.size(); ++i)
+            if (adv || i != 6)
+                if (knobs[i]) vis.push_back(knobs[i].get());
+        layoutKnobsH(b, vis);
     }
 };
 
@@ -3409,9 +3466,9 @@ struct FuzzStylePanel : public EditorPanelBase
 
         modeSel = std::make_unique<ChickenHeadSelector>();
         modeSel->setOptions ({
-            { "M", "Maestro",  "Bias-starved gated fuzz (Maestro FZ-1A character)" },
-            { "F", "Fuzz Face","Warm germanium soft tanh (Fuzz Face character)" },
-            { "O", "Octavia",  "Full-wave rectifier + hard clip (upper-octave Octavia character)" },
+            { "Gt", "Gated",     "Bias-starved gated fuzz" },
+            { "Ge", "Germanium", "Warm germanium soft-clip fuzz" },
+            { "Oc", "Octave",    "Full-wave rectifier + hard clip, upper-octave fuzz" },
         });
         modeSel->setBodyTooltip ("Fuzz mode");
         modeSel->setSelectedIndex (dsp ? (int) dsp->mMode : (int) FuzzStyleDSP::Mode::F,
@@ -3844,10 +3901,22 @@ struct BassCompressorStylePanel : public EditorPanelBase, public juce::Timer
 // SynthStylePanel - SY Style Polyphonic Synth
 // 6 knobs (Variation / Tone / Rate / Depth / Effect / Direct) + Type chickenhead
 // ─────────────────────────────────────────────────────────────────────────────
+// QA-EffectsReview Task 4: SY-1 TYPE-knob display order -> preset-stable enum value
+// (the original 4 kept enum values 0..3; new types took 4..10, so display != value).
+static constexpr int kSynthTypeOrder[SynthStyleDSP::kNumTypes] =
+    { 0, 4, 1, 2, 5, 6, 7, 8, 9, 3, 10 };   // Lead1 Lead2 Pad Bass Str Organ Bell Sfx1 Sfx2 Seq1 Seq2
+static int synthTypeValueToDisplay (int v)
+{
+    for (int i = 0; i < SynthStyleDSP::kNumTypes; ++i) if (kSynthTypeOrder[i] == v) return i;
+    return 0;
+}
+
 struct SynthStylePanel : public EditorPanelBase
 {
     SynthStyleDSP* mDsp { nullptr };
     std::unique_ptr<ChickenHeadSelector> typeSel;
+    std::unique_ptr<DualLabelToggle>     polyTog;   // Mono / Poly
+    std::unique_ptr<DualLabelToggle>     instTog;   // Guitar / Bass
 
     explicit SynthStylePanel (SynthStyleDSP* dsp) : mDsp (dsp)
     {
@@ -3865,16 +3934,41 @@ struct SynthStylePanel : public EditorPanelBase
         });
 
         typeSel = std::make_unique<ChickenHeadSelector>();
-        typeSel->setOptions ({
-            { "Le", "Lead", "Saw lead voice -- fast envelope follow + filter LFO" },
-            { "Pa", "Pad",  "Sine/saw pad -- slow attack + gentle filter LFO" },
-            { "Ba", "Bass", "Square -1 oct bass voice -- fast envelope, no LFO" },
-            { "Sq", "Seq",  "Saw with LFO-modulated amplitude (rhythmic stutter)" },
+        typeSel->setOptions ({   // displayed in the SY-1 TYPE-knob order; 2-char marks (full name in hover)
+            { "L1", "Lead 1", "Lead voice -- fast envelope follow + filter LFO" },
+            { "L2", "Lead 2", "Edgier square lead -- brighter, more cut" },
+            { "Pd", "Pad",    "Sine/saw pad -- slow attack + gentle filter LFO" },
+            { "Bs", "Bass",   "Square -1 oct bass voice -- fast envelope" },
+            { "St", "Str",    "Saw string ensemble -- slow swell" },
+            { "Or", "Organ",  "Sine organ -- rotary-style amplitude LFO" },
+            { "Bl", "Bell",   "Bright bell -- fast metallic decay, +1 oct" },
+            { "F1", "SFX 1",  "Synth FX voice" },
+            { "F2", "SFX 2",  "Animated synth FX voice" },
+            { "Q1", "Seq 1",  "Rhythmic filter sweep" },
+            { "Q2", "Seq 2",  "LFO-stuttered amplitude (rhythmic)" },
         });
-        typeSel->setBodyTooltip ("Voice type");
-        typeSel->setSelectedIndex (dsp ? (int) dsp->mType : 0, juce::dontSendNotification);
-        typeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setType (idx); };
+        typeSel->setBodyTooltip ("Voice type -- 11 synth voice categories");
+        typeSel->setSelectedIndex (dsp ? synthTypeValueToDisplay ((int) dsp->mType) : 0, juce::dontSendNotification);
+        typeSel->onChange = [dsp] (int idx) {
+            if (dsp) dsp->setType (kSynthTypeOrder[juce::jlimit (0, SynthStyleDSP::kNumTypes - 1, idx)]); };
         addAndMakeVisible (*typeSel);
+
+        // QA-EffectsReview Task 4: Mono/Poly + Guitar/Bass switches.
+        polyTog = std::make_unique<DualLabelToggle>();
+        polyTog->setupNamed ("Mono", "Monophonic YIN tracking -- one voice follows the dominant note (tight on single lines + bass)",
+                             "Poly", "Polyphonic FFT tracking -- up to 6 voices follow a chord (best on sustained, cleanly-played chords)");
+        polyTog->btn().setToggleState (dsp && dsp->mPolyMode, juce::dontSendNotification);
+        polyTog->btn().onClick = [dsp, this] { if (dsp) dsp->setPolyMode (polyTog->btn().getToggleState()); };
+        polyTog->setLabelColour (VC::Text);
+        addAndMakeVisible (*polyTog);
+
+        instTog = std::make_unique<DualLabelToggle>();
+        instTog->setupNamed ("Gtr",  "Guitar range -- tracks ~70 Hz..1.3 kHz, full polyphony",
+                             "Bass", "Bass range -- tracks ~35..400 Hz, polyphony capped (bass is usually single-note)");
+        instTog->btn().setToggleState (dsp && dsp->mInstrument == SynthStyleDSP::Instrument::Bass, juce::dontSendNotification);
+        instTog->btn().onClick = [dsp, this] { if (dsp) dsp->setInstrument (instTog->btn().getToggleState() ? 1 : 0); };
+        instTog->setLabelColour (VC::Text);
+        addAndMakeVisible (*instTog);
 
         knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setVariation   ((int)   knobs[0]->slider.getValue()); };
         knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setTone        ((float) knobs[1]->slider.getValue()); };
@@ -3901,12 +3995,26 @@ struct SynthStylePanel : public EditorPanelBase
         auto b = getLocalBounds().reduced (4, 4);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
-        auto remainingLeft = rightClusterKnobs (b, knobs, kKnobSz + 4, kKnobSz);
-        if (typeSel)
+
+        // QA-EffectsReview Task 4: Type selector in its own full-width row ABOVE
+        // the knobs (centred square) so the 11-letter chicken-head bezel has room,
+        // instead of overlapping in a cramped 66 px side column.
         {
-            auto col = remainingLeft.removeFromRight (66);
-            typeSel->setBounds (col.reduced (2));
+            const int typeH = juce::jlimit (64, 84, b.getHeight() - 60);
+            auto topRow = b.removeFromTop (typeH);
+            // Mono/Poly on the left, Gtr/Bass on the right; chicken-head centred between.
+            const int togW = 62;
+            const int togH = juce::jmin (topRow.getHeight() - 2, 74);   // room for top label + switch + bottom label
+            if (polyTog) polyTog->setBounds (topRow.removeFromLeft  (togW).withSizeKeepingCentre (togW, togH));
+            if (instTog) instTog->setBounds (topRow.removeFromRight (togW).withSizeKeepingCentre (togW, togH));
+            if (typeSel)
+            {
+                const int sz = juce::jmin (topRow.getWidth(), topRow.getHeight());
+                typeSel->setBounds (topRow.withSizeKeepingCentre (sz, sz));
+            }
         }
+
+        layoutKnobsH (b, knobs);   // the 6 knobs fill the row below
     }
 };
 
@@ -4536,7 +4644,7 @@ struct FurmanEQStylePanel : public EditorPanelBase,
 
         inputVol = std::make_unique<VKnob>("Input",
             dsp ? dsp->getInputVolDb() : 0.0f,
-            "Master Input Volume preamp (0 to +26 dB).  Above ~+12 dB the soft-clipper engages; the overload LED (top-right) lights when it clips.  The PQ-3's full range emerges by combining this with the boost bands + the Hi switch.");
+            "Master Input Volume preamp (0 to +26 dB).  Above ~+12 dB the soft-clipper engages; the overload LED (top-right) lights when it clips.  The full gain range emerges by combining this with the boost bands + the Hi switch.");
         inputVol->slider.setRange (0.0, 26.0, 0.1);
         inputVol->slider.setSkewFactorFromMidPoint (12.0);
         inputVol->slider.setValue (dsp ? dsp->getInputVolDb() : 0.0, juce::dontSendNotification);
@@ -4553,7 +4661,7 @@ struct FurmanEQStylePanel : public EditorPanelBase,
         // QA-EffectsReview Task 3: Hi/Lo output gain-range switch (+20 dB in Hi).
         hiLoBtn = std::make_unique<juce::TextButton>();
         hiLoBtn->setClickingTogglesState (true);
-        hiLoBtn->setTooltip ("Hi/Lo output gain range -- Hi adds +20 dB (PQ-3 gain-range switch)");
+        hiLoBtn->setTooltip ("Hi/Lo output gain range -- Hi adds +20 dB");
         const bool hi = (dsp && dsp->getGainRange() == FurmanEQStyleDSP::GainRange::Hi);
         hiLoBtn->setToggleState (hi, juce::dontSendNotification);
         hiLoBtn->setButtonText (hi ? "Hi +20" : "Lo");
@@ -4985,7 +5093,7 @@ struct NAMPedalStylePanel : public EditorPanelBase
         knobs[5]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setOutputDb ((float) knobs[5]->slider.getValue()); };
 
         loadBtn = std::make_unique<juce::TextButton>("Load .nam");
-        loadBtn->setTooltip ("Load a Neural Amp Modeler capture (.nam) file");
+        loadBtn->setTooltip ("Load an amp capture (.nam) file");
         loadBtn->onClick = [this] { showFileChooser(); };
         addAndMakeVisible (*loadBtn);
 
