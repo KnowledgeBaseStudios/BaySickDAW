@@ -11,15 +11,15 @@
 //
 // DSP chain:
 //   1. 4x oversample (PolyphaseOversampler4x).
-//   2. Asymmetric soft-clip waveshaper:  y = tanh(x + 0.2) - 0.19
-//      (DC offset 0.2 pre-shaper biases the waveform into the asymmetric
-//      region of tanh, then subtracted back out as a constant; net effect is
-//      an even-harmonic-rich saturation similar to a single-ended tube
-//      stage.)
+//   2. Envelope-driven dual-stage waveshaper (QA-EffectsReview Task 5):
+//        stage 1 -- asymmetric soft-clip  y1 = tanh(drive*x + 0.2) - 0.19
+//                   (even-harmonic-rich, single-ended-tube character),
+//        then cross-fade y1 -> a cubic soft-clip (1.5a - 0.5a^3) as |y1| rises,
+//        shifting the dominant harmonic 2nd -> 3rd as the player digs in.
 //   3. Downsample.
-//   4. 1st-order LPF tone stack (Fender-style); cutoff sweeps 500 Hz - 5 kHz
-//      from the Tone knob.
-//   5. Output level knob (linear gain).
+//   4. 1st-order LPF tone stack; cutoff sweeps 500 Hz - 5 kHz from the Tone knob.
+//   5. ~100 Hz +3.5 dB body peak (QA-EffectsReview Task 5: the low-mid bump).
+//   6. Output level knob (linear gain).
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BluesDriveStyleDSP : public DSPBase
@@ -51,10 +51,11 @@ private:
 
     PolyphaseOversampler4x mOs;
 
-    using StereoLPF = juce::dsp::ProcessorDuplicator<
+    using StereoIIR = juce::dsp::ProcessorDuplicator<
                          juce::dsp::IIR::Filter<float>,
                          juce::dsp::IIR::Coefficients<float>>;
-    StereoLPF mToneLpf;
+    StereoIIR mToneLpf;
+    StereoIIR mBodyPeak;   // QA-EffectsReview Task 5: ~100 Hz +3.5 dB body bump (fixed coefs)
 
     // 5 Hz DC blocker state (per channel).  The asymmetric tanh(x+0.2)-0.19
     // shaper produces ~0.0074 of static DC at silence; without this blocker

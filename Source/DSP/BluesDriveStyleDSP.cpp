@@ -30,6 +30,12 @@ void BluesDriveStyleDSP::prepare (double sampleRate, int maxBlockSize)
     mToneLpf.reset();
     updateToneCoefs();
 
+    // QA-EffectsReview Task 5: fixed ~100 Hz +3.5 dB body peak (the low-mid bump).
+    mBodyPeak.prepare (spec);
+    mBodyPeak.reset();
+    *mBodyPeak.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter (
+        (double) sampleRate, 100.0f, 0.7071f, juce::Decibels::decibelsToGain (3.5f));
+
     // 5 Hz DC blocker: y[n] = x[n] - x[n-1] + R*y[n-1].
     // R = 1 - 2*pi*5/sr ≈ 0.999 at 44.1 kHz.
     mDcCoef = 1.0f - (float) (juce::MathConstants<double>::twoPi * 5.0 / sampleRate);
@@ -40,6 +46,7 @@ void BluesDriveStyleDSP::reset()
 {
     mOs.reset();
     mToneLpf.reset();
+    mBodyPeak.reset();
     mDcXL = mDcYL = mDcXR = mDcYR = 0.0f;
 }
 
@@ -85,10 +92,11 @@ void BluesDriveStyleDSP::process (juce::AudioBuffer<float>& buffer)
     // 1. Upsample to 4x.
     auto upBlock = mOs.upsample (block);
 
-    // 2. Asymmetric tanh shaper at 4x.  pre-add 0.2 DC, post-subtract 0.19.
-    //    The 0.01 residual difference is intentional -- it's the tanh(0.2)
-    //    static DC value left as a tiny bias floor (BD-2 character; the
-    //    DC blocker on the chain output strips it before it reaches the bus).
+    // 2. Envelope-driven dual-stage shaper at 4x (QA-EffectsReview Task 5).
+    //    Stage 1: asymmetric tanh (pre-add 0.2 DC, post-subtract 0.19 -- the
+    //    0.01 residual is the intentional bias floor; the DC blocker strips it).
+    //    Then cross-fade stage 1 -> a cubic soft-clip (1.5a - 0.5a^3) by |s1|,
+    //    so the dominant harmonic shifts 2nd -> 3rd as the player digs in.
     const float drive = driveAmount (mDrive);
     const int upN     = (int) upBlock.getNumSamples();
     const int upChs   = (int) upBlock.getNumChannels();
@@ -97,8 +105,11 @@ void BluesDriveStyleDSP::process (juce::AudioBuffer<float>& buffer)
         float* d = upBlock.getChannelPointer ((size_t) ch);
         for (int i = 0; i < upN; ++i)
         {
-            const float x = d[i] * drive + 0.2f;
-            d[i] = std::tanh (x) - 0.19f;
+            const float s1  = std::tanh (d[i] * drive + 0.2f) - 0.19f;   // asym (2nd)
+            const float a   = juce::jlimit (-1.0f, 1.0f, s1);
+            const float cub = 1.5f * a - 0.5f * a * a * a;               // cubic (3rd)
+            const float mix = juce::jlimit (0.0f, 1.0f, std::abs (s1));  // louder -> more cubic
+            d[i] = s1 + mix * (cub - s1);
         }
     }
 
@@ -109,7 +120,10 @@ void BluesDriveStyleDSP::process (juce::AudioBuffer<float>& buffer)
     juce::dsp::ProcessContextReplacing<float> ctx (block);
     mToneLpf.process (ctx);
 
-    // 5. 5 Hz DC blocker -- strips the static 0.0074 bias the shaper leaves
+    // 5. ~100 Hz +3.5 dB body peak (QA-EffectsReview Task 5: the low-mid bump).
+    mBodyPeak.process (ctx);
+
+    // 6. 5 Hz DC blocker -- strips the static 0.0074 bias the shaper leaves
     // at silence.  Without this the dBFS meter registers ~-42 dB at rest
     // and toggling bypass clicks because the bypassed signal is 0 but the
     // un-bypassed signal sits on a DC pedestal.
@@ -131,7 +145,7 @@ void BluesDriveStyleDSP::process (juce::AudioBuffer<float>& buffer)
         }
     }
 
-    // 6. Output level.
+    // 7. Output level.
     if (mLevel != 0.0f)
         buffer.applyGain (juce::Decibels::decibelsToGain (mLevel, -60.0f));
 }

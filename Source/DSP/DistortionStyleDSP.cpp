@@ -9,14 +9,15 @@ namespace
     constexpr float kPreEmphasisHz   = 1000.0f;
     constexpr float kPreEmphasisMaxDb = 12.0f;
 
-    // Big-Muff tilt EQ: two parallel paths crossfaded by Tone.
-    constexpr float kToneLpfHz = 400.0f;    // dark side of Tone
-    constexpr float kToneHpfHz = 2000.0f;   // bright side of Tone
+    // Tilt-EQ tone control: two parallel paths crossfaded by Tone.
+    // QA-EffectsReview Task 5: scoop recentred ~800 -> ~500 Hz to match the reference.
+    constexpr float kToneLpfHz = 250.0f;    // dark side of Tone
+    constexpr float kToneHpfHz = 1000.0f;   // bright side of Tone
 
     // Mid-scoop at noon: when Tone ~ 0.5, both paths summed give a notch
-    // around 800 Hz (geometric mean of 400 Hz and 2 kHz).  No explicit notch
+    // around 500 Hz (geometric mean of 250 Hz and 1 kHz).  No explicit notch
     // filter -- the LPF + HPF parallel sum naturally produces a scoop because
-    // 800 Hz sits in the rolloff of both.
+    // 500 Hz sits in the rolloff of both.
 }
 
 void DistortionStyleDSP::prepare (double sampleRate, int maxBlockSize)

@@ -17,7 +17,8 @@
 //   3. Cascading hard clip: two clamp stages with a small smoothing curve
 //      between them so the "stacked transistor" sound lands.
 //   4. Downsample.
-//   5. Fixed severe mid-scoop biquad post-clip (the famous MT-2 V curve).
+//   5. Two fixed post-clip gyrator boosts (~100 Hz + ~5 kHz); the V/scoop is the
+//      valley between them (the real pedal boosts the extremes, not cuts the mids).
 //   6. User 3-band EQ: Low shelf (~80 Hz), parametric Mid (Hz + dB), High
 //      shelf (~5 kHz).
 //   7. Output level.
@@ -62,8 +63,11 @@ private:
                             juce::dsp::IIR::Coefficients<float>>;
 
     // Fixed character (don't move with knobs):
-    StereoFilter mFixedMidBoost;   // pre-clip, locks ~700 Hz +9 dB
-    StereoFilter mFixedMidScoop;   // post-clip, ~700 Hz -12 dB
+    StereoFilter mFixedMidBoost;   // pre-clip, locks ~1 kHz +36 dB (QA-EffectsReview Task 5)
+    // QA-EffectsReview Task 5: the real pedal's post-clip "V" is NOT a mid cut -- it's
+    // two fixed gyrator BOOSTS (~100 Hz + ~5 kHz); the scoop is the valley between them.
+    StereoFilter mFixedScoopLo;    // post-clip boost, ~100 Hz
+    StereoFilter mFixedScoopHi;    // post-clip boost, ~5 kHz (the fixed treble spike)
 
     // User 3-band EQ:
     StereoFilter mUserLowShelf;    // ~80 Hz, +/- mLowDb

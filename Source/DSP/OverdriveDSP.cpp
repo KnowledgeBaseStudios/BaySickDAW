@@ -23,12 +23,12 @@ void OverdriveDSP::prepare (double sampleRate, int maxBlockSize)
     spec.sampleRate       = sampleRate;
     spec.maximumBlockSize = (juce::uint32) mMaxBlock;
     spec.numChannels      = 2;
-    mBPF.prepare (spec);
+    mPreLpf.prepare (spec);
     mLPF.prepare (spec);
-    mBPF.setType (juce::dsp::StateVariableTPTFilterType::bandpass);
-    mLPF.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
-    mBPF.setCutoffFrequency (juce::jlimit (20.0f, (float) sampleRate * 0.49f, mColor));
-    mBPF.setResonance       (0.5f + (1.0f - mPreBand) * 9.5f);
+    mPreLpf.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
+    mLPF.setType    (juce::dsp::StateVariableTPTFilterType::lowpass);
+    mPreLpf.setCutoffFrequency (juce::jlimit (20.0f, (float) sampleRate * 0.49f, mColor));
+    mPreLpf.setResonance       (juce::MathConstants<float>::sqrt2 * 0.5f);   // Butterworth pre-LP
     mLPF.setCutoffFrequency (juce::jlimit (20.0f, (float) sampleRate * 0.49f, mPostFilter));
     mLPF.setResonance       (juce::MathConstants<float>::sqrt2 * 0.5f);
 
@@ -43,8 +43,7 @@ void OverdriveDSP::prepare (double sampleRate, int maxBlockSize)
     mLatencySamples = (int) std::ceil (mOversampler->getLatencyInSamples());
 
     // ── Scratch buffers (stereo) ─────────────────────────────────────────────
-    mBandBuf    .setSize (2, mMaxBlock, false, true, true);
-    mResidualBuf.setSize (2, mMaxBlock, false, true, true);
+    mBandBuf.setSize (2, mMaxBlock, false, true, true);
 
     // I-5 (2026-05-02): Pedal mode 80 Hz split filters + clean-path scratch.
     mPedalSplitHpf.prepare (spec);
@@ -58,6 +57,18 @@ void OverdriveDSP::prepare (double sampleRate, int maxBlockSize)
     mPedalSplitHpf.reset();
     mPedalSplitLpf.reset();
     mPedalCleanBuf.setSize (2, mMaxBlock, false, true, true);
+
+    // QA-EffectsReview Task 5: OD-pedal 500 Hz mid-notch + 720 Hz inter-stage HPF.
+    const auto notchCoefs = juce::dsp::IIR::Coefficients<float>::makePeakFilter (
+        sampleRate, 500.0f, 1.0f, juce::Decibels::decibelsToGain (-4.5f));
+    mPedalNotchL.coefficients = notchCoefs;   // pointer copy (coefficients starts NULL)
+    mPedalNotchR.coefficients = notchCoefs;
+    mPedalNotchL.reset();
+    mPedalNotchR.reset();
+    // 1-pole HPF coef at the oversampled rate (the drive path runs inside the OS loop).
+    const double osRate = sampleRate * (double) (1 << juce::jlimit (1, 4, mOsLog2));
+    mPedalHpfR = (float) (1.0 - (juce::MathConstants<double>::twoPi * 720.0 / osRate));
+    mPedalHpfX[0] = mPedalHpfX[1] = mPedalHpfY[0] = mPedalHpfY[1] = 0.0f;
 
     // ── SmoothedValues ───────────────────────────────────────────────────────
     mPreAmpSmooth    .reset (sampleRate, kSmoothMs     * 0.001);
@@ -79,13 +90,15 @@ void OverdriveDSP::prepare (double sampleRate, int maxBlockSize)
 // ─────────────────────────────────────────────────────────────────────────────
 void OverdriveDSP::reset()
 {
-    mBPF.reset();
+    mPreLpf.reset();
     mLPF.reset();
     if (mOversampler) mOversampler->reset();
     mBandBuf.clear();
-    mResidualBuf.clear();
     mDcX_L = mDcY_L = 0.0f;
     mDcX_R = mDcY_R = 0.0f;
+    mPedalNotchL.reset();
+    mPedalNotchR.reset();
+    mPedalHpfX[0] = mPedalHpfX[1] = mPedalHpfY[0] = mPedalHpfY[1] = 0.0f;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,7 +163,8 @@ void OverdriveDSP::setPostFilter (float hz)
 
 void OverdriveDSP::setPostGain (float dB)
 {
-    const float n = juce::jlimit (-18.0f, 18.0f, dB);
+    // QA-EffectsReview Task 5: attenuate-only (the reference's "gain reducer"; max = unity).
+    const float n = juce::jlimit (-18.0f, 0.0f, dB);
     if (n != mPostGain) { mPostGain = n; mPostGainSmooth.setTargetValue (n); }
 }
 
@@ -257,8 +271,19 @@ void OverdriveDSP::process (juce::AudioBuffer<float>& buffer)
             mPedalSplitLpf.process (ctx);
         }
 
-        // 4x oversampled dual cascaded soft-clip on the drive path.
-        const float drive = 1.0f + juce::jlimit (0.0f, 10.0f, mPreAmp) * 4.0f;  // up to ~+34 dB
+        // QA-EffectsReview Task 5: 500 Hz mid-notch on the drive path, pre-clip (1x).
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            auto&  notch = (ch == 0) ? mPedalNotchL : mPedalNotchR;
+            for (int i = 0; i < numSamples; ++i)
+                d[i] = notch.processSample (d[i]);
+        }
+
+        // Dual cascaded soft-clip on the drive path (oversampled).  QA-EffectsReview
+        // Task 5: drive ceiling raised 1+preAmp*4 -> 1+preAmp*13 (~+43 dB) and a
+        // 720 Hz 1-pole HPF inserted between the two clip stages.
+        const float drive = 1.0f + juce::jlimit (0.0f, 10.0f, mPreAmp) * 13.0f;
         juce::dsp::AudioBlock<float> driveBlock (buffer);
         auto driveSub = driveBlock.getSubBlock (0, (size_t) numSamples)
                                    .getSubsetChannelBlock (0, (size_t) numCh);
@@ -268,13 +293,18 @@ void OverdriveDSP::process (juce::AudioBuffer<float>& buffer)
         for (int ch = 0; ch < upChs; ++ch)
         {
             float* d = upBlock.getChannelPointer ((size_t) ch);
+            const int hch = juce::jmin (ch, 1);
             for (int i = 0; i < upN; ++i)
             {
                 // Stage 1: gentle pre-clip (warms the upper-mids).
-                float x = std::tanh (d[i] * drive);
-                // Stage 2: harder cascade (the "second op-amp clipping
-                // diodes" that give OD-3 its punchy attack).
-                d[i] = std::tanh (x * 1.6f);
+                const float s1 = std::tanh (d[i] * drive);
+                // 720 Hz 1-pole HPF between stages -- strips low-end mud so the
+                // second cascade stays tight under chords.
+                const float hy = mPedalHpfR * (mPedalHpfY[hch] + s1 - mPedalHpfX[hch]);
+                mPedalHpfX[hch] = s1;
+                mPedalHpfY[hch] = hy;
+                // Stage 2: harder cascade (the pedal's punchy attack).
+                d[i] = std::tanh (hy * 1.6f);
             }
         }
         mOversampler->processSamplesDown (driveSub);
@@ -309,36 +339,30 @@ void OverdriveDSP::process (juce::AudioBuffer<float>& buffer)
     const int kOsNow = 1 << mOsLog2;
     const float nyq  = (float) mSampleRate * 0.49f;
 
-    // ── Step 1: base-rate BPF with per-sample smoothed coef refresh (A9). ────
-    // Also split into (band, residual). Writes band into mBandBuf, residual
-    // into mResidualBuf. Leaves `buffer` holding original input for the final
-    // wet/dry blend.
+    // ── Step 1: in-series pre-LP. The whole signal is driven (no parallel clean ──
+    // band). PreBand is the AMOUNT of low-pass blended into the drive input
+    // (0 = full bandwidth, 1 = fully low-passed at Color). Writes the drive input
+    // into mBandBuf; leaves `buffer` holding the original input for the wet/dry blend.
     //
-    // A8: if input is mono, duplicate ch0 into mBandBuf ch1 before the
-    // 2-channel oversampler runs so its second-channel state sees valid data.
+    // A8: if input is mono, duplicate ch0 into mBandBuf ch1 before the 2-channel
+    // oversampler runs so its second-channel state sees valid data.
     for (int n = 0; n < numSamples; ++n)
     {
-        // A9 -- advance and push smoothed filter coefs per sample. `setCutoff /
-        // setResonance` on TPT SVF is a small trig/div -- ~30 cycles.
+        // A9 -- per-sample smoothed cutoff (Color). Pre-LP Q is fixed Butterworth.
         const float color = juce::jlimit (20.0f, nyq, mColorSmooth.getNextValue());
-        const float preBd = mPreBandSmooth.getNextValue();
-        const float bpfQ  = 0.5f + (1.0f - preBd) * 9.5f;
-        mBPF.setCutoffFrequency (color);
-        mBPF.setResonance       (bpfQ);
+        const float amt   = mPreBandSmooth.getNextValue();   // 0..1 low-pass amount
+        mPreLpf.setCutoffFrequency (color);
 
         for (int ch = 0; ch < numCh; ++ch)
         {
-            const float x    = buffer.getSample (ch, n);
-            const float band = mBPF.processSample (ch, x);
-            mBandBuf    .setSample (ch, n, band);
-            mResidualBuf.setSample (ch, n, x - band);
+            const float x  = buffer.getSample (ch, n);
+            const float lp = mPreLpf.processSample (ch, x);
+            // Blend dry -> low-passed by the PreBand amount, then drive in series.
+            mBandBuf.setSample (ch, n, x + amt * (lp - x));
         }
         // A8: mono input -- pad ch1 with ch0 so the 2ch oversampler has valid data.
         if (numCh == 1)
-        {
-            mBandBuf    .setSample (1, n, mBandBuf    .getSample (0, n));
-            mResidualBuf.setSample (1, n, mResidualBuf.getSample (0, n));
-        }
+            mBandBuf.setSample (1, n, mBandBuf.getSample (0, n));
     }
 
     // ── Step 2: oversample band -> soft-clip sigmoid -> downsample ──────────
@@ -405,10 +429,9 @@ void OverdriveDSP::process (juce::AudioBuffer<float>& buffer)
 
         for (int ch = 0; ch < numCh; ++ch)
         {
-            const float x       = buffer.getSample (ch, n);
-            const float shaped  = mBandBuf    .getSample (ch, n);
-            const float residual= mResidualBuf.getSample (ch, n);
-            float out = shaped + residual;
+            const float x   = buffer.getSample (ch, n);
+            // In-series: the shaped band IS the whole driven signal (no clean residual).
+            float out       = mBandBuf.getSample (ch, n);
 
             out = mLPF.processSample (ch, out);
             out *= postGain;
@@ -467,7 +490,8 @@ void OverdriveDSP::setStateInformation (const void* data, int sz)
     mPreAmp     = (float) xml->getDoubleAttribute ("preAmp",     mPreAmp);
     mX100       =         xml->getBoolAttribute   ("x100",       mX100);
     mPostFilter = (float) xml->getDoubleAttribute ("postFilter", mPostFilter);
-    mPostGain   = (float) xml->getDoubleAttribute ("postGain",   mPostGain);
+    // QA-EffectsReview Task 5: enforce attenuate-only on legacy presets that saved a boost.
+    mPostGain   = juce::jlimit (-18.0f, 0.0f, (float) xml->getDoubleAttribute ("postGain", mPostGain));
     mWet        = (float) xml->getDoubleAttribute ("wet",        mWet);
     mBias       = (float) xml->getDoubleAttribute ("bias",       mBias);       // C2
     mParallel   =         xml->getBoolAttribute   ("parallel",   mParallel);   // C4
@@ -492,11 +516,11 @@ void OverdriveDSP::setStateInformation (const void* data, int sz)
             return;
         }
         const float nyq = (float) mSampleRate * 0.49f;
-        mBPF.setCutoffFrequency (juce::jlimit (20.0f, nyq, mColor));
-        mBPF.setResonance       (0.5f + (1.0f - mPreBand) * 9.5f);
+        mPreLpf.setCutoffFrequency (juce::jlimit (20.0f, nyq, mColor));
+        mPreLpf.setResonance       (juce::MathConstants<float>::sqrt2 * 0.5f);
         mLPF.setCutoffFrequency (juce::jlimit (20.0f, nyq, mPostFilter));
         mLPF.setResonance       (juce::MathConstants<float>::sqrt2 * 0.5f);
-        mBPF.reset();
+        mPreLpf.reset();
         mLPF.reset();
         if (mOversampler) mOversampler->reset();
         mDcX_L = mDcY_L = mDcX_R = mDcY_R = 0.0f;

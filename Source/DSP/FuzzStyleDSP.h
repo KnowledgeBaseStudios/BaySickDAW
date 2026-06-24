@@ -6,8 +6,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // FuzzStyleDSP - Phase I-5 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
-// FZ Style Fuzz pedal.  Three-mode multi-character fuzz.  Knobs: Level / Mode /
-// Fuzz (Drive).
+// FZ Style Fuzz pedal.  Three-mode multi-character fuzz.  Knobs: Fuzz (Drive) /
+// Boost / Level, plus a Mode selector.
 //
 // Modes:
 //   M  -- Maestro FZ-1A bias-starved.  Asymmetric gated clip: positive half
@@ -45,10 +45,12 @@ public:
     void setFuzz  (float v01);   // 0..1   (drive amount)
     void setMode  (int   m);     // 0..2   (M / F / O)
     void setLevel (float dB);    // -24..+12
+    void setBoost (float dB);    // 0..+20  (input boost into the fuzz; QA-EffectsReview Task 5)
 
     float mFuzz  { 0.5f };
     Mode  mMode  { Mode::F };
     float mLevel { 0.0f };
+    float mBoost { 0.0f };   // QA-EffectsReview Task 5: input boost (dB) into the fuzz drive
 
 private:
     PolyphaseOversampler4x mOs;

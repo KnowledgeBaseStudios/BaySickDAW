@@ -3,12 +3,19 @@
 namespace
 {
     // Fixed pre-clip mid boost: locks the metal honk character.
-    constexpr float kFixedMidBoostHz = 700.0f;
-    constexpr float kFixedMidBoostDb = 9.0f;
+    // QA-EffectsReview Task 5: steepened 700/+9 -> 1k/+36 to match the reference's
+    // aggressive pre-gain (the tanh/clamp stages downstream bound it, so it stays stable).
+    constexpr float kFixedMidBoostHz = 1000.0f;
+    constexpr float kFixedMidBoostDb = 36.0f;
 
-    // Fixed post-clip mid scoop: the classic MT-2 V curve.
-    constexpr float kFixedMidScoopHz = 700.0f;
-    constexpr float kFixedMidScoopDb = -12.0f;
+    // Fixed post-clip gyrator boosts (the real pedal's "V" is the valley between
+    // a ~100 Hz low boost and a ~5 kHz high boost -- NOT a mid cut).
+    constexpr float kFixedScoopLoHz = 100.0f;
+    constexpr float kFixedScoopLoDb = 10.0f;
+    constexpr float kFixedScoopLoQ  = 6.0f;
+    constexpr float kFixedScoopHiHz = 5000.0f;
+    constexpr float kFixedScoopHiDb = 10.0f;
+    constexpr float kFixedScoopHiQ  = 3.0f;
 
     // User 3-band EQ shelf/peak frequencies.
     constexpr float kUserLowShelfHz  = 80.0f;
@@ -26,7 +33,8 @@ void HighGainStyleDSP::prepare (double sampleRate, int maxBlockSize)
                                    (juce::uint32) juce::jmax (1, maxBlockSize),
                                    2 };
     mFixedMidBoost.prepare (spec);  mFixedMidBoost.reset();
-    mFixedMidScoop.prepare (spec);  mFixedMidScoop.reset();
+    mFixedScoopLo .prepare (spec);  mFixedScoopLo .reset();
+    mFixedScoopHi .prepare (spec);  mFixedScoopHi .reset();
     mUserLowShelf .prepare (spec);  mUserLowShelf .reset();
     mUserMidPeak  .prepare (spec);  mUserMidPeak  .reset();
     mUserHighShelf.prepare (spec);  mUserHighShelf.reset();
@@ -42,7 +50,8 @@ void HighGainStyleDSP::reset()
 {
     mOs.reset();
     mFixedMidBoost.reset();
-    mFixedMidScoop.reset();
+    mFixedScoopLo .reset();
+    mFixedScoopHi .reset();
     mUserLowShelf .reset();
     mUserMidPeak  .reset();
     mUserHighShelf.reset();
@@ -55,9 +64,12 @@ void HighGainStyleDSP::initFixedEqCoefs()
     *mFixedMidBoost.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter (
         (double) mSampleRate, kFixedMidBoostHz, 1.2f,
         juce::Decibels::decibelsToGain (kFixedMidBoostDb, -60.0f));
-    *mFixedMidScoop.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter (
-        (double) mSampleRate, kFixedMidScoopHz, 0.8f,
-        juce::Decibels::decibelsToGain (kFixedMidScoopDb, -60.0f));
+    *mFixedScoopLo.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter (
+        (double) mSampleRate, kFixedScoopLoHz, kFixedScoopLoQ,
+        juce::Decibels::decibelsToGain (kFixedScoopLoDb, -60.0f));
+    *mFixedScoopHi.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter (
+        (double) mSampleRate, kFixedScoopHiHz, kFixedScoopHiQ,
+        juce::Decibels::decibelsToGain (kFixedScoopHiDb, -60.0f));
 }
 
 void HighGainStyleDSP::updateUserEqCoefs()
@@ -156,10 +168,11 @@ void HighGainStyleDSP::process (juce::AudioBuffer<float>& buffer)
     }
     mOs.downsample (block);
 
-    // 4. Fixed mid-scoop post-clip (1x).
+    // 4. Fixed post-clip gyrator boosts (~100 Hz + ~5 kHz); the V is the valley between.
     {
         juce::dsp::ProcessContextReplacing<float> ctx (block);
-        mFixedMidScoop.process (ctx);
+        mFixedScoopLo.process (ctx);
+        mFixedScoopHi.process (ctx);
     }
 
     // 5. User 3-band EQ.

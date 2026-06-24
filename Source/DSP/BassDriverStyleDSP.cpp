@@ -2,13 +2,19 @@
 
 namespace
 {
-    constexpr float kXover1Hz = 200.0f;    // low/mid split
+    constexpr float kXover1Hz = 500.0f;    // low/mid split -- lows < 500 Hz stay clean (BB-1X)
     constexpr float kXover2Hz = 2000.0f;   // mid/high split
 
     // tanh(0.2) static bias removed post-shaper (same approach as
     // BluesDriveStyleDSP for the asymmetric character).
     constexpr float kAsymBias       = 0.2f;
     const     float kAsymBiasOffset = std::tanh (kAsymBias);
+
+    // QA-EffectsReview Task 5: MDP-style adaptive drive shaping.  kDriveFloor = the
+    // fraction of the Drive knob applied at silence (soft playing stays cleaner);
+    // the envelope lifts it toward the full knob value as the player digs in.
+    constexpr float kDriveFloor = 0.4f;
+    constexpr float kEnvSens    = 3.0f;    // envelope -> 0..1 drive-lift sensitivity
 }
 
 void BassDriverStyleDSP::prepare (double sampleRate, int maxBlockSize)
@@ -48,6 +54,13 @@ void BassDriverStyleDSP::prepare (double sampleRate, int maxBlockSize)
 
     mDcCoef = 1.0f - (float) (juce::MathConstants<double>::twoPi * 5.0 / sampleRate);
     mDcXL = mDcYL = mDcXR = mDcYR = 0.0f;
+
+    // QA-EffectsReview Task 5: adaptive-drive envelope follower (fast attack, slow
+    // release) + the per-base-sample drive scratch.
+    mEnvAtkCoef = 1.0f - std::exp (-1.0f / (float) (0.003 * sampleRate));   // ~3 ms
+    mEnvRelCoef = 1.0f - std::exp (-1.0f / (float) (0.080 * sampleRate));   // ~80 ms
+    mEnv = 0.0f;
+    mDriveEnvBuf.setSize (1, juce::jmax (1, maxBlockSize), false, true, true);
 }
 
 void BassDriverStyleDSP::reset()
@@ -56,6 +69,7 @@ void BassDriverStyleDSP::reset()
     mXover1Lp.reset();  mXover1Hp.reset();
     mXover2Lp.reset();  mXover2Hp.reset();
     mDcXL = mDcYL = mDcXR = mDcYR = 0.0f;
+    mEnv = 0.0f;
 }
 
 void BassDriverStyleDSP::setDrive (float v01) { v01 = juce::jlimit (0.0f, 1.0f, v01); if (mDrive != v01) mDrive = v01; }
@@ -99,7 +113,7 @@ void BassDriverStyleDSP::process (juce::AudioBuffer<float>& buffer)
         mMidBuf.copyFrom  (ch, 0, buffer, ch, 0, n);  // shared starting point
     }
 
-    // 1a. Xover1 split @ 200 Hz: mLowBuf <- LP, mMidBuf <- HP (rest).
+    // 1a. Xover1 split @ 500 Hz: mLowBuf <- LP, mMidBuf <- HP (rest).
     {
         juce::dsp::AudioBlock<float> lowBlk (mLowBuf);
         juce::dsp::AudioBlock<float> midBlk (mMidBuf);
@@ -139,23 +153,48 @@ void BassDriverStyleDSP::process (juce::AudioBuffer<float>& buffer)
             clean[i] = mid[i] + high[i] * mHigh;
     }
 
-    // 3. Asymmetric soft-clip on the Mid+High sum at 4x oversampled.  Drive
-    // scalar 1..15 (bass drivers are gentler than guitar overdrives).
-    const float drive = 1.0f + mDrive * 14.0f;
+    // 3a. MDP-style dynamics-adaptive drive (QA-EffectsReview Task 5).  An envelope
+    // follower on the Mid+High sum sets a per-base-sample drive: soft playing gets
+    // kDriveFloor of the Drive knob (stays cleaner / keeps dynamics), digging in
+    // lifts it toward the full knob value (the grind comes in on harder playing).
+    const float baseDrive = 1.0f + mDrive * 14.0f;
+    if (mDriveEnvBuf.getNumSamples() < n)
+        mDriveEnvBuf.setSize (1, n, false, false, true);
+    {
+        float* env = mDriveEnvBuf.getWritePointer (0);
+        for (int i = 0; i < n; ++i)
+        {
+            float mono = 0.0f;
+            for (int ch = 0; ch < numCh; ++ch)
+                mono += mCleanSumBuf.getSample (ch, i);
+            mono = std::abs (mono / (float) numCh);
+            const float coef = (mono > mEnv) ? mEnvAtkCoef : mEnvRelCoef;
+            mEnv += (mono - mEnv) * coef;
+            const float lift = std::tanh (mEnv * kEnvSens);   // 0..~1
+            env[i] = baseDrive * (kDriveFloor + (1.0f - kDriveFloor) * lift);
+        }
+    }
+
+    // 3b. Asymmetric soft-clip on the Mid+High sum at 4x oversampled, at the
+    // adaptive drive (mapped per base sample).  Base scalar 1..15 (bass drivers
+    // are gentler than guitar overdrives).
     for (int ch = 0; ch < numCh; ++ch)
         mClippedSumBuf.copyFrom (ch, 0, mCleanSumBuf, ch, 0, n);
     {
         juce::dsp::AudioBlock<float> clipBlk (mClippedSumBuf);
         auto clipSub = clipBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
         auto upBlock = mOs.upsample (clipSub);
-        const int upN   = (int) upBlock.getNumSamples();
-        const int upChs = (int) upBlock.getNumChannels();
+        const int upN     = (int) upBlock.getNumSamples();
+        const int upChs   = (int) upBlock.getNumChannels();
+        const int osRatio = (n > 0) ? juce::jmax (1, upN / n) : 4;
+        const float* env  = mDriveEnvBuf.getReadPointer (0);
         for (int ch = 0; ch < upChs; ++ch)
         {
             float* d = upBlock.getChannelPointer ((size_t) ch);
             for (int i = 0; i < upN; ++i)
             {
-                const float x = d[i] * drive + kAsymBias;
+                const int baseIdx = juce::jmin (n - 1, i / osRatio);
+                const float x = d[i] * env[baseIdx] + kAsymBias;
                 d[i] = std::tanh (x) - kAsymBiasOffset;
             }
         }

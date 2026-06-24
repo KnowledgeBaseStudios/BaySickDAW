@@ -5,18 +5,19 @@
 
 // ── OverdriveDSP - 5F-9 §6 DSP quality pass ──────────────────────────────────
 //
-// Algorithm chain (stereo, per block):
-//   1. Pre BPF (TPT SVF) - 2nd-order bandpass at Color Hz, Q from PreBand.
-//      Only the filtered band is distorted; residual stays clean.
-//   2. Waveshaper - atan(PreAmp · (x100?100:1) · band) / (π/2)
-//                   Processed at 4× via juce::dsp::Oversampling (IIR polyphase,
+// Algorithm chain (stereo, per block) -- QA-EffectsReview Task 5: reworked to the
+// reference's in-series topology (the whole signal is driven; no parallel clean band).
+//   1. Pre LPF (TPT SVF) - 2nd-order low-pass at Color Hz.  PreBand is the AMOUNT of
+//      low-pass blended into the drive input (0 = full bandwidth, 1 = fully low-passed)
+//      -- i.e. "amount of low-pass filtering applied before the overdrive".
+//   2. Waveshaper - x / (1 + |drive*driveIn + bias|) soft-clip, drive = PreAmp*(x100?100:1).
+//                   Processed at 2/4/8/16x via juce::dsp::Oversampling (IIR polyphase,
 //                   low-latency). Reduces aliasing on x100 especially.
-//   3. Recombine  - shaped_band + clean_residual
-//   4. Post LPF (TPT SVF) - 2nd-order Butterworth at PostFilter Hz
-//   5. PostGain   - dB trim
-//   6. Hard clip  - ±1.0 protection for ×100 blow-up
-//   7. 5 Hz DC blocker - strips DC injected by asymmetric shaping at high drive
-//   8. Legacy wet/dry mix
+//   3. Post LPF (TPT SVF) - 2nd-order Butterworth at PostFilter Hz (whole signal).
+//   4. PostGain   - attenuate-only trim (-18..0 dB; the reference's "gain reducer").
+//   5. Hard clip  - +/-1.0 protection for x100 blow-up.
+//   6. 5 Hz DC blocker - strips DC injected by asymmetric shaping at high drive.
+//   7. Wet/dry mix (Blend, default) or parallel-add.
 //
 // Parameters PreAmp / Color / PostFilter / PostGain are smoothed (15-30 ms) to
 // kill zipper noise on automation. Coefs refreshed once per process() block.
@@ -59,12 +60,12 @@ public:
     int  getLatencySamples() const override { return mLatencySamples; }
 
     // ── New API ──────────────────────────────────────────────────────────────
-    void setPreBand    (float v);    // 0 = narrow (high Q), 1 = wide (low Q)   (smoothed, A3)
+    void setPreBand    (float v);    // 0 = no pre-LP (full bandwidth), 1 = full LP at Color (smoothed, A3)
     void setColor      (float hz);   // BPF center frequency (smoothed)
     void setPreAmp     (float v);    // 0-10 drive amount (smoothed)
     void setX100       (bool on);    // x100 gain mode (extreme drive; smoothed scalar 1<->100 via A5)
     void setPostFilter (float hz);   // output LPF cutoff (smoothed)
-    void setPostGain   (float dB);   // output gain trim -18..+18 dB (smoothed)
+    void setPostGain   (float dB);   // output trim -18..0 dB, attenuate-only (smoothed)
     void setWet        (float v);    // 0-1 wet/dry mix (smoothed, A4)
     // C2: pre-shaper DC offset injects even harmonics. Post-shaper the same
     // bias is subtracted back out (approximately -- tanh(drive*bias) is the
@@ -111,13 +112,12 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mBiasSmooth;       // -1..+1 (C2)
 
     // ── TPT SVF filters (stereo) ─────────────────────────────────────────────
-    juce::dsp::StateVariableTPTFilter<float> mBPF;
+    juce::dsp::StateVariableTPTFilter<float> mPreLpf;   // QA-EffectsReview Task 5: pre-LP (was a bandpass)
     juce::dsp::StateVariableTPTFilter<float> mLPF;
 
     // ── 4× oversampler around the shaper (stereo) ────────────────────────────
     std::unique_ptr<juce::dsp::Oversampling<float>> mOversampler;
-    juce::AudioBuffer<float> mBandBuf;     // stereo, mMaxBlock - band pre-shaper
-    juce::AudioBuffer<float> mResidualBuf; // stereo, mMaxBlock - x - band
+    juce::AudioBuffer<float> mBandBuf;      // stereo, mMaxBlock - the in-series drive signal (pre-shaper)
     int  mLatencySamples { 0 };
 
     // ── 5 Hz DC-blocker state (post-clip, pre-wet/dry) ───────────────────────
@@ -133,6 +133,16 @@ private:
     juce::dsp::StateVariableTPTFilter<float> mPedalSplitHpf;
     juce::dsp::StateVariableTPTFilter<float> mPedalSplitLpf;
     juce::AudioBuffer<float>                 mPedalCleanBuf;
+
+    // QA-EffectsReview Task 5: OD-pedal fidelity -- a 500 Hz pre-clip mid-notch
+    // (the pedal's scooped mids) + a 720 Hz 1-pole HPF between the two clip stages
+    // (tightens the low end so it stays punchy under chords), plus a higher drive
+    // ceiling (set in process()).  Per-channel so the per-sample inter-stage HPF
+    // state is valid for L and R independently.
+    juce::dsp::IIR::Filter<float> mPedalNotchL, mPedalNotchR;   // 500 Hz, -4.5 dB peak
+    float mPedalHpfR { 0.0f };                                   // 720 Hz 1-pole HPF coef (oversampled rate)
+    float mPedalHpfX[2] { 0.0f, 0.0f };
+    float mPedalHpfY[2] { 0.0f, 0.0f };
 
     // ── Helpers ──────────────────────────────────────────────────────────────
     void refreshFilterCoefs(int numSamples);   // called at top of each process()

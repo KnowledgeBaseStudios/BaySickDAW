@@ -4,6 +4,13 @@ namespace
 {
     constexpr float kLowShelfHz  = 100.0f;
     constexpr float kHighShelfHz = 3000.0f;
+
+    // QA-EffectsReview Task 5: the ODB-3 is never fully clean -- a grit floor keeps
+    // a little dirt even at Gain=0 (the diodes are always in-circuit; clips peaks
+    // above ~1/kGritFloor), and the gain sweeps from there up to kMaxDrive (it
+    // reaches fuzz territory early, well before noon).
+    constexpr float kGritFloor = 1.6f;
+    constexpr float kMaxDrive  = 50.0f;
 }
 
 void BassOverdriveStyleDSP::prepare (double sampleRate, int maxBlockSize)
@@ -76,8 +83,8 @@ void BassOverdriveStyleDSP::process (juce::AudioBuffer<float>& buffer)
     for (int ch = 0; ch < numCh; ++ch)
         mDryScratch.copyFrom (ch, 0, buffer, ch, 0, n);
 
-    // 1 + 2 + 3. Hard clip at 4x oversampled.
-    const float drive = 1.0f + mGain * 49.0f;
+    // 1 + 2 + 3. Hard clip at 4x oversampled, from a grit floor (never fully clean).
+    const float drive = kGritFloor + mGain * (kMaxDrive - kGritFloor);
     juce::dsp::AudioBlock<float> block (buffer);
     auto upBlock = mOs.upsample (block);
     const int upN   = (int) upBlock.getNumSamples();

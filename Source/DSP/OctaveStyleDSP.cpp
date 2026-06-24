@@ -4,6 +4,15 @@ namespace
 {
     constexpr float kRangeMinHz = 300.0f;
     constexpr float kRangeMaxHz = 3000.0f;
+
+    // QA-EffectsReview Task 5: period-doubler confidence gating.
+    constexpr float kConfThreshold = 0.5f;   // YIN confidence to engage the doubler
+    constexpr float kConfSmooth    = 0.25f;  // per-block confidence fade coef
+
+    // QA-EffectsReview Task 5 (C3): voicing -- transient duck + shifted-voice LP.
+    constexpr float kTransRatio = 1.5f;    // fast-env > slow-env * this -> a transient/attack
+    constexpr float kTransFloor = 0.01f;   // ignore tiny levels (don't duck on noise)
+    constexpr float kDuckDepth  = 0.4f;    // shifted-voice gain during an attack
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14,7 +23,7 @@ void OctaveStyleDSP::GranularShifter::reset()
     std::fill (ring.begin(), ring.end(), 0.0f);
     writePos = 0;
     readPos1 = 0.0;
-    readPos2 = (double) (kGrainSize / 2);
+    readPos2 = (double) (grainSize / 2);
 }
 
 float OctaveStyleDSP::GranularShifter::interp (double pos) const noexcept
@@ -33,7 +42,7 @@ void OctaveStyleDSP::GranularShifter::process (const float* input,
                                                 int numSamples)
 {
     const float ratio = pitchRatio;
-    const float invGrain = 1.0f / (float) kGrainSize;
+    const float invGrain = 1.0f / (float) grainSize;
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -55,10 +64,14 @@ void OctaveStyleDSP::GranularShifter::process (const float* input,
             // diff < 0  -> read is ahead of write by '-diff' samples
             // For ratio > 1 read overtakes -> diff goes negative -> jump back.
             // For ratio < 1 read falls behind -> diff grows large positive.
-            if (diff < (double) kGrainSize)
-                rp -= (double) kGrainSize;            // jump back, lengthen lag
-            else if (diff > (double) (kBufferSize - kGrainSize))
-                rp += (double) kGrainSize;            // jump forward, shorten lag
+            if (diff < (double) grainSize)
+                rp -= (double) grainSize;            // jump back, lengthen lag
+            else if (diff > (double) (kBufferSize - grainSize))
+                rp += (double) grainSize;            // jump forward, shorten lag
+            // Keep rp bounded so interp()'s wrap + the diff wrap above stay O(1).
+            // Without this rp grows ~1 sample/sample and the wrap loops climb CPU.
+            while (rp < 0.0)                   rp += (double) kBufferSize;
+            while (rp >= (double) kBufferSize) rp -= (double) kBufferSize;
         };
 
         adjust (readPos1);
@@ -75,7 +88,7 @@ void OctaveStyleDSP::GranularShifter::process (const float* input,
             while (diff < 0.0)               diff += kBufferSize;
             while (diff >= kBufferSize)      diff -= kBufferSize;
             // Modulo grainSize -> 0..grainSize, normalise to 0..1.
-            const double mod = std::fmod (diff, (double) kGrainSize);
+            const double mod = std::fmod (diff, (double) grainSize);
             return (float) (mod * (double) invGrain);
         };
 
@@ -86,7 +99,96 @@ void OctaveStyleDSP::GranularShifter::process (const float* input,
         output[i] = s1 * w1 + s2 * w2;
 
         readPos1 += (double) ratio;
+        if (readPos1 >= (double) kBufferSize) readPos1 -= (double) kBufferSize;
         readPos2 += (double) ratio;
+        if (readPos2 >= (double) kBufferSize) readPos2 -= (double) kBufferSize;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PeriodDoubler (PSOLA octave-down) -- QA-EffectsReview Task 5
+// ─────────────────────────────────────────────────────────────────────────────
+void OctaveStyleDSP::PeriodDoubler::reset()
+{
+    ring.fill (0.0f);
+    writePos    = 0;
+    readPos     = 0.0;
+    xfadeOldPos = 0.0;
+    xfadeLeft   = 0;
+    grainCount  = 0;
+    repeat      = 0;
+    period      = pendingPeriod;
+}
+
+float OctaveStyleDSP::PeriodDoubler::interp (double pos) const noexcept
+{
+    while (pos < 0.0)          pos += kRingSize;
+    while (pos >= kRingSize)   pos -= kRingSize;
+    const int   i0 = (int) pos;
+    const int   i1 = (i0 + 1) % kRingSize;
+    const float f  = (float) (pos - (double) i0);
+    return ring[(size_t) i0] * (1.0f - f) + ring[(size_t) i1] * f;
+}
+
+void OctaveStyleDSP::PeriodDoubler::process (const float* input, float* output, int numSamples)
+{
+    for (int i = 0; i < numSamples; ++i)
+    {
+        ring[(size_t) writePos] = input[i];
+        writePos = (writePos + 1) % kRingSize;
+
+        // Read the doubled grain, with a short seam crossfade across the jumps.
+        float s = interp (readPos);
+        if (xfadeLeft > 0)
+        {
+            const float t = (float) xfadeLeft / (float) kXfade;   // 1 -> 0
+            s = s * (1.0f - t) + interp (xfadeOldPos) * t;
+            xfadeOldPos += 1.0;
+            if (xfadeOldPos >= (double) kRingSize) xfadeOldPos -= (double) kRingSize;
+            --xfadeLeft;
+        }
+        output[i] = s;
+
+        // Keep readPos wrapped into [0,kRingSize).  CRITICAL: if it grows unbounded
+        // (~1 sample/sample) the interp() + lag-guard wraps become O(readPos/kRingSize)
+        // loops and the CPU climbs the longer you play (and persists across transport
+        // pause, since the pointer isn't reset).
+        readPos += 1.0;
+        if (readPos >= (double) kRingSize) readPos -= (double) kRingSize;
+        if (++grainCount >= period)
+        {
+            grainCount  = 0;
+            xfadeOldPos = readPos;     // old head keeps going during the crossfade
+            xfadeLeft   = kXfade;
+            if (++repeat < repeatsPerGrain)
+            {
+                readPos -= (double) period;                         // replay this period
+                if (readPos < 0.0) readPos += (double) kRingSize;
+            }
+            else
+            {
+                repeat  = 0;
+                readPos += (double) (repeatsPerGrain - 1) * period; // skip the discarded periods
+                while (readPos >= (double) kRingSize) readPos -= (double) kRingSize;
+                period  = pendingPeriod;                            // adopt the new period at the boundary
+            }
+
+            // Lag guard: keep readPos safely behind the write head (read only
+            // already-written data; never overtake it).  Re-anchor ~2 periods back
+            // on drift -- rare, only on large pitch glides.  INVARIANT: minLag must
+            // stay >= period + kXfade so the crossfade's old head can't read ahead
+            // of the write pointer (the +8 is slack); preserve that if revisiting.
+            double lag = (double) writePos - readPos;
+            while (lag < 0.0)        lag += (double) kRingSize;
+            while (lag >= kRingSize) lag -= (double) kRingSize;
+            const double minLag = (double) (period + kXfade + 8);
+            const double maxLag = (double) (kRingSize - 2 * period - kXfade - 8);
+            if (lag < minLag || lag > maxLag)
+            {
+                readPos = (double) writePos - (double) (2 * period);
+                while (readPos < 0.0) readPos += (double) kRingSize;
+            }
+        }
     }
 }
 
@@ -109,6 +211,8 @@ void OctaveStyleDSP::prepare (double sampleRate, int maxBlockSize)
     mFilteredBuf .setSize (2, n, false, true, true);
     for (auto& b : mShiftedBuf)
         b.setSize (2, n, false, true, true);
+    for (auto& b : mDoublerScratch)
+        b.setSize (2, n, false, true, true);
 
     // Granular shifter pitch ratios per octave path.
     for (auto& chArr : mShifters)
@@ -118,6 +222,26 @@ void OctaveStyleDSP::prepare (double sampleRate, int maxBlockSize)
         chArr[kMinusTwo].setPitchRatio (0.25f);
         for (auto& s : chArr) s.reset();
     }
+
+    // QA-EffectsReview Task 5: PSOLA period-doublers (octave-DOWN) + pitch tracker.
+    for (auto& chArr : mDoublers)
+    {
+        chArr[kDdMinusOne].setRepeats (2);   // -1 oct
+        chArr[kDdMinusTwo].setRepeats (4);   // -2 oct
+        for (auto& d : chArr) d.reset();
+    }
+    mConf = 0.0f;
+    mYin.prepare (sampleRate);
+
+    // QA-EffectsReview Task 5 (C3): voicing coefs.
+    mFastAtkCoef     = 1.0f - std::exp (-1.0f / (float) (0.001 * sampleRate));   // ~1 ms attack
+    mFastRelCoef     = 1.0f - std::exp (-1.0f / (float) (0.015 * sampleRate));   // ~15 ms release
+    mSlowCoef        = 1.0f - std::exp (-1.0f / (float) (0.080 * sampleRate));   // ~80 ms slow env
+    mDuckRecoverCoef = 1.0f - std::exp (-1.0f / (float) (0.025 * sampleRate));   // ~25 ms duck recover
+    mVoiceLpCoef     = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * 5000.0f / (float) sampleRate);
+    mFastEnv = mSlowEnv = 0.0f;
+    mDuck = 1.0f;
+    for (auto& v : mVoiceLpState) { v[0] = v[1] = 0.0f; }
 
     mDcCoef = 1.0f - (float) (juce::MathConstants<double>::twoPi * 5.0 / sampleRate);
     mDcXL = mDcYL = mDcXR = mDcYR = 0.0f;
@@ -133,6 +257,14 @@ void OctaveStyleDSP::reset()
     for (auto& chArr : mShifters)
         for (auto& s : chArr)
             s.reset();
+    for (auto& chArr : mDoublers)
+        for (auto& d : chArr)
+            d.reset();
+    mYin.reset();
+    mConf = 0.0f;
+    mFastEnv = mSlowEnv = 0.0f;
+    mDuck = 1.0f;
+    for (auto& v : mVoiceLpState) { v[0] = v[1] = 0.0f; }
     mRangeLpf.reset();
     mDcXL = mDcYL = mDcXR = mDcYR = 0.0f;
     mFwrDcXL = mFwrDcYL = mFwrDcXR = mFwrDcYR = 0.0f;
@@ -182,6 +314,7 @@ void OctaveStyleDSP::process (juce::AudioBuffer<float>& buffer)
     };
     ensureSize (mFilteredBuf);
     for (auto& b : mShiftedBuf) ensureSize (b);
+    for (auto& b : mDoublerScratch) ensureSize (b);
 
     // 1. Copy input into the Range-filtered scratch (used as the source for
     //    the pitch-shift paths; the dry signal stays in `buffer` until the
@@ -198,13 +331,57 @@ void OctaveStyleDSP::process (juce::AudioBuffer<float>& buffer)
     // 2. Generate the three pitch-shifted streams.
     if (mMode == Mode::Polyphonic)
     {
+        // Feed the pitch tracker (Range-filtered input so the fundamental dominates).
+        if (numCh > 1)
+            mYin.pushAudio (mFilteredBuf.getReadPointer (0), mFilteredBuf.getReadPointer (1), n);
+        else
+            mYin.pushAudio (mFilteredBuf.getReadPointer (0), n);
+
+        // Read the published pitch -> a period-aligned granular grain (kills the
+        // warble) + the doublers' period; smooth the confidence (it crossfades the
+        // crisp doubler vs the granular fallback below).
+        const float hz   = mYin.getFrequencyHz();
+        const float conf = mYin.getConfidence();
+        if (hz >= PitchTrackerYIN::kMinFreqHz)
+        {
+            const double P     = mSampleRate / (double) hz;
+            const int    Pi    = (int) std::lround (P);
+            const int    nPer  = juce::jmax (1, (int) std::lround (1024.0 / P));   // ~1024-sample target
+            const int    grain = juce::jlimit (256, GranularShifter::kBufferSize / 2, nPer * Pi);
+            for (auto& chArr : mShifters) for (auto& s : chArr) s.setGrainSize (grain);
+            for (auto& chArr : mDoublers) for (auto& d : chArr) d.setPendingPeriod (Pi);
+        }
+        const float confTarget = (hz >= PitchTrackerYIN::kMinFreqHz && conf > kConfThreshold) ? 1.0f : 0.0f;
+        const float prevConf   = mConf;
+        mConf += (confTarget - mConf) * kConfSmooth;   // per-block one-pole
+
         for (int ch = 0; ch < numCh; ++ch)
         {
             const int chIdx = juce::jmin (ch, 1);
             const float* src = mFilteredBuf.getReadPointer (ch);
-            for (int oct = 0; oct < 3; ++oct)
-                mShifters[(size_t) chIdx][(size_t) oct].process (
-                    src, mShiftedBuf[oct].getWritePointer (ch), n);
+
+            // +1 oct: period-synced granular shifter.
+            mShifters[(size_t) chIdx][kPlusOne].process (
+                src, mShiftedBuf[kPlusOne].getWritePointer (ch), n);
+
+            // -1 / -2 oct: crossfade the PSOLA doubler (confident single notes) against
+            // the period-synced granular (chords / unvoiced) by the smoothed confidence.
+            mShifters[(size_t) chIdx][kMinusOne].process (
+                src, mShiftedBuf[kMinusOne].getWritePointer (ch), n);
+            mShifters[(size_t) chIdx][kMinusTwo].process (
+                src, mShiftedBuf[kMinusTwo].getWritePointer (ch), n);
+            mDoublers[(size_t) chIdx][kDdMinusOne].process (
+                src, mDoublerScratch[0].getWritePointer (ch), n);
+            mDoublers[(size_t) chIdx][kDdMinusTwo].process (
+                src, mDoublerScratch[1].getWritePointer (ch), n);
+
+            // granular *= (1 - conf); doubler *= conf; sum -> mShiftedBuf.
+            mShiftedBuf[kMinusOne].applyGainRamp (ch, 0, n, 1.0f - prevConf, 1.0f - mConf);
+            mShiftedBuf[kMinusTwo].applyGainRamp (ch, 0, n, 1.0f - prevConf, 1.0f - mConf);
+            mDoublerScratch[0].applyGainRamp (ch, 0, n, prevConf, mConf);
+            mDoublerScratch[1].applyGainRamp (ch, 0, n, prevConf, mConf);
+            mShiftedBuf[kMinusOne].addFrom (ch, 0, mDoublerScratch[0], ch, 0, n);
+            mShiftedBuf[kMinusTwo].addFrom (ch, 0, mDoublerScratch[1], ch, 0, n);
         }
     }
     else // Vintage
@@ -265,6 +442,34 @@ void OctaveStyleDSP::process (juce::AudioBuffer<float>& buffer)
                 d[i]  = y;
             }
         }
+    }
+
+    // 2b. C3 voicing (Polyphonic only -- Vintage keeps its own raw character):
+    //     transient-duck the shifted streams (the dry attack leads, the shifted
+    //     voices fade in behind it) + a gentle low-pass to mask pitch-shift smear.
+    //     The detector runs on the still-dry `buffer`.
+    if (mMode == Mode::Polyphonic)
+    for (int i = 0; i < n; ++i)
+    {
+        float mono = 0.0f;
+        for (int ch = 0; ch < numCh; ++ch)
+            mono += buffer.getSample (ch, i);
+        mono = std::abs (mono / (float) numCh);
+
+        mFastEnv += (mono - mFastEnv) * ((mono > mFastEnv) ? mFastAtkCoef : mFastRelCoef);
+        mSlowEnv += (mono - mSlowEnv) * mSlowCoef;
+        if (mFastEnv > mSlowEnv * kTransRatio + kTransFloor)
+            mDuck = kDuckDepth;                              // duck on the attack
+        mDuck += (1.0f - mDuck) * mDuckRecoverCoef;          // recover toward 1
+
+        for (int v = 0; v < 3; ++v)
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                float* d  = mShiftedBuf[v].getWritePointer (ch);
+                float& lp = mVoiceLpState[v][ch];
+                lp += (d[i] - lp) * mVoiceLpCoef;            // gentle 1-pole LP
+                d[i] = lp * mDuck;                           // + transient duck
+            }
     }
 
     // 3. Sum: out = direct*level + sum(shifted * level).  Scale dry by

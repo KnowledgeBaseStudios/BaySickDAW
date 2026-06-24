@@ -33,6 +33,12 @@ void FuzzStyleDSP::setLevel (float dB)
     if (mLevel != dB) mLevel = dB;
 }
 
+void FuzzStyleDSP::setBoost (float dB)
+{
+    dB = juce::jlimit (0.0f, 20.0f, dB);
+    if (mBoost != dB) mBoost = dB;
+}
+
 void FuzzStyleDSP::process (juce::AudioBuffer<float>& buffer)
 {
     if (bypassed) return;
@@ -47,9 +53,10 @@ void FuzzStyleDSP::process (juce::AudioBuffer<float>& buffer)
     const int upN   = (int) upBlock.getNumSamples();
     const int upChs = (int) upBlock.getNumChannels();
 
-    // Drive scales by Fuzz (1..50).  Same range across all modes; the
-    // character difference is in the shaper, not the gain.
-    const float drive = 1.0f + mFuzz * 49.0f;
+    // Drive scales by Fuzz (1..50), then the Boost knob pushes the input harder
+    // into the clipper (QA-EffectsReview Task 5).  Same range across all modes;
+    // the character difference is in the shaper, not the gain.
+    const float drive = (1.0f + mFuzz * 49.0f) * juce::Decibels::decibelsToGain (mBoost);
 
     switch (mMode)
     {
@@ -133,6 +140,7 @@ void FuzzStyleDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("fuzz",  mFuzz,         nullptr);
     state.setProperty ("mode",  (int) mMode,   nullptr);
     state.setProperty ("level", mLevel,        nullptr);
+    state.setProperty ("boost", mBoost,        nullptr);
     state.setProperty ("bypassed", (int) bypassed, nullptr);
     if (auto xml = state.createXml())
         juce::AudioProcessor::copyXmlToBinary (*xml, dest);
@@ -146,5 +154,6 @@ void FuzzStyleDSP::setStateInformation (const void* data, int sz)
     setFuzz  ((float)(double) state.getProperty ("fuzz",  0.5));
     setMode  ((int)           state.getProperty ("mode",  (int) Mode::F));
     setLevel ((float)(double) state.getProperty ("level", 0.0));
+    setBoost ((float)(double) state.getProperty ("boost", 0.0));
     bypassed = ((int) state.getProperty ("bypassed", 0)) != 0;
 }

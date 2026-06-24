@@ -144,4 +144,35 @@ close after surfacing the strip list to Jeff.
 - Files (beyond sub-chunk 1): `SynthStyleDSP.cpp/.h`, `PolyPitchTracker.cpp/.h` (new), `EffectEditorPanels.cpp`, `SharedUI.cpp`, `CMakeLists.txt` + comment-only edits in 4 BaySickVocal headers.
 - **Verify status:** Task-4 DSP/panels verified by Jeff in Debug+Release; the brand-safety string/comment + Fuzz-label edits are text-only, awaiting a confirm build before commit.
 - Diagnostic catalog: none added.
-- **Next:** build-confirm the brand-safety/Fuzz edits -> one combined Task-4 commit -> Task 5 (Drive + Octave).
+- **Next:** Task 5 (Drive + Octave).
+- **LANDED — Task 4 committed `1bb2c18`** (16 files, +735/-125) after Jeff verified PASS in Debug + Release (incl. the brand-safety edits). Commit message is brand-free (direct gear names removed, generic "-style" descriptors kept, per Jeff).
+
+## 2026-06-19 — Task 5 (Drive + Octave) — Chunk A complete (verified); Chunk B/C in progress
+
+- **Chunk A (drive/distortion rack + pedals) — VERIFIED PASS (Jeff, Debug+Release, in two sub-builds):**
+  - **Overdrive RACK (Blood Overdrive):** reference-confirmed via the FL manual (6 controls: PreBand/Color/PreAmp/x100/PostFilter/PostGain). DSP reworked: pre-filter bandpass -> lowpass + in-series whole-signal drive (dropped the parallel clean residual + the `mResidualBuf` member; `mBPF` renamed `mPreLpf`); PreBand remapped to lowpass-amount blend; PostGain attenuate-only (-18..0, enforced on legacy load). NEW Basic/Advanced toggle (Basic = the 6 reference controls; Advanced = Bias/Wet/Parallel/Oversampling, our additions). **SPEC CALL:** Jeff confirmed the full reference match (bandpass->lowpass) over the plan's literal "drop residual" alone, which would have thinned the bandpass.
+  - **OD pedal (OD-3):** 500 Hz pre-clip mid-notch + 720 Hz 1-pole inter-stage HPF + drive ceiling `1+preAmp*4` -> `*13`.
+  - **Distortion (DS-1):** scoop recentred ~800 -> ~500 Hz (kToneLpf 400->250, kToneHpf 2000->1000).
+  - **Fuzz (FZ-5):** NEW Boost knob (0..+20 dB, inserted between Fuzz/Level, handlers reindexed; serialized "boost", defaults 0).
+  - **Blues (BD-2):** ~100 Hz +3.5 dB fixed body peak + envelope-driven dual-stage shaper (asym tanh cross-fading into a cubic soft-clip by |s1| -> 2nd->3rd harmonic shift as the player digs in). `StereoLPF` alias renamed `StereoIIR`.
+  - **High-Gain (MT-2):** pre-boost 700/+9 -> 1k/+36 (research-confirmed: Electric Druid measured "+36 dB at 1 kHz"). Post-clip "V" CORRECTED -- the real pedal does NOT cut mids; it's two fixed gyrator BOOSTS (~100 Hz + ~5 kHz, the V is the valley between). **Both the plan's "-12 cuts" AND my mid-notch guess were wrong; multi-source research (Electric Druid / audio-tk / guitarpedalsvisualized) found the real boosts -- Jeff: "I want what the metal zone pedal actually does."** `mFixedMidScoop` -> `mFixedScoopLo`+`mFixedScoopHi`. dsp-test-signal verdict: provably bounded (tanh ceiling absorbs the +36 dB x 1000x); the 5 kHz +10 dB IS the MT-2's signature harsh treble (faithful, not a bug).
+- **3 fix-vs-accept spec calls (Jeff chose ALL the builds, not accept-faithful):** Octave -> build FFT/pitch-sync shifter; Bass Driver -> build adaptive (MDP) drive; Bass Overdrive -> add grit-floor.
+- **Chunk C (Octave) design researched + saved** to `Research Reports/daw-architecture-octave-pitch-shift-engine-2026-06-18.md` (hybrid: PSOLA period-doubler for octave-down + small-FFT for up/poly + POG-style voicing; reuses PitchTrackerYIN + the SY-style tracker wiring; NOT the PhaseVocoder / NOT Rubber Band).
+- **Chunk B (bass) in progress:** BassDriver already keeps lows clean (3-band, low bypasses clipper) -> the MDP gap is the adaptive/dynamics drive + the SansAmp->BB-1X doc-fix; BassOverdrive is clean at Gain=0 (grit-floor gap confirmed). Research on the real BB-1X MDP + ODB-3 grit-floor running.
+- Diagnostic catalog: none added.
+- **Next:** implement Chunk B (BassDriver adaptive drive + doc-fix; BassOverdrive grit-floor) per the research -> Chunk C (Octave shifter) -> one Task-5 commit at the end.
+
+## 2026-06-19 — Task 5 (Drive + Octave) — Chunk B + C complete; Task 5 DONE (all 9 units verified)
+
+- **Chunk B (bass) — VERIFIED PASS:**
+  - **Bass Driver (re-pointed SansAmp -> BB-1X):** the multiband-clean-lows was already there; added the missing MDP piece -- an envelope-driven **dynamics-adaptive drive** (soft playing = cleaner, dig in = grind; kDriveFloor 0.4 + fast/slow env -> per-base-sample drive on the mid/high band) -- and raised the low/mid split 200 -> 500 Hz (more low end kept clean). Research (official copy + TalkBass measurement): MDP is frequency- AND dynamics-adaptive, keeps lows tight while mids/highs grind, ~600 Hz split, parallel clean Blend. Header/doc rewritten to the BB-1X.
+  - **Bass Overdrive (ODB-3):** grit floor added -- drive now `1.6 + mGain*48.4` (never fully clean at Gain=0; diodes always in-circuit), dirties early. Research confirmed the ODB-3 is never clean at min gain + is a harsh/near-fuzz distortion.
+- **Chunk C (Octave) -- the big build -- VERIFIED PASS. B/hybrid** (Jeff chose B = PSOLA over the safe period-synced-granular after a full A-vs-B benefit/drawback/future-functionality comparison; B builds reusable pitch-synchronous infra for a future harmonizer / vocal harmony):
+  - **C1 -- PSOLA period-doubler (octave-DOWN):** new `PeriodDoubler` (re-emits each pitch period 2x for -1 / 4x for -2; period-aligned seam crossfade; lag guard), driven by `PitchTrackerYIN` (SY-style wiring); confidence-gated.
+  - **C2 -- period-synced granular + chord fallback:** granular grain now sized to an integer multiple of the detected period (kills the +1 warble); -1/-2 crossfade the crisp doubler (confident single notes) vs the granular (chords/unvoiced) by smoothed confidence -> Polyphonic works on EVERYTHING.
+  - **C3 -- POG-style voicing (Polyphonic only):** a transient duck (dry attack leads, shifted voices fade in behind) + a gentle ~5 kHz LP on the shifted streams to mask smear.
+  - **CPU-CLIMB BUG found + fixed (Jeff caught it):** the doubler's `readPos` + the pre-existing granular's `readPos1/2`/`rp` grew UNBOUNDED -> the ring-wrap `while` loops became O(pointer/ringSize) -> DSP% climbed the longer you played + persisted across transport pause (resumed from where it stopped). Fixed by wrapping the read pointers each sample (behavior-preserving). New memory `reference_wrap_ring_read_pointers.md`; the build-review (no-OOB) + /test-signal (audio) both MISSED it.
+- **All 9 units verified PASS (Jeff, Debug+Release, across the sub-builds).** Every Octave sub-step (C1/C2/C3) + the CPU fix re-verified by ear/meter.
+- Files (Task 5 total): 16 modified (15 source + this running-notes doc) + the Octave research report (new, `Research Reports/daw-architecture-octave-pitch-shift-engine-2026-06-18.md`). Each meaty unit got an adversarial build-safety review (SAFE-TO-BUILD) before Jeff built; HighGain + Octave-C1 also got /test-signal plans.
+- Diagnostic catalog: none added (PitchTrackerYIN's worker thread is permanent, not diagnostic).
+- **Next:** the single Task-5 commit (brand-free message), then Task 6 (Compressors).

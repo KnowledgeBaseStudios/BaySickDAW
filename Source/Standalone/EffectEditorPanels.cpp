@@ -2155,7 +2155,8 @@ struct FlangerPanel : public EditorPanelBase
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OverdrivePanel
-// Drive | Color | Band | Filter | Out | Wet   +  x100 toggle switch
+// Basic (reference): Drive | Color | Band | Filter | Out  +  x100
+// Advanced (our additions): Bias + Wet knobs, Parallel toggle, Oversampling selector
 // ─────────────────────────────────────────────────────────────────────────────
 struct OverdrivePanel : public EditorPanelBase
 {
@@ -2163,17 +2164,21 @@ struct OverdrivePanel : public EditorPanelBase
     std::unique_ptr<DualLabelToggle>     parallelTog;   // C4
     std::unique_ptr<ChickenHeadSelector> osSel;         // C5
 
+    // QA-EffectsReview Task 5: Bias + Wet + Parallel + Oversampling are our additions
+    // beyond the reference's 6 controls, so this panel gets the Basic/Advanced toggle.
+    bool hasAdvancedControls() const override { return true; }
+
     explicit OverdrivePanel(OverdriveDSP* dsp)
     {
         setLookAndFeel(&HarmonicLAF::get());
 
         buildKnobs(*this, knobs, {
             { "Drive",   0.f,   10.f,   5.f,  0.1f, "Pre-amp drive" },
-            { "Color",  200.f, 8000.f,1000.f, 10.f, "BPF center frequency (Hz)" },
-            { "Band",    0.f,   1.f,   0.5f,  0.01f,"BPF width (0=narrow, 1=wide)" },
+            { "Color",  200.f, 8000.f,1000.f, 10.f, "Pre-filter low-pass cutoff (Hz)" },
+            { "Band",    0.f,   1.f,   0.5f,  0.01f,"Amount of pre low-pass into the drive (0 = full bandwidth, 1 = full LP at Color)" },
             { "Bias",   -1.f,   1.f,   0.f,   0.01f,"Pre-shaper DC bias (adds even harmonics / tube-like warmth). 0 = symmetric (odd harmonics only)" },
             { "Filter", 500.f,18000.f,8000.f, 10.f, "Post LPF cutoff (Hz)" },
-            { "Out",   -18.f,  18.f,   0.f,   0.5f, "Output gain (dB)" },
+            { "Out",   -18.f,   0.f,   0.f,   0.5f, "Output level -- attenuate-only (-18..0 dB; max = unity gain)" },
             { "Wet",    0.f,    1.f,   1.0f, 0.01f, "Wet/dry mix (1 = full wet)" },
         });
 
@@ -2245,26 +2250,38 @@ struct OverdrivePanel : public EditorPanelBase
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
         b.removeFromRight(4);
 
-        // Right sidebar (taken right-to-left; visual order L->R = OS | Parallel | x100)
+        // QA-EffectsReview Task 5: Basic = the reference's 6 controls (Drive/Color/Band/
+        // Filter/Out + x100); Advanced adds the Bias + Wet knobs + Parallel + Oversampling.
+        const bool adv = ! mBasicMode;
+        if (parallelTog) parallelTog->setVisible(adv);
+        if (osSel)       osSel->setVisible(adv);
+        if (knobs.size() > 6 && knobs[3]) knobs[3]->setVisible(adv);   // Bias
+        if (knobs.size() > 6 && knobs[6]) knobs[6]->setVisible(adv);   // Wet
+
+        // Right sidebar (right-to-left): x100 always; Parallel + OS Advanced only.
         if (x100Tog)
         {
             auto col = b.removeFromRight(62); b.removeFromRight(2);
             x100Tog->setBounds(col.reduced(1));
         }
-        if (parallelTog)
+        if (adv && parallelTog)
         {
             auto col = b.removeFromRight(68); b.removeFromRight(2);
             parallelTog->setBounds(col.reduced(1));
         }
-        if (osSel)
+        if (adv && osSel)
         {
             auto col = b.removeFromRight(66); b.removeFromRight(2);
             osSel->setBounds(col.reduced(2));
         }
         b.removeFromRight(4);
 
-        // Knobs fill remaining width
-        layoutKnobsH(b, knobs);
+        // Knobs: reference knobs always; Bias (idx 3) + Wet (idx 6, our additions) Advanced only.
+        std::vector<VKnob*> vis;
+        for (int i = 0; i < (int) knobs.size(); ++i)
+            if (adv || (i != 3 && i != 6))
+                if (knobs[i]) vis.push_back(knobs[i].get());
+        layoutKnobsH(b, vis);
     }
 };
 
@@ -3446,7 +3463,7 @@ struct DistortionStylePanel : public EditorPanelBase
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FuzzStylePanel - FZ Style Fuzz
-// 3 controls: Level / Mode chickenhead (M / F / O) / Fuzz
+// 4 controls: Fuzz / Boost / Level + Mode chickenhead (Gated / Germanium / Octave)
 // ─────────────────────────────────────────────────────────────────────────────
 struct FuzzStylePanel : public EditorPanelBase
 {
@@ -3461,6 +3478,7 @@ struct FuzzStylePanel : public EditorPanelBase
 
         buildKnobs (*this, knobs, {
             { "Fuzz",  0.f,   1.f,   0.5f, 0.001f, "Fuzz amount" },
+            { "Boost", 0.f,   20.f,  0.f,  0.1f,   "Input boost into the fuzz (dB) -- pushes the clipping harder without changing Fuzz" },
             { "Level", -24.f, 12.f,  0.f,  0.1f,   "Output level (dB)" },
         });
 
@@ -3477,12 +3495,14 @@ struct FuzzStylePanel : public EditorPanelBase
         addAndMakeVisible (*modeSel);
 
         knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setFuzz  ((float) knobs[0]->slider.getValue()); };
-        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevel ((float) knobs[1]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setBoost ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevel ((float) knobs[2]->slider.getValue()); };
 
         if (dsp)
         {
             knobs[0]->slider.setValue (dsp->mFuzz,  juce::sendNotificationSync);
-            knobs[1]->slider.setValue (dsp->mLevel, juce::sendNotificationSync);
+            knobs[1]->slider.setValue (dsp->mBoost, juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->mLevel, juce::sendNotificationSync);
         }
     }
 
