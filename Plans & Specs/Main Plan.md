@@ -194,6 +194,58 @@ the plan via ExitPlanMode, the plan body assumes the agent's picks
 Surfacing via chat first keeps the plan body honest: every plan-body
 line reflects a user-confirmed decision, not an agent default.
 
+**Rule 6 — Comment Policy: comments only for the six keeper
+categories; the code is the source of truth.** Adopted 2026-06-24
+(QA-Rules).  Write a comment ONLY when it falls in one of six keeper
+categories: (1) architectural intent / the "why" a non-obvious approach
+was chosen (incl. the existing `// HOLD-FOR-<reason>` markers);
+(2) real-time audio-thread danger zones (no allocation, no locks,
+lock-free only); (3) DSP / domain references (formulas, papers,
+hardware/schematic refs — modeled-gear names are allowed here per the
+no-brand-names rule); (4) framework quirks / workarounds (the JUCE/OS
+idiosyncrasy the "ugly" code exists for); (5) magic-number calibrations
++ how the value was derived; (6) thread-safety / ownership (who owns a
+resource, which thread reads vs writes).  Never narrate WHAT the code
+does — restating the code is the bloat that goes stale and misleads.
+The code is the single source of truth; never trust a comment over the
+code.  **Cleanup clause:** when editing code, strip or fix
+non-conforming comments in the regions you touch (the function/block
+being changed), same edit pass — scoped to edited regions only, never a
+whole-file audit.  Sanctioned hygiene, not a "don't expand scope"
+violation.  No retroactive mass strip: existing comments in untouched
+files stay.  Edges: keep named-arg hints (`/*keepContent=*/`); strip
+date/batch tags baked into comments (`// H-9 (2026-05-02):`) and
+classify the rest normally; keep real TODO/FIXME/HACK; decorative
+section dividers are bloat (the ascii-only rule governs unicode in a
+legitimate comment, not whether to keep a divider).  Supersedes the
+prior "comments only when WHY is non-obvious" guidance.
+
+**Rule 7 — Communication Style: direct, no cheerleading.** Adopted
+2026-06-24 (QA-Rules).  Be direct and straightforward.  No cheerleading
+phrases ("that's absolutely right," "great question").  Tell Jeff when
+an idea is flawed, incomplete, or poorly thought through.  Casual
+language and occasional profanity when it fits.  Focus on practical
+problems and realistic solutions over positivity or encouragement.
+
+**Rule 8 — Technical Approach: challenge assumptions.** Adopted
+2026-06-24 (QA-Rules).  Challenge assumptions, point out potential
+issues, and ask the hard questions about implementation, scalability,
+and real-world viability.  If something won't work, say so directly and
+explain why — don't just dismiss it, and don't rubber-stamp it.
+Challenging is not deciding: spec calls still go to Jeff per Rule 5.
+
+**Rule 9 — Commit messages stay brief.** Adopted 2026-06-24 (QA-Rules).
+Commit messages contain only the files/areas touched + base-level
+what-was-done.  No multi-paragraph narrative.  The full narrative lives
+in the Implemented Work Log + running notes (in-repo) — duplicating it
+in the commit body doubles the work and tokens for zero added record.
+Brief commits skip `/draft-commit`: write the one-liner directly,
+surface the message + full `git status`, wait for approval.  Format:
+`<Batch> Task N: <one-line what> (<scope>)` + `Co-Authored-By` trailer;
+`git commit -m` (`-F` only on a quoting/encoding hazard).  Supersedes
+the prior multi-paragraph-narrative convention + the
+every-commit-via-drafter rule.
+
 ### Document Formatting Conventions (canonical for all `Plans & Specs/` docs)
 
 All five `Plans & Specs/` documents follow a shared formatting doctrine
@@ -455,24 +507,21 @@ mirror the equivalents from that project's CLAUDE.md.
   Diagnose before retrying.
 - **Concept blocker** (you hit an unfamiliar idea) → `/explain
   <concept>`.  Don't bluff or web-search inline; route to the agent.
-- **Pre-commit** → `/draft-commit`.  Show the user the proposed
-  message; commit only after explicit approval.
-- **Long commit messages (this project's multi-paragraph
-  technical-narrative style): use `git commit -F <file>`, NOT
-  bash heredoc.**  Write the message to
-  `.git/COMMIT_EDITMSG_<batch>-<task>.txt`, run
-  `git commit -F <that file>`, then `rm` the temp file.  Reason:
-  the Bash tool harness's outer command wrapping collides with
-  the dozens of apostrophes per long message (`Jeff's blueprint`
-  / `framework's stealing` / etc.), tripping bash with
-  "unexpected EOF while looking for matching `'`".  File-based
-  bypasses all shell quoting interaction with the message body.
-  Heredoc (`git commit -m "$(cat <<'EOF' ... EOF)"`) is fine for
-  short single-paragraph commits without apostrophes/backticks
-  but fragile for this project's style.  Convention adopted
-  2026-05-25 mid-QA-VoicePool Task 1 after two failed heredoc
-  attempts in the same batch (Task 0 + Task 1 commits both hit
-  the same parser error).
+- **Pre-commit (Rule 9 — brief, drafter skipped):** commit messages
+  stay brief — only files/areas touched + base-level what-was-done, no
+  multi-paragraph narrative (that lives in the Implemented Work Log +
+  running notes).  Write the one-liner directly — do NOT dispatch
+  `/draft-commit`.  Surface the message + full `git status` and commit
+  only after explicit approval.  Format: `<Batch> Task N: <one-line
+  what> (<scope>)` + `Co-Authored-By` trailer.  Adopted 2026-06-24
+  (QA-Rules); supersedes the prior multi-paragraph-narrative +
+  every-commit-via-drafter convention.
+- **Commit mechanic:** `git commit -m` for the brief message.  Use
+  `git commit -F .git/COMMIT_EDITMSG_<batch>-<task>.txt` (then `rm` it)
+  ONLY when the one-liner carries a quoting/encoding hazard — a `§`
+  glyph, apostrophes, backticks, or `$`/`&`/`<`/`>` — since the Bash
+  harness's quoting layer mangles those.  `-F` reads the file verbatim,
+  bypassing all shell parsing of the message body.
 - **Batch close (mandatory sequence):**
   1. `/draft-doc batch-close` — compile the Implemented Work Log
      entry from running notes.

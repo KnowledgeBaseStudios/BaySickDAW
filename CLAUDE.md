@@ -17,6 +17,34 @@ routed at batch close.
 
 ---
 
+## Working Rules (standing — Main Plan §0 Rules 6-9 is authoritative)
+
+Four standing rules govern how I work here (full text + the existing
+Rules 1-5 live in Main Plan §0):
+
+- **Rule 6 — Comment Policy.** Comments only for the six keeper
+  categories: (1) architectural why, (2) real-time audio-thread danger
+  zones, (3) DSP/domain references, (4) framework quirks/workarounds,
+  (5) magic-number calibrations, (6) thread-safety/ownership.  Never
+  narrate WHAT the code does — the code is the single source of truth.
+  When editing code, clean non-conforming comments in the regions you
+  touch (edited regions only, never a whole-file audit).  No retroactive
+  mass strip.
+- **Rule 7 — Communication: direct, no cheerleading.** No "that's
+  absolutely right" / "great question."  Say when an idea is flawed,
+  incomplete, or half-baked.  Casual tone, occasional profanity when it
+  fits.  Practical over positive.
+- **Rule 8 — Technical approach: challenge assumptions.** Surface the
+  hard questions (implementation, scalability, real-world viability); if
+  something won't work, say so and explain why.  Challenging is not
+  deciding — spec calls still go to Jeff (Rule 5).
+- **Rule 9 — Commit messages stay brief.** Files/areas touched +
+  base-level what-was-done; no narrative (that lives in the in-repo
+  docs).  Skip `/draft-commit`; write the one-liner directly.  See
+  `## Git Commit Mechanics` below.
+
+---
+
 ## Subagents (added 2026-05-08)
 
 Six BaySickDAW-specific subagents live at `.claude/agents/`, with slash
@@ -97,13 +125,10 @@ JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone
 
 ## Git Commit Mechanics
 
-- **Long commit messages (this project's multi-paragraph technical-narrative style): use `git commit -F <file>`, NEVER bash heredoc.**
-  - Write the message to `.git/COMMIT_EDITMSG_<batch>-<task>.txt` (under .git/, automatically out of working tree).
-  - `git commit -F <that file>`.
-  - `rm <that file>` after the commit.
-- **Why:** the Bash tool harness's outer command wrapping has a quoting layer that collides with the ~30+ apostrophes per long message (`Jeff's blueprint` / `framework's stealing` / `JUCE's MemoryAudioSource` / etc.), producing "unexpected EOF while looking for matching `'`" parser errors. File-based commit bypasses all shell parsing of the message body — apostrophes, backticks, `$`, `&`, `<`, `>` in the file are inert.
-- **Heredoc still fine for short commits.** `git commit -m "$(cat <<'EOF' ... EOF)"` works for single-paragraph commits without apostrophe-dense narrative. The Build System "Standing rule" precedent of using heredoc for the Co-Authored-By trailer is still fine since those messages are short.
-- **Convention adopted 2026-05-25** mid-QA-VoicePool Task 1 after two failed heredoc attempts in the same batch (Task 0 + Task 1 both hit `unexpected EOF while looking for matching '`'). Mirrored in Main Plan §0 Agent Orchestration Rules > Batch lifecycle so future sessions see it whether they read CLAUDE.md or Main Plan first.
+- **Commit messages stay brief (Main Plan §0 Rule 9, adopted 2026-06-24 at QA-Rules).** Only the files/areas touched + base-level what-was-done. NO multi-paragraph narrative — the full narrative lives in the Implemented Work Log + running notes, so duplicating it in the commit body just doubles the work + tokens. Format: `<Batch> Task N: <one-line what> (<scope>)` + a `Co-Authored-By` trailer.
+- **Skip `/draft-commit`.** Write the one-liner directly, surface the message + full `git status`, commit only after explicit approval. (Reverses the former every-commit-via-drafter rule — with no long narrative left, there's nothing to keep uniform.)
+- **Mechanic: `git commit -m`.** Use `git commit -F .git/COMMIT_EDITMSG_<batch>-<task>.txt` (then `rm <that file>`) ONLY when the brief one-liner carries a quoting/encoding hazard — a `§` glyph, apostrophes, backticks, or `$`/`&`/`<`/`>`. The Bash tool harness's quoting layer mangles those; `-F` reads the file verbatim, bypassing all shell parsing of the message body.
+- **Supersedes** the prior multi-paragraph-technical-narrative convention (adopted 2026-05-25, retired 2026-06-24 at QA-Rules).
 
 ---
 
