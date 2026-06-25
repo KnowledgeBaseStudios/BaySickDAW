@@ -1122,6 +1122,14 @@ needed to find what you should pull up to review the work.
 - **Bucket:** Cross-cutting Infrastructure
 - Verify (own plan file will detail): the 10-label snap on each of Builder + PianoRoll + Record-Quantize produces correct tick-aligned positions; existing saved-project loads correctly migrate `startBeats * 96 → startTicks`; audio-clip playback in the post-migration state still plays from the right offset; MIDI recording with each of the 10 quantize values commits notes at the expected tick boundaries; triplet divisions don't drift on long projects.
 
+#### **QA-Rules: Four Standing Rules — Comment Policy / Communication / Technical Approach / Commit Brevity** *(NEW — inserted 2026-06-24)*
+- **STATUS: OPEN (2026-06-24).**  **Plan file:** [`Plans & Specs/Batch Plans/silent-pruning-heron.md`](Batch Plans/silent-pruning-heron.md).
+- Items: adds Main Plan §0 **Rules 6-9** — (6) **Comment Policy** (write only the six keeper categories: architectural why / RT-thread danger / DSP-domain refs / framework workarounds / magic-number calibration / thread-ownership; never narrate WHAT; clean non-conforming comments in edited regions as we go — NO retroactive strip); (7) **Communication Style** (direct, no cheerleading); (8) **Technical Approach** (challenge assumptions); (9) **Commit Brevity** (files-touched + base-level what only; full narrative lives in the in-repo docs; brief commits skip `/draft-commit`).
+- Scope: **docs + memory only — NO source, NO build.**  Main Plan §0 + CLAUDE.md + boilerplate + memory entries.  Rule 9 reconciles four conflicting commit/comment conventions (CLAUDE.md Git Commit Mechanics, §0 batch-lifecycle commit bullets, `feedback_commit_at_checkpoints`, `feedback_every_commit_via_draft_commit`) per the plan's Reconciliation Audit.
+- Sequencing: **immediately before QA-EffectsReview** (Jeff's confirmed slot 2026-06-24 per `feedback_slot_placement_is_spec_call.md` — QA-EffectsReview pauses at a committed checkpoint, QA-Rules lands, then QA-EffectsReview resumes under the new rules; see §6 arrow + §9 fifty-first Forks entry).
+- Effort: ~45-60 min.
+- **Bucket:** Cross-cutting Infrastructure
+
 #### **QA-EffectsReview: Effects-Correctness Sweep → Full Effects Fidelity Sweep** *(NEW — inserted 2026-06-05 at QA-Ee close; STATUS:OPEN + RE-SCOPED 2026-06-06)*
 - **STATUS: OPEN (2026-06-06).**  **Plan file:** [`Plans & Specs/Batch Plans/composed-foraging-rose.md`](Batch Plans/composed-foraging-rose.md).
 - **RE-SCOPED at open (2026-06-06):** expanded from the 4-bug sweep below to a full effects-subsystem **max-clone fidelity rework** — every rack effect + every BaySickPedals pedal graded + reworked vs its reference (BOSS / FL Studio / Furman PQ-3 / Waves BB Tubes / Caelum Tape Cassette 2 / SSL+Neve console), a per-slot **Basic/Advanced** control toggle (FX-rack panels only), **Console Clean(SSL)/Dirty(Neve)**, big builds on the 4 heavy units (De-Esser→Sibilance / SY-1 / AD-2 / Tape), plus original bugs (a)/(b)/(c).  Item **(d) multi-call SPLIT OUT** to new batch **QA-MultiBlockHazard** (engine/hot-path, not effect fidelity), directly after.  Step-1 audit: `Research Reports/effects-fidelity-audit-2026-06-06.md`.  See §9 2026-06-06 Forks entry.
@@ -2057,7 +2065,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-Rules*********************************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-DirtyFlag*******************
 ```
@@ -2528,6 +2536,18 @@ Slotted **immediately after QA-Ee, before QA-Eb** (Jeff's call per
 `feedback_slot_placement_is_spec_call.md`); capstone bridging QA-Ed's
 sample clock + QA-Ee's tick clock.  Bucket: Cross-cutting Infrastructure.
 See §9 forty-eighth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-Rules** inserted
+2026-06-24 — four standing rules added to Main Plan §0: (6) Comment Policy
+(write only the six keeper categories; never narrate WHAT; clean
+non-conforming comments in edited regions as we go — no retroactive strip),
+(7) Communication Style (direct, no cheerleading), (8) Technical Approach
+(challenge assumptions), (9) Commit Brevity (files-touched + base-level what;
+narrative stays in the in-repo docs; brief commits skip /draft-commit).
+Rules-only — no source, no build.  Slotted **immediately before
+QA-EffectsReview** (Jeff 2026-06-24 — QA-EffectsReview pauses at a committed
+checkpoint, QA-Rules lands, then resumes under the new rules).  Bucket:
+Cross-cutting Infrastructure.  See §9 fifty-first Forks entry.
 
 \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-EffectsReview** inserted
 2026-06-05 at the QA-Ee close — effects-correctness sweep (compressor
@@ -5479,3 +5499,24 @@ The initial "1/8-note-late" report was diagnosed to **TV audio output latency** 
 - `Plans & Specs/Research Reports/effects-fidelity-audit-2026-06-06.md` — Step-1 audit findings.
 
 **Close routing** comes later, per Rule 3 at QA-EffectsReview close.
+
+### 2026-06-24 — QA-Rules inserted before QA-EffectsReview: four standing rules (Comment Policy / Communication / Technical Approach / Commit Brevity) (fifty-first Forks entry)
+
+**Status:** OPEN.  QA-Rules opened 2026-06-24 as a standalone rules-only batch (user-initiated, not a finding-fork), slotted **immediately before QA-EffectsReview** — QA-EffectsReview pauses at a committed checkpoint, QA-Rules lands, then QA-EffectsReview resumes under the new rules.  No source, no build.
+
+**What it adds.**  Main Plan §0 Rules 6-9: (6) Comment Policy — write only the six keeper categories (architectural why / RT-thread danger / DSP-domain refs / framework workarounds / magic-number calibration / thread-ownership), never narrate WHAT, clean non-conforming comments in edited regions as we go (no retroactive strip); (7) Communication Style — direct, no cheerleading; (8) Technical Approach — challenge assumptions; (9) Commit Brevity — files-touched + base-level what only, narrative stays in the in-repo docs, brief commits skip /draft-commit.
+
+**Reconciliation.**  Rule 9 conflicts with four active conventions (CLAUDE.md Git Commit Mechanics, §0 batch-lifecycle commit bullets, memory `feedback_commit_at_checkpoints` + `feedback_every_commit_via_draft_commit`); Rule 6 conflicts with the boilerplate "comments only when WHY is non-obvious" line.  All rewritten / deleted / annotated in-batch per the plan's Reconciliation Audit (3 memory entries added, 2 rewritten, 1 deleted, 2 annotated).
+
+**Inline back-refs:**
+- §5 — NEW QA-Rules docket inserted immediately before the QA-EffectsReview entry.
+- §6 — arrow gains `→ QA-Rules` (35 asterisks) immediately before QA-EffectsReview (30); one footnote added before the QA-EffectsReview footnote.
+- §9 — this entry (fifty-first).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §0 Rules 6-9 + batch-lifecycle commit-bullet rewrite (Task 1); §5 QA-Rules docket; §6 arrow + footnote; §9 this entry.
+- `Plans & Specs/Batch Plans/silent-pruning-heron.md` — the §0-conformant batch plan.
+- `Plans & Specs/Running Notes/silent-pruning-heron.md` — seeded.
+- `CLAUDE.md` — new `## Working Rules (standing)` + rewritten `## Git Commit Mechanics` (Task 1).
+
+**Close routing** comes later, per Rule 3 at QA-Rules close.
