@@ -90,7 +90,7 @@ Highlights:
 - **Every 3 batches OR pre-milestone** → `/perf-audit`
 - **Before architecture decision** (multiple plausible approaches) → `/architecture <topic>`
 - **Concept blocker** → `/explain <concept>`
-- **Pre-commit** → `/draft-commit`
+- **Pre-commit (Rule 9)** → write the brief one-liner directly, skip `/draft-commit`
 - **Batch close (mandatory)** → `/draft-doc batch-close` → `/review-batch` → apply draft → commit
 - **Pre-release** → `/audit-licenses`
 - **Pre-milestone** → `/research [focus]` (one-shot per focus)

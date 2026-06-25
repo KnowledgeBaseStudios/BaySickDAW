@@ -320,7 +320,7 @@ so plan execution is mechanical + verifiable.  Reference exemplar:
   - `- [ ]` checkbox steps for every executable action
   - Embedded code blocks (```` ```cpp ```` / ```` ```markdown ````) showing non-trivial fix patterns, before/after pairs where useful
   - Explicit "Tell Jeff: ..." verify scripts with numbered test scenarios `(1)`, `(2)`, `(3)` ...
-  - `/draft-commit` → surface drafted message + full git status → Jeff approves → commit step (per `feedback_surface_drafted_commit_message_for_approval.md` + `feedback_surface_full_git_status_before_commit.md`)
+  - Brief commit step (Rule 9): write the one-liner directly (skip `/draft-commit`) → surface message + full git status → Jeff approves → commit (per `feedback_surface_drafted_commit_message_for_approval.md` + `feedback_surface_full_git_status_before_commit.md`)
   - `/draft-doc running-notes` dispatch + apply step (per `feedback_draft_doc_running_notes_every_checkpoint.md`)
 - **Verification (end-to-end smoke)** — final integration test scenarios after all source tasks land
 - **Routing notes (Rule 3 application during execution)** — guidance for findings that surface mid-batch
@@ -1177,7 +1177,7 @@ needed to find what you should pull up to review the work.
 - Scope: **docs + memory only — NO source, NO build.**  Main Plan §0 + CLAUDE.md + boilerplate + memory entries.  Rule 9 reconciles four conflicting commit/comment conventions (CLAUDE.md Git Commit Mechanics, §0 batch-lifecycle commit bullets, `feedback_commit_at_checkpoints`, `feedback_every_commit_via_draft_commit`) per the plan's Reconciliation Audit.
 - Sequencing: **immediately before QA-EffectsReview** (Jeff's confirmed slot 2026-06-24 per `feedback_slot_placement_is_spec_call.md` — QA-EffectsReview pauses at a committed checkpoint, QA-Rules lands, then QA-EffectsReview resumes under the new rules; see §6 arrow + §9 fifty-first Forks entry).
 - Effort: ~45-60 min.
-- **Bucket:** Cross-cutting Infrastructure
+- **Bucket:** Cross-cutting Infrastructure, Meta
 
 #### **QA-EffectsReview: Effects-Correctness Sweep → Full Effects Fidelity Sweep** *(NEW — inserted 2026-06-05 at QA-Ee close; STATUS:OPEN + RE-SCOPED 2026-06-06)*
 - **STATUS: OPEN (2026-06-06).**  **Plan file:** [`Plans & Specs/Batch Plans/composed-foraging-rose.md`](Batch Plans/composed-foraging-rose.md).
@@ -2596,7 +2596,7 @@ narrative stays in the in-repo docs; brief commits skip /draft-commit).
 Rules-only — no source, no build.  Slotted **immediately before
 QA-EffectsReview** (Jeff 2026-06-24 — QA-EffectsReview pauses at a committed
 checkpoint, QA-Rules lands, then resumes under the new rules).  Bucket:
-Cross-cutting Infrastructure.  See §9 fifty-first Forks entry.
+Cross-cutting Infrastructure, Meta.  See §9 fifty-first Forks entry.
 
 \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-EffectsReview** inserted
 2026-06-05 at the QA-Ee close — effects-correctness sweep (compressor

@@ -26,3 +26,11 @@ Conventions: Main Plan §0 "Document Formatting Conventions" + "Batch Plans + Ru
 - Memory (outside repo): ADDED feedback_comment_policy / feedback_communication_style_direct / feedback_commit_message_brevity; REWROTE feedback_commit_at_checkpoints (heredoc+4.7 -> brief+`-m`+4.8) + feedback_surface_drafted_commit_message_for_approval (de-draftered); DELETED feedback_every_commit_via_draft_commit; ANNOTATED feedback_drafter_output_verbatim_no_restyle (dormant) + feedback_ascii_only_ui_strings (dividers note); updated MEMORY.md index (-1 deleted, +3 new).
 - MEMORY.md further over its size budget (net +2 entries) — flagged for a future consolidate-memory pass per the plan's routing note; not consolidating now.
 - No source, no build.  Task 1 commit covers Main Plan.md + CLAUDE.md (boilerplate gitignored, memory outside repo).
+
+## 2026-06-24 — Task 2 — close
+
+- `/draft-doc batch-close` -> Work Log close entry compiled + applied (appended to `Implemented Work Log.md`).
+- `/review-batch QA-Rules`: 0 BLOCKER, 3 NEEDS-FIX, 2 NIT.  The 3 NEEDS-FIX were leftover `/draft-commit` mandates my Reconciliation Audit MISSED — Main Plan §0 L323 (plan-structure required-sections rule) + CLAUDE.md L93 (orchestration-highlights list) + boilerplate L29 (open-step g) — all fixed in the close commit.  Brand-names NIT was a reviewer false positive (grep confirmed not present).  Structural checks (35/35 asterisks, fifty-first, cross-refs) passed.
+- Bucket resolved to `Cross-cutting Infrastructure, Meta` (Jeff, option 2 — the QA-Inventory `Meta` precedent was surfaced by /review-batch); §5 docket + §6 banner + Work Log entry all updated to match.
+- MEMORY.md over size budget -> future consolidate-memory pass (routed, not done).
+- Close commit covers Main Plan.md (§5/§6 bucket + §0 L323 fix) + CLAUDE.md (L93 fix) + Work Log entry + these running notes.  Next: resume QA-EffectsReview under the new rules.

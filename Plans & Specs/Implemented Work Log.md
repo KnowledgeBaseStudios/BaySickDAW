@@ -2101,3 +2101,63 @@ Per the §6 sequencing arrow updated at this close, **QA-ClipDrop is the next ba
 `e5e71dd` (open, docs) · `1840380` Stage 1 · `6cd615f` Task 1b · `1bdc155` Task 1c · `9adbfe8` Stage 2 · `56ecc38` Stage 3 · `427ee34` count-in record-displacement fix · `69e909b` Stage 4 · `6da4f9e` in-batch dead-code cleanup · `779fcee` /review-batch follow-up · `<TBD — close commit SHA appended after commit>` CLOSE (docs).  Verified by Jeff in Debug + Release per stage (2026-06-03 / 04 / 05).
 
 ---
+
+### 2026-06-24 18:48 PT — QA-Rules — Four standing rules added to Main Plan §0 (Comment Policy / Communication Style / Technical Approach / Commit Brevity) + reconciliation of the conflicting commit + comment conventions; rules-only, no source, no build
+
+**Bucket:** Cross-cutting Infrastructure, Meta
+
+#### Done
+
+- Main Plan §0: inserted **Rule 6 (Comment Policy)** / **Rule 7 (Communication Style)** / **Rule 8 (Technical Approach)** / **Rule 9 (Commit Brevity)** after the existing Rule 5 (`f43857e`).
+  - **Rule 6** — write comments ONLY for six keeper categories (architectural why / RT-audio-thread danger zones / DSP-domain refs / framework quirks-workarounds / magic-number calibration / thread-ownership); never narrate WHAT the code does; the code is the single source of truth. Cleanup clause = strip/fix non-conforming comments in EDITED REGIONS only, same edit pass — never a whole-file audit, no retroactive mass strip. Keeps the existing `// HOLD-FOR-<reason>` markers + named-arg hints + real TODO/FIXME/HACK; strips baked-in date/batch tags. Supersedes the prior "comments only when WHY is non-obvious" guidance.
+  - **Rule 7** — direct, no cheerleading; tell Jeff when an idea is flawed.
+  - **Rule 8** — challenge assumptions + ask the hard questions; challenging is NOT deciding (spec calls still go to Jeff per Rule 5).
+  - **Rule 9** — commit messages = files/areas touched + base-level what only; full narrative stays in the in-repo Work Log + running notes. Brief commits SKIP `/draft-commit` (write the one-liner directly, surface message + full git status, wait for approval); format `<Batch> Task N: <one-line what> (<scope>)` + `Co-Authored-By`; `git commit -m`, `-F` only on a quoting/encoding hazard.
+- Main Plan §0: rewrote the batch-lifecycle commit bullets (Pre-commit + long-message block) to match Rule 9 (`f43857e`).
+- CLAUDE.md: added `## Working Rules (standing)` near the top (Rules 6-9 condensed → §0 authoritative); rewrote `## Git Commit Mechanics` to the brief convention (`f43857e`).
+- `Files For Claude/batch_session_boilerplate.md` (gitignored — not committed): L36-37 + L53 → brief + skip-drafter; L69 → six keeper categories + clean-edited-regions; ADDED two standing-rule bullets for Rule 7 + Rule 8.
+- Memory (outside repo — not committed): ADDED `feedback_comment_policy` / `feedback_communication_style_direct` / `feedback_commit_message_brevity`; REWROTE `feedback_commit_at_checkpoints` (heredoc + Opus-4.7 → brief + `-m` + Opus-4.8) + `feedback_surface_drafted_commit_message_for_approval` (de-draftered); DELETED `feedback_every_commit_via_draft_commit`; ANNOTATED `feedback_drafter_output_verbatim_no_restyle` (dormant) + `feedback_ascii_only_ui_strings` (dividers carve-out); updated MEMORY.md index (-1, +3).
+
+#### Reconciliation (old rules/docs/memory the four new rules collided with)
+
+- **Rule 9 vs four active commit conventions** — CLAUDE.md `## Git Commit Mechanics`, §0 batch-lifecycle commit bullets, memory `feedback_commit_at_checkpoints`, memory `feedback_every_commit_via_draft_commit`. Resolved: first three rewritten to brief; the fourth deleted (lineage carried by the new `feedback_commit_message_brevity`).
+- **Rule 6 vs the boilerplate "comments only when WHY is non-obvious" line** (L69) — replaced with the six keeper categories + clean-edited-regions clause.
+- Compatible rules left untouched (cross-linked only): `feedback_surface_full_git_status_before_commit`, `feedback_no_mid_task_commits`, `feedback_no_source_edits_to_shape_commits`, `feedback_dont_make_unilateral_spec_calls` (the Rule 8 "challenge ≠ decide" boundary), `feedback_no_brand_names_in_user_facing_strings`. The cross-project `commit-drafter` agent is untouched; BaySickDAW just stops invoking it for brief commits.
+- Full conflict table in the plan's Reconciliation Audit ([Batch Plans/silent-pruning-heron.md](Batch Plans/silent-pruning-heron.md)).
+
+#### Found along the way
+
+- **Planning scope pivoted twice before any edit.** Original ask "remove every comment in the codebase" → "selective strip keeping the six keeper categories" → "no retroactive strip; forward Comment Policy rule + clean-as-you-go in edited regions only." A ~26.7k-comment retro strip across 306 `Source/` files was scoped, then rejected as high-cost / high-risk (a misclassified keeper) / low-payoff (a stale comment only misleads when read, at which point the cleanup clause already fires). Batch renamed **QA-CommentStrip → QA-Rules** when the strip was dropped.
+- **The plan under-scoped the boilerplate edits** (listed only L36-37 + L69; actual fix also needed L53 + two net-new Rule 7/8 standing-rule bullets). Jeff caught it mid-Task-1; scope expanded in place.
+- **`/review-batch` caught three leftover `/draft-commit` mandates the Reconciliation Audit missed** — Main Plan §0 L323 (plan-structure required-sections rule), CLAUDE.md L93 (orchestration-highlights list), boilerplate L29 (open-step g). All three contradicted Rule 9.
+- **MEMORY.md is now further over its 24.4 KB size budget** (net +2 entries).
+
+#### What was done about each finding
+
+- The two scope pivots + the rename were locked as spec calls S1/S2/S4 before any edit; no retro comment-audit sub-task opened.
+- Boilerplate scope expanded in-batch to L36-37 + L53 + L69 + the two new Rule-7/8 bullets.
+- The three `/draft-commit` leftovers fixed in the Task 2 close commit (Main Plan §0 L323 + CLAUDE.md L93 committed; boilerplate L29 gitignored).
+- **MEMORY.md over budget → routed to a future `consolidate-memory` pass** (memory-maintenance note, not a code finding — no §9 Forks entry). NOT done this batch.
+- No source side-findings (no source touched).
+
+#### `/review-batch` outcome
+
+- 0 BLOCKER. 3 NEEDS-FIX (the leftover `/draft-commit` mandates above) — all fixed in the close commit. 2 NIT: bucket (resolved to `Cross-cutting Infrastructure, Meta` per Jeff — the QA-Inventory `Meta` precedent was surfaced by the review) + a "brand-names wording drift" that was a reviewer false positive (grep confirmed no such string in CLAUDE.md). Structural checks passed: §6 arrow token + banner footnote both 35 asterisks, §9 ordinal "fifty-first" correct, all §5/§6/§9 cross-references resolve, Rule 6-9 wording consistent with the §0 Rule-1-5 style.
+
+#### Carry-forward contradictions (if any)
+
+- None. No source, no audio-thread path, no DSP module touched.
+
+#### Files touched
+
+- `Plans & Specs/Main Plan.md` (§0 Rules 6-9 + batch-lifecycle commit bullets + plan-structure rule L323 fix + §5/§6 bucket), `CLAUDE.md` (`## Working Rules` + `## Git Commit Mechanics` + orchestration-highlights L93 fix) — committed.
+- `Files For Claude/batch_session_boilerplate.md` (gitignored), memory dir + `MEMORY.md` (outside repo) — changed but not in any commit.
+- No source code changes. No build.
+
+#### Commit(s)
+
+`9bdaaef` (Task 0 — open: plan mirror + Main Plan §5 docket / §6 arrow / §9 fifty-first Forks entry + running-notes seed) · `f43857e` (Task 1 — Rules 6-9 into Main Plan §0 + CLAUDE.md + the full commit/comment-convention reconciliation) · `<TBD — close commit SHA appended after commit>` (Task 2 — CLOSE: this Work Log entry + the 3 `/review-batch` NEEDS-FIX fixes + §5/§6 bucket update). Rules-only batch — no source, no build; verified by Jeff reviewing the rule wording before each commit.
+
+#### Next action
+
+- Resume **QA-EffectsReview** (paused at its committed checkpoint) — now operating under Rules 6-9.
