@@ -17,6 +17,7 @@ void NoiseGateStyleDSP::reset()
 {
     mEnvL = mEnvR = 0.0f;
     mGainL = mGainR = 1.0f;
+    mOpenL = mOpenR = false;
 }
 
 void NoiseGateStyleDSP::recomputeCoefs()
@@ -27,6 +28,8 @@ void NoiseGateStyleDSP::recomputeCoefs()
     // Decay coefficient -- gate close release time.
     const float decay = juce::jlimit (1.0f, 1000.0f, mDecayMs);
     mDecayCoef = (float) std::exp (-1.0 / (decay * 0.001 * mSampleRate));
+    // Fast gate OPEN (~1 ms) so transients aren't faded in.
+    mAttackCoef = (float) std::exp (-1.0 / (0.001 * mSampleRate));
 }
 
 void NoiseGateStyleDSP::setThresholdDb (float dB)
@@ -75,6 +78,9 @@ void NoiseGateStyleDSP::process (juce::AudioBuffer<float>& buffer)
 
     const float threshLin = juce::Decibels::decibelsToGain (mThresholdDb, -120.0f);
     const float threshSq  = threshLin * threshLin;
+    // Schmitt close point: 3 dB below threshold (squared domain).
+    const float closeLin  = juce::Decibels::decibelsToGain (mThresholdDb - kHysteresisDb, -120.0f);
+    const float closeSq   = closeLin * closeLin;
     const float floorDb   = (mMode == Mode::Mute) ? kMuteFloorDb : kReductionFloorDb;
     const float floorLin  = juce::Decibels::decibelsToGain (floorDb, -120.0f);
 
@@ -86,6 +92,7 @@ void NoiseGateStyleDSP::process (juce::AudioBuffer<float>& buffer)
         float* aud       = buffer .getWritePointer (ch);
         float& env       = (ch == 0) ? mEnvL  : mEnvR;
         float& gain      = (ch == 0) ? mGainL : mGainR;
+        bool&  open      = (ch == 0) ? mOpenL : mOpenR;
 
         for (int i = 0; i < n; ++i)
         {
@@ -93,10 +100,16 @@ void NoiseGateStyleDSP::process (juce::AudioBuffer<float>& buffer)
             const float x = det[i];
             env = mRmsCoef * env + (1.0f - mRmsCoef) * (x * x);
 
-            // Gate decision: open when env >= threshold, otherwise ramp toward
-            // floor at decay rate.
-            const float targetGain = (env >= threshSq) ? 1.0f : floorLin;
-            gain = mDecayCoef * gain + (1.0f - mDecayCoef) * targetGain;
+            // Schmitt trigger: open above threshold, close only once the env falls
+            // 3 dB below it (hysteresis -> no chatter when the signal hovers there).
+            if (open) { if (env <  closeSq)  open = false; }
+            else      { if (env >= threshSq) open = true;  }
+
+            const float targetGain = open ? 1.0f : floorLin;
+            // Fast OPEN (~1 ms attack), slow CLOSE (Decay knob): pick the coef by
+            // whether the gain is rising toward open or falling toward the floor.
+            const float coef = (targetGain > gain) ? mAttackCoef : mDecayCoef;
+            gain = coef * gain + (1.0f - coef) * targetGain;
 
             aud[i] *= gain;
         }

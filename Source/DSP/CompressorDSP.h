@@ -112,6 +112,12 @@ public:
     // params as-is (Modern/FET/Opto don't read csSustain or csTone).
     void setType (int t);
 
+    // QA-EffectsReview Task 6: FET all-buttons-in toggle (see fetAllButtons).
+    void setFetAllButtons (bool on);
+
+    // QA-EffectsReview Task 6: Opto Comp/Limit toggle (see optoLimit).
+    void setOptoLimit (bool on);
+
     // I-4 (2026-05-02): CS Style "Sustain" macro.  Single user knob 0..1
     // that maps inversely to threshold AND boosts makeup gain in lockstep.
     //   sustain=0  -> threshold ~ -6 dB,  makeup +0 dB (light comp)
@@ -150,6 +156,15 @@ public:
     bool  peakDetection{ false };   // C3: false = RMS (default), true = peak
     float detectionMs  { 10.0f };   // C4: RMS window in ms
     int   sidechainSourceId { -1 };  // scaffolding: -1 = internal detection path
+    // QA-EffectsReview Task 6: FET (1176) all-buttons-in mode.  When true the
+    // gain computer uses a program-dependent RISING ratio (the bias-shift
+    // character) instead of the fixed button ratio.  Serialized; FET-only.
+    bool  fetAllButtons { false };
+    // QA-EffectsReview Task 6: Opto (LA-2A) Comp/Limit mode.  true = Limit (the
+    // gain computer uses the 8->80:1 soft-ceiling rising curve).  Serialized;
+    // Opto-only.  A flag, NOT inferred from ratio: setRatio clamps to 30, so the
+    // panel's old "ratio 100 = Limit, read ratio>50" scheme was unreachable.
+    bool  optoLimit { false };
 
     // I-4 (2026-05-02): CS Style state.  csSustain01 [0..1] is the macro
     // knob value; csTone01 [0..1] is the post-comp tilt EQ position
@@ -162,6 +177,10 @@ public:
     float csSustain01 { 0.0f };
     float csTone01    { 0.5f };
     float csLevelDb   { 0.0f };
+    // QA-EffectsReview Task 6: CS-3 Sustain pre-amp drive in dB (= 24 * csSustain01,
+    // set by applyCsSustainMacro).  DERIVED from csSustain01 -> not serialized;
+    // recomputed on load.  Applied CS-only in process() to detector + audio.
+    float csInputDriveDb { 0.0f };
 
 private:
     // I-4: build tilt-EQ coefficients from csTone01 + sample rate.  Called

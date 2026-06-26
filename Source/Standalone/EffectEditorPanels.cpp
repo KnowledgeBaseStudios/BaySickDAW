@@ -367,8 +367,8 @@ struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
         // Attack + Release stored as integer position 0..7 (0=OFF) -- mapped to
         // ms via kAttackMs / kReleaseMs in the onValueChange callbacks.
         buildKnobs (*this, knobs, {
-            { "Input",   -60.f,   0.f, -12.f, 0.5f, "Input drive into the FET stage (dB) -- more = more compression" },
-            { "Output",  -60.f,   0.f,   0.f, 0.5f, "Output level (dB)" },
+            { "Input",   -60.f,   0.f, -12.f, 0.5f, "Input drive (1176-style): no threshold knob -- Input sets how hard the signal hits the fixed threshold, so MORE input (turn up) = MORE compression. Default is gentle (about the 1176 Input at '36')." },
+            { "Output",  -30.f,  30.f,  12.f, 0.5f, "Output / makeup gain (dB): the 1176 brings level back up here after compression. Up = more makeup (max +30 = the unit's loudest, dial '0'); 0 dB = unity (dial '30'); down = attenuate. Default +12 (dial '18'). Set it to match the bypassed level." },
             { "Attack",   0.f,    7.f,   4.f,  1.f, "Attack position (0=OFF, 1=slow 800us, 7=fast 20us)" },
             { "Release",  0.f,    7.f,   4.f,  1.f, "Release position (0=OFF, 1=slow 1100ms, 7=fast 50ms)" },
         });
@@ -382,20 +382,30 @@ struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
             { "8",   "8 : 1",        "Medium compression" },
             { "12",  "12 : 1",       "Heavy compression" },
             { "20",  "20 : 1",       "Limiting / heavy" },
-            { "All", "All-buttons in", "All-buttons-in mode -- the famous aggressive crush sound (~30:1 with bias shift)" },
+            { "All", "All-buttons in", "All-buttons-in mode -- program-dependent rising ratio (climbs with level) plus extra grit; the aggressive crush character" },
         });
         ratioSel->setBodyTooltip ("Ratio (FET-style face plate)");
         ratioSel->setDefaultLabelColour (juce::Colours::black);
         const float r = dsp ? dsp->ratio : 4.0f;
-        const int initIdx = (r < 6.f)  ? 0
+        // All-buttons round-trips via the flag; legacy presets (no flag) stored a
+        // high sentinel ratio, so r > 25 also reads as all-buttons (idx 4).
+        const int initIdx = ((dsp && dsp->fetAllButtons) || r > 25.0f) ? 4
+                          : (r < 6.f)  ? 0
                           : (r < 10.f) ? 1
-                          : (r < 16.f) ? 2
-                          : (r < 50.f) ? 3 : 4;
+                          : (r < 16.f) ? 2 : 3;
         ratioSel->setSelectedIndex (initIdx, juce::dontSendNotification);
         ratioSel->onChange = [dsp] (int idx)
         {
-            const float ratios[] = { 4.f, 8.f, 12.f, 20.f, 1000.f };
-            if (dsp) dsp->setRatio (ratios[juce::jlimit (0, 4, idx)]);
+            // idx 0-3 = fixed 4/8/12/20:1 buttons; idx 4 = all-buttons-in, which
+            // sets a serialized flag (the gain computer then uses the program-
+            // dependent rising-ratio curve).  The flag -- not a magic ratio
+            // number -- is what round-trips on reload (see initIdx).
+            idx = juce::jlimit (0, 4, idx);
+            if (! dsp) return;
+            const bool allButtons = (idx == 4);
+            dsp->setFetAllButtons (allButtons);
+            const float ratios[] = { 4.f, 8.f, 12.f, 20.f };
+            dsp->setRatio (allButtons ? 20.0f : ratios[idx]);   // all-buttons: nominal fallback; the curve overrides
         };
         addAndMakeVisible (*ratioSel);
 
@@ -416,9 +426,12 @@ struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
         // Knob -> DSP wiring.
         knobs[0]->slider.onValueChange = [dsp,this]
         {
-            // Input drives signal hot into the FET; map slider dB to threshold.
-            // Slider 0 dB (top of face plate) = aggressive threshold; -60 = no comp.
-            if (dsp) dsp->setThreshold ((float) knobs[0]->slider.getValue());
+            // QA-EffectsReview Task 6 (b): Input is a drive control -- knob UP
+            // (toward 0 dB, hotter input) must LOWER the threshold = MORE comp,
+            // like the real 1176 face plate.  Map Input [-60..0] -> threshold
+            // [0..-42].  (Was setThreshold(input) -- inverted: up gave less comp.)
+            const float input = (float) knobs[0]->slider.getValue();   // -60..0
+            if (dsp) dsp->setThreshold (-(input + 60.0f) * 0.70f);      // 0..-42 dB
         };
         knobs[1]->slider.onValueChange = [dsp,this]
         {
@@ -437,7 +450,10 @@ struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
 
         if (dsp)
         {
-            knobs[0]->slider.setValue (dsp->threshold, juce::sendNotificationSync);
+            // (b) reverse-map the stored threshold back onto the Input knob.
+            knobs[0]->slider.setValue (juce::jlimit (-60.0, 0.0,
+                                       -(double) dsp->threshold / 0.70 - 60.0),
+                                       juce::sendNotificationSync);
             knobs[1]->slider.setValue (dsp->makeupDb,  juce::sendNotificationSync);
             // Best-effort sync from current ms back to the closest 1..7 position.
             int aPos = 4, rPos = 4;
@@ -549,11 +565,11 @@ struct OptoCompressorPanel : public EditorPanelBase, public juce::Timer
         compLimitTog->setupNamed (
             "Comp",  "Compress mode (3:1 ratio)",
             "Limit", "Limit mode (effectively infinity:1 -- Opto 'limit' position)");
-        compLimitTog->btn().setToggleState (dsp && dsp->ratio > 50.f, juce::dontSendNotification);
+        compLimitTog->btn().setToggleState (dsp && dsp->optoLimit, juce::dontSendNotification);
         compLimitTog->btn().onClick = [dsp, this]
         {
             const bool limit = compLimitTog->btn().getToggleState();
-            if (dsp) dsp->setRatio (limit ? 100.0f : 3.0f);
+            if (dsp) dsp->setOptoLimit (limit);
         };
         addAndMakeVisible (*compLimitTog);
 
@@ -667,10 +683,10 @@ struct OptoCompressorPanel : public EditorPanelBase, public juce::Timer
 // CSStyleCompressorPanel - I-4 (2026-05-02)
 // BOSS CS-Style sustain pedal layout.  4 user knobs: Level / Tone / Attack /
 // Sustain.  Selected when the underlying CompressorDSP's mType == CS Style.
-// Sustain is the macro that drives both Threshold (down) and makeup gain
-// (up); Tone is the post-comp tilt EQ; Level is the post-EQ output trim;
-// Attack is exposed directly (1..50 ms typical).  Ratio + Release are
-// fixed internally to CS-typical values (5:1 / 200ms) by setType.
+// QA-EffectsReview Task 6 (CS-3 fidelity): Sustain = pre-amp INTO a fixed -24 dB
+// threshold (more drive = harder squash + sustain); Tone = treble high-shelf only
+// (12 o'clock flat); Level is the post-EQ output trim; ratio is fixed 10:1 and
+// Release follows Attack inversely (both set by setType / setAttack).
 // ─────────────────────────────────────────────────────────────────────────────
 struct CSStyleCompressorPanel : public EditorPanelBase, public juce::Timer
 {
@@ -693,14 +709,14 @@ struct CSStyleCompressorPanel : public EditorPanelBase, public juce::Timer
         disableOutputVolKnob();
 
         // Level   -- output trim, -12..+12 dB (csLevelDb).
-        // Tone    -- 0..1, center 0.5 = flat (csTone01); bipolar tilt EQ.
-        // Attack  -- 1..50 ms (compressor attackMs, exposed directly).
-        // Sustain -- 0..1 macro (csSustain01) -> threshold + auto-makeup.
+        // Tone    -- 0..1, center 0.5 = flat (csTone01); treble high-shelf only.
+        // Attack  -- 1..50 ms (attackMs); also sets release inversely (CS-3).
+        // Sustain -- 0..1 macro (csSustain01) -> input drive into fixed threshold.
         buildKnobs (*this, knobs, {
-            { "Level",   -12.f,  12.f,   0.f, 0.1f, "Output level trim (dB)" },
-            { "Tone",      0.f,   1.f,  0.5f, 0.01f, "Tilt EQ (left = darker, right = brighter, center = flat)" },
-            { "Attack",    1.f,  50.f,  10.f, 0.1f, "Attack time (ms)" },
-            { "Sustain",   0.f,   1.f,   0.f, 0.01f, "Sustain macro (more = lower threshold + more makeup gain)" },
+            { "Level",   -12.f,  12.f,   0.f, 0.1f, "Output level / makeup trim (dB)" },
+            { "Tone",      0.f,   1.f,  0.5f, 0.01f, "Tone (treble): right = boost highs, left = cut highs, center (12 o'clock) = flat" },
+            { "Attack",    1.f,  50.f,  10.f, 0.1f, "Attack time (ms) -- also sets release inversely (fast = more sustain, slow = punchier)" },
+            { "Sustain",   0.f,   1.f,   0.f, 0.01f, "Sustain: drives the signal harder into the comp -- more = more compression + sustain" },
         });
         for (auto& k : knobs)
             k->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
@@ -788,6 +804,12 @@ struct CompressorPanel : public EditorPanelBase,
     {
         if (grMeter) { removeChildComponent (grMeter.get()); grMeter.reset(); }
     }
+
+    // QA-EffectsReview Task 6: Basic = the exact FL Fruity Compressor control set
+    // (Thresh/Ratio/Gain/Attack/Release/KneeType + meters); Advanced reveals our
+    // additions (manual KneeW, Mix, Look-ahead, Det window, SC-HPF, Auto-MU,
+    // Stereo Link, Peak/RMS).  resized() does the show/hide + reflow.
+    bool hasAdvancedControls() const override { return true; }
 
     explicit CompressorPanel(CompressorDSP* dsp)
         : mDsp(dsp)
@@ -900,10 +922,22 @@ struct CompressorPanel : public EditorPanelBase,
         if (mDsp && grMeter) grMeter->setGainReduction(mDsp->getGainReductionDb());
     }
 
-    // Layout: [VU] [GR] Thresh|Ratio|KneeW|Gain|Knee|Atk|Rel|Mix|LookA|Det|SCHPF [AutoMU/Link/PeakRMS toggles] [DBFS][Vol]
+    // Layout: [VU] [GR] <knob strip> [toggles (Advanced)] [DBFS][Vol].
+    // Basic shows only the 6 Fruity controls (Thresh|Ratio|Gain|KneeType|Atk|Rel);
+    // Advanced inserts KneeW + Mix|LookA|Det|SCHPF knobs and the toggle column.
     void resized() override
     {
         auto b = getLocalBounds().reduced(4, 4);
+
+        const bool adv = ! mBasicMode;
+        knobs[2]->setVisible (adv);   // KneeW
+        knobs[6]->setVisible (adv);   // Mix
+        knobs[7]->setVisible (adv);   // LookA
+        knobs[8]->setVisible (adv);   // Det
+        knobs[9]->setVisible (adv);   // SCHPF
+        if (autoMuTog)  autoMuTog ->setVisible (adv);
+        if (linkTog)    linkTog   ->setVisible (adv);
+        if (peakRmsTog) peakRmsTog->setVisible (adv);
 
         // VU input meter (left)
         if (vuIn) vuIn->setBounds(b.removeFromLeft(120).reduced(1, 2));
@@ -920,42 +954,50 @@ struct CompressorPanel : public EditorPanelBase,
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
         b.removeFromRight(4);
 
-        // Toggles laid out as two columns: Auto MU on its own (left), Link +
-        // Peak/RMS stacked (right).
-        constexpr int kToggleColW = 62;
-        auto togArea = b.removeFromRight(kToggleColW * 2 + 2);
-        b.removeFromRight(4);
+        // Toggles (Advanced only): Auto MU (left), Link + Peak/RMS stacked (right).
+        if (adv)
+        {
+            constexpr int kToggleColW = 62;
+            auto togArea = b.removeFromRight(kToggleColW * 2 + 2);
+            b.removeFromRight(4);
 
-        auto rightCol = togArea.removeFromRight(kToggleColW);
-        const int halfH = rightCol.getHeight() / 2;
-        auto linkSlot = rightCol.removeFromTop(halfH);
-        if (linkTog)    linkTog   ->setBounds(linkSlot.reduced(1));
-        if (peakRmsTog) peakRmsTog->setBounds(rightCol.reduced(1));
+            auto rightCol = togArea.removeFromRight(kToggleColW);
+            const int halfH = rightCol.getHeight() / 2;
+            auto linkSlot = rightCol.removeFromTop(halfH);
+            if (linkTog)    linkTog   ->setBounds(linkSlot.reduced(1));
+            if (peakRmsTog) peakRmsTog->setBounds(rightCol.reduced(1));
 
-        togArea.removeFromRight(2);
-        auto autoMuSlot = togArea.withSizeKeepingCentre(kToggleColW, halfH);
-        if (autoMuTog)  autoMuTog ->setBounds(autoMuSlot.reduced(1));
+            togArea.removeFromRight(2);
+            auto autoMuSlot = togArea.withSizeKeepingCentre(kToggleColW, halfH);
+            if (autoMuTog)  autoMuTog ->setBounds(autoMuSlot.reduced(1));
+        }
 
-        // Knob strip: 11 slots (D.4-Q4: KneeW added between Ratio and Gain).
-        // Thresh|Ratio|KneeW|Gain|KneeType|Atk|Rel|Mix|LookA|Det|SCHPF
-        const int n     = 11;
+        // Knob strip in display order; Advanced-only items inserted in place.
+        std::vector<juce::Component*> strip;
+        strip.push_back (knobs[0].get());              // Thresh
+        strip.push_back (knobs[1].get());              // Ratio
+        if (adv) strip.push_back (knobs[2].get());     // KneeW
+        strip.push_back (knobs[3].get());              // Gain
+        if (kneeSel) strip.push_back (kneeSel.get());  // KneeType chicken-head
+        strip.push_back (knobs[4].get());              // Attack
+        strip.push_back (knobs[5].get());              // Release
+        if (adv)
+        {
+            strip.push_back (knobs[6].get());          // Mix
+            strip.push_back (knobs[7].get());          // LookA
+            strip.push_back (knobs[8].get());          // Det
+            strip.push_back (knobs[9].get());          // SCHPF
+        }
+
+        const int n     = juce::jmax (1, (int) strip.size());
         const int slotW = b.getWidth() / n;
         const int sz    = juce::jmin(slotW, b.getHeight(), kKnobSz);
-
-        knobs[0]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Thresh
-        knobs[1]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Ratio
-        knobs[2]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // KneeW (D.4-Q4)
-        knobs[3]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Gain
+        for (auto* c : strip)
         {
             auto slot = b.removeFromLeft(slotW);
-            if (kneeSel) kneeSel->setBounds(slot.reduced(2));                          // KneeType chicken-head
+            if (c == kneeSel.get()) c->setBounds(slot.reduced(2));               // chicken-head fills slot
+            else                    c->setBounds(slot.withSizeKeepingCentre(sz, sz));
         }
-        knobs[4]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Attack
-        knobs[5]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Release
-        knobs[6]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Mix
-        knobs[7]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // LookA
-        knobs[8]->setBounds(b.removeFromLeft(slotW).withSizeKeepingCentre(sz, sz));   // Det
-        knobs[9]->setBounds(b.withSizeKeepingCentre(sz, sz));                          // SCHPF
     }
 
     void paint(juce::Graphics& g) override
@@ -3846,8 +3888,8 @@ struct NoiseGateStylePanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BassCompressorStylePanel - BC Style Bass Compressor
-// 4 knobs (Comp / Ratio / Release / Level) + LED GR meter
+// BassCompressorStylePanel - BC Style Bass Compressor (BOSS BC-1X)
+// 4 knobs (Thresh / Ratio / Release / Level) + LED GR meter
 // ─────────────────────────────────────────────────────────────────────────────
 struct BassCompressorStylePanel : public EditorPanelBase, public juce::Timer
 {
@@ -3867,19 +3909,19 @@ struct BassCompressorStylePanel : public EditorPanelBase, public juce::Timer
         disableOutputVolKnob();
 
         buildKnobs (*this, knobs, {
-            { "Comp",    0.f,   1.f,    0.5f,  0.001f, "Macro compression amount (lowers thresholds + raises ratios across all 3 bands)" },
-            { "Ratio",   1.f,   10.f,   4.f,   0.1f,   "Per-band ratio (multiplied by the Comp macro)" },
+            { "Thresh",  -48.f, 0.f,    -24.f, 0.5f,   "Threshold (dB) -- compression begins above this level" },
+            { "Ratio",   1.f,   10.f,   4.f,   0.1f,   "Per-band ratio (applied directly to all 3 bands)" },
             { "Release", 50.f,  500.f,  200.f, 1.f,    "Per-band release time (ms)" },
             { "Level",   -24.f, 12.f,   0.f,   0.1f,   "Output level (dB)" },
         });
-        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setComp      ((float) knobs[0]->slider.getValue()); };
+        knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setThresholdDb ((float) knobs[0]->slider.getValue()); };
         knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setRatio     ((float) knobs[1]->slider.getValue()); };
         knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setReleaseMs ((float) knobs[2]->slider.getValue()); };
         knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevel     ((float) knobs[3]->slider.getValue()); };
 
         if (dsp)
         {
-            knobs[0]->slider.setValue (dsp->mComp,     juce::sendNotificationSync);
+            knobs[0]->slider.setValue (dsp->mThresholdDb, juce::sendNotificationSync);
             knobs[1]->slider.setValue (dsp->mRatio,    juce::sendNotificationSync);
             knobs[2]->slider.setValue (dsp->mReleaseMs, juce::sendNotificationSync);
             knobs[3]->slider.setValue (dsp->mLevel,    juce::sendNotificationSync);

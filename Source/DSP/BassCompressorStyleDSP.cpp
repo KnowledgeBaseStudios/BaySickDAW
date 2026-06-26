@@ -6,13 +6,6 @@ namespace
     constexpr float kXover2Hz   = 2000.0f;
     constexpr float kAttackMs   = 10.0f;
 
-    // Macro mapping: Comp 0..1 maps to threshold -6..-36 dB and ratio 2..8x
-    // (multiplied with the user's Ratio knob to reach the final ratio).
-    constexpr float kCompMinThreshDb = -6.0f;
-    constexpr float kCompMaxThreshDb = -36.0f;
-    constexpr float kCompMinRatioMul = 1.0f;
-    constexpr float kCompMaxRatioMul = 2.5f;
-
     // Per-sample squared-domain compressor: envSq follows |x|^2 with attack/
     // release coefficients.  Returns the linear gain factor that should be
     // applied to the audio sample given the current envelope.
@@ -80,10 +73,10 @@ void BassCompressorStyleDSP::recomputeCoefs()
     mReleaseCoef = (float) std::exp (-1.0 / (mReleaseMs * 0.001 * mSampleRate));
 }
 
-void BassCompressorStyleDSP::setComp (float v01)
+void BassCompressorStyleDSP::setThresholdDb (float dB)
 {
-    v01 = juce::jlimit (0.0f, 1.0f, v01);
-    if (mComp != v01) mComp = v01;
+    dB = juce::jlimit (-48.0f, 0.0f, dB);
+    if (mThresholdDb != dB) mThresholdDb = dB;
 }
 
 void BassCompressorStyleDSP::setRatio (float r)
@@ -155,15 +148,10 @@ void BassCompressorStyleDSP::process (juce::AudioBuffer<float>& buffer)
         mXover2Hp.process (ctx);
     }
 
-    // Compressor params after macro mapping.
-    const float comp01      = juce::jlimit (0.0f, 1.0f, mComp);
-    const float threshDb    = juce::jmap (comp01, 0.0f, 1.0f,
-                                            kCompMinThreshDb, kCompMaxThreshDb);
-    const float threshLin   = juce::Decibels::decibelsToGain (threshDb, -120.0f);
+    // Discrete threshold + direct ratio (no macro).
+    const float threshLin   = juce::Decibels::decibelsToGain (mThresholdDb, -120.0f);
     const float threshSq    = threshLin * threshLin;
-    const float ratioMul    = juce::jmap (comp01, 0.0f, 1.0f,
-                                            kCompMinRatioMul, kCompMaxRatioMul);
-    const float effRatio    = mRatio * ratioMul;
+    const float effRatio    = mRatio;
 
     // Per-band per-sample compress, then sum.  Track worst-case GR for the
     // meter (most-negative value across bands and channels).
@@ -221,7 +209,7 @@ void BassCompressorStyleDSP::process (juce::AudioBuffer<float>& buffer)
 void BassCompressorStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::ValueTree state ("BassCompressorStyleDSP");
-    state.setProperty ("comp",    mComp,          nullptr);
+    state.setProperty ("threshold", mThresholdDb,  nullptr);
     state.setProperty ("ratio",   mRatio,         nullptr);
     state.setProperty ("release", mReleaseMs,     nullptr);
     state.setProperty ("level",   mLevel,         nullptr);
@@ -235,7 +223,13 @@ void BassCompressorStyleDSP::setStateInformation (const void* data, int sz)
     auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
     if (! xml || ! xml->hasTagName ("BassCompressorStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
-    setComp      ((float)(double) state.getProperty ("comp",    0.5));
+    // QA-EffectsReview Task 6: discrete threshold replaced the old "comp" macro.
+    // Migrate old presets -- if there's no threshold key, derive it from the old
+    // comp 0..1 (which mapped to -6..-36 dB).  Ratio is no longer macro-multiplied,
+    // so old presets compress a bit differently; re-save recommended.
+    const double oldComp    = (double) state.getProperty ("comp", 0.5);
+    const double migrateThr = -6.0 - 30.0 * juce::jlimit (0.0, 1.0, oldComp);
+    setThresholdDb ((float)(double) state.getProperty ("threshold", migrateThr));
     setRatio     ((float)(double) state.getProperty ("ratio",   4.0));
     setReleaseMs ((float)(double) state.getProperty ("release", 200.0));
     setLevel     ((float)(double) state.getProperty ("level",   0.0));

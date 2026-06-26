@@ -6,17 +6,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // BassCompressorStyleDSP - Phase I-8 (2026-05-02)
 // ─────────────────────────────────────────────────────────────────────────────
-// BC Style Bass Compressor pedal.  Multi-band feedforward compressor split
-// into 3 bands by Linkwitz-Riley 4th-order crossovers (200 Hz, 2 kHz).
-// Each band has an independent compressor stage; the macro Comp knob
-// lowers thresholds and raises ratios across all 3 in lockstep so a single
-// twist gives uniformly heavier compression.
+// BC Style Bass Compressor pedal (BOSS BC-1X).  Multi-band feedforward
+// compressor split into 3 bands by Linkwitz-Riley 4th-order crossovers
+// (200 Hz, 2 kHz) -- models the BC-1X's MDP multi-band character.
 //
-// Knobs:
-//   Comp    -- 0..1 macro that pushes all 3 bands deeper into compression.
-//              At 0 = light per-band 2:1 with -6 dB threshold; at 1 =
-//              aggressive 8:1 with -36 dB threshold.
-//   Ratio   -- 1..10 fine ratio override (multiplied by macro).
+// Knobs (the BC-1X's four discrete controls):
+//   Thresh  -- discrete threshold, -48..0 dB (QA-EffectsReview Task 6 split this
+//              out of the old 0..1 "Comp" macro that bundled threshold + ratio).
+//   Ratio   -- 1..10, applied directly to all bands.
 //   Release -- per-band release time, 50..500 ms.
 //   Level   -- output dB trim, -24..+12.
 //
@@ -42,15 +39,15 @@ public:
         return mGainReductionDb.load (std::memory_order_relaxed);
     }
 
-    void setComp     (float v01);   // 0..1 macro
-    void setRatio    (float r);     // 1..10
-    void setReleaseMs (float ms);   // 50..500
-    void setLevel    (float dB);    // -24..+12
+    void setThresholdDb (float dB);   // -48..0
+    void setRatio       (float r);    // 1..10
+    void setReleaseMs   (float ms);   // 50..500
+    void setLevel       (float dB);   // -24..+12
 
-    float mComp     { 0.5f };
-    float mRatio    { 4.0f };
-    float mReleaseMs { 200.0f };
-    float mLevel    { 0.0f };
+    float mThresholdDb { -24.0f };
+    float mRatio       {   4.0f };
+    float mReleaseMs   { 200.0f };
+    float mLevel       {   0.0f };
 
 private:
     void recomputeCoefs();

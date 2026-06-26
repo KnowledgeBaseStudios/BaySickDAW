@@ -69,6 +69,13 @@ private:
     float mGainL { 1.0f }, mGainR { 1.0f }; // applied gain (smoothed via decay)
     float mRmsCoef    { 0.0f };
     float mDecayCoef  { 0.0f };
+    // QA-EffectsReview Task 6: fast OPEN coef (~1 ms) so note attacks punch
+    // through -- the gate opens fast, closes at the Decay rate.  Plus a Schmitt
+    // trigger (mOpenL/R latch): open at threshold, stay open until 3 dB below
+    // (kHysteresisDb) so a signal hovering at the threshold doesn't chatter.
+    float mAttackCoef { 0.0f };
+    bool  mOpenL { false }, mOpenR { false };
+    static constexpr float kHysteresisDb = 3.0f;
 
     // Cached linear floor for Reduction mode (-20 dB) and Mute mode (-60 dB).
     static constexpr float kReductionFloorDb = -20.0f;

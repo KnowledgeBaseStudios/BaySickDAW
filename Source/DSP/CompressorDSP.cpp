@@ -2,6 +2,17 @@
 #include <cmath>
 #include <algorithm>
 
+namespace
+{
+    // CS-3: the single Attack knob also sets release, inversely (fast attack ->
+    // long release = max sustain; slow attack -> short release = punch).  Maps the
+    // CS Attack range [1,50] ms to release [800,100] ms.
+    inline float csReleaseFromAttackMs (float attackMs) noexcept
+    {
+        return juce::jmap (juce::jlimit (1.0f, 50.0f, attackMs), 1.0f, 50.0f, 800.0f, 100.0f);
+    }
+}
+
 // -----------------------------------------------------------------------------
 CompressorDSP::CompressorDSP()
 {
@@ -94,49 +105,64 @@ void CompressorDSP::setType (int t)
     // they're standard params on the other Types.
     if (mType == Type::CS)
     {
-        // CS Style fixed character: ratio 5:1, release 200ms.  Attack stays
-        // user-driven (it's a CS Style face-plate knob).
-        if (ratio    != 5.0f)   { ratio    = 5.0f;   mRatioSmoothed.setTargetValue (ratio); }
-        if (releaseMs != 200.0f) { releaseMs = 200.0f; calcCoefs(); }
+        // CS Style (BOSS CS-3): high fixed ratio; the single Attack knob also
+        // sets release inversely; the Sustain macro drives INTO a fixed threshold
+        // (applyCsSustainMacro).
+        if (ratio != 10.0f) { ratio = 10.0f; mRatioSmoothed.setTargetValue (ratio); }
+        releaseMs = csReleaseFromAttackMs (attackMs);
+        calcCoefs();   // release derived from attack
         applyCsSustainMacro();
-        // Refresh tilt-EQ coefs in case csTone01 was edited while a non-CS
-        // Type was active (the coefs are only USED in process() under CS,
-        // but keeping them current makes the switch instantaneous).
+        // Refresh tilt-EQ coefs in case csTone01 was edited while a non-CS Type
+        // was active (only USED in process() under CS; keeps the switch instant).
         updateCsToneCoefs();
+    }
+
+    // QA-EffectsReview Task 6: FET (1176) is a peak-detecting, hard-knee FET
+    // limiter.  Force those on every FET selection (the FET panel exposes
+    // neither Peak/RMS nor knee) so the mode is correct however the user got
+    // here -- live switch, or the load path (mirrored in setStateInformation).
+    if (mType == Type::FET)
+    {
+        peakDetection = true;
+        kneeDb        = 0.0f;
+        // 1176 Output is a makeup control; default a fresh FET to +12 dB makeup
+        // (the "18" dial position) since the shared makeup default is 0 = unity.
+        // Preset loads keep their saved makeup (setStateInformation, no nudge).
+        if (makeupDb == 0.0f) setGain (12.0f);
     }
 }
 
-// I-4 (2026-05-02): build a complementary low-shelf + high-shelf pair from
-// csTone01.  Pivot ~ 1 kHz; max ±6 dB at the extremes (csTone01 = 0 or 1).
-// At csTone01 = 0.5 both shelves are flat (gain = 1.0).
+// QA-EffectsReview Task 6: CS-3 Tone is a TREBLE control (high-shelf only) --
+// 12 o'clock (csTone01 = 0.5) flat, max = treble boost, min = treble cut, +/-9 dB
+// at the extremes.  The low shelf is pinned flat (was a bipolar low/high tilt;
+// the real CS-3 Tone doesn't touch the lows).
 void CompressorDSP::updateCsToneCoefs()
 {
     if (mSampleRate <= 0.0) return;
     const float toneSigned = juce::jlimit (-1.0f, 1.0f,
                                             (csTone01 - 0.5f) * 2.0f);
-    constexpr float kMaxShelfDb  = 6.0f;
-    constexpr float kLowShelfHz  = 300.0f;
+    constexpr float kMaxShelfDb  = 9.0f;
     constexpr float kHighShelfHz = 3000.0f;
 
-    const float highShelfDb =  kMaxShelfDb * toneSigned;   // bright = positive
-    const float lowShelfDb  = -kMaxShelfDb * toneSigned;   // bright = bass cut
-
-    auto lowGain  = juce::Decibels::decibelsToGain (lowShelfDb,  -60.0f);
-    auto highGain = juce::Decibels::decibelsToGain (highShelfDb, -60.0f);
+    const float highGain = juce::Decibels::decibelsToGain (kMaxShelfDb * toneSigned, -60.0f);
 
     *mCsLowShelf .state = *juce::dsp::IIR::Coefficients<float>::makeLowShelf
-        ((double) mSampleRate, kLowShelfHz, 0.7071f, lowGain);
+        ((double) mSampleRate, 300.0f, 0.7071f, 1.0f);   // pinned flat
     *mCsHighShelf.state = *juce::dsp::IIR::Coefficients<float>::makeHighShelf
         ((double) mSampleRate, kHighShelfHz, 0.7071f, highGain);
 }
 
 void CompressorDSP::applyCsSustainMacro()
 {
-    // sustain01 = 0  -> threshold -6 dB,  makeup 0 dB
-    // sustain01 = 1  -> threshold -36 dB, makeup +12 dB
+    // QA-EffectsReview Task 6: CS-3 Sustain = pre-amplification INTO a fixed
+    // threshold (not a threshold drop).  More sustain -> more drive into the
+    // high-ratio comp (= harder squash + more sustain) + a touch of makeup.
+    //   s01 = 0  -> drive  0 dB, makeup 0 dB ;  s01 = 1 -> drive +24 dB, makeup +6 dB
+    // Threshold is FIXED at -24 dB; csInputDriveDb is applied CS-only in process().
     const float s01 = juce::jlimit (0.0f, 1.0f, csSustain01);
-    const float newThreshold = -6.0f - 30.0f * s01;
-    const float newMakeup    =  12.0f * s01;
+    csInputDriveDb = 24.0f * s01;
+    const float newThreshold = -24.0f;
+    const float newMakeup    =   6.0f * s01;
     if (threshold != newThreshold)
     {
         threshold = newThreshold;
@@ -213,12 +239,13 @@ void CompressorDSP::calcCoefs()
     mPeakAttCoef = static_cast<float>(std::exp(-1.0 / (0.0001 * sr)));
     mPeakRelCoef = static_cast<float>(std::exp(-1.0 / (detectionMs * 0.001 * sr)));
 
-    // H-2 -- Opto multi-stage release coefficients.  60 ms fast / 500 ms slow,
-    // blended by mOptoHistory which itself averages over ~1 sec.  Numbers
-    // chosen to mirror the typical LA-2A release character (fast initial
-    // recovery from transients, slow final crawl back to unity).
+    // H-2 -- Opto multi-stage release coefficients.  60 ms fast / 3 s slow,
+    // blended by mOptoHistory which itself averages over ~1 sec.  Mirrors the
+    // LA-2A two-stage release: ~60 ms to half, then a long program-dependent
+    // crawl (real T4 cell is 0.5-5 s).  QA-EffectsReview Task 6: slow stage
+    // lengthened 500 ms -> 3 s for the signature long LA-2A tail.
     mOptoFastRelCoef   = static_cast<float>(std::exp(-1.0 / (0.060 * sr)));
-    mOptoSlowRelCoef   = static_cast<float>(std::exp(-1.0 / (0.500 * sr)));
+    mOptoSlowRelCoef   = static_cast<float>(std::exp(-1.0 / (3.000 * sr)));
     mOptoHistoryCoef   = static_cast<float>(std::exp(-1.0 / (1.000 * sr)));
 }
 
@@ -242,15 +269,57 @@ float CompressorDSP::computeGainDb (float levelDb) const noexcept
     // public members which are updated each sample by the caller.
     const float overshoot = levelDb - threshold;
 
-    // Vintage optical model (types 2 and 6): ratio decreases linearly back
-    // toward 1:1 over 12 dB above threshold, mimicking electro-optical behavior.
+    // Opto (LA-2A): level-dependent RISING ratio -- the T4 cell's nonlinear,
+    // program-dependent curve, not a fixed ratio.  Comp rises 1.5:1 -> 4:1 (~3:1
+    // average, the LA-2A Compress spec); Limit rises 8:1 -> 80:1 -- a SOFT ceiling
+    // that holds the output within ~0.25 dB of threshold at the top (actually
+    // limiting, but optical/musical, not a brickwall).  Mode = the optoLimit flag
+    // (NOT ratio: setRatio clamps to 30, so a ratio>50 sentinel was unreachable).
+    // Returns GR directly; the ~10 ms optical attack holds sustained level, not peaks.
+    if (mType == Type::Opto)
+    {
+        if (overshoot <= 0.0f) return 0.0f;
+        const float t    = juce::jlimit (0.0f, 1.0f, overshoot / 20.0f);
+        const float effR = optoLimit ? (8.0f + t * (80.0f - 8.0f))
+                                     : (1.5f + t * (4.0f  - 1.5f));
+        return (1.0f / effR - 1.0f) * overshoot;   // negative dB gain reduction
+    }
+
+    // Vintage optical model (knee types 2 and 6): above threshold the ratio
+    // relaxes from the user's ratio toward a gentle 2:1 floor over 12 dB,
+    // mimicking electro-optical softening.  QA-EffectsReview Task 6 (a): the
+    // relax target was 1:1, which zeroed gain reduction on peaks > 12 dB over
+    // threshold (GR humped, then collapsed -- the comp stopped compressing
+    // exactly when the signal was loudest).  Flooring at 2:1 keeps the slope
+    // < 1 so output stays monotonic and loud peaks are still caught.  floorRatio
+    // = min(ratio,2): never relax a ratio already <= 2:1 (nothing to soften), so
+    // low ratios + upward expansion keep the user's setting.
     float effectiveRatio = ratio;
-    const bool isVintage = (mKneeType == 2 || mKneeType == 6);
+
+    // FET (1176) all-buttons-in: a program-dependent RISING ratio -- the bias
+    // shift makes the effective ratio climb with level, and that shifting curve
+    // (not a fixed number) is the all-buttons character.  Aggressive-but-
+    // controlled: ~8:1 at threshold rising to ~20:1 by +18 dB over, capped there
+    // (limits hard but the curve stays monotonic).  Overrides the button ratio.
+    if (mType == Type::FET && fetAllButtons && overshoot > 0.0f)
+    {
+        constexpr float kAbBase = 8.0f;    // ratio at threshold
+        constexpr float kAbTop  = 20.0f;   // ratio ceiling
+        constexpr float kAbSpan = 18.0f;   // dB of overshoot to reach the ceiling
+        const float t = juce::jlimit (0.0f, 1.0f, overshoot / kAbSpan);
+        effectiveRatio = kAbBase + t * (kAbTop - kAbBase);
+    }
+
+    // Vintage knee is a Modern-algorithm character only (the FET/Opto/CS panels
+    // never expose the knee selector; FET forces a hard knee).  Gate on Modern
+    // so a stale mKneeType can't apply the optical taper to another Type.
+    const bool isVintage = (mType == Type::Modern) && (mKneeType == 2 || mKneeType == 6);
     if (isVintage && overshoot > 0.0f)
     {
-        float t = juce::jlimit (0.0f, 1.0f, overshoot / 12.0f);
-        effectiveRatio = ratio + t * (1.0f - ratio);   // ratio -> 1.0 over 12 dB
-        effectiveRatio = std::max (effectiveRatio, 1.0f);
+        const float floorRatio = std::min (ratio, 2.0f);
+        const float t = juce::jlimit (0.0f, 1.0f, overshoot / 12.0f);
+        effectiveRatio = ratio + t * (floorRatio - ratio);   // ratio -> floorRatio over 12 dB
+        effectiveRatio = std::max (effectiveRatio, floorRatio);
     }
 
     if (kneeDb > 0.0f)
@@ -364,6 +433,13 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
         return juce::jlimit(-120.0f, 60.0f, db);
     };
 
+    // CS-3 Sustain pre-amplification: drive the signal INTO the fixed threshold.
+    // csInputDriveDb (= 24 * sustain) lifts BOTH the detected level and the audio
+    // so the high-ratio comp squashes the driven signal (the "dig in" sustain).
+    // 0 for every non-CS Type -> no-op.
+    const float csDriveDb = (mType == Type::CS) ? csInputDriveDb : 0.0f;
+    const float csDriveGn = juce::Decibels::decibelsToGain (csDriveDb);
+
     for (int i = 0; i < numSamples; ++i)
     {
         // -- Continuous-param smoothers (A2) --------------------------------
@@ -423,6 +499,11 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
             }
         }
 
+        // CS-3 Sustain: lift the detected level so more of the signal exceeds the
+        // fixed threshold (harder compression as Sustain rises).  0 for non-CS.
+        levelDbL += csDriveDb;
+        levelDbR += csDriveDb;
+
         // Safety clamp before gain computer.
         levelDbL = clampLevelDb(levelDbL);
         levelDbR = clampLevelDb(levelDbR);
@@ -474,24 +555,6 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
         float grL = smoothOne(mEnvL, targetDbL);
         float grR = stereoLink ? (mEnvR = grL) : smoothOne(mEnvR, targetDbR);
 
-        // H-2 -- FET mode: soft-saturate the GR signal at deep compression.
-        // grL/grR are negative dB; magnitudes <= 6 pass through, magnitudes
-        // beyond 6 dB get tanh-compressed so the gain stage adds harmonic
-        // distortion rather than just clamping.  Approximates 1176's gain-stage
-        // FET nonlinearity at high GR.
-        if (mType == Type::FET)
-        {
-            auto satGr = [](float gr) noexcept -> float
-            {
-                if (gr >= -6.0f) return gr;
-                const float overshoot    = -6.0f - gr;             // positive
-                const float satOvershoot = 6.0f * std::tanh (overshoot / 6.0f);
-                return -6.0f - satOvershoot;
-            };
-            grL = satGr (grL);
-            grR = satGr (grR);
-        }
-
         // H-2 -- Opto memory tracker: one-pole running magnitude of current GR
         // over a ~1 sec window.  Drives the fast/slow release blend on next
         // sample.  Always updated when Type=Opto, even outside release phase,
@@ -528,8 +591,47 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
         const float gL = juce::Decibels::decibelsToGain(grL) * makeupLin;
         const float gR = juce::Decibels::decibelsToGain(grR) * makeupLin;
 
-        const float wetL = audioL * gL;
-        const float wetR = audioR * gR;
+        // CS-3 Sustain pre-amp: drive the audio into the comp (matches the detector
+        // drive) so the output is the driven-then-compressed signal.  Unity for non-CS.
+        audioL *= csDriveGn;
+        audioR *= csDriveGn;
+
+        float wetL = audioL * gL;
+        float wetR = audioR * gR;
+
+        // FET (1176) gain-stage color: always-on tanh harmonic shaping on the WET
+        // output (QA-EffectsReview Task 6 moved it here from the GR control signal,
+        // where it was gated > 6 dB GR and nearly inaudible).  /(1+drv) normalizes
+        // to UNITY at low level (no rest-level jump); drive grows with GR depth
+        // (-gr) but is CAPPED at 12 dB GR so heavy all-buttons crush colors rather
+        // than fuzzes out (aggressive-but-controlled).  gr is negative dB.
+        if (mType == Type::FET)
+        {
+            const float grCapL = std::min (12.0f, std::max (0.0f, -grL));
+            const float grCapR = std::min (12.0f, std::max (0.0f, -grR));
+            const float drvL = 0.08f + 0.05f * grCapL;
+            const float drvR = 0.08f + 0.05f * grCapR;
+            wetL = std::tanh (wetL * (1.0f + drvL)) / (1.0f + drvL);
+            wetR = std::tanh (wetR * (1.0f + drvR)) / (1.0f + drvR);
+        }
+
+        // Opto (LA-2A) tube warmth: gentle EVEN-harmonic (2nd) coloration via an
+        // asymmetric tanh -- the small bias offset makes the curve asymmetric
+        // (generates 2nd harmonic); subtracting tanh(bias) removes the static
+        // offset and /(1+drv) keeps low level ~unity (no level jump).  Drive +
+        // bias grow subtly with GR depth, capped (LA-2A is a gentle leveler).
+        if (mType == Type::Opto)
+        {
+            const float grCapL = std::min (12.0f, std::max (0.0f, -grL));
+            const float grCapR = std::min (12.0f, std::max (0.0f, -grR));
+            const float drvL  = 0.04f + 0.03f * grCapL;
+            const float drvR  = 0.04f + 0.03f * grCapR;
+            const float biasL = 0.20f * drvL;
+            const float biasR = 0.20f * drvR;
+            wetL = (std::tanh (wetL * (1.0f + drvL) + biasL) - std::tanh (biasL)) / (1.0f + drvL);
+            wetR = (std::tanh (wetR * (1.0f + drvR) + biasR) - std::tanh (biasR)) / (1.0f + drvR);
+        }
+
         outL[i] = audioL + curMix * (wetL - audioL);
         if (outR) outR[i] = audioR + curMix * (wetR - audioR);
     }
@@ -592,6 +694,10 @@ void CompressorDSP::setAttack (float ms)
     if (attackMs != ms)
     {
         attackMs = ms;
+        // CS-3: the Attack knob also sets release, inversely (fast attack -> long
+        // release = sustain; slow attack -> short release = punch).
+        if (mType == Type::CS)
+            releaseMs = csReleaseFromAttackMs (attackMs);
         calcCoefs();
     }
 }
@@ -689,6 +795,16 @@ void CompressorDSP::setPeakDetection (bool on)
     if (on != peakDetection) peakDetection = on;
 }
 
+void CompressorDSP::setFetAllButtons (bool on)
+{
+    if (on != fetAllButtons) fetAllButtons = on;
+}
+
+void CompressorDSP::setOptoLimit (bool on)
+{
+    if (on != optoLimit) optoLimit = on;
+}
+
 void CompressorDSP::setDetectionMs (float ms)
 {
     ms = juce::jlimit (1.0f, 100.0f, ms);
@@ -738,6 +854,8 @@ void CompressorDSP::getStateInformation (juce::MemoryBlock& dest)
     // H-2 (2026-05-01) -- Type umbrella character mode (Modern/FET/Opto/CS).
     // Default 0 = Modern preserves old presets bit-exact on load.
     state.setProperty ("type",          (int) mType,         nullptr);
+    state.setProperty ("fetAllButtons", (int) fetAllButtons, nullptr);
+    state.setProperty ("optoLimit",     (int) optoLimit,     nullptr);
     // I-4 (2026-05-02) -- CS Style state.  Persisted regardless of active
     // Type so a user who set up CS Style settings, switched to FET briefly,
     // and saved doesn't lose their CS values on reload.
@@ -780,11 +898,39 @@ void CompressorDSP::setStateInformation (const void* data, int sz)
     mType = static_cast<Type> (juce::jlimit (0, 3,
         (int) state.getProperty ("type", 0)));
     mOptoHistory = 0.0f;
+    // QA-EffectsReview Task 6: mirror setType's FET coercion on the load path
+    // (setStateInformation sets mType directly, bypassing setType), so old FET
+    // presets saved before peak/hard-knee was forced still load correct.
+    if (mType == Type::FET)
+    {
+        peakDetection = true;
+        kneeDb        = 0.0f;
+    }
+    // All-buttons-in flag.  Legacy FET all-buttons presets stored a high sentinel
+    // ratio (e.g. 1000) with no flag, so treat ratio > 25 on a FET preset as
+    // all-buttons -> the program-dependent rising-ratio curve.
+    fetAllButtons = ((int) state.getProperty ("fetAllButtons", 0)) != 0;
+    if (mType == Type::FET && ratio > 25.0f)
+        fetAllButtons = true;
+    // Opto Comp/Limit flag.  Legacy Opto Limit presets stored a high ratio (panel
+    // wrote 100, clamped to 30 by setRatio), so ratio > 16 on an Opto preset
+    // migrates to the flag.
+    optoLimit = ((int) state.getProperty ("optoLimit", 0)) != 0;
+    if (mType == Type::Opto && ratio > 16.0f)
+        optoLimit = true;
     // I-4 -- CS Style state.  Defaults preserve neutral behaviour for old
     // projects (csSustain=0 => light comp; csTone=0.5 => flat tilt EQ).
     csSustain01 = (float)(double) state.getProperty ("csSustain", 0.0);
     csTone01    = (float)(double) state.getProperty ("csTone",    0.5);
     csLevelDb   = (float)(double) state.getProperty ("csLevel",   0.0);
+    // QA-EffectsReview Task 6: CS-3 derives release from attack + the Sustain
+    // macro now drives a fixed threshold (recompute csInputDriveDb).  Re-applying
+    // here migrates old CS presets (threshold-drop -> input-drive) on load.
+    if (mType == Type::CS)
+    {
+        releaseMs = csReleaseFromAttackMs (attackMs);
+        applyCsSustainMacro();
+    }
 
     // Rebuild derived state
     if (mSampleRate > 0.0 && !mLookaheadL.empty())
