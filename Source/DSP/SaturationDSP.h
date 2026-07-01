@@ -57,6 +57,16 @@ public:
                        //    chain.  Bit-exact with the legacy TapeDSP class.
     };
 
+    // Console character voicing.  Clean = transparent console soft-clip with a
+    // drive-scaled 2nd-harmonic (SSL-style even "glue"); Dirty = low-frequency-
+    // weighted saturation + low-end bloom (Neve transformer LF saturation).
+    // Both reuse the Tube band-split + shapers.
+    enum class ConsoleMode : int
+    {
+        Clean = 0,   // default
+        Dirty = 1
+    };
+
     // H-7 (2026-05-01): Keep Low / Normal / Keep High harmonic-routing mode
     // (Saturation Knob style).  When KeepLow, signal is split at 250 Hz LR4;
     // only the high band is saturated.  When KeepHigh, split at 4 kHz; only
@@ -102,6 +112,13 @@ public:
     void setVocalBody      (bool on); // post-sat -2dB@250Hz peaking + +2dB@3kHz shelf
     void setHarmonicsMode  (int m);   // 0=KeepLow, 1=Normal (default), 2=KeepHigh
 
+    // Console character: Clean/Dirty voicing + a master Color enable.  The Color
+    // enable decouples Console's 2nd-harmonic term from the Tube mTransformer
+    // flag (which the Console panel can't set) -- without it, Console's Color
+    // control is dead by default.
+    void setConsoleMode    (int m);   // 0 = Clean (default), 1 = Dirty
+    void setConsoleColor   (bool on); // master enable for the 2nd-harmonic color
+
     // ── H-10 (2026-05-02): Tape setters -- mirror TapeDSP API ────────────
     //   These only mutate the Tape sub-state; existing Tube/Console params
     //   stay independent.  Engaged by setSatType (Tape).  Bit-exact with
@@ -119,6 +136,9 @@ public:
     void setTapeBias         (float v);     // 0..10  (5 = neutral)
     void setTapePreShelfDb   (float dB);    // -12..+12
     void setTapeDeShelfDb    (float dB);    // -12..+12
+    void setTapeLpHz         (float hz);    // 5000..22000 (cassette HF rolloff)
+    void setTapeIrOn         (bool on);     // cassette IR on/off
+    void setTapeCassette     (int idx);     // 0..9 (paired IR + hiss)
 
     // ── H-10 Tape getters for panel construct-time state-sync ────────────
     int   getTapeOsLog2()    const noexcept { return mOsLog2; }   // shared with Tube/Console
@@ -153,6 +173,8 @@ public:
     Type  mSatType     { Type::Tube }; // H-7: default Tube preserves prior audio
     bool  mVocalBody   { false };      // H-7: vocal-body EQ post-saturation
     HarmonicsMode mHarmonicsMode { HarmonicsMode::Normal };  // H-7
+    ConsoleMode   mConsoleMode  { ConsoleMode::Clean };  // Console Clean/Dirty voicing
+    bool          mConsoleColor { true };                // Console 2nd-harmonic color enable
 
     // ── H-10 (2026-05-02): Tape sub-engine public knobs.  Defaults match
     //   TapeDSP's defaults bit-exact so any preset round-trip through the
@@ -162,26 +184,32 @@ public:
     float mTapeSpeed        { 0.5f };
     float mTapeHystAmount   { 1.0f };
     float mTapeWowRate      { 0.5f };
-    float mTapeWowDepth     { 0.0f };
+    float mTapeWowDepth     { 0.02f };
     float mTapeFlutterRate  { 5.0f };
-    float mTapeFlutterDepth { 0.0f };
+    float mTapeFlutterDepth { 0.02f };
     float mTapeInputGain    { 1.0f };
     float mTapeOutputGain   { 1.0f };
-    float mTapeHiss         { 0.0f };
+    float mTapeHiss         { 0.001f };    // -60 dB default (linear; knob is dB)
     float mTapeBias         { 5.0f };
     float mTapePreShelfDb   { 0.0f };
     float mTapeDeShelfDb    { 0.0f };
+    float mTapeLpHz         { 18000.0f };  // cassette low-pass (5k..22k; 22k = off)
+    bool  mTapeIrOn         { false };     // cassette IR engaged (Basic on/off; default off)
+    int   mTapeCassetteIdx  { 0 };         // 0..9 -> paired cassette IR + hiss bed
 
 private:
     // Tube engine (stateless per sample; takes per-sample smoothed params).
     static float processTube (float x, float flowers, float dabs,
                               int tubeType, bool transformer) noexcept;
 
-    // H-7 (2026-05-01): Console engine -- alternative character.  Gentler
-    // soft-clip + asymmetric 2nd-harmonic transformer saturation.  Same
-    // input scaling (flowers / dabs / transformer) but different curve.
-    static float processConsole (float x, float drive, float xfmr,
-                                  bool transformer) noexcept;
+    // Console engine -- two voicings.  Clean: transparent soft-clip + a
+    // drive-scaled 2nd harmonic when Color is on (SSL-style even glue).  Dirty:
+    // low-frequency-weighted saturation (isLow drives the low band ~2x harder)
+    // + a 2nd that sits ~= the tanh 3rd (Neve 2nd~=3rd balance).  drive = Drive
+    // knob (flowers), color = Color knob (dabs), colorOn = Color master enable,
+    // dirty = Dirty mode, isLow = which split band this is.
+    static float processConsole (float x, float drive, float color,
+                                  bool colorOn, bool dirty, bool isLow) noexcept;
 
     void updateFilters();
     void allocateScratch();
@@ -201,6 +229,12 @@ private:
     float mShelfCoef  { 0.0f };   // base rate, 10 kHz
     float mBassLPCoef { 0.0f };   // OS rate, 350 Hz (depends on mOsLog2)
     float mDCCoef     { 0.9995f }; // 9c: SR-aware, 5 Hz target
+
+    // Console Dirty LF-bloom low-shelf (base rate) -- models the Neve transformer
+    // low-end bump.  Applied to the wet path in Phase 3 on the Dirty voicing only.
+    float mConsoleBloomCoef    { 0.0f };   // 1-pole corner (~90 Hz)
+    float mConsoleBloomAddGain { 0.0f };   // shelf boost - 1 (added * low-passed)
+    float mConsoleBloomL { 0.0f }, mConsoleBloomR { 0.0f };
 
     // 9a: oversampler + latency ------------------------------------------------
     std::unique_ptr<juce::dsp::Oversampling<float>> mOversampler;
@@ -319,6 +353,26 @@ private:
     float mTapeHissHpCoef      { 0.0f };   // base rate, 200 Hz
     float mTapeDcCoef          { 0.9995f };// base rate, 5 Hz (10h)
     float mTapeHystAlphaOS     { 0.5f };   // OS-effective alpha (time-constant model)
+
+    // ── Cassette IR + sampled hiss (Task 7) ──────────────────────────────────
+    // IR = zero-latency convolution of a real cassette impulse, applied to the
+    // tape output when mTapeIrOn.  Hiss = the cassette hiss beds, all loaded once
+    // on prepare (message thread, no concurrent audio); the audio thread reads
+    // the active bed by clamped index with a BOUNDED looping read pointer (wraps
+    // each sample -> no read-pointer CPU climb).  mTapeCassetteIdx pairs them.
+    static constexpr int kNumCassettes = 10;
+    juce::dsp::Convolution                mTapeConv;
+    std::vector<juce::AudioBuffer<float>> mTapeHissSamples;   // [kNumCassettes]
+    int  mTapeHissReadPos { 0 };
+    bool mTapeHissLoaded  { false };
+    void loadCassetteIR (int idx);     // message thread; identity fallback if missing
+    void loadAllCassetteHiss();        // message thread (prepare)
+    static juce::File cassetteResourceDir();   // <exe>/Resources/Tape
+
+    // Cassette low-pass (HF rolloff) -- 1-pole, base rate, on the program signal
+    // post de-emphasis.  Default 22 kHz = effectively transparent.
+    float mTapeLpCoef          { 0.0f };
+    float mTapeLpL { 0.0f }, mTapeLpR { 0.0f };
 
     juce::Random mTapeRandomL, mTapeRandomR;   // independent streams for stereo decorrelation
 

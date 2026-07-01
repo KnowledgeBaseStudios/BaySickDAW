@@ -530,3 +530,16 @@ if(MSVC)
     # (no graceful fallback).  This matches our supported user base.
     target_compile_options(BaySickDAWStandalone PRIVATE /arch:AVX2)
 endif()
+
+# ── Stage runtime resources next to the exe (QA-EffectsReview Task 7) ─────────
+# The app loads optional overrides (cassette IRs + hiss samples, acoustic IRs)
+# from <exe dir>/Resources/.  Copy the repo Resources/ tree there post-build so
+# the running binary finds them.  copy_directory works on the 3.22 minimum;
+# re-copies each build (~16 MB, sub-second on SSD).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
+    add_custom_command(TARGET BaySickDAWStandalone POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/Resources"
+                "$<TARGET_FILE_DIR:BaySickDAWStandalone>/Resources"
+        VERBATIM)
+endif()

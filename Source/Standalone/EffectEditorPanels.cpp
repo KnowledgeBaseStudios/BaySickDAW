@@ -1259,6 +1259,13 @@ struct SaturationPanel : public EditorPanelBase,
         return v;
     }
 
+    // Tube panel = a near-1:1 replica of the reference (Beauty/Beast tube
+    // saturator).  Basic = the reference's face controls (all 8 knobs +
+    // Transformer + Oversampling + Tube Type A/B).  Advanced reveals our
+    // additions: Auto-MU, the Keep-Low/Normal/Keep-High harmonics routing, and
+    // the 3rd (C) tube-type voicing the reference doesn't have.
+    bool hasAdvancedControls() const override { return true; }
+
     explicit SaturationPanel(SaturationDSP* dsp)
         : mDsp(dsp)
     {
@@ -1402,6 +1409,26 @@ struct SaturationPanel : public EditorPanelBase,
         HarmonicLAF::paintHammeritePanel(g, getLocalBounds());
     }
 
+    // Tube Type C is an Advanced voicing: Basic offers A/B only.  C stays
+    // visible if it's the CURRENTLY-ACTIVE type so a C preset is neither hidden
+    // nor silently changed; once you move off C in Basic it drops to A/B.
+    void updateTubeTypeOptions()
+    {
+        if (!tubeTypeSel) return;
+        const int cur = mDsp ? juce::jlimit(0, 2, mDsp->mTubeType) : 0;
+        const bool showC = (! mBasicMode) || (cur == 2);
+        const int want = showC ? 3 : 2;
+        if (tubeTypeSel->getNumOptions() == want) return;   // no churn
+        std::vector<ChickenHeadSelector::Option> opts = {
+            { "A", "Type A", "Aggressive odd harmonics - bold, gritty drive" },
+            { "B", "Type B", "Mild odd harmonics - gentler, cleaner clip" },
+        };
+        if (showC)
+            opts.push_back({ "C", "Type C", "Warm even harmonics (foldback) - tube-like warmth" });
+        tubeTypeSel->setOptions(opts);
+        tubeTypeSel->setSelectedIndex(juce::jlimit(0, want - 1, cur), juce::dontSendNotification);
+    }
+
     void resized() override
     {
         auto b = getLocalBounds().reduced(4, 2);
@@ -1413,25 +1440,35 @@ struct SaturationPanel : public EditorPanelBase,
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
         b.removeFromRight(4);
 
+        // Advanced-only: Auto-MU toggle + its dB comp label (Row 1) and the
+        // harmonics-routing selector (Row 2).  Tube Type A/B/C handled below.
+        const bool adv = ! mBasicMode;
+        if (autoGainTog)       autoGainTog->setVisible(adv);
+        if (autoGainCompLabel) autoGainCompLabel->setVisible(adv);
+        if (harmModeSel)       harmModeSel->setVisible(adv);
+        updateTubeTypeOptions();
+
         auto r1 = b.removeFromTop(b.getHeight() / 2);
         auto r2 = b;
 
-        // Row 1 right (right-to-left): OS chicken-head | Auto MU toggle | dB comp label
+        // Row 1 right (right-to-left): OS chicken-head (Basic) | [Auto MU | dB comp label] (Advanced).
         auto osSlot = r1.removeFromRight(60); r1.removeFromRight(2);
         if (osSel) osSel->setBounds(osSlot.reduced(2));
-
-        auto togSlot = r1.removeFromRight(52); r1.removeFromRight(2);
-        if (autoGainTog) autoGainTog->setBounds(togSlot.reduced(1));
-
-        auto labelSlot = r1.removeFromRight(38); r1.removeFromRight(2);
-        if (autoGainCompLabel) autoGainCompLabel->setBounds(labelSlot.reduced(1));
-
+        if (adv)
+        {
+            auto togSlot = r1.removeFromRight(52); r1.removeFromRight(2);
+            if (autoGainTog) autoGainTog->setBounds(togSlot.reduced(1));
+            auto labelSlot = r1.removeFromRight(38); r1.removeFromRight(2);
+            if (autoGainCompLabel) autoGainCompLabel->setBounds(labelSlot.reduced(1));
+        }
         layoutKnobsH(r1, r1knobs);
 
-        // Row 2: TubeType chicken-head + Transformer on/off toggle on right, knobs fill left.
-        // H-7 (2026-05-01): Harmonic-mode chickenhead added at the right edge.
-        auto hm = r2.removeFromRight(66); r2.removeFromRight(2);
-        if (harmModeSel) harmModeSel->setBounds(hm.reduced(2));
+        // Row 2 right: [harmonics routing] (Advanced) | TubeType | Transformer (Basic); knobs fill left.
+        if (adv)
+        {
+            auto hm = r2.removeFromRight(66); r2.removeFromRight(2);
+            if (harmModeSel) harmModeSel->setBounds(hm.reduced(2));
+        }
         auto tc = r2.removeFromRight(66); r2.removeFromRight(2);
         if (tubeTypeSel) tubeTypeSel->setBounds(tc.reduced(2));
         auto tb = r2.removeFromRight(62); r2.removeFromRight(2);
@@ -2867,26 +2904,35 @@ struct TapeSatPanel : public EditorPanelBase
     std::vector<std::unique_ptr<VKnob>>  r1knobs, r2knobs;
     std::unique_ptr<ChickenHeadSelector> tapeSpeedSel;   // C4
     std::unique_ptr<ChickenHeadSelector> osSel;          // C2
+    std::unique_ptr<VKnob>               lowPassKnob;     // cassette HF rolloff (Basic)
+    std::unique_ptr<DualLabelToggle>     irTog;           // cassette IR on/off (Basic)
+    std::unique_ptr<ChickenHeadSelector> cassetteSel;     // 10-way cassette picker (Advanced)
 
     std::vector<VKnob*> getExtraKnobs() override
     {
         std::vector<VKnob*> v;
         for (auto& k : r1knobs) if (k) v.push_back(k.get());
         for (auto& k : r2knobs) if (k) v.push_back(k.get());
+        if (lowPassKnob) v.push_back(lowPassKnob.get());
         return v;
     }
+
+    // Basic = the reference cassette's face controls (Drive / Low-Pass / Noise /
+    // Wow / Flutter).  Advanced reveals our deeper tape engine (Vibe/Hyst/Bias,
+    // wow+flutter rates, emphasis shelves, tape speed, oversampling).
+    bool hasAdvancedControls() const override { return true; }
 
     explicit TapeSatPanel(SaturationDSP* dsp)
     {
         setLookAndFeel(&HarmonicLAF::get());
 
-        // Row 1: shaper character + input + hiss (matches TapePanel exactly)
+        // Row 1: shaper character + drive + hiss
         buildKnobs(*this, r1knobs, {
             { "Vibe",    0.f,  1.f,   0.5f, 0.01f, "Shaper asymmetry driver - k = 0.3 * Vibe in the sigmoid" },
             { "Hyst",    0.f,  2.f,   1.0f, 0.01f, "Hysteresis amount (C1) - 0 = no tape memory, 1 = default, 2 = strong memory" },
             { "Bias",    0.f, 10.f,   5.0f, 0.1f,  "Tape bias (C5) - 5 = neutral (zero DC offset); extremes inject even harmonics" },
-            { "InGain",  0.f,  4.f,   1.0f, 0.01f, "Input gain (linear)" },
-            { "Hiss",    0.f,  1.f,   0.0f, 0.01f, "Hiss level (pink-filtered + 200 Hz HPF, independent L/R) - default 0; raise to taste" },
+            { "Drive", -24.f, 24.f,   0.0f, 0.1f,  "Drive into the tape saturator (dB; 0 = unity, high noon)" },
+            { "Hiss",  -80.f,  0.f, -60.0f, 0.5f,  "Tape hiss level (dB)" },
         });
 
         // Row 2: wow/flutter + pre/de-emphasis shelves
@@ -2932,12 +2978,41 @@ struct TapeSatPanel : public EditorPanelBase
         osSel->onChange = [dsp](int idx){ dsp->setOversamplingFactor(juce::jlimit(1, 4, idx + 1)); };
         addAndMakeVisible(*osSel);
 
+        // Cassette low-pass (HF rolloff) -- Basic-tier tone control.
+        lowPassKnob = std::make_unique<VKnob>("LoPass", 18000.0f,
+            "Cassette tone rolloff - lowers the high end (5-22 kHz; full right = off)");
+        lowPassKnob->slider.setRange(5000.0, 22000.0, 1.0);
+        lowPassKnob->slider.setValue(dsp->mTapeLpHz, juce::dontSendNotification);
+        lowPassKnob->slider.onValueChange = [dsp,this]{ if (dsp) dsp->setTapeLpHz((float)lowPassKnob->slider.getValue()); };
+        addAndMakeVisible(*lowPassKnob);
+
+        // Cassette IR on/off (Basic-tier; matches the reference's single IR toggle).
+        irTog = std::make_unique<DualLabelToggle>();
+        irTog->setupOnOff("IR", "Cassette impulse response - tone coloration of a real cassette");
+        if (dsp) irTog->btn().setToggleState(dsp->mTapeIrOn, juce::dontSendNotification);
+        irTog->btn().onClick = [dsp, this]{ if (dsp) dsp->setTapeIrOn(irTog->btn().getToggleState()); };
+        addAndMakeVisible(*irTog);
+
+        // 10-way cassette picker (Advanced) -- selects the IR + its paired hiss bed.
+        cassetteSel = std::make_unique<ChickenHeadSelector>();
+        {
+            std::vector<ChickenHeadSelector::Option> casOpts;
+            for (int i = 1; i <= 10; ++i)
+                casOpts.push_back({ juce::String(i), "Cassette " + juce::String(i),
+                                    "Cassette " + juce::String(i) + " - impulse response + paired hiss" });
+            cassetteSel->setOptions(casOpts);
+        }
+        cassetteSel->setBodyTooltip("Cassette type (IR + paired hiss)");
+        if (dsp) cassetteSel->setSelectedIndex(juce::jlimit(0, 9, dsp->mTapeCassetteIdx), juce::dontSendNotification);
+        cassetteSel->onChange = [dsp](int idx){ if (dsp) dsp->setTapeCassette(idx); };
+        addAndMakeVisible(*cassetteSel);
+
         // Row 1 knob bindings -- call setTape* on SaturationDSP
         r1knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setTapeVibe       ((float)r1knobs[0]->slider.getValue()); };
         r1knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setTapeHystAmount ((float)r1knobs[1]->slider.getValue()); };
         r1knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setTapeBias       ((float)r1knobs[2]->slider.getValue()); };
-        r1knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setTapeInputGain  ((float)r1knobs[3]->slider.getValue()); };
-        r1knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setTapeHiss       ((float)r1knobs[4]->slider.getValue()); };
+        r1knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setTapeInputGain  (juce::Decibels::decibelsToGain ((float)r1knobs[3]->slider.getValue())); };
+        r1knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setTapeHiss       (juce::Decibels::decibelsToGain ((float)r1knobs[4]->slider.getValue())); };
 
         // Row 2 knob bindings
         r2knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setTapeWowRate      ((float)r2knobs[0]->slider.getValue()); };
@@ -2951,8 +3026,8 @@ struct TapeSatPanel : public EditorPanelBase
         r1knobs[0]->slider.setValue (dsp->mTapeVibe,         juce::sendNotificationSync);
         r1knobs[1]->slider.setValue (dsp->mTapeHystAmount,   juce::sendNotificationSync);
         r1knobs[2]->slider.setValue (dsp->mTapeBias,         juce::sendNotificationSync);
-        r1knobs[3]->slider.setValue (dsp->mTapeInputGain,    juce::sendNotificationSync);
-        r1knobs[4]->slider.setValue (dsp->mTapeHiss,         juce::sendNotificationSync);
+        r1knobs[3]->slider.setValue (juce::Decibels::gainToDecibels (dsp->mTapeInputGain, -24.0f), juce::sendNotificationSync);
+        r1knobs[4]->slider.setValue (juce::Decibels::gainToDecibels (dsp->mTapeHiss, -80.0f),      juce::sendNotificationSync);
         r2knobs[0]->slider.setValue (dsp->mTapeWowRate,      juce::sendNotificationSync);
         r2knobs[1]->slider.setValue (dsp->mTapeWowDepth,     juce::sendNotificationSync);
         r2knobs[2]->slider.setValue (dsp->mTapeFlutterRate,  juce::sendNotificationSync);
@@ -2982,18 +3057,75 @@ struct TapeSatPanel : public EditorPanelBase
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
         b.removeFromRight(4);
 
-        auto r1 = b.removeFromTop(b.getHeight() / 2);
-        auto r2 = b;
+        // Advanced-only: the deeper tape engine (Vibe/Hyst/Bias + wow/flutter
+        // rates + emphasis shelves + tape speed + oversampling) + the 10-way
+        // cassette picker.  Basic = Drive / Low-Pass / Noise / Wow / Flutter +
+        // the cassette IR on/off (IR toggle shows in both modes).
+        const bool adv = ! mBasicMode;
+        if (r1knobs[0]) r1knobs[0]->setVisible(adv);   // Vibe
+        if (r1knobs[1]) r1knobs[1]->setVisible(adv);   // Hyst
+        if (r1knobs[2]) r1knobs[2]->setVisible(adv);   // Bias
+        if (r2knobs[0]) r2knobs[0]->setVisible(adv);   // Wow rate
+        if (r2knobs[2]) r2knobs[2]->setVisible(adv);   // Flutter rate
+        if (r2knobs[4]) r2knobs[4]->setVisible(adv);   // Pre-emphasis
+        if (r2knobs[5]) r2knobs[5]->setVisible(adv);   // De-emphasis
+        if (tapeSpeedSel) tapeSpeedSel->setVisible(adv);
+        if (osSel)        osSel->setVisible(adv);
+        // irTog + cassetteSel stay visible in both modes -- the cassette is
+        // pickable wherever you can turn the IR on.
 
-        // Row 1 right: OS chicken-head | Tape Speed chicken-head
-        auto osSlot = r1.removeFromRight(60); r1.removeFromRight(2);
-        if (osSel) osSel->setBounds(osSlot.reduced(2));
-        auto tsSlot = r1.removeFromRight(62); r1.removeFromRight(2);
-        if (tapeSpeedSel) tapeSpeedSel->setBounds(tsSlot.reduced(2));
-        layoutKnobsH(r1, r1knobs);
+        if (adv)
+        {
+            auto r1 = b.removeFromTop(b.getHeight() / 2);
+            auto r2 = b;
 
-        // Row 2: knobs only
-        layoutKnobsH(r2, r2knobs);
+            // Row 1 right: OS | Tape Speed | Cassette picker | IR on/off
+            auto osSlot = r1.removeFromRight(54); r1.removeFromRight(2);
+            if (osSel) osSel->setBounds(osSlot.reduced(2));
+            auto tsSlot = r1.removeFromRight(56); r1.removeFromRight(2);
+            if (tapeSpeedSel) tapeSpeedSel->setBounds(tsSlot.reduced(2));
+            auto casSlot = r1.removeFromRight(58); r1.removeFromRight(2);
+            if (cassetteSel) cassetteSel->setBounds(casSlot.reduced(2));
+            auto irSlot = r1.removeFromRight(44); r1.removeFromRight(2);
+            if (irTog) irTog->setBounds(irSlot.reduced(1));
+
+            // Row 1: Basic-tier Drive / Hiss / LoPass grouped at the front (so the
+            // Basic set stays together in Advanced), then Vibe / Hyst.
+            std::vector<VKnob*> row1 = {
+                r1knobs[3].get(),    // Drive
+                r1knobs[4].get(),    // Hiss
+                lowPassKnob.get(),   // LoPass
+                r1knobs[0].get(),    // Vibe
+                r1knobs[1].get(),    // Hyst
+            };
+            layoutKnobsH(r1, row1);
+
+            // Row 2: wow/flutter + emphasis shelves + Bias (swapped in where LoPass sat).
+            std::vector<VKnob*> row2 = {
+                r2knobs[0].get(), r2knobs[1].get(), r2knobs[2].get(),
+                r2knobs[3].get(), r2knobs[4].get(), r2knobs[5].get(),
+                r1knobs[2].get(),    // Bias
+            };
+            layoutKnobsH(r2, row2);
+        }
+        else
+        {
+            // Basic right cluster: Cassette picker + IR on/off (cassette is
+            // pickable here too).  The toggle gets full label height so its
+            // OFF/ON tags show.  Then the 5 knobs fill the rest.
+            auto irSlot = b.removeFromRight(48); b.removeFromRight(3);
+            if (irTog) irTog->setBounds(irSlot.withSizeKeepingCentre(48, juce::jmin(irSlot.getHeight(), 72)));
+            auto casSlot = b.removeFromRight(60); b.removeFromRight(4);
+            if (cassetteSel) cassetteSel->setBounds(casSlot.withSizeKeepingCentre(58, juce::jmin(casSlot.getHeight(), 58)));
+
+            std::vector<VKnob*> basic;
+            if (r1knobs[3])  basic.push_back(r1knobs[3].get());   // Drive
+            if (lowPassKnob) basic.push_back(lowPassKnob.get());  // Low-Pass
+            if (r1knobs[4])  basic.push_back(r1knobs[4].get());   // Noise (Hiss)
+            if (r2knobs[1])  basic.push_back(r2knobs[1].get());   // Wow depth
+            if (r2knobs[3])  basic.push_back(r2knobs[3].get());   // Flutter depth
+            layoutKnobsH(b, basic);
+        }
     }
 };
 
@@ -3174,7 +3306,14 @@ struct LimiterPanel : public EditorPanelBase,
 struct ConsoleSaturationPanel : public EditorPanelBase
 {
     SaturationDSP* mDsp { nullptr };
-    std::unique_ptr<ChickenHeadSelector> harmModeSel;   // Keep Low / Normal / Keep High
+    std::unique_ptr<ChickenHeadSelector> harmModeSel;       // Keep Low / Normal / Keep High
+    std::unique_ptr<ChickenHeadSelector> consoleModeSel;    // Clean / Dirty voicing
+    std::unique_ptr<DualLabelToggle>     colorTog;          // 2nd-harmonic color master enable
+
+    // Basic = Drive / Color / Clean-Dirty / Color-toggle / Output (a reference
+    // console saturator's set).  Advanced reveals our extras: Mix + the
+    // Keep-Low/Normal/Keep-High harmonics routing.
+    bool hasAdvancedControls() const override { return true; }
 
     explicit ConsoleSaturationPanel (SaturationDSP* dsp) : mDsp (dsp)
     {
@@ -3215,6 +3354,26 @@ struct ConsoleSaturationPanel : public EditorPanelBase
             if (dsp) dsp->setHarmonicsMode (idx);
         };
         addAndMakeVisible (*harmModeSel);
+
+        // Clean / Dirty console voicing.
+        consoleModeSel = std::make_unique<ChickenHeadSelector>();
+        consoleModeSel->setOptions ({
+            { "Cln", "Clean", "Transparent console color - soft clip + subtle even-harmonic glue" },
+            { "Drt", "Dirty", "Driven console - low-frequency-weighted saturation + low-end bloom" },
+        });
+        consoleModeSel->setBodyTooltip ("Console character");
+        if (dsp)
+            consoleModeSel->setSelectedIndex ((int) dsp->mConsoleMode, juce::dontSendNotification);
+        consoleModeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setConsoleMode (idx); };
+        addAndMakeVisible (*consoleModeSel);
+
+        // Color master enable -- the dead-Color fix exposes this (default on).
+        colorTog = std::make_unique<DualLabelToggle>();
+        colorTog->setupOnOff ("Color", "Harmonic color - adds 2nd-harmonic saturation (off = clean soft-clip only)");
+        if (dsp)
+            colorTog->btn().setToggleState (dsp->mConsoleColor, juce::dontSendNotification);
+        colorTog->btn().onClick = [dsp, this] { if (dsp) dsp->setConsoleColor (colorTog->btn().getToggleState()); };
+        addAndMakeVisible (*colorTog);
     }
 
     ~ConsoleSaturationPanel() override { setLookAndFeel (nullptr); }
@@ -3239,15 +3398,37 @@ struct ConsoleSaturationPanel : public EditorPanelBase
         outputVolKnob->setBounds (b.removeFromRight (kKnobSz).withSizeKeepingCentre (kKnobSz, kKnobSz));
         b.removeFromRight (4);
 
-        // Harmonics-mode chickenhead on the right (before the meters strip).
-        if (harmModeSel)
+        // Advanced-only: Mix knob (idx 2) + the harmonics-routing selector.
+        const bool adv = ! mBasicMode;
+        if (harmModeSel) harmModeSel->setVisible (adv);
+        if (knobs.size() > 2 && knobs[2]) knobs[2]->setVisible (adv);
+
+        // Right cluster (right-to-left): [harmonics routing if adv] | Color | Clean/Dirty.
+        if (adv && harmModeSel)
         {
             auto col = b.removeFromRight (66);
             harmModeSel->setBounds (col.reduced (2));
             b.removeFromRight (4);
         }
+        if (colorTog)
+        {
+            auto col = b.removeFromRight (62);
+            colorTog->setBounds (col.reduced (1));
+            b.removeFromRight (4);
+        }
+        if (consoleModeSel)
+        {
+            auto col = b.removeFromRight (66);
+            consoleModeSel->setBounds (col.reduced (2));
+            b.removeFromRight (4);
+        }
 
-        layoutKnobsH (b, knobs, kKnobSz);
+        // Knobs fill the rest: Drive / Color / (Mix in Advanced) / Output.
+        std::vector<VKnob*> vis;
+        for (int i = 0; i < (int) knobs.size(); ++i)
+            if (adv || i != 2)
+                if (knobs[i]) vis.push_back (knobs[i].get());
+        layoutKnobsH (b, vis, kKnobSz);
     }
 };
 

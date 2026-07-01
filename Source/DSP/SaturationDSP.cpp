@@ -32,6 +32,12 @@ void SaturationDSP::updateFilters()
     // 9c: sample-rate-aware DC blocker targeting ~5 Hz cutoff.
     mDCCoef = 1.0f - twoPi * 5.0f / sr;
 
+    // Console Dirty LF bloom: 1-pole low-shelf, ~90 Hz corner, +3.5 dB boost
+    // (add-gain applied to the low-passed wet signal) -- the Neve low-end bump;
+    // ear-tunable.
+    mConsoleBloomCoef    = std::exp (-twoPi * 90.0f / sr);
+    mConsoleBloomAddGain = juce::Decibels::decibelsToGain (3.5f) - 1.0f;
+
     // H-7 (2026-05-01): Vocal Body shaping biquads.
     //   Dip: -2 dB peaking @ 250 Hz Q=0.7  (cleans low-mid mud)
     //   Shelf: +2 dB high shelf @ 3 kHz Q=0.7  (vocal presence lift)
@@ -140,6 +146,7 @@ void SaturationDSP::reset()
     mPreLP_L = mPreLP_R = mPostLP_L = mPostLP_R = 0.0f;
     mBassLP_L = mBassLP_R = 0.0f;
     mDCx_L = mDCy_L = mDCx_R = mDCy_R = 0.0f;
+    mConsoleBloomL = mConsoleBloomR = 0.0f;
     if (mOversampler) mOversampler->reset();
     mBandBuf.clear();
     mBodyDip  .reset();
@@ -182,6 +189,15 @@ void SaturationDSP::setBassRelief (float v)
 void SaturationDSP::setTransformer (bool on)
 {
     if (on != mTransformer) mTransformer = on;
+}
+void SaturationDSP::setConsoleMode (int m)
+{
+    const auto n = static_cast<ConsoleMode> (juce::jlimit (0, 1, m));
+    if (n != mConsoleMode) mConsoleMode = n;
+}
+void SaturationDSP::setConsoleColor (bool on)
+{
+    if (on != mConsoleColor) mConsoleColor = on;
 }
 void SaturationDSP::setTubeType (int t)
 {
@@ -273,33 +289,39 @@ void SaturationDSP::setHarmonicsMode (int m)
 }
 
 // -- Console engine (stateless, takes per-sample smoothed params) -------------
-//
-// Console / preamp character: gentler than tube saturation.  Uses a reduced-
-// gain tanh curve so soft-clipping starts later and rolls off less aggressively
-// (transparent on low-mid material).  When transformer flag is on, adds an
-// asymmetric 2nd-harmonic component (output^2 with DC removed) for
-// transformer-style colouring.
-//
-// `drive` here = mFlowers smoothed value (0..10); `xfmr` = mDabs (0..10).
-// Same input range as Tube path so users keep their muscle memory across
-// the Type switch.
-float SaturationDSP::processConsole (float x, float drive, float xfmr,
-                                       bool transformer) noexcept
+// Clean (SSL-style) vs Dirty (Neve-style) voicings; see the header decl for the
+// per-arg meaning.  drive = mFlowers (0..10), color = mDabs (0..10) -- same
+// input range as the Tube path so the Type switch keeps muscle memory.
+float SaturationDSP::processConsole (float x, float drive, float color,
+                                       bool colorOn, bool dirty, bool isLow) noexcept
 {
-    // Drive maps to a 1.0..3.5 tanh gain factor.  Output normalised by the
-    // same factor so unity-gain stays constant as drive sweeps.
-    const float driveAmount = 1.0f + drive * 0.25f;
-    float y = std::tanh (x * driveAmount) / driveAmount;
-
-    // Transformer 2nd-harmonic component (asymmetric).  xfmr = 0..10 maps to
-    // a 0.04..0.4 mix of the squared signal with DC removed.
-    if (transformer && xfmr > 0.001f)
+    // Color = an asymmetric input bias -> even (2nd) harmonics.  The tanh(bias)
+    // subtraction removes the operating-point DC and the sech^2(bias) slope
+    // normalization holds low-level gain at unity, so Color changes harmonic
+    // CONTENT not loudness, and it ramps continuously from bias=0 (no on-
+    // threshold step -> no click).  bias=0 collapses to the plain soft-clip.
+    // (Same gain-compensated asymmetric-shaper approach as the Opto warmth.)
+    // Drive/bias coefficients are ear-calibration starting points.
+    if (! dirty)
     {
-        const float xfmrAmount = 0.04f + (xfmr / 10.0f) * 0.36f;
-        const float h2         = y * y - 0.333f;   // DC-removed even harmonic
-        y += xfmrAmount * h2;
+        // Clean (SSL-style): transparent soft-clip; Drive saturates at normal
+        // levels, output-compensated so enable doesn't jump the loudness.
+        const float driveAmount = 1.0f + drive * 0.60f;          // 1.0..7.0
+        const float bias  = colorOn ? color * 0.07f : 0.0f;      // 0..0.7
+        const float sb    = std::tanh (bias);
+        const float sech2 = 1.0f - sb * sb;                      // sech^2 = 1 - tanh^2
+        return (std::tanh (x * driveAmount + bias) - sb) / (driveAmount * sech2);
     }
-    return y;
+
+    // Dirty (Neve-style): low-frequency-weighted saturation -- the low band is
+    // driven much harder than the high (transformer LF saturation), with a
+    // slightly stronger even-harmonic Color.  Still unity at low level.
+    const float bandDrive   = isLow ? 2.2f : 0.8f;
+    const float driveAmount = (1.0f + drive * 0.60f) * bandDrive;
+    const float bias  = colorOn ? color * 0.08f : 0.0f;          // 0..0.8
+    const float sb    = std::tanh (bias);
+    const float sech2 = 1.0f - sb * sb;
+    return (std::tanh (x * driveAmount + bias) - sb) / (driveAmount * sech2);
 }
 
 // -- Tube engine (stateless, takes per-sample smoothed params) ---------------
@@ -387,6 +409,13 @@ void SaturationDSP::process (juce::AudioBuffer<float>& buffer)
     const float a_bass  = mBassLPCoef;
     const int   tubeTy  = mTubeType;
     const bool  transf  = mTransformer;
+
+    // Console voicing (constant across the block).
+    const bool  consoleDirty   = (mSatType == Type::Console
+                                  && mConsoleMode == ConsoleMode::Dirty);
+    const bool  consoleColorOn = mConsoleColor;
+    const float aBloom         = mConsoleBloomCoef;
+    const float bloomAdd       = mConsoleBloomAddGain;
 
     // H-7 (2026-05-01): Keep Low / Keep High routing.
     // Splits the input into two LR4-complementary bands, saturates only one,
@@ -512,21 +541,23 @@ void SaturationDSP::process (juce::AudioBuffer<float>& buffer)
             const float high = x_os - low;
 
             // H-7 (2026-05-01): branch the inner saturation by Type.  Tube path
-            // bit-exact preserved (mSatType default == Tube).  Console path
-            // takes the same drive/dabs/transformer inputs but applies a
-            // gentler curve.
+            // bit-exact preserved (mSatType default == Tube).  Console path uses
+            // the Clean/Dirty voicing with its own Color enable.
             float low_proc, high_proc;
             if (mSatType == Type::Console)
             {
-                low_proc  = processConsole (low,  flowers, dabs, transf);
-                high_proc = processConsole (high, flowers, dabs, transf);
+                low_proc  = processConsole (low,  flowers, dabs, consoleColorOn, consoleDirty, true);
+                high_proc = processConsole (high, flowers, dabs, consoleColorOn, consoleDirty, false);
             }
             else
             {
                 low_proc  = processTube (low,  flowers, dabs, tubeTy, transf);
                 high_proc = processTube (high, flowers, dabs, tubeTy, transf);
             }
-            const float low_out = relief * low + (1.0f - relief) * low_proc;
+            // Dirty console drops bass relief so the LF-weighted saturated low
+            // dominates (Neve low-end character); Tube + Clean keep the knob.
+            const float effRelief = consoleDirty ? 0.0f : relief;
+            const float low_out = effRelief * low + (1.0f - effRelief) * low_proc;
 
             up[osN] = low_out + high_proc;
         }
@@ -540,9 +571,10 @@ void SaturationDSP::process (juce::AudioBuffer<float>& buffer)
         float*       samples = buffer.getWritePointer (ch);
         const float* tube    = mBandBuf.getReadPointer (ch);
 
-        float& postLP = (ch == 0) ? mPostLP_L : mPostLP_R;
-        float& dcX    = (ch == 0) ? mDCx_L    : mDCx_R;
-        float& dcY    = (ch == 0) ? mDCy_L    : mDCy_R;
+        float& postLP  = (ch == 0) ? mPostLP_L : mPostLP_R;
+        float& dcX     = (ch == 0) ? mDCx_L    : mDCx_R;
+        float& dcY     = (ch == 0) ? mDCy_L    : mDCy_R;
+        float& bloomLP = (ch == 0) ? mConsoleBloomL : mConsoleBloomR;
 
         for (int n = 0; n < numSamples; ++n)
         {
@@ -565,6 +597,13 @@ void SaturationDSP::process (juce::AudioBuffer<float>& buffer)
             tube_out = dc_in - dcX + mDCCoef * dcY;
             dcX = dc_in;
             dcY = tube_out;
+
+            // Console Dirty LF bloom: 1-pole low-shelf boost on the wet path.
+            if (consoleDirty)
+            {
+                bloomLP   = (1.0f - aBloom) * tube_out + aBloom * bloomLP;
+                tube_out += bloomAdd * bloomLP;
+            }
 
             // Tone post (base-rate shelf)
             postLP = (1.0f - a_shelf) * tube_out + a_shelf * postLP;
@@ -623,6 +662,8 @@ void SaturationDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("satType",     (int) mSatType, nullptr);
     state.setProperty ("vocalBody",   mVocalBody,   nullptr);
     state.setProperty ("harmonicsMode", (int) mHarmonicsMode, nullptr);
+    state.setProperty ("consoleMode",   (int) mConsoleMode,   nullptr);
+    state.setProperty ("consoleColor",  mConsoleColor,        nullptr);
 
     // H-10 (2026-05-02): Tape sub-engine state -- prefixed `tape_*` so old
     // presets (no tape attrs) load with TapeDSP defaults preserved bit-exact.
@@ -639,6 +680,9 @@ void SaturationDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("tape_bias",         mTapeBias,         nullptr);
     state.setProperty ("tape_preShelfDb",   mTapePreShelfDb,   nullptr);
     state.setProperty ("tape_deShelfDb",    mTapeDeShelfDb,    nullptr);
+    state.setProperty ("tape_lpHz",         mTapeLpHz,         nullptr);
+    state.setProperty ("tape_irOn",         mTapeIrOn,         nullptr);
+    state.setProperty ("tape_cassetteIdx",  mTapeCassetteIdx,  nullptr);
 
     auto xml = state.createXml();
     if (xml) juce::AudioProcessor::copyXmlToBinary (*xml, dest);
@@ -673,6 +717,7 @@ void SaturationDSP::setStateInformation (const void* data, int sz)
         mTapeBias         = (float) xml->getDoubleAttribute ("bias",         mTapeBias);
         mTapePreShelfDb   = (float) xml->getDoubleAttribute ("preShelfDb",   mTapePreShelfDb);
         mTapeDeShelfDb    = (float) xml->getDoubleAttribute ("deShelfDb",    mTapeDeShelfDb);
+        mTapeIrOn         = false;   // legacy TapeDSP presets predate the cassette IR -> off
         const int loadedOs = xml->getIntAttribute ("osLog2", mOsLog2);
         const bool osChanged = (loadedOs != mOsLog2);
         mOsLog2 = juce::jlimit (1, 4, loadedOs);
@@ -682,7 +727,7 @@ void SaturationDSP::setStateInformation (const void* data, int sz)
         if (mSampleRate > 0.0)
         {
             if (osChanged) prepare (mSampleRate, mMaxBlock);
-            else { updateFilters(); tapeUpdateFilters(); }
+            else { updateFilters(); tapeUpdateFilters(); loadCassetteIR (mTapeCassetteIdx); }
             reset();
         }
         return;
@@ -710,6 +755,12 @@ void SaturationDSP::setStateInformation (const void* data, int sz)
     // Default 1 = Normal preserves audio for old presets.
     mHarmonicsMode = static_cast<HarmonicsMode> (juce::jlimit (0, 2,
                        xml->getIntAttribute ("harmonicsMode", 1)));
+    // Console voicing + Color enable.  Defaults: Clean + Color ON.  Old Console
+    // presets (pre-dead-Color-fix) had Color gated dead behind mTransformer, so
+    // defaulting ON makes their saved Color amount audible -> re-save.
+    mConsoleMode  = static_cast<ConsoleMode> (juce::jlimit (0, 1,
+                       xml->getIntAttribute ("consoleMode", 0)));
+    mConsoleColor = xml->getBoolAttribute ("consoleColor", true);
     const int loadedOs = xml->getIntAttribute ("osLog2", mOsLog2);
     const bool osChanged = (loadedOs != mOsLog2);
     mOsLog2 = juce::jlimit (1, 4, loadedOs);
@@ -730,6 +781,12 @@ void SaturationDSP::setStateInformation (const void* data, int sz)
     mTapeBias         = (float) xml->getDoubleAttribute ("tape_bias",         mTapeBias);
     mTapePreShelfDb   = (float) xml->getDoubleAttribute ("tape_preShelfDb",   mTapePreShelfDb);
     mTapeDeShelfDb    = (float) xml->getDoubleAttribute ("tape_deShelfDb",    mTapeDeShelfDb);
+    mTapeLpHz         = (float) xml->getDoubleAttribute ("tape_lpHz",         mTapeLpHz);
+    // Default false on load so old Tape presets (pre-cassette-IR) preserve their
+    // sound; fresh patches keep the construction default (IR on).
+    mTapeIrOn         =         xml->getBoolAttribute    ("tape_irOn",        false);
+    mTapeCassetteIdx  = juce::jlimit (0, kNumCassettes - 1,
+                                      xml->getIntAttribute ("tape_cassetteIdx", mTapeCassetteIdx));
 
     // Snap smoothers to restored values + clear filter state (P4-style safety).
     snapSmoothedToTargets();
@@ -742,6 +799,7 @@ void SaturationDSP::setStateInformation (const void* data, int sz)
         {
             updateFilters();
             tapeUpdateFilters();
+            loadCassetteIR (mTapeCassetteIdx);
         }
         reset();
     }
@@ -815,6 +873,9 @@ void SaturationDSP::tapeUpdateFilters()
     mTapeDeShelfGainLin  = juce::Decibels::decibelsToGain (mTapeDeShelfDb);
     mTapeHissHpCoef      = std::exp (-twoPi * 200.0f / sr);
     mTapeDcCoef          = 1.0f - twoPi * 5.0f / sr;
+    // coef 0 at the top of the range -> lp = x (truly transparent, no rolloff).
+    mTapeLpCoef          = (mTapeLpHz >= 22000.0f) ? 0.0f
+                         : std::exp (-twoPi * juce::jlimit (5000.0f, 22000.0f, mTapeLpHz) / sr);
 
     const int osFactor = 1 << juce::jlimit (1, 4, mOsLog2);
     mTapeHystAlphaOS = computeTapeHystAlpha (mTapeSpeed, mTapeHystAmount, osFactor);
@@ -877,7 +938,16 @@ void SaturationDSP::tapePrepare (double sampleRate, int maxBlockSize)
     mTapeFlutterDepthSmooth .reset (sampleRate, kTapeSmoothMsMed   * 0.001);
     mTapeHissSmooth         .reset (sampleRate, kTapeSmoothMsMed   * 0.001);
     tapeSnapSmoothedToTargets();
-    juce::ignoreUnused (maxBlockSize);
+
+    // Cassette IR convolution + hiss beds.  Conv is re-prepared + re-loaded each
+    // prepare (loadImpulseResponse resamples the IR to the host SR); the hiss
+    // beds load once (noise -> no resample needed).  Both run on the prepare
+    // (message) thread -- never concurrent with processBlock.
+    juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) juce::jmax (1, maxBlockSize), 2 };
+    mTapeConv.reset();
+    mTapeConv.prepare (spec);
+    if (mTapeHissSamples.empty()) loadAllCassetteHiss();
+    loadCassetteIR (mTapeCassetteIdx);
 }
 
 void SaturationDSP::tapeReset()
@@ -897,6 +967,9 @@ void SaturationDSP::tapeReset()
     mTapePinkR = TapePinkState{};
     mTapeHissHPx_L = mTapeHissHPy_L = mTapeHissHPx_R = mTapeHissHPy_R = 0.0f;
     mTapeDcX_L = mTapeDcY_L = mTapeDcX_R = mTapeDcY_R = 0.0f;
+    mTapeLpL = mTapeLpR = 0.0f;
+    mTapeConv.reset();
+    mTapeHissReadPos = 0;
 
     mTapeBandBuf.clear();
 }
@@ -1002,6 +1075,85 @@ void SaturationDSP::setTapeDeShelfDb (float dB)
         mTapeDeGainSmooth.setTargetValue (mTapeDeShelfGainLin);
     }
 }
+void SaturationDSP::setTapeLpHz (float hz)
+{
+    const float n = juce::jlimit (5000.0f, 22000.0f, hz);
+    if (n != mTapeLpHz)
+    {
+        mTapeLpHz = n;
+        if (mSampleRate > 0.0)
+            mTapeLpCoef = (n >= 22000.0f) ? 0.0f
+                        : std::exp (-juce::MathConstants<float>::twoPi * n / (float) mSampleRate);
+    }
+}
+void SaturationDSP::setTapeIrOn (bool on)
+{
+    if (on != mTapeIrOn) mTapeIrOn = on;
+}
+void SaturationDSP::setTapeCassette (int idx)
+{
+    const int i = juce::jlimit (0, kNumCassettes - 1, idx);
+    if (i != mTapeCassetteIdx)
+    {
+        mTapeCassetteIdx = i;
+        if (mSampleRate > 0.0) loadCassetteIR (i);   // hiss switches via the audio-thread index read
+    }
+}
+
+juce::File SaturationDSP::cassetteResourceDir()
+{
+    // Runtime override dir staged next to the exe by the build (mirrors the
+    // AcousticPreampStyleDSP IR-resolution convention).
+    return juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+              .getParentDirectory().getChildFile ("Resources").getChildFile ("Tape");
+}
+
+void SaturationDSP::loadCassetteIR (int idx)
+{
+    const int i = juce::jlimit (0, kNumCassettes - 1, idx);
+    const auto f = cassetteResourceDir().getChildFile ("IRs")
+                       .getChildFile ("cassette tape_" + juce::String (i + 1) + ".wav");
+    if (f.existsAsFile())
+    {
+        mTapeConv.loadImpulseResponse (f,
+            juce::dsp::Convolution::Stereo::yes,
+            juce::dsp::Convolution::Trim::yes, 0,
+            juce::dsp::Convolution::Normalise::yes);
+    }
+    else
+    {
+        // Identity (unit-impulse) IR -> the convolution passes through unchanged.
+        juce::AudioBuffer<float> identity (1, 1);
+        identity.setSample (0, 0, 1.0f);
+        mTapeConv.loadImpulseResponse (std::move (identity),
+            mSampleRate > 0.0 ? mSampleRate : 44100.0,
+            juce::dsp::Convolution::Stereo::no,
+            juce::dsp::Convolution::Trim::no,
+            juce::dsp::Convolution::Normalise::no);
+    }
+}
+
+void SaturationDSP::loadAllCassetteHiss()
+{
+    mTapeHissSamples.assign (kNumCassettes, juce::AudioBuffer<float>());
+    mTapeHissLoaded = false;
+
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    const auto dir = cassetteResourceDir().getChildFile ("Samples");
+    for (int i = 0; i < kNumCassettes; ++i)
+    {
+        const auto f = dir.getChildFile ("cassette tape_" + juce::String (i + 1) + "_noise.wav");
+        if (! f.existsAsFile()) continue;
+        std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+        if (reader == nullptr || reader->lengthInSamples <= 0) continue;
+        const int ch  = (int) juce::jmin ((juce::uint32) 2, reader->numChannels);
+        const int len = (int) juce::jmin ((juce::int64) (1 << 23), reader->lengthInSamples);
+        mTapeHissSamples[(size_t) i].setSize (juce::jmax (1, ch), len);
+        reader->read (&mTapeHissSamples[(size_t) i], 0, len, 0, true, ch > 1);
+        mTapeHissLoaded = true;
+    }
+}
 
 // -- Tape process body (bit-exact port of TapeDSP::process) ------------------
 
@@ -1026,6 +1178,18 @@ void SaturationDSP::processTape (juce::AudioBuffer<float>& buffer)
     const float a_deC     = mTapeDeShelfCoef;
     const float a_hissHp  = mTapeHissHpCoef;
     const float a_dc      = mTapeDcCoef;
+    const float a_lp      = mTapeLpCoef;
+
+    // Sampled hiss: the active cassette bed (clamped index), or synthetic pink if
+    // no bed is loaded.  Read pointers are bounded each sample in the loop below.
+    const int  hissIdx        = juce::jlimit (0, kNumCassettes - 1, mTapeCassetteIdx);
+    const bool useSampledHiss = mTapeHissLoaded
+        && hissIdx < (int) mTapeHissSamples.size()
+        && mTapeHissSamples[(size_t) hissIdx].getNumSamples() > 0;
+    const int    hissLen = useSampledHiss ? mTapeHissSamples[(size_t) hissIdx].getNumSamples() : 0;
+    const float* hissCh0 = useSampledHiss ? mTapeHissSamples[(size_t) hissIdx].getReadPointer (0) : nullptr;
+    const float* hissCh1 = (useSampledHiss && mTapeHissSamples[(size_t) hissIdx].getNumChannels() > 1)
+                           ? mTapeHissSamples[(size_t) hissIdx].getReadPointer (1) : hissCh0;
 
     // Phase 0: consume smoothers into scratch arrays.
     for (int n = 0; n < numSamples; ++n)
@@ -1117,6 +1281,10 @@ void SaturationDSP::processTape (juce::AudioBuffer<float>& buffer)
         mTapeDeShelfR = (1.0f - a_deC) * sampR + a_deC * mTapeDeShelfR;
         sampR         = gDe * sampR + (1.0f - gDe) * mTapeDeShelfR;
 
+        // Cassette low-pass (HF rolloff) on the program signal.
+        mTapeLpL = (1.0f - a_lp) * sampL + a_lp * mTapeLpL;  sampL = mTapeLpL;
+        mTapeLpR = (1.0f - a_lp) * sampR + a_lp * mTapeLpR;  sampR = mTapeLpR;
+
         // Write into wow/flutter delay buffer.
         mTapeWowBufL[(size_t) mTapeWowWritePos] = sampL;
         mTapeWowBufR[(size_t) mTapeWowWritePos] = sampR;
@@ -1144,16 +1312,29 @@ void SaturationDSP::processTape (juce::AudioBuffer<float>& buffer)
 
         // Pink-filtered hiss + 200 Hz HPF (independent L/R RNG streams).
         const float hissNow = mTapeHissScr[(size_t) n];
-        const float whiteL  = mTapeRandomL.nextFloat() * 2.0f - 1.0f;
-        const float whiteR  = mTapeRandomR.nextFloat() * 2.0f - 1.0f;
-        const float pinkL   = mTapePinkL.process (whiteL);
-        const float pinkR   = mTapePinkR.process (whiteR);
-        const float hpL     = a_hissHp * (mTapeHissHPy_L + pinkL - mTapeHissHPx_L);
-        const float hpR     = a_hissHp * (mTapeHissHPy_R + pinkR - mTapeHissHPx_R);
-        mTapeHissHPx_L = pinkL; mTapeHissHPy_L = hpL;
-        mTapeHissHPx_R = pinkR; mTapeHissHPy_R = hpR;
-        wowL += hissNow * hpL * 0.1f;
-        wowR += hissNow * hpR * 0.1f;
+        if (useSampledHiss)
+        {
+            // Bounded looping read: clamp before (the cassette may have just
+            // switched to a shorter bed), wrap after advancing.
+            if (mTapeHissReadPos >= hissLen) mTapeHissReadPos = 0;
+            wowL += hissNow * hissCh0[mTapeHissReadPos];
+            wowR += hissNow * hissCh1[mTapeHissReadPos];
+            if (++mTapeHissReadPos >= hissLen) mTapeHissReadPos = 0;
+        }
+        else
+        {
+            // Synthetic pink + 200 Hz HPF fallback (no real hiss bed loaded).
+            const float whiteL = mTapeRandomL.nextFloat() * 2.0f - 1.0f;
+            const float whiteR = mTapeRandomR.nextFloat() * 2.0f - 1.0f;
+            const float pinkL  = mTapePinkL.process (whiteL);
+            const float pinkR  = mTapePinkR.process (whiteR);
+            const float hpL    = a_hissHp * (mTapeHissHPy_L + pinkL - mTapeHissHPx_L);
+            const float hpR    = a_hissHp * (mTapeHissHPy_R + pinkR - mTapeHissHPx_R);
+            mTapeHissHPx_L = pinkL; mTapeHissHPy_L = hpL;
+            mTapeHissHPx_R = pinkR; mTapeHissHPy_R = hpR;
+            wowL += hissNow * hpL * 0.1f;
+            wowR += hissNow * hpR * 0.1f;
+        }
 
         // DC blocker (5 Hz SR-aware).
         const float dcInL = wowL;
@@ -1175,6 +1356,15 @@ void SaturationDSP::processTape (juce::AudioBuffer<float>& buffer)
         while (mTapeWowPhase     >= 1.0) mTapeWowPhase     -= 1.0;
         mTapeFlutterPhase += (double) mTapeFlutterRate / (double) sr;
         while (mTapeFlutterPhase >= 1.0) mTapeFlutterPhase -= 1.0;
+    }
+
+    // Cassette IR: zero-latency convolution on the tape output when engaged.
+    if (mTapeIrOn)
+    {
+        juce::dsp::AudioBlock<float> blk (buffer);
+        auto sub = blk.getSubBlock (0, (size_t) numSamples).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing<float> ctx (sub);
+        mTapeConv.process (ctx);
     }
 
     juce::ignoreUnused (sr);
