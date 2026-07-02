@@ -1001,6 +1001,10 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         if (auto optPos = ph->getPosition())
             pos = *optPos;
 
+    // Publish transport state for editor panels (see DSPBase::sTransportPlaying:
+    // panels lock latency-changing controls while the transport runs).
+    DSPBase::sTransportPlaying.store (pos.getIsPlaying(), std::memory_order_relaxed);
+
     // QA-RustyMeter Task 3 (2026-05-30): reset the master LUFS Integrated window
     // on transport play-from-top / loop-start.  Edge = stopped->playing, OR a
     // backward ppq jump while playing (loop wrap / relocate-to-start).  Done
@@ -1521,39 +1525,67 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // the engine page-buffer named by the Piano Roll's currently-focused
     // engine (set via setLiveMidiTarget on focus change).  Runs before
     // choke-group dispatch so live note-ons participate in the same choke
-    // semantics as piano-roll scheduled notes.  Q3 spec: only Layer / Bass
-    // / Drum receive - Vox / Inst / Clip / DrumKit grid drop.
+    // semantics as piano-roll scheduled notes.
+    //
+    // Routes to every MIDI-instrument kind, into the SAME page buffer the
+    // pattern/song scheduler above feeds (so the target engine already
+    // consumes it): Layer / Bass / Drum + the sfizz instruments Guitars /
+    // Basses (shared instPageMidi[idx]) / Rusty Drums (singleton
+    // mRustyDrumsMidi).  Only true live-input pages (Vox + live-input Inst),
+    // Clip, and the DrumKit grid drop -- those take audio, not MIDI notes.
     {
         juce::MidiBuffer liveMidi;
         mLiveMidiCollector.removeNextBlockOfMessages (liveMidi, numSamples);
         if (! liveMidi.isEmpty())
         {
-            // QA-Ea Task 0b (2026-05-18): hardware-MIDI recording fix.  The
-            // MIDI recorder reads `allMidi`, built only from host midiMessages
-            // - it never contained the hardware keyboard (that flows via
-            // mLiveMidiCollector, dispatched per-page below), so hardware-
-            // MIDI recording captured nothing (never worked, build-independent).
-            // Merge liveMidi into allMidi so the recorder sees the performance.
-            // Double-trigger-safe: allMidi's only real consumer is the recorder;
-            // the engines are driven by `dest` below.  Forks #25.
-            for (const auto m : liveMidi)
-                allMidi.addEvent (m.getMessage(), m.samplePosition);
-
+            // Resolve the live-MIDI target engine first -- both the routing
+            // dest and the per-engine live-keyboard octave offset key off it.
             const int kind = mLiveMidiTargetKind .load (std::memory_order_relaxed);
             const int idx  = mLiveMidiTargetIndex.load (std::memory_order_relaxed);
             juce::MidiBuffer* dest = nullptr;
-            // Encoding matches PianoRollPage::EngineKind ordering.
+            // Encoding matches PianoRollPage::EngineKind ordering:
+            // 1 Layer / 2 Bass / 3 Drum / 7 Guitars / 8 Basses / 9 Rusty Drums.
             if      (kind == 1 && idx >= 0 && idx < kMaxLayerPages) dest = &layerPageMidi[idx];
             else if (kind == 2 && idx >= 0 && idx < kMaxBassPages)  dest = &bassPageMidi [idx];
             else if (kind == 3 && idx >= 0 && idx < kMaxDrumPages)  dest = &drumPageMidi [idx];
-            if (dest != nullptr)
+            else if (kind == 4 && idx >= 0 && idx < kMaxClipPages)  dest = &clipPageMidi [idx];
+            else if ((kind == 7 || kind == 8) && idx >= 0 && idx < kMaxInstPages) dest = &instPageMidi[idx];
+            else if (kind == 9)                                    dest = &mRustyDrumsMidi;
+
+            // Per-engine live-keyboard octave offset.  The sfizz BaySickBasses
+            // kit (kind 8) is sampled an octave below where a 61-key controller
+            // sits, so its keyswitches + playable range only fall under the
+            // hardware keys after a -12 shift (whole octave -> note class C->C
+            // preserved).  Applied to the WHOLE live path below (recorder +
+            // monitor + engine) so played/recorded/displayed pitch all agree.
+            // Live keyboard ONLY -- roll notes + stored patterns are untouched
+            // (the pattern scheduler feeds instPageMidi natively elsewhere).
+            const int liveTranspose = (kind == 8) ? -12 : 0;
+
+            // QA-Ea Task 0b (2026-05-18): merge liveMidi into allMidi so the MIDI
+            // recorder (allMidi's only consumer) captures the hardware
+            // performance -- allMidi is built from host midiMessages otherwise
+            // and never saw the keyboard.  Engines are driven by `dest`.  Forks #25.
+            for (const auto m : liveMidi)
             {
-                for (const auto m : liveMidi)
-                    dest->addEvent (m.getMessage(), m.samplePosition);
+                auto msg = m.getMessage();
+                if (liveTranspose != 0 && msg.isNoteOnOrOff())
+                    msg.setNoteNumber (juce::jlimit (0, 127, msg.getNoteNumber() + liveTranspose));
+
+                allMidi.addEvent (msg, m.samplePosition);
+                // Live-note monitor (audio -> UI): held hardware notes light the
+                // on-screen keyboard.  Uses the post-offset note so the lit key
+                // matches the sounding pitch.
+                if      (msg.isNoteOn())  updateLiveHeldNote (msg.getNoteNumber(), true);
+                else if (msg.isNoteOff()) updateLiveHeldNote (msg.getNoteNumber(), false);
+                else if (msg.isAllNotesOff() || msg.isAllSoundOff()) clearLiveHeldNotes();
+
+                if (dest != nullptr)
+                    dest->addEvent (msg, m.samplePosition);
             }
-            // else: drop for ENGINE routing only (DrumKit grid / Clip / Vox /
-            // Inst / unset) - allMidi already has it above so the recorder
-            // still captures the performance.
+            // Non-routed targets (DrumKit grid / Clip / Vox / live-input Inst /
+            // unset) leave dest null -- dropped for ENGINE routing only; allMidi
+            // already captured the performance so the recorder still sees it.
         }
     }
 

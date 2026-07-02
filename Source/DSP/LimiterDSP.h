@@ -9,7 +9,7 @@
 // Look-ahead peak limiter with soft-sat pre-stage and 4× oversampled True Peak
 // detection. Fruity-Limiter-style architecture:
 //
-//   input → InputGain → tanh SoftSat(SatThresh,SatCurve) → DelayLine(0–10 ms)
+//   input → InputGain → DelayLine(0–10 ms)
 //                                                                ↓
 //                    (pre-delay tap) → 4× TP detector (JUCE Oversampling, IIR)
 //                                                                ↓
@@ -20,6 +20,8 @@
 //                                      GainComputer: min(1, ceiling/peak)
 //                                                                ↓
 //                                            applied to delayed audio
+//                                                                ↓
+//                    tanh SoftSat(SatThresh,SatCurve) -- post-limiter (FL SAT)
 //                                                                ↓
 //                                                hard ceiling clamp (safety)
 //                                                                ↓
@@ -45,13 +47,14 @@ public:
 
     // ── Setters ───────────────────────────────────────────────────────────────
     void setInputGainDb   (float dB);     // -12..+24 dB     (smoothed, 15 ms)
-    void setCeilingDb     (float dB);     // -24..0 dB       (smoothed, 15 ms)
+    void setCeilingDb     (float dB);     // -24..+12 dB     (smoothed, 15 ms; +12 = FL headroom)
     void setSatThresh     (float lin);    // 0..1 linear     (smoothed, 15 ms; 1.0 = off)
     void setSatCurve      (float v01);    // 0..1 knee shape (smoothed, 15 ms)
     void setAttackMs      (float ms);     // 0.1..20 ms
     void setReleaseMs     (float ms);     // 10..1000 ms
     void setAheadMs       (float ms);     // 0..10 ms        (delay line size)
     void setReleaseCurve  (float v01);    // 0..1 (0=linear, 1=exp)
+    void setSustainMs     (float ms);     // 0..1000 ms (Fruity RMS-window hold; 0 = off)
     void setAutoRelease   (bool on);
     // C2: Sidechain HPF cutoff on detector path (20..2000 Hz; 20 = effectively off).
     void setSidechainHPF  (float hz);
@@ -78,6 +81,7 @@ public:
     float getReleaseMs()    const { return mReleaseMs; }
     float getAheadMs()      const { return mAheadMs; }
     float getReleaseCurve() const { return mReleaseCurve; }
+    float getSustainMs()    const { return mSustainMs; }
     bool  getAutoRelease()  const { return mAutoRelease; }
     float getSidechainHPF() const { return mSidechainHPF; }
     bool  getAutoMakeup()   const { return mAutoMakeup; }
@@ -93,6 +97,7 @@ private:
     float mReleaseMs         { 100.0f };
     float mAheadMs           { 2.0f };
     float mReleaseCurve      { 0.5f };
+    float mSustainMs         { 0.0f };    // 0..1000 ms RMS window (0 = off)
     bool  mAutoRelease       { false };
     float mSidechainHPF      { 20.0f };   // C2: 20 Hz = effectively off
     bool  mAutoMakeup        { false };   // C4
@@ -125,6 +130,13 @@ private:
     float mRelStepPerSample { 0.0f };   // linear-release step size (linear in dB/sample)
     float mRelStepFast      { 0.0f };
     float mRelStepSlow      { 0.0f };
+
+    // SUSTAIN (Fruity-Limiter RMS window): a mean-square smoother holds the peak
+    // envelope so GR releases over the window instead of early.  blendedPeak =
+    // max(truePeak, sqrt(meanSq)) keeps the true-peak guarantee.  mMeanSqL also
+    // serves the linked path (single detector).
+    float mSusCoef  { 0.0f };
+    float mMeanSqL  { 0.0f }, mMeanSqR { 0.0f };
 
     // ── Look-ahead circular delay (integer-sample only) ───────────────────────
     std::vector<float> mDelayL, mDelayR;

@@ -49,11 +49,13 @@ public:
     void setMuted (bool yes);
     void set432   (bool yes);           // false = 440 mode, true = 432 mode
     void setTrimHz (float hz);          // valid range follows the 432-toggle
+    void setFlat  (int semitones);      // 0..6 flat/drop tuning (TU-3: references N semitones below standard)
 
     bool  isMuted() const { return mMuted; }
     bool  is432()  const { return mIs432; }
     Mode  getMode() const { return mMode; }
     float getTrimHz() const { return mTrimHz; }
+    int   getFlat()  const { return mFlatSemitones; }
 
     // UI thread reads.  Wait-free atomics.
     float getFrequencyHz() const noexcept { return mYin.getFrequencyHz(); }
@@ -84,6 +86,7 @@ private:
     bool  mMuted  { false };
     bool  mIs432  { false };
     float mTrimHz { 440.0f };          // reference Hz including trim
+    int   mFlatSemitones { 0 };        // 0..6 flat/drop tuning (references N semitones below standard)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TunerStyleDSP)
 };

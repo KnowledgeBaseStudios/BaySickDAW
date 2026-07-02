@@ -319,16 +319,30 @@ public:
     // focused engine, pushed via setLiveMidiTarget when focus changes).
     //
     // Target encoding (matches PianoRollPage::EngineKind ordering):
-    //   1 = Layer (mLiveMidiTargetIndex = 0..kMaxLayerPages-1)
-    //   2 = Bass  (mLiveMidiTargetIndex = 0..kMaxBassPages-1)
-    //   3 = Drum  (mLiveMidiTargetIndex = 0..kMaxDrumPages-1)
-    //   anything else (0 DrumKit grid / 4 Clip / 5 Vox / 6 Inst / -1 unset)
-    //   = drop incoming messages (no target).  Q3 spec call locks Vox/Inst out.
+    //   1 = Layer   (mLiveMidiTargetIndex = 0..kMaxLayerPages-1)
+    //   2 = Bass    (mLiveMidiTargetIndex = 0..kMaxBassPages-1)
+    //   3 = Drum    (mLiveMidiTargetIndex = 0..kMaxDrumPages-1)
+    //   7 = Guitars (mLiveMidiTargetIndex = 0..kMaxInstPages-1, sfizz Inst)
+    //   8 = Basses  (mLiveMidiTargetIndex = 0..kMaxInstPages-1, sfizz Inst)
+    //   9 = Rusty Drums (singleton; index ignored)
+    //   anything else (0 DrumKit grid / 4 Clip / 5 Vox / 6 live-input Inst /
+    //   -1 unset) = drop (no MIDI-driven engine on those pages).
     juce::MidiMessageCollector& getLiveMidiCollector() noexcept { return mLiveMidiCollector; }
     void setLiveMidiTarget (int engineKind, int index) noexcept
     {
         mLiveMidiTargetKind .store (engineKind, std::memory_order_relaxed);
         mLiveMidiTargetIndex.store (index,      std::memory_order_relaxed);
+    }
+
+    // Live-note monitor: snapshot of the hardware-MIDI notes currently held
+    // down, as a 128-bit mask (note n -> lo>>n for n<64, hi>>(n-64) for n>=64).
+    // The live-MIDI drain in processBlock sets/clears bits (audio thread); the
+    // Piano Roll's 30 Hz timer reads this to light the on-screen keyboard for
+    // whatever the user is physically playing (a MIDI-mapping diagnostic).
+    void getLiveHeldNotes (uint64_t& lo, uint64_t& hi) const noexcept
+    {
+        lo = mLiveHeldNotesLo.load (std::memory_order_relaxed);
+        hi = mLiveHeldNotesHi.load (std::memory_order_relaxed);
     }
 
     // ── I-3b (2026-05-02): MIDI Learn registry ───────────────────────────────
@@ -1143,6 +1157,24 @@ private:
     juce::MidiMessageCollector mLiveMidiCollector;
     std::atomic<int>           mLiveMidiTargetKind  { -1 };   // -1 = unset
     std::atomic<int>           mLiveMidiTargetIndex { 0  };
+
+    // Live-note monitor mask (see getLiveHeldNotes).  Audio thread sets/clears
+    // bits as hardware note-on/offs drain; UI reads the public snapshot.
+    std::atomic<uint64_t>      mLiveHeldNotesLo { 0 };
+    std::atomic<uint64_t>      mLiveHeldNotesHi { 0 };
+    void updateLiveHeldNote (int note, bool on) noexcept
+    {
+        if (note < 0 || note > 127) return;
+        auto& word = (note < 64) ? mLiveHeldNotesLo : mLiveHeldNotesHi;
+        const uint64_t bit = 1ull << (note & 63);
+        if (on) word.fetch_or  (bit,   std::memory_order_relaxed);
+        else    word.fetch_and (~bit,  std::memory_order_relaxed);
+    }
+    void clearLiveHeldNotes() noexcept
+    {
+        mLiveHeldNotesLo.store (0, std::memory_order_relaxed);
+        mLiveHeldNotesHi.store (0, std::memory_order_relaxed);
+    }
 
     // I-3b (2026-05-02): MIDI Learn registry + per-device event queue.
     // The queue is a MIDI-thread -> audio-thread bridge that preserves source

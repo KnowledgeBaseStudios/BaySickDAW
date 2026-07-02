@@ -61,7 +61,7 @@ public:
     void setAttack       (float a);         // -100..100 (panel range; stored as -1..1)
     void setSustain      (float s);         // -1..1 (legacy path)
     void setSensitivity  (float s);         // 0..1
-    void setRelease      (float rel);       // -100..100; stored as -1..1 in mSustain
+    void setRelease      (float rel);       // -100..100; stored as -1..1 in mRelease
 
     // Attack/release envelope shape presets (affect ONE end of each envelope).
     void setAttackShape  (int shape);       // 0=Sharp, 1=Medium, 2=Soft (fast-env ATTACK time)
@@ -87,8 +87,8 @@ public:
     bool getStereoDetect()  const noexcept { return mStereoDetect; }
 
     // ---- Public state ----------------------------------------------------
-    float mAttack       { 0.5f };      // stored -1..1
-    float mSustain      { 0.0f };      // stored -1..1
+    float mAttack       { 0.0f };      // stored -1..1 (0 = neutral, no attack boost/cut)
+    float mRelease      { 0.0f };      // stored -1..1
     float mSensitivity  { 0.5f };
     int   mAttackShape  { 1 };         // 0=Sharp,1=Med,2=Soft
     int   mReleaseShape { 1 };
@@ -134,7 +134,7 @@ private:
 
     // Smoothers (11d + C3 Wet)
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mAttackSmooth;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mSustainSmooth;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mReleaseSmooth;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mSensitivitySmooth;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mSplitFreqSmooth;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mBalanceSmooth;   // -100..100 -> 0..1 highWeight

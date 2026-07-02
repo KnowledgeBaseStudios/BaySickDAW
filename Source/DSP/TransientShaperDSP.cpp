@@ -39,7 +39,7 @@ void TransientShaperDSP::recalcEnvelopeCoefs()
 void TransientShaperDSP::snapSmoothedToTargets()
 {
     mAttackSmooth      .setCurrentAndTargetValue (mAttack);
-    mSustainSmooth     .setCurrentAndTargetValue (mSustain);
+    mReleaseSmooth     .setCurrentAndTargetValue (mRelease);
     mSensitivitySmooth .setCurrentAndTargetValue (mSensitivity);
     mSplitFreqSmooth   .setCurrentAndTargetValue (mSplitFreq);
     mBalanceSmooth     .setCurrentAndTargetValue ((mSplitBalance + 100.0f) / 200.0f);
@@ -83,7 +83,7 @@ void TransientShaperDSP::prepare (double sampleRate, int maxBlockSize)
 
     // 11d smoothers
     mAttackSmooth      .reset (sampleRate, kSmoothMsFast * 0.001);
-    mSustainSmooth     .reset (sampleRate, kSmoothMsFast * 0.001);
+    mReleaseSmooth     .reset (sampleRate, kSmoothMsFast * 0.001);
     mSensitivitySmooth .reset (sampleRate, kSmoothMsMed  * 0.001);
     mSplitFreqSmooth   .reset (sampleRate, kSmoothMsMed  * 0.001);
     mBalanceSmooth     .reset (sampleRate, kSmoothMsMed  * 0.001);
@@ -117,7 +117,7 @@ void TransientShaperDSP::setAttack (float a)
 void TransientShaperDSP::setSustain (float s)
 {
     const float n = juce::jlimit (-1.0f, 1.0f, s);
-    if (n != mSustain) { mSustain = n; mSustainSmooth.setTargetValue (n); }
+    if (n != mRelease) { mRelease = n; mReleaseSmooth.setTargetValue (n); }
 }
 
 void TransientShaperDSP::setSensitivity (float s)
@@ -128,9 +128,9 @@ void TransientShaperDSP::setSensitivity (float s)
 
 void TransientShaperDSP::setRelease (float rel)
 {
-    // -100..100 UI -> -1..1 stored in mSustain.
+    // -100..100 UI -> -1..1 stored in mRelease.
     const float n = juce::jlimit (-1.0f, 1.0f, rel * 0.01f);
-    if (n != mSustain) { mSustain = n; mSustainSmooth.setTargetValue (n); }
+    if (n != mRelease) { mRelease = n; mReleaseSmooth.setTargetValue (n); }
 }
 
 void TransientShaperDSP::setAttackShape (int shape)
@@ -272,7 +272,7 @@ void TransientShaperDSP::process (juce::AudioBuffer<float>& buffer)
     for (int n = 0; n < numSamples; ++n)
     {
         const float attack    = mAttackSmooth     .getNextValue();
-        const float sustain   = mSustainSmooth    .getNextValue();
+        const float sustain   = mReleaseSmooth    .getNextValue();
         const float sensScale = 1.0f + mSensitivitySmooth.getNextValue() * 9.0f;
         const float highW     = juce::jlimit (0.0f, 1.0f, mBalanceSmooth.getNextValue());
 
@@ -433,7 +433,7 @@ void TransientShaperDSP::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::ValueTree state ("TransientShaperDSP");
     state.setProperty ("attack",       mAttack,       nullptr);
-    state.setProperty ("sustain",      mSustain,      nullptr);
+    state.setProperty ("sustain",      mRelease,      nullptr);
     state.setProperty ("sensitivity",  mSensitivity,  nullptr);
     state.setProperty ("attackShape",  mAttackShape,  nullptr);
     state.setProperty ("releaseShape", mReleaseShape, nullptr);
@@ -457,7 +457,7 @@ void TransientShaperDSP::setStateInformation (const void* data, int sz)
     if (!xml || xml->getTagName() != "TransientShaperDSP") return;
 
     mAttack       = (float) xml->getDoubleAttribute ("attack",       mAttack);
-    mSustain      = (float) xml->getDoubleAttribute ("sustain",      mSustain);
+    mRelease      = (float) xml->getDoubleAttribute ("sustain",      mRelease);
     mSensitivity  = (float) xml->getDoubleAttribute ("sensitivity",  mSensitivity);
     mAttackShape  = juce::jlimit (0, 2, xml->getIntAttribute ("attackShape",  mAttackShape));
     mReleaseShape = juce::jlimit (0, 2, xml->getIntAttribute ("releaseShape", mReleaseShape));

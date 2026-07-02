@@ -59,6 +59,13 @@ struct EditorPanelBase : public juce::Component
 
     std::function<void(float db)> onOutputGainChanged;
 
+    // Fired by panels whose controls change the DSP's getLatencySamples()
+    // (lookahead toggles/knobs, FFT-size switches) so the host can refresh
+    // bus PDC (EffectsPage wires this to VibeGraph::updateBusLatencies).
+    // Without the poke, changing lookahead left compensation stale until the
+    // next effect load.
+    std::function<void()> onLatencyChanged;
+
     // Wire all knobs to the undo system.
     // Call this after the derived constructor has built the knobs vector.
     void setUndoContext(const UndoContext& ctx);

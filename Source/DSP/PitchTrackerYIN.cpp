@@ -106,12 +106,14 @@ public:
 
     void run() override
     {
-        // Rolling analysis window - slides forward by kHopSize each iteration.
-        // Initialized to zero; first analysis fires once kWindowSize samples
-        // have been pulled from the FIFO so we don't analyze trailing zeros.
-        std::vector<float> rolling ((size_t) kWindowSize, 0.0f);
+        // Per-instance window/hop, snapshotted once (constant for the worker's
+        // lifetime; set before prepare()).  Rolling window slides forward by H
+        // each iteration; first analysis fires once W samples have been pulled.
+        const int W = owner.mWindowSize;
+        const int H = owner.mHopSize;
+        std::vector<float> rolling ((size_t) W, 0.0f);
         std::vector<float> diff;
-        diff.reserve ((size_t) (kWindowSize / 2));
+        diff.reserve ((size_t) (W / 2));
 
         int totalIn = 0;     // cumulative samples pulled into rolling so far
         int sinceLast = 0;   // samples pulled since last analyze()
@@ -121,7 +123,7 @@ public:
             // Block until at least one hop's worth is ready, with a timeout
             // so we can check threadShouldExit periodically.
             const int ready = owner.mFifo.getNumReady();
-            if (ready < kHopSize)
+            if (ready < H)
             {
                 wait (5);   // ms
                 continue;
@@ -130,7 +132,7 @@ public:
             // Pull as many samples as are available, capped at one hop per
             // iteration.  Larger pulls per iteration means stale rolling
             // window (analysis lags); smaller means tight loop = more CPU.
-            const int pullCount = std::min (ready, kHopSize);
+            const int pullCount = std::min (ready, H);
 
             int s1 = 0, b1 = 0, s2 = 0, b2 = 0;
             owner.mFifo.prepareToRead (pullCount, s1, b1, s2, b2);
@@ -138,8 +140,8 @@ public:
             // Slide rolling window left by pullCount, then append new samples.
             std::memmove (rolling.data(),
                           rolling.data() + pullCount,
-                          (size_t) (kWindowSize - pullCount) * sizeof (float));
-            int dest = kWindowSize - pullCount;
+                          (size_t) (W - pullCount) * sizeof (float));
+            int dest = W - pullCount;
             for (int i = 0; i < b1; ++i)
                 rolling[(size_t) (dest + i)] = owner.mFifoBuf[(size_t) (s1 + i)];
             dest += b1;
@@ -153,20 +155,20 @@ public:
 
             // Run YIN once the rolling window is fully populated AND we've
             // advanced by at least one hop since last analysis.
-            if (totalIn >= kWindowSize && sinceLast >= kHopSize)
+            if (totalIn >= W && sinceLast >= H)
             {
-                analyze (rolling.data());
+                analyze (rolling.data(), W);
                 sinceLast = 0;
             }
         }
     }
 
 private:
-    void analyze (const float* window) noexcept
+    void analyze (const float* window, int W) noexcept
     {
         // 1) Difference function over half the window.
         std::vector<float> cmndf;
-        computeDifference (window, kWindowSize, cmndf);
+        computeDifference (window, W, cmndf);
 
         // 2) Cumulative Mean Normalized Difference Function (in-place).
         computeCMNDF (cmndf);
@@ -214,6 +216,14 @@ PitchTrackerYIN::PitchTrackerYIN()
 PitchTrackerYIN::~PitchTrackerYIN()
 {
     releaseResources();
+}
+
+void PitchTrackerYIN::setAnalysisWindow (int windowSize, int hopSize) noexcept
+{
+    // Call before prepare() -- the worker snapshots these at run() start.  The
+    // ring (kMaxWindowSize*4) already fits any window up to kMaxWindowSize.
+    mWindowSize = juce::jlimit (256, kMaxWindowSize, windowSize);
+    mHopSize    = juce::jlimit (64,  mWindowSize,    hopSize);
 }
 
 void PitchTrackerYIN::prepare (double sampleRate)

@@ -38,6 +38,11 @@ public:
     // legible across the full range.  Used by BaySickRustyDrums where the
     // sharp/flat distinction has no musical meaning (it's a drum kit).
     void setAllKeysWhiteMode(bool enabled);
+    // Live-note monitor: light the keys the user is holding on a hardware MIDI
+    // keyboard.  The Piano Roll timer pushes a 128-bit held-note mask each tick
+    // (note n -> lo>>n for n<64, hi>>(n-64) otherwise); lit keys render like a
+    // mouse-preview.  Repaints only when the mask changes.
+    void setLiveHeldNotes(uint64_t lo, uint64_t hi);
     std::function<void(int midiNote, bool noteOn)> onNotePreview;
     // 2026-04-21: forward wheel events to the grid so scrolling works over keys too.
     std::function<void(const juce::MouseEvent&, const juce::MouseWheelDetails&)> onWheel;
@@ -54,6 +59,16 @@ private:
     std::vector<juce::String> mDrumRowLabels;  // top-to-bottom row labels
     std::function<juce::String(int)> mNoteLabelProvider;
     std::function<juce::String(int)> mKeyswitchLabelProvider;
+
+    // Live-note monitor mask (message thread only; pushed by setLiveHeldNotes).
+    uint64_t mLiveHeldLo { 0 };
+    uint64_t mLiveHeldHi { 0 };
+    bool isLiveHeld (int note) const
+    {
+        if (note < 0 || note > 127) return false;
+        return note < 64 ? ((mLiveHeldLo >> note)        & 1ull) != 0
+                         : ((mLiveHeldHi >> (note - 64)) & 1ull) != 0;
+    }
 
     int noteToY  (int note) const;
     int yToNote  (int y)    const;
@@ -515,6 +530,9 @@ public:
     void setAllKeysWhiteMode(bool enabled);
     // J-7b: scroll the view so `topNote` is the highest visible MIDI note.
     void setTopNote(int topNote);
+    // Live-note monitor: forward a held-note mask (from PianoRollPage's timer)
+    // to the keyboard strip so hardware-MIDI notes light up on the keys.
+    void setLiveHeldNotes(uint64_t lo, uint64_t hi);
     void setPlayheadBeat (double beat);
 
     // ── Toolbar context label (e.g. "Layer 0 - Harmless") ────────────────

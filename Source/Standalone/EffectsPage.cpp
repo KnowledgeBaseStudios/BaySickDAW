@@ -844,6 +844,11 @@ void EffectsPage::rebuildSlotEditor(int slotIndex)
             // the slot's persisted state BEFORE setEditor() (which runs the first
             // resized()), so the initial layout matches the saved choice.
             base->mBasicMode = mRack->getSlotBasicMode(slotIndex);
+            // Latency-changing panel controls (lookahead) poke a bus-PDC refresh.
+            base->onLatencyChanged = [this]
+            {
+                mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
+            };
         }
 
         // C.4 Phase 1 (2026-04-30): push the strip's mixer APVTS prefix +

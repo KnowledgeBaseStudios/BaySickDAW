@@ -126,6 +126,11 @@ public:
     // Editor wires this so the playhead-pump knows when to pass -1 (Song mode).
     std::function<bool()> isSongMode;
 
+    // Editor wires this to read the processor's held hardware-MIDI notes each
+    // timer tick (128-bit mask: lo = notes 0..63, hi = 64..127).  The active
+    // roll's keyboard lights those keys so the user sees what they're playing.
+    std::function<void(uint64_t&, uint64_t&)> liveHeldNotesProvider;
+
     // Editor sets this so PianoRollPage can build its dropdown popup with the
     // ribbon's current Layer/Bass/Drum order.  Returns the engines in the
     // order they should appear AFTER Drum Kit (which is always first).

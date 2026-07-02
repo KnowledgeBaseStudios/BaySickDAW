@@ -93,6 +93,14 @@ void PianoKeyboard::setAllKeysWhiteMode(bool enabled)
     repaint();
 }
 
+void PianoKeyboard::setLiveHeldNotes(uint64_t lo, uint64_t hi)
+{
+    if (lo == mLiveHeldLo && hi == mLiveHeldHi) return;   // no change -> no repaint
+    mLiveHeldLo = lo;
+    mLiveHeldHi = hi;
+    repaint();
+}
+
 void PianoKeyboard::mouseMove(const juce::MouseEvent& e)
 {
     const int n = yToNote(e.y);
@@ -153,7 +161,7 @@ void PianoKeyboard::paint(Graphics& g)
         {
             int y = noteToY(note);
             int labelIdx = mTopNote - note;
-            bool highlighted = (note == mPreviewNote);
+            bool highlighted = (note == mPreviewNote) || isLiveHeld(note);
 
             g.setColour(highlighted ? kDrumRowHl : (labelIdx % 2 == 0 ? kDrumRowBg : kDrumRowAlt));
             g.fillRect(0, y, bw, mNoteH - 1);
@@ -176,6 +184,9 @@ void PianoKeyboard::paint(Graphics& g)
     for (int note = loNote; note <= hiNote; ++note)
     {
         int y  = noteToY(note);
+        // Live-note monitor + mouse preview share the same "hot" highlight so a
+        // note played on a hardware keyboard lights up like a clicked key.
+        const bool hot = (note == mPreviewNote) || isLiveHeld (note);
 
         // QA-SfzGroup Sub-Q (2026-05-27): keyswitch key takes priority - render
         // with amber-highlighted full-width background + label, regardless of
@@ -189,8 +200,8 @@ void PianoKeyboard::paint(Graphics& g)
             keyswitchLabel = mKeyswitchLabelProvider(note);
         if (keyswitchLabel.isNotEmpty())
         {
-            const juce::Colour amber = (note == mPreviewNote)
-                ? juce::Colour(0xfff5d690)    // brighter when previewed
+            const juce::Colour amber = hot
+                ? juce::Colour(0xfff5d690)    // brighter when previewed / held
                 : juce::Colour(0xffe8c060);   // amber for keyswitch resting
             g.setColour(amber);
             g.fillRect(0, y, bw, mNoteH - 1);
@@ -213,14 +224,14 @@ void PianoKeyboard::paint(Graphics& g)
 
         if (paintAsBlack)
         {
-            g.setColour(note == mPreviewNote ? VC::Highlight.brighter() : Colour(0xff181820));
+            g.setColour(hot ? VC::Highlight.brighter() : Colour(0xff181820));
             g.fillRect(0, y, bw * 7 / 10, mNoteH);
             g.setColour(VC::Accent);
             g.drawRect(0, y, bw * 7 / 10, mNoteH, 1);
         }
         else
         {
-            g.setColour(note == mPreviewNote ? VC::Highlight.brighter() : Colour(0xffe8e8f0));
+            g.setColour(hot ? VC::Highlight.brighter() : Colour(0xffe8e8f0));
             g.fillRect(0, y, bw, mNoteH - 1);
             g.setColour(Colour(0xffaaaaaa));
             g.drawHorizontalLine(y + mNoteH - 1, 0, (float)bw);
@@ -2944,6 +2955,11 @@ void PianoRollContainer::setActiveSlot (int slot)
 void PianoRollContainer::setDrumRowLabels(const std::vector<juce::String>& labels)
 {
     if (mKeyboard) mKeyboard->setDrumRowLabels(labels);
+}
+
+void PianoRollContainer::setLiveHeldNotes(uint64_t lo, uint64_t hi)
+{
+    if (mKeyboard) mKeyboard->setLiveHeldNotes(lo, hi);
 }
 
 void PianoRollContainer::setNoteLabelProvider(std::function<juce::String(int)> provider)

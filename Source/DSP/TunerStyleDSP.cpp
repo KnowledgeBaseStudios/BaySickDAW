@@ -12,6 +12,10 @@ TunerStyleDSP::TunerStyleDSP() = default;
 
 void TunerStyleDSP::prepare (double sampleRate, int /*maxBlockSize*/)
 {
+    // Bigger analysis window than the shared default so the tuner reaches bass
+    // low notes (~21.5 Hz @ 44.1k).  Must be set before prepare().  Other
+    // PitchTrackerYIN consumers (Octave / Synth / PitchCorrector) keep 2048.
+    mYin.setAnalysisWindow (4096, 1024);
     mYin.prepare (sampleRate);
 }
 
@@ -49,6 +53,11 @@ void TunerStyleDSP::setTrimHz (float hz)
     mTrimHz = juce::jlimit (lo, hi, hz);
 }
 
+void TunerStyleDSP::setFlat (int semitones)
+{
+    mFlatSemitones = juce::jlimit (0, 6, semitones);
+}
+
 void TunerStyleDSP::getTrimRange (float& outMin, float& outMax) const
 {
     if (mIs432) { outMin = 428.0f; outMax = 437.0f; }
@@ -63,10 +72,12 @@ float TunerStyleDSP::midiToHz (int midi) const noexcept
 bool TunerStyleDSP::getReading (Reading& out) const noexcept
 {
     const float hz = mYin.getFrequencyHz();
-    if (hz < 30.0f || hz > 1500.0f) return false;
+    if (hz < PitchTrackerYIN::kMinFreqHz || hz > PitchTrackerYIN::kMaxFreqHz) return false;
 
-    // Convert Hz -> chromatic midi note (with cents).
-    const float midiF = 69.0f + 12.0f * std::log2 (hz / mTrimHz);
+    // Convert Hz -> chromatic midi note (with cents).  Flat tuning references N
+    // semitones below standard: shift the note up by N so an N-flat string reads
+    // as its standard note name at 0 cents.
+    const float midiF = 69.0f + 12.0f * std::log2 (hz / mTrimHz) + (float) mFlatSemitones;
     const int   midi  = (int) std::round (midiF);
     const float cents = (midiF - (float) midi) * 100.0f;
 
@@ -133,6 +144,7 @@ void TunerStyleDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("muted",    (int) mMuted,   nullptr);
     state.setProperty ("is432",    (int) mIs432,   nullptr);
     state.setProperty ("trimHz",   mTrimHz,        nullptr);
+    state.setProperty ("flat",     mFlatSemitones, nullptr);
     state.setProperty ("bypassed", (int) bypassed, nullptr);
     if (auto xml = state.createXml())
         juce::AudioProcessor::copyXmlToBinary (*xml, dest);
@@ -148,5 +160,6 @@ void TunerStyleDSP::setStateInformation (const void* data, int sz)
     mMuted = ((int) state.getProperty ("muted", 0)) != 0;
     set432   (((int) state.getProperty ("is432", 0)) != 0);
     setTrimHz ((float)(double) state.getProperty ("trimHz", mIs432 ? 432.0 : 440.0));
+    setFlat   ((int) state.getProperty ("flat", 0));
     bypassed = ((int) state.getProperty ("bypassed", 0)) != 0;
 }

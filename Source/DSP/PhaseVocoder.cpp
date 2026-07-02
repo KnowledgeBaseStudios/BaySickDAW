@@ -16,14 +16,14 @@ PhaseVocoder::PhaseVocoder (int numChannels)
     for (int i = 0; i < kFFTSize; ++i)
         mWindow[i] = 0.5f * (1.0f - std::cos (kTwoPi * i / (kFFTSize - 1)));
 
-    // OLA normalization for Hann + 4x overlap.
-    // For a frame at position p: contribution = window[i] * IFFT[i] / N.
-    // Four overlapping frames each contribute window[i-j*Hs]² / N.
-    // Sum of Hann² over a hop period: sum_j(w[n-j*Hs]²) = 3/8 * N (analytical).
-    // We apply window twice (analysis + synthesis), so effective scale = Ha / (3N/8) per
-    // hop.  Simplified: mWindowScale = Ha * 8 / (3 * N²) * N = 8*Ha / (3*N).
-    // Multiplied by N (the IFFT gain we must cancel): scale = (2.0f/3.0f) / kFFTSize.
-    mWindowScale = (2.0f / 3.0f) / (float) kFFTSize;
+    // OLA normalization: window applied twice (analysis + synthesis), so the
+    // overlapping frames sum Hann^2 at the SYNTHESIS hop: sum_j(w[n-j*Hs]^2)
+    // ~= (3/8)*N / Hs per sample -> scale = (8/3)*Hs/N (= 2/3 at Hs = N/4).
+    // juce::dsp::FFT already normalizes the inverse by 1/N internally, so
+    // there is NO extra N to cancel -- the old (2/3)/N assumed unnormalized
+    // IFFT and made stretched output ~1/N (~-66 dB, "clips don't play").
+    // Recomputed in setStretchRatio because Hs tracks the stretch ratio.
+    mWindowScale = (8.0f / 3.0f) * (float) mSynthHop / (float) kFFTSize;
 
     mCh.resize (numChannels);
     for (auto& c : mCh)
@@ -42,6 +42,8 @@ void PhaseVocoder::setStretchRatio (double ratio)
     if (ratio == mStretchRatio) return;
     mStretchRatio = ratio;
     mSynthHop     = juce::jmax (1, juce::roundToInt (kHopSize * ratio));
+    // Overlap density changes with Hs -> keep unity output level at any ratio.
+    mWindowScale  = (8.0f / 3.0f) * (float) mSynthHop / (float) kFFTSize;
 }
 
 // ── reset ─────────────────────────────────────────────────────────────────────

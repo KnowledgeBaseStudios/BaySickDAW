@@ -69,6 +69,10 @@ void LimiterDSP::recalcCoefs()
     mRelStepPerSample = linStep (mReleaseMs);
     mRelStepFast      = linStep (kRelFastMs);
     mRelStepSlow      = linStep (kRelSlowMs);
+
+    // SUSTAIN RMS-window coef (0 = off -> coef 0 -> meanSq tracks the peak
+    // instantly, so blendedPeak == peak and the hold is a no-op).
+    mSusCoef = (mSustainMs <= 0.0f) ? 0.0f : expCoef (mSustainMs);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,6 +156,7 @@ void LimiterDSP::reset()
     mWritePos = 0;
     mEnv = mEnvFast = mEnvSlow = 0.0f;
     mEnvR = mEnvFastR = mEnvSlowR = 0.0f;   // C5
+    mMeanSqL = mMeanSqR = 0.0f;
     if (mOversampler) mOversampler->reset();
     mScBuf.clear();
     std::fill (mTpPeaks .begin(), mTpPeaks .end(), 0.0f);
@@ -219,23 +224,17 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
     {
         const float gainDb  = mInputGainSmooth.getNextValue();
         const float gainLin = juce::Decibels::decibelsToGain (gainDb);
-        const float satTh   = mSatThreshSmooth.getNextValue();
-        const float satCv   = mSatCurveSmooth .getNextValue();   // C1 smoothed
-        // drive: 0 when SatThresh=1 (off), grows as SatThresh shrinks
-        const float drive   = (1.0f - satTh) * 5.0f;
 
         const float rawL = L[i] * gainLin;
         const float rawR = (R ? R[i] : rawL) * gainLin;
 
-        const float processedL = softSat (rawL, drive, satCv);
-        const float processedR = softSat (rawR, drive, satCv);
-
-        // Detector path: SC source when external-keyed, otherwise processed
-        // input.  HPF still applies to whichever source feeds the detector.
-        // Main audio path (delay line, output) is NOT filtered + uses
-        // processed input regardless of SC state.
-        float detL = (extScL != nullptr) ? extScL[i] : processedL;
-        float detR = (extScR != nullptr) ? extScR[i] : processedR;
+        // SAT moved post-limiter (FL flow: ... -> Limiter -> Saturation -> out).
+        // The detector + limiter run on the clean post-gain signal so the
+        // saturation no longer affects the gain reduction (SAT is applied to the
+        // limited output in the gain-computer loop below).
+        // Detector path: external SC when keyed, otherwise the post-gain input.
+        float detL = (extScL != nullptr) ? extScL[i] : rawL;
+        float detR = (extScR != nullptr) ? extScR[i] : rawR;
         if (scHpfActive)
         {
             detL = mScHpfL.processSample (0, detL);
@@ -244,12 +243,12 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         scL[i] = detL;
         scR[i] = detR;
 
-        // Input meter (post-gain, post-sat - i.e. "what the limiter sees")
-        inPeakLin = juce::jmax (inPeakLin, std::abs (processedL), std::abs (processedR));
+        // Input meter (post-gain - what the limiter sees)
+        inPeakLin = juce::jmax (inPeakLin, std::abs (rawL), std::abs (rawR));
 
-        // Write UNFILTERED processed samples to delay line (main audio path)
-        mDelayL[(size_t) mWritePos] = processedL;
-        mDelayR[(size_t) mWritePos] = processedR;
+        // Write the post-gain (un-saturated) samples to the delay line.
+        mDelayL[(size_t) mWritePos] = rawL;
+        mDelayR[(size_t) mWritePos] = rawR;
         mWritePos = (mWritePos + 1) % writeDelaySize;
     }
 
@@ -359,6 +358,8 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
 
     const bool autoMakeupOn = mAutoMakeup;     // C4
     const bool linkOn       = mStereoLink;     // C5
+    const bool  susOn   = mSusCoef > 0.0f;     // SUSTAIN RMS-window hold
+    const float susCoef = mSusCoef;
 
     // Gain-computer helper: returns the gain to apply given an envelope value.
     auto computeGain = [] (float env, float ceilingLin) -> float
@@ -377,6 +378,13 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         const float ceilingDb  = mCeilingSmooth.getNextValue();
         const float ceilingLin = juce::Decibels::decibelsToGain (ceilingDb);
 
+        // SAT (post-limiter, FL-faithful): smoothers consumed here (not in the
+        // input loop) so the saturation colors the limited output and never
+        // touches the detector/GR.  drive = 0 when SatThresh == 1 (off).
+        const float satTh    = mSatThreshSmooth.getNextValue();
+        const float satCv    = mSatCurveSmooth .getNextValue();
+        const float satDrive = (1.0f - satTh) * 5.0f;
+
         // C4: Auto-makeup = -ceilingDb of post-limit boost so the output stays
         // hot when the user lowers the ceiling. Skipped when off.
         const float makeupLin = autoMakeupOn
@@ -387,7 +395,12 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         float gainL = 1.0f, gainR = 1.0f;
         if (linkOn)
         {
-            const float peak = mTpPeaks[(size_t) i];
+            float peak = mTpPeaks[(size_t) i];
+            if (susOn)   // SUSTAIN: hold via mean-square window (true-peak preserved by the max)
+            {
+                mMeanSqL = (1.0f - susCoef) * peak * peak + susCoef * mMeanSqL;
+                peak = juce::jmax (peak, std::sqrt (mMeanSqL));
+            }
             if (autoRel)
             {
                 mEnvFast = envStepFast (mEnvFast, peak);
@@ -409,8 +422,15 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         else
         {
             // Per-channel envelope + gain reduction.
-            const float peakL = mTpPeaksL[(size_t) i];
-            const float peakR = mTpPeaksR[(size_t) i];
+            float peakL = mTpPeaksL[(size_t) i];
+            float peakR = mTpPeaksR[(size_t) i];
+            if (susOn)   // SUSTAIN: per-channel mean-square hold
+            {
+                mMeanSqL = (1.0f - susCoef) * peakL * peakL + susCoef * mMeanSqL;
+                peakL = juce::jmax (peakL, std::sqrt (mMeanSqL));
+                mMeanSqR = (1.0f - susCoef) * peakR * peakR + susCoef * mMeanSqR;
+                peakR = juce::jmax (peakR, std::sqrt (mMeanSqR));
+            }
             if (autoRel)
             {
                 mEnvFast  = envStepFast (mEnvFast,  peakL);
@@ -442,8 +462,16 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         outL *= gainL * makeupLin;
         outR *= gainR * makeupLin;
 
-        // Hard ceiling safety clamp (applied AFTER makeup so auto-makeup can't
-        // push output above ceiling - limiter guarantee preserved).
+        // SAT: post-limiter saturation (FL final stage) -- colors the limited
+        // output.  Skipped when off (SatThresh == 1 -> drive 0).
+        if (satDrive > 0.0f)
+        {
+            outL = softSat (outL, satDrive, satCv);
+            outR = softSat (outR, satDrive, satCv);
+        }
+
+        // Hard ceiling safety clamp (LAST, so the ceiling guarantee holds even
+        // after saturation + makeup).
         outL = juce::jlimit (-ceilingLin, ceilingLin, outL);
         outR = juce::jlimit (-ceilingLin, ceilingLin, outR);
 
@@ -495,7 +523,7 @@ void LimiterDSP::setInputGainDb (float dB)
 
 void LimiterDSP::setCeilingDb (float dB)
 {
-    const float n = juce::jlimit (-24.0f, 0.0f, dB);
+    const float n = juce::jlimit (-24.0f, 12.0f, dB);
     if (n != mCeilingTargetDb)
     {
         mCeilingTargetDb = n;
@@ -576,6 +604,12 @@ void LimiterDSP::setReleaseCurve (float v01)
     if (n != mReleaseCurve) mReleaseCurve = n;
 }
 
+void LimiterDSP::setSustainMs (float ms)
+{
+    const float n = juce::jlimit (0.0f, 1000.0f, ms);
+    if (n != mSustainMs) { mSustainMs = n; recalcCoefs(); }
+}
+
 void LimiterDSP::setAutoRelease (bool on)
 {
     if (on != mAutoRelease) mAutoRelease = on;
@@ -595,6 +629,7 @@ void LimiterDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("releaseMs",    mReleaseMs,         nullptr);
     state.setProperty ("aheadMs",      mAheadMs,           nullptr);
     state.setProperty ("releaseCurve", mReleaseCurve,      nullptr);
+    state.setProperty ("sustainMs",    mSustainMs,         nullptr);
     state.setProperty ("autoRelease",  (int) mAutoRelease, nullptr);
     state.setProperty ("sidechainHPF", mSidechainHPF,      nullptr);   // C2
     state.setProperty ("autoMakeup",   (int) mAutoMakeup,  nullptr);   // C4
@@ -621,6 +656,7 @@ void LimiterDSP::setStateInformation (const void* data, int sz)
     mReleaseMs         = state.getProperty ("releaseMs",    mReleaseMs);
     mAheadMs           = state.getProperty ("aheadMs",      mAheadMs);
     mReleaseCurve      = state.getProperty ("releaseCurve", mReleaseCurve);
+    mSustainMs         = (float)(double) state.getProperty ("sustainMs", 0.0);   // default off (old presets)
     mAutoRelease       = ((int) state.getProperty ("autoRelease", 0)) != 0;
     mSidechainHPF      = (float)(double) state.getProperty ("sidechainHPF", 20.0);   // C2
     mAutoMakeup        = ((int) state.getProperty ("autoMakeup", 0)) != 0;           // C4
@@ -647,6 +683,7 @@ void LimiterDSP::setStateInformation (const void* data, int sz)
         mWritePos = 0;
         mEnv = mEnvFast = mEnvSlow = 0.0f;
         mEnvR = mEnvFastR = mEnvSlowR = 0.0f;
+        mMeanSqL = mMeanSqR = 0.0f;
         if (mOversampler) mOversampler->reset();
         std::fill (mTpPeaks .begin(), mTpPeaks .end(), 0.0f);
         std::fill (mTpPeaksL.begin(), mTpPeaksL.end(), 0.0f);

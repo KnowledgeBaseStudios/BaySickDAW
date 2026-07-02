@@ -1460,6 +1460,10 @@ void StandaloneEditor::buildDefaultTabs()
     {
         mPianoRollPage->setPlayHead    (&mPlayHead);
         mPianoRollPage->isSongMode     = [this] { return mProcessor.isSongMode(); };
+        // Live-note monitor: the page timer reads held hardware-MIDI notes from
+        // the processor each tick to light the active roll's keyboard.
+        mPianoRollPage->liveHeldNotesProvider = [this](uint64_t& lo, uint64_t& hi)
+        { mProcessor.getLiveHeldNotes (lo, hi); };
         // QA-Ee Stage 3: GLOBAL Piano Roll snap (Unified_PianoRollSnapDiv) read/write,
         // fanned into every roll + the drum kit so all share one snap.
         mPianoRollPage->setSnapAccessors (
@@ -1547,9 +1551,10 @@ void StandaloneEditor::buildDefaultTabs()
         mPianoRollPage->onEngineSelected = [this](EngineId id) {
             // C.3 (2026-04-30): push the focused engine into the processor as
             // the live MIDI input target.  Routing semantics in
-            // PluginProcessor::processBlock: only Layer (1) / Bass (2) /
-            // Drum (3) receive -- DrumKit grid (0) and Clip / Vox / Inst
-            // (4..6) drop incoming messages per Q3 spec.
+            // PluginProcessor::processBlock: Layer / Bass / Drum + the sfizz
+            // instruments Guitars / Basses / Rusty Drums receive; DrumKit grid,
+            // Clip, Vox, and live-input Inst drop (no MIDI-driven engine).  The
+            // enumeration above only surfaces the MIDI-driven kinds here.
             mProcessor.setLiveMidiTarget ((int) id.kind, id.index);
 
             // Refresh the menu-bar pill label on the next showPageForTab pass

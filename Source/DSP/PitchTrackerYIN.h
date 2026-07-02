@@ -29,23 +29,35 @@
 //   itself runs through a faster hop=256 PhaseVocoder (the pitch reading is
 //   slightly stale but the correction is sample-accurate within its hop).
 //
-// Range:
-//   kMinTau = 32  -> ~1378 Hz max (above F6 / two octaves above middle C)
-//   kMaxTau = 1000 -> ~44 Hz min  (below E1 / well below low bass guitar)
-//   At 44.1 kHz; scales with sample rate via prepare().
+// Range (at 44.1 kHz; scales with sample rate):
+//   kMaxFreqHz 4186 -> tauMin ~10 -> C8 top (global).
+//   Analysis window is PER-INSTANCE (mWindowSize): the 2048 default -> ~44 Hz
+//   min (Octave / Synth / PitchCorrector, unchanged); the tuner sets 4096 ->
+//   ~21.5 Hz min (covers 5-string bass low B ~31 Hz).  The window governs the
+//   real minimum.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PitchTrackerYIN
 {
 public:
-    static constexpr int   kWindowSize        = 2048;
-    static constexpr int   kHopSize           = 512;
+    // The analysis window/hop are PER-INSTANCE (mWindowSize/mHopSize +
+    // setAnalysisWindow) so the tuner can use a bigger window (bass range)
+    // WITHOUT changing the latency of the other consumers (Octave / Synth /
+    // PitchCorrector) that share this class and keep the 2048 default.
+    static constexpr int   kDefaultWindowSize = 2048;
+    static constexpr int   kDefaultHopSize    = 512;
+    static constexpr int   kMaxWindowSize     = 4096;    // the tuner's window; the ring is sized for this
     static constexpr float kYinThreshold      = 0.15f;   // CMNDF detection threshold
-    static constexpr float kMinFreqHz         = 40.0f;
-    static constexpr float kMaxFreqHz         = 1500.0f;
+    static constexpr float kMinFreqHz         = 20.0f;   // global floor; the per-instance window clamps the real min
+    static constexpr float kMaxFreqHz         = 4186.0f; // C8 (global; benign for the 2048 consumers)
 
     PitchTrackerYIN();
     ~PitchTrackerYIN();
+
+    // Set the analysis window + hop BEFORE prepare().  Larger window reaches
+    // lower frequencies (bass) at the cost of latency + worker CPU.  Default
+    // 2048/512; the tuner uses 4096/1024.  Clamped to kMaxWindowSize.
+    void setAnalysisWindow (int windowSize, int hopSize) noexcept;
 
     // Set sample rate + start the worker thread.  Idempotent - calling again
     // restarts the worker at the new rate.
@@ -80,7 +92,7 @@ private:
     // Sized to 4 * kWindowSize so a slow worker can't backpressure the
     // audio thread; oldest-data-overruns are visible as a momentary stale
     // pitch reading (worker just continues from current ring position).
-    static constexpr int kRingSize = kWindowSize * 4;
+    static constexpr int kRingSize = kMaxWindowSize * 4;
     juce::AbstractFifo  mFifo { kRingSize };
     std::vector<float>  mFifoBuf;
 
@@ -89,4 +101,6 @@ private:
     std::atomic<float>  mConfidence { 0.0f };
 
     double mSampleRate { 44100.0 };
+    int    mWindowSize { kDefaultWindowSize };   // per-instance analysis window (<= kMaxWindowSize)
+    int    mHopSize    { kDefaultHopSize };
 };

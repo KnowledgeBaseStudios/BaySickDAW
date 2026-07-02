@@ -18,6 +18,7 @@ DeEsserDSP::DeEsserDSP()
     mThresholdSmoothed.setCurrentAndTargetValue (mThresholdDb);
     mRangeSmoothed    .setCurrentAndTargetValue (mRangeDb);
     mMixSmoothed      .setCurrentAndTargetValue (mMix);
+    mModeSmoothed     .setCurrentAndTargetValue (mModeBlend / 100.0f);
 
     calcCoefs();
 }
@@ -34,7 +35,7 @@ void DeEsserDSP::prepare (double sampleRate, int maxBlockSize)
     mAudHpfL.prepare (spec); mAudHpfR.prepare (spec);
     mAudLpfL.prepare (spec); mAudLpfR.prepare (spec);
 
-    // Lookahead buffers sized to max possible (5 ms) + 1 sample for safe wrap.
+    // Lookahead buffers sized to max possible (kMaxLookaheadMs) + 1 sample for safe wrap.
     const int maxLASamples = static_cast<int> (std::ceil (kMaxLookaheadMs * 0.001 * sampleRate)) + 1;
     mLookaheadL.assign ((size_t) maxLASamples, 0.0f);
     mLookaheadR.assign ((size_t) maxLASamples, 0.0f);
@@ -50,9 +51,22 @@ void DeEsserDSP::prepare (double sampleRate, int maxBlockSize)
     mThresholdSmoothed.reset (sampleRate, rampSecs);
     mRangeSmoothed    .reset (sampleRate, rampSecs);
     mMixSmoothed      .reset (sampleRate, rampSecs);
+    mModeSmoothed     .reset (sampleRate, rampSecs);
     mThresholdSmoothed.setCurrentAndTargetValue (mThresholdDb);
     mRangeSmoothed    .setCurrentAndTargetValue (mRangeDb);
     mMixSmoothed      .setCurrentAndTargetValue (mMix);
+    mModeSmoothed     .setCurrentAndTargetValue (mModeBlend / 100.0f);
+
+    mSpectral.prepare (sampleRate, maxBlockSize);
+    // Spectral-path rings sized for the max (HQ) latency (one 2048 frame) + one block.
+    const int spRingSize = 2048 + juce::jmax (1, maxBlockSize) + 64;
+    mSpDryL .assign ((size_t) spRingSize, 0.0f);
+    mSpDryR .assign ((size_t) spRingSize, 0.0f);
+    mSpOther.assign ((size_t) spRingSize, 0.0f);
+    mSpAxis .assign ((size_t) juce::jmax (1, maxBlockSize), 0.0f);
+    mSpRingPos = 0;
+    mSpLastLat = -1;
+    mSpectralPrimed = false;
 
     calcCoefs();
     updateScCoefs();
@@ -70,6 +84,15 @@ void DeEsserDSP::reset()
     mScHpfL.reset();  mScHpfR.reset();
     mAudHpfL.reset(); mAudHpfR.reset();
     mAudLpfL.reset(); mAudLpfR.reset();
+    mSpectral.reset();
+    if (! mSpDryL.empty())
+    {
+        std::fill (mSpDryL .begin(), mSpDryL .end(), 0.0f);
+        std::fill (mSpDryR .begin(), mSpDryR .end(), 0.0f);
+        std::fill (mSpOther.begin(), mSpOther.end(), 0.0f);
+    }
+    mSpRingPos = 0;
+    mSpectralPrimed = false;
 }
 
 void DeEsserDSP::calcCoefs()
@@ -88,20 +111,26 @@ void DeEsserDSP::updateScCoefs()
     mScHpfL.setCutoffFrequency (fc); mScHpfL.setResonance (q);
     mScHpfR.setCutoffFrequency (fc); mScHpfR.setResonance (q);
 
-    // Linkwitz-Riley-ish split: HPF + LPF at same fc, Q=0.7071 each.
-    mAudHpfL.setCutoffFrequency (fc); mAudHpfL.setResonance (0.7071f);
-    mAudHpfR.setCutoffFrequency (fc); mAudHpfR.setResonance (0.7071f);
-    mAudLpfL.setCutoffFrequency (fc); mAudLpfL.setResonance (0.7071f);
-    mAudLpfR.setCutoffFrequency (fc); mAudLpfR.setResonance (0.7071f);
+    // Linkwitz-Riley-ish split, FIXED at 4 kHz (the reference hardcodes its
+    // Split point; the user's Freq only moves the detector HPF above).
+    constexpr float kSplitHz = 4000.0f;
+    mAudHpfL.setCutoffFrequency (kSplitHz); mAudHpfL.setResonance (0.7071f);
+    mAudHpfR.setCutoffFrequency (kSplitHz); mAudHpfR.setResonance (0.7071f);
+    mAudLpfL.setCutoffFrequency (kSplitHz); mAudLpfL.setResonance (0.7071f);
+    mAudLpfR.setCutoffFrequency (kSplitHz); mAudLpfR.setResonance (0.7071f);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Setters
 // ─────────────────────────────────────────────────────────────────────────────
-void DeEsserDSP::setMode (int m)
+void DeEsserDSP::setModeBlend (float v)
 {
-    const Mode nm = static_cast<Mode> (juce::jlimit (0, 1, m));
-    if (nm != mMode) mMode = nm;
+    const float vv = juce::jlimit (0.0f, 100.0f, v);
+    if (vv != mModeBlend)
+    {
+        mModeBlend = vv;
+        mModeSmoothed.setTargetValue (vv / 100.0f);
+    }
 }
 
 void DeEsserDSP::setMsMode (int m)
@@ -124,13 +153,13 @@ void DeEsserDSP::setQ (float q)
 
 void DeEsserDSP::setThresholdDb (float dB)
 {
-    const float v = juce::jlimit (-40.0f, 0.0f, dB);
+    const float v = juce::jlimit (-80.0f, 0.0f, dB);
     if (v != mThresholdDb) { mThresholdDb = v; mThresholdSmoothed.setTargetValue (v); }
 }
 
 void DeEsserDSP::setRangeDb (float dB)
 {
-    const float v = juce::jlimit (-20.0f, 0.0f, dB);
+    const float v = juce::jlimit (-48.0f, 0.0f, dB);
     if (v != mRangeDb) { mRangeDb = v; mRangeSmoothed.setTargetValue (v); }
 }
 
@@ -164,6 +193,22 @@ void DeEsserDSP::setMix (float v)
 
 void DeEsserDSP::setListen (bool on) { mListen = on; }
 
+void DeEsserDSP::setEngine (int e)
+{
+    const Engine ne = static_cast<Engine> (juce::jlimit (0, 1, e));
+    if (ne != mEngine) mEngine = ne;   // path swap + state priming happen at block rate
+}
+
+void DeEsserDSP::setSpectralQuality (int q)
+{
+    const int v = juce::jlimit (0, 1, q);
+    if (v != mSpectralQuality)
+    {
+        mSpectralQuality = v;
+        mSpectral.setQuality (v);      // applied on the audio thread next block
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // process()
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,6 +221,13 @@ void DeEsserDSP::process (juce::AudioBuffer<float>& buffer)
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
     if (numSamples == 0 || numChannels == 0) return;
+
+    if (mEngine == Engine::Spectral)
+    {
+        processSpectral (buffer);
+        return;
+    }
+    mSpectralPrimed = false;   // spectral state re-primes fresh on next activation
 
     float* outL = buffer.getWritePointer (0);
     float* outR = (numChannels > 1) ? buffer.getWritePointer (1) : nullptr;
@@ -260,71 +312,71 @@ void DeEsserDSP::process (juce::AudioBuffer<float>& buffer)
             mLAWritePos = (mLAWritePos + 1) % laSize;
         }
 
-        // ── Listen mode: monitor the sidechain HPF output, skip de-essing ──
+        // ── Apply GR: continuous Wide<->Split blend on the DELAYED audio ────
+        // Wide = full-band duck; Split = only the fixed-4 kHz high band ducks.
+        // M/S extracts the axis from the delayed signal and recomposes with the
+        // untouched component (detector above already ran on the chosen axis).
+        const float blend = mModeSmoothed.getNextValue();   // 0=Wide .. 1=Split
+        float wetL, wetR;
+        float monL = 0.0f, monR = 0.0f;   // Listen: the removed component
+
+        if (mMsMode == MsMode::Stereo)
+        {
+            const float lowL   = mAudLpfL.processSample (0, audioL);
+            const float highL  = mAudHpfL.processSample (0, audioL);
+            const float wideL  = audioL * grLin;
+            const float splitL = lowL + highL * grLin;
+            wetL = wideL + (splitL - wideL) * blend;
+            monL = (1.0f - grLin) * (audioL + (highL - audioL) * blend);
+
+            if (isStereo)
+            {
+                const float lowR   = mAudLpfR.processSample (0, audioR);
+                const float highR  = mAudHpfR.processSample (0, audioR);
+                const float wideR  = audioR * grLin;
+                const float splitR = lowR + highR * grLin;
+                wetR = wideR + (splitR - wideR) * blend;
+                monR = (1.0f - grLin) * (audioR + (highR - audioR) * blend);
+            }
+            else { wetR = wetL; monR = monL; }
+        }
+        else
+        {
+            const float procIn = (mMsMode == MsMode::MidOnly)
+                               ? (audioL + audioR) * 0.5f
+                               : (audioL - audioR) * 0.5f;
+            const float other  = (mMsMode == MsMode::MidOnly)
+                               ? (audioL - audioR) * 0.5f
+                               : (audioL + audioR) * 0.5f;
+
+            const float lowP   = mAudLpfL.processSample (0, procIn);
+            const float highP  = mAudHpfL.processSample (0, procIn);
+            const float wideP  = procIn * grLin;
+            const float splitP = lowP + highP * grLin;
+            // Keep the R filter pair fed so its state stays valid across a
+            // later switch back to Stereo (output unused).
+            mAudLpfR.processSample (0, procIn);
+            mAudHpfR.processSample (0, procIn);
+
+            const float wetP = wideP + (splitP - wideP) * blend;
+            // Removed component of the processed axis only -- the untouched
+            // axis contributes nothing to the monitor.
+            const float monP = (1.0f - grLin) * (procIn + (highP - procIn) * blend);
+
+            if (mMsMode == MsMode::MidOnly) { wetL = wetP + other;  wetR = wetP - other;  monL = monP;  monR = monP;  }
+            else                            { wetL = other + wetP;  wetR = other - wetP;  monL = monP;  monR = -monP; }
+        }
+
+        // ── Listen (reference Monitor): solo the removed component ─────────
+        // Computed from the gain reduction directly ((1-gr) x the ducked
+        // band), NOT dry-minus-wet: the split filters rotate phase, so plain
+        // subtraction leaks the whole program even at zero GR.  Silent when
+        // nothing is detected.
         if (mListen)
         {
-            outL[i] = scL;
-            if (outR) outR[i] = scR;
+            outL[i] = monL;
+            if (outR) outR[i] = monR;
             continue;
-        }
-
-        // ── Apply GR per Mode ───────────────────────────────────────────────
-        float wetL = audioL;
-        float wetR = audioR;
-
-        if (mMode == Mode::Wide)
-        {
-            // Full-band ducking when sibilance triggers.
-            wetL = audioL * grLin;
-            wetR = audioR * grLin;
-        }
-        else // Mode::Split
-        {
-            // Split into two bands at the sidechain crossover; only high band
-            // gets ducked, low band passes unchanged.  Sum the two bands at
-            // the output.  Applied to the M/S axis via dL/dR substitution
-            // when MsMode != Stereo so the duck respects the user's M/S pick.
-            const float bandSrcL = (mMsMode == MsMode::Stereo) ? audioL : dL;
-            const float bandSrcR = (mMsMode == MsMode::Stereo) ? audioR : dR;
-            const float lowL  = mAudLpfL.processSample (0, bandSrcL);
-            const float lowR  = isStereo ? mAudLpfR.processSample (0, bandSrcR) : lowL;
-            const float highL = mAudHpfL.processSample (0, bandSrcL);
-            const float highR = isStereo ? mAudHpfR.processSample (0, bandSrcR) : highL;
-            wetL = lowL + highL * grLin;
-            wetR = lowR + highR * grLin;
-
-            // For M/S mode, decode back to stereo from the processed mid/side.
-            if (mMsMode == MsMode::MidOnly)
-            {
-                // dL,dR carried mid; original side is preserved.  Recompose:
-                const float origSide = (drySrcL - drySrcR) * 0.5f;
-                wetL = wetL + origSide;
-                wetR = wetR - origSide;
-            }
-            else if (mMsMode == MsMode::SideOnly)
-            {
-                const float origMid = (drySrcL + drySrcR) * 0.5f;
-                wetL =  origMid + wetL;
-                wetR =  origMid - wetR;
-            }
-        }
-
-        // ── Wide-mode M/S decode (parallel to the Split-mode block above) ──
-        if (mMode == Mode::Wide && mMsMode != MsMode::Stereo)
-        {
-            const float origMid  = (drySrcL + drySrcR) * 0.5f;
-            const float origSide = (drySrcL - drySrcR) * 0.5f;
-            if (mMsMode == MsMode::MidOnly)
-            {
-                // wetL == wetR == ducked mid.  Side is original.
-                wetL = wetL + origSide;
-                wetR = wetR - origSide;
-            }
-            else // SideOnly
-            {
-                wetL = origMid + wetL;
-                wetR = origMid - wetR;
-            }
         }
 
         // ── Wet/dry mix ─────────────────────────────────────────────────────
@@ -340,12 +392,138 @@ void DeEsserDSP::process (juce::AudioBuffer<float>& buffer)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// processSpectral - Engine::Spectral block path
+// ─────────────────────────────────────────────────────────────────────────────
+void DeEsserDSP::processSpectral (juce::AudioBuffer<float>& buffer)
+{
+    const int n   = buffer.getNumSamples();
+    const int nCh = buffer.getNumChannels();
+    float* L = buffer.getWritePointer (0);
+    float* R = (nCh > 1) ? buffer.getWritePointer (1) : nullptr;
+    const bool isStereo = (R != nullptr);
+
+    const int ringSize = (int) mSpDryL.size();
+    if (ringSize == 0 || (int) mSpAxis.size() < n) return;   // prepare not run / oversize block
+
+    // Pending == active after the first process() call this block, so this
+    // latency is the one the delivered audio actually has.
+    const int lat = mSpectral.getLatencySamples();
+
+    // Fresh activation or quality swap: the rings hold audio delayed at the
+    // OLD latency -- re-zero so the recompose/mix stays aligned.
+    if (! mSpectralPrimed || lat != mSpLastLat)
+    {
+        if (! mSpectralPrimed) mSpectral.reset();
+        std::fill (mSpDryL .begin(), mSpDryL .end(), 0.0f);
+        std::fill (mSpDryR .begin(), mSpDryR .end(), 0.0f);
+        std::fill (mSpOther.begin(), mSpOther.end(), 0.0f);
+        mSpRingPos      = 0;
+        mSpLastLat      = lat;
+        mSpectralPrimed = true;
+    }
+
+    // Keep the time-path smoothers current so switching engines back resumes
+    // without a jump (spectral consumes the raw params at frame rate instead).
+    mThresholdSmoothed.skip (n);
+    mRangeSmoothed    .skip (n);
+    mModeSmoothed     .skip (n);
+
+    SibilanceSpectralProcessor::Params p;
+    p.detectLoHz    = mFreqHz;
+    p.thresholdDb   = mThresholdDb;
+    p.rangeDb       = mRangeDb;
+    p.blend01       = mModeBlend * 0.01f;
+    p.attackMs      = mAttackMs;
+    p.releaseMs     = mReleaseMs;
+    p.outputRemoved = mListen;
+
+    // Push dry (and the untouched M/S axis) into the latency rings BEFORE the
+    // STFT transforms the buffer in place.
+    const int base = mSpRingPos;
+    for (int i = 0; i < n; ++i)
+    {
+        const int w = (base + i) % ringSize;
+        mSpDryL[(size_t) w] = L[i];
+        if (isStereo) mSpDryR[(size_t) w] = R[i];
+    }
+    mSpRingPos = (base + n) % ringSize;
+
+    if (mMsMode == MsMode::Stereo)
+    {
+        mSpectral.process (L, isStereo ? R : nullptr, n, p);
+    }
+    else
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const float sl   = L[i];
+            const float sr   = isStereo ? R[i] : sl;
+            const float mid  = (sl + sr) * 0.5f;
+            const float side = (sl - sr) * 0.5f;
+            mSpAxis[(size_t) i] = (mMsMode == MsMode::MidOnly) ? mid : side;
+            mSpOther[(size_t) ((base + i) % ringSize)] =
+                (mMsMode == MsMode::MidOnly) ? side : mid;
+        }
+        mSpectral.process (mSpAxis.data(), nullptr, n, p);
+    }
+
+    for (int i = 0; i < n; ++i)
+    {
+        const int rd = (base + i - lat + 2 * ringSize) % ringSize;
+        const float dryL   = mSpDryL[(size_t) rd];
+        const float dryR   = isStereo ? mSpDryR[(size_t) rd] : dryL;
+        const float curMix = mMixSmoothed.getNextValue();
+
+        float wetL, wetR;
+        if (mMsMode == MsMode::Stereo)
+        {
+            wetL = L[i];
+            wetR = isStereo ? R[i] : wetL;
+        }
+        else
+        {
+            const float axis  = mSpAxis[(size_t) i];               // delayed processed axis
+            const float other = mSpOther[(size_t) rd];             // delayed untouched axis
+            if (mListen)
+            {
+                // Monitor: removed component of the axis only (other adds 0).
+                wetL = axis;
+                wetR = (mMsMode == MsMode::MidOnly) ? axis : -axis;
+            }
+            else if (mMsMode == MsMode::MidOnly) { wetL = axis + other;  wetR = axis - other; }
+            else                                 { wetL = other + axis;  wetR = other - axis; }
+        }
+
+        if (mListen)
+        {
+            // Monitor bypasses the Mix blend (matches the time path).
+            L[i] = wetL;
+            if (isStereo) R[i] = wetR;
+        }
+        else
+        {
+            L[i] = dryL + curMix * (wetL - dryL);
+            if (isStereo) R[i] = dryR + curMix * (wetR - dryR);
+        }
+    }
+
+    // GR meter: same peak-hold + decay publish as the time path.
+    const float grNow  = mSpectral.getLastReductionDb();
+    const float lastGr = mGainReductionDb.load (std::memory_order_relaxed);
+    float newGr = juce::jmin (lastGr, grNow);
+    newGr = juce::jmin (0.0f, newGr + mGrDecayDbPerBlock);
+    mGainReductionDb.store (newGr, std::memory_order_relaxed);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Serialization
 // ─────────────────────────────────────────────────────────────────────────────
 void DeEsserDSP::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::ValueTree state ("DeEsserDSP");
-    state.setProperty ("mode",        (int) mMode,        nullptr);
+    state.setProperty ("modeBlend",   mModeBlend,         nullptr);
+    state.setProperty ("engine",      (int) mEngine,      nullptr);
+    state.setProperty ("spQuality",   mSpectralQuality,   nullptr);
     state.setProperty ("msMode",      (int) mMsMode,      nullptr);
     state.setProperty ("freqHz",      mFreqHz,            nullptr);
     state.setProperty ("q",           mQ,                 nullptr);
@@ -368,17 +546,27 @@ void DeEsserDSP::setStateInformation (const void* data, int sz)
     if (! xml || ! xml->hasTagName ("DeEsserDSP")) return;
 
     juce::ValueTree state = juce::ValueTree::fromXml (*xml);
-    mMode        = static_cast<Mode> (juce::jlimit (0, 1,
-                       (int) state.getProperty ("mode", 0)));
+    // Legacy migration: pre-Task-8 states stored an int "mode" (0=Wide,
+    // 1=Split); map to the blend endpoints so old projects keep their sound.
+    if (state.hasProperty ("modeBlend"))
+        mModeBlend = juce::jlimit (0.0f, 100.0f,
+                       (float)(double) state.getProperty ("modeBlend", 50.0));
+    else
+        mModeBlend = ((int) state.getProperty ("mode", 0) != 0) ? 100.0f : 0.0f;
+    setEngine          ((int) state.getProperty ("engine",    0));
+    setSpectralQuality ((int) state.getProperty ("spQuality", 0));
     mMsMode      = static_cast<MsMode> (juce::jlimit (0, 2,
                        (int) state.getProperty ("msMode", 0)));
     mFreqHz      = (float)(double) state.getProperty ("freqHz",      6500.0);
     mQ           = (float)(double) state.getProperty ("q",           1.4);
-    mThresholdDb = (float)(double) state.getProperty ("thresholdDb", -24.0);
-    mRangeDb     = (float)(double) state.getProperty ("rangeDb",     -12.0);
+    mThresholdDb = juce::jlimit (-80.0f, 0.0f,
+                       (float)(double) state.getProperty ("thresholdDb", -12.5));
+    mRangeDb     = juce::jlimit (-48.0f, 0.0f,
+                       (float)(double) state.getProperty ("rangeDb",     -14.0));
     mAttackMs    = (float)(double) state.getProperty ("attackMs",    1.0);
     mReleaseMs   = (float)(double) state.getProperty ("releaseMs",   80.0);
-    mLookaheadMs = (float)(double) state.getProperty ("lookaheadMs", 0.0);
+    mLookaheadMs = juce::jlimit (0.0f, kMaxLookaheadMs,
+                       (float)(double) state.getProperty ("lookaheadMs", 0.0));
     mMix         = (float)(double) state.getProperty ("mix",         1.0);
     mListen      = ((int) state.getProperty ("listen",   0)) != 0;
     bypassed     = ((int) state.getProperty ("bypassed", 0)) != 0;
@@ -392,4 +580,5 @@ void DeEsserDSP::setStateInformation (const void* data, int sz)
     mThresholdSmoothed.setCurrentAndTargetValue (mThresholdDb);
     mRangeSmoothed    .setCurrentAndTargetValue (mRangeDb);
     mMixSmoothed      .setCurrentAndTargetValue (mMix);
+    mModeSmoothed     .setCurrentAndTargetValue (mModeBlend / 100.0f);
 }

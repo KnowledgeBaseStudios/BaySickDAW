@@ -40,6 +40,17 @@ void PianoRollPage::resized()
 
 void PianoRollPage::timerCallback()
 {
+    // Live-note monitor: push the processor's held hardware-MIDI notes to the
+    // active roll's keyboard so live-played keys light up.  Runs before the
+    // playhead early-return below so it works even with no playhead attached.
+    if (liveHeldNotesProvider)
+        if (auto* roll = getActivePianoRoll())
+        {
+            uint64_t lo = 0, hi = 0;
+            liveHeldNotesProvider (lo, hi);
+            roll->setLiveHeldNotes (lo, hi);
+        }
+
     if (mPlayHead == nullptr) return;
     const bool song = (isSongMode && isSongMode());
     const double beat = song ? -1.0 : mPlayHead->getCurrentBeat();

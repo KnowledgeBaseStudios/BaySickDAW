@@ -860,7 +860,10 @@ struct CompressorPanel : public EditorPanelBase,
         knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setAttack      ((float)knobs[4]->slider.getValue()); };
         knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setRelease     ((float)knobs[5]->slider.getValue()); };
         knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setMix         ((float)knobs[6]->slider.getValue()); };
-        knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setLookaheadMs ((float)knobs[7]->slider.getValue()); };
+        knobs[7]->slider.onValueChange = [dsp,this]{
+            dsp->setLookaheadMs ((float)knobs[7]->slider.getValue());
+            if (onLatencyChanged) onLatencyChanged();   // lookahead changes getLatencySamples -> refresh PDC
+        };
         knobs[8]->slider.onValueChange = [dsp,this]{ dsp->setDetectionMs ((float)knobs[8]->slider.getValue()); };
         knobs[9]->slider.onValueChange = [dsp,this]{ dsp->setSidechainHPF((float)knobs[9]->slider.getValue()); };
 
@@ -2599,6 +2602,12 @@ struct TransientShaperPanel : public EditorPanelBase
         return v;
     }
 
+    // Basic = the FL Transient Processor's controls (Attack / Release / Attack-
+    // Shape / Release-Shape / Split / Wet (= FL Split Balance) / Gain / Drive).
+    // Advanced = our additions (Balance / Sensitivity / FastRelease / SlowAttack
+    // / Oversampling / Stereo-detect).
+    bool hasAdvancedControls() const override { return true; }
+
     explicit TransientShaperPanel(TransientShaperDSP* dsp)
     {
         setLookAndFeel(&DynamicsLAF::get());
@@ -2606,7 +2615,7 @@ struct TransientShaperPanel : public EditorPanelBase
 
         // Row 1: primary shaping controls (unchanged 7 knobs)
         buildKnobs(*this, r1knobs, {
-            { "Attack",  -100.f, 100.f,  50.f, 1.f,  "Attack shaping (-100=reduce, +100=enhance)" },
+            { "Attack",  -100.f, 100.f,   0.f, 1.f,  "Attack shaping (-100=reduce, 0=neutral, +100=enhance)" },
             { "Release", -100.f, 100.f,   0.f, 1.f,  "Release shaping (-100=shorten, +100=extend)" },
             { "Sens",      0.f,   1.f,   0.5f, 0.01f,"Detection sensitivity" },
             { "Split",     5.f, 1000.f, 260.f, 5.f,  "Band-split frequency (Hz)" },
@@ -2692,7 +2701,7 @@ struct TransientShaperPanel : public EditorPanelBase
         // onValueChange lambdas, which call the DSP setters with the clamped slider value).
         // Attack/Release: setter takes -100..100, DSP stores -1..1; scale by 100.
         r1knobs[0]->slider.setValue(dsp->mAttack * 100.0f,  juce::sendNotificationSync);
-        r1knobs[1]->slider.setValue(dsp->mSustain * 100.0f, juce::sendNotificationSync);
+        r1knobs[1]->slider.setValue(dsp->mRelease * 100.0f, juce::sendNotificationSync);
         r1knobs[2]->slider.setValue(dsp->mSensitivity,      juce::sendNotificationSync);
         r1knobs[3]->slider.setValue(dsp->mSplitFreq,        juce::sendNotificationSync);
         r1knobs[4]->slider.setValue(dsp->mSplitBalance,     juce::sendNotificationSync);
@@ -2719,23 +2728,55 @@ struct TransientShaperPanel : public EditorPanelBase
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
         b.removeFromRight(4);
 
-        auto r1 = b.removeFromTop(b.getHeight() / 2);
-        auto r2 = b;
+        // Advanced-only: Sens (r1[2]), Balance (r1[4]), FastRel (r2[1]),
+        // SlowAtt (r2[2]) + Oversampling + Stereo-detect.  Basic = the FL
+        // controls (Attack/Release/Split/Drive/Gain/Wet + the 2 Shape selectors).
+        const bool adv = ! mBasicMode;
+        if (r1knobs.size() > 4 && r1knobs[2]) r1knobs[2]->setVisible (adv);   // Sens
+        if (r1knobs.size() > 4 && r1knobs[4]) r1knobs[4]->setVisible (adv);   // Balance
+        if (r2knobs.size() > 2 && r2knobs[1]) r2knobs[1]->setVisible (adv);   // FastRel
+        if (r2knobs.size() > 2 && r2knobs[2]) r2knobs[2]->setVisible (adv);   // SlowAtt
+        if (osSel) osSel->setVisible (adv);
+        if (stereoDetectTog) stereoDetectTog->setVisible (adv);
 
-        // Row 1 right: AttackShape + ReleaseShape chicken-heads (visual order: Attack | Release, right-to-left in removeFromRight)
-        int r1sz = juce::jmin(r1.getHeight(), kKnobSz);
-        auto rSlot = r1.removeFromRight(r1sz); r1.removeFromRight(4);
-        if (releaseShapeSel) releaseShapeSel->setBounds(rSlot.reduced(2));
-        auto aSlot = r1.removeFromRight(r1sz); r1.removeFromRight(4);
-        if (attackShapeSel)  attackShapeSel->setBounds(aSlot.reduced(2));
-        layoutKnobsH(r1, r1knobs);
+        if (adv)
+        {
+            auto r1 = b.removeFromTop(b.getHeight() / 2);
+            auto r2 = b;
 
-        // Row 2 right: OS chicken-head + StereoDetect toggle (visual order: StereoDet | OS, right-to-left)
-        auto osSlot = r2.removeFromRight(60); r2.removeFromRight(4);
-        if (osSel) osSel->setBounds(osSlot.reduced(2));
-        auto sdSlot = r2.removeFromRight(74); r2.removeFromRight(4);
-        if (stereoDetectTog) stereoDetectTog->setBounds(sdSlot.reduced(1));
-        layoutKnobsH(r2, r2knobs);
+            // Row 1 right: AttackShape + ReleaseShape chicken-heads.
+            int r1sz = juce::jmin(r1.getHeight(), kKnobSz);
+            auto rSlot = r1.removeFromRight(r1sz); r1.removeFromRight(4);
+            if (releaseShapeSel) releaseShapeSel->setBounds(rSlot.reduced(2));
+            auto aSlot = r1.removeFromRight(r1sz); r1.removeFromRight(4);
+            if (attackShapeSel)  attackShapeSel->setBounds(aSlot.reduced(2));
+            layoutKnobsH(r1, r1knobs);   // all 7 (Attack/Release/Sens/Split/Balance/Drive/Gain)
+
+            // Row 2 right: OS + StereoDetect.
+            auto osSlot = r2.removeFromRight(60); r2.removeFromRight(4);
+            if (osSel) osSel->setBounds(osSlot.reduced(2));
+            auto sdSlot = r2.removeFromRight(74); r2.removeFromRight(4);
+            if (stereoDetectTog) stereoDetectTog->setBounds(sdSlot.reduced(1));
+            layoutKnobsH(r2, r2knobs);   // Wet/FastRel/SlowAtt
+        }
+        else
+        {
+            // Basic single row: Attack/Release/Split/Drive/Gain/Wet + Shape selectors.
+            int shSz = juce::jmin(b.getHeight(), kKnobSz + 10);
+            auto rSlot = b.removeFromRight(shSz); b.removeFromRight(4);
+            if (releaseShapeSel) releaseShapeSel->setBounds(rSlot.withSizeKeepingCentre(shSz, juce::jmin(b.getHeight(), 58)));
+            auto aSlot = b.removeFromRight(shSz); b.removeFromRight(4);
+            if (attackShapeSel)  attackShapeSel->setBounds(aSlot.withSizeKeepingCentre(shSz, juce::jmin(b.getHeight(), 58)));
+
+            std::vector<VKnob*> basic;
+            if (r1knobs[0]) basic.push_back(r1knobs[0].get());   // Attack
+            if (r1knobs[1]) basic.push_back(r1knobs[1].get());   // Release
+            if (r1knobs[3]) basic.push_back(r1knobs[3].get());   // Split
+            if (r1knobs[5]) basic.push_back(r1knobs[5].get());   // Drive
+            if (r1knobs[6]) basic.push_back(r1knobs[6].get());   // Gain
+            if (r2knobs[0]) basic.push_back(r2knobs[0].get());   // Wet
+            layoutKnobsH(b, basic);
+        }
     }
 
     void paint(juce::Graphics& g) override
@@ -3143,7 +3184,13 @@ struct LimiterPanel : public EditorPanelBase,
     std::unique_ptr<DualLabelToggle>    autoMuTog;    // C4
     std::unique_ptr<DualLabelToggle>    linkTog;      // C5
     std::unique_ptr<GRMeter>            grMeter;
+    std::unique_ptr<VKnob>              sustainKnob;  // Fruity SUSTAIN (Basic)
     LimiterDSP*                         mDsp { nullptr };
+
+    // Basic = the real Fruity Limiter controls (GAIN / Ceiling / SAT-thresh /
+    // Attack / Release / Sustain + GR meter).  Advanced = our additions
+    // (SatCurve / Ahead / RelCurve / SC-HPF + Auto-release / Auto-makeup / Link).
+    bool hasAdvancedControls() const override { return true; }
 
     void disableGrMeter() override
     {
@@ -3155,6 +3202,7 @@ struct LimiterPanel : public EditorPanelBase,
         std::vector<VKnob*> v;
         for (auto& k : r1knobs) if (k) v.push_back(k.get());
         for (auto& k : r2knobs) if (k) v.push_back(k.get());
+        if (sustainKnob) v.push_back(sustainKnob.get());
         return v;
     }
 
@@ -3166,7 +3214,7 @@ struct LimiterPanel : public EditorPanelBase,
 
         buildKnobs (*this, r1knobs, {
             { "InGain", -12.f,   24.f,   0.f,  0.1f,  "Input gain (dB)" },
-            { "Ceil",   -24.f,    0.f,  -0.3f, 0.1f,  "Output ceiling (dB)" },
+            { "Ceil",   -24.f,   12.f,  -0.3f, 0.1f,  "Output ceiling (dB; +12 = headroom / no limiting)" },
             { "SatTh",    0.f,    1.f,   1.0f, 0.01f, "Soft-sat threshold (1 = off)" },
             { "SatCv",    0.f,    1.f,   0.5f, 0.01f, "Soft-sat knee curve" },
             { "SCHPF",   20.f, 2000.f,  20.f,  1.f,   "Sidechain HPF cutoff (Hz) - 20 = off. Raise to stop bass from pumping the limiter" },
@@ -3229,6 +3277,15 @@ struct LimiterPanel : public EditorPanelBase,
         grMeter = std::make_unique<GRMeter>();
         addAndMakeVisible (*grMeter);
 
+        // Fruity SUSTAIN: RMS-window hold (0-1000 ms; 0 = off).  Basic-tier.
+        sustainKnob = std::make_unique<VKnob>("Sustain", 0.0f,
+            "Sustain (ms) - RMS window that holds the limiter's gain reduction so it releases over the window instead of early. 0 = off");
+        sustainKnob->slider.setRange (0.0, 1000.0, 1.0);
+        sustainKnob->slider.setValue (dsp->getSustainMs(), juce::dontSendNotification);
+        sustainKnob->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
+        sustainKnob->slider.onValueChange = [dsp,this]{ if (dsp) dsp->setSustainMs ((float) sustainKnob->slider.getValue()); };
+        addAndMakeVisible (*sustainKnob);
+
         startTimerHz (30);
     }
 
@@ -3267,30 +3324,53 @@ struct LimiterPanel : public EditorPanelBase,
         outputVolKnob->setBounds (b.removeFromRight (kKnobSz).withSizeKeepingCentre (kKnobSz, kKnobSz));
         b.removeFromRight (4);
 
-        // Toggle layout: Auto MU as its own column LEFT of the Auto Release + Link
-        // stack (same-size toggles, no overlap). Reserve two columns from the
-        // right BEFORE splitting knob rows so both knob rows don't steal space.
-        constexpr int kToggleColW = 62;
-        auto togArea = b.removeFromRight (kToggleColW * 2 + 2);
-        b.removeFromRight (2);
+        // Advanced-only: SatCurve (r1[3]) + SC-HPF (r1[4]) + Ahead (r2[2]) +
+        // RelCurve (r2[3]) + the 3 toggles.  Basic = the real Fruity controls
+        // (GAIN / Ceiling / SAT / Attack / Release / Sustain) + the GR meter.
+        const bool adv = ! mBasicMode;
+        if (r1knobs.size() > 4 && r1knobs[3]) r1knobs[3]->setVisible (adv);   // SatCv
+        if (r1knobs.size() > 4 && r1knobs[4]) r1knobs[4]->setVisible (adv);   // SCHPF
+        if (r2knobs.size() > 3 && r2knobs[2]) r2knobs[2]->setVisible (adv);   // Ahead
+        if (r2knobs.size() > 3 && r2knobs[3]) r2knobs[3]->setVisible (adv);   // RelCv
+        if (autoRelTog) autoRelTog->setVisible (adv);
+        if (autoMuTog)  autoMuTog ->setVisible (adv);
+        if (linkTog)    linkTog   ->setVisible (adv);
 
-        // Right column: Auto Release (top half) + Link (bottom half), stacked.
-        auto rightCol = togArea.removeFromRight (kToggleColW);
-        const int halfH = rightCol.getHeight() / 2;
-        auto autoRelSlot = rightCol.removeFromTop (halfH);
-        if (autoRelTog) autoRelTog->setBounds (autoRelSlot.reduced (1));
-        if (linkTog)    linkTog   ->setBounds (rightCol .reduced (1));
+        if (adv)
+        {
+            // Toggle layout: Auto MU column LEFT of the Auto Release + Link stack.
+            constexpr int kToggleColW = 62;
+            auto togArea = b.removeFromRight (kToggleColW * 2 + 2);
+            b.removeFromRight (2);
+            auto rightCol = togArea.removeFromRight (kToggleColW);
+            const int halfH = rightCol.getHeight() / 2;
+            auto autoRelSlot = rightCol.removeFromTop (halfH);
+            if (autoRelTog) autoRelTog->setBounds (autoRelSlot.reduced (1));
+            if (linkTog)    linkTog   ->setBounds (rightCol .reduced (1));
+            togArea.removeFromRight (2);
+            auto autoMuSlot = togArea.withSizeKeepingCentre (kToggleColW, halfH);
+            if (autoMuTog) autoMuTog->setBounds (autoMuSlot.reduced (1));
 
-        // Left column (inside togArea after removing rightCol): Auto MU centered
-        // vertically at the same height as one of the stacked toggles.
-        togArea.removeFromRight (2);   // gutter between the two toggle columns
-        auto autoMuSlot = togArea.withSizeKeepingCentre (kToggleColW, halfH);
-        if (autoMuTog) autoMuTog->setBounds (autoMuSlot.reduced (1));
-
-        auto r1 = b.removeFromTop (b.getHeight() / 2);
-        auto r2 = b;
-        layoutKnobsH (r1, r1knobs);
-        layoutKnobsH (r2, r2knobs);
+            auto r1 = b.removeFromTop (b.getHeight() / 2);
+            auto r2 = b;
+            layoutKnobsH (r1, r1knobs);                 // InGain / Ceil / SatTh / SatCv / SCHPF
+            std::vector<VKnob*> row2;                   // Atk / Rel / Ahead / RelCv + Sustain
+            for (auto& k : r2knobs) if (k) row2.push_back (k.get());
+            if (sustainKnob) row2.push_back (sustainKnob.get());
+            layoutKnobsH (r2, row2);
+        }
+        else
+        {
+            // Basic single row: GAIN / Ceiling / SAT / Attack / Release / Sustain.
+            std::vector<VKnob*> basic;
+            if (r1knobs[0]) basic.push_back (r1knobs[0].get());   // InGain (GAIN)
+            if (r1knobs[1]) basic.push_back (r1knobs[1].get());   // Ceiling
+            if (r1knobs[2]) basic.push_back (r1knobs[2].get());   // SatTh (SAT)
+            if (r2knobs[0]) basic.push_back (r2knobs[0].get());   // Attack
+            if (r2knobs[1]) basic.push_back (r2knobs[1].get());   // Release
+            if (sustainKnob) basic.push_back (sustainKnob.get()); // Sustain
+            layoutKnobsH (b, basic);
+        }
     }
 };
 
@@ -3435,26 +3515,41 @@ struct ConsoleSaturationPanel : public EditorPanelBase
 // ─────────────────────────────────────────────────────────────────────────────
 // DeEsserPanel - H-3/H-6 (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
-struct DeEsserPanel : public EditorPanelBase
+struct DeEsserPanel : public EditorPanelBase, private juce::Timer
 {
+    DeEsserDSP* mDsp { nullptr };
+    std::unique_ptr<DualLabelToggle>     monitorTog;     // Basic (reference: solo detected ess)
+    std::unique_ptr<DualLabelToggle>     engineTog;      // Advanced: Time <-> Spectral engine
+    std::unique_ptr<DualLabelToggle>     qualityTog;     // Advanced: spectral HQ <-> low-latency
+    std::unique_ptr<ChickenHeadSelector> msSel;          // Advanced (our M/S extra)
+
+    // Basic = the reference's control set (Detection width / Threshold / Range /
+    // Mode blend + Monitor); Advanced = our extras (explicit Freq+Q,
+    // Attack/Release, lookahead knob, Mix, M/S, Spectral engine + quality).
+    // Lookahead is Advanced-only as the continuous knob -- owner call
+    // 2026-07-01 dropped the reference's on/off toggle + its playback lock;
+    // the Engine/Quality switches DO lock during playback (they change
+    // latency) per the same owner call.
+    bool hasAdvancedControls() const override { return true; }
+
     ~DeEsserPanel() override { setLookAndFeel (nullptr); }
 
-    explicit DeEsserPanel (DeEsserDSP* dsp)
+    explicit DeEsserPanel (DeEsserDSP* dsp) : mDsp (dsp)
     {
         setLookAndFeel (&DynamicsLAF::get());
 
-        // 8 knobs in a single horizontal row matching the Compressor / Limiter
-        // visual vocabulary.  Mode / Listen / M-S toggles deferred to a polish
-        // pass - defaults are preset-safe (Wide / Off / Stereo).
+        // Knobs 0-3 Basic, 4-9 Advanced.
         buildKnobs (*this, knobs, {
-            { "Freq",   4000.f, 12000.f, 6500.f, 10.f,  "Sidechain HPF cutoff (Hz). 4-12 kHz typical sibilance band" },
-            { "Q",      0.5f,    4.0f,   1.4f,  0.05f, "Sidechain HPF Q. Higher = narrower detection band" },
-            { "Thresh",-40.f,    0.f,  -24.f,   0.5f,  "Threshold (dB). Detector triggers above this level" },
-            { "Range", -20.f,    0.f,  -12.f,   0.5f,  "Max reduction (dB). Caps how much the de-esser can pull down" },
-            { "Atk",    0.1f,   30.f,   1.f,   0.1f,  "Attack (ms)" },
-            { "Rel",   10.f,   500.f,  80.f,   1.f,   "Release (ms)" },
-            { "Look",   0.f,     5.f,   0.f,   0.05f, "Lookahead (ms). Catches consonant before it lands" },
-            { "Mix",    0.f,     1.f,   1.f,   0.01f, "Wet / dry blend" },
+            { "Detect",  0.f,   100.f,  50.f,  1.f,   "Detection width. Narrow = S sounds only; Wide = also catches Sh sounds" },
+            { "Thresh", -80.f,    0.f, -12.5f, 0.5f,  "Threshold (dB). Detector triggers above this level" },
+            { "Range",  -48.f,    0.f, -14.f,  0.5f,  "Max reduction (dB). Caps how much the de-esser can pull down" },
+            { "Mode",    0.f,   100.f,  50.f,  1.f,   "0 = Wide (duck the whole detected sound), 100 = Split (duck only above 4 kHz), between = blend" },
+            { "Freq",   4000.f, 12000.f, 6500.f, 10.f, "Detector HPF cutoff (Hz). Direct control of what Detect sets" },
+            { "Q",       0.5f,    4.0f,  1.4f, 0.05f, "Detector HPF Q. Higher = narrower detection band" },
+            { "Atk",     0.1f,   30.f,   1.f,  0.1f,  "Attack (ms)" },
+            { "Rel",    10.f,   500.f,  80.f,  1.f,   "Release (ms)" },
+            { "Look",    0.f, DeEsserDSP::kMaxLookaheadMs, 0.f, 0.05f, "Lookahead (ms). Detector sees the audio early so the duck lands on the consonant. Not used by the Spectral engine" },
+            { "Mix",     0.f,     1.f,   1.f,  0.01f, "Wet / dry blend" },
         });
 
         // DynamicsLAF "modernAnalog" knob variant -- matches Compressor +
@@ -3463,24 +3558,107 @@ struct DeEsserPanel : public EditorPanelBase
         for (auto& k : knobs)
             k->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
 
-        knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setFrequencyHz ((float) knobs[0]->slider.getValue()); };
-        knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setQ           ((float) knobs[1]->slider.getValue()); };
-        knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setThresholdDb ((float) knobs[2]->slider.getValue()); };
-        knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setRangeDb     ((float) knobs[3]->slider.getValue()); };
-        knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setAttackMs    ((float) knobs[4]->slider.getValue()); };
-        knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setReleaseMs   ((float) knobs[5]->slider.getValue()); };
-        knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setLookaheadMs ((float) knobs[6]->slider.getValue()); };
-        knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setMix         ((float) knobs[7]->slider.getValue()); };
+        // Detect = macro over Freq+Q (the reference exposes only an abstract
+        // 0..100 width, no Hz): narrow(0) -> 7500 Hz tight, wide(100) -> 4000 Hz
+        // broad.  Advanced Freq edits reflect back into Detect's position.
+        knobs[0]->slider.onValueChange = [dsp,this]{
+            const float d  = (float) knobs[0]->slider.getValue();
+            const float fq = 7500.0f - (d / 100.0f) * 3500.0f;
+            const float qq = 2.2f    - (d / 100.0f) * 1.4f;
+            dsp->setFrequencyHz (fq);
+            dsp->setQ (qq);
+            knobs[4]->slider.setValue (fq, juce::dontSendNotification);
+            knobs[5]->slider.setValue (qq, juce::dontSendNotification);
+        };
+        knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setThresholdDb ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setRangeDb     ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setModeBlend   ((float) knobs[3]->slider.getValue()); };
+        knobs[4]->slider.onValueChange = [dsp,this]{
+            const float fq = (float) knobs[4]->slider.getValue();
+            dsp->setFrequencyHz (fq);
+            knobs[0]->slider.setValue (juce::jlimit (0.0, 100.0, (7500.0 - fq) / 35.0),
+                                       juce::dontSendNotification);
+        };
+        knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setQ         ((float) knobs[5]->slider.getValue()); };
+        knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setAttackMs  ((float) knobs[6]->slider.getValue()); };
+        knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setReleaseMs ((float) knobs[7]->slider.getValue()); };
+        knobs[8]->slider.onValueChange = [dsp,this]{
+            dsp->setLookaheadMs ((float) knobs[8]->slider.getValue());
+            if (onLatencyChanged) onLatencyChanged();   // lookahead changes getLatencySamples -> refresh PDC
+        };
+        knobs[9]->slider.onValueChange = [dsp,this]{ dsp->setMix ((float) knobs[9]->slider.getValue()); };
 
-        // Sync slider visual state from current DSP state.
-        knobs[0]->slider.setValue (dsp->mFreqHz,      juce::sendNotificationSync);
-        knobs[1]->slider.setValue (dsp->mQ,           juce::sendNotificationSync);
-        knobs[2]->slider.setValue (dsp->mThresholdDb, juce::sendNotificationSync);
-        knobs[3]->slider.setValue (dsp->mRangeDb,     juce::sendNotificationSync);
-        knobs[4]->slider.setValue (dsp->mAttackMs,    juce::sendNotificationSync);
-        knobs[5]->slider.setValue (dsp->mReleaseMs,   juce::sendNotificationSync);
-        knobs[6]->slider.setValue (dsp->mLookaheadMs, juce::sendNotificationSync);
-        knobs[7]->slider.setValue (dsp->mMix,         juce::sendNotificationSync);
+        monitorTog = std::make_unique<DualLabelToggle>();
+        monitorTog->setupOnOff ("Monitor", "Solo the detected ess -- hear only what the de-esser is removing.");
+        monitorTog->btn().setToggleState (dsp->mListen, juce::dontSendNotification);
+        monitorTog->btn().onClick = [dsp,this]{ dsp->setListen (monitorTog->btn().getToggleState()); };
+        addAndMakeVisible (*monitorTog);
+
+        // Engine + Quality switches change getLatencySamples() -> locked while
+        // the transport runs (timer below) and poke a PDC refresh on flip.
+        engineTog = std::make_unique<DualLabelToggle>();
+        engineTog->setupOnOff ("Spectral", "Spectral engine: per-frequency de-essing -- only the ess "
+                               "frequencies duck, vowels keep their brightness. Adds latency, so it is "
+                               "locked while playback is running.");
+        engineTog->btn().setToggleState (dsp->mEngine == DeEsserDSP::Engine::Spectral,
+                                         juce::dontSendNotification);
+        engineTog->btn().onClick = [dsp,this]{
+            dsp->setEngine (engineTog->btn().getToggleState() ? 1 : 0);
+            if (onLatencyChanged) onLatencyChanged();
+        };
+        addAndMakeVisible (*engineTog);
+
+        qualityTog = std::make_unique<DualLabelToggle>();
+        qualityTog->setupOnOff ("LowLat", "Spectral quality: Off = HQ (2048 FFT, ~43 ms, cleanest "
+                                "ess/vowel separation); On = low-latency (1024 FFT, ~21 ms, slightly "
+                                "coarser). Locked while playback is running -- switching resets the "
+                                "spectral engine.");
+        qualityTog->btn().setToggleState (dsp->mSpectralQuality == 1, juce::dontSendNotification);
+        qualityTog->btn().onClick = [dsp,this]{
+            dsp->setSpectralQuality (qualityTog->btn().getToggleState() ? 1 : 0);
+            if (onLatencyChanged) onLatencyChanged();
+        };
+        addAndMakeVisible (*qualityTog);
+
+        startTimerHz (10);   // transport lock for Engine/Quality + Look-in-Spectral greying
+
+        msSel = std::make_unique<ChickenHeadSelector>();
+        msSel->setOptions ({
+            { "St", "Stereo", "Detect and duck the stereo signal (linked)" },
+            { "M",  "Mid",    "Duck only the Mid (center) component" },
+            { "S",  "Side",   "Duck only the Side (width) component" },
+        });
+        msSel->setSelectedIndex (juce::jlimit (0, 2, (int) dsp->mMsMode), juce::dontSendNotification);
+        msSel->setBodyTooltip ("Mid/Side processing target");
+        msSel->onChange = [dsp] (int idx) { dsp->setMsMode (idx); };
+        addAndMakeVisible (*msSel);
+
+        // Sync slider visual state from current DSP state.  Detect last, with
+        // no notification: its position is derived from the saved Freq (the
+        // macro must not stomp a custom Advanced Freq/Q on rebuild).
+        knobs[1]->slider.setValue (dsp->mThresholdDb, juce::sendNotificationSync);
+        knobs[2]->slider.setValue (dsp->mRangeDb,     juce::sendNotificationSync);
+        knobs[3]->slider.setValue (dsp->mModeBlend,   juce::sendNotificationSync);
+        knobs[4]->slider.setValue (dsp->mFreqHz,      juce::sendNotificationSync);
+        knobs[5]->slider.setValue (dsp->mQ,           juce::sendNotificationSync);
+        knobs[6]->slider.setValue (dsp->mAttackMs,    juce::sendNotificationSync);
+        knobs[7]->slider.setValue (dsp->mReleaseMs,   juce::sendNotificationSync);
+        knobs[8]->slider.setValue (dsp->mLookaheadMs, juce::sendNotificationSync);
+        knobs[9]->slider.setValue (dsp->mMix,         juce::sendNotificationSync);
+        knobs[0]->slider.setValue (juce::jlimit (0.0, 100.0, (7500.0 - dsp->mFreqHz) / 35.0),
+                                   juce::dontSendNotification);
+    }
+
+    void timerCallback() override
+    {
+        const bool locked = DSPBase::isTransportPlaying();
+        if (engineTog)  engineTog ->setEnabled (! locked);
+        if (qualityTog) qualityTog->setEnabled (! locked);
+        // Look knob is a no-op in the Spectral engine (frame analysis sees
+        // ahead inherently) -- grey it there.
+        const bool spectral = (mDsp != nullptr
+                               && mDsp->mEngine == DeEsserDSP::Engine::Spectral);
+        if (knobs.size() > 8) knobs[8]->setEnabled (! spectral);
     }
 
     void paint (juce::Graphics& g) override
@@ -3499,7 +3677,52 @@ struct DeEsserPanel : public EditorPanelBase
         outputVolKnob->setBounds (b.removeFromRight (kKnobSz).withSizeKeepingCentre (kKnobSz, kKnobSz));
         b.removeFromRight (4);
 
-        layoutKnobsH (b, knobs, kKnobSz);
+        const bool adv = ! mBasicMode;
+        for (size_t i = 4; i < knobs.size(); ++i)
+            knobs[i]->setVisible (adv);
+        if (msSel)      msSel     ->setVisible (adv);
+        if (engineTog)  engineTog ->setVisible (adv);
+        if (qualityTog) qualityTog->setVisible (adv);
+
+        // Monitor switch at the right of the knob area (Basic, always visible).
+        auto togSlot = b.removeFromRight (52);
+        if (monitorTog) monitorTog->setBounds (togSlot.withSizeKeepingCentre (50, 40));
+        b.removeFromRight (2);
+
+        if (! adv)
+        {
+            std::vector<VKnob*> row;
+            for (int i = 0; i < 4; ++i) row.push_back (knobs[(size_t) i].get());
+            layoutKnobsH (b, row, kKnobSz);
+        }
+        else
+        {
+            auto r1 = b.removeFromTop (b.getHeight() / 2);
+            auto r2 = b;
+            if (msSel)
+            {
+                auto s = r2.removeFromRight (56);
+                msSel->setBounds (s.reduced (2));
+                r2.removeFromRight (2);
+            }
+            if (qualityTog)
+            {
+                auto s = r2.removeFromRight (52);
+                qualityTog->setBounds (s.withSizeKeepingCentre (50, 40));
+                r2.removeFromRight (2);
+            }
+            if (engineTog)
+            {
+                auto s = r2.removeFromRight (52);
+                engineTog->setBounds (s.withSizeKeepingCentre (50, 40));
+                r2.removeFromRight (2);
+            }
+            std::vector<VKnob*> row1, row2;
+            for (int i = 0; i < 6;  ++i) row1.push_back (knobs[(size_t) i].get());
+            for (int i = 6; i < 10; ++i) row2.push_back (knobs[(size_t) i].get());
+            layoutKnobsH (r1, row1);
+            layoutKnobsH (r2, row2);
+        }
     }
 };
 
@@ -5048,9 +5271,15 @@ struct TunerStylePanel : public EditorPanelBase, private juce::Timer
 
     std::unique_ptr<ChickenHeadSelector> modeSel;
     std::unique_ptr<ChickenHeadSelector> displaySel;
+    std::unique_ptr<ChickenHeadSelector> flatSel;      // 0..6 flat/drop tuning
     std::unique_ptr<juce::TextButton>    muteBtn;
     std::unique_ptr<juce::TextButton>    btn432;
     std::unique_ptr<VKnob>               trimKnob;
+
+    // The tuner is a pedalboard pedal, not a rack effect -- the Basic/Advanced
+    // slot-header toggle doesn't exist in that context, so a split would strand
+    // Trim / 432 / display-style / flat with no way to reveal them.  All
+    // controls stay visible; hasAdvancedControls stays at the default (false).
 
     // Latest cached reading for paint().
     bool                  mHasReading { false };
@@ -5127,6 +5356,21 @@ struct TunerStylePanel : public EditorPanelBase, private juce::Timer
             trimKnob->slider.setValue (mDsp->getTrimHz(), juce::dontSendNotification);
         };
         addAndMakeVisible (*btn432);
+
+        // Flat/drop tuning selector (0 = standard, 1-6 = semitones below).
+        flatSel = std::make_unique<ChickenHeadSelector>();
+        {
+            std::vector<ChickenHeadSelector::Option> opts;
+            opts.push_back ({ "0", "Standard", "No flat/drop tuning" });
+            for (int i = 1; i <= 6; ++i)
+                opts.push_back ({ juce::String (i), "Flat " + juce::String (i),
+                                  juce::String (i) + " semitone(s) below standard" });
+            flatSel->setOptions (opts);
+        }
+        flatSel->setBodyTooltip ("Flat / drop tuning (semitones below standard)");
+        flatSel->setSelectedIndex (juce::jlimit (0, 6, dsp ? dsp->getFlat() : 0), juce::dontSendNotification);
+        flatSel->onChange = [dsp] (int idx) { if (dsp) dsp->setFlat (idx); };
+        addAndMakeVisible (*flatSel);
 
         startTimerHz (60);
     }
@@ -5281,6 +5525,13 @@ struct TunerStylePanel : public EditorPanelBase, private juce::Timer
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
 
+        // All controls always visible -- the tuner is a pedal, no Basic/Advanced
+        // toggle to reveal them.  Trim + Mode | Display | Flat + Mute / 432.
+        if (trimKnob)   trimKnob  ->setVisible (true);
+        if (displaySel) displaySel->setVisible (true);
+        if (btn432)     btn432    ->setVisible (true);
+        if (flatSel)    flatSel   ->setVisible (true);
+
         // Right cluster: knob (top) + chickenheads + Mute / 432 buttons.
         const int rightW = juce::jmin (b.getWidth() / 3 + 30, 230);
         auto right = b.removeFromRight (rightW);
@@ -5288,13 +5539,13 @@ struct TunerStylePanel : public EditorPanelBase, private juce::Timer
         // Trim knob top-right.
         if (trimKnob) trimKnob->setBounds (right.removeFromTop (kKnobSz + 14)
                                                   .withSizeKeepingCentre (kKnobSz, kKnobSz + 14));
-
-        // Beneath: 2 chickenheads side-by-side.
+        // Mode | Display | Flat chickenheads (three across).
         auto sels = right.removeFromTop (50);
-        if (modeSel)    modeSel   ->setBounds (sels.removeFromLeft (sels.getWidth() / 2).reduced (2));
-        if (displaySel) displaySel->setBounds (sels.reduced (2));
-
-        // Bottom row: Mute + 432 buttons.
+        const int cw = sels.getWidth() / 3;
+        if (modeSel)    modeSel   ->setBounds (sels.removeFromLeft (cw).reduced (2));
+        if (displaySel) displaySel->setBounds (sels.removeFromLeft (cw).reduced (2));
+        if (flatSel)    flatSel   ->setBounds (sels.reduced (2));
+        // Mute + 432 buttons.
         auto btnRow = right.removeFromTop (22);
         if (muteBtn) muteBtn->setBounds (btnRow.removeFromLeft (btnRow.getWidth() / 2).reduced (2, 0));
         if (btn432)  btn432 ->setBounds (btnRow.reduced (2, 0));

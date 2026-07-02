@@ -340,6 +340,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/PhaseVocoder.cpp
     Source/DSP/CompressorDSP.cpp
     Source/DSP/DeEsserDSP.cpp
+    Source/DSP/SibilanceSpectralProcessor.cpp
     Source/DSP/PitchTrackerYIN.cpp
     Source/DSP/PitchCorrectorDSP.cpp
     Source/DSP/BaySickAlignDSP.cpp
