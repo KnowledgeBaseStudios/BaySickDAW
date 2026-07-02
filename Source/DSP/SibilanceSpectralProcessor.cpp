@@ -154,7 +154,7 @@ void SibilanceSpectralProcessor::process (float* l, float* r, int numSamples,
         const int m = numSamples - zeros;
         for (int i = 0; i < m; ++i)
         {
-            const int physIdx = (c.outReadAbs + i) % outSize;
+            const int physIdx = (int) ((c.outReadAbs + i) % outSize);
             dst[zeros + i] = c.outBuf[(size_t) physIdx];
             c.outBuf[(size_t) physIdx] = 0.0f;   // clear after read (OLA correctness)
         }
@@ -286,7 +286,7 @@ void SibilanceSpectralProcessor::processFrame (int numCh, const Params& p)
 
         fft.perform (mFftA.data(), mFftS.data(), true);
 
-        const int writeBase = c.outWriteAbs % outSize;
+        const int writeBase = (int) (c.outWriteAbs % outSize);
         for (int i = 0; i < N; ++i)
         {
             const float sample  = mFftS[(size_t) i].real() * window[i] * wScale;

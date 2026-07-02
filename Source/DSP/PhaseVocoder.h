@@ -80,10 +80,12 @@ private:
         // ── Output OLA buffer ─────────────────────────────────────────────
         // Linear (non-circular) with absolute counters so OLA indexing is simple.
         // Size = kFFTSize * 8.  outReadAbs and outWriteAbs are absolute sample
-        // positions; physical index = pos % bufSize.
+        // positions; physical index = pos % bufSize.  int64 so the counters
+        // can't overflow into a negative modulo under continuous playback (an
+        // int wraps after ~12 h @ 48k -> OOB read).
         std::vector<float> outBuf;
-        int outReadAbs  { 0 };  // next sample to deliver to caller
-        int outWriteAbs { 0 };  // OLA write head (advances by mSynthHop per frame)
+        int64_t outReadAbs  { 0 };  // next sample to deliver to caller
+        int64_t outWriteAbs { 0 };  // OLA write head (advances by mSynthHop per frame)
     };
     std::vector<Channel> mCh;
 

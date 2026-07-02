@@ -102,8 +102,10 @@ private:
         int inWrite { 0 };
         int inAvail { 0 };
         std::vector<float> outBuf;       // [kMaxFFT * 8], absolute counters like PhaseVocoder
-        int outReadAbs  { 0 };
-        int outWriteAbs { 0 };
+        // int64 so the counters can't overflow into a negative modulo under
+        // continuous playback (an int wraps after ~12 h @ 48k -> OOB read).
+        int64_t outReadAbs  { 0 };
+        int64_t outWriteAbs { 0 };
         int primeRemaining { 0 };        // zeros still owed = one FFT frame after reset
         std::vector<float> floorDb;      // [kMaxBins] per-bin slow floor EMA
         std::vector<float> gain;         // [kMaxBins] per-bin smoothed gain (0..1)

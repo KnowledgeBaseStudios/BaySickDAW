@@ -104,7 +104,7 @@ int PhaseVocoder::pull (juce::AudioBuffer<float>& out,
 
         for (int i = 0; i < toPull; ++i)
         {
-            const int physIdx = (c.outReadAbs + i) % outBufSize;
+            const int physIdx = (int) ((c.outReadAbs + i) % outBufSize);
             dst[i] = c.outBuf[physIdx];
             c.outBuf[physIdx] = 0.0f;  // clear after read - essential for OLA correctness
         }
@@ -124,7 +124,7 @@ int PhaseVocoder::getOutputAvailable() const
     // Output is "settled" (all overlapping frames have contributed) once the OLA
     // write head is at least (kFFTSize - mSynthHop) ahead of the read head.
     const int settling = kFFTSize - mSynthHop;
-    const int produced = c.outWriteAbs - c.outReadAbs;
+    const int produced = (int) (c.outWriteAbs - c.outReadAbs);
     return juce::jmax (0, produced - settling);
 }
 
@@ -194,7 +194,7 @@ void PhaseVocoder::processFrame()
         mFFT.perform (mFftA.data(), mFftS.data(), true);
 
         // ── 6. Synthesis window + normalize + overlap-add ─────────────────
-        const int writeBase = c.outWriteAbs % outBufSize;
+        const int writeBase = (int) (c.outWriteAbs % outBufSize);
 
         for (int i = 0; i < kFFTSize; ++i)
         {
