@@ -140,6 +140,16 @@ public:
     float getDuckReleaseMs()  const noexcept { return mDuckReleaseMs;   }
     int   getSyncDivision()   const noexcept { return mSyncDivIdx;      }
 
+    // QA-EffectsReview Task 9: getters for the panel's construct-time state
+    // sync (these controls previously mounted showing defaults regardless of
+    // the loaded DSP state).
+    int   getProcessingMode() const noexcept { return mMode;            }
+    bool  getTempoSync()      const noexcept { return mTempoSync;       }
+    bool  getHighDampBypass() const noexcept { return mHighDampBypass;  }
+    bool  getFreeze()         const noexcept { return mFreeze;          }
+    int   getTailModShape()   const noexcept { return mTailModShape;    }
+    float getER()             const noexcept { return mERdB;            }
+
     // ── H-9 (2026-05-02) tempo-sync division table (public so the editor
     //   panel can populate its dropdown).  num/den expresses pre-delay
     //   length in whole notes; index 2 = 1/4 is the construction default.
@@ -174,7 +184,12 @@ private:
     static constexpr float kERTapGain [kERTaps] = { 1.00f, 0.70f,   0.45f };
 
     // ── Parameters ───────────────────────────────────────────────────────────
-    int   mMode          {  0      };
+    // 0=Stereo 1=MidOnly 2=SideOnly.  Fresh instances default Mid -- matches
+    // the reference reverb's documented default (MID = summed-mono input
+    // component; owner pick 2026-07-02).  Legacy saves without the key load
+    // as Stereo (the old default) via the explicit fallback in
+    // setStateInformation; the Stereo mode itself is our superset addition.
+    int   mMode          {  1      };
     float mLowCutHz      { 80.0f   };
     float mHighCutHz     { 18000.0f};
     float mPreDelayMs    { 10.0f   };

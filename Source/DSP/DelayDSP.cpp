@@ -160,7 +160,8 @@ void DelayDSP::computeBiquadCoefs (Biquad2P& bq, double sr, float fc, float q, i
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Push mFBFilterType → TPT filter type. Cutoff/resonance are set separately
-// (and cutoff is modulated per-sample in process()).
+// (and cutoff is modulated per-sample in process()).  Type 3 = Off leaves the
+// TPT untouched -- process() skips the filter entirely for that type.
 void DelayDSP::applyFBFilterType()
 {
     using FT = juce::dsp::StateVariableTPTFilterType;
@@ -168,7 +169,8 @@ void DelayDSP::applyFBFilterType()
     {
         case 0: mFBTPT.setType(FT::lowpass);  break;
         case 1: mFBTPT.setType(FT::highpass); break;
-        default: mFBTPT.setType(FT::bandpass); break;
+        case 2: mFBTPT.setType(FT::bandpass); break;
+        default: break;   // 3 = Off (bypassed in process())
     }
 }
 
@@ -414,6 +416,13 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
                               ? scBufEcho->getReadPointer (1) : scL_E;
     const int scN_E = scBufEcho ? scBufEcho->getNumSamples() : 0;
 
+    // Off model = reference-delay behavior: no echoes at all -- the FX chain
+    // (lo-fi -> FB filter -> FB distortion -> tone) runs instantly on the
+    // input, turning the effect into a pure distortion/filter unit.  The
+    // delay line is flushed with zeros while Off so a later model switch
+    // doesn't replay a stale tail.
+    const bool instantFx = (mDelayModel == 3);
+
     // LFO increment per sample
     const float lfoInc = static_cast<float>(
         juce::MathConstants<double>::twoPi * mModRate / mSampleRate);
@@ -470,6 +479,14 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
 
         // ── Read from delay lines ────────────────────────────────────────────
         float rawReadL, rawReadR;
+        if (instantFx)
+        {
+            // Off model: no delayed read -- the input (through the input-wet
+            // gain) feeds the FX chain directly.
+            rawReadL = inL * mWetIn;
+            rawReadR = inR * mWetIn;
+        }
+        else
         {
             float rposL = static_cast<float>(mWritePos) - mCurDelayL;
             float rposR = static_cast<float>(mWritePos) - mCurDelayR;
@@ -511,15 +528,19 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         float feedL = rawReadL;
         float feedR = rawReadR;
 
-        // 1. Diffusion (allpass chain, only when diffLevel > 0)
-        if (mDiffLevel > 0.001f)
+        // 1. Diffusion (allpass chain, only when diffLevel > 0; not part of the
+        //    Off model's instant chain -- the reference applies filter / lo-fi /
+        //    distortion / tone in Off, not diffusion)
+        if (mDiffLevel > 0.001f && ! instantFx)
         {
             for (int s = 0; s < kDiffStages; ++s)
                 mDiffusion[s].processLR(feedL, feedR);
         }
 
-        // 3. Feedback filter (TPT SVF LP/HP/BP, per-sample modulated cutoff)
+        // 3. Feedback filter (TPT SVF LP/HP/BP, per-sample modulated cutoff;
+        //    type 3 = Off bypasses the filter entirely)
         //    mModCutoffMod scales cutoff by ±(mModCutoffMod) octaves (lfoVal is -1..1)
+        if (mFBFilterType != 3)
         {
             const float cutoffMod       = std::exp2(mModCutoffMod * lfoVal);
             const float modulatedCutoff = juce::jlimit(20.0f, 20000.0f, mFBCutoff * cutoffMod);
@@ -537,16 +558,26 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         }
         else
         {
-            // Saturation: tanh with optional DC offset for asymmetry.
-            // Normalize so small-signal gain == 1.0 (not drive/tanh(drive) which
-            // is >1 for drive>0 and causes feedback runaway). Subtracting the
-            // pre-computed DC-bias floor also removes the static DC injected by
-            // Symmetry>0 in-place (the 5 Hz DC-blocker below catches LFO drift).
-            const float dc         = mFBDistSymmetry * 0.3f;
-            const float drive      = std::max(0.001f, mFBDistLevel);
-            const float dcOutBias  = std::tanh(drive * dc);
-            feedL = (std::tanh(drive * (feedL + dc)) - dcOutBias) / drive;
-            feedR = (std::tanh(drive * (feedR + dc)) - dcOutBias) / drive;
+            // Saturation: tanh soft curve cross-faded toward a hard clip by
+            // Knee (reference behavior: Knee is the Sat-mode character --
+            // soft/rounded = valve, sharp = solid-state).  knee=1 -> pure tanh
+            // (the pre-Task-9 sound), knee=0 -> hard clip.  Both terms are
+            // normalized so small-signal gain == 1.0 (a >1 small-signal gain
+            // causes feedback runaway) and both subtract their own DC-bias
+            // floor so Symmetry's static DC doesn't leak (the 5 Hz DC-blocker
+            // below catches LFO drift).
+            const float dc        = mFBDistSymmetry * 0.3f;
+            const float drive     = std::max(0.001f, mFBDistLevel);
+            const float hard      = 1.0f - mFBDistKnee;
+            const float uBias     = drive * dc;
+            const float tanhBias  = std::tanh(uBias);
+            const float clipBias  = juce::jlimit(-1.0f, 1.0f, uBias);
+            const float uL        = drive * (feedL + dc);
+            const float uR        = drive * (feedR + dc);
+            feedL = ((1.0f - hard) * (std::tanh(uL) - tanhBias)
+                   +  hard         * (juce::jlimit(-1.0f, 1.0f, uL) - clipBias)) / drive;
+            feedR = ((1.0f - hard) * (std::tanh(uR) - tanhBias)
+                   +  hard         * (juce::jlimit(-1.0f, 1.0f, uR) - clipBias)) / drive;
         }
 
         // 4b. 5 Hz DC-blocker (post-distortion / pre-feedback-level).
@@ -561,9 +592,13 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
             mDcBlockXR = feedR; mDcBlockYR = dcOutR; feedR = dcOutR;
         }
 
-        // 5. Feedback level
-        feedL *= mFeedbackLevel;
-        feedR *= mFeedbackLevel;
+        // 5. Feedback level (loop injection only -- in the Off model the
+        //    post-chain signal IS the audible output and there is no loop)
+        if (! instantFx)
+        {
+            feedL *= mFeedbackLevel;
+            feedR *= mFeedbackLevel;
+        }
 
         // ── Write to delay lines (depends on model) ──────────────────────────
         const float monoIn = (inL + inR) * 0.5f;
@@ -580,9 +615,10 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
                 mLineR[mWritePos] = inR * mWetIn + feedL;
                 break;
 
-            case 3: // Off - only feedback, no new input into delay
-                mLineL[mWritePos] = feedL;
-                mLineR[mWritePos] = feedR;
+            case 3: // Off - no delay engine; flush at 1x so a later model
+                    // switch doesn't replay a stale tail
+                mLineL[mWritePos] = 0.0f;
+                mLineR[mWritePos] = 0.0f;
                 break;
 
             default: // Stereo
@@ -592,8 +628,9 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         }
 
         // ── Output path ──────────────────────────────────────────────────────
-        float outL = mToneFilter.processL(rawReadL);
-        float outR = mToneFilter.processR(rawReadR);
+        // Off model taps the post-FX-chain signal (there is no delayed read).
+        float outL = mToneFilter.processL(instantFx ? feedL : rawReadL);
+        float outR = mToneFilter.processR(instantFx ? feedR : rawReadR);
 
         // Output limiter (protect when feedback > 1 causes buildup)
         outL = juce::jlimit(-1.0f, 1.0f, outL);
@@ -758,7 +795,7 @@ void DelayDSP::setDelayMs (float ms)
 
 void DelayDSP::setFeedbackFilterType (int t)
 {
-    const int n = juce::jlimit(0, 2, t);
+    const int n = juce::jlimit(0, 3, t);
     if (n != mFBFilterType)
     {
         mFBFilterType = n;
@@ -990,7 +1027,10 @@ void DelayDSP::setStateInformation (const void* data, int sz)
     mModCutoffMod   = state.getProperty("modCutoffMod",    mModCutoffMod);
     mDiffLevel      = state.getProperty("diffLevel",       mDiffLevel);
     mDiffSpread     = state.getProperty("diffSpread",      mDiffSpread);
-    mFBDistType     = state.getProperty("fbDistType",      mFBDistType);
+    // Explicit 0 (Limit) fallback, NOT the member: a save without this key
+    // predates the FBDist feature, when Limit was the only behavior -- the
+    // member now constructs as 1 (Sat) and must not leak into legacy files.
+    mFBDistType     = state.getProperty("fbDistType",      0);
     mFBDistKnee     = state.getProperty("fbDistKnee",      mFBDistKnee);
     mFBDistSymmetry = state.getProperty("fbDistSymmetry",  mFBDistSymmetry);
     mFBDistLevel    = state.getProperty("fbDistLevel",     mFBDistLevel);

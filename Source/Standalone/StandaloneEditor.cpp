@@ -1379,6 +1379,9 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
     // ── Automation playback timer ─────────────────────────────────────────────
     mAutomationTimer.startTimerHz(30);
+
+    // ── Pattern-dropdown label sync (10 Hz, repaints only on change) ──────────
+    mPatternLabelTimer.startTimerHz(10);
 }
 
 StandaloneEditor::~StandaloneEditor()
@@ -5470,7 +5473,10 @@ void StandaloneEditor::refreshPatternBox()
     juce::String label = mPM->currentPattern().name
                        + "  "
                        + juce::String(juce::CharPointer_UTF8("\xe2\x96\xbe"));  // ▾
-    if (mPatternBtn) mPatternBtn->setButtonText(label);
+    // Change-guarded: also called at 10 Hz by mPatternLabelTimer, so skip the
+    // button write (and its repaint) unless the label actually changed.
+    if (mPatternBtn && mPatternBtn->getButtonText() != label)
+        mPatternBtn->setButtonText(label);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -134,6 +134,16 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
 
     if (mEditor)
     {
+        // QA-EffectsReview Task 9: stamp the slot's persisted Basic/Advanced
+        // state onto EVERY incoming panel before its first layout.  This is
+        // the single authority -- internal remounts (preset load, Mode-menu
+        // switch, remountEditor) construct fresh panels that would otherwise
+        // fall back to the ctor default (Basic) while the rack + header
+        // button still say Advanced.
+        if (auto* base = dynamic_cast<EditorPanelBase*>(mEditor.get()))
+            if (mRack)
+                base->mBasicMode = mRack->getSlotBasicMode(mSlotIndex);
+
         addAndMakeVisible(*mEditor);
 
         // Wire output vol knob → rack slot gain

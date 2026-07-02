@@ -87,6 +87,17 @@ struct EditorPanelBase : public juce::Component
     // two rows.
     virtual std::vector<VKnob*> getExtraKnobs() { return {}; }
 
+    // QA-EffectsReview Task 9: opt a toggle into the right-click "Automate"
+    // system (first user: Reverb Freeze).  Call from the derived constructor;
+    // setSlotContext() stamps the paramId (base + suffix) as componentID on
+    // the wrapper + its children (GlobalAutoRightClick reads the clicked
+    // component's id directly) and registers a 0/1 applicator + reader that
+    // drive the button with sendNotification -- the toggle's own onClick
+    // pushes to the DSP, mirroring how knob applicators drive the slider.
+    void addAutomatableToggle(DualLabelToggle& tog, const juce::String& paramSuffix);
+    struct AutoToggle { DualLabelToggle* tog; juce::String suffix; };
+    std::vector<AutoToggle> mAutoToggles;
+
     // H-7 (2026-05-01): hook fired when the slot's character mode (Compressor
     // Type / Saturation Type) changes via the SlotComponent's Mode dropdown,
     // and once at editor-mount time so the initial Type's layout is applied.

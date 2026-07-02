@@ -840,10 +840,9 @@ void EffectsPage::rebuildSlotEditor(int slotIndex)
         if (auto* base = dynamic_cast<EditorPanelBase*>(editor.get()))
         {
             base->setSlotContext(getChannelPrefix(), mRack->getSlotUuid(slotIndex));
-            // QA-EffectsReview Task 1: stamp the panel's Basic/Advanced flag from
-            // the slot's persisted state BEFORE setEditor() (which runs the first
-            // resized()), so the initial layout matches the saved choice.
-            base->mBasicMode = mRack->getSlotBasicMode(slotIndex);
+            // Basic/Advanced stamping lives in SlotComponent::setEditor (Task 9:
+            // single authority, so internal remounts -- preset load, Mode switch
+            // -- inherit the slot's persisted state too).
             // Latency-changing panel controls (lookahead) poke a bus-PDC refresh.
             base->onLatencyChanged = [this]
             {

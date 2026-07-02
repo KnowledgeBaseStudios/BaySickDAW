@@ -629,19 +629,43 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // only enabling devices that already had a MIDIINPUT entry in the XML.
     {
         bool anySavedMidiState = false;
+        juce::StringArray savedMidiIds;
         if (settingsFile.existsAsFile())
         {
             if (auto savedXml = juce::XmlDocument::parse (settingsFile))
             {
                 for (auto* c : savedXml->getChildIterator())
-                    if (c->hasTagName ("MIDIINPUT")) { anySavedMidiState = true; break; }
+                    if (c->hasTagName ("MIDIINPUT"))
+                    {
+                        anySavedMidiState = true;
+                        savedMidiIds.add (c->getStringAttribute ("identifier"));
+                    }
             }
         }
 
         const auto availableMidi = juce::MidiInput::getAvailableDevices();
+
+        // Stale-state safety net (QA-EffectsReview 2026-07-01): the saved
+        // MIDIINPUT set pins enablement, but a device that re-enumerates (USB
+        // re-instancing) changes identifier -- the saved entries then match
+        // NOTHING available and every input stays silently disabled with no
+        // UI hint (owner hit this: FLkey dead until settings were re-applied).
+        // If no saved identifier matches any available device, the state is
+        // stale -> fall back to enable-all.  A partially-matching set is
+        // respected as-is (user intent intact).  Mirrors the ASIO
+        // input/output-name net earlier in initialise().
+        bool savedMatchesAnyDevice = false;
+        for (const auto& d : availableMidi)
+            if (savedMidiIds.contains (d.identifier))
+            {
+                savedMatchesAnyDevice = true;
+                break;
+            }
+
+        const bool enableAll = ! anySavedMidiState || ! savedMatchesAnyDevice;
         for (const auto& d : availableMidi)
         {
-            if (! anySavedMidiState)
+            if (enableAll)
                 mDeviceManager->setMidiInputDeviceEnabled (d.identifier, true);
             // Register the callback for every available device.  JUCE only
             // invokes it while the device is enabled, so toggling

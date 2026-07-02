@@ -72,10 +72,15 @@ private:
     void rebuildBodyEQ();
     void rebuildPickupEQ();
     void rebuildTopShelf();
-    void loadUserIRConvolution();
+    // Loads the conv IR for the CURRENT mode: named modes get the bundled
+    // acoustic body capture (`Resources/Acoustic IRs/Acoustic Simulator
+    // IR.wav`, exe-relative); User gets the user file (identity fallback).
+    // Message thread / prepare only -- process() never loads (Tape rule).
+    void reloadConvIR();
 
     double mSampleRate { 44100.0 };
     int    mMaxBlock   { 0 };
+    bool   mSimIRLoaded { false };   // bundled body IR found + loaded
 
     using IIRDup = juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>,
                                                     juce::dsp::IIR::Coefficients<float>>;
@@ -97,10 +102,11 @@ private:
     //   - high-shelf coefficients refreshed when Top knob moves
     IIRDup mTopShelf;
 
-    // User IR convolution path (Mode::User only).
+    // Convolution: bundled acoustic body IR for the named modes (Task 9 --
+    // the shared "acoustic-ness" base under the per-mode voicing curves), or
+    // the user IR in Mode::User.
     juce::dsp::Convolution mConv;
     juce::String           mUserIRPath;
-    bool                   mUserConvDirty { true };
 
     // Transient envelope state per channel.
     float mEnvAttackCoef  { 0.0f };
@@ -110,6 +116,7 @@ private:
 
     juce::AudioBuffer<float> mShelfScratch;
     juce::AudioBuffer<float> mRevScratch;
+    juce::AudioBuffer<float> mConvScratch;   // conv wet (preallocated -- no audio-thread alloc)
 
     // Schroeder reverberator (own instance, separate from AD Style's).
     struct CombFilter

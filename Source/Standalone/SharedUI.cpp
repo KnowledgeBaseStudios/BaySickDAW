@@ -2166,6 +2166,8 @@ void DualLabelToggle::setupOnOff(const juce::String& featureName, const juce::St
 
 void DualLabelToggle::mouseUp(const juce::MouseEvent& e)
 {
+    // Right-click is reserved for the Automate menu (see class comment).
+    if (e.mods.isPopupMenu()) return;
     if (e.mouseWasDraggedSinceMouseDown()) return;
     // Dispatch based on which label forwarded the event.
     if (mMode == Mode::Named)

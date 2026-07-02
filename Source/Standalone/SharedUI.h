@@ -916,6 +916,12 @@ private:
 //
 // The underlying juce::ToggleButton is accessible via btn() and uses the
 // VibeLAF switch_toggle filmstrip regardless of the panel's current LAF.
+//
+// Right-click never flips the switch (button + label paths both swallow it):
+// it is reserved for the GlobalAutoRightClick "Automate" menu, which fires
+// via the app-wide mouse listener regardless of the swallow -- same
+// rationale as VibeSlider.  The menu appears only on toggles a panel has
+// registered via EditorPanelBase::addAutomatableToggle (componentID set).
 // ─────────────────────────────────────────────────────────────────────────────
 class DualLabelToggle : public juce::Component
 {
@@ -944,7 +950,17 @@ private:
     //   Named : mTop (top), mBot (bottom)
     //   OnOff : mTop (feature name), mMidTop ("OFF"), mMidBot ("ON")
     juce::Label        mTop, mMidTop, mMidBot, mBot;
-    juce::ToggleButton mBtn;
+
+    // ToggleButton that ignores right-click (see class comment) -- still a
+    // juce::ToggleButton to callers via btn().
+    struct SwitchButton : public juce::ToggleButton
+    {
+        void mouseDown (const juce::MouseEvent& e) override
+        { if (! e.mods.isPopupMenu()) juce::ToggleButton::mouseDown (e); }
+        void mouseUp   (const juce::MouseEvent& e) override
+        { if (! e.mods.isPopupMenu()) juce::ToggleButton::mouseUp   (e); }
+    };
+    SwitchButton mBtn;
 };
 
 // ── Fader with 0 dB snap ─────────────────────────────────────────────────────

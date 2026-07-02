@@ -6,9 +6,12 @@
 
 // ── DelayDSP ──────────────────────────────────────────────────────────────────
 // Full-featured stereo delay with:
-//   • Delay models: Stereo / Mono / PingPong / Off
+//   • Delay models: Stereo / Mono / PingPong / Off (Off = reference-delay
+//     behavior: no echoes -- lo-fi / FB filter / FB distortion / tone run
+//     instantly on the input, i.e. a pure distortion/filter unit)
 //   • Keep-pitch smooth delay time changes (exponential slew)
-//   • Feedback chain: diffusion (4 allpass) → Lo-Fi → biquad filter → distortion
+//   • Feedback chain: diffusion (4 allpass) → Lo-Fi → SVF filter (LP/HP/BP/Off)
+//     → distortion
 //   • LFO modulation of delay time and/or feedback filter cutoff
 //   • Tone filter (bipolar LP↔HP) on the output path
 //   • Output limiter (protects against feedback > 1)
@@ -54,10 +57,10 @@ public:
     void setKeepPitch        (bool en);   // smooth delay time changes (no pitch shift)
     void setSmoothing        (float v);   // 0..1 slew rate (higher = slower transition)
     void setOffsetPan        (float v);   // -1..1 L/R delay time offset for width
-    void setDelayModel       (int m);     // 0=Stereo 1=Mono 2=PingPong 3=Off
+    void setDelayModel       (int m);     // 0=Stereo 1=Mono 2=PingPong 3=Off(instant FX chain)
     void setStereoSpread     (float v);   // 0..1 extra L/R delay time difference
     void setFeedbackLevel    (float v);   // 0..1.2 (>1 builds up; limiter protects)
-    void setFeedbackFilterType(int t);    // 0=LP  1=HP  2=BP
+    void setFeedbackFilterType(int t);    // 0=LP  1=HP  2=BP  3=Off(bypass)
     void setFeedbackCutoff   (float hz);
     void setFeedbackResonance(float q);
     void setLoFiSampleRate   (float hz);  // 100..48000 (48000 = full quality)
@@ -252,7 +255,7 @@ private:
     int   mDelayModel     { 0 };        // 0=Stereo 1=Mono 2=PingPong 3=Off
     float mStereoSpread   { 0.0f };
     float mFeedbackLevel  { 0.4f };
-    int   mFBFilterType   { 1 };        // 0=LP 1=HP 2=BP  (HP default like legacy)
+    int   mFBFilterType   { 1 };        // 0=LP 1=HP 2=BP 3=Off  (HP default like legacy)
     float mFBCutoff       { 80.0f };
     float mFBResonance    { 0.707f };
     float mLoFiRate       { 48000.0f };
@@ -262,7 +265,11 @@ private:
     float mModCutoffMod   { 0.0f };
     float mDiffLevel      { 0.0f };
     float mDiffSpread     { 0.5f };
-    int   mFBDistType     { 0 };        // 0=Limit 1=Saturation
+    // 0=Limit 1=Saturation.  Fresh instances default Sat -- matches the
+    // reference delay's fresh-load state (owner-verified on the real unit,
+    // 2026-07-02).  Legacy saves without the key load as Limit (the old
+    // default) via the explicit fallback in setStateInformation.
+    int   mFBDistType     { 1 };
     float mFBDistKnee     { 0.5f };
     float mFBDistSymmetry { 0.0f };
     float mFBDistLevel    { 1.0f };

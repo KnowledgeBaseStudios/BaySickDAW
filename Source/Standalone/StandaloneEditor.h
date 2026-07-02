@@ -616,6 +616,17 @@ private:
         void timerCallback() override { owner.applyAutomationAtCurrentPosition(); }
     } mAutomationTimer { *this };
 
+    // Pattern-dropdown label sync.  The current pattern changes from places
+    // that can't reach refreshPatternBox directly (Builder browser/grid
+    // selection, project load restoring currentPattern), so poll cheaply --
+    // refreshPatternBox only touches the button on an actual label change.
+    // Same polling idiom as tab detection (no change-listener available).
+    struct PatternLabelTimer : public juce::Timer {
+        StandaloneEditor& owner;
+        explicit PatternLabelTimer(StandaloneEditor& o) : owner(o) {}
+        void timerCallback() override { owner.refreshPatternBox(); }
+    } mPatternLabelTimer { *this };
+
     // ── Event Editor windows (Phase 4D) ───────────────────────────────────────
     // Owned list of open EventEditor windows. Windows remove themselves on close.
     juce::OwnedArray<EventEditor> mEventEditors;

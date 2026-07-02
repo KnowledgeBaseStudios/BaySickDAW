@@ -1063,7 +1063,11 @@ void ReverbDSP::setStateInformation (const void* data, int sz)
     if (xml->hasTagName ("ReverbDSP2"))
     {
         juce::ValueTree s = juce::ValueTree::fromXml (*xml);
-        mMode           = (int)  s.getProperty ("mode",           mMode);
+        // Explicit 0 (Stereo) fallback, NOT the member: a save without this
+        // key predates the mode selector, when Stereo was the only behavior --
+        // the member now constructs as 1 (Mid) and must not leak into legacy
+        // files.
+        mMode           = (int)  s.getProperty ("mode",           0);
         mLowCutHz       = (float)s.getProperty ("lowCut",         mLowCutHz);
         mHighCutHz      = (float)s.getProperty ("highCut",        mHighCutHz);
         mPreDelayMs     = (float)s.getProperty ("preDelayMs",     mPreDelayMs);

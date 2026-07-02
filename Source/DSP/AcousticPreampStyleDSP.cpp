@@ -11,29 +11,43 @@ namespace
     constexpr int kAllpassLensL[2] = { 225,  556  };
     constexpr int kAllpassLensR[2] = { 248,  579  };
 
-    // Body-resonance frequencies for the synthetic IRs.  Each body type
-    // gets 3 damped sinusoids at the listed peaks summed into a 4096-sample
-    // exponential-decay envelope (~93 ms @ 44.1k).  Real IRs from
-    // Resources/IRs/Acoustic/{Dreadnought,Parlor,Jumbo}.wav override these.
-    struct BodyResonance { float air, top, body; };
-    constexpr BodyResonance kRes[3] = {
-        {  100.0f, 220.0f, 460.0f }, // Dreadnought
-        {  180.0f, 320.0f, 580.0f }, // Parlor
-        {   80.0f, 180.0f, 410.0f }, // Jumbo
+    // Per-body voicing for the adaptive modal bank.  Mode centers follow
+    // published acoustic-guitar mode regions (Helmholtz air ~75-170 Hz by
+    // body size, top plate, upper body modes); weights/Qs/tilt differentiate
+    // the bodies for real (Task 9 re-voicing -- the old shared-gain seeds
+    // made the bodies near-indistinguishable).  All values are ear-tunable
+    // calibration starting points.
+    struct BodyVoicing
+    {
+        float air,  top,  body;                // mode centers (Hz)
+        float airW, topW, bodW;                // per-mode gain weights
+        float airQ, topQ, bodQ;                // per-mode Q bases
+        // Broadband per-body voicing (low shelf + mid/upper-mid peak) --
+        // the audible body-SIZE difference; the narrow modes alone were
+        // near-indistinguishable between bodies (Jeff, 2026-07-02).  Max dB
+        // at full macro depth; scales with bodyDepth so it breathes too.
+        float shelfHz, shelfDb;
+        float peakHz,  peakDb, peakQ;
+    };
+    constexpr BodyVoicing kVoicing[3] = {
+        // Dreadnought: balanced warm punch -- low lift + relaxed low-mids.
+        { 100.0f, 210.0f, 440.0f,   1.00f, 0.80f, 0.55f,   2.2f, 2.8f, 3.2f,
+          100.0f,  4.0f,   900.0f, -3.0f, 1.0f },
+        // Parlor: small boxy -- lows CUT + boxy upper-mid bump, tight Qs.
+        { 170.0f, 380.0f, 780.0f,   0.55f, 1.00f, 0.75f,   3.0f, 3.4f, 3.6f,
+          180.0f, -6.0f,  1100.0f,  6.0f, 1.4f },
+        // Jumbo: big wide bloom -- strong low shelf + scooped low-mids.
+        {  78.0f, 160.0f, 360.0f,   1.30f, 0.70f, 0.50f,   1.8f, 2.6f, 3.0f,
+          130.0f,  8.0f,   700.0f, -4.5f, 1.1f },
     };
 
-    constexpr int kSynthIRLen = 4096;
-
-    juce::File getResourceIRFile (AcousticPreampStyleDSP::Body body)
+    // Bundled base correction IR (piezo-to-real fingerprint), staged next to
+    // the exe by the Resources copy step.  Exact on-disk name, spaces included.
+    juce::File getBaseIRFile()
     {
-        const auto* name = (body == AcousticPreampStyleDSP::Body::Dreadnought) ? "Dreadnought.wav"
-                         : (body == AcousticPreampStyleDSP::Body::Parlor)      ? "Parlor.wav"
-                         : (body == AcousticPreampStyleDSP::Body::Jumbo)       ? "Jumbo.wav"
-                         : "";
-        if (name == nullptr || *name == 0) return {};
         auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
-        return exe.getParentDirectory().getChildFile ("Resources").getChildFile ("IRs")
-                  .getChildFile ("Acoustic").getChildFile (name);
+        return exe.getParentDirectory().getChildFile ("Resources")
+                  .getChildFile ("Acoustic IRs").getChildFile ("Acoustic Preamp IR.wav");
     }
 }
 
@@ -74,11 +88,20 @@ void AcousticPreampStyleDSP::prepare (double sampleRate, int maxBlockSize)
         mAllpasses[i][1].prepare ((int) std::lround (kAllpassLensR[i] * scale));
     }
 
-    mDryScratch.setSize (2, juce::jmax (1, maxBlockSize), false, true, true);
-    mAmbScratch.setSize (2, juce::jmax (1, maxBlockSize), false, true, true);
+    mAmbScratch.setSize   (2, juce::jmax (1, maxBlockSize), false, true, true);
+    mConvScratch.setSize  (2, juce::jmax (1, maxBlockSize), false, true, true);
+    mNotchScratch.setSize (2, juce::jmax (1, maxBlockSize), false, true, true);
 
-    mBodyIRDirty = true;
-    rebuildBodyIR();
+    // Adaptive-resonance state: clear envelopes + filter rings; force a coef
+    // refresh on the first block (sample rate may have changed).
+    mEnvFast = mEnvSlow = 0.0f;
+    for (auto& m : mModes) m.reset();
+    mDeQuack.reset();
+    mTilt.reset();
+    mBodyPeak.reset();
+    mCoefBody = -1;
+
+    reloadConvIR();
 }
 
 void AcousticPreampStyleDSP::reset()
@@ -87,101 +110,85 @@ void AcousticPreampStyleDSP::reset()
     mNotch.reset();
     for (auto& row : mCombs)    for (auto& c : row) c.reset();
     for (auto& row : mAllpasses) for (auto& a : row) a.reset();
+    mEnvFast = mEnvSlow = 0.0f;
+    for (auto& m : mModes) m.reset();
+    mDeQuack.reset();
+    mTilt.reset();
+    mBodyPeak.reset();
 }
 
-void AcousticPreampStyleDSP::buildSyntheticIR (Body body, juce::AudioBuffer<float>& dest, double sr)
+// RBJ cookbook peaking EQ (constant-Q), written straight into the biquad.
+// No allocation -- safe at block rate on the audio thread (JUCE's
+// coefficient makers return heap-allocated objects, so they aren't).
+void AcousticPreampStyleDSP::makePeakCoefs (StereoBiquad& bq, double sr,
+                                             float fc, float q, float gainDb)
 {
-    const int idx = juce::jlimit (0, 2, (int) body);
-    const auto& r = kRes[idx];
-
-    dest.setSize (2, kSynthIRLen, false, true, true);
-    dest.clear();
-
-    const float dec = 4.0f / (float) kSynthIRLen;   // exp decay tau ~ N/4 samples
-    const float twoPi = juce::MathConstants<float>::twoPi;
-    const float fs = (float) sr;
-
-    for (int ch = 0; ch < 2; ++ch)
-    {
-        float* p = dest.getWritePointer (ch);
-        const float airW = ch == 0 ? 1.0f : 0.92f;     // slight stereo decorrelation
-        const float topW = ch == 0 ? 0.7f : 0.78f;
-        const float bodW = ch == 0 ? 0.45f : 0.5f;
-        for (int i = 0; i < kSynthIRLen; ++i)
-        {
-            const float t = (float) i / fs;
-            const float env = std::exp (-(float) i * dec);
-            float s = airW * std::sin (twoPi * r.air  * t) * env;
-            s     += topW * std::sin (twoPi * r.top  * t) * env * std::exp (-(float) i * dec * 1.6f);
-            s     += bodW * std::sin (twoPi * r.body * t) * env * std::exp (-(float) i * dec * 2.4f);
-            p[i] = s;
-        }
-
-        // Add a tiny click at sample 0 so the IR has DC-balanced low-end response
-        // (otherwise the all-sinusoid IR has no fundamental impulse).
-        p[0] += 1.0f;
-    }
-
-    // Normalize peak to 0 dBFS so per-body gain stays comparable.
-    float peak = 0.0f;
-    for (int ch = 0; ch < 2; ++ch)
-    {
-        const float* p = dest.getReadPointer (ch);
-        for (int i = 0; i < kSynthIRLen; ++i) peak = juce::jmax (peak, std::abs (p[i]));
-    }
-    if (peak > 1.0e-6f)
-    {
-        const float g = 0.95f / peak;
-        for (int ch = 0; ch < 2; ++ch) dest.applyGain (ch, 0, kSynthIRLen, g);
-    }
+    const float A     = std::pow (10.0f, gainDb * (1.0f / 40.0f));
+    const float w0    = juce::MathConstants<float>::twoPi * fc / (float) sr;
+    const float cw    = std::cos (w0);
+    const float alpha = std::sin (w0) / (2.0f * juce::jmax (0.1f, q));
+    const float a0inv = 1.0f / (1.0f + alpha / A);
+    bq.b0 = (1.0f + alpha * A) * a0inv;
+    bq.b1 = (-2.0f * cw)       * a0inv;
+    bq.b2 = (1.0f - alpha * A) * a0inv;
+    bq.a1 = (-2.0f * cw)       * a0inv;
+    bq.a2 = (1.0f - alpha / A) * a0inv;
 }
 
-void AcousticPreampStyleDSP::rebuildBodyIR()
+// RBJ cookbook low shelf, same no-allocation rationale.
+void AcousticPreampStyleDSP::makeLowShelfCoefs (StereoBiquad& bq, double sr,
+                                                 float fc, float q, float gainDb)
 {
-    mBodyIRDirty = false;
+    const float A     = std::pow (10.0f, gainDb * (1.0f / 40.0f));
+    const float w0    = juce::MathConstants<float>::twoPi * fc / (float) sr;
+    const float cw    = std::cos (w0);
+    const float alpha = std::sin (w0) / (2.0f * juce::jmax (0.1f, q));
+    const float sqA   = std::sqrt (A);
+    const float a0    = (A + 1.0f) + (A - 1.0f) * cw + 2.0f * sqA * alpha;
+    const float a0inv = 1.0f / a0;
+    bq.b0 = (        A * ((A + 1.0f) - (A - 1.0f) * cw + 2.0f * sqA * alpha)) * a0inv;
+    bq.b1 = ( 2.0f * A * ((A - 1.0f) - (A + 1.0f) * cw))                      * a0inv;
+    bq.b2 = (        A * ((A + 1.0f) - (A - 1.0f) * cw - 2.0f * sqA * alpha)) * a0inv;
+    bq.a1 = (-2.0f *     ((A - 1.0f) + (A + 1.0f) * cw))                      * a0inv;
+    bq.a2 = (            ((A + 1.0f) + (A - 1.0f) * cw - 2.0f * sqA * alpha)) * a0inv;
+}
 
-    if (mBody == Body::User)
+void AcousticPreampStyleDSP::reloadConvIR()
+{
+    if (mBody != Body::User)
     {
-        if (mUserIRPath.isNotEmpty())
-        {
-            juce::File f (mUserIRPath);
-            if (f.existsAsFile())
-            {
-                mConv.loadImpulseResponse (f, juce::dsp::Convolution::Stereo::yes,
-                                              juce::dsp::Convolution::Trim::yes,
-                                              0,
-                                              juce::dsp::Convolution::Normalise::yes);
-                return;
-            }
-        }
-        // Fall through: User mode with no path -> single-sample identity IR
-        // (acts as bypass; user blends with Resonance knob).
-        juce::AudioBuffer<float> empty (2, 1);
-        empty.clear();
-        empty.setSample (0, 0, 1.0f);
-        empty.setSample (1, 0, 1.0f);
-        mConv.loadImpulseResponse (std::move (empty), mSampleRate,
-                                    juce::dsp::Convolution::Stereo::yes,
-                                    juce::dsp::Convolution::Trim::yes,
-                                    juce::dsp::Convolution::Normalise::yes);
+        // Named bodies: the bundled base correction IR (piezo-to-real
+        // fingerprint).  Missing file -> adaptive-only (mBaseIRLoaded gates
+        // the conv stage in process()).
+        auto f = getBaseIRFile();
+        mBaseIRLoaded = f.existsAsFile();
+        if (mBaseIRLoaded)
+            mConv.loadImpulseResponse (f, juce::dsp::Convolution::Stereo::yes,
+                                          juce::dsp::Convolution::Trim::yes,
+                                          0,
+                                          juce::dsp::Convolution::Normalise::yes);
         return;
     }
 
-    // Try to load a real IR file for this body type if Jeff drops one in
-    // Resources/IRs/Acoustic/.  Falls back to synthetic if not found.
-    auto resourceFile = getResourceIRFile (mBody);
-    if (resourceFile.existsAsFile())
+    if (mUserIRPath.isNotEmpty())
     {
-        mConv.loadImpulseResponse (resourceFile, juce::dsp::Convolution::Stereo::yes,
-                                                  juce::dsp::Convolution::Trim::yes,
-                                                  0,
-                                                  juce::dsp::Convolution::Normalise::yes);
-        return;
+        juce::File f (mUserIRPath);
+        if (f.existsAsFile())
+        {
+            mConv.loadImpulseResponse (f, juce::dsp::Convolution::Stereo::yes,
+                                          juce::dsp::Convolution::Trim::yes,
+                                          0,
+                                          juce::dsp::Convolution::Normalise::yes);
+            return;
+        }
     }
-
-    juce::AudioBuffer<float> ir;
-    buildSyntheticIR (mBody, ir, mSampleRate);
-    mConv.loadImpulseResponse (std::move (ir), mSampleRate,
+    // User mode with no path -> single-sample identity IR (acts as bypass;
+    // user blends with Resonance knob).
+    juce::AudioBuffer<float> empty (2, 1);
+    empty.clear();
+    empty.setSample (0, 0, 1.0f);
+    empty.setSample (1, 0, 1.0f);
+    mConv.loadImpulseResponse (std::move (empty), mSampleRate,
                                 juce::dsp::Convolution::Stereo::yes,
                                 juce::dsp::Convolution::Trim::yes,
                                 juce::dsp::Convolution::Normalise::yes);
@@ -190,7 +197,14 @@ void AcousticPreampStyleDSP::rebuildBodyIR()
 void AcousticPreampStyleDSP::setBody (int body)
 {
     const Body b = static_cast<Body> (juce::jlimit (0, 3, body));
-    if (mBody != b) { mBody = b; mBodyIRDirty = true; }
+    if (mBody != b)
+    {
+        // Reload only across the named<->User boundary (all named bodies
+        // share the bundled base IR).  Message-thread callers only.
+        const bool needReload = (b == Body::User) != (mBody == Body::User);
+        mBody = b;
+        if (needReload) reloadConvIR();
+    }
 }
 
 void AcousticPreampStyleDSP::setResonance (float v01)
@@ -213,6 +227,11 @@ void AcousticPreampStyleDSP::setNotchHz (float hz)
     }
 }
 
+void AcousticPreampStyleDSP::setNotchOn (bool on)
+{
+    if (on != mNotchOn) mNotchOn = on;
+}
+
 void AcousticPreampStyleDSP::setLevelDb (float db)
 {
     mLevelDb = juce::jlimit (-24.0f, 12.0f, db);
@@ -221,7 +240,7 @@ void AcousticPreampStyleDSP::setLevelDb (float db)
 void AcousticPreampStyleDSP::loadUserIR (const juce::File& file)
 {
     mUserIRPath = file.existsAsFile() ? file.getFullPathName() : juce::String();
-    if (mBody == Body::User) mBodyIRDirty = true;
+    if (mBody == Body::User) reloadConvIR();   // message-thread caller (panel)
 }
 
 void AcousticPreampStyleDSP::process (juce::AudioBuffer<float>& buffer)
@@ -233,17 +252,22 @@ void AcousticPreampStyleDSP::process (juce::AudioBuffer<float>& buffer)
     const int n     = buffer.getNumSamples();
     if (numCh == 0 || n == 0) return;
 
-    if (mBodyIRDirty) rebuildBodyIR();
+    // Signal flow: input -> Acoustic Resonance (base-IR conv + adaptive
+    // de-quack / modal bank / size tilt; User body = static conv wet/dry)
+    // -> Schroeder ambience -> Notch (when on) -> Level -> output.
+    // Conv IRs load on the message thread / prepare only -- never here.
 
-    // Signal flow: input -> split (dry/wet=Convolution) -> sum -> Schroeder
-    // ambience -> Notch (last) -> Level -> output.
-
-    // ── Body convolution wet/dry ─────────────────────────────────────────────
+    // ── Acoustic Resonance ───────────────────────────────────────────────────
+    if (mBody == Body::User)
     {
-        juce::AudioBuffer<float> wet (numCh, n);
+        // Static convolution wet/dry -- a user IR is a fixed capture (locked
+        // no-regression).  Scratch preallocated in prepare(); the size guard
+        // only fires if the host exceeds the prepared block size.
+        if (mConvScratch.getNumChannels() < numCh || mConvScratch.getNumSamples() < n)
+            mConvScratch.setSize (juce::jmax (2, numCh), n, false, false, true);
         for (int ch = 0; ch < numCh; ++ch)
-            wet.copyFrom (ch, 0, buffer, ch, 0, n);
-        juce::dsp::AudioBlock<float> wb (wet);
+            mConvScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+        juce::dsp::AudioBlock<float> wb (mConvScratch);
         auto wsub = wb.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
         juce::dsp::ProcessContextReplacing<float> wctx (wsub);
         mConv.process (wctx);
@@ -253,8 +277,147 @@ void AcousticPreampStyleDSP::process (juce::AudioBuffer<float>& buffer)
         for (int ch = 0; ch < numCh; ++ch)
         {
             float* dst = buffer.getWritePointer (ch);
-            const float* w = wet.getReadPointer (ch);
+            const float* w = mConvScratch.getReadPointer (ch);
             for (int i = 0; i < n; ++i) dst[i] = dst[i] * dryGain + w[i] * wetGain;
+        }
+    }
+    else if (mResonance01 > 0.001f)
+    {
+        // 1. Base correction IR (the bundled piezo-to-real fingerprint),
+        //    wet/dry under the same Resonance macro.  Missing file ->
+        //    adaptive-only (no conv).
+        if (mBaseIRLoaded)
+        {
+            if (mConvScratch.getNumChannels() < numCh || mConvScratch.getNumSamples() < n)
+                mConvScratch.setSize (juce::jmax (2, numCh), n, false, false, true);
+            for (int ch = 0; ch < numCh; ++ch)
+                mConvScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+            juce::dsp::AudioBlock<float> wb (mConvScratch);
+            auto wsub = wb.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing<float> wctx (wsub);
+            mConv.process (wctx);
+
+            const float wetGain = mResonance01;
+            const float dryGain = 1.0f - mResonance01 * 0.5f;
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                float* dst = buffer.getWritePointer (ch);
+                const float* w = mConvScratch.getReadPointer (ch);
+                for (int i = 0; i < n; ++i) dst[i] = dst[i] * dryGain + w[i] * wetGain;
+            }
+        }
+
+        // 2. Block-rate dynamics analysis (mono-summed peak).
+        float blockPeak = 0.0f;
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const float* p = buffer.getReadPointer (ch);
+            for (int i = 0; i < n; ++i) blockPeak = juce::jmax (blockPeak, std::abs (p[i]));
+        }
+        // Fast: instant attack / ~80 ms release (pick transients).
+        // Slow: ~400 ms one-pole (playing level).  Block-rate is plenty for
+        // body-resonance breathing; coefs below only refresh at block rate.
+        const float blockSec = (float) n / (float) mSampleRate;
+        const float fastRel  = std::exp (-blockSec / 0.080f);
+        const float slowCf   = 1.0f - std::exp (-blockSec / 0.400f);
+        mEnvFast  = juce::jmax (blockPeak, mEnvFast * fastRel);
+        mEnvSlow += slowCf * (blockPeak - mEnvSlow);
+
+        // Playing level mapped over -42..-10 dBFS; transient = fast-over-slow.
+        const float slowDb      = juce::Decibels::gainToDecibels (mEnvSlow, -60.0f);
+        const float level01     = juce::jlimit (0.0f, 1.0f, (slowDb + 42.0f) / 32.0f);
+        const float transient01 = juce::jlimit (0.0f, 1.0f,
+            (mEnvFast - mEnvSlow) / juce::jmax (mEnvSlow, 1.0e-4f) * 0.5f);
+
+        // 3. Macro map -- the Resonance knob is the CEILING of the adaptive
+        //    depth.  Calibration starting points (ear-tunable):
+        //    de-quack fully in by noon; body depth breathes 55-100 % with
+        //    level; pick attacks bloom the modes; the air (lowest) mode gains
+        //    extra weight past noon ("adds bass" upper half).  Per-body
+        //    voicing (centers / weights / Qs / size tilt) from kVoicing[].
+        const float k         = mResonance01;
+        const float quackDb   = -7.0f * juce::jmin (1.0f, k * 2.0f);
+        const float bodyDepth = k * (0.55f + 0.45f * level01);
+        const float bloom     = transient01 * k;
+        const float lowExtra  = juce::jmax (0.0f, k - 0.5f) * 2.0f;
+
+        const int   bodyIdx = juce::jlimit (0, 2, (int) mBody);
+        const auto& v       = kVoicing[bodyIdx];
+        const float fcs[3]  = { v.air,  v.top,  v.body };
+        const float qbs[3]  = { v.airQ, v.topQ, v.bodQ };
+        const float modeDb[3] = {
+            (bodyDepth * (5.0f + 4.0f * lowExtra) + bloom * 2.0f) * v.airW,   // air
+            (bodyDepth * 4.5f                     + bloom * 3.0f) * v.topW,   // top (pick knock)
+            (bodyDepth * 3.5f                     + bloom * 1.5f) * v.bodW    // body
+        };
+        // Broadband body voice scales with the KNOB only (k), not the
+        // dynamics depth -- a body's size is static; tying it to bodyDepth
+        // halved the A/B contrast at moderate playing levels.  The adaptive
+        // breathing stays on the modes + bloom above.
+        const float tiltDb = v.shelfDb * k;
+        const float peakDb = v.peakDb  * k;
+
+        // 4. CPU-guarded coef refresh (only on real movement / body switch).
+        const bool bodyChanged = (mCoefBody != bodyIdx);
+        for (int m = 0; m < 3; ++m)
+        {
+            const float qEff = qbs[m] / (1.0f + 0.30f * transient01);   // transients widen
+            if (bodyChanged || std::abs (modeDb[m] - mAppliedModeDb[m]) > 0.05f
+                            || std::abs (qEff     - mAppliedModeQ[m])  > 0.02f)
+            {
+                makePeakCoefs (mModes[m], mSampleRate, fcs[m], qEff, modeDb[m]);
+                mAppliedModeDb[m] = modeDb[m];
+                mAppliedModeQ[m]  = qEff;
+            }
+        }
+        if (bodyChanged || std::abs (quackDb - mAppliedQuackDb) > 0.05f)
+        {
+            makePeakCoefs (mDeQuack, mSampleRate, 2000.0f, 1.1f, quackDb);
+            mAppliedQuackDb = quackDb;
+        }
+        if (bodyChanged || std::abs (tiltDb - mAppliedTiltDb) > 0.05f)
+        {
+            makeLowShelfCoefs (mTilt, mSampleRate, v.shelfHz, 0.707f, tiltDb);
+            mAppliedTiltDb = tiltDb;
+        }
+        if (bodyChanged || std::abs (peakDb - mAppliedPeakDb) > 0.05f)
+        {
+            makePeakCoefs (mBodyPeak, mSampleRate, v.peakHz, v.peakQ, peakDb);
+            mAppliedPeakDb = peakDb;
+        }
+        if (bodyChanged)
+        {
+            mCoefBody = bodyIdx;
+            for (auto& m : mModes) m.reset();   // clear stale ring on body switch
+            mTilt.reset();
+            mBodyPeak.reset();
+        }
+
+        // 5. In-place series pass:
+        //    de-quack -> air -> top -> body -> shelf -> voicing peak.
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            float* p = buffer.getWritePointer (ch);
+            if (ch == 0)
+                for (int i = 0; i < n; ++i)
+                {
+                    float y = mDeQuack.processL (p[i]);
+                    y = mModes[0].processL (y);
+                    y = mModes[1].processL (y);
+                    y = mModes[2].processL (y);
+                    y = mTilt.processL (y);
+                    p[i] = mBodyPeak.processL (y);
+                }
+            else
+                for (int i = 0; i < n; ++i)
+                {
+                    float y = mDeQuack.processR (p[i]);
+                    y = mModes[0].processR (y);
+                    y = mModes[1].processR (y);
+                    y = mModes[2].processR (y);
+                    y = mTilt.processR (y);
+                    p[i] = mBodyPeak.processR (y);
+                }
         }
     }
 
@@ -294,19 +457,22 @@ void AcousticPreampStyleDSP::process (juce::AudioBuffer<float>& buffer)
     }
 
     // ── Notch (band-stop, last in chain - surgical feedback rejection) ──────
+    // OFF unless the panel knob leaves its bottom position (reference default).
     // Process bandpass tap and subtract from main buffer to get band-stop.
+    if (mNotchOn)
     {
-        juce::AudioBuffer<float> bpScratch (numCh, n);
+        if (mNotchScratch.getNumChannels() < numCh || mNotchScratch.getNumSamples() < n)
+            mNotchScratch.setSize (juce::jmax (2, numCh), n, false, false, true);
         for (int ch = 0; ch < numCh; ++ch)
-            bpScratch.copyFrom (ch, 0, buffer, ch, 0, n);
-        juce::dsp::AudioBlock<float> bpBlk (bpScratch);
+            mNotchScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+        juce::dsp::AudioBlock<float> bpBlk (mNotchScratch);
         auto bpSub = bpBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
         juce::dsp::ProcessContextReplacing<float> bpCtx (bpSub);
         mNotch.process (bpCtx);
         for (int ch = 0; ch < numCh; ++ch)
         {
             float* dst = buffer.getWritePointer (ch);
-            const float* bp = bpScratch.getReadPointer (ch);
+            const float* bp = mNotchScratch.getReadPointer (ch);
             for (int i = 0; i < n; ++i) dst[i] -= bp[i];
         }
     }
@@ -326,6 +492,7 @@ void AcousticPreampStyleDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("resonance", mResonance01,         nullptr);
     state.setProperty ("ambience",  mAmbience01,          nullptr);
     state.setProperty ("notchHz",   mNotchHz,             nullptr);
+    state.setProperty ("notchOn",   (int) mNotchOn,       nullptr);
     state.setProperty ("levelDb",   mLevelDb,             nullptr);
     state.setProperty ("userIR",    mUserIRPath,          nullptr);
     state.setProperty ("bypassed",  (int) bypassed,       nullptr);
@@ -344,8 +511,9 @@ void AcousticPreampStyleDSP::setStateInformation (const void* data, int sz)
     setResonance ((float)(double)  state.getProperty ("resonance", 0.5));
     setAmbience  ((float)(double)  state.getProperty ("ambience",  0.2));
     setNotchHz   ((float)(double)  state.getProperty ("notchHz",   250.0));
+    setNotchOn   (((int)           state.getProperty ("notchOn",   0)) != 0);
     setLevelDb   ((float)(double)  state.getProperty ("levelDb",   0.0));
     bypassed = ((int) state.getProperty ("bypassed", 0)) != 0;
 
-    mBodyIRDirty = true;
+    reloadConvIR();   // message-thread caller (preset/project load)
 }

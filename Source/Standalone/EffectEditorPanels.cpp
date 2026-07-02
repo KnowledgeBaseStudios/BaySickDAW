@@ -232,6 +232,40 @@ void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const ju
     for (auto& k : knobs) regKnob(k.get());
     for (auto* k : getExtraKnobs()) regKnob(k);
     regKnob(outputVolKnob.get());
+
+    // Task 9: automatable toggles (addAutomatableToggle).  ComponentID goes on
+    // the wrapper AND every child -- GlobalAutoRightClick reads the clicked
+    // component's id directly, and a click can land on the switch button or a
+    // forwarding label.  The applicator drives the BUTTON (SafePointer-guarded
+    // like regKnob) so the toggle's own onClick pushes to the DSP.
+    for (auto& t : mAutoToggles)
+    {
+        if (t.tog == nullptr) continue;
+        const juce::String pid = base + t.suffix;
+        t.tog->setComponentID(pid);
+        for (auto* child : t.tog->getChildren())
+            if (child) child->setComponentID(pid);
+
+        juce::Component::SafePointer<juce::Button> safeBtn(&t.tog->btn());
+        if (VKnobAutomation::sOnRegisterApplicator)
+            VKnobAutomation::sOnRegisterApplicator(pid, [safeBtn](float v01)
+            {
+                if (auto* b = safeBtn.getComponent())
+                    if (b->getToggleState() != (v01 >= 0.5f))
+                        b->setToggleState(v01 >= 0.5f, juce::sendNotification);
+            });
+        if (VKnobAutomation::sOnRegisterReader)
+            VKnobAutomation::sOnRegisterReader(pid, [safeBtn]() -> float
+            {
+                auto* b = safeBtn.getComponent();
+                return (b != nullptr && b->getToggleState()) ? 1.0f : 0.0f;
+            });
+    }
+}
+
+void EditorPanelBase::addAutomatableToggle(DualLabelToggle& tog, const juce::String& paramSuffix)
+{
+    mAutoToggles.push_back({ &tog, paramSuffix });
 }
 
 void EditorPanelBase::setVolumeKnobVariant(bool dark)
@@ -1011,30 +1045,78 @@ struct CompressorPanel : public EditorPanelBase,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ReverbPanel - 5F-9 §8 expanded (2 rows, 8 knobs each + right-side extras)
-// Row 1: Room | Decay | HFRatio | Diffuse | PreDly | WetTone | Wet | Dry
-// Row 1 right: Mode combo + Freeze toggle switch
+// ReverbPanel - 5F-9 §8 expanded (2 rows + right-side extras)
+// Row 1: Room | Decay | HFRatio* | Diffuse | PreDly | WetTone* | Wet | Dry
+//        (+ Duck | DkThr | DkAtt | DkRel in Advanced)
+// Row 1 right: Mode combo + Freeze* toggle
 // Row 2: LoCut | HiCut | BassMlt | BassCross | TailDep | TailRt | Stereo | HiDamp
-// Row 2 right: ER knob + TailShape combo + Sync + HiDmp toggle switches
+// Row 2 right: ER knob + TailShape* combo + Sync + HiDmp-bypass* toggles
+// (* = our addition vs the reference reverb -> Advanced only.  Basic = the
+//  reference face; the Mode combo shows Mid/Side in Basic -- Stereo is our
+//  superset mode, revealed in Advanced, kept visible while active.)
 // ─────────────────────────────────────────────────────────────────────────────
 struct ReverbPanel : public EditorPanelBase
 {
-    std::vector<std::unique_ptr<VKnob>>         r1knobs, r2knobs;
+    std::vector<std::unique_ptr<VKnob>>         r1knobs, r2knobs, duckKnobs;
     std::unique_ptr<VKnob>                      erKnob;       // row 2 right
+
+    // QA-EffectsReview Task 9: Basic = the exact reference face.  Our
+    // additions = HFRatio / WetTone / Freeze / TailShape / HiDamp-bypass /
+    // the duck cluster / the Stereo processing mode -> Advanced.
+    bool hasAdvancedControls() const override { return true; }
 
     std::vector<VKnob*> getExtraKnobs() override
     {
         std::vector<VKnob*> v;
-        for (auto& k : r1knobs) if (k) v.push_back(k.get());
-        for (auto& k : r2knobs) if (k) v.push_back(k.get());
+        for (auto& k : r1knobs)   if (k) v.push_back(k.get());
+        for (auto& k : r2knobs)   if (k) v.push_back(k.get());
+        for (auto& k : duckKnobs) if (k) v.push_back(k.get());
         if (erKnob) v.push_back(erKnob.get());
         return v;
     }
     std::unique_ptr<DualLabelToggle>            tempoTog, hdBypassTog, freezeTog;
     std::unique_ptr<ChickenHeadSelector>        modeSel, tailShapeSel, syncDivSel;
     JewelIndicator                              mJewel;
+    ReverbDSP*                                  mDsp { nullptr };
+    std::vector<int>                            mModeOptionValues;   // visible option idx -> DSP mode
+
+    // The reference M/S control is a 2-state Mid/Side selector (default Mid);
+    // our Stereo mode is a superset addition.  Basic shows Mid/Side only --
+    // unless Stereo is the ACTIVE mode (old projects), which stays visible
+    // until moved off (same edge rule as the Tube type-C option).  Advanced
+    // always shows all three.  Rebuild is count-guarded; selection re-resolves
+    // through mModeOptionValues so index<->mode stays correct in both lists.
+    void updateModeOptions()
+    {
+        if (! modeSel || ! mDsp) return;
+        const int  mode       = juce::jlimit(0, 2, mDsp->getProcessingMode());
+        const bool showStereo = ! mBasicMode || mode == 0;
+        const int  want       = showStereo ? 3 : 2;
+        if (modeSel->getNumOptions() != want)
+        {
+            std::vector<ChickenHeadSelector::Option> opts;
+            mModeOptionValues.clear();
+            if (showStereo)
+            {
+                opts.push_back({ "S", "Stereo", "Process left/right independently - classic stereo reverb" });
+                mModeOptionValues.push_back(0);
+            }
+            opts.push_back({ "M", "Mid",  "Process mid (L+R) only - side channel passes dry" });
+            mModeOptionValues.push_back(1);
+            opts.push_back({ "D", "Side", "Process side (L-R) only - mid channel passes dry" });
+            mModeOptionValues.push_back(2);
+            modeSel->setOptions(opts);
+        }
+        for (int i = 0; i < (int) mModeOptionValues.size(); ++i)
+            if (mModeOptionValues[(size_t) i] == mode)
+            {
+                modeSel->setSelectedIndex(i, juce::dontSendNotification);
+                break;
+            }
+    }
 
     explicit ReverbPanel(ReverbDSP* dsp)
+        : mDsp(dsp)
     {
         disableVU();   // Reverb has no input VU - full knob width
         setLookAndFeel(&TimeLAF::get());
@@ -1068,19 +1150,24 @@ struct ReverbPanel : public EditorPanelBase
         // ER knob (row 2 right side, compact - standalone since it's not in r2knobs)
         erKnob = std::make_unique<VKnob>("ER", -6.0f, "Early reflections level (dB)");
         erKnob->slider.setRange(-60.0, 12.0, 0.1);
-        erKnob->slider.setValue(-6.0, juce::dontSendNotification);
+        // A9-style construct-time sync (was hardcoded -6, ignoring loaded state).
+        erKnob->slider.setValue(dsp->getER(), juce::dontSendNotification);
         erKnob->slider.onValueChange = [dsp, this]{ dsp->setER((float)erKnob->slider.getValue()); };
         addAndMakeVisible(*erKnob);
 
         modeSel = std::make_unique<ChickenHeadSelector>();
-        modeSel->setOptions({
-            { "S", "Stereo", "Process left/right independently - classic stereo reverb" },
-            { "M", "Mid",    "Process mid (L+R) only - side channel passes dry" },
-            { "D", "Side",   "Process side (L-R) only - mid channel passes dry" },
-        });
         modeSel->setBodyTooltip("Channel-processing mode");
-        modeSel->onChange = [dsp](int idx){ dsp->setProcessingMode(idx); };
+        // Task 9: options + selection come from updateModeOptions() (list is
+        // Basic/Advanced-dependent); mModeOptionValues maps the visible index
+        // to the DSP mode so the 2-option Basic list can't misroute.  Moving
+        // off Stereo in Basic drops the Stereo option at the next relayout
+        // (same eventual-consistency as the Tube type-C edge).
+        modeSel->onChange = [dsp, this](int idx){
+            if (idx >= 0 && idx < (int) mModeOptionValues.size())
+                dsp->setProcessingMode(mModeOptionValues[(size_t) idx]);
+        };
         addAndMakeVisible(*modeSel);
+        updateModeOptions();
 
         // §8f tail-mod shape selector: sine / triangle / random S&H
         tailShapeSel = std::make_unique<ChickenHeadSelector>();
@@ -1090,11 +1177,16 @@ struct ReverbPanel : public EditorPanelBase
             { "R", "Rand", "Random sample-and-hold - organic, non-repeating wobble" },
         });
         tailShapeSel->setBodyTooltip("Tail modulation LFO shape");
+        // A9: initialize from DSP so preset-loaded shape shows correctly.
+        tailShapeSel->setSelectedIndex(juce::jlimit(0, 2, dsp->getTailModShape()),
+                                       juce::dontSendNotification);
         tailShapeSel->onChange = [dsp](int idx){ dsp->setTailModShape(idx); };
         addAndMakeVisible(*tailShapeSel);
 
         tempoTog = std::make_unique<DualLabelToggle>();
         tempoTog->setupOnOff("Sync", "Sync pre-delay to host BPM");
+        // A9: initialize from DSP so preset-loaded sync state shows correctly.
+        tempoTog->btn().setToggleState(dsp->getTempoSync(), juce::dontSendNotification);
         tempoTog->btn().onClick = [dsp, this]{
             const bool on = tempoTog->btn().getToggleState();
             dsp->setTempoSync (on);
@@ -1124,22 +1216,29 @@ struct ReverbPanel : public EditorPanelBase
             juce::jlimit(0, ReverbDSP::kNumSyncDivisions - 1, dsp->getSyncDivision()),
             juce::dontSendNotification);
         syncDivSel->onChange = [dsp](int idx){ dsp->setSyncDivision(idx); };
-        // Initial lockout state -- tempoTog defaults off, so dropdown locked.
-        syncDivSel->setLocked (true);
+        // Initial lockout follows the loaded sync state (A9).
+        syncDivSel->setLocked (! dsp->getTempoSync());
         addAndMakeVisible(*syncDivSel);
 
         hdBypassTog = std::make_unique<DualLabelToggle>();
         hdBypassTog->setupOnOff("HiDmp", "Bypass high-freq damping");
+        // A9: initialize from DSP so preset-loaded bypass shows correctly.
+        hdBypassTog->btn().setToggleState(dsp->getHighDampBypass(), juce::dontSendNotification);
         hdBypassTog->btn().onClick = [dsp, this]{ dsp->setHighDampBypass(hdBypassTog->btn().getToggleState()); };
         hdBypassTog->setLabelColour(VC::Text);
         addAndMakeVisible(*hdBypassTog);
 
         // §8c Freeze toggle
         freezeTog = std::make_unique<DualLabelToggle>();
-        freezeTog->setupOnOff("Freeze", "Freeze/infinite hold - hold the current reverb tail indefinitely");
+        freezeTog->setupOnOff("Freeze", "Freeze/infinite hold - hold the current reverb tail indefinitely.  Right-click to automate.");
+        // A9: initialize from DSP so preset-loaded freeze shows correctly.
+        freezeTog->btn().setToggleState(dsp->getFreeze(), juce::dontSendNotification);
         freezeTog->btn().onClick = [dsp, this]{ dsp->setFreeze(freezeTog->btn().getToggleState()); };
         freezeTog->setLabelColour(VC::Text);
         addAndMakeVisible(*freezeTog);
+        // Task 9: freeze is the musically-automatable toggle -- opt it into
+        // the right-click Automate system (paramId = <base>freeze).
+        addAutomatableToggle(*freezeTog, "freeze");
 
         // Row 1 bindings
         r1knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setRoomSize ((float)r1knobs[0]->slider.getValue()); };
@@ -1178,6 +1277,24 @@ struct ReverbPanel : public EditorPanelBase
         r2knobs[5]->slider.setValue(dsp->getTailModRateHz(),  juce::sendNotificationSync);
         r2knobs[6]->slider.setValue(dsp->getStereoSep(),      juce::sendNotificationSync);
         r2knobs[7]->slider.setValue(dsp->getHighDampHz(),     juce::sendNotificationSync);
+
+        // QA-EffectsReview Task 9: ducking controls (Advanced) -- the DSP has
+        // carried the full duck engine since H-9 with no panel controls; wired
+        // here mirroring the Delay's duck cluster.
+        buildKnobs(*this, duckKnobs, {
+            { "Duck",   0.f, 100.f,   0.f, 1.f, "0..100 %.  Sidechain ducking amount.  When the trigger (SC source, or the dry input if none picked) crosses the DkThr threshold, the wet reverb is attenuated by this amount.  0 = disabled." },
+            { "DkThr", -60.f,   0.f, -24.f, 1.f, "Duck threshold (dB) - trigger level where ducking starts" },
+            { "DkAtt",   1.f, 200.f,  10.f, 1.f, "Duck attack (ms) - how fast the wet ducks once the trigger crosses threshold" },
+            { "DkRel",  10.f,1000.f, 200.f, 5.f, "Duck release (ms) - how fast the wet recovers after the trigger falls back" },
+        });
+        duckKnobs[0]->slider.onValueChange = [dsp,this]{ dsp->setDuckAmount      ((float)duckKnobs[0]->slider.getValue()); };
+        duckKnobs[1]->slider.onValueChange = [dsp,this]{ dsp->setDuckThresholdDb ((float)duckKnobs[1]->slider.getValue()); };
+        duckKnobs[2]->slider.onValueChange = [dsp,this]{ dsp->setDuckAttackMs    ((float)duckKnobs[2]->slider.getValue()); };
+        duckKnobs[3]->slider.onValueChange = [dsp,this]{ dsp->setDuckReleaseMs   ((float)duckKnobs[3]->slider.getValue()); };
+        duckKnobs[0]->slider.setValue(dsp->getDuckAmount(),      juce::sendNotificationSync);
+        duckKnobs[1]->slider.setValue(dsp->getDuckThresholdDb(), juce::sendNotificationSync);
+        duckKnobs[2]->slider.setValue(dsp->getDuckAttackMs(),    juce::sendNotificationSync);
+        duckKnobs[3]->slider.setValue(dsp->getDuckReleaseMs(),   juce::sendNotificationSync);
     }
 
     ~ReverbPanel() override { setLookAndFeel(nullptr); }
@@ -1201,36 +1318,64 @@ struct ReverbPanel : public EditorPanelBase
         // Jewel: top-right of content area
         mJewel.setBounds(b.getRight() - 14, b.getY(), 12, 12);
 
+        // Task 9 Basic/Advanced: Basic = the reference face.  Advanced adds
+        // HFRatio + WetTone (row 1), the duck cluster (row 1), Freeze,
+        // TailShape, HiDamp-bypass -- and the Stereo mode option
+        // (updateModeOptions).
+        const bool adv = ! mBasicMode;
+        if (r1knobs.size() > 2 && r1knobs[2]) r1knobs[2]->setVisible(adv);   // HFRatio
+        if (r1knobs.size() > 5 && r1knobs[5]) r1knobs[5]->setVisible(adv);   // WetTone
+        if (freezeTog)    freezeTog   ->setVisible(adv);
+        if (tailShapeSel) tailShapeSel->setVisible(adv);
+        if (hdBypassTog)  hdBypassTog ->setVisible(adv);
+        for (auto& k : duckKnobs) if (k) k->setVisible(adv);
+        updateModeOptions();
+
         auto r1 = b.removeFromTop(b.getHeight() / 2);
         auto r2 = b;
 
         // H-9 (2026-05-02): right-side controls grid (visual right-to-left).
         // The chicken-heads stack vertically by column so each pair reads as
         // a unit:
-        //   Col A (rightmost): Freeze toggle  /  HiDmp toggle
+        //   Col A (rightmost, Advanced only): Freeze toggle / HiDmp toggle
         //   Col B:             SyncDiv combo  /  Sync toggle
-        //   Col C:             Mode combo     /  TailShape combo
+        //   Col C:             Mode combo     /  TailShape combo (Advanced)
         //   Row 2 only:        ER knob (no row-1 partner)
         // Matched widths per column so the rows align cleanly.
         constexpr int kTogW = 62;   // toggle column width
         constexpr int kCmbW = 66;   // chicken-head column width
 
-        // ── Row 1 right (right-to-left): Freeze | SyncDiv | Mode ──────────
-        auto freezeSlot = r1.removeFromRight(kTogW); r1.removeFromRight(2);
-        if (freezeTog) freezeTog->setBounds(freezeSlot.reduced(1));
+        // ── Row 1 right (right-to-left): [Freeze adv] | SyncDiv | Mode ────
+        if (adv)
+        {
+            auto freezeSlot = r1.removeFromRight(kTogW); r1.removeFromRight(2);
+            if (freezeTog) freezeTog->setBounds(freezeSlot.reduced(1));
+        }
         auto syncDivSlot = r1.removeFromRight(kCmbW); r1.removeFromRight(2);
         if (syncDivSel)  syncDivSel->setBounds(syncDivSlot.reduced(2));
         auto modeSlot = r1.removeFromRight(kCmbW); r1.removeFromRight(2);
         if (modeSel)   modeSel->setBounds(modeSlot.reduced(2));
-        layoutKnobsH(r1, r1knobs);
+        std::vector<VKnob*> row1;
+        for (int i = 0; i < (int) r1knobs.size(); ++i)
+            if (r1knobs[i] && (adv || (i != 2 && i != 5)))
+                row1.push_back(r1knobs[i].get());
+        if (adv)
+            for (auto& k : duckKnobs) if (k) row1.push_back(k.get());
+        layoutKnobsH(r1, row1);
 
-        // ── Row 2 right (right-to-left): HiDmp | Sync | TailShape | ER ────
-        auto hiDmpSlot = r2.removeFromRight(kTogW); r2.removeFromRight(2);
-        if (hdBypassTog) hdBypassTog->setBounds(hiDmpSlot.reduced(1));
+        // ── Row 2 right (right-to-left): [HiDmp adv] | Sync | [TailShape adv] | ER ────
+        if (adv)
+        {
+            auto hiDmpSlot = r2.removeFromRight(kTogW); r2.removeFromRight(2);
+            if (hdBypassTog) hdBypassTog->setBounds(hiDmpSlot.reduced(1));
+        }
         auto syncSlot = r2.removeFromRight(kCmbW); r2.removeFromRight(2);
         if (tempoTog)    tempoTog->setBounds(syncSlot.reduced(1));
-        auto tailShapeSlot = r2.removeFromRight(kCmbW); r2.removeFromRight(2);
-        if (tailShapeSel) tailShapeSel->setBounds(tailShapeSlot.reduced(2));
+        if (adv)
+        {
+            auto tailShapeSlot = r2.removeFromRight(kCmbW); r2.removeFromRight(2);
+            if (tailShapeSel) tailShapeSel->setBounds(tailShapeSlot.reduced(2));
+        }
         auto erSlot = r2.removeFromRight(kKnobSz + 4); r2.removeFromRight(2);
         if (erKnob) erKnob->setBounds(erSlot.withSizeKeepingCentre(kKnobSz, kKnobSz));
         layoutKnobsH(r2, r2knobs);
@@ -1645,21 +1790,31 @@ struct ChorusPanel : public EditorPanelBase
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DelayPanel  (2 rows)
-// Row 1: Time | Feed | Wet | Dry | FBCut | Tone          +  Model combo  +  FBFilter combo
-// Row 2: ModHz | ModFB | Diff | LoBit | FBDist | Spread | Pan  +  BPM  +  Pitch  +  FBDistType combo
+// Row 1: Time | Feed | LoFiSR | WetIn | Wet | Dry | FBCut | FBReso | Tone
+//        (+ Duck | DkThr | DkAtt | DkRel in Advanced)  +  Model  +  FBFilter  (+ Slap in Advanced)
+// Row 2: ModHz | ModTime | ModFB | Diff | DiffSprd | LoBit | FBDst | FBKnee | FBSym | Spread | Pan | Smooth
+//        +  SyncDiv  +  BPM  +  Pitch  +  FBDistType
 // ─────────────────────────────────────────────────────────────────────────────
 struct DelayPanel : public EditorPanelBase
 {
-    std::vector<std::unique_ptr<VKnob>>         r1knobs, r2knobs;
+    std::vector<std::unique_ptr<VKnob>>         r1knobs, r2knobs, duckKnobs;
     std::unique_ptr<DualLabelToggle>            tempoTog, keepPitchTog, fbDistTypeTog;
     std::unique_ptr<ChickenHeadSelector>        modelSel, fbFilterTypeSel, syncDivSel;
     std::unique_ptr<juce::TextButton>           slapbackBtn;   // H-8 (2026-05-02)
 
+    // QA-EffectsReview Task 9: Basic = the exact reference face (FL Fruity
+    // Delay 3) -- which is the ENTIRE Echo panel except our additions.  Our
+    // additions = the Duck cluster (amount + threshold/attack/release) + the
+    // Slap preset button; those hide in Basic.  resized() does show/hide +
+    // reflow.
+    bool hasAdvancedControls() const override { return true; }
+
     std::vector<VKnob*> getExtraKnobs() override
     {
         std::vector<VKnob*> v;
-        for (auto& k : r1knobs) if (k) v.push_back(k.get());
-        for (auto& k : r2knobs) if (k) v.push_back(k.get());
+        for (auto& k : r1knobs)   if (k) v.push_back(k.get());
+        for (auto& k : r2knobs)   if (k) v.push_back(k.get());
+        for (auto& k : duckKnobs) if (k) v.push_back(k.get());
         return v;
     }
 
@@ -1689,12 +1844,13 @@ struct DelayPanel : public EditorPanelBase
             { "Dry",     0.f,    1.f,     1.0f, 0.01f, "Dry output level" },
             { "FBCut",  20.f,18000.f,    80.f,  10.f,  "Feedback filter cutoff (Hz)" },
             { "FBReso",  0.1f,  20.f,   0.707f, 0.01f, "Feedback filter resonance (Q) - essential for BP character, subtle for LP/HP" },
-            { "Tone",   -1.f,    1.f,     0.f,  0.01f, "Tone (-=HP, +=LP)" },
+            { "Tone",   -1.f,    1.f,     0.f,  0.01f, "Tone on the wet output (left = low-pass, right = high-pass, center = off)" },
         });
 
-        // Row 2: ModHz | ModTime | ModFB | Diff | DiffSprd | LoBit | FBDst | FBKnee | FBSym | Spread | Pan | Smooth  (12 knobs)
-        // ModTime placed next to ModHz (its LFO-rate dependency).  Smooth at the
-        // end near the Pitch toggle (its keep-pitch dependency).
+        // Row 2: ModHz | ModTime | ModFB | Diff | DiffSprd | LoBit | FBDst | FBKnee | FBSym | Spread | Pan | Smooth
+        // (+ Duck at idx 12, laid into row 1 in Advanced).  ModTime placed next
+        // to ModHz (its LFO-rate dependency).  Smooth at the end near the Pitch
+        // toggle (its keep-pitch dependency).
         buildKnobs(*this, r2knobs, {
             { "ModHz",    0.f,  20.f,  0.f,  0.1f,  "LFO modulation rate (Hz)" },
             { "ModTime",  0.f,   1.f,  0.f,  0.01f, "LFO depth on delay TIME (chorus / flange-into-delay character). Requires ModHz > 0 (left of this knob) to hear any change" },
@@ -1703,12 +1859,20 @@ struct DelayPanel : public EditorPanelBase
             { "DiffSprd", 0.f,   1.f,  0.5f, 0.01f, "Diffusion spread - scales the 4 allpass base delays (tight 0 to wide 1)" },
             { "LoBit",    1.f,  24.f, 24.f,  0.5f,  "Lo-Fi bit depth (24=off)" },
             { "FBDst",    0.f,  10.f,  1.f,  0.1f,  "Feedback distortion drive" },
-            { "FBKnee",   0.f,   1.f,  0.5f, 0.01f, "Limit-mode knee (0=hard clip, 1=smooth curve)" },
+            { "FBKnee",   0.f,   1.f,  0.5f, 0.01f, "Curve knee - Limit: 0=hard clip, 1=smooth; Sat: 0=sharp (solid-state), 1=soft (valve)" },
             { "FBSym",    0.f,   1.f,  0.f,  0.01f, "Sat-mode symmetry (0=symmetric, 1=asymmetric DC offset)" },
             { "Spread",   0.f,   1.f,  0.f,  0.01f, "Stereo spread (L/R base delay difference)" },
             { "Pan",     -1.f,   1.f,  0.f,  0.01f, "L/R offset pan" },
             { "Smooth",   0.f,   1.f,  0.5f, 0.01f, "Time smoothing - higher = slower transition when delay time changes. Only audible when the Pitch toggle (right of this row) is ON" },
-            { "Duck",     0.f, 100.f,  0.f,  1.0f,  "0..100 %.  Sidechain ducking amount.  When dry input crosses threshold, wet output is attenuated by this amount.  0 = disabled (vocal-friendly setting around 60 %).  Threshold/attack/release at sane defaults (-24 dB / 10 ms / 200 ms)." },
+            { "Duck",     0.f, 100.f,  0.f,  1.0f,  "0..100 %.  Sidechain ducking amount.  When the trigger (SC source, or the dry input if none picked) crosses the DkThr threshold, the wet output is attenuated by this amount.  0 = disabled (vocal-friendly setting around 60 %)." },
+        });
+
+        // QA-EffectsReview Task 9: duck envelope params (Advanced) -- were
+        // DSP-only defaults; now knobs alongside the Duck amount.
+        buildKnobs(*this, duckKnobs, {
+            { "DkThr", -60.f,    0.f, -24.f, 1.f, "Duck threshold (dB) - trigger level where ducking starts" },
+            { "DkAtt",   1.f,  200.f,  10.f, 1.f, "Duck attack (ms) - how fast the wet ducks once the trigger crosses threshold" },
+            { "DkRel",  10.f, 1000.f, 200.f, 5.f, "Duck release (ms) - how fast the wet recovers after the trigger falls back" },
         });
 
         modelSel = std::make_unique<ChickenHeadSelector>();
@@ -1716,7 +1880,7 @@ struct DelayPanel : public EditorPanelBase
             { "S", "Stereo",   "Independent left/right delay lines - natural stereo" },
             { "M", "Mono",     "Summed mono delay - both channels get the same repeats" },
             { "P", "PingPong", "Ping-pong - repeats alternate between left and right" },
-            { "O", "Off",      "Delay line disabled - only dry signal passes" },
+            { "O", "Off",      "No echoes - the filter / lo-fi / distortion / tone chain runs instantly on the input (distortion-unit mode)" },
         });
         modelSel->setBodyTooltip("Delay topology");
         // A9: initialize from DSP so preset-loaded model shows correctly.
@@ -1726,13 +1890,14 @@ struct DelayPanel : public EditorPanelBase
 
         fbFilterTypeSel = std::make_unique<ChickenHeadSelector>();
         fbFilterTypeSel->setOptions({
-            { "L", "FB LP", "Low-pass feedback filter - progressively darker repeats" },
-            { "H", "FB HP", "High-pass feedback filter - thinner, brighter repeats" },
-            { "B", "FB BP", "Band-pass feedback filter - narrows on each repeat" },
+            { "L", "FB LP",  "Low-pass feedback filter - progressively darker repeats" },
+            { "H", "FB HP",  "High-pass feedback filter - thinner, brighter repeats" },
+            { "B", "FB BP",  "Band-pass feedback filter - narrows on each repeat" },
+            { "O", "FB Off", "Feedback filter off - repeats pass unfiltered" },
         });
         fbFilterTypeSel->setBodyTooltip("Feedback-path filter topology");
         // A9: initialize from DSP instead of hardcoded default so preset load reflects stored type.
-        fbFilterTypeSel->setSelectedIndex(juce::jlimit(0, 2, dsp->getFBFilterType()), juce::dontSendNotification);
+        fbFilterTypeSel->setSelectedIndex(juce::jlimit(0, 3, dsp->getFBFilterType()), juce::dontSendNotification);
         fbFilterTypeSel->onChange = [dsp](int idx){ dsp->setFeedbackFilterType(idx); };
         addAndMakeVisible(*fbFilterTypeSel);
 
@@ -1826,7 +1991,7 @@ struct DelayPanel : public EditorPanelBase
             r1knobs[5]->slider.setValue (dsp->getDryOut(),         juce::dontSendNotification);
             r1knobs[6]->slider.setValue (dsp->getFBCutoff(),       juce::dontSendNotification);
             r1knobs[7]->slider.setValue (dsp->getFBResonance(),    juce::dontSendNotification);
-            r1knobs[8]->slider.setValue (dsp->getTone(),           juce::dontSendNotification);
+            r1knobs[8]->slider.setValue (-dsp->getTone(),          juce::dontSendNotification);
             r2knobs[0] ->slider.setValue (dsp->getModRate(),        juce::dontSendNotification);
             r2knobs[1] ->slider.setValue (dsp->getModTimeMod(),     juce::dontSendNotification);
             r2knobs[2] ->slider.setValue (dsp->getModCutoffMod(),   juce::dontSendNotification);
@@ -1839,9 +2004,13 @@ struct DelayPanel : public EditorPanelBase
             r2knobs[9] ->slider.setValue (dsp->getStereoSpread(),   juce::dontSendNotification);
             r2knobs[10]->slider.setValue (dsp->getOffsetPan(),      juce::dontSendNotification);
             r2knobs[11]->slider.setValue (dsp->getSmoothing(),      juce::dontSendNotification);
+            r2knobs[12]->slider.setValue (dsp->getDuckAmount(),     juce::dontSendNotification);
+            duckKnobs[0]->slider.setValue (dsp->getDuckThresholdDb(), juce::dontSendNotification);
+            duckKnobs[1]->slider.setValue (dsp->getDuckAttackMs(),    juce::dontSendNotification);
+            duckKnobs[2]->slider.setValue (dsp->getDuckReleaseMs(),   juce::dontSendNotification);
             // Selectors
             if (modelSel)        modelSel       ->setSelectedIndex (juce::jlimit (0, 3, dsp->getDelayModel()),   juce::dontSendNotification);
-            if (fbFilterTypeSel) fbFilterTypeSel->setSelectedIndex (juce::jlimit (0, 2, dsp->getFBFilterType()), juce::dontSendNotification);
+            if (fbFilterTypeSel) fbFilterTypeSel->setSelectedIndex (juce::jlimit (0, 3, dsp->getFBFilterType()), juce::dontSendNotification);
             if (tempoTog)        tempoTog->btn().setToggleState (dsp->syncBPM,                  juce::dontSendNotification);
             if (keepPitchTog)    keepPitchTog->btn().setToggleState (dsp->getKeepPitch(),       juce::dontSendNotification);
             if (fbDistTypeTog)   fbDistTypeTog->btn().setToggleState (dsp->getFBDistType() == 1, juce::dontSendNotification);
@@ -1857,9 +2026,11 @@ struct DelayPanel : public EditorPanelBase
         r1knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setDryOut            ((float)r1knobs[5]->slider.getValue()); };
         r1knobs[6]->slider.onValueChange = [dsp,this]{ dsp->setFeedbackCutoff    ((float)r1knobs[6]->slider.getValue()); };
         r1knobs[7]->slider.onValueChange = [dsp,this]{ dsp->setFeedbackResonance ((float)r1knobs[7]->slider.getValue()); };
-        r1knobs[8]->slider.onValueChange = [dsp,this]{ dsp->setTone              ((float)r1knobs[8]->slider.getValue()); };
+        // Task 9: display negated vs the DSP (reference direction: left = LP,
+        // right = HP; DSP keeps positive = LP, so old projects sound identical).
+        r1knobs[8]->slider.onValueChange = [dsp,this]{ dsp->setTone             (-(float)r1knobs[8]->slider.getValue()); };
 
-        // Row 2 bindings (12 knobs - ModTime at idx 1, Smooth at idx 11)
+        // Row 2 bindings (ModTime at idx 1, Smooth at idx 11, Duck at idx 12)
         r2knobs[0] ->slider.onValueChange = [dsp,this]{ dsp->setModRate           ((float)r2knobs[0] ->slider.getValue()); };
         r2knobs[1] ->slider.onValueChange = [dsp,this]{ dsp->setModTimeMod        ((float)r2knobs[1] ->slider.getValue()); };
         r2knobs[2] ->slider.onValueChange = [dsp,this]{ dsp->setModCutoffMod      ((float)r2knobs[2] ->slider.getValue()); };
@@ -1874,6 +2045,10 @@ struct DelayPanel : public EditorPanelBase
         r2knobs[11]->slider.onValueChange = [dsp,this]{ dsp->setSmoothing         ((float)r2knobs[11]->slider.getValue()); };
         r2knobs[12]->slider.onValueChange = [dsp,this]{ dsp->setDuckAmount        ((float)r2knobs[12]->slider.getValue()); };
 
+        duckKnobs[0]->slider.onValueChange = [dsp,this]{ dsp->setDuckThresholdDb ((float)duckKnobs[0]->slider.getValue()); };
+        duckKnobs[1]->slider.onValueChange = [dsp,this]{ dsp->setDuckAttackMs    ((float)duckKnobs[1]->slider.getValue()); };
+        duckKnobs[2]->slider.onValueChange = [dsp,this]{ dsp->setDuckReleaseMs   ((float)duckKnobs[2]->slider.getValue()); };
+
         // A9 slider sync from DSP state + clamp cleanup (via public getters).
         // delayMs is already a public field on DelayDSP; the rest need getters.
         r1knobs[0]->slider.setValue(dsp->delayMs,                juce::sendNotificationSync);
@@ -1884,7 +2059,7 @@ struct DelayPanel : public EditorPanelBase
         r1knobs[5]->slider.setValue(dsp->getDryOut(),            juce::sendNotificationSync);
         r1knobs[6]->slider.setValue(dsp->getFBCutoff(),          juce::sendNotificationSync);
         r1knobs[7]->slider.setValue(dsp->getFBResonance(),       juce::sendNotificationSync);
-        r1knobs[8]->slider.setValue(dsp->getTone(),              juce::sendNotificationSync);
+        r1knobs[8]->slider.setValue(-dsp->getTone(),             juce::sendNotificationSync);
         r2knobs[0] ->slider.setValue(dsp->getModRate(),           juce::sendNotificationSync);
         r2knobs[1] ->slider.setValue(dsp->getModTimeMod(),        juce::sendNotificationSync);
         r2knobs[2] ->slider.setValue(dsp->getModCutoffMod(),      juce::sendNotificationSync);
@@ -1898,6 +2073,9 @@ struct DelayPanel : public EditorPanelBase
         r2knobs[10]->slider.setValue(dsp->getOffsetPan(),         juce::sendNotificationSync);
         r2knobs[11]->slider.setValue(dsp->getSmoothing(),         juce::sendNotificationSync);
         r2knobs[12]->slider.setValue(dsp->getDuckAmount(),        juce::sendNotificationSync);
+        duckKnobs[0]->slider.setValue(dsp->getDuckThresholdDb(),  juce::sendNotificationSync);
+        duckKnobs[1]->slider.setValue(dsp->getDuckAttackMs(),     juce::sendNotificationSync);
+        duckKnobs[2]->slider.setValue(dsp->getDuckReleaseMs(),    juce::sendNotificationSync);
 
         // A6 -- apply initial Time-knob lockout state
         applyTimeLockout(dsp->syncBPM);
@@ -1932,6 +2110,13 @@ struct DelayPanel : public EditorPanelBase
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
         b.removeFromRight(4);
 
+        // Task 9 Basic/Advanced: Basic = the reference face; Advanced adds the
+        // Duck cluster (laid into row 1) + the Slap preset button.
+        const bool adv = ! mBasicMode;
+        if (slapbackBtn) slapbackBtn->setVisible(adv);
+        if (r2knobs.size() > 12 && r2knobs[12]) r2knobs[12]->setVisible(adv);
+        for (auto& k : duckKnobs) if (k) k->setVisible(adv);
+
         auto r1 = b.removeFromTop(b.getHeight() / 2);
         auto r2 = b;
 
@@ -1940,10 +2125,20 @@ struct DelayPanel : public EditorPanelBase
         if (modelSel) modelSel->setBounds(mc.reduced(2));
         auto fbc = r1.removeFromRight(66); r1.removeFromRight(2);
         if (fbFilterTypeSel) fbFilterTypeSel->setBounds(fbc.reduced(2));
-        // H-8: Slapback preset button between FB filter selector and the knob row.
-        auto slap = r1.removeFromRight(46); r1.removeFromRight(2);
-        if (slapbackBtn) slapbackBtn->setBounds(slap.reduced(2, 4));
-        layoutKnobsH(r1, r1knobs);
+        if (adv)
+        {
+            // H-8: Slapback preset button between FB filter selector and the knob row.
+            auto slap = r1.removeFromRight(46); r1.removeFromRight(2);
+            if (slapbackBtn) slapbackBtn->setBounds(slap.reduced(2, 4));
+        }
+        std::vector<VKnob*> row1;
+        for (auto& k : r1knobs) if (k) row1.push_back(k.get());
+        if (adv)
+        {
+            if (r2knobs.size() > 12 && r2knobs[12]) row1.push_back(r2knobs[12].get());
+            for (auto& k : duckKnobs) if (k) row1.push_back(k.get());
+        }
+        layoutKnobsH(r1, row1);
 
         // Row 2 right: SyncDiv chicken-head | BPM on/off | Pitch on/off | FBDistType named
         // (taken right-to-left; order left-to-right on screen = SyncDiv / BPM / Pitch / FBDist)
@@ -1955,28 +2150,38 @@ struct DelayPanel : public EditorPanelBase
         if (tempoTog) tempoTog->setBounds(tb.reduced(1));
         auto sd = r2.removeFromRight(66); r2.removeFromRight(2);
         if (syncDivSel) syncDivSel->setBounds(sd.reduced(2));
-        layoutKnobsH(r2, r2knobs);
+        std::vector<VKnob*> row2;
+        for (int i = 0; i < (int) r2knobs.size() && i < 12; ++i)
+            if (r2knobs[i]) row2.push_back(r2knobs[i].get());
+        layoutKnobsH(r2, row2);
     }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VocalDoublerDelayPanel - H-8 (2026-05-02)
-// Renders when DelayDSP::Type == VocalDoubler.  Single row of 6 knobs:
-// Time L | Time R | Detune | Width | Rate | Mix.  Shares the TimeLAF look
-// with the Echo DelayPanel so switching Mode keeps a coherent visual family.
+// Renders when DelayDSP::Type == VocalDoubler.  Single row:
+// Time L | Time R | Detune | Width | Rate | Mix (+ Duck | DkThr | DkAtt |
+// DkRel + Slap in Advanced).  Shares the TimeLAF look with the Echo
+// DelayPanel so switching Mode keeps a coherent visual family.
 // No feedback / lo-fi / mod LFO / diffusion -- VocalDoubler is fundamentally
 // a different effect (dual short detuned taps, no FB).  Slapback button
 // flips back to Echo Type and writes the slapback preset.
 // ─────────────────────────────────────────────────────────────────────────────
 struct VocalDoublerDelayPanel : public EditorPanelBase
 {
-    std::vector<std::unique_ptr<VKnob>> knobsRow;
+    std::vector<std::unique_ptr<VKnob>> knobsRow, duckKnobs;
     std::unique_ptr<juce::TextButton>    slapBtn;
+
+    // QA-EffectsReview Task 9: the doubler Type is itself our addition, but
+    // its six core knobs ARE the effect -- only the Duck cluster + Slap
+    // button (additions on top of the doubler) hide in Basic.
+    bool hasAdvancedControls() const override { return true; }
 
     std::vector<VKnob*> getExtraKnobs() override
     {
         std::vector<VKnob*> v;
-        for (auto& k : knobsRow) if (k) v.push_back (k.get());
+        for (auto& k : knobsRow)  if (k) v.push_back (k.get());
+        for (auto& k : duckKnobs) if (k) v.push_back (k.get());
         return v;
     }
 
@@ -2006,9 +2211,17 @@ struct VocalDoublerDelayPanel : public EditorPanelBase
                 "30-60 % is typical for sit-behind doubling." },
             { "Duck",    0.f,  100.f,  0.f, 1.0f,
                 "0..100 %.  Sidechain ducking amount.  Pick a SC source on the slot header "
-                "(typically the lead vocal) -- when the source crosses threshold, the doubled "
-                "signal is attenuated so it sits behind the lead.  0 = disabled.  No SC source "
-                "= self-ducks on the doubler's own input." },
+                "(typically the lead vocal) -- when the source crosses the DkThr threshold, "
+                "the doubled signal is attenuated so it sits behind the lead.  0 = disabled.  "
+                "No SC source = self-ducks on the doubler's own input." },
+        });
+
+        // QA-EffectsReview Task 9: duck envelope params (Advanced) -- were
+        // DSP-only defaults; now knobs alongside the Duck amount.
+        buildKnobs (*this, duckKnobs, {
+            { "DkThr", -60.f,    0.f, -24.f, 1.f, "Duck threshold (dB) - trigger level where ducking starts" },
+            { "DkAtt",   1.f,  200.f,  10.f, 1.f, "Duck attack (ms) - how fast the doubled signal ducks once the trigger crosses threshold" },
+            { "DkRel",  10.f, 1000.f, 200.f, 5.f, "Duck release (ms) - how fast the doubled signal recovers after the trigger falls back" },
         });
 
         knobsRow[0]->slider.onValueChange = [dsp,this]{ dsp->setDoubleTimeLMs ((float) knobsRow[0]->slider.getValue()); };
@@ -2018,6 +2231,9 @@ struct VocalDoublerDelayPanel : public EditorPanelBase
         knobsRow[4]->slider.onValueChange = [dsp,this]{ dsp->setDoubleRate    ((float) knobsRow[4]->slider.getValue()); };
         knobsRow[5]->slider.onValueChange = [dsp,this]{ dsp->setWetOut        ((float) knobsRow[5]->slider.getValue() * 0.01f); };
         knobsRow[6]->slider.onValueChange = [dsp,this]{ dsp->setDuckAmount    ((float) knobsRow[6]->slider.getValue()); };
+        duckKnobs[0]->slider.onValueChange = [dsp,this]{ dsp->setDuckThresholdDb ((float) duckKnobs[0]->slider.getValue()); };
+        duckKnobs[1]->slider.onValueChange = [dsp,this]{ dsp->setDuckAttackMs    ((float) duckKnobs[1]->slider.getValue()); };
+        duckKnobs[2]->slider.onValueChange = [dsp,this]{ dsp->setDuckReleaseMs   ((float) duckKnobs[2]->slider.getValue()); };
 
         if (dsp)
         {
@@ -2028,6 +2244,9 @@ struct VocalDoublerDelayPanel : public EditorPanelBase
             knobsRow[4]->slider.setValue (dsp->getDoubleRate(),    juce::sendNotificationSync);
             knobsRow[5]->slider.setValue (dsp->getWetOut() * 100.0f, juce::sendNotificationSync);
             knobsRow[6]->slider.setValue (dsp->getDuckAmount(),    juce::sendNotificationSync);
+            duckKnobs[0]->slider.setValue (dsp->getDuckThresholdDb(), juce::sendNotificationSync);
+            duckKnobs[1]->slider.setValue (dsp->getDuckAttackMs(),    juce::sendNotificationSync);
+            duckKnobs[2]->slider.setValue (dsp->getDuckReleaseMs(),   juce::sendNotificationSync);
         }
 
         // H-8: Slapback preset button (matches the one on the Echo DelayPanel).
@@ -2068,11 +2287,26 @@ struct VocalDoublerDelayPanel : public EditorPanelBase
                                                           .withSizeKeepingCentre (kKnobSz, kKnobSz));
         b.removeFromRight (4);
 
-        // Slap button on the right between Output and the knob row.
-        if (slapBtn) slapBtn->setBounds (b.removeFromRight (46).reduced (2, 14));
-        b.removeFromRight (4);
+        // Task 9 Basic/Advanced: Duck cluster + Slap are our additions on top
+        // of the doubler -> Advanced only.
+        const bool adv = ! mBasicMode;
+        if (slapBtn) slapBtn->setVisible (adv);
+        if (knobsRow.size() > 6 && knobsRow[6]) knobsRow[6]->setVisible (adv);
+        for (auto& k : duckKnobs) if (k) k->setVisible (adv);
 
-        layoutKnobsH (b, knobsRow, kKnobSz);
+        if (adv)
+        {
+            // Slap button on the right between Output and the knob row.
+            if (slapBtn) slapBtn->setBounds (b.removeFromRight (46).reduced (2, 14));
+            b.removeFromRight (4);
+        }
+
+        std::vector<VKnob*> row;
+        for (int i = 0; i < (int) knobsRow.size(); ++i)
+            if (knobsRow[i] && (adv || i != 6)) row.push_back (knobsRow[i].get());
+        if (adv)
+            for (auto& k : duckKnobs) if (k) row.push_back (k.get());
+        layoutKnobsH (b, row, kKnobSz);
     }
 };
 
@@ -4536,8 +4770,10 @@ struct WahStylePanel : public EditorPanelBase
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AcousticPreampStylePanel - AD Style Acoustic Preamp
-// 3 knobs (Resonance / Ambience / Notch) + Body chickenhead (Dr/Pa/Ju/Us) +
-// "Load IR..." button (visible/active when Body == User).
+// 4 knobs (Resonance / Ambience / Notch-with-OFF-at-bottom / Level) + Body
+// chickenhead (Dr/Pa/Ju/Us) + "Load IR..." button (active when Body == User).
+// All controls always visible in both rack and board views -- no
+// Basic/Advanced split, matching the Acoustic Simulator (Jeff, 2026-07-02).
 // ─────────────────────────────────────────────────────────────────────────────
 struct AcousticPreampStylePanel : public EditorPanelBase
 {
@@ -4553,23 +4789,31 @@ struct AcousticPreampStylePanel : public EditorPanelBase
         disableOutputVolKnob();
 
         buildKnobs (*this, knobs, {
-            { "Resonance", 0.f,   1.f,    0.5f,  0.001f, "Body convolution wet/dry mix (Dry / Wet)" },
+            { "Resonance", 0.f,   1.f,    0.5f,  0.001f, "Acoustic resonance amount - adaptive: analyzes your playing and breathes the body resonance with level and pick attacks; this knob is the ceiling of that depth.  In User body mode: IR wet/dry mix." },
             { "Ambience",  0.f,   1.f,    0.2f,  0.001f, "Schroeder reverberator wet/dry mix" },
-            { "Notch",     50.f, 1000.f,  250.f, 1.0f,   "Feedback-rejection notch frequency (50 Hz - 1 kHz, log-swept). Q fixed at ~10." },
+            { "Notch",     45.f, 1000.f,  45.f,  1.0f,   "Feedback-rejection notch.  Bottom = OFF (the normal position); raise to sweep 50 Hz - 1 kHz, Q ~10.  Turn until the feedback rumble disappears." },
             { "Level",    -24.f,  12.f,   0.f,   0.1f,   "Output level (dB)" },
         });
         knobs[2]->slider.setSkewFactorFromMidPoint (224.0); // log feel for 50..1000 Hz
+        knobs[2]->slider.textFromValueFunction = [] (double v)
+        { return v < 50.0 ? juce::String ("OFF") : juce::String ((int) v) + " Hz"; };
         knobs[0]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setResonance ((float) knobs[0]->slider.getValue()); };
         knobs[1]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setAmbience  ((float) knobs[1]->slider.getValue()); };
-        knobs[2]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setNotchHz   ((float) knobs[2]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [dsp,this]
+        {
+            if (! dsp) return;
+            const float v = (float) knobs[2]->slider.getValue();
+            if (v < 50.0f) dsp->setNotchOn (false);          // knob bottom = OFF
+            else { dsp->setNotchOn (true); dsp->setNotchHz (v); }
+        };
         knobs[3]->slider.onValueChange = [dsp,this] { if (dsp) dsp->setLevelDb   ((float) knobs[3]->slider.getValue()); };
 
         bodySel = std::make_unique<ChickenHeadSelector>();
         bodySel->setOptions ({
-            { "Dr", "Dreadnought", "Big steel-string body. Punchy low-mids, body resonance ~100 Hz" },
-            { "Pa", "Parlor",      "Small steel-string body. Brighter, body resonance ~180 Hz" },
-            { "Ju", "Jumbo",       "Biggest body. Deep bass, body resonance ~80 Hz" },
-            { "Us", "User",        "Custom impulse response loaded from disk via the Load IR button" },
+            { "Dr", "Dreadnought", "Balanced warm punch - low lift, relaxed low-mids, breathing air/top/body resonances" },
+            { "Pa", "Parlor",      "Small tight box - lows cut, boxy upper-mid bump, higher resonances" },
+            { "Ju", "Jumbo",       "Biggest body - strong low bloom, scooped low-mids, deep wide resonances" },
+            { "Us", "User",        "Custom impulse response loaded from disk via the Load IR button (static - no adaptive layer)" },
         });
         bodySel->setBodyTooltip ("Body type");
         bodySel->setSelectedIndex (dsp ? (int) dsp->mBody : 0, juce::dontSendNotification);
@@ -4608,7 +4852,8 @@ struct AcousticPreampStylePanel : public EditorPanelBase
         {
             knobs[0]->slider.setValue (dsp->mResonance01, juce::sendNotificationSync);
             knobs[1]->slider.setValue (dsp->mAmbience01,  juce::sendNotificationSync);
-            knobs[2]->slider.setValue (dsp->mNotchHz,     juce::sendNotificationSync);
+            knobs[2]->slider.setValue (dsp->getNotchOn() ? dsp->mNotchHz : 45.0f,
+                                       juce::sendNotificationSync);
             knobs[3]->slider.setValue (dsp->mLevelDb,     juce::sendNotificationSync);
         }
         updateLoadBtnState();
@@ -4664,7 +4909,7 @@ struct AcousticSimulatorStylePanel : public EditorPanelBase
 
         buildKnobs (*this, knobs, {
             { "Top",    -15.f, 15.f, 0.f, 0.1f,   "Transient pick attack (HF shelf >4 kHz, modulated by envelope follower). +15 emphasizes pick clack; -15 ducks attack." },
-            { "Body",   -15.f, 15.f, 0.f, 0.1f,   "Body modeler depth (-15 = invert curve, 0 = flat, +15 = full character). In User mode this becomes IR wet/dry mix." },
+            { "Body",   -15.f, 15.f, 0.f, 0.1f,   "Acoustic body depth - bottom = off, center = moderate, top = full voice (bundled body capture + the selected mode's voicing). In User mode: your IR's wet/dry mix." },
             { "Reverb",   0.f,  1.f, 0.2f, 0.001f,"Schroeder reverb wet/dry mix" },
             { "Level",  -24.f, 12.f, 0.f, 0.1f,   "Output level (dB)" },
         });

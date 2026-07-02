@@ -59,9 +59,9 @@ void AcousticSimulatorStyleDSP::prepare (double sampleRate, int maxBlockSize)
 
     mShelfScratch.setSize (2, juce::jmax (1, maxBlockSize), false, true, true);
     mRevScratch  .setSize (2, juce::jmax (1, maxBlockSize), false, true, true);
+    mConvScratch .setSize (2, juce::jmax (1, maxBlockSize), false, true, true);
 
-    mUserConvDirty = true;
-    if (mMode == Mode::User) loadUserIRConvolution();
+    reloadConvIR();
 }
 
 void AcousticSimulatorStyleDSP::reset()
@@ -101,39 +101,43 @@ void AcousticSimulatorStyleDSP::rebuildTopShelf()
 
 void AcousticSimulatorStyleDSP::rebuildBodyEQ()
 {
-    // Body modeler -- 2 parallel IIR stages (mBodyA + mBodyB), config varies
-    // per Mode.  Body knob (-15..+15 dB) scales the gain of both stages.
-    const float depth = juce::jlimit (-15.0f, 15.0f, mBodyDb) / 15.0f;  // -1..+1
+    // Body modeler -- 2 series IIR voicing stages (mBodyA + mBodyB) layered
+    // over the bundled body-IR base in process().  Task 9 re-voicing: the
+    // Body knob now maps -15..+15 -> depth 0..1 (bottom = stage off, center
+    // ~60 %, top = full -- the old 0-centered/invert contract made every
+    // mode identical at the default), and the per-mode curves got real
+    // separation.  All values ear-tunable.
+    const float depth = juce::jlimit (0.0f, 1.0f, (mBodyDb + 15.0f) / 30.0f);
 
     juce::dsp::IIR::Coefficients<float>::Ptr a, b;
 
     switch (mMode)
     {
         case Mode::Standard:
-            // Low-mid scoop @ 600 Hz + neutral high (small upper-mid bump).
+            // Balanced dreadnought: low-mid scoop + presence.
             a = juce::dsp::IIR::Coefficients<float>::makePeakFilter
-                    (mSampleRate, 600.0f, 1.2f, juce::Decibels::decibelsToGain (-6.0f * depth));
+                    (mSampleRate, 600.0f, 1.2f, juce::Decibels::decibelsToGain (-8.0f * depth));
             b = juce::dsp::IIR::Coefficients<float>::makePeakFilter
-                    (mSampleRate, 4000.0f, 0.9f, juce::Decibels::decibelsToGain (3.0f * depth));
+                    (mSampleRate, 4000.0f, 0.9f, juce::Decibels::decibelsToGain (4.0f * depth));
             break;
         case Mode::Jumbo:
-            // Massive low shelf + slight low-mid cut.
+            // Massive low shelf + low-mid cut -- big-body bloom.
             a = juce::dsp::IIR::Coefficients<float>::makeLowShelf
-                    (mSampleRate, 120.0f, 0.7f, juce::Decibels::decibelsToGain (8.0f * depth));
+                    (mSampleRate, 110.0f, 0.7f, juce::Decibels::decibelsToGain (10.0f * depth));
             b = juce::dsp::IIR::Coefficients<float>::makePeakFilter
-                    (mSampleRate, 500.0f, 1.0f, juce::Decibels::decibelsToGain (-3.0f * depth));
+                    (mSampleRate, 550.0f, 1.0f, juce::Decibels::decibelsToGain (-5.0f * depth));
             break;
         case Mode::Enhanced:
-            // Hi-fi: high-shelf boost + slight low boost.
+            // Hi-fi sheen: strong high shelf + supporting low shelf.
             a = juce::dsp::IIR::Coefficients<float>::makeHighShelf
-                    (mSampleRate, 6000.0f, 0.7f, juce::Decibels::decibelsToGain (6.0f * depth));
+                    (mSampleRate, 6000.0f, 0.7f, juce::Decibels::decibelsToGain (9.0f * depth));
             b = juce::dsp::IIR::Coefficients<float>::makeLowShelf
-                    (mSampleRate, 200.0f, 0.7f, juce::Decibels::decibelsToGain (3.0f * depth));
+                    (mSampleRate, 180.0f, 0.7f, juce::Decibels::decibelsToGain (4.0f * depth));
             break;
         case Mode::Piezo:
-            // Upper-mid quack @ ~2.5 kHz + tight low cut.
+            // Undersaddle quack @ ~2.5 kHz + tight low cut.
             a = juce::dsp::IIR::Coefficients<float>::makePeakFilter
-                    (mSampleRate, 2500.0f, 1.5f, juce::Decibels::decibelsToGain (8.0f * depth));
+                    (mSampleRate, 2500.0f, 1.5f, juce::Decibels::decibelsToGain (10.0f * depth));
             b = juce::dsp::IIR::Coefficients<float>::makeHighPass
                     (mSampleRate, 100.0f, 0.7f);
             break;
@@ -152,9 +156,26 @@ void AcousticSimulatorStyleDSP::rebuildBodyEQ()
     if (b) *mBodyB.state = *b;
 }
 
-void AcousticSimulatorStyleDSP::loadUserIRConvolution()
+void AcousticSimulatorStyleDSP::reloadConvIR()
 {
-    mUserConvDirty = false;
+    if (mMode != Mode::User)
+    {
+        // Named modes: the bundled acoustic body capture -- the shared
+        // "acoustic-ness" base the per-mode voicing curves sit on.  Missing
+        // file -> curves-only (mSimIRLoaded gates the conv in process()).
+        auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+        auto f   = exe.getParentDirectory().getChildFile ("Resources")
+                      .getChildFile ("Acoustic IRs")
+                      .getChildFile ("Acoustic Simulator IR.wav");
+        mSimIRLoaded = f.existsAsFile();
+        if (mSimIRLoaded)
+            mConv.loadImpulseResponse (f, juce::dsp::Convolution::Stereo::yes,
+                                          juce::dsp::Convolution::Trim::yes,
+                                          0,
+                                          juce::dsp::Convolution::Normalise::yes);
+        return;
+    }
+
     if (mUserIRPath.isNotEmpty())
     {
         juce::File f (mUserIRPath);
@@ -183,9 +204,12 @@ void AcousticSimulatorStyleDSP::setMode (int m)
     const Mode newMode = static_cast<Mode> (juce::jlimit (0, 4, m));
     if (mMode != newMode)
     {
+        // Reload only across the named<->User boundary (named modes share
+        // the bundled body IR).  Message-thread callers only.
+        const bool needReload = (newMode == Mode::User) != (mMode == Mode::User);
         mMode = newMode;
         rebuildBodyEQ();
-        if (mMode == Mode::User) mUserConvDirty = true;
+        if (needReload) reloadConvIR();
     }
 }
 
@@ -223,7 +247,7 @@ void AcousticSimulatorStyleDSP::setLevelDb (float db)
 void AcousticSimulatorStyleDSP::loadUserIR (const juce::File& file)
 {
     mUserIRPath = file.existsAsFile() ? file.getFullPathName() : juce::String();
-    if (mMode == Mode::User) mUserConvDirty = true;
+    if (mMode == Mode::User) reloadConvIR();   // message-thread caller (panel)
 }
 
 void AcousticSimulatorStyleDSP::process (juce::AudioBuffer<float>& buffer)
@@ -235,7 +259,7 @@ void AcousticSimulatorStyleDSP::process (juce::AudioBuffer<float>& buffer)
     const int n     = buffer.getNumSamples();
     if (numCh == 0 || n == 0) return;
 
-    if (mUserConvDirty && mMode == Mode::User) loadUserIRConvolution();
+    // Conv IRs load on the message thread / prepare only -- never here.
 
     juce::dsp::AudioBlock<float> blk (buffer);
     auto sub = blk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
@@ -288,33 +312,60 @@ void AcousticSimulatorStyleDSP::process (juce::AudioBuffer<float>& buffer)
     }
 
     // ── 3. Body Modeler ─────────────────────────────────────────────────────
+    // Body knob -15..+15 -> depth 0..1 (bottom = stage off, center ~60 %).
+    const float depth01 = juce::jlimit (0.0f, 1.0f, (mBodyDb + 15.0f) / 30.0f);
     if (mMode == Mode::User)
     {
-        // User mode: convolution with wet/dry from Body knob (-15..+15 dB
-        // mapped to 0..1 wet; negative side acts as inverse-blend).
-        juce::AudioBuffer<float> wet (numCh, n);
-        for (int ch = 0; ch < numCh; ++ch)
-            wet.copyFrom (ch, 0, buffer, ch, 0, n);
-        juce::dsp::AudioBlock<float> wb (wet);
-        auto wsub = wb.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
-        juce::dsp::ProcessContextReplacing<float> wctx (wsub);
-        mConv.process (wctx);
-
-        const float bodyMix = juce::jlimit (0.0f, 1.0f, (mBodyDb + 15.0f) / 30.0f); // -15..+15 -> 0..1
-        const float wetGain = bodyMix;
-        const float dryGain = 1.0f - bodyMix * 0.5f;
-        for (int ch = 0; ch < numCh; ++ch)
+        // User mode: convolution with the user IR, wet/dry from the depth.
+        if (depth01 > 0.001f)
         {
-            float* dst = buffer.getWritePointer (ch);
-            const float* w = wet.getReadPointer (ch);
-            for (int i = 0; i < n; ++i) dst[i] = dst[i] * dryGain + w[i] * wetGain;
+            if (mConvScratch.getNumChannels() < numCh || mConvScratch.getNumSamples() < n)
+                mConvScratch.setSize (juce::jmax (2, numCh), n, false, false, true);
+            for (int ch = 0; ch < numCh; ++ch)
+                mConvScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+            juce::dsp::AudioBlock<float> wb (mConvScratch);
+            auto wsub = wb.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing<float> wctx (wsub);
+            mConv.process (wctx);
+
+            const float wetGain = depth01;
+            const float dryGain = 1.0f - depth01 * 0.5f;
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                float* dst = buffer.getWritePointer (ch);
+                const float* w = mConvScratch.getReadPointer (ch);
+                for (int i = 0; i < n; ++i) dst[i] = dst[i] * dryGain + w[i] * wetGain;
+            }
         }
     }
-    else
+    else if (depth01 > 0.001f)
     {
-        // Algorithmic mode: parallel-bank EQ via 2 series stages (parallel
-        // sum approximated by two cascaded peak/shelf filters w/ depth-scaled
-        // gains -- close enough for character emulation, less code).
+        // Named modes (Task 9): the bundled body IR is the shared acoustic
+        // voice, blended by the depth; the per-mode voicing curves (rebuilt
+        // with the same depth baked into their gains) then separate the
+        // modes on top of it.
+        if (mSimIRLoaded)
+        {
+            if (mConvScratch.getNumChannels() < numCh || mConvScratch.getNumSamples() < n)
+                mConvScratch.setSize (juce::jmax (2, numCh), n, false, false, true);
+            for (int ch = 0; ch < numCh; ++ch)
+                mConvScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+            juce::dsp::AudioBlock<float> wb (mConvScratch);
+            auto wsub = wb.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing<float> wctx (wsub);
+            mConv.process (wctx);
+
+            // Center of the knob lands ~60 % wet so a fresh pedal is audibly
+            // acoustic; top = full voice.
+            const float wetGain = juce::jmin (1.0f, depth01 * 1.2f);
+            const float dryGain = 1.0f - wetGain * 0.5f;
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                float* dst = buffer.getWritePointer (ch);
+                const float* w = mConvScratch.getReadPointer (ch);
+                for (int i = 0; i < n; ++i) dst[i] = dst[i] * dryGain + w[i] * wetGain;
+            }
+        }
         mBodyA.process (ctx);
         mBodyB.process (ctx);
     }
@@ -388,5 +439,5 @@ void AcousticSimulatorStyleDSP::setStateInformation (const void* data, int sz)
     setLevelDb ((float)(double)  state.getProperty ("levelDb",  0.0));
     bypassed = ((int) state.getProperty ("bypassed", 0)) != 0;
 
-    if (mMode == Mode::User) mUserConvDirty = true;
+    reloadConvIR();   // message-thread caller (preset/project load)
 }

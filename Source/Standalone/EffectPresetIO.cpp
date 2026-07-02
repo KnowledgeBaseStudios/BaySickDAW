@@ -350,7 +350,10 @@ namespace
         // ── Reverb (3) -- Vocal Tame is the H-9 polish preset ──────────
         // Setter contract: setSize, setDecay (RT60 sec), setDamp (0..1
         // bright->dark), setPreDelay (ms), setWet (0..1), setStereoSep (0..200).
+        // setProcessingMode(0) pins Stereo -- presets authored before the
+        // fresh-instance default flipped to Mid (Task 9).
         { EffectType::Reverb, "70s Plate", [](DSPBase* p){ AS(ReverbDSP)
+            d->setProcessingMode (0);
             d->setSize (0.55f);
             d->setDecay (1.8f);
             d->setDamp (0.40f);
@@ -359,6 +362,7 @@ namespace
             d->setStereoSep (100.0f);
         }},
         { EffectType::Reverb, "Cathedral", [](DSPBase* p){ AS(ReverbDSP)
+            d->setProcessingMode (0);
             d->setSize (0.95f);
             d->setDecay (4.5f);
             d->setDamp (0.55f);
@@ -371,6 +375,7 @@ namespace
             // (algo=4) -- tiny 4-line FDN, heavy HF damp, no modulation.
             // Vocal-safe by design; the small + dark knob values below
             // shape it for "tame the reverb behind a lead vocal" duty.
+            d->setProcessingMode (0);
             d->setAlgorithm (4);
             d->setSize (0.40f);
             d->setDecay (1.2f);
@@ -417,6 +422,7 @@ namespace
             d->setDelayModel (0);   // Stereo
             d->setDelayMs (500.0f);
             d->setFeedbackLevel (0.45f);
+            d->setFBDistType (0);   // pin Limit -- preset authored before the fresh-instance default flipped to Sat
             d->setWetOut (0.30f);
             d->setDryOut (1.0f);
             d->setTone (0.20f);
