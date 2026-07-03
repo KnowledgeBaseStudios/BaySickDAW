@@ -1189,12 +1189,13 @@ needed to find what you should pull up to review the work.
 - Effort: TBD at batch open.
 - **Bucket:** Effects
 
-#### **QA-MultiBlockHazard: Audio/Vox/Inst Multi-Call-Per-Block Stateful-Effect Hazard** *(NEW — inserted 2026-06-06 at QA-EffectsReview open; split from QA-EffectsReview item (d))*
+#### **QA-MultiBlockHazard: Audio/Vox/Inst Multi-Call-Per-Block Stateful-Effect Hazard** *(NEW — inserted 2026-06-06 at QA-EffectsReview open; split from QA-EffectsReview item (d); STATUS:OPEN 2026-07-02)*
+- **STATUS: OPEN (2026-07-02).**  **Plan file:** [`Plans & Specs/Batch Plans/fluffy-toasting-hartmanis.md`](Batch Plans/fluffy-toasting-hartmanis.md).
 - Items: on Audio / Vox / Inst mixer strips an insert effect's `process()` runs once PER audio clip / per source in a block instead of once, so stateful effects (delay lines, LFO phase, compressor envelopes, reverb tails) advance 2-3x per block and corrupt.  The engine compensates only for peak metering (CAS-max, `VibeGraph.cpp:2500`), NOT DSP state.
 - Scope: engine-layer restructure — sum each strip's sources into one buffer, run the rack exactly ONCE per block.  Touches the render tasks (`CompositeAudioInsertTask` / `VoxStripTask` / `InstStripTask`) + `renderFilePlayPlayer` / `renderAudioClipsForRow` + `routeInsertOutput`.  NOT effect-DSP fidelity (that is QA-EffectsReview).
 - Risk: HIGH — hot audio path under MT.  **Mandatory full live-input + playback regression pass on Audio/Vox/Inst before close.**
 - Sequencing: **immediately after QA-EffectsReview, before QA-CutSelfReview** (Jeff's confirmed slot 2026-06-06 per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 2026-06-06 Forks entry).
-- Effort: TBD at batch open.
+- Effort: ~3-4h code across 2 tasks (Task 1 Audio path + Task 2 Vox+Inst path) + Jeff's Debug->Release regression cycles on all 3 strip types (verification-heavy).
 - **Bucket:** Cross-cutting Infrastructure
 
 #### **QA-CutSelfReview: "Cut Self" on Layers/Bass** *(NEW — inserted 2026-06-05 at QA-Ee close)*
