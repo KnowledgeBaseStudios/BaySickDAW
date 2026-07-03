@@ -2496,14 +2496,14 @@ void VibeGraph::processInsert(InsertKind kind, int index,
 
         // QA-AudioMeters fix-up (2026-05-24): CAS-max MERGE (not plain store) of
         // the InsertNode's freshly published peak into VibeGraph's per-kind
-        // public-member array for the (kind, index) slot.  CAS-max is required
-        // because processInsert is called MULTIPLE TIMES PER BLOCK for some
-        // InsertKinds: Audio (Flow A clip-engine in CompositeAudioInsertTask +
-        // per-clip Flow B inside renderAudioClipsForRow), Vox + Inst (per-
-        // FilePlay-player loop in VoxStripTask / InstStripTask).  A plain
-        // store would overwrite each prior call's peak with the latest; CAS-
-        // max preserves the maximum across all calls within a single audio
-        // block.  drainMeterAtomicsForUI's per-kind G1 loop drains the
+        // public-member array for the (kind, index) slot.
+        // QA-MultiBlockHazard (2026-07-02): processInsert is now called ONCE per
+        // block for every InsertKind -- Audio / Vox / Inst were collapsed to a
+        // single summed-sources pass (previously Flow A + per-clip Flow B on
+        // Audio, and a per-FilePlay-player loop on Vox / Inst).  The CAS-max is
+        // retained as a harmless single-call max -- safe if a future path ever
+        // re-introduces multiple calls -- but no longer compensates for a live
+        // multi-call.  drainMeterAtomicsForUI's per-kind G1 loop drains the
         // accumulated mirror into the PluginProcessor mirror that the UI
         // polls.  Mono branch removed -- the m<Kind>InsertPeakDb mono mirrors
         // have no UI consumer (per-batch dead-write cleanup); InsertNode->

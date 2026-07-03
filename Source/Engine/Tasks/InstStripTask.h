@@ -30,8 +30,10 @@ class VibeSynthProcessor;
 //   9. Listen gate (live-input case) -> silence if monitor off.
 //
 // QA-Ef (2026-05-21): this is the live audio plumbing.  Dry-recorder tap is
-// wired via VibeSynthProcessor::tapDryRecorder (see ::run); FilePlay routing
-// is wired via VibeSynthProcessor::renderFilePlayPlayer.
+// wired via VibeSynthProcessor::tapDryRecorder (see ::run).  QA-MultiBlockHazard
+// (Task 2): the FilePlay branch decodes every routed clip into a per-task sum,
+// then runs the engine + insert chain ONCE via VibeSynthProcessor::
+// decodeFilePlayClip + finalizeFilePlayStrip.
 class InstStripTask : public RenderTask
 {
 public:

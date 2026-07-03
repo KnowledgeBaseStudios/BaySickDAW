@@ -29,7 +29,9 @@ class BaySickVocalProcessor;
 //
 // QA-Ef (2026-05-21): this is the only render path now; the serial fallback
 // was deleted.  Dry-recorder tap is wired via VibeSynthProcessor::tapDryRecorder
-// (see ::run); FilePlay routing is wired via VibeSynthProcessor::renderFilePlayPlayer.
+// (see ::run).  QA-MultiBlockHazard (Task 2): the FilePlay branch decodes every
+// routed clip into a per-task sum, then runs the engine + insert chain ONCE via
+// VibeSynthProcessor::decodeFilePlayClip + finalizeFilePlayStrip.
 class VoxStripTask : public RenderTask
 {
 public:

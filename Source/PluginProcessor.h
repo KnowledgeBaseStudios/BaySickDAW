@@ -616,38 +616,33 @@ public:
                                  const AudioClipBlockContext& ctx,
                                  juce::AudioBuffer<float>* mtDest);
 
-    // 2026-05-06 (Batch 9b Item 9): per-clip FilePlay rendering helper.
-    // Decodes the clip portion that falls in this block (phase vocoder OR
-    // direct-path SR-interp), copies into the matching Vox/Inst engine's
-    // scratch, runs eng->processBlock + processInsert + routes the output.
+    // QA-MultiBlockHazard (Task 2): the Vox/Inst FilePlay path is split into a
+    // per-clip decode + a once-per-block finalize so a stateful engine + rack
+    // advance once per block instead of once per clip (was renderFilePlayPlayer,
+    // Batch 9b Item 9).  Caller MUST be iterating mCurrentBlockClipSnapshot->
+    // players (snapshot captured at processBlock top, alive for the block via the
+    // RetirementQueue ack) and MUST have filtered the player by FilePlay status
+    // (player.routeChannel is a Vox or Inst id).
     //
-    // 2026-05-06 (Batch 9c B1): caller MUST be iterating over
-    // mCurrentBlockClipSnapshot->players (or have already obtained the
-    // player reference from there).  The snapshot is captured at the top
-    // of processBlock and is guaranteed alive for the duration of the
-    // block via the RetirementQueue ack protocol.  Caller MUST also have
-    // already filtered the player by FilePlay status (player.routeChannel
-    // must be a Vox or Inst id).
-    //
-    // engineMidi: per-page MIDI buffer for the Vox/Inst page identified by
-    // player.routeChannel (e.g. mCtx->voxPageMidi[mIndex] from a VoxStripTask).
-    //
-    // mtDest: the strip's pull-model output buffer (always non-null).  Engine
-    //         output is addFrom'd into it so the task graph's downstream
-    //         consumers see it on this strip's mOutputBuffer.
-    //
-    // Returns true if a clip portion was rendered (engine was driven).
-    // Returns false if the clip is out of range / muted / EOF / etc.
-    //
-    // QA-E Task 3 follow-up (2026-05-12): engineScratch parameter added so
-    // the caller provides the engine-input buffer rather than the function
-    // touching shared members.  VoxStripTask / InstStripTask each pass their
-    // own per-task scratch (no cross-strip race).
-    bool renderFilePlayPlayer (AudioClipPlayer&             player,
+    // decodeFilePlayClip: decode the in-block portion of ONE clip (phase vocoder
+    // OR direct-path SR-interp) into ctx.clipScratch and ADD it (raw) into
+    // sumDest.  Does NOT run the engine or insert chain.  Caller sizes + clears
+    // sumDest before the per-clip loop.  Returns true if the clip contributed
+    // (false = out of range / muted / choke / EOF).
+    bool decodeFilePlayClip (AudioClipPlayer&             player,
+                             const AudioClipBlockContext& ctx,
+                             juce::AudioBuffer<float>&    sumDest);
+
+    // finalizeFilePlayStrip: run the Vox/Inst engine + insert chain ONCE on the
+    // summed clips (engineSum), then addFrom into mtDest (the strip's pull-model
+    // output buffer, non-null).  routeCh = the strip's channel id (all summed
+    // clips share it); engineMidi = the page's per-block MIDI buffer.  Caller
+    // invokes this once per block iff >=1 clip contributed.
+    void finalizeFilePlayStrip (int                          routeCh,
                                 const AudioClipBlockContext& ctx,
                                 juce::MidiBuffer&            engineMidi,
                                 juce::AudioBuffer<float>*    mtDest,
-                                juce::AudioBuffer<float>&    engineScratch);
+                                juce::AudioBuffer<float>&    engineSum);
 
     // QA-AudioMeters (2026-05-24): per-kind insert peak snapshot mirrors -- the
     // UI poll target for all 8 InsertKinds.  Audio thread writes via

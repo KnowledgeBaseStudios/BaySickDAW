@@ -56,3 +56,13 @@ close after surfacing the strip list to Jeff.
 - **DECISION (Jeff):** route this fix WITH the clip-knobs feature into the SAME new dedicated batch ("kind of all one thing" — same clip-drop subsystem). Slot TBD at close. Route formally per Rule 3 at close: fold into the same new §5 batch row + §9 Forks entry as the knobs feature.
 
 **Next:** commit Task 1 → Task 2 (Vox+Inst).
+
+## 2026-07-02 — Task 2 VERIFIED (Vox+Inst FilePlay path)
+
+**Task 2 (Vox/Inst FilePlay multi-call) VERIFIED — PASS:** `renderFilePlayPlayer` split into `decodeFilePlayClip` (per-clip decode → per-task sum buffer) + `finalizeFilePlayStrip` (engine `processBlock` + insert chain run ONCE on the sum → route). `VoxStripTask` / `InstStripTask` FilePlay branches size + clear `mEngineScratch` as the sum, loop the decode, then finalize iff ≥1 clip contributed. CAS-max metering comment updated (SC2, comment-only, no code change). All Jeff Debug+Release tests pass: Vox live monitor/record, Vox FilePlay single + overlap (clean single pass), Inst live (sfizz MIDI + live-input, idle-suspend intact), Inst FilePlay single.
+- **7 files:** `PluginProcessor.cpp` / `.h`, `VoxStripTask.cpp` / `.h`, `InstStripTask.cpp` / `.h`, `VibeGraph.cpp`.
+- **Rule 6:** FilePlay-branch comments in both strip tasks updated to the new split. **3 out-of-region stale `renderFilePlayPlayer` refs left for `/review-batch`** (not my edited regions): `PluginProcessor.h:583`, `PluginProcessor.cpp:2425`, `StandaloneEditor.cpp:10948`.
+
+**Diagnostic Instrumentation Catalog:** NONE added this batch — no `DBG` / `Logger` / temp `jassert` / debug `AlertWindow` / temp-file traces were needed (Task 1 + Task 2 verified via audible behavior).
+
+**Next:** commit Task 2 → close sequence (Task 3): `/draft-doc batch-close` → apply Work Log entry → `/review-batch` → route clip-knobs + grid-mute findings to a new batch (Jeff picks slot) → close commit.

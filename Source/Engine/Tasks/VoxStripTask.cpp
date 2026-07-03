@@ -37,12 +37,12 @@ void VoxStripTask::run()
     juce::AudioBuffer<float> blockView (ptrs, mOutputBuffer->getNumChannels(), n);
     blockView.clear();
 
-    // 2026-05-06 (Batch 9b Item 9): FilePlay branch.  When an audio clip is
+    // 2026-05-06 (Batch 9b Item 9): FilePlay branch.  When audio clips are
     // routed to this Vox engine (player.routeChannel == channelId),
-    // VibeSynthProcessor::renderFilePlayPlayer decodes the clip + drives the
-    // engine + processInsert + writes to blockView (mtDest).  The live-input
-    // path below is skipped entirely.  Same path the serial Pass 1 loop
-    // uses, so the helper is exercised under flag=false.
+    // QA-MultiBlockHazard (Task 2) decodes every routed clip into a per-task
+    // sum (decodeFilePlayClip) then drives the engine + insert chain ONCE on
+    // the sum (finalizeFilePlayStrip -> blockView).  The live-input path below
+    // is skipped entirely.
     if (mIndex >= 0 && mIndex < (int) mProcessor->mVoxFilePlayActive.size()
         && mProcessor->mVoxFilePlayActive[(size_t) mIndex])
     {
@@ -84,7 +84,7 @@ void VoxStripTask::run()
         // shared mProcessor->mAudioClipScratch -- the documented race went
         // live once the Task 3 pre-scan fix activated MT FilePlay, producing
         // all-clips-mixed-into-every-strip cross-pollution on playback).
-        // Must size before renderFilePlayPlayer reads it; the function
+        // Must size before decodeFilePlayClip reads it; the function
         // assumes the caller sized clipScratch (serial Pass 1 does so via
         // mAudioClipScratch at processBlock top).
         mClipScratch.setSize (blockView.getNumChannels(), n, false, false, true);
@@ -95,17 +95,25 @@ void VoxStripTask::run()
             ? mCtx->voxPageMidi[mIndex] : emptyMidi;
 
         // 2026-05-07 (Batch 9c follow-up): populate this strip's SC accumulator
-        // so renderFilePlayPlayer's internal processInsert sees real SC data.
+        // so finalizeFilePlayStrip's processInsert sees real SC data.
         pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
         // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot.
-        // QA-E Task 3 follow-up (2026-05-12): pass per-task mEngineScratch
-        // (no race vs the previously-shared mProcessor->mVoxEngineScratch).
+        // QA-MultiBlockHazard (Task 2): decode every routed clip into the
+        // per-task engine-sum buffer, then run the engine + insert chain ONCE on
+        // the sum -- so a stateful engine + rack advance once per block, not once
+        // per FilePlay clip.
+        mEngineScratch.setSize (blockView.getNumChannels(), n, false, false, true);
+        mEngineScratch.clear();
+        bool anyClip = false;
         for (auto& player : mProcessor->mCurrentBlockClipSnapshot->players)
         {
             if (player.routeChannel != channelId) continue;
-            mProcessor->renderFilePlayPlayer (player, clipCtx, engineMidi, &blockView, mEngineScratch);
+            if (mProcessor->decodeFilePlayClip (player, clipCtx, mEngineScratch))
+                anyClip = true;
         }
+        if (anyClip)
+            mProcessor->finalizeFilePlayStrip (channelId, clipCtx, engineMidi, &blockView, mEngineScratch);
         return;   // FilePlay handled; skip live-input + engine branch below
     }
 

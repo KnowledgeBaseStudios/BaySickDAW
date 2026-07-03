@@ -37,8 +37,9 @@ void InstStripTask::run()
     blockView.clear();
 
     // 2026-05-06 (Batch 9b Item 9): FilePlay branch - see VoxStripTask::run for
-    // rationale.  Audio clips routed to this Inst engine drive the chain via
-    // renderFilePlayPlayer (decode + engine + processInsert + write to mtDest).
+    // rationale.  QA-MultiBlockHazard (Task 2): audio clips routed to this Inst
+    // engine are decoded into a per-task sum (decodeFilePlayClip) then driven
+    // through the engine + insert chain ONCE (finalizeFilePlayStrip).
     if (mIndex >= 0 && mIndex < (int) mProcessor->mInstFilePlayActive.size()
         && mProcessor->mInstFilePlayActive[(size_t) mIndex])
     {
@@ -83,17 +84,25 @@ void InstStripTask::run()
             ? mCtx->instPageMidi[mIndex] : emptyMidi;
 
         // 2026-05-07 (Batch 9c follow-up): SC accumulator population so
-        // renderFilePlayPlayer's internal processInsert sees real SC data.
+        // finalizeFilePlayStrip's processInsert sees real SC data.
         pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
         // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot.
-        // QA-E Task 3 follow-up (2026-05-12): pass per-task mEngineScratch
-        // (no race vs the previously-shared mProcessor->mInstEngineScratch).
+        // QA-MultiBlockHazard (Task 2): decode every routed clip into the
+        // per-task engine-sum buffer, then run the engine + insert chain ONCE on
+        // the sum -- so a stateful engine + rack advance once per block, not once
+        // per FilePlay clip.
+        mEngineScratch.setSize (blockView.getNumChannels(), n, false, false, true);
+        mEngineScratch.clear();
+        bool anyClip = false;
         for (auto& player : mProcessor->mCurrentBlockClipSnapshot->players)
         {
             if (player.routeChannel != channelId) continue;
-            mProcessor->renderFilePlayPlayer (player, clipCtx, engineMidi, &blockView, mEngineScratch);
+            if (mProcessor->decodeFilePlayClip (player, clipCtx, mEngineScratch))
+                anyClip = true;
         }
+        if (anyClip)
+            mProcessor->finalizeFilePlayStrip (channelId, clipCtx, engineMidi, &blockView, mEngineScratch);
         return;
     }
 
