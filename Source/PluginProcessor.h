@@ -605,13 +605,14 @@ public:
         juce::AudioBuffer<float>* clipScratch = nullptr;   // shared decode buffer
     };
 
-    // Render all non-FilePlay audio clips on `row` through the row's Audio
-    // InsertNode, adding each clip's processed output into `mtDest` (the row
-    // InsertNode's pull-model output buffer; always non-null).  Called per
-    // audio row by CompositeAudioInsertTask::run.  FilePlay clips (clip routed
-    // to a Vox/Inst page) are skipped - handled by the FilePlay pass in
-    // processBlock.
-    void renderAudioClipsForRow (int row,
+    // Decode all non-FilePlay audio clips on `row` and sum their RAW output into
+    // `mtDest` (the row InsertNode's pull-model output buffer; always non-null).
+    // Called per audio row by CompositeAudioInsertTask::run.  QA-MultiBlockHazard:
+    // the insert chain is NOT applied here -- the caller runs processInsert ONCE
+    // per block on the summed sources.  Returns true if >=1 clip contributed.
+    // FilePlay clips (clip routed to a Vox/Inst page) are skipped - handled by
+    // the FilePlay pass in processBlock.
+    bool renderAudioClipsForRow (int row,
                                  const AudioClipBlockContext& ctx,
                                  juce::AudioBuffer<float>* mtDest);
 

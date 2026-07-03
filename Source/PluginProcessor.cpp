@@ -393,23 +393,26 @@ bool VibeSynthProcessor::isBusesLayoutSupported(const BusesLayout& layouts) cons
     return true;
 }
 
-// renderAudioClipsForRow: decode + insert-chain processing for every
-// NON-FilePlay audio clip whose trackRow matches `row`.  Called per audio row
-// by CompositeAudioInsertTask::run -- each clip's processed output is added
-// into the row InsertNode pull-model buffer (mtDest, always non-null) so the
-// task graph's downstream consumers see the summed row output.  FilePlay clips
-// (routeChannel pointing at a Vox/Inst page) are skipped here.
-void VibeSynthProcessor::renderAudioClipsForRow (int row,
+// renderAudioClipsForRow: decode every NON-FilePlay audio clip whose trackRow
+// matches `row` and sum its RAW output into the row's block buffer (mtDest,
+// always non-null).  Called per audio row by CompositeAudioInsertTask::run.
+// QA-MultiBlockHazard: the insert chain (rack / EQ / fader) is NOT run here --
+// the caller runs processInsert ONCE per block on the summed sources, so a
+// stateful rack advances once per block instead of once per clip.  Returns true
+// if >=1 clip contributed (the caller uses this to gate the single chain pass).
+// FilePlay clips (routeChannel pointing at a Vox/Inst page) are skipped here.
+bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                                                   const AudioClipBlockContext& ctx,
                                                   juce::AudioBuffer<float>* mtDest)
 {
     if (row < 0 || row >= kMaxAudioRows)
-        return;
+        return false;
     if (mPatternManager == nullptr || ctx.mxState == nullptr || ctx.clipScratch == nullptr)
-        return;
+        return false;
 
     const auto& mx = *ctx.mxState;
     auto& clipScratch = *ctx.clipScratch;
+    bool anyContributed = false;
 
     // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot captured
     // at the top of processBlock.  CompositeAudioInsertTask calls this helper
@@ -613,25 +616,21 @@ void VibeSynthProcessor::renderAudioClipsForRow (int row,
             }
         }
 
-        // 5F-4a Batch 6: route per-clip scratch through Audio InsertNode
-        // (polarity → width → rack → post-rack EQ → fader × mute × solo → PDC → peak).
-        // QA-AudioMeters (2026-05-24): the InsertNode now CAS-max's its peakDb via
-        // publishPeakReading, and processInsert exchange-stores into VibeGraph's
-        // audioInsertPeakDb*[row] array; consecutive processInsert calls within
-        // one CompositeAudioInsertTask::run accumulate (Flow A + Flow B both
-        // contribute via the per-call exchange-store).  No per-flow drain needed.
-        mVibeGraph.processInsert (VibeGraph::InsertKind::Audio, row,
-                                   clipScratch, ctx.bpm, ctx.anySolo);
-
-        // Publish: add the clip's processed output into the row InsertNode's
-        // pull-model buffer (additive so multiple clips on the row sum).
+        // QA-MultiBlockHazard (Task 1): sum this clip's RAW decoded output into
+        // the row block buffer (additive so multiple clips on the row sum).  The
+        // insert chain runs ONCE per block on this summed buffer in
+        // CompositeAudioInsertTask::run -- not per-clip -- so a stateful rack
+        // (delay / reverb / LFO / compressor) advances once per block.
         {
             const int nc = juce::jmin (mtDest->getNumChannels(),
                                        clipScratch.getNumChannels());
             for (int c = 0; c < nc; ++c)
                 mtDest->addFrom (c, 0, clipScratch, c, 0, ctx.numSamples);
         }
+        anyContributed = true;
     }
+
+    return anyContributed;
 }
 
 // ── Batch 9b Item 9 (2026-05-06): renderFilePlayPlayer ───────────────────────

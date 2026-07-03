@@ -17,19 +17,23 @@ class VibeSynthProcessor;
 //   1. Clip-engine flow (was ClipPageTask): a sampler-style
 //      juce::AudioProcessor that the user assigned to a Clips ribbon tab,
 //      driven by piano-roll MIDI from BlockContext::clipPageMidi[row].
-//      processBlock writes engine audio into the row's arena slot;
-//      processInsert applies polarity / preEq / width / rack / postEq /
-//      fader x mute x solo / PDC / peak in-place.
+//      processBlock writes RAW engine audio into the row's arena slot.
 //
 //   2. Arrangement-clip flow (was AudioInsertTask): per-row decode of
 //      every NON-FilePlay AudioClipPlayer through the shared helper
 //      VibeSynthProcessor::renderAudioClipsForRow (mtDest = blockView).
-//      Each clip's post-rack output is ADDED to blockView (additive).
+//      Each clip's RAW decoded output is ADDED to blockView (additive).
 //
-// Order B inside run(): clear blockView once -> clip-engine flow
-// (if engine set) -> arrangement-clip flow (if song mode + has clips).
-// Both contributions (clip-engine flow + arrangement-clip flow) accumulate
-// in mOutputBuffer at audioInsert(row) for the row's downstream consumers.
+// QA-MultiBlockHazard: both flows sum their RAW output into blockView, then the
+// insert chain (processInsert: polarity / preEq / width / rack / postEq / fader
+// x mute x solo / PDC / peak) runs exactly ONCE per block on the summed buffer
+// -- so a stateful rack advances once per block, not once per source.
+//
+// Order inside run(): clear blockView once -> clip-engine flow (raw, if engine
+// set) -> arrangement-clip flow (raw, if song mode + has clips) -> single
+// processInsert (iff >=1 source contributed; N->1 calls, never 0->1).  The
+// summed post-chain output lands in mOutputBuffer at audioInsert(row) for the
+// row's downstream consumers.
 //
 // Lifecycle (Strategy 1a):
 //   - One instance per audio row, created by
