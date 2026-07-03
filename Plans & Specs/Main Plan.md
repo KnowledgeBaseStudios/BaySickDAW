@@ -1189,8 +1189,8 @@ needed to find what you should pull up to review the work.
 - Effort: TBD at batch open.
 - **Bucket:** Effects
 
-#### **QA-MultiBlockHazard: Audio/Vox/Inst Multi-Call-Per-Block Stateful-Effect Hazard** *(NEW — inserted 2026-06-06 at QA-EffectsReview open; split from QA-EffectsReview item (d); STATUS:OPEN 2026-07-02)*
-- **STATUS: OPEN (2026-07-02).**  **Plan file:** [`Plans & Specs/Batch Plans/fluffy-toasting-hartmanis.md`](Batch Plans/fluffy-toasting-hartmanis.md).
+#### **QA-MultiBlockHazard: Audio/Vox/Inst Multi-Call-Per-Block Stateful-Effect Hazard** *(NEW — inserted 2026-06-06 at QA-EffectsReview open; split from QA-EffectsReview item (d); STATUS:CLOSED 2026-07-02)*
+- **STATUS: CLOSED (2026-07-02).**  Audio + Vox/Inst insert chain collapsed to once-per-block on summed sources (completes Carry-Forward §4 "sum before insert DSP" intent).  Work Log entry: [`Implemented Work Log.md`](Implemented Work Log.md) 2026-07-02 22:10 PT.  Close routing → §9 fifty-third Forks entry (2 pre-existing clip-drop findings → new QA-ClipPlayback batch).  **Plan file:** [`Plans & Specs/Batch Plans/fluffy-toasting-hartmanis.md`](Batch Plans/fluffy-toasting-hartmanis.md).
 - Items: on Audio / Vox / Inst mixer strips an insert effect's `process()` runs once PER audio clip / per source in a block instead of once, so stateful effects (delay lines, LFO phase, compressor envelopes, reverb tails) advance 2-3x per block and corrupt.  The engine compensates only for peak metering (CAS-max, `VibeGraph.cpp:2500`), NOT DSP state.
 - Scope: engine-layer restructure — sum each strip's sources into one buffer, run the rack exactly ONCE per block.  Touches the render tasks (`CompositeAudioInsertTask` / `VoxStripTask` / `InstStripTask`) + `renderFilePlayPlayer` / `renderAudioClipsForRow` + `routeInsertOutput`.  NOT effect-DSP fidelity (that is QA-EffectsReview).
 - Risk: HIGH — hot audio path under MT.  **Mandatory full live-input + playback regression pass on Audio/Vox/Inst before close.**
@@ -1198,10 +1198,18 @@ needed to find what you should pull up to review the work.
 - Effort: ~3-4h code across 2 tasks (Task 1 Audio path + Task 2 Vox+Inst path) + Jeff's Debug->Release regression cycles on all 3 strip types (verification-heavy).
 - **Bucket:** Cross-cutting Infrastructure
 
+#### **QA-ClipPlayback: Timeline-WAV Player Controls + Per-Grid-Row Clip Mute** *(NEW — inserted 2026-07-02 at QA-MultiBlockHazard close; two pre-existing clip-drop findings)*
+- Items: (1) **Player controls dead on timeline-WAV playback** — the timeline-WAV decode path (`renderAudioClipsForRow`, "Flow B") never runs a clip through the ClipsPage BaySickPlayer Player controls (volume / pan / pitch / filter / tone / width / ADSR); only the piano-roll / sampler path ("Flow A") honors them.  It's the playback MODE (WAV vs sampler) that gates the knobs, NOT the add-path (Builder drop + Clip-tab dropdown behave identically).  Intended design (Jeff): every clip is dual-purpose — piano roll = sampler, Builder = editable WAV — BOTH through the Player setup; the WAV half is only half-wired.  (2) **Builder-grid mute keys on the owner page, not the grid row** — two clips on one player page share a mute (muting the owner-row's grid track silences both; the other grid row's mute is inert).  `renderAudioClipsForRow` (~`PluginProcessor.cpp:457`) checks `isRowAudible(row)` where `row` = owner page, so both clips resolve to the same audibility.  Rode in with the route-by-owner refactor `c616f0d` (2026-06-02), NOT QA-MultiBlockHazard's summing (git diff + blame confirm).
+- Scope: ClipsPage-BaySickPlayer clip-drop subsystem (Jeff: "kind of all one thing").  (1) Feature build — wire the full Player control set into the WAV decode path while keeping stretch + trim (ADSR maps clip-level: attack @ clipStart / release @ clipEnd).  (2) Bug fix — key the builder-grid mute on `player.trackRow` instead of `row` (verify `trackRow` tracks block moves first); strip mute (`audioRowMute[row]`) + routing stay owner-keyed.  NOT the multi-call hot-path work (QA-MultiBlockHazard) and NOT effect-DSP fidelity (QA-EffectsReview).
+- Risk: MEDIUM — item (1) adds a per-clip Player-param read into the decode path; regression-test that a piano-roll/sampler clip is unchanged and a WAV clip now tracks every Player knob.  Item (2) is a low-risk row-key swap gated on confirming `trackRow` follows block moves.
+- Sequencing: **immediately after QA-MultiBlockHazard, before QA-CutSelfReview** (Jeff's confirmed slot 2026-07-02 per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 fifty-third Forks entry).
+- Effort: TBD at batch open.
+- **Bucket:** Players, System Pages
+
 #### **QA-CutSelfReview: "Cut Self" on Layers/Bass** *(NEW — inserted 2026-06-05 at QA-Ee close)*
 - Items: "Cut Self" (self-choke) works on the drum-kit grid but not on Layers or Bass piano rolls.
 - Scope: program-wide investigation — confirm the exact feature + why it's drum-kit-only.
-- Sequencing: **immediately after QA-MultiBlockHazard, before QA-UICleanup** (Jeff 2026-06-05; re-pointed 2026-06-06 when QA-MultiBlockHazard inserted between; see §6 arrow + §9 forty-ninth + 2026-06-06 Forks entries).
+- Sequencing: **immediately after QA-ClipPlayback, before QA-UICleanup** (Jeff 2026-06-05; re-pointed 2026-06-06 when QA-MultiBlockHazard inserted between, then 2026-07-02 when QA-ClipPlayback inserted between; see §6 arrow + §9 forty-ninth + 2026-06-06 + fifty-third Forks entries).
 - Effort: TBD at batch open.
 - **Bucket:** System Pages
 
@@ -2117,7 +2125,7 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-Rules*********************************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-Rules*********************************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-ClipPlayback************************************ → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-DirtyFlag*******************
 ```
@@ -2617,11 +2625,24 @@ envelopes; engine-layer sum-then-process restructure.  Slotted **immediately
 after QA-EffectsReview, before QA-CutSelfReview** (Jeff 2026-06-06).  Bucket:
 Cross-cutting Infrastructure.  See §9 2026-06-06 Forks entry.
 
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-ClipPlayback** inserted
+2026-07-02 at the QA-MultiBlockHazard close — two pre-existing clip-drop
+findings routed together (Jeff: "kind of all one thing", same ClipsPage-
+BaySickPlayer subsystem): (1) timeline-WAV playback never runs a clip through
+the Player controls (volume/pan/pitch/filter/tone/width/ADSR) — only the
+piano-roll/sampler path does; feature build to wire the WAV half.  (2) the
+Builder-grid mute keys on the owner page, not the grid row, so two clips on one
+player page share a mute (route-by-owner refactor `c616f0d`, 2026-06-02).
+Slotted **immediately after QA-MultiBlockHazard, before QA-CutSelfReview**
+(Jeff 2026-07-02).  Bucket: Players, System Pages.  See §9 fifty-third Forks
+entry.
+
 \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-CutSelfReview** inserted
 2026-06-05 at the QA-Ee close — "Cut Self" (self-choke) works on the drum-kit
 grid but not on Layers/Bass; program-wide investigation.  Slotted **immediately
-after QA-EffectsReview, before QA-UICleanup** (Jeff 2026-06-05).  Bucket: System
-Pages.  See §9 forty-ninth Forks entry.
+after QA-ClipPlayback, before QA-UICleanup** (Jeff 2026-06-05; re-pointed
+2026-07-02 when QA-ClipPlayback inserted between).  Bucket: System
+Pages.  See §9 forty-ninth + fifty-third Forks entries.
 
 \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-UICleanup** inserted
 2026-06-05 at the QA-Ee close — piano-roll + misc UI (quit-prompt modal, Layers
@@ -5598,3 +5619,23 @@ The initial "1/8-note-late" report was diagnosed to **TV audio output latency** 
 - `Plans & Specs/Implemented Work Log.md` — the QA-EffectsReview close entry.
 - `Plans & Specs/Future State.md` — CL-298 + CL-299 (applied during the batch).
 - `Plans & Specs/Running Notes/composed-foraging-rose.md` + `Batch Plans/composed-foraging-rose.md` — the batch pair.
+
+### 2026-07-02 — QA-MultiBlockHazard close: two pre-existing clip-drop findings routed to new QA-ClipPlayback batch (fifty-third Forks entry)
+
+**Status:** OPEN.  QA-MultiBlockHazard (fiftieth Forks origin; the item-(d) split from QA-EffectsReview) closed 2026-07-02 (Audio + Vox/Inst insert chain collapsed to once-per-block on summed sources).  During its Task 1 verify it surfaced two **pre-existing** ClipsPage-BaySickPlayer / clip-drop findings — both unrelated to the multi-call summing fix (`git diff` + `git blame` confirm this batch's summing edits are audio-only and don't touch the affected lines).  Per Rule 3 (no surface match to an in-flight batch — genuinely new work area) they route to a **new dedicated §5 batch**, **QA-ClipPlayback**, slotted **immediately after QA-MultiBlockHazard, before QA-CutSelfReview** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`).  Jeff's call to bundle both into one batch: "kind of all one thing" — same clip-drop subsystem (ClipsPage BaySickPlayer + `renderAudioClipsForRow`).
+
+**Finding 1 — Player controls dead on timeline-WAV playback (feature build).**  The timeline-WAV decode path (`renderAudioClipsForRow`, "Flow B") never runs a clip through the ClipsPage BaySickPlayer Player controls (volume / pan / pitch / filter / tone / width / ADSR).  Only the piano-roll / sampler path ("Flow A") honors them.  It's the playback MODE (WAV vs sampler) that gates the knobs, NOT the add-path — both add-paths (Builder drop + Clip-tab dropdown) behave identically.  Intended design (Jeff): every clip is dual-purpose — piano roll = sampler, Builder = editable WAV — and BOTH should honor the Player setup; the WAV half is only half-wired.  Fix = wire the full Player control set into the decode path while keeping stretch + trim (ADSR maps as clip-level attack @ clipStart / release @ clipEnd).  Feature build, not a hot-path fix — hence its own batch, not folded into the multi-call work.
+
+**Finding 2 — Builder-grid mute keys on the owner page, not the grid row.**  Two clips on one player page share a mute — muting the owner-row's grid track silences both; the other grid row's mute is inert.  `renderAudioClipsForRow` (~`PluginProcessor.cpp:457`) checks `isRowAudible(row)` where `row` = owner page (audioInsert index), so both clips (same owner) resolve to the same audibility.  Rode in with the route-by-owner refactor `c616f0d` (2026-06-02), NOT the multi-call change (`git diff` + `git blame` confirm the mute/row-keying lines are untouched by QA-MultiBlockHazard).  Behavior confirmed (Jeff): builder-grid track mutes act PER-GRID-ROW (each clip follows the grid row it sits on); the mixer STRIP mute stays per-owner-page.  Fix = key the builder-grid mute on `player.trackRow` instead of `row` (verify `trackRow` tracks block moves before implementing); strip mute (`audioRowMute[row]`) + routing stay owner-keyed.
+
+**Inline back-refs:**
+- §5 — QA-MultiBlockHazard entry gains STATUS:CLOSED + Work Log pointer; NEW QA-ClipPlayback docket inserted after it, before QA-CutSelfReview; QA-CutSelfReview Sequencing re-pointed to follow QA-ClipPlayback.
+- §6 — arrow gains `→ QA-ClipPlayback` (36 asterisks) between QA-MultiBlockHazard (34) and QA-CutSelfReview (31); one footnote added after the QA-MultiBlockHazard footnote; the stale QA-CutSelfReview footnote ("after QA-EffectsReview") corrected to "after QA-ClipPlayback".
+- §9 — this entry (fifty-third); back-refs the fiftieth (QA-MultiBlockHazard split) as the batch these findings surfaced in, and `c616f0d` as Finding 2's origin.
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-MultiBlockHazard CLOSED + NEW QA-ClipPlayback docket + QA-CutSelfReview re-point; §6 arrow + footnote + CutSelfReview footnote fix; §9 this entry.
+- `Plans & Specs/Implemented Work Log.md` — the QA-MultiBlockHazard close entry.
+- `Plans & Specs/Batch Plans/<silly-name>.md` + `Running Notes/<silly-name>.md` — created when QA-ClipPlayback starts (not now).
+
+**Close routing** comes later, per Rule 3 at QA-ClipPlayback close.

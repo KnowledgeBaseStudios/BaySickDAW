@@ -10945,7 +10945,7 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
         // behavior unchanged).  Same value applies to master + every strip
         // block of this Record session per the strip-recorder scope (plan
         // SC line 120).  Audio engine adds this to every file-position read
-        // in renderAudioClipsForRow / renderFilePlayPlayer (Component 5).
+        // in renderAudioClipsForRow / decodeFilePlayClip + finalizeFilePlayStrip (Component 5).
         block.contentStartSamples = res.preRollSamples;
         // 2026-04-24 recorded-clip library registration: matches what
         // BuilderPage::importAudioFile does on user drop so the clip shows

@@ -2422,7 +2422,7 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         // copy the block's file-position offset to the player so the audio
         // thread can read it without a back-pointer into ArrangementBlock.
         // Component 5 (below) consumes this in the file-position computation
-        // sites in renderAudioClipsForRow + renderFilePlayPlayer.
+        // sites in renderAudioClipsForRow + decodeFilePlayClip / finalizeFilePlayStrip.
         p.contentStartSamples = blk.contentStartSamples;
         // D3: look up the source clip's choke group from the library.
         p.chokeGroup     = 0;

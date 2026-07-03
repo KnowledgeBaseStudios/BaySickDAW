@@ -2229,3 +2229,53 @@ Per the §6 sequencing arrow updated at this close, **QA-ClipDrop is the next ba
 #### Next action
 
 - Proceed to **QA-MultiBlockHazard** (teed up at Task 0 — engine-layer sum-then-process restructure for Audio/Vox/Inst strips).
+
+### 2026-07-02 22:10 PT — QA-MultiBlockHazard — Audio/Vox/Inst strip insert chain collapsed from once-per-source to once-per-block on summed sources (completes the Composite-task "sum before insert DSP" intent); 2 pre-existing clip-drop findings routed to new QA-ClipPlayback batch
+
+**Bucket:** Cross-cutting Infrastructure
+
+#### Done
+
+- **The bug (engine/hot-path, not effect-DSP fidelity).** On Audio / Vox / Inst mixer strips a strip's insert chain (`VibeGraph::processInsert` = polarity -> preEQ -> width -> rack -> postEQ -> fader x mute x solo -> PDC -> peak) ran **once per source in the block instead of once per block**. Stateful DSP (delay lines, reverb tails, LFO phase, compressor envelopes) advanced 2-3x per block whenever sources overlapped on a strip, and corrupted. On Vox/Inst it was worse — the **engine itself** (`eng->processBlock`), not just the rack, advanced per-clip.
+- **Task 1 — Audio path (`a6f02a8`).** `renderAudioClipsForRow` changed `void`->`bool` (returns ">=1 clip contributed") and now sums each decoded clip **raw** into the block buffer with no per-clip `processInsert`. `CompositeAudioInsertTask::run` sets `anySource` across both flows (Flow A clip-engine writes raw to `blockView`; Flow B early-returns converted to a guarded block), then runs **one** `processInsert(Audio, index, blockView, ...)` gated on `anySource`. N overlapping clips + the clip-engine flow now share a single rack pass.
+- **Task 2 — Vox/Inst FilePlay path (`6f91be6`).** The ~260-line `renderFilePlayPlayer` split into `decodeFilePlayClip` (decode ONE clip -> declick -> add raw into a per-strip sum buffer; returns "contributed") + `finalizeFilePlayStrip` (engine `processBlock` **once** + `processInsert` **once** + route, on the summed audio). `VoxStripTask` / `InstStripTask` FilePlay branches size + clear `mEngineScratch` as the sum (`avoidReallocating=true` — no audio-thread malloc), loop the decode, then finalize iff >=1 clip contributed. Per SC3 the engine now sees the **summed** clip audio; live-input (non-FilePlay) branches untouched.
+- **Completes the original design intent — did not invent one.** Carry-Forward §4 (Decisions Already Made) records the Composite-task shape as *"sums them internally before insert DSP. Matches serial-mode summation."* QA-0 built the composite task to kill the most-recent-wins silencing (DSP-12) but summed only the *post-rack outputs* — it never moved summation to *before* the rack. This batch finishes that, for all three strip types.
+- **CAS-max metering comment updated (SC2 — comment-only, no code change; `6f91be6`).** `VibeGraph.cpp:2497` previously documented `processInsert` being called "MULTIPLE TIMES PER BLOCK" as a meter-only compensation. Rewritten to note the multi-call is gone; CAS-max is retained as a harmless single-call max (safe if a future path ever re-introduces multiple calls). Metering behavior unchanged.
+- **Gating is bit-identical for the 99% path (SC4).** N->1 only, never 0->1 — the rack still does NOT run on a strip with 0 sources this block. A single-source strip is bit-identical to pre-batch; only 2+ overlap changes (corrects the doubling). Verified in Jeff's Debug->Release cycle per task: Audio single-clip + Clips-page-engine regressions unchanged, Audio overlap = one clean rack pass; Vox live monitor/record + Vox FilePlay single unchanged, Vox FilePlay overlap = clean single pass; Inst live (sfizz MIDI + live-input, idle-suspend intact) + Inst FilePlay single unchanged.
+
+#### Found along the way
+
+- **FINDING #1 — Clip Player-knobs gap (PRE-EXISTING, unrelated to the multi-call fix).** The timeline-WAV decode path (`renderAudioClipsForRow`, "Flow B") never runs a clip through the ClipsPage BaySickPlayer Player controls (volume / pan / pitch / filter / tone / width / ADSR). Only the piano-roll / sampler path ("Flow A") honors them. It is the playback **MODE** (WAV vs sampler) that gates the knobs, NOT the add-path — both add-paths (Builder drop + Clip-tab dropdown) behave identically (Jeff retest: knobs work on the piano roll, dead on Builder/WAV for both). Confirmed pre-existing: Flow B never read engine params, before or after Task 1. Two mid-investigation claims were corrected: the dropdown clip is NOT piano-roll-only (it also makes a draggable Builder WAV), and ADSR CAN apply to a timeline clip (attack @ clipStart / release @ clipEnd), so essentially the full Player control set can map. Intended design (Jeff): every clip is dual-purpose — piano roll = sampler, Builder = editable WAV — and BOTH should honor the Player setup; the WAV half is only half-wired. This is a **DSP feature build**, not the hot-path multi-call fix.
+- **FINDING #2 — Clip builder-grid mute keys on the OWNER page, not the grid row (PRE-EXISTING; rode in with the route-by-owner refactor `c616f0d` 2026-06-02).** Two clips on one player page share a mute — muting the owner-row's grid track silences both; the other grid row's mute is inert. `renderAudioClipsForRow` checks `isRowAudible(row)` where `row` = the owner page (audioInsert index), so both clips (same owner) resolve to the same audibility. NOT caused by this batch's summing — `git diff` + `git blame` confirm the mute/row-keying lines are untouched by QA-MultiBlockHazard (the summing is audio-only). Behavior confirmed by Jeff: builder-grid track mutes should act PER-GRID-ROW (each clip follows the grid row it sits on); the mixer STRIP mute stays per-owner-page. Fix = key the builder-grid mute on `player.trackRow` instead of `row` (verify `trackRow` tracks block moves before implementing); strip mute (`audioRowMute[row]`) + routing stay owner-keyed.
+
+#### What was done about each finding
+
+- **Both findings route to ONE new dedicated batch, QA-ClipPlayback (Jeff, close — "kind of all one thing", same clip-drop subsystem).** Neither is the hot-path multi-call fix; both are the clip-drop / ClipsPage-BaySickPlayer feature surface. Finding #1 = the WAV-playback Player-control feature build; Finding #2 = the per-grid-row mute fix, folded into the same batch. **Slot (Jeff's call, locked): immediately after QA-MultiBlockHazard, before QA-CutSelfReview.** Routed formally per Rule 3 via the **§9 fifty-third Forks entry** (new §5 QA-ClipPlayback docket, §6 arrow token + footnote, QA-CutSelfReview §5 sequencing re-point; back-refs `c616f0d` for Finding #2's provenance). Neither deferred to Future State — per `feedback_qa_batches_fix_bugs_dont_defer.md` these are real bugs/gaps getting their own fix batch.
+
+#### `/review-batch` outcome
+
+- **READY-TO-COMMIT — 0 blocker / 0 needs-fix.** Gating bit-identity (single-source path identical; N->1 never 0->1), audio-thread safety (all scratch `avoidReallocating=true`, no new locks/allocs), channel counts (arena `kChannelsPerStrip=2` so `blockView.getNumChannels()` == the old hardcoded `numRenderCh=2`), snapshot lifetime, and the decode/finalize split all verified against the actual code. No live caller of the removed `renderFilePlayPlayer` symbol.
+- **The one NIT — 3 out-of-region stale `renderFilePlayPlayer` comment refs — was FIXED at close, not deferred** (`PluginProcessor.h`, `PluginProcessor.cpp`, `StandaloneEditor.cpp`, updated to `decodeFilePlayClip` / `finalizeFilePlayStrip`). Per Jeff: wrong comments get fixed wherever they are — Rule 6's "edited-regions-only" governs discretionary style sweeps, not references a rename made stale.
+
+#### Carry-forward contradictions (if any)
+
+- None. This batch **completes** Carry-Forward §4's "sum before insert DSP. Matches serial-mode summation" intent rather than contradicting it — §4 recorded the target shape; QA-0 only implemented the post-rack-sum half; this batch moves summation to before the rack for all three strip types.
+
+#### Diagnostic Instrumentation Catalog
+
+- **NONE added this batch.** No `DBG` / `juce::Logger` / temp `jassert` / debug `AlertWindow` / temp-file trace was needed — Task 1 + Task 2 were both verified via audible behavior in Jeff's Debug->Release cycle. Nothing to strip.
+
+#### Files touched
+
+- **Task 1 (Audio):** `Source/PluginProcessor.cpp` (`renderAudioClipsForRow`), `Source/PluginProcessor.h` (decl + doc-comment), `Source/Engine/Tasks/CompositeAudioInsertTask.cpp` (`run` — `anySource` + guarded Flow B + single `processInsert`), `Source/Engine/Tasks/CompositeAudioInsertTask.h` (header doc-comment).
+- **Task 2 (Vox/Inst):** `Source/PluginProcessor.cpp` (`renderFilePlayPlayer` split -> `decodeFilePlayClip` + `finalizeFilePlayStrip`), `Source/PluginProcessor.h` (two new decls), `Source/Engine/Tasks/VoxStripTask.cpp` / `.h`, `Source/Engine/Tasks/InstStripTask.cpp` / `.h`, `Source/VibeGraph.cpp` (CAS-max comment-only, SC2).
+- **Close (stale-ref fixes):** `Source/PluginProcessor.h`, `Source/PluginProcessor.cpp`, `Source/Standalone/StandaloneEditor.cpp` — 3 stale `renderFilePlayPlayer` comment references updated to the new split.
+- **Docs:** paired `Running Notes/fluffy-toasting-hartmanis.md` + `Batch Plans/fluffy-toasting-hartmanis.md`; this Work Log entry; Main Plan §5 (QA-MultiBlockHazard STATUS + plan-file pointer, NEW QA-ClipPlayback docket, QA-CutSelfReview re-point) / §6 arrow + footnotes / §9 fifty-third Forks entry.
+
+#### Commit(s)
+
+`23503c8` (Task 0 — open) · `a6f02a8` (Task 1 — Audio strip insert chain once/block on summed sources) · `6f91be6` (Task 2 — Vox/Inst FilePlay engine + rack once/block on summed clips: `renderFilePlayPlayer` split) · `<close commit — this Work Log entry + §5/§6/§9 QA-ClipPlayback routing + §6 CutSelfReview footnote fix + 3 stale-ref comment fixes>`. Verified by Jeff in Debug + Release per task, 2026-07-02. HIGH-risk hot-path batch — full live-input + playback regression pass on all three strip types passed before close.
+
+#### Next action
+
+- Proceed to **QA-ClipPlayback** (routed at this close — Findings #1 + #2; slotted immediately after QA-MultiBlockHazard per Jeff), then QA-CutSelfReview per §6 arrow.

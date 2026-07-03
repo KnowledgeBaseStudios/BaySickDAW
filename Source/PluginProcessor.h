@@ -580,8 +580,8 @@ public:
     // load-acquire of mActiveAudioClips) and consumed by every iteration
     // site for the rest of that block: FilePlay pre-scan, Pass 2
     // song-mode loop, applyChokeGroupDispatch (both sub-loops), the
-    // shared renderAudioClipsForRow / renderFilePlayPlayer helpers, plus
-    // the AudioInsertTask / VoxStripTask / InstStripTask MT workers.
+    // shared renderAudioClipsForRow / decodeFilePlayClip / finalizeFilePlayStrip
+    // helpers, plus the AudioInsertTask / VoxStripTask / InstStripTask MT workers.
     // Visibility to MT workers is established by the dispatcher's
     // notify/wait release-acquire pair (workers wake AFTER the audio
     // thread has written this).
