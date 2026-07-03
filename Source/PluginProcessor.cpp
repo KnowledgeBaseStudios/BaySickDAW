@@ -439,8 +439,10 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         // grid track.  routeChannel is stamped to audioInsert(ownerPage) at creation
         // (onAudioClipAdded retag / placeAudioLibraryEntry) and migrated for legacy
         // projects on load.  Legacy/unset routeChannel (0) falls back to trackRow.
-        // `row` is therefore the owner row below, so the mute/strip checks already
-        // key on the clip's own strip.
+        // `row` is the owner row below.  The mixer STRIP mute (audioRowMute) +
+        // routing key on the owner strip; the builder-grid track mute keys on the
+        // clip's own grid row (player.trackRow) so two clips on one page mute
+        // independently.
         const int ownerRow =
             (routeCh >= MixerChannelIds::kAudioBase
           && routeCh <  MixerChannelIds::kAudioBase + kMaxAudioRows)
@@ -454,7 +456,7 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         if (ctx.projectEnd <= clipStart || ctx.projectStart >= clipEnd) continue;
 
         const bool rowMuted        = mx.audioRowMute[(size_t) row];
-        const bool builderRowMuted = ! mPatternManager->isRowAudible (row);
+        const bool builderRowMuted = ! mPatternManager->isRowAudible (player.trackRow);
 
         if (player.mutedByChoke)
         {
