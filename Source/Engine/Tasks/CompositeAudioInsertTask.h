@@ -8,6 +8,7 @@
 class VibeGraph;
 class ISidechainEngine;
 class VibeSynthProcessor;
+class VibePlayerProcessor;
 
 // CompositeAudioInsertTask
 // ------------------------
@@ -76,6 +77,10 @@ private:
     // Clip-engine flow state.
     std::atomic<juce::AudioProcessor*> mClipEngine { nullptr };
     std::atomic<ISidechainEngine*>     mScEngine   { nullptr };
+    // QA-ClipPlayback Task 2: cached BaySickPlayer cast of mClipEngine (null when
+    // the clip engine isn't a BaySickPlayer, e.g. NAM/IR) so the timeline-WAV
+    // decode reads its Player controls without a per-block dynamic_cast.
+    std::atomic<VibePlayerProcessor*>  mClipPlayer { nullptr };
 
     // Arrangement-clip per-task scratch (pre-9b cross-task race fix).
     juce::AudioBuffer<float>           mClipScratch;

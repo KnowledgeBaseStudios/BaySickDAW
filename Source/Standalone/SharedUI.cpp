@@ -7872,8 +7872,9 @@ void setSliderDoubleClickDefaultsFromApvts (juce::Component& root,
         {
             const auto pid = s->getProperties().getWithDefault ("apvtsId", juce::var()).toString();
             if (pid.isNotEmpty())
-                if (auto* p = apvts.getRawParameterValue (pid))
-                    s->setDoubleClickReturnValue (true, p->load());
+                if (auto* param = apvts.getParameter (pid))
+                    s->setDoubleClickReturnValue (true,
+                        (double) param->convertFrom0to1 (param->getDefaultValue()));
         }
 
         setSliderDoubleClickDefaultsFromApvts (*c, apvts);

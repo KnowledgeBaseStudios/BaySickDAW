@@ -3,6 +3,7 @@
 #include "../../PatternManager.h"
 #include "../../VibeGraph.h"
 #include "../../DSP/EngineSidechainHelper.h"
+#include "../../VibePlayer/VibePlayerProcessor.h"   // QA-ClipPlayback Task 2: complete type for the dynamic_cast in setClipEngine
 #include "../SidechainPullHelper.h"
 
 #include <atomic>
@@ -24,6 +25,8 @@ void CompositeAudioInsertTask::setClipEngine (juce::AudioProcessor* engine)
     mClipEngine.store (engine, std::memory_order_release);
     mScEngine .store (dynamic_cast<ISidechainEngine*> (engine),
                       std::memory_order_release);
+    mClipPlayer.store (dynamic_cast<VibePlayerProcessor*> (engine),
+                       std::memory_order_release);
 }
 
 juce::AudioBuffer<float>& CompositeAudioInsertTask::getClipScratch (int numChannels,
@@ -132,6 +135,7 @@ void CompositeAudioInsertTask::run()
         clipCtx.masterGain    = masterGain;
         clipCtx.mxState       = &mx;
         clipCtx.clipScratch   = &getClipScratch (blockView.getNumChannels(), n);
+        clipCtx.clipPlayer    = mClipPlayer.load (std::memory_order_acquire);
 
         if (mProcessor->renderAudioClipsForRow (mIndex, clipCtx, &blockView))
             anySource = true;

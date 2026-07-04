@@ -251,7 +251,8 @@ VibePlayerProcessor::createLayout (const juce::String& p)
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         vid (p + "stereo"), "Stereo",
-        juce::NormalisableRange<float> (0.f, 1.f), 0.f));
+        // QA-ClipPlayback: bipolar width -- -1 = mono, 0 = full stereo (default), +1 = 2x wide.
+        juce::NormalisableRange<float> (-1.f, 1.f), 0.f));
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         vid (p + "lfo_rate"), "LFO Rate",

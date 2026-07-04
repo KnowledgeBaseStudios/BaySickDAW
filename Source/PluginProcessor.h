@@ -528,6 +528,15 @@ public:
         juce::AudioBuffer<float> pvOutBuf;  // stretched output from vocoder (file SR)
         // Expected next file position - used to detect seeks and reset vocoder.
         int64 expectedFilePos { 0 };
+        // QA-ClipPlayback Task 2: per-clip DSP state for the ClipsPage BaySickPlayer
+        // control chain applied to timeline-WAV (Flow B) playback so a WAV clip
+        // matches the sampler.  Prepared + reset at rebuildAudioClipPlayers time
+        // (like vocoder/pvInBuf).  Per-clip so filter / tremolo state never bleeds
+        // between clips sharing a row.
+        juce::dsp::StateVariableTPTFilter<float> clipFilter;
+        float  clipTrebleLp[2] { 0.f, 0.f };   // one-pole treble-shelf state per channel
+        double clipLfoPhase    { 0.0 };        // amplitude-tremolo LFO phase
+        int    clipReductStep  { 0 };          // sample-rate-reduction hold counter
     };
     // 2026-05-06 (Batch 9c B1): deferred-destruction GC pattern.
     //
@@ -603,6 +612,10 @@ public:
         float       masterGain       = 1.0f;
         const MixerState* mxState    = nullptr;   // PatternManager.h top-level struct
         juce::AudioBuffer<float>* clipScratch = nullptr;   // shared decode buffer
+        // QA-ClipPlayback Task 2: the row's ClipsPage BaySickPlayer (null when the
+        // clip engine isn't a BaySickPlayer) - the timeline-WAV decode reads its
+        // Player controls live and applies them per-clip before the raw sum.
+        VibePlayerProcessor* clipPlayer = nullptr;
     };
 
     // Decode all non-FilePlay audio clips on `row` and sum their RAW output into

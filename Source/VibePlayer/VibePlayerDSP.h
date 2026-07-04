@@ -564,7 +564,7 @@ private:
     float mLastAmpS        { -1.f };
     float mLastAmpR        { -1.f };
     float mLastLfoAmt      { -1.f };
-    float mLastStereo      { -1.f };
+    float mLastStereo      { 9999.f };   // sentinel outside the bipolar -1..1 range
     float mLastTreble      { -1.f };
     float mLastStretch     { -1.f };
     float mLastMuffle      { -1.f };

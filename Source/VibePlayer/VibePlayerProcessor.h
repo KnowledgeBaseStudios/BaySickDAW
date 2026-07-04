@@ -117,7 +117,7 @@ private:
         float release      { -1.f };
         float pan          { -1.f };
         float volume       { -1.f };
-        float stereo       { -1.f };
+        float stereo       { 9999.f };   // sentinel outside the bipolar -1..1 range
         float treble       { -1.f };
         float stretch      { -1.f };
         float muffle       { -1.f };

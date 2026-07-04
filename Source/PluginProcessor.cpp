@@ -401,6 +401,89 @@ bool VibeSynthProcessor::isBusesLayoutSupported(const BusesLayout& layouts) cons
 // stateful rack advances once per block instead of once per clip.  Returns true
 // if >=1 clip contributed (the caller uses this to gate the single chain pass).
 // FilePlay clips (routeChannel pointing at a Vox/Inst page) are skipped here.
+namespace {
+
+// QA-ClipPlayback Task 2: resolved BaySickPlayer control values for the
+// timeline-WAV decode chain, read once per row per block from the ClipsPage
+// engine's APVTS.  Velocity-driven routings (velTo*) are inert on a timeline
+// clip; muffle/hardness fold into the filter with velocity N/A (matches
+// VibeVoice::startNote).  active=false when the engine isn't a BaySickPlayer
+// (S7 guard) -> the decode stays raw (pre-batch behavior).
+struct ClipCtl
+{
+    bool  active = false;
+    float volume = 1.f, panL = 1.f, panR = 1.f;
+    float cutoff = 20000.f, q = 0.5f;
+    float drive  = 1.f;                    // 1..12, skipped at 1
+    float reduct = 0.f;                    // 0..1
+    float lfoAmt = 0.f, lfoRate = 5.5f;    // amplitude tremolo
+    float trebleGain = 0.f;                // -1..1 shelf
+    float width = 1.f;                     // M/S width (WAV baseline 1.0)
+    float atk = 0.f, dec = 0.f, sus = 1.f, rel = 0.f;
+};
+
+ClipCtl readClipCtl (VibePlayerProcessor* pl)
+{
+    ClipCtl c;
+    if (pl == nullptr) return c;
+    c.active = true;
+    auto rd = [pl] (const char* n)
+    {
+        auto* a = pl->apvts.getRawParameterValue (pl->pid (n));
+        return a != nullptr ? a->load() : 0.f;
+    };
+
+    c.volume = rd ("volume");
+    const float pan = juce::jlimit (-1.f, 1.f, rd ("pan"));
+    const float ang = (pan + 1.f) * juce::MathConstants<float>::halfPi * 0.5f;   // equal-power
+    c.panL = std::cos (ang);
+    c.panR = std::sin (ang);
+
+    // res 0..1 -> Q 0.5..10 (VibeSynth::setFilterParams); hardness adds to Q,
+    // muffle lowers cutoff toward 200 Hz -- both with velocity N/A on a timeline
+    // clip (VibeVoice::startNote velFactor/velScale reduce to 1.0 at default).
+    const float baseCut  = juce::jlimit (20.f, 20000.f, rd ("cutoff"));
+    const float muffle   = juce::jlimit (0.f, 1.f, rd ("muffle"));
+    const float hardness = juce::jlimit (0.f, 1.f, rd ("hardness"));
+    c.cutoff = juce::jlimit (20.f, 20000.f, baseCut - muffle * (baseCut - 200.f));
+    c.q      = juce::jlimit (0.5f, 10.f, 0.5f + (rd ("res") + hardness) * 9.5f);
+
+    c.drive      = 1.f + juce::jlimit (0.f, 1.f, rd ("drive")) * 11.f;
+    c.reduct     = juce::jlimit (0.f, 1.f, rd ("reduct"));
+    c.lfoAmt     = juce::jlimit (0.f, 1.f, rd ("lfoAmt"));
+    c.lfoRate    = juce::jlimit (0.1f, 20.f, rd ("lfo_rate"));
+    c.trebleGain = juce::jlimit (-1.f, 1.f, rd ("treble") / 12.f);
+    // Bipolar stereo (QA-ClipPlayback): param -1..1 -> M/S width (0 mono, 1 full,
+    // 2 wide).  Applied BEFORE pan below so pan always survives (unlike the
+    // sampler's per-voice pan, which thins at full mono).
+    c.width = juce::jlimit (0.f, 2.f, 1.f + rd ("stereo"));
+
+    c.atk = juce::jmax (0.f, rd ("attack"));
+    c.dec = juce::jmax (0.f, rd ("decay"));
+    c.sus = juce::jlimit (0.f, 1.f, rd ("sustain"));
+    c.rel = juce::jmax (0.f, rd ("release"));
+    return c;
+}
+
+// Clip-level ADSR: attack ramp at clipStart, decay to sustain, hold, release
+// ending at clipEnd.  pos/len in output samples.  The 5 ms declick still runs
+// after this as the anti-click floor.
+inline float clipAdsr (juce::int64 pos, juce::int64 len,
+                       float atk, float dec, float sus, float rel, double sr)
+{
+    if (len <= 0) return 0.f;
+    const double t        = (double) pos / sr;
+    const double end      = (double) len / sr;
+    const double relStart = juce::jmax (0.0, end - (double) rel);
+    float g = sus;
+    if (atk > 0.f && t < (double) atk)              g = (float) (t / atk);
+    else if (dec > 0.f && t < (double) (atk + dec)) g = 1.f - (1.f - sus) * (float) ((t - atk) / dec);
+    if (rel > 0.f && t >= relStart)                 g = juce::jmin (g, sus * (float) ((end - t) / (double) rel));
+    return juce::jlimit (0.f, 1.f, g);
+}
+
+} // namespace
+
 bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                                                   const AudioClipBlockContext& ctx,
                                                   juce::AudioBuffer<float>* mtDest)
@@ -413,6 +496,10 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
     const auto& mx = *ctx.mxState;
     auto& clipScratch = *ctx.clipScratch;
     bool anyContributed = false;
+
+    // QA-ClipPlayback Task 2: all clips on this row share the ClipsPage engine, so
+    // read its Player controls once (null/non-BaySickPlayer -> ctl.active false).
+    const ClipCtl ctl = readClipCtl (ctx.clipPlayer);
 
     // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot captured
     // at the top of processBlock.  CompositeAudioInsertTask calls this helper
@@ -594,6 +681,98 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
             peak = player.streamer->readAndMix (
                 clipScratch, bufOffset, outSamples, filePos, readRatio, ctx.numOut, gain);
             player.expectedFilePos = filePos + (juce::int64) std::ceil (outSamples * readRatio);
+        }
+
+        // QA-ClipPlayback Task 2: run the ClipsPage BaySickPlayer control chain on
+        // the decoded clip (before the declick + raw sum) so a timeline-WAV clip
+        // tracks the Player knobs.  Chain: tremolo -> drive -> reduction -> filter
+        // -> M/S width -> treble shelf -> volume x ADSR x pan.  Pan is LAST (after
+        // width) so it survives even at full-mono width.  Per-clip state on `player`.
+        if (ctl.active)
+        {
+            const int chs = clipScratch.getNumChannels();
+
+            if (ctl.lfoAmt > 0.001f)   // amplitude tremolo
+            {
+                const double inc = (juce::MathConstants<double>::twoPi * ctl.lfoRate) / mSampleRate;
+                for (int ch = 0; ch < chs; ++ch)
+                {
+                    auto* d = clipScratch.getWritePointer (ch, bufOffset);
+                    double ph = player.clipLfoPhase;
+                    for (int s = 0; s < outSamples; ++s) { d[s] *= 1.f + ctl.lfoAmt * 0.12f * (float) std::sin (ph); ph += inc; }
+                }
+                player.clipLfoPhase = std::fmod (player.clipLfoPhase + inc * outSamples,
+                                                 juce::MathConstants<double>::twoPi);
+            }
+
+            if (ctl.drive > 1.001f)    // tanh waveshaper
+            {
+                const float norm = std::tanh (ctl.drive);
+                for (int ch = 0; ch < chs; ++ch)
+                {
+                    auto* d = clipScratch.getWritePointer (ch, bufOffset);
+                    for (int s = 0; s < outSamples; ++s) d[s] = std::tanh (d[s] * ctl.drive) / norm;
+                }
+            }
+
+            if (ctl.reduct > 0.01f)    // sample-rate reduction (sample-and-hold)
+            {
+                const int holdN     = 1 + juce::roundToInt (ctl.reduct * 15.f);
+                const int startStep = player.clipReductStep;
+                int       endStep   = startStep;
+                for (int ch = 0; ch < chs; ++ch)
+                {
+                    auto* d = clipScratch.getWritePointer (ch, bufOffset);
+                    int step = startStep; float held = d[0];
+                    for (int s = 0; s < outSamples; ++s) { if (step == 0) held = d[s]; d[s] = held; step = (step + 1) % holdN; }
+                    endStep = step;
+                }
+                player.clipReductStep = endStep;
+            }
+
+            player.clipFilter.setCutoffFrequency (ctl.cutoff);   // SVF lowpass
+            player.clipFilter.setResonance       (ctl.q);
+            for (int ch = 0; ch < juce::jmin (chs, 2); ++ch)
+            {
+                auto* d = clipScratch.getWritePointer (ch, bufOffset);
+                for (int s = 0; s < outSamples; ++s) d[s] = player.clipFilter.processSample (ch, d[s]);
+            }
+
+            if (chs >= 2)   // M/S width + treble shelf, BEFORE pan so pan survives at any width
+            {
+                auto* L = clipScratch.getWritePointer (0, bufOffset);
+                auto* R = clipScratch.getWritePointer (1, bufOffset);
+                if (ctl.width != 1.f)   // bipolar: 0 = mono, 1 = full, 2 = wide
+                    for (int s = 0; s < outSamples; ++s)
+                    {
+                        const float mid = (L[s] + R[s]) * 0.5f, side = (L[s] - R[s]) * 0.5f * ctl.width;
+                        L[s] = mid + side; R[s] = mid - side;
+                    }
+                if (std::abs (ctl.trebleGain) > 0.001f)
+                {
+                    const float omega = 2.f * juce::MathConstants<float>::pi * 8000.f / (float) mSampleRate;
+                    const float a     = omega / (1.f + omega);
+                    for (int s = 0; s < outSamples; ++s)
+                    {
+                        player.clipTrebleLp[0] += a * (L[s] - player.clipTrebleLp[0]); L[s] += ctl.trebleGain * (L[s] - player.clipTrebleLp[0]);
+                        player.clipTrebleLp[1] += a * (R[s] - player.clipTrebleLp[1]); R[s] += ctl.trebleGain * (R[s] - player.clipTrebleLp[1]);
+                    }
+                }
+            }
+
+            const juce::int64 clipLen = effectiveClipEnd - clipStart;   // volume x ADSR x pan (pan LAST -> survives width)
+            for (int s = 0; s < outSamples; ++s)
+            {
+                const float g = ctl.volume * clipAdsr (outPosInClip + s, clipLen,
+                                                       ctl.atk, ctl.dec, ctl.sus, ctl.rel, mSampleRate);
+                if (chs >= 2)
+                {
+                    clipScratch.setSample (0, bufOffset + s, clipScratch.getSample (0, bufOffset + s) * g * ctl.panL);
+                    clipScratch.setSample (1, bufOffset + s, clipScratch.getSample (1, bufOffset + s) * g * ctl.panR);
+                }
+                else
+                    clipScratch.setSample (0, bufOffset + s, clipScratch.getSample (0, bufOffset + s) * g);
+            }
         }
 
         // F3 declick: 5 ms linear fade-in / -out, capped at half clip length.
@@ -2454,6 +2633,15 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         }
 
         p.expectedFilePos = 0;
+        // QA-ClipPlayback Task 2: prepare the per-clip control-chain filter (message
+        // thread -- allocation ok).  SVF lowpass, 2 ch, current sample rate.  maxBlock
+        // is nominal (processSample doesn't allocate per-block).
+        {
+            juce::dsp::ProcessSpec spec { mSampleRate, (juce::uint32) 8192, (juce::uint32) 2 };
+            p.clipFilter.prepare (spec);
+            p.clipFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
+            p.clipFilter.reset();
+        }
         newPlayers.push_back (std::move (p));
     }
 

@@ -1477,7 +1477,8 @@ void VibeSynth::setStereo (float width) noexcept
 {
     if (width == mLastStereo) return;
     mLastStereo   = width;
-    mStereoWidth  = width;
+    // QA-ClipPlayback: bipolar stereo param (-1..1) -> M/S width (0 mono, 1 full, 2 wide).
+    mStereoWidth  = 1.f + width;
 }
 
 void VibeSynth::setTreble (float treble) noexcept

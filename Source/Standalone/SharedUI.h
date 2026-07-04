@@ -60,12 +60,11 @@ namespace VC {
     };
 }
 
-// ── Preset-aware slider attachment ────────────────────────────────────────────
+// ── APVTS-tagged slider attachment ────────────────────────────────────────────
 // Drop-in replacement for AudioProcessorValueTreeState::SliderAttachment that
-// also tags the slider with its paramId via getProperties().set("apvtsId", id).
-// The tag lets setSliderDoubleClickDefaultsFromApvts walk an editor's
-// component tree and update each slider's double-click reset value to the
-// currently-loaded preset's value, without each editor maintaining its own
+// also tags the slider with its paramId via getProperties().set("apvtsId", id),
+// so setSliderDoubleClickDefaultsFromApvts can find it and reset its double-click
+// return to the param's FACTORY DEFAULT, without each editor maintaining its own
 // (slider, paramId) registry.
 class TaggedSliderAttachment : public juce::AudioProcessorValueTreeState::SliderAttachment
 {
@@ -80,10 +79,10 @@ public:
 };
 
 // Recursively walks all child components of `root`, finds every juce::Slider
-// tagged with an "apvtsId" property, and updates that slider's double-click
-// return value to the current APVTS value for that paramId.  Call after
-// every preset load so double-click resets to the loaded patch instead of
-// the engine's factory default.
+// tagged with an "apvtsId" property, and sets that slider's double-click return
+// to the param's FACTORY DEFAULT.  QA-ClipPlayback: was the loaded-patch value
+// (deliberate, but non-standard) -- double-click now behaves like every other
+// DAW knob (returns to the factory default, not whatever was last saved).
 void setSliderDoubleClickDefaultsFromApvts (juce::Component& root,
                                             juce::AudioProcessorValueTreeState& apvts);
 
