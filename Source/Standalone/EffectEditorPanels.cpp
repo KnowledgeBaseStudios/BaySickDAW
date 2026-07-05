@@ -1,5 +1,4 @@
 #include "EffectEditorPanels.h"
-#include "SlotComponent.h"   // H-8: VocalDoubler's Slap button calls remountEditor
 // D.4 (2026-05-01): force MSBuild to recompile this file - Compressor + Delay
 // knob additions were missing from the previous incremental build.
 #include "../DSP/CompressorDSP.h"
@@ -1791,7 +1790,7 @@ struct ChorusPanel : public EditorPanelBase
 // ─────────────────────────────────────────────────────────────────────────────
 // DelayPanel  (2 rows)
 // Row 1: Time | Feed | LoFiSR | WetIn | Wet | Dry | FBCut | FBReso | Tone
-//        (+ Duck | DkThr | DkAtt | DkRel in Advanced)  +  Model  +  FBFilter  (+ Slap in Advanced)
+//        (+ Duck | DkThr | DkAtt | DkRel in Advanced)  +  Model  +  FBFilter
 // Row 2: ModHz | ModTime | ModFB | Diff | DiffSprd | LoBit | FBDst | FBKnee | FBSym | Spread | Pan | Smooth
 //        +  SyncDiv  +  BPM  +  Pitch  +  FBDistType
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1800,13 +1799,11 @@ struct DelayPanel : public EditorPanelBase
     std::vector<std::unique_ptr<VKnob>>         r1knobs, r2knobs, duckKnobs;
     std::unique_ptr<DualLabelToggle>            tempoTog, keepPitchTog, fbDistTypeTog;
     std::unique_ptr<ChickenHeadSelector>        modelSel, fbFilterTypeSel, syncDivSel;
-    std::unique_ptr<juce::TextButton>           slapbackBtn;   // H-8 (2026-05-02)
 
     // QA-EffectsReview Task 9: Basic = the exact reference face (FL Fruity
     // Delay 3) -- which is the ENTIRE Echo panel except our additions.  Our
-    // additions = the Duck cluster (amount + threshold/attack/release) + the
-    // Slap preset button; those hide in Basic.  resized() does show/hide +
-    // reflow.
+    // additions = the Duck cluster (amount + threshold/attack/release); those
+    // hide in Basic.  resized() does show/hide + reflow.
     bool hasAdvancedControls() const override { return true; }
 
     std::vector<VKnob*> getExtraKnobs() override
@@ -1967,55 +1964,6 @@ struct DelayPanel : public EditorPanelBase
         };
         addAndMakeVisible(*syncDivSel);
 
-        // H-8 (2026-05-02): Slapback preset button.  Loads classic-slapback
-        // values into the Echo Type (single short delay ~110 ms, ~12 % feedback,
-        // 30 % wet, no diffusion).  After loading, re-syncs all panel knobs
-        // from the DSP so the UI reflects the new state.
-        slapbackBtn = std::make_unique<juce::TextButton>("Slap");
-        slapbackBtn->setTooltip ("Slapback preset -- single short delay, low "
-                                   "feedback, low wet.  Classic 50s-rockabilly / "
-                                   "vintage-vocal effect.  Replaces current settings.");
-        slapbackBtn->onClick = [this, dsp]
-        {
-            if (! dsp) return;
-            dsp->presetSlapback();
-            // Re-sync r1 + r2 knob sliders from the new DSP state so the UI
-            // reflects the loaded preset.  setValue with sendNotificationSync
-            // would re-trigger our onValueChange and write back to the DSP --
-            // use dontSendNotification + the public DSP fields/getters.
-            r1knobs[0]->slider.setValue (dsp->delayMs,             juce::dontSendNotification);
-            r1knobs[1]->slider.setValue (dsp->getFeedbackLevel(),  juce::dontSendNotification);
-            r1knobs[2]->slider.setValue (dsp->getLoFiSampleRate(), juce::dontSendNotification);
-            r1knobs[3]->slider.setValue (dsp->getWetIn(),          juce::dontSendNotification);
-            r1knobs[4]->slider.setValue (dsp->getWetOut(),         juce::dontSendNotification);
-            r1knobs[5]->slider.setValue (dsp->getDryOut(),         juce::dontSendNotification);
-            r1knobs[6]->slider.setValue (dsp->getFBCutoff(),       juce::dontSendNotification);
-            r1knobs[7]->slider.setValue (dsp->getFBResonance(),    juce::dontSendNotification);
-            r1knobs[8]->slider.setValue (-dsp->getTone(),          juce::dontSendNotification);
-            r2knobs[0] ->slider.setValue (dsp->getModRate(),        juce::dontSendNotification);
-            r2knobs[1] ->slider.setValue (dsp->getModTimeMod(),     juce::dontSendNotification);
-            r2knobs[2] ->slider.setValue (dsp->getModCutoffMod(),   juce::dontSendNotification);
-            r2knobs[3] ->slider.setValue (dsp->getDiffLevel(),      juce::dontSendNotification);
-            r2knobs[4] ->slider.setValue (dsp->getDiffSpread(),     juce::dontSendNotification);
-            r2knobs[5] ->slider.setValue (dsp->getLoFiBits(),       juce::dontSendNotification);
-            r2knobs[6] ->slider.setValue (dsp->getFBDistLevel(),    juce::dontSendNotification);
-            r2knobs[7] ->slider.setValue (dsp->getFBDistKnee(),     juce::dontSendNotification);
-            r2knobs[8] ->slider.setValue (dsp->getFBDistSymmetry(), juce::dontSendNotification);
-            r2knobs[9] ->slider.setValue (dsp->getStereoSpread(),   juce::dontSendNotification);
-            r2knobs[10]->slider.setValue (dsp->getOffsetPan(),      juce::dontSendNotification);
-            r2knobs[11]->slider.setValue (dsp->getSmoothing(),      juce::dontSendNotification);
-            r2knobs[12]->slider.setValue (dsp->getDuckAmount(),     juce::dontSendNotification);
-            duckKnobs[0]->slider.setValue (dsp->getDuckThresholdDb(), juce::dontSendNotification);
-            duckKnobs[1]->slider.setValue (dsp->getDuckAttackMs(),    juce::dontSendNotification);
-            duckKnobs[2]->slider.setValue (dsp->getDuckReleaseMs(),   juce::dontSendNotification);
-            // Selectors
-            if (modelSel)        modelSel       ->setSelectedIndex (juce::jlimit (0, 3, dsp->getDelayModel()),   juce::dontSendNotification);
-            if (fbFilterTypeSel) fbFilterTypeSel->setSelectedIndex (juce::jlimit (0, 3, dsp->getFBFilterType()), juce::dontSendNotification);
-            if (tempoTog)        tempoTog->btn().setToggleState (dsp->syncBPM,                  juce::dontSendNotification);
-            if (keepPitchTog)    keepPitchTog->btn().setToggleState (dsp->getKeepPitch(),       juce::dontSendNotification);
-            if (fbDistTypeTog)   fbDistTypeTog->btn().setToggleState (dsp->getFBDistType() == 1, juce::dontSendNotification);
-        };
-        addAndMakeVisible(*slapbackBtn);
 
         // Row 1 bindings (9 knobs)
         r1knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setDelayMs           ((float)r1knobs[0]->slider.getValue()); };
@@ -2111,9 +2059,8 @@ struct DelayPanel : public EditorPanelBase
         b.removeFromRight(4);
 
         // Task 9 Basic/Advanced: Basic = the reference face; Advanced adds the
-        // Duck cluster (laid into row 1) + the Slap preset button.
+        // Duck cluster (laid into row 1).
         const bool adv = ! mBasicMode;
-        if (slapbackBtn) slapbackBtn->setVisible(adv);
         if (r2knobs.size() > 12 && r2knobs[12]) r2knobs[12]->setVisible(adv);
         for (auto& k : duckKnobs) if (k) k->setVisible(adv);
 
@@ -2125,12 +2072,6 @@ struct DelayPanel : public EditorPanelBase
         if (modelSel) modelSel->setBounds(mc.reduced(2));
         auto fbc = r1.removeFromRight(66); r1.removeFromRight(2);
         if (fbFilterTypeSel) fbFilterTypeSel->setBounds(fbc.reduced(2));
-        if (adv)
-        {
-            // H-8: Slapback preset button between FB filter selector and the knob row.
-            auto slap = r1.removeFromRight(46); r1.removeFromRight(2);
-            if (slapbackBtn) slapbackBtn->setBounds(slap.reduced(2, 4));
-        }
         std::vector<VKnob*> row1;
         for (auto& k : r1knobs) if (k) row1.push_back(k.get());
         if (adv)
@@ -2161,16 +2102,14 @@ struct DelayPanel : public EditorPanelBase
 // VocalDoublerDelayPanel - H-8 (2026-05-02)
 // Renders when DelayDSP::Type == VocalDoubler.  Single row:
 // Time L | Time R | Detune | Width | Rate | Mix (+ Duck | DkThr | DkAtt |
-// DkRel + Slap in Advanced).  Shares the TimeLAF look with the Echo
+// DkRel in Advanced).  Shares the TimeLAF look with the Echo
 // DelayPanel so switching Mode keeps a coherent visual family.
 // No feedback / lo-fi / mod LFO / diffusion -- VocalDoubler is fundamentally
-// a different effect (dual short detuned taps, no FB).  Slapback button
-// flips back to Echo Type and writes the slapback preset.
+// a different effect (dual short detuned taps, no FB).
 // ─────────────────────────────────────────────────────────────────────────────
 struct VocalDoublerDelayPanel : public EditorPanelBase
 {
     std::vector<std::unique_ptr<VKnob>> knobsRow, duckKnobs;
-    std::unique_ptr<juce::TextButton>    slapBtn;
 
     // QA-EffectsReview Task 9: the doubler Type is itself our addition, but
     // its six core knobs ARE the effect -- only the Duck cluster + Slap
@@ -2249,24 +2188,6 @@ struct VocalDoublerDelayPanel : public EditorPanelBase
             duckKnobs[2]->slider.setValue (dsp->getDuckReleaseMs(),   juce::sendNotificationSync);
         }
 
-        // H-8: Slapback preset button (matches the one on the Echo DelayPanel).
-        // presetSlapback() flips Type back to Echo + writes the preset values;
-        // we then ask the parent SlotComponent to re-mount so the Echo panel
-        // shows the loaded settings.  Without the re-mount the user would be
-        // stuck with VocalDoubler knobs while the DSP is now in Echo mode.
-        slapBtn = std::make_unique<juce::TextButton>("Slap");
-        slapBtn->setTooltip ("Slapback preset -- single short delay, low feedback, "
-                              "low wet.  Switches to Echo Type and loads the classic "
-                              "vintage-vocal effect (50s rockabilly / John Lennon "
-                              "doubling).  Replaces current settings.");
-        slapBtn->onClick = [this, dsp]
-        {
-            if (! dsp) return;
-            dsp->presetSlapback();
-            if (auto* sc = findParentComponentOfClass<SlotComponent>())
-                sc->remountEditor();
-        };
-        addAndMakeVisible (*slapBtn);
     }
 
     ~VocalDoublerDelayPanel() override { setLookAndFeel (nullptr); }
@@ -2287,19 +2208,11 @@ struct VocalDoublerDelayPanel : public EditorPanelBase
                                                           .withSizeKeepingCentre (kKnobSz, kKnobSz));
         b.removeFromRight (4);
 
-        // Task 9 Basic/Advanced: Duck cluster + Slap are our additions on top
+        // Task 9 Basic/Advanced: the Duck cluster is our addition on top
         // of the doubler -> Advanced only.
         const bool adv = ! mBasicMode;
-        if (slapBtn) slapBtn->setVisible (adv);
         if (knobsRow.size() > 6 && knobsRow[6]) knobsRow[6]->setVisible (adv);
         for (auto& k : duckKnobs) if (k) k->setVisible (adv);
-
-        if (adv)
-        {
-            // Slap button on the right between Output and the knob row.
-            if (slapBtn) slapBtn->setBounds (b.removeFromRight (46).reduced (2, 14));
-            b.removeFromRight (4);
-        }
 
         std::vector<VKnob*> row;
         for (int i = 0; i < (int) knobsRow.size(); ++i)

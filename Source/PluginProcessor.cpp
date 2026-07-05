@@ -420,6 +420,10 @@ struct ClipCtl
     float trebleGain = 0.f;                // -1..1 shelf
     float width = 1.f;                     // M/S width (WAV baseline 1.0)
     float atk = 0.f, dec = 0.f, sus = 1.f, rel = 0.f;
+    // Task 3 (decode-read domain): length-preserving pitch, reverse, sample-start.
+    float pitchRatio  = 1.f;   // 2^((tune semis + detune cents)/12)
+    bool  reverse     = false;
+    float sampleStart = 0.f;   // 0..1 skip-into fraction (composes with slip-trim)
 };
 
 ClipCtl readClipCtl (VibePlayerProcessor* pl)
@@ -462,6 +466,13 @@ ClipCtl readClipCtl (VibePlayerProcessor* pl)
     c.dec = juce::jmax (0.f, rd ("decay"));
     c.sus = juce::jlimit (0.f, 1.f, rd ("sustain"));
     c.rel = juce::jmax (0.f, rd ("release"));
+
+    // Task 3: pitch (tune semitones + detune cents) -> ratio; reverse + sample-start.
+    const float tune   = juce::jlimit (-48.f, 48.f, rd ("tune"));
+    const float detune = juce::jlimit (-100.f, 100.f, rd ("detune"));
+    c.pitchRatio  = std::pow (2.f, (tune + detune / 100.f) / 12.f);
+    c.reverse     = rd ("reverse") > 0.5f;
+    c.sampleStart = juce::jlimit (0.f, 0.999f, rd ("sampleStart"));
     return c;
 }
 
@@ -558,72 +569,70 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         const juce::int64 outPosInClip = (ctx.projectStart + bufOffset) - clipStart;
 
         const double readRatio = player.fileSampleRate / mSampleRate;
-        // QA-Ea Task 0c (FL pre-roll record): shift file reads by the
-        // content-start offset so the clip plays from sample N of the file
-        // rather than 0.  Zero default preserves every pre-Task-0c clip.
-        // Rule-4 defensive floor (belt+suspenders against a UI clamp miss):
-        // contentStartSamples is clamped >= 0 at the UI layer (slip-edit
-        // mouseDrag in BuilderPage.cpp -- Option A: no dead space on either
-        // edge in Slip mode); the floor here protects the streamer seek
-        // against the unlikely case of a stale / corrupt project value.
+        const juce::int64 fileTotalSamples = player.streamer->getTotalLength();
+
+        // QA-Ea Task 0c slip-trim + QA-ClipPlayback Task 3 sample-start: the clip's
+        // first playable file frame.  Rule-4 defensive floor + clamp keep it in range.
         const juce::int64 contentStart = juce::jmax ((juce::int64) 0,
                                                      player.contentStartSamples);
-        const juce::int64 filePos = (juce::int64) (outPosInClip * readRatio)
-                                    + contentStart;
+        const juce::int64 contentBase = juce::jlimit ((juce::int64) 0,
+            juce::jmax ((juce::int64) 0, fileTotalSamples - 1),
+            contentStart + (juce::int64) ((double) ctl.sampleStart * (double) fileTotalSamples));
 
-        const juce::int64 fileTotalSamples = player.streamer->getTotalLength();
-        // EOF guard: clip extends past file end -> output silence.
-        // filePos < 0 is unreachable post-Rule-4 floor (outPosInClip * readRatio
-        // is always >= 0 and contentStart is floored >= 0), so a single >=
-        // check is sufficient.
-        if (filePos >= fileTotalSamples)
-        {
-            continue;
-        }
+        // BPM stretch + length-preserving pitch.  pitch scales the vocoder stretch
+        // and the output resample but CANCELS in the source read rate (fileRate),
+        // so the disk read is unchanged by pitch.
+        const double stretchRatio    = (player.stretchMode && player.originalBPM > 0.f)
+            ? (double) player.originalBPM / ctx.bpm : 1.0;
+        const double pitchRatio      = (double) ctl.pitchRatio;
+        const double effStretchRatio = stretchRatio * pitchRatio;
+        const double effReadRatio    = readRatio    * pitchRatio;
+        const double fileRate        = readRatio / stretchRatio;   // source frames per output frame
 
-        const double stretchRatio = (player.vocoder != nullptr
-                                     && player.stretchMode
-                                     && player.originalBPM > 0.f)
-            ? (double) player.originalBPM / ctx.bpm
-            : 1.0;
+        // reverse: RAM-loaded clips only (the forward-only disk streamer can't read
+        // backward without thrashing; >100 MB streaming clips play forward).
+        const bool doReverse = ctl.reverse && player.streamer->isRamLoaded();
 
-        // QA-Ea Task 0c: playable file length reduced by contentStart (the
-        // clip's first playable file frame is contentStart, not 0).
+        // Timeline frame where the file runs out (from contentBase, via eff ratios).
+        const juce::int64 playableFile = juce::jmax ((juce::int64) 0, fileTotalSamples - contentBase);
         const juce::int64 fileEOFOutput = clipStart
-            + (juce::int64) ((double) (fileTotalSamples - contentStart)
-                             * stretchRatio / readRatio);
+            + (juce::int64) ((double) playableFile * effStretchRatio / effReadRatio);
         const juce::int64 effectiveClipEnd = juce::jmin (clipEnd, fileEOFOutput);
         const int outSamples = (int) juce::jmin (
             (juce::int64) (ctx.numSamples - bufOffset),
             effectiveClipEnd - (ctx.projectStart + bufOffset));
-
         if (outSamples <= 0) continue;
 
-        clipScratch.clear();
+        // Source frame for this block's first output sample.  Forward advances from
+        // contentBase; reverse counts down from the clip's forward end frame.
+        const juce::int64 clipOutLen  = effectiveClipEnd - clipStart;
+        const juce::int64 srcEndFrame = juce::jmin (fileTotalSamples,
+            contentBase + (juce::int64) ((double) clipOutLen * fileRate));
+        const juce::int64 pvRefPos = doReverse
+            ? srcEndFrame - (juce::int64) ((double) outPosInClip * fileRate)
+            : contentBase + (juce::int64) ((double) outPosInClip * fileRate);
 
+        if (! doReverse && pvRefPos >= fileTotalSamples) continue;   // forward EOF
+
+        clipScratch.clear();
         const float gain = ctx.masterGain;
         float       peak = 0.0f;
 
+        // Vocoder path for any stretch / pitch / reverse; plain forward playback
+        // takes the cheaper direct read below.
         const bool usePV = (player.vocoder != nullptr)
-                        && player.stretchMode
-                        && (player.originalBPM > 0.f)
-                        && (std::abs (ctx.bpm - player.originalBPM) > 0.01);
+                        && (std::abs (effStretchRatio - 1.0) > 0.001 || doReverse);
 
         if (usePV)
         {
-            player.vocoder->setStretchRatio (stretchRatio);
+            player.vocoder->setStretchRatio (effStretchRatio);
 
-            // QA-Ea Task 0c: stretch-aware file reference includes the
-            // content-start offset.  player.expectedFilePos / streamer->seek
-            // track the absolute file frame so subsequent reads stay aligned.
-            const juce::int64 pvRefPos  = (juce::int64) ((double) outPosInClip
-                                                          * readRatio / stretchRatio)
-                                          + contentStart;
+            // player.expectedFilePos / streamer->seek track the absolute file frame.
+            // For reverse it counts DOWN and the read chunk is flipped before push.
             const juce::int64 pvReadPos = player.expectedFilePos;
-
             const bool seekNeeded =
                 (pvReadPos == 0 && pvRefPos > (juce::int64) mSampleRate) ||
-                (pvReadPos  > 0 &&
+                (pvReadPos != 0 &&
                  std::abs (pvRefPos - pvReadPos) > (juce::int64) (mSampleRate * 2));
 
             if (seekNeeded)
@@ -633,31 +642,45 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                 player.expectedFilePos = pvRefPos;
             }
 
-            const int numFileSamples = (int) std::ceil (
-                (double) outSamples * readRatio / stretchRatio);
+            const int numFileSamples = (int) std::ceil ((double) outSamples * fileRate);
+            const juce::int64 readAt = doReverse
+                ? player.expectedFilePos - numFileSamples
+                : player.expectedFilePos;
 
             player.pvInBuf.clear();
-            const bool gotRaw = player.streamer->readRaw (
-                player.pvInBuf, 0, numFileSamples, player.expectedFilePos);
+            const bool inRange = (readAt >= 0) && (readAt + numFileSamples <= fileTotalSamples);
+            const bool gotRaw  = inRange
+                && player.streamer->readRaw (player.pvInBuf, 0, numFileSamples, readAt);
 
             if (gotRaw)
             {
-                player.expectedFilePos += numFileSamples;
+                if (doReverse)
+                {
+                    // flip the freshly-read chunk so the vocoder is fed source frames
+                    // in descending-time order (reverse playback).
+                    for (int ch = 0; ch < player.pvInBuf.getNumChannels(); ++ch)
+                    {
+                        float* d = player.pvInBuf.getWritePointer (ch);
+                        for (int a = 0, b = numFileSamples - 1; a < b; ++a, --b)
+                        { const float t = d[a]; d[a] = d[b]; d[b] = t; }
+                    }
+                    player.expectedFilePos -= numFileSamples;
+                }
+                else
+                    player.expectedFilePos += numFileSamples;
+
                 player.vocoder->push (player.pvInBuf, 0, numFileSamples);
 
-                const int numVocOut = (int) std::ceil (
-                    (double) outSamples * readRatio) + 2;
-
+                const int numVocOut = (int) std::ceil ((double) outSamples * effReadRatio) + 2;
                 player.pvOutBuf.clear();
-                const int pulled = player.vocoder->pull (
-                    player.pvOutBuf, 0, numVocOut);
+                const int pulled = player.vocoder->pull (player.pvOutBuf, 0, numVocOut);
 
                 if (pulled > 0)
                 {
                     const int pvCh = player.pvOutBuf.getNumChannels();
                     for (int i = 0; i < outSamples; ++i)
                     {
-                        const double exactFP = (double) i * readRatio;
+                        const double exactFP = (double) i * effReadRatio;
                         const int    ip      = (int) exactFP;
                         const float  frac    = (float) (exactFP - ip);
 
@@ -679,8 +702,8 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         else
         {
             peak = player.streamer->readAndMix (
-                clipScratch, bufOffset, outSamples, filePos, readRatio, ctx.numOut, gain);
-            player.expectedFilePos = filePos + (juce::int64) std::ceil (outSamples * readRatio);
+                clipScratch, bufOffset, outSamples, pvRefPos, readRatio, ctx.numOut, gain);
+            player.expectedFilePos = pvRefPos + (juce::int64) std::ceil (outSamples * readRatio);
         }
 
         // QA-ClipPlayback Task 2: run the ClipsPage BaySickPlayer control chain on
@@ -2617,8 +2640,10 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
                                                          mAudioFileThread);
         p.streamer->seek (0);
 
-        // Create phase vocoder when stretch mode is enabled.
-        if (blk.stretchMode)
+        // QA-ClipPlayback Task 3: always create the phase vocoder so length-preserving
+        // pitch (and reverse) work live on any clip, not just BPM-stretched ones.  It
+        // is bypassed in the render when the clip is forward + unstretched + unpitched
+        // (usePV false), so no CPU cost when idle -- only the buffer memory.
         {
             const int pvCh = p.streamer->getNumChannels();
             p.vocoder = std::make_unique<PhaseVocoder> (pvCh);

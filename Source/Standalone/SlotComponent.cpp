@@ -819,11 +819,10 @@ void SlotComponent::showModeMenu()
         });
 }
 
-// H-8 (2026-05-02): public re-mount helper.  Used by DelayDSP's Slapback
-// preset button (which flips Type back to Echo internally) so the inline
-// panel swaps from VocalDoublerDelayPanel to DelayPanel after the preset
-// loads.  Mirrors the re-mount logic at the bottom of showModeMenu's
-// callback so panel-driven Type changes show the right layout.
+// Public re-mount helper.  Used after a preset load / Restore-Defaults (see
+// showPresetMenu) so an inline panel picks up a Type change (e.g. Delay
+// Echo <-> VocalDoubler) and shows the right layout.  Mirrors the re-mount
+// logic in showModeMenu's callback.
 void SlotComponent::remountEditor()
 {
     if (! mRack) return;
