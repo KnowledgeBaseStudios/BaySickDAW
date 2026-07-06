@@ -1208,6 +1208,7 @@ needed to find what you should pull up to review the work.
 - **Bucket:** Players, System Pages
 
 #### **QA-CutSelfReview: "Cut Self" on Layers/Bass** *(NEW — inserted 2026-06-05 at QA-Ee close)*
+- **STATUS: OPEN (2026-07-06).**  **Plan file:** [`Plans & Specs/Batch Plans/concurrent-fluttering-turtle.md`](Batch Plans/concurrent-fluttering-turtle.md).
 - Items: "Cut Self" (self-choke) works on the drum-kit grid but not on Layers or Bass piano rolls.
 - Scope: program-wide investigation — confirm the exact feature + why it's drum-kit-only.
 - Sequencing: **immediately after QA-ClipPlayback, before QA-UICleanup** (Jeff 2026-06-05; re-pointed 2026-06-06 when QA-MultiBlockHazard inserted between, then 2026-07-02 when QA-ClipPlayback inserted between; see §6 arrow + §9 forty-ninth + 2026-06-06 + fifty-third Forks entries).
