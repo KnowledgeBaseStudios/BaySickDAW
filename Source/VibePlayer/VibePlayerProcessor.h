@@ -159,6 +159,7 @@ private:
         int   detuneMode   { -1 };
         // S1 Incr3 cache
         float cutSelf      { -1.f };   // bool as float (apvts bool stores 0/1)
+        float cutSelfMode  { -1.f };   // bool as float: 0=Same Pitch, 1=Cut All
         float reverse      { -1.f };
         int   unisonVoices { -1 };
         float unisonSpread { -1.f };

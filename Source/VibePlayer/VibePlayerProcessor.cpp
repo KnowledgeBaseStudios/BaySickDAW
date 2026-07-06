@@ -207,11 +207,13 @@ void VibePlayerProcessor::updateFromApvts()
 
     // ── S1 Incr3 2026-04-21 ───────────────────────────────────────────────────
     const float cutSelf      = get ("cutSelf");
+    const float cutSelfMode  = get ("cutSelfMode");
     const float reverse      = get ("reverse");
     const int   unisonVoices = juce::roundToInt (get ("unisonVoices"));
     const float unisonSpread = get ("unisonSpread");
 
     if (cutSelf      != mCache.cutSelf)      { mCache.cutSelf      = cutSelf;      mSynth.setCutSelf      (cutSelf > 0.5f); }
+    if (cutSelfMode  != mCache.cutSelfMode)  { mCache.cutSelfMode  = cutSelfMode;  mSynth.setCutSelfMode  (cutSelfMode > 0.5f); }
     if (reverse      != mCache.reverse)      { mCache.reverse      = reverse;      mSynth.setReverse      (reverse > 0.5f); }
     if (unisonVoices != mCache.unisonVoices) { mCache.unisonVoices = unisonVoices; mSynth.setUnisonVoices (unisonVoices); }
     if (unisonSpread != mCache.unisonSpread) { mCache.unisonSpread = unisonSpread; mSynth.setUnisonSpread (unisonSpread); }
@@ -317,6 +319,10 @@ VibePlayerProcessor::createLayout (const juce::String& p)
     // S1 2026-04-21 additions (all preserve v1 behaviour on defaults):
     layout.add (std::make_unique<juce::AudioParameterBool> (
         vid (p + "cutSelf"), "Cut Self", false));
+    // Cut Self mode (QA-CutSelfReview): false = Same Pitch, true = Cut All.
+    // BaySickPlayer defaults to Cut All to preserve today's drum behaviour.
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        vid (p + "cutSelfMode"), "Cut Self Mode", true));
 
     layout.add (std::make_unique<juce::AudioParameterInt> (
         vid (p + "detuneMode"), "Detune Mode", 0, 2, 0));   // 0=simple 1=random 2=pair

@@ -73,24 +73,65 @@ void HarmlessSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
 {
     applyStrum (midi, buffer.getNumSamples());
 
-    // Session E - Cut Self: inject a noteOff for each incoming noteOn so any
-    // voice already playing that note is stopped cleanly. Prevents phase
-    // stacking on rapid retrigs of the same note.
-    if (mCutSelf)
+    // Per-pitch note-off strip (QA-CutSelfReview): see BaySickSynthDSP for the
+    // rationale - overlapping same-pitch notes must not let an earlier note's
+    // note-off cascade onto the retriggered voice.  Harmless is always poly.
     {
-        juce::MidiBuffer processed;
+        bool anyActive = false;
+        for (int i = 0; i < mSynth.getNumVoices(); ++i)
+            if (mSynth.getVoice (i)->isVoiceActive()) { anyActive = true; break; }
+        if (! anyActive)
+            for (int k = 0; k < 128; ++k) mNoteOnCount[k] = 0;
+
+        juce::MidiBuffer filtered;
         for (const auto meta : midi)
         {
             const auto msg = meta.getMessage();
             if (msg.isNoteOn())
             {
-                processed.addEvent (
-                    juce::MidiMessage::noteOff (msg.getChannel(), msg.getNoteNumber()),
-                    meta.samplePosition);
+                const int p = msg.getNoteNumber();
+                if (p >= 0 && p < 128) ++mNoteOnCount[p];
+                filtered.addEvent (msg, meta.samplePosition);
             }
-            processed.addEvent (msg, meta.samplePosition);
+            else if (msg.isNoteOff())
+            {
+                const int  p       = msg.getNoteNumber();
+                bool       deliver = true;
+                if (p >= 0 && p < 128)
+                {
+                    if (mNoteOnCount[p] > 0) --mNoteOnCount[p];
+                    if (mNoteOnCount[p] > 0) deliver = false;   // a later same-pitch note still holds it
+                }
+                if (deliver) filtered.addEvent (msg, meta.samplePosition);
+            }
+            else
+            {
+                filtered.addEvent (msg, meta.samplePosition);
+            }
         }
-        midi.swapWith (processed);
+        midi.swapWith (filtered);
+    }
+
+    // Cut Self (QA-CutSelfReview): on each incoming note-on, hard-cut the matching
+    // voice (Same Pitch) or every active voice (Cut All) BEFORE rendering, so the
+    // retrigger starts clean.  cutFast() is an instant ~1.5 ms click-free
+    // quick-release - NOT a MIDI note-off, which runs the (possibly long) ADSR
+    // release = the audible bleed.  Harmless is always poly.
+    if (mCutSelf)
+    {
+        for (const auto meta : midi)
+        {
+            const auto msg = meta.getMessage();
+            if (! msg.isNoteOn())
+                continue;
+
+            const int n = msg.getNoteNumber();
+            forEachVoice ([this, n] (AdditiveVoice& v)
+            {
+                if (v.isVoiceActive() && (mCutAll || v.getCurrentlyPlayingNote() == n))
+                    v.cutFast();
+            });
+        }
     }
 
     // 2026-04-30: T2-B lfo_vel - note-on velocity scaling.  If the global

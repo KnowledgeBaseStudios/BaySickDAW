@@ -107,6 +107,7 @@ private:
         int   voiceMode     { -1 };
         float glide         { -1.f };
         int   cutSelf       { -1 };
+        int   cutSelfMode   { -1 };
         int   modWheelDest  { -1 };
         float modWheelAmt   { -1.f };
 

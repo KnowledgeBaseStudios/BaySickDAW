@@ -127,6 +127,7 @@ private:
         float glideTime         { -1.f };
         int   legato            { -1 };
         int   cutSelf           { -1 };
+        int   cutSelfMode       { -1 };
         float strumTime         { -1.f };
         float prismAmount       { -1.f };
         float pluckDecay        { -1.f };

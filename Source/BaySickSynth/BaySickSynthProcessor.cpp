@@ -174,9 +174,13 @@ BaySickSynthProcessor::createLayout (const juce::String& p)
         vid (p + "glide"), "Glide",
         juce::NormalisableRange<float> (0.f, 2.f, 0.f, 0.4f), 0.f));
 
-    // Cut self (Session E) - Poly-mode same-note retrig cut. Default false.
+    // Cut self (QA-CutSelfReview) - Poly-mode cut on note-on. Default off.
     layout.add (std::make_unique<juce::AudioParameterBool> (
         vid (p + "cutSelf"), "Cut Self", false));
+    // Cut Self mode: false = Same Pitch (cut only the retriggered note),
+    // true = Cut All (cut every ringing voice). Synths default to Same Pitch.
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        vid (p + "cutSelfMode"), "Cut Self Mode", false));
 
     // ── Mod wheel ─────────────────────────────────────────────────────────────
     layout.add (std::make_unique<juce::AudioParameterChoice> (
@@ -403,6 +407,13 @@ void BaySickSynthProcessor::updateFromApvts()
     {
         mSynth.setCutSelf (cutSelf != 0);
         mCache.cutSelf = cutSelf;
+    }
+
+    const int cutSelfMode = geti ("cutSelfMode");
+    if (cutSelfMode != mCache.cutSelfMode)
+    {
+        mSynth.setCutSelfMode (cutSelfMode != 0);
+        mCache.cutSelfMode = cutSelfMode;
     }
 
     const int mwd = geti ("modWheelDest");

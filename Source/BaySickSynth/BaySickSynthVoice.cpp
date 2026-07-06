@@ -87,6 +87,10 @@ void BaySickSynthVoice::startNote (int midiNote, float velocity,
     mDeclickGain = 0.0f;
     mDeclickStep = 1.0f / (float) fadeSamples;
 
+    // A fresh allocation is never mid-cut (a stolen voice may have been fading).
+    mCutFadeActive = false;
+    mCutFadeGain   = 1.0f;
+
     // Arm transient injector (P3.5) - short HPF'd noise burst on noteOn.
     // Only fires when amount > 0 so the voice stays click-free by default.
     if (mTransientAmount > 0.0001f)
@@ -142,6 +146,21 @@ void BaySickSynthVoice::stopNote (float /*velocity*/, bool allowTailOff)
         mInRelease   = false;
         clearCurrentNote();
     }
+}
+
+void BaySickSynthVoice::cutFast() noexcept
+{
+    if (! isVoiceActive())
+        return;
+
+    // ~1 ms linear fade-out to zero (matches the declick ramp length), applied to
+    // the voice output; the voice retires when the ramp completes.  Click-free
+    // because it ramps continuously from the current level, unlike a MIDI note-off
+    // which runs the (possibly long) ADSR release = the audible bleed we're fixing.
+    const int fadeSamples = juce::jmax (1, (int) ((float) getSampleRate() * 0.001f));
+    mCutFadeGain   = 1.0f;
+    mCutFadeStep   = 1.0f / (float) fadeSamples;
+    mCutFadeActive = true;
 }
 
 // Legato retarget: glide to new pitch (if glide>0), update note number and
@@ -656,9 +675,30 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
             }
         }
 
+        // Cut-self fast fade-out (QA-CutSelfReview): applied to the final L/R so
+        // the unison stack fades with the main voice; retire when the ramp hits 0.
+        if (mCutFadeActive)
+        {
+            Lout *= mCutFadeGain;
+            Rout *= mCutFadeGain;
+            mCutFadeGain -= mCutFadeStep;
+        }
+
         // ── 11. Stereo output ─────────────────────────────────────────────────
         L[i] += Lout;
         R[i] += Rout;
+
+        if (mCutFadeActive && mCutFadeGain <= 0.0f)
+        {
+            mCutFadeActive = false;
+            mAmpEnv.reset();
+            mFltEnv.reset();
+            mPitchEnv.reset();
+            mCurrentNote = -1;
+            mInRelease   = false;
+            clearCurrentNote();
+            break;
+        }
 
         // ── 12. Deactivate when amp envelope finishes ─────────────────────────
         if (!mAmpEnv.isActive())

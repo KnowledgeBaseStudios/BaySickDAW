@@ -115,6 +115,7 @@ private:
     juce::Slider   mOutVolKnob;       // 2026-04-25 master out parity (BaySickPlayer)
     juce::Label    mOutVolLbl;
     juce::TextButton mCutSelfBtn { "CUT SELF" };
+    juce::TextButton mCutSelfModeBtn { "SAME PITCH" };   // QA-CutSelfReview: Same Pitch / Cut All
 
     juce::Slider   mModWheelAmtKnob;
     juce::Label    mModWheelAmtLbl;
@@ -175,6 +176,7 @@ private:
     std::unique_ptr<SliderAtt> mTransposeAtt, mModifierAtt, mNoiseAtt;
     std::unique_ptr<SliderAtt> mGlideAtt, mModWheelAmtAtt, mOutVolAtt;
     std::unique_ptr<ButtonAtt> mCutSelfAtt;
+    std::unique_ptr<ButtonAtt> mCutSelfModeAtt;
     // Amp Env
     std::unique_ptr<SliderAtt> mAmpAAtt, mAmpDAtt, mAmpSAtt, mAmpRAtt;
     std::unique_ptr<SliderAtt> mVelAmpAtt;

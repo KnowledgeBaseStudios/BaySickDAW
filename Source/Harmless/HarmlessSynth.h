@@ -48,8 +48,11 @@ public:
     void setGlide  (float glideTimeSec);
     void setLegato (bool legatoOn);
 
-    // ── Session E: Cut self - noteOn cuts prior voices playing the same note
+    // ── Cut self (QA-CutSelfReview): note-on hard-cuts prior voice(s) instantly.
     void setCutSelf (bool on) noexcept { mCutSelf = on; }
+    // Cut Self mode: false = Same Pitch (cut only the retriggered note),
+    // true = Cut All (cut every ringing voice).
+    void setCutSelfMode (bool cutAll) noexcept { mCutAll = cutAll; }
 
     // ── Beta: strum ───────────────────────────────────────────────────────────
     // Staggers simultaneous note-ons by strumTimeSec / (numNotes-1).
@@ -245,6 +248,13 @@ private:
     float  mStrumTimeSec  { 0.0f };
     int    mStrumDir      { 0 };    // 0=up 1=down 2=random
     bool   mCutSelf       { false };  // Session E
+    bool   mCutAll        { false };  // QA-CutSelfReview: false = Same Pitch, true = Cut All
+
+    // Per-pitch note-on reference count (QA-CutSelfReview): holds an earlier
+    // same-pitch note's note-off until the LAST overlapping note of that pitch
+    // ends, so juce's pitch-matched note-off can't cascade onto a retriggered
+    // voice.  Self-heals to 0 whenever the synth is silent.
+    int    mNoteOnCount[128] {};
 
     // Cached pointer to the registry so global-LFO macro writes can reach it.
     const HarmlessModRegistry* mModRegistry { nullptr };

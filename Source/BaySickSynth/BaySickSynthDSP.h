@@ -42,8 +42,10 @@ public:
     // ── Voice mode ────────────────────────────────────────────────────────────
     void setVoiceMode   (BssVoiceMode mode);
 
-    // ── Cut self (Session E retro): cut prior voice playing same note on noteOn
+    // ── Cut self (QA-CutSelfReview): on note-on, instant click-free hard cut of
+    //   the same-note voice (Same Pitch) or every active voice (Cut All).  Poly only.
     void setCutSelf     (bool on);
+    void setCutSelfMode (bool cutAll);   // false = Same Pitch, true = Cut All
 
     // ── Mod wheel ─────────────────────────────────────────────────────────────
     void setModWheelDest (int dest);
@@ -95,7 +97,14 @@ private:
     // ── Mono/Lead/Legato state ────────────────────────────────────────────────
     BssVoiceMode mVoiceMode    { BssVoiceMode::Poly };
     int          mLastMonoNote { -1 };
-    bool         mCutSelf      { false };   // Session E: Poly-mode same-note cut
+    bool         mCutSelf      { false };   // QA-CutSelfReview: Poly-mode cut on note-on
+    bool         mCutAll       { false };   // false = Same Pitch, true = Cut All
+
+    // Per-pitch note-on reference count (QA-CutSelfReview): holds an earlier
+    // same-pitch note's note-off until the LAST overlapping note of that pitch
+    // ends, so juce::Synthesiser's pitch-matched note-off can't cascade onto a
+    // retriggered voice.  Poly-only; self-heals to 0 whenever the synth is silent.
+    int          mNoteOnCount[128] {};
 
     // Legato: last-note-priority stack + currently-playing voice pointer.
     // mLegatoSynthNote = the note number the juce::Synthesiser thinks the voice is

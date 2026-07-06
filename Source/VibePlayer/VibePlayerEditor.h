@@ -70,7 +70,7 @@ private:
     // ── Box 1: Sample Engine ─────────────────────────────────────────────────
     juce::Slider    mSampleStartKnob, mStretchKnob;
     juce::Label     mSampleStartLbl,  mStretchLbl;
-    DualLabelToggle mReverseTog,      mCutSelfTog;
+    DualLabelToggle mReverseTog,      mCutSelfTog,      mCutSelfModeTog;
 
     // ── Box 2: Pitch & Voicing ───────────────────────────────────────────────
     juce::Slider mTuneKnob,          mVoiceCapKnob;
@@ -136,7 +136,7 @@ private:
     std::unique_ptr<SliderAtt> mAttackAtt,   mSustainAtt,   mVolumeAtt,   mLfoRateAtt;
     std::unique_ptr<SliderAtt> mVelVolAtt,   mSampleStartAtt;
     std::unique_ptr<SliderAtt> mUnisonVoicesAtt, mUnisonSpreadAtt, mVoiceCapAtt;
-    std::unique_ptr<ButtonAtt> mCutSelfAtt,  mReverseAtt;
+    std::unique_ptr<ButtonAtt> mCutSelfAtt,  mReverseAtt,  mCutSelfModeAtt;
     // detuneMode selector is wired manually (ChickenHeadSelector has no juce Attachment):
     std::unique_ptr<juce::ParameterAttachment> mDetuneModeAtt;
     // D.4-Q3 (2026-05-01): Filter box attachments

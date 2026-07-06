@@ -220,6 +220,24 @@ void AdditiveVoice::stopNote (float /*velocity*/, bool allowTailOff)
     }
 }
 
+void AdditiveVoice::cutFast() noexcept
+{
+    if (! isVoiceActive())
+        return;
+
+    // Instant click-free hard cut: override the amp release to ~1.5 ms and release.
+    // The voice fades over the quick-release and auto-retires when mAmpADSR goes
+    // idle (renderNextBlock clears it).  startNote re-applies mAmpParams, so the
+    // override never leaks into the next note on this voice.
+    auto quick = mAmpParams;
+    quick.release = 0.0015f;   // ~1.5 ms (matches the VibePlayer voice-steal fade)
+    mAmpADSR.setParameters (quick);
+    mAmpADSR.noteOff();
+    mFltADSR1.noteOff();
+    mFltADSR2.noteOff();
+    mInRelease = true;
+}
+
 void AdditiveVoice::pitchWheelMoved (int newValue)
 {
     mPitchWheelSemis = float (newValue - 8192) / 8192.0f * 2.0f;

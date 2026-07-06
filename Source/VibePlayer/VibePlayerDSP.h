@@ -543,6 +543,7 @@ public:
     void setLfoRate           (float hz)                             noexcept;
     void setVoiceCap          (int   cap)                            noexcept;
     void setCutSelf           (bool  on)                             noexcept;
+    void setCutSelfMode       (bool  cutAll)                         noexcept;   // false=Same Pitch, true=Cut All
     void setReverse           (bool  rev)                            noexcept;
     void setUnisonVoices      (int   n)                              noexcept;
     void setUnisonSpread      (float cents)                          noexcept;
@@ -583,6 +584,7 @@ private:
     int   mLastVoiceCap    { -1 };
     // S1 Incr3 state (audio-thread only)
     bool  mCutSelf         { false };
+    bool  mCutAll          { false };   // QA-CutSelfReview: false=Same Pitch, true=Cut All
     bool  mReverse         { false };
     bool  mLastReverse     { false };
     int   mUnisonVoices    { 1 };

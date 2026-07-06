@@ -137,6 +137,16 @@ BaySickSynthEditor::BaySickSynthEditor (BaySickSynthProcessor& p)
                             "Prevents phase stacking on rapid retrigs of the same note.\n"
                             "Active in Poly mode only (Mono/Lead cut inherently; Legato retargets).");
     addAndMakeVisible (mCutSelfBtn);
+
+    // Cut Self mode toggle (QA-CutSelfReview): Same Pitch vs Cut All.  Label
+    // follows the toggle state.  Only bites in Poly (Mono/Lead cut inherently).
+    mCutSelfModeBtn.setClickingTogglesState (true);
+    mCutSelfModeBtn.setTooltip ("Cut Self mode: Same Pitch cuts only the retriggered note (default);\n"
+                                "Cut All cuts every ringing voice on each new note.");
+    mCutSelfModeBtn.onStateChange = [this]
+    { mCutSelfModeBtn.setButtonText (mCutSelfModeBtn.getToggleState() ? "CUT ALL" : "SAME PITCH"); };
+    mCutSelfModeBtn.onStateChange();
+    addAndMakeVisible (mCutSelfModeBtn);
     mModWheelDestLed = std::make_unique<BssLedRadio> (avts, pid ("modWheelDest"),
                          juce::StringArray { "Filter", "LFO" }, 1, 2, ledCol);
     addAndMakeVisible (*mVoiceModeLed);
@@ -330,6 +340,7 @@ BaySickSynthEditor::BaySickSynthEditor (BaySickSynthProcessor& p)
     mOutVolAtt      = std::make_unique<SliderAtt> (avts, pid ("outVol"),      mOutVolKnob);
     mModWheelAmtAtt = std::make_unique<SliderAtt> (avts, pid ("modWheelAmt"), mModWheelAmtKnob);
     mCutSelfAtt     = std::make_unique<ButtonAtt> (avts, pid ("cutSelf"),     mCutSelfBtn);
+    mCutSelfModeAtt = std::make_unique<ButtonAtt> (avts, pid ("cutSelfMode"), mCutSelfModeBtn);
     // Amp Env
     mAmpAAtt   = std::make_unique<SliderAtt> (avts, pid ("amp_attack"),   mAmpASlider);
     mAmpDAtt   = std::make_unique<SliderAtt> (avts, pid ("amp_decay"),    mAmpDSlider);
@@ -625,7 +636,11 @@ void BaySickSynthEditor::layoutOscDeck (juce::Rectangle<int> deck)
     const int vGap   = 4;
     if (mVoiceModeLed) mVoiceModeLed->setBounds (vInner.getX(), vInner.getY(), vInner.getWidth(), ledH);
 
-    mCutSelfBtn.setBounds (vInner.getX(), vInner.getY() + ledH + vGap, vInner.getWidth(), cutH);
+    // Cut Self button (half width) + Cut Self mode toggle (Same Pitch / Cut All).
+    const int cutY     = vInner.getY() + ledH + vGap;
+    const int cutHalfW = (vInner.getWidth() - vGap) / 2;
+    mCutSelfBtn.setBounds     (vInner.getX(),                   cutY, cutHalfW, cutH);
+    mCutSelfModeBtn.setBounds (vInner.getX() + cutHalfW + vGap, cutY, vInner.getWidth() - cutHalfW - vGap, cutH);
 
     // Slide + Out Vol - split the remaining vertical space horizontally.
     // Two knobs side-by-side, each centered in its half-column with its own label.
@@ -897,6 +912,7 @@ void BaySickSynthEditor::showDeck (int deck, bool visible)
             mGlideKnob.setVisible (visible);      mGlideLbl.setVisible (visible);
             mOutVolKnob.setVisible (visible);     mOutVolLbl.setVisible (visible);
             mCutSelfBtn.setVisible (visible);
+            mCutSelfModeBtn.setVisible (visible);
             mModWheelAmtKnob.setVisible (visible); mModWheelAmtLbl.setVisible (visible);
             mVoiceModeLed->setVisible (visible);
             mModWheelDestLed->setVisible (visible);

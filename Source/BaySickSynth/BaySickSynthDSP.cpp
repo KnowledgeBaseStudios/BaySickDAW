@@ -24,6 +24,11 @@ void BaySickSynthDSP::prepare (double sampleRate, int /*maxBlockSize*/)
 void BaySickSynthDSP::renderNextBlock (juce::AudioBuffer<float>& buf,
                                         juce::MidiBuffer& midi)
 {
+    // The per-pitch note-off counter (poly branch below) is poly-only; keep it
+    // zeroed in the other modes so Poly always resumes from a clean state.
+    if (mVoiceMode != BssVoiceMode::Poly)
+        std::fill_n (mNoteOnCount, 128, 0);
+
     if (mVoiceMode == BssVoiceMode::Legato)
     {
         handleLegatoMidi (midi);
@@ -75,29 +80,68 @@ void BaySickSynthDSP::renderNextBlock (juce::AudioBuffer<float>& buf,
         mLegatoVoice     = nullptr;
         mLegatoSynthNote = -1;
 
-        // Cut-self (Session E) - Poly mode only. Inject a noteOff for the
-        // incoming note before each noteOn so any voice already playing that
-        // note is stopped cleanly (no phase stacking on rapid retrigs).
+        // Per-pitch note-off strip (QA-CutSelfReview): overlapping same-pitch notes
+        // must not let the earlier note's note-off cascade onto the retriggered
+        // voice (juce::Synthesiser matches note-offs by pitch).  Hold an earlier
+        // note-off until the LAST overlapping note of that pitch ends.  Self-heals:
+        // the counter zeroes whenever the synth is fully silent (no lost-note-off
+        // drift can persist past a moment of silence).
+        bool anyActive = false;
+        for (int vi = 0; vi < kNumVoices; ++vi)
+            if (mVoices[vi] != nullptr && mVoices[vi]->isVoiceActive()) { anyActive = true; break; }
+        if (! anyActive)
+            std::fill_n (mNoteOnCount, 128, 0);
+
+        juce::MidiBuffer filtered;
+        for (const auto meta : midi)
+        {
+            const auto msg = meta.getMessage();
+            if (msg.isNoteOn())
+            {
+                const int p = msg.getNoteNumber();
+                if (p >= 0 && p < 128) ++mNoteOnCount[p];
+                filtered.addEvent (msg, meta.samplePosition);
+            }
+            else if (msg.isNoteOff())
+            {
+                const int  p       = msg.getNoteNumber();
+                bool       deliver = true;
+                if (p >= 0 && p < 128)
+                {
+                    if (mNoteOnCount[p] > 0) --mNoteOnCount[p];
+                    if (mNoteOnCount[p] > 0) deliver = false;   // a later same-pitch note still holds it
+                }
+                if (deliver) filtered.addEvent (msg, meta.samplePosition);
+            }
+            else
+            {
+                filtered.addEvent (msg, meta.samplePosition);
+            }
+        }
+
+        // Cut Self (Poly): on each note-on, hard-cut the matching voice (Same Pitch)
+        // or every active voice (Cut All) BEFORE rendering, so the retrigger starts
+        // clean.  cutFast() is an instant ~1 ms click-free fade-out - NOT a MIDI
+        // note-off (which JUCE turns into an ADSR tail-off = the old bleed).  Runs
+        // only on note-on events; mVoices[] is cached (no dynamic_cast).
         if (mCutSelf)
         {
-            juce::MidiBuffer processed;
-            for (const auto meta : midi)
+            for (const auto meta : filtered)
             {
                 const auto msg = meta.getMessage();
-                if (msg.isNoteOn())
-                {
-                    processed.addEvent (
-                        juce::MidiMessage::noteOff (msg.getChannel(), msg.getNoteNumber()),
-                        meta.samplePosition);
-                }
-                processed.addEvent (msg, meta.samplePosition);
+                if (! msg.isNoteOn())
+                    continue;
+
+                const int n = msg.getNoteNumber();
+                for (int vi = 0; vi < kNumVoices; ++vi)
+                    if (auto* v = mVoices[vi];
+                        v != nullptr && v->isVoiceActive()
+                        && (mCutAll || v->getCurrentlyPlayingNote() == n))
+                        v->cutFast();
             }
-            mSynth.renderNextBlock (buf, processed, 0, buf.getNumSamples());
         }
-        else
-        {
-            mSynth.renderNextBlock (buf, midi, 0, buf.getNumSamples());
-        }
+
+        mSynth.renderNextBlock (buf, filtered, 0, buf.getNumSamples());
     }
 }
 
@@ -273,6 +317,11 @@ void BaySickSynthDSP::setVoiceMode (BssVoiceMode mode)
 void BaySickSynthDSP::setCutSelf (bool on)
 {
     mCutSelf = on;
+}
+
+void BaySickSynthDSP::setCutSelfMode (bool cutAll)
+{
+    mCutAll = cutAll;
 }
 
 void BaySickSynthDSP::setModWheelDest (int dest)

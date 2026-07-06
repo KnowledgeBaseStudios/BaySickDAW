@@ -272,9 +272,12 @@ HarmlessProcessor::createLayout (const juce::String& p)
     layout.add (std::make_unique<juce::AudioParameterBool> (
         vid (p + "legato"), "Legato", false));
 
-    // Session E - Cut Self: noteOn cuts prior voices playing the same note.
+    // Cut Self (QA-CutSelfReview): note-on hard-cuts prior voice(s) instantly.
     layout.add (std::make_unique<juce::AudioParameterBool> (
         vid (p + "cutSelf"), "Cut Self", false));
+    // Cut Self mode: false = Same Pitch, true = Cut All. Harmless defaults to Same Pitch.
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        vid (p + "cutSelfMode"), "Cut Self Mode", false));
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         vid (p + "strum_time"), "Strum Time",
@@ -675,6 +678,13 @@ void HarmlessProcessor::updateFromApvts()
     {
         mSynth.setCutSelf (cutSelf != 0);
         mCache.cutSelf = cutSelf;
+    }
+
+    const int cutSelfMode = geti ("cutSelfMode");
+    if (cutSelfMode != mCache.cutSelfMode)
+    {
+        mSynth.setCutSelfMode (cutSelfMode != 0);
+        mCache.cutSelfMode = cutSelfMode;
     }
 
     const float strum = getf ("strum_time");

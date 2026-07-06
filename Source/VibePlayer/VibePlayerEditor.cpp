@@ -83,11 +83,16 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     for (auto* l : { &mSampleStartLbl,  &mStretchLbl  }) addAndMakeVisible (*l);
     mReverseTog.setupOnOff ("REVERSE", "Play samples in reverse");
     mCutSelfTog.setupOnOff ("CUT SELF", "Kill previous notes when a new note starts");
+    // Cut Self mode (QA-CutSelfReview): Same Pitch (top/off) vs Cut All (bottom/on).
+    mCutSelfModeTog.setupNamed ("SAME PITCH", "Cut only the retriggered note",
+                                "CUT ALL",    "Cut every ringing voice on each new note");
     // Match the other VibePlayer labels (0xFFB0B0B0 per initLabel).
     mReverseTog.setLabelColour (juce::Colour (0xFFB0B0B0));
     mCutSelfTog.setLabelColour (juce::Colour (0xFFB0B0B0));
+    mCutSelfModeTog.setLabelColour (juce::Colour (0xFFB0B0B0));
     addAndMakeVisible (mReverseTog);
     addAndMakeVisible (mCutSelfTog);
+    addAndMakeVisible (mCutSelfModeTog);
 
     // ── Box 2: Pitch & Voicing (5 knobs + 1 chickenhead) ─────────────────────
     initModKnob (mTuneKnob,          "Tune (semitones)");
@@ -248,6 +253,7 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     mStretchAtt       = std::make_unique<SliderAtt> (avts, pid ("stretch"),      mStretchKnob);
     mReverseAtt       = std::make_unique<ButtonAtt> (avts, pid ("reverse"),      mReverseTog.btn());
     mCutSelfAtt       = std::make_unique<ButtonAtt> (avts, pid ("cutSelf"),      mCutSelfTog.btn());
+    mCutSelfModeAtt   = std::make_unique<ButtonAtt> (avts, pid ("cutSelfMode"),  mCutSelfModeTog.btn());
 
     mTuneAtt          = std::make_unique<SliderAtt> (avts, pid ("tune"),         mTuneKnob);
     mVoiceCapAtt      = std::make_unique<SliderAtt> (avts, pid ("voiceCap"),     mVoiceCapKnob);
@@ -431,11 +437,18 @@ void VibePlayerEditor::resized()
     placeKnob (0, 0, 0, mSampleStartKnob, mSampleStartLbl);
     placeKnob (0, 1, 0, mStretchKnob,     mStretchLbl);
     {
-        auto revCell = cell (0, 0, 1);
-        auto cutCell = cell (0, 1, 1);
-        const int doubleH = revCell.getHeight() * 2;
-        mReverseTog.setBounds (revCell.withHeight (doubleH));
-        mCutSelfTog.setBounds (cutCell.withHeight (doubleH));
+        // Box 0 toggle row (QA-CutSelfReview): Reverse | CUT SELF | Same Pitch/Cut All,
+        // three switches spread evenly across the full box width (rows 1-2, doubleH).
+        auto      b0      = box (0);
+        auto      rowCell = cell (0, 0, 1);
+        const int doubleH = rowCell.getHeight() * 2;
+        const int y       = rowCell.getY();
+        const int tx      = b0.getX() + kInnerPad;
+        const int tw      = b0.getWidth() - 2 * kInnerPad;
+        const int third   = tw / 3;
+        mReverseTog    .setBounds (tx,             y, third,          doubleH);
+        mCutSelfTog    .setBounds (tx + third,     y, third,          doubleH);
+        mCutSelfModeTog.setBounds (tx + 2 * third, y, tw - 2 * third, doubleH);
     }
 
     // ── Box 1: Pitch & Voicing (5 knobs + chickenhead, 2x3) ──────────────────

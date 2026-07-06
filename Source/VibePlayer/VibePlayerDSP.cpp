@@ -1272,16 +1272,24 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
             // QA-VoicePool Task 3: iterate cached mVoices[] (no dynamic_cast
             // per voice per Sub-A=(a) rationale - this loop fires on every
             // note-on so the dynamic_cast cost was on the hot path).
+            // QA-CutSelfReview: in Cut Self "Same Pitch" mode this same-note stop
+            // becomes an instant ~1.5 ms quick-release (no bleed) via initiateSteal;
+            // otherwise it stays the soft one-voice-per-pitch release.
+            const bool fastSameNoteCut = mCutSelf && ! mCutAll;
             for (int vi = 0; vi < kMaxVoices; ++vi)
             {
                 auto* vv = mVoices[vi];
                 if (vv != nullptr && vv->isVoiceActive()
                     && vv->getCurrentlyPlayingNote() == note)
-                    vv->stopNote (0.f, true);   // soft stop (ADSR release)
+                {
+                    if (fastSameNoteCut) vv->initiateSteal();
+                    vv->stopNote (0.f, true);   // soft stop, or fast if stolen above
+                }
             }
 
-            // ── Cut-self: hard-stop ALL voices (any pitch) before the new note ──
-            if (mCutSelf)
+            // Cut Self "Cut All" mode: hard-stop EVERY voice on each note-on (drums
+            // default; unchanged).  "Same Pitch" is handled by the fast cut above.
+            if (mCutSelf && mCutAll)
                 mSynth.allNotesOff (0, false);
 
             // ── Unison fan-out: N voices per note-on with per-voice cents ───
@@ -1602,6 +1610,11 @@ void VibeSynth::setVoiceCap (int cap) noexcept
 void VibeSynth::setCutSelf (bool on) noexcept
 {
     mCutSelf = on;
+}
+
+void VibeSynth::setCutSelfMode (bool cutAll) noexcept
+{
+    mCutAll = cutAll;
 }
 
 void VibeSynth::setReverse (bool rev) noexcept

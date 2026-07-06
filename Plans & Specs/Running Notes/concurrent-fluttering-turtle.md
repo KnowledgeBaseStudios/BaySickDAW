@@ -32,6 +32,18 @@ Jeff confirmed live: switching a synth to **Mono** "fixed" it — but that was M
 
 ---
 
+## 2026-07-06 — Task 1 — Cut Self mode across 4 engines + note-off cascade fix
+
+**Code complete (all 4 engines).** Same Pitch / Cut All mode (`cutSelfMode` Bool param, per-engine behavior-preserving default: Player→Cut All, others→Same Pitch) + the instant click-free cut. Per-engine cut mechanism: BaySickSynthVoice `cutFast()` = ~1 ms fade-out ramp (custom `AdsrEnvelope` has no getters, so a fade multiplier not a quick-release); AdditiveVoice `cutFast()` + VibeVoice `initiateSteal()` = ~1.5 ms ADSR quick-release (juce::ADSR); VibePlayer Cut All keeps `allNotesOff` (drums unchanged). UI per SC-ui-* (Bass shares BaySickSynthDSP).
+
+**VibePlayer editor placement correction.** First cut mis-sized the editor (assumed 480×400 from stale CLAUDE.md notes; it's actually 600×560). Box 0 has ample room. Per Jeff, the mode switch is a third `DualLabelToggle` spread across Box 0 (Reverse | CUT SELF | Same Pitch/Cut All), `setupNamed` (top=Same Pitch=off, bottom=Cut All=on).
+
+**Verify #1 FAILED → deeper root cause (Jeff, 2026-07-06, BaySickSynth on a Layer, overlapping same-pitch notes played back).** The fade worked, but the 2nd note went silent + the 1st bled. Root cause = **per-pitch note-off cascade**: `juce::Synthesiser` matches note-offs by pitch number, so the earlier note's note-off (landing during the 2nd note) kills the retriggered voice. Same problem VibePlayer's QA-VoicePool already fixed (its "per-pitch note-off strip", `VibePlayerDSP.cpp:1264`); BaySickSynth + Harmless never got it.
+
+**Fix (Jeff green-lit — scope expansion).** Per-pitch note-on reference counting: hold an earlier note's note-off until the LAST overlapping same-pitch note ends; deliver only when the count hits 0. Poly-only (BaySickSynthDSP: zeroed when not in Poly). Self-heals: counters zero whenever the synth is fully silent, so a lost note-off can't cause a permanent stuck note. Applied to BaySickSynthDSP (covers Bass) + HarmlessSynth. **Verified all-pass (Jeff, 2026-07-06)** — overlapping same-pitch notes retrigger cleanly (2nd cuts 1st instantly + plays its full length), different pitches unaffected, Cut All chokes, three-note chains + sustained-with-retriggers OK, no hang/stuck, no pop — across BaySickSynth / Bass / Harmless. Debug + Release.
+
+---
+
 ## Diagnostic Instrumentation Catalog
 
 _(Empty — no diagnostic instrumentation added this batch. Rule 4. Rows added here in the same edit pass if any `DBG`/`Logger`/temp `jassert`/debug `AlertWindow`/temp-file trace is introduced mid-task.)_

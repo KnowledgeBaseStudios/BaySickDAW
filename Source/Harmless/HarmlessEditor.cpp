@@ -272,6 +272,16 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     mCutSelfBtn.setTooltip ("Cut Self: noteOn cuts any prior voice playing the same note.\n"
                             "Prevents phase stacking on rapid retrigs of the same note.");
     addAndMakeVisible (mCutSelfBtn);
+
+    // Cut Self mode toggle (QA-CutSelfReview): Same Pitch vs Cut All.  Label
+    // follows the toggle state.  Harmless is always poly.
+    mCutSelfModeBtn.setClickingTogglesState (true);
+    mCutSelfModeBtn.setTooltip ("Cut Self mode: Same Pitch cuts only the retriggered note (default);\n"
+                                "Cut All cuts every ringing voice on each new note.");
+    mCutSelfModeBtn.onStateChange = [this]
+    { mCutSelfModeBtn.setButtonText (mCutSelfModeBtn.getToggleState() ? "CUT ALL" : "SAME PITCH"); };
+    mCutSelfModeBtn.onStateChange();
+    addAndMakeVisible (mCutSelfModeBtn);
     mPartABtn.setClickingTogglesState (true);
     mPartABtn.getProperties().set ("switchToggle", true);
     mPartBBtn.setClickingTogglesState (true);
@@ -441,6 +451,7 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     mPanAtt          = std::make_unique<SliderAtt> (apvts, pid("pan"),            mPan);
     mVelLinkAtt      = std::make_unique<ButtonAtt> (apvts, pid("vel_link"),       mVelLinkBtn);
     mCutSelfAtt      = std::make_unique<ButtonAtt> (apvts, pid("cutSelf"),        mCutSelfBtn);
+    mCutSelfModeAtt  = std::make_unique<ButtonAtt> (apvts, pid("cutSelfMode"),    mCutSelfModeBtn);
     mAmpAAtt         = std::make_unique<SliderAtt> (apvts, pid("amp_a"),          mAmpA);
     mAmpDAtt         = std::make_unique<SliderAtt> (apvts, pid("amp_d"),          mAmpD);
     mAmpSAtt         = std::make_unique<SliderAtt> (apvts, pid("amp_s"),          mAmpS);
@@ -868,6 +879,7 @@ void HarmlessEditor::resized()
             { &mPan,         kKnobSm, kKnobSm },
             { &mVelLinkBtn,  34,      18      },
             { &mCutSelfBtn,  56,      18      },
+            { &mCutSelfModeBtn, 74,   18      },   // QA-CutSelfReview: Same Pitch / Cut All
             { &mAutoGainBtn, 52,      18      },   // D.4-Q1+Q2: moved here from Timbre cell
         });
         mRoutingMatrix.setBounds (mRoutingSec.reduced (4, 16));

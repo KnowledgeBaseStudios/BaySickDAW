@@ -142,6 +142,7 @@ private:
     juce::Slider     mVolume, mPan;
     juce::TextButton mVelLinkBtn { "VEL" };
     juce::TextButton mCutSelfBtn { "CUT SELF" };
+    juce::TextButton mCutSelfModeBtn { "SAME PITCH" };   // QA-CutSelfReview: Same Pitch / Cut All
     // Amp ADSR
     juce::Slider    mAmpA, mAmpD, mAmpS, mAmpR;
     // Phase (compact in amp row)
@@ -223,6 +224,7 @@ private:
     std::unique_ptr<SliderAtt> mVolumeAtt, mPanAtt;
     std::unique_ptr<ButtonAtt> mVelLinkAtt;
     std::unique_ptr<ButtonAtt> mCutSelfAtt;
+    std::unique_ptr<ButtonAtt> mCutSelfModeAtt;
     std::unique_ptr<SliderAtt> mAmpAAtt, mAmpDAtt, mAmpSAtt, mAmpRAtt;
     std::unique_ptr<SliderAtt> mPhaseStartAtt, mPhaseRandAtt;
     std::unique_ptr<SliderAtt> mLfoVelAtt, mLfoVolAtt, mLfoPitchAtt;

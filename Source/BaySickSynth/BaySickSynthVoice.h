@@ -100,6 +100,10 @@ public:
     void retargetLegato (int midiNote);
     bool isInRelease() const { return mInRelease; }
 
+    // ── Cut-self hard cut (QA-CutSelfReview): instant, click-free fade-out then
+    // retire.  Driven by BaySickSynthDSP for the Same Pitch / Cut All modes.
+    void cutFast() noexcept;
+
     // ── Filter ────────────────────────────────────────────────────────────────
     void setFilterType     (BssFilterType type);
     void setFilterCutoff   (float hz);        // 20-20000
@@ -230,6 +234,12 @@ private:
     // termination (e.g. Legato's forced V0 stop) can't produce an audible click.
     float mDeclickGain     { 1.0f };
     float mDeclickStep     { 1.0f };
+
+    // Cut-self fast fade-out (QA-CutSelfReview): ~1 ms linear ramp to 0, then the
+    // voice retires.  Gives an instant but click-free hard cut.
+    bool  mCutFadeActive { false };
+    float mCutFadeGain   { 1.0f };
+    float mCutFadeStep   { 0.0f };
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     static float midiToHz (int note, float extraSemis = 0.0f) noexcept;

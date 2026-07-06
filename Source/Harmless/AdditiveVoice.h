@@ -120,6 +120,10 @@ public:
     void controllerMoved (int controllerNumber, int newValue)            override;
     void setCurrentPlaybackSampleRate (double newRate)                   override;
 
+    // ── Cut-self hard cut (QA-CutSelfReview): instant, click-free fade-out via a
+    // ~1.5 ms quick-release, then the voice auto-retires.  Driven by HarmlessSynth.
+    void cutFast() noexcept;
+
 private:
     // ── Engine references ─────────────────────────────────────────────────────
     // 2026-04-20 (S4 Option 2): the shared-template engines are now called
