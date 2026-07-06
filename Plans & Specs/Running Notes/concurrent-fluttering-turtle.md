@@ -44,6 +44,12 @@ Jeff confirmed live: switching a synth to **Mono** "fixed" it — but that was M
 
 ---
 
+## 2026-07-06 — Task 2 — Close: /review-batch + close docs
+
+**`/review-batch QA-CutSelfReview`** — no BLOCKERs. **1 NEEDS-FIX (fixed in-batch):** the per-pitch note-off counter drifted on **CC-123 All-Notes-Off** — broadcast on transport stop / play-from-top / **every loop wrap** (`PluginProcessor.cpp:1330`). CC-123 isn't an `isNoteOff()`, so it fell through the strip's `else` branch un-counted while `juce::Synthesiser` released the voices, leaving `mNoteOnCount` ≥1; the idle-reset self-heal doesn't fire while a long-release tail keeps voices active, so retriggering that pitch during the tail hung it (bit even with Cut Self OFF — the strip runs unconditionally in Poly). Fix: zero `mNoteOnCount` on `isAllNotesOff() || isAllSoundOff()` in the strip's `else` branch (BaySickSynthDSP + HarmlessSynth, ~1 line each). **2 NITs deferred:** (a) `cutFast` fade-gain can go one sample negative before the retire check — sub-sample, inaudible (a `jmax(0,...)` on the multiply would make it exact); (b) Harmless strip comment cross-refs BaySickSynthDSP one-directionally (both now carry the CC-123 comment inline). Awaiting rebuild + targeted re-verify (hold audition note on a long-release pad → stop / loop → re-press same key = no hang).
+
+---
+
 ## Diagnostic Instrumentation Catalog
 
 _(Empty — no diagnostic instrumentation added this batch. Rule 4. Rows added here in the same edit pass if any `DBG`/`Logger`/temp `jassert`/debug `AlertWindow`/temp-file trace is introduced mid-task.)_

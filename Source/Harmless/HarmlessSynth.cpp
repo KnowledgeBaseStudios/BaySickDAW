@@ -106,6 +106,12 @@ void HarmlessSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
             }
             else
             {
+                // CC-123 All-Notes-Off / CC-120 All-Sound-Off flush every voice
+                // without per-note offs (transport stop / play-from-top / loop
+                // wrap).  Zero the counter so those untracked releases can't leave
+                // it drifted and strip a later note-off.
+                if (msg.isAllNotesOff() || msg.isAllSoundOff())
+                    for (int k = 0; k < 128; ++k) mNoteOnCount[k] = 0;
                 filtered.addEvent (msg, meta.samplePosition);
             }
         }

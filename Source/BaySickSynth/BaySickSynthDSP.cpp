@@ -115,6 +115,12 @@ void BaySickSynthDSP::renderNextBlock (juce::AudioBuffer<float>& buf,
             }
             else
             {
+                // CC-123 All-Notes-Off / CC-120 All-Sound-Off flush every voice
+                // without per-note offs (transport stop / play-from-top / loop
+                // wrap, PluginProcessor.cpp).  Zero the counter so those untracked
+                // releases can't leave it drifted and strip a later note-off.
+                if (msg.isAllNotesOff() || msg.isAllSoundOff())
+                    std::fill_n (mNoteOnCount, 128, 0);
                 filtered.addEvent (msg, meta.samplePosition);
             }
         }

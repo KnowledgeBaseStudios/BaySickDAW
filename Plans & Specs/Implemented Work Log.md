@@ -2340,3 +2340,56 @@ Per the §6 sequencing arrow updated at this close, **QA-ClipDrop is the next ba
 #### Next action
 
 - Proceed to **QA-CutSelfReview** ("Cut Self" self-choke on Layers/Bass) per the §6 arrow.
+
+---
+
+### 2026-07-06 15:15 PT — QA-CutSelfReview — Cut Self unified across all 4 engines: instant click-free same-pitch cut + user-selectable Same Pitch / Cut All mode (no migration); mid-batch scope expansion added a per-pitch note-off refcount strip (fixes the overlapping same-pitch cascade) to BaySickSynth/Bass + Harmless
+
+**Bucket:** Players, System Pages
+
+#### Done
+
+- **Root cause (pre-batch investigation) — engine differential, not page differential.** The QA-Ee origin finding ("Cut Self doesn't work on Layers/Bass; works on drum-kit grid") framed it as a page/piano-roll problem. It is not — note dispatch is identical across pages. "Cut Self" is a fully-wired control (`cutSelf` APVTS bool + "CUT SELF" button + `setCutSelf()`) on all four engines, implemented **three inconsistent ways**: BaySickPlayer = `allNotesOff()` (hard-kills every voice, obvious, "works"); BaySickSynth/BaySickBass (Poly) + Harmless = same-note-only via an **injected MIDI note-off**, which JUCE always runs as an ADSR **tail-off release** so the old note bleeds into the retrigger (subtle, "doesn't work"). Jeff's live "Mono fixes it" was Mono cutting on its own — the Cut Self flag is ignored on the Mono/Lead path.
+- **Two-part change, one implementation pass (SC-tasksplit), all four engines together (`62553df`).** (1) The same-pitch cut becomes an **instant, click-free hard stop** on BaySickSynth/Bass + Harmless (kills the bleed). (2) A **separate 2-way mode** `cutSelfMode` (**Same Pitch** / **Cut All**) is added beside the retained on/off `cutSelf` on all four engines, so each engine does what it is SET to, not what it IS.
+- **Zero migration (SC-onoff-plus-mode + SC-default).** The on/off bool is kept untouched; `cutSelfMode` is a NEW sibling `AudioParameterBool`, not a bool-to-enum conversion, with a per-engine behavior-preserving default: **BaySickPlayer default true (Cut All)**; BaySickSynth / BaySickBass / Harmless default false (Same Pitch). An old project/preset with Cut Self ON loads and behaves exactly as before — no migration code.
+- **Per-engine cut mechanism (declick = shortest possible, SC-declick).** BaySickSynthVoice `cutFast()` = a ~1 ms fade-OUT ramp at the existing per-sample declick apply point (the custom `AdsrEnvelope` exposes no getters, so a fade multiplier, not a quick-release); reused by Bass (shared `BaySickSynthDSP`/voice). AdditiveVoice `cutFast()` = a NEW ~1 ms fade-out ramp (Harmless had no declick/quick-release before). VibePlayer Same Pitch = the existing `initiateSteal()` + `stopNote(0, true)` (~1.5 ms) on same-note voices; **Cut All keeps `allNotesOff(0,false)` verbatim** so drums are untouched (SC-leave-alone). The cut loop runs off the per-sample hot path (note-on events only) and re-renders the UN-modified MIDI, so no injected note-off / no tail-off.
+- **UI per SC-ui-\* (all four editors).** Harmless: mode button to the RIGHT of the full-width CUT SELF. BaySickSynth + BaySickBass: CUT SELF halved, the mode toggle fills the freed half. BaySickPlayer: a third `DualLabelToggle` spread across Box 0 (Reverse | CUT SELF | Same Pitch/Cut All), `setupNamed` (top=Same Pitch=off / bottom=Cut All=on). All `cutSelfMode`-attached, ASCII labels "Same Pitch" / "Cut All"; the feature is NOT renamed (avoids colliding with the parked drum "Choke Group" concept, SC-labels). On Synth/Bass the control is left enabled-but-inert in Mono, matching how CUT SELF already behaves there.
+- **CPU-safeguarding preserved.** Each new `setCutSelfMode` sync is value-change-guarded via a `ParamCache` field (only calls the DSP setter when the mode int actually changes).
+
+#### Found along the way
+
+- **FINDING — the real same-pitch defect was a per-pitch note-off CASCADE, not just the tail-off bleed (surfaced at Verify #1; Jeff, BaySickSynth on a Layer, overlapping same-pitch notes played back).** With `cutFast()` in place the cut was instant, but the 2nd note went silent AND the 1st still bled. Root cause: `juce::Synthesiser` matches note-offs by pitch number, so an earlier overlapping note's note-off (arriving DURING the 2nd note) kills the retriggered voice. Exactly the class of bug VibePlayer's QA-VoicePool already fixed (its "per-pitch note-off strip", `VibePlayerDSP.cpp:1264`) — BaySickSynth and Harmless never got that fix. A voice-management defect one layer below the cut logic; the declick fix alone could never have closed it.
+- **FINDING (review) — the note-off refcount strip drifted on CC-123 All-Notes-Off.** `/review-batch` caught that the transport releases untracked held notes via CC-123 (broadcast on stop / play-from-top / **every loop wrap**, `PluginProcessor.cpp:1330`), which is not an `isNoteOff()` — so the strip's counter was not decremented while JUCE released the voices, and on a long-release patch the idle-reset self-heal does not fire (voices still tailing), so a retrigger during the tail hung the note (bit even with Cut Self OFF).
+
+#### What was done about each finding
+
+- **Cascade — fixed in-batch as a Jeff-green-lit scope expansion (Rule 3 fold; QA default = fix real bugs found, don't defer).** Added **per-pitch note-on reference counting** (a note-off strip) to `BaySickSynthDSP` (covers Bass) + `HarmlessSynth`: an earlier note's note-off is held until the LAST overlapping same-pitch note ends, delivered only when the refcount hits 0. Poly-only (zeroed when not in Poly on Synth/Bass). Self-healing — counters zero whenever the synth is fully silent. Same pattern QA-VoicePool established for VibePlayer, now extended to the two synth engines that lacked it. Stayed inside QA-CutSelfReview (same subsystem, per SC-scope) — no new batch, no §5/§6 change, no §9 Forks entry.
+- **CC-123 drift — fixed in-batch (review NEEDS-FIX).** Zero `mNoteOnCount` on `isAllNotesOff() || isAllSoundOff()` in the strip's `else` branch (BaySickSynthDSP + HarmlessSynth). Re-verified all-pass (Jeff, Debug + Release).
+- **VibePlayer editor placement corrected mid-Task-1.** The first cut mis-sized the editor from stale CLAUDE.md notes (assumed 480x400; it is 600x560). Box 0 has ample room; the mode control landed as the third `DualLabelToggle` per Jeff.
+
+#### `/review-batch` outcome
+
+- **No BLOCKERs.** 1 NEEDS-FIX (fixed in-batch — the CC-123 counter drift above), 2 NITs deferred: (a) `cutFast` fade-gain "goes one sample negative" — on re-inspection a **false finding** (the loop retires the instant the gain hits 0, before it is ever used in a multiply; no phase-inverted sample); (b) the Harmless strip comment cross-refs BaySickSynthDSP one-directionally (cosmetic; both DSPs now carry the CC-123 comment inline).
+
+#### Carry-forward contradictions
+
+- None. The change adds a new sibling param + extends the per-pitch note-off pattern QA-VoicePool established for VibePlayer to the synth engines; nothing in Carry-Forward §1-§3 is contradicted.
+
+#### Diagnostic Instrumentation Catalog
+
+- **NONE added this batch.** No `DBG` / `juce::Logger` / temp `jassert` / debug `AlertWindow` / temp-file trace — every step (the bleed, the cascade root-cause, the CC-123 drift, the declick) was resolved by reading the code + Jeff's audible Debug->Release cycles. Nothing to strip.
+
+#### Files touched
+
+- **BaySickSynth + Bass (shared DSP/voice — one fix serves both):** `Source/BaySickSynth/BaySickSynthDSP.cpp` / `.h` (cut-then-render restructure + `setCutSelfMode` + per-pitch note-off refcount strip incl. CC-123 reset), `Source/BaySickSynth/BaySickSynthVoice.cpp` / `.h` (`cutFast()` fade-out), `Source/BaySickSynth/BaySickSynthProcessor.cpp` / `.h` (`cutSelfMode` reg + cache + guarded sync), `Source/BaySickSynth/BaySickSynthEditor.cpp` / `.h` (halved CUT SELF + mode toggle), `Source/BaySickBass/BaySickBassProcessor.cpp` / `.h` + `Source/BaySickBass/BaySickBassEditor.cpp` / `.h` (`cutSelfMode` reg + cache + guarded sync + mirrored split).
+- **Harmless:** `Source/Harmless/HarmlessSynth.cpp` / `.h` (cut-then-render restructure + `setCutSelfMode` + per-pitch note-off refcount strip incl. CC-123 reset), `Source/Harmless/AdditiveVoice.cpp` / `.h` (new `cutFast()` fade-out ramp), `Source/Harmless/HarmlessProcessor.cpp` / `.h` (`cutSelfMode` reg + cache + guarded sync), `Source/Harmless/HarmlessEditor.cpp` / `.h` (mode button right of CUT SELF).
+- **BaySickPlayer (VibePlayer):** `Source/VibePlayer/VibePlayerDSP.cpp` / `.h` (`setCutSelfMode` + Same Pitch steal branch; Cut All `allNotesOff` unchanged), `Source/VibePlayer/VibePlayerProcessor.cpp` / `.h` (`cutSelfMode` reg default true + cache + guarded sync), `Source/VibePlayer/VibePlayerEditor.cpp` / `.h` (third DualLabelToggle across Box 0).
+- **Docs:** paired `Running Notes/concurrent-fluttering-turtle.md` + `Batch Plans/concurrent-fluttering-turtle.md`; this Work Log entry; Main Plan §5 (QA-CutSelfReview STATUS:CLOSED + Work Log pointer). No §6 change (the arrow carries no per-batch closed/active marker — CLOSED is tracked in §5). No §9 Forks entry (clean in-batch close — the cascade + CC-123 fixes folded into the batch's own subsystem, no cross-batch routing or plan-structure change).
+
+#### Commit(s)
+
+`f2f3fbb` (Task 0 — open) · `62553df` (Task 1 — instant click-free Cut Self + Same Pitch/Cut All mode on BaySickSynth/Bass/Harmless/BaySickPlayer + per-pitch note-off refcount strip on BaySickSynth+Harmless; one implementation pass) · `<close commit — CC-123 counter-drift review-fix + this Work Log entry + §5 CLOSED>`. Verified all-pass by Jeff in Debug + Release, 2026-07-06 — overlapping same-pitch notes retrigger cleanly (2nd cuts 1st instantly + plays its full length), different pitches unaffected, Cut All chokes, three-note chains + sustained-with-retriggers OK, the CC-123 long-release-tail retrigger no longer hangs, no pop, across BaySickSynth / Bass / Harmless.
+
+#### Next action
+
+- Proceed to **QA-UICleanup** (piano-roll menu + toolbar consolidation) per the §6 arrow.
