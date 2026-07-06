@@ -296,8 +296,8 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
         };
     }
 
-    // Slider double-click default = current preset value (refreshed every
-    // time the APVTS state is replaced via valueTreeRedirected).
+    // Slider double-click returns each param's FACTORY default (the helper reads
+    // getDefaultValue) -- standard knob behavior, independent of the loaded patch.
     setSliderDoubleClickDefaultsFromApvts (*this, mProc.apvts);
     mProc.apvts.state.addListener (this);
 }

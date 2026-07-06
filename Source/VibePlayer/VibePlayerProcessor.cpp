@@ -9,6 +9,22 @@ VibePlayerProcessor::VibePlayerProcessor (const juce::String& trackId)
       mTrackId (trackId),
       mPrefix  ("tk_" + trackId + "_bsp_")
 {
+    // Resolve the timeline-WAV control atoms once (alloc-free per-block read; see
+    // ClipCtlPtrs).  getRawParameterValue returns nullptr for any absent id, which
+    // readClipCtl's load helper treats as the field default (same as the old path).
+    auto rp = [this] (const char* n) { return apvts.getRawParameterValue (pid (n)); };
+    mClipCtlPtrs.volume   = rp ("volume");   mClipCtlPtrs.pan         = rp ("pan");
+    mClipCtlPtrs.cutoff   = rp ("cutoff");   mClipCtlPtrs.muffle      = rp ("muffle");
+    mClipCtlPtrs.hardness = rp ("hardness"); mClipCtlPtrs.res         = rp ("res");
+    mClipCtlPtrs.drive    = rp ("drive");    mClipCtlPtrs.reduct      = rp ("reduct");
+    mClipCtlPtrs.lfoAmt   = rp ("lfoAmt");   mClipCtlPtrs.lfoRate     = rp ("lfo_rate");
+    mClipCtlPtrs.treble   = rp ("treble");   mClipCtlPtrs.stereo      = rp ("stereo");
+    mClipCtlPtrs.attack   = rp ("attack");   mClipCtlPtrs.decay       = rp ("decay");
+    mClipCtlPtrs.sustain  = rp ("sustain");  mClipCtlPtrs.release     = rp ("release");
+    mClipCtlPtrs.tune     = rp ("tune");     mClipCtlPtrs.detune      = rp ("detune");
+    mClipCtlPtrs.reverse  = rp ("reverse");  mClipCtlPtrs.sampleStart = rp ("sampleStart");
+    mClipCtlPtrs.stretch  = rp ("stretch");
+
     updateFromApvts();   // pre-warm cache so first processBlock skips all setters
 }
 

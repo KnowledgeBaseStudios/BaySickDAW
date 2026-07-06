@@ -57,6 +57,27 @@ public:
     const juce::String& getParamPrefix() const { return mPrefix; }
     juce::String pid (const char* name)  const { return mPrefix + name; }
 
+    // QA-ClipPlayback close (perf): raw APVTS atom pointers for the timeline-WAV
+    // control read (readClipCtl in PluginProcessor), resolved ONCE at construction.
+    // That read runs per-row per-block on the render thread; resolving by string id
+    // there heap-allocs (juce::String pid concat) + hashes every block.  Written
+    // only in the ctor before any audio callback fires; const thereafter.
+    struct ClipCtlPtrs
+    {
+        std::atomic<float>* volume { nullptr };   std::atomic<float>* pan { nullptr };
+        std::atomic<float>* cutoff { nullptr };   std::atomic<float>* muffle { nullptr };
+        std::atomic<float>* hardness { nullptr }; std::atomic<float>* res { nullptr };
+        std::atomic<float>* drive { nullptr };    std::atomic<float>* reduct { nullptr };
+        std::atomic<float>* lfoAmt { nullptr };   std::atomic<float>* lfoRate { nullptr };
+        std::atomic<float>* treble { nullptr };   std::atomic<float>* stereo { nullptr };
+        std::atomic<float>* attack { nullptr };   std::atomic<float>* decay { nullptr };
+        std::atomic<float>* sustain { nullptr };  std::atomic<float>* release { nullptr };
+        std::atomic<float>* tune { nullptr };     std::atomic<float>* detune { nullptr };
+        std::atomic<float>* reverse { nullptr };  std::atomic<float>* sampleStart { nullptr };
+        std::atomic<float>* stretch { nullptr };
+    };
+    const ClipCtlPtrs& clipCtlPtrs() const noexcept { return mClipCtlPtrs; }
+
     // Thread-safe note audition (UI thread → audio thread via atomic)
     void auditionNote    (int midiNote) { mAuditionNote.store    (midiNote); }
     void auditionNoteOn  (int midiNote) { mAuditionHoldOn.store  (midiNote); }
@@ -142,6 +163,9 @@ private:
         int   unisonVoices { -1 };
         float unisonSpread { -1.f };
     } mCache;
+
+    // QA-ClipPlayback close: resolved once in the ctor (see clipCtlPtrs()).
+    ClipCtlPtrs mClipCtlPtrs;
 
     // 2026-05-05 dirty-flag wiring.  Declared LAST so apvts is fully constructed.
     ApvtsDirtyTracker mDirtyTracker { apvts };

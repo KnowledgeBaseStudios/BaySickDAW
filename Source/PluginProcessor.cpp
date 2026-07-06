@@ -424,6 +424,7 @@ struct ClipCtl
     float pitchRatio  = 1.f;   // 2^((tune semis + detune cents)/12)
     bool  reverse     = false;
     float sampleStart = 0.f;   // 0..1 skip-into fraction (composes with slip-trim)
+    float stretchSpeed = 1.f;  // Stretch knob = varispeed 0.5..2.0 (couples pitch+content-speed)
 };
 
 ClipCtl readClipCtl (VibePlayerProcessor* pl)
@@ -431,14 +432,11 @@ ClipCtl readClipCtl (VibePlayerProcessor* pl)
     ClipCtl c;
     if (pl == nullptr) return c;
     c.active = true;
-    auto rd = [pl] (const char* n)
-    {
-        auto* a = pl->apvts.getRawParameterValue (pl->pid (n));
-        return a != nullptr ? a->load() : 0.f;
-    };
+    const auto& p = pl->clipCtlPtrs();   // atoms pre-resolved at ctor -> no per-block alloc
+    auto rd = [] (std::atomic<float>* a) { return a != nullptr ? a->load() : 0.f; };
 
-    c.volume = rd ("volume");
-    const float pan = juce::jlimit (-1.f, 1.f, rd ("pan"));
+    c.volume = rd (p.volume);
+    const float pan = juce::jlimit (-1.f, 1.f, rd (p.pan));
     const float ang = (pan + 1.f) * juce::MathConstants<float>::halfPi * 0.5f;   // equal-power
     c.panL = std::cos (ang);
     c.panR = std::sin (ang);
@@ -446,33 +444,38 @@ ClipCtl readClipCtl (VibePlayerProcessor* pl)
     // res 0..1 -> Q 0.5..10 (VibeSynth::setFilterParams); hardness adds to Q,
     // muffle lowers cutoff toward 200 Hz -- both with velocity N/A on a timeline
     // clip (VibeVoice::startNote velFactor/velScale reduce to 1.0 at default).
-    const float baseCut  = juce::jlimit (20.f, 20000.f, rd ("cutoff"));
-    const float muffle   = juce::jlimit (0.f, 1.f, rd ("muffle"));
-    const float hardness = juce::jlimit (0.f, 1.f, rd ("hardness"));
+    const float baseCut  = juce::jlimit (20.f, 20000.f, rd (p.cutoff));
+    const float muffle   = juce::jlimit (0.f, 1.f, rd (p.muffle));
+    const float hardness = juce::jlimit (0.f, 1.f, rd (p.hardness));
     c.cutoff = juce::jlimit (20.f, 20000.f, baseCut - muffle * (baseCut - 200.f));
-    c.q      = juce::jlimit (0.5f, 10.f, 0.5f + (rd ("res") + hardness) * 9.5f);
+    c.q      = juce::jlimit (0.5f, 10.f, 0.5f + (rd (p.res) + hardness) * 9.5f);
 
-    c.drive      = 1.f + juce::jlimit (0.f, 1.f, rd ("drive")) * 11.f;
-    c.reduct     = juce::jlimit (0.f, 1.f, rd ("reduct"));
-    c.lfoAmt     = juce::jlimit (0.f, 1.f, rd ("lfoAmt"));
-    c.lfoRate    = juce::jlimit (0.1f, 20.f, rd ("lfo_rate"));
-    c.trebleGain = juce::jlimit (-1.f, 1.f, rd ("treble") / 12.f);
+    c.drive      = 1.f + juce::jlimit (0.f, 1.f, rd (p.drive)) * 11.f;
+    c.reduct     = juce::jlimit (0.f, 1.f, rd (p.reduct));
+    c.lfoAmt     = juce::jlimit (0.f, 1.f, rd (p.lfoAmt));
+    c.lfoRate    = juce::jlimit (0.1f, 20.f, rd (p.lfoRate));
+    c.trebleGain = juce::jlimit (-1.f, 1.f, rd (p.treble) / 12.f);
     // Bipolar stereo (QA-ClipPlayback): param -1..1 -> M/S width (0 mono, 1 full,
     // 2 wide).  Applied BEFORE pan below so pan always survives (unlike the
     // sampler's per-voice pan, which thins at full mono).
-    c.width = juce::jlimit (0.f, 2.f, 1.f + rd ("stereo"));
+    c.width = juce::jlimit (0.f, 2.f, 1.f + rd (p.stereo));
 
-    c.atk = juce::jmax (0.f, rd ("attack"));
-    c.dec = juce::jmax (0.f, rd ("decay"));
-    c.sus = juce::jlimit (0.f, 1.f, rd ("sustain"));
-    c.rel = juce::jmax (0.f, rd ("release"));
+    c.atk = juce::jmax (0.f, rd (p.attack));
+    c.dec = juce::jmax (0.f, rd (p.decay));
+    c.sus = juce::jlimit (0.f, 1.f, rd (p.sustain));
+    c.rel = juce::jmax (0.f, rd (p.release));
 
     // Task 3: pitch (tune semitones + detune cents) -> ratio; reverse + sample-start.
-    const float tune   = juce::jlimit (-48.f, 48.f, rd ("tune"));
-    const float detune = juce::jlimit (-100.f, 100.f, rd ("detune"));
+    const float tune   = juce::jlimit (-48.f, 48.f, rd (p.tune));
+    const float detune = juce::jlimit (-100.f, 100.f, rd (p.detune));
     c.pitchRatio  = std::pow (2.f, (tune + detune / 100.f) / 12.f);
-    c.reverse     = rd ("reverse") > 0.5f;
-    c.sampleStart = juce::jlimit (0.f, 0.999f, rd ("sampleStart"));
+    c.reverse     = rd (p.reverse) > 0.5f;
+    c.sampleStart = juce::jlimit (0.f, 0.999f, rd (p.sampleStart));
+    // Stretch knob = varispeed (couples pitch + content-speed, tape-style; NOT
+    // length-preserving, unlike tune/detune above).  Null-guard defaults to 1.0 (off),
+    // NOT rd()'s 0.0 -> which would clamp to 0.5 (half-speed).
+    const float sp = (p.stretch != nullptr) ? p.stretch->load() : 1.f;
+    c.stretchSpeed = juce::jlimit (0.5f, 2.f, sp);
     return c;
 }
 
@@ -579,15 +582,19 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
             juce::jmax ((juce::int64) 0, fileTotalSamples - 1),
             contentStart + (juce::int64) ((double) ctl.sampleStart * (double) fileTotalSamples));
 
-        // BPM stretch + length-preserving pitch.  pitch scales the vocoder stretch
-        // and the output resample but CANCELS in the source read rate (fileRate),
-        // so the disk read is unchanged by pitch.
+        // BPM stretch + length-preserving pitch + varispeed.  Pitch scales the vocoder
+        // stretch AND the output resample but CANCELS in the source read rate (fileRate),
+        // so the disk read is unchanged by pitch (grid length held).  Varispeed (Stretch
+        // knob) instead scales the output resample + source consumption but NOT the
+        // vocoder stretch -> it couples pitch + content-speed (tape-style) on top:
+        // net pitch = tune x varispeed, source consumed x varispeed.
         const double stretchRatio    = (player.stretchMode && player.originalBPM > 0.f)
             ? (double) player.originalBPM / ctx.bpm : 1.0;
         const double pitchRatio      = (double) ctl.pitchRatio;
+        const double varispeed       = (double) ctl.stretchSpeed;
         const double effStretchRatio = stretchRatio * pitchRatio;
-        const double effReadRatio    = readRatio    * pitchRatio;
-        const double fileRate        = readRatio / stretchRatio;   // source frames per output frame
+        const double effReadRatio    = readRatio    * pitchRatio * varispeed;
+        const double fileRate        = (readRatio / stretchRatio) * varispeed;   // source frames per output frame
 
         // reverse: RAM-loaded clips only (the forward-only disk streamer can't read
         // backward without thrashing; >100 MB streaming clips play forward).
@@ -618,10 +625,13 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         const float gain = ctx.masterGain;
         float       peak = 0.0f;
 
-        // Vocoder path for any stretch / pitch / reverse; plain forward playback
-        // takes the cheaper direct read below.
+        // Vocoder path for actual time-stretch / pitch only.  Reverse no longer forces
+        // it: feeding independently-flipped chunks to a phase vocoder broke phase
+        // continuity at the block seams (audible crackle), so plain reverse takes the
+        // direct backward read below.  Reverse + stretch still flips into the vocoder
+        // (the doReverse block inside this branch).
         const bool usePV = (player.vocoder != nullptr)
-                        && (std::abs (effStretchRatio - 1.0) > 0.001 || doReverse);
+                        && (std::abs (effStretchRatio - 1.0) > 0.001);
 
         if (usePV)
         {
@@ -642,7 +652,13 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                 player.expectedFilePos = pvRefPos;
             }
 
-            const int numFileSamples = (int) std::ceil ((double) outSamples * fileRate);
+            // Clamp to pvInBuf capacity: fileRate can exceed the buffer's 4x-block
+            // headroom (high-SR file x slow BPM stretch x varispeed) which would overrun
+            // readRaw's write.  Truncating degrades to a brief glitch in that extreme
+            // instead of corrupting memory (mirrors the reverse branch's clamp below).
+            const int numFileSamples = (int) juce::jmin (
+                (juce::int64) std::ceil ((double) outSamples * fileRate),
+                (juce::int64) player.pvInBuf.getNumSamples());
             const juce::int64 readAt = doReverse
                 ? player.expectedFilePos - numFileSamples
                 : player.expectedFilePos;
@@ -699,11 +715,54 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                 }
             }
         }
+        else if (doReverse)
+        {
+            // Plain reverse (no stretch/pitch): read the source backward straight from RAM
+            // (doReverse is RAM-only) and interpolate DESCENDING -- click-free, because it
+            // never touches the phase vocoder.  fileRate carries any varispeed.  pvInBuf is
+            // free here (usePV is false so the vocoder branch didn't run) and is reused as
+            // the raw-read scratch.
+            const juce::int64 lowFrame = pvRefPos
+                - (juce::int64) std::ceil ((double) (outSamples - 1) * fileRate) - 1;
+            const juce::int64 loRead   = juce::jmax ((juce::int64) 0, lowFrame);
+            const int numRaw = (int) juce::jmax ((juce::int64) 0, juce::jmin (
+                juce::jmin (pvRefPos - loRead + 2, fileTotalSamples - loRead),
+                (juce::int64) player.pvInBuf.getNumSamples()));
+            player.pvInBuf.clear();
+            if (numRaw > 1 && player.streamer->readRaw (player.pvInBuf, 0, numRaw, loRead))
+            {
+                const int pvCh = player.pvInBuf.getNumChannels();
+                for (int i = 0; i < outSamples; ++i)
+                {
+                    const double idx = ((double) pvRefPos - (double) i * fileRate) - (double) loRead;
+                    if (idx < 0.0) break;                          // reached content start
+                    int   ip   = (int) idx;
+                    float frac = (float) (idx - ip);
+                    // Top edge (reverse starting at the file's true end): no s0/s1 pair
+                    // exists above the last frame, so pin to it instead of emitting
+                    // silence.  numRaw > 1 is guaranteed above, so numRaw-2 >= 0.
+                    if (ip >= numRaw - 1) { ip = numRaw - 2; frac = 1.0f; }
+                    for (int ch = 0; ch < ctx.numOut; ++ch)
+                    {
+                        const int   srcCh = ch % pvCh;
+                        const float s0    = player.pvInBuf.getSample (srcCh, ip);
+                        const float s1    = player.pvInBuf.getSample (srcCh, ip + 1);
+                        const float v     = (s0 + frac * (s1 - s0)) * gain;
+                        clipScratch.addSample (ch, bufOffset + i, v);
+                        peak = juce::jmax (peak, std::abs (v));
+                    }
+                }
+            }
+            player.expectedFilePos = pvRefPos;
+        }
         else
         {
+            // Direct read runs only when the vocoder is bypassed (effStretchRatio ~ 1),
+            // so fileRate here == readRatio scaled by varispeed -- pass fileRate (not the
+            // raw readRatio) so the Stretch knob varispeeds the plain-playback path too.
             peak = player.streamer->readAndMix (
-                clipScratch, bufOffset, outSamples, pvRefPos, readRatio, ctx.numOut, gain);
-            player.expectedFilePos = pvRefPos + (juce::int64) std::ceil (outSamples * readRatio);
+                clipScratch, bufOffset, outSamples, pvRefPos, fileRate, ctx.numOut, gain);
+            player.expectedFilePos = pvRefPos + (juce::int64) std::ceil (outSamples * fileRate);
         }
 
         // QA-ClipPlayback Task 2: run the ClipsPage BaySickPlayer control chain on

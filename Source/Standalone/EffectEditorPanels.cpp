@@ -2112,8 +2112,8 @@ struct VocalDoublerDelayPanel : public EditorPanelBase
     std::vector<std::unique_ptr<VKnob>> knobsRow, duckKnobs;
 
     // QA-EffectsReview Task 9: the doubler Type is itself our addition, but
-    // its six core knobs ARE the effect -- only the Duck cluster + Slap
-    // button (additions on top of the doubler) hide in Basic.
+    // its six core knobs ARE the effect -- only the Duck cluster (an addition
+    // on top of the doubler) hides in Basic.
     bool hasAdvancedControls() const override { return true; }
 
     std::vector<VKnob*> getExtraKnobs() override
