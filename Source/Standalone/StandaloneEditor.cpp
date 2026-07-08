@@ -3887,6 +3887,16 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
             p->onRenameRequested = [this, newId] {
                 if (mRibbon) mRibbon->startRename (newId);
             };
+            // QA-UICleanup Task 2: added Layers tabs were missing this hook (the
+            // initial/default + duplicate + Drums-add paths all wire it), so a
+            // patch load on any but the first-created tab never renamed the ribbon
+            // tab / mixer strip / piano-roll label.  Mirror the initial form (:1640).
+            p->onSoundNameChanged = [this, newId, pageIdx] (const juce::String& nm) {
+                if (nm.isEmpty()) return;
+                if (mRibbon)    mRibbon->renameTab (newId, nm);
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Layer, pageIdx, nm);
+                if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Layer, pageIdx }, nm);
+            };
             registerLayerPianoRoll (p);
         }
     }
@@ -3924,6 +3934,13 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
             };
             p->onRenameRequested = [this, newId] {
                 if (mRibbon) mRibbon->startRename (newId);
+            };
+            // QA-UICleanup Task 2: added Bass tabs were missing this hook (mirror :1689).
+            p->onSoundNameChanged = [this, newId, pageIdx] (const juce::String& nm) {
+                if (nm.isEmpty()) return;
+                if (mRibbon)    mRibbon->renameTab (newId, nm);
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Bass, pageIdx, nm);
+                if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Bass, pageIdx }, nm);
             };
             registerBassPianoRoll (p);
         }
