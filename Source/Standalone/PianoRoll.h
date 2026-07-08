@@ -478,7 +478,8 @@ class PianoRollMenuBar;   // defined after PianoRollContainer
 
 // ── PianoRollContainer: menu bar + toolbar + keyboard + grid + lane ───────────
 class PianoRollContainer : public juce::Component,
-                           private juce::ScrollBar::Listener
+                           private juce::ScrollBar::Listener,
+                           private juce::Timer
 {
 public:
     PianoRollContainer();
@@ -487,6 +488,7 @@ public:
     void paint   (juce::Graphics&) override;
     bool keyPressed(const juce::KeyPress& key) override;
     void focusGained(juce::Component::FocusChangeType) override;
+    void timerCallback() override;   // QA-UICleanup Task 3: live snap-highlight sync
 
     void setData         (PianoRollData* data);
     // C.5b: forward pattern's intrinsic TS to the grid.  Caller is the
@@ -657,7 +659,6 @@ private:
     int    mNumBars    { 2 };
     std::function<int()>     mOnGetSnapDiv;   // QA-Ee Stage 3: global snap read (PianoRollPage)
     std::function<void(int)> mOnSetSnapDiv;   // QA-Ee Stage 3: global snap write
-    int                      mLastSnapDiv { 1 };  // QA-Ee Stage 3: restore-to div for the on/off toggle
     PianoRollGrid::PRTool mActiveTool { PianoRollGrid::PRTool::Draw };
 
     // Zoom-to-rect undo state

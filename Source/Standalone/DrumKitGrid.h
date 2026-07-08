@@ -398,7 +398,8 @@ public:
 // DrumKitContainer - menu bar + toolbar + sidebar + grid + lane
 // ─────────────────────────────────────────────────────────────────────────────
 class DrumKitContainer : public juce::Component,
-                         private juce::ScrollBar::Listener
+                         private juce::ScrollBar::Listener,
+                         private juce::Timer
 {
 public:
     DrumKitContainer();
@@ -407,6 +408,7 @@ public:
     void paint   (juce::Graphics&)                                          override;
     bool keyPressed(const juce::KeyPress& key)                              override;
     void focusGained(juce::Component::FocusChangeType)                      override;
+    void timerCallback()                                                    override;   // QA-UICleanup Task 3: live snap-highlight sync
 
     void setPatternManager (PatternManager* pm);
     void setApvts          (juce::AudioProcessorValueTreeState* a);
@@ -488,7 +490,6 @@ private:
     double mBeatOff    { 0.0 };
     std::function<int()>     mOnGetSnapDiv;   // QA-Ee Stage 3: global snap read
     std::function<void(int)> mOnSetSnapDiv;   // QA-Ee Stage 3: global snap write
-    int                      mLastSnapDiv { 1 };  // QA-Ee Stage 3: restore-to div for the on/off toggle
     DrumKitGrid::PRTool mActiveTool { DrumKitGrid::PRTool::Draw };
 
     float  mPreZoomPPB     { 80.f };

@@ -2616,22 +2616,12 @@ PianoRollContainer::PianoRollContainer()
 
     mMagnetBtn = std::make_unique<RightClickTextButton>();
     mMagnetBtn->setButtonText("Snap");
-    mMagnetBtn->setClickingTogglesState(true);
-    mMagnetBtn->setToggleState(true, dontSendNotification); // snap on by default
-    mMagnetBtn->setTooltip("Snap on/off - right-click to set resolution");
+    mMagnetBtn->setToggleState(true, dontSendNotification); // highlight; re-synced to the live div in setSnapAccessors
+    mMagnetBtn->setTooltip("Snap resolution - click to choose");
+    // QA-UICleanup Task 3 (SC8): click opens the resolution dropdown (was an on/off
+    // toggle + right-click picker).  Highlight still reflects Off (dim) vs any active
+    // division; "Off" is the first dropdown entry (default Line = highlighted).
     mMagnetBtn->onClick = [this] {
-        // QA-Ee Stage 3: the Snap button toggles the GLOBAL snap (Off <-> last div).
-        if (mMagnetBtn->getToggleState()) {
-            if (mOnSetSnapDiv) mOnSetSnapDiv(mLastSnapDiv > 0 ? mLastSnapDiv : 1);
-        } else {
-            const int cur = mOnGetSnapDiv ? mOnGetSnapDiv() : 1;
-            if (cur != 0) mLastSnapDiv = cur;
-            if (mOnSetSnapDiv) mOnSetSnapDiv(0);
-        }
-        if (mGrid) mGrid->grabKeyboardFocus();
-    };
-    mMagnetBtn->onRightMouseDown = [this](const MouseEvent&) {
-        // QA-Ee Stage 3: the 11-label unified scheme writes the GLOBAL snap div.
         PopupMenu m;
         const int cur = mOnGetSnapDiv ? mOnGetSnapDiv() : 1;
         for (int i = 0; i < kNumUnifiedSnapDivs; ++i)
@@ -2640,14 +2630,18 @@ PianoRollContainer::PianoRollContainer()
             [this](int r) {
                 if (r > 0 && mOnSetSnapDiv) {
                     const int d = r - 1;
-                    if (d != 0) mLastSnapDiv = d;
                     mOnSetSnapDiv(d);
                     if (mMagnetBtn) mMagnetBtn->setToggleState(d != 0, juce::dontSendNotification);
                 }
                 if (mGrid) { mGrid->repaint(); mGrid->grabKeyboardFocus(); }
             });
+        if (mGrid) mGrid->grabKeyboardFocus();
     };
     addAndMakeVisible(*mMagnetBtn);
+
+    // QA-UICleanup Task 3 (SC8): keep the Snap highlight synced with the shared
+    // global div even when it's changed from another editor (low-freq idle poll).
+    startTimer (200);
 
     static const char* toolLabels[] = {
         "Draw","Paint","Del","Mute","Slice","Sel","Zoom","Stamp" };
@@ -3253,9 +3247,17 @@ void PianoRollContainer::setSnapAccessors (std::function<int()> getter,
     if (mOnGetSnapDiv)
     {
         const int cur = mOnGetSnapDiv();
-        if (cur != 0) mLastSnapDiv = cur;
         if (mMagnetBtn) mMagnetBtn->setToggleState (cur != 0, juce::dontSendNotification);
     }
+}
+
+void PianoRollContainer::timerCallback()
+{
+    // QA-UICleanup Task 3: live-sync the Snap highlight to the shared global div
+    // (may change from another editor's dropdown / the Builder).  Only the visible
+    // roll needs it; setToggleState repaints only on an actual state change.
+    if (isShowing() && mMagnetBtn && mOnGetSnapDiv)
+        mMagnetBtn->setToggleState (mOnGetSnapDiv() != 0, juce::dontSendNotification);
 }
 
 void PianoRollContainer::setScaleActive(bool active)
