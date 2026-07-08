@@ -9180,42 +9180,85 @@ namespace
 
 void StandaloneEditor::confirmDiscardChanges (std::function<void()> continuation)
 {
-    if (! mProjectManager || ! mProjectManager->hasProject() || ! mProjectManager->isDirty())
+    if (! mProjectManager || ! mProjectManager->isDirty())
     {
         if (continuation) continuation();
         return;
     }
-    juce::AlertWindow::showYesNoCancelBox (
-        juce::MessageBoxIconType::WarningIcon,
-        "Unsaved changes",
-        "Save changes to '" + mProjectManager->getCurrentName() + "' first?",
-        "Save",
-        "Don't Save",
-        "Cancel",
-        this,
-        juce::ModalCallbackFunction::create (
-            [this, continuation = std::move (continuation)] (int result)
+
+    // Prompt whenever there are unsaved edits - even a never-saved session (no
+    // project folder yet), so work isn't lost silently on quit / New / Open.
+    const juce::String message = mProjectManager->hasProject()
+        ? "Save changes to '" + mProjectManager->getCurrentName() + "' first?"
+        : juce::String ("You have unsaved changes.  Save them first?");
+
+    // Native TaskDialog: centered + non-draggable (juce::AlertWindow drags itself via
+    // its own ComponentDragger).  showAsync uses plainIndex result mapping, so button
+    // order gives 0 = Save, 1 = Don't Save, 2 = Cancel.
+    juce::NativeMessageBox::showAsync (
+        juce::MessageBoxOptions{}
+            .withIconType (juce::MessageBoxIconType::WarningIcon)
+            .withTitle ("Unsaved changes")
+            .withMessage (message)
+            .withButton ("Save")
+            .withButton ("Don't Save")
+            .withButton ("Cancel")
+            .withAssociatedComponent (this),
+        [this, continuation] (int result)
+        {
+            if (result == 2) return;                                        // Cancel
+            if (result == 1) { if (continuation) continuation(); return; }  // Don't Save
+
+            // Save.  A named project saves in place; an unnamed session routes
+            // through Save As (name it first), then continues on success.  A
+            // failed or cancelled save leaves the app open with work intact.
+            if (mProjectManager->hasProject())
             {
-                // Result: 1=Save, 2=Don't Save, 0=Cancel.
-                if (result == 0) return;   // cancel - abort continuation
-                if (result == 1)
+                if (mProjectManager->saveProject())
                 {
-                    if (! mProjectManager->saveProject())
+                    if (continuation) continuation();
+                }
+                else
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Save failed",
+                        "Couldn't write project.xml.  Aborting.");
+                }
+                return;
+            }
+
+            promptForProjectName (
+                "Save Project",
+                "Give your project a name so your work has somewhere to live:",
+                "Untitled Project",
+                [this, continuation] (juce::String name)
+                {
+                    if (! ProjectManager::isValidProjectName (name))
+                    {
+                        juce::AlertWindow::showMessageBoxAsync (
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Invalid project name",
+                            "Try another name (no < > : \" / \\ | ? * or reserved names).");
+                        return;
+                    }
+                    if (! mProjectManager->saveProjectAs (name))
                     {
                         juce::AlertWindow::showMessageBoxAsync (
                             juce::MessageBoxIconType::WarningIcon,
                             "Save failed",
-                            "Couldn't write project.xml.  Aborting.");
+                            "Couldn't create the project folder.  Try another name.");
                         return;
                     }
-                }
-                if (continuation) continuation();
-            }));
+                    refreshWindowTitle();
+                    if (continuation) continuation();
+                });
+        });
 }
 
 bool StandaloneEditor::requestAppQuit()
 {
-    if (! mProjectManager || ! mProjectManager->hasProject() || ! mProjectManager->isDirty())
+    if (! mProjectManager || ! mProjectManager->isDirty())
         return true;   // nothing to prompt about - proceed synchronously
     confirmDiscardChanges ([] { juce::JUCEApplication::getInstance()->quit(); });
     return false;
