@@ -2338,53 +2338,24 @@ std::vector<DrumKitGrid::NoteRef> DrumKitGrid::getWorkingSet() const
     return mSelection;
 }
 
-void DrumKitGrid::showToolsMenu()
-{
-    PopupMenu menu;
-    menu.addItem(1, "Quantize          Alt+Q");
-    menu.addItem(2, "Strum             Alt+S");
-
-    PopupMenu chopSub;
-    chopSub.addItem(10, "Into 2  (halves)");
-    chopSub.addItem(11, "Into 3  (thirds)");
-    chopSub.addItem(12, "Into 4  (quarters)");
-    chopSub.addItem(13, "Into 6");
-    chopSub.addItem(14, "Into 8");
-    menu.addSubMenu("Chop...", chopSub);
-
-    menu.addItem(4, "Glue              Ctrl+G");
-    menu.addItem(5, "Articulate        Alt+L");
-    menu.addItem(6, "Randomize         Alt+R");
-
-    menu.showMenuAsync(PopupMenu::Options().withTargetComponent(this), [this](int r)
-    {
-        if      (r == 1) toolQuantize();
-        else if (r == 2) toolStrum();
-        else if (r == 4) toolGlue();
-        else if (r == 5) toolArticulate();
-        else if (r == 6) toolRandomize();
-        else if (r >= 10 && r <= 14)
-        {
-            constexpr int kDivs[] = { 2, 3, 4, 6, 8 };
-            toolChop(kDivs[r - 10]);
-        }
-    });
-}
-
 void DrumKitGrid::toolQuantize()
 {
     if (mPM == nullptr) return;
     auto targets = getWorkingSet();
     if (targets.empty()) return;
     beginEdit("Quantize");
-    const double snap = snapUnitBeats();
+    // QA-UICleanup Task 4: round to the decoupled Tools>Quantize resolution
+    // (Unified_QuantizeDiv 0..3 -> 1/4,1/8,1/16,1/32 note = 1,0.5,0.25,0.125 beats),
+    // NOT the snap grid.
+    const int qdiv = onGetQuantizeDiv ? onGetQuantizeDiv() : 0;
+    const double q = 1.0 / (double) (1 << qdiv);
     for (auto ref : targets)
     {
         const int pi = rowToPageIndex(ref.row);
         if (pi < 0) continue;
         auto& notes = mPM->currentPattern().drumRolls[pi].notes;
         if (ref.idx >= 0 && ref.idx < (int) notes.size())
-            notes[ref.idx].startBeat = std::round(notes[ref.idx].startBeat / snap) * snap;
+            notes[ref.idx].startBeat = std::round(notes[ref.idx].startBeat / q) * q;
     }
     for (int p = 0; p < (int) kMaxDrumPages; ++p)
         sortNotes(mPM->currentPattern().drumRolls[p].notes);
@@ -3125,15 +3096,8 @@ DrumKitContainer::DrumKitContainer()
         if (onGlobalLockRequested) onGlobalLockRequested();
     };
 
-    // Toolbar.
-    mWrenchBtn = std::make_unique<TextButton>("Tools");
-    mWrenchBtn->setTooltip("Tools - Quantize, Strum, Glue, Chop, Randomize, Articulate");
-    mWrenchBtn->onClick = [this] {
-        if (mGrid) mGrid->showToolsMenu();
-        if (mGrid) mGrid->grabKeyboardFocus();
-    };
-    addAndMakeVisible(*mWrenchBtn);
-
+    // Toolbar.  QA-UICleanup Task 4: Tools wrench button removed; its popup folded
+    // into the menu-bar Tools menu.
     mMagnetBtn = std::make_unique<DrumKitRightClickButton>();
     mMagnetBtn->setButtonText("Snap");
     mMagnetBtn->setToggleState(true, dontSendNotification); // highlight; re-synced to the live div in setSnapAccessors
@@ -3520,15 +3484,6 @@ void DrumKitContainer::setLaneVisible(bool v)
     repaint();
 }
 
-void DrumKitContainer::setSnapDenomAndQuantize(int denom)
-{
-    // QA-Ee Stage 3: legacy quantize-submenu denom (4/8/16/32) -> unified div,
-    // written to the GLOBAL snap; then quantize the selection to it.
-    const int div = (denom <= 4) ? 3 : (denom <= 8) ? 4 : (denom <= 16) ? 6 : 7;
-    if (mOnSetSnapDiv) mOnSetSnapDiv(div);
-    if (mGrid) mGrid->toolQuantize();
-}
-
 // QA-Ee Stage 3: PianoRollPage wires these so the grid reads the global snap
 // param live (snapBeat) + the magnet menu writes it.
 void DrumKitContainer::setSnapAccessors (std::function<int()> getter,
@@ -3542,6 +3497,16 @@ void DrumKitContainer::setSnapAccessors (std::function<int()> getter,
         const int cur = mOnGetSnapDiv();
         if (mMagnetBtn) mMagnetBtn->setToggleState (cur != 0, juce::dontSendNotification);
     }
+}
+
+// QA-UICleanup Task 4: PianoRollPage wires these so the grid reads the global
+// quantize param live (toolQuantize) + the Tools>Quantize Settings menu writes it.
+void DrumKitContainer::setQuantizeAccessors (std::function<int()> getter,
+                                             std::function<void(int)> setter)
+{
+    mOnGetQuantizeDiv = std::move (getter);
+    mOnSetQuantizeDiv = std::move (setter);
+    if (mGrid) mGrid->onGetQuantizeDiv = mOnGetQuantizeDiv;
 }
 
 void DrumKitContainer::timerCallback()
@@ -3581,8 +3546,6 @@ void DrumKitContainer::resized()
 
     auto row1 = b.removeFromTop(kToolbarH);
     row1.removeFromLeft(4);
-    mWrenchBtn->setBounds(row1.removeFromLeft(38).reduced(2, 3));
-    row1.removeFromLeft(2);
     mMagnetBtn->setBounds(row1.removeFromLeft(38).reduced(2, 3));
     row1.removeFromLeft(4);
     for (int i = 0; i < 7; ++i)
@@ -3657,28 +3620,37 @@ juce::PopupMenu DrumKitMenuBar::getMenuForIndex(int idx, const juce::String&)
         menu.addItem(4, "Paste\tCtrl+V");
         menu.addItem(5, "Delete");
         menu.addItem(6, "Duplicate\tCtrl+B");
-        menu.addSeparator();
-
-        juce::PopupMenu quantSub;
-        quantSub.addItem(101, "1/4");
-        quantSub.addItem(102, "1/8");
-        quantSub.addItem(103, "1/16");
-        quantSub.addItem(104, "1/32");
-        menu.addSubMenu("Quantize", quantSub);
+        // QA-UICleanup Task 4: Quantize submenu moved to the Tools menu (Quantize
+        // action honors the decoupled Quantize resolution).
     }
     else if (idx == 1)
     {
-        using T = DrumKitGrid::PRTool;
-        auto addTool = [&](int id, const juce::String& label, T tool) {
-            menu.addItem(id, label, true, mOwner.getActiveTool() == tool);
-        };
-        addTool(21, "Draw\tP",       T::Draw);
-        addTool(22, "Paint\tB",      T::Paint);
-        addTool(23, "Delete\tD",     T::Delete);
-        addTool(24, "Mute\tT",       T::Mute);
-        addTool(25, "Slice\tC",      T::Slice);
-        addTool(26, "Select\tE",     T::Select);
-        addTool(27, "Zoom\tShift+Z", T::Zoom);
+        // QA-UICleanup Task 4 (SC13/SC15): the old Tools-button popup folded in, in
+        // its original order; the 7 tool-selectors dropped (SC5).  No Arpeggiate /
+        // Generate Chords / Transpose on drums (SC15).
+        menu.addItem(60, "Quantize\tAlt+Q");
+        menu.addItem(61, "Strum\tAlt+S");
+
+        juce::PopupMenu chopSub;
+        chopSub.addItem(70, "Into 2  (halves)");
+        chopSub.addItem(71, "Into 3  (thirds)");
+        chopSub.addItem(72, "Into 4  (quarters)");
+        chopSub.addItem(73, "Into 6");
+        chopSub.addItem(74, "Into 8");
+        menu.addSubMenu("Chop...", chopSub);
+
+        menu.addItem(63, "Glue\tCtrl+G");
+        menu.addItem(64, "Articulate\tAlt+L");
+        menu.addItem(65, "Randomize\tAlt+R");
+
+        menu.addSeparator();
+        juce::PopupMenu quantSub;
+        const int qd = mOwner.getQuantizeDiv();
+        quantSub.addItem(110, "1/4",  true, qd == 0);
+        quantSub.addItem(111, "1/8",  true, qd == 1);
+        quantSub.addItem(112, "1/16", true, qd == 2);
+        quantSub.addItem(113, "1/32", true, qd == 3);
+        menu.addSubMenu("Quantize Settings", quantSub);
     }
     else if (idx == 2)
     {
@@ -3701,18 +3673,19 @@ void DrumKitMenuBar::menuItemSelected(int id, int)
     else if (id == 4) { if (auto* g = o.mGrid.get()) g->pasteClipboard(); }
     else if (id == 5) { if (auto* g = o.mGrid.get()) g->deleteSelected(); }
     else if (id == 6) { if (auto* g = o.mGrid.get()) g->duplicateSelected(); }
-    else if (id >= 101 && id <= 104)
+    // ── Tools (folded from the removed Tools-button popup) ──────────────────
+    else if (id == 60) { if (auto* g = o.mGrid.get()) g->toolQuantize(); }
+    else if (id == 61) { if (auto* g = o.mGrid.get()) g->toolStrum(); }
+    else if (id == 63) { if (auto* g = o.mGrid.get()) g->toolGlue(); }
+    else if (id == 64) { if (auto* g = o.mGrid.get()) g->toolArticulate(); }
+    else if (id == 65) { if (auto* g = o.mGrid.get()) g->toolRandomize(); }
+    else if (id >= 70 && id <= 74)
     {
-        constexpr int kDenoms[] = { 4, 8, 16, 32 };
-        o.setSnapDenomAndQuantize(kDenoms[id - 101]);
+        constexpr int kDivs[] = { 2, 3, 4, 6, 8 };
+        if (auto* g = o.mGrid.get()) g->toolChop(kDivs[id - 70]);
     }
-    else if (id >= 21 && id <= 27)
-    {
-        using T = DrumKitGrid::PRTool;
-        constexpr T kTools[] = {
-            T::Draw, T::Paint, T::Delete, T::Mute, T::Slice, T::Select, T::Zoom };
-        o.setActiveTool(kTools[id - 21]);
-    }
+    // Quantize Settings: set the decoupled resolution only (no immediate quantize).
+    else if (id >= 110 && id <= 113) { o.setQuantizeDiv(id - 110); }
     else if (id == 51) { o.applyZoom(1.3f); }
     else if (id == 52) { o.applyZoom(1.f / 1.3f); }
     else if (id == 55) { o.scrollToPlayhead(); }

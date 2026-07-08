@@ -123,6 +123,13 @@ VibeSynthProcessor::createParameterLayout()
     // each grid reads it live via onGetSnapDiv.  Default 1 = Line (matches Builder).
     addI("Unified_PianoRollSnapDiv", "Piano Roll Snap Division", 0, 10, 1);
 
+    // QA-UICleanup Task 4 (Tools > Quantize Settings): GLOBAL quantize division,
+    // decoupled from snap (SC10).  ONE param shared across every piano roll + the
+    // drum kit (SC16), read live by each grid via onGetQuantizeDiv; the Quantize
+    // action rounds the selection to it.  Int 0..3 -> 1/4, 1/8, 1/16, 1/32 note.
+    // Default 0 = 1/4.  Per-project (SC11), same as the snap params above.
+    addI("Unified_QuantizeDiv", "Quantize Division", 0, 3, 0);
+
     // §P4.3 B7 (2026-04-22): legacy bus-EQ param blocks removed.
     // Pre-rack Layers/Bass/Drums EQs are now per-strip on the InsertNode/BusNode
     // (mixer_{kind}_<i>_preeq_mid_eq* / _preeq_side_eq*, registered lazily via

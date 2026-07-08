@@ -158,9 +158,6 @@ public:
     // keyboard column.  PianoRollContainer wires it in its ctor.
     std::function<void()> onToggleKeyboard;
 
-    // ── Tools menu (public so PianoRollContainer can invoke it) ──────────
-    void showToolsMenu();
-
     // ── Edit operations (callable from menu bar / container) ─────────────
     void copySelected      ();
     void pasteClipboard    ();
@@ -168,6 +165,15 @@ public:
     void duplicateSelected ();
     void toolQuantize      ();
     void transposeSelection(int semitones);  // nudgeSelection(0, n)
+    // QA-UICleanup Task 4: the rest of the tool algorithms are menu-bar-invoked
+    // now (folded from the removed Tools popup), same as toolQuantize above.
+    void toolChop       (int divisions);
+    void toolGlue       ();
+    void toolArpeggiate ();
+    void toolStrum      ();
+    void toolRandomize  ();
+    void toolArticulate ();
+    void toolGenerateChords();
 
     // ── Undo / Redo ───────────────────────────────────────────────────────
     // Set the global undo context (called by PianoRollContainer after it
@@ -198,6 +204,7 @@ public:
                        double beatEnd)>           onZoomTo;     // zoom-to-rect
     std::function<void()>                         onZoomToggle; // RMB in Zoom tool
     std::function<int()>                          onGetSnapDiv; // QA-Ee Stage 3: live read of the global snap div
+    std::function<int()>                          onGetQuantizeDiv; // QA-UICleanup Task 4: live read of the global quantize div
     std::function<void(double beat)>              onSeek;       // ruler click → seek playhead
     std::function<void(int midiNote)>             onNoteAudition; // legacy one-shot (kept for callers)
 
@@ -401,15 +408,8 @@ private:
     // Rebuild mSelection after a sort by matching stored (beat, note) pairs
     void rebuildSelectionFromKeys(const std::vector<std::pair<double,int>>& keys);
 
-    // ── Tools menu (private algorithms) ──────────────────────────────────
+    // ── Tools menu (private helper) ──────────────────────────────────────
     std::vector<int> getWorkingSet() const;   // selection (group-expanded) or all notes
-    void toolChop       (int divisions);
-    void toolGlue       ();
-    void toolArpeggiate ();
-    void toolStrum      ();
-    void toolRandomize  ();
-    void toolArticulate ();
-    void toolGenerateChords();
 };
 
 // ── Control lane (velocity / panning / fine pitch) ────────────────────────────
@@ -580,6 +580,11 @@ public:
     // QA-Ee Stage 3: wire the GLOBAL Piano Roll snap accessors (provided by
     // PianoRollPage).  getter -> live div for the grid's snapBeat; setter -> menu writes.
     void setSnapAccessors (std::function<int()> getter, std::function<void(int)> setter);
+    // QA-UICleanup Task 4: GLOBAL quantize accessors (provided by PianoRollPage).
+    // getter -> live div for toolQuantize; setter -> Tools>Quantize Settings writes.
+    void setQuantizeAccessors (std::function<int()> getter, std::function<void(int)> setter);
+    int  getQuantizeDiv() const { return mOnGetQuantizeDiv ? mOnGetQuantizeDiv() : 0; }
+    void setQuantizeDiv (int div) { if (mOnSetQuantizeDiv) mOnSetQuantizeDiv (div); }
     // QA-Ee Stage 2: content-bound dynamic zoom limits (active pattern's notes).
     float contentMaxBars() const;
     float minZoomPPB (float vpW) const;
@@ -590,7 +595,6 @@ public:
     void scrollToPlayhead       ();
     void setLaneVisible         (bool v);
     void setGhostsVisible       (bool v);
-    void setSnapDenomAndQuantize(int denom);
 
     // ── Scale / chord state (set by menu bar, read back for checkmarks) ───
     void setScaleActive(bool active);
@@ -640,11 +644,10 @@ private:
     // ScrollBar::Listener
     void scrollBarMoved(juce::ScrollBar* sb, double newRangeStart) override;
 
-    // Toolbar row 1: Wrench | Magnet | 7 tool buttons | Undo | Redo | H
+    // Toolbar row 1: Magnet | 7 tool buttons | Undo | Redo | H
     std::array<std::unique_ptr<juce::TextButton>, 8> mToolBtns; // [7] = Stamp, always hidden
     std::unique_ptr<juce::TextButton>        mUndoBtn, mRedoBtn, mHistoryBtn;
-    std::unique_ptr<juce::TextButton>        mWrenchBtn;     // options/tools menu
-    std::unique_ptr<RightClickTextButton>    mMagnetBtn;     // snap toggle + right-click res.
+    std::unique_ptr<RightClickTextButton>    mMagnetBtn;     // snap resolution dropdown
 
     // Toolbar row 2
     std::unique_ptr<juce::TextButton> mZoomInBtn, mZoomOutBtn;
@@ -659,6 +662,8 @@ private:
     int    mNumBars    { 2 };
     std::function<int()>     mOnGetSnapDiv;   // QA-Ee Stage 3: global snap read (PianoRollPage)
     std::function<void(int)> mOnSetSnapDiv;   // QA-Ee Stage 3: global snap write
+    std::function<int()>     mOnGetQuantizeDiv;   // QA-UICleanup Task 4: global quantize read
+    std::function<void(int)> mOnSetQuantizeDiv;   // QA-UICleanup Task 4: global quantize write
     PianoRollGrid::PRTool mActiveTool { PianoRollGrid::PRTool::Draw };
 
     // Zoom-to-rect undo state

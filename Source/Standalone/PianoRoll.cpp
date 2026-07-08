@@ -2605,15 +2605,9 @@ PianoRollContainer::PianoRollContainer()
         if (mGrid) mGrid->mouseWheelMove(e, wheel);
     };
 
-    // ── Toolbar row 1: Wrench | Magnet | 7 tool buttons | Undo | Redo | H ─
-    mWrenchBtn = std::make_unique<TextButton>("Tools");
-    mWrenchBtn->setTooltip("Tools - Quantize, Strum, Glue, Chop, Randomize, Articulate...");
-    mWrenchBtn->onClick = [this] {
-        if (mGrid) mGrid->showToolsMenu();
-        if (mGrid) mGrid->grabKeyboardFocus();
-    };
-    addAndMakeVisible(*mWrenchBtn);
-
+    // ── Toolbar row 1: Magnet | 7 tool buttons | Undo | Redo | H ─
+    // QA-UICleanup Task 4: Tools wrench button removed; its popup folded into the
+    // menu-bar Tools menu.
     mMagnetBtn = std::make_unique<RightClickTextButton>();
     mMagnetBtn->setButtonText("Snap");
     mMagnetBtn->setToggleState(true, dontSendNotification); // highlight; re-synced to the live div in setSnapAccessors
@@ -3227,15 +3221,6 @@ void PianoRollContainer::setGhostsVisible(bool v)
     if (mGrid) mGrid->setGhostData(v ? mGhostStore : decltype(mGhostStore){});
 }
 
-void PianoRollContainer::setSnapDenomAndQuantize(int denom)
-{
-    // QA-Ee Stage 3: legacy quantize-submenu denom (4/8/16/32) -> unified div,
-    // written to the GLOBAL snap; then quantize the selection to it.
-    const int div = (denom <= 4) ? 3 : (denom <= 8) ? 4 : (denom <= 16) ? 6 : 7;
-    if (mOnSetSnapDiv) mOnSetSnapDiv(div);
-    if (mGrid) mGrid->toolQuantize();
-}
-
 // QA-Ee Stage 3: PianoRollPage wires these so the grid reads the global snap
 // param live (snapBeat) + the magnet menu writes it.
 void PianoRollContainer::setSnapAccessors (std::function<int()> getter,
@@ -3249,6 +3234,16 @@ void PianoRollContainer::setSnapAccessors (std::function<int()> getter,
         const int cur = mOnGetSnapDiv();
         if (mMagnetBtn) mMagnetBtn->setToggleState (cur != 0, juce::dontSendNotification);
     }
+}
+
+// QA-UICleanup Task 4: PianoRollPage wires these so the grid reads the global
+// quantize param live (toolQuantize) + the Tools>Quantize Settings menu writes it.
+void PianoRollContainer::setQuantizeAccessors (std::function<int()> getter,
+                                               std::function<void(int)> setter)
+{
+    mOnGetQuantizeDiv = std::move (getter);
+    mOnSetQuantizeDiv = std::move (setter);
+    if (mGrid) mGrid->onGetQuantizeDiv = mOnGetQuantizeDiv;
 }
 
 void PianoRollContainer::timerCallback()
@@ -3320,11 +3315,9 @@ void PianoRollContainer::resized()
     // Menu bar (20 px)
     if (mMenuBar) mMenuBar->setBounds(b.removeFromTop(kMenuBarH));
 
-    // Single toolbar row (28 px): Wrench | Magnet | tool buttons | Undo | Redo | H
+    // Single toolbar row (28 px): Magnet | tool buttons | Undo | Redo | H
     auto row1 = b.removeFromTop(kToolbarH);
     row1.removeFromLeft(4);
-    mWrenchBtn->setBounds(row1.removeFromLeft(38).reduced(2, 3));
-    row1.removeFromLeft(2);
     mMagnetBtn->setBounds(row1.removeFromLeft(38).reduced(2, 3));
     row1.removeFromLeft(4);
     for (int i = 0; i < 7; ++i)   // Draw(0)..Zoom(6); Stamp(7) always hidden
@@ -3413,53 +3406,19 @@ std::vector<int> PianoRollGrid::getWorkingSet() const
     return expanded;
 }
 
-void PianoRollGrid::showToolsMenu()
-{
-    PopupMenu menu;
-    menu.addItem(1, "Quantize          Alt+Q");
-    menu.addItem(2, "Strum             Alt+S");
-    menu.addItem(3, "Arpeggiate        Alt+A");
-
-    PopupMenu chopSub;
-    chopSub.addItem(10, "Into 2  (halves)");
-    chopSub.addItem(11, "Into 3  (thirds)");
-    chopSub.addItem(12, "Into 4  (quarters)");
-    chopSub.addItem(13, "Into 6");
-    chopSub.addItem(14, "Into 8");
-    menu.addSubMenu("Chop...", chopSub);
-
-    menu.addItem(4, "Glue              Ctrl+G");
-    menu.addItem(5, "Articulate        Alt+L");
-    menu.addItem(6, "Randomize         Alt+R");
-    menu.addSeparator();
-    menu.addItem(7, "Generate Chords   Alt+P");
-
-    menu.showMenuAsync(PopupMenu::Options().withTargetComponent(this), [this](int r)
-    {
-        if      (r == 1)  toolQuantize();
-        else if (r == 2)  toolStrum();
-        else if (r == 3)  toolArpeggiate();
-        else if (r == 4)  toolGlue();
-        else if (r == 5)  toolArticulate();
-        else if (r == 6)  toolRandomize();
-        else if (r == 7)  toolGenerateChords();
-        else if (r >= 10 && r <= 14)
-        {
-            constexpr int kDivs[] = { 2, 3, 4, 6, 8 };
-            toolChop(kDivs[r - 10]);
-        }
-    });
-}
-
 void PianoRollGrid::toolQuantize()
 {
     if (!mData) return;
     auto targets = getWorkingSet();
     if (targets.empty()) return;
     beginEdit("Quantize");
-    double snap = snapUnitBeats();
+    // QA-UICleanup Task 4: round to the decoupled Tools>Quantize resolution
+    // (Unified_QuantizeDiv 0..3 -> 1/4,1/8,1/16,1/32 note = 1,0.5,0.25,0.125 beats),
+    // NOT the snap grid.
+    const int qdiv = onGetQuantizeDiv ? onGetQuantizeDiv() : 0;
+    const double q = 1.0 / (double) (1 << qdiv);
     for (int i : targets)
-        mData->notes[i].startBeat = std::round(mData->notes[i].startBeat / snap) * snap;
+        mData->notes[i].startBeat = std::round(mData->notes[i].startBeat / q) * q;
     auto& notes = mData->notes;
     sortNotes(notes);
     commitEdit();
@@ -4034,35 +3993,45 @@ juce::PopupMenu PianoRollMenuBar::getMenuForIndex(int idx, const juce::String&)
         menu.addItem(4, "Paste\tCtrl+V");
         menu.addItem(5, "Delete");
         menu.addItem(6, "Duplicate\tCtrl+B");
-        menu.addSeparator();
-
-        juce::PopupMenu quantSub;
-        quantSub.addItem(101, "1/4");
-        quantSub.addItem(102, "1/8");
-        quantSub.addItem(103, "1/16");
-        quantSub.addItem(104, "1/32");
-        menu.addSubMenu("Quantize", quantSub);
-
-        menu.addSeparator();
-        menu.addItem(7,  "Transpose Up\tShift+\xe2\x86\x91");
-        menu.addItem(8,  "Transpose Down\tShift+\xe2\x86\x93");
-        menu.addItem(9,  "Transpose Up Octave\tShift+Ctrl+\xe2\x86\x91");
-        menu.addItem(10, "Transpose Down Octave\tShift+Ctrl+\xe2\x86\x93");
+        // QA-UICleanup Task 4: Quantize submenu + Transpose items moved to the
+        // Tools menu (Quantize action honors the decoupled Quantize resolution).
     }
     else if (idx == 1) // ── Tools ─────────────────────────────────────────────
     {
-        using T = PianoRollGrid::PRTool;
-        auto addTool = [&](int id, const juce::String& label, T tool)
-        {
-            menu.addItem(id, label, true, mOwner.getActiveTool() == tool);
-        };
-        addTool(21, "Draw\tP",       T::Draw);
-        addTool(22, "Paint\tB",      T::Paint);
-        addTool(23, "Delete\tD",     T::Delete);
-        addTool(24, "Mute\tT",       T::Mute);
-        addTool(25, "Slice\tC",      T::Slice);
-        addTool(26, "Select\tE",     T::Select);
-        addTool(27, "Zoom\tShift+Z", T::Zoom);
+        // QA-UICleanup Task 4 (SC13): the old Tools-button popup folded in, in its
+        // original order; the 7 tool-selectors dropped (SC5 - they duplicate the
+        // toolbar tool buttons + the P/B/D/T/C/E/Z keys).
+        menu.addItem(60, "Quantize\tAlt+Q");
+        menu.addItem(61, "Strum\tAlt+S");
+        menu.addItem(62, "Arpeggiate\tAlt+A");
+
+        juce::PopupMenu chopSub;
+        chopSub.addItem(70, "Into 2  (halves)");
+        chopSub.addItem(71, "Into 3  (thirds)");
+        chopSub.addItem(72, "Into 4  (quarters)");
+        chopSub.addItem(73, "Into 6");
+        chopSub.addItem(74, "Into 8");
+        menu.addSubMenu("Chop...", chopSub);
+
+        menu.addItem(63, "Glue\tCtrl+G");
+        menu.addItem(64, "Articulate\tAlt+L");
+        menu.addItem(65, "Randomize\tAlt+R");
+        menu.addItem(66, "Generate Chords\tAlt+P");
+
+        menu.addSeparator();
+        juce::PopupMenu quantSub;
+        const int qd = mOwner.getQuantizeDiv();
+        quantSub.addItem(110, "1/4",  true, qd == 0);
+        quantSub.addItem(111, "1/8",  true, qd == 1);
+        quantSub.addItem(112, "1/16", true, qd == 2);
+        quantSub.addItem(113, "1/32", true, qd == 3);
+        menu.addSubMenu("Quantize Settings", quantSub);
+
+        menu.addSeparator();
+        menu.addItem(7,  "Transpose Up\tShift+Up");
+        menu.addItem(8,  "Transpose Down\tShift+Down");
+        menu.addItem(9,  "Transpose Up Octave\tCtrl+Up");
+        menu.addItem(10, "Transpose Down Octave\tCtrl+Down");
     }
     else if (idx == 2) // ── Scale ─────────────────────────────────────────────
     {
@@ -4120,20 +4089,21 @@ void PianoRollMenuBar::menuItemSelected(int id, int)
     else if (id == 8) { o.transposeSelection(-1); }
     else if (id == 9) { o.transposeSelection(+12); }
     else if (id == 10){ o.transposeSelection(-12); }
-    // Quantize submenu
-    else if (id >= 101 && id <= 104)
+    // ── Tools (folded from the removed Tools-button popup) ──────────────────
+    else if (id == 60) { if (auto* g = o.mGrid.get()) g->toolQuantize(); }
+    else if (id == 61) { if (auto* g = o.mGrid.get()) g->toolStrum(); }
+    else if (id == 62) { if (auto* g = o.mGrid.get()) g->toolArpeggiate(); }
+    else if (id == 63) { if (auto* g = o.mGrid.get()) g->toolGlue(); }
+    else if (id == 64) { if (auto* g = o.mGrid.get()) g->toolArticulate(); }
+    else if (id == 65) { if (auto* g = o.mGrid.get()) g->toolRandomize(); }
+    else if (id == 66) { if (auto* g = o.mGrid.get()) g->toolGenerateChords(); }
+    else if (id >= 70 && id <= 74)
     {
-        constexpr int kDenoms[] = { 4, 8, 16, 32 };
-        o.setSnapDenomAndQuantize(kDenoms[id - 101]);
+        constexpr int kDivs[] = { 2, 3, 4, 6, 8 };
+        if (auto* g = o.mGrid.get()) g->toolChop(kDivs[id - 70]);
     }
-    // ── Tools ─────────────────────────────────────────────────────────────
-    else if (id >= 21 && id <= 27)
-    {
-        using T = PianoRollGrid::PRTool;
-        constexpr T kTools[] = {
-            T::Draw, T::Paint, T::Delete, T::Mute, T::Slice, T::Select, T::Zoom };
-        o.setActiveTool(kTools[id - 21]);
-    }
+    // Quantize Settings: set the decoupled resolution only (no immediate quantize).
+    else if (id >= 110 && id <= 113) { o.setQuantizeDiv(id - 110); }
     // ── Scale root ────────────────────────────────────────────────────────
     else if (id >= 201 && id <= 212)  { o.setScaleRoot(id - 201); }
     // ── Scale name ────────────────────────────────────────────────────────

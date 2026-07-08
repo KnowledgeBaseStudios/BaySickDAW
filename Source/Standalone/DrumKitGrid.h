@@ -159,12 +159,18 @@ public:
     // callback can ask the grid whether a given (row, idx) ref is selected.
     bool isRefSelected (NoteRef ref) const;
 
-    void showToolsMenu();
     void copySelected      ();
     void pasteClipboard    ();
     void deleteSelected    ();
     void duplicateSelected ();
     void toolQuantize      ();
+    // QA-UICleanup Task 4: the rest of the tool algorithms are menu-bar-invoked
+    // now (folded from the removed Tools popup), same as toolQuantize above.
+    void toolChop       (int divisions);
+    void toolGlue       ();
+    void toolStrum      ();
+    void toolRandomize  ();
+    void toolArticulate ();
     // 2026-04-26 (D-7): drum-applicable bundle helpers (quickLegato +
     // transposeSelection are NOT mirrored here - drum hits don't legato and
     // drum rows are slot-based, not pitch).
@@ -197,6 +203,7 @@ public:
                        double beatEnd)>           onZoomTo;
     std::function<void()>                         onZoomToggle;
     std::function<int()>                          onGetSnapDiv; // QA-Ee Stage 3: live read of the global snap div
+    std::function<int()>                          onGetQuantizeDiv; // QA-UICleanup Task 4: live read of the global quantize div
     std::function<void(double beat)>              onSeek;
 
     std::function<void(int rowIdx)>               onRowAuditionOn;
@@ -318,12 +325,6 @@ private:
 
     std::vector<NoteRef> getWorkingSet() const;
 
-    void toolChop       (int divisions);
-    void toolGlue       ();
-    void toolStrum      ();
-    void toolRandomize  ();
-    void toolArticulate ();
-
     // ── Per-note context menu (double-click) ─────────────────────────────
     void showNoteContextMenu (NoteRef ref);
     void promptVelocity      (NoteRef ref);
@@ -443,6 +444,10 @@ public:
 
     // QA-Ee Stage 3: GLOBAL snap accessors (provided by PianoRollPage).
     void setSnapAccessors (std::function<int()> getter, std::function<void(int)> setter);
+    // QA-UICleanup Task 4: GLOBAL quantize accessors (provided by PianoRollPage).
+    void setQuantizeAccessors (std::function<int()> getter, std::function<void(int)> setter);
+    int  getQuantizeDiv() const { return mOnGetQuantizeDiv ? mOnGetQuantizeDiv() : 0; }
+    void setQuantizeDiv (int div) { if (mOnSetQuantizeDiv) mOnSetQuantizeDiv (div); }
     // QA-Ee Stage 2: content-bound dynamic zoom limits (scans all drum rows' notes).
     float contentMaxBars() const;
     float minZoomPPB (float vpW) const;
@@ -450,7 +455,6 @@ public:
 
     void scrollToPlayhead       ();
     void setLaneVisible         (bool v);
-    void setSnapDenomAndQuantize(int denom);
 
     bool isLaneVisible()    const { return mLaneVisible;   }
     DrumKitGrid::PRTool getActiveTool() const { return mActiveTool; }
@@ -477,7 +481,6 @@ private:
 
     std::array<std::unique_ptr<juce::TextButton>, 7> mToolBtns;
     std::unique_ptr<juce::TextButton>                mUndoBtn, mRedoBtn, mHistoryBtn;
-    std::unique_ptr<juce::TextButton>                mWrenchBtn;
     std::unique_ptr<DrumKitRightClickButton>         mMagnetBtn;
     std::unique_ptr<juce::TextButton>                mZoomInBtn, mZoomOutBtn;
     // Batch 5: Kit button - opens the Save Kit As / Load Kit popup.
@@ -490,6 +493,8 @@ private:
     double mBeatOff    { 0.0 };
     std::function<int()>     mOnGetSnapDiv;   // QA-Ee Stage 3: global snap read
     std::function<void(int)> mOnSetSnapDiv;   // QA-Ee Stage 3: global snap write
+    std::function<int()>     mOnGetQuantizeDiv;   // QA-UICleanup Task 4: global quantize read
+    std::function<void(int)> mOnSetQuantizeDiv;   // QA-UICleanup Task 4: global quantize write
     DrumKitGrid::PRTool mActiveTool { DrumKitGrid::PRTool::Draw };
 
     float  mPreZoomPPB     { 80.f };

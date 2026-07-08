@@ -107,6 +107,9 @@ public:
     // QA-Ee Stage 3: wire the GLOBAL Unified_PianoRollSnapDiv accessors into every
     // roll + the drum kit (the editor provides the apvts read/write).
     void setSnapAccessors  (std::function<int()> getter, std::function<void(int)> setter);
+    // QA-UICleanup Task 4: wire the GLOBAL Unified_QuantizeDiv accessors into every
+    // roll + the drum kit (Tools > Quantize Settings writes; the Quantize action reads).
+    void setQuantizeAccessors (std::function<int()> getter, std::function<void(int)> setter);
     void selectEngine      (EngineId id);
     void setEngineDisplayName (EngineId id, const juce::String& name);
     // QA-D STATE-02 follow-on: update the engine-type half of the context
@@ -161,6 +164,8 @@ private:
     std::unordered_map<EngineId, PianoRollConnection, EngineIdHash>                 mConns;
     std::function<int()>     mSnapGetter;   // QA-Ee Stage 3: global snap read
     std::function<void(int)> mSnapSetter;   // QA-Ee Stage 3: global snap write
+    std::function<int()>     mQuantizeGetter;   // QA-UICleanup Task 4: global quantize read
+    std::function<void(int)> mQuantizeSetter;   // QA-UICleanup Task 4: global quantize write
 
     EngineId            mActive { EngineKind::DrumKit, 0 };
     StandalonePlayHead* mPlayHead { nullptr };

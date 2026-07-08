@@ -115,6 +115,7 @@ void PianoRollPage::registerEngine (EngineId id, PianoRollConnection conn)
     roll->setContextLabel (composeContextLabel (conn));   // QA-D STATE-02 follow-on
     roll->setUndoContext (mUndoCtx);
     if (mSnapGetter) roll->setSnapAccessors (mSnapGetter, mSnapSetter);   // QA-Ee Stage 3: global snap
+    if (mQuantizeGetter) roll->setQuantizeAccessors (mQuantizeGetter, mQuantizeSetter);   // QA-UICleanup Task 4
     if (conn.rollMode != PianoRollContainer::RollMode::Standard)
         roll->setRollMode (conn.rollMode);
     if (conn.auditionMomentary) roll->onNoteAudition    = conn.auditionMomentary;
@@ -145,6 +146,17 @@ void PianoRollPage::setSnapAccessors (std::function<int()> getter, std::function
     if (mDrumKit) mDrumKit->setSnapAccessors (mSnapGetter, mSnapSetter);
     for (auto& kv : mRolls)
         if (kv.second) kv.second->setSnapAccessors (mSnapGetter, mSnapSetter);
+}
+
+// QA-UICleanup Task 4: wire the global quantize accessors into the drum kit +
+// every roll (future registrations pick them up in registerEngine).
+void PianoRollPage::setQuantizeAccessors (std::function<int()> getter, std::function<void(int)> setter)
+{
+    mQuantizeGetter = std::move (getter);
+    mQuantizeSetter = std::move (setter);
+    if (mDrumKit) mDrumKit->setQuantizeAccessors (mQuantizeGetter, mQuantizeSetter);
+    for (auto& kv : mRolls)
+        if (kv.second) kv.second->setQuantizeAccessors (mQuantizeGetter, mQuantizeSetter);
 }
 
 void PianoRollPage::unregisterEngine (EngineId id)

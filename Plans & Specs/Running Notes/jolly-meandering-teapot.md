@@ -61,4 +61,62 @@ All auto-name-trace sites write, in call order, to `Documents/BaySickDAW/qa_rena
 - Snap stays a shared global (`Unified_BuilderSnapDiv`, read live via `onGetSnapDiv`) — no change to snapping itself, only the control. Highlight syncs on `setSnapAccessors` + local menu pick (not a live cross-editor poll; matches prior behavior).
 - **Live highlight sync added (Jeff request after first verify):** both `PianoRollContainer` + `DrumKitContainer` now inherit `juce::Timer` (`startTimer(200)`); `timerCallback()` re-syncs the Snap highlight to the live shared div, guarded by `isShowing()` so only the visible roll polls. Covers cross-editor changes (change snap on the roll -> drum-kit highlight follows within ~200ms). `setToggleState` repaints only on an actual change, so the idle poll is effectively free. No explicit `stopTimer` needed (Timer auto-stops on destruct; single-threaded teardown = no callback race).
 - **First verify: all pass** (snap dropdown + highlight on both toolbars; Kit far-right; shared snapping) — live highlight was the one add-on request.
-- **Next:** build + re-verify the live highlight, then commit Task 3.
+- **DONE — committed `2a077da`.** Live highlight re-verified all-pass (cross-editor sync works); snap dropdown + Kit-right + `mLastSnapDiv` removal all shipped.
+
+## 2026-07-08 — Task 4 — CARRY-OVER (mapped, NOT yet implemented)
+
+**Status:** Tasks 0-3 done + committed (`307a211` open / `4845e50` T1 quit / `b48e2d5` T2 auto-name / `2a077da` T3 snap+kit). Task 4 (items 3+5+6+7) is fully mapped (Explore agent 2026-07-08) but NOT started. Working tree clean at Task 3.
+
+**Two map corrections (verified):**
+- **SC7 moot — there is NO right-click tools popup.** The wrench button (`mWrenchBtn->onClick`) is the ONLY caller of `showToolsMenu()` in both grids (full-tree grep). Right-click = erase/zoom. So item 3 = remove the wrench button + fold its popup into the menu-bar Tools menu; nothing else to remove.
+- The piano-roll/drum-kit snap threads through **`Unified_PianoRollSnapDiv`** (not `Unified_BuilderSnapDiv`) via `setSnapAccessors`. Clone THAT chain for the new `Unified_QuantizeDiv`.
+
+**Implementation plan (4 stages, ONE commit per SC14=B):**
+- **Stage 1 — new param + accessor chain** (mirror `Unified_PianoRollSnapDiv` exactly):
+  - Register: `PluginProcessor.cpp:124` -> add `addI("Unified_QuantizeDiv", "Quantize Division", 0, 3, 0);` (0..3 -> 1/4,1/8,1/16,1/32, default 0=1/4). `addI` helper at :78-83.
+  - APVTS read/write lambdas: `StandaloneEditor.cpp:1472-1482` -> add a parallel `mPianoRollPage->setQuantizeAccessors(getter,setter)` reading/writing `Unified_QuantizeDiv`.
+  - Page fan-out: `PianoRollPage.cpp:141-148` (`setSnapAccessors`) + re-apply at `:117` (registerEngine) + decl `PianoRollPage.h:109`; add `setQuantizeAccessors` + members `mQuantizeGetter/mQuantizeSetter`.
+  - Container store + push getter to grid: `PianoRoll.cpp:3241-3252` / `DrumKitGrid.cpp:3534-3545`; members `PianoRoll.h:660-661` / `DrumKitGrid.h:491-492`; decls `PianoRoll.h:582` / `DrumKitGrid.h:445`. Add `mOnGetQuantizeDiv/mOnSetQuantizeDiv` + `setQuantizeAccessors` (push getter to `mGrid->onGetQuantizeDiv`).
+  - Grid read hook: add `onGetQuantizeDiv` next to `onGetSnapDiv` (`PianoRoll.h:200` / `DrumKitGrid.h:199`).
+- **Stage 2 — item 6, toolQuantize honors the quantize div** (sever the snap coupling): `PianoRollGrid::toolQuantize` `PianoRoll.cpp:3454-3469` + `DrumKitGrid::toolQuantize` `DrumKitGrid.cpp:2374-2395` -> replace `double snap = snapUnitBeats();` with a quantize unit from `onGetQuantizeDiv` (div 0..3 -> beats `1.0 / (1 << div)` = 1, 0.5, 0.25, 0.125). Keep `snapUnitBeats` for actual snapping.
+- **Stage 3 — menu restructure (items 3+5+7), both editors:**
+  - Tools menu `getMenuForIndex` (piano-roll `PianoRoll.cpp:4050-4064` idx==1; drum-kit `DrumKitGrid.cpp` Tools block): DROP the 7 tool-selectors (ids 21-27); ADD the folded popup tools in `showToolsMenu` order (piano-roll `:3416-3452` = Quantize/Strum/Arpeggiate/Chop>/Glue/Articulate/Randomize/GenerateChords; drum-kit `:2341-2372` = same minus Arpeggiate+GenerateChords) + a "Quantize Settings" submenu (1/4,1/8,1/16,1/32, radio-checked to `Unified_QuantizeDiv`) + (piano-roll only) the 4 Transpose items with ASCII/real-binding text (`Transpose Up  Shift+Up`, `Down  Shift+Down`, `Up Octave  Ctrl+Up`, `Down Octave  Ctrl+Down`).
+  - Edit menu: REMOVE the Quantize submenu (build `PianoRoll.cpp:4039-4044` / `DrumKitGrid.cpp:3662-3667`; dispatch `:4124-4128` / `:3704-3708`) AND (piano-roll) the 4 Transpose items (`PianoRoll.cpp:4045-4048`, dispatch ids 7-10 at `:4117-4120`).
+  - `menuItemSelected` (`PianoRoll.cpp:4106-4154` / `DrumKitGrid.cpp:3700-3718`): route the new Tools-menu ids -> `g->toolQuantize()/toolStrum()/...` (currently in `showToolsMenu`'s async cb) + Quantize Settings -> `setQuantizeDiv` (NO immediate quantize) + keep Transpose 7-10 (relocated). Assign a non-colliding id block (Edit uses 1-10, selectors 21-27, Quantize 101-104, Scale 201+/301+, Chords 401+, View 51-57 -> use e.g. 60-74 for folded tools, 110-113 for Quantize Settings).
+  - **Item 5/6 sever:** `setSnapDenomAndQuantize` (`PianoRoll.cpp:3230-3237` / `DrumKitGrid.cpp:3523-3530`) is now unused (Edit>Quantize removed) -> remove it (clean-in-batch) OR repoint. Confirm no other caller.
+- **Stage 4 — remove the wrench button** (`mWrenchBtn`) from both toolbars: setup `PianoRoll.cpp:2609-2614` / `DrumKitGrid.cpp:3129-3134` + its `resized()` layout slot + the header member. `showToolsMenu()` becomes dead -> remove it too (clean-in-batch).
+
+**Consolidated Tools menus (SC13/SC15 locked):**
+- Piano-roll: Quantize / Strum / Arpeggiate / Chop> / Glue / Articulate / Randomize / Generate Chords -- separator -- Quantize Settings> -- separator -- Transpose Up/Down/Up Octave/Down Octave.
+- Drum-kit: Quantize / Strum / Chop> / Glue / Articulate / Randomize -- separator -- Quantize Settings> (no Arpeggiate, no Generate Chords, no Transpose).
+
+**Item 7 detail:** current Transpose strings (`PianoRoll.cpp:4045-4048`) use UTF-8 arrow glyphs (U+2191/2193) + the two Octave entries DISPLAY `Shift+Ctrl+arrow` but the real binding is `Ctrl+Up/Down` (key handler `:1086-1089`). Fix = display-only: `Shift+Up`/`Shift+Down`/`Ctrl+Up`/`Ctrl+Down`, ASCII. DO NOT touch the key handler.
+
+**Resume action:** start Stage 1 (register `Unified_QuantizeDiv` + clone the accessor chain), Debug-build after each stage optional; single verify + commit at Task 4 end.
+
+- **Next (pending Jeff):** push through Task 4 now, or resume fresh (context checkpoint).
+
+## 2026-07-08 — Task 4 — DONE (menu consolidation: items 3+5+6+7)
+
+Items 3+5+6+7 shipped as ONE commit (SC14=B), built in the 4 mapped stages. Working tree was clean at Task 3, so this is the whole diff since `2a077da`. Verified all-pass Debug + Release (8 scenarios below).
+
+- **Stage 1 — new param + accessor chain (SC10/SC11/SC16).** Registered `Unified_QuantizeDiv` (Int 0..3 -> 1/4,1/8,1/16,1/32 note, default 0=1/4) in `PluginProcessor.cpp` right after `Unified_PianoRollSnapDiv` (`addI` helper) — decoupled from snap (SC10), ONE param shared across every piano roll + the drum kit (SC16), per-project (SC11). Cloned the `Unified_PianoRollSnapDiv` accessor chain *exactly*: `StandaloneEditor` apvts read/write lambdas -> `PianoRollPage::setQuantizeAccessors` + `mQuantizeGetter/mQuantizeSetter` (+ re-apply in `registerEngine` so future rolls inherit) -> `PianoRollContainer`/`DrumKitContainer::setQuantizeAccessors` + `getQuantizeDiv`/`setQuantizeDiv` + `mOnGetQuantizeDiv`/`mOnSetQuantizeDiv` -> grid `onGetQuantizeDiv` read hook (added next to `onGetSnapDiv`).
+- **Stage 2 — item 6: quantize honors its own div (sever the snap coupling).** Both `PianoRollGrid::toolQuantize` + `DrumKitGrid::toolQuantize` now round the selection to the quantize unit `1.0/(1<<div)` beats (1, 0.5, 0.25, 0.125), read live via `onGetQuantizeDiv`, replacing the old `snapUnitBeats()` round. `snapUnitBeats` stays for actual snapping — quantize + snap are now independent controls.
+- **Stage 3 — items 3+5+7: menu restructure, both editors.**
+  - Made the grid tool algorithms public (joining the already-public `toolQuantize`) so `*MenuBar::menuItemSelected` can route to them via `mGrid`.
+  - Folded the wrench popup into the menu-bar **Tools** menu in exact popup order: piano-roll = Quantize / Strum / Arpeggiate / Chop> / Glue / Articulate / Randomize / Generate Chords (ids 60-66 tools, 70-74 chop); drum-kit = same minus Arpeggiate + Generate Chords (SC15).
+  - Added a `Quantize Settings>` radio submenu (ids 110-113, radio-checked to `Unified_QuantizeDiv` via `getQuantizeDiv`) that sets the resolution ONLY — no immediate quantize.
+  - Relocated the 4 Transpose items into piano-roll Tools (ids 7-10 unchanged) with ASCII/real-binding display text: `Shift+Up` / `Shift+Down` / `Ctrl+Up` / `Ctrl+Down` (item 7 = display-only fix; the U+2191/2193 glyphs + the wrong "Shift+Ctrl" octave labels are gone). Key handler at `PianoRoll.cpp:1086-1089` NOT touched.
+  - Dropped the 7 tool-selectors (ids 21-27) from both Tools menus (SC5 — they dup the toolbar buttons + the P/B/D/T/C/E/Z keys); the `using T` blocks they needed went with them.
+  - Removed the `Edit>Quantize` submenu (ids 101-104) from both Edit menus + `Edit>Transpose` from the piano-roll Edit menu.
+- **Stage 4 — wrench button + dead-code sweep.** Removed the Tools wrench button (`mWrenchBtn`: setup + `resized()` slot + header member) from both toolbars — the Snap (magnet) button slides into its old slot. Removed the now-dead `showToolsMenu()` and `setSnapDenomAndQuantize()` (decls + defs, both editors) — clean-in-batch. Fixed a stale `mMagnetBtn` header comment ("snap toggle + right-click res." -> "snap resolution dropdown", a Task-3 SC8 leftover) in the edited region per Rule 6.
+- **Two carry-over map corrections confirmed in code during execution:**
+  - **SC7 moot** — there was NO right-click tools popup; the wrench was `showToolsMenu`'s ONLY caller, so removing it left nothing else to strip. Right-click stays erase/zoom.
+  - The snap/quantize accessors thread through **`Unified_PianoRollSnapDiv`** (not `Unified_BuilderSnapDiv`); cloned that chain.
+- **Implementation call (Rule 8 — NOT a spec call).** Made the grid tool methods public rather than `friend`-ing the grid into the menu bar — matches the existing public `toolQuantize` precedent (already public for exactly this reason). `getActiveTool` kept as a symmetric public accessor, paired with the still-used `setActiveTool` (its only prior caller was the dropped selector checkmarks).
+- **Self-review (inline self-check, no per-unit review agent):** grep-clean of `mWrenchBtn` / `showToolsMenu` / `setSnapDenomAndQuantize` = 0 refs; `Unified_QuantizeDiv` chain wired end-to-end (param -> editor lambdas -> page -> container -> grid hook); no dangling `using T` left from the dropped selector blocks.
+- **Diagnostics:** none added this task — nothing for the Diagnostic Instrumentation Catalog.
+- **Files:** `PluginProcessor.cpp`, `Standalone/StandaloneEditor.cpp`, `Standalone/PianoRollPage.h/.cpp`, `Standalone/PianoRoll.h/.cpp`, `Standalone/DrumKitGrid.h/.cpp`.
+- **VERIFIED (Debug + Release, all 8 scenarios pass):** (1) wrench button gone from both toolbars; (2) Tools menu consolidated, tool-selectors gone; (3) Edit menus stripped (no Quantize submenu / no Transpose on piano-roll); (4) Quantize Settings sets the resolution without moving notes, Quantize then honors it; (5) Transpose ASCII shortcuts show + the real keys still work; (6) drum-kit Tools menu = piano-roll minus Arpeggiate / Generate Chords / Transpose; (7) the shared quantize value tracks cross-editor (set it on the roll -> drum-kit menu radio follows); (8) persists per-project, fresh session defaults to 1/4.
+- **DONE — committed with the Task 4 source commit (hash TBD).**
+- **Next:** Task 5 (batch close) — `/draft-doc batch-close` -> apply to Implemented Work Log -> `/review-batch QA-UICleanup` -> fix any BLOCKER / NEEDS-FIX in-batch (fold everything; Jeff: no routing out) -> Main Plan §5 QA-UICleanup `STATUS: CLOSED` + "Next batch: QA-Chords" -> close commit.

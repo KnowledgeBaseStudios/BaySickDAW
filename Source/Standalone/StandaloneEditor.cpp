@@ -1480,6 +1480,19 @@ void StandaloneEditor::buildDefaultTabs()
                         mProcessor.apvts.getParameter ("Unified_PianoRollSnapDiv")))
                     p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 ((float) div));
             });
+        // QA-UICleanup Task 4: GLOBAL Tools>Quantize resolution (Unified_QuantizeDiv),
+        // decoupled from snap, fanned into every roll + the drum kit the same way.
+        mPianoRollPage->setQuantizeAccessors (
+            [this]() -> int {
+                if (auto* p = mProcessor.apvts.getRawParameterValue ("Unified_QuantizeDiv"))
+                    return (int) p->load();
+                return 0;
+            },
+            [this](int div) {
+                if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                        mProcessor.apvts.getParameter ("Unified_QuantizeDiv")))
+                    p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 ((float) div));
+            });
         mPianoRollPage->setUndoContext (makeUndoContext());
         wirePianoRollPageKitView (mPianoRollPage);
 
