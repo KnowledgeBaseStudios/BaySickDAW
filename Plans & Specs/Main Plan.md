@@ -1223,10 +1223,22 @@ needed to find what you should pull up to review the work.
 - Effort: ~7-10h estimated at batch open (Task 4 menu consolidation is the heavy one; Task 2 unknown-until-diagnosed).
 - **Bucket:** UI / L&F / Theming
 
+#### **QA-TransportDisplay: Transport-Bar Playback-Position Readout** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry)*
+**Plan file:** TBD (written in the bulk-run G1 group plan-file pass).
+- Items: playback-position display on the transport bar (`Source/Standalone/GlobalTransportBar.h/.cpp`) — current position shown as **time** or **bars:beats**, user-swappable, live during playback in BOTH song and pattern mode (Jeff request 2026-07-08 at bulk-run plan review).
+- Scope: UI readout consuming the QA-Ed int64-sample clock via the existing playhead API (`getPosition`/`deriveBeat`) on the UI timer — read-only clock consumer; survives QA-TempoMap's anchor-to-map rework unchanged (it consumes the derived position, not the anchor internals); beats format rides the QA-Ee 96 PPQ tick base.  Constraint: the combined 40px transport bar must NOT grow (standing no-expand rule) — the readout compacts into existing width.
+- Risk: low — UI-only, read-only clock consumer.
+- Dependencies: QA-Ed (int64 clock) + QA-Ee (tick base) — both closed.
+- Sequencing: **immediately after QA-UICleanup, before QA-Chords** — first batch of the bulk run.  Slot explicitly DELEGATED to Claude by Jeff 2026-07-08 (recorded exception to `feedback_slot_placement_is_spec_call.md`); rationale: the readout is a verification aid for the G1 transport work and the entire Master Test Plan campaign, so it pays for itself earliest here.  See §6 arrow + §9 fifty-fifth Forks entry.
+- Effort: small (~2-4 hours).
+- **Bucket:** UI / L&F / Theming, Cross-cutting Infrastructure
+- Sub-spec calls (bulk-run marathon docket item 17, per `Batch Plans/swift-stampeding-caribou.md`): pattern-mode position semantics (pattern-relative vs absolute); bars:beats vs bars:beats:ticks; time format precision; display-mode persistence (settings.xml vs per-project); exact placement on the bar (visual pick is Jeff's).
+- Verify (Master Test Plan §B section): readout tracks playback live in song + pattern modes; toggle swaps format and persists per the locked persistence choice; displayed bars line up with audible downbeats; no transport-bar layout regression at 40px.
+
 #### **QA-Chords: Chord Stamp Stretch + Scale-Aware Dual-Mode** *(NEW — inserted 2026-06-05 at QA-Ee close)*
 - Items: (1) a stamped chord can't be stretched/resized (places as-is only); (2) dual-mode Root/Scale/Snap-to-Scale behavior.
 - Scope: Mode 1 (Snap-to-Scale OFF) — the chord dropdown (Major/Minor/Sus2/...) reads the globally active Root + Scale and generates a context-aware chord that fits the selected scale degrees relative to the clicked note (NOT static hardcoded semitone intervals).  Mode 2 (Snap-to-Scale ON) — strict scale compliance + an Octave Resolution Pass: a same-MIDI-note collision shifts the duplicate up to the next valid scale degree an octave up (preserving harmonic thickness, not stacking / deleting).  Deliverable = JUCE-compatible C++ data structures + algorithm for both modes + the MIDI-note array for the 96 PPQ grid + the octave-collision resolver.
-- Sequencing: **immediately after QA-UICleanup, before QA-TempoMap** (Jeff 2026-06-05 — last of the four new batches; see §6 arrow + §9 forty-ninth Forks entry).
+- Sequencing: **immediately after QA-TransportDisplay, before QA-TempoMap** (Jeff 2026-06-05 — last of the four new batches; re-pointed 2026-07-08 when QA-TransportDisplay inserted between — see §9 fifty-fifth Forks entry; see §6 arrow + §9 forty-ninth Forks entry).
 - Effort: TBD at batch open.
 - **Bucket:** System Pages
 
@@ -1783,10 +1795,21 @@ needed to find what you should pull up to review the work.
   - Sweep dead code from custom-browser components that become unused post-swap (likely candidates: any `Source/Standalone/*Browser*.h/.cpp` files exclusive to in-app file picking — verify at batch open before deletion).
 - Risk: **low-medium** — pure UX swap; no audio-thread / DSP / routing surface touched.  Main risk surface is missed call-sites (a file-picker entry not migrated still shows the old internal browser) and incorrect default-folder routing (would open the wrong context).
 - Dependencies: independent — could run alongside any other batch.  Does NOT depend on QA-ProjectSave (each batch operates on whatever file-picker surfaces exist at its execution time; QA-ProjectSave adds new save-as / open surfaces that this batch's pattern propagates to naturally if it lands first, or that QA-ProjectSave picks up the native-dialog pattern from if QA-NativeDialogs lands first).
-- Sequencing: **immediately after QA-VibeSlider, before QA-Verify** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 twenty-ninth Forks entry).  Slot rationale: late Phase 5 UI-polish cluster (sits naturally with QA-VibeSlider's app-wide widget refactor — both are mechanical sweeps over many call-sites); lands before QA-Verify so the per-engine preset-state verify uses native dialogs.
+- Sequencing: **immediately after QA-VibeSlider, before QA-ApvtsAutomation** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; re-pointed 2026-07-08 when QA-ApvtsAutomation inserted between it and QA-Verify — see §9 fifty-fifth Forks entry; see §6 arrow + §9 twenty-ninth Forks entry).  Slot rationale: late Phase 5 UI-polish cluster (sits naturally with QA-VibeSlider's app-wide widget refactor — both are mechanical sweeps over many call-sites); lands before QA-Verify so the per-engine preset-state verify uses native dialogs.
 - Effort: medium (~4-7 hours; per-surface audit ~1-2 hr, mechanical swap across ~15-25 sites ~2-3 hr, default-folder wiring ~1 hr, verify ~1-2 hr).
 - **Bucket:** UI / L&F / Theming, System Pages
 - Verify (own plan file will detail): every file-open / file-save / folder-pick surface in the app shows the native Windows dialog (not a custom internal one); each surface opens to the correct default folder for its context; file-extension filters work; Save replaces existing files cleanly; Cancel returns without state change; no missed call-sites (grep `juce::FileChooser` for any remaining non-native instances; grep for the deleted custom-browser class names returns no live references).
+
+#### **QA-ApvtsAutomation: Full APVTS + Automation Coverage Review** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry)*
+**Plan file:** TBD (written in the bulk-run G4 group plan-file pass).
+- Items: audit EVERY user-changeable control across every editor/panel (10 engines + effect panels + mixer strips + system pages) — APVTS-bound with proper param setup, automatable end-to-end (right-click Automate resolves, stable componentID, attachment present) — and fix every gap found (Jeff request 2026-07-08 at bulk-run plan review).
+- Scope: natural superset of three items currently folded into QA-L — BLU-378 (componentID on sliders), BLU-379 (SliderAttachment sync verify), BLU-492 (combo-box → APVTS params, **PRESET-BREAK** at preset-format level).  **Proposed migration of those three out of QA-L into this batch is PENDING Jeff's confirm at the bulk-run spec marathon (docket item 18) — QA-L's entry is unchanged until confirmed.**  PRESET-BREAK sequencing constraint: must land BEFORE the Master Test Plan per-engine preset walk and BEFORE QA-Templates authors factory presets.
+- Risk: medium — combo-param infrastructure + preset-format change.
+- Dependencies: the G2 vocal builds (QA-F/QA-Fa add ~30-45 params) land first so the audit covers the final param surface.
+- Sequencing: **immediately after QA-NativeDialogs, before QA-Verify** (Jeff-approved slot via the bulk-run plan approval 2026-07-08, `Batch Plans/swift-stampeding-caribou.md`; see §6 arrow + §9 fifty-fifth Forks entry).
+- Effort: medium (~6-10 hours).
+- **Bucket:** Cross-cutting Infrastructure, UI / L&F / Theming
+- Verify (Master Test Plan §B section): sampled controls per engine/panel automate end-to-end (lane writes + playback drives the control); the audit table shows zero unbound user-changeable controls; combo-box params round-trip through preset save/load post-BLU-492.
 
 #### **QA-Verify: Phase 5A/5B/5C systems verification** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** TBD.
@@ -1796,6 +1819,7 @@ needed to find what you should pull up to review the work.
 - Dependencies: all preceding QA batches (must verify against final-state engines).
 - Effort: medium-large (~6-10 hours; one engine at a time).
 - Why this slot: late Phase 5 because final-state engines must be present. Feeds into QA-RC test plan.
+- **Scope note (2026-07-08, Jeff at bulk-run setup):** the verification walk (Master Test Plan §E under the bulk run) expands beyond engine presets to four round-trip-verified families — engine presets, effect-rack presets (`EffectPresetIO` + per-effect preset menus), engine "Save Current Patch As..." flows (Layers/Bass/Drum/Clips + per-drum context menu), and page-level "Save Page Preset As..."/Load + "Save Page Preset & Delete" paths on all 7 page types + Pedals "Save as Default".  Detail with source refs in [`Batch Plans/swift-stampeding-caribou.md`](Batch Plans/swift-stampeding-caribou.md) §E.
 
 #### **QA-Export: Audio Export rebuild + Project Bundle** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** TBD.
@@ -1827,9 +1851,21 @@ needed to find what you should pull up to review the work.
 - **Bucket:** System Pages, Cross-cutting Infrastructure
 - Verify (own plan file will detail): saving a template with full project state (L/B/D + vox/inst/clip/rusty/aux/samples) round-trips through Load Template intact; loading a template into a project with other-type tabs leaves those tabs untouched (non-destructive teardown); user templates with inline `<Drum>` children load correctly (drum inline-load fix); the New-from-Template submenu shows Default / Premade / My Templates in the correct folders; dirty-check flow prompts on dirty project and loads directly on clean; sample reference-vs-copy behavior matches the source-aware hybrid spec; Pack project produces a portable zip with all referenced samples resolved correctly on the receiving end; existing per-project-copy samples migrate cleanly (no orphaned files, no broken references); Save Template As dialog text accurately describes the expanded scope.
 
+#### **QA-UndoCoverage: App-Wide Undo-History Coverage Review** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry)*
+**Plan file:** TBD (written in the bulk-run G4 group plan-file pass).
+- Items: everything the user can change must register in the central UndoManager (`Source/Standalone/StandaloneEditor.h:300`) — audit every mutable surface (pattern/note edits, arrangement blocks, mixer state, engine params, effect params, page state, renames) and wire the gaps via `ParameterAttachment`s or explicit transactions (Jeff request 2026-07-08 at bulk-run plan review).
+- Scope: this is the "Strict UndoManager Plumbing" half of QA-DirtyFlag's locked spec, promoted to its own batch; **QA-DirtyFlag re-scopes to the transaction-pointer system on top of it** (its correctness depends on this coverage being complete).  Sizing intel (source-verified 2026-07-08): 477 `setProperty(..., nullptr)` sites across 50 files, of which ~300 are detached-tree preset serialization (correctly nullptr — OUT of scope); real targets = PatternManager (105 sites) + live UI writes; the main APVTS is currently constructed with a nullptr UndoManager (`PluginProcessor.cpp:159`).  UndoCoverage/DirtyFlag boundary + which UndoManager becomes the single global authority = marathon docket item 19.
+- Risk: medium-high — codebase-wide audit; a missed site silently fails to register undo.
+- Dependencies: QA-ProjectSave (its new save/load state sites must exist so the audit covers them).
+- Sequencing: **immediately after QA-ProjectSave, before QA-DirtyFlag** (Jeff-approved slot via the bulk-run plan approval 2026-07-08, `Batch Plans/swift-stampeding-caribou.md`; see §6 arrow + §9 fifty-fifth Forks entry).
+- Effort: medium (~6-10 hours; QA-DirtyFlag's remainder re-estimates to ~6-10 hours).
+- **Bucket:** Cross-cutting Infrastructure, System Pages, UI / L&F / Theming
+- Verify (Master Test Plan §B section): every page's state mutations undo/redo correctly (sampled walk per surface); a representative multi-surface edit session unwinds fully via Ctrl+Z; no mutable control bypasses the history.
+
 #### **QA-DirtyFlag: UndoManager-Aware Project Dirty Tracking** *(NEW — inserted 2026-05-24)*
 
 **Plan file:** `<silly-name>.md (when started)`
+- **Re-scope (2026-07-08 — see §9 fifty-fifth Forks entry):** the "Strict UndoManager Plumbing" audit half of the locked spec below moved to the new **QA-UndoCoverage** batch (runs immediately before this one); QA-DirtyFlag keeps the TransactionTracker / transaction-pointer system + dynamic dirty evaluation, built on that completed plumbing.  Original spec text below preserved as written.
 - Items: refactor BaySickDAW's project dirty state tracking from the current "anything touched since load" model to a transaction-pointer system mimicking major DAWs.  Origin: surfaced 2026-05-23 mid-QA-Eg-Task-3 testing — clicking a solo button and unclicking it marks the project dirty even though net state matches the saved file.  Verified by code-read: `ApvtsDirtyTracker` (`Source/Standalone/ApvtsDirtyTracker.h:39-42`) is a `ValueTree::Listener` that fires `onAny` on every property write regardless of old-vs-new equality; `ProjectManager::markDirty` (`Source/ProjectManager.cpp:98-102`) sets `mDirty=true` unconditionally.  The flag tracks "anything touched since load" — NOT "state differs from file."  See §9 thirty-second Forks entry.
 - Scope (Jeff's verbatim spec, locked 2026-05-23):
 
@@ -1877,7 +1913,7 @@ needed to find what you should pull up to review the work.
 
 - Risk: **medium-high** — every `ValueTree::setProperty` call site touched (codebase-wide audit); every custom UI component that mutates parameters reviewed for `ParameterAttachment` use or explicit `beginNewTransaction()` call; the `ApvtsDirtyTracker` listener model is removed entirely.  Worst case: a state-mutation site missed by the audit silently fails to register undo + the dirty flag wrongly clears on Ctrl+Z (would be caught by an explicit verify of every page's state-mutation surface).
 - Dependencies: should land **AFTER every preceding Phase 1-5 batch that adds state-mutation sites** — codebase-wide audit naturally covers QA-ProjectSave's new save/load + every preceding batch's UI/audio state-mutation surface; running this batch earlier would force a re-audit every time a new state-mutation site landed.
-- Sequencing: **at the end of the Phase 1-5 chain, after QA-ProjectSave** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; see §6 arrow + §9 thirty-second Forks entry).  Slot rationale per Jeff: orthogonal to QA-ProjectSave (DirtyFlag is a control-flow change — UndoManager-plumbing audit; ProjectSave is a data-layer change — XML format + sample retention); DirtyFlag-after-ProjectSave means its codebase-wide audit naturally covers ProjectSave's new save/load code (the `savedUndoStep = currentUndoStep` sync point lives at `ProjectManager::save()` which ProjectSave touches).
+- Sequencing: **at the end of the Phase 1-5 chain, after QA-UndoCoverage** (Jeff's confirmed slot per `feedback_slot_placement_is_spec_call.md`; re-pointed 2026-07-08 when QA-UndoCoverage inserted between it and QA-ProjectSave — see §9 fifty-fifth Forks entry; see §6 arrow + §9 thirty-second Forks entry).  Slot rationale per Jeff: orthogonal to QA-ProjectSave (DirtyFlag is a control-flow change — UndoManager-plumbing audit; ProjectSave is a data-layer change — XML format + sample retention); DirtyFlag-after-ProjectSave means its codebase-wide audit naturally covers ProjectSave's new save/load code (the `savedUndoStep = currentUndoStep` sync point lives at `ProjectManager::save()` which ProjectSave touches).
 - Effort: large (~10-16 hours; codebase audit of `setProperty(id, val, nullptr)` call sites ~3-5 hr, APVTS constructor verify + custom-UI-component review ~2-3 hr, `TransactionTracker` implementation + Undo/Redo command wrappers ~2-3 hr, UI header re-wire to observe dynamic evaluation ~1-2 hr, verify ~2-3 hr across every page's state-mutation surface).
 - **Bucket:** Cross-cutting Infrastructure, System Pages, UI / L&F / Theming
 - Verify (own plan file will detail): clicking a state-mutation control + reverting to original net state leaves the project clean (no dirty asterisk); Ctrl+Z to the exact state of the last save clears the dirty asterisk; a new edit after Ctrl+Z'ing past `savedUndoStep` correctly destroys the saved future (`savedUndoStep = -1`); every page's state mutations participate in undo correctly; every `setProperty(id, val, nullptr)` call site rewritten or explicitly justified; no `ApvtsDirtyTracker` `onAny` regressions (the listener is gone); UI header observes `currentUndoStep != savedUndoStep` dynamically; saves correctly sync the pointer.
@@ -2065,12 +2101,23 @@ These four batches were planned in the original `lucky-discovering-tiger` Phase 
 - Effort: medium-large (~10-20 hours).
 - Why this slot: factory presets + templates ship with the installer.
 
+#### **QA-LegalReview: Full Legal Review — licenses + trademarks + content clearance** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry)*
+**Plan file:** TBD (written when the batch starts).
+- Items: nothing shipped in code, comments, UI strings, assets, presets, templates, manuals, or the installer fails legal standards (Jeff request 2026-07-08 at bulk-run plan review).
+- Scope: `/audit-licenses` sweep (vendored libs, fonts incl. the TTF embed, sample packs, IR/asset attribution, EULA text); tree-wide brand/trademark sweep of USER-FACING strings + asset/preset/template names + manual text via semantic agent sweep (keyword grep misses cases like UREI); comment check verifies factual modeled-product references stay within nominative fair use per the standing no-brand-names rule (comments MAY factually reference modeled gear — the review confirms compliance, it does NOT mass-scrub).  Fix everything found.  Sweep depth + comment-standard confirm = marathon docket item 20 (`Batch Plans/swift-stampeding-caribou.md`).
+- Risk: low — review + targeted fixes.
+- Dependencies: QA-Manuals + QA-Templates (their content must exist to be reviewed).
+- Sequencing: **immediately after QA-Templates, before QA-Installer** (Jeff-approved slot via the bulk-run plan approval 2026-07-08; rationale: the installer only ever bundles cleared content; quick re-check of any late additions at ship).  See §6 Phase 7 arrow + §9 fifty-fifth Forks entry.
+- Effort: small-medium (~4-8 hours with agents).
+- **Bucket:** Other / Platform / Deferred, Meta, UI / L&F / Theming
+- Verify: license manifest clean (no incompatible or unattributed dependency/asset); brand sweep returns zero user-facing trademark hits; installer bundle contains only cleared content.
+
 #### **QA-Installer: NSIS Installer + TTF embed** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** TBD.
 - Items: LDT-178 + LDT-420 (NSIS Installer with sample-package downloads — `vibedaw_installer.nsi`, 11 sample packs from GitHub) + **LDT-173** (5E Font & Asset Bundling — embed TTF in `BaySickDAWAssets` BinaryData so VibeLAF font choices render correctly on clean Windows installs without relying on system fonts) + **`Resources/` runtime DSP assets** (folded in 2026-07-02 at QA-EffectsReview close via Rule 3 — see §9 fifty-second Forks entry): the cassette-tape IR + hiss set (`Resources/Tape/…`, Task 7), the two acoustic-pedal IRs (`Resources/Acoustic IRs/…`, Task 9), and the acoustic-preamp IR overrides — every WAV the effect engines load from `<exe-dir>/Resources/…` at runtime.
 - Scope: build the installer; bundle TTFs alongside existing PNG/SVG assets; **bundle the `Resources/` runtime-asset tree next to the exe** (the QA-EffectsReview CMake POST_BUILD `copy_directory` only stages these for DEV builds — the shipping installer is a separate mechanism, so a clean-machine install currently ships without them and the effects fall back to synthetic/identity substitutes); configure sample-pack download UI; update VibeDAW references to BaySickDAW; verify clean-machine install produces functional shipping bundle **incl. the Resources/ WAVs**.
 - Risk: medium. Installer build = first time touching NSIS for this project; bundling decisions affect download size + first-run experience.
-- Dependencies: QA-Manuals + QA-Templates (installer ships them).
+- Dependencies: QA-Manuals + QA-Templates (installer ships them) + QA-LegalReview (inserted 2026-07-08 — content cleared before bundling; see §9 fifty-fifth Forks entry).
 - Effort: medium-large (~10-15 hours).
 - Why this slot: installer last; everything ships through it.
 
@@ -2128,9 +2175,9 @@ records the same set so cross-doc grep stays consistent.
 
 **Bug-fix phases (1-5):**
 ```
-QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-Rules*********************************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-ClipPlayback************************************ → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
+QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-Rules*********************************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-ClipPlayback************************************ → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-TransportDisplay************************************* → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
-   → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-DirtyFlag*******************
+   → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-ApvtsAutomation************************************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-UndoCoverage*************************************** → QA-DirtyFlag*******************
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -2660,16 +2707,56 @@ Slotted **immediately after QA-CutSelfReview, before QA-Chords** (Jeff
 Snap-ON strict compliance + octave-collision resolver).  Slotted **immediately
 after QA-UICleanup, before QA-TempoMap** (Jeff 2026-06-05 — last of the four).
 Bucket: System Pages.  See §9 forty-ninth Forks entry.
+*(Re-pointed 2026-07-08: QA-TransportDisplay now sits between QA-UICleanup and
+QA-Chords — fifty-fifth Forks entry.)*
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-TransportDisplay**
+inserted 2026-07-08 at bulk-run plan approval — transport-bar playback-position
+readout (time / bars:beats click-toggle, live in song + pattern modes; reads the
+QA-Ed clock via `deriveBeat`; 40px bar must not grow).  Slotted **immediately
+after QA-UICleanup, before QA-Chords** (slot delegated to Claude by Jeff
+2026-07-08 — first batch of the bulk run; verification aid for everything after
+it).  Bucket: UI / L&F / Theming, Cross-cutting Infrastructure.  See §9
+fifty-fifth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-ApvtsAutomation**
+inserted 2026-07-08 at bulk-run plan approval — full APVTS + automation coverage
+review across every editor/panel; superset of QA-L's BLU-378/379/492 (migration
+pending marathon confirm); BLU-492 = PRESET-BREAK, must precede the preset walk +
+QA-Templates.  Slotted **immediately after QA-NativeDialogs, before QA-Verify**
+(Jeff-approved via bulk-run plan approval).  Bucket: Cross-cutting Infrastructure,
+UI / L&F / Theming.  See §9 fifty-fifth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-UndoCoverage**
+inserted 2026-07-08 at bulk-run plan approval — app-wide undo-history coverage
+audit + gap wiring (the "Strict UndoManager Plumbing" half promoted out of
+QA-DirtyFlag, which re-scopes to the transaction-pointer system on top).
+Slotted **immediately after QA-ProjectSave, before QA-DirtyFlag** (Jeff-approved
+via bulk-run plan approval).  Bucket: Cross-cutting Infrastructure, System
+Pages, UI / L&F / Theming.  See §9 fifty-fifth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-LegalReview**
+inserted 2026-07-08 at bulk-run plan approval — full legal review (licenses /
+trademark sweep of user-facing strings + assets + manuals / nominative-fair-use
+comment check) before anything bundles.  Slotted **immediately after
+QA-Templates, before QA-Installer** in Phase 7 (Jeff-approved via bulk-run plan
+approval).  Bucket: Other / Platform / Deferred, Meta, UI / L&F / Theming.  See
+§9 fifty-fifth Forks entry.
 
 **Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
 ```
-QA-Manuals****  →  QA-Templates****  →  QA-Installer****  →  QA-Updater*****  →  QA-Framework****
+QA-Manuals****  →  QA-Templates****  →  QA-LegalReview****************************************  →  QA-Installer****  →  QA-Updater*****  →  QA-Framework****
 ```
 
 Four added 2026-05-08 at QA-Inventory close + one (QA-Updater) added
-2026-05-08 via user spec call. **QA-Manuals** — the beginner manual +
+2026-05-08 via user spec call + one (QA-LegalReview) added 2026-07-08
+at bulk-run plan approval (fifty-fifth Forks entry). **QA-Manuals** —
+the beginner manual +
 in-app help screens (LDT-218, LDT-219, etc.). **QA-Templates** — factory
-project templates / starter packs (LDT-220, LDT-221). **QA-Installer**
+project templates / starter packs (LDT-220, LDT-221). **QA-LegalReview**
+— full legal clearance sweep (licenses + user-facing trademark/brand
+sweep + nominative-fair-use comment check) so the installer bundles
+only cleared content. **QA-Installer**
 — Windows installer build with embedded TTF fonts (LDT-173) and licence /
 EULA flow. **QA-Updater** — WinSparkle auto-update integration with
 GitHub Releases as the appcast source, once-per-launch + manual check,
@@ -5669,3 +5756,27 @@ The initial "1/8-note-late" report was diagnosed to **TV audio output latency** 
 - `Plans & Specs/Main Plan.md` — §5 QA-ClipPlayback CLOSED; §9 this entry + the fifty-third close-routing (no §6 change — the arrow has no closed/active marker).
 - `Plans & Specs/Implemented Work Log.md` — the QA-ClipPlayback close entry.
 - `Plans & Specs/Batch Plans/memoized-inventing-flask.md` + `Running Notes/memoized-inventing-flask.md` — paired plan + notes (already present).
+
+### 2026-07-08 — Bulk-run expedite plan approved; 4 new batches inserted (QA-TransportDisplay / QA-ApvtsAutomation / QA-UndoCoverage / QA-LegalReview) (fifty-fifth Forks entry)
+
+**What happened:** Jeff asked to expedite everything past QA-UICleanup (the per-batch cadence — ~2.2 days/batch over 27 closed batches — projected ~11 more weeks for the ~36 remaining).  A full Main Plan read + 3-agent source-verification review produced the **bulk-run expedite plan**, approved by Jeff 2026-07-08 with a full folder backup + origin push in place: [`Plans & Specs/Batch Plans/swift-stampeding-caribou.md`](Batch Plans/swift-stampeding-caribou.md) is the governing run plan.  Mode summary (full detail + locked structural picks R1-R5 live in the run plan; the doc-discipline adjustments take effect at run open, which is gated on QA-UICleanup close): batches execute in §6 order grouped into checkpoint groups (G1-G6) with per-batch build+commit but NO per-task verify cycles; all functional verification moves to a sectioned Master Test Plan (`Plans & Specs/Test Plans/v1-master-test-plan.md`, created at run pre-flight); a batch's Work Log entry is drafted at code-complete and HELD; its §5 `STATUS:CLOSED` + close commit apply only when its test section passes; `/review-batch` runs once per group; full §0 plan files are written + approved per group just-in-time; smoke test at every group boundary + ear-checks in G1/G2; **every spec call discovered mid-run gets asked in the moment — never self-decided** (Jeff's explicit lock at plan review).
+
+**Source-verification findings folded into the run plan** (details there): QA-J's headline DSP-06 restructure already shipped via QA-MultiBlockHazard (QA-J re-scope to verify+residuals pending marathon confirm); QA-Ec ~half-absorbed (Stretch-follow works; Resample-follow / Rubber-Band stub / import default / fit-to-grid remain); QA-Fb's dual dry/wet tap already exists (bleed root-located in the WET tap's FilePlay window); QA-NativeDialogs ~90% native already (ProjectBrowserWindow is the sole conversion target); QA-G/QA-H/QA-VibeSlider shrunk; QA-TempoMap confirmed FULLY open.
+
+**Four new batches inserted** (Jeff's requests at plan review 2026-07-08; §5 dockets + §6 arrow/footnotes added this entry):
+
+1. **QA-TransportDisplay** — transport-bar playback-position readout (time / bars:beats click-toggle, song + pattern modes, reads the QA-Ed clock via `deriveBeat`, 96 PPQ beats format, 40px bar no-expand).  Slot: **immediately after QA-UICleanup, before QA-Chords** — first batch of the bulk run; slot explicitly DELEGATED to Claude by Jeff (recorded exception to `feedback_slot_placement_is_spec_call.md`); rationale: verification aid for the G1 transport work + the whole test campaign.  Arrow marker: 37 asterisks.
+2. **QA-ApvtsAutomation** — full APVTS + automation coverage review (every user-changeable control bound + automatable; superset of QA-L's BLU-378/379/492 — migration out of QA-L pending marathon confirm, docket 18; BLU-492 = PRESET-BREAK so this precedes the preset walk + QA-Templates).  Slot: **immediately after QA-NativeDialogs, before QA-Verify** (Jeff-approved via the plan).  Arrow marker: 38 asterisks.
+3. **QA-UndoCoverage** — app-wide undo-history coverage audit + gap wiring; the "Strict UndoManager Plumbing" half of QA-DirtyFlag's locked spec promoted to its own batch; **QA-DirtyFlag re-scoped in place** to the TransactionTracker / transaction-pointer system on top (inline re-scope note added to its §5 entry; original spec text preserved).  Slot: **immediately after QA-ProjectSave, before QA-DirtyFlag** (Jeff-approved via the plan).  Arrow marker: 39 asterisks.
+4. **QA-LegalReview** — full legal review at the end (licenses via `/audit-licenses`, user-facing trademark/brand sweep incl. assets + presets + templates + manuals, nominative-fair-use comment-standard verification — confirms compliance, no mass-scrub).  Slot: **Phase 7, immediately after QA-Templates, before QA-Installer** (Jeff-approved via the plan) so the installer bundles only cleared content.  Arrow marker: 40 asterisks.
+
+**Inline back-refs:**
+- §5 — four NEW dockets inserted (QA-TransportDisplay before QA-Chords; QA-ApvtsAutomation before QA-Verify; QA-UndoCoverage before QA-DirtyFlag; QA-LegalReview before QA-Installer); QA-Chords + QA-NativeDialogs + QA-DirtyFlag Sequencing lines re-pointed; QA-DirtyFlag gains the re-scope note; QA-Installer Dependencies gains QA-LegalReview.  QA-L intentionally UNCHANGED pending the docket-18 migration confirm.
+- §6 — phases-1-5 arrow gains QA-TransportDisplay (37) / QA-ApvtsAutomation (38) / QA-UndoCoverage (39); Phase 7 arrow gains QA-LegalReview (40); four footnotes added after the QA-Chords footnote + QA-Chords footnote re-point annotation + Phase 7 paragraph extended.
+- §9 — this entry (fifty-fifth).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 four new dockets + three re-points + one re-scope note + Installer deps; §6 arrows + footnotes; §9 this entry.
+- `Plans & Specs/Batch Plans/swift-stampeding-caribou.md` — the governing bulk-run plan (mirrored + home copy deleted 2026-07-08).
+- `Plans & Specs/Test Plans/v1-master-test-plan.md` — created at run pre-flight (not yet).
+- Per-batch plan + running-notes files — created per checkpoint group during the run (not yet).
