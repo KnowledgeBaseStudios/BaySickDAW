@@ -118,5 +118,16 @@ Items 3+5+6+7 shipped as ONE commit (SC14=B), built in the 4 mapped stages. Work
 - **Diagnostics:** none added this task — nothing for the Diagnostic Instrumentation Catalog.
 - **Files:** `PluginProcessor.cpp`, `Standalone/StandaloneEditor.cpp`, `Standalone/PianoRollPage.h/.cpp`, `Standalone/PianoRoll.h/.cpp`, `Standalone/DrumKitGrid.h/.cpp`.
 - **VERIFIED (Debug + Release, all 8 scenarios pass):** (1) wrench button gone from both toolbars; (2) Tools menu consolidated, tool-selectors gone; (3) Edit menus stripped (no Quantize submenu / no Transpose on piano-roll); (4) Quantize Settings sets the resolution without moving notes, Quantize then honors it; (5) Transpose ASCII shortcuts show + the real keys still work; (6) drum-kit Tools menu = piano-roll minus Arpeggiate / Generate Chords / Transpose; (7) the shared quantize value tracks cross-editor (set it on the roll -> drum-kit menu radio follows); (8) persists per-project, fresh session defaults to 1/4.
-- **DONE — committed with the Task 4 source commit (hash TBD).**
+- **DONE — committed as `104875f` (Task 4 source + this notes entry).**
 - **Next:** Task 5 (batch close) — `/draft-doc batch-close` -> apply to Implemented Work Log -> `/review-batch QA-UICleanup` -> fix any BLOCKER / NEEDS-FIX in-batch (fold everything; Jeff: no routing out) -> Main Plan §5 QA-UICleanup `STATUS: CLOSED` + "Next batch: QA-Chords" -> close commit.
+
+## 2026-07-08 — Task 5 — batch CLOSED
+
+- `/draft-doc batch-close` -> compiled the QA-UICleanup Implemented Work Log entry (header 2026-07-08 15:04 PT); applied verbatim via Edit (parent filled the timestamp + `/review-batch` outcome + commit placeholder).
+- `/review-batch QA-UICleanup` (`batch-code-reviewer`) -> **READY-TO-COMMIT**: 0 BLOCKER, 0 NEEDS-FIX, 1 NIT. Verified clean: menu-ID integrity (no collisions, every id handled both ways), the `Unified_QuantizeDiv` chain (byte-for-byte clone of the verified snap chain), Task 1 native-dialog button mapping (0=Save / 1=Don't-Save / 2=Cancel, Escape/X -> safe abort), ASCII-only, dead-code hygiene (0 refs to the removed symbols), SharedUI knob double-click fix undisturbed.
+- **NIT FIXED in the close commit (not deferred):** a Rule-6 keeper comment in `StandaloneEditor.cpp` (Task 1 quit dialog) read "centered + non-draggable" — corrected to reflect the SC1 finding (native TaskDialog is title-bar movable; native only drops the AlertWindow click-body drag). A factually-wrong keeper comment gets fixed, not shipped.
+- **`getActiveTool`** intentional keep confirmed (reviewer did not flag it as a finding).
+- **Routing:** NONE out of batch (Jeff's standing decision — a separate grouped-batch set covers the rest). No §9 Forks entry; no §6 arrow change (CLOSED is tracked in §5).
+- **Next-batch correction:** the §6 arrow was re-pointed 2026-07-08 by the bulk-run insertion (`387f02f` / fifty-fifth Forks entry) so **QA-TransportDisplay** now sits between QA-UICleanup and QA-Chords. Main Plan §5 QA-UICleanup docket -> **STATUS: CLOSED (2026-07-08)** + Work Log pointer + **Next batch: QA-TransportDisplay** (supersedes the stale "QA-Chords" in the Task 4 entry's Next line above, which predated the re-sequence).
+- **Housekeeping:** `Documents/BaySickDAW/qa_rename_trace.txt` (Task 2 diagnostic file) can be deleted.
+- **Batch complete.** Close commit: `<pending Jeff approval>`.

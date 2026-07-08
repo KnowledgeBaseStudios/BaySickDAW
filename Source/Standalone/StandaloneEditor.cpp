@@ -9222,9 +9222,11 @@ void StandaloneEditor::confirmDiscardChanges (std::function<void()> continuation
         ? "Save changes to '" + mProjectManager->getCurrentName() + "' first?"
         : juce::String ("You have unsaved changes.  Save them first?");
 
-    // Native TaskDialog: centered + non-draggable (juce::AlertWindow drags itself via
-    // its own ComponentDragger).  showAsync uses plainIndex result mapping, so button
-    // order gives 0 = Save, 1 = Don't Save, 2 = Cancel.
+    // Native TaskDialog: centered, and it drops the old juce::AlertWindow's
+    // click-anywhere-body drag (AlertWindow moves itself via its own ComponentDragger).
+    // The native dialog is still title-bar movable -- Windows exposes no flag to pin it.
+    // showAsync uses plainIndex result mapping, so button order gives
+    // 0 = Save, 1 = Don't Save, 2 = Cancel.
     juce::NativeMessageBox::showAsync (
         juce::MessageBoxOptions{}
             .withIconType (juce::MessageBoxIconType::WarningIcon)
