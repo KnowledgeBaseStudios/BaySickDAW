@@ -1216,10 +1216,11 @@ needed to find what you should pull up to review the work.
 - **Bucket:** System Pages
 
 #### **QA-UICleanup: Piano-Roll + Misc UI Cleanup** *(NEW — inserted 2026-06-05 at QA-Ee close)*
+- **STATUS: OPEN (2026-07-08).**  Batch plan written + approved.  **Plan file:** [`Plans & Specs/Batch Plans/jolly-meandering-teapot.md`](Batch Plans/jolly-meandering-teapot.md).
 - Items: (1) quit save-prompt dialog is draggable -> fixed centered modal; (2) Layers don't auto-name from the loaded patch (tab / picker / name-tag); (3) fold the Piano-Roll Tools BUTTON's advanced tools (Quantize/Strum/Glue/Chop/Randomize/Articulate) into the menu-bar "Tools" entry + drop that menu's duplicate per-tool selectors + remove the wrench button; (4) snap button -> Builder-style snap DROPDOWN on BOTH the engine-roll + Drum-Kit toolbars + move the Drum-Kit kit button to the bar's right end; (5) "Quantize Settings" — move the Edit-menu Quantize submenu (1/4..1/32) into the Tools menu, renamed, as the quantize-RESOLUTION setting (no longer quantizing on the spot); (6) Tools-menu "Quantize" action honors whatever Quantize Settings is set to; (7) the transpose menu — items render non-ASCII arrow glyphs; the two "Transpose Octave" entries show the wrong shortcut vs the Key Binds window (which lists Ctrl+Up/Down); move all four transpose options (Up / Down / Up Octave / Down Octave) from the Edit menu into the Tools menu.
 - Scope: piano-roll menu + toolbar consolidation; no DSP.
 - Sequencing: **immediately after QA-CutSelfReview, before QA-Chords** (Jeff 2026-06-05; see §6 arrow + §9 forty-ninth Forks entry).
-- Effort: TBD at batch open.
+- Effort: ~7-10h estimated at batch open (Task 4 menu consolidation is the heavy one; Task 2 unknown-until-diagnosed).
 - **Bucket:** UI / L&F / Theming
 
 #### **QA-Chords: Chord Stamp Stretch + Scale-Aware Dual-Mode** *(NEW — inserted 2026-06-05 at QA-Ee close)*
