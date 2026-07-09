@@ -222,5 +222,73 @@ Sections, in this shape:
 
 ## Verification
 1. **Pre-flight verifiable:** marathon table locked in this plan; test-plan skeleton + §0 line + §9 entry applied; tag pushed.
-2. **G1 = go/no-go:** 4 batches coded/built/committed, group review clean, smoke + ear-check pass. If G1's smoke fails badly or the cadence doesn't feel right, stop and reassess — the pre-bulk-run tag + backup make abort cheap.
+2. **G1 = go/no-go:** 5 batches coded/built/committed ("4" corrected 2026-07-08 — the line predated QA-TransportDisplay's insertion), group review clean, smoke + ear-check pass. If G1's smoke fails badly or the cadence doesn't feel right, stop and reassess — the pre-bulk-run tag + backup make abort cheap.
 3. **Run success =** every §B section passed + closed, §C ledger cleared, §D-§G passed, Phase 6 clean 2nd build, QA-RC-lite green — at which point the Main Plan shows all V1 batches CLOSED and Phase 7 ships the release artifacts.
+
+## Marathon answers — LOCKED 2026-07-08 (pre-flight, first bulk-run session)
+
+Walked in full with Jeff in one sitting (chat, numbered options, no recommendations) plus three
+follow-up rounds. These are the working picks, NOT immutable law: any answer whose premise later
+gets invalidated comes back to Jeff as a fresh call (the ask-always lock). Sub-details explicitly
+deferred are in the "Deferred to group start" ledger below. §5 scope updates implied by these
+answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
+
+| # | Call | Locked answer |
+|---|------|---------------|
+| 1 | QA-J collapse | Collapse to **QA-J-Verify** (campaign section: ear-verify DSP-06 + the §C ledger). The two residuals (stretch-path unmute staleness; UI-thread map growth) get fixed as small code items in **G3**. |
+| 2a | QA-Ec' remainder | Confirmed: Resample-follow, RB-stub replacement, import default, fit-to-grid, outSamples guard. PLUS block-RESIZE re-fit is core scope — fitRatio derives from block length, so resizing a block re-fits playback (this is where "stretch the block and it changes what plays" lives; BUILD-06 (QA-H) + QA-Fb' clip-resize propagation are the downstream fixes, expected to shrink to verification once Ec' lands). |
+| 2b | Resample/Stretch model | DUAL-TRIGGER on both tempo change AND block resize. Resample = varispeed (rate + pitch shift together). Stretch = time-stretch, pitch locked. |
+| 2c | Fit-to-grid | Automatic at import — clip block sizes to nearest whole bar count, ratio applied. (Deliberate pairing with the QA-TransportDisplay readout: displayed position/length = real length.) |
+| 2d | Import BPM default | Content-length derivation — nearest whole bar count at project BPM; replaces hardcoded 120. |
+| 3a | QA-Fb' remainder | Confirmed: WET-bleed gate, conditional-WET, channel-composite renderer, clip-resize propagation, dirty-flag investigation. |
+| 3b | Bleed gate behavior | New take = live input ONLY; prior-take playback never bleeds in. No bounce toggle. |
+| 4a | BUILD-05 / S key | S already works (cycles Standard/Slide/Portamento; converts selections; silently arms the new-note type with no selection — that invisibility was the "dead" report). Spec: visible active-note-type indicator + S converts selections; exact interaction (no-selection behavior, indicator click) pinned at G3/QA-H plan. D-8 fold (below) covers Note Properties + verifying slide/porta DSP audibly works. |
+| 4b | Ghost notes | Feed from ALL instrument tabs project-wide, each ghost tinted with its source tab's piano-roll color shade. |
+| 4c | Humanize | Replicate FL Studio's Humanize dialog — same adjustable ranges + same presets. Reference capture (Jeff's FL screenshot) at G3 start per the exact-reference-replica rule. |
+| 4d | MIDI-02 | Modifier + mouse-drag across selected notes scrubs the active control-lane value up/down (FL-style gesture). Detail at G3 plan. |
+| 5 | QA-G tracks | Keep 50 stock rows. NEW scope: track-row right-click menu — Insert track above / Group with above (visual signifier) / Remove from group / Color group. Groups are VISUAL-ONLY for V1 (no linked behavior). |
+| 6 | QA-NativeDialogs' scope | Audit runs from the user's seat: EVERY file/project/template/preset pick surface converts to native, whatever widget currently draws it (the "17 sites already native" finding covered only FileChooser-based surfaces). 6a: Open Project browser -> native. 6b: fixed per-context default folders. New-from-Template: stays QA-ProjectSave's locked submenu design (no file dialog there). |
+| 7a | Export formats | WAV + OGG + MP3 (vendor LAME; the new license surface routes to QA-LegalReview). |
+| 7b | Export options | Minimal + quality setting for lossy: format / bit depth / SR / tail / quality. |
+| 7c | Bundle shape | Both offered: single .zip AND plain-folder export. |
+| 8a | Sample retention | Source-aware hybrid (library = reference, volatile = copy) + explicit "Pack project" action — for ALL project saves; templates inherit. |
+| 8b | Migration | Existing per-project copies left as-is; the hybrid applies going forward. |
+| 9a | Dirty audit filter | Live-state mutations only (~PatternManager 105 + live UI writes); detached-tree preset serialization stays nullptr. |
+| 9b | Undo authority | Processor-owned UndoManager, handed to the APVTS at construction; StandaloneEditor's manager retires in favor of it; param changes become undoable + count toward the dirty pointer. (Also answers docket 19's authority half.) |
+| 10a | DSP-08 hardware | Tascam Model 24 available during the campaign — hardware test lands there. |
+| 10b | DSP-11 | IN, feasibility-gated: build live ASIO buffer-size change + diagnose the prior crash as part of it; if the driver layer provably can't do it safely, surface evidence and fall back to the documented workaround (Jeff decides). |
+| 11 | QA-TempoMap model | Ruler flags/markers = STEPPED tempo-change points — the sample-indexed map stays a stepped list. RAMPS come via tempo AUTOMATION (the existing global_tempo path), not the map. Marker <-> automation precedence pinned at G1 plan write. |
+| 12a | AlertWindow migration | Migrate-as-sweep in QA-Cleanup-1. |
+| 12b | /audit-security agent | Build it pre-RC-lite (Tier-1 sweep runs before V1); Tier-2 once QA-Updater's network code exists. |
+| 12c | Crash reporting | V1 = OS-native WER + per-release .pdb archival; no third-party SDK / symbol server. |
+| 12d | DSP meter cap | 2.0 (200%) for V1 Release (applied in Phase 6). |
+| 12e | MT diagnostic | Compile-flag gate (#if BAYSICKDAW_MT_DIAGNOSTIC) — out of V1 Release builds. |
+| 12f | HarmlessLAF zero-px | Investigate root cause at QA-Audit as planned. |
+| 13a | Genre templates | Based on the on-disk preset style groups (verified: no Jazz/Rock group exists on disk); specific genre picks at QA-Templates open with /preset-gaps in hand. |
+| 13b | Factory presets | Existing presets' correctness = campaign §E (locked). QA-Templates authoring is gap-driven: /preset-gaps reports, Jeff decides what gets authored at batch open. |
+| 14 | D-1 + test cadence | D-1 = YES: draft Manuals/Framework during the campaign (all code done by then; campaign fixes fold into drafts). Group boundaries stay smoke + ear-check only (model as approved — full section walks happen once, in the campaign). |
+| 15 | Scope cuts | NONE — keep all. All 3 manuals ship at launch ("Manuals 2-3 post-release" struck — it was a run-plan lever candidate, never plan-of-record). |
+| 16 | Group composition | G1-G4 confirmed as laid out. |
+| 17a | Pattern-mode position | Pattern-relative (resets each loop pass). |
+| 17b | Beats format | bars:beats:ticks (96 PPQ). |
+| 17c | Time format | M:SS.mmm. |
+| 17d | Persistence | settings.xml (app-wide). |
+| 17e | Placement | Between the pattern dropdown and the ribbon; layout must respect the reserved ~40px keyboard-MIDI slot next to the metronome (D-4 fold below). |
+| 18 | QA-ApvtsAutomation | Confirmed: BLU-378/379/492 migrate OUT of QA-L into it; BLU-492 PRESET-BREAK accepted now (before factory presets are authored / the preset walk runs). |
+| 19 | UndoCoverage/DirtyFlag | Boundary confirmed (coverage = plumbing audit + wiring; DirtyFlag = transaction pointer on top). Authority = 9b. |
+| 20a | Comment standard | Nominative fair use verified, not mass-scrubbed: anything failing the legal standard gets scrubbed; compliant factual references stay. |
+| 20b | Sweep depth | Full semantic sweep over ALL user-facing content (UI strings + every asset/preset/template/kit name + complete manual text + installer/EULA). |
+
+### Marathon-discovered findings + scope changes (locked same sitting)
+
+- **Triage gap (2026-05-08 FSW triage):** Final Stretch Work Phase-D items **D-4** (Typing keyboard -> MIDI, Ctrl+T; only the reserved ~40px transport-bar slot next to the metronome ever shipped — GlobalTransportBar.cpp:200/:856), **D-6** (Riff Machine, Alt+E), and **D-8** (Note Properties dialog + slide/porta DSP fix) were never routed to Main Plan / Future State (name-grep verified across all plan docs; every Phase-D sibling is shipped or routed). Routing locked by Jeff: **D-4 -> QA-TransportDisplay (G1)** — that batch roughly doubles (~2-4h -> ~5-8h); **D-6 -> QA-H (G3)**; **D-8 -> QA-H (G3)**.
+- **Scope growth locked:** QA-G (+ the item-5 track right-click set), QA-Ec' (+ dual-trigger resize re-fit), QA-H (+ D-6 + D-8 + the 4a-4d specs), QA-TransportDisplay (+ D-4). QA-NativeDialogs' audit basis corrected (user-seat enumeration of ALL custom pick surfaces, not FileChooser-site count).
+- **QA-TempoMap** keeps the existing global_tempo automation path as the RAMP mechanism; the new map is stepped markers only.
+
+### Deferred to group start (the ask-in-the-moment ledger)
+
+| When | What |
+|------|------|
+| G1 plan write | D-4 sub-specs (key layout / octave range / velocity behavior); tempo marker <-> tempo-automation precedence |
+| G3 start | 4a exact S-key/indicator interaction; 4c FL Humanize reference capture (Jeff screenshot); D-6 Riff Machine spec; D-8 Note Properties spec |
+| G6 start (QA-Templates open) | 13a specific genre picks; 13b gap-fill decisions (with the /preset-gaps report) |

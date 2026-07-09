@@ -367,6 +367,12 @@ Current and approved subfolders:
   primary input when compiling the single Implemented Work Log entry.
   Established 2026-05-09 mid-QA-A after the running-notes home gap was
   flagged.
+- `Plans & Specs/Test Plans/` — sectioned verification campaign
+  documents (`v1-master-test-plan.md`, created 2026-07-08 at bulk-run
+  pre-flight).  §B sections are authored per batch at code-complete
+  during the bulk run and walked in the campaign; a batch's held Work
+  Log entry + §5 STATUS flip apply at its section pass (R2 — see
+  [`Batch Plans/swift-stampeding-caribou.md`](Batch Plans/swift-stampeding-caribou.md)).
 - (more subfolders added here as the need arises — decision logs,
   post-mortems, audit reports, etc.; document each new subfolder here
   when added so the structure stays discoverable).
@@ -1173,7 +1179,7 @@ needed to find what you should pull up to review the work.
 - Verify (own plan file will detail): the 10-label snap on each of Builder + PianoRoll + Record-Quantize produces correct tick-aligned positions; existing saved-project loads correctly migrate `startBeats * 96 → startTicks`; audio-clip playback in the post-migration state still plays from the right offset; MIDI recording with each of the 10 quantize values commits notes at the expected tick boundaries; triplet divisions don't drift on long projects.
 
 #### **QA-Rules: Four Standing Rules — Comment Policy / Communication / Technical Approach / Commit Brevity** *(NEW — inserted 2026-06-24)*
-- **STATUS: OPEN (2026-06-24).**  **Plan file:** [`Plans & Specs/Batch Plans/silent-pruning-heron.md`](Batch Plans/silent-pruning-heron.md).
+- **STATUS: CLOSED (2026-06-24; docket line flipped 2026-07-08 at bulk-run pre-flight — the close was logged same-day but this §5 line was never flipped).**  Rules 6-9 live in Main Plan §0 + CLAUDE.md + boilerplate + memory; conflicting commit/comment conventions reconciled.  Work Log entry: [`Implemented Work Log.md`](Implemented Work Log.md) 2026-06-24 18:48 PT.  **Next batch: QA-EffectsReview** (resumed at the committed checkpoint).  **Plan file:** [`Plans & Specs/Batch Plans/silent-pruning-heron.md`](Batch Plans/silent-pruning-heron.md).
 - Items: adds Main Plan §0 **Rules 6-9** — (6) **Comment Policy** (write only the six keeper categories: architectural why / RT-thread danger / DSP-domain refs / framework workarounds / magic-number calibration / thread-ownership; never narrate WHAT; clean non-conforming comments in edited regions as we go — NO retroactive strip); (7) **Communication Style** (direct, no cheerleading); (8) **Technical Approach** (challenge assumptions); (9) **Commit Brevity** (files-touched + base-level what only; full narrative lives in the in-repo docs; brief commits skip `/draft-commit`).
 - Scope: **docs + memory only — NO source, NO build.**  Main Plan §0 + CLAUDE.md + boilerplate + memory entries.  Rule 9 reconciles four conflicting commit/comment conventions (CLAUDE.md Git Commit Mechanics, §0 batch-lifecycle commit bullets, `feedback_commit_at_checkpoints`, `feedback_every_commit_via_draft_commit`) per the plan's Reconciliation Audit.
 - Sequencing: **immediately before QA-EffectsReview** (Jeff's confirmed slot 2026-06-24 per `feedback_slot_placement_is_spec_call.md` — QA-EffectsReview pauses at a committed checkpoint, QA-Rules lands, then QA-EffectsReview resumes under the new rules; see §6 arrow + §9 fifty-first Forks entry).
