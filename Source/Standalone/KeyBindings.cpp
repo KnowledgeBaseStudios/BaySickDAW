@@ -180,6 +180,12 @@ namespace
               "Toggle Slip/Stretch Editing",
               "Flips the Builder grid's Slip/Stretch dropdown between modes.  Slip: drag an Audio clip's left or right edge to expose pre-roll / trim leading or tail audio.  Stretch: drag an Audio clip's right edge to resize (time-stretching from the left edge ships in a later update).  Pattern and Automation blocks ignore this mode.",
               juce::KeyPress ('s', 0, 0) },
+
+            // ── Typing-keyboard MIDI (D-4, QA-TransportDisplay 2026-07-08) ──
+            { cmdToggleTypingKeyboard, Category::General,
+              "Toggle Typing Keyboard (MIDI)",
+              "Play the active tab's instrument with your computer keyboard. Bottom row Z-M is one octave (S D G H J are the black keys), top row Q-P is the octave above (number row black keys). Page Up / Page Down shift octaves. Notes record just like a hardware MIDI keyboard.",
+              juce::KeyPress ('T', juce::ModifierKeys::ctrlModifier, 0) },
         };
     }
 

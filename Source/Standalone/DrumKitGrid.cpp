@@ -1,4 +1,5 @@
 #include "DrumKitGrid.h"
+#include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
 #include <numeric>
 #include <algorithm>
 #include <map>
@@ -1094,6 +1095,11 @@ void DrumKitGrid::releaseAudition()
 // ─────────────────────────────────────────────────────────────────────────────
 bool DrumKitGrid::keyPressed(const KeyPress& key)
 {
+    // D-4: while typing-keyboard mode is on, mapped note keys (and the PgUp/
+    // PgDn octave shift) must bubble up to StandaloneEditor's converter
+    // instead of firing the single-letter tool shortcuts below.
+    if (TypingKeyboardMap::shouldBypassLocalKeys (key)) return false;
+
     const bool ctrl  = key.getModifiers().isCtrlDown();
     const bool shift = key.getModifiers().isShiftDown();
     const bool alt   = key.getModifiers().isAltDown();

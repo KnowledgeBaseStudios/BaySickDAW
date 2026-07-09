@@ -335,6 +335,42 @@ public:
     }
 };
 
+// D-4 (QA-TransportDisplay 2026-07-08): typing-keyboard MIDI toggle - a row of
+// piano keys, amber-lit while the mode is on.  Occupies the bar slot that was
+// reserved next to the metronome.  setClickingTogglesState stays OFF because
+// StandaloneEditor owns the mode state (Ctrl+T is the other entry point) and
+// pushes the visual back via GlobalTransportBar::setTypingKeyboardOn.
+class KeyboardMidiButton : public juce::Button
+{
+public:
+    KeyboardMidiButton() : juce::Button ("KeybMidi")
+    {
+        setMouseClickGrabsKeyboardFocus (false);
+        setClickingTogglesState (false);
+    }
+
+    void paintButton (juce::Graphics& g, bool highlighted, bool /*down*/) override
+    {
+        auto b = getLocalBounds().toFloat().reduced (1.0f);
+        const bool on = getToggleState();
+
+        g.setColour (on ? juce::Colour (0xff3A2F18)
+                        : (highlighted ? VC::Accent.brighter (0.15f) : VC::Accent));
+        g.fillRoundedRectangle (b, 4.0f);
+
+        auto keys = b.reduced (5.0f, 6.0f);
+        const float kw = keys.getWidth() / 4.0f;
+        g.setColour (on ? juce::Colour (0xffFFB030) : juce::Colours::white.withAlpha (0.75f));
+        for (int i = 0; i < 4; ++i)
+            g.fillRect (juce::Rectangle<float> (keys.getX() + i * kw, keys.getY(),
+                                                kw - 1.0f, keys.getHeight()));
+        g.setColour (juce::Colour (0xff141414));
+        for (int i = 1; i < 4; ++i)
+            g.fillRect (juce::Rectangle<float> (keys.getX() + i * kw - kw * 0.30f, keys.getY(),
+                                                kw * 0.55f, keys.getHeight() * 0.60f));
+    }
+};
+
 GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
     : mPlayHead(ph)
 {
@@ -384,6 +420,15 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
     // the matching default in `VibeSynthProcessor::mSongLoopMode`.
     mSongLoopBtn->setToggleState(true, juce::dontSendNotification);
     addAndMakeVisible(*mSongLoopBtn);
+
+    // D-4: typing-keyboard MIDI toggle in the reserved slot next to the metronome.
+    {
+        auto k = std::make_unique<KeyboardMidiButton>();
+        k->setTooltip ("Play notes with your computer keyboard (Ctrl+T)");
+        k->onClick = [this] { if (onTypingKeyboardToggle) onTypingKeyboardToggle(); };
+        addAndMakeVisible (*k);
+        mKeybMidiBtn.reset (k.release());
+    }
 
     mPlayBtn->setTooltip("Play  (Space)");
     mPauseBtn->setTooltip("Pause  (Space while playing)");
@@ -852,10 +897,12 @@ void GlobalTransportBar::resized()
     if (mSongLoopBtn) mSongLoopBtn->setBounds(b.removeFromLeft(28).reduced(1, 1));
     b.removeFromLeft(space);
     // 2026-04-26 (D-5 polish): button widths tightened around the icon glyphs
-    // (metronome 30, arrow 18).  kControlsWidth stays at 520 - the saved
-    // ~40 px reserves space for the keyboard-MIDI button slot (D-4).
+    // (metronome 30, arrow 18).  kControlsWidth stays at 520 - the once-
+    // reserved ~40 px now holds the D-4 typing-keyboard toggle (2026-07-08).
     mMetronomeBtn->setBounds(b.removeFromLeft(30).reduced(1, 1));
     if (mMetroArrowBtn) mMetroArrowBtn->setBounds(b.removeFromLeft(18).reduced(1, 1));
+    b.removeFromLeft(4);
+    if (mKeybMidiBtn) mKeybMidiBtn->setBounds(b.removeFromLeft(32).reduced(1, 1));
     b.removeFromLeft(12);
 
     // CPU / DSP / MEM / LAT 2x2 grid (far right). Width sized for the longest
@@ -873,4 +920,87 @@ void GlobalTransportBar::setSongMode(bool song)
     mSongModeBtn->setToggleState(song, juce::dontSendNotification);
     mSongModeBtn->setButtonText(song ? "SONG" : "PATTERN");
     if (onSongModeChanged) onSongModeChanged(song);
+}
+
+void GlobalTransportBar::setTypingKeyboardOn (bool on)
+{
+    if (mKeybMidiBtn && mKeybMidiBtn->getToggleState() != on)
+    {
+        mKeybMidiBtn->setToggleState (on, juce::dontSendNotification);
+        mKeybMidiBtn->repaint();
+    }
+}
+
+// ── TransportPositionReadout ─────────────────────────────────────────────────
+TransportPositionReadout::TransportPositionReadout()
+{
+    setTooltip ("Playback position - click to switch between bars:beats:ticks and time");
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    startTimerHz (30);
+}
+
+void TransportPositionReadout::setShowTime (bool showTime)
+{
+    if (mShowTime == showTime) return;
+    mShowTime = showTime;
+    mText = buildText();
+    repaint();
+}
+
+void TransportPositionReadout::mouseDown (const juce::MouseEvent&)
+{
+    mShowTime = ! mShowTime;
+    mText = buildText();
+    repaint();
+    if (onDisplayModeChanged) onDisplayModeChanged (mShowTime);
+}
+
+void TransportPositionReadout::timerCallback()
+{
+    auto s = buildText();
+    if (s != mText) { mText = s; repaint(); }
+}
+
+juce::String TransportPositionReadout::buildText() const
+{
+    if (mShowTime)
+    {
+        const double secs = onGetTimeSeconds ? juce::jmax (0.0, onGetTimeSeconds()) : 0.0;
+        int mins = (int) (secs / 60.0);
+        int ms   = (int) juce::roundToInt ((secs - mins * 60.0) * 1000.0);
+        int s    = ms / 1000;
+        ms %= 1000;
+        if (s >= 60) { s -= 60; ++mins; }
+        return juce::String (mins) + ":" + juce::String (s).paddedLeft ('0', 2)
+             + "." + juce::String (ms).paddedLeft ('0', 3);
+    }
+
+    const double beat = onGetBeat ? juce::jmax (0.0, onGetBeat()) : 0.0;
+    // Song mode counts uniform 4 beats/bar (the grid playback uses everywhere);
+    // pattern mode counts the pattern's tsNum so the bar rollover lands on the
+    // metronome accent.  Display is 1-based (bar 1 : beat 1 : tick 00 at start).
+    double bpb = 4.0;
+    if (onGetSongMode && ! onGetSongMode() && onGetPatternTsNum)
+        bpb = (double) juce::jmax (1, onGetPatternTsNum());
+
+    // Quantize to ticks BEFORE splitting so 95.99 ticks can't render as tick 96.
+    const juce::int64 totalTicks  = (juce::int64) std::llround (beat * 96.0);
+    const juce::int64 ticksPerBar = juce::jmax ((juce::int64) 1, (juce::int64) std::llround (bpb * 96.0));
+    const juce::int64 bar   = totalTicks / ticksPerBar;
+    const juce::int64 inBar = totalTicks - bar * ticksPerBar;
+    return juce::String (bar + 1) + ":" + juce::String ((int) (inBar / 96) + 1)
+         + ":" + juce::String ((int) (inBar % 96)).paddedLeft ('0', 2);
+}
+
+void TransportPositionReadout::paint (juce::Graphics& g)
+{
+    auto b = getLocalBounds().toFloat();
+    // Same LCD treatment as the BPM field (LRX-14 palette).
+    g.setColour (juce::Colour (0xff0A0A08));
+    g.fillRoundedRectangle (b, 3.0f);
+    g.setColour (juce::Colour (0xff2A2A28));
+    g.drawRoundedRectangle (b.reduced (0.5f), 3.0f, 1.0f);
+    g.setColour (juce::Colour (0xffFFB030));
+    g.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 14.0f, juce::Font::bold));
+    g.drawText (mText, getLocalBounds().reduced (4, 0), juce::Justification::centred, false);
 }

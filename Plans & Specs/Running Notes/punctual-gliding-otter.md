@@ -45,3 +45,106 @@ target `setLiveMidiTarget` (`PluginProcessor.h:331-335`, atomics `.h:1167-1168`)
 lit `:1856-1858`, `allMidi` feeds the MIDI recorder. Alternative hold-audition atomics
 (mono-per-block, NOT chosen): `auditionNoteOn/Off` on Synth/Harmless/Player/Bass
 (off-before-on `BaySickSynthProcessor.cpp:65-72`).
+
+## 2026-07-08 — Tasks 1+2 CODE-COMPLETE (both configs build clean, Jeff)
+
+- **Task 1 — readout.** New `TransportPositionReadout` (GlobalTransportBar.h/.cpp; BPM-field LCD
+  palette; own 30 Hz timer, repaint-on-change) instanced by StandaloneEditor as an overlay child
+  between the pattern button and the ribbon (`resized()` — ribbon absorbs the 108px, `kPosReadoutW
+  = 100`). Click toggles beats<->time; persisted via new `<TransportDisplay showTime>` settings.xml
+  child (load/saveTransportDisplayPref, MT-pref clone). New
+  `StandalonePlayHead::getCurrentTimeSeconds()` (sample-derived wall time — survives QA-TempoMap).
+  Beats math: ticks-first rounding then carry; song = 4 beats/bar, pattern = pattern tsNum
+  (downbeat-alignment criterion); 1-based display.
+- **Task 2 — D-4 typing keyboard.** New `TypingKeyboardMap.h` (inline atomic + two-row map +
+  bypass predicate); bypass early-returns added to the THREE grid key handlers (PianoRollGrid /
+  DrumKitGrid / ArrangementGrid — containers just delegate, verified). `KeyboardMidiButton` in the
+  reserved bar slot (476->520 gap; layout now 4+32, 20px margin left); `cmdToggleTypingKeyboard =
+  0x10071` + Ctrl+T catalog entry + `perform()` case; editor owns state (`toggleTypingKeyboard`),
+  overrides `keyPressed` (note-on, auto-repeat guard, PgUp/PgDn octave shift with release-first,
+  bare-keys-only) + `keyStateChanged` (release diff vs OS key state, never consumes). Notes inject
+  into the live-MIDI collector (self-timestamped — collector asserts on zero stamps) → record
+  parity + keyboard lighting free. Releases on mode-off / octave-shift / tab-switch
+  (`showPageForTab` head).
+- **Accepted limitation (logged, not a bug):** tab-switch note-release has a one-audio-block race —
+  the collector routes at DRAIN time, so a noteOff enqueued just before the target flips could
+  reach the new engine if the block boundary lands in between (~5 ms window, requires holding a
+  typed note through the exact switch block; recovery = retap or mode toggle). Accepted at
+  implementation; revisit only if the campaign reproduces it.
+- **Diagnostics:** none added (nothing for the Rule 4 catalog).
+- **Docs:** `STANDALONE_UI_CHANGES.md` gained the QA-TransportDisplay section; Master Test Plan
+  §B.1 authored (13 scenarios TD-1..TD-13; `blocks:` hash backfills at the next test-plan touch).
+- **Files:** `GlobalTransportBar.h/.cpp`, `StandaloneEditor.h/.cpp`, `StandaloneApp.h`,
+  `KeyBindings.h/.cpp`, `TypingKeyboardMap.h` (new), `PianoRoll.cpp`, `DrumKitGrid.cpp`,
+  `BuilderPage.cpp` (bypass lines), `STANDALONE_UI_CHANGES.md`, test plan §B.1.
+
+## Held Work Log entry (apply at section pass)
+
+> Apply verbatim below at §B.1 section pass; fill `<hash>` with the batch's source commit and
+> `<section-pass date/outcome>` from the campaign walk. Group review outcome (R3: one /review-batch
+> per group) gets its line filled at the G1 boundary.
+
+### <APPLY-DATE> — QA-TransportDisplay — Transport-bar position readout (bars:beats:ticks / M:SS.mmm click-toggle, live in both modes, settings.xml persistence) + D-4 typing-keyboard MIDI (two-row map, PgUp/PgDn octaves, record parity via the live-MIDI collector, bar button + Ctrl+T, grid tool-key bypass)
+
+**Bucket:** UI / L&F / Theming, Cross-cutting Infrastructure
+
+#### Done
+
+- **Task 1 — position readout.** `TransportPositionReadout` (GlobalTransportBar.h/.cpp) — LCD
+  (BPM-field palette), own 30 Hz timer repainting only on string change; overlay child of
+  StandaloneEditor between pattern button and ribbon (ribbon absorbs the width per the no-expand
+  rule; bar stays 40px). Click toggles `bars:beats:ticks` (96 PPQ, 1-based, ticks-first rounding)
+  <-> `M:SS.mmm`; mode persists app-wide (`<TransportDisplay>` settings.xml child, MT-pref
+  pattern). Song mode counts 4 beats/bar (playback's grid); pattern mode counts the pattern's
+  tsNum (metronome-accent alignment) and is naturally pattern-relative (17a — the clock
+  loop-wraps). New `StandalonePlayHead::getCurrentTimeSeconds()` (sample-derived; QA-TempoMap-proof).
+- **Task 2 — D-4 typing-keyboard MIDI** (the 2026-05-08 triage-gap item, folded at the marathon).
+  `TypingKeyboardMap.h` (new): inline atomic mode flag + two-row key map (A1) + bypass predicate;
+  the three grid key handlers decline bare mapped keys while the mode is on so they bubble to
+  StandaloneEditor's converter (single-letter tool shortcuts + S-cycle suppressed by design while
+  typing). `KeyboardMidiButton` fills the bar slot reserved since D-5 polish; `cmdToggleTypingKeyboard`
+  (0x10071, Ctrl+T). Editor owns the mode; keyPressed converts (velocity 0.8 = A3; auto-repeat
+  guarded; PgUp/PgDn octave shift clamped [-5..+3] with release-first = A2); keyStateChanged diffs
+  held notes vs OS key state for releases and never consumes. Notes self-timestamp into the
+  live-MIDI collector (A4) — active-tab routing (A5), MIDI-recorder capture, and on-screen keyboard
+  lighting all ride the existing dispatch. Held notes release on mode-off / octave-shift /
+  tab-switch.
+
+#### Found along the way
+
+- **Tab-switch release race (accepted limitation):** the collector routes at drain time, so a
+  noteOff enqueued immediately before the live-MIDI target flips can land on the new engine if the
+  block boundary falls in between (~one block, ~5 ms). Accepted; revisit only on campaign repro.
+- The D-4 reserved slot + `kControlsWidth` reserve comments were accurate; layout consumed 4+32 of
+  the ~44px gap (20px margin remains before kControlsWidth).
+
+#### What was done about each finding
+
+- Race: documented here + in running notes; no code (fix would need per-note engine addressing the
+  collector path deliberately avoids). Nothing routed out.
+
+#### Group review (R3 — one /review-batch per checkpoint group)
+
+- <G1-boundary outcome — filled at group review>
+
+#### Diagnostic Instrumentation Catalog
+
+- None added.
+
+#### Files touched
+
+`Source/Standalone/GlobalTransportBar.h/.cpp`, `Source/Standalone/StandaloneEditor.h/.cpp`,
+`Source/Standalone/StandaloneApp.h`, `Source/Standalone/KeyBindings.h/.cpp`,
+`Source/Standalone/TypingKeyboardMap.h` (new), `Source/Standalone/PianoRoll.cpp`,
+`Source/Standalone/DrumKitGrid.cpp`, `Source/Standalone/BuilderPage.cpp`,
+`Source/Standalone/STANDALONE_UI_CHANGES.md`, `Plans & Specs/Test Plans/v1-master-test-plan.md`
+(§B.1), paired plan + running notes.
+
+#### Commit(s)
+
+`<hash>` (Tasks 1+2 + §B.1 + held entry + running notes — single batch commit per the bulk-run
+model). Verified via Master Test Plan §B.1, <section-pass date/outcome>.
+
+#### Next action
+
+- <filled at apply: next unchecked §B section>.

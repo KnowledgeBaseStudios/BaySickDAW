@@ -2,6 +2,45 @@
 #include <JuceHeader.h>
 #include "StandaloneApp.h"
 
+// ── TransportPositionReadout ──────────────────────────────────────────────────
+// QA-TransportDisplay (2026-07-08): live playback-position readout.  Click
+// toggles bars:beats:ticks (96 PPQ) <-> M:SS.mmm.  Owned by StandaloneEditor
+// as an overlay child (like the pattern button + ribbon) and positioned
+// between them; defined here so it shares the transport bar's LCD styling.
+// Read-only clock consumer - all values arrive via callbacks on the message
+// thread (the seqlock retry lives inside StandalonePlayHead::deriveBeat).
+// Own 30 Hz timer: the bar's shared 10 Hz tick is too coarse for the .mmm
+// digits; a repaint fires only when the formatted string actually changes.
+class TransportPositionReadout : public juce::Component,
+                                 public juce::SettableTooltipClient,
+                                 private juce::Timer
+{
+public:
+    TransportPositionReadout();
+
+    std::function<double()> onGetBeat;          // musical position (pattern mode arrives pre-wrapped)
+    std::function<double()> onGetTimeSeconds;   // wall-clock position (sample-derived)
+    std::function<bool()>   onGetSongMode;
+    std::function<int()>    onGetPatternTsNum;  // beats-per-bar in pattern mode (matches metronome accents)
+
+    std::function<void(bool)> onDisplayModeChanged;   // user click-toggle -> persistence hook (true = time)
+
+    void setShowTime (bool showTime);   // programmatic (pref restore) - does NOT fire the callback
+    bool isShowingTime() const noexcept { return mShowTime; }
+
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+private:
+    void timerCallback() override;
+    juce::String buildText() const;
+
+    bool mShowTime { false };           // default = bars:beats:ticks
+    juce::String mText { "1:1:00" };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TransportPositionReadout)
+};
+
 // ── GlobalTransportBar ────────────────────────────────────────────────────────
 // Sits between the title bar and the ribbon tabs.
 // Play (Space), Pause (Space toggle), Stop (Shift+Space),
@@ -103,6 +142,14 @@ public:
         return getScreenBounds();
     }
 
+    // D-4 typing-keyboard MIDI (QA-TransportDisplay 2026-07-08): the toggle
+    // button occupies the slot that was reserved next to the metronome.
+    // The button only REPORTS clicks; StandaloneEditor owns the mode state
+    // (it also flips via Ctrl+T) and pushes the visual back through the
+    // setter so the two entry points can't drift.
+    std::function<void()> onTypingKeyboardToggle;
+    void setTypingKeyboardOn (bool on);
+
     // Called by StandaloneEditor to keep display in sync
     void setPlayState(bool playing, bool paused);
     // R5b (2026-04-23): editor calls this on Stop / disarm so the Record
@@ -129,6 +176,7 @@ private:
     std::unique_ptr<juce::TextButton> mMetroArrowBtn;  // ▾ → settings popup
     std::unique_ptr<juce::TextButton> mSongModeBtn;    // toggle: Pattern / Song
     std::unique_ptr<juce::TextButton> mSongLoopBtn;    // toggle: play-through (→) / loop (🔁)
+    std::unique_ptr<juce::Button>     mKeybMidiBtn;    // D-4: typing-keyboard MIDI toggle (custom-painted)
 
     // BPM
     std::unique_ptr<juce::Label>      mBpmLabel;

@@ -251,3 +251,32 @@ Need to wire it to internal tab-switching methods on EffectsPage, BuilderPage, a
 - Delete current pattern
 Currently `mPatternBox` is a plain ComboBox. Needs replacing with a TextButton + PopupMenu.
 `mPatternNameEdit` is hidden until this is implemented.
+
+---
+
+## 2026-07-08 — QA-TransportDisplay: position readout + typing-keyboard button
+
+**Files:** `GlobalTransportBar.h/.cpp`, `StandaloneEditor.h/.cpp`, `StandaloneApp.h`, `KeyBindings.h/.cpp`, `TypingKeyboardMap.h` (new)
+
+### TransportPositionReadout
+LCD-styled (BPM-field palette) live position readout, an overlay child of
+StandaloneEditor placed between the pattern button and the ribbon — the ribbon
+absorbs the ~108px width loss (no-expand rule; bar stays 40px). Click toggles
+`bars:beats:ticks` (96 PPQ, 1-based) <-> `M:SS.mmm`; mode persists app-wide via
+`<TransportDisplay showTime="0|1"/>` in settings.xml. Own 30 Hz timer; repaints
+only when the formatted string changes. Song mode counts 4 beats/bar (matches
+playback's grid); pattern mode counts the pattern's tsNum (matches metronome
+accents) and is naturally pattern-relative (the clock loop-wraps).
+
+### Typing-keyboard MIDI (D-4)
+The ~40px slot reserved next to the metronome since D-5 polish now holds the
+KeyboardMidiButton (piano-keys icon, amber when on). StandaloneEditor owns the
+mode (Ctrl+T = cmdToggleTypingKeyboard 0x10071 is the other entry point) and
+pushes visuals back via setTypingKeyboardOn. Two-row map (Z-row octave +
+S D G H J sharps; Q-row octave above + number-row sharps), PgUp/PgDn octave
+shift [-5..+3], velocity 0.8. Notes inject into the live-MIDI collector →
+active-tab routing + recorder + on-screen keyboard lighting for free. While the
+mode is on, `TypingKeyboardMap::shouldBypassLocalKeys` makes the three grid
+key handlers (PianoRollGrid / DrumKitGrid / ArrangementGrid) decline bare
+mapped keys so they bubble to the editor's converter; any modifier = normal
+shortcut. Held notes release on mode-off, octave shift, and tab switch.

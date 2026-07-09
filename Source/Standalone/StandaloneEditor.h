@@ -316,8 +316,29 @@ private:
 
     // Transport bar, ribbon, and page menu bar
     std::unique_ptr<GlobalTransportBar> mTransport;
+    // QA-TransportDisplay (2026-07-08): position readout overlays the bar
+    // between the pattern button and the ribbon (same overlay pattern).
+    std::unique_ptr<TransportPositionReadout> mPosReadout;
     std::unique_ptr<RibbonTabBar>       mRibbon;
     std::unique_ptr<PageMenuBar>        mPageMenuBar;
+
+    // ── D-4 typing-keyboard MIDI (QA-TransportDisplay 2026-07-08) ────────────
+    // Editor owns the mode: the bar button and Ctrl+T both route through
+    // toggleTypingKeyboard().  Held notes tracked as (keyCode, midiNote) pairs
+    // so key-up sends the matching noteOff even across an octave shift.
+    bool mTypingKeyboardOn { false };
+    int  mTypingOctaveOffset { 0 };                    // PgUp/PgDn steps, clamped [-5..+3]
+    std::vector<std::pair<int,int>> mTypingHeldNotes;  // keyCode -> sounding MIDI note
+    void toggleTypingKeyboard();
+    void sendTypingNote (int midiNote, bool noteOn);
+    void releaseAllTypingNotes();
+    bool keyPressed (const juce::KeyPress&) override;
+    bool keyStateChanged (bool isKeyDown) override;
+
+    // QA-TransportDisplay: readout display-mode persistence (settings.xml,
+    // same parse-preserve-siblings pattern as the MT pref).
+    void loadTransportDisplayPref();
+    void saveTransportDisplayPref (bool showTime);
 
     // Page entries: parallel to ribbon tabs
     juce::OwnedArray<PageEntry> mPages;

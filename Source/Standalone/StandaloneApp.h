@@ -21,6 +21,13 @@ public:
     double getBPM()              const { return mBPM.load(); }
     void   setBPM(double bpm);                          // re-anchors the tempo anchor (message thread)
     double getCurrentBeat()      const { return deriveBeat(mSamplePos.load()); }
+    // QA-TransportDisplay: wall-clock position from the sample counter - the
+    // sample domain is the transport truth, so this stays exact across tempo
+    // changes (and survives QA-TempoMap's anchor->map rework unchanged).
+    double getCurrentTimeSeconds() const
+    {
+        return (double) mSamplePos.load() / juce::jmax (1.0, mSampleRate.load());
+    }
     void   seekTo(double beat);
 
     // QA-Ed: backward-seek discontinuity signal.  Set by seekTo() on a

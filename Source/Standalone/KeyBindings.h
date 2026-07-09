@@ -72,7 +72,10 @@ namespace BSCommands
         // keeps existing length-resize UX).  Default keybind 'S'.
         cmdToggleSlipStretchMode = 0x10070,
 
-        // (later phases continue from 0x10071.)
+        // ── General - typing-keyboard MIDI (D-4, QA-TransportDisplay) ───────
+        cmdToggleTypingKeyboard = 0x10071,
+
+        // (later phases continue from 0x10072.)
     };
 
     enum class Category : int

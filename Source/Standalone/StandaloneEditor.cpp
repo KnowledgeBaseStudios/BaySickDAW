@@ -14,6 +14,7 @@
 #include "MetroPanel.h"
 #include "SlotComponent.h"  // effectTypeName() for automation display-name resolver
 #include "KeyBindings.h"
+#include "TypingKeyboardMap.h"   // D-4 typing-keyboard MIDI (QA-TransportDisplay)
 #include "KeyBindsWindow.h"
 #include "RustyDrumsMapWindow.h"
 #include "PatternColorPicker.h"
@@ -873,6 +874,25 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         mProcessor.mSongEndBeats.store(0.0, std::memory_order_relaxed);
         return beats;
     };
+    // ── QA-TransportDisplay: position readout (overlay child, like the
+    // pattern button + ribbon; placed by resized() between the two) ──────────
+    mPosReadout = std::make_unique<TransportPositionReadout>();
+    mPosReadout->onGetBeat         = [this] { return mPlayHead.getCurrentBeat(); };
+    mPosReadout->onGetTimeSeconds  = [this] { return mPlayHead.getCurrentTimeSeconds(); };
+    mPosReadout->onGetSongMode     = [this] { return mTransport && mTransport->isSongMode(); };
+    mPosReadout->onGetPatternTsNum = [this]
+    {
+        if (auto* pm = mProcessor.getPatternManager()) return pm->currentPattern().tsNum;
+        return 4;
+    };
+    mPosReadout->onDisplayModeChanged = [this] (bool showTime) { saveTransportDisplayPref (showTime); };
+    loadTransportDisplayPref();
+    addAndMakeVisible (*mPosReadout);
+
+    // D-4: the bar button reports clicks; Ctrl+T routes through perform() -
+    // both land in toggleTypingKeyboard() so the two entry points can't drift.
+    mTransport->onTypingKeyboardToggle = [this] { toggleTypingKeyboard(); };
+
     // 1M: DSP load readout - poll processor atomics each timer tick
     mTransport->onGetDspLoad = [this] {
         return mProcessor.mAudioDspLoad.load(std::memory_order_relaxed);
@@ -4552,6 +4572,11 @@ void StandaloneEditor::onSubPageSelected(RibbonTabBar::TabType type, int subPage
 
 void StandaloneEditor::showPageForTab(int tabId)
 {
+    // D-4: the live-MIDI target follows the visible tab, so a tab switch
+    // while typing-keyboard notes are held would send their noteOffs to the
+    // NEW tab's engine and strand the old one - release before switching.
+    releaseAllTypingNotes();
+
     // Hide all
     for (auto* entry : mPages)
         if (entry->component) entry->component->setVisible(false);
@@ -7040,6 +7065,11 @@ bool StandaloneEditor::perform (const InvocationInfo& info)
             if (mTransport) mTransport->toggleMetronome();
             return true;
 
+        // ── Typing-keyboard MIDI (D-4, QA-TransportDisplay) ─────────────
+        case BSCommands::cmdToggleTypingKeyboard:
+            toggleTypingKeyboard();
+            return true;
+
         // ── Undo / Redo (Phase B-5) ─────────────────────────────────────
         case BSCommands::cmdGlobalUndo: globalUndo(); return true;
         case BSCommands::cmdGlobalRedo: globalRedo(); return true;
@@ -9037,8 +9067,14 @@ void StandaloneEditor::resized()
     int py = bar.getY() + (kBarH - 28) / 2;
     mPatternBtn->setBounds(bar.getX() + kPatStart, py, kPatBtnW, 28);
 
-    // Ribbon tabs: from end of pattern section to just before CPU readout
-    int ribX = kPatStart + kPatBtnW + 8;
+    // QA-TransportDisplay: position readout between the pattern button and
+    // the ribbon; the ribbon absorbs the width loss (standing no-expand rule).
+    static constexpr int kPosReadoutW = 100;
+    if (mPosReadout)
+        mPosReadout->setBounds(bar.getX() + kPatStart + kPatBtnW + 8, py, kPosReadoutW, 28);
+
+    // Ribbon tabs: from end of the readout to just before CPU readout
+    int ribX = kPatStart + kPatBtnW + 8 + kPosReadoutW + 8;
     int ribW = bar.getWidth() - ribX - kCPUReserve;
     if (ribW > 60)
         mRibbon->setBounds(bar.getX() + ribX, bar.getY(), ribW, kBarH);
@@ -9052,6 +9088,114 @@ void StandaloneEditor::resized()
     // G-4: Vox + Inst empty-state placeholders.
     if (mVoxEmptyState)   mVoxEmptyState  ->setBounds(b);
     if (mInstEmptyState)  mInstEmptyState ->setBounds(b);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-TransportDisplay: readout persistence + D-4 typing-keyboard MIDI
+
+void StandaloneEditor::loadTransportDisplayPref()
+{
+    if (! mPosReadout) return;
+    const auto f = ProjectManager::getSettingsFile();
+    if (! f.existsAsFile()) return;   // first launch - keep the beats default
+    if (auto root = juce::XmlDocument::parse (f))
+        if (auto* node = root->getChildByName ("TransportDisplay"))
+            mPosReadout->setShowTime (node->getBoolAttribute ("showTime", false));
+}
+
+void StandaloneEditor::saveTransportDisplayPref (bool showTime)
+{
+    const auto f = ProjectManager::getSettingsFile();
+    f.getParentDirectory().createDirectory();
+
+    // Re-parse the existing root so every sibling section survives (same
+    // pattern as saveMultiCoreRenderingPref - settings.xml is shared).
+    std::unique_ptr<juce::XmlElement> root;
+    if (f.existsAsFile())
+        root = juce::XmlDocument::parse (f);
+    if (root == nullptr)
+        root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
+
+    if (auto* existing = root->getChildByName ("TransportDisplay"))
+        root->removeChildElement (existing, true);
+    root->createNewChildElement ("TransportDisplay")->setAttribute ("showTime", showTime);
+    root->writeTo (f);
+}
+
+void StandaloneEditor::toggleTypingKeyboard()
+{
+    mTypingKeyboardOn = ! mTypingKeyboardOn;
+    if (! mTypingKeyboardOn) releaseAllTypingNotes();
+    TypingKeyboardMap::gActive.store (mTypingKeyboardOn, std::memory_order_relaxed);
+    if (mTransport) mTransport->setTypingKeyboardOn (mTypingKeyboardOn);
+}
+
+void StandaloneEditor::sendTypingNote (int midiNote, bool noteOn)
+{
+    if (midiNote < 0 || midiNote > 127) return;
+    auto msg = noteOn ? juce::MidiMessage::noteOn  (1, midiNote, 0.8f)
+                      : juce::MidiMessage::noteOff (1, midiNote, 0.0f);
+    // MidiMessageCollector asserts on zero timestamps.  Hardware input is
+    // pre-stamped by juce::MidiInput; synthetic messages must self-stamp.
+    msg.setTimeStamp (juce::Time::getMillisecondCounterHiRes() * 0.001);
+    mProcessor.getLiveMidiCollector().addMessageToQueue (msg);
+}
+
+void StandaloneEditor::releaseAllTypingNotes()
+{
+    for (auto& held : mTypingHeldNotes)
+        sendTypingNote (held.second, false);
+    mTypingHeldNotes.clear();
+}
+
+bool StandaloneEditor::keyPressed (const juce::KeyPress& key)
+{
+    if (! mTypingKeyboardOn) return false;
+
+    // Only bare keys are notes - any modifier means a normal shortcut
+    // (Ctrl+Z undo, Shift+Space stop, ...) and must pass through untouched.
+    const auto mods = key.getModifiers();
+    if (mods.isCtrlDown() || mods.isAltDown() || mods.isShiftDown()) return false;
+
+    const int kc = key.getKeyCode();
+    if (TypingKeyboardMap::isOctaveShiftKey (kc))
+    {
+        // Shifting while notes are held would strand the old pitches at
+        // key-up (the noteOff would target the shifted pitch) - release first.
+        releaseAllTypingNotes();
+        mTypingOctaveOffset = juce::jlimit (-5, 3,
+            mTypingOctaveOffset + (kc == juce::KeyPress::pageUpKey ? 1 : -1));
+        return true;
+    }
+
+    const int semi = TypingKeyboardMap::semitoneForKey (kc);
+    if (semi < 0) return false;
+
+    for (auto& held : mTypingHeldNotes)
+        if (held.first == kc) return true;    // OS key auto-repeat - already sounding
+
+    const int note = juce::jlimit (0, 127, 60 + semi + mTypingOctaveOffset * 12);
+    mTypingHeldNotes.push_back ({ kc, note });
+    sendTypingNote (note, true);
+    return true;
+}
+
+bool StandaloneEditor::keyStateChanged (bool /*isKeyDown*/)
+{
+    if (mTypingHeldNotes.empty()) return false;
+
+    // JUCE reports "something changed", not which key - diff our held set
+    // against the OS key state to find releases.
+    for (int i = (int) mTypingHeldNotes.size(); --i >= 0;)
+    {
+        const auto held = mTypingHeldNotes[(size_t) i];
+        if (! juce::KeyPress::isKeyCurrentlyDown (held.first))
+        {
+            sendTypingNote (held.second, false);
+            mTypingHeldNotes.erase (mTypingHeldNotes.begin() + (int) i);
+        }
+    }
+    return false;   // never consume - command-system key-up handling stays intact
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

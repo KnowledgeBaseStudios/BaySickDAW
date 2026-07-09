@@ -41,6 +41,50 @@ naming the batch's source commit (bisect anchor on failure).
 
 ---
 
+### §B.1 — QA-TransportDisplay (position readout + D-4 typing keyboard)
+
+`blocks:` the QA-TransportDisplay source commit (message-tagged "QA-TransportDisplay"; hash
+backfilled at the next test-plan touch). Debug exe FIRST (screenshot any jassert), then confirm in
+Release — mark each scenario `D:` and `R:`.
+
+- [ ] **TD-1 — readout tracks song mode.** Song mode, arrangement with content, play from the top;
+      watch bars 2-5. Expected: beats mode reads `N:1:00` exactly at each audible downbeat,
+      advancing smoothly. `D:__ R:__` notes:
+- [ ] **TD-2 — pattern-relative wrap.** Pattern mode, 4-bar pattern, loop 3+ passes. Expected:
+      readout runs `1:1:00 -> 4:4:xx` and wraps to `1:1:00` exactly at the loop point every pass.
+      `D:__ R:__` notes:
+- [ ] **TD-3 — click-toggle + persistence.** Click the readout (beats -> time), play (expect live
+      `M:SS.mmm`), quit, relaunch. Expected: time mode remembered across launch. `D:__ R:__` notes:
+- [ ] **TD-4 — consistency across BPM change.** Play, change BPM mid-play (field, then tap), toggle
+      display modes. Expected: no position jump in either display; time stays true wall-clock.
+      `D:__ R:__` notes:
+- [ ] **TD-5 — stopped + seek.** Stop mid-song; use prev/next-bar keys to scrub. Expected: readout
+      shows the playhead position while stopped and follows seeks. `D:__ R:__` notes:
+- [ ] **TD-6 — width floor.** (After QA-Eb lands) shrink the window to its minimum width. Expected:
+      readout fully legible, ribbon still usable, bar height unchanged at 40px. `D:__ R:__` notes:
+- [ ] **TD-7 — typing-mode toggle parity.** Toggle via Ctrl+T, then via the piano-keys button.
+      Expected: both flip the same lit state; they never disagree. `D:__ R:__` notes:
+- [ ] **TD-8 — chord + hold.** Layers tab, typing ON, hold `Z`+`C`+`B`. Expected: 3-note chord
+      sounds and HOLDS; releasing one key releases only that note. `D:__ R:__` notes:
+- [ ] **TD-9 — layout map + octave shift.** Play the Z-row + `S D G H J` sharps, then the Q-row +
+      number sharps; PgUp/PgDn between phrases AND while holding notes. Expected: correct two-octave
+      map; shift is +-1 octave; shifting while holding releases cleanly (no stuck notes).
+      `D:__ R:__` notes:
+- [ ] **TD-10 — tool keys bypassed + text fields safe.** Typing ON with a piano roll focused: press
+      `Z X C S T M`. Expected: notes only — no tool switch, no note-type cycle, no keyboard-column
+      toggle. Click into the BPM field and type: normal text entry, zero notes. Typing OFF: tool
+      keys behave normally again. `D:__ R:__` notes:
+- [ ] **TD-11 — record parity.** Record-arm (MIDI mode) on a Layers tab, play, type a phrase.
+      Expected: notes land in the piano roll like a hardware MIDI keyboard; the on-screen keyboard
+      lights while typing. `D:__ R:__` notes:
+- [ ] **TD-12 — release guards.** Hold notes and (a) switch tabs, (b) Ctrl+T off. Expected: no stuck
+      notes in either case; after the tab switch, typed notes play the NEW tab's engine.
+      `D:__ R:__` notes:
+- [ ] **TD-13 — Vox tab parity (not a bug).** Typing ON on a Vox tab, press keys. Expected: silence —
+      identical to a hardware MIDI keyboard on a Vox tab today. `D:__ R:__` notes:
+
+---
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is
