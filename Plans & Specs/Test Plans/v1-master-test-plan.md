@@ -127,9 +127,10 @@ confirm in Release — mark each scenario `D:` and `R:`.
 
 ### §B.3 — QA-TempoMap (stepped tempo timeline + ruler tempo flags)
 
-`blocks:` the QA-TempoMap source commit (message-tagged "QA-TempoMap"; hash backfilled at the next
-test-plan touch). Debug exe FIRST — this batch touched the transport core; screenshot ANY jassert.
-G1 ear-check batch: use the QA-TransportDisplay readout + metronome as the measuring instruments.
+`blocks:` `753dddc` (QA-TempoMap Tasks 1-4; also carries the QA-TransportDisplay readout z-order
+fix — the readout was invisible until this commit). Debug exe FIRST — this batch touched the
+transport core; screenshot ANY jassert. G1 ear-check batch: use the QA-TransportDisplay readout +
+metronome as the measuring instruments.
 
 - [ ] **TM-1 — marker lands on the downbeat (the headline ear-check).** Song mode, project at 140,
       metronome on. Ruler right-click at bar 5 → "Add Tempo Change" → 90. Play from bar 1.
@@ -171,6 +172,73 @@ G1 ear-check batch: use the QA-TransportDisplay readout + metronome as the measu
       `D:__ R:__` notes:
 - [ ] **TM-12 — MT stress regression.** The big MT stress arrangement with 2 markers added: no
       dropouts vs the pre-batch baseline, DSP% comparable, no Debug jasserts. `D:__ R:__` notes:
+
+---
+
+### §B.4 — QA-Eb (window resizability, min-size-clamp shape)
+
+`blocks:` the QA-Eb source commit (message-tagged "QA-Eb"; hash backfilled at the next test-plan
+touch). Debug first, then Release.
+
+- [ ] **EB-1 — launch + restore-down.** Launch → still opens maximized. Restore-down → a movable
+      window with drag-resizable borders. `D:__ R:__` notes:
+- [ ] **EB-2 — smooth resize.** Drag-resize in both axes and diagonally. Expected: pages reflow
+      live, no paint artifacts, no Debug jasserts. `D:__ R:__` notes:
+- [ ] **EB-3 — maximize round-trip.** Maximize button toggles maximize/restore; restored position
+      + size come back. `D:__ R:__` notes:
+- [ ] **EB-4 — the floor (1100x700 — TUNE HERE).** Shrink hard toward zero: window stops at the
+      floor. At the floor: transport bar fully usable (all buttons + readout + pattern dropdown +
+      some ribbon), piano roll scrolls via its own bars, Builder grid via its viewport, Mixer via
+      its bottom scrollbar, EffectsPage slots clickable. If anything is unusable, name it — the
+      floor values are starting points for you to tune. `D:__ R:__` notes:
+- [ ] **EB-5 — every page at two sizes.** Visit every page type at the floor and at ~1400x900.
+      Expected: no clipped-off controls; exactly one scroll authority per surface (no double
+      scrollbars, no scroll fights). `D:__ R:__` notes:
+- [ ] **EB-6 — save/reopen at a small size.** Save a project while the window is small, close,
+      reopen. Expected: no layout-dependent state weirdness (window size itself is NOT persisted —
+      launches maximized by design). `D:__ R:__` notes:
+
+---
+
+### §B.5 — QA-Ec (true-length import + Resample follow + Shift+drag re-fit)
+
+`blocks:` the QA-Ec source commit (message-tagged "QA-Ec"; hash backfilled at the next test-plan
+touch). G1 ear-check batch — verify by ear + the readout. Debug first, then Release.
+
+- [ ] **EC-1 — true-length import at any tempo.** Project at 90: import a ~2s WAV. Expected: the
+      block spans exactly 3 beats (2s at 90 — check via the readout/grid), plays IDENTICAL to the
+      source (no stretch artifacts, correct pitch). Repeat at 140 — different beat-length, still
+      1:1 playback. The old behavior (instant stretch at any tempo != 120) must be gone.
+      `D:__ R:__` notes:
+- [ ] **EC-2 — Stretch mode follows tempo.** Stretch-mode clip, change project 90 → 120 (field).
+      Expected: re-fits pitch-locked (same musical length, faster); ear-check quality.
+      `D:__ R:__` notes:
+- [ ] **EC-3 — Resample mode follows tempo (vinyl).** Same change on a Resample-mode clip
+      (right-click → Properties → mode). Expected: speeds up AND pitches up together; at the
+      clip's own import tempo it plays exactly 1:1. `D:__ R:__` notes:
+- [ ] **EC-4 — Shift+drag re-fit, Stretch.** Shift+drag a Stretch clip's right edge to 2x length.
+      Expected: content plays across the full new length, pitch locked. Ctrl+Z restores exactly.
+      `D:__ R:__` notes:
+- [ ] **EC-5 — Shift+drag re-fit, Resample.** Shift+drag a Resample clip to half length. Expected:
+      double speed, one octave up (vinyl). Plain (unshifted) edge-drag still just trims/extends
+      with playback speed unchanged (the F split). `D:__ R:__` notes:
+- [ ] **EC-6 — sub-bar clip re-fit.** Import a short one-shot (< 1 bar), Shift+drag it longer.
+      Expected: correct proportional re-fit (the ratio uses exact beats, not whole bars).
+      `D:__ R:__` notes:
+- [ ] **EC-7 — the old silence case.** Import at 120, crank tempo to 200. Expected: clip still
+      audible with meter movement, correct Stretch behavior (no vanishing clip). `D:__ R:__` notes:
+- [ ] **EC-8 — browser re-drag inherits.** Import at 90, delete the block, re-drag the file from
+      the browser at project 140. Expected: places at its true length and plays 1:1 relative to
+      its stored 90-BPM identity (i.e. Stretch-fits to 140) — no return of the 120 assumption; a
+      Properties-set BPM on the entry survives re-drags. `D:__ R:__` notes:
+- [ ] **EC-9 — clips stay grid-locked across tempo flags.** Ruler tempo flag at bar 5 (140→90);
+      place clips at bars 3 and 7. Expected: both clips START exactly on their grid lines by ear
+      and readout (the position seam through the tempo map); the bar-7 clip's length displays true
+      at 90. `D:__ R:__` notes:
+- [ ] **EC-10 — Vox/Inst path parity.** Route a clip to a Vox/Inst page (FILE-02 routing) and
+      repeat EC-2/EC-3. Expected: identical follow behavior (Path B lockstep). `D:__ R:__` notes:
+- [ ] **EC-11 — save/reload round-trip.** After re-fits + mode changes: save, reload. Expected:
+      modes, lengths, pitches, re-fit identities all identical. `D:__ R:__` notes:
 
 ---
 

@@ -3501,16 +3501,26 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
 
-    // Compute bars + precise beats from file duration at the assumed original BPM (120).
-    // stretchMode will handle tempo differences at playback time.
-    // QA-E Task 5 (2026-05-15): set lengthBeats to the precise float beat count
-    // so playback / loop end match the source file's exact duration -- mirrors
-    // the recording-finalize dropWavAsClip path at StandaloneEditor.cpp:9853-9854.
-    // Prior bug: lengthBeats defaulted to -1.f, falling back to lengthBars * 4
-    // (rounded up to next bar boundary), so drag-from-browser blocks were
-    // longer than the underlying audio.
+    // QA-Ec (G, 2026-07-08): the clip lands at its TRUE wall-clock length at
+    // the tempo in effect at the target bar (base + ruler tempo flags), and
+    // plays 1:1 there - originalBPM = that tempo makes the render ratio
+    // exactly 1 at import.  The old hardcoded 120 sized blocks wrong at any
+    // other project tempo AND silently engaged the stretcher on every import.
+    // QA-E Task 5 (2026-05-15): lengthBeats stays the precise float beat
+    // count so playback / loop end match the source file's exact duration.
+    auto tempoAtBar = [this] (float bar) -> double
+    {
+        double t = mPM.getGlobalTempo();
+        for (int i = 0; i < mPM.getNumTempoChanges(); ++i)
+        {
+            const auto& tc = mPM.getTempoChange (i);
+            if ((float) tc.bar <= bar) t = tc.bpm;
+            else break;
+        }
+        return t;
+    };
     int lengthBars = 4;  // fallback
-    float originalBPM = 120.f;
+    float originalBPM = (float) tempoAtBar (snapBar (targetBar));
     float fileBeats = -1.f;
     if (reader && reader->sampleRate > 0 && reader->lengthInSamples > 0)
     {
@@ -3545,7 +3555,18 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     // keeps showing it even if every block referencing it gets deleted.
     // QA-E Task 4 (2026-05-12): tag ownerChannelId so re-drag from browser
     // continues to find the entry under the right category.
+    const int libCountBefore = mPM.getNumAudioLibrary();
     mPM.addAudioToLibrary(storedPath, {}, routeChannel);
+    // QA-Ec (G): a NEW library entry inherits the import tempo as its
+    // source-of-truth BPM so browser re-drags land 1:1 too (Properties can
+    // override later).  Existing entries are left alone - re-importing a
+    // file must not clobber a user-set BPM.
+    if (mPM.getNumAudioLibrary() > libCountBefore)
+    {
+        const int li = mPM.getNumAudioLibrary() - 1;
+        mPM.setAudioLibraryClipDefaults (li, mPM.getAudioLibraryPitch (li),
+                                         originalBPM, mPM.getAudioLibraryStretchMode (li));
+    }
     ClipDropDiag::log ("importAudioFile library-add", "storedPath=" + storedPath + " routeChannel=" + juce::String (routeChannel) + " libCount=" + juce::String (mPM.getNumAudioLibrary()));
     ArrangementBlock b;
     b.clipType       = ClipType::Audio;
@@ -3607,7 +3628,11 @@ void ArrangementGrid::placeAudioLibraryEntry(int libIdx, int targetRow, float ta
     fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
     int   lengthBars  = 4;
-    const float originalBPM = 120.f;
+    // QA-Ec (G): the library entry's stored BPM is the source of truth
+    // (stamped at first import with the import tempo; user-editable via
+    // Properties) - the old hardcoded 120 stretched every placement the
+    // moment the project tempo was anything else.
+    const float originalBPM = mPM.getAudioLibraryBPM (libIdx);
     float fileBeats   = -1.f;
     if (reader && reader->sampleRate > 0 && reader->lengthInSamples > 0)
     {
@@ -3626,7 +3651,10 @@ void ArrangementGrid::placeAudioLibraryEntry(int libIdx, int targetRow, float ta
     b.setLengthBeats (fileBeats);
     b.audioFilePath = path;
     b.originalBPM   = originalBPM;
-    b.stretchMode   = true;
+    // QA-Ec: inherit the entry's stretch/resample mode too - the library is
+    // the source of truth for clip defaults (FILE-02 design); hardcoded
+    // `true` ignored a Properties edit on the browser entry.
+    b.stretchMode   = mPM.getAudioLibraryStretchMode (libIdx);
     b.routeChannel  = owner;
     mPM.addBlock (b);
     mSelection.clear();
@@ -4328,6 +4356,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                 mStretching      = e.mods.isShiftDown() && mPM.getBlock(hit).clipType == ClipType::Audio;
                 mResizeIdx       = hit;
                 mResizeOrigLen   = (float)mPM.getBlock(hit).lengthBars;
+                mStretchOrigBeats = effectiveLengthBeats (mPM.getBlock(hit));   // QA-Ec: exact re-fit base
                 mResizeOrigStart = (float)mPM.getBlock(hit).startBar;
                 if (mPM.getBlock(hit).clipType == ClipType::Automation)
                     mResizeOrigPoints = mPM.getBlock(hit).automationLane.points;
@@ -4538,11 +4567,9 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
                 pt.timeTicks = pt.timeTicks * mResizeOrigLen / newLenBars;
         }
 
-        // For audio stretch: adjust originalBPM so the content duration stays proportional
-        if (mStretching) {
-            // Store new length; actual time-stretching applied offline via Rubber Band
-            (void)mResizeOrigLen;
-        }
+        // QA-Ec (F): the Shift+drag re-fit applies ONCE at mouseUp (no
+        // mid-drag audio rebuilds on the hot path) - see the mResizing
+        // branch in mouseUp.  This replaced the old no-op Rubber Band stub.
         resized(); repaint();
         return;
     }
@@ -4855,7 +4882,29 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
         return;
     }
 
-    if (mResizing) { commitEdit(); mResizing = false; mStretching = false; mResizeIdx = -1; updateCursor(); return; }
+    if (mResizing)
+    {
+        // QA-Ec (F): Shift+drag re-fit commits here - scale the clip's tempo
+        // identity by the beat-length ratio and the render ratio does the
+        // rest (Stretch: originalBPM/bpm -> pitch-locked re-fit; Resample:
+        // the 2b follow term bpm/originalBPM -> rate+pitch re-fit).  One
+        // persisted field drives both modes.  Plain (unshifted) drags never
+        // enter here with mStretching set, so trim/extend is untouched.
+        if (mStretching && mResizeIdx >= 0 && mResizeIdx < mPM.getNumBlocks()
+            && mStretchOrigBeats > 0.0)
+        {
+            auto&        blk     = mPM.getBlock (mResizeIdx);
+            const double newBeats = effectiveLengthBeats (blk);
+            if (blk.clipType == ClipType::Audio && blk.originalBPM > 0.f
+                && newBeats > 0.0
+                && std::abs (newBeats - mStretchOrigBeats) > 1e-9)
+                blk.originalBPM = (float) juce::jlimit (1.0, 999.0,
+                    (double) blk.originalBPM * (newBeats / mStretchOrigBeats));
+        }
+        commitEdit(); mResizing = false; mStretching = false; mResizeIdx = -1;
+        mStretchOrigBeats = 0.0;
+        updateCursor(); return;
+    }
     if (mMoving)   { commitEdit(); mMoving = false; mMoveIndices.clear(); updateCursor(); return; }
     // QA-Ea Task 0c (FL pre-roll record): finalize the slip-edit drag.
     // commitEdit() snapshots the new contentStartSamples / lengthBeats for

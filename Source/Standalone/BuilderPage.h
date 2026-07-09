@@ -720,6 +720,10 @@ private:
     // Resize (also handles Shift+drag = time-stretch for audio clips)
     bool  mResizing       { false };
     bool  mStretching     { false };  // Shift+drag right edge on audio clip
+    // QA-Ec (2026-07-08): exact beat length at stretch-drag start.  The
+    // re-fit ratio needs BEATS - mResizeOrigLen is whole bars, which is
+    // wrong for sub-bar clips (an imported 2.3-beat one-shot reads 1 bar).
+    double mStretchOrigBeats { 0.0 };
     int   mResizeIdx      { -1 };
     float mResizeOrigLen  { 0.f };
     float mResizeOrigStart{ 0.f };

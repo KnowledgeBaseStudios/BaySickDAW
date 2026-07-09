@@ -1,5 +1,17 @@
 #include "PluginProcessor.h"
 #include "TempoMapRead.h"   // QA-TempoMap: stepped tempo timeline (standalone publishes; VST falls back)
+
+// QA-Ec x QA-TempoMap seam: audio-clip block boundaries are BEAT-authored, so
+// with a published timeline their sample positions must resolve through it -
+// a clip sitting past a ruler tempo flag would otherwise drift off the grid
+// (linear beat*secPerBeat assumes one tempo).  Falls back to the caller's
+// linear math when no timeline is published (legacy VST target).
+static inline juce::int64 clipBeatToSample (double beat, double secPerBeat, double sampleRate)
+{
+    if (TempoMap::isActive())
+        return TempoMap::sampleAtBeat (beat);
+    return (juce::int64) (beat * secPerBeat * sampleRate);
+}
 // 2026-04-25: BaySickDrumsProcessor include removed - class deleted.
 #include "BaySickSynth/BaySickSynthProcessor.h"   // D1.4-fix (c): drum transpose compensation
 #include "BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-5: singleton sfizz drum-kit engine
@@ -559,8 +571,8 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                 : player.trackRow;
         if (ownerRow != row) continue;
 
-        const juce::int64 clipStart = (juce::int64) (player.clipStartBeat * ctx.secPerBeat * mSampleRate);
-        const juce::int64 clipEnd   = (juce::int64) (player.clipEndBeat   * ctx.secPerBeat * mSampleRate);
+        const juce::int64 clipStart = clipBeatToSample (player.clipStartBeat, ctx.secPerBeat, mSampleRate);
+        const juce::int64 clipEnd   = clipBeatToSample (player.clipEndBeat,   ctx.secPerBeat, mSampleRate);
 
         if (ctx.projectEnd <= clipStart || ctx.projectStart >= clipEnd) continue;
 
@@ -596,10 +608,20 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         // knob) instead scales the output resample + source consumption but NOT the
         // vocoder stretch -> it couples pitch + content-speed (tape-style) on top:
         // net pitch = tune x varispeed, source consumed x varispeed.
+        // QA-Ec: ratio clamps [1/64, 64] keep a corrupt/degenerate originalBPM
+        // from collapsing the window math into silence (PhaseVocoder's own
+        // mSynthHop floor backstops the DSP side).
         const double stretchRatio    = (player.stretchMode && player.originalBPM > 0.f)
-            ? (double) player.originalBPM / ctx.bpm : 1.0;
+            ? juce::jlimit (1.0 / 64.0, 64.0, (double) player.originalBPM / ctx.bpm) : 1.0;
+        // QA-Ec (2b): Resample mode follows tempo as VARISPEED - rate and
+        // pitch move together (vinyl) - so the follow term rides the same
+        // slots the Stretch-knob varispeed uses (read rate + consumption,
+        // never the vocoder ratio).  Exactly 1.0 when the project sits at the
+        // clip's own tempo, so imports play untouched (G).
+        const double tempoFollow     = (! player.stretchMode && player.originalBPM > 0.f)
+            ? juce::jlimit (1.0 / 64.0, 64.0, ctx.bpm / (double) player.originalBPM) : 1.0;
         const double pitchRatio      = (double) ctl.pitchRatio;
-        const double varispeed       = (double) ctl.stretchSpeed;
+        const double varispeed       = (double) ctl.stretchSpeed * tempoFollow;
         const double effStretchRatio = stretchRatio * pitchRatio;
         const double effReadRatio    = readRatio    * pitchRatio * varispeed;
         const double fileRate        = (readRatio / stretchRatio) * varispeed;   // source frames per output frame
@@ -935,8 +957,8 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     const double secPerBeat = ctx.secPerBeat;
 
     // ── Clip-range + mute/choke checks ────────
-    const int64 clipStart = (int64)(player.clipStartBeat * secPerBeat * mSampleRate);
-    const int64 clipEnd   = (int64)(player.clipEndBeat   * secPerBeat * mSampleRate);
+    const int64 clipStart = clipBeatToSample (player.clipStartBeat, secPerBeat, mSampleRate);
+    const int64 clipEnd   = clipBeatToSample (player.clipEndBeat,   secPerBeat, mSampleRate);
     if (ctx.projectEnd <= clipStart || ctx.projectStart >= clipEnd) return false;
 
     const int   row      = player.trackRow;
@@ -956,7 +978,12 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     // ── Decode params ────────────────────────────────────────────────────────
     const int   bufOffset    = (int) juce::jmax ((int64) 0, clipStart - ctx.projectStart);
     const int64 outPosInClip = (ctx.projectStart + bufOffset) - clipStart;
-    const double readRatio   = player.fileSampleRate / mSampleRate;
+    // QA-Ec (2b): Path B mirror of Path A's Resample tempo-follow - varispeed
+    // (rate + pitch together) folded into the read rate.  Path B has no
+    // per-clip pitch/varispeed knobs, so the read rate is the single slot.
+    const double tempoFollowB = (! player.stretchMode && player.originalBPM > 0.f)
+        ? juce::jlimit (1.0 / 64.0, 64.0, ctx.bpm / (double) player.originalBPM) : 1.0;
+    const double readRatio   = (player.fileSampleRate / mSampleRate) * tempoFollowB;
     // QA-Ea Task 0c (FL pre-roll record): mirror of Site A direct-read
     // offset (Vox/Inst FilePlay).  Rule-4 defensive floor: UI clamps
     // contentStartSamples >= 0; floor here is belt+suspenders against a
@@ -964,6 +991,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     const int64 contentStart = juce::jmax ((int64) 0, player.contentStartSamples);
     const int64 filePos      = (int64)(outPosInClip * readRatio)
                                + contentStart;
+    // (readRatio above already carries the QA-Ec Resample tempo-follow term.)
 
     const int64 fileTotalSamples = player.streamer->getTotalLength();
     // EOF guard: clip extends past file end -> skip.  filePos < 0 is
@@ -976,7 +1004,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     const double stretchRatio = (player.vocoder != nullptr
                                  && player.stretchMode
                                  && player.originalBPM > 0.f)
-        ? (double) player.originalBPM / ctx.bpm
+        ? juce::jlimit (1.0 / 64.0, 64.0, (double) player.originalBPM / ctx.bpm)   // QA-Ec degenerate-ratio clamp
         : 1.0;
 
     // QA-Ea Task 0c: mirror of Site A EOF reduction (Vox/Inst FilePlay).
@@ -1953,8 +1981,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         for (auto& p : mCurrentBlockClipSnapshot->players)
         {
             if (p.routeChannel == 0 || p.streamer == nullptr) continue;
-            const int64 cs = (int64)(p.clipStartBeat * secPerBeatPS * mSampleRate);
-            const int64 ce = (int64)(p.clipEndBeat   * secPerBeatPS * mSampleRate);
+            const int64 cs = clipBeatToSample (p.clipStartBeat, secPerBeatPS, mSampleRate);
+            const int64 ce = clipBeatToSample (p.clipEndBeat,   secPerBeatPS, mSampleRate);
             if (blockEnd <= cs || blockStart >= ce) continue;
 
             const int chId = p.routeChannel;
@@ -2860,8 +2888,8 @@ void VibeSynthProcessor::applyChokeGroupDispatch(
         const juce::int64 projectEnd = projectStartSamp + numSamples;
         for (auto& player : clipPlayers)
         {
-            const juce::int64 cs = (juce::int64)(player.clipStartBeat * secPerBeat * mSampleRate);
-            const juce::int64 ce = (juce::int64)(player.clipEndBeat   * secPerBeat * mSampleRate);
+            const juce::int64 cs = clipBeatToSample (player.clipStartBeat, secPerBeat, mSampleRate);
+            const juce::int64 ce = clipBeatToSample (player.clipEndBeat,   secPerBeat, mSampleRate);
             if (projectEnd <= cs || projectStartSamp >= ce)
                 player.mutedByChoke = false;
         }
@@ -2904,7 +2932,7 @@ void VibeSynthProcessor::applyChokeGroupDispatch(
         {
             const auto& p = clipPlayers[ci];
             if (p.chokeGroup <= 0) continue;
-            const juce::int64 cs = (juce::int64)(p.clipStartBeat * secPerBeat * mSampleRate);
+            const juce::int64 cs = clipBeatToSample (p.clipStartBeat, secPerBeat, mSampleRate);
             // Clip "starts" if its absolute sample falls inside [projectStart, projectEnd).
             if (cs >= projectStartSamp && cs < projectStartSamp + numSamples)
             {

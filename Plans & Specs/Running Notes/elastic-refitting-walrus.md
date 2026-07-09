@@ -50,3 +50,89 @@ applies ABOVE it in the callers.
 **Persistence (already round-trips):** block `PatternManager.cpp:1076-1077`/`:1468-1469` (+
 contentStart `:1094-1095`/`:1485-1486`, ticks `:1070`/`:1456-1461`); library
 `:1143-1145`/`:1553-1555`. PV degenerate-ratio backstop `PhaseVocoder.cpp:44`.
+
+## 2026-07-08 — Tasks 1-3 CODE-COMPLETE (built clean with QA-Eb, Jeff)
+
+- **Task 1 — true-length import (G).** Both import sites: `originalBPM` = the tempo in effect at
+  the TARGET BAR (base + ruler tempo flags via a local `tempoAtBar` walk — a drop into a
+  marker-section sizes at that section's tempo, "where it lands is actually how long it is").
+  New library entries get the import tempo stamped via `setAudioLibraryClipDefaults` — GUARDED by
+  a count-before/after check so re-importing an existing file never clobbers a user-set BPM.
+  `placeAudioLibraryEntry` now reads the entry's stored BPM (was: fresh hardcoded 120) AND
+  inherits the entry's stretch/resample mode (was: hardcoded Stretch — ignored a Properties edit;
+  aligns with the FILE-02 source-of-truth design).
+- **Task 2 — Resample follow (2b) + clamps.** Path A: `tempoFollow = bpm/originalBPM` folded into
+  the existing varispeed slots (read rate + consumption, never the vocoder ratio) — one term, all
+  downstream math (EOF window, srcEnd, reverse) inherits it. Path B: folded into `readRatio` (its
+  single rate slot). Both paths' stretch/follow ratios clamped [1/64, 64] (degenerate-ratio
+  hardening; the `outSamples<=0` skip stays — with the 120-premise gone it only fires on TRUE
+  content exhaustion). LOCKSTEP kept: both paths edited in the same commit.
+- **Task 3 — Shift+drag re-fit (F).** Applies ONCE at mouseUp (no mid-drag rebuilds):
+  `originalBPM *= newBeats/origBeats` (clamped 1..999). New `mStretchOrigBeats` member captures
+  the EXACT beat length at drag start — `mResizeOrigLen` is whole bars and would misfit sub-bar
+  clips. Stretch: doubles length -> half speed pitch-locked; Resample: the follow term makes the
+  same field re-speed with pitch (vinyl). Plain drags untouched. Rubber Band no-op stub deleted.
+- **Seam fix (found reading Path B): clip POSITIONS now resolve through the tempo map.** All five
+  `clipStartBeat/clipEndBeat * secPerBeat * sr` sites (render gate A, decode gate B, MT pre-scan,
+  choke scan x2) were linear-in-bpm — under ruler tempo flags clips would drift off the grid. New
+  file-static `clipBeatToSample` helper -> `TempoMap::sampleAtBeat` when active, linear fallback
+  (VST). This is the Ec<->TempoMap seam both plans flagged for coordination; §B.5 EC-9 tests it.
+- **Diagnostics:** none added. **Files:** `PluginProcessor.cpp`, `BuilderPage.h/.cpp`, test plan
+  §B.5 (+§B.3/§B.4 hash backfills ride the commits).
+
+## Held Work Log entry (apply at section pass)
+
+> Apply verbatim at §B.5 section pass; fill `<hash>` + date/outcome; group review line at G1 boundary.
+
+### <APPLY-DATE> — QA-Ec — True-length import at the target-bar tempo (kills the hardcoded-120 default + its silent instant-stretch) + Resample varispeed tempo-follow in both render paths + Shift+drag re-fit via exact beat-ratio BPM scaling (replaces the Rubber Band no-op) + degenerate-ratio clamps + clip positions resolved through the tempo map (grid-lock across tempo flags)
+
+**Bucket:** System Pages, Cross-cutting Infrastructure
+
+#### Done
+
+- **True-length import (G):** both import sites size the block at the tempo in effect at the
+  target bar and set `originalBPM` to it (render ratio = exactly 1 at import); new library entries
+  inherit the import tempo as source-of-truth BPM (guarded against clobbering user-set values);
+  `placeAudioLibraryEntry` reads the entry's BPM + stretch mode instead of hardcoding 120/Stretch.
+- **Resample tempo-follow (2b):** `bpm/originalBPM` varispeed term in Path A (folded into the
+  Stretch-knob varispeed slots) and Path B (read rate), rate + pitch together; 1:1 at the clip's
+  own tempo; ratios clamped [1/64, 64] both paths.
+- **Shift+drag re-fit (F):** at mouseUp, `originalBPM` scales by the exact beat-length ratio (new
+  `mStretchOrigBeats` capture — whole-bar math would misfit sub-bar clips); one persisted field
+  drives both modes; plain drags remain trim/extend; the no-op stub is gone.
+- **Tempo-map position seam:** five clip beat->sample sites route through
+  `TempoMap::sampleAtBeat` (file-static `clipBeatToSample`, linear VST fallback) so clips stay
+  grid-locked across ruler tempo flags.
+
+#### Found along the way
+
+- The BUILD-06 "missing rebuild trigger" claim was already stale at plan time (wired at QA-Ea
+  Task 0c) — recorded at group open; the REAL gap (rebuild without re-fit) is what Task 3 closed.
+- Clip-position linear math (the seam fix above) — found reading Path B during Task 2; fixed
+  in-batch (real bug under the new tempo-flag feature).
+
+#### What was done about each finding
+
+- Both folded in-batch; EC-9 verifies the seam. Nothing routed out.
+
+#### Group review (R3)
+
+- <G1-boundary outcome>
+
+#### Diagnostic Instrumentation Catalog
+
+- None added.
+
+#### Files touched
+
+`Source/PluginProcessor.cpp`, `Source/Standalone/BuilderPage.h/.cpp`, test plan §B.5, paired plan
++ running notes.
+
+#### Commit(s)
+
+`<hash>` (Tasks 1-3 + §B.5 + held entry — single batch commit). Verified via Master Test Plan
+§B.5, <section-pass date/outcome>.
+
+#### Next action
+
+- <filled at apply>.
