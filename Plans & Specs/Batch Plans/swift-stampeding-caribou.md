@@ -238,8 +238,8 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
 | 1 | QA-J collapse | Collapse to **QA-J-Verify** (campaign section: ear-verify DSP-06 + the §C ledger). The two residuals (stretch-path unmute staleness; UI-thread map growth) get fixed as small code items in **G3**. |
 | 2a | QA-Ec' remainder | Confirmed: Resample-follow, RB-stub replacement, import default, fit-to-grid, outSamples guard. PLUS block-RESIZE re-fit is core scope — fitRatio derives from block length, so resizing a block re-fits playback (this is where "stretch the block and it changes what plays" lives; BUILD-06 (QA-H) + QA-Fb' clip-resize propagation are the downstream fixes, expected to shrink to verification once Ec' lands). |
 | 2b | Resample/Stretch model | DUAL-TRIGGER on both tempo change AND block resize. Resample = varispeed (rate + pitch shift together). Stretch = time-stretch, pitch locked. |
-| 2c | Fit-to-grid | Automatic at import — clip block sizes to nearest whole bar count, ratio applied. (Deliberate pairing with the QA-TransportDisplay readout: displayed position/length = real length.) |
-| 2d | Import BPM default | Content-length derivation — nearest whole bar count at project BPM; replaces hardcoded 120. |
+| 2c | Import placement | *(CORRECTED by G1 answer G, 2026-07-08 — the "nearest whole bar" wording was Claude's option text, rejected by Jeff.)* Automatic at import: the clip lands at its TRUE wall-clock length converted at the current project tempo — exact, never rounded — and plays 1:1 at that position. (Deliberate pairing with the QA-TransportDisplay readout: where it lands is actually how long it is.) |
+| 2d | Import BPM default | *(CORRECTED by G1 answer G, same sitting.)* `originalBPM` = the project tempo at import (so the clip is unstretched at import; ratio = 1); block length = file duration in beats at that tempo. Replaces hardcoded 120. No bar rounding. "Fit-to-grid" as a separate feature is DEAD — what remains is tempo-follow (2b) + Shift+drag re-fit (F below). |
 | 3a | QA-Fb' remainder | Confirmed: WET-bleed gate, conditional-WET, channel-composite renderer, clip-resize propagation, dirty-flag investigation. |
 | 3b | Bleed gate behavior | New take = live input ONLY; prior-take playback never bleeds in. No bounce toggle. |
 | 4a | BUILD-05 / S key | S already works (cycles Standard/Slide/Portamento; converts selections; silently arms the new-note type with no selection — that invisibility was the "dead" report). Spec: visible active-note-type indicator + S converts selections; exact interaction (no-selection behavior, indicator click) pinned at G3/QA-H plan. D-8 fold (below) covers Note Properties + verifying slide/porta DSP audibly works. |
@@ -289,6 +289,22 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
 
 | When | What |
 |------|------|
-| G1 plan write | D-4 sub-specs (key layout / octave range / velocity behavior); tempo marker <-> tempo-automation precedence |
+| G1 plan write | D-4 sub-specs (key layout / octave range / velocity behavior); tempo marker <-> tempo-automation precedence — **ANSWERED, see next table** |
+
+### G1 plan-write answers — LOCKED 2026-07-08 (same sitting, second round)
+
+| # | Call | Locked answer |
+|---|------|---------------|
+| A1 | D-4 key layout | Two-row DAW convention: Z-row = lower octave whites (+ S D G H J blacks), Q-row = upper octave (+ number-row blacks). |
+| A2 | D-4 octave shift | Yes — PgUp/PgDn, +/-1 octave, clamped (Jeff delegated PgUp/PgDn-vs-arrows; arrows collide with roll navigation, so PgUp/PgDn). |
+| A3 | D-4 velocity | Fixed 0.8 (matches placed-note default). |
+| A4 | D-4 record vs audition | Full hardware-MIDI-keyboard parity — typed notes record. Mechanism: inject noteOn/noteOff into the live-MIDI collector (chord-safe; recorder + on-screen keyboard + active-tab dispatch for free). |
+| A5 | D-4 targeting | Active tab's engine (existing live-MIDI target follows focus). Confirmed. |
+| B | Marker <-> automation precedence | Last-writer-wins: markers set tempo at their bars; automation writes override while playing; markers re-assert at their boundaries. |
+| C | QA-Eb shape | Min-size clamp; NO outer Viewport (premise correction: no fixed design size exists; layout already proportional; a wrap would double-wrap the four self-scrolling surfaces). Floor derived by Claude, tuned by Jeff at the G1 smoke. Batch shrinks ~3-5h -> ~2-3h. |
+| D | Chord-as-unit resize mechanism | Selection-based multi-note resize: grabbing an edge when multiple notes are selected resizes ALL selected (the stamp already leaves the chord selected). Groups (Shift+G) stay what they are — manual, for permanent move-together. NO auto-grouping of stamps. |
+| E | BPM field once markers exist | Field EDITS the base tempo (bar 1 until the first marker); field DISPLAYS live effective tempo during playback as markers/automation change it. |
+| F | Which drag re-fits | Plain right-edge drag = trim/extend (unchanged). Shift+drag = re-fit (varispeed in Resample / pitch-locked stretch in Stretch, per 2b). |
+| G | Import behavior | See corrected 2c/2d rows above — true-length placement at project tempo, `originalBPM` = import-time project tempo, plays 1:1, no rounding, no import-time stretch. |
 | G3 start | 4a exact S-key/indicator interaction; 4c FL Humanize reference capture (Jeff screenshot); D-6 Riff Machine spec; D-8 Note Properties spec |
 | G6 start (QA-Templates open) | 13a specific genre picks; 13b gap-fill decisions (with the /preset-gaps report) |

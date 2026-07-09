@@ -1230,7 +1230,7 @@ needed to find what you should pull up to review the work.
 - **Bucket:** UI / L&F / Theming
 
 #### **QA-TransportDisplay: Transport-Bar Playback-Position Readout** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry)*
-**Plan file:** TBD (written in the bulk-run G1 group plan-file pass).
+**Plan file:** [`Plans & Specs/Batch Plans/punctual-gliding-otter.md`](Batch Plans/punctual-gliding-otter.md) *(G1 group open 2026-07-08; scope grew: D-4 typing-keyboard-MIDI folded per the marathon triage-gap finding — see the run plan's marathon answers)*.
 - Items: playback-position display on the transport bar (`Source/Standalone/GlobalTransportBar.h/.cpp`) — current position shown as **time** or **bars:beats**, user-swappable, live during playback in BOTH song and pattern mode (Jeff request 2026-07-08 at bulk-run plan review).
 - Scope: UI readout consuming the QA-Ed int64-sample clock via the existing playhead API (`getPosition`/`deriveBeat`) on the UI timer — read-only clock consumer; survives QA-TempoMap's anchor-to-map rework unchanged (it consumes the derived position, not the anchor internals); beats format rides the QA-Ee 96 PPQ tick base.  Constraint: the combined 40px transport bar must NOT grow (standing no-expand rule) — the readout compacts into existing width.
 - Risk: low — UI-only, read-only clock consumer.
@@ -1242,6 +1242,7 @@ needed to find what you should pull up to review the work.
 - Verify (Master Test Plan §B section): readout tracks playback live in song + pattern modes; toggle swaps format and persists per the locked persistence choice; displayed bars line up with audible downbeats; no transport-bar layout regression at 40px.
 
 #### **QA-Chords: Chord Stamp Stretch + Scale-Aware Dual-Mode** *(NEW — inserted 2026-06-05 at QA-Ee close)*
+**Plan file:** [`Plans & Specs/Batch Plans/harmonic-stacking-owl.md`](Batch Plans/harmonic-stacking-owl.md) *(G1 group open 2026-07-08; resize mechanism locked as selection-based multi-note resize per G1 answer D)*.
 - Items: (1) a stamped chord can't be stretched/resized (places as-is only); (2) dual-mode Root/Scale/Snap-to-Scale behavior.
 - Scope: Mode 1 (Snap-to-Scale OFF) — the chord dropdown (Major/Minor/Sus2/...) reads the globally active Root + Scale and generates a context-aware chord that fits the selected scale degrees relative to the clicked note (NOT static hardcoded semitone intervals).  Mode 2 (Snap-to-Scale ON) — strict scale compliance + an Octave Resolution Pass: a same-MIDI-note collision shifts the duplicate up to the next valid scale degree an octave up (preserving harmonic thickness, not stacking / deleting).  Deliverable = JUCE-compatible C++ data structures + algorithm for both modes + the MIDI-note array for the 96 PPQ grid + the octave-collision resolver.
 - Sequencing: **immediately after QA-TransportDisplay, before QA-TempoMap** (Jeff 2026-06-05 — last of the four new batches; re-pointed 2026-07-08 when QA-TransportDisplay inserted between — see §9 fifty-fifth Forks entry; see §6 arrow + §9 forty-ninth Forks entry).
@@ -1249,6 +1250,7 @@ needed to find what you should pull up to review the work.
 - **Bucket:** System Pages
 
 #### **QA-TempoMap: Audio-Thread Sample-Indexed Tempo Map** *(NEW — inserted 2026-06-01 at QA-Ed close)*
+**Plan file:** [`Plans & Specs/Batch Plans/steady-marching-ibex.md`](Batch Plans/steady-marching-ibex.md) *(G1 group open 2026-07-08; model locked at the marathon: stepped ruler markers; ramps via tempo automation; last-writer-wins)*.
 - Items: a full audio-thread sample-indexed tempo map — the SC-1 deferral from QA-Ed.  QA-Ed shipped the int64-sample transport source-of-truth + a single re-basing tempo anchor, but explicitly deferred a sample↔tick tempo MAP (Jeff's SC-1 lock — scope-creep rejected for that batch).
 - Scope: replace the single re-basing tempo anchor with an audio-thread sample-indexed tempo map so tempo changes are positioned sample-accurately across the arrangement (samples ↔ ticks resolved through the map at any sample position).  Capstone bridging QA-Ed's sample-domain clock + QA-Ee's musical-domain 96-PPQ tick clock.  Full DSP / data-model scope set at batch open.
 - Own §0-conformant plan file + own verification pass.
@@ -1260,6 +1262,7 @@ needed to find what you should pull up to review the work.
 - Verify (own plan file will detail): tempo changes land sample-accurately across a long arrangement; samples ↔ ticks round-trip through the map; existing tempo-automation behavior preserved or improved (no regression vs QA-Ed).
 
 #### **QA-Eb: Standalone App-Window Resizability** *(NEW — inserted 2026-05-17)*
+**Plan file:** [`Plans & Specs/Batch Plans/stretchy-framing-gecko.md`](Batch Plans/stretchy-framing-gecko.md) *(G1 group open 2026-07-08; re-shaped per G1 answer C: min-size clamp, NO outer Viewport — the fixed-design-size premise below was corrected by the 2026-07-08 surface map; original text preserved)*.
 - Items: standalone app-window user-resizability (new feature; Jeff
   request 2026-05-17 during the QA-E Task 7 verify session).  **NOT a
   carve-out of QA-L's `NAV-01`** — this is a fresh independent request;
@@ -1313,7 +1316,7 @@ needed to find what you should pull up to review the work.
 
 #### **QA-Ec: Audio-Clip Resample/Stretch Follow-Tempo + Fit-to-Grid Build-Out** *(NEW — inserted 2026-05-17)*
 
-**Plan file:** `Plans & Specs/Batch Plans/<silly-name>.md` (when started)
+**Plan file:** [`Plans & Specs/Batch Plans/elastic-refitting-walrus.md`](Batch Plans/elastic-refitting-walrus.md) *(G1 group open 2026-07-08; scope re-shaped by the marathon absorption findings + G1 answers 2b/F/G: Stretch-follow already shipped; true-length import replaces the fit-to-grid item; see the run plan's marathon answers)*.
 - Items: audio-clip Resample/Stretch "follow tempo / fit to grid" build-out (new finding, surfaced 2026-05-17 building the QA-Ea test rig). Currently a non-functional shell: abandoned Rubber Band stub (BuilderPage.cpp:4107-4111); Resample-follow has no code path; Stretch engages only on an accidental never-true condition. NOT a carve-out; NOT part of the QA-E cluster. Folds in the audio-clip silence defect (hardcoded-120 import default + PluginProcessor.cpp:533 outSamples<=0 guard → silent clip, no meter, on project-BPM change).
 - Scope (wiring + ratio-model + stub-replacement + guard-fix — DSP + persistence already exist; NOT from-scratch):
   - One consistent fitRatio model (content-beats vs block-beats, beat-domain so master-BPM-follow is free).
