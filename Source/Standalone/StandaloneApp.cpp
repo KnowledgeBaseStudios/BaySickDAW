@@ -791,8 +791,17 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     editor->setAudioCallback(mAdvancer.get());   // allows safe unregister/re-register around device switches
     mWindow->setContentOwned(editor, true);
 
-    // Full window mode -- launch maximized
-    mWindow->setResizable(false, false);
+    // QA-Eb (2026-07-08): user-resizable window with a working maximize
+    // button; launch stays maximized (unchanged behavior).  No corner
+    // resizer widget - border drag, matching the resizable child-window
+    // precedents (EventEditor / KeyBinds / UndoHistory).
+    mWindow->setResizable(true, false);
+    // Floor below which the layout stops being usable: the 40px bar's fixed
+    // occupants (controls 520 + pattern 176 + readout 100 + CPU 120 + gaps)
+    // need ~1050px before the ribbon guard (>60) kicks in, and the fixed
+    // chrome (24+40+26) plus the smallest workable page area needs ~700px
+    // of height.  Starting values - Jeff tunes at the G1 boundary smoke.
+    mWindow->setResizeLimits(1100, 700, 32000, 32000);
     mWindow->setFullScreen(true);
     mWindow->setVisible(true);
 }
