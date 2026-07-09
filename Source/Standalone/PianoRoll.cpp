@@ -24,7 +24,12 @@ static void sortNotes(std::vector<PianoNote>& notes)
 // Scale & chord tables
 // ─────────────────────────────────────────────────────────────────────────────
 struct ScaleDef { const char* name; std::array<bool,12> inKey; };
-struct ChordDef { const char* name; std::vector<int>   intervals; };
+// QA-Chords (2026-07-08): each chord carries a literal semitone shape (Mode 2
+// input - snapped into the scale when Snap-to-Scale is ON) AND a scale-degree
+// template (Mode 1 input - stacked on the roll's Root+Scale when Snap is OFF,
+// so the clicked degree's natural quality emerges from the scale; that is why
+// Major/Minor/Dim/Aug share the {0,2,4} triad template).
+struct ChordDef { const char* name; std::vector<int> intervals; std::vector<int> degrees; };
 
 static const ScaleDef kScaleDefs[] = {
     { "Chromatic",       {1,1,1,1,1,1,1,1,1,1,1,1} },
@@ -44,20 +49,20 @@ static const ScaleDef kScaleDefs[] = {
 static constexpr int kNumScales = (int)(sizeof(kScaleDefs) / sizeof(kScaleDefs[0]));
 
 static const ChordDef kChordDefs[] = {
-    { "Major",       {0, 4, 7}          },
-    { "Minor",       {0, 3, 7}          },
-    { "Dim",         {0, 3, 6}          },
-    { "Aug",         {0, 4, 8}          },
-    { "Sus2",        {0, 2, 7}          },
-    { "Sus4",        {0, 5, 7}          },
-    { "Major 7",     {0, 4, 7, 11}      },
-    { "Minor 7",     {0, 3, 7, 10}      },
-    { "Dom 7",       {0, 4, 7, 10}      },
-    { "Half-Dim 7",  {0, 3, 6, 10}      },
-    { "Dim 7",       {0, 3, 6,  9}      },
-    { "Major 9",     {0, 4, 7, 11, 14}  },
-    { "Minor 9",     {0, 3, 7, 10, 14}  },
-    { "Add 9",       {0, 4, 7, 14}      },
+    { "Major",       {0, 4, 7},          {0, 2, 4}       },
+    { "Minor",       {0, 3, 7},          {0, 2, 4}       },
+    { "Dim",         {0, 3, 6},          {0, 2, 4}       },
+    { "Aug",         {0, 4, 8},          {0, 2, 4}       },
+    { "Sus2",        {0, 2, 7},          {0, 1, 4}       },
+    { "Sus4",        {0, 5, 7},          {0, 3, 4}       },
+    { "Major 7",     {0, 4, 7, 11},      {0, 2, 4, 6}    },
+    { "Minor 7",     {0, 3, 7, 10},      {0, 2, 4, 6}    },
+    { "Dom 7",       {0, 4, 7, 10},      {0, 2, 4, 6}    },
+    { "Half-Dim 7",  {0, 3, 6, 10},      {0, 2, 4, 6}    },
+    { "Dim 7",       {0, 3, 6,  9},      {0, 2, 4, 6}    },
+    { "Major 9",     {0, 4, 7, 11, 14},  {0, 2, 4, 6, 8} },
+    { "Minor 9",     {0, 3, 7, 10, 14},  {0, 2, 4, 6, 8} },
+    { "Add 9",       {0, 4, 7, 14},      {0, 2, 4, 8}    },
 };
 static constexpr int kNumChords = (int)(sizeof(kChordDefs) / sizeof(kChordDefs[0]));
 
@@ -343,15 +348,20 @@ void PianoRollGrid::setScale(int root, const std::array<bool,12>& relIntervals, 
     mScaleRoot   = root;
     mScaleActive = active;
     mScaleInKey.fill(false);
-    if (active)
-        for (int i = 0; i < 12; ++i)
-            if (relIntervals[i]) mScaleInKey[(root + i) % 12] = true;
+    // QA-Chords: the table fills regardless of `active` - Mode 1 stamping
+    // consumes Root+Scale with Snap-to-Scale OFF.  Every snapping BEHAVIOR
+    // (snapPitchToScale / nextScalePitch / move-snap / transpose / row tint)
+    // stays gated on mScaleActive.
+    for (int i = 0; i < 12; ++i)
+        if (relIntervals[i]) mScaleInKey[(root + i) % 12] = true;
     repaint();
 }
 
-void PianoRollGrid::setStampChord(const std::vector<int>& intervals)
+void PianoRollGrid::setStampChord(const std::vector<int>& intervals,
+                                  const std::vector<int>& degrees)
 {
     mStampIntervals = intervals;
+    mStampDegrees   = degrees;
 }
 
 int PianoRollGrid::snapPitchToScale(int midiNote) const
@@ -386,17 +396,95 @@ int PianoRollGrid::nextScalePitch(int midiNote, int dir) const
 // ─────────────────────────────────────────────────────────────────────────────
 // Stamp chord
 // ─────────────────────────────────────────────────────────────────────────────
+std::vector<int> PianoRollGrid::resolveStampNotes(int clickedNote) const
+{
+    std::vector<int> out;
+    if (mStampIntervals.empty()) return out;
+
+    auto contains = [&out](int n) { return std::find(out.begin(), out.end(), n) != out.end(); };
+
+    if (mScaleActive)
+    {
+        // Mode 2 (Snap-to-Scale ON): literal shape -> strict per-note scale
+        // compliance -> octave-collision resolver.  A duplicate produced by
+        // snapping jumps an octave up (then re-snaps); if a dense stack still
+        // collides it walks up degree-by-degree.  Thickness preserved - notes
+        // are never merged or dropped (except off the top of MIDI range).
+        const int rootNote = snapPitchToScale(clickedNote);
+        for (int interval : mStampIntervals)
+        {
+            int mn = snapPitchToScale(jlimit(0, 127, rootNote + interval));
+            if (contains(mn)) mn = snapPitchToScale(jlimit(0, 127, mn + 12));
+            while (contains(mn) && mn < 127) mn = nextScalePitch(mn, +1);
+            if (!contains(mn)) out.push_back(mn);
+        }
+        return out;
+    }
+
+    // Mode 1 (Snap-to-Scale OFF): stack the chord's DEGREE template through
+    // the roll's Root+Scale at the clicked note - the degree's natural
+    // quality comes from the scale.  Chromatic (all 12 in key) would turn
+    // degree offsets into a tone cluster, so it - and any missing table -
+    // falls back to the literal shape (pre-QA-Chords behavior).
+    std::vector<int> scalePCs;
+    for (int pc = 0; pc < 12; ++pc)
+        if (mScaleInKey[pc]) scalePCs.push_back(pc);
+
+    if (scalePCs.empty() || (int) scalePCs.size() >= 12 || mStampDegrees.empty())
+    {
+        for (int interval : mStampIntervals)
+        {
+            const int mn = jlimit(0, 127, clickedNote + interval);
+            if (!contains(mn)) out.push_back(mn);
+        }
+        return out;
+    }
+
+    // Nearest in-scale root - same outward search as snapPitchToScale but
+    // ungated (mScaleActive is false in this branch by definition).
+    int root = clickedNote;
+    if (! mScaleInKey[((root % 12) + 12) % 12])
+    {
+        for (int dist = 1; dist <= 6; ++dist)
+        {
+            const int up = jlimit(0, 127, clickedNote + dist);
+            const int dn = jlimit(0, 127, clickedNote - dist);
+            if (mScaleInKey[up % 12]) { root = up; break; }
+            if (mScaleInKey[dn % 12]) { root = dn; break; }
+        }
+    }
+
+    const int scaleLen = (int) scalePCs.size();
+    const int rootPc   = ((root % 12) + 12) % 12;
+    int degIdx = 0;
+    for (int i = 0; i < scaleLen; ++i)
+        if (scalePCs[(size_t) i] == rootPc) { degIdx = i; break; }
+
+    int prev = root - 1;
+    for (int off : mStampDegrees)
+    {
+        const int d  = degIdx + off;
+        const int pc = scalePCs[(size_t)(d % scaleLen)];
+        int note = (root / 12) * 12 + pc + 12 * (d / scaleLen);
+        while (note <= prev) note += 12;    // enforce a strictly ascending stack
+        if (note > 127) break;
+        out.push_back(note);
+        prev = note;
+    }
+    return out;
+}
+
 void PianoRollGrid::stampChordAt(int x, int y)
 {
-    if (!mData || mStampIntervals.empty()) return;
+    if (!mData) return;
+    const auto chord = resolveStampNotes(yToNote(y));
+    if (chord.empty()) return;
     beginEdit("Stamp Chord");
-    int    rootNote = snapPitchToScale(yToNote(y));
-    double beat     = snapBeat(xToBeat(x));
-    double dur      = snapUnitBeats();
+    double beat = snapBeat(xToBeat(x));
+    double dur  = snapUnitBeats();
     std::vector<std::pair<double,int>> newKeys;
-    for (int interval : mStampIntervals)
+    for (int mn : chord)
     {
-        int mn = jlimit(0, 127, rootNote + interval);
         mData->notes.push_back({ mn, beat, dur, 0.8f, 0.f, 0.f });
         tagLastCreatedNote (mn);   // Phase C §P4.2
         newKeys.push_back({beat, mn});
@@ -920,6 +1008,35 @@ int PianoRollGrid::nextGroupId() const
     return maxId + 1;
 }
 
+// QA-Chords (2026-07-08): shared resize-gesture setup for the Draw + Select
+// entry points.  Grabbing a selected note's edge resizes the WHOLE selection
+// (group-expanded, matching Move); grabbing an unselected note resizes just
+// it - byte-identical to the old single-note behavior.
+void PianoRollGrid::beginResizeGesture(int grabbedIdx)
+{
+    beginEdit("Resize");
+    mResizing         = true;
+    mResizingFromLeft = mResizeFromLeftEnabled;
+    mResizeNoteIdx    = grabbedIdx;
+    mResizeOrigDur    = mData->notes[grabbedIdx].durationBeats;
+    mResizeOrigStart  = mData->notes[grabbedIdx].startBeat;
+
+    mResizeIndices.clear();
+    if (isSelected(grabbedIdx) && mSelection.size() > 1)
+        mResizeIndices = mSelection;
+    else
+        mResizeIndices.push_back(grabbedIdx);
+    expandForGroups(mResizeIndices);
+
+    mResizeOrigDurs.clear();
+    mResizeOrigStarts.clear();
+    for (int idx : mResizeIndices)
+    {
+        mResizeOrigDurs  .push_back(mData->notes[idx].durationBeats);
+        mResizeOrigStarts.push_back(mData->notes[idx].startBeat);
+    }
+}
+
 void PianoRollGrid::expandForGroups(std::vector<int>& indices) const
 {
     if (!mData || indices.empty()) return;
@@ -1325,12 +1442,7 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
             int ri = noteIndexNearRightEdge(e.x, e.y);
             if (ri >= 0)
             {
-                beginEdit("Resize");
-                mResizing        = true;
-                mResizingFromLeft = mResizeFromLeftEnabled;
-                mResizeNoteIdx   = ri;
-                mResizeOrigDur   = mData->notes[ri].durationBeats;
-                mResizeOrigStart = mData->notes[ri].startBeat;
+                beginResizeGesture(ri);
                 break;
             }
 
@@ -1454,12 +1566,7 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
             int ri = noteIndexNearRightEdge(e.x, e.y);
             if (ri >= 0)
             {
-                beginEdit("Resize");
-                mResizing        = true;
-                mResizingFromLeft = mResizeFromLeftEnabled;
-                mResizeNoteIdx   = ri;
-                mResizeOrigDur   = mData->notes[ri].durationBeats;
-                mResizeOrigStart = mData->notes[ri].startBeat;
+                beginResizeGesture(ri);
                 break;
             }
 
@@ -1626,11 +1733,15 @@ void PianoRollGrid::mouseDrag(const MouseEvent& e)
     // Resize drag
     if (mResizing && mResizeNoteIdx >= 0 && mResizeNoteIdx < (int)mData->notes.size())
     {
-        auto& n = mData->notes[mResizeNoteIdx];
         // QA-Ee Stage 3: snap ON -> min one snap step; free (Alt / Off) -> 1 tick.
         const int    rSnapDiv = onGetSnapDiv ? onGetSnapDiv() : 1;
         const double minDur   = (e.mods.isAltDown() || rSnapDiv <= 0)
                                   ? (1.0 / (double) kTicksPerBeat) : snapUnitBeats();
+
+        // QA-Chords: the delta is measured on the GRABBED note, then applied
+        // to every gesture member - same amount each, so relative lengths are
+        // preserved (D2) and each note floors at minDur independently.
+        double deltaStart = 0.0, deltaDur = 0.0;
         if (mResizingFromLeft)
         {
             // 2026-04-26 (D-7): drag the LEFT edge - keep the original right
@@ -1638,13 +1749,31 @@ void PianoRollGrid::mouseDrag(const MouseEvent& e)
             const double origEnd  = mResizeOrigStart + mResizeOrigDur;
             const double rawStart = e.mods.isAltDown() ? xToBeat(e.x) : snapBeat(xToBeat(e.x));
             const double newStart = jmax(0.0, jmin(rawStart, origEnd - minDur));
-            n.startBeat     = newStart;
-            n.durationBeats = origEnd - newStart;
+            deltaStart = newStart - mResizeOrigStart;
         }
         else
         {
-            double newEnd = e.mods.isAltDown() ? xToBeat(e.x) : snapBeat(xToBeat(e.x));
-            n.durationBeats = jmax(minDur, newEnd - n.startBeat);
+            const double newEnd = e.mods.isAltDown() ? xToBeat(e.x) : snapBeat(xToBeat(e.x));
+            deltaDur = jmax(minDur, newEnd - mResizeOrigStart) - mResizeOrigDur;
+        }
+
+        for (size_t k = 0; k < mResizeIndices.size(); ++k)
+        {
+            const int idx = mResizeIndices[k];
+            if (idx < 0 || idx >= (int)mData->notes.size()) continue;
+            auto& n = mData->notes[(size_t) idx];
+            if (mResizingFromLeft)
+            {
+                const double origEndK  = mResizeOrigStarts[k] + mResizeOrigDurs[k];
+                const double newStartK = jlimit(0.0, origEndK - minDur,
+                                                mResizeOrigStarts[k] + deltaStart);
+                n.startBeat     = newStartK;
+                n.durationBeats = origEndK - newStartK;
+            }
+            else
+            {
+                n.durationBeats = jmax(minDur, mResizeOrigDurs[k] + deltaDur);
+            }
         }
         if (onNotesChanged) onNotesChanged();
         repaint();
@@ -1784,10 +1913,25 @@ void PianoRollGrid::mouseUp(const MouseEvent&)
     // Finalise resize: sort
     if (mResizing && mData)
     {
+        // QA-Chords: a MULTI-note gesture can move startBeats (left edge), so
+        // the selection must survive the re-sort the same way Move's does -
+        // capture keys first, rebuild after.  Single-note resize keeps the
+        // pre-existing behavior exactly (no selection change).
+        const bool multi = mResizeIndices.size() > 1;
+        std::vector<std::pair<double,int>> keys;
+        if (multi)
+            for (int idx : mResizeIndices)
+                if (idx >= 0 && idx < (int)mData->notes.size())
+                    keys.push_back({mData->notes[(size_t) idx].startBeat,
+                                    mData->notes[(size_t) idx].midiNote});
         sortNotes(mData->notes);
+        if (multi && !keys.empty()) rebuildSelectionFromKeys(keys);
         commitEdit();
         if (onNotesChanged) onNotesChanged();
         mResizeNoteIdx = -1;
+        mResizeIndices.clear();
+        mResizeOrigDurs.clear();
+        mResizeOrigStarts.clear();
     }
 
     // Finalise marquee
@@ -2181,14 +2325,13 @@ void PianoRollGrid::paint(Graphics& g)
     // Stamp chord ghost preview
     if (mActiveTool == PRTool::Stamp && !mStampIntervals.empty())
     {
-        int    rootNote = snapPitchToScale(yToNote(mStampPos.y));
+        // QA-Chords: preview mirrors resolveStampNotes exactly (both modes).
         double beat     = snapBeat(xToBeat(mStampPos.x));
         int    px       = beatToX(beat);
         double dur      = snapUnitBeats();
         int    pw       = jmax(3, (int)(dur * mPPB) - 1);
-        for (int interval : mStampIntervals)
+        for (int mn : resolveStampNotes(yToNote(mStampPos.y)))
         {
-            int mn = jlimit(0, 127, rootNote + interval);
             int py = noteToY(mn);
             g.setColour(VC::Highlight.withAlpha(0.45f));
             g.fillRoundedRectangle((float)px, (float)(py + 1),
@@ -2710,7 +2853,7 @@ PianoRollContainer::PianoRollContainer()
     addAndMakeVisible(*mZoomOutBtn);
 
     // ── Initialise scale / chord state and seed the grid ─────────────────
-    mGrid->setStampChord(kChordDefs[mChordIdx].intervals);
+    mGrid->setStampChord(kChordDefs[mChordIdx].intervals, kChordDefs[mChordIdx].degrees);
     updateScaleFromUI();
 
     // ── Menu bar ──────────────────────────────────────────────────────────
@@ -3283,7 +3426,7 @@ void PianoRollContainer::selectChord(int chordIdx)
 {
     if (chordIdx < 0 || chordIdx >= kNumChords) return;
     mChordIdx = chordIdx;
-    if (mGrid) mGrid->setStampChord(kChordDefs[chordIdx].intervals);
+    if (mGrid) mGrid->setStampChord(kChordDefs[chordIdx].intervals, kChordDefs[chordIdx].degrees);
     setActiveTool(PianoRollGrid::PRTool::Stamp);
 }
 

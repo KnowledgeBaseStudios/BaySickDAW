@@ -35,3 +35,100 @@ gated): `:1608` move-snap, `:802` transpose, `:392` stamp-root, `:1912` row tint
 Mode-1 ancestor: `toolGenerateChords` `:3871-3972` — in-scale thirds `:3912-3914`, `pcToMidi`
 `:3917-3922`, stack+clamp `:3929-3934`. Snap toggle: Scale menu id 28 (`:4038`, handler `:4112`,
 `setScaleActive` `:3258-3262`). Undo brackets: stamp `:391`/`:405`, resize `:1322`/`:1782`.
+
+## 2026-07-08 — Tasks 1-3 CODE-COMPLETE (both configs build clean, Jeff)
+
+- **Task 1 — selection-based multi-note resize (D/D2).** New `beginResizeGesture(grabbedIdx)`
+  helper replaces the duplicated setup at both entry points (Draw + Select): gesture set =
+  `mSelection` when the grabbed note is selected and selection > 1, else just the grabbed note;
+  `expandForGroups` applied either way (grabbing a grouped note resizes its group — consistent
+  with Move). New parallel state `mResizeIndices`/`mResizeOrigDurs`/`mResizeOrigStarts`; the drag
+  computes the delta on the GRABBED note (right edge: dur delta; left edge: start delta) and
+  applies the same delta to every member with per-note `minDur` clamps. Grabbed-note math is
+  byte-identical to the old single path. Release: multi-gestures capture (startBeat, midiNote)
+  keys and `rebuildSelectionFromKeys` after `sortNotes` (left-edge moves starts → indices shift);
+  single-note release keeps the exact pre-existing behavior (no selection change).
+- **Task 2 — Mode 1 degree stacking.** `ChordDef` gained a `degrees` template column (14 chords:
+  triads {0,2,4} incl. Major/Minor/Dim/Aug collapsing by design; sus2 {0,1,4}; sus4 {0,3,4}; 7ths
+  {0,2,4,6}; 9ths {0,2,4,6,8}; Add9 {0,2,4,8}). `setScale` now fills `mScaleInKey` UNCONDITIONALLY
+  (audited all five gated behaviors — each checks `mScaleActive` before reading the table, so
+  nothing else changes). `setStampChord` carries both shapes; both call sites (`:2713` container
+  init + `selectChord`) pass them. New `resolveStampNotes(clickedNote)`: Snap OFF → nearest
+  in-scale root (ungated outward search) + degree stacking through the sorted in-scale pitch-class
+  list, strictly ascending, octave-lift per wrap; **fallback to the literal shape** when the scale
+  is Chromatic (12-in-key degree offsets = tone clusters), the table is empty, or no degree
+  template exists.
+- **Task 3 — Mode 2 strict snap + octave-collision resolver.** Snap ON → literal intervals, each
+  `snapPitchToScale`d; a duplicate jumps +12 then re-snaps; still-colliding walks `nextScalePitch`
+  upward; notes only ever drop off the TOP of MIDI range, never merged. Ghost preview now renders
+  `resolveStampNotes` output — preview == stamp in both modes.
+- **Behavior notes for the campaign:** grabbing one note of a Shift+G group now resizes the whole
+  group (new, consistent with group-move); Mode 1's Major/Minor/Dim/Aug all yield the clicked
+  degree's natural triad (the spec'd "fits the selected scale degrees" reading — re-spec at
+  section pass if it surprises).
+- **Diagnostics:** none added (nothing for the Rule 4 catalog).
+- **Files:** `PianoRoll.h` (resize state + gesture helper + resolveStampNotes + 2-arg
+  setStampChord + mStampDegrees), `PianoRoll.cpp` (ChordDef/kChordDefs, setScale, stamp/preview,
+  resize paths), test plan §B.2 (+§B.1 `blocks:` hash backfilled `d6d46cf`).
+
+## Held Work Log entry (apply at section pass)
+
+> Apply verbatim at §B.2 section pass; fill `<hash>` with the batch's source commit and the
+> section-pass date/outcome. Group review line fills at the G1 boundary.
+
+### <APPLY-DATE> — QA-Chords — Selection-based multi-note resize (same-delta, group-consistent) + scale-aware dual-mode chord stamp (Mode 1 degree-stacking off the roll's Root+Scale with Snap OFF; Mode 2 strict snap + octave-collision resolver with Snap ON; ghost preview mirrors both)
+
+**Bucket:** System Pages
+
+#### Done
+
+- **Task 1 — multi-select resize (Jeff's D/D2 locks: selection-based mechanism, same-delta,
+  relative lengths preserved).** `beginResizeGesture` unifies both resize entry points; gesture =
+  selection (when grabbed note ∈ selection, size > 1) else single note, group-expanded like Move.
+  Same-delta application with per-note min-duration floors, both edges; multi-gesture release
+  rebuilds selection across the re-sort; single-note behavior byte-identical to pre-batch. A fresh
+  stamp leaves the chord selected, so chord-as-unit resize works immediately (§5 item 1 closed).
+- **Task 2 — Mode 1 (Snap-to-Scale OFF).** Degree templates on all 14 chord types; `setScale`
+  fills the pitch-class table unconditionally (behaviors stay gated on `mScaleActive` — five sites
+  audited); `resolveStampNotes` stacks the template through the roll's Root+Scale at the
+  nearest-in-scale clicked note; Chromatic/empty-table/missing-template fall back to the literal
+  shape. Natural degree quality by design (Major/Minor/Dim/Aug share the triad template).
+- **Task 3 — Mode 2 (Snap-to-Scale ON).** Literal shape → strict per-note snap → collision
+  resolver (+12 re-snap, then `nextScalePitch` upward walk); thickness preserved, drop only off
+  the top of range. Ghost preview shares `resolveStampNotes` — preview equals result in both modes.
+
+#### Found along the way
+
+- Old release path never rebuilt the selection after `sortNotes` — harmless for right-edge
+  (startBeats unchanged) but a latent stale-selection risk on single-note LEFT-edge resize.
+  Multi-resize made rebuild mandatory; the single-note path was left exactly as it was (no
+  unprompted behavior change) — the latent single-note case is noted here for the campaign.
+
+#### What was done about each finding
+
+- Multi path: fixed structurally (keys captured + rebuilt). Single-note left-edge latent case:
+  intentionally untouched; log-only (route at section pass if the campaign reproduces a stale
+  selection).
+
+#### Group review (R3 — one /review-batch per checkpoint group)
+
+- <G1-boundary outcome — filled at group review>
+
+#### Diagnostic Instrumentation Catalog
+
+- None added.
+
+#### Files touched
+
+`Source/Standalone/PianoRoll.h`, `Source/Standalone/PianoRoll.cpp`,
+`Plans & Specs/Test Plans/v1-master-test-plan.md` (§B.2 + §B.1 hash backfill), paired plan +
+running notes.
+
+#### Commit(s)
+
+`<hash>` (Tasks 1-3 + §B.2 + held entry + running notes — single batch commit per the bulk-run
+model). Verified via Master Test Plan §B.2, <section-pass date/outcome>.
+
+#### Next action
+
+- <filled at apply: next unchecked §B section>.

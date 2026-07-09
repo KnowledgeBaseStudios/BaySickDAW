@@ -43,9 +43,8 @@ naming the batch's source commit (bisect anchor on failure).
 
 ### §B.1 — QA-TransportDisplay (position readout + D-4 typing keyboard)
 
-`blocks:` the QA-TransportDisplay source commit (message-tagged "QA-TransportDisplay"; hash
-backfilled at the next test-plan touch). Debug exe FIRST (screenshot any jassert), then confirm in
-Release — mark each scenario `D:` and `R:`.
+`blocks:` `d6d46cf` (QA-TransportDisplay Tasks 1+2). Debug exe FIRST (screenshot any jassert), then
+confirm in Release — mark each scenario `D:` and `R:`.
 
 - [ ] **TD-1 — readout tracks song mode.** Song mode, arrangement with content, play from the top;
       watch bars 2-5. Expected: beats mode reads `N:1:00` exactly at each audible downbeat,
@@ -82,6 +81,47 @@ Release — mark each scenario `D:` and `R:`.
       `D:__ R:__` notes:
 - [ ] **TD-13 — Vox tab parity (not a bug).** Typing ON on a Vox tab, press keys. Expected: silence —
       identical to a hardware MIDI keyboard on a Vox tab today. `D:__ R:__` notes:
+
+---
+
+### §B.2 — QA-Chords (multi-select resize + scale-aware dual-mode chord stamp)
+
+`blocks:` the QA-Chords source commit (message-tagged "QA-Chords"; hash backfilled at the next
+test-plan touch). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+
+- [ ] **CH-1 — chord resizes as a unit.** Stamp a Major 7 (Chords menu → click the grid), then
+      immediately drag one member's right edge. Expected: all four notes stretch together by the
+      same amount; ONE Ctrl+Z restores all four. `D:__ R:__` notes:
+- [ ] **CH-2 — mixed-length same-delta.** Marquee-select notes of different lengths, drag one
+      selected note's edge. Expected: each note changes by the same amount (relative differences
+      preserved); the shortest floors at the minimum length without stopping the others.
+      `D:__ R:__` notes:
+- [ ] **CH-3 — unselected grab = single resize.** With a selection active, grab the edge of a note
+      OUTSIDE it. Expected: only that note resizes; the selection is untouched. `D:__ R:__` notes:
+- [ ] **CH-4 — groups resize together.** Shift+G a set of notes, click empty space (deselect), grab
+      one member's edge. Expected: the whole group resizes (consistent with group-move). Alt+G
+      ungroups and they resize individually again. `D:__ R:__` notes:
+- [ ] **CH-5 — left-edge multi-resize.** Ctrl+Alt+Home (left-edge mode), repeat CH-1. Expected: all
+      selected notes' starts move by the same amount, right edges pinned; undo restores.
+      `D:__ R:__` notes:
+- [ ] **CH-6 — Mode 1 natural quality.** Scale menu: Root A, Scale Minor, Snap-to-Scale OFF. Stamp
+      "Major" on E. Expected: E-G-B (the degree's natural minor triad), every note in A minor —
+      NOT the literal E-G#-B. `D:__ R:__` notes:
+- [ ] **CH-7 — Mode 1 structures.** Same scale, stamp Major 7 / Sus2 / Add 9 on various rows.
+      Expected: 7th = four stacked scale-thirds; Sus2 = degrees 1-2-5; Add 9 = triad + ninth; zero
+      out-of-scale notes anywhere. `D:__ R:__` notes:
+- [ ] **CH-8 — Mode 2 collision resolver.** Scale Pentatonic Min, Snap-to-Scale ON, stamp Major 9
+      and Dim 7 on several rows. Expected: no two chord notes merge — collisions resolve an octave
+      up on valid scale degrees; note count = chord size (unless clamped off the top of the range).
+      `D:__ R:__` notes:
+- [ ] **CH-9 — ghost preview honesty.** Hover with the stamp in both modes before clicking.
+      Expected: the preview outline shows EXACTLY the notes the click then places. `D:__ R:__` notes:
+- [ ] **CH-10 — defaults + fallbacks.** Fresh roll (Scale menu untouched), Snap OFF: stamping
+      degree-stacks in C Major sensibly. Scale = Chromatic: stamping places the literal chord
+      shapes (old behavior). `D:__ R:__` notes:
+- [ ] **CH-11 — no regressions.** Single-note draw/click/resize, click-memory, P-key Generate
+      Chords, Alt+M mute, copy/paste all behave exactly as before; save → reload round-trips
+      (stamped notes are plain notes, no format change). `D:__ R:__` notes:
 
 ---
 

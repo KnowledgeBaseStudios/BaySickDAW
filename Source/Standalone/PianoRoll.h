@@ -116,7 +116,11 @@ public:
     // ── Scale snap ────────────────────────────────────────────────────────
     // relIntervals: which of the 12 pitch classes (relative to root=0) are in key
     void setScale      (int root, const std::array<bool,12>& relIntervals, bool active);
-    void setStampChord (const std::vector<int>& semitoneOffsets);
+    // QA-Chords (2026-07-08): the stamp carries BOTH shapes - literal semitone
+    // offsets (Mode 2 snaps them into the scale) and scale-degree offsets
+    // (Mode 1 stacks degrees of the roll's Root+Scale at the clicked note).
+    void setStampChord (const std::vector<int>& semitoneOffsets,
+                        const std::vector<int>& degreeOffsets);
 
     // ── Ghost notes (other rolls shown behind this one, with per-source color) ──
     void setGhostData  (const std::vector<std::pair<const PianoRollData*, juce::Colour>>& ghosts);
@@ -305,9 +309,17 @@ private:
 
     // ── Resize interaction ────────────────────────────────────────────────
     bool   mResizing        { false };
-    int    mResizeNoteIdx   { -1 };
-    double mResizeOrigDur   { 0.0 }; // kept for future Alt-25% snapping
-    double mResizeOrigStart { 0.0 }; // note's startBeat (immutable during resize)
+    int    mResizeNoteIdx   { -1 };  // the grabbed note (the drag delta is measured on it)
+    double mResizeOrigDur   { 0.0 };
+    double mResizeOrigStart { 0.0 }; // grabbed note's startBeat (immutable during resize)
+    // QA-Chords (2026-07-08): selection-based multi-note resize.  When the
+    // grabbed edge belongs to a selected note, every selected note (group-
+    // expanded, matching Move) resizes by the SAME delta - relative lengths
+    // preserved, per-note min-duration clamp (Jeff's D/D2 picks).
+    std::vector<int>    mResizeIndices;
+    std::vector<double> mResizeOrigDurs;    // parallel to mResizeIndices
+    std::vector<double> mResizeOrigStarts;
+    void beginResizeGesture (int grabbedIdx);
     // 2026-04-26 (D-7): when on, the right-edge-grab area moves to the LEFT
     // edge so dragging extends a note's start backward (instead of length).
     // Toggled via Ctrl+Alt+Home.
@@ -359,7 +371,8 @@ private:
     std::array<bool, 12> mScaleInKey  {};            // absolute pitch classes in key
 
     // ── Stamp (chord stamp) tool ──────────────────────────────────────────
-    std::vector<int>     mStampIntervals;             // semitone offsets for stamp chord
+    std::vector<int>     mStampIntervals;             // literal semitone offsets (Mode 2 input)
+    std::vector<int>     mStampDegrees;               // scale-degree offsets (Mode 1 input)
     juce::Point<int>     mStampPos;
 
     // ── Ghost notes ───────────────────────────────────────────────────────
@@ -400,6 +413,10 @@ private:
     // Scale helpers
     int  snapPitchToScale (int midiNote)          const; // nearest in-scale note
     int  nextScalePitch   (int midiNote, int dir) const; // next in-scale in direction (+1/-1)
+    // QA-Chords: final MIDI notes a stamp at `clickedNote` produces (Mode 1
+    // degree-stacking with Snap OFF / Mode 2 strict-snap + octave-collision
+    // resolver with Snap ON).  Shared by stampChordAt + the ghost preview.
+    std::vector<int> resolveStampNotes (int clickedNote) const;
 
     // Group helpers
     int  nextGroupId      ()                           const;
