@@ -462,6 +462,10 @@ public:
     // the path from the row.
     std::function<void(int row, const juce::String& rowName, const juce::String& filePath)> onAudioClipAdded;
     std::function<void()>                              onArrangementChanged;    // any block move/resize/delete → rebuild audio clip players
+    // QA-TempoMap (2026-07-08): fires after any ruler tempo-flag add/edit/
+    // delete; StandaloneEditor pushes the marker set into the playhead's
+    // timeline + marks the project dirty.
+    std::function<void()>                              onTempoMapChanged;
     // QA-E Task 7 (FILE-02): "Routes to:" dropdown support.  Both wired by
     // StandaloneEditor (mirrors onArrangementChanged / onAudioClipAdded).
     // onEnumerateRoutablePages → one RoutablePageInfo per Vox/Inst/Clips page
@@ -808,6 +812,9 @@ public:
     void promptRenameTimeMarker(int idx);
     void promptAddTimeSigChange(int bar);
     void promptEditTimeSigChange(int idx);
+    // QA-TempoMap (2026-07-08): ruler tempo-flag prompts.
+    void promptAddTempoChange(int bar);
+    void promptEditTempoChange(int idx);
     juce::String getTooltip() override;   // TooltipClient - shows marker label / TS info on ruler hover
 
     // ── Paint helpers ─────────────────────────────────────────────────────────

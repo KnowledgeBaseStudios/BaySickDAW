@@ -78,6 +78,18 @@ lit `:1856-1858`, `allMidi` feeds the MIDI recorder. Alternative hold-audition a
   `KeyBindings.h/.cpp`, `TypingKeyboardMap.h` (new), `PianoRoll.cpp`, `DrumKitGrid.cpp`,
   `BuilderPage.cpp` (bypass lines), `STANDALONE_UI_CHANGES.md`, test plan §B.1.
 
+## 2026-07-08 — DEFECT found by Jeff at app-open + FIXED (z-order)
+
+Jeff launched the app after the QA-TempoMap build and saw EMPTY SPACE where the readout belongs.
+Root cause: `addAndMakeVisible (*mPosReadout)` ran in the ctor's transport-WIRING block
+(StandaloneEditor.cpp:897), but `addAndMakeVisible(*mTransport)` runs later (:987) — later child =
+higher z-order, so the bar's full-width brushed-aluminum paint covered the readout entirely. The
+overlay convention (STANDALONE_UI_CHANGES.md: transport added FIRST as background; pattern button
++ ribbon added after) was documented and I missed applying it to the new overlay child. Fix: the
+add moved to immediately after the transport's add (comment records the rule at both sites).
+Fix commit references QA-TransportDisplay (owning batch) per the bulk-run fix-commit rule.
+Lesson logged: any new overlay child of the 40px bar must be added after mTransport.
+
 ## Held Work Log entry (apply at section pass)
 
 > Apply verbatim below at §B.1 section pass; fill `<hash>` with the batch's source commit and

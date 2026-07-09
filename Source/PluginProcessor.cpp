@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "TempoMapRead.h"   // QA-TempoMap: stepped tempo timeline (standalone publishes; VST falls back)
 // 2026-04-25: BaySickDrumsProcessor include removed - class deleted.
 #include "BaySickSynth/BaySickSynthProcessor.h"   // D1.4-fix (c): drum transpose compensation
 #include "BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-5: singleton sfizz drum-kit engine
@@ -1391,12 +1392,24 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             const double  loopStartBeat = mLoopStartBeats.load (std::memory_order_relaxed);
             const double  loopEndBeat   = mCachedPatternLoopBeats.load (std::memory_order_relaxed);
             const double  spb           = 60.0 * mSampleRate / juce::jmax (1e-6, bpmVal);
-            // Loop sample-bounds measured from the CURRENT (samplePos, beatStart)
-            // point on the playhead's tempo-anchor line, NOT from beat 0 -- matches
-            // advanceBlock so the scheduler + playhead share the exact same wrap
-            // point under any tempo (identical to from-zero at constant tempo).
-            const int64_t loopEndSamp   = loopEndBeat > 0.0 ? samplePos + (int64_t) std::llround ((loopEndBeat   - beatStart) * spb) : 0;
-            const int64_t loopStartSamp = loopEndBeat > 0.0 ? samplePos + (int64_t) std::llround ((loopStartBeat - beatStart) * spb) : 0;
+            // QA-TempoMap: with a published timeline, every beat<->sample
+            // conversion goes through the map so tempo steps land sample-
+            // exactly (incl. INSIDE a block); without one (legacy VST target,
+            // host owns tempo) everything falls back to the pre-map linear
+            // math below.
+            const bool tmActive = TempoMap::isActive();
+            if (tmActive)
+                beatEnd = TempoMap::beatAtSample (samplePos + numSamples);   // exact across an in-block tempo step
+            // Loop sample-bounds: the map is an absolute sample<->beat
+            // function, so from-origin lookups are exact at any tempo; the
+            // linear fallback measures from the CURRENT (samplePos, beatStart)
+            // point, matching advanceBlock's pre-map math.
+            const int64_t loopEndSamp   = loopEndBeat > 0.0
+                ? (tmActive ? TempoMap::sampleAtBeat (loopEndBeat)
+                            : samplePos + (int64_t) std::llround ((loopEndBeat   - beatStart) * spb)) : 0;
+            const int64_t loopStartSamp = loopEndBeat > 0.0
+                ? (tmActive ? TempoMap::sampleAtBeat (loopStartBeat)
+                            : samplePos + (int64_t) std::llround ((loopStartBeat - beatStart) * spb)) : 0;
             const int64_t loopSpanSamp  = loopEndSamp - loopStartSamp;
 
             struct RollWindow { double winStart; double winEnd; int sampleBase; };
@@ -1412,13 +1425,33 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             if (straddle)
             {
                 wrapSmp = (int) juce::jlimit<int64_t> (0, numSamples - 1, loopEndSamp - samplePos);
-                windows[nWin++] = { beatStart,     loopEndBeat,                            0 };
-                windows[nWin++] = { loopStartBeat, loopStartBeat + (beatEnd - loopEndBeat), wrapSmp };
+                // QA-TempoMap: the wrapped tail's musical end derives through
+                // the map from the post-wrap sample range (the tempo just
+                // after loopStart can differ from the one at loopEnd).
+                const double wrapEnd = tmActive
+                    ? TempoMap::beatAtSample (loopStartSamp + (int64_t) (numSamples - wrapSmp))
+                    : loopStartBeat + (beatEnd - loopEndBeat);
+                windows[nWin++] = { beatStart,     loopEndBeat, 0 };
+                windows[nWin++] = { loopStartBeat, wrapEnd,     wrapSmp };
             }
             else
             {
                 windows[nWin++] = { beatStart, beatEnd, 0 };
             }
+
+            // QA-TempoMap: beat -> in-block sample offset within a window.
+            // Map path: offset = exact sample distance from the window's
+            // musical start (window 1's base re-anchors at the wrap sample).
+            // Fallback: the pre-map linear division.
+            auto beatToSmpInWindow = [&] (double absBeat, const RollWindow& w) -> int
+            {
+                if (tmActive)
+                    return (int) juce::jlimit<int64_t> (0, (int64_t) numSamples - 1,
+                        (int64_t) w.sampleBase
+                          + (TempoMap::sampleAtBeat (absBeat) - TempoMap::sampleAtBeat (w.winStart)));
+                return juce::jlimit (0, numSamples - 1,
+                                     w.sampleBase + (int) ((absBeat - w.winStart) / bs));
+            };
 
             // Decode a pending-off's target -> per-engine buffer + emit a noteOff.
             auto emitOff = [&] (const PRPendingOff& off, int smp)
@@ -1464,7 +1497,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     if (straddle && off.beatOff >= loopEndBeat) { emitOff (off, wrapSmp); continue; }
                     if (off.beatOff < beatEnd)
                     {
-                        emitOff (off, juce::jlimit (0, numSamples - 1, (int) ((off.beatOff - beatStart) / bs)));
+                        emitOff (off, beatToSmpInWindow (off.beatOff, windows[0]));
                         continue;
                     }
                     keep.push_back (off);
@@ -1490,8 +1523,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     {
                         if (absStart >= windows[w].winStart && absStart < windows[w].winEnd)
                         {
-                            const int smp = juce::jlimit (0, numSamples - 1,
-                                windows[w].sampleBase + (int) ((absStart - windows[w].winStart) / bs));
+                            const int smp = beatToSmpInWindow (absStart, windows[w]);
                             emitPianoNoteOn (buf, note, smp);
                             double off = absStart + note.durationBeats;
                             if (off > offHi) off = offHi;
@@ -2017,6 +2049,18 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
         // false until the count-in timer fires), which dropped the count-in bar
         // out of recorded note positions (notes a measure early + sheared length).
         double bps = bpm / (60.0 * mSampleRate);
+        // QA-TempoMap: while the transport runs, feed the exact per-block
+        // AVERAGE beats-per-sample from the map so the recorder's accumulated
+        // clock cannot drift across a tempo-boundary block (a persistent
+        // whole-take error, unlike one-off placement).  The count-in keeps
+        // the linear clock - the transport is frozen then and the map delta
+        // would be zero.
+        if (pos.getIsPlaying() && TempoMap::isActive())
+        {
+            const int64_t p0 = pos.getTimeInSamples().orFallback((int64_t) 0);
+            bps = juce::jmax(1e-9, (TempoMap::beatAtSample(p0 + numSamples)
+                                    - TempoMap::beatAtSample(p0)) / (double) numSamples);
+        }
         mMidiRecorder.processBlock(allMidi, numSamples, bps);
     }
 
@@ -2168,9 +2212,37 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                     const int accentEvery = mPatternManager
                         ? juce::jmax (1, mPatternManager->currentPattern().tsNum)
                         : 4;
-                    for (int s = 0; s < numSamples; ++s)
+
+                    // QA-TempoMap: this metronome is the marker ear-check
+                    // instrument, so tick placement must stay sample-exact
+                    // through a tempo step - split the block at the boundary
+                    // (one per block is the realistic case) into constant-
+                    // tempo spans instead of one linear sweep.  Fallback = the
+                    // pre-map single span.
+                    struct MetroSpan { int s0; int s1; double beat0; double bps; };
+                    MetroSpan spans[2];
+                    int nSpans = 0;
+                    if (TempoMap::isActive())
                     {
-                        double sampleBeat = bs0 + s * bps;
+                        const int64_t smp0 = pi->getTimeInSamples().orFallback((int64_t) 0);
+                        const int64_t bnd  = TempoMap::nextBoundaryAfter(smp0);
+                        const int cut = (bnd > smp0 && bnd < smp0 + numSamples)
+                                          ? (int)(bnd - smp0) : numSamples;
+                        spans[nSpans++] = { 0, cut, TempoMap::beatAtSample(smp0),
+                                            juce::jmax(1e-6, TempoMap::bpmAtSample(smp0) / (60.0 * mSampleRate)) };
+                        if (cut < numSamples)
+                            spans[nSpans++] = { cut, numSamples, TempoMap::beatAtSample(bnd),
+                                                juce::jmax(1e-6, TempoMap::bpmAtSample(bnd) / (60.0 * mSampleRate)) };
+                    }
+                    else
+                    {
+                        spans[nSpans++] = { 0, numSamples, bs0, bps };
+                    }
+
+                    for (int sp = 0; sp < nSpans; ++sp)
+                    for (int s = spans[sp].s0; s < spans[sp].s1; ++s)
+                    {
+                        double sampleBeat = spans[sp].beat0 + (s - spans[sp].s0) * spans[sp].bps;
                         double beatFloor  = std::floor(sampleBeat);
                         if (beatFloor < mMetro.lastBeatFloor - 1.0)
                             mMetro.lastBeatFloor = beatFloor - 1.0;

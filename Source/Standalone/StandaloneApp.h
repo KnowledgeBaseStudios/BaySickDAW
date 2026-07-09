@@ -1,6 +1,9 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../PluginProcessor.h"
+#include "../TempoMapRead.h"   // QA-TempoMap: the published stepped tempo timeline
+#include <vector>
+#include <utility>
 
 // ── Fake AudioPlayHead for standalone transport ───────────────────────────────
 class StandalonePlayHead : public juce::AudioPlayHead
@@ -18,8 +21,23 @@ public:
     // consumer wouldn't see the recording state.
     bool   isRecording()         const { return mRecording.load(); }
     void   setRecording(bool r)        { mRecording.store(r); }
-    double getBPM()              const { return mBPM.load(); }
-    void   setBPM(double bpm);                          // re-anchors the tempo anchor (message thread)
+    // QA-TempoMap: getBPM() reports the EFFECTIVE tempo at the playhead (the
+    // BPM field displays it live per Jeff's E pick); the BASE tempo (bar 1
+    // until the first marker - the project-persisted value) is separate.
+    double getBPM()              const
+    {
+        return TempoMap::isActive() ? TempoMap::bpmAtSample (mSamplePos.load())
+                                    : mBPM.load();
+    }
+    double getBaseTempo()        const { return mBPM.load(); }
+    void   setBPM(double bpm);                          // edits the BASE tempo (message thread)
+    // QA-TempoMap: live tempo override (the tempo-automation applicator).
+    // Truncate-and-appends a tail segment at the playhead; markers ahead
+    // remain in the timeline and re-assert at their samples (last-writer-wins).
+    void   setLiveTempo(double bpm);
+    // QA-TempoMap: ruler tempo flags, pushed by StandaloneEditor whenever the
+    // marker set changes.  {beat, bpm}, any order; stored sorted.
+    void   setTempoMarkers(std::vector<std::pair<double,double>> markers);
     double getCurrentBeat()      const { return deriveBeat(mSamplePos.load()); }
     // QA-TransportDisplay: wall-clock position from the sample counter - the
     // sample domain is the transport truth, so this stays exact across tempo
@@ -77,22 +95,24 @@ private:
     std::atomic<bool>    mSeekDiscontinuity { false };
     std::atomic<bool>    mLoopWrapped       { false };   // QA-Ee Task 1c: set on loop wrap, consumed by the scheduler
 
-    // Tempo anchor: beat = mAnchorBeat + (sample - mAnchorSample) * bpm/(60*sr).
-    // Re-based on every BPM change / seek so derived beats stay continuous
-    // across tempo automation.  Because the formula is linear in the sample
-    // count, a constant-tempo loop-wrap of mSamplePos derives the exact
-    // wrapped beat with NO anchor write on the audio thread (loopStartSamp
-    // maps to loopStartBeat by construction).  The three fields are published
-    // as a group via a SEQLOCK (mAnchorSeq): single writer = the message
-    // thread (setBPM/seekTo/start/reset); readers (audio getPosition +
-    // message-thread UI cursor) retry on a torn read.
-    std::atomic<uint32_t> mAnchorSeq    { 0 };
-    std::atomic<double>   mAnchorBeat   { 0.0 };
-    std::atomic<int64_t>  mAnchorSample { 0 };
-    std::atomic<double>   mAnchorBpm    { 120.0 };
+    // QA-TempoMap (2026-07-08): beat is derived piecewise-linearly through the
+    // stepped sample-indexed timeline published in TempoMap:: (TempoMapRead.h)
+    // - replaces the QA-Ed single re-basing anchor (whose seqlock protocol the
+    // timeline publication inherits).  mBPM stores the BASE tempo; mMarkers is
+    // the message-thread copy of the ruler tempo flags.  Single writer stays
+    // the message thread: every mutation (base edit / marker CRUD / live
+    // automation write) rebuilds + republishes.  While PLAYING, rebuilds
+    // truncate-and-append at the playhead so already-heard mapping never
+    // re-maps and the sample clock never jumps; while STOPPED, rebuilds are
+    // pure and the playhead relocates to keep its BEAT (bar) position.  A
+    // loop-wrap needs NO timeline write: the map is a pure sample->beat
+    // function, so wrapped samples re-derive their beats exactly at any
+    // number of intervening tempo changes.
+    std::vector<std::pair<double,double>> mMarkers;   // {beat, bpm} sorted; message thread only
 
+    void   rebuildTimeline (double forwardTempoOverride = -1.0);
+    double markerRuleTempoAtBeat (double beat) const;   // base + markers rule (message thread)
     double deriveBeat (int64_t sample) const;
-    void   publishAnchor (double beat, int64_t sample, double bpm);
 };
 
 // J-A2 (2026-05-04): master-output routing globals.  Atomics live here so the

@@ -1730,6 +1730,25 @@ void ArrangementGrid::drawRuler(Graphics& g) const
             g.drawText(txt, rx + 1, 1, textW, kRulerH - 2,
                        Justification::centred, false);
         }
+
+        // QA-TempoMap (2026-07-08): tempo flags - amber pill with the BPM
+        // number, distinct from the yellow marker pennant + blue TS pill.
+        for (int i = 0; i < mPM.getNumTempoChanges(); ++i)
+        {
+            const auto& tc = mPM.getTempoChange(i);
+            int rx = barToX((float) tc.bar);
+            if (rx < -40 || rx > b.getWidth()) continue;
+            const juce::String txt = juce::String((int) std::llround(tc.bpm));
+            const int textW = 26;
+            g.setColour(juce::Colour(0xffFFB030).withAlpha(0.9f));
+            g.drawVerticalLine(rx, 1.f, (float)(kRulerH - 3));
+            g.setColour(juce::Colour(0xff3A2F18));
+            g.fillRoundedRectangle((float)(rx + 1), 1.f, (float) textW, (float)(kRulerH - 2), 2.f);
+            g.setColour(juce::Colour(0xffFFB030));
+            g.setFont(Font(9.f, Font::bold));
+            g.drawText(txt, rx + 1, 1, textW, kRulerH - 2,
+                       Justification::centred, false);
+        }
     }
 
     // Playhead triangle arrow - drawn last so it's always on top of ruler content
@@ -2886,6 +2905,14 @@ juce::String ArrangementGrid::getTooltip()
              + "\nRight-click to edit / delete";
     }
 
+    const int tcIdx = mPM.findTempoChangeNearBar (bar, 0.5f);
+    if (tcIdx >= 0)
+    {
+        const auto& tc = mPM.getTempoChange (tcIdx);
+        return "Tempo: " + juce::String (tc.bpm, 1) + " BPM from Bar " + juce::String (tc.bar + 1)
+             + "\nRight-click to edit / delete";
+    }
+
     return {};
 }
 
@@ -2900,6 +2927,7 @@ void ArrangementGrid::showRulerContextMenu(int xPx)
 
     const int existingMarker = mPM.findTimeMarkerNearBar(clickedBar, 0.5f);
     const int existingTS     = mPM.findTimeSigChangeAtBar(snappedBar);
+    const int existingTempo  = mPM.findTempoChangeNearBar(clickedBar, 0.5f);
 
     juce::PopupMenu m;
     if (existingMarker >= 0)
@@ -2919,20 +2947,82 @@ void ArrangementGrid::showRulerContextMenu(int xPx)
         m.addItem (4, "Delete Time Signature");
         m.addSeparator();
     }
+    if (existingTempo >= 0)
+    {
+        const auto& tc = mPM.getTempoChange(existingTempo);
+        m.addSectionHeader ("Tempo: " + juce::String(tc.bpm, 1) + " BPM  @ Bar "
+                            + juce::String(tc.bar + 1));
+        m.addItem (5, "Edit Tempo Change...");
+        m.addItem (6, "Delete Tempo Change");
+        m.addSeparator();
+    }
     m.addItem (10, "Add Time Marker at Bar " + juce::String(snappedBar + 1) + "...");
     m.addItem (11, "Add Time Signature at Bar " + juce::String(snappedBar + 1) + "...");
+    m.addItem (12, "Add Tempo Change at Bar " + juce::String(snappedBar + 1) + "...");
 
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent(this),
-        [this, snappedBar, existingMarker, existingTS](int result)
+        [this, snappedBar, existingMarker, existingTS, existingTempo](int result)
         {
             if (result <= 0) return;
             if (result == 1 && existingMarker >= 0) promptRenameTimeMarker(existingMarker);
             else if (result == 2 && existingMarker >= 0) { mPM.removeTimeMarker(existingMarker); repaint(); }
             else if (result == 3 && existingTS >= 0)     promptEditTimeSigChange(existingTS);
             else if (result == 4 && existingTS >= 0)     { mPM.removeTimeSigChange(existingTS); repaint(); }
+            else if (result == 5 && existingTempo >= 0)  promptEditTempoChange(existingTempo);
+            else if (result == 6 && existingTempo >= 0)
+            {
+                mPM.removeTempoChange(existingTempo);
+                if (onTempoMapChanged) onTempoMapChanged();
+                repaint();
+            }
             else if (result == 10) promptAddTimeMarker(snappedBar);
             else if (result == 11) promptAddTimeSigChange(snappedBar);
+            else if (result == 12) promptAddTempoChange(snappedBar);
         });
+}
+
+// QA-TempoMap (2026-07-08): tempo-flag prompts - mirror the D-2 prompt shape.
+void ArrangementGrid::promptAddTempoChange(int bar)
+{
+    auto* aw = new juce::AlertWindow ("Add Tempo Change",
+        "Tempo from Bar " + juce::String(bar + 1) + " onward (20-300 BPM):",
+        juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("bpm", "120");
+    aw->addButton ("Add",    1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    aw->enterModalState (true,
+        juce::ModalCallbackFunction::create ([this, bar, aw](int r)
+        {
+            if (r != 1) return;
+            const double bpm = aw->getTextEditorContents("bpm").getDoubleValue();
+            if (bpm <= 0.0) return;
+            mPM.addTempoChange (bar, bpm);
+            if (onTempoMapChanged) onTempoMapChanged();
+            repaint();
+        }), true);
+}
+
+void ArrangementGrid::promptEditTempoChange(int idx)
+{
+    if (idx < 0 || idx >= mPM.getNumTempoChanges()) return;
+    const auto cur = mPM.getTempoChange(idx);
+    auto* aw = new juce::AlertWindow ("Edit Tempo Change",
+        "Tempo from Bar " + juce::String(cur.bar + 1) + " onward (20-300 BPM):",
+        juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("bpm", juce::String(cur.bpm, 1));
+    aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    aw->enterModalState (true,
+        juce::ModalCallbackFunction::create ([this, cur, aw](int r)
+        {
+            if (r != 1) return;
+            const double bpm = aw->getTextEditorContents("bpm").getDoubleValue();
+            if (bpm <= 0.0) return;
+            // addTempoChange replaces the existing change at the same bar.
+            mPM.addTempoChange (cur.bar, bpm);
+            if (onTempoMapChanged) onTempoMapChanged();
+            repaint();
+        }), true);
 }
 
 void ArrangementGrid::promptAddTimeMarker(int bar)

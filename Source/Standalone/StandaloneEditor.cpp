@@ -606,8 +606,12 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     {
         const double bpm = juce::jlimit (kTempoMinBpm, kTempoMaxBpm,
             kTempoMinBpm + v01 * (kTempoMaxBpm - kTempoMinBpm));
-        mPlayHead.setBPM (bpm);
-        if (mPM) mPM->setGlobalTempo (bpm);
+        // QA-TempoMap: automation is a LIVE override (truncate-and-append tail
+        // segment; ruler tempo flags ahead re-assert = last-writer-wins).  It
+        // no longer writes the persisted BASE tempo - the BPM field owns that
+        // (Jeff's E pick); pre-map code wrote setGlobalTempo here, which would
+        // now corrupt the base with transient automation values.
+        mPlayHead.setLiveTempo (bpm);
     };
     mAutomationValueReaders["global_tempo"] = [this, kTempoMinBpm, kTempoMaxBpm]() -> float
     {
@@ -765,6 +769,9 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     };
     mTransport->onSongModeChanged = [this](bool songMode) {
         mProcessor.setSongMode(songMode);
+        // QA-TempoMap: markers are song-domain - the timeline gains/loses
+        // them on every mode switch (base tempo + live automation persist).
+        pushTempoMarkersToPlayHead();
     };
     mTransport->onSongLoopModeChanged = [this](bool loop) {
         mProcessor.mSongLoopMode.store(loop, std::memory_order_relaxed);
@@ -887,7 +894,9 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     };
     mPosReadout->onDisplayModeChanged = [this] (bool showTime) { saveTransportDisplayPref (showTime); };
     loadTransportDisplayPref();
-    addAndMakeVisible (*mPosReadout);
+    // NOTE: added as a child further down, AFTER addAndMakeVisible(*mTransport)
+    // - the transport bar paints the full 40px row, so overlay children must
+    // be added later to sit on top (same z-order rule as mPatternBtn/mRibbon).
 
     // D-4: the bar button reports clicks; Ctrl+T routes through perform() -
     // both land in toggleTypingKeyboard() so the two entry points can't drift.
@@ -978,6 +987,9 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                                                nullptr);
     };
     addAndMakeVisible(*mTransport);
+    // QA-TransportDisplay: the readout overlays the bar - must be added AFTER
+    // it (later child = higher z-order) or the bar's full-width paint hides it.
+    if (mPosReadout) addAndMakeVisible (*mPosReadout);
 
     // ── Title label - hidden (title now lives in the OS window title bar) ─────
     mTitleLabel = std::make_unique<juce::Label>();
@@ -2139,6 +2151,15 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         {
             mProcessor.rebuildAudioClipPlayers();
         };
+        // QA-TempoMap: ruler tempo-flag mutations rebuild the playhead's
+        // timeline (markers ride the uniform 4-beats/bar the whole playback
+        // path uses) + dirty the project.
+        grid->onTempoMapChanged = [this]()
+        {
+            pushTempoMarkersToPlayHead();
+            if (mProjectManager) mProjectManager->markDirty();
+        };
+        pushTempoMarkersToPlayHead();   // initial publish (also seeds the timeline at startup)
 
         // QA-E Task 7 (FILE-02): enumerate every Vox/Inst/Clips page for the
         // Audio Clip Properties "Routes to:" dropdown.  channelId mapping
@@ -9093,6 +9114,22 @@ void StandaloneEditor::resized()
 // ─────────────────────────────────────────────────────────────────────────────
 // QA-TransportDisplay: readout persistence + D-4 typing-keyboard MIDI
 
+void StandaloneEditor::pushTempoMarkersToPlayHead()
+{
+    if (! mPM) return;
+    // Markers are SONG-domain (a looping pattern has no song position, so
+    // pattern mode plays the base tempo) - push the empty set there and the
+    // full set in song mode; onSongModeChanged re-pushes on every switch.
+    std::vector<std::pair<double,double>> markers;
+    if (mTransport && mTransport->isSongMode())
+        for (int i = 0; i < mPM->getNumTempoChanges(); ++i)
+        {
+            const auto& tc = mPM->getTempoChange (i);
+            markers.push_back ({ (double) tc.bar * 4.0, tc.bpm });
+        }
+    mPlayHead.setTempoMarkers (std::move (markers));
+}
+
 void StandaloneEditor::loadTransportDisplayPref()
 {
     if (! mPosReadout) return;
@@ -10954,6 +10991,18 @@ static void syncTempoFromPatternManager (StandalonePlayHead& ph,
                                           PatternManager* pm)
 {
     if (pm == nullptr) return;
+    // QA-TempoMap: push the loaded ruler tempo flags BEFORE the base so the
+    // single rebuild that setBPM triggers sees the full marker set.  Markers
+    // are song-domain; pattern mode gets the empty set (and every later mode
+    // switch re-pushes via onSongModeChanged).
+    std::vector<std::pair<double,double>> markers;
+    if (transport && transport->isSongMode())
+        for (int i = 0; i < pm->getNumTempoChanges(); ++i)
+        {
+            const auto& tc = pm->getTempoChange (i);
+            markers.push_back ({ (double) tc.bar * 4.0, tc.bpm });
+        }
+    ph.setTempoMarkers (std::move (markers));
     const double bpm = pm->getGlobalTempo();
     ph.setBPM (bpm);
     if (transport)

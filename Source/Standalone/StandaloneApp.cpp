@@ -135,39 +135,106 @@ namespace MasterOutputRouting
 // ── StandalonePlayHead ────────────────────────────────────────────────────────
 // QA-Ed: position is an int64 ABSOLUTE sample count (mSamplePos), advanced by
 // exact integer addition each block; the loop-wrap is an exact integer-sample
-// modulo (no float fmod).  Beat is DERIVED from the sample count through a
-// seqlock-published tempo anchor, so per-block float accumulation drift (the
-// Issue 3 root cause) is eliminated and the public API stays in beats.
+// modulo (no float fmod).  QA-TempoMap: beat is DERIVED from the sample count
+// through the stepped sample-indexed timeline (TempoMapRead.h), so multiple
+// tempo changes sit at exact sample positions; the float-accumulation drift
+// fix from QA-Ed is preserved and the public API stays in beats.
 
 double StandalonePlayHead::deriveBeat (int64_t sample) const
 {
-    // Fence-based seqlock read of the (beat, sample, bpm) anchor tuple.  Spins
-    // only while a message-thread writer is mid-publish (rare; bounded).
-    double ab, bpm; int64_t as; uint32_t s1, s2;
-    do {
-        s1  = mAnchorSeq.load (std::memory_order_acquire);
-        ab  = mAnchorBeat  .load (std::memory_order_relaxed);
-        as  = mAnchorSample.load (std::memory_order_relaxed);
-        bpm = mAnchorBpm   .load (std::memory_order_relaxed);
-        std::atomic_thread_fence (std::memory_order_acquire);
-        s2  = mAnchorSeq.load (std::memory_order_relaxed);
-    } while ((s1 & 1u) != 0u || s1 != s2);
-
+    if (TempoMap::isActive())
+        return TempoMap::beatAtSample (sample);
+    // Pre-first-publish fallback (startup order) - linear on the base tempo.
     const double sr = mSampleRate.load();
-    return ab + (double) (sample - as) * bpm / (60.0 * (sr > 0.0 ? sr : 44100.0));
+    return (double) sample * mBPM.load() / (60.0 * (sr > 0.0 ? sr : 44100.0));
 }
 
-void StandalonePlayHead::publishAnchor (double beat, int64_t sample, double bpm)
+double StandalonePlayHead::markerRuleTempoAtBeat (double beat) const
 {
-    // Single writer (message thread): setBPM / seekTo / start / reset.
-    const uint32_t s = mAnchorSeq.load (std::memory_order_relaxed);
-    mAnchorSeq.store (s + 1, std::memory_order_relaxed);            // odd = write in progress
-    std::atomic_thread_fence (std::memory_order_release);
-    mAnchorBeat  .store (beat,   std::memory_order_relaxed);
-    mAnchorSample.store (sample, std::memory_order_relaxed);
-    mAnchorBpm   .store (bpm,    std::memory_order_relaxed);
-    std::atomic_thread_fence (std::memory_order_release);
-    mAnchorSeq.store (s + 2, std::memory_order_relaxed);            // even = published
+    // The base+markers rule: base tempo until the first marker, then each
+    // marker's bpm from its beat forward.  Live automation overrides are NOT
+    // part of the rule - they enter as explicit tail segments.
+    double t = mBPM.load();
+    for (const auto& m : mMarkers)
+    {
+        if (m.first <= beat) t = m.second;
+        else break;
+    }
+    return t;
+}
+
+void StandalonePlayHead::rebuildTimeline (double forwardTempoOverride)
+{
+    // Message thread only (the timeline's single writer).
+    const double  sr  = juce::jmax (1.0, mSampleRate.load());
+    const int64_t now = mSamplePos.load();
+
+    static_assert (TempoMap::kMaxSegs >= 2, "timeline needs headroom");
+    int64_t smp[TempoMap::kMaxSegs];
+    double  bt [TempoMap::kMaxSegs];
+    double  bp [TempoMap::kMaxSegs];
+    int n = 0;
+
+    const bool   playing    = mPlaying.load();
+    const bool   wasActive  = TempoMap::isActive();
+    const double curBeatOld = deriveBeat (now);
+
+    if (playing && wasActive)
+    {
+        // Truncate-and-append: mapping already heard stays untouched (history
+        // never re-maps mid-play, so the sample clock and every derived beat
+        // behind the playhead are stable); the pivot re-states the current
+        // position, and everything ahead is rebuilt from the rule.  This is
+        // the only writer, so plain reads of the published globals are safe.
+        const int oldN = juce::jlimit (1, TempoMap::kMaxSegs,
+                                       TempoMap::gCount.load (std::memory_order_relaxed));
+        for (int i = 0; i < oldN && n < TempoMap::kMaxSegs - 1; ++i)
+        {
+            const int64_t s = TempoMap::gSegSample[i].load (std::memory_order_relaxed);
+            if (s >= now) break;
+            smp[n] = s;
+            bt [n] = TempoMap::gSegBeat[i].load (std::memory_order_relaxed);
+            bp [n] = TempoMap::gSegBpm [i].load (std::memory_order_relaxed);
+            ++n;
+        }
+        const double fwd = forwardTempoOverride > 0.0 ? forwardTempoOverride
+                                                      : markerRuleTempoAtBeat (curBeatOld);
+        smp[n] = now; bt[n] = curBeatOld; bp[n] = fwd; ++n;
+
+        for (const auto& m : mMarkers)
+        {
+            if (m.first <= curBeatOld) continue;
+            if (n >= TempoMap::kMaxSegs) break;
+            const int64_t s = smp[n-1] + (int64_t) std::llround (
+                (m.first - bt[n-1]) * 60.0 * sr / juce::jmax (1e-6, bp[n-1]));
+            smp[n] = s; bt[n] = m.first; bp[n] = m.second; ++n;
+        }
+    }
+    else
+    {
+        // Pure rebuild from origin: base tempo, then every marker cumulatively.
+        smp[0] = 0; bt[0] = 0.0;
+        bp[0]  = forwardTempoOverride > 0.0 && ! playing && mMarkers.empty()
+                   ? forwardTempoOverride : mBPM.load();
+        n = 1;
+        for (const auto& m : mMarkers)
+        {
+            if (n >= TempoMap::kMaxSegs) break;
+            if (m.first <= 0.0) { bp[0] = m.second; continue; }   // a bar-1 marker IS the opening tempo
+            const int64_t s = smp[n-1] + (int64_t) std::llround (
+                (m.first - bt[n-1]) * 60.0 * sr / juce::jmax (1e-6, bp[n-1]));
+            smp[n] = s; bt[n] = m.first; bp[n] = m.second; ++n;
+        }
+    }
+
+    TempoMap::publish (smp, bt, bp, n, sr);
+
+    if (! playing)
+    {
+        // Stopped: keep the MUSICAL position (the user sits "at bar N"; a
+        // tempo edit must not move their bar) - relocate the sample clock.
+        mSamplePos.store (TempoMap::sampleAtBeat (juce::jmax (0.0, curBeatOld)));
+    }
 }
 
 void StandalonePlayHead::advanceBlock(int numSamples, double sampleRate)
@@ -181,19 +248,24 @@ void StandalonePlayHead::advanceBlock(int numSamples, double sampleRate)
     const double loopEndBeat = mLoopBeats.load();
     if (loopEndBeat > 0.0)
     {
-        // Measure the loop's sample bounds from the playhead's CURRENT point on
-        // the tempo-anchor line, NOT from beat 0.  Under a mid-loop tempo change
-        // the anchor re-bases away from the origin, so a from-zero
-        // llround(loopEndBeat*spb) no longer maps to loopEndBeat -- the loop
-        // wrapped early, the derived beat went negative, and each pass got
-        // shorter.  Anchoring the bounds to (oldPos, curBeat) keeps them exact at
-        // any tempo (and is identical to the from-zero math at constant tempo,
-        // where curBeat == oldPos/spb).
-        const double  curBeat       = deriveBeat (oldPos);
-        const double  spb           = 60.0 * sampleRate / juce::jmax (1e-6, mBPM.load());
-        const int64_t loopEndSamp   = oldPos + (int64_t) std::llround ((loopEndBeat       - curBeat) * spb);
-        const int64_t loopStartSamp = oldPos + (int64_t) std::llround ((mLoopStart.load() - curBeat) * spb);
-        const int64_t span          = loopEndSamp - loopStartSamp;
+        // QA-TempoMap: the timeline is an absolute sample<->beat map, so the
+        // loop bounds are exact from-origin lookups at ANY number of tempo
+        // changes (the QA-Ed relative-anchor dance existed because one anchor
+        // re-based away from the origin; the map never does).  Falls back to
+        // base-tempo linear math before the first publish.
+        int64_t loopEndSamp, loopStartSamp;
+        if (TempoMap::isActive())
+        {
+            loopEndSamp   = TempoMap::sampleAtBeat (loopEndBeat);
+            loopStartSamp = TempoMap::sampleAtBeat (mLoopStart.load());
+        }
+        else
+        {
+            const double spb = 60.0 * sampleRate / juce::jmax (1e-6, mBPM.load());
+            loopEndSamp   = (int64_t) std::llround (loopEndBeat       * spb);
+            loopStartSamp = (int64_t) std::llround (mLoopStart.load() * spb);
+        }
+        const int64_t span = loopEndSamp - loopStartSamp;
         // Exact integer wrap, overshoot PRESERVED (carries into the next pass)
         // so looped content stays sample-locked to absolute time -> no drift.
         if (span > 0 && pos >= loopEndSamp)
@@ -211,42 +283,63 @@ void StandalonePlayHead::advanceBlock(int numSamples, double sampleRate)
 
 void StandalonePlayHead::start(double bpm)
 {
-    // Re-anchor at the current position under the new bpm, then play.
-    publishAnchor (deriveBeat (mSamplePos.load()), mSamplePos.load(), bpm);
-    mBPM.store (bpm);
+    setBPM (bpm);           // base-tempo edit semantics (rebuild handles continuity)
     mPlaying.store (true);
 }
 void StandalonePlayHead::stop()  { mPlaying.store (false); }
 void StandalonePlayHead::reset()
 {
     mSamplePos.store (0);
-    publishAnchor (0.0, 0, mBPM.load());
     mSeekDiscontinuity.store (false);
     mLoopWrapped.store (false);   // QA-Ee Task 1c
     mPlaying.store (false);
+    rebuildTimeline();            // pure map from origin
 }
 void StandalonePlayHead::setBPM(double bpm)
 {
-    // Re-anchor so the derived beat stays continuous across the tempo change,
-    // then derive from the new bpm going forward.
-    publishAnchor (deriveBeat (mSamplePos.load()), mSamplePos.load(), bpm);
+    // QA-TempoMap: edits the BASE tempo (Jeff's E pick - the field edits the
+    // base; markers own their own spans).  The rebuild preserves continuity:
+    // playing -> truncate-and-append at the playhead; stopped -> pure rebuild
+    // + beat-stable relocation.
     mBPM.store (bpm);
+    rebuildTimeline();
+}
+void StandalonePlayHead::setLiveTempo(double bpm)
+{
+    // Tempo-automation write: an explicit tail segment at the playhead; later
+    // markers stay in the timeline and re-assert at their samples
+    // (last-writer-wins).  Does NOT touch the base tempo.
+    rebuildTimeline (juce::jmax (1.0, bpm));
+}
+void StandalonePlayHead::setTempoMarkers(std::vector<std::pair<double,double>> markers)
+{
+    std::sort (markers.begin(), markers.end(),
+               [] (const auto& a, const auto& b) { return a.first < b.first; });
+    mMarkers = std::move (markers);
+    rebuildTimeline();
 }
 void StandalonePlayHead::seekTo(double beat)
 {
     beat = juce::jmax (0.0, beat);
     const double  oldBeat = deriveBeat (mSamplePos.load());
-    const double  spb     = 60.0 * mSampleRate.load() / juce::jmax (1e-6, mBPM.load());
-    const int64_t s       = (int64_t) std::llround (beat * spb);
+    int64_t s;
+    if (TempoMap::isActive())
+        s = TempoMap::sampleAtBeat (beat);   // exact through every tempo step
+    else
+        s = (int64_t) std::llround (beat * 60.0 * mSampleRate.load()
+                                    / juce::jmax (1e-6, mBPM.load()));
     mSamplePos.store (s);
-    publishAnchor (beat, s, mBPM.load());                 // getCurrentBeat()==beat right after
     if (beat < oldBeat) mSeekDiscontinuity.store (true);  // backward seek -> scheduler off-flush
 }
 
 juce::Optional<juce::AudioPlayHead::PositionInfo> StandalonePlayHead::getPosition() const
 {
     PositionInfo info;
-    info.setBpm(mBPM.load());
+    // QA-TempoMap: per-block EFFECTIVE tempo (the segment under the playhead)
+    // - every block-rate consumer (BlockContext, strip tasks, clip stretch
+    // ratio, metronome) inherits the right value through PositionInfo.
+    info.setBpm(TempoMap::isActive() ? TempoMap::bpmAtSample (mSamplePos.load())
+                                     : mBPM.load());
     info.setPpqPosition(deriveBeat (mSamplePos.load()));
     info.setTimeInSamples(mSamplePos.load());   // exact integer clock the scheduler shares
     info.setIsPlaying(mPlaying.load());

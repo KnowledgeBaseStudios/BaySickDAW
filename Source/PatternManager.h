@@ -258,6 +258,17 @@ struct TimeSigChange
     int den { 4 };   // note value (denominator - power of 2)
 };
 
+// QA-TempoMap (2026-07-08): stepped tempo-change flags on the Builder ruler.
+// Bar-authored; beat = bar * 4 (uniform 4 beats/bar - song-level TS markers
+// stay decorative for playback, same convention every playback consumer
+// already uses).  Tempo applies from `bar` forward until the next change;
+// the base tempo (mGlobalTempo) covers bar 1 until the first change.
+struct TempoChange
+{
+    int    bar { 0 };
+    double bpm { 120.0 };
+};
+
 // ── Clip type ─────────────────────────────────────────────────────────────────
 enum class ClipType { Pattern, Audio, Automation };
 
@@ -489,6 +500,13 @@ public:
     void                 removeTimeSigChange (int idx);
     int                  findTimeSigChangeAtBar (int bar) const;   // exact-bar match, -1 otherwise
 
+    // ── Tempo changes (QA-TempoMap, 2026-07-08) ──────────────────────────
+    int                getNumTempoChanges() const { return (int) mTempoChanges.size(); }
+    const TempoChange& getTempoChange (int idx) const { return mTempoChanges[(size_t) idx]; }
+    void               addTempoChange (int bar, double bpm);       // replaces an existing same-bar change
+    void               removeTempoChange (int idx);
+    int                findTempoChangeNearBar (float bar, float tolerance = 0.5f) const;
+
     // C.5 (2026-04-30): time-signature-aware beat/bar conversion.
     // The DAW beat is one quarter note (PPQ).  For a time signature N/D, one
     // bar contains N * (4/D) PPQ beats - so 4/4 = 4 beats, 3/4 = 3, 6/8 = 3,
@@ -634,6 +652,8 @@ private:
     // D-2 (2026-04-26): time-markers + time-signature-changes - project scope.
     std::vector<TimeMarker>       mTimeMarkers;
     std::vector<TimeSigChange>    mTimeSigChanges;
+    // QA-TempoMap (2026-07-08): ruler tempo flags - project scope.
+    std::vector<TempoChange>      mTempoChanges;
     int                           mCurrentPattern { 0 };
     double                        mGlobalTempo    { 120.0 };   // 2026-04-24
     std::array<bool, MAX_DRUM_SOUNDS> mDrumEnabled;

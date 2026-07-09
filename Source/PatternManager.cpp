@@ -412,6 +412,40 @@ int PatternManager::findTimeSigChangeAtBar (int bar) const
     return -1;
 }
 
+// ── Tempo changes (QA-TempoMap, 2026-07-08) ─────────────────────────────
+void PatternManager::addTempoChange (int bar, double bpm)
+{
+    bar = juce::jmax (0, bar);
+    bpm = juce::jlimit (20.0, 300.0, bpm);   // the tempo range every other writer clamps to
+    for (auto& tc : mTempoChanges)
+        if (tc.bar == bar) { tc.bpm = bpm; notifyContentChanged(); return; }   // one change per bar
+    mTempoChanges.push_back ({ bar, bpm });
+    std::sort (mTempoChanges.begin(), mTempoChanges.end(),
+               [] (const TempoChange& a, const TempoChange& b) { return a.bar < b.bar; });
+    notifyContentChanged();
+}
+
+void PatternManager::removeTempoChange (int idx)
+{
+    if (idx >= 0 && idx < (int) mTempoChanges.size())
+    {
+        mTempoChanges.erase (mTempoChanges.begin() + idx);
+        notifyContentChanged();
+    }
+}
+
+int PatternManager::findTempoChangeNearBar (float bar, float tolerance) const
+{
+    int   bestIdx  = -1;
+    float bestDist = tolerance + 1.f;
+    for (int i = 0; i < (int) mTempoChanges.size(); ++i)
+    {
+        const float d = std::abs ((float) mTempoChanges[(size_t) i].bar - bar);
+        if (d <= tolerance && d < bestDist) { bestIdx = i; bestDist = d; }
+    }
+    return bestIdx;
+}
+
 // ── C.5: time-signature-aware beat/bar conversion ────────────────────────────
 TimeSigChange PatternManager::getEffectiveTimeSigAtBar (int bar) const
 {
@@ -1127,6 +1161,17 @@ juce::ValueTree PatternManager::toValueTree() const
             ts.addChild(e, -1, nullptr);
         }
         root.addChild(ts, -1, nullptr);
+
+        // QA-TempoMap (2026-07-08): ruler tempo flags.
+        juce::ValueTree tc("TempoChanges");
+        for (const auto& t : mTempoChanges)
+        {
+            juce::ValueTree e("Tempo");
+            e.setProperty("bar", t.bar, nullptr);
+            e.setProperty("bpm", t.bpm, nullptr);
+            tc.addChild(e, -1, nullptr);
+        }
+        root.addChild(tc, -1, nullptr);
     }
 
     // ── Audio library + automation-lane template library ────────────────────
@@ -1533,6 +1578,21 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         }
         std::sort(mTimeSigChanges.begin(), mTimeSigChanges.end(),
                   [](const TimeSigChange& a, const TimeSigChange& b) { return a.bar < b.bar; });
+
+        // QA-TempoMap (2026-07-08): ruler tempo flags (absent in old projects).
+        mTempoChanges.clear();
+        auto tc = root.getChildWithName("TempoChanges");
+        for (int i = 0; i < tc.getNumChildren(); ++i)
+        {
+            auto e = tc.getChild(i);
+            if (! e.hasType("Tempo")) continue;
+            TempoChange t;
+            t.bar = (int)    e.getProperty("bar", 0);
+            t.bpm = (double) e.getProperty("bpm", 120.0);
+            mTempoChanges.push_back(t);
+        }
+        std::sort(mTempoChanges.begin(), mTempoChanges.end(),
+                  [](const TempoChange& a, const TempoChange& b) { return a.bar < b.bar; });
     }
 
     // ── Audio library + automation-lane template library ────────────────────

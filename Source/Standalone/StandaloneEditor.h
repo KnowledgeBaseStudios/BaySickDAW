@@ -340,6 +340,10 @@ private:
     void loadTransportDisplayPref();
     void saveTransportDisplayPref (bool showTime);
 
+    // QA-TempoMap: rebuild the playhead's tempo timeline from the ruler
+    // tempo flags (bar-authored; beat = bar * 4 per the uniform playback grid).
+    void pushTempoMarkersToPlayHead();
+
     // Page entries: parallel to ribbon tabs
     juce::OwnedArray<PageEntry> mPages;
 

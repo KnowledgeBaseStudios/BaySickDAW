@@ -86,8 +86,8 @@ confirm in Release — mark each scenario `D:` and `R:`.
 
 ### §B.2 — QA-Chords (multi-select resize + scale-aware dual-mode chord stamp)
 
-`blocks:` the QA-Chords source commit (message-tagged "QA-Chords"; hash backfilled at the next
-test-plan touch). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+`blocks:` `805ca03` (QA-Chords Tasks 1-3). Debug exe FIRST, then Release — mark each scenario
+`D:` and `R:`.
 
 - [ ] **CH-1 — chord resizes as a unit.** Stamp a Major 7 (Chords menu → click the grid), then
       immediately drag one member's right edge. Expected: all four notes stretch together by the
@@ -122,6 +122,55 @@ test-plan touch). Debug exe FIRST, then Release — mark each scenario `D:` and 
 - [ ] **CH-11 — no regressions.** Single-note draw/click/resize, click-memory, P-key Generate
       Chords, Alt+M mute, copy/paste all behave exactly as before; save → reload round-trips
       (stamped notes are plain notes, no format change). `D:__ R:__` notes:
+
+---
+
+### §B.3 — QA-TempoMap (stepped tempo timeline + ruler tempo flags)
+
+`blocks:` the QA-TempoMap source commit (message-tagged "QA-TempoMap"; hash backfilled at the next
+test-plan touch). Debug exe FIRST — this batch touched the transport core; screenshot ANY jassert.
+G1 ear-check batch: use the QA-TransportDisplay readout + metronome as the measuring instruments.
+
+- [ ] **TM-1 — marker lands on the downbeat (the headline ear-check).** Song mode, project at 140,
+      metronome on. Ruler right-click at bar 5 → "Add Tempo Change" → 90. Play from bar 1.
+      Expected: the click and the music audibly slow EXACTLY on bar 5's downbeat (readout `5:1:00`);
+      no early/late tick around the boundary. `D:__ R:__` notes:
+- [ ] **TM-2 — readout continuity.** Same setup, watch the readout across the marker. Expected:
+      beats roll continuously (no jump at bar 5); time display's rate visibly changes slope.
+      `D:__ R:__` notes:
+- [ ] **TM-3 — multiple markers + song loop.** Markers 140 → 90 (bar 5) → 160 (bar 9); loop the song
+      across both. Expected: every pass hits both changes tight; loop wrap returns to 140 cleanly;
+      no drift pass-to-pass. `D:__ R:__` notes:
+- [ ] **TM-4 — BPM field displays live, edits base.** Play across the bar-5 marker. Expected: field
+      reads 140 before, flips to 90 at the marker. While past the marker, type 120 into the field.
+      Expected: the pre-marker section is now 120 (verify by replaying from bar 1); the marker
+      section stays 90. `D:__ R:__` notes:
+- [ ] **TM-5 — automation override + marker re-assert (last-writer-wins).** Tempo automation clip
+      spanning bars 3-7 (right-click BPM field → Automate tempo, draw values), marker 90 at bar 9.
+      Expected: automation values win while its points play (bars 3-7); past the clip the tempo
+      holds until bar 9, where the marker re-asserts 90. `D:__ R:__` notes:
+- [ ] **TM-6 — clips follow the step (ear-check).** A Stretch-mode audio clip spanning bar 5
+      (marker 140→90): rate slows at the boundary, pitch locked. A Resample-mode clip: slows AND
+      pitches down (vinyl). `D:__ R:__` notes:
+- [ ] **TM-7 — pattern mode = base only.** Switch to pattern mode with the bar-5 marker present.
+      Expected: pattern loops at the base tempo throughout (marker ignored); the BPM field edits
+      take effect immediately; back in song mode the marker applies again. `D:__ R:__` notes:
+- [ ] **TM-8 — flags UI round-trip.** Edit the bar-5 flag to 100 (right-click → Edit), hover
+      tooltip shows "Tempo: 100.0 BPM from Bar 5"; delete it; undo is NOT expected (flags are
+      prompt-driven, not undoable — matches D-2 markers). Save with two flags → reload → both
+      restored, playback identical. `D:__ R:__` notes:
+- [ ] **TM-9 — seek/stop/start around a boundary.** Seek before/after the marker while playing and
+      stopped; stop mid-marker-section and restart. Expected: position readout consistent, no stuck
+      notes, tempo always matches the section the playhead is in. `D:__ R:__` notes:
+- [ ] **TM-10 — tempo edits while stopped keep the bar.** Stopped at bar 7 (past the marker), edit
+      the base tempo. Expected: the playhead stays at bar 7 (readout unchanged in beats mode; time
+      display re-derives). `D:__ R:__` notes:
+- [ ] **TM-11 — MIDI record across a boundary.** Record-arm (MIDI), play a phrase across bar 5
+      while typing/hardware-playing. Expected: recorded notes land where they were played relative
+      to the beat grid on BOTH sides of the marker (no cumulative shear after it).
+      `D:__ R:__` notes:
+- [ ] **TM-12 — MT stress regression.** The big MT stress arrangement with 2 markers added: no
+      dropouts vs the pre-batch baseline, DSP% comparable, no Debug jasserts. `D:__ R:__` notes:
 
 ---
 
