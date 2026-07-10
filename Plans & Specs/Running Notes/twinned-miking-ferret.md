@@ -57,6 +57,13 @@ Plan approved 2026-07-09 (G2 group approval, R5). QA-Fc is fully locked by §23;
 - **Fix (coded, build pending):** new audio-thread-only member `mPRLastBlockStraddled` (`PluginProcessor.h:1133`, declared beside `mPRPendingOffs` with a thread-ownership + trap comment). Scheduler (`PluginProcessor.cpp`): the loop-wrap flush becomes `loopEndFlush = loopFlush && !mPRLastBlockStraddled` (`:2023`) — after a straddle block the flush is redundant (every pre-wrap off at/past loopEnd already fired at the wrap sample), so an off found at loopEnd right after a straddle belongs to the seam-restarted note and is KEPT. Flag updated to `straddle` after the pending-off pass each block (`:2040`); reset false in the transport-stopped branch (`:1898`). Case walk: full-pattern straddle seam FIXED; QA-Ee wrap-on-block-boundary case PRESERVED (no straddle precedes -> flush fires; restart + flush land in the same block, off-before-on order correct); mid-pattern note ending at loopEnd unchanged; sub-block degenerate loops unchanged (straddle always false); consecutive-straddle short loops consistent; song-loop mode gets the same guard; single scheduling site shared by serial + MT.
 - **Process:** fix rides as its OWN commit (`PluginProcessor.h/.cpp` — file-disjoint from QA-Fc's 4 NAMIR files; two clean commits from one tree). Verify folded into Jeff's next build cycle alongside QA-Fc's build: (1) original repro — the full-pattern note sustains every pass; (2) QA-Ee regression guard — mid-pattern note ending exactly at loop end still releases at the seam, no hang; (3) then the deferred Harmless-automation lane test. Rule 3: finding + fix logged here; §9 Forks entry (QA-Ed/QA-Ee-era latent bug surfaced + fixed mid-QA-Fc) rides the section pass. Rule 4: no diagnostic instrumentation added — diagnosis was git/code archaeology + owner-run UI discriminators; the catalog stays EMPTY.
 
+## 2026-07-10 — Interrupt closed + batch committed — seam fix verified, automation gap routed
+
+- Jeff verified the seam fix (Debug + Release build CLEAN): (1) the full-pattern-note repro sustains every pass; (2) QA-Ee regression guard — a mid-pattern note ending exactly at the loop point still releases cleanly at the seam. Fix committed as `32930dca` (own commit, PluginProcessor only).
+- QA-Fc committed as `a36ed3cc` (8 files: 4 NAMIR source + test plan §B.9/backfills + 3 notes files). Batch code-complete + build-clean; §B.9 verification rides the campaign (R2).
+- Harmless-automation discriminator (the deferred test): Jeff confirms lanes do NOT drive engine-page params — the application gap from the earlier code trace is REAL. Jeff's picks (numbered docket, 2026-07-10): **(2a)** the seam fix gets its OWN Work Log entry at section pass (held below); **(3a)** the automation gap stays with QA-ApvtsAutomation at its G4 slot — §5 docket annotated as CONFIRMED (not audit-hypothesis); §9 Forks entry rides the section pass.
+- Held entries below updated to match: the QA-Fc entry's Routed section amended (interrupt + automation-gap routings); the seam fix's own held entry appended after it.
+
 ## Held Work Log entry (apply at section pass)
 
 > Apply to `Implemented Work Log.md` when §B.9 passes (R2). Stamp `HH:MM PT` at apply time.
@@ -88,9 +95,38 @@ Plan approved 2026-07-09 (G2 group approval, R5). QA-Fc is fully locked by §23;
 
 #### Routed (Rule 3)
 
-- Nothing routed — the one finding (H-6d selector staleness) was pulled in-batch; orthogonal batch (`Source/BaySickNAMIR/` only, untouched since QA-A `27a10bd2`), no cross-engine findings.
+- The H-6d selector staleness finding was pulled in-batch (fix above); the batch's own surface stayed orthogonal (`Source/BaySickNAMIR/` only, untouched since QA-A `27a10bd2`).
+- Mid-batch interrupt (Jeff): loop-seam staccato on full-pattern notes — diagnosed + fixed same session as its OWN commit `32930dca` with its OWN Work Log entry (Jeff pick 2a, 2026-07-10); see the second held entry below + the running-notes interrupt entries.
+- Engine-param automation application gap CONFIRMED by owner test (lanes draw but never drive engine-page params — both application sites resolve main-APVTS ids + the applicator registry only): routed to QA-ApvtsAutomation (Jeff pick 3a, 2026-07-10 — stays at its G4 slot; §5 docket annotated). BaySickNAMIR's missing componentID stamping (no Automate menu at all) rides the same batch's audit scope.
 
 #### Diagnostic Instrumentation Catalog
 
 - Empty — no diagnostic instrumentation added in QA-Fc (Rule 4); nothing to strip.
+```
+
+## Held Work Log entry — loop-seam fix (apply at section pass, own entry per Jeff pick 2a)
+
+> Apply to `Implemented Work Log.md` alongside the QA-Fc entry when §B.9 passes (R2). Stamp `HH:MM PT` at apply time. Already owner-verified 2026-07-10 (both configs) — no campaign scenarios gate it; it applies with the section pass for chronology only.
+
+```markdown
+### 2026-07-10 — Loop-seam fix (mid-QA-Fc interrupt) — full-pattern-note staccato on loop repeats
+
+**Bucket:** Cross-cutting Infrastructure
+**Plan:** none (owner-pulled interrupt; diagnosed + fixed same session) · **Running notes:** `Running Notes/twinned-miking-ferret.md` (interrupt entries) · **Commit:** `32930dca`
+
+#### Done
+
+- **Symptom (Jeff, mid-QA-Fc):** a note spanning a FULL pattern (starts at loopStart, ends exactly at loopEnd; 2-bar note in a 2-bar pattern, pattern-mode loop) played complete on pass 1, then staccato-blipped and went silent on every repeat.
+- **Root cause:** the QA-Ee Task 1c loop-wrap flush (`1bdc1552`, built for the wrap-on-a-block-boundary case the straddle test misses) is REDUNDANT in the block after the scheduler's straddle path already handled the wrap sample-exactly — and its `beatOff >= loopEndBeat` rule caught the seam-RESTARTED note's own pending off (clamped to exactly loopEndBeat by offHi), emitting it one block into the new pass; Harmless's ~0.3 s default release rendered that as the staccato. Only a full-pattern note arms it (a mid-pattern note ending at loopEnd has no freshly-queued off at loopEnd in the first post-wrap block) — why the QA-Ee soak and a month of use never surfaced it. Mechanism confirmed by owner discriminator tests before the fix was written (note moved off loopStart -> clean; pattern extended past the note -> clean).
+- **Fix:** new audio-thread-only `mPRLastBlockStraddled` (PluginProcessor.h, beside `mPRPendingOffs`); the flush becomes `loopEndFlush = loopFlush && !mPRLastBlockStraddled` so it only fires for wraps the straddle did NOT handle; flag updated per block after the pending-off pass, reset in the transport-stopped branch. Case walk in the running notes: QA-Ee boundary case preserved (no straddle precedes -> flush fires; restart + flush land in the same block, off-before-on order correct); mid-pattern notes ending at loopEnd, sub-block degenerate loops, song-loop mode, stop/restart, serial + MT all unchanged.
+- **Verified by Jeff same session** (Debug + Release build clean): the full-pattern repro sustains on every pass; the regression guard (mid-pattern note ending exactly at the loop point) still releases at the seam with no hang.
+- **Attribution:** latent since the QA-Ed/QA-Ee seam rework (June 2026), armed only by this gesture; group-era changes through this code (QA-TempoMap's absolute-map conversions) traced behavior-identical at constant tempo. Not QA-Fc-related (NAMIR-only surface).
+
+#### Found along the way
+
+- The Harmless-automation test that triggered the gesture confirmed the engine-param automation application gap — routed to QA-ApvtsAutomation per Jeff pick 3a (see the QA-Fc entry's Routed section + the §5 docket annotation).
+
+#### Diagnostic Instrumentation Catalog
+
+- Empty — diagnosis was git/code archaeology plus owner-run UI discriminators (Rule 4); nothing to strip.
 ```
