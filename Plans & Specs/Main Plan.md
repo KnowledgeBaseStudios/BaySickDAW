@@ -1563,6 +1563,7 @@ needed to find what you should pull up to review the work.
 - Verify (own plan file will detail): on a fresh BaySickGuitars/Basses tab the CC-gated articulation sounds correct immediately (matches the moved-to-64 sound) with no control touch; load a saved sfizz project (incl. the "Cool bass riff" repro) and confirm it plays (not silent); both MT + serial identical.
 
 #### **QA-F: BaySickAlign Build-Out + Vox DSP Disconnect (Cluster 1)**
+**Plan file:** [`Plans & Specs/Batch Plans/crooning-warping-lynx.md`](Batch Plans/crooning-warping-lynx.md) *(G2 group open 2026-07-09; keystone — builds the shared composite renderer + pitch-shifters consumed by QA-Fa/QA-Fb; realtime Vox pitch quality pass folded per Call 2a)*.
 - Items: DSP-02 (Vox FX bypassed), DSP-03 (Vox pitch correction does
   nothing), DSP-05 (BaySickAlign full build-out per redesign spec).
 - Scope: audit `BaySickVocalProcessor::processBlock` for FX-array pipeline
@@ -1585,6 +1586,7 @@ needed to find what you should pull up to review the work.
 - Effort: large (~14-22 hours; folded DSP-03 items add 2-4 hours; full BaySickAlign redesign + DSP build-out adds 8-12 hours).
 
 #### **QA-Fa: BaySickPitch Build-Out + Audio Import**
+**Plan file:** [`Plans & Specs/Batch Plans/melodic-bending-finch.md`](Batch Plans/melodic-bending-finch.md) *(G2 group open 2026-07-09; consumes QA-F's composite + shifters; DSP-04 import DROPPED per Call 4a — composite-auto-resolve only)*.
 - Items: DSP-04 (BaySickPitch audio import) + full BaySickPitch build-out per locked redesign.
 - Scope: BaySickPitch moves from paint-only shell (no DSP class exists
   at all — there is no `BaySickPitchDSP` in `Source/DSP/`; editor has
@@ -1605,6 +1607,7 @@ needed to find what you should pull up to review the work.
 - Effort: medium-large (~8-14 hours).
 
 #### **QA-Fb: Recording Lifecycle + Channel-Composite Renderer** *(NEW — inserted 2026-05-14)*
+**Plan file:** [`Plans & Specs/Batch Plans/doubled-tracking-badger.md`](Batch Plans/doubled-tracking-badger.md) *(G2 group open 2026-07-09; composite renderer MOVED to QA-F per Call 1a; clip-resize now verify-only after QA-Ec)*.
 - Items: dual-buffer recording architecture; conditional WET tap; multi-take capture-bleed fix; audio-clip-resize-doesn't-stretch fix; dirty-flag investigation (page-creation + record-finalize triggers); channel-composite renderer (shared dependency with QA-F + QA-Fa, lives here as the foundational layer).
 - Scope: post-QA-F + QA-Fa architecture lift — the recording flow underneath the BaySickAlign + BaySickPitch DSP work.  Per running notes
   `Plans & Specs/Running Notes/phantom-recording-mongoose.md` §2 + §3 + §7 + §8 + §9.
@@ -1620,6 +1623,7 @@ needed to find what you should pull up to review the work.
 - Effort: large (~10-16 hours).
 
 #### **QA-Fc: BaySickNAMIR Dual-Mic Stack** *(NEW — inserted 2026-05-14)*
+**Plan file:** [`Plans & Specs/Batch Plans/twinned-miking-ferret.md`](Batch Plans/twinned-miking-ferret.md) *(G2 group open 2026-07-09; fully locked by §23 — parallel Mic B, summed)*.
 - Items: dual mic-sim/placement path on BaySickNAMIR engine (new feature; lives on the audited-clean BaySickNAMIR foundation — see §9 eighteenth Forks entry's audit-outcome bullet).
 - Scope: simulate two microphones on the same source rather than the current single-mic chain.  Real-recording workflow — most pro recordings use 2+ mics on guitar cabs, vocals, drums, etc.; the two mics summed produce more energy and dimension than either alone.  Existing single-mic chain becomes Mic A; new parallel Mic B path mirrors Mic A's controls.  **Output is sum (Mic A + Mic B), not blend / crossfade.**  Per running notes
   `Plans & Specs/Running Notes/phantom-recording-mongoose.md` §23 — parallel-paths-not-blend architecture is the central spec call (post-cab buffer copied to scratch; Mic A processes in-place on the main buffer; Mic B processes scratch through its own Mic Sim + Mic Placement chain; Mic B output sums back into main).  `nam_micb_active` toggle (default false) bypasses the entire Mic B path when off — byte-identical to today's single-mic chain.  Editor layout splits the existing Mic Sim + Mic Placement rows into Mic A | Mic B columns side-by-side; the existing single-mic UI squishes to half-width, second mic mirrors it on the right half.  Picks up automatically on both Vox + Inst pages (BaySickNAMIR is a shared engine module hosted as a sub-tab on each — `Source/BaySickNAMIR/`, audit confirmed clean wiring 2026-05-14).
