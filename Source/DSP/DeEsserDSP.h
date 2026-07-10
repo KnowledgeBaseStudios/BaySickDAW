@@ -86,9 +86,6 @@ public:
 
     // ── Parameter setters (CPU-guarded; no-op when unchanged) ─────────────────
     void setModeBlend     (float v);        // 0..100  (0=Wide, 100=Split@4kHz, between=blend)
-    // Legacy 0/1 Wide/Split shim -- BaySickVocal's bsv_deesser_mode APVTS param
-    // (Int 0/1) drives this per block; maps onto the blend endpoints.
-    void setMode (int m) { setModeBlend (m != 0 ? 100.0f : 0.0f); }
     void setMsMode        (int m);          // 0=Stereo, 1=Mid, 2=Side
     void setFrequencyHz   (float hz);       // 4000..12000  (sidechain detector HPF)
     void setQ             (float q);        // 0.5..4.0

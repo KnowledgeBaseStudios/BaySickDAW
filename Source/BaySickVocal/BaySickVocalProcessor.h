@@ -88,6 +88,14 @@ public:
     // sub-tab hosts SlotComponents bound to this rack.
     EffectRack mVocalChainRack;
 
+    // QA-F chain-wiring fix (2026-07-10): fired at the end of
+    // setStateInformation after the per-slot chain-DSP blobs are restored
+    // (message thread), so the Vocal Chain sub-tab can re-mount its slot
+    // editors -- their knobs sync from DSP state at construction and would
+    // otherwise display pre-restore values.  Installed by VocalChainPanel;
+    // cleared in its destructor.
+    std::function<void()> onChainStateRestored;
+
     // H-6d (2026-05-02): owned BaySickNAMIRProcessor for the BaySickNAM/IR
     // sub-tab.  Owning it here (instead of on the editor) lets the page
     // preset save/load capture its state automatically through

@@ -947,6 +947,66 @@ struct CompressorPanel : public EditorPanelBase,
         // mounts when the user picks those modes.  No hide-some-knobs hack.
     }
 
+    // QA-F chain-wiring fix (2026-07-10): see EditorPanelBase::bindToApvts.
+    // The direct DSP lambdas stay live -- the attachment writes the param and
+    // the host's per-block push re-imposes the same value (agreement, not a
+    // stomp).  Param ranges mirror the knob ranges above exactly (a
+    // SliderAttachment resets the slider's range from the param).
+    void bindToApvts (juce::AudioProcessorValueTreeState& apvts,
+                      const juce::String& prefix) override
+    {
+        auto bindSlider = [&] (juce::Slider& s, const char* suffix)
+        {
+            mChainSliderAtts.push_back (std::make_unique<TaggedSliderAttachment> (
+                apvts, prefix + suffix, s));
+        };
+        bindSlider (knobs[0]->slider, "comp_threshold");
+        bindSlider (knobs[1]->slider, "comp_ratio");
+        bindSlider (knobs[2]->slider, "comp_knee");
+        bindSlider (knobs[3]->slider, "comp_gain");
+        bindSlider (knobs[4]->slider, "comp_attack");
+        bindSlider (knobs[5]->slider, "comp_release");
+        bindSlider (knobs[6]->slider, "comp_mix");
+        bindSlider (knobs[7]->slider, "comp_lookahead");
+        bindSlider (knobs[8]->slider, "comp_detection");
+        bindSlider (knobs[9]->slider, "comp_scHpf");
+
+        auto bindButton = [&] (juce::Button& btn, const char* suffix)
+        {
+            mChainButtonAtts.push_back (
+                std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+                    apvts, prefix + suffix, btn));
+        };
+        if (autoMuTog)  bindButton (autoMuTog ->btn(), "comp_autoMakeup");
+        if (linkTog)    bindButton (linkTog   ->btn(), "comp_stereoLink");
+        if (peakRmsTog) bindButton (peakRmsTog->btn(), "comp_peakDet");
+
+        if (auto* p = apvts.getParameter (prefix + "comp_kneeType"))
+        {
+            auto prev = kneeSel->onChange;
+            kneeSel->onChange = [prev, p] (int idx)
+            {
+                if (prev) prev (idx);
+                p->setValueNotifyingHost (
+                    p->getNormalisableRange().convertTo0to1 ((float) idx));
+            };
+            mChainSelAtts.push_back (std::make_unique<juce::ParameterAttachment> (*p,
+                [this] (float v)
+                {
+                    if (kneeSel)
+                        kneeSel->setSelectedIndex ((int) std::lround (v),
+                                                   juce::dontSendNotification);
+                }, nullptr));
+            mChainSelAtts.back()->sendInitialUpdate();
+        }
+    }
+
+    // Declared after the controls they attach to: members destruct in
+    // reverse order, so the attachments detach before their targets die.
+    std::vector<std::unique_ptr<TaggedSliderAttachment>> mChainSliderAtts;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> mChainButtonAtts;
+    std::vector<std::unique_ptr<juce::ParameterAttachment>> mChainSelAtts;
+
     ~CompressorPanel() override
     {
         stopTimer();
@@ -1529,6 +1589,38 @@ struct SaturationPanel : public EditorPanelBase,
         harmModeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setHarmonicsMode (idx); };
         addAndMakeVisible (*harmModeSel);
     }
+
+    // QA-F chain-wiring fix (2026-07-10): see EditorPanelBase::bindToApvts.
+    // Only the harmonics selector is param-backed on this panel (the host's
+    // bsv_sat_* set: type rides the SlotComponent Mode dropdown, vocalBody
+    // has no panel control).  The tube/tape knobs were never pushed from
+    // params, so they are not stomped; they persist via the host's per-slot
+    // DSP-state blob instead.
+    void bindToApvts (juce::AudioProcessorValueTreeState& apvts,
+                      const juce::String& prefix) override
+    {
+        if (auto* p = apvts.getParameter (prefix + "sat_harmonicsMode"))
+        {
+            auto prev = harmModeSel->onChange;
+            harmModeSel->onChange = [prev, p] (int idx)
+            {
+                if (prev) prev (idx);
+                p->setValueNotifyingHost (
+                    p->getNormalisableRange().convertTo0to1 ((float) idx));
+            };
+            mChainSelAtts.push_back (std::make_unique<juce::ParameterAttachment> (*p,
+                [this] (float v)
+                {
+                    if (harmModeSel)
+                        harmModeSel->setSelectedIndex ((int) std::lround (v),
+                                                       juce::dontSendNotification);
+                }, nullptr));
+            mChainSelAtts.back()->sendInitialUpdate();
+        }
+    }
+
+    // Declared after the selector it attaches to (reverse-order destruction).
+    std::vector<std::unique_ptr<juce::ParameterAttachment>> mChainSelAtts;
 
     void updateAutoGainLabel()
     {
@@ -3436,6 +3528,45 @@ struct LimiterPanel : public EditorPanelBase,
         startTimerHz (30);
     }
 
+    // QA-F chain-wiring fix (2026-07-10): see EditorPanelBase::bindToApvts +
+    // the CompressorPanel override.  Every limiter control is param-backed
+    // (the bsv_limiter_* set added with this fix -- the chain's limiter knobs
+    // previously neither persisted nor had params at all).
+    void bindToApvts (juce::AudioProcessorValueTreeState& apvts,
+                      const juce::String& prefix) override
+    {
+        auto bindSlider = [&] (juce::Slider& s, const char* suffix)
+        {
+            mChainSliderAtts.push_back (std::make_unique<TaggedSliderAttachment> (
+                apvts, prefix + suffix, s));
+        };
+        bindSlider (r1knobs[0]->slider, "limiter_inGain");
+        bindSlider (r1knobs[1]->slider, "limiter_ceiling");
+        bindSlider (r1knobs[2]->slider, "limiter_satThresh");
+        bindSlider (r1knobs[3]->slider, "limiter_satCurve");
+        bindSlider (r1knobs[4]->slider, "limiter_scHpf");
+        bindSlider (r2knobs[0]->slider, "limiter_attack");
+        bindSlider (r2knobs[1]->slider, "limiter_release");
+        bindSlider (r2knobs[2]->slider, "limiter_ahead");
+        bindSlider (r2knobs[3]->slider, "limiter_relCurve");
+        if (sustainKnob)
+            bindSlider (sustainKnob->slider, "limiter_sustain");
+
+        auto bindButton = [&] (juce::Button& btn, const char* suffix)
+        {
+            mChainButtonAtts.push_back (
+                std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+                    apvts, prefix + suffix, btn));
+        };
+        if (autoRelTog) bindButton (autoRelTog->btn(), "limiter_autoRelease");
+        if (autoMuTog)  bindButton (autoMuTog ->btn(), "limiter_autoMakeup");
+        if (linkTog)    bindButton (linkTog   ->btn(), "limiter_stereoLink");
+    }
+
+    // Declared after the controls they attach to (reverse-order destruction).
+    std::vector<std::unique_ptr<TaggedSliderAttachment>> mChainSliderAtts;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> mChainButtonAtts;
+
     ~LimiterPanel() override
     {
         stopTimer();
@@ -3795,6 +3926,63 @@ struct DeEsserPanel : public EditorPanelBase, private juce::Timer
         knobs[0]->slider.setValue (juce::jlimit (0.0, 100.0, (7500.0 - dsp->mFreqHz) / 35.0),
                                    juce::dontSendNotification);
     }
+
+    // QA-F chain-wiring fix (2026-07-10): see EditorPanelBase::bindToApvts +
+    // the CompressorPanel override.  Knob 0 (Detect) is deliberately unbound
+    // -- it is a MACRO over Freq+Q with no state of its own; binding Freq+Q
+    // covers it (and its position re-derives from Freq on mount).
+    void bindToApvts (juce::AudioProcessorValueTreeState& apvts,
+                      const juce::String& prefix) override
+    {
+        auto bindSlider = [&] (juce::Slider& s, const char* suffix)
+        {
+            mChainSliderAtts.push_back (std::make_unique<TaggedSliderAttachment> (
+                apvts, prefix + suffix, s));
+        };
+        bindSlider (knobs[1]->slider, "deesser_threshold");
+        bindSlider (knobs[2]->slider, "deesser_range");
+        bindSlider (knobs[3]->slider, "deesser_modeBlend");
+        bindSlider (knobs[4]->slider, "deesser_freq");
+        bindSlider (knobs[5]->slider, "deesser_q");
+        bindSlider (knobs[6]->slider, "deesser_attack");
+        bindSlider (knobs[7]->slider, "deesser_release");
+        bindSlider (knobs[8]->slider, "deesser_lookahead");
+        bindSlider (knobs[9]->slider, "deesser_mix");
+
+        auto bindButton = [&] (juce::Button& btn, const char* suffix)
+        {
+            mChainButtonAtts.push_back (
+                std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+                    apvts, prefix + suffix, btn));
+        };
+        if (monitorTog) bindButton (monitorTog->btn(), "deesser_listen");
+        if (engineTog)  bindButton (engineTog ->btn(), "deesser_spectral");
+        if (qualityTog) bindButton (qualityTog->btn(), "deesser_lowlat");
+
+        if (auto* p = apvts.getParameter (prefix + "deesser_msMode"))
+        {
+            auto prev = msSel->onChange;
+            msSel->onChange = [prev, p] (int idx)
+            {
+                if (prev) prev (idx);
+                p->setValueNotifyingHost (
+                    p->getNormalisableRange().convertTo0to1 ((float) idx));
+            };
+            mChainSelAtts.push_back (std::make_unique<juce::ParameterAttachment> (*p,
+                [this] (float v)
+                {
+                    if (msSel)
+                        msSel->setSelectedIndex ((int) std::lround (v),
+                                                 juce::dontSendNotification);
+                }, nullptr));
+            mChainSelAtts.back()->sendInitialUpdate();
+        }
+    }
+
+    // Declared after the controls they attach to (reverse-order destruction).
+    std::vector<std::unique_ptr<TaggedSliderAttachment>> mChainSliderAtts;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> mChainButtonAtts;
+    std::vector<std::unique_ptr<juce::ParameterAttachment>> mChainSelAtts;
 
     void timerCallback() override
     {

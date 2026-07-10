@@ -105,6 +105,16 @@ struct EditorPanelBase : public juce::Component
     // mode-specific knobs and re-layout.
     virtual void onTypeChanged() {}
 
+    // QA-F chain-wiring fix (2026-07-10): opt-in two-way APVTS binding for
+    // hosts whose params are the source of truth (BaySickVocal's locked
+    // chain: prefix "bsv_").  Overriding panels attach their controls to the
+    // host's params so knob edits write params (instead of being stomped by
+    // the host's per-block param push) and param/preset loads reflect back
+    // into the controls.  EffectsPage racks never call this -- their panels
+    // stay DSP-direct.  Default no-op.
+    virtual void bindToApvts (juce::AudioProcessorValueTreeState& /*apvts*/,
+                              const juce::String& /*prefix*/) {}
+
     // Call from derived constructor to select filmstrip variant:
     //   dark=true  → Volume Black (Dynamics panels)
     //   dark=false → Volume White (all others, default)

@@ -91,8 +91,10 @@ BaySickVocalProcessor::createLayout()
     // Knob set exposed in H-6's editor adapts to the active Type.
     addI ("comp_type",       "Compressor Type",  0,    2,    0);   // 0=Modern, 1=FET, 2=Opto
     addF ("comp_threshold",  "Compressor Threshold dB", -60.f, 0.f, -12.f);
-    addF ("comp_ratio",      "Compressor Ratio",        1.0f,  20.f, 4.f);
-    addF ("comp_attack",     "Compressor Attack ms",    0.02f, 400.f, 10.f);
+    // QA-F chain-wiring fix (2026-07-10): ratio + attack widened to the
+    // CompressorPanel knob ranges (attachment range-sync; defaults kept).
+    addF ("comp_ratio",      "Compressor Ratio",        0.4f,  30.f, 4.f);
+    addF ("comp_attack",     "Compressor Attack ms",    0.f,   400.f, 10.f);
     addF ("comp_release",    "Compressor Release ms",   1.f,   4000.f, 100.f);
     addF ("comp_gain",       "Compressor Makeup dB",   -30.f,  30.f, 0.f);
     addF ("comp_knee",       "Compressor Knee dB",      0.f,   18.f, 6.f);
@@ -108,20 +110,48 @@ BaySickVocalProcessor::createLayout()
     addB ("sat_vocalBody",     "Saturation Vocal Body",    false);
     addI ("sat_harmonicsMode", "Saturation Harmonics Mode", 0, 2, 1);  // 0=Lo, 1=Normal, 2=Hi
 
-    // H-3 (2026-05-01) -- De-esser stage params.  New DeEsserDSP module
-    // (split-band sidechain HPF + dynamic notch + envelope + range cap +
-    // M/S optional + lookahead + listen mode + GR meter).
-    addI ("deesser_mode",        "De-esser Mode",      0,    1,    0);   // 0=Wide, 1=Split
+    // H-3 (2026-05-01) -- De-esser stage params.  QA-F chain-wiring fix
+    // (2026-07-10): ranges re-synced to the QA-EffectsReview panel/DSP
+    // clamps (a SliderAttachment resets the knob's range from the param, so
+    // a narrower param would shrink the knob's reach); defaults unchanged.
+    // The legacy Int deesser_mode (0/1) is REMOVED -- it never had a UI and
+    // every save carries 0; the continuous modeBlend replaces it.
     addI ("deesser_msMode",      "De-esser M/S",       0,    2,    0);   // 0=Stereo, 1=Mid, 2=Side
     addF ("deesser_freq",        "De-esser Frequency", 4000.f, 12000.f, 6500.f);
     addF ("deesser_q",           "De-esser Q",         0.5f,  4.0f,    1.4f);
-    addF ("deesser_threshold",   "De-esser Threshold dB", -40.f, 0.f, -24.f);
-    addF ("deesser_range",       "De-esser Range dB", -20.f, 0.f, -12.f);
+    addF ("deesser_threshold",   "De-esser Threshold dB", -80.f, 0.f, -24.f);
+    addF ("deesser_range",       "De-esser Range dB", -48.f, 0.f, -12.f);
     addF ("deesser_attack",      "De-esser Attack ms",  0.1f,  30.f,  1.f);
     addF ("deesser_release",     "De-esser Release ms", 10.f, 500.f, 80.f);
-    addF ("deesser_lookahead",   "De-esser Lookahead ms", 0.f, 5.f,   0.f);
+    addF ("deesser_lookahead",   "De-esser Lookahead ms", 0.f, 12.f,  0.f);
     addF ("deesser_mix",         "De-esser Mix",        0.f,   1.f,   1.f);
     addB ("deesser_listen",      "De-esser SC Listen",  false);
+    addF ("deesser_modeBlend",   "De-esser Mode Blend", 0.f, 100.f,   0.f);  // 0=Wide, 100=Split@4k
+    addB ("deesser_spectral",    "De-esser Spectral Engine",      false);
+    addB ("deesser_lowlat",      "De-esser Spectral Low Latency", false);
+
+    // QA-F chain-wiring fix (2026-07-10) -- params for the chain panel
+    // controls that had none (the panel edits were stomped by the per-block
+    // push or, for the limiter, never persisted).  Ranges/defaults mirror
+    // the panels exactly.
+    addF ("comp_detection",  "Compressor Detection ms",   1.f,  100.f,  10.f);
+    addF ("comp_scHpf",      "Compressor SC HPF Hz",     20.f, 2000.f,  20.f);
+    addI ("comp_kneeType",   "Compressor Knee Type",      0,    7,      1);
+    addB ("comp_peakDet",    "Compressor Peak Detection", false);
+
+    addF ("limiter_inGain",      "Limiter Input Gain dB", -12.f,  24.f,   0.f);
+    addF ("limiter_ceiling",     "Limiter Ceiling dB",    -24.f,  12.f,  -0.3f);
+    addF ("limiter_satThresh",   "Limiter Sat Threshold",   0.f,   1.f,   1.f);
+    addF ("limiter_satCurve",    "Limiter Sat Curve",       0.f,   1.f,   0.5f);
+    addF ("limiter_scHpf",       "Limiter SC HPF Hz",      20.f, 2000.f, 20.f);
+    addF ("limiter_attack",      "Limiter Attack ms",       0.1f, 20.f,   1.f);
+    addF ("limiter_release",     "Limiter Release ms",     10.f, 1000.f, 100.f);
+    addF ("limiter_ahead",       "Limiter Lookahead ms",    0.f,  10.f,   2.f);
+    addF ("limiter_relCurve",    "Limiter Release Curve",   0.f,   1.f,   0.5f);
+    addF ("limiter_sustain",     "Limiter Sustain ms",      0.f, 1000.f,  0.f);
+    addB ("limiter_autoRelease", "Limiter Auto Release",  false);
+    addB ("limiter_autoMakeup",  "Limiter Auto Makeup",   false);
+    addB ("limiter_stereoLink",  "Limiter Stereo Link",   true);
 
     // ── QA-F Task 3: BaySickAlign (bsa_ prefix; sections 13a/13e) ───────────
     // Offline-only params -- read at action time on the message thread,
@@ -269,9 +299,11 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
     mVocalChainRack.setSlotBypassed (3, rdb ("bsv_limiter_bypass"));
 
     // ── De-esser (slot 0) ──────────────────────────────────────────────────
+    // QA-F chain-wiring fix (2026-07-10): modeBlend replaces the removed
+    // legacy Int mode; the new engine/quality params ride the same push.
     if (auto* de = dynamic_cast<DeEsserDSP*> (mVocalChainRack.getSlotEffect (0)))
     {
-        de->setMode         (rdi ("bsv_deesser_mode"));
+        de->setModeBlend    (rd  ("bsv_deesser_modeBlend"));
         de->setMsMode       (rdi ("bsv_deesser_msMode"));
         de->setFrequencyHz  (rd  ("bsv_deesser_freq"));
         de->setQ            (rd  ("bsv_deesser_q"));
@@ -282,6 +314,8 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
         de->setLookaheadMs  (rd  ("bsv_deesser_lookahead"));
         de->setMix          (rd  ("bsv_deesser_mix"));
         de->setListen       (rdb ("bsv_deesser_listen"));
+        de->setEngine          (rdb ("bsv_deesser_spectral") ? 1 : 0);
+        de->setSpectralQuality (rdb ("bsv_deesser_lowlat")   ? 1 : 0);
     }
 
     // ── Compressor (slot 1) ────────────────────────────────────────────────
@@ -298,6 +332,12 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
         cp->setLookaheadMs (rd  ("bsv_comp_lookahead"));
         cp->setStereoLink  (rdb ("bsv_comp_stereoLink"));
         cp->setAutoMakeup  (rdb ("bsv_comp_autoMakeup"));
+        // QA-F chain-wiring fix (2026-07-10): the panel controls that had no
+        // params behind them.
+        cp->setDetectionMs   (rd  ("bsv_comp_detection"));
+        cp->setSidechainHPF  (rd  ("bsv_comp_scHpf"));
+        cp->setKneeType      (rdi ("bsv_comp_kneeType"));
+        cp->setPeakDetection (rdb ("bsv_comp_peakDet"));
     }
 
     // ── Saturation (slot 2) ────────────────────────────────────────────────
@@ -311,8 +351,25 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
         sat->setHarmonicsMode  (rdi ("bsv_sat_harmonicsMode"));
     }
 
-    // Limiter (slot 3) -- knob wiring lands in a polish pass.  Bypass flag
-    // above is already pushed; runs at default settings.
+    // ── Limiter (slot 3) ───────────────────────────────────────────────────
+    // QA-F chain-wiring fix (2026-07-10): full knob push (was "polish pass"
+    // deferred -- the panel's edits neither persisted nor had params).
+    if (auto* lim = dynamic_cast<LimiterDSP*> (mVocalChainRack.getSlotEffect (3)))
+    {
+        lim->setInputGainDb  (rd  ("bsv_limiter_inGain"));
+        lim->setCeilingDb    (rd  ("bsv_limiter_ceiling"));
+        lim->setSatThresh    (rd  ("bsv_limiter_satThresh"));
+        lim->setSatCurve     (rd  ("bsv_limiter_satCurve"));
+        lim->setSidechainHPF (rd  ("bsv_limiter_scHpf"));
+        lim->setAttackMs     (rd  ("bsv_limiter_attack"));
+        lim->setReleaseMs    (rd  ("bsv_limiter_release"));
+        lim->setAheadMs      (rd  ("bsv_limiter_ahead"));
+        lim->setReleaseCurve (rd  ("bsv_limiter_relCurve"));
+        lim->setSustainMs    (rd  ("bsv_limiter_sustain"));
+        lim->setAutoRelease  (rdb ("bsv_limiter_autoRelease"));
+        lim->setAutoMakeup   (rdb ("bsv_limiter_autoMakeup"));
+        lim->setStereoLink   (rdb ("bsv_limiter_stereoLink"));
+    }
 }
 
 void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
@@ -671,6 +728,12 @@ namespace
     constexpr const char* kPitchEditsTag = "PitchEdits";
     constexpr const char* kAlignEditsTag = "AlignEdits";
     constexpr const char* kNamIrStateTag = "NamIrState";
+    // QA-F chain-wiring fix (2026-07-10): per-slot chain-DSP state blobs.
+    // Covers the panel-only controls with no bsv_ params behind them (the
+    // saturation tube/tape set etc.) -- bound controls persist via APVTS and
+    // the per-block push re-imposes them over the blob on load (params stay
+    // the source of truth for everything bound).
+    constexpr const char* kVocalChainStateTag = "VocalChainState";
 }
 
 void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
@@ -690,6 +753,7 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
     removeChild (kPitchEditsTag);
     removeChild (kAlignEditsTag);
     removeChild (kNamIrStateTag);
+    removeChild (kVocalChainStateTag);
 
     // <PitchEdits> stays a reserved empty slot (QA-Fa populates it).
     state.appendChild (juce::ValueTree (kPitchEditsTag), nullptr);
@@ -721,6 +785,24 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
             align.appendChild (e, nullptr);
         }
         state.appendChild (align, nullptr);
+    }
+
+    // QA-F chain-wiring fix (2026-07-10): per-slot chain-DSP blobs (see the
+    // kVocalChainStateTag note above).
+    {
+        juce::ValueTree chain (kVocalChainStateTag);
+        for (int i = 0; i < 4; ++i)
+        {
+            if (auto* eff = mVocalChainRack.getSlotEffect (i))
+            {
+                juce::MemoryBlock blob;
+                eff->getStateInformation (blob);
+                if (blob.getSize() > 0)
+                    chain.setProperty ("s" + juce::String (i),
+                                       blob.toBase64Encoding(), nullptr);
+            }
+        }
+        state.appendChild (chain, nullptr);
     }
 
     // H-6d: embed the BaySickNAMIRProcessor's full state as a base64
@@ -761,7 +843,31 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         if (alignChild.isValid())
             newState.removeChild (alignChild, nullptr);
 
+        // QA-F chain-wiring fix (2026-07-10): same for <VocalChainState>.
+        auto chainChild = newState.getChildWithName (kVocalChainStateTag);
+        if (chainChild.isValid())
+            newState.removeChild (chainChild, nullptr);
+
         apvts.replaceState (newState);
+
+        // Restore the per-slot chain-DSP blobs IN PLACE on the existing DSP
+        // instances (no slot reload -- the Vocal Chain panel holds raw DSP
+        // pointers).  Bound controls get re-imposed from the params by the
+        // per-block push; the blob supplies everything unbound.  Pre-fix
+        // saves have no child -> chain DSPs keep their defaults, unchanged.
+        if (chainChild.isValid())
+        {
+            for (int i = 0; i < 4; ++i)
+            {
+                const juce::String b64 = chainChild.getProperty (
+                    "s" + juce::String (i), juce::String()).toString();
+                if (b64.isEmpty()) continue;
+                juce::MemoryBlock blob;
+                if (! blob.fromBase64Encoding (b64)) continue;
+                if (auto* eff = mVocalChainRack.getSlotEffect (i))
+                    eff->setStateInformation (blob.getData(), (int) blob.getSize());
+            }
+        }
 
         mAlignState = AlignState();
         if (alignChild.isValid())
@@ -816,5 +922,10 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
 
         // <PitchEdits> remains a reserved placeholder (QA-Fa's BaySickPitch
         // data model populates it).
+
+        // QA-F chain-wiring fix (2026-07-10): let the Vocal Chain sub-tab
+        // re-mount its slot editors against the restored DSP state.
+        if (onChainStateRestored)
+            onChainStateRestored();
     }
 }

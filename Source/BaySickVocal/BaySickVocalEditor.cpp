@@ -431,10 +431,7 @@ public:
             sc->setRack (&mProc.mVocalChainRack);
             sc->setLocked (true);
 
-            // Materialize the inline editor for the locked slot's effect.
-            const auto& slot = mProc.mVocalChainRack.getSlot (i);
-            if (auto* eff = mProc.mVocalChainRack.getSlotEffect (i))
-                sc->setEditor (createEffectEditor (eff, slot.type));
+            mountSlotEditor (*sc, i);
 
             // H-7 (2026-05-01): Mode dropdown's onModeChanged callback writes
             // to APVTS so pushApvtsToDsp's per-block push stays consistent
@@ -455,6 +452,22 @@ public:
             addAndMakeVisible (*sc);
             mSlots[i] = std::move (sc);
         }
+
+        // QA-F chain-wiring fix (2026-07-10): re-mount the slot editors after
+        // a state restore -- panel knobs sync from DSP state at construction
+        // and would otherwise display pre-restore values.
+        mProc.onChainStateRestored = [this]
+        {
+            for (int i = 0; i < kNumChainSlots; ++i)
+                if (mSlots[i])
+                    mountSlotEditor (*mSlots[i], i);
+            resized();
+        };
+    }
+
+    ~VocalChainPanel() override
+    {
+        mProc.onChainStateRestored = nullptr;
     }
 
     void paint (juce::Graphics& g) override
@@ -477,6 +490,22 @@ public:
     }
 
 private:
+    // Materialize (or re-materialize after a state restore) the inline
+    // editor for the locked slot's effect, then opt it into the two-way
+    // bsv_ param binding (QA-F chain-wiring fix, 2026-07-10).
+    void mountSlotEditor (SlotComponent& sc, int i)
+    {
+        const auto& slot = mProc.mVocalChainRack.getSlot (i);
+        if (auto* eff = mProc.mVocalChainRack.getSlotEffect (i))
+        {
+            auto ed = createEffectEditor (eff, slot.type);
+            auto* base = dynamic_cast<EditorPanelBase*> (ed.get());
+            sc.setEditor (std::move (ed));
+            if (base)
+                base->bindToApvts (mProc.apvts, "bsv_");
+        }
+    }
+
     static constexpr int kNumChainSlots = 4;
 
     BaySickVocalProcessor& mProc;

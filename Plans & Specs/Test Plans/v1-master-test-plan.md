@@ -356,6 +356,15 @@ Debug first, then Release.
       (section 12); nominative modeled-gear refs in code comments (1176/LA-2A) remain per the
       20a fair-use ruling. (BaySickPitch's editor still carries reference-product comments — that
       file is QA-Fa's full-rewrite surface; verify it under §B.7.) `D:__ R:__` notes:
+- [ ] **F-12 — Vocal Chain panel wiring (owner catch at QA-F close; separate fix commit).** On
+      the Vocal Chain sub-tab, while playing a vocal: turn De-esser Thresh, Compressor Ratio, a
+      Saturation knob, and Limiter Ceiling — every knob audibly sticks (the old behavior snapped
+      De-esser/Comp/Sat knobs back within a block). Flip the comp Knee selector, Peak/RMS, and
+      the de-esser M/S selector — same. Toggle the de-esser Spectral engine (transport stopped) —
+      sticks + persists. Save the project, reopen: ALL chain edits restore — bound knobs via the
+      bsv_ params (incl. the new bsv_limiter_* set), saturation tube-land knobs via the per-slot
+      state blob — and the panels DISPLAY the restored values (remount hook). Save a Vox page
+      preset, load it on a fresh Vox tab: chain settings travel with it. `D:__ R:__` notes:
 
 ---
 
