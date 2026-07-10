@@ -892,6 +892,23 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // resizer widget - border drag, matching the resizable child-window
     // precedents (EventEditor / KeyBinds / UndoHistory).
     mWindow->setResizable(true, false);
+    // Floor below which the layout stops being usable: the 40px bar's fixed
+    // occupants (controls 520 + pattern 176 + readout 100 + CPU 120 + gaps)
+    // need ~1050px before the ribbon guard (>60) kicks in, and the fixed
+    // chrome (24+40+26) plus the smallest workable page area needs ~700px
+    // of height.  Starting values - Jeff tunes at the G1 boundary smoke.
+    //
+    // ORDER MATTERS (G1 smoke, the maximize-restore hunt): the limits MUST be
+    // installed BEFORE any setFullScreen/restore below.  setResizeLimits runs
+    // setBoundsConstrained, and the default constrainer's keep-on-screen
+    // clamp nudges a maximized window (which legitimately sits a few px
+    // above the screen edge) - that nudge is a real SetWindowPos, and
+    // Windows answers it by silently demoting the window from MAXIMIZED to
+    // NORMAL placement at the same size.  Every relaunch then came up
+    // windowed-almost-full and the next close saved maximized=0.  The
+    // first-launch path always had this order right, which is why it never
+    // showed the bug.
+    mWindow->setResizeLimits(1100, 700, 32000, 32000);
     // QA-Eb follow-up (Jeff, G1 smoke): remember the window size across runs
     // - a maximized close restores maximized, a sized close restores those
     // exact bounds.  Global pref in settings.xml (WindowState child).
@@ -914,12 +931,6 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
             windowRestored = true;
         }
     }
-    // Floor below which the layout stops being usable: the 40px bar's fixed
-    // occupants (controls 520 + pattern 176 + readout 100 + CPU 120 + gaps)
-    // need ~1050px before the ribbon guard (>60) kicks in, and the fixed
-    // chrome (24+40+26) plus the smallest workable page area needs ~700px
-    // of height.  Starting values - Jeff tunes at the G1 boundary smoke.
-    mWindow->setResizeLimits(1100, 700, 32000, 32000);
     if (! windowRestored)
         mWindow->setFullScreen(true);   // first launch / no saved state
     mWindow->setVisible(true);
@@ -948,15 +959,11 @@ void VibesynthStandaloneApp::shutdown()
         if (auto* old = root->getChildByName ("WindowState"))
             root->removeChildElement (old, true);
         auto* ws = root->createNewChildElement ("WindowState");
-        // G1 smoke fix: with a JUCE-drawn title bar, isFullScreen() only
-        // reflects the internal flag the JUCE maximize button sets - an OS
-        // maximize (Win+Up / snap) zooms the HWND without touching it, so a
-        // maximized close saved "windowed at nearly-full bounds".  OR in the
-        // peer's real OS state.
-        const bool maxed = mWindow->isFullScreen()
-                        || (mWindow->getPeer() != nullptr
-                            && mWindow->getPeer()->isFullScreen());
-        ws->setAttribute ("maximized", maxed);
+        // isFullScreen() for an on-desktop window reads the peer's real OS
+        // placement (GetWindowPlacement == SW_SHOWMAXIMIZED on Windows), so
+        // this save is honest for every maximize gesture.  The historical
+        // maximize-restore bug lived in initialise's restore ORDER, not here.
+        ws->setAttribute ("maximized", mWindow->isFullScreen());
         const auto wb = mWindow->getBounds();
         ws->setAttribute ("x", wb.getX());
         ws->setAttribute ("y", wb.getY());

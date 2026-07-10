@@ -563,8 +563,19 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
   3 apply sites (Set = replace); row now joins ALL bindings ", "-separated; Jeff's keymap.xml
   removed (backup .bak) -> pure catalog defaults.  Note-key strays (2/D/G/H) had already been
   silenced by the typing-mode gate - F survived only because it is not a note key.
-  **Rule 4 diagnostic catalog (this boundary; disposition Keep, extends the existing
-  audio_setup_log.txt):** (1) StandaloneApp.cpp initialise ~post-restart block - "Device-type scan
+  **Post-boundary fix (maximize-restore, round 2 - the round-1 "fix" was a no-op):** Jeff proved
+  via before/after screenshots (title-bar glyphs + an ~8 px content shift) that the window IS
+  truly maximized at close and the RELAUNCH demotes it.  Root cause: the WindowState restore ran
+  setFullScreen(true) BEFORE setResizeLimits; setResizeLimits calls setBoundsConstrained, and
+  the default constrainer's keep-on-screen clamp nudges a maximized window (legitimately a few
+  px above the screen edge) down to y=+7 - a real SetWindowPos, which Windows answers by
+  demoting MAXIMIZED -> NORMAL placement at the same size.  Every relaunch opened
+  windowed-almost-full; the next close then honestly saved maximized=0 (the round-1 peer-OR
+  save fix read the same GetWindowPlacement both ways = dead on arrival; ResizableWindow::
+  isFullScreen always defers to the peer for on-desktop windows).  The first-launch path always
+  ordered limits-then-maximize, which is why QA-Eb testing never saw it.  FIX: restore block
+  moved AFTER setResizeLimits (StandaloneApp initialise); saved y=7 + the screenshot shift were
+  the pinning evidence.  Uncommitted - rides with the next commit (Jeff to retest first). (1) StandaloneApp.cpp initialise ~post-restart block - "Device-type scan
   lists" dump (every type's device names) - answers "was the requested ASIO driver enumerable";
   (2) StandaloneApp.cpp C.3 MIDI block - "MIDI at startup" append (available devices, saved-id
   match, enableAll, per-device enabled state) - answers "what did MIDI enumeration return". No
@@ -588,6 +599,10 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
   shared_ptr->seqlock publish; markers song-domain gate).
 - **Resume action:** collect Jeff's G1 smoke + ear-check results -> fix/fold findings -> one
   boundary commit (message + full status -> approval) -> give the honest model assessment ->
-  **Jeff's GO/NO-GO on the bulk-run model.** On GO: G2 group start (plan files for QA-F / QA-Fa /
+  **Jeff's GO/NO-GO on the bulk-run model.**  **RESOLVED 2026-07-09: GO** — G1 boundary closed at
+  commit 4920efa0; model continues through G6 at the ORIGINAL cadence (my proposed
+  render-path-batch ear-checks REJECTED by Jeff — no added checks; only the two already-planned
+  G2 mid-group ear-checks stand).  G2 starts when Jeff opens it.  On GO: G2 group start (plan
+  files for QA-F / QA-Fa /
   QA-Fb' / QA-Fc; no marathon leftovers block G2 — item 3 locked; remember the two MID-group
   ear-checks after QA-F and QA-Fa).
