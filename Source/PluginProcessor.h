@@ -1122,6 +1122,15 @@ private:
         int    target;    // 0..7 = layer page; kBassPRTarget+0..3 (8..11) = bass page index
     };
     std::vector<PRPendingOff> mPRPendingOffs;
+    // Audio-thread only.  True when the PREVIOUS block's scheduler ran the
+    // straddle path (loop seam handled sample-exactly inside that block).
+    // The QA-Ee loop-wrap flush exists for the wrap-on-a-block-boundary case
+    // the straddle test misses; after a straddle block the flush is redundant
+    // -- every pre-wrap off at/past loopEnd was already emitted at the wrap
+    // sample, so any off it would now find at loopEnd belongs to the seam-
+    // RESTARTED note (a note spanning the full pattern) and flushing it kills
+    // that note one block into the new pass (staccato-on-every-repeat).
+    bool mPRLastBlockStraddled { false };
     // QA-Ed: the float `mPRLastBeatEnd` jump-heuristic + the kWrapSlop / jumped
     // / windowStart band-aid are removed; the int-sample clock + the exact
     // loop-seam windows (mLoopStartBeats + mSeekDiscontinuity above) replace it.

@@ -1895,6 +1895,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 }
                 mPRPendingOffs.clear();
             }
+            mPRLastBlockStraddled = false;
         }
         else if (mPatternManager)
         {
@@ -2013,11 +2014,18 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             const bool loopFlush = (mLoopWrapped != nullptr
                                     && mLoopWrapped->exchange (false, std::memory_order_acq_rel));
             {
+                // The loop-wrap flush only covers wraps the straddle path did
+                // NOT handle (wrap exactly on a block boundary).  After a
+                // straddle block, every pre-wrap off at/past loopEnd already
+                // fired at the wrap sample -- an off found here at loopEnd
+                // belongs to the seam-restarted full-pattern note, and
+                // flushing it would cut that note one block into the new pass.
+                const bool loopEndFlush = loopFlush && ! mPRLastBlockStraddled;
                 std::vector<PRPendingOff> keep;
                 for (auto& off : mPRPendingOffs)
                 {
                     if (seekFlush)                              { emitOff (off, 0);       continue; }
-                    if (loopFlush && off.beatOff >= loopEndBeat) { emitOff (off, 0);       continue; }
+                    if (loopEndFlush && off.beatOff >= loopEndBeat) { emitOff (off, 0);   continue; }
                     if (off.beatOff <= beatStart)               { emitOff (off, 0);       continue; }
                     if (straddle && off.beatOff >= loopEndBeat) { emitOff (off, wrapSmp); continue; }
                     if (off.beatOff < beatEnd)
@@ -2029,6 +2037,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 }
                 mPRPendingOffs = std::move (keep);
             }
+            mPRLastBlockStraddled = straddle;
 
             // ── Note-on scheduler (shared by both modes) ────────────────────
             // absOffset: pattern -> 0 (note.startBeat is loop-local); song ->
