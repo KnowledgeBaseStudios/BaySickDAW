@@ -46,6 +46,9 @@ void BaySickPitchDSP::prepare (double sampleRate, int maxBlockSize)
     for (auto& sh : mShifters) sh.prepare (mSampleRate, maxBlockSize);
     for (auto& fe : mFormant)  fe.prepare (mSampleRate, maxBlockSize);
     mAppState = {};
+    for (auto& sh : mMonShifters) sh.prepare (mSampleRate, maxBlockSize);
+    for (auto& fe : mMonFormant)  fe.prepare (mSampleRate, maxBlockSize);
+    mMonState = {};
 }
 
 // ─── Analysis ─────────────────────────────────────────────────────────────────
@@ -369,6 +372,37 @@ void BaySickPitchDSP::processFilePlay (juce::AudioBuffer<float>& buffer,
                         focus, mod, mSpeedMs.load (std::memory_order_relaxed),
                         on,
                         mShifters.data(), mFormant.data(), mAppState);
+}
+
+// QA-Fb (A1 monitor merge): processFilePlay's twin over the monitor stream
+// state.  Same snapshot + knob loads + fast-path gates; the two streams share
+// nothing mutable, so the live take's corrector and the prior takes' edits
+// advance independently within one block.
+void BaySickPitchDSP::processFilePlayMonitor (juce::AudioBuffer<float>& buffer,
+                                              juce::int64 timelineStartSample) noexcept
+{
+    auto* snap = mActive.load (std::memory_order_acquire);
+    if (snap == nullptr) return;
+
+    const bool  on    = mChainOn.load (std::memory_order_relaxed);
+    const float focus = mFocus01.load (std::memory_order_relaxed);
+    const float mod   = mModAmt .load (std::memory_order_relaxed);
+    const bool settled = std::abs (mMonState.smoothedSemis)   < 0.002f
+                      && std::abs (mMonState.smoothedFormant) < 0.002f
+                      && std::abs (mMonState.smoothedGain - 1.0f) < 0.002f;
+    if (! on && settled)
+        return;
+    if (on && settled
+        && ! snap->anyEdits && focus < 0.001f && std::abs (mod - 1.0f) < 0.01f)
+        return;
+
+    const int numCh = juce::jmin (2, buffer.getNumChannels());
+    applyEditsToBuffer (buffer.getArrayOfWritePointers(), numCh,
+                        buffer.getNumSamples(), timelineStartSample,
+                        mSampleRate, *snap,
+                        focus, mod, mSpeedMs.load (std::memory_order_relaxed),
+                        on,
+                        mMonShifters.data(), mMonFormant.data(), mMonState);
 }
 
 // ─── Offline render (Render/Freeze bake) ──────────────────────────────────────

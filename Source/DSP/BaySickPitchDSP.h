@@ -169,6 +169,14 @@ public:
     void processFilePlay (juce::AudioBuffer<float>& buffer,
                           juce::int64 timelineStartSample) noexcept;
 
+    // QA-Fb (A1 monitor merge): same applicator, SECOND stream state.  While
+    // a live take runs over prior takes, the realtime corrector occupies the
+    // main pitch stage, so the takes' monitor path applies the channel's note
+    // edits through this parallel state set (shared snapshot, own PSOLA /
+    // formant / glide cursors -- the two streams advance independently).
+    void processFilePlayMonitor (juce::AudioBuffer<float>& buffer,
+                                 juce::int64 timelineStartSample) noexcept;
+
     // ── Offline render (message thread; the Render/Freeze bake) ─────────────
     // Applies focus/vibrato/edits to the composite exactly like the realtime
     // path, but offline over the whole buffer.  Returns the processed mono.
@@ -244,6 +252,10 @@ private:
     std::array<PsolaShifter, 2>          mShifters;
     std::array<CepstralFormantEngine, 2> mFormant;
     ApplicatorState mAppState;
+    // QA-Fb (A1): monitor-stream twin of the above -- see processFilePlayMonitor.
+    std::array<PsolaShifter, 2>          mMonShifters;
+    std::array<CepstralFormantEngine, 2> mMonFormant;
+    ApplicatorState mMonState;
     double mSampleRate { 44100.0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPitchDSP)

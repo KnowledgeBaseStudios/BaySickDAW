@@ -3982,20 +3982,35 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
             // I-16 G-9: Vox-only wet recorder + push pointer to the
             // BaySickVocalProcessor for this page so its processBlock taps
             // post-realtime-pitch audio into the wet file.
+            // QA-Fb conditional-WET (G2-condWET + Jeff 2026-07-10): realtime
+            // pitch bypassed means WET == DRY, and master bypass means the
+            // tap never runs (processBlock early-outs) -- either way skip the
+            // second writer entirely; the take is DRY-only and
+            // commitRecordingResult's existing no-wet fallback places the
+            // DRY file on the grid.
             if (isVox && i < kMaxVoxPages)
             {
-                sr.wetFile     = samplesFolder.getChildFile (
-                    projectName + " - " + sr.displayName + " - " + ts + " - WET.wav");
-                sr.wetRecorder = std::make_unique<AudioFileRecorder>();
-                if (sr.wetRecorder->startRecording (sr.wetFile, mSampleRate, 1))
+                BaySickVocalProcessor* vp = nullptr;
+                if (auto* eng = mVoxEngines[i])
+                    vp = dynamic_cast<BaySickVocalProcessor*> (eng);
+
+                bool rtPitchActive = false;
+                if (vp != nullptr)
+                    if (auto* byp = vp->apvts.getRawParameterValue ("bsv_pitch_realtime_bypass"))
+                        rtPitchActive = byp->load() < 0.5f;
+                if (rtPitchActive)
+                    if (auto* mbyp = vp->apvts.getRawParameterValue ("bsv_bypass"))
+                        rtPitchActive = mbyp->load() < 0.5f;
+
+                if (rtPitchActive)
                 {
-                    if (auto* eng = mVoxEngines[i])
-                        if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
-                            vp->setWetRecorder (sr.wetRecorder.get());
-                }
-                else
-                {
-                    sr.wetRecorder.reset();   // failed to open -> drop wet recording
+                    sr.wetFile     = samplesFolder.getChildFile (
+                        projectName + " - " + sr.displayName + " - " + ts + " - WET.wav");
+                    sr.wetRecorder = std::make_unique<AudioFileRecorder>();
+                    if (sr.wetRecorder->startRecording (sr.wetFile, mSampleRate, 1))
+                        vp->setWetRecorder (sr.wetRecorder.get());
+                    else
+                        sr.wetRecorder.reset();   // failed to open -> drop wet recording
                 }
             }
 

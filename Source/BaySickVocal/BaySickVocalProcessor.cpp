@@ -300,6 +300,8 @@ void BaySickVocalProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
 
     mDryScratch.setSize (2, maxBlockSize, false, false, true);
     mDryScratch.clear();
+    mWetMonoScratch.setSize (1, maxBlockSize, false, false, true);
+    mWetMonoScratch.clear();
 
     // H-6d: prepare the embedded NAM/IR processor so its DSP is ready when
     // G-9 routes audio through it.
@@ -429,6 +431,16 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
+
+    // QA-Fb Option A: consume the block-scoped monitor-merge params FIRST so
+    // an early-out path (empty block / shutdown / master bypass) can never
+    // leave a stale task-scratch pointer armed for a later block.
+    juce::AudioBuffer<float>* monTakes    = mMonitorMerge;
+    const juce::int64         monTimeline = mMonitorMergeTimeline;
+    const bool                monMuteLive = mMonitorMuteLive;
+    mMonitorMerge    = nullptr;
+    mMonitorMuteLive = false;
+
     if (numSamples <= 0 || numChannels <= 0) return;
 
     // 2026-05-06 (Batch 9c N1): audio-thread shutdown gate.  Bail BEFORE
@@ -445,7 +457,21 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // Master bypass - entire processor passes input straight to output unchanged.
     const bool masterBypass = apvts.getRawParameterValue ("bsv_bypass")->load() > 0.5f;
     mScHelper.updateLevel (numSamples);
-    if (masterBypass) return;
+    if (masterBypass)
+    {
+        // QA-Fb: bypass = raw passthrough, so the monitor merge applies raw --
+        // prior takes stay audible exactly like pure playback under bypass
+        // (finalizeFilePlayStrip's engine call passes them through unchanged).
+        if (monMuteLive)
+            buffer.clear();
+        if (monTakes != nullptr)
+        {
+            const int nc = juce::jmin (numChannels, monTakes->getNumChannels());
+            for (int ch = 0; ch < nc; ++ch)
+                buffer.addFrom (ch, 0, *monTakes, ch, 0, numSamples);
+        }
+        return;
+    }
 
     // H-6 (2026-05-01) -- push APVTS to DSP stages once per block.
     pushApvtsToDsp();
@@ -470,7 +496,8 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // FilePlay (force-bypass) so a wet file with realtime pitch already
     // committed at record time doesn't get corrected twice.  NAM/IR routing
     // also added in G-9.
-    if (! mForcePitchBypass.load (std::memory_order_acquire))
+    const bool filePlaySrc = mForcePitchBypass.load (std::memory_order_acquire);
+    if (! filePlaySrc)
         mPitchCorrector.process (buffer);
     else
         // QA-Fa Mode C applicator: FilePlay only (mutually exclusive with the
@@ -484,22 +511,68 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // captures realtime-pitch-applied audio so playback bypasses realtime
     // (single pass) while everything from the vocal chain rack onwards
     // stays dynamic across sessions.
-    if (auto* wetRec = mWetRecorder.load (std::memory_order_acquire))
+    // QA-Fb bleed gate (G2-3b): capture-eligible = live-source blocks only.
+    // The force-bypass flag IS the live/FilePlay source-mux discriminator
+    // (its only writers: VoxStripTask live path = false,
+    // finalizeFilePlayStrip = true).  FilePlay decode is prior-take playback
+    // and must never land in a take's WET file.
+    if (! filePlaySrc)
     {
-        // Sum stereo to mono for the recorder (dry source was a mono ASIO
-        // channel duplicated to L=R upstream; pitch correction may have
-        // diverged the channels slightly).
-        const float invCh = (numChannels > 1) ? (1.0f / (float) numChannels) : 1.0f;
-        juce::AudioBuffer<float> monoView (1, numSamples);
-        float* dst = monoView.getWritePointer (0);
-        for (int i = 0; i < numSamples; ++i)
+        if (auto* wetRec = mWetRecorder.load (std::memory_order_acquire))
         {
-            float s = 0.0f;
-            for (int ch = 0; ch < numChannels; ++ch)
-                s += buffer.getReadPointer (ch)[i];
-            dst[i] = s * invCh;
+            // Sum stereo to mono for the recorder (dry source was a mono ASIO
+            // channel duplicated to L=R upstream; pitch correction may have
+            // diverged the channels slightly).
+            // QA-Fb: member scratch + non-owning view -- the old per-block
+            // AudioBuffer construction allocated on the audio thread every
+            // block while recording.  Lazy-grow guarded like mDryScratch.
+            const float invCh = (numChannels > 1) ? (1.0f / (float) numChannels) : 1.0f;
+            if (mWetMonoScratch.getNumChannels() < 1
+                || mWetMonoScratch.getNumSamples() < numSamples)
+                mWetMonoScratch.setSize (1, numSamples, false, false, true);
+            float* dst = mWetMonoScratch.getWritePointer (0);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                float s = 0.0f;
+                for (int ch = 0; ch < numChannels; ++ch)
+                    s += buffer.getReadPointer (ch)[i];
+                dst[i] = s * invCh;
+            }
+            float* monoPtrs[1] = { dst };
+            juce::AudioBuffer<float> monoView (monoPtrs, 1, numSamples);
+            wetRec->writeBlock (monoView);
         }
-        wetRec->writeBlock (monoView);
+    }
+
+    // ── QA-Fb Option A monitor merge (locked 2026-07-10) ─────────────────
+    // Prior takes join the chain AFTER the corrector + WET tap (capture =
+    // live only, bleed impossible by construction) and BEFORE the rack, so
+    // deesser/comp/sat/limiter + NAM process the summed vocal stack exactly
+    // like post-stop playback (finalizeFilePlayStrip runs the same sum
+    // through this same single chain).  A1: the monitor-stream applicator
+    // applies the takes' note edits first -- the realtime corrector occupies
+    // the main pitch stage for the live stream.
+    if (monTakes != nullptr || monMuteLive)
+    {
+        if (monMuteLive)
+        {
+            buffer.clear();                     // captured, not monitored
+            if (needDry)
+                mDryScratch.clear();            // live must not re-enter via Mix
+        }
+        if (monTakes != nullptr)
+        {
+            const int nc = juce::jmin (numChannels, monTakes->getNumChannels());
+            // Dry reference gains the RAW takes (pre-applicator) -- matches
+            // pure playback, where the dry stash is captured before the
+            // pitch stage.
+            if (needDry)
+                for (int ch = 0; ch < nc; ++ch)
+                    mDryScratch.addFrom (ch, 0, *monTakes, ch, 0, numSamples);
+            mPitch.processFilePlayMonitor (*monTakes, monTimeline);
+            for (int ch = 0; ch < nc; ++ch)
+                buffer.addFrom (ch, 0, *monTakes, ch, 0, numSamples);
+        }
     }
 
     mVocalChainRack .process (buffer);

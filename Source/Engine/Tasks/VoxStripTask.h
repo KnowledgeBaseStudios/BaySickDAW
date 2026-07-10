@@ -12,26 +12,28 @@ class BaySickVocalProcessor;
 
 // VoxStripTask
 // ------------
-// Live-input vocal strip task. Mirrors the primary Vox-engine loop in
-// PluginProcessor::processBlock (lines ~1446-1525):
+// Vocal strip task -- the only render path (QA-Ef: serial fallback deleted).
 //
-//   1. Skip if FilePlay-active (the audio-clip loop drives the engine in
-//      that case; see the FilePlay branch in the audio-clip rendering loop).
-//   2. Read APVTS arm / inputChIdx / inputStereo / listen for this strip.
-//   3. If armed and inputChIdx is in range, copy live input from the snapshot
-//      into the engine scratch (mono->dual or stereo pair).
-//   4. Clear setForcePitchBypass on BaySickVocalProcessor (live mode).
-//   5. SC predecessor pull -> ISidechainEngine push.
-//   6. engine.processBlock(scratch, voxPageMidi[index]).
-//   7. VibeGraph::processInsert(Vox, index, ...).
-//   8. If armed && !listen, write silence to mOutputBuffer (do not route).
-//      Else mOutputBuffer's storage holds the strip's final output.
-//
-// QA-Ef (2026-05-21): this is the only render path now; the serial fallback
-// was deleted.  Dry-recorder tap is wired via VibeSynthProcessor::tapDryRecorder
-// (see ::run).  QA-MultiBlockHazard (Task 2): the FilePlay branch decodes every
-// routed clip into a per-task sum, then runs the engine + insert chain ONCE via
-// VibeSynthProcessor::decodeFilePlayClip + finalizeFilePlayStrip.
+//   1. FilePlay + NOT active (no arm, no listen): decode every routed clip
+//      into a per-task sum, then engine + insert chain ONCE on the sum
+//      (decodeFilePlayClip + finalizeFilePlayStrip; QA-MultiBlockHazard
+//      Task 2).  Live input skipped.
+//   2. Otherwise: read APVTS arm / inputChIdx / inputStereo / listen; if
+//      active, copy live input from the snapshot (DRY tap fires pre-chain
+//      when armed) and clear setForcePitchBypass (live mode).
+//   3. QA-Fb Option A (locked 2026-07-10): live strip over FilePlay clips
+//      decodes the prior takes and hands them to the engine as the
+//      block-scoped monitor merge (setMonitorMergeForThisBlock) -- the
+//      engine sums them in after its corrector + WET tap and before its
+//      rack, so chain + NAM process the vocal stack exactly like post-stop
+//      playback; muteLive covers armed && !listen.
+//   4. SC predecessor pull -> ISidechainEngine push.
+//   5. engine.processBlock(blockView, voxPageMidi[index]) -- corrector +
+//      WET tap on the live stream, then the monitor merge, then rack + NAM.
+//   6. VibeGraph::processInsert(Vox, index, ...).
+//   7. No-overlap tail: armed && !listen writes silence to mOutputBuffer
+//      (capture happened; don't route).  Overlap blocks skip this -- the
+//      engine's muteLive already handled it.
 class VoxStripTask : public RenderTask
 {
 public:

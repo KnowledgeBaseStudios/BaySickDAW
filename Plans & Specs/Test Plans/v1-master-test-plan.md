@@ -478,6 +478,65 @@ tab's third sub-tab. Debug first, then Release.
       still list their versions and revert still works (persisted in project XML).
       `D:__ R:__` notes:
 
+### §B.8 — QA-Fb' (recording lifecycle: bleed gate + monitor merge + conditional-WET + dirty)
+
+`blocks:` the QA-Fb' source commit (hash backfilled at the next test-plan touch). Setup: a Vox
+tab with a mic on an ASIO input (arm LED → input picker) + an Inst tab with a DI line for FB-6.
+Multi-take = record take 1, stop, then record take 2 WHILE take 1's clip plays back on the same
+channel. Recording auto-places each take on its own NEW row — do NOT hand-stack two clips on
+the SAME row (overlapping-same-row is campaign §C items 1-2, QA-J-Verify territory). Sound-
+quality listening (glides, comp feel) rides the G2 boundary ear-check; these scenarios are
+functional. Debug first, then Release.
+
+- [ ] **FB-1 — multi-take no-bleed (Vox).** Realtime pitch ON (BaySickVocals sub-tab, bypass
+      off). Record take 1 (sing a melody), stop. Record take 2 over it (count "1-2-3-4"
+      distinctly) — you HEAR take 1 while singing. Stop. Mute take 1's row, solo/play take 2's
+      clip. Expected: take 2 contains ONLY the counting — zero melody bleed; same for its DRY
+      file (drag `Samples/... - DRY.wav` onto an Audio row and play it). `D:__ R:__` notes:
+- [ ] **FB-2 — live capture survives overlap (no missing stretches).** During FB-1's take 2,
+      land a count sharply ON a downbeat mid-overlap. Expected: take 2's clip plays that count
+      exactly on its downbeat — not shifted early (the old early-return dropped overlap blocks
+      from the file entirely, so everything after slid earlier); the take-2 WAV's length covers
+      the full armed duration. `D:__ R:__` notes:
+- [ ] **FB-3 — conditional-WET.** (1) Realtime pitch BYPASSED (default) + record → `Samples/`
+      gains ONLY a `- DRY.wav` (no `- WET.wav` at all), and the DRY clip lands on the grid +
+      browser once (no duplicate entry). (2) Realtime pitch ON + record → BOTH files; WET on
+      the grid, DRY in the browser. (3) Page master bypass ON (pitch left on) + record → DRY
+      only again (no empty orphan WET). `D:__ R:__` notes:
+- [ ] **FB-4 — monitor = playback preview (Option A / A1, Vox).** Before take 2: crank an
+      obvious vocal-chain setting (heavy saturation or comp) AND drag one of take 1's
+      BaySickPitch pills +2 st. While recording take 2: (a) take 1 sounds PROCESSED (the
+      chain character is audible, not a dry/raw version); (b) take 1's edited note plays at its
+      EDITED pitch (A1 — the monitor applicator); (c) your own voice monitors pitch-corrected
+      through the same chain. After stop: play the stack — it sounds like what you heard while
+      tracking (the comp reacting to voice+takes together IS the playback behavior). DSP meter:
+      an idle Vox channel (no recording, no overlap) costs the same as before this batch.
+      `D:__ R:__` notes:
+- [ ] **FB-5 — armed with monitor off (listen off).** Arm the Vox strip, listen OFF, record
+      take 2 over take 1. Expected: you do NOT hear yourself, take 1 keeps playing (produced,
+      not raw) the whole time, and after stop take 2's clip still contains everything you sang
+      (capture ran without the monitor). `D:__ R:__` notes:
+- [ ] **FB-6 — Inst multi-take (same fix, DI).** On the Inst tab (pedals/amp set audibly hot):
+      record DI take 1, stop; record take 2 while take 1 plays. Expected: take 1 is audible
+      THROUGH the pedals/amp while tracking (one chain over the summed stack — same as
+      playback); take 2's file contains only the fresh DI (no take-1 bleed, no missing
+      stretches — repeat the FB-2 downbeat check). `D:__ R:__` notes:
+- [ ] **FB-7 — listen-only monitoring coexists with clips (#5 fold-in).** UNARMED Vox strip,
+      listen ON, transport playing over the channel's clips. Expected: you hear the clips AND
+      your live mic together (pre-batch, the clips silenced the live monitor for their whole
+      duration); works the same on the Inst tab with a DI line. `D:__ R:__` notes:
+- [ ] **FB-8 — dirty on page-create.** New project (title clean, no `*`). Add a Vox page →
+      `*` appears. Save (clean), add an Inst page → `*` again. Save, close, reopen → title
+      stays CLEAN (the restore path must not phantom-dirty). Duplicate-tab and "+ Add New Vox
+      From Export" adds also flip `*`. `D:__ R:__` notes:
+- [ ] **FB-9 — dirty on record-finalize (regression confirm).** Record + stop → `*` shows;
+      save → clean; reopen → clean. `D:__ R:__` notes:
+- [ ] **FB-10 — clip-resize + composite (regression confirms).** Resize a Vox audio clip on the
+      Builder grid: plain drag trims/extends the playable length, Shift/Stretch re-fits — playback
+      follows the new edge (QA-Ec chain). Then open BaySickPitch on a channel with 2 clips —
+      pills appear over both (the QA-F composite renderer feeding analysis, shared-dependency
+      smoke). `D:__ R:__` notes:
+
 ---
 
 ## §C — Deferred re-verify ledger

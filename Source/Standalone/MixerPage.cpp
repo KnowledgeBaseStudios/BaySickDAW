@@ -2061,6 +2061,17 @@ void MixerPage::addVoxChannelAtIndex(int idx)
     // page is spawned alongside the strip.  spawnVoxTabIfMissing is idempotent
     // so firing this on project-load restore paths is safe.
     if (onVoxStripAdded) onVoxStripAdded(idx);
+
+    // QA-Fb G2-dirty: createAndAddParameter for the strip's APVTS params never
+    // fires a value-change, so the APVTS dirty hook can't see a page-add
+    // (mirror of addAuxChannel / QA-Ef #5).  Fired here in the AtIndex body --
+    // unlike aux, user gestures reach this directly (onAddTabRequest, tab
+    // duplicate, Add-From-Export) -- and markDirty no-ops while
+    // ProjectManager::mIgnoreDirty is up, so deserializeUIState's restore-time
+    // calls stay clean (onDeserializeUIState fires inside the openProject
+    // ignore-dirty window).
+    if (mProcessor.onAnyStateChange)
+        mProcessor.onAnyStateChange();
 }
 
 // R2 (2026-04-23): shared ASIO input-channel picker for Vox + Inst Arm-LED
@@ -2395,6 +2406,12 @@ void MixerPage::addInstChannelAtIndex(int idx)
     // G-4 (2026-04-28): notify StandaloneEditor so the matching Inst ribbon
     // page is spawned alongside the strip.
     if (onInstStripAdded) onInstStripAdded(idx);
+
+    // QA-Fb G2-dirty: same page-add dirty fire as addVoxChannelAtIndex above
+    // (APVTS dirty hook can't see createAndAddParameter; load path suppressed
+    // by ProjectManager::mIgnoreDirty).
+    if (mProcessor.onAnyStateChange)
+        mProcessor.onAnyStateChange();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

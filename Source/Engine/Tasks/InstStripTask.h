@@ -11,29 +11,32 @@ class VibeSynthProcessor;
 
 // InstStripTask
 // -------------
-// Live-input + source-mode-aware instrument strip task. Mirrors the primary
-// Inst-engine loop in PluginProcessor::processBlock (lines ~1528-1640):
+// Live-input + source-mode-aware instrument strip task -- the only render
+// path (QA-Ef: serial fallback deleted).
 //
-//   1. Skip if FilePlay-active (audio-clip loop drives the engine in that
-//      case; AudioInsertTask owns that path in Batch 5).
-//   2. Detect sfizz-source slot (mGuitarsActive[index] || mBassesActive[index]).
+//   1. Detect sfizz-source slot (mGuitarsActive[index] || mBassesActive[index]);
+//      read APVTS arm / inputChIdx / inputStereo / listen (arm/listen force-
+//      disabled when sfizz-active -- sfizz drives audio from MIDI).
+//   2. FilePlay + NOT active: decode every routed clip into a per-task sum,
+//      then engine + insert chain ONCE on the sum (decodeFilePlayClip +
+//      finalizeFilePlayStrip; QA-MultiBlockHazard Task 2).
 //   3. Idle suspend (sfizz-source only): if MIDI is empty AND sfizz reports
 //      0 active voices for kIdleSuspendBlocks consecutive blocks, skip the
 //      whole chain. Wake instantly on next block where any gate fails.
-//   4. Read APVTS arm / inputChIdx / inputStereo / listen.  Arm is force-
-//      disabled when sfizz-active (sfizz drives audio from MIDI).
-//   5. If armed && !sfizz, copy live input from the snapshot into the engine
-//      scratch (mono->dual or stereo pair).
+//   4. If active, copy live input from the snapshot (DRY tap fires on the
+//      raw snapshot when armed).
+//   5. QA-Fb Option A (locked 2026-07-10): live strip over FilePlay clips
+//      sums the decoded prior takes with the live DI BEFORE the engine --
+//      one chain pass over the stack, bit-identical to post-stop playback;
+//      armed && !listen clears the live monitor pre-merge (captured, not
+//      monitored).
 //   6. SC predecessor pull -> ISidechainEngine push.
-//   7. engine.processBlock(scratch, instPageMidi[index]).
+//   7. engine.processBlock(blockView, instPageMidi[index]).
 //   8. VibeGraph::processInsert(Inst, index, ...).
-//   9. Listen gate (live-input case) -> silence if monitor off.
+//   9. Listen gate (no-overlap live case) -> silence if monitor off.
 //
 // QA-Ef (2026-05-21): this is the live audio plumbing.  Dry-recorder tap is
-// wired via VibeSynthProcessor::tapDryRecorder (see ::run).  QA-MultiBlockHazard
-// (Task 2): the FilePlay branch decodes every routed clip into a per-task sum,
-// then runs the engine + insert chain ONCE via VibeSynthProcessor::
-// decodeFilePlayClip + finalizeFilePlayStrip.
+// wired via VibeSynthProcessor::tapDryRecorder (see ::run).
 class InstStripTask : public RenderTask
 {
 public:

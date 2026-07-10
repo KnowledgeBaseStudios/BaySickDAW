@@ -36,21 +36,59 @@ void InstStripTask::run()
     juce::AudioBuffer<float> blockView (ptrs, mOutputBuffer->getNumChannels(), n);
     blockView.clear();
 
-    // 2026-05-06 (Batch 9b Item 9): FilePlay branch - see VoxStripTask::run for
-    // rationale.  QA-MultiBlockHazard (Task 2): audio clips routed to this Inst
-    // engine are decoded into a per-task sum (decodeFilePlayClip) then driven
-    // through the engine + insert chain ONCE (finalizeFilePlayStrip).
-    if (mIndex >= 0 && mIndex < (int) mProcessor->mInstFilePlayActive.size()
-        && mProcessor->mInstFilePlayActive[(size_t) mIndex])
-    {
-        if (mCtx->posInfo == nullptr) return;
-        if (! mCtx->posInfo->getIsPlaying()) return;
-        if (mProcessor->mPatternManager == nullptr) return;
-        if (! mProcessor->mSongMode.load (std::memory_order_relaxed)) return;
+    // ── Source-mode detection ────────────────────────────────────────────────
+    const bool guitarsActive = mProcessor->mGuitarsActive[(size_t) mIndex]
+                                          .load (std::memory_order_acquire);
+    const bool bassesActive  = mProcessor->mBassesActive [(size_t) mIndex]
+                                          .load (std::memory_order_acquire);
+    const bool sfizzActive   = guitarsActive || bassesActive;
 
-        // 2026-05-06 (Batch 9c B1): try-lock removed.  mCurrentBlockClipSnapshot
-        // is captured by VibeSynthProcessor::processBlock at the top of the
-        // audio callback BEFORE the dispatcher fires this task.
+    // ── APVTS strip params ────────────────────────────────────────────────────
+    // QA-Fb: hoisted above the FilePlay branch -- active now selects between
+    // pure playback and the capture/monitor path below.  sfizz-active slots
+    // ignore arm / listen - sfizz is the source, no live input.
+    auto& apvts = mProcessor->apvts;
+    const auto* armP    = apvts.getRawParameterValue (mPrefix + "_arm");
+    const auto* idxP    = apvts.getRawParameterValue (mPrefix + "_inputChannelIdx");
+    const auto* stereoP = apvts.getRawParameterValue (mPrefix + "_inputChannelStereo");
+    const auto* listenP = apvts.getRawParameterValue (mPrefix + "_listen");
+
+    const int  chIdx    = (idxP != nullptr) ? (int) idxP->load() : -1;
+    const bool isStereo = (stereoP != nullptr) && stereoP->load() > 0.5f;
+
+    const auto* snapshot = mCtx->liveInputSnapshot;
+    const int   snapChs  = (snapshot != nullptr) ? snapshot->getNumChannels() : 0;
+
+    const bool channelOK = (chIdx >= 0 && chIdx < snapChs);
+    const bool armed     = ! sfizzActive
+                        && (armP    != nullptr) && armP   ->load() > 0.5f && channelOK;
+    const bool listen    = ! sfizzActive
+                        && (listenP != nullptr) && listenP->load() > 0.5f;
+    // QA-E Task 5 (2026-05-15): live input flows through the chain whenever
+    // either arm OR listen is engaged (with a channel selected).  Prior
+    // behavior gated on armed-only, making "monitor without recording"
+    // impossible.
+    const bool active    = channelOK && (armed || listen);
+
+    // 2026-05-06 (Batch 9b Item 9): FilePlay -- audio clips routed to this
+    // Inst engine.  Gates mirror the pre-scan in VibeSynthProcessor::
+    // processBlock; mCurrentBlockClipSnapshot is block-stable via the
+    // RetirementQueue ack protocol (Batch 9c B1).
+    const bool filePlay = mIndex >= 0
+        && mIndex < (int) mProcessor->mInstFilePlayActive.size()
+        && mProcessor->mInstFilePlayActive[(size_t) mIndex]
+        && mCtx->posInfo != nullptr
+        && mCtx->posInfo->getIsPlaying()
+        && mProcessor->mPatternManager != nullptr
+        && mProcessor->mSongMode.load (std::memory_order_relaxed);
+
+    // Shared FilePlay decode: sums every routed clip into mEngineScratch.
+    // QA-MultiBlockHazard (Task 2): one decode sum per block so a stateful
+    // engine + rack advance once per block, not once per FilePlay clip.
+    VibeSynthProcessor::AudioClipBlockContext clipCtx;
+    bool anyClip = false;
+    auto decodeRoutedClips = [&]()
+    {
         const double bpm        = mCtx->bpm;
         const double secPerBeat = 60.0 / juce::jmax (20.0, bpm);
         const double beatStart  = mCtx->posInfo->getPpqPosition().orFallback (0.0);
@@ -59,62 +97,56 @@ void InstStripTask::run()
         // CompositeAudioInsertTask; same seam on Inst FilePlay).
         const juce::int64 projectStart = mCtx->posInfo->getTimeInSamples().orFallback (
             (juce::int64) (beatStart * secPerBeat * mProcessor->mSampleRate));
-        const juce::int64 projectEnd   = projectStart + n;
 
         const auto& mx = mProcessor->mPatternManager->getMixer();
         float masterGain = mx.masterLevel;
         if (auto* p = mProcessor->apvts.getRawParameterValue ("masterGain"))
             masterGain *= p->load();
 
-        VibeSynthProcessor::AudioClipBlockContext clipCtx;
         clipCtx.bpm          = bpm;
         clipCtx.anySolo      = mCtx->anySolo;
         clipCtx.secPerBeat   = secPerBeat;
         clipCtx.projectStart = projectStart;
-        clipCtx.projectEnd   = projectEnd;
+        clipCtx.projectEnd   = projectStart + n;
         clipCtx.numSamples   = n;
         clipCtx.numOut       = blockView.getNumChannels();
         clipCtx.masterGain   = masterGain;
         clipCtx.mxState      = &mx;
-        // QA-E Task 3 follow-up (2026-05-12): per-task clip scratch (was
-        // shared mProcessor->mAudioClipScratch).  See VoxStripTask.cpp for
-        // the cross-pollution rationale + the size-before-read requirement.
+        // QA-E Task 3 follow-up (2026-05-12): per-task clip scratch -- see
+        // VoxStripTask.cpp for the cross-pollution rationale + the
+        // size-before-read requirement.
         mClipScratch.setSize (blockView.getNumChannels(), n, false, false, true);
         clipCtx.clipScratch  = &mClipScratch;
 
-        juce::MidiBuffer  emptyMidi;
-        juce::MidiBuffer& engineMidi = (mCtx->instPageMidi != nullptr)
-            ? mCtx->instPageMidi[mIndex] : emptyMidi;
-
-        // 2026-05-07 (Batch 9c follow-up): SC accumulator population so
-        // finalizeFilePlayStrip's processInsert sees real SC data.
-        pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
-
-        // 2026-05-06 (Batch 9c B1): iterate the audio-thread snapshot.
-        // QA-MultiBlockHazard (Task 2): decode every routed clip into the
-        // per-task engine-sum buffer, then run the engine + insert chain ONCE on
-        // the sum -- so a stateful engine + rack advance once per block, not once
-        // per FilePlay clip.
         mEngineScratch.setSize (blockView.getNumChannels(), n, false, false, true);
         mEngineScratch.clear();
-        bool anyClip = false;
         for (auto& player : mProcessor->mCurrentBlockClipSnapshot->players)
         {
             if (player.routeChannel != channelId) continue;
             if (mProcessor->decodeFilePlayClip (player, clipCtx, mEngineScratch))
                 anyClip = true;
         }
+    };
+
+    if (filePlay && ! active)
+    {
+        // Pure playback (nobody listening to live input): drive the engine +
+        // insert chain ONCE on the decoded sum (finalizeFilePlayStrip ->
+        // blockView).  QA-Fb #5 fold-in: the gate is !active so a LIVE strip
+        // -- armed OR listen -- takes the pre-engine merge path below instead
+        // of losing its live input to this branch.  sfizz strips always land
+        // here when clips overlap (arm/listen forced off above).
+        pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+
+        decodeRoutedClips();
+
+        juce::MidiBuffer  emptyMidi;
+        juce::MidiBuffer& engineMidi = (mCtx->instPageMidi != nullptr)
+            ? mCtx->instPageMidi[mIndex] : emptyMidi;
         if (anyClip)
             mProcessor->finalizeFilePlayStrip (channelId, clipCtx, engineMidi, &blockView, mEngineScratch);
         return;
     }
-
-    // ── Source-mode detection ────────────────────────────────────────────────
-    const bool guitarsActive = mProcessor->mGuitarsActive[(size_t) mIndex]
-                                          .load (std::memory_order_acquire);
-    const bool bassesActive  = mProcessor->mBassesActive [(size_t) mIndex]
-                                          .load (std::memory_order_acquire);
-    const bool sfizzActive   = guitarsActive || bassesActive;
 
     // ── Idle suspend (sfizz-source only) ─────────────────────────────────────
     // When the tab has no MIDI activity AND sfizz reports 0 active voices,
@@ -162,31 +194,6 @@ void InstStripTask::run()
         }
     }
 
-    // ── APVTS strip params (live-input mode) ─────────────────────────────────
-    auto& apvts = mProcessor->apvts;
-    const auto* armP    = apvts.getRawParameterValue (mPrefix + "_arm");
-    const auto* idxP    = apvts.getRawParameterValue (mPrefix + "_inputChannelIdx");
-    const auto* stereoP = apvts.getRawParameterValue (mPrefix + "_inputChannelStereo");
-    const auto* listenP = apvts.getRawParameterValue (mPrefix + "_listen");
-
-    const int  chIdx    = (idxP != nullptr) ? (int) idxP->load() : -1;
-    const bool isStereo = (stereoP != nullptr) && stereoP->load() > 0.5f;
-
-    const auto* snapshot = mCtx->liveInputSnapshot;
-    const int   snapChs  = (snapshot != nullptr) ? snapshot->getNumChannels() : 0;
-
-    // sfizz-active slots ignore arm / listen - sfizz is the source, no live input.
-    const bool channelOK = (chIdx >= 0 && chIdx < snapChs);
-    const bool armed     = ! sfizzActive
-                        && (armP    != nullptr) && armP   ->load() > 0.5f && channelOK;
-    const bool listen    = ! sfizzActive
-                        && (listenP != nullptr) && listenP->load() > 0.5f;
-    // QA-E Task 5 (2026-05-15): live input flows through the chain whenever
-    // either arm OR listen is engaged (with a channel selected).  Prior
-    // behavior gated on armed-only, making "monitor without recording"
-    // impossible.
-    const bool active    = channelOK && (armed || listen);
-
     if (active)
     {
         // 2026-05-06 (Batch 9b Item 8): dry-recorder tap (RAW pre-chain mono)
@@ -205,6 +212,27 @@ void InstStripTask::run()
             blockView.copyFrom (0, 0, *snapshot, chIdx,   0, n);
         if (blockView.getNumChannels() > 1)
             blockView.copyFrom (1, 0, *snapshot, rightCh, 0, n);
+    }
+
+    // ── QA-Fb Option A (locked 2026-07-10): live strip over FilePlay clips ───
+    // Prior takes sum with the live DI BEFORE the engine, so the pedals/amp
+    // chain processes the stack in one pass -- bit-identical to how post-stop
+    // playback runs the summed decode through the same chain.  The DRY tap
+    // above reads the raw input snapshot directly, so capture never sees the
+    // merge.  armed && !listen: live is captured but cleared from the monitor
+    // before the takes join.
+    if (filePlay)
+    {
+        decodeRoutedClips();
+        if (armed && ! listen)
+            blockView.clear();
+        if (anyClip)
+        {
+            const int nc = juce::jmin (blockView.getNumChannels(),
+                                       mEngineScratch.getNumChannels());
+            for (int c = 0; c < nc; ++c)
+                blockView.addFrom (c, 0, mEngineScratch, c, 0, n);
+        }
     }
 
     // ── Sidechain push ────────────────────────────────────────────────────────
@@ -240,6 +268,8 @@ void InstStripTask::run()
     // sfizz-source: always route. Armed live + !listen: kill output.
     // Unarmed + listen: route naturally (input was copied into blockView above).
     // Unarmed + !listen: silent strip, nothing to clear.
-    if (armed && ! listen)
+    // QA-Fb: overlap blocks skip this -- live was already cleared pre-merge
+    // and clearing here would kill the monitored prior takes.
+    if (! filePlay && armed && ! listen)
         blockView.clear();
 }

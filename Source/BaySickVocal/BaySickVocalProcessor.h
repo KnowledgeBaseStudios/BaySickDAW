@@ -298,6 +298,30 @@ public:
     juce::int64 getFilePlayTimelineSample() const noexcept
         { return mFilePlayTimelineSample.load (std::memory_order_relaxed); }
 
+    // ── QA-Fb Option A monitor merge (same-thread, block-scoped) ─────────────
+    // VoxStripTask sets this immediately before calling processBlock when the
+    // strip is live (armed or listen) with FilePlay clips overlapping; the
+    // SAME processBlock call consumes + clears it.  Never set from any other
+    // thread -- plain members, no atomics needed, but the pointer must only
+    // reference storage that outlives the call (the task's decode scratch).
+    //   takes    -> decoded prior-take sum (align warp already applied at the
+    //               decode layer).  processBlock applies the channel's note
+    //               edits via the monitor-stream applicator (A1), then sums
+    //               it in AFTER the corrector + WET tap and BEFORE the rack,
+    //               so the chain + NAM process the vocal stack exactly like
+    //               post-stop playback does.
+    //   timeline -> the takes' block start on the project timeline.
+    //   muteLive -> armed && !listen: the live stream is captured (DRY/WET)
+    //               but removed from the monitor before the merge.
+    void setMonitorMergeForThisBlock (juce::AudioBuffer<float>* takes,
+                                      juce::int64 timelineSample,
+                                      bool muteLive) noexcept
+    {
+        mMonitorMerge         = takes;
+        mMonitorMergeTimeline = timelineSample;
+        mMonitorMuteLive      = muteLive;
+    }
+
     // Analyze the OWN channel's composite into mPitch (auto-resolve, section
     // 14b -- no manual load).  MESSAGE THREAD ONLY.
     bool analyzePitch (juce::String& errorOut);
@@ -331,6 +355,19 @@ private:
     PitchCorrectorDSP mPitchCorrector;
 
     juce::AudioBuffer<float> mDryScratch;   // for global Mix dry/wet crossfade
+
+    // QA-Fb: reusable mono scratch for the WET tap (was a per-block
+    // AudioBuffer construction -- audio-thread allocation).  Sized in
+    // prepareToPlay; lazy-grow guarded like mDryScratch.
+    juce::AudioBuffer<float> mWetMonoScratch;
+
+    // QA-Fb Option A monitor merge -- see setMonitorMergeForThisBlock.
+    // Same-thread block-scoped contract; consumed + cleared at the top of
+    // processBlock so a bailed block (master bypass / shutdown) can never
+    // leave a stale pointer for a later call.
+    juce::AudioBuffer<float>* mMonitorMerge { nullptr };
+    juce::int64               mMonitorMergeTimeline { 0 };
+    bool                      mMonitorMuteLive { false };
 
     // I-16 G-9 (2026-05-03): realtime-bypass + wet recorder hooks.  Atomics
     // because audio thread reads / message thread writes.
