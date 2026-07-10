@@ -1292,8 +1292,14 @@ void VibeSynthProcessor::finalizeFilePlayStrip (int                          rou
 
         // setForcePitchBypass(true) - realtime pitch was baked into the wet
         // recording at capture time, so don't double-apply on FilePlay.
+        // QA-Fa: stamp the block's timeline position alongside it -- the
+        // BaySickPitch applicator maps this strip's audio onto composite
+        // note regions by absolute position.
         if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
+        {
             vp->setForcePitchBypass (true);
+            vp->setFilePlayTimelineSample (ctx.projectStart);
+        }
 
         pushScToEng (eng, MixerChannelIds::voxInsert (vi));
         eng->processBlock (engineSum, engineMidi);
@@ -3317,6 +3323,27 @@ juce::int64 VibeSynthProcessor::channelClipSignature (int channelId) const
         h = h * 31 + (juce::int64) std::llround ((double) blk.originalBPM * 100.0);
         sig += h;
     }
+
+    // QA-Fa: fold the tempo timeline in -- a tempo change re-maps every
+    // clip's beat->sample position, so Align warp maps and Pitch note
+    // regions authored under the old tempo are stale even though no clip
+    // moved.  Stepped map when published, global tempo otherwise.
+    if (TempoMap::isActive())
+    {
+        juce::int64 t = 0;
+        for (int guard = 0; guard < TempoMap::kMaxSegs; ++guard)
+        {
+            sig = sig * 31 + (juce::int64) std::llround (TempoMap::bpmAtSample (t) * 100.0);
+            sig = sig * 31 + t;
+            const juce::int64 nb = TempoMap::nextBoundaryAfter (t);
+            if (nb < 0) break;
+            t = nb;
+        }
+    }
+    else
+        sig = sig * 31 + (juce::int64) std::llround (
+            juce::jmax (1.0, mPatternManager->getGlobalTempo()) * 100.0);
+
     return sig;
 }
 

@@ -1,641 +1,1153 @@
 #include "BaySickPitchEditor.h"
 #include "BaySickVocalProcessor.h"
-#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
+#include "../Standalone/BaySickTitleBar.h"
+#include "../Standalone/SharedUI.h"
+#include "../Standalone/StandaloneEditor.h"
+#include "../TempoMapRead.h"   // LENGTH readout: seconds -> bars through the timeline
+#include <algorithm>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickPitchEditor - H-6b (2026-05-02)
-//
-// Newtone-clone visual + interaction model.  See header for layout summary.
-// H-6b ships the empty-state shell: layout + paint match Newtone, but no
-// recording is loaded yet (G-9 wires the source).
+// BaySickPitchEditor - QA-Fa Task 2 (2026-07-10).  See header; section 14 of
+// phantom-recording-mongoose is the spec.
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace
 {
-    // ── Layout constants ────────────────────────────────────────────────────
-    constexpr int kToolbarH   = 70;
-    constexpr int kRulerH     = 16;
-    constexpr int kKeyboardW  = 40;
-    constexpr int kInfoBarH   = 22;
+    constexpr int kToolbarH  = 70;
+    constexpr int kRulerH    = 16;
+    constexpr int kKeyboardW = 40;
+    constexpr int kInfoBarH  = 22;
+    constexpr int kSubCurveH = 46;   // 3 stacked mini-lanes under the selected pill
 
-    constexpr int kBigKnobSz  = 52;       // CENTER / VARIATION / TRANS
+    const juce::Colour kBg        = juce::Colour (0xff0e0f12);
+    const juce::Colour kPanelBg   = juce::Colour (0xff16191e);
+    const juce::Colour kToolbarBg = juce::Colour (0xff0d0f12);
+    const juce::Colour kText      = juce::Colour (0xffd0d6dc);
+    const juce::Colour kTextDim   = juce::Colour (0xff8a929c);
+    const juce::Colour kDirtyDot  = juce::Colour (0xff58c067);
+    const juce::Colour kStale     = juce::Colour (0xffe8a13c);
 
-    // ── Palette: matches the existing PianoRoll (VC::Bg / VC::Panel /
-    //    VC::Accent) so BaySickPitch reads as part of the same family.
-    const juce::Colour kCanvas      = juce::Colour (0xff252529);   // VC::Panel
-    const juce::Colour kGridFaint   = juce::Colour (0xff333339);   // VC::Accent ~50% alpha baked
-    const juce::Colour kGridStrong  = juce::Colour (0xff3a3a3e);   // VC::Accent
-    const juce::Colour kRulerBg     = juce::Colour (0xff2e2e33);   // VC::Surface
-    const juce::Colour kToolbarBg   = juce::Colour (0xff1c1c1e);   // VC::Bg
-    const juce::Colour kToolbarText = juce::Colour (0xffe0e0e8);   // VC::Text
-    const juce::Colour kKeyWhite    = juce::Colour (0xff8a939d);
-    const juce::Colour kKeyBlack    = juce::Colour (0xff2e3742);
-    const juce::Colour kKeyBorder   = juce::Colour (0xff202830);
-    const juce::Colour kPitchCurve  = juce::Colour (0xffe89c5a);
-    const juce::Colour kPlayhead    = juce::Colour (0xfff05030);
-    const juce::Colour kInfoBarBg   = juce::Colour (0xff252529);   // VC::Panel
+    // Section 14c / section 15 palette: pills Effects purple, waveform
+    // interior Vox teal, pitch curve Bass green (the same green as the Align
+    // Leader lane -- both editors use Bass green for the pitch signal).
+    const juce::Colour kPillFill   = juce::Colour (0xff8a2be2);
+    const juce::Colour kPillWave   = juce::Colour (0xff0fafa5);
+    const juce::Colour kPitchCurve = juce::Colour (0xff33ff88);
+    const juce::Colour kPlayhead   = juce::Colour (0xffe8e8e8);
+
+    struct FactoryPitchPreset { const char* name; float focus, mod, speed; };
+    constexpr FactoryPitchPreset kPitchPresets[3] = {
+        { "Loose",   0.0f, 50.0f, 30.0f },
+        { "Close",  50.0f, 50.0f, 50.0f },
+        { "Tight", 100.0f, 20.0f, 80.0f },
+    };
+
+    const char* const kPitchPresetParamIds[] = { "bsp_focus", "bsp_mod", "bsp_speed" };
+
+    juce::File pitchPresetsDir()
+    {
+        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                 .getChildFile ("BaySickDAW").getChildFile ("Presets")
+                 .getChildFile ("BaySickPitch").getChildFile ("My Presets");
+    }
+
+    juce::String midiNoteName (int midi)
+    {
+        static const char* names[12] = { "C", "C#", "D", "D#", "E", "F",
+                                         "F#", "G", "G#", "A", "A#", "B" };
+        return juce::String (names[((midi % 12) + 12) % 12]) + juce::String (midi / 12 - 1);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Toolbar
+// PitchKeyboard - vertical MIDI keyboard strip (section 14c KEEP)
+// ─────────────────────────────────────────────────────────────────────────────
+class BaySickPitchEditor::PitchKeyboard : public juce::Component
+{
+public:
+    explicit PitchKeyboard (BaySickPitchEditor& o) : mOwner (o) {}
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colour (0xff14171c));
+        const double laneH = mOwner.noteLaneH();
+        const int top = mOwner.topNote();
+        for (int note = top; note > 0; --note)
+        {
+            const float y = (float) ((top - note) * laneH);
+            if (y > (float) getHeight()) break;
+            const int pc = ((note % 12) + 12) % 12;
+            const bool black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
+            g.setColour (black ? juce::Colour (0xff1a1d22) : juce::Colour (0xffd8dce0));
+            g.fillRect (0.0f, y, (float) getWidth() - 1.0f, (float) laneH - 0.5f);
+            if (pc == 0 && laneH >= 7.0)
+            {
+                g.setColour (juce::Colours::black);
+                g.setFont (9.0f);
+                g.drawText (midiNoteName (note), 2, (int) y, getWidth() - 6, (int) laneH,
+                            juce::Justification::centredRight);
+            }
+        }
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& e,
+                         const juce::MouseWheelDetails& w) override
+    {
+        juce::ignoreUnused (e);
+        mOwner.setTopNote (mOwner.topNote() + (w.deltaY > 0 ? 2 : -2));
+    }
+
+private:
+    BaySickPitchEditor& mOwner;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PitchCanvas - ruler + grid + pitch curve + pills + sub-curves + playhead
+// ─────────────────────────────────────────────────────────────────────────────
+class BaySickPitchEditor::PitchCanvas : public juce::Component
+{
+public:
+    explicit PitchCanvas (BaySickPitchEditor& o) : mOwner (o) {}
+
+    double secForX (int x) const
+    {
+        return mOwner.scrollSeconds() + (double) x / mOwner.pixelsPerSecond();
+    }
+    int xForSec (double sec) const
+    {
+        return (int) std::round ((sec - mOwner.scrollSeconds()) * mOwner.pixelsPerSecond());
+    }
+    float yForMidi (double midi) const
+    {
+        return (float) (kRulerH + (mOwner.topNote() - midi) * mOwner.noteLaneH());
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (kBg);
+        auto& pitch = mOwner.mProc.mPitch;
+        const double laneH = mOwner.noteLaneH();
+        const int top = mOwner.topNote();
+
+        // Note lanes + octave lines
+        for (int note = top; note > 0; --note)
+        {
+            const float y = yForMidi (note);
+            if (y > (float) getHeight()) break;
+            if (y < kRulerH) continue;
+            const int pc = ((note % 12) + 12) % 12;
+            const bool black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
+            if (black)
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.25f));
+                g.fillRect (0.0f, y, (float) getWidth(), (float) laneH);
+            }
+            if (pc == 0)
+            {
+                g.setColour (kTextDim.withAlpha (0.25f));
+                g.drawHorizontalLine ((int) (y + laneH), 0.0f, (float) getWidth());
+            }
+        }
+
+        // Ruler (time ticks)
+        g.setColour (juce::Colour (0xff14171c));
+        g.fillRect (0, 0, getWidth(), kRulerH);
+        {
+            double step = 1.0;
+            while (step * mOwner.pixelsPerSecond() < 50.0)  step *= 2.0;
+            while (step * mOwner.pixelsPerSecond() > 160.0) step /= 2.0;
+            g.setFont (9.0f);
+            double t = std::floor (mOwner.scrollSeconds() / step) * step;
+            for (;; t += step)
+            {
+                const int x = xForSec (t);
+                if (x > getWidth()) break;
+                if (x < 0) continue;
+                g.setColour (kTextDim.withAlpha (0.5f));
+                g.drawVerticalLine (x, 2.0f, (float) kRulerH);
+                g.setColour (kTextDim);
+                const int mins = (int) (t / 60.0);
+                g.drawText (juce::String (mins) + ":"
+                              + juce::String (t - mins * 60.0, (step < 1.0) ? 1 : 0)
+                                    .paddedLeft ('0', (step < 1.0) ? 4 : 2),
+                            x + 2, 1, 48, kRulerH - 2, juce::Justification::centredLeft);
+                g.setColour (kTextDim.withAlpha (0.12f));
+                g.drawVerticalLine (x, (float) kRulerH, (float) getHeight());
+            }
+        }
+
+        if (! pitch.isAnalyzed() || pitch.regions().empty())
+        {
+            g.setColour (kTextDim);
+            g.setFont (13.0f);
+            g.drawText (pitch.isAnalyzed()
+                            ? "No notes detected on this channel yet"
+                            : "Put audio clips on this channel - notes appear here automatically",
+                        getLocalBounds(), juce::Justification::centred);
+            return;
+        }
+
+        // Detected pitch curve (Bass green) from the analysis F0 track.
+        {
+            const auto& f0 = pitch.f0Track();
+            const double hopSec = BaySickPitchDSP::kF0Hop / pitch.analysisSampleRate();
+            juce::Path p;
+            bool started = false;
+            for (size_t f = 0; f < f0.size(); ++f)
+            {
+                const double t = (double) f * hopSec;
+                const int x = xForSec (t);
+                if (x < -4) continue;
+                if (x > getWidth() + 4) break;
+                if (f0[f] <= 0.0f) { started = false; continue; }
+                const double midi = 12.0 * std::log2 (f0[f] / 440.0) + 69.0;
+                const float y = yForMidi (midi) + (float) (laneH * 0.5);
+                if (! started) { p.startNewSubPath ((float) x, y); started = true; }
+                else             p.lineTo ((float) x, y);
+            }
+            g.setColour (kPitchCurve.withAlpha (0.75f));
+            g.strokePath (p, juce::PathStrokeType (1.4f));
+        }
+
+        // Pills (rounded 5 px, purple fill, teal waveform interior) at the
+        // EDITED pitch (midi + shiftSemis) so drags read immediately.
+        const auto& regions = pitch.regions();
+        for (int i = 0; i < (int) regions.size(); ++i)
+        {
+            const auto& r = regions[(size_t) i];
+            const int x0 = xForSec (r.startSec);
+            const int x1 = xForSec (r.endSec);
+            if (x1 < 0 || x0 > getWidth()) continue;
+            const float y = yForMidi ((double) r.midi + r.shiftSemis + 0.5);
+            auto pill = juce::Rectangle<float> ((float) x0, y - (float) laneH * 0.5f,
+                                                (float) juce::jmax (6, x1 - x0),
+                                                (float) laneH * 2.0f);
+            const bool sel = (i == mOwner.mSelectedRegion);
+            g.setColour (kPillFill.withAlpha (sel ? 0.95f : 0.7f));
+            g.fillRoundedRectangle (pill, 5.0f);
+            if (sel)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.8f));
+                g.drawRoundedRectangle (pill, 5.0f, 1.4f);
+            }
+            drawPillWaveform (g, pill);
+            if (r.hasEdits())
+            {
+                g.setColour (kDirtyDot);
+                g.fillEllipse (pill.getX() + 3.0f, pill.getY() + 3.0f, 5.0f, 5.0f);
+            }
+        }
+
+        // Sub-curves under the selected pill (always visible when selected).
+        if (mOwner.mSelectedRegion >= 0
+            && mOwner.mSelectedRegion < (int) regions.size())
+            drawSubCurves (g, regions[(size_t) mOwner.mSelectedRegion]);
+
+        // Playhead (FilePlay position; owner hides it when it stops moving).
+        if (mOwner.mLastPlaySample >= 0)
+        {
+            const double tSec = (double) (mOwner.mLastPlaySample - pitch.startSample())
+                                / pitch.analysisSampleRate();
+            const int x = xForSec (tSec);
+            if (x >= 0 && x <= getWidth())
+            {
+                g.setColour (kPlayhead.withAlpha (0.8f));
+                g.drawVerticalLine (x, (float) kRulerH, (float) getHeight());
+            }
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        auto& pitch = mOwner.mProc.mPitch;
+        auto& regions = pitch.regions();
+        const double tSec = secForX (e.x);
+
+        // Sub-curve hit first (they float below the selected pill).
+        if (mOwner.mSelectedRegion >= 0
+            && mOwner.mSelectedRegion < (int) regions.size()
+            && subCurveArea (regions[(size_t) mOwner.mSelectedRegion])
+                   .contains (e.getPosition()))
+        {
+            mOwner.pushUndo();
+            mDragKind = DragKind::SubCurve;
+            applySubCurveDrag (e.getPosition(),
+                               regions[(size_t) mOwner.mSelectedRegion]);
+            repaint();
+            return;
+        }
+
+        int hit = -1;
+        for (int i = 0; i < (int) regions.size(); ++i)
+        {
+            const auto& r = regions[(size_t) i];
+            const float y = yForMidi ((double) r.midi + r.shiftSemis + 0.5);
+            if (tSec >= r.startSec && tSec < r.endSec
+                && e.y >= y - mOwner.noteLaneH() && e.y <= y + mOwner.noteLaneH() * 2.0)
+                { hit = i; break; }
+        }
+
+        if (hit < 0)
+        {
+            mOwner.mSelectedRegion = -1;
+            mDragKind = DragKind::None;
+            repaint();
+            return;
+        }
+
+        mOwner.mSelectedRegion = hit;
+        mOwner.updateInfoBarFor (hit);
+
+        const bool sliceMode = ((int) mOwner.paramValue ("bsp_mode", 1.0f)) == 0;
+        if (sliceMode)
+        {
+            // Slice: split the region at the click (both halves inherit the
+            // detected fields + edits).
+            auto& r = regions[(size_t) hit];
+            if (tSec > r.startSec + 0.03 && tSec < r.endSec - 0.03)
+            {
+                mOwner.pushUndo();
+                PitchNoteRegion right = r;
+                right.startSec = tSec;
+                r.endSec       = tSec;
+                regions.insert (regions.begin() + hit + 1, right);
+                pitch.publishEdits();
+            }
+            mDragKind = DragKind::None;
+            repaint();
+            return;
+        }
+
+        // Edit mode: edges resize, body = vertical pitch drag.
+        mOwner.pushUndo();
+        const int x0 = xForSec (regions[(size_t) hit].startSec);
+        const int x1 = xForSec (regions[(size_t) hit].endSec);
+        if (e.x - x0 < 6)       mDragKind = DragKind::LeftEdge;
+        else if (x1 - e.x < 6)  mDragKind = DragKind::RightEdge;
+        else                    mDragKind = DragKind::PitchDrag;
+        mDragStartShift = regions[(size_t) hit].shiftSemis;
+        mDragStartY     = e.y;
+        repaint();
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        auto& pitch = mOwner.mProc.mPitch;
+        auto& regions = pitch.regions();
+        const int sel = mOwner.mSelectedRegion;
+        if (sel < 0 || sel >= (int) regions.size() || mDragKind == DragKind::None)
+            return;
+        auto& r = regions[(size_t) sel];
+        const double tSec = secForX (e.x);
+
+        switch (mDragKind)
+        {
+            case DragKind::PitchDrag:
+            {
+                // 1 lane = 1 semitone; 0.1 st steps.
+                const double semis = mDragStartShift
+                    + (mDragStartY - e.y) / mOwner.noteLaneH();
+                r.shiftSemis = (float) juce::jlimit (-24.0, 24.0,
+                    std::round (semis * 10.0) / 10.0);
+                break;
+            }
+            case DragKind::LeftEdge:
+                r.startSec = juce::jlimit (
+                    (sel > 0) ? regions[(size_t) sel - 1].endSec : 0.0,
+                    r.endSec - 0.02, tSec);
+                break;
+            case DragKind::RightEdge:
+                r.endSec = juce::jlimit (r.startSec + 0.02,
+                    (sel + 1 < (int) regions.size()) ? regions[(size_t) sel + 1].startSec
+                                                     : pitch.compositeSec(),
+                    tSec);
+                break;
+            case DragKind::SubCurve:
+                applySubCurveDrag (e.getPosition(), r);
+                break;
+            case DragKind::None:
+                break;
+        }
+        mOwner.updateInfoBarFor (sel);
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (mDragKind != DragKind::None)
+            mOwner.mProc.mPitch.publishEdits();
+        mDragKind = DragKind::None;
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        auto& regions = mOwner.mProc.mPitch.regions();
+        const double tSec = secForX (e.x);
+        for (int i = 0; i < (int) regions.size(); ++i)
+        {
+            const auto& r = regions[(size_t) i];
+            const float y = yForMidi ((double) r.midi + r.shiftSemis + 0.5);
+            if (tSec >= r.startSec && tSec < r.endSec
+                && e.y >= y - mOwner.noteLaneH() && e.y <= y + mOwner.noteLaneH() * 2.0)
+            {
+                mOwner.updateInfoBarFor (i);
+                return;
+            }
+        }
+        mOwner.updateInfoBarFor (mOwner.mSelectedRegion);
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& e,
+                         const juce::MouseWheelDetails& w) override
+    {
+        if (e.mods.isCtrlDown())
+        {
+            const double f = (w.deltaY > 0) ? 1.2 : 1.0 / 1.2;
+            mOwner.setView (mOwner.pixelsPerSecond() * f, mOwner.scrollSeconds());
+        }
+        else if (e.mods.isShiftDown())
+        {
+            mOwner.setView (mOwner.pixelsPerSecond(),
+                            mOwner.scrollSeconds() - w.deltaY * 60.0 / mOwner.pixelsPerSecond());
+        }
+        else
+            mOwner.setTopNote (mOwner.topNote() + (w.deltaY > 0 ? 2 : -2));
+    }
+
+private:
+    enum class DragKind { None, PitchDrag, LeftEdge, RightEdge, SubCurve };
+
+    void drawPillWaveform (juce::Graphics& g, juce::Rectangle<float> pill)
+    {
+        if (! mOwner.mCompValid) return;
+        const auto& buf = mOwner.mCompCache;
+        const float* src = buf.getReadPointer (0);
+        const int n = buf.getNumSamples();
+        const double sr = mOwner.mCompSr;
+        g.setColour (kPillWave.withAlpha (0.85f));
+        const float midY = pill.getCentreY();
+        const float halfH = pill.getHeight() * 0.42f;
+        const int px0 = juce::jmax ((int) pill.getX(), 0);
+        const int px1 = juce::jmin ((int) pill.getRight(), getWidth());
+        for (int x = px0; x < px1; ++x)
+        {
+            const juce::int64 s0 = (juce::int64) (secForX (x) * sr);
+            const juce::int64 s1 = (juce::int64) (secForX (x + 1) * sr);
+            if (s0 >= n || s1 <= 0) continue;
+            const juce::int64 a = juce::jmax ((juce::int64) 0, s0);
+            const juce::int64 z = juce::jmin ((juce::int64) n, juce::jmax (s0 + 1, s1));
+            const juce::int64 stride = juce::jmax ((juce::int64) 1, (z - a) / 32);
+            float lo = 0.0f, hi = 0.0f;
+            for (juce::int64 s = a; s < z; s += stride)
+            {
+                lo = juce::jmin (lo, src[s]);
+                hi = juce::jmax (hi, src[s]);
+            }
+            g.drawVerticalLine (x, midY - hi * halfH, midY - lo * halfH + 1.0f);
+        }
+    }
+
+    juce::Rectangle<int> subCurveArea (const PitchNoteRegion& r) const
+    {
+        const int x0 = xForSec (r.startSec);
+        const int x1 = xForSec (r.endSec);
+        const float y = yForMidi ((double) r.midi + r.shiftSemis + 0.5);
+        return { x0, (int) (y + mOwner.noteLaneH() * 2.0) + 2,
+                 juce::jmax (72, x1 - x0), kSubCurveH };
+    }
+
+    void drawSubCurves (juce::Graphics& g, const PitchNoteRegion& r)
+    {
+        auto area = subCurveArea (r);
+        g.setColour (kPanelBg.withAlpha (0.92f));
+        g.fillRoundedRectangle (area.toFloat(), 3.0f);
+
+        const int laneH = kSubCurveH / 3;
+        auto lane = [&] (int idx)
+        {
+            return area.withHeight (laneH).withY (area.getY() + idx * laneH);
+        };
+        g.setFont (8.0f);
+
+        // Vibrato: filled bar = depth mult (0..2, half = natural).
+        {
+            auto L = lane (0).reduced (2, 1);
+            g.setColour (kTextDim);
+            g.drawText ("VIB", L.removeFromLeft (26), juce::Justification::centredLeft);
+            g.setColour (kPitchCurve.withAlpha (0.25f));
+            g.fillRect (L);
+            g.setColour (kPitchCurve);
+            const float w = (float) L.getWidth()
+                          * juce::jlimit (0.0f, 2.0f, r.vibDepthMult) * 0.5f;
+            g.fillRect ((float) L.getX(), (float) L.getY(), w, (float) L.getHeight());
+        }
+        // Formant: bipolar bar from center (-6..+6 st).
+        {
+            auto L = lane (1).reduced (2, 1);
+            g.setColour (kTextDim);
+            g.drawText ("FRM", L.removeFromLeft (26), juce::Justification::centredLeft);
+            g.setColour (kPillWave.withAlpha (0.25f));
+            g.fillRect (L);
+            const float cx = (float) L.getCentreX();
+            const float dx = (float) L.getWidth() * 0.5f
+                           * juce::jlimit (-1.0f, 1.0f, r.formantSemis / 6.0f);
+            g.setColour (kPillWave);
+            g.fillRect (juce::Rectangle<float> (juce::jmin (cx, cx + dx), (float) L.getY(),
+                                                std::abs (dx), (float) L.getHeight()));
+        }
+        // Volume: shape polyline (unity midline when empty).
+        {
+            auto L = lane (2).reduced (2, 1);
+            g.setColour (kTextDim);
+            g.drawText ("VOL", L.removeFromLeft (26), juce::Justification::centredLeft);
+            g.setColour (kDirtyDot.withAlpha (0.25f));
+            g.fillRect (L);
+            g.setColour (kDirtyDot);
+            juce::Path p;
+            const int steps = juce::jmax (2, L.getWidth() / 4);
+            for (int s = 0; s <= steps; ++s)
+            {
+                const float t01 = (float) s / (float) steps;
+                const float gval = juce::jlimit (0.0f, 2.0f, r.volGainAt (t01));
+                const float x = (float) L.getX() + t01 * (float) L.getWidth();
+                const float y = (float) L.getBottom() - gval * 0.5f * (float) L.getHeight();
+                if (s == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+            }
+            g.strokePath (p, juce::PathStrokeType (1.2f));
+        }
+    }
+
+    void applySubCurveDrag (juce::Point<int> pos, PitchNoteRegion& r)
+    {
+        auto area = subCurveArea (r);
+        const int laneH = kSubCurveH / 3;
+        const int lane = juce::jlimit (0, 2, (pos.y - area.getY()) / laneH);
+        auto L = area.withHeight (laneH).withY (area.getY() + lane * laneH).reduced (2, 1);
+        L.removeFromLeft (26);
+        const float t01 = juce::jlimit (0.0f, 1.0f,
+            (float) (pos.x - L.getX()) / (float) juce::jmax (1, L.getWidth()));
+
+        if (lane == 0)
+            r.vibDepthMult = juce::jlimit (0.0f, 2.0f, t01 * 2.0f);
+        else if (lane == 1)
+            r.formantSemis = juce::jlimit (-6.0f, 6.0f, (t01 - 0.5f) * 12.0f);
+        else
+        {
+            // Volume: set/update a point at this t01 (merge within 5%).
+            const float gval = juce::jlimit (0.0f, 2.0f,
+                2.0f * (float) (L.getBottom() - pos.y) / (float) juce::jmax (1, L.getHeight()));
+            bool merged = false;
+            for (auto& p : r.volShape)
+                if (std::abs (p.x - t01) < 0.05f) { p.y = gval; merged = true; break; }
+            if (! merged)
+            {
+                r.volShape.push_back ({ t01, gval });
+                std::sort (r.volShape.begin(), r.volShape.end(),
+                           [] (const juce::Point<float>& a, const juce::Point<float>& b)
+                           { return a.x < b.x; });
+            }
+        }
+    }
+
+    BaySickPitchEditor& mOwner;
+    DragKind mDragKind       { DragKind::None };
+    float    mDragStartShift { 0.0f };
+    int      mDragStartY     { 0 };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// InfoBar (section 14d): monospace Pitch / Cents / Length
+// ─────────────────────────────────────────────────────────────────────────────
+class BaySickPitchEditor::InfoBar : public juce::Component
+{
+public:
+    void setText (const juce::String& t)
+    {
+        if (t != mText) { mText = t; repaint(); }
+    }
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (kToolbarBg);
+        g.setColour (kText);
+        g.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 12.0f,
+                               juce::Font::plain));
+        g.drawText (mText, getLocalBounds().reduced (8, 0),
+                    juce::Justification::centredLeft);
+    }
+private:
+    juce::String mText;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Toolbar (section 14b)
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickPitchEditor::Toolbar : public juce::Component
 {
 public:
-    explicit Toolbar (BaySickPitchEditor& owner) : mOwner (owner)
+    Toolbar (BaySickPitchEditor& o, juce::AudioProcessorValueTreeState& apvts)
+        : mOwner (o), mApvts (apvts)
     {
-        auto plain = [this](juce::TextButton& b, const juce::String& txt,
-                             const juce::String& tooltip)
-        {
-            b.setButtonText (txt);
-            b.setTooltip (tooltip);
-            b.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff404a55));
-            b.setColour (juce::TextButton::textColourOnId,  kToolbarText);
-            b.setColour (juce::TextButton::textColourOffId, kToolbarText);
-            addAndMakeVisible (b);
-        };
-
-        // Transport row (top-left)
-        plain (mLoopBtn, "Loop", "Loop Mode (L)");
-        mLoopBtn.setClickingTogglesState (true);
-
-        plain (mPlayBtn, "Play", "Play / Stop (Spacebar)");
-        plain (mStopBtn, "Stop", "Stop");
-
-        // Edit-mode row (right of transport)
-        plain (mCutBtn,      "Cut",  "Cut Mode (C)");
-        mCutBtn.setClickingTogglesState (true);
-        mCutBtn.setRadioGroupId (1);
-        mCutBtn.onClick = [this] { mOwner.setEditMode (BaySickPitchEditor::EditMode::Cut); };
-
-        plain (mAdvBtn,      "Adv",  "Advanced Edit Mode (Ctrl+Shift+A)");
-        mAdvBtn.setClickingTogglesState (true);
-        mAdvBtn.setRadioGroupId (1);
-        mAdvBtn.setToggleState (true, juce::dontSendNotification);
-        mAdvBtn.onClick = [this] { mOwner.setEditMode (BaySickPitchEditor::EditMode::Advanced); };
-
-        plain (mVibBtn,      "Vib",  "Vibrato Edit Mode");
-        mVibBtn.setClickingTogglesState (true);
-        mVibBtn.setRadioGroupId (1);
-        mVibBtn.onClick = [this] { mOwner.setEditMode (BaySickPitchEditor::EditMode::Vibrato); };
-
-        plain (mSlavedBtn,   "Slv",  "Slaved Playback Mode (H) -- follow global transport");
-        mSlavedBtn.setClickingTogglesState (true);
-
-        plain (mAutoBtn,     "Auto", "Auto-Scroll Mode (A)");
-        mAutoBtn.setClickingTogglesState (true);
-
-        // File-action row (icons-as-text since we don't ship icon resources yet)
-        plain (mLoadBtn,   "Load",   "Load Sample (Ctrl+O) -- only used pre-G-9");
-        plain (mSaveBtn,   "Save",   "Render (Ctrl+S)");
-        mSaveBtn.setEnabled (false);   // disabled until source loaded
-        plain (mResetBtn,  "Reset",  "Reset all edits");
-        plain (mCenterPRBtn, "->PR", "Send Selection to Piano Roll");
-
-        // Title + filename labels (top-left text strip).
-        // QA-A (2026-05-09): mTitleLbl swapped to BaySickEngineLabel for
-        // matching BaySickVocals title styling (16pt bold, teal #0FAFA5,
-        // bloom halo).  Engine name + accent are set via the member
-        // initializer below; no setText/setFont/setColour needed here.
         addAndMakeVisible (mTitleLbl);
 
-        addAndMakeVisible (mFileLbl);
-        mFileLbl.setText ("(no recording loaded)", juce::dontSendNotification);
-        mFileLbl.setColour (juce::Label::textColourId,
-                             kToolbarText.withAlpha (0.65f));
-        mFileLbl.setFont (juce::Font (11.0f));
-
-        addAndMakeVisible (mLengthLbl);
-        mLengthLbl.setText ("LENGTH/SEL --", juce::dontSendNotification);
-        mLengthLbl.setColour (juce::Label::textColourId,
-                               kToolbarText.withAlpha (0.65f));
-        mLengthLbl.setFont (juce::Font (10.0f));
-
-        addAndMakeVisible (mTempoLbl);
-        mTempoLbl.setText ("TEMPO --", juce::dontSendNotification);
-        mTempoLbl.setColour (juce::Label::textColourId,
-                              kToolbarText.withAlpha (0.65f));
-        mTempoLbl.setFont (juce::Font (10.0f));
-
-        addAndMakeVisible (mSyncLbl);
-        mSyncLbl.setText ("SYNC", juce::dontSendNotification);
-        mSyncLbl.setColour (juce::Label::textColourId,
-                             kToolbarText.withAlpha (0.65f));
-        mSyncLbl.setFont (juce::Font (10.0f));
-
-        // 3 big global knobs (top-right) -- CENTER / VARIATION / TRANS
-        auto bigKnob = [this](juce::Slider& s, juce::Label& l,
-                               const juce::String& nm, const juce::String& tt)
+        addAndMakeVisible (mPresetCombo);
+        for (int i = 0; i < 3; ++i)
+            mPresetCombo.addItem (kPitchPresets[i].name, i + 1);
+        mPresetCombo.addItem ("(User)", 4);
+        mPresetCombo.setColour (juce::ComboBox::backgroundColourId, kPanelBg);
+        mPresetCombo.setColour (juce::ComboBox::textColourId, kText);
+        mPresetCombo.onChange = [this]
         {
-            s.setSliderStyle (juce::Slider::RotaryVerticalDrag);
-            s.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-            s.setRange (0.0, 100.0, 0.5);
-            s.setValue (50.0, juce::dontSendNotification);
-            s.setTooltip (tt);
-            s.setColour (juce::Slider::rotarySliderFillColourId,
-                          juce::Colour (0xff7a8898));
-            s.setColour (juce::Slider::rotarySliderOutlineColourId,
-                          juce::Colour (0xff1d242d));
-            addAndMakeVisible (s);
-
-            l.setText (nm, juce::dontSendNotification);
-            l.setColour (juce::Label::textColourId, kToolbarText);
-            l.setFont (juce::Font (10.0f, juce::Font::bold));
-            l.setJustificationType (juce::Justification::centred);
-            addAndMakeVisible (l);
+            if (mMirroring) return;
+            const int id = mPresetCombo.getSelectedId();
+            if (id >= 1 && id <= 3)
+                mOwner.applyFactoryPreset (id - 1);
         };
-        bigKnob (mCenter,    mCenterLbl,    "CENTER",
-                  "Global pitch correction. Scales all notes toward 100% nearest pitch.");
-        bigKnob (mVariation, mVariationLbl, "VARIATION",
-                  "Global pitch variation correction. Controls vibrato + pitch errors.");
-        bigKnob (mTrans,     mTransLbl,     "TRANS",
-                  "Global pitch transition speed between notes.");
+
+        auto plain = [this] (juce::TextButton& b, const juce::String& t,
+                             const juce::String& tt)
+        {
+            b.setButtonText (t);
+            b.setTooltip (tt);
+            b.setColour (juce::TextButton::buttonColourId, kPanelBg);
+            b.setColour (juce::TextButton::textColourOnId,  kText);
+            b.setColour (juce::TextButton::textColourOffId, kText);
+            addAndMakeVisible (b);
+        };
+        plain (mSaveBtn,   "Save",   "Save the current Focus/Mod/Speed as a user preset");
+        plain (mLoadBtn,   "Load",   "Load a saved user preset");
+        plain (mSliceBtn,  "Slice",  "Slice mode: click a note to split it");
+        plain (mEditBtn,   "Edit",   "Edit mode: drag notes vertically (pitch) / edges (length); drag the sub-curves");
+        plain (mResetBtn,  "Reset",  "Clear every pitch edit on this channel");
+        plain (mRenderBtn, "Render", "Bake the edited channel to Pitched/{name}_pitch_v{N}.wav");
+        plain (mSendBtn,   "Send Notes to...", "Send the detected notes as MIDI to a Layers / Bass / Drums / Clips tab");
+        plain (mUndoBtn,   "Undo",   "Undo the last note edit");
+        plain (mRedoBtn,   "Redo",   "Redo");
+        plain (mScrollBtn, "A",      "Auto-scroll the canvas to follow playback (A)");
+        mScrollBtn.setClickingTogglesState (true);
+        mScrollBtn.setToggleState (true, juce::dontSendNotification);
+        mScrollBtn.onClick = [this] { mOwner.mAutoScroll = mScrollBtn.getToggleState(); };
+
+        mSliceBtn.setClickingTogglesState (true);
+        mEditBtn .setClickingTogglesState (true);
+        mSliceBtn.setRadioGroupId (0x50544D44);
+        mEditBtn .setRadioGroupId (0x50544D44);
+        mEditBtn .setToggleState (true, juce::dontSendNotification);
+        mSliceBtn.onClick = [this] { mOwner.setParamValue ("bsp_mode", 0.0f); };
+        mEditBtn .onClick = [this] { mOwner.setParamValue ("bsp_mode", 1.0f); };
+
+        mSaveBtn  .onClick = [this] { mOwner.saveUserPreset(); };
+        mLoadBtn  .onClick = [this] { mOwner.loadUserPreset(); };
+        mResetBtn .onClick = [this] { mOwner.runReset(); };
+        mRenderBtn.onClick = [this] { mOwner.runRender(); };
+        mSendBtn  .onClick = [this] { mOwner.showSendNotesMenu(); };
+        mUndoBtn  .onClick = [this] { mOwner.doUndo(); };
+        mRedoBtn  .onClick = [this] { mOwner.doRedo(); };
+
+        // Focus / Mod / Speed (section 14b renames), APVTS-attached.
+        auto knob = [this] (juce::Slider& s, const char* id, const juce::String& tt,
+                            std::unique_ptr<TaggedSliderAttachment>& att)
+        {
+            addAndMakeVisible (s);
+            s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+            s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 44, 14);
+            s.setTooltip (tt);
+            att = std::make_unique<TaggedSliderAttachment> (mApvts, id, s);
+        };
+        knob (mFocus, "bsp_focus", "How strongly note centers pull to the nearest semitone (0 = leave the take alone)", mFocusAtt);
+        knob (mMod,   "bsp_mod",   "Vibrato movement: 50 = natural, above adds synthesized vibrato per note", mModAtt);
+        knob (mSpeed, "bsp_speed", "How fast pitch moves between notes: low = smooth glide, high = instant", mSpeedAtt);
+    }
+
+    void setDirty (bool d) { if (mDirty != d) { mDirty = d; repaint(); } }
+    void setStale (bool s) { if (mStale != s) { mStale = s; repaint(); } }
+    void mirrorPreset (int presetParam)
+    {
+        mMirroring = true;
+        mPresetCombo.setSelectedId (juce::jlimit (0, 3, presetParam) + 1,
+                                    juce::dontSendNotification);
+        mMirroring = false;
+    }
+    void mirrorMode (int mode)
+    {
+        mSliceBtn.setToggleState (mode == 0, juce::dontSendNotification);
+        mEditBtn .setToggleState (mode != 0, juce::dontSendNotification);
+    }
+    void setLengthText (const juce::String& t)
+    {
+        if (t != mLengthText) { mLengthText = t; repaint(); }
     }
 
     void paint (juce::Graphics& g) override
     {
         g.fillAll (kToolbarBg);
-        g.setColour (juce::Colours::black.withAlpha (0.4f));
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
         g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
+
+        if (mDirty)
+        {
+            g.setColour (kDirtyDot);
+            g.fillEllipse ((float) mPresetCombo.getRight() + 5.0f, 13.0f, 8.0f, 8.0f);
+        }
+        if (mStale)
+        {
+            g.setColour (kStale);
+            g.setFont (juce::Font (11.0f, juce::Font::bold));
+            g.drawText ("RE-ANALYZE", getWidth() - 3 * 56 - 8 - 96, 2, 92, 30,
+                        juce::Justification::centredRight);
+        }
+        // LENGTH readout (section 14b RETAIN), monospace.
+        g.setColour (kTextDim);
+        g.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 11.0f,
+                               juce::Font::plain));
+        g.drawText (mLengthText, 8, kToolbarH - 26, 250, 20,
+                    juce::Justification::centredLeft);
+
+        g.setFont (10.0f);
+        g.drawText ("Focus", mFocus.getX(), 1, mFocus.getWidth(), 11, juce::Justification::centred);
+        g.drawText ("Mod",   mMod  .getX(), 1, mMod  .getWidth(), 11, juce::Justification::centred);
+        g.drawText ("Speed", mSpeed.getX(), 1, mSpeed.getWidth(), 11, juce::Justification::centred);
     }
 
     void resized() override
     {
-        auto b = getLocalBounds().reduced (6, 4);
+        auto b = getLocalBounds().reduced (6, 3);
 
-        // ── Top row (transport + edit-mode buttons + file-action buttons) ──
-        const int btnH = 20;
-        auto topRow = b.removeFromTop (btnH);
-        b.removeFromTop (4);
+        auto knobs = b.removeFromRight (3 * 56 + 6);
+        knobs.removeFromTop (11);
+        mFocus.setBounds (knobs.removeFromLeft (56).reduced (2, 0));
+        mMod  .setBounds (knobs.removeFromLeft (56).reduced (2, 0));
+        mSpeed.setBounds (knobs.removeFromLeft (56).reduced (2, 0));
 
-        auto place = [&topRow] (juce::Component& c, int w) {
-            c.setBounds (topRow.removeFromLeft (w));
-            topRow.removeFromLeft (3);
-        };
-        place (mLoopBtn, 36);
-        place (mPlayBtn, 36);
-        place (mStopBtn, 36);
-        topRow.removeFromLeft (8);
-        place (mCutBtn,    34);
-        place (mAdvBtn,    34);
-        place (mVibBtn,    34);
-        topRow.removeFromLeft (6);
-        place (mSlavedBtn, 30);
-        place (mAutoBtn,   34);
-        topRow.removeFromLeft (6);
-        place (mLoadBtn,    40);
-        place (mSaveBtn,    40);
-        place (mResetBtn,   40);
-        place (mCenterPRBtn, 40);
+        auto row1 = b.removeFromTop (26);
+        mTitleLbl.setBounds (row1.removeFromLeft (104));
+        row1.removeFromLeft (6);
+        mPresetCombo.setBounds (row1.removeFromLeft (100).reduced (0, 2));
+        row1.removeFromLeft (16);   // dirty-dot slot
+        mSaveBtn.setBounds (row1.removeFromLeft (44));
+        row1.removeFromLeft (3);
+        mLoadBtn.setBounds (row1.removeFromLeft (44));
+        row1.removeFromLeft (10);
+        mSliceBtn.setBounds (row1.removeFromLeft (48));
+        row1.removeFromLeft (2);
+        mEditBtn.setBounds (row1.removeFromLeft (48));
+        row1.removeFromLeft (10);
+        mSendBtn.setBounds (row1.removeFromLeft (108));
 
-        // ── Bottom row (title + filename + length/tempo info) + big knobs ──
-        const int rightW = (kBigKnobSz + 6) * 3 + 6;
-        auto right = b.removeFromRight (rightW);
-
-        // 3 big knobs across the right edge (vertically centered in the
-        // remaining toolbar space), each with its label below the dial.
-        auto laneW = right.getWidth() / 3;
-        auto lane0 = right.removeFromLeft (laneW);
-        auto lane1 = right.removeFromLeft (laneW);
-        auto lane2 = right;
-
-        auto layoutKnob = [] (juce::Rectangle<int> lane, juce::Slider& s, juce::Label& l)
-        {
-            const int kw = juce::jmin (kBigKnobSz, lane.getWidth() - 4);
-            auto knobR = lane.withSizeKeepingCentre (kw, kw)
-                              .translated (0, -4);
-            s.setBounds (knobR);
-            l.setBounds (lane.withTrimmedTop (knobR.getBottom() - lane.getY() + 1)
-                              .withHeight (12));
-        };
-        layoutKnob (lane0, mCenter,    mCenterLbl);
-        layoutKnob (lane1, mVariation, mVariationLbl);
-        layoutKnob (lane2, mTrans,     mTransLbl);
-
-        // Remaining left area for title + filename + info strip
-        auto left = b;
-        const int titleW = 130;
-        mTitleLbl.setBounds (left.removeFromLeft (titleW).withHeight (16));
-        left.removeFromLeft (6);
-
-        auto info = left;
-        const int infoH = 14;
-        auto row = info.removeFromTop (infoH);
-        mFileLbl.setBounds (row);
-
-        info.removeFromTop (2);
-        auto row2 = info.removeFromTop (infoH);
-        mLengthLbl.setBounds (row2.removeFromLeft (110));
-        row2.removeFromLeft (8);
-        mTempoLbl.setBounds (row2.removeFromLeft (90));
-        row2.removeFromLeft (8);
-        mSyncLbl.setBounds (row2.removeFromLeft (40));
-    }
-
-    void setRenderEnabled (bool b) { mSaveBtn.setEnabled (b); }
-
-    void setEditModeUI (BaySickPitchEditor::EditMode m)
-    {
-        mCutBtn.setToggleState (m == BaySickPitchEditor::EditMode::Cut,      juce::dontSendNotification);
-        mAdvBtn.setToggleState (m == BaySickPitchEditor::EditMode::Advanced, juce::dontSendNotification);
-        mVibBtn.setToggleState (m == BaySickPitchEditor::EditMode::Vibrato,  juce::dontSendNotification);
+        auto row2 = b.withTrimmedTop (4).removeFromTop (26);
+        row2.removeFromLeft (260);   // LENGTH readout slot
+        mScrollBtn.setBounds (row2.removeFromRight (28));
+        row2.removeFromRight (4);
+        mRedoBtn.setBounds (row2.removeFromRight (46));
+        row2.removeFromRight (3);
+        mUndoBtn.setBounds (row2.removeFromRight (46));
+        row2.removeFromRight (10);
+        mRenderBtn.setBounds (row2.removeFromRight (58));
+        row2.removeFromRight (3);
+        mResetBtn.setBounds (row2.removeFromRight (50));
     }
 
 private:
     BaySickPitchEditor& mOwner;
-
-    juce::TextButton mLoopBtn, mPlayBtn, mStopBtn;
-    juce::TextButton mCutBtn, mAdvBtn, mVibBtn;
-    juce::TextButton mSlavedBtn, mAutoBtn;
-    juce::TextButton mLoadBtn, mSaveBtn, mResetBtn, mCenterPRBtn;
+    juce::AudioProcessorValueTreeState& mApvts;
 
     BaySickEngineLabel mTitleLbl { "BaySickPitch", juce::Colour (0xFF0FAFA5) };
-    juce::Label        mFileLbl, mLengthLbl, mTempoLbl, mSyncLbl;
+    juce::ComboBox   mPresetCombo;
+    juce::TextButton mSaveBtn, mLoadBtn, mSliceBtn, mEditBtn, mResetBtn,
+                     mRenderBtn, mSendBtn, mUndoBtn, mRedoBtn, mScrollBtn;
+    juce::Slider     mFocus, mMod, mSpeed;
+    std::unique_ptr<TaggedSliderAttachment> mFocusAtt, mModAtt, mSpeedAtt;
+    juce::String mLengthText;
+    bool mDirty { false }, mStale { false }, mMirroring { false };
 
-    juce::Slider mCenter,    mVariation,    mTrans;
-    juce::Label  mCenterLbl, mVariationLbl, mTransLbl;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PitchKeyboard
-// ─────────────────────────────────────────────────────────────────────────────
-class BaySickPitchEditor::PitchKeyboard : public juce::Component
-{
-public:
-    explicit PitchKeyboard (BaySickPitchEditor& owner) : mOwner (owner) {}
-
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (kKeyBlack);
-
-        const int top    = mOwner.topNote();
-        const int bot    = mOwner.bottomNote();
-        const int rows   = juce::jmax (1, top - bot + 1);
-        const float rowH = (float) getHeight() / (float) rows;
-
-        for (int n = bot; n <= top; ++n)
-        {
-            const int row = top - n;
-            const float y = row * rowH;
-            const bool black = isBlackKey (n);
-
-            g.setColour (black ? kKeyBlack : kKeyWhite);
-            g.fillRect (0.0f, y, (float) getWidth(), rowH);
-
-            g.setColour (kKeyBorder);
-            g.drawHorizontalLine ((int) (y + rowH), 0.0f, (float) getWidth());
-
-            // Label every C with its octave (FL Studio convention --
-            // MIDI 0 = C0, middle C = C5 = MIDI 60, MIDI 120 = C10).
-            if ((n % 12) == 0)
-            {
-                g.setColour (juce::Colour (0xff1a2028));
-                g.setFont (juce::Font (9.0f, juce::Font::bold));
-                g.drawText ("C" + juce::String (n / 12),
-                            juce::Rectangle<float> (2.0f, y, (float) getWidth() - 4.0f, rowH),
-                            juce::Justification::centredLeft);
-            }
-        }
-    }
-
-private:
-    static bool isBlackKey (int midi) noexcept
-    {
-        const int n = ((midi % 12) + 12) % 12;
-        return n == 1 || n == 3 || n == 6 || n == 8 || n == 10;
-    }
-
-    BaySickPitchEditor& mOwner;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PitchGrid -- includes the bar/beat ruler at the top of itself.
-// ─────────────────────────────────────────────────────────────────────────────
-class BaySickPitchEditor::PitchGrid : public juce::Component
-{
-public:
-    explicit PitchGrid (BaySickPitchEditor& owner) : mOwner (owner) {}
-
-    void paint (juce::Graphics& g) override
-    {
-        // Bar/beat ruler strip at top
-        auto local = getLocalBounds();
-        auto ruler = local.removeFromTop (kRulerH);
-        g.setColour (kRulerBg);
-        g.fillRect (ruler);
-
-        const double pps  = mOwner.pixelsPerSecond();
-        const double secL = mOwner.scrollSeconds();
-        const double secR = secL + getWidth() / juce::jmax (1.0, pps);
-
-        g.setColour (kToolbarText.withAlpha (0.50f));
-        g.setFont (juce::Font (10.0f));
-        for (int sec = (int) std::floor (secL); (double) sec <= secR + 1.0; ++sec)
-        {
-            const int x = (int) ((sec - secL) * pps);
-            if (x < 0 || x >= getWidth()) continue;
-            g.drawVerticalLine (x, 0.0f, (float) ruler.getHeight());
-            g.drawText (juce::String (sec) + "s",
-                        x + 2, 0, 36, ruler.getHeight(),
-                        juce::Justification::centredLeft);
-        }
-
-        // Canvas body
-        g.setColour (kCanvas);
-        g.fillRect (local);
-
-        const int top  = mOwner.topNote();
-        const int bot  = mOwner.bottomNote();
-        const int rows = juce::jmax (1, top - bot + 1);
-        const float rowH = (float) local.getHeight() / (float) rows;
-
-        // Horizontal semitone lines + bolder octaves
-        for (int n = bot; n <= top + 1; ++n)
-        {
-            const float y = (float) local.getY() + (top - n + 1) * rowH;
-            g.setColour ((n % 12) == 0 ? kGridStrong : kGridFaint);
-            g.drawHorizontalLine ((int) y, 0.0f, (float) getWidth());
-        }
-
-        // Vertical second grid lines
-        for (int sec = (int) std::floor (secL); (double) sec <= secR + 1.0; ++sec)
-        {
-            const int x = (int) ((sec - secL) * pps);
-            if (x < 0 || x >= getWidth()) continue;
-            g.setColour (kGridFaint);
-            g.drawVerticalLine (x, (float) local.getY(), (float) (local.getBottom()));
-        }
-
-        // G-9: draw note blobs (waveform-inside-blob) + orange pitch curve
-        // overlay + per-note volume / pitch ramp / formant / vibrato curves
-        // here once audio is loaded.  Empty grid renders as just the grid
-        // -- the toolbar's filename label "(no recording loaded)" is the
-        // only empty-state indicator.  Interaction handlers below.
-    }
-
-    void mouseDown (const juce::MouseEvent&) override
-    {
-        if (! mOwner.hasAudio()) return;
-        // G-9: hit-test note blobs / handles per current edit mode.
-    }
-
-    void mouseDrag (const juce::MouseEvent&) override
-    {
-        if (! mOwner.hasAudio()) return;
-    }
-
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        if (! mOwner.hasAudio()) return;
-    }
-
-    void mouseWheelMove (const juce::MouseEvent& e,
-                          const juce::MouseWheelDetails& w) override
-    {
-        // Forward to the editor so the same wheel logic fires whether the
-        // event happened over the grid or the keyboard.
-        mOwner.mouseWheelMove (e, w);
-    }
-
-private:
-    BaySickPitchEditor& mOwner;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// InfoBar
-// ─────────────────────────────────────────────────────────────────────────────
-class BaySickPitchEditor::InfoBar : public juce::Component
-{
-public:
-    InfoBar()
-    {
-        addAndMakeVisible (mLbl);
-        mLbl.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(),
-                                   12.0f, juce::Font::plain));
-        mLbl.setColour (juce::Label::textColourId, kToolbarText.withAlpha (0.85f));
-        mLbl.setJustificationType (juce::Justification::centredLeft);
-        mLbl.setText ("Pitch: --   Cents: --   Length: --   Loop: --",
-                       juce::dontSendNotification);
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (kInfoBarBg);
-    }
-
-    void resized() override
-    {
-        mLbl.setBounds (getLocalBounds().reduced (8, 0));
-    }
-
-private:
-    juce::Label mLbl;
+    friend class BaySickPitchEditor;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickPitchEditor
 // ─────────────────────────────────────────────────────────────────────────────
-BaySickPitchEditor::BaySickPitchEditor (BaySickVocalProcessor& p) : mProc (p)
+BaySickPitchEditor::BaySickPitchEditor (BaySickVocalProcessor& p)
+    : mProc (p)
 {
-    mToolbar  = std::make_unique<Toolbar>       (*this);
+    mToolbar  = std::make_unique<Toolbar> (*this, mProc.apvts);
     mKeyboard = std::make_unique<PitchKeyboard> (*this);
-    mGrid     = std::make_unique<PitchGrid>     (*this);
-    mInfoBar  = std::make_unique<InfoBar>       ();
+    mCanvas   = std::make_unique<PitchCanvas> (*this);
+    mInfoBar  = std::make_unique<InfoBar>();
 
     addAndMakeVisible (*mToolbar);
     addAndMakeVisible (*mKeyboard);
-    addAndMakeVisible (*mGrid);
+    addAndMakeVisible (*mCanvas);
     addAndMakeVisible (*mInfoBar);
 
-    addAndMakeVisible (mHScroll);
-    addAndMakeVisible (mVScroll);
-    mHScroll.addListener (this);
-    mVScroll.addListener (this);
-    mHScroll.setColour (juce::ScrollBar::thumbColourId,
-                          juce::Colour (0xff7a8898));
-    mVScroll.setColour (juce::ScrollBar::thumbColourId,
-                          juce::Colour (0xff7a8898));
-    mHScroll.setAutoHide (false);
-    mVScroll.setAutoHide (false);
+    setWantsKeyboardFocus (true);
+    snapshotPresetValues();
+    startTimer (400);
 }
 
-BaySickPitchEditor::~BaySickPitchEditor()
-{
-    mHScroll.removeListener (this);
-    mVScroll.removeListener (this);
-}
-
-void BaySickPitchEditor::setEditMode (EditMode m)
-{
-    if (m == mEditMode) return;
-    mEditMode = m;
-    if (mToolbar) mToolbar->setEditModeUI (m);
-    if (mGrid)    mGrid->repaint();
-}
+BaySickPitchEditor::~BaySickPitchEditor() = default;
 
 void BaySickPitchEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (kCanvas);
+    g.fillAll (kBg);
 }
 
 void BaySickPitchEditor::resized()
 {
     auto b = getLocalBounds();
-    mToolbar->setBounds (b.removeFromTop    (kToolbarH));
+    mToolbar->setBounds (b.removeFromTop (kToolbarH));
     mInfoBar->setBounds (b.removeFromBottom (kInfoBarH));
-
-    // Carve out scroll-bar tracks from the remaining canvas.  H-scroll runs
-    // along the bottom (above the InfoBar but below the grid + keyboard).
-    // V-scroll runs along the right edge (right of the grid).
-    auto hTrack = b.removeFromBottom (kHScrollH);
-    auto vTrack = b.removeFromRight  (kVScrollW);
-
-    mKeyboard->setBounds (b.removeFromLeft (kKeyboardW)
-                            .withTrimmedTop (kRulerH));   // align under ruler
-    mGrid    ->setBounds (b);
-
-    // H-scroll stops at the keyboard on the left and at the V-scroll column
-    // on the right, leaving a small dead corner in the bottom-right.
-    mHScroll.setBounds (hTrack.withTrimmedLeft (kKeyboardW)
-                                .withTrimmedRight (kVScrollW));
-    mVScroll.setBounds (vTrack.withTrimmedTop (kRulerH));
-
-    syncScrollBarsToState();
+    mKeyboard->setBounds (b.removeFromLeft (kKeyboardW).withTrimmedTop (kRulerH));
+    mCanvas->setBounds (b);
 }
 
-void BaySickPitchEditor::syncScrollBarsToState()
+void BaySickPitchEditor::visibilityChanged()
 {
-    if (mPushingToBars) return;
-    mPushingToBars = true;
-
-    // ── Horizontal scroll: range = total length in seconds (placeholder
-    //    kEmptyStateLengthSec until G-9 gives a real length); thumb = the
-    //    visible window in seconds.
-    const int gridW = juce::jmax (1, mGrid ? mGrid->getWidth() : getWidth());
-    const double visibleSec = gridW / juce::jmax (1.0, mPpsX);
-    const double totalSec   = juce::jmax (visibleSec, kEmptyStateLengthSec);
-    mHScroll.setRangeLimits (0.0, totalSec);
-    mHScroll.setCurrentRange (mScrollX, visibleSec, juce::dontSendNotification);
-
-    // ── Vertical scroll: range = full MIDI 0..127, thumb = visible
-    //    semitones (mTopNote - mBottomNote + 1).  Top of bar = highest
-    //    visible note (so dragging up scrolls toward higher pitches).
-    const double visibleNotes = juce::jmax (1, mTopNote - mBottomNote + 1);
-    mVScroll.setRangeLimits (0.0, 128.0);
-    // Bar value = position of mBottomNote from the bottom; we present
-    // "MIDI 0 at top of range" so high notes appear at the top of the bar.
-    const double barTop = juce::jlimit (0.0, 128.0 - visibleNotes,
-                                          (double) (127 - mTopNote));
-    mVScroll.setCurrentRange (barTop, visibleNotes, juce::dontSendNotification);
-
-    mPushingToBars = false;
+    // Composite auto-resolve (section 14b, Call 4a: no manual load): first
+    // show, or a stale grid, re-runs the analysis.
+    if (isVisible())
+        runAnalyzeIfNeeded (false);
 }
 
-void BaySickPitchEditor::scrollBarMoved (juce::ScrollBar* bar, double newRangeStart)
+bool BaySickPitchEditor::keyPressed (const juce::KeyPress& k)
 {
-    if (mPushingToBars) return;
-
-    if (bar == &mHScroll)
+    if (k.getTextCharacter() == 'a' || k.getTextCharacter() == 'A')
     {
-        mScrollX = juce::jmax (0.0, newRangeStart);
+        mAutoScroll = ! mAutoScroll;
+        mToolbar->mScrollBtn.setToggleState (mAutoScroll, juce::dontSendNotification);
+        return true;
     }
-    else if (bar == &mVScroll)
-    {
-        const int visibleNotes = juce::jmax (1, mTopNote - mBottomNote + 1);
-        const int newTop = juce::jlimit (visibleNotes - 1, 127,
-                                           127 - (int) std::round (newRangeStart));
-        mTopNote    = newTop;
-        mBottomNote = newTop - visibleNotes + 1;
-    }
-
-    repaint();
+    return false;
 }
 
-void BaySickPitchEditor::zoomHorizontalBy (double factor)
+void BaySickPitchEditor::setView (double pps, double scrollSec)
 {
-    const double newPps = juce::jlimit (20.0, 400.0, mPpsX * factor);
-    if (juce::approximatelyEqual (newPps, mPpsX)) return;
-
-    // Keep the visible center fixed: anchor the time at the midpoint of
-    // the canvas, recompute scrollX for the new pps.
-    const int gridW = juce::jmax (1, mGrid ? mGrid->getWidth() : getWidth());
-    const double centerSec = mScrollX + (gridW * 0.5) / juce::jmax (1.0, mPpsX);
-    mPpsX    = newPps;
-    mScrollX = juce::jmax (0.0, centerSec - (gridW * 0.5) / mPpsX);
-
-    syncScrollBarsToState();
-    repaint();
-}
-
-void BaySickPitchEditor::zoomVerticalBy (double factor)
-{
-    const int currentVisible = juce::jmax (1, mTopNote - mBottomNote + 1);
-    const int newVisible = juce::jlimit (12, 96,
-                                           (int) std::round (currentVisible / factor));
-    if (newVisible == currentVisible) return;
-
-    const int center = (mTopNote + mBottomNote) / 2;
-    int newTop = center + newVisible / 2;
-    int newBot = newTop - newVisible + 1;
-    newTop = juce::jlimit (newVisible - 1, 127, newTop);
-    newBot = newTop - newVisible + 1;
-
-    mTopNote    = newTop;
-    mBottomNote = newBot;
-
-    syncScrollBarsToState();
-    repaint();
-}
-
-void BaySickPitchEditor::setScrollSeconds (double secs)
-{
-    mScrollX = juce::jmax (0.0, secs);
-    syncScrollBarsToState();
+    mPps    = juce::jlimit (20.0, 2000.0, pps);
+    mScroll = juce::jmax (0.0, scrollSec);
     repaint();
 }
 
 void BaySickPitchEditor::setTopNote (int note)
 {
-    const int visibleNotes = juce::jmax (1, mTopNote - mBottomNote + 1);
-    mTopNote    = juce::jlimit (visibleNotes - 1, 127, note);
-    mBottomNote = mTopNote - visibleNotes + 1;
-    syncScrollBarsToState();
-    repaint();
+    mTopNote = juce::jlimit (24, 120, note);
+    mKeyboard->repaint();
+    mCanvas->repaint();
 }
 
-void BaySickPitchEditor::mouseWheelMove (const juce::MouseEvent&,
-                                           const juce::MouseWheelDetails& w)
+void BaySickPitchEditor::timerCallback()
 {
-    const auto& mods = juce::ModifierKeys::currentModifiers;
+    mToolbar->setStale (mProc.isPitchStale());
 
-    if (mods.isCtrlDown())
+    const bool dirty = paramsDivergeFromSnapshot();
+    mToolbar->setDirty (dirty);
+    if (auto* pd = mProc.apvts.getRawParameterValue ("bsp_preset_dirty"))
+        if ((pd->load() > 0.5f) != dirty)
+            setParamValue ("bsp_preset_dirty", dirty ? 1.0f : 0.0f);
+    mToolbar->mirrorPreset ((int) paramValue ("bsp_preset", 0.0f));
+    mToolbar->mirrorMode   ((int) paramValue ("bsp_mode",   1.0f));
+
+    // LENGTH readout (section 14b): composite (or SEL) length as
+    // `X bars / M:SS.f`.  Bars resolve through the tempo timeline from the
+    // composite's anchor; linear 120 fallback when no map is published.
     {
-        // Ctrl+wheel = horizontal zoom
-        zoomHorizontalBy (w.deltaY > 0.0f ? 1.15 : 1.0 / 1.15);
+        auto& pitch = mProc.mPitch;
+        juce::String t;
+        if (pitch.isAnalyzed() && pitch.compositeSec() > 0.0)
+        {
+            double secA = 0.0, secB = pitch.compositeSec();
+            juce::String prefix;
+            if (mSelectedRegion >= 0 && mSelectedRegion < (int) pitch.regions().size())
+            {
+                const auto& r = pitch.regions()[(size_t) mSelectedRegion];
+                secA = r.startSec;
+                secB = r.endSec;
+                prefix = "SEL ";
+            }
+            const double sec = secB - secA;
+            const double sr  = pitch.analysisSampleRate();
+            double beats;
+            if (TempoMap::isActive())
+                beats = TempoMap::beatAtSample (pitch.startSample()
+                                                + (juce::int64) std::llround (secB * sr))
+                      - TempoMap::beatAtSample (pitch.startSample()
+                                                + (juce::int64) std::llround (secA * sr));
+            else
+                beats = sec * 2.0;   // 120 BPM legacy fallback (no timeline)
+            const int bars = juce::jmax (1, (int) std::ceil (beats / 4.0));
+            const int mins = (int) (sec / 60.0);
+            t = prefix + juce::String (bars) + " bars / "
+              + juce::String (mins) + ":"
+              + juce::String (sec - mins * 60.0, 1).paddedLeft ('0', 4);
+        }
+        mToolbar->setLengthText (t);
     }
-    else if (mods.isAltDown())
+
+    // Playhead from the FilePlay stamp; hide 300 ms after it stops moving.
+    const juce::int64 s = mProc.getFilePlayTimelineSample();
+    const juce::uint32 now = juce::Time::getMillisecondCounter();
+    if (s != mLastPlaySample && mProc.mPitch.isAnalyzed())
     {
-        // Alt+wheel = vertical zoom
-        zoomVerticalBy (w.deltaY > 0.0f ? 1.15 : 1.0 / 1.15);
+        mLastPlaySample = s;
+        mLastPlayMoveMs = now;
+        if (mAutoScroll)
+        {
+            const double tSec = (double) (s - mProc.mPitch.startSample())
+                                / mProc.mPitch.analysisSampleRate();
+            const double viewSec = juce::jmax (1, mCanvas->getWidth()) / mPps;
+            if (tSec < mScroll || tSec > mScroll + viewSec * 0.9)
+                setView (mPps, tSec - viewSec * 0.2);
+        }
+        mCanvas->repaint();
     }
-    else if (mods.isShiftDown())
+    else if (mLastPlaySample >= 0 && now - mLastPlayMoveMs > 300)
     {
-        // Shift+wheel = horizontal scroll
-        const int gridW = juce::jmax (1, mGrid ? mGrid->getWidth() : getWidth());
-        const double stepSec = (gridW / juce::jmax (1.0, mPpsX)) * 0.1;
-        setScrollSeconds (mScrollX - w.deltaY * stepSec);
+        mLastPlaySample = -1;
+        mCanvas->repaint();
     }
+}
+
+void BaySickPitchEditor::updateInfoBarFor (int regionIdx)
+{
+    auto& regions = mProc.mPitch.regions();
+    if (regionIdx < 0 || regionIdx >= (int) regions.size())
+    {
+        mInfoBar->setText ({});
+        return;
+    }
+    const auto& r = regions[(size_t) regionIdx];
+    const float edited = r.midi + r.shiftSemis;
+    const int   nearest = (int) std::round (edited);
+    const int   cents   = (int) std::round ((edited - (float) nearest) * 100.0f);
+    mInfoBar->setText ("Pitch: " + midiNoteName (nearest)
+                       + "  Cents: " + (cents >= 0 ? "+" : "") + juce::String (cents)
+                       + "  Length: " + juce::String (r.endSec - r.startSec, 2) + "s"
+                       + (r.hasEdits() ? "  [edited]" : ""));
+}
+
+// ─── Actions ──────────────────────────────────────────────────────────────────
+void BaySickPitchEditor::runAnalyzeIfNeeded (bool force)
+{
+    if (! force && mProc.mPitch.isAnalyzed() && ! mProc.isPitchStale())
+    {
+        if (! mCompValid) refreshComposite();
+        return;
+    }
+    juce::String err;
+    if (mProc.analyzePitch (err))
+    {
+        refreshComposite();
+        mSelectedRegion = -1;
+        mCanvas->repaint();
+    }
+    // Silent on failure: an empty channel legitimately has nothing to
+    // analyze -- the canvas empty-state carries the message.
+}
+
+void BaySickPitchEditor::refreshComposite()
+{
+    mCompValid = false;
+    if (! mProc.onRenderComposite) return;
+    double beat = 0.0, sr = 44100.0;
+    juce::int64 samp = 0;
+    auto buf = mProc.onRenderComposite (mProc.getOwnChannelId(), beat, samp, sr);
+    if (buf.getNumSamples() <= 0) return;
+    mCompCache = std::move (buf);
+    mCompSr    = sr;
+    mCompValid = true;
+}
+
+void BaySickPitchEditor::runRender()
+{
+    juce::String err;
+    const auto file = mProc.renderPitchedTake (err);
+    if (file == juce::File())
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+            "Render", err);
     else
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+            "Render", "Baked to " + file.getFileName());
+}
+
+void BaySickPitchEditor::runReset()
+{
+    pushUndo();
+    mProc.mPitch.clearAllEdits();
+    mCanvas->repaint();
+}
+
+void BaySickPitchEditor::showSendNotesMenu()
+{
+    auto* se = findParentComponentOfClass<StandaloneEditor>();
+    if (se == nullptr) return;
+
+    const auto targets = se->listPitchNoteTargets();
+    juce::PopupMenu m;
+    if (targets.empty())
+        m.addItem (-1, "(no Layers / Bass / Drums / Clips tabs open)", false, false);
+    for (int i = 0; i < (int) targets.size(); ++i)
+        m.addItem (i + 1, targets[(size_t) i].label);
+
+    juce::Component::SafePointer<BaySickPitchEditor> self (this);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&mToolbar->mSendBtn),
+        [self, targets] (int r)
+        {
+            if (! self || r <= 0 || r > (int) targets.size()) return;
+            auto* se2 = self->findParentComponentOfClass<StandaloneEditor>();
+            if (se2 == nullptr) return;
+
+            // MIDI only (section 14b): the detected contour quantized to
+            // notes, normalized so the first note starts the riff.
+            std::vector<StandaloneEditor::ContourNote> notes;
+            const auto& regions = self->mProc.mPitch.regions();
+            double t0 = -1.0;
+            for (const auto& reg : regions)
+            {
+                if (t0 < 0.0) t0 = reg.startSec;
+                StandaloneEditor::ContourNote n;
+                n.startSec = reg.startSec - t0;
+                n.endSec   = reg.endSec   - t0;
+                n.midiNote = juce::jlimit (0, 127,
+                    (int) std::round (reg.midi + reg.shiftSemis));
+                notes.push_back (n);
+            }
+            if (notes.empty()) return;
+            const auto& tgt = targets[(size_t) (r - 1)];
+            se2->sendPitchNotesToTab (tgt.kind, tgt.pageIndex, notes);
+        });
+}
+
+// ─── Presets (section 14f) ────────────────────────────────────────────────────
+void BaySickPitchEditor::applyFactoryPreset (int idx)
+{
+    idx = juce::jlimit (0, 2, idx);
+    setParamValue ("bsp_preset", (float) idx);
+    setParamValue ("bsp_focus",  kPitchPresets[idx].focus);
+    setParamValue ("bsp_mod",    kPitchPresets[idx].mod);
+    setParamValue ("bsp_speed",  kPitchPresets[idx].speed);
+    snapshotPresetValues();
+}
+
+void BaySickPitchEditor::snapshotPresetValues()
+{
+    mPresetSnapshot.clear();
+    for (auto* id : kPitchPresetParamIds)
+        mPresetSnapshot[id] = paramValue (id);
+}
+
+bool BaySickPitchEditor::paramsDivergeFromSnapshot() const
+{
+    for (auto* id : kPitchPresetParamIds)
     {
-        // Plain wheel = vertical scroll (move the visible note range).
-        // deltaY > 0 (wheel up) -> view moves up (higher pitches), mTopNote
-        // increases.  deltaY < 0 (wheel down) -> view moves down (lower
-        // pitches), mTopNote decreases.  Don't clamp the step magnitude
-        // via jmax(1, ...) -- that drops the sign for negative deltas and
-        // makes both directions scroll up.
-        int step = (int) std::round (w.deltaY * 3.0);
-        if (step == 0)                   // tiny wheel deltas: still move 1 note
-            step = (w.deltaY >= 0.0f) ? 1 : -1;
-        setTopNote (mTopNote + step);
+        const auto it = mPresetSnapshot.find (id);
+        if (it == mPresetSnapshot.end()) return true;
+        if (std::abs (paramValue (id) - it->second) > 0.001f) return true;
     }
+    return false;
+}
+
+void BaySickPitchEditor::saveUserPreset()
+{
+    auto* aw = new juce::AlertWindow ("Save Pitch Preset",
+                                      "Enter a name for this Pitch preset:",
+                                      juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("name", "My Pitch");
+    aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<BaySickPitchEditor> self (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [self, aw] (int r)
+        {
+            if (r != 1 || ! self) return;
+            const juce::String name = aw->getTextEditorContents ("name").trim();
+            if (name.isEmpty()) return;
+
+            juce::XmlElement el ("BaySickPitchPreset");
+            for (auto* id : kPitchPresetParamIds)
+                el.setAttribute (id, (double) self->paramValue (id));
+
+            auto dir = pitchPresetsDir();
+            dir.createDirectory();
+            auto target = dir.getChildFile (name + ".xml");
+            int n = 2;
+            while (target.exists())
+                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
+            target.replaceWithText (el.toString());
+
+            self->setParamValue ("bsp_preset", 3.0f);   // "(User)"
+            self->snapshotPresetValues();
+        }), true);
+}
+
+void BaySickPitchEditor::loadUserPreset()
+{
+    juce::PopupMenu m;
+    juce::Array<juce::File> files;
+    auto dir = pitchPresetsDir();
+    if (dir.isDirectory())
+        for (const auto& f : dir.findChildFiles (juce::File::findFiles, false, "*.xml"))
+            files.add (f);
+    if (files.isEmpty())
+        m.addItem (-1, "(no presets saved)", false, false);
+    else
+        for (int i = 0; i < files.size(); ++i)
+            m.addItem (i + 1, files[i].getFileNameWithoutExtension());
+
+    juce::Component::SafePointer<BaySickPitchEditor> self (this);
+    m.showMenuAsync (juce::PopupMenu::Options(),
+        [self, files] (int r)
+        {
+            if (! self || r <= 0 || r > files.size()) return;
+            auto xml = juce::parseXML (files[r - 1]);
+            if (xml == nullptr || ! xml->hasTagName ("BaySickPitchPreset")) return;
+            for (auto* id : kPitchPresetParamIds)
+                if (xml->hasAttribute (id))
+                    self->setParamValue (id, (float) xml->getDoubleAttribute (id));
+            self->setParamValue ("bsp_preset", 3.0f);
+            self->snapshotPresetValues();
+        });
+}
+
+// ─── Local edit undo ──────────────────────────────────────────────────────────
+void BaySickPitchEditor::pushUndo()
+{
+    mUndoStack.push_back (mProc.mPitch.regions());
+    if (mUndoStack.size() > 50)
+        mUndoStack.erase (mUndoStack.begin());
+    mRedoStack.clear();
+}
+
+void BaySickPitchEditor::doUndo()
+{
+    if (mUndoStack.empty()) return;
+    mRedoStack.push_back (mProc.mPitch.regions());
+    mProc.mPitch.regions() = mUndoStack.back();
+    mUndoStack.pop_back();
+    mProc.mPitch.publishEdits();
+    mSelectedRegion = -1;
+    mCanvas->repaint();
+}
+
+void BaySickPitchEditor::doRedo()
+{
+    if (mRedoStack.empty()) return;
+    mUndoStack.push_back (mProc.mPitch.regions());
+    mProc.mPitch.regions() = mRedoStack.back();
+    mRedoStack.pop_back();
+    mProc.mPitch.publishEdits();
+    mSelectedRegion = -1;
+    mCanvas->repaint();
+}
+
+// ─── Param helpers ────────────────────────────────────────────────────────────
+float BaySickPitchEditor::paramValue (const char* id, float fallback) const
+{
+    if (auto* p = mProc.apvts.getRawParameterValue (id))
+        return p->load();
+    return fallback;
+}
+
+void BaySickPitchEditor::setParamValue (const char* id, float v)
+{
+    if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+            mProc.apvts.getParameter (id)))
+        p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (v));
 }

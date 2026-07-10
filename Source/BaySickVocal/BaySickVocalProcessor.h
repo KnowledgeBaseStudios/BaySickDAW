@@ -3,6 +3,7 @@
 #include "../DSP/EngineSidechainHelper.h"
 #include "../DSP/PitchCorrectorDSP.h"
 #include "../DSP/BaySickAlignDSP.h"
+#include "../DSP/BaySickPitchDSP.h"
 #include "../EffectRack.h"
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
 #include "../Standalone/ApvtsDirtyTracker.h"
@@ -227,6 +228,33 @@ public:
     // (polled by the editor timer; cheap hash compare via hook).
     bool isAlignStale() const;
 
+    // ── QA-Fa: BaySickPitch channel state ────────────────────────────────────
+    // Same offline/message-thread shape as the Align block above, except the
+    // realtime applicator (Mode C) DOES run on the audio thread during
+    // FilePlay -- processBlock hands it the strip audio + the timeline
+    // position stamped by finalizeFilePlayStrip.
+    BaySickPitchDSP mPitch;
+    std::vector<AlignRenderEntry> mPitchRenders;   // Pitched/ bake history
+    juce::int64 mPitchAnalyzedSig { 0 };
+
+    // Stamped per block by finalizeFilePlayStrip (next to the force-bypass
+    // set) so the applicator can map strip audio to composite note regions.
+    void setFilePlayTimelineSample (juce::int64 s) noexcept
+        { mFilePlayTimelineSample.store (s, std::memory_order_relaxed); }
+    juce::int64 getFilePlayTimelineSample() const noexcept
+        { return mFilePlayTimelineSample.load (std::memory_order_relaxed); }
+
+    // Analyze the OWN channel's composite into mPitch (auto-resolve, section
+    // 14b -- no manual load).  MESSAGE THREAD ONLY.
+    bool analyzePitch (juce::String& errorOut);
+
+    // Render/Freeze bake -> <project>/Pitched/{name}_pitch_v{N}.wav +
+    // history entry.  Grid placement is a pending owner call (mirrors the
+    // Align question); the bake is written + listed either way.
+    juce::File renderPitchedTake (juce::String& errorOut);
+
+    bool isPitchStale() const;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -254,6 +282,12 @@ private:
     // because audio thread reads / message thread writes.
     std::atomic<bool> mForcePitchBypass { false };
     std::atomic<class AudioFileRecorder*> mWetRecorder { nullptr };
+
+    // QA-Fa: FilePlay block-start timeline sample (MT worker writes inside
+    // finalizeFilePlayStrip; this engine's processBlock reads in the same
+    // call chain -- same-thread within a block, atomic for the ST/MT
+    // branch-agnostic contract).
+    std::atomic<juce::int64> mFilePlayTimelineSample { 0 };
 
     // 2026-05-06 (Batch 9c N1): shutdown gate (see setShuttingDown above).
     // Audio thread reads at the top of processBlock; message thread writes

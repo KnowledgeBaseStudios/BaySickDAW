@@ -81,6 +81,18 @@ public:
     void placeAlignedBake (const juce::File& bakeFile, double startBeat,
                            int followerChannelId);
 
+    // QA-Fa (2026-07-10): BaySickPitch "Send Notes to..." (section 14b).
+    // Targets = the open Layers / Bass / Drums / Clips tabs; only MIDI notes
+    // travel (the detected contour quantized to notes), never audio.  The
+    // contour arrives in seconds (first note = 0); placement converts to
+    // beats at the current transport tempo and appends into the target
+    // page's roll in the CURRENT pattern.
+    struct PitchNoteTarget { int kind; int pageIndex; juce::String label; };
+    struct ContourNote     { double startSec; double endSec; int midiNote; };
+    std::vector<PitchNoteTarget> listPitchNoteTargets() const;   // kind: 0=Layer 1=Bass 2=Drum 3=Clips
+    void sendPitchNotesToTab (int kind, int pageIndex,
+                              const std::vector<ContourNote>& notes);
+
     // Build a UndoContext token pointing at this editor's undo infrastructure.
     UndoContext makeUndoContext();
 

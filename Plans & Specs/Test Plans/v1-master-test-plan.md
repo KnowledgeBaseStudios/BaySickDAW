@@ -366,6 +366,63 @@ Debug first, then Release.
       state blob — and the panels DISPLAY the restored values (remount hook). Save a Vox page
       preset, load it on a fresh Vox tab: chain settings travel with it. `D:__ R:__` notes:
 
+### §B.7 — QA-Fa (BaySickPitch composite-driven editor + DSP)
+
+`blocks:` the QA-Fa source commit (message-tagged "QA-Fa"; hash backfilled at the next test-plan
+touch). G2 ear-check batch — the pitch-edit ear-check folds into the G2 boundary smoke (owner
+call 2026-07-10). Setup: a Vox tab with 1-2 vocal clips back-to-back on its channel (sequential
+only — overlap is §C item C2). BaySickPitch is the Vox tab's third sub-tab. Debug first, then
+Release.
+
+- [ ] **FA-1 — composite auto-resolve (no Load button).** Two vocal clips on the Vox channel at
+      bars 1 and 3; open BaySickPitch. Expected: note pills (purple, teal waveform inside)
+      auto-appear over BOTH clips at their positions — no file dialog anywhere; the Bass-green
+      detected pitch curve threads through them; empty channel shows the "notes appear here
+      automatically" empty state instead. `D:__ R:__` notes:
+- [ ] **FA-2 — Slice / Edit modes.** Slice mode: click mid-pill → it splits into two pills at the
+      click. Edit mode: drag a pill up a lane → pitch shift +1 st (green edit dot appears);
+      drag its left/right edge → start/end trims (clamped at neighbors); InfoBar tracks
+      Pitch/Cents/Length live during the drag. `D:__ R:__` notes:
+- [ ] **FA-3 — sub-curves under the selected pill.** Select a pill: three mini-lanes (VIB / FRM /
+      VOL) appear under it. Drag VIB right → vibrato deepens on playback of that note; drag FRM
+      off-center → character shifts; drag VOL points → a gain shape draws and the note follows it
+      when played. `D:__ R:__` notes:
+- [ ] **FA-4 — realtime applicator (no bake).** Nudge one flat note up a semitone; global Play.
+      Expected: the note plays CORRECTED in place (FilePlay), other notes unaltered; a second
+      zero-edit clip on the channel plays bit-identical (lazy-activate); the playhead line runs
+      across the canvas during playback (Auto-Scroll follows when A is lit). Focus knob at 0 =
+      untouched channel plays exactly as recorded even after analysis. `D:__ R:__` notes:
+- [ ] **FA-5 — Focus / Mod / Speed + presets.** Raise Focus → notes pull toward centers audibly
+      (Tight preset = hard pull, Loose = none); Speed low = audible glide between notes, high =
+      instant; presets Loose/Close/Tight set all three knobs (dirty dot lights on manual tweak);
+      Save/Load a user preset round-trips knob values, dot clears. `D:__ R:__` notes:
+- [ ] **FA-6 — Render bake + history.** Render (project saved first). Expected:
+      `Pitched/{name}_pitch_v1.wav` on disk with edits printed; a second Render → `_v2`.
+      NOTE: whether the bake also PLACES on the grid (like the Align bake) is an open owner call
+      at code-complete — verify against wherever it lands. `D:__ R:__` notes:
+- [ ] **FA-7 — Send Notes to... (MIDI only).** With a Layers tab open: Send Notes to → "Layer 1".
+      Expected: the target tab's piano roll (current pattern) gains the detected contour as notes
+      starting at beat 0 (rhythm at the current tempo); NO audio moves; the Clips target appears
+      only when a Clips tab exists; empty list message when no target tabs are open.
+      `D:__ R:__` notes:
+- [ ] **FA-8 — persistence.** Save the project with slices + pitch/vib/formant/vol edits + a
+      render history; close, reopen, open BaySickPitch. Expected: pills, edits (green dots),
+      history all restore without re-analysis (signature matches); playback still applies the
+      edits (applicator snapshot rebuilt on load). Undo/Redo walk the note edits (incl. an
+      accidental Reset). `D:__ R:__` notes:
+- [ ] **FA-9 — stale detection.** After analysis: move a clip on the Builder grid (or change the
+      project tempo / add a ruler tempo flag). Expected: amber RE-ANALYZE appears in the toolbar;
+      closing/reopening the sub-tab re-runs analysis automatically (edits carry over for notes
+      that still line up within 50 ms). `D:__ R:__` notes:
+- [ ] **FA-10 — [EAR-CHECK, at the G2 boundary smoke] pitch-edit quality.** A corrected note
+      sounds natural — no chipmunk (per-note formant left at 0 keeps timbre; deliberate FRM
+      shifts change character not pitch); an exaggerated pill drag (+7 st) is audibly artifact-
+      bounded (PSOLA, no phase-vocoder smear on the live path). `D:__ R:__` notes:
+- [ ] **FA-11 — brand-safety visual pass.** Walk BaySickPitch tooltips/labels/menus + its source
+      files. Expected: zero third-party product/brand strings (tree-wide Newtone grep is clean at
+      code-complete); Slice/Edit + Focus/Mod/Speed naming everywhere; engine name BaySickPitch
+      retained by design. `D:__ R:__` notes:
+
 ---
 
 ## §C — Deferred re-verify ledger

@@ -97,7 +97,8 @@ Plan approved 2026-07-09 (G2 group approval, R5). QA-F is the keystone of G2 (bu
   - Persistence: `<VocalChainState>` per-slot DSP-state blobs in get/setStateInformation (base64, NamIr pattern) — chosen over `EffectRack::setStateInformation` because a rack-level restore can reload slots and dangle the panels' captured DSP pointers; per-slot `eff->setStateInformation` applies IN PLACE. Restore order: params replaceState → blob → per-block push re-imposes bound values (params stay truth for bound; blob supplies unbound). Pre-fix saves: no child → defaults, unchanged.
   - Display-correctness: `onChainStateRestored` hook (processor → VocalChainPanel) re-mounts the 4 slot editors after a restore (panels sync knobs from DSP at construction; would show stale values otherwise). `mountSlotEditor()` factored; hook cleared in the panel dtor.
 - §B.6 **F-12** scenario added (stick + persist + remount + page-preset travel).
-- **Needs a rebuild**; follow-on commit after Jeff's green light.
+- **Follow-on commit `35ac9928`** (build clean, approved). QA-F CLOSED.
+- **Owner call (2026-07-10): the after-QA-F EAR-CHECK is DEFERRED** — folds into the G2 boundary smoke instead of running in-batch ("do the whole smoke test at the end"). The run plan's mid-group ear-check cadence adjusts accordingly; §B.6's ear-check scenarios (F-4/F-9/F-10) are unchanged and run at the boundary/campaign.
 - Rule 4 diagnostic catalog: **no diagnostic instrumentation was added in QA-F** (no DBG/log/temp-jassert sites; the catalog stays empty for this batch).
 - Awaiting: Jeff's `do_build.bat` (Release+Debug) → fix to clean → commit approval → ONE batch commit. Then the after-QA-F EAR-CHECK (align/warp + realtime pitch) is the in-batch Jeff gate before QA-Fa opens.
 

@@ -11264,6 +11264,79 @@ void StandaloneEditor::placeAlignedBake (const juce::File& bakeFile, double star
     if (mBuilderPage) mBuilderPage->repaint();
 }
 
+// ── QA-Fa (2026-07-10): BaySickPitch "Send Notes to..." ─────────────────────
+std::vector<StandaloneEditor::PitchNoteTarget> StandaloneEditor::listPitchNoteTargets() const
+{
+    std::vector<PitchNoteTarget> targets;
+    for (auto* entry : mPages)
+    {
+        if (! entry || ! entry->component) continue;
+        if (auto* lp = dynamic_cast<LayersPage*> (entry->component.get()))
+            targets.push_back ({ 0, lp->getPageIndex(),
+                                 "Layer " + juce::String (lp->getPageIndex() + 1) });
+        else if (auto* bp = dynamic_cast<BassPage*> (entry->component.get()))
+            targets.push_back ({ 1, bp->getPageIndex(),
+                                 "Bass " + juce::String (bp->getPageIndex() + 1) });
+        else if (auto* dp = dynamic_cast<DrumPage*> (entry->component.get()))
+            targets.push_back ({ 2, dp->getPageIndex(),
+                                 "Drum " + juce::String (dp->getPageIndex() + 1) });
+        else if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+            targets.push_back ({ 3, cp->getPageIndex(),
+                                 "Clips " + juce::String (cp->getPageIndex() + 1) });
+    }
+    std::sort (targets.begin(), targets.end(),
+               [] (const PitchNoteTarget& a, const PitchNoteTarget& b)
+               { return a.kind != b.kind ? a.kind < b.kind
+                                         : a.pageIndex < b.pageIndex; });
+    return targets;
+}
+
+void StandaloneEditor::sendPitchNotesToTab (int kind, int pageIndex,
+                                            const std::vector<ContourNote>& notes)
+{
+    if (! mPM || notes.empty()) return;
+
+    auto& pat = mPM->getPattern (mPM->getCurrentPatternIndex());
+    PianoRollData* roll = nullptr;
+    switch (kind)
+    {
+        case 0: if (pageIndex >= 0 && pageIndex < (int) pat.layerRoll.size())
+                    roll = &pat.layerRoll[(size_t) pageIndex];
+                break;
+        case 1: if (pageIndex >= 0 && pageIndex < (int) pat.bassRoll.size())
+                    roll = &pat.bassRoll[(size_t) pageIndex];
+                break;
+        case 2: if (pageIndex >= 0 && pageIndex < (int) pat.drumRolls.size())
+                    roll = &pat.drumRolls[(size_t) pageIndex];
+                break;
+        case 3: if (pageIndex >= 0 && pageIndex < (int) pat.clipRoll.size())
+                    roll = &pat.clipRoll[(size_t) pageIndex];
+                break;
+        default: break;
+    }
+    if (roll == nullptr) return;
+
+    // Seconds -> beats at the current transport tempo: the contour keeps its
+    // rhythm at today's tempo, starting at the pattern's beat 0.
+    const double bpm = juce::jmax (20.0, mTransport ? mTransport->getBPM() : 120.0);
+    const double bps = bpm / 60.0;
+
+    double maxBeat = 0.0;
+    for (const auto& n : notes)
+    {
+        PianoNote pn;
+        pn.midiNote      = juce::jlimit (0, 127, n.midiNote);
+        pn.startBeat     = juce::jmax (0.0, n.startSec * bps);
+        pn.durationBeats = juce::jmax (0.05, (n.endSec - n.startSec) * bps);
+        roll->notes.push_back (pn);
+        maxBeat = juce::jmax (maxBeat, pn.startBeat + pn.durationBeats);
+    }
+    roll->numBars = juce::jmax (roll->numBars, (int) std::ceil (maxBeat / 4.0));
+
+    if (mProjectManager) mProjectManager->markDirty();
+    repaint();
+}
+
 // ── R5d (2026-04-24): post-stop recording routing ───────────────────────────
 void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordResult& res)
 {

@@ -344,6 +344,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/PitchTrackerYIN.cpp
     Source/DSP/PitchCorrectorDSP.cpp
     Source/DSP/BaySickAlignDSP.cpp
+    Source/DSP/BaySickPitchDSP.cpp
     Source/DSP/ReverbDSP.cpp
     Source/DSP/ChorusDSP.cpp
     Source/DSP/DelayDSP.cpp

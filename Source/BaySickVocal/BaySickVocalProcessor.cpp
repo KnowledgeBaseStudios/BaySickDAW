@@ -189,6 +189,33 @@ BaySickVocalProcessor::createLayout()
     addAI ("leader_channel",   "Align Leader Channel",   -1, 999, -1);
     addAI ("follower_channel", "Align Follower Channel", -1, 999, -1);
 
+    // ── QA-Fa: BaySickPitch (bsp_ prefix; sections 14b/14f) ─────────────────
+    // Focus DEFAULTS 0 so an analyzed-but-untouched channel plays untouched.
+    auto addPF = [&](const char* suffix, const juce::String& name,
+                     float lo, float hi, float def)
+    {
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID (juce::String ("bsp_") + suffix, 1), name,
+            juce::NormalisableRange<float> (lo, hi), def));
+    };
+    auto addPB = [&](const char* suffix, const juce::String& name, bool def)
+    {
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID (juce::String ("bsp_") + suffix, 1), name, def));
+    };
+    auto addPI = [&](const char* suffix, const juce::String& name,
+                     int lo, int hi, int def)
+    {
+        params.push_back (std::make_unique<juce::AudioParameterInt> (
+            juce::ParameterID (juce::String ("bsp_") + suffix, 1), name, lo, hi, def));
+    };
+    addPF ("focus",        "Pitch Focus",        0.0f, 100.0f, 0.0f);
+    addPF ("mod",          "Pitch Mod",          0.0f, 100.0f, 50.0f);
+    addPF ("speed",        "Pitch Speed",        0.0f, 100.0f, 50.0f);
+    addPI ("preset",       "Pitch Preset",       0, 3, 0);   // Loose/Close/Tight/User
+    addPB ("preset_dirty", "Pitch Preset Dirty", false);
+    addPI ("mode",         "Pitch Edit Mode",    0, 1, 1);   // 0=Slice, 1=Edit
+
     return { params.begin(), params.end() };
 }
 
@@ -242,6 +269,9 @@ void BaySickVocalProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
     // QA-F Task 3: align engine (offline; prepare just records the rate).
     mAlign.prepare (sampleRate, maxBlockSize);
 
+    // QA-Fa: pitch engine (offline analysis + the FilePlay applicator).
+    mPitch.prepare (sampleRate, maxBlockSize);
+
     // H-6c -- pre-load the vocal chain rack with 4 locked slots in order.
     // loadEffect is idempotent on type match; second prepareToPlay calls
     // (e.g. sample-rate change) just re-prepare the existing slots.
@@ -291,6 +321,12 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
     mPitchCorrector.setFormantPreserve   (rdb ("bsv_pitch_formantPreserve"));
     mPitchCorrector.setHumanizeCents     (rd  ("bsv_pitch_humanize"));
     mPitchCorrector.setThroatShiftSemis  (rd  ("bsv_pitch_throatShift"));
+
+    // ── QA-Fa: BaySickPitch applicator knobs (CPU-guarded setters) ─────────
+    // Speed knob is "higher = faster": 0 -> 300 ms glide, 100 -> 5 ms.
+    mPitch.setFocus01   (rd ("bsp_focus") / 100.0f);
+    mPitch.setModAmount (rd ("bsp_mod")   / 50.0f);
+    mPitch.setSpeedMs   (300.0f - rd ("bsp_speed") * 2.95f);
 
     // ── Rack stage Bypass flags (forward to slots) ────────────────────────
     mVocalChainRack.setSlotBypassed (0, rdb ("bsv_deesser_bypass"));
@@ -422,6 +458,12 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // also added in G-9.
     if (! mForcePitchBypass.load (std::memory_order_acquire))
         mPitchCorrector.process (buffer);
+    else
+        // QA-Fa Mode C applicator: FilePlay only (mutually exclusive with the
+        // realtime corrector) -- note-level edits ride normal playback with
+        // no bake step.  One atomic load when the channel has no edits.
+        mPitch.processFilePlay (buffer,
+            mFilePlayTimelineSample.load (std::memory_order_relaxed));
 
     // ── Wet recording tap (post-realtime pitch / pre-vocal-chain) ────────
     // This is the user-locked tap point per Option C of G-9.1: the file
@@ -689,6 +731,95 @@ bool BaySickVocalProcessor::isAlignStale() const
         || onChannelClipSignature (follower) != mAlignState.analyzedFollowerSig;
 }
 
+// ─── QA-Fa: BaySickPitch actions (message thread only) ────────────────────────
+
+bool BaySickVocalProcessor::analyzePitch (juce::String& errorOut)
+{
+    errorOut.clear();
+    if (! onRenderComposite || ! onChannelClipSignature)
+        { errorOut = "Pitch services not connected."; return false; }
+    if (mOwnChannelId < 0)
+        { errorOut = "This Vox page has no channel yet."; return false; }
+
+    double beat = 0.0, sr = 44100.0;
+    juce::int64 samp = 0;
+    auto comp = onRenderComposite (mOwnChannelId, beat, samp, sr);
+    if (comp.getNumSamples() <= 0)
+        { errorOut = "This channel has no audio clips to analyze."; return false; }
+
+    mPitch.analyzeComposite (comp.getReadPointer (0), comp.getNumSamples(),
+                             sr, beat, samp);
+    mPitchAnalyzedSig = onChannelClipSignature (mOwnChannelId);
+    if (auto& fn = mDirtyTracker.onAny) fn();
+    return true;
+}
+
+juce::File BaySickVocalProcessor::renderPitchedTake (juce::String& errorOut)
+{
+    errorOut.clear();
+    if (! onRenderComposite || ! onGetProjectFolder)
+        { errorOut = "Pitch services not connected."; return {}; }
+    if (! mPitch.isAnalyzed())
+        { errorOut = "Nothing analyzed yet - open the editor with clips on the channel."; return {}; }
+
+    double beat = 0.0, sr = mPitch.analysisSampleRate();
+    juce::int64 samp = 0;
+    auto comp = onRenderComposite (mOwnChannelId, beat, samp, sr);
+    if (comp.getNumSamples() <= 0)
+        { errorOut = "This channel has no audio clips."; return {}; }
+
+    auto rendered = mPitch.renderOffline (comp.getReadPointer (0),
+                                          comp.getNumSamples(), sr);
+    if (rendered.getNumSamples() <= 0)
+        { errorOut = "Render produced no audio."; return {}; }
+
+    const juce::File projDir = onGetProjectFolder();
+    if (projDir == juce::File() || ! projDir.isDirectory())
+        { errorOut = "Save the project first - renders live in the project folder."; return {}; }
+
+    auto pitchedDir = projDir.getChildFile ("Pitched");
+    pitchedDir.createDirectory();
+
+    juce::String base = "Vox";
+    if (onListCandidateChannels)
+        for (const auto& c : onListCandidateChannels())
+            if (c.first == mOwnChannelId)
+                { base = c.second.replaceCharacter (' ', '_'); break; }
+
+    int version = (int) mPitchRenders.size() + 1;
+    auto file = pitchedDir.getChildFile (base + "_pitch_v" + juce::String (version) + ".wav");
+    while (file.existsAsFile())
+        file = pitchedDir.getChildFile (base + "_pitch_v" + juce::String (++version) + ".wav");
+
+    juce::WavAudioFormat fmt;
+    auto os = file.createOutputStream();
+    if (os == nullptr) { errorOut = "Could not write " + file.getFullPathName(); return {}; }
+    std::unique_ptr<juce::AudioFormatWriter> writer (fmt.createWriterFor (
+        os.release(), sr, 1, 24, {}, 0));
+    if (writer == nullptr) { errorOut = "Could not create the WAV writer."; return {}; }
+    writer->writeFromAudioSampleBuffer (rendered, 0, rendered.getNumSamples());
+    writer.reset();
+
+    AlignRenderEntry e;
+    e.file    = "Pitched/" + file.getFileName();
+    e.dateIso = juce::Time::getCurrentTime().toISO8601 (true);
+    e.version = version;
+    mPitchRenders.push_back (e);
+
+    // Grid placement deliberately NOT wired: whether a Pitch bake places
+    // like an Align bake (row below + row-mute) is a pending owner call --
+    // the realtime applicator already plays these edits without a bake.
+    if (auto& fn = mDirtyTracker.onAny) fn();
+    return file;
+}
+
+bool BaySickVocalProcessor::isPitchStale() const
+{
+    if (! mPitch.isAnalyzed() || ! onChannelClipSignature || mOwnChannelId < 0)
+        return false;
+    return onChannelClipSignature (mOwnChannelId) != mPitchAnalyzedSig;
+}
+
 // ─── Editor ───────────────────────────────────────────────────────────────────
 juce::AudioProcessorEditor* BaySickVocalProcessor::createEditor()
 {
@@ -755,8 +886,23 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
     removeChild (kNamIrStateTag);
     removeChild (kVocalChainStateTag);
 
-    // <PitchEdits> stays a reserved empty slot (QA-Fa populates it).
-    state.appendChild (juce::ValueTree (kPitchEditsTag), nullptr);
+    // QA-Fa: <PitchEdits> carries the BaySickPitch channel state -- analyzed
+    // note regions + per-note edits, the analysis frame, the Pitched/ render
+    // history, and the analyze-time clip signature.
+    {
+        juce::ValueTree pitch (kPitchEditsTag);
+        pitch.setProperty ("pSig", mPitchAnalyzedSig, nullptr);
+        pitch.appendChild (mPitch.stateToValueTree(), nullptr);
+        for (const auto& r : mPitchRenders)
+        {
+            juce::ValueTree e ("R");
+            e.setProperty ("f", r.file,    nullptr);
+            e.setProperty ("d", r.dateIso, nullptr);
+            e.setProperty ("v", r.version, nullptr);
+            pitch.appendChild (e, nullptr);
+        }
+        state.appendChild (pitch, nullptr);
+    }
 
     // QA-F Task 3: <AlignEdits> carries the full channel-pair align state --
     // WarpMap (with per-anchor pitch deltas), sync points, protected areas,
@@ -848,7 +994,32 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         if (chainChild.isValid())
             newState.removeChild (chainChild, nullptr);
 
+        // QA-Fa: same for <PitchEdits>.
+        auto pitchChild = newState.getChildWithName (kPitchEditsTag);
+        if (pitchChild.isValid())
+            newState.removeChild (pitchChild, nullptr);
+
         apvts.replaceState (newState);
+
+        mPitchRenders.clear();
+        mPitchAnalyzedSig = 0;
+        if (pitchChild.isValid())
+        {
+            mPitchAnalyzedSig = (juce::int64) pitchChild.getProperty ("pSig", 0);
+            mPitch.stateFromValueTree (pitchChild.getChildWithName ("PitchState"));
+            for (int i = 0; i < pitchChild.getNumChildren(); ++i)
+            {
+                auto c = pitchChild.getChild (i);
+                if (! c.hasType ("R")) continue;
+                AlignRenderEntry r;
+                r.file    = c.getProperty ("f", juce::String()).toString();
+                r.dateIso = c.getProperty ("d", juce::String()).toString();
+                r.version = (int) c.getProperty ("v", 1);
+                mPitchRenders.push_back (r);
+            }
+        }
+        else
+            mPitch.stateFromValueTree ({});
 
         // Restore the per-slot chain-DSP blobs IN PLACE on the existing DSP
         // instances (no slot reload -- the Vocal Chain panel holds raw DSP
