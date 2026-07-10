@@ -26,6 +26,17 @@ public:
         }
         juce::JUCEApplication::getInstance()->systemRequestedQuit();
     }
+
+    // G1 review fix (D-4): flush held typing-keyboard notes when the app
+    // deactivates - Alt+Tab mid-hold sends the key-up to the OTHER app, so
+    // keyStateChanged never fires here and the note drones until refocus.
+    void activeWindowStatusChanged() override
+    {
+        juce::DocumentWindow::activeWindowStatusChanged();
+        if (! isActiveWindow())
+            if (auto* editor = dynamic_cast<StandaloneEditor*> (getContentComponent()))
+                editor->releaseAllTypingNotes();
+    }
 };
 
 // ── PlayHeadAdvancer ──────────────────────────────────────────────────────────
@@ -163,7 +174,8 @@ double StandalonePlayHead::markerRuleTempoAtBeat (double beat) const
     return t;
 }
 
-void StandalonePlayHead::rebuildTimeline (double forwardTempoOverride)
+void StandalonePlayHead::rebuildTimeline (double forwardTempoOverride,
+                                          bool   rebaseWhilePlaying)
 {
     // Message thread only (the timeline's single writer).
     const double  sr  = juce::jmax (1.0, mSampleRate.load());
@@ -179,7 +191,7 @@ void StandalonePlayHead::rebuildTimeline (double forwardTempoOverride)
     const bool   wasActive  = TempoMap::isActive();
     const double curBeatOld = deriveBeat (now);
 
-    if (playing && wasActive)
+    if (playing && wasActive && ! rebaseWhilePlaying)
     {
         // Truncate-and-append: mapping already heard stays untouched (history
         // never re-maps mid-play, so the sample clock and every derived beat
@@ -197,9 +209,18 @@ void StandalonePlayHead::rebuildTimeline (double forwardTempoOverride)
             bp [n] = TempoMap::gSegBpm [i].load (std::memory_order_relaxed);
             ++n;
         }
+        // G1 review fix: coalesce consecutive live-automation pivots.  If the
+        // newest kept history segment IS the previous live pivot (no marker
+        // landed between it and now), drop it - the new pivot replaces it and
+        // the segment count stays "history + one live tail" no matter how
+        // long an automation ramp runs.
+        if (forwardTempoOverride > 0.0 && n > 1
+            && smp[n-1] == mLastLivePivot)
+            --n;
         const double fwd = forwardTempoOverride > 0.0 ? forwardTempoOverride
                                                       : markerRuleTempoAtBeat (curBeatOld);
         smp[n] = now; bt[n] = curBeatOld; bp[n] = fwd; ++n;
+        mLastLivePivot = (forwardTempoOverride > 0.0) ? now : -1;
 
         for (const auto& m : mMarkers)
         {
@@ -225,6 +246,7 @@ void StandalonePlayHead::rebuildTimeline (double forwardTempoOverride)
                 (m.first - bt[n-1]) * 60.0 * sr / juce::jmax (1e-6, bp[n-1]));
             smp[n] = s; bt[n] = m.first; bp[n] = m.second; ++n;
         }
+        mLastLivePivot = -1;   // pure rebuild discards any live tail
     }
 
     TempoMap::publish (smp, bt, bp, n, sr);
@@ -234,6 +256,18 @@ void StandalonePlayHead::rebuildTimeline (double forwardTempoOverride)
         // Stopped: keep the MUSICAL position (the user sits "at bar N"; a
         // tempo edit must not move their bar) - relocate the sample clock.
         mSamplePos.store (TempoMap::sampleAtBeat (juce::jmax (0.0, curBeatOld)));
+    }
+    else if (rebaseWhilePlaying)
+    {
+        // G1 boundary smoke (Jeff): a BASE edit mid-play re-tempos the WHOLE
+        // timeline - nothing gets "recorded" at the playhead the way live
+        // automation does.  Keep the musical position (same bar, new tempo)
+        // by relocating the sample clock, and raise the discontinuity flag so
+        // the scheduler + clip players resync in one clean step instead of
+        // chasing a position mismatch.  Same accepted message-thread-store
+        // pattern as seekTo.
+        mSamplePos.store (TempoMap::sampleAtBeat (juce::jmax (0.0, curBeatOld)));
+        mSeekDiscontinuity.store (true);
     }
 }
 
@@ -281,9 +315,10 @@ void StandalonePlayHead::advanceBlock(int numSamples, double sampleRate)
     mSamplePos.store (pos);
 }
 
-void StandalonePlayHead::start(double bpm)
+void StandalonePlayHead::start()
 {
-    setBPM (bpm);           // base-tempo edit semantics (rebuild handles continuity)
+    // G1 review fix: no tempo edit here - see the header note.  Field edits
+    // land through onTempoChanged -> setBPM when the editor commits them.
     mPlaying.store (true);
 }
 void StandalonePlayHead::stop()  { mPlaying.store (false); }
@@ -298,18 +333,27 @@ void StandalonePlayHead::reset()
 void StandalonePlayHead::setBPM(double bpm)
 {
     // QA-TempoMap: edits the BASE tempo (Jeff's E pick - the field edits the
-    // base; markers own their own spans).  The rebuild preserves continuity:
-    // playing -> truncate-and-append at the playhead; stopped -> pure rebuild
-    // + beat-stable relocation.
+    // base; markers own their own spans).  G1 boundary smoke: a base edit is
+    // a RULE change, not a live event - even mid-play it rebuilds the pure
+    // base+markers map from the origin (beat position preserved), so replay
+    // never crosses a phantom step at wherever the playhead happened to be.
+    if (std::abs (mBPM.load() - bpm) < 1e-9) return;   // value-change guard
     mBPM.store (bpm);
-    rebuildTimeline();
+    rebuildTimeline (-1.0, true);
 }
 void StandalonePlayHead::setLiveTempo(double bpm)
 {
     // Tempo-automation write: an explicit tail segment at the playhead; later
     // markers stay in the timeline and re-assert at their samples
     // (last-writer-wins).  Does NOT touch the base tempo.
-    rebuildTimeline (juce::jmax (1.0, bpm));
+    bpm = juce::jmax (1.0, bpm);
+    // G1 review fix: value-change guard (the standing CPU-safeguard rule) -
+    // the 30 Hz applicator fires every tick even on a FLAT lane; identical
+    // values must not rebuild/republish at all.
+    if (TempoMap::isActive()
+        && std::abs (TempoMap::bpmAtSample (mSamplePos.load()) - bpm) < 0.01)
+        return;
+    rebuildTimeline (bpm);
 }
 void StandalonePlayHead::setTempoMarkers(std::vector<std::pair<double,double>> markers)
 {
@@ -577,6 +621,23 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
         {
             xml->removeAttribute ("audioDeviceInChans");
             xml->removeAttribute ("audioDeviceOutChans");
+            // G1 boundary fix (2026-07-08, found at the smoke): switching
+            // between two ASIO devices leaves the OLD device's name in
+            // audioInputDeviceName (the dialog has no input picker and
+            // deliberately preserves the prior entry).  ASIO drivers are
+            // one-device-per-driver - JUCE cannot open a mismatched in/out
+            // pair, so initialise silently fell back to the old device and
+            // the user's pick never took (retry loop + pending files piling
+            // up).  The post-open net further down only covers the
+            // EMPTY-input case, so it never saw this.  Force input = output
+            // for ASIO BEFORE opening.
+            if (xml->getStringAttribute ("deviceType").equalsIgnoreCase ("ASIO"))
+            {
+                const auto outName = xml->getStringAttribute ("audioOutputDeviceName");
+                if (outName.isNotEmpty()
+                    && xml->getStringAttribute ("audioInputDeviceName") != outName)
+                    xml->setAttribute ("audioInputDeviceName", outName);
+            }
         }
         mDeviceManager->initialise(64, 64, xml.get(), true);
     }
@@ -689,6 +750,20 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
         diagLog << "getCurrentAudioDevice() returned null after initialise.\n";
     }
 
+    // G1 boundary diagnostics (2026-07-08, Keep): the log could not answer
+    // "was the requested ASIO driver even enumerable at launch?" - JUCE's
+    // ASIO createDevice returns null for a name missing from its scan and
+    // the manager silently falls back, which looks identical to a settings
+    // bug from the outside.  Dump every device type's scan list.
+    diagLog << "\nDevice-type scan lists:\n";
+    for (auto* type : mDeviceManager->getAvailableDeviceTypes())
+    {
+        type->scanForDevices();
+        diagLog << "  [" << type->getTypeName() << "] outputs:";
+        for (const auto& n : type->getDeviceNames (false)) diagLog << " '" << n << "'";
+        diagLog << "\n";
+    }
+
     {
         const auto logFile = settingsFile.getSiblingFile ("audio_setup_log.txt");
         logFile.getParentDirectory().createDirectory();
@@ -765,6 +840,27 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
             // setMidiInputDeviceEnabled later is sufficient.
             mDeviceManager->addMidiInputDeviceCallback (d.identifier, this);
         }
+
+        // G1 boundary diagnostics (2026-07-08, Keep): append the MIDI
+        // enumeration story to audio_setup_log.txt - "(no MIDI devices
+        // detected)" in the settings dialog is indistinguishable from a
+        // wedged OS MIDI stack without this.
+        {
+            juce::String midiLog;
+            midiLog << "\nMIDI at startup:\n";
+            midiLog << "  available (" << availableMidi.size() << "):";
+            for (const auto& d : availableMidi)
+                midiLog << " '" << d.name << "'";
+            midiLog << "\n  saved MIDIINPUT ids: " << savedMidiIds.size()
+                    << "  matchesAvailable: " << (savedMatchesAnyDevice ? "yes" : "no")
+                    << "  enableAll: " << (enableAll ? "yes" : "no") << "\n";
+            for (const auto& d : availableMidi)
+                midiLog << "  enabled('" << d.name << "'): "
+                        << (mDeviceManager->isMidiInputDeviceEnabled (d.identifier) ? "yes" : "no")
+                        << "\n";
+            getAudioSettingsFile().getSiblingFile ("audio_setup_log.txt")
+                                  .appendText (midiLog);
+        }
     }
 
     // I-3b (2026-05-02): Load the user's global MIDI Learn defaults if the
@@ -796,13 +892,36 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // resizer widget - border drag, matching the resizable child-window
     // precedents (EventEditor / KeyBinds / UndoHistory).
     mWindow->setResizable(true, false);
+    // QA-Eb follow-up (Jeff, G1 smoke): remember the window size across runs
+    // - a maximized close restores maximized, a sized close restores those
+    // exact bounds.  Global pref in settings.xml (WindowState child).
+    bool windowRestored = false;
+    if (auto wsRoot = juce::XmlDocument::parse (ProjectManager::getSettingsFile()))
+    {
+        if (auto* ws = wsRoot->getChildByName ("WindowState"))
+        {
+            if (ws->getBoolAttribute ("maximized", true))
+            {
+                mWindow->setFullScreen (true);
+            }
+            else
+            {
+                mWindow->setBounds (ws->getIntAttribute ("x", 100),
+                                    ws->getIntAttribute ("y", 100),
+                                    juce::jmax (1100, ws->getIntAttribute ("w", 1280)),
+                                    juce::jmax (700,  ws->getIntAttribute ("h", 800)));
+            }
+            windowRestored = true;
+        }
+    }
     // Floor below which the layout stops being usable: the 40px bar's fixed
     // occupants (controls 520 + pattern 176 + readout 100 + CPU 120 + gaps)
     // need ~1050px before the ribbon guard (>60) kicks in, and the fixed
     // chrome (24+40+26) plus the smallest workable page area needs ~700px
     // of height.  Starting values - Jeff tunes at the G1 boundary smoke.
     mWindow->setResizeLimits(1100, 700, 32000, 32000);
-    mWindow->setFullScreen(true);
+    if (! windowRestored)
+        mWindow->setFullScreen(true);   // first launch / no saved state
     mWindow->setVisible(true);
 }
 
@@ -815,6 +934,36 @@ void VibesynthStandaloneApp::shutdown()
     auto pendingFile = getAudioSettingsFile().getSiblingFile("audio_settings_pending.xml");
     if (!pendingFile.existsAsFile())
         saveAudioSettings();
+    // QA-Eb follow-up: persist the window size/maximized state (global
+    // settings.xml, sibling-preserving write like every other pref there).
+    if (mWindow)
+    {
+        const auto f = ProjectManager::getSettingsFile();
+        f.getParentDirectory().createDirectory();
+        std::unique_ptr<juce::XmlElement> root;
+        if (f.existsAsFile())
+            root = juce::XmlDocument::parse (f);
+        if (root == nullptr)
+            root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
+        if (auto* old = root->getChildByName ("WindowState"))
+            root->removeChildElement (old, true);
+        auto* ws = root->createNewChildElement ("WindowState");
+        // G1 smoke fix: with a JUCE-drawn title bar, isFullScreen() only
+        // reflects the internal flag the JUCE maximize button sets - an OS
+        // maximize (Win+Up / snap) zooms the HWND without touching it, so a
+        // maximized close saved "windowed at nearly-full bounds".  OR in the
+        // peer's real OS state.
+        const bool maxed = mWindow->isFullScreen()
+                        || (mWindow->getPeer() != nullptr
+                            && mWindow->getPeer()->isFullScreen());
+        ws->setAttribute ("maximized", maxed);
+        const auto wb = mWindow->getBounds();
+        ws->setAttribute ("x", wb.getX());
+        ws->setAttribute ("y", wb.getY());
+        ws->setAttribute ("w", wb.getWidth());
+        ws->setAttribute ("h", wb.getHeight());
+        root->writeTo (f);
+    }
     mWindow = nullptr;
     if (mDeviceManager)
         mDeviceManager->removeChangeListener(this);

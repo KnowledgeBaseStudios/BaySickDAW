@@ -1,6 +1,8 @@
 #include "BuilderPage.h"
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
+#include "../DSP/BpmDetect.h"    // QA-Ec G1-boundary: content tempo estimation (import + display)
 #include "PatternColorPicker.h"
+#include <map>                    // G1 boundary: detected-tempo display cache
 #include "../ClipDropDiag.h"        // QA-ClipDrop: diagnostic trap (2026-06-02)
 using namespace juce;
 
@@ -32,7 +34,8 @@ namespace {
                                   const std::vector<RoutablePageInfo>&,
                                   bool, bool,
                                   std::shared_ptr<juce::TextButton>&,
-                                  std::shared_ptr<PendingRoute>&);
+                                  std::shared_ptr<PendingRoute>&,
+                                  const juce::String& bpmDisplayOverride = {});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2135,6 +2138,35 @@ void ArrangementGrid::drawAudioClip(Graphics& g, const ArrangementBlock& b,
                    x + w - 36, y + 1, 34, 12, Justification::centredRight, false);
     }
 
+    // G1 boundary (Jeff #2): stretch badge - the clip's playback-speed factor
+    // vs its NATURAL tempo (library entry / Reset Stretch target) to 0.01.
+    // Hidden at x1.00.  Bottom-RIGHT on a dark pill (the top row is owned by
+    // the full-width filename label; the bottom-left corner by the follow
+    // dot).  Makes a re-fit visible no matter which gesture baked it.
+    if (b.clipType == ClipType::Audio && w >= 40 && h >= 24)
+    {
+        const int   li      = mPM.findAudioLibraryIndexByPath (b.audioFilePath);
+        const float natural = li >= 0 ? mPM.getAudioLibraryBPM (li) : 0.f;
+        if (natural > 0.f && b.originalBPM > 0.f)
+        {
+            const double factor = (double) b.originalBPM / (double) natural;
+            if (std::abs (factor - 1.0) >= 0.005)
+            {
+                const String txt = "x" + String (factor, 2);
+                g.setFont (Font (9.f, Font::bold));
+                const int tw = juce::jmax (30,
+                    (int) std::ceil (g.getCurrentFont().getStringWidthFloat (txt)) + 8);
+                const juce::Rectangle<float> pill ((float) (x + w - tw - 3),
+                                                   (float) (y + h - 15),
+                                                   (float) tw, 12.f);
+                g.setColour (Colours::black.withAlpha (0.65f));
+                g.fillRoundedRectangle (pill, 6.f);
+                g.setColour (Colour (0xffFFB030));
+                g.drawText (txt, pill.toNearestInt(), Justification::centred, false);
+            }
+        }
+    }
+
     // QA-E Task 7 (FILE-02): per-copy "follows the file's master" indicator.
     // NOT the project dirty flag (that is the title-bar asterisk).  Always
     // shown on audio blocks: GREEN = this copy still follows the file's
@@ -2566,6 +2598,12 @@ void ArrangementGrid::applySnapshot(const std::vector<ArrangementBlock>& blocks,
     resized();
     repaint();
     if (onUndoRedoStateChanged) onUndoRedoStateChanged();
+    // G1 boundary smoke: undo/redo restore lands HERE, not in commitEdit -
+    // without this the audio players keep the pre-undo clip state (a stretch
+    // undo reverted the block visually but kept PLAYING stretched).  Fires a
+    // second time on a fresh commit (perform + commitEdit) - harmless, the
+    // rebuild is idempotent.
+    if (onArrangementChanged) onArrangementChanged();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3162,9 +3200,20 @@ void ArrangementGrid::showClipContextMenu(int blockIdx)
     m.addItem(5, b.muted ? "Unmute" : "Mute");
     m.addSeparator();
     if (b.clipType == ClipType::Audio)
+    {
         m.addItem(6, "Properties...");                 // QA-E Task 7 (FILE-02):
                                                         // renamed; now also hosts
                                                         // the Routing dropdown
+        // G1 boundary (Jeff pick 1): escape hatch for the stretch state -
+        // restores the clip's NATURAL tempo identity (its library entry's
+        // BPM), keeping position + length.  Enabled only when re-fit.
+        {
+            const int   li      = mPM.findAudioLibraryIndexByPath (b.audioFilePath);
+            const bool  canRst  = li >= 0
+                && std::abs (b.originalBPM - mPM.getAudioLibraryBPM (li)) > 0.01f;
+            m.addItem(7, "Reset Stretch", canRst);
+        }
+    }
     if (b.clipType == ClipType::Automation)
         m.addItem(8, "Open in Event Editor...");
     // QA-E Task 7 (FILE-02): dead duplicate item 7 deleted (no case 7 in the
@@ -3210,6 +3259,47 @@ void ArrangementGrid::showClipContextMenu(int blockIdx)
                       if (!isSelected(blockIdx)) { mSelection.clear(); mSelection.push_back(blockIdx); }
                       muteSelected(m2); break; }
             case 6: showAudioClipProperties(blockIdx); break;
+            case 7: // Reset Stretch (G1 boundary, Jeff pick 1)
+            {
+                auto& b = mPM.getBlock(blockIdx);
+                const int li = mPM.findAudioLibraryIndexByPath (b.audioFilePath);
+                if (b.clipType == ClipType::Audio && li >= 0)
+                {
+                    beginEdit("Reset Stretch");
+                    b.originalBPM = mPM.getAudioLibraryBPM (li);
+                    // Jeff (G1 smoke): reset = the ORIGINAL DROP FORM in one
+                    // click - natural speed AND full file length at the
+                    // natural tempo, slip offset cleared.  Position kept.
+                    juce::File af (b.audioFilePath);
+                    if (! af.existsAsFile() && onResolveStoredPath)
+                        af = onResolveStoredPath (b.audioFilePath);
+                    if (af.existsAsFile())
+                    {
+                        juce::AudioFormatManager fm;
+                        fm.registerBasicFormats();
+                        if (std::unique_ptr<juce::AudioFormatReader> rd { fm.createReaderFor (af) })
+                        {
+                            if (rd->sampleRate > 0 && rd->lengthInSamples > 0
+                                && b.originalBPM > 0.f)
+                            {
+                                const double secs  = (double) rd->lengthInSamples / rd->sampleRate;
+                                const double beats = secs * (double) b.originalBPM / 60.0;
+                                b.setLengthBeats (beats);
+                                b.lengthBars = juce::jmax (1, (int) std::ceil (beats / 4.0));
+                            }
+                        }
+                    }
+                    b.contentStartSamples = 0;
+                    // Follow-state is DERIVED (same rule as the Properties
+                    // dialog): back on the library master only if every other
+                    // per-copy prop matches it too.
+                    b.isOverride = std::abs (b.pitchSemitones - mPM.getAudioLibraryPitch (li)) > 0.001f
+                                || b.stretchMode != mPM.getAudioLibraryStretchMode (li);
+                    commitEdit();   // fires onArrangementChanged -> rebuildAudioClipPlayers
+                    repaint();
+                }
+                break;
+            }
             case 8: if (onOpenEventEditor) onOpenEventEditor(blockIdx); break;
             default:
                 // C.5b: 100..107 = TS preset picks for the block's pattern.
@@ -3259,10 +3349,19 @@ void buildAudioPropsControls (juce::AlertWindow& aw,
                               bool offerMove,
                               bool offerResetToMaster,
                               std::shared_ptr<juce::TextButton>& outBtn,
-                              std::shared_ptr<PendingRoute>& outPending)
+                              std::shared_ptr<PendingRoute>& outPending,
+                              const juce::String& bpmDisplayOverride)
 {
     aw.addTextEditor ("pitch", juce::String (curPitch, 2), "Pitch shift (semitones):");
-    aw.addTextEditor ("bpm",   juce::String (curBPM, 1),   "Original BPM:");
+    // G1 boundary (Jeff, teaching-app cut): the PER-CLIP dialog shows tempo
+    // as a read-only detected display (bpmDisplayOverride non-empty) - the
+    // number a stretch-drag rewrites is no longer hand-editable per copy.
+    // The BROWSER entry keeps the editable field as the single correction
+    // point for detection misses (octave errors need a human override).
+    if (bpmDisplayOverride.isNotEmpty())
+        aw.addTextBlock (bpmDisplayOverride);
+    else
+        aw.addTextEditor ("bpm", juce::String (curBPM, 1), "Original BPM:");
 
     aw.addComboBox ("mode", { "Stretch (pitch locked)", "Resample (pitch follows tempo)" }, "Mode:");
     if (auto* cb = aw.getComboBoxComponent ("mode"))
@@ -3362,12 +3461,39 @@ void ArrangementGrid::showAudioClipProperties(int blockIdx)
 
     std::shared_ptr<juce::TextButton> routeBtn;
     std::shared_ptr<PendingRoute>     pending;
+    // G1 boundary: detected-tempo display (path-cached so reopening the
+    // dialog doesn't re-read the file; message thread only).
+    juce::String bpmDisplay;
+    {
+        static std::map<juce::String, BpmDetect::Estimate> sBpmCache;
+        auto it = sBpmCache.find (block.audioFilePath);
+        if (it == sBpmCache.end())
+        {
+            BpmDetect::Estimate est;
+            juce::File bf (block.audioFilePath);
+            if (! bf.existsAsFile() && onResolveStoredPath)
+                bf = onResolveStoredPath (block.audioFilePath);
+            if (bf.existsAsFile())
+            {
+                juce::AudioFormatManager bfm;
+                bfm.registerBasicFormats();
+                if (std::unique_ptr<juce::AudioFormatReader> rd { bfm.createReaderFor (bf) })
+                    est = BpmDetect::detect (*rd);
+            }
+            it = sBpmCache.emplace (block.audioFilePath, est).first;
+        }
+        bpmDisplay = it->second.confident
+            ? "Detected tempo: ~" + juce::String (it->second.bpm, 1) + " BPM"
+            : juce::String ("Detected tempo: (not detectable)");
+    }
+
     // Per-clip dialog: offerMove == false -> the menu offers "Copy to X" only
     // (per-clip routing always forks a copy; the acted-on block becomes it).
     buildAudioPropsControls (*aw, block.pitchSemitones, block.originalBPM,
                              block.stretchMode, curRouteName, pages,
                              /*offerMove*/ false,
-                             /*offerResetToMaster*/ true, routeBtn, pending);
+                             /*offerResetToMaster*/ true, routeBtn, pending,
+                             bpmDisplay);
 
     aw->enterModalState(true,
         ModalCallbackFunction::create([this, blockIdx, aw, routeBtn, pending](int r) {
@@ -3403,7 +3529,10 @@ void ArrangementGrid::showAudioClipProperties(int blockIdx)
             if (r != 1) return;   // defensive (only 0/1/2 expected)
 
             const float newPitch  = aw->getTextEditorContents("pitch").getFloatValue();
-            const float bpmClamped = jmax(1.f, aw->getTextEditorContents("bpm").getFloatValue());
+            // G1 boundary: the per-clip dialog has no BPM editor anymore (the
+            // tempo identity is display-only here) - the clip keeps its
+            // current identity through Apply/Copy.
+            const float bpmClamped = jmax(1.f, cur.originalBPM);
             bool  stretch = true;
             if (auto* cb = aw->getComboBoxComponent("mode"))
                 stretch = (cb->getSelectedItemIndex() == 0);
@@ -3524,6 +3653,12 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     float fileBeats = -1.f;
     if (reader && reader->sampleRate > 0 && reader->lengthInSamples > 0)
     {
+        // G1 smoke ruling (Jeff, supersedes the A/A pick): the DROP-TIME tempo
+        // is the identity for EVERY clip regardless of length - it lands at
+        // its actual wall-clock time and plays 1:1.  Content-tempo detection
+        // is DISPLAY-ONLY (the per-clip Properties readout); letting it drive
+        // identity broke portability (tracks recorded in one project and
+        // dropped into another at a different BPM would silently re-stretch).
         const double durationSecs = (double) reader->lengthInSamples / reader->sampleRate;
         const double beats = durationSecs * (originalBPM / 60.0);
         lengthBars = juce::jmax (1, (int) std::ceil (beats / 4.0));
@@ -4350,10 +4485,15 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
 
             if (nearRightEdge(hit, e.x))
             {
-                // Resize or Shift+drag = time-stretch for audio clips
+                // Resize or time-stretch for audio clips.  G1 boundary fix
+                // (Jeff's smoke): the toolbar's Slip/Stretch EDIT MODE is the
+                // primary stretch gesture - in Stretch mode a plain edge drag
+                // re-fits (that was always the dropdown's stated purpose,
+                // "QA-Ec ships it"); Shift+drag stretches from ANY mode.
                 beginEdit("Resize");
                 mResizing        = true;
-                mStretching      = e.mods.isShiftDown() && mPM.getBlock(hit).clipType == ClipType::Audio;
+                mStretching      = mPM.getBlock(hit).clipType == ClipType::Audio
+                                   && (e.mods.isShiftDown() || mEditMode == EditMode::Stretch);
                 mResizeIdx       = hit;
                 mResizeOrigLen   = (float)mPM.getBlock(hit).lengthBars;
                 mStretchOrigBeats = effectiveLengthBeats (mPM.getBlock(hit));   // QA-Ec: exact re-fit base
@@ -4898,8 +5038,13 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
             if (blk.clipType == ClipType::Audio && blk.originalBPM > 0.f
                 && newBeats > 0.0
                 && std::abs (newBeats - mStretchOrigBeats) > 1e-9)
+            {
                 blk.originalBPM = (float) juce::jlimit (1.0, 999.0,
                     (double) blk.originalBPM * (newBeats / mStretchOrigBeats));
+                // G1 boundary: a re-fit is a per-copy customization - detach
+                // from the library master so the follow dot stays truthful.
+                blk.isOverride = true;
+            }
         }
         commitEdit(); mResizing = false; mStretching = false; mResizeIdx = -1;
         mStretchOrigBeats = 0.0;
@@ -5558,23 +5703,31 @@ ArrangementToolbar::ArrangementToolbar()
     addAndMakeVisible(*mZoomInBtn);
     addAndMakeVisible(*mZoomOutBtn);
 
-    mSnapLabel = std::make_unique<Label>("", "Snap:");
-    mSnapLabel->setFont(Font(10.f));
-    mSnapLabel->setColour(Label::textColourId, VC::TextDim);
-    addAndMakeVisible(*mSnapLabel);
-
-    mSnapCombo = std::make_unique<ComboBox>();
-    // QA-Ee Stage 2: 11-label unified snap scheme.  ComboBox item id = paramIdx+1
-    // (ids are 1-based; getSelectedItemIndex() gives the 0-based param index).
-    // Default selection = Line (param idx 1).
-    for (int i = 0; i < kNumUnifiedSnapDivs; ++i)
-        mSnapCombo->addItem (kUnifiedSnapLabels[i], i + 1);
-    mSnapCombo->setSelectedId (1 + 1, dontSendNotification);   // idx 1 = Line
-    mSnapCombo->onChange = [this] {
-        if (onSnapChanged)
-            onSnapChanged (mSnapCombo->getSelectedItemIndex());   // 0..10
+    // G1 boundary (2026-07-08, missed locked scope from QA-UICleanup capture):
+    // the Builder's own snap control (param Unified_BuilderSnapDiv - fully
+    // independent of the rolls' shared div) restyled to the magnet pattern
+    // the rolls got in QA-UICleanup Task 3: click opens the 11-value menu
+    // (current pick ticked), button highlight = snap active / dim = Off.
+    // Replaces the old "Snap:" label + plain ComboBox; sits FIRST on the bar
+    // (ahead of Draw) per Jeff's placement pick.
+    mSnapBtn = std::make_unique<TextButton>("Snap");
+    mSnapBtn->setToggleState(true, dontSendNotification);   // default Line = active; re-synced via setSnapDivIndex on load
+    mSnapBtn->setTooltip("Snap resolution - click to choose");
+    mSnapBtn->onClick = [this] {
+        PopupMenu m;
+        const int cur = onGetSnapDiv ? onGetSnapDiv() : 1;
+        for (int i = 0; i < kNumUnifiedSnapDivs; ++i)
+            m.addItem(i + 1, kUnifiedSnapLabels[i], true, i == cur);
+        m.showMenuAsync(PopupMenu::Options().withTargetComponent(mSnapBtn.get()),
+            [this](int r) {
+                if (r > 0) {
+                    const int d = r - 1;
+                    if (onSnapChanged) onSnapChanged(d);   // 0..10
+                    if (mSnapBtn) mSnapBtn->setToggleState(d != 0, dontSendNotification);
+                }
+            });
     };
-    addAndMakeVisible(*mSnapCombo);
+    addAndMakeVisible(*mSnapBtn);
 
     // ── Context label (right-aligned) ────────────────────────────────────
     mContextLabel = std::make_unique<juce::Label>();
@@ -5625,6 +5778,12 @@ void ArrangementToolbar::paint(Graphics& g)
 void ArrangementToolbar::resized()
 {
     auto b = getLocalBounds().reduced(2);
+    // Snap magnet first (ahead of Draw) - Jeff's placement pick, G1 boundary.
+    if (mSnapBtn)
+    {
+        mSnapBtn->setBounds(b.removeFromLeft(52).reduced(1));
+        b.removeFromLeft(8);
+    }
     for (auto& btn : mToolBtns)
         btn->setBounds(b.removeFromLeft(62).reduced(1));
     // QA-Ea Task 0c (2026-05-20): Slip/Stretch dropdown flush after Play(Y),
@@ -5642,8 +5801,6 @@ void ArrangementToolbar::resized()
     mZoomOutBtn->setBounds(b.removeFromLeft(22).reduced(1));
     mZoomInBtn ->setBounds(b.removeFromLeft(22).reduced(1));
     b.removeFromLeft(8);
-    mSnapLabel ->setBounds(b.removeFromLeft(36).reduced(1));
-    mSnapCombo ->setBounds(b.removeFromLeft(72).reduced(1));
     // Context label fills remaining right-side space.
     if (mContextLabel)
     {
@@ -5709,6 +5866,11 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
         // repaint so the grid lines follow the new division immediately.
         if (mGrid && mGrid->onSnapDivChanged) mGrid->onSnapDivChanged (snapDiv);
         if (mGrid) mGrid->repaint();
+    };
+    // G1 boundary: the magnet menu ticks the LIVE div (same APVTS reader the
+    // grid uses), so external writes (project load) can never leave a stale tick.
+    mToolbar->onGetSnapDiv = [this]() -> int {
+        return (mGrid && mGrid->onGetSnapDiv) ? mGrid->onGetSnapDiv() : 1;
     };
     mToolbar->onZoom = [this](float factor) {
         if (!mGrid || !mGridViewport) return;

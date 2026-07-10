@@ -53,8 +53,17 @@ public:
     ~AudioClipStreamer() override;
 
     // Seek to filePos and synchronously pre-fill kPrefillSeconds of audio.
-    // Call from the message thread before playback begins (or on transport seek).
+    // MESSAGE THREAD ONLY - takes the reader lock and does disk IO.
     void seek (int64 filePos);
+
+    // G1 smoke round 6: audio-thread-safe seek.  Flags the request and
+    // returns immediately; the background thread performs the locked disk
+    // prefill (useTimeSlice), and readRaw/readAndMix return silence until it
+    // completes.  RAM mode just relocates the read head (no lock, no IO).
+    // The PV render branches called seek() from the audio callback - a
+    // synchronous prefill read under the reader lock inside a 2.9 ms
+    // deadline (128-sample buffer) = guaranteed dropout on streamed files.
+    void requestSeek (int64 filePos);
 
     // ── Audio-thread read ─────────────────────────────────────────────────────
     // Reads numOutputSamples of output audio, linearly interpolated from
@@ -62,10 +71,16 @@ public:
     // Mixes into dest[0..numDestCh-1][destOffset..+numOutputSamples] with gain.
     // Returns peak magnitude (post-gain) for metering.
     // Returns 0 (silence) if the ring is not ready or a seek is in progress.
+    // QA-Ec G1-boundary fix (2026-07-08): fileStartPos is a DOUBLE - with a
+    // fractional read rate (tempo-follow / varispeed / SR mismatch) the true
+    // block-start position is fractional, and truncating it to an integer
+    // every block produced a sub-sample discontinuity at every buffer
+    // boundary (~86 clicks/s = audible crackle).  The interpolator already
+    // ran on doubles internally; the fraction now survives the call.
     float readAndMix (juce::AudioBuffer<float>& dest,
                       int    destOffset,
                       int    numOutputSamples,
-                      int64  fileStartPos,
+                      double fileStartPos,
                       double readRatio,
                       int    numDestChannels,
                       float  gain);

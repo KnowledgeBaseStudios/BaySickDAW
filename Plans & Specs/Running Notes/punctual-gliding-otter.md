@@ -137,7 +137,13 @@ Lesson logged: any new overlay child of the 40px bar must be added after mTransp
 
 #### Group review (R3 — one /review-batch per checkpoint group)
 
-- <G1-boundary outcome — filled at group review>
+- G1 group review 2026-07-08: **1 NEEDS-FIX here, FIXED in the G1 review-fix commit.** The plan's
+  "release held notes on app focus loss" trigger was dropped unrecorded — Alt+Tab mid-hold sent
+  the key-up to the other app and the note droned until refocus. Fix:
+  `VibeSynthWindow::activeWindowStatusChanged` flushes via `releaseAllTypingNotes()` (made public
+  for the window). 2 NITs also fixed: `semitoneForKey` now matches both letter cases (the
+  codebase's `code || code+32` convention; Windows-only uppercase delivery made it non-functional
+  today but a portability landmine); Ctrl+T catalog entry lowercased to match file style.
 
 #### Diagnostic Instrumentation Catalog
 

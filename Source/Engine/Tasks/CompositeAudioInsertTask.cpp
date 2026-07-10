@@ -116,7 +116,14 @@ void CompositeAudioInsertTask::run()
         const double secPerBeat = 60.0 / juce::jmax (20.0, bpm);
         const double beatStart  = mCtx->posInfo->getPpqPosition().orFallback (0.0);
 
-        const juce::int64 projectStart = (juce::int64) (beatStart * secPerBeat * mProcessor->mSampleRate);
+        // G1 smoke round 9 FIX (the fizz): use the transport's EXACT integer
+        // sample clock.  The old beat round-trip (integer clock -> ppq double
+        // -> truncating cast back) landed +-1 sample on FP rounding luck, so
+        // projectStart wobbled block-to-block and every clip rendered a
+        // one-sample seam wherever it flipped (trace-proven: paired +-1
+        // steps).  Beat math stays for hosts that don't supply samples.
+        const juce::int64 projectStart = mCtx->posInfo->getTimeInSamples().orFallback (
+            (juce::int64) (beatStart * secPerBeat * mProcessor->mSampleRate));
         const juce::int64 projectEnd   = projectStart + n;
 
         const auto& mx = mProcessor->mPatternManager->getMixer();

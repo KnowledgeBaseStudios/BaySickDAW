@@ -890,10 +890,13 @@ public:
 
     // QA-Ee Stage 2: set the snap combo's selection silently (no onChange fire),
     // for initial + project-load sync from the Unified_BuilderSnapDiv param.
-    void setSnapDivIndex (int idx) { if (mSnapCombo) mSnapCombo->setSelectedId (idx + 1, juce::dontSendNotification); }
+    // G1 boundary: the magnet button carries no value - the menu reads the
+    // live div via onGetSnapDiv - so restore only re-syncs the highlight.
+    void setSnapDivIndex (int idx) { if (mSnapBtn) mSnapBtn->setToggleState (idx != 0, juce::dontSendNotification); }
 
     std::function<void(ArrangementGrid::AGTool)> onToolSelected;
     std::function<void(int)>                     onSnapChanged;   // QA-Ee Stage 2: snap-div index 0..10
+    std::function<int()>                         onGetSnapDiv;    // G1 boundary: live div for the magnet menu's tick
     std::function<void(float factor)>            onZoom;
     std::function<void()>                        onUndo;
     std::function<void()>                        onRedo;
@@ -933,8 +936,7 @@ private:
     std::unique_ptr<juce::TextButton> mUndoBtn, mRedoBtn, mHistoryBtn;
     std::unique_ptr<juce::TextButton> mZoomInBtn, mZoomOutBtn;
 
-    std::unique_ptr<juce::Label>    mSnapLabel;
-    std::unique_ptr<juce::ComboBox> mSnapCombo;
+    std::unique_ptr<juce::TextButton> mSnapBtn;   // magnet-style: click = 11-value menu; lit = snap active
 
     // Context label (e.g. "Playlist > Pattern 1")
     std::unique_ptr<juce::Label>    mContextLabel;

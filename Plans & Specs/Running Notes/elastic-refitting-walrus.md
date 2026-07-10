@@ -117,7 +117,10 @@ contentStart `:1094-1095`/`:1485-1486`, ticks `:1070`/`:1456-1461`); library
 
 #### Group review (R3)
 
-- <G1-boundary outcome>
+- G1 group review 2026-07-08: **clean for this batch** — 0 findings. Reviewer verified: Stretch
+  ratios byte-identical to pre-batch for valid data (the clamp can't engage in 20-300 range);
+  scheduler + advanceBlock share the same map lookups (wrap points cannot disagree); the
+  clipBeatToSample seam + library-stamp guard confirmed as recorded fold-ins.
 
 #### Diagnostic Instrumentation Catalog
 

@@ -528,6 +528,10 @@ public:
         juce::AudioBuffer<float> pvOutBuf;  // stretched output from vocoder (file SR)
         // Expected next file position - used to detect seeks and reset vocoder.
         int64 expectedFilePos { 0 };
+        // QA-Ec G1-boundary fix: fractional vocoder-OUTPUT read position -
+        // carries the interp phase across blocks (peekOutput/advanceOutput
+        // pattern); reset alongside vocoder->reset() on seeks.
+        double pvOutFrac { 0.0 };
         // QA-ClipPlayback Task 2: per-clip DSP state for the ClipsPage BaySickPlayer
         // control chain applied to timeline-WAV (Flow B) playback so a WAV clip
         // matches the sampler.  Prepared + reset at rebuildAudioClipPlayers time

@@ -48,6 +48,17 @@ public:
     // Returns the number of samples actually written (may be less if queue is short).
     int pull (juce::AudioBuffer<float>& out, int startSample, int numSamples);
 
+    // QA-Ec G1-boundary fix (2026-07-08): consumers interpolate the output at
+    // a fractional rate, so they need LOOKAHEAD samples they must not consume
+    // - pull()'s read-and-clear meant the +2 interp lookahead was thrown away
+    // every block (a 2-sample skip at every buffer boundary = audible crackle
+    // on stretched clips).  peekOutput copies WITHOUT consuming (slots stay
+    // uncleared, read head stays put); advanceOutput then consumes exactly
+    // what the caller's fractional position advanced past (and does the OLA
+    // slot-clearing pull()'s zeroing previously covered).
+    int  peekOutput    (juce::AudioBuffer<float>& out, int startSample, int numSamples);
+    void advanceOutput (int numSamples);
+
     // How many output samples are fully settled and ready to read.
     int getOutputAvailable() const;
 

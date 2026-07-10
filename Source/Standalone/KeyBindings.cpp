@@ -185,7 +185,7 @@ namespace
             { cmdToggleTypingKeyboard, Category::General,
               "Toggle Typing Keyboard (MIDI)",
               "Play the active tab's instrument with your computer keyboard. Bottom row Z-M is one octave (S D G H J are the black keys), top row Q-P is the octave above (number row black keys). Page Up / Page Down shift octaves. Notes record just like a hardware MIDI keyboard.",
-              juce::KeyPress ('T', juce::ModifierKeys::ctrlModifier, 0) },
+              juce::KeyPress ('t', juce::ModifierKeys::ctrlModifier, 0) },
         };
     }
 

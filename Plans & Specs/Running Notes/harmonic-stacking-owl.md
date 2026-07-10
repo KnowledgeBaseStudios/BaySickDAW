@@ -112,7 +112,9 @@ Mode-1 ancestor: `toolGenerateChords` `:3871-3972` — in-scale thirds `:3912-39
 
 #### Group review (R3 — one /review-batch per checkpoint group)
 
-- <G1-boundary outcome — filled at group review>
+- G1 group review 2026-07-08: **clean for this batch** — 0 findings. Mode-2 resolver termination
+  verified (strictly ascends or caps at 127); multi-resize delta math checked; the unconditional
+  scale table's five gated behavior sites confirmed still gated.
 
 #### Diagnostic Instrumentation Catalog
 

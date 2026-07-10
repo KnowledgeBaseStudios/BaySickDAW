@@ -10,7 +10,13 @@ class StandalonePlayHead : public juce::AudioPlayHead
 {
 public:
     void advanceBlock(int numSamples, double sampleRate);
-    void start(double bpm);
+    // G1 review fix: start() no longer takes/edits tempo.  The pre-map
+    // start(bpm) re-anchored at the BPM-field value, which was benign when
+    // field == base; now the field displays the EFFECTIVE tempo, so routing
+    // it back through a base edit on every Play/resume silently rewrote the
+    // base to whatever marker/automation tempo was showing (spec E breach).
+    // The timeline already holds tempo truth - Play just plays.
+    void start();
     void stop();
     void reset();
 
@@ -109,8 +115,15 @@ private:
     // function, so wrapped samples re-derive their beats exactly at any
     // number of intervening tempo changes.
     std::vector<std::pair<double,double>> mMarkers;   // {beat, bpm} sorted; message thread only
+    // G1 review fix: the previous live-automation pivot's sample.  Consecutive
+    // live writes COALESCE onto one tail segment instead of appending ~30
+    // pivots/s until kMaxSegs saturates and history mapping erodes ("base +
+    // markers + one live tail" is the published invariant).  Message thread
+    // only; -1 = no live tail; cleared whenever the rule set rebuilds.
+    int64_t mLastLivePivot { -1 };
 
-    void   rebuildTimeline (double forwardTempoOverride = -1.0);
+    void   rebuildTimeline (double forwardTempoOverride = -1.0,
+                            bool   rebaseWhilePlaying   = false);
     double markerRuleTempoAtBeat (double beat) const;   // base + markers rule (message thread)
     double deriveBeat (int64_t sample) const;
 };

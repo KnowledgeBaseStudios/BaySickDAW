@@ -412,6 +412,7 @@ Pre-QA reference docs (`Files For Claude/Final Stretch Work.txt`, `Files For Cla
 - `addChildComponent()` adds a child WITHOUT making it visible (preserves setVisible(false)). `addAndMakeVisible()` unconditionally sets visible=true.
 - `juce::PopupMenu` has no `isEmpty()` method — use `getNumItems() > 0`.
 - LCG noise generator `x * 1103515245.0 + 12345.0` overflows double in ~35 samples. Wrap with `std::fmod(..., 4294967296.0)` every iteration.
+- `Component::addKeyListener` dispatch is REVERSE registration order (`ComponentPeer::handleKeyPress` iterates `for (i = size(); --i >= 0;)`), and listeners run BEFORE the component's own `keyPressed`. Highest priority = registered LAST. Also asymmetric: `handleKeyUpOrDown` runs the VIRTUAL first, then listeners (still reversed).
 
 ### Harmless-specific
 - Internal `HarmlessCurvePoint { float time; float value; int curveType; }` is defined inside `HarmlessModEditor` — deliberately NOT shared with `PatternManager::ControlPoint`. Harmless modulation is per-note 0-1 phase; PatternManager automation is tick-based song position. Different domains.

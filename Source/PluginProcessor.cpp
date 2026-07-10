@@ -645,9 +645,33 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         const juce::int64 clipOutLen  = effectiveClipEnd - clipStart;
         const juce::int64 srcEndFrame = juce::jmin (fileTotalSamples,
             contentBase + (juce::int64) ((double) clipOutLen * fileRate));
-        const juce::int64 pvRefPos = doReverse
-            ? srcEndFrame - (juce::int64) ((double) outPosInClip * fileRate)
-            : contentBase + (juce::int64) ((double) outPosInClip * fileRate);
+        // QA-Ec G1-boundary fix: the linear elapsed*rate mapping is wrong the
+        // moment tempo changes mid-clip (the rate it multiplies by only holds
+        // for THIS block).  File consumption per musical BEAT is tempo-
+        // independent in BOTH modes - stretch pins it by definition, and
+        // resample's follow term cancels: (bpm/orig) * (SR*60/bpm) * (fileSR/SR)
+        // = fileSR*60/orig - so the beat-domain position is exact through any
+        // number of tempo steps.  Kept FRACTIONAL end to end (readAndMix takes
+        // a double now); pitch cancels in consumption exactly as it does in
+        // fileRate; the varispeed KNOB (not the follow term) still scales it.
+        // Reverse keeps the linear model (reverse across mid-clip tempo steps
+        // is unsupported; RAM-only path, corner case).
+        double posD;
+        if (! doReverse && TempoMap::isActive() && player.originalBPM > 0.f)
+        {
+            const double beatsIn = TempoMap::beatAtSample (ctx.projectStart + bufOffset)
+                                   - player.clipStartBeat;
+            posD = (double) contentBase
+                 + juce::jmax (0.0, beatsIn) * player.fileSampleRate * 60.0
+                   * (double) ctl.stretchSpeed / (double) player.originalBPM;
+        }
+        else
+        {
+            posD = doReverse
+                ? (double) srcEndFrame - (double) outPosInClip * fileRate
+                : (double) contentBase + (double) outPosInClip * fileRate;
+        }
+        const juce::int64 pvRefPos = (juce::int64) std::llround (posD);
 
         if (! doReverse && pvRefPos >= fileTotalSamples) continue;   // forward EOF
 
@@ -678,8 +702,13 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
             if (seekNeeded)
             {
                 player.vocoder->reset();
-                player.streamer->seek (pvRefPos);
+                // G1 smoke round 6: requestSeek, NOT seek() - seek() does a
+                // synchronous disk prefill under the reader lock; calling it
+                // here (audio thread) blew the callback deadline on streamed
+                // files.  The bg thread fills; readRaw is silent until ready.
+                player.streamer->requestSeek (pvRefPos);
                 player.expectedFilePos = pvRefPos;
+                player.pvOutFrac       = 0.0;   // G1 fix: fresh fractional output position
             }
 
             // Clamp to pvInBuf capacity: fileRate can exceed the buffer's 4x-block
@@ -717,31 +746,59 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
 
                 player.vocoder->push (player.pvInBuf, 0, numFileSamples);
 
-                const int numVocOut = (int) std::ceil ((double) outSamples * effReadRatio) + 2;
+                // QA-Ec G1-boundary fix: peek + fractional advance.  pull()'s
+                // consume-what-you-request discarded the +2 interp lookahead
+                // every block (a 2-sample skip per buffer = audible crackle
+                // on every stretched clip), and the interp phase restarted at
+                // zero per block (fraction lost).  pvOutFrac carries the exact
+                // fractional output position across blocks.
+                const double needF   = player.pvOutFrac + (double) outSamples * effReadRatio;
+                const int    consume = (int) needF;
                 player.pvOutBuf.clear();
-                const int pulled = player.vocoder->pull (player.pvOutBuf, 0, numVocOut);
+                const int peeked = player.vocoder->peekOutput (player.pvOutBuf, 0,
+                    juce::jmin (consume + 2, player.pvOutBuf.getNumSamples()));
 
-                if (pulled > 0)
+                if (peeked > 0)
                 {
                     const int pvCh = player.pvOutBuf.getNumChannels();
                     for (int i = 0; i < outSamples; ++i)
                     {
-                        const double exactFP = (double) i * effReadRatio;
+                        const double exactFP = player.pvOutFrac + (double) i * effReadRatio;
                         const int    ip      = (int) exactFP;
                         const float  frac    = (float) (exactFP - ip);
 
-                        if (ip + 1 >= pulled) break;
+                        if (ip + 1 >= peeked) break;
+
+                        // G1 smoke round 5: Catmull-Rom (was linear) - the
+                        // linear error tracks the program material = fizz on
+                        // dense mixes.  Edge frames clamp into [0, peeked).
+                        const int im1 = juce::jmax (0, ip - 1);
+                        const int ip2 = juce::jmin (ip + 2, peeked - 1);
 
                         for (int ch = 0; ch < ctx.numOut; ++ch)
                         {
                             const int   srcCh = ch % pvCh;
-                            const float s0    = player.pvOutBuf.getSample (srcCh, ip);
-                            const float s1    = player.pvOutBuf.getSample (srcCh, ip + 1);
-                            const float v     = (s0 + frac * (s1 - s0)) * gain;
+                            const float p0    = player.pvOutBuf.getSample (srcCh, im1);
+                            const float p1    = player.pvOutBuf.getSample (srcCh, ip);
+                            const float p2    = player.pvOutBuf.getSample (srcCh, ip + 1);
+                            const float p3    = player.pvOutBuf.getSample (srcCh, ip2);
+                            const float v     = (p1 + 0.5f * frac * ((p2 - p0)
+                                              + frac * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3
+                                              + frac * (3.f * (p1 - p2) + p3 - p0)))) * gain;
                             clipScratch.addSample (ch, bufOffset + i, v);
                             peak = juce::jmax (peak, std::abs (v));
                         }
                     }
+                    const int adv = juce::jmin (consume, peeked);
+                    player.vocoder->advanceOutput (adv);
+                    player.pvOutFrac = needF - (double) adv;
+                    // G1 smoke round 4: a shortfall (peeked < consume) must
+                    // NOT carry as whole-sample DEBT - it compounds every
+                    // block into an unbounded demand (the big-streaming-file
+                    // lockup + the MP3 crackle).  The missed samples are
+                    // gone; keep only the sub-sample phase.
+                    if (player.pvOutFrac >= 1.0)
+                        player.pvOutFrac -= std::floor (player.pvOutFrac);
                 }
             }
         }
@@ -790,9 +847,10 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
             // Direct read runs only when the vocoder is bypassed (effStretchRatio ~ 1),
             // so fileRate here == readRatio scaled by varispeed -- pass fileRate (not the
             // raw readRatio) so the Stretch knob varispeeds the plain-playback path too.
+            // posD keeps the fractional position (sub-sample block continuity).
             peak = player.streamer->readAndMix (
-                clipScratch, bufOffset, outSamples, pvRefPos, fileRate, ctx.numOut, gain);
-            player.expectedFilePos = pvRefPos + (juce::int64) std::ceil (outSamples * fileRate);
+                clipScratch, bufOffset, outSamples, posD, fileRate, ctx.numOut, gain);
+            player.expectedFilePos = (juce::int64) std::llround (posD + (double) outSamples * fileRate);
         }
 
         // QA-ClipPlayback Task 2: run the ClipsPage BaySickPlayer control chain on
@@ -989,8 +1047,23 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     // contentStartSamples >= 0; floor here is belt+suspenders against a
     // stale / corrupt project value.
     const int64 contentStart = juce::jmax ((int64) 0, player.contentStartSamples);
-    const int64 filePos      = (int64)(outPosInClip * readRatio)
-                               + contentStart;
+    // QA-Ec G1-boundary fix: beat-domain file position (mirror of Path A -
+    // tempo-independent in both modes, exact across tempo steps, fractional
+    // for sub-sample block continuity).  Linear fallback when no timeline.
+    double posDB;
+    if (TempoMap::isActive() && player.originalBPM > 0.f)
+    {
+        const double beatsIn = TempoMap::beatAtSample (ctx.projectStart + bufOffset)
+                               - player.clipStartBeat;
+        posDB = (double) contentStart
+              + juce::jmax (0.0, beatsIn) * player.fileSampleRate * 60.0
+                / (double) player.originalBPM;
+    }
+    else
+    {
+        posDB = (double) outPosInClip * readRatio + (double) contentStart;
+    }
+    const int64 filePos = (int64) std::llround (posDB);
     // (readRatio above already carries the QA-Ec Resample tempo-follow term.)
 
     const int64 fileTotalSamples = player.streamer->getTotalLength();
@@ -1035,8 +1108,11 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
         player.vocoder->setStretchRatio (stretchRatio);
 
         // QA-Ea Task 0c: mirror of Site A pvRefPos offset (Vox/Inst FilePlay).
-        const int64 pvRefPos  = (int64) ((double) outPosInClip * readRatio / stretchRatio)
-                                + contentStart;
+        // QA-Ec G1-boundary fix: beat-domain when the timeline is live (posDB
+        // already IS the source frame - consumption per beat is mode-blind).
+        const int64 pvRefPos  = TempoMap::isActive() && player.originalBPM > 0.f
+            ? (int64) std::llround (posDB)
+            : (int64) ((double) outPosInClip * readRatio / stretchRatio) + contentStart;
         const int64 pvReadPos = player.expectedFilePos;
 
         const bool seekNeeded =
@@ -1047,8 +1123,11 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
         if (seekNeeded)
         {
             player.vocoder->reset();
-            player.streamer->seek (pvRefPos);
+            // G1 smoke round 6: requestSeek, NOT seek() - see Path A (audio-
+            // thread disk IO under the reader lock = blown deadline).
+            player.streamer->requestSeek (pvRefPos);
             player.expectedFilePos = pvRefPos;
+            player.pvOutFrac       = 0.0;   // G1 fix: fresh fractional output position
         }
 
         const int numFileSamples = (int) std::ceil (
@@ -1063,31 +1142,51 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
             player.expectedFilePos += numFileSamples;
             player.vocoder->push (player.pvInBuf, 0, numFileSamples);
 
-            const int numVocOut = (int) std::ceil ((double) outSamples * readRatio) + 2;
+            // QA-Ec G1-boundary fix: peek + fractional advance (mirror of
+            // Path A - see its comment; the pull() lookahead-discard clicked
+            // at every block boundary on stretched clips).
+            const double needF   = player.pvOutFrac + (double) outSamples * readRatio;
+            const int    consume = (int) needF;
             player.pvOutBuf.clear();
-            const int pulled = player.vocoder->pull (player.pvOutBuf, 0, numVocOut);
+            const int peeked = player.vocoder->peekOutput (player.pvOutBuf, 0,
+                juce::jmin (consume + 2, player.pvOutBuf.getNumSamples()));
 
-            if (pulled > 0)
+            if (peeked > 0)
             {
                 const int pvCh = player.pvOutBuf.getNumChannels();
                 for (int i = 0; i < outSamples; ++i)
                 {
-                    const double exactFP = (double) i * readRatio;
+                    const double exactFP = player.pvOutFrac + (double) i * readRatio;
                     const int    ip      = (int) exactFP;
                     const float  frac    = (float)(exactFP - ip);
 
-                    if (ip + 1 >= pulled) break;
+                    if (ip + 1 >= peeked) break;
+
+                    // G1 smoke round 5: Catmull-Rom (was linear) - see Path A.
+                    const int im1 = juce::jmax (0, ip - 1);
+                    const int ip2 = juce::jmin (ip + 2, peeked - 1);
 
                     for (int ch = 0; ch < numOut; ++ch)
                     {
                         const int   srcCh = ch % pvCh;
-                        const float s0    = player.pvOutBuf.getSample (srcCh, ip);
-                        const float s1    = player.pvOutBuf.getSample (srcCh, ip + 1);
-                        const float v     = (s0 + frac * (s1 - s0)) * gain;
+                        const float p0    = player.pvOutBuf.getSample (srcCh, im1);
+                        const float p1    = player.pvOutBuf.getSample (srcCh, ip);
+                        const float p2    = player.pvOutBuf.getSample (srcCh, ip + 1);
+                        const float p3    = player.pvOutBuf.getSample (srcCh, ip2);
+                        const float v     = (p1 + 0.5f * frac * ((p2 - p0)
+                                          + frac * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3
+                                          + frac * (3.f * (p1 - p2) + p3 - p0)))) * gain;
                         clipScratch.addSample (ch, bufOffset + i, v);
                         peak = juce::jmax (peak, std::abs (v));
                     }
                 }
+                const int adv = juce::jmin (consume, peeked);
+                player.vocoder->advanceOutput (adv);
+                player.pvOutFrac = needF - (double) adv;
+                // G1 smoke round 4: drop whole-sample shortfall debt (see
+                // Path A) - carrying it compounds into an unbounded demand.
+                if (player.pvOutFrac >= 1.0)
+                    player.pvOutFrac -= std::floor (player.pvOutFrac);
             }
         }
         // gotRaw false: expectedFilePos NOT advanced - retry next block.
@@ -1095,9 +1194,10 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     else
     {
         // ── Direct path: SR-only interpolation (no BPM stretch) ──────────────
+        // posDB keeps the fractional position (sub-sample block continuity).
         peak = player.streamer->readAndMix (
-            clipScratch, bufOffset, outSamples, filePos, readRatio, numOut, gain);
-        player.expectedFilePos = filePos + (int64) std::ceil (outSamples * readRatio);
+            clipScratch, bufOffset, outSamples, posDB, readRatio, numOut, gain);
+        player.expectedFilePos = (int64) std::llround (posDB + (double) outSamples * readRatio);
     }
 
     juce::ignoreUnused (peak);

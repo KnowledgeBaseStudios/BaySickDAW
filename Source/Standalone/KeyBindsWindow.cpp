@@ -72,9 +72,16 @@ void KeyBindsTab::rebuildRows()
 
         if (set != nullptr)
         {
+            // G1 smoke (the F/H ghost-bind hunt): show EVERY binding, not
+            // just the first - hidden extras were live but invisible here.
             auto keys = set->getKeyPressesAssignedToCommand (ci->id);
             if (keys.size() > 0)
-                r.shortcut = keys.getFirst().getTextDescription();
+            {
+                juce::StringArray descs;
+                for (const auto& k : keys)
+                    descs.add (k.getTextDescription());
+                r.shortcut = descs.joinIntoString (", ");
+            }
             else
                 r.shortcut = "(none)";
         }
@@ -275,6 +282,13 @@ namespace
                 if (hardcoded.empty())
                 {
                     set->removeKeyPress (kp);
+                    // G1 smoke (the F/H ghost-bind hunt): Set = REPLACE, not
+                    // accumulate.  addKeyPress alone STACKED a new key onto
+                    // the command's old one - and the row only displays the
+                    // first, so the extra stayed invisible but live (Jeff's
+                    // keymap.xml carried five such strays: 2/H->play,
+                    // F/G->record, D->stop).
+                    set->clearAllKeyPresses (mCmdId);
                     set->addKeyPress (mCmdId, kp);
                     BSCommands::saveMappings (*set);
                     dismiss (1);
@@ -310,6 +324,7 @@ namespace
                             if (auto* s = mgrRef.getKeyMappings())
                             {
                                 s->removeKeyPress (kpCopy);
+                                s->clearAllKeyPresses ((juce::CommandID) newCmd);   // replace, don't stack
                                 s->addKeyPress ((juce::CommandID) newCmd, kpCopy);
                                 BSCommands::saveMappings (*s);
                             }
@@ -359,6 +374,7 @@ namespace
                         if (auto* s = mgrRef.getKeyMappings())
                         {
                             s->removeKeyPress (kpCopy);
+                            s->clearAllKeyPresses ((juce::CommandID) newCmd);   // replace, don't stack
                             s->addKeyPress ((juce::CommandID) newCmd, kpCopy);
                             BSCommands::saveMappings (*s);
                         }

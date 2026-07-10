@@ -172,6 +172,21 @@ metronome as the measuring instruments.
       `D:__ R:__` notes:
 - [ ] **TM-12 — MT stress regression.** The big MT stress arrangement with 2 markers added: no
       dropouts vs the pre-batch baseline, DSP% comparable, no Debug jasserts. `D:__ R:__` notes:
+- [ ] **TM-13 — pause/resume past a marker never edits the base (the G1 review BLOCKER's repro).**
+      Base 140, flag at bar 5 = 90. Play past bar 5 → Pause (field shows 90) → Play → replay from
+      bar 1. Expected: bars 1-4 still play 140 (the base survived resume). Repeat with Stop while a
+      Builder time-selection starts past the marker, and with pause-resume inside a tempo-automation
+      clip. `D:__ R:__` notes:
+- [ ] **TM-14 — long automation ramp map health (the G1 review NEEDS-FIX repro).** A 60+ second
+      tempo-automation ramp playing continuously: tempo follows smoothly the whole way; afterwards
+      loop braces and clip starts behind the playhead are still exactly where they were (no
+      position drift from map saturation). `D:__ R:__` notes:
+- [ ] **TM-15 — mid-play BASE edit is a rule change, not a recorded event (G1 smoke).** No markers,
+      no automation, playing: change the BPM field mid-song. Playback keeps its bar (position does
+      not jump musically) and continues at the new tempo with at most a brief resync blip — NOT
+      seconds of static. Stop, replay from bar 1: the new tempo from the very start, NO phantom
+      tempo change at the spot where the field was edited. Repeat with a marker present: marker
+      spans keep their own tempo, only base-owned spans change. `D:__ R:__` notes:
 
 ---
 
@@ -195,8 +210,10 @@ touch). Debug first, then Release.
       Expected: no clipped-off controls; exactly one scroll authority per surface (no double
       scrollbars, no scroll fights). `D:__ R:__` notes:
 - [ ] **EB-6 — save/reopen at a small size.** Save a project while the window is small, close,
-      reopen. Expected: no layout-dependent state weirdness (window size itself is NOT persisted —
-      launches maximized by design). `D:__ R:__` notes:
+      reopen. Expected: no layout-dependent state weirdness. `D:__ R:__` notes:
+- [ ] **EB-7 — window size persists (G1 smoke request).** Resize to a custom size, close, relaunch:
+      same size + position. Maximize, close, relaunch: maximized. Delete `<WindowState>` from
+      settings.xml (or first launch): maximized default. `D:__ R:__` notes:
 
 ---
 
@@ -239,6 +256,29 @@ touch). G1 ear-check batch — verify by ear + the readout. Debug first, then Re
       repeat EC-2/EC-3. Expected: identical follow behavior (Path B lockstep). `D:__ R:__` notes:
 - [ ] **EC-11 — save/reload round-trip.** After re-fits + mode changes: save, reload. Expected:
       modes, lengths, pitches, re-fit identities all identical. `D:__ R:__` notes:
+- [ ] **EC-12 — full-song clip across a tempo flag, NO crackle (the G1 smoke bug's repro).** Drop a
+      full song file, tempo flag at end of bar 1 (both a speed-up and a slow-down). Stretch mode:
+      rate changes at the flag, pitch locked, NO crackling, no audible position jump at the flag.
+      Resample mode: rate+pitch change, NO crackling. Any residual Stretch-mode texture on a full
+      mix = vocoder quality (report it, don't fail the scenario on it). `D:__ R:__` notes:
+- [ ] **EC-13 — Stretch EDIT MODE drag re-fits (the G1 smoke gap's repro).** Toolbar mode =
+      Stretch: plain right-edge drag on an audio clip re-fits (both clip modes, per EC-4/EC-5
+      expectations). Toolbar mode = Slip: plain drag trims, Shift+drag re-fits. `D:__ R:__` notes:
+- [ ] **EC-14 — stretch badge + Reset Stretch (G1 smoke picks, revised at boundary round 2).**
+      Stretch a clip: an amber `xN.NN` pill appears bottom-right (exact factor to 0.01).
+      Slip-trim it back: badge STAYS (the state is visible now). Ctrl+Z after a stretch reverts
+      it AUDIBLY, not just visually. Right-click → Reset Stretch = the ORIGINAL DROP FORM in one
+      click: natural speed AND full natural length AND slip offset cleared (position kept), badge
+      gone; one Ctrl+Z restores the stretch. Reset is greyed on unstretched clips.
+      `D:__ R:__` notes:
+- [ ] **EC-15 — tempo detection is DISPLAY-ONLY (G1 smoke ruling, supersedes the A/A pick).**
+      Drop ANY file (loop or full song, any length, any project tempo): it lands at its actual
+      wall-clock length and plays 1:1 — detection never changes import behavior. Per-clip
+      Properties shows "Detected tempo: ~N.N BPM" (read-only) or "(not detectable)"; the editable
+      BPM field lives only on the browser entry. Grid-locking a loop is a MANUAL act (set the
+      browser entry's BPM, or stretch it). Octave-error check on the display: a known-BPM file
+      reading at half/double = note it (detector calibration is campaign-tunable).
+      `D:__ R:__` notes:
 
 ---
 

@@ -20,6 +20,12 @@ namespace TypingKeyboardMap
     // as its black keys. Returns the semitone offset from the base C, or -1.
     inline int semitoneForKey (int keyCode) noexcept
     {
+        // Windows delivers unmodified-uppercase key codes, but match both
+        // cases like the rest of the codebase (PianoRoll's `code || code+32`
+        // convention) so a future non-Windows target doesn't silently lose
+        // every white key.
+        if (keyCode >= 'a' && keyCode <= 'z')
+            keyCode -= ('a' - 'A');
         switch (keyCode)
         {
             // lower octave (base C)

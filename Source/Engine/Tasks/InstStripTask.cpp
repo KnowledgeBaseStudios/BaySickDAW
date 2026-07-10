@@ -54,8 +54,11 @@ void InstStripTask::run()
         const double bpm        = mCtx->bpm;
         const double secPerBeat = 60.0 / juce::jmax (20.0, bpm);
         const double beatStart  = mCtx->posInfo->getPpqPosition().orFallback (0.0);
-        const juce::int64 projectStart =
-            (juce::int64) (beatStart * secPerBeat * mProcessor->mSampleRate);
+        // G1 smoke round 9 FIX: exact integer transport clock - the beat
+        // round-trip truncation wobbled projectStart by +-1 sample (see
+        // CompositeAudioInsertTask; same seam on Inst FilePlay).
+        const juce::int64 projectStart = mCtx->posInfo->getTimeInSamples().orFallback (
+            (juce::int64) (beatStart * secPerBeat * mProcessor->mSampleRate));
         const juce::int64 projectEnd   = projectStart + n;
 
         const auto& mx = mProcessor->mPatternManager->getMixer();

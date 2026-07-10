@@ -306,5 +306,288 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
 | E | BPM field once markers exist | Field EDITS the base tempo (bar 1 until the first marker); field DISPLAYS live effective tempo during playback as markers/automation change it. |
 | F | Which drag re-fits | Plain right-edge drag = trim/extend (unchanged). Shift+drag = re-fit (varispeed in Resample / pitch-locked stretch in Stretch, per 2b). |
 | G | Import behavior | See corrected 2c/2d rows above — true-length placement at project tempo, `originalBPM` = import-time project tempo, plays 1:1, no rounding, no import-time stretch. |
-| G3 start | 4a exact S-key/indicator interaction; 4c FL Humanize reference capture (Jeff screenshot); D-6 Riff Machine spec; D-8 Note Properties spec |
+| G3 start | 4a exact S-key/indicator interaction; 4c FL Humanize reference capture (Jeff screenshot); D-6 Riff Machine spec; D-8 Note Properties spec; **Builder pattern-block NOTE-PREVIEW spec (Jeff, G1 smoke):** the mini notes drawn ON arrangement pattern blocks must sit at their true musical positions within the block's viewport - 1 bar of notes fills exactly 1 bar of block regardless of the block's length or stretch (1-bar notes on a 2-bar block occupy only the first half) |
 | G6 start (QA-Templates open) | 13a specific genre picks; 13b gap-fill decisions (with the /preset-gaps report) |
+
+## Carry-Over — 2026-07-08 (G1 boundary, first bulk-run session)
+
+- **Completed:** Pre-flight in full (QA-UICleanup close `f2001c9`; `pre-bulk-run` tag pushed on it;
+  marathon + G1 plan-write answers locked above; test-plan skeleton + §0 registry; QA-Rules flip).
+  G1 group opened (5 plan files + seeded notes, `0e5fed5`). **All five G1 batches code-complete,
+  built clean per batch, committed:** QA-TransportDisplay+D-4 `d6d46cf` / QA-Chords `805ca03` /
+  QA-TempoMap (+readout z-order fix) `753dddc` / QA-Eb `44d5c01` / QA-Ec `67bd4f6e`. Master Test
+  Plan §B.1-B.5 authored (13/11/14/6/11 scenarios); held Work Log entries in all five running
+  notes. G1 group review ran (R3): 1 BLOCKER (Play/resume rewrote the base tempo via the
+  now-effective field value) + 2 NEEDS-FIX (setLiveTempo segment growth; typing-note drone on app
+  deactivation) + 2 NITs — ALL FIXED; 1 NIT logged-deferred (stopped-rebuild override asymmetry,
+  steady-marching-ibex notes). Review outcomes recorded in each batch's held entry.
+- **In-flight:** the G1 review fixes + TM-13/TM-14 scenarios + review-outcome note fills are
+  UNCOMMITTED in the tree (Jeff's call: one boundary commit after the smoke, folding any smoke
+  findings). Both configs build clean on this tree.
+- **Smoke finding #1 (PRE-EXISTING, fixed at boundary):** switching between two ASIO devices never
+  took - the settings dialog preserves the old input-device name (no input picker, by design
+  2026-04-30), ASIO cannot open a mismatched in/out pair, and initialise fell back to the old
+  device; the empty-input-only net (StandaloneApp.cpp ~:662) never covered the switch case.
+  Evidence: Jeff's Apply->Restart loop stuck on ASIO4ALL vs a "Model Mixer ASIO" pending +
+  fallback-shaped audio_setup_log.  Fix: force input=output for ASIO in the settings XML BEFORE
+  initialise (StandaloneApp.cpp, pending-promote block).  Rule 3 routing at section pass: QA-K
+  owns the audio-system polish surface (DSP-08 is Tascam-adjacent).  **Smoke finding #2** (MIDI
+  keyboard "not detected") under diagnosis - dialog enumeration returned OS-level empty while
+  saved MIDIINPUT entries exist; environmental vs code TBD on Jeff's FLkey-presence check.
+  **Finding #1 THEORY CORRECTED** after Jeff's "switched many times before" pushback + vendored
+  JUCE read: ASIO createDevice uses the OUTPUT name (mismatch does NOT fall back) - the in=out fix
+  stays as hygiene (JUCE's own suppressed jassert documents the pattern) but the real failure is
+  upstream: createDevice returns null when the requested driver is MISSING FROM THE ASIO SCAN,
+  and the manager silently falls back - i.e. the Tascam driver may not have been enumerable at
+  that launch (rhymes with the FLkey being un-enumerable in the same session; two USB devices).
+  **Smoke findings RESOLVED:** #2 was environmental (Jeff's USB switcher box wedged BOTH the
+  Tascam ASIO driver and the FLkey out of enumeration; his diagnosis) - the new startup
+  diagnostics stay (Keep).  #1's in=out fix stays as hygiene.
+  **Smoke finding #3 (MISSED LOCKED SCOPE from QA-UICleanup, fixed at boundary):** Jeff's
+  original instruction for that batch included restyling the BUILDER GRID's own snap control
+  (param Unified_BuilderSnapDiv, independent of the rolls) to the magnet-button pattern - it
+  never made the docket/plan (capture miss at the docket write, verified by grep of the plan
+  file; my miss).  Fixed: "Snap:" label + ComboBox replaced by a magnet-style Snap button, FIRST
+  on the Builder toolbar ahead of Draw (Jeff's placement pick), click = 11-value menu with live
+  tick, highlight = snap active; load-restore re-syncs the highlight
+  (BuilderPage.h/.cpp; new toolbar onGetSnapDiv callback).  §9 back-ref to QA-UICleanup rides
+  the section-pass routing.
+  **Smoke finding #4 (REAL BUG, fixed): clip crackle + position error across tempo flags.** Jeff's
+  full-song clip crackled from the marker onward in BOTH modes.  Two stacked causes, both fixed:
+  (a) `AudioClipStreamer::readAndMix` took an INTEGER file position while the follow/varispeed
+  rates are fractional -> the fractional position truncated at every block boundary = sub-sample
+  click ~86x/s (his 44.1k file at ratio 1.0 was integer-clean pre-marker, which is why it started
+  "instantly" at the flag).  Signature -> double; fraction survives; fast path gated on integral
+  start; lookahead +2 -> +3.  (b) STRUCTURAL: all clip file positions were linear elapsed*rate -
+  wrong the moment tempo changes mid-clip (position jump at the marker; the PV seek-net absorbed
+  <2s of it silently).  Fixed with the BEAT-DOMAIN mapping: file consumption per musical beat is
+  tempo-independent in both modes (stretch pins it; resample's follow term cancels:
+  (bpm/orig)(SR*60/bpm)(fileSR/SR) = fileSR*60/orig) -> posD = contentBase + beatsIntoClip *
+  fileSR*60*vsKnob/originalBPM, exact through any number of steps, fractional end to end.  Both
+  render paths (A + B), PV refs + direct reads + expectedFilePos.  Reverse keeps linear (RAM-only
+  corner; noted).  Any residual stretch-mode grit after this = PhaseVocoder quality on full-mix
+  material (bounded; ear-check at retest).  Routing: QA-Ec surface (its own §B section).
+  **Smoke finding #5 (locked-scope gap in my F implementation, fixed):** the toolbar Slip/Stretch
+  EDIT MODE never triggered the re-fit - I gated stretching on Shift only, but Stretch mode's
+  stated purpose was always "drag = time-stretch (QA-Ec ships it)".  Fixed: mStretching = Audio &&
+  (Shift || EditMode::Stretch).  Jeff's F pick refines to: Slip mode = plain drag trims, Shift
+  re-fits; Stretch mode = plain drag re-fits.
+  **Smoke finding #6 (Jeff request, added to QA-Eb):** window size/maximized state now persists in
+  global settings.xml (`<WindowState>`; maximized close -> reopens maximized, sized close ->
+  reopens at those bounds; first launch unchanged).
+  **Smoke finding #7 (REAL BUG, fixed; Jeff's retest - crackle persisted in Stretch mode):** the
+  #4 fixes covered the DIRECT read path only; the PHASE-VOCODER output pull had its own version of
+  the same defect class, latent since the vocoder landed: `pull()` consumes-and-clears everything
+  it returns, so the +2 interpolation LOOKAHEAD was discarded every block = a 2-sample skip per
+  buffer (~86 clicks/s) on every stretched clip, plus the interp fraction restarted at zero per
+  block.  Fixed with a peek/advance split on PhaseVocoder (`peekOutput` = copy without consuming;
+  `advanceOutput` = consume exactly the fractional true advance + do the OLA slot-clearing) + a
+  per-player `pvOutFrac` carrying the phase across blocks (reset with vocoder->reset on seeks);
+  both render paths.  ALSO fixed in the same pass: the streamer's ring read-head advanced past
+  the interp lookahead every block, marking still-needed samples overwritable (background-thread
+  race on streaming files) - now advances by floor(true consumption) only.  **Open semantics
+  question from the same retest (slip-revert):** stretch-mode drag bakes the re-fit into the
+  clip's tempo identity; a later Slip-mode resize back trims WITHOUT undoing the stretch (Slip
+  never touches speed by design/F) - Jeff expected revert-by-resize to restore normal speed;
+  options posed, his pick pending.
+  **Smoke follow-on #8 (Jeff picks, all built): stretch visibility + tempo detection.**  (1)
+  Right-click "Reset Stretch" on audio clips (restores the library natural identity, keeps
+  position/length, undoable; enabled only when re-fit; follow-flag re-derived like the Properties
+  dialog); the stretch-drag now also sets isOverride so the follow dot stays truthful.  (2)
+  Stretch badge on audio blocks: "xN.NN" (factor vs natural, 0.01 precision, hidden at x1.00,
+  top-right stacking under the pitch label).  (3) Teaching-app cut (Jeff): the PER-CLIP Properties
+  BPM box is now a READ-ONLY detected-tempo display ("Detected tempo: ~139.8 BPM" /
+  "(not detectable)", path-cached); the BROWSER entry keeps the single editable correction field.
+  (4) NEW DSP `Source/DSP/BpmDetect.h` (header-only, message-thread): onset-energy-flux +
+  comb-scored autocorrelation (octave guard) + parabolic sub-BPM refinement, 60 s bounded chunked
+  analysis, confidence = comb peak > 2x field mean (CALIBRATION STARTING POINT - tune at
+  campaign).  (5) Import (Jeff A/A): a CONFIDENT estimate becomes the clip's natural identity
+  (grid-locks a 140 loop dropped at 90 immediately); unconfident keeps the G fallback
+  (target-bar tempo, plays 1:1).  Beat detection was a Future State wishlist item - route the
+  cross-ref at section pass.
+  **Smoke round 3 findings (all REAL BUGS, all fixed at boundary):** (1) undo/redo never rebuilt
+  the audio-clip players - `applySnapshot` (the undo/redo restore path) lacked the
+  `onArrangementChanged` fire that `commitEdit` has, so a stretch undo reverted the block
+  visually but kept playing stretched.  PRE-EXISTING for every audio-clip undo, exposed by the
+  stretch feature.  Fixed in applySnapshot (double-fires on fresh commits; idempotent).  (2)
+  stretch badge invisible at top-right despite provably-true data (the Reset menu's enable check
+  uses the same lookup and worked) - top row is owned by the full-width filename label; moved to
+  a bottom-right dark pill, 9pt bold.  (3) Reset Stretch restored speed only; Jeff's spec: reset
+  = ORIGINAL DROP FORM (natural speed + full natural length + slip offset cleared, position
+  kept) - now re-derives length from the file duration at natural tempo.  (4) BASE tempo edit
+  mid-play went through truncate-and-append, leaving the old tempo as history segments = a
+  phantom "recorded" tempo change on replay.  Base edits are RULE changes: new
+  `rebuildTimeline(-, rebaseWhilePlaying)` mode does a pure origin rebuild mid-play + beat-stable
+  sample relocation + mSeekDiscontinuity raise (setBPM only; automation/markers keep
+  truncate-append).  Value-change guard added to setBPM.  (5) 1-2 s of static after a mid-play
+  tempo edit - expected to be the players chasing the map mismatch block-by-block; the (4)
+  rebase + discontinuity flag makes it one clean resync; RETEST, if static persists it gets its
+  own investigation.  Test plan: EC-14 revised, TM-15 added.
+  **Smoke round 4 (one root cause, three symptoms; REAL BUG from round 2's own fix + a latent
+  overrun):** Jeff reported (a) crackle at NORMAL length on a streamed MP3 song, (b) a big
+  streamed WAV song LOCKING UP the app (position counter crawling ~1% realtime), (c) small
+  RAM-loaded WAV clean.  Root cause: the round-2 `pvOutFrac` carry treated a vocoder output
+  SHORTFALL (peeked < consume - happens exactly on streaming-file refill hiccups; RAM never
+  misses) as repayable whole-sample DEBT - it compounds per block into an unbounded demand.
+  Second defect underneath: `PhaseVocoder::peekOutput` copied into the caller's scratch without
+  clamping to its capacity, so once the demand exceeded pvOutBuf the copy wrote past the heap
+  allocation every block = memory corruption = the lockup.  Fixes: (1) shortfall debt DROPPED
+  after advance, only sub-sample phase carries (both PV sites); (2) request clamped to
+  pvOutBuf capacity at both sites; (3) peekOutput clamps to destination room (API-level - a
+  runaway request degrades to a short read, never corruption).  ALSO surfaced from the same
+  report: detection-stamped identities mean FULL SONGS grid-lock too (his 2:00 MP3 spans
+  2:10.378 of timeline = detected ~130.4 in a 120 project; 7 s WAV spans 9.332 s = exactly 4/3;
+  2:25 WAV spans 1:30.9 = 0.627, a likely half-tempo octave error) - lengths were the A/A
+  design (musical length), spec call posed to Jeff.  **RESOLVED (Jeff, same round): detection is
+  DISPLAY-ONLY, no import stamping at all - EVERY clip regardless of length lands at its actual
+  wall-clock time at the drop-time tempo and plays 1:1 (portability: tracks recorded in one
+  project must not re-stretch when dropped into another).  Supersedes the A/A pick; import
+  detection call removed; the Properties detected-tempo readout + cache stay.**  MP3
+  length-estimate accuracy noted as a watch item (moot for behavior now; display-only).
+  **Smoke round 5 (universal small fizz; diagnosed via Jeff-run discriminator battery, then
+  fixed):** small content-correlated crackle on EVERY clip (RAM + streamed, all formats), same
+  sample rate, in-app only.  Battery results: synth-only playback CLEAN (rules out xruns /
+  master path / driver), buffer-size raise only marginal (and Jeff runs 128 for live tracking -
+  FL is clean there), character = random gritty fizz that scales with program density (the
+  linear-interpolation error fingerprint), and the round-4 wet/dry vox asymmetry retired as
+  evidence (that dry file predates the dry recorder - May-era wet-only rig).  ROOT CAUSE: the
+  QA-Ec beat-domain positions are fractional even for unstretched clips, so playback lost the
+  bit-exact fast path and EVERYTHING ran through 2-point linear interpolation (error tracks
+  signal slope = program-dependent fizz).  FIXES: (1) readAndMix snaps to the nearest frame when
+  readRatio == 1.0 exactly - constant +-0.5-frame timing shift, advance stays 1/sample so blocks
+  stay continuous, exact-copy fast path restored (1:1 playback bit-exact again); (2) the
+  fractional-rate path upgraded linear -> 4-point Catmull-Rom (readAndMix + BOTH PV output
+  interpolators) - window lower bound extended 1 frame + ring read-head retention margin -2 for
+  the kernel's behind-read.  Verify at 128-buffer live-rig settings (Jeff's baseline).
+  **Smoke round 6 (crackle persists post-round-5; Jeff supplied an AI RT-violations explainer to
+  review):** scorecard vs evidence - the "global buffer underrun" framing stays REFUTED
+  (synth-only playback clean = the callback meets its deadline when clips aren't decoding), and
+  the clip path holds the RT rules (pre-allocated buffers, atomics/lock-free ring, no logging) -
+  EXCEPT one genuine hit: both PV render branches called `AudioClipStreamer::seek()` from the
+  AUDIO THREAD = synchronous disk prefill under the reader lock (sin #3 + priority inversion),
+  firing at clip starts / loop wraps / transport+tempo jumps on STREAMED files.  Fixed: new
+  lock-free `requestSeek()` (flag-only; the bg thread does the locked prefill; readRaw silent
+  until ready); `seek()` re-documented message-thread-only.  Caveat that keeps this from being
+  Jeff's fizz: kRamThresholdBytes = 100 MB (~9.5 min stereo) - his songs RAM-load and never hit
+  the disk path, so this fix owns the LONG-file / streamed class (and the round-4 lockup family),
+  not the ubiquitous fizz.  LEADING remaining hypothesis: his project's clips carry
+  detection-stamped BPMs from the pre-ruling build -> EVERY clip secretly runs the phase vocoder
+  at ~1.09x even at normal length -> PV transient smear on dense material = content-correlated
+  grit.  Decisive test queued: FRESH drop into a blank project post-build (fresh 1:1 = direct
+  bit-exact path).  If a fresh drop still fizzes -> next round adds a diagnostic render capture
+  (bounce the clip path's exact output to WAV, bit-compare offline vs source).
+  **Smoke round 7 (fresh drop STILL fizzes -> stop theorizing, instrument):** clip-decode
+  diagnostic tap added (Rule 4 tooling; disposition decide-at-close).  Armed by flag-file
+  existence (`Documents/BaySickDAW/enable_clip_tap.txt`) at Play; the audio thread writes the
+  FIRST Builder audio clip's decoded output per block (post-decode, PRE-control-chain/declick/
+  inserts) to `clip_decode_tap.wav` via the queue-backed AudioFileRecorder (wet-recorder RT
+  pattern); Stop finalizes + AlertWindow with the path.  Bisection logic: tap WAV fizzes in an
+  external player -> artifact is in the decode data (streamer/interp); tap clean but live
+  playback fizzes -> downstream (control chain / inserts / master / driver) and the tap moves
+  down the chain next.  Jeff's round-6 answers logged: detected-BPM display reads ~half actual
+  (octave error, display-only, campaign calibration); fresh-drop MP3 block length may still
+  over-report (VBR length-estimate watch item - WAV-vs-MP3 fresh-drop length comparison
+  requested).
+  **Smoke round 8 (tap analyzed offline - the fizz is REAL, RARE, and BLOCK-LOCKED):** wrote
+  pure-Python analyzers (scratchpad) against clip_decode_tap.wav (27.7 s stereo float).  Strict
+  local-contrast detector: 12-15 events/channel (~0.4-0.5/s), period-128 concentration = 1.000
+  (= Jeff's ASIO buffer; 12/12 within +-1 of a boundary ~ 1e-20 chance) - every fizz event is a
+  ONE-SAMPLE FORWARD SKIP exactly at an audio-block boundary (waveform dumps confirm: boundary
+  step ~ 2x local slope then smooth continuation; gain-step hypothesis quantitatively excluded).
+  Control test (same metric at mid-block) killed a faster-drift reading (boundary excess ~0).
+  Desk math says the beat-domain posD chain CANNOT skip at that rate (rational cancellation ->
+  frac ~ 0, llround stable) -> data vs math conflict -> instrument the disputed variable:
+  round-8 adds a POSITION-RESIDUAL TRACE alongside the tap (clip_decode_trace.wav, 1 float per
+  block = posD advance minus expected; first sample = (fileRate-1)x1e6 rate fingerprint).
+  Discriminates: residual +-1 spikes = engine position math skips; flat zeros + audio skips =
+  copy layer (readAndMix/ring) or the tap itself.  Also: automation applicator confirmed
+  guarded (no periodic mid-play rebuilds exist to blame).
+  **Smoke round 9 (trace round 1 analyzed - the position itself wobbles):** trace showed
+  fileRate EXACTLY 1.0 (snap engaged) yet posD dips on ISOLATED blocks in paired -r/+r
+  residuals: r grows PERFECTLY LINEARLY with elapsed blocks (r = k x 0.0045248, i.e. 1 sample
+  per 28800 elapsed samples = 3.47e-5 relative) until CAPPING at exactly +-1.0 sample at block
+  ~225, then persists as exact +-1.0 pairs on an irregular ~26-88 Hz message-thread-jitter
+  cadence.  Interpretation: TWO position formulas whose slopes differ by 3.47e-5, one used on
+  rare blocks - but code reading exhausted the candidates (map reader seqlock verified sound;
+  no mid-play publisher exists - transport timer's setLoopBeats/setTimeSignature are plain
+  atomic stores; automation applicator inert with no lanes).  Round 9: trace upgraded to 5
+  channels (posD residual / bufOffset / outSamples / playhead step error / (fileRate-1)x1e6
+  rate wobble) so the guilty INGREDIENT names itself: playhead-clock skip vs sub-span geometry
+  vs per-block rate wobble (varispeed knob float round-trip would break the snap on exactly
+  the dipped blocks) vs map anomaly.  One more capture cycle, then the fix.
+  **Smoke round 10 - THE FIZZ ROOT CAUSE (trace round 2, FOUND + FIXED):** the 5-channel trace
+  first exposed a self-own: AudioFileRecorder::writeBlock applies a 5 ms fade-in (221 samples)
+  to EVERYTHING - at 1 trace-sample/block that scaled the first 221 blocks of round-1 trace
+  data by a 0->1 ramp, manufacturing the whole "grows linearly then caps at 1.0" mystery (the
+  growth WAS the fade; the cap was it ending; 225 blocks ~ 221).  Un-scrambled truth: residual
+  dips are CONSTANT +-1.0 and ch3 (playhead step error) = +-1 with MATCHING SIGNS -> the
+  transport clock ITSELF wobbles one sample block-to-block.  ROOT CAUSE (grep-confirmed x3):
+  CompositeAudioInsertTask / InstStripTask / VoxStripTask all derived projectStart via the
+  BEAT ROUND-TRIP - integer mSamplePos -> getPpqPosition() double -> `(int64)(beat x secPerBeat
+  x sr)` TRUNCATING cast - which lands +-1 sample on FP rounding luck, so every clip rendered a
+  stuttering clock (one-sample seams; audible where they hit steep waveform moments; the
+  irregular 26-88 Hz "UI-jitter" cadence = FP rounding pattern, no timer involved).  Explains
+  why pre-QA-Ec playback was clean: the old accumulator-based position IGNORED the transport
+  per block, masking the wobble; the stateless beat-domain math faithfully reproduced it.  FIX:
+  all three tasks now use posInfo->getTimeInSamples() (the exact integer clock the playhead
+  already publishes) with the beat math as VST-host fallback.  Recorder fade-in flagged as a
+  Rule-4 tooling caveat (any future 1-sample-per-block diagnostic must skip or account for it).
+  **Smoke item-12 FAIL + fix (typing keyboard vs command layer):** Jeff: some letters still fire
+  their commands in typing mode; R and F both arm record; H starts play ("never has before").
+  Diagnosis: the D-4 bypass covered the GRID tool keys but not the COMMAND layer - the
+  KeyPressMappingSet (a key listener on StandaloneEditor) still dispatched letter bindings, and
+  the note-vs-command priority hung on unguaranteed virtual-vs-listener dispatch order.  Real
+  default collisions: R = cmdToggleRecord, bare S = cmdToggleSlipStretchMode.  H->play / F->record
+  exist in NO current default -> stale overlay from the persisted keymap.xml (defaults are
+  applied then user file overlaid; old-generation bindings survive).  FIX: StandaloneEditor now
+  also inherits juce::KeyListener (overloads forward to the existing handlers) and registers
+  ITSELF as a key listener BEFORE the mapping set - listener registration order = dispatch
+  order, so note keys are consumed ahead of command dispatch whenever the mode is on; mode off =
+  instant false, commands untouched.  Design stated to Jeff: mode ON trades ALL bare letters for
+  notes (R/S included); Ctrl+T restores.  keymap.xml stale-binding cleanup = his Help > Key
+  Binds reset (or delete the file).  **Round 2 (Jeff: "still happening"):** the first fix
+  registered the gate BEFORE the set on the assumption listener dispatch = registration order -
+  WRONG: ComponentPeer::handleKeyPress iterates key listeners in REVERSE registration order
+  (`for (i = size(); --i >= 0;)`, verified in vendored juce_ComponentPeer.cpp:206) and runs them
+  BEFORE the component's own keyPressed.  So the set (registered later) had ALWAYS outranked
+  both the gate and the D-4 virtual handler - explains the original bug AND the failed first
+  fix.  Corrected: gate registers AFTER the set (last = first).  Gotcha added to CLAUDE.md.
+  **Item-12 round 3 (the F/H ghost binds - SOLVED by reading keymap.xml directly):** F->record
+  and H->play were NOT code bindings, JUCE defaults, or my typing-keyboard work - Jeff's
+  keymap.xml carried FIVE stray user-overlay mappings (2+H->cmdPlayPause, F+G->cmdToggleRecord,
+  D->cmdStopAndDisarm), silently re-applied every launch.  TWO KeyBindsWindow bugs made them
+  possible + invisible: (1) the Set capture flow called addKeyPress WITHOUT clearing the
+  command's existing keys -> every rebind attempt ACCUMULATED a binding (all 3 apply sites);
+  (2) the row displayed only keys.getFirst() -> extras live but invisible (also why Jeff's
+  Key Binds check showed nothing).  FIXES: clearAllKeyPresses(cmd) before addKeyPress at all
+  3 apply sites (Set = replace); row now joins ALL bindings ", "-separated; Jeff's keymap.xml
+  removed (backup .bak) -> pure catalog defaults.  Note-key strays (2/D/G/H) had already been
+  silenced by the typing-mode gate - F survived only because it is not a note key.
+  **Rule 4 diagnostic catalog (this boundary; disposition Keep, extends the existing
+  audio_setup_log.txt):** (1) StandaloneApp.cpp initialise ~post-restart block - "Device-type scan
+  lists" dump (every type's device names) - answers "was the requested ASIO driver enumerable";
+  (2) StandaloneApp.cpp C.3 MIDI block - "MIDI at startup" append (available devices, saved-id
+  match, enableAll, per-device enabled state) - answers "what did MIDI enumeration return". No
+  tag prefix (plain-text log sections named as quoted).
+  (3) **Clip-decode tap** (rounds 7-9) - PluginProcessor start/stopClipDecodeTap + the Path A
+  render-site write + StandaloneEditor Play/Pause/Stop arm/finalize wiring, flag-file armed.
+  Wrote `clip_decode_tap.wav` (first audio clip's decoded output, pre-control-chain) - answered
+  "is an audio artifact in the decode data or downstream".  **Disposition: REMOVED at boundary
+  close (Jeff) - stripped from source before the boundary commit; rebuild cost if ever needed
+  again ~1 hour, and this catalog entry is the spec.**
+  (4) **Position-forensics trace** (rounds 8-9) - same switch, wrote `clip_decode_trace.wav`
+  (5 ch x 1 float/block: posD residual / bufOffset / outSamples / playhead step error / rate
+  wobble) - answered "which position ingredient moved" (named the transport clock).
+  **Disposition: REMOVED with (3), same commit.**
+  (5) **Tooling caveat, permanent:** AudioFileRecorder::writeBlock applies a 5 ms fade-in
+  (mFadeSamples) to every capture - any future 1-sample-per-block diagnostic through it must
+  skip/deconvolve the first ~221 writes or the ramp manufactures phantom growth (cost one
+  full analysis round in the fizz hunt).
+- **Assumptions changed:** none beyond what the running notes + corrected marathon rows already
+  record (bar-rounding import correction G; QA-Eb Viewport premise; BUILD-06 staleness;
+  shared_ptr->seqlock publish; markers song-domain gate).
+- **Resume action:** collect Jeff's G1 smoke + ear-check results -> fix/fold findings -> one
+  boundary commit (message + full status -> approval) -> give the honest model assessment ->
+  **Jeff's GO/NO-GO on the bulk-run model.** On GO: G2 group start (plan files for QA-F / QA-Fa /
+  QA-Fb' / QA-Fc; no marathon leftovers block G2 — item 3 locked; remember the two MID-group
+  ear-checks after QA-F and QA-Fa).

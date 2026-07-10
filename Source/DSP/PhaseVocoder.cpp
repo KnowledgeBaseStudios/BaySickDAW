@@ -115,6 +115,48 @@ int PhaseVocoder::pull (juce::AudioBuffer<float>& out,
     return toPull;
 }
 
+int PhaseVocoder::peekOutput (juce::AudioBuffer<float>& out,
+                              int startSample, int numSamples)
+{
+    const int avail  = getOutputAvailable();
+    // G1 smoke round 4: clamp to the destination's capacity - avail can
+    // exceed the caller's scratch buffer (the OLA ring is several FFT frames
+    // deep); an unclamped copy wrote past the heap allocation.  A runaway
+    // request degrades to a short read, never memory corruption.
+    const int room   = juce::jmax (0, out.getNumSamples() - startSample);
+    const int toPeek = juce::jmin (numSamples, juce::jmin (avail, room));
+    if (toPeek <= 0) return 0;
+
+    const int outBufSize = (int) mCh[0].outBuf.size();
+
+    for (int ch = 0; ch < juce::jmin (mNumCh, out.getNumChannels()); ++ch)
+    {
+        auto& c = mCh[ch];
+        float* dst = out.getWritePointer (ch) + startSample;
+        for (int i = 0; i < toPeek; ++i)
+            dst[i] = c.outBuf[(int) ((c.outReadAbs + i) % outBufSize)];
+        // NO clear, NO read-head advance - advanceOutput() consumes.
+    }
+    return toPeek;
+}
+
+void PhaseVocoder::advanceOutput (int numSamples)
+{
+    const int n = juce::jmin (numSamples, getOutputAvailable());
+    if (n <= 0) return;
+
+    const int outBufSize = (int) mCh[0].outBuf.size();
+
+    for (auto& c : mCh)
+    {
+        // Zero the consumed OLA slots (pull()'s clear-after-read contract -
+        // future overlap-add must land on silence, not stale data).
+        for (int i = 0; i < n; ++i)
+            c.outBuf[(int) ((c.outReadAbs + i) % outBufSize)] = 0.0f;
+        c.outReadAbs += n;
+    }
+}
+
 // ── getOutputAvailable ────────────────────────────────────────────────────────
 
 int PhaseVocoder::getOutputAvailable() const

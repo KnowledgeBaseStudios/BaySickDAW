@@ -750,7 +750,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         if (mPlayHead.isPlaying()) { mPlayHead.stop(); mTransport->setPlayState(false, true); }
         // 2026-04-30: flush all-notes-off on Pause.  Was Stop-only - long-tail
         // notes (Harmless pads, big reverbs) would keep ringing after Pause
-        // until the user hit Stop.  Same broadcast Stop uses, just promoted
+        // until the user hits Stop.  Same broadcast Stop uses, just promoted
         // up so the user never hears stuck voices regardless of which
         // halting button they pressed.
         mProcessor.mFlushAllNotes.store (true, std::memory_order_release);
@@ -760,8 +760,10 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         stopTransportAndFinalizeRecording();
     };
     mTransport->onTempoChanged = [this](double bpm) {
-        mPlayHead.setBPM(bpm);   // always update BPM so timer doesn't revert tap tempo
-        if (mPlayHead.isPlaying()) mPlayHead.start(bpm);
+        // QA-TempoMap: setBPM = BASE edit; its rebuild handles continuity
+        // whether stopped or playing (the old play-time re-anchor call died
+        // with the G1 review fix to start()).
+        mPlayHead.setBPM(bpm);
         // 2026-04-24: tempo is a global PROJECT value; persist it through the
         // PatternManager so save/reload round-trips correctly.
         if (mPM) mPM->setGlobalTempo (bpm);
@@ -1397,6 +1399,15 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         BSCommands::loadMappings (*set);
         addKeyListener (set);
     }
+
+    // G1 smoke item-12 fix: the typing-keyboard note handler must outrank
+    // the command map (bare note letters R / S / H collide with letter
+    // command bindings).  FRAMEWORK QUIRK: ComponentPeer::handleKeyPress
+    // iterates a component's key listeners in REVERSE registration order
+    // (juce_ComponentPeer.cpp `for (int i = size(); --i >= 0;)`) and runs
+    // them BEFORE the component's own keyPressed - so highest priority =
+    // registered LAST.  The gate therefore registers AFTER the mapping set.
+    addKeyListener (this);
     setWantsKeyboardFocus(true);
 
     // 2026-04-26: deferred keyboard-focus grab.  At ctor time the window isn't
@@ -1449,6 +1460,7 @@ StandaloneEditor::~StandaloneEditor()
     // is no longer a KeyListener (Phase A 2026-04-26 - keymap migration).
     if (auto* set = mCmdMgr.getKeyMappings())
         removeKeyListener(set);
+    removeKeyListener (this);   // G1 smoke item-12: the typing-note gate
 
     // Null legacy pointers before OwnedArray destroys everything
     mLegacyLayersPage = nullptr;
@@ -5569,7 +5581,6 @@ void StandaloneEditor::startPlayback(double bpm)
         const double totalBeats = 4.0;   // 1 bar
         const int    delayMs    = juce::roundToInt(totalBeats * (60000.0 / juce::jmax(1.0, bpm)));
 
-        mCountInPendingBpm = bpm;
         mProcessor.mMetro.countInBpm.store(bpm, std::memory_order_relaxed);
         mProcessor.mMetro.countInActive.store(true, std::memory_order_relaxed);
         mTransport->setPlayState(true, false);
@@ -5577,7 +5588,7 @@ void StandaloneEditor::startPlayback(double bpm)
     }
     else
     {
-        mPlayHead.start(bpm);
+        mPlayHead.start();   // G1 review fix: Play never edits tempo (spec E)
         mTransport->setPlayState(true, false);
     }
 }

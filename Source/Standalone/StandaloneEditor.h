@@ -45,7 +45,8 @@ class BaySickRustyDrumsPage;  // J-6 (2026-05-03): singleton drum-kit page
 // ─────────────────────────────────────────────────────────────────────────────
 class StandaloneEditor : public  juce::Component,
                          public  juce::MenuBarModel,
-                         public  juce::ApplicationCommandTarget
+                         public  juce::ApplicationCommandTarget,
+                         public  juce::KeyListener
 {
 public:
     StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph,
@@ -331,9 +332,33 @@ private:
     std::vector<std::pair<int,int>> mTypingHeldNotes;  // keyCode -> sounding MIDI note
     void toggleTypingKeyboard();
     void sendTypingNote (int midiNote, bool noteOn);
-    void releaseAllTypingNotes();
     bool keyPressed (const juce::KeyPress&) override;
     bool keyStateChanged (bool isKeyDown) override;
+    // G1 smoke item-12 fix: KeyListener overloads forwarding to the two
+    // handlers above.  The editor registers ITSELF as a key listener AFTER
+    // the command map's KeyPressMappingSet - JUCE dispatches a component's
+    // key listeners in REVERSE registration order, before the component's
+    // own keyPressed (see the ctor comment) - so while typing-keyboard mode
+    // is on, note keys are consumed BEFORE command dispatch can fire the
+    // colliding letter bindings (R = record, bare S = Slip/Stretch, plus
+    // anything a stale keymap.xml overlays).  Mode off: both return false
+    // instantly and commands work.
+    bool keyPressed (const juce::KeyPress& k, juce::Component*) override
+    {
+        return keyPressed (k);
+    }
+    bool keyStateChanged (bool isKeyDown, juce::Component*) override
+    {
+        return keyStateChanged (isKeyDown);
+    }
+
+public:
+    // G1 review fix: public so VibeSynthWindow can flush held typed notes on
+    // app deactivation (Alt+Tab mid-hold left the key-up with another app and
+    // the note droned until refocus).  Idempotent; message thread.
+    void releaseAllTypingNotes();
+
+private:
 
     // QA-TransportDisplay: readout display-mode persistence (settings.xml,
     // same parse-preserve-siblings pattern as the MT pref).
@@ -427,7 +452,6 @@ private:
     // recording engages on bar 1.  Disabled by default; toggle via Ctrl+P or
     // the metronome panel's Precount checkbox.
     bool   mPrecountEnabled { false };
-    double mCountInPendingBpm { 120.0 };
 
     // R5b (2026-04-23): Record button arms recording; capture only begins
     // when the user presses Play.  startPlayback() checks this flag and
@@ -478,7 +502,9 @@ private:
         void timerCallback() override {
             stopTimer();
             owner.mProcessor.mMetro.countInActive.store(false, std::memory_order_relaxed);
-            owner.mPlayHead.start(owner.mCountInPendingBpm);
+            // G1 review fix: Play never edits tempo; the count-in CLICK rate
+            // still uses the field value via mMetro.countInBpm above.
+            owner.mPlayHead.start();
         }
     } mCountInTimer { *this };
 

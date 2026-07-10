@@ -86,6 +86,21 @@ void AudioClipStreamer::seek (int64 filePos)
     mReady.store (true, std::memory_order_release);
 }
 
+void AudioClipStreamer::requestSeek (int64 filePos)
+{
+    const int64 clampedPos = juce::jlimit ((int64) 0, mTotalLength, filePos);
+
+    if (mRamMode)
+    {
+        mRingReadHead.store (clampedPos, std::memory_order_release);
+        return;
+    }
+
+    mSeekTarget .store (clampedPos, std::memory_order_release);
+    mSeekPending.store (true,       std::memory_order_release);
+    mReady      .store (false,      std::memory_order_release);
+}
+
 // ── fillIntoRing - internal, mReaderLock must be held ────────────────────────
 
 void AudioClipStreamer::fillIntoRing (int64 fromFilePos, int numSamples)
@@ -234,7 +249,7 @@ bool AudioClipStreamer::readRaw (juce::AudioBuffer<float>& dest,
 float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
                                      int    destOffset,
                                      int    numOutputSamples,
-                                     int64  fileStartPos,
+                                     double fileStartPos,
                                      double readRatio,
                                      int    numDestChannels,
                                      float  gain)
@@ -242,15 +257,29 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
     if (! mReady.load (std::memory_order_acquire) || numOutputSamples <= 0)
         return 0.0f;
 
-    // How many file samples we need (+ 2 for interpolation lookahead)
-    const int numFileSamples = (int) std::ceil ((double) numOutputSamples * readRatio) + 2;
+    // G1 smoke round 5: at a true 1:1 rate the fractional offset is a
+    // CONSTANT sub-sample delay (beat-domain start positions are fractional
+    // even for unstretched clips), and interpolating for it traded bit-exact
+    // playback for program-dependent interp error - an audible fizz floor on
+    // dense material.  Snap to the nearest frame: a +-0.5-frame constant
+    // timing shift (inaudible), the advance stays exactly 1 frame/sample so
+    // consecutive blocks remain continuous, and the exact-copy fast path
+    // takes over (zero interpolation error).
+    if (readRatio == 1.0)
+        fileStartPos = (double) (int64) std::llround (fileStartPos);
+
+    // QA-Ec G1-boundary fix: the start position is fractional now (tempo-
+    // follow / varispeed rates).  Integer window/seek math uses its floor;
+    // +3 lookahead (was +2) covers the sub-sample start offset.
+    const int64 startFloor = (int64) std::floor (fileStartPos);
+    const int numFileSamples = (int) std::ceil ((double) numOutputSamples * readRatio) + 3;
 
     // G-7 polish: in RAM mode the entire file is loaded, so skip the ring
     // availability + seek-trigger logic.  Reads past EOF still bail with
     // silence rather than triggering a phantom seek.
     if (mRamMode)
     {
-        if (fileStartPos < 0 || fileStartPos >= mTotalLength)
+        if (startFloor < 0 || startFloor >= mTotalLength)
             return 0.0f;
         // Per-sample bounds checks below already break out at EOF - fine.
     }
@@ -261,31 +290,33 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
         // The ring physically covers [wh - capacity, wh).
         // Use coveredStart (not rh) as the lower bound - the stateless filePos
         // (outPosInClip * readRatio) lands 1-2 samples behind rh every block due
-        // to the +2 interpolation lookahead in numFileSamples.  Using rh caused a
+        // to the interpolation lookahead in numFileSamples.  Using rh caused a
         // phantom seek on every single block even though the data was present.
         const int64 coveredStart = wh - (int64) mCapacity;
-        if (fileStartPos < coveredStart || fileStartPos + numFileSamples > wh)
+        // G1 smoke round 5: lower bound extended by 1 - the Catmull-Rom
+        // kernel below reads one frame BEHIND the integer position.
+        if (startFloor - 1 < coveredStart || startFloor + numFileSamples > wh)
         {
             // Genuine position jump (backward scrub, loop, or first-block miss) -
             // signal the background thread to seek.
-            mSeekTarget .store (fileStartPos, std::memory_order_release);
-            mSeekPending.store (true,         std::memory_order_release);
-            mReady      .store (false,        std::memory_order_release);
+            mSeekTarget .store (startFloor, std::memory_order_release);
+            mSeekPending.store (true,       std::memory_order_release);
+            mReady      .store (false,      std::memory_order_release);
             return 0.0f;
         }
     }
 
     float peak = 0.0f;
 
-    if (readRatio == 1.0)
+    if (readRatio == 1.0 && fileStartPos == (double) startFloor)
     {
-        // ── Fast path: 1:1 copy, no interpolation ────────────────────────
+        // ── Fast path: 1:1 copy from an integral start, no interpolation ──
         for (int ch = 0; ch < numDestChannels; ++ch)
         {
             const int srcCh = ch % mNumChannels;
             for (int i = 0; i < numOutputSamples; ++i)
             {
-                const int64 fp = fileStartPos + i;
+                const int64 fp = startFloor + i;
                 if (fp >= mTotalLength) break;
 
                 const float v = mRing.getSample (srcCh, (int) (fp % mCapacity)) * gain;
@@ -296,30 +327,52 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
     }
     else
     {
-        // ── Interpolated path: linear interpolation for SR conversion ─────
+        // ── Interpolated path: 4-point Catmull-Rom for fractional rates ───
+        // (varispeed / tempo-follow / SR conversion).  G1 smoke round 5:
+        // linear interpolation's error tracks the program material (audible
+        // fizz on dense mixes); Catmull-Rom drops that floor by orders of
+        // magnitude for a few extra ops.  The fractional block-start carries
+        // into exactFP, so consecutive blocks stay sub-sample continuous.
+        // Edge frames clamp (file head / EOF) - window validity for ip-1 is
+        // guaranteed by the -1 lower-bound check above.
         for (int i = 0; i < numOutputSamples; ++i)
         {
-            const double exactFP = (double) fileStartPos + (double) i * readRatio;
+            const double exactFP = fileStartPos + (double) i * readRatio;
             const int64  ip      = (int64) exactFP;
             const float  frac    = (float) (exactFP - (double) ip);
 
             if (ip + 1 >= mTotalLength) break;
 
+            const int64 im1 = juce::jmax ((int64) 0, ip - 1);
+            const int64 ip2 = juce::jmin (ip + 2, mTotalLength - 1);
+
             for (int ch = 0; ch < numDestChannels; ++ch)
             {
                 const int   srcCh = ch % mNumChannels;
-                const float s0    = mRing.getSample (srcCh, (int) (ip       % mCapacity));
-                const float s1    = mRing.getSample (srcCh, (int) ((ip + 1) % mCapacity));
-                const float v     = (s0 + frac * (s1 - s0)) * gain;
+                const float p0    = mRing.getSample (srcCh, (int) (im1      % mCapacity));
+                const float p1    = mRing.getSample (srcCh, (int) (ip       % mCapacity));
+                const float p2    = mRing.getSample (srcCh, (int) ((ip + 1) % mCapacity));
+                const float p3    = mRing.getSample (srcCh, (int) (ip2      % mCapacity));
+                const float v     = (p1 + 0.5f * frac * ((p2 - p0)
+                                  + frac * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3
+                                  + frac * (3.f * (p1 - p2) + p3 - p0)))) * gain;
                 dest.addSample (ch, destOffset + i, v);
                 peak = juce::jmax (peak, std::abs (v));
             }
         }
     }
 
-    // Advance the ring read head - these file samples are consumed;
-    // the background thread can now overwrite that space.
-    mRingReadHead.store (fileStartPos + numFileSamples, std::memory_order_release);
+    // Advance the ring read head CONSERVATIVELY - only past samples the next
+    // block can never need again (floor of the true consumption).  Advancing
+    // by the full numFileSamples (which includes the interp LOOKAHEAD) marked
+    // still-needed samples overwritable, letting the background thread race
+    // the next block's read of them (QA-Ec G1-boundary fix).  Round 5: -2
+    // retention margin so the Catmull kernel's one-frame-behind read (ip-1)
+    // of the NEXT block is never marked overwritable either.
+    mRingReadHead.store (juce::jmax ((int64) 0,
+                             startFloor - 2
+                             + (int64) std::floor ((double) numOutputSamples * readRatio)),
+                         std::memory_order_release);
 
     return peak;
 }

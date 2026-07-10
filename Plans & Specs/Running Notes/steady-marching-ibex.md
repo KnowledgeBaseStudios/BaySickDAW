@@ -162,7 +162,17 @@ marker changes only the pre-marker span — requires an independent base).
 
 #### Group review (R3 — one /review-batch per checkpoint group)
 
-- <G1-boundary outcome — filled at group review>
+- G1 group review 2026-07-08: **1 BLOCKER + 1 NEEDS-FIX here, both FIXED in the G1 review-fix
+  commit.** BLOCKER: `start(bpm)` routed the BPM field's (now-effective) value through the
+  base-edit path — pause/resume past a marker silently rewrote the base to the marker tempo
+  (spec E breach; also re-persisted automation overrides). Fix: `start()` takes no tempo (Play
+  just plays; field edits land via onTempoChanged->setBPM); orphaned `mCountInPendingBpm`
+  removed; §B.3 TM-13 added. NEEDS-FIX: `setLiveTempo` appended one segment per 30 Hz applicator
+  tick → kMaxSegs saturation on ramps >17 s eroded history mapping. Fix: value-change guard
+  (flat lanes = zero rebuilds, per the standing CPU-safeguard rule) + consecutive live pivots
+  COALESCE onto one tail segment (`mLastLivePivot`; cleared on rule rebuilds); §B.3 TM-14 added.
+  NIT deferred (logged): the stopped-rebuild honors a live override only for marker-less
+  projects — unspecified corner, asymmetric; revisit if a campaign scenario hits it.
 
 #### Diagnostic Instrumentation Catalog
 
