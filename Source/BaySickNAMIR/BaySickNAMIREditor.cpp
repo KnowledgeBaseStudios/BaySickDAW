@@ -9,8 +9,6 @@ namespace
     constexpr int kEditorW       = 760;
     constexpr int kEditorH       = 560;   // H-6d: grew from 340 to fit
                                            // Mic Sim + Mic Placement rows.
-    constexpr int kMicSimRowH    = 100;   // Mic Sim section height
-    constexpr int kMicPlaceRowH  = 100;   // Mic Placement section height
 
     // ── H-6d (2026-05-02): default Presets folders for the 3 file pickers ──
     juce::File namIrPresetsRoot()
@@ -77,7 +75,15 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
       mMicPlacementAngleKnob      ("Angle",     0.0f,
         "Off-axis angle (-90..+90 deg).  0 = on-axis.  Off-axis darkens the high end based on polar pattern."),
       mMicPlacementMixKnob        ("Mix",      100.0f,
-        "Mic Placement wet/dry mix (0..100 %).")
+        "Mic Placement wet/dry mix (0..100 %)."),
+      mMicSimMixKnobB             ("Mix",      100.0f,
+        "Mic B Sim wet/dry mix (0..100 %)."),
+      mMicPlacementDistanceKnobB  ("Distance", 30.0f,
+        "Mic B virtual distance from the source (1..150 cm).  Offset from Mic A's distance for comb-filter colouration."),
+      mMicPlacementAngleKnobB     ("Angle",     0.0f,
+        "Mic B off-axis angle (-90..+90 deg).  0 = on-axis."),
+      mMicPlacementMixKnobB       ("Mix",      100.0f,
+        "Mic B Placement wet/dry mix (0..100 %).")
 {
     setSize (kEditorW, kEditorH);
     setWantsKeyboardFocus (false);
@@ -237,14 +243,22 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
         l.setColour (juce::Label::textColourId, juce::Colour (0xffd0d0d0));
         l.setTooltip (tip);
     };
-    setupSubSectionLbl (mMicSimSectionLbl, "MIC SIM",
+    setupSubSectionLbl (mMicSimSectionLbl, "MIC SIM A",
         "Mic fingerprint stage applied AFTER the cabinet IR.  None / Built-in "
         "(10 generic mic archetypes) / User IR (load your own captured mic IR).");
-    setupSubSectionLbl (mMicPlacementSectionLbl, "MIC PLACEMENT",
+    setupSubSectionLbl (mMicPlacementSectionLbl, "MIC PLACEMENT A",
         "Virtual mic position model: distance + off-axis angle + polar pattern.  "
         "Models 1/r gain, air absorption, proximity-effect bass, off-axis darkening.");
+    setupSubSectionLbl (mMicSimBSectionLbl, "MIC SIM B",
+        "Second parallel mic over the same post-cab signal.  Its output SUMS "
+        "with Mic A (like two real mics on one source), it does not crossfade.");
+    setupSubSectionLbl (mMicPlacementBSectionLbl, "MIC PLACEMENT B",
+        "Mic B virtual position.  Offset distance/angle from Mic A for "
+        "comb-filter colouration from the path difference.");
     addAndMakeVisible (mMicSimSectionLbl);
     addAndMakeVisible (mMicPlacementSectionLbl);
+    addAndMakeVisible (mMicSimBSectionLbl);
+    addAndMakeVisible (mMicPlacementBSectionLbl);
 
     // Mic Sim mode chickenhead (None / Built-in / User IR -- exclusive)
     addAndMakeVisible (mMicSimMode);
@@ -361,9 +375,143 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
 
     updateMicSimModeUI();
 
+    // ── QA-Fc Mic B column (mirrors the Mic A wiring, `_b_` params) ──────────
+    addAndMakeVisible (mMicBActiveToggle);
+    mMicBActiveToggle.setupNamed (
+        "OFF", "Switch up = Mic B OFF.  Single-mic chain, exactly as before dual-mic.",
+        "ON",  "Switch down = Mic B ON.  A second parallel mic processes the same "
+               "post-cab signal and sums into the output - like two real mics on one source.");
+    mMicBActiveToggle.setLabelColour (juce::Colours::white);
+    mMicBActiveToggle.btn().setTooltip (
+        "Mic B active.  Adds a second parallel mic path (summed, not blended).");
+    mMicBActiveAtt = std::make_unique<ButtonAtt> (
+                        processor.apvts, "nam_micb_active", mMicBActiveToggle.btn());
+
+    addAndMakeVisible (mMicSimModeB);
+    mMicSimModeB.setOptions ({
+        { "Off",  "None",     "Mic B Sim disabled (passthrough)" },
+        { "Bln",  "Built-in", "Use one of 10 built-in mic archetypes" },
+        { "User", "User IR",  "Load your own captured mic IR (.wav)" },
+    });
+    mMicSimModeB.setBodyTooltip ("Mic B Sim mode");
+    if (auto* p = processor.apvts.getRawParameterValue ("nam_micsim_b_mode"))
+        mMicSimModeB.setSelectedIndex ((int) p->load(), juce::dontSendNotification);
+    mMicSimModeB.onChange = [this] (int idx)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                          processor.apvts.getParameter ("nam_micsim_b_mode")))
+            p->setValueNotifyingHost (
+                p->getNormalisableRange().convertTo0to1 ((float) idx));
+        updateMicSimModeBUI();
+    };
+    addAndMakeVisible (mMicSimModeBLbl);
+    mMicSimModeBLbl.setText ("Mode", juce::dontSendNotification);
+    mMicSimModeBLbl.setJustificationType (juce::Justification::centred);
+    mMicSimModeBLbl.setColour (juce::Label::textColourId, juce::Colour (0xff909090));
+
+    addAndMakeVisible (mMicSimModelComboB);
+    for (int i = 0; i < (int) MicSimDSP::Model::kNumModels; ++i)
+        mMicSimModelComboB.addItem (MicSimDSP::modelDisplayName (i), i + 1);
+    if (auto* p = processor.apvts.getRawParameterValue ("nam_micsim_b_model"))
+        mMicSimModelComboB.setSelectedId ((int) p->load() + 1, juce::dontSendNotification);
+    mMicSimModelComboB.onChange = [this]()
+    {
+        const int idx = juce::jmax (0, mMicSimModelComboB.getSelectedId() - 1);
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                          processor.apvts.getParameter ("nam_micsim_b_model")))
+            p->setValueNotifyingHost (
+                p->getNormalisableRange().convertTo0to1 ((float) idx));
+        updateMicSimModelTooltipB();
+    };
+    updateMicSimModelTooltipB();
+
+    addAndMakeVisible (mMicSimModelBLbl);
+    mMicSimModelBLbl.setText ("Model", juce::dontSendNotification);
+    mMicSimModelBLbl.setJustificationType (juce::Justification::centred);
+    mMicSimModelBLbl.setColour (juce::Label::textColourId, juce::Colour (0xff909090));
+
+    addAndMakeVisible (mMicSimUserIrBtnB);
+    mMicSimUserIrBtnB.setButtonText ("Load Mic IR...");
+    mMicSimUserIrBtnB.setTooltip ("Left-click: browse for a .wav mic IR for Mic B.  "
+                                    "Right-click: clear the loaded IR.");
+    mMicSimUserIrBtnB.onClick      = [this]() { browseForMicUserIrB(); };
+    mMicSimUserIrBtnB.onRightClick = [this]()
+    {
+        processor.clearUserMicIrB();
+        mMicSimUserIrLabelB.setText ("(no IR loaded)", juce::dontSendNotification);
+    };
+    addAndMakeVisible (mMicSimUserIrLabelB);
+    mMicSimUserIrLabelB.setJustificationType (juce::Justification::centredLeft);
+    mMicSimUserIrLabelB.setColour (juce::Label::textColourId, juce::Colour (kCabGreenARGB));
+    mMicSimUserIrLabelB.setColour (juce::Label::backgroundColourId, juce::Colour (0xff1a1a1a));
+    mMicSimUserIrLabelB.setColour (juce::Label::outlineColourId,    juce::Colour (0xff333333));
+    mMicSimUserIrLabelB.setBorderSize ({ 2, 6, 2, 6 });
+    {
+        const auto path = processor.getMicSimB().getUserIrPath();
+        mMicSimUserIrLabelB.setText (path.isEmpty() ? "(no IR loaded)"
+                                                     : juce::File (path).getFileName(),
+                                       juce::dontSendNotification);
+    }
+
+    addAndMakeVisible (mMicSimMixKnobB);
+    mMicSimMixBAtt = std::make_unique<SliderAtt> (processor.apvts,
+                                                    "nam_micsim_b_mix",
+                                                    mMicSimMixKnobB.slider);
+
+    addAndMakeVisible (mMicPlacementPolarB);
+    mMicPlacementPolarB.setOptions ({
+        { "O",    "Omni",          "Equal pickup all directions; no proximity effect" },
+        { "Card", "Cardioid",      "Heart-shaped pattern; rejects rear" },
+        { "Sup",  "Supercardioid", "Tighter pattern with small rear lobe" },
+        { "Hyp",  "Hypercardioid", "Sharper still; pronounced side rejection" },
+        { "8",    "Figure-8",      "Bidirectional; equal front + rear, side rejection" },
+    });
+    mMicPlacementPolarB.setBodyTooltip ("Mic B polar pattern");
+    if (auto* p = processor.apvts.getRawParameterValue ("nam_placement_b_polar"))
+        mMicPlacementPolarB.setSelectedIndex ((int) p->load(), juce::dontSendNotification);
+    mMicPlacementPolarB.onChange = [this] (int idx)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                          processor.apvts.getParameter ("nam_placement_b_polar")))
+            p->setValueNotifyingHost (
+                p->getNormalisableRange().convertTo0to1 ((float) idx));
+    };
+    addAndMakeVisible (mMicPlacementPolarBLbl);
+    mMicPlacementPolarBLbl.setText ("Polar", juce::dontSendNotification);
+    mMicPlacementPolarBLbl.setJustificationType (juce::Justification::centred);
+    mMicPlacementPolarBLbl.setColour (juce::Label::textColourId, juce::Colour (0xff909090));
+
+    addAndMakeVisible (mMicPlacementDistanceKnobB);
+    addAndMakeVisible (mMicPlacementAngleKnobB);
+    addAndMakeVisible (mMicPlacementMixKnobB);
+    mMicPlacementDistanceBAtt = std::make_unique<SliderAtt> (processor.apvts,
+                                                               "nam_placement_b_distance_cm",
+                                                               mMicPlacementDistanceKnobB.slider);
+    mMicPlacementAngleBAtt    = std::make_unique<SliderAtt> (processor.apvts,
+                                                               "nam_placement_b_angle_deg",
+                                                               mMicPlacementAngleKnobB.slider);
+    mMicPlacementMixBAtt      = std::make_unique<SliderAtt> (processor.apvts,
+                                                               "nam_placement_b_mix",
+                                                               mMicPlacementMixKnobB.slider);
+
+    updateMicSimModeBUI();
+    updateMicBEnabled();
+
     // ── A/B + listener - initial sync ────────────────────────────────────────
     processor.apvts.addParameterListener ("ab_slot",       this);
     processor.apvts.addParameterListener ("oversampling",  this);
+    processor.apvts.addParameterListener ("nam_micb_active", this);
+    // QA-Fc: the mode/model/polar selectors are manual-sync (no APVTS
+    // attachment exists for ChickenHeadSelector), so an A/B slot restore
+    // that rewrites these params must push the new values back into the
+    // widgets -- without these listeners the audio switches but the
+    // selectors keep showing the outgoing slot's positions.
+    processor.apvts.addParameterListener ("nam_micsim_mode",     this);
+    processor.apvts.addParameterListener ("nam_micsim_model",    this);
+    processor.apvts.addParameterListener ("nam_placement_polar", this);
+    processor.apvts.addParameterListener ("nam_micsim_b_mode",     this);
+    processor.apvts.addParameterListener ("nam_micsim_b_model",    this);
+    processor.apvts.addParameterListener ("nam_placement_b_polar", this);
 
     const int slot0 = processor.getActiveSlot();
     mSlotABtn.setToggleState (slot0 == 0, juce::dontSendNotification);
@@ -385,6 +533,13 @@ BaySickNAMIREditor::~BaySickNAMIREditor()
 {
     processor.apvts.removeParameterListener ("ab_slot",      this);
     processor.apvts.removeParameterListener ("oversampling", this);
+    processor.apvts.removeParameterListener ("nam_micb_active",      this);
+    processor.apvts.removeParameterListener ("nam_micsim_mode",      this);
+    processor.apvts.removeParameterListener ("nam_micsim_model",     this);
+    processor.apvts.removeParameterListener ("nam_placement_polar",  this);
+    processor.apvts.removeParameterListener ("nam_micsim_b_mode",     this);
+    processor.apvts.removeParameterListener ("nam_micsim_b_model",    this);
+    processor.apvts.removeParameterListener ("nam_placement_b_polar", this);
     processor.onStateRestored = nullptr;
 }
 
@@ -396,6 +551,9 @@ void BaySickNAMIREditor::paint (juce::Graphics& g)
     g.fillAll (juce::Colour (kCabBgARGB));   // single dark faceplate
 
     // QA-A (2026-05-09): header strip + divider moved to BaySickTitleBar::paint().
+
+    g.setColour (juce::Colour (kDividerARGB));
+    g.fillRect (mMicColumnDivider);
 }
 
 void BaySickNAMIREditor::resized()
@@ -462,41 +620,60 @@ void BaySickNAMIREditor::resized()
     mFullRigHint.setBounds (kPad, statusY, getWidth() / 2 - kPad, 22);
     mErrorLabel .setBounds (getWidth() / 2, statusY, getWidth() / 2 - kPad, 22);
 
-    // ── H-6d Mic Sim row ─────────────────────────────────────────────────────
+    // ── QA-Fc Mic Sim + Mic Placement rows, split Mic A | Mic B ─────────────
+    const int colW  = (getWidth() - 3 * kPad) / 2;
+    const int colAx = kPad;
+    const int colBx = kPad * 2 + colW;
+
+    // Header band is 48 so the Mic B Active DualLabelToggle fits its
+    // 12+1+22+1+12 Named layout without clipping the bottom label.
     const int micSimY = statusY + 26;
-    mMicSimSectionLbl.setBounds (kPad, micSimY, 100, 18);
+    const int simHdrH = 48;
+    const int simRowY = micSimY + simHdrH;
+    mMicSimSectionLbl .setBounds (colAx, micSimY + 15, 120, 18);
+    mMicSimBSectionLbl.setBounds (colBx, micSimY + 15, 120, 18);
+    mMicBActiveToggle .setBounds (colBx + colW - 70, micSimY, 70, simHdrH);
+
+    auto layoutMicSimCol = [&] (int x, juce::Label& modeLbl, ChickenHeadSelector& mode,
+                                juce::Label& modelLbl, juce::ComboBox& combo,
+                                FilePickerButton& irBtn, juce::Label& irLbl, VKnob& mixKnob)
     {
-        const int rowY = micSimY + 22;
-        int x = kPad;
-        mMicSimModeLbl.setBounds (x, rowY,        80, 14);
-        mMicSimMode   .setBounds (x, rowY + 14,   84, 56);
-        x += 96;
+        modeLbl.setBounds (x,      simRowY,      80, 14);
+        mode   .setBounds (x,      simRowY + 14, 84, 56);
+        modelLbl.setBounds (x + 96, simRowY,      150, 14);
+        combo   .setBounds (x + 96, simRowY + 18, 150, 22);
+        // The user-IR filename shares the combo's slot: the two are
+        // mode-exclusive (Built-in shows the combo, User IR shows the label).
+        irLbl   .setBounds (x + 96, simRowY + 18, 150, 22);
+        irBtn   .setBounds (x + 96, simRowY + 44, 150, 22);
+        mixKnob .setBounds (x + colW - 72, simRowY, 72, 70);
+    };
+    layoutMicSimCol (colAx, mMicSimModeLbl,  mMicSimMode,  mMicSimModelLbl,  mMicSimModelCombo,
+                     mMicSimUserIrBtn,  mMicSimUserIrLabel,  mMicSimMixKnob);
+    layoutMicSimCol (colBx, mMicSimModeBLbl, mMicSimModeB, mMicSimModelBLbl, mMicSimModelComboB,
+                     mMicSimUserIrBtnB, mMicSimUserIrLabelB, mMicSimMixKnobB);
 
-        mMicSimModelLbl.setBounds (x, rowY,       180, 14);
-        mMicSimModelCombo.setBounds (x, rowY + 18, 180, 22);
-        mMicSimUserIrBtn .setBounds (x, rowY + 44, 180, 22);
-        x += 192;
+    const int placeY    = simRowY + 70 + 8;
+    const int placeRowY = placeY + 22;
+    mMicPlacementSectionLbl .setBounds (colAx, placeY, 160, 18);
+    mMicPlacementBSectionLbl.setBounds (colBx, placeY, 160, 18);
 
-        const int lblW = getWidth() - x - 80 - kPad - 8;
-        mMicSimUserIrLabel.setBounds (x, rowY + 18, juce::jmax (60, lblW), 22);
-
-        mMicSimMixKnob.setBounds (getWidth() - 80 - kPad, rowY, 80, 70);
-    }
-
-    // ── H-6d Mic Placement row ───────────────────────────────────────────────
-    const int placeY = micSimY + kMicSimRowH;
-    mMicPlacementSectionLbl.setBounds (kPad, placeY, 160, 18);
+    auto layoutPlacementCol = [&] (int x, juce::Label& polarLbl, ChickenHeadSelector& polar,
+                                   VKnob& dist, VKnob& angle, VKnob& mix)
     {
-        const int rowY = placeY + 22;
-        int x = kPad;
-        mMicPlacementPolarLbl.setBounds (x, rowY,      120, 14);
-        mMicPlacementPolar   .setBounds (x, rowY + 14, 120, 56);
-        x += 132;
+        polarLbl.setBounds (x,       placeRowY,      104, 14);
+        polar   .setBounds (x,       placeRowY + 14, 104, 56);
+        dist    .setBounds (x + 116, placeRowY, 72, 70);
+        angle   .setBounds (x + 196, placeRowY, 72, 70);
+        mix     .setBounds (x + colW - 72, placeRowY, 72, 70);
+    };
+    layoutPlacementCol (colAx, mMicPlacementPolarLbl,  mMicPlacementPolar,
+                        mMicPlacementDistanceKnob,  mMicPlacementAngleKnob,  mMicPlacementMixKnob);
+    layoutPlacementCol (colBx, mMicPlacementPolarBLbl, mMicPlacementPolarB,
+                        mMicPlacementDistanceKnobB, mMicPlacementAngleKnobB, mMicPlacementMixKnobB);
 
-        mMicPlacementDistanceKnob.setBounds (x, rowY, 80, 70); x += 88;
-        mMicPlacementAngleKnob   .setBounds (x, rowY, 80, 70); x += 88;
-        mMicPlacementMixKnob     .setBounds (getWidth() - 80 - kPad, rowY, 80, 70);
-    }
+    mMicColumnDivider = { colAx + colW + kPad / 2 - 1, micSimY,
+                          2, (placeRowY + 70) - micSimY };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -560,6 +737,88 @@ void BaySickNAMIREditor::updateMicSimModelTooltip()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// QA-Fc Mic B helpers (mirror the Mic A set over the `_b_` params).
+// ─────────────────────────────────────────────────────────────────────────────
+void BaySickNAMIREditor::browseForMicUserIrB()
+{
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Load Mic B IR (.wav)",
+        ensurePresetsDir (micIrPresetsDir()),
+        "*.wav");
+
+    auto flags = juce::FileBrowserComponent::openMode
+               | juce::FileBrowserComponent::canSelectFiles;
+
+    chooser->launchAsync (flags, [this, chooser] (const juce::FileChooser& fc)
+    {
+        const auto file = fc.getResult();
+        if (file == juce::File()) return;
+
+        juce::String err;
+        if (processor.loadUserMicIrB (file, err))
+        {
+            mMicSimUserIrLabelB.setText (file.getFileName(), juce::dontSendNotification);
+            if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                              processor.apvts.getParameter ("nam_micsim_b_mode")))
+                p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (2.0f));
+            mMicSimModeB.setSelectedIndex (2, juce::dontSendNotification);
+            updateMicSimModeBUI();
+        }
+        else
+        {
+            showError (err);
+        }
+    });
+}
+
+void BaySickNAMIREditor::updateMicSimModeBUI()
+{
+    const int mode = mMicSimModeB.getSelectedIndex();
+    const bool builtIn = (mode == 1);
+    const bool userIr  = (mode == 2);
+    mMicSimModelBLbl   .setVisible (builtIn);
+    mMicSimModelComboB .setVisible (builtIn);
+    mMicSimUserIrBtnB  .setVisible (userIr);
+    mMicSimUserIrLabelB.setVisible (userIr);
+}
+
+void BaySickNAMIREditor::updateMicSimModelTooltipB()
+{
+    const int idx = juce::jmax (0, mMicSimModelComboB.getSelectedId() - 1);
+    juce::String tip = juce::String ("Built-in mic archetype: ")
+                        + MicSimDSP::modelDisplayName (idx)
+                        + ".\nTypical use: "
+                        + MicSimDSP::modelTypicalUse (idx);
+    mMicSimModelComboB.setTooltip (tip);
+}
+
+void BaySickNAMIREditor::updateMicBEnabled()
+{
+    bool on = false;
+    if (auto* p = processor.apvts.getRawParameterValue ("nam_micb_active"))
+        on = p->load() > 0.5f;
+
+    const float alpha = on ? 1.0f : 0.4f;
+    juce::Component* comps[] = { &mMicSimBSectionLbl, &mMicPlacementBSectionLbl,
+                                 &mMicSimModeBLbl, &mMicSimModelBLbl, &mMicSimModelComboB,
+                                 &mMicSimUserIrBtnB, &mMicSimUserIrLabelB, &mMicSimMixKnobB,
+                                 &mMicPlacementPolarBLbl,
+                                 &mMicPlacementDistanceKnobB, &mMicPlacementAngleKnobB,
+                                 &mMicPlacementMixKnobB };
+    for (auto* c : comps)
+    {
+        c->setEnabled (on);
+        c->setAlpha (alpha);
+    }
+    // Selectors keep hover/tooltips while locked (setLocked greys + ignores
+    // clicks) so the user can still read what the disabled controls are.
+    mMicSimModeB       .setLocked (! on);
+    mMicPlacementPolarB.setLocked (! on);
+    mMicSimModeB       .setAlpha (alpha);
+    mMicPlacementPolarB.setAlpha (alpha);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // APVTS listener.
 // ─────────────────────────────────────────────────────────────────────────────
 void BaySickNAMIREditor::parameterChanged (const juce::String& paramID, float newValue)
@@ -580,6 +839,55 @@ void BaySickNAMIREditor::parameterChanged (const juce::String& paramID, float ne
         juce::MessageManager::callAsync ([this, idx]()
         {
             mOSSelector.setSelectedIndex (idx, juce::dontSendNotification);
+        });
+    }
+    else if (paramID == "nam_micb_active")
+    {
+        juce::MessageManager::callAsync ([this]() { updateMicBEnabled(); });
+    }
+    // QA-Fc: manual-sync selector resync.  A/B slot restores rewrite these
+    // params behind the widgets' backs (ChickenHeadSelector has no APVTS
+    // attachment); push the new value back into the UI.
+    else if (paramID == "nam_micsim_mode" || paramID == "nam_micsim_b_mode")
+    {
+        const bool isB = (paramID == "nam_micsim_b_mode");
+        const int  idx = juce::jlimit (0, 2, (int) newValue);
+        juce::MessageManager::callAsync ([this, isB, idx]()
+        {
+            auto& sel = isB ? mMicSimModeB : mMicSimMode;
+            if (sel.getSelectedIndex() != idx)
+            {
+                sel.setSelectedIndex (idx, juce::dontSendNotification);
+                if (isB) updateMicSimModeBUI();
+                else     updateMicSimModeUI();
+            }
+        });
+    }
+    else if (paramID == "nam_micsim_model" || paramID == "nam_micsim_b_model")
+    {
+        const bool isB = (paramID == "nam_micsim_b_model");
+        const int  idx = juce::jlimit (0, (int) MicSimDSP::Model::kNumModels - 1,
+                                          (int) newValue);
+        juce::MessageManager::callAsync ([this, isB, idx]()
+        {
+            auto& combo = isB ? mMicSimModelComboB : mMicSimModelCombo;
+            if (combo.getSelectedId() != idx + 1)
+            {
+                combo.setSelectedId (idx + 1, juce::dontSendNotification);
+                if (isB) updateMicSimModelTooltipB();
+                else     updateMicSimModelTooltip();
+            }
+        });
+    }
+    else if (paramID == "nam_placement_polar" || paramID == "nam_placement_b_polar")
+    {
+        const bool isB = (paramID == "nam_placement_b_polar");
+        const int  idx = juce::jlimit (0, 4, (int) newValue);
+        juce::MessageManager::callAsync ([this, isB, idx]()
+        {
+            auto& sel = isB ? mMicPlacementPolarB : mMicPlacementPolar;
+            if (sel.getSelectedIndex() != idx)
+                sel.setSelectedIndex (idx, juce::dontSendNotification);
         });
     }
 }
@@ -621,6 +929,12 @@ void BaySickNAMIREditor::updateLabels()
                                     ? juce::String ("(no IR loaded)")
                                     : juce::File (micPath).getFileName(),
                                   juce::dontSendNotification);
+
+    const juce::String micPathB = processor.getMicSimB().getUserIrPath (slot);
+    mMicSimUserIrLabelB.setText (micPathB.isEmpty()
+                                     ? juce::String ("(no IR loaded)")
+                                     : juce::File (micPathB).getFileName(),
+                                   juce::dontSendNotification);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

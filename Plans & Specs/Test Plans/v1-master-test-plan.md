@@ -192,8 +192,7 @@ metronome as the measuring instruments.
 
 ### §B.4 — QA-Eb (window resizability, min-size-clamp shape)
 
-`blocks:` the QA-Eb source commit (message-tagged "QA-Eb"; hash backfilled at the next test-plan
-touch). Debug first, then Release.
+`blocks:` `44d5c015` (QA-Eb Task 1). Debug first, then Release.
 
 - [ ] **EB-1 — launch + restore-down.** Launch → still opens maximized. Restore-down → a movable
       window with drag-resizable borders. `D:__ R:__` notes:
@@ -219,8 +218,8 @@ touch). Debug first, then Release.
 
 ### §B.5 — QA-Ec (true-length import + Resample follow + Shift+drag re-fit)
 
-`blocks:` the QA-Ec source commit (message-tagged "QA-Ec"; hash backfilled at the next test-plan
-touch). G1 ear-check batch — verify by ear + the readout. Debug first, then Release.
+`blocks:` `67bd4f6e` (QA-Ec Tasks 1-3). G1 ear-check batch — verify by ear + the readout.
+Debug first, then Release.
 
 - [ ] **EC-1 — true-length import at any tempo.** Project at 90: import a ~2s WAV. Expected: the
       block spans exactly 3 beats (2s at 90 — check via the readout/grid), plays IDENTICAL to the
@@ -282,8 +281,8 @@ touch). G1 ear-check batch — verify by ear + the readout. Debug first, then Re
 
 ### §B.6 — QA-F (BaySickAlign build-out + shared composite/shifters + realtime pitch quality)
 
-`blocks:` the QA-F source commit (message-tagged "QA-F"; hash backfilled at the next test-plan
-touch). G2 ear-check batch — the after-QA-F ear-check (F-9/F-10-adjacent listening) already ran
+`blocks:` `9262c746` (QA-F Tasks 1-5) + `35ac9928` (Vocal Chain two-way wiring follow-on;
+F-12). G2 ear-check batch — the after-QA-F ear-check (F-9/F-10-adjacent listening) already ran
 in-batch; these scenarios are the full campaign walk. Setup for most: two Vox tabs — record or
 drop a "leader" take on Vox 1 and a slightly-off "follower" take on Vox 2 (sequential same-row
 clips only; overlapping-same-row is §C item C2). BaySickAlign lives on the FOLLOWER's Vox tab.
@@ -382,8 +381,8 @@ FA-12/FA-13.
 
 ### §B.7 — QA-Fa (BaySickPitch composite-driven editor + DSP)
 
-`blocks:` the QA-Fa source commits — the `d8cc9494` checkpoint AND the "QA-Fa recovery round"
-commit (hash backfilled at the next test-plan touch); FA-4/FA-6/FA-9 rewrites + FA-12/FA-13
+`blocks:` the QA-Fa source commits — the `d8cc9494` checkpoint AND the `62895ca8` recovery
+round; FA-4/FA-6/FA-9 rewrites + FA-12/FA-13
 verify the recovery commit specifically. G2 ear-check batch — the pitch-edit ear-check folds
 into the G2 boundary smoke (owner call 2026-07-10). Setup: a Vox tab with 1-2 vocal clips
 back-to-back on its channel (sequential only — overlap is §C item C2). BaySickPitch is the Vox
@@ -480,7 +479,7 @@ tab's third sub-tab. Debug first, then Release.
 
 ### §B.8 — QA-Fb' (recording lifecycle: bleed gate + monitor merge + conditional-WET + dirty)
 
-`blocks:` the QA-Fb' source commit (hash backfilled at the next test-plan touch). Setup: a Vox
+`blocks:` `66fea472` (QA-Fb' Tasks 1-3). Setup: a Vox
 tab with a mic on an ASIO input (arm LED → input picker) + an Inst tab with a DI line for FB-6.
 Multi-take = record take 1, stop, then record take 2 WHILE take 1's clip plays back on the same
 channel. Recording auto-places each take on its own NEW row — do NOT hand-stack two clips on
@@ -536,6 +535,53 @@ functional. Debug first, then Release.
       follows the new edge (QA-Ec chain). Then open BaySickPitch on a channel with 2 clips —
       pills appear over both (the QA-F composite renderer feeding analysis, shared-dependency
       smoke). `D:__ R:__` notes:
+
+---
+
+### §B.9 — QA-Fc (BaySickNAMIR dual-mic stack: parallel Mic B, summed)
+
+`blocks:` the QA-Fc source commit (hash backfilled at the next test-plan touch). Dual-mic lives
+on the NAM/IR editor — the Vox tab's NAM/IR sub-tab or the Inst tab's NAM/IR sub-tab. The mic
+stages only run when the page has a NAM model or cab IR loaded (existing engine gate — with
+neither loaded the whole NAM/IR chain is a passthrough, Mic A included), so load a .nam or a
+cab IR first. Feed the chain something sustained: an Inst DI, a held Vox note, or FilePlay
+clips on the channel. "Mic B Active" is the OFF/ON switch at the top-right of the Mic B
+column. Sound-quality listening rides the G2 boundary ear-check; these scenarios are
+functional. Debug first, then Release.
+
+- [ ] **FC-1 — regression (off = identical).** Mic B Active OFF (the default). Expected: output
+      identical to before this batch (single-mic chain untouched); the Mic B column renders
+      dimmed and its controls ignore clicks; a pre-batch project loads with Mic B off and
+      sounds unchanged. `D:__ R:__` notes:
+- [ ] **FC-2 — correlated sum (+6 dB, not a blend).** Set Mic B identical to Mic A (same Sim
+      mode/model, same Placement values). Toggle Mic B ON while watching the strip meter.
+      Expected: ≈ doubled amplitude (+6 dB) — the sound gets bigger, nothing crossfades away
+      (that jump IS the parallel-sum design). `D:__ R:__` notes:
+- [ ] **FC-3 — comb colouration from path difference.** Mic A distance 30 cm, Mic B distance
+      120 cm, everything else identical, Mic B ON. Expected: audibly "fuller"/hollower
+      character than either mic alone (comb filtering); slowly sweeping Mic B's Distance
+      moves that character. `D:__ R:__` notes:
+- [ ] **FC-4 — per-slot A/B + UI follow.** On slot A: Mic B ON, Built-in "Ribbon", Figure-8,
+      distance 120. Switch to slot B: leave Mic B OFF (or configure it differently). Flip
+      `A`/`B` back and forth. Expected: the tone snaps to each slot's stored dual-mic state
+      AND every Mic B control follows (Active switch + dimming, mode/model/polar selectors,
+      IR filename); the Mic A mode/model/polar selectors now follow slot switches too (same
+      sync fix, both columns). `D:__ R:__` notes:
+- [ ] **FC-5 — persistence (params + per-slot Mic B user IRs).** Load a user .wav IR into Mic B
+      (mode auto-flips to User IR), configure slots A/B differently, save the project, close,
+      reopen. Expected: Mic B state restores per slot including the user IR (filename label
+      shows the active slot's file); the dimmed/enabled state matches the restored toggle.
+      `D:__ R:__` notes:
+- [ ] **FC-6 — no-click toggle mid-play.** With sustained audio playing through the chain,
+      click Mic B Active ON and OFF repeatedly. Expected: each flip glides in/out over ~15 ms —
+      no click, pop, or hard step (the param snaps, the DSP ramps). `D:__ R:__` notes:
+- [ ] **FC-7 — CPU fast-path.** DSP meter with Mic B OFF ≈ the pre-batch idle cost (the off
+      path is one param read + a branch); ON shows a small steady delta (the second mic
+      chain). `D:__ R:__` notes:
+- [ ] **FC-8 — both pages, independent instances.** Repeat FC-2 briefly on the OTHER page type
+      (Inst if you used Vox, or vice versa). Expected: identical dual-mic UI + behavior; the
+      two pages' NAM/IR settings stay independent (Mic B on one page doesn't affect the
+      other). `D:__ R:__` notes:
 
 ---
 

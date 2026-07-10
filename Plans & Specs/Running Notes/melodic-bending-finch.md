@@ -113,7 +113,7 @@ Plan approved 2026-07-09 (G2 group approval, R5). QA-Fa consumes QA-F's shared f
 ### 2026-07-10 — QA-Fa — BaySickPitch composite-driven editor + DSP build-out
 
 **Bucket:** Players, Effects, Cross-cutting Infrastructure
-**Plan:** `Batch Plans/melodic-bending-finch.md` · **Running notes:** `Running Notes/melodic-bending-finch.md` · **Commits:** `d8cc9494` (checkpoint) + <hash at commit> (recovery round)
+**Plan:** `Batch Plans/melodic-bending-finch.md` · **Running notes:** `Running Notes/melodic-bending-finch.md` · **Commits:** `d8cc9494` (checkpoint) + `62895ca8` (recovery round)
 
 #### Done
 
@@ -133,7 +133,7 @@ Plan approved 2026-07-09 (G2 group approval, R5). QA-Fa consumes QA-F's shared f
 
 - QA-J-Verify (§C item 2): overlapping-same-row scenarios. BaySickPitch reference-product comment handoff from QA-F: CLOSED here (rewrite).
 
-#### Recovery round (2026-07-10 — second commit <hash at commit>)
+#### Recovery round (2026-07-10 — second commit `62895ca8`)
 
 The G2-warp lock in the QA-F plan ("offline analyze → render-to-bake → playback loads the baked wav") was authored at group open from the STALE H-6a Option C comment in `BaySickAlignDSP.h` and contradicted the LOCKED May design — `Running Notes/phantom-recording-mongoose.md` §5 (2026-05-14, "design locked"): both editors play LIVE during FilePlay (the PV applies warp stretch + pitch shift in one pass at playback), Render = opt-in export. Jeff caught the loss 2026-07-10; every downstream artifact — the row-below + row-mute bake-placement model and the OPEN pitch-bake placement spec call above — was solving problems that only exist in the drifted version. The placement spec call DISSOLVED (export-only supersedes it) and the QA-F auto-placement (`35ac9928`) was retired here. Jeff locked a 10-item recovery bundle in chat (running notes DESIGN RECOVERY entry = the spec); the Task 1+2 checkpoint (`d8cc9494`, both configs clean, Jeff-verified) predates the recovery, and bundle items 1-7 + 10 landed as this second commit (item 5 landed inside item 1; item 8 note-only — version history stays separate from global undo until QA-UndoCoverage/G4; item 9 = ear-checks deferred to the G2 boundary smoke). §9 Forks entry documenting the recovery rides the section pass.
 

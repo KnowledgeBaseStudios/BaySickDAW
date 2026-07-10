@@ -122,10 +122,17 @@ public:
     // The two stages live as direct members of this processor so they ride
     // along on every host (Vox sub-tab, Inst sub-tab, FX rack slot).  See
     // MicSimDSP / MicPlacementDSP headers for parameter semantics.
-    MicSimDSP&       getMicSim()       noexcept { return mMicSim; }
-    MicPlacementDSP& getMicPlacement() noexcept { return mMicPlacement; }
-    bool loadUserMicIr (const juce::File& f, juce::String& outErr);
-    void clearUserMicIr();
+    // QA-Fc dual-mic: a second, parallel mic path (Mic B) mirrors the pair
+    // and SUMS into the main buffer (not a blend) -- two real mics on one
+    // source add.  `nam_micb_active` off = byte-identical single-mic chain.
+    MicSimDSP&       getMicSim()        noexcept { return mMicSim; }
+    MicPlacementDSP& getMicPlacement()  noexcept { return mMicPlacement; }
+    MicSimDSP&       getMicSimB()       noexcept { return mMicSimB; }
+    MicPlacementDSP& getMicPlacementB() noexcept { return mMicPlacementB; }
+    bool loadUserMicIr  (const juce::File& f, juce::String& outErr);
+    void clearUserMicIr ();
+    bool loadUserMicIrB (const juce::File& f, juce::String& outErr);
+    void clearUserMicIrB();
 
     // ── Per-slot A/B snapshot (full per-slot tone state, locked 2026-05-02) ──
     // When `ab_slot` changes (UI click OR host automation), the processor
@@ -162,6 +169,18 @@ public:
         float placementAngle    { 0.0f };
         int   placementPolar    { 1 };
         float placementMix      { 100.0f };
+
+        // QA-Fc dual-mic (Mic B).  Defaults match the `_b_` param defaults so
+        // pre-dual-mic saves (no B properties) restore to Mic B off.
+        bool  micbActive        { false };
+        int   micSimBMode       { 0 };
+        int   micSimBModel      { 0 };
+        float micSimBMix        { 100.0f };
+        juce::String micbUserIrPath;
+        float placementBDistance { 30.0f };
+        float placementBAngle    { 0.0f };
+        int   placementBPolar    { 1 };
+        float placementBMix      { 100.0f };
 
         juce::ValueTree toValueTree (const juce::Identifier& root) const;
         void             fromValueTree (const juce::ValueTree& v);
@@ -246,6 +265,8 @@ private:
     std::vector<double>      mNamMonoOut;
     juce::AudioBuffer<float> mMonoFloatBuf;  // mono scratch fed into Oversampling
     juce::AudioBuffer<float> mDryBuf;        // pre-cab fork copy
+    juce::AudioBuffer<float> mPreMicScratch; // QA-Fc: post-cab tap Mic B feeds from
+    juce::AudioBuffer<float> mMicBScratch;   // QA-Fc: Mic B chain workspace
 
     // ── File paths - saved as ValueTree custom string properties ─────────────
     // Index 0 = slot A, index 1 = slot B.
@@ -258,6 +279,16 @@ private:
     MicSimDSP        mMicSim;
     MicPlacementDSP  mMicPlacement;
     juce::String     mLastMicIrError;
+
+    // ── QA-Fc dual-mic (Mic B parallel path) ─────────────────────────────────
+    // mMicBGain ramps toward the `nam_micb_active` target so automating the
+    // toggle glides the summed branch in/out instead of stepping +6 dB.
+    // Audio-thread-only state; when the ramp settles at 0 with the toggle
+    // off, processBlock skips the whole B path (one param read + branch).
+    MicSimDSP        mMicSimB;
+    MicPlacementDSP  mMicPlacementB;
+    float            mMicBGain { 0.0f };
+    bool             mMicBWasRunning { false };
 
     // ── Per-slot A/B snapshots (capture-then-restore on ab_slot change) ─────
     std::array<SlotSnapshot, 2> mSnapshots;

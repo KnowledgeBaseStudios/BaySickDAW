@@ -95,7 +95,7 @@ All five open calls resolved in chat (Jeff, 2026-07-10, after a design workshop)
 ### 2026-07-10 — QA-Fb' — Recording lifecycle: bleed gate + Option A monitor merge + conditional-WET + dirty-flag
 
 **Bucket:** Cross-cutting Infrastructure, System Pages, Players, Effects
-**Plan:** `Batch Plans/doubled-tracking-badger.md` · **Running notes:** `Running Notes/doubled-tracking-badger.md` · **Commit:** <hash at commit>
+**Plan:** `Batch Plans/doubled-tracking-badger.md` · **Running notes:** `Running Notes/doubled-tracking-badger.md` · **Commit:** `66fea472`
 
 #### Done
 

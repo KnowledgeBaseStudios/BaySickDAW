@@ -108,9 +108,8 @@ private:
     juce::Label mFullRigHint;
     juce::Label mErrorLabel;
 
-    // ── H-6d Mic Sim + Mic Placement (only visible when editor is taller
-    //    than the standalone 760x340 size -- i.e. when hosted in a Vox/Inst
-    //    sub-tab that gives us extra vertical room).  ─────────────────────────
+    // ── H-6d Mic Sim + Mic Placement, Mic A column (QA-Fc: rows split into
+    //    Mic A | Mic B columns; Mic B mirrors this set below) ─────────────────
     juce::Label   mMicSimSectionLbl;
     juce::Label   mMicPlacementSectionLbl;
 
@@ -134,6 +133,36 @@ private:
     void browseForMicUserIr();
     void updateMicSimModeUI();   // updates the model combo + browse btn visibility
     void updateMicSimModelTooltip();   // refreshes "typical use" tooltip on combo
+
+    // ── QA-Fc Mic B column (parallel mic, summed; bound to `_b_` params) ─────
+    juce::Label   mMicSimBSectionLbl;
+    juce::Label   mMicPlacementBSectionLbl;
+    DualLabelToggle mMicBActiveToggle;
+    std::unique_ptr<ButtonAtt> mMicBActiveAtt;
+
+    ChickenHeadSelector mMicSimModeB;
+    juce::Label         mMicSimModeBLbl;
+    juce::ComboBox      mMicSimModelComboB;
+    juce::Label         mMicSimModelBLbl;
+    FilePickerButton    mMicSimUserIrBtnB;
+    juce::Label         mMicSimUserIrLabelB;
+    VKnob               mMicSimMixKnobB;
+    std::unique_ptr<SliderAtt> mMicSimMixBAtt;
+
+    ChickenHeadSelector mMicPlacementPolarB;
+    juce::Label         mMicPlacementPolarBLbl;
+    VKnob               mMicPlacementDistanceKnobB;
+    VKnob               mMicPlacementAngleKnobB;
+    VKnob               mMicPlacementMixKnobB;
+    std::unique_ptr<SliderAtt> mMicPlacementDistanceBAtt, mMicPlacementAngleBAtt,
+                                 mMicPlacementMixBAtt;
+
+    juce::Rectangle<int> mMicColumnDivider;   // painted A | B separator
+
+    void browseForMicUserIrB();
+    void updateMicSimModeBUI();
+    void updateMicSimModelTooltipB();
+    void updateMicBEnabled();    // dims/disables the Mic B column when inactive
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickNAMIREditor)
 };
