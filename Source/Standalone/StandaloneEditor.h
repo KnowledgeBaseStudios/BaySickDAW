@@ -71,6 +71,16 @@ public:
     void globalRedo();
     void showHistoryWindow();
 
+    // QA-F (2026-07-09, owner call at build round): place a BaySickAlign
+    // render-to-bake on the Builder grid.  The bake lands on the track row
+    // BELOW the follower's original clips (replacing a prior bake for the
+    // same channel in place), routed through the same Vox chain, marked
+    // alignBake (excluded from re-analysis composites), and the original
+    // rows get row-MUTED so the A/B toggle is one click on the row mute.
+    // Reached from the Align editor via VoxPage's onPlaceBakedClip hook.
+    void placeAlignedBake (const juce::File& bakeFile, double startBeat,
+                           int followerChannelId);
+
     // Build a UndoContext token pointing at this editor's undo infrastructure.
     UndoContext makeUndoContext();
 

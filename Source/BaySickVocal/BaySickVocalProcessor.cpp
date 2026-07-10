@@ -19,6 +19,13 @@ namespace
     {
         return juce::ParameterID (juce::String ("bsv_") + suffix, versionHint);
     }
+
+    // QA-F Task 3: BaySickAlign params live under bsa_ (still on this same
+    // APVTS -- the prefix keeps the two control families greppable apart).
+    juce::ParameterID aid (const char* suffix, int versionHint = 1)
+    {
+        return juce::ParameterID (juce::String ("bsa_") + suffix, versionHint);
+    }
 }
 
 // ─── APVTS layout ─────────────────────────────────────────────────────────────
@@ -62,8 +69,12 @@ BaySickVocalProcessor::createLayout()
     //        5=Mixolydian, 6=Phrygian, 7=Lydian, 8=Locrian, 9=Custom
     addI ("pitch_key",          "Pitch Key",      0,    11,   0);
     addI ("pitch_scale",        "Pitch Scale",    0,    9,    0);
-    addF ("pitch_retuneSpeed",  "Retune Speed ms", 0.0f, 100.0f, 50.0f);
-    addF ("pitch_strength",     "Pitch Strength",  0.0f, 1.0f,   1.0f);
+    // QA-F Task 5 (Call 2a): defaults re-tuned so correction is musical out
+    // of the box -- 60 ms glide + 80% pull leaves natural variation instead
+    // of the hard-snapped robotic sound at 50 ms / 100%.  Saved projects
+    // keep their stored values; only fresh instances see these.
+    addF ("pitch_retuneSpeed",  "Retune Speed ms", 0.0f, 100.0f, 60.0f);
+    addF ("pitch_strength",     "Pitch Strength",  0.0f, 1.0f,   0.8f);
     addB ("pitch_formantPreserve", "Formant Preserve", false);
     addF ("pitch_humanize",     "Humanize cents",  0.0f, 20.0f,  0.0f);
     addF ("pitch_throatShift",  "Throat Shift semis", -12.0f, 12.0f, 0.0f);
@@ -111,6 +122,42 @@ BaySickVocalProcessor::createLayout()
     addF ("deesser_lookahead",   "De-esser Lookahead ms", 0.f, 5.f,   0.f);
     addF ("deesser_mix",         "De-esser Mix",        0.f,   1.f,   1.f);
     addB ("deesser_listen",      "De-esser SC Listen",  false);
+
+    // ── QA-F Task 3: BaySickAlign (bsa_ prefix; sections 13a/13e) ───────────
+    // Offline-only params -- read at action time on the message thread,
+    // never pushed per-block.  Defaults = the Close-Align factory preset
+    // (mode Close, pitch off).
+    auto addAF = [&](const char* suffix, const juce::String& name,
+                     float lo, float hi, float def)
+    {
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            aid (suffix), name, juce::NormalisableRange<float> (lo, hi), def));
+    };
+    auto addAB = [&](const char* suffix, const juce::String& name, bool def)
+    {
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            aid (suffix), name, def));
+    };
+    auto addAI = [&](const char* suffix, const juce::String& name,
+                     int lo, int hi, int def)
+    {
+        params.push_back (std::make_unique<juce::AudioParameterInt> (
+            aid (suffix), name, lo, hi, def));
+    };
+
+    addAB ("align_on",        "Align On",            true);
+    addAI ("align_mode",      "Align Mode",          0, 2, 1);    // 0=Loose, 1=Close, 2=Tight
+    addAF ("align_fineTune",  "Align Fine Tune ms",  -50.0f, 50.0f, 0.0f);  // bipolar around Mode base
+    addAB ("pitch_on",        "Align Pitch On",      false);
+    addAF ("pitch_range",     "Align Pitch Range",   0.0f, 100.0f, 50.0f); // % of leader contour
+    addAI ("pitch_algo",      "Align Pitch Algo",    0, 2, 0);    // 0=PSOLA, 1=Granular, 2=Phase Vocoder
+    addAI ("pitch_transpose", "Align Transpose st",  -12, 12, 0);
+    addAB ("formant_on",      "Align Formant On",    false);
+    addAF ("formant_shift",   "Align Formant Shift st", -12.0f, 12.0f, 0.0f);
+    addAI ("preset",          "Align Preset",        0, 6, 2);    // 6 factory (13a order) + 6=User
+    addAB ("preset_dirty",    "Align Preset Dirty",  false);
+    addAI ("leader_channel",   "Align Leader Channel",   -1, 999, -1);
+    addAI ("follower_channel", "Align Follower Channel", -1, 999, -1);
 
     return { params.begin(), params.end() };
 }
@@ -161,6 +208,9 @@ void BaySickVocalProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
 
     // H-6 (2026-05-01) -- prepare pitch corrector + vocal chain rack.
     mPitchCorrector.prepare (sampleRate, maxBlockSize);
+
+    // QA-F Task 3: align engine (offline; prepare just records the rate).
+    mAlign.prepare (sampleRate, maxBlockSize);
 
     // H-6c -- pre-load the vocal chain rack with 4 locked slots in order.
     // loadEffect is idempotent on type match; second prepareToPlay calls
@@ -359,6 +409,229 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 }
 
+// ─── QA-F Task 3: BaySickAlign actions (message thread only) ─────────────────
+
+int BaySickVocalProcessor::resolveLeaderChannel() const
+{
+    if (auto* p = apvts.getRawParameterValue ("bsa_leader_channel"))
+        return (int) p->load();
+    return -1;
+}
+
+int BaySickVocalProcessor::resolveFollowerChannel() const
+{
+    int v = -1;
+    if (auto* p = apvts.getRawParameterValue ("bsa_follower_channel"))
+        v = (int) p->load();
+    return (v >= 0) ? v : mOwnChannelId;
+}
+
+double BaySickVocalProcessor::alignToleranceSec() const
+{
+    int mode = 1;
+    float fine = 0.0f;
+    if (auto* p = apvts.getRawParameterValue ("bsa_align_mode"))     mode = (int) p->load();
+    if (auto* p = apvts.getRawParameterValue ("bsa_align_fineTune")) fine = p->load();
+    // Section 13e: Loose base 150 ms / Close 100 / Tight 50, +/-50 Fine Tune.
+    const float base = (mode == 0) ? 150.0f : (mode == 2) ? 50.0f : 100.0f;
+    return (double) juce::jmax (5.0f, base + fine) / 1000.0;
+}
+
+bool BaySickVocalProcessor::analyzeAlign (juce::String& errorOut)
+{
+    errorOut.clear();
+    if (! onRenderComposite || ! onChannelClipSignature)
+        { errorOut = "Align services not connected."; return false; }
+
+    const int leader   = resolveLeaderChannel();
+    const int follower = resolveFollowerChannel();
+    if (leader < 0)         { errorOut = "Pick a Leader channel first.";   return false; }
+    if (follower < 0)       { errorOut = "No Follower channel available."; return false; }
+    if (leader == follower) { errorOut = "Leader and Follower must be different channels."; return false; }
+
+    double gBeat = 0.0, dBeat = 0.0, gSr = 44100.0, dSr = 44100.0;
+    juce::int64 gSamp = 0, dSamp = 0;
+    auto guide = onRenderComposite (leader,   gBeat, gSamp, gSr);
+    auto dub   = onRenderComposite (follower, dBeat, dSamp, dSr);
+    if (guide.getNumSamples() <= 0) { errorOut = "The Leader channel has no audio clips.";   return false; }
+    if (dub  .getNumSamples() <= 0) { errorOut = "The Follower channel has no audio clips."; return false; }
+
+    // Common-origin pad: anchor times must share t=0 or pairing compares
+    // apples to oranges (composites start at their own first clip).
+    const juce::int64 commonSamp = juce::jmin (gSamp, dSamp);
+    const double      commonBeat = (gSamp <= dSamp) ? gBeat : dBeat;
+    const juce::int64 gPad = gSamp - commonSamp;
+    const juce::int64 dPad = dSamp - commonSamp;
+    if ((juce::int64) guide.getNumSamples() + gPad > ((juce::int64) 1 << 28)
+        || (juce::int64) dub.getNumSamples() + dPad > ((juce::int64) 1 << 28))
+        { errorOut = "Leader and Follower are too far apart on the timeline."; return false; }
+
+    auto padFront = [] (juce::AudioBuffer<float>& b, juce::int64 padN)
+    {
+        if (padN <= 0) return;
+        juce::AudioBuffer<float> padded (1, b.getNumSamples() + (int) padN);
+        padded.clear();
+        padded.copyFrom (0, (int) padN, b, 0, 0, b.getNumSamples());
+        b = std::move (padded);
+    };
+    padFront (guide, gPad);
+    padFront (dub,   dPad);
+
+    bool  pitchOn = false;
+    float range01 = 0.0f;
+    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_on"))    pitchOn = p->load() > 0.5f;
+    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_range")) range01 = p->load() / 100.0f;
+
+    auto map = BaySickAlignDSP::analyzeOffline (
+        guide.getReadPointer (0), guide.getNumSamples(),
+        dub  .getReadPointer (0), dub.getNumSamples(),
+        gSr, 1.0f, alignToleranceSec(),
+        mAlignState.syncPoints, mAlignState.protectedAreas,
+        pitchOn ? juce::jlimit (0.0f, 1.0f, range01) : 0.0f);
+
+    if (! map.isValid())
+        { errorOut = "Not enough matching transients to align - try a looser Mode."; return false; }
+
+    mAlignState.map                 = map;
+    mAlignState.analyzedLeaderSig   = onChannelClipSignature (leader);
+    mAlignState.analyzedFollowerSig = onChannelClipSignature (follower);
+    mAlignState.commonStartBeat     = commonBeat;
+    mAlignState.leaderPadSamples    = gPad;
+    mAlignState.followerPadSamples  = dPad;
+    mAlignState.analysisSampleRate  = gSr;
+    mAlignState.analyzed            = true;
+    mAlign.setWarpMap (map);
+    if (auto& fn = mDirtyTracker.onAny) fn();
+    return true;
+}
+
+juce::AudioBuffer<float> BaySickVocalProcessor::buildWarpedFollower (juce::String& errorOut)
+{
+    errorOut.clear();
+    juce::AudioBuffer<float> empty;
+    if (! mAlignState.analyzed || ! mAlignState.map.isValid())
+        { errorOut = "Analyze first."; return empty; }
+    if (! onRenderComposite)
+        { errorOut = "Align services not connected."; return empty; }
+
+    const int follower = resolveFollowerChannel();
+    if (follower < 0) { errorOut = "No Follower channel available."; return empty; }
+
+    double b = 0.0, sr = mAlignState.analysisSampleRate;
+    juce::int64 s = 0;
+    auto dub = onRenderComposite (follower, b, s, sr);
+    if (dub.getNumSamples() <= 0)
+        { errorOut = "The Follower channel has no audio clips."; return empty; }
+
+    if (mAlignState.followerPadSamples > 0)
+    {
+        juce::AudioBuffer<float> padded (1,
+            dub.getNumSamples() + (int) mAlignState.followerPadSamples);
+        padded.clear();
+        padded.copyFrom (0, (int) mAlignState.followerPadSamples, dub, 0, 0,
+                         dub.getNumSamples());
+        dub = std::move (padded);
+    }
+
+    bool  alignOn = true, pitchOn = false, formantOn = false;
+    int   algo = 0, transpose = 0;
+    float formantShift = 0.0f;
+    if (auto* p = apvts.getRawParameterValue ("bsa_align_on"))       alignOn = p->load() > 0.5f;
+    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_on"))       pitchOn = p->load() > 0.5f;
+    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_algo"))     algo = (int) p->load();
+    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_transpose")) transpose = (int) p->load();
+    if (auto* p = apvts.getRawParameterValue ("bsa_formant_on"))     formantOn = p->load() > 0.5f;
+    if (auto* p = apvts.getRawParameterValue ("bsa_formant_shift"))  formantShift = p->load();
+
+    // Align master OFF renders the follower unwarped (an identity map keeps
+    // the pitch pass available -- the Pitch box is independently toggleable).
+    WarpMap effMap = mAlignState.map;
+    if (! alignOn)
+        for (auto& a : effMap.anchors)
+            a.guideTimeSec = a.dubTimeSec;
+    if (! pitchOn)
+        for (auto& a : effMap.anchors)
+            a.pitchSemis = 0.0f;
+
+    auto warped = BaySickAlignDSP::applyWarp (
+        dub.getReadPointer (0), dub.getNumSamples(),
+        mAlignState.analysisSampleRate, effMap, algo,
+        pitchOn ? (float) transpose : 0.0f);
+
+    if (pitchOn && formantOn && std::abs (formantShift) > 0.01f
+        && warped.getNumSamples() > 0)
+        CepstralFormantEngine::formantShiftMono (warped.getWritePointer (0),
+                                                 warped.getNumSamples(),
+                                                 mAlignState.analysisSampleRate,
+                                                 formantShift);
+    return warped;
+}
+
+juce::AudioBuffer<float> BaySickVocalProcessor::renderAlignedPreview()
+{
+    juce::String ignored;
+    return buildWarpedFollower (ignored);
+}
+
+juce::File BaySickVocalProcessor::renderAlignedTake (juce::String& errorOut)
+{
+    errorOut.clear();
+    if (! onGetProjectFolder)
+        { errorOut = "Align services not connected."; return {}; }
+
+    auto warped = buildWarpedFollower (errorOut);
+    if (warped.getNumSamples() <= 0)
+        return {};
+
+    const juce::File projDir = onGetProjectFolder();
+    if (projDir == juce::File() || ! projDir.isDirectory())
+        { errorOut = "Save the project first - renders live in the project folder."; return {}; }
+
+    auto alignedDir = projDir.getChildFile ("Aligned");
+    alignedDir.createDirectory();
+
+    juce::String base = "Follower";
+    const int follower = resolveFollowerChannel();
+    if (onListCandidateChannels)
+        for (const auto& c : onListCandidateChannels())
+            if (c.first == follower) { base = c.second.replaceCharacter (' ', '_'); break; }
+
+    int version = (int) mAlignState.renders.size() + 1;
+    auto file = alignedDir.getChildFile (base + "_align_v" + juce::String (version) + ".wav");
+    while (file.existsAsFile())
+        file = alignedDir.getChildFile (base + "_align_v" + juce::String (++version) + ".wav");
+
+    juce::WavAudioFormat fmt;
+    auto os = file.createOutputStream();
+    if (os == nullptr) { errorOut = "Could not write " + file.getFullPathName(); return {}; }
+    std::unique_ptr<juce::AudioFormatWriter> writer (fmt.createWriterFor (
+        os.release(), mAlignState.analysisSampleRate, 1, 24, {}, 0));
+    if (writer == nullptr) { errorOut = "Could not create the WAV writer."; return {}; }
+    writer->writeFromAudioSampleBuffer (warped, 0, warped.getNumSamples());
+    writer.reset();
+
+    AlignRenderEntry e;
+    e.file    = "Aligned/" + file.getFileName();
+    e.dateIso = juce::Time::getCurrentTime().toISO8601 (true);
+    e.version = version;
+    mAlignState.renders.push_back (e);
+
+    if (onPlaceBakedClip)
+        onPlaceBakedClip (file, mAlignState.commonStartBeat);
+    if (auto& fn = mDirtyTracker.onAny) fn();
+    return file;
+}
+
+bool BaySickVocalProcessor::isAlignStale() const
+{
+    if (! mAlignState.analyzed || ! onChannelClipSignature) return false;
+    const int leader   = resolveLeaderChannel();
+    const int follower = resolveFollowerChannel();
+    if (leader < 0 || follower < 0) return false;
+    return onChannelClipSignature (leader)   != mAlignState.analyzedLeaderSig
+        || onChannelClipSignature (follower) != mAlignState.analyzedFollowerSig;
+}
+
 // ─── Editor ───────────────────────────────────────────────────────────────────
 juce::AudioProcessorEditor* BaySickVocalProcessor::createEditor()
 {
@@ -418,11 +691,37 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
     removeChild (kAlignEditsTag);
     removeChild (kNamIrStateTag);
 
-    // H-6b/c slots reserved for future G-9 edit-data persistence.  Empty
-    // ValueTrees today; G-9 populates them when the offline editors gain
-    // an edit data model.
+    // <PitchEdits> stays a reserved empty slot (QA-Fa populates it).
     state.appendChild (juce::ValueTree (kPitchEditsTag), nullptr);
-    state.appendChild (juce::ValueTree (kAlignEditsTag), nullptr);
+
+    // QA-F Task 3: <AlignEdits> carries the full channel-pair align state --
+    // WarpMap (with per-anchor pitch deltas), sync points, protected areas,
+    // render history, and the analysis frame.
+    {
+        juce::ValueTree align (kAlignEditsTag);
+        align.setProperty ("analyzed",   mAlignState.analyzed ? 1 : 0,      nullptr);
+        align.setProperty ("lSig",       mAlignState.analyzedLeaderSig,     nullptr);
+        align.setProperty ("fSig",       mAlignState.analyzedFollowerSig,   nullptr);
+        align.setProperty ("startBeat",  mAlignState.commonStartBeat,       nullptr);
+        align.setProperty ("lPad",       mAlignState.leaderPadSamples,      nullptr);
+        align.setProperty ("fPad",       mAlignState.followerPadSamples,    nullptr);
+        align.setProperty ("sr",         mAlignState.analysisSampleRate,    nullptr);
+        if (mAlignState.analyzed)
+            align.appendChild (mAlignState.map.toValueTree(), nullptr);
+        for (const auto& p : mAlignState.syncPoints)
+            align.appendChild (p.toValueTree(), nullptr);
+        for (const auto& a : mAlignState.protectedAreas)
+            align.appendChild (a.toValueTree(), nullptr);
+        for (const auto& r : mAlignState.renders)
+        {
+            juce::ValueTree e ("R");
+            e.setProperty ("f", r.file,    nullptr);
+            e.setProperty ("d", r.dateIso, nullptr);
+            e.setProperty ("v", r.version, nullptr);
+            align.appendChild (e, nullptr);
+        }
+        state.appendChild (align, nullptr);
+    }
 
     // H-6d: embed the BaySickNAMIRProcessor's full state as a base64
     // string property under <NamIrState>.  ValueTree doesn't take MemoryBlock
@@ -457,7 +756,48 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         if (namIrChild.isValid())
             newState.removeChild (namIrChild, nullptr);
 
+        // QA-F Task 3: same for <AlignEdits> -- parsed into mAlignState below.
+        auto alignChild = newState.getChildWithName (kAlignEditsTag);
+        if (alignChild.isValid())
+            newState.removeChild (alignChild, nullptr);
+
         apvts.replaceState (newState);
+
+        mAlignState = AlignState();
+        if (alignChild.isValid())
+        {
+            mAlignState.analyzed            = ((int) alignChild.getProperty ("analyzed", 0)) != 0;
+            mAlignState.analyzedLeaderSig   = (juce::int64) alignChild.getProperty ("lSig", 0);
+            mAlignState.analyzedFollowerSig = (juce::int64) alignChild.getProperty ("fSig", 0);
+            mAlignState.commonStartBeat     = (double) alignChild.getProperty ("startBeat", 0.0);
+            mAlignState.leaderPadSamples    = (juce::int64) alignChild.getProperty ("lPad", 0);
+            mAlignState.followerPadSamples  = (juce::int64) alignChild.getProperty ("fPad", 0);
+            mAlignState.analysisSampleRate  = (double) alignChild.getProperty ("sr", 44100.0);
+            for (int i = 0; i < alignChild.getNumChildren(); ++i)
+            {
+                auto c = alignChild.getChild (i);
+                if (c.hasType ("WarpMap"))
+                    mAlignState.map.fromValueTree (c);
+                else if (c.hasType ("SP"))
+                    mAlignState.syncPoints.push_back (AlignSyncPoint::fromValueTree (c));
+                else if (c.hasType ("PA"))
+                    mAlignState.protectedAreas.push_back (AlignProtectedArea::fromValueTree (c));
+                else if (c.hasType ("R"))
+                {
+                    AlignRenderEntry r;
+                    r.file    = c.getProperty ("f", juce::String()).toString();
+                    r.dateIso = c.getProperty ("d", juce::String()).toString();
+                    r.version = (int) c.getProperty ("v", 1);
+                    mAlignState.renders.push_back (r);
+                }
+            }
+            if (mAlignState.analyzed && mAlignState.map.isValid())
+                mAlign.setWarpMap (mAlignState.map);
+            else
+                mAlign.clearWarpMap();
+        }
+        else
+            mAlign.clearWarpMap();
 
         // H-6d: restore the embedded NAM/IR state.  Pre-H-6d projects have
         // no <NamIrState> child; the per-Vox NAM/IR processor stays at its
@@ -474,9 +814,7 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
             }
         }
 
-        // <PitchEdits> + <AlignEdits> are placeholders today.  G-9 will
-        // populate them via offline-editor data models that live on this
-        // processor; setStateInformation will then read those children
-        // back into the data models here.
+        // <PitchEdits> remains a reserved placeholder (QA-Fa's BaySickPitch
+        // data model populates it).
     }
 }

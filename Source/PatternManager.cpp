@@ -1118,6 +1118,10 @@ juce::ValueTree PatternManager::toValueTree() const
         // instead of routing through the original Vox/Inst page.  Default 0
         // on deserialize preserves backward compatibility with pre-fix saves.
         bNode.setProperty("routeChannel",   b.routeChannel,   nullptr);
+        // QA-F (2026-07-09): persist the align-bake marker so the composite /
+        // signature exclusion survives save/load (default false on read
+        // leaves pre-QA-F saves unchanged).
+        bNode.setProperty("alignBake",      b.alignBake,      nullptr);
         // QA-E Task 7 (FILE-02): persist the per-copy override flag (see
         // ArrangementBlock::isOverride).  New saves always carry it.
         bNode.setProperty("isOverride",     b.isOverride,      nullptr);
@@ -1517,6 +1521,7 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         // pre-fix saves -> legacy "no Vox/Inst routing" behavior.  New saves
         // carry the field so Vox/Inst-recorded clips persist their route.
         b.routeChannel   = (int)             bNode.getProperty("routeChannel",   0);
+        b.alignBake      = (bool)            bNode.getProperty("alignBake",      false);
         // QA-E Task 7 (FILE-02): default TRUE on read.  Pre-Task-7 saves have
         // no "isOverride" attribute -> treat every existing block as a fully
         // customized copy so its saved pitch / BPM / mode / route are all

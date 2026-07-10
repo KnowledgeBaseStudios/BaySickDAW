@@ -33,6 +33,7 @@
 // PagePresetIO.h.  Rusty's Save/Load Page Preset now uses PageKind::RustyDrums.
 #include "PagePresetIO.h"
 #include "../ClipDropDiag.h"                   // QA-ClipDrop: diagnostic trap (2026-06-02)
+#include "../TempoMapRead.h"                   // QA-F: bake length in beats through the tempo map
 #include "../Clips/ClipsPage.h"                       // G-2: Clips page + empty state
 #include "../Vox/VoxPage.h"                           // G-4: Vox page + empty state
 #include "../Inst/InstPage.h"                         // G-4: Inst page + empty state
@@ -11135,6 +11136,132 @@ void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
     // only when we were the outermost owner).  Audio resumes here.
     if (isLoadContext)
         mProcessor.setProjectLoadInProgress (shieldWasUp);
+}
+
+// ── QA-F (2026-07-09): BaySickAlign bake placement ───────────────────────────
+// Owner call (build round): bake -> the track row BELOW the follower's
+// original clips; original rows row-muted (one-click A/B toggle); a prior
+// bake for the same channel is replaced IN PLACE (no row stacking per
+// render).  The block is routed through the follower's Vox chain so the A/B
+// compares like-for-like, and alignBake-marked so re-analysis never
+// composites the bake into its own source.
+void StandaloneEditor::placeAlignedBake (const juce::File& bakeFile, double startBeat,
+                                         int followerChannelId)
+{
+    if (! mPM || ! bakeFile.existsAsFile() || followerChannelId <= 0)
+        return;
+
+    // File duration via the header only (dropWavAsClip precedent).
+    double fileSeconds = 0.0;
+    {
+        juce::AudioFormatManager fmt;
+        fmt.registerBasicFormats();
+        if (auto reader = std::unique_ptr<juce::AudioFormatReader> (
+                fmt.createReaderFor (bakeFile)))
+            if (reader->sampleRate > 0.0)
+                fileSeconds = (double) reader->lengthInSamples / reader->sampleRate;
+    }
+    if (fileSeconds <= 0.0)
+        return;
+
+    // Length in beats through the tempo map from the bake position (linear
+    // fallback at the transport tempo when no timeline is published).
+    const double bpm = juce::jmax (20.0, mTransport ? mTransport->getBPM() : 120.0);
+    double lengthBeats;
+    double bpmAtStart = bpm;
+    if (TempoMap::isActive())
+    {
+        const juce::int64 s0 = TempoMap::sampleAtBeat (startBeat);
+        const double mapSr   = TempoMap::gSampleRate.load (std::memory_order_relaxed);
+        const juce::int64 s1 = s0 + (juce::int64) std::llround (
+            fileSeconds * (mapSr > 0.0 ? mapSr : 44100.0));
+        lengthBeats = TempoMap::beatAtSample (s1) - startBeat;
+        bpmAtStart  = TempoMap::bpmAtSample (s0);
+    }
+    else
+    {
+        lengthBeats = fileSeconds * bpm / 60.0;
+    }
+    if (lengthBeats <= 0.0)
+        return;
+
+    const juce::String relPath = "Aligned/" + bakeFile.getFileName();
+    constexpr double kBeatsPerBar = 4.0;
+
+    // Originals = un-muted audio clips routed to the follower channel
+    // (bakes excluded).  Their rows get muted; the bake row sits below the
+    // deepest of them.
+    int maxOriginalRow = -1;
+    std::vector<int> originalRows;
+    int existingBakeIdx = -1;
+    for (int i = 0; i < mPM->getNumBlocks(); ++i)
+    {
+        const auto& b = mPM->getBlock (i);
+        if (b.clipType != ClipType::Audio || b.routeChannel != followerChannelId)
+            continue;
+        if (b.alignBake)
+        {
+            existingBakeIdx = i;   // replace in place on re-render
+            continue;
+        }
+        if (b.muted) continue;
+        maxOriginalRow = juce::jmax (maxOriginalRow, b.trackRow);
+        if (std::find (originalRows.begin(), originalRows.end(), b.trackRow)
+                == originalRows.end())
+            originalRows.push_back (b.trackRow);
+    }
+    if (maxOriginalRow < 0 && existingBakeIdx < 0)
+        return;   // nothing routed to this channel -- nowhere sensible to place
+
+    const int targetRow = (existingBakeIdx >= 0)
+        ? mPM->getBlock (existingBakeIdx).trackRow
+        : juce::jmin (kMaxArrangementRows - 1, maxOriginalRow + 1);
+
+    // Browser entry for the bake (grouped under the Vox page's category).
+    mPM->addAudioToLibrary (relPath, {}, followerChannelId);
+
+    if (existingBakeIdx >= 0)
+    {
+        auto& b = mPM->getBlock (existingBakeIdx);
+        b.audioFilePath = relPath;
+        b.startBar      = (int) std::floor (startBeat / kBeatsPerBar);
+        b.setStartBeats  (startBeat);
+        b.lengthBars    = juce::jmax (1, (int) std::ceil (lengthBeats / kBeatsPerBar));
+        b.setLengthBeats (lengthBeats);
+        b.originalBPM   = (float) bpmAtStart;
+        b.stretchMode   = true;
+        b.muted         = false;
+        b.contentStartSamples = 0;
+    }
+    else
+    {
+        ArrangementBlock block;
+        block.clipType      = ClipType::Audio;
+        block.trackRow      = targetRow;
+        block.startBar      = (int) std::floor (startBeat / kBeatsPerBar);
+        block.setStartBeats  (startBeat);
+        block.lengthBars    = juce::jmax (1, (int) std::ceil (lengthBeats / kBeatsPerBar));
+        block.setLengthBeats (lengthBeats);
+        block.patternIndex  = mPM->getCurrentPatternIndex();
+        block.layerTrack    = false;
+        block.audioFilePath = relPath;
+        block.originalBPM   = (float) bpmAtStart;   // unstretched at its own position (G law)
+        block.stretchMode   = true;
+        block.routeChannel  = followerChannelId;    // same Vox chain as the originals
+        block.alignBake     = true;
+        // Detached copy: the bake's identity is authoritative -- a library
+        // Properties edit must not re-drive its BPM/mode/route.
+        block.isOverride    = true;
+        mPM->addBlock (block);
+    }
+
+    // Mute the original rows -- the owner-specified one-click A/B toggle.
+    for (int row : originalRows)
+        mPM->setRowMuted (row, true);
+
+    mProcessor.rebuildAudioClipPlayers();
+    if (mProjectManager) mProjectManager->markDirty();
+    if (mBuilderPage) mBuilderPage->repaint();
 }
 
 // ── R5d (2026-04-24): post-stop recording routing ───────────────────────────

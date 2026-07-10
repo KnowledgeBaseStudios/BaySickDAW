@@ -661,6 +661,30 @@ public:
                                 juce::AudioBuffer<float>*    mtDest,
                                 juce::AudioBuffer<float>&    engineSum);
 
+    // QA-F Task 1: offline channel-composite renderer -- the shared analysis
+    // foundation for BaySickAlign / BaySickPitch.  MESSAGE THREAD ONLY: opens
+    // its own readers from the arrangement blocks and never touches the
+    // audio-thread clip snapshot, so it is safe during live playback.  Sums
+    // every un-muted clip routed to channelId (FilePlay takes included) at
+    // its grid position, mono, at the device sample rate.  outStartBeat /
+    // outStartSample = timeline beat + timeline sample of composite sample 0
+    // (the sample form lets two composites be common-origin padded without
+    // re-deriving the beat->sample mapping).  Empty buffer when the channel
+    // has no decodable clips.
+    juce::AudioBuffer<float> renderChannelComposite (int channelId, double& outStartBeat,
+                                                     juce::int64& outStartSample);
+
+    // QA-F Task 3: order-independent signature of a channel's clip layout
+    // (path/start/length/trim/stretch per routed block).  BaySickAlign
+    // compares analyze-time vs current to flag a stale WarpMap.  Message
+    // thread only.
+    juce::int64 channelClipSignature (int channelId) const;
+
+    // QA-F Task 3: channels that currently have audio clips routed to them
+    // (candidates for the BaySickAlign Leader/Follower pickers).  Generic
+    // kind+index labels; tab renames live at the editor layer.
+    std::vector<std::pair<int, juce::String>> listAudioClipChannels() const;
+
     // QA-AudioMeters (2026-05-24): per-kind insert peak snapshot mirrors -- the
     // UI poll target for all 8 InsertKinds.  Audio thread writes via
     // drainMeterAtomicsForUI's 8-per-kind drainAndMerge loop (which drains

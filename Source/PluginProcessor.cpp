@@ -12,6 +12,20 @@ static inline juce::int64 clipBeatToSample (double beat, double secPerBeat, doub
         return TempoMap::sampleAtBeat (beat);
     return (juce::int64) (beat * secPerBeat * sampleRate);
 }
+
+// QA-F: the beat-domain file-position law shared by every audio-clip decode
+// path (realtime Paths A + B and the offline channel-composite renderer).
+// File consumption per musical beat is fileSR*60/originalBPM in BOTH clip
+// modes -- stretch pins it by definition, and resample's tempo-follow term
+// cancels -- so the returned position is exact through any number of tempo
+// steps.  varispeed = the Stretch-knob rate multiplier (Path A only).
+static inline double clipFilePosForBeat (double beatsIntoClip, double fileSampleRate,
+                                         double originalBPM, double contentStart,
+                                         double varispeed = 1.0)
+{
+    return contentStart + juce::jmax (0.0, beatsIntoClip)
+                          * fileSampleRate * 60.0 * varispeed / originalBPM;
+}
 // 2026-04-25: BaySickDrumsProcessor include removed - class deleted.
 #include "BaySickSynth/BaySickSynthProcessor.h"   // D1.4-fix (c): drum transpose compensation
 #include "BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-5: singleton sfizz drum-kit engine
@@ -661,9 +675,9 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         {
             const double beatsIn = TempoMap::beatAtSample (ctx.projectStart + bufOffset)
                                    - player.clipStartBeat;
-            posD = (double) contentBase
-                 + juce::jmax (0.0, beatsIn) * player.fileSampleRate * 60.0
-                   * (double) ctl.stretchSpeed / (double) player.originalBPM;
+            posD = clipFilePosForBeat (beatsIn, player.fileSampleRate,
+                                       (double) player.originalBPM,
+                                       (double) contentBase, (double) ctl.stretchSpeed);
         }
         else
         {
@@ -1055,9 +1069,9 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     {
         const double beatsIn = TempoMap::beatAtSample (ctx.projectStart + bufOffset)
                                - player.clipStartBeat;
-        posDB = (double) contentStart
-              + juce::jmax (0.0, beatsIn) * player.fileSampleRate * 60.0
-                / (double) player.originalBPM;
+        posDB = clipFilePosForBeat (beatsIn, player.fileSampleRate,
+                                    (double) player.originalBPM,
+                                    (double) contentStart);
     }
     else
     {
@@ -2950,6 +2964,397 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
     if (oldRaw != nullptr)
         mClipRetirement.retire (std::unique_ptr<AudioClipSnapshot> (oldRaw),
                                  newGen);
+}
+
+// ── QA-F Task 1: offline channel-composite renderer ──────────────────────────
+// MESSAGE THREAD ONLY.  Shared analysis foundation for BaySickAlign /
+// BaySickPitch: decodes every un-muted arrangement audio clip routed to
+// `channelId` (INCLUDING Vox/Inst FilePlay takes, which the realtime row
+// renderer skips) at its grid position and sums it, mono, at the device
+// sample rate.  Opens its own readers from the block paths and never touches
+// the audio-thread snapshot / streamers / vocoders, so it is safe to call
+// during live playback.  Strip/row mutes and choke state are deliberately
+// ignored (block-level mute IS respected): analysis must see the channel's
+// content even while the user monitors with the strip muted.
+// outStartBeat = the timeline beat of composite sample 0; composite index i
+// maps to timeline sample clipBeatToSample(outStartBeat, ...) + i.
+juce::AudioBuffer<float> VibeSynthProcessor::renderChannelComposite (int channelId,
+                                                                     double& outStartBeat,
+                                                                     juce::int64& outStartSample)
+{
+    outStartBeat   = 0.0;
+    outStartSample = 0;
+    juce::AudioBuffer<float> composite;
+    if (mPatternManager == nullptr)
+        return composite;
+
+    const double globalBpm  = juce::jmax (1.0, mPatternManager->getGlobalTempo());
+    const double secPerBeat = 60.0 / globalBpm;
+
+    struct CompClip
+    {
+        std::unique_ptr<juce::AudioFormatReader> reader;
+        double      startBeat    = 0.0;
+        double      endBeat      = 0.0;     // already file-EOF-clamped
+        double      originalBPM  = 120.0;
+        bool        stretchMode  = true;
+        juce::int64 contentStart = 0;
+    };
+    std::vector<CompClip> clips;
+
+    for (int i = 0; i < mPatternManager->getNumBlocks(); ++i)
+    {
+        auto& blk = mPatternManager->getBlock (i);
+        // alignBake exclusion: a placed bake must never feed the composite
+        // of the channel it was rendered FROM (see ArrangementBlock::alignBake).
+        if (blk.clipType != ClipType::Audio || blk.audioFilePath.isEmpty()
+            || blk.muted || blk.alignBake)
+            continue;
+
+        // Same owner resolution as the realtime paths: routeChannel when
+        // stamped; legacy 0 falls back to the creation row's Clips strip.
+        // Read-only here -- rebuildAudioClipPlayers owns the migration stamp.
+        const int route = (blk.routeChannel != 0)
+            ? blk.routeChannel
+            : MixerChannelIds::audioInsert (blk.trackRow);
+        if (route != channelId)
+            continue;
+
+        std::unique_ptr<juce::AudioFormatReader> reader (
+            mAudioFormatManager.createReaderFor (resolveProjectFile (blk.audioFilePath)));
+        if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0.0)
+            continue;
+
+        CompClip c;
+        c.startBeat    = effectiveStartBeats (blk);
+        c.endBeat      = c.startBeat + effectiveLengthBeats (blk);
+        c.originalBPM  = (blk.originalBPM > 0.f) ? (double) blk.originalBPM : 120.0;
+        c.stretchMode  = blk.stretchMode;
+        c.contentStart = juce::jmax ((juce::int64) 0, blk.contentStartSamples);
+        // File-EOF clamp in the beat domain (consumption per beat is mode-
+        // blind -- see clipFilePosForBeat).
+        const double playableBeats =
+            (double) (reader->lengthInSamples - c.contentStart)
+            / reader->sampleRate * c.originalBPM / 60.0;
+        c.endBeat = juce::jmin (c.endBeat, c.startBeat + playableBeats);
+        if (c.endBeat <= c.startBeat)
+            continue;
+
+        c.reader = std::move (reader);
+        clips.push_back (std::move (c));
+    }
+
+    if (clips.empty())
+        return composite;
+
+    double startBeat = clips.front().startBeat;
+    double endBeat   = clips.front().endBeat;
+    for (const auto& c : clips)
+    {
+        startBeat = juce::jmin (startBeat, c.startBeat);
+        endBeat   = juce::jmax (endBeat,   c.endBeat);
+    }
+
+    const juce::int64 compStart = clipBeatToSample (startBeat, secPerBeat, mSampleRate);
+    const juce::int64 compEnd   = clipBeatToSample (endBeat,   secPerBeat, mSampleRate);
+    // 30-min cap: corrupt beat data would otherwise demand a multi-GB
+    // allocation; align/pitch material is song-length (minutes).  Truncates
+    // silently past the cap -- acceptable for an analysis composite.
+    const juce::int64 totalLen = juce::jmin (compEnd - compStart,
+                                             (juce::int64) (1800.0 * mSampleRate));
+    if (totalLen <= 0)
+        return composite;
+
+    composite.setSize (1, (int) totalLen);
+    composite.clear();
+    outStartBeat   = startBeat;
+    outStartSample = compStart;
+
+    // Timeline sample -> beat: exact inverse of clipBeatToSample (map when
+    // published, linear fallback otherwise).
+    auto beatAtTimeline = [secPerBeat, this] (juce::int64 t)
+    {
+        if (TempoMap::isActive())
+            return TempoMap::beatAtSample (t);
+        return (double) t / (secPerBeat * mSampleRate);
+    };
+
+    for (auto& c : clips)
+    {
+        const juce::int64 clipS  = clipBeatToSample (c.startBeat, secPerBeat, mSampleRate);
+        const juce::int64 clipE  = clipBeatToSample (c.endBeat,   secPerBeat, mSampleRate);
+        const juce::int64 dstOff = clipS - compStart;
+        const int dstLen = (int) juce::jmin (clipE - clipS,
+                                             (juce::int64) composite.getNumSamples() - dstOff);
+        if (dstLen <= 0 || dstOff < 0)
+            continue;
+        const juce::int64 tEnd = clipS + dstLen;
+
+        // Mono-fold the rendered source range into RAM once (chunked read).
+        // Sized from the beats actually rendered, not the full clip, so the
+        // 30-min composite cap bounds this too; 2^28-sample backstop (~1 GB)
+        // skips anything a degenerate SR/length combo could still ask for.
+        const double srcPerBeat    = c.reader->sampleRate * 60.0 / c.originalBPM;
+        const double renderedBeats = juce::jmin (c.endBeat - c.startBeat,
+                                                 beatAtTimeline (tEnd) - c.startBeat);
+        const juce::int64 srcLen = juce::jmin (
+            c.reader->lengthInSamples - c.contentStart,
+            (juce::int64) std::ceil (juce::jmax (0.0, renderedBeats) * srcPerBeat) + 8);
+        if (srcLen <= 0 || srcLen > (juce::int64) 1 << 28)
+            continue;
+
+        juce::AudioBuffer<float> monoSrc (1, (int) srcLen);
+        monoSrc.clear();
+        {
+            const int nCh = juce::jmax (1, (int) c.reader->numChannels);
+            juce::AudioBuffer<float> tmp (nCh, 1 << 16);
+            juce::int64 done = 0;
+            while (done < srcLen)
+            {
+                const int n = (int) juce::jmin ((juce::int64) tmp.getNumSamples(),
+                                                srcLen - done);
+                tmp.clear();
+                if (! c.reader->read (&tmp, 0, n, c.contentStart + done, true, true))
+                    break;
+                for (int ch = 0; ch < nCh; ++ch)
+                    monoSrc.addFrom (0, (int) done, tmp, ch, 0, n, 1.0f / (float) nCh);
+                done += n;
+            }
+        }
+
+        // Constant-tempo spans across the clip's rendered range.
+        struct Span { juce::int64 t0, t1; double bpm; };
+        std::vector<Span> spans;
+        if (TempoMap::isActive())
+        {
+            juce::int64 t = clipS;
+            while (t < tEnd)
+            {
+                const double      bpm = TempoMap::bpmAtSample (t);
+                const juce::int64 nb  = TempoMap::nextBoundaryAfter (t);
+                const juce::int64 t1  = (nb < 0 || nb > tEnd) ? tEnd : nb;
+                spans.push_back ({ t, t1, juce::jmax (1.0, bpm) });
+                t = t1;
+            }
+        }
+        else
+            spans.push_back ({ clipS, tEnd, globalBpm });
+
+        bool needPV = false;
+        if (c.stretchMode)
+            for (const auto& s : spans)
+                if (std::abs (c.originalBPM / s.bpm - 1.0) > 0.001)
+                    { needPV = true; break; }
+
+        // F3-style 5 ms edge declick (matches the realtime clip render; also
+        // keeps clip boundaries from reading as spectral-flux onsets).
+        const int fadeN = juce::jmax (1, juce::jmin (
+            (int) std::round (mSampleRate * 0.005), dstLen / 2));
+        auto edgeGain = [fadeN, dstLen] (int p)
+        {
+            float g = 1.0f;
+            if (p < fadeN)           g = (float) (p + 1) / (float) fadeN;
+            if (p >= dstLen - fadeN) g = juce::jmin (g, (float) (dstLen - p) / (float) fadeN);
+            return g;
+        };
+
+        const float* src = monoSrc.getReadPointer (0);
+        float*       dst = composite.getWritePointer (0);
+
+        if (! needPV)
+        {
+            // Direct / resample decode: exact beat-domain anchor at each span
+            // start, linear advance inside (constant bpm) -- positions match
+            // the realtime paths through every tempo step.
+            for (const auto& s : spans)
+            {
+                double fp = clipFilePosForBeat (beatAtTimeline (s.t0) - c.startBeat,
+                                                c.reader->sampleRate, c.originalBPM, 0.0);
+                const double fpStep = (s.bpm / c.originalBPM)
+                                      * (c.reader->sampleRate / mSampleRate);
+                for (juce::int64 t = s.t0; t < s.t1; ++t, fp += fpStep)
+                {
+                    const int ip = (int) fp;
+                    if (ip + 1 >= (int) srcLen) break;
+                    const float frac = (float) (fp - (double) ip);
+                    const float v    = src[ip] + (src[ip + 1] - src[ip]) * frac;
+                    const int   p    = (int) (t - clipS);
+                    dst[dstOff + p] += v * edgeGain (p);
+                }
+            }
+        }
+        else
+        {
+            // Stretch decode: offline PhaseVocoder pass per constant-tempo
+            // span (pitch preserved, matching the realtime stretch path).
+            // The synthesis hop is integer-rounded, so the EFFECTIVE ratio is
+            // synthHop/kHop, not the request -- both the pre-roll skip and
+            // the exact-length resample below must use it or the span end
+            // drifts ~0.1% (tens of ms over a minute of material).  Span
+            // boundaries reset PV phase; a seam there coincides with a tempo
+            // step (already a musical discontinuity).
+            PhaseVocoder pv (1);
+            juce::AudioBuffer<float> feed   (1, PhaseVocoder::kHopSize);
+            juce::AudioBuffer<float> pvPull (1, 1 << 14);
+            std::vector<float> outAccum;
+
+            for (const auto& s : spans)
+            {
+                const double ratio = juce::jlimit (1.0 / 64.0, 64.0,
+                                                   c.originalBPM / s.bpm);
+                const double effRatio =
+                    (double) juce::jmax (1, juce::roundToInt (
+                        (double) PhaseVocoder::kHopSize * ratio))
+                    / (double) PhaseVocoder::kHopSize;
+
+                const double srcA = clipFilePosForBeat (
+                    beatAtTimeline (s.t0) - c.startBeat,
+                    c.reader->sampleRate, c.originalBPM, 0.0);
+                const double srcB = clipFilePosForBeat (
+                    beatAtTimeline (s.t1) - c.startBeat,
+                    c.reader->sampleRate, c.originalBPM, 0.0);
+
+                const juce::int64 srcA64 = juce::jlimit ((juce::int64) 0, srcLen,
+                    (juce::int64) std::floor (srcA));
+                const juce::int64 srcB64 = juce::jlimit (srcA64, srcLen,
+                    (juce::int64) std::ceil (srcB));
+                if (srcB64 <= srcA64)
+                    continue;
+
+                // Pre-roll primes the OLA ramp-in; tail flushes the settle
+                // margin.  Both scale up for compressive ratios (< 1) where
+                // one source sample yields < 1 output sample.
+                const juce::int64 preN = juce::jmin (srcA64,
+                    (juce::int64) std::ceil ((double) PhaseVocoder::kFFTSize
+                                             / juce::jmin (1.0, ratio)));
+                const juce::int64 tailN = (juce::int64) std::ceil (
+                    2.0 * PhaseVocoder::kFFTSize / juce::jmin (1.0, ratio));
+
+                const juce::int64 outProjected = (juce::int64) (
+                    (double) (preN + (srcB64 - srcA64) + tailN) * effRatio) + 4096;
+                if (outProjected > (juce::int64) 1 << 28)
+                    continue;   // hostile ratio x length combo -- skip span
+
+                pv.reset();
+                pv.setStretchRatio (ratio);
+                outAccum.clear();
+                outAccum.reserve ((size_t) outProjected);
+
+                // kHopSize-sized pushes with an immediate drain keep the PV's
+                // fixed input/OLA rings from overflowing at large ratios.
+                juce::int64 fpos = srcA64 - preN;
+                const juce::int64 feedEnd = srcB64 + tailN;
+                while (fpos < feedEnd)
+                {
+                    const int n = (int) juce::jmin (
+                        (juce::int64) PhaseVocoder::kHopSize, feedEnd - fpos);
+                    feed.clear();
+                    const juce::int64 availSrc = juce::jmin ((juce::int64) n,
+                                                             srcLen - fpos);
+                    if (availSrc > 0)
+                        feed.copyFrom (0, 0, monoSrc, 0, (int) fpos, (int) availSrc);
+                    pv.push (feed, 0, n);
+                    for (int got = 0;
+                         (got = pv.pull (pvPull, 0, pvPull.getNumSamples())) > 0;)
+                        outAccum.insert (outAccum.end(),
+                                         pvPull.getReadPointer (0),
+                                         pvPull.getReadPointer (0) + got);
+                    fpos += n;
+                }
+
+                // Map the span onto [outSkip, outSkip + stretchedLen) and
+                // resample to the exact device-sample span length (absorbs
+                // the hop rounding; SR conversion happens here too).
+                const double outSkip      = (double) preN * effRatio;
+                const double stretchedLen = juce::jmax (1.0,
+                    (double) (srcB64 - srcA64) * effRatio);
+                const juce::int64 spanDst = s.t1 - s.t0;
+
+                for (juce::int64 j = 0; j < spanDst; ++j)
+                {
+                    const double op = outSkip
+                        + ((double) j / (double) spanDst) * stretchedLen;
+                    const int ip = (int) op;
+                    if (ip + 1 >= (int) outAccum.size()) break;
+                    const float fr = (float) (op - (double) ip);
+                    const float v  = outAccum[(size_t) ip]
+                        + (outAccum[(size_t) ip + 1] - outAccum[(size_t) ip]) * fr;
+                    const int p = (int) ((s.t0 - clipS) + j);
+                    dst[dstOff + p] += v * edgeGain (p);
+                }
+            }
+        }
+    }
+
+    return composite;
+}
+
+juce::int64 VibeSynthProcessor::channelClipSignature (int channelId) const
+{
+    if (mPatternManager == nullptr) return 0;
+    juce::int64 sig = 0;
+    for (int i = 0; i < mPatternManager->getNumBlocks(); ++i)
+    {
+        const auto& blk = mPatternManager->getBlock (i);
+        // Filter matches renderChannelComposite exactly (the signature hashes
+        // what the composite would render -- a bake placement must not read
+        // as "the channel changed").
+        if (blk.clipType != ClipType::Audio || blk.audioFilePath.isEmpty()
+            || blk.muted || blk.alignBake)
+            continue;
+        const int route = (blk.routeChannel != 0)
+            ? blk.routeChannel
+            : MixerChannelIds::audioInsert (blk.trackRow);
+        if (route != channelId) continue;
+
+        // Order-independent (sum of per-block hashes): a block move changes
+        // its own term; reordering the block list does not.
+        juce::int64 h = (juce::int64) blk.audioFilePath.hashCode64();
+        h = h * 31 + (juce::int64) std::llround (effectiveStartBeats (blk) * 1000.0);
+        h = h * 31 + (juce::int64) std::llround (effectiveLengthBeats (blk) * 1000.0);
+        h = h * 31 + blk.contentStartSamples;
+        h = h * 31 + (blk.stretchMode ? 1 : 0);
+        h = h * 31 + (juce::int64) std::llround ((double) blk.originalBPM * 100.0);
+        sig += h;
+    }
+    return sig;
+}
+
+std::vector<std::pair<int, juce::String>> VibeSynthProcessor::listAudioClipChannels() const
+{
+    std::vector<std::pair<int, juce::String>> outList;
+    if (mPatternManager == nullptr) return outList;
+
+    std::vector<int> seen;
+    for (int i = 0; i < mPatternManager->getNumBlocks(); ++i)
+    {
+        const auto& blk = mPatternManager->getBlock (i);
+        if (blk.clipType != ClipType::Audio || blk.audioFilePath.isEmpty()
+            || blk.muted || blk.alignBake)
+            continue;
+        const int route = (blk.routeChannel != 0)
+            ? blk.routeChannel
+            : MixerChannelIds::audioInsert (blk.trackRow);
+        if (std::find (seen.begin(), seen.end(), route) != seen.end())
+            continue;
+        seen.push_back (route);
+
+        juce::String label;
+        if (route >= MixerChannelIds::kVoxBase
+            && route < MixerChannelIds::kVoxBase + MixerChannelIds::kMaxVoxStrips)
+            label = "Vox " + juce::String (route - MixerChannelIds::kVoxBase + 1);
+        else if (route >= MixerChannelIds::kInstBase
+                 && route < MixerChannelIds::kInstBase + MixerChannelIds::kMaxInstStrips)
+            label = "Inst " + juce::String (route - MixerChannelIds::kInstBase + 1);
+        else if (route >= MixerChannelIds::kAudioBase
+                 && route < MixerChannelIds::kAudioBase + kMaxAudioRows)
+            label = "Clips " + juce::String (route - MixerChannelIds::kAudioBase + 1);
+        else
+            label = "Channel " + juce::String (route);
+        outList.push_back ({ route, label });
+    }
+    std::sort (outList.begin(), outList.end());
+    return outList;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

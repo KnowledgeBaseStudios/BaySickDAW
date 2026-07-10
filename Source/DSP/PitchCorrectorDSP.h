@@ -1,35 +1,38 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PitchTrackerYIN.h"
+#include "PitchShifters.h"
 #include <array>
 #include <atomic>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PitchCorrectorDSP - Phase H-5 (2026-05-01)
+// PitchCorrectorDSP - Phase H-5 (2026-05-01), QA-F Task 5 quality pass
+// (2026-07-09)
 // ─────────────────────────────────────────────────────────────────────────────
 // Realtime pitch correction wrapper for BaySickVocal.  Owns:
 //   * PitchTrackerYIN for fundamental detection (40-1500 Hz, ~50 ms latency)
-//   * Granular time-domain pitch shifter for the realtime audio path
-//     (2 overlapping Hann-windowed grains, simple but reliable for vocals
-//     at small shift amounts <= 1 semitone)
+//   * PsolaShifter (PitchShifters.h) for the realtime audio path -- period-
+//     synchronous OLA at ~2-pitch-period latency, period fed from the YIN
+//     tracker.  Chosen over a phase vocoder per Call 2a: PV adds ~40 ms,
+//     which confuses a learner monitoring themselves live.
+//   * CepstralFormantEngine pair for Formant Preserve + Throat Shift
+//     (engaged only while either is active; adds ~20 ms on the wet path).
 //
 // Algorithm:
 //   1. Audio thread pushes input samples into PitchTrackerYIN.
 //   2. Read tracker's detected fundamental Hz.
-//   3. Convert to MIDI float, snap to nearest note in active Key/Scale.
+//   3. Convert to MIDI float, snap to nearest note in active Key/Scale --
+//      with note-change hysteresis so vibrato doesn't flip-flop targets.
 //   4. Compute desired shift ratio = targetHz / detectedHz.
 //   5. Smooth toward target shift over RetuneSpeed ms.
 //   6. Apply Strength: blend between 1.0 (no correction) and target ratio.
 //   7. Add Humanize: small random walk in cents.
-//   8. Apply ratio to audio via granular shifter -> output.
-//
-// Formant Preserve toggle and Throat Shift APVTS params are wired but the
-// formant DSP itself is a follow-up (cepstral envelope swap pass) - for H-5
-// the toggle is a no-op pass through.  Knobs are preset-safe to add later.
+//   8. Apply ratio via PSOLA; optionally re-impose the dry spectral
+//      envelope (Formant Preserve) / shift it (Throat Shift).
 //
 // Mode switch (Realtime vs Offline) is a UI/processing choice; the DSP class
-// itself runs the realtime path.  H-6a's BaySickAlign + BaySickPitch use
-// PhaseVocoder directly for offline render rather than this wrapper.
+// itself runs the realtime path.  BaySickAlign + BaySickPitch render offline
+// through BaySickAlignDSP / the PitchShifters trio instead of this wrapper.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PitchCorrectorDSP
@@ -67,9 +70,9 @@ public:
     void setScale             (int    s);         // Scale enum value
     void setRetuneSpeedMs     (float  ms);        // 0..100; lower = robotic, higher = transparent
     void setStrength          (float  unit);      // 0..1
-    void setFormantPreserve   (bool   on);        // currently no-op pass through
+    void setFormantPreserve   (bool   on);        // cepstral envelope re-imposition (QA-F Task 5)
     void setHumanizeCents     (float  cents);     // 0..20
-    void setThroatShiftSemis  (float  semis);     // -12..+12 (formant shift; no-op stub)
+    void setThroatShiftSemis  (float  semis);     // -12..+12 spectral-envelope shift (QA-F Task 5)
     void setCustomScaleNotes  (const std::array<bool, 12>& notes);
 
     bool bypassed { true };   // H-5: default OFF per locked spec
@@ -91,32 +94,15 @@ private:
     // ── YIN tracker ──────────────────────────────────────────────────────────
     PitchTrackerYIN mTracker;
 
-    // ── Granular pitch shifter (per channel) ────────────────────────────────
-    struct Shifter
-    {
-        std::vector<float>     ring;        // input ring buffer
-        int                    writePos { 0 };
-        int                    ringSize { 0 };
-
-        // Two grains, 50 % overlap
-        struct Grain
-        {
-            float readPos    { 0.0f };  // floating point read index (linear-interp)
-            float outputAge  { 0.0f };  // 0..grainSize - position within grain envelope
-            bool  active     { false };
-        };
-        std::array<Grain, 2>   grains;
-        int                    sinceLastGrain { 0 };
-
-        int                    grainSize   { 1024 };  // re-sized in prepare from sampleRate
-        int                    grainStride { 512  };  // half of grainSize (50% overlap)
-
-        void prepare (double sampleRate);
-        void reset();
-        // Process one mono sample: write `in`, read `pitchRatio`-scaled grains, return output.
-        float processSample (float in, float pitchRatio) noexcept;
-    };
-    std::array<Shifter, 2> mShifters;   // L and R
+    // ── QA-F Task 5: PSOLA shifter + formant machinery (per channel) ────────
+    // Replaces the H-5 2-grain granular Shifter: PSOLA's epoch-grid grains
+    // stay period-coherent (no comb/warble) and its latency is ~2 pitch
+    // periods.  The formant engines only run while Formant Preserve or
+    // Throat Shift is active; the engage edge resets them (their ~20 ms
+    // latency appears/disappears with the mode).
+    std::array<PsolaShifter, 2>          mShifters;   // L and R
+    std::array<CepstralFormantEngine, 2> mFormant;    // L and R
+    bool mFormantEngaged { false };
 
     // ── Parameter state ──────────────────────────────────────────────────────
     int   mKey             { 0 };          // 0 = C
@@ -132,6 +118,10 @@ private:
     float mCurrentShiftRatio { 1.0f };      // smoothed toward target
     float mRetuneCoef        { 0.0f };      // computed from RetuneSpeed + sampleRate
     float mHumanizePhase     { 0.0f };      // for slow Humanize random walk
+    // QA-F Task 5: the currently-held target note (MIDI).  -1 = none.  Held
+    // until the sung pitch commits to a different note (hysteresis) so
+    // vibrato around a boundary doesn't flip-flop the target (the "warble").
+    float mCurrentTargetMidi { -1.0f };
 
     // ── UI feedback (atomic published) ──────────────────────────────────────
     std::atomic<float> mDetectedHz        { 0.0f };

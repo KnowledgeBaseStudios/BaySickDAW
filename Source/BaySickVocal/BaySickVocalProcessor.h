@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "../DSP/EngineSidechainHelper.h"
 #include "../DSP/PitchCorrectorDSP.h"
+#include "../DSP/BaySickAlignDSP.h"
 #include "../EffectRack.h"
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
 #include "../Standalone/ApvtsDirtyTracker.h"
@@ -19,8 +20,8 @@
 // Editor (H-6) - 6 sub-tabs:
 //   1. BaySickVocals      (realtime pitch + page-wide controls)
 //   2. Vocal Chain        (de-esser / compressor / saturation / limiter rack)
-//   3. BaySickPitch       (Newtone-style offline pitch editor)
-//   4. BaySickAlign       (VocAlign-style offline time-alignment editor)
+//   3. BaySickPitch       (offline note-by-note pitch editor)
+//   4. BaySickAlign       (offline channel-pair time-alignment editor)
 //   5. BaySickNAM/IR      (existing engine hosted as a sub-tab)
 //   6. Pre Rack EQ        (strip's existing Pre EQ8 M/S)
 //
@@ -136,6 +137,88 @@ public:
     }
     float getSidechainLevel() const noexcept override { return mScHelper.getLevel(); }
 
+    // ── QA-F Task 3: BaySickAlign channel-pair state ─────────────────────────
+    // MESSAGE THREAD ONLY end to end -- the whole Align pipeline is offline
+    // (analyze -> preview -> render-to-bake per the G2-warp design lock); no
+    // bsa_* param ever reaches the audio thread, so there is no per-block
+    // APVTS push for this block of state.
+    BaySickAlignDSP mAlign;
+
+    struct AlignRenderEntry
+    {
+        juce::String file;      // project-relative ("Aligned/x_align_v1.wav")
+        juce::String dateIso;   // ISO8601 at render time
+        int          version { 1 };
+    };
+
+    struct AlignState
+    {
+        WarpMap                          map;
+        std::vector<AlignSyncPoint>      syncPoints;
+        std::vector<AlignProtectedArea>  protectedAreas;
+        std::vector<AlignRenderEntry>    renders;
+        // Channel-clip signatures captured at analyze time; a mismatch on
+        // poll = the grid changed under the map -> stale badge, manual
+        // re-analyze (never auto -- G2-warp lock).
+        juce::int64 analyzedLeaderSig   { 0 };
+        juce::int64 analyzedFollowerSig { 0 };
+        // Common-origin frame the map was authored in: both composites are
+        // front-padded to the earlier of the two start positions, so anchor
+        // times are comparable and the bake lands back at this beat.
+        double      commonStartBeat     { 0.0 };
+        juce::int64 leaderPadSamples    { 0 };
+        juce::int64 followerPadSamples  { 0 };
+        double      analysisSampleRate  { 44100.0 };
+        bool        analyzed            { false };
+    };
+    AlignState mAlignState;
+
+    // Services injected by the owning VoxPage (this engine must not link
+    // against VibeSynthProcessor).  All message-thread.
+    std::function<juce::AudioBuffer<float> (int channelId, double& outStartBeat,
+                                            juce::int64& outStartSample,
+                                            double& outSampleRate)> onRenderComposite;
+    std::function<juce::int64 (int channelId)>                  onChannelClipSignature;
+    std::function<std::vector<std::pair<int, juce::String>>()>  onListCandidateChannels;
+    std::function<juce::File()>                                 onGetProjectFolder;
+    // Bake placement is a pending owner spec call (what happens to the
+    // original follower clips when a render lands) -- the hook stays
+    // uninstalled until it is answered; render still writes the file +
+    // history entry either way.
+    std::function<void (const juce::File& bake, double startBeat)> onPlaceBakedClip;
+
+    void setOwnChannelId (int id) noexcept { mOwnChannelId = id; }
+    int  getOwnChannelId() const noexcept  { return mOwnChannelId; }
+
+    // Resolved picker state: bsa_leader_channel / bsa_follower_channel with
+    // -1 meaning "none picked" (leader) / "this page's own channel" (follower).
+    int resolveLeaderChannel()   const;
+    int resolveFollowerChannel() const;
+
+    // Mode/Fine-Tune -> pairing tolerance seconds (section 13e: base
+    // 150/100/50 ms for Loose/Close/Tight, +/-50 ms Fine Tune).
+    double alignToleranceSec() const;
+
+    // Analyze the current Leader/Follower pair into mAlignState (composites
+    // via onRenderComposite, common-origin padded).  Returns false + fills
+    // errorOut on a precondition failure (no channels picked / no clips /
+    // hooks missing).  MESSAGE THREAD ONLY.
+    bool analyzeAlign (juce::String& errorOut);
+
+    // Render-to-bake: warp the (re-rendered) follower composite through the
+    // current map + pitch pass + optional formant shift, write
+    // <project>/Aligned/{name}_align_v{N}.wav, append the history entry.
+    // Returns the file (invalid on failure + fills errorOut).
+    juce::File renderAlignedTake (juce::String& errorOut);
+
+    // Warped preview of the follower composite for the Output lane (same
+    // transform as the bake, no file write).  Empty when not analyzed.
+    juce::AudioBuffer<float> renderAlignedPreview();
+
+    // True when the leader/follower clip layout changed since analyze
+    // (polled by the editor timer; cheap hash compare via hook).
+    bool isAlignStale() const;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -168,6 +251,15 @@ private:
     // Audio thread reads at the top of processBlock; message thread writes
     // from the destructor (and ideally pre-flagged by the owner).
     std::atomic<bool> mShuttingDown { false };
+
+    // QA-F Task 3: this page's own mixer channel id (voxInsert(pageIndex)),
+    // stamped by VoxPage::setProcessor.  -1 until stamped.
+    int mOwnChannelId { -1 };
+
+    // Shared transform behind renderAlignedTake + renderAlignedPreview:
+    // re-render the follower composite, re-pad to the analysis origin, warp
+    // + pitch + optional formant shift.  Empty buffer + errorOut on failure.
+    juce::AudioBuffer<float> buildWarpedFollower (juce::String& errorOut);
 
     // H-6d (2026-05-02): owned NAM/IR processor (per-Vox-strip instance).
     // unique_ptr so the include only needs the forward declaration in

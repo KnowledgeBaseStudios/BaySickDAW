@@ -25,106 +25,20 @@ namespace
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shifter - 2-grain Hann-windowed time-domain pitch shifter
-// ─────────────────────────────────────────────────────────────────────────────
-
-void PitchCorrectorDSP::Shifter::prepare (double sampleRate)
-{
-    // Grain size ~25 ms at 44.1k (1100 samples), tuned to balance grain density
-    // (more = artifacts) vs latency (more = pitch tracking lag).  Stride = half
-    // for 50% overlap between two grains.
-    grainSize   = juce::jmax (256, (int) std::round (sampleRate * 0.025));
-    grainStride = grainSize / 2;
-    // Ring sized to 4x grain so we always have past samples to read from
-    // regardless of pitch ratio (up or down) without underruns.
-    ringSize = grainSize * 4;
-    ring.assign ((size_t) ringSize, 0.0f);
-    reset();
-}
-
-void PitchCorrectorDSP::Shifter::reset()
-{
-    std::fill (ring.begin(), ring.end(), 0.0f);
-    writePos = 0;
-    sinceLastGrain = 0;
-    for (auto& g : grains) { g.active = false; g.readPos = 0.0f; g.outputAge = 0.0f; }
-}
-
-float PitchCorrectorDSP::Shifter::processSample (float in, float pitchRatio) noexcept
-{
-    // Write input to ring.
-    ring[(size_t) writePos] = in;
-    writePos = (writePos + 1) % ringSize;
-
-    // Trigger a new grain every grainStride samples.  New grain reads from
-    // (writePos - grainSize) so it covers the most recent grainSize samples.
-    if (sinceLastGrain >= grainStride)
-    {
-        // Pick the inactive (or older) grain slot.
-        int slot = 0;
-        if (grains[0].active && grains[1].active)
-            slot = (grains[0].outputAge > grains[1].outputAge) ? 0 : 1;
-        else
-            slot = grains[0].active ? 1 : 0;
-
-        // Start position = writePos - grainSize, wrapped to ring length.
-        // Use float for sub-sample read precision via linear interpolation.
-        float startReal = (float) writePos - (float) grainSize;
-        while (startReal < 0.0f) startReal += (float) ringSize;
-        grains[slot].readPos   = startReal;
-        grains[slot].outputAge = 0.0f;
-        grains[slot].active    = true;
-        sinceLastGrain         = 0;
-    }
-    sinceLastGrain++;
-
-    // Mix active grains with Hann envelope.
-    float out = 0.0f;
-    for (auto& g : grains)
-    {
-        if (! g.active) continue;
-
-        // Read sample with linear interpolation between adjacent ring slots.
-        float fp = g.readPos;
-        while (fp < 0.0f)               fp += (float) ringSize;
-        while (fp >= (float) ringSize)  fp -= (float) ringSize;
-        const int   ia = (int) fp;
-        const int   ib = (ia + 1) % ringSize;
-        const float frac = fp - (float) ia;
-        const float a    = ring[(size_t) ia];
-        const float b    = ring[(size_t) ib];
-        const float src  = a + frac * (b - a);
-
-        // Hann envelope from outputAge / grainSize.
-        const float t   = juce::jlimit (0.0f, 1.0f,
-            g.outputAge / (float) grainSize);
-        const float win = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * t);
-
-        out += src * win;
-
-        // Advance read by ratio (>1 = pitch up; <1 = pitch down).
-        g.readPos    += pitchRatio;
-        g.outputAge  += 1.0f;
-        if (g.outputAge >= (float) grainSize)
-            g.active = false;
-    }
-
-    // 50% overlap of two Hann windows sums to 1.0 - no normalization needed.
-    return out;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // PitchCorrectorDSP
 // ─────────────────────────────────────────────────────────────────────────────
+// QA-F Task 5: the H-5 2-grain granular Shifter is deleted -- the live path
+// now runs PsolaShifter + CepstralFormantEngine from PitchShifters.h.
 
 PitchCorrectorDSP::PitchCorrectorDSP() {}
 PitchCorrectorDSP::~PitchCorrectorDSP() { releaseResources(); }
 
-void PitchCorrectorDSP::prepare (double sampleRate, int /*maxBlockSize*/)
+void PitchCorrectorDSP::prepare (double sampleRate, int maxBlockSize)
 {
     mSampleRate = (sampleRate > 0.0) ? sampleRate : 44100.0;
     mTracker.prepare (mSampleRate);
-    for (auto& sh : mShifters) sh.prepare (mSampleRate);
+    for (auto& sh : mShifters) sh.prepare (mSampleRate, maxBlockSize);
+    for (auto& fe : mFormant)  fe.prepare (mSampleRate, maxBlockSize);
     recalcRetuneCoef();
     reset();
 }
@@ -138,8 +52,11 @@ void PitchCorrectorDSP::reset()
 {
     mTracker.reset();
     for (auto& sh : mShifters) sh.reset();
+    for (auto& fe : mFormant)  fe.reset();
+    mFormantEngaged    = false;
     mCurrentShiftRatio = 1.0f;
     mHumanizePhase     = 0.0f;
+    mCurrentTargetMidi = -1.0f;
     mDetectedHz       .store (0.0f, std::memory_order_release);
     mTargetHz         .store (0.0f, std::memory_order_release);
     mCurrentShiftCents.store (0.0f, std::memory_order_release);
@@ -273,9 +190,18 @@ void PitchCorrectorDSP::process (juce::AudioBuffer<float>& buffer)
 
     if (detHz > 0.0f && confidence > 0.4f)
     {
-        const float detMidi    = hzToMidi (detHz);
-        const float snappedMidi= snapMidiToScale (detMidi);
-        const float targetHz   = midiToHz (snappedMidi);
+        const float detMidi = hzToMidi (detHz);
+
+        // QA-F Task 5 note-change hysteresis: hold the current target note
+        // until the sung pitch commits to a different one.  0.65 st sits
+        // past the semitone midpoint, so vibrato riding a note boundary no
+        // longer flip-flops the target every tracker frame (the "warble" /
+        // robotic artifact at default settings).
+        if (mCurrentTargetMidi < 0.0f
+            || std::abs (detMidi - mCurrentTargetMidi) > 0.65f)
+            mCurrentTargetMidi = snapMidiToScale (detMidi);
+
+        const float targetHz = midiToHz (mCurrentTargetMidi);
 
         // Strength blends between dry pitch (1.0 ratio) and full snap.
         const float fullRatio  = targetHz / juce::jmax (detHz, 1.0f);
@@ -295,6 +221,27 @@ void PitchCorrectorDSP::process (juce::AudioBuffer<float>& buffer)
         }
 
         targetHzPub = targetHz;
+
+        // Feed the PSOLA epoch grid from the tracker (period in samples).
+        const float period = (float) (mSampleRate / (double) detHz);
+        for (auto& sh : mShifters)
+            sh.setPeriodSamples (period);
+    }
+    else
+    {
+        // Unvoiced: release the held target so the next phrase re-snaps
+        // fresh; the shifters keep their last period (PSOLA at ratio->1 is
+        // a near-identity at any period).
+        mCurrentTargetMidi = -1.0f;
+    }
+
+    // Formant machinery engages only while audible work exists; the engage
+    // edge resets the engines (their latency appears with the mode).
+    const bool wantFormant = mFormantPreserve || std::abs (mThroatSemis) > 0.01f;
+    if (wantFormant != mFormantEngaged)
+    {
+        mFormantEngaged = wantFormant;
+        for (auto& fe : mFormant) fe.reset();
     }
 
     // Per-sample one-pole smoothing of the active shift ratio toward target.
@@ -306,12 +253,19 @@ void PitchCorrectorDSP::process (juce::AudioBuffer<float>& buffer)
         mCurrentShiftRatio = retCoef * mCurrentShiftRatio
                            + (1.0f - retCoef) * targetRatio;
 
-        const float shifted0 = mShifters[0].processSample (L[i], mCurrentShiftRatio);
-        L[i] = shifted0;
+        const float dryL = L[i];
+        float wetL = mShifters[0].processSample (dryL, mCurrentShiftRatio);
+        if (mFormantEngaged)
+            wetL = mFormant[0].processSample (dryL, wetL, mFormantPreserve, mThroatSemis);
+        L[i] = wetL;
+
         if (R != nullptr)
         {
-            const float shifted1 = mShifters[1].processSample (R[i], mCurrentShiftRatio);
-            R[i] = shifted1;
+            const float dryR = R[i];
+            float wetR = mShifters[1].processSample (dryR, mCurrentShiftRatio);
+            if (mFormantEngaged)
+                wetR = mFormant[1].processSample (dryR, wetR, mFormantPreserve, mThroatSemis);
+            R[i] = wetR;
         }
     }
 
@@ -320,9 +274,4 @@ void PitchCorrectorDSP::process (juce::AudioBuffer<float>& buffer)
     mTargetHz         .store (targetHzPub, std::memory_order_release);
     mCurrentShiftCents.store (1200.0f * std::log2 (juce::jmax (mCurrentShiftRatio, 0.001f)),
                                std::memory_order_release);
-
-    // Formant Preserve / Throat Shift toggles are stored but DSP is no-op for
-    // H-5 -- a follow-up batch will add cepstral envelope swap so these
-    // become audible.  The knobs are preset-safe additions today.
-    juce::ignoreUnused (mFormantPreserve, mThroatSemis);
 }

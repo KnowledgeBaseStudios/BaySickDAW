@@ -327,6 +327,12 @@ struct ArrangementBlock
     // for Inst) instead of through a new Audio row's mixer strip.  Zero
     // (default) = legacy "drop on Audio bus row" behavior.
     int routeChannel { 0 };
+    // QA-F (2026-07-09): true = this clip is a BaySickAlign render-to-bake
+    // placed by the Align editor.  Plays back like any routed audio clip, but
+    // the channel-composite renderer + clip-signature hash SKIP it -- a
+    // re-analyze after Render would otherwise composite the bake together
+    // with the original takes (the bake feeding its own analysis source).
+    bool alignBake { false };
     // QA-E Task 7 (FILE-02): two-level clip properties.  The audio library
     // entry is the SOURCE OF TRUTH for a file's pitch / BPM / stretch-mode /
     // route (AudioLibraryEntry pitchSemitones/originalBPM/stretchMode +

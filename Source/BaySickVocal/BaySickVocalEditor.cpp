@@ -186,7 +186,7 @@ public:
         addAndMakeVisible (mPitchBypassBtn);
         mPitchBypassBtn.setButtonText ("Realtime Pitch ON");
         mPitchBypassBtn.setClickingTogglesState (true);
-        mPitchBypassBtn.setTooltip ("Turns on Auto-Tune-style realtime pitch correction.  "
+        mPitchBypassBtn.setTooltip ("Turns on realtime pitch correction.  "
                                       "Tightens vocals to the Key/Scale picked below as they play, "
                                       "in both live monitoring and recorded-clip playback.  Use the "
                                       "BaySickPitch sub-tab for offline note-by-note pitch editing.");
@@ -249,7 +249,7 @@ public:
 
         makeKnob (mRetuneSpeed, mRetuneSpeedLbl, "Retune ms", pid ("pitch_retuneSpeed"),
                    "0..100 ms.  Sets how fast vocals snap to the target note.  Low values = "
-                   "instant robotic Auto-Tune sound; high values = transparent natural correction.",
+                   "instant robotic hard-tune sound; high values = transparent natural correction.",
                    mRetuneSpeedAtt);
         makeKnob (mStrength,    mStrengthLbl,    "Strength",  pid ("pitch_strength"),
                    "0..100 %.  Sets how aggressively the correction pulls pitch toward the target.  "

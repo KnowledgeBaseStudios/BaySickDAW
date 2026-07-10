@@ -280,6 +280,83 @@ touch). G1 ear-check batch — verify by ear + the readout. Debug first, then Re
       reading at half/double = note it (detector calibration is campaign-tunable).
       `D:__ R:__` notes:
 
+### §B.6 — QA-F (BaySickAlign build-out + shared composite/shifters + realtime pitch quality)
+
+`blocks:` the QA-F source commit (message-tagged "QA-F"; hash backfilled at the next test-plan
+touch). G2 ear-check batch — the after-QA-F ear-check (F-9/F-10-adjacent listening) already ran
+in-batch; these scenarios are the full campaign walk. Setup for most: two Vox tabs — record or
+drop a "leader" take on Vox 1 and a slightly-off "follower" take on Vox 2 (sequential same-row
+clips only; overlapping-same-row is §C item C2). BaySickAlign lives on the FOLLOWER's Vox tab.
+Debug first, then Release.
+
+- [ ] **F-1 — composite renderer feeds the lanes.** Put two audio clips on the follower Vox
+      channel at bars 1 and 5. Open BaySickAlign, pick the Leader channel on the Leader lane.
+      Expected: the Follower lane draws BOTH clips' waveforms at their grid positions (gap between
+      them, no overlap error); the Leader lane draws its channel; the shared ruler lines the two
+      lanes up (bar-1 content starts at the same x in both when both start at bar 1).
+      `D:__ R:__` notes:
+- [ ] **F-2 — Analyze builds the warp + Output preview.** With Leader picked: Analyze. Expected:
+      no error; the Output lane (red) fills with a preview waveform that visibly rides the
+      Leader's timing (onsets line up with the Leader lane, not the Follower lane). Analyze with
+      NO leader picked = clean error dialog, not a crash. `D:__ R:__` notes:
+- [ ] **F-3 — Mode reach: Close vs Loose (ear + eye).** Same pair: Analyze under Loose-Align,
+      Render; then Close-Align, Analyze, Render. Expected: audible/visible difference in how far
+      onsets get pulled (Fine Tune ms window = pairing reach; Tight only pairs near onsets).
+      The Mode dropdown also re-seats the Pitch Range knob's window (watch it move).
+      `D:__ R:__` notes:
+- [ ] **F-4 — +Pitch preset pulls pitch, Tight maps contour [EAR-CHECK].** Close-Align+Pitch on a
+      deliberately-flat follower note: Analyze, Render. Expected: rendered follower pulls toward
+      the leader's pitch WITHOUT erasing all human variation. Tight-Align+Pitch: the contour maps
+      much harder. A/B the three Algos (PSOLA / Granular / Phase Vocoder) on a sustained vocal —
+      each renders audibly shifted, artifact-bounded output (no dropouts/garble). `D:__ R:__` notes:
+- [ ] **F-5 — Render versions + history + grid placement (owner call, locked at build round).**
+      Render twice (tweak something between). Expected: `<project>/Aligned/{name}_align_v1.wav`
+      and `_v2.wav` on disk (project must be saved first — unsaved project = clean error);
+      HistoryScrubber lists v1 + v2 with dates; Del removes the entry from the list but leaves
+      the file on disk. ON THE BUILDER GRID: the bake lands as a clip on the row BELOW the
+      follower's original clips, routed through the same Vox chain; the original row(s) get
+      ROW-MUTED (one-click A/B toggle on the row mute); the second Render REPLACES the bake clip
+      in place (no row stacking). Toggling the row mutes A/Bs original vs aligned. Re-analyze
+      after a render must NOT composite the bake into itself (Output preview unchanged by the
+      bake's presence). Save/reload: bake clip + row mutes persist. `D:__ R:__` notes:
+- [ ] **F-6 — stale detection is manual-re-analyze (no auto).** After an Analyze: move (or
+      resize/mute) a follower clip on the Builder grid. Expected: the toolbar shows the amber
+      RE-ANALYZE badge within ~a second; nothing re-runs by itself; Analyze clears it. Editing a
+      sync point / protected area also raises the badge. `D:__ R:__` notes:
+- [ ] **F-7 — presets + persistence round-trip.** Set Mode/Fine Tune/Pitch controls off-preset
+      (green dirty dot lights), Save as a user preset (name it), tweak more, Load it back —
+      values + dot state restore. Save the project with an analysis + sync points + protected
+      areas + render history; close, reopen. Expected: WarpMap (Output preview after re-open via
+      Analyze state), sync points, protected areas, and the history list all restore; the two
+      channel picks restore. `D:__ R:__` notes:
+- [ ] **F-8 — sync points + protected areas drive the result.** Place a sync point between two
+      onset clusters (click the strip; drag its top handle = leader side, bottom = follower side).
+      Analyze. Expected: pairing respects it as a hard boundary (no pair crosses it; the point
+      itself is an anchor). Draw a protected area over a phrase; right-click → leave only
+      "Protect Pitch" checked; Analyze + Render with a +Pitch preset. Expected: that phrase keeps
+      its own pitch while still time-aligning; "Protect Timing" instead = the phrase keeps its
+      own timing. Right-click → Delete removes. Undo/Redo walks these edits (and an Analyze) back
+      and forward. `D:__ R:__` notes:
+- [ ] **F-9 — [EAR-CHECK] realtime pitch quality at defaults.** Live/monitored vocal (or FilePlay
+      OFF path), Realtime Pitch ON, defaults (Retune 60 ms / Strength 80%): correction reads
+      musical, NOT chipmunk/robotic; vibrato around a note boundary doesn't warble between
+      targets (the hysteresis); on-key notes pass through essentially unaltered (EXPECTED — not a
+      bug); monitoring latency stays unobtrusive (~2 pitch periods; no phase-vocoder smear).
+      Retune 0 ms + Strength 100% still gives the deliberate hard-tune effect. `D:__ R:__` notes:
+- [ ] **F-10 — [EAR-CHECK] Formant Preserve + Throat Shift are audible.** Same setup, shift a few
+      semitones via Key/Scale forcing (or sing off-key hard): toggle Formant Preserve — timbre
+      naturalness audibly changes (chipmunk tamed when ON). Throat Shift +/-4 st with Preserve
+      off: character (thin/full) changes WITHOUT re-pitching. Expect ~20 ms extra wet-path
+      latency only while either is engaged (toggle edge may click once — engage resets).
+      `D:__ R:__` notes:
+- [ ] **F-11 — brand-safety visual pass.** Walk every BaySickVocal sub-tab's tooltips, labels,
+      menus, dialogs + the Align editor end to end. Expected: no third-party product/brand names
+      in USER-FACING strings and no trade-dress "clone" phrasing in the Vocal/Align source
+      comments; the engine names BaySickAlign/BaySickPitch + universal keybinds remain BY DESIGN
+      (section 12); nominative modeled-gear refs in code comments (1176/LA-2A) remain per the
+      20a fair-use ruling. (BaySickPitch's editor still carries reference-product comments — that
+      file is QA-Fa's full-rewrite surface; verify it under §B.7.) `D:__ R:__` notes:
+
 ---
 
 ## §C — Deferred re-verify ledger

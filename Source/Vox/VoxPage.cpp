@@ -3,6 +3,7 @@
 #include "../BaySickVocal/BaySickVocalEditor.h"
 #include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
+#include "../Standalone/StandaloneEditor.h"   // QA-F: placeAlignedBake via parent lookup
 #include "../PluginProcessor.h"
 
 namespace
@@ -479,6 +480,50 @@ void VoxPage::setProcessor (VibeSynthProcessor* p)
     mFullProcessor = p;
     // J-6 EQ unification (2026-05-03): page-level EQ display removed; pre-rack
     // EQ is bound exclusively by EffectsPage (mixer_vox_<N>_preeq_*).
+
+    // QA-F Task 3: inject the BaySickAlign services (composite renderer +
+    // clip signatures + channel list + project folder) into the vocal
+    // engine.  The engine never links against VibeSynthProcessor; these
+    // hooks are its only reach into the timeline.  All message-thread.
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+    {
+        bv->setOwnChannelId (MixerChannelIds::voxInsert (mPageIndex));
+
+        VibeSynthProcessor* full = mFullProcessor;
+        bv->onRenderComposite = [full] (int channelId, double& outStartBeat,
+                                        juce::int64& outStartSample, double& outSr)
+            -> juce::AudioBuffer<float>
+        {
+            outStartBeat = 0.0; outStartSample = 0; outSr = 44100.0;
+            if (full == nullptr) return {};
+            outSr = (full->getSampleRate() > 0.0) ? full->getSampleRate() : 44100.0;
+            return full->renderChannelComposite (channelId, outStartBeat, outStartSample);
+        };
+        bv->onChannelClipSignature = [full] (int channelId) -> juce::int64
+        {
+            return (full != nullptr) ? full->channelClipSignature (channelId) : 0;
+        };
+        bv->onListCandidateChannels = [full]()
+            -> std::vector<std::pair<int, juce::String>>
+        {
+            return (full != nullptr) ? full->listAudioClipChannels()
+                                     : std::vector<std::pair<int, juce::String>> {};
+        };
+        bv->onGetProjectFolder = [full]() -> juce::File
+        {
+            if (full == nullptr) return {};
+            const juce::ScopedLock lk (full->mProjectFolderLock);
+            return full->mCurrentProjectFolder;
+        };
+        // Bake placement (owner call, build round): row below the originals,
+        // original rows muted for one-click A/B.  Parent lookup at call time
+        // -- setProcessor can run before this page is parented.
+        bv->onPlaceBakedClip = [this, bv] (const juce::File& bake, double startBeat)
+        {
+            if (auto* se = findParentComponentOfClass<StandaloneEditor>())
+                se->placeAlignedBake (bake, startBeat, bv->resolveFollowerChannel());
+        };
+    }
 }
 
 // QA-E Task 4 (2026-05-12): setClipFilePath deleted.  Vox file-association

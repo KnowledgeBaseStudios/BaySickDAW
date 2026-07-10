@@ -8,8 +8,8 @@
 // Stretch-to-fill editor for BaySickVocalProcessor.  Five sub-tabs:
 //   1. BaySickVocals  - realtime pitch correction + page-wide controls
 //   2. Vocal Chain    - De-esser / Compressor / Saturation / Limiter rack
-//   3. BaySickPitch   - Newtone-style offline pitch editor    [placeholder]
-//   4. BaySickAlign   - VocAlign-style offline alignment      [placeholder]
+//   3. BaySickPitch   - offline note-by-note pitch editor     [placeholder]
+//   4. BaySickAlign   - offline channel-pair time alignment   [QA-F build-out]
 //   5. BaySickNAM/IR  - existing engine hosted as sub-tab     [placeholder; G-9]
 //
 // J-6 EQ unification (2026-05-03): the former 6th "Pre Rack EQ" tab is
