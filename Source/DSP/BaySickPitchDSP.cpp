@@ -239,11 +239,18 @@ void BaySickPitchDSP::setSpeedMs (float ms)
         mSpeedMs.store (ms, std::memory_order_relaxed);
 }
 
+void BaySickPitchDSP::setChainOn (bool on)
+{
+    if (on != mChainOn.load (std::memory_order_relaxed))
+        mChainOn.store (on, std::memory_order_relaxed);
+}
+
 // ─── Shared per-sample applicator ─────────────────────────────────────────────
 void BaySickPitchDSP::applyEditsToBuffer (float* const* chans, int numCh, int numSamples,
                                           juce::int64 timelineStartSample, double sr,
                                           const Snapshot& snap,
                                           float focus01, float modAmt, float speedMs,
+                                          bool chainOn,
                                           PsolaShifter* shifters,
                                           CepstralFormantEngine* formants,
                                           ApplicatorState& st) const noexcept
@@ -252,6 +259,7 @@ void BaySickPitchDSP::applyEditsToBuffer (float* const* chans, int numCh, int nu
     if (regions.empty() || numCh <= 0) return;
 
     const float smoothCoef = 1.0f - std::exp (-1.0f / (float) (speedMs * 0.001 * sr));
+    const float gainCoef   = 1.0f - std::exp (-1.0f / (float) (0.005 * sr));
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -273,7 +281,10 @@ void BaySickPitchDSP::applyEditsToBuffer (float* const* chans, int numCh, int nu
         float targetFormant = 0.0f;
         float gain          = 1.0f;
 
-        if (inRegion)
+        // Chain OFF keeps the loop running with neutral targets so the
+        // smoothing glides everything home; the caller's fast path bails
+        // once settled.
+        if (inRegion && chainOn)
         {
             const auto& r = regions[(size_t) st.cursor];
             if (st.cursor != st.lastRegion)
@@ -314,6 +325,7 @@ void BaySickPitchDSP::applyEditsToBuffer (float* const* chans, int numCh, int nu
 
         st.smoothedSemis   += (targetSemis   - st.smoothedSemis)   * smoothCoef;
         st.smoothedFormant += (targetFormant - st.smoothedFormant) * smoothCoef;
+        st.smoothedGain    += (gain          - st.smoothedGain)    * gainCoef;
 
         const float ratio = std::pow (2.0f, st.smoothedSemis / 12.0f);
 
@@ -323,7 +335,7 @@ void BaySickPitchDSP::applyEditsToBuffer (float* const* chans, int numCh, int nu
             float wet = shifters[ch].processSample (dry, ratio);
             if (snap.anyFormant)
                 wet = formants[ch].processSample (dry, wet, false, st.smoothedFormant);
-            chans[ch][i] = wet * gain;
+            chans[ch][i] = wet * st.smoothedGain;
         }
     }
 }
@@ -335,11 +347,19 @@ void BaySickPitchDSP::processFilePlay (juce::AudioBuffer<float>& buffer,
     auto* snap = mActive.load (std::memory_order_acquire);
     if (snap == nullptr) return;
 
+    const bool  on    = mChainOn.load (std::memory_order_relaxed);
     const float focus = mFocus01.load (std::memory_order_relaxed);
     const float mod   = mModAmt .load (std::memory_order_relaxed);
     // Fast path (lazy-activate): zero-edit channels at neutral knobs cost
-    // one atomic load + two float compares per block.
-    if (! snap->anyEdits && focus < 0.001f && std::abs (mod - 1.0f) < 0.01f)
+    // one atomic load + two float compares per block.  Chain OFF bails only
+    // once the glide has settled (no hard switch, rule 5).
+    const bool settled = std::abs (mAppState.smoothedSemis)   < 0.002f
+                      && std::abs (mAppState.smoothedFormant) < 0.002f
+                      && std::abs (mAppState.smoothedGain - 1.0f) < 0.002f;
+    if (! on && settled)
+        return;
+    if (on && settled
+        && ! snap->anyEdits && focus < 0.001f && std::abs (mod - 1.0f) < 0.01f)
         return;
 
     const int numCh = juce::jmin (2, buffer.getNumChannels());
@@ -347,6 +367,7 @@ void BaySickPitchDSP::processFilePlay (juce::AudioBuffer<float>& buffer,
                         buffer.getNumSamples(), timelineStartSample,
                         mSampleRate, *snap,
                         focus, mod, mSpeedMs.load (std::memory_order_relaxed),
+                        on,
                         mShifters.data(), mFormant.data(), mAppState);
 }
 
@@ -397,8 +418,10 @@ juce::AudioBuffer<float> BaySickPitchDSP::renderOffline (const float* mono, int 
         const int src = juce::jlimit (0, numSamples - 1, j + lat);
         feed[0] = mono[src];
         float* chans[1] = { feed.data() };
+        // Render bakes the edited state regardless of the bsp_on chain
+        // switch (export = the edits, not the monitor state).
         applyEditsToBuffer (chans, 1, 1, (juce::int64) src, sampleRate, snap,
-                            focus, mod, speed, &shifter, &formant, st);
+                            focus, mod, speed, true, &shifter, &formant, st);
         if (j >= 0)
             shifted[(size_t) j] = feed[0];
     }

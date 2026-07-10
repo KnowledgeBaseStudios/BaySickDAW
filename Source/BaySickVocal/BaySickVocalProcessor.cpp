@@ -1,6 +1,8 @@
 #include "BaySickVocalProcessor.h"
 #include "../AudioFileRecorder.h"   // I-16 G-9: wet recorder tap inside processBlock
+#include "../TempoMapRead.h"        // QA-Fa recovery: legacy-save origin-sample derivation
 #include "BaySickVocalEditor.h"
+#include <algorithm>
 #include "../DSP/DeEsserDSP.h"
 #include "../DSP/CompressorDSP.h"
 #include "../DSP/SaturationDSP.h"
@@ -215,6 +217,7 @@ BaySickVocalProcessor::createLayout()
     addPI ("preset",       "Pitch Preset",       0, 3, 0);   // Loose/Close/Tight/User
     addPB ("preset_dirty", "Pitch Preset Dirty", false);
     addPI ("mode",         "Pitch Edit Mode",    0, 1, 1);   // 0=Slice, 1=Edit
+    addPB ("on",           "Pitch Chain On",     true);      // QA-Fa recovery: chain switch
 
     return { params.begin(), params.end() };
 }
@@ -240,6 +243,12 @@ BaySickVocalProcessor::BaySickVocalProcessor()
         // safe to call even when null (handled inside the lambda we set).
         if (auto& fn = mDirtyTracker.onAny) fn();
     };
+
+    // QA-Fa recovery: the decode layer reads the align chain switch + Pitch
+    // box gates per block; cache the raw-param atomics once (APVTS-stable).
+    mAlignOnRaw        = apvts.getRawParameterValue ("bsa_align_on");
+    mAlignPitchOnRaw   = apvts.getRawParameterValue ("bsa_pitch_on");
+    mAlignTransposeRaw = apvts.getRawParameterValue ("bsa_pitch_transpose");
 }
 
 // ─── Destructor ───────────────────────────────────────────────────────────────
@@ -254,6 +263,10 @@ BaySickVocalProcessor::BaySickVocalProcessor()
 BaySickVocalProcessor::~BaySickVocalProcessor()
 {
     mShuttingDown.store (true, std::memory_order_release);
+    // QA-Fa recovery: owners raise the shutdown gate (and the clip snapshot
+    // rebuild drops the channel's players) before teardown, so the decode
+    // layer cannot be inside a block holding this pointer here.
+    delete mAlignPlayActive.exchange (nullptr);
 }
 
 // ─── Audio lifecycle ──────────────────────────────────────────────────────────
@@ -327,6 +340,7 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
     mPitch.setFocus01   (rd ("bsp_focus") / 100.0f);
     mPitch.setModAmount (rd ("bsp_mod")   / 50.0f);
     mPitch.setSpeedMs   (300.0f - rd ("bsp_speed") * 2.95f);
+    mPitch.setChainOn   (rdb ("bsp_on"));
 
     // ── Rack stage Bypass flags (forward to slots) ────────────────────────
     mVocalChainRack.setSlotBypassed (0, rdb ("bsv_deesser_bypass"));
@@ -595,13 +609,137 @@ bool BaySickVocalProcessor::analyzeAlign (juce::String& errorOut)
     mAlignState.analyzedLeaderSig   = onChannelClipSignature (leader);
     mAlignState.analyzedFollowerSig = onChannelClipSignature (follower);
     mAlignState.commonStartBeat     = commonBeat;
+    mAlignState.commonStartSample   = commonSamp;
     mAlignState.leaderPadSamples    = gPad;
     mAlignState.followerPadSamples  = dPad;
     mAlignState.analysisSampleRate  = gSr;
     mAlignState.analyzed            = true;
     mAlign.setWarpMap (map);
+
+    // QA-Fa recovery: Analyze IS Apply -- version the committed state and
+    // publish it to the decode layer so playback picks it up this block.
+    appendAlignVersion();
+    publishAlignPlayback();
     if (auto& fn = mDirtyTracker.onAny) fn();
     return true;
+}
+
+// ─── QA-Fa recovery: applied-frame (de)serialization + versions + publish ────
+
+juce::ValueTree BaySickVocalProcessor::alignAppliedToTree() const
+{
+    juce::ValueTree v ("AlignApplied");
+    v.setProperty ("lSig",      mAlignState.analyzedLeaderSig,   nullptr);
+    v.setProperty ("fSig",      mAlignState.analyzedFollowerSig, nullptr);
+    v.setProperty ("startBeat", mAlignState.commonStartBeat,     nullptr);
+    v.setProperty ("cSamp",     mAlignState.commonStartSample,   nullptr);
+    v.setProperty ("lPad",      mAlignState.leaderPadSamples,    nullptr);
+    v.setProperty ("fPad",      mAlignState.followerPadSamples,  nullptr);
+    v.setProperty ("sr",        mAlignState.analysisSampleRate,  nullptr);
+    v.appendChild (mAlignState.map.toValueTree(), nullptr);
+    return v;
+}
+
+void BaySickVocalProcessor::alignAppliedFromTree (const juce::ValueTree& v)
+{
+    if (! v.hasType ("AlignApplied")) return;
+    mAlignState.analyzedLeaderSig   = (juce::int64) v.getProperty ("lSig", 0);
+    mAlignState.analyzedFollowerSig = (juce::int64) v.getProperty ("fSig", 0);
+    mAlignState.commonStartBeat     = (double) v.getProperty ("startBeat", 0.0);
+    mAlignState.commonStartSample   = (juce::int64) v.getProperty ("cSamp", 0);
+    mAlignState.leaderPadSamples    = (juce::int64) v.getProperty ("lPad", 0);
+    mAlignState.followerPadSamples  = (juce::int64) v.getProperty ("fPad", 0);
+    mAlignState.analysisSampleRate  = (double) v.getProperty ("sr", 44100.0);
+    auto mapTree = v.getChildWithName ("WarpMap");
+    if (mapTree.isValid())
+    {
+        mAlignState.map.fromValueTree (mapTree);
+        mAlignState.analyzed = mAlignState.map.isValid();
+    }
+    if (mAlignState.analyzed)
+        mAlign.setWarpMap (mAlignState.map);
+}
+
+void BaySickVocalProcessor::appendAlignVersion()
+{
+    if (! mAlignState.analyzed) return;
+    EditorVersionEntry e;
+    e.state   = alignAppliedToTree();
+    e.dateIso = juce::Time::getCurrentTime().toISO8601 (true);
+    e.sigA    = mAlignState.analyzedLeaderSig;
+    e.sigB    = mAlignState.analyzedFollowerSig;
+    mAlignVersions.push_back (std::move (e));
+    while ((int) mAlignVersions.size() > kMaxEditorVersions)
+        mAlignVersions.erase (mAlignVersions.begin());
+}
+
+void BaySickVocalProcessor::appendPitchVersion()
+{
+    if (! mPitch.isAnalyzed()) return;
+    EditorVersionEntry e;
+    e.state   = mPitch.stateToValueTree();
+    e.dateIso = juce::Time::getCurrentTime().toISO8601 (true);
+    e.sigA    = mPitchAnalyzedSig;
+    mPitchVersions.push_back (std::move (e));
+    while ((int) mPitchVersions.size() > kMaxEditorVersions)
+        mPitchVersions.erase (mPitchVersions.begin());
+}
+
+bool BaySickVocalProcessor::revertAlignToVersion (int index)
+{
+    if (index < 0 || index >= (int) mAlignVersions.size()) return false;
+    alignAppliedFromTree (mAlignVersions[(size_t) index].state);
+    publishAlignPlayback();
+    if (auto& fn = mDirtyTracker.onAny) fn();
+    return true;
+}
+
+bool BaySickVocalProcessor::revertPitchToVersion (int index)
+{
+    if (index < 0 || index >= (int) mPitchVersions.size()) return false;
+    mPitch.stateFromValueTree (mPitchVersions[(size_t) index].state);
+    mPitchAnalyzedSig = mPitchVersions[(size_t) index].sigA;
+    if (auto& fn = mDirtyTracker.onAny) fn();
+    return true;
+}
+
+void BaySickVocalProcessor::publishAlignPlayback()
+{
+    std::unique_ptr<AlignPlaySnapshot> snap;
+    if (mAlignState.analyzed && mAlignState.map.isValid())
+    {
+        snap = std::make_unique<AlignPlaySnapshot>();
+        snap->followerChannelId  = resolveFollowerChannel();
+        snap->commonStartBeat    = mAlignState.commonStartBeat;
+        snap->commonStartSample  = mAlignState.commonStartSample;
+        snap->analysisSampleRate = mAlignState.analysisSampleRate;
+
+        // Guide-axis SoA, sorted + monotone-clamped so the decode lookup is
+        // well-defined even if a pathological pairing crossed anchors.
+        auto anchors = mAlignState.map.anchors;
+        std::sort (anchors.begin(), anchors.end(),
+                   [] (const WarpAnchor& a, const WarpAnchor& b)
+                   { return a.guideTimeSec < b.guideTimeSec; });
+        double lastDub = -1.0e18;
+        for (const auto& a : anchors)
+        {
+            const double d = juce::jmax (lastDub, a.dubTimeSec);
+            snap->guideSec  .push_back (a.guideTimeSec);
+            snap->dubSec    .push_back (d);
+            snap->pitchSemis.push_back (a.pitchSemis);
+            if (std::abs (a.pitchSemis) > 0.01f) snap->anyPitch = true;
+            lastDub = d;
+        }
+        if (! snap->isUsable())
+            snap.reset();
+    }
+
+    auto* old = mAlignPlayActive.exchange (snap.release(),
+                                           std::memory_order_acq_rel);
+    if (old != nullptr)
+        mAlignPlayRetired.push_back (std::unique_ptr<AlignPlaySnapshot> (old));
+    while (mAlignPlayRetired.size() > 8)
+        mAlignPlayRetired.erase (mAlignPlayRetired.begin());
 }
 
 juce::AudioBuffer<float> BaySickVocalProcessor::buildWarpedFollower (juce::String& errorOut)
@@ -710,13 +848,15 @@ juce::File BaySickVocalProcessor::renderAlignedTake (juce::String& errorOut)
     writer.reset();
 
     AlignRenderEntry e;
-    e.file    = "Aligned/" + file.getFileName();
-    e.dateIso = juce::Time::getCurrentTime().toISO8601 (true);
-    e.version = version;
+    e.file      = "Aligned/" + file.getFileName();
+    e.dateIso   = juce::Time::getCurrentTime().toISO8601 (true);
+    e.version   = version;
+    e.startBeat = mAlignState.commonStartBeat;
     mAlignState.renders.push_back (e);
 
-    if (onPlaceBakedClip)
-        onPlaceBakedClip (file, mAlignState.commonStartBeat);
+    // QA-Fa recovery: Render is EXPORT ONLY -- no grid placement, nothing
+    // audible changes (playback already applies the map live).  Re-import
+    // goes through the Vox ribbon's "+ Add New Vox From Export" flow.
     if (auto& fn = mDirtyTracker.onAny) fn();
     return file;
 }
@@ -750,6 +890,9 @@ bool BaySickVocalProcessor::analyzePitch (juce::String& errorOut)
     mPitch.analyzeComposite (comp.getReadPointer (0), comp.getNumSamples(),
                              sr, beat, samp);
     mPitchAnalyzedSig = onChannelClipSignature (mOwnChannelId);
+    // QA-Fa recovery: every analyze is a restore point (edits stay instant
+    // between analyses -- versions are the safety net, not an edit gate).
+    appendPitchVersion();
     if (auto& fn = mDirtyTracker.onAny) fn();
     return true;
 }
@@ -801,14 +944,14 @@ juce::File BaySickVocalProcessor::renderPitchedTake (juce::String& errorOut)
     writer.reset();
 
     AlignRenderEntry e;
-    e.file    = "Pitched/" + file.getFileName();
-    e.dateIso = juce::Time::getCurrentTime().toISO8601 (true);
-    e.version = version;
+    e.file      = "Pitched/" + file.getFileName();
+    e.dateIso   = juce::Time::getCurrentTime().toISO8601 (true);
+    e.version   = version;
+    e.startBeat = mPitch.startBeat();
     mPitchRenders.push_back (e);
 
-    // Grid placement deliberately NOT wired: whether a Pitch bake places
-    // like an Align bake (row below + row-mute) is a pending owner call --
-    // the realtime applicator already plays these edits without a bake.
+    // QA-Fa recovery: Render is EXPORT ONLY (same contract as the Align
+    // render above).
     if (auto& fn = mDirtyTracker.onAny) fn();
     return file;
 }
@@ -836,11 +979,12 @@ juce::AudioProcessorEditor* BaySickVocalProcessor::createEditor()
 //   BaySickVocals      -> APVTS (bsv_pitch_*, bsv_mix, bsv_bypass, etc.)
 //   Vocal Chain        -> APVTS (bsv_deesser_*, bsv_comp_*, bsv_sat_*,
 //                                bsv_limiter_*); rack topology is fixed
-//   BaySickPitch       -> <PitchEdits> ValueTree child (empty until G-9
-//                          ships the offline editor's data model; slot
-//                          reserved here so future G-9 storage round-
-//                          trips through this same save path)
-//   BaySickAlign       -> <AlignEdits> ValueTree child (same pattern)
+//   BaySickPitch       -> <PitchEdits> ValueTree child (note regions +
+//                          edits + analysis frame + render history +
+//                          version history)
+//   BaySickAlign       -> <AlignEdits> ValueTree child (warp map + sync
+//                          points + protected areas + analysis frame +
+//                          render history + version history)
 //   BaySickNAM/IR      -> <NamIrState> child holding the embedded
 //                          BaySickNAMIRProcessor's getStateInformation
 //                          binary (per-slot A/B snapshots + NAM models +
@@ -888,7 +1032,8 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
 
     // QA-Fa: <PitchEdits> carries the BaySickPitch channel state -- analyzed
     // note regions + per-note edits, the analysis frame, the Pitched/ render
-    // history, and the analyze-time clip signature.
+    // history, the analyze-time clip signature, and (QA-Fa recovery) the
+    // version history.
     {
         juce::ValueTree pitch (kPitchEditsTag);
         pitch.setProperty ("pSig", mPitchAnalyzedSig, nullptr);
@@ -896,9 +1041,18 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
         for (const auto& r : mPitchRenders)
         {
             juce::ValueTree e ("R");
-            e.setProperty ("f", r.file,    nullptr);
-            e.setProperty ("d", r.dateIso, nullptr);
-            e.setProperty ("v", r.version, nullptr);
+            e.setProperty ("f", r.file,      nullptr);
+            e.setProperty ("d", r.dateIso,   nullptr);
+            e.setProperty ("v", r.version,   nullptr);
+            e.setProperty ("b", r.startBeat, nullptr);
+            pitch.appendChild (e, nullptr);
+        }
+        for (const auto& ver : mPitchVersions)
+        {
+            juce::ValueTree e ("Ver");
+            e.setProperty ("ts", ver.dateIso, nullptr);
+            e.setProperty ("sa", ver.sigA,    nullptr);
+            e.appendChild (ver.state.createCopy(), nullptr);
             pitch.appendChild (e, nullptr);
         }
         state.appendChild (pitch, nullptr);
@@ -913,6 +1067,7 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
         align.setProperty ("lSig",       mAlignState.analyzedLeaderSig,     nullptr);
         align.setProperty ("fSig",       mAlignState.analyzedFollowerSig,   nullptr);
         align.setProperty ("startBeat",  mAlignState.commonStartBeat,       nullptr);
+        align.setProperty ("cSamp",      mAlignState.commonStartSample,     nullptr);
         align.setProperty ("lPad",       mAlignState.leaderPadSamples,      nullptr);
         align.setProperty ("fPad",       mAlignState.followerPadSamples,    nullptr);
         align.setProperty ("sr",         mAlignState.analysisSampleRate,    nullptr);
@@ -925,9 +1080,19 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
         for (const auto& r : mAlignState.renders)
         {
             juce::ValueTree e ("R");
-            e.setProperty ("f", r.file,    nullptr);
-            e.setProperty ("d", r.dateIso, nullptr);
-            e.setProperty ("v", r.version, nullptr);
+            e.setProperty ("f", r.file,      nullptr);
+            e.setProperty ("d", r.dateIso,   nullptr);
+            e.setProperty ("v", r.version,   nullptr);
+            e.setProperty ("b", r.startBeat, nullptr);
+            align.appendChild (e, nullptr);
+        }
+        for (const auto& ver : mAlignVersions)
+        {
+            juce::ValueTree e ("Ver");
+            e.setProperty ("ts", ver.dateIso, nullptr);
+            e.setProperty ("sa", ver.sigA,    nullptr);
+            e.setProperty ("sb", ver.sigB,    nullptr);
+            e.appendChild (ver.state.createCopy(), nullptr);
             align.appendChild (e, nullptr);
         }
         state.appendChild (align, nullptr);
@@ -1002,6 +1167,7 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         apvts.replaceState (newState);
 
         mPitchRenders.clear();
+        mPitchVersions.clear();
         mPitchAnalyzedSig = 0;
         if (pitchChild.isValid())
         {
@@ -1010,12 +1176,24 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
             for (int i = 0; i < pitchChild.getNumChildren(); ++i)
             {
                 auto c = pitchChild.getChild (i);
-                if (! c.hasType ("R")) continue;
-                AlignRenderEntry r;
-                r.file    = c.getProperty ("f", juce::String()).toString();
-                r.dateIso = c.getProperty ("d", juce::String()).toString();
-                r.version = (int) c.getProperty ("v", 1);
-                mPitchRenders.push_back (r);
+                if (c.hasType ("R"))
+                {
+                    AlignRenderEntry r;
+                    r.file      = c.getProperty ("f", juce::String()).toString();
+                    r.dateIso   = c.getProperty ("d", juce::String()).toString();
+                    r.version   = (int) c.getProperty ("v", 1);
+                    r.startBeat = (double) c.getProperty ("b", 0.0);
+                    mPitchRenders.push_back (r);
+                }
+                else if (c.hasType ("Ver"))
+                {
+                    EditorVersionEntry ver;
+                    ver.dateIso = c.getProperty ("ts", juce::String()).toString();
+                    ver.sigA    = (juce::int64) c.getProperty ("sa", 0);
+                    ver.state   = c.getChildWithName ("PitchState").createCopy();
+                    if (ver.state.isValid())
+                        mPitchVersions.push_back (std::move (ver));
+                }
             }
         }
         else
@@ -1041,12 +1219,14 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         }
 
         mAlignState = AlignState();
+        mAlignVersions.clear();
         if (alignChild.isValid())
         {
             mAlignState.analyzed            = ((int) alignChild.getProperty ("analyzed", 0)) != 0;
             mAlignState.analyzedLeaderSig   = (juce::int64) alignChild.getProperty ("lSig", 0);
             mAlignState.analyzedFollowerSig = (juce::int64) alignChild.getProperty ("fSig", 0);
             mAlignState.commonStartBeat     = (double) alignChild.getProperty ("startBeat", 0.0);
+            mAlignState.commonStartSample   = (juce::int64) alignChild.getProperty ("cSamp", 0);
             mAlignState.leaderPadSamples    = (juce::int64) alignChild.getProperty ("lPad", 0);
             mAlignState.followerPadSamples  = (juce::int64) alignChild.getProperty ("fPad", 0);
             mAlignState.analysisSampleRate  = (double) alignChild.getProperty ("sr", 44100.0);
@@ -1062,10 +1242,21 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
                 else if (c.hasType ("R"))
                 {
                     AlignRenderEntry r;
-                    r.file    = c.getProperty ("f", juce::String()).toString();
-                    r.dateIso = c.getProperty ("d", juce::String()).toString();
-                    r.version = (int) c.getProperty ("v", 1);
+                    r.file      = c.getProperty ("f", juce::String()).toString();
+                    r.dateIso   = c.getProperty ("d", juce::String()).toString();
+                    r.version   = (int) c.getProperty ("v", 1);
+                    r.startBeat = (double) c.getProperty ("b", 0.0);
                     mAlignState.renders.push_back (r);
+                }
+                else if (c.hasType ("Ver"))
+                {
+                    EditorVersionEntry ver;
+                    ver.dateIso = c.getProperty ("ts", juce::String()).toString();
+                    ver.sigA    = (juce::int64) c.getProperty ("sa", 0);
+                    ver.sigB    = (juce::int64) c.getProperty ("sb", 0);
+                    ver.state   = c.getChildWithName ("AlignApplied").createCopy();
+                    if (ver.state.isValid())
+                        mAlignVersions.push_back (std::move (ver));
                 }
             }
             if (mAlignState.analyzed && mAlignState.map.isValid())
@@ -1075,6 +1266,16 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         }
         else
             mAlign.clearWarpMap();
+
+        // QA-Fa recovery: a restored applied map goes live immediately.
+        // Saves predating cSamp (the d8cc9494 checkpoint era) stored only
+        // the origin beat -- derive the sample through the tempo timeline
+        // (message thread; the standalone always publishes one).
+        if (mAlignState.analyzed && mAlignState.commonStartSample == 0
+            && mAlignState.commonStartBeat > 0.0 && TempoMap::isActive())
+            mAlignState.commonStartSample =
+                TempoMap::sampleAtBeat (mAlignState.commonStartBeat);
+        publishAlignPlayback();
 
         // H-6d: restore the embedded NAM/IR state.  Pre-H-6d projects have
         // no <NamIrState> child; the per-Vox NAM/IR processor stays at its
@@ -1090,9 +1291,6 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
                     mNamIrProc->setStateInformation (blob.getData(), (int) blob.getSize());
             }
         }
-
-        // <PitchEdits> remains a reserved placeholder (QA-Fa's BaySickPitch
-        // data model populates it).
 
         // QA-F chain-wiring fix (2026-07-10): let the Vocal Chain sub-tab
         // re-mount its slot editors against the restored DSP state.

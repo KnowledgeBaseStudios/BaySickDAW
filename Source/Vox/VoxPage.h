@@ -11,11 +11,17 @@ class BaySickVocalEditor;
 // Mirror of InstPage with Vox-specific colour + naming.  Engine list for V1
 // is just BaySickPlayer (sample playback of recorded vocal).  Phase H adds
 // `BaySickVocal` (the dedicated vocal channel-strip processor) as the
-// preferred default option.  Spawn trigger is the Mixer page's "Add Vox
-// Strip" button - ribbon Vox dropdown is an instance switcher only.
+// preferred default option.  Spawn triggers: the Mixer page's "Add Vox
+// Strip" button, the ribbon Vox dropdown's "+ Add New Vox" (G-6), and the
+// QA-Fa "+ Add New Vox From Export" flow.
+//
+// QA-Fa recovery: the page owns a 4 Hz timer driving the stop-gated auto
+// re-analyze for the engine's Align + Pitch analyses (works with the
+// editors closed; dies with the page).
 // ─────────────────────────────────────────────────────────────────────────────
 
-class VoxPage : public juce::Component
+class VoxPage : public juce::Component,
+                private juce::Timer
 {
 public:
     // 2026-04-29 DEBUG: drag-drop a WAV/MP3 onto the page to load it into the
@@ -110,6 +116,15 @@ private:
     void layoutEditor (juce::Rectangle<int> r);
     juce::AudioProcessorEditor* activeEditor() const;
     void showEngineContextMenu();
+
+    // QA-Fa recovery: stop-gated auto re-analyze poller (see the .cpp).
+    void timerCallback() override;
+    juce::int64 mAlignAutoLastSig   { 0 };
+    juce::int64 mAlignAutoAttempted { 0 };
+    int         mAlignAutoStable    { 0 };
+    juce::int64 mPitchAutoLastSig   { 0 };
+    juce::int64 mPitchAutoAttempted { 0 };
+    int         mPitchAutoStable    { 0 };
 
     // G-6: ComboBox subclass that fires onRightClick on right-button click
     // (left-click still opens the dropdown for engine selection).

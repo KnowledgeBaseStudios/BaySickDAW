@@ -16,14 +16,17 @@
 //   * `PhaseVocoder` time-stretch + the PitchShifters trio for the offline
 //     applyWarp render.
 //
-// Save model = Option C (per H-6a locked spec, confirmed by the G2-warp
-// design lock 2026-07-09):
+// Playback model (QA-Fa recovery, 2026-07-10 -- restores the locked May
+// design, phantom-recording-mongoose section 5):
 //   * `WarpMap` + sync points + protected areas persist as project XML on
 //     the owning BaySickVocalProcessor (<AlignEdits>).
-//   * Render bakes the aligned audio to
-//     `<project>/Aligned/{name}_align_v{N}.wav`; playback then plays the
-//     baked file (no realtime warp DSP -- the whole pipeline is offline,
-//     message-thread only).
+//   * Applied maps play LIVE: the clip-decode layer (decodeFilePlayClip)
+//     remaps the follower channel's FilePlay read position through the
+//     published AlignPlaySnapshot; the PhaseVocoder compounds warp slope x
+//     tempo-stretch x per-anchor pitch ratio in one pass.
+//   * Render is EXPORT ONLY: bakes to
+//     `<project>/Aligned/{name}_align_v{N}.wav` + a history entry; nothing
+//     is placed on the grid and playback does not change.
 //
 // The DSP class is GUI-agnostic: the BaySickAlign editor feeds it channel
 // composites (VibeSynthProcessor::renderChannelComposite) and drives
@@ -123,6 +126,71 @@ struct WarpMap
 
     juce::ValueTree toValueTree() const;
     void fromValueTree (const juce::ValueTree& v);
+};
+
+// ── AlignPlaySnapshot ────────────────────────────────────────────────────────
+// QA-Fa recovery (2026-07-10): immutable audio-thread view of an APPLIED warp
+// map, published by BaySickVocalProcessor via atomic pointer swap (retire-ring
+// liveness contract identical to BaySickPitchDSP::Snapshot -- the decode layer
+// holds the pointer only within one block).  Guide-axis SoA arrays so the
+// per-block lookup is one binary search; guide times are monotone-clamped at
+// publish, so mapping is well-defined even on a degenerate analysis.
+struct AlignPlaySnapshot
+{
+    // Parallel arrays sorted by guideSec ascending (composite common-origin
+    // seconds).  dubSec = follower-side time; pitchSemis = leader-minus-
+    // follower delta at the anchor (already Range-scaled at analysis).
+    std::vector<double> guideSec;
+    std::vector<double> dubSec;
+    std::vector<float>  pitchSemis;
+
+    int          followerChannelId  { -1 };
+    double       commonStartBeat    { 0.0 };
+    juce::int64  commonStartSample  { 0 };     // timeline sample of composite t=0 (analysis-time device rate)
+    double       analysisSampleRate { 44100.0 };
+    bool         anyPitch           { false };
+
+    bool isUsable() const noexcept { return guideSec.size() >= 2 && followerChannelId >= 0; }
+
+    // Piecewise-linear lookup at a guide-domain time: the follower-side read
+    // time, the local dDub/dGuide slope, and the lerped pitch delta.  Outside
+    // the anchor range: offset-continued at slope 1, pitch 0.
+    void lookupAtGuideSec (double g, double& outDubSec,
+                           double& outDubPerGuide, float& outSemis) const noexcept
+    {
+        const size_t n = guideSec.size();
+        if (n < 2)
+        {
+            outDubSec = g; outDubPerGuide = 1.0; outSemis = 0.0f;
+            return;
+        }
+        if (g <= guideSec.front())
+        {
+            outDubSec = dubSec.front() + (g - guideSec.front());
+            outDubPerGuide = 1.0;
+            outSemis = 0.0f;
+            return;
+        }
+        if (g >= guideSec.back())
+        {
+            outDubSec = dubSec.back() + (g - guideSec.back());
+            outDubPerGuide = 1.0;
+            outSemis = 0.0f;
+            return;
+        }
+        size_t lo = 0, hi = n - 1;
+        while (hi - lo > 1)
+        {
+            const size_t mid = (lo + hi) / 2;
+            if (guideSec[mid] <= g) lo = mid; else hi = mid;
+        }
+        const double gSpan = juce::jmax (1.0e-9, guideSec[hi] - guideSec[lo]);
+        const double f     = (g - guideSec[lo]) / gSpan;
+        outDubSec      = dubSec[lo] + f * (dubSec[hi] - dubSec[lo]);
+        outDubPerGuide = juce::jlimit (1.0 / 64.0, 64.0,
+                                       (dubSec[hi] - dubSec[lo]) / gSpan);
+        outSemis       = pitchSemis[lo] + (float) f * (pitchSemis[hi] - pitchSemis[lo]);
+    }
 };
 
 class BaySickAlignDSP

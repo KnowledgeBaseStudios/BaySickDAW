@@ -1016,21 +1016,30 @@ public:
         };
         plain (mSaveBtn,    "Save",    "Save the current Align + Pitch settings as a user preset");
         plain (mLoadBtn,    "Load",    "Load a saved user preset");
-        plain (mAnalyzeBtn, "Analyze", "Pair the Follower's onsets to the Leader and build the warp");
-        plain (mRenderBtn,  "Render",  "Bake the aligned Follower to Aligned/{name}_align_v{N}.wav");
+        plain (mAnalyzeBtn, "Analyze/Apply",
+               "Pair the Follower's onsets to the Leader, build the warp, and apply it to playback");
+        plain (mVersionsBtn, "Versions",
+               "Revert to an earlier applied state (every Analyze/Apply is a restore point)");
+        plain (mRenderBtn,  "Render",
+               "Export the aligned Follower to Aligned/{name}_align_v{N}.wav (file only - playback is already live)");
         plain (mUndoBtn,    "Undo",    "Undo the last sync-point / protected-area / analysis change");
         plain (mRedoBtn,    "Redo",    "Redo");
 
-        mSaveBtn   .onClick = [this] { mOwner.saveUserPreset(); };
-        mLoadBtn   .onClick = [this] { mOwner.loadUserPreset(); };
-        mAnalyzeBtn.onClick = [this] { mOwner.runAnalyze(); };
-        mRenderBtn .onClick = [this] { mOwner.runRender(); };
-        mUndoBtn   .onClick = [this] { mOwner.doUndo(); };
-        mRedoBtn   .onClick = [this] { mOwner.doRedo(); };
+        mSaveBtn    .onClick = [this] { mOwner.saveUserPreset(); };
+        mLoadBtn    .onClick = [this] { mOwner.loadUserPreset(); };
+        mAnalyzeBtn .onClick = [this] { mOwner.runAnalyze(); };
+        mVersionsBtn.onClick = [this] { mOwner.showVersionsMenu(); };
+        mRenderBtn  .onClick = [this] { mOwner.runRender(); };
+        mUndoBtn    .onClick = [this] { mOwner.doUndo(); };
+        mRedoBtn    .onClick = [this] { mOwner.doRedo(); };
     }
 
     void setDirty (bool d)          { if (mDirty != d) { mDirty = d; repaint(); } }
-    void setStale (bool s)          { if (mStale != s) { mStale = s; repaint(); } }
+    void setStale (bool s, bool pending)
+    {
+        if (mStale != s || mStalePending != pending)
+            { mStale = s; mStalePending = pending; repaint(); }
+    }
     void mirrorPreset (int presetParam)   // 0..5 factory, 6 = user
     {
         mMirroring = true;
@@ -1056,9 +1065,13 @@ public:
 
         if (mStale)
         {
+            // Pending = the grid changed while the transport runs; the
+            // stop-gated auto re-analyze fires at the next stop (item 4 of
+            // the recovery bundle).
             g.setColour (kStaleAmber);
             g.setFont (juce::Font (11.0f, juce::Font::bold));
-            g.drawText ("RE-ANALYZE", mAnalyzeBtn.getX() - 92, 0, 88, getHeight(),
+            g.drawText (mStalePending ? "RE-ANALYZE ON STOP" : "RE-ANALYZE",
+                        mAnalyzeBtn.getX() - 154, 0, 150, getHeight(),
                         juce::Justification::centredRight);
         }
     }
@@ -1082,15 +1095,19 @@ public:
         right.removeFromRight (12);
         mRenderBtn.setBounds (right.removeFromRight (62));
         right.removeFromRight (gap);
-        mAnalyzeBtn.setBounds (right.removeFromRight (66));
+        mVersionsBtn.setBounds (right.removeFromRight (66));
+        right.removeFromRight (gap);
+        mAnalyzeBtn.setBounds (right.removeFromRight (94));
     }
 
 private:
     BaySickAlignEditor& mOwner;
     BaySickEngineLabel  mTitleLbl { "BaySickAlign", juce::Colour (0xFF0FAFA5) };
     juce::ComboBox      mPresetCombo;
-    juce::TextButton    mSaveBtn, mLoadBtn, mAnalyzeBtn, mRenderBtn, mUndoBtn, mRedoBtn;
-    bool mDirty { false }, mStale { false }, mMirroring { false };
+    juce::TextButton    mSaveBtn, mLoadBtn, mAnalyzeBtn, mVersionsBtn, mRenderBtn,
+                        mUndoBtn, mRedoBtn;
+    bool mDirty { false }, mStale { false }, mStalePending { false },
+         mMirroring { false };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1158,7 +1175,8 @@ void BaySickAlignEditor::setView (double pps, double scrollSec)
 
 void BaySickAlignEditor::timerCallback()
 {
-    mToolbar->setStale (mProc.isAlignStale() || mEditsSinceAnalyze);
+    const bool stale = mProc.isAlignStale() || mEditsSinceAnalyze;
+    mToolbar->setStale (stale, stale && DSPBase::isTransportPlaying());
 
     const bool dirty = paramsDivergeFromSnapshot();
     mToolbar->setDirty (dirty);
@@ -1204,6 +1222,55 @@ void BaySickAlignEditor::runRender()
     }
     refreshOutputPreview();
     repaint();
+}
+
+// QA-Fa recovery (bundle item 3): dropdown of applied states, newest first.
+// Entries whose analyze-time grid signature differs from the current grid
+// carry a "(grid changed)" marker; reverting to one is allowed and lights
+// the stale badge immediately.
+void BaySickAlignEditor::showVersionsMenu()
+{
+    const auto& versions = mProc.mAlignVersions;
+    if (versions.empty())
+    {
+        juce::PopupMenu m;
+        m.addItem (1, "No versions yet - Analyze/Apply creates one", false);
+        m.showMenuAsync (juce::PopupMenu::Options());
+        return;
+    }
+
+    juce::int64 curL = 0, curF = 0;
+    if (mProc.onChannelClipSignature)
+    {
+        const int l = mProc.resolveLeaderChannel();
+        const int f = mProc.resolveFollowerChannel();
+        if (l >= 0) curL = mProc.onChannelClipSignature (l);
+        if (f >= 0) curF = mProc.onChannelClipSignature (f);
+    }
+
+    juce::PopupMenu m;
+    for (int i = (int) versions.size() - 1; i >= 0; --i)
+    {
+        const auto& v = versions[(size_t) i];
+        juce::String label = "v" + juce::String (i + 1) + "  "
+            + v.dateIso.substring (0, 16).replace ("T", " ");
+        if (v.sigA != curL || v.sigB != curF)
+            label += "  (grid changed)";
+        m.addItem (i + 1, "Revert to " + label);
+    }
+    juce::Component::SafePointer<BaySickAlignEditor> self (this);
+    m.showMenuAsync (juce::PopupMenu::Options(),
+        [self] (int result)
+        {
+            if (! self || result <= 0) return;
+            self->pushUndo();
+            if (! self->mProc.revertAlignToVersion (result - 1))
+                { self->mUndoStack.pop_back(); return; }
+            self->mEditsSinceAnalyze = false;
+            self->refreshComposites();
+            self->refreshOutputPreview();
+            self->repaint();
+        });
 }
 
 void BaySickAlignEditor::refreshComposites()

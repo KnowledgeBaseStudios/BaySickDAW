@@ -618,11 +618,24 @@ public:
         plain (mSliceBtn,  "Slice",  "Slice mode: click a note to split it");
         plain (mEditBtn,   "Edit",   "Edit mode: drag notes vertically (pitch) / edges (length); drag the sub-curves");
         plain (mResetBtn,  "Reset",  "Clear every pitch edit on this channel");
-        plain (mRenderBtn, "Render", "Bake the edited channel to Pitched/{name}_pitch_v{N}.wav");
+        plain (mRenderBtn, "Render",
+               "Export the edited channel to Pitched/{name}_pitch_v{N}.wav (file only - playback is already live)");
         plain (mSendBtn,   "Send Notes to...", "Send the detected notes as MIDI to a Layers / Bass / Drums / Clips tab");
+        plain (mSnapshotBtn, "Snapshot",
+               "Save the current edits as a restore point in the version history");
+        plain (mVersionsBtn, "Versions",
+               "Revert to an earlier snapshot (every analyze also creates one)");
         plain (mUndoBtn,   "Undo",   "Undo the last note edit");
         plain (mRedoBtn,   "Redo",   "Redo");
         plain (mScrollBtn, "A",      "Auto-scroll the canvas to follow playback (A)");
+
+        // QA-Fa recovery: bsp_on chain switch -- edits play live while ON;
+        // OFF glides the applicator to neutral (never a hard switch).
+        addAndMakeVisible (mOnToggle);
+        mOnToggle.setButtonText ("ON");
+        mOnToggle.setTooltip ("Play the pitch edits live through the chain (off glides back to the untouched take)");
+        mOnAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+            mApvts, "bsp_on", mOnToggle);
         mScrollBtn.setClickingTogglesState (true);
         mScrollBtn.setToggleState (true, juce::dontSendNotification);
         mScrollBtn.onClick = [this] { mOwner.mAutoScroll = mScrollBtn.getToggleState(); };
@@ -635,13 +648,15 @@ public:
         mSliceBtn.onClick = [this] { mOwner.setParamValue ("bsp_mode", 0.0f); };
         mEditBtn .onClick = [this] { mOwner.setParamValue ("bsp_mode", 1.0f); };
 
-        mSaveBtn  .onClick = [this] { mOwner.saveUserPreset(); };
-        mLoadBtn  .onClick = [this] { mOwner.loadUserPreset(); };
-        mResetBtn .onClick = [this] { mOwner.runReset(); };
-        mRenderBtn.onClick = [this] { mOwner.runRender(); };
-        mSendBtn  .onClick = [this] { mOwner.showSendNotesMenu(); };
-        mUndoBtn  .onClick = [this] { mOwner.doUndo(); };
-        mRedoBtn  .onClick = [this] { mOwner.doRedo(); };
+        mSaveBtn    .onClick = [this] { mOwner.saveUserPreset(); };
+        mLoadBtn    .onClick = [this] { mOwner.loadUserPreset(); };
+        mResetBtn   .onClick = [this] { mOwner.runReset(); };
+        mRenderBtn  .onClick = [this] { mOwner.runRender(); };
+        mSendBtn    .onClick = [this] { mOwner.showSendNotesMenu(); };
+        mSnapshotBtn.onClick = [this] { mOwner.runSnapshotVersion(); };
+        mVersionsBtn.onClick = [this] { mOwner.showVersionsMenu(); };
+        mUndoBtn    .onClick = [this] { mOwner.doUndo(); };
+        mRedoBtn    .onClick = [this] { mOwner.doRedo(); };
 
         // Focus / Mod / Speed (section 14b renames), APVTS-attached.
         auto knob = [this] (juce::Slider& s, const char* id, const juce::String& tt,
@@ -659,7 +674,11 @@ public:
     }
 
     void setDirty (bool d) { if (mDirty != d) { mDirty = d; repaint(); } }
-    void setStale (bool s) { if (mStale != s) { mStale = s; repaint(); } }
+    void setStale (bool s, bool pending)
+    {
+        if (mStale != s || mStalePending != pending)
+            { mStale = s; mStalePending = pending; repaint(); }
+    }
     void mirrorPreset (int presetParam)
     {
         mMirroring = true;
@@ -690,9 +709,12 @@ public:
         }
         if (mStale)
         {
+            // Pending = grid changed while the transport runs; the stop-
+            // gated auto re-analyze fires at the next stop.
             g.setColour (kStale);
             g.setFont (juce::Font (11.0f, juce::Font::bold));
-            g.drawText ("RE-ANALYZE", getWidth() - 3 * 56 - 8 - 96, 2, 92, 30,
+            g.drawText (mStalePending ? "RE-ANALYZE ON STOP" : "RE-ANALYZE",
+                        getWidth() - 3 * 56 - 8 - 152, 2, 148, 30,
                         juce::Justification::centredRight);
         }
         // LENGTH readout (section 14b RETAIN), monospace.
@@ -735,6 +757,7 @@ public:
 
         auto row2 = b.withTrimmedTop (4).removeFromTop (26);
         row2.removeFromLeft (260);   // LENGTH readout slot
+        mOnToggle.setBounds (row2.removeFromLeft (48));
         mScrollBtn.setBounds (row2.removeFromRight (28));
         row2.removeFromRight (4);
         mRedoBtn.setBounds (row2.removeFromRight (46));
@@ -744,6 +767,10 @@ public:
         mRenderBtn.setBounds (row2.removeFromRight (58));
         row2.removeFromRight (3);
         mResetBtn.setBounds (row2.removeFromRight (50));
+        row2.removeFromRight (10);
+        mVersionsBtn.setBounds (row2.removeFromRight (64));
+        row2.removeFromRight (3);
+        mSnapshotBtn.setBounds (row2.removeFromRight (68));
     }
 
 private:
@@ -753,11 +780,15 @@ private:
     BaySickEngineLabel mTitleLbl { "BaySickPitch", juce::Colour (0xFF0FAFA5) };
     juce::ComboBox   mPresetCombo;
     juce::TextButton mSaveBtn, mLoadBtn, mSliceBtn, mEditBtn, mResetBtn,
-                     mRenderBtn, mSendBtn, mUndoBtn, mRedoBtn, mScrollBtn;
+                     mRenderBtn, mSendBtn, mSnapshotBtn, mVersionsBtn,
+                     mUndoBtn, mRedoBtn, mScrollBtn;
+    juce::ToggleButton mOnToggle;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mOnAtt;
     juce::Slider     mFocus, mMod, mSpeed;
     std::unique_ptr<TaggedSliderAttachment> mFocusAtt, mModAtt, mSpeedAtt;
     juce::String mLengthText;
-    bool mDirty { false }, mStale { false }, mMirroring { false };
+    bool mDirty { false }, mStale { false }, mStalePending { false },
+         mMirroring { false };
 
     friend class BaySickPitchEditor;
 };
@@ -834,7 +865,8 @@ void BaySickPitchEditor::setTopNote (int note)
 
 void BaySickPitchEditor::timerCallback()
 {
-    mToolbar->setStale (mProc.isPitchStale());
+    const bool stale = mProc.isPitchStale();
+    mToolbar->setStale (stale, stale && DSPBase::isTransportPlaying());
 
     const bool dirty = paramsDivergeFromSnapshot();
     mToolbar->setDirty (dirty);
@@ -971,6 +1003,52 @@ void BaySickPitchEditor::runReset()
     pushUndo();
     mProc.mPitch.clearAllEdits();
     mCanvas->repaint();
+}
+
+// QA-Fa recovery (bundle item 3): versions are restore points, never an
+// edit gate -- edits stay instant; analyze + this explicit action snapshot.
+void BaySickPitchEditor::runSnapshotVersion()
+{
+    if (! mProc.mPitch.isAnalyzed()) return;
+    mProc.appendPitchVersion();
+}
+
+void BaySickPitchEditor::showVersionsMenu()
+{
+    const auto& versions = mProc.mPitchVersions;
+    if (versions.empty())
+    {
+        juce::PopupMenu m;
+        m.addItem (1, "No versions yet - analyze or Snapshot creates one", false);
+        m.showMenuAsync (juce::PopupMenu::Options());
+        return;
+    }
+
+    juce::int64 curSig = 0;
+    if (mProc.onChannelClipSignature && mProc.getOwnChannelId() >= 0)
+        curSig = mProc.onChannelClipSignature (mProc.getOwnChannelId());
+
+    juce::PopupMenu m;
+    for (int i = (int) versions.size() - 1; i >= 0; --i)
+    {
+        const auto& v = versions[(size_t) i];
+        juce::String label = "v" + juce::String (i + 1) + "  "
+            + v.dateIso.substring (0, 16).replace ("T", " ");
+        if (v.sigA != curSig)
+            label += "  (grid changed)";
+        m.addItem (i + 1, "Revert to " + label);
+    }
+    juce::Component::SafePointer<BaySickPitchEditor> self (this);
+    m.showMenuAsync (juce::PopupMenu::Options(),
+        [self] (int result)
+        {
+            if (! self || result <= 0) return;
+            self->pushUndo();
+            if (! self->mProc.revertPitchToVersion (result - 1))
+                { self->mUndoStack.pop_back(); return; }
+            self->mSelectedRegion = -1;
+            self->mCanvas->repaint();
+        });
 }
 
 void BaySickPitchEditor::showSendNotesMenu()

@@ -14,8 +14,11 @@ class BaySickVocalProcessor;
 // paint-only widgets.
 //
 //   - Toolbar: BaySickAlign title, 6-entry preset combo (Loose/Close/Tight
-//     x +/-Pitch), Save/Load preset, preset-dirty green dot, Analyze +
-//     Render actions, Undo/Redo (local align-edit stack), stale badge.
+//     x +/-Pitch), Save/Load preset, preset-dirty green dot, Analyze/Apply +
+//     Versions (applied-state revert dropdown) + Render (export-only)
+//     actions, Undo/Redo (local align-edit stack), stale badge (shows
+//     "RE-ANALYZE ON STOP" while the transport runs -- the stop-gated auto
+//     re-analyze fires at the next stop).
 //   - Shared time ruler above the 3-lane stack.
 //   - Lanes: Leader (Bass green) / Follower (Vox teal) / Output (Drums red),
 //     channel pickers on the Leader + Follower headers, composite waveforms
@@ -33,8 +36,10 @@ class BaySickVocalProcessor;
 //              Granular / Phase Vocoder), Transpose, Formant Shift ON +
 //              rotary.
 //
-// All processing is offline/message-thread (the G2-warp design lock): the
-// editor drives BaySickVocalProcessor::analyzeAlign / renderAlignedTake /
+// Analysis + rendering are offline/message-thread; APPLIED maps play LIVE
+// through the decode-layer applicator (QA-Fa recovery -- the locked May
+// design).  The editor drives BaySickVocalProcessor::analyzeAlign (which is
+// also Apply) / revertAlignToVersion / renderAlignedTake (export only) /
 // renderAlignedPreview and paints the results.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -83,6 +88,7 @@ private:
     // Actions
     void runAnalyze();
     void runRender();
+    void showVersionsMenu();   // QA-Fa recovery: applied-version revert dropdown
     void refreshComposites();     // Leader + Follower caches (cheap-ish)
     void refreshOutputPreview();  // Output cache (expensive: full warp render)
     void rebuildChannelCombos();

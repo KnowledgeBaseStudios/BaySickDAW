@@ -64,6 +64,9 @@ private:
     void runReset();
     void refreshComposite();          // waveform cache for the pills
     void showSendNotesMenu();
+    // QA-Fa recovery: version-history restore points (bundle item 3).
+    void runSnapshotVersion();
+    void showVersionsMenu();
 
     // Presets (section 14f: 3 mode presets drive the knobs)
     void applyFactoryPreset (int idx);   // 0 Loose / 1 Close / 2 Tight

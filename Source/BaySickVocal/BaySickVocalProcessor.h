@@ -146,11 +146,13 @@ public:
     }
     float getSidechainLevel() const noexcept override { return mScHelper.getLevel(); }
 
-    // ── QA-F Task 3: BaySickAlign channel-pair state ─────────────────────────
-    // MESSAGE THREAD ONLY end to end -- the whole Align pipeline is offline
-    // (analyze -> preview -> render-to-bake per the G2-warp design lock); no
-    // bsa_* param ever reaches the audio thread, so there is no per-block
-    // APVTS push for this block of state.
+    // ── QA-F Task 3 / QA-Fa recovery: BaySickAlign channel-pair state ────────
+    // Analyze / versions / render are MESSAGE THREAD ONLY.  Applied maps
+    // reach the audio thread as an immutable AlignPlaySnapshot (atomic swap +
+    // retire ring, the BaySickPitchDSP contract): the clip-decode layer in
+    // VibeSynthProcessor::decodeFilePlayClip reads it per block and warps the
+    // follower channel's FilePlay read position live.  bsa_align_on is the
+    // chain switch (decode reads the cached raw-param atomic).
     BaySickAlignDSP mAlign;
 
     struct AlignRenderEntry
@@ -158,6 +160,22 @@ public:
         juce::String file;      // project-relative ("Aligned/x_align_v1.wav")
         juce::String dateIso;   // ISO8601 at render time
         int          version { 1 };
+        // QA-Fa recovery: the render's timeline origin (Align = the pair's
+        // commonStartBeat, Pitch = the composite startBeat) so Add-From-
+        // Export can land the file back at its original position.
+        double       startBeat { 0.0 };
+    };
+
+    // QA-Fa recovery: one applied state in the per-editor version history.
+    // `state` is the same ValueTree shape the project XML persists (Align:
+    // the applied-frame tree; Pitch: the PitchState tree), so revert =
+    // deserialize + republish.  Signatures power the "(grid changed)" marker.
+    struct EditorVersionEntry
+    {
+        juce::ValueTree state;
+        juce::String    dateIso;
+        juce::int64     sigA { 0 };   // Align: leader sig / Pitch: own-channel sig
+        juce::int64     sigB { 0 };   // Align: follower sig / Pitch: unused
     };
 
     struct AlignState
@@ -167,20 +185,61 @@ public:
         std::vector<AlignProtectedArea>  protectedAreas;
         std::vector<AlignRenderEntry>    renders;
         // Channel-clip signatures captured at analyze time; a mismatch on
-        // poll = the grid changed under the map -> stale badge, manual
-        // re-analyze (never auto -- G2-warp lock).
+        // poll = the grid changed under the map -> stale badge.  QA-Fa
+        // recovery: staleness now also arms the stop-gated auto re-analyze
+        // (VoxPage timer; runs on transport stop, debounced ~1s otherwise).
         juce::int64 analyzedLeaderSig   { 0 };
         juce::int64 analyzedFollowerSig { 0 };
         // Common-origin frame the map was authored in: both composites are
         // front-padded to the earlier of the two start positions, so anchor
         // times are comparable and the bake lands back at this beat.
         double      commonStartBeat     { 0.0 };
+        juce::int64 commonStartSample   { 0 };
         juce::int64 leaderPadSamples    { 0 };
         juce::int64 followerPadSamples  { 0 };
         double      analysisSampleRate  { 44100.0 };
         bool        analyzed            { false };
     };
     AlignState mAlignState;
+
+    // ── QA-Fa recovery: per-editor version histories (message thread) ────────
+    std::vector<EditorVersionEntry> mAlignVersions;
+    std::vector<EditorVersionEntry> mPitchVersions;
+
+    // Append the CURRENT applied state as a new version (called by every
+    // successful analyze, and by the Pitch editor's explicit Snapshot
+    // action).  FIFO-capped at kMaxEditorVersions.
+    static constexpr int kMaxEditorVersions = 20;
+    void appendAlignVersion();
+    void appendPitchVersion();
+
+    // Revert to versions[index]: deserialize the stored state back into the
+    // live fields and republish the playback snapshot.  Reverting to an
+    // entry whose signature differs from the current grid is allowed -- the
+    // stale badge lights immediately (the entry shows "(grid changed)").
+    bool revertAlignToVersion (int index);
+    bool revertPitchToVersion (int index);
+
+    // ── QA-Fa recovery: live-playback snapshot publication ──────────────────
+    // Rebuild + atomically publish the decode-layer AlignPlaySnapshot from
+    // mAlignState (or clear when not analyzed).  MESSAGE THREAD.
+    void publishAlignPlayback();
+
+    // AUDIO/MT: one atomic load; pointer valid within the current block
+    // (retire ring of 8 -- the BaySickPitchDSP liveness contract).
+    const AlignPlaySnapshot* loadAlignPlaySnapshot() const noexcept
+        { return mAlignPlayActive.load (std::memory_order_acquire); }
+
+    // AUDIO/MT: bsa_align_on via the cached raw-param atomic.
+    bool isAlignChainOn() const noexcept
+        { return mAlignOnRaw == nullptr || mAlignOnRaw->load() > 0.5f; }
+
+    // AUDIO/MT: the Pitch box gates, mirroring the bake path's reads --
+    // live pitch pull = (anchor semis + transpose) only while pitch_on.
+    bool isAlignPitchOn() const noexcept
+        { return mAlignPitchOnRaw != nullptr && mAlignPitchOnRaw->load() > 0.5f; }
+    float alignTransposeSemis() const noexcept
+        { return mAlignTransposeRaw != nullptr ? mAlignTransposeRaw->load() : 0.0f; }
 
     // Services injected by the owning VoxPage (this engine must not link
     // against VibeSynthProcessor).  All message-thread.
@@ -190,11 +249,6 @@ public:
     std::function<juce::int64 (int channelId)>                  onChannelClipSignature;
     std::function<std::vector<std::pair<int, juce::String>>()>  onListCandidateChannels;
     std::function<juce::File()>                                 onGetProjectFolder;
-    // Bake placement is a pending owner spec call (what happens to the
-    // original follower clips when a render lands) -- the hook stays
-    // uninstalled until it is answered; render still writes the file +
-    // history entry either way.
-    std::function<void (const juce::File& bake, double startBeat)> onPlaceBakedClip;
 
     void setOwnChannelId (int id) noexcept { mOwnChannelId = id; }
     int  getOwnChannelId() const noexcept  { return mOwnChannelId; }
@@ -302,6 +356,23 @@ private:
     // re-render the follower composite, re-pad to the analysis origin, warp
     // + pitch + optional formant shift.  Empty buffer + errorOut on failure.
     juce::AudioBuffer<float> buildWarpedFollower (juce::String& errorOut);
+
+    // QA-Fa recovery: applied-frame (de)serialization shared by project
+    // persistence, the version history, and revert.
+    juce::ValueTree alignAppliedToTree() const;
+    void alignAppliedFromTree (const juce::ValueTree& v);
+
+    // QA-Fa recovery: decode-layer snapshot (see loadAlignPlaySnapshot).
+    // Message thread owns the retired list; audio holds the active pointer
+    // only within one block.
+    std::atomic<AlignPlaySnapshot*> mAlignPlayActive { nullptr };
+    std::vector<std::unique_ptr<AlignPlaySnapshot>> mAlignPlayRetired;
+
+    // Cached raw-param atomics (APVTS owns them; pointers stable for the
+    // processor's lifetime).
+    std::atomic<float>* mAlignOnRaw        { nullptr };
+    std::atomic<float>* mAlignPitchOnRaw   { nullptr };
+    std::atomic<float>* mAlignTransposeRaw { nullptr };
 
     // H-6d (2026-05-02): owned NAM/IR processor (per-Vox-strip instance).
     // unique_ptr so the include only needs the forward declaration in

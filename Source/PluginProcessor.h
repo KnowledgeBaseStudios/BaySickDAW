@@ -16,6 +16,7 @@
 #include "AudioFileRecorder.h"
 #include "DSP/AudioClipStreamer.h"
 #include "DSP/PhaseVocoder.h"
+#include "DSP/BaySickAlignDSP.h"   // QA-Fa recovery: AlignPlaySnapshot (decode-layer live warp)
 #include "MidiLearn/MidiLearnRegistry.h"
 // Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06).  These
 // members live for the lifetime of the processor; per-strip RenderTask
@@ -532,6 +533,33 @@ public:
         // carries the interp phase across blocks (peekOutput/advanceOutput
         // pattern); reset alongside vocoder->reset() on seeks.
         double pvOutFrac { 0.0 };
+        // QA-Fa recovery: align live-warp per-clip state.  The warp branch
+        // in decodeFilePlayClip owns these; all zero-cost when the clip's
+        // channel has no applied map.
+        //   alignEngaged        - clip is currently decoding through the
+        //                         PV-warp path (vs the untouched original
+        //                         paths when the chain is OFF and settled).
+        //   alignPosCorr        - file-domain position correction leftover
+        //                         from the last law change (toggle / Apply /
+        //                         revert); drains to 0 over ~50 ms as a
+        //                         consumption-rate glide (rule 5 no-click).
+        //   alignLastLawEnd     - file-domain end position of the previous
+        //                         block's law; a mismatch vs this block's
+        //                         law start IS the law-change detector.
+        //   alignLastEndTimeline- previous block's end timeline sample;
+        //                         discontinuity = transport seek -> hard
+        //                         resync instead of glide.
+        //   alignRho            - smoothed pitch ratio (anchor semis +
+        //                         transpose), ~50 ms approach.
+        //   alignInFrac         - fractional file-consumption carry so the
+        //                         PV input feed matches the effective
+        //                         (hop-quantized) stretch long-run exactly.
+        bool   alignEngaged        { false };
+        double alignPosCorr        { 0.0 };
+        double alignLastLawEnd     { -1.0 };
+        int64  alignLastEndTimeline { -1 };
+        double alignRho            { 1.0 };
+        double alignInFrac         { 0.0 };
         // QA-ClipPlayback Task 2: per-clip DSP state for the ClipsPage BaySickPlayer
         // control chain applied to timeline-WAV (Flow B) playback so a WAV clip
         // matches the sampler.  Prepared + reset at rebuildAudioClipPlayers time
@@ -599,6 +627,23 @@ public:
     // notify/wait release-acquire pair (workers wake AFTER the audio
     // thread has written this).
     AudioClipSnapshot* mCurrentBlockClipSnapshot { nullptr };
+
+    // QA-Fa recovery: per-block align live-warp cache, captured right after
+    // mCurrentBlockClipSnapshot (audio thread; MT workers see it through the
+    // same dispatcher release-acquire pair).  One entry per Vox page: the
+    // engine's published AlignPlaySnapshot (nullptr when none / unusable)
+    // and the bsa_ chain-switch + Pitch-box gate reads for this block.
+    // decodeFilePlayClip matches a clip's routeChannel against the cached
+    // snapshot's followerChannelId -- constant per-block cost, zero per-clip
+    // casts, and pointer liveness is the publisher's retire-ring contract.
+    struct AlignBlockEntry
+    {
+        const AlignPlaySnapshot* snap        { nullptr };
+        bool                     chainOn     { true };
+        bool                     pitchOn     { false };
+        float                    transpose   { 0.0f };
+    };
+    std::array<AlignBlockEntry, kMaxVoxPages> mBlockAlignEntries {};
 
     // ── Batch 5 (2026-05-06): shared audio-clip render path ──────────────────
     // Per-block context bundle passed into renderAudioClipsForRow.  Keeps the

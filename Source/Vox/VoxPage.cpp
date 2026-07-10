@@ -3,7 +3,6 @@
 #include "../BaySickVocal/BaySickVocalEditor.h"
 #include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
-#include "../Standalone/StandaloneEditor.h"   // QA-F: placeAlignedBake via parent lookup
 #include "../PluginProcessor.h"
 
 namespace
@@ -515,14 +514,76 @@ void VoxPage::setProcessor (VibeSynthProcessor* p)
             const juce::ScopedLock lk (full->mProjectFolderLock);
             return full->mCurrentProjectFolder;
         };
-        // Bake placement (owner call, build round): row below the originals,
-        // original rows muted for one-click A/B.  Parent lookup at call time
-        // -- setProcessor can run before this page is parented.
-        bv->onPlaceBakedClip = [this, bv] (const juce::File& bake, double startBeat)
+        // QA-Fa recovery: render is EXPORT ONLY -- the QA-F onPlaceBakedClip
+        // install is retired (re-import goes through the Vox ribbon's
+        // "+ Add New Vox From Export" flow).
+
+        // QA-Fa recovery: a project-restored applied map may have published
+        // before setOwnChannelId resolved the follower id -- republish now
+        // that the id is real.
+        bv->publishAlignPlayback();
+
+        // QA-Fa recovery: stop-gated auto re-analyze poller (works with the
+        // editors closed; dies with the page).
+        startTimerHz (4);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-Fa recovery: stop-gated auto re-analyze (locked bundle item 4).
+// Grid/tempo changes on the analyzed channel(s) re-run the analysis
+// automatically: transport STOPPED -> debounced ~1 s after the signature
+// stops moving; transport PLAYING -> pending (the editors' badges show it),
+// runs at the next stop.  The version history appended by every analyze is
+// the safety net that makes auto re-analysis safe.  Failures are silent
+// (badge stays lit); a failed signature is not retried until it changes.
+// ─────────────────────────────────────────────────────────────────────────────
+void VoxPage::timerCallback()
+{
+    auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get());
+    if (bv == nullptr || mFullProcessor == nullptr) return;
+
+    auto pollOne = [&] (bool stale, juce::int64 curSig, juce::int64& lastSeen,
+                        int& stableTicks, juce::int64& lastAttempt,
+                        auto&& runAnalyze)
+    {
+        if (! stale) { stableTicks = 0; lastSeen = curSig; return; }
+        if (curSig != lastSeen)
         {
-            if (auto* se = findParentComponentOfClass<StandaloneEditor>())
-                se->placeAlignedBake (bake, startBeat, bv->resolveFollowerChannel());
-        };
+            lastSeen    = curSig;
+            stableTicks = 0;
+            return;
+        }
+        if (curSig == lastAttempt) return;   // this exact state already failed
+        if (++stableTicks < 4) return;       // ~1 s at 4 Hz
+        if (DSPBase::isTransportPlaying()) return;   // stop-gated
+        lastAttempt = curSig;
+        stableTicks = 0;
+        runAnalyze();
+    };
+
+    // Align: only re-runs an analysis that exists; combined leader+follower
+    // signature so either channel's change (or a tempo edit) trips it.
+    if (bv->mAlignState.analyzed)
+    {
+        const int leader   = bv->resolveLeaderChannel();
+        const int follower = bv->resolveFollowerChannel();
+        const juce::int64 sig =
+            (leader >= 0 ? mFullProcessor->channelClipSignature (leader) : 0)
+            ^ (follower >= 0
+               ? (mFullProcessor->channelClipSignature (follower) * 31) : 0);
+        pollOne (bv->isAlignStale(), sig, mAlignAutoLastSig, mAlignAutoStable,
+                 mAlignAutoAttempted,
+                 [&] { juce::String err; bv->analyzeAlign (err); });
+    }
+
+    if (bv->mPitch.isAnalyzed())
+    {
+        const juce::int64 sig =
+            mFullProcessor->channelClipSignature (bv->getOwnChannelId());
+        pollOne (bv->isPitchStale(), sig, mPitchAutoLastSig, mPitchAutoStable,
+                 mPitchAutoAttempted,
+                 [&] { juce::String err; bv->analyzePitch (err); });
     }
 }
 

@@ -678,6 +678,30 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                           :                             "+ Add New Drum";
     m.addItem(-3, addLabel);
 
+    // QA-Fa recovery: "+ Add New Vox From Export" submenu (Vox only; the one
+    // sanctioned exception to the old instance-switcher-only convention,
+    // owner design 2026-07-10).  Greyed when the editor returns no entries
+    // (no exports / vox cap reached / project unsaved).
+    if (type == TabType::Vox)
+    {
+        mVoxExportShown.clear();
+        if (onListVoxExports)
+            mVoxExportShown = onListVoxExports();
+        juce::PopupMenu sub;
+        juce::String lastFolder;
+        for (int i = 0; i < (int) mVoxExportShown.size(); ++i)
+        {
+            const auto& e = mVoxExportShown[(size_t) i];
+            if (e.folder != lastFolder)
+            {
+                sub.addItem(-99, e.folder + ":", false, false);
+                lastFolder = e.folder;
+            }
+            sub.addItem(kVoxExportBaseId + i, "  " + e.name);
+        }
+        m.addSubMenu("+ Add New Vox From Export", sub, ! mVoxExportShown.empty());
+    }
+
     // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry - only on the Drums
     // dropdown, only when the singleton isn't already spawned (1-instance lock).
     if (type == TabType::Drums)
@@ -771,6 +795,14 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
             {
                 // L-3 (2026-05-05): + Add BaySickBasses (Inst dropdown only).
                 if (onAddBaySickBassesRequest) onAddBaySickBassesRequest();
+            }
+            else if (result >= kVoxExportBaseId
+                     && result < kVoxExportBaseId + (int) mVoxExportShown.size())
+            {
+                // QA-Fa recovery: + Add New Vox From Export pick.
+                if (onAddVoxFromExport)
+                    onAddVoxFromExport (
+                        mVoxExportShown[(size_t)(result - kVoxExportBaseId)].fullPath);
             }
             else if (result <= -10 && result >= (type == TabType::Drums ? -12
                                                 : (type == TabType::Vox || type == TabType::Inst) ? -11

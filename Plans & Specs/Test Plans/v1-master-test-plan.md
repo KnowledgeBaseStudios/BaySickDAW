@@ -288,6 +288,11 @@ in-batch; these scenarios are the full campaign walk. Setup for most: two Vox ta
 drop a "leader" take on Vox 1 and a slightly-off "follower" take on Vox 2 (sequential same-row
 clips only; overlapping-same-row is §C item C2). BaySickAlign lives on the FOLLOWER's Vox tab.
 Debug first, then Release.
+NOTE (QA-Fa recovery round, 2026-07-10): F-2 through F-6 were rewritten to the recovered
+design — applied maps play LIVE through the chain, Render is export-only, staleness
+auto-re-analyzes stop-gated. Failures in the rewritten expectations indict the "QA-Fa
+recovery round" commit, not the QA-F commit. The recovery's own scenarios are §B.7
+FA-12/FA-13.
 
 - [ ] **F-1 — composite renderer feeds the lanes.** Put two audio clips on the follower Vox
       channel at bars 1 and 5. Open BaySickAlign, pick the Leader channel on the Leader lane.
@@ -295,34 +300,43 @@ Debug first, then Release.
       them, no overlap error); the Leader lane draws its channel; the shared ruler lines the two
       lanes up (bar-1 content starts at the same x in both when both start at bar 1).
       `D:__ R:__` notes:
-- [ ] **F-2 — Analyze builds the warp + Output preview.** With Leader picked: Analyze. Expected:
-      no error; the Output lane (red) fills with a preview waveform that visibly rides the
-      Leader's timing (onsets line up with the Leader lane, not the Follower lane). Analyze with
-      NO leader picked = clean error dialog, not a crash. `D:__ R:__` notes:
-- [ ] **F-3 — Mode reach: Close vs Loose (ear + eye).** Same pair: Analyze under Loose-Align,
-      Render; then Close-Align, Analyze, Render. Expected: audible/visible difference in how far
-      onsets get pulled (Fine Tune ms window = pairing reach; Tight only pairs near onsets).
-      The Mode dropdown also re-seats the Pitch Range knob's window (watch it move).
+- [ ] **F-2 — Analyze/Apply builds the warp, playback goes LIVE.** With Leader picked:
+      Analyze/Apply. Expected: no error; the Output lane (red) fills with a preview waveform that
+      visibly rides the Leader's timing; AND pressing global Play immediately plays the follower
+      channel time-aligned (onsets land with the leader BY EAR, no render step, nothing new on
+      the grid). Analyze with NO leader picked = clean error dialog, not a crash.
       `D:__ R:__` notes:
+- [ ] **F-3 — Mode reach: Close vs Loose (ear + eye).** Same pair: Analyze/Apply under
+      Loose-Align, Play and listen; then Close-Align, Analyze/Apply, Play. Expected:
+      audible/visible difference in how far onsets get pulled (Fine Tune ms window = pairing
+      reach; Tight only pairs near onsets). The Mode dropdown also re-seats the Pitch Range
+      knob's window (watch it move). `D:__ R:__` notes:
 - [ ] **F-4 — +Pitch preset pulls pitch, Tight maps contour [EAR-CHECK].** Close-Align+Pitch on a
-      deliberately-flat follower note: Analyze, Render. Expected: rendered follower pulls toward
-      the leader's pitch WITHOUT erasing all human variation. Tight-Align+Pitch: the contour maps
-      much harder. A/B the three Algos (PSOLA / Granular / Phase Vocoder) on a sustained vocal —
-      each renders audibly shifted, artifact-bounded output (no dropouts/garble). `D:__ R:__` notes:
-- [ ] **F-5 — Render versions + history + grid placement (owner call, locked at build round).**
-      Render twice (tweak something between). Expected: `<project>/Aligned/{name}_align_v1.wav`
-      and `_v2.wav` on disk (project must be saved first — unsaved project = clean error);
-      HistoryScrubber lists v1 + v2 with dates; Del removes the entry from the list but leaves
-      the file on disk. ON THE BUILDER GRID: the bake lands as a clip on the row BELOW the
-      follower's original clips, routed through the same Vox chain; the original row(s) get
-      ROW-MUTED (one-click A/B toggle on the row mute); the second Render REPLACES the bake clip
-      in place (no row stacking). Toggling the row mutes A/Bs original vs aligned. Re-analyze
-      after a render must NOT composite the bake into itself (Output preview unchanged by the
-      bake's presence). Save/reload: bake clip + row mutes persist. `D:__ R:__` notes:
-- [ ] **F-6 — stale detection is manual-re-analyze (no auto).** After an Analyze: move (or
-      resize/mute) a follower clip on the Builder grid. Expected: the toolbar shows the amber
-      RE-ANALYZE badge within ~a second; nothing re-runs by itself; Analyze clears it. Editing a
-      sync point / protected area also raises the badge. `D:__ R:__` notes:
+      deliberately-flat follower note: Analyze/Apply, Play. Expected: the follower pulls toward
+      the leader's pitch LIVE, WITHOUT erasing all human variation; Tight-Align+Pitch maps the
+      contour much harder. The Algos dropdown drives the RENDER's pitch pass (the live path is
+      phase-vocoder based): Render under each of the three Algos (PSOLA / Granular / Phase
+      Vocoder), audition each export via "+ Add New Vox From Export" (mute the new strip after
+      each listen) — each is audibly shifted, artifact-bounded (no dropouts/garble).
+      `D:__ R:__` notes:
+- [ ] **F-5 — Render is EXPORT ONLY + history.** Render twice (tweak something between).
+      Expected: `<project>/Aligned/{name}_align_v1.wav` and `_v2.wav` on disk (project must be
+      saved first — unsaved project = clean error); HistoryScrubber lists v1 + v2 with dates;
+      Del removes the entry from the list but leaves the file on disk. NOTHING appears on the
+      Builder grid, no rows mute, and playback sounds IDENTICAL before vs after a Render (the
+      live warp was already playing; the render is a file export). Re-analysis after a render is
+      unchanged by the export's existence. Save/reload: the history list persists.
+      `D:__ R:__` notes:
+- [ ] **F-6 — stale detection auto-re-analyzes, STOP-GATED.** After an Analyze/Apply: with the
+      transport STOPPED, move (or resize/mute) a follower clip on the Builder grid. Expected: the
+      amber RE-ANALYZE badge appears, then ~1 s after the edit settles the analysis re-runs BY
+      ITSELF (badge clears, a new version appears in the Versions dropdown, playback follows the
+      new map). Same edit while PLAYING: badge reads "RE-ANALYZE ON STOP", playback keeps
+      applying the LAST-applied map (stable, no shifting mid-play), and the re-analysis fires at
+      the next transport stop. Manual Analyze/Apply mid-play is allowed and glides (no click).
+      Editing a sync point / protected area raises the badge but does NOT auto-run (those are
+      mid-edit gestures — auto fires on grid/tempo signature changes only; commit sync-point
+      edits with a manual Analyze/Apply). `D:__ R:__` notes:
 - [ ] **F-7 — presets + persistence round-trip.** Set Mode/Fine Tune/Pitch controls off-preset
       (green dirty dot lights), Save as a user preset (name it), tweak more, Load it back —
       values + dot state restore. Save the project with an analysis + sync points + protected
@@ -368,11 +382,12 @@ Debug first, then Release.
 
 ### §B.7 — QA-Fa (BaySickPitch composite-driven editor + DSP)
 
-`blocks:` the QA-Fa source commit (message-tagged "QA-Fa"; hash backfilled at the next test-plan
-touch). G2 ear-check batch — the pitch-edit ear-check folds into the G2 boundary smoke (owner
-call 2026-07-10). Setup: a Vox tab with 1-2 vocal clips back-to-back on its channel (sequential
-only — overlap is §C item C2). BaySickPitch is the Vox tab's third sub-tab. Debug first, then
-Release.
+`blocks:` the QA-Fa source commits — the `d8cc9494` checkpoint AND the "QA-Fa recovery round"
+commit (hash backfilled at the next test-plan touch); FA-4/FA-6/FA-9 rewrites + FA-12/FA-13
+verify the recovery commit specifically. G2 ear-check batch — the pitch-edit ear-check folds
+into the G2 boundary smoke (owner call 2026-07-10). Setup: a Vox tab with 1-2 vocal clips
+back-to-back on its channel (sequential only — overlap is §C item C2). BaySickPitch is the Vox
+tab's third sub-tab. Debug first, then Release.
 
 - [ ] **FA-1 — composite auto-resolve (no Load button).** Two vocal clips on the Vox channel at
       bars 1 and 3; open BaySickPitch. Expected: note pills (purple, teal waveform inside)
@@ -387,19 +402,33 @@ Release.
       VOL) appear under it. Drag VIB right → vibrato deepens on playback of that note; drag FRM
       off-center → character shifts; drag VOL points → a gain shape draws and the note follows it
       when played. `D:__ R:__` notes:
-- [ ] **FA-4 — realtime applicator (no bake).** Nudge one flat note up a semitone; global Play.
-      Expected: the note plays CORRECTED in place (FilePlay), other notes unaltered; a second
-      zero-edit clip on the channel plays bit-identical (lazy-activate); the playhead line runs
-      across the canvas during playback (Auto-Scroll follows when A is lit). Focus knob at 0 =
-      untouched channel plays exactly as recorded even after analysis. `D:__ R:__` notes:
+- [ ] **FA-4 — realtime applicator (no bake) + ON/OFF glide.** Nudge one flat note up a
+      semitone; global Play. Expected: the note plays CORRECTED in place (FilePlay), other notes
+      unaltered; a second zero-edit clip on the channel plays bit-identical (lazy-activate); the
+      playhead line runs across the canvas during playback (Auto-Scroll follows when A is lit).
+      Focus knob at 0 = untouched channel plays exactly as recorded even after analysis.
+      ON/OFF (toolbar row 2): toggle OFF mid-note — the correction GLIDES back to the raw take
+      (no click, no splice, Speed-rate glide); toggle ON mid-note — glides back in; with OFF
+      settled the channel is bit-identical to pre-analysis. Render while OFF still prints the
+      edits (export = the edits, not the monitor state). `D:__ R:__` notes:
 - [ ] **FA-5 — Focus / Mod / Speed + presets.** Raise Focus → notes pull toward centers audibly
       (Tight preset = hard pull, Loose = none); Speed low = audible glide between notes, high =
       instant; presets Loose/Close/Tight set all three knobs (dirty dot lights on manual tweak);
       Save/Load a user preset round-trips knob values, dot clears. `D:__ R:__` notes:
-- [ ] **FA-6 — Render bake + history.** Render (project saved first). Expected:
-      `Pitched/{name}_pitch_v1.wav` on disk with edits printed; a second Render → `_v2`.
-      NOTE: whether the bake also PLACES on the grid (like the Align bake) is an open owner call
-      at code-complete — verify against wherever it lands. `D:__ R:__` notes:
+- [ ] **FA-6 — Render is EXPORT ONLY + "+ Add New Vox From Export".** Render (project saved
+      first). Expected: `Pitched/{name}_pitch_v1.wav` on disk with edits printed; a second
+      Render → `_v2`; NOTHING placed on the grid, playback unchanged (the edits were already
+      live). THE RE-IMPORT FLOW — Vox ribbon dropdown arrow → "+ Add New Vox From Export":
+      (1) grey rules: entry DISABLED when the project is unsaved, when no exports exist, or when
+      all 6 Vox slots are used; (2) submenu lists the Aligned/ and Pitched/ wavs grouped under
+      folder headers; (3) picking one spawns a NEW Vox strip + tab (Mixer strip + chain appear)
+      with the export placed as a clip at its ORIGINAL timeline position (bar-check against the
+      source clips); (4) PROMPT "Clone the source tab's vocal chain settings?" — Yes copies the
+      chain knobs (spot-check one obvious chain setting) but NOT the source's analyses/history
+      (new strip's BaySickPitch shows the empty/analyze state); (5) PROMPT "Mute the original
+      Vox strip?" — Yes mutes the source strip on the Mixer (A/B by unmuting); No leaves both
+      audible. The new strip's clip is first-class: BaySickPitch on the NEW tab analyzes it, and
+      it appears as a Leader candidate in another strip's Align picker. `D:__ R:__` notes:
 - [ ] **FA-7 — Send Notes to... (MIDI only).** With a Layers tab open: Send Notes to → "Layer 1".
       Expected: the target tab's piano roll (current pattern) gains the detected contour as notes
       starting at beat 0 (rhythm at the current tempo); NO audio moves; the Clips target appears
@@ -410,10 +439,16 @@ Release.
       history all restore without re-analysis (signature matches); playback still applies the
       edits (applicator snapshot rebuilt on load). Undo/Redo walk the note edits (incl. an
       accidental Reset). `D:__ R:__` notes:
-- [ ] **FA-9 — stale detection.** After analysis: move a clip on the Builder grid (or change the
-      project tempo / add a ruler tempo flag). Expected: amber RE-ANALYZE appears in the toolbar;
-      closing/reopening the sub-tab re-runs analysis automatically (edits carry over for notes
-      that still line up within 50 ms). `D:__ R:__` notes:
+- [ ] **FA-9 — stale detection auto-re-analyzes, STOP-GATED.** After analysis: with the
+      transport STOPPED, move a clip on the Builder grid (or change the project tempo / add a
+      ruler tempo flag). Expected: amber RE-ANALYZE appears, then ~1 s after the edit settles
+      the analysis re-runs BY ITSELF — no tab switch needed — and edits carry over for notes
+      that still line up within 50 ms (a version snapshot is appended first, so nothing is
+      lost).  Same edit while PLAYING: badge reads "RE-ANALYZE ON STOP", playback keeps applying
+      the last-analyzed regions, and the re-analysis fires at the next stop.  The auto also
+      works with the BaySickPitch sub-tab CLOSED (make the grid edit from Builder, stop, reopen
+      the sub-tab — already re-analyzed, no badge).  Opening the sub-tab on a stale channel
+      still re-runs immediately (the analyze-on-open path stays). `D:__ R:__` notes:
 - [ ] **FA-10 — [EAR-CHECK, at the G2 boundary smoke] pitch-edit quality.** A corrected note
       sounds natural — no chipmunk (per-note formant left at 0 keeps timbre; deliberate FRM
       shifts change character not pitch); an exaggerated pill drag (+7 st) is audibly artifact-
@@ -422,6 +457,26 @@ Release.
       files. Expected: zero third-party product/brand strings (tree-wide Newtone grep is clean at
       code-complete); Slice/Edit + Focus/Mod/Speed naming everywhere; engine name BaySickPitch
       retained by design. `D:__ R:__` notes:
+- [ ] **FA-12 — [recovery round] Align live warp at the decode layer.** Two-strip leader/follower
+      setup (the §B.6 rig), follower audibly late by a constant offset. Analyze/Apply on the
+      Align tab, then press Play with NO render: the follower plays time-aligned (onsets land
+      with the leader by ear).  The Align editor's ON toggle mid-play: OFF glides the follower
+      back to its natural (late) timing over a short varispeed slur — NO click, NO dropout, NO
+      splice; ON glides it back into alignment.  With OFF settled, playback is bit-identical to
+      pre-align.  Tempo-stretched case: change the project tempo away from the takes' BPM (clips
+      stretch) — the warp still applies on top of the stretch, and the ON/OFF glide stays clean.
+      Transport seek/loop-wrap while ON: playback resumes at the warped position instantly (a
+      seek is a jump, not a glide).  DSP meter: a vox channel with NO applied map costs the same
+      as before the recovery round (fast-path). `D:__ R:__` notes:
+- [ ] **FA-13 — [recovery round] version histories + revert, both editors.** Align: three
+      Analyze/Apply passes under different Modes → Versions dropdown lists v1..v3 newest-first
+      with timestamps; revert to v1 → playback audibly returns to v1's alignment (glide, no
+      click if playing); revert entries whose grid has since changed carry "(grid changed)" and
+      reverting to one lights the stale badge immediately.  Pitch: analyze (auto v1), drag some
+      pills, Snapshot (v2), drag more, then revert to v2 → the canvas + playback return to v2's
+      edits; Ctrl+Z after a revert undoes the revert locally.  Save/close/reopen: BOTH dropdowns
+      still list their versions and revert still works (persisted in project XML).
+      `D:__ R:__` notes:
 
 ---
 

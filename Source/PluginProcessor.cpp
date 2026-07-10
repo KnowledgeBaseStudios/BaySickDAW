@@ -1116,6 +1116,356 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                     && (player.originalBPM > 0.f)
                     && (std::abs (ctx.bpm - player.originalBPM) > 0.01);
 
+    // ── QA-Fa recovery: align live-warp applicator (decode layer) ────────────
+    // When a Vox channel has an APPLIED warp map with the chain ON, its clips
+    // decode through the PhaseVocoder with the read position remapped through
+    // the map (guide -> dub inverse) and the stretch compounding warp slope x
+    // tempo-stretch x pitch ratio in one pass (the locked May design).  All
+    // law changes (ON/OFF toggle, Apply, revert) glide over ~50 ms as a
+    // consumption-rate correction -- never a splice (rule 5); the only path
+    // swaps (direct <-> PV) crossfade within one block at identical read
+    // positions.  Idle cost per clip: the mBlockAlignEntries scan below
+    // (<= kMaxVoxPages pointer compares) + one bool check.
+    bool warpHandled = false;
+    if (isVoxRoute && player.vocoder != nullptr)
+    {
+        const AlignBlockEntry* ae = nullptr;
+        for (const auto& e : mBlockAlignEntries)
+            if (e.snap != nullptr && e.snap->followerChannelId == routeCh)
+                { ae = &e; break; }
+        const bool wantWarp = (ae != nullptr) && ae->chainOn;
+
+        if (player.alignEngaged || wantWarp)
+        {
+            const juce::int64 T0 = ctx.projectStart + bufOffset;
+
+            // The existing beat-domain / linear file-position law, callable
+            // at ANY timeline sample (posDB above is rawLawAt(T0) exactly).
+            auto rawLawAt = [&] (double timelineSample) -> double
+            {
+                if (TempoMap::isActive() && player.originalBPM > 0.f)
+                {
+                    const double beatsIn = TempoMap::beatAtSample (
+                        (juce::int64) std::llround (timelineSample))
+                        - player.clipStartBeat;
+                    return clipFilePosForBeat (beatsIn, player.fileSampleRate,
+                                               (double) player.originalBPM,
+                                               (double) contentStart);
+                }
+                return (timelineSample - (double) clipStart) * readRatio
+                       + (double) contentStart;
+            };
+
+            juce::int64 alignOrigin = 0;
+            if (ae != nullptr)
+            {
+                // Composite t=0 in CURRENT-rate timeline samples.  The stored
+                // origin is exact while the device rate matches analysis; on
+                // a rate change, re-derive from the origin beat (seconds are
+                // rate-invariant, sample frames are not).
+                alignOrigin = ae->snap->commonStartSample;
+                if (std::abs (ae->snap->analysisSampleRate - mSampleRate) > 0.5)
+                    alignOrigin = TempoMap::isActive()
+                        ? TempoMap::sampleAtBeat (ae->snap->commonStartBeat)
+                        : (juce::int64) std::llround (ae->snap->commonStartBeat
+                                                      * secPerBeat * mSampleRate);
+            }
+
+            auto warpLawAt = [&] (double timelineSample) -> double
+            {
+                if (ae == nullptr) return rawLawAt (timelineSample);
+                const double g = (timelineSample - (double) alignOrigin) / mSampleRate;
+                double d = g, dPerG = 1.0; float semis = 0.0f;
+                ae->snap->lookupAtGuideSec (g, d, dPerG, semis);
+                return rawLawAt ((double) alignOrigin + d * mSampleRate);
+            };
+
+            const double lawStart = wantWarp ? warpLawAt ((double) T0)
+                                             : rawLawAt  ((double) T0);
+            const double lawEnd   = wantWarp ? warpLawAt ((double) (T0 + outSamples))
+                                             : rawLawAt  ((double) (T0 + outSamples));
+
+            float semisTarget = 0.0f;
+            if (wantWarp && ae->pitchOn)
+            {
+                const double g0 = ((double) T0 - (double) alignOrigin) / mSampleRate;
+                double d = g0, dPerG = 1.0; float semis = 0.0f;
+                ae->snap->lookupAtGuideSec (g0, d, dPerG, semis);
+                semisTarget = semis + ae->transpose;
+            }
+
+            const double blockSec = (double) outSamples / mSampleRate;
+            const double glideK   = juce::jmin (1.0, blockSec / 0.05);   // rule 5: ~50 ms
+
+            int  fadeMode = 0;      // +1 = direct->PV engage fade, -1 = PV->direct exit fade
+            bool engageOk = true;
+
+            const bool contiguous = (player.alignLastEndTimeline == T0)
+                                 && (player.alignLastLawEnd >= 0.0);
+
+            if (! player.alignEngaged)
+            {
+                // Engage.  If the clip was audible last block (mid-play
+                // toggle), start exactly where the pristine path was reading
+                // and glide to the warped law -- no position jump.  A fresh
+                // clip start / play-from-middle starts at the warped law
+                // directly (nothing was audible to glide from).
+                const bool wasAudible = (player.alignLastEndTimeline == T0);
+                player.alignPosCorr = wasAudible
+                    ? rawLawAt ((double) T0) - lawStart : 0.0;
+                player.alignInFrac  = 0.0;
+                player.alignRho     = 1.0;
+                player.alignEngaged = true;
+                if (! usePV)
+                    fadeMode = +1;   // pristine side was the direct path
+            }
+            else if (! contiguous)
+            {
+                // Transport seek / loop wrap / re-entry: hard resync (seeks
+                // jump by design -- the glide is for law changes only).
+                player.alignPosCorr = 0.0;
+                player.alignInFrac  = 0.0;
+                player.alignRho     = std::pow (2.0, (double) semisTarget / 12.0);
+            }
+            else if (std::abs (lawStart - player.alignLastLawEnd) > 4.0)
+            {
+                // Law changed under us (toggle / Apply / revert): keep the
+                // read position continuous, drain the difference out.
+                player.alignPosCorr += player.alignLastLawEnd - lawStart;
+            }
+
+            const double corrBefore = player.alignPosCorr;
+            player.alignPosCorr *= (1.0 - glideK);
+            if (std::abs (player.alignPosCorr) < 1.0e-3) player.alignPosCorr = 0.0;
+
+            const double rhoTarget = std::pow (2.0, (double) semisTarget / 12.0);
+            player.alignRho += (rhoTarget - player.alignRho) * glideK;
+            if (std::abs (player.alignRho - 1.0) < 1.0e-4) player.alignRho = 1.0;
+
+            const double pStart = lawStart + corrBefore;
+            double tc = (lawEnd - lawStart) + (player.alignPosCorr - corrBefore);
+            // Degenerate clamp (a huge backward law jump could zero or
+            // invert a single block's consumption; the law-end bookkeeping
+            // below re-absorbs the clamp next block).
+            tc = juce::jmax (tc, (double) outSamples * readRatio / 64.0);
+
+            const bool settled = corrBefore == 0.0 && player.alignPosCorr == 0.0
+                              && player.alignRho == 1.0;
+
+            if (! wantWarp && settled)
+            {
+                // Chain OFF and fully glided home: hand decode back to the
+                // pristine paths.  PV-native clips continue seamlessly (same
+                // law, same machinery); direct clips get the one-block
+                // crossfade below, at identical read positions.
+                if (usePV)
+                {
+                    player.alignEngaged    = false;
+                    player.alignLastLawEnd = -1.0;
+                }
+                else
+                    fadeMode = -1;
+            }
+
+            if (player.alignEngaged || fadeMode == -1)
+            {
+                const double rReqRaw = (double) outSamples * readRatio
+                                       * player.alignRho / tc;
+                const double rReq = juce::jlimit (1.0 / 64.0, 64.0, rReqRaw);
+                const double rEff = (double) juce::jmax (1, juce::roundToInt (
+                                        (double) PhaseVocoder::kHopSize * rReq))
+                                    / (double) PhaseVocoder::kHopSize;
+                // Position is the hard target: the (hop-quantized) effective
+                // stretch feeds back into the output read rate so file
+                // consumption stays law-exact; the ~0.1% quantization lands
+                // on pitch (cents) instead.
+                const double outRate = tc * rEff / (double) outSamples;
+
+                if (fadeMode == +1)
+                {
+                    // Prime the vocoder so its first delivered output sample
+                    // corresponds to input position pStart (OLA accounting:
+                    // output o <-> input (o - N/2) / rEff + N/2, relative to
+                    // the reset).  Feed comes from the streamer ring, which
+                    // is resident around the position the direct path was
+                    // just reading.
+                    player.vocoder->reset();
+                    player.vocoder->setStretchRatio (rReq);
+                    constexpr int kPre = PhaseVocoder::kFFTSize;
+                    const double pStarTarget =
+                        ((double) kPre - (double) PhaseVocoder::kFFTSize * 0.5) * rEff
+                        + (double) PhaseVocoder::kFFTSize * 0.5;
+                    juce::int64 feedPos = (juce::int64) std::llround (pStart) - kPre;
+                    int fed = 0;
+                    const int feedCap = PhaseVocoder::kFFTSize * 6;
+                    while (player.vocoder->getOutputAvailable()
+                               < (int) std::ceil (pStarTarget) + 16
+                           && fed < feedCap)
+                    {
+                        const int chunk = PhaseVocoder::kHopSize;
+                        player.pvInBuf.clear (0, chunk);
+                        if (feedPos >= 0
+                            && ! player.streamer->readRaw (player.pvInBuf, 0,
+                                                           chunk, feedPos))
+                        {
+                            engageOk = false;
+                            break;
+                        }
+                        player.vocoder->push (player.pvInBuf, 0, chunk);
+                        feedPos += chunk;
+                        fed     += chunk;
+                    }
+                    if (engageOk && player.vocoder->getOutputAvailable()
+                                        >= (int) pStarTarget)
+                    {
+                        const int adv = (int) pStarTarget;
+                        player.vocoder->advanceOutput (adv);
+                        player.pvOutFrac       = pStarTarget - (double) adv;
+                        player.expectedFilePos =
+                            (juce::int64) std::llround (pStart) - kPre + fed;
+                    }
+                    else
+                        engageOk = false;
+
+                    if (! engageOk)
+                    {
+                        // Ring not resident (fresh seek etc.): stay on the
+                        // original path this block, retry the engage next.
+                        player.alignEngaged    = false;
+                        player.alignPosCorr    = 0.0;
+                        player.alignLastLawEnd = -1.0;
+                    }
+                }
+
+                if (engageOk)
+                {
+                    player.vocoder->setStretchRatio (rReq);
+
+                    // Seek detection on the effective position (mirror of the
+                    // pristine PV path; requestSeek, never seek()).
+                    const juce::int64 pvRefPos  = (juce::int64) std::llround (pStart);
+                    const juce::int64 pvReadPos = player.expectedFilePos;
+                    const bool seekNeeded =
+                        (pvReadPos == 0 && pvRefPos > (juce::int64) mSampleRate) ||
+                        (pvReadPos  > 0
+                         && std::abs (pvRefPos - pvReadPos) > (juce::int64)(mSampleRate * 2));
+                    if (seekNeeded)
+                    {
+                        player.vocoder->reset();
+                        player.streamer->requestSeek (pvRefPos);
+                        player.expectedFilePos = pvRefPos;
+                        player.pvOutFrac       = 0.0;
+                        player.alignInFrac     = 0.0;
+                    }
+
+                    // Law-exact input feed: floor + fractional carry (the
+                    // pristine path's ceil would slowly inflate the OLA
+                    // queue; the carry keeps consumption == law long-run).
+                    // Capacity clamp = readRaw writes dest[0..n) unchecked.
+                    const double needIn = tc + player.alignInFrac;
+                    const int numFileSamples = juce::jlimit (0,
+                        player.pvInBuf.getNumSamples(), (int) needIn);
+                    player.alignInFrac = needIn - (double) numFileSamples;
+
+                    player.pvInBuf.clear();
+                    const bool gotRaw = numFileSamples > 0
+                        && player.streamer->readRaw (player.pvInBuf, 0,
+                                                     numFileSamples,
+                                                     player.expectedFilePos);
+                    if (gotRaw)
+                    {
+                        player.expectedFilePos += numFileSamples;
+                        player.vocoder->push (player.pvInBuf, 0, numFileSamples);
+                    }
+                    // gotRaw false: expectedFilePos NOT advanced - retry next
+                    // block (pristine-path convention).
+
+                    if (fadeMode != 0)
+                    {
+                        // Complementary direct leg at the SAME read position
+                        // (no flam): engage fades it out, exit fades it in.
+                        const double dirRate = tc / (double) outSamples;
+                        player.streamer->readAndMix (clipScratch, bufOffset,
+                                                     outSamples, pStart, dirRate,
+                                                     numOut, gain);
+                        for (int i = 0; i < outSamples; ++i)
+                        {
+                            const float t  = ((float) i + 0.5f) / (float) outSamples;
+                            const float g2 = (fadeMode > 0) ? (1.0f - t) : t;
+                            for (int ch = 0; ch < numOut; ++ch)
+                                clipScratch.setSample (ch, bufOffset + i,
+                                    clipScratch.getSample (ch, bufOffset + i) * g2);
+                        }
+                    }
+
+                    {
+                        const double needF   = player.pvOutFrac
+                                             + (double) outSamples * outRate;
+                        const int    consume = (int) needF;
+                        player.pvOutBuf.clear();
+                        const int peeked = player.vocoder->peekOutput (
+                            player.pvOutBuf, 0,
+                            juce::jmin (consume + 2, player.pvOutBuf.getNumSamples()));
+                        if (peeked > 0)
+                        {
+                            const int pvCh = player.pvOutBuf.getNumChannels();
+                            for (int i = 0; i < outSamples; ++i)
+                            {
+                                const double exactFP = player.pvOutFrac
+                                                     + (double) i * outRate;
+                                const int    ip      = (int) exactFP;
+                                const float  frac    = (float)(exactFP - ip);
+                                if (ip + 1 >= peeked) break;
+                                const int im1 = juce::jmax (0, ip - 1);
+                                const int ip2 = juce::jmin (ip + 2, peeked - 1);
+                                float fadeG = 1.0f;
+                                if (fadeMode != 0)
+                                {
+                                    const float t = ((float) i + 0.5f)
+                                                  / (float) outSamples;
+                                    fadeG = (fadeMode > 0) ? t : (1.0f - t);
+                                }
+                                for (int ch = 0; ch < numOut; ++ch)
+                                {
+                                    const int   srcCh = ch % pvCh;
+                                    const float p0 = player.pvOutBuf.getSample (srcCh, im1);
+                                    const float p1 = player.pvOutBuf.getSample (srcCh, ip);
+                                    const float p2 = player.pvOutBuf.getSample (srcCh, ip + 1);
+                                    const float p3 = player.pvOutBuf.getSample (srcCh, ip2);
+                                    const float v  = (p1 + 0.5f * frac * ((p2 - p0)
+                                                   + frac * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3
+                                                   + frac * (3.f * (p1 - p2) + p3 - p0))))
+                                                   * gain * fadeG;
+                                    clipScratch.addSample (ch, bufOffset + i, v);
+                                }
+                            }
+                            const int adv = juce::jmin (consume, peeked);
+                            player.vocoder->advanceOutput (adv);
+                            player.pvOutFrac = needF - (double) adv;
+                            if (player.pvOutFrac >= 1.0)
+                                player.pvOutFrac -= std::floor (player.pvOutFrac);
+                        }
+                    }
+
+                    if (fadeMode == -1)
+                    {
+                        // Exit fade complete: the clip is fully back on the
+                        // pristine direct path from the next block.
+                        player.alignEngaged    = false;
+                        player.alignLastLawEnd = -1.0;
+                        player.expectedFilePos =
+                            (juce::int64) std::llround (pStart + tc);
+                    }
+                    else
+                        player.alignLastLawEnd = lawEnd + player.alignPosCorr;
+                    warpHandled = true;
+                }
+            }
+        }
+    }
+
+    if (! warpHandled)
+    {
     if (usePV)
     {
         // ── Phase vocoder path (BPM stretch + pitch preservation) ────────────
@@ -1213,6 +1563,13 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
             clipScratch, bufOffset, outSamples, posDB, readRatio, numOut, gain);
         player.expectedFilePos = (int64) std::llround (posDB + (double) outSamples * readRatio);
     }
+    }   // !warpHandled (QA-Fa recovery: pristine paths untouched when the warp regime decoded)
+
+    // QA-Fa recovery: audibility tracker for every path -- an engage glide
+    // (vs a hard start at the warped law) is only correct when the clip was
+    // actually sounding in the immediately-previous block.
+    if (isVoxRoute)
+        player.alignLastEndTimeline = ctx.projectStart + bufOffset + outSamples;
 
     juce::ignoreUnused (peak);
 
@@ -1361,6 +1718,26 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         // mutator only ever publishes non-null pointers.
         mCurrentBlockClipSnapshot = snap;
         mClipRetirement.setInUseGeneration (snap->generation);
+    }
+
+    // QA-Fa recovery: capture each Vox engine's published align-warp
+    // snapshot + chain/pitch gates ONCE per block (see mBlockAlignEntries).
+    // Idle cost = kMaxVoxPages casts + atomic loads per BLOCK, not per clip.
+    for (int vi = 0; vi < kMaxVoxPages; ++vi)
+    {
+        auto& e = mBlockAlignEntries[(size_t) vi];
+        e = {};
+        if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (mVoxEngines[(size_t) vi]))
+        {
+            const auto* s = vp->loadAlignPlaySnapshot();
+            if (s != nullptr && s->isUsable())
+            {
+                e.snap      = s;
+                e.chainOn   = vp->isAlignChainOn();
+                e.pitchOn   = vp->isAlignPitchOn();
+                e.transpose = vp->alignTransposeSemis();
+            }
+        }
     }
 
     // ── Render dispatch ────────────────────────────────────────────────────

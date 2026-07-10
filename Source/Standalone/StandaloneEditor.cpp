@@ -1208,6 +1208,9 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     mRibbon->onAddBaySickGuitarsRequest = [this] { addBaySickGuitarsTab(); };
     // L-3 (2026-05-05): "+ Add BaySickBasses" entry on the Inst dropdown.
     mRibbon->onAddBaySickBassesRequest = [this] { addBaySickBassesTab(); };
+    // QA-Fa recovery: "+ Add New Vox From Export" submenu on the Vox dropdown.
+    mRibbon->onListVoxExports   = [this] { return listVoxExportEntries(); };
+    mRibbon->onAddVoxFromExport = [this] (const juce::String& p) { addVoxFromExport (p); };
     mRibbon->onIsInstCapReached         = [this]
     {
         int n = 0;
@@ -11139,12 +11142,16 @@ void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
 }
 
 // ── QA-F (2026-07-09): BaySickAlign bake placement ───────────────────────────
-// Owner call (build round): bake -> the track row BELOW the follower's
-// original clips; original rows row-muted (one-click A/B toggle); a prior
-// bake for the same channel is replaced IN PLACE (no row stacking per
-// render).  The block is routed through the follower's Vox chain so the A/B
-// compares like-for-like, and alignBake-marked so re-analysis never
-// composites the bake into its own source.
+// Bake -> the track row BELOW the follower's original clips; original rows
+// row-muted (one-click A/B toggle); a prior bake for the same channel is
+// replaced IN PLACE (no row stacking per render).  The block is routed
+// through the follower's Vox chain so the A/B compares like-for-like, and
+// alignBake-marked so re-analysis never composites the bake into its own
+// source.
+// QA-Fa recovery (2026-07-10): DORMANT by design -- Render is export-only
+// and the automatic call from renderAlignedTake was retired.  Kept (with
+// the alignBake guard sites) for any future same-channel bake placement;
+// re-import goes through addVoxFromExport below.
 void StandaloneEditor::placeAlignedBake (const juce::File& bakeFile, double startBeat,
                                          int followerChannelId)
 {
@@ -11262,6 +11269,239 @@ void StandaloneEditor::placeAlignedBake (const juce::File& bakeFile, double star
     mProcessor.rebuildAudioClipPlayers();
     if (mProjectManager) mProjectManager->markDirty();
     if (mBuilderPage) mBuilderPage->repaint();
+}
+
+// ── QA-Fa recovery (2026-07-10): "+ Add New Vox From Export" ─────────────────
+int StandaloneEditor::findFreeVoxIndex() const
+{
+    std::array<bool, kMaxVoxPages> taken {};
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Vox) continue;
+        if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+        {
+            const int i = vp->getPageIndex();
+            if (i >= 0 && i < (int) kMaxVoxPages) taken[(size_t) i] = true;
+        }
+    }
+    for (int i = 0; i < (int) kMaxVoxPages; ++i)
+        if (! taken[(size_t) i]) return i;
+    return -1;
+}
+
+std::vector<RibbonTabBar::VoxExportEntry> StandaloneEditor::listVoxExportEntries()
+{
+    std::vector<RibbonTabBar::VoxExportEntry> out;
+
+    // Grey rules: empty list = greyed menu entry.
+    juce::File projDir;
+    {
+        const juce::ScopedLock lk (mProcessor.mProjectFolderLock);
+        projDir = mProcessor.mCurrentProjectFolder;
+    }
+    if (projDir == juce::File() || ! projDir.isDirectory()) return out;   // unsaved project
+    if (findFreeVoxIndex() < 0) return out;                               // vox cap reached
+
+    for (const char* folder : { "Aligned", "Pitched" })
+    {
+        auto files = projDir.getChildFile (folder).findChildFiles (
+            juce::File::findFiles, false, "*.wav");
+        std::sort (files.begin(), files.end(),
+                   [] (const juce::File& a, const juce::File& b)
+                   { return a.getFileName().compareNatural (b.getFileName()) < 0; });
+        for (const auto& f : files)
+            out.push_back ({ folder, f.getFileName(), f.getFullPathName() });
+    }
+    return out;
+}
+
+void StandaloneEditor::placeVoxExportClip (const juce::File& exportFile, double startBeat,
+                                           int routeChannel)
+{
+    if (! mPM || ! exportFile.existsAsFile() || routeChannel <= 0)
+        return;
+
+    // File duration via the header only (dropWavAsClip precedent).
+    double fileSeconds = 0.0;
+    {
+        juce::AudioFormatManager fmt;
+        fmt.registerBasicFormats();
+        if (auto reader = std::unique_ptr<juce::AudioFormatReader> (
+                fmt.createReaderFor (exportFile)))
+            if (reader->sampleRate > 0.0)
+                fileSeconds = (double) reader->lengthInSamples / reader->sampleRate;
+    }
+    if (fileSeconds <= 0.0)
+        return;
+
+    const double bpm = juce::jmax (20.0, mTransport ? mTransport->getBPM() : 120.0);
+    double lengthBeats;
+    double bpmAtStart = bpm;
+    if (TempoMap::isActive())
+    {
+        const juce::int64 s0 = TempoMap::sampleAtBeat (startBeat);
+        const double mapSr   = TempoMap::gSampleRate.load (std::memory_order_relaxed);
+        const juce::int64 s1 = s0 + (juce::int64) std::llround (
+            fileSeconds * (mapSr > 0.0 ? mapSr : 44100.0));
+        lengthBeats = TempoMap::beatAtSample (s1) - startBeat;
+        bpmAtStart  = TempoMap::bpmAtSample (s0);
+    }
+    else
+    {
+        lengthBeats = fileSeconds * bpm / 60.0;
+    }
+    if (lengthBeats <= 0.0)
+        return;
+
+    const juce::String relPath = exportFile.getParentDirectory().getFileName()
+                               + "/" + exportFile.getFileName();
+    constexpr double kBeatsPerBar = 4.0;
+
+    int nextRow = 0;
+    for (int i = 0; i < mPM->getNumBlocks(); ++i)
+        nextRow = juce::jmax (nextRow, mPM->getBlock (i).trackRow + 1);
+    nextRow = juce::jmin (nextRow, kMaxArrangementRows - 1);
+
+    ArrangementBlock block;
+    block.clipType      = ClipType::Audio;
+    block.trackRow      = nextRow;
+    block.startBar      = (int) std::floor (startBeat / kBeatsPerBar);
+    block.setStartBeats  (startBeat);
+    block.lengthBars    = juce::jmax (1, (int) std::ceil (lengthBeats / kBeatsPerBar));
+    block.setLengthBeats (lengthBeats);
+    block.patternIndex  = mPM->getCurrentPatternIndex();
+    block.layerTrack    = false;
+    block.audioFilePath = relPath;
+    block.originalBPM   = (float) bpmAtStart;
+    block.stretchMode   = true;
+    block.routeChannel  = routeChannel;
+    // First-class clip -- alignBake deliberately FALSE: the new strip's own
+    // Align/Pitch analyses must see this audio, and the cleaned take must be
+    // listable as a Leader for other strips.  Cross-channel self-feedback
+    // cannot occur (composites filter by routeChannel).
+    block.isOverride    = true;
+    mPM->addBlock (block);
+    mPM->addAudioToLibrary (relPath, {}, routeChannel);
+
+    mProcessor.rebuildAudioClipPlayers();
+    if (mProjectManager) mProjectManager->markDirty();
+    if (mBuilderPage) mBuilderPage->repaint();
+}
+
+void StandaloneEditor::addVoxFromExport (const juce::String& fullPath)
+{
+    if (! mMixerPage || ! mPM) return;
+    const juce::File exportFile (fullPath);
+    if (! exportFile.existsAsFile()) return;
+
+    juce::File projDir;
+    {
+        const juce::ScopedLock lk (mProcessor.mProjectFolderLock);
+        projDir = mProcessor.mCurrentProjectFolder;
+    }
+
+    // Original-position + source-strip lookup across every Vox engine's
+    // render histories.  Orphan files (no history entry) place at beat 0
+    // and skip both prompts -- there is no identifiable source strip.
+    double   startBeat = 0.0;
+    VoxPage* sourceVp  = nullptr;
+    int      sourceIdx = -1;
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Vox) continue;
+        auto* vp = dynamic_cast<VoxPage*> (entry->component.get());
+        if (vp == nullptr) continue;
+        auto* bv = dynamic_cast<BaySickVocalProcessor*> (vp->getVocalProcessor());
+        if (bv == nullptr) continue;
+
+        auto matches = [&] (const BaySickVocalProcessor::AlignRenderEntry& r)
+        { return r.file.isNotEmpty() && projDir.getChildFile (r.file) == exportFile; };
+
+        bool found = false;
+        for (const auto& r : bv->mAlignState.renders)
+            if (matches (r)) { startBeat = r.startBeat; found = true; break; }
+        if (! found)
+            for (const auto& r : bv->mPitchRenders)
+                if (matches (r)) { startBeat = r.startBeat; found = true; break; }
+        if (found) { sourceVp = vp; sourceIdx = vp->getPageIndex(); break; }
+    }
+
+    const int newIdx = findFreeVoxIndex();
+    if (newIdx < 0) return;
+
+    // Strip + InsertNode + params + tab via the Mixer-add cascade
+    // (addVoxChannelAtIndex synchronously fires onVoxStripAdded ->
+    // spawnVoxTabIfMissing).
+    mMixerPage->addVoxChannelAtIndex (newIdx);
+
+    VoxPage* newVp = nullptr;
+    int newRibbonId = -1;
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Vox) continue;
+        if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+            if (vp->getPageIndex() == newIdx)
+                { newVp = vp; newRibbonId = entry->ribbonTabId; break; }
+    }
+    if (newVp == nullptr) return;
+
+    placeVoxExportClip (exportFile, startBeat, MixerChannelIds::voxInsert (newIdx));
+
+    if (newRibbonId >= 0 && mRibbon)
+    {
+        mRibbon->selectTab (newRibbonId);
+        onTabSelected (newRibbonId);
+    }
+
+    if (sourceVp == nullptr)
+        return;
+
+    // PROMPT 1 (clone the source chain) then PROMPT 2 (mute the source
+    // strip), sequential, both optional.
+    juce::Component::SafePointer<StandaloneEditor> self (this);
+    juce::Component::SafePointer<VoxPage> src (sourceVp);
+    juce::Component::SafePointer<VoxPage> dst (newVp);
+    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon,
+        "New Vox From Export",
+        "Clone the source tab's vocal chain settings?",
+        "Yes", "No", nullptr,
+        juce::ModalCallbackFunction::create ([self, src, dst, sourceIdx] (int clone)
+        {
+            if (self == nullptr) return;
+            if (clone == 1 && src != nullptr && dst != nullptr)
+            {
+                dst->importVoxState (src->exportVoxState());
+                // Chain settings only: the source's Align/Pitch analyses,
+                // versions, and render histories reference the SOURCE
+                // channel's composites -- meaningless on the new strip.
+                if (auto* nbv = dynamic_cast<BaySickVocalProcessor*> (
+                        dst->getVocalProcessor()))
+                {
+                    nbv->mAlignState = BaySickVocalProcessor::AlignState();
+                    nbv->mAlignVersions.clear();
+                    nbv->mAlign.clearWarpMap();
+                    nbv->publishAlignPlayback();
+                    nbv->mPitchRenders.clear();
+                    nbv->mPitchVersions.clear();
+                    nbv->mPitchAnalyzedSig = 0;
+                    nbv->mPitch.stateFromValueTree ({});
+                }
+            }
+            juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon,
+                "New Vox From Export",
+                "Mute the original Vox strip?",
+                "Yes", "No", nullptr,
+                juce::ModalCallbackFunction::create ([self, sourceIdx] (int mute)
+                {
+                    if (self == nullptr || mute != 1) return;
+                    const juce::String id = "mixer_vox_"
+                        + juce::String (sourceIdx) + "_mute";
+                    if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                            self->mProcessor.apvts.getParameter (id)))
+                        p->setValueNotifyingHost (
+                            p->getNormalisableRange().convertTo0to1 (1.0f));
+                }));
+        }));
 }
 
 // ── QA-Fa (2026-07-10): BaySickPitch "Send Notes to..." ─────────────────────

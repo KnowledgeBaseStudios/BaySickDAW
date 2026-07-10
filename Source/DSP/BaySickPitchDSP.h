@@ -156,6 +156,10 @@ public:
     void setFocus01   (float v);   // 0..1: pull note centers to the nearest semitone
     void setModAmount (float v);   // 0..2: vibrato preservation scale (1 = natural)
     void setSpeedMs   (float ms);  // 5..300: note-transition glide
+    // QA-Fa recovery: bsp_on chain switch.  OFF glides every target to
+    // neutral through the Speed smoothing (no hard switch), then the fast
+    // path disengages once settled.
+    void setChainOn   (bool on);
 
     // ── Realtime applicator (AUDIO THREAD, FilePlay only -- Mode C) ──────────
     // timelineStartSample = the block's first timeline sample (stamped by
@@ -196,6 +200,10 @@ private:
     {
         float  smoothedSemis   { 0.0f };
         float  smoothedFormant { 0.0f };
+        // Volume-shape gain gets its own fast (~5 ms) smoother: the drawn
+        // envelope must track (Speed-rate smoothing would smear a fade), but
+        // region-boundary and chain-toggle steps still need de-clicking.
+        float  smoothedGain    { 1.0f };
         double vibPhase        { 0.0 };
         int    cursor          { 0 };
         int    lastRegion      { -1 };
@@ -205,6 +213,7 @@ private:
                              juce::int64 timelineStartSample, double sr,
                              const Snapshot& snap,
                              float focus01, float modAmt, float speedMs,
+                             bool chainOn,
                              PsolaShifter* shifters,
                              CepstralFormantEngine* formants,
                              ApplicatorState& st) const noexcept;
@@ -229,6 +238,7 @@ private:
     std::atomic<float> mFocus01  { 0.0f };
     std::atomic<float> mModAmt   { 1.0f };
     std::atomic<float> mSpeedMs  { 60.0f };
+    std::atomic<bool>  mChainOn  { true };
 
     // Audio-thread applicator state (owned by the audio thread)
     std::array<PsolaShifter, 2>          mShifters;

@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <vector>
 
 // ── RibbonTabBar ──────────────────────────────────────────────────────────────
 // Fixed 10-slot tab bar. Each slot represents a page type:
@@ -70,6 +71,18 @@ public:
     // K-4: shared cap query - true when total Inst-type pages (LiveInput +
     // BaySickGuitars + BaySickBasses) hits kMaxInstPages.
     std::function<bool()>                             onIsInstCapReached;
+    // QA-Fa recovery: "+ Add New Vox From Export" submenu (Vox dropdown
+    // only).  The editor returns the Aligned/ + Pitched/ export list --
+    // EMPTY when any grey rule holds (no exports / vox cap reached /
+    // project unsaved) -- and receives the picked file's full path.
+    struct VoxExportEntry
+    {
+        juce::String folder;     // "Aligned" / "Pitched" (submenu grouping)
+        juce::String name;       // display file name
+        juce::String fullPath;
+    };
+    std::function<std::vector<VoxExportEntry>()>      onListVoxExports;
+    std::function<void(const juce::String& fullPath)> onAddVoxFromExport;
     std::function<void(int tabId, const juce::String& newName)> onTabRenamed;
     // 2026-05-05 dirty-flag wiring: fired when a tab's lock state actually
     // toggles (no fire on no-op set).  Editor wires to ProjectManager::markDirty.
@@ -217,6 +230,11 @@ private:
     // re-opens the user's last-visited instance of that type instead of
     // always falling back to the first instance.
     std::map<TabType, int> mLastUsedByType;
+
+    // QA-Fa recovery: the export list shown by the last Vox dropdown --
+    // submenu ids index into it inside the menu result callback.
+    std::vector<VoxExportEntry> mVoxExportShown;
+    static constexpr int kVoxExportBaseId = 100000;
 
     static juce::Colour tabColour(TabType type, bool active);
 
