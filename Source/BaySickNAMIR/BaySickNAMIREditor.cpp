@@ -79,7 +79,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
       mMicSimMixKnobB             ("Mix",      100.0f,
         "Mic B Sim wet/dry mix (0..100 %)."),
       mMicPlacementDistanceKnobB  ("Distance", 30.0f,
-        "Mic B virtual distance from the source (1..150 cm).  Offset from Mic A's distance for comb-filter colouration."),
+        "Mic B virtual distance from the source (1..150 cm).  Offset from Mic A's distance for comb-filter coloration."),
       mMicPlacementAngleKnobB     ("Angle",     0.0f,
         "Mic B off-axis angle (-90..+90 deg).  0 = on-axis."),
       mMicPlacementMixKnobB       ("Mix",      100.0f,
@@ -254,7 +254,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
         "with Mic A (like two real mics on one source), it does not crossfade.");
     setupSubSectionLbl (mMicPlacementBSectionLbl, "MIC PLACEMENT B",
         "Mic B virtual position.  Offset distance/angle from Mic A for "
-        "comb-filter colouration from the path difference.");
+        "comb-filter coloration from the path difference.");
     addAndMakeVisible (mMicSimSectionLbl);
     addAndMakeVisible (mMicPlacementSectionLbl);
     addAndMakeVisible (mMicSimBSectionLbl);
@@ -823,27 +823,37 @@ void BaySickNAMIREditor::updateMicBEnabled()
 // ─────────────────────────────────────────────────────────────────────────────
 void BaySickNAMIREditor::parameterChanged (const juce::String& paramID, float newValue)
 {
+    // SafePointer on every posted hop: the destructor removes the listeners,
+    // but a lambda already queued can still run after the editor is torn down
+    // (page delete / project-load param storms).
+    juce::Component::SafePointer<BaySickNAMIREditor> self (this);
+
     if (paramID == "ab_slot")
     {
         const int slot = juce::jlimit (0, 1, (int) newValue);
-        juce::MessageManager::callAsync ([this, slot]()
+        juce::MessageManager::callAsync ([self, slot]()
         {
-            mSlotABtn.setToggleState (slot == 0, juce::dontSendNotification);
-            mSlotBBtn.setToggleState (slot == 1, juce::dontSendNotification);
-            updateLabels();
+            if (self == nullptr) return;
+            self->mSlotABtn.setToggleState (slot == 0, juce::dontSendNotification);
+            self->mSlotBBtn.setToggleState (slot == 1, juce::dontSendNotification);
+            self->updateLabels();
         });
     }
     else if (paramID == "oversampling")
     {
         const int idx = juce::jlimit (0, 2, (int) newValue);
-        juce::MessageManager::callAsync ([this, idx]()
+        juce::MessageManager::callAsync ([self, idx]()
         {
-            mOSSelector.setSelectedIndex (idx, juce::dontSendNotification);
+            if (self == nullptr) return;
+            self->mOSSelector.setSelectedIndex (idx, juce::dontSendNotification);
         });
     }
     else if (paramID == "nam_micb_active")
     {
-        juce::MessageManager::callAsync ([this]() { updateMicBEnabled(); });
+        juce::MessageManager::callAsync ([self]()
+        {
+            if (self != nullptr) self->updateMicBEnabled();
+        });
     }
     // QA-Fc: manual-sync selector resync.  A/B slot restores rewrite these
     // params behind the widgets' backs (ChickenHeadSelector has no APVTS
@@ -852,14 +862,15 @@ void BaySickNAMIREditor::parameterChanged (const juce::String& paramID, float ne
     {
         const bool isB = (paramID == "nam_micsim_b_mode");
         const int  idx = juce::jlimit (0, 2, (int) newValue);
-        juce::MessageManager::callAsync ([this, isB, idx]()
+        juce::MessageManager::callAsync ([self, isB, idx]()
         {
-            auto& sel = isB ? mMicSimModeB : mMicSimMode;
+            if (self == nullptr) return;
+            auto& sel = isB ? self->mMicSimModeB : self->mMicSimMode;
             if (sel.getSelectedIndex() != idx)
             {
                 sel.setSelectedIndex (idx, juce::dontSendNotification);
-                if (isB) updateMicSimModeBUI();
-                else     updateMicSimModeUI();
+                if (isB) self->updateMicSimModeBUI();
+                else     self->updateMicSimModeUI();
             }
         });
     }
@@ -868,14 +879,15 @@ void BaySickNAMIREditor::parameterChanged (const juce::String& paramID, float ne
         const bool isB = (paramID == "nam_micsim_b_model");
         const int  idx = juce::jlimit (0, (int) MicSimDSP::Model::kNumModels - 1,
                                           (int) newValue);
-        juce::MessageManager::callAsync ([this, isB, idx]()
+        juce::MessageManager::callAsync ([self, isB, idx]()
         {
-            auto& combo = isB ? mMicSimModelComboB : mMicSimModelCombo;
+            if (self == nullptr) return;
+            auto& combo = isB ? self->mMicSimModelComboB : self->mMicSimModelCombo;
             if (combo.getSelectedId() != idx + 1)
             {
                 combo.setSelectedId (idx + 1, juce::dontSendNotification);
-                if (isB) updateMicSimModelTooltipB();
-                else     updateMicSimModelTooltip();
+                if (isB) self->updateMicSimModelTooltipB();
+                else     self->updateMicSimModelTooltip();
             }
         });
     }
@@ -883,9 +895,10 @@ void BaySickNAMIREditor::parameterChanged (const juce::String& paramID, float ne
     {
         const bool isB = (paramID == "nam_placement_b_polar");
         const int  idx = juce::jlimit (0, 4, (int) newValue);
-        juce::MessageManager::callAsync ([this, isB, idx]()
+        juce::MessageManager::callAsync ([self, isB, idx]()
         {
-            auto& sel = isB ? mMicPlacementPolarB : mMicPlacementPolar;
+            if (self == nullptr) return;
+            auto& sel = isB ? self->mMicPlacementPolarB : self->mMicPlacementPolar;
             if (sel.getSelectedIndex() != idx)
                 sel.setSelectedIndex (idx, juce::dontSendNotification);
         });

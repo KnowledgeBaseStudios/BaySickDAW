@@ -309,7 +309,16 @@ FA-12/FA-13.
       Loose-Align, Play and listen; then Close-Align, Analyze/Apply, Play. Expected:
       audible/visible difference in how far onsets get pulled (Fine Tune ms window = pairing
       reach; Tight only pairs near onsets). The Mode dropdown also re-seats the Pitch Range
-      knob's window (watch it move). `D:__ R:__` notes:
+      knob's window (watch it move). (G2 boundary fix after the "choppy slop" ear verdict:
+      monotone onset pairing + 2:1 segment-slope bound + smooth-cubic map lookup — ALL three
+      modes must play CLEAN now; chop in any mode indicts the boundary commit. Re-Analyze on
+      the fix build — a map analyzed pre-fix carries the old anchors. Offline Render parity
+      pending: exports still step at anchors until the applyWarp follow-up. Second boundary
+      round after Tight starved on real takes: pairing upgraded to OPTIMAL monotone matching
+      (max pairs, min total distance — the greedy walk's one-bad-early-grab cascade is dead);
+      Tight must now succeed wherever pre-chop-fix Tight did. A failed Analyze reports
+      Leader/Follower word-start counts + pairs-within-window and states that the previous
+      alignment stays applied.) `D:__ R:__` notes:
 - [ ] **F-4 — +Pitch preset pulls pitch, Tight maps contour [EAR-CHECK].** Close-Align+Pitch on a
       deliberately-flat follower note: Analyze/Apply, Play. Expected: the follower pulls toward
       the leader's pitch LIVE, WITHOUT erasing all human variation; Tight-Align+Pitch maps the
@@ -332,7 +341,9 @@ FA-12/FA-13.
       ITSELF (badge clears, a new version appears in the Versions dropdown, playback follows the
       new map). Same edit while PLAYING: badge reads "RE-ANALYZE ON STOP", playback keeps
       applying the LAST-applied map (stable, no shifting mid-play), and the re-analysis fires at
-      the next transport stop. Manual Analyze/Apply mid-play is allowed and glides (no click).
+      the next transport stop. Analyze/Apply + Versions GREY OUT during playback with a
+      stop-first tooltip (stop-gated, owner call at the G2 boundary — the ON/OFF toggle is the
+      only live map gesture; a mid-play analyze was never owner-approved behavior).
       Editing a sync point / protected area raises the badge but does NOT auto-run (those are
       mid-edit gestures — auto fires on grid/tempo signature changes only; commit sync-point
       edits with a manual Analyze/Apply). `D:__ R:__` notes:
@@ -447,7 +458,8 @@ tab's third sub-tab. Debug first, then Release.
       the last-analyzed regions, and the re-analysis fires at the next stop.  The auto also
       works with the BaySickPitch sub-tab CLOSED (make the grid edit from Builder, stop, reopen
       the sub-tab — already re-analyzed, no badge).  Opening the sub-tab on a stale channel
-      still re-runs immediately (the analyze-on-open path stays). `D:__ R:__` notes:
+      re-runs immediately while STOPPED; during playback it lights the badge and defers to the
+      next stop (analyze is stop-gated, G2 boundary). `D:__ R:__` notes:
 - [ ] **FA-10 — [EAR-CHECK, at the G2 boundary smoke] pitch-edit quality.** A corrected note
       sounds natural — no chipmunk (per-note formant left at 0 keeps timbre; deliberate FRM
       shifts change character not pitch); an exaggerated pill drag (+7 st) is audibly artifact-
@@ -460,8 +472,11 @@ tab's third sub-tab. Debug first, then Release.
       setup (the §B.6 rig), follower audibly late by a constant offset. Analyze/Apply on the
       Align tab, then press Play with NO render: the follower plays time-aligned (onsets land
       with the leader by ear).  The Align editor's ON toggle mid-play: OFF glides the follower
-      back to its natural (late) timing over a short varispeed slur — NO click, NO dropout, NO
-      splice; ON glides it back into alignment.  With OFF settled, playback is bit-identical to
+      back to its natural (late) timing as a varispeed slur bent no harder than 2:1 (G2-boundary
+      recalibration — glide time ~ the offset traveled; a ~200 ms-late take lands in ~0.2-0.4 s)
+      — NO click, NO dropout, NO splice, NO position drift after repeated toggling (failures
+      here indict the G2 boundary commit); ON glides it back into alignment.  With OFF settled,
+      playback is bit-identical to
       pre-align.  Tempo-stretched case: change the project tempo away from the takes' BPM (clips
       stretch) — the warp still applies on top of the stretch, and the ON/OFF glide stays clean.
       Transport seek/loop-wrap while ON: playback resumes at the warped position instantly (a
@@ -469,9 +484,10 @@ tab's third sub-tab. Debug first, then Release.
       as before the recovery round (fast-path). `D:__ R:__` notes:
 - [ ] **FA-13 — [recovery round] version histories + revert, both editors.** Align: three
       Analyze/Apply passes under different Modes → Versions dropdown lists v1..v3 newest-first
-      with timestamps; revert to v1 → playback audibly returns to v1's alignment (glide, no
-      click if playing); revert entries whose grid has since changed carry "(grid changed)" and
-      reverting to one lights the stale badge immediately.  Pitch: analyze (auto v1), drag some
+      with timestamps; during playback the Versions button greys with a stop-first tooltip
+      (revert is stop-gated, G2 boundary); stopped, revert to v1 → press Play: playback
+      audibly returns to v1's alignment; revert entries whose grid has since changed carry
+      "(grid changed)" and reverting to one lights the stale badge immediately.  Pitch: analyze (auto v1), drag some
       pills, Snapshot (v2), drag more, then revert to v2 → the canvas + playback return to v2's
       edits; Ctrl+Z after a revert undoes the revert locally.  Save/close/reopen: BOTH dropdowns
       still list their versions and revert still works (persisted in project XML).
@@ -535,12 +551,23 @@ functional. Debug first, then Release.
       follows the new edge (QA-Ec chain). Then open BaySickPitch on a channel with 2 clips —
       pills appear over both (the QA-F composite renderer feeding analysis, shared-dependency
       smoke). `D:__ R:__` notes:
+- [ ] **FB-11 — [G2 boundary] realtime board locks during capture.** Arm the Vox strip and
+      record. Expected: the moment capture starts (count-in included) the ENTIRE realtime
+      section (Realtime Pitch toggle, Key/Scale, Retune/Strength/Humanize/Throat, Formant
+      Preserve) PLUS the page-wide chain Bypass and A/B slot grey to 40% and ignore input
+      (Mix stays live — smooth param); the locked controls' tooltips read "Locked while
+      recording - ...". Stop — everything re-enables.
+      Armed-with-listen-off capture locks the same way; monitoring WITHOUT recording (listen
+      ON, unarmed) stays fully editable — that is the setup flow. Per-strip: a second Vox
+      tab's board stays live unless that strip is also capturing. (Rationale: an engage-edge
+      toggle mid-take clicks and prints into the WET file — owner call 2026-07-10 after the
+      Part 6 tick listen. Failures indict the G2 boundary commit.) `D:__ R:__` notes:
 
 ---
 
 ### §B.9 — QA-Fc (BaySickNAMIR dual-mic stack: parallel Mic B, summed)
 
-`blocks:` the QA-Fc source commit (hash backfilled at the next test-plan touch). Dual-mic lives
+`blocks:` `a36ed3cc` (QA-Fc Tasks 1-3). Dual-mic lives
 on the NAM/IR editor — the Vox tab's NAM/IR sub-tab or the Inst tab's NAM/IR sub-tab. The mic
 stages only run when the page has a NAM model or cab IR loaded (existing engine gate — with
 neither loaded the whole NAM/IR chain is a passthrough, Mic A included), so load a .nam or a

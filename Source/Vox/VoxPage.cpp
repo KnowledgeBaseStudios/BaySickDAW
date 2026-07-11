@@ -514,6 +514,13 @@ void VoxPage::setProcessor (VibeSynthProcessor* p)
             const juce::ScopedLock lk (full->mProjectFolderLock);
             return full->mCurrentProjectFolder;
         };
+        {
+            const int chId = MixerChannelIds::voxInsert (mPageIndex);
+            bv->onIsStripRecording = [full, chId]() -> bool
+            {
+                return full != nullptr && full->isStripRecording (chId);
+            };
+        }
         // QA-Fa recovery: render is EXPORT ONLY -- the QA-F onPlaceBakedClip
         // install is retired (re-import goes through the Vox ribbon's
         // "+ Add New Vox From Export" flow).

@@ -668,15 +668,34 @@ bool BaySickVocalProcessor::analyzeAlign (juce::String& errorOut)
     if (auto* p = apvts.getRawParameterValue ("bsa_pitch_on"))    pitchOn = p->load() > 0.5f;
     if (auto* p = apvts.getRawParameterValue ("bsa_pitch_range")) range01 = p->load() / 100.0f;
 
+    AlignAnalyzeDiag diag;
     auto map = BaySickAlignDSP::analyzeOffline (
         guide.getReadPointer (0), guide.getNumSamples(),
         dub  .getReadPointer (0), dub.getNumSamples(),
         gSr, 1.0f, alignToleranceSec(),
         mAlignState.syncPoints, mAlignState.protectedAreas,
-        pitchOn ? juce::jlimit (0.0f, 1.0f, range01) : 0.0f);
+        pitchOn ? juce::jlimit (0.0f, 1.0f, range01) : 0.0f,
+        &diag);
 
     if (! map.isValid())
-        { errorOut = "Not enough matching transients to align - try a looser Mode."; return false; }
+    {
+        const int winMs = (int) std::lround (diag.toleranceSec * 1000.0);
+        if (diag.guideOnsets < 2 || diag.dubOnsets < 2)
+            errorOut = "Could not detect enough word starts (Leader: "
+                     + juce::String (diag.guideOnsets) + ", Follower: "
+                     + juce::String (diag.dubOnsets)
+                     + ").  Check both channels have vocal clips with clear words.  "
+                       "The previous alignment (if any) is still applied.";
+        else
+            errorOut = "Found " + juce::String (diag.guideOnsets) + " Leader / "
+                     + juce::String (diag.dubOnsets) + " Follower word starts, but "
+                     + (diag.pairs == 0 ? juce::String ("none")
+                                        : "only " + juce::String (diag.pairs))
+                     + " lined up within this Mode's reach (+/-" + juce::String (winMs)
+                     + " ms).  Try Close or Loose.  "
+                       "The previous alignment (if any) is still applied.";
+        return false;
+    }
 
     mAlignState.map                 = map;
     mAlignState.analyzedLeaderSig   = onChannelClipSignature (leader);
@@ -803,6 +822,29 @@ void BaySickVocalProcessor::publishAlignPlayback()
             if (std::abs (a.pitchSemis) > 0.01f) snap->anyPitch = true;
             lastDub = d;
         }
+        // Collapse near-equal guide entries (a post-clamp duplicate would
+        // poison the cubic tangents with a degenerate segment); keep the
+        // later dub -- the clamp's own resolution.
+        {
+            size_t w = 0;
+            for (size_t i = 0; i < snap->guideSec.size(); ++i)
+            {
+                if (w > 0 && snap->guideSec[i] - snap->guideSec[w - 1] < 1.0e-4)
+                {
+                    snap->dubSec[w - 1]     = snap->dubSec[i];
+                    snap->pitchSemis[w - 1] = snap->pitchSemis[i];
+                    continue;
+                }
+                snap->guideSec[w]   = snap->guideSec[i];
+                snap->dubSec[w]     = snap->dubSec[i];
+                snap->pitchSemis[w] = snap->pitchSemis[i];
+                ++w;
+            }
+            snap->guideSec.resize (w);
+            snap->dubSec.resize (w);
+            snap->pitchSemis.resize (w);
+        }
+        snap->computeTangents();
         if (! snap->isUsable())
             snap.reset();
     }

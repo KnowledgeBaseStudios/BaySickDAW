@@ -98,6 +98,16 @@ struct AlignProtectedArea
     }
 };
 
+// Filled by analyzeOffline so a failed analysis can say WHY (onsets found
+// per side, pairs within the Mode window) instead of one generic line.
+struct AlignAnalyzeDiag
+{
+    int    guideOnsets  { 0 };
+    int    dubOnsets    { 0 };
+    int    pairs        { 0 };
+    double toleranceSec { 0.0 };
+};
+
 struct WarpMap
 {
     // Anchors sorted by dubTimeSec ascending.  Two anchors at index i and i+1
@@ -144,6 +154,14 @@ struct AlignPlaySnapshot
     std::vector<double> dubSec;
     std::vector<float>  pitchSemis;
 
+    // Monotone-cubic tangents (dDub/dGuide per anchor, Fritsch-Butland),
+    // computed once at publish.  The piecewise-LINEAR lookup stepped the
+    // playback rate at every anchor -- audible chop at onset cadence, worst
+    // under wide pairing windows (G2 boundary ear verdict).  Empty = the
+    // lookup falls back to linear.
+    std::vector<double> tangent;
+    void computeTangents();
+
     int          followerChannelId  { -1 };
     double       commonStartBeat    { 0.0 };
     juce::int64  commonStartSample  { 0 };     // timeline sample of composite t=0 (analysis-time device rate)
@@ -186,10 +204,34 @@ struct AlignPlaySnapshot
         }
         const double gSpan = juce::jmax (1.0e-9, guideSec[hi] - guideSec[lo]);
         const double f     = (g - guideSec[lo]) / gSpan;
-        outDubSec      = dubSec[lo] + f * (dubSec[hi] - dubSec[lo]);
-        outDubPerGuide = juce::jlimit (1.0 / 64.0, 64.0,
-                                       (dubSec[hi] - dubSec[lo]) / gSpan);
-        outSemis       = pitchSemis[lo] + (float) f * (pitchSemis[hi] - pitchSemis[lo]);
+        if (tangent.size() == n)
+        {
+            // Cubic Hermite between anchors: C1-continuous position AND
+            // slope, so the decode rate glides through anchors instead of
+            // stepping at each one.
+            const double t2  = f * f, t3 = t2 * f;
+            const double h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+            const double h10 = t3 - 2.0 * t2 + f;
+            const double h01 = -2.0 * t3 + 3.0 * t2;
+            const double h11 = t3 - t2;
+            const double y0  = dubSec[lo],   y1 = dubSec[hi];
+            const double m0  = tangent[lo],  m1 = tangent[hi];
+            outDubSec = h00 * y0 + h10 * gSpan * m0
+                      + h01 * y1 + h11 * gSpan * m1;
+            const double d00 = 6.0 * t2 - 6.0 * f;
+            const double d10 = 3.0 * t2 - 4.0 * f + 1.0;
+            const double d11 = 3.0 * t2 - 2.0 * f;
+            outDubPerGuide = juce::jlimit (1.0 / 64.0, 64.0,
+                (d00 * y0 + d10 * gSpan * m0
+                 - d00 * y1 + d11 * gSpan * m1) / gSpan);
+        }
+        else
+        {
+            outDubSec      = dubSec[lo] + f * (dubSec[hi] - dubSec[lo]);
+            outDubPerGuide = juce::jlimit (1.0 / 64.0, 64.0,
+                                           (dubSec[hi] - dubSec[lo]) / gSpan);
+        }
+        outSemis = pitchSemis[lo] + (float) f * (pitchSemis[hi] - pitchSemis[lo]);
     }
 };
 
@@ -232,7 +274,8 @@ public:
                                     double pairingToleranceSec = 0.5,
                                     const std::vector<AlignSyncPoint>&     syncPoints     = {},
                                     const std::vector<AlignProtectedArea>& protectedAreas = {},
-                                    float  pitchRange01        = 0.0f);
+                                    float  pitchRange01        = 0.0f,
+                                    AlignAnalyzeDiag*          diagOut = nullptr);
 
     // ── Map state (message-thread convenience mirror) ────────────────────────
     void setWarpMap (const WarpMap& map);

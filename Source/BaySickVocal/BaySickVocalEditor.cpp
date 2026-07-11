@@ -365,6 +365,51 @@ public:
 private:
     void timerCallback() override
     {
+        // Realtime board locks while THIS strip captures a take (owner call
+        // 2026-07-10): engage-edge toggles mid-take click AND print into the
+        // WET file -- the sound is set before the take.  Monitoring without
+        // recording stays editable (that's the setup flow).
+        const bool rec = mProc.onIsStripRecording && mProc.onIsStripRecording();
+        if (rec != mRecGated)
+        {
+            mRecGated = rec;
+            auto gate = [rec] (juce::Component& c)
+            {
+                c.setEnabled (! rec);
+                c.setAlpha (rec ? 0.4f : 1.0f);
+            };
+            gate (mPitchBypassBtn);
+            gate (mKeyCombo);    gate (mKeyLbl);
+            gate (mScaleCombo);  gate (mScaleLbl);
+            gate (mRetuneSpeed); gate (mRetuneSpeedLbl);
+            gate (mStrength);    gate (mStrengthLbl);
+            gate (mHumanize);    gate (mHumanizeLbl);
+            gate (mThroatShift); gate (mThroatShiftLbl);
+            gate (mFormantBtn);
+            // Chain Bypass + A/B are stepped whole-chain swaps -- same
+            // click-and-print class mid-take (owner extension, 2026-07-10).
+            // Mix stays live (smooth param).
+            gate (mBypassBtn);
+            gate (mABSlot);
+            mPitchBypassBtn.setTooltip (rec
+                ? "Locked while recording - set the realtime sound before the take"
+                : "Turns on realtime pitch correction.  "
+                  "Tightens vocals to the Key/Scale picked below as they play, "
+                  "in both live monitoring and recorded-clip playback.  Use the "
+                  "BaySickPitch sub-tab for offline note-by-note pitch editing.");
+            mBypassBtn.setTooltip (rec
+                ? "Locked while recording - set the chain before the take"
+                : "Bypasses the entire BaySickVocal chain (pitch + de-esser + "
+                  "comp + sat + limiter).  Use to compare the processed vocal "
+                  "against the raw input at the strip's output.");
+            mABSlot.setTooltip (rec
+                ? "Locked while recording - pick the A/B slot before the take"
+                : "A/B compare slot.  Each slot remembers a full set of chain "
+                  "settings -- build one tone in A, switch to B and build another, "
+                  "then flip between the two without losing either.  Automatable "
+                  "from the timeline.");
+        }
+
         // Note: PitchCorrectorDSP atomic readers aren't exposed via apvts; we
         // read them via the processor's mPitchCorrector member.  H-6 part 1
         // didn't expose accessors, so leave this as a placeholder text update
@@ -410,6 +455,7 @@ private:
     std::unique_ptr<CAtt> mKeyAtt, mScaleAtt;
     std::unique_ptr<SAtt> mRetuneSpeedAtt, mStrengthAtt, mHumanizeAtt, mThroatShiftAtt;
     std::unique_ptr<BAtt> mFormantAtt;
+    bool mRecGated { false };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

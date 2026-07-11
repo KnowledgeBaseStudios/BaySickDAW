@@ -606,3 +606,252 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
   files for QA-F / QA-Fa /
   QA-Fb' / QA-Fc; no marathon leftovers block G2 — item 3 locked; remember the two MID-group
   ear-checks after QA-F and QA-Fa).
+
+## Carry-Over — 2026-07-10 (G2 boundary session)
+
+- **Completed:** session-open per protocol (standup + Main Plan §0 + boundary steps + ferret
+  carry-over, all read in full). Test plan §B.9 `blocks:` backfilled `a36ed3cc` (the standing
+  first-touch convention; uncommitted, rides the boundary commit). R3 group review over the
+  COMBINED G2 diff `e5c62218..71bd93bc` (10 commits, 44 files) ran CLEAN: **0 BLOCKER /
+  0 NEEDS-FIX / 4 NITs**, every finding premise-verified against source before surfacing:
+  (1) en-GB "colouration" x2 — the ONLY en-GB user-facing strings in the whole G2 diff
+  (grep-swept; `BaySickNAMIREditor.cpp:82/:257`); (2) raw-`this` `callAsync` in the NAMIR
+  editor param listeners — 4 new QA-Fc sites (:846/:855/:871/:886) extending the 2 pre-existing
+  H-6d/QA-A sites (:829/:839); destructor removes the listeners but an already-posted lambda
+  survives destruction; the same diff's Align/Pitch editors use `SafePointer` throughout;
+  (3) pitch applicator lacks the align side's device-SR-change rederive
+  (`BaySickPitchDSP.cpp:269` divides analysis-rate `snap.startSample` by the current device
+  rate; align re-derives from the beat on rate mismatch at `PluginProcessor.cpp:1167-1171`;
+  `Snapshot::sampleRate` carried but unread on this path; rare trigger, self-heals on any
+  re-analysis); (4) stop-gated auto re-analyze = synchronous message-thread analysis fired by
+  VoxPage's 4 Hz timer (locked bundle item 4, NOT a violation — flagged as a
+  deliberate-judgment watch item inside the ear-check walkthrough: long channel = multi-second
+  UI hitch when the auto fires). The review's five special-attention areas (seam-fix case walk
+  incl. wrap-on-boundary + stale-wrap consumption; Fb' record-path order corrector→WET
+  tap→merge→rack; Fc byte-identical-off + rising-edge-on-`micBRun` reset; PitchShifters
+  RT-safety + ring-wrap bounds; cross-batch mux/exclusion sites) all HELD.
+- **Docket answers (Jeff, 2026-07-10):** 1=A, 2=A, 3=A — all three FIXED in-tree same session
+  (coloration x2 `BaySickNAMIREditor.cpp:82/:257`; SafePointer on all 6 posted lambdas in
+  `BaySickNAMIREditor::parameterChanged` incl. the 2 pre-existing H-6d/QA-A sites; pitch
+  applicator origin converted through the ANALYSIS rate — seconds-domain `snapStartSec` in
+  `BaySickPitchDSP::applyBlockCommon`, one site covers live + monitor streams; offline path
+  already composite-relative, untouched). Build pending — rides the align-fix build cycle.
+  **Docket 4 CORRECTED:** my "accepted design" framing was WRONG — the tick was flagged FOR
+  Jeff's judgment at QA-F code-complete, never signed off by him; presenting it as
+  pre-accepted was my error (the self-authored-notes-as-owner-signoff trap). Jeff's answer:
+  NOT accepted, needs a real fix, follow-up LATER (slot TBD when we return to it; not
+  boundary work).
+- **Smoke finding #1 (REAL BUG, Part 3 item 3 — smoke halted there; diagnosis code-traced,
+  fix held on a spec call):** mid-play Align ON/OFF toggle makes the follower voice STOP
+  (silence/smear) instead of the promised FA-12 glide, then playback reads persistently in
+  the WRONG PLACE until a block nudge (rebuild) heals it; Jeff also heard pre-clip count-in
+  content (take 2 slip-recorded a count-in before the clip start). TWO stacked defects in
+  the QA-Fa recovery glide (`PluginProcessor.cpp:1197-1250`), both mine: **(A)** the ~50 ms
+  glide constant drains `glideK*posCorr` per block — for any alignment offset > ~50 ms
+  (0.05*SR*readRatio; real align offsets are 100s of ms) the intended per-block law motion
+  goes NEGATIVE, the degenerate clamp pins consumption at `outSamples*RR/64` (2 samples at
+  Jeff's 128 buffer) → rrEq pegs at 64x → the PV starves/smears ("voice stops") for the
+  drain duration (~0.8 s per 200 ms of offset; the ON direction symmetrically fast-forwards
+  at unbounded rate). The glide was validated on sub-50 ms law changes only — mis-scoped
+  constant. **(B)** during clamped blocks the INTENDED bookkeeping (`alignLastLawEnd =
+  lawEnd + posCorr`, :1460) and the ACTUAL feed (`expectedFilePos += clamped tc`) diverge;
+  the only reconciler is the 2-SECOND seek net (:1348-1351), so sub-2-s error persists for
+  as long as the chain stays engaged → "reading in the wrong place"; repeated toggles
+  compound it; divergent reads land outside the [raw..warp] envelope incl. BEFORE the
+  clip's content start = the audible count-in (Jeff's slip observation = the fingerprint,
+  not the cause). Numbers reproduce all three symptoms at his 128/44.1k rig. Heal-by-nudge
+  = player rebuild resets the per-clip glide state (+ stale → auto re-analyze). **Defect (C),
+  found during the fix implementation and DOMINANT:** the law-change detector compared
+  `lawStart` (law-only) against `alignLastLawEnd` (law + outstanding correction), so it
+  misfired on EVERY mid-glide block and the `+=` re-added the full outstanding correction
+  each time — compounding ~1.9x/block at the 128 buffer for ANY law change > 4 samples;
+  the 2 s seek net kept resetting the FEED but never the correction, so it re-broke every
+  block (the true persistence mechanism; A and B are real but secondary). **Design (Jeff,
+  approved 2026-07-10 after a VocAlign reference pull — workflow + Max Difference 0-200 ms /
+  Max Shift 10-150 ms / 2.0x-0.5x warp restriction, synchroarts.com manuals):** the ON/OFF
+  toggle KEEPS a glide; analyze + revert become STOP-GATED (greyed + stop-first tooltip)
+  in BOTH editors — "maps only change while stopped", matching the already-stop-gated auto
+  re-analyze. **Fix SHIPPED (built pending):** (i) detector strips the correction before
+  comparing law ends; rebase is ASSIGN not += (kills C); (ii) drain capped so the audible
+  bend never exceeds 2:1 either direction — the reference aligner's own published warp
+  restriction; glide time ~= offset traveled (~0.2-0.4 s for a 200 ms-late take); taper
+  = the existing ~50 ms exponential inside the cap (kills A); (iii) exact-bookkeeping
+  invariant `posCorr = (pStart + tc) − lawEnd` after the degenerate guard (kills B; the
+  guard self-accounts); (iv) stop-gates: Align editor Analyze/Apply + Versions, Pitch
+  editor Versions + analyze-on-open-stale defers to the poller at stop; guards in
+  runAnalyze / runAnalyzeIfNeeded / both async menu-result handlers (menu race);
+  `setPlaybackGate` on both toolbar structs driven from the existing editor timers
+  (PluginProcessor.cpp glide block; BaySickAlignEditor.cpp; BaySickPitchEditor.cpp).
+  gotRaw-miss + peeked-short paths examined and LEFT as-is (pre-existing pristine-path
+  conventions, rare streaming corners, self-heal via the seek net). Test plan amended:
+  F-6 stop-gate wording, FA-9 analyze-on-open deferral, FA-12 glide recalibration +
+  no-drift-after-toggle-spam expectation (failures indict the boundary commit), FA-13
+  stopped-revert flow.
+- **Assumptions changed:** the QA-Fa recovery's "no-click machinery" bundle-5 claim
+  ("law changes glide over ~50 ms — never a splice") is FALSE as built for real-size
+  alignment offsets; held finch/ferret Work Log entries stay as-written (append-only —
+  the fix gets its own boundary entry at section pass).
+- **Part 6 verdict + realtime-board lock (Jeff, 2026-07-10):** the first-engage tick clicks
+  on EVERY leg of the Part 6 listen — "annoying and unusable" — BUT the controls are
+  set-before-take by nature; Jeff's design: lock the WHOLE realtime board during live
+  recording (same pattern as the align/pitch stop-gates) so the artifact can't reach a
+  take. SHIPPED same session: `VibeSynthProcessor::isStripRecording(channelId)`
+  (message-thread accessor over mStripRecorders) → new `onIsStripRecording` hook on
+  BaySickVocalProcessor (wired per-strip in VoxPage::setProcessor via voxInsert(pageIndex))
+  → the vocal editor board's 10 Hz timer greys/disables the full realtime section
+  (toggle, Key/Scale, Retune/Strength/Humanize/Throat, Formant Preserve; alpha 0.4;
+  lock tooltip on the toggle) while THIS strip captures — count-in included,
+  armed+listen-off included, monitoring-only stays editable (the setup flow). §B.8 FB-11
+  authored (indicts the boundary commit). RESOLVED (Jeff, same session): (a) docket 4
+  stays OPEN — the lock does NOT close it; the engage tick itself must be fixed so
+  tuning-while-monitoring is clean (fix needs its own design round: latency trade-off
+  options — always-resident engines vs latency-matched bypass vs edge crossfade; SLOT
+  pending Jeff's pick, posed alongside the build: pull into this boundary vs slot at G3
+  open); (b) SAME TREATMENT for the page-wide chain Bypass + A/B slot — SHIPPED same
+  session (added to the gate set + lock tooltips; Mix stays live, smooth param; FB-11
+  amended). NOTE for QA-ApvtsAutomation (G4): ab_slot's tooltip advertises timeline
+  automation; once the confirmed application gap is fixed there, an automated ab_slot
+  swap could fire mid-capture and bypass this UI lock — that batch should decide whether
+  automation writes to gated params get suppressed/deferred while the strip records
+  (Rule 3 routing at section pass).
+- **Smoke finding #2 (QA-F ear-check FAIL at retest Part 3 item 5, FIXED same session):**
+  Jeff's mode listen: "loose sounds like choppy slop, close chops every once in a while,
+  tight relatively good" — mode REACH works, warp QUALITY fails, severity scaling with
+  correction size. TWO build defects (code-traced): **(a)** `pairOnsets` was greedy
+  nearest-within-tolerance with NO order constraint — a later dub onset could grab an
+  EARLIER guide onset (crossing); the publisher's monotone clamp then flattened each
+  crossing into plateau+cliff segments = alternating extreme slopes (Loose's 150 ms window
+  crosses most; Tight's 50 ms barely — matches the verdict exactly); **(b)** the map is
+  piecewise-LINEAR (WarpMap docs + `lookupAtGuideSec`) so playback rate is a stair-step —
+  constant per segment, instant jump at EVERY anchor (onset cadence), bounded only by the
+  absurd 1/64..64 clamp (reference restricts to 0.5..2.0). FIXES (live path): (1) monotone
+  pairing — paired guide onsets must strictly ascend (kills crossings at the source);
+  (2) segment slope bound 0.5..2.0 at map build (reference's own warp restriction) —
+  out-of-bound AUTO anchors dropped iteratively; sync points + endpoints exempt (user
+  intent; lookup clamp bounds a hard-vs-hard breach); (3) monotone-cubic map lookup —
+  `AlignPlaySnapshot::tangent` (Fritsch-Butland harmonic-mean tangents, computed at
+  publish after a near-equal-guide dedup) + cubic Hermite position AND slope in
+  `lookupAtGuideSec` (C1: the decode rate glides through anchors; linear fallback kept
+  for tangent-less snapshots). Mode windows (150/100/50 ms ±50 fine) NOT touched — sane
+  vs the reference's own Max Shift 10-150 ms. **PARITY FLAG:** the offline Render
+  (`applyWarp`, segment-per-anchor PV) still steps at anchors — upgrade follows in-batch
+  once the live sound passes Jeff's ear (its calibration informs the offline shape);
+  F-3 amended with the fix note + re-Analyze requirement + the parity caveat.
+  (BaySickAlignDSP.h/.cpp, BaySickVocalProcessor.cpp publisher.)
+- **Smoke finding #3 (retest round 2, 2026-07-10/11):** clean-source takes CLEARED both
+  residuals (Loose "off" + pitch clicks = raspy-source material, not engine — chop fix
+  verdict STANDS, no chop in any mode). NEW: Tight Analyze fails ("Not enough matching
+  transients") after previously succeeding repeatedly on the SAME setup; Loose + Close
+  still pass; only align settings were touched between runs; the lanes visually line up
+  (confusing — a failed analyze silently KEEPS the previous map applied, so the Output
+  lane still shows the old success). Verified honest: fineTune bipolar -50..+50 def 0,
+  mode combo order matches bases (150/100/50 ms), presets seat fine=0 — no settings-
+  mapping defect. Determinism reasoning: same inputs cannot succeed-then-fail, so the
+  suspect is the CHANGED CODE — the smoke-#2 fix's greedy-first monotone matcher has a
+  cascade failure (one early grab — e.g. a breath onset taking a real word's partner —
+  blocks all later pairs from reaching back; crossing-pairs previously masked it), which
+  can starve Tight's +/-50 ms window below the 2-pair minimum on material where pre-fix
+  Tight passed (his earlier successes likely pre-fix build; attribution question posed).
+  FIXES (same session): (1) `pairOnsets` upgraded to OPTIMAL monotone matching — small DP,
+  maximize pair count, tiebreak min total distance, monotone/no-crossings structural;
+  greedy fallback retained above a ~4M-cell DP cap (pathological composite lengths);
+  (2) approved error-message fix shipped WITH diagnostics: `AlignAnalyzeDiag` out-struct
+  from analyzeOffline (guide/dub onset counts, pairs, window) → analyzeAlign's failure
+  dialog now distinguishes too-few-word-starts from no-pairs-within-window, reports the
+  counts + window ms, and states the previous alignment stays applied (the Jeff-confusion
+  fix). F-3 note amended (Tight must succeed wherever pre-chop-fix Tight did). Rule 4:
+  the counts ride the user-facing dialog (permanent product improvement, not temp
+  instrumentation — catalog stays empty).
+- **Align semantics rework — LOCKED (Jeff, 2026-07-11, dockets 9-13):** root insight (Jeff):
+  our Mode/Fine Tune GATES which words may match then snaps 100%; the reference's timing
+  knob (Max Difference, manual-verified: "the size of the 'window' of allowable variation
+  in timing... fully-locked at the Tight end") controls RESIDUAL tightness of the result,
+  with matching internal. Root cause of the Fine-Tune footgun (finding #3's ACTUAL cause —
+  fine at knob-bottom = effective ~5 ms window = no pairs; the display shows base+fine so
+  the screenshot's "0 ms" was the bottomed knob, which I misread as raw-centered; the
+  greedy-cascade theory was a wrong detour, DP matcher retained as strictly-better anyway).
+  PICKS: **9a** adopt reference semantics — matching window goes INTERNAL (wide, my
+  calibration ~400 ms), Mode/Fine Tune becomes residual tightness; **10a** residual CAP
+  model (within the window = untouched natural timing; beyond = pulled to the window edge);
+  starting calibration Tight=0 / Close~50 / Loose~100 ms, fine +/-50 clamped >= 0 — tuned at
+  the re-listen. Docket 8 (footgun floor) SUPERSEDED — 0 now means fully-locked, valid.
+  **12a** pitch side gets the full reference set with OUR names (no reference naming
+  conventions): "Pitch Variation" = allowable tuning-variation cap (their Max Difference
+  (Pitch) role; within = untouched, beyond = pulled to cap edge), "Pitch Blend" = percent
+  toward leader contour 0-100 free travel (their Pitch Target role; our existing knob's
+  semantics, renamed, mode-clamp travel windows DROPPED — modes preset values instead),
+  "Pitch Types" = per-side detection-band pickers (their Pitch Ranges role); **13a** bands:
+  Normal / High Vocal / Low Vocal / High Instrument / Low Instrument (Hz ranges = my
+  calibration); pitch percent/cap moves from baked-at-analysis to applied-at-publish (live
+  knobs, no re-analysis). F-3/F-4 + tooltips rewrite with the rework. Alignment-section gap
+  survey (manual-verified) POSED as dockets 14-18: Flexibility rule choice / Maximum Shift
+  guard / High-Res 384k render / SmartAlign toggle / vibrato mode — awaiting per-line
+  in-batch vs Future State vs skip.
+- **Gap dockets 14-18 ANSWERED (Jeff, 2026-07-11):** **14a** — Flexibility rule exposed as a
+  user choice, but with JEFF'S simplified rungs: **Low / Normal / High / Max All** (maps to
+  stretch-bend ratio bounds, calibration mine ~1.5:1 / 2:1 / 4:1 / unbounded-both; the
+  reference's separate Max-Compression/Max-Expansion one-direction rungs collapse into Max
+  All; the "+ Pitch" legato variant implicitly dropped — Future State if ever wanted).
+  **15a** — Maximum-Shift-style per-word movement cap knob, in. **16a** — High-Res
+  (384 kHz-class) oversampled processing folds into the RENDER-parity follow-up (Jeff's
+  clarifying question answered: per-effect internal oversampling around one nonlinear stage
+  (e.g. NAM/IR's Oversampling selector) is a bounded 2-4x cost on a small block of math and
+  lives happily on live paths; the reference's High-Res runs the ENTIRE edit engine at
+  384 kHz — ~8.7x data rate through the heaviest DSP — which even the reference treats as a
+  processing-time tradeoff in a render-based product; ours lands on Render, same place they
+  pay it). **17b** — SmartAlign-style disable toggle → Future State (we have no meaningful
+  dumb-mode fallback; a toggle would deliberately re-enable the inferior greedy walk).
+  **18b** — vibrato-focused tuning/details mode → Future State.
+- **EVERYTHING TABLED (Jeff directive, 2026-07-11):** the entire vocal-editor rework — the
+  locked 9a/10a timing-residual model, 12a/13a Pitch Variation + Pitch Blend + Pitch Types,
+  14a Flexibility rungs, 15a max-shift cap, 16a render high-res — is TABLED, not started.
+  Trigger: walkthrough Part 4 (BaySickPitch) surfaced EIGHT problems; Jeff's call: figure
+  out ALL of them + run a FULL Newtone (FL Studio) reference review + a missing-features
+  survey, THEN implement everything as ONE body of work. Boundary walkthrough state:
+  Part 3 (align) closed good on the current tree's fixes (chop gone all modes, glide/
+  toggle clean, fine-tune mystery resolved as knob semantics — now superseded by the 9a
+  rework anyway); Part 4 halted on the problems below; Part 5 + FB-11 pending.
+- **BaySickPitch problem list (Jeff, Part 4, 2026-07-11 — verbatim-faithful; diagnosis
+  belongs to the review phase, NOT yet attempted):**
+  1. Pills don't match what Align shows for the SAME channel — a number of pills that
+     should be there are missing.
+  2. Moving pills up/down does nothing (no effect); pills cannot be moved left-right AT
+     ALL — "defeats the purpose and is not how Newtone works which is the setup it's
+     supposed to be replicating" (horizontal note movement = reference-parity gap).
+  3. Focus/Mod/Speed knobs do nothing; the tightness dropdown does nothing (and reads as
+     conceptually out of place in an editor — likely the Loose/Close/Tight PRESET combo,
+     naming collision with Align's modes); Slice mode does not slice pills. (Items 2+3
+     cluster — smells like the realtime applicator not engaging at all on his rig, but
+     that is a lead for the review, not a finding.)
+  4. Pills show "some sort of line like a waveform" — unclear if it is one (FA-1 spec says
+     teal waveform inside pills; visibility/rendering in question).
+  5. Alt+scroll does not zoom vertically — can't inspect the pill contents.
+  6. Piano roll scrolls past C0 (range clamp missing).
+  7. Playhead follows the main playhead but on STOP it stays where it stopped — does not
+     reset with the main transport.
+  8. With the view zoomed + scrolled away from the playhead: the moment the playhead goes
+     off-screen the view RESETS to the beginning as though never scrolled (auto-scroll
+     logic misbehaving with the A toggle default-on).
+- **Next phase (the review, before ANY implementation):** (1) full Newtone reference
+  review — FL Studio manual pull + Jeff's own FL walkthrough (he is the canonical FL
+  source per standing memory; exact-reference-replica rule: fetch + diff the real
+  reference FIRST); (2) missing-features survey (what Newtone has that we could use);
+  (3) diagnose the 8 problems (split: plain bugs vs parity gaps); (4) consolidated spec +
+  remaining dockets to Jeff; (5) implement the WHOLE body (tabled rework + parity + fixes)
+  in one pass; (6) full re-listen + walkthrough completion (Parts 4-5, FB-11).
+- **Resume action (SUPERSEDED by the 2026-07-11 tabling — current version):** the tree
+  holds ALL boundary fixes (glide + stop-gates + record-lock incl. Bypass/A/B + dockets
+  1-3 + DP matcher + counts dialog + §B.9 backfill + test-plan amendments + this block),
+  built by Jeff and verified through Part 3. NEXT: the review phase — Newtone reference
+  review (manual pull + Jeff's FL walkthrough) + missing-features survey + diagnose the 8
+  BaySickPitch problems → consolidated spec + dockets → implement the tabled rework
+  (9a/10a/12a/13a/14a/15a/16a) + parity + fixes as ONE body → full re-listen + Parts 4-5 +
+  FB-11 → boundary commit(s) (message + FULL git status → approval) → G3 group-open per
+  this plan's G3 section (plan files + G3-start ledger locks: 4a S-key, 4c FL Humanize
+  capture, D-6 Riff Machine, D-8 Note Properties, Builder note-preview). An interim
+  commit of the already-verified boundary fixes BEFORE the rework starts is Jeff's call
+  to make at next session open (clean bisect point vs one combined commit).
+- **Work-Log entries needed:** boundary gets its own entry at section pass covering the R3
+  review (0/0/4 verified), docket fixes, the align-glide finding + fix, and the docket-4
+  correction; NIT-4 (sync auto re-analyze UI freeze) still pending Jeff's deliberate
+  judgment at the resumed ear-check.

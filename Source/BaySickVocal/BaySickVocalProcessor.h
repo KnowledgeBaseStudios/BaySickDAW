@@ -249,6 +249,10 @@ public:
     std::function<juce::int64 (int channelId)>                  onChannelClipSignature;
     std::function<std::vector<std::pair<int, juce::String>>()>  onListCandidateChannels;
     std::function<juce::File()>                                 onGetProjectFolder;
+    // True while THIS strip is capturing a take.  The realtime board locks
+    // on it (engage-edge toggles mid-take click AND print into the WET
+    // capture -- the sound is set before the take, owner call 2026-07-10).
+    std::function<bool()>                                       onIsStripRecording;
 
     void setOwnChannelId (int id) noexcept { mOwnChannelId = id; }
     int  getOwnChannelId() const noexcept  { return mOwnChannelId; }

@@ -894,6 +894,15 @@ public:
             || ! mStripRecorders.empty();
     }
 
+    // Message-thread only (start/stopRecording mutate the vector there; the
+    // documented audio-thread race is tapDryRecorder's, not this one).
+    bool isStripRecording (int channelId) const
+    {
+        for (const auto& r : mStripRecorders)
+            if (r.channelId == channelId) return true;
+        return false;
+    }
+
 private:
     AudioFileRecorder              mMasterRecorder;        // master-output fallback
     std::vector<StripRecorder>     mStripRecorders;        // per-armed-strip WAVs

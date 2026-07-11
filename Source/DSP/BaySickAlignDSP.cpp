@@ -168,37 +168,103 @@ namespace
         return estimateF0Hz (mono + start, numSamples - start, sampleRate);
     }
 
+    // Monotone pairing: dub onsets ascend, so their paired guide onsets must
+    // ascend too.  The original nearest-unused search could CROSS pairs (a
+    // later dub onset grabbing an EARLIER guide onset); the publish-side
+    // monotone clamp then flattened each crossing into a plateau+cliff
+    // segment pair = the G2-boundary "choppy" ear verdict.  A greedy
+    // first-come monotone matcher fixes the crossings but has a cascade
+    // failure of its own: one early grab (a breath onset taking a real
+    // word's partner) blocks every later pair from reaching back, which can
+    // starve a narrow (Tight) window below the 2-pair minimum.  So: optimal
+    // monotone matching -- maximize pair count, tiebreak on smallest total
+    // distance.  Monotonicity is structural (both indices only advance).
     std::vector<Pair> pairOnsets (const std::vector<double>& dubOnsets,
                                    const std::vector<double>& guideOnsets,
                                    double tolerance)
     {
         std::vector<Pair> pairs;
-        std::vector<bool> guideUsed (guideOnsets.size(), false);
+        const size_t m = dubOnsets.size(), n = guideOnsets.size();
+        if (m == 0 || n == 0) return pairs;
 
-        size_t guideHint = 0;
-        for (double dt : dubOnsets)
+        // DP table cap ~4M cells (~100 MB-safe transient, message thread).
+        // Beyond it (pathological hour-long composites) fall back to the
+        // greedy monotone walk.
+        if ((m + 1) * (n + 1) > (size_t) 4 * 1024 * 1024)
         {
-            // Walk guideHint forward to the first guide onset >= dt - tolerance
-            while (guideHint < guideOnsets.size()
-                   && guideOnsets[guideHint] < dt - tolerance)
-                ++guideHint;
-
-            // Find nearest unused guide onset within ±tolerance starting at hint.
-            double bestDist = tolerance + 1.0;
-            size_t bestIdx  = guideOnsets.size();
-            for (size_t g = guideHint; g < guideOnsets.size(); ++g)
+            double lastGuide = -1.0e18;
+            size_t guideHint = 0;
+            for (double dt : dubOnsets)
             {
-                if (guideUsed[g]) continue;
-                if (guideOnsets[g] > dt + tolerance) break;
-                const double d = std::abs (guideOnsets[g] - dt);
-                if (d < bestDist) { bestDist = d; bestIdx = g; }
+                while (guideHint < n && guideOnsets[guideHint] < dt - tolerance)
+                    ++guideHint;
+                double bestDist = tolerance + 1.0;
+                size_t bestIdx  = n;
+                for (size_t g = guideHint; g < n; ++g)
+                {
+                    if (guideOnsets[g] <= lastGuide) continue;
+                    if (guideOnsets[g] > dt + tolerance) break;
+                    const double d = std::abs (guideOnsets[g] - dt);
+                    if (d < bestDist) { bestDist = d; bestIdx = g; }
+                }
+                if (bestIdx < n)
+                {
+                    lastGuide = guideOnsets[bestIdx];
+                    pairs.push_back ({ dt, guideOnsets[bestIdx] });
+                }
             }
-            if (bestIdx < guideOnsets.size())
-            {
-                guideUsed[bestIdx] = true;
-                pairs.push_back ({ dt, guideOnsets[bestIdx] });
-            }
+            return pairs;
         }
+
+        struct Cell { int count; double cost; unsigned char from; };
+        // from: 0 = pair (diag), 1 = skip dub, 2 = skip guide.
+        std::vector<Cell> dp ((m + 1) * (n + 1));
+        auto at = [&] (size_t i, size_t j) -> Cell&
+        { return dp[i * (n + 1) + j]; };
+
+        for (size_t i = 0; i <= m; ++i)
+            for (size_t j = 0; j <= n; ++j)
+            {
+                if (i == 0 && j == 0) { at (0, 0) = { 0, 0.0, 1 }; continue; }
+                Cell best { -1, 1.0e18, 1 };
+                if (i > 0)
+                {
+                    const Cell& c = at (i - 1, j);
+                    if (c.count > best.count
+                        || (c.count == best.count && c.cost < best.cost))
+                        best = { c.count, c.cost, 1 };
+                }
+                if (j > 0)
+                {
+                    const Cell& c = at (i, j - 1);
+                    if (c.count > best.count
+                        || (c.count == best.count && c.cost < best.cost))
+                        best = { c.count, c.cost, 2 };
+                }
+                if (i > 0 && j > 0)
+                {
+                    const double d = std::abs (dubOnsets[i - 1] - guideOnsets[j - 1]);
+                    if (d <= tolerance)
+                    {
+                        const Cell& c = at (i - 1, j - 1);
+                        if (c.count + 1 > best.count
+                            || (c.count + 1 == best.count && c.cost + d < best.cost))
+                            best = { c.count + 1, c.cost + d, 0 };
+                    }
+                }
+                at (i, j) = best;
+            }
+
+        size_t i = m, j = n;
+        while (i > 0 || j > 0)
+        {
+            const Cell& c = at (i, j);
+            if (c.from == 0)
+                { pairs.push_back ({ dubOnsets[i - 1], guideOnsets[j - 1] }); --i; --j; }
+            else if (c.from == 1) { if (i > 0) --i; else --j; }
+            else                  { if (j > 0) --j; else --i; }
+        }
+        std::reverse (pairs.begin(), pairs.end());
         return pairs;
     }
 }
@@ -224,6 +290,33 @@ double WarpMap::getStretchRatioAt (double dubTimeSec) const noexcept
         }
     }
     return 1.0;
+}
+
+// ─── AlignPlaySnapshot ────────────────────────────────────────────────────────
+void AlignPlaySnapshot::computeTangents()
+{
+    const size_t n = guideSec.size();
+    tangent.assign (n, 1.0);
+    if (n < 2) return;
+
+    std::vector<double> hseg (n - 1), sec (n - 1);
+    for (size_t i = 0; i + 1 < n; ++i)
+    {
+        hseg[i] = juce::jmax (1.0e-9, guideSec[i + 1] - guideSec[i]);
+        sec[i]  = (dubSec[i + 1] - dubSec[i]) / hseg[i];
+    }
+    tangent[0]     = sec[0];
+    tangent[n - 1] = sec[n - 2];
+    for (size_t i = 1; i + 1 < n; ++i)
+    {
+        // Fritsch-Butland weighted harmonic mean: keeps the cubic monotone
+        // (dub time can never read backward), flattens to 0 across a
+        // direction change or plateau.
+        if (sec[i - 1] * sec[i] <= 0.0) { tangent[i] = 0.0; continue; }
+        const double w1 = 2.0 * hseg[i] + hseg[i - 1];
+        const double w2 = hseg[i] + 2.0 * hseg[i - 1];
+        tangent[i] = (w1 + w2) / (w1 / sec[i - 1] + w2 / sec[i]);
+    }
 }
 
 double WarpMap::mapDubToGuide (double dubTimeSec) const noexcept
@@ -627,8 +720,12 @@ WarpMap BaySickAlignDSP::analyzeOffline (const float* guideMono, int numGuideSam
                                           double pairingToleranceSec,
                                           const std::vector<AlignSyncPoint>&     syncPoints,
                                           const std::vector<AlignProtectedArea>& protectedAreas,
-                                          float  pitchRange01)
+                                          float  pitchRange01,
+                                          AlignAnalyzeDiag* diagOut)
 {
+    if (diagOut != nullptr)
+        *diagOut = { 0, 0, 0, pairingToleranceSec };
+
     WarpMap map;
     map.analysisSampleRate = sampleRate;
     map.guideDurationSec   = (sampleRate > 0.0) ? numGuideSamples / sampleRate : 0.0;
@@ -640,6 +737,11 @@ WarpMap BaySickAlignDSP::analyzeOffline (const float* guideMono, int numGuideSam
 
     const auto guideOnsets = detectOnsetsSec (guideMono, numGuideSamples, sampleRate);
     const auto dubOnsets   = detectOnsetsSec (dubMono,   numDubSamples,   sampleRate);
+    if (diagOut != nullptr)
+    {
+        diagOut->guideOnsets = (int) guideOnsets.size();
+        diagOut->dubOnsets   = (int) dubOnsets.size();
+    }
 
     // Sync points sorted by follower time = hard segmentation boundaries
     // (section 13c): auto-pairing runs independently inside each region so a
@@ -668,6 +770,9 @@ WarpMap BaySickAlignDSP::analyzeOffline (const float* guideMono, int numGuideSam
         }
     }
 
+    if (diagOut != nullptr)
+        diagOut->pairs = (int) pairs.size();
+
     const bool haveSync = ! sp.empty();
     if (pairs.size() < 2 && ! haveSync)
         return map;
@@ -677,15 +782,19 @@ WarpMap BaySickAlignDSP::analyzeOffline (const float* guideMono, int numGuideSam
     // points are user intent -- they land at FULL strength regardless.
     const float s = juce::jlimit (0.0f, 1.0f, strength);
 
+    // hard = endpoint or user sync point: never dropped by the slope bound.
+    struct Flagged { WarpAnchor a; bool hard; };
+    std::vector<Flagged> fl;
+
     // Anchor at start (0,0) so the warp is well-defined from the start.
-    map.anchors.push_back ({ 0.0, 0.0, 1.0f, 0.0f });
+    fl.push_back ({ { 0.0, 0.0, 1.0f, 0.0f }, true });
     for (const auto& p : pairs)
     {
         WarpAnchor a;
         a.dubTimeSec   = p.dub;
         a.guideTimeSec = p.dub + (p.guide - p.dub) * (double) s;
         a.weight       = 1.0f;
-        map.anchors.push_back (a);
+        fl.push_back ({ a, false });
     }
     for (const auto& x : sp)
     {
@@ -693,7 +802,7 @@ WarpMap BaySickAlignDSP::analyzeOffline (const float* guideMono, int numGuideSam
         a.dubTimeSec   = x.followerSec;
         a.guideTimeSec = x.leaderSec;
         a.weight       = 1.0f;
-        map.anchors.push_back (a);
+        fl.push_back ({ a, true });
     }
     // Anchor at end (dubDur, guideDur) so the tail isn't unbounded.
     if (map.dubDurationSec > 0.0 && map.guideDurationSec > 0.0)
@@ -702,18 +811,44 @@ WarpMap BaySickAlignDSP::analyzeOffline (const float* guideMono, int numGuideSam
         end.dubTimeSec   = map.dubDurationSec;
         end.guideTimeSec = map.dubDurationSec + (map.guideDurationSec - map.dubDurationSec) * (double) s;
         end.weight       = 1.0f;
-        map.anchors.push_back (end);
+        fl.push_back ({ end, true });
     }
 
-    std::sort (map.anchors.begin(), map.anchors.end(),
-               [] (const WarpAnchor& l, const WarpAnchor& r) { return l.dubTimeSec < r.dubTimeSec; });
+    std::sort (fl.begin(), fl.end(),
+               [] (const Flagged& l, const Flagged& r)
+               { return l.a.dubTimeSec < r.a.dubTimeSec; });
 
     // Monotonicity guard: guide times must never run backwards or applyWarp's
     // segment ratios go negative.  Sync points + tolerant pairing can produce
     // a crossing on hostile input -- clamp forward.
-    for (size_t i = 1; i < map.anchors.size(); ++i)
-        map.anchors[i].guideTimeSec = juce::jmax (map.anchors[i].guideTimeSec,
-                                                  map.anchors[i - 1].guideTimeSec);
+    for (size_t i = 1; i < fl.size(); ++i)
+        fl[i].a.guideTimeSec = juce::jmax (fl[i].a.guideTimeSec,
+                                           fl[i - 1].a.guideTimeSec);
+
+    // Segment slope bound 0.5..2.0 -- the reference aligner's own deliberate
+    // warp restriction (G2 boundary): an auto anchor whose segment demands
+    // more than 2:1 time-bend is a mispairing or an over-reach; drop it and
+    // let the neighbors span the region.  Sync points + endpoints survive
+    // (user intent; the lookup clamp bounds a hard-vs-hard breach).
+    for (bool changed = true; changed;)
+    {
+        changed = false;
+        for (size_t i = 1; i < fl.size(); ++i)
+        {
+            const double dDub   = fl[i].a.dubTimeSec   - fl[i - 1].a.dubTimeSec;
+            const double dGuide = fl[i].a.guideTimeSec - fl[i - 1].a.guideTimeSec;
+            if (dDub <= 1.0e-6) continue;
+            const double r = dGuide / dDub;
+            if (r >= 0.5 && r <= 2.0) continue;
+            if      (! fl[i].hard)     { fl.erase (fl.begin() + (long) i);       changed = true; break; }
+            else if (! fl[i - 1].hard) { fl.erase (fl.begin() + (long) (i - 1)); changed = true; break; }
+        }
+    }
+
+    map.anchors.clear();
+    map.anchors.reserve (fl.size());
+    for (const auto& f : fl)
+        map.anchors.push_back (f.a);
 
     // ── Per-anchor pitch deltas (QA-F Task 3, sections 13f/13g) ─────────────
     // Frame-YIN both sides of every anchor; scaled leader-minus-follower

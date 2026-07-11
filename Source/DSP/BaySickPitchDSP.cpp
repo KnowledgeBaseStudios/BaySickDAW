@@ -264,9 +264,15 @@ void BaySickPitchDSP::applyEditsToBuffer (float* const* chans, int numCh, int nu
     const float smoothCoef = 1.0f - std::exp (-1.0f / (float) (speedMs * 0.001 * sr));
     const float gainCoef   = 1.0f - std::exp (-1.0f / (float) (0.005 * sr));
 
+    // snap.startSample is stamped in ANALYSIS-time frames; convert the origin
+    // through the analysis rate so a device-rate switch after analysis doesn't
+    // re-interpret it at the current rate (seconds are rate-invariant — the
+    // align side re-derives its origin the same way).
+    const double snapStartSec = (double) snap.startSample / snap.sampleRate;
+
     for (int i = 0; i < numSamples; ++i)
     {
-        const double tSec = (double) (timelineStartSample + i - snap.startSample) / sr;
+        const double tSec = (double) (timelineStartSample + i) / sr - snapStartSec;
 
         // Monotonic cursor with seek rewind (transport jumps).
         while (st.cursor < (int) regions.size()

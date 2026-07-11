@@ -679,6 +679,18 @@ public:
         if (mStale != s || mStalePending != pending)
             { mStale = s; mStalePending = pending; repaint(); }
     }
+    // Revert is stop-gated (owner call 2026-07-10, same rule as Align):
+    // a mid-play version swap is an unbounded law change.  Snapshot stays
+    // live -- it only records, never swaps the map.
+    void setPlaybackGate (bool playing)
+    {
+        if (mPlayGated == playing) return;
+        mPlayGated = playing;
+        mVersionsBtn.setEnabled (! playing);
+        mVersionsBtn.setTooltip (playing
+            ? "Stop playback to revert"
+            : "Revert to an earlier snapshot (every analyze also creates one)");
+    }
     void mirrorPreset (int presetParam)
     {
         mMirroring = true;
@@ -788,7 +800,7 @@ private:
     std::unique_ptr<TaggedSliderAttachment> mFocusAtt, mModAtt, mSpeedAtt;
     juce::String mLengthText;
     bool mDirty { false }, mStale { false }, mStalePending { false },
-         mMirroring { false };
+         mMirroring { false }, mPlayGated { false };
 
     friend class BaySickPitchEditor;
 };
@@ -865,8 +877,10 @@ void BaySickPitchEditor::setTopNote (int note)
 
 void BaySickPitchEditor::timerCallback()
 {
+    const bool playing = DSPBase::isTransportPlaying();
     const bool stale = mProc.isPitchStale();
-    mToolbar->setStale (stale, stale && DSPBase::isTransportPlaying());
+    mToolbar->setStale (stale, stale && playing);
+    mToolbar->setPlaybackGate (playing);
 
     const bool dirty = paramsDivergeFromSnapshot();
     mToolbar->setDirty (dirty);
@@ -962,6 +976,14 @@ void BaySickPitchEditor::runAnalyzeIfNeeded (bool force)
         if (! mCompValid) refreshComposite();
         return;
     }
+    // Analyze is stop-gated (owner call 2026-07-10): opening on a stale
+    // channel mid-play lights the badge and the VoxPage poller re-runs at
+    // the next transport stop instead.
+    if (DSPBase::isTransportPlaying())
+    {
+        if (! mCompValid) refreshComposite();
+        return;
+    }
     juce::String err;
     if (mProc.analyzePitch (err))
     {
@@ -1043,6 +1065,8 @@ void BaySickPitchEditor::showVersionsMenu()
         [self] (int result)
         {
             if (! self || result <= 0) return;
+            // Menu is modal-async: play could have started since it opened.
+            if (DSPBase::isTransportPlaying()) return;
             self->pushUndo();
             if (! self->mProc.revertPitchToVersion (result - 1))
                 { self->mUndoStack.pop_back(); return; }

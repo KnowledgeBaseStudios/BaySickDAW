@@ -1227,27 +1227,54 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                 player.alignInFrac  = 0.0;
                 player.alignRho     = std::pow (2.0, (double) semisTarget / 12.0);
             }
-            else if (std::abs (lawStart - player.alignLastLawEnd) > 4.0)
+            // alignLastLawEnd stores the ACTUAL end read position (law +
+            // outstanding correction), so the law-change test must strip the
+            // correction back out before comparing law ends -- comparing the
+            // raw stored value re-detected "a change" on every mid-glide
+            // block, and the old += then COMPOUNDED the correction ~1.9x per
+            // block (the G2-boundary runaway: starved PV = dropout, position
+            // pinned wrong until a player rebuild).
+            else if (std::abs ((player.alignLastLawEnd - player.alignPosCorr)
+                               - lawStart) > 4.0)
             {
-                // Law changed under us (toggle / Apply / revert): keep the
-                // read position continuous, drain the difference out.
-                player.alignPosCorr += player.alignLastLawEnd - lawStart;
+                // Law changed under us (the ON/OFF toggle -- analyze/revert
+                // are stop-gated): REBASE onto the new law so the read stays
+                // continuous, then drain the difference out.
+                player.alignPosCorr = player.alignLastLawEnd - lawStart;
             }
 
             const double corrBefore = player.alignPosCorr;
-            player.alignPosCorr *= (1.0 - glideK);
-            if (std::abs (player.alignPosCorr) < 1.0e-3) player.alignPosCorr = 0.0;
+
+            // Drain wanted by the ~50 ms exponential, capped so the audible
+            // bend never exceeds 2:1 either direction -- the reference
+            // aligner's own deliberate warp restriction (owner calibration
+            // 2026-07-10; glide time ~= the offset being traveled).  The
+            // uncapped drain demanded backward consumption for any real-size
+            // alignment offset and starved the vocoder.
+            const double lawAdvance = lawEnd - lawStart;
+            double drain = corrBefore * glideK;
+            if (lawAdvance > 0.0)
+                drain = juce::jlimit (-lawAdvance, 0.5 * lawAdvance, drain);
+            else
+                drain = 0.0;
 
             const double rhoTarget = std::pow (2.0, (double) semisTarget / 12.0);
             player.alignRho += (rhoTarget - player.alignRho) * glideK;
             if (std::abs (player.alignRho - 1.0) < 1.0e-4) player.alignRho = 1.0;
 
             const double pStart = lawStart + corrBefore;
-            double tc = (lawEnd - lawStart) + (player.alignPosCorr - corrBefore);
-            // Degenerate clamp (a huge backward law jump could zero or
-            // invert a single block's consumption; the law-end bookkeeping
-            // below re-absorbs the clamp next block).
+            double tc = lawAdvance - drain;
+            // Degenerate guard (extreme warp slope could zero a block's
+            // consumption; the invariant below re-absorbs whatever it alters).
             tc = juce::jmax (tc, (double) outSamples * readRatio / 64.0);
+
+            // Exact-bookkeeping invariant: the outstanding correction is
+            // DERIVED from the consumption actually scheduled, so the law
+            // bookkeeping and the fed stream can never drift apart (the
+            // pre-fix divergence sat below the 2 s seek net and never
+            // healed while the chain stayed engaged).
+            player.alignPosCorr = (pStart + tc) - lawEnd;
+            if (std::abs (player.alignPosCorr) < 1.0e-3) player.alignPosCorr = 0.0;
 
             const bool settled = corrBefore == 0.0 && player.alignPosCorr == 0.0
                               && player.alignRho == 1.0;

@@ -1040,6 +1040,22 @@ public:
         if (mStale != s || mStalePending != pending)
             { mStale = s; mStalePending = pending; repaint(); }
     }
+    // Analyze + revert are stop-gated (owner call 2026-07-10): a mid-play map
+    // swap is an unbounded law change the glide is not meant to absorb -- the
+    // ON/OFF toggle is the only live gesture.
+    void setPlaybackGate (bool playing)
+    {
+        if (mPlayGated == playing) return;
+        mPlayGated = playing;
+        mAnalyzeBtn .setEnabled (! playing);
+        mVersionsBtn.setEnabled (! playing);
+        mAnalyzeBtn .setTooltip (playing
+            ? "Stop playback to analyze"
+            : "Pair the Follower's onsets to the Leader, build the warp, and apply it to playback");
+        mVersionsBtn.setTooltip (playing
+            ? "Stop playback to revert"
+            : "Revert to an earlier applied state (every Analyze/Apply is a restore point)");
+    }
     void mirrorPreset (int presetParam)   // 0..5 factory, 6 = user
     {
         mMirroring = true;
@@ -1107,7 +1123,7 @@ private:
     juce::TextButton    mSaveBtn, mLoadBtn, mAnalyzeBtn, mVersionsBtn, mRenderBtn,
                         mUndoBtn, mRedoBtn;
     bool mDirty { false }, mStale { false }, mStalePending { false },
-         mMirroring { false };
+         mMirroring { false }, mPlayGated { false };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1175,8 +1191,10 @@ void BaySickAlignEditor::setView (double pps, double scrollSec)
 
 void BaySickAlignEditor::timerCallback()
 {
+    const bool playing = DSPBase::isTransportPlaying();
     const bool stale = mProc.isAlignStale() || mEditsSinceAnalyze;
-    mToolbar->setStale (stale, stale && DSPBase::isTransportPlaying());
+    mToolbar->setStale (stale, stale && playing);
+    mToolbar->setPlaybackGate (playing);
 
     const bool dirty = paramsDivergeFromSnapshot();
     mToolbar->setDirty (dirty);
@@ -1195,6 +1213,7 @@ void BaySickAlignEditor::timerCallback()
 // ─── Actions ──────────────────────────────────────────────────────────────────
 void BaySickAlignEditor::runAnalyze()
 {
+    if (DSPBase::isTransportPlaying()) return;   // stop-gated; button is greyed
     pushUndo();
     juce::String err;
     if (! mProc.analyzeAlign (err))
@@ -1263,6 +1282,8 @@ void BaySickAlignEditor::showVersionsMenu()
         [self] (int result)
         {
             if (! self || result <= 0) return;
+            // Menu is modal-async: play could have started since it opened.
+            if (DSPBase::isTransportPlaying()) return;
             self->pushUndo();
             if (! self->mProc.revertAlignToVersion (result - 1))
                 { self->mUndoStack.pop_back(); return; }
