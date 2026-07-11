@@ -261,6 +261,9 @@ void BaySickPitchDSP::applyEditsToBuffer (float* const* chans, int numCh, int nu
     const auto& regions = snap.regions;
     if (regions.empty() || numCh <= 0) return;
 
+    st.diagInRegion = 0;   // [PITCH DIAG]
+    st.diagChanged  = 0;   // [PITCH DIAG]
+
     const float smoothCoef = 1.0f - std::exp (-1.0f / (float) (speedMs * 0.001 * sr));
     const float gainCoef   = 1.0f - std::exp (-1.0f / (float) (0.005 * sr));
 
@@ -285,6 +288,8 @@ void BaySickPitchDSP::applyEditsToBuffer (float* const* chans, int numCh, int nu
         const bool inRegion = st.cursor < (int) regions.size()
                            && tSec >= regions[(size_t) st.cursor].startSec
                            && tSec <  regions[(size_t) st.cursor].endSec;
+        if (inRegion) ++st.diagInRegion;                    // [PITCH DIAG]
+        if (i == numSamples - 1) st.diagLastTSec = tSec;    // [PITCH DIAG]
 
         float targetSemis   = 0.0f;
         float targetFormant = 0.0f;
@@ -344,7 +349,16 @@ void BaySickPitchDSP::applyEditsToBuffer (float* const* chans, int numCh, int nu
             float wet = shifters[ch].processSample (dry, ratio);
             if (snap.anyFormant)
                 wet = formants[ch].processSample (dry, wet, false, st.smoothedFormant);
-            chans[ch][i] = wet * st.smoothedGain;
+            const float out = wet * st.smoothedGain;
+            // [PITCH DIAG]
+            if (ch == 0)
+            {
+                const float aIn = std::abs (dry), aOut = std::abs (out);
+                if (aIn  > st.diagPeakIn)  st.diagPeakIn  = aIn;
+                if (aOut > st.diagPeakOut) st.diagPeakOut = aOut;
+                if (std::abs (out - dry) > 1.0e-4f) ++st.diagChanged;
+            }
+            chans[ch][i] = out;
         }
     }
 }
@@ -354,7 +368,15 @@ void BaySickPitchDSP::processFilePlay (juce::AudioBuffer<float>& buffer,
                                        juce::int64 timelineStartSample) noexcept
 {
     auto* snap = mActive.load (std::memory_order_acquire);
-    if (snap == nullptr) return;
+    // [PITCH DIAG] G2 boundary (Rule 4, Remove at close): relaxed counters,
+    // negligible cost, no branches added to the hot loop itself.
+    mDiag.blocks.fetch_add (1, std::memory_order_relaxed);
+    if (snap == nullptr)
+    {
+        mDiag.snapNull.fetch_add (1, std::memory_order_relaxed);
+        return;
+    }
+    mDiag.regionCount.store ((int) snap->regions.size(), std::memory_order_relaxed);
 
     const bool  on    = mChainOn.load (std::memory_order_relaxed);
     const float focus = mFocus01.load (std::memory_order_relaxed);
@@ -366,10 +388,16 @@ void BaySickPitchDSP::processFilePlay (juce::AudioBuffer<float>& buffer,
                       && std::abs (mAppState.smoothedFormant) < 0.002f
                       && std::abs (mAppState.smoothedGain - 1.0f) < 0.002f;
     if (! on && settled)
+    {
+        mDiag.bailOff.fetch_add (1, std::memory_order_relaxed);
         return;
+    }
     if (on && settled
         && ! snap->anyEdits && focus < 0.001f && std::abs (mod - 1.0f) < 0.01f)
+    {
+        mDiag.bailNeutral.fetch_add (1, std::memory_order_relaxed);
         return;
+    }
 
     const int numCh = juce::jmin (2, buffer.getNumChannels());
     applyEditsToBuffer (buffer.getArrayOfWritePointers(), numCh,
@@ -378,6 +406,17 @@ void BaySickPitchDSP::processFilePlay (juce::AudioBuffer<float>& buffer,
                         focus, mod, mSpeedMs.load (std::memory_order_relaxed),
                         on,
                         mShifters.data(), mFormant.data(), mAppState);
+    mDiag.applied.fetch_add (1, std::memory_order_relaxed);
+    mDiag.inRegion.store (mAppState.diagInRegion, std::memory_order_relaxed);
+    mDiag.lastTSec.store ((float) mAppState.diagLastTSec, std::memory_order_relaxed);
+    mDiag.changed.store (mAppState.diagChanged, std::memory_order_relaxed);
+    if (mAppState.diagPeakIn > mDiag.peakIn.load (std::memory_order_relaxed))
+        mDiag.peakIn.store (mAppState.diagPeakIn, std::memory_order_relaxed);
+    if (mAppState.diagPeakOut > mDiag.peakOut.load (std::memory_order_relaxed))
+        mDiag.peakOut.store (mAppState.diagPeakOut, std::memory_order_relaxed);
+    const float curAbs = std::abs (mAppState.smoothedSemis);
+    if (curAbs > mDiag.maxSemis.load (std::memory_order_relaxed))
+        mDiag.maxSemis.store (curAbs, std::memory_order_relaxed);
 }
 
 // QA-Fb (A1 monitor merge): processFilePlay's twin over the monitor stream

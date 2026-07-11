@@ -187,6 +187,26 @@ public:
     juce::ValueTree stateToValueTree() const;
     void stateFromValueTree (const juce::ValueTree& v);
 
+    // [PITCH DIAG] G2 boundary (Rule 4, Remove at close).  Which gate eats
+    // the signal: the audio thread bumps these; the pitch editor's InfoBar
+    // shows them while Documents/BaySickDAW/enable_pitch_diag.txt exists.
+    struct Diag
+    {
+        std::atomic<juce::int64> blocks      { 0 };   // processFilePlay entries
+        std::atomic<juce::int64> snapNull    { 0 };   // bailed: no snapshot
+        std::atomic<juce::int64> bailOff     { 0 };   // bailed: chain off + settled
+        std::atomic<juce::int64> bailNeutral { 0 };   // bailed: no edits + neutral knobs
+        std::atomic<juce::int64> applied     { 0 };   // reached applyEditsToBuffer
+        std::atomic<int>         inRegion    { 0 };   // samples inside a region (last call)
+        std::atomic<float>       lastTSec    { 0.0f };// composite-sec at last call end
+        std::atomic<float>       maxSemis    { 0.0f };// peak |smoothedSemis| since arm
+        std::atomic<int>         regionCount { 0 };   // regions in the active snapshot
+        std::atomic<float>       peakIn      { 0.0f };// max |input| seen (since arm)
+        std::atomic<float>       peakOut     { 0.0f };// max |output| written (since arm)
+        std::atomic<int>         changed     { 0 };   // samples where wet != dry (last call)
+    };
+    Diag mDiag;
+
 private:
     // Immutable audio-thread view.  Published via atomic swap; retired
     // snapshots retained in mRetired (audio holds the pointer only within a
@@ -215,7 +235,16 @@ private:
         double vibPhase        { 0.0 };
         int    cursor          { 0 };
         int    lastRegion      { -1 };
+        // [PITCH DIAG] G2 boundary (Rule 4, Remove at close): per-call gate
+        // tracer -- audio-thread plains, copied into Diag atomics after each
+        // applyEditsToBuffer call.
+        int    diagInRegion    { 0 };
+        double diagLastTSec    { 0.0 };
+        float  diagPeakIn      { 0.0f };
+        float  diagPeakOut     { 0.0f };
+        int    diagChanged     { 0 };
     };
+
 
     void applyEditsToBuffer (float* const* chans, int numCh, int numSamples,
                              juce::int64 timelineStartSample, double sr,

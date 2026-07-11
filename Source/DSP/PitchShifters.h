@@ -84,10 +84,16 @@ public:
         // Warmup: need [center-P, center+P) fully written before any grain.
         if (outAbs >= mNextSynthAbs && mWriteAbs > (juce::int64) (2.0 * P + 8.0))
         {
-            // Center on the nearest analysis epoch (k*P grid) held >= P+2
-            // behind the write head so the whole window is already written.
-            double center = std::round (mNextSynthAbs / P) * P;
-            center = juce::jmin (center, (double) mWriteAbs - P - 2.0);
+            // Anchor on the k*P analysis grid by snapping DOWN from the
+            // write head, so the whole 2P window is already written AND the
+            // anchor stays on-grid.  The original round-then-clamp defeated
+            // the grid: the scheduler pins mNextSynthAbs at the write head,
+            // so the written-window clamp (writeAbs - P - 2, off-grid) won
+            // the min() on virtually every epoch -- the analysis step
+            // collapsed to the synthesis step and the shifter degenerated to
+            // a pure ~2P delay at ANY ratio (G2 boundary: pitch edits
+            // audibly inert while diag showed every sample changed).
+            const double center = std::floor ((outAbs - P - 2.0) / P) * P;
             if (center >= P)
                 spawnGrain (center, P);
             // Schedule the next epoch; the jmax bounds catch-up after long

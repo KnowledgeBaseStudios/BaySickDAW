@@ -948,6 +948,37 @@ void BaySickPitchEditor::timerCallback()
         mLastPlaySample = -1;
         mCanvas->repaint();
     }
+
+    // [PITCH DIAG] G2 boundary (Rule 4, Remove at close): while the flag file
+    // exists, the InfoBar shows the applicator gate counters so the owner can
+    // read which gate eats the signal.
+    if (++mDiagTick >= 5)   // flag-file poll ~every 2 s at the 400 ms timer
+    {
+        mDiagTick  = 0;
+        const auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                             .getChildFile ("BaySickDAW");
+        // Tolerate the hidden-extensions double-suffix trap.
+        mDiagArmed = dir.getChildFile ("enable_pitch_diag.txt").existsAsFile()
+                  || dir.getChildFile ("enable_pitch_diag.txt.txt").existsAsFile()
+                  || dir.getChildFile ("enable_pitch_diag").existsAsFile();
+    }
+    if (mDiagArmed)
+    {
+        auto& d = mProc.mPitch.mDiag;
+        mInfoBar->setText (
+            "DIAG blk:"   + juce::String (d.blocks.load())
+            + " null:"    + juce::String (d.snapNull.load())
+            + " off:"     + juce::String (d.bailOff.load())
+            + " neut:"    + juce::String (d.bailNeutral.load())
+            + " app:"     + juce::String (d.applied.load())
+            + " inReg:"   + juce::String (d.inRegion.load())
+            + " regs:"    + juce::String (d.regionCount.load())
+            + " tSec:"    + juce::String (d.lastTSec.load(), 2)
+            + " maxSemi:" + juce::String (d.maxSemis.load(), 2)
+            + " in:"      + juce::String (d.peakIn.load(), 3)
+            + " out:"     + juce::String (d.peakOut.load(), 3)
+            + " chg:"     + juce::String (d.changed.load()));
+    }
 }
 
 void BaySickPitchEditor::updateInfoBarFor (int regionIdx)

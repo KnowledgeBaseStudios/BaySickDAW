@@ -108,6 +108,10 @@ private:
     juce::int64 mLastPlaySample  { -1 };
     juce::uint32 mLastPlayMoveMs { 0 };
 
+    // [PITCH DIAG] G2 boundary (Rule 4, Remove at close)
+    int  mDiagTick  { 0 };
+    bool mDiagArmed { false };
+
     std::vector<std::vector<PitchNoteRegion>> mUndoStack, mRedoStack;
     std::map<juce::String, float> mPresetSnapshot;
 

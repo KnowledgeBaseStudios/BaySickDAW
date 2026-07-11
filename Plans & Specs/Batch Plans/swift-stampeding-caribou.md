@@ -839,6 +839,179 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
   (3) diagnose the 8 problems (split: plain bugs vs parity gaps); (4) consolidated spec +
   remaining dockets to Jeff; (5) implement the WHOLE body (tabled rework + parity + fixes)
   in one pass; (6) full re-listen + walkthrough completion (Parts 4-5, FB-11).
+- **Boundary-fix commit LANDED:** `9b024062` (14 files, +732/-79 — all Part-3-verified
+  fixes + doc records; Jeff confirmed the last build included the DP matcher + counts
+  dialog, so tree == verified build; interim-commit question resolved: commit-then-review,
+  Jeff 2026-07-11).
+- **Review phase inputs gathered (2026-07-11):** (1) NEWTONE REFERENCE INVENTORY compiled
+  from the official Image-Line manual (agent transcript holds the full quoted inventory) —
+  headline facts: time model = ELASTIC WARP w/ Ctrl+drag detach ("if possible"), not free
+  move; per-note Advanced Edit = 9 handles (Pitch/Position/Formant + Pitch variation +
+  pitch & volume ramp-in/out pairs; green=in red=out, volume band top / variation band
+  bottom — Jeff supplied the manual's annotated figure); global knobs = Center/Variation/
+  Transition (map ~1:1 onto our Focus/Mod/Speed; our Loose/Close/Tight preset combo has
+  NO reference counterpart); nav = Alt+wheel vertical zoom, Ctrl+wheel horizontal zoom,
+  Shift+wheel h-scroll, middle-drag pan, Ctrl+right-click zoom-to-selection; A =
+  auto-scroll toggle; scrub-audition = drag note middle while stopped; Cut mode (C) click
+  = slice, Alt+click x2 = join; snap-to-scale; batch re-pitch via ruler click; vibrato
+  edit mode (freq line + bi-directional start/end intensity); exports (drag-to-playlist,
+  region-marker WAV, MIDI); playhead/view-on-stop behavior NOT documented (Jeff to check
+  hands-on in FL). (2) JEFF'S WORKFLOW INPUT: moves notes up/down/left/right + stretch/
+  squeeze; multi-point volume like ours; OUR volume line lacking a revert-to-default is
+  "pretty rough" — logged as a first-class UX defect; asked for FL-materials gleaning for
+  friendliness/intuitiveness → follow-up research pass dispatched (FL-wide control-reset
+  conventions + Newtone gesture/reset details). (3) CODE MAP of the 8 symptoms (agent
+  transcript holds file:line detail) — triage: #6 BUG (setTopNote clamps top min 24 only,
+  no bottom clamp → lanes below C0 render); #8 BUG (auto-scroll recenters on every tick
+  the playhead is off-screen while the stamp advances → fights manual scroll; early
+  playback recenters to ~0 = "resets to beginning"; A defaults ON); #7 DESIGN GAP (editor
+  playhead = FilePlay stamp which freezes when finalize stops being called; editor only
+  hides it after 300 ms; main transport explicitly seeks to 0/selection on stop — no
+  follow); #1 SEGMENTATION AGGRESSION (60 ms min-note discard + 2-frame gap end + voicing
+  gate + 0.6-semi split; unvoiced/short/split-residual material silently dropped) +
+  expected inter-clip silence gaps; #2 SPLIT — horizontal move UNIMPLEMENTED (drag kinds =
+  pitch/left-trim/right-trim only) = parity gap, while vertical-drag INAUDIBILITY is an
+  OPEN MYSTERY (chain verified wired end-to-end: drag writes shiftSemis -> publishEdits ->
+  snapshot -> FilePlay applicator, and FilePlay WAS active in his session since the
+  playhead stamp advanced — verification pass owns this; candidates: symptom-1 pill/audio
+  time mismatch, stamp domain mismatch, my SR-origin fix's tSec mapping); #3 same gate as
+  #2 for knobs (wired: apvts -> pushApvtsToDsp -> atomics -> applyEditsToBuffer; Focus
+  no-op until >0.001, Mod until |mod-1|>=0.01) + preset combo just writes the 3 knob
+  params + Slice needs pill-band hit + 30 ms-interior click (wired but strict) — plus the
+  combo itself is a no-reference-counterpart docket; #5 parity gap (wheel handler has
+  Ctrl/Shift/else branches only — NO Alt branch, laneH is a fixed constant, no vertical
+  zoom exists); #4 BY DESIGN (pill interior = actual composite audio waveform (teal),
+  green F0 curve behind pills — visibility hampered by #5's missing zoom).
+- **UX-conventions follow-up gathered (2026-07-11, official FL manual quotes in agent
+  transcript):** FL-wide control conventions — RESET TRIAD = Alt+Left-click / middle-click
+  / right-click -> "reset" menu item (double-click is NOT an FL convention anywhere, and
+  in Newtone double-click = enter Advanced Edit, right-click-on-note = snap-to-semitone —
+  both taken); fine-adjust = Ctrl+drag (or both buttons); controls DETENT at default +
+  useful values, Shift bypasses detents; type-in value via right-click menu or
+  click-hold-and-type; hint bar shows hover hints + values on change. Newtone specifics:
+  the 9-handle figure's only prose = "click on the controls as indicated and drag in the
+  direction of the arrows" (handles draw their drag-axis arrows; no cursor/hit-zone/color
+  prose); NO note/canvas context menu exists in Newtone; NO reset/default/restore wording
+  anywhere on its page. Current FL SPLIT time-warping out of Newtone into the separate
+  NewTime plugin (older Newtone had a Warp Mode — secondary-source only); NewTime's
+  warp-marker gestures (Shift+click or double-click add/remove, drag on the
+  double-arrow cursor, Ctrl+drag multi-select + Del) = family-convention data for our
+  move/stretch handle design. SPEC IMPLICATIONS captured: our curve/handle reset follows
+  the FL triad (Alt+click primary); detents-at-default for our knobs; hint-bar-style
+  value feedback candidate. GROUND-TRUTH QUESTIONS posed to Jeff: (a) during the failed
+  pill drags, did pills visibly move + green dot + InfoBar update with only SOUND
+  unchanged, or refuse to move at all (splits #2a between hit-test failure — 10 px lanes,
+  no vertical zoom — and audio-chain failure); (b) the Newtone playhead/view-on-stop
+  hands-on check (manual silent).
+- **#2a/#3a inaudibility — ground truth + hand trace (2026-07-11):** Jeff confirms pills
+  MOVE visually + InfoBar tracks the drag — edit lands in the data model; audio chain
+  drops it. Hand-verified at desk (direct source reads, not agent paraphrase): stamp
+  domain == analysis-origin domain (both beat->timeline-sample via clipBeatToSample /
+  TempoMap; stamp set fresh same-block immediately before eng->processBlock,
+  PluginProcessor.cpp:1682-1689); processFilePlay gates pass with his edit state
+  (snap non-null, bsp_on default true, anyEdits true); applyEditsToBuffer loop sound
+  (region cursor, per-region PSOLA period from r.f0Hz, shiftSemis+focus target,
+  smoothing, per-sample shifter). PRIME SUSPECT FOUND: the MASTER-BYPASS early return
+  (BaySickVocalProcessor.cpp:457-474, `bsv_bypass`) passes audio raw + merges takes raw
+  + returns BEFORE the applicator — reproduces the full symptom set (takes audible,
+  playhead moves, pills move, zero audibility from any pitch control). Zero-build check
+  posed to Jeff: confirm the BaySickVocals sub-tab Bypass button OFF -> retest a pill
+  drag. If audible -> closed + NEW SPEC DOCKET (edits-under-bypass behavior: keep edits
+  audible under chain bypass vs bypass-with-indication — Jeff's pick at spec time). If
+  still silent with bypass OFF -> instrumented diagnostic build (designed: applicator
+  gate counters -> atomics -> editor InfoBar readout, flag-file armed per the Rule 4
+  clip-tap convention; disposition Remove at close). ALSO CORRECTED this session: the
+  Alt+click reset proposal is DEAD — I relayed an agent's unverified FL-manual pull as
+  fact and pre-picked a spec call (verify-premise + spec-calls-are-Jeff's violations,
+  owner called it out); the curve/handle reset gesture is an OPEN SPEC LINE for Jeff
+  with NO recommendation. #7 spec settled by owner's original words: editor playhead
+  follows the main transport INCLUDING its stop-reset behavior (Newtone comparison
+  dropped — it is standalone-transport by design, not applicable).
+- **#2a/#3a: bypass RULED OUT (Jeff: never touched in any test) → instrumented diagnostic
+  SHIPPED (2026-07-11, build pending).** Diagnostic Instrumentation Catalog (Rule 4):
+  | Site | Tag | Purpose | Disposition |
+  | `BaySickPitchDSP.h` Diag struct + ApplicatorState diag fields; `BaySickPitchDSP.cpp`
+  processFilePlay gate counters + applyEditsToBuffer inRegion/lastTSec capture;
+  `BaySickPitchEditor.h/.cpp` flag-file-armed InfoBar readout | `[PITCH DIAG]` | name
+  which applicator gate eats the signal (blocks/snapNull/bailOff/bailNeutral/applied/
+  inRegion/regionCount/lastTSec/maxSemis), read off the pitch editor InfoBar while
+  `Documents/BaySickDAW/enable_pitch_diag.txt` exists | Remove at close |
+  Found while instrumenting: the pitch editor UI timer runs at 400 ms (2.5 Hz) —
+  playhead/auto-scroll updates are inherently chunky at that rate; spec note for the
+  rework (#7/#8-adjacent). Newtone have/don't-have matrix delivered to Jeff (16-line
+  don't-have pick list + have-with-state table; content mirrors the two research reports
+  + the 8-symptom code map).
+- **Newtone parity picks LOCKED (Jeff, 2026-07-11): items 1-14 IN, 15-16 OUT** (in:
+  horizontal move + stretch/squeeze elastic warp w/ detach; vertical zoom + pan +
+  zoom-to-selection; scrub-audition; snap-to-scale; multi-select + select ops +
+  copy/paste; batch re-pitch via key click; merge/join; right-click snap-to-semitone;
+  per-note pitch + volume ramp handles; per-note pitch-variation handle; 9-handle
+  Advanced Edit surface; vibrato-edit mode; in-block pitch display; fine-pitch modifier.
+  out: export routes; tempo detect/sync tools).
+- **NEW UX finding (Jeff, 2026-07-11): pitch tab feels dependent on Align to populate**
+  ("forces me to go to align to analyze just to get the pitch screen to load").
+  Code truth: the analyses are INDEPENDENT (each runs its own analysis over the shared
+  channel-composite renderer — sharing the renderer is correct); the felt coupling is a
+  UX failure with a likely ME-MADE component: the boundary stop-gate defers
+  analyze-on-open during playback with NO visible state (empty canvas, no badge on
+  first-open), and the pitch analyze path is silent-on-failure by design — so pills
+  appear only after a stop + the 4 Hz poller fires, which correlates with his align
+  round-trips. SPEC DIRECTION (posed): FIRST analysis of a never-analyzed channel runs
+  immediately even mid-play (provably inaudible — no edits exist, the fresh snapshot is
+  a no-op; the maps-change-while-stopped rule targets RE-analysis swapping an applied
+  law), re-analysis stays stop-gated; plus an explicit visible analyzing/deferred state
+  instead of silence. Also the felt dependency dies with it.
+- **BaySickPitch problem #9 (Jeff, 2026-07-11, during diag setup):** the InfoBar's
+  "[edited]" tag does NOT clear after undoing a pill back to default — updateInfoBarFor
+  only fires on hover/selection events, so the label goes stale after Ctrl+Z / drag-back
+  (and if drag-back leaves a quantized 0.1-st residue, hasEdits stays true legitimately —
+  disambiguate at fix time). Joins the rework's bug list. DIAG first run: no DIAG line —
+  suspected flag-file name trap (hidden-extensions .txt.txt) or stale build; flag check
+  made tolerant (accepts enable_pitch_diag / .txt / .txt.txt), needs one rebuild.
+- **DIAG round 1 (Jeff screenshots, 2026-07-11): upstream FULLY EXONERATED.** During play
+  at the edited note: `blk:3693 null:0 off:0 neut:0 app:3693 inReg:128 regs:14 tSec:5.77
+  maxSemi:23.82` — every block reaches + applies, zero bails, full block in-region, tSec
+  matches the playhead, and the smoothed shift peaked at ~24 st (his drag). The failure
+  is BELOW the shift computation. Desk-checks of the remaining links came up clean:
+  PsolaShifter algorithm verified sound twice (grid-anchored analysis + re-spaced
+  synthesis; identity at ratio 1; correct re-spacing at ratio 4), shifters ARE prepared
+  (BaySickPitchDSP::prepare :43-50), engineSum IS the decoded takes (decodeFilePlayClip
+  sums into it, finalizeFilePlayStrip comment + :1625-1633) so the silent-buffer theory
+  died. DIAG ROUND 2 SHIPPED (build pending): signal-level fields at the applicator —
+  `in:` (peak input since arm), `out:` (peak output written), `chg:` (samples where
+  wet != dry last block). Decision table: in~0 -> buffer silent after all (routing);
+  chg 0 with in > 0 -> shifter returns dry at runtime (period/state pathology);
+  chg > 0 + still audibly dry -> the applicator's writes are discarded downstream
+  (output overwrite / double-path routing hunt in finalize/mtDest). Flag-file check also
+  made extension-trap tolerant (.txt/.txt.txt/bare).
+- **#2a/#3a ROOT CAUSE FOUND + FIXED (2026-07-11, build pending): PsolaShifter was a
+  delay, not a shifter — since birth (QA-F `9262c746`).** Evidence chain: diag round 2
+  `in:0.256 out:0.256 chg:128` (real audio, every sample changed) + Jeff's VOL-drop test
+  (note goes silent -> the applicator's output IS the audible path) -> the shift itself
+  neutralized inside the shifter. Mechanism: `processSample`'s epoch anchor did
+  round-to-k*P-grid THEN min() against the written-window bound (writeAbs - P - 2);
+  the scheduler pins mNextSynthAbs at the write head, so the off-grid clamp won the
+  min() on virtually every epoch -> analysis step collapsed to the synthesis step
+  (centers advanced at pOut, not the grid) -> grain re-spacing (the ENTIRE pitch
+  mechanism) nullified -> mathematically clean ~2P DELAY at any ratio: every sample
+  differs (chg:128), level preserved, volume path intact, pitch untouched. FIX
+  (PitchShifters.h): anchor = floor((writeAbs - P - 2)/P) * P — snap DOWN onto the grid
+  from the safe bound; case-walked ratio 1 (identity via consecutive cycles), 4 (4x
+  cycle repeat at P/4), 0.5 (alternate cycles); latency worst case ~3P (was ~2P doc'd).
+  **BLAST RADIUS — the same PsolaShifter drives:** (1) the pitch-editor applicator
+  (Jeff's broken test), (2) the QA-F REALTIME CORRECTOR — Retune/Strength/hard-tune have
+  NEVER audibly shifted in any build; every prior "pass" heard a delayed copy (the
+  engage ticks were delay-jump clicks — consistent), (3) the offline renders' PSOLA
+  algo (pitch render + align +Pitch pass), (4) the monitor-stream applicator. All heal
+  with this one fix. GranularShifter + PvShifter are separate implementations (render
+  Algo alternatives) — quick audit queued for the rework pass. Retest: pill drag
+  audible; realtime hard-tune snap check (first-ever real listen); diag line optional.
+  **OWNER-VERIFIED 2026-07-11 ("It works") — pitch edits audible on the fix build.**
+  Review phase COMPLETE: all 9 problems triaged/root-caused (2 fixed in-tree: the
+  shifter + the stop-gate tolerances; the rest are spec'd rework items), reference
+  review + parity picks + tabled rework all locked in this block. NEXT DELIVERABLE:
+  the consolidated vocal-editor rework spec (the [PITCH DIAG] instrumentation stays
+  in-tree through the rework, stripped at its close per the catalog).
 - **Resume action (SUPERSEDED by the 2026-07-11 tabling — current version):** the tree
   holds ALL boundary fixes (glide + stop-gates + record-lock incl. Bypass/A/B + dockets
   1-3 + DP matcher + counts dialog + §B.9 backfill + test-plan amendments + this block),
