@@ -130,3 +130,11 @@ Plan approved 2026-07-09 (G2 group approval, R5). QA-Fc is fully locked by §23;
 
 - Empty — diagnosis was git/code archaeology plus owner-run UI discriminators (Rule 4); nothing to strip.
 ```
+
+## Carry-Over — 2026-07-10 (QA-Fc closed; G2 complete; next session = G2 BOUNDARY)
+
+- **Completed:** G2 fully code-complete + committed: QA-F (`9262c746` + `35ac9928`), QA-Fa (`d8cc9494` + recovery `62895ca8`), QA-Fb' (`66fea472`), QA-Fc (`a36ed3cc`) + the mid-Fc loop-seam fix (`32930dca`, owner-verified same day: full-pattern repro sustains + QA-Ee boundary guard holds) + docs close (`23fc077f`). §B.6-§B.9 authored; every held Work Log entry parked (finch, badger, ferret x2). Tree CLEAN; main ahead 10 of origin (unpushed — Jeff's standing call).
+- **In-flight:** nothing mid-edit.
+- **Assumptions changed:** (1) engine-param automation application gap CONFIRMED by owner test — routed to QA-ApvtsAutomation at its G4 slot, §5 docket annotated (Jeff pick 3a; §9 entry rides the section pass); (2) the loop-seam full-pattern-note trap was latent since QA-Ed/QA-Ee (June), NOT group-caused per the code trace — fixed at `32930dca` with its own held Work Log entry (Jeff pick 2a); (3) the Fc plan-context "+3 dB correlated" line is a misstatement (+6 dB is correct, per §23 scenario 2 — noted in the held Fc entry).
+- **Resume action (fresh session, G2 BOUNDARY per `Batch Plans/swift-stampeding-caribou.md` per-group loop):** read Main Plan §0 + the caribou boundary steps + this file's 2026-07-10 entries. Dispatch `/review-batch` over the COMBINED G2 diff (`e5c62218..23fc077f` — the four batches + follow-ons + the seam fix); address BLOCKERS before the boundary closes. Jeff runs the boundary smoke PLUS the deferred ear-checks (owner call 2026-07-10): QA-F align/warp listening, QA-Fa pitch-edit listening, QA-Fb' monitor/recording sound quality, and the accepted-artifact call on the lazy-activate first-engage tick (~13 ms shifter / ~20 ms formant — flippable at ear-check). Then G3 group-open per the run plan.
+- **Work-Log entries needed:** none to draft — all held in the notes files; they apply at their §B section passes (R2). §9 Forks entries riding section passes: QA-Fa design recovery; seam-fix interrupt + automation-gap routing (QA-Fc pass).
