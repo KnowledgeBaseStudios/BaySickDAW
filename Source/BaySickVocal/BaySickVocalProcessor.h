@@ -26,10 +26,10 @@
 //   5. BaySickNAM/IR      (existing engine hosted as a sub-tab)
 //   6. Pre Rack EQ        (strip's existing Pre EQ8 M/S)
 //
-// H-1 scope: structural shell only. No DSP yet - processBlock is a passthrough
-// honoring the master bypass + mix params. Stage Bypass params registered as
-// placeholders so subsequent sub-batches can wire their stages without
-// re-touching the param layout.
+// QA-Fd 3a/12b: the page-master Bypass (bsv_bypass) is retired -- the chain
+// always runs so pitch/align edits are never silenced by a page switch.
+// Per-stage Bypass params + the realtime section's own toggle remain the
+// bypass surface.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BaySickVocalProcessor : public juce::AudioProcessor,
@@ -199,8 +199,23 @@ public:
         juce::int64 followerPadSamples  { 0 };
         double      analysisSampleRate  { 44100.0 };
         bool        analyzed            { false };
+        // QA-Fd: align-settings generation the map was analyzed under.  A
+        // mismatch vs the live counter = a time-map knob (Mode / Fine /
+        // Max Shift / Pitch Types) moved since -> stale -> the stop-gated
+        // auto re-analyze swaps the map at the next stop ("maps only change
+        // while stopped").  Transient: not persisted.
+        juce::int64 analyzedSettingsGen { 0 };
+        // QA-Fd: the follower's pitch time-map hash at analyze time -- a
+        // pitch-tab time edit redefines the performance align matched, so a
+        // mismatch marks the analysis stale (pitch is UPSTREAM, locked
+        // 5/13a).  Transient: not persisted.
+        juce::int64 analyzedPitchMapHash { 0 };
     };
     AlignState mAlignState;
+
+    // QA-Fd: the follower channel's pitch time-map hash right now (0 when
+    // no follower / no hook / no edits).  MESSAGE THREAD.
+    juce::int64 followerPitchMapHash() const;
 
     // ── QA-Fa recovery: per-editor version histories (message thread) ────────
     std::vector<EditorVersionEntry> mAlignVersions;
@@ -241,6 +256,20 @@ public:
     float alignTransposeSemis() const noexcept
         { return mAlignTransposeRaw != nullptr ? mAlignTransposeRaw->load() : 0.0f; }
 
+    // AUDIO/MT (QA-Fd): bsp_on -- gates the pitch editor's TIME map at the
+    // decode layer exactly like bsa_align_on gates the warp (OFF glides the
+    // law back to raw through the same machinery).
+    bool isPitchEditChainOn() const noexcept
+        { return mBspOnRaw == nullptr || mBspOnRaw->load() > 0.5f; }
+
+    // QA-Fd review fix: true while setStateInformation restores.  The align
+    // editor's mode-change hook seats the Blend preset via callAsync, which
+    // otherwise runs AFTER the load restored the saved Blend and stomps it.
+    // Cleared via a queued callAsync so it outlives every hook the restore
+    // posted (queue order guarantees the hooks see it still raised).
+    bool isRestoringState() const noexcept
+        { return mRestoringState->load (std::memory_order_acquire); }
+
     // Services injected by the owning VoxPage (this engine must not link
     // against VibeSynthProcessor).  All message-thread.
     std::function<juce::AudioBuffer<float> (int channelId, double& outStartBeat,
@@ -253,6 +282,14 @@ public:
     // on it (engage-edge toggles mid-take click AND print into the WET
     // capture -- the sound is set before the take, owner call 2026-07-10).
     std::function<bool()>                                       onIsStripRecording;
+    // QA-Fd: the pitch DSP owning a channel's time edits (the align
+    // FOLLOWER may be another Vox page's channel; its time map redefines
+    // the performance align must match).  Installed by VoxPage.
+    std::function<BaySickPitchDSP* (int channelId)>             onPitchDspForChannel;
+    // QA-Fd #7: the MAIN transport beat (StandalonePlayHead::getCurrentBeat,
+    // UI-safe) -- the pitch editor's playhead follows it INCLUDING the
+    // stop-reset seek, replacing the freeze-on-stop FilePlay stamp.
+    std::function<double()>                                     onTransportBeat;
 
     void setOwnChannelId (int id) noexcept { mOwnChannelId = id; }
     int  getOwnChannelId() const noexcept  { return mOwnChannelId; }
@@ -262,9 +299,31 @@ public:
     int resolveLeaderChannel()   const;
     int resolveFollowerChannel() const;
 
-    // Mode/Fine-Tune -> pairing tolerance seconds (section 13e: base
-    // 150/100/50 ms for Loose/Close/Tight, +/-50 ms Fine Tune).
-    double alignToleranceSec() const;
+    // QA-Fd semantics rework (locked 9a/10a/14a/15a): Mode/Fine-Tune ->
+    // residual tightness cap R (base Tight 0 / Close 50 / Loose 100 ms,
+    // +/-50 ms Fine Tune, sum clamped >= 0).  Matching itself runs inside
+    // the DSP's fixed internal window.
+    double alignResidualCapSec() const;
+    // Per-word movement cap (bsa_align_maxShift, ms -> seconds).
+    double alignMaxShiftSec() const;
+    // Stretch-ratio bound r for the map builder.  Fixed at Normal (2.0)
+    // since the Flexibility picker's removal (2026-07-11); kept as a
+    // function so the control can return without touching the DSP.
+    double alignFlexRatio() const;
+
+    // QA-Fd 12a: raw anchor delta -> effective pull through the live pitch
+    // knobs.  Differences inside the Variation cap are untouched; the excess
+    // is scaled by Blend percent.  Used by publishAlignPlayback (live path)
+    // and buildWarpedFollower (render/preview) so every consumer agrees.
+    float effectiveAlignPitchSemis (float rawSemis) const;
+
+    // QA-Fd: time-map knob generation.  The align editor bumps it on any
+    // Mode / Fine / Max Shift / Pitch Types change; isAlignStale() compares
+    // against the analyzed generation, and VoxPage's poller folds it into
+    // its debounce signature so a knob change re-arms the stop-gated auto
+    // re-analyze even at an unchanged grid.
+    void bumpAlignSettingsGeneration() noexcept { mAlignSettingsGen.fetch_add (1, std::memory_order_acq_rel); }
+    juce::int64 alignSettingsGeneration() const noexcept { return mAlignSettingsGen.load (std::memory_order_acquire); }
 
     // Analyze the current Leader/Follower pair into mAlignState (composites
     // via onRenderComposite, common-origin padded).  Returns false + fills
@@ -276,7 +335,8 @@ public:
     // current map + pitch pass + optional formant shift, write
     // <project>/Aligned/{name}_align_v{N}.wav, append the history entry.
     // Returns the file (invalid on failure + fills errorOut).
-    juce::File renderAlignedTake (juce::String& errorOut);
+    // highRes (QA-Fd 16a): the warp phase runs oversampled (384 kHz-class).
+    juce::File renderAlignedTake (juce::String& errorOut, bool highRes = false);
 
     // Warped preview of the follower composite for the Output lane (same
     // transform as the bake, no file write).  Empty when not analyzed.
@@ -301,6 +361,16 @@ public:
         { mFilePlayTimelineSample.store (s, std::memory_order_relaxed); }
     juce::int64 getFilePlayTimelineSample() const noexcept
         { return mFilePlayTimelineSample.load (std::memory_order_relaxed); }
+
+    // QA-Fd: source-position stamp (decode layer -> finalize -> applicator).
+    // Valid for THIS block only; finalize re-stamps every block (identity
+    // when the composed law is not engaged).
+    void setFilePlaySourceStamp (double x0, double ratePerSample, bool valid) noexcept
+    {
+        mFilePlaySrcX0.store (x0, std::memory_order_relaxed);
+        mFilePlaySrcRate.store (ratePerSample, std::memory_order_relaxed);
+        mFilePlaySrcValid.store (valid, std::memory_order_relaxed);
+    }
 
     // ── QA-Fb Option A monitor merge (same-thread, block-scoped) ─────────────
     // VoxStripTask sets this immediately before calling processBlock when the
@@ -330,10 +400,27 @@ public:
     // 14b -- no manual load).  MESSAGE THREAD ONLY.
     bool analyzePitch (juce::String& errorOut);
 
+    // ── QA-Fd preview play (shared by scrub-audition + the sub-editor Play
+    // button): renders a span of the composite through the pitch applicator
+    // on the message thread, then streams it into the chain (pre-rack, so
+    // it sounds like playback) while the main transport is stopped ──────────
+    void startPitchPreview (const juce::AudioBuffer<float>& composite, double sr,
+                            double startSec, double endSec, bool loop);
+    void stopPitchPreview();
+    bool isPitchPreviewPlaying() const noexcept
+    {
+        auto* pv = mPitchPreview.load (std::memory_order_acquire);
+        return pv != nullptr
+            && (pv->loop || pv->cursor.load (std::memory_order_relaxed)
+                              < pv->buf.getNumSamples());
+    }
+
     // Render/Freeze bake -> <project>/Pitched/{name}_pitch_v{N}.wav +
     // history entry.  Grid placement is a pending owner call (mirrors the
     // Align question); the bake is written + listed either way.
-    juce::File renderPitchedTake (juce::String& errorOut);
+    // QA-Fd Task 8: the bake honors the channel's TIME edits (post-warp
+    // through the published time map); highRes oversamples that warp (16a).
+    juce::File renderPitchedTake (juce::String& errorOut, bool highRes = false);
 
     bool isPitchStale() const;
 
@@ -384,19 +471,47 @@ private:
     // branch-agnostic contract).
     std::atomic<juce::int64> mFilePlayTimelineSample { 0 };
 
+    // QA-Fd: source-position stamp (same write/read contract as above).
+    std::atomic<double> mFilePlaySrcX0    { 0.0 };
+    std::atomic<double> mFilePlaySrcRate  { 1.0 };
+    std::atomic<bool>   mFilePlaySrcValid { false };
+
+    // QA-Fd preview play: message thread renders + publishes; audio streams
+    // + advances the cursor.  Retire ring mirrors the snapshot contract.
+    struct PitchPreview
+    {
+        juce::AudioBuffer<float> buf;   // mono, device rate
+        std::atomic<int> cursor { 0 };
+        bool loop { false };
+    };
+    std::atomic<PitchPreview*> mPitchPreview { nullptr };
+    std::vector<std::unique_ptr<PitchPreview>> mPreviewRetired;
+
     // 2026-05-06 (Batch 9c N1): shutdown gate (see setShuttingDown above).
     // Audio thread reads at the top of processBlock; message thread writes
     // from the destructor (and ideally pre-flagged by the owner).
     std::atomic<bool> mShuttingDown { false };
 
+    // QA-Fd review fix (see isRestoringState).  shared_ptr so the deferred
+    // clear can never touch a dead processor (the lambda co-owns the flag).
+    std::shared_ptr<std::atomic<bool>> mRestoringState
+        = std::make_shared<std::atomic<bool>> (false);
+
     // QA-F Task 3: this page's own mixer channel id (voxInsert(pageIndex)),
     // stamped by VoxPage::setProcessor.  -1 until stamped.
     int mOwnChannelId { -1 };
 
+    // QA-Fd: live time-map knob generation (see bumpAlignSettingsGeneration).
+    // Editor writes / message+UI threads read -- atomic for the poller.
+    std::atomic<juce::int64> mAlignSettingsGen { 0 };
+
     // Shared transform behind renderAlignedTake + renderAlignedPreview:
-    // re-render the follower composite, re-pad to the analysis origin, warp
-    // + pitch + optional formant shift.  Empty buffer + errorOut on failure.
-    juce::AudioBuffer<float> buildWarpedFollower (juce::String& errorOut);
+    // re-render the follower composite, re-pad to the analysis origin,
+    // compose the follower's pitch TIME map (QA-Fd Task 8 -- renders play
+    // what the decode layer plays), warp + pitch + optional formant shift.
+    // Empty buffer + errorOut on failure.
+    juce::AudioBuffer<float> buildWarpedFollower (juce::String& errorOut,
+                                                  bool highRes = false);
 
     // QA-Fa recovery: applied-frame (de)serialization shared by project
     // persistence, the version history, and revert.
@@ -414,6 +529,7 @@ private:
     std::atomic<float>* mAlignOnRaw        { nullptr };
     std::atomic<float>* mAlignPitchOnRaw   { nullptr };
     std::atomic<float>* mAlignTransposeRaw { nullptr };
+    std::atomic<float>* mBspOnRaw          { nullptr };   // QA-Fd time-map gate
 
     // H-6d (2026-05-02): owned NAM/IR processor (per-Vox-strip instance).
     // unique_ptr so the include only needs the forward declaration in

@@ -434,6 +434,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/BaySickVocal/BaySickVocalProcessor.cpp
     Source/BaySickVocal/BaySickVocalEditor.cpp
     Source/BaySickVocal/BaySickPitchEditor.cpp
+    Source/BaySickVocal/BaySickPitchSubEditor.cpp
     Source/BaySickVocal/BaySickAlignEditor.cpp
     # Phase G-2 — Clips page (engine picker hosts BaySickPlayer or
     # BaySickNAM/IR; spawned via Builder drop or empty-state drop, never

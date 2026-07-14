@@ -57,8 +57,11 @@ BaySickVocalProcessor::createLayout()
     };
 
     // ── Page-wide controls (BaySickVocals tab top half) ─────────────────────
+    // QA-Fd 3a/12b: the page-master Bypass param is RETIRED -- pitch/align
+    // edits are never silenced by a page switch (no other player has one;
+    // the realtime section has its own toggle).  Old saves carrying
+    // bsv_bypass load fine (unknown params are ignored by replaceState).
     addF ("mix",      "Mix",            0.0f, 1.0f, 1.0f);   // global wet/dry
-    addB ("bypass",   "Bypass",         false);              // entire processor
     addI ("ab_slot",  "A/B Slot",       0,    1,   0);       // A/B compare snapshot
 
     // ── Realtime pitch correction stage (BaySickVocals tab bottom half) ─────
@@ -66,11 +69,14 @@ BaySickVocalProcessor::createLayout()
     addB ("pitch_realtime_bypass",  "Pitch Realtime Bypass",  true);
 
     // H-5 (2026-05-01) -- Pitch correction knobs.
-    // Key: 0..11 (C, C#, D, D#, E, F, F#, G, G#, A, A#, B)
-    // Scale: 0=Chromatic, 1=Major, 2=Minor, 3=HarmonicMinor, 4=Dorian,
-    //        5=Mixolydian, 6=Phrygian, 7=Lydian, 8=Locrian, 9=Custom
-    addI ("pitch_key",          "Pitch Key",      0,    11,   0);
-    addI ("pitch_scale",        "Pitch Scale",    0,    9,    0);
+    // Root: 0..11 (C, C#, D, D#, E, F, F#, G, G#, A, A#, B)
+    // Scale (QA-Fd 17b): 0..12 = the piano roll's 13 scales in piano-roll
+    // order (PianoRoll.cpp kScaleDefs / PitchCorrectorDSP::Scale).  The old
+    // 0..9 order (with a dead Custom slot) is retired; pre-QA-Fd saves with
+    // a non-default scale load shifted (accepted -- the corrector was
+    // inaudibly broken until 703f06e4 anyway).
+    addI ("pitch_key",          "Pitch Root",     0,    11,   0);
+    addI ("pitch_scale",        "Pitch Scale",    0,    12,   0);
     // QA-F Task 5 (Call 2a): defaults re-tuned so correction is musical out
     // of the box -- 60 ms glide + 80% pull leaves natural variation instead
     // of the hard-snapped robotic sound at 50 ms / 100%.  Saved projects
@@ -178,10 +184,30 @@ BaySickVocalProcessor::createLayout()
     };
 
     addAB ("align_on",        "Align On",            true);
+    // QA-Fd 9a/10a: Mode/Fine = residual tightness (base Tight 0 / Close 50
+    // / Loose 100 ms, fine +/-50 clamped >= 0); matching window is internal.
     addAI ("align_mode",      "Align Mode",          0, 2, 1);    // 0=Loose, 1=Close, 2=Tight
-    addAF ("align_fineTune",  "Align Fine Tune ms",  -50.0f, 50.0f, 0.0f);  // bipolar around Mode base
+    // Owner respec 2026-07-11: Fine sweeps the mode's ABSOLUTE residual
+    // window (Tight 0-50 / Close 50-150 / Loose 100-200 ms; 0 = window
+    // center).  Stored as the normalized bipolar offset.
+    addAF ("align_fineTune",  "Align Fine Tune ms",  -50.0f, 50.0f, 0.0f);
+    // QA-Fd 15a: per-word Max Shift cap.  (Flexibility picker removed
+    // 2026-07-11 -- owner call; DSP runs a fixed Normal 2:1 slope bound.)
+    // Owner review 2026-07-11 vs the reference aligner (VocAlign): cap range
+    // 10-150 ms; > 150 = No Limit (its usual default).  Old 10-400/def-400
+    // saves clamp to 160 = No Limit -- same effective behavior.
+    addAF ("align_maxShift",  "Align Max Shift ms",  10.0f, 160.0f, 160.0f);
     addAB ("pitch_on",        "Align Pitch On",      false);
-    addAF ("pitch_range",     "Align Pitch Range",   0.0f, 100.0f, 50.0f); // % of leader contour
+    // QA-Fd 12a: existing knob renamed at display level ("Pitch Blend" --
+    // percent toward the leader contour, free 0-100 travel; mode presets the
+    // value).  Applied at publish, live, no re-analysis.
+    addAF ("pitch_range",     "Align Pitch Blend",   0.0f, 100.0f, 50.0f);
+    // QA-Fd 12a: tuning-variation cap in semitones -- deviation inside the
+    // cap is untouched, only the excess is pulled (then Blend-scaled).
+    addAF ("pitch_variation", "Align Pitch Variation st", 0.0f, 6.0f, 0.0f);
+    // QA-Fd 13a: per-side detection bands (kAlignPitchBands order).
+    addAI ("pitch_typeGuide",  "Align Pitch Type Leader",   0, 4, 0);
+    addAI ("pitch_typeDub",    "Align Pitch Type Follower", 0, 4, 0);
     addAI ("pitch_algo",      "Align Pitch Algo",    0, 2, 0);    // 0=PSOLA, 1=Granular, 2=Phase Vocoder
     addAI ("pitch_transpose", "Align Transpose st",  -12, 12, 0);
     addAB ("formant_on",      "Align Formant On",    false);
@@ -214,8 +240,15 @@ BaySickVocalProcessor::createLayout()
     addPF ("focus",        "Pitch Focus",        0.0f, 100.0f, 0.0f);
     addPF ("mod",          "Pitch Mod",          0.0f, 100.0f, 50.0f);
     addPF ("speed",        "Pitch Speed",        0.0f, 100.0f, 50.0f);
-    addPI ("preset",       "Pitch Preset",       0, 3, 0);   // Loose/Close/Tight/User
-    addPB ("preset_dirty", "Pitch Preset Dirty", false);
+    // QA-Fd 7a: the Loose/Close/Tight preset combo is RETIRED (no reference
+    // counterpart; name collision with Align's modes) -- bsp_preset +
+    // bsp_preset_dirty removed; the knobs stand alone.
+    // QA-Fd 8/14a-c: editor Root/Scale/Snap (13-scale shared table; Snap ON
+    // = Focus targets the scale + vertical drags land on in-scale lanes).
+    // Intentionally independent from the realtime board's Root/Scale.
+    addPI ("root",         "Pitch Edit Root",    0, 11, 0);
+    addPI ("scale",        "Pitch Edit Scale",   0, 12, 0);
+    addPB ("snap",         "Pitch Edit Snap",    false);
     addPI ("mode",         "Pitch Edit Mode",    0, 1, 1);   // 0=Slice, 1=Edit
     addPB ("on",           "Pitch Chain On",     true);      // QA-Fa recovery: chain switch
 
@@ -249,6 +282,7 @@ BaySickVocalProcessor::BaySickVocalProcessor()
     mAlignOnRaw        = apvts.getRawParameterValue ("bsa_align_on");
     mAlignPitchOnRaw   = apvts.getRawParameterValue ("bsa_pitch_on");
     mAlignTransposeRaw = apvts.getRawParameterValue ("bsa_pitch_transpose");
+    mBspOnRaw          = apvts.getRawParameterValue ("bsp_on");
 }
 
 // ─── Destructor ───────────────────────────────────────────────────────────────
@@ -267,6 +301,7 @@ BaySickVocalProcessor::~BaySickVocalProcessor()
     // rebuild drops the channel's players) before teardown, so the decode
     // layer cannot be inside a block holding this pointer here.
     delete mAlignPlayActive.exchange (nullptr);
+    delete mPitchPreview.exchange (nullptr);
 }
 
 // ─── Audio lifecycle ──────────────────────────────────────────────────────────
@@ -343,6 +378,10 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
     mPitch.setModAmount (rd ("bsp_mod")   / 50.0f);
     mPitch.setSpeedMs   (300.0f - rd ("bsp_speed") * 2.95f);
     mPitch.setChainOn   (rdb ("bsp_on"));
+    // QA-Fd 14b: the Focus snap target set (editor Root/Scale/Snap).
+    mPitch.setRoot      (rdi ("bsp_root"));
+    mPitch.setScaleIdx  (rdi ("bsp_scale"));
+    mPitch.setSnapOn    (rdb ("bsp_snap"));
 
     // ── Rack stage Bypass flags (forward to slots) ────────────────────────
     mVocalChainRack.setSlotBypassed (0, rdb ("bsv_deesser_bypass"));
@@ -454,24 +493,10 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         return;
     }
 
-    // Master bypass - entire processor passes input straight to output unchanged.
-    const bool masterBypass = apvts.getRawParameterValue ("bsv_bypass")->load() > 0.5f;
+    // QA-Fd 3a/12b: the master-bypass early return is deleted with the
+    // bsv_bypass param -- the chain always runs, so pitch/align edits can
+    // never be silently eaten by a page switch.
     mScHelper.updateLevel (numSamples);
-    if (masterBypass)
-    {
-        // QA-Fb: bypass = raw passthrough, so the monitor merge applies raw --
-        // prior takes stay audible exactly like pure playback under bypass
-        // (finalizeFilePlayStrip's engine call passes them through unchanged).
-        if (monMuteLive)
-            buffer.clear();
-        if (monTakes != nullptr)
-        {
-            const int nc = juce::jmin (numChannels, monTakes->getNumChannels());
-            for (int ch = 0; ch < nc; ++ch)
-                buffer.addFrom (ch, 0, *monTakes, ch, 0, numSamples);
-        }
-        return;
-    }
 
     // H-6 (2026-05-01) -- push APVTS to DSP stages once per block.
     pushApvtsToDsp();
@@ -503,8 +528,13 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         // QA-Fa Mode C applicator: FilePlay only (mutually exclusive with the
         // realtime corrector) -- note-level edits ride normal playback with
         // no bake step.  One atomic load when the channel has no edits.
+        // QA-Fd: the source stamp resolves pills where the (align/time-map)
+        // warped audio actually came from.
         mPitch.processFilePlay (buffer,
-            mFilePlayTimelineSample.load (std::memory_order_relaxed));
+            mFilePlayTimelineSample.load (std::memory_order_relaxed),
+            mFilePlaySrcX0.load (std::memory_order_relaxed),
+            mFilePlaySrcRate.load (std::memory_order_relaxed),
+            mFilePlaySrcValid.load (std::memory_order_relaxed));
 
     // ── Wet recording tap (post-realtime pitch / pre-vocal-chain) ────────
     // This is the user-locked tap point per Option C of G-9.1: the file
@@ -544,6 +574,30 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // ── QA-Fd preview play (scrub-audition / sub-editor Play) ─────────────
+    // Streams the message-thread-rendered span into the chain pre-rack so
+    // it is voiced exactly like playback.  One atomic load when idle.
+    if (auto* pv = mPitchPreview.load (std::memory_order_acquire))
+    {
+        const int len = pv->buf.getNumSamples();
+        int cur = pv->cursor.load (std::memory_order_relaxed);
+        if (len > 0 && (pv->loop || cur < len))
+        {
+            int written = 0;
+            while (written < numSamples && (pv->loop || cur < len))
+            {
+                if (cur >= len) cur = 0;   // loop wrap
+                const int n = juce::jmin (numSamples - written, len - cur);
+                for (int ch = 0; ch < numChannels; ++ch)
+                    buffer.addFrom (ch, written, pv->buf, 0, cur, n);
+                cur     += n;
+                written += n;
+                if (! pv->loop && cur >= len) break;
+            }
+            pv->cursor.store (cur, std::memory_order_relaxed);
+        }
+    }
+
     // ── QA-Fb Option A monitor merge (locked 2026-07-10) ─────────────────
     // Prior takes join the chain AFTER the corrector + WET tap (capture =
     // live only, bleed impossible by construction) and BEFORE the rack, so
@@ -569,7 +623,12 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             if (needDry)
                 for (int ch = 0; ch < nc; ++ch)
                     mDryScratch.addFrom (ch, 0, *monTakes, ch, 0, numSamples);
-            mPitch.processFilePlayMonitor (*monTakes, monTimeline);
+            // QA-Fd: the monitor takes decode through the same composed law,
+            // so the same block's source stamp applies.
+            mPitch.processFilePlayMonitor (*monTakes, monTimeline,
+                mFilePlaySrcX0.load (std::memory_order_relaxed),
+                mFilePlaySrcRate.load (std::memory_order_relaxed),
+                mFilePlaySrcValid.load (std::memory_order_relaxed));
             for (int ch = 0; ch < nc; ++ch)
                 buffer.addFrom (ch, 0, *monTakes, ch, 0, numSamples);
         }
@@ -606,21 +665,69 @@ int BaySickVocalProcessor::resolveLeaderChannel() const
 
 int BaySickVocalProcessor::resolveFollowerChannel() const
 {
-    int v = -1;
-    if (auto* p = apvts.getRawParameterValue ("bsa_follower_channel"))
-        v = (int) p->load();
-    return (v >= 0) ? v : mOwnChannelId;
+    // Owner call 2026-07-11: the follower is ALWAYS the page you're on.  The
+    // override picker is removed; bsa_follower_channel is vestigial (kept so
+    // old saves load without a param-missing gap, but never read).
+    return mOwnChannelId;
 }
 
-double BaySickVocalProcessor::alignToleranceSec() const
+double BaySickVocalProcessor::alignResidualCapSec() const
 {
     int mode = 1;
     float fine = 0.0f;
     if (auto* p = apvts.getRawParameterValue ("bsa_align_mode"))     mode = (int) p->load();
     if (auto* p = apvts.getRawParameterValue ("bsa_align_fineTune")) fine = p->load();
-    // Section 13e: Loose base 150 ms / Close 100 / Tight 50, +/-50 Fine Tune.
-    const float base = (mode == 0) ? 150.0f : (mode == 2) ? 50.0f : 100.0f;
-    return (double) juce::jmax (5.0f, base + fine) / 1000.0;
+    // Owner respec 2026-07-11: Fine sweeps the mode's absolute residual
+    // window -- Tight 0-50 / Close 50-150 / Loose 100-200 ms, knob center =
+    // window center (twin display math in the align editor's
+    // fineTuneCenterForMode/fineTuneHalfWidthForMode).
+    const float center = (mode == 0) ? 150.0f : (mode == 2) ? 25.0f : 100.0f;
+    const float half   = (mode == 2) ? 25.0f : 50.0f;
+    return (double) juce::jmax (0.0f, center + fine * half / 50.0f) / 1000.0;
+}
+
+double BaySickVocalProcessor::alignMaxShiftSec() const
+{
+    // > 150 ms = No Limit (owner review 2026-07-11 vs the reference
+    // aligner's 10-150 + No Limit model).
+    if (auto* p = apvts.getRawParameterValue ("bsa_align_maxShift"))
+    {
+        const float v = p->load();
+        return v > 150.5f ? 1.0e9 : (double) v / 1000.0;
+    }
+    return 1.0e9;
+}
+
+double BaySickVocalProcessor::alignFlexRatio() const
+{
+    // Owner call 2026-07-11: the Flexibility picker is removed (only Normal
+    // felt right; the other rungs dropped valid pairings or smeared).  The
+    // DSP stays parameterized on flexRatio so the control can return -- it's
+    // just fed Normal's 2:1 slope bound unconditionally now.
+    return 2.0;
+}
+
+juce::int64 BaySickVocalProcessor::followerPitchMapHash() const
+{
+    const int follower = resolveFollowerChannel();
+    if (follower < 0) return 0;
+    if (follower == mOwnChannelId)
+        return mPitch.timeMapHash();
+    if (onPitchDspForChannel)
+        if (auto* dsp = onPitchDspForChannel (follower))
+            return dsp->timeMapHash();
+    return 0;
+}
+
+float BaySickVocalProcessor::effectiveAlignPitchSemis (float rawSemis) const
+{
+    float blend = 0.5f, cap = 0.0f;
+    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_range"))     blend = p->load() / 100.0f;
+    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_variation")) cap   = p->load();
+    const float excess = std::abs (rawSemis) - juce::jmax (0.0f, cap);
+    if (excess <= 0.0f) return 0.0f;
+    return (rawSemis >= 0.0f ? 1.0f : -1.0f) * excess
+         * juce::jlimit (0.0f, 1.0f, blend);
 }
 
 bool BaySickVocalProcessor::analyzeAlign (juce::String& errorOut)
@@ -663,18 +770,44 @@ bool BaySickVocalProcessor::analyzeAlign (juce::String& errorOut)
     padFront (guide, gPad);
     padFront (dub,   dPad);
 
-    bool  pitchOn = false;
-    float range01 = 0.0f;
-    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_on"))    pitchOn = p->load() > 0.5f;
-    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_range")) range01 = p->load() / 100.0f;
+    AlignBuildParams bp;
+    bp.residualCapSec = alignResidualCapSec();
+    bp.maxShiftSec    = alignMaxShiftSec();
+    bp.flexRatio      = alignFlexRatio();
+    int bandG = 0, bandD = 0;
+    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_typeGuide")) bandG = juce::jlimit (0, 4, (int) p->load());
+    if (auto* p = apvts.getRawParameterValue ("bsa_pitch_typeDub"))   bandD = juce::jlimit (0, 4, (int) p->load());
+    bp.guideMinHz = kAlignPitchBands[bandG].minHz;
+    bp.guideMaxHz = kAlignPitchBands[bandG].maxHz;
+    bp.dubMinHz   = kAlignPitchBands[bandD].minHz;
+    bp.dubMaxHz   = kAlignPitchBands[bandD].maxHz;
+
+    // QA-Fd (locked 5/13a): align consumes the EDITED performance -- the
+    // follower's pitch-tab time edits transform its raw onset times before
+    // pairing.  Composite times here are common-origin padded, the pitch
+    // map's domain is the follower's own composite -- convert through dPad.
+    juce::int64 pmHash = 0;
+    {
+        BaySickPitchDSP* fDsp = nullptr;
+        if (follower == mOwnChannelId)             fDsp = &mPitch;
+        else if (onPitchDspForChannel)             fDsp = onPitchDspForChannel (follower);
+        if (fDsp != nullptr && fDsp->timeMapHash() != 0)
+        {
+            pmHash = fDsp->timeMapHash();
+            const double padSec = (double) dPad / gSr;
+            bp.dubEditTransform = [fDsp, padSec] (double tCommon)
+            {
+                return fDsp->srcToEditedSec (tCommon - padSec) + padSec;
+            };
+        }
+    }
 
     AlignAnalyzeDiag diag;
     auto map = BaySickAlignDSP::analyzeOffline (
         guide.getReadPointer (0), guide.getNumSamples(),
         dub  .getReadPointer (0), dub.getNumSamples(),
-        gSr, 1.0f, alignToleranceSec(),
+        gSr, bp,
         mAlignState.syncPoints, mAlignState.protectedAreas,
-        pitchOn ? juce::jlimit (0.0f, 1.0f, range01) : 0.0f,
         &diag);
 
     if (! map.isValid())
@@ -691,8 +824,9 @@ bool BaySickVocalProcessor::analyzeAlign (juce::String& errorOut)
                      + juce::String (diag.dubOnsets) + " Follower word starts, but "
                      + (diag.pairs == 0 ? juce::String ("none")
                                         : "only " + juce::String (diag.pairs))
-                     + " lined up within this Mode's reach (+/-" + juce::String (winMs)
-                     + " ms).  Try Close or Loose.  "
+                     + " lined up within the +/-" + juce::String (winMs)
+                     + " ms matching window.  Check both takes sit at the same "
+                       "spot on the grid.  "
                        "The previous alignment (if any) is still applied.";
         return false;
     }
@@ -706,6 +840,8 @@ bool BaySickVocalProcessor::analyzeAlign (juce::String& errorOut)
     mAlignState.followerPadSamples  = dPad;
     mAlignState.analysisSampleRate  = gSr;
     mAlignState.analyzed            = true;
+    mAlignState.analyzedSettingsGen = alignSettingsGeneration();
+    mAlignState.analyzedPitchMapHash = pmHash;
     mAlign.setWarpMap (map);
 
     // QA-Fa recovery: Analyze IS Apply -- version the committed state and
@@ -781,6 +917,11 @@ bool BaySickVocalProcessor::revertAlignToVersion (int index)
 {
     if (index < 0 || index >= (int) mAlignVersions.size()) return false;
     alignAppliedFromTree (mAlignVersions[(size_t) index].state);
+    // Revert is explicit user intent to run THAT map -- current knob state
+    // is accepted as its baseline (knob moves after the revert re-arm the
+    // stale flag normally).
+    mAlignState.analyzedSettingsGen  = alignSettingsGeneration();
+    mAlignState.analyzedPitchMapHash = followerPitchMapHash();
     publishAlignPlayback();
     if (auto& fn = mDirtyTracker.onAny) fn();
     return true;
@@ -816,10 +957,14 @@ void BaySickVocalProcessor::publishAlignPlayback()
         for (const auto& a : anchors)
         {
             const double d = juce::jmax (lastDub, a.dubTimeSec);
+            // QA-Fd 12a: map stores RAW deltas; Blend/Variation apply here so
+            // the pitch knobs are live -- the editor republishes on any
+            // pitch-knob change (time map identical, mid-play legal).
+            const float eff = effectiveAlignPitchSemis (a.pitchSemis);
             snap->guideSec  .push_back (a.guideTimeSec);
             snap->dubSec    .push_back (d);
-            snap->pitchSemis.push_back (a.pitchSemis);
-            if (std::abs (a.pitchSemis) > 0.01f) snap->anyPitch = true;
+            snap->pitchSemis.push_back (eff);
+            if (std::abs (eff) > 0.01f) snap->anyPitch = true;
             lastDub = d;
         }
         // Collapse near-equal guide entries (a post-clamp duplicate would
@@ -857,7 +1002,8 @@ void BaySickVocalProcessor::publishAlignPlayback()
         mAlignPlayRetired.erase (mAlignPlayRetired.begin());
 }
 
-juce::AudioBuffer<float> BaySickVocalProcessor::buildWarpedFollower (juce::String& errorOut)
+juce::AudioBuffer<float> BaySickVocalProcessor::buildWarpedFollower (juce::String& errorOut,
+                                                                     bool highRes)
 {
     errorOut.clear();
     juce::AudioBuffer<float> empty;
@@ -897,18 +1043,120 @@ juce::AudioBuffer<float> BaySickVocalProcessor::buildWarpedFollower (juce::Strin
 
     // Align master OFF renders the follower unwarped (an identity map keeps
     // the pitch pass available -- the Pitch box is independently toggleable).
+    // QA-Fd 12a: anchors carry RAW deltas -- run them through the same
+    // Variation/Blend transform the live publish uses so render == playback.
     WarpMap effMap = mAlignState.map;
     if (! alignOn)
         for (auto& a : effMap.anchors)
             a.guideTimeSec = a.dubTimeSec;
-    if (! pitchOn)
-        for (auto& a : effMap.anchors)
-            a.pitchSemis = 0.0f;
+    for (auto& a : effMap.anchors)
+        a.pitchSemis = pitchOn ? effectiveAlignPitchSemis (a.pitchSemis) : 0.0f;
+
+    // ── QA-Fd Task 8: compose the follower's pitch TIME map (locked 5/13a:
+    // the decode layer plays rawLaw(pitchMap(alignMap(t))) -- renders must
+    // match).  Sample a dense guide set (align anchor guides + the pitch
+    // anchors' dst positions pulled back through the align map) and rebuild
+    // the anchors as guide -> SOURCE.
+    {
+        BaySickPitchDSP* fDsp = nullptr;
+        if (follower == mOwnChannelId)  fDsp = &mPitch;
+        else if (onPitchDspForChannel)  fDsp = onPitchDspForChannel (follower);
+        const AlignPlaySnapshot* tm =
+            (fDsp != nullptr) ? fDsp->loadTimeMapSnapshot() : nullptr;
+
+        if (tm != nullptr && tm->guideSec.size() >= 2 && effMap.anchors.size() >= 2)
+        {
+            const double padSec = (double) mAlignState.followerPadSamples / sr;
+
+            // Guide-axis lookup over the (possibly identity) align anchors.
+            AlignPlaySnapshot alook;
+            {
+                auto sorted = effMap.anchors;
+                std::sort (sorted.begin(), sorted.end(),
+                           [] (const WarpAnchor& l, const WarpAnchor& r)
+                           { return l.guideTimeSec < r.guideTimeSec; });
+                double lastDub = -1.0e18;
+                for (const auto& a : sorted)
+                {
+                    const double d = juce::jmax (lastDub, a.dubTimeSec);
+                    alook.guideSec  .push_back (a.guideTimeSec);
+                    alook.dubSec    .push_back (d);
+                    alook.pitchSemis.push_back (a.pitchSemis);
+                    lastDub = d;
+                }
+                alook.computeTangents();
+            }
+            auto alignDubAt = [&alook] (double g)
+            {
+                double d = g, dp = 1.0; float sm = 0.0f;
+                alook.lookupAtGuideSec (g, d, dp, sm);
+                return d;
+            };
+            auto alignSemisAt = [&alook] (double g)
+            {
+                double d = g, dp = 1.0; float sm = 0.0f;
+                alook.lookupAtGuideSec (g, d, dp, sm);
+                return sm;
+            };
+            // Inverse of the (monotone) align dub lookup by bisection.
+            const double gLo = alook.guideSec.front() - 5.0;
+            const double gHi = alook.guideSec.back() + 5.0;
+            auto guideForDub = [&] (double dWant)
+            {
+                double lo = gLo, hi = gHi;
+                for (int it = 0; it < 48; ++it)
+                {
+                    const double mid = (lo + hi) * 0.5;
+                    if (alignDubAt (mid) < dWant) lo = mid; else hi = mid;
+                }
+                return (lo + hi) * 0.5;
+            };
+
+            std::vector<double> guides;
+            for (const auto& a : effMap.anchors)
+                guides.push_back (a.guideTimeSec);
+            for (double dst : tm->guideSec)
+                guides.push_back (guideForDub (dst + padSec));
+            std::sort (guides.begin(), guides.end());
+            guides.erase (std::unique (guides.begin(), guides.end(),
+                              [] (double a, double b2)
+                              { return std::abs (a - b2) < 1.0e-4; }),
+                          guides.end());
+
+            auto pitchSrcAt = [&tm] (double te)
+            {
+                double u = te, dp = 1.0; float sm = 0.0f;
+                tm->lookupAtGuideSec (te, u, dp, sm);
+                return u;
+            };
+
+            WarpMap composed;
+            composed.analysisSampleRate = effMap.analysisSampleRate;
+            composed.dubDurationSec     = effMap.dubDurationSec;
+            composed.guideDurationSec   = effMap.guideDurationSec;
+            for (double g : guides)
+            {
+                WarpAnchor a;
+                a.guideTimeSec = g;
+                const double dEdited = alignDubAt (g);
+                a.dubTimeSec   = pitchSrcAt (dEdited - padSec) + padSec;
+                a.pitchSemis   = alignSemisAt (g);
+                a.weight       = 1.0f;
+                composed.anchors.push_back (a);
+            }
+            effMap = std::move (composed);
+        }
+    }
+
+    // QA-Fd 16a: High-Res = the warp phase oversampled to ~384 kHz-class.
+    const int os = highRes
+        ? juce::jlimit (2, 8, juce::roundToInt (384000.0 / juce::jmax (1.0, sr)))
+        : 1;
 
     auto warped = BaySickAlignDSP::applyWarp (
         dub.getReadPointer (0), dub.getNumSamples(),
         mAlignState.analysisSampleRate, effMap, algo,
-        pitchOn ? (float) transpose : 0.0f);
+        pitchOn ? (float) transpose : 0.0f, os);
 
     if (pitchOn && formantOn && std::abs (formantShift) > 0.01f
         && warped.getNumSamples() > 0)
@@ -925,13 +1173,13 @@ juce::AudioBuffer<float> BaySickVocalProcessor::renderAlignedPreview()
     return buildWarpedFollower (ignored);
 }
 
-juce::File BaySickVocalProcessor::renderAlignedTake (juce::String& errorOut)
+juce::File BaySickVocalProcessor::renderAlignedTake (juce::String& errorOut, bool highRes)
 {
     errorOut.clear();
     if (! onGetProjectFolder)
         { errorOut = "Align services not connected."; return {}; }
 
-    auto warped = buildWarpedFollower (errorOut);
+    auto warped = buildWarpedFollower (errorOut, highRes);
     if (warped.getNumSamples() <= 0)
         return {};
 
@@ -979,6 +1227,12 @@ juce::File BaySickVocalProcessor::renderAlignedTake (juce::String& errorOut)
 bool BaySickVocalProcessor::isAlignStale() const
 {
     if (! mAlignState.analyzed || ! onChannelClipSignature) return false;
+    // QA-Fd reconciliation rule: a time-map knob moved since analyze -> the
+    // applied map no longer reflects the settings -> stale (swaps at stop).
+    if (alignSettingsGeneration() != mAlignState.analyzedSettingsGen) return true;
+    // QA-Fd (locked 5/13a): the follower's pitch time edits redefine the
+    // performance align matched -> stale on any time-map change.
+    if (followerPitchMapHash() != mAlignState.analyzedPitchMapHash) return true;
     const int leader   = resolveLeaderChannel();
     const int follower = resolveFollowerChannel();
     if (leader < 0 || follower < 0) return false;
@@ -1012,7 +1266,7 @@ bool BaySickVocalProcessor::analyzePitch (juce::String& errorOut)
     return true;
 }
 
-juce::File BaySickVocalProcessor::renderPitchedTake (juce::String& errorOut)
+juce::File BaySickVocalProcessor::renderPitchedTake (juce::String& errorOut, bool highRes)
 {
     errorOut.clear();
     if (! onRenderComposite || ! onGetProjectFolder)
@@ -1030,6 +1284,33 @@ juce::File BaySickVocalProcessor::renderPitchedTake (juce::String& errorOut)
                                           comp.getNumSamples(), sr);
     if (rendered.getNumSamples() <= 0)
         { errorOut = "Render produced no audio."; return {}; }
+
+    // QA-Fd Task 8: the bake honors the channel's TIME edits -- warp the
+    // pitched result through the published time map (edited -> source
+    // becomes the render's guide -> dub; no pitch deltas, phase 1 only).
+    if (const auto* tm = mPitch.loadTimeMapSnapshot();
+        tm != nullptr && tm->guideSec.size() >= 2)
+    {
+        WarpMap wm;
+        wm.analysisSampleRate = sr;
+        wm.dubDurationSec     = (double) rendered.getNumSamples() / sr;
+        wm.guideDurationSec   = tm->guideSec.back();
+        for (size_t i = 0; i < tm->guideSec.size(); ++i)
+        {
+            WarpAnchor a;
+            a.guideTimeSec = tm->guideSec[i];
+            a.dubTimeSec   = tm->dubSec[i];
+            wm.anchors.push_back (a);
+        }
+        const int os = highRes
+            ? juce::jlimit (2, 8, juce::roundToInt (384000.0 / juce::jmax (1.0, sr)))
+            : 1;
+        rendered = BaySickAlignDSP::applyWarp (rendered.getReadPointer (0),
+                                               rendered.getNumSamples(), sr,
+                                               wm, /*pitchAlgo*/ 0, 0.0f, os);
+        if (rendered.getNumSamples() <= 0)
+            { errorOut = "Render produced no audio."; return {}; }
+    }
 
     const juce::File projDir = onGetProjectFolder();
     if (projDir == juce::File() || ! projDir.isDirectory())
@@ -1078,6 +1359,53 @@ bool BaySickVocalProcessor::isPitchStale() const
     return onChannelClipSignature (mOwnChannelId) != mPitchAnalyzedSig;
 }
 
+// ─── QA-Fd preview play (message thread) ──────────────────────────────────────
+void BaySickVocalProcessor::startPitchPreview (const juce::AudioBuffer<float>& composite,
+                                               double sr, double startSec, double endSec,
+                                               bool loop)
+{
+    if (composite.getNumSamples() <= 0 || sr <= 0.0 || endSec <= startSec)
+        { stopPitchPreview(); return; }
+
+    const juce::int64 s0 = juce::jlimit ((juce::int64) 0,
+        (juce::int64) composite.getNumSamples(),
+        (juce::int64) std::llround (startSec * sr));
+    const int len = (int) juce::jlimit ((juce::int64) 0,
+        (juce::int64) composite.getNumSamples() - s0,
+        (juce::int64) std::llround ((endSec - startSec) * sr));
+    if (len <= 0) { stopPitchPreview(); return; }
+
+    auto pv = std::make_unique<PitchPreview>();
+    pv->buf  = mPitch.renderOffline (composite.getReadPointer (0),
+                                     composite.getNumSamples(), sr, s0, len);
+    pv->loop = loop;
+    if (pv->buf.getNumSamples() <= 0) { stopPitchPreview(); return; }
+
+    // ~3 ms edge fades de-click the span boundaries.
+    const int fade = juce::jmin (pv->buf.getNumSamples() / 2,
+                                 (int) std::lround (sr * 0.003));
+    if (fade > 0)
+    {
+        pv->buf.applyGainRamp (0, 0, fade, 0.0f, 1.0f);
+        pv->buf.applyGainRamp (0, pv->buf.getNumSamples() - fade, fade, 1.0f, 0.0f);
+    }
+
+    auto* old = mPitchPreview.exchange (pv.release(), std::memory_order_acq_rel);
+    if (old != nullptr)
+        mPreviewRetired.push_back (std::unique_ptr<PitchPreview> (old));
+    while (mPreviewRetired.size() > 4)
+        mPreviewRetired.erase (mPreviewRetired.begin());
+}
+
+void BaySickVocalProcessor::stopPitchPreview()
+{
+    auto* old = mPitchPreview.exchange (nullptr, std::memory_order_acq_rel);
+    if (old != nullptr)
+        mPreviewRetired.push_back (std::unique_ptr<PitchPreview> (old));
+    while (mPreviewRetired.size() > 4)
+        mPreviewRetired.erase (mPreviewRetired.begin());
+}
+
 // ─── Editor ───────────────────────────────────────────────────────────────────
 juce::AudioProcessorEditor* BaySickVocalProcessor::createEditor()
 {
@@ -1091,7 +1419,7 @@ juce::AudioProcessorEditor* BaySickVocalProcessor::createEditor()
 // hamburger menu's Save Page Preset / Load Page Preset round-trips
 // faithfully.  Captured state per sub-tab:
 //
-//   BaySickVocals      -> APVTS (bsv_pitch_*, bsv_mix, bsv_bypass, etc.)
+//   BaySickVocals      -> APVTS (bsv_pitch_*, bsv_mix, bsv_ab_slot, etc.)
 //   Vocal Chain        -> APVTS (bsv_deesser_*, bsv_comp_*, bsv_sat_*,
 //                                bsv_limiter_*); rack topology is fixed
 //   BaySickPitch       -> <PitchEdits> ValueTree child (note regions +
@@ -1256,6 +1584,12 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         if (! xml->hasTagName (apvts.state.getType()))
             return;
 
+        // QA-Fd review fix: replaceState fires the align editor's param
+        // hooks; the mode hook's queued Blend-preset seat would stomp the
+        // restored Blend value.  Raise the restoring flag now; the queued
+        // clear below runs AFTER every hook the restore posted.
+        mRestoringState->store (true, std::memory_order_release);
+
         auto newState = juce::ValueTree::fromXml (*xml);
 
         // Pull NamIrState OUT of the tree before handing it to APVTS so
@@ -1390,6 +1724,13 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
             && mAlignState.commonStartBeat > 0.0 && TempoMap::isActive())
             mAlignState.commonStartSample =
                 TempoMap::sampleAtBeat (mAlignState.commonStartBeat);
+        // QA-Fd: replaceState above fired the editor's knob hooks (attachment
+        // sync), bumping the settings generation -- re-baseline so a freshly
+        // restored project doesn't read as knob-stale.  Same for the pitch
+        // time-map hash (the restored map was analyzed against the restored
+        // edits by construction).
+        mAlignState.analyzedSettingsGen  = alignSettingsGeneration();
+        mAlignState.analyzedPitchMapHash = followerPitchMapHash();
         publishAlignPlayback();
 
         // H-6d: restore the embedded NAM/IR state.  Pre-H-6d projects have
@@ -1411,5 +1752,10 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         // re-mount its slot editors against the restored DSP state.
         if (onChainStateRestored)
             onChainStateRestored();
+
+        // Queued AFTER every hook the restore posted (message-queue order);
+        // the lambda co-owns the flag so a torn-down processor is safe.
+        juce::MessageManager::callAsync (
+            [tok = mRestoringState] { tok->store (false, std::memory_order_release); });
     }
 }

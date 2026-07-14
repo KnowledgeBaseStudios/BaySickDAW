@@ -1,23 +1,29 @@
 #include "BaySickPitchEditor.h"
+#include "BaySickPitchSubEditor.h"
 #include "BaySickVocalProcessor.h"
+#include "../DSP/PitchCorrectorDSP.h"   // shared 13-scale table
 #include "../Standalone/BaySickTitleBar.h"
 #include "../Standalone/SharedUI.h"
 #include "../Standalone/StandaloneEditor.h"
-#include "../TempoMapRead.h"   // LENGTH readout: seconds -> bars through the timeline
+#include "../TempoMapRead.h"   // LENGTH readout + playhead beat->sample
 #include <algorithm>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BaySickPitchEditor - QA-Fa Task 2 (2026-07-10).  See header; section 14 of
-// phantom-recording-mongoose is the spec.
+// BaySickPitchEditor - QA-Fd rework (2026-07-11).  See header; the
+// snug-orbiting-catmull plan (dockets 1-20 + parity 1-14) is the spec.
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace
 {
-    constexpr int kToolbarH  = 70;
-    constexpr int kRulerH    = 16;
-    constexpr int kKeyboardW = 40;
-    constexpr int kInfoBarH  = 22;
-    constexpr int kSubCurveH = 46;   // 3 stacked mini-lanes under the selected pill
+    constexpr int kToolbarH   = 70;
+    constexpr int kRulerH     = 16;
+    constexpr int kKeyboardW  = 40;
+    constexpr int kInfoBarH   = 22;
+    constexpr int kSliceLaneH = 18;   // slice pills live in a bottom strip
+    constexpr int kBoxH       = 64;   // display-only sub-edit box (4 bars)
+    constexpr int kBoxBtnH    = 14;
+    constexpr int kMinNote    = 12;   // C0 floor (view + lanes never go below)
+    constexpr int kHandleSz   = 8;    // on-pill corner handles
 
     const juce::Colour kBg        = juce::Colour (0xff0e0f12);
     const juce::Colour kPanelBg   = juce::Colour (0xff16191e);
@@ -27,28 +33,39 @@ namespace
     const juce::Colour kDirtyDot  = juce::Colour (0xff58c067);
     const juce::Colour kStale     = juce::Colour (0xffe8a13c);
 
-    // Section 14c / section 15 palette: pills Effects purple, waveform
-    // interior Vox teal, pitch curve Bass green (the same green as the Align
-    // Leader lane -- both editors use Bass green for the pitch signal).
+    // Pills Effects purple, waveform interior Vox teal, pitch curve Bass
+    // green (as-sung reference -- stays put under every edit); slice pills
+    // neutral gray; handles green=in / red=out (Newtone figure convention).
     const juce::Colour kPillFill   = juce::Colour (0xff8a2be2);
     const juce::Colour kPillWave   = juce::Colour (0xff0fafa5);
     const juce::Colour kPitchCurve = juce::Colour (0xff33ff88);
     const juce::Colour kPlayhead   = juce::Colour (0xffe8e8e8);
-
-    struct FactoryPitchPreset { const char* name; float focus, mod, speed; };
-    constexpr FactoryPitchPreset kPitchPresets[3] = {
-        { "Loose",   0.0f, 50.0f, 30.0f },
-        { "Close",  50.0f, 50.0f, 50.0f },
-        { "Tight", 100.0f, 20.0f, 80.0f },
-    };
-
-    const char* const kPitchPresetParamIds[] = { "bsp_focus", "bsp_mod", "bsp_speed" };
+    const juce::Colour kSliceFill  = juce::Colour (0xff5a6068);
+    const juce::Colour kHandleIn   = juce::Colour (0xff58c067);
+    const juce::Colour kHandleOut  = juce::Colour (0xffe05555);
+    const juce::Colour kDetachCol  = juce::Colour (0xffe8a13c);
 
     juce::File pitchPresetsDir()
     {
         return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
                  .getChildFile ("BaySickDAW").getChildFile ("Presets")
                  .getChildFile ("BaySickPitch").getChildFile ("My Presets");
+    }
+
+    // App-wide UI prefs (the multi-select reset never-show-again flag).
+    // Lives beside settings.xml in Documents/BaySickDAW per the standing
+    // artifact-location convention.
+    std::unique_ptr<juce::PropertiesFile> openUiPrefs()
+    {
+        juce::PropertiesFile::Options o;
+        o.applicationName     = "BaySickDAW";
+        o.filenameSuffix      = "xml";
+        o.folderName          = "BaySickDAW";
+        juce::File dir = juce::File::getSpecialLocation (
+                             juce::File::userDocumentsDirectory)
+                             .getChildFile ("BaySickDAW");
+        return std::make_unique<juce::PropertiesFile> (
+            dir.getChildFile ("ui_prefs.xml"), o);
     }
 
     juce::String midiNoteName (int midi)
@@ -60,7 +77,10 @@ namespace
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PitchKeyboard - vertical MIDI keyboard strip (section 14c KEEP)
+// PitchKeyboard - vertical MIDI keyboard strip.  QA-Fd: clicking a key with a
+// selection batch re-pitches the selected pills onto that note (the Newtone
+// ruler-click parity item); holding previews the focused pill at its new
+// pitch while the transport is stopped.
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickPitchEditor::PitchKeyboard : public juce::Component
 {
@@ -72,7 +92,7 @@ public:
         g.fillAll (juce::Colour (0xff14171c));
         const double laneH = mOwner.noteLaneH();
         const int top = mOwner.topNote();
-        for (int note = top; note > 0; --note)
+        for (int note = top; note >= kMinNote; --note)
         {
             const float y = (float) ((top - note) * laneH);
             if (y > (float) getHeight()) break;
@@ -90,6 +110,20 @@ public:
         }
     }
 
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const int note = juce::jlimit (kMinNote, 120,
+            mOwner.topNote() - (int) std::floor (e.y / mOwner.noteLaneH()));
+        if (! mOwner.mSelection.empty())
+        {
+            mOwner.batchRepitchTo (note);
+            if (! DSPBase::isTransportPlaying() && mOwner.mFocusRegion >= 0)
+                mOwner.startRegionPreview (mOwner.mFocusRegion, false);
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent&) override { mOwner.stopPreview(); }
+
     void mouseWheelMove (const juce::MouseEvent& e,
                          const juce::MouseWheelDetails& w) override
     {
@@ -102,7 +136,8 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PitchCanvas - ruler + grid + pitch curve + pills + sub-curves + playhead
+// PitchCanvas - ruler + grid + pitch curve + pills + display box + playhead.
+// Owns every canvas gesture (QA-Fd motion model).
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickPitchEditor::PitchCanvas : public juce::Component
 {
@@ -121,6 +156,77 @@ public:
     {
         return (float) (kRulerH + (mOwner.topNote() - midi) * mOwner.noteLaneH());
     }
+    double midiForY (int y) const
+    {
+        return mOwner.topNote() - (double) (y - kRulerH) / mOwner.noteLaneH();
+    }
+
+    // Rendered pitch (locked 8): detected + drag + Focus pull toward the
+    // snap target.  The green curve stays as-sung; the PILL shows what you
+    // will hear.
+    float drawMidiFor (const PitchNoteRegion& r) const
+    {
+        const float base   = r.midi + r.shiftSemis;
+        const float focus  = mOwner.paramValue ("bsp_focus") / 100.0f;
+        const bool  snapOn = mOwner.paramValue ("bsp_snap") > 0.5f;
+        const float target = snapOn
+            ? PitchCorrectorDSP::snapMidiToScaleStatic (base,
+                  (int) mOwner.paramValue ("bsp_root"),
+                  (int) mOwner.paramValue ("bsp_scale"))
+            : std::round (base);
+        return base + (target - base) * juce::jlimit (0.0f, 1.0f, focus);
+    }
+
+    juce::Rectangle<float> pillRect (const PitchNoteRegion& r) const
+    {
+        const int x0 = xForSec (r.dstStart());
+        const int x1 = xForSec (r.dstEnd());
+        const float w = (float) juce::jmax (6, x1 - x0);
+        if (r.isSlice)
+        {
+            const float y = (float) (getHeight() - kSliceLaneH + 2);
+            return { (float) x0, y, w, (float) (kSliceLaneH - 4) };
+        }
+        const double laneH = mOwner.noteLaneH();
+        const float y = yForMidi ((double) drawMidiFor (r) + 0.5);
+        return { (float) x0, y - (float) laneH * 0.5f, w, (float) laneH * 2.0f };
+    }
+
+    juce::Rectangle<int> displayBoxArea (const PitchNoteRegion& r) const
+    {
+        auto pill = pillRect (r);
+        const int x0 = (int) pill.getX();
+        return { x0, (int) pill.getBottom() + 4,
+                 juce::jmax (150, (int) pill.getWidth()), kBoxH };
+    }
+    juce::Rectangle<int> boxEditBtn (const juce::Rectangle<int>& box) const
+    {
+        return { box.getX() + 2, box.getY() + 2, 34, kBoxBtnH };
+    }
+    juce::Rectangle<int> boxResetBtn (const juce::Rectangle<int>& box) const
+    {
+        return { box.getRight() - 44, box.getY() + 2, 42, kBoxBtnH };
+    }
+
+    // On-pill corner handles (locked 19a; selected pill only, hidden below
+    // the zoom threshold).  0=fade-in 1=fade-out 2=approach 3=release.
+    bool handlesVisible (const PitchNoteRegion& r) const
+    {
+        return ! r.isSlice && mOwner.noteLaneH() >= 8.0
+            && pillRect (r).getWidth() >= 36.0f;
+    }
+    juce::Rectangle<float> handleRect (const PitchNoteRegion& r, int which) const
+    {
+        auto p = pillRect (r);
+        const float s = (float) kHandleSz;
+        switch (which)
+        {
+            case 0:  return { p.getX(),         p.getY(),            s, s };
+            case 1:  return { p.getRight() - s, p.getY(),            s, s };
+            case 2:  return { p.getX(),         p.getBottom() - s,   s, s };
+            default: return { p.getRight() - s, p.getBottom() - s,   s, s };
+        }
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -129,8 +235,8 @@ public:
         const double laneH = mOwner.noteLaneH();
         const int top = mOwner.topNote();
 
-        // Note lanes + octave lines
-        for (int note = top; note > 0; --note)
+        // Note lanes + octave lines (floored at C0 -- #6 bottom clamp).
+        for (int note = top; note >= kMinNote; --note)
         {
             const float y = yForMidi (note);
             if (y > (float) getHeight()) break;
@@ -178,16 +284,34 @@ public:
 
         if (! pitch.isAnalyzed() || pitch.regions().empty())
         {
+            // QA-Fd 4a: the empty canvas names its state instead of sitting
+            // silent (Analyzing / Deferred / Failed / genuinely empty).
+            juce::String msg;
+            switch (mOwner.mAnalysisState)
+            {
+                case AnalysisState::Analyzing:
+                    msg = "Analyzing..."; break;
+                case AnalysisState::Deferred:
+                    msg = "Analysis deferred until stop - stop playback to refresh the notes"; break;
+                case AnalysisState::Failed:
+                    msg = mOwner.mAnalysisError.isNotEmpty()
+                            ? mOwner.mAnalysisError
+                            : "Analysis failed - check the channel has audio clips"; break;
+                case AnalysisState::Idle:
+                default:
+                    msg = pitch.isAnalyzed()
+                            ? "No notes detected on this channel yet"
+                            : "Put audio clips on this channel - notes appear here automatically";
+                    break;
+            }
             g.setColour (kTextDim);
             g.setFont (13.0f);
-            g.drawText (pitch.isAnalyzed()
-                            ? "No notes detected on this channel yet"
-                            : "Put audio clips on this channel - notes appear here automatically",
-                        getLocalBounds(), juce::Justification::centred);
+            g.drawText (msg, getLocalBounds(), juce::Justification::centred);
             return;
         }
 
-        // Detected pitch curve (Bass green) from the analysis F0 track.
+        // Detected pitch curve (Bass green, SOURCE positions -- the as-sung
+        // reference stays put under every edit, locked 8).
         {
             const auto& f0 = pitch.f0Track();
             const double hopSec = BaySickPitchDSP::kF0Hop / pitch.analysisSampleRate();
@@ -209,46 +333,110 @@ public:
             g.strokePath (p, juce::PathStrokeType (1.4f));
         }
 
-        // Pills (rounded 5 px, purple fill, teal waveform interior) at the
-        // EDITED pitch (midi + shiftSemis) so drags read immediately.
+        // Slice-lane backdrop
+        g.setColour (juce::Colour (0xff14171c).withAlpha (0.85f));
+        g.fillRect (0, getHeight() - kSliceLaneH, getWidth(), kSliceLaneH);
+        g.setColour (kTextDim.withAlpha (0.4f));
+        g.setFont (8.0f);
+        g.drawText ("SLICES", 4, getHeight() - kSliceLaneH, 60, kSliceLaneH,
+                    juce::Justification::centredLeft);
+
+        // Pills at their EDITED positions (dst spans + corrected pitch).
         const auto& regions = pitch.regions();
         for (int i = 0; i < (int) regions.size(); ++i)
         {
             const auto& r = regions[(size_t) i];
-            const int x0 = xForSec (r.startSec);
-            const int x1 = xForSec (r.endSec);
-            if (x1 < 0 || x0 > getWidth()) continue;
-            const float y = yForMidi ((double) r.midi + r.shiftSemis + 0.5);
-            auto pill = juce::Rectangle<float> ((float) x0, y - (float) laneH * 0.5f,
-                                                (float) juce::jmax (6, x1 - x0),
-                                                (float) laneH * 2.0f);
-            const bool sel = (i == mOwner.mSelectedRegion);
-            g.setColour (kPillFill.withAlpha (sel ? 0.95f : 0.7f));
-            g.fillRoundedRectangle (pill, 5.0f);
-            if (sel)
+            auto pill = pillRect (r);
+            if (pill.getRight() < 0.0f || pill.getX() > (float) getWidth()) continue;
+            const bool sel = mOwner.isSelected (i);
+
+            if (r.isSlice)
             {
-                g.setColour (juce::Colours::white.withAlpha (0.8f));
-                g.drawRoundedRectangle (pill, 5.0f, 1.4f);
+                g.setColour (kSliceFill.withAlpha (sel ? 0.95f : 0.6f));
+                g.fillRoundedRectangle (pill, 3.0f);
+                // Always-on outline: abutting same-pitch pills would render
+                // as one seamless bar without it (splits invisible).
+                g.setColour (juce::Colours::black.withAlpha (0.5f));
+                g.drawRoundedRectangle (pill, 3.0f, 1.0f);
+                if (sel)
+                {
+                    g.setColour (juce::Colours::white.withAlpha (0.8f));
+                    g.drawRoundedRectangle (pill, 3.0f, 1.2f);
+                }
             }
-            drawPillWaveform (g, pill);
-            if (r.hasEdits())
+            else
+            {
+                g.setColour (kPillFill.withAlpha (sel ? 0.95f : 0.7f));
+                g.fillRoundedRectangle (pill, 5.0f);
+                g.setColour (juce::Colours::black.withAlpha (0.5f));
+                g.drawRoundedRectangle (pill, 5.0f, 1.0f);
+                if (sel)
+                {
+                    g.setColour (juce::Colours::white.withAlpha (0.8f));
+                    g.drawRoundedRectangle (pill, 5.0f, 1.4f);
+                }
+                if (r.detached)
+                {
+                    g.setColour (kDetachCol.withAlpha (0.9f));
+                    g.drawRoundedRectangle (pill.reduced (1.0f), 5.0f, 1.0f);
+                }
+                drawPillWaveform (g, r, pill);
+
+                // In-block pitch readout at sufficient zoom (parity item 13).
+                if (laneH >= 12.0 && pill.getWidth() >= 44.0f)
+                {
+                    const float edited = drawMidiFor (r);
+                    const int   nearest = (int) std::round (edited);
+                    const int   cents = (int) std::round ((edited - (float) nearest) * 100.0f);
+                    g.setColour (juce::Colours::white.withAlpha (0.85f));
+                    g.setFont (9.5f);
+                    g.drawText (midiNoteName (nearest)
+                                  + (cents != 0 ? juce::String (" ")
+                                        + (cents > 0 ? "+" : "") + juce::String (cents)
+                                    : juce::String()),
+                                (int) pill.getX() + 10, (int) pill.getY(),
+                                (int) pill.getWidth() - 14, (int) pill.getHeight(),
+                                juce::Justification::centredLeft);
+                }
+            }
+            if (r.hasEdits() || r.hasTimeEdit())
             {
                 g.setColour (kDirtyDot);
                 g.fillEllipse (pill.getX() + 3.0f, pill.getY() + 3.0f, 5.0f, 5.0f);
             }
+
+            // On-pill handles (19a): selected pill only.
+            if (sel && (int) mOwner.mSelection.size() == 1 && handlesVisible (r))
+                drawHandles (g, r);
         }
 
-        // Sub-curves under the selected pill (always visible when selected).
-        if (mOwner.mSelectedRegion >= 0
-            && mOwner.mSelectedRegion < (int) regions.size())
-            drawSubCurves (g, regions[(size_t) mOwner.mSelectedRegion]);
+        // Display-only sub-edit box under a single-selected pill.
+        if ((int) mOwner.mSelection.size() == 1
+            && mOwner.mFocusRegion >= 0
+            && mOwner.mFocusRegion < (int) regions.size())
+            drawDisplayBox (g, regions[(size_t) mOwner.mFocusRegion]);
 
-        // Playhead (FilePlay position; owner hides it when it stops moving).
-        if (mOwner.mLastPlaySample >= 0)
+        // Marquee
+        if (mDragKind == DragKind::Marquee)
         {
-            const double tSec = (double) (mOwner.mLastPlaySample - pitch.startSample())
-                                / pitch.analysisSampleRate();
-            const int x = xForSec (tSec);
+            g.setColour (juce::Colours::white.withAlpha (0.12f));
+            g.fillRect (mMarquee);
+            g.setColour (juce::Colours::white.withAlpha (0.5f));
+            g.drawRect (mMarquee);
+        }
+        // Zoom rect (family Ctrl+RMB idiom)
+        if (mDragKind == DragKind::ZoomRect)
+        {
+            g.setColour (kPillWave.withAlpha (0.15f));
+            g.fillRect (mMarquee);
+            g.setColour (kPillWave.withAlpha (0.7f));
+            g.drawRect (mMarquee);
+        }
+
+        // Playhead (main transport, incl. stop-reset -- #7).
+        if (mOwner.mPlayheadSec >= 0.0)
+        {
+            const int x = xForSec (mOwner.mPlayheadSec);
             if (x >= 0 && x <= getWidth())
             {
                 g.setColour (kPlayhead.withAlpha (0.8f));
@@ -257,76 +445,151 @@ public:
         }
     }
 
+    // ── Mouse ────────────────────────────────────────────────────────────────
     void mouseDown (const juce::MouseEvent& e) override
     {
         auto& pitch = mOwner.mProc.mPitch;
         auto& regions = pitch.regions();
-        const double tSec = secForX (e.x);
+        mDragKind = DragKind::None;
+        mMouseDownPos = e.getPosition();
 
-        // Sub-curve hit first (they float below the selected pill).
-        if (mOwner.mSelectedRegion >= 0
-            && mOwner.mSelectedRegion < (int) regions.size()
-            && subCurveArea (regions[(size_t) mOwner.mSelectedRegion])
-                   .contains (e.getPosition()))
+        // Middle-drag pan (parity item 2).
+        if (e.mods.isMiddleButtonDown())
         {
-            mOwner.pushUndo();
-            mDragKind = DragKind::SubCurve;
-            applySubCurveDrag (e.getPosition(),
-                               regions[(size_t) mOwner.mSelectedRegion]);
+            mDragKind = DragKind::Pan;
+            mPanStartScroll = mOwner.scrollSeconds();
+            mPanStartTop    = mOwner.topNote();
+            return;
+        }
+
+        const int hit = hitTest (e.getPosition());
+
+        if (e.mods.isPopupMenu())
+        {
+            if (e.mods.isCtrlDown())
+            {
+                // Ctrl+RMB drag = zoom-to-rect (family idiom; works over
+                // pills too).
+                mDragKind = DragKind::ZoomRect;
+                mMarquee = { e.x, e.y, 0, 0 };
+                return;
+            }
+            if (hit >= 0)
+            {
+                if (! mOwner.isSelected (hit))
+                    mOwner.selectOnly (hit);
+                mOwner.mFocusRegion = hit;
+                mOwner.showPillMenu (hit);
+            }
+            else
+            {
+                // Plain RMB on empty space returns from zoom-to-selection.
+                mOwner.restoreSavedView();
+            }
+            return;
+        }
+
+        // Slice mode is a blade, not a selector (owner find 2026-07-11: the
+        // old order selected first, so clicks read as selection): no marquee,
+        // no handles, no popup -- a pill click splits at the click point.
+        if (((int) mOwner.paramValue ("bsp_mode", 1.0f)) == 0)
+        {
+            if (hit < 0) return;
+            auto& r = regions[(size_t) hit];
+            const double tSrc = srcTimeForDstSec (r, secForX (e.x));
+            if (tSrc > r.startSec + 0.03 && tSrc < r.endSec - 0.03)
+            {
+                mOwner.beginEdit();
+                PitchNoteRegion right = r;
+                const double f = (tSrc - r.startSec) / (r.endSec - r.startSec);
+                if (r.dstStartSec >= 0.0)
+                {
+                    const double dstMid = r.dstStart() + f * (r.dstEnd() - r.dstStart());
+                    right.dstStartSec = dstMid;
+                    right.dstEndSec   = r.dstEndSec;
+                    r.dstEndSec       = dstMid;
+                }
+                right.startSec = tSrc;
+                r.endSec       = tSrc;
+                regions.insert (regions.begin() + hit + 1, right);
+                mOwner.commitEdit ("Pitch: Slice");
+            }
             repaint();
             return;
         }
 
-        int hit = -1;
-        for (int i = 0; i < (int) regions.size(); ++i)
+        // Display-box buttons (single selection).
+        if ((int) mOwner.mSelection.size() == 1 && mOwner.mFocusRegion >= 0
+            && mOwner.mFocusRegion < (int) regions.size())
         {
-            const auto& r = regions[(size_t) i];
-            const float y = yForMidi ((double) r.midi + r.shiftSemis + 0.5);
-            if (tSec >= r.startSec && tSec < r.endSec
-                && e.y >= y - mOwner.noteLaneH() && e.y <= y + mOwner.noteLaneH() * 2.0)
-                { hit = i; break; }
+            const auto box = displayBoxArea (regions[(size_t) mOwner.mFocusRegion]);
+            if (boxEditBtn (box).contains (e.getPosition()))
+                { mOwner.openSubEditor (mOwner.mFocusRegion); return; }
+            if (boxResetBtn (box).contains (e.getPosition()))
+                { mOwner.resetBoxedParams (mOwner.selectionOrFocus()); return; }
+        }
+
+        // On-pill handle grab (single selection, 19a).
+        if ((int) mOwner.mSelection.size() == 1 && mOwner.mFocusRegion >= 0
+            && mOwner.mFocusRegion < (int) regions.size())
+        {
+            const auto& r = regions[(size_t) mOwner.mFocusRegion];
+            if (handlesVisible (r))
+                for (int h = 0; h < 4; ++h)
+                    if (handleRect (r, h).expanded (2.0f).contains (e.position))
+                    {
+                        mOwner.beginEdit();
+                        mDragKind   = DragKind::Handle;
+                        mHandleIdx  = h;
+                        mHandlePill = mOwner.mFocusRegion;
+                        applyHandleDrag (e.getPosition());
+                        return;
+                    }
         }
 
         if (hit < 0)
         {
-            mOwner.mSelectedRegion = -1;
-            mDragKind = DragKind::None;
+            // Empty space: marquee select (Edit mode) / deselect.
+            if (! e.mods.isShiftDown())
+                mOwner.clearSelection();
+            mDragKind = DragKind::Marquee;
+            mMarquee = { e.x, e.y, 0, 0 };
             repaint();
             return;
         }
 
-        mOwner.mSelectedRegion = hit;
+        // Double-click a pill = open the sub-editor popup.
+        if (e.getNumberOfClicks() >= 2)
+        {
+            mOwner.selectOnly (hit);
+            mOwner.openSubEditor (hit);
+            return;
+        }
+
+        // Selection update (family convention: plain click selects; click on
+        // an already-selected pill keeps the group; Shift+click toggles).
+        if (e.mods.isShiftDown())
+            mOwner.toggleSelect (hit);
+        else if (! mOwner.isSelected (hit))
+            mOwner.selectOnly (hit);
+        mOwner.mFocusRegion = hit;
         mOwner.updateInfoBarFor (hit);
 
-        const bool sliceMode = ((int) mOwner.paramValue ("bsp_mode", 1.0f)) == 0;
-        if (sliceMode)
-        {
-            // Slice: split the region at the click (both halves inherit the
-            // detected fields + edits).
-            auto& r = regions[(size_t) hit];
-            if (tSec > r.startSec + 0.03 && tSec < r.endSec - 0.03)
-            {
-                mOwner.pushUndo();
-                PitchNoteRegion right = r;
-                right.startSec = tSec;
-                r.endSec       = tSec;
-                regions.insert (regions.begin() + hit + 1, right);
-                pitch.publishEdits();
-            }
-            mDragKind = DragKind::None;
-            repaint();
-            return;
-        }
+        // Edit mode: edges = stretch/squeeze, body = 2-axis move.
+        mOwner.beginEdit();
+        const auto pill = pillRect (regions[(size_t) hit]);
+        mFineDrag   = e.mods.isCtrlDown();
+        mDetachArm  = e.mods.isCtrlDown();
+        mDidDetach  = false;
+        if (e.position.x - pill.getX() < 6.0f)
+            mDragKind = DragKind::StretchLeft;
+        else if (pill.getRight() - e.position.x < 6.0f)
+            mDragKind = DragKind::StretchRight;
+        else
+            mDragKind = DragKind::PitchMove;
 
-        // Edit mode: edges resize, body = vertical pitch drag.
-        mOwner.pushUndo();
-        const int x0 = xForSec (regions[(size_t) hit].startSec);
-        const int x1 = xForSec (regions[(size_t) hit].endSec);
-        if (e.x - x0 < 6)       mDragKind = DragKind::LeftEdge;
-        else if (x1 - e.x < 6)  mDragKind = DragKind::RightEdge;
-        else                    mDragKind = DragKind::PitchDrag;
-        mDragStartShift = regions[(size_t) hit].shiftSemis;
-        mDragStartY     = e.y;
+        captureDragBases();
+        mScrubbing = ! DSPBase::isTransportPlaying();
         repaint();
     }
 
@@ -334,76 +597,226 @@ public:
     {
         auto& pitch = mOwner.mProc.mPitch;
         auto& regions = pitch.regions();
-        const int sel = mOwner.mSelectedRegion;
-        if (sel < 0 || sel >= (int) regions.size() || mDragKind == DragKind::None)
-            return;
-        auto& r = regions[(size_t) sel];
-        const double tSec = secForX (e.x);
 
         switch (mDragKind)
         {
-            case DragKind::PitchDrag:
+            case DragKind::Pan:
             {
-                // 1 lane = 1 semitone; 0.1 st steps.
-                const double semis = mDragStartShift
-                    + (mDragStartY - e.y) / mOwner.noteLaneH();
-                r.shiftSemis = (float) juce::jlimit (-24.0, 24.0,
-                    std::round (semis * 10.0) / 10.0);
-                break;
+                mOwner.setView (mOwner.pixelsPerSecond(),
+                                mPanStartScroll
+                                    - (e.x - mMouseDownPos.x) / mOwner.pixelsPerSecond());
+                mOwner.setTopNote (mPanStartTop
+                    + (int) std::round ((e.y - mMouseDownPos.y) / mOwner.noteLaneH()));
+                return;
             }
-            case DragKind::LeftEdge:
-                r.startSec = juce::jlimit (
-                    (sel > 0) ? regions[(size_t) sel - 1].endSec : 0.0,
-                    r.endSec - 0.02, tSec);
+            case DragKind::Marquee:
+            case DragKind::ZoomRect:
+            {
+                mMarquee = juce::Rectangle<int>::leftTopRightBottom (
+                    juce::jmin (mMouseDownPos.x, e.x), juce::jmin (mMouseDownPos.y, e.y),
+                    juce::jmax (mMouseDownPos.x, e.x), juce::jmax (mMouseDownPos.y, e.y));
+                if (mDragKind == DragKind::Marquee)
+                    applyMarqueeSelection (e.mods.isShiftDown());
+                repaint();
+                return;
+            }
+            case DragKind::Handle:
+                applyHandleDrag (e.getPosition());
+                repaint();
+                return;
+            case DragKind::PitchMove:
+            {
+                // Vertical: pitch (0.1 st; Ctrl fine 0.01; Snap ON lands on
+                // in-scale lanes).  Horizontal: elastic move / Ctrl detach.
+                const double dySemisRaw = (mMouseDownPos.y - e.y) / mOwner.noteLaneH();
+                const bool  snapOn = mOwner.paramValue ("bsp_snap") > 0.5f
+                                     && ! mFineDrag;
+                const double quant = mFineDrag ? 0.01 : 0.1;
+                const double dxSec = (e.x - mMouseDownPos.x) / mOwner.pixelsPerSecond();
+                const bool wantDetach = mDetachArm
+                    && std::abs (e.x - mMouseDownPos.x) > 3;
+
+                const double timeDelta = wantDetach
+                    ? juce::jmax (dxSec, minDetachDelta())
+                    : clampElasticDelta (dxSec);
+
+                for (const auto& b : mDragBases)
+                {
+                    if (b.idx < 0 || b.idx >= (int) regions.size()) continue;
+                    auto& r = regions[(size_t) b.idx];
+                    if (! r.isSlice)
+                    {
+                        if (snapOn)
+                        {
+                            const float wanted = r.midi + b.shift + (float) dySemisRaw;
+                            const float lane = PitchCorrectorDSP::snapMidiToScaleStatic (
+                                wanted,
+                                (int) mOwner.paramValue ("bsp_root"),
+                                (int) mOwner.paramValue ("bsp_scale"));
+                            r.shiftSemis = juce::jlimit (-24.0f, 24.0f, lane - r.midi);
+                        }
+                        else
+                        {
+                            const double q = std::round (dySemisRaw / quant) * quant;
+                            r.shiftSemis = (float) juce::jlimit (-24.0, 24.0,
+                                (double) b.shift + q);
+                        }
+                    }
+                    if (std::abs (timeDelta) > 1.0e-9)
+                    {
+                        r.dstStartSec = juce::jmax (0.0, b.dstS + timeDelta);
+                        r.dstEndSec   = r.dstStartSec + (b.dstE - b.dstS);
+                        if (wantDetach && ! r.detached)
+                            { r.detached = true; mDidDetach = true; }
+                    }
+                }
+                mOwner.updateInfoBarFor (mOwner.mFocusRegion);
+                maybeScrub();
+                repaint();
+                return;
+            }
+            case DragKind::StretchLeft:
+            case DragKind::StretchRight:
+            {
+                if (mOwner.mFocusRegion < 0
+                    || mOwner.mFocusRegion >= (int) regions.size()) return;
+                auto& r = regions[(size_t) mOwner.mFocusRegion];
+                const DragBase* b = baseFor (mOwner.mFocusRegion);
+                if (b == nullptr) return;
+                const double dxSec = (e.x - mMouseDownPos.x) / mOwner.pixelsPerSecond();
+                const bool detach = mDetachArm && std::abs (e.x - mMouseDownPos.x) > 3;
+                double s = b->dstS, en = b->dstE;
+                if (mDragKind == DragKind::StretchLeft)
+                {
+                    s = juce::jlimit (detach ? 0.0 : prevBound (mOwner.mFocusRegion),
+                                      en - 0.02, b->dstS + dxSec);
+                    s = juce::jmax (0.0, s);
+                }
+                else
+                {
+                    en = juce::jlimit (s + 0.02,
+                                       detach ? 1.0e9 : nextBound (mOwner.mFocusRegion),
+                                       b->dstE + dxSec);
+                }
+                r.dstStartSec = s;
+                r.dstEndSec   = en;
+                if (detach && ! r.detached) { r.detached = true; mDidDetach = true; }
+                mOwner.updateInfoBarFor (mOwner.mFocusRegion);
+                repaint();
+                return;
+            }
+            case DragKind::None:
+                return;
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        switch (mDragKind)
+        {
+            case DragKind::ZoomRect:
+                if (mMarquee.getWidth() > 8 && mMarquee.getHeight() > 8)
+                    zoomToRect (mMarquee);
                 break;
-            case DragKind::RightEdge:
-                r.endSec = juce::jlimit (r.startSec + 0.02,
-                    (sel + 1 < (int) regions.size()) ? regions[(size_t) sel + 1].startSec
-                                                     : pitch.compositeSec(),
-                    tSec);
+            case DragKind::Marquee:
                 break;
-            case DragKind::SubCurve:
-                applySubCurveDrag (e.getPosition(), r);
+            case DragKind::Handle:
+                mOwner.commitEdit ("Pitch: Handle Ramp");
                 break;
+            case DragKind::PitchMove:
+                if (e.getPosition() != mMouseDownPos)
+                    mOwner.commitEdit (mDidDetach ? "Pitch: Detach Move"
+                                                  : "Pitch: Move");
+                else
+                    mOwner.cancelEdit();
+                break;
+            case DragKind::StretchLeft:
+            case DragKind::StretchRight:
+                if (e.getPosition() != mMouseDownPos)
+                    mOwner.commitEdit (mDidDetach ? "Pitch: Detach Stretch"
+                                                  : "Pitch: Stretch");
+                else
+                    mOwner.cancelEdit();
+                break;
+            case DragKind::Pan:
             case DragKind::None:
                 break;
         }
-        mOwner.updateInfoBarFor (sel);
-        repaint();
-    }
-
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        if (mDragKind != DragKind::None)
-            mOwner.mProc.mPitch.publishEdits();
+        if (mScrubbing) mOwner.stopPreview();
+        mScrubbing = false;
         mDragKind = DragKind::None;
+        repaint();
     }
 
     void mouseMove (const juce::MouseEvent& e) override
     {
+        // Hover feedback: handles advertise their drag axis (19a).
         auto& regions = mOwner.mProc.mPitch.regions();
-        const double tSec = secForX (e.x);
-        for (int i = 0; i < (int) regions.size(); ++i)
+        if ((int) mOwner.mSelection.size() == 1 && mOwner.mFocusRegion >= 0
+            && mOwner.mFocusRegion < (int) regions.size())
         {
-            const auto& r = regions[(size_t) i];
-            const float y = yForMidi ((double) r.midi + r.shiftSemis + 0.5);
-            if (tSec >= r.startSec && tSec < r.endSec
-                && e.y >= y - mOwner.noteLaneH() && e.y <= y + mOwner.noteLaneH() * 2.0)
+            const auto& r = regions[(size_t) mOwner.mFocusRegion];
+            if (handlesVisible (r))
             {
-                mOwner.updateInfoBarFor (i);
-                return;
+                int hov = -1;
+                for (int h = 0; h < 4; ++h)
+                    if (handleRect (r, h).expanded (2.0f).contains (e.position))
+                        { hov = h; break; }
+                if (hov != mHoverHandle) { mHoverHandle = hov; repaint(); }
+                if (hov >= 0)
+                {
+                    setMouseCursor (hov <= 1 ? juce::MouseCursor::LeftRightResizeCursor
+                                             : juce::MouseCursor::UpDownLeftRightResizeCursor);
+                    mOwner.updateInfoBarFor (mOwner.mFocusRegion);
+                    return;
+                }
             }
         }
-        mOwner.updateInfoBarFor (mOwner.mSelectedRegion);
+        else if (mHoverHandle != -1) { mHoverHandle = -1; repaint(); }
+
+        const int hit = hitTest (e.getPosition());
+        const bool sliceMode = ((int) mOwner.paramValue ("bsp_mode", 1.0f)) == 0;
+        if (hit >= 0)
+        {
+            if (sliceMode)
+            {
+                // Blade affordance: the I-beam marks the cut point.
+                setMouseCursor (juce::MouseCursor::IBeamCursor);
+                mOwner.updateInfoBarFor (hit);
+                return;
+            }
+            const auto pill = pillRect (regions[(size_t) hit]);
+            const bool edge = (e.position.x - pill.getX() < 6.0f)
+                           || (pill.getRight() - e.position.x < 6.0f);
+            setMouseCursor (edge ? juce::MouseCursor::LeftRightResizeCursor
+                                 : juce::MouseCursor::NormalCursor);
+            mOwner.updateInfoBarFor (hit);
+        }
+        else
+        {
+            setMouseCursor (juce::MouseCursor::NormalCursor);
+            mOwner.updateInfoBarFor (mOwner.mFocusRegion);
+        }
     }
 
+    // Wheel map per family idiom: Ctrl h-zoom, Alt v-zoom, Shift h-scroll,
+    // bare v-scroll.
     void mouseWheelMove (const juce::MouseEvent& e,
                          const juce::MouseWheelDetails& w) override
     {
         if (e.mods.isCtrlDown())
         {
             const double f = (w.deltaY > 0) ? 1.2 : 1.0 / 1.2;
-            mOwner.setView (mOwner.pixelsPerSecond() * f, mOwner.scrollSeconds());
+            const double anchorSec = secForX (e.x);
+            const double newPps = juce::jlimit (20.0, 2000.0,
+                                                mOwner.pixelsPerSecond() * f);
+            mOwner.setView (newPps, anchorSec - (double) e.x / newPps);
+        }
+        else if (e.mods.isAltDown())
+        {
+            // Alt+wheel vertical zoom (parity item 2; PianoRoll idiom).
+            const double f = (w.deltaY > 0) ? 1.15 : 1.0 / 1.15;
+            mOwner.setLaneHeight (mOwner.noteLaneH() * f, midiForY (e.y), e.y);
         }
         else if (e.mods.isShiftDown())
         {
@@ -414,75 +827,341 @@ public:
             mOwner.setTopNote (mOwner.topNote() + (w.deltaY > 0 ? 2 : -2));
     }
 
-private:
-    enum class DragKind { None, PitchDrag, LeftEdge, RightEdge, SubCurve };
-
-    void drawPillWaveform (juce::Graphics& g, juce::Rectangle<float> pill)
+    void zoomToRegions (const std::vector<int>& idxs)
     {
-        if (! mOwner.mCompValid) return;
-        const auto& buf = mOwner.mCompCache;
-        const float* src = buf.getReadPointer (0);
-        const int n = buf.getNumSamples();
-        const double sr = mOwner.mCompSr;
-        g.setColour (kPillWave.withAlpha (0.85f));
-        const float midY = pill.getCentreY();
-        const float halfH = pill.getHeight() * 0.42f;
-        const int px0 = juce::jmax ((int) pill.getX(), 0);
-        const int px1 = juce::jmin ((int) pill.getRight(), getWidth());
-        for (int x = px0; x < px1; ++x)
+        auto& regions = mOwner.mProc.mPitch.regions();
+        if (idxs.empty()) return;
+        double t0 = 1.0e18, t1 = -1.0e18;
+        float mLo = 200.0f, mHi = -200.0f;
+        for (int i : idxs)
         {
-            const juce::int64 s0 = (juce::int64) (secForX (x) * sr);
-            const juce::int64 s1 = (juce::int64) (secForX (x + 1) * sr);
-            if (s0 >= n || s1 <= 0) continue;
-            const juce::int64 a = juce::jmax ((juce::int64) 0, s0);
-            const juce::int64 z = juce::jmin ((juce::int64) n, juce::jmax (s0 + 1, s1));
-            const juce::int64 stride = juce::jmax ((juce::int64) 1, (z - a) / 32);
-            float lo = 0.0f, hi = 0.0f;
-            for (juce::int64 s = a; s < z; s += stride)
+            if (i < 0 || i >= (int) regions.size()) continue;
+            const auto& r = regions[(size_t) i];
+            t0 = juce::jmin (t0, r.dstStart());
+            t1 = juce::jmax (t1, r.dstEnd());
+            if (! r.isSlice)
             {
-                lo = juce::jmin (lo, src[s]);
-                hi = juce::jmax (hi, src[s]);
+                mLo = juce::jmin (mLo, drawMidiFor (r) - 4.0f);
+                mHi = juce::jmax (mHi, drawMidiFor (r) + 4.0f);
             }
-            g.drawVerticalLine (x, midY - hi * halfH, midY - lo * halfH + 1.0f);
+        }
+        if (t1 <= t0) return;
+        mOwner.mHasSavedView = true;
+        mOwner.mSavedPps = mOwner.pixelsPerSecond();
+        mOwner.mSavedScroll = mOwner.scrollSeconds();
+        mOwner.mSavedTopNote = mOwner.topNote();
+        mOwner.mSavedLaneH = mOwner.noteLaneH();
+
+        const double pps = juce::jlimit (20.0, 2000.0,
+            (double) juce::jmax (60, getWidth() - 40) / (t1 - t0));
+        mOwner.setView (pps, t0 - 20.0 / pps);
+        if (mHi > mLo)
+        {
+            const double laneH = juce::jlimit (4.0, 24.0,
+                (double) juce::jmax (60, getHeight() - kRulerH - kSliceLaneH)
+                    / juce::jmax (8.0, (double) (mHi - mLo)));
+            mOwner.setLaneHeight (laneH, (mLo + mHi) * 0.5,
+                                  (getHeight() + kRulerH) / 2);
         }
     }
 
-    juce::Rectangle<int> subCurveArea (const PitchNoteRegion& r) const
+private:
+    enum class DragKind { None, PitchMove, StretchLeft, StretchRight,
+                          Marquee, ZoomRect, Pan, Handle };
+    struct DragBase { int idx; float shift; double dstS, dstE; };
+
+    int hitTest (juce::Point<int> pos) const
     {
-        const int x0 = xForSec (r.startSec);
-        const int x1 = xForSec (r.endSec);
-        const float y = yForMidi ((double) r.midi + r.shiftSemis + 0.5);
-        return { x0, (int) (y + mOwner.noteLaneH() * 2.0) + 2,
-                 juce::jmax (72, x1 - x0), kSubCurveH };
+        const auto& regions = mOwner.mProc.mPitch.regions();
+        for (int i = 0; i < (int) regions.size(); ++i)
+            if (pillRect (regions[(size_t) i]).contains (pos.toFloat()))
+                return i;
+        return -1;
     }
 
-    void drawSubCurves (juce::Graphics& g, const PitchNoteRegion& r)
+    // Map a canvas dst-time back into a region's SOURCE time (slice tool).
+    static double srcTimeForDstSec (const PitchNoteRegion& r, double dstSec)
     {
-        auto area = subCurveArea (r);
-        g.setColour (kPanelBg.withAlpha (0.92f));
-        g.fillRoundedRectangle (area.toFloat(), 3.0f);
+        const double dLen = r.dstEnd() - r.dstStart();
+        if (dLen <= 1.0e-9) return r.startSec;
+        const double f = juce::jlimit (0.0, 1.0, (dstSec - r.dstStart()) / dLen);
+        return r.startSec + f * (r.endSec - r.startSec);
+    }
 
-        const int laneH = kSubCurveH / 3;
+    void captureDragBases()
+    {
+        mDragBases.clear();
+        const auto& regions = mOwner.mProc.mPitch.regions();
+        for (int i : mOwner.selectionOrFocus())
+            if (i >= 0 && i < (int) regions.size())
+            {
+                const auto& r = regions[(size_t) i];
+                mDragBases.push_back ({ i, r.shiftSemis, r.dstStart(), r.dstEnd() });
+            }
+    }
+
+    const DragBase* baseFor (int idx) const
+    {
+        for (const auto& b : mDragBases)
+            if (b.idx == idx) return &b;
+        return nullptr;
+    }
+
+    // Non-selected neighbor bounds in DST time (pills never cross; gap
+    // counter-warp exhausts at contact).
+    double prevBound (int idx) const
+    {
+        const auto& regions = mOwner.mProc.mPitch.regions();
+        double bound = 0.0;
+        const bool slice = regions[(size_t) idx].isSlice;
+        for (int j = 0; j < (int) regions.size(); ++j)
+        {
+            if (j == idx || mOwner.isSelected (j)) continue;
+            if (regions[(size_t) j].isSlice != slice) continue;
+            if (regions[(size_t) j].dstEnd() <= regions[(size_t) idx].dstStart() + 1.0e-9)
+                bound = juce::jmax (bound, regions[(size_t) j].dstEnd());
+        }
+        return bound;
+    }
+    double nextBound (int idx) const
+    {
+        const auto& regions = mOwner.mProc.mPitch.regions();
+        double bound = 1.0e18;
+        const bool slice = regions[(size_t) idx].isSlice;
+        for (int j = 0; j < (int) regions.size(); ++j)
+        {
+            if (j == idx || mOwner.isSelected (j)) continue;
+            if (regions[(size_t) j].isSlice != slice) continue;
+            if (regions[(size_t) j].dstStart() >= regions[(size_t) idx].dstEnd() - 1.0e-9)
+                bound = juce::jmin (bound, regions[(size_t) j].dstStart());
+        }
+        return bound;
+    }
+
+    double clampElasticDelta (double wanted) const
+    {
+        double lo = -1.0e18, hi = 1.0e18;
+        for (const auto& b : mDragBases)
+        {
+            lo = juce::jmax (lo, prevBound (b.idx) - b.dstS);
+            lo = juce::jmax (lo, -b.dstS);                 // composite start
+            hi = juce::jmin (hi, nextBound (b.idx) - b.dstE);
+        }
+        return juce::jlimit (juce::jmin (0.0, lo), juce::jmax (0.0, hi), wanted);
+    }
+    double minDetachDelta() const
+    {
+        double lo = -1.0e18;
+        for (const auto& b : mDragBases)
+            lo = juce::jmax (lo, -b.dstS);
+        return lo;   // detach: free placement, floored at composite start
+    }
+
+    void applyMarqueeSelection (bool additive)
+    {
+        auto& regions = mOwner.mProc.mPitch.regions();
+        if (! additive) mOwner.mSelection.clear();
+        for (int i = 0; i < (int) regions.size(); ++i)
+            if (pillRect (regions[(size_t) i]).toNearestInt()
+                    .intersects (mMarquee))
+            {
+                mOwner.mSelection.insert (i);
+                mOwner.mFocusRegion = i;
+            }
+    }
+
+    void zoomToRect (juce::Rectangle<int> rect)
+    {
+        mOwner.mHasSavedView = true;
+        mOwner.mSavedPps = mOwner.pixelsPerSecond();
+        mOwner.mSavedScroll = mOwner.scrollSeconds();
+        mOwner.mSavedTopNote = mOwner.topNote();
+        mOwner.mSavedLaneH = mOwner.noteLaneH();
+
+        const double t0 = secForX (rect.getX());
+        const double t1 = secForX (rect.getRight());
+        const double midiHi = midiForY (rect.getY());
+        const double midiLo = midiForY (rect.getBottom());
+        if (t1 - t0 < 0.01) return;
+        const double pps = juce::jlimit (20.0, 2000.0, (double) getWidth() / (t1 - t0));
+        mOwner.setView (pps, t0);
+        const double span = juce::jmax (6.0, midiHi - midiLo);
+        const double laneH = juce::jlimit (4.0, 24.0,
+            (double) juce::jmax (60, getHeight() - kRulerH) / span);
+        mOwner.setLaneHeight (laneH, (midiHi + midiLo) * 0.5,
+                              (getHeight() + kRulerH) / 2);
+    }
+
+    // 150 ms throttle keeps the per-step preview re-render from hitching
+    // long pills.
+    void maybeScrub()
+    {
+        if (! mScrubbing || mOwner.mFocusRegion < 0) return;
+        const juce::uint32 now = juce::Time::getMillisecondCounter();
+        if (now - mLastScrubMs < 150) return;
+        mLastScrubMs = now;
+        mOwner.mProc.mPitch.publishEdits();
+        mOwner.startRegionPreview (mOwner.mFocusRegion, false);
+    }
+
+    // ── On-pill handles (19a single-storage contract) ────────────────────────
+    // Handles write ORDINARY points into the SAME volShape / pitchShape the
+    // popup edits; re-dragging over a complex boundary span replaces that
+    // span with the clean ramp (deliberate, one undo step).
+    void applyHandleDrag (juce::Point<int> pos)
+    {
+        auto& regions = mOwner.mProc.mPitch.regions();
+        if (mHandlePill < 0 || mHandlePill >= (int) regions.size()) return;
+        auto& r = regions[(size_t) mHandlePill];
+        const auto pill = pillRect (r);
+        const float t01 = juce::jlimit (0.0f, 1.0f,
+            (float) (pos.x - pill.getX()) / juce::jmax (1.0f, pill.getWidth()));
+
+        auto replaceSpanLE = [] (std::vector<juce::Point<float>>& pts, float x)
+        {
+            pts.erase (std::remove_if (pts.begin(), pts.end(),
+                        [x] (const juce::Point<float>& p) { return p.x <= x + 1.0e-4f; }),
+                       pts.end());
+        };
+        auto replaceSpanGE = [] (std::vector<juce::Point<float>>& pts, float x)
+        {
+            pts.erase (std::remove_if (pts.begin(), pts.end(),
+                        [x] (const juce::Point<float>& p) { return p.x >= x - 1.0e-4f; }),
+                       pts.end());
+        };
+        auto sortPts = [] (std::vector<juce::Point<float>>& pts)
+        {
+            std::sort (pts.begin(), pts.end(),
+                       [] (const juce::Point<float>& a, const juce::Point<float>& b)
+                       { return a.x < b.x; });
+        };
+
+        if (mHandleIdx == 0)          // volume fade-in: horizontal = length
+        {
+            const float len = juce::jlimit (0.0f, 0.9f, t01);
+            replaceSpanLE (r.volShape, len);
+            if (len > 0.005f)
+            {
+                r.volShape.push_back ({ 0.0f, 0.0f });
+                r.volShape.push_back ({ len, 1.0f });
+            }
+            sortPts (r.volShape);
+            mHandleReadout = "Fade in: " + juce::String (len * 100.0f, 0) + "%";
+        }
+        else if (mHandleIdx == 1)     // volume fade-out
+        {
+            const float start = juce::jlimit (0.1f, 1.0f, t01);
+            replaceSpanGE (r.volShape, start);
+            if (start < 0.995f)
+            {
+                r.volShape.push_back ({ start, 1.0f });
+                r.volShape.push_back ({ 1.0f, 0.0f });
+            }
+            sortPts (r.volShape);
+            mHandleReadout = "Fade out: " + juce::String ((1.0f - start) * 100.0f, 0) + "%";
+        }
+        else
+        {
+            // Pitch approach (2) / release (3): 2-axis -- horizontal =
+            // length, vertical = semitone offset scooped from / released to.
+            const float semis = juce::jlimit (-12.0f, 12.0f,
+                (float) ((pill.getCentreY() - pos.y) / mOwner.noteLaneH()));
+            if (mHandleIdx == 2)
+            {
+                const float len = juce::jlimit (0.02f, 0.9f, t01);
+                replaceSpanLE (r.pitchShape, len);
+                if (std::abs (semis) > 0.05f)
+                {
+                    r.pitchShape.push_back ({ 0.0f, semis });
+                    r.pitchShape.push_back ({ len, 0.0f });
+                }
+                sortPts (r.pitchShape);
+                mHandleReadout = "Approach: " + juce::String (semis, 1) + " st over "
+                               + juce::String (len * 100.0f, 0) + "%";
+            }
+            else
+            {
+                const float start = juce::jlimit (0.1f, 0.98f, t01);
+                replaceSpanGE (r.pitchShape, start);
+                if (std::abs (semis) > 0.05f)
+                {
+                    r.pitchShape.push_back ({ start, 0.0f });
+                    r.pitchShape.push_back ({ 1.0f, semis });
+                }
+                sortPts (r.pitchShape);
+                mHandleReadout = "Release: " + juce::String (semis, 1) + " st from "
+                               + juce::String ((1.0f - start) * 100.0f, 0) + "%";
+            }
+        }
+        mOwner.updateInfoBarFor (mHandlePill);
+    }
+
+    void drawHandles (juce::Graphics& g, const PitchNoteRegion& r)
+    {
+        for (int h = 0; h < 4; ++h)
+        {
+            auto hr = handleRect (r, h);
+            g.setColour ((h == 0 || h == 2) ? kHandleIn : kHandleOut);
+            g.fillRect (hr);
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawRect (hr, 1.0f);
+            if (h == mHoverHandle)
+            {
+                // Hover arrows advertise the drag axis (19a).
+                g.setColour (juce::Colours::white);
+                const float cx = hr.getCentreX(), cy = hr.getCentreY();
+                g.drawArrow ({ cx - 10.0f, cy, cx - 4.0f, cy }, 1.4f, 5.0f, 4.0f);
+                g.drawArrow ({ cx + 10.0f, cy, cx + 4.0f, cy }, 1.4f, 5.0f, 4.0f);
+                if (h >= 2)
+                {
+                    g.drawArrow ({ cx, cy - 10.0f, cx, cy - 4.0f }, 1.4f, 5.0f, 4.0f);
+                    g.drawArrow ({ cx, cy + 10.0f, cx, cy + 4.0f }, 1.4f, 5.0f, 4.0f);
+                }
+            }
+        }
+    }
+
+    // Display-only sub-edit box (Jeff's design): 4 bars VIB / FRM / VOL /
+    // PITCH + Edit button over the titles + Reset button over the bars.
+    void drawDisplayBox (juce::Graphics& g, const PitchNoteRegion& r)
+    {
+        const auto box = displayBoxArea (r);
+        if (box.getBottom() > getHeight() - kSliceLaneH) return;   // off-canvas
+        g.setColour (kPanelBg.withAlpha (0.94f));
+        g.fillRoundedRectangle (box.toFloat(), 3.0f);
+
+        auto edit = boxEditBtn (box);
+        auto rst  = boxResetBtn (box);
+        g.setColour (kPillWave.withAlpha (0.85f));
+        g.fillRoundedRectangle (edit.toFloat(), 2.0f);
+        g.setColour (juce::Colours::black);
+        g.setFont (9.0f);
+        g.drawText ("EDIT", edit, juce::Justification::centred);
+        g.setColour (kStale.withAlpha (0.85f));
+        g.fillRoundedRectangle (rst.toFloat(), 2.0f);
+        g.setColour (juce::Colours::black);
+        g.drawText ("RESET", rst, juce::Justification::centred);
+
+        auto bars = box.withTrimmedTop (kBoxBtnH + 4).reduced (2, 1);
+        const int laneH = bars.getHeight() / 4;
         auto lane = [&] (int idx)
         {
-            return area.withHeight (laneH).withY (area.getY() + idx * laneH);
+            return bars.withHeight (laneH).withY (bars.getY() + idx * laneH);
         };
         g.setFont (8.0f);
 
-        // Vibrato: filled bar = depth mult (0..2, half = natural).
-        {
+        {   // VIB: filled bar = depth mult (0..2, half = natural)
             auto L = lane (0).reduced (2, 1);
             g.setColour (kTextDim);
             g.drawText ("VIB", L.removeFromLeft (26), juce::Justification::centredLeft);
             g.setColour (kPitchCurve.withAlpha (0.25f));
             g.fillRect (L);
             g.setColour (kPitchCurve);
-            const float w = (float) L.getWidth()
-                          * juce::jlimit (0.0f, 2.0f, r.vibDepthMult) * 0.5f;
-            g.fillRect ((float) L.getX(), (float) L.getY(), w, (float) L.getHeight());
+            g.fillRect ((float) L.getX(), (float) L.getY(),
+                        (float) L.getWidth() * juce::jlimit (0.0f, 2.0f, r.vibDepthMult) * 0.5f,
+                        (float) L.getHeight());
         }
-        // Formant: bipolar bar from center (-6..+6 st).
-        {
+        {   // FRM: bipolar bar (-6..+6 st)
             auto L = lane (1).reduced (2, 1);
             g.setColour (kTextDim);
             g.drawText ("FRM", L.removeFromLeft (26), juce::Justification::centredLeft);
@@ -495,8 +1174,7 @@ private:
             g.fillRect (juce::Rectangle<float> (juce::jmin (cx, cx + dx), (float) L.getY(),
                                                 std::abs (dx), (float) L.getHeight()));
         }
-        // Volume: shape polyline (unity midline when empty).
-        {
+        {   // VOL: shape polyline (unity midline when empty)
             auto L = lane (2).reduced (2, 1);
             g.setColour (kTextDim);
             g.drawText ("VOL", L.removeFromLeft (26), juce::Justification::centredLeft);
@@ -515,48 +1193,87 @@ private:
             }
             g.strokePath (p, juce::PathStrokeType (1.2f));
         }
+        {   // PITCH: additive curve (+-12 st) around the midline
+            auto L = lane (3).reduced (2, 1);
+            g.setColour (kTextDim);
+            g.drawText ("PIT", L.removeFromLeft (26), juce::Justification::centredLeft);
+            g.setColour (kPillFill.withAlpha (0.25f));
+            g.fillRect (L);
+            g.setColour (kPillFill.brighter (0.4f));
+            juce::Path p;
+            const int steps = juce::jmax (2, L.getWidth() / 4);
+            for (int s = 0; s <= steps; ++s)
+            {
+                const float t01 = (float) s / (float) steps;
+                const float semis = juce::jlimit (-12.0f, 12.0f, r.pitchSemisAt (t01));
+                const float x = (float) L.getX() + t01 * (float) L.getWidth();
+                const float y = (float) L.getCentreY() - semis / 12.0f * 0.5f * (float) L.getHeight();
+                if (s == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+            }
+            g.strokePath (p, juce::PathStrokeType (1.2f));
+        }
     }
 
-    void applySubCurveDrag (juce::Point<int> pos, PitchNoteRegion& r)
+    // Pill waveform, drawn POST-GAIN so handle fades show on-canvas (19a).
+    void drawPillWaveform (juce::Graphics& g, const PitchNoteRegion& r,
+                           juce::Rectangle<float> pill)
     {
-        auto area = subCurveArea (r);
-        const int laneH = kSubCurveH / 3;
-        const int lane = juce::jlimit (0, 2, (pos.y - area.getY()) / laneH);
-        auto L = area.withHeight (laneH).withY (area.getY() + lane * laneH).reduced (2, 1);
-        L.removeFromLeft (26);
-        const float t01 = juce::jlimit (0.0f, 1.0f,
-            (float) (pos.x - L.getX()) / (float) juce::jmax (1, L.getWidth()));
-
-        if (lane == 0)
-            r.vibDepthMult = juce::jlimit (0.0f, 2.0f, t01 * 2.0f);
-        else if (lane == 1)
-            r.formantSemis = juce::jlimit (-6.0f, 6.0f, (t01 - 0.5f) * 12.0f);
-        else
+        if (! mOwner.mCompValid) return;
+        const auto& buf = mOwner.mCompCache;
+        const float* src = buf.getReadPointer (0);
+        const int n = buf.getNumSamples();
+        const double sr = mOwner.mCompSr;
+        g.setColour (kPillWave.withAlpha (0.85f));
+        const float midY = pill.getCentreY();
+        const float halfH = pill.getHeight() * 0.42f;
+        const int px0 = juce::jmax ((int) pill.getX(), 0);
+        const int px1 = juce::jmin ((int) pill.getRight(), getWidth());
+        const double srcLen = r.endSec - r.startSec;
+        for (int x = px0; x < px1; ++x)
         {
-            // Volume: set/update a point at this t01 (merge within 5%).
-            const float gval = juce::jlimit (0.0f, 2.0f,
-                2.0f * (float) (L.getBottom() - pos.y) / (float) juce::jmax (1, L.getHeight()));
-            bool merged = false;
-            for (auto& p : r.volShape)
-                if (std::abs (p.x - t01) < 0.05f) { p.y = gval; merged = true; break; }
-            if (! merged)
+            // Canvas dst position -> region t01 -> SOURCE audio position.
+            const float t01a = juce::jlimit (0.0f, 1.0f,
+                (float) ((secForX (x) - r.dstStart())
+                         / juce::jmax (1.0e-9, r.dstEnd() - r.dstStart())));
+            const float t01b = juce::jlimit (0.0f, 1.0f,
+                (float) ((secForX (x + 1) - r.dstStart())
+                         / juce::jmax (1.0e-9, r.dstEnd() - r.dstStart())));
+            const juce::int64 s0 = (juce::int64) ((r.startSec + t01a * srcLen) * sr);
+            const juce::int64 s1 = (juce::int64) ((r.startSec + t01b * srcLen) * sr);
+            if (s0 >= n || s1 <= 0) continue;
+            const juce::int64 a = juce::jmax ((juce::int64) 0, s0);
+            const juce::int64 z = juce::jmin ((juce::int64) n, juce::jmax (s0 + 1, s1));
+            const juce::int64 stride = juce::jmax ((juce::int64) 1, (z - a) / 32);
+            float lo = 0.0f, hi = 0.0f;
+            for (juce::int64 s = a; s < z; s += stride)
             {
-                r.volShape.push_back ({ t01, gval });
-                std::sort (r.volShape.begin(), r.volShape.end(),
-                           [] (const juce::Point<float>& a, const juce::Point<float>& b)
-                           { return a.x < b.x; });
+                lo = juce::jmin (lo, src[s]);
+                hi = juce::jmax (hi, src[s]);
             }
+            const float gain = juce::jlimit (0.0f, 2.0f, r.volGainAt (t01a));
+            g.drawVerticalLine (x, midY - hi * gain * halfH,
+                                   midY - lo * gain * halfH + 1.0f);
         }
     }
 
     BaySickPitchEditor& mOwner;
-    DragKind mDragKind       { DragKind::None };
-    float    mDragStartShift { 0.0f };
-    int      mDragStartY     { 0 };
+    DragKind mDragKind { DragKind::None };
+    juce::Point<int> mMouseDownPos;
+    juce::Rectangle<int> mMarquee;
+    std::vector<DragBase> mDragBases;
+    bool mFineDrag { false }, mDetachArm { false }, mDidDetach { false };
+    bool mScrubbing { false };
+    juce::uint32 mLastScrubMs { 0 };
+    double mPanStartScroll { 0.0 };
+    int    mPanStartTop { 84 };
+    int mHandleIdx { -1 }, mHandlePill { -1 }, mHoverHandle { -1 };
+    juce::String mHandleReadout;
+
+    friend class BaySickPitchEditor;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// InfoBar (section 14d): monospace Pitch / Cents / Length
+// InfoBar: monospace Pitch / Cents / Length at hover/selection
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickPitchEditor::InfoBar : public juce::Component
 {
@@ -579,7 +1296,8 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Toolbar (section 14b)
+// Toolbar - QA-Fd: preset combo retired (7a); Root/Scale/Snap added (8/14a-c);
+// Undo/Redo drive the GLOBAL stack (9a).
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickPitchEditor::Toolbar : public juce::Component
 {
@@ -588,20 +1306,6 @@ public:
         : mOwner (o), mApvts (apvts)
     {
         addAndMakeVisible (mTitleLbl);
-
-        addAndMakeVisible (mPresetCombo);
-        for (int i = 0; i < 3; ++i)
-            mPresetCombo.addItem (kPitchPresets[i].name, i + 1);
-        mPresetCombo.addItem ("(User)", 4);
-        mPresetCombo.setColour (juce::ComboBox::backgroundColourId, kPanelBg);
-        mPresetCombo.setColour (juce::ComboBox::textColourId, kText);
-        mPresetCombo.onChange = [this]
-        {
-            if (mMirroring) return;
-            const int id = mPresetCombo.getSelectedId();
-            if (id >= 1 && id <= 3)
-                mOwner.applyFactoryPreset (id - 1);
-        };
 
         auto plain = [this] (juce::TextButton& b, const juce::String& t,
                              const juce::String& tt)
@@ -615,8 +1319,8 @@ public:
         };
         plain (mSaveBtn,   "Save",   "Save the current Focus/Mod/Speed as a user preset");
         plain (mLoadBtn,   "Load",   "Load a saved user preset");
-        plain (mSliceBtn,  "Slice",  "Slice mode: click a note to split it");
-        plain (mEditBtn,   "Edit",   "Edit mode: drag notes vertically (pitch) / edges (length); drag the sub-curves");
+        plain (mSliceBtn,  "Slice",  "Slice mode: click a note to split it (works on slice pills too)");
+        plain (mEditBtn,   "Edit",   "Edit mode: drag pills (vertical = pitch, horizontal = move), edges stretch, Ctrl+drag detaches");
         plain (mResetBtn,  "Reset",  "Clear every pitch edit on this channel");
         plain (mRenderBtn, "Render",
                "Export the edited channel to Pitched/{name}_pitch_v{N}.wav (file only - playback is already live)");
@@ -625,7 +1329,7 @@ public:
                "Save the current edits as a restore point in the version history");
         plain (mVersionsBtn, "Versions",
                "Revert to an earlier snapshot (every analyze also creates one)");
-        plain (mUndoBtn,   "Undo",   "Undo the last note edit");
+        plain (mUndoBtn,   "Undo",   "Undo (app-wide history - Ctrl+Z)");
         plain (mRedoBtn,   "Redo",   "Redo");
         plain (mScrollBtn, "A",      "Auto-scroll the canvas to follow playback (A)");
 
@@ -648,6 +1352,35 @@ public:
         mSliceBtn.onClick = [this] { mOwner.setParamValue ("bsp_mode", 0.0f); };
         mEditBtn .onClick = [this] { mOwner.setParamValue ("bsp_mode", 1.0f); };
 
+        // QA-Fd 8/14a: Root + Scale + Snap (shared 13-scale table; the
+        // editor's pick is deliberately independent from the realtime board).
+        addAndMakeVisible (mRootCombo);
+        const char* keyNames[] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
+        for (int i = 0; i < 12; ++i) mRootCombo.addItem (keyNames[i], i + 1);
+        mRootCombo.setColour (juce::ComboBox::backgroundColourId, kPanelBg);
+        mRootCombo.setColour (juce::ComboBox::textColourId, kText);
+        mRootCombo.setTooltip ("Root note for Snap and the Focus pull target");
+        mRootAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+            mApvts, "bsp_root", mRootCombo);
+
+        addAndMakeVisible (mScaleCombo);
+        for (int i = 0; i < PitchCorrectorDSP::kNumScales; ++i)
+            mScaleCombo.addItem (PitchCorrectorDSP::scaleName (i), i + 1);
+        mScaleCombo.setColour (juce::ComboBox::backgroundColourId, kPanelBg);
+        mScaleCombo.setColour (juce::ComboBox::textColourId, kText);
+        mScaleCombo.setTooltip ("Scale for Snap and the Focus pull target (same list as the piano roll)");
+        mScaleAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+            mApvts, "bsp_scale", mScaleCombo);
+
+        addAndMakeVisible (mSnapBtn);
+        mSnapBtn.setButtonText ("Snap");
+        mSnapBtn.setClickingTogglesState (true);
+        mSnapBtn.setTooltip ("Snap ON: Focus pulls toward the Root/Scale notes and "
+                             "vertical drags land on in-scale lanes (Ctrl+drag = free fine "
+                             "movement).  OFF: nearest semitone.");
+        mSnapAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+            mApvts, "bsp_snap", mSnapBtn);
+
         mSaveBtn    .onClick = [this] { mOwner.saveUserPreset(); };
         mLoadBtn    .onClick = [this] { mOwner.loadUserPreset(); };
         mResetBtn   .onClick = [this] { mOwner.runReset(); };
@@ -655,29 +1388,35 @@ public:
         mSendBtn    .onClick = [this] { mOwner.showSendNotesMenu(); };
         mSnapshotBtn.onClick = [this] { mOwner.runSnapshotVersion(); };
         mVersionsBtn.onClick = [this] { mOwner.showVersionsMenu(); };
-        mUndoBtn    .onClick = [this] { mOwner.doUndo(); };
-        mRedoBtn    .onClick = [this] { mOwner.doRedo(); };
+        mUndoBtn    .onClick = [this] { if (mOwner.mUndoCtx.undo) mOwner.mUndoCtx.undo(); };
+        mRedoBtn    .onClick = [this] { if (mOwner.mUndoCtx.redo) mOwner.mUndoCtx.redo(); };
 
-        // Focus / Mod / Speed (section 14b renames), APVTS-attached.
+        // Focus / Mod / Speed, APVTS-attached, FL knob conventions (P1-14).
         auto knob = [this] (juce::Slider& s, const char* id, const juce::String& tt,
-                            std::unique_ptr<TaggedSliderAttachment>& att)
+                            std::unique_ptr<TaggedSliderAttachment>& att,
+                            double defaultValue)
         {
             addAndMakeVisible (s);
             s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
             s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 44, 14);
             s.setTooltip (tt);
             att = std::make_unique<TaggedSliderAttachment> (mApvts, id, s);
+            applyFLKnobFeel (s, defaultValue);
         };
-        knob (mFocus, "bsp_focus", "How strongly note centers pull to the nearest semitone (0 = leave the take alone)", mFocusAtt);
-        knob (mMod,   "bsp_mod",   "Vibrato movement: 50 = natural, above adds synthesized vibrato per note", mModAtt);
-        knob (mSpeed, "bsp_speed", "How fast pitch moves between notes: low = smooth glide, high = instant", mSpeedAtt);
+        knob (mFocus, "bsp_focus", "How strongly note centers pull to the snap target (semitone, or the Root/Scale when Snap is on).  0 = leave the take alone.", mFocusAtt, 0.0);
+        knob (mMod,   "bsp_mod",   "Vibrato movement: 50 = natural, above adds synthesized vibrato per note", mModAtt, 50.0);
+        knob (mSpeed, "bsp_speed", "How fast pitch moves between notes: low = smooth glide, high = instant", mSpeedAtt, 50.0);
     }
 
-    void setDirty (bool d) { if (mDirty != d) { mDirty = d; repaint(); } }
     void setStale (bool s, bool pending)
     {
         if (mStale != s || mStalePending != pending)
             { mStale = s; mStalePending = pending; repaint(); }
+    }
+    // QA-Fd 4a: transient analysis state -- wins over the stale text.
+    void setAnalysisBadge (const juce::String& t)
+    {
+        if (t != mAnalysisBadge) { mAnalysisBadge = t; repaint(); }
     }
     // Revert is stop-gated (owner call 2026-07-10, same rule as Align):
     // a mid-play version swap is an unbounded law change.  Snapshot stays
@@ -691,12 +1430,10 @@ public:
             ? "Stop playback to revert"
             : "Revert to an earlier snapshot (every analyze also creates one)");
     }
-    void mirrorPreset (int presetParam)
+    void setUndoRedoEnabled (bool canUndo, bool canRedo)
     {
-        mMirroring = true;
-        mPresetCombo.setSelectedId (juce::jlimit (0, 3, presetParam) + 1,
-                                    juce::dontSendNotification);
-        mMirroring = false;
+        mUndoBtn.setEnabled (canUndo);
+        mRedoBtn.setEnabled (canRedo);
     }
     void mirrorMode (int mode)
     {
@@ -714,22 +1451,25 @@ public:
         g.setColour (juce::Colours::black.withAlpha (0.6f));
         g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
 
-        if (mDirty)
+        if (mAnalysisBadge.isNotEmpty())
         {
-            g.setColour (kDirtyDot);
-            g.fillEllipse ((float) mPresetCombo.getRight() + 5.0f, 13.0f, 8.0f, 8.0f);
+            g.setColour (kStale);
+            g.setFont (juce::Font (11.0f, juce::Font::bold));
+            g.drawText (mAnalysisBadge,
+                        mRootCombo.getX() - 196, 2, 188, 30,
+                        juce::Justification::centredRight);
         }
-        if (mStale)
+        else if (mStale)
         {
             // Pending = grid changed while the transport runs; the stop-
             // gated auto re-analyze fires at the next stop.
             g.setColour (kStale);
             g.setFont (juce::Font (11.0f, juce::Font::bold));
             g.drawText (mStalePending ? "RE-ANALYZE ON STOP" : "RE-ANALYZE",
-                        getWidth() - 3 * 56 - 8 - 152, 2, 148, 30,
+                        mRootCombo.getX() - 156, 2, 148, 30,
                         juce::Justification::centredRight);
         }
-        // LENGTH readout (section 14b RETAIN), monospace.
+        // LENGTH readout, monospace.
         g.setColour (kTextDim);
         g.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 11.0f,
                                juce::Font::plain));
@@ -755,17 +1495,23 @@ public:
         auto row1 = b.removeFromTop (26);
         mTitleLbl.setBounds (row1.removeFromLeft (104));
         row1.removeFromLeft (6);
-        mPresetCombo.setBounds (row1.removeFromLeft (100).reduced (0, 2));
-        row1.removeFromLeft (16);   // dirty-dot slot
         mSaveBtn.setBounds (row1.removeFromLeft (44));
         row1.removeFromLeft (3);
         mLoadBtn.setBounds (row1.removeFromLeft (44));
         row1.removeFromLeft (10);
-        mSliceBtn.setBounds (row1.removeFromLeft (48));
+        mSliceBtn.setBounds (row1.removeFromLeft (46));
         row1.removeFromLeft (2);
-        mEditBtn.setBounds (row1.removeFromLeft (48));
+        mEditBtn.setBounds (row1.removeFromLeft (42));
         row1.removeFromLeft (10);
-        mSendBtn.setBounds (row1.removeFromLeft (108));
+        mSendBtn.setBounds (row1.removeFromLeft (104));
+        // Root / Scale / Snap sit right-aligned, directly above row 2's
+        // Undo / Redo stack (owner placement call, 2026-07-11).
+        row1.removeFromRight (32);
+        mSnapBtn.setBounds (row1.removeFromRight (44));
+        row1.removeFromRight (3);
+        mScaleCombo.setBounds (row1.removeFromRight (102).reduced (0, 2));
+        row1.removeFromRight (2);
+        mRootCombo.setBounds (row1.removeFromRight (52).reduced (0, 2));
 
         auto row2 = b.withTrimmedTop (4).removeFromTop (26);
         row2.removeFromLeft (260);   // LENGTH readout slot
@@ -790,17 +1536,17 @@ private:
     juce::AudioProcessorValueTreeState& mApvts;
 
     BaySickEngineLabel mTitleLbl { "BaySickPitch", juce::Colour (0xFF0FAFA5) };
-    juce::ComboBox   mPresetCombo;
     juce::TextButton mSaveBtn, mLoadBtn, mSliceBtn, mEditBtn, mResetBtn,
                      mRenderBtn, mSendBtn, mSnapshotBtn, mVersionsBtn,
-                     mUndoBtn, mRedoBtn, mScrollBtn;
+                     mUndoBtn, mRedoBtn, mScrollBtn, mSnapBtn;
+    juce::ComboBox   mRootCombo, mScaleCombo;
     juce::ToggleButton mOnToggle;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mOnAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mOnAtt, mSnapAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mRootAtt, mScaleAtt;
     juce::Slider     mFocus, mMod, mSpeed;
     std::unique_ptr<TaggedSliderAttachment> mFocusAtt, mModAtt, mSpeedAtt;
-    juce::String mLengthText;
-    bool mDirty { false }, mStale { false }, mStalePending { false },
-         mMirroring { false }, mPlayGated { false };
+    juce::String mLengthText, mAnalysisBadge;
+    bool mStale { false }, mStalePending { false }, mPlayGated { false };
 
     friend class BaySickPitchEditor;
 };
@@ -822,11 +1568,16 @@ BaySickPitchEditor::BaySickPitchEditor (BaySickVocalProcessor& p)
     addAndMakeVisible (*mInfoBar);
 
     setWantsKeyboardFocus (true);
-    snapshotPresetValues();
-    startTimer (400);
+    // 30 Hz: playhead + auto-scroll follow the main transport smoothly; the
+    // poll-ish work (stale badges, length readout, diag) runs on a divided
+    // slow path (#7 rate note -- the old 400 ms timer was too coarse).
+    startTimerHz (30);
 }
 
-BaySickPitchEditor::~BaySickPitchEditor() = default;
+BaySickPitchEditor::~BaySickPitchEditor()
+{
+    stopPreview();
+}
 
 void BaySickPitchEditor::paint (juce::Graphics& g)
 {
@@ -844,18 +1595,66 @@ void BaySickPitchEditor::resized()
 
 void BaySickPitchEditor::visibilityChanged()
 {
-    // Composite auto-resolve (section 14b, Call 4a: no manual load): first
-    // show, or a stale grid, re-runs the analysis.
+    // Composite auto-resolve (no manual load): first show, or a stale grid,
+    // re-runs the analysis (QA-Fd 4a: first analysis even mid-play).
     if (isVisible())
         runAnalyzeIfNeeded (false);
 }
 
 bool BaySickPitchEditor::keyPressed (const juce::KeyPress& k)
 {
-    if (k.getTextCharacter() == 'a' || k.getTextCharacter() == 'A')
+    const bool ctrl  = k.getModifiers().isCtrlDown();
+    const bool shift = k.getModifiers().isShiftDown();
+    const int  kc    = k.getKeyCode();
+
+    if (! ctrl && ! shift && (k.getTextCharacter() == 'a' || k.getTextCharacter() == 'A'))
     {
         mAutoScroll = ! mAutoScroll;
         mToolbar->mScrollBtn.setToggleState (mAutoScroll, juce::dontSendNotification);
+        return true;
+    }
+    if (ctrl && ! shift)
+    {
+        if (kc == 'A' || kc == 'a')
+        {
+            mSelection.clear();
+            for (int i = 0; i < (int) mProc.mPitch.regions().size(); ++i)
+                mSelection.insert (i);
+            if (! mSelection.empty()) mFocusRegion = *mSelection.begin();
+            mCanvas->repaint();
+            return true;
+        }
+        if (kc == 'C' || kc == 'c') { copySelection();    return true; }
+        if (kc == 'V' || kc == 'v') { pasteToSelection(); return true; }
+        if (kc == 'B' || kc == 'b')
+        {
+            // Family "duplicate" analog for analysis pills: duplicate the
+            // FOCUSED pill's treatment across the selection (one undo step).
+            copySelection();
+            pasteToSelection();
+            return true;
+        }
+    }
+    if (shift && ! ctrl)
+    {
+        if (k.isKeyCode (juce::KeyPress::upKey))    { nudgeSelection (+0.1f); return true; }
+        if (k.isKeyCode (juce::KeyPress::downKey))  { nudgeSelection (-0.1f); return true; }
+        if (k.isKeyCode (juce::KeyPress::leftKey))  { nudgeSelectionTime (-0.01); return true; }
+        if (k.isKeyCode (juce::KeyPress::rightKey)) { nudgeSelectionTime (+0.01); return true; }
+    }
+    if (! ctrl && (k.isKeyCode (juce::KeyPress::deleteKey)
+                   || k.isKeyCode (juce::KeyPress::backspaceKey)))
+    {
+        // Pills are analysis segments, not deletable objects: Delete =
+        // Restore to Original State (locked Task 6 semantics).
+        deleteSelection();
+        return true;
+    }
+    if (k.isKeyCode (juce::KeyPress::escapeKey))
+    {
+        if (mSubWin != nullptr) { closeSubEditor(); return true; }
+        clearSelection();
+        mCanvas->repaint();
         return true;
     }
     return false;
@@ -870,29 +1669,197 @@ void BaySickPitchEditor::setView (double pps, double scrollSec)
 
 void BaySickPitchEditor::setTopNote (int note)
 {
-    mTopNote = juce::jlimit (24, 120, note);
-    mKeyboard->repaint();
+    // Floor: the view bottom never dips below C0 (#6).
+    const int visLanes = (int) std::ceil (
+        (double) juce::jmax (60, mCanvas != nullptr ? mCanvas->getHeight() : 400)
+        / juce::jmax (2.0, mLaneH));
+    const int minTop = juce::jmin (120, kMinNote + visLanes);
+    mTopNote = juce::jlimit (minTop, 120, note);
+    if (mKeyboard) mKeyboard->repaint();
+    if (mCanvas)   mCanvas->repaint();
+}
+
+void BaySickPitchEditor::setLaneHeight (double laneH, double anchorMidi, int anchorY)
+{
+    mLaneH = juce::jlimit (4.0, 24.0, laneH);
+    // Keep the note under the cursor stationary (cursor-anchored v-zoom).
+    setTopNote ((int) std::round (anchorMidi + (double) (anchorY - kRulerH) / mLaneH));
+}
+
+void BaySickPitchEditor::zoomToSelection()
+{
+    if (mSelection.empty()) return;
+    mCanvas->zoomToRegions (selectionOrFocus());
+}
+
+void BaySickPitchEditor::restoreSavedView()
+{
+    if (! mHasSavedView) return;
+    mHasSavedView = false;
+    mLaneH = mSavedLaneH;
+    setView (mSavedPps, mSavedScroll);
+    setTopNote (mSavedTopNote);
+}
+
+// ─── Selection ────────────────────────────────────────────────────────────────
+void BaySickPitchEditor::selectOnly (int idx)
+{
+    mSelection.clear();
+    if (idx >= 0) mSelection.insert (idx);
+    mFocusRegion = idx;
     mCanvas->repaint();
 }
 
+void BaySickPitchEditor::toggleSelect (int idx)
+{
+    if (idx < 0) return;
+    if (! mSelection.insert (idx).second)
+        mSelection.erase (idx);
+    mFocusRegion = idx;
+    mCanvas->repaint();
+}
+
+void BaySickPitchEditor::clearSelection()
+{
+    mSelection.clear();
+    mFocusRegion = -1;
+}
+
+std::vector<int> BaySickPitchEditor::selectionOrFocus() const
+{
+    if (! mSelection.empty())
+        return { mSelection.begin(), mSelection.end() };
+    if (mFocusRegion >= 0) return { mFocusRegion };
+    return {};
+}
+
+// ─── Global undo (9a) ─────────────────────────────────────────────────────────
+void BaySickPitchEditor::beginEdit()
+{
+    mPendingBefore = mProc.mPitch.regions();
+    mEditPending   = true;
+}
+
+void BaySickPitchEditor::cancelEdit()
+{
+    mEditPending = false;
+    mPendingBefore.clear();
+}
+
+void BaySickPitchEditor::commitEdit (const juce::String& label)
+{
+    if (! mEditPending) return;
+    mEditPending = false;
+
+    mProc.mPitch.publishEdits();
+    updateInfoBarFor (mFocusRegion);
+
+    if (! mUndoCtx.isValid())
+        { mPendingBefore.clear(); return; }
+
+    juce::Component::SafePointer<BaySickPitchEditor> safe (this);
+    mUndoCtx.perform (
+        new PitchEditAction (label, std::move (mPendingBefore),
+                             mProc.mPitch.regions(),
+                             [safe] (const std::vector<PitchNoteRegion>& regions)
+                             {
+                                 // Tab closed = editor gone: the SafePointer
+                                 // degrades the action to a safe no-op (the
+                                 // processor died with its page too).
+                                 if (safe != nullptr)
+                                     safe->applyRegionsFromUndo (regions);
+                             }),
+        label);
+    mPendingBefore.clear();
+}
+
+void BaySickPitchEditor::applyRegionsFromUndo (const std::vector<PitchNoteRegion>& regions)
+{
+    mProc.mPitch.regions() = regions;
+    mProc.mPitch.publishEdits();
+    clearSelection();
+    // #9: the InfoBar refreshes on undo/redo so the [edited] tag is truthful.
+    updateInfoBarFor (-1);
+    mCanvas->repaint();
+}
+
+// ─── Timer (30 Hz) ────────────────────────────────────────────────────────────
 void BaySickPitchEditor::timerCallback()
 {
     const bool playing = DSPBase::isTransportPlaying();
+
+    // ── Playhead: main transport beat -> composite seconds (#7) ────────────
+    double newPlayhead = -1.0;
+    if (mProc.onTransportBeat && mProc.mPitch.isAnalyzed())
+    {
+        const double beat = mProc.onTransportBeat();
+        const double devSr = (mProc.getSampleRate() > 0.0)
+                               ? mProc.getSampleRate() : 44100.0;
+        const double tlSample = TempoMap::isActive()
+            ? (double) TempoMap::sampleAtBeat (beat)
+            : beat * 0.5 * devSr;   // 120 BPM legacy fallback
+        newPlayhead = tlSample / devSr
+                    - (double) mProc.mPitch.startSample()
+                        / mProc.mPitch.analysisSampleRate();
+        if (newPlayhead < 0.0 || newPlayhead > mProc.mPitch.compositeSec())
+            newPlayhead = -1.0;
+    }
+    if (std::abs (newPlayhead - mPlayheadSec) > 1.0e-4)
+    {
+        const double prev = mPlayheadSec;
+        mPlayheadSec = newPlayhead;
+
+        // Auto-scroll (#8 fix): edge-triggered page-flip ONLY while the
+        // playhead ADVANCES across the right edge during playback -- never
+        // recenters on a stale/frozen position, never fights manual scroll.
+        if (mAutoScroll && playing && mPlayheadSec >= 0.0 && prev >= 0.0
+            && mPlayheadSec > prev)
+        {
+            const double viewSec = juce::jmax (1, mCanvas->getWidth()) / mPps;
+            if (mPlayheadSec > mScroll + viewSec * 0.98)
+                setView (mPps, mPlayheadSec - viewSec * 0.1);
+        }
+        mCanvas->repaint();
+    }
+
+    // Focus / Snap / Root / Scale move the RENDERED pill positions (the
+    // Focus pull is paint-time math), and the Slice / Edit buttons mirror
+    // bsp_mode -- without this fast-path watch, knob turns while stopped
+    // leave the canvas visually frozen (2026-07-11 owner find).
+    {
+        const float sig = paramValue ("bsp_focus")
+                        + paramValue ("bsp_snap")  * 1000.0f
+                        + paramValue ("bsp_root")  * 4000.0f
+                        + paramValue ("bsp_scale") * 100000.0f
+                        + paramValue ("bsp_mode", 1.0f) * 2000000.0f;
+        if (sig != mRenderSig)
+        {
+            mRenderSig = sig;
+            mToolbar->mirrorMode ((int) paramValue ("bsp_mode", 1.0f));
+            mCanvas->repaint();
+        }
+    }
+
+    // ── Slow path (~2 Hz) ───────────────────────────────────────────────────
+    if (++mSlowTick < 15) return;
+    mSlowTick = 0;
+
     const bool stale = mProc.isPitchStale();
     mToolbar->setStale (stale, stale && playing);
     mToolbar->setPlaybackGate (playing);
+    mToolbar->setUndoRedoEnabled (
+        mUndoCtx.isValid() && mUndoCtx.manager->canUndo(),
+        mUndoCtx.isValid() && mUndoCtx.manager->canRedo());
 
-    const bool dirty = paramsDivergeFromSnapshot();
-    mToolbar->setDirty (dirty);
-    if (auto* pd = mProc.apvts.getRawParameterValue ("bsp_preset_dirty"))
-        if ((pd->load() > 0.5f) != dirty)
-            setParamValue ("bsp_preset_dirty", dirty ? 1.0f : 0.0f);
-    mToolbar->mirrorPreset ((int) paramValue ("bsp_preset", 0.0f));
-    mToolbar->mirrorMode   ((int) paramValue ("bsp_mode",   1.0f));
+    // QA-Fd 4a state upkeep: a deferred analysis fires as soon as the
+    // transport stops; Failed clears once something analyzes cleanly.
+    if (mAnalysisState == AnalysisState::Deferred && ! playing && isVisible())
+        runAnalyzeIfNeeded (false);
+    else if (mAnalysisState == AnalysisState::Failed
+             && mProc.mPitch.isAnalyzed() && ! stale)
+        setAnalysisState (AnalysisState::Idle, {});
 
-    // LENGTH readout (section 14b): composite (or SEL) length as
-    // `X bars / M:SS.f`.  Bars resolve through the tempo timeline from the
-    // composite's anchor; linear 120 fallback when no map is published.
+    // LENGTH readout: composite (or SEL) length as `X bars / M:SS.f`.
     {
         auto& pitch = mProc.mPitch;
         juce::String t;
@@ -900,9 +1867,10 @@ void BaySickPitchEditor::timerCallback()
         {
             double secA = 0.0, secB = pitch.compositeSec();
             juce::String prefix;
-            if (mSelectedRegion >= 0 && mSelectedRegion < (int) pitch.regions().size())
+            if (mFocusRegion >= 0 && mFocusRegion < (int) pitch.regions().size()
+                && ! mSelection.empty())
             {
-                const auto& r = pitch.regions()[(size_t) mSelectedRegion];
+                const auto& r = pitch.regions()[(size_t) mFocusRegion];
                 secA = r.startSec;
                 secB = r.endSec;
                 prefix = "SEL ";
@@ -926,38 +1894,13 @@ void BaySickPitchEditor::timerCallback()
         mToolbar->setLengthText (t);
     }
 
-    // Playhead from the FilePlay stamp; hide 300 ms after it stops moving.
-    const juce::int64 s = mProc.getFilePlayTimelineSample();
-    const juce::uint32 now = juce::Time::getMillisecondCounter();
-    if (s != mLastPlaySample && mProc.mPitch.isAnalyzed())
-    {
-        mLastPlaySample = s;
-        mLastPlayMoveMs = now;
-        if (mAutoScroll)
-        {
-            const double tSec = (double) (s - mProc.mPitch.startSample())
-                                / mProc.mPitch.analysisSampleRate();
-            const double viewSec = juce::jmax (1, mCanvas->getWidth()) / mPps;
-            if (tSec < mScroll || tSec > mScroll + viewSec * 0.9)
-                setView (mPps, tSec - viewSec * 0.2);
-        }
-        mCanvas->repaint();
-    }
-    else if (mLastPlaySample >= 0 && now - mLastPlayMoveMs > 300)
-    {
-        mLastPlaySample = -1;
-        mCanvas->repaint();
-    }
-
     // [PITCH DIAG] G2 boundary (Rule 4, Remove at close): while the flag file
-    // exists, the InfoBar shows the applicator gate counters so the owner can
-    // read which gate eats the signal.
-    if (++mDiagTick >= 5)   // flag-file poll ~every 2 s at the 400 ms timer
+    // exists, the InfoBar shows the applicator gate counters.
+    if (++mDiagTick >= 1)   // slow path is already ~2 s cadence
     {
-        mDiagTick  = 0;
+        mDiagTick = 0;
         const auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
                              .getChildFile ("BaySickDAW");
-        // Tolerate the hidden-extensions double-suffix trap.
         mDiagArmed = dir.getChildFile ("enable_pitch_diag.txt").existsAsFile()
                   || dir.getChildFile ("enable_pitch_diag.txt.txt").existsAsFile()
                   || dir.getChildFile ("enable_pitch_diag").existsAsFile();
@@ -977,12 +1920,16 @@ void BaySickPitchEditor::timerCallback()
             + " maxSemi:" + juce::String (d.maxSemis.load(), 2)
             + " in:"      + juce::String (d.peakIn.load(), 3)
             + " out:"     + juce::String (d.peakOut.load(), 3)
-            + " chg:"     + juce::String (d.changed.load()));
+            + " chg:"     + juce::String (d.changed.load())
+            + " floor:"   + juce::String (d.floorHits.load())
+            + " gMin:"    + juce::String (d.grainMin.load())
+            + " per:"     + juce::String (d.shPeriod.load(), 0));
     }
 }
 
 void BaySickPitchEditor::updateInfoBarFor (int regionIdx)
 {
+    if (mDiagArmed) return;   // [PITCH DIAG] readout owns the bar while armed
     auto& regions = mProc.mPitch.regions();
     if (regionIdx < 0 || regionIdx >= (int) regions.size())
     {
@@ -990,40 +1937,89 @@ void BaySickPitchEditor::updateInfoBarFor (int regionIdx)
         return;
     }
     const auto& r = regions[(size_t) regionIdx];
+    if (mCanvas != nullptr && mCanvas->mHandleReadout.isNotEmpty()
+        && mCanvas->mDragKind == PitchCanvas::DragKind::Handle)
+    {
+        mInfoBar->setText (mCanvas->mHandleReadout);
+        return;
+    }
+    if (r.isSlice)
+    {
+        mInfoBar->setText (juce::String ("Slice")
+                           + "  Length: " + juce::String (r.endSec - r.startSec, 2) + "s"
+                           + (r.hasTimeEdit() ? "  [moved]" : "")
+                           + (r.hasEdits() ? "  [edited]" : ""));
+        return;
+    }
     const float edited = r.midi + r.shiftSemis;
     const int   nearest = (int) std::round (edited);
     const int   cents   = (int) std::round ((edited - (float) nearest) * 100.0f);
     mInfoBar->setText ("Pitch: " + midiNoteName (nearest)
                        + "  Cents: " + (cents >= 0 ? "+" : "") + juce::String (cents)
                        + "  Length: " + juce::String (r.endSec - r.startSec, 2) + "s"
+                       + (r.detached ? "  [detached]" : "")
+                       + (r.hasTimeEdit() ? "  [moved]" : "")
                        + (r.hasEdits() ? "  [edited]" : ""));
 }
 
-// ─── Actions ──────────────────────────────────────────────────────────────────
+// ─── Analysis flow (QA-Fd 4a) ─────────────────────────────────────────────────
+void BaySickPitchEditor::setAnalysisState (AnalysisState s, const juce::String& err)
+{
+    if (mAnalysisState == s && mAnalysisError == err) return;
+    mAnalysisState = s;
+    mAnalysisError = err;
+    mToolbar->setAnalysisBadge (s == AnalysisState::Analyzing ? "ANALYZING..."
+                              : s == AnalysisState::Deferred  ? "DEFERRED UNTIL STOP"
+                              : s == AnalysisState::Failed    ? "ANALYSIS FAILED"
+                                                              : juce::String());
+    mCanvas->repaint();
+}
+
 void BaySickPitchEditor::runAnalyzeIfNeeded (bool force)
 {
-    if (! force && mProc.mPitch.isAnalyzed() && ! mProc.isPitchStale())
+    const bool analyzed = mProc.mPitch.isAnalyzed();
+    if (! force && analyzed && ! mProc.isPitchStale())
     {
+        setAnalysisState (AnalysisState::Idle, {});
         if (! mCompValid) refreshComposite();
         return;
     }
-    // Analyze is stop-gated (owner call 2026-07-10): opening on a stale
-    // channel mid-play lights the badge and the VoxPage poller re-runs at
-    // the next transport stop instead.
-    if (DSPBase::isTransportPlaying())
+    // QA-Fd 4a: RE-analysis stays stop-gated (it swaps an applied law
+    // mid-play); a NEVER-analyzed channel analyzes immediately even during
+    // playback -- no edits exist, so the fresh snapshot is a provable no-op,
+    // and the felt "pitch needs Align first" coupling dies with the silent
+    // empty canvas.
+    if (DSPBase::isTransportPlaying() && analyzed)
     {
+        setAnalysisState (AnalysisState::Deferred, {});
         if (! mCompValid) refreshComposite();
         return;
     }
-    juce::String err;
-    if (mProc.analyzePitch (err))
+    // Review fix: visibility + timer (or a double retrigger) could queue two
+    // deferred analyses -- one in flight at a time.
+    if (mAnalyzeQueued) return;
+    mAnalyzeQueued = true;
+
+    setAnalysisState (AnalysisState::Analyzing, {});
+    // One paint pass before the synchronous analysis so the ANALYZING state
+    // is actually visible (analysis can take seconds on long channels -- the
+    // NIT-4 hitch rides the owner's judgment at the boundary listen).
+    juce::Component::SafePointer<BaySickPitchEditor> self (this);
+    juce::Timer::callAfterDelay (30, [self]
     {
-        refreshComposite();
-        mSelectedRegion = -1;
-        mCanvas->repaint();
-    }
-    // Silent on failure: an empty channel legitimately has nothing to
-    // analyze -- the canvas empty-state carries the message.
+        if (! self) return;
+        self->mAnalyzeQueued = false;
+        juce::String err;
+        if (self->mProc.analyzePitch (err))
+        {
+            self->setAnalysisState (AnalysisState::Idle, {});
+            self->refreshComposite();
+            self->clearSelection();
+        }
+        else
+            self->setAnalysisState (AnalysisState::Failed, err);
+        self->mCanvas->repaint();
+    });
 }
 
 void BaySickPitchEditor::refreshComposite()
@@ -1039,22 +2035,39 @@ void BaySickPitchEditor::refreshComposite()
     mCompValid = true;
 }
 
+// ─── Actions ──────────────────────────────────────────────────────────────────
 void BaySickPitchEditor::runRender()
 {
-    juce::String err;
-    const auto file = mProc.renderPitchedTake (err);
-    if (file == juce::File())
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
-            "Render", err);
-    else
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
-            "Render", "Baked to " + file.getFileName());
+    // QA-Fd 16a: render dialog -- Standard vs High Resolution (the warp
+    // phase runs 384 kHz-class oversampled; slower, finer transients).
+    auto* aw = new juce::AlertWindow ("Render",
+        "Bake the edited channel to Pitched/{name}_pitch_v{N}.wav "
+        "(file only - playback is already live).",
+        juce::AlertWindow::NoIcon);
+    aw->addButton ("Standard",                 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("High Resolution (slower)", 2);
+    aw->addButton ("Cancel",                   0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<BaySickPitchEditor> self (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [self] (int r)
+        {
+            if (! self || r == 0) return;
+            juce::String err;
+            const auto file = self->mProc.renderPitchedTake (err, r == 2);
+            if (file == juce::File())
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                    "Render", err);
+            else
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+                    "Render", "Baked to " + file.getFileName());
+        }), true);
 }
 
 void BaySickPitchEditor::runReset()
 {
-    pushUndo();
+    beginEdit();
     mProc.mPitch.clearAllEdits();
+    commitEdit ("Pitch: Clear All Edits");
     mCanvas->repaint();
 }
 
@@ -1098,10 +2111,11 @@ void BaySickPitchEditor::showVersionsMenu()
             if (! self || result <= 0) return;
             // Menu is modal-async: play could have started since it opened.
             if (DSPBase::isTransportPlaying()) return;
-            self->pushUndo();
+            self->beginEdit();
             if (! self->mProc.revertPitchToVersion (result - 1))
-                { self->mUndoStack.pop_back(); return; }
-            self->mSelectedRegion = -1;
+                { self->cancelEdit(); return; }
+            self->commitEdit ("Pitch: Revert Version");
+            self->clearSelection();
             self->mCanvas->repaint();
         });
 }
@@ -1126,17 +2140,19 @@ void BaySickPitchEditor::showSendNotesMenu()
             auto* se2 = self->findParentComponentOfClass<StandaloneEditor>();
             if (se2 == nullptr) return;
 
-            // MIDI only (section 14b): the detected contour quantized to
-            // notes, normalized so the first note starts the riff.
+            // MIDI only: the detected contour quantized to notes, normalized
+            // so the first note starts the riff.  Slice pills are skipped
+            // (no pitch identity).
             std::vector<StandaloneEditor::ContourNote> notes;
             const auto& regions = self->mProc.mPitch.regions();
             double t0 = -1.0;
             for (const auto& reg : regions)
             {
-                if (t0 < 0.0) t0 = reg.startSec;
+                if (reg.isSlice) continue;
+                if (t0 < 0.0) t0 = reg.dstStart();
                 StandaloneEditor::ContourNote n;
-                n.startSec = reg.startSec - t0;
-                n.endSec   = reg.endSec   - t0;
+                n.startSec = reg.dstStart() - t0;
+                n.endSec   = reg.dstEnd()   - t0;
                 n.midiNote = juce::jlimit (0, 127,
                     (int) std::round (reg.midi + reg.shiftSemis));
                 notes.push_back (n);
@@ -1147,35 +2163,348 @@ void BaySickPitchEditor::showSendNotesMenu()
         });
 }
 
-// ─── Presets (section 14f) ────────────────────────────────────────────────────
-void BaySickPitchEditor::applyFactoryPreset (int idx)
+// ─── Pill menu (18a) + pill operations ───────────────────────────────────────
+void BaySickPitchEditor::showPillMenu (int idx)
 {
-    idx = juce::jlimit (0, 2, idx);
-    setParamValue ("bsp_preset", (float) idx);
-    setParamValue ("bsp_focus",  kPitchPresets[idx].focus);
-    setParamValue ("bsp_mod",    kPitchPresets[idx].mod);
-    setParamValue ("bsp_speed",  kPitchPresets[idx].speed);
-    snapshotPresetValues();
+    auto& regions = mProc.mPitch.regions();
+    if (idx < 0 || idx >= (int) regions.size()) return;
+    const bool slice = regions[(size_t) idx].isSlice;
+    const bool multi = (int) mSelection.size() > 1;
+
+    juce::PopupMenu m;
+    m.addItem (1, multi ? "Restore Selected to Original State"
+                        : "Restore to Original State");
+    if (! slice)
+        m.addItem (2, multi ? "Snap Selected to Semitone" : "Snap to Semitone");
+    m.addSeparator();
+    if (multi)
+        m.addItem (3, "Merge Selected Pills");
+    else if (idx + 1 < (int) regions.size())
+        m.addItem (4, "Merge With Next Pill");
+    if (! slice)
+        m.addItem (5, "Open Sub-Editor...");
+    if (! mSelection.empty())
+        m.addItem (6, "Zoom to Selection");
+
+    juce::Component::SafePointer<BaySickPitchEditor> self (this);
+    m.showMenuAsync (juce::PopupMenu::Options(),
+        [self, idx] (int r)
+        {
+            if (! self || r <= 0) return;
+            switch (r)
+            {
+                case 1: self->restoreToOriginal (self->selectionOrFocus()); break;
+                case 2: self->snapToSemitone (self->selectionOrFocus());    break;
+                case 3: self->mergeSelection();                              break;
+                case 4:
+                    self->mSelection = { idx, idx + 1 };
+                    self->mergeSelection();
+                    break;
+                case 5: self->openSubEditor (idx);                           break;
+                case 6: self->zoomToSelection();                             break;
+                default: break;
+            }
+        });
 }
 
-void BaySickPitchEditor::snapshotPresetValues()
+void BaySickPitchEditor::restoreToOriginal (const std::vector<int>& idxs)
 {
-    mPresetSnapshot.clear();
-    for (auto* id : kPitchPresetParamIds)
-        mPresetSnapshot[id] = paramValue (id);
-}
-
-bool BaySickPitchEditor::paramsDivergeFromSnapshot() const
-{
-    for (auto* id : kPitchPresetParamIds)
+    if (idxs.empty()) return;
+    auto& regions = mProc.mPitch.regions();
+    beginEdit();
+    for (int i : idxs)
     {
-        const auto it = mPresetSnapshot.find (id);
-        if (it == mPresetSnapshot.end()) return true;
-        if (std::abs (paramValue (id) - it->second) > 0.001f) return true;
+        if (i < 0 || i >= (int) regions.size()) continue;
+        auto& r = regions[(size_t) i];
+        r.shiftSemis = 0.0f; r.formantSemis = 0.0f;
+        r.vibDepthMult = 1.0f; r.vibRateMult = 1.0f; r.variation = 1.0f;
+        r.volShape.clear(); r.pitchShape.clear();
+        r.dstStartSec = -1.0; r.dstEndSec = -1.0; r.detached = false;
     }
-    return false;
+    commitEdit ("Pitch: Restore to Original");
+    mCanvas->repaint();
 }
 
+void BaySickPitchEditor::snapToSemitone (const std::vector<int>& idxs)
+{
+    if (idxs.empty()) return;
+    auto& regions = mProc.mPitch.regions();
+    beginEdit();
+    for (int i : idxs)
+    {
+        if (i < 0 || i >= (int) regions.size()) continue;
+        auto& r = regions[(size_t) i];
+        if (r.isSlice) continue;
+        r.shiftSemis = std::round (r.midi + r.shiftSemis) - r.midi;
+    }
+    commitEdit ("Pitch: Snap to Semitone");
+    mCanvas->repaint();
+}
+
+void BaySickPitchEditor::mergeSelection()
+{
+    auto idxs = selectionOrFocus();
+    if ((int) idxs.size() < 2) return;
+    std::sort (idxs.begin(), idxs.end());
+    auto& regions = mProc.mPitch.regions();
+    // Review fix: the pill menu is async -- a deferred re-analysis can
+    // shrink the region list between menu-open and click.
+    if (idxs.front() < 0 || idxs.back() >= (int) regions.size()) return;
+    for (size_t k = 0; k + 1 < idxs.size(); ++k)
+        if (idxs[k + 1] != idxs[k] + 1) return;   // adjacent runs only
+
+    beginEdit();
+    // Keep the LONGEST member's pitch identity + edits; absorb src + dst
+    // spans (gaps between members fold in).
+    int longest = idxs.front();
+    for (int i : idxs)
+        if (regions[(size_t) i].endSec - regions[(size_t) i].startSec
+            > regions[(size_t) longest].endSec - regions[(size_t) longest].startSec)
+            longest = i;
+
+    PitchNoteRegion merged = regions[(size_t) longest];
+    const auto& first = regions[(size_t) idxs.front()];
+    const auto& last  = regions[(size_t) idxs.back()];
+    merged.startSec = first.startSec;
+    merged.endSec   = last.endSec;
+    if (first.dstStartSec >= 0.0 || last.dstStartSec >= 0.0
+        || merged.dstStartSec >= 0.0)
+    {
+        merged.dstStartSec = first.dstStart();
+        merged.dstEndSec   = last.dstEnd();
+    }
+    merged.isSlice = std::all_of (idxs.begin(), idxs.end(),
+        [&] (int i) { return regions[(size_t) i].isSlice; });
+
+    regions.erase (regions.begin() + idxs.front(),
+                   regions.begin() + idxs.back() + 1);
+    regions.insert (regions.begin() + idxs.front(), merged);
+    commitEdit ("Pitch: Merge Pills");
+    selectOnly (idxs.front());
+}
+
+void BaySickPitchEditor::batchRepitchTo (int midiNote)
+{
+    auto idxs = selectionOrFocus();
+    if (idxs.empty()) return;
+    auto& regions = mProc.mPitch.regions();
+    beginEdit();
+    for (int i : idxs)
+    {
+        if (i < 0 || i >= (int) regions.size()) continue;
+        auto& r = regions[(size_t) i];
+        if (r.isSlice) continue;
+        r.shiftSemis = juce::jlimit (-24.0f, 24.0f, (float) midiNote - r.midi);
+    }
+    commitEdit ("Pitch: Re-pitch to " + midiNoteName (midiNote));
+    mCanvas->repaint();
+}
+
+void BaySickPitchEditor::copySelection()
+{
+    const auto& regions = mProc.mPitch.regions();
+    if (mFocusRegion < 0 || mFocusRegion >= (int) regions.size()) return;
+    const auto& r = regions[(size_t) mFocusRegion];
+    mClipboard.valid        = true;
+    mClipboard.shiftSemis   = r.shiftSemis;
+    mClipboard.formantSemis = r.formantSemis;
+    mClipboard.vibDepthMult = r.vibDepthMult;
+    mClipboard.vibRateMult  = r.vibRateMult;
+    mClipboard.variation    = r.variation;
+    mClipboard.volShape     = r.volShape;
+    mClipboard.pitchShape   = r.pitchShape;
+}
+
+void BaySickPitchEditor::pasteToSelection()
+{
+    if (! mClipboard.valid) return;
+    auto idxs = selectionOrFocus();
+    if (idxs.empty()) return;
+    auto& regions = mProc.mPitch.regions();
+    beginEdit();
+    for (int i : idxs)
+    {
+        if (i < 0 || i >= (int) regions.size()) continue;
+        auto& r = regions[(size_t) i];
+        if (! r.isSlice)
+        {
+            r.shiftSemis   = mClipboard.shiftSemis;
+            r.formantSemis = mClipboard.formantSemis;
+            r.vibDepthMult = mClipboard.vibDepthMult;
+            r.vibRateMult  = mClipboard.vibRateMult;
+            r.variation    = mClipboard.variation;
+            r.pitchShape   = mClipboard.pitchShape;
+        }
+        r.volShape = mClipboard.volShape;
+    }
+    commitEdit ("Pitch: Paste Edits");
+    mCanvas->repaint();
+}
+
+void BaySickPitchEditor::nudgeSelection (float semis)
+{
+    auto idxs = selectionOrFocus();
+    if (idxs.empty()) return;
+    auto& regions = mProc.mPitch.regions();
+    beginEdit();
+    for (int i : idxs)
+        if (i >= 0 && i < (int) regions.size() && ! regions[(size_t) i].isSlice)
+            regions[(size_t) i].shiftSemis = juce::jlimit (-24.0f, 24.0f,
+                regions[(size_t) i].shiftSemis + semis);
+    commitEdit ("Pitch: Nudge");
+    mCanvas->repaint();
+}
+
+void BaySickPitchEditor::nudgeSelectionTime (double dSec)
+{
+    auto idxs = selectionOrFocus();
+    if (idxs.empty()) return;
+    auto& regions = mProc.mPitch.regions();
+
+    // Collective elastic clamp: pills never cross non-selected neighbors
+    // (same rule as the drag; detached pills keep their freedom implicitly
+    // since a nudge is elastic by definition).
+    double lo = -1.0e18, hi = 1.0e18;
+    for (int i : idxs)
+    {
+        if (i < 0 || i >= (int) regions.size()) continue;
+        const auto& r = regions[(size_t) i];
+        double prevB = 0.0, nextB = 1.0e18;
+        for (int j = 0; j < (int) regions.size(); ++j)
+        {
+            if (j == i || isSelected (j)) continue;
+            const auto& o = regions[(size_t) j];
+            if (o.isSlice != r.isSlice) continue;
+            if (o.dstEnd() <= r.dstStart() + 1.0e-9)
+                prevB = juce::jmax (prevB, o.dstEnd());
+            if (o.dstStart() >= r.dstEnd() - 1.0e-9)
+                nextB = juce::jmin (nextB, o.dstStart());
+        }
+        lo = juce::jmax (lo, juce::jmax (prevB - r.dstStart(), -r.dstStart()));
+        hi = juce::jmin (hi, nextB - r.dstEnd());
+    }
+    dSec = juce::jlimit (juce::jmin (0.0, lo), juce::jmax (0.0, hi), dSec);
+    if (std::abs (dSec) < 1.0e-9) return;
+
+    beginEdit();
+    for (int i : idxs)
+    {
+        if (i < 0 || i >= (int) regions.size()) continue;
+        auto& r = regions[(size_t) i];
+        const double len = r.dstEnd() - r.dstStart();
+        const double s = juce::jmax (0.0, r.dstStart() + dSec);
+        r.dstStartSec = s;
+        r.dstEndSec   = s + len;
+    }
+    commitEdit ("Pitch: Nudge Time");
+    mCanvas->repaint();
+}
+
+void BaySickPitchEditor::deleteSelection()
+{
+    restoreToOriginal (selectionOrFocus());
+}
+
+void BaySickPitchEditor::resetBoxedParams (const std::vector<int>& idxs)
+{
+    if (idxs.empty()) return;
+
+    auto doReset = [this, idxs]
+    {
+        auto& regions = mProc.mPitch.regions();
+        beginEdit();
+        for (int i : idxs)
+        {
+            if (i < 0 || i >= (int) regions.size()) continue;
+            auto& r = regions[(size_t) i];
+            // 15b: boxed params only -- pitch offset + time edits KEPT.
+            r.formantSemis = 0.0f;
+            r.vibDepthMult = 1.0f; r.vibRateMult = 1.0f; r.variation = 1.0f;
+            r.volShape.clear(); r.pitchShape.clear();
+        }
+        commitEdit ("Pitch: Reset Sub-Edits");
+        mCanvas->repaint();
+    };
+
+    if ((int) idxs.size() <= 1) { doReset(); return; }
+
+    auto prefs = openUiPrefs();
+    if (prefs->getBoolValue ("pitchMultiResetNoPrompt", false))
+        { doReset(); return; }
+
+    // Multi-select reset warning + never-show-again (settings-persisted).
+    auto* aw = new juce::AlertWindow ("Reset Sub-Edits",
+        "This clears the vibrato / formant / variation values and the volume "
+        "and pitch curves of " + juce::String ((int) idxs.size())
+        + " selected pills.",
+        juce::AlertWindow::WarningIcon);
+    if (mResetPromptCheck == nullptr)
+    {
+        mResetPromptCheck = std::make_unique<juce::ToggleButton> (
+            "Do not show this again");
+        mResetPromptCheck->setSize (220, 22);
+    }
+    mResetPromptCheck->setToggleState (false, juce::dontSendNotification);
+    aw->addCustomComponent (mResetPromptCheck.get());
+    aw->addButton ("Reset",  1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<BaySickPitchEditor> self (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [self, doReset, aw] (int r)
+        {
+            if (! self) return;
+            if (self->mResetPromptCheck != nullptr
+                && self->mResetPromptCheck->getToggleState())
+            {
+                auto prefs2 = openUiPrefs();
+                prefs2->setValue ("pitchMultiResetNoPrompt", true);
+                prefs2->saveIfNeeded();
+            }
+            juce::ignoreUnused (aw);
+            if (r == 1) doReset();
+        }), true);
+}
+
+// ─── Sub-editor popup (Task 7) ───────────────────────────────────────────────
+void BaySickPitchEditor::openSubEditor (int idx)
+{
+    auto& regions = mProc.mPitch.regions();
+    if (idx < 0 || idx >= (int) regions.size()) return;
+    if (regions[(size_t) idx].isSlice) return;
+
+    if (mSubWin == nullptr)
+        mSubWin = std::make_unique<BaySickPitchSubEditorWindow> (*this);
+    if (auto* content = mSubWin->content())
+        content->openFor (idx, selectionOrFocus());
+    mSubWin->setVisible (true);
+    mSubWin->toFront (true);
+}
+
+void BaySickPitchEditor::closeSubEditor()
+{
+    stopPreview();
+    // Reset deletes the floating window; safe when called from its own
+    // closeButtonPressed because nothing touches members after the call.
+    mSubWin.reset();
+}
+
+// ─── Preview play (shared scrub / popup Play) ────────────────────────────────
+void BaySickPitchEditor::startRegionPreview (int regionIdx, bool loop)
+{
+    const auto& regions = mProc.mPitch.regions();
+    if (regionIdx < 0 || regionIdx >= (int) regions.size()) return;
+    if (! mCompValid) refreshComposite();
+    if (! mCompValid) return;
+    const auto& r = regions[(size_t) regionIdx];
+    mProc.startPitchPreview (mCompCache, mCompSr, r.startSec, r.endSec, loop);
+}
+
+void BaySickPitchEditor::stopPreview()
+{
+    mProc.stopPitchPreview();
+}
+
+// ─── User presets (Focus/Mod/Speed) ──────────────────────────────────────────
 void BaySickPitchEditor::saveUserPreset()
 {
     auto* aw = new juce::AlertWindow ("Save Pitch Preset",
@@ -1194,7 +2523,7 @@ void BaySickPitchEditor::saveUserPreset()
             if (name.isEmpty()) return;
 
             juce::XmlElement el ("BaySickPitchPreset");
-            for (auto* id : kPitchPresetParamIds)
+            for (auto* id : { "bsp_focus", "bsp_mod", "bsp_speed" })
                 el.setAttribute (id, (double) self->paramValue (id));
 
             auto dir = pitchPresetsDir();
@@ -1204,9 +2533,6 @@ void BaySickPitchEditor::saveUserPreset()
             while (target.exists())
                 target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
             target.replaceWithText (el.toString());
-
-            self->setParamValue ("bsp_preset", 3.0f);   // "(User)"
-            self->snapshotPresetValues();
         }), true);
 }
 
@@ -1231,43 +2557,10 @@ void BaySickPitchEditor::loadUserPreset()
             if (! self || r <= 0 || r > files.size()) return;
             auto xml = juce::parseXML (files[r - 1]);
             if (xml == nullptr || ! xml->hasTagName ("BaySickPitchPreset")) return;
-            for (auto* id : kPitchPresetParamIds)
+            for (auto* id : { "bsp_focus", "bsp_mod", "bsp_speed" })
                 if (xml->hasAttribute (id))
                     self->setParamValue (id, (float) xml->getDoubleAttribute (id));
-            self->setParamValue ("bsp_preset", 3.0f);
-            self->snapshotPresetValues();
         });
-}
-
-// ─── Local edit undo ──────────────────────────────────────────────────────────
-void BaySickPitchEditor::pushUndo()
-{
-    mUndoStack.push_back (mProc.mPitch.regions());
-    if (mUndoStack.size() > 50)
-        mUndoStack.erase (mUndoStack.begin());
-    mRedoStack.clear();
-}
-
-void BaySickPitchEditor::doUndo()
-{
-    if (mUndoStack.empty()) return;
-    mRedoStack.push_back (mProc.mPitch.regions());
-    mProc.mPitch.regions() = mUndoStack.back();
-    mUndoStack.pop_back();
-    mProc.mPitch.publishEdits();
-    mSelectedRegion = -1;
-    mCanvas->repaint();
-}
-
-void BaySickPitchEditor::doRedo()
-{
-    if (mRedoStack.empty()) return;
-    mUndoStack.push_back (mProc.mPitch.regions());
-    mProc.mPitch.regions() = mRedoStack.back();
-    mRedoStack.pop_back();
-    mProc.mPitch.publishEdits();
-    mSelectedRegion = -1;
-    mCanvas->repaint();
 }
 
 // ─── Param helpers ────────────────────────────────────────────────────────────

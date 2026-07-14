@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../Standalone/SharedUI.h"   // ParametricEQDisplay
+#include "../Standalone/UndoActions.h"   // QA-Fd: UndoContext plumb-through
 
 class VibeSynthProcessor;
 class BaySickVocalEditor;
@@ -105,6 +106,12 @@ public:
     // Bus fallback: if a saved _sendTo references kVoxBus2 and that bus isn't
     // active in the current project, the loader silently substitutes kVoxBus.
     void setProcessor (VibeSynthProcessor* p);
+    // QA-Fd 9a: the pitch editor joins the global undo -- StandaloneEditor
+    // hands the context here; forwarded into the vocal editor (and re-applied
+    // if the editor is ever rebuilt by selectEngine).
+    void setUndoContext (const UndoContext& ctx);
+    // QA-Fd #7: main-transport beat provider for the pitch editor playhead.
+    void setTransportBeatProvider (std::function<double()> fn);
     void setBusActiveQuery (std::function<bool(int channelId)> q) { mBusActiveQuery = std::move (q); }
     void savePagePreset (std::function<void()> onSaved = {});
     void loadPagePreset (const juce::File& xml);
@@ -157,6 +164,8 @@ private:
     // G-7: full processor + bus-active query for Page Preset save/load.
     VibeSynthProcessor*                          mFullProcessor { nullptr };
     std::function<bool(int)>                     mBusActiveQuery;
+    UndoContext                                  mUndoCtx;   // QA-Fd 9a
+    std::function<double()>                      mTransportBeat;   // QA-Fd #7
 
     // G-7 (2026-04-29): listener-based dirty tracking - see ClipsPage for
     // the rationale.  Reliable across engines whose getStateInformation

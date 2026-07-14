@@ -423,12 +423,18 @@ void VoxPage::selectEngine (EngineType e)
     {
         auto vp = std::make_unique<BaySickVocalProcessor>();
         vp->prepareToPlay (44100.0, 512);
+        // QA-Fd #7: re-install the transport-beat hook on a rebuilt engine.
+        if (mTransportBeat)
+            vp->onTransportBeat = mTransportBeat;
         mVocalProc = std::move (vp);
         // J-6 EQ unification (2026-05-03): cast-fixed editor pointer (originally
         // for setPreRackEQ injection; that hookup is removed).
         auto* ed = static_cast<BaySickVocalEditor*> (mVocalProc->createEditor());
         mVocalEditor.reset (ed);
         if (mVocalEditor) addChildComponent (*mVocalEditor);
+        // QA-Fd 9a: re-apply the global undo context onto a (re)built editor.
+        if (ed != nullptr && mUndoCtx.isValid())
+            ed->setUndoContext (mUndoCtx);
         // J-6 EQ unification (2026-05-03): Pre Rack EQ injection removed -
         // pre-rack EQ is exclusively edited via the Effects page.
     }
@@ -454,6 +460,24 @@ void VoxPage::selectEngine (EngineType e)
 juce::AudioProcessorEditor* VoxPage::activeEditor() const
 {
     return mVocalEditor.get();
+}
+
+// QA-Fd 9a: forward the global undo context into the vocal editor (the
+// pitch editor's toolbar Undo/Redo + Ctrl+Z drive it).
+void VoxPage::setUndoContext (const UndoContext& ctx)
+{
+    mUndoCtx = ctx;
+    if (auto* ed = dynamic_cast<BaySickVocalEditor*> (mVocalEditor.get()))
+        ed->setUndoContext (ctx);
+}
+
+// QA-Fd #7: main-transport beat provider -> engine hook (pitch editor
+// playhead follows the transport incl. stop-reset).
+void VoxPage::setTransportBeatProvider (std::function<double()> fn)
+{
+    mTransportBeat = std::move (fn);
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+        bv->onTransportBeat = mTransportBeat;
 }
 
 void VoxPage::switchTab (int idx)
@@ -521,6 +545,17 @@ void VoxPage::setProcessor (VibeSynthProcessor* p)
                 return full != nullptr && full->isStripRecording (chId);
             };
         }
+        // QA-Fd (locked 5/13a): resolve a channel's pitch DSP so align can
+        // consume the follower's EDITED performance timing even when the
+        // follower is another Vox page's channel.  MESSAGE THREAD.
+        bv->onPitchDspForChannel = [full] (int channelId) -> BaySickPitchDSP*
+        {
+            if (full == nullptr) return nullptr;
+            if (auto* other = dynamic_cast<BaySickVocalProcessor*> (
+                    full->voxEngineAt (channelId - MixerChannelIds::kVoxBase)))
+                return &other->mPitch;
+            return nullptr;
+        };
         // QA-Fa recovery: render is EXPORT ONLY -- the QA-F onPlaceBakedClip
         // install is retired (re-import goes through the Vox ribbon's
         // "+ Add New Vox From Export" flow).
@@ -571,6 +606,9 @@ void VoxPage::timerCallback()
 
     // Align: only re-runs an analysis that exists; combined leader+follower
     // signature so either channel's change (or a tempo edit) trips it.
+    // QA-Fd: the time-map settings generation folds in so a Mode/Fine/
+    // Max Shift/Pitch Types change restarts the debounce and re-arms the
+    // attempt even at an unchanged grid (lastAttempt keys on this sig).
     if (bv->mAlignState.analyzed)
     {
         const int leader   = bv->resolveLeaderChannel();
@@ -578,7 +616,9 @@ void VoxPage::timerCallback()
         const juce::int64 sig =
             (leader >= 0 ? mFullProcessor->channelClipSignature (leader) : 0)
             ^ (follower >= 0
-               ? (mFullProcessor->channelClipSignature (follower) * 31) : 0);
+               ? (mFullProcessor->channelClipSignature (follower) * 31) : 0)
+            ^ (bv->alignSettingsGeneration() * 131)
+            ^ (bv->followerPitchMapHash() * 17);
         pollOne (bv->isAlignStale(), sig, mAlignAutoLastSig, mAlignAutoStable,
                  mAlignAutoAttempted,
                  [&] { juce::String err; bv->analyzeAlign (err); });

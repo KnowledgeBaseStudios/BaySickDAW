@@ -86,3 +86,19 @@ Plans & Specs/Issue Tracker.txt
 # this is a leftover JUCE auto-generated artefact that escaped earlier
 # cleanup. Per-machine and not source.
 /keymap.xml
+
+# QA-Fe pitch-engine A/B render byproducts (2026-07-13) — throwaway comparison
+# clips from the WORLD/Signalsmith/Rubber Band engine evaluation, not shipped.
+/SIM_*.wav
+/PV_*.wav
+/RBLIVE_*.wav
+/RUBBERBAND_*.wav
+/SIGSMITH_*.wav
+/WORLD_*.wav
+/enable_pitch_diag.txt
+
+# QA-Fe pitch-engine test harnesses (2026-07-13) — throwaway build/render
+# scaffolding for the engine A/B; stripped at QA-Fe Task 7.
+/Tools/signalsmith-test/
+/Tools/rubberband-test/
+/Tools/pitch-sim/

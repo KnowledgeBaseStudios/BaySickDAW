@@ -442,6 +442,11 @@ KeyBindsContent::KeyBindsContent (juce::ApplicationCommandManager& mgr)
     // Piano Roll except for pitch-based ops; documented row-by-row.
     mTabs.addTab (BSCommands::categoryName (BSCommands::Category::DrumKit),
                   VC::Bg, new KeyBindsTab (BSCommands::Category::DrumKit,   mgr), true);
+    // 2026-07-11 (QA-Fd): vocal-editor (BaySickPitch / BaySickAlign)
+    // reference.  Page-local hardcoded keys + mouse gestures - documented,
+    // not rebindable (same deal as the Piano Roll's local keys).
+    mTabs.addTab (BSCommands::categoryName (BSCommands::Category::VocalEditors),
+                  VC::Bg, new KeyBindsTab (BSCommands::Category::VocalEditors, mgr), true);
 
     addAndMakeVisible (mTabs);
 }

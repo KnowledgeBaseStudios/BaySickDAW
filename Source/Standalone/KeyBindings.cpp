@@ -11,6 +11,7 @@ juce::String categoryName (Category c)
         case Category::PianoRoll:      return "Piano Roll Key Binds";
         case Category::DrumKit:        return "Drum Kit Key Binds";
         case Category::MouseReference: return "Mouse Reference";
+        case Category::VocalEditors:   return "Vocal Editor Key Binds";
     }
     return {};
 }
@@ -596,6 +597,74 @@ namespace
             { Category::DrumKit, "Alt + A / Alt + P",
               "(Piano Roll only)",
               "Arpeggiate (Alt+A) and Generate Chords (Alt+P) apply only to the Piano Roll - both are pitch-based and don't translate to a slot-per-row drum layout." },
+
+            // ── Vocal Editors (QA-Fd, 2026-07-11) - BaySickPitch tab ────────
+            // Page-local hardcoded keys + mouse gestures; none rebindable.
+            { Category::VocalEditors, "Click / Drag (note)",
+              "Select + Move Note",
+              "Click selects a note pill; drag moves it.  Vertical = repitch in 0.1-semitone steps (lands on in-scale lanes when Snap is on); horizontal = shift timing, with neighbors stretching elastically so the phrase stays continuous." },
+            { Category::VocalEditors, "Ctrl + Drag (note)",
+              "Fine Repitch / Detach",
+              "Vertical: fine 0.01-semitone movement that bypasses Snap.  Horizontal (past 3 px): DETACHES the note so it moves freely - neighbors stop stretching and the gap becomes a hard cut instead of an elastic warp." },
+            { Category::VocalEditors, "Drag (note edge)",
+              "Stretch / Squeeze",
+              "Dragging the first or last 6 px of a pill stretches or squeezes that note's timing against its neighbors.  Ctrl past 3 px detaches the edge." },
+            { Category::VocalEditors, "Double-Click (note)",
+              "Open Sub-Editor",
+              "Opens the floating sub-edit window: volume / pitch point lanes over the note's waveform, Vib / Frm / Variation knobs, a pill browser, and its own Play button." },
+            { Category::VocalEditors, "Shift + Click (note)",
+              "Toggle in Selection",
+              "Adds the note to the selection, or removes it if already selected.  Marquee-drag on empty space also selects (Shift adds)." },
+            { Category::VocalEditors, "Click (Slice mode)",
+              "Split Note",
+              "With the Slice tool armed, clicking a note splits it at the click point (30 ms interior guard).  Slice mode never selects - switch back to Edit for selection gestures." },
+            { Category::VocalEditors, "Right-Click (note)",
+              "Note Menu",
+              "Restore to original / snap to semitone / merge selection / re-pitch to a note / copy + paste edits / open sub-editor / zoom to selection." },
+            { Category::VocalEditors, "Ctrl + Right-Drag",
+              "Zoom to Rect",
+              "Drag a rectangle to zoom the view onto it.  Plain right-click on empty space returns to the saved view." },
+            { Category::VocalEditors, "Middle-Drag",
+              "Pan View",
+              "Pans time and pitch together." },
+            { Category::VocalEditors, "Mouse Wheel",
+              "Scroll / Zoom",
+              "Bare wheel scrolls pitch up / down.  Shift+Wheel scrolls time.  Ctrl+Wheel zooms time (cursor-anchored).  Alt+Wheel zooms the lane height vertically (Piano Roll idiom)." },
+            { Category::VocalEditors, "A",
+              "Toggle Auto-Scroll",
+              "Playhead page-flip follow on / off (same as the >> toolbar button)." },
+            { Category::VocalEditors, "Ctrl + A / C / V",
+              "Select All / Copy / Paste Edits",
+              "Copy takes the focused note's treatment (pitch offset, curves, knob settings); Paste applies it to the selection.  Audio never relocates - only the edit state transfers." },
+            { Category::VocalEditors, "Ctrl + B",
+              "Duplicate Treatment",
+              "Copy + paste in one stroke: the focused note's treatment applies across the selection as a single undo step." },
+            { Category::VocalEditors, "Shift + Arrows",
+              "Nudge",
+              "Up / Down = +/- 0.1 semitone.  Left / Right = +/- 10 ms time nudge (elastic rules apply)." },
+            { Category::VocalEditors, "Delete / Backspace",
+              "Restore to Original",
+              "Notes are analysis segments, not deletable objects - Delete returns the selection to its as-sung state." },
+            { Category::VocalEditors, "Escape",
+              "Close / Deselect",
+              "Closes the sub-edit window if open, otherwise clears the selection." },
+            { Category::VocalEditors, "SPACE (sub-editor)",
+              "Preview Note",
+              "Plays the open note's span through its current edits; press again to stop.  Works while the main transport is stopped." },
+            { Category::VocalEditors, "Click / Drag / Right-Click (sub-editor lane)",
+              "Add / Move / Delete Point",
+              "Event Editor gesture set on the volume / pitch lanes: click empty space adds a point, drag moves one, right-click deletes it." },
+
+            // ── Vocal Editors - BaySickAlign tab (mouse-only surface) ───────
+            { Category::VocalEditors, "Drag (sync point strip)",
+              "Move Sync Point",
+              "Drags a sync-point marker's leader or follower time.  Changes arm the RE-ANALYZE badge; the re-match runs at the next stop." },
+            { Category::VocalEditors, "Right-Click (sync point strip)",
+              "Sync Point Menu",
+              "Delete the clicked sync point, or generate Automatic Sync Points." },
+            { Category::VocalEditors, "Drag (protected strip)",
+              "Paint Protected Area",
+              "Drags out a region the aligner must leave alone.  Right-click it to toggle Protect Timing / Protect Pitch or delete the area." },
         };
     }
 }

@@ -305,27 +305,29 @@ FA-12/FA-13.
       channel time-aligned (onsets land with the leader BY EAR, no render step, nothing new on
       the grid). Analyze with NO leader picked = clean error dialog, not a crash.
       `D:__ R:__` notes:
-- [ ] **F-3 — Mode reach: Close vs Loose (ear + eye).** Same pair: Analyze/Apply under
-      Loose-Align, Play and listen; then Close-Align, Analyze/Apply, Play. Expected:
-      audible/visible difference in how far onsets get pulled (Fine Tune ms window = pairing
-      reach; Tight only pairs near onsets). The Mode dropdown also re-seats the Pitch Range
-      knob's window (watch it move). (G2 boundary fix after the "choppy slop" ear verdict:
-      monotone onset pairing + 2:1 segment-slope bound + smooth-cubic map lookup — ALL three
-      modes must play CLEAN now; chop in any mode indicts the boundary commit. Re-Analyze on
-      the fix build — a map analyzed pre-fix carries the old anchors. Offline Render parity
-      pending: exports still step at anchors until the applyWarp follow-up. Second boundary
-      round after Tight starved on real takes: pairing upgraded to OPTIMAL monotone matching
-      (max pairs, min total distance — the greedy walk's one-bad-early-grab cascade is dead);
-      Tight must now succeed wherever pre-chop-fix Tight did. A failed Analyze reports
-      Leader/Follower word-start counts + pairs-within-window and states that the previous
-      alignment stays applied.) `D:__ R:__` notes:
-- [ ] **F-4 — +Pitch preset pulls pitch, Tight maps contour [EAR-CHECK].** Close-Align+Pitch on a
-      deliberately-flat follower note: Analyze/Apply, Play. Expected: the follower pulls toward
-      the leader's pitch LIVE, WITHOUT erasing all human variation; Tight-Align+Pitch maps the
-      contour much harder. The Algos dropdown drives the RENDER's pitch pass (the live path is
-      phase-vocoder based): Render under each of the three Algos (PSOLA / Granular / Phase
-      Vocoder), audition each export via "+ Add New Vox From Export" (mute the new strip after
-      each listen) — each is audibly shifted, artifact-bounded (no dropouts/garble).
+- [ ] **F-3 — Mode = RESIDUAL tightness (QA-Fd rewrite, locked 9a/10a).** Same pair:
+      Analyze/Apply under Loose, Play; then Tight, wait for the stop-gated re-analysis (or
+      re-Analyze), Play. Expected: matching itself no longer depends on the Mode (the pairing
+      window is internal, ~+/-400 ms — Tight finds the SAME pairs Loose does); what changes is
+      how much natural timing survives: Tight = every paired word lands ON the leader (fully
+      locked); Loose = words already within ~100 ms keep their own timing and only the
+      outliers get pulled to the cap edge; Close sits between (~50 ms). Fine Tune trims the
+      cap +/-50 ms (sum clamps at 0 = fully locked — valid, not a footgun). All three modes
+      play CLEAN (the G2 chop fixes stand). A failed Analyze still reports word-start counts +
+      pairs and states the previous alignment stays applied — but the "Try Close or Loose"
+      advice is gone (modes no longer change matching). `D:__ R:__` notes:
+- [ ] **F-4 — +Pitch = Blend / Variation / Types, LIVE at publish (QA-Fd rewrite, 12a/13a)
+      [EAR-CHECK].** Close-Align+Pitch on a deliberately-flat follower note: Analyze/Apply,
+      Play. Expected: the follower pulls toward the leader's pitch LIVE. Now turn the
+      "Blend" knob (the renamed Range; free 0-100) DURING playback — the pull amount follows
+      the knob with NO re-analysis and no timing change; "Variation" up leaves that much
+      natural tuning deviation untouched (only the excess pulls — human feel survives);
+      Mode changes PRESET the Blend value (Loose 0 / Close 50 / Tight 100) instead of
+      re-windowing the knob. The per-side "Leader Type"/"Follower Type" pickers change
+      DETECTION (next analysis) — flip one and confirm the stale badge arms. The Algos
+      dropdown drives the RENDER's pitch pass: Render under each of the three Algos (PSOLA /
+      Granular / Phase Vocoder), audition each export via "+ Add New Vox From Export" (mute
+      the new strip after each listen) — each is audibly shifted, artifact-bounded.
       `D:__ R:__` notes:
 - [ ] **F-5 — Render is EXPORT ONLY + history.** Render twice (tweak something between).
       Expected: `<project>/Aligned/{name}_align_v1.wav` and `_v2.wav` on disk (project must be
@@ -335,18 +337,21 @@ FA-12/FA-13.
       live warp was already playing; the render is a file export). Re-analysis after a render is
       unchanged by the export's existence. Save/reload: the history list persists.
       `D:__ R:__` notes:
-- [ ] **F-6 — stale detection auto-re-analyzes, STOP-GATED.** After an Analyze/Apply: with the
-      transport STOPPED, move (or resize/mute) a follower clip on the Builder grid. Expected: the
-      amber RE-ANALYZE badge appears, then ~1 s after the edit settles the analysis re-runs BY
-      ITSELF (badge clears, a new version appears in the Versions dropdown, playback follows the
-      new map). Same edit while PLAYING: badge reads "RE-ANALYZE ON STOP", playback keeps
-      applying the LAST-applied map (stable, no shifting mid-play), and the re-analysis fires at
-      the next transport stop. Analyze/Apply + Versions GREY OUT during playback with a
-      stop-first tooltip (stop-gated, owner call at the G2 boundary — the ON/OFF toggle is the
-      only live map gesture; a mid-play analyze was never owner-approved behavior).
-      Editing a sync point / protected area raises the badge but does NOT auto-run (those are
-      mid-edit gestures — auto fires on grid/tempo signature changes only; commit sync-point
-      edits with a manual Analyze/Apply). `D:__ R:__` notes:
+- [ ] **F-6 — stale detection auto-re-analyzes, STOP-GATED (QA-Fd amendments).** After an
+      Analyze/Apply: with the transport STOPPED, move (or resize/mute) a follower clip on the
+      Builder grid. Expected: the amber RE-ANALYZE badge appears, then ~1 s after the edit
+      settles the analysis re-runs BY ITSELF (badge clears, a new version appears in the
+      Versions dropdown, playback follows the new map). Same edit while PLAYING: badge reads
+      "RE-ANALYZE ON STOP", playback keeps applying the LAST-applied map, and the re-analysis
+      fires at the next transport stop. QA-Fd additions: the TIME-map knobs (Mode / Fine Tune
+      / Flexibility / Max Shift / the Type pickers) also arm the stale badge — the map swaps
+      at the next stop, honoring "maps only change while stopped" — while Blend/Variation
+      republish live and do NOT arm it. RE-analysis stays stop-gated (Analyze + Versions +
+      Undo/Redo grey during playback with stop-first tooltips), BUT a NEVER-analyzed pair's
+      FIRST Analyze runs even mid-play (4a carve-out — the button stays live until a map
+      exists; an ANALYZING... badge shows while it runs). Editing a sync point / protected
+      area raises the badge but does NOT auto-run (mid-edit gestures — commit with a manual
+      Analyze/Apply). `D:__ R:__` notes:
 - [ ] **F-7 — presets + persistence round-trip.** Set Mode/Fine Tune/Pitch controls off-preset
       (green dirty dot lights), Save as a user preset (name it), tweak more, Load it back —
       values + dot state restore. Save the project with an analysis + sync points + protected
@@ -368,7 +373,7 @@ FA-12/FA-13.
       bug); monitoring latency stays unobtrusive (~2 pitch periods; no phase-vocoder smear).
       Retune 0 ms + Strength 100% still gives the deliberate hard-tune effect. `D:__ R:__` notes:
 - [ ] **F-10 — [EAR-CHECK] Formant Preserve + Throat Shift are audible.** Same setup, shift a few
-      semitones via Key/Scale forcing (or sing off-key hard): toggle Formant Preserve — timbre
+      semitones via Root/Scale forcing (or sing off-key hard): toggle Formant Preserve — timbre
       naturalness audibly changes (chipmunk tamed when ON). Throat Shift +/-4 st with Preserve
       off: character (thin/full) changes WITHOUT re-pitching. Expect ~20 ms extra wet-path
       latency only while either is engaged (toggle edge may click once — engage resets).
@@ -398,6 +403,9 @@ verify the recovery commit specifically. G2 ear-check batch — the pitch-edit e
 into the G2 boundary smoke (owner call 2026-07-10). Setup: a Vox tab with 1-2 vocal clips
 back-to-back on its channel (sequential only — overlap is §C item C2). BaySickPitch is the Vox
 tab's third sub-tab. Debug first, then Release.
+NOTE (QA-Fd, 2026-07-11): the pitch editor was REBUILT (§B.10). FA-2's edge-trim, FA-3's
+draggable sub-curves, and FA-5's preset combo describe RETIRED behavior — their superseded
+parts are marked inline and re-covered by the FD-* scenarios; walk the remainder here.
 
 - [ ] **FA-1 — composite auto-resolve (no Load button).** Two vocal clips on the Vox channel at
       bars 1 and 3; open BaySickPitch. Expected: note pills (purple, teal waveform inside)
@@ -406,12 +414,13 @@ tab's third sub-tab. Debug first, then Release.
       automatically" empty state instead. `D:__ R:__` notes:
 - [ ] **FA-2 — Slice / Edit modes.** Slice mode: click mid-pill → it splits into two pills at the
       click. Edit mode: drag a pill up a lane → pitch shift +1 st (green edit dot appears);
-      drag its left/right edge → start/end trims (clamped at neighbors); InfoBar tracks
-      Pitch/Cents/Length live during the drag. `D:__ R:__` notes:
-- [ ] **FA-3 — sub-curves under the selected pill.** Select a pill: three mini-lanes (VIB / FRM /
-      VOL) appear under it. Drag VIB right → vibrato deepens on playback of that note; drag FRM
-      off-center → character shifts; drag VOL points → a gain shape draws and the note follows it
-      when played. `D:__ R:__` notes:
+      InfoBar tracks Pitch/Cents/Length live during the drag. (SUPERSEDED by §B.10 FD-10:
+      edge drags are now STRETCH/SQUEEZE, not trims — edge-trim retired at QA-Fd.)
+      `D:__ R:__` notes:
+- [ ] **FA-3 — sub-edit display box under the selected pill.** Select a pill: the display box
+      (VIB / FRM / VOL / PITCH bars) appears under it. (SUPERSEDED by §B.10 FD-16: the bars
+      are DISPLAY-ONLY at QA-Fd — editing moved to the popup sub-editor + on-pill handles;
+      verify the box mirrors popup edits there.) `D:__ R:__` notes:
 - [ ] **FA-4 — realtime applicator (no bake) + ON/OFF glide.** Nudge one flat note up a
       semitone; global Play. Expected: the note plays CORRECTED in place (FilePlay), other notes
       unaltered; a second zero-edit clip on the channel plays bit-identical (lazy-activate); the
@@ -421,10 +430,11 @@ tab's third sub-tab. Debug first, then Release.
       (no click, no splice, Speed-rate glide); toggle ON mid-note — glides back in; with OFF
       settled the channel is bit-identical to pre-analysis. Render while OFF still prints the
       edits (export = the edits, not the monitor state). `D:__ R:__` notes:
-- [ ] **FA-5 — Focus / Mod / Speed + presets.** Raise Focus → notes pull toward centers audibly
-      (Tight preset = hard pull, Loose = none); Speed low = audible glide between notes, high =
-      instant; presets Loose/Close/Tight set all three knobs (dirty dot lights on manual tweak);
-      Save/Load a user preset round-trips knob values, dot clears. `D:__ R:__` notes:
+- [ ] **FA-5 — Focus / Mod / Speed + user presets.** Raise Focus → notes pull toward centers
+      audibly; Speed low = audible glide between notes, high = instant; Save/Load a user
+      preset round-trips the three knob values. (SUPERSEDED in part by §B.10: the
+      Loose/Close/Tight preset combo + dirty dot were RETIRED at QA-Fd — 7a; Focus now pulls
+      to the Root/Scale set when Snap is on, FD-10.) `D:__ R:__` notes:
 - [ ] **FA-6 — Render is EXPORT ONLY + "+ Add New Vox From Export".** Render (project saved
       first). Expected: `Pitched/{name}_pitch_v1.wav` on disk with edits printed; a second
       Render → `_v2`; NOTHING placed on the grid, playback unchanged (the edits were already
@@ -449,17 +459,20 @@ tab's third sub-tab. Debug first, then Release.
       history all restore without re-analysis (signature matches); playback still applies the
       edits (applicator snapshot rebuilt on load). Undo/Redo walk the note edits (incl. an
       accidental Reset). `D:__ R:__` notes:
-- [ ] **FA-9 — stale detection auto-re-analyzes, STOP-GATED.** After analysis: with the
-      transport STOPPED, move a clip on the Builder grid (or change the project tempo / add a
-      ruler tempo flag). Expected: amber RE-ANALYZE appears, then ~1 s after the edit settles
-      the analysis re-runs BY ITSELF — no tab switch needed — and edits carry over for notes
-      that still line up within 50 ms (a version snapshot is appended first, so nothing is
-      lost).  Same edit while PLAYING: badge reads "RE-ANALYZE ON STOP", playback keeps applying
-      the last-analyzed regions, and the re-analysis fires at the next stop.  The auto also
-      works with the BaySickPitch sub-tab CLOSED (make the grid edit from Builder, stop, reopen
-      the sub-tab — already re-analyzed, no badge).  Opening the sub-tab on a stale channel
-      re-runs immediately while STOPPED; during playback it lights the badge and defers to the
-      next stop (analyze is stop-gated, G2 boundary). `D:__ R:__` notes:
+- [ ] **FA-9 — stale detection auto-re-analyzes, STOP-GATED + the QA-Fd first-analysis
+      carve-out (4a).** After analysis: with the transport STOPPED, move a clip on the Builder
+      grid (or change the project tempo / add a ruler tempo flag). Expected: amber RE-ANALYZE
+      appears, then ~1 s after the edit settles the analysis re-runs BY ITSELF — no tab switch
+      needed — and edits carry over for notes that still line up within 50 ms (a version
+      snapshot is appended first).  Same edit while PLAYING: badge reads "RE-ANALYZE ON STOP",
+      playback keeps applying the last-analyzed regions, and the re-analysis fires at the next
+      stop.  The auto also works with the BaySickPitch sub-tab CLOSED.  QA-Fd carve-out:
+      opening the sub-tab on a NEVER-analyzed channel analyzes IMMEDIATELY even during
+      playback (no edits exist — provably inaudible; the felt "go to Align first" coupling is
+      dead) with a visible ANALYZING... badge / canvas state; a STALE (already-analyzed)
+      channel during playback shows DEFERRED UNTIL STOP instead of a silent empty canvas and
+      re-runs at the stop; an analysis FAILURE names itself on the canvas instead of silence.
+      `D:__ R:__` notes:
 - [ ] **FA-10 — [EAR-CHECK, at the G2 boundary smoke] pitch-edit quality.** A corrected note
       sounds natural — no chipmunk (per-note formant left at 0 keeps timbre; deliberate FRM
       shifts change character not pitch); an exaggerated pill drag (+7 st) is audibly artifact-
@@ -516,8 +529,8 @@ functional. Debug first, then Release.
 - [ ] **FB-3 — conditional-WET.** (1) Realtime pitch BYPASSED (default) + record → `Samples/`
       gains ONLY a `- DRY.wav` (no `- WET.wav` at all), and the DRY clip lands on the grid +
       browser once (no duplicate entry). (2) Realtime pitch ON + record → BOTH files; WET on
-      the grid, DRY in the browser. (3) Page master bypass ON (pitch left on) + record → DRY
-      only again (no empty orphan WET). `D:__ R:__` notes:
+      the grid, DRY in the browser. (Case 3 RETIRED at QA-Fd: the page-master Bypass button
+      and its bsv_bypass condition were removed — 3a/12b.) `D:__ R:__` notes:
 - [ ] **FB-4 — monitor = playback preview (Option A / A1, Vox).** Before take 2: crank an
       obvious vocal-chain setting (heavy saturation or comp) AND drag one of take 1's
       BaySickPitch pills +2 st. While recording take 2: (a) take 1 sounds PROCESSED (the
@@ -551,12 +564,13 @@ functional. Debug first, then Release.
       follows the new edge (QA-Ec chain). Then open BaySickPitch on a channel with 2 clips —
       pills appear over both (the QA-F composite renderer feeding analysis, shared-dependency
       smoke). `D:__ R:__` notes:
-- [ ] **FB-11 — [G2 boundary] realtime board locks during capture.** Arm the Vox strip and
-      record. Expected: the moment capture starts (count-in included) the ENTIRE realtime
-      section (Realtime Pitch toggle, Key/Scale, Retune/Strength/Humanize/Throat, Formant
-      Preserve) PLUS the page-wide chain Bypass and A/B slot grey to 40% and ignore input
-      (Mix stays live — smooth param); the locked controls' tooltips read "Locked while
-      recording - ...". Stop — everything re-enables.
+- [ ] **FB-11 — [G2 boundary, QA-Fd amendment] realtime board locks during capture.** Arm the
+      Vox strip and record. Expected: the moment capture starts (count-in included) the ENTIRE
+      realtime section (Realtime Pitch toggle, Root/Scale, Retune/Strength/Humanize/Throat,
+      Formant Preserve) PLUS the A/B slot grey to 40% and ignore input (Mix stays live —
+      smooth param); the locked controls' tooltips read "Locked while recording - ...".
+      Stop — everything re-enables. (QA-Fd: the page-wide chain Bypass LEFT the gate set with
+      its removal — 3a/12b — and the "Key" label is now "Root".)
       Armed-with-listen-off capture locks the same way; monitoring WITHOUT recording (listen
       ON, unarmed) stays fully editable — that is the setup flow. Per-strip: a second Vox
       tab's board stays live unless that strip is also capturing. (Rationale: an engage-edge
@@ -609,6 +623,146 @@ functional. Debug first, then Release.
       (Inst if you used Vox, or vice versa). Expected: identical dual-mic UI + behavior; the
       two pages' NAM/IR settings stay independent (Mic B on one page doesn't affect the
       other). `D:__ R:__` notes:
+
+---
+
+### §B.10 — QA-Fd (vocal editor rework: align semantics + time-edit engine + editor rebuild + sub-edits + engage fix)
+
+`blocks:` (backfill the QA-Fd close commit hash at commit). The consolidated rework batch —
+locked dockets 1-20 + Newtone parity 1-14 (plan: `Batch Plans/snug-orbiting-catmull.md`).
+Setup: the §B.6 two-strip leader/follower rig for FD-1..FD-5; a single Vox tab with 1-2 vocal
+clips for the rest; Jeff's two G2 test wavs (the align screenshot pair + the
+missing-first-note case) are the FD-6 material. Rewritten F-3/F-4/F-6/FA-9/FB-3/FB-11 above
+carry this batch's amendments — failures there indict the QA-Fd commit. Calibrations
+(match window, residual caps, flex ratios, Hz bands, crossfade, merge thresholds) are
+Claude's first-pass values, TUNED at this smoke. Debug first, then Release.
+
+- [ ] **FD-1 — residual semantics by ear.** Leader/follower pair, follower loosely late.
+      Tight: words lock hard onto the leader (default residual 25 ms; Fine full-left = 0 =
+      exact lock). Loose: the take keeps its human feel — only words further than ~150 ms
+      out get pulled (to the cap edge, not fully). The same words pair in all three modes
+      (internal matching): Tight no longer "loses" pairs. Fine sweeps the mode's window
+      (Tight 0-50 / Close 50-150 / Loose 100-200 ms, 12 o'clock = center) and the readout
+      tracks in ms across the whole travel — no dead half. *(Amended 2026-07-11: owner
+      respec from the bipolar-offset model.)* `D:__ R:__` notes:
+- [ ] **FD-2 — Blend / Variation are LIVE knobs.** With +Pitch analyzed and playing: sweep
+      Blend 0 -> 100 — the pitch pull follows audibly mid-play, timing untouched, no
+      re-analysis, no stale badge; raise Variation — natural tuning deviation returns while
+      big misses stay corrected. `D:__ R:__` notes:
+- [ ] **FD-3 — Max Shift guard.** A take with one badly-timed word: Max Shift wound down to
+      ~50 ms caps how far ANY word moves (listen for the residual offset staying put); at
+      full-right No Limit (the default) the guard never binds. Time-map knob: each change arms
+      the stale badge and applies at stop. *(Amended 2026-07-11: (a) Flexibility picker
+      REMOVED — the DSP runs a fixed Normal 2:1 slope bound in the background, so there's no
+      rung to test; (b) Max Shift knob is 10-150 ms + a No Limit top stop, was 10-400.)*
+      `D:__ R:__` notes:
+- [ ] **FD-4 — Pitch Types per-side bands.** Set the Leader type to its material (e.g. High
+      Vocal for a high harmony) and re-analyze: pitch detection locks the right octave (the
+      +Pitch pull stops chasing octave errors, if any were audible under Normal). Band flips
+      arm the stale badge (detection-time controls). `D:__ R:__` notes:
+- [ ] **FD-5 — publish-vs-stop reconciliation.** Playing: change Mode (time knob) — badge arms,
+      playback does NOT lurch, the new map lands at stop; change Blend (pitch knob) — applies
+      immediately, badge stays dark. `D:__ R:__` notes:
+- [ ] **FD-6 — no-silent-drop segmentation [Jeff's two wavs].** Analyze the missing-first-note
+      wav: the first note now HAS a pill (the onset glide merged forward — the rising curve is
+      visible INSIDE the pill, the pill center sits on the stable note); the align screenshot
+      pair shows pills matching what Align's lanes show. Unvoiced/short material (consonants,
+      breaths) shows as gray SLICE pills in the bottom lane — time-editable, no pitch handle;
+      silence stays pill-free. `D:__ R:__` notes:
+- [ ] **FD-7 — analysis states + first-analysis carve-out (both editors).** Fresh channel,
+      transport PLAYING, open BaySickPitch: ANALYZING... shows, pills appear WITHOUT stopping
+      (never-analyzed = immediate). Make it stale and reopen during playback: DEFERRED UNTIL
+      STOP, fires at stop. Align: never-analyzed pair mid-play — Analyze button is live and
+      works; after a map exists it greys during playback. An empty channel's analysis failure
+      names itself on the canvas. `D:__ R:__` notes:
+- [ ] **FD-8 — Bypass button is GONE, edits always audible.** The BaySickVocals sub-tab has no
+      page-master Bypass (Mix + A/B remain); pitch/align edits are audible in every page
+      state; a pre-QA-Fd project that had bsv_bypass saved ON loads fine and PLAYS (the param
+      is ignored). `D:__ R:__` notes:
+- [ ] **FD-9 — time edits are the performance (pitch upstream of align).** Align OFF: drag a
+      word's pill right ~200 ms — playback moves the WORD (neighbor gaps counter-warp, no
+      other word moves); drag it back. Align ON over a leader: make the same time edit — the
+      align badge arms, at stop align re-analyzes against the EDITED timing and the correction
+      follows the word (no wrong-syllable artifacts at offsets). Ctrl+drag = detach: the pill
+      relocates freely; crossing its old neighborhood plays as a clean cut (brief, no garble
+      spray). `D:__ R:__` notes:
+- [ ] **FD-10 — motion model + snap.** Body drag: vertical = 0.1 st steps (Ctrl = 0.01 fine),
+      horizontal = elastic move clamped at neighbor contact (pills never cross). Edge drag =
+      stretch/squeeze (the pill lengthens/shortens; edge-TRIM is retired — re-partition via
+      Slice + merge; flag if trim is missed). Snap ON: vertical drags land on in-scale lanes
+      for the picked Root/Scale; Focus pulls toward the scale AND the pills visibly render at
+      the corrected pitch while the green curve stays as-sung; Snap OFF: nearest-semitone
+      behavior. Knobs detent at their defaults (Shift bypasses), Ctrl-drag = fine, the value
+      box types in. `D:__ R:__` notes:
+- [ ] **FD-11 — pill menu + merge + batch re-pitch + scrub.** Right-click a pill: Restore to
+      Original State (everything back as-analyzed incl. time edits), Snap to Semitone (cents
+      -> 0). Select two adjacent pills -> Merge Selected = one pill spanning both. Select
+      several pills + click a keyboard key = all re-center on that note (hold = hear the
+      focused pill). Dragging a pill while STOPPED re-renders + previews it (scrub-audition).
+      Double-click = the sub-editor popup. Zoomed in, pills show their note name inline.
+      `D:__ R:__` notes:
+- [ ] **FD-12 — view + navigation set.** Ctrl+wheel h-zoom (cursor-anchored), Alt+wheel v-zoom
+      (lane height changes, cursor-anchored), Shift+wheel h-scroll, bare wheel v-scroll,
+      middle-drag pan. Ctrl+RMB-drag a rect = zoom to it; plain RMB on empty space = jump back
+      to the pre-zoom view; pill menu "Zoom to Selection" works the same. The view floor stops
+      at C0 — no lanes render below it and scrolling can't go past. `D:__ R:__` notes:
+- [ ] **FD-13 — playhead + auto-scroll.** Play: the canvas playhead tracks the MAIN transport
+      smoothly (30 Hz). STOP: the playhead returns to the transport's stop-seek position
+      (start or the loop selection) — it no longer freezes where playback died. Zoom in +
+      scroll away with A on: the view only page-flips when the ADVANCING playhead crosses the
+      right edge — it never resets to the start on its own; with A off it never moves.
+      `D:__ R:__` notes:
+- [ ] **FD-14 — selection + clipboard.** Marquee-drag selects pills (Shift adds); Ctrl+A all.
+      Ctrl+C on a treated pill, select others, Ctrl+V: the treatment (pitch offset, curves,
+      vib/frm/variation) transfers in ONE undo step (audio does not relocate); Ctrl+B =
+      duplicate the focused pill's treatment across the selection. Shift+Up/Down nudges pitch
+      0.1 st; Shift+Left/Right nudges time ~10 ms (clamped at neighbors). Delete on pills =
+      Restore to Original State (pills are analysis segments, not deletable objects).
+      `D:__ R:__` notes:
+- [ ] **FD-15 — global undo (9a).** Drag a pill, Ctrl+Z: the app-wide undo reverts it (the
+      InfoBar's [edited] tag clears — #9); redo restores. The undo HISTORY window lists the
+      pitch edits by label among app edits. Undo works across popup sub-editor edits and knob
+      drags. Toolbar Undo/Redo = the same global stack. `D:__ R:__` notes:
+- [ ] **FD-16 — sub-edit system end-to-end.** Select a pill: the display box shows 4 bars
+      (VIB / FRM / VOL / PITCH), display-only (drags on it do nothing). EDIT (or double-click)
+      opens the popup: pill waveform ghosted behind the lane; click adds points, drag moves,
+      right-click deletes; Volume/Pitch lane toggle; the PITCH lane audibly bends pitch inside
+      the one pill on preview; Vib/Frm knobs shape the note; VARIATION at 0 flattens the
+      note's own wiggle, at 2 exaggerates it. Play button + SPACE preview the pill through
+      current edits while stopped. The pill browser lists pills in order (filtered to the
+      selection when opened from a multi-select) and switches the popup. RESET on the box
+      clears the boxed params of the selection only (pitch offset + timing kept); a
+      multi-select Reset prompts once with a working never-show-again checkbox (persists
+      across app restarts). On-pill corner handles (selected pill, zoomed in): top = volume
+      fade in/out (drag length), bottom = pitch approach/release (length + semitones,
+      green=in/red=out, hover arrows); handle ramps appear as points IN the popup lanes and
+      fades show on the pill waveform itself; re-grabbing a handle over hand-drawn points
+      replaces that span (one undo step). `D:__ R:__` notes:
+- [ ] **FD-17 — render parity + High-Res.** Align render vs live playback: A/B by ear — the
+      export no longer steps/chops at word boundaries (the smooth-map port; re-render an old
+      project's map after re-analyzing). A time-edited channel's renders (both editors)
+      reflect the moved words. All three Algos render sane. High Resolution render completes
+      and sounds at least as good as Standard (slower is expected; long takes use several
+      hundred MB transiently — flag if that hurts). `D:__ R:__` notes:
+- [ ] **FD-18 — engage-tick fix [realtime FIRST real listen].** Live monitoring, Realtime
+      Pitch OFF -> ON mid-phrase: no click, no doubled-voice artifact beyond a brief (~40 ms)
+      fade; OFF again — same. THEN the first honest hard-tune listen (every prior impression
+      was formed on the broken shifter): Retune 0 / Strength 100 snaps hard; defaults sound
+      musical; NIT-4 (the sync auto re-analyze UI hitch on long channels) gets Jeff's
+      deliberate judgment during this session. OFF-path monitoring latency is unchanged from
+      pre-batch. `D:__ R:__` notes:
+- [ ] **FD-19 — persistence round-trip.** Make one of each: a time edit, a detached pill, a
+      pitch-lane curve, a Variation tweak, Root/Scale/Snap picks, new align knob positions.
+      Save, close, reopen: everything restores (pills at edited positions, curves in the
+      popup, knob values); playback matches pre-save; a PRE-QA-Fd project loads with its
+      pills at source positions and neutral new fields (nothing shifts). `D:__ R:__` notes:
+- [ ] **FD-20 — realtime board Root + 13-scale list (17b).** The realtime section's first
+      combo reads "Root"; the Scale list reads IDENTICALLY to the piano roll's picker (same
+      13 names, same order — Chromatic through Blues, no Custom entry). A pre-QA-Fd project
+      with a saved non-default scale loads SHIFTED (accepted at spec — the corrector was
+      inaudibly broken before `703f06e4`); correction snaps to the picked scale's notes,
+      including near the root wrap (a B-ish note pulls to the nearest in-scale note, never an
+      octave down — the wrap fix). `D:__ R:__` notes:
 
 ---
 

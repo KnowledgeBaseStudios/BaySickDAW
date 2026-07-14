@@ -27,14 +27,19 @@ class BaySickVocalProcessor;
 //     either side's handle, right-click delete, "Automatic Sync Points" seed.
 //   - Protected Areas strip (between Follower + Output): drag-create,
 //     right-click toggles time/pitch protection dimensions.
-//   - ViewModeBar: Wave / Pitch (frame-YIN F0 contour) / Energy (RMS).
-//   - HistoryScrubber: render-version list (version + date) + Del / + / -.
-//   - Right panel, always visible, two boxes:
-//       Align: ON, Mode (Loose/Close/Tight), Fine Tune (bipolar +/-50 ms
-//              around the Mode base 150/100/50).
-//       Pitch: ON, Range (Mode-driven center + travel), Algos (PSOLA /
-//              Granular / Phase Vocoder), Transpose, Formant Shift ON +
-//              rotary.
+//   - ViewModeBar: Wave / Pitch (frame-YIN F0 contour) / Energy (RMS)
+//     + time zoom +/- (renders bar retired 2026-07-11, owner call).
+//   - Right panel, always visible, two boxes (QA-Fd semantics rework):
+//       Align: ON, Mode (residual tightness -- Tight locks, Loose keeps
+//              natural timing), Fine Tune (sweeps the mode's residual
+//              window: Tight 0-50 / Close 50-150 / Loose 100-200 ms,
+//              12 o'clock = window center), Max Shift cap (10-150 ms +
+//              No Limit).  (Flexibility picker removed 2026-07-11 -- DSP
+//              runs a fixed Normal 2:1 slope bound.)
+//       Pitch: ON, per-side Pitch Type bands, Blend (percent toward the
+//              leader contour) + Variation (tuning-variation cap) -- both
+//              applied at publish, live, Algos (PSOLA / Granular / Phase
+//              Vocoder), Transpose, Formant Shift ON + rotary.
 //
 // Analysis + rendering are offline/message-thread; APPLIED maps play LIVE
 // through the decode-layer applicator (QA-Fa recovery -- the locked May
@@ -79,7 +84,6 @@ private:
     class SyncStrip;
     class ProtectedStrip;
     class ViewModeBar;
-    class HistoryScrubber;
     class RightPanel;
     class Toolbar;
 
@@ -127,7 +131,6 @@ private:
     std::unique_ptr<ProtectedStrip>  mProtectedStrip;
     std::unique_ptr<LaneView>        mOutputLane;
     std::unique_ptr<ViewModeBar>     mViewModeBar;
-    std::unique_ptr<HistoryScrubber> mHistory;
     std::unique_ptr<RightPanel>      mRightPanel;
 
     LaneCache mLeaderCache, mFollowerCache, mOutputCache;

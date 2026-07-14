@@ -1343,12 +1343,25 @@ EventEditorContent::EventEditorContent(VibeSynthProcessor& p, UndoManager& um)
 
     updateTabStyles();
     updateToolButtonStates();
+    // QA-Fd owner find (2026-07-11): undo/redo rewrote the lane but nothing
+    // repainted the grid, so Ctrl+Z looked dead.  The UndoManager broadcasts
+    // on perform/undo/redo from ANY window; repaint is the whole sync (the
+    // grid draws straight from PatternManager).
+    mUM.addChangeListener(this);
+
     startTimerHz(24);
 }
 
 EventEditorContent::~EventEditorContent()
 {
+    mUM.removeChangeListener(this);
     stopTimer();
+}
+
+void EventEditorContent::changeListenerCallback(ChangeBroadcaster*)
+{
+    if (mGrid) mGrid->repaint();
+    updateValueDisplay();
 }
 
 void EventEditorContent::setBlock(PatternManager* pm, int blockIdx)

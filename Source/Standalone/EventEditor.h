@@ -203,6 +203,7 @@ private:
 class EventEditorContent : public juce::Component,
                            public juce::MenuBarModel,
                            public juce::KeyListener,
+                           private juce::ChangeListener,
                            private juce::Timer
 {
 public:
@@ -286,6 +287,9 @@ private:
     std::unique_ptr<juce::Label>           mStatusBar;
 
     void timerCallback() override;
+    // UndoManager broadcast: undo/redo may have rewritten the bound lane
+    // from this window or the main one - repaint the grid (QA-Fd fix).
+    void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void switchMode(bool lfo);
     void updateTabStyles();
     void updateValueDisplay();

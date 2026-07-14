@@ -180,9 +180,16 @@ void VoxStripTask::run()
     {
         decodeRoutedClips();
         if (mVocalEngine != nullptr)
+        {
+            // QA-Fd: forward the decode layer's source-position stamp so the
+            // monitor-stream applicator resolves pills in the SOURCE domain
+            // (this path has no finalizeFilePlayStrip to do it).
+            const auto& e = mProcessor->mBlockAlignEntries[(size_t) mIndex];
+            mVocalEngine->setFilePlaySourceStamp (e.srcX0, e.srcRate, e.srcSet);
             mVocalEngine->setMonitorMergeForThisBlock (anyClip ? &mEngineScratch : nullptr,
                                                        clipCtx.projectStart,
                                                        armed && ! listen);
+        }
     }
 
     // ── Sidechain push (pull from SC predecessor outputs) ─────────────────────

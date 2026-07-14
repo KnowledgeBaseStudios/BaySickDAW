@@ -485,6 +485,13 @@ public:
     std::function<juce::String(const juce::String& /*src*/)>            onDuplicateFileForCopy;
     std::function<void(const juce::String& /*np*/, int /*targetChannel*/,
                        float /*pitch*/, float /*bpm*/, bool /*stretch*/)> onTagCopiedEntry;
+    // Owner call 2026-07-11: per-clip Properties "Move" mirrors the browser
+    // dialog exactly by sharing its lambda -- relocate the library entry's
+    // owner + props and propagate to every FOLLOWING copy (isOverride==false),
+    // so the grid clip and its browser entry move as one (linked).  Wired in
+    // StandaloneEditor from `panel->onApplyLibraryProperties`.
+    std::function<void(int /*libIdx*/, float /*pitch*/, float /*bpm*/,
+                       bool /*stretchMode*/, int /*newRoute*/)>          onApplyLibraryProperties;
     // copies it into the current project's Samples/ folder and returns the
     // relative string to store (e.g. "Samples/kick.wav"), or returns {} to
     // reject the drop (e.g. no project open - caller also shows the user an

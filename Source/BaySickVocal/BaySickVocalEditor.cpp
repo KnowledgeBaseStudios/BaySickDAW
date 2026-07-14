@@ -162,15 +162,9 @@ public:
         mMixLbl.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (mMixLbl);
 
-        addAndMakeVisible (mBypassBtn);
-        mBypassBtn.setButtonText ("Bypass");
-        mBypassBtn.setClickingTogglesState (true);
-        mBypassBtn.setTooltip ("Bypasses the entire BaySickVocal chain (pitch + de-esser + "
-                                "comp + sat + limiter).  Use to compare the processed vocal "
-                                "against the raw input at the strip's output.");
-        mBypassAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
-                          mProc.apvts, pid ("bypass"), mBypassBtn);
-
+        // QA-Fd 3a/12b: the page-master Bypass button is REMOVED with its
+        // param -- pitch/align edits must never be silenced by a page
+        // switch.  A/B + Mix cover the compare workflow.
         addAndMakeVisible (mABSlot);
         mABSlot.addItem ("A", 1);
         mABSlot.addItem ("B", 2);
@@ -187,7 +181,7 @@ public:
         mPitchBypassBtn.setButtonText ("Realtime Pitch ON");
         mPitchBypassBtn.setClickingTogglesState (true);
         mPitchBypassBtn.setTooltip ("Turns on realtime pitch correction.  "
-                                      "Tightens vocals to the Key/Scale picked below as they play, "
+                                      "Tightens vocals to the Root/Scale picked below as they play, "
                                       "in both live monitoring and recorded-clip playback.  Use the "
                                       "BaySickPitch sub-tab for offline note-by-note pitch editing.");
         // bypass=true => OFF.  We invert visually via getToggleState.
@@ -202,7 +196,8 @@ public:
         };
         mPitchBypassBtn.onStateChange();
 
-        // Key combo
+        // Root combo (QA-Fd 17b: "Key" label retired app-wide; param id
+        // bsv_pitch_key unchanged).
         addAndMakeVisible (mKeyCombo);
         const char* keyNames[] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
         for (int i = 0; i < 12; ++i) mKeyCombo.addItem (keyNames[i], i + 1);
@@ -210,20 +205,20 @@ public:
                                 "Combined with the Scale below to define which notes are 'in tune'.");
         mKeyAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
                        mProc.apvts, pid ("pitch_key"), mKeyCombo);
-        mKeyLbl.setText ("Key", juce::dontSendNotification);
+        mKeyLbl.setText ("Root", juce::dontSendNotification);
         mKeyLbl.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (mKeyLbl);
 
-        // Scale combo
+        // Scale combo (QA-Fd 17b: list + order = the piano roll's 13 scales
+        // via the shared corrector table -- single source, no literal copy;
+        // the dead Custom entry retired with the corrector's old table).
         addAndMakeVisible (mScaleCombo);
-        const char* scaleNames[] = {
-            "Chromatic","Major","Minor","Harmonic Minor","Dorian","Mixolydian",
-            "Phrygian","Lydian","Locrian","Custom" };
-        for (int i = 0; i < 10; ++i) mScaleCombo.addItem (scaleNames[i], i + 1);
+        for (int i = 0; i < PitchCorrectorDSP::kNumScales; ++i)
+            mScaleCombo.addItem (PitchCorrectorDSP::scaleName (i), i + 1);
         mScaleCombo.setTooltip ("Picks which scale the realtime correction snaps detected pitch to.  "
                                   "Chromatic = nearest semitone (most natural); a named scale (Major, "
-                                  "Minor, etc.) tightens to in-key notes only; Custom lets you pick "
-                                  "the allowed notes manually.");
+                                  "Minor, etc.) tightens to in-key notes only.  Same list as the "
+                                  "piano roll's scale picker.");
         mScaleAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
                          mProc.apvts, pid ("pitch_scale"), mScaleCombo);
         mScaleLbl.setText ("Scale", juce::dontSendNotification);
@@ -323,11 +318,8 @@ public:
                        .reduced (16, 8);
         auto bot = getLocalBounds().withTrimmedTop (half).reduced (16, 24);
 
-        // Top half: Bypass | Mix knob | A/B combo
+        // Top half: Mix knob | A/B combo (QA-Fd: Bypass slot removed)
         const int btnH = 28;
-        mBypassBtn  .setBounds (top.removeFromLeft (100).withSizeKeepingCentre (96, btnH));
-        top.removeFromLeft (12);
-
         mMixLbl     .setBounds (top.getX(), top.getY(), 90, 16);
         mMixSlider  .setBounds (top.getX(), top.getY() + 16, 90, 90);
         top.removeFromLeft (102);
@@ -386,22 +378,17 @@ private:
             gate (mHumanize);    gate (mHumanizeLbl);
             gate (mThroatShift); gate (mThroatShiftLbl);
             gate (mFormantBtn);
-            // Chain Bypass + A/B are stepped whole-chain swaps -- same
-            // click-and-print class mid-take (owner extension, 2026-07-10).
-            // Mix stays live (smooth param).
-            gate (mBypassBtn);
+            // A/B is a stepped whole-chain swap -- same click-and-print
+            // class mid-take (owner extension, 2026-07-10).  Mix stays live
+            // (smooth param).  QA-Fd: the chain Bypass left the gate set
+            // with its removal.
             gate (mABSlot);
             mPitchBypassBtn.setTooltip (rec
                 ? "Locked while recording - set the realtime sound before the take"
                 : "Turns on realtime pitch correction.  "
-                  "Tightens vocals to the Key/Scale picked below as they play, "
+                  "Tightens vocals to the Root/Scale picked below as they play, "
                   "in both live monitoring and recorded-clip playback.  Use the "
                   "BaySickPitch sub-tab for offline note-by-note pitch editing.");
-            mBypassBtn.setTooltip (rec
-                ? "Locked while recording - set the chain before the take"
-                : "Bypasses the entire BaySickVocal chain (pitch + de-esser + "
-                  "comp + sat + limiter).  Use to compare the processed vocal "
-                  "against the raw input at the strip's output.");
             mABSlot.setTooltip (rec
                 ? "Locked while recording - pick the A/B slot before the take"
                 : "A/B compare slot.  Each slot remembers a full set of chain "
@@ -429,13 +416,11 @@ private:
     using BAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using CAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
-    // Top half
+    // Top half (QA-Fd: master Bypass removed with bsv_bypass)
     juce::Slider     mMixSlider;
     juce::Label      mMixLbl;
-    juce::TextButton mBypassBtn;
     juce::ComboBox   mABSlot;
     std::unique_ptr<SAtt> mMixAtt;
-    std::unique_ptr<BAtt> mBypassAtt;
     std::unique_ptr<CAtt> mABAtt;
 
     // Bottom half
@@ -606,6 +591,12 @@ void BaySickVocalEditor::setActiveTab (int idx)
         if (auto* c = panelForTab (i))
             c->setVisible (i == mActiveTab);
     resized();
+}
+
+void BaySickVocalEditor::setUndoContext (const UndoContext& ctx)
+{
+    if (auto* pe = dynamic_cast<BaySickPitchEditor*> (mPanelBaySickPitch.get()))
+        pe->setUndoContext (ctx);
 }
 
 // J-6 EQ unification (2026-05-03): setPreRackEQ removed.

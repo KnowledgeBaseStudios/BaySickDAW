@@ -1126,6 +1126,11 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     // swaps (direct <-> PV) crossfade within one block at identical read
     // positions.  Idle cost per clip: the mBlockAlignEntries scan below
     // (<= kMaxVoxPages pointer compares) + one bool check.
+    //
+    // QA-Fd time-edit engine (locked 5/13a): the law COMPOSES the channel's
+    // pitch TIME map downstream of the align map -- read =
+    // rawLaw(pitchMap(alignMap(t))) with either stage dropping out when its
+    // chain is off.  The glide/seek machinery is law-agnostic and unchanged.
     bool warpHandled = false;
     if (isVoxRoute && player.vocoder != nullptr)
     {
@@ -1133,7 +1138,11 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
         for (const auto& e : mBlockAlignEntries)
             if (e.snap != nullptr && e.snap->followerChannelId == routeCh)
                 { ae = &e; break; }
-        const bool wantWarp = (ae != nullptr) && ae->chainOn;
+        // The channel's OWN pitch time map (index-matched; also the stamp slot).
+        auto& ownEntry = mBlockAlignEntries[(size_t) (routeCh - MixerChannelIds::kVoxBase)];
+        const bool alignActive = (ae != nullptr) && ae->chainOn;
+        const bool pitchActive = ownEntry.pitchMap != nullptr && ownEntry.pitchChainOn;
+        const bool wantWarp    = alignActive || pitchActive;
 
         if (player.alignEngaged || wantWarp)
         {
@@ -1170,14 +1179,43 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                         : (juce::int64) std::llround (ae->snap->commonStartBeat
                                                       * secPerBeat * mSampleRate);
             }
+            juce::int64 pitchOrigin = 0;
+            if (ownEntry.pitchMap != nullptr)
+            {
+                // Same SR-origin convention as the align side.
+                pitchOrigin = ownEntry.pitchMap->commonStartSample;
+                if (std::abs (ownEntry.pitchMap->analysisSampleRate - mSampleRate) > 0.5)
+                    pitchOrigin = TempoMap::isActive()
+                        ? TempoMap::sampleAtBeat (ownEntry.pitchMap->commonStartBeat)
+                        : (juce::int64) std::llround (ownEntry.pitchMap->commonStartBeat
+                                                      * secPerBeat * mSampleRate);
+            }
 
+            // Composed SOURCE position (timeline-equivalent samples): align
+            // maps output time onto the edited performance; the pitch map
+            // then maps edited time onto the raw source.
+            auto sourcePosAt = [&] (double timelineSample) -> double
+            {
+                double x = timelineSample;
+                if (alignActive)
+                {
+                    const double g = (x - (double) alignOrigin) / mSampleRate;
+                    double d = g, dPerG = 1.0; float semis = 0.0f;
+                    ae->snap->lookupAtGuideSec (g, d, dPerG, semis);
+                    x = (double) alignOrigin + d * mSampleRate;
+                }
+                if (pitchActive)
+                {
+                    const double te = (x - (double) pitchOrigin) / mSampleRate;
+                    double u = te, dPerG = 1.0; float semis = 0.0f;
+                    ownEntry.pitchMap->lookupAtGuideSec (te, u, dPerG, semis);
+                    x = (double) pitchOrigin + u * mSampleRate;
+                }
+                return x;
+            };
             auto warpLawAt = [&] (double timelineSample) -> double
             {
-                if (ae == nullptr) return rawLawAt (timelineSample);
-                const double g = (timelineSample - (double) alignOrigin) / mSampleRate;
-                double d = g, dPerG = 1.0; float semis = 0.0f;
-                ae->snap->lookupAtGuideSec (g, d, dPerG, semis);
-                return rawLawAt ((double) alignOrigin + d * mSampleRate);
+                return rawLawAt (sourcePosAt (timelineSample));
             };
 
             const double lawStart = wantWarp ? warpLawAt ((double) T0)
@@ -1186,7 +1224,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                                              : rawLawAt  ((double) (T0 + outSamples));
 
             float semisTarget = 0.0f;
-            if (wantWarp && ae->pitchOn)
+            if (alignActive && ae->pitchOn)
             {
                 const double g0 = ((double) T0 - (double) alignOrigin) / mSampleRate;
                 double d = g0, dPerG = 1.0; float semis = 0.0f;
@@ -1197,8 +1235,9 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
             const double blockSec = (double) outSamples / mSampleRate;
             const double glideK   = juce::jmin (1.0, blockSec / 0.05);   // rule 5: ~50 ms
 
-            int  fadeMode = 0;      // +1 = direct->PV engage fade, -1 = PV->direct exit fade
-            bool engageOk = true;
+            int  fadeMode  = 0;     // +1 = direct->PV engage fade, -1 = PV->direct exit fade
+            bool engageOk  = true;
+            bool forceSeek = false; // QA-Fd: detach-pill law jump -> hard resync
 
             const bool contiguous = (player.alignLastEndTimeline == T0)
                                  && (player.alignLastLawEnd >= 0.0);
@@ -1237,10 +1276,25 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
             else if (std::abs ((player.alignLastLawEnd - player.alignPosCorr)
                                - lawStart) > 4.0)
             {
-                // Law changed under us (the ON/OFF toggle -- analyze/revert
-                // are stop-gated): REBASE onto the new law so the read stays
-                // continuous, then drain the difference out.
-                player.alignPosCorr = player.alignLastLawEnd - lawStart;
+                // QA-Fd detach-pill jump: crossing a detached boundary makes
+                // the law JUMP (relocated audio) -- that is a cut, not a bend
+                // the 2:1 glide should grind through (a backward jump could
+                // never drain at all: consumption is forward-only).  Hard
+                // resync through the existing seek path instead.
+                if (std::abs ((player.alignLastLawEnd - player.alignPosCorr)
+                              - lawStart) > 0.25 * player.fileSampleRate)
+                {
+                    player.alignPosCorr = 0.0;
+                    player.alignInFrac  = 0.0;
+                    forceSeek = true;
+                }
+                else
+                {
+                    // Law changed under us (the ON/OFF toggle -- analyze/
+                    // revert are stop-gated): REBASE onto the new law so the
+                    // read stays continuous, then drain the difference out.
+                    player.alignPosCorr = player.alignLastLawEnd - lawStart;
+                }
             }
 
             const double corrBefore = player.alignPosCorr;
@@ -1369,10 +1423,11 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                     player.vocoder->setStretchRatio (rReq);
 
                     // Seek detection on the effective position (mirror of the
-                    // pristine PV path; requestSeek, never seek()).
+                    // pristine PV path; requestSeek, never seek()).  QA-Fd:
+                    // forceSeek = a detach-pill law jump this block.
                     const juce::int64 pvRefPos  = (juce::int64) std::llround (pStart);
                     const juce::int64 pvReadPos = player.expectedFilePos;
-                    const bool seekNeeded =
+                    const bool seekNeeded = forceSeek ||
                         (pvReadPos == 0 && pvRefPos > (juce::int64) mSampleRate) ||
                         (pvReadPos  > 0
                          && std::abs (pvRefPos - pvReadPos) > (juce::int64)(mSampleRate * 2));
@@ -1485,6 +1540,22 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                     }
                     else
                         player.alignLastLawEnd = lawEnd + player.alignPosCorr;
+
+                    // QA-Fd: stamp the block's SOURCE positions for the pill
+                    // applicator.  The outstanding glide correction (file
+                    // frames) folds back through the raw-law slope so the
+                    // stamp tracks what is actually audible, not just the
+                    // law target (glide-exact to first order).
+                    {
+                        const double x0 = sourcePosAt ((double) T0);
+                        const double x1 = sourcePosAt ((double) (T0 + outSamples));
+                        const double rawSlope = juce::jmax (1.0e-9,
+                            (rawLawAt ((double) (T0 + outSamples)) - rawLawAt ((double) T0))
+                            / (double) juce::jmax (1, outSamples));
+                        ownEntry.srcX0   = x0 + corrBefore / rawSlope;
+                        ownEntry.srcRate = (x1 - x0) / (double) juce::jmax (1, outSamples);
+                        ownEntry.srcSet  = true;
+                    }
                     warpHandled = true;
                 }
             }
@@ -1678,11 +1749,15 @@ void VibeSynthProcessor::finalizeFilePlayStrip (int                          rou
         // recording at capture time, so don't double-apply on FilePlay.
         // QA-Fa: stamp the block's timeline position alongside it -- the
         // BaySickPitch applicator maps this strip's audio onto composite
-        // note regions by absolute position.
+        // note regions by absolute position.  QA-Fd: forward the decode
+        // layer's source-position stamp (identity when no law engaged) so
+        // the applicator resolves pills in the SOURCE domain.
         if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
         {
             vp->setForcePitchBypass (true);
             vp->setFilePlayTimelineSample (ctx.projectStart);
+            const auto& e = mBlockAlignEntries[(size_t) vi];
+            vp->setFilePlaySourceStamp (e.srcX0, e.srcRate, e.srcSet);
         }
 
         pushScToEng (eng, MixerChannelIds::voxInsert (vi));
@@ -1750,6 +1825,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // QA-Fa recovery: capture each Vox engine's published align-warp
     // snapshot + chain/pitch gates ONCE per block (see mBlockAlignEntries).
     // Idle cost = kMaxVoxPages casts + atomic loads per BLOCK, not per clip.
+    // QA-Fd: also captures the page's pitch TIME map (edited -> source) so
+    // the decode layer can compose pitchMap(alignMap(t)) per clip.
     for (int vi = 0; vi < kMaxVoxPages; ++vi)
     {
         auto& e = mBlockAlignEntries[(size_t) vi];
@@ -1764,6 +1841,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 e.pitchOn   = vp->isAlignPitchOn();
                 e.transpose = vp->alignTransposeSemis();
             }
+            e.pitchMap     = vp->mPitch.loadTimeMapSnapshot();
+            e.pitchChainOn = vp->isPitchEditChainOn();
         }
     }
 
@@ -4019,11 +4098,11 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
             // BaySickVocalProcessor for this page so its processBlock taps
             // post-realtime-pitch audio into the wet file.
             // QA-Fb conditional-WET (G2-condWET + Jeff 2026-07-10): realtime
-            // pitch bypassed means WET == DRY, and master bypass means the
-            // tap never runs (processBlock early-outs) -- either way skip the
-            // second writer entirely; the take is DRY-only and
-            // commitRecordingResult's existing no-wet fallback places the
-            // DRY file on the grid.
+            // pitch bypassed means WET == DRY -- skip the second writer
+            // entirely; the take is DRY-only and commitRecordingResult's
+            // existing no-wet fallback places the DRY file on the grid.
+            // (QA-Fd 3a/12b: the page-master bsv_bypass condition retired
+            // with the param.)
             if (isVox && i < kMaxVoxPages)
             {
                 BaySickVocalProcessor* vp = nullptr;
@@ -4034,9 +4113,6 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
                 if (vp != nullptr)
                     if (auto* byp = vp->apvts.getRawParameterValue ("bsv_pitch_realtime_bypass"))
                         rtPitchActive = byp->load() < 0.5f;
-                if (rtPitchActive)
-                    if (auto* mbyp = vp->apvts.getRawParameterValue ("bsv_bypass"))
-                        rtPitchActive = mbyp->load() < 0.5f;
 
                 if (rtPitchActive)
                 {

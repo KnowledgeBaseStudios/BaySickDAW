@@ -29,6 +29,11 @@
 // round-trips outlive any in-flight block by orders of magnitude.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// QA-Fd time-edit engine: the published channel time map reuses the align
+// snapshot type (same monotone-cubic anchor math; guideSec = EDITED time,
+// dubSec = SOURCE time, pitchSemis unused).
+struct AlignPlaySnapshot;
+
 // One detected note (composite/timeline domain) + its user edits.
 struct PitchNoteRegion
 {
@@ -39,37 +44,92 @@ struct PitchNoteRegion
     float  f0Hz           { 261.6f }; // median F0 (drives the PSOLA period)
     float  vibDepthCents  { 0.0f };   // detected natural vibrato
     float  vibRateHz      { 5.0f };
+    // QA-Fd (locked 6): slice pill -- unvoiced / too-short-to-pitch material
+    // kept as a time-editable region (Newtone-style slice).  No pitch
+    // identity: the applicator skips pitch/focus/vibrato and applies the
+    // volume shape only; the editor draws it without a pitch handle.
+    // Absent in pre-QA-Fd saves -> defaults false (back-compat).
+    bool   isSlice        { false };
 
-    // ── User edits (section 14c sub-curves + Edit-mode drags) ────────────────
+    // ── QA-Fd time edits (locked 5/13a: pitch tab is UPSTREAM of align) ─────
+    // Destination span on the EDITED performance timeline.  dstStartSec < 0
+    // = no time edit (the pill plays at its source position) -- the value
+    // pre-QA-Fd saves implicitly carry.  Elastic moves keep the channel map
+    // monotone (gap counter-warp, pills never cross); `detached` marks a
+    // Ctrl-detached pill whose boundaries may jump (rendered as steep ramp
+    // segments in the published map; the decode layer cuts, not glides).
+    double dstStartSec    { -1.0 };
+    double dstEndSec      { -1.0 };
+    bool   detached       { false };
+
+    double dstStart() const noexcept { return dstStartSec >= 0.0 ? dstStartSec : startSec; }
+    double dstEnd()   const noexcept { return dstStartSec >= 0.0 ? dstEndSec   : endSec;   }
+    bool hasTimeEdit() const noexcept
+    {
+        return dstStartSec >= 0.0
+            && (std::abs (dstStartSec - startSec) > 1.0e-6
+                || std::abs (dstEndSec - endSec) > 1.0e-6);
+    }
+
+    // ── User edits (QA-Fd sub-edit system + Edit-mode drags) ─────────────────
     float  shiftSemis     { 0.0f };   // vertical pill drag
-    float  formantSemis   { 0.0f };   // formant sub-curve amount
-    float  vibDepthMult   { 1.0f };   // vibrato sub-curve depth (0 = flatten)
-    float  vibRateMult    { 1.0f };   // vibrato sub-curve rate
+    float  formantSemis   { 0.0f };   // formant amount (popup knob)
+    float  vibDepthMult   { 1.0f };   // vibrato depth (popup knob; 0 = flatten)
+    float  vibRateMult    { 1.0f };   // vibrato rate
+    // QA-Fd 15a: scales the note's own pitch wiggle around its center
+    // (deviation sourced from the analysis F0 track): 1 = natural, 0 =
+    // flattened, 2 = exaggerated.
+    float  variation      { 1.0f };
     // Volume sub-curve: (t01, gain) points sorted by t01; empty = unity.
+    // Single-storage contract (locked 19a): the popup lanes AND the on-pill
+    // corner handles read/write THESE SAME points.
     std::vector<juce::Point<float>> volShape;
+    // QA-Fd (Jeff's sub-edit design): additive pitch curve over the pill,
+    // (t01, semis) points; empty = flat.  Rendered by the popup Pitch lane +
+    // the bottom corner handles (approach/release ramps).
+    std::vector<juce::Point<float>> pitchShape;
+
+    // #9 (QA-Fd): shapes count as edits only when they DO something -- a
+    // handle dragged back to zero leaves neutral points behind, and those
+    // must not latch the [edited] tag or keep anyEdits disengaging the
+    // audio fast path.
+    static bool shapeIsMeaningful (const std::vector<juce::Point<float>>& pts,
+                                   float neutral) noexcept
+    {
+        for (const auto& p : pts)
+            if (std::abs (p.y - neutral) > 0.01f)
+                return true;
+        return false;
+    }
 
     bool hasEdits() const noexcept
     {
         return std::abs (shiftSemis) > 0.01f || std::abs (formantSemis) > 0.01f
             || std::abs (vibDepthMult - 1.0f) > 0.01f
             || std::abs (vibRateMult - 1.0f) > 0.01f
-            || ! volShape.empty();
+            || std::abs (variation - 1.0f) > 0.01f
+            || shapeIsMeaningful (volShape, 1.0f)
+            || shapeIsMeaningful (pitchShape, 0.0f);
     }
 
-    float volGainAt (float t01) const noexcept
+    static float shapeValueAt (const std::vector<juce::Point<float>>& pts,
+                               float t01, float fallback) noexcept
     {
-        if (volShape.empty()) return 1.0f;
-        if (t01 <= volShape.front().x) return volShape.front().y;
-        if (t01 >= volShape.back().x)  return volShape.back().y;
-        for (size_t i = 0; i + 1 < volShape.size(); ++i)
-            if (t01 >= volShape[i].x && t01 < volShape[i + 1].x)
+        if (pts.empty()) return fallback;
+        if (t01 <= pts.front().x) return pts.front().y;
+        if (t01 >= pts.back().x)  return pts.back().y;
+        for (size_t i = 0; i + 1 < pts.size(); ++i)
+            if (t01 >= pts[i].x && t01 < pts[i + 1].x)
             {
-                const float d = volShape[i + 1].x - volShape[i].x;
-                const float f = (d > 1.0e-6f) ? (t01 - volShape[i].x) / d : 0.0f;
-                return volShape[i].y + f * (volShape[i + 1].y - volShape[i].y);
+                const float d = pts[i + 1].x - pts[i].x;
+                const float f = (d > 1.0e-6f) ? (t01 - pts[i].x) / d : 0.0f;
+                return pts[i].y + f * (pts[i + 1].y - pts[i].y);
             }
-        return volShape.back().y;
+        return pts.back().y;
     }
+
+    float volGainAt     (float t01) const noexcept { return shapeValueAt (volShape,   t01, 1.0f); }
+    float pitchSemisAt  (float t01) const noexcept { return shapeValueAt (pitchShape, t01, 0.0f); }
 
     juce::ValueTree toValueTree() const
     {
@@ -84,10 +144,27 @@ struct PitchNoteRegion
         v.setProperty ("fo", formantSemis,  nullptr);
         v.setProperty ("dm", vibDepthMult,  nullptr);
         v.setProperty ("rm", vibRateMult,   nullptr);
-        juce::String pts;
-        for (const auto& p : volShape)
-            pts << p.x << "," << p.y << ";";
-        v.setProperty ("vol", pts, nullptr);
+        if (std::abs (variation - 1.0f) > 1.0e-4f)
+            v.setProperty ("va", variation, nullptr);
+        if (isSlice)
+            v.setProperty ("sl", 1, nullptr);
+        if (dstStartSec >= 0.0)
+        {
+            v.setProperty ("ds", dstStartSec, nullptr);
+            v.setProperty ("de", dstEndSec,   nullptr);
+        }
+        if (detached)
+            v.setProperty ("dt", 1, nullptr);
+        auto packShape = [] (const std::vector<juce::Point<float>>& shape)
+        {
+            juce::String s;
+            for (const auto& p : shape)
+                s << p.x << "," << p.y << ";";
+            return s;
+        };
+        v.setProperty ("vol", packShape (volShape), nullptr);
+        if (! pitchShape.empty())
+            v.setProperty ("pit", packShape (pitchShape), nullptr);
         return v;
     }
 
@@ -104,14 +181,25 @@ struct PitchNoteRegion
         r.formantSemis  = (float)(double) v.getProperty ("fo", 0.0);
         r.vibDepthMult  = (float)(double) v.getProperty ("dm", 1.0);
         r.vibRateMult   = (float)(double) v.getProperty ("rm", 1.0);
-        juce::StringArray pts;
-        pts.addTokens (v.getProperty ("vol", juce::String()).toString(), ";", "");
-        for (const auto& tok : pts)
+        r.variation     = (float)(double) v.getProperty ("va", 1.0);
+        r.isSlice       = ((int) v.getProperty ("sl", 0)) != 0;
+        r.dstStartSec   = (double) v.getProperty ("ds", -1.0);
+        r.dstEndSec     = (double) v.getProperty ("de", -1.0);
+        r.detached      = ((int) v.getProperty ("dt", 0)) != 0;
+        auto unpackShape = [&v] (const char* prop,
+                                 std::vector<juce::Point<float>>& shape)
         {
-            if (! tok.containsChar (',')) continue;
-            r.volShape.push_back ({ tok.upToFirstOccurrenceOf (",", false, false).getFloatValue(),
-                                    tok.fromFirstOccurrenceOf (",", false, false).getFloatValue() });
-        }
+            juce::StringArray pts;
+            pts.addTokens (v.getProperty (prop, juce::String()).toString(), ";", "");
+            for (const auto& tok : pts)
+            {
+                if (! tok.containsChar (',')) continue;
+                shape.push_back ({ tok.upToFirstOccurrenceOf (",", false, false).getFloatValue(),
+                                   tok.fromFirstOccurrenceOf (",", false, false).getFloatValue() });
+            }
+        };
+        unpackShape ("vol", r.volShape);
+        unpackShape ("pit", r.pitchShape);
         return r;
     }
 };
@@ -139,7 +227,12 @@ public:
 
     // Analyzed F0 track (hop = kF0Hop samples at the analysis rate) -- the
     // editor's Bass-green pitch curve.
-    static constexpr int kF0Hop = 2048;
+    // Hop 512 (2026-07-12): a 4x-finer F0 track so the shifter's live grain
+    // period follows vibrato/drift (Angle-1 fix).  Segmentation's frame-count
+    // gates (kGapFrames/kSplitHoldFrames) were scaled x4 to keep the SAME
+    // sample thresholds -- note detection is unchanged.  YIN window stays 2048
+    // (kYinWin), so windows now overlap 75%.
+    static constexpr int kF0Hop = 512;
     const std::vector<float>& f0Track() const noexcept { return mF0Track; }
 
     // Message-thread edit surface (the editor mutates, then publishEdits()).
@@ -148,26 +241,59 @@ public:
 
     // Rebuild + atomically publish the audio-thread snapshot.  Call after
     // every edit gesture completes (mouse-up), every analyze, and on load.
+    // QA-Fd: also rebuilds + publishes the channel TIME MAP (nullptr when no
+    // region has a time edit -- the decode fast path stays untouched).
     void publishEdits();
 
     void clearAllEdits();   // Reset button: keeps regions, zeroes edits
 
+    // ── QA-Fd time-edit engine (locked 5/13a) ────────────────────────────────
+    // AUDIO/MT: the published EDITED->SOURCE map (composite-relative seconds
+    // both sides; AlignPlaySnapshot anchor/Hermite reuse).  nullptr = no
+    // time edits.  Same retire-ring liveness contract as the edit snapshot.
+    const AlignPlaySnapshot* loadTimeMapSnapshot() const noexcept
+        { return mTimeMapActive.load (std::memory_order_acquire); }
+
+    // MESSAGE THREAD: hash over the regions' time-edit state (0 = none).
+    // The align staleness signature folds this in so a time edit re-arms
+    // the stop-gated align re-analysis (align consumes the EDITED timing).
+    juce::int64 timeMapHash() const;
+
+    // MESSAGE THREAD: source-composite seconds -> edited-performance seconds
+    // (the inverse view the align analysis needs to transform raw onsets).
+    double srcToEditedSec (double srcSec) const;
+
     // ── Global knobs (CPU-guarded; pushed per block from bsp_ params) ────────
-    void setFocus01   (float v);   // 0..1: pull note centers to the nearest semitone
+    void setFocus01   (float v);   // 0..1: pull note centers toward the snap target
     void setModAmount (float v);   // 0..2: vibrato preservation scale (1 = natural)
     void setSpeedMs   (float ms);  // 5..300: note-transition glide
     // QA-Fa recovery: bsp_on chain switch.  OFF glides every target to
     // neutral through the Speed smoothing (no hard switch), then the fast
     // path disengages once settled.
     void setChainOn   (bool on);
+    // QA-Fd 14b: Snap OFF -> Focus pulls to the nearest semitone (legacy);
+    // Snap ON -> the target set is the Root/Scale pick (shared 13-scale
+    // table).  Pushed per block like the knobs above.
+    void setRoot      (int pc);        // 0..11
+    void setScaleIdx  (int idx);       // 0..12 (piano-roll order)
+    void setSnapOn    (bool on);
 
     // ── Realtime applicator (AUDIO THREAD, FilePlay only -- Mode C) ──────────
     // timelineStartSample = the block's first timeline sample (stamped by
     // finalizeFilePlayStrip next to setForcePitchBypass).  Fast-path: a
     // single atomic load bails when no edits exist (zero-edit channels cost
     // one load per block).
+    //
+    // QA-Fd source-domain stamps (closes the wrong-syllable hole): when the
+    // decode layer warps this channel (align and/or time map), srcValid=true
+    // and srcX0/srcRatePerSample describe the SOURCE-composite position the
+    // audible audio actually came from (timeline-equivalent samples at the
+    // device rate) -- the applicator resolves the active pill there instead
+    // of at the linear timeline position.
     void processFilePlay (juce::AudioBuffer<float>& buffer,
-                          juce::int64 timelineStartSample) noexcept;
+                          juce::int64 timelineStartSample,
+                          double srcX0 = 0.0, double srcRatePerSample = 1.0,
+                          bool srcValid = false) noexcept;
 
     // QA-Fb (A1 monitor merge): same applicator, SECOND stream state.  While
     // a live take runs over prior takes, the realtime corrector occupies the
@@ -175,13 +301,19 @@ public:
     // edits through this parallel state set (shared snapshot, own PSOLA /
     // formant / glide cursors -- the two streams advance independently).
     void processFilePlayMonitor (juce::AudioBuffer<float>& buffer,
-                                 juce::int64 timelineStartSample) noexcept;
+                                 juce::int64 timelineStartSample,
+                                 double srcX0 = 0.0, double srcRatePerSample = 1.0,
+                                 bool srcValid = false) noexcept;
 
     // ── Offline render (message thread; the Render/Freeze bake) ─────────────
     // Applies focus/vibrato/edits to the composite exactly like the realtime
     // path, but offline over the whole buffer.  Returns the processed mono.
+    // QA-Fd: spanStart/spanLen render just a composite portion (the shared
+    // preview-play / scrub-audition path); defaults = the whole composite.
     juce::AudioBuffer<float> renderOffline (const float* mono, int numSamples,
-                                            double sampleRate) const;
+                                            double sampleRate,
+                                            juce::int64 spanStart = 0,
+                                            int spanLen = -1) const;
 
     // ── Persistence (message thread) ─────────────────────────────────────────
     juce::ValueTree stateToValueTree() const;
@@ -204,6 +336,9 @@ public:
         std::atomic<float>       peakIn      { 0.0f };// max |input| seen (since arm)
         std::atomic<float>       peakOut     { 0.0f };// max |output| written (since arm)
         std::atomic<int>         changed     { 0 };   // samples where wet != dry (last call)
+        std::atomic<juce::int64> floorHits   { 0 };   // shifter wsum-floor (silence-gap) total
+        std::atomic<int>         grainMin    { 99 };  // fewest concurrent grains seen
+        std::atomic<float>       shPeriod    { 0.0f };// shifter's current period (samples)
     };
     Diag mDiag;
 
@@ -220,6 +355,10 @@ private:
         juce::int64 startSample   { 0 };
         bool        anyEdits      { false };
         bool        anyFormant    { false };
+        // QA-Fd 15a: the analysis F0 track rides the snapshot so the
+        // Variation knob can scale the note's own contour deviation
+        // per-sample (composite-relative, hop = kF0Hop at sampleRate).
+        std::vector<float> f0Track;
     };
 
     // Streaming state shared by the realtime members and the offline
@@ -235,6 +374,15 @@ private:
         double vibPhase        { 0.0 };
         int    cursor          { 0 };
         int    lastRegion      { -1 };
+        // Period-geometry stabilizer (2026-07-12): the grain window size + hop
+        // (hw/pOut) follow a MEDIAN of the F0 track so an octave-glitch at a
+        // low-energy word boundary can't yank the scheduler into a coverage
+        // hole (the stutter).  <3 voiced frames in the window (breath/silence)
+        // freeze the geometry to the last known-good period.  Pulse (epoch)
+        // timing is NOT filtered -- only the window/hop period is stabilized.
+        int    f0MedFrame      { -1 };    // last F0 frame the median was recomputed at
+        float  geomTargetPer   { 0.0f };  // median-derived target period (samples)
+        float  geomPeriod      { 0.0f };  // slewed period actually sent to the shifter
         // [PITCH DIAG] G2 boundary (Rule 4, Remove at close): per-call gate
         // tracer -- audio-thread plains, copied into Diag atomics after each
         // applyEditsToBuffer call.
@@ -253,7 +401,12 @@ private:
                              bool chainOn,
                              PsolaShifter* shifters,
                              CepstralFormantEngine* formants,
-                             ApplicatorState& st) const noexcept;
+                             ApplicatorState& st,
+                             double srcX0 = 0.0, double srcRatePerSample = 1.0,
+                             bool srcValid = false) const noexcept;
+
+    // publishEdits helper: rebuild + swap the time-map snapshot.
+    void publishTimeMap();
 
     // Message-thread state
     std::vector<PitchNoteRegion> mRegions;
@@ -268,6 +421,10 @@ private:
     std::atomic<Snapshot*> mActive { nullptr };
     std::vector<std::unique_ptr<Snapshot>> mRetired;   // message thread only
 
+    // QA-Fd: published time map (edited -> source), same liveness contract.
+    std::atomic<AlignPlaySnapshot*> mTimeMapActive { nullptr };
+    std::vector<std::unique_ptr<AlignPlaySnapshot>> mTimeMapRetired;
+
     // Knob targets (audio thread reads; message thread writes via setters).
     // Focus DEFAULTS 0 -- an analyzed-but-untouched channel must play
     // bit-identical (the fast path stays engaged) until the user asks for
@@ -276,6 +433,9 @@ private:
     std::atomic<float> mModAmt   { 1.0f };
     std::atomic<float> mSpeedMs  { 60.0f };
     std::atomic<bool>  mChainOn  { true };
+    std::atomic<int>   mRootPc   { 0 };
+    std::atomic<int>   mScaleIdx { 0 };
+    std::atomic<bool>  mSnapOn   { false };
 
     // Audio-thread applicator state (owned by the audio thread)
     std::array<PsolaShifter, 2>          mShifters;

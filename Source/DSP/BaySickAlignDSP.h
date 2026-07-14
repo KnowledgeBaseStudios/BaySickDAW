@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <atomic>
+#include <functional>
 #include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,9 +39,12 @@ struct WarpAnchor
     double dubTimeSec   { 0.0 };   // source (follower) time at this anchor
     double guideTimeSec { 0.0 };   // target (leader) time at this anchor
     float  weight       { 1.0f };  // confidence 0..1; UI may show as anchor opacity
-    // QA-F Task 3: leader-minus-follower pitch delta at this anchor,
-    // semitones, already scaled by the Pitch box Range amount at analysis
-    // time.  0 = no pitch pull (unvoiced or Range 0).
+    // QA-Fd: RAW leader-minus-follower pitch delta at this anchor, semitones
+    // (sampled at the raw pair positions, not the capped anchor position).
+    // 0 = unvoiced on either side.  Blend/Variation apply at PUBLISH time
+    // (BaySickVocalProcessor::effectiveAlignPitchSemis) so the pitch knobs
+    // are live without re-analysis.  Pre-QA-Fd saves carry Range-scaled
+    // values here; they read slightly under-pulled until the next analyze.
     float  pitchSemis   { 0.0f };
 };
 
@@ -99,13 +103,57 @@ struct AlignProtectedArea
 };
 
 // Filled by analyzeOffline so a failed analysis can say WHY (onsets found
-// per side, pairs within the Mode window) instead of one generic line.
+// per side, pairs within the internal matching window) instead of one
+// generic line.  toleranceSec reports the internal window (QA-Fd: matching
+// is no longer Mode-driven; Mode/Fine control residual tightness instead).
 struct AlignAnalyzeDiag
 {
     int    guideOnsets  { 0 };
     int    dubOnsets    { 0 };
     int    pairs        { 0 };
     double toleranceSec { 0.0 };
+};
+
+// QA-Fd (locked 13a): per-side pitch-detection bands for the anchor deltas.
+// Combo order = param order (bsa_pitch_typeGuide / bsa_pitch_typeDub 0..4).
+// Hz calibrations tuned at the G2 boundary re-listen.  Note the frame-YIN
+// window is 2048 samples, so the practical low bound at 44.1 kHz is ~43 Hz
+// regardless of the band's stated minimum.
+struct AlignPitchBand { const char* name; float minHz; float maxHz; };
+constexpr AlignPitchBand kAlignPitchBands[5] = {
+    { "Normal",          60.0f,  1200.0f },
+    { "High Vocal",      160.0f, 1400.0f },
+    { "Low Vocal",       50.0f,  500.0f  },
+    { "High Instrument", 200.0f, 2400.0f },
+    { "Low Instrument",  30.0f,  350.0f  },
+};
+
+// QA-Fd align semantics rework (locked 9a/10a/14a/15a): analysis-time knobs.
+// Matching is INTERNAL (wide fixed window); these control what the map DOES
+// with the matched pairs.
+struct AlignBuildParams
+{
+    // Residual tightness cap R (Mode/Fine): a paired word already within R
+    // of the leader keeps its natural timing; beyond R it is pulled to the
+    // cap edge.  0 = fully locked (every pair lands on the leader).
+    double residualCapSec { 0.05 };
+    // Per-word movement cap M: move = min(max(|d| - R, 0), M).
+    double maxShiftSec    { 0.4 };
+    // Segment-slope bound [1/r, r] at map build; auto anchors whose segment
+    // demands more are dropped.  <= 1 = unbounded (Max All; the snapshot
+    // lookup clamp still rails at 1/64..64).
+    double flexRatio      { 2.0 };
+    // Per-side YIN detection bands for the anchor pitch deltas.
+    float  guideMinHz { 60.0f }, guideMaxHz { 1200.0f };
+    float  dubMinHz   { 60.0f }, dubMaxHz   { 1200.0f };
+    // QA-Fd (locked 5/13a): the follower's pitch-tab time edits redefine
+    // the performance align matches -- this transforms a RAW follower
+    // composite time into its EDITED performance time.  Null = identity.
+    // Applied to detected dub onsets, sync-point follower times, and the
+    // dub duration; anchor dub times land in EDITED time (what the decode
+    // layer's composed law expects), while anchor pitch deltas still sample
+    // the RAW audio at the raw positions.
+    std::function<double(double)> dubEditTransform;
 };
 
 struct WarpMap
@@ -148,8 +196,9 @@ struct WarpMap
 struct AlignPlaySnapshot
 {
     // Parallel arrays sorted by guideSec ascending (composite common-origin
-    // seconds).  dubSec = follower-side time; pitchSemis = leader-minus-
-    // follower delta at the anchor (already Range-scaled at analysis).
+    // seconds).  dubSec = follower-side time; pitchSemis = EFFECTIVE pull at
+    // the anchor (raw map delta through the Variation cap + Blend percent,
+    // applied at publish -- QA-Fd 12a live-knob contract).
     std::vector<double> guideSec;
     std::vector<double> dubSec;
     std::vector<float>  pitchSemis;
@@ -249,58 +298,57 @@ public:
     // Returns a populated WarpMap on success; empty (anchors.size() < 2) on
     // failure (e.g. no transients detected, signals too quiet, etc.).
     //
-    // strength = 0..1 blend between the follower's natural timing (0) and a
-    // full snap of every paired onset to the leader's timing (1).
-    //
-    // pairingToleranceSec = max time difference between a follower onset and
-    // a leader onset that may be paired -- the Fine Tune "max difference"
-    // control (Mode base 150/100/50 ms +/- 50 ms, section 13e).
+    // QA-Fd semantics rework (locked 9a/10a): onset matching runs inside a
+    // FIXED internal window (kMatchWindowSec); params.residualCapSec /
+    // maxShiftSec / flexRatio shape the resulting map (see AlignBuildParams).
     //
     // syncPoints (section 13c): hard boundaries -- auto-pairing only pairs
     // onsets between consecutive sync points, and each sync point lands as a
-    // full-weight anchor of its own (strength does not dilute user intent).
+    // full-weight anchor of its own (caps do not dilute user intent).
     //
     // protectedAreas (section 13c): follower-side regions post-processed out
     // of the map -- protectTime forces ratio 1 through the region (offset
     // continuity preserved); protectPitch zeroes anchor pitch deltas inside.
     //
-    // pitchRange01 = the Pitch box Range amount (0..1).  > 0 runs frame-YIN
-    // at every anchor in both composites and stores the scaled leader-minus-
-    // follower delta on the anchor (0 when either side is unvoiced).
+    // Anchor pitch deltas are ALWAYS computed and stored RAW (leader minus
+    // follower, sampled at the raw pair positions through the per-side
+    // bands); Blend/Variation apply at publish so the pitch knobs stay live.
+    static constexpr double kMatchWindowSec = 0.4;
     static WarpMap analyzeOffline (const float* guideMono, int numGuideSamples,
                                     const float* dubMono,   int numDubSamples,
                                     double sampleRate,
-                                    float  strength            = 1.0f,
-                                    double pairingToleranceSec = 0.5,
+                                    const AlignBuildParams& params = {},
                                     const std::vector<AlignSyncPoint>&     syncPoints     = {},
                                     const std::vector<AlignProtectedArea>& protectedAreas = {},
-                                    float  pitchRange01        = 0.0f,
-                                    AlignAnalyzeDiag*          diagOut = nullptr);
+                                    AlignAnalyzeDiag*       diagOut = nullptr);
 
     // ── Map state (message-thread convenience mirror) ────────────────────────
     void setWarpMap (const WarpMap& map);
     void clearWarpMap();
     bool hasWarpMap() const noexcept;
 
-    // ── Offline warp render (QA-F Task 3 -- replaces the H-6a passthrough) ──
+    // ── Offline warp render (QA-Fd Task 8 smooth-map port) ──────────────────
     // MESSAGE/WORKER THREAD ONLY (allocates; PhaseVocoder passes).  Renders
     // the follower composite onto the leader timeline:
-    //   * per anchor segment: PhaseVocoder time-stretch at dGuide/dDub with
-    //     an exact-length map (effective-hop-corrected), 5 ms crossfades at
-    //     segment seams;
-    //   * then one pitch pass over the warped result applying the anchors'
-    //     pitch deltas (lerped between anchors in guide time) via the chosen
-    //     algo: 0 = PSOLA, 1 = Granular, 2 = Phase Vocoder (per-segment
-    //     constant delta).
-    // extraSemis = flat transpose added on top of the anchor deltas (the
-    // Pitch box Transpose control).
+    //   * Phase 1: ONE streaming PhaseVocoder whose ratio follows the same
+    //     monotone-cubic (Fritsch-Butland) slope the live decode glides on --
+    //     renders no longer step at anchors (the old per-anchor-segment
+    //     assembly ran each segment at a constant ratio).
+    //   * Phase 2: pitch pass over the warped result applying the anchors'
+    //     pitch deltas (lerped in guide time) via the chosen algo:
+    //     0 = PSOLA, 1 = Granular, 2 = Phase Vocoder.
+    // extraSemis = flat transpose added on top of the anchor deltas.
+    // oversample > 1 (QA-Fd 16a High-Res): Phase 1 runs at sampleRate *
+    // oversample (~384 kHz-class at 8x) and downsamples before Phase 2 (the
+    // pitch algos stay at the device rate -- their trackers assume it).
     // Returns the warped mono buffer (length = mapDubToGuide(dubDuration)).
     // An invalid map returns a straight copy.
     static juce::AudioBuffer<float> applyWarp (const float* dubMono, int numDubSamples,
                                                double sampleRate,
                                                const WarpMap& map,
                                                int pitchAlgo,
-                                               float extraSemis = 0.0f);
+                                               float extraSemis = 0.0f,
+                                               int oversample = 1);
 
     // QA-F Task 4: coarse frame-YIN F0 track (one value per hop; 0 =
     // unvoiced frame).  Feeds the editor's Pitch view mode.  MESSAGE THREAD.

@@ -62,6 +62,11 @@ public:
         mRing.fill (0.0f);
         mWriteAbs     = 0;
         mNextSynthAbs = 0.0;
+        mLastEpochAbs  = -1;
+        mEpochHead     = 0;
+        mEpochCount    = 0;
+        mEpochPolarity = 1.0f;
+        mEpochs.fill (0);
         for (auto& g : mGrains) g.active = false;
     }
 
@@ -71,40 +76,85 @@ public:
     // (50%-overlap Hann pair) at any period.
     void setPeriodSamples (float p) { mPeriod = juce::jlimit (kMinPeriod, kMaxPeriod, p); }
 
+    // QA-Fd 11/16a (engage-tick fix): keep the analysis ring warm while the
+    // owner is bypassed -- ring write + head advance ONLY (no grains, no
+    // synthesis cost).  Pair with resyncToWriteHead() on the engage edge so
+    // the first synthesized grains read real, current history instead of a
+    // stale or empty ring (the old engage produced a delay-jump click).
+    void feedSample (float in) noexcept
+    {
+        mRing[(size_t) (mWriteAbs % kRingSize)] = in;
+        ++mWriteAbs;
+        detectEpochs();   // keep pitch marks current so an engage reads real ones
+    }
+
+    void resyncToWriteHead() noexcept
+    {
+        mNextSynthAbs = (double) mWriteAbs;
+        for (auto& g : mGrains) g.active = false;
+    }
+
     float processSample (float in, float ratio) noexcept
     {
         mRing[(size_t) (mWriteAbs % kRingSize)] = in;
         ++mWriteAbs;
+        detectEpochs();
 
         ratio = juce::jlimit (0.25f, 4.0f, ratio);
         const double P    = (double) mPeriod;
-        const double pOut = P / (double) ratio;   // synthesis epoch spacing
+        const double pOut = P / (double) ratio;   // synthesis mark spacing
+        // Fixed 2-period grain: half-window = one analysis period P, INDEPENDENT
+        // of ratio (pitch-shift-correctness fix, 2026-07-13).  The prior
+        // ratio-coupled hw = max(pOut, min(P, 2*pOut)) grew to pOut on a downshift
+        // (pOut = P/ratio > P), so each grain spanned several original pitch
+        // periods and just replayed the original pitch -- downshift was impossible
+        // by construction (a -3 st request measured 0 st out).  A fixed 2-period
+        // GCI-centered grain carries one glottal cycle at full Hann weight, so
+        // repeating/skipping whole cycles at the pOut cadence shifts BOTH ways.
+        // Big up-shifts (pOut << P) overlap many grains; that count is bounded by
+        // kMaxGrains, never by shrinking the window (which would drag the captured
+        // spectral envelope with pitch).
+        const double hw = P;
 
         const double outAbs = (double) mWriteAbs;
-        // Warmup: need [center-P, center+P) fully written before any grain.
-        if (outAbs >= mNextSynthAbs && mWriteAbs > (juce::int64) (2.0 * P + 8.0))
+        // Lock the synthesis clock near the write head.  If it drifts far
+        // behind -- startup at 0, or a big note-boundary pitch jump -- snap it
+        // to the head ONCE rather than let the old catch-up burst a bunch of
+        // marks (bunched grains -> coverage hole).  Steady state it stays one
+        // hop ahead and never trips this.
+        if (mNextSynthAbs < outAbs - 2.0 * hw)
+            mNextSynthAbs = outAbs;
+
+        if (outAbs >= mNextSynthAbs
+            && (double) mWriteAbs > 2.0 * hw + 8.0
+            && mEpochCount > 0)
         {
-            // Anchor on the k*P analysis grid by snapping DOWN from the
-            // write head, so the whole 2P window is already written AND the
-            // anchor stays on-grid.  The original round-then-clamp defeated
-            // the grid: the scheduler pins mNextSynthAbs at the write head,
-            // so the written-window clamp (writeAbs - P - 2, off-grid) won
-            // the min() on virtually every epoch -- the analysis step
-            // collapsed to the synthesis step and the shifter degenerated to
-            // a pure ~2P delay at ANY ratio (G2 boundary: pitch edits
-            // audibly inert while diag showed every sample changed).
-            const double center = std::floor ((outAbs - P - 2.0) / P) * P;
-            if (center >= P)
-                spawnGrain (center, P);
-            // Schedule the next epoch; the jmax bounds catch-up after long
-            // silence at construction (mNextSynthAbs far behind outAbs).
-            mNextSynthAbs = juce::jmax (mNextSynthAbs + pOut, outAbs - pOut);
+            // Per-mark nearest-epoch placement IS the pitch-shift mechanism.
+            // TD-PSOLA changes pitch by re-emitting whole glottal cycles at the
+            // NEW synthesis spacing (pOut = P/ratio): an up-shift snaps two close
+            // marks onto the same epoch (repeats a cycle), a down-shift skips
+            // epochs.  Snapping each mark's read to the nearest detected glottal
+            // epoch keeps grains pulse-aligned.  A continuous wall-clock read
+            // pointer is a pure DELAY at any ratio -- it copies the input 1:1 and
+            // deletes the shift (measured output F0 ratio ~1.00; sim-confirmed on
+            // the dry vocal) -- so it must NOT come back.  The moire this beats
+            // with is killed at its source (grain length + GCI coherence + sub-
+            // sample placement, Task 2), never by smoothing the mark map.
+            const double target = outAbs - hw;   // fixed-latency read target
+            juce::int64 e = nearestEpoch ((juce::int64) target);
+            // Never read a window past the write head: fall back to the fixed-
+            // latency target (a slightly off-pitch grain beats a silence notch).
+            if ((double) e + hw > outAbs) e = (juce::int64) target;
+            if ((double) e >= hw) spawnGrain ((double) e, hw);
+            mNextSynthAbs += pOut;
         }
 
         float sig = 0.0f, wsum = 0.0f;
+        int   active = 0;
         for (auto& g : mGrains)
         {
             if (! g.active) continue;
+            ++active;
             const float t = (float) g.age / (float) g.len;
             const float w = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * t);
             sig  += mRing[(size_t) ((g.startAbs + g.age) % kRingSize)] * w;
@@ -112,11 +162,24 @@ public:
             if (++g.age >= g.len)
                 g.active = false;
         }
+        // [PITCH DIAG] G2 boundary (Rule 4, remove at close): silence-gap
+        // fingerprint.  A floor hit = the grains stopped covering this sample
+        // (wsum ~ 0 -> raw ~0 out).  The min concurrent-grain count over the
+        // block separates an overlap/spawn failure (grains missing -> silence
+        // notch) from a garble chop (grains present but misaligned).
+        if (active < mDiagGrainMin) mDiagGrainMin = active;
+        if (wsum <= 0.05f) ++mDiagFloor;
         // Window-sum normalize: epoch spacing != P/2 exactly, so raw Hann
         // sums ripple; dividing restores unity.  0.05 floor guards the
         // grain-edge/startup region (sig ~= 0 there anyway).
         return (wsum > 0.05f) ? sig / wsum : sig;
     }
+
+    // [PITCH DIAG] read-and-clear the per-block silence-gap counters.
+    int   diagFloorHits() const noexcept { return mDiagFloor; }
+    int   diagGrainMin()  const noexcept { return mDiagGrainMin; }
+    float diagPeriod()    const noexcept { return mPeriod; }
+    void  diagClear()     noexcept { mDiagFloor = 0; mDiagGrainMin = 99; }
 
 private:
     struct Grain
@@ -126,11 +189,13 @@ private:
         int         age      = 0;
         bool        active   = false;
     };
-    // Concurrent grains = 2*ratio (window 2P, spacing P/ratio) -> 8 at the
-    // ratio-4 clamp; +2 slack.
-    static constexpr int kMaxGrains = 10;
+    // Concurrent grains: 3x overlap (1.5x half-window) x up to ratio 4 on an
+    // upshift -> ~12 grains; +4 slack.
+    static constexpr int kMaxGrains = 16;
 
-    void spawnGrain (double center, double P) noexcept
+    // halfLen = the grain's Hann half-window, always the analysis period P (a
+    // fixed 2-period grain, ratio-independent -- see the hw derivation above).
+    void spawnGrain (double center, double halfLen) noexcept
     {
         int slot = -1, oldest = -1, oldestAge = -1;
         for (int i = 0; i < kMaxGrains; ++i)
@@ -142,18 +207,173 @@ private:
         if (slot < 0) slot = oldest;
 
         auto& g = mGrains[(size_t) slot];
-        g.len      = juce::jmax (8, 2 * juce::roundToInt (P));
-        g.startAbs = juce::jmax ((juce::int64) 0, (juce::int64) std::llround (center - P));
+        g.len      = juce::jmax (8, 2 * juce::roundToInt (halfLen));
+        g.startAbs = juce::jmax ((juce::int64) 0,
+                                 (juce::int64) std::llround (center - halfLen));
         g.age      = 0;
         g.active   = true;
     }
 
+    // ── Pitch-mark (epoch) detection ────────────────────────────────────────
+    // Predict the next mark one period on, then snap it to the strongest
+    // SAME-POLARITY excursion within +-P/4.  Angle-3 fix (2026-07-12): locking
+    // to the seed pulse's SIGN (not max |sample|) stops the mark flipping
+    // between a cycle's positive and negative peak -- a half-period jump that
+    // smeared the overlap-add and leaked the original pitch.  The prediction
+    // period is now the LIVE per-frame pitch (set every sample by the
+    // applicator), so the marks track vibrato instead of a note median.  Marks
+    // finalize only once their window is fully written and stay behind the
+    // write head, so a grain's whole window is always available.
+    void detectEpochs() noexcept
+    {
+        const int         Pi      = juce::jmax (2, juce::roundToInt (mPeriod));
+        const juce::int64 searchR = juce::jmax ((juce::int64) 1, (juce::int64) (Pi / 4));
+        if (mLastEpochAbs < 0)
+        {
+            if (mWriteAbs <= (juce::int64) (2 * Pi))
+                return;
+            // Seed on a REAL pulse -- the strongest excursion in the last
+            // period -- and lock the mark polarity to its sign so every
+            // following mark tracks the same glottal phase.
+            const juce::int64 s0 = mWriteAbs - 2 * Pi;
+            const juce::int64 s1 = mWriteAbs - Pi;
+            juce::int64 bp = s0;
+            float bv = -1.0f, pol = 1.0f;
+            for (juce::int64 s = s0; s < s1; ++s)
+            {
+                const float x = mRing[(size_t) (s % kRingSize)];
+                const float a = std::abs (x);
+                if (a > bv) { bv = a; bp = s; pol = (x >= 0.0f) ? 1.0f : -1.0f; }
+            }
+            mEpochPolarity = pol;
+            mLastEpochAbs  = bp;
+            mEpochs[(size_t) mEpochHead] = bp;
+            mEpochHead = (mEpochHead + 1) % kEpochRing;
+            if (mEpochCount < kEpochRing) ++mEpochCount;
+        }
+        while (mLastEpochAbs + Pi + searchR < mWriteAbs)
+        {
+            const juce::int64 predicted = mLastEpochAbs + Pi;
+            // GCI upgrade (2026-07-12): the true glottal-closure instant is a
+            // clean impulse in the LPC RESIDUAL (excitation), not in the raw
+            // signal where formant ringing produces the wrong peak and the
+            // near-equal opposite-polarity extremum that made abs() jitter.
+            // Fit LPC over the local frame, inverse-filter, and peak-pick the
+            // residual magnitude.  Falls back to the polarity-locked raw peak
+            // when LPC can't be formed (warmup / silence).
+            const bool haveLpc = computeLpc (predicted + searchR + 1, 3 * Pi);
+            juce::int64 best    = predicted;
+            float       bestVal = -1.0e30f;
+            for (juce::int64 s = predicted - searchR; s <= predicted + searchR; ++s)
+            {
+                if (s < 0) continue;
+                const float v = haveLpc
+                    ? std::abs (residualAt (s))
+                    : mRing[(size_t) (s % kRingSize)] * mEpochPolarity;
+                if (v > bestVal) { bestVal = v; best = s; }
+            }
+            mLastEpochAbs = best;
+            mEpochs[(size_t) mEpochHead] = best;
+            mEpochHead = (mEpochHead + 1) % kEpochRing;
+            if (mEpochCount < kEpochRing) ++mEpochCount;
+        }
+    }
+
+    // ── LPC-residual glottal-closure detection ──────────────────────────────
+    static constexpr int kLpcOrder    = 12;
+    static constexpr int kMaxLpcFrame = 2 * (int) kMaxPeriod;   // 2048
+
+    // Autocorrelation LPC (Hamming window + 0.97 pre-emphasis) over
+    // [frameEnd-frameLen, frameEnd) of the ring, solved by Levinson-Durbin into
+    // the predictor mLpc[1..order].  Returns false if the frame isn't available
+    // or is degenerate (caller falls back to the raw peak-pick).
+    bool computeLpc (juce::int64 frameEnd, int frameLen) noexcept
+    {
+        frameLen = juce::jlimit (kLpcOrder + 2, kMaxLpcFrame, frameLen);
+        const juce::int64 s0 = frameEnd - frameLen;
+        if (s0 < 1) return false;
+        const float twoPi = juce::MathConstants<float>::twoPi;
+        for (int i = 0; i < frameLen; ++i)
+        {
+            const float x  = mRing[(size_t) ((s0 + i)     % kRingSize)];
+            const float xm = mRing[(size_t) ((s0 + i - 1) % kRingSize)];
+            const float w  = 0.54f - 0.46f * std::cos (twoPi * (float) i / (float) (frameLen - 1));
+            mLpcFrame[(size_t) i] = (x - 0.97f * xm) * w;   // pre-emphasis + Hamming
+        }
+        double R[kLpcOrder + 1];
+        for (int lag = 0; lag <= kLpcOrder; ++lag)
+        {
+            double acc = 0.0;
+            for (int i = lag; i < frameLen; ++i)
+                acc += (double) mLpcFrame[(size_t) i] * (double) mLpcFrame[(size_t) (i - lag)];
+            R[lag] = acc;
+        }
+        if (R[0] <= 1.0e-9) return false;
+        R[0] *= 1.00001;   // tiny white-noise ridge for numerical stability
+        double a[kLpcOrder + 1] = { 0.0 };
+        double E = R[0];
+        for (int i = 1; i <= kLpcOrder; ++i)
+        {
+            double acc = R[i];
+            for (int j = 1; j < i; ++j) acc -= a[j] * R[i - j];
+            const double k = acc / E;
+            double anew[kLpcOrder + 1];
+            for (int j = 1; j < i; ++j) anew[j] = a[j] - k * a[i - j];
+            anew[i] = k;
+            for (int j = 1; j <= i; ++j) a[j] = anew[j];
+            E *= (1.0 - k * k);
+            if (E <= 0.0) return false;
+        }
+        for (int kk = 1; kk <= kLpcOrder; ++kk) mLpc[(size_t) kk] = (float) a[kk];
+        return true;
+    }
+
+    // LPC residual (glottal excitation) at absolute sample s, on the same
+    // pre-emphasised signal the coefficients were fit to: e = x - sum a[k] x[k].
+    float residualAt (juce::int64 s) const noexcept
+    {
+        if (s - (kLpcOrder + 1) < 0) return 0.0f;
+        auto pe = [this] (juce::int64 t) noexcept
+        {
+            return mRing[(size_t) (t % kRingSize)]
+                 - 0.97f * mRing[(size_t) ((t - 1) % kRingSize)];
+        };
+        float e = pe (s);
+        for (int k = 1; k <= kLpcOrder; ++k) e -= mLpc[(size_t) k] * pe (s - k);
+        return e;
+    }
+
+    // Closest stored pitch mark to `pos` (linear scan of <=32 marks -- runs
+    // once per synthesis mark, i.e. every pOut samples).
+    juce::int64 nearestEpoch (juce::int64 pos) const noexcept
+    {
+        juce::int64 best = pos, bestD = (juce::int64) 1 << 62;
+        for (int i = 0; i < mEpochCount; ++i)
+        {
+            juce::int64 d = mEpochs[(size_t) i] - pos;
+            if (d < 0) d = -d;
+            if (d < bestD) { bestD = d; best = mEpochs[(size_t) i]; }
+        }
+        return best;
+    }
+
+    static constexpr int kEpochRing = 32;   // marks retained (<< ring capacity)
+
     std::array<float, kRingSize>     mRing {};
     std::array<Grain, kMaxGrains>    mGrains {};
+    std::array<juce::int64, kEpochRing> mEpochs {};
+    int                              mEpochHead    { 0 };
+    int                              mEpochCount   { 0 };
+    float                            mEpochPolarity { 1.0f };  // Angle-3: locked pulse sign
+    float                            mLpc[kLpcOrder + 1] {};   // LPC predictor (GCI detect)
+    std::array<float, kMaxLpcFrame>  mLpcFrame {};             // windowed LPC frame scratch
+    juce::int64                      mLastEpochAbs { -1 };
     juce::int64                      mWriteAbs     { 0 };
     double                           mNextSynthAbs { 0.0 };
     float                            mPeriod       { 256.0f };
     double                           mSampleRate   { 44100.0 };
+    int                              mDiagFloor    { 0 };    // [PITCH DIAG]
+    int                              mDiagGrainMin { 99 };   // [PITCH DIAG]
 };
 
 // ── GranularShifter ──────────────────────────────────────────────────────────

@@ -642,6 +642,21 @@ public:
         bool                     chainOn     { true };
         bool                     pitchOn     { false };
         float                    transpose   { 0.0f };
+        // QA-Fd time-edit engine: the page's published pitch TIME map
+        // (edited -> source; nullptr = no time edits) + its bsp_on gate.
+        // Matched by PAGE INDEX (the map always describes the page's own
+        // channel), unlike snap which matches by followerChannelId.
+        const AlignPlaySnapshot* pitchMap     { nullptr };
+        bool                     pitchChainOn { true };
+        // Source-position stamp: decodeFilePlayClip writes it when the
+        // composed law is engaged (timeline-equivalent samples at the
+        // device rate + per-sample rate); finalizeFilePlayStrip forwards
+        // it to the engine so the pitch applicator resolves pills in the
+        // SOURCE domain.  Written and read on the strip's own render
+        // thread within one block (no cross-thread hazard).
+        double srcX0    { 0.0 };
+        double srcRate  { 1.0 };
+        bool   srcSet   { false };
     };
     std::array<AlignBlockEntry, kMaxVoxPages> mBlockAlignEntries {};
 
@@ -901,6 +916,15 @@ public:
         for (const auto& r : mStripRecorders)
             if (r.channelId == channelId) return true;
         return false;
+    }
+
+    // QA-Fd: message-thread peek at a Vox page's engine (VoxPage resolves a
+    // FOLLOWER channel's pitch DSP through it so align can consume the
+    // edited performance).  Page lifecycle is message-thread-owned.
+    juce::AudioProcessor* voxEngineAt (int pageIndex) const noexcept
+    {
+        return (pageIndex >= 0 && pageIndex < kMaxVoxPages)
+                 ? mVoxEngines[(size_t) pageIndex] : nullptr;
     }
 
 private:

@@ -86,6 +86,33 @@ public:
 void setSliderDoubleClickDefaultsFromApvts (juce::Component& root,
                                             juce::AudioProcessorValueTreeState& apvts);
 
+// ── QA-Fd FL knob conventions (locked P1-14; vocal editors) ───────────────────
+// Detent at the default value (Shift bypasses), Ctrl-drag = fine velocity
+// mode, editable value box for type-in.  Wraps any existing onValueChange.
+inline void applyFLKnobFeel (juce::Slider& s, double defaultValue)
+{
+    s.setDoubleClickReturnValue (true, defaultValue);
+    s.setVelocityModeParameters (0.6, 1, 0.0, true,
+                                 juce::ModifierKeys::ctrlModifier);
+    s.setTextBoxIsEditable (true);
+    const double detent =
+        juce::jmax (1.0e-9, s.getRange().getLength()) * 0.015;
+    auto prev = s.onValueChange;
+    s.onValueChange = [&s, defaultValue, detent, prev]
+    {
+        if (! juce::ModifierKeys::currentModifiers.isShiftDown()
+            && s.getValue() != defaultValue
+            && std::abs (s.getValue() - defaultValue) < detent)
+        {
+            // Re-enters this handler carrying the detented value; prev fires
+            // on that pass.
+            s.setValue (defaultValue, juce::sendNotificationSync);
+            return;
+        }
+        if (prev) prev();
+    };
+}
+
 // ── Shared LookAndFeel (forward declared -- defined in SharedUI.cpp) ──────────
 class VibeLAF : public juce::LookAndFeel_V4
 {

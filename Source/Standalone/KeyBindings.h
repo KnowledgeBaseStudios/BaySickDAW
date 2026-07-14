@@ -85,6 +85,10 @@ namespace BSCommands
         PianoRoll      = 2,
         DrumKit        = 3,    // 2026-04-26 (D-7 sub-2): drum-kit specifics
         MouseReference = 4,
+        // 2026-07-11 (QA-Fd): BaySickPitch / BaySickAlign vocal editors.
+        // All entries are page-local hardcoded keys + mouse gestures --
+        // reference rows only, none rebindable (Piano Roll local-key deal).
+        VocalEditors   = 5,
     };
 
     juce::String categoryName (Category c);

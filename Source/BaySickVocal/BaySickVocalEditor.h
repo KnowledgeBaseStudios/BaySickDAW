@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "BaySickVocalProcessor.h"
+#include "../Standalone/UndoActions.h"   // QA-Fd 9a: UndoContext plumb-through
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickVocalEditor - Phase H-6 (2026-05-01)
@@ -46,6 +47,9 @@ public:
     // setTabSlots callback to call this).  Default = TabBaySickVocals.
     void setActiveTab (int idx);
     int  getActiveTab() const noexcept { return mActiveTab; }
+
+    // QA-Fd 9a: global undo context, forwarded to the BaySickPitch panel.
+    void setUndoContext (const UndoContext& ctx);
 
 private:
     BaySickVocalProcessor& mProc;

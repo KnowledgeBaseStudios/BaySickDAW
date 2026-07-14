@@ -18,7 +18,6 @@ namespace
     constexpr int kSyncStripH      = 18;
     constexpr int kProtectedStripH = 18;
     constexpr int kViewModeH       = 22;
-    constexpr int kHistoryH        = 56;
     constexpr int kRightPanelW     = 210;
 
     // ── Palette ─────────────────────────────────────────────────────────────
@@ -52,17 +51,28 @@ namespace
         { "Tight-Align+Pitch",  2, true,  100.0f },
     };
 
-    // Mode-driven Range knob window (section 13e).
-    inline void rangeWindowForMode (int mode, float& lo, float& hi, float& def)
+    // QA-Fd 9a/10a: Mode bases are RESIDUAL tightness (Tight 0 = fully
+    // locked / Close 50 / Loose 100 ms), not the retired pairing window.
+    // Owner respec 2026-07-11: the Fine knob sweeps an ABSOLUTE residual
+    // window per mode (Tight 0-50 / Close 50-150 / Loose 100-200 ms, knob
+    // center = window center) -- the old bipolar-offset-clamped-at-0 model
+    // left Tight's whole left half dead.  Param stays -50..+50; effective
+    // ms = center + v * (halfWidth / 50).  Twin math lives in
+    // BaySickVocalProcessor::alignResidualCapSec().
+    inline float fineTuneCenterForMode (int mode)
     {
-        if (mode == 0)      { lo = 0.0f;  hi = 50.0f;  def = 0.0f;   }
-        else if (mode == 2) { lo = 50.0f; hi = 100.0f; def = 100.0f; }
-        else                { lo = 25.0f; hi = 75.0f;  def = 50.0f;  }
+        return (mode == 0) ? 150.0f : (mode == 2) ? 25.0f : 100.0f;
+    }
+    inline float fineTuneHalfWidthForMode (int mode)
+    {
+        return (mode == 2) ? 25.0f : 50.0f;
     }
 
-    inline float fineTuneBaseForMode (int mode)
+    // QA-Fd 12a: the mode-clamp travel windows are dropped -- a Mode change
+    // PRESETS the Blend value (free 0-100 travel afterwards).
+    inline float blendPresetForMode (int mode)
     {
-        return (mode == 0) ? 150.0f : (mode == 2) ? 50.0f : 100.0f;
+        return (mode == 0) ? 0.0f : (mode == 2) ? 100.0f : 50.0f;
     }
 
     juce::File alignPresetsDir()
@@ -75,7 +85,9 @@ namespace
     // The bsa_ ids that participate in presets + the dirty dot.
     const char* const kPresetParamIds[] = {
         "bsa_align_on", "bsa_align_mode", "bsa_align_fineTune",
-        "bsa_pitch_on", "bsa_pitch_range", "bsa_pitch_algo",
+        "bsa_align_maxShift",
+        "bsa_pitch_on", "bsa_pitch_range", "bsa_pitch_variation",
+        "bsa_pitch_typeGuide", "bsa_pitch_typeDub", "bsa_pitch_algo",
         "bsa_pitch_transpose", "bsa_formant_on", "bsa_formant_shift"
     };
 }
@@ -134,11 +146,13 @@ public:
     LaneView (BaySickAlignEditor& o, Role r, LaneCache& cache)
         : mOwner (o), mRole (r), mCache (cache)
     {
-        if (mRole != Role::Output)
+        // Only the Leader gets a channel picker.  The Follower is ALWAYS the
+        // page you're on (owner call 2026-07-11) -- its old override combo is
+        // gone; the header shows a static "(this page)" instead.
+        if (mRole == Role::Leader)
         {
             addAndMakeVisible (mChannelCombo);
-            mChannelCombo.setTextWhenNothingSelected (
-                mRole == Role::Leader ? "Pick Leader..." : "(This Vox)");
+            mChannelCombo.setTextWhenNothingSelected ("Pick Leader...");
             mChannelCombo.setColour (juce::ComboBox::backgroundColourId, kPanelBg);
             mChannelCombo.setColour (juce::ComboBox::textColourId, kText);
             mChannelCombo.onChange = [this] { pushChannelPick(); };
@@ -161,11 +175,9 @@ public:
     void setChannelItems (const std::vector<std::pair<int, juce::String>>& items,
                           int currentChannelId)
     {
-        if (mRole == Role::Output) return;
+        if (mRole != Role::Leader) return;   // Follower/Output have no picker
         mRebuilding = true;
         mChannelCombo.clear (juce::dontSendNotification);
-        if (mRole == Role::Follower)
-            mChannelCombo.addItem ("(This Vox)", 1);        // id 1 -> channel -1
         for (const auto& it : items)
             mChannelCombo.addItem (it.second, it.first + 2); // id = channel + 2
         const int wantId = (currentChannelId < 0) ? 1 : currentChannelId + 2;
@@ -188,6 +200,14 @@ public:
         g.fillRect (header.removeFromLeft (3));
         g.setFont (juce::Font (12.0f, juce::Font::bold));
         g.drawText (roleName(), kHeaderW - 100, 4, 94, 14, juce::Justification::centredLeft);
+        // Follower is always this page -- static hint where the old combo sat.
+        if (mRole == Role::Follower)
+        {
+            g.setColour (kTextDim);
+            g.setFont (11.0f);
+            g.drawText ("(this page)", 4, getHeight() - 24, kHeaderW - 10, 18,
+                        juce::Justification::centredLeft);
+        }
 
         auto area = getLocalBounds().withTrimmedLeft (kHeaderW);
         g.setColour (kPanelBg.brighter (0.03f));
@@ -281,7 +301,7 @@ public:
 
     void resized() override
     {
-        if (mRole != Role::Output)
+        if (mRole == Role::Leader)
             mChannelCombo.setBounds (4, getHeight() - 26, kHeaderW - 10, 22);
     }
 
@@ -645,6 +665,17 @@ public:
         setup (mPitch,  "Pitch",  1);
         setup (mEnergy, "Energy", 2);
         mWave.setToggleState (true, juce::dontSendNotification);
+
+        // Zoom +/- moved here from the retired HistoryScrubber strip
+        // (owner call 2026-07-11: the renders bar is gone).
+        addAndMakeVisible (mZoomIn);
+        addAndMakeVisible (mZoomOut);
+        mZoomIn .setButtonText ("+");
+        mZoomOut.setButtonText ("-");
+        mZoomIn .setTooltip ("Zoom in (time)");
+        mZoomOut.setTooltip ("Zoom out (time)");
+        mZoomIn .onClick = [this] { mOwner.setView (mOwner.pixelsPerSecond() * 1.25, mOwner.scrollSeconds()); };
+        mZoomOut.onClick = [this] { mOwner.setView (mOwner.pixelsPerSecond() / 1.25, mOwner.scrollSeconds()); };
     }
 
     void paint (juce::Graphics& g) override { g.fillAll (kToolbarBg); }
@@ -658,112 +689,14 @@ public:
         mPitch .setBounds (b.removeFromLeft (64));
         b.removeFromLeft (2);
         mEnergy.setBounds (b.removeFromLeft (64));
+        mZoomIn .setBounds (b.removeFromRight (26));
+        b.removeFromRight (2);
+        mZoomOut.setBounds (b.removeFromRight (26));
     }
 
 private:
     BaySickAlignEditor& mOwner;
-    juce::TextButton mWave, mPitch, mEnergy;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HistoryScrubber - render-version list + Del / + / - (section 13d)
-// ─────────────────────────────────────────────────────────────────────────────
-class BaySickAlignEditor::HistoryScrubber : public juce::Component
-{
-public:
-    explicit HistoryScrubber (BaySickAlignEditor& o) : mOwner (o)
-    {
-        auto plain = [this] (juce::TextButton& b, const juce::String& t,
-                             const juce::String& tt)
-        {
-            b.setButtonText (t);
-            b.setTooltip (tt);
-            b.setColour (juce::TextButton::buttonColourId, kPanelBg);
-            b.setColour (juce::TextButton::textColourOnId,  kText);
-            b.setColour (juce::TextButton::textColourOffId, kText);
-            addAndMakeVisible (b);
-        };
-        plain (mDelBtn,  "Del", "Remove the selected render from the history list (the file stays on disk)");
-        plain (mZoomIn,  "+",   "Zoom in");
-        plain (mZoomOut, "-",   "Zoom out");
-        mDelBtn.onClick = [this]
-        {
-            auto& renders = mOwner.mProc.mAlignState.renders;
-            if (mSelected >= 0 && mSelected < (int) renders.size())
-            {
-                renders.erase (renders.begin() + mSelected);
-                mSelected = -1;
-                repaint();
-            }
-        };
-        mZoomIn .onClick = [this] { mOwner.setView (mOwner.pixelsPerSecond() * 1.25, mOwner.scrollSeconds()); };
-        mZoomOut.onClick = [this] { mOwner.setView (mOwner.pixelsPerSecond() / 1.25, mOwner.scrollSeconds()); };
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (kStripBg);
-        g.setColour (kTextDim.withAlpha (0.5f));
-        g.setFont (9.0f);
-        g.drawText ("RENDERS", 4, 2, kHeaderW - 8, 12, juce::Justification::centredLeft);
-
-        const auto& renders = mOwner.mProc.mAlignState.renders;
-        auto area = getLocalBounds().withTrimmedLeft (kHeaderW)
-                                    .withTrimmedRight (88).reduced (2);
-        if (renders.empty())
-        {
-            g.drawText ("No renders yet - Render bakes Aligned/{name}_align_v{N}.wav",
-                        area, juce::Justification::centredLeft);
-            return;
-        }
-        const int cellW = 132;
-        for (int i = 0; i < (int) renders.size(); ++i)
-        {
-            auto cell = juce::Rectangle<int> (area.getX() + i * (cellW + 4),
-                                              area.getY(), cellW, area.getHeight());
-            if (cell.getX() > area.getRight()) break;
-            g.setColour (i == mSelected ? kPanelBg.brighter (0.3f) : kPanelBg);
-            g.fillRoundedRectangle (cell.toFloat(), 3.0f);
-            g.setColour (i == mSelected ? kText : kTextDim);
-            g.setFont (juce::Font (11.0f, juce::Font::bold));
-            g.drawText ("v" + juce::String (renders[(size_t) i].version),
-                        cell.removeFromTop (16).reduced (6, 1),
-                        juce::Justification::centredLeft);
-            g.setFont (9.0f);
-            // ISO date -> readable "YYYY-MM-DD HH:MM"
-            juce::String d = renders[(size_t) i].dateIso;
-            d = d.replaceCharacter ('T', ' ');
-            if (d.length() > 16) d = d.substring (0, 16);
-            g.drawText (d, cell.reduced (6, 1), juce::Justification::topLeft);
-        }
-    }
-
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        auto area = getLocalBounds().withTrimmedLeft (kHeaderW)
-                                    .withTrimmedRight (88).reduced (2);
-        if (! area.contains (e.getPosition())) return;
-        const int idx = (e.x - area.getX()) / 136;
-        const auto& renders = mOwner.mProc.mAlignState.renders;
-        mSelected = (idx >= 0 && idx < (int) renders.size()) ? idx : -1;
-        repaint();
-    }
-
-    void resized() override
-    {
-        auto right = getLocalBounds().removeFromRight (86).reduced (2);
-        const int w = 26;
-        mDelBtn .setBounds (right.removeFromLeft (w));
-        right.removeFromLeft (2);
-        mZoomIn .setBounds (right.removeFromLeft (w));
-        right.removeFromLeft (2);
-        mZoomOut.setBounds (right.removeFromLeft (w));
-    }
-
-private:
-    BaySickAlignEditor& mOwner;
-    juce::TextButton mDelBtn, mZoomIn, mZoomOut;
-    int mSelected { -1 };
+    juce::TextButton mWave, mPitch, mEnergy, mZoomIn, mZoomOut;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -788,19 +721,50 @@ public:
         mModeCombo.addItem ("Tight", 3);
         mModeCombo.setColour (juce::ComboBox::backgroundColourId, kPanelBg);
         mModeCombo.setColour (juce::ComboBox::textColourId, kText);
+        mModeCombo.setTooltip ("How tightly the timing is corrected.  Tight locks every "
+                               "word to the Leader; Close and Loose leave more of the "
+                               "natural timing in place.  Also presets the Blend knob.");
         mModeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
             mApvts, "bsa_align_mode", mModeCombo);
+
 
         setupRotary (mFineTune, "bsa_align_fineTune", mFineTuneAtt);
         mFineTune.textFromValueFunction = [this] (double v)
         {
             const int mode = (int) mOwner.paramValue ("bsa_align_mode", 1.0f);
-            return juce::String (fineTuneBaseForMode (mode) + v, 0) + " ms";
+            return juce::String (juce::jmax (0.0,
+                fineTuneCenterForMode (mode)
+                    + v * fineTuneHalfWidthForMode (mode) / 50.0), 0) + " ms";
         };
         mFineTune.updateText();
-        mFineTune.setTooltip ("Max onset difference used for pairing.  12 o'clock = "
-                              "the Mode base (Loose 150 ms / Close 100 ms / Tight 50 ms); "
-                              "turn left for tighter, right for looser.");
+        mFineTune.setTooltip ("How much natural timing each word may keep.  Words already "
+                              "within this many ms of the Leader are left alone; words "
+                              "further out are pulled to the edge.  The knob sweeps the "
+                              "Mode's window: Tight 0-50 ms, Close 50-150 ms, Loose "
+                              "100-200 ms (12 o'clock = the middle).");
+
+        // QA-Fd 15a: per-word movement cap.  Range matches the reference
+        // aligner (VocAlign: cap 10-150 ms + a No Limit setting that is the
+        // usual default) -- owner review 2026-07-11; the old 10-400/def-400
+        // dial made the cap look mandatory and huge.
+        setupRotary (mMaxShift, "bsa_align_maxShift", mMaxShiftAtt);
+        mMaxShift.textFromValueFunction = [] (double v)
+        {
+            return v > 150.5 ? juce::String ("No Limit")
+                             : juce::String ((int) std::lround (v)) + " ms";
+        };
+        mMaxShift.updateText();
+        mMaxShift.setTooltip ("The furthest any single word may be moved.  Full right = "
+                              "No Limit (the default - most takes align fine uncapped); "
+                              "turn down to 150-10 ms to stop far-out words from being "
+                              "dragged.");
+
+        // QA-Fd reconciliation rule: time-map knobs mark the analysis stale
+        // (map swaps at the next stop); pitch knobs republish live below.
+        auto bumpGen = [this] { mOwner.mProc.bumpAlignSettingsGeneration(); };
+        mModeCombo.onChange       = bumpGen;
+        mFineTune.onValueChange   = bumpGen;
+        mMaxShift.onValueChange   = bumpGen;
 
         // ── Pitch box ────────────────────────────────────────────────────────
         addAndMakeVisible (mPitchOn);
@@ -808,21 +772,47 @@ public:
         mPitchOnAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
             mApvts, "bsa_pitch_on", mPitchOn);
 
-        // Range: manual binding -- the Mode dropdown re-windows its travel
-        // (section 13e), which a stock SliderAttachment can't express.
-        addAndMakeVisible (mRange);
-        mRange.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-        mRange.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 64, 16);
+        // QA-Fd 12a: Blend (the renamed Range knob) -- free 0-100 travel, a
+        // stock attachment now that the mode-clamp windows are dropped.
+        // Blend + Variation apply at PUBLISH: the hooks below republish the
+        // playback snapshot live (time map identical, mid-play legal).
+        setupRotary (mRange, "bsa_pitch_range", mRangeAtt);
         mRange.setTextValueSuffix (" %");
-        mRange.setTooltip ("How much of the Leader's pitch contour is applied to the "
-                           "Follower.  The Mode dropdown sets this knob's window: "
-                           "Loose 0-50, Close 25-75, Tight 50-100.");
-        mRange.onValueChange = [this]
+        mRange.setTooltip ("Percent of the pitch difference (beyond the Variation cap) "
+                           "pulled toward the Leader's contour.  0 = off, 100 = full "
+                           "pull.  Live - no re-analysis needed.");
+
+        setupRotary (mVariation, "bsa_pitch_variation", mVariationAtt);
+        mVariation.setTextValueSuffix (" st");
+        mVariation.setTooltip ("How much natural tuning variation the Follower may keep, "
+                               "in semitones.  Pitch differences inside the cap are left "
+                               "alone; only the excess is pulled.  Live - no re-analysis "
+                               "needed.");
+
+        auto republish = [this] { mOwner.mProc.publishAlignPlayback(); };
+        mRange.onValueChange     = republish;
+        mVariation.onValueChange = republish;
+
+        // QA-Fd 13a: per-side detection-band pickers.  Band changes affect
+        // the NEXT analysis (detection-time), so they ride the stale path.
+        auto setupBand = [&] (juce::ComboBox& c, const char* paramId,
+                              const juce::String& sideName,
+                              std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>& att)
         {
-            if (mRangeRewindowing) return;
-            mOwner.setParamValue ("bsa_pitch_range", (float) mRange.getValue());
+            addAndMakeVisible (c);
+            for (int i = 0; i < 5; ++i)
+                c.addItem (kAlignPitchBands[i].name, i + 1);
+            c.setColour (juce::ComboBox::backgroundColourId, kPanelBg);
+            c.setColour (juce::ComboBox::textColourId, kText);
+            c.setTooltip ("Pitch detection band for the " + sideName + " channel.  "
+                          "Pick the range that matches the material so detection locks "
+                          "onto the right octave.  Takes effect at the next analysis.");
+            att = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+                mApvts, paramId, c);
+            c.onChange = [this] { mOwner.mProc.bumpAlignSettingsGeneration(); };
         };
-        applyModeWindowToRange ((int) mOwner.paramValue ("bsa_align_mode", 1.0f));
+        setupBand (mTypeGuide, "bsa_pitch_typeGuide", "Leader",   mTypeGuideAtt);
+        setupBand (mTypeDub,   "bsa_pitch_typeDub",   "Follower", mTypeDubAtt);
 
         addAndMakeVisible (mAlgoCombo);
         mAlgoCombo.addItem ("PSOLA",         1);
@@ -846,6 +836,16 @@ public:
         mFormantShift.setTextValueSuffix (" st");
         mFormantShift.setTooltip ("Shifts the vocal character (spectral envelope) without "
                                   "re-pitching - up for thinner, down for fuller.");
+
+        // QA-Fd FL knob conventions (P1-14): detent at default, Ctrl fine,
+        // type-in via the value box.  Applied LAST so the wrapper composes
+        // over the bump/republish hooks above.
+        applyFLKnobFeel (mFineTune,     0.0);
+        applyFLKnobFeel (mMaxShift,     160.0);
+        applyFLKnobFeel (mRange,        50.0);
+        applyFLKnobFeel (mVariation,    0.0);
+        applyFLKnobFeel (mTranspose,    0.0);
+        applyFLKnobFeel (mFormantShift, 0.0);
 
         mApvts.addParameterListener ("bsa_align_mode", this);
     }
@@ -873,7 +873,7 @@ public:
         b.removeFromTop (6);
         drawBox (b, "PITCH");
 
-        // Knob captions
+        // Knob / combo captions
         g.setColour (kTextDim);
         g.setFont (10.0f);
         auto caption = [&g] (juce::Component& c, const juce::String& t)
@@ -882,7 +882,11 @@ public:
                         juce::Justification::centred);
         };
         caption (mFineTune,     "Fine Tune");
-        caption (mRange,        "Range");
+        caption (mMaxShift,     "Max Shift");
+        caption (mTypeGuide,    "Leader Type");
+        caption (mTypeDub,      "Follower Type");
+        caption (mRange,        "Blend");
+        caption (mVariation,    "Variation");
         caption (mTranspose,    "Transpose");
         caption (mFormantShift, "Formant Shift");
     }
@@ -897,8 +901,11 @@ public:
         mAlignOn.setBounds (row1.removeFromLeft (52));
         row1.removeFromLeft (6);
         mModeCombo.setBounds (row1);
-        align.removeFromTop (14);
-        mFineTune.setBounds (align.removeFromTop (78).withSizeKeepingCentre (74, 76));
+        align.removeFromTop (14);   // knob caption strip
+        auto aKnobs = align.removeFromTop (78);
+        mFineTune.setBounds (aKnobs.removeFromLeft (aKnobs.getWidth() / 2)
+                                   .withSizeKeepingCentre (74, 76));
+        mMaxShift.setBounds (aKnobs.withSizeKeepingCentre (74, 76));
 
         b.removeFromTop (6);
         auto pitch = b;
@@ -907,16 +914,24 @@ public:
         mPitchOn.setBounds (prow.removeFromLeft (52));
         prow.removeFromLeft (6);
         mAlgoCombo.setBounds (prow);
+        pitch.removeFromTop (14);   // band caption strip
+        auto brow = pitch.removeFromTop (22).reduced (8, 0);
+        mTypeGuide.setBounds (brow.removeFromLeft ((brow.getWidth() - 4) / 2));
+        brow.removeFromLeft (4);
+        mTypeDub.setBounds (brow);
         pitch.removeFromTop (14);
         auto knobRow = pitch.removeFromTop (78);
         mRange    .setBounds (knobRow.removeFromLeft (knobRow.getWidth() / 2)
                                      .withSizeKeepingCentre (74, 76));
-        mTranspose.setBounds (knobRow.withSizeKeepingCentre (74, 76));
-        pitch.removeFromTop (16);
-        auto frow = pitch.removeFromTop (24).reduced (8, 0);
-        mFormantOn.setBounds (frow.removeFromLeft (80));
+        mVariation.setBounds (knobRow.withSizeKeepingCentre (74, 76));
         pitch.removeFromTop (14);
-        mFormantShift.setBounds (pitch.removeFromTop (78).withSizeKeepingCentre (74, 76));
+        auto knobRow2 = pitch.removeFromTop (78);
+        mTranspose   .setBounds (knobRow2.removeFromLeft (knobRow2.getWidth() / 2)
+                                         .withSizeKeepingCentre (74, 76));
+        mFormantShift.setBounds (knobRow2.withSizeKeepingCentre (74, 76));
+        pitch.removeFromTop (4);
+        auto frow = pitch.removeFromTop (24).reduced (8, 0);
+        mFormantOn.setBounds (frow.removeFromLeft (100));
     }
 
 private:
@@ -929,35 +944,22 @@ private:
         att = std::make_unique<TaggedSliderAttachment> (mApvts, paramId, s);
     }
 
-    // Mode drives the Range knob's window + default (section 13e).
-    void applyModeWindowToRange (int mode)
-    {
-        float lo, hi, def;
-        rangeWindowForMode (mode, lo, hi, def);
-        mRangeRewindowing = true;
-        mRange.setRange (lo, hi, 0.1);
-        const float cur = mOwner.paramValue ("bsa_pitch_range", def);
-        mRange.setValue (juce::jlimit (lo, hi, cur), juce::dontSendNotification);
-        mRange.setDoubleClickReturnValue (true, def);
-        mRangeRewindowing = false;
-    }
-
     void parameterChanged (const juce::String& id, float newValue) override
     {
         if (id != "bsa_align_mode") return;
         // APVTS listeners can fire off the message thread; UI work bounces.
+        // QA-Fd 12a: a Mode change PRESETS the Blend value (the clamp
+        // windows are gone); the attachment moves the knob, whose hook
+        // republishes the snapshot with the new Blend.
         const int mode = (int) newValue;
         juce::Component::SafePointer<RightPanel> self (this);
         juce::MessageManager::callAsync ([self, mode]
         {
             if (! self) return;
-            float lo, hi, def;
-            rangeWindowForMode (mode, lo, hi, def);
-            self->applyModeWindowToRange (mode);
-            // Mode change re-seats Range at the mode default (section 13e:
-            // "sets both the default position and the min/max travel").
-            self->mOwner.setParamValue ("bsa_pitch_range", def);
-            self->mRange.setValue (def, juce::dontSendNotification);
+            // Review fix: a project load fires this hook via replaceState --
+            // seating the preset here would stomp the RESTORED Blend value.
+            if (self->mOwner.mProc.isRestoringState()) return;
+            self->mOwner.setParamValue ("bsa_pitch_range", blendPresetForMode (mode));
             self->mFineTune.updateText();
         });
     }
@@ -965,19 +967,19 @@ private:
     BaySickAlignEditor& mOwner;
     juce::AudioProcessorValueTreeState& mApvts;
 
-    int mAlignBoxH { 160 };
+    int mAlignBoxH { 140 };   // Flexibility row removed 2026-07-11 (-36 px)
 
     juce::ToggleButton mAlignOn, mPitchOn, mFormantOn;
-    juce::ComboBox     mModeCombo, mAlgoCombo;
-    juce::Slider       mFineTune, mRange, mTranspose, mFormantShift;
-    bool               mRangeRewindowing { false };
+    juce::ComboBox     mModeCombo, mAlgoCombo, mTypeGuide, mTypeDub;
+    juce::Slider       mFineTune, mMaxShift, mRange, mVariation, mTranspose, mFormantShift;
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
         mAlignOnAtt, mPitchOnAtt, mFormantOnAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
-        mModeAtt, mAlgoAtt;
+        mModeAtt, mAlgoAtt, mTypeGuideAtt, mTypeDubAtt;
     std::unique_ptr<TaggedSliderAttachment>
-        mFineTuneAtt, mTransposeAtt, mFormantShiftAtt;
+        mFineTuneAtt, mMaxShiftAtt, mRangeAtt, mVariationAtt,
+        mTransposeAtt, mFormantShiftAtt;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1040,21 +1042,39 @@ public:
         if (mStale != s || mStalePending != pending)
             { mStale = s; mStalePending = pending; repaint(); }
     }
+    // QA-Fd 4a: transient analysis state ("ANALYZING...") -- paints in the
+    // stale-badge slot and wins over the stale text while non-empty.
+    void setAnalysisBadge (const juce::String& t)
+    {
+        if (t != mAnalysisBadge) { mAnalysisBadge = t; repaint(); }
+    }
     // Analyze + revert are stop-gated (owner call 2026-07-10): a mid-play map
     // swap is an unbounded law change the glide is not meant to absorb -- the
-    // ON/OFF toggle is the only live gesture.
-    void setPlaybackGate (bool playing)
+    // ON/OFF toggle is the only live gesture.  QA-Fd: Undo/Redo join the gate
+    // set (they restore applied maps too; restoreEdits republishes), and the
+    // FIRST analysis of a never-analyzed pair is carved out (4a) -- engaging
+    // alignment for the first time is the user's explicit intent and the
+    // capped glide absorbs it.
+    void setPlaybackGate (bool playing, bool analyzed)
     {
-        if (mPlayGated == playing) return;
-        mPlayGated = playing;
-        mAnalyzeBtn .setEnabled (! playing);
+        const bool gateAnalyze = playing && analyzed;
+        if (mPlayGated == playing && mAnalyzeGated == gateAnalyze) return;
+        mPlayGated    = playing;
+        mAnalyzeGated = gateAnalyze;
+        mAnalyzeBtn .setEnabled (! gateAnalyze);
         mVersionsBtn.setEnabled (! playing);
-        mAnalyzeBtn .setTooltip (playing
-            ? "Stop playback to analyze"
+        mUndoBtn    .setEnabled (! playing);
+        mRedoBtn    .setEnabled (! playing);
+        mAnalyzeBtn .setTooltip (gateAnalyze
+            ? "Stop playback to re-analyze"
             : "Pair the Follower's onsets to the Leader, build the warp, and apply it to playback");
         mVersionsBtn.setTooltip (playing
             ? "Stop playback to revert"
             : "Revert to an earlier applied state (every Analyze/Apply is a restore point)");
+        mUndoBtn.setTooltip (playing
+            ? "Stop playback to undo"
+            : "Undo the last sync-point / protected-area / analysis change");
+        mRedoBtn.setTooltip (playing ? "Stop playback to redo" : "Redo");
     }
     void mirrorPreset (int presetParam)   // 0..5 factory, 6 = user
     {
@@ -1079,7 +1099,15 @@ public:
                            (float) getHeight() / 2.0f - 4.0f, 8.0f, 8.0f);
         }
 
-        if (mStale)
+        if (mAnalysisBadge.isNotEmpty())
+        {
+            g.setColour (kStaleAmber);
+            g.setFont (juce::Font (11.0f, juce::Font::bold));
+            g.drawText (mAnalysisBadge,
+                        mAnalyzeBtn.getX() - 154, 0, 150, getHeight(),
+                        juce::Justification::centredRight);
+        }
+        else if (mStale)
         {
             // Pending = the grid changed while the transport runs; the
             // stop-gated auto re-analyze fires at the next stop (item 4 of
@@ -1122,8 +1150,9 @@ private:
     juce::ComboBox      mPresetCombo;
     juce::TextButton    mSaveBtn, mLoadBtn, mAnalyzeBtn, mVersionsBtn, mRenderBtn,
                         mUndoBtn, mRedoBtn;
+    juce::String mAnalysisBadge;
     bool mDirty { false }, mStale { false }, mStalePending { false },
-         mMirroring { false }, mPlayGated { false };
+         mMirroring { false }, mPlayGated { false }, mAnalyzeGated { false };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1140,7 +1169,6 @@ BaySickAlignEditor::BaySickAlignEditor (BaySickVocalProcessor& p)
     mProtectedStrip = std::make_unique<ProtectedStrip> (*this);
     mOutputLane     = std::make_unique<LaneView> (*this, LaneView::Role::Output,   mOutputCache);
     mViewModeBar    = std::make_unique<ViewModeBar> (*this);
-    mHistory        = std::make_unique<HistoryScrubber> (*this);
     mRightPanel     = std::make_unique<RightPanel> (*this, mProc.apvts);
 
     addAndMakeVisible (*mToolbar);
@@ -1151,7 +1179,6 @@ BaySickAlignEditor::BaySickAlignEditor (BaySickVocalProcessor& p)
     addAndMakeVisible (*mProtectedStrip);
     addAndMakeVisible (*mOutputLane);
     addAndMakeVisible (*mViewModeBar);
-    addAndMakeVisible (*mHistory);
     addAndMakeVisible (*mRightPanel);
 
     snapshotPresetValues();
@@ -1170,7 +1197,6 @@ void BaySickAlignEditor::resized()
     auto b = getLocalBounds();
     mToolbar->setBounds (b.removeFromTop (kToolbarH));
     mRightPanel->setBounds (b.removeFromRight (kRightPanelW));
-    mHistory->setBounds (b.removeFromBottom (kHistoryH));
     mViewModeBar->setBounds (b.removeFromBottom (kViewModeH));
     mRuler->setBounds (b.removeFromTop (kRulerH));
 
@@ -1194,7 +1220,7 @@ void BaySickAlignEditor::timerCallback()
     const bool playing = DSPBase::isTransportPlaying();
     const bool stale = mProc.isAlignStale() || mEditsSinceAnalyze;
     mToolbar->setStale (stale, stale && playing);
-    mToolbar->setPlaybackGate (playing);
+    mToolbar->setPlaybackGate (playing, mProc.mAlignState.analyzed);
 
     const bool dirty = paramsDivergeFromSnapshot();
     mToolbar->setDirty (dirty);
@@ -1213,34 +1239,64 @@ void BaySickAlignEditor::timerCallback()
 // ─── Actions ──────────────────────────────────────────────────────────────────
 void BaySickAlignEditor::runAnalyze()
 {
-    if (DSPBase::isTransportPlaying()) return;   // stop-gated; button is greyed
-    pushUndo();
-    juce::String err;
-    if (! mProc.analyzeAlign (err))
+    // QA-Fd 4a: RE-analysis is stop-gated (mid-play map swap); the FIRST
+    // analysis of a never-analyzed pair runs even during playback -- it is
+    // explicit user intent and the capped recovery glide absorbs engagement.
+    if (DSPBase::isTransportPlaying() && mProc.mAlignState.analyzed)
+        return;   // button is greyed; menu-race guard
+
+    mToolbar->setAnalysisBadge ("ANALYZING...");
+    // One paint pass before the synchronous analysis + preview render so
+    // the badge is actually visible (both can take seconds on long takes).
+    juce::Component::SafePointer<BaySickAlignEditor> self (this);
+    juce::Timer::callAfterDelay (30, [self]
     {
-        mUndoStack.pop_back();   // nothing changed
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
-            "Analyze", err);
-        return;
-    }
-    mEditsSinceAnalyze = false;
-    refreshComposites();
-    refreshOutputPreview();
-    repaint();
+        if (! self) return;
+        self->pushUndo();
+        juce::String err;
+        if (! self->mProc.analyzeAlign (err))
+        {
+            self->mUndoStack.pop_back();   // nothing changed
+            self->mToolbar->setAnalysisBadge ({});
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                "Analyze", err);
+            return;
+        }
+        self->mEditsSinceAnalyze = false;
+        self->refreshComposites();
+        self->refreshOutputPreview();
+        self->mToolbar->setAnalysisBadge ({});
+        self->repaint();
+    });
 }
 
 void BaySickAlignEditor::runRender()
 {
-    juce::String err;
-    const auto file = mProc.renderAlignedTake (err);
-    if (file == juce::File())
-    {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
-            "Render", err);
-        return;
-    }
-    refreshOutputPreview();
-    repaint();
+    // QA-Fd 16a: render dialog -- Standard vs High Resolution (the warp
+    // phase runs 384 kHz-class oversampled; slower, finer transients).
+    auto* aw = new juce::AlertWindow ("Render",
+        "Export the aligned Follower to Aligned/{name}_align_v{N}.wav "
+        "(file only - playback is already live).",
+        juce::AlertWindow::NoIcon);
+    aw->addButton ("Standard",                 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("High Resolution (slower)", 2);
+    aw->addButton ("Cancel",                   0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<BaySickAlignEditor> self (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [self] (int r)
+        {
+            if (! self || r == 0) return;
+            juce::String err;
+            const auto file = self->mProc.renderAlignedTake (err, r == 2);
+            if (file == juce::File())
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                    "Render", err);
+                return;
+            }
+            self->refreshOutputPreview();
+            self->repaint();
+        }), true);
 }
 
 // QA-Fa recovery (bundle item 3): dropdown of applied states, newest first.
@@ -1362,14 +1418,12 @@ void BaySickAlignEditor::rebuildChannelCombos()
                         { return it.first == follower; }),
                        leaderItems.end());
 
-    int leaderParam = -1, followerParam = -1;
+    int leaderParam = -1;
     if (auto* p = mProc.apvts.getRawParameterValue ("bsa_leader_channel"))
         leaderParam = (int) p->load();
-    if (auto* p = mProc.apvts.getRawParameterValue ("bsa_follower_channel"))
-        followerParam = (int) p->load();
 
-    mLeaderLane  ->setChannelItems (leaderItems, leaderParam);
-    mFollowerLane->setChannelItems (items,       followerParam);
+    // Leader picker only -- the follower has no combo (always this page).
+    mLeaderLane->setChannelItems (leaderItems, leaderParam);
 }
 
 // ─── Presets (section 13a) ────────────────────────────────────────────────────
@@ -1487,6 +1541,12 @@ void BaySickAlignEditor::restoreEdits (const EditSnapshot& s)
     mProc.mAlignState.analyzed       = s.analyzed;
     if (s.analyzed && s.map.isValid()) mProc.mAlign.setWarpMap (s.map);
     else                               mProc.mAlign.clearWarpMap();
+    // QA-Fd found-bug fix: the restored map must reach the decode layer --
+    // playback otherwise kept the undone map while the UI showed the old
+    // one.  Undo/Redo share the stop-gate (setPlaybackGate), so this never
+    // swaps a map mid-play.
+    mProc.mAlignState.analyzedSettingsGen = mProc.alignSettingsGeneration();
+    mProc.publishAlignPlayback();
     refreshOutputPreview();
     repaint();
 }
@@ -1501,6 +1561,7 @@ void BaySickAlignEditor::pushUndo()
 
 void BaySickAlignEditor::doUndo()
 {
+    if (DSPBase::isTransportPlaying()) return;   // stop-gated; button is greyed
     if (mUndoStack.empty()) return;
     mRedoStack.push_back (captureEdits());
     restoreEdits (mUndoStack.back());
@@ -1509,6 +1570,7 @@ void BaySickAlignEditor::doUndo()
 
 void BaySickAlignEditor::doRedo()
 {
+    if (DSPBase::isTransportPlaying()) return;   // stop-gated; button is greyed
     if (mRedoStack.empty()) return;
     mUndoStack.push_back (captureEdits());
     restoreEdits (mRedoStack.back());

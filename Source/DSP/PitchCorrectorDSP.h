@@ -38,19 +38,37 @@
 class PitchCorrectorDSP
 {
 public:
+    // QA-Fd 17b: order + membership = the piano roll's kScaleDefs table
+    // (PianoRoll.cpp) so the realtime board and the pitch editor read
+    // identically.  The old 0..9 order retires; its Custom slot was dead
+    // (no UI or caller ever set the custom mask).  Saved pre-QA-Fd scale
+    // picks load shifted -- accepted at spec (17b).
     enum class Scale : int
     {
         Chromatic     = 0,
         Major         = 1,
         Minor         = 2,
-        HarmonicMinor = 3,
-        Dorian        = 4,
-        Mixolydian    = 5,
-        Phrygian      = 6,
-        Lydian        = 7,
-        Locrian       = 8,
-        Custom        = 9
+        Dorian        = 3,
+        Phrygian      = 4,
+        Lydian        = 5,
+        Mixolydian    = 6,
+        Locrian       = 7,
+        HarmonicMinor = 8,
+        MelodicMinor  = 9,
+        PentatonicMaj = 10,
+        PentatonicMin = 11,
+        Blues         = 12
     };
+    static constexpr int kNumScales = 13;
+
+    // QA-Fd 14a/17b: the single scale table shared by the realtime board and
+    // the pitch editor's Root/Scale/Snap controls (order + masks = the piano
+    // roll's kScaleDefs).
+    static const char* scaleName (int idx);
+    static const std::array<bool, 12>& scaleMask (int idx);
+    // Nearest in-scale note to midiFloat (root pc 0..11); scale 0 = nearest
+    // semitone.  Static so the pitch editor + BaySickPitchDSP share it.
+    static float snapMidiToScaleStatic (float midiFloat, int rootPc, int scaleIdx);
 
     PitchCorrectorDSP();
     ~PitchCorrectorDSP();
@@ -73,7 +91,6 @@ public:
     void setFormantPreserve   (bool   on);        // cepstral envelope re-imposition (QA-F Task 5)
     void setHumanizeCents     (float  cents);     // 0..20
     void setThroatShiftSemis  (float  semis);     // -12..+12 spectral-envelope shift (QA-F Task 5)
-    void setCustomScaleNotes  (const std::array<bool, 12>& notes);
 
     bool bypassed { true };   // H-5: default OFF per locked spec
 
@@ -85,8 +102,6 @@ public:
 
 private:
     // ── Note / scale math ────────────────────────────────────────────────────
-    bool  isNoteInScale (int pc, int rootPc, Scale s) const noexcept;
-    int   snapPcToScale (int pc, int rootPc, Scale s) const noexcept;
     float snapMidiToScale (float midiFloat) const noexcept;
     static float midiToHz (float midi)  noexcept { return 440.0f * std::pow (2.0f, (midi - 69.0f) / 12.0f); }
     static float hzToMidi (float hz)    noexcept { return 12.0f * std::log2 (juce::jmax (hz, 1.0f) / 440.0f) + 69.0f; }
@@ -112,7 +127,6 @@ private:
     bool  mFormantPreserve { false };       // toggle stored, DSP no-op for H-5
     float mHumanizeCents   { 0.0f };
     float mThroatSemis     { 0.0f };        // toggle stored, DSP no-op for H-5
-    std::array<bool, 12> mCustomScale {};   // all-false = empty until user sets
 
     // ── Smoothed pitch correction state ─────────────────────────────────────
     float mCurrentShiftRatio { 1.0f };      // smoothed toward target
@@ -122,6 +136,17 @@ private:
     // until the sung pitch commits to a different note (hysteresis) so
     // vibrato around a boundary doesn't flip-flop the target (the "warble").
     float mCurrentTargetMidi { -1.0f };
+
+    // ── QA-Fd 11/16a engage crossfade ────────────────────────────────────────
+    // The shifters' input rings stay warm while bypassed (feedSample copy;
+    // zero synthesis, zero added latency).  Engage/disengage runs a ~40 ms
+    // equal-power crossfade between the dry tap and the corrected tap, so
+    // the shifter's spin-up (and the formant engines' reset) never lands as
+    // a click.  0 = fully dry (synthesis skipped once settled), 1 = wet.
+    float mEngageFade     { 0.0f };
+    // 1/(0.04*sr); prepare() re-derives.  Non-zero default keeps the fade
+    // functional even if a block slips in before prepare.
+    float mEngageFadeStep { 1.0f / 1764.0f };
 
     // ── UI feedback (atomic published) ──────────────────────────────────────
     std::atomic<float> mDetectedHz        { 0.0f };

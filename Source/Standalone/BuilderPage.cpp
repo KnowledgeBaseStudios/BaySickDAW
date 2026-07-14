@@ -3487,11 +3487,12 @@ void ArrangementGrid::showAudioClipProperties(int blockIdx)
             : juce::String ("Detected tempo: (not detectable)");
     }
 
-    // Per-clip dialog: offerMove == false -> the menu offers "Copy to X" only
-    // (per-clip routing always forks a copy; the acted-on block becomes it).
+    // Owner call 2026-07-11: the grid dialog offers Move + Copy, same as the
+    // browser dialog (offerMove == true).  Move relocates the shared library
+    // entry (linked path -- see the Apply handler); Copy forks a duplicate.
     buildAudioPropsControls (*aw, block.pitchSemitones, block.originalBPM,
                              block.stretchMode, curRouteName, pages,
-                             /*offerMove*/ false,
+                             /*offerMove*/ true,
                              /*offerResetToMaster*/ true, routeBtn, pending,
                              bpmDisplay);
 
@@ -3537,12 +3538,31 @@ void ArrangementGrid::showAudioClipProperties(int blockIdx)
             if (auto* cb = aw->getComboBoxComponent("mode"))
                 stretch = (cb->getSelectedItemIndex() == 0);
 
-            // QA-E Task 7 (FILE-02): per-clip routing pick = COPY (Jeff
-            // 2026-05-15).  Duplicate FIRST, THEN create the new page bound
-            // to the DUPLICATE (so "Copy to a new Clip Page" registers only
-            // the one dupe entry -- not the original too).  Then tag it
-            // (dedup-safe) + THIS block BECOMES the copy.
-            if (pending && pending->chosen && onDuplicateFileForCopy)
+            // Owner call 2026-07-11: per-clip Move mirrors the browser Move
+            // EXACTLY -- resolve the target (creating a page bound to THIS
+            // file if a "new page" entry was picked), then relocate via the
+            // SAME onApplyLibraryProperties lambda the browser uses.  That
+            // moves the library entry + every following copy as one, so grid
+            // and browser stay linked.  (Copies the user customized
+            // individually are detached and, like the browser, keep their
+            // route until re-attached -- the dialog's "Reset to Browser
+            // Entry" re-attaches.)
+            if (pending && pending->chosen && ! pending->isCopy)
+            {
+                const int li = mPM.findAudioLibraryIndexByPath(cur.audioFilePath);
+                int target = pending->channelId;
+                if (pending->createKind >= 0 && onCreateRoutablePage)
+                    target = onCreateRoutablePage(pending->createKind, cur.audioFilePath);
+                if (li >= 0 && target >= 0 && onApplyLibraryProperties)
+                    onApplyLibraryProperties(li, newPitch, bpmClamped, stretch, target);
+                return;   // the Move was the action
+            }
+
+            // QA-E Task 7 (FILE-02): per-clip Copy.  Duplicate FIRST, THEN
+            // create the new page bound to the DUPLICATE (so "Copy to a new
+            // Clip Page" registers only the one dupe entry -- not the original
+            // too).  Then tag it (dedup-safe) + THIS block BECOMES the copy.
+            if (pending && pending->chosen && pending->isCopy && onDuplicateFileForCopy)
             {
                 const juce::String np = onDuplicateFileForCopy(cur.audioFilePath);
                 if (np.isNotEmpty())

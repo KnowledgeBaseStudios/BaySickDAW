@@ -6,6 +6,7 @@
 #include <vector>
 #include "../PatternManager.h"
 #include "../EffectRack.h"
+#include "../DSP/BaySickPitchDSP.h"   // QA-Fd: PitchNoteRegion for PitchEditAction
 
 // ── UndoContext ────────────────────────────────────────────────────────────────
 // Lightweight token passed to any component that needs to perform undoable
@@ -73,6 +74,50 @@ private:
     bool         mFirstPerform { true };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PianoRollEditAction)
+};
+
+// ── PitchEditAction (QA-Fd 9a: pitch editor joins the global undo) ───────────
+// Full before/after snapshot of a channel's pitch note regions for one edit
+// gesture.  ApplyFn routes through a Component::SafePointer at the call site
+// so an action outliving its editor (tab closed) degrades to a safe no-op.
+// ─────────────────────────────────────────────────────────────────────────────
+class PitchEditAction : public juce::UndoableAction
+{
+public:
+    using RegionVec = std::vector<PitchNoteRegion>;
+    using ApplyFn   = std::function<void(const RegionVec&)>;
+
+    PitchEditAction(juce::String label,
+                    RegionVec before, RegionVec after,
+                    ApplyFn applyFn)
+        : mLabel(std::move(label))
+        , mBefore(std::move(before))
+        , mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    // The edit is already applied before commitEdit() calls perform() (the
+    // PianoRollEditAction convention) -- skip the first perform.
+    bool perform() override
+    {
+        if (mFirstPerform) { mFirstPerform = false; return true; }
+        mApply(mAfter);
+        return true;
+    }
+    bool undo() override { mApply(mBefore); return true; }
+
+    int getSizeInUnits() override
+    {
+        return (int)((mBefore.size() + mAfter.size()) * sizeof(PitchNoteRegion));
+    }
+
+private:
+    juce::String mLabel;
+    RegionVec    mBefore, mAfter;
+    ApplyFn      mApply;
+    bool         mFirstPerform { true };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PitchEditAction)
 };
 
 // ── ArrangementEditAction ─────────────────────────────────────────────────────

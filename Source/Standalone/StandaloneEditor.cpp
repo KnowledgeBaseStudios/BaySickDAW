@@ -2639,6 +2639,11 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             if (mBuilderPage) mBuilderPage->notifyArrangementChanged();
         };
 
+        // Owner call 2026-07-11: the grid's per-clip Move shares this exact
+        // lambda so grid + browser Move are one code path (linked).
+        if (auto* g = page->getGrid())
+            g->onApplyLibraryProperties = panel->onApplyLibraryProperties;
+
         // QA-E Task 5 (2026-05-15): browser Delete on the LAST library entry
         // owned by a page -> close that page's ribbon tab.  Walk mPages,
         // match by (page type, page index -> channelId), close the tab.
@@ -8444,6 +8449,10 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
     auto* cpRaw = cpHolder.get();
     cpRaw->setTabName (tabName);
     cpRaw->setProcessor (&mProcessor);   // G-7: Page Preset save/load access
+    cpRaw->setUndoContext (makeUndoContext());   // QA-Fd 9a: pitch editor global undo
+    // QA-Fd #7: pitch editor playhead follows the main transport (incl. the
+    // stop-reset seek) -- getCurrentBeat is the UI-safe playhead accessor.
+    cpRaw->setTransportBeatProvider ([this] { return mPlayHead.getCurrentBeat(); });
     cpRaw->setBusActiveQuery ([this] (int chId)
     {
         // Bus fallback query: kVoxBus2 active iff MixerPage activated it.

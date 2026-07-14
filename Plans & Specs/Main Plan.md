@@ -1633,6 +1633,26 @@ needed to find what you should pull up to review the work.
 - Dependencies: clean BaySickNAMIR foundation — audit confirmed 2026-05-14 (running notes §20: all 18 existing APVTS params declared / read / wired; no follow-on wiring fixes needed, conditional QA-Fd batch dropped).  Sequencing-independent of QA-F + QA-Fa + QA-Fb (orthogonal surfaces) but slotted after QA-Fb so all engine-side dust has settled before adding a new DSP path.
 - Effort: medium-large (~7-12 hours; ~2-4 hours processor changes, ~3-5 hours editor layout, ~1 hour snapshot expansion, ~1-2 hours verify).
 
+#### **QA-Fd: Vocal Editor Rework** *(NEW — inserted 2026-07-11 as the fifth batch of G2; the ID reuses the 2026-05-14 conditional NAMIR/Pedals-wiring batch name that was QUEUED + DROPPED without running — see §9 eighteenth Forks entry; the two are unrelated)*
+**Plan file:** [`Plans & Specs/Batch Plans/snug-orbiting-catmull.md`](Batch Plans/snug-orbiting-catmull.md)
+- **Bucket:** Players, Effects, Cross-cutting Infrastructure.
+- Items: the consolidated vocal-editor rework — the G2 boundary's tabled align-semantics package (9a/10a/12a/13a/14a/15a/16a), the BaySickPitch 9-problem list, the Newtone parity picks 1-14, Jeff's sub-edit popup design, and the realtime engage-tick fix (chat docket 1-20, 2026-07-11).
+- Scope (10 tasks, full detail in the plan file): align Mode/Fine reworked to RESIDUAL tightness with an internal matching window + Flexibility rungs + Max Shift cap + publish-time Pitch Blend/Variation/Types (live knobs); no-silent-drop segmentation (glide merge + slice pills); first-analysis-mid-play carve-out + visible analyzing/deferred states; page-master Bypass REMOVED (3a/12b); pitch-tab TIME-EDIT engine upstream of align (elastic move/stretch + Ctrl-detach, published time map composed into the decode law, source-domain applicator stamps); full editor rebuild (motion model, Root/Scale/Snap + Focus-pull rendering, pill menu, merge, batch re-pitch, view/nav/playhead, marquee/clipboard, GLOBAL undo migration); sub-edit system (display box + popup + on-pill handles on single-storage curves + Variation); offline render parity (continuous smooth-map applyWarp port + renders honor time edits) + High-Res render option; PsolaShifter warm-feed + engage crossfade.
+- **STATUS: code-complete 2026-07-11; ONE close commit pending build + owner approval; Work Log entry HELD per R2 (applies at §B.10 section pass); the G2 boundary closes after THIS batch's smoke completion (Parts 4-5 + FB-11 + Part-3 re-runs + realtime first-listen).**
+- Risk: high (largest batch of the bulk run — editor rebuild + DSP semantics rework + a new time-warp stage).  Mitigations per the plan: the PsolaShifter root-cause fix landed pre-batch (`703f06e4`, owner-verified); the align live-warp machinery is reused not rebuilt.
+- Dependencies: QA-F/Fa/Fb'/Fc committed (`e5c62218..703f06e4`).
+- Effort: largest single batch of the run (executed in one bulk-run session).
+
+#### **QA-Fe: Vocal Pitch Engine — adopt library engines, retire PSOLA** *(NEW — inserted 2026-07-12 as the SIXTH batch of G2; RE-SCOPED 2026-07-13 from a PSOLA rebuild to library-engine adoption — see §9 fifty-seventh + fifty-eighth Forks entries)*
+**Plan file:** [`Plans & Specs/Batch Plans/prancy-crunching-bear.md`](Batch Plans/prancy-crunching-bear.md)
+- **Bucket:** Players, Effects.
+- Items: the vocal pitch engine (editor / Align / real-time correction) broke via a shared-`PsolaShifter` change; a 3-day PSOLA rebuild attempt proved TD-PSOLA is the wrong engine (inherent moire, worst at the small shifts real-time correction uses; the clean tools use spectral/source-filter engines, not PSOLA). RE-SCOPED to adopt vendored library engines that A/B-shift cleanly on Jeff's voice. Backed by [`daw-architecture-monophonic-vocal-pitch-shift-2026-07-12.md`](Research Reports/daw-architecture-monophonic-vocal-pitch-shift-2026-07-12.md) + the 3-day execution findings (§9 fifty-eighth).
+- Scope (7 tasks, full detail in the plan file): vendor + CMake-wire **WORLD** (BSD) / **Signalsmith** (MIT) / **Rubber Band** (GPL v2+, already vendored) + repo-root GPLv3 LICENSE; `IPitchShifter` seam + bake-on-edit cache; **editor + Align 3-engine dropdown** (Rubber Band default; labels "Balanced" / "Highest Quality (High CPU)" / "Lightest (Low CPU)"); **real-time vocal correction -> Rubber Band `R3LiveShifter`** (dry-monitor default); **monitor-button right-click -> Dry / With-Effect popup** (default Dry); throat control via each engine's formant param; retire PSOLA + `PitchShifters.h::GranularShifter` + strip `[PITCH DIAG]`.
+- **STATUS: in execution 2026-07-13 (bulk-run — ONE close commit; Work Log entry HELD per R2, applies at the Master Test Plan §B.## section pass); the G2 boundary closes after THIS batch's smoke.**
+- Risk: high — three vendored libraries + a real-time engine swap + APVTS/UI + a monitor-path UX change. Mitigations: engines A/B-validated on the real vocal (CPU + latency measured); adversarial review on the audio-thread changes at close.
+- Dependencies: QA-Fd code-complete (2026-07-11). UNBLOCKS the G2 boundary smoke (halted at Part 4 by the pitch editor); nothing downstream starts until QA-Fe's smoke passes.
+- Effort: large — three engine integrations + real-time swap + UI.
+
 ### Phase 4 — Builder + UX work
 
 #### **QA-G: Timeline Geometry**
@@ -1786,6 +1806,15 @@ needed to find what you should pull up to review the work.
 - Risk: low. Read-only measurement; no audio path changes.
 - Dependencies: independent.
 - Effort: small-medium (~3-5 hours).
+
+#### **QA-OctavePedal: Octave-Pedal Engine Fix + Pedal-Mode UI + Low-Latency Instrument Monitoring** *(NEW — inserted 2026-07-13; bulk-run group G3, Main Plan Phase 5, after QA-N — see §9 fifty-eighth Forks entry)*
+**Plan file:** TBD (authored at batch start).
+- **Bucket:** Effects, Players, UI / L&F / Theming.
+- Items: (1) the octave pedal (`OctaveStyleDSP`, BaySickPedals) "rings like a broken bell" — its engine was built per the June octave research ([`daw-architecture-octave-pitch-shift-engine-2026-06-18.md`](Research Reports/daw-architecture-octave-pitch-shift-engine-2026-06-18.md)) but does NOT deliver the clean low-latency octave-down it was supposed to; (2) the **pedal-mode editor UI has overlapping knobs** (the effects-rack view of the same pedal renders fine); (3) **low-latency live instrument monitoring** — the player must hear the processed result at near-zero latency (the ~48 ms library engines can't; time-domain PSOLA-style is the low-latency class per the June report).
+- Scope (full detail in the plan file at start): diagnose + fix the `OctaveStyleDSP` octave-down "broken bell" against the June recommendation (the PSOLA-style period-doubler + YIN + POG voicing are already present per the code — find the real quality gap); rework the pedal-mode editor layout using the working rack layout as reference; deliver clean low-latency live instrument monitoring.
+- Risk: medium-high — audio-thread pitch DSP (already partly built) + tight <10 ms latency budget + UI layout.
+- Dependencies: QA-Fe (PSOLA retirement + engine decisions); the June octave research.
+- Effort: medium-large.
 
 #### **QA-VibeSlider: App-wide juce::Slider → VibeSlider refactor** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** TBD (silly-name file when batch starts).
@@ -2138,7 +2167,7 @@ These four batches were planned in the original `lucky-discovering-tiger` Phase 
 #### **QA-Updater: WinSparkle auto-update integration** (added 2026-05-08 via user spec call — see §9 sixth Forks entry)
 **Plan file:** TBD.
 - Items: User-requested 2026-05-08 — auto-updater integration (no source-doc precedent in `lucky-discovering-tiger.md` / `Final Stretch Work.txt` / `vibedaw_blueprint.md`).
-- Scope: vendor WinSparkle (BSD-licensed Windows updater C++ library); link into app launch path; configure GitHub Releases as the appcast source (BaySickDAW repo's Releases tab hosts signed `BaySickDAW-Setup-X.Y.Z.exe` artifacts + an `appcast.xml` manifest); wire once-per-launch background check (with "Remind me later" / "Skip this version" buttons in the prompt) + manual `Help → Check for Updates` menu item; "Auto-check for updates" toggle lives in a **General Settings dialog** (sub-spec at execution time: extend an existing settings dialog or create a new one — current Audio Settings dialog is audio-device-only); silent-skip on no internet (no error UI when offline); update-available prompt offers in-app "Update Now" → WinSparkle downloads the new installer → app exits → NSIS handles the upgrade → app relaunches; **signature-verify** the downloaded installer before running (defends against MITM tampering); rebuild installer to bundle WinSparkle DLL alongside the app binary; stable channel only — beta channel deferred to Future State `CL-287`.
+- Scope: vendor WinSparkle (BSD-licensed Windows updater C++ library); link into app launch path; configure GitHub Releases as the appcast source (BaySickDAW repo's Releases tab hosts signed `BaySickDAW-Setup-X.Y.Z.exe` artifacts + an `appcast.xml` manifest); wire once-per-launch background check (with "Remind me later" / "Skip this version" buttons in the prompt) + manual `Help → Check for Updates` menu item; "Auto-check for updates" toggle lives in a **General Settings dialog** (sub-spec at execution time: extend an existing settings dialog or create a new one — current Audio Settings dialog is audio-device-only); silent-skip on no internet (no error UI when offline); update-available prompt offers in-app "Update Now" → WinSparkle downloads the new installer → app exits → NSIS handles the upgrade → app relaunches; **signature-verify** the downloaded installer before running (defends against MITM tampering); rebuild installer to bundle WinSparkle DLL alongside the app binary; stable channel only — beta channel deferred to Future State `CL-287`.  **Plus a DEV-FACING vendored-dependency update watcher** (added 2026-07-13 — distinct from the user-facing WinSparkle updater above; it notifies the MAINTAINER, not end users): a `libs/` vendor-version manifest (repo URL + vendored tag/commit + date per vendored lib, since stripping `.git` means the vendored copy can't self-report its version) + a scheduled GitHub Action (weekly cron) that compares each vendored lib against its upstream latest tag/commit and opens a GitHub issue when any is newer, so the maintainer reviews + decides whether to re-vendor.  Covers all vendored `libs/` (rubberband, world, signalsmith-stretch, signalsmith-linear, sfizz, eigen, lunasvg, NeuralAmpModelerCore, concurrentqueue, asiosdk).
 - Risk: medium-high. First WinSparkle integration; cryptographic signing chain depends on QA-Framework's signed-binary path (signing key needs to exist for both the binary and the appcast manifest); testing requires a staged GitHub Release dry-run before V1.0 cuts. WinSparkle has good documentation but the full GitHub-Releases-as-appcast pattern requires a small custom helper to translate Releases JSON → appcast XML (or Sparkle-compatible RSS).
 - Dependencies: QA-Installer (NSIS skeleton + sample-pack download infra), QA-Framework signing setup (signature verify needs the signing certificate + key established).
 - Effort: medium-large (~10-15 hours).
@@ -2190,8 +2219,8 @@ records the same set so cross-doc grep stays consistent.
 **Bug-fix phases (1-5):**
 ```
 QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-Rules*********************************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-ClipPlayback************************************ → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-TransportDisplay************************************* → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
-   → QA-Fa → QA-Fb******** → QA-Fc******** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
-   → QA-M → QA-Drum-Polish**** → QA-N → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-ApvtsAutomation************************************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-UndoCoverage*************************************** → QA-DirtyFlag*******************
+   → QA-Fa → QA-Fb******** → QA-Fc******** → QA-Fd***************************************** → QA-Fe****************************************** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
+   → QA-M → QA-Drum-Polish**** → QA-N → QA-OctavePedal******************************************* → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-ApvtsAutomation************************************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-UndoCoverage*************************************** → QA-DirtyFlag*******************
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -2297,6 +2326,36 @@ mic-sim paths summed rather than blended; new feature; sits on the
 audited-clean BaySickNAMIR foundation).  See §9 eighteenth Forks entry
 for the full four-decision package + the queued QA-Fd-dropped audit
 outcome.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-Fd (Vocal Editor Rework)** inserted 2026-07-11
+as the FIFTH batch of the G2 checkpoint group (Jeff's placement, docket
+1a) — the consolidated rework the G2 boundary walkthrough tabled (align
+residual semantics + pitch-editor rebuild + time-edit engine + sub-edit
+system + engage-tick fix).  The batch ID reuses the name of the
+2026-05-14 conditional NAMIR/Pedals-wiring batch that was queued and
+DROPPED without ever running (see the eighteenth Forks entry) — the two
+are unrelated.  The G2 boundary stays open through this batch and
+closes after ITS smoke completion.  See §9 fifty-sixth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-Fe (Vocal Pitch-Shift Engine Rebuild)** inserted 2026-07-12
+as the SIXTH batch of the G2 checkpoint group, after QA-Fd — restores the
+pitch shift (a continuous-read-pointer change to the shared `PsolaShifter`
+had mathematically deleted it in all three consumers), makes PSOLA clean at
+its source, wires formant preservation onto the vocoder, adds a WORLD offline
+engine (conditional on a validated A/B gate), and ships the user-selectable
+Pitch Engine feature.  The G2 boundary stays open through this batch and
+closes after ITS smoke completion (the G2 boundary smoke that halted at
+Part 4 because the pitch editor stopped shifting — QA-Fe fixes exactly what
+unblocks it).  See §9 fifty-seventh Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-OctavePedal** inserted 2026-07-13 in bulk-run
+group G3 (Main Plan Phase 5), after QA-N (Jeff's placement — engine + UI polish,
+next to QA-K / QA-L / QA-M; it's a DSP/effects follow-up to QA-EffectsReview, which
+built the engine).  Fixes the octave pedal's "broken bell" `OctaveStyleDSP`
+octave-down against the June octave research, reworks the pedal-mode editor UI
+(overlapping knobs; the rack view renders fine), and delivers low-latency live
+instrument monitoring (the ~48 ms library engines can't do it).  See §9
+fifty-eighth Forks entry.
 
 \*\*\*\*\*\*\*\*\* **QA-Ea** inserted 2026-05-15 at the QA-E Task 6
 (DSP-09) pre-task spec-call.  Slotted **immediately after QA-E, before
@@ -5794,3 +5853,105 @@ The initial "1/8-note-late" report was diagnosed to **TV audio output latency** 
 - `Plans & Specs/Batch Plans/swift-stampeding-caribou.md` — the governing bulk-run plan (mirrored + home copy deleted 2026-07-08).
 - `Plans & Specs/Test Plans/v1-master-test-plan.md` — created at run pre-flight (not yet).
 - Per-batch plan + running-notes files — created per checkpoint group during the run (not yet).
+
+### 2026-07-11 — QA-Fd (Vocal Editor Rework) inserted as G2's fifth batch; G2 composition change (fifty-sixth Forks entry)
+
+**Trigger:** the G2 boundary walkthrough halted at Part 4 when BaySickPitch surfaced 9 problems (caribou G2-boundary bullets, 2026-07-11).  Jeff's call: figure out ALL of them + run a full reference review + missing-features survey, then implement everything as ONE body of work instead of piecemeal boundary fixes.  The review phase completed same-day (9 problems triaged — 2 fixed in-tree pre-batch incl. the PsolaShifter grid-anchor root cause `703f06e4`; reference review two passes + owner figure; parity picks locked 1-14 IN / 15-16 OUT; the tabled align-semantics rework 9a/10a/12a/13a/14a/15a/16a locked; chat docket items 1-20 walked and answered).
+
+**G2 composition change:** G2 was planned as four batches (QA-F / QA-Fa / QA-Fb' / QA-Fc).  **QA-Fd is its FIFTH batch** (Jeff placement, docket 1a); the G2 boundary stays OPEN through QA-Fd and closes after ITS smoke completion (Parts 4-5 + FB-11 + re-runs of the Part-3 align items the semantics rework touches + the realtime corrector's FIRST real listen).  The caribou Carry-Over FINAL doc block rides QA-Fd's single close commit (docket 2b).
+
+**Batch ID note:** "QA-Fd" was previously the name of the 2026-05-14 CONDITIONAL BaySickNAMIR/Pedals-wiring batch that was queued and dropped without running (eighteenth Forks entry, audit came back clean).  The ID is reused for the vocal rework; the two are unrelated.  Both the new §5 entry and the §6 footnote carry the disambiguation.
+
+**Scope (locked in the plan file; §5 entry summarizes):** align residual-tightness semantics with an internal matching window + Flexibility/Max Shift + publish-time Pitch Blend/Variation/Types; no-silent-drop segmentation + slice pills; first-analysis-mid-play carve-out + visible analysis states; page-master Bypass removal (bsv_bypass retired); the pitch-tab time-edit engine UPSTREAM of align (elastic move/stretch/detach, composed decode law, source-domain applicator stamps closing the wrong-syllable hole); full pitch-editor rebuild (motion model, Root/Scale/Snap, menus, view/nav/playhead, selection/clipboard, GLOBAL undo migration via new PitchEditAction); the sub-edit system (display box + popup + on-pill handles on single-storage curves + Variation); offline render parity (continuous smooth-map applyWarp) + High-Res render option (16a); PsolaShifter warm-feed + engage crossfade (11/16a).  17b also reordered the realtime scale list to the piano roll's 13-scale table (bsv_pitch_scale 0..12; saved-pick shift accepted at spec).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-Fd entry inserted after QA-Fc; §6 arrow gains `→ QA-Fd` (41 asterisks) between QA-Fc and QA-G + matching footnote; §9 this entry.
+- `Plans & Specs/Batch Plans/snug-orbiting-catmull.md` — the QA-Fd plan (approved 2026-07-11, single R4/R5 approval).
+- `Plans & Specs/Running Notes/snug-orbiting-catmull.md` — per-task entries through code-complete.
+- `Plans & Specs/Test Plans/v1-master-test-plan.md` — new §B.10 (FD-1..FD-20) + amendments F-3/F-4/F-6/F-10/FA-2/FA-3/FA-5/FA-9/FB-3/FB-11 (the FA/FB sweep covers scenarios describing behavior QA-Fd retired — reconcile-sweep discipline).
+
+**Verification:** the G2 boundary smoke completion (the batch's Verification section) doubles as the §B.10 walk or feeds it, Jeff's cadence call at the smoke.  [PITCH DIAG] strips only AFTER that smoke passes, per the caribou Rule 4 catalog.
+
+### 2026-07-12 — QA-Fe (Vocal Pitch-Shift Engine Rebuild) inserted as G2's sixth batch (fifty-seventh Forks entry)
+
+**Trigger:** during QA-Fd's G2-boundary pitch work, a change to the shared `PsolaShifter` (`Source/DSP/PitchShifters.h`) — a continuous read pointer meant to remove a low-frequency amplitude "moire" — **mathematically deleted the pitch shift**: advancing the analysis read at wall-clock rate copies the input 1:1, so the overlap-add rebuilds the original and the measured output F0 ratio is ~1.00 for any requested shift (verified on rendered audio).  Because `PsolaShifter` is shared, the shift broke in all three consumers — the pitch editor (`BaySickPitchDSP`), Align (`BaySickAlignDSP`), and the live pedal (`PitchCorrectorDSP`).  An owner-approved architecture research pass ([`Plans & Specs/Research Reports/daw-architecture-monophonic-vocal-pitch-shift-2026-07-12.md`](Research Reports/daw-architecture-monophonic-vocal-pitch-shift-2026-07-12.md)) established: we are NOT missing a DSP algorithm (the tree ships correct TD-PSOLA, a PhaseVocoder wrapper, and a cepstral formant stage); the problems are (a) the change that deleted the shift, (b) a real grain-coherence bug that inflated the moire to 40%+, and (c) the formant stage never wired into the pitch/align paths (so the vocoder chipmunks).
+
+**G2 composition change:** G2 grew from five batches (QA-F / QA-Fa / QA-Fb' / QA-Fc / QA-Fd) to **SIX — QA-Fe is its sixth** (2026-07-12).  The G2 boundary stays OPEN through QA-Fe and closes after ITS smoke completion: QA-Fe fixes exactly what halted the boundary smoke at Part 4 (the non-shifting pitch editor), so its smoke IS the boundary's end-to-end verification.  Bulk-run cadence (A11): ONE commit at close + Master Test Plan §B.## backfill; per-task lines are build checkpoints (no commit).  Jeff's hands-on ear verification happens at the G2 boundary smoke.
+
+**Scope (8 tasks; §5 entry summarizes, full detail in the plan file):** Task 1 restore the shift (revert the read pointer to per-mark nearest-epoch snap, F0-verified first — Phase 0, ship-blocking); Task 2 PSOLA quality — kill the moire at its source via fixed 2-period GCI-centered grains + sub-sample fractional placement + strip the `[PITCH DIAG]` scaffolding shipped this session; Task 3 the Roebel-Rodet iterative true-envelope formant estimator (A7 — full transparency for V1); Task 4 vocoder engine + `CepstralFormantEngine(preserve=true)` chain (un-chipmunk Align's PV branch + wire the editor); Task 5 a Python WORLD A/B validation prototype (GATE per A8 — GO/NO-GO surfaced to Jeff); Task 6 the WORLD offline engine (CONDITIONAL on Task-5 GO — vendored modified-BSD drop + bake-cache per A12); Task 7 the user-selectable Pitch Engine feature (thin `IPitchShifter` seam, cycling toolbar button PSOLA/Phase Vocoder/WORLD, Align combo Granular->WORLD with old-project fallback to PSOLA, delete the orphaned `GranularShifter` per A10); Task 8 the throat/character control (A9).
+
+**Spec-call gates surfaced to Jeff (not decided unilaterally):** the Task-5 WORLD GO/NO-GO (A8 — NO-GO drops Task 6, ships 2 engines, parks WORLD in Future State) and the Task-6 WORLD stream-vs-bake UX (A12).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-Fe entry inserted after QA-Fd; §6 arrow gains `→ QA-Fe` (42 asterisks) between QA-Fd and QA-G + matching footnote; §9 this entry.
+- `Plans & Specs/Batch Plans/prancy-crunching-bear.md` — the QA-Fe plan (approved 2026-07-12).
+- `Plans & Specs/Running Notes/prancy-crunching-bear.md` — per-task entries through code-complete.
+- `Plans & Specs/Test Plans/v1-master-test-plan.md` — §B.## backfill authored at close (pitch-engine restore + PSOLA quality + selectable-engine + throat scenarios).
+
+**Verification:** the G2 boundary smoke (the plan's Verification section) — the vocal-cluster walkthrough plus the pitch-shift-specific additions (pitch tracks the pills on all engines; engine switch is audible + formant-preserving; Align has no Granular; live pedal still PSOLA + low latency; throat shifts formants independently; old Granular project falls back cleanly).  The `[PITCH DIAG]` scaffolding strips at Task 2 and the strip is recorded in the running-notes Diagnostic Instrumentation Catalog (Rule 4).
+
+### 2026-07-13 — QA-Fe RE-SCOPED (PSOLA retired -> library engines) + QA-OctavePedal batch inserted (fifty-eighth Forks entry)
+
+**Trigger:** QA-Fe Task 1 (restore the PSOLA shift) executed, but the engine kept
+failing: the read-pointer revert + `hw=P` grain-length fix restored only a partial
+shift (app measured +3 -> ~+1.5 st, -3 -> ~0), and the **moire warble is inherent
+to nearest-epoch TD-PSOLA** — worst at 1-2 semitone shifts (exactly the real-time
+correction range), and sub-sample fractional placement did NOT reduce it (sim:
+47%->47%).  An honest read of the batch's own research question ("what do the real
+tools use") is spectral / source-filter vocoders, NOT PSOLA.  ~3 days were spent
+grinding the wrong engine before the pivot (owner-flagged pattern — see
+`feedback_surface_full_research_recommendations`).
+
+**Engine A/B (2026-07-13, on Jeff's dry vocal, all measured):** three vendored
+library engines, all clean + formant-preserving + accurate both directions:
+- **WORLD** (modified-BSD): F0=132Hz dry -> +3.20 / -2.80 / +7.17 st.  CPU 3.6x
+  realtime (heaviest; harvest F0 ~half).  Install ~0.2-0.3 MB.  Vocal-ONLY.
+- **Signalsmith Stretch** (MIT): +3.18 / -2.76 / +7.53 st.  CPU 69x realtime
+  (lightest).  Install 0.15 MB.  General-purpose (vocal + Builder stretch).
+- **Rubber Band R3** (GPL v2+, already vendored): +3.53 / -2.61 / +7.37 st.  CPU
+  16.6x realtime.  Install 0.65 MB.  General-purpose.  Its **`R3LiveShifter`** (the
+  real-time variant) measured ~48-58 ms latency, clean at small corrections.
+Jeff's ear: WORLD best, Rubber Band closest to WORLD.
+
+**Licensing (app is OPEN-SOURCE giveaway on JUCE's GPLv3 path — `JUCE_DISPLAY_SPLASH_SCREEN=0`
+confirms it):** all three free + legal to ship (WORLD BSD, Signalsmith MIT, Rubber
+Band GPL-v2+ compatible with GPLv3).  Vendored 2026-07-13 into `libs/`; a repo-root
+GPLv3 LICENSE gets added in QA-Fe Task 1.
+
+**QA-Fe re-scope (owner-approved 2026-07-13):** editor + Align = 3-engine dropdown
+(Rubber Band default; labels Balanced / Highest Quality (High CPU) / Lightest (Low
+CPU)); real-time vocal correction (`PitchCorrectorDSP`) -> Rubber Band
+`R3LiveShifter` with **dry-monitor default** (the ~48 ms is invisible under dry
+monitoring; opt-in "With Effect" processed monitor via the new **monitor-button
+right-click -> Dry/With-Effect popup**); throat control via each engine's formant
+param; **PSOLA (`PsolaShifter`) + `PitchShifters.h::GranularShifter` fully retired**
+from the vocal paths.  The old PSOLA-rebuild Tasks 1-8 are superseded (7 new tasks
+in the rewritten `prancy-crunching-bear.md`).
+
+**QA-OctavePedal (NEW, bulk-run group G3 / Main Plan Phase 5, after QA-N):** the octave pedal (`OctaveStyleDSP`,
+BaySickPedals) "rings like a broken bell."  Its engine WAS built per the June octave
+research (`daw-architecture-octave-pitch-shift-engine-2026-06-18.md` — PSOLA-style
+period-doubler + YIN + POG voicing, verified present in the code) but does not
+deliver the clean low-latency octave-down promised.  This batch fixes that real
+quality gap, reworks the **pedal-mode editor UI** (overlapping knobs; the rack view
+is fine), and delivers **low-latency live instrument monitoring** (the requirement
+the ~48 ms library engines can't meet).  NOTE: the octave pedal never used the
+shared `PsolaShifter` — the earlier plan-file "live pedal = PSOLA" label conflated
+`PitchCorrectorDSP` (vocal) with the instrument pedals; corrected here.
+
+**Also 2026-07-13:** a dev-facing vendored-dependency update watcher was added to
+QA-Updater's scope (manifest + weekly GitHub Action; maintainer-facing, distinct
+from WinSparkle).
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-Fe entry re-scoped; §5 QA-OctavePedal entry
+  inserted in Phase 5 after QA-N; §6 arrow gains `-> QA-OctavePedal` (43 asterisks)
+  after QA-N (bulk-run G3) + footnote; QA-Updater scope + the dev watcher; §9 this entry.
+- `Plans & Specs/Batch Plans/swift-stampeding-caribou.md` — QA-OctavePedal added to
+  the G3 checkpoint group (the doc that drives the bulk-run execution).
+- `Plans & Specs/Batch Plans/prancy-crunching-bear.md` — full rewrite (7 tasks +
+  RESCOPE NOTE + B1-B10 spec calls).
+- `Plans & Specs/Running Notes/prancy-crunching-bear.md` — the 3-day path +
+  decisions.
+- `libs/` — vendored `world`, `signalsmith-stretch`, `signalsmith-linear` (rubberband
+  already present).

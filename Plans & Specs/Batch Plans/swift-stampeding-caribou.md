@@ -150,7 +150,7 @@ mass-scrub). Fix everything found.
 ### Checkpoint groups (§6 order preserved; boundaries adjustable at marathon)
 - **G1 — Transport + timeline foundations** (ear-check group): **QA-TransportDisplay**, QA-Chords, QA-TempoMap, QA-Eb, QA-Ec′. Ear-check: tempo-change sample accuracy by ear (position readout assists), stretch/resample behavior, chord stamping. **G1 completion = go/no-go checkpoint for the whole model.**
 - **G2 — Vocal/creative builds** (ear-check group): QA-F, QA-Fa, QA-Fb′, QA-Fc. Ear-checks mid-group: after QA-F (align/warp quality) and after QA-Fa (pitch-edit quality) — pitch/align DSP cannot be judged by smoke tests, and Fa builds on F's shifters.
-- **G3 — Builder/UX/engine polish:** QA-G′, QA-H′, QA-I, QA-J′(residuals only), QA-K (code items; DSP-08 hardware test → campaign), QA-L, QA-M, QA-Drum-Polish, QA-N. Nine batches, three shrunk small.
+- **G3 — Builder/UX/engine polish:** QA-G′, QA-H′, QA-I, QA-J′(residuals only), QA-K (code items; DSP-08 hardware test → campaign), QA-L, QA-M, QA-Drum-Polish, QA-N, **QA-OctavePedal** (NEW 2026-07-13 — octave-pedal engine fix + pedal-mode UI rework + low-latency instrument monitoring; see Main Plan §9 fifty-eighth Forks entry). Ten batches, three shrunk small.
 - **G4 — Mechanical sweeps + data layer:** QA-VibeSlider, QA-NativeDialogs′, **QA-ApvtsAutomation**, QA-Verify (only the BaySickPedals preset FIX is code; the 10-engine walk → campaign), QA-Export, QA-ProjectSave, **QA-UndoCoverage**, QA-DirtyFlag.
 - **CAMPAIGN — Master Test Plan execution** (absorbs QA-B + QA-Verify walk + QA-RC's page-by-page plan): Jeff walks sections in commit order; failures → I fix (fix commits reference the batch) → re-run scenario; **section pass → apply held Work Log entry + Main Plan STATUS:CLOSED + close commit for that batch (R2)**.
 - **G5 — Phase 6:** QA-Audit (docket decisions pre-resolved at marathon) → QA-Cleanup-1 → QA-PlayerRename → QA-Cleanup-2 → QA-Cleanup-3 → QA-Cleanup-4 — build-after-every-delete discipline unchanged. Then **QA-RC-lite**: 2nd clean build (delete build/, full rebuild, warning audit) + test-to-failure soak + a regression spot-pass (full page-by-page already ran in the campaign).
@@ -1028,3 +1028,90 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
   review (0/0/4 verified), docket fixes, the align-glide finding + fix, and the docket-4
   correction; NIT-4 (sync auto re-analyze UI freeze) still pending Jeff's deliberate
   judgment at the resumed ear-check.
+
+## Carry-Over FINAL — 2026-07-11 (session close; handoff to the vocal-rework-spec session)
+
+> The bullets above this block accreted chronologically across the whole boundary session.
+> This block is the MAP: state, index, and resume. The details live in the bullets.
+
+- **Completed this session:** R3 group review (0 BLOCKER / 0 NEEDS-FIX / 4 NITs, all
+  premise-verified); boundary-fix commit `9b024062` (glide rebase/2:1 cap + optimal
+  matcher + stop-gates + record-locked realtime board + counts dialog + dockets 1-3);
+  Part 3 (align) ear-checks PASSED after two fix rounds (chop dead in all modes;
+  fine-tune mystery resolved); Part 4 (pitch) exploded into the owner-mandated
+  vocal-editor review — COMPLETE: 9 problems triaged, Newtone reference review (2 passes
+  + owner figure + workflow), parity picks locked, rework decisions locked; the
+  session-long PsolaShifter hunt ended in the grid-anchor fix, OWNER-VERIFIED, committed
+  `703f06e4` (with the temp [PITCH DIAG] tracer). Tree clean (one untracked local flag
+  file `enable_pitch_diag.txt.txt` — Jeff deletes when done); main ahead 13, unpushed
+  (Jeff's standing call).
+- **In-flight:** nothing mid-edit. The G2 boundary remains OPEN pending the rework.
+- **SPEC-INPUTS INDEX (everything the consolidated rework spec must cover — details in
+  the bullets above, keyed by their bold titles):**
+  1. TIMING MODEL — "Align semantics rework LOCKED": 9a residual semantics, 10a cap;
+     calibrations mine (internal window ~400 ms; Tight=0/Close~50/Loose~100; fine +/-50
+     clamped >= 0). Docket 8 superseded.
+  2. PITCH CONTROLS — same bullet: 12a Pitch Variation (cap) + Pitch Blend (0-100 free,
+     mode-clamp travel DROPPED) + Pitch Types (13a bands: Normal/High Vocal/Low Vocal/
+     High Instrument/Low Instrument); percent/cap apply at PUBLISH (live knobs, no
+     re-analysis).
+  3. ALIGNMENT EXTRAS — "Gap dockets 14-18 ANSWERED": 14a Flexibility rungs = Jeff's
+     Low/Normal/High/Max All (+Pitch variant dropped -> Future State); 15a per-word
+     max-shift cap knob; 16a high-res -> Render-parity follow-up; 17b/18b Future State.
+  4. NEWTONE PARITY — "Newtone parity picks LOCKED": items 1-14 IN, 15-16 OUT; motion
+     model = elastic warp + Ctrl-detach + stretch/squeeze (NewTime marker gestures =
+     family conventions); 9-handle Advanced Edit figure (arrows advertise drag axis;
+     green=in/red=out ramps); FL conventions (detents, Ctrl fine-adjust, type-in value)
+     — RESET GESTURE = OPEN, Jeff's line, options only, NO recommendation (the Alt+click
+     incident is logged — never propose from unverified research again).
+  5. BUG LIST (9) — "BaySickPitch problem list" + follow-ups: #1 segmentation thresholds
+     (spec where the line goes; consider Newtone-style slices for unvoiced material);
+     #2b horizontal move (parity item 1); #3b preset-combo removal docket (no reference
+     counterpart); #4 heals via #5; #5 nav set (parity item 2); #6 bottom clamp; #7
+     playhead follows main transport INCL. stop-reset (Jeff's words; + the 400 ms editor
+     timer is too coarse — rate note); #8 auto-scroll recenter logic; #9 stale [edited]
+     tag after undo (+ disambiguate quantize residue). FIXED already: the shifter
+     (`703f06e4`) + stop-gate flag tolerance.
+  6. UX FINDINGS — "NEW UX finding" + "UX-conventions follow-up": first-analysis-mid-play
+     direction POSED (never-analyzed channel analyzes immediately even during playback —
+     provably inaudible; re-analysis stays stop-gated; visible analyzing/deferred state)
+     — needs Jeff's confirm at spec; edits-under-bypass docket (keep audible vs
+     bypass-with-indication); volume/pitch-curve reset affordance (Jeff's gesture).
+  7. BLAST-RADIUS AUDITS QUEUED — "ROOT CAUSE FOUND" bullet: GranularShifter + PvShifter
+     correctness audit (separate implementations, same bug class possible); realtime
+     corrector FIRST real listen (hard-tune snap — every prior impression was formed on
+     the broken shifter); offline render parity (applyWarp smooth-map port + 16a).
+  8. STILL-OPEN FROM EARLIER IN THE BOUNDARY — docket 7a/7b NEVER ANSWERED (the
+     first-engage tick fix: pull into boundary vs slot at G3 open — re-pose at spec);
+     NIT-3 SR-guard fix shipped; NIT-2 SafePointer shipped; NIT-4 UI-freeze judgment
+     pending Jeff's resumed ear-check; QA-ApvtsAutomation note (automation writes vs
+     the capture lock) recorded for G4.
+- **Assumptions changed (owner-relations, logged for every future session):** two
+  self-authored-artifact-as-fact failures this session (docket-4 "accepted design";
+  mid-play analyze/revert "allowed") + one relayed-unverified-research failure (Alt+click)
+  — all called out by Jeff. The verify-premise discipline now explicitly extends to
+  research-agent manual quotes; spec calls NEVER pre-picked from them.
+- **Resume action (the NEW session):** /standup -> Main Plan §0 in full -> THIS block +
+  the G2-boundary bullets above in full -> then PLAN MODE for the consolidated
+  vocal-editor rework spec as a proper §0-convention batch (own silly-name plan file +
+  running-notes pair, R4/R5 single approval; slot/placement of the batch = Jeff's call;
+  scope = spec-inputs 1-8 + verify scripts into the Master Test Plan; every OPEN line
+  above asked, never picked). After approval: implement ALL of it in one pass -> Jeff's
+  full re-listen (incl. realtime first-listen) -> strip [PITCH DIAG] per catalog ->
+  boundary walkthrough completion (Parts 4-5 + FB-11) -> boundary close -> G3 group-open
+  per this plan's G3 section.
+- **Work-Log entries needed:** unchanged from the bullet above (boundary entry at section
+  pass) + the rework batch will hold its own entries per the normal R2 discipline.
+
+## G2 composition note — 2026-07-11 (QA-Fd joined the group)
+
+The consolidated vocal-editor rework became batch **QA-Fd**, G2's FIFTH batch (Jeff,
+docket 1a; plan `Batch Plans/snug-orbiting-catmull.md`, approved 2026-07-11) — G2 is
+QA-F / QA-Fa / QA-Fb' / QA-Fc / QA-Fd, and the G2 boundary closes after QA-Fd's smoke
+completion (Parts 4-5 + FB-11 + Part-3 re-runs of the semantics-touched items + the
+realtime first-listen), not before.  QA-Fd went code-complete 2026-07-11 (all 10 tasks,
+one session; per-task record in `Running Notes/snug-orbiting-catmull.md`); its single
+close commit carries this file's Carry-Over FINAL block per docket 2b.  Main Plan §5
+gained the QA-Fd entry + §6 arrow slot + §9 fifty-sixth Forks entry (the batch ID reuses
+the dropped 2026-05-14 conditional wiring batch's name — unrelated; disambiguated there).
+The [PITCH DIAG] catalog above still governs: strip AFTER the QA-Fd smoke passes.
