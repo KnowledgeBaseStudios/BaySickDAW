@@ -106,16 +106,22 @@ This batch was originally "restore + rebuild the shared PSOLA (`PsolaShifter`) e
 > Overlapping-same-row multi-take is deliberately NOT in this pass — campaign territory.
 > Adapted 2026-07-13 for the library-engine model (dropdown engines, LiveShifter,
 > dry-monitor); engine-agnostic timing/lifecycle checks left as-is.
+> **RECONCILED 2026-07-14** against the shipped Tasks 4-7: the monitor is now a
+> 3-way selector (True Dry / Bypass Pitch Corrector / With Effect, default Bypass
+> Pitch Corrector), the recorded take is latency-aligned, Part 4 has the real
+> Task-6 Throat knob, the engine dropdown moved to editor row 2, and the pitch
+> editor is bake-based (edits heard on drag-release; WORLD delayed).
 
 ### Part 1 — Smoke ladder (Debug exe first, watch for assert dialogs; then repeat in Release)
 - Launch, default project, press Play — audio plays, meters move, no error dialogs (screenshot any that pop).
 - Load the big multi-engine stress project — all tabs restore, playback doesn't glitch.
-- Save -> close the app -> reopen -> load — tabs, patterns, mixer, engine settings all identical.
-- Review spot-checks: none needed — the QA-Fd review came back clean.
+- Save -> close the app -> reopen -> load — tabs, patterns, mixer, engine picks all identical.
+- **Old-project migration (Task 3):** open a project saved BEFORE this batch that has a Vox pitch/Align tab — it loads without error and the engine reads Rubber Band (pre-QA-Fe picks force-migrate to RB).  No crash, no silent tab.
+- The QA-Fe `/review-batch` runs at close, separate from this ear pass.
 
 ### Part 2 — Ear-check rig (one-time setup, Release)
-- Vox 1 = a "leader" take.  Vox 2 = the same phrase sung again, deliberately a little late + a few flat/sharp notes (record or drop files).  Clips side-by-side per channel — never stacked same-row.
-- Mic on your ASIO input for Parts 4-6 (arm LED on the Vox strip -> input picker), your normal 128-sample buffer.
+- Vox 1 = a "leader" take.  Vox 2 = the same phrase sung again, deliberately a little late + a few flat/sharp notes (record or drop files).  One take at a time per channel row — don't OVERLAP two takes on the same row.  (Where a clip sits / moving it is fixed and fine to exercise — QA-Fd source-domain stamps, and Part 4 does exactly that.  The ONLY excluded layout is two takes overlapping on one row, which still hits the open per-row summing bug DSP-06 -> campaign QA-J-Verify.)
+- Mic on your ASIO input for Parts 4-6 (right-click the Arm LED on the Vox strip -> input picker), your normal 128-sample buffer.
 
 ### Part 3 — Align quality (listen) [was QA-F]
 - On Vox 2's tab open the BaySickAlign sub-tab; pick Vox 1's channel on the Leader lane.  **Engine dropdown = Rubber Band (default)**; optionally try Signalsmith / WORLD.
@@ -127,29 +133,31 @@ This batch was originally "restore + rebuild the shared PSOLA (`PsolaShifter`) e
 
 ### Part 4 — Pitch-edit quality (listen) [was QA-Fa — THIS is where the boundary halted]
 - Open BaySickPitch (third Vox sub-tab) on a channel with a take — pills appear on their own.
-- **Cycle the engine dropdown (Rubber Band / Signalsmith / WORLD)** — each shifts cleanly, formant-preserving; default Rubber Band.
-- Edit mode: drag one slightly-off pill to the correct lane.  Play — sounds like YOU singing it right; timbre intact, no chipmunk, **no warble** (the whole reason for the engine swap).
+- **Cycle the engine dropdown** (now on row 2, right of the Snapshot button): Rubber Band / Signalsmith / WORLD — each shifts cleanly, formant-preserving; default Rubber Band.  Picking WORLD pops the "works offline" notice once.
+- Edit mode: drag one slightly-off pill to the correct lane.  On release it re-bakes; Play — sounds like YOU singing it right; timbre intact, no chipmunk, **no warble** (the whole reason for the engine swap).
 - Drag a pill +7 semitones (deliberately extreme).  Play — obviously shifted but contained; no smearing/garbling/dropouts on any engine.
-- Move the Throat control off-center: character changes (thinner/fuller) while pitch stays put — on each engine.
-- Bake/engine ON/OFF mid-note: the correction glides out and back — no click.
+- **Throat knob (new, Task 6)** — next to Focus/Mod/Speed in the BaySickPitch toolbar.  Move it off-center: after the re-bake, character changes (thinner/fuller = brighter/darker) while pitch stays put — on each engine (WORLD lags, expected).
+- Chain ON/OFF (the editor's `ON` toggle) mid-note: the correction glides out and back — listen for a click at the switch (hard switch by design; flag if audible).
 - **Judgment:** musical enough to ship?  Which engine is your confirmed default?
 - **Watch item (QA-Fd review NIT 4):** after you move a clip on the Builder grid (transport stopped), the analysis re-runs ~1 s later ON THE UI THREAD — on a LONG channel the app visibly freezes for that duration.  Locked design; judge whether the freeze is acceptable on real material — if not, it's a call.
 
 ### Part 5 — Real-time correction / tracking quality (listen) [was QA-Fb']
-- Vox tab's BaySickVocals sub-tab: **Realtime Pitch ON** (bypass off) — now runs the Rubber Band `R3LiveShifter`.  Crank one obvious chain setting (heavy saturation or compression).
-- **Monitor default = Dry** (right-click the strip's monitor button -> Dry / With Effect popup).  Record take 1 (short melody), stop.
-- Record take 2 while take 1 plays.  As you track: your OWN voice comes back **dry, zero-latency** (the default); take 1 plays back processed (the chain's character).  No clicks/dropouts at record start/stop.
-- Now right-click monitor -> **With Effect**: your live voice returns pitch-corrected through the chain with the LiveShifter's ~48 ms delay (a slapback you'll feel) — the opt-in path.  Confirm the processed result is clean.
-- Stop, play the stack — the RECORDED take is corrected + processed regardless of which monitor mode you tracked in.
-- **Judgment:** is dry-monitor tracking comfortable, and is the recorded correction good enough to ship?
+- Vox tab's BaySickVocals sub-tab: **Realtime Pitch ON** (Pitch Bypass off) — now runs the Rubber Band `R3LiveShifter`.  Crank one obvious chain setting (heavy saturation or compression) so the monitor modes are easy to tell apart by ear.
+- **Monitor mode = right-click the Listen (headphones) LED** on the Vox strip -> **True Dry / Bypass Pitch Corrector / With Effect**; default **Bypass Pitch Corrector**.  Record take 1 (short melody), stop.
+- Record take 2 while take 1 plays.  As you track on the default (Bypass Pitch Corrector): your OWN voice comes back through the chain's character (you hear that cranked sat/comp) but WITHOUT pitch correction and zero ~48 ms lag; take 1 plays back processed.  No clicks/dropouts at record start/stop.
+- Switch monitor -> **True Dry**: your live voice is bare (no sat/comp, no correction) — but take 1 STILL plays fully processed (the split).  Confirm the takes don't go raw with you.
+- Switch monitor -> **With Effect**: your live voice returns pitch-corrected through the chain with the LiveShifter's ~48 ms delay (a slapback you'll feel) — the opt-in path.  Confirm the processed result is clean.
+- Stop, play the stack — the RECORDED take is corrected + processed regardless of which monitor mode you tracked in, AND sits in time with take 1 / the backing (no ~48 ms drag — the record path compensates the LiveShifter latency).
+- **Judgment:** is default (Bypass) tracking comfortable, True Dry useful, and the recorded correction good enough to ship?
 
 ### Part 6 — Real-time engage artifact (accept-or-flip) [reframed from the old docket-4 first-engage tick]
-- Plain English: the `R3LiveShifter` carries ~48 ms latency.  When the "With Effect" monitor (or the Realtime Pitch bypass) engages/disengages mid-note, the wet path acquires/drops that delay — a one-time jump/tick at the toggle edge, both directions (bigger than the old ~13 ms PSOLA tick).
-- Monitor your mic, Realtime Pitch bypassed.  Hold a steady note, right-click monitor -> With Effect mid-note — listen for the delay-jump as it engages.  Toggle back a few times.
-- With correction ON, dial Throat away from zero mid-note — listen for any artifact at the change.
-- **Decision:** a) accept — a documented one-time artifact at the toggle edges; or b) flip — smooth it (a crossfade-on-engage fix becomes its own discussion; I'll pose options if you pick this).
+- Plain English: the `R3LiveShifter` carries ~48 ms latency, cold-started on engage.  Entering/leaving "With Effect" (or toggling Realtime Pitch) makes the wet path acquire/drop that delay — a one-time jump/tick at that edge, both directions (bigger than the old ~13 ms PSOLA tick).  True Dry <-> Bypass Pitch Corrector do NOT engage the corrector, so there should be no delay-jump between those two.
+- Monitor your mic, Realtime Pitch on, mode = Bypass.  Hold a steady note, right-click -> With Effect mid-note — listen for the delay-jump as it engages.  Toggle back a few times.
+- Also flick between True Dry <-> Bypass mid-note — listen for any click at the routing switch (should be clean; flag if not).
+- With correction ON (With Effect), dial the REALTIME board's Throat knob (the `[...Humanize][Throat][Formant]` row, NOT the editor knob) away from zero mid-note — listen for any artifact at the change.
+- **Decision:** a) accept — a documented one-time artifact at the With Effect toggle edge; or b) flip — smooth it (a crossfade-on-engage fix becomes its own discussion; I'll pose options if you pick this).
 
-On smoke pass: **ONE commit** (QA-Fe close — brief Rule-9 one-liner, message + full `git status` surfaced for approval), Master Test Plan §B.## backfill, `/draft-doc batch-close` -> Implemented Work Log entry, and the **G2 boundary CLOSES**.
+On smoke pass: **ONE commit** (QA-Fe close — brief Rule-9 one-liner, message + full `git status` surfaced for approval), Master Test Plan §B.## backfill, `/draft-doc batch-close` -> Implemented Work Log entry, delete the breakdown doc, and the **G2 boundary CLOSES**.
 
 ---
 

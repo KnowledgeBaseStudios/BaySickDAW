@@ -602,7 +602,7 @@ namespace
             // Page-local hardcoded keys + mouse gestures; none rebindable.
             { Category::VocalEditors, "Click / Drag (note)",
               "Select + Move Note",
-              "Click selects a note pill; drag moves it.  Vertical = repitch in 0.1-semitone steps (lands on in-scale lanes when Snap is on); horizontal = shift timing, with neighbors stretching elastically so the phrase stays continuous." },
+              "Click selects a note pill; drag moves it.  Vertical = repitch in 0.1-semitone steps (Snap on = the drag walls onto in-scale lanes but keeps the note's natural cents; Center is what flattens cents); horizontal = shift timing, with neighbors stretching elastically so the phrase stays continuous." },
             { Category::VocalEditors, "Ctrl + Drag (note)",
               "Fine Repitch / Detach",
               "Vertical: fine 0.01-semitone movement that bypasses Snap.  Horizontal (past 3 px): DETACHES the note so it moves freely - neighbors stop stretching and the gap becomes a hard cut instead of an elastic warp." },
@@ -617,7 +617,7 @@ namespace
               "Adds the note to the selection, or removes it if already selected.  Marquee-drag on empty space also selects (Shift adds)." },
             { Category::VocalEditors, "Click (Slice mode)",
               "Split Note",
-              "With the Slice tool armed, clicking a note splits it at the click point (30 ms interior guard).  Slice mode never selects - switch back to Edit for selection gestures." },
+              "With the Slice tool armed, clicking a note splits it (snaps to the beat grid; hold Alt to slice anywhere) -- e.g. chop a consonant off its vowel.  Slice mode never selects - switch back to Edit for selection gestures." },
             { Category::VocalEditors, "Right-Click (note)",
               "Note Menu",
               "Restore to original / snap to semitone / merge selection / re-pitch to a note / copy + paste edits / open sub-editor / zoom to selection." },
@@ -654,6 +654,8 @@ namespace
             { Category::VocalEditors, "Click / Drag / Right-Click (sub-editor lane)",
               "Add / Move / Delete Point",
               "Event Editor gesture set on the volume / pitch lanes: click empty space adds a point, drag moves one, right-click deletes it." },
+            { Category::VocalEditors, "Ctrl + A, then Right-Click (grid)", "Force All to Scale",
+              "After Select All, right-click the grid to force every out-of-scale note onto the center of its nearest in-key scale note. In-key notes keep their natural cents. Needs a non-Chromatic scale; independent of the Snap toggle." },
 
             // ── Vocal Editors - BaySickAlign tab (mouse-only surface) ───────
             { Category::VocalEditors, "Drag (sync point strip)",

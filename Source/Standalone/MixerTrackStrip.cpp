@@ -331,6 +331,36 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
         && apvts.getParameter(paramPrefix + "_listen") != nullptr)
     {
         mListenAtt = std::make_unique<ButtonAtt>(apvts, paramPrefix + "_listen", mListenBtn);
+
+        // QA-Fe Task 5: Vox strips get a right-click monitor-mode selector on the
+        // Listen LED (True Dry / Bypass Pitch Corrector / With Effect).  Writes
+        // mixer_vox_<n>_monitorMode; VoxStripTask forwards it to the vocal
+        // engine's live-monitor split.  apvts outlives the strip, so capture its
+        // address (mirrors the mArmBtn.onRightClick callback pattern above).
+        if (mType == StripType::Vox
+            && apvts.getParameter(paramPrefix + "_monitorMode") != nullptr)
+        {
+            auto* apvtsPtr = &apvts;
+            mListenBtn.onRightClick = [apvtsPtr, prefix = paramPrefix]
+            {
+                auto* p  = apvtsPtr->getParameter        (prefix + "_monitorMode");
+                auto* rv = apvtsPtr->getRawParameterValue (prefix + "_monitorMode");
+                if (p == nullptr || rv == nullptr) return;
+                const int cur = (int) rv->load();
+                juce::PopupMenu m;
+                m.addItem (1, "True Dry",               true, cur == 0);
+                m.addItem (2, "Bypass Pitch Corrector", true, cur == 1);
+                m.addItem (3, "With Effect",            true, cur == 2);
+                m.showMenuAsync (juce::PopupMenu::Options(), [p] (int r)
+                {
+                    if (r <= 0) return;
+                    p->beginChangeGesture();
+                    p->setValueNotifyingHost (
+                        p->getNormalisableRange().convertTo0to1 ((float) (r - 1)));
+                    p->endChangeGesture();
+                });
+            };
+        }
     }
 }
 

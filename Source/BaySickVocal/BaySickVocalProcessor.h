@@ -115,6 +115,13 @@ public:
     void setForcePitchBypass (bool yes) noexcept { mForcePitchBypass.store (yes, std::memory_order_release); }
     bool isForcePitchBypassed() const noexcept   { return mForcePitchBypass.load (std::memory_order_acquire); }
 
+    // QA-Fe Task 5: live-monitor mode for this strip (0 = True Dry, 1 = Bypass
+    // Pitch Corrector [default], 2 = With Effect).  Set per block from
+    // VoxStripTask off the mixer_vox_<n>_monitorMode param.  Governs only what
+    // the monitor HEARS of the live voice -- the WET recording stays corrected
+    // in every mode (the WET tap sits before this split).
+    void setMonitorMode (int m) noexcept { mMonitorMode.store (m, std::memory_order_release); }
+
     // 2026-05-06 (Batch 9c N1): atomic shutdown gate.  Mirrors
     // VibeSynthProcessor::mProjectLoadInProgress.  Owners SHOULD call
     // setShuttingDown(true) ~30 ms before destroying this instance (same
@@ -401,11 +408,15 @@ public:
     bool analyzePitch (juce::String& errorOut);
 
     // ── QA-Fd preview play (shared by scrub-audition + the sub-editor Play
-    // button): renders a span of the composite through the pitch applicator
-    // on the message thread, then streams it into the chain (pre-rack, so
-    // it sounds like playback) while the main transport is stopped ──────────
+    // button): auditions a span of the note while the main transport is stopped,
+    // streamed into the chain pre-rack so it sounds like playback.  QA-Fe: reads
+    // the background-baked cache at the EDITED span (no message-thread render);
+    // falls back to the raw SOURCE span when the note has no cache (unedited, or a
+    // time-only edit that bakes as neutral).  Both spans are composite-relative
+    // seconds; they are equal for an untimed note. ─────────────────────────────
     void startPitchPreview (const juce::AudioBuffer<float>& composite, double sr,
-                            double startSec, double endSec, bool loop);
+                            double srcStartSec, double srcEndSec,
+                            double editedStartSec, double editedEndSec, bool loop);
     void stopPitchPreview();
     bool isPitchPreviewPlaying() const noexcept
     {
@@ -452,6 +463,12 @@ private:
     // prepareToPlay; lazy-grow guarded like mDryScratch.
     juce::AudioBuffer<float> mWetMonoScratch;
 
+    // QA-Fe Task 5: raw live-input stash for the monitor split.  True Dry +
+    // Bypass Pitch Corrector re-route the live voice around the corrector for
+    // the monitor while the WET tap still captures the corrected stream.
+    // Lazy-grow guarded like mDryScratch.
+    juce::AudioBuffer<float> mMonitorLiveDry;
+
     // QA-Fb Option A monitor merge -- see setMonitorMergeForThisBlock.
     // Same-thread block-scoped contract; consumed + cleared at the top of
     // processBlock so a bailed block (master bypass / shutdown) can never
@@ -464,6 +481,20 @@ private:
     // because audio thread reads / message thread writes.
     std::atomic<bool> mForcePitchBypass { false };
     std::atomic<class AudioFileRecorder*> mWetRecorder { nullptr };
+
+    // QA-Fe Task 5: live-monitor mode (0 TrueDry / 1 BypassCorr [default] /
+    // 2 WithEffect).  Audio thread reads; VoxStripTask writes per block.
+    std::atomic<int> mMonitorMode { 1 };
+
+    // QA-Fe Task 4: latency-align the WET take.  The realtime corrector's
+    // LiveShifter delays its output by getLatencySamples(); the WET recorder
+    // (armed only while realtime pitch is active) captures that delayed stream,
+    // so the take would play back that late vs the transport.  Drop the first
+    // getLatencySamples() the recorder would write (pre-roll / primed silence)
+    // so WET[0] aligns to the record-arm moment, matching the zero-latency DRY
+    // take.  Audio-thread-only state; mPrevWetRecorder edge-detects the arm.
+    class AudioFileRecorder* mPrevWetRecorder { nullptr };
+    int                      mWetLatencySkip { 0 };
 
     // QA-Fa: FilePlay block-start timeline sample (MT worker writes inside
     // finalizeFilePlayStrip; this engine's processBlock reads in the same

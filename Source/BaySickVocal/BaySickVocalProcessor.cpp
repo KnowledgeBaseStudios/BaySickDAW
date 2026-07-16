@@ -240,6 +240,7 @@ BaySickVocalProcessor::createLayout()
     addPF ("focus",        "Pitch Focus",        0.0f, 100.0f, 0.0f);
     addPF ("mod",          "Pitch Mod",          0.0f, 100.0f, 50.0f);
     addPF ("speed",        "Pitch Speed",        0.0f, 100.0f, 50.0f);
+    addPF ("throat",       "Pitch Throat",       0.0f, 100.0f, 50.0f);   // QA-Fe Task 6: 50 = neutral
     // QA-Fd 7a: the Loose/Close/Tight preset combo is RETIRED (no reference
     // counterpart; name collision with Align's modes) -- bsp_preset +
     // bsp_preset_dirty removed; the knobs stand alone.
@@ -251,6 +252,7 @@ BaySickVocalProcessor::createLayout()
     addPB ("snap",         "Pitch Edit Snap",    false);
     addPI ("mode",         "Pitch Edit Mode",    0, 1, 1);   // 0=Slice, 1=Edit
     addPB ("on",           "Pitch Chain On",     true);      // QA-Fa recovery: chain switch
+    addPI ("engine",       "Pitch Engine",       0, 2, 0);   // QA-Fe: 0=Rubber Band, 1=Signalsmith, 2=WORLD
 
     return { params.begin(), params.end() };
 }
@@ -377,11 +379,13 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
     mPitch.setFocus01   (rd ("bsp_focus") / 100.0f);
     mPitch.setModAmount (rd ("bsp_mod")   / 50.0f);
     mPitch.setSpeedMs   (300.0f - rd ("bsp_speed") * 2.95f);
+    mPitch.setThroat    ((rd ("bsp_throat") - 50.0f) * (12.0f / 50.0f));   // QA-Fe Task 6: 0..100 -> -12..+12 semis
     mPitch.setChainOn   (rdb ("bsp_on"));
     // QA-Fd 14b: the Focus snap target set (editor Root/Scale/Snap).
     mPitch.setRoot      (rdi ("bsp_root"));
     mPitch.setScaleIdx  (rdi ("bsp_scale"));
     mPitch.setSnapOn    (rdb ("bsp_snap"));
+    mPitch.setEngine    ((PitchEngine) juce::jlimit (0, 2, rdi ("bsp_engine")));
 
     // ── Rack stage Bypass flags (forward to slots) ────────────────────────
     mVocalChainRack.setSlotBypassed (0, rdb ("bsv_deesser_bypass"));
@@ -501,6 +505,10 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // H-6 (2026-05-01) -- push APVTS to DSP stages once per block.
     pushApvtsToDsp();
 
+    // QA-Fe Task 5: source mux + live-monitor mode, needed before the dry stash.
+    const bool filePlaySrc = mForcePitchBypass.load (std::memory_order_acquire);
+    const int  monMode     = mMonitorMode.load (std::memory_order_acquire);   // 0 TrueDry / 1 BypassCorr / 2 WithEffect
+
     // Stash dry copy for the global Mix wet/dry crossfade.
     const float mix = juce::jlimit (0.0f, 1.0f,
         apvts.getRawParameterValue ("bsv_mix")->load());
@@ -512,16 +520,32 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             mDryScratch.setSize (numChannels, numSamples, false, false, true);
         for (int ch = 0; ch < numChannels; ++ch)
             mDryScratch.copyFrom (ch, 0, buffer, ch, 0, numSamples);
+        // True Dry re-adds the raw live voice AFTER the Mix, so it must not also
+        // ride the wet/dry crossfade here (that would double the live signal).
+        if (! filePlaySrc && monMode == 0)
+            mDryScratch.clear();
+    }
+
+    // QA-Fe Task 5: stash the raw live input before the corrector.  True Dry (0)
+    // and Bypass Pitch Corrector (1) route this raw voice to the monitor; the
+    // corrector still runs below so the WET tap captures the corrected stream.
+    const bool needMonitorLive = (! filePlaySrc) && (monMode != 2);
+    if (needMonitorLive)
+    {
+        if (mMonitorLiveDry.getNumChannels() < numChannels
+            || mMonitorLiveDry.getNumSamples() < numSamples)
+            mMonitorLiveDry.setSize (numChannels, numSamples, false, false, true);
+        for (int ch = 0; ch < numChannels; ++ch)
+            mMonitorLiveDry.copyFrom (ch, 0, buffer, ch, 0, numSamples);
     }
 
     // ── Run the locked vocal chain in order ──────────────────────────────
-    // input -> pitch correction -> [WET TAP] -> [rack: deess->comp->sat->lim]
-    //       -> NAM/IR -> output
+    // input -> pitch correction -> [WET TAP] -> [monitor split] -> [rack:
+    //       deess->comp->sat->lim] -> NAM/IR -> output
     // I-16 G-9 (2026-05-03): pitch correction skipped when the source mux is
     // FilePlay (force-bypass) so a wet file with realtime pitch already
     // committed at record time doesn't get corrected twice.  NAM/IR routing
     // also added in G-9.
-    const bool filePlaySrc = mForcePitchBypass.load (std::memory_order_acquire);
     if (! filePlaySrc)
         mPitchCorrector.process (buffer);
     else
@@ -548,11 +572,20 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // and must never land in a take's WET file.
     if (! filePlaySrc)
     {
-        if (auto* wetRec = mWetRecorder.load (std::memory_order_acquire))
+        auto* wetRec = mWetRecorder.load (std::memory_order_acquire);
+        // QA-Fe Task 4: on the arm edge, prime the latency skip so the recorded
+        // WET take aligns to the record-arm moment (the LiveShifter delays its
+        // output by getLatencySamples()).
+        if (wetRec != mPrevWetRecorder)
         {
-            // Sum stereo to mono for the recorder (dry source was a mono ASIO
-            // channel duplicated to L=R upstream; pitch correction may have
-            // diverged the channels slightly).
+            mWetLatencySkip  = (wetRec != nullptr) ? mPitchCorrector.getLatencySamples() : 0;
+            mPrevWetRecorder = wetRec;
+        }
+        if (wetRec != nullptr)
+        {
+            // Sum to mono for the recorder (the source is a mono ASIO channel
+            // duplicated to L=R, and realtime correction is mono -> the channels
+            // are identical; the sum is the recorder's mono format).
             // QA-Fb: member scratch + non-owning view -- the old per-block
             // AudioBuffer construction allocated on the audio thread every
             // block while recording.  Lazy-grow guarded like mDryScratch.
@@ -568,10 +601,37 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     s += buffer.getReadPointer (ch)[i];
                 dst[i] = s * invCh;
             }
-            float* monoPtrs[1] = { dst };
-            juce::AudioBuffer<float> monoView (monoPtrs, 1, numSamples);
-            wetRec->writeBlock (monoView);
+            // Drop the leading latency samples (pre-roll / primed silence) so the
+            // written take starts at the record-arm moment, matching the DRY take.
+            int off = 0;
+            if (mWetLatencySkip > 0)
+            {
+                off = juce::jmin (mWetLatencySkip, numSamples);
+                mWetLatencySkip -= off;
+            }
+            const int toWrite = numSamples - off;
+            if (toWrite > 0)
+            {
+                float* monoPtrs[1] = { dst + off };
+                juce::AudioBuffer<float> monoView (monoPtrs, 1, toWrite);
+                wetRec->writeBlock (monoView);
+            }
         }
+    }
+
+    // ── QA-Fe Task 5: live-monitor split (after the WET tap, so recording stays
+    // corrected regardless of what the monitor hears) ────────────────────────
+    //   1 Bypass Pitch Corrector -> monitor the RAW live voice through the chain
+    //   0 True Dry              -> pull the live voice out of the chain here; it
+    //                             is re-added raw AFTER the Mix (below)
+    //   2 With Effect          -> leave the corrected voice in the chain (no-op)
+    if (! filePlaySrc)
+    {
+        if (monMode == 1)
+            for (int ch = 0; ch < numChannels; ++ch)
+                buffer.copyFrom (ch, 0, mMonitorLiveDry, ch, 0, numSamples);
+        else if (monMode == 0)
+            buffer.clear();
     }
 
     // ── QA-Fd preview play (scrub-audition / sub-editor Play) ─────────────
@@ -652,6 +712,14 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 wet[i] = dry[i] + mix * (wet[i] - dry[i]);
         }
     }
+
+    // ── QA-Fe Task 5: True Dry -- add the raw live voice at the very end, so it
+    // reaches the monitor with zero effect (bypassing corrector + chain + Mix)
+    // while any prior takes above stay fully processed.  Skipped when the live
+    // is muted (armed && !listen), matching the monitor gate. ─────────────────
+    if (! filePlaySrc && monMode == 0 && ! monMuteLive)
+        for (int ch = 0; ch < numChannels; ++ch)
+            buffer.addFrom (ch, 0, mMonitorLiveDry, ch, 0, numSamples);
 }
 
 // ─── QA-F Task 3: BaySickAlign actions (message thread only) ─────────────────
@@ -1280,37 +1348,17 @@ juce::File BaySickVocalProcessor::renderPitchedTake (juce::String& errorOut, boo
     if (comp.getNumSamples() <= 0)
         { errorOut = "This channel has no audio clips."; return {}; }
 
+    // renderOffline now WARPS-THEN-BAKES (the time map is applied inside bakeSpan,
+    // exactly like playback), so the export already honors the channel's TIME
+    // edits.  The old post-hoc applyWarp here ran on the ALREADY-pitched buffer
+    // (pitch-then-warp) and destroyed phase coherence -- engine-independent garble
+    // on any time move.  Removed.  (highRes warp oversampling is a follow-up:
+    // bakeSpan's internal warp runs at os=1 like playback.)
+    juce::ignoreUnused (highRes);
     auto rendered = mPitch.renderOffline (comp.getReadPointer (0),
                                           comp.getNumSamples(), sr);
     if (rendered.getNumSamples() <= 0)
         { errorOut = "Render produced no audio."; return {}; }
-
-    // QA-Fd Task 8: the bake honors the channel's TIME edits -- warp the
-    // pitched result through the published time map (edited -> source
-    // becomes the render's guide -> dub; no pitch deltas, phase 1 only).
-    if (const auto* tm = mPitch.loadTimeMapSnapshot();
-        tm != nullptr && tm->guideSec.size() >= 2)
-    {
-        WarpMap wm;
-        wm.analysisSampleRate = sr;
-        wm.dubDurationSec     = (double) rendered.getNumSamples() / sr;
-        wm.guideDurationSec   = tm->guideSec.back();
-        for (size_t i = 0; i < tm->guideSec.size(); ++i)
-        {
-            WarpAnchor a;
-            a.guideTimeSec = tm->guideSec[i];
-            a.dubTimeSec   = tm->dubSec[i];
-            wm.anchors.push_back (a);
-        }
-        const int os = highRes
-            ? juce::jlimit (2, 8, juce::roundToInt (384000.0 / juce::jmax (1.0, sr)))
-            : 1;
-        rendered = BaySickAlignDSP::applyWarp (rendered.getReadPointer (0),
-                                               rendered.getNumSamples(), sr,
-                                               wm, /*pitchAlgo*/ 0, 0.0f, os);
-        if (rendered.getNumSamples() <= 0)
-            { errorOut = "Render produced no audio."; return {}; }
-    }
 
     const juce::File projDir = onGetProjectFolder();
     if (projDir == juce::File() || ! projDir.isDirectory())
@@ -1361,23 +1409,35 @@ bool BaySickVocalProcessor::isPitchStale() const
 
 // ─── QA-Fd preview play (message thread) ──────────────────────────────────────
 void BaySickVocalProcessor::startPitchPreview (const juce::AudioBuffer<float>& composite,
-                                               double sr, double startSec, double endSec,
+                                               double sr, double srcStartSec, double srcEndSec,
+                                               double editedStartSec, double editedEndSec,
                                                bool loop)
 {
-    if (composite.getNumSamples() <= 0 || sr <= 0.0 || endSec <= startSec)
+    if (composite.getNumSamples() <= 0 || sr <= 0.0 || srcEndSec <= srcStartSec)
         { stopPitchPreview(); return; }
 
+    // Dry-fallback span = the raw note at its SOURCE position (correct for an
+    // unedited note AND a time-only edit, which has no cache).
     const juce::int64 s0 = juce::jlimit ((juce::int64) 0,
         (juce::int64) composite.getNumSamples(),
-        (juce::int64) std::llround (startSec * sr));
+        (juce::int64) std::llround (srcStartSec * sr));
     const int len = (int) juce::jlimit ((juce::int64) 0,
         (juce::int64) composite.getNumSamples() - s0,
-        (juce::int64) std::llround ((endSec - startSec) * sr));
+        (juce::int64) std::llround ((srcEndSec - srcStartSec) * sr));
     if (len <= 0) { stopPitchPreview(); return; }
 
     auto pv = std::make_unique<PitchPreview>();
-    pv->buf  = mPitch.renderOffline (composite.getReadPointer (0),
-                                     composite.getNumSamples(), sr, s0, len);
+    // QA-Fe threading fix: read the background-baked cache (lock-free load + span
+    // copy) instead of running the heavy engine bake HERE.  The old renderOffline
+    // call ran WORLD/RubberBand/Signalsmith SYNCHRONOUSLY on the message thread on
+    // every scrub during a drag, freezing the UI (WORLD worst).  No cache yet
+    // (unedited/neutral note) -> audition the dry source span.
+    pv->buf = mPitch.copyCacheSpan (editedStartSec, editedEndSec);
+    if (pv->buf.getNumSamples() <= 0)
+    {
+        pv->buf.setSize (1, len);
+        pv->buf.copyFrom (0, 0, composite.getReadPointer (0) + s0, len);
+    }
     pv->loop = loop;
     if (pv->buf.getNumSamples() <= 0) { stopPitchPreview(); return; }
 
@@ -1613,7 +1673,18 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         if (pitchChild.isValid())
             newState.removeChild (pitchChild, nullptr);
 
+        // QA-Fe migration: bsp_engine is net-new, so its absence marks a
+        // pre-QA-Fe project whose bsa_pitch_algo still meant PSOLA/Granular/PV
+        // (those engines are retired).  Default such projects to Rubber Band (0)
+        // so a stale Granular/PV pick doesn't silently land on a different engine.
+        const bool preQaFePitch = ! newState.getChildWithProperty (
+            "id", juce::String ("bsp_engine")).isValid();
+
         apvts.replaceState (newState);
+
+        if (preQaFePitch)
+            if (auto* p = apvts.getParameter ("bsa_pitch_algo"))
+                p->setValueNotifyingHost (p->convertTo0to1 (0.0f));
 
         mPitchRenders.clear();
         mPitchVersions.clear();

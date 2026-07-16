@@ -19,11 +19,14 @@ namespace
     constexpr int kRulerH     = 16;
     constexpr int kKeyboardW  = 40;
     constexpr int kInfoBarH   = 22;
-    constexpr int kSliceLaneH = 18;   // slice pills live in a bottom strip
     constexpr int kBoxH       = 64;   // display-only sub-edit box (4 bars)
     constexpr int kBoxBtnH    = 14;
     constexpr int kMinNote    = 12;   // C0 floor (view + lanes never go below)
     constexpr int kHandleSz   = 8;    // on-pill corner handles
+    // Design E: a move/stretch may not squash or stretch a gap (or a note) past
+    // this ratio -- beyond it the time-warp vocoder rails (Hs -> kFFTSize, overlap
+    // collapses) into spikes + level drop.  Detach bypasses it (free hard-cut).
+    constexpr double kMaxWarpRatio = 3.0;
 
     const juce::Colour kBg        = juce::Colour (0xff0e0f12);
     const juce::Colour kPanelBg   = juce::Colour (0xff16191e);
@@ -34,7 +37,7 @@ namespace
     const juce::Colour kStale     = juce::Colour (0xffe8a13c);
 
     // Pills Effects purple, waveform interior Vox teal, pitch curve Bass
-    // green (as-sung reference -- stays put under every edit); slice pills
+    // green (as-sung reference -- stays put under every edit); slice pieces
     // neutral gray; handles green=in / red=out (Newtone figure convention).
     const juce::Colour kPillFill   = juce::Colour (0xff8a2be2);
     const juce::Colour kPillWave   = juce::Colour (0xff0fafa5);
@@ -152,6 +155,37 @@ public:
     {
         return (int) std::round ((sec - mOwner.scrollSeconds()) * mOwner.pixelsPerSecond());
     }
+    // Composite-seconds <-> project beats (bars/beats grid + Slice snap).  Mirrors
+    // the playhead/length mapping: the composite sits at startSample (analysis
+    // rate) on the project timeline.  120 BPM fallback when no tempo map.
+    double beatForSec (double s) const
+    {
+        auto& pitch = mOwner.mProc.mPitch;
+        const double sr = juce::jmax (1.0, pitch.analysisSampleRate());
+        return TempoMap::isActive()
+            ? TempoMap::beatAtSample (pitch.startSample()
+                                      + (juce::int64) std::llround (s * sr))
+            : s * 2.0;
+    }
+    double secForBeat (double b) const
+    {
+        auto& pitch = mOwner.mProc.mPitch;
+        const double sr = juce::jmax (1.0, pitch.analysisSampleRate());
+        return TempoMap::isActive()
+            ? (double) (TempoMap::sampleAtBeat (b) - pitch.startSample()) / sr
+            : b * 0.5;
+    }
+    // Visible grid resolution in beats -- coarsens when zoomed out, subdivides
+    // (1/2, 1/4 beat) when zoomed in.  Shared by the ruler draw and Slice snap.
+    double gridBeatStep() const
+    {
+        const double pxPerBeat = juce::jmax (1.0e-6,
+            (double) (xForSec (secForBeat (1.0)) - xForSec (secForBeat (0.0))));
+        double step = 1.0;
+        if (pxPerBeat >= 24.0) { while (step * pxPerBeat > 24.0) step *= 0.5; }
+        else                   { while (step * pxPerBeat < 12.0) step *= 2.0; }
+        return step;
+    }
     float yForMidi (double midi) const
     {
         return (float) (kRulerH + (mOwner.topNote() - midi) * mOwner.noteLaneH());
@@ -161,19 +195,17 @@ public:
         return mOwner.topNote() - (double) (y - kRulerH) / mOwner.noteLaneH();
     }
 
-    // Rendered pitch (locked 8): detected + drag + Focus pull toward the
-    // snap target.  The green curve stays as-sung; the PILL shows what you
-    // will hear.
+    // Rendered pitch (locked 8): detected + drag + Center/Focus pull toward the
+    // nearest semitone center.  The green curve stays as-sung; the PILL shows
+    // what you will hear.  Must mirror the DSP Center pull exactly (nearest
+    // semitone, scale-independent) or the pill would display a different target
+    // than it sounds.
     float drawMidiFor (const PitchNoteRegion& r) const
     {
+        if (r.isSlice) return r.midi;   // unpitched block: fixed lane, no Focus pull
         const float base   = r.midi + r.shiftSemis;
         const float focus  = mOwner.paramValue ("bsp_focus") / 100.0f;
-        const bool  snapOn = mOwner.paramValue ("bsp_snap") > 0.5f;
-        const float target = snapOn
-            ? PitchCorrectorDSP::snapMidiToScaleStatic (base,
-                  (int) mOwner.paramValue ("bsp_root"),
-                  (int) mOwner.paramValue ("bsp_scale"))
-            : std::round (base);
+        const float target = std::round (base);
         return base + (target - base) * juce::jlimit (0.0f, 1.0f, focus);
     }
 
@@ -182,11 +214,8 @@ public:
         const int x0 = xForSec (r.dstStart());
         const int x1 = xForSec (r.dstEnd());
         const float w = (float) juce::jmax (6, x1 - x0);
-        if (r.isSlice)
-        {
-            const float y = (float) (getHeight() - kSliceLaneH + 2);
-            return { (float) x0, y, w, (float) (kSliceLaneH - 4) };
-        }
+        // Slice pieces render inline at their sibling's pitch row -- a slice
+        // inherits the note's midi, so consonant+vowel read as one unit.
         const double laneH = mOwner.noteLaneH();
         const float y = yForMidi ((double) drawMidiFor (r) + 0.5);
         return { (float) x0, y - (float) laneH * 0.5f, w, (float) laneH * 2.0f };
@@ -255,30 +284,37 @@ public:
             }
         }
 
-        // Ruler (time ticks)
+        // Ruler + grid (bars/beats -- NewTone / FL piano-roll style).  Bar lines
+        // major + numbered, beat lines minor, sub-beats when zoomed in.
         g.setColour (juce::Colour (0xff14171c));
         g.fillRect (0, 0, getWidth(), kRulerH);
         {
-            double step = 1.0;
-            while (step * mOwner.pixelsPerSecond() < 50.0)  step *= 2.0;
-            while (step * mOwner.pixelsPerSecond() > 160.0) step /= 2.0;
+            constexpr int beatsPerBar = 4;   // 4/4 (app default; TODO time-sig read)
+            const double beatStep = gridBeatStep();
+
             g.setFont (9.0f);
-            double t = std::floor (mOwner.scrollSeconds() / step) * step;
-            for (;; t += step)
+            double b = std::floor (beatForSec (mOwner.scrollSeconds()) / beatStep) * beatStep;
+            for (;; b += beatStep)
             {
-                const int x = xForSec (t);
+                const int x = xForSec (secForBeat (b));
                 if (x > getWidth()) break;
                 if (x < 0) continue;
-                g.setColour (kTextDim.withAlpha (0.5f));
-                g.drawVerticalLine (x, 2.0f, (float) kRulerH);
-                g.setColour (kTextDim);
-                const int mins = (int) (t / 60.0);
-                g.drawText (juce::String (mins) + ":"
-                              + juce::String (t - mins * 60.0, (step < 1.0) ? 1 : 0)
-                                    .paddedLeft ('0', (step < 1.0) ? 4 : 2),
-                            x + 2, 1, 48, kRulerH - 2, juce::Justification::centredLeft);
-                g.setColour (kTextDim.withAlpha (0.12f));
+                const bool onBeat = std::abs (b - std::round (b)) < 1.0e-6;
+                const bool onBar  = onBeat && (((int) std::llround (b)) % beatsPerBar == 0);
+                g.setColour (kTextDim.withAlpha (onBar ? 0.28f : onBeat ? 0.13f : 0.06f));
                 g.drawVerticalLine (x, (float) kRulerH, (float) getHeight());
+                g.setColour (kTextDim.withAlpha (onBar ? 0.8f : 0.4f));
+                g.drawVerticalLine (x, onBar ? 1.0f : 6.0f, (float) kRulerH);
+                if (onBar)
+                {
+                    const int bar = (int) std::llround (b) / beatsPerBar + 1;   // 1-based
+                    if (bar >= 1)
+                    {
+                        g.setColour (kTextDim);
+                        g.drawText (juce::String (bar), x + 2, 1, 40, kRulerH - 2,
+                                    juce::Justification::centredLeft);
+                    }
+                }
             }
         }
 
@@ -332,14 +368,6 @@ public:
             g.setColour (kPitchCurve.withAlpha (0.75f));
             g.strokePath (p, juce::PathStrokeType (1.4f));
         }
-
-        // Slice-lane backdrop
-        g.setColour (juce::Colour (0xff14171c).withAlpha (0.85f));
-        g.fillRect (0, getHeight() - kSliceLaneH, getWidth(), kSliceLaneH);
-        g.setColour (kTextDim.withAlpha (0.4f));
-        g.setFont (8.0f);
-        g.drawText ("SLICES", 4, getHeight() - kSliceLaneH, 60, kSliceLaneH,
-                    juce::Justification::centredLeft);
 
         // Pills at their EDITED positions (dst spans + corrected pitch).
         const auto& regions = pitch.regions();
@@ -483,8 +511,14 @@ public:
             }
             else
             {
-                // Plain RMB on empty space returns from zoom-to-selection.
-                mOwner.restoreSavedView();
+                // #3 gesture: right-click the empty GRID with a live selection
+                // (all or partial) + a real scale forces it to scale (Select All
+                // -> right-click grid = Force All to Scale).  No selection ->
+                // restore the zoom-to-selection view.
+                if (! mOwner.mSelection.empty() && (int) mOwner.paramValue ("bsp_scale") > 0)
+                    mOwner.forceSelectionToScale (mOwner.selectionOrFocus());
+                else
+                    mOwner.restoreSavedView();
             }
             return;
         }
@@ -496,7 +530,14 @@ public:
         {
             if (hit < 0) return;
             auto& r = regions[(size_t) hit];
-            const double tSrc = srcTimeForDstSec (r, secForX (e.x));
+            // Slice snaps to the beat grid; hold Alt to slice anywhere (NewTone).
+            double cutSec = secForX (e.x);
+            if (! e.mods.isAltDown())
+            {
+                const double step = gridBeatStep();
+                cutSec = secForBeat (std::round (beatForSec (cutSec) / step) * step);
+            }
+            const double tSrc = srcTimeForDstSec (r, cutSec);
             if (tSrc > r.startSec + 0.03 && tSrc < r.endSec - 0.03)
             {
                 mOwner.beginEdit();
@@ -511,6 +552,15 @@ public:
                 }
                 right.startSec = tSrc;
                 r.endSec       = tSrc;
+                // Auto-mark the more-unvoiced half (the consonant) as a slice --
+                // excluded from pitch correction so tuning the vowel doesn't shift
+                // the noise.  Only when it is genuinely mostly unvoiced; slicing
+                // mid-vowel leaves two plain notes.  Right-click toggles it.
+                auto& pitch = mOwner.mProc.mPitch;
+                const double vL = pitch.voicedFraction (r.startSec, r.endSec);
+                const double vR = pitch.voicedFraction (right.startSec, right.endSec);
+                if (vL <= vR) { if (vL < 0.5) r.isSlice = true; }
+                else          { if (vR < 0.5) right.isSlice = true; }
                 regions.insert (regions.begin() + hit + 1, right);
                 mOwner.commitEdit ("Pitch: Slice");
             }
@@ -648,12 +698,17 @@ public:
                     {
                         if (snapOn)
                         {
-                            const float wanted = r.midi + b.shift + (float) dySemisRaw;
-                            const float lane = PitchCorrectorDSP::snapMidiToScaleStatic (
-                                wanted,
-                                (int) mOwner.paramValue ("bsp_root"),
-                                (int) mOwner.paramValue ("bsp_scale"));
-                            r.shiftSemis = juce::jlimit (-24.0f, 24.0f, lane - r.midi);
+                            // Wall: the note's home semitone leaps only to VALID
+                            // scale lanes; the shift is whole-semitone so r.midi's
+                            // natural cents ride along (Center flattens them, not
+                            // Snap).  NewTone "Snap Only" = land on lane, keep the
+                            // cents.
+                            const int   root      = (int) mOwner.paramValue ("bsp_root");
+                            const int   scale     = (int) mOwner.paramValue ("bsp_scale");
+                            const float homeInt   = std::round (r.midi);
+                            const float wantedInt = homeInt + b.shift + (float) dySemisRaw;
+                            const float laneInt   = PitchCorrectorDSP::snapMidiToScaleStatic (wantedInt, root, scale);
+                            r.shiftSemis = juce::jlimit (-24.0f, 24.0f, laneInt - homeInt);
                         }
                         else
                         {
@@ -685,18 +740,30 @@ public:
                 if (b == nullptr) return;
                 const double dxSec = (e.x - mMouseDownPos.x) / mOwner.pixelsPerSecond();
                 const bool detach = mDetachArm && std::abs (e.x - mMouseDownPos.x) > 3;
+                const double srcLen = juce::jmax (1.0e-6, r.endSec - r.startSec);
                 double s = b->dstS, en = b->dstE;
                 if (mDragKind == DragKind::StretchLeft)
                 {
-                    s = juce::jlimit (detach ? 0.0 : prevBound (mOwner.mFocusRegion),
-                                      en - 0.02, b->dstS + dxSec);
+                    double loS = detach ? 0.0 : prevBound (mOwner.mFocusRegion);
+                    double hiS = en - 0.02;
+                    if (! detach)   // keep the note's own dst/src ratio off the rails
+                    {
+                        loS = juce::jmax (loS, en - srcLen * kMaxWarpRatio);   // max stretch
+                        hiS = juce::jmin (hiS, en - srcLen / kMaxWarpRatio);   // max compress
+                    }
+                    s = juce::jlimit (loS, juce::jmax (loS, hiS), b->dstS + dxSec);
                     s = juce::jmax (0.0, s);
                 }
                 else
                 {
-                    en = juce::jlimit (s + 0.02,
-                                       detach ? 1.0e9 : nextBound (mOwner.mFocusRegion),
-                                       b->dstE + dxSec);
+                    double loE = s + 0.02;
+                    double hiE = detach ? 1.0e9 : nextBound (mOwner.mFocusRegion);
+                    if (! detach)
+                    {
+                        loE = juce::jmax (loE, s + srcLen / kMaxWarpRatio);    // max compress
+                        hiE = juce::jmin (hiE, s + srcLen * kMaxWarpRatio);    // max stretch
+                    }
+                    en = juce::jlimit (loE, juce::jmax (loE, hiE), b->dstE + dxSec);
                 }
                 r.dstStartSec = s;
                 r.dstEndSec   = en;
@@ -858,7 +925,7 @@ public:
         if (mHi > mLo)
         {
             const double laneH = juce::jlimit (4.0, 24.0,
-                (double) juce::jmax (60, getHeight() - kRulerH - kSliceLaneH)
+                (double) juce::jmax (60, getHeight() - kRulerH)
                     / juce::jmax (8.0, (double) (mHi - mLo)));
             mOwner.setLaneHeight (laneH, (mLo + mHi) * 0.5,
                                   (getHeight() + kRulerH) / 2);
@@ -907,45 +974,76 @@ private:
         return nullptr;
     }
 
-    // Non-selected neighbor bounds in DST time (pills never cross; gap
-    // counter-warp exhausts at contact).
-    double prevBound (int idx) const
+    // Non-selected neighbor bound in DST time + the SOURCE position of that same
+    // neighbor (for the gap warp-ratio clamp).  prev -> {0,0} = composite start;
+    // next -> {big,big} = no neighbor.
+    struct Bound { double dst; double src; };
+    Bound prevBoundEx (int idx) const
     {
         const auto& regions = mOwner.mProc.mPitch.regions();
-        double bound = 0.0;
-        const bool slice = regions[(size_t) idx].isSlice;
+        Bound b { 0.0, 0.0 };
         for (int j = 0; j < (int) regions.size(); ++j)
         {
             if (j == idx || mOwner.isSelected (j)) continue;
-            if (regions[(size_t) j].isSlice != slice) continue;
-            if (regions[(size_t) j].dstEnd() <= regions[(size_t) idx].dstStart() + 1.0e-9)
-                bound = juce::jmax (bound, regions[(size_t) j].dstEnd());
+            const auto& o = regions[(size_t) j];
+            if (o.dstEnd() <= regions[(size_t) idx].dstStart() + 1.0e-9 && o.dstEnd() >= b.dst)
+                b = { o.dstEnd(), o.endSec };
         }
-        return bound;
+        return b;
     }
-    double nextBound (int idx) const
+    Bound nextBoundEx (int idx) const
     {
         const auto& regions = mOwner.mProc.mPitch.regions();
-        double bound = 1.0e18;
-        const bool slice = regions[(size_t) idx].isSlice;
+        Bound b { 1.0e18, 1.0e18 };
         for (int j = 0; j < (int) regions.size(); ++j)
         {
             if (j == idx || mOwner.isSelected (j)) continue;
-            if (regions[(size_t) j].isSlice != slice) continue;
-            if (regions[(size_t) j].dstStart() >= regions[(size_t) idx].dstEnd() - 1.0e-9)
-                bound = juce::jmin (bound, regions[(size_t) j].dstStart());
+            const auto& o = regions[(size_t) j];
+            if (o.dstStart() >= regions[(size_t) idx].dstEnd() - 1.0e-9 && o.dstStart() <= b.dst)
+                b = { o.dstStart(), o.startSec };
         }
-        return bound;
+        return b;
     }
+    double prevBound (int idx) const { return prevBoundEx (idx).dst; }
+    double nextBound (int idx) const { return nextBoundEx (idx).dst; }
 
+    // Move-delta clamp (design E): pills never cross a non-selected neighbor AND
+    // no adjacent GAP is squashed/stretched past kMaxWarpRatio (that ratio is what
+    // rails the vocoder into garble).  Also caps the leading gap so a move to the
+    // origin can't cram the anacrusis into ~0.
     double clampElasticDelta (double wanted) const
     {
+        const auto& regions = mOwner.mProc.mPitch.regions();
         double lo = -1.0e18, hi = 1.0e18;
         for (const auto& b : mDragBases)
         {
-            lo = juce::jmax (lo, prevBound (b.idx) - b.dstS);
+            if (b.idx < 0 || b.idx >= (int) regions.size()) continue;
+            const auto& r = regions[(size_t) b.idx];
+
+            const Bound pv = prevBoundEx (b.idx);
+            const double gapSrcBefore = juce::jmax (0.0, r.startSec - pv.src);
+            if (gapSrcBefore > 1.0e-6)   // gap-before dst len = (b.dstS + d) - pv.dst
+            {
+                lo = juce::jmax (lo, pv.dst + gapSrcBefore / kMaxWarpRatio - b.dstS);
+                hi = juce::jmin (hi, pv.dst + gapSrcBefore * kMaxWarpRatio - b.dstS);
+            }
+            else
+                lo = juce::jmax (lo, pv.dst - b.dstS);
+
+            const Bound nx = nextBoundEx (b.idx);
+            if (nx.dst < 1.0e17)
+            {
+                const double gapSrcAfter = juce::jmax (0.0, nx.src - r.endSec);
+                if (gapSrcAfter > 1.0e-6)   // gap-after dst len = nx.dst - (b.dstE + d)
+                {
+                    hi = juce::jmin (hi, nx.dst - gapSrcAfter / kMaxWarpRatio - b.dstE);
+                    lo = juce::jmax (lo, nx.dst - gapSrcAfter * kMaxWarpRatio - b.dstE);
+                }
+                else
+                    hi = juce::jmin (hi, nx.dst - b.dstE);
+            }
+
             lo = juce::jmax (lo, -b.dstS);                 // composite start
-            hi = juce::jmin (hi, nextBound (b.idx) - b.dstE);
         }
         return juce::jlimit (juce::jmin (0.0, lo), juce::jmax (0.0, hi), wanted);
     }
@@ -1126,7 +1224,7 @@ private:
     void drawDisplayBox (juce::Graphics& g, const PitchNoteRegion& r)
     {
         const auto box = displayBoxArea (r);
-        if (box.getBottom() > getHeight() - kSliceLaneH) return;   // off-canvas
+        if (box.getBottom() > getHeight()) return;   // off-canvas
         g.setColour (kPanelBg.withAlpha (0.94f));
         g.fillRoundedRectangle (box.toFloat(), 3.0f);
 
@@ -1299,7 +1397,8 @@ private:
 // Toolbar - QA-Fd: preset combo retired (7a); Root/Scale/Snap added (8/14a-c);
 // Undo/Redo drive the GLOBAL stack (9a).
 // ─────────────────────────────────────────────────────────────────────────────
-class BaySickPitchEditor::Toolbar : public juce::Component
+class BaySickPitchEditor::Toolbar : public juce::Component,
+                                    private juce::ComboBox::Listener
 {
 public:
     Toolbar (BaySickPitchEditor& o, juce::AudioProcessorValueTreeState& apvts)
@@ -1319,7 +1418,7 @@ public:
         };
         plain (mSaveBtn,   "Save",   "Save the current Focus/Mod/Speed as a user preset");
         plain (mLoadBtn,   "Load",   "Load a saved user preset");
-        plain (mSliceBtn,  "Slice",  "Slice mode: click a note to split it (works on slice pills too)");
+        plain (mSliceBtn,  "Slice",  "Slice mode: click a note to split it -- e.g. chop a consonant off its vowel (snaps to grid; Alt = free)");
         plain (mEditBtn,   "Edit",   "Edit mode: drag pills (vertical = pitch, horizontal = move), edges stretch, Ctrl+drag detaches");
         plain (mResetBtn,  "Reset",  "Clear every pitch edit on this channel");
         plain (mRenderBtn, "Render",
@@ -1372,6 +1471,22 @@ public:
         mScaleAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
             mApvts, "bsp_scale", mScaleCombo);
 
+        // QA-Fe B2: pitch engine dropdown (bsp_engine value order 0/1/2).  A
+        // ComboBox::Listener (separate from the attachment's onChange) fires the
+        // WORLD-offline notice on a user pick; mEnginePopupArmed suppresses the
+        // attachment's construction-time sync.
+        addAndMakeVisible (mEngineCombo);
+        mEngineCombo.addItem ("Rubber Band - Balanced",             1);
+        mEngineCombo.addItem ("Signalsmith - Lightest (Low CPU)",   2);
+        mEngineCombo.addItem ("WORLD - Highest Quality (High CPU)", 3);
+        mEngineCombo.setColour (juce::ComboBox::backgroundColourId, kPanelBg);
+        mEngineCombo.setColour (juce::ComboBox::textColourId, kText);
+        mEngineCombo.setTooltip ("Pitch-shift engine.  Rubber Band + Signalsmith edit live; "
+                                 "WORLD is highest quality but works offline (edits apply a moment later).");
+        mEngineAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+            mApvts, "bsp_engine", mEngineCombo);
+        mEngineCombo.addListener (this);
+
         addAndMakeVisible (mSnapBtn);
         mSnapBtn.setButtonText ("Snap");
         mSnapBtn.setClickingTogglesState (true);
@@ -1406,6 +1521,15 @@ public:
         knob (mFocus, "bsp_focus", "How strongly note centers pull to the snap target (semitone, or the Root/Scale when Snap is on).  0 = leave the take alone.", mFocusAtt, 0.0);
         knob (mMod,   "bsp_mod",   "Vibrato movement: 50 = natural, above adds synthesized vibrato per note", mModAtt, 50.0);
         knob (mSpeed, "bsp_speed", "How fast pitch moves between notes: low = smooth glide, high = instant", mSpeedAtt, 50.0);
+        knob (mThroat, "bsp_throat", "Throat / character: 50 = natural; left = bigger/darker, right = smaller/brighter (formant only, pitch stays put)", mThroatAtt, 50.0);
+        mEnginePopupArmed = true;   // now user picks fire the WORLD notice, not the ctor sync
+    }
+
+    void comboBoxChanged (juce::ComboBox* cb) override
+    {
+        if (mEnginePopupArmed && cb == &mEngineCombo
+            && cb->getSelectedItemIndex() == 2)   // WORLD (offline)
+            mOwner.showWorldOfflineNotice();
     }
 
     void setStale (bool s, bool pending)
@@ -1477,20 +1601,22 @@ public:
                     juce::Justification::centredLeft);
 
         g.setFont (10.0f);
-        g.drawText ("Focus", mFocus.getX(), 1, mFocus.getWidth(), 11, juce::Justification::centred);
-        g.drawText ("Mod",   mMod  .getX(), 1, mMod  .getWidth(), 11, juce::Justification::centred);
-        g.drawText ("Speed", mSpeed.getX(), 1, mSpeed.getWidth(), 11, juce::Justification::centred);
+        g.drawText ("Focus",  mFocus .getX(), 1, mFocus .getWidth(), 11, juce::Justification::centred);
+        g.drawText ("Mod",    mMod   .getX(), 1, mMod   .getWidth(), 11, juce::Justification::centred);
+        g.drawText ("Speed",  mSpeed .getX(), 1, mSpeed .getWidth(), 11, juce::Justification::centred);
+        g.drawText ("Throat", mThroat.getX(), 1, mThroat.getWidth(), 11, juce::Justification::centred);
     }
 
     void resized() override
     {
         auto b = getLocalBounds().reduced (6, 3);
 
-        auto knobs = b.removeFromRight (3 * 56 + 6);
+        auto knobs = b.removeFromRight (4 * 56 + 6);
         knobs.removeFromTop (11);
-        mFocus.setBounds (knobs.removeFromLeft (56).reduced (2, 0));
-        mMod  .setBounds (knobs.removeFromLeft (56).reduced (2, 0));
-        mSpeed.setBounds (knobs.removeFromLeft (56).reduced (2, 0));
+        mFocus .setBounds (knobs.removeFromLeft (56).reduced (2, 0));
+        mMod   .setBounds (knobs.removeFromLeft (56).reduced (2, 0));
+        mSpeed .setBounds (knobs.removeFromLeft (56).reduced (2, 0));
+        mThroat.setBounds (knobs.removeFromLeft (56).reduced (2, 0));
 
         auto row1 = b.removeFromTop (26);
         mTitleLbl.setBounds (row1.removeFromLeft (104));
@@ -1529,6 +1655,8 @@ public:
         mVersionsBtn.setBounds (row2.removeFromRight (64));
         row2.removeFromRight (3);
         mSnapshotBtn.setBounds (row2.removeFromRight (68));
+        row2.removeFromRight (10);
+        mEngineCombo.setBounds (row2.removeFromRight (210).reduced (0, 2));   // QA-Fe engine dropdown, right of Snapshot
     }
 
 private:
@@ -1539,12 +1667,13 @@ private:
     juce::TextButton mSaveBtn, mLoadBtn, mSliceBtn, mEditBtn, mResetBtn,
                      mRenderBtn, mSendBtn, mSnapshotBtn, mVersionsBtn,
                      mUndoBtn, mRedoBtn, mScrollBtn, mSnapBtn;
-    juce::ComboBox   mRootCombo, mScaleCombo;
+    juce::ComboBox   mRootCombo, mScaleCombo, mEngineCombo;
+    bool             mEnginePopupArmed { false };
     juce::ToggleButton mOnToggle;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mOnAtt, mSnapAtt;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mRootAtt, mScaleAtt;
-    juce::Slider     mFocus, mMod, mSpeed;
-    std::unique_ptr<TaggedSliderAttachment> mFocusAtt, mModAtt, mSpeedAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mRootAtt, mScaleAtt, mEngineAtt;
+    juce::Slider     mFocus, mMod, mSpeed, mThroat;
+    std::unique_ptr<TaggedSliderAttachment> mFocusAtt, mModAtt, mSpeedAtt, mThroatAtt;
     juce::String mLengthText, mAnalysisBadge;
     bool mStale { false }, mStalePending { false }, mPlayGated { false };
 
@@ -1894,42 +2023,10 @@ void BaySickPitchEditor::timerCallback()
         mToolbar->setLengthText (t);
     }
 
-    // [PITCH DIAG] G2 boundary (Rule 4, Remove at close): while the flag file
-    // exists, the InfoBar shows the applicator gate counters.
-    if (++mDiagTick >= 1)   // slow path is already ~2 s cadence
-    {
-        mDiagTick = 0;
-        const auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                             .getChildFile ("BaySickDAW");
-        mDiagArmed = dir.getChildFile ("enable_pitch_diag.txt").existsAsFile()
-                  || dir.getChildFile ("enable_pitch_diag.txt.txt").existsAsFile()
-                  || dir.getChildFile ("enable_pitch_diag").existsAsFile();
-    }
-    if (mDiagArmed)
-    {
-        auto& d = mProc.mPitch.mDiag;
-        mInfoBar->setText (
-            "DIAG blk:"   + juce::String (d.blocks.load())
-            + " null:"    + juce::String (d.snapNull.load())
-            + " off:"     + juce::String (d.bailOff.load())
-            + " neut:"    + juce::String (d.bailNeutral.load())
-            + " app:"     + juce::String (d.applied.load())
-            + " inReg:"   + juce::String (d.inRegion.load())
-            + " regs:"    + juce::String (d.regionCount.load())
-            + " tSec:"    + juce::String (d.lastTSec.load(), 2)
-            + " maxSemi:" + juce::String (d.maxSemis.load(), 2)
-            + " in:"      + juce::String (d.peakIn.load(), 3)
-            + " out:"     + juce::String (d.peakOut.load(), 3)
-            + " chg:"     + juce::String (d.changed.load())
-            + " floor:"   + juce::String (d.floorHits.load())
-            + " gMin:"    + juce::String (d.grainMin.load())
-            + " per:"     + juce::String (d.shPeriod.load(), 0));
-    }
 }
 
 void BaySickPitchEditor::updateInfoBarFor (int regionIdx)
 {
-    if (mDiagArmed) return;   // [PITCH DIAG] readout owns the bar while armed
     auto& regions = mProc.mPitch.regions();
     if (regionIdx < 0 || regionIdx >= (int) regions.size())
     {
@@ -2176,6 +2273,9 @@ void BaySickPitchEditor::showPillMenu (int idx)
                         : "Restore to Original State");
     if (! slice)
         m.addItem (2, multi ? "Snap Selected to Semitone" : "Snap to Semitone");
+    if (! slice)
+        m.addItem (7, multi ? "Force Selected to Scale" : "Force to Scale",
+                   (int) paramValue ("bsp_scale") > 0);
     m.addSeparator();
     if (multi)
         m.addItem (3, "Merge Selected Pills");
@@ -2185,6 +2285,9 @@ void BaySickPitchEditor::showPillMenu (int idx)
         m.addItem (5, "Open Sub-Editor...");
     if (! mSelection.empty())
         m.addItem (6, "Zoom to Selection");
+    m.addSeparator();
+    m.addItem (8, slice ? "Include in Pitch Correction"
+                        : "Exclude from Pitch Correction");
 
     juce::Component::SafePointer<BaySickPitchEditor> self (this);
     m.showMenuAsync (juce::PopupMenu::Options(),
@@ -2202,6 +2305,8 @@ void BaySickPitchEditor::showPillMenu (int idx)
                     break;
                 case 5: self->openSubEditor (idx);                           break;
                 case 6: self->zoomToSelection();                             break;
+                case 7: self->forceSelectionToScale (self->selectionOrFocus()); break;
+                case 8: self->toggleSliceExcluded (idx);                     break;
                 default: break;
             }
         });
@@ -2225,6 +2330,16 @@ void BaySickPitchEditor::restoreToOriginal (const std::vector<int>& idxs)
     mCanvas->repaint();
 }
 
+void BaySickPitchEditor::toggleSliceExcluded (int idx)
+{
+    auto& regions = mProc.mPitch.regions();
+    if (idx < 0 || idx >= (int) regions.size()) return;
+    beginEdit();
+    regions[(size_t) idx].isSlice = ! regions[(size_t) idx].isSlice;
+    commitEdit ("Pitch: Toggle Slice");
+    mCanvas->repaint();
+}
+
 void BaySickPitchEditor::snapToSemitone (const std::vector<int>& idxs)
 {
     if (idxs.empty()) return;
@@ -2239,6 +2354,33 @@ void BaySickPitchEditor::snapToSemitone (const std::vector<int>& idxs)
     }
     commitEdit ("Pitch: Snap to Semitone");
     mCanvas->repaint();
+}
+
+void BaySickPitchEditor::forceSelectionToScale (const std::vector<int>& idxs)
+{
+    const int scale = (int) paramValue ("bsp_scale");
+    if (scale <= 0) return;                        // Chromatic: nothing is out of scale
+    const int root  = (int) paramValue ("bsp_root");
+    const auto& mask = PitchCorrectorDSP::scaleMask (scale);
+    auto& regions = mProc.mPitch.regions();
+    bool any = false;
+    beginEdit();
+    for (int i : idxs)
+    {
+        if (i < 0 || i >= (int) regions.size()) continue;
+        auto& r = regions[(size_t) i];
+        if (r.isSlice) continue;
+        const float center    = r.midi + r.shiftSemis;
+        const int   centerInt = (int) std::round (center);
+        const int   rel       = ((centerInt - root) % 12 + 12) % 12;
+        if (mask[(size_t) rel]) continue;          // already in scale -> keep its cents
+        const float lane = PitchCorrectorDSP::snapMidiToScaleStatic (center, root, scale);
+        r.shiftSemis = juce::jlimit (-24.0f, 24.0f, lane - r.midi);
+        any = true;
+    }
+    if (any) commitEdit ("Pitch: Force to Scale");  // publishEdits() re-bakes
+    else     cancelEdit();
+    if (mCanvas) mCanvas->repaint();
 }
 
 void BaySickPitchEditor::mergeSelection()
@@ -2374,7 +2516,6 @@ void BaySickPitchEditor::nudgeSelectionTime (double dSec)
         {
             if (j == i || isSelected (j)) continue;
             const auto& o = regions[(size_t) j];
-            if (o.isSlice != r.isSlice) continue;
             if (o.dstEnd() <= r.dstStart() + 1.0e-9)
                 prevB = juce::jmax (prevB, o.dstEnd());
             if (o.dstStart() >= r.dstEnd() - 1.0e-9)
@@ -2465,6 +2606,41 @@ void BaySickPitchEditor::resetBoxedParams (const std::vector<int>& idxs)
         }), true);
 }
 
+// ─── QA-Fe: WORLD-is-offline notice ──────────────────────────────────────────
+void BaySickPitchEditor::showWorldOfflineNotice()
+{
+    if (openUiPrefs()->getBoolValue ("pitchWorldOfflineNoPrompt", false))
+        return;
+
+    auto* aw = new juce::AlertWindow ("WORLD works offline",
+        "WORLD is the highest-quality pitch engine, but it processes offline: "
+        "edits you make while audio is playing apply a moment later, not live.  "
+        "For instant edits during playback, use Rubber Band or Signalsmith.",
+        juce::AlertWindow::InfoIcon);
+    if (mWorldPromptCheck == nullptr)
+    {
+        mWorldPromptCheck = std::make_unique<juce::ToggleButton> ("Do not show this again");
+        mWorldPromptCheck->setSize (220, 22);
+    }
+    mWorldPromptCheck->setToggleState (false, juce::dontSendNotification);
+    aw->addCustomComponent (mWorldPromptCheck.get());
+    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    juce::Component::SafePointer<BaySickPitchEditor> self (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [self, aw] (int)
+        {
+            if (! self) return;
+            if (self->mWorldPromptCheck != nullptr
+                && self->mWorldPromptCheck->getToggleState())
+            {
+                auto prefs = openUiPrefs();
+                prefs->setValue ("pitchWorldOfflineNoPrompt", true);
+                prefs->saveIfNeeded();
+            }
+            juce::ignoreUnused (aw);
+        }), true);
+}
+
 // ─── Sub-editor popup (Task 7) ───────────────────────────────────────────────
 void BaySickPitchEditor::openSubEditor (int idx)
 {
@@ -2496,7 +2672,10 @@ void BaySickPitchEditor::startRegionPreview (int regionIdx, bool loop)
     if (! mCompValid) refreshComposite();
     if (! mCompValid) return;
     const auto& r = regions[(size_t) regionIdx];
-    mProc.startPitchPreview (mCompCache, mCompSr, r.startSec, r.endSec, loop);
+    // QA-Fe: cache read uses the EDITED span (cache is edited-timeline); the dry
+    // fallback uses the raw SOURCE span (== edited when untimed).
+    mProc.startPitchPreview (mCompCache, mCompSr,
+                             r.startSec, r.endSec, r.dstStart(), r.dstEnd(), loop);
 }
 
 void BaySickPitchEditor::stopPreview()

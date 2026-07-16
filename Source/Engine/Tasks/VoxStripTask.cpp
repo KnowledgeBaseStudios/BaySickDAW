@@ -45,6 +45,10 @@ void VoxStripTask::run()
     const auto* idxP    = apvts.getRawParameterValue (mPrefix + "_inputChannelIdx");
     const auto* stereoP = apvts.getRawParameterValue (mPrefix + "_inputChannelStereo");
     const auto* listenP = apvts.getRawParameterValue (mPrefix + "_listen");
+    // QA-Fe Task 5: live-monitor mode (0 TrueDry / 1 BypassCorr [default] /
+    // 2 WithEffect); default 1 when the param is absent (Inst strips / old state).
+    const auto* monModeP = apvts.getRawParameterValue (mPrefix + "_monitorMode");
+    const int   monitorMode = (monModeP != nullptr) ? (int) monModeP->load() : 1;
 
     const int  chIdx    = (idxP != nullptr) ? (int) idxP->load() : -1;
     const bool isStereo = (stereoP != nullptr) && stereoP->load() > 0.5f;
@@ -168,7 +172,10 @@ void VoxStripTask::run()
 
     // ── Live-mode clears the wet-recorder pitch bypass ───────────────────────
     if (mVocalEngine != nullptr)
+    {
         mVocalEngine->setForcePitchBypass (false);
+        mVocalEngine->setMonitorMode (monitorMode);   // QA-Fe Task 5
+    }
 
     // ── QA-Fb Option A (locked 2026-07-10): live strip over FilePlay clips ───
     // Decode the prior takes now and hand them to the engine as the

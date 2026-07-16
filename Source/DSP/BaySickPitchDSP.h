@@ -1,9 +1,11 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PitchShifters.h"
+#include "LibraryPitchShifters.h"   // QA-Fe: PitchEngine + IPitchShifter bake seam
 #include <array>
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,11 +46,13 @@ struct PitchNoteRegion
     float  f0Hz           { 261.6f }; // median F0 (drives the PSOLA period)
     float  vibDepthCents  { 0.0f };   // detected natural vibrato
     float  vibRateHz      { 5.0f };
-    // QA-Fd (locked 6): slice pill -- unvoiced / too-short-to-pitch material
-    // kept as a time-editable region (Newtone-style slice).  No pitch
-    // identity: the applicator skips pitch/focus/vibrato and applies the
-    // volume shape only; the editor draws it without a pitch handle.
-    // Absent in pre-QA-Fd saves -> defaults false (back-compat).
+    // QA-Fe (NewTone model): slice flag -- a piece excluded from pitch
+    // correction.  Analysis no longer sets it (consonants/breaths fold into the
+    // neighboring note); it is set only by the Slice tool, which chops a
+    // consonant off its vowel so the vowel tunes without shifting the noise.  No
+    // pitch identity: the applicator skips pitch/focus/vibrato and applies the
+    // volume shape only; the editor draws it inline.  The "sl" save key is
+    // unchanged, so old auto-slices still load (migrated on restore).
     bool   isSlice        { false };
 
     // ── QA-Fd time edits (locked 5/13a: pitch tab is UPSTREAM of align) ─────
@@ -239,6 +243,23 @@ public:
     std::vector<PitchNoteRegion>&       regions()       noexcept { return mRegions; }
     const std::vector<PitchNoteRegion>& regions() const noexcept { return mRegions; }
 
+    // QA-Fe: fraction of the [startSec,endSec) composite span that is voiced
+    // (F0 detected).  The Slice tool uses it to auto-mark the more-unvoiced
+    // half of a cut (the consonant) as excluded from pitch correction.
+    double voicedFraction (double startSec, double endSec) const noexcept
+    {
+        if (mF0Track.empty() || endSec <= startSec || mAnalysisSr <= 0.0) return 0.0;
+        const double hopSec = (double) kF0Hop / mAnalysisSr;
+        const int n = (int) mF0Track.size();
+        const int a = juce::jlimit (0, n, (int) std::floor (startSec / hopSec));
+        const int z = juce::jlimit (0, n, (int) std::ceil  (endSec   / hopSec));
+        if (z <= a) return 0.0;
+        int voiced = 0;
+        for (int f = a; f < z; ++f)
+            if (mF0Track[(size_t) f] > 0.0f) ++voiced;
+        return (double) voiced / (double) (z - a);
+    }
+
     // Rebuild + atomically publish the audio-thread snapshot.  Call after
     // every edit gesture completes (mouse-up), every analyze, and on load.
     // QA-Fd: also rebuilds + publishes the channel TIME MAP (nullptr when no
@@ -254,6 +275,14 @@ public:
     const AlignPlaySnapshot* loadTimeMapSnapshot() const noexcept
         { return mTimeMapActive.load (std::memory_order_acquire); }
 
+    // AUDIO/MT: true when a non-empty pitched cache is published.  The decode
+    // layer reads this so a baked channel stamps the ALIGN-ONLY edited read
+    // position instead of the composed source position (the pitch time-warp now
+    // lives in the edited-timeline cache).  Immutable published snapshot;
+    // retire-ring-safe.
+    bool hasBakedCache() const noexcept
+    { auto* c = mCacheActive.load (std::memory_order_acquire); return c != nullptr && ! c->audio.empty(); }
+
     // MESSAGE THREAD: hash over the regions' time-edit state (0 = none).
     // The align staleness signature folds this in so a time edit re-arms
     // the stop-gated align re-analysis (align consumes the EDITED timing).
@@ -267,6 +296,12 @@ public:
     void setFocus01   (float v);   // 0..1: pull note centers toward the snap target
     void setModAmount (float v);   // 0..2: vibrato preservation scale (1 = natural)
     void setSpeedMs   (float ms);  // 5..300: note-transition glide
+    // QA-Fe Task 6: global throat/character -- semitones of formant shift added
+    // on top of each region's own formant before the bake's 2^(x/12) formant
+    // scale.  0 = neutral; + raises formants (smaller/brighter throat), - lowers
+    // them (bigger/darker).  Maps to the engine's native formant control via the
+    // bake seam; a change re-bakes.
+    void setThroat    (float semis);
     // QA-Fa recovery: bsp_on chain switch.  OFF glides every target to
     // neutral through the Speed smoothing (no hard switch), then the fast
     // path disengages once settled.
@@ -277,6 +312,16 @@ public:
     void setRoot      (int pc);        // 0..11
     void setScaleIdx  (int idx);       // 0..12 (piano-roll order)
     void setSnapOn    (bool on);
+    // QA-Fe: selected bake engine (Task 3 wires bsp_engine to this).  Read on
+    // the bake/render (message/worker) thread; an engine change re-bakes.
+    void setEngine    (PitchEngine e)
+    {
+        if ((int) e != mEngine.load (std::memory_order_relaxed))
+        {
+            mEngine.store ((int) e, std::memory_order_relaxed);
+            requestBake();
+        }
+    }
 
     // ── Realtime applicator (AUDIO THREAD, FilePlay only -- Mode C) ──────────
     // timelineStartSample = the block's first timeline sample (stamped by
@@ -315,32 +360,16 @@ public:
                                             juce::int64 spanStart = 0,
                                             int spanLen = -1) const;
 
+    // QA-Fe (threading fix): message-thread snapshot of the background-baked cache
+    // over an EDITED-timeline span [startEditedSec, endEditedSec).  Lock-free load
+    // of the immutable published snapshot + a plain span copy (no engine bake) --
+    // the scrub preview reads THIS instead of running the heavy bake (WORLD froze
+    // the UI on every drag scrub).  Empty when no cache is published yet.
+    juce::AudioBuffer<float> copyCacheSpan (double startEditedSec, double endEditedSec) const;
+
     // ── Persistence (message thread) ─────────────────────────────────────────
     juce::ValueTree stateToValueTree() const;
     void stateFromValueTree (const juce::ValueTree& v);
-
-    // [PITCH DIAG] G2 boundary (Rule 4, Remove at close).  Which gate eats
-    // the signal: the audio thread bumps these; the pitch editor's InfoBar
-    // shows them while Documents/BaySickDAW/enable_pitch_diag.txt exists.
-    struct Diag
-    {
-        std::atomic<juce::int64> blocks      { 0 };   // processFilePlay entries
-        std::atomic<juce::int64> snapNull    { 0 };   // bailed: no snapshot
-        std::atomic<juce::int64> bailOff     { 0 };   // bailed: chain off + settled
-        std::atomic<juce::int64> bailNeutral { 0 };   // bailed: no edits + neutral knobs
-        std::atomic<juce::int64> applied     { 0 };   // reached applyEditsToBuffer
-        std::atomic<int>         inRegion    { 0 };   // samples inside a region (last call)
-        std::atomic<float>       lastTSec    { 0.0f };// composite-sec at last call end
-        std::atomic<float>       maxSemis    { 0.0f };// peak |smoothedSemis| since arm
-        std::atomic<int>         regionCount { 0 };   // regions in the active snapshot
-        std::atomic<float>       peakIn      { 0.0f };// max |input| seen (since arm)
-        std::atomic<float>       peakOut     { 0.0f };// max |output| written (since arm)
-        std::atomic<int>         changed     { 0 };   // samples where wet != dry (last call)
-        std::atomic<juce::int64> floorHits   { 0 };   // shifter wsum-floor (silence-gap) total
-        std::atomic<int>         grainMin    { 99 };  // fewest concurrent grains seen
-        std::atomic<float>       shPeriod    { 0.0f };// shifter's current period (samples)
-    };
-    Diag mDiag;
 
 private:
     // Immutable audio-thread view.  Published via atomic swap; retired
@@ -374,39 +403,38 @@ private:
         double vibPhase        { 0.0 };
         int    cursor          { 0 };
         int    lastRegion      { -1 };
-        // Period-geometry stabilizer (2026-07-12): the grain window size + hop
-        // (hw/pOut) follow a MEDIAN of the F0 track so an octave-glitch at a
-        // low-energy word boundary can't yank the scheduler into a coverage
-        // hole (the stutter).  <3 voiced frames in the window (breath/silence)
-        // freeze the geometry to the last known-good period.  Pulse (epoch)
-        // timing is NOT filtered -- only the window/hop period is stabilized.
-        int    f0MedFrame      { -1 };    // last F0 frame the median was recomputed at
-        float  geomTargetPer   { 0.0f };  // median-derived target period (samples)
-        float  geomPeriod      { 0.0f };  // slewed period actually sent to the shifter
-        // [PITCH DIAG] G2 boundary (Rule 4, Remove at close): per-call gate
-        // tracer -- audio-thread plains, copied into Diag atomics after each
-        // applyEditsToBuffer call.
-        int    diagInRegion    { 0 };
-        double diagLastTSec    { 0.0 };
-        float  diagPeakIn      { 0.0f };
-        float  diagPeakOut     { 0.0f };
-        int    diagChanged     { 0 };
     };
 
 
-    void applyEditsToBuffer (float* const* chans, int numCh, int numSamples,
-                             juce::int64 timelineStartSample, double sr,
-                             const Snapshot& snap,
-                             float focus01, float modAmt, float speedMs,
-                             bool chainOn,
-                             PsolaShifter* shifters,
-                             CepstralFormantEngine* formants,
-                             ApplicatorState& st,
-                             double srcX0 = 0.0, double srcRatePerSample = 1.0,
-                             bool srcValid = false) const noexcept;
+    // QA-Fe: resolve the per-sample pitch ratio / formant-semitones / gain the
+    // edits produce (outRatio/outFormant/outGain, each length numSamples) for the
+    // library-engine bake -- no audio touched.  Snap + knob state is passed in
+    // (immutable) so the background bake thread can run it off a captured
+    // BakeInput without racing the message thread's live members.
+    void computeEnvelopes (int numSamples, juce::int64 timelineStartSample, double sr,
+                           const Snapshot& snap,
+                           float focus01, float modAmt, float speedMs, bool chainOn,
+                           bool snapScale, int rootPc, int scaleIdx,
+                           ApplicatorState& st,
+                           float* outRatio, float* outFormant, float* outGain,
+                           double srcX0 = 0.0, double srcRatePerSample = 1.0,
+                           bool srcValid = false) const noexcept;
+
+    // Shared bake core (message + worker thread): resolve envelopes over
+    // [spanStart, spanStart+spanLen), bake through `engine` (length-preserved,
+    // formant-preserving), apply the gain.
+    juce::AudioBuffer<float> bakeSpan (const float* mono, int numSamples, double sr,
+                                       const Snapshot& snap, PitchEngine engine,
+                                       float focus, float mod, float speed, float throat,
+                                       bool snapOn, int rootPc, int scaleIdx,
+                                       juce::int64 spanStart, int spanLen,
+                                       const AlignPlaySnapshot* timeMap = nullptr) const;
 
     // publishEdits helper: rebuild + swap the time-map snapshot.
     void publishTimeMap();
+    // #1/#2 bake path: build the EDITED->SOURCE map (guide=edited, dub=source)
+    // from the regions' time edits; nullptr when no region has one.
+    std::unique_ptr<AlignPlaySnapshot> buildTimeMapSnapshot() const;
 
     // Message-thread state
     std::vector<PitchNoteRegion> mRegions;
@@ -416,10 +444,42 @@ private:
     double      mStartBeat    { 0.0 };
     juce::int64 mStartSample  { 0 };
     double      mAnalysisSr   { 44100.0 };
+    // QA-Fe: the analyzed composite (mono, analysis rate).  shared_ptr so the
+    // background bake thread reads it via a cheap refcount copy in the BakeInput
+    // without racing a re-analyze on the message thread.
+    std::shared_ptr<const std::vector<float>> mComposite;
 
-    // Audio-thread snapshot machinery
-    std::atomic<Snapshot*> mActive { nullptr };
-    std::vector<std::unique_ptr<Snapshot>> mRetired;   // message thread only
+    // QA-Fe: the background-baked pitched composite the audio thread reads.
+    // Published lock-free (atomic ptr + retire ring, same liveness contract as
+    // the time map); the audio thread holds the pointer only within one block.
+    struct CacheSnapshot
+    {
+        std::vector<float> audio;          // pitched composite, mono, analysis rate
+        double             sampleRate  { 44100.0 };
+        juce::int64        startSample { 0 };
+    };
+    std::atomic<CacheSnapshot*> mCacheActive { nullptr };
+    std::vector<std::unique_ptr<CacheSnapshot>> mCacheRetired;   // worker thread only
+
+    // Cache-handoff crossfade (AUDIO THREAD state only, RT-safe/lock-free): a fresh
+    // bake is a new pointer, so the read loop crossfades old->new over ~30 ms
+    // instead of hard-swapping (which steps the waveform = a click after an edit
+    // during playback).  The retiring cache stays alive through the short fade
+    // (retire ring is 8 deep vs one 30 ms fade).
+    CacheSnapshot* mCachePlaying    { nullptr };   // last cache the read loop adopted
+    CacheSnapshot* mCacheFading     { nullptr };   // previous cache, fading out
+    int            mCacheFadeRemain { 0 };
+    int            mCacheFadeLen    { 0 };
+    // Hazard pointers: the two caches the audio thread holds as raw pointers
+    // ACROSS blocks -- the last-adopted cache (mCachePlaying: pointer-compared at
+    // the swap check, dereferenced there, and latched as the fade source) and the
+    // fading-from cache (mCacheFading).  The worker's retire-ring erase skips BOTH,
+    // so neither can be freed out from under processFilePlay -- including when a
+    // transport pause freezes the audio thread while the user keeps editing (many
+    // bakes).  The plain 8-deep ring only covers a within-block hold.  Audio thread
+    // writes (release); worker reads (acquire).
+    std::atomic<CacheSnapshot*> mCacheHazardPlaying { nullptr };
+    std::atomic<CacheSnapshot*> mCacheHazardFading  { nullptr };
 
     // QA-Fd: published time map (edited -> source), same liveness contract.
     std::atomic<AlignPlaySnapshot*> mTimeMapActive { nullptr };
@@ -432,20 +492,66 @@ private:
     std::atomic<float> mFocus01  { 0.0f };
     std::atomic<float> mModAmt   { 1.0f };
     std::atomic<float> mSpeedMs  { 60.0f };
+    std::atomic<float> mThroat   { 0.0f };   // QA-Fe Task 6: global formant/throat (semis)
     std::atomic<bool>  mChainOn  { true };
     std::atomic<int>   mRootPc   { 0 };
     std::atomic<int>   mScaleIdx { 0 };
     std::atomic<bool>  mSnapOn   { false };
+    std::atomic<int>   mEngine   { (int) PitchEngine::RubberBand };  // QA-Fe (B1 default)
 
-    // Audio-thread applicator state (owned by the audio thread)
-    std::array<PsolaShifter, 2>          mShifters;
-    std::array<CepstralFormantEngine, 2> mFormant;
-    ApplicatorState mAppState;
-    // QA-Fb (A1): monitor-stream twin of the above -- see processFilePlayMonitor.
-    std::array<PsolaShifter, 2>          mMonShifters;
-    std::array<CepstralFormantEngine, 2> mMonFormant;
-    ApplicatorState mMonState;
     double mSampleRate { 44100.0 };
+
+    // QA-Fe: background bake worker.  requestBake() (message thread) captures a
+    // BakeInput under mBakeMutex + wakes the worker; the worker bakes it into a
+    // fresh CacheSnapshot off-thread and publishes it -- so a WORLD bake never
+    // freezes the UI, and RB/Signalsmith finish fast enough to feel live.
+    struct BakeInput
+    {
+        Snapshot    snap;                 // startSample = 0 (composite-relative bake)
+        std::shared_ptr<const std::vector<float>> composite;
+        // #1/#2: EDITED->SOURCE map (guide=edited, dub=source); nullptr = no
+        // time edit -> the bake warps onto the edited timeline so playback reads
+        // it directly (no varispeed).
+        std::shared_ptr<const AlignPlaySnapshot> timeMap;
+        juce::int64 timelineStart { 0 };  // composite's timeline origin (for the cache read)
+        int         engine   { (int) PitchEngine::RubberBand };
+        float       focus    { 0.0f };
+        float       mod      { 1.0f };
+        float       speed    { 60.0f };
+        float       throat   { 0.0f };    // QA-Fe Task 6
+        bool        snapOn   { false };
+        int         rootPc   { 0 };
+        int         scaleIdx { 0 };
+    };
+    struct BakeWorker : juce::Thread
+    {
+        explicit BakeWorker (BaySickPitchDSP& o) : juce::Thread ("BsPitchBake"), owner (o) {}
+        void run() override
+        {
+            while (! threadShouldExit())
+            {
+                wait (-1);   // sleep until requestBake() notifies (or shutdown)
+                while (owner.mBakeDirty.exchange (false, std::memory_order_acquire))
+                {
+                    if (threadShouldExit()) return;
+                    BakeInput in;
+                    {
+                        std::lock_guard<std::mutex> lk (owner.mBakeMutex);
+                        in = owner.mBakeInput;   // cheap: shared_ptr composite + small vectors
+                    }
+                    owner.bakeToCache (in);
+                }
+            }
+        }
+        BaySickPitchDSP& owner;
+    };
+    std::unique_ptr<BakeWorker> mBakeWorker;
+    std::mutex        mBakeMutex;
+    BakeInput         mBakeInput;                 // guarded by mBakeMutex
+    std::atomic<bool> mBakeDirty { false };
+
+    void requestBake();     // message thread: snapshot inputs + wake the worker
+    void bakeToCache (const BakeInput& in);       // worker: bake whole composite -> cache
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPitchDSP)
 };

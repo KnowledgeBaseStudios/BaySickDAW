@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <cstring>
 
+#if BAYSICK_HAS_RUBBERBAND
+ #include <rubberband/RubberBandLiveShifter.h>
+#endif
+
 // ─────────────────────────────────────────────────────────────────────────────
-// PitchCorrectorDSP - Phase H-5 (2026-05-01)
+// PitchCorrectorDSP - realtime vocal pitch correction (QA-Fe Task 4, 2026-07-14)
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace
@@ -71,20 +75,84 @@ float PitchCorrectorDSP::snapMidiToScaleStatic (float midiFloat, int rootPc, int
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MonoFifo - single-threaded (audio-thread) mono ring; preallocated in prepare().
+// ─────────────────────────────────────────────────────────────────────────────
+void PitchCorrectorDSP::MonoFifo::init (int capacity)
+{
+    cap = juce::jmax (1, capacity);
+    buf.assign ((size_t) cap, 0.0f);
+    head = 0; count = 0;
+}
+
+void PitchCorrectorDSP::MonoFifo::clear() noexcept
+{
+    head = 0; count = 0;
+    std::fill (buf.begin(), buf.end(), 0.0f);
+}
+
+void PitchCorrectorDSP::MonoFifo::push (const float* src, int n) noexcept
+{
+    for (int i = 0; i < n; ++i)
+    {
+        const int w = (head + count) % cap;
+        buf[(size_t) w] = src[i];
+        if (count < cap) ++count; else head = (head + 1) % cap;
+    }
+}
+
+void PitchCorrectorDSP::MonoFifo::pushZeros (int n) noexcept
+{
+    for (int i = 0; i < n; ++i)
+    {
+        const int w = (head + count) % cap;
+        buf[(size_t) w] = 0.0f;
+        if (count < cap) ++count; else head = (head + 1) % cap;
+    }
+}
+
+void PitchCorrectorDSP::MonoFifo::pop (float* dst, int n) noexcept
+{
+    for (int i = 0; i < n; ++i)
+    {
+        if (count > 0) { dst[i] = buf[(size_t) head]; head = (head + 1) % cap; --count; }
+        else           { dst[i] = 0.0f; }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PitchCorrectorDSP
 // ─────────────────────────────────────────────────────────────────────────────
-// QA-F Task 5: the H-5 2-grain granular Shifter is deleted -- the live path
-// now runs PsolaShifter + CepstralFormantEngine from PitchShifters.h.
-
 PitchCorrectorDSP::PitchCorrectorDSP() {}
 PitchCorrectorDSP::~PitchCorrectorDSP() { releaseResources(); }
 
 void PitchCorrectorDSP::prepare (double sampleRate, int maxBlockSize)
 {
     mSampleRate = (sampleRate > 0.0) ? sampleRate : 44100.0;
+    mMaxBlock   = juce::jmax (1, maxBlockSize);
     mTracker.prepare (mSampleRate);
-    for (auto& sh : mShifters) sh.prepare (mSampleRate, maxBlockSize);
-    for (auto& fe : mFormant)  fe.prepare (mSampleRate, maxBlockSize);
+
+#if BAYSICK_HAS_RUBBERBAND
+    using RBL = RubberBand::RubberBandLiveShifter;
+    const int opts = RBL::OptionFormantPreserved | RBL::OptionWindowShort;
+    mLive = std::make_unique<RBL> ((size_t) mSampleRate, 1, opts);
+    mLive->setPitchScale (1.0);                       // set before querying start delay
+    mBlockSize      = (int) mLive->getBlockSize();
+    mLatencySamples = (int) mLive->getStartDelay() + mBlockSize;
+    mLivePreserve   = true;                           // matches the constructed option
+#else
+    mBlockSize      = 0;
+    mLatencySamples = 0;
+#endif
+
+    mBlockSize = juce::jmax (0, mBlockSize);
+    mInBlock .assign ((size_t) juce::jmax (1, mBlockSize), 0.0f);
+    mOutBlock.assign ((size_t) juce::jmax (1, mBlockSize), 0.0f);
+    mMonoIn  .assign ((size_t) mMaxBlock, 0.0f);
+    mWetOut  .assign ((size_t) mMaxBlock, 0.0f);
+    const int cap = 2 * (mBlockSize + mMaxBlock) + 64;
+    mInFifo .init (cap);
+    mOutFifo.init (cap);
+
     // QA-Fd 11/16a: ~40 ms engage/disengage crossfade (calibration tuned at
     // the boundary listen).
     mEngageFadeStep = (float) (1.0 / (0.04 * mSampleRate));
@@ -100,9 +168,15 @@ void PitchCorrectorDSP::releaseResources()
 void PitchCorrectorDSP::reset()
 {
     mTracker.reset();
-    for (auto& sh : mShifters) sh.reset();
-    for (auto& fe : mFormant)  fe.reset();
-    mFormantEngaged    = false;
+#if BAYSICK_HAS_RUBBERBAND
+    if (mLive) { mLive->reset(); mLive->setPitchScale (1.0); mLive->setFormantScale (0.0); }
+#endif
+    mInFifo .clear();
+    mOutFifo.clear();
+    if (mBlockSize > 0) mOutFifo.pushZeros (mBlockSize);   // prime the block-adapter latency
+    mLiveActive       = false;
+    mLivePitchScale   = 1.0;
+    mLiveFormantScale = 0.0;
     mCurrentShiftRatio = 1.0f;
     mHumanizePhase     = 0.0f;
     mCurrentTargetMidi = -1.0f;
@@ -194,46 +268,45 @@ void PitchCorrectorDSP::process (juce::AudioBuffer<float>& buffer)
     if (R != nullptr) mTracker.pushAudio (L, R, numSamples);
     else              mTracker.pushAudio (L, numSamples);
 
-    // QA-Fd 11/16a engage-tick fix: fully-bypassed fast path keeps the
-    // shifter rings warm (copy only -- no synthesis, no added latency) and
-    // tracks the period, so an engage starts on real current history.
+#if BAYSICK_HAS_RUBBERBAND
     const bool wantOn = ! bypassed;
+
+    // Settled bypass: dry passthrough with the shifter kept cold -- the ~48 ms
+    // engine never runs while correction is off (fast-path bypass).  On the
+    // just-settled edge, re-prime so the next engage is a clean cold start.
     if (! wantOn && mEngageFade <= 0.0f)
     {
-        const float idleHz = mTracker.getFrequencyHz();
-        if (idleHz > 0.0f)
+        if (mLiveActive)
         {
-            const float period = (float) (mSampleRate / (double) idleHz);
-            for (auto& sh : mShifters) sh.setPeriodSamples (period);
-        }
-        for (int i = 0; i < numSamples; ++i)
-        {
-            mShifters[0].feedSample (L[i]);
-            if (R != nullptr) mShifters[1].feedSample (R[i]);
+            if (mLive) mLive->reset();
+            mInFifo.clear(); mOutFifo.clear();
+            if (mBlockSize > 0) mOutFifo.pushZeros (mBlockSize);
+            mLiveActive = false;
         }
         mCurrentTargetMidi = -1.0f;
         mCurrentShiftRatio = 1.0f;
         return;
     }
 
-    if (wantOn && mEngageFade <= 0.0f)
+    // Engage edge: cold-start the shifter -- the delay is acquired here (B3/B6);
+    // the crossfade below masks the dry-side click.
+    if (! mLiveActive)
     {
-        // Engage edge: synthesis anchors re-sync onto the warm ring; the
-        // per-sample crossfade below masks the grain spin-up.  The formant
-        // engines reset too -- if formant mode stayed logically engaged
-        // across a bypass, their rings hold stale audio that would blend
-        // into the fade-in (review NIT).
-        for (auto& sh : mShifters) sh.resyncToWriteHead();
-        for (auto& fe : mFormant)  fe.reset();
+        if (mLive)
+        {
+            mLive->reset();
+            mLive->setPitchScale   (mLivePitchScale);
+            mLive->setFormantScale (mLiveFormantScale);
+        }
+        mInFifo.clear(); mOutFifo.clear();
+        if (mBlockSize > 0) mOutFifo.pushZeros (mBlockSize);
+        mLiveActive = true;
     }
 
-    // Read the latest pitch reading once per block.  Tracker publishes ~50 ms
-    // behind the audio so we don't get sample-accurate updates anyway.
-    const float detHz       = mTracker.getFrequencyHz();
-    const float confidence  = mTracker.getConfidence();
+    // Read the latest pitch reading once per block (tracker is ~50 ms behind).
+    const float detHz      = mTracker.getFrequencyHz();
+    const float confidence = mTracker.getConfidence();
 
-    // No detected pitch -> hold last shift, fade ratio toward 1.0 over RetuneSpeed
-    // so silence / unpitched frames don't get correction artifacts.
     float targetRatio = 1.0f;
     float targetHzPub = 0.0f;
 
@@ -241,95 +314,100 @@ void PitchCorrectorDSP::process (juce::AudioBuffer<float>& buffer)
     {
         const float detMidi = hzToMidi (detHz);
 
-        // QA-F Task 5 note-change hysteresis: hold the current target note
-        // until the sung pitch commits to a different one.  0.65 st sits
-        // past the semitone midpoint, so vibrato riding a note boundary no
-        // longer flip-flops the target every tracker frame (the "warble" /
-        // robotic artifact at default settings).
+        // QA-F Task 5 note-change hysteresis: hold the current target note until
+        // the sung pitch commits to a different one.  0.65 st past the semitone
+        // midpoint stops vibrato riding a boundary from flip-flopping the target.
         if (mCurrentTargetMidi < 0.0f
             || std::abs (detMidi - mCurrentTargetMidi) > 0.65f)
             mCurrentTargetMidi = snapMidiToScale (detMidi);
 
-        const float targetHz = midiToHz (mCurrentTargetMidi);
+        const float targetHz  = midiToHz (mCurrentTargetMidi);
+        const float fullRatio = targetHz / juce::jmax (detHz, 1.0f);
+        targetRatio           = 1.0f + (fullRatio - 1.0f) * mStrength;
 
-        // Strength blends between dry pitch (1.0 ratio) and full snap.
-        const float fullRatio  = targetHz / juce::jmax (detHz, 1.0f);
-        targetRatio            = 1.0f + (fullRatio - 1.0f) * mStrength;
-
-        // Humanize: small slow random walk in cents, additive on top of ratio.
         if (mHumanizeCents > 0.001f)
         {
-            // Update walk every block; multiply random cents into ratio.
             mHumanizePhase += nextRandPm1() * mHumanizeCents * 0.05f;
-            mHumanizePhase = juce::jlimit (-mHumanizeCents,
-                                            mHumanizeCents,
-                                            mHumanizePhase);
-            // cents -> ratio: 2^(cents/1200)
-            const float wobbleRatio = std::pow (2.0f, mHumanizePhase / 1200.0f);
-            targetRatio *= wobbleRatio;
+            mHumanizePhase  = juce::jlimit (-mHumanizeCents, mHumanizeCents, mHumanizePhase);
+            targetRatio    *= std::pow (2.0f, mHumanizePhase / 1200.0f);   // cents -> ratio
         }
 
         targetHzPub = targetHz;
-
-        // Feed the PSOLA epoch grid from the tracker (period in samples).
-        const float period = (float) (mSampleRate / (double) detHz);
-        for (auto& sh : mShifters)
-            sh.setPeriodSamples (period);
     }
     else
     {
-        // Unvoiced: release the held target so the next phrase re-snaps
-        // fresh; the shifters keep their last period (PSOLA at ratio->1 is
-        // a near-identity at any period).
-        mCurrentTargetMidi = -1.0f;
+        mCurrentTargetMidi = -1.0f;   // unvoiced: re-snap fresh next phrase
     }
 
-    // Formant machinery engages only while audible work exists; the engage
-    // edge resets the engines (their latency appears with the mode).
-    const bool wantFormant = mFormantPreserve || std::abs (mThroatSemis) > 0.01f;
-    if (wantFormant != mFormantEngaged)
+    // Formant Preserve maps to the engine's native option; Throat to its formant
+    // scale (0.0 == auto-preserve).  Applied only on change (RT-safe setters).
+    if (mLive && mFormantPreserve != mLivePreserve)
     {
-        mFormantEngaged = wantFormant;
-        for (auto& fe : mFormant) fe.reset();
+        using RBL = RubberBand::RubberBandLiveShifter;
+        mLive->setFormantOption (mFormantPreserve ? RBL::OptionFormantPreserved
+                                                  : RBL::OptionFormantShifted);
+        mLivePreserve = mFormantPreserve;
     }
+    const double fScale = (std::abs (mThroatSemis) < 0.01f)
+                        ? 0.0 : std::pow (2.0, (double) mThroatSemis / 12.0);
 
-    // Per-sample one-pole smoothing of the active shift ratio toward target.
-    // mRetuneCoef = 0 at speed=0 (snap), -> ~1 at long speed (slow tracking).
-    const float retCoef   = mRetuneCoef;
-    const float fadeTgt   = wantOn ? 1.0f : 0.0f;
-    constexpr float halfPi = juce::MathConstants<float>::halfPi;
+    // Accumulate mono input, then drain whole shifter blocks.
+    if (R != nullptr)
+        for (int i = 0; i < numSamples; ++i) mMonoIn[(size_t) i] = 0.5f * (L[i] + R[i]);
+    else
+        for (int i = 0; i < numSamples; ++i) mMonoIn[(size_t) i] = L[i];
+    mInFifo.push (mMonoIn.data(), numSamples);
 
-    for (int i = 0; i < numSamples; ++i)
+    const float retCoef = mRetuneCoef;
+    while (mBlockSize > 0 && mInFifo.size() >= mBlockSize)
     {
-        mCurrentShiftRatio = retCoef * mCurrentShiftRatio
-                           + (1.0f - retCoef) * targetRatio;
+        mInFifo.pop (mInBlock.data(), mBlockSize);
+        // Advance the ratio smoothing across the block so the RetuneSpeed time
+        // constant is unchanged by the shifter's block granularity.
+        for (int k = 0; k < mBlockSize; ++k)
+            mCurrentShiftRatio = retCoef * mCurrentShiftRatio + (1.0f - retCoef) * targetRatio;
 
-        // QA-Fd 11/16a: equal-power engage/disengage crossfade.
-        mEngageFade = (fadeTgt > mEngageFade)
-            ? juce::jmin (1.0f, mEngageFade + mEngageFadeStep)
-            : juce::jmax (0.0f, mEngageFade - mEngageFadeStep);
-        const float gW = std::sin (mEngageFade * halfPi);
-        const float gD = std::cos (mEngageFade * halfPi);
-
-        const float dryL = L[i];
-        float wetL = mShifters[0].processSample (dryL, mCurrentShiftRatio);
-        if (mFormantEngaged)
-            wetL = mFormant[0].processSample (dryL, wetL, mFormantPreserve, mThroatSemis);
-        L[i] = dryL * gD + wetL * gW;
-
-        if (R != nullptr)
+        if (mLive)
         {
-            const float dryR = R[i];
-            float wetR = mShifters[1].processSample (dryR, mCurrentShiftRatio);
-            if (mFormantEngaged)
-                wetR = mFormant[1].processSample (dryR, wetR, mFormantPreserve, mThroatSemis);
-            R[i] = dryR * gD + wetR * gW;
+            const double ps = juce::jlimit (0.25, 4.0, (double) mCurrentShiftRatio);
+            if (ps != mLivePitchScale)       { mLive->setPitchScale   (ps);     mLivePitchScale   = ps; }
+            if (fScale != mLiveFormantScale) { mLive->setFormantScale (fScale); mLiveFormantScale = fScale; }
+            const float* ip[1] = { mInBlock.data() };
+            float*       op[1] = { mOutBlock.data() };
+            mLive->shift (ip, op);
+            mOutFifo.push (mOutBlock.data(), mBlockSize);
+        }
+        else
+        {
+            mOutFifo.push (mInBlock.data(), mBlockSize);   // shifter absent: passthrough
         }
     }
 
-    // Publish UI feedback once per block.
+    // Pop this block's worth of wet, then equal-power crossfade dry <-> wet.
+    // The wet stream carries the shifter latency; at the engage edge it is the
+    // primed silence filling in -- the documented one-time delay jump (B6).
+    mOutFifo.pop (mWetOut.data(), numSamples);
+
+    const float fadeTgt = wantOn ? 1.0f : 0.0f;
+    constexpr float halfPi = juce::MathConstants<float>::halfPi;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        mEngageFade = (fadeTgt > mEngageFade)
+            ? juce::jmin (1.0f, mEngageFade + mEngageFadeStep)
+            : juce::jmax (0.0f, mEngageFade - mEngageFadeStep);
+        const float gW  = std::sin (mEngageFade * halfPi);
+        const float gD  = std::cos (mEngageFade * halfPi);
+        const float wet = mWetOut[(size_t) i];
+
+        L[i] = L[i] * gD + wet * gW;
+        if (R != nullptr) R[i] = R[i] * gD + wet * gW;   // mono wet to both channels
+    }
+
     mDetectedHz       .store (detHz,       std::memory_order_release);
     mTargetHz         .store (targetHzPub, std::memory_order_release);
     mCurrentShiftCents.store (1200.0f * std::log2 (juce::jmax (mCurrentShiftRatio, 0.001f)),
                                std::memory_order_release);
+#else
+    juce::ignoreUnused (L, R);   // corrector unavailable -> dry passthrough
+#endif
 }

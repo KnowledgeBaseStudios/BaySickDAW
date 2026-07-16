@@ -648,6 +648,10 @@ public:
         // channel), unlike snap which matches by followerChannelId.
         const AlignPlaySnapshot* pitchMap     { nullptr };
         bool                     pitchChainOn { true };
+        // #1: the pitch time-warp now lives in the edited-timeline bake cache,
+        // so when a cache is published the file-read pitch stage stays OFF and
+        // sourcePosAt collapses to align-only (or linear when no align).
+        bool                     pitchBaked   { false };
         // Source-position stamp: decodeFilePlayClip writes it when the
         // composed law is engaged (timeline-equivalent samples at the
         // device rate + per-sample rate); finalizeFilePlayStrip forwards

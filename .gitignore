@@ -102,3 +102,9 @@ Plans & Specs/Issue Tracker.txt
 /Tools/signalsmith-test/
 /Tools/rubberband-test/
 /Tools/pitch-sim/
+
+# QA-Fe garble investigation dumps (2026-07-15) -- verbatim pipeline map +
+# adversarial-verification notes generated for external review; analysis
+# artifacts, not shipped source.
+/PITCH_PIPELINE_BREAKDOWN.md
+/PITCH_PIPELINE_VERIFICATION.md

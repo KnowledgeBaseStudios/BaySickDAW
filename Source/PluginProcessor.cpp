@@ -1141,7 +1141,15 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
         // The channel's OWN pitch time map (index-matched; also the stamp slot).
         auto& ownEntry = mBlockAlignEntries[(size_t) (routeCh - MixerChannelIds::kVoxBase)];
         const bool alignActive = (ae != nullptr) && ae->chainOn;
-        const bool pitchActive = ownEntry.pitchMap != nullptr && ownEntry.pitchChainOn;
+        // QA-Fe Option A (owner-confirmed 2026-07-15): the pitch tab's timing AND
+        // pitch are ALWAYS baked into the cache now -- never the realtime file-read
+        // warp.  Holding pitchActive off means a not-yet-baked edit plays DRY (raw)
+        // through the async bake window instead of the decode varispeed, which was
+        // the pre-bake "funky / rolling" artifact; once the cache publishes,
+        // processFilePlay owns the sound.  sourcePosAt collapses to align-only (or
+        // linear); the pitchMap/pitchOrigin decode branch is now runtime-dead (a
+        // follow-up removes it -- left in place here to keep this fix minimal).
+        const bool pitchActive = false;
         const bool wantWarp    = alignActive || pitchActive;
 
         if (player.alignEngaged || wantWarp)
@@ -1843,6 +1851,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             }
             e.pitchMap     = vp->mPitch.loadTimeMapSnapshot();
             e.pitchChainOn = vp->isPitchEditChainOn();
+            e.pitchBaked   = vp->mPitch.hasBakedCache();
         }
     }
 
@@ -5906,6 +5915,17 @@ void VibeSynthProcessor::addLiveInputParams (const juce::String& prefix)
         apvts.createAndAddParameter (std::make_unique<juce::AudioParameterBool> (
             VID(prefix + "_inputChannelStereo"),
             prefix + " Input Stereo", false));
+    // QA-Fe Task 5: live-monitor mode (Vox only -- the realtime pitch corrector
+    // is a vocal stage).  Right-click the strip's Listen LED to choose:
+    //   0 = True Dry (bare voice, no corrector + no chain)
+    //   1 = Bypass Pitch Corrector (chain character, no ~48 ms correction) -- DEFAULT
+    //   2 = With Effect (full processed chain incl. the corrector's ~48 ms).
+    // The RECORDED take is corrected in every mode (the WET tap is separate).
+    if (prefix.startsWith ("mixer_vox_")
+        && apvts.getParameter (prefix + "_monitorMode") == nullptr)
+        apvts.createAndAddParameter (std::make_unique<juce::AudioParameterInt> (
+            VID(prefix + "_monitorMode"),
+            prefix + " Monitor Mode", 0, 2, 1));
 }
 
 void VibeSynthProcessor::setInputChannelName (const juce::String& stripPrefix,

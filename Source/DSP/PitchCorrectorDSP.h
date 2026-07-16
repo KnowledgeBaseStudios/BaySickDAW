@@ -1,38 +1,51 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PitchTrackerYIN.h"
-#include "PitchShifters.h"
 #include <array>
 #include <atomic>
+#include <memory>
+#include <vector>
+
+// QA-Fe Task 4: the real-time pitch engine is Rubber Band's LiveShifter,
+// forward-declared here; the concrete header is included only in the .cpp.
+// PitchCorrectorDSP is standalone-only, where BaySickRubberBand is always
+// linked (BAYSICK_HAS_RUBBERBAND).
+namespace RubberBand { class RubberBandLiveShifter; }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PitchCorrectorDSP - Phase H-5 (2026-05-01), QA-F Task 5 quality pass
-// (2026-07-09)
+// PitchCorrectorDSP - realtime vocal pitch correction (QA-Fe Task 4, 2026-07-14)
 // ─────────────────────────────────────────────────────────────────────────────
-// Realtime pitch correction wrapper for BaySickVocal.  Owns:
-//   * PitchTrackerYIN for fundamental detection (40-1500 Hz, ~50 ms latency)
-//   * PsolaShifter (PitchShifters.h) for the realtime audio path -- period-
-//     synchronous OLA at ~2-pitch-period latency, period fed from the YIN
-//     tracker.  Chosen over a phase vocoder per Call 2a: PV adds ~40 ms,
-//     which confuses a learner monitoring themselves live.
-//   * CepstralFormantEngine pair for Formant Preserve + Throat Shift
-//     (engaged only while either is active; adds ~20 ms on the wet path).
+// Realtime auto-tune wrapper for BaySickVocal.  Owns:
+//   * PitchTrackerYIN for fundamental detection (40-1500 Hz, ~50 ms latency).
+//   * RubberBand::RubberBandLiveShifter for the audio path
+//     (OptionFormantPreserved | OptionWindowShort, ~48 ms latency).  Replaces
+//     the retired TD-PSOLA + cepstral-formant path: PSOLA's moire warble was
+//     worst at the small corrections this stage makes (QA-Fe engine pivot).
 //
 // Algorithm:
 //   1. Audio thread pushes input samples into PitchTrackerYIN.
-//   2. Read tracker's detected fundamental Hz.
-//   3. Convert to MIDI float, snap to nearest note in active Key/Scale --
+//   2. Read the tracker's detected fundamental Hz.
+//   3. Convert to MIDI float, snap to nearest note in the active Key/Scale --
 //      with note-change hysteresis so vibrato doesn't flip-flop targets.
 //   4. Compute desired shift ratio = targetHz / detectedHz.
-//   5. Smooth toward target shift over RetuneSpeed ms.
-//   6. Apply Strength: blend between 1.0 (no correction) and target ratio.
+//   5. Smooth toward the target ratio over RetuneSpeed ms.
+//   6. Apply Strength: blend between 1.0 (no correction) and the target ratio.
 //   7. Add Humanize: small random walk in cents.
-//   8. Apply ratio via PSOLA; optionally re-impose the dry spectral
-//      envelope (Formant Preserve) / shift it (Throat Shift).
+//   8. Feed the LiveShifter (formant-preserving); Throat maps to its formant
+//      scale.
 //
-// Mode switch (Realtime vs Offline) is a UI/processing choice; the DSP class
-// itself runs the realtime path.  BaySickAlign + BaySickPitch render offline
-// through BaySickAlignDSP / the PitchShifters trio instead of this wrapper.
+// LiveShifter contract (framework quirk): shift() consumes and returns EXACTLY
+// getBlockSize() frames, fixed for the shifter's lifetime -- unrelated to the
+// JUCE block -- so the JUCE block is re-partitioned through an input/output
+// FIFO.  Total added latency = getStartDelay() + one block (getLatencySamples);
+// the engine is cold-started on the correction-engage edge (the ~48 ms delay is
+// acquired there, per B3/B6).  Correction is mono (the vocal source is a mono
+// mic duplicated L=R; the wet stream is written to every channel), matching the
+// editor's mono bake.
+//
+// Mode switch (Realtime vs Offline) is a UI/processing choice; this DSP class
+// runs the realtime path.  BaySickAlign + BaySickPitch render offline through
+// BaySickAlignDSP / the LibraryPitchShifters bake seam instead of this wrapper.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PitchCorrectorDSP
@@ -100,6 +113,11 @@ public:
     float getCurrentShiftCents()   const noexcept { return mCurrentShiftCents.load (std::memory_order_acquire); }
     float getDetectionConfidence() const noexcept { return mTracker.getConfidence(); }
 
+    // QA-Fe Task 4: total wet-path latency (LiveShifter start delay + one block).
+    // 0 when the shifter isn't built in.  Exposed so the record/monitor path can
+    // choose to compensate.
+    int getLatencySamples() const noexcept { return mLatencySamples; }
+
 private:
     // ── Note / scale math ────────────────────────────────────────────────────
     float snapMidiToScale (float midiFloat) const noexcept;
@@ -109,24 +127,46 @@ private:
     // ── YIN tracker ──────────────────────────────────────────────────────────
     PitchTrackerYIN mTracker;
 
-    // ── QA-F Task 5: PSOLA shifter + formant machinery (per channel) ────────
-    // Replaces the H-5 2-grain granular Shifter: PSOLA's epoch-grid grains
-    // stay period-coherent (no comb/warble) and its latency is ~2 pitch
-    // periods.  The formant engines only run while Formant Preserve or
-    // Throat Shift is active; the engage edge resets them (their ~20 ms
-    // latency appears/disappears with the mode).
-    std::array<PsolaShifter, 2>          mShifters;   // L and R
-    std::array<CepstralFormantEngine, 2> mFormant;    // L and R
-    bool mFormantEngaged { false };
+    // ── QA-Fe Task 4: Rubber Band LiveShifter + JUCE-block <-> fixed-block FIFO ─
+    // The shifter's block size is fixed at construction and unrelated to the JUCE
+    // block, so mInFifo accumulates mono input into whole shift() blocks and
+    // mOutFifo buffers the shifted output back out at arbitrary JUCE block sizes.
+    // Single-threaded (audio thread only): no locks, preallocated in prepare().
+    struct MonoFifo
+    {
+        std::vector<float> buf;
+        int cap { 0 }, head { 0 }, count { 0 };
+        void init (int capacity);
+        void clear() noexcept;
+        int  size() const noexcept { return count; }
+        void push (const float* src, int n) noexcept;
+        void pushZeros (int n) noexcept;
+        void pop  (float* dst, int n) noexcept;
+    };
+
+#if BAYSICK_HAS_RUBBERBAND
+    std::unique_ptr<RubberBand::RubberBandLiveShifter> mLive;   // null if not yet prepared
+#endif
+    MonoFifo mInFifo, mOutFifo;
+    std::vector<float> mInBlock, mOutBlock;   // shift() de-interleaved scratch (mBlockSize)
+    std::vector<float> mMonoIn,  mWetOut;     // per-JUCE-block mono in / wet out (mMaxBlock)
+    int  mBlockSize      { 0 };
+    int  mMaxBlock       { 0 };
+    int  mLatencySamples { 0 };               // getStartDelay() + mBlockSize
+    bool mLiveActive     { false };           // running the shifter vs settled-bypass cold
+    // Last values pushed to the shifter -- CPU-guard redundant RT-safe setters.
+    double mLivePitchScale   { 1.0 };
+    double mLiveFormantScale  { 0.0 };        // 0.0 == auto (OptionFormantPreserved)
+    bool   mLivePreserve      { true };       // last setFormantOption state
 
     // ── Parameter state ──────────────────────────────────────────────────────
     int   mKey             { 0 };          // 0 = C
     Scale mScale           { Scale::Chromatic };
     float mRetuneSpeedMs   { 50.0f };
     float mStrength        { 1.0f };
-    bool  mFormantPreserve { false };       // toggle stored, DSP no-op for H-5
+    bool  mFormantPreserve { false };       // -> LiveShifter formant option
     float mHumanizeCents   { 0.0f };
-    float mThroatSemis     { 0.0f };        // toggle stored, DSP no-op for H-5
+    float mThroatSemis     { 0.0f };        // -> LiveShifter formant scale (Throat)
 
     // ── Smoothed pitch correction state ─────────────────────────────────────
     float mCurrentShiftRatio { 1.0f };      // smoothed toward target
@@ -137,12 +177,12 @@ private:
     // vibrato around a boundary doesn't flip-flop the target (the "warble").
     float mCurrentTargetMidi { -1.0f };
 
-    // ── QA-Fd 11/16a engage crossfade ────────────────────────────────────────
-    // The shifters' input rings stay warm while bypassed (feedSample copy;
-    // zero synthesis, zero added latency).  Engage/disengage runs a ~40 ms
-    // equal-power crossfade between the dry tap and the corrected tap, so
-    // the shifter's spin-up (and the formant engines' reset) never lands as
-    // a click.  0 = fully dry (synthesis skipped once settled), 1 = wet.
+    // ── QA-Fd 11/16a engage crossfade (QA-Fe Task 4: cold-start engine) ──────
+    // The LiveShifter is cold while settled-bypassed (fast path, no CPU); it is
+    // reset + fed on the engage edge.  Engage/disengage runs a ~40 ms equal-power
+    // crossfade between the dry tap and the wet tap so the transition never lands
+    // as a click.  The wet tap carries the shifter's ~48 ms latency, so a one-time
+    // delay jump at the edges is expected (B6).  0 = fully dry, 1 = wet.
     float mEngageFade     { 0.0f };
     // 1/(0.04*sr); prepare() re-derives.  Non-zero default keeps the fade
     // functional even if a block slips in before prepare.

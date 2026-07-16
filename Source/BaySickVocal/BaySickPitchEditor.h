@@ -80,6 +80,9 @@ private:
     void runReset();
     void refreshComposite();          // waveform cache for the pills
     void showSendNotesMenu();
+    // QA-Fe: WORLD-is-offline notice (once, until "do not show again").  Fired
+    // from the toolbar engine dropdown when the user picks WORLD.
+    void showWorldOfflineNotice();
     // QA-Fa recovery: version-history restore points (bundle item 3).
     void runSnapshotVersion();
     void showVersionsMenu();
@@ -112,6 +115,10 @@ private:
     void showPillMenu (int idx);
     void restoreToOriginal (const std::vector<int>& idxs);   // 15b full reset
     void snapToSemitone (const std::vector<int>& idxs);      // 18a menu item
+    void toggleSliceExcluded (int idx);   // include/exclude a piece from correction
+    // #3: force out-of-scale notes onto the nearest in-key lane center; in-key
+    // notes keep their natural cents (Root/Scale-driven; no-op on Chromatic).
+    void forceSelectionToScale (const std::vector<int>& idxs);
     void mergeSelection();                                    // merge/join
     void batchRepitchTo (int midiNote);                       // keyboard click
     void copySelection();                                     // 20a
@@ -168,10 +175,6 @@ private:
 
     bool mAutoScroll { true };
 
-    // [PITCH DIAG] G2 boundary (Rule 4, Remove at close)
-    int  mDiagTick  { 0 };
-    bool mDiagArmed { false };
-
     // Playhead: follows the MAIN transport (incl. stop-reset) at 30 Hz.
     double mPlayheadSec { -1.0 };   // composite seconds; < 0 = hidden
     int    mSlowTick    { 0 };      // 30 Hz timer -> ~2 Hz slow path
@@ -180,6 +183,8 @@ private:
     // Multi-select reset prompt's never-show-again checkbox (owned so the
     // async AlertWindow can host it without lifetime games).
     std::unique_ptr<juce::ToggleButton> mResetPromptCheck;
+    // QA-Fe: WORLD-offline notice's do-not-show-again checkbox (async-owned).
+    std::unique_ptr<juce::ToggleButton> mWorldPromptCheck;
 
     // Clipboard: edit-state transfer (locked 20a) -- audio never relocates.
     struct EditClipboard

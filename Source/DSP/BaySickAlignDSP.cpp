@@ -1,6 +1,6 @@
 #include "BaySickAlignDSP.h"
 #include "PhaseVocoder.h"
-#include "PitchShifters.h"
+#include "LibraryPitchShifters.h"   // QA-Fe: PitchEngine + IPitchShifter bake seam
 #include <algorithm>
 #include <cmath>
 
@@ -693,107 +693,29 @@ juce::AudioBuffer<float> BaySickAlignDSP::applyWarp (const float* dubMono, int n
         }
     }
 
-    // ── Phase 2: pitch pass over the warped result (anchor deltas +
-    //    Transpose) ─────────────────────────────────────────────────────────
-    const int fade = juce::jmax (1, (int) std::round (sampleRate * 0.005));
+    // ── Phase 2: pitch pass over the warped result (anchor deltas + Transpose) ──
+    // QA-Fe: bake the pitch envelope through the selected library engine
+    // (pitchAlgo -> PitchEngine; Task 3 owns the dropdown + old-value migration).
     bool anyPitch = std::abs (extraSemis) > 0.01f;
     for (const auto& a : map.anchors)
         if (std::abs (a.pitchSemis) > 0.01f) { anyPitch = true; break; }
     if (! anyPitch)
         return out;
 
-    if (pitchAlgo == 2)
+    // Per-sample pitch ratio from the anchor-cursor semis lerp (guide-time domain)
+    // + the global Transpose, then a length-preserved bake over the warped result.
+    std::vector<float> ratio ((size_t) outLen, 1.0f);
     {
-        // Phase Vocoder: per anchor-segment constant delta (segment midpoint),
-        // 5 ms crossfades between differently-shifted spans.
-        std::vector<float> shifted ((size_t) outLen, 0.0f);
-        std::vector<float> acc     ((size_t) outLen, 0.0f);
-        std::vector<float> wsum    ((size_t) outLen, 0.0f);
-        for (size_t i = 0; i + 1 < map.anchors.size(); ++i)
-        {
-            const juce::int64 dstA = juce::jlimit ((juce::int64) 0, (juce::int64) outLen,
-                (juce::int64) std::llround (map.anchors[i].guideTimeSec * sampleRate));
-            const juce::int64 dstB = juce::jlimit (dstA, (juce::int64) outLen,
-                (juce::int64) std::llround (map.anchors[i + 1].guideTimeSec * sampleRate));
-            const int n = (int) (dstB - dstA);
-            if (n <= 0) continue;
-            const float semis = 0.5f * (map.anchors[i].pitchSemis
-                                        + map.anchors[i + 1].pitchSemis) + extraSemis;
-            const juce::int64 ea = juce::jmax ((juce::int64) 0, dstA - fade);
-            const juce::int64 eb = juce::jmin ((juce::int64) outLen, dstB + fade);
-            const int en = (int) (eb - ea);
-            if (en <= 0) continue;
-            shifted.assign ((size_t) en, 0.0f);
-            if (std::abs (semis) > 0.01f)
-                PvShifter::shiftBufferMono (dst + ea, shifted.data(), en,
-                                            std::pow (2.0, (double) semis / 12.0));
-            else
-                std::copy (dst + ea, dst + ea + en, shifted.begin());
-            for (int j = 0; j < en; ++j)
-            {
-                float g = 1.0f;
-                if (j < 2 * fade)      g = (float) (j + 1) / (float) (2 * fade);
-                if (j >= en - 2 * fade) g = juce::jmin (g, (float) (en - j) / (float) (2 * fade));
-                acc [(size_t) (ea + j)] += shifted[(size_t) j] * g;
-                wsum[(size_t) (ea + j)] += g;
-            }
-        }
-        for (int j = 0; j < outLen; ++j)
-            dst[j] = (wsum[(size_t) j] > 0.01f) ? acc[(size_t) j] / wsum[(size_t) j]
-                                                 : dst[j];
-    }
-    else
-    {
-        // PSOLA / Granular: one continuous streaming pass with a per-sample
-        // delta lerp.  The period track (PSOLA) is PRE-computed at a 2048
-        // hop -- per-sample YIN would take seconds per render -- and the
-        // semis lerp advances an anchor cursor instead of re-scanning the
-        // anchor list every sample.  A lead-in of real audio primes the
-        // shifter; its (approximate) latency is skipped so the result stays
-        // time-aligned -- residual error is a few ms, inside alignment
-        // tolerance.
-        PsolaShifter    psola;
-        GranularShifter gran;
-        psola.prepare (sampleRate, 512);
-        gran .prepare (sampleRate, 512);
-
-        const bool usePsola = (pitchAlgo == 0);
-        const int  lat      = usePsola ? 600 : 1200;   // ~2 mean periods / ~1 grain
-
-        std::vector<float> periodTrack;
-        if (usePsola)
-        {
-            const int hop = 2048;
-            const int nFrames = outLen / hop + 1;
-            periodTrack.assign ((size_t) nFrames, 256.0f);
-            float last = 256.0f;
-            for (int f = 0; f < nFrames; ++f)
-            {
-                const int start = juce::jlimit (0, juce::jmax (0, outLen - kYinWin), f * hop);
-                const float f0 = estimateF0Hz (dst + start, outLen - start, sampleRate);
-                if (f0 > 0.0f)
-                    last = (float) (sampleRate / (double) f0);
-                periodTrack[(size_t) f] = last;
-            }
-        }
-
-        std::vector<float> shifted ((size_t) outLen, 0.0f);
         const auto& an = map.anchors;
         size_t ai = 0;
-
-        for (int j = -lat; j < outLen; ++j)
+        for (int j = 0; j < outLen; ++j)
         {
-            const int src = juce::jlimit (0, outLen - 1, j + lat);
-            if (usePsola && ((j + lat) & 2047) == 0)
-                psola.setPeriodSamples (periodTrack[(size_t) juce::jmin (
-                    (int) periodTrack.size() - 1, src / 2048)]);
-
-            // Anchor-cursor semis lerp (guide-time domain).
-            const double gSec = (double) juce::jmax (0, j) / sampleRate;
-            while (ai + 2 < an.size() && gSec >= an[ai + 1].guideTimeSec)
-                ++ai;
-            float semis;
+            float semis = 0.0f;
+            if (an.size() >= 2)
             {
+                const double gSec = (double) j / sampleRate;
+                while (ai + 2 < an.size() && gSec >= an[ai + 1].guideTimeSec)
+                    ++ai;
                 const auto& a = an[ai];
                 const auto& b = an[ai + 1];
                 if (gSec <= a.guideTimeSec)      semis = a.pitchSemis;
@@ -801,19 +723,23 @@ juce::AudioBuffer<float> BaySickAlignDSP::applyWarp (const float* dubMono, int n
                 else
                 {
                     const double d = b.guideTimeSec - a.guideTimeSec;
-                    const double t = (d > 1e-9) ? (gSec - a.guideTimeSec) / d : 0.0;
+                    const double t = (d > 1.0e-9) ? (gSec - a.guideTimeSec) / d : 0.0;
                     semis = a.pitchSemis + (float) t * (b.pitchSemis - a.pitchSemis);
                 }
             }
+            else if (! an.empty())
+                semis = an.front().pitchSemis;
             semis += extraSemis;
-            const float ratio = std::pow (2.0f, semis / 12.0f);
-            const float v = usePsola ? psola.processSample (dst[src], ratio)
-                                     : gran .processSample (dst[src], ratio);
-            if (j >= 0)
-                shifted[(size_t) j] = v;
+            ratio[(size_t) j] = std::pow (2.0f, semis / 12.0f);
         }
-        std::copy (shifted.begin(), shifted.end(), dst);
     }
+
+    std::vector<float> shifted ((size_t) outLen, 0.0f);
+    if (auto shifter = makePitchShifter ((PitchEngine) juce::jlimit (0, 2, pitchAlgo)))
+        shifter->bake (dst, shifted.data(), outLen, sampleRate, ratio.data(), nullptr);
+    else
+        std::copy (dst, dst + outLen, shifted.begin());
+    std::copy (shifted.begin(), shifted.end(), dst);
 
     return out;
 }

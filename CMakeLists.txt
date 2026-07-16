@@ -268,6 +268,90 @@ else()
     set(BAYSICK_HAS_LUNASVG FALSE)
 endif()
 
+# ── QA-Fe (2026-07-13): vocal pitch-shift engines (WORLD / Rubber Band / Signalsmith) ──
+# The vocal pitch editor, BaySickAlign, and real-time correction moved off the
+# in-house PSOLA engine onto three vendored library engines.  All are standalone-
+# only (the pitch DSP is not in the VST scaffolding target).  Full license text
+# is bundled per lib under libs/<lib>/ (repo-root LICENSE is GPLv3;
+# THIRD_PARTY_LICENSES.md summarizes):
+#   * WORLD               -- modified-BSD (permissive)
+#   * Rubber Band R3      -- GPL v2-or-later (GPLv3-compatible; the app ships GPLv3)
+#   * Signalsmith Stretch -- MIT (header-only; depends on Signalsmith Linear)
+#   * Signalsmith Linear  -- MIT (header-only FFT/STFT backend)
+# The global CMAKE_MSVC_RUNTIME_LIBRARY (/MD) set at the top of this file applies
+# to these add_library() targets too (reference_msvc_runtime_md_md_match), so no
+# per-lib runtime patch is needed.
+
+# WORLD (modified-BSD) -- high-quality vocal analysis/synthesis vocoder.  Upstream
+# CMakeLists also builds an unconditional world_tool (audio-IO helpers) + examples
+# we don't want, so -- like BaySickNAMCore -- collect just the 11 core src/*.cpp
+# into our own static lib.  Headers live in src/world/ and sources include them as
+# "world/<x>.h", so the PUBLIC include root is src/.
+set(WORLD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/world")
+if(EXISTS "${WORLD_DIR}/src/harvest.cpp")
+    add_library(BaySickWorld STATIC
+        "${WORLD_DIR}/src/cheaptrick.cpp"
+        "${WORLD_DIR}/src/codec.cpp"
+        "${WORLD_DIR}/src/common.cpp"
+        "${WORLD_DIR}/src/d4c.cpp"
+        "${WORLD_DIR}/src/dio.cpp"
+        "${WORLD_DIR}/src/fft.cpp"
+        "${WORLD_DIR}/src/harvest.cpp"
+        "${WORLD_DIR}/src/matlabfunctions.cpp"
+        "${WORLD_DIR}/src/stonemask.cpp"
+        "${WORLD_DIR}/src/synthesis.cpp"
+        "${WORLD_DIR}/src/synthesisrealtime.cpp"
+    )
+    target_include_directories(BaySickWorld PUBLIC "${WORLD_DIR}/src")
+    if(MSVC)
+        target_compile_options(BaySickWorld PRIVATE /W0)
+    endif()
+    set(BAYSICK_HAS_WORLD TRUE)
+else()
+    message(STATUS "WORLD not found at ${WORLD_DIR}/src/harvest.cpp"
+                   " -- WORLD pitch engine will be disabled.")
+    set(BAYSICK_HAS_WORLD FALSE)
+endif()
+
+# Rubber Band R3 (GPL v2+) -- general-purpose stretch/shift; R3 offline + the
+# R3LiveShifter real-time variant.  Upstream builds with meson (no CMakeLists);
+# it ships a single-file compilation unit (single/RubberBandSingle.cpp) that
+# #includes every needed src/*.cpp with the built-in FFT + BQ resampler and
+# NO_THREADING -- exactly the portable static build we want.  The file must stay
+# at single/ for its "../src" relative includes to resolve; the only extra include
+# it needs is libs/rubberband (for the public rubberband/*.h it references).
+set(RUBBERBAND_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/rubberband")
+if(EXISTS "${RUBBERBAND_DIR}/single/RubberBandSingle.cpp")
+    add_library(BaySickRubberBand STATIC "${RUBBERBAND_DIR}/single/RubberBandSingle.cpp")
+    target_include_directories(BaySickRubberBand PUBLIC "${RUBBERBAND_DIR}")
+    if(MSVC)
+        # Windows.h is pulled in by src/common/sysutils.cpp; NOMINMAX keeps its
+        # min/max macros from clashing with the library's std::min/max use.
+        target_compile_definitions(BaySickRubberBand PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        target_compile_options(BaySickRubberBand PRIVATE /W0)
+    endif()
+    set(BAYSICK_HAS_RUBBERBAND TRUE)
+else()
+    message(STATUS "Rubber Band single-file unit not found at ${RUBBERBAND_DIR}/single/RubberBandSingle.cpp"
+                   " -- Rubber Band pitch engine will be disabled.")
+    set(BAYSICK_HAS_RUBBERBAND FALSE)
+endif()
+
+# Signalsmith Stretch + Linear (MIT) -- header-only, no compiled target.  Stretch's
+# public header (signalsmith-stretch/signalsmith-stretch.h) #includes
+# "signalsmith-linear/stft.h", so BOTH packaged include/ roots go on the consumer
+# include path; stft.h then resolves its own "./fft.h" locally.
+set(SIGSMITH_STRETCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/signalsmith-stretch")
+set(SIGSMITH_LINEAR_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/libs/signalsmith-linear")
+if(EXISTS "${SIGSMITH_STRETCH_DIR}/include/signalsmith-stretch/signalsmith-stretch.h"
+   AND EXISTS "${SIGSMITH_LINEAR_DIR}/include/signalsmith-linear/stft.h")
+    set(BAYSICK_HAS_SIGNALSMITH TRUE)
+else()
+    message(STATUS "Signalsmith Stretch/Linear headers not found under libs/signalsmith-*/include"
+                   " -- Signalsmith pitch engine will be disabled.")
+    set(BAYSICK_HAS_SIGNALSMITH FALSE)
+endif()
+
 # ── Legacy plugin target (NOT shipped; BaySickDAW is standalone-only) ────────
 # Kept as build scaffolding only. Do not distribute. See
 # memory/feedback_standalone_only_no_vst.md for rationale.
@@ -345,6 +429,8 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/PitchCorrectorDSP.cpp
     Source/DSP/BaySickAlignDSP.cpp
     Source/DSP/BaySickPitchDSP.cpp
+    # QA-Fe (2026-07-13) - library pitch-engine bake seam (Rubber Band / Signalsmith / WORLD)
+    Source/DSP/LibraryPitchShifters.cpp
     Source/DSP/ReverbDSP.cpp
     Source/DSP/ChorusDSP.cpp
     Source/DSP/DelayDSP.cpp
@@ -465,7 +551,9 @@ target_compile_definitions(BaySickDAWStandalone
 )
 
 target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Engine Source/Engine/Tasks Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn
-    # Rubber Band Library (Phase 4B time-stretch) — headers only; link rubberband.lib to enable DSP
+    # Rubber Band Library -- public headers (rubberband/*.h) so consumer code can
+    # #include <rubberband/RubberBandLiveShifter.h>.  The compiled library links
+    # via BaySickRubberBand (QA-Fe); this include is also propagated by that lib.
     "${CMAKE_CURRENT_SOURCE_DIR}/libs/rubberband"
     # moodycamel::ConcurrentQueue — vendored single-header MPMC queue for the
     # multi-threaded render engine. Drop concurrentqueue.h into this folder.
@@ -512,6 +600,25 @@ if(BAYSICK_HAS_LUNASVG)
     target_link_libraries(BaySickDAWStandalone PRIVATE lunasvg)
     target_include_directories(BaySickDAWStandalone PRIVATE "${LUNASVG_DIR}/include")
     target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_LUNASVG=1)
+endif()
+
+# QA-Fe -- link the vocal pitch-shift engines (standalone-only) when vendored.
+# WORLD + Rubber Band are compiled static libs; Signalsmith is header-only (just
+# include paths).  Each gets a BAYSICK_HAS_<engine>=1 define so the IPitchShifter
+# seam can #if out an engine that isn't present.
+if(BAYSICK_HAS_WORLD)
+    target_link_libraries(BaySickDAWStandalone PRIVATE BaySickWorld)
+    target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_WORLD=1)
+endif()
+if(BAYSICK_HAS_RUBBERBAND)
+    target_link_libraries(BaySickDAWStandalone PRIVATE BaySickRubberBand)
+    target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_RUBBERBAND=1)
+endif()
+if(BAYSICK_HAS_SIGNALSMITH)
+    target_include_directories(BaySickDAWStandalone PRIVATE
+        "${SIGSMITH_STRETCH_DIR}/include"
+        "${SIGSMITH_LINEAR_DIR}/include")
+    target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_SIGNALSMITH=1)
 endif()
 
 # ── Generate PDBs in Release builds so minidumps symbolicate ─────────────────

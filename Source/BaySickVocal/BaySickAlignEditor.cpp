@@ -815,9 +815,10 @@ public:
         setupBand (mTypeDub,   "bsa_pitch_typeDub",   "Follower", mTypeDubAtt);
 
         addAndMakeVisible (mAlgoCombo);
-        mAlgoCombo.addItem ("PSOLA",         1);
-        mAlgoCombo.addItem ("Granular",      2);
-        mAlgoCombo.addItem ("Phase Vocoder", 3);
+        // QA-Fe B2: engine dropdown (bsa_pitch_algo value order 0/1/2).
+        mAlgoCombo.addItem ("Rubber Band - Balanced",           1);
+        mAlgoCombo.addItem ("Signalsmith - Lightest (Low CPU)", 2);
+        mAlgoCombo.addItem ("WORLD - Highest Quality (High CPU)", 3);
         mAlgoCombo.setColour (juce::ComboBox::backgroundColourId, kPanelBg);
         mAlgoCombo.setColour (juce::ComboBox::textColourId, kText);
         mAlgoAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (

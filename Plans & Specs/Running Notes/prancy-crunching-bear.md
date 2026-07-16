@@ -326,3 +326,1020 @@ monitoring. Slot = Phase 3 (DSP/effects follow-up to QA-EffectsReview).
 bear.md` full rewrite; Main Plan §5 (QA-Fe re-scope + QA-OctavePedal) / §6 arrow /
 §9 fifty-eighth Forks / QA-Updater dev-watcher task; this running-notes entry;
 memory `feedback_surface_full_research_recommendations`.
+
+---
+
+## 2026-07-13 — Task 1 (LIBRARY-ENGINE) — vendor wiring + LICENSE code-complete (pending Jeff build)
+
+**New Task 1** (the re-scoped one, NOT the retired PSOLA-restore Task 1 above).
+Vendor wiring only -- no DSP yet.  Files touched:
+
+- **`LICENSE`** (repo root, NEW, B9) -- canonical GPLv3 fetched byte-exact from
+  gnu.org/licenses/gpl-3.0.txt via `curl --ssl-no-revoke` (schannel CRL check
+  fails on this box; cert chain still validated).  35,149 bytes, 674 lines,
+  "Version 3, 29 June 2007".  Hand-transcription avoided deliberately.
+- **`THIRD_PARTY_LICENSES.md`** (repo root, NEW) -- table of the four vendored
+  pitch engines (WORLD BSD / Rubber Band GPLv2+ / Signalsmith Stretch+Linear
+  MIT) + pointer to each bundled `libs/<lib>/LICENSE.txt`.  Scoped to the QA-Fe
+  vendoring; a full manifest is a pre-release `/audit-licenses` job.  *(Placement
+  flagged to Jeff -- easy to move/rename/fold.)*
+- **`CMakeLists.txt`** -- three static-lib/include blocks after the LunaSVG block
+  + a link block after the LunaSVG link block + a stale-comment fix on the old
+  rubberband headers-only include (Rule 6 edited-region cleanup):
+  - **WORLD** -> `BaySickWorld` STATIC, 11 `src/*.cpp` collected manually (the
+    NAM pattern; upstream CMakeLists also builds an unconditional `world_tool` +
+    examples we don't want).  PUBLIC include `src/` (sources include `world/*.h`).
+  - **Rubber Band** -> `BaySickRubberBand` STATIC from the single-file unit
+    `single/RubberBandSingle.cpp` (built-in FFT + BQ resampler + NO_THREADING;
+    upstream has no CMakeLists, meson-only).  PUBLIC include `libs/rubberband`;
+    MSVC `NOMINMAX`/`WIN32_LEAN_AND_MEAN` (sysutils.cpp pulls in Windows.h).
+  - **Signalsmith** -> header-only, no target; include dirs
+    `signalsmith-stretch/include` + `signalsmith-linear/include` (stretch's
+    header `#include`s `signalsmith-linear/stft.h`, which resolves `./fft.h`
+    locally).
+  - `/MD` runtime is inherited from the global `CMAKE_MSVC_RUNTIME_LIBRARY` CACHE
+    FORCE at the top of the file (`reference_msvc_runtime_md_md_match`) -- no
+    per-lib patch needed (unlike sfizz).
+  - `/W0` on both compiled libs (vendored third-party; not our warnings).
+  - Each engine gets a `BAYSICK_HAS_<engine>=1` define for the Task-2 `IPitchShifter`
+    `#if` guards; all standalone-only (pitch DSP is not in the VST target).
+
+**What the build proves:** `do_build.bat` builds `--target BaySickDAWStandalone`
+(not ALL_BUILD), so linking BaySickWorld + BaySickRubberBand into the standalone
+is what forces them to compile.  A clean build => WORLD (11 files) + Rubber Band
+(single unit) COMPILE + LINK on MSVC /MD, both configs.  **Signalsmith is
+header-only** -- nothing includes it until the Task-2 wrapper, so its MSVC
+compile is verified THEN, not here (told Jeff).  `cmake --build` auto-reconfigures
+via ZERO_CHECK when CMakeLists changes, so the new targets appear without a manual
+configure step.
+
+**No spec calls** in Task 1 (integration mechanics are Rule-8 my call).  One flag:
+the `THIRD_PARTY_LICENSES.md` file placement (Jeff can redirect).
+
+**Build checkpoint (no commit) -- pending Jeff's build of both configs + confirm
+all four engines wire in.**
+
+---
+
+## 2026-07-13 — Task 1 — BUILD-ENV FINDING: VS toolset update invalidated the CMake cache (not a QA-Fe bug)
+
+**Symptom:** first Task-1 build failed at `project()` with
+`CMAKE_C/CXX_COMPILER: .../MSVC/14.50.35717/.../cl.exe is not a full path to an
+existing compiler tool` (both the top-level configure and juceaide's nested one).
+
+**Root cause:** Visual Studio (18 2026 / Community) auto-updated its MSVC toolset
+from **14.50.35717 -> 14.51.36231**; the old toolset dir was removed.  The
+existing `build/` cache still pinned the deleted `14.50` `cl.exe` in two
+`CMakeCache.txt` (main + `juce_build/tools/`) + the `CMakeFiles/*/CMakeC*Compiler.cmake`
+detection files.  My CMakeLists edit merely *triggered* the ZERO_CHECK
+reconfigure that exposed it -- `do_build.bat` only runs `cmake --build`, so the
+dead toolset had sat latent since the VS update.  **NOT caused by the vendor
+wiring.**
+
+**Why a full rebuild is forced (unavoidable):** every target's MSBuild
+`.lastbuildstate` records `VCToolsVersion=14.50.35717`.  On the next build with
+14.51 MSBuild sees the toolset mismatch and force-rebuilds that target -- so the
+9.8 GB of existing objects are invalidated by the toolset bump regardless.  The
+`14.50` string also appears baked inside `.obj` debug records (harmless) and the
+`PlatformToolset` in the .vcxproj is the stable label `v145` (resolves to 14.51
+now; not the problem).
+
+**Fix applied (surgical, keeps the object tree):** deleted only the stale CMake
+metadata -- `build/CMakeCache.txt`, `build/CMakeFiles/`,
+`build/juce_build/tools/CMakeCache.txt`, `build/juce_build/tools/CMakeFiles/`.
+Objects preserved (159 Release .obj intact).  Because `CMakeCache.txt` is gone,
+`cmake --build` alone can't run -- a one-time explicit reconfigure is needed
+first, then `do_build.bat`.  After this, the cache is fresh + future builds go
+back to `do_build.bat`-only.  *(Candidate reference-memory once the reconfigure
+is confirmed working.)*
+
+**Recovery shipped:** `do_configure.bat` (repo root, NEW) -- self-healing
+reconfigure: tries a normal reconfigure, and on the stale-toolset failure it
+clears the CMake cache metadata + reconfigures fresh, logging to
+`configure_log.txt`.  For any future VS-toolset update: run `do_configure.bat`
+then `do_build.bat`.  Reconfigure confirmed working (Jeff ran it, cache
+regenerated clean, new BaySickWorld/BaySickRubberBand vcxproj present).  Process
+misstep this session: I ran the reconfigure once + deleted the cache instead of
+version-bumping in place -> memory `feedback_never_run_builds_jeff_runs_all` +
+`feedback_jeffs_word_is_the_evidence`.
+
+**Task 1 CLOSE:** Jeff built both configs -- BUILDS CLEAN.  WORLD + Rubber Band
+compile + link; Signalsmith include paths wired (header-only, first real compile
+lands with the Task-2 wrapper).  All four engines in.  Build checkpoint passed;
+on to Task 2.
+
+---
+
+## 2026-07-13 — Task 2 — SPEC PIVOT (Jeff): B7 uniform-bake -> Option 3 HYBRID (live-edit + WORLD bake)
+
+**Library API extraction (3 background agents, complete):** precise call-contracts
+mapped for Rubber Band, Signalsmith, WORLD.  Key finding driving the design: Rubber
+Band's OFFLINE mode fixes pitch for the whole pass, so time-varying edits (glide /
+vibrato / pill curves) go through its REAL-TIME engine block-by-block
+(`OptionEngineFiner | OptionFormantPreserved | OptionPitchHighConsistency`,
+`setPitchScale` per block); Signalsmith does per-chunk `setTransposeSemitones` over
+`outputSeek`/`process`/`flush`; WORLD scales per-frame `f0[i] *= ratio` (time-varying
+is native).  Formant/throat: RB `setFormantScale`, Signalsmith
+`setFormantSemitones`, WORLD spectral-envelope warp.  (Full specs archived in the
+agent transcripts; latency + length-preservation recipes captured.)
+
+**Design surfaced to Jeff -> he reopened B7 himself.**  I first framed sync-vs-async
+bake; Jeff pushed the right question -- do real pitch editors let you edit DURING
+playback?  They do (Melodyne / Auto-Tune graphical / Flex Pitch / Newtone, at the UX
+level), and the ONLY reason we were baking is WORLD (offline, heavy, can't stream).
+Rubber Band + Signalsmith CAN stream live during playback of a recorded take.
+
+**DECISION (Jeff, 2026-07-13) -- Option 3, HYBRID (supersedes B7 "uniform bake for
+all three"):**
+- **Rubber Band + Signalsmith = live edit-during-playback** (Melodyne-style): the
+  engine streams under the playhead on the audio thread; edits are heard live.
+- **WORLD = background (async) bake** -- **delayed, NOT a hard freeze** (Jeff's
+  explicit pick).  Edits made during playback apply a moment later when the
+  off-thread bake completes + swaps in (atomic-snapshot, clean crossfade on swap);
+  the app never freezes.
+- **WORLD-select popup** (BaySickPitch only -- Align applies offline regardless):
+  on picking WORLD, show once-until-suppressed:
+  > **WORLD works offline**
+  > WORLD is the highest-quality pitch engine, but it processes offline: edits you
+  > make while audio is playing apply a moment later, not live.  For instant edits
+  > during playback, use Rubber Band or Signalsmith.
+  > `[ ] Don't show this again`
+  Suppress-flag persists to app settings.  **No** dropdown "offline" tag (Jeff
+  declined the extra clutter).
+
+**Plan impact:** B7 (uniform bake) SUPERSEDED by the hybrid model.  Task 2 now
+carries BOTH a live-streaming audio-thread path (RB/Signalsmith) and the async WORLD
+bake + cache + popup, on top of the `IPitchShifter` seam + PSOLA/Granular retirement.
+The plan-file B7 line needs a targeted edit (revised wording surfaced to Jeff before
+it touches the plan file, per the doc-discipline).  Recorded here per Jeff's "update
+the running notes with this and proceed."
+
+**Latency-alignment note (implementation, my call):** the live engines carry real
+latency (RB ~50 ms, Signalsmith ~120 ms).  For playback of a RECORDED take that's a
+sync problem the old ~13 ms PSOLA didn't have -- solved by the editor owning/reading
+the analyzed composite and feeding the engine look-ahead (playhead + engine latency)
+so the shifted output lands time-aligned.  Standard "editor owns its audio" approach.
+
+**Process note:** Jeff flagged that a prior competitive pass had me steering toward
+the easy read instead of surfacing the harder "do it right" option
+(`feedback_surface_full_research_recommendations`).  Owned; no re-research (he
+declined).
+
+---
+
+## 2026-07-13 — Task 2 — Live-path mechanism DECIDED: uniform background re-render (true streaming -> Future State)
+
+**Finding surfaced to Jeff:** true audio-thread streaming vs a fast background
+re-render give the SAME edit-latency for the region CURRENTLY playing (you can't
+change audio already inside the engine's ~50-120 ms latency buffer); editing a
+region AHEAD of the playhead is on-time in both.  The ONLY difference is
+continuous drag-glide-during-playback (true streaming) vs hear-on-drag-release
+(background re-render) -- and background re-render is far simpler + safer (the
+heavy library engine never runs on the audio thread).
+
+**DECISION (Jeff, 2026-07-13):** **uniform background re-render for all three
+engines.**  Rubber Band + Signalsmith are fast enough (16x / 69x realtime) that
+the re-render completes ahead of / on drag-release => feels live; WORLD (3.6x) is
+delayed (the popup explains).  No engine touches the audio thread -- all bake work
+is on a background worker; the audio thread only reads the published cache
+(atomic-snapshot, same liveness contract as the existing edit snapshot).  This
+supersedes the earlier "RB/Signalsmith stream on the audio thread" framing.
+
+**True audio-thread streaming (continuous drag-glide) -> Future State CL-300**
+(`Batch-surfaced (QA-Fe)`), deferred by Jeff.
+
+**Architecture (rest of Task 2, my implementation call):** BaySickPitchDSP stores
+the analyzed composite; the applicator's per-sample target math (region shift +
+focus/snap + vibrato + pitch-shape + variation -> pitch/formant/gain envelopes) is
+reused OFFLINE by the background baker; `IPitchShifter::bake()` produces the
+pitched cache (gain applied after); `processFilePlay` reads the cache at the
+source position instead of running PSOLA per block.  Deletes the PSOLA per-sample
+path + `mShifters`/`mFormant` + the geometry-period code + `[PITCH DIAG]` from the
+editor; retires `PsolaShifter`/`GranularShifter` usage on the editor + Align paths
+(the `PsolaShifter` CLASS stays until Task 4 swaps `PitchCorrectorDSP`).
+
+**Chunk 2b (code-complete, pending build):** offline render now uses the bakers.
+`applyEditsToBuffer` gained ENVELOPE MODE (outRatio/outFormant/outGain != nullptr
+-> write resolved per-sample pitch/formant/gain, skip the PSOLA shift; shifters may
+be null) so the SAME target math feeds the bake with no duplication.  `renderOffline`
+now: envelope mode -> `makePitchShifter(mEngine)->bake()` (length-preserved) -> apply
+gain; old PSOLA lead-in removed (engines self-compensate latency).  New `mEngine`
+atomic (default Rubber Band, B1) + inline `setEngine()` (Task 3 wires the param).
+`processFilePlay`/`Monitor` still PSOLA (unchanged) -> swaps to the cache in 2c.
+Build = compile-check the signature change across call sites + first RB bake path;
+optional Render/Freeze ear-check on a pill-edited take.  Files: BaySickPitchDSP.h/.cpp.
+
+**Routed to QA-Cleanup-1 (Jeff-directed 2026-07-13):** the full-rebuild surfaced
+two C4702 unreachable-code warnings at `StandaloneEditor.cpp:9666-9667` -- a retired
+`ProjectBrowserWindow` block left after an early `return;` in
+`doFileSetDefaultTemplate()` (pre-existing, NOT a QA-Fe change; re-surfaced only
+because the VS-toolset full rebuild recompiled the whole tree).  Jeff routed BOTH
+(a) that dead-code deletion and (b) a full-build compiler-warning cleanup pass (run a
+fresh full build at the cleanup batch, capture the complete our-Source warning set,
+clean everything safely fixable -- the `juce::Font`->`FontOptions` C4996 migration is
+the bulk) to **QA-Cleanup-1** for open-source code cleanliness.  Folded into
+QA-Cleanup-1 §5 scope now (not-yet-started batch, Rule 3); the §9 Forks back-ref lands
+at QA-Fe close.  Jeff's call: do NOT capture the warning list mid-QA-Fe (incremental
+builds miss unchanged files) -- capture it via the fresh full build at QA-Cleanup-1.
+
+---
+
+## 2026-07-13 — Task 2 chunk 2c (EDITOR) — background-cache architecture code-complete
+
+Full rewrite of `BaySickPitchDSP`'s audio-thread + threading path to the uniform
+background-re-render model.  **Editor side done; Align (BaySickAlignDSP) is the
+remaining Task-2 piece (2d) -- still on the old shifters, so the tree builds now.**
+
+- **Composite storage:** `analyzeComposite` keeps the mono composite in a
+  `shared_ptr<const vector<float>>` so the worker reads it race-free.
+- **Envelope extraction:** `applyEditsToBuffer` -> `computeEnvelopes` (envelope-ONLY;
+  no chans/shifters; snapOn/root/scale PASSED IN so the worker doesn't race live
+  members).  Shared `bakeSpan` core (computeEnvelopes -> `IPitchShifter::bake` ->
+  gain) used by BOTH the worker and `renderOffline`.
+- **Background worker:** `BakeWorker : juce::Thread` started in the ctor, stopped in
+  the dtor.  `requestBake()` (message thread; called from `publishEdits` + every
+  edit/knob/engine setter) captures a `BakeInput` under a mutex + `notify()`s; the
+  worker coalesces via `mBakeDirty`, bakes into a fresh `CacheSnapshot`, publishes it
+  lock-free (atomic ptr + 8-deep retire ring).  WORLD's slow bake runs here without
+  freezing the UI; RB/Signalsmith finish fast -> feels live.
+- **Playback:** `processFilePlay`/`Monitor` now just READ the cache at the source
+  position (linear-interp, RT-safe, mono -> all strip channels) -- no PSOLA, no
+  per-sample DSP.  Chain OFF or no-cache -> dry passthrough; outside the composite
+  span -> left dry.  Monitor delegates to processFilePlay (no separate DSP state).
+- **Origin fix:** the bake envelope is composite-relative (`snap.startSample = 0`);
+  the cache carries the TIMELINE origin (`BakeInput.timelineStart = mStartSample`) so
+  the playback read maps device-rate source position -> composite cache index.
+- **Deleted:** the PSOLA per-sample applicator + `mShifters`/`mFormant`/`mMonState`
+  twins + `mActive`/`mRetired` edit snapshot + the geometry-period stabilizer +
+  ApplicatorState geom fields + the whole `Diag` struct.  **[PITCH DIAG] stripped:**
+  editor InfoBar readout (BaySickPitchEditor.h/.cpp) + `PsolaShifter`'s silence-gap
+  counters (PitchShifters.h) -- catalog fully cleared for the editor.  (`PsolaShifter`
+  CLASS stays: PitchCorrectorDSP still uses it until Task 4.)
+- **Behavior notes:** editing is now bake-then-play (RB default feels ~immediate);
+  the bake is MONO (matches mono analysis) so a stereo strip collapses to mono when
+  corrected; chain-off toggles dry/corrected with a hard switch (crossfade = polish
+  if it clicks).
+- Files: BaySickPitchDSP.h/.cpp, BaySickPitchEditor.h/.cpp, PitchShifters.h.
+
+**Align swap (completes Task 2):** `BaySickAlignDSP::applyWarp` Phase-2 pitch pass
+rewritten -- the PSOLA/Granular/PhaseVocoder branches (streaming + PV-crossfade)
+are replaced by ONE path: build a per-sample pitch ratio from the anchor-cursor
+semis lerp (guide-time) + Transpose, then `makePitchShifter((PitchEngine)pitchAlgo)
+->bake()` length-preserved over the warped result.  `pitchAlgo` is now the engine
+index (0=RubberBand/1=Signalsmith/2=WORLD); old-value migration + the dropdown are
+Task 3.  Include swapped PitchShifters.h -> LibraryPitchShifters.h.
+
+**Orphaned by the swaps -> Task 7 remnant sweep** (per the plan's "remove all
+PSOLA/Granular remnants"; Task 2 removed the USAGE, the class removal is Task 7):
+`PitchShifters.h::GranularShifter` + `PitchShifters.h::PvShifter` now have zero
+users (editor + Align were their only consumers).  `PsolaShifter` +
+`CepstralFormantEngine` STAY (PitchCorrectorDSP + BaySickVocalProcessor use them
+until Tasks 4/6).  `OctaveStyleDSP::GranularShifter` is a different class, untouched.
+
+**Task 2 code-complete.** Files: + BaySickAlignDSP.cpp.
+
+---
+
+## 2026-07-13 — Task 3 — engine dropdown + params + labels + migration + WORLD popup
+
+- **`bsp_engine`** (NEW, `addPI("engine",...0,2,0)`) registered + pushed to
+  `mPitch.setEngine((PitchEngine) bsp_engine)` alongside the other pitch setters.
+  Default 0 = Rubber Band (B1).
+- **Migration (old Align -> RB):** `bsp_engine` is net-new, so its ABSENCE in a
+  loaded project's APVTS state marks a pre-QA-Fe project (whose `bsa_pitch_algo`
+  meant PSOLA/Granular/PV) -> `setStateInformation` forces `bsa_pitch_algo` to 0
+  (Rubber Band) after `replaceState`.  New projects (have `bsp_engine`) keep their
+  pick.  Clean version detector, no new marker.  (Old default PSOLA(0) already
+  maps to RB(0); this catches the explicit Granular(1)/PV(2) old picks.)
+- **B2 labels (ASCII, value order 0/1/2):** "Rubber Band - Balanced" /
+  "Signalsmith - Lightest (Low CPU)" / "WORLD - Highest Quality (High CPU)" on
+  BOTH the Align combo (`bsa_pitch_algo`, relabeled) and the new editor combo.
+- **Editor dropdown:** `mEngineCombo` in the BaySickPitch toolbar (row 1, after
+  Send), `ComboBoxAttachment` -> `bsp_engine`.  The Toolbar is now a
+  `ComboBox::Listener`; `comboBoxChanged` (separate from the attachment's onChange)
+  fires the WORLD notice on a user pick.  `mEnginePopupArmed` + the listener being
+  added AFTER the attachment's construction sync suppress the ctor-time fire.
+- **WORLD popup (BaySickPitch only):** `showWorldOfflineNotice()` -- InfoIcon
+  AlertWindow ("WORLD works offline" + the B4 body) with a "Do not show this again"
+  toggle persisted to `ui_prefs.xml` (`pitchWorldOfflineNoPrompt`), mirroring the
+  existing multi-reset prompt (`openUiPrefs()`).  Align has no popup (it applies
+  offline regardless).
+- Files: BaySickVocalProcessor.cpp, BaySickAlignEditor.cpp, BaySickPitchEditor.h/.cpp.
+- **Task 3 code-complete.**
+
+---
+
+## 2026-07-14 — Task 4 — real-time vocal correction -> Rubber Band R3LiveShifter (code-complete, pending Jeff build)
+
+Swapped `PitchCorrectorDSP`'s per-sample PSOLA path (`std::array<PsolaShifter,2>`
++ `std::array<CepstralFormantEngine,2>`) for one `RubberBand::RubberBandLiveShifter`
+(`OptionFormantPreserved | OptionWindowShort`, ~48 ms).  Files:
+`Source/DSP/PitchCorrectorDSP.h/.cpp` only.
+
+**Architecture (the block adapter):** the LiveShifter's `getBlockSize()` is FIXED
+at construction and unrelated to the JUCE block, so `process()` re-partitions
+through a preallocated mono `MonoFifo` pair: mono input accumulates into `mInFifo`;
+whole `getBlockSize()` blocks drain through `shift()` into `mOutFifo`; each JUCE
+block pops `numSamples` of wet back out.  `mOutFifo` is primed with one block of
+zeros at reset (guarantees no underflow for any JUCE block size -- proof: available
+`= B + floor(n/B)*B >= n` for all n).  **Total added latency = `getStartDelay()`
++ one block = `getLatencySamples()`** (new public getter).  All state preallocated
+in `prepare()`; `shift()`/`setPitchScale`/`setFormantScale`/`setFormantOption` are
+RT-safe per the RB docs.
+
+**Correction is MONO** (implementation call): the vocal source is a mono mic
+duplicated L=R, so `process()` averages to mono, runs one shifter, and writes the
+wet stream to every channel -- half the CPU, no L/R divergence, and matches the
+editor's established mono bake.  (The old path ran two independent shifters that
+"may have diverged the channels slightly" -- BaySickVocalProcessor.cpp:557 comment;
+with mono correction they can't, but that comment is in another file + moot since
+the wet recorder sums to mono anyway -- left untouched, not a symbol rename.)
+
+**Formant / throat mapping (Task-4 boundary interpretation):** the LiveShifter's
+NATIVE formant handling replaces the retired `CepstralFormantEngine` on the
+realtime corrector path -- Formant Preserve toggle -> `setFormantOption(Preserved/
+Shifted)`; Throat -> `setFormantScale(2^(semis/12))` (0.0 == auto-preserve),
+matching the LibraryPitchShifters throat convention (`>1` raises formants / smaller
+throat).  Sign verified against the old `CepstralFormantEngine::processFrame`
+(`scale = 2^(-throatSemis/12)` sampling => +semis raises formants).  Rationale for
+doing the realtime throat here (not Task 6): it's the corrector's OWN param
+(`bsv_pitch_throatShift`), part of this swap; **Task 6 is the EDITOR/offline global
+throat** (a NEW `bsp_throat` knob feeding the bake seam) -- a separate throat.
+`CepstralFormantEngine` the CLASS stays (still used at
+BaySickVocalProcessor.cpp:1165, the Align offline throat) until Task 6 moves that
+off it + Task 7 deletes it.
+
+**Engage/disengage = cold-start (per B6):** settled-bypass is a fast path (no
+shifter CPU while realtime pitch is off -- the default);
+`reference_audio_thread_fast_path_bypass`.  The engine is `reset()` + fed on the
+engage edge, so the ~48 ms delay is ACQUIRED at engage (the documented one-time
+delay jump, B6 accept-or-flip at the smoke).  The existing ~40 ms equal-power
+dry<->wet crossfade is retained to mask the dry-side click; it can't hide the
+latency step (that's the B6 artifact).  `mLive->reset()` runs on the audio thread
+but only at the toggle edge (rare), not per block.
+
+**Guarding:** the whole RB path is `#if BAYSICK_HAS_RUBBERBAND` (member + include +
+usage); `#else` = dry passthrough -- preserves the graceful-degradation the batch
+keeps if the vendored lib is absent (before the swap, the corrector had no vendored
+dep, so the guard is a net-new requirement made optional).  `PitchCorrectorDSP.cpp`
+is standalone-only (CMake line 429, not in the VST target), where the define is
+always on.
+
+**Rule 6 comment cleanup (edited regions):** rewrote the class header block +
+member comments for the LiveShifter; fixed two now-WRONG comments -- the `mFormantPreserve`/
+`mThroatSemis` "DSP no-op for H-5" tags (they're live now) and the engage-crossfade
+"input rings stay warm while bypassed (feedSample copy)" comment (removed -- now
+cold-start).
+
+**SPEC CALL (latency of the recorded WET take) -- RESOLVED (Jeff, 2026-07-14 =
+option (b), realign, fold into Task 4):** the corrector now adds ~48 ms + one block
+to the wet path (was ~10 ms PSOLA).  The WET recorder (BaySickVocalProcessor.cpp:553)
+captures the corrector output, so an uncompensated take plays back ~48 ms late vs
+the transport.  This is a RECORDING concern, NOT a monitoring one -- monitoring is
+handled by the Task-5 dry default (dry = zero latency); and it's ONLY the realtime
+LiveShifter path (the editor/Align offline bakers pad + trim their own start delay,
+so those are already time-aligned).
+
+**Fix folded in:** in the WET tap, an audio-thread arm-edge detector (`mPrevWetRecorder`)
+primes `mWetLatencySkip = mPitchCorrector.getLatencySamples()` when the recorder
+arms, then drops that many leading samples (pre-roll / primed silence) before
+`writeBlock`.  So WET[0] aligns to the record-arm moment, matching the parallel
+zero-latency DRY take (both anchor at the same `startBeat`; the clip anchor doesn't
+move, so this realigns rather than truncates the performance).  The WET recorder is
+armed ONLY when realtime pitch is active (PluginProcessor.cpp:4117), so the skip is
+unconditionally `getLatencySamples()` -- no bypass branch needed.  Known minor:
+the corrector's last ~48 ms of latency-buffered tail never flushes to the WET file
+at stop (release/silence for a normal take; the DRY file keeps the full length but
+WET replaces it when rtPitch was on).  Files: BaySickVocalProcessor.h/.cpp.
+
+**Note:** the dry-monitor DEFAULT (B3) is delivered by Task 5 (monitor-button
+right-click Dry/With-Effect).  In Task 4 the live monitor is still the wet
+(delayed) path; the intermediate never ships (bulk-run, one close commit).
+
+- Files: PitchCorrectorDSP.h, PitchCorrectorDSP.cpp, BaySickVocalProcessor.h,
+  BaySickVocalProcessor.cpp.
+- **Task 4 code-complete — pending Jeff build (both configs).**
+
+**Post-Task-4 UI tweak (Jeff, 2026-07-14):** the BaySickPitch engine dropdown
+(`mEngineCombo`) was sitting on row 1 on top of the analyze-state notice.  Moved
+to row 2, right-aligned immediately left of the Snapshot button (off the notice).
+File: BaySickPitchEditor.cpp (Toolbar::resized).  Builds clean.
+
+---
+
+## 2026-07-14 — Task 5 — monitor-button 3-way selector (True Dry / Bypass Pitch Corrector / With Effect)
+
+**Design pivot mid-spec (Jeff, 2026-07-14):** I first surfaced this as a BINARY
+"what does Dry mean" (bypass-corrector-only vs fully-raw).  Jeff correctly called
+that a false either/or -- a right-click *selector* is a choice among options, so
+it should be **3 options**, not one-or-the-other.  Corrected design (B4 widened
+from 2 -> 3 options, Jeff's call):
+- **True Dry** (mode 0) -- bare voice, no corrector + no chain (comp/de-ess/sat/
+  limiter/NAM).  Zero latency.
+- **Bypass Pitch Corrector** (mode 1, **DEFAULT** -- Jeff) -- voice through the
+  chain's character but no pitch correction, so the ~48 ms is gone.
+- **With Effect** (mode 2) -- full processed chain incl. the corrector's ~48 ms.
+The RECORDED take is corrected in **every** mode (the WET tap sits before the split).
+Labels approved as-is.  Right-click the Vox strip's **Listen LED** (headphones) to
+pick; the popup shows at the mouse with a tick on the current mode.
+
+**!! LOUD PAPER-TRAIL -- default live-monitor behavior CHANGES !!**
+Before QA-Fe, the live vocal monitor passed straight THROUGH the corrector + chain,
+so monitoring = the fully-corrected + processed signal (and post-Task-4 that carries
+the LiveShifter's ~48 ms).  QA-Fe Task 5 makes the **default = Bypass Pitch
+Corrector**: by default you now monitor your live voice through the chain WITHOUT
+pitch correction and WITHOUT the ~48 ms.  The old always-processed monitor is still
+available per-strip via right-click -> With Effect.  Not a removal (the mode still
+exists) but a default change users will hear -- flagged here + carries to the
+Master Test Plan / Implemented Work Log at close.  New param defaults to 1 on every
+Vox strip incl. loaded projects (lazy-registered, default applies -- no migration).
+
+**Implementation:**
+- **Param (Vox-only):** `mixer_vox_<n>_monitorMode` (AudioParameterInt 0..2,
+  default 1) registered in `VibeSynthProcessor::addLiveInputParams` gated on the
+  `mixer_vox_` prefix (Inst strips have no corrector -> no param, no selector).
+- **UI:** `MixerTrackStrip::setApvts` wires `mListenBtn.onRightClick` (Vox only) to
+  a 3-item PopupMenu writing the param (mirrors the existing `mArmBtn.onRightClick`
+  pattern; captures `&apvts` as a pointer since the APVTS outlives the strip).
+- **Forward:** `VoxStripTask::run` reads `_monitorMode` next to `_listen` and calls
+  `mVocalEngine->setMonitorMode(mode)` in the live branch (beside the existing
+  `setForcePitchBypass(false)`).
+- **Audio split (`BaySickVocalProcessor::processBlock`):** the corrector ALWAYS runs
+  (so the WET tap captures corrected).  Then, after the WET tap:
+  - mode 1 (Bypass) -> copy the pre-corrector raw live (`mMonitorLiveDry`, stashed
+    before the corrector) back into the buffer -> chain processes raw-live + takes.
+  - mode 0 (True Dry) -> `buffer.clear()` (pull live out of the chain) so the rack/
+    NAM process ONLY the prior takes; the raw live is re-added at the very END,
+    post-Mix, so it reaches the monitor with zero effect while takes stay processed
+    (the split Jeff asked for -- avoids "stuck raw takes").  For True Dry the live is
+    also excluded from `mDryScratch` so the global Mix crossfade doesn't double it,
+    and the post-add is gated on `!monMuteLive` (armed && !listen).
+  - mode 2 (With Effect) -> untouched = exactly the old behavior.
+- Files: PluginProcessor.cpp, BaySickVocalProcessor.h/.cpp, VoxStripTask.cpp,
+  MixerTrackStrip.cpp.
+- **Task 5 code-complete — pending Jeff build (both configs).**
+
+---
+
+## 2026-07-14 — Task 6 — global Throat/character knob (editor / offline bake)
+
+Editor-side global throat (the realtime corrector already got its throat in Task 4
+via `setFormantScale`).  This is the BaySickPitch editor knob feeding the offline
+bake seam's per-sample formant envelope (B6).  The bake seam already accepted a
+`formantScale`; per-region `formantSemis` already flowed through -- this adds the
+GLOBAL knob on top.
+
+**Mechanism:** the global throat is a flat semitone offset ADDED to each region's
+smoothed `formSemis` right before the bake's `formScale = 2^((formSemis + throat)/12)`
+conversion in `bakeSpan` (no per-sample smoothing needed -- it's a constant for the
+whole bake; a knob change re-bakes like Focus/Mod/Speed).  Positive raises formants
+(smaller/brighter throat), negative lowers them (bigger/darker) -- matches the
+LibraryPitchShifters convention + the Task-4 realtime sign.  Pitch is untouched.
+
+**DSP (`BaySickPitchDSP`):** new `mThroat` atomic (semis, default 0) + `setThroat()`
+(jlimit +/-12, re-bakes on change, mirrors setSpeedMs); `throat` added to `BakeInput`
++ `requestBake` + both `bakeSpan` call sites (worker `bakeToCache`, `renderOffline`);
+`bakeSpan` takes `throat`, folds it into `formScale` AND the `neutral` early-out (so
+throat-alone bakes instead of falling through to dry) -- same fix mirrored in
+`bakeToCache`'s neutral gate.  Default (0 semis) keeps the "analyzed-but-untouched
+plays bit-identical" invariant.
+
+**Param + push (`BaySickVocalProcessor`):** `bsp_throat` Float 0..100 default 50
+(neutral), matching the Focus/Mod/Speed knob convention; pushApvtsToDsp maps
+`(v - 50) * 12/50` -> -12..+12 semis into `mPitch.setThroat`.
+
+**Editor (`BaySickPitchEditor` Toolbar):** 4th knob `mThroat`/`mThroatAtt` next to
+Focus/Mod/Speed (same `knob()` builder, default 50), "Throat" paint label, and the
+knobs row widened 3 -> 4 slots.
+
+**Watch-item (layout):** the knobs row grew by one 56 px slot; on the default-width
+window there's ample room (engine combo moved to row 2 in the Task-4 tweak freed row
+1), but if the BaySickPitch toolbar looks cramped on a narrow window, the knob
+width / row-2 engine-combo width is the tweak.  Judge at build.
+
+- Files: BaySickPitchDSP.h/.cpp, BaySickVocalProcessor.cpp, BaySickPitchEditor.cpp.
+- **Task 6 code-complete — pending Jeff build (both configs).**
+
+---
+
+## 2026-07-14 — Task 7 — retire + clean
+
+**Orphaned classes deleted** from `Source/DSP/PitchShifters.h`: `PsolaShifter`,
+`GranularShifter`, `PvShifter` (grep-confirmed zero users outside the file --
+editor + Align dropped them in Task 2, the realtime corrector in Task 4).
+`OctaveStyleDSP::GranularShifter` is a DIFFERENT nested class (octave pedal),
+untouched.  `CepstralFormantEngine` KEPT -- still used by the Align offline throat
+(`BaySickVocalProcessor.cpp:1165` `formantShiftMono`).  Also removed the now-dead
+`#include "PhaseVocoder.h"` (was only for `PvShifter`; grep-confirmed no consumer of
+PitchShifters.h uses PhaseVocoder) and rewrote the stale file-top trio comment to
+describe the remaining CepstralFormantEngine.  File 810 -> 243 lines.
+
+**Note (left as-is):** `BaySickPitchDSP.h` still `#include`s PitchShifters.h purely
+to transitively hand `CepstralFormantEngine` to BaySickVocalProcessor.cpp -- a
+fragile but working chain; moving the include is out of Task 7's scope (Task 6/7
+don't migrate the :1165 Align throat off the cepstral engine).
+
+**Throwaway artifacts removed** (all untracked -- don't appear as git `D`):
+- `Tools/rubberband-test/`, `Tools/signalsmith-test/`, `Tools/pitch-sim/` (the A/B +
+  sim harnesses; served their purpose).  Legit `Tools/` scripts untouched.
+- Repo-root `enable_pitch_diag.txt` (0-byte flag; `[PITCH DIAG]` code stripped in
+  Task 2 -> Diagnostic Instrumentation Catalog fully cleared).
+- 27 loose A/B render WAVs at the repo root (`PV_* RBLIVE_* RUBBERBAND_* SIGSMITH_*
+  SIM_* WORLD_*`).  Enumerated first: the repo root held ONLY these 27 (0 wav left);
+  Jeff's source recordings live in a subfolder and were NOT touched.
+
+- Files: PitchShifters.h (+ filesystem deletions above).
+- **Task 7 code-complete — pending Jeff build (both configs).  Last code task; next
+  is the reconciled G2 boundary smoke (Jeff's hands-on).**
+
+---
+
+## 2026-07-14 — G2 boundary smoke RECONCILED + synced to the plan file
+
+All 7 code tasks build clean.  Per Jeff's standing instruction (memory
+`feedback_reconcile_smoke_against_batch_changes`), reviewed the plan's Verification
+ladder (Parts 1-6) against the shipped Tasks 4-7 and rewrote the stale steps, then
+synced the reconciled ladder into `prancy-crunching-bear.md` `## Verification`
+(intro blockquote gained a dated reconciliation note).  Deltas folded in:
+- **Part 5 monitor:** 2-way "Dry / With Effect (default Dry)" -> 3-way **True Dry /
+  Bypass Pitch Corrector / With Effect** on the **Listen LED** right-click, default
+  **Bypass Pitch Corrector**; added the True-Dry split check (live raw, takes still
+  processed) + the recorded-take **latency-alignment** check (no ~48 ms drag).
+- **Part 4:** engine dropdown now on editor row 2 (right of Snapshot); the **Throat
+  knob** (Task 6) is a real control to exercise; edits heard on drag-release (bake;
+  WORLD delayed); WORLD-pick offline notice.
+- **Part 6:** delay-jump is specifically the **With Effect** boundary (True Dry <->
+  Bypass don't engage the corrector); added a mode-switch click listen; clarified
+  the Throat here = the REALTIME board knob, not the editor knob.
+- **Part 1:** added the old-project engine-migration load check (Task 3).
+- Confirmed the realtime BaySickVocals board exposes a `Throat` knob
+  (`mThroatShift` -> `bsv_pitch_throatShift`) so Part 6's throat step is executable.
+- Jeff running the smoke now; on pass -> the ONE close commit + backfill + batch-close
+  draft + delete breakdown doc + G2 boundary CLOSES.
+
+---
+
+## 2026-07-14 — Part-4 smoke FINDINGS (3 bugs) + fixes (blueprint + adversarial-verify workflows)
+
+Jeff's Part-4 hands-on surfaced three bugs.  Fixed via an ultracode orchestration:
+a **blueprint workflow** (3 parallel deep-map agents + adversarial plan-verify) ->
+implement from the verified blueprint -> a **review workflow** (3 lenses: build /
+DSP-RT / NewTone-spec + synthesis) = **GO, zero confirmed defects**.
+
+**#1 "vinyl scratch" on a sideways/TIME pill move (every pill).** Root cause (agent-
+confirmed): the QA-Fe Task-2 bake produced a SOURCE-timed pitch cache, and
+`processFilePlay` read it at `srcX0 + i*srcRate`; a time edit made `srcRate != 1`
+(cubic-Hermite-varying) so the STATIC cache was varispeed-RESAMPLED = pitch-bend +
+scrub.  A regression from Task 2's cache model (old PSOLA resynthesized per block).
+
+**#2 WORLD "water/electric/buzz" background, always-on, on BaySickPitch but CLEAN on
+BaySickAlign.** Same channel composite both paths (both `onRenderComposite`, same
+gaps -- my earlier "continuous take vs composite" claim was WRONG, retracted).  Real
+difference: Align runs the composite through a PhaseVocoder (`applyWarp`) BEFORE the
+WORLD bake; Pitch fed WORLD the RAW composite.  WORLD's Harvest/D4C resynthesis is
+noisy on raw vocal, clean on a PV'd signal.
+
+**Fix #1+#2 (unified) -- BaySickPitch renders like BaySickAlign:** phase-vocoder-warp
+the composite to the EDITED timeline, THEN bake pitch, play the result DIRECTLY.
+- `BaySickPitchDSP` `bakeSpan` gained a `timeMap` param + a warp-then-bake tail:
+  `runWarp = anyTime || engine==World`; time-edit -> `applyWarp` warps source->edited
+  + the source-timed pitch/formant/gain envelopes resample onto the edited timeline
+  via the SAME `lookupAtGuideSec`; WORLD-no-time-edit -> identity 2-anchor PV pass
+  (clean input, matching Align); RB/Signalsmith-no-time-edit -> bake raw (unchanged,
+  no PV smear).  File-local `warpMapFromSnapshot` + `lerpClamp`.  Cache flips SOURCE
+  -> EDITED domain; `bakeToCache` stores `baked.getNumSamples()`.  `buildTimeMapSnapshot`
+  extracted from `publishTimeMap` so the bake + the published map share one build.
+  New `hasBakedCache()`.  `processFilePlay` read loop UNCHANGED (edited cache read at
+  the align-only position; linear when no align -> #1 gone).
+- **Decode (MINIMAL, per the adversarial-verify correction -- the first blueprint's
+  stamp rewrite would've reintroduced an align-toggle click):** `AlignBlockEntry.pitchBaked`
+  + `pitchActive &= !pitchBaked` + `e.pitchBaked = vp->mPitch.hasBakedCache()`.  Baked
+  => `wantWarp` collapses to align-only; `sourcePosAt` auto-reduces to align-only.  No
+  stamp/lambda surgery.
+- Export (`renderPitchedTake`) unchanged: `renderOffline`->`bakeSpan(timeMap=nullptr)`
+  now PV's WORLD (identity) before baking, then `applyWarp` handles timing -> WORLD-
+  clean export.
+- **!! LOUD PAPER-TRAIL (render model change):** the pitched playback cache changed
+  from source-timed (+ srcRate resample) to an EDITED-timeline cache read directly.
+  Behavior-visible only as the bug fix (time moves no longer scratch; WORLD clean).
+- **Known limitation (documented in-code + routed):** for DETACHED pills (backward-
+  jump maps) the single-`lookupAtGuideSec` envelope resample diverges from `applyWarp`'s
+  internal monotone segmentation at the splice -> pitch/gain slightly misplaced right
+  at a detach cut.  Detached pills are already hard cuts; a segmentation-aware resample
+  is a follow-up.
+
+**#3 Snap/Center did not match Newtone (Jeff pasted the authoritative spec).** Center
+(= our Focus knob) is micro-tonal: pull to the nearest-semitone CENTER, ALWAYS,
+scale-independent.  Snap-to-Scale is a manual-DRAG "wall" (skip out-of-scale lanes,
+KEEP cents; no processing on toggle).  Ctrl+A then right-click the grid = force all
+out-of-scale to nearest-scale-note center.
+- **Center decouple:** `computeEnvelopes` Focus target + the pill preview `drawMidiFor`
+  both now `std::round(base)` unconditionally (was `snapScale ? scaleNote : round`).
+  `setSnapOn/setRoot/setScaleIdx` dropped their `requestBake()` (bake no longer reads
+  them -> no re-bake/move on Snap toggle, satisfying "no auto-correction on toggle").
+- **Snap drag-wall:** the PitchMove drag now snaps the note's whole-semitone HOME to a
+  valid scale lane (`laneInt - round(r.midi)`), preserving the natural cents (was
+  forcing the absolute pitch to an integer, killing cents).
+- **Force-to-Scale (Jeff: gesture A + menu B, all+partial):** new `forceSelectionToScale`
+  (out-of-scale-only, snaps center to nearest valid scale note, one undo step, Chromatic
+  no-op, slices skipped).  Gesture = right-click the EMPTY grid with a live selection +
+  non-Chromatic scale (narrowed from the agent's right-click-anywhere so pills keep their
+  menu).  Menu item "Force Selected to Scale" in `showPillMenu`.  Keybinds VocalEditors
+  row added (`KeyBindings.cpp`); Snap tooltip refined (wall keeps cents).
+- **!! LOUD PAPER-TRAIL (behavior change):** old projects with Focus>0 + Snap ON on an
+  out-of-key note now pull to the nearest SEMITONE center (the Newtone-correct Center)
+  instead of the nearest in-scale note.  That old coupling was the bug; per-note pitch
+  re-bakes from live params on load (nothing stored changes).
+
+**Routed (Rule 3):** dead `computeEnvelopes` params (`snapScale/rootPc/scaleIdx`) +
+the now-only-wastefully-populated `mSnapOn/mRootPc/mScaleIdx` DSP atomics (the editor
+reads the APVTS params directly) -> **QA-Cleanup-1** dead-code sweep (harmless; kept to
+bound this change's blast radius).
+
+- Files: BaySickPitchDSP.h/.cpp, PluginProcessor.h/.cpp, BaySickVocalProcessor.cpp,
+  BaySickPitchEditor.h/.cpp, KeyBindings.cpp.
+- **Code-complete, adversarial-review GO -- pending Jeff build (both configs) + the
+  Part-4 re-listen (time move clean, WORLD clean, Center/Snap/Force per Newtone).**
+
+---
+
+## 2026-07-14 — GRAVE THREADING BUG (Jeff-flagged) — scrub preview ran the heavy bake ON THE MESSAGE THREAD during a drag
+
+Jeff (5 days in) asked me to check the threading before anything else.  He was right,
+and it's the worst error of the batch.
+
+**Root cause (traced with evidence):** the BaySickPitch scrub preview rendered the
+pitch bake SYNCHRONOUSLY on the MESSAGE (UI) thread on every drag scrub:
+`PitchCanvas::mouseDrag -> maybeScrub()` (150 ms throttle) `-> startRegionPreview ->
+BaySickVocalProcessor::startPitchPreview -> mPitch.renderOffline()` = the full
+`bakeSpan` (engine bake + my new `applyWarp` PhaseVocoder pass).  WORLD bakes at
+~3.6x realtime, so a multi-second region render exceeds the 150 ms throttle -> the UI
+thread is blocked back-to-back for the whole drag = freeze/stutter/glitch, worst on
+WORLD.  **My Part-4 `applyWarp` addition made `renderOffline` heavier, worsening a
+pre-existing (QA-Fe Task-2) message-thread-scrub problem.**  Owned.
+
+**Fix (Jeff's prescription -- drags update params, heavy work off-thread, hand off via
+atomic):** the scrub preview now READS the background-baked cache instead of rendering.
+- New `BaySickPitchDSP::copyCacheSpan(startEditedSec, endEditedSec)` -- a lock-free
+  `mCacheActive.load` + a plain span copy (no engine bake).  Thread-safe on the
+  message thread: the published snapshot is immutable + kept alive by the worker's
+  8-deep retire ring (a sub-ms copy vs 8 more full bakes = seconds of margin).
+- `startPitchPreview` reads `copyCacheSpan(editedSpan)`; only the dry FALLBACK (no
+  cache yet) copies the raw source span.  The heavy bake stays on the `BakeWorker`
+  (async), where it already was for playback.  `renderOffline` is now used ONLY by
+  the explicit Render/Freeze export (`renderPitchedTake`), never the drag.
+- The preview now trails the drag by the (async) bake latency instead of freezing --
+  RB/Signalsmith feel near-live, WORLD lags (already the accepted model).
+
+**Adversarial review (single focused agent): GO for build, memory-safe, off-thread,
+index math correct** -- caught ONE regression, fixed:
+- **Fallback span (fixed):** a TIME-ONLY edit (no pitch edit, Focus=0) bakes as
+  neutral (`hasEdits()` excludes `hasTimeEdit()`) -> empty cache -> the fallback must
+  play the note's raw SOURCE span, not the moved (edited) position (which would
+  audition the wrong material, worst on slice pills).  So `startPitchPreview` now
+  takes BOTH spans: cache read = EDITED span; dry fallback = SOURCE span.
+
+**Scope honesty:** this fixes the FREEZE/stutter (threading).  It does NOT fix the
+other two: (2) the horizontal time-edit RENDER output is genuinely garbled + drops
+~half level (a warp-correctness bug, offline -- measured in Jeff's 4 WORLD renders:
+horizontal move/stretch show garble spikes + half RMS, vertical is clean), and (3)
+WORLD's water/electric/buzz on any adjustment (DSP artifact; my identity-PV may not be
+the real fix -- ratio-jitter is a live alternative hypothesis).  Those are next.
+
+- Files: BaySickPitchDSP.h/.cpp, BaySickVocalProcessor.h/.cpp, BaySickPitchEditor.cpp.
+- **Threading fix code-complete, review GO -- pending Jeff build.**
+
+---
+
+## 2026-07-14 — Cache-handoff CROSSFADE + lock-free hazard pointers (Jeff-flagged, second grave-error class)
+
+Jeff, before accepting the threading fix, told me to verify the cache handoff:
+"even async, if the audio engine instantly hard-swaps the old buffer for the new
+async-baked buffer, that's a waveform discontinuity -> stutter/glitch right after a
+pill move.  Use a rapid 20-50 ms crossfade, and confirm the handoff is completely
+lock-free."  He was right on both counts.
+
+**Verified state (before fix):** `processFilePlay` (audio thread) did a single
+`mCacheActive.load(acquire)` and read the current cache directly -- lock-free, YES,
+but a HARD SWAP.  The instant a background re-bake published, the next block read the
+new cache -> the waveform stepped -> a click/glitch after editing a pill during
+playback.  (Pre-existing from the Task-2 cache model, flagged then as "crossfade =
+polish if it clicks"; Jeff called it in.)
+
+**Fix 1 -- ~30 ms lock-free crossfade on the handoff.**  `processFilePlay` detects a
+swap (a fresh bake is a new pointer) and crossfades old->new over ~30 ms (equal-gain,
+per-output-sample ramp) instead of hard-swapping.  Because the caches are highly
+correlated (same take, slightly different edit) a linear fade doesn't dip.  No locks,
+no allocation on the audio thread.  `mCacheFadeLen` set in `prepare` (0.030 * sr).
+
+**Fix 2 -- two-slot HAZARD POINTER (the actually-grave bug the crossfade exposed).**
+A crossfade spans blocks, so the audio thread now holds the old cache pointer ACROSS
+blocks -- which the plain 8-deep retire ring did NOT guarantee (it was sized for a
+within-block hold).  Adversarial review (dedicated agent, three rounds) found a real
+audio-thread USE-AFTER-FREE on the *common* path, not just the fade:
+`mCachePlaying` (the last-adopted cache, dereferenced at the swap check) is also held
+across blocks.  Kill sequence: Play (adopts C0) -> **Stop** -> tune 8+ notes while
+stopped (8+ bakes free C0 from the retire ring) -> **Play** -> `processFilePlay`
+dereferences freed C0 = crash.  A pause-edit-resume is a normal vocal workflow.
+- Fix: two atomic hazard pointers (`mCacheHazardPlaying` + `mCacheHazardFading`) name
+  the two caches the audio thread holds across blocks; the worker's retire-ring erase
+  skips BOTH, so neither can be freed out from under playback -- even across a paused
+  fade.  Audio thread writes (release), worker reads (acquire).  Invariant
+  `mCacheHazardPlaying == mCachePlaying` maintained at every swap.
+- Erase-loop bound: the erase SKIPS the (<=2) pinned caches and keeps trimming the
+  rest to 8 (a "stop at the first hazard" version would let the ring grow without
+  bound during a stopped tuning session -- memory spike, self-healing but real).
+  Bounded at 8, terminates, never frees a pinned cache.
+
+**Adversarial review verdict (3 rounds, same agent): GO** -- "the crossfade +
+two-slot-hazard + bounded-skip-erase design is now correct and RT-safe."  RT-safe (no
+alloc/locks on the audio thread), no OOB, UAF closed on all paths (pause, empty-cache,
+first-call), normal playback unaffected, worker-thread-only erase.
+
+- Files: BaySickPitchDSP.h (fade state + 2 hazard atomics), BaySickPitchDSP.cpp
+  (prepare fade len; processFilePlay crossfade + hazard set/clear; bakeToCache
+  hazard-skip erase).
+- **Crossfade + hazard-pointer code-complete, 3-round review GO -- pending Jeff build.**
+
+---
+
+## 2026-07-15 — Bug #2 ROOT-CAUSE FIX: unified NewTone note model (retire the note/slice split)
+
+Owner call, unambiguous: the pill/slice split I built was never NewTone and was the
+direct cause of the horizontal-move garble.  Confirmed diagnostic: garble scales with
+move distance = a moved vowel's span vs its stationary orphaned-consonant span leaving a
+widening degenerate gap in the edited->source time map (phase-vocoder smear + level
+loss).  Same split also made words "look like parts are missing" (pills showed only the
+vowel core; consonants were carved off to a bottom lane).
+
+**Owner's spec (NewTone, mirrored exactly):** true silence stays empty (no region);
+breaths/consonants that lead directly into a phrase fold into the FOLLOWING note (trailing
+into the preceding), so one pill owns consonant+vowel and moves as one unit -> no orphan,
+no time-map gap, no garble.  The Cut tool (blade -- already exists) is the escape hatch
+for the tradeoff (a tuned syllable would pitch-shift its wrapped consonant).
+
+**Process note (owner correction):** I wrongly went into plan-mode + framed "is this its
+own batch" + "build the Cut tool" for work that is obviously the QA-Fe #2 fix and where
+Cut already exists.  Retracted, deleted the plan file, did the work.
+
+**What shipped (analysis + editor, NOT the audio thread -- slices were always resolved
+offline):**
+- Analysis (BaySickPitchDSP.cpp Stages 3-4): every voiced run -> a NOTE (short runs =
+  tiny notes; no slice regions).  New Stage 4 folds each energetic-unvoiced span into the
+  FOLLOWING note (leading consonant/breath) or PRECEDING note (trailing), within
+  kAttachGapFrames (=3, ~35 ms); an isolated breath (silence both sides) + true silence
+  stay uncovered.  noteFrames tracks frame spans + region index for the fold.
+- Flag repurpose: isSlice "auto slice" -> "unpitched (excluded from correction)", set ONLY
+  by Cut (not yet wired -- see open items).  computeEnvelopes volume-only branch unchanged
+  (already correct for a Cut-off consonant); buildTimeMapSnapshot needs NO change (no
+  separate slice spans -> no gap).
+- Editor (BaySickPitchEditor.cpp): removed the bottom "SLICES" lane (kSliceLaneH deleted,
+  layout reclaimed in zoomToRegions/drawDisplayBox); unpitched pieces render INLINE at the
+  sibling's pitch row (greyed, no waveform); unified the collision domain
+  (prevBound/nextBound + nudgeSelectionTime no longer segregate note vs slice, so a Cut
+  piece stays in contact with its vowel).
+- Naming reconciliation (Slice -> Cut / Unpitched): toolbar button + tooltip, commit label
+  "Pitch: Cut", info-bar "Unpitched", sub-editor browser label, KeyBindings VocalEditors
+  entry, bsp_mode param comment.  (Other editors' "Slice Tool" left alone.)
+- Migration (stateFromValueTree): old projects' UNtouched auto-slices dropped on load
+  (clears their old garble; re-analysis re-folds the audio); EDITED slices kept inline so
+  no user work is lost.
+
+**Adversarial review (dedicated agent, full source trace): SAFE-TO-BUILD, zero defects.**
+Compile surface clean (local NoteFrame struct, foldSpan [&] lambda, remove_if, no dangling
+kSliceLaneH); fold can't overlap (kGapFrames 8 > kAttachGapFrames 3 -> a span reaches at
+most one note boundary); migration never drops a real note; dormant isSlice sites don't
+crash.
+
+**Open (surfaced to owner, NOT guessed):** (1) how Cut marks the consonant piece
+"unpitched" so tuning the vowel doesn't shift it -- auto-detect the unvoiced side vs a
+manual exclude toggle; (2) what "snap the cut point to the grid" should mean (beat grid vs
+the voiced/unvoiced boundary).  Cut currently still splits into two like-kind pieces.
+
+- Files: BaySickPitchDSP.cpp/.h, BaySickPitchEditor.cpp, BaySickPitchSubEditor.cpp,
+  KeyBindings.cpp, BaySickVocalProcessor.cpp (param comment).
+- **Note-model rework code-complete, review SAFE-TO-BUILD -- pending Jeff build.**
+
+---
+
+## 2026-07-15 (cont.) — owner corrections + Slice behavior + bars/beats grid
+
+**Owner corrections applied:**
+- **REVERTED the Slice->Cut/Unpitched rename in full.** "Slice" is the established term
+  app-wide (drum/wave editors have a Slice tool); renaming only the vocal one was
+  unrequested + inconsistent.  Button/tooltip/commit "Pitch: Slice"/info-bar/sub-editor/
+  KeyBindings/bsp_mode comment/all internal comments back to "slice".  The isSlice region
+  is a "slice" (made by the Slice tool); flag name unchanged.
+- Prior entry's "Naming reconciliation (Slice -> Cut)" line is SUPERSEDED by this revert.
+
+**Slice behavior (owner call #1 -- "both"):**
+- Auto-detect: on slice, the more-unvoiced half (voicedFraction < 0.5) is marked
+  isSlice=true (excluded from correction) so tuning the vowel doesn't shift the consonant;
+  slicing mid-vowel leaves two plain notes.  New DSP query `voicedFraction(startSec,endSec)`
+  over the F0 track (BaySickPitchDSP.h).
+- Manual override: pill right-click menu item "Include/Exclude from Pitch Correction"
+  (id 8) -> new `toggleSliceExcluded(idx)` flips the flag under one undo.
+
+**Bars/beats grid + Slice snap (owner call #2):**
+- The pitch editor timeline drew a SECONDS ruler; owner wants FL/NewTone bars/beats (which
+  the piano roll already has).  Reworked the ruler + gridlines to bars/beats (major bar
+  lines + numbers, minor beat lines, sub-beat when zoomed) via new canvas helpers
+  beatForSec/secForBeat/gridBeatStep using the existing TempoMap (project beats) + the
+  composite's startSample; 4/4 assumed (app default).  ADDITIVE -- the pills/drags/zoom
+  keep the seconds coordinate system; only the ruler/grid render + snap changed.
+- Slice snaps the cut point to the visible grid (gridBeatStep resolution); hold ALT to
+  slice anywhere -- exactly NewTone's behavior.
+
+**Adversarial review (2 dedicated agents): SAFE-TO-BUILD, zero defects** on both the
+note-model rework AND the grid/snap/auto-detect/toggle additions (TempoMap in scope,
+loops terminate, no div-by-zero, no dangling `r` before insert, menu id unique).
+
+- Files: BaySickPitchDSP.h (voicedFraction), BaySickPitchEditor.cpp/.h (grid helpers +
+  ruler + snap + auto-detect + toggle menu), + the rename reverts across the 6 files above.
+- **All of #2-fix + Slice behavior + bars/beats grid code-complete, review SAFE-TO-BUILD
+  -- pending Jeff build.**
+
+---
+
+## 2026-07-15 (cont.) — Metronome / time-signature: correction + regression lead
+
+**My error (owned):** I told Jeff time-signature is "decorative / uniform 4 everywhere for
+playback."  WRONG.  Time signature IS functional: the metronome accent reads
+`currentPattern().tsNum` for BOTH the count-in (PluginProcessor.cpp:2818-2820) and the
+transport metro (:2857-2859), accenting every Nth beat.  The song-level TS markers on the
+builder ruler feed a pattern's `tsNum` via `autoDerivePatternTimeSig` (PatternManager.cpp:
+538-548) or the direct setter `setPatternTimeSig` (:551).  I read ONE narrow comment
+(PatternManager.h:261 -- song-level markers "decorative for playback POSITION", i.e. the
+beat<->sample timeline math is uniform-4) and wrongly generalized it to "TS does nothing."
+Two different aspects of the markers; I conflated them.
+
+**Regression lead (Jeff: "metronome used to play the signature, now it doesn't"):**
+- The accent CODE is UNCHANGED -- git: `accentEvery`/`currentPattern().tsNum` has exactly
+  ONE commit ever (16488287, Phase D), nothing since.  So the break is UPSTREAM of the
+  accent, in how `tsNum` gets onto the pattern being played.
+- Prime suspects: (1) `currentPattern()` returns the SELECTED pattern (mCurrentPattern),
+  NOT the pattern under the playhead -> in SONG/arrangement playback the accent follows the
+  selected pattern's TS (often pattern 0 = 4/4), while single-PATTERN playback would be
+  correct; (2) `tsLocked` blocks a later marker change from re-deriving (:542); (3) `tsNum`
+  loads default 4 (:1299) for pre-field projects.
+- NOT touched by any QA-Fe / this-session work (all vocal-pitch-editor + DSP).  Awaiting
+  Jeff's repro (which mode + accents-every-4 vs no-accent) to trace + fix.  Separate from
+  QA-Fe.
+
+---
+
+## 2026-07-15 (cont.) — QA-Fe #2: fold-fix did NOT resolve the garble + fold visually broken
+
+Jeff built + tested.  TWO problems remain:
+1. **Garble persists** on ANY left/right MOVE or STRETCH (vertical pitch-only clean).  So
+   removing the orphaned slice regions did NOT fix it -> the garble is in the time-WARP
+   mechanics themselves (buildTimeMapSnapshot / AlignPlaySnapshot / applyWarp / bake
+   sequencing), not the slice-gap hypothesis.  Confirmed engine-independent (RB/SS/WORLD).
+2. **The consonant FOLD is not working.**  Jeff: the note pills are UNCHANGED in size +
+   position, and the consonant/breath sections are now MISSING (silent) -- no slice, and
+   not attached to any note.  So Stage 4 `foldSpan` never fires (strong suspect:
+   kAttachGapFrames=3 is far too small -- the energetic-unvoiced spans that used to be
+   slices sit >3 frames from the note's voiced run, so they fall outside the fold window,
+   get dropped, and the audio goes missing).
+
+**Action:** launched a Workflow (7 parallel extraction agents) to assemble ONE review doc
+with the VERBATIM code of the entire pipeline (segmentation/fold, region model, editor
+drag, time-map, applyWarp, bake sequencing, composite+playback) + per-stage
+holes-analysis, for Jeff + Gemini to review.  Doc = PITCH_PIPELINE_BREAKDOWN.md (repo
+root, 214 KB, 54 verbatim code blocks).
+
+---
+
+## 2026-07-15 (cont.) — Gemini review + adversarial re-verification (10 claims vs source)
+
+Gemini reviewed the doc; I ran a 7-agent adversarial verification of every Gemini claim
+against the real code (each agent tried to REFUTE).  Net verdicts:
+
+**Bug A (garble on time edits) -- REAL, engine is `BaySickAlignDSP::applyWarp` (internal
+PhaseVocoder), reached on EVERY time edit (runWarp = anyTime||WORLD); pitch-only bypasses
+it (runWarp=false) -> exact match for "pitch-only clean, time-move garbles, all 3 engines".**
+Two CONFIRMED feeders + one edge:
+- **Claim 8 CONFIRMED (export order inversion):** export (renderPitchedTake) bakes PITCH
+  first (renderOffline passes timeMap=nullptr) then post-hoc applyWarp on the ALREADY-
+  pitched audio; playback is warp-then-bake.  Engine-independent -> the garbled exported
+  WAVs.  Fix: make export warp-then-bake like playback.
+- **Claim 6 PARTIAL (right suspect, wrong forensics):** the garble is NOT the constant-hop
+  windowScale (that tracks per-window, avg level unity).  It is OVERLAP COLLAPSE at steep
+  ratios: rReq clamped [0.25,4]; at the rails Hs->kFFTSize -> Hann^2 OLA overlap->1 ->
+  amplitude-modulation/spikes/RMS-drop that scales with warp steepness.  Steep ratios come
+  from a rigid note move offloading ALL the stretch onto the small gap segments.
+- **Claim 10a CONFIRMED (edge):** dragging the FIRST note to the origin crams leading
+  anacrusis into 1 ms (railed decimation) -> spike.  Narrow (first-note-to-origin only).
+- **REFUTED as causes:** Claim 5 (dst-nudge tangent-zero smear -- applyWarp SPLITS at
+  backward jumps + per-segment monotone-clamps BEFORE the audio read, and it only fires on
+  region REORDER, not "any move"); Claim 9 (bakeSpan si=dubSec*sr unit mismatch -- LATENT,
+  the only path reaching it (bakeToCache) passes spanStart=0); Claim 7 (no double-warp in
+  playback -- CONFIRMED correct, decode gates pitchActive off via `&& !pitchBaked`);
+  Claim 10b (copyCacheSpan vs processFilePlay origin -- SAME origin audio[0]=edited t0).
+
+**Bug B (fold not extending / sections missing) -- BOTH my AND Gemini's hypotheses REFUTED:**
+- **Claim 1 REFUTED (my kAttachGapFrames/YIN-lag theory was WRONG):** estimateF0Track uses
+  a FORWARD-looking window, so runStart LEADS the onset (not lags); the energetic-span
+  builder absorbs loud unvoiced onset frames so nextI.f0 - z ~= 0 -> the fold DOES fire for
+  a consonant running straight into the vowel.  It only FAILS to fire when a genuinely
+  QUIET (below-gate) stretch sits between consonant and vowel (gap > 3 frames) -- e.g. a
+  stop consonant's VOT closure.
+- **Claim 3 REFUTED (Gemini's "silence" theory was WRONG):** the bake covers the WHOLE
+  composite continuously; a non-region (unfolded) consonant bakes NEUTRAL (ratio 1/gain 1)
+  and IS present in the cache -> audible, not silent (or fully dry if no edits at all).
+- So "pills unchanged + sections missing" is most likely VISUAL (unfolded consonants get no
+  pill) rather than audio-silent -- UNLESS on WORLD (unvoiced degrades at ratio 1) or with a
+  time edit (gap squash).  NEEDS Jeff's clarification: visual-missing vs audio-silent, which
+  engine, with/without a time move.
+
+**No code changed.**  Reporting synthesized findings to Jeff; Bug A fix direction is clear
+(export order + warp-quality/steep-ratio); Bug B awaits the visual-vs-audio clarification.
+
+---
+
+## 2026-07-15 (cont.) — Bug A + Bug B FIX implemented (Gemini CLI wired as 2nd reviewer)
+
+Gemini CLI set up as an on-demand second reviewer (installed v0.50.0; OAuth free-tier dead
+-> API-key path via ~/.gemini/.env + settings.json selectedType=gemini-api-key; reads the
+real repo code directly).  Gemini confirmed my verification (conceded claims 1 + 3) and
+supplied the fix plan.  Jeff picked gap-squash design **E** + "do the whole thing."
+
+**Bug A -- the garble (the real cause = the internal applyWarp phase vocoder railing at
+steep ratios, fed impossible micro-ratios by a rigid note-move offloading all stretch onto
+tiny gaps; NOT engine-specific):**
+- **Gap-squash cap (design E), BaySickPitchEditor.cpp:** new `kMaxWarpRatio = 3.0`; new
+  `Bound{dst,src}` + `prevBoundEx`/`nextBoundEx` (neighbor dst bound + its source pos);
+  `clampElasticDelta` (move) now bounds the delta so neither adjacent GAP's dst/src ratio
+  leaves [1/3, 3]; Stretch handlers cap the NOTE's own dst/src ratio the same way.  Detach
+  bypasses all caps (free hard-cut for big moves).  Also caps the leading gap -> kills the
+  origin-crush edge too.
+- **Export reorder, renderOffline + renderPitchedTake:** renderOffline now builds the time
+  map and passes it into bakeSpan (WARP-THEN-BAKE, matching playback); renderPitchedTake
+  dropped its post-hoc applyWarp (which ran on already-pitched audio = phase-coherence
+  destruction = the engine-independent WAV garble).  (highRes warp-oversampling now a
+  follow-up: the bake's internal warp runs at os=1 like playback.)
+
+**Bug B -- missing visual handles (audio was never lost; the fold just dropped isolated
+spans):**  Stage 4 foldSpan `else` branch now MATERIALIZES an isolated span (plosive
+closure / silence-bounded breath) as an inline `isSlice` block at the nearest note's midi
+lane (NewTone shows these inline, not a bottom lane).  drawMidiFor returns raw midi for
+slices (no Focus drift).  Contiguous consonants still fold into their note (word stays
+whole) -- only genuinely silence-separated material becomes a block.
+
+**Adversarial review (dedicated agent, 15 VERIFY items): SAFE-TO-BUILD, zero defects** --
+clamp sign-math correct, no jlimit lo>hi/UB, delta=0 always allowed, no div-by-zero,
+push_back doesn't invalidate noteFrames, export const/lifetime/signature OK, sort correct.
+
+- Files: BaySickPitchEditor.cpp (cap + bounds + drawMidiFor), BaySickPitchDSP.cpp
+  (foldSpan slice + renderOffline timeMap + Stage-4 comment), BaySickVocalProcessor.cpp
+  (renderPitchedTake reorder).
+- **All three fixes code-complete, review SAFE-TO-BUILD -- pending Jeff build.**
+
+---
+
+## 2026-07-15 (cont.) — Garble DIAGNOSIS breakthrough: it's the pitch-editor MAP, not the engine/bake
+
+Jeff built the three fixes.  Garble STILL present on ANY horizontal move/stretch.  Ran a
+surgical bypass probe (temp `anyTime=false` in bakeSpan -> bake does NO time-warp): garble
+PERSISTED -> **ruled the bake out entirely.**  Traced it: a pure horizontal move has no
+pitch change, so `hasEdits()` (which excludes `hasTimeEdit()`) makes it "neutral" -> NO
+cache -> `pitchBaked=false` -> `pitchActive=true` -> the timing is applied by the REALTIME
+DECODER (`PluginProcessor.cpp:1147/1211-1216` sourcePosAt -> lookupAtGuideSec file-read),
+a path the bypass never touched.  BUT Jeff then confirmed a DIAGONAL edit (time+pitch,
+which DOES bake) ALSO garbles -> so BOTH the decode warp AND the bake warp garble.
+
+**Common denominator (the actual root): the pitch-editor's TIME MAP / warp read.**  Two
+hard facts:
+- **Align's time-warp is CLEAN** (Jeff verified: mute leader, hear the dub warp+correct --
+  clean).  Same warp machinery (AlignPlaySnapshot / lookupAtGuideSec).  So the warp ENGINE
+  is fine; the PITCH-EDITOR MAP CONSTRUCTION (buildTimeMapSnapshot: rigid note-segments +
+  warped gaps, sparse anchors) is what differs from Align's smooth dense map and breaks it.
+- **The artifact is "cutting IN AND OUT"** (dropout/gating), NOT smear/misplacement -> the
+  reader is hitting stretches that output SILENCE (out-of-range reads / map-coverage gaps),
+  not a phase-vocoder smear.
+
+**Next:** Jeff to send renders (garbled simple move + clean reference, RB/SS) for WAV
+forensic (cut-in/out period -> block-boundary vs out-of-range).  In parallel: DIFF
+buildTimeMapSnapshot (pitch, broken) vs the Align map builder (clean) to find the
+structural difference.  NO bandaid until the warp map is fixed.
+
+**Also retracted:** the earlier "engines were tried for the time-STRETCH" claim was
+imprecise -- the time-warp is ALWAYS applyWarp; the RB/SS/WORLD engines only do PITCH after.
+
+### DEFERRED (push aside until the garble is fixed -- NO bandaids first)
+- **Pitch-editor mouse-control rework (Jeff's spec, to confirm):** plain drag = pitch
+  (vertical) + edge-stretch, NO free horizontal move (so dragging up never knocks a note
+  out of line); **Ctrl+drag = detach stretch**; **Ctrl+Alt+drag = full horizontal move**.
+  Makes the destructive/garbling move deliberate + decouples pitch from accidental move.
+  Explicitly NOT a substitute for fixing the warp (stretch still garbles).
+- **Bug B slice/block refinement:** inline consonant blocks reinstated (foldSpan else ->
+  isSlice at nearest-note lane; kAttachGapFrames 3->2 to break out plosives).  Cosmetic,
+  secondary to the garble; tune after.
+- **highRes export oversampling:** lost in the renderPitchedTake warp-then-bake reorder
+  (bake's internal warp runs os=1); thread highRes -> bakeSpan os as a follow-up.
+- **Metronome / time-signature regression:** accent code unchanged since commit D; break is
+  upstream (currentPattern=selected not playhead, or tsLocked, or load default).  Awaiting
+  Jeff's repro (mode + accents-every-4 vs no-accent).  Separate from QA-Fe.
+- **Gap-squash cap (kMaxWarpRatio) + export reorder:** in the tree, unbuilt-clean; the cap
+  was built on the (wrong) ratio-rail hypothesis -- keep as a sane limit but it is NOT the
+  garble fix; the export reorder is a genuine correctness fix (retain).
