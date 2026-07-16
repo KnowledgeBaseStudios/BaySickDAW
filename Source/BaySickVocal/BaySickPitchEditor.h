@@ -41,7 +41,8 @@ class BaySickPitchSubEditorWindow;
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BaySickPitchEditor : public juce::Component,
-                           private juce::Timer
+                           private juce::Timer,
+                           private juce::ScrollBar::Listener
 {
 public:
     explicit BaySickPitchEditor (BaySickVocalProcessor& p);
@@ -174,6 +175,15 @@ private:
     void   restoreSavedView();
 
     bool mAutoScroll { true };
+
+    // Scroll bars (piano-roll parity).  mHScroll drives mScroll (seconds), mVScroll
+    // drives mTopNote (MIDI note, inverted).  mPushingToBars guards the funnel
+    // (bars written with dontSendNotification) from re-entering scrollBarMoved.
+    static constexpr int kScrollBarSz = 12;
+    std::unique_ptr<juce::ScrollBar> mHScroll, mVScroll;
+    bool mPushingToBars { false };
+    void scrollBarMoved (juce::ScrollBar* sb, double newStart) override;
+    void pushScrollStateToBars();
 
     // Playhead: follows the MAIN transport (incl. stop-reset) at 30 Hz.
     double mPlayheadSec { -1.0 };   // composite seconds; < 0 = hidden

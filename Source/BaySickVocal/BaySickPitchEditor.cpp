@@ -6,6 +6,7 @@
 #include "../Standalone/SharedUI.h"
 #include "../Standalone/StandaloneEditor.h"
 #include "../TempoMapRead.h"   // LENGTH readout + playhead beat->sample
+#include "../VibesynthConstants.h"   // shared piano-roll zoom baselines (single source of truth)
 #include <algorithm>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -193,6 +194,43 @@ public:
     double midiForY (int y) const
     {
         return mOwner.topNote() - (double) (y - kRulerH) / mOwner.noteLaneH();
+    }
+
+    // Snap a composite-second to the 96-tick grid at the visible resolution --
+    // matches the piano roll's snapBeat (kTicksPerBeat = 96; div = the visible grid
+    // step in ticks; tick-exact rounding so triplet grids don't drift).  Used for
+    // the time SELECTION only; the bare-click seek stays free (piano-roll parity).
+    double snapSecToGrid (double sec) const
+    {
+        const double beat     = beatForSec (sec);
+        const int    divTicks = juce::jmax (1, (int) std::llround (gridBeatStep() * 96.0));
+        const double snapped  = std::round (beat * 96.0 / (double) divTicks)
+                                 * (double) divTicks / 96.0;
+        return secForBeat (snapped);
+    }
+
+    // Ruler range <-> builder-grid SONG time selection.  Push: composite seconds
+    // -> project beats -> bars (4 beats/bar, matching onGetLoopBeats); endBar <=
+    // startBar clears.  Sync: read the builder selection back into the local draw
+    // range (skipped mid-drag so the live gesture stays responsive).
+    void pushRulerSel()
+    {
+        if (! mOwner.mProc.onSetSongTimeSel) return;
+        if (mRulerSelStart >= 0.0 && mRulerSelEnd > mRulerSelStart)
+            mOwner.mProc.onSetSongTimeSel ((float) (beatForSec (mRulerSelStart) / 4.0),
+                                           (float) (beatForSec (mRulerSelEnd)   / 4.0));
+        else
+            mOwner.mProc.onSetSongTimeSel (-1.0f, -1.0f);
+    }
+    void syncRulerSelFromBuilder()
+    {
+        if (mRulerDragging || ! mOwner.mProc.onGetSongTimeSel) return;
+        float sBar = 0.0f, eBar = 0.0f;
+        if (mOwner.mProc.onGetSongTimeSel (sBar, eBar) && eBar > sBar)
+        { mRulerSelStart = secForBeat (sBar * 4.0); mRulerSelEnd = secForBeat (eBar * 4.0); }
+        else
+        { mRulerSelStart = mRulerSelEnd = -1.0; }
+        repaint();
     }
 
     // Rendered pitch (locked 8): detected + drag + Center/Focus pull toward the
@@ -461,14 +499,39 @@ public:
             g.drawRect (mMarquee);
         }
 
-        // Playhead (main transport, incl. stop-reset -- #7).
+        // Ruler range selection (drives song-mode looping via the builder grid) --
+        // piano-roll parity: VC::Highlight (red), full-height column + denser ruler
+        // band + bright edge lines in the ruler band.
+        if (mRulerSelStart >= 0.0 && mRulerSelEnd > mRulerSelStart)
+        {
+            const int sx = xForSec (mRulerSelStart);
+            const int ex = xForSec (mRulerSelEnd);
+            if (ex > 0 && sx < getWidth())
+            {
+                g.setColour (VC::Highlight.withAlpha (0.08f));
+                g.fillRect (sx, 0, ex - sx, getHeight());              // full-height column
+                g.setColour (VC::Highlight.withAlpha (0.30f));
+                g.fillRect (sx, 0, ex - sx, kRulerH);                  // ruler band, denser
+                g.setColour (VC::Highlight.withAlpha (0.85f));
+                g.drawVerticalLine (sx, 0.0f, (float) kRulerH);        // edge lines (ruler band)
+                g.drawVerticalLine (ex, 0.0f, (float) kRulerH);
+            }
+        }
+
+        // Playhead -- piano-roll / builder parity: VC::Green triangle in the ruler
+        // band + a 2px body line below it (was a plain grey line).
         if (mOwner.mPlayheadSec >= 0.0)
         {
             const int x = xForSec (mOwner.mPlayheadSec);
             if (x >= 0 && x <= getWidth())
             {
-                g.setColour (kPlayhead.withAlpha (0.8f));
-                g.drawVerticalLine (x, (float) kRulerH, (float) getHeight());
+                g.setColour (VC::Green.withAlpha (0.9f));
+                juce::Path tri;
+                tri.addTriangle ((float) x, 0.0f, (float) (x - 5), (float) kRulerH,
+                                 (float) (x + 5), (float) kRulerH);
+                g.fillPath (tri);
+                g.setColour (VC::Green.withAlpha (0.8f));
+                g.fillRect (x, kRulerH, 2, getHeight() - kRulerH);
             }
         }
     }
@@ -487,6 +550,24 @@ public:
             mDragKind = DragKind::Pan;
             mPanStartScroll = mOwner.scrollSeconds();
             mPanStartTop    = mOwner.topNote();
+            return;
+        }
+
+        // Ruler band: bare left-click seeks the shared transport (moves the
+        // builder-grid song playhead too); Ctrl+drag selects a time range that
+        // drives song-mode looping via the builder selection (family idiom).
+        // Right-click falls through to the existing menu path.
+        if (e.y < kRulerH && ! e.mods.isPopupMenu())
+        {
+            if (e.mods.isCtrlDown())
+            {
+                mRulerDragging  = true;
+                mRulerSelAnchor = snapSecToGrid (secForX (e.x));
+                mRulerSelStart  = mRulerSelEnd = mRulerSelAnchor;
+                repaint();
+            }
+            else if (mOwner.mProc.onTransportSeek)
+                mOwner.mProc.onTransportSeek (beatForSec (secForX (e.x)));
             return;
         }
 
@@ -645,6 +726,15 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (mRulerDragging)
+        {
+            const double s = snapSecToGrid (secForX (e.x));
+            mRulerSelStart = juce::jmin (mRulerSelAnchor, s);
+            mRulerSelEnd   = juce::jmax (mRulerSelAnchor, s);
+            pushRulerSel();
+            repaint();
+            return;
+        }
         auto& pitch = mOwner.mProc.mPitch;
         auto& regions = pitch.regions();
 
@@ -779,6 +869,16 @@ public:
 
     void mouseUp (const juce::MouseEvent& e) override
     {
+        if (mRulerDragging)
+        {
+            mRulerDragging = false;
+            const double secPerBeat = secForBeat (1.0) - secForBeat (0.0);
+            if (mRulerSelEnd - mRulerSelStart < 0.25 * juce::jmax (0.05, secPerBeat))
+                mRulerSelStart = mRulerSelEnd = -1.0;   // tiny drag == click -> clear
+            pushRulerSel();
+            repaint();
+            return;
+        }
         switch (mDragKind)
         {
             case DragKind::ZoomRect:
@@ -873,11 +973,14 @@ public:
     {
         if (e.mods.isCtrlDown())
         {
-            const double f = (w.deltaY > 0) ? 1.2 : 1.0 / 1.2;
+            const double f = (w.deltaY > 0) ? 1.15 : 1.0 / 1.15;   // piano-roll step
             const double anchorSec = secForX (e.x);
-            const double newPps = juce::jlimit (20.0, 2000.0,
-                                                mOwner.pixelsPerSecond() * f);
-            mOwner.setView (newPps, anchorSec - (double) e.x / newPps);
+            // Clamp THEN anchor (piano-roll applyZoomAnchored parity): let setView
+            // apply the zoom-out floor, then re-anchor with the actual clamped pps so
+            // the second under the cursor stays put even at the zoom limit.
+            mOwner.setView (mOwner.pixelsPerSecond() * f, mOwner.scrollSeconds());
+            const double clamped = mOwner.pixelsPerSecond();
+            mOwner.setView (clamped, anchorSec - (double) e.x / clamped);
         }
         else if (e.mods.isAltDown())
         {
@@ -1358,6 +1461,10 @@ private:
     DragKind mDragKind { DragKind::None };
     juce::Point<int> mMouseDownPos;
     juce::Rectangle<int> mMarquee;
+    // Ruler range selection (Ctrl+drag) in composite seconds; drives + mirrors
+    // the builder-grid SONG time selection (loops in song mode).
+    double mRulerSelStart { -1.0 }, mRulerSelEnd { -1.0 }, mRulerSelAnchor { 0.0 };
+    bool   mRulerDragging { false };
     std::vector<DragBase> mDragBases;
     bool mFineDrag { false }, mDetachArm { false }, mDidDetach { false };
     bool mScrubbing { false };
@@ -1696,6 +1803,15 @@ BaySickPitchEditor::BaySickPitchEditor (BaySickVocalProcessor& p)
     addAndMakeVisible (*mCanvas);
     addAndMakeVisible (*mInfoBar);
 
+    mHScroll = std::make_unique<juce::ScrollBar> (false);   // horizontal (seconds)
+    mHScroll->setAutoHide (false);
+    mHScroll->addListener (this);
+    addAndMakeVisible (*mHScroll);
+    mVScroll = std::make_unique<juce::ScrollBar> (true);    // vertical (MIDI note)
+    mVScroll->setAutoHide (false);
+    mVScroll->addListener (this);
+    addAndMakeVisible (*mVScroll);
+
     setWantsKeyboardFocus (true);
     // 30 Hz: playhead + auto-scroll follow the main transport smoothly; the
     // poll-ish work (stale badges, length readout, diag) runs on a divided
@@ -1718,8 +1834,20 @@ void BaySickPitchEditor::resized()
     auto b = getLocalBounds();
     mToolbar->setBounds (b.removeFromTop (kToolbarH));
     mInfoBar->setBounds (b.removeFromBottom (kInfoBarH));
-    mKeyboard->setBounds (b.removeFromLeft (kKeyboardW).withTrimmedTop (kRulerH));
-    mCanvas->setBounds (b);
+
+    // Reserve a gutter on the right (V bar) + bottom (H bar); the keyboard is
+    // trimmed to the shortened canvas height so its lanes stay aligned.
+    const int cx = b.getX() + kKeyboardW;
+    const int cy = b.getY();
+    const int canvasW = juce::jmax (1, b.getWidth()  - kKeyboardW - kScrollBarSz);
+    const int canvasH = juce::jmax (1, b.getHeight() - kScrollBarSz);
+
+    mKeyboard->setBounds (b.getX(), cy + kRulerH, kKeyboardW, juce::jmax (1, canvasH - kRulerH));
+    mCanvas  ->setBounds (cx, cy, canvasW, canvasH);
+    if (mVScroll) mVScroll->setBounds (cx + canvasW, cy, kScrollBarSz, canvasH);
+    if (mHScroll) mHScroll->setBounds (cx, cy + canvasH, canvasW, kScrollBarSz);
+
+    pushScrollStateToBars();
 }
 
 void BaySickPitchEditor::visibilityChanged()
@@ -1791,28 +1919,102 @@ bool BaySickPitchEditor::keyPressed (const juce::KeyPress& k)
 
 void BaySickPitchEditor::setView (double pps, double scrollSec)
 {
-    mPps    = juce::jlimit (20.0, 2000.0, pps);
+    // Zoom spans EXACTLY match the piano roll: full zoom-IN shows 0.5 beat across
+    // the canvas; full zoom-OUT shows max(canvasW/160 baseline, content + 1 bar) bars.
+    const double canvasW = (double) juce::jmax (1, mCanvas != nullptr ? mCanvas->getWidth() : 800);
+    const double compSec = mProc.mPitch.compositeSec();
+    double secPerBeat = 0.5;   // 120 BPM fallback
+    if (TempoMap::isActive())
+    {
+        const double sr = juce::jmax (1.0, mProc.mPitch.analysisSampleRate());
+        secPerBeat = juce::jmax (1.0e-3,
+            (double) (TempoMap::sampleAtBeat (1.0) - TempoMap::sampleAtBeat (0.0)) / sr);
+    }
+    const double secPerBar   = 4.0 * secPerBeat;
+    const double contentBars = compSec / juce::jmax (1.0e-6, secPerBar);
+    // Zoom-OUT bar count = the piano roll's exact minZoomPPB formula: the empty
+    // baseline (canvasW / kDefaultPianoRollEmptyPx px-per-bar, monitor-dependent) OR
+    // content + kPianoRollZoomPadBars, whichever is larger.  For a short composite the
+    // baseline wins (~7 bars) -- an earlier version dropped it and zoomed out too far.
+    const double maxBars = juce::jmax (canvasW / (double) kDefaultPianoRollEmptyPx,
+                                       contentBars + (double) kPianoRollZoomPadBars);
+    const double maxPps  = canvasW / ((double) kMaxZoomInBeatsAcross * secPerBeat);  // 0.5 beat across (in)
+    const double minPps  = canvasW / juce::jmax (1.0e-3, maxBars * secPerBar);       // maxBars bars across (out)
+    mPps    = juce::jlimit (minPps, maxPps, pps);
     mScroll = juce::jmax (0.0, scrollSec);
+    pushScrollStateToBars();
     repaint();
 }
 
 void BaySickPitchEditor::setTopNote (int note)
 {
     // Floor: the view bottom never dips below C0 (#6).
+    // Lane area = canvas MINUS the ruler (lanes draw from y=kRulerH), matching
+    // pushScrollStateToBars so the clamp + V-scrollbar thumb agree -- otherwise a
+    // ruler-height sliver of grey shows below C0.
     const int visLanes = (int) std::ceil (
-        (double) juce::jmax (60, mCanvas != nullptr ? mCanvas->getHeight() : 400)
+        (double) juce::jmax (60, (mCanvas != nullptr ? mCanvas->getHeight() : 400) - kRulerH)
         / juce::jmax (2.0, mLaneH));
     const int minTop = juce::jmin (120, kMinNote + visLanes);
     mTopNote = juce::jlimit (minTop, 120, note);
+    pushScrollStateToBars();
     if (mKeyboard) mKeyboard->repaint();
     if (mCanvas)   mCanvas->repaint();
 }
 
 void BaySickPitchEditor::setLaneHeight (double laneH, double anchorMidi, int anchorY)
 {
-    mLaneH = juce::jlimit (4.0, 24.0, laneH);
+    // Zoom spans EXACTLY match the piano roll's applyVZoom: it divides the FULL grid
+    // height (gridHf, ruler included) by 48 (out) / 12 (in), so mirror that with the
+    // full canvas height -- NOT canvasH-kRulerH, which fit ~2 extra lanes below the
+    // ruler and read as slightly more zoomed-out than the roll.  (48 < the 108-lane
+    // C0..120 range, so the range always over-fills the height -> no grey below C0.)
+    const double laneArea = (double) juce::jmax (60, mCanvas != nullptr ? mCanvas->getHeight() : 400);
+    const double minLaneH = laneArea / 48.0;   // 48 notes (out)
+    const double maxLaneH = laneArea / 12.0;   // 12 notes (in)
+    mLaneH = juce::jlimit (minLaneH, maxLaneH, laneH);
     // Keep the note under the cursor stationary (cursor-anchored v-zoom).
     setTopNote ((int) std::round (anchorMidi + (double) (anchorY - kRulerH) / mLaneH));
+}
+
+// Push the view state to the scroll bars (piano-roll parity).  Every view
+// mutation funnels through setView/setTopNote, so this keeps the thumbs live.
+// Writes use dontSendNotification (+ the mPushingToBars guard) so it never
+// re-enters scrollBarMoved.
+void BaySickPitchEditor::pushScrollStateToBars()
+{
+    if (mCanvas == nullptr || mHScroll == nullptr || mVScroll == nullptr) return;
+    mPushingToBars = true;
+
+    // Horizontal (seconds).  Extend past the composite end by the current view so
+    // a cursor-zoom past the end stays representable + can't snap back to 0.
+    const double viewSec  = (double) juce::jmax (1, mCanvas->getWidth()) / juce::jmax (1.0, mPps);
+    const double compSec  = mProc.mPitch.compositeSec();
+    const double totalSec = juce::jmax (compSec, mScroll + viewSec);
+    const double visSec   = juce::jmin (totalSec, viewSec);
+    mHScroll->setRangeLimits (0.0, totalSec);
+    mHScroll->setCurrentRange (juce::jlimit (0.0, juce::jmax (0.0, totalSec - visSec), mScroll),
+                               visSec, juce::dontSendNotification);
+
+    // Vertical (MIDI note, inverted: high MIDI at the top; range kMinNote..120).
+    const double lanes      = (double) juce::jmax (1, mCanvas->getHeight() - kRulerH)
+                                / juce::jmax (2.0, mLaneH);
+    const double totalNotes = 120.0 - (double) kMinNote;
+    const double sv         = 120.0 - (double) mTopNote;
+    mVScroll->setRangeLimits (0.0, totalNotes);
+    mVScroll->setCurrentRange (juce::jlimit (0.0, juce::jmax (0.0, totalNotes - lanes), sv),
+                               lanes, juce::dontSendNotification);
+
+    mPushingToBars = false;
+}
+
+void BaySickPitchEditor::scrollBarMoved (juce::ScrollBar* sb, double newStart)
+{
+    if (mPushingToBars || sb == nullptr) return;
+    if (sb == mHScroll.get())
+        setView (mPps, juce::jmax (0.0, newStart));
+    else if (sb == mVScroll.get())
+        setTopNote (120 - (int) std::round (newStart));
 }
 
 void BaySickPitchEditor::zoomToSelection()
@@ -1948,6 +2150,7 @@ void BaySickPitchEditor::timerCallback()
             if (mPlayheadSec > mScroll + viewSec * 0.98)
                 setView (mPps, mPlayheadSec - viewSec * 0.1);
         }
+        mCanvas->syncRulerSelFromBuilder();   // reflect builder-set range on the pitch ruler
         mCanvas->repaint();
     }
 

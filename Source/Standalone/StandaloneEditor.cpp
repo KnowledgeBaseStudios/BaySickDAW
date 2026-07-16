@@ -8453,6 +8453,20 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
     // QA-Fd #7: pitch editor playhead follows the main transport (incl. the
     // stop-reset seek) -- getCurrentBeat is the UI-safe playhead accessor.
     cpRaw->setTransportBeatProvider ([this] { return mPlayHead.getCurrentBeat(); });
+    cpRaw->setTransportSeekProvider ([this] (double b) { mPlayHead.seekTo (b); });
+    cpRaw->setSongTimeSelProviders (
+        [this] (float s, float e)
+        {
+            if (mBuilderPage == nullptr) return;
+            if (e > s) mBuilderPage->setTimeSelectionBars (s, e);
+            else       mBuilderPage->clearTimeSelectionBars();
+        },
+        [this] (float& s, float& e) -> bool
+        {
+            if (mBuilderPage != nullptr && mBuilderPage->hasTimeSelection())
+            { s = mBuilderPage->getTimeSelStartBars(); e = mBuilderPage->getTimeSelEndBars(); return true; }
+            return false;
+        });
     cpRaw->setBusActiveQuery ([this] (int chId)
     {
         // Bus fallback query: kVoxBus2 active iff MixerPage activated it.

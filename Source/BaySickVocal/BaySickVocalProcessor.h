@@ -297,6 +297,15 @@ public:
     // UI-safe) -- the pitch editor's playhead follows it INCLUDING the
     // stop-reset seek, replacing the freeze-on-stop FilePlay stamp.
     std::function<double()>                                     onTransportBeat;
+    // Seek the MAIN transport (StandalonePlayHead::seekTo, project beats).  The
+    // pitch editor's ruler click writes the shared song position; the builder
+    // grid reads the same playhead, so the two stay in sync bidirectionally.
+    std::function<void(double beat)>                            onTransportSeek;
+    // Pitch-editor ruler range <-> the builder-grid SONG time selection (bars).
+    // Write pushes the range (endBar <= startBar clears it); the getter reads it
+    // back each timer tick so the pitch ruler stays in sync + loops in song mode.
+    std::function<void(float startBar, float endBar)>           onSetSongTimeSel;
+    std::function<bool(float& startBar, float& endBar)>         onGetSongTimeSel;
 
     void setOwnChannelId (int id) noexcept { mOwnChannelId = id; }
     int  getOwnChannelId() const noexcept  { return mOwnChannelId; }
@@ -485,6 +494,14 @@ private:
     // QA-Fe Task 5: live-monitor mode (0 TrueDry / 1 BypassCorr [default] /
     // 2 WithEffect).  Audio thread reads; VoxStripTask writes per block.
     std::atomic<int> mMonitorMode { 1 };
+
+    // Monitor-swap de-click: a hard mode swap steps the waveform (the corrected
+    // voice carries the corrector latency, the raw voice does not), so a mode
+    // change equal-gain crossfades over ~10 ms.  Audio-thread-only state.
+    int mMonLastMode    { -1 };
+    int mMonXfadeFrom   { 1 };
+    int mMonXfadeRemain { 0 };
+    int mMonXfadeLen    { 0 };
 
     // QA-Fe Task 4: latency-align the WET take.  The realtime corrector's
     // LiveShifter delays its output by getLatencySamples(); the WET recorder

@@ -976,6 +976,11 @@ public:
     bool  hasTimeSelection() const { return mGrid && mGrid->hasTimeSelection(); }
     float getTimeSelStartBars() const { return mGrid ? mGrid->getTimeSelStart() : 0.f; }
     float getTimeSelEndBars()   const { return mGrid ? mGrid->getTimeSelEnd()   : 0.f; }
+    // The pitch-editor ruler range feeds this SONG time selection, so it loops
+    // (song mode, via onGetLoopBeats) and shows on the builder ruler -- kept in
+    // sync like the shared playhead.  Bars domain (4 beats/bar).
+    void  setTimeSelectionBars (float startBar, float endBar) { if (mGrid) mGrid->setTimeSelection (startBar, endBar); }
+    void  clearTimeSelectionBars ()                           { if (mGrid) mGrid->clearTimeSelection(); }
 
     // Called from toolbar ≡ menu / keyboard shortcuts
     void doImportAudio();

@@ -1662,9 +1662,9 @@ void ArrangementGrid::drawRuler(Graphics& g) const
             g.setColour(VC::Text);
             g.setFont(Font(9));
             // QA-Ea Task 0c (2026-05-20): ruler labels are 0-indexed so the
-            // song downbeat (bar 0 in code) shows as "0", and slip-edited
-            // clips in negative-bar territory show "-1", "-2", etc.
-            g.drawText(String(bar), rx + 2, 1, 24, kRulerH - 2,
+            // 1-based labels (owner 2026-07-16): song downbeat (bar 0 in code)
+            // shows as "1"; pre-roll / slip-edited clips show "0", "-1", etc.
+            g.drawText(String(bar + 1), rx + 2, 1, 24, kRulerH - 2,
                        Justification::centredLeft, false);
         }
     }

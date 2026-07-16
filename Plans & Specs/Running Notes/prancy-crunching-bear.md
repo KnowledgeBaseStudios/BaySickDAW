@@ -1343,3 +1343,228 @@ imprecise -- the time-warp is ALWAYS applyWarp; the RB/SS/WORLD engines only do 
 - **Gap-squash cap (kMaxWarpRatio) + export reorder:** in the tree, unbuilt-clean; the cap
   was built on the (wrong) ratio-rail hypothesis -- keep as a sane limit but it is NOT the
   garble fix; the export reorder is a genuine correctness fix (retain).
+
+---
+
+## 2026-07-16 -- WORLD buzz/water: FULL investigation record + v1 tabling recommendation
+
+Scope: at Jeff's request, the complete WORLD engineering record -- everything
+tried, everything discussed, every angle covered -- consolidated from the six
+transcripts spanning 2026-07-15 -> 07-16 (e91daf87 / 5b424108 / 60b9de37 ->
+f83d414a / d6485a88 -> de34fc20).  This is the permanent record AND the input to
+an external Fable review.  The garble/wobble fix (Option A) is the confirmed win
+of this arc and is committed (`bfb345ec`); WORLD's separate residual buzz/water
+survived every fix and is unresolved.  Prior WORLD context this entry does NOT
+repeat (cross-refs): adoption A/B + measured stats at L298-303; offline popup at
+L603-623; the ORIGINAL identity-PV "fix" at L889-929 (superseded by Option A);
+the raw-vs-PV integration rationale at L895-900.
+
+### What WORLD is, and why it is here
+WORLD is the third, "highest quality" vocal pitch engine behind the
+`IPitchShifter` seam, next to Rubber Band and Signalsmith.  It is a DIFFERENT
+KIND of thing: RB/Signalsmith are time-domain stretchers that PRESERVE the
+original waveform's fine structure + phase; WORLD is an analysis->resynthesis
+VOCODER -- Harvest (F0) / CheapTrick (spectral envelope) / D4C (aperiodicity)
+-> `Synthesis()` (a pitch-synchronous pulse+noise vocoder that REBUILDS PHASE
+FROM SCRATCH every frame).  That phase rebuild is why it never wobbles on a
+sharp edit map -- and, per the final read, why it is phase-incoherent with the
+take and carries an intrinsic vocoder character.  Adopted for best ear-quality
+(Jeff's A/B pick), license-clean (modified-BSD, patent-free), lowest memory,
+~3.6x realtime.  User-facing: combo item 3 "WORLD - Highest Quality (High CPU)",
+offline-only (one-time notice popup), default engine is Rubber Band (index 0).
+
+### The unmasking event (root of this whole arc)
+Pre-Option-A, WORLD was force-fed through Align's `applyWarp` phase vocoder as a
+cleanup pre-pass EVEN WITH NO TIME EDIT (`runWarp = anyTime || engine==World`),
+recorded rationale: "WORLD's Harvest/D4C resynthesis is noisy on raw vocal,
+clean on a PV'd signal."  The PV was doing double duty -- warping time AND
+masking WORLD's own buzz.  Option A (2026-07-15) pulled `applyWarp` out of the
+pitch path so each engine warps natively (`bakeWarped`).  Jeff's call, made with
+eyes open -- his words: "WORLD wasn't clean it just didn't have the 3 sounds it
+was making ... so it probably was just masking its problem so lets do A."
+Result: the mask came off and WORLD's buzz/water came back on every voiced note.
+
+### The symptom (Jeff verbatim + conditions)
+- "I waited for ever and WORLD's weird buzz and water sound remain" (survives a
+  fully finished bake -- NOT the pre-bake window).
+- "still there even if turn it down" + RMS-normalize did nothing -> LEVEL-
+  INDEPENDENT (not clipping/heat).
+- "wouldn't that display itself in all 3 engines?" -> WORLD-only; RB/Signalsmith
+  clean on every edit type, every render, every master recording.
+- DECISIVE (clips-channel test): "a render played in a clips channel does make
+  the noise I just had to turn it up alot to hear it as its way quieter on a
+  clips channel so this isn't just a vocal chain issue" -> the buzz is BAKED INTO
+  WORLD's synthesis output, present even with NO vocal chain, merely much
+  quieter without the chain's boost.
+- MOST DIAGNOSTIC CLUE: "they both only seem to hit when there is a pill at the
+  playhead point so the one or two gaps where there is legit nothing it stops for
+  half a second" -> gated to VOICED material; the textbook pulse-train signature.
+
+### Every hypothesis floated, with disposition
+1. DJ-scratch = decode varispeed (`usePV=false` resample path). -> That was the
+   GARBLE, correctly fixed by Option A. Not the buzz.
+2. Wobble = Align `applyWarp` PV chasing the sharp per-note move map. -> Correct
+   for the WOBBLE, fixed by Option A. Not the buzz.
+3. Pre-bake async window (WORLD bakes slow -> long fallback window). -> Explains
+   the "rolling/funky first play or two"; RULED OUT for the buzz (10s wait).
+4. WORLD runs hot -> clipping upstream (RMS ~1.14-1.3x, crest 7.4 vs RB 6.7).
+   -> RULED OUT (fader-down + RMS-normalize both did nothing).
+5. Cache-read linear-interp aliasing (2-pt read aliases WORLD's hot HF if
+   cache-rate != device-rate). -> Jeff rejected the rate-mismatch premise
+   repeatedly; composite builds at device rate; never confirmed. Effectively out.
+6. PDC / latency comb (Jeff's hypothesis). -> `CompDelayLine` is a pure integer
+   delay, cannot comb/alias. RULED OUT.
+7. Global dry/wet Mix comb (`wet = dry + mix*(wet-dry)`). -> Real latent path but
+   Mix default 1.0 + Jeff confirmed 100% -> path off. RULED OUT.
+8. WORLD non-determinism (random breath differs cache vs render). -> `randn`
+   uses FIXED seeds reseeded every `Synthesis` -> cache bit-identical to render.
+   RULED OUT.
+9. Always-on vocal chain (DeEsser->Comp->Saturation->Limiter) distorting WORLD's
+   peaky/HF-rich/phase-rebuilt signal. -> The confident "found it," backed by a
+   clean pre-chain diagnostic capture. RETRACTED -- the clips test demolished it.
+10. HF tilt (pulse-train excitation brighter top octave -> Saturation grabs it).
+    -> HF de-emphasis barely moved it; NOT just the top octave.
+11. Intrinsic pulse-train buzz from D4C-underestimated aperiodicity (the research
+    agent's rank-1). -> The best-grounded theory; DISPROVEN BY ITS OWN FIX (see
+    the 0.50 AP floor below).
+12. Our own tanh soft-clip coloring the whole F0-pulse signal -> F0-correlated
+    buzz baked into the bare render. -> Gated to peaks-only; no audible change.
+
+### Every fix attempt (file / function / intent / result)
+- **Option A -- engine-native `bakeWarped`** (`LibraryPitchShifters.cpp` +
+  `bakeSpan` restructure, `applyWarp` out of the pitch path). -> **THE WIN**:
+  garble/wobble GONE for RB + Signalsmith across ~18 render WAVs. Committed.
+- **`hasTimeEdit()` neutral-gate + `renderOffline` export twin.** Pure time moves
+  were "neutral" so bake/export bailed -> exports were bit-identical to Normal
+  (peak 0.320 / RMS 0.0465 / F0 170.1). -> Correct; export now matches playback.
+- **Retire realtime pitch-decode warp (`pitchActive=false`).** Not-yet-baked
+  edit plays the DRY raw take through the bake window. -> "rolling gone after
+  ~1s." Confirmed. (Dead pitch-decode branch left for a follow-up cleanup.)
+- **WORLD RMS-normalize (`writeNormalized`).** Level-match to input (WORLD ~1.14x
+  hot). -> NO audible difference. Killed the level theory. KEPT anyway (WORLD
+  shouldn't be louder than the other two).
+- **WORLD peak soft-clip (tanh at source peak).** Limiter is peak-driven. ->
+  "a little fainter but still noticeable." Peaks were PART of it, not the core.
+- **WORLD HF de-emphasis (`deEmphasizeHF`, 11 kHz one-pole).** -> "still there,
+  a little fainter" then "barely moved it." NOT just the top octave.
+- **Aperiodicity floor >4 kHz (`floorAperiodicity`).** Research rank-1 cure. ->
+  buzz + water still there; Jeff added the pill-at-playhead clue here.
+- **Tanh gate (peaks-only, not whole-signal).** Stop our own tanh coloring the
+  F0 pulses. -> no audible change.
+- **Aperiodicity floor WHOLE BAND 0.15@DC -> 0.50@Nyquist ("one last swing").**
+  Should inject MASSIVE noise between harmonics. -> **NO AUDIBLE DIFFERENCE.**
+  This is THE key negative: 0.50 aperiodicity doing nothing DISPROVES the entire
+  pulse-train model the AP floor was built on.
+
+The fixes that made ZERO audible difference (most diagnostic): RMS-normalize,
+the peaks-only tanh gate, and -- most damning -- the whole-band 0.50 AP floor.
+Only the fixes that were actually about the GARBLE (Option A + the two gates)
+fully worked.
+
+### Decisive tests + what they proved
+- 18 render WAVs + master recordings, full spectral battery (HF%, flatness,
+  roughness, spectral flux, HNR, hiss): WORLD ~= Rubber Band on EVERY metric,
+  and playback ~= render. The metrics NEVER caught the buzz Jeff clearly heard.
+  "Your ears beat my metrics" became the theme -- the artifact was never once
+  measured, only heard.
+- Wait-10s: rolling gone, buzz persists -> not the window.
+- Fader -6 dB: unchanged -> not clipping.
+- Render dropped into a FRESH project (empty strip): clean -> misled toward
+  "the specific vocal chain" (wrong -- see clips test).
+- Pre-chain diagnostic capture (`DEBUG_liveread`): clean -> ALSO misled toward
+  the chain. It read "quieter pre-chain" as "clean"; the buzz was just too quiet
+  to notice without the chain's ~+14 dB boost. (Diagnostic removed before commit.)
+- CLIPS-CHANNEL TEST (decisive): WORLD render on a bare channel, no vocal chain
+  -> STILL buzzes, just very quiet. Proves the buzz is intrinsic to WORLD's
+  synthesis, not the chain. Forced the chain retraction.
+- Pill-at-playhead: buzz on voiced pills, silence in true gaps -> WORLD
+  synthesizing voiced content = pulse-train signature.
+- Whole-band 0.50 AP floor -> nothing: disproved the pulse-train model itself.
+
+### Rubber Band / Signalsmith comparison
+Both clean all arc, on every edit type, every render, every master recording.
+Same playback path / cache read / strip / PDC / mixer as WORLD -> the cause is
+WORLD-specific. Physical differences left standing: WORLD rebuilds phase from
+scratch (RB/SS preserve it), is ~1.14-1.2x hotter + peakier, and is impulse/
+pulse-train excited. Implication: the buzz is intrinsic to what WORLD IS -- a
+pulse/noise vocoder -- the exact artifact the WORLD paper exists to mitigate and
+why the field moved to neural vocoders. RB + Signalsmith already deliver the
+clean garble fix, so WORLD is expendable for v1.
+
+### Where I was wrong (retractions, for the record)
+- "The `anyTime=false` bypass is still live" -> grep-confirmed already reverted;
+  the screenshot was from when the diagnostic was applied last session.
+- "WORLD render == playback, it's just the window" -> retracted after the 10s
+  test; "you said 10 seconds, I said one -- my mistake."
+- Level/clipping -> retracted twice (fader + RMS both did nothing).
+- Sample-rate re-litigation -> Jeff killed it 3x; "dropping it for good."
+- Always-on vocal chain -> the BIGGEST retraction; the clips test demolished a
+  confident "found it."
+- Pulse-train / aperiodicity model -> disproven by its own 0.50 AP-floor fix; no
+  replacement diagnosis was found. THIS is the crack Fable is asked to probe.
+
+### Current code state (what is in the tree, uncommitted at time of writing)
+Three WORLD-only buzz-fix helpers survive in `LibraryPitchShifters.cpp`, all
+load-bearing on EVERY WORLD bake (both `bake` + `bakeWarped`), NONE audibly
+effective against the buzz:
+- `floorAperiodicity` (:527) -- 0.15@DC -> 0.50@Nyquist band floor.
+- `deEmphasizeHF` (:550) -- 11 kHz one-pole LP.
+- `writeNormalized` (:559) -- RMS-match (gain cap 4.0) + tanh soft-clip ABOVE the
+  source peak only. The RMS match is KEPT for level parity regardless of the buzz.
+No dead WORLD code; the only superseded thing (the old whole-signal tanh) lives
+as a regression comment, not code.
+
+### Loose threads for the reviewer (never resolved -- what we may be missing)
+1. **Why did a 0.50 whole-band AP floor produce ZERO change?** If the floor truly
+   reaches `Synthesis`, that much injected noise MUST change the output. Suspects:
+   (a) `floorAperiodicity` mutates the SOURCE `ap` rows but `bakeWarped`
+   resynthesizes from the REMAPPED `apEd` rows (interpolated at :494-498) -- check
+   the floor is applied to the array `Synthesis` actually reads; (b) stale build;
+   (c) the buzz genuinely is NOT in the AP/periodic balance -> look at CheapTrick's
+   envelope, `writeNormalized`, or `deEmphasizeHF` itself.
+2. **D4C low-F0 revision** (`d4c.cpp` ~314-316): subtracts aperiodicity for
+   F0 < 100 Hz -> pushes low/male voices MORE periodic -> MORE buzz. Never guarded
+   or tested. What F0 does Jeff's test take actually sit at?
+3. **StoneMask never wired in** -- pipeline is Harvest -> (no StoneMask) ->
+   CheapTrick/D4C. Standard WORLD refines F0 with StoneMask. Never tried.
+4. **The metrics never once registered the buzz.** No time-aligned / F0-synchronous
+   / perceptual metric was built. Any next pass should START by capturing a buzzy
+   playback and finding a metric that actually SEES it -- the whole arc flew blind.
+5. **`bakeWarped` frame-remap vs base `bake` never differentially tested** for the
+   buzz -- but the buzz appears on UNEDITED WORLD too, pointing at base
+   `Synthesis()` character, not the time-remap.
+6. **Cache->output 2-pt linear read never runtime-instrumented** at matched rates.
+7. Running-notes "ratio-jitter" alt hypothesis (L1006) still untested.
+
+### Recommendation (SPEC CALL -- surfaced, Jeff's to decide)
+Table WORLD for v1. Ship Rubber Band + Signalsmith (both clean). Pull the WORLD
+combo item, or park it behind an "Experimental" label, so no beginner lands on
+the buzz. Default is already Rubber Band, so nobody is forced into WORLD today.
+If pulled, that is a user-facing OPTION REMOVAL and gets its own explicit removal
+line here at the moment it happens. Alternative: keep chasing per the loose
+threads above (starting with #1 -- confirm the AP floor even reaches synthesis).
+
+---
+
+## 2026-07-16 -- Companion: pitch-editor grid + monitor de-click + playhead (shipped alongside)
+
+Recorded for commit completeness (these ship in the same commit as the WORLD
+experiments, all on top of `bfb345ec`):
+- **Monitor-swap de-click** (`BaySickVocalProcessor`): 10 ms per-sample crossfade
+  between the 3 monitor modes (True Dry / Bypass Corrector / With Effect) so
+  switching modes no longer clicks. Jeff: "Monitor click is good."
+- **Pitch-editor playhead** (`BaySickPitchEditor`): green (`VC::Green`) triangle +
+  body playhead, bidirectionally synced to the song/builder playhead
+  (`onTransportBeat` get + new `onTransportSeek` set -> `mPlayHead.seekTo`).
+- **Ruler seek + range select** (`BaySickPitchEditor`): click ruler to position;
+  Ctrl+drag = red (`VC::Highlight`) time-selection, 96-tick snap, two-way synced
+  to the builder time selection via new `onSetSongTimeSel`/`onGetSongTimeSel`.
+- **H+V scroll bars** on the pitch editor (piano-roll parity).
+- **Grid zoom = EXACT piano-roll parity** (`setView`/`setLaneHeight`): H zoom-out
+  `max(canvasW/kDefaultPianoRollEmptyPx, contentBars + kPianoRollZoomPadBars)`
+  bars, H zoom-in `kMaxZoomInBeatsAcross` (0.5 beat), V 48/12 notes over the FULL
+  canvas height, wheel step 1.15, clamp-then-anchor. Now pulls the piano roll's
+  own constants (`VibesynthConstants.h`) so it tracks any future baseline change.
+  (Earlier attempts dropped the empty-baseline term -> zoomed too far out; fixed.)
+- **1-based bar labels** (display only): playlist/builder (`BuilderPage`), normal
+  piano roll (`PianoRoll`), drum-kit piano roll (`DrumKitGrid`).

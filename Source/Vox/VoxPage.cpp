@@ -426,6 +426,10 @@ void VoxPage::selectEngine (EngineType e)
         // QA-Fd #7: re-install the transport-beat hook on a rebuilt engine.
         if (mTransportBeat)
             vp->onTransportBeat = mTransportBeat;
+        if (mTransportSeek)
+            vp->onTransportSeek = mTransportSeek;
+        if (mSetSongTimeSel) vp->onSetSongTimeSel = mSetSongTimeSel;
+        if (mGetSongTimeSel) vp->onGetSongTimeSel = mGetSongTimeSel;
         mVocalProc = std::move (vp);
         // J-6 EQ unification (2026-05-03): cast-fixed editor pointer (originally
         // for setPreRackEQ injection; that hookup is removed).
@@ -478,6 +482,28 @@ void VoxPage::setTransportBeatProvider (std::function<double()> fn)
     mTransportBeat = std::move (fn);
     if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
         bv->onTransportBeat = mTransportBeat;
+}
+
+// Ruler click in the pitch editor seeks the main transport (bidirectional
+// playhead with the builder grid).  Mirrors setTransportBeatProvider.
+void VoxPage::setTransportSeekProvider (std::function<void(double)> fn)
+{
+    mTransportSeek = std::move (fn);
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+        bv->onTransportSeek = mTransportSeek;
+}
+
+// Pitch-editor ruler range <-> builder-grid song time selection.
+void VoxPage::setSongTimeSelProviders (std::function<void(float,float)> setFn,
+                                       std::function<bool(float&,float&)> getFn)
+{
+    mSetSongTimeSel = std::move (setFn);
+    mGetSongTimeSel = std::move (getFn);
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+    {
+        bv->onSetSongTimeSel = mSetSongTimeSel;
+        bv->onGetSongTimeSel = mGetSongTimeSel;
+    }
 }
 
 void VoxPage::switchTab (int idx)

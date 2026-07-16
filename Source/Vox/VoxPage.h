@@ -112,6 +112,9 @@ public:
     void setUndoContext (const UndoContext& ctx);
     // QA-Fd #7: main-transport beat provider for the pitch editor playhead.
     void setTransportBeatProvider (std::function<double()> fn);
+    void setTransportSeekProvider (std::function<void(double)> fn);
+    void setSongTimeSelProviders (std::function<void(float,float)> setFn,
+                                  std::function<bool(float&,float&)> getFn);
     void setBusActiveQuery (std::function<bool(int channelId)> q) { mBusActiveQuery = std::move (q); }
     void savePagePreset (std::function<void()> onSaved = {});
     void loadPagePreset (const juce::File& xml);
@@ -166,6 +169,9 @@ private:
     std::function<bool(int)>                     mBusActiveQuery;
     UndoContext                                  mUndoCtx;   // QA-Fd 9a
     std::function<double()>                      mTransportBeat;   // QA-Fd #7
+    std::function<void(double)>                  mTransportSeek;   // pitch ruler -> seek
+    std::function<void(float,float)>             mSetSongTimeSel;  // pitch ruler range -> builder
+    std::function<bool(float&,float&)>           mGetSongTimeSel;  // builder range -> pitch ruler
 
     // G-7 (2026-04-29): listener-based dirty tracking - see ClipsPage for
     // the rationale.  Reliable across engines whose getStateInformation

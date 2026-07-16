@@ -340,6 +340,10 @@ void BaySickVocalProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
     mWetMonoScratch.setSize (1, maxBlockSize, false, false, true);
     mWetMonoScratch.clear();
 
+    mMonXfadeLen    = juce::jmax (1, (int) (sampleRate * 0.010));   // ~10 ms de-click
+    mMonXfadeRemain = 0;
+    mMonLastMode    = -1;
+
     // H-6d: prepare the embedded NAM/IR processor so its DSP is ready when
     // G-9 routes audio through it.
     if (mNamIrProc)
@@ -509,6 +513,20 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const bool filePlaySrc = mForcePitchBypass.load (std::memory_order_acquire);
     const int  monMode     = mMonitorMode.load (std::memory_order_acquire);   // 0 TrueDry / 1 BypassCorr / 2 WithEffect
 
+    // Monitor-swap de-click: detect a mode change and arm the ~10 ms crossfade
+    // (live monitoring only).  monFrom + xRem drive the blend at BOTH monitor
+    // application points below; mMonXfadeRemain advances once, at block end.
+    int monFrom = monMode, xRem = 0;
+    if (! filePlaySrc)
+    {
+        if (mMonLastMode >= 0 && monMode != mMonLastMode)
+        { mMonXfadeFrom = mMonLastMode; mMonXfadeRemain = mMonXfadeLen; }
+        mMonLastMode = monMode;
+        monFrom = mMonXfadeFrom;
+        xRem    = mMonXfadeRemain;
+    }
+    else { mMonLastMode = -1; mMonXfadeRemain = 0; }
+
     // Stash dry copy for the global Mix wet/dry crossfade.
     const float mix = juce::jlimit (0.0f, 1.0f,
         apvts.getRawParameterValue ("bsv_mix")->load());
@@ -529,7 +547,9 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // QA-Fe Task 5: stash the raw live input before the corrector.  True Dry (0)
     // and Bypass Pitch Corrector (1) route this raw voice to the monitor; the
     // corrector still runs below so the WET tap captures the corrected stream.
-    const bool needMonitorLive = (! filePlaySrc) && (monMode != 2);
+    // Always stash for live so the de-click crossfade can read the raw voice even
+    // on a swap INTO With-Effect (mode 2, which by itself would not need it).
+    const bool needMonitorLive = (! filePlaySrc);
     if (needMonitorLive)
     {
         if (mMonitorLiveDry.getNumChannels() < numChannels
@@ -627,11 +647,22 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //   2 With Effect          -> leave the corrected voice in the chain (no-op)
     if (! filePlaySrc)
     {
-        if (monMode == 1)
-            for (int ch = 0; ch < numChannels; ++ch)
-                buffer.copyFrom (ch, 0, mMonitorLiveDry, ch, 0, numSamples);
-        else if (monMode == 0)
-            buffer.clear();
+        // De-click crossfade of the monitor SOURCE.  target(mode): 2 = corrected
+        // (the incoming buffer), 1 = raw live, 0 = silence (True Dry re-adds the
+        // raw voice post-Mix below).  xRem == 0 => w == 1 => steady new mode.
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            float*       b   = buffer.getWritePointer (ch);
+            const float* raw = mMonitorLiveDry.getReadPointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const float corrected = b[i];
+                auto tgt = [&] (int m) noexcept { return m == 2 ? corrected : (m == 1 ? raw[i] : 0.0f); };
+                const int   r = juce::jmax (0, xRem - i);
+                const float w = 1.0f - (float) r / (float) mMonXfadeLen;
+                b[i] = tgt (monFrom) * (1.0f - w) + tgt (monMode) * w;
+            }
+        }
     }
 
     // ── QA-Fd preview play (scrub-audition / sub-editor Play) ─────────────
@@ -717,9 +748,22 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // reaches the monitor with zero effect (bypassing corrector + chain + Mix)
     // while any prior takes above stay fully processed.  Skipped when the live
     // is muted (armed && !listen), matching the monitor gate. ─────────────────
-    if (! filePlaySrc && monMode == 0 && ! monMuteLive)
+    if (! filePlaySrc && ! monMuteLive && (monFrom == 0 || monMode == 0))
         for (int ch = 0; ch < numChannels; ++ch)
-            buffer.addFrom (ch, 0, mMonitorLiveDry, ch, 0, numSamples);
+        {
+            float*       b   = buffer.getWritePointer (ch);
+            const float* raw = mMonitorLiveDry.getReadPointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const int   r    = juce::jmax (0, xRem - i);
+                const float w    = 1.0f - (float) r / (float) mMonXfadeLen;
+                const float addW = (monFrom == 0 ? (1.0f - w) : 0.0f) + (monMode == 0 ? w : 0.0f);
+                b[i] += raw[i] * addW;
+            }
+        }
+
+    // Advance the monitor de-click crossfade once for the block.
+    if (! filePlaySrc) mMonXfadeRemain = juce::jmax (0, mMonXfadeRemain - numSamples);
 }
 
 // ─── QA-F Task 3: BaySickAlign actions (message thread only) ─────────────────
