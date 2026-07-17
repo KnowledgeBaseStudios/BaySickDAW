@@ -151,6 +151,7 @@ mass-scrub). Fix everything found.
 - **G1 — Transport + timeline foundations** (ear-check group): **QA-TransportDisplay**, QA-Chords, QA-TempoMap, QA-Eb, QA-Ec′. Ear-check: tempo-change sample accuracy by ear (position readout assists), stretch/resample behavior, chord stamping. **G1 completion = go/no-go checkpoint for the whole model.**
 - **G2 — Vocal/creative builds** (ear-check group): QA-F, QA-Fa, QA-Fb′, QA-Fc, QA-Fd (inserted 2026-07-11, §9 fifty-sixth), QA-Fe (inserted 2026-07-12, re-scoped 2026-07-13, §9 fifty-seventh/-eighth), QA-Fe2 (inserted 2026-07-16, §9 fifty-ninth — De-noise/De-reverb/Gate/browser groups, grown from the QA-Fe WORLD arc). Ear-checks mid-group: after QA-F (align/warp quality) and after QA-Fa (pitch-edit quality) — pitch/align DSP cannot be judged by smoke tests, and Fa builds on F's shifters.
 - **G3 — Builder/UX/engine polish:** QA-G′, QA-H′, QA-I, QA-J′(residuals only), QA-K (code items; DSP-08 hardware test → campaign), QA-L, QA-M, QA-Drum-Polish, QA-N, **QA-OctavePedal** (NEW 2026-07-13 — octave-pedal engine fix + pedal-mode UI rework + low-latency instrument monitoring; see Main Plan §9 fifty-eighth Forks entry). Plus the **metronome/time-signature regression** fix item (routed 2026-07-16 from QA-Fe2 close, §9 fifty-ninth; gated on Jeff's repro). Ten batches, three shrunk small.
+  *(UPDATED at G3 group open 2026-07-17 — see the "G3 group open" section at the bottom of this file: NINE batches — QA-Drum-Polish folded into QA-L (docket #11=B); the metronome/TS item became the full time-signature system inside QA-G (docket #14 + A/B/B1a/B2a — repro delivered, no longer gated); pattern-block slice folded into QA-G.)*
 - **G4 — Mechanical sweeps + data layer:** QA-VibeSlider, QA-NativeDialogs′, **QA-ApvtsAutomation**, QA-Verify (only the BaySickPedals preset FIX is code; the 10-engine walk → campaign), QA-Export, QA-ProjectSave, **QA-UndoCoverage**, QA-DirtyFlag.
 - **CAMPAIGN — Master Test Plan execution** (absorbs QA-B + QA-Verify walk + QA-RC's page-by-page plan): Jeff walks sections in commit order; failures → I fix (fix commits reference the batch) → re-run scenario; **section pass → apply held Work Log entry + Main Plan STATUS:CLOSED + close commit for that batch (R2)**.
 - **G5 — Phase 6:** QA-Audit (docket decisions pre-resolved at marathon) → QA-Cleanup-1 → QA-PlayerRename → QA-Cleanup-2 → QA-Cleanup-3 → QA-Cleanup-4 — build-after-every-delete discipline unchanged. Then **QA-RC-lite**: 2nd clean build (delete build/, full rebuild, warning audit) + test-to-failure soak + a regression spot-pass (full page-by-page already ran in the campaign).
@@ -1115,3 +1116,58 @@ close commit carries this file's Carry-Over FINAL block per docket 2b.  Main Pla
 gained the QA-Fd entry + §6 arrow slot + §9 fifty-sixth Forks entry (the batch ID reuses
 the dropped 2026-05-14 conditional wiring batch's name — unrelated; disambiguated there).
 The [PITCH DIAG] catalog above still governs: strip AFTER the QA-Fd smoke passes.
+
+## G3 docket answers — LOCKED 2026-07-17 (group open; chat dockets, numbered options, no recommendations)
+
+Full narrative in Main Plan §9 sixtieth; per-batch detail in each plan file's locked table.
+Condensed record (item = pick):
+
+| # | Pick | | # | Pick |
+|---|------|-|---|------|
+| 1 | B + Randomize also rebuilt as FL replica (manual captured) | | 10 | a + a; default nothing mapped |
+| 2 | A full Riff Machine replica (manual captured) | | 11 | B — fold into QA-L, drop QA-Drum-Polish |
+| 3 | A + Jeff's dialog spec (double-click popup; multi-select applies to all) | | 12 | a — real poly tracking |
+| 4i | a — button between Select and Zoom; grey Standard / lit Slide+Porta; "Sel"->"Select" | | 13 | a modified — TWO modes: Dry / With Effect |
+| 4ii | S cycles the button's options | | 14 | Full TS directive (markers sole driver; type-in popup stays; metronome math) |
+| 5i/5ii | a / a — Ctrl+drag; selected notes only | | 15 | Dead — done in G2 |
+| 6 | Real bug, repro'd: muted block shortens song length | | 16 | Dead — §B.11 QA-Fe exists (my stale note) |
+| 7 | Whichever batch runs first = QA-G | | 17 | c — dropped as moot |
+| 8 | a — groups/colors save with project | | 18 | FX Rack button at right end of every page-tab row (both Inst variants) |
+| 9 | No tool — Claude audits ALL factory presets, flagged report | | — | |
+
+Follow-ups: **A**=a (TS work in QA-G); **B**=pattern popup stays, spawns linked auto-markers
+(move/delete with block; pattern-TS edit updates them; manual wins same-bar ties);
+**B1**=a (persists until next marker); **B2**=a (touch unlinks); **C**=TWO buttons right of
+the roll dropdown — "Player Page" + "FX Rack" (Jeff's correction of the one-button reading);
+**D**=B (per-note Resonance added; MODX->Filter Cutoff, MODY->Resonance; both join the Note
+Properties popup).  **Slice follow-up**=(a) fold into QA-G (content-offset model).
+**Jeff's folded Rule-3 item:** BaySickPedals PDC latency reporting (pull model) -> QA-OctavePedal
+Task 4 (+ the scout's octave-internal-latency companion).  **Flagged interpretations baked
+pending veto:** inst monitor default = With Effect; NAV-04 = the two buttons above.
+
+## Carry-Over — 2026-07-17 (G3 group-open session)
+
+- **Completed:** G2/G3 seam resolved (QA-Fe2 close `479790e8` + boundary wrap were done by
+  the prior session; items 15/16 confirmed dead against the file).  G3 group open in full:
+  6 read-only scouts over all ten batch surfaces (one re-run after a harness restart killed
+  the first QA-L attempt); complete spec-call docket walked across four chat rounds (record
+  above); NINE §0 plan files written with every answer baked, approved by Jeff in one R5
+  pass; mirrored to Batch Plans/ (home copies deleted); nine running-notes files seeded;
+  Main Plan §5 pointers + QA-Drum-Polish fold annotation + §9 sixtieth entry applied; this
+  file's G3 composition line updated + docket record + this block added.
+- **In-flight:** the group-open docs commit — surfaced for Jeff's approval at session end
+  (carries all of the above + the two doc stragglers from the G2 wrap: prancy running-notes
+  post-commit checkpoint + test-plan §B.12 hash backfill).  No source code touched yet.
+- **Assumptions changed:** MIX-05 premise (relayout calls exist; real cause = orphaned
+  Layer/Bass/Drum strips on page close); QA-Drum-Polish's "MIDI Map placeholder" never
+  existed; BUILD-06 moot; Builder slice = int-bar-only + no content-offset (the "does
+  nothing" report); Lasersaw = preset-data sustain 0.0; live meter cap is 10.0 w/
+  HOLD-FOR-Phase-6 (marathon 12d's 2.0 applies there, not in QA-N).
+- **Resume action (NEW session):** paste the G3 execution prompt (handed to Jeff at this
+  session's close): /standup -> Main Plan §0 in full -> this file's G3 sections (docket
+  record + this block) -> `Batch Plans/steady-pinning-heron.md` in full -> confirm the
+  group-open commit is at HEAD -> begin QA-G Task 1 (ruler pin).  Per-batch loop per this
+  plan's R1-R5; batch order QA-G -> QA-H -> QA-I -> QA-J' -> QA-K -> QA-L -> QA-M -> QA-N
+  -> QA-OctavePedal; R3 review + smoke at the group boundary.
+- **Work-Log entries needed:** none new (group open is docs-only; each batch drafts + HOLDs
+  its own entry at code-complete per R2).

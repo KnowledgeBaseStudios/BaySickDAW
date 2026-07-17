@@ -2628,3 +2628,38 @@ FULL combined diff.
   (done).  Commit gate opens: ONE batch commit, message + FULL git
   status surfaced for Jeff's approval; then the G2 boundary wrap
   (Jeff's smoke).
+- COMMITTED (Jeff approved, 2026-07-17): `479790e8` -- 50 files,
+  +5219/-382, the whole batch in one commit; main ahead 1, unpushed
+  (standing call).  Section B.11 blocks: backfilled with the hash;
+  this note + the backfill ride the G2 boundary commit per the B.9
+  precedent.  G2 boundary smoke handed to Jeff (section A ladder +
+  the two behavior heads-ups: metronome click timing, monitor
+  default).
+- POST-COMMIT (Jeff's order): the QA-Fe section-B gap FIXED --
+  v1-master-test-plan.md gained a QA-Fe section in its commit-order
+  slot as section B.11 (FE-1..6: three-engine bake sanity, Option A
+  time-warp bake + hasTimeEdit gate, LiveShifter WET-path quality,
+  monitor-swap de-click, pitch-editor parity, 1-based bar labels;
+  blocks: b9f1894f + bfb345ec + 6bbb8650), and the QA-Fe2 section
+  RENUMBERED B.11 -> B.12 (scenario IDs FE2-* unchanged).  Earlier
+  "section B.11" mentions in TODAY'S committed entries meant the
+  QA-Fe2 section = B.12 after this renumber.  Rides the boundary
+  commit.
+- CORRECTION (Jeff, 2026-07-17): `479790e8` WAS the G2 boundary commit
+  -- no separate boundary commit follows.  The post-commit doc edits
+  (QA-Fe section B.11 + the B.12 renumber + hash backfill + these
+  notes) therefore go out as their own small docs commit instead of
+  "riding" anything.
+- POST-CLOSE FIND (Jeff, 2026-07-17): BaySickPedalsProcessor reports
+  ZERO latency -- it hosts the 4x-oversampled drive pedals (~6-12 smp
+  each, ~1-1.5 ms worst full board) but never aggregates slot
+  latencies, so the QA-Fe2 Inst chain hook (which sums whatever the
+  Pedals stage reports) sees 0.  Not in the audit's gap list -- a NEW
+  find, Jeff's catch.  Clarified in chat: time/mod pedals (delay/
+  chorus/flanger/phaser/reverb) correctly report 0 -- dry path
+  undelayed; wet lateness is the effect.  ROUTED TO G3 (Jeff pick "b";
+  G3 already open in another session) -- full handoff breakdown
+  delivered for the G3 prompt (pull-model fix mirroring
+  getChainLatencySamples, per-slot bsp_slot{N}_bypass in APVTS, 5 Hz
+  poll consumes automatically).  Back-ref added to the section 9
+  fifty-ninth Forks entry.

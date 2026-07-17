@@ -766,9 +766,48 @@ Claude's first-pass values, TUNED at this smoke. Debug first, then Release.
 
 ---
 
-### §B.11 — QA-Fe2 (vocal cleanup: De-noise / Gate / De-reverb / browser groups + PDC full-graph + monitor shifter)
+### §B.11 — QA-Fe (pitch-engine pivot: vendored WORLD / Signalsmith / Rubber Band + LiveShifter realtime, Option A time-warp bake, pitch-editor parity)
 
-`blocks:` (backfill the QA-Fe2 close commit hash at commit). Debug exe FIRST, then Release —
+`blocks:` `b9f1894f` (vendor drop + re-scope) + `bfb345ec` (garble fix + Option A engine-native
+time-warp) + `6bbb8650` (pitch-editor grid parity + monitor-swap de-click + 1-based bar labels).
+Authored late — at the QA-Fe2 close, Jeff's order — in its commit-order slot. Debug exe FIRST,
+then Release — mark each scenario `D:` and `R:`. WORLD's synthesis config here is the QA-Fe2
+"stock" state (the buzz-fix helpers this batch experimented with were deleted there); the WORLD
+endgame + Rubber Band A/B is §B.12 FE2-7 — don't double-run it, this section covers the rest of
+the pivot.
+
+- [ ] **FE-1 — three-engine bake sanity.** Same edited take (a few clear note pitch edits),
+      baked once per engine (WORLD / Signalsmith / Rubber Band — the same picker used for the
+      Task-5 A/B). Expected: all three land the notes in tune at the edited targets; character
+      differs (WORLD reads synthetic-er, Signalsmith/Rubber Band smoother) but NONE garbles or
+      loses words — the garble class the engine pivot retired PSOLA over. `D:__ R:__` notes:
+- [ ] **FE-2 — Option A time-warp bake.** One take with BOTH a time edit (elastic move or an
+      edge stretch) and a pitch edit; preview, then bake. Expected: the bake honors both edits
+      exactly as previewed (engine-native warp — no double-warp, no timing drift vs the
+      preview); a take with ONLY time edits (zero pitch moves) still bakes/exports warped
+      (the hasTimeEdit neutral-gate fix). `D:__ R:__` notes:
+- [ ] **FE-3 — realtime corrector on the WET path.** Record a deliberately pitchy phrase with
+      realtime correction ON; play the WET take back. Expected: in tune, natural formants, no
+      moire/warble on held notes (the LiveShifter replaced PSOLA exactly for this); post-QA-Fe2
+      note — what you MONITORED was the low-latency shifter, so judge the R3 engine on the
+      recorded file, not the live phones. `D:__ R:__` notes:
+- [ ] **FE-4 — monitor-swap de-click.** While live-monitoring a held note, right-click the
+      Listen LED and swap monitor modes mid-note (True Dry -> Bypass Pitch Corrector -> With
+      Effect and back). Expected: every swap crossfades (~10 ms) — no click/pop, even though
+      the modes sit at different latencies. `D:__ R:__` notes:
+- [ ] **FE-5 — pitch-editor piano-roll parity.** In the vocal pitch editor: zoom behaves like
+      the piano roll; the playhead tracks transport playback; clicking the ruler seeks;
+      dragging on the ruler selects a span; horizontal + vertical scrollbars present and
+      functional. `D:__ R:__` notes:
+- [ ] **FE-6 — 1-based bar labels.** Builder ruler, piano-roll ruler, and the drum-kit grid
+      all label the first bar "1" (never 0) and agree with the transport readout at the same
+      position. `D:__ R:__` notes:
+
+---
+
+### §B.12 — QA-Fe2 (vocal cleanup: De-noise / Gate / De-reverb / browser groups + PDC full-graph + monitor shifter)
+
+`blocks:` `479790e8` (QA-Fe2 close, the whole batch in one commit). Debug exe FIRST, then Release —
 mark each scenario `D:` and `R:`. The batch's feature set ran a consolidated in-batch
 verification (Task 5, 2026-07-16); FE2-1..9 are the campaign re-verify of that set, FE2-10..14
 are the PDC scope addition's FIRST functional pass (bulk-run R2 deferred them here).

@@ -1665,6 +1665,7 @@ needed to find what you should pull up to review the work.
 ### Phase 4 — Builder + UX work
 
 #### **QA-G: Timeline Geometry**
+**Plan file:** [`Plans & Specs/Batch Plans/steady-pinning-heron.md`](Batch Plans/steady-pinning-heron.md) *(G3 group open 2026-07-17; scope grew: +track menu/groups/colors, +note-preview true positions, +pattern-block slice w/ content-offset, +the full time-signature system — see §9 sixtieth Forks entry)*
 - Items: BUILD-01 (100 tracks), BUILD-02 (ruler freeze), BUILD-03 (zoom
   alignment).
 - Scope: refactor BuilderPage Viewport. Extract ruler from vertical
@@ -1675,6 +1676,7 @@ needed to find what you should pull up to review the work.
 - Effort: medium (~4-6 hours).
 
 #### **QA-H: Builder Polish + Piano Roll Features**
+**Plan file:** [`Plans & Specs/Batch Plans/ghostly-riffing-moth.md`](Batch Plans/ghostly-riffing-moth.md) *(G3 group open 2026-07-17; scope grew: +D-6 Riff Machine + D-8 Note Properties (new Release/Resonance note fields, slide/porta made audible) + Randomize FL rebuild; NAV-05 + folded-#15 already shipped; BUILD-06 verified moot — see §9 sixtieth)*
 - Items: BUILD-04 (ghost notes static), BUILD-05 ('s' keybind dead),
   BUILD-06 (WAV-clip stretch missing rebuild trigger), NAV-05 (REMOVE
   Builder hamburger), MIDI-01 (Ctrl+click row select), MIDI-02
@@ -1712,6 +1714,7 @@ needed to find what you should pull up to review the work.
 - Effort: medium-large (~8-12 hours; folded items add 2-4 hours).
 
 #### **QA-I: Heavy Operation Progress Overlay**
+**Plan file:** [`Plans & Specs/Batch Plans/patient-veiling-tortoise.md`](Batch Plans/patient-veiling-tortoise.md) *(G3 group open 2026-07-17)*
 - Items: NAV-02 (engine swap loading sign), APP-02 (shutdown overlay
   replacing black-screen), APP-03 (project load modal dialog), STATE-03
   (folded into APP-03 — symptomatic, fixed by UX), STATE-04 (already
@@ -1728,6 +1731,7 @@ needed to find what you should pull up to review the work.
 ### Phase 5 — Audio engine cleanup + UI polish
 
 #### **QA-J: Multi-Clip Stacking Fix (DSP-06)**
+**Plan file:** [`Plans & Specs/Batch Plans/prompt-reseeking-newt.md`](Batch Plans/prompt-reseeking-newt.md) *(G3 group open 2026-07-17; batch collapsed to QA-J-Verify at the bulk-run marathon — the plan covers only the two G3 code residuals (unmute re-sync + applicator-map hygiene); the campaign owns the re-verify ledger — see §9 fifty-fifth + sixtieth)*
 - Scope: restructure per-row audio-clip rendering so the rack/EQ runs
   ONCE per row per block on the SUM of the row's clips, not N times per
   block.
@@ -1748,6 +1752,7 @@ needed to find what you should pull up to review the work.
 - Effort: large (~13-18 hours; folded streamer-sync + applicator cleanup adds ~2 hours; folded FilePlay restructure adds ~3-4 hours; folded Clips routing unification adds ~1-2 hours; folded QA-F/Fa/Fb overlapping-row re-verify adds ~1-2 hours).
 
 #### **QA-K: Audio Engine Polish**
+**Plan file:** [`Plans & Specs/Batch Plans/brisk-prioritizing-wren.md`](Batch Plans/brisk-prioritizing-wren.md) *(G3 group open 2026-07-17; DSP-01 re-scoped by Jeff: no in-app audit tool — data-read audit of ALL factory presets -> flagged report; DSP-08 hardware test = campaign — see §9 sixtieth)*
 - Items: APP-04 (SetPriorityClass + MMCSS), APP-05 (Open ASIO Control
   Panel button), DSP-08 (Tascam Model 24 outputs 21/22 stereo bug),
   DSP-11 (live ASIO buffer-size change), DSP-01 (Harmless lazersaw silent
@@ -1761,6 +1766,7 @@ needed to find what you should pull up to review the work.
 - Effort: medium (~4-6 hours total).
 
 #### **QA-L: UI Polish**
+**Plan file:** [`Plans & Specs/Batch Plans/tidy-unsticking-magpie.md`](Batch Plans/tidy-unsticking-magpie.md) *(G3 group open 2026-07-17; composition: BLU-378/379/492 OUT per marathon 18; QA-Drum-Polish's per-drum MIDI note folded IN (docket #11=B, kit fan-out #10); FSW-123 dropped as moot (docket #17=c); NAV-03/NAV-04 placements locked — see §9 sixtieth)*
 - Items: UI-01 (right-click on PopupMenu activates item — JUCE wrapper),
   UI-02 (auto-lane "(deleted slot)" UUID — diagnose with UI-01), MIX-05
   (mixer strip overlap after delete — missing `resized()`/`repaint()`
@@ -1790,6 +1796,7 @@ needed to find what you should pull up to review the work.
   granular commits — recommend split if scope feels off at start.
 
 #### **QA-M: Engine Restoration Lifecycle**
+**Plan file:** [`Plans & Specs/Batch Plans/faithful-rekitting-beaver.md`](Batch Plans/faithful-rekitting-beaver.md) *(G3 group open 2026-07-17)*
 - Items: LIFE-01 (DrumKit kit-load destroys Rusty), LIFE-02 (re-add Rusty
   doesn't auto-reload kit).
 - Scope: dedicated debug session in DrumPage / DrumKitGrid kit-load path
@@ -1799,7 +1806,10 @@ needed to find what you should pull up to review the work.
 - Effort: medium (~4-6 hours).
 
 #### **QA-Drum-Polish: Per-drum MIDI Note Map (D1.5)** (added 2026-05-08 via Rule 3 — see §9)
-**Plan file:** TBD.
+**FOLDED into QA-L (Jeff, 2026-07-17 G3 docket #11=B — see §9 sixtieth Forks entry).** No
+separate plan file; the per-drum MIDI note work lives in QA-L's plan
+([`tidy-unsticking-magpie.md`](Batch Plans/tidy-unsticking-magpie.md) Task 7) with the
+kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - Items: LDT-026 (D1.5 Per-drum MIDI Note Map for pad-controller mapping).
 - Scope: implement per-drum `mInputNote` field that pad-controllers can map to. Populates the MIDI Map placeholder in the per-drum context menu (Phase D D1.4-fix(c) shipped placeholder; D1.5 wires it).
 - Risk: low. Per-drum APVTS param + MIDI dispatch routing.
@@ -1808,6 +1818,7 @@ needed to find what you should pull up to review the work.
 - Why this slot: drum-related work cluster.
 
 #### **QA-N: DSP Meter Sum-of-Cores (DIAG-02)**
+**Plan file:** [`Plans & Specs/Batch Plans/honest-summing-falcon.md`](Batch Plans/honest-summing-falcon.md) *(G3 group open 2026-07-17; live meter cap stays 10.0 — the 200% release value is Phase 6 per marathon 12d)*
 - Items: DIAG-02.
 - Scope: refine the DSP meter under MT to sum audio-thread + per-worker
   times (or use wall-clock dispatch-entry-to-mAllDone). Target: "% of
@@ -1817,7 +1828,7 @@ needed to find what you should pull up to review the work.
 - Effort: small-medium (~3-5 hours).
 
 #### **QA-OctavePedal: Octave-Pedal Engine Fix + Pedal-Mode UI + Low-Latency Instrument Monitoring** *(NEW — inserted 2026-07-13; bulk-run group G3, Main Plan Phase 5, after QA-N — see §9 fifty-eighth Forks entry)*
-**Plan file:** TBD (authored at batch start).
+**Plan file:** [`Plans & Specs/Batch Plans/locked-doubling-frog.md`](Batch Plans/locked-doubling-frog.md) *(G3 group open 2026-07-17; +real poly tracking (docket #12=a) + two-mode Dry/With-Effect inst monitoring (#13=a modified) + Jeff's folded BaySickPedals PDC latency item w/ the octave pedal's own latency report — see §9 fifty-ninth + sixtieth)*
 - **Bucket:** Effects, Players, UI / L&F / Theming.
 - Items: (1) the octave pedal (`OctaveStyleDSP`, BaySickPedals) "rings like a broken bell" — its engine was built per the June octave research ([`daw-architecture-octave-pitch-shift-engine-2026-06-18.md`](Research Reports/daw-architecture-octave-pitch-shift-engine-2026-06-18.md)) but does NOT deliver the clean low-latency octave-down it was supposed to; (2) the **pedal-mode editor UI has overlapping knobs** (the effects-rack view of the same pedal renders fine); (3) **low-latency live instrument monitoring** — the player must hear the processed result at near-zero latency (the ~48 ms library engines can't; time-domain PSOLA-style is the low-latency class per the June report).
 - Scope (full detail in the plan file at start): diagnose + fix the `OctaveStyleDSP` octave-down "broken bell" against the June recommendation (the PSOLA-style period-doubler + YIN + POG voicing are already present per the code — find the real quality gap); rework the pedal-mode editor layout using the working rack layout as reference; deliver clean low-latency live instrument monitoring.
@@ -6031,3 +6042,57 @@ MonitorPitchShifter feeds the live monitor/mix path while WET recording keeps
 R3 quality; monitor-mode default flipped Bypass → With Effect, Jeff pick "a").
 Bus-node consolidation routed to Future State CL-301 (Jeff).  Full record:
 `Running Notes/prancy-crunching-bear.md` 2026-07-16/17 PDC entries.
+**Post-close find (2026-07-17, Jeff):** BaySickPedalsProcessor never reports
+its drive pedals' oversampler latency (~1-1.5 ms worst) to the Inst chain
+hook -> **routed to G3** as a folded-in Rule-3 item (Jeff's call; handoff
+breakdown delivered to the G3 session).  Time/mod pedals correctly report
+0 (wet-path delay is the effect, not latency).
+
+### 2026-07-17 — G3 group open: docket locked, nine plans approved, QA-Drum-Polish folded (sixtieth Forks entry)
+
+**Group open per bulk-run R4/R5** (single approval, Jeff 2026-07-17). All G3 spec calls
+were walked in chat dockets (items 1-18 + follow-ups A-D + B1/B2/C + two corrections) —
+answers recorded in the run plan's "G3 docket answers" section
+([`Batch Plans/swift-stampeding-caribou.md`](Batch Plans/swift-stampeding-caribou.md)) and
+baked into each plan file's locked-calls table.  Composition + scope changes:
+
+- **QA-Drum-Polish FOLDED into QA-L** (docket #11=B) — batch dropped from the group; the
+  per-drum MIDI note work is QA-L Task 7 with Jeff's kit fan-out behavior (#10=a/a,
+  default unmapped).  §5 entry annotated in place.
+- **QA-G grew:** +track right-click set (marathon 5, groups/colors SAVED per #8a),
+  +note-preview true-position fix (#7: first-executed batch), +pattern-block SLICE rework
+  (follow-up (a): snap-resolution cuts + a block content-offset so sliced pieces keep
+  their notes — the unrouted second half of the ghost-notes cluster, a capture miss), +the
+  FULL time-signature system (#14 + A/B/B1a/B2a).  **!! Option-semantics change:** the
+  per-pattern time-signature setting stops driving playback/metronome directly — grid
+  markers become the sole played source; the pattern popup is re-purposed to spawn linked
+  auto-markers on block placement (B1a persist-until-next-marker; B2a touch-to-unlink).
+- **QA-H grew:** +D-6 Riff Machine (FULL FL replica, manual captured) + D-8 Note
+  Properties (Jeff's dialog spec: Normal/Slide/Porta + Velocity/Release/Fine Pitch/
+  Panning/Filter Cutoff/Resonance; slide/porta made AUDIBLE — engines currently drop the
+  note type at playback) + Randomize rebuilt as an FL replica alongside Humanize (#1=B);
+  per-note Release + Resonance are NEW note properties end-to-end (D=B).  Folded #18
+  re-scoped from Jeff's live repro: muted blocks must not shorten song playback length.
+- **QA-K:** DSP-01 re-scoped (#9) — no in-app tool; full data-read audit of ALL factory
+  presets -> flagged-candidates report; Lasersaw root = amp sustain 0.0 in the preset XML.
+- **QA-L:** FSW-123 dropped as moot (#17=c — the Clips page has only the locked engine
+  picker); NAV-03 = FX Rack button at the right end of every page-tab button row (both
+  Inst variants); NAV-04 = "Player Page" + "FX Rack" buttons right of the piano-roll
+  selector dropdown (Jeff's two-button correction).
+- **QA-OctavePedal:** +real poly tracking (#12=a); inst monitoring = TWO modes
+  Dry / With Effect (#13=a modified; With Effect default flagged at approval); + the
+  fifty-ninth entry's folded BaySickPedals PDC item (pull model) + the group-open scout's
+  companion finding (OctaveStyleDSP reports no internal latency — both halves land
+  together).
+- **Dead at the docket:** items 15/16 (first-engage tick + QA-Fe §B section — both already
+  done in G2; the §B claim was my stale note, corrected against the file).
+
+**Plan files (mirrored + running notes seeded 2026-07-17):** QA-G
+`steady-pinning-heron` / QA-H `ghostly-riffing-moth` / QA-I `patient-veiling-tortoise` /
+QA-J' `prompt-reseeking-newt` / QA-K `brisk-prioritizing-wren` / QA-L
+`tidy-unsticking-magpie` / QA-M `faithful-rekitting-beaver` / QA-N
+`honest-summing-falcon` / QA-OctavePedal `locked-doubling-frog`.  Group-open scouting
+(6 read-only agents, 2026-07-17) premise-corrected several §5 claims — recorded in the
+plan files' Context blocks (notably: MIX-05's real cause = orphaned Layer/Bass/Drum
+strips on page close; the QA-Drum-Polish "MIDI Map placeholder" never existed; BUILD-06
+moot; slice tool exists but int-bar-only + no content-offset).
