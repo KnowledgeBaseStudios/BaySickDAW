@@ -66,20 +66,20 @@ void EngineInsertTask::run()
     juce::AudioBuffer<float> blockView (ptrs, mOutputBuffer->getNumChannels(), n);
     blockView.clear();
 
-    // ── Sidechain push ────────────────────────────────────────────────────────
-    // Pull from each SC predecessor's mOutputBuffer (already written by the
-    // upstream task - guaranteed by mDeps reaching zero before we run). Feed
-    // into the engine via ISidechainEngine.
+    // ── Sidechain fill + push ─────────────────────────────────────────────────
+    // QA-Fe2 SC delay-match: fill + delay-match the strip's SC receive
+    // buffers FIRST (pre-compensation source taps via the pull helper), then
+    // hand those SAME aligned buffers to the engine -- engine-level SC and
+    // rack/preEq/postEq SC read identical keys.  (Pre-QA-Fe2 the engine got
+    // raw post-compensation predecessor outputs and the pull ran after the
+    // engine render.)
+    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
     if (mScEngine != nullptr)
     {
+        const VibeGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
         juce::AudioBuffer<float>* scBufs[VibeGraph::kMaxScRecvSlots] = {};
-        for (const auto& link : mPredecessors)
-        {
-            if (! link.isSc) continue;
-            if (link.scSlot < 0 || link.scSlot >= VibeGraph::kMaxScRecvSlots) continue;
-            if (link.source == nullptr || link.source->mOutputBuffer == nullptr) continue;
-            scBufs[link.scSlot] = link.source->mOutputBuffer;
-        }
+        for (int i = 0; i < VibeGraph::kMaxScRecvSlots; ++i)
+            scBufs[i] = scArr[(size_t) i];
         mScEngine->setSidechainBuffers (scBufs, VibeGraph::kMaxScRecvSlots);
     }
 
@@ -90,13 +90,6 @@ void EngineInsertTask::run()
         midi = &emptyMidi;
 
     mEngine->processBlock (blockView, *midi);
-
-    // 2026-05-07 (Batch 9c follow-up): populate the strip's SC accumulator
-    // from MT predecessors so processInsert's internal pushScArrayToStrip
-    // forwards real data to the rack / preEq / postEq.  Without this, the
-    // engine's setSidechainBuffers above covers engine-level SC but the
-    // rack-level SC (e.g. compressor with SC source) reads silence.
-    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
     // ── Insert chain (polarity → preEq → width → rack → postEq → fader …) ────
     mGraph->processInsert (toInsertKind (mKind), mIndex,

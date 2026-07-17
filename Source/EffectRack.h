@@ -26,7 +26,7 @@ enum class EffectType
     TransientShaper,
     Tape,
     Limiter,
-    DeEsser,    // H-6 (2026-05-01) -- vocal chain rack uses this for slot 0
+    DeEsser,    // H-6 (2026-05-01) -- vocal chain stage (slot 2 since QA-Fe2)
 
     // I-1: BaySickPedals 18-module spec.  DSP classes land in I-5..I-13;
     // factory returns nullptr until then.  Numeric values explicit so saved
@@ -55,6 +55,11 @@ enum class EffectType
     FurmanEQStyle        = 116,   // EQFH-Time      - slot 7 (option 3)
     AcousticSimulatorStyle = 117, // AC - Modulation - slots 1-6 (added 2026-05-03 alongside AD polish)
     NAMPedalStyle          = 118, // User NAM Pedal - slots 1-6 (loads .nam capture; pedal-specific entry, BaySickPedals only)
+
+    // QA-Fe2 (2026-07-16): locked vocal-chain stages (Gate slot 0, De-reverb
+    // slot 1).  Not offered in the general FX-rack picker -- vocal chain only.
+    Gate                   = 119,
+    DeReverb               = 120,
 };
 
 // ── EffectRack ────────────────────────────────────────────────────────────────

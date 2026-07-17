@@ -17,6 +17,7 @@
 #include "DSP/AudioClipStreamer.h"
 #include "DSP/PhaseVocoder.h"
 #include "DSP/BaySickAlignDSP.h"   // QA-Fa recovery: AlignPlaySnapshot (decode-layer live warp)
+#include "DSP/DenoiseDSP.h"        // QA-Fe2: DenoiseProfile (project-persisted per recording)
 #include "MidiLearn/MidiLearnRegistry.h"
 // Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06).  These
 // members live for the lifetime of the processor; per-strip RenderTask
@@ -642,16 +643,6 @@ public:
         bool                     chainOn     { true };
         bool                     pitchOn     { false };
         float                    transpose   { 0.0f };
-        // QA-Fd time-edit engine: the page's published pitch TIME map
-        // (edited -> source; nullptr = no time edits) + its bsp_on gate.
-        // Matched by PAGE INDEX (the map always describes the page's own
-        // channel), unlike snap which matches by followerChannelId.
-        const AlignPlaySnapshot* pitchMap     { nullptr };
-        bool                     pitchChainOn { true };
-        // #1: the pitch time-warp now lives in the edited-timeline bake cache,
-        // so when a cache is published the file-read pitch stage stays OFF and
-        // sourcePosAt collapses to align-only (or linear when no align).
-        bool                     pitchBaked   { false };
         // Source-position stamp: decodeFilePlayClip writes it when the
         // composed law is engaged (timeline-equivalent samples at the
         // device rate + per-sample rate); finalizeFilePlayStrip forwards
@@ -931,6 +922,29 @@ public:
                  ? mVoxEngines[(size_t) pageIndex] : nullptr;
     }
 
+    // QA-Fe2 De-noise: per-recording noise profiles (raw + corrector domain),
+    // keyed by recording base name (file name minus the " - DRY.wav"-style
+    // tag).  Project-persisted (<DenoiseProfiles>) so Regenerate De-noise
+    // works across sessions.  Message thread only.
+    void storeDenoiseProfiles (const juce::String& baseName,
+                               const DenoiseProfile& raw, const DenoiseProfile& wet)
+    {
+        mDenoiseProfiles[baseName] = { raw, wet };
+    }
+    const std::pair<DenoiseProfile, DenoiseProfile>*
+        findDenoiseProfiles (const juce::String& baseName) const
+    {
+        auto it = mDenoiseProfiles.find (baseName);
+        return it != mDenoiseProfiles.end() ? &it->second : nullptr;
+    }
+    void renameDenoiseProfiles (const juce::String& oldBase, const juce::String& newBase)
+    {
+        auto it = mDenoiseProfiles.find (oldBase);
+        if (it == mDenoiseProfiles.end()) return;
+        mDenoiseProfiles[newBase] = it->second;
+        mDenoiseProfiles.erase (oldBase);
+    }
+
 private:
     AudioFileRecorder              mMasterRecorder;        // master-output fallback
     std::vector<StripRecorder>     mStripRecorders;        // per-armed-strip WAVs
@@ -1116,6 +1130,9 @@ public:
     juce::CriticalSection mProjectFolderLock;
     juce::File            mCurrentProjectFolder;
 
+    // QA-Fe2: De-noise profile store (see accessors above).  Message thread.
+    std::map<juce::String, std::pair<DenoiseProfile, DenoiseProfile>> mDenoiseProfiles;
+
     // ── Metronome DSP ─────────────────────────────────────────────────────
     struct MetroDSP {
         enum SoundType { Sine = 0, Click, Wood, Bell };
@@ -1136,8 +1153,17 @@ public:
         bool   countInWasActive { false }; // edge-detect to reset phase on start
         int    countInBeatsFired{ 0 };     // 2026-04-26 (D-5 fix): tracks how many
                                            // count-in clicks have fired so the loop
-                                           // doesn't double-fire beat 1 after the
-                                           // rising-edge initial trigger.
+                                           // doesn't double-fire beat 1 after its
+                                           // initial trigger (fires in-loop once the
+                                           // QA-Fe2 PDC deferral elapses).
+        // QA-Fe2 PDC (2026-07-16): the compensated mix reaches this buffer
+        // totalLatencySamples late, so clicks defer by the same amount or
+        // they LEAD the music (default-audible now that De-reverb ships
+        // active).  countInDelaySamp defers the whole count-in once at its
+        // rising edge; transportWasPlaying edge-inits the transport click
+        // grid so the deferral can't fire a stale catch-up click at play.
+        int    countInDelaySamp { 0 };
+        bool   transportWasPlaying { false };
     } mMetro;
 
 private:

@@ -237,6 +237,58 @@ void PatternManager::setAudioLibraryPageOwner(int idx, int channelId)
 
 // QA-E Task 7 (FILE-02): set the source-of-truth pitch / BPM / stretch on the
 // library entry (browser "Properties..." applies here; followers inherit).
+// ── QA-Fe2 browser groups ────────────────────────────────────────────────────
+void PatternManager::addManualAudioGroup(int category, const juce::String& name)
+{
+    if (name.isEmpty()) return;
+    for (const auto& [c, n] : mManualAudioGroups)
+        if (c == category && n == name) return;   // dedup
+    mManualAudioGroups.emplace_back(category, name);
+}
+
+void PatternManager::renameManualAudioGroup(int category, const juce::String& oldName,
+                                            const juce::String& newName)
+{
+    if (newName.isEmpty()) return;
+    for (auto& [c, n] : mManualAudioGroups)
+        if (c == category && n == oldName) n = newName;
+    // Member rewrite is category-filtered too: same-named groups can exist
+    // in different categories (the create default is "New Group"), and a
+    // rename in one must not re-group the other's members.  Category from
+    // the owner-channel ranges (literals per the BuilderPage convention:
+    // Clips 400..449 = 0, Vox 600..605 = 1, Inst 700..705 = 2).
+    auto ownerCategory = [] (int ch) noexcept
+    {
+        if (ch >= 600 && ch < 606) return 1;
+        if (ch >= 700 && ch < 706) return 2;
+        if (ch >= 400 && ch < 450) return 0;
+        return -1;
+    };
+    for (auto& e : mAudioLibrary)
+        if (e.groupName == oldName && ownerCategory(e.pageOwnerChannelId) == category)
+            e.groupName = newName;
+}
+
+juce::StringArray PatternManager::getManualAudioGroups(int category) const
+{
+    juce::StringArray out;
+    for (const auto& [c, n] : mManualAudioGroups)
+        if (c == category) out.add(n);
+    return out;
+}
+
+int PatternManager::replaceAudioPath(const juce::String& oldPath,
+                                     const juce::String& newPath)
+{
+    int hits = 0;
+    for (auto& e : mAudioLibrary)
+        if (e.path == oldPath) { e.path = newPath; ++hits; }
+    for (auto& blk : mArrangement)
+        if (blk.clipType == ClipType::Audio && blk.audioFilePath == oldPath)
+            { blk.audioFilePath = newPath; ++hits; }
+    return hits;
+}
+
 void PatternManager::setAudioLibraryClipDefaults(int idx, float pitch,
                                                  float bpm, bool stretchMode)
 {
@@ -856,6 +908,7 @@ void PatternManager::reset()
     // is unaffected -- entries still accumulate via addAudioLibraryEntry within a
     // project, so a true duplicate drop still prompts correctly.
     mAudioLibrary.clear();
+    mManualAudioGroups.clear();   // QA-Fe2
     mMixer = {};
     mDrumEnabled.fill (true);
     for (auto& m : mRowMuted)  m.store (false, std::memory_order_relaxed);
@@ -1192,9 +1245,22 @@ juce::ValueTree PatternManager::toValueTree() const
             en.setProperty("libPitch",           e.pitchSemitones,     nullptr);
             en.setProperty("libBPM",             e.originalBPM,        nullptr);
             en.setProperty("libStretch",         e.stretchMode,        nullptr);
+            en.setProperty("group",              e.groupName,          nullptr);   // QA-Fe2
             lib.addChild(en, -1, nullptr);
         }
         root.addChild(lib, -1, nullptr);
+    }
+    {
+        // QA-Fe2: user-created browser groups (may be empty of members).
+        juce::ValueTree grp("AudioGroups");
+        for (const auto& [cat, name] : mManualAudioGroups)
+        {
+            juce::ValueTree g("Group");
+            g.setProperty("cat",  cat,  nullptr);
+            g.setProperty("name", name, nullptr);
+            grp.addChild(g, -1, nullptr);
+        }
+        root.addChild(grp, -1, nullptr);
     }
     {
         juce::ValueTree lib("AutomationTemplates");
@@ -1211,6 +1277,7 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
     mPatterns.clear();
     mArrangement.clear();
     mAudioLibrary.clear();
+    mManualAudioGroups.clear();   // QA-Fe2
     mAutomationTemplates.clear();
     mCurrentPattern = (int)root.getProperty("currentPattern", 0);
     mGlobalTempo    = (double) root.getProperty ("globalTempo", 120.0);
@@ -1617,8 +1684,19 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
                 // blocks all deserialize isOverride=true so they don't follow.
                 (float) e.getProperty("libPitch",   0.0),
                 (float) e.getProperty("libBPM",     120.0),
-                (bool)  e.getProperty("libStretch", true)
+                (bool)  e.getProperty("libStretch", true),
+                e.getProperty("group", juce::String()).toString()   // QA-Fe2
             });
+        }
+    }
+    {
+        auto grp = root.getChildWithName("AudioGroups");   // QA-Fe2
+        for (int i = 0; i < grp.getNumChildren(); ++i)
+        {
+            auto g = grp.getChild(i);
+            if (g.hasType("Group"))
+                mManualAudioGroups.emplace_back((int) g.getProperty("cat", 0),
+                                                g.getProperty("name", juce::String()).toString());
         }
     }
     {

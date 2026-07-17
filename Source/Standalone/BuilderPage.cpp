@@ -1,6 +1,7 @@
 #include "BuilderPage.h"
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
 #include "../DSP/BpmDetect.h"    // QA-Ec G1-boundary: content tempo estimation (import + display)
+#include "../DSP/DSPBase.h"      // QA-Fe2: isTransportPlaying stop-gate (Regenerate De-noise)
 #include "PatternColorPicker.h"
 #include <map>                    // G1 boundary: detected-tempo display cache
 #include "../ClipDropDiag.h"        // QA-ClipDrop: diagnostic trap (2026-06-02)
@@ -216,8 +217,46 @@ void AudioCategoryItem::paintItem (Graphics& g, int width, int height)
 void AudioCategoryItem::itemClicked (const MouseEvent& e)
 {
     // Toggle open state on label click for usability (in addition to the
-    // triangle icon).  Right-click is a no-op on category nodes.
-    if (e.mods.isPopupMenu()) return;
+    // triangle icon).  QA-Fe2: right-click opens the category menu
+    // ("Create Group...").
+    if (e.mods.isPopupMenu())
+    {
+        if (onContextMenu) onContextMenu (e.getScreenPosition());
+        return;
+    }
+    setOpen (! isOpen());
+}
+
+// ── QA-Fe2: AudioGroupItem ───────────────────────────────────────────────────
+AudioGroupItem::AudioGroupItem (const String& name, Colour accent, bool isAuto)
+    : mName (name), mAccent (accent), mIsAuto (isAuto)
+{
+    setOpen (true);
+}
+
+void AudioGroupItem::paintItem (Graphics& g, int width, int height)
+{
+    auto r = Rectangle<int> (width, height).reduced (2, 1).toFloat();
+    g.setColour (Colour (0xff20242c));
+    g.fillRoundedRectangle (r, 2.0f);
+    g.setColour (mAccent.withAlpha (0.55f));
+    g.fillRoundedRectangle (r.withWidth (3.0f), 1.0f);
+
+    const int n = const_cast<AudioGroupItem*> (this)->getNumSubItems();
+    g.setColour (Colour (0xffd0d4dc));
+    g.setFont (Font (12.0f, Font::bold));
+    g.drawText (mName + " (" + String (n) + ")",
+                r.withTrimmedLeft (8.0f).withTrimmedRight (4.0f).toNearestInt(),
+                Justification::centredLeft, true);
+}
+
+void AudioGroupItem::itemClicked (const MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+    {
+        if (onContextMenu) onContextMenu (e.getScreenPosition());
+        return;
+    }
     setOpen (! isOpen());
 }
 
@@ -285,6 +324,12 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
     mClipsCat = clipsCat.get();
     mVoxCat   = voxCat  .get();
     mInstCat  = instCat .get();
+    // QA-Fe2: category headers get the group-creation menu (0 Clips / 1 Vox
+    // / 2 Inst -- literal category indices, mirrors the browser convention).
+    mClipsCat->onContextMenu = [this] (juce::Point<int> pt) { showCategoryContextMenu (0, pt); };
+    mVoxCat  ->onContextMenu = [this] (juce::Point<int> pt) { showCategoryContextMenu (1, pt); };
+    mInstCat ->onContextMenu = [this] (juce::Point<int> pt) { showCategoryContextMenu (2, pt); };
+
     mAudioRoot->addSubItem (clipsCat.release());
     mAudioRoot->addSubItem (voxCat  .release());
     mAudioRoot->addSubItem (instCat .release());
@@ -394,7 +439,8 @@ void BrowserPanel::rebuildAudioRows()
     if (! onEnumerateAudio) return;
 
     auto entries = onEnumerateAudio();
-    for (auto& e : entries)
+
+    auto makeLeaf = [this] (const CategorizedAudioEntry& e) -> AudioBrowserItem*
     {
         auto* leaf = new AudioBrowserItem (e);
         leaf->onRenameRequested = [this, leaf]
@@ -432,12 +478,241 @@ void BrowserPanel::rebuildAudioRows()
         {
             showAudioTreeContextMenu (*leaf, pt);
         };
+        return leaf;
+    };
 
-        if      (e.category == "Clips") mClipsCat->addSubItem (leaf);
-        else if (e.category == "Vox")   mVoxCat  ->addSubItem (leaf);
-        else if (e.category == "Inst")  mInstCat ->addSubItem (leaf);
-        else                            delete leaf;   // unknown category - drop
+    // QA-Fe2 grouping: manual groupName wins; else Vox/Inst recordings
+    // auto-group by take-tag base (CLEANED tags matched before plain --
+    // suffix order is load-bearing).  Clips never auto-group (uploads, not
+    // recordings).  Registry groups render even when empty.
+    static const char* kTagSuffix[4] = { " - DRY CLEANED", " - WET CLEANED",
+                                         " - DRY", " - WET" };
+    static const char* kTagLabel [4] = { "Dry Cleaned", "Wet Cleaned",
+                                         "Dry", "Wet" };
+    const Colour catAccent[3] = { Colour (0xffd4a017), Colour (0xff0fafa5),
+                                  Colour (0xff1c3a8a) };
+    AudioCategoryItem* catNode[3] = { mClipsCat, mVoxCat, mInstCat };
+
+    struct GroupBucket
+    {
+        bool isAuto { false };
+        std::vector<std::pair<CategorizedAudioEntry, String>> members; // (entry, leaf-label override)
+    };
+    std::vector<std::pair<String, GroupBucket>> groups[3];
+    std::vector<CategorizedAudioEntry>          flat[3];
+
+    auto bucketFor = [&groups] (int ci, const String& key, bool isAuto) -> GroupBucket&
+    {
+        for (auto& [k, b] : groups[ci])
+            if (k == key) return b;
+        groups[ci].push_back ({ key, GroupBucket { isAuto, {} } });
+        return groups[ci].back().second;
+    };
+
+    for (int ci = 0; ci < 3; ++ci)
+        for (const auto& g : mPM.getManualAudioGroups (ci))
+            bucketFor (ci, g, false);
+
+    for (auto& e : entries)
+    {
+        const int ci = e.category == "Clips" ? 0
+                     : e.category == "Vox"   ? 1
+                     : e.category == "Inst"  ? 2 : -1;
+        if (ci < 0) continue;
+
+        if (e.groupName.isNotEmpty())
+        {
+            bucketFor (ci, e.groupName, false).members.push_back ({ e, {} });
+            continue;
+        }
+        bool grouped = false;
+        if (ci != 0)
+        {
+            const String stem = juce::File (e.fullPath).getFileNameWithoutExtension();
+            for (int t = 0; t < 4 && ! grouped; ++t)
+                if (stem.endsWith (kTagSuffix[t]))
+                {
+                    const String base = stem.upToLastOccurrenceOf (kTagSuffix[t], false, false);
+                    bucketFor (ci, base, true).members.push_back ({ e, kTagLabel[t] });
+                    grouped = true;
+                }
+        }
+        if (! grouped) flat[ci].push_back (e);
     }
+
+    for (int ci = 0; ci < 3; ++ci)
+    {
+        for (auto& gpair : groups[ci])
+        {
+            // Plain locals (not structured bindings): C++17 lambdas cannot
+            // portably capture bindings.
+            const String       key    = gpair.first;
+            const GroupBucket& bucket = gpair.second;
+            const bool         isAuto = bucket.isAuto;
+
+            auto* grp = new AudioGroupItem (key, catAccent[ci], isAuto);
+            grp->onContextMenu = [this, ci, key, isAuto] (Point<int> pt)
+            {
+                showGroupContextMenu (ci, key, isAuto, pt);
+            };
+            for (const auto& mpair : bucket.members)
+            {
+                auto shown = mpair.first;
+                if (mpair.second.isNotEmpty()) shown.displayName = mpair.second;
+                grp->addSubItem (makeLeaf (shown));
+            }
+            catNode[ci]->addSubItem (grp);
+        }
+        for (auto& e : flat[ci])
+            catNode[ci]->addSubItem (makeLeaf (e));
+    }
+}
+
+// ── QA-Fe2 browser groups: menus + move/copy group assignment ────────────────
+
+void BrowserPanel::showCategoryContextMenu (int category, Point<int> globalPt)
+{
+    PopupMenu m;
+    m.addItem (1, "Create Group...");
+    m.showMenuAsync (PopupMenu::Options().withTargetScreenArea (
+                         Rectangle<int> (globalPt.x, globalPt.y, 1, 1)),
+        [this, category] (int r)
+        {
+            if (r != 1) return;
+            auto editor = std::make_unique<TextEditor>();
+            editor->setText ("New Group", false);
+            editor->setFont (Font (13.f));
+            editor->setSelectAllWhenFocused (true);
+            editor->setSize (180, 26);
+            editor->setEscapeAndReturnKeysConsumed (true);
+            auto* raw = editor.get();
+            editor->onReturnKey = [this, category, raw]
+            {
+                const String t = raw->getText().trim();
+                if (t.isNotEmpty())
+                {
+                    mPM.addManualAudioGroup (category, t);
+                    rebuildAudioRows();
+                }
+                if (auto* cb = raw->findParentComponentOfClass<CallOutBox>())
+                    cb->dismiss();
+            };
+            editor->onEscapeKey = [raw]
+            {
+                if (auto* cb = raw->findParentComponentOfClass<CallOutBox>())
+                    cb->dismiss();
+            };
+            Rectangle<int> anchor;
+            if (mAudioTree) anchor = mAudioTree->getScreenBounds().withHeight (28);
+            CallOutBox::launchAsynchronously (std::move (editor), anchor, nullptr);
+        });
+}
+
+void BrowserPanel::showGroupContextMenu (int category, const String& name,
+                                         bool isAuto, Point<int> globalPt)
+{
+    // Auto (recording) group rename moves files the clip streamers may hold
+    // open -> same stop-gate as Regenerate De-noise.  Manual groups are
+    // label-only renames and stay available during playback.
+    const bool renameOk = ! isAuto || ! DSPBase::isTransportPlaying();
+    PopupMenu m;
+    m.addItem (1, renameOk ? "Rename Group..."
+                           : "Rename Group... (stop playback)", renameOk);
+    m.showMenuAsync (PopupMenu::Options().withTargetScreenArea (
+                         Rectangle<int> (globalPt.x, globalPt.y, 1, 1)),
+        [this, category, name, isAuto] (int r)
+        {
+            if (r != 1) return;
+            auto editor = std::make_unique<TextEditor>();
+            editor->setText (name, false);
+            editor->setFont (Font (13.f));
+            editor->setSelectAllWhenFocused (true);
+            editor->setSize (220, 26);
+            editor->setEscapeAndReturnKeysConsumed (true);
+            auto* raw = editor.get();
+            editor->onReturnKey = [this, category, name, isAuto, raw]
+            {
+                const String t = raw->getText().trim();
+                if (t.isNotEmpty() && t != name)
+                {
+                    if (isAuto)
+                    {
+                        // Disk-rename flow lives in StandaloneEditor.
+                        if (onRenameRecordingGroup)
+                            onRenameRecordingGroup (name, t);
+                    }
+                    else
+                    {
+                        mPM.renameManualAudioGroup (category, name, t);
+                    }
+                    rebuildAudioRows();
+                }
+                if (auto* cb = raw->findParentComponentOfClass<CallOutBox>())
+                    cb->dismiss();
+            };
+            editor->onEscapeKey = [raw]
+            {
+                if (auto* cb = raw->findParentComponentOfClass<CallOutBox>())
+                    cb->dismiss();
+            };
+            Rectangle<int> anchor;
+            if (mAudioTree) anchor = mAudioTree->getScreenBounds().withHeight (28);
+            CallOutBox::launchAsynchronously (std::move (editor), anchor, nullptr);
+        });
+}
+
+void BrowserPanel::maybePromptGroupAssign (int libIdx, int targetChannel)
+{
+    // Ranges mirror MixerChannelIds; literals per the BuilderPage convention.
+    const int category = (targetChannel >= 600 && targetChannel < 606) ? 1
+                       : (targetChannel >= 700 && targetChannel < 706) ? 2 : -1;
+    if (category < 0 || libIdx < 0 || libIdx >= mPM.getNumAudioLibrary()) return;
+
+    // Candidate groups "connected to that page": the target page's own
+    // recording groups (auto bases from entries it owns) + the category's
+    // manual groups.
+    juce::StringArray candidates = mPM.getManualAudioGroups (category);
+    static const char* kTags[4] = { " - DRY CLEANED", " - WET CLEANED",
+                                    " - DRY", " - WET" };
+    for (int i = 0; i < mPM.getNumAudioLibrary(); ++i)
+    {
+        if (mPM.getAudioLibraryPageOwner (i) != targetChannel) continue;
+        const String stem = juce::File (mPM.getAudioLibraryPath (i)).getFileNameWithoutExtension();
+        for (int t = 0; t < 4; ++t)
+            if (stem.endsWith (kTags[t]))
+            {
+                candidates.addIfNotAlreadyThere (stem.upToLastOccurrenceOf (kTags[t], false, false));
+                break;
+            }
+    }
+    if (candidates.isEmpty()) return;
+
+    auto* aw = new juce::AlertWindow ("Add to Group",
+        "Add this file to one of the destination page's groups?",
+        juce::MessageBoxIconType::QuestionIcon);
+    juce::StringArray items;
+    items.add ("(none)");
+    items.addArray (candidates);
+    aw->addComboBox ("grp", items, "Group:");
+    aw->addButton ("OK", 1);
+
+    juce::Component::SafePointer<BrowserPanel> safeThis (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safeThis, aw, libIdx] (int r)
+        {
+            auto* self = safeThis.getComponent();
+            if (! self || r != 1) return;
+            int sel = 0;
+            if (auto* cb = aw->getComboBoxComponent ("grp"))
+                sel = juce::jmax (0, cb->getSelectedItemIndex());
+            if (sel > 0)
+            {
+                self->mPM.setAudioLibraryGroup (libIdx,
+                    aw->getComboBoxComponent ("grp")->getText());
+                self->rebuildAudioRows();
+            }
+        }),
+        true);
 }
 
 void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> globalPt)
@@ -451,6 +726,8 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
     constexpr int kIdProperties = 4;   // QA-E Task 7 (FILE-02)
     constexpr int kIdReveal     = 7;
     constexpr int kIdChokeBase  = 200;
+    constexpr int kIdRegenLight  = 300;   // QA-Fe2 De-noise
+    constexpr int kIdRegenStrong = 301;
 
     PopupMenu m;
     m.addItem (kIdRename,    "Rename...");
@@ -459,6 +736,25 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
     // QA-E Task 7 (FILE-02): the library entry is the source of truth for
     // routing.  Editing this moves every grid copy still following it.
     m.addItem (kIdProperties, "Properties...");
+
+    // QA-Fe2: cleaned takes can be re-generated at either strength from the
+    // stored (or self-learned) profile.  Stop-gated (grey while playing) --
+    // the clip streamers hold the target file open during playback, so a
+    // mid-play overwrite would fail on Windows.  Hard guard lives in
+    // StandaloneEditor::regenerateDenoise.
+    const String libPath = mPM.getAudioLibraryPath (libIdx);
+    const String stem    = File (libPath).getFileNameWithoutExtension();
+    const bool isCleanedTake = stem.endsWith (" - DRY CLEANED")
+                            || stem.endsWith (" - WET CLEANED");
+    if (isCleanedTake && onRegenerateDenoise != nullptr)
+    {
+        const bool stopped = ! DSPBase::isTransportPlaying();
+        PopupMenu regen;
+        regen.addItem (kIdRegenLight,  "Light",  stopped);
+        regen.addItem (kIdRegenStrong, "Strong", stopped);
+        m.addSubMenu (stopped ? "Regenerate De-noise"
+                              : "Regenerate De-noise (stop playback)", regen);
+    }
     m.addSeparator();
 
     // Choke Group submenu - same model as the flat-list audio context menu.
@@ -480,13 +776,19 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
 
     m.showMenuAsync (PopupMenu::Options().withTargetScreenArea (
                          Rectangle<int> (globalPt.x, globalPt.y, 1, 1)),
-        [this, libIdx, absPath, onRename] (int result)
+        [this, libIdx, absPath, libPath, onRename] (int result)
         {
             if (result == 0) return;
 
             if (result == kIdRename)
             {
                 if (onRename) onRename();
+                return;
+            }
+            if (result == kIdRegenLight || result == kIdRegenStrong)
+            {
+                if (onRegenerateDenoise)
+                    onRegenerateDenoise (libPath, result == kIdRegenStrong ? 1 : 0);
                 return;
             }
             if (result == kIdDuplicate)
@@ -692,6 +994,10 @@ void BrowserPanel::showLibraryPropertiesDialog (int libIdx)
                 if (target < 0) return;
                 if (self->onTagCopiedEntry)
                     self->onTagCopiedEntry (np, target, newPitch, newBPM, stretch);
+                // QA-Fe2: offer the destination page's groups for the copy.
+                const int newIdx = self->mPM.findAudioLibraryIndexByPath (np);
+                if (newIdx >= 0)
+                    self->maybePromptGroupAssign (newIdx, target);
             }
             else
             {
@@ -706,6 +1012,7 @@ void BrowserPanel::showLibraryPropertiesDialog (int libIdx)
                 if (self->onApplyLibraryProperties)
                     self->onApplyLibraryProperties (libIdx, newPitch, newBPM,
                                                     stretch, target);
+                self->maybePromptGroupAssign (libIdx, target);   // QA-Fe2
             }
         }),
         true);
@@ -860,7 +1167,10 @@ void BrowserPanel::refresh()
         // Vox/Inst page wouldn't trigger a tree rebuild.
         snapshot << "A:" << mPM.getNumAudioLibrary() << "|";
         for (int i = 0; i < mPM.getNumAudioLibrary(); ++i)
-            snapshot << mPM.getAudioLibraryPath(i) << "/" << mPM.getAudioLibraryAlias(i) << "\n";
+            snapshot << mPM.getAudioLibraryPath(i) << "/" << mPM.getAudioLibraryAlias(i)
+                     << "/" << mPM.getAudioLibraryGroup(i) << "\n";   // QA-Fe2: group edits rebuild too
+        for (int c = 0; c < 3; ++c)                                   // QA-Fe2: manual-group registry
+            snapshot << "G" << c << ":" << mPM.getManualAudioGroups(c).joinIntoString(",") << "|";
         if (onEnumerateAudio)
         {
             auto entries = onEnumerateAudio();
@@ -5840,6 +6150,16 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
 
     // Source Picker / Browser
     mBrowser = std::make_unique<BrowserPanel>(pm, mAFM, mThumbCache);
+
+    // QA-Fe2: draggable browser right edge (min = default 180, max = 3x).
+    mBrowserGrip = std::make_unique<BrowserEdgeGrip>();
+    mBrowserGrip->getWidth = [this] { return mBrowserWidth; };
+    mBrowserGrip->setWidth = [this](int w)
+    {
+        const int clamped = juce::jlimit (kBrowserDefaultW, kBrowserDefaultW * 3, w);
+        if (clamped != mBrowserWidth) { mBrowserWidth = clamped; resized(); }
+    };
+    addAndMakeVisible (*mBrowserGrip);
     mBrowser->onPatternSelected = [this](int idx) {
         mPM.setCurrentPattern(idx);
         if (mGrid) mGrid->setSelectedPatternIndex(idx);
@@ -5995,8 +6315,14 @@ void BuilderPage::resized()
     auto b = getLocalBounds();
 
     // Browser panel (left)
-    int browserW = mBrowser->isCollapsed() ? 28 : 180;
+    int browserW = mBrowser->isCollapsed() ? 28 : mBrowserWidth;   // QA-Fe2 resizable
     mBrowser->setBounds(b.removeFromLeft(browserW));
+    if (mBrowserGrip)
+    {
+        mBrowserGrip->setVisible (! mBrowser->isCollapsed());
+        if (! mBrowser->isCollapsed())
+            mBrowserGrip->setBounds (b.removeFromLeft (5));
+    }
 
     // Menu bar (above toolbar)
     if (mMenuBar) mMenuBar->setBounds(b.removeFromTop(kMenuBarH));

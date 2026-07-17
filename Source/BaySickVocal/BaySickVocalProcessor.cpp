@@ -7,6 +7,8 @@
 #include "../DSP/CompressorDSP.h"
 #include "../DSP/SaturationDSP.h"
 #include "../DSP/LimiterDSP.h"
+#include "../DSP/GateDSP.h"      // QA-Fe2 slot 0
+#include "../DSP/DeReverbDSP.h"  // QA-Fe2 slot 1
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickVocalProcessor - Phase H-1 skeleton (2026-05-01)
@@ -92,6 +94,19 @@ BaySickVocalProcessor::createLayout()
     addB ("comp_bypass",     "Compressor Bypass",false);
     addB ("sat_bypass",      "Saturation Bypass",false);
     addB ("limiter_bypass",  "Limiter Bypass",   false);
+
+    // QA-Fe2 (2026-07-16) -- Gate (slot 0) + De-reverb (slot 1) stages.
+    // Gate defaults are fully transparent (threshold at the floor).
+    addB ("gate_bypass",       "Gate Bypass",        false);
+    addF ("gate_threshold",    "Gate Threshold dB",  -80.f,   0.f,  -80.f);
+    addF ("gate_range",        "Gate Range dB",      -80.f,   0.f,  -60.f);
+    addF ("gate_attack",       "Gate Attack ms",       0.1f, 100.f,   1.f);
+    addF ("gate_hold",         "Gate Hold ms",         0.f,  500.f,  50.f);
+    addF ("gate_release",      "Gate Release ms",      5.f, 2000.f, 100.f);
+    addB ("dereverb_bypass",   "De-reverb Bypass",   false);
+    addF ("dereverb_reduction","De-reverb Reduction",  0.f,  100.f,  50.f);
+    addF ("dereverb_tail",     "De-reverb Tail ms",  100.f, 1000.f, 400.f);
+    addF ("dereverb_mix",      "De-reverb Mix",        0.f,  100.f, 100.f);
 
     // H-2 (2026-05-01) -- Compressor stage params.  The compressor is a
     // single CompressorDSP instance with the new Type dropdown selecting
@@ -284,7 +299,6 @@ BaySickVocalProcessor::BaySickVocalProcessor()
     mAlignOnRaw        = apvts.getRawParameterValue ("bsa_align_on");
     mAlignPitchOnRaw   = apvts.getRawParameterValue ("bsa_pitch_on");
     mAlignTransposeRaw = apvts.getRawParameterValue ("bsa_pitch_transpose");
-    mBspOnRaw          = apvts.getRawParameterValue ("bsp_on");
 }
 
 // ─── Destructor ───────────────────────────────────────────────────────────────
@@ -322,23 +336,47 @@ void BaySickVocalProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
     // QA-Fa: pitch engine (offline analysis + the FilePlay applicator).
     mPitch.prepare (sampleRate, maxBlockSize);
 
-    // H-6c -- pre-load the vocal chain rack with 4 locked slots in order.
-    // loadEffect is idempotent on type match; second prepareToPlay calls
-    // (e.g. sample-rate change) just re-prepare the existing slots.
-    if (mVocalChainRack.getSlotType (0) != EffectType::DeEsser)
-        mVocalChainRack.loadEffect (0, EffectType::DeEsser);
-    if (mVocalChainRack.getSlotType (1) != EffectType::Compressor)
-        mVocalChainRack.loadEffect (1, EffectType::Compressor);
-    if (mVocalChainRack.getSlotType (2) != EffectType::Saturation)
-        mVocalChainRack.loadEffect (2, EffectType::Saturation);
-    if (mVocalChainRack.getSlotType (3) != EffectType::Limiter)
-        mVocalChainRack.loadEffect (3, EffectType::Limiter);
+    // H-6c / QA-Fe2 -- pre-load the vocal chain rack, now 6 locked slots:
+    // [0] Gate [1] De-reverb [2] De-esser [3] Compressor [4] Saturation
+    // [5] Limiter (de-reverb ahead of compression so the tail can't be
+    // pumped back up).  loadEffect is idempotent on type match; second
+    // prepareToPlay calls (e.g. sample-rate change) just re-prepare.
+    if (mVocalChainRack.getSlotType (0) != EffectType::Gate)
+        mVocalChainRack.loadEffect (0, EffectType::Gate);
+    if (mVocalChainRack.getSlotType (1) != EffectType::DeReverb)
+        mVocalChainRack.loadEffect (1, EffectType::DeReverb);
+    if (mVocalChainRack.getSlotType (2) != EffectType::DeEsser)
+        mVocalChainRack.loadEffect (2, EffectType::DeEsser);
+    if (mVocalChainRack.getSlotType (3) != EffectType::Compressor)
+        mVocalChainRack.loadEffect (3, EffectType::Compressor);
+    if (mVocalChainRack.getSlotType (4) != EffectType::Saturation)
+        mVocalChainRack.loadEffect (4, EffectType::Saturation);
+    if (mVocalChainRack.getSlotType (5) != EffectType::Limiter)
+        mVocalChainRack.loadEffect (5, EffectType::Limiter);
     mVocalChainRack.prepare (sampleRate, maxBlockSize);
 
     mDryScratch.setSize (2, maxBlockSize, false, false, true);
     mDryScratch.clear();
     mWetMonoScratch.setSize (1, maxBlockSize, false, false, true);
     mWetMonoScratch.clear();
+
+    // QA-Fe2: De-noise learners (raw + corrector-domain).  prepareToPlay is
+    // never concurrent with processBlock, so the ring realloc is safe here.
+    mDenoiseRawLearner.prepare (sampleRate);
+    mDenoiseWetLearner.prepare (sampleRate);
+    mDenoiseMonoScratch.assign ((size_t) juce::jmax (16, maxBlockSize), 0.0f);
+
+    // QA-Fe2 docket 2a: low-latency corrected monitor path.
+    mMonitorShifter.prepare (sampleRate, maxBlockSize);
+    mMonShiftScratch.assign ((size_t) juce::jmax (16, maxBlockSize), 0.0f);
+    mMonShiftFadeStep = 1.0f / juce::jmax (1.0f, (float) (0.04 * sampleRate));
+    mMonShiftFade      = 0.0f;
+    mMonShiftWasActive = false;
+    mDenoisePump.onTick = [this]
+    {
+        mDenoiseRawLearner.processPending();
+        mDenoiseWetLearner.processPending();
+    };
 
     mMonXfadeLen    = juce::jmax (1, (int) (sampleRate * 0.010));   // ~10 ms de-click
     mMonXfadeRemain = 0;
@@ -391,16 +429,36 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
     mPitch.setSnapOn    (rdb ("bsp_snap"));
     mPitch.setEngine    ((PitchEngine) juce::jlimit (0, 2, rdi ("bsp_engine")));
 
-    // ── Rack stage Bypass flags (forward to slots) ────────────────────────
-    mVocalChainRack.setSlotBypassed (0, rdb ("bsv_deesser_bypass"));
-    mVocalChainRack.setSlotBypassed (1, rdb ("bsv_comp_bypass"));
-    mVocalChainRack.setSlotBypassed (2, rdb ("bsv_sat_bypass"));
-    mVocalChainRack.setSlotBypassed (3, rdb ("bsv_limiter_bypass"));
+    // ── Rack stage Bypass flags (forward to slots; QA-Fe2 order 0..5) ─────
+    mVocalChainRack.setSlotBypassed (0, rdb ("bsv_gate_bypass"));
+    mVocalChainRack.setSlotBypassed (1, rdb ("bsv_dereverb_bypass"));
+    mVocalChainRack.setSlotBypassed (2, rdb ("bsv_deesser_bypass"));
+    mVocalChainRack.setSlotBypassed (3, rdb ("bsv_comp_bypass"));
+    mVocalChainRack.setSlotBypassed (4, rdb ("bsv_sat_bypass"));
+    mVocalChainRack.setSlotBypassed (5, rdb ("bsv_limiter_bypass"));
 
-    // ── De-esser (slot 0) ──────────────────────────────────────────────────
+    // ── Gate (slot 0, QA-Fe2) ─────────────────────────────────────────────
+    if (auto* gt = dynamic_cast<GateDSP*> (mVocalChainRack.getSlotEffect (0)))
+    {
+        gt->setThresholdDb (rd ("bsv_gate_threshold"));
+        gt->setRangeDb     (rd ("bsv_gate_range"));
+        gt->setAttackMs    (rd ("bsv_gate_attack"));
+        gt->setHoldMs      (rd ("bsv_gate_hold"));
+        gt->setReleaseMs   (rd ("bsv_gate_release"));
+    }
+
+    // ── De-reverb (slot 1, QA-Fe2) ────────────────────────────────────────
+    if (auto* dr = dynamic_cast<DeReverbDSP*> (mVocalChainRack.getSlotEffect (1)))
+    {
+        dr->setReductionPct (rd ("bsv_dereverb_reduction"));
+        dr->setTailMs       (rd ("bsv_dereverb_tail"));
+        dr->setMixPct       (rd ("bsv_dereverb_mix"));
+    }
+
+    // ── De-esser (slot 2) ──────────────────────────────────────────────────
     // QA-F chain-wiring fix (2026-07-10): modeBlend replaces the removed
     // legacy Int mode; the new engine/quality params ride the same push.
-    if (auto* de = dynamic_cast<DeEsserDSP*> (mVocalChainRack.getSlotEffect (0)))
+    if (auto* de = dynamic_cast<DeEsserDSP*> (mVocalChainRack.getSlotEffect (2)))
     {
         de->setModeBlend    (rd  ("bsv_deesser_modeBlend"));
         de->setMsMode       (rdi ("bsv_deesser_msMode"));
@@ -417,8 +475,8 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
         de->setSpectralQuality (rdb ("bsv_deesser_lowlat")   ? 1 : 0);
     }
 
-    // ── Compressor (slot 1) ────────────────────────────────────────────────
-    if (auto* cp = dynamic_cast<CompressorDSP*> (mVocalChainRack.getSlotEffect (1)))
+    // ── Compressor (slot 3) ────────────────────────────────────────────────
+    if (auto* cp = dynamic_cast<CompressorDSP*> (mVocalChainRack.getSlotEffect (3)))
     {
         cp->setType        (rdi ("bsv_comp_type"));
         cp->setThreshold   (rd  ("bsv_comp_threshold"));
@@ -439,21 +497,21 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
         cp->setPeakDetection (rdb ("bsv_comp_peakDet"));
     }
 
-    // ── Saturation (slot 2) ────────────────────────────────────────────────
+    // ── Saturation (slot 4) ────────────────────────────────────────────────
     // H-7 (2026-05-01): Type umbrella + Vocal Body.  Other knobs (drive,
     // tube type, etc.) still run at defaults until a polish pass exposes
     // them in the BaySickVocal UI; the existing rack panel reads them too.
-    if (auto* sat = dynamic_cast<SaturationDSP*> (mVocalChainRack.getSlotEffect (2)))
+    if (auto* sat = dynamic_cast<SaturationDSP*> (mVocalChainRack.getSlotEffect (4)))
     {
         sat->setSatType        (rdi ("bsv_sat_type"));
         sat->setVocalBody      (rdb ("bsv_sat_vocalBody"));
         sat->setHarmonicsMode  (rdi ("bsv_sat_harmonicsMode"));
     }
 
-    // ── Limiter (slot 3) ───────────────────────────────────────────────────
+    // ── Limiter (slot 5) ───────────────────────────────────────────────────
     // QA-F chain-wiring fix (2026-07-10): full knob push (was "polish pass"
     // deferred -- the panel's edits neither persisted nor had params).
-    if (auto* lim = dynamic_cast<LimiterDSP*> (mVocalChainRack.getSlotEffect (3)))
+    if (auto* lim = dynamic_cast<LimiterDSP*> (mVocalChainRack.getSlotEffect (5)))
     {
         lim->setInputGainDb  (rd  ("bsv_limiter_inGain"));
         lim->setCeilingDb    (rd  ("bsv_limiter_ceiling"));
@@ -557,6 +615,24 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             mMonitorLiveDry.setSize (numChannels, numSamples, false, false, true);
         for (int ch = 0; ch < numChannels; ++ch)
             mMonitorLiveDry.copyFrom (ch, 0, buffer, ch, 0, numSamples);
+
+        // QA-Fe2 raw-domain De-noise learner: fold the pre-corrector live
+        // voice to mono and feed the ring (wait-free; FFT work runs on the
+        // pump timer).  Digital-silence frames are skipped learner-side, so
+        // an assigned-but-idle strip never poisons the room profile.
+        if (mDenoiseLearnEnabled.load (std::memory_order_acquire)
+            && numSamples <= (int) mDenoiseMonoScratch.size())
+        {
+            const float invCh = (numChannels > 1) ? (1.0f / (float) numChannels) : 1.0f;
+            for (int i = 0; i < numSamples; ++i)
+            {
+                float s = 0.0f;
+                for (int ch = 0; ch < numChannels; ++ch)
+                    s += buffer.getReadPointer (ch)[i];
+                mDenoiseMonoScratch[(size_t) i] = s * invCh;
+            }
+            mDenoiseRawLearner.pushBlock (mDenoiseMonoScratch.data(), numSamples);
+        }
     }
 
     // ── Run the locked vocal chain in order ──────────────────────────────
@@ -592,6 +668,23 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // and must never land in a take's WET file.
     if (! filePlaySrc)
     {
+        // QA-Fe2 corrector-domain De-noise learner: the WET take's noise
+        // floor is corrector-transformed, so it gets its own profile learned
+        // at this same tap point -- during monitoring too, not just capture.
+        if (mDenoiseLearnEnabled.load (std::memory_order_acquire)
+            && numSamples <= (int) mDenoiseMonoScratch.size())
+        {
+            const float invCh = (numChannels > 1) ? (1.0f / (float) numChannels) : 1.0f;
+            for (int i = 0; i < numSamples; ++i)
+            {
+                float s = 0.0f;
+                for (int ch = 0; ch < numChannels; ++ch)
+                    s += buffer.getReadPointer (ch)[i];
+                mDenoiseMonoScratch[(size_t) i] = s * invCh;
+            }
+            mDenoiseWetLearner.pushBlock (mDenoiseMonoScratch.data(), numSamples);
+        }
+
         auto* wetRec = mWetRecorder.load (std::memory_order_acquire);
         // QA-Fe Task 4: on the arm edge, prime the latency skip so the recorded
         // WET take aligns to the record-arm moment (the LiveShifter delays its
@@ -639,30 +732,75 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // ── QA-Fe2 docket 2a: low-latency corrected monitor stage ─────────────────
+    // While realtime correction is live, the With-Effect monitor/mix target
+    // below swaps the R3 stream (~48 ms) for a dual-tap time-domain shift of
+    // the RAW voice at the same smoothed correction ratio (~12 ms).  The R3
+    // stream already fed the WET recorder above, so recordings keep R3
+    // quality; only what the performer (and the live mix) hears changes.
+    // ~40 ms fade on the correction-toggle edges; the shifter cold-restarts
+    // on engage (ring primes silent under the fade).
+    const float* tdMon = nullptr;
+    if (! filePlaySrc)
+    {
+        const bool rtActive = ! mPitchCorrector.bypassed;
+        if (rtActive && ! mMonShiftWasActive)
+            mMonitorShifter.reset();
+        mMonShiftWasActive = rtActive;
+
+        if ((rtActive || mMonShiftFade > 0.0f)
+            && (int) mMonShiftScratch.size() >= numSamples
+            && mMonitorLiveDry.getNumChannels() > 0)
+        {
+            // The live source is a mono mic duplicated L=R (recorder-contract
+            // comment above) -- shift channel 0 only.
+            const float* raw0 = mMonitorLiveDry.getReadPointer (0);
+            std::copy (raw0, raw0 + numSamples, mMonShiftScratch.data());
+            const float ratio = std::pow (2.0f,
+                mPitchCorrector.getCurrentShiftCents() / 1200.0f);
+            mMonitorShifter.process (mMonShiftScratch.data(), numSamples, ratio);
+            tdMon = mMonShiftScratch.data();
+        }
+    }
+
     // ── QA-Fe Task 5: live-monitor split (after the WET tap, so recording stays
     // corrected regardless of what the monitor hears) ────────────────────────
     //   1 Bypass Pitch Corrector -> monitor the RAW live voice through the chain
     //   0 True Dry              -> pull the live voice out of the chain here; it
     //                             is re-added raw AFTER the Mix (below)
-    //   2 With Effect          -> leave the corrected voice in the chain (no-op)
+    //   2 With Effect          -> corrected voice in the chain (R3 stream, or
+    //                             the low-latency monitor shift when live)
     if (! filePlaySrc)
     {
         // De-click crossfade of the monitor SOURCE.  target(mode): 2 = corrected
         // (the incoming buffer), 1 = raw live, 0 = silence (True Dry re-adds the
         // raw voice post-Mix below).  xRem == 0 => w == 1 => steady new mode.
+        const float fadeStart = mMonShiftFade;
+        const float fadeDir   = mMonShiftWasActive ? 1.0f : -1.0f;
         for (int ch = 0; ch < numChannels; ++ch)
         {
             float*       b   = buffer.getWritePointer (ch);
             const float* raw = mMonitorLiveDry.getReadPointer (ch);
             for (int i = 0; i < numSamples; ++i)
             {
-                const float corrected = b[i];
+                float corrected = b[i];
+                if (tdMon != nullptr)
+                {
+                    // Substitution fade is a pure function of i so every
+                    // channel blends identically; the member advances once
+                    // below.
+                    const float f = juce::jlimit (0.0f, 1.0f,
+                        fadeStart + fadeDir * mMonShiftFadeStep * (float) i);
+                    corrected += f * (tdMon[i] - corrected);
+                }
                 auto tgt = [&] (int m) noexcept { return m == 2 ? corrected : (m == 1 ? raw[i] : 0.0f); };
                 const int   r = juce::jmax (0, xRem - i);
                 const float w = 1.0f - (float) r / (float) mMonXfadeLen;
                 b[i] = tgt (monFrom) * (1.0f - w) + tgt (monMode) * w;
             }
         }
+        mMonShiftFade = juce::jlimit (0.0f, 1.0f,
+            fadeStart + fadeDir * mMonShiftFadeStep * (float) numSamples);
     }
 
     // ── QA-Fd preview play (scrub-audition / sub-editor Play) ─────────────
@@ -1378,7 +1516,7 @@ bool BaySickVocalProcessor::analyzePitch (juce::String& errorOut)
     return true;
 }
 
-juce::File BaySickVocalProcessor::renderPitchedTake (juce::String& errorOut, bool highRes)
+juce::File BaySickVocalProcessor::renderPitchedTake (juce::String& errorOut)
 {
     errorOut.clear();
     if (! onRenderComposite || ! onGetProjectFolder)
@@ -1392,13 +1530,13 @@ juce::File BaySickVocalProcessor::renderPitchedTake (juce::String& errorOut, boo
     if (comp.getNumSamples() <= 0)
         { errorOut = "This channel has no audio clips."; return {}; }
 
-    // renderOffline now WARPS-THEN-BAKES (the time map is applied inside bakeSpan,
+    // renderOffline WARPS-THEN-BAKES (the time map is applied inside bakeSpan,
     // exactly like playback), so the export already honors the channel's TIME
     // edits.  The old post-hoc applyWarp here ran on the ALREADY-pitched buffer
-    // (pitch-then-warp) and destroyed phase coherence -- engine-independent garble
-    // on any time move.  Removed.  (highRes warp oversampling is a follow-up:
-    // bakeSpan's internal warp runs at os=1 like playback.)
-    juce::ignoreUnused (highRes);
+    // (pitch-then-warp) and destroyed phase coherence -- engine-independent
+    // garble on any time move.  Removed.  (QA-Fe2 item 2: the highRes flag is
+    // retired with the dialog choice -- engine-native warping made the PV
+    // oversampling it drove obsolete.)
     auto rendered = mPitch.renderOffline (comp.getReadPointer (0),
                                           comp.getNumSamples(), sr);
     if (rendered.getNumSamples() <= 0)
@@ -1649,7 +1787,7 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
     // kVocalChainStateTag note above).
     {
         juce::ValueTree chain (kVocalChainStateTag);
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < 6; ++i)   // QA-Fe2: 6 locked slots
         {
             if (auto* eff = mVocalChainRack.getSlotEffect (i))
             {
@@ -1770,7 +1908,7 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         // saves have no child -> chain DSPs keep their defaults, unchanged.
         if (chainChild.isValid())
         {
-            for (int i = 0; i < 4; ++i)
+            for (int i = 0; i < 6; ++i)   // QA-Fe2: 6 locked slots
             {
                 const juce::String b64 = chainChild.getProperty (
                     "s" + juce::String (i), juce::String()).toString();

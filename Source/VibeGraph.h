@@ -413,8 +413,23 @@ public:
     // Returns the total latency in samples (master rack latency + max bus latency).
     int updateBusLatencies();
 
-    // Total algorithmic latency (Layers/Bass/Drums compensation + master rack).
-    // Read by VibeSynthProcessor::getLatencySamples().
+    // QA-Fe2 PDC (2026-07-16): per-Vox-strip ENGINE-side chain latency
+    // (BaySickVocal rack -- the spectral De-esser and De-reverb report real
+    // FFT latency -- plus the strip's NAM/IR oversampling).  Queried by
+    // updateBusLatencies so the vocal chain joins the compensation set.
+    // Wired once by VibeSynthProcessor; message thread only
+    // (updateBusLatencies allocates in setDelay).
+    std::function<int(int voxIdx)> onGetVoxStripChainLatency;
+
+    // QA-Fe2 PDC full-graph pass (2026-07-16): Inst analog of the Vox hook.
+    // Inst strips host an EngineChainProcessor (sfizz -> Pedals -> NAM/IR);
+    // NAM/IR reports oversampling latency via setLatencySamples, which was
+    // written but never read by any aggregator before this hook.
+    std::function<int(int instIdx)> onGetInstStripEngineLatency;
+
+    // Total algorithmic latency (strip-stage + bus-stage compensation target
+    // + master chain).  Read by VibeSynthProcessor::getLatencySamples() and,
+    // on the audio thread, by the metronome offset + master-recorder trim.
     std::atomic<int> totalLatencySamples { 0 };
 
     // ── Rack + bus EQ state serialization ────────────────────────────────────
@@ -602,6 +617,15 @@ public:
     ScRecvArray getScRecvArray (int channelId);
     // Clear all SC receive buffers (call at the top of each block).
     void clearScRecvBuffers();
+    // QA-Fe2 SC delay-match (docket 1b): pre-compensation key tap for an SC
+    // SOURCE channel.  nullptr when the channel isn't an armed SC source or
+    // has no stash (Master) -- caller falls back to the post-everything
+    // output buffer.  Audio thread.
+    const juce::AudioBuffer<float>* getScSourceTap (int channelId) const;
+    // Apply the per-(consumer, slot) key-alignment delay in place on the SC
+    // receive buffer (values solved on the message thread by
+    // updateBusLatencies).  Audio thread, allocation-free.
+    void applyScRecvDelay (int channelId, int slotIdx, int numSamples);
     // Push the strip's SC array to its preEq + rack + postEq DSP modules.
     // Address-only push -- the actual buffer contents are filled by upstream
     // SC fanout (pullSidechainPredecessorsToGraph under MT), AFTER topo-sorted
@@ -813,6 +837,70 @@ private:
     // Global "kill-all" FX bypass, read by every rack process site each block.
     // Cached in buildFixedTopology() so audio-thread reads are lock-free.
     std::atomic<float>* mGlobalFxBypassPtr { nullptr };
+
+    // ── PDC compensation delay line ──────────────────────────────────────────
+    // A simple stereo ring buffer. setDelay() resizes and resets it on the
+    // message thread (safe because processBlock() only runs between
+    // prepareToPlay calls or when the topology is stable). process() is
+    // audio-thread only.  Nested here (moved from the .cpp at QA-Fe2) so the
+    // SC key-alignment array below can hold it by value.
+    struct CompDelayLine
+    {
+        // 32768 (~680 ms @ 48k) headroom: a vocal chain (De-reverb 2048 +
+        // spectral De-esser 2048 + limiter lookahead) stacked with an
+        // HQ-Linear strip EQ (2x ~2050 mid+side) can pass 8192.  setDelay
+        // allocates the FULL cap (256 KB stereo) for any line it activates
+        // and a line returned to 0 keeps it; only never-activated lines cost
+        // nothing -- a few MB total across a fully latent session.  Beyond
+        // the cap the delay silently clamps (misaligned but stable).
+        static constexpr int kMaxSamples = 32768;
+
+        void setDelay(int delaySamples, int numChannels)
+        {
+            mDelay = juce::jlimit(0, kMaxSamples, delaySamples);
+            mNumCh = numChannels;
+            mBuf.assign((size_t)(mNumCh * kMaxSamples), 0.f);
+            mWrite = 0;
+        }
+
+        // In-place: reads delayed sample, writes current sample, advances pointer.
+        void process(juce::AudioBuffer<float>& buf)
+        {
+            if (mDelay == 0 || mBuf.empty()) return;
+
+            const int n = buf.getNumSamples();
+            for (int s = 0; s < n; ++s)
+            {
+                int readPos = (mWrite - mDelay + kMaxSamples) % kMaxSamples;
+                for (int ch = 0; ch < mNumCh; ++ch)
+                {
+                    float* chBuf = mBuf.data() + ch * kMaxSamples;
+                    float delayed = chBuf[readPos];
+                    chBuf[mWrite]  = buf.getSample(ch, s);
+                    buf.setSample(ch, s, delayed);
+                }
+                mWrite = (mWrite + 1) % kMaxSamples;
+            }
+        }
+
+        int mDelay { 0 };
+        int mNumCh { 2 };
+        int mWrite  { 0 };
+        std::vector<float> mBuf;
+    };
+
+    // QA-Fe2 SC delay-match (docket 1b): per-(consumer, slot) key-alignment
+    // delay lines.  Fixed array (not inside ScSet) because mScRecv is
+    // audio-thread-owned (rebuildRoutingFromApvts inserts at block rate) and
+    // the message-thread solver must never race the map; empty lines cost
+    // ~48 bytes each, setDelay allocates only on active receives.
+    std::array<std::array<CompDelayLine, (size_t) kMaxScRecvSlots>,
+               (size_t) kMaxStripChannels> mScRecvDelays;
+
+    // Audio thread (block rate, from rebuildRoutingFromApvts): flag every
+    // SC-edge source node so its process stashes the pre-compensation tap.
+    // Allocation-free (relaxed atomic bools on the nodes).
+    void armScSourceTaps();
 
     // 5F-4b B1b: routing state
     RoutingGraph                                       mRoutingGraph;

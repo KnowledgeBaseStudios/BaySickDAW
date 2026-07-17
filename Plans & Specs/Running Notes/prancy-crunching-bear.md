@@ -1568,3 +1568,1063 @@ experiments, all on top of `bfb345ec`):
   (Earlier attempts dropped the empty-baseline term -> zoomed too far out; fixed.)
 - **1-based bar labels** (display only): playlist/builder (`BuilderPage`), normal
   piano roll (`PianoRoll`), drum-kit piano roll (`DrumKitGrid`).
+
+---
+
+## 2026-07-16 -- WORLD buzz: external Fable review findings -> fix arc opened (Jeff's call)
+
+Scope: the independent adversarial review Jeff requested (input = the FULL
+investigation record entry above) came back; Jeff reviewed it and ordered a
+FIX ARC instead of tabling.  This entry records (1) the review's corrections
+to the record, (2) Jeff's calls on the review, (3) the ordered work.  The
+implementation record follows in the next entry.
+
+### Review finding 1 -- the 0.50 AP-floor "disproof" is INVALID (record correction)
+The record's key negative ("whole-band 0.50 aperiodicity floor -> no audible
+change -> pulse-train model disproven") is wrong in its INFERENCE, not its
+observation:
+- The floor DID reach `Synthesis` in BOTH paths.  `bake()`: floors at
+  LibraryPitchShifters.cpp:402, Synthesis reads the same rows.  `bakeWarped()`:
+  floors the SOURCE rows (:457) BEFORE the :479-498 remap; the remap is a
+  convex interpolation of floored rows, which stays >= the floor.  Loose
+  thread #1 suspect (a) is refuted -- the plumbing was fine all along.
+- But the intervention was physically WEAK: WORLD SQUARES stored aperiodicity
+  (synthesis.cpp:172); periodic power scales by (1-ap^2), noise by ap^2.  A
+  0.50 floor = noise at 25% power (-6 dB below the envelope) + harmonics down
+  all of 1.25 dB -- AT NYQUIST ONLY.  At the 0.15 low end: noise -16.5 dB,
+  harmonics -0.1 dB.
+- And it was aimed BACKWARDS: D4C anchors ap at -60 dB @ 0 Hz and ~0 dB @
+  Nyquist BY CONSTRUCTION (d4c.cpp:373-379; measured points only at
+  3/6/9/12/15 kHz) -- so the 0.50 end landed where ap is already ~1 (no-op),
+  the 0.15 end landed where the buzz harmonics live (masked), and
+  deEmphasizeHF ate whatever HF noise was added.  ZERO audible change was the
+  EXPECTED outcome.  The pulse-train model was never disproven; the experiment
+  had no power.
+
+### Review finding 2 -- buzz and water are TWO artifacts with opposite mechanisms
+- WATER: D4C's LoveTrain gate (d4c.cpp:386, default threshold 0.85) SKIPS any
+  voiced frame whose low-band energy ratio fails the test, leaving that frame
+  at ap ~= 1.0 (InitializeAperiodicity, d4c.cpp:327) -> synthesis.cpp:111
+  zeroes the periodic part -> the frame renders as PURE NOISE mid-note.
+  Scattered noise frames inside voiced notes = the watery/gurgle.  Community-
+  validated fix: threshold 0.25 (straycat, the dominant OpenUtau WORLD
+  resampler, ships 0.25; the pyworld maintainer docstring documents 0 =
+  "voiced frames will be kept voiced").  Honesty note: this fixes WATER, not
+  buzz -- it keeps MORE frames periodic.
+- BUZZ: minimum-phase envelope + mono-pulse excitation with per-period phase
+  reset is a DOCUMENTED intrinsic "buzzy" limitation of this vocoder class
+  (High-Quality Vocoding Design, arXiv 2101.10278; the differentiable-WORLD
+  neural-vocoder work exists because of it).  D4C MEASURES group delay but
+  Synthesis never RESTORES phase dispersion -- that is the physical difference
+  from RB/Signalsmith, which preserve the take's natural phase.  Fix lever:
+  restore phase dispersion to the excitation -- not aperiodicity/magnitude
+  knobs.  This also explains the original unmasking cleanly: a PV pre-pass
+  hands WORLD an already-phase-coherent signal, so WORLD's re-render adds far
+  less audible delta.
+
+### Review finding 3 -- why the metrics never saw it (loose thread #4 resolved)
+HF%, flatness, HNR, flux, roughness are all magnitude-domain, long-window
+stats -- and WORLD reproduces the magnitude spectrum nearly perfectly (same
+envelope, same harmonics).  The buzz is a PHASE / temporal-fine-structure
+artifact: every harmonic fires phase-aligned once per glottal cycle.
+Magnitude metrics CANNOT see it -- the whole 18-WAV battery was structurally
+blind, not unlucky.  Metric that can see it: band-limited (2-6 kHz) envelope
+modulation spectrum -- buzz index = modulation energy at F0/2F0/3F0 over total
+20-800 Hz modulation energy; simpler proxy: kurtosis/crest of the 2-6 kHz
+band per 50 ms window.
+
+### Loose threads closed by the review
+- #1: RESOLVED above (plumbing fine, inference wrong).
+- #2 D4C low-F0 revision: irrelevant for this material -- Jeff's takes sit at
+  F0 ~132-201 Hz (Clean.wav 132 / SIM_dry 201 / export stat 170.1); above
+  100 Hz the d4c.cpp:314-316 revision RAISES aperiodicity (anti-buzz
+  direction).
+- #3 StoneMask: designed to refine DIO; redundant after Harvest (maintainer
+  guidance; vendored Harvest already runs full candidate refinement +
+  FixF0Contour + SmoothF0Contour).  Would not have touched the buzz.
+- #5 bake-vs-bakeWarped differential: dispatch confirmed (pitch-only channel
+  -> bake(); any time edit anywhere -> whole composite via bakeWarped();
+  BaySickPitchDSP.cpp:880); buzz heard under both -> base Synthesis character,
+  as the record suspected.
+- #6 cache 2-pt linear read: at matched rates the read index steps by exactly
+  cr/sr = 1.0 (BaySickPitchDSP.cpp:1019); worst case a static gentle HF shelf
+  at a fractional offset; incapable of producing an F0-locked artifact; and it
+  is the identical path for all three engines.
+- #7 ratio-jitter: no mechanism exists -- computeEnvelopes one-pole-smooths
+  the semitone target and WORLD samples that smooth envelope once per 5 ms
+  frame center.  Nothing jitters.
+
+### Jeff's calls on the review (2026-07-16)
+- "The Normal take WAS the copy-synthesis control" -- checked against code:
+  the QA-Fe Task 6 neutral gate (BaySickPitchDSP.cpp:461-463 / :859-861)
+  returns the DRY composite when nothing is edited, so a Normal take never
+  reaches WORLD at all.  The record's own "exports bit-identical to Normal"
+  stat is the proof.  Right instinct; the gate silently made it a bypass, not
+  a control.  (With the helpers removed below, any unedited note inside an
+  edited bake IS the true bare control from now on.)
+- Clips-channel test: Jeff rules it irrelevant (not the intended playback
+  design).  Noted for the record; the offline experiments in the next entry
+  settle the intrinsic-vs-our-code question objectively regardless.
+- ORDER: fix arc, not tabling -- (1) update this record, (2) REMOVE the three
+  buzz-fix helpers, (3) execute review items #1 + #3-#5 (whisper/AP
+  validation, D4C threshold, buzz metric, phase dispersion).  If it still
+  sounds wrong after those, WORLD moves to Future State.
+
+### LOUD REMOVAL LINE (internal DSP, Jeff's explicit order this session)
+`floorAperiodicity` (0.15->0.50 AP floor), `deEmphasizeHF` (11 kHz one-pole),
+and `writeNormalized`'s above-source-peak tanh soft-clip are REMOVED from
+`WorldShifter` -- all three shipped in 6bbb8650 as ineffective-against-the-
+buzz experiments and colored every WORLD bake for nothing.  The RMS level
+match (gain cap 4.0) is KEPT (WORLD Synthesis runs ~1.14x hot vs the take).
+
+---
+
+## 2026-07-16 -- WORLD fix arc: implementation + offline validation (unverified in-app)
+
+### Code shipped (uncommitted; Jeff builds + ear-verifies)
+- `LibraryPitchShifters.cpp` / `WorldShifter`:
+  - Helpers REMOVED per the loud line above; `writeNormalized` reduced to the
+    plain RMS match.
+  - `dopt.threshold = 0.25` in BOTH `bake` + `bakeWarped` (LoveTrain water
+    fix; matches the straycat/OpenUtau shipping value).
+  - NEW `disperseHF()` after `Synthesis()` in both paths: static allpass FIR
+    restoring excitation phase dispersion.  Zero phase below 2 kHz, smoothstep
+    ramp 2->5 kHz, pseudo-random group delay up to 4 ms (fixed LCG seed
+    0x5EEDCAFE -> deterministic; cache == export).  LTI post-pass == in-
+    synthesis dispersion for the periodic path; noise floor statistically
+    invariant.  10 ms FIR, direct convolution, offline bake-worker cost only.
+- NEW `Tools/buzz_metric.py`: the phase-sensitive metric the whole arc lacked
+  -- buzz index (F0/2F0/3F0 energy share of the 2-6 kHz envelope modulation
+  spectrum) + band kurtosis + band crest, voiced-gated.  numpy-only.
+
+### Offline validation (pyworld 0.3.5 + the QA-Fe battery WAVs, project
+### "Untitled Project (100)")
+- NEUTRAL-GATE PROOF: `WORLD Normal.wav` is BIT-IDENTICAL to `Rubber Band
+  Normal.wav` (302848 samples, maxdiff 0.00e+00) -> Normal takes never reach
+  any engine; they are the dry composite.  Settles the "Normal was the
+  copy-synthesis control" question objectively.
+- LOVETRAIN COUNTS (dry Clean.wav, fs 44100, 1030 voiced frames, median F0
+  138.4 Hz): threshold 0.85 forces 22/1030 voiced frames to full noise
+  (scattered 5 ms breath bursts mid-note = the water); 0.25 -> 2/1030.
+- WHISPER TEST PASSED: ap := 1.0 -> band kurtosis collapses 2.82 -> 0.19
+  (Gaussian), crest 4.62 -> 3.57, output is pitchless breath -> the
+  aperiodicity array demonstrably reaches Synthesis and controls the output;
+  most F0-rate modulation rides the periodic path.  Loose thread #1 fully
+  closed (plumbing fine; the 0.50 floor was just weak).
+- METRIC SEPARATES THE ENGINES (same edit, "Vertical Move" renders):
+  WORLD buzz 0.171 / kurt 2.17  vs  RB 0.077 / 1.35  and  SS 0.080 / 1.69
+  -- 2.2x separation where the magnitude battery saw nothing.
+- METRIC HONESTY NOTE: the ABSOLUTE buzz index does not equal perceptual buzz
+  -- the dry take itself measures 0.307 (natural voice pulses at F0 by
+  definition) yet sounds clean.  Valid use = MATCHED comparisons (same
+  material, same path, engine/param delta only).
+- DISPERSION LADDER (metric): 2 ms / 3-6 kHz = measured no-op (render 0.171 ->
+  0.178).  4 ms / 2-5 kHz = render 0.171 -> 0.100 buzz, kurt 2.17 -> 1.13 --
+  WORLD's band fine structure lands at/below Rubber Band's.  Shipped constants
+  = the 4 ms variant; the constants are the tuning knob if the ear disagrees.
+- THRESHOLD SIDE-EFFECT (as predicted): copy-synth buzz index 0.330 (t=0.85)
+  -> 0.388 (t=0.25) -- keeping more frames periodic nudges pulsation up; the
+  win is the 22 -> 2 noise-frame kill.  Net call belongs to the ear test.
+
+### Ear-ladder WAVs for Jeff (in `Untitled Project (100)/Pitched/`, playable
+### now, NO build needed -- all 16-bit PCM)
+- `FABLE_copysynth_t085.wav` / `FABLE_copysynth_t025.wav` -- bare WORLD
+  copy-synthesis of the dry take (the control that never ran), old vs new
+  threshold.  A/B against `Samples/Clean.wav`.
+- `FABLE_whisper.wav` -- the ap=1 whisper test (demo that the AP knob works).
+- `FABLE_WORLDVerticalMove_dispersed.wav` (2 ms) /
+  `FABLE_WORLDVerticalMove_dispersed4ms.wav` (4 ms, = shipped constants) --
+  the buzzy app render post-dispersed.  A/B against `WORLD Vertical Move.wav`
+  and `Rubber Band Vertical Move.wav`.
+- `FABLE_copysynth_t025_dispersed.wav` / `..._dispersed4ms.wav` -- same ladder
+  on the bare copy-synth.
+Caveat: the existing app renders were baked WITH the old helpers; the offline
+prototypes disperse that already-colored signal.  The in-app rebuild (helpers
+gone + threshold + dispersion at bake time) is the true test.
+
+### Verify (Jeff, after do_build)
+1. Debug exe first (jassert screen), then Release.
+2. WORLD engine, same project: re-bake a pitch edit -> listen for (a) water
+   gone on sustained notes (threshold), (b) buzz reduced/gone (dispersion),
+   (c) no new smear/phasey tinge on note attacks (dispersion cost).
+3. Compare against Rubber Band on the same edit.
+4. If it still sounds wrong: WORLD moves to Future State per Jeff's call
+   (2026-07-16); the constants in `disperseHF` are the one knob to try first
+   (kDispMaxMs up = more de-buzz, more smear risk).
+
+### VERIFY RESULT (Jeff, same day): FAILED -- "the 2 sounds are still there
+### and now it sounds worse."  Bake-side fixes were aimed at the wrong signal.
+
+---
+
+## 2026-07-16 -- BREAKTHROUGH: the noise is manufactured by the PLAYBACK path
+## from WORLD's signal shape (master-recording differential)
+
+Jeff's two corrections that unlocked it: (1) the render path skips the strip
+processing and the renders DO NOT have the sound -- so every render-WAV
+comparison (including the Fable review's offline validation) measured the
+wrong signal; (2) supplied the missing ground truth: `WORLD Stretch Master
+Recording.wav` (master-out capture, nothing armed = full playback path,
+artifact AUDIBLE) alongside the matching RB/Signalsmith master recordings
+(all three recorded 19:23-19:25 on 07-15) and the same-edit renders.
+NOTE: this un-retracts the record's biggest retraction -- the "always-on
+vocal chain" theory was killed by the clips test, which Jeff has ruled
+irrelevant; the chain (or another playback stage) is prime suspect again.
+
+### The subtraction experiment (scratchpad isolate_noise.py, results in-repo
+### as FABLE_playback_minus_render_{WORLD,RB,SS}.wav in Pitched/)
+Aligned each master recording to its same-edit render (xcorr lag 92 all
+three), least-squares gain fit, subtract:
+- Path gain identical for all engines: x2.62-2.68 (+8.4-8.6 dB).
+- Residual (what playback ADDS) identical in LEVEL for all engines:
+  -18.5..-18.7 dB rel, same band split (57-59% in 250-1000 Hz).
+- THE FINDING -- residual FINE STRUCTURE (2-6 kHz band):
+    WORLD residual: kurtosis 4.62, crest 5.22   <- spikier than even the
+                    WORLD render itself (2.88)
+    RB residual:    kurtosis 0.28, crest 3.64
+    SS residual:    kurtosis 0.37, crest 3.74
+  A linear path leaves residual spikiness ~= source spikiness; 4.62 > 2.88
+  means a NONLINEAR playback stage EMPHASIZES WORLD's per-period peaks --
+  it manufactures F0-locked spiky products it does not produce for RB/SS.
+  At -18.7 dB, pulse-concentrated: quiet enough that every global metric
+  washed it out, spiky enough that the ear locks on.  This is why nothing
+  ever measured it.
+- Code-confirmed path delta: `renderPitchedTake` writes bare `renderOffline`
+  output (BaySickVocalProcessor.cpp:1402) -- no chain, no gain.  Playback
+  runs the cache through the vocal chain rack DeEsser->Comp->Sat->Limiter
+  (slots 0-3, :395-398) + strip/master gain staging (+8.5 dB net measured).
+- Mechanism candidates (per-stage): Saturation (memoryless waveshaper on a
+  kurt-2.9 pulse signal -> per-pulse distortion bursts), Limiter (1 ms
+  attack / 2 ms lookahead CAN track individual F0 periods at 145 Hz ->
+  F0-rate gain ripple), Compressor (10 ms attack, marginal), DeEsser (band
+  gain-mod).  Pinning = the bypass ladder.
+- BLOCKER for the ladder: `bsv_{deesser,comp,sat,limiter}_bypass` exist in
+  APVTS + are forwarded to rack slots, but NO UI anywhere attaches them
+  (grep-confirmed: only the processor touches them).  Ladder needs 4 toggle
+  buttons added to the Vocal editor (or equivalent) -- surfaced to Jeff.
+- Ear checks available NOW, no build: (1) FABLE_playback_minus_render_WORLD
+  vs _RB (the isolated added-noise, normalized ~+19 dB for audibility);
+  (2) FABLE_WORLD_render_levelmatched.wav (render x2.6229 = master loudness)
+  vs the WORLD master recording -- separates "quiet seed amplified" from
+  "path-manufactured" by ear.
+- Status of the 07-16 bake-side changes (helpers removed / threshold 0.25 /
+  disperseHF): verdict deferred until the stage is pinned; "worse" is
+  plausibly the removed tanh crest-cap (it was taming exactly the peaks the
+  nonlinear stage grabs -- record: tanh made it "a little fainter", the one
+  helper that measurably moved it).  Keep/revert is Jeff's docket call.
+
+### Jeff's ear verdicts on the isolation set (same day) -- MODEL CORRECTED
+1. The isolated playback residual does NOT contain the sounds -> the path's
+   nonlinear contribution (the kurt-4.62 finding above) is real but is NOT
+   the artifact.  Chain-manufactured theory DEAD.
+2. The sounds ARE in the level-matched render (render x2.62) AND the master
+   -> THE ARTIFACT IS IN THE BAKE ITSELF, sitting ~8-9 dB below unity-render
+   audibility.  "Renders don't have the sound" was a LOUDNESS-threshold
+   effect, not a path effect.  The original clips-test read ("way quieter,
+   not just a vocal chain issue") was right all along.
+3. Chain-bypassed master recording (Master 2026-07-16 11-01-03, stage
+   bypasses engaged from the vocal editor panels -- correction: working
+   bypass toggles DO exist in the UI; the earlier "no UI anywhere" claim was
+   wrong) STILL has the sounds.  Chain exonerated as the source for good.
+   Measured: bypassed master kurt 1.69 / crest 3.76 vs chain-on 2.11 / 4.44
+   -- the chain adds peak emphasis (seasoning) but is not the artifact.
+CONSEQUENCE: every listen this arc made at render level was a false
+negative; ALL future WORLD listening happens at master loudness.
+
+### Jeff's call: RESTORE last session's DSP state
+`git restore Source/DSP/LibraryPitchShifters.cpp` executed -> back to the
+committed 6bbb8650 WorldShifter (floor/deemph/tanh in, LoveTrain threshold
+0.85 default, no disperseHF).  `Tools/buzz_metric.py` kept (untracked).
+Note for later: if the component test below pins "water" on the noise path,
+the restored `floorAperiodicity` ADDS noise-path energy and would be actively
+feeding the water -- permanent removal becomes the indicated fix.
+
+### Next diagnostic: WORLD component solo at master loudness (files ready,
+### no build needed -- Pitched/ folder)
+WORLD synthesis output == periodic pulse part + period-gated noise part.
+pyworld decomposition of the dry take (threshold 0.85 = restored baseline),
+one common gain (x2.62 master loudness), relative balance preserved:
+- `FABLE_component_full_masterloud.wav`        (both parts; RMS -18.6 dBFS pre-boost)
+- `FABLE_component_periodiconly_masterloud.wav` (pulse train only)
+- `FABLE_component_noiseonly_masterloud.wav`    (noise part only; sits -22.2 dB
+  under the full mix -- the prime "quiet layer" candidate)
+Question for the ear: WHICH file carries the "water", which the "buzz"?
+- water == noiseonly -> lever = scale the aperiodic part down (targeted,
+  two-line) + kill floorAperiodicity permanently.
+- buzz == periodiconly -> lever = periodic-path phase treatment (dispersion
+  family, re-tuned BY EAR AT MASTER LOUDNESS offline before any build; last
+  round's "worse" was confounded three ways).
+- both sounds only in FULL, neither solo objectionable -> interaction case,
+  hardest; Future State gate looms per Jeff's 2026-07-16 call.
+
+### Jeff's component verdicts (same day): BUZZ = PERIODIC PATH (confirmed);
+### noiseonly innocuous (VERY quiet -- that IS its true in-mix level,
+### -22 dB under full); WATER = only in FULL -> an ALTERNATION artifact
+Water is not the noise itself: it is the voice FLICKERING between pulse
+texture and noise texture at 5 ms frame granularity (per-frame aperiodicity
+flicker; the 22 LoveTrain-flipped frames are the extreme case).  In
+periodiconly the flickers are just level dips (no water heard); in noiseonly
+they are noise beside quiet noise (nothing); in full they are texture swaps
+(gurgle).  Both sounds now have testable, single-variable levers.
+
+### Offline fix ladder (files in Pitched/, master loudness, ONE variable per
+### file, compare each against FABLE_ladder_baselinefull.wav; no build)
+Water candidates (ap-side, threshold 0.85 baseline kept):
+- `FABLE_ladder_flipfix.wav`  -- ONLY the 22 LoveTrain-flipped voiced frames
+  repaired (ap copied from nearest healthy voiced frame).
+- `FABLE_ladder_apsmooth.wav` -- flip repair + 25 ms temporal median of ap
+  inside voiced runs (kills frame-rate aperiodicity flicker, preserves
+  average breathiness).
+Buzz candidates (periodic-path phase dispersion on the full synthesis,
+2-5 kHz ramp, one strength per file):
+- `FABLE_ladder_disp1ms.wav` / `disp2ms` / `disp4ms`.
+Readout: water dies in flipfix -> C++ fix = LoveTrain frame repair (or
+threshold) alone; water needs apsmooth -> C++ fix = ap temporal smoothing
+pre-Synthesis; buzz dies at disp N ms without smearing the voice -> C++ fix
+= disperseHF at that strength.  Winners get combined into ONE variant for a
+final confirm listen before any code lands.
+
+### Ladder 1 verdicts (Jeff, same day): both PARTIAL
+- Water: NEITHER flipfix nor apsmooth killed it (apsmooth slightly better)
+  -> aperiodicity flicker largely exonerated as the water's core.
+- Buzz: disp4ms leaves buzz but LESS than before -> dispersion mechanism
+  confirmed directionally; remainder is either below the 2 kHz ramp corner
+  (harmonics 3-14 still fully phase-locked at F0 ~140 Hz), needs more
+  strength, or is the metronomic-pulse component (zero cycle-to-cycle
+  variation; natural jitter is why real voices don't buzz).
+
+### Ladder 2 (FABLE_ladder2_* in Pitched/, master loudness, one variable
+### per file vs FABLE_ladder_baselinefull.wav)
+Water candidates:
+- `spsmooth`  -- CheapTrick envelope temporal median (25 ms, log domain)
+  inside voiced runs: tests envelope flicker as the water.
+- `f0smooth`  -- Harvest F0 temporal median: tests F0-jitter-driven wobble.
+- `contnoise` -- periodic part + CONTINUOUS spectrally-shaped noise replacing
+  WORLD's per-period gated noise bursts (level-matched to the gated noise):
+  tests Jeff's own caveat -- breath re-rendered as F0-pulsed bursts instead
+  of continuous noise may BE the water.
+- `noiseonly_loud` -- the noise solo +12 dB over true level, so the noise
+  TEXTURE is finally characterizable by ear (answers the "too quiet to
+  judge" caveat from the component test).
+Buzz candidates:
+- `dispdeep` -- 4 ms but ramp lowered to 800 Hz-3 kHz (disperses the mid
+  harmonics the 2 kHz corner left untouched).
+- `disp6ms`  -- same 2-5 kHz band, strength up to 6 ms.
+- `jitter`   -- +/-0.4% band-limited (20 Hz walk) F0 jitter, voiced only:
+  breaks the metronomic pulse identity (humanization lever).
+Ceiling check:
+- `combo` -- current best-of (flipfix + apsmooth ap, disp4ms): where WORLD
+  lands if we ship everything validated so far.
+
+### Ladder 2 verdicts (Jeff) + the WATER IDENTIFIED
+- `noiseonly_loud` DEFINITELY has the water -> the water IS the noise path;
+  the earlier "innocuous" solo read was a level issue (true level -22 dB).
+- Best water reducer: JITTER (a buzz-lever!) -- because the water is the
+  take's continuous noise layer (breath/room/floor) RE-RENDERED by WORLD as
+  noise bursts gated once per glottal cycle; jitter makes the burst spacing
+  irregular -> rhythmic bubbling reverts toward breath.  RB/SS pass the same
+  layer through untouched (steady -> ear ignores it) -- why they never water.
+- Best buzz reducer: disp6ms.  Everything still partial; best-of beat combo.
+- Jeff's screenshot question (WORLD residual "looks quiet"): peak-
+  normalization artifact of the FABLE residual files -- WORLD's residual RMS
+  was actually the HIGHEST (0.0161 vs 0.0142/0.0141); its energy sits in rare
+  tall spikes (crest 5.2), so peak-norm draws the body thin.  The visual IS
+  the spikiness signature.
+- Jeff's "squash" theory disposition: literal version refuted (bake is
+  RMS-matched; measured path gains near-identical x2.62/2.67/2.68; no
+  differential squash-recover).  The core instinct ADOPTED in transformed
+  form: the recording's own noise layer sets the water's LEVEL; WORLD makes
+  it rhythmic.  Not a take defect -- any real take feeds the mechanism.
+
+### TOOLING BUG FOUND + FIXED: dispersion FIR was NOT flat (v1)
+Level audit (triggered by the ladder-3 RMS printout) caught every v1
+dispersion render losing ~3.3 dB RMS.  Cause: allpass FIR built at zero
+nominal delay -> acausal pre-ring wraps to negative time and gets truncated;
+only ~3% of time energy, but spread coherently across ALL bins: -4 dB low
+shelf, +2.2 dB bump at 3 kHz (probed).  CONSEQUENCES:
+- All v1 offline dispersion ear-rankings carry loudness + tilt bias (disp
+  strength verdicts VOID; "dispersion reduces buzz" direction survives via
+  the level-invariant modulation metric).
+- The reverted in-app disperseHF shared the construction, and writeNormalized
+  re-matched RMS AFTER it -> net in-app effect ~= +3-4 dB presence-region
+  tilt vs lows = brighter/harsher vocal.  Plausibly a large chunk of Jeff's
+  "now it sounds worse" verdict on the 07-16 build.
+FIX (v2, scratchpad disperse2.py): add constant group delay D=3 ms to every
+bin so the pre-ring is causal, FIR window = D + tau_max + 6 ms ring room
+(662 taps @ 44.1k), taper both ends, advance output by D samples after
+convolution -> zero net latency.  Verified: worst probe deviation 0.05 dB,
+RMS delta 0.00 dB.  ANY future C++ port uses the v2 construction.
+
+### Ladder 3 (FABLE_ladder3_* in Pitched/, level-true, vs ladder_baselinefull)
+- `cleantake` -- take denoised ~12 dB (spectral gate) BEFORE analysis, stock
+  WORLD after: tests "water level tracks the take's noise floor".
+- `apscale` -- D4C ap x0.6 in voiced frames: rendered noise layer -4.4 dB.
+- `disp4v2` / `disp6v2` -- CORRECTED flat dispersion, re-rank strength.
+- `jitterdisp6` -- jitter + disp6 v2 stack (regenerated flat).
+- `kitchen` -- jitter + apscale 0.6 + disp6 v2 on the raw take (denoise
+  deliberately excluded; it is attributed separately via cleantake).
+
+### Ladder 3 verdicts (Jeff, partial): INPUT NOISE IS THE DOMINANT CAUSE
+- `cleantake` (take denoised ~12 dB pre-analysis): "doesn't sound perfect
+  but it sounds a hell of a lot better" -- the noise-layer model confirmed
+  as the main mechanism.  "It's gotta be the noise in the file" (Jeff).
+- `kitchen` (jitter + apscale + disp6 v2): "considerably worse" -- the
+  synthesis-mangling levers are net-negative in combination.  Direction
+  locked: CLEAN THE INPUT, don't warp the synthesis.
+- Still unreported: disp4v2 / disp6v2 / jitterdisp6 / apscale solo reads,
+  and WHAT remains imperfect in cleantake (buzz vs water residue) -- both
+  needed before any C++ recipe is drafted.
+
+### True Dry question (Jeff) -- answered from code
+Monitor split (BaySickVocalProcessor.cpp:547-564): True Dry (0) routes the
+RAW live mic to the monitor and skips the rack; Bypass Corrector (1) and
+With Effect (2) route the monitor THROUGH the rack (deess->comp->sat->lim),
+whose compressor + saturation add ~14 dB small-signal gain -> room noise
+between/under phrases is boosted hard in modes 1/2.  True Dry's cleanliness
+is the ABSENCE of makeup gain, not noise removal.  No denoiser exists
+anywhere in the app today.
+
+### Ladder 3 final verdicts + Jeff's build order (2026-07-16)
+- The 4 remaining ladder-3 files (disp4v2/disp6v2/apscale/jitterdisp6) all
+  still have issues -> synthesis-side levers CLOSED.  Jeff: "I completely
+  now think this is due to the takes being amplified" -- input-noise cause
+  locked.
+- ORDERED: (1) Noise Cleanup feature, Option A NON-DESTRUCTIVE (record raw,
+  per-take Keep/Remove), strengths Off/Light/Strong; (2) GATE as a 5th
+  vocal-chain panel, FIRST in the chain; (3) then wrap the G2 boundary.
+- Scope mapping done (3-agent workflow, file:line evidence): playback
+  streams clips per-block via AudioClipStreamer (NOT the composite) -> the
+  cleaned result must exist as a FILE; exactly 2 real audio open sites
+  (PluginProcessor.cpp:3389 players, :3530 composite) + thumbnail :1562;
+  per-clip property rides ArrangementBlock + PatternManager save/load
+  (routeChannel pattern); clip UI surface = Builder clip Properties dialog
+  (BuilderPage.cpp:3443) / right-click menu (:3188); project subfolder
+  convention = inline two-liner (Pitched/Aligned precedent); vocal rack has
+  6 fixed slots (4 used, 2 spare) so Gate-at-slot-0 = re-slot types 0..4 at
+  prepareToPlay + shift index literals (:328-335,:395-398,:403/421/446/456)
+  + kNumChainSlots 4->5 + <VocalChainState> s0..s3 blob MIGRATION (index-
+  keyed, would mis-restore without a shift); EXISTING NoiseGateStyleDSP
+  (EffectType 104, panel + DynamicsLAF) is a reuse candidate vs a new
+  channel-strip GateDSP -- surfaced as a spec call.  Plan surfaced in chat;
+  awaiting Jeff's approval + sub-call picks.
+
+### DESIGN PIVOT (Jeff, 2026-07-16): lazy-cache model DROPPED -> record-time
+### 4-take model (LOUD REMOVAL: per-clip Off/Light/Strong toggle, Cleaned/
+### cache folder, and the reader-swap resolver are all OUT of the plan)
+Jeff's calls: 1=B (new vocal channel gate, not the pedal reuse), 2=B (WORLD
+back to full stock, helpers out, RMS match stays), 3=B (live auto-learn IN,
+and moved EARLIER: starts at interface-track assignment when monitoring
+begins, not at arm).  Pre-v1 rule declared permanent: NO backward-compat /
+save-migration work until v1 (all projects are Jeff's own) -> saved to
+memory; the Gate s0..s3 blob-migration item is deleted.
+Jeff's technical catch that killed the lazy model's fuzzy edges: a WET take
+(through the realtime corrector) has a TRANSFORMED noise floor -- a profile
+learned from the raw mic cannot exactly describe the wet file's noise.
+Design answer: DUAL live learners from track-assignment on -- one on the
+raw-input tap, one on the post-corrector (pre-chain) tap -- so each cleaned
+variant uses its matching-domain profile; wet cleaning is inherently
+slightly less exact (noise under notes shifts with the voice); per-file
+self-learn stays as fallback for imported takes.
+Jeff's replacement flow (his spec, verbatim-faithful):
+- Track assigned to strip -> auto-learn starts (live feed exists pre-arm).
+- ARM -> popup (native-Windows style, not custom-LAF) asking which of the
+  4 takes (Dry / Dry Cleaned / Wet / Wet Cleaned) lands on the Builder
+  grid, with a notice that unselected types are driven by Options > File
+  Settings; picking an already-checked type keeps defaults; picking an
+  unchecked type adds it (semantics to confirm -- Q2 below).  All written
+  takes land in the Builder browser; the chosen one lands on the grid.
+- Options > File Settings (currently a dead menu name) -> the 4 take-type
+  checkboxes, >=1 always enforced, + cleanup strength default.
+- Browser restructure: Vox/Inst recordings group -> one ENTRY per recording
+  (base name minus the variant tag) -> child rows showing only Dry / Dry
+  Cleaned / Wet / Wet Cleaned.  Right-click variant = existing per-file
+  actions (+ move/copy-to-page gains a join-that-page's-group option).
+  Right-click group name = RENAME: disk-renames all variants (base swapped
+  through the timestamp, variant tags kept) -> must rewrite every
+  ArrangementBlock.audioFilePath + library entry referencing them.
+Open questions posed to Jeff in chat (popup nativeness/4-choice limit,
+arm-popup repeat behavior, defaults-union vs defaults-update, strength
+regeneration + profile persistence in project file, imported-take cleanup
+path, group/page semantics).  NO code until answered.
+
+### Jeff's answers (2026-07-16, all six locked)
+1. Popup = stock-looking plain dialog (system style, radio buttons, no
+   custom LAF).  2. Picking an unchecked type writes it THAT ONCE only --
+   File Settings defaults never silently change ("I definitely want A").
+3. Right-click "Regenerate cleaned (Light/Strong)" on cleaned takes, and
+   the learned profiles ARE STORED IN THE PROJECT FILE (both domains, per
+   recording).  4. NO cleanup path for imported/pre-existing takes -- new
+   projects will be used for testing.  5. Arm popup once per strip per
+   session; re-ask after interface-track reassignment (reassignment also
+   restarts the learners).  6. Browser design (screenshot provided):
+   Clips/Vox/Inst main groups stay; under Vox + Inst, one collapsible
+   RECORDING-GROUP entry per recording (name up to the type suffix),
+   children showing only Dry / Dry Cleaned / Wet / Wet Cleaned; renaming
+   the group entry disk-renames every take in it keeping type tags;
+   individual-entry edits affect only that entry; the file Properties
+   popup gains a destination-group option when moving/copying to Vox or
+   Inst; right-click on the Clips/Vox/Inst headers -> "create group" for
+   manual after-the-fact grouping; Clips gets manual groups too (never
+   auto-grouped -- uploads, not recordings).
+
+### NEW ASK (Jeff, same message): de-reverb vocal-chain panel, RX-style
+Difficulty assessment delivered in chat: honest tiering (RX-grade = ML,
+out of reach; achievable = late-tail spectral suppression sharing the
+denoiser's STFT skeleton, Lebart-style delayed-decay estimate + per-bin
+gain; reduces room wash convincingly at moderate settings, will not
+de-room a bathroom).  Would be the 6th slot -- exactly fills the rack
+(Gate -> De-Reverb -> DeEsser -> Comp -> Sat -> Limiter, de-reverb before
+compression so the comp can't pump the tail back up).  One-FFT-frame
+latency, PDC precedent = spectral DeEsser.  Slotting (this batch / next
+batch / Future State) = Jeff's call, pending.
+
+## 2026-07-16 -- QA-Fe2 Task 1 -- De-noise core: BUILT + CLEAN (Jeff confirmed)
+
+Batch plan: `Batch Plans/gentle-scrubbing-otter.md` (bulk-run mode: no
+per-task ear tests; all verify consolidated in Task 5).
+- NEW `Source/DSP/DenoiseDSP.h/.cpp`: DenoiseProfile (base64 project-
+  persistable, FFT 1024 / 513 bins), DenoiseLearner (wait-free ring push on
+  the audio thread, FFT on a 15 Hz pump, asymmetric min-follow floor with
+  +12 dB voice gate + digital-silence skip), Denoise::cleanFile (offline
+  STFT 1024/256, Light 1.25x/-6 dB floor, Strong 2.0x/-12 dB floor =
+  ear-validated cleantake constants, 3-bin freq + one-pole time gain
+  smoothing, output length/rate/bit-depth identical, stereo keeps image
+  via shared mono gain field), Denoise::learnFromFile fallback.
+- `BaySickVocalProcessor`: dual learners (raw tap at the mMonitorLiveDry
+  stash, corrector-domain tap at the WET-recorder point, BOTH monitoring-
+  time not just capture), prepare in prepareToPlay, mono-fold scratch (no
+  audio-thread alloc), setDenoiseLearnersEnabled/reset/getDenoiseProfiles.
+- `VibeSynthProcessor`: mDenoiseProfiles store keyed by recording base name
+  + <DenoiseProfiles> serialize (after PatternManager node) / deserialize
+  (cleared unconditionally -- no cross-project room leaks).
+- `StandaloneEditor`: 5 Hz DenoisePollTimer (arm edges + inputChannelIdx
+  changes -> learner enable/reset + popup re-arm), showArmTakePopup (stock
+  LookAndFeel_V4, AlertWindow combo, Dry-pair-only when corrector bypassed,
+  preselect = legacy rule), File Settings dialog (case 502, 4 checkboxes
+  >=1 enforced + strength, ui_prefs.xml keys fsWrite*/fsDenoiseStrength),
+  commitRecordingResult Vox branch rewritten (union set, cleaned
+  generation w/ self-learn fallback, pick->grid, rest->library, unselected
+  sources DELETED, clean-failure falls back to the uncleaned source),
+  regenerateDenoise (stored-profile re-clean, error dialog on held files).
+- `BuilderPage`: "Regenerate De-noise > Light/Strong" on * CLEANED tree
+  leaves via new BrowserPanel::onRegenerateDenoise.
+- CMakeLists: DenoiseDSP.cpp added.
+- Defaults picked (Jeff veto-able, surfaced in chat): File Settings starts
+  Dry+Wet checked (today's behavior), strength default Strong.
+- OPEN SUB-CALL (asked in chat): Inst strips left dry-only as today -- no
+  Inst Dry Cleaned generation yet (no live learner on sfizz engines;
+  file-self-learn add is cheap if wanted).
+- KNOWN LIMITATION: regenerating a cleaned take currently on the grid can
+  fail on Windows (file held by playback); error dialog guides removal.
+- Jeff: "Clean" (build confirmed, 2026-07-16).
+
+## 2026-07-16 -- QA-Fe2 Task 2 -- Browser groups + resize: BUILT + CLEAN (Jeff)
+
+- `PatternManager`: AudioLibraryEntry.groupName (persisted per Entry as
+  "group"), manual-group registry mManualAudioGroups (persisted as
+  <AudioGroups>, cleared at both reset sites), APIs get/setAudioLibraryGroup
+  + add/rename/getManualAudioGroups + replaceAudioPath (library + every
+  arrangement block; returns hit count).
+- `BuilderPage`: new AudioGroupItem tree node (collapsible, accent-tinted,
+  right-click menu); AudioCategoryItem gained onContextMenu ("Create
+  Group..." on Clips/Vox/Inst headers; Clips manual-only); rebuildAudioRows
+  now buckets manual-group -> auto recording-group (take-tag suffix match,
+  CLEANED before plain -- order load-bearing) -> flat, with leaf labels
+  inside auto groups showing only Dry/Dry Cleaned/Wet/Wet Cleaned; refresh
+  hash extended with groupName + registry so group edits rebuild; Properties
+  move/copy to Vox/Inst ends with the "Add to Group?" prompt (page's auto
+  bases + category manual groups, "(none)" default); browser right edge =
+  BrowserEdgeGrip drag (default=min=180, max=540, session-local).
+- `StandaloneEditor`: enumerate fills groupName; renameRecordingGroup =
+  pre-flight target collision check -> repoint refs (replaceAudioPath) ->
+  player rebuild (releases old readers) -> disk moves w/ full rollback ->
+  profile re-key (renameDenoiseProfiles) -> rebuild + markDirty.
+- MID-TASK ADD (Jeff's order): Regenerate De-noise + recording-group Rename
+  are STOP-GATED -- greyed "(stop playback)" menu items + hard guards via
+  DSPBase::isTransportPlaying() (the Align-editor stop-gate precedent).
+  Manual-group renames stay live (label-only).  Honest residual: a stopped
+  overwrite of an on-grid take may still hit a Windows file hold depending
+  on share flags; rollback+dialog covers it; Task 5 verification decides if
+  the release-retry dance is needed (Jeff's call then).
+- COMMIT MODE LOCKED (Jeff): ONE combined commit at batch close (Task 6).
+- Jeff: "build is clean" (2026-07-16).
+
+## 2026-07-16 -- QA-Fe2 Task 3 -- Gate + De-reverb: BUILT + CLEAN (Jeff)
+
+- NEW `Source/DSP/GateDSP.h/.cpp`: channel gate (Threshold/Range/Attack/
+  Hold/Release), stereo-linked peak detector, 3 dB Schmitt hysteresis, hold
+  stage, per-sample gain smoothing, GR atomic; defaults transparent
+  (threshold -80).
+- NEW `Source/DSP/DeReverbDSP.h/.cpp`: Lebart-family late-tail suppressor,
+  STFT 2048/512 identity OLA (Sibilance skeleton, single config), per-bin
+  delayed-decay tail estimate (3-frame direct-sound skip, T60 decay from
+  Tail), Wiener gain w/ -14 dB floor, 3-bin freq + asymmetric time
+  smoothing, Mix = spectral lerp to unity, latency 2048 reported for PDC
+  (spectral De-esser precedent), shared gain field keeps stereo image.
+- EffectType Gate=119 / DeReverb=120 (stable values), createEffect cases,
+  SlotComponent display names; DELIBERATELY absent from the general FX-rack
+  picker (vocal-chain-only per scope; two-line add later if wanted).
+  EffectPresetIO skipped (locked slots never hit preset save).
+- Vocal chain re-slotted 6/6: Gate -> De-reverb -> De-esser -> Comp -> Sat
+  -> Limiter; createLayout bsv_gate_*/bsv_dereverb_* params; bypass +
+  stage pushes reindexed 0..5; <VocalChainState> blob loops 4->6 (NO
+  migration, pre-v1 rule); stale slot comments fixed incl. EffectRack.h
+  DeEsser entry; kNumChainSlots 6; mode-map slotIdx 3/4.
+- MID-TASK FIXES (Jeff's calls after eyeballing the 6-panel view):
+  (1) both new panels restyled to EXACT De-esser scaffolding --
+  DynamicsLAF::paintLA2APanel cream/wood plate + right-edge dbfs/output-
+  knob + layoutKnobsH row (my originals skipped the plate paint + used a
+  divergent layout); (2) text GR readouts replaced with the REAL GRMeter
+  widget (Compressor-family asset), 30 Hz setGainReduction feed, left-strip
+  placement per the FET panel idiom.
+- Viewport fallback for short windows NOT added (6 rows clip below ~410 px
+  page height; acceptable risk, revisit if Task 5 shows clipping).
+- CMakeLists: GateDSP.cpp + DeReverbDSP.cpp.
+- Jeff: "Builds clean" (2026-07-16).
+- SIDE THREAD (same day): De-reverb Future State research completed via two
+  workflow sweeps (classical WPE w/ NTT patent gate to ~2029; pretrained
+  model licensing incl. openMHA AGPL dead-end + UVR weights-license gap +
+  Roformer relicense/in-house-train path).  JEFF UPDATED Future State.md
+  HIMSELF with these findings -- batch close must NOT double-draft them.
+
+## 2026-07-16 -- QA-Fe2 Task 4 -- WORLD to stock: BUILT + CLEAN (Jeff)
+
+- `LibraryPitchShifters.cpp` WorldShifter: floorAperiodicity + deEmphasizeHF
+  + peak-tanh DELETED from both bake paths (removal-record comment left at
+  writeNormalized so the helpers don't get re-invented); writeNormalized =
+  plain RMS match (cap 4.0) only; D4C threshold stays stock 0.85.  This is
+  byte-for-byte the ear-validated "cleantake" configuration -- stock WORLD
+  fed by De-noised takes.  Leftover grep: clean (1 hit = the record comment).
+- Jeff: "Clean" (2026-07-16).  Task 5 (consolidated verification) handed
+  over in chat with the reconciled numbered script (stale plan steps purged:
+  popup is a combo not radios; File Settings defaults leave cleaned boxes
+  OFF so the endgame test requires enabling Dry Cleaned; stop-gates added
+  mid-batch are in the script; commits deferred to close per Jeff).
+
+## 2026-07-16 -- QA-Fe2 Task 5 verification, finding #1: Gate GR meter scale
+
+Jeff, first look at the 6-panel chain: the shared GRMeter is a compressor
+meter -- scale bottoms at -20 (gate legitimately sits at -60 closed ->
+needle pinned) and its red zone is at the DEEP end (backwards for a gate,
+where closed is the normal resting state).  Fix per Jeff's call: NEW
+`GateGRMeter` in SharedUI.h/.cpp -- identical chassis (chrome bezel / cream
+plate / 120-degree needle / brass cap / LCD), scale 0..-80 (marks every
+20), red zone at the OPEN end (-6..0), LCD reads "GATE dB"; GatePanel
+switched to it.  De-reverb stays on stock GRMeter (its -14 dB max cut fits
+0..-20 correctly).  Fixed in-batch per Rule 3.
+
+## 2026-07-16 -- QA-Fe2 Task 5 verification, finding #2 + WORLD verdict
+
+- FINDING #2 (Jeff): arm popup had OK but no Cancel (mis-click = forced
+  channel change to re-ask) -> Jeff's redesign call: POPUP REMOVED ENTIRELY.
+  Replacement: "Builder Grid Default" section in the Vox arm-LED right-click
+  picker (MixerPage::showInputChannelPicker, item IDs 300..303) -- Dry /
+  Dry Cleaned / Wet / Wet Cleaned, tick = locked pick.  Semantics: -1 = auto
+  (Wet when realtime correction on, else Dry -- the legacy rule); a user
+  pick LOCKS until the project closes (reset in
+  restoreAudioStripsFromArrangement load path; deliberately SURVIVES track
+  reassignment).  New MixerPage hooks onGet/onSetGridDefault wired from
+  StandaloneEditor (state stays beside commitRecordingResult).
+  showArmTakePopup + mVoxArmPopupShown/mVoxArmLast DELETED (grep-clean).
+  LOUD REMOVAL: the arm popup (S5) is gone; S5's once-per-session +
+  reassignment-re-ask semantics are superseded by the lock-until-close menu.
+- WORLD VERDICT (Jeff, Task 5 endgame): "doesn't sound perfect but we're
+  gonna call it good enough cause it's been a week."  WORLD SHIPS in v1 as
+  the third engine, fed by De-noised takes, stock synthesis.  The buzz/water
+  arc closes as: root cause = take noise re-rendered F0-gated; fix =
+  De-noise at the source; residual character accepted.
+
+## 2026-07-16 -- QA-Fe2 close-out routing (Jeff's calls on the to-address list)
+
+- Items 1-5 -> IN THIS BATCH, now (Jeff): (1) pitch-editor mouse-control
+  rework (plain drag = pitch + edge-stretch, NO free horizontal; Ctrl+drag =
+  detach stretch; Ctrl+Alt+drag = full horizontal move -- Jeff's deferred
+  spec, now confirmed by the in-batch order); (2) highRes export
+  oversampling follow-up; (3) dead realtime pitch-decode branch cleanup;
+  (4) detached-pill segmentation-aware envelope resample; (5) Bug B
+  consonant-slice tune (kAttachGapFrames 3->2).
+- Item 6 (metronome/time-signature regression) -> ROUTED TO G3 (my
+  placement per Jeff's delegation, group plan reviewed: G3 = Builder/UX/
+  engine polish where QA-J' residual fixes live; G4 = mechanical sweeps/
+  data layer, wrong shape).  Gated on Jeff's repro.  Forks entry at close.
+- Item 7 (Inst cleaned takes): VERIFIED STRUCTURALLY IMPOSSIBLE -- cleaned
+  generation + File Settings union live only in commitRecordingResult's Vox
+  branch; Inst branch = dry dropWavAsClip only; Regenerate menu keys off
+  "* CLEANED" names Inst never makes; Grid Default picker section is
+  Vox-only.  No code change.  The stopped-overwrite file-hold residual dies
+  as theoretical (untested by Jeff, never observed).
+
+## 2026-07-16 -- QA-Fe2 close-out items 2-5 executed
+
+- ITEM 5: ALREADY SHIPPED (stale deferred note) -- kAttachGapFrames is
+  already 2 with the calibration comment and the foldSpan else-branch
+  isSlice materialization is in the tree (BaySickPitchDSP.cpp:45, :344-364).
+  No change.
+- ITEM 3 (dead realtime pitch-decode branch): REMOVED -- pitchActive kill
+  switch + pitchOrigin block + the dead sourcePosAt pitch stage
+  (PluginProcessor.cpp ~:1144-1221), the AlignBlockEntry pitchMap/
+  pitchChainOn/pitchBaked fields + their writers (:1852-1854), the orphaned
+  isPitchEditChainOn accessor + mBspOnRaw cached pointer
+  (BaySickVocalProcessor).  loadTimeMapSnapshot STAYS (live Align-render
+  caller at BaySickVocalProcessor.cpp:1264).  Stale "4 locked slots" +
+  chain-order header comments fixed while in the file.
+- ITEM 4 (detach-cut envelope resample): bakeSpan now detects detach ramps
+  in the time map (guide window <= 2 ms with a backward or > 50 ms forward
+  dub jump -- impossible under the 3:1 warp rails) and SNAPS samples inside
+  a ramp to the nearest side of the cut.  Kills the Hermite sweep that baked
+  unrelated notes' pitch/formant/gain at the cut AND hands the shifters a
+  clean instantaneous step for their own detach detection.  Hermite
+  endpoint easing in neighboring segments remains (mild, monotone) --
+  accepted.
+- ITEM 2 (Jeff: 2a): !! LOUD OPTION REMOVAL -- the Pitch render dialog's
+  "High Resolution (slower)" button is RETIRED (BaySickPitchEditor::
+  runRender now Render/Cancel); renderPitchedTake's highRes param deleted.
+  It had been a NO-OP since QA-Fe Option A removed the applyWarp PV from
+  the pitch path (the oversampling had nothing left to oversample).
+  BaySickAlign's High Resolution render is REAL (oversampled PV warp, os
+  2-8) and is untouched.
+- ITEM 1 (Jeff: option d): GESTURE MAP SHIPPED -- body plain drag =
+  vertical pitch ONLY; Ctrl = fine pitch (0.01 st); Ctrl+Alt = elastic move
+  (neighbor-walled, the old plain-drag move); Ctrl+Shift = DETACH move
+  (hard cut, no walls, >3 px); edges unchanged (drag = stretch, Ctrl =
+  detach stretch).  Shift-toggle-select now gated to Shift-without-Ctrl so
+  Ctrl+Shift can't deselect mid-gesture.  Edit-button tooltip updated.
+  !! LOUD BEHAVIOR CHANGE: plain drags can no longer move a note in time --
+  timing moves are deliberate modifier gestures (Jeff's spec, deferred from
+  the garble arc, confirmed + refined to option d today).
+- KEYBINDS MENU (Jeff's order): Vocal Editor section rewritten to the new
+  gesture map (+ Ctrl+Alt / Ctrl+Shift rows); Builder section gained the
+  QA-Fe2 gestures -- Create Group / Rename Group / Regenerate De-noise /
+  browser-edge resize / Vox arm-LED right-click (input + Builder Grid
+  Default).
+
+## 2026-07-16 -- QA-Fe2 Task 5 COMPLETE + final build CLEAN (Jeff) -> Task 6
+
+Final build (Grid Default menu, dead-branch removal, detach-cut resample,
+High-Res retirement, gesture map, keybinds menu): Jeff "clean".  Task 5
+verification verdicts across the session: WORLD ships ("good enough"),
+6-panel chain approved after the two panel fixes + GateGRMeter, popup
+replaced by the Grid Default menu, groups/resize/regenerate exercised
+during the finding rounds.  Plan registration completed (Main Plan section 5
+entry + section 6 arrow/footnote + section 9 fifty-ninth Forks; group-plan
+G2 composition drift fixed [Fd/Fe were missing too] + G3 metronome item).
+Task 6 open: /review-batch over the full batch diff -> fix findings -> ONE
+commit (message + FULL git status surfaced for Jeff's approval) -> G2
+boundary wrap.  NOTE: the Implemented Work Log batch-close entry is HELD
+per bulk-run R2 (applies at the Master Test Plan section-B backfill), so
+the close writes NO Work Log entry now -- my plan file's Task 6 line said
+"/draft-doc batch-close" but the bulk-run convention governs.
+
+## 2026-07-16 -- QA-Fe2 Task 6: /review-batch findings fixed + REAL PDC wired
+## (Jeff: option c, "FIX IT NOW" -- the S11 "w/ PDC" clause I wrote was never
+## actually true; owning that)
+
+/review-batch verdict: zero blockers; five NEEDS-FIX mechanical items ALL
+fixed (stale arm-popup string in File Settings + 2 comments -> Builder Grid
+Default wording; stale "4 SlotComponents" header comment; kDenoiseMaxVox
+16 -> 6 [the real kMaxVoxStrips]; renameManualAudioGroup member rewrite now
+category-filtered via owner-channel ranges [cross-category same-name bug];
+/ui_prefs.xml gitignored].  Review NITs recorded: forward-detach jumps
+< 50 ms keep the old envelope sweep (bounded); collapsed browser groups
+re-expand on tree rebuild; stereo clean-path per-hop alloc (offline).
+
+PDC EXTENSION (the real fix for the De-reverb/spectral-De-esser latency):
+- `BaySickVocalProcessor::getChainLatencySamples()` (bypass-aware rack
+  total, message thread).
+- `VibeGraph::onGetVoxStripChainLatency` hook (wired in VibeSynthProcessor
+  before the initial updateBusLatencies call).
+- `updateBusLatencies` rewritten: compensation target = max(Layers, Bass,
+  Drums, maxVoxChain); the 3 synth buses keep their bus-level comp delays;
+  SOURCE-FED inserts on buses without bus-level comp (Audio 400-449, Vox
+  600-605 minus own chain latency, Inst 700-719, Rusty 800-812) get
+  INSERT-level compensation via the already-live InsertNode::compDelay
+  (:1290) -- value-only, no new audio-path code.  Layer/Bass/Drum inserts
+  skipped (bus comp covers them; insert-level would double-delay); Aux
+  skipped (receives post-compensation sends).  setDelay calls now skip
+  no-ops (setDelay reallocs+clears; the poll must not glitch a live mix).
+- Refresh: the 5 Hz StandaloneEditor poll watches per-strip chain latency
+  and re-runs setLatencySamples(updateBusLatencies()) on change (bypass
+  toggles, engine switches, project load).  <= 200 ms re-align lag at a
+  live toggle -- inherent to toggling latent FX mid-play.
+- HONEST BOUNDS (disclosed): (1) live MONITITORING through an active
+  De-reverb still hears ~46 ms -- physics; bypass slot 1 or True Dry while
+  tracking; (2) the metronome renders post-mix and sits EARLY by the
+  compensation amount whenever any path carries latency -- PRE-EXISTING
+  model class (was equally true for latent bus racks before this batch);
+  (3) De-reverb remains ACTIVE by default (Reduction 50 / Mix 100) -- the
+  timing is now compensated, the sound default ships as approved in Task 5.
+
+## 2026-07-16 -- PDC full-graph audit + Jeff's fix-everything directive +
+## SESSION HANDOFF (context ceiling)
+
+- Jeff asked whether the 3-bus PDC model was the whole story -> full audit
+  commissioned (2 agents, file:line evidence), saved durable at
+  `Plans & Specs/Research Reports/pdc-coverage-audit-2026-07-16.md`.
+- Headline findings: only 4 bus rack+postEq pairs + the 6 Vox engine chains
+  are measured; ~130 per-insert mixer racks invisible; FX bus + 7 sibling
+  bus nodes unmeasured AND uncompensable (no delay lines); preEq omitted
+  from all 4 measured sums; METRONOME leads the compensated mix by total
+  PDC (default-on now that De-reverb ships active); master recordings land
+  late vs beat grid; SC keys skew when latency exists; NAMIR OS latency
+  written-but-unread.
+- CORRECTION (Jeff, forceful): the pitch-corrector ~48 ms MONITOR latency
+  is NOT "by design / none needed" as this session labeled it -- the
+  dry-monitor default was a mitigation, not a fix.  A real corrected-
+  monitoring fix (e.g. dedicated low-latency monitor shifter, WET keeps R3)
+  is IN SCOPE; options = Jeff's spec call.
+- JEFF'S CALL: fix EVERY audit gap IN-BATCH before the QA-Fe2 close.
+  Handed to a FRESH session (this one is at context ceiling) via a handoff
+  prompt referencing the saved audit; the new session also runs the close
+  (re-review, ONE commit w/ approval gate, G2 wrap).  Batch remains OPEN;
+  tree remains fully uncommitted vs 6bbb8650.
+
+### Jeff's final calls (2026-07-16): De-reverb IN this batch; naming; resize
+- De-reverb ships in this batch, titled "De-reverb"; the cleanup feature is
+  titled "De-noise" -- uniform with De-esser.  (Take-type file tags stay
+  "DRY CLEANED"/"WET CLEANED" as Jeff spec'd verbatim; flagged at approval
+  in case he wants "De-noised" tags instead.)
+- Vocal chain final order (6/6 rack slots, exactly full): Gate -> De-reverb
+  -> De-esser -> Compressor -> Saturation -> Limiter.
+- Builder browser panel right edge becomes drag-resizable: default = min =
+  current width, max = 3x current width (not persisted across sessions
+  unless Jeff asks).
+- Full consolidated task breakdown presented in chat for approval; plan
+  file to be written on Jeff's go.
+
+### Jeff feature idea (2026-07-16, workshop): armed-mic noise cleanup
+Learn the room's noise profile from the armed-but-not-recording feed;
+user chooses keep/remove ("noise clean up option"); explicitly NOT just a
+gate; separately, a Gate panel for the vocal chain is wanted regardless.
+Assessment recorded in chat: standard profile-based spectral denoise
+(= exactly the cleantake prototype), auto-learn-while-armed is sound UX for
+the beginner audience; the non-destructive record-raw + apply-at-bake shape
+would land at the same pipeline point where it fixes WORLD (denoise before
+analysis) -- one feature, two wins.  Scope/slot/shape = Jeff's spec calls;
+options surfaced in chat, NOT decided.
+
+## 2026-07-16 -- QA-Fe2 PDC full-graph pass, work item A: BUILT + CLEAN (Jeff)
+## + spec picks
+
+WORK ITEM A = all 7 gaps from
+`Plans & Specs/Research Reports/pdc-coverage-audit-2026-07-16.md` (Jeff's
+fix-everything directive, prior entry).  Built; Jeff confirmed clean.  Tree
+stays fully uncommitted per bulk-run ONE-commit-at-close.
+
+- `updateBusLatencies` (VibeGraph.cpp) rewritten as a TWO-STAGE minimal-
+  latency solve.  Stage 1: every live insert strip aligns WITHIN its actual
+  main-out bus (reads `_sendTo`, natural-parent fallback; own path latency
+  = engine chain via the Vox/Inst hooks + preEq + rack + postEq) via the
+  existing per-insert delay.  Stage 2: each bus (natural = A(bus) +
+  busChain) aligns cross-path to target T via bus delay lines.  Replaces
+  the single-max model; ~130 previously-invisible insert racks now
+  measured; preEq now in every sum (was omitted from all 4 measured buses).
+- FX bus (EffectsBusNode) + the 7 InstrChannelNode buses (Clips/Vox/Inst/
+  Vox2/Inst2/Inst3/Rusty) gained CompDelayLine members, applied post-pan/
+  pre-meter -- previously unmeasured AND uncompensable.  CompDelayLine
+  kMaxSamples 8192 -> 32768 (vocal chain + HQ-Linear strip EQ can pass
+  8192; alloc is per-active-line so idle lines cost nothing).
+- Aux strips align to EACH OTHER (auxStage); FX input reference = maxA +
+  auxStage, so the most latent source's send return lands exactly on the
+  aligned mix.  Net CPU slightly DOWN at the shipped default: ~83
+  per-insert full-compensation delay lines (Audio/Inst/Rusty) collapse
+  into single bus-level lines.
+- NAMIR oversampling latency now CONSUMED: BaySickVocalProcessor::
+  getChainLatencySamples adds its owned NAM/IR stage; NEW
+  `VibeGraph::onGetInstStripEngineLatency` hook wired in VibeSynthProcessor
+  prepareToPlay -> EngineChainProcessor::getChainLatencySamples (new
+  method, sums stages under the spinlock).
+- Metronome (applyPostMixRecordAndMetro, PluginProcessor.cpp): ALL clicks
+  defer by totalLatencySamples (audio-thread atomic read).  Count-in
+  defers as ONE unit via new MetroDSP::countInDelaySamp armed at the
+  rising edge (beat spacing through the transport handoff stays exact).
+  Transport click grid derives from the DELAYED clock (TempoMap spans
+  built from smp0 - pdc; TempoMap extrapolates segment 0 linearly below
+  sample 0; negative-beat clicks suppressed).  !! LOUD BEHAVIOR CHANGE:
+  play-press mid-beat no longer fires an immediate catch-up click (new
+  MetroDSP::transportWasPlaying edge seeds lastBeatFloor = ceil(beat0)-1)
+  -- first click lands on the next real crossing; the old immediate click
+  also fired the PREVIOUS beat's accent (mislabeled).
+- Master recorder: AudioFileRecorder::startRecording gained
+  skipInitialSamples (default 0); writeBlock consumes the countdown before
+  writing so the 5 ms fade-in ramps the first WRITTEN samples; master
+  fallback capture passes totalLatencySamples -> master WAVs land on the
+  beat grid.  Strip DRY recorders (pre-chain tap) + Vox WET recorder
+  (pre-chain tap + existing corrector skip) unchanged.
+- 5 Hz poll (StandaloneEditor::pollDenoiseState): vox-chain-only latency
+  watch replaced by a FULL updateBusLatencies re-solve every tick
+  (no-op-guarded setDelay); host report refreshed on total change;
+  mVoxChainLatLast member deleted, new mPdcTotalLast.  Learner-enable
+  logic untouched.
+- HONEST RESIDUALS (per-NODE delays cannot express per-EDGE timing;
+  recorded in the updateBusLatencies header comment): cross-bus sends
+  into one aux mix at A(b)-relative offsets; bus->bus / bus->aux sends +
+  re-cabled aux main-outs arrive a stage off; direct strip->FX send early
+  by auxStage when an aux carries latent FX.  Exact per-edge PDC = future
+  work.
+
+SPEC CALLS RESOLVED (Jeff, this chat):
+- Docket 1 (sidechain key timing) = option (b): pre-delay key taps (keys
+  at natural time via per-node stash) + per-receive delay lines set to
+  max(0, consumerPos - sourceNaturalPos).  Residual ACCEPTED: a source
+  naturally later than its consumer (e.g. vocal chain keys a drum gate)
+  stays late -- full per-edge graph PDC is the only complete fix.
+  Grounding surfaced: (b) matches modern pro-DAW behavior (REAPER/
+  Cubase/modern Pro Tools compensate SC as routed inputs).
+- Docket 2 (corrected live monitoring, the ~48 ms R3 LiveShifter) =
+  option (a): NEW dedicated time-domain monitor shifter (dual-tap
+  crossfade class, ~10-15 ms effective) feeds the live monitor/mix path;
+  the WET recording keeps R3 quality.  Grounding: the industry pattern --
+  every shipping realtime tracking tuner is time-domain few-ms class;
+  spectral engines are the quality path.  Assumption surfaced, not vetoed:
+  the live monitor path stays OUT of the PDC target (delaying the backing
+  to match the cue would worsen tracking); wet FILE alignment already
+  handled at write.
+- CL-301 -> Future State.md (Jeff's routing call): bus-node consolidation
+  into InstrChannelNode; ALREADY APPLIED under Mixer / Routing, new
+  "Batch-surfaced (QA-Fe2 2026-07-16)" sub-cluster -- batch close must
+  NOT double-draft it.  Origin: Jeff asked whether the L/B/D-vs-generic
+  processBus split is normal DAW construction; answer: historical
+  accretion, three on-record divergence incidents, industry norm is one
+  generic channel type.
+
+Work item B (the two docket picks) builds next; its own checkpoint
+follows its build-clean.
+
+## 2026-07-17 -- QA-Fe2 PDC work item B (SC delay-match + monitor shifter):
+## BUILT + CLEAN (Jeff)
+
+Work item B = the two docket picks (1b + 2a) from the work-item-A entry.
+Built late in the 2026-07-16 session; Jeff's build-clean landed
+2026-07-17.  Tree stays fully uncommitted -- ONE commit at close.
+
+DOCKET 1b SHIPPED -- sidechain key delay-match:
+- Pre-compensation key taps: every node type (LayersBusNode/BassBusNode/
+  DrumsBusNode via one shared-text edit, EffectsBusNode, InstrChannelNode
+  in processBus, InsertNode) gained an scTap stereo stash + scTapArmed
+  atomic; the copy runs right BEFORE that node's compDelay so alignment
+  delays never leak into keys.  Master needs no stash (no comp delay).
+  Arming = new VibeGraph::armScSourceTaps() called at the tail of
+  rebuildRoutingFromApvts (audio thread, block rate, relaxed stores,
+  allocation-free): clears all flags then arms every RoutingGraph scEdge
+  source.
+- Per-receive key alignment: new fixed array VibeGraph::mScRecvDelays
+  [kMaxStripChannels=1000][kMaxScRecvSlots=4] of CompDelayLine --
+  deliberately NOT inside the mScRecv map (that map is audio-thread-
+  owned; the message-thread solver must never race it).
+  updateBusLatencies now solves want = max(0, consumerPos(dst) -
+  srcNatural(src)) per SC receive param (_sc_recv{N}_from read straight
+  from APVTS), with srcNatural/consumerPos lambdas over the two-stage
+  solve results (new ownByCh/engineByCh bookkeeping in the strip sweep).
+  Applied in SidechainPullHelper via new VibeGraph::applyScRecvDelay
+  (audio thread, allocation-free, n-sample view).
+- Pull helper reads the pre-delay tap via new
+  VibeGraph::getScSourceTap(chId); falls back to the post-everything
+  output buffer for tap-less sources.
+- Engine SC unified: all FOUR setSidechainBuffers sites (EngineInsertTask,
+  VoxStripTask live branch, InstStripTask, CompositeAudioInsertTask) now
+  run the pull FIRST and hand the engine the SAME filled + delay-matched
+  receive buffers via getScRecvArray -- previously three of the four
+  pushed raw post-compensation predecessor pointers BEFORE the receive
+  buffers were even filled.  EngineInsertTask/InstStripTask pulls hoisted
+  above the engine render (were after).
+- CompDelayLine struct MOVED from VibeGraph.cpp file scope into
+  VibeGraph.h as a private nested struct (mScRecvDelays needs the
+  complete type); node structs unchanged consumers.
+- Residuals (accepted at the docket): source naturally later than its
+  consumer (vocal chain keys a drum gate) stays late -- per-edge graph
+  PDC territory; engine-internal SC readers sit deeper than the chain
+  input (consumer position approximated at chain input; engine-stage
+  term dominates); cross-order +1-block policy unchanged.
+
+DOCKET 2a SHIPPED -- low-latency corrected monitor:
+- NEW `Source/DSP/MonitorPitchShifter.h` (header-only,
+  PolyphaseOversampler precedent -- no CMake change): dual-tap delay-line
+  crossfade shifter, 24 ms window, half-sine tap gains (zero exactly at
+  wrap -- no splice clicks), ~12 ms effective latency (gain-weighted mean
+  tap delay = W/2), linear-interp taps, power-of-2 ring with the write
+  index itself wrapped (& mask, incl. two's-complement negative-index
+  wrap) per the wrap-the-accumulator rule.  Mono, allocation-free after
+  prepare.
+- BaySickVocalProcessor: new TD stage between the WET tap and the monitor
+  split.  While realtime correction is live (bsv_pitch_realtime_bypass
+  off), the With-Effect monitor/mix target swaps the R3 stream (~48 ms)
+  for the TD shift of the RAW stash driven by the corrector's published
+  applied shift (getCurrentShiftCents -> ratio; includes strength/
+  humanize/retune smoothing).  The R3 stream above the split still feeds
+  the WET recorder -- recordings + playback keep R3 quality.  ~40 ms
+  substitution fade on correction-toggle edges (fade is a pure function
+  of the sample index so all channels blend identically; member advances
+  once per block); shifter cold-restarts on the engage edge (ring primes
+  silent under the fade).  Total heard latency while tracking corrected:
+  ~12 ms + device RT (~6-12 ms) = ~18-24 ms, down from ~55-60 ms.
+- Honest bounds: no formant handling on the monitor path (R3 keeps it on
+  recordings); at exactly-unity momentary shift with the tap phase parked
+  mid-window the dual-tap can transiently blend two copies ~12 ms apart
+  (mild thickening; parks on a single clean tap at engage and corrections
+  keep the phase moving).
+
+!! LOUD DEFAULT CHANGE (Jeff pick "a", 2026-07-17):
+mixer_vox_{n}_monitorMode DEFAULT flipped 1 -> 2 (Bypass Pitch Corrector
+-> With Effect) in all three places (param default in
+VibeSynthProcessor::addLiveInputParams, VoxStripTask no-param fallback,
+BaySickVocalProcessor::mMonitorMode member default).  The dry-monitor
+default was the ~48 ms mitigation; with the ~12 ms monitor shifter,
+corrected live monitoring ships ON by default.  Listen-LED right-click
+menu unchanged (never labeled a default).
+
+Jeff: "Builds clean" (2026-07-17).  Close opens: /review-batch over the
+FULL combined diff.
+
+## 2026-07-17 -- QA-Fe2 close: full-diff /review-batch CLEAN + fixes;
+## commit gate
+
+- /review-batch re-ran over the FULL combined uncommitted diff (working
+  tree vs 6bbb8650, 39 tracked files +3450/-371 plus 10 untracked):
+  ZERO BLOCKERS.  Reviewer verified hard: audio-thread allocation-
+  freedom (armScSourceTaps relaxed-stores-only, applyScRecvDelay
+  non-inserting find + pointer view, metronome one relaxed atomic,
+  recorder plain countdown); the single message-thread setDelay call
+  site; MonitorPitchShifter ring-wrap compliance + correct shift
+  direction; no double SC delay advance (FilePlay early-returns); all
+  four engine-push conversions covering every mScEngine holder; the
+  two-stage solve's non-negative wants; L/B/D scTap+compDelay landing
+  in the live processChainOnly path; ASCII/US-spelling/CPU-guard sweeps
+  clean; the prior review's five fixes still in place.
+- Three NEEDS-FIX, all fixed: (1) three stale "1 BypassCorr [default]"
+  comments contradicting the flipped monitor default (VoxStripTask.cpp
+  fallback site, BaySickVocalProcessor.h setMonitorMode + mMonitorMode
+  member) -> reworded to "2 WithEffect [default since QA-Fe2 docket
+  2a]"; (2) stale "highRes oversamples that warp (16a)" clause above
+  renderPitchedTake (the param was retired this batch; Align-side
+  highRes untouched) -> clause dropped; (3) running-notes/plan-file lag
+  vs the Main Plan section-9 back-reference -> already resolved
+  mid-review (the work-item-B checkpoint + plan-file scope addition
+  landed while the reviewer ran; timing artifact, no extra work).
+- Three actionable NITs also fixed in-batch: CompDelayLine header
+  comment no longer claims need-proportional allocation (setDelay
+  allocates the full 256 KB cap per activated line; only never-
+  activated lines are free); countInBeatsFired comment updated for the
+  in-loop beat-1 trigger (was "rising-edge"); applyScRecvDelay channel
+  guard tightened < 1 -> < 2 (CompDelayLine::process iterates mNumCh=2)
+  with a one-line why.  Fourth NIT = no-action record: the
+  message-thread setDelay-vs-live-audio realloc hazard is the
+  pre-existing PDC contract; this batch grows the line population but
+  not the trigger frequency.
+- FOR THE MASTER TEST PLAN CAMPAIGN (reviewer's explicit ask, recorded
+  so the held Work Log backfill picks it up): add line items for
+  (1) metronome-on-the-beat with a latent chain loaded, (2) SC key
+  timing under compensation, (3) the TD monitor's sound -- it now ships
+  as the DEFAULT monitor mode, so every new Vox strip hears it first.
+  Suggested Work Log buckets at backfill: Players, Effects, System
+  Pages PLUS Mixer / Routing for the PDC/SC work.
+- SUPERSEDED SAME DAY (Jeff's order at the commit gate): the test-plan
+  update happened IN-BATCH -- v1-master-test-plan.md gained section
+  B.11 (FE2-1..14: the batch feature re-verify set + the three PDC
+  items above as FE2-10/13/14 plus master-recorder trim FE2-11 and
+  per-insert-rack PDC FE2-12); blocks: placeholder backfills with the
+  close commit hash at the campaign, per the B.10 precedent.  QA-Fe
+  still has NO section-B block of its own -- flagged to Jeff, his call.
+- Reviewer recommendation: READY-TO-COMMIT after the comment fixes
+  (done).  Commit gate opens: ONE batch commit, message + FULL git
+  status surfaced for Jeff's approval; then the G2 boundary wrap
+  (Jeff's smoke).

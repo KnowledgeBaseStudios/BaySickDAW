@@ -399,7 +399,6 @@ public:
         CheapTrick (x.data(), n, fs, temporal.data(), f0.data(), f0len, &copt, spec.data());
         D4COption dopt;  InitializeD4COption (&dopt);
         D4C (x.data(), n, fs, temporal.data(), f0.data(), f0len, fftSize, &dopt, ap.data());
-        floorAperiodicity (ap.data(), f0len, H, fs, fftSize);   // break the pulse-train buzz
 
         // MODIFY: per-frame pitch scale (== the shift; envelope stays fixed =>
         // formant-preserving).  Optional throat warp on the envelope.
@@ -415,7 +414,6 @@ public:
         std::vector<double> y ((size_t) n, 0.0);
         Synthesis (f0.data(), f0len, spec.data(), ap.data(), fftSize,
                    hopt.frame_period, fs, n, y.data());
-        deEmphasizeHF (y.data(), n, fs);
         writeNormalized (in, n, y.data(), n, out);
     }
 
@@ -454,7 +452,6 @@ public:
         CheapTrick (x.data(), nIn, fs, temporal.data(), f0.data(), f0len, &copt, spec.data());
         D4COption dopt;  InitializeD4COption (&dopt);
         D4C (x.data(), nIn, fs, temporal.data(), f0.data(), f0len, fftSize, &dopt, ap.data());
-        floorAperiodicity (ap.data(), f0len, H, fs, fftSize);   // break the pulse-train buzz
 
         // RE-TIME the analysis frames onto the EDITED timeline: edited synthesis
         // frame g (edited sample g*framePeriod) reads the SOURCE frame the map
@@ -504,7 +501,6 @@ public:
         std::vector<double> y ((size_t) nOut, 0.0);
         Synthesis (f0Ed.data(), edFrames, specEd.data(), apEd.data(), fftSize,
                    hopt.frame_period, fs, nOut, y.data());
-        deEmphasizeHF (y.data(), nOut, fs);
         writeNormalized (in, nIn, y.data(), nOut, out);
     }
 
@@ -514,75 +510,21 @@ private:
     // WORLD's Synthesis does not preserve absolute level -- it runs a bit hot vs
     // the analyzed input (~1.14x on vocal here), unlike RubberBand/Signalsmith
     // which are level-neutral.  Match the output RMS back to the input so WORLD
-    // sits at the same level as the other engines and can't drive an upstream
-    // strip stage into distortion (owner: buzz survives a fader cut -> the hot
-    // signal is clipping BEFORE the fader).  Gain capped to guard near-silence.
-    // WORLD synthesis splits each pitch pulse into a periodic part (energy prop.
-    // 1-AP^2) and an aperiodic noise part (prop. AP^2).  D4C under-estimates
-    // aperiodicity, so the harmonic pulse train dominates -> the classic vocoder
-    // "buzz" on voiced notes.  Floor the aperiodicity across the WHOLE band (0.15
-    // at DC -> 0.50 at Nyquist; ~2% noise energy low, ~25% top) to inject enough
-    // noise between harmonics to break the pulse train.  Aggressive -- the owner's
-    // "one more swing"; too much reads as breathy, too little as buzz.  Tunable.
-    static void floorAperiodicity (double* const* ap, int f0len, int H, int fs, int fftSize) noexcept
-    {
-        if (ap == nullptr || fftSize <= 0 || fs <= 0) return;
-        const double nyq = juce::jmax (1.0, 0.5 * (double) fs);
-        for (int f = 0; f < f0len; ++f)
-        {
-            double* row = ap[(size_t) f];
-            for (int k = 0; k < H; ++k)
-            {
-                const double freq = (double) k * (double) fs / (double) fftSize;
-                const double t    = juce::jlimit (0.0, 1.0, freq / nyq);
-                const double fl   = 0.15 + 0.35 * t;                 // 0.15 -> 0.50
-                if (fl > row[k]) row[k] = fl;
-            }
-        }
-    }
-
-    // WORLD's impulse-train excitation is spectrally flatter (brighter top octave)
-    // than a natural glottal source, so its HF over-drives the always-on vocal-
-    // chain Saturation (~+14 dB small-signal, drive 3.0) into an F0-locked "water/
-    // buzz".  A gentle one-pole roll-off restores a natural HF tilt BEFORE the
-    // chain -- WORLD only (RubberBand/Signalsmith already roll off naturally).
-    // Offline whole-clip pass -> function-local state, no realtime concern.
-    static void deEmphasizeHF (double* y, int n, int fs) noexcept
-    {
-        if (y == nullptr || n <= 0 || fs <= 0) return;
-        const double fc = 11000.0;   // corner (owner-tunable by ear)
-        const double a  = std::exp (-2.0 * juce::MathConstants<double>::pi * fc / (double) fs);
-        double lp = 0.0;
-        for (int i = 0; i < n; ++i) { lp = (1.0 - a) * y[i] + a * lp; y[i] = lp; }
-    }
-
+    // sits at the same level as the other engines.  Gain capped to guard
+    // near-silence.  QA-Fe2 Task 4: the former buzz-fix helpers (AP floor /
+    // 11 kHz de-emphasis / peak tanh) are gone for good -- the buzz/water was
+    // the take's own noise layer re-rendered F0-gated by Synthesis, fixed at
+    // the source by De-noise; stock WORLD + a cleaned take is the
+    // ear-validated configuration ("cleantake", running notes 2026-07-16).
     static void writeNormalized (const float* in, int nIn, const double* y, int nOut, float* out) noexcept
     {
-        // Level: match WORLD's output RMS to the input (WORLD runs ~1.14x hot).
-        double inSum = 0.0, outSum = 0.0, inPk = 0.0;
-        for (int i = 0; i < nIn; ++i)
-        { const double v = (double) in[i]; inSum += v * v; inPk = juce::jmax (inPk, std::abs (v)); }
+        double inSum = 0.0, outSum = 0.0;
+        for (int i = 0; i < nIn;  ++i) { const double v = (double) in[i]; inSum += v * v; }
         for (int i = 0; i < nOut; ++i) outSum += y[i] * y[i];
         const double inRms  = std::sqrt (inSum  / (double) juce::jmax (1, nIn));
         const double outRms = std::sqrt (outSum / (double) juce::jmax (1, nOut));
         const double g = (outRms > 1.0e-9) ? juce::jmin (4.0, inRms / outRms) : 1.0;
-        // Crest: WORLD's impulse-train excitation spikes higher than the source
-        // (crest ~7.4 vs ~6.7), over-driving the always-on vocal-chain Saturation +
-        // Limiter into the "water/buzz".  Soft-clip the RMS-matched output at the
-        // SOURCE peak so WORLD's crest matches the source and the chain treats all
-        // three engines the same.  tanh is transparent well below the threshold and
-        // tames only the excess peaks.
-        const double thr = juce::jmax (1.0e-4, inPk);
-        for (int i = 0; i < nOut; ++i)
-        {
-            const double s = y[i] * g;
-            const double a = std::abs (s);
-            // Only bend samples ABOVE the source peak.  The old whole-signal tanh
-            // colored the F0 pulses themselves -> an F0-correlated buzz audible even
-            // on a bare channel; below the peak, pass through clean.
-            out[i] = (float) (a <= thr ? s
-                                       : std::copysign (thr * (1.0 + std::tanh ((a - thr) / thr)), s));
-        }
+        for (int i = 0; i < nOut; ++i) out[i] = (float) (y[i] * g);
     }
 
     // Warp the power-spectrum envelope frequency axis: dst[k] = src(k/ratio).

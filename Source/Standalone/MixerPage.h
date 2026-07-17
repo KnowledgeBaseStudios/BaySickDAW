@@ -75,6 +75,15 @@ public:
     // suffixes.  Empty when no device is open.
     std::function<juce::String()> getInputDeviceName;
 
+    // QA-Fe2 (2026-07-16, replaces the arm popup): "Builder Grid Default"
+    // section in the Vox arm-LED right-click picker -- which recorded take
+    // lands on the Builder grid.  -1 = auto (Wet when realtime correction is
+    // on, else Dry); 0..3 = user-locked pick (Dry / Dry Cleaned / Wet /
+    // Wet Cleaned) held until the project closes.  State lives in
+    // StandaloneEditor (it drives commitRecordingResult).
+    std::function<int(int voxIdx)>            onGetGridDefault;
+    std::function<void(int voxIdx, int pick)> onSetGridDefault;
+
     // Returns the current display name of an audio row strip (for Effects dropdown).
     juce::String getAudioStripName(int row) const;
 

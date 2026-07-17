@@ -699,18 +699,25 @@ public:
 
         // Selection update (family convention: plain click selects; click on
         // an already-selected pill keeps the group; Shift+click toggles).
-        if (e.mods.isShiftDown())
+        // QA-Fe2: Shift-toggle only WITHOUT Ctrl (Ctrl+Shift = detach move).
+        if (e.mods.isShiftDown() && ! e.mods.isCtrlDown())
             mOwner.toggleSelect (hit);
         else if (! mOwner.isSelected (hit))
             mOwner.selectOnly (hit);
         mOwner.mFocusRegion = hit;
         mOwner.updateInfoBarFor (hit);
 
-        // Edit mode: edges = stretch/squeeze, body = 2-axis move.
+        // QA-Fe2 gesture map (Jeff, 2026-07-16): body plain drag = vertical
+        // pitch ONLY (dragging up can never knock a note out of line);
+        // Ctrl = fine pitch; Ctrl+Alt = elastic move (neighbor-walled);
+        // Ctrl+Shift = detach move (hard cut, no walls).  Edges keep:
+        // drag = stretch, Ctrl = detach stretch.
         mOwner.beginEdit();
         const auto pill = pillRect (regions[(size_t) hit]);
-        mFineDrag   = e.mods.isCtrlDown();
-        mDetachArm  = e.mods.isCtrlDown();
+        mFineDrag      = e.mods.isCtrlDown();
+        mDetachArm     = e.mods.isCtrlDown();                          // stretch-path detach
+        mMoveArm       = e.mods.isCtrlDown() && e.mods.isAltDown();
+        mDetachMoveArm = e.mods.isCtrlDown() && e.mods.isShiftDown();
         mDidDetach  = false;
         if (e.position.x - pill.getX() < 6.0f)
             mDragKind = DragKind::StretchLeft;
@@ -767,18 +774,19 @@ public:
             case DragKind::PitchMove:
             {
                 // Vertical: pitch (0.1 st; Ctrl fine 0.01; Snap ON lands on
-                // in-scale lanes).  Horizontal: elastic move / Ctrl detach.
+                // in-scale lanes).  Horizontal (QA-Fe2 gesture map): only
+                // when armed -- Ctrl+Alt elastic / Ctrl+Shift detach.
                 const double dySemisRaw = (mMouseDownPos.y - e.y) / mOwner.noteLaneH();
                 const bool  snapOn = mOwner.paramValue ("bsp_snap") > 0.5f
                                      && ! mFineDrag;
                 const double quant = mFineDrag ? 0.01 : 0.1;
                 const double dxSec = (e.x - mMouseDownPos.x) / mOwner.pixelsPerSecond();
-                const bool wantDetach = mDetachArm
+                const bool wantDetach = mDetachMoveArm
                     && std::abs (e.x - mMouseDownPos.x) > 3;
 
-                const double timeDelta = wantDetach
-                    ? juce::jmax (dxSec, minDetachDelta())
-                    : clampElasticDelta (dxSec);
+                const double timeDelta = ! (mMoveArm || wantDetach) ? 0.0
+                    : wantDetach ? juce::jmax (dxSec, minDetachDelta())
+                                 : clampElasticDelta (dxSec);
 
                 for (const auto& b : mDragBases)
                 {
@@ -1467,6 +1475,8 @@ private:
     bool   mRulerDragging { false };
     std::vector<DragBase> mDragBases;
     bool mFineDrag { false }, mDetachArm { false }, mDidDetach { false };
+    // QA-Fe2 gesture map: Ctrl+Alt = elastic move, Ctrl+Shift = detach move.
+    bool mMoveArm { false }, mDetachMoveArm { false };
     bool mScrubbing { false };
     juce::uint32 mLastScrubMs { 0 };
     double mPanStartScroll { 0.0 };
@@ -1526,7 +1536,7 @@ public:
         plain (mSaveBtn,   "Save",   "Save the current Focus/Mod/Speed as a user preset");
         plain (mLoadBtn,   "Load",   "Load a saved user preset");
         plain (mSliceBtn,  "Slice",  "Slice mode: click a note to split it -- e.g. chop a consonant off its vowel (snaps to grid; Alt = free)");
-        plain (mEditBtn,   "Edit",   "Edit mode: drag pills (vertical = pitch, horizontal = move), edges stretch, Ctrl+drag detaches");
+        plain (mEditBtn,   "Edit",   "Edit mode: drag pills = pitch (Ctrl = fine), edges stretch (Ctrl = detach stretch), Ctrl+Alt+drag = move, Ctrl+Shift+drag = detach move");
         plain (mResetBtn,  "Reset",  "Clear every pitch edit on this channel");
         plain (mRenderBtn, "Render",
                "Export the edited channel to Pitched/{name}_pitch_v{N}.wav (file only - playback is already live)");
@@ -2338,22 +2348,24 @@ void BaySickPitchEditor::refreshComposite()
 // ─── Actions ──────────────────────────────────────────────────────────────────
 void BaySickPitchEditor::runRender()
 {
-    // QA-Fd 16a: render dialog -- Standard vs High Resolution (the warp
-    // phase runs 384 kHz-class oversampled; slower, finer transients).
+    // QA-Fe2 item 2 (Jeff 2a): the High Resolution choice is RETIRED here --
+    // it oversampled the applyWarp phase-vocoder pass, which QA-Fe Option A
+    // removed from the pitch path (engines warp natively at full quality), so
+    // the choice had become a no-op.  BaySickAlign's High-Res render is real
+    // (oversampled PV warp) and keeps its dialog.
     auto* aw = new juce::AlertWindow ("Render",
         "Bake the edited channel to Pitched/{name}_pitch_v{N}.wav "
         "(file only - playback is already live).",
         juce::AlertWindow::NoIcon);
-    aw->addButton ("Standard",                 1, juce::KeyPress (juce::KeyPress::returnKey));
-    aw->addButton ("High Resolution (slower)", 2);
-    aw->addButton ("Cancel",                   0, juce::KeyPress (juce::KeyPress::escapeKey));
+    aw->addButton ("Render", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
     juce::Component::SafePointer<BaySickPitchEditor> self (this);
     aw->enterModalState (true, juce::ModalCallbackFunction::create (
         [self] (int r)
         {
             if (! self || r == 0) return;
             juce::String err;
-            const auto file = self->mProc.renderPitchedTake (err, r == 2);
+            const auto file = self->mProc.renderPitchedTake (err);
             if (file == juce::File())
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
                     "Render", err);

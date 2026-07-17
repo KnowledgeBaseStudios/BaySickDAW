@@ -2,8 +2,10 @@
 #include <JuceHeader.h>
 #include "../DSP/EngineSidechainHelper.h"
 #include "../DSP/PitchCorrectorDSP.h"
+#include "../DSP/MonitorPitchShifter.h"
 #include "../DSP/BaySickAlignDSP.h"
 #include "../DSP/BaySickPitchDSP.h"
+#include "../DSP/DenoiseDSP.h"
 #include "../EffectRack.h"
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
 #include "../Standalone/ApvtsDirtyTracker.h"
@@ -14,13 +16,14 @@
 // Vocal chain processor, peer to BaySickNAMIRProcessor in the Vox chain.
 // APVTS prefix `bsv_*`.
 //
-// Locked signal flow (filled in by subsequent sub-batches):
-//   input -> pitch correction -> de-esser -> compressor -> saturation
-//         -> limiter -> output
+// Locked signal flow (QA-Fe2 chain order):
+//   input -> pitch correction -> gate -> de-reverb -> de-esser -> compressor
+//         -> saturation -> limiter -> output
 //
 // Editor (H-6) - 6 sub-tabs:
 //   1. BaySickVocals      (realtime pitch + page-wide controls)
-//   2. Vocal Chain        (de-esser / compressor / saturation / limiter rack)
+//   2. Vocal Chain        (gate / de-reverb / de-esser / compressor /
+//                          saturation / limiter rack)
 //   3. BaySickPitch       (offline note-by-note pitch editor)
 //   4. BaySickAlign       (offline channel-pair time-alignment editor)
 //   5. BaySickNAM/IR      (existing engine hosted as a sub-tab)
@@ -82,11 +85,11 @@ public:
     // the embedded NAMIR sub-processor has its own tracker wired separately.
     void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
-    // H-6c (2026-05-01): Vocal Chain rack -- 4 locked slots in fixed order:
-    //   [0] DeEsser  [1] Compressor  [2] Saturation  [3] Limiter
-    // Slots 4 + 5 unused (rack always has 6 slots; the trailing two are
-    // EffectType::None and pass through silently).  Editor's Vocal Chain
-    // sub-tab hosts SlotComponents bound to this rack.
+    // H-6c (2026-05-01) / QA-Fe2 (2026-07-16): Vocal Chain rack -- 6 locked
+    // slots in fixed order:
+    //   [0] Gate  [1] De-reverb  [2] De-esser  [3] Compressor
+    //   [4] Saturation  [5] Limiter
+    // Editor's Vocal Chain sub-tab hosts SlotComponents bound to this rack.
     EffectRack mVocalChainRack;
 
     // QA-F chain-wiring fix (2026-07-10): fired at the end of
@@ -116,10 +119,11 @@ public:
     bool isForcePitchBypassed() const noexcept   { return mForcePitchBypass.load (std::memory_order_acquire); }
 
     // QA-Fe Task 5: live-monitor mode for this strip (0 = True Dry, 1 = Bypass
-    // Pitch Corrector [default], 2 = With Effect).  Set per block from
-    // VoxStripTask off the mixer_vox_<n>_monitorMode param.  Governs only what
-    // the monitor HEARS of the live voice -- the WET recording stays corrected
-    // in every mode (the WET tap sits before this split).
+    // Pitch Corrector, 2 = With Effect [default since QA-Fe2 docket 2a]).  Set
+    // per block from VoxStripTask off the mixer_vox_<n>_monitorMode param.
+    // Governs only what the monitor HEARS of the live voice -- the WET
+    // recording stays corrected in every mode (the WET tap sits before this
+    // split).
     void setMonitorMode (int m) noexcept { mMonitorMode.store (m, std::memory_order_release); }
 
     // 2026-05-06 (Batch 9c N1): atomic shutdown gate.  Mirrors
@@ -144,6 +148,46 @@ public:
     void setWetRecorder (class AudioFileRecorder* recorder) noexcept
     {
         mWetRecorder.store (recorder, std::memory_order_release);
+    }
+
+    // QA-Fe2 PDC: the engine-side path latency downstream of the input --
+    // vocal chain rack (bypass-aware; De-reverb 2048, spectral De-esser
+    // 1024/2048) plus the owned NAM/IR stage's oversampling latency, which
+    // was written via setLatencySamples but never read by any aggregator
+    // before the full-graph pass.  Consumed by VibeGraph::updateBusLatencies
+    // via VibeSynthProcessor's hook.  Message thread.  The realtime pitch
+    // corrector's ~48 ms is deliberately NOT in this sum: it runs only while
+    // live-monitoring, and folding it in would delay every other path to
+    // match the cue mix the performer is singing against (see the QA-Fe2
+    // monitor-latency spec call).
+    int getChainLatencySamples() const
+    {
+        int total = mVocalChainRack.getTotalLatencySamples();
+        if (mNamIrProc != nullptr)
+            total += juce::jmax (0, mNamIrProc->getLatencySamples());
+        return total;
+    }
+
+    // ── QA-Fe2 De-noise live learners (dual-domain, see DenoiseDSP.h) ────────
+    // Enabled from interface-track assignment on (message thread); the raw
+    // learner listens pre-corrector, the wet learner post-corrector, because
+    // the corrector transforms the noise floor along with the voice -- each
+    // cleaned take variant needs its matching-domain profile.
+    void setDenoiseLearnersEnabled (bool on)
+    {
+        mDenoiseLearnEnabled.store (on, std::memory_order_release);
+        if (on)  mDenoisePump.startTimerHz (15);
+        else     mDenoisePump.stopTimer();
+    }
+    void resetDenoiseLearners()          // track reassignment: room may differ
+    {
+        mDenoiseRawLearner.reset();
+        mDenoiseWetLearner.reset();
+    }
+    void getDenoiseProfiles (DenoiseProfile& raw, DenoiseProfile& wet) const
+    {
+        raw = mDenoiseRawLearner.snapshot();
+        wet = mDenoiseWetLearner.snapshot();
     }
 
     // ── Sidechain primitive (engine-level, for future ducking stages) ────────
@@ -262,12 +306,6 @@ public:
         { return mAlignPitchOnRaw != nullptr && mAlignPitchOnRaw->load() > 0.5f; }
     float alignTransposeSemis() const noexcept
         { return mAlignTransposeRaw != nullptr ? mAlignTransposeRaw->load() : 0.0f; }
-
-    // AUDIO/MT (QA-Fd): bsp_on -- gates the pitch editor's TIME map at the
-    // decode layer exactly like bsa_align_on gates the warp (OFF glides the
-    // law back to raw through the same machinery).
-    bool isPitchEditChainOn() const noexcept
-        { return mBspOnRaw == nullptr || mBspOnRaw->load() > 0.5f; }
 
     // QA-Fd review fix: true while setStateInformation restores.  The align
     // editor's mode-change hook seats the Blend preset via callAsync, which
@@ -439,8 +477,8 @@ public:
     // history entry.  Grid placement is a pending owner call (mirrors the
     // Align question); the bake is written + listed either way.
     // QA-Fd Task 8: the bake honors the channel's TIME edits (post-warp
-    // through the published time map); highRes oversamples that warp (16a).
-    juce::File renderPitchedTake (juce::String& errorOut, bool highRes = false);
+    // through the published time map).
+    juce::File renderPitchedTake (juce::String& errorOut);
 
     bool isPitchStale() const;
 
@@ -491,9 +529,23 @@ private:
     std::atomic<bool> mForcePitchBypass { false };
     std::atomic<class AudioFileRecorder*> mWetRecorder { nullptr };
 
-    // QA-Fe Task 5: live-monitor mode (0 TrueDry / 1 BypassCorr [default] /
-    // 2 WithEffect).  Audio thread reads; VoxStripTask writes per block.
-    std::atomic<int> mMonitorMode { 1 };
+    // QA-Fe2 De-noise learners.  pushBlock is audio-thread wait-free; the
+    // FFT work runs on mDenoisePump (message-thread timer).  Mono fold uses
+    // a prepare-time scratch -- no audio-thread allocation.
+    struct DenoisePump : juce::Timer
+    {
+        std::function<void()> onTick;
+        void timerCallback() override { if (onTick) onTick(); }
+    };
+    DenoiseLearner     mDenoiseRawLearner, mDenoiseWetLearner;
+    DenoisePump        mDenoisePump;
+    std::atomic<bool>  mDenoiseLearnEnabled { false };
+    std::vector<float> mDenoiseMonoScratch;
+
+    // QA-Fe Task 5: live-monitor mode (0 TrueDry / 1 BypassCorr / 2 WithEffect
+    // [default since QA-Fe2 docket 2a]).  Audio thread reads; VoxStripTask
+    // writes per block.
+    std::atomic<int> mMonitorMode { 2 };
 
     // Monitor-swap de-click: a hard mode swap steps the waveform (the corrected
     // voice carries the corrector latency, the raw voice does not), so a mode
@@ -502,6 +554,20 @@ private:
     int mMonXfadeFrom   { 1 };
     int mMonXfadeRemain { 0 };
     int mMonXfadeLen    { 0 };
+
+    // QA-Fe2 docket 2a: low-latency corrected monitor.  While realtime
+    // correction is live, the With-Effect monitor/mix path swaps the R3
+    // stream (~48 ms) for a dual-tap time-domain shift of the RAW voice
+    // driven by the same smoothed correction ratio (~12 ms); the R3 stream
+    // above the split keeps feeding the WET recorder untouched.
+    // mMonShiftFade ramps the substitution over ~40 ms at the
+    // correction-toggle edges (mirrors the corrector's own engage fade).
+    // Audio-thread-only state.
+    MonitorPitchShifter mMonitorShifter;
+    std::vector<float>  mMonShiftScratch;
+    float mMonShiftFade      { 0.0f };
+    float mMonShiftFadeStep  { 1.0f / 1764.0f };
+    bool  mMonShiftWasActive { false };
 
     // QA-Fe Task 4: latency-align the WET take.  The realtime corrector's
     // LiveShifter delays its output by getLatencySamples(); the WET recorder
@@ -577,7 +643,6 @@ private:
     std::atomic<float>* mAlignOnRaw        { nullptr };
     std::atomic<float>* mAlignPitchOnRaw   { nullptr };
     std::atomic<float>* mAlignTransposeRaw { nullptr };
-    std::atomic<float>* mBspOnRaw          { nullptr };   // QA-Fd time-map gate
 
     // H-6d (2026-05-02): owned NAM/IR processor (per-Vox-strip instance).
     // unique_ptr so the include only needs the forward declaration in

@@ -88,6 +88,10 @@ Plans & Specs/Issue Tracker.txt
 /keymap.xml
 
 # QA-Fe pitch-engine A/B render byproducts (2026-07-13) — throwaway comparison
+# QA-Fe2 (2026-07-16): per-machine UI prefs (File Settings checkboxes etc.) --
+# sibling of settings.xml, never shipped.
+/ui_prefs.xml
+
 # clips from the WORLD/Signalsmith/Rubber Band engine evaluation, not shipped.
 /SIM_*.wav
 /PV_*.wav

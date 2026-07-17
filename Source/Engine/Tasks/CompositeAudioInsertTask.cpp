@@ -77,17 +77,15 @@ void CompositeAudioInsertTask::run()
         = mClipEngine.load (std::memory_order_acquire);
     if (clipEngine != nullptr)
     {
-        // Push SC buffers via setSidechainBuffers (same as old ClipPageTask).
+        // QA-Fe2 SC delay-match: hand the engine the SAME aligned receive
+        // buffers the pull above filled + delay-matched (pre-compensation
+        // source taps), so engine SC and rack/EQ SC read identical keys.
         if (auto* sc = mScEngine.load (std::memory_order_acquire))
         {
+            const VibeGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
             juce::AudioBuffer<float>* scBufs[VibeGraph::kMaxScRecvSlots] = {};
-            for (const auto& link : mPredecessors)
-            {
-                if (! link.isSc) continue;
-                if (link.scSlot < 0 || link.scSlot >= VibeGraph::kMaxScRecvSlots) continue;
-                if (link.source == nullptr || link.source->mOutputBuffer == nullptr) continue;
-                scBufs[link.scSlot] = link.source->mOutputBuffer;
-            }
+            for (int i = 0; i < VibeGraph::kMaxScRecvSlots; ++i)
+                scBufs[i] = scArr[(size_t) i];
             sc->setSidechainBuffers (scBufs, VibeGraph::kMaxScRecvSlots);
         }
 

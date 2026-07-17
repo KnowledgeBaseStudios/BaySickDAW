@@ -424,6 +424,9 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/PhaseVocoder.cpp
     Source/DSP/CompressorDSP.cpp
     Source/DSP/DeEsserDSP.cpp
+    Source/DSP/DenoiseDSP.cpp                # QA-Fe2 De-noise (2026-07-16)
+    Source/DSP/GateDSP.cpp                   # QA-Fe2 vocal-chain Gate
+    Source/DSP/DeReverbDSP.cpp               # QA-Fe2 vocal-chain De-reverb
     Source/DSP/SibilanceSpectralProcessor.cpp
     Source/DSP/PitchTrackerYIN.cpp
     Source/DSP/PitchCorrectorDSP.cpp

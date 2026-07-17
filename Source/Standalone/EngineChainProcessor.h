@@ -31,6 +31,18 @@ public:
     // the message thread; coordinated against the audio thread via spinlock.
     void setChain (std::initializer_list<juce::AudioProcessor*> stages);
 
+    // QA-Fe2 PDC: summed stage latency (NAM/IR reports its oversampling via
+    // setLatencySamples; sfizz/Pedals stages report 0).  Message thread --
+    // feeds VibeGraph::onGetInstStripEngineLatency.
+    int getChainLatencySamples()
+    {
+        const juce::SpinLock::ScopedLockType lk (mLock);
+        int total = 0;
+        for (auto* s : mStages)
+            if (s != nullptr) total += juce::jmax (0, s->getLatencySamples());
+        return total;
+    }
+
     // ── AudioProcessor overrides ──────────────────────────────────────────────
     void prepareToPlay (double sampleRate, int blockSize) override;
     void releaseResources()                                override;

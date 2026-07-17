@@ -33,6 +33,7 @@ static inline double clipFilePosForBeat (double beatsIntoClip, double fileSample
 #include "BaySickBasses/BaySickBassesProcessor.h"          // L-2: per-instance sfizz bass engines
 #include "VibePlayer/VibePlayerProcessor.h"       // D1.4-fix (c): drum tune compensation
 #include "BaySickVocal/BaySickVocalProcessor.h"   // I-16 G-9: wet recorder hand-off
+#include "Standalone/EngineChainProcessor.h"      // QA-Fe2 PDC: Inst strip engine-chain latency hook
 #include "DSP/EngineSidechainHelper.h"            // C.4 Phase 2.2: ISidechainEngine for engine-level SC push
 #include <thread>                                 // 2026-05-06: hardware_concurrency for render worker count
 #ifdef VIBESYNTH_VST
@@ -361,7 +362,29 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     };
     mVibeGraph.rebindAllRackHooks();
 
-    // Compute initial PDC (0 for all current effects) and report to host.
+    // QA-Fe2 PDC: the graph queries each Vox strip's engine-side vocal chain
+    // latency (De-reverb / spectral De-esser FFT frames) through this hook so
+    // updateBusLatencies can compensate it like any bus rack.
+    mVibeGraph.onGetVoxStripChainLatency = [this](int voxIdx) -> int
+    {
+        if (auto* vp = dynamic_cast<BaySickVocalProcessor*>(voxEngineAt(voxIdx)))
+            return vp->getChainLatencySamples();
+        return 0;
+    };
+
+    // QA-Fe2 PDC full-graph pass: Inst analog -- the strip engine is an
+    // EngineChainProcessor (sfizz -> Pedals -> NAM/IR) whose NAM/IR stage
+    // reports oversampling latency.  Message thread (same serialization as
+    // register/unregisterInstEngine), so no mInstEngineLock needed here.
+    mVibeGraph.onGetInstStripEngineLatency = [this](int instIdx) -> int
+    {
+        if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return 0;
+        if (auto* chain = dynamic_cast<EngineChainProcessor*>(mInstEngines[(size_t) instIdx]))
+            return chain->getChainLatencySamples();
+        return 0;
+    };
+
+    // Compute initial PDC and report to host.
     setLatencySamples(mVibeGraph.updateBusLatencies());
 
     // ── Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06) ───────
@@ -1142,15 +1165,13 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
         auto& ownEntry = mBlockAlignEntries[(size_t) (routeCh - MixerChannelIds::kVoxBase)];
         const bool alignActive = (ae != nullptr) && ae->chainOn;
         // QA-Fe Option A (owner-confirmed 2026-07-15): the pitch tab's timing AND
-        // pitch are ALWAYS baked into the cache now -- never the realtime file-read
-        // warp.  Holding pitchActive off means a not-yet-baked edit plays DRY (raw)
-        // through the async bake window instead of the decode varispeed, which was
-        // the pre-bake "funky / rolling" artifact; once the cache publishes,
-        // processFilePlay owns the sound.  sourcePosAt collapses to align-only (or
-        // linear); the pitchMap/pitchOrigin decode branch is now runtime-dead (a
-        // follow-up removes it -- left in place here to keep this fix minimal).
-        const bool pitchActive = false;
-        const bool wantWarp    = alignActive || pitchActive;
+        // pitch are ALWAYS baked into the cache -- never the realtime file-read
+        // warp.  A not-yet-baked edit plays DRY (raw) through the async bake
+        // window (the decode varispeed was the pre-bake "funky/rolling"
+        // artifact); once the cache publishes, processFilePlay owns the sound.
+        // QA-Fe2 item 3: the runtime-dead pitchMap/pitchOrigin decode branch is
+        // REMOVED -- sourcePosAt is align-only (or linear).
+        const bool wantWarp = alignActive;
 
         if (player.alignEngaged || wantWarp)
         {
@@ -1187,21 +1208,9 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                         : (juce::int64) std::llround (ae->snap->commonStartBeat
                                                       * secPerBeat * mSampleRate);
             }
-            juce::int64 pitchOrigin = 0;
-            if (ownEntry.pitchMap != nullptr)
-            {
-                // Same SR-origin convention as the align side.
-                pitchOrigin = ownEntry.pitchMap->commonStartSample;
-                if (std::abs (ownEntry.pitchMap->analysisSampleRate - mSampleRate) > 0.5)
-                    pitchOrigin = TempoMap::isActive()
-                        ? TempoMap::sampleAtBeat (ownEntry.pitchMap->commonStartBeat)
-                        : (juce::int64) std::llround (ownEntry.pitchMap->commonStartBeat
-                                                      * secPerBeat * mSampleRate);
-            }
-
-            // Composed SOURCE position (timeline-equivalent samples): align
-            // maps output time onto the edited performance; the pitch map
-            // then maps edited time onto the raw source.
+            // SOURCE position (timeline-equivalent samples): align maps output
+            // time onto the edited performance; pitch timing is baked, so no
+            // second stage exists (QA-Fe2 item 3).
             auto sourcePosAt = [&] (double timelineSample) -> double
             {
                 double x = timelineSample;
@@ -1211,13 +1220,6 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                     double d = g, dPerG = 1.0; float semis = 0.0f;
                     ae->snap->lookupAtGuideSec (g, d, dPerG, semis);
                     x = (double) alignOrigin + d * mSampleRate;
-                }
-                if (pitchActive)
-                {
-                    const double te = (x - (double) pitchOrigin) / mSampleRate;
-                    double u = te, dPerG = 1.0; float semis = 0.0f;
-                    ownEntry.pitchMap->lookupAtGuideSec (te, u, dPerG, semis);
-                    x = (double) pitchOrigin + u * mSampleRate;
                 }
                 return x;
             };
@@ -1833,8 +1835,6 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // QA-Fa recovery: capture each Vox engine's published align-warp
     // snapshot + chain/pitch gates ONCE per block (see mBlockAlignEntries).
     // Idle cost = kMaxVoxPages casts + atomic loads per BLOCK, not per clip.
-    // QA-Fd: also captures the page's pitch TIME map (edited -> source) so
-    // the decode layer can compose pitchMap(alignMap(t)) per clip.
     for (int vi = 0; vi < kMaxVoxPages; ++vi)
     {
         auto& e = mBlockAlignEntries[(size_t) vi];
@@ -1849,9 +1849,6 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 e.pitchOn   = vp->isAlignPitchOn();
                 e.transpose = vp->alignTransposeSemis();
             }
-            e.pitchMap     = vp->mPitch.loadTimeMapSnapshot();
-            e.pitchChainOn = vp->isPitchEditChainOn();
-            e.pitchBaked   = vp->mPitch.hasBakedCache();
         }
     }
 
@@ -2741,6 +2738,12 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
         const float  metroVol  = mMetro.volume.load(std::memory_order_relaxed);
         const int    sndType   = mMetro.soundType.load(std::memory_order_relaxed);
         const float  twoPi     = juce::MathConstants<float>::twoPi;
+        // QA-Fe2 PDC: this buffer's mix content is totalLatencySamples late
+        // vs the transport clock (bus + master compensation), so every click
+        // defers by the same amount to land ON the music instead of leading
+        // it by the full PDC.
+        const int    pdcSamples = juce::jmax (0,
+            mVibeGraph.totalLatencySamples.load (std::memory_order_relaxed));
 
         // Helper: fire one click burst of appropriate duration for sound type
         auto triggerClick = [&](bool accent)
@@ -2807,8 +2810,11 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
         if (!mMetro.countInWasActive && ciActive) {
             mMetro.countInPhase      = 0.0;
             mMetro.lastBeatFloor     = -99999.0;
-            mMetro.countInBeatsFired = 1;
-            triggerClick(true);   // Beat 1 (always accented) - fires at sample 0.
+            mMetro.countInBeatsFired = 0;
+            // QA-Fe2 PDC: defer the WHOLE count-in by the current PDC so the
+            // interval from its last click into the first transport click
+            // stays exactly one beat (the transport clicks defer below).
+            mMetro.countInDelaySamp  = pdcSamples;
         }
         mMetro.countInWasActive = ciActive;
 
@@ -2824,14 +2830,28 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                 : 4;
             for (int s = 0; s < numSamples; ++s)
             {
-                double prevPhase = mMetro.countInPhase;
-                mMetro.countInPhase += bps;
-                if ((long long)mMetro.countInPhase > (long long)prevPhase)
+                if (mMetro.countInDelaySamp > 0)
                 {
-                    // Crossing into integer N means beat (N+1).  countInBeatsFired
-                    // tracks how many beats have fired so far.
-                    ++mMetro.countInBeatsFired;
-                    triggerClick((mMetro.countInBeatsFired - 1) % countInBeatsPerBar == 0);
+                    --mMetro.countInDelaySamp;
+                }
+                else
+                {
+                    // D-5 semantics preserved: beat 1 fires immediately once
+                    // the PDC deferral elapses (was: on the rising edge).
+                    if (mMetro.countInBeatsFired == 0)
+                    {
+                        mMetro.countInBeatsFired = 1;
+                        triggerClick(true);
+                    }
+                    double prevPhase = mMetro.countInPhase;
+                    mMetro.countInPhase += bps;
+                    if ((long long)mMetro.countInPhase > (long long)prevPhase)
+                    {
+                        // Crossing into integer N means beat (N+1).  countInBeatsFired
+                        // tracks how many beats have fired so far.
+                        ++mMetro.countInBeatsFired;
+                        triggerClick((mMetro.countInBeatsFired - 1) % countInBeatsPerBar == 0);
+                    }
                 }
                 float s0 = synthClick();
                 for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
@@ -2844,6 +2864,7 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
         }
 
         // ── Transport-locked metro (runs while playing, count-in inactive, metro enabled) ───
+        bool transportMetroRan = false;
         if (!ciActive && mMetro.enabled.load(std::memory_order_relaxed))
         {
             if (auto pi = getPlayHead() ? getPlayHead()->getPosition()
@@ -2851,6 +2872,7 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
             {
                 if (pi->getIsPlaying())
                 {
+                    transportMetroRan = true;
                     const double bpmV = pi->getBpm().orFallback(120.0);
                     const double bps  = juce::jmax(1e-6, bpmV / (60.0 * mSampleRate));
                     const double bs0  = pi->getPpqPosition().orFallback(0.0);
@@ -2868,12 +2890,18 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                     // (one per block is the realistic case) into constant-
                     // tempo spans instead of one linear sweep.  Fallback = the
                     // pre-map single span.
+                    // QA-Fe2 PDC: the grid derives from the DELAYED clock
+                    // (transport minus pdcSamples).  TempoMap extrapolates
+                    // segment 0 linearly below sample 0, so the sub-zero
+                    // region right after a song-top start stays exact; clicks
+                    // for negative beats are suppressed in the loop.
                     struct MetroSpan { int s0; int s1; double beat0; double bps; };
                     MetroSpan spans[2];
                     int nSpans = 0;
                     if (TempoMap::isActive())
                     {
-                        const int64_t smp0 = pi->getTimeInSamples().orFallback((int64_t) 0);
+                        const int64_t smp0 = pi->getTimeInSamples().orFallback((int64_t) 0)
+                                             - (int64_t) pdcSamples;
                         const int64_t bnd  = TempoMap::nextBoundaryAfter(smp0);
                         const int cut = (bnd > smp0 && bnd < smp0 + numSamples)
                                           ? (int)(bnd - smp0) : numSamples;
@@ -2885,8 +2913,17 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                     }
                     else
                     {
-                        spans[nSpans++] = { 0, numSamples, bs0, bps };
+                        spans[nSpans++] = { 0, numSamples, bs0 - pdcSamples * bps, bps };
                     }
+
+                    // QA-Fe2 PDC: play-start edge seeds the grid one below the
+                    // NEXT crossing, so a start exactly ON a beat (pdc 0,
+                    // count-in handoff) still clicks at sample 0 while the
+                    // deferral can't fire a stale catch-up click mid-beat --
+                    // the first click otherwise lands on the next real
+                    // crossing.
+                    if (!mMetro.transportWasPlaying)
+                        mMetro.lastBeatFloor = std::ceil(spans[0].beat0) - 1.0;
 
                     for (int sp = 0; sp < nSpans; ++sp)
                     for (int s = spans[sp].s0; s < spans[sp].s1; ++s)
@@ -2899,7 +2936,8 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                         {
                             mMetro.lastBeatFloor = beatFloor;
                             long long bf = (long long)std::round(beatFloor);
-                            triggerClick ((((bf % accentEvery) + accentEvery) % accentEvery) == 0);
+                            if (bf >= 0)   // sub-zero = the first pdcSamples after a song-top start
+                                triggerClick ((((bf % accentEvery) + accentEvery) % accentEvery) == 0);
                         }
                         float s0 = synthClick();
                         for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
@@ -2908,6 +2946,7 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                 }
             }
         }
+        mMetro.transportWasPlaying = transportMetroRan;
     }
 }
 
@@ -4144,11 +4183,15 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
           MixerChannelIds::kInstBase, "Inst", /*isVox=*/false);
 
     // No strips armed -> fall back to master output capture.
+    // QA-Fe2 PDC: the master tap is post-compensation, so the capture runs
+    // totalLatencySamples late vs the beat grid -- trim that many leading
+    // samples so the WAV lands on the grid like the strip recorders do.
     if (mStripRecorders.empty())
     {
         auto file = samplesFolder.getChildFile (
             projectName + " - Master - " + ts + ".wav");
-        mMasterRecorder.startRecording (file, mSampleRate, 2);
+        mMasterRecorder.startRecording (file, mSampleRate, 2,
+            juce::jmax (0, mVibeGraph.totalLatencySamples.load (std::memory_order_relaxed)));
     }
 }
 
@@ -4430,6 +4473,21 @@ void VibeSynthProcessor::serializeProject (juce::XmlElement& root)
             root.addChildElement (pmXml.release());
     }
 
+    // QA-Fe2: De-noise profiles (raw + corrector domain per recording base
+    // name) -- standalone-only project data, same placement rule as
+    // PatternManager (not in the VST blob).
+    if (! mDenoiseProfiles.empty())
+    {
+        auto* dn = root.createNewChildElement ("DenoiseProfiles");
+        for (const auto& [base, pair] : mDenoiseProfiles)
+        {
+            auto* e = dn->createNewChildElement ("Profile");
+            e->setAttribute ("base", base);
+            if (pair.first.isValid())  e->setAttribute ("raw", pair.first.toBase64());
+            if (pair.second.isValid()) e->setAttribute ("wet", pair.second.toBase64());
+        }
+    }
+
     // P1+P2 persistence (2026-04-24): let StandaloneEditor append its tab +
     // engine state under a <UIState> child.  Callback is null in plugin /
     // headless contexts - that's fine; the project just omits UI state.
@@ -4588,6 +4646,19 @@ void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
                 mPatternManager->fromValueTree (pmTree);
         }
     }
+
+    // QA-Fe2: De-noise profiles.  Cleared unconditionally so a project
+    // without the node never inherits the previous project's rooms.
+    mDenoiseProfiles.clear();
+    if (auto* dn = root.getChildByName ("DenoiseProfiles"))
+        for (auto* e : dn->getChildWithTagNameIterator ("Profile"))
+        {
+            const juce::String base = e->getStringAttribute ("base");
+            if (base.isEmpty()) continue;
+            mDenoiseProfiles[base] = {
+                DenoiseProfile::fromBase64 (e->getStringAttribute ("raw")),
+                DenoiseProfile::fromBase64 (e->getStringAttribute ("wet")) };
+        }
 
     // P1+P2 persistence: fire after main state is loaded so the editor's
     // engine-processor creation can inherit any APVTS-driven defaults.
@@ -5918,14 +5989,17 @@ void VibeSynthProcessor::addLiveInputParams (const juce::String& prefix)
     // QA-Fe Task 5: live-monitor mode (Vox only -- the realtime pitch corrector
     // is a vocal stage).  Right-click the strip's Listen LED to choose:
     //   0 = True Dry (bare voice, no corrector + no chain)
-    //   1 = Bypass Pitch Corrector (chain character, no ~48 ms correction) -- DEFAULT
-    //   2 = With Effect (full processed chain incl. the corrector's ~48 ms).
+    //   1 = Bypass Pitch Corrector (chain character, no correction)
+    //   2 = With Effect (full processed chain incl. correction) -- DEFAULT
     // The RECORDED take is corrected in every mode (the WET tap is separate).
+    // QA-Fe2 docket 2a (Jeff): default flipped 1 -> 2 -- With-Effect
+    // monitoring now runs the ~12 ms time-domain monitor shifter instead of
+    // the ~48 ms R3 stream, so corrected live monitoring ships on by default.
     if (prefix.startsWith ("mixer_vox_")
         && apvts.getParameter (prefix + "_monitorMode") == nullptr)
         apvts.createAndAddParameter (std::make_unique<juce::AudioParameterInt> (
             VID(prefix + "_monitorMode"),
-            prefix + " Monitor Mode", 0, 2, 1));
+            prefix + " Monitor Mode", 0, 2, 2));
 }
 
 void VibeSynthProcessor::setInputChannelName (const juce::String& stripPrefix,

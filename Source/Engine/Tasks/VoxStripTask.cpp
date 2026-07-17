@@ -45,10 +45,11 @@ void VoxStripTask::run()
     const auto* idxP    = apvts.getRawParameterValue (mPrefix + "_inputChannelIdx");
     const auto* stereoP = apvts.getRawParameterValue (mPrefix + "_inputChannelStereo");
     const auto* listenP = apvts.getRawParameterValue (mPrefix + "_listen");
-    // QA-Fe Task 5: live-monitor mode (0 TrueDry / 1 BypassCorr [default] /
-    // 2 WithEffect); default 1 when the param is absent (Inst strips / old state).
+    // QA-Fe Task 5: live-monitor mode (0 TrueDry / 1 BypassCorr / 2 WithEffect
+    // [default since QA-Fe2 docket 2a -- the ~12 ms monitor shifter]); default
+    // 2 when the param is absent (Inst strips / old state).
     const auto* monModeP = apvts.getRawParameterValue (mPrefix + "_monitorMode");
-    const int   monitorMode = (monModeP != nullptr) ? (int) monModeP->load() : 1;
+    const int   monitorMode = (monModeP != nullptr) ? (int) monModeP->load() : 2;
 
     const int  chIdx    = (idxP != nullptr) ? (int) idxP->load() : -1;
     const bool isStereo = (stereoP != nullptr) && stereoP->load() > 0.5f;
@@ -199,17 +200,20 @@ void VoxStripTask::run()
         }
     }
 
-    // ── Sidechain push (pull from SC predecessor outputs) ─────────────────────
+    // ── Sidechain fill + push ─────────────────────────────────────────────────
+    // QA-Fe2 SC delay-match: fill + delay-match the strip's SC receive
+    // buffers FIRST (pre-compensation source taps via the pull helper), then
+    // hand those SAME aligned buffers to the engine -- engine-level SC and
+    // rack/preEq/postEq SC read identical keys.  (Pre-QA-Fe2 the engine got
+    // raw post-compensation predecessor outputs and the pull ran after the
+    // engine render.)
+    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
     if (mScEngine != nullptr)
     {
+        const VibeGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
         juce::AudioBuffer<float>* scBufs[VibeGraph::kMaxScRecvSlots] = {};
-        for (const auto& link : mPredecessors)
-        {
-            if (! link.isSc) continue;
-            if (link.scSlot < 0 || link.scSlot >= VibeGraph::kMaxScRecvSlots) continue;
-            if (link.source == nullptr || link.source->mOutputBuffer == nullptr) continue;
-            scBufs[link.scSlot] = link.source->mOutputBuffer;
-        }
+        for (int i = 0; i < VibeGraph::kMaxScRecvSlots; ++i)
+            scBufs[i] = scArr[(size_t) i];
         mScEngine->setSidechainBuffers (scBufs, VibeGraph::kMaxScRecvSlots);
     }
 
@@ -235,11 +239,6 @@ void VoxStripTask::run()
                 blockView.addFrom (c, 0, mEngineScratch, c, 0, n);
         }
     }
-
-    // 2026-05-07 (Batch 9c follow-up): SC accumulator population (live-input
-    // branch).  Mirrors the FilePlay branch above + the EngineInsertTask
-    // pattern.
-    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
     mGraph->processInsert (VibeGraph::InsertKind::Vox, mIndex,
                            blockView, mCtx->bpm, mCtx->anySolo);

@@ -446,9 +446,9 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 // VocalChainPanel - H-6c (2026-05-01)
 // ─────────────────────────────────────────────────────────────────────────────
-// Hosts 4 SlotComponents bound to BaySickVocalProcessor's mVocalChainRack.
-// Slots are locked (cannot be swapped / removed / reordered) -- they're
-// pinned to: De-esser / Compressor / Saturation / Limiter in that order.
+// Hosts 6 SlotComponents bound to BaySickVocalProcessor's mVocalChainRack
+// (QA-Fe2).  Slots are locked (cannot be swapped / removed / reordered) --
+// pinned to: Gate / De-reverb / De-esser / Compressor / Saturation / Limiter.
 // SlotComponent's bypass + sidechain dropdown still work normally.
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickVocalEditor::VocalChainPanel : public juce::Component
@@ -466,13 +466,13 @@ public:
 
             // H-7 (2026-05-01): Mode dropdown's onModeChanged callback writes
             // to APVTS so pushApvtsToDsp's per-block push stays consistent
-            // with the user-picked Mode.  Compressor at slot 1 -> bsv_comp_type;
-            // Saturation at slot 2 -> bsv_sat_type.
+            // with the user-picked Mode.  QA-Fe2 re-slot: Compressor at slot 3
+            // -> bsv_comp_type; Saturation at slot 4 -> bsv_sat_type.
             sc->onModeChanged = [this] (int slotIdx, int newType)
             {
                 const char* paramId = nullptr;
-                if      (slotIdx == 1) paramId = "bsv_comp_type";
-                else if (slotIdx == 2) paramId = "bsv_sat_type";
+                if      (slotIdx == 3) paramId = "bsv_comp_type";
+                else if (slotIdx == 4) paramId = "bsv_sat_type";
                 if (paramId == nullptr) return;
                 if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                                   mProc.apvts.getParameter (paramId)))
@@ -537,7 +537,7 @@ private:
         }
     }
 
-    static constexpr int kNumChainSlots = 4;
+    static constexpr int kNumChainSlots = 6;   // QA-Fe2: Gate + De-reverb added
 
     BaySickVocalProcessor& mProc;
     std::array<std::unique_ptr<SlotComponent>, kNumChainSlots> mSlots {};

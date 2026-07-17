@@ -891,12 +891,46 @@ juce::AudioBuffer<float> BaySickPitchDSP::bakeSpan (const float* mono, int numSa
         // sub-span render and is a no-op at spanStart==0.
         const double edDurSec = timeMap->guideSec.back();
         const int    outLen   = juce::jmax (1, (int) std::llround (edDurSec * sr));
+
+        // QA-Fe2 item 4 (segmentation-aware resample): a detach cut is encoded
+        // as a ~1 ms guide-side ramp whose dub side jumps (backward, or far
+        // beyond any legal warp ratio).  The Hermite lookup SWEEPS through
+        // every intermediate source position across that ramp, so srcPos and
+        // the envelope reads pick up unrelated notes' pitch/formant/gain right
+        // at the cut.  Snap samples inside a ramp to the nearest side -- the
+        // shifters then see a clean instantaneous step (their backward-step
+        // detach detection fires at a precise sample instead of mid-sweep).
+        struct CutRamp { double g0, g1, d0, d1; };
+        std::vector<CutRamp> cuts;
+        for (size_t i = 0; i + 1 < timeMap->guideSec.size(); ++i)
+        {
+            const double dg = timeMap->guideSec[i + 1] - timeMap->guideSec[i];
+            const double dd = timeMap->dubSec[i + 1]   - timeMap->dubSec[i];
+            // <= 2 ms guide window with a backward or > 50 ms forward dub jump
+            // cannot be a legal stretch (ratio rails cap at 3:1) -> detach ramp.
+            if (dg <= 2.0e-3 && (dd < -1.0e-9 || dd > 0.05))
+                cuts.push_back ({ timeMap->guideSec[i], timeMap->guideSec[i + 1],
+                                  timeMap->dubSec[i],   timeMap->dubSec[i + 1] });
+        }
+        auto snapAcrossCut = [&cuts] (double g, double& dub) noexcept
+        {
+            for (const auto& c : cuts)
+                if (g > c.g0 && g < c.g1)
+                {
+                    dub = (g - c.g0 <= c.g1 - g) ? c.d0 : c.d1;
+                    return;
+                }
+        };
+
         std::vector<double> srcPos  ((size_t) outLen);
         std::vector<float>  ratioEd ((size_t) outLen), formEd ((size_t) outLen), gainEd ((size_t) outLen);
         for (int j = 0; j < outLen; ++j)
         {
             double dubSec, slope; float semis;
-            timeMap->lookupAtGuideSec ((double) j / sr, dubSec, slope, semis);
+            const double gSec = (double) j / sr;
+            timeMap->lookupAtGuideSec (gSec, dubSec, slope, semis);
+            if (! cuts.empty())
+                snapAcrossCut (gSec, dubSec);
             const double si = dubSec * sr - (double) spanStart;  // span-relative source index
             srcPos [(size_t) j] = si;
             ratioEd[(size_t) j] = lerpClamp (ratio, si);

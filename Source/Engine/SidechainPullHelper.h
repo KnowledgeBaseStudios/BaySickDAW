@@ -43,9 +43,21 @@ inline void pullSidechainPredecessorsToGraph(
         auto* recv = graph.getScRecvBuffer (channelId, link.scSlot);
         if (recv == nullptr) continue;
 
-        const auto& src = *link.source->mOutputBuffer;
-        const int nc = juce::jmin (src.getNumChannels(), recv->getNumChannels());
+        // QA-Fe2 SC delay-match (docket 1b): prefer the source's
+        // PRE-compensation tap so alignment delays never leak into keys;
+        // fall back to the post-everything output for tap-less sources
+        // (Master, or a stale un-armed edge).
+        const juce::AudioBuffer<float>* srcBuf =
+            graph.getScSourceTap (link.source->channelId);
+        if (srcBuf == nullptr) srcBuf = link.source->mOutputBuffer;
+
+        const int nc = juce::jmin (srcBuf->getNumChannels(), recv->getNumChannels());
         for (int c = 0; c < nc; ++c)
-            recv->copyFrom (c, 0, src, c, 0, numSamples);
+            recv->copyFrom (c, 0, *srcBuf, c, 0,
+                            juce::jmin (numSamples, srcBuf->getNumSamples()));
+
+        // Per-(consumer, slot) key alignment: delays the key to meet a LATE
+        // consumer point (values solved by updateBusLatencies).
+        graph.applyScRecvDelay (channelId, link.scSlot, numSamples);
     }
 }

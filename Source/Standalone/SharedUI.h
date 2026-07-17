@@ -1614,6 +1614,40 @@ private:
     static constexpr float kSmoothAlpha = 0.35f;
 };
 
+// ── GateGRMeter ──────────────────────────────────────────────────────────────
+// QA-Fe2 (2026-07-16): gate-specific sibling of GRMeter.  A gate's attenuation
+// legitimately swings to -80 dB (closed is its RESTING state, not a warning),
+// so the compressor meter's 0..-20 scale pins and its deep-end red zone reads
+// backwards.  Same chassis (chrome bezel / cream plate / needle / LCD), but:
+// scale 0..-80, and the red zone sits at the 0 end (owner call: red toward 0,
+// never at the closed end).
+class GateGRMeter : public juce::Component,
+                    public juce::SettableTooltipClient,
+                    private juce::Timer
+{
+public:
+    GateGRMeter();
+    ~GateGRMeter() override { stopTimer(); }
+
+    // Push live attenuation in dB (0 = open / passing, negative = gating).
+    // Thread-safe; store-only on the writer side.
+    void setGainReduction(float grDb);
+
+    void paint(juce::Graphics&) override;
+
+private:
+    std::atomic<float> mTargetDb  { 0.0f };
+    float              mDisplayDb { 0.0f };
+
+    void timerCallback() override;
+
+    static constexpr float kMinDb       = -80.0f;  // leftmost (fully closed)
+    static constexpr float kMaxDb       =   0.0f;  // rightmost (open, rest)
+    static constexpr float kRedDb       =  -6.0f;  // red zone: kRedDb..0 (open end)
+    static constexpr int   kTimerHz     = 60;
+    static constexpr float kSmoothAlpha = 0.35f;
+};
+
 // ── ColoredSectionLAF ────────────────────────────────────────────────────────
 // LookAndFeel override for ComboBox popup menus that draws section headings
 // as colored horizontal lines. Encode the color in the heading string using

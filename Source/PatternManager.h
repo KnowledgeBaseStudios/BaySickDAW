@@ -588,6 +588,21 @@ public:
     void                 setAudioLibraryClipDefaults (int idx, float pitch,
                                                       float bpm, bool stretchMode);
 
+    // ── QA-Fe2 browser groups ────────────────────────────────────────────
+    juce::String         getAudioLibraryGroup (int idx) const
+        { return (idx >= 0 && idx < (int) mAudioLibrary.size()) ? mAudioLibrary[idx].groupName : juce::String(); }
+    void                 setAudioLibraryGroup (int idx, const juce::String& g)
+        { if (idx >= 0 && idx < (int) mAudioLibrary.size()) mAudioLibrary[idx].groupName = g; }
+    void                 addManualAudioGroup    (int category, const juce::String& name);
+    void                 renameManualAudioGroup (int category, const juce::String& oldName,
+                                                 const juce::String& newName);
+    juce::StringArray    getManualAudioGroups   (int category) const;
+    // Rewrites a stored audio path EVERYWHERE it is referenced: library
+    // entries + every ArrangementBlock.audioFilePath in every pattern.
+    // Returns the number of references rewritten.  (Recording-group rename.)
+    int                  replaceAudioPath (const juce::String& oldPath,
+                                           const juce::String& newPath);
+
     // ── Automation template library (persists independently of blocks) ───
     void                    addAutomationTemplate   (const AutomationLane& lane);
     void                    removeAutomationTemplate(int idx);
@@ -687,7 +702,15 @@ private:
         float pitchSemitones   { 0.f };
         float originalBPM      { 120.f };
         bool  stretchMode      { true };
+        // QA-Fe2: manual browser-group membership ("" = ungrouped; recording
+        // takes auto-group by base name in the tree, this overrides).
+        juce::String groupName;
     };
     std::vector<AudioLibraryEntry> mAudioLibrary;
     std::vector<AutomationLane>    mAutomationTemplates;
+
+    // QA-Fe2: user-created (possibly empty) browser groups, per category
+    // (0 = Clips, 1 = Vox, 2 = Inst).  Auto recording-groups are NOT stored
+    // here -- they are derived from take-tag file names at tree build.
+    std::vector<std::pair<int, juce::String>> mManualAudioGroups;
 };

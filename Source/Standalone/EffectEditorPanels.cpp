@@ -13,6 +13,8 @@
 #include "../DSP/TapeDSP.h"
 #include "../DSP/LimiterDSP.h"
 #include "../DSP/DeEsserDSP.h"
+#include "../DSP/GateDSP.h"      // QA-Fe2 vocal-chain Gate
+#include "../DSP/DeReverbDSP.h"  // QA-Fe2 vocal-chain De-reverb
 // I-5 (2026-05-02): Harmonics drive pedals batch -- 4 new DSP classes.
 #include "../DSP/BluesDriveStyleDSP.h"
 #include "../DSP/DistortionStyleDSP.h"
@@ -6283,6 +6285,178 @@ struct ReverbPedalPanel : public EditorPanelBase
     }
 };
 
+// ── GatePanel - QA-Fe2 (2026-07-16) ──────────────────────────────────────────
+// Vocal-chain channel gate (slot 0).  Cream Dynamics family.
+struct GatePanel : public EditorPanelBase, private juce::Timer
+{
+    GateDSP* mDsp { nullptr };
+    std::unique_ptr<GateGRMeter> grMeter;   // gate-scaled meter (0..-80, red at the open end)
+
+    explicit GatePanel (GateDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&DynamicsLAF::get());
+
+        buildKnobs (*this, knobs, {
+            { "Thresh",  -80.f,    0.f, -80.f, 0.5f, "Gate threshold (dB). Signal below closes the gate; default -80 = fully open" },
+            { "Range",   -80.f,    0.f, -60.f, 0.5f, "Attenuation when closed (dB)" },
+            { "Attack",    0.1f, 100.f,   1.f, 0.1f, "Opening speed (ms)" },
+            { "Hold",      0.f,  500.f,  50.f, 1.f,  "Time held open after the signal drops (ms)" },
+            { "Release",   5.f, 2000.f, 100.f, 1.f,  "Closing speed (ms)" },
+        });
+        for (auto& k : knobs)
+            k->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
+
+        if (mDsp != nullptr)
+        {
+            knobs[0]->slider.setValue (mDsp->thresholdDb, juce::dontSendNotification);
+            knobs[1]->slider.setValue (mDsp->rangeDb,     juce::dontSendNotification);
+            knobs[2]->slider.setValue (mDsp->attackMs,    juce::dontSendNotification);
+            knobs[3]->slider.setValue (mDsp->holdMs,      juce::dontSendNotification);
+            knobs[4]->slider.setValue (mDsp->releaseMs,   juce::dontSendNotification);
+        }
+        knobs[0]->slider.onValueChange = [this] { if (mDsp) mDsp->setThresholdDb ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [this] { if (mDsp) mDsp->setRangeDb     ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [this] { if (mDsp) mDsp->setAttackMs    ((float) knobs[2]->slider.getValue()); };
+        knobs[3]->slider.onValueChange = [this] { if (mDsp) mDsp->setHoldMs      ((float) knobs[3]->slider.getValue()); };
+        knobs[4]->slider.onValueChange = [this] { if (mDsp) mDsp->setReleaseMs   ((float) knobs[4]->slider.getValue()); };
+
+        grMeter = std::make_unique<GateGRMeter>();
+        addAndMakeVisible (*grMeter);
+        startTimerHz (30);
+    }
+
+    ~GatePanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        // LA-2A cream/wood plate -- identical to De-esser/Compressor/TS.
+        DynamicsLAF::paintLA2APanel (g, getLocalBounds());
+    }
+
+    void timerCallback() override
+    {
+        if (grMeter && mDsp)
+            grMeter->setGainReduction (mDsp->getGainReductionDb());
+    }
+
+    void bindToApvts (juce::AudioProcessorValueTreeState& apvts,
+                      const juce::String& prefix) override
+    {
+        auto bindSlider = [&] (juce::Slider& s, const char* suffix)
+        {
+            mChainSliderAtts.push_back (std::make_unique<TaggedSliderAttachment> (
+                apvts, prefix + suffix, s));
+        };
+        bindSlider (knobs[0]->slider, "gate_threshold");
+        bindSlider (knobs[1]->slider, "gate_range");
+        bindSlider (knobs[2]->slider, "gate_attack");
+        bindSlider (knobs[3]->slider, "gate_hold");
+        bindSlider (knobs[4]->slider, "gate_release");
+    }
+    std::vector<std::unique_ptr<TaggedSliderAttachment>> mChainSliderAtts;
+
+    void resized() override
+    {
+        // De-esser layout rhythm: right-edge dbfs meter + output knob, then
+        // the readout slot, then one knob row.
+        auto b = getLocalBounds().reduced (4, 4);
+        if (grMeter)
+        {
+            const int gw = juce::jmin (96, b.getHeight() + 8);
+            grMeter->setBounds (b.removeFromLeft (gw).reduced (1, 2));
+            b.removeFromLeft (4);
+        }
+        dbfsOut      ->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (2);
+        outputVolKnob->setBounds (b.removeFromRight (kKnobSz).withSizeKeepingCentre (kKnobSz, kKnobSz));
+        b.removeFromRight (4);
+        std::vector<VKnob*> row;
+        for (auto& k : knobs) row.push_back (k.get());
+        layoutKnobsH (b, row, kKnobSz);
+    }
+};
+
+// ── DeReverbPanel - QA-Fe2 (2026-07-16) ──────────────────────────────────────
+// Vocal-chain De-reverb (slot 1).  Reduction / Tail / Mix + suppression readout.
+struct DeReverbPanel : public EditorPanelBase, private juce::Timer
+{
+    DeReverbDSP* mDsp { nullptr };
+    std::unique_ptr<GRMeter> grMeter;   // real GR asset, matches Compressor family
+
+    explicit DeReverbPanel (DeReverbDSP* dsp) : mDsp (dsp)
+    {
+        setLookAndFeel (&DynamicsLAF::get());
+
+        buildKnobs (*this, knobs, {
+            { "Reduce", 0.f,  100.f,  50.f, 1.f, "How hard the room tail is suppressed (%)" },
+            { "Tail",  100.f, 1000.f, 400.f, 5.f, "Modeled reverb tail length (ms). Match the room: bigger room = longer" },
+            { "Mix",    0.f,  100.f, 100.f, 1.f, "Dry/wet blend (%)" },
+        });
+        for (auto& k : knobs)
+            k->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
+
+        if (mDsp != nullptr)
+        {
+            knobs[0]->slider.setValue (mDsp->reductionPct, juce::dontSendNotification);
+            knobs[1]->slider.setValue (mDsp->tailMs,       juce::dontSendNotification);
+            knobs[2]->slider.setValue (mDsp->mixPct,       juce::dontSendNotification);
+        }
+        knobs[0]->slider.onValueChange = [this] { if (mDsp) mDsp->setReductionPct ((float) knobs[0]->slider.getValue()); };
+        knobs[1]->slider.onValueChange = [this] { if (mDsp) mDsp->setTailMs       ((float) knobs[1]->slider.getValue()); };
+        knobs[2]->slider.onValueChange = [this] { if (mDsp) mDsp->setMixPct       ((float) knobs[2]->slider.getValue()); };
+
+        grMeter = std::make_unique<GRMeter>();
+        addAndMakeVisible (*grMeter);
+        startTimerHz (30);
+    }
+
+    ~DeReverbPanel() override { setLookAndFeel (nullptr); }
+
+    void paint (juce::Graphics& g) override
+    {
+        // LA-2A cream/wood plate -- identical to De-esser/Compressor/TS.
+        DynamicsLAF::paintLA2APanel (g, getLocalBounds());
+    }
+
+    void timerCallback() override
+    {
+        if (grMeter && mDsp)
+            grMeter->setGainReduction (mDsp->getGainReductionDb());
+    }
+
+    void bindToApvts (juce::AudioProcessorValueTreeState& apvts,
+                      const juce::String& prefix) override
+    {
+        auto bindSlider = [&] (juce::Slider& s, const char* suffix)
+        {
+            mChainSliderAtts.push_back (std::make_unique<TaggedSliderAttachment> (
+                apvts, prefix + suffix, s));
+        };
+        bindSlider (knobs[0]->slider, "dereverb_reduction");
+        bindSlider (knobs[1]->slider, "dereverb_tail");
+        bindSlider (knobs[2]->slider, "dereverb_mix");
+    }
+    std::vector<std::unique_ptr<TaggedSliderAttachment>> mChainSliderAtts;
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (4, 4);
+        if (grMeter)
+        {
+            const int gw = juce::jmin (96, b.getHeight() + 8);
+            grMeter->setBounds (b.removeFromLeft (gw).reduced (1, 2));
+            b.removeFromLeft (4);
+        }
+        dbfsOut      ->setBounds (b.removeFromRight (32).reduced (1, 2));
+        b.removeFromRight (2);
+        outputVolKnob->setBounds (b.removeFromRight (kKnobSz).withSizeKeepingCentre (kKnobSz, kKnobSz));
+        b.removeFromRight (4);
+        std::vector<VKnob*> row;
+        for (auto& k : knobs) row.push_back (k.get());
+        layoutKnobsH (b, row, kKnobSz);
+    }
+};
+
 std::unique_ptr<juce::Component> createEffectEditor (DSPBase* effect,
                                                      EffectType type,
                                                      EditorPanelBase::PanelMode mode)
@@ -6428,6 +6602,12 @@ std::unique_ptr<juce::Component> createEffectEditor (DSPBase* effect,
             break;
         case EffectType::DeEsser:
             panel = std::make_unique<DeEsserPanel>       (static_cast<DeEsserDSP*>       (effect));
+            break;
+        case EffectType::Gate:                                                       // QA-Fe2
+            panel = std::make_unique<GatePanel>          (static_cast<GateDSP*>          (effect));
+            break;
+        case EffectType::DeReverb:                                                   // QA-Fe2
+            panel = std::make_unique<DeReverbPanel>      (static_cast<DeReverbDSP*>      (effect));
             break;
 
         // I-5 (2026-05-02): BaySickPedals Harmonics drive pedals batch panels.

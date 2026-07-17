@@ -1653,6 +1653,15 @@ needed to find what you should pull up to review the work.
 - Dependencies: QA-Fd code-complete (2026-07-11). UNBLOCKS the G2 boundary smoke (halted at Part 4 by the pitch editor); nothing downstream starts until QA-Fe's smoke passes.
 - Effort: large — three engine integrations + real-time swap + UI.
 
+#### **QA-Fe2: Vocal Cleanup — De-noise / De-reverb / Gate / Browser Groups** *(NEW — inserted 2026-07-16 as the SEVENTH batch of G2, grown from the QA-Fe WORLD buzz/water investigation — see §9 fifty-ninth Forks entry)*
+**Plan file:** [`Plans & Specs/Batch Plans/gentle-scrubbing-otter.md`](Batch Plans/gentle-scrubbing-otter.md)
+- **Bucket:** Players, Effects, System Pages.
+- Items: the WORLD buzz/water root cause (the take's own noise layer re-rendered F0-gated by WORLD's synthesis; fix = clean the take, not the vocoder) generalized by Jeff into a user feature set: recording-time **De-noise** takes (dual-domain live learners from track-assignment on, DRY/WET CLEANED sibling files, Options > File Settings, Builder Grid Default section in the arm-LED picker, Regenerate at either strength from project-stored profiles), **Gate** + **De-reverb** vocal-chain stages (rack now 6/6 locked: Gate -> De-reverb -> De-esser -> Comp -> Sat -> Limiter; gate-scaled GR meter asset), Builder-browser **recording groups** (auto by take-tag + manual groups, group rename = disk rename w/ reference rewrite, drag-resizable panel), **WORLD-to-stock** (buzz-fix helpers deleted for good), and 5 close-out leftovers (pitch-editor gesture map rework incl. keybinds menu, highRes render-choice retirement, dead realtime pitch-decode branch deletion, detach-cut segmentation-aware resample, slice tune verified already-shipped).
+- **STATUS: code-complete 2026-07-16 (bulk-run — ONE close commit pending); Task 5 verification in progress; WORLD verdict = ships ("good enough"); closes the G2 boundary together with QA-Fe.**
+- Risk: medium — record-stop flow + browser tree are UI-heavy; two new DSP modules; mitigated by single-variable offline ear-ladders (De-noise constants ear-validated against Jeff's takes before any build).
+- Dependencies: QA-Fe (vendored engines + the bake seam).  The metronome/time-signature regression surfaced during this arc routed to G3 (see fifty-ninth Forks entry).
+- Effort: large — the biggest batch of the QA-Fe arc.
+
 ### Phase 4 — Builder + UX work
 
 #### **QA-G: Timeline Geometry**
@@ -2222,7 +2231,7 @@ records the same set so cross-doc grep stays consistent.
 **Bug-fix phases (1-5):**
 ```
 QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-Rules*********************************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-ClipPlayback************************************ → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-TransportDisplay************************************* → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
-   → QA-Fa → QA-Fb******** → QA-Fc******** → QA-Fd***************************************** → QA-Fe****************************************** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
+   → QA-Fa → QA-Fb******** → QA-Fc******** → QA-Fd***************************************** → QA-Fe****************************************** → QA-Fe2******************************************** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
    → QA-M → QA-Drum-Polish**** → QA-N → QA-OctavePedal******************************************* → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-ApvtsAutomation************************************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-UndoCoverage*************************************** → QA-DirtyFlag*******************
 ```
 
@@ -2359,6 +2368,15 @@ octave-down against the June octave research, reworks the pedal-mode editor UI
 (overlapping knobs; the rack view renders fine), and delivers low-latency live
 instrument monitoring (the ~48 ms library engines can't do it).  See §9
 fifty-eighth Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-Fe2 (Vocal Cleanup)** inserted 2026-07-16 as the
+SEVENTH batch of the G2 checkpoint group, after QA-Fe — grown directly from
+QA-Fe's WORLD buzz/water investigation (root cause: the take's own noise
+layer re-rendered F0-gated by WORLD's synthesis).  Ships De-noise recording
+takes, Gate + De-reverb vocal-chain stages, Builder-browser recording
+groups, WORLD-to-stock, and the arc's five deferred leftovers.  The G2
+boundary closes after QA-Fe + QA-Fe2 wrap together.  See §9 fifty-ninth
+Forks entry.
 
 \*\*\*\*\*\*\*\*\* **QA-Ea** inserted 2026-05-15 at the QA-E Task 6
 (DSP-09) pre-task spec-call.  Slotted **immediately after QA-E, before
@@ -5958,3 +5976,58 @@ from WinSparkle).
   decisions.
 - `libs/` — vendored `world`, `signalsmith-stretch`, `signalsmith-linear` (rubberband
   already present).
+
+### 2026-07-16 — QA-Fe2 (Vocal Cleanup) inserted as G2's seventh batch; WORLD arc closed; metronome regression routed to G3 (fifty-ninth Forks entry)
+
+**Trigger:** the QA-Fe WORLD buzz/water investigation (external Fable review +
+master-recording differential + component-solo ear ladders, full record in
+`Running Notes/prancy-crunching-bear.md` 2026-07-16 entries) proved the artifact
+was the take's own noise layer re-rendered F0-gated by WORLD's synthesis —
+denoising the take ("cleantake") was ear-validated as the fix.  Jeff generalized
+the fix into a feature batch instead of tabling WORLD.
+
+**G2 composition change:** G2 grows from six batches to **SEVEN — QA-Fe2 is its
+seventh** (2026-07-16).  Scope: De-noise recording takes (dual-domain live
+learners, CLEANED sibling files, File Settings, Builder Grid Default picker
+section, project-stored profiles + Regenerate), Gate + De-reverb vocal-chain
+stages (rack 6/6), Builder-browser recording groups + manual groups + panel
+resize, WORLD-to-stock (buzz-fix helpers deleted), and the arc's five deferred
+leftovers (gesture-map rework + keybinds, highRes retirement [!! option
+removal: the Pitch render dialog's no-op "High Resolution" button], dead
+realtime pitch-decode branch, detach-cut segmentation-aware resample, slice
+tune verified already-shipped).  WORLD verdict: SHIPS ("good enough" — Jeff,
+Task 5 endgame).  The G2 boundary closes after QA-Fe + QA-Fe2 wrap together.
+
+**Routed OUT (Jeff, 2026-07-16):** the metronome/time-signature regression
+(accent code unchanged; break upstream — currentPattern-vs-playhead, tsLocked,
+or load default) -> **bulk-run group G3** with the residual fix items, gated on
+Jeff's repro.  Claude's placement per Jeff's delegation (G3 = behavior-fix
+polish; G4 = mechanical sweeps, wrong shape).
+
+**Files:**
+- `Plans & Specs/Main Plan.md` — §5 QA-Fe2 entry after QA-Fe; §6 arrow gains
+  `-> QA-Fe2` (44 asterisks) + footnote; §9 this entry.
+- `Plans & Specs/Batch Plans/gentle-scrubbing-otter.md` — the QA-Fe2 plan
+  (approved 2026-07-16; running notes stay in prancy-crunching-bear.md by
+  deliberate pairing deviation recorded in the plan file).
+- `Plans & Specs/Batch Plans/swift-stampeding-caribou.md` — G2 composition +
+  the G3 metronome item.
+
+**Scope addition at close (2026-07-16 → 2026-07-17, Jeff's fix-everything
+directive):** the Task-6 /review-batch latency finding grew into a
+commissioned full-graph PDC audit
+(`Research Reports/pdc-coverage-audit-2026-07-16.md`); Jeff ordered EVERY
+audit gap fixed in-batch before the close.  Shipped: two-stage
+minimal-latency PDC solve (~130 per-insert mixer racks + the FX bus + the 7
+InstrChannelNode buses measured AND compensated — the latter 8 gained delay
+lines; preEq joined every sum; NAM/IR oversampling latency consumed via the
+vocal-chain getter + a new Inst engine-chain hook), metronome click deferral
+by total PDC (count-in defers as one unit; play-press catch-up click retired),
+master-recorder leading-trim, sidechain key delay-match (docket 1b, Jeff's
+pick: pre-compensation source taps + per-receive alignment delays; reverse
+direction stays physics-late pending per-edge graph PDC), and the
+corrected-live-monitor fix (docket 2a, Jeff's pick: new ~12 ms time-domain
+MonitorPitchShifter feeds the live monitor/mix path while WET recording keeps
+R3 quality; monitor-mode default flipped Bypass → With Effect, Jeff pick "a").
+Bus-node consolidation routed to Future State CL-301 (Jeff).  Full record:
+`Running Notes/prancy-crunching-bear.md` 2026-07-16/17 PDC entries.

@@ -515,6 +515,33 @@ private:
     // result, so Pause / Stop / Record-disarm all use the same path.
     void commitRecordingResult (const struct VibeSynthProcessor::RecordResult& res);
 
+    // ── QA-Fe2 De-noise (2026-07-16) ─────────────────────────────────────
+    // Take types written at record stop = File Settings checkboxes UNION the
+    // strip's Builder Grid Default (the arm-LED right-click picker section --
+    // replaced the arm popup, Jeff's Task-5 call).  -1 = auto rule (Wet when
+    // realtime correction is on, else Dry); a user pick LOCKS until the
+    // project closes (reset on project load, NOT on track reassignment).
+    enum TakeType { kTakeDry = 0, kTakeDryCleaned = 1, kTakeWet = 2, kTakeWetCleaned = 3 };
+    struct FileTakeSettings { bool dry, dryCleaned, wet, wetCleaned; int strength; };
+    FileTakeSettings readFileTakeSettings() const;
+    void showFileSettingsDialog();
+    void pollDenoiseState();
+    bool regenerateDenoise (const juce::String& relPath, int strength);
+    bool renameRecordingGroup (const juce::String& oldBase, const juce::String& newBase);
+
+    static constexpr int kDenoiseMaxVox = 6;    // == MixerChannelIds::kMaxVoxStrips (6)
+    std::array<int,   kDenoiseMaxVox> mVoxTakePick;       // ctor-filled -1
+    std::array<int,   kDenoiseMaxVox> mVoxInputIdxLast;   // ctor-filled -999
+    // QA-Fe2 PDC full-graph pass: last host-reported total; the poll re-solves
+    // the whole graph each tick and refreshes the report only on change.
+    int mPdcTotalLast { -1 };
+
+    struct DenoisePollTimer : public juce::Timer {
+        StandaloneEditor& owner;
+        explicit DenoisePollTimer(StandaloneEditor& o) : owner(o) {}
+        void timerCallback() override { owner.pollDenoiseState(); }
+    } mDenoisePollTimer { *this };
+
     // R5d follow-up (2026-04-24): after any project load / backup restore,
     // scan the arrangement for ClipType::Audio blocks and recreate the mixer
     // strip + InsertNode + routing edges for each row.  Without this, loaded

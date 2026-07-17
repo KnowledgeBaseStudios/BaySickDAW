@@ -2295,6 +2295,22 @@ void MixerPage::showInputChannelPicker(int channelId)
                         .setTicked (ticked));
     }
 
+    // QA-Fe2: Builder Grid Default (Vox strips only -- Inst records dry-only).
+    // Item IDs 300..303; tick shows the locked pick, no tick = auto rule.
+    const bool isVoxStrip = prefix.startsWith ("mixer_vox_");
+    if (isVoxStrip && onGetGridDefault != nullptr && onSetGridDefault != nullptr)
+    {
+        const int voxIdx = channelId - kVoxBase;
+        const int cur    = onGetGridDefault (voxIdx);
+        menu.addSeparator();
+        menu.addSectionHeader ("Builder Grid Default");
+        static const char* kTakeNames[4] = { "Dry", "Dry Cleaned", "Wet", "Wet Cleaned" };
+        for (int t = 0; t < 4; ++t)
+            menu.addItem (juce::PopupMenu::Item (kTakeNames[t])
+                            .setID (300 + t)
+                            .setTicked (cur == t));
+    }
+
     if (curArmed)
     {
         menu.addSeparator();
@@ -2306,6 +2322,15 @@ void MixerPage::showInputChannelPicker(int channelId)
         [self, prefix, channelId, names] (int chosen)
         {
             if (! self || chosen == 0) return;
+
+            // QA-Fe2: grid-default pick -- session lock, no channel change.
+            if (chosen >= 300 && chosen < 304)
+            {
+                if (self->onSetGridDefault)
+                    self->onSetGridDefault (channelId - MixerChannelIds::kVoxBase,
+                                            chosen - 300);
+                return;
+            }
 
             const bool disarm = (chosen == 99);
             // B2 + B1: 100..199 = mono on (chosen - 100); 200..299 = stereo

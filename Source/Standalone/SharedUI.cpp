@@ -7858,6 +7858,162 @@ void GRMeter::paint(juce::Graphics& g)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GateGRMeter - see SharedUI.h (QA-Fe2 gate sibling of GRMeter)
+// ─────────────────────────────────────────────────────────────────────────────
+GateGRMeter::GateGRMeter()
+{
+    setTooltip("Gate attenuation (dB)");
+    startTimerHz(kTimerHz);
+}
+
+void GateGRMeter::setGainReduction(float grDb)
+{
+    mTargetDb.store(juce::jlimit(kMinDb, kMaxDb, grDb), std::memory_order_relaxed);
+}
+
+void GateGRMeter::timerCallback()
+{
+    const float target = mTargetDb.load(std::memory_order_relaxed);
+    mDisplayDb += (target - mDisplayDb) * kSmoothAlpha;
+    repaint();
+}
+
+void GateGRMeter::paint(juce::Graphics& g)
+{
+    auto b = getLocalBounds().toFloat();
+
+    // Chrome bezel (identical chassis to GRMeter)
+    {
+        juce::ColourGradient bezel(
+            juce::Colour(0xffC0C0C0), b.getX(),      b.getY(),
+            juce::Colour(0xff505050), b.getRight(),  b.getBottom(), false);
+        bezel.addColour(0.5, juce::Colour(0xffA8A8A8));
+        g.setGradientFill(bezel);
+        g.fillRoundedRectangle(b, 5.f);
+    }
+    b = b.reduced(2.5f);
+
+    g.setColour(juce::Colour(0xffF2EEDC));
+    g.fillRoundedRectangle(b, 4.f);
+    juce::ColourGradient warm(juce::Colour(0xffFFFBEA), b.getCentreX(), b.getCentreY(),
+                              juce::Colour(0xffE6E0C8), b.getX(), b.getY(), true);
+    g.setGradientFill(warm);
+    g.fillRoundedRectangle(b.reduced(2.f), 3.f);
+
+    const float lcdH     = b.getHeight() * 0.18f;
+    const float arcAreaH = b.getHeight() - lcdH;
+    const float pivotX   = b.getCentreX();
+    const float pivotY   = b.getY() + arcAreaH + b.getHeight() * 0.02f;
+    const float needleLen = juce::jmin(b.getHeight() * 0.70f,
+                                        b.getWidth()  * 0.42f);
+
+    const float arcLeftAngle  = -juce::MathConstants<float>::pi * 0.333f;
+    const float arcRightAngle =  juce::MathConstants<float>::pi * 0.333f;
+
+    auto dbToAngle = [&](float db) {
+        float t = (db - kMinDb) / (kMaxDb - kMinDb);
+        t = juce::jlimit(0.f, 1.f, t);
+        return arcLeftAngle + t * (arcRightAngle - arcLeftAngle);
+    };
+    auto polarToXY = [&](float angle, float radius) {
+        return juce::Point<float>{ pivotX + radius * std::sin(angle),
+                                   pivotY - radius * std::cos(angle) };
+    };
+
+    // Red zone at the OPEN end (kRedDb..0): closed-is-normal for a gate, so
+    // the warning band lives toward 0 (owner call, 2026-07-16).
+    {
+        const float innerR = needleLen * 0.82f;
+        const float outerR = needleLen * 0.95f;
+        const float a0 = dbToAngle(kRedDb);
+        const float a1 = dbToAngle(kMaxDb);
+        juce::Path wedge;
+        const int steps = 12;
+        for (int i = 0; i <= steps; ++i) {
+            float a = a0 + (a1 - a0) * (float)i / steps;
+            auto  pt = polarToXY(a, outerR);
+            if (i == 0) wedge.startNewSubPath(pt.x, pt.y);
+            else        wedge.lineTo(pt.x, pt.y);
+        }
+        for (int i = steps; i >= 0; --i) {
+            float a = a0 + (a1 - a0) * (float)i / steps;
+            auto  pt = polarToXY(a, innerR);
+            wedge.lineTo(pt.x, pt.y);
+        }
+        wedge.closeSubPath();
+        g.setColour(juce::Colour(0xffFF2D2D));
+        g.fillPath(wedge);
+    }
+
+    // Tick marks + labels (0 at right, deepening left to -80)
+    struct Mark { float db; const char* label; };
+    static const Mark kMarks[] = {
+        {   0.f,  "0"  },
+        { -20.f, "20" },
+        { -40.f, "40" },
+        { -60.f, "60" },
+        { -80.f, "80" },
+    };
+    const float tickInner = needleLen * 0.86f;
+    const float tickOuter = needleLen * 0.97f;
+    const float labelR    = needleLen * 0.75f;
+
+    g.setFont(juce::Font(9.f, juce::Font::bold));
+    for (auto& m : kMarks) {
+        float a  = dbToAngle(m.db);
+        auto  p0 = polarToXY(a, tickInner);
+        auto  p1 = polarToXY(a, tickOuter);
+        g.setColour(juce::Colour(0xff202020));
+        g.drawLine(p0.x, p0.y, p1.x, p1.y, 1.8f);
+
+        auto  lp = polarToXY(a, labelR);
+        g.setColour(m.db >= kRedDb ? juce::Colour(0xffCC0000) : juce::Colour(0xff202020));
+        g.drawText(m.label, juce::Rectangle<float>(lp.x - 10.f, lp.y - 6.f, 20.f, 12.f),
+                   juce::Justification::centred, false);
+    }
+
+    // Needle + brass cap (identical to GRMeter)
+    {
+        const float a = dbToAngle(mDisplayDb);
+        auto        tip  = polarToXY(a, needleLen * 0.92f);
+        auto        base = juce::Point<float>(pivotX, pivotY);
+        juce::Path needle;
+        needle.startNewSubPath(base);
+        needle.lineTo(tip);
+        g.setColour(juce::Colour(0xffCC1A1A));
+        g.strokePath(needle, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved,
+                                                  juce::PathStrokeType::rounded));
+        g.setColour(juce::Colour(0xff8B6F3E));
+        g.fillEllipse(pivotX - 3.5f, pivotY - 3.5f, 7.f, 7.f);
+        g.setColour(juce::Colour(0xff3A2E1A));
+        g.drawEllipse(pivotX - 3.5f, pivotY - 3.5f, 7.f, 7.f, 1.f);
+    }
+
+    // Bottom LCD: "GATE dB" label + current reading
+    {
+        const float lcdTop = b.getBottom() - lcdH;
+        const float labelH = lcdH * 0.30f;
+        const float boxW   = b.getWidth() * 0.55f;
+        const float boxH   = lcdH * 0.55f;
+        const float boxX   = b.getCentreX() - boxW * 0.5f;
+        const float boxY   = lcdTop + labelH + 1.f;
+
+        g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 5.5f, juce::Font::plain));
+        g.setColour(juce::Colour(0xff555555));
+        g.drawText("GATE dB", juce::Rectangle<float>(b.getX(), lcdTop, b.getWidth(), labelH),
+                   juce::Justification::centredBottom, false);
+
+        g.setColour(juce::Colour(0xffD3D3D3));
+        g.fillRoundedRectangle(boxX, boxY, boxW, boxH, 2.f);
+        g.setColour(juce::Colour(0xff333333));
+        g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 7.f, juce::Font::plain));
+        g.drawText(juce::String(mDisplayDb, 1),
+                   juce::Rectangle<float>(boxX + 2.f, boxY + 1.f, boxW - 4.f, boxH - 2.f),
+                   juce::Justification::centred, false);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // setSliderDoubleClickDefaultsFromApvts - see SharedUI.h
 // ─────────────────────────────────────────────────────────────────────────────
 void setSliderDoubleClickDefaultsFromApvts (juce::Component& root,

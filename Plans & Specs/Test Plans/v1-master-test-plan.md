@@ -766,6 +766,82 @@ Claude's first-pass values, TUNED at this smoke. Debug first, then Release.
 
 ---
 
+### §B.11 — QA-Fe2 (vocal cleanup: De-noise / Gate / De-reverb / browser groups + PDC full-graph + monitor shifter)
+
+`blocks:` (backfill the QA-Fe2 close commit hash at commit). Debug exe FIRST, then Release —
+mark each scenario `D:` and `R:`. The batch's feature set ran a consolidated in-batch
+verification (Task 5, 2026-07-16); FE2-1..9 are the campaign re-verify of that set, FE2-10..14
+are the PDC scope addition's FIRST functional pass (bulk-run R2 deferred them here).
+
+- [ ] **FE2-1 — De-noise record flow.** Fresh project, assign an interface track to Vox 1
+      (learners start on assignment), arm, record a phrase with realtime correction ON.
+      Expected: written take set in `Samples/` matches the Options > File Settings checkboxes
+      (union rule); the grid gets the Builder Grid Default pick; the browser shows one
+      recording group under Vox with Dry / Dry Cleaned / Wet / Wet Cleaned children per the
+      settings. `D:__ R:__` notes:
+- [ ] **FE2-2 — Grid Default menu semantics.** Right-click the Vox arm LED; use the "Builder
+      Grid Default" section (Dry / Dry Cleaned / Wet / Wet Cleaned). Expected: no pick =
+      auto (Wet while correction is on, else Dry); a pick shows a tick, LOCKS until the
+      project closes, and survives input-track reassignment. `D:__ R:__` notes:
+- [ ] **FE2-3 — group rename + stop-gates.** Rename a recording group in the browser while
+      its clip sits on the grid (playback STOPPED). Expected: every take renames on disk,
+      the grid clip re-resolves and still plays. During playback: Rename Group + Regenerate
+      De-noise menu items grey out with "(stop playback)". `D:__ R:__` notes:
+- [ ] **FE2-4 — Regenerate De-noise A/B.** On a `* CLEANED` take: Regenerate De-noise >
+      Light, listen; then Strong, listen. Expected: audible strength difference (Strong
+      cleans harder), file regenerates from the stored profile, no length change.
+      `D:__ R:__` notes:
+- [ ] **FE2-5 — browser edge resize.** Drag the Builder browser's right edge. Expected:
+      minimum = the default width, maximum = 3x; width resets on relaunch (session-local).
+      `D:__ R:__` notes:
+- [ ] **FE2-6 — Gate + De-reverb panels.** Vocal Chain sub-tab shows 6 slots in order:
+      Gate, De-reverb, De-esser, Compressor, Saturation, Limiter. Gate defaults transparent
+      (threshold -80); its GR meter scale runs 0..-80 with the red zone at the OPEN end and
+      "GATE dB" on the LCD. De-reverb ships active (Reduction 50 / Mix 100); sweeping
+      Reduction/Tail/Mix audibly changes a roomy take's tail. `D:__ R:__` notes:
+- [ ] **FE2-7 — WORLD endgame regression.** Dry Cleaned take on the grid, WORLD engine pitch
+      edit, bake, listen at master loudness. Expected: buzz/water character no worse than
+      the accepted 2026-07-16 "good enough" verdict; A/B vs Rubber Band for reference.
+      `D:__ R:__` notes:
+- [ ] **FE2-8 — pitch-editor gesture map.** In the vocal pitch editor: body plain drag =
+      vertical pitch ONLY (no time motion); Ctrl+drag = fine pitch; Ctrl+Alt+drag = elastic
+      move (neighbor-walled); Ctrl+Shift+drag = detach move (hard cut, free); edge drag =
+      stretch; Ctrl+edge = detach stretch; Shift+click still toggle-selects only when Ctrl
+      is up. `D:__ R:__` notes:
+- [ ] **FE2-9 — High-Res retirement (Pitch only).** The Pitch render dialog offers
+      Render/Cancel only (no High Resolution button); BaySickAlign's render still offers its
+      REAL High Resolution option. `D:__ R:__` notes:
+- [ ] **FE2-10 — metronome on the beat under latency.** Fresh project with a default Vox
+      strip (De-reverb active = latent chain), a tight drum pattern, metronome ON.
+      Expected: the click lands ON the drum hits (pre-batch it led by ~45 ms); count-in
+      spacing into bar 1 stays exact; transport LAT readout shows the chain latency.
+      DELIBERATE CHANGE: pressing play mid-beat no longer fires an immediate catch-up
+      click — the first click lands on the next real beat crossing. `D:__ R:__` notes:
+- [ ] **FE2-11 — master-recorder trim.** No strips armed, record the master fallback WAV of
+      a click-tight pattern (latent vocal chain still loaded), stop, place the WAV on the
+      grid next to the source pattern. Expected: transients sit ON the grid (pre-batch the
+      capture landed late by the full LAT amount). `D:__ R:__` notes:
+- [ ] **FE2-12 — per-insert rack PDC.** Load a Limiter on ONE Layer insert's rack while
+      drums play. Expected: LAT readout ticks up; that layer stays in time with the other
+      buses (no double-hit/flam against drums); bypassing the Limiter mid-play re-aligns
+      within ~200 ms (one soft click at the toggle is the documented cost).
+      `D:__ R:__` notes:
+- [ ] **FE2-13 — SC key timing under compensation.** With the latent vocal chain loaded:
+      (a) kick strip keys a bass-strip compressor — pumping stays tight on the kick (keys
+      are not skewed by compensation); (b) kick keys the VOX strip's mixer-side compressor —
+      the duck lands ON the vocal's audio (the key waits for the late vocal), not ~45 ms
+      early. KNOWN residual: the reverse direction (vocal keys a drum gate) runs late by
+      the vocal's real latency — physics, per-edge PDC is future work. `D:__ R:__` notes:
+- [ ] **FE2-14 — TD monitor default + sound.** Fresh Vox strip, correction ON, live mic.
+      Expected: With Effect is the DEFAULT monitor mode (Listen-LED right-click shows the
+      tick); the corrected voice in the phones feels immediate (~20 ms class vs the old
+      ~55-60 ms slap); toggling correction on/off while monitoring never clicks (~40 ms
+      fades); big shifts may thicken slightly (dual-tap doubling — accepted); the RECORDED
+      WET take plays back R3-quality (slight timbre difference vs what was monitored is
+      expected and accepted). `D:__ R:__` notes:
+
+---
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is

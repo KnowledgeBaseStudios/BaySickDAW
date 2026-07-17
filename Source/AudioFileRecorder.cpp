@@ -9,7 +9,8 @@ AudioFileRecorder::~AudioFileRecorder()
 
 bool AudioFileRecorder::startRecording(const juce::File& outputFile,
                                         double sampleRate,
-                                        int numChannels)
+                                        int numChannels,
+                                        int skipInitialSamples)
 {
     if (mRecording.load()) return false;
 
@@ -17,6 +18,7 @@ bool AudioFileRecorder::startRecording(const juce::File& outputFile,
     mCurrentSampleRate  = sampleRate;
     mOutputFile         = outputFile;
     mSamplesSinceStart  = 0;
+    mSkipRemaining      = juce::jmax (0, skipInitialSamples);
     mFadeSamples        = juce::jmax (1, (int) std::round (sampleRate * 0.005));  // 5 ms
 
     outputFile.getParentDirectory().createDirectory();
@@ -58,18 +60,30 @@ void AudioFileRecorder::writeBlock (const juce::AudioBuffer<float>& buffer)
     const int numSamples = buffer.getNumSamples();
     const int numCh      = juce::jmin (buffer.getNumChannels(), mNumChannels);
 
+    // QA-Fe2 PDC: consume the leading-trim countdown before anything is
+    // written, so the fade-in below still ramps the first WRITTEN samples.
+    int offset = 0;
+    if (mSkipRemaining > 0)
+    {
+        const int skip = juce::jmin (mSkipRemaining, numSamples);
+        mSkipRemaining -= skip;
+        if (skip == numSamples) return;
+        offset = skip;
+    }
+    const int writeCount = numSamples - offset;
+
     // Fade-in ramp over the first mFadeSamples.  Once past the ramp we can
     // hand the original buffer straight to ThreadedWriter (zero-copy).
-    if (mSamplesSinceStart < mFadeSamples)
+    if (mSamplesSinceStart < mFadeSamples || offset > 0)
     {
-        if (mFadedBuf.getNumChannels() < numCh || mFadedBuf.getNumSamples() < numSamples)
-            mFadedBuf.setSize (numCh, numSamples, false, false, true);
+        if (mFadedBuf.getNumChannels() < numCh || mFadedBuf.getNumSamples() < writeCount)
+            mFadedBuf.setSize (numCh, writeCount, false, false, true);
 
         for (int ch = 0; ch < numCh; ++ch)
         {
-            const float* src = buffer.getReadPointer (ch);
+            const float* src = buffer.getReadPointer (ch) + offset;
             float*       dst = mFadedBuf.getWritePointer (ch);
-            for (int s = 0; s < numSamples; ++s)
+            for (int s = 0; s < writeCount; ++s)
             {
                 const int absSample = mSamplesSinceStart + s;
                 const float g = absSample < mFadeSamples
@@ -80,15 +94,15 @@ void AudioFileRecorder::writeBlock (const juce::AudioBuffer<float>& buffer)
         }
 
         const float* const* chPtrs = mFadedBuf.getArrayOfReadPointers();
-        mThreadedWriter->write (chPtrs, numSamples);
+        mThreadedWriter->write (chPtrs, writeCount);
     }
     else
     {
         const float* const* chPtrs = buffer.getArrayOfReadPointers();
-        mThreadedWriter->write (chPtrs, numSamples);
+        mThreadedWriter->write (chPtrs, writeCount);
     }
 
-    mSamplesSinceStart += numSamples;
+    mSamplesSinceStart += writeCount;
 }
 
 juce::File AudioFileRecorder::stopRecording()

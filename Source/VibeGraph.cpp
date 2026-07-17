@@ -233,48 +233,6 @@ static void applyStereoPan (juce::AudioBuffer<float>& buf, float pan, int law) n
     buf.applyGain (1, 0, buf.getNumSamples(), gR);
 }
 
-// ── PDC compensation delay line ───────────────────────────────────────────────
-// A simple stereo ring buffer. setDelay() resizes and resets it on the message
-// thread (safe because processBlock() only runs between prepareToPlay calls or
-// when the topology is stable). process() is audio-thread only.
-struct CompDelayLine
-{
-    static constexpr int kMaxSamples = 8192;  // ~186 ms @ 44100
-
-    void setDelay(int delaySamples, int numChannels)
-    {
-        mDelay = juce::jlimit(0, kMaxSamples, delaySamples);
-        mNumCh = numChannels;
-        mBuf.assign((size_t)(mNumCh * kMaxSamples), 0.f);
-        mWrite = 0;
-    }
-
-    // In-place: reads delayed sample, writes current sample, advances pointer.
-    void process(juce::AudioBuffer<float>& buf)
-    {
-        if (mDelay == 0 || mBuf.empty()) return;
-
-        const int n = buf.getNumSamples();
-        for (int s = 0; s < n; ++s)
-        {
-            int readPos = (mWrite - mDelay + kMaxSamples) % kMaxSamples;
-            for (int ch = 0; ch < mNumCh; ++ch)
-            {
-                float* chBuf = mBuf.data() + ch * kMaxSamples;
-                float delayed = chBuf[readPos];
-                chBuf[mWrite]  = buf.getSample(ch, s);
-                buf.setSample(ch, s, delayed);
-            }
-            mWrite = (mWrite + 1) % kMaxSamples;
-        }
-    }
-
-    int mDelay { 0 };
-    int mNumCh { 2 };
-    int mWrite  { 0 };
-    std::vector<float> mBuf;
-};
-
 // ── LayersBusNode ─────────────────────────────────────────────────────────────
 // Renders the polyphonic Layers synth, applies bus EQ, pushes to spectrum feed,
 // runs bus EffectRack, then applies channel fader / mute / solo.
@@ -342,6 +300,12 @@ struct VibeGraph::LayersBusNode
         pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
     }
 
+    // QA-Fe2 SC delay-match: pre-compensation key stash.  armScSourceTaps
+    // flags SC-edge sources at block rate; the copy runs right before
+    // compDelay so keys never carry the alignment delay.
+    juce::AudioBuffer<float> scTap;
+    std::atomic<bool>        scTapArmed { false };
+
     LayersBusNode(juce::Synthesiser& s, VibeGraph::BusMix& m)
         : synth(s), busMix(m) {}
 
@@ -350,6 +314,7 @@ struct VibeGraph::LayersBusNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         busEq.prepare(sr, blockSize);
+        scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
     }
     void reset()
     {
@@ -458,6 +423,12 @@ struct VibeGraph::LayersBusNode
         // 2026-04-29: pan applied AFTER fader + width using project-level law.
         applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
 
+        // QA-Fe2 SC delay-match: stash the pre-compensation output for SC
+        // consumers before the alignment delay lands on this node.
+        if (scTapArmed.load(std::memory_order_relaxed))
+            for (int c = 0, tc = juce::jmin(buf.getNumChannels(), scTap.getNumChannels()); c < tc; ++c)
+                scTap.copyFrom(c, 0, buf, c, 0, juce::jmin(buf.getNumSamples(), scTap.getNumSamples()));
+
         compDelay.process(buf);
         // Peak meter with hold+decay - matches InsertNode pattern so transient
         // bus peaks aren't missed between ~30 Hz UI polls.
@@ -532,6 +503,10 @@ struct VibeGraph::BassBusNode
         pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
     }
 
+    // QA-Fe2 SC delay-match stash (see LayersBusNode).
+    juce::AudioBuffer<float> scTap;
+    std::atomic<bool>        scTapArmed { false };
+
     BassBusNode(BassSynth& b, VibeGraph::BusMix& m)
         : bass(b), busMix(m) {}
 
@@ -540,6 +515,7 @@ struct VibeGraph::BassBusNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         busEq.prepare(sr, blockSize);
+        scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
     }
     void reset()
     {
@@ -622,6 +598,12 @@ struct VibeGraph::BassBusNode
         // 2026-04-29: pan applied AFTER fader + width using project-level law.
         applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
 
+        // QA-Fe2 SC delay-match: stash the pre-compensation output for SC
+        // consumers before the alignment delay lands on this node.
+        if (scTapArmed.load(std::memory_order_relaxed))
+            for (int c = 0, tc = juce::jmin(buf.getNumChannels(), scTap.getNumChannels()); c < tc; ++c)
+                scTap.copyFrom(c, 0, buf, c, 0, juce::jmin(buf.getNumSamples(), scTap.getNumSamples()));
+
         compDelay.process(buf);
         {
             // 2026-05-02: lock-free max + latency-compensated publish.  The UI
@@ -692,6 +674,10 @@ struct VibeGraph::DrumsBusNode
         pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
     }
 
+    // QA-Fe2 SC delay-match stash (see LayersBusNode).
+    juce::AudioBuffer<float> scTap;
+    std::atomic<bool>        scTapArmed { false };
+
     DrumsBusNode(VibeGraph::BusMix& m)
         : busMix(m) {}
 
@@ -700,6 +686,7 @@ struct VibeGraph::DrumsBusNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         busEq.prepare(sr, blockSize);
+        scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
     }
     void reset()
     {
@@ -779,6 +766,12 @@ struct VibeGraph::DrumsBusNode
 
         // 2026-04-29: pan applied AFTER fader + width using project-level law.
         applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
+
+        // QA-Fe2 SC delay-match: stash the pre-compensation output for SC
+        // consumers before the alignment delay lands on this node.
+        if (scTapArmed.load(std::memory_order_relaxed))
+            for (int c = 0, tc = juce::jmin(buf.getNumChannels(), scTap.getNumChannels()); c < tc; ++c)
+                scTap.copyFrom(c, 0, buf, c, 0, juce::jmin(buf.getNumSamples(), scTap.getNumSamples()));
 
         compDelay.process(buf);
         {
@@ -956,6 +949,7 @@ struct VibeGraph::EffectsBusNode
     EQ8MsDSP           preEq;    // §P4.3 pre-rack
     EffectRack         rack;
     EQ8MsDSP           busEq;    // post-rack Effects Bus EQ - shown on Effects Page
+    CompDelayLine      compDelay;   // QA-Fe2 PDC full-graph pass: FX bus was uncompensable (no line)
     std::atomic<float> peakDb  { -60.f };
     // 2026-04-30: stereo L/R peakDb for split DBFSMeter, written each block
     // inside processBlock once the FX Bus pipeline runs.  Mirrored into
@@ -996,11 +990,16 @@ struct VibeGraph::EffectsBusNode
         pSolo           = apvts.getRawParameterValue(prefix + "_solo");
     }
 
+    // QA-Fe2 SC delay-match stash (see LayersBusNode).
+    juce::AudioBuffer<float> scTap;
+    std::atomic<bool>        scTapArmed { false };
+
     void prepare(double sr, int blockSize)
     {
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         busEq.prepare(sr, blockSize);
+        scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
     }
     void reset()
     {
@@ -1075,6 +1074,14 @@ struct VibeGraph::EffectsBusNode
             buf.applyGain(0, 0, n, gL);
             buf.applyGain(1, 0, n, gR);
         }
+
+        // QA-Fe2 SC delay-match: stash the pre-compensation output for SC
+        // consumers before the alignment delay lands on this node.
+        if (scTapArmed.load(std::memory_order_relaxed))
+            for (int c = 0, tc = juce::jmin(buf.getNumChannels(), scTap.getNumChannels()); c < tc; ++c)
+                scTap.copyFrom(c, 0, buf, c, 0, juce::jmin(buf.getNumSamples(), scTap.getNumSamples()));
+
+        compDelay.process(buf);
 
         {
             // 2026-05-02: lock-free max + latency-compensated publish.  The UI
@@ -1166,6 +1173,10 @@ struct VibeGraph::InsertNode
     // every block alongside pPan so the user can pick FL-style pan curve.
     std::atomic<float>* pPanLaw { nullptr };
 
+    // QA-Fe2 SC delay-match stash (see LayersBusNode).
+    juce::AudioBuffer<float> scTap;
+    std::atomic<bool>        scTapArmed { false };
+
     InsertNode(VibeGraph::InsertKind k, int i, int channelId,
                juce::String displayName, juce::String prefix)
         : name(std::move(displayName))
@@ -1177,6 +1188,7 @@ struct VibeGraph::InsertNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack .prepare(sr, blockSize);
         eq   .prepare(sr, blockSize);
+        scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
     }
     void reset()
     {
@@ -1286,6 +1298,12 @@ struct VibeGraph::InsertNode
         // for the common case.
         applyStereoPan (buf, load(pPan, 0.f), (int) load(pPanLaw, 0.f));
 
+        // QA-Fe2 SC delay-match: stash the pre-compensation output for SC
+        // consumers before the alignment delay lands on this strip.
+        if (scTapArmed.load(std::memory_order_relaxed))
+            for (int c = 0, tc = juce::jmin(nc, scTap.getNumChannels()); c < tc; ++c)
+                scTap.copyFrom(c, 0, buf, c, 0, juce::jmin(n, scTap.getNumSamples()));
+
         // Per-insert PDC alignment
         compDelay.process(buf);
 
@@ -1312,6 +1330,10 @@ struct VibeGraph::InstrChannelNode
     EQ8MsDSP     preEq;   // §P4.3 pre-rack (used by Audio Clips Bus; processed inline in PluginProcessor)
     EffectRack   rack;
     EQ8MsDSP     eq;
+    // QA-Fe2 PDC full-graph pass: the 7 InstrChannelNode buses (Clips/Vox/
+    // Inst/Vox2/Inst2/Inst3/Rusty) had no delay line, so their own chain
+    // latency could never be compensated.  Runs in processBus after pan.
+    CompDelayLine compDelay;
 
     // 5F-4a Batch 6: polarity + width pointers (used by audio clips bus node)
     std::atomic<float>* pPolarity { nullptr };
@@ -1328,6 +1350,10 @@ struct VibeGraph::InstrChannelNode
     std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
     int peakRingIdx { 0 };
 
+    // QA-Fe2 SC delay-match stash (see LayersBusNode).
+    juce::AudioBuffer<float> scTap;
+    std::atomic<bool>        scTapArmed { false };
+
     explicit InstrChannelNode(const juce::String& displayName) : name(displayName) {}
 
     void prepare(double sr, int blockSize)
@@ -1335,6 +1361,7 @@ struct VibeGraph::InstrChannelNode
         preEq.prepare(sr, blockSize);   // §P4.3
         rack.prepare(sr, blockSize);
         eq  .prepare(sr, blockSize);
+        scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
     }
     void reset()
     {
@@ -1791,6 +1818,17 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             applyStereoPan (buf, pan, panLaw);
     }
 
+    // QA-Fe2 PDC full-graph pass: bus-stage alignment, same slot in the chain
+    // as the L/B/D BusNodes (post-pan, pre-meter).  The SC stash runs first
+    // so keys never carry the alignment delay.
+    if (node != nullptr)
+    {
+        if (node->scTapArmed.load (std::memory_order_relaxed))
+            for (int c = 0, tc = juce::jmin (buf.getNumChannels(), node->scTap.getNumChannels()); c < tc; ++c)
+                node->scTap.copyFrom (c, 0, buf, c, 0, juce::jmin (buf.getNumSamples(), node->scTap.getNumSamples()));
+        node->compDelay.process (buf);
+    }
+
     // Peak meter.  Each bus's InstrChannelNode (or BusNode for L/B/D/Master/FX)
     // owns the G1 peak fields; publishPeakReading writes them inside this
     // block, and the exchange-store at the end of this function lifts the
@@ -1948,34 +1986,247 @@ EffectRack* VibeGraph::getAuxRack(int idx)
 }
 
 // ── PDC ───────────────────────────────────────────────────────────────────────
+// QA-Fe2 PDC full-graph pass (2026-07-16): two-stage minimal-latency solve
+// replacing the single-max model (which measured only the 4 L/B/D/Master
+// rack+postEq pairs + the Vox engine chains -- ~130 per-insert racks, the FX
+// bus, and the 7 InstrChannelNode buses were invisible, and preEq was omitted
+// everywhere).
+//   Stage 1 (strip): each live insert's own path latency (engine chain via
+//   the Vox/Inst hooks + preEq + rack + postEq) aligns WITHIN its actual
+//   main-out bus (_sendTo, natural parent fallback) through the per-insert
+//   delay:  want = A(bus) - own,  A(bus) = max own over that bus's members.
+//   Stage 2 (bus): each bus's natural output latency A(bus) + busChain aligns
+//   cross-path through the bus delay:  want = T - natural,  T = longest path.
+// Aux strips align to each other (auxStage) so their summed FX-bus feed stays
+// coherent; the FX input reference is maxA + auxStage, which lands the most
+// latent source's send return exactly on the aligned mix.
+// Deliberate residuals (per-NODE delays cannot express per-EDGE timing):
+// sends from different buses into one aux mix at A(b)-relative offsets;
+// bus->bus / bus->aux sends and re-cabled aux main-outs arrive a stage off;
+// exact per-edge alignment is future work.
+// Message thread only -- setDelay allocates + clears, so no-op updates are
+// skipped to keep the periodic poll from glitching a running mix.  The audio
+// thread consumes totalLatencySamples atomically (metronome offset,
+// master-recorder trim).
 int VibeGraph::updateBusLatencies()
 {
     if (!mTopologyBuilt) return 0;
 
+    using namespace MixerChannelIds;
     const int ch = 2;
 
-    // Per-bus latency = rack + post-rack bus EQ. Bus EQ latency was previously
-    // omitted (assumed always 0); 5F-9 sec.12 12f added opt-in 2x oversampling
-    // to EQ8DSP, so EQ8MsDSP::getLatencySamples() can now report a non-zero
-    // value when AC is on. Sum both so PDC stays accurate.
-    int layersLat  = mLayersNode    ->rack.getTotalLatencySamples()
-                   + mLayersNode    ->busEq.getLatencySamples();
-    int bassLat    = mBassNode      ->rack.getTotalLatencySamples()
-                   + mBassNode      ->busEq.getLatencySamples();
-    int drumsLat   = mDrumsNode     ->rack.getTotalLatencySamples()
-                   + mDrumsNode     ->busEq.getLatencySamples();
-    int masterLat  = mMasterNode    ->rack.getTotalLatencySamples()
-                   + mMasterNode    ->busEq.getLatencySamples();
+    auto chainLat = [](EQ8MsDSP& pre, EffectRack& rack, EQ8MsDSP& post)
+    {
+        return juce::jmax(0, pre .getLatencySamples())
+             + juce::jmax(0, rack.getTotalLatencySamples())
+             + juce::jmax(0, post.getLatencySamples());
+    };
 
-    // Each source bus is compensated to the longest among them before the master sum.
-    int maxBusLat = juce::jmax(layersLat, bassLat, drumsLat);
+    // Stage-2 table: the 10 strip-fed buses.  Index order is load-bearing for
+    // busIndexFor below only; FX and Master are handled apart (FX is send-fed,
+    // Master is the terminal sum).
+    struct BusSlot { CompDelayLine* delay; int chain; int maxOwn; };
+    std::array<BusSlot, 10> buses {};
+    auto busIndexFor = [](int chId) -> int
+    {
+        switch (chId)
+        {
+            case kLayersBus:     return 0;
+            case kBassBus:       return 1;
+            case kDrumsBus:      return 2;
+            case kClipsBus:      return 3;
+            case kVoxBus:        return 4;
+            case kInstBus:       return 5;
+            case kVoxBus2:       return 6;
+            case kInstBus2:      return 7;
+            case kInstBus3:      return 8;
+            case kRustyDrumsBus: return 9;
+        }
+        return -1;
+    };
+    buses[0] = { &mLayersNode->compDelay, chainLat(mLayersNode->preEq, mLayersNode->rack, mLayersNode->busEq), 0 };
+    buses[1] = { &mBassNode  ->compDelay, chainLat(mBassNode  ->preEq, mBassNode  ->rack, mBassNode  ->busEq), 0 };
+    buses[2] = { &mDrumsNode ->compDelay, chainLat(mDrumsNode ->preEq, mDrumsNode ->rack, mDrumsNode ->busEq), 0 };
+    auto instrBus = [&chainLat](InstrChannelNode* n) -> BusSlot
+    {
+        if (n == nullptr) return { nullptr, 0, 0 };
+        return { &n->compDelay, chainLat(n->preEq, n->rack, n->eq), 0 };
+    };
+    buses[3] = instrBus(mAudioClipsBusNode.get());
+    buses[4] = instrBus(mVoxBusNode.get());
+    buses[5] = instrBus(mInstBusNode.get());
+    buses[6] = instrBus(mVoxBus2Node.get());
+    buses[7] = instrBus(mInstBus2Node.get());
+    buses[8] = instrBus(mInstBus3Node.get());
+    buses[9] = instrBus(mRustyDrumsBusNode.get());
 
-    mLayersNode->compDelay.setDelay(maxBusLat - layersLat, ch);
-    mBassNode  ->compDelay.setDelay(maxBusLat - bassLat,   ch);
-    mDrumsNode ->compDelay.setDelay(maxBusLat - drumsLat,  ch);
+    const int fxChain = mEffectsBusNode != nullptr
+        ? chainLat(mEffectsBusNode->preEq, mEffectsBusNode->rack, mEffectsBusNode->busEq) : 0;
+    const int masterChain =
+        chainLat(mMasterNode->preEq, mMasterNode->rack, mMasterNode->busEq);
 
-    // Total latency seen by the host = aligned source buses + master rack
-    int total = maxBusLat + masterLat;
+    // Stage-1 sweep: classify every live insert by its actual main-out target.
+    // ownByCh / engineByCh feed the SC key-alignment solve below (-1 own =
+    // channel not live).
+    enum class Dest { Bus, FxFeed, MasterDirect, AuxStage };
+    struct StripRec { CompDelayLine* delay; int own; Dest dest; int busIdx; };
+    std::vector<StripRec> strips;
+    strips.reserve(mLiveInsertChannels.size());
+    std::vector<int> ownByCh    ((size_t) kMaxStripChannels, -1);
+    std::vector<int> engineByCh ((size_t) kMaxStripChannels, 0);
+    int auxStage = 0, fxFeedMaxOwn = 0, masterDirectMaxOwn = 0;
+
+    for (int chId : mLiveInsertChannels)
+    {
+        auto* node = mInsertsByChannel[(size_t) chId].get();
+        if (node == nullptr) continue;
+
+        int engineLat = 0;
+        if (chId >= kVoxBase && chId < kVoxBase + kMaxVoxStrips && onGetVoxStripChainLatency)
+            engineLat = juce::jmax(0, onGetVoxStripChainLatency(chId - kVoxBase));
+        else if (chId >= kInstBase && chId < kInstBase + kMaxInstStrips && onGetInstStripEngineLatency)
+            engineLat = juce::jmax(0, onGetInstStripEngineLatency(chId - kInstBase));
+        int own = chainLat(node->preEq, node->rack, node->eq) + engineLat;
+        ownByCh   [(size_t) chId] = own;
+        engineByCh[(size_t) chId] = engineLat;
+
+        // Aux strips receive sends tapped POST-compensation, so they carry no
+        // cross-path delta of their own -- only the relative auxStage align.
+        if (chId >= kAuxBase && chId < kAuxBase + kMaxAuxStrips)
+        {
+            auxStage = juce::jmax(auxStage, own);
+            strips.push_back({ &node->compDelay, own, Dest::AuxStage, -1 });
+            continue;
+        }
+
+        int dst = defaultSendTo(chId);
+        if (mApvts != nullptr)
+            if (auto* p = mApvts->getRawParameterValue(node->apvtsPrefix + "_sendTo"))
+                dst = (int) p->load();
+
+        int bi = busIndexFor(dst);
+        if (bi >= 0 && buses[(size_t) bi].delay == nullptr) bi = -1;
+        if (bi < 0 && dst != kFxBus && dst != kMaster
+            && ! (dst >= kAuxBase && dst < kAuxBase + kMaxAuxStrips))
+        {
+            // Unroutable target (e.g. a strip-to-strip cable the render graph
+            // does not pull) -- fall back to the natural parent bucket so the
+            // strip still aligns with its siblings.
+            bi = busIndexFor(defaultSendTo(chId));
+            if (bi >= 0 && buses[(size_t) bi].delay == nullptr) bi = -1;
+        }
+
+        if (bi >= 0)
+        {
+            buses[(size_t) bi].maxOwn = juce::jmax(buses[(size_t) bi].maxOwn, own);
+            strips.push_back({ &node->compDelay, own, Dest::Bus, bi });
+        }
+        else if (dst == kMaster)
+        {
+            masterDirectMaxOwn = juce::jmax(masterDirectMaxOwn, own);
+            strips.push_back({ &node->compDelay, own, Dest::MasterDirect, -1 });
+        }
+        else
+        {
+            fxFeedMaxOwn = juce::jmax(fxFeedMaxOwn, own);
+            strips.push_back({ &node->compDelay, own, Dest::FxFeed, -1 });
+        }
+    }
+
+    // Strip-stage reference: send taps sit at their bus's A(b), so the FX
+    // input reference tracks the largest strip stage in the graph.
+    int maxA = fxFeedMaxOwn;
+    for (auto& b : buses) maxA = juce::jmax(maxA, b.maxOwn);
+
+    // Cross-path target T = longest natural path at the master input.
+    int T = juce::jmax(masterDirectMaxOwn, maxA + auxStage + fxChain);
+    for (auto& b : buses) T = juce::jmax(T, b.maxOwn + b.chain);
+
+    auto setDelayGuarded = [ch](CompDelayLine* d, int want)
+    {
+        if (d == nullptr) return;
+        want = juce::jmax(0, want);
+        if (d->mDelay != want) d->setDelay(want, ch);
+    };
+
+    for (const auto& s : strips)
+    {
+        int want = 0;
+        switch (s.dest)
+        {
+            case Dest::Bus:          want = buses[(size_t) s.busIdx].maxOwn - s.own; break;
+            case Dest::FxFeed:       want = maxA - s.own;                            break;
+            case Dest::MasterDirect: want = T - s.own;                               break;
+            case Dest::AuxStage:     want = auxStage - s.own;                        break;
+        }
+        setDelayGuarded(s.delay, want);
+    }
+
+    for (auto& b : buses)
+        setDelayGuarded(b.delay, T - b.maxOwn - b.chain);
+    if (mEffectsBusNode != nullptr)
+        setDelayGuarded(&mEffectsBusNode->compDelay, T - (maxA + auxStage + fxChain));
+
+    // QA-Fe2 SC delay-match (docket 1b): each SC receive line delays its key
+    // by (consumer chain-input position - source natural position), so the
+    // alignment delays above never skew keying.  Sources tap PRE-compensation
+    // (armScSourceTaps + the per-node scTap stash), which makes "natural" the
+    // source's real path latency.  A source naturally LATER than its consumer
+    // (vocal chain keying a drum gate) stays late -- only per-edge graph PDC
+    // could fix that direction.  Engine-internal SC readers sit deeper than
+    // the chain input; the engine-stage term dominates and the intra-chain
+    // offset is accepted.
+    auto srcNaturalFor = [&](int src) -> int
+    {
+        const int bi = busIndexFor(src);
+        if (bi >= 0)        return buses[(size_t) bi].maxOwn + buses[(size_t) bi].chain;
+        if (src == kFxBus)  return maxA + auxStage + fxChain;
+        if (src == kMaster) return T + masterChain;
+        if (src >= 0 && src < kMaxStripChannels && ownByCh[(size_t) src] >= 0)
+            return (src >= kAuxBase && src < kAuxBase + kMaxAuxStrips)
+                     ? maxA + ownByCh[(size_t) src] : ownByCh[(size_t) src];
+        return -1;
+    };
+    auto consumerPosFor = [&](int dst) -> int
+    {
+        const int bi = busIndexFor(dst);
+        if (bi >= 0)        return buses[(size_t) bi].maxOwn;
+        if (dst == kFxBus)  return maxA + auxStage;
+        if (dst == kMaster) return T;
+        if (dst >= 0 && dst < kMaxStripChannels && ownByCh[(size_t) dst] >= 0)
+            return (dst >= kAuxBase && dst < kAuxBase + kMaxAuxStrips)
+                     ? maxA : engineByCh[(size_t) dst];
+        return 0;
+    };
+    auto solveScFor = [&](int dst, const juce::String& prefix)
+    {
+        for (int s = 0; s < kMaxScRecvSlots; ++s)
+        {
+            int want = 0;
+            if (mApvts != nullptr)
+                if (auto* p = mApvts->getRawParameterValue(prefix + "_sc_recv"
+                                                           + juce::String(s) + "_from"))
+                {
+                    const int src = (int) p->load();
+                    if (src >= 0 && src != dst)
+                    {
+                        const int nat = srcNaturalFor(src);
+                        if (nat >= 0)
+                            want = juce::jmax(0, consumerPosFor(dst) - nat);
+                    }
+                }
+            setDelayGuarded(&mScRecvDelays[(size_t) dst][(size_t) s], want);
+        }
+    };
+    for (int busCh : { kMaster, kLayersBus, kBassBus, kDrumsBus, kFxBus,
+                       kClipsBus, kVoxBus, kInstBus, kVoxBus2, kInstBus2,
+                       kInstBus3, kRustyDrumsBus })
+        solveScFor(busCh, prefixFromChannelId(busCh));
+    for (int chId : mLiveInsertChannels)
+        if (auto* node = mInsertsByChannel[(size_t) chId].get())
+            solveScFor(chId, node->apvtsPrefix);
+
+    const int total = T + masterChain;
     totalLatencySamples.store(total, std::memory_order_relaxed);
     return total;
 }
@@ -2974,6 +3225,105 @@ juce::AudioBuffer<float>* VibeGraph::getScRecvBuffer (int channelId, int slotIdx
     return &buf;
 }
 
+// QA-Fe2 SC delay-match (docket 1b): pre-compensation key tap lookup.
+// Mirrors the pushScArrayToStrip channel map; Master has no comp delay so
+// its output IS the natural tap (nullptr -> caller falls back).
+const juce::AudioBuffer<float>* VibeGraph::getScSourceTap (int channelId) const
+{
+    using namespace MixerChannelIds;
+    auto tapOf = [](const auto* node) -> const juce::AudioBuffer<float>*
+    {
+        if (node == nullptr) return nullptr;
+        return node->scTapArmed.load (std::memory_order_relaxed) ? &node->scTap
+                                                                 : nullptr;
+    };
+    switch (channelId)
+    {
+        case kLayersBus:     return tapOf (mLayersNode.get());
+        case kBassBus:       return tapOf (mBassNode.get());
+        case kDrumsBus:      return tapOf (mDrumsNode.get());
+        case kFxBus:         return tapOf (mEffectsBusNode.get());
+        case kClipsBus:      return tapOf (mAudioClipsBusNode.get());
+        case kVoxBus:        return tapOf (mVoxBusNode.get());
+        case kInstBus:       return tapOf (mInstBusNode.get());
+        case kVoxBus2:       return tapOf (mVoxBus2Node.get());
+        case kInstBus2:      return tapOf (mInstBus2Node.get());
+        case kInstBus3:      return tapOf (mInstBus3Node.get());
+        case kRustyDrumsBus: return tapOf (mRustyDrumsBusNode.get());
+        default: break;
+    }
+    if (channelId >= 0 && channelId < kMaxStripChannels)
+        return tapOf (mInsertsByChannel[(size_t) channelId].get());
+    return nullptr;
+}
+
+// QA-Fe2 SC delay-match: run the (consumer, slot) key-alignment delay in
+// place on the receive buffer.  Values are solved by updateBusLatencies on
+// the message thread; this path is audio-thread + allocation-free.
+void VibeGraph::applyScRecvDelay (int channelId, int slotIdx, int numSamples)
+{
+    if (slotIdx < 0 || slotIdx >= kMaxScRecvSlots) return;
+    if (channelId < 0 || channelId >= kMaxStripChannels) return;
+    if (numSamples <= 0) return;
+
+    auto& d = mScRecvDelays[(size_t) channelId][(size_t) slotIdx];
+    if (d.mDelay == 0) return;
+
+    auto it = mScRecv.find (channelId);
+    if (it == mScRecv.end()) return;
+    auto& buf = it->second.bufs[(size_t) slotIdx];
+    // CompDelayLine::process iterates its own mNumCh (2) -- require a full
+    // stereo receive buffer, not just one channel.
+    if (buf.getNumChannels() < 2 || buf.getNumSamples() < numSamples) return;
+
+    juce::AudioBuffer<float> view (buf.getArrayOfWritePointers(),
+                                   buf.getNumChannels(), numSamples);
+    d.process (view);
+}
+
+// QA-Fe2 SC delay-match: flag SC-edge source nodes so their process stashes
+// the pre-compensation tap.  Block rate from rebuildRoutingFromApvts (audio
+// thread) -- relaxed stores only, no allocation.
+void VibeGraph::armScSourceTaps()
+{
+    using namespace MixerChannelIds;
+    auto armCh = [this](int chId, bool on)
+    {
+        auto arm = [on](auto* node)
+        {
+            if (node != nullptr)
+                node->scTapArmed.store (on, std::memory_order_relaxed);
+        };
+        switch (chId)
+        {
+            case kLayersBus:     arm (mLayersNode.get());       return;
+            case kBassBus:       arm (mBassNode.get());         return;
+            case kDrumsBus:      arm (mDrumsNode.get());        return;
+            case kFxBus:         arm (mEffectsBusNode.get());   return;
+            case kClipsBus:      arm (mAudioClipsBusNode.get()); return;
+            case kVoxBus:        arm (mVoxBusNode.get());       return;
+            case kInstBus:       arm (mInstBusNode.get());      return;
+            case kVoxBus2:       arm (mVoxBus2Node.get());      return;
+            case kInstBus2:      arm (mInstBus2Node.get());     return;
+            case kInstBus3:      arm (mInstBus3Node.get());     return;
+            case kRustyDrumsBus: arm (mRustyDrumsBusNode.get()); return;
+            default: break;
+        }
+        if (chId >= 0 && chId < kMaxStripChannels)
+            arm (mInsertsByChannel[(size_t) chId].get());
+    };
+
+    for (int busCh : { kLayersBus, kBassBus, kDrumsBus, kFxBus, kClipsBus,
+                       kVoxBus, kInstBus, kVoxBus2, kInstBus2, kInstBus3,
+                       kRustyDrumsBus })
+        armCh (busCh, false);
+    for (int chId : mLiveInsertChannels)
+        armCh (chId, false);
+
+    for (const auto& sce : mRoutingGraph.scEdges())
+        armCh (sce.srcId, true);
+}
+
 VibeGraph::ScRecvArray VibeGraph::getScRecvArray (int channelId)
 {
     ScRecvArray out {};
@@ -3124,6 +3474,10 @@ void VibeGraph::rebuildRoutingFromApvts()
     // calls then hit existing buffers and just .clear() them.
     for (const auto& sce : mRoutingGraph.scEdges())
         getScRecvBuffer(sce.dstId, sce.dstSlot);
+
+    // QA-Fe2 SC delay-match: re-flag SC-edge source nodes from the fresh
+    // edge list so their process stashes the pre-compensation key tap.
+    armScSourceTaps();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

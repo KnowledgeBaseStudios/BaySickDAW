@@ -27,9 +27,15 @@ public:
     ~AudioFileRecorder();
 
     // Message thread: open file + spin up ThreadedWriter's background thread.
+    // skipInitialSamples drops that many leading samples before anything is
+    // written -- QA-Fe2 PDC: the master capture tap sits after the compensated
+    // graph, so its content arrives totalLatencySamples late vs the transport
+    // grid; the skip re-aligns the WAV.  Strip recorders tap pre-chain raw
+    // input and pass 0.
     bool startRecording(const juce::File& outputFile,
                         double sampleRate,
-                        int numChannels);
+                        int numChannels,
+                        int skipInitialSamples = 0);
 
     bool isRecording() const { return mRecording.load(); }
 
@@ -45,6 +51,7 @@ private:
     // actual sample rate so the fade stays 5 ms regardless of device rate.
     int    mFadeSamples { 0 };
     int    mSamplesSinceStart { 0 };      // audio thread only; ramp-in counter
+    int    mSkipRemaining { 0 };          // audio thread only; PDC leading-trim countdown
     double mCurrentSampleRate { 44100.0 };
     int    mNumChannels { 2 };
 

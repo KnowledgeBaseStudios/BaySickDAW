@@ -962,6 +962,10 @@ juce::String SlotComponent::effectTypeName(EffectType type)
         case EffectType::Tape:            return "Tape";
         case EffectType::Limiter:         return "Limiter";
         case EffectType::DeEsser:         return "De-esser";
+        // QA-Fe2: vocal-chain-only stages (locked slots; deliberately absent
+        // from the rack picker menu above).
+        case EffectType::Gate:            return "Gate";
+        case EffectType::DeReverb:        return "De-reverb";
 
         // I-5 (2026-05-02): BaySickPedals Harmonics drive pedals batch.
         case EffectType::BluesDriveStyle: return "Blues Drive";

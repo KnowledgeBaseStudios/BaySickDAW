@@ -78,6 +78,7 @@ struct CategorizedAudioEntry
     juce::String displayName;          // shown as leaf label
     juce::String fullPath;             // for tooltip + Reveal in Explorer
     juce::Colour accent;               // category accent color
+    juce::String groupName;            // QA-Fe2: manual group ("" = auto/flat)
 };
 
 // QA-E Task 7 (FILE-02): one routable target for the "Routes to:" dropdown
@@ -147,9 +148,41 @@ public:
     void          paintItem            (juce::Graphics&, int, int) override;
     void          itemClicked          (const juce::MouseEvent&) override;
 
+    // QA-Fe2: right-click on the category header ("Create Group...").
+    std::function<void(juce::Point<int>)> onContextMenu;
+
 private:
     juce::String mName;
     juce::Colour mAccent;
+};
+
+// QA-Fe2: collapsible group node inside a category.  Two flavors: AUTO
+// recording groups (derived from " - DRY/WET [CLEANED]" take-tag file names;
+// children show only the tag) and MANUAL groups (user-created via the
+// category header; children keep their names).  Rename semantics differ:
+// auto = disk-rename every take in the group (StandaloneEditor flow),
+// manual = label rename only.
+class AudioGroupItem : public juce::TreeViewItem
+{
+public:
+    AudioGroupItem (const juce::String& name, juce::Colour accent, bool isAuto);
+
+    bool          mightContainSubItems () override               { return true; }
+    int           getItemHeight        () const override         { return 24; }
+    juce::String  getUniqueName        () const override         { return "grp:" + mName; }
+    bool          canBeSelected        () const override         { return false; }
+    void          paintItem            (juce::Graphics&, int, int) override;
+    void          itemClicked          (const juce::MouseEvent&) override;
+
+    bool isAutoGroup() const noexcept   { return mIsAuto; }
+    const juce::String& getGroupName() const noexcept { return mName; }
+
+    std::function<void(juce::Point<int>)> onContextMenu;
+
+private:
+    juce::String mName;
+    juce::Colour mAccent;
+    bool         mIsAuto { false };
 };
 
 // ── BrowserPanel ──────────────────────────────────────────────────────────────
@@ -197,6 +230,17 @@ public:
     // to render with empty Clips / Vox / Inst categories (which is normal
     // before any pages exist).
     std::function<std::vector<CategorizedAudioEntry>()> onEnumerateAudio;
+
+    // QA-Fe2 De-noise: re-clean a "* CLEANED" take at a new strength
+    // (0 = Light, 1 = Strong).  Returns false on failure (caller shows why).
+    std::function<bool(const juce::String& relPath, int strength)> onRegenerateDenoise;
+
+    // QA-Fe2: recording-group rename = disk-rename every take in the group
+    // (base swapped, take tags kept) + rewrite all clip/library references.
+    // StandaloneEditor owns the flow (file moves need the project folder +
+    // player rebuild ordering).  Returns false on failure (flow shows why).
+    std::function<bool(const juce::String& oldBase, const juce::String& newBase)>
+        onRenameRecordingGroup;
     // G-6 (2026-04-29): right-click "Duplicate..." on an audio tree leaf has
     // already (a) prompted for a name + resolved any filename conflict and
     // (b) physically copied the WAV.  This callback hands BOTH the source
@@ -304,6 +348,18 @@ private:
     // + new Reveal in Explorer).  audioLibIdx is the global library index for
     // direct lookup into mPM.audioLibrary.
     void showAudioTreeContextMenu(AudioBrowserItem& item, juce::Point<int> globalPt);
+
+    // ── QA-Fe2 browser groups ────────────────────────────────────────────
+    // Category header right-click -> "Create Group..." (manual, may sit
+    // empty).  Group header right-click -> "Rename Group..." (auto groups
+    // route through onRenameRecordingGroup; manual rename is label-only).
+    // maybePromptGroupAssign fires after a Properties move/copy lands on a
+    // Vox/Inst target: offers that page's recording groups + the category's
+    // manual groups as a destination ("(none)" default).
+    void showCategoryContextMenu (int category, juce::Point<int> globalPt);
+    void showGroupContextMenu    (int category, const juce::String& name,
+                                  bool isAuto, juce::Point<int> globalPt);
+    void maybePromptGroupAssign  (int libIdx, int targetChannel);
 
     // G-6 (2026-04-29): "Duplicate..." right-click flow.  Shows the name
     // prompt, resolves conflicts (Overwrite / Cancel / Rename re-prompt),
@@ -1028,6 +1084,27 @@ private:
     bool mPerfMode { false };
 
     std::unique_ptr<BrowserPanel>         mBrowser;
+
+    // QA-Fe2: draggable browser right edge.  Default == minimum == the
+    // pre-feature fixed width (kBrowserDefaultW); max = 3x.  Session-local
+    // (not persisted) per Jeff's S9 call.
+    static constexpr int kBrowserDefaultW = 180;
+    int mBrowserWidth { kBrowserDefaultW };
+    struct BrowserEdgeGrip : juce::Component
+    {
+        std::function<int()>     getWidth;
+        std::function<void(int)> setWidth;
+        int mStartW { 0 };
+        BrowserEdgeGrip() { setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); }
+        void mouseDown (const juce::MouseEvent&) override
+            { mStartW = getWidth ? getWidth() : 0; }
+        void mouseDrag (const juce::MouseEvent& e) override
+            { if (setWidth) setWidth (mStartW + e.getDistanceFromDragStartX()); }
+        void paint (juce::Graphics& g) override
+            { g.fillAll (juce::Colour (0xff303640)); }
+    };
+    std::unique_ptr<BrowserEdgeGrip>      mBrowserGrip;
+
     std::unique_ptr<TrackHeaderPanel>     mTrackHeader;
     std::unique_ptr<ArrangementToolbar>   mToolbar;
     std::unique_ptr<juce::Viewport>       mGridViewport;

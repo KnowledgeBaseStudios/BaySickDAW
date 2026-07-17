@@ -1429,6 +1429,12 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
     // ── Pattern-dropdown label sync (10 Hz, repaints only on change) ──────────
     mPatternLabelTimer.startTimerHz(10);
+
+    // ── QA-Fe2 De-noise poll (input-assignment watch -> learner enable;
+    // 5 Hz is plenty for human assign gestures, matches the timer-poll idiom) ──
+    mVoxTakePick.fill (-1);
+    mVoxInputIdxLast.fill (-999);
+    mDenoisePollTimer.startTimerHz(5);
 }
 
 StandaloneEditor::~StandaloneEditor()
@@ -2779,6 +2785,19 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             // will spawn on the matching mixer strip + apply saved state.
         };
 
+        // QA-Fe2 De-noise: strength re-clean from the browser tree menu.
+        panel->onRegenerateDenoise = [this] (const juce::String& relPath, int strength)
+        {
+            return regenerateDenoise (relPath, strength);
+        };
+
+        // QA-Fe2: recording-group disk-rename flow.
+        panel->onRenameRecordingGroup = [this] (const juce::String& oldBase,
+                                                const juce::String& newBase)
+        {
+            return renameRecordingGroup (oldBase, newBase);
+        };
+
         panel->onEnumerateAudio = [this]() -> std::vector<CategorizedAudioEntry>
         {
             std::vector<CategorizedAudioEntry> out;
@@ -2803,6 +2822,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                 e.fullPath    = mProcessor.resolveProjectFile (path).getFullPathName();
                 if (e.fullPath.isEmpty()) e.fullPath = path;
                 e.displayName = alias.isNotEmpty() ? alias : juce::File (path).getFileName();
+                e.groupName   = mPM->getAudioLibraryGroup (libIdx);   // QA-Fe2
 
                 if (owner >= MixerChannelIds::kVoxBase
                     && owner <  MixerChannelIds::kVoxBase + MixerChannelIds::kMaxVoxStrips)
@@ -3643,6 +3663,18 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
         if (auto* dev = mDeviceManager.getCurrentAudioDevice())
             return dev->getName();
         return {};
+    };
+    // QA-Fe2: Builder Grid Default section in the same picker (replaced the
+    // arm popup).  State lives here so commitRecordingResult reads it.
+    page->onGetGridDefault = [this] (int voxIdx) -> int
+    {
+        return (voxIdx >= 0 && voxIdx < kDenoiseMaxVox)
+                 ? mVoxTakePick[(size_t) voxIdx] : -1;
+    };
+    page->onSetGridDefault = [this] (int voxIdx, int pick)
+    {
+        if (voxIdx >= 0 && voxIdx < kDenoiseMaxVox)
+            mVoxTakePick[(size_t) voxIdx] = juce::jlimit (0, 3, pick);
     };
     // G-4 (2026-04-28): "Add Vox Strip" / "Add Inst Strip" buttons in the
     // Mixer page are the spawn trigger for the matching ribbon page (no other
@@ -9034,6 +9066,11 @@ void StandaloneEditor::menuItemSelected(int id, int)
               while ((int)mHistoryLabels.size() > 1000) mHistoryLabels.pop_front();
               mHistoryCursor = juce::jmin(mHistoryCursor, 1000); break;
 
+    // QA-Fe2: File Settings (take-type checkboxes + De-noise strength)
+    case 502:
+        showFileSettingsDialog();
+        break;
+
     // Audio & MIDI Settings dialog - uses AudioSettingsDialog (safe Apply flow)
     case 503:
     {
@@ -11056,6 +11093,11 @@ void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
 {
     if (mPM == nullptr) return;
 
+    // QA-Fe2: grid-default picks are per-project session state ("locks until
+    // the project is shut down") -- every load path runs through here.
+    if (isLoadContext)
+        mVoxTakePick.fill (-1);
+
     // QA-Ef (2026-05-22): shield the audio-row rebuild on load paths.  This runs
     // just after deserializeProject returns (its shield already lowered), and
     // ensureAudioInsert below calls registerTask while applyPendingRackStates
@@ -11600,6 +11642,269 @@ void StandaloneEditor::sendPitchNotesToTab (int kind, int pageIndex,
     repaint();
 }
 
+// ── QA-Fe2 De-noise (2026-07-16) ─────────────────────────────────────────────
+
+namespace
+{
+    // Same PropertiesFile as BaySickPitchEditor's openUiPrefs (file-local
+    // there; duplicated rather than hoisted to keep this batch's blast
+    // radius inside the editor).
+    std::unique_ptr<juce::PropertiesFile> openDenoisePrefs()
+    {
+        juce::PropertiesFile::Options o;
+        o.applicationName    = "BaySickDAW";
+        o.filenameSuffix     = "xml";
+        o.folderName         = "BaySickDAW";
+        o.osxLibrarySubFolder = "Application Support";
+        return std::make_unique<juce::PropertiesFile> (
+            juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                .getChildFile ("BaySickDAW").getChildFile ("ui_prefs.xml"), o);
+    }
+}
+
+StandaloneEditor::FileTakeSettings StandaloneEditor::readFileTakeSettings() const
+{
+    auto p = openDenoisePrefs();
+    FileTakeSettings s;
+    // Defaults preserve today's behavior (DRY + WET written) until the user
+    // opts into cleaned takes; strength default = Strong (the ear-validated
+    // "cleantake" setting from the WORLD arc).
+    s.dry        = p->getBoolValue ("fsWriteDry",        true);
+    s.dryCleaned = p->getBoolValue ("fsWriteDryCleaned", false);
+    s.wet        = p->getBoolValue ("fsWriteWet",        true);
+    s.wetCleaned = p->getBoolValue ("fsWriteWetCleaned", false);
+    s.strength   = p->getIntValue  ("fsDenoiseStrength", (int) Denoise::Strong);
+    return s;
+}
+
+void StandaloneEditor::showFileSettingsDialog()
+{
+    // Standard app-styled dialog (503-pattern).  Live >=1 enforcement:
+    // unchecking the last checked take type re-checks it.
+    struct FileSettingsComp : juce::Component
+    {
+        juce::ToggleButton boxes[4];
+        juce::ComboBox strength;
+        juce::Label note, strengthLbl;
+
+        FileSettingsComp()
+        {
+            static const char* names[4] = { "Dry", "Dry Cleaned", "Wet", "Wet Cleaned" };
+            auto p = openDenoisePrefs();
+            static const char* keys[4]  = { "fsWriteDry", "fsWriteDryCleaned",
+                                            "fsWriteWet", "fsWriteWetCleaned" };
+            for (int i = 0; i < 4; ++i)
+            {
+                boxes[i].setButtonText (names[i]);
+                boxes[i].setToggleState (p->getBoolValue (keys[i], i == 0 || i == 2),
+                                         juce::dontSendNotification);
+                boxes[i].onClick = [this, i] { onBoxToggled (i); };
+                addAndMakeVisible (boxes[i]);
+            }
+            strengthLbl.setText ("De-noise strength:", juce::dontSendNotification);
+            addAndMakeVisible (strengthLbl);
+            strength.addItem ("Light",  1);
+            strength.addItem ("Strong", 2);
+            strength.setSelectedId (p->getIntValue ("fsDenoiseStrength", (int) Denoise::Strong) == (int) Denoise::Light ? 1 : 2,
+                                    juce::dontSendNotification);
+            strength.onChange = [this] { save(); };
+            addAndMakeVisible (strength);
+            note.setText ("Take types written at record stop. At least one stays checked; "
+                          "your Builder Grid Default pick is always written too.",
+                          juce::dontSendNotification);
+            note.setJustificationType (juce::Justification::topLeft);
+            addAndMakeVisible (note);
+            setSize (400, 250);
+        }
+
+        void onBoxToggled (int i)
+        {
+            if (! boxes[0].getToggleState() && ! boxes[1].getToggleState()
+                && ! boxes[2].getToggleState() && ! boxes[3].getToggleState())
+                boxes[i].setToggleState (true, juce::dontSendNotification);
+            save();
+        }
+        void save()
+        {
+            auto p = openDenoisePrefs();
+            p->setValue ("fsWriteDry",        boxes[0].getToggleState());
+            p->setValue ("fsWriteDryCleaned", boxes[1].getToggleState());
+            p->setValue ("fsWriteWet",        boxes[2].getToggleState());
+            p->setValue ("fsWriteWetCleaned", boxes[3].getToggleState());
+            p->setValue ("fsDenoiseStrength", strength.getSelectedId() == 1
+                                                ? (int) Denoise::Light : (int) Denoise::Strong);
+            p->saveIfNeeded();
+        }
+        void resized() override
+        {
+            auto b = getLocalBounds().reduced (12);
+            for (int i = 0; i < 4; ++i)
+                boxes[i].setBounds (b.removeFromTop (26));
+            b.removeFromTop (8);
+            auto row = b.removeFromTop (26);
+            strengthLbl.setBounds (row.removeFromLeft (140));
+            strength.setBounds (row.removeFromLeft (120));
+            b.removeFromTop (8);
+            note.setBounds (b);
+        }
+    };
+
+    juce::DialogWindow::LaunchOptions opts;
+    opts.dialogTitle            = "File Settings";
+    opts.dialogBackgroundColour = VC::Bg;
+    opts.content.setOwned (new FileSettingsComp());
+    opts.resizable              = false;
+    opts.useNativeTitleBar      = true;
+    opts.launchAsync();
+}
+
+void StandaloneEditor::pollDenoiseState()
+{
+    for (int i = 0; i < kDenoiseMaxVox; ++i)
+    {
+        const auto prefix = "mixer_vox_" + juce::String (i);
+        auto* idxP = mProcessor.apvts.getRawParameterValue (prefix + "_inputChannelIdx");
+        if (idxP == nullptr) continue;   // live-input params not registered yet
+
+        const int idx = (int) idxP->load();
+        if (idx != mVoxInputIdxLast[(size_t) i])
+        {
+            mVoxInputIdxLast[(size_t) i] = idx;
+            // Reassignment restarts the learners (new room, new fingerprint).
+            // The grid-default pick deliberately survives it (locks until the
+            // project closes -- Jeff's Task-5 call).
+            if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (mProcessor.voxEngineAt (i)))
+            {
+                vp->resetDenoiseLearners();
+                vp->setDenoiseLearnersEnabled (idx >= 0);
+            }
+        }
+    }
+
+    // QA-Fe2 PDC full-graph pass: re-solve every tick instead of watching
+    // only the vox chains -- ANY latency source can now move the solution
+    // (insert-rack bypass, engine switch, NAM/IR oversampling change,
+    // De-reverb toggle, project load).  updateBusLatencies no-op-guards its
+    // setDelay calls, so a steady-state tick costs a few hundred atomic
+    // reads; the host report only refreshes on an actual change.  <= 200 ms
+    // re-align lag at a live toggle -- inherent to toggling latent FX
+    // mid-play.
+    const int total = mProcessor.mVibeGraph.updateBusLatencies();
+    if (total != mPdcTotalLast)
+    {
+        mPdcTotalLast = total;
+        mProcessor.setLatencySamples (total);
+    }
+}
+
+bool StandaloneEditor::regenerateDenoise (const juce::String& relPath, int strength)
+{
+    // Stop-gate (Jeff, 2026-07-16): the menu greys this during playback; the
+    // hard guard covers every other entry path.
+    if (DSPBase::isTransportPlaying())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+            "Regenerate De-noise", "Stop playback first.", "OK");
+        return false;
+    }
+    const juce::File cleaned = mProcessor.resolveProjectFile (relPath);
+    const juce::String name  = cleaned.getFileNameWithoutExtension();
+    const bool isWet = name.endsWith (" - WET CLEANED");
+    const bool isDry = name.endsWith (" - DRY CLEANED");
+    if (! isWet && ! isDry) return false;
+
+    const juce::String base = name.upToLastOccurrenceOf (isWet ? " - WET CLEANED"
+                                                                : " - DRY CLEANED", false, false);
+    const juce::File source = cleaned.getSiblingFile (base + (isWet ? " - WET.wav" : " - DRY.wav"));
+
+    DenoiseProfile prof;
+    if (auto* pair = mProcessor.findDenoiseProfiles (base))
+        prof = isWet ? pair->second : pair->first;
+    if (! prof.isValid() && source.existsAsFile())
+        prof = Denoise::learnFromFile (source);      // pre-feature recording fallback
+
+    juce::String err;
+    if (! source.existsAsFile())
+        err = "Source take " + source.getFileName() + " no longer exists.";
+    else
+        Denoise::cleanFile (source, cleaned, prof, (Denoise::Strength) strength, err);
+
+    if (err.isNotEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+            "Regenerate De-noise",
+            err + "\n\nIf this take is on the Builder grid, its file may be held "
+                  "open by playback - remove the clip and try again.", "OK");
+        return false;
+    }
+    mProcessor.rebuildAudioClipPlayers();
+    if (mProjectManager) mProjectManager->markDirty();
+    return true;
+}
+
+bool StandaloneEditor::renameRecordingGroup (const juce::String& oldBase,
+                                             const juce::String& newBase)
+{
+    if (DSPBase::isTransportPlaying())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+            "Rename Group", "Stop playback first.", "OK");
+        return false;
+    }
+    if (! mPM || newBase.isEmpty() || newBase == oldBase) return false;
+    static const char* kTags[4] = { " - DRY", " - DRY CLEANED", " - WET", " - WET CLEANED" };
+
+    struct MoveOp { juce::File from, to; juce::String oldRel, newRel; };
+    std::vector<MoveOp> ops;
+    for (auto* tag : kTags)
+    {
+        const juce::String oldRel = "Samples/" + oldBase + tag + ".wav";
+        const juce::File   from   = mProcessor.resolveProjectFile (oldRel);
+        if (! from.existsAsFile()) continue;
+        const juce::File to = from.getSiblingFile (newBase + tag + ".wav");
+        if (to.existsAsFile())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                "Rename Group",
+                "A file named " + to.getFileName() + " already exists.", "OK");
+            return false;
+        }
+        ops.push_back ({ from, to, oldRel, "Samples/" + newBase + tag + ".wav" });
+    }
+    if (ops.empty()) return false;
+
+    // Order is load-bearing: (1) repoint every library/block reference at
+    // the NEW paths, (2) rebuild players so the streamers release the OLD
+    // files (new paths don't exist yet -> those clips skip for a moment),
+    // (3) rename on disk, (4) rebuild again on the now-real files.
+    for (const auto& op : ops)
+        mPM->replaceAudioPath (op.oldRel, op.newRel);
+    mProcessor.rebuildAudioClipPlayers();
+
+    bool ok = true;
+    for (size_t i = 0; i < ops.size(); ++i)
+        if (! ops[i].from.moveFileTo (ops[i].to))
+        {
+            ok = false;
+            for (size_t j = 0; j <= i; ++j)
+                ops[j].to.moveFileTo (ops[j].from);   // roll back completed moves
+            for (const auto& op : ops)
+                mPM->replaceAudioPath (op.newRel, op.oldRel);
+            break;
+        }
+
+    if (ok)
+        mProcessor.renameDenoiseProfiles (oldBase, newBase);
+    mProcessor.rebuildAudioClipPlayers();
+    if (mProjectManager) mProjectManager->markDirty();
+    if (! ok)
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+            "Rename Group",
+            "Could not rename one of the takes (a file may be held open by "
+            "playback).  All changes were rolled back.", "OK");
+    return ok;
+}
+
 // ── R5d (2026-04-24): post-stop recording routing ───────────────────────────
 void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordResult& res)
 {
@@ -11741,19 +12046,77 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
     {
         if (isVoxCh (chId))
         {
+            // QA-Fe2 De-noise: written take set = File Settings checkboxes
+            // UNION the Builder Grid Default session pick; the pick lands on the grid,
+            // the rest go browser-only; unselected source takes are deleted
+            // (the checkboxes decide which files exist, per Jeff's spec).
+            const int voxIdx = chId - MixerChannelIds::kVoxBase;
             const juce::File wetFile = findWet (chId);
-            const juce::String dryRel = "Samples/" + dryFile.getFileName();
-            // Add DRY to Audio Browser only (it doesn't go on the grid; the
-            // BaySickPitch offline editor loads it).
-            // QA-E Task 4 (2026-05-12): tag DRY with this Vox page's
-            // channel id so the browser groups it under the Vox category
-            // alongside the WET take (which dropWavAsClip tags below).
-            mPM->addAudioToLibrary (dryRel, {}, chId);
+            const bool haveWet = wetFile.existsAsFile();
 
-            if (wetFile.existsAsFile())
-                dropWavAsClip (wetFile, chId);     // WET on grid + linked to Vox page
-            else
-                dropWavAsClip (dryFile, chId);     // fallback if wet capture failed
+            const auto fs = readFileTakeSettings();
+            int pick = (voxIdx >= 0 && voxIdx < kDenoiseMaxVox)
+                         ? mVoxTakePick[(size_t) voxIdx] : -1;
+            if (pick < 0) pick = haveWet ? kTakeWet : kTakeDry;   // legacy rule
+            if (! haveWet && pick >= kTakeWet)
+                pick = (pick == kTakeWetCleaned) ? kTakeDryCleaned : kTakeDry;
+
+            bool want[4] = { fs.dry, fs.dryCleaned,
+                             fs.wet && haveWet, fs.wetCleaned && haveWet };
+            want[pick] = true;
+
+            // Profiles: live learners first; a take recorded before the
+            // learners warmed up self-learns from its own file (the method
+            // the cleantake prototype validated).
+            DenoiseProfile rawProf, wetProf;
+            if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (mProcessor.voxEngineAt (voxIdx)))
+                vp->getDenoiseProfiles (rawProf, wetProf);
+            if ((want[kTakeDryCleaned]) && ! rawProf.isValid())
+                rawProf = Denoise::learnFromFile (dryFile);
+            if ((want[kTakeWetCleaned] && haveWet) && ! wetProf.isValid())
+                wetProf = Denoise::learnFromFile (wetFile);
+
+            juce::String base = dryFile.getFileNameWithoutExtension();
+            base = base.upToLastOccurrenceOf (" - DRY", false, false);
+            if (rawProf.isValid() || wetProf.isValid())
+                mProcessor.storeDenoiseProfiles (base, rawProf, wetProf);
+
+            const auto strength = (Denoise::Strength) fs.strength;
+            juce::File takes[4] = {
+                dryFile,
+                dryFile.getSiblingFile (base + " - DRY CLEANED.wav"),
+                wetFile,
+                haveWet ? wetFile.getSiblingFile (base + " - WET CLEANED.wav") : juce::File() };
+
+            juce::String err;
+            if (want[kTakeDryCleaned]
+                && ! Denoise::cleanFile (dryFile, takes[kTakeDryCleaned], rawProf, strength, err))
+            {
+                want[kTakeDryCleaned] = false;
+                if (pick == kTakeDryCleaned) pick = kTakeDry;
+            }
+            if (want[kTakeWetCleaned] && haveWet
+                && ! Denoise::cleanFile (wetFile, takes[kTakeWetCleaned], wetProf, strength, err))
+            {
+                want[kTakeWetCleaned] = false;
+                if (pick == kTakeWetCleaned) pick = kTakeWet;
+            }
+            want[pick] = true;   // a clean-failure fallback must still land
+
+            for (int t = 0; t < 4; ++t)
+            {
+                if (takes[t] == juce::File() || ! takes[t].existsAsFile()) continue;
+                if (! want[t])
+                {
+                    if (t == kTakeDry || t == kTakeWet)
+                        takes[t].deleteFile();     // unselected source take
+                    continue;
+                }
+                if (t == pick)
+                    dropWavAsClip (takes[t], chId);
+                else
+                    mPM->addAudioToLibrary ("Samples/" + takes[t].getFileName(), {}, chId);
+            }
         }
         else if (isInstCh (chId))
         {

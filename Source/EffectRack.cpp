@@ -11,6 +11,8 @@
 #include "DSP/TapeDSP.h"
 #include "DSP/LimiterDSP.h"
 #include "DSP/DeEsserDSP.h"
+#include "DSP/GateDSP.h"      // QA-Fe2 vocal-chain Gate
+#include "DSP/DeReverbDSP.h"  // QA-Fe2 vocal-chain De-reverb
 // I-5 (2026-05-02): Harmonics drive pedals batch -- 4 new DSP classes.
 #include "DSP/BluesDriveStyleDSP.h"
 #include "DSP/DistortionStyleDSP.h"
@@ -74,6 +76,8 @@ std::unique_ptr<DSPBase> EffectRack::createEffect(EffectType type)
         }
         case EffectType::Limiter:         return std::make_unique<LimiterDSP>();
         case EffectType::DeEsser:         return std::make_unique<DeEsserDSP>();
+        case EffectType::Gate:            return std::make_unique<GateDSP>();      // QA-Fe2
+        case EffectType::DeReverb:        return std::make_unique<DeReverbDSP>();  // QA-Fe2
 
         // I-5 (2026-05-02): BaySickPedals Harmonics drive pedals batch.
         case EffectType::BluesDriveStyle: return std::make_unique<BluesDriveStyleDSP>();
