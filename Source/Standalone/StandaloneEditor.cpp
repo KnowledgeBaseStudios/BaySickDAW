@@ -1,5 +1,6 @@
 #include "StandaloneEditor.h"
 #include "StandaloneApp.h"   // J-A2: MasterOutputRouting + saveMasterOutputRouting
+#include "../TsMapRead.h"    // QA-G Task 6: played-TS source (marker map) for song mode
 #include "../PatternManager.h"
 #include "../ProjectManager.h"
 #include "ProjectBrowserWindow.h"
@@ -475,6 +476,15 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // route through APVTS - chain into ProjectManager::markDirty.
     if (mPM)
         mPM->onAnyChange = [this] { if (mProjectManager) mProjectManager->markDirty(); };
+    // QA-G Task 6: immediate UI refresh on TS lifecycle changes (the rolls +
+    // pattern-button label also self-heal on their timers; this just makes
+    // the response instant).
+    if (mPM)
+        mPM->onTimeSigStateChanged = [this]
+        {
+            refreshPatternBox();
+            if (mBuilderPage) mBuilderPage->repaint();
+        };
 
     // 2026-05-05 dirty-flag wiring: VU calibration target changes.  Default is
     // -18 dBFS; persists per-project via <VUCalibration> in UIState.  Static
@@ -780,11 +790,17 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         mProcessor.mSongLoopMode.store(loop, std::memory_order_relaxed);
     };
     // C.5b (post-revert): report the CURRENT PATTERN's intrinsic TS to the
-    // playhead each tick (FL-style - pattern owns its TS).  Song-level TS
-    // markers are decorative-only and don't drive the playhead.
+    // playhead each tick.  QA-G Task 6 (docket #14): grid TS markers are the
+    // SOLE played source -- song mode reads the marker map at the playhead
+    // position; pattern mode uses the pattern's effective signature.
     mTransport->onGetTimeSig = [this](int& outNum, int& outDen) {
         outNum = 4; outDen = 4;
-        if (auto* pm = mProcessor.getPatternManager())
+        if (mTransport && mTransport->isSongMode() && TsMap::isActive())
+        {
+            const auto bb = TsMap::barBeatAt (juce::jmax (0.0, mPlayHead.getCurrentBeat()));
+            outNum = bb.num; outDen = bb.den;
+        }
+        else if (auto* pm = mProcessor.getPatternManager())
         {
             outNum = pm->currentPattern().tsNum;
             outDen = pm->currentPattern().tsDen;
@@ -890,10 +906,14 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     mPosReadout->onGetBeat         = [this] { return mPlayHead.getCurrentBeat(); };
     mPosReadout->onGetTimeSeconds  = [this] { return mPlayHead.getCurrentTimeSeconds(); };
     mPosReadout->onGetSongMode     = [this] { return mTransport && mTransport->isSongMode(); };
-    mPosReadout->onGetPatternTsNum = [this]
+    mPosReadout->onGetPatternTs = [this] (int& outNum, int& outDen)
     {
-        if (auto* pm = mProcessor.getPatternManager()) return pm->currentPattern().tsNum;
-        return 4;
+        outNum = 4; outDen = 4;
+        if (auto* pm = mProcessor.getPatternManager())
+        {
+            outNum = pm->currentPattern().tsNum;
+            outDen = pm->currentPattern().tsDen;
+        }
     };
     mPosReadout->onDisplayModeChanged = [this] (bool showTime) { saveTransportDisplayPref (showTime); };
     loadTransportDisplayPref();
@@ -1011,40 +1031,46 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         int cur = mPM->getCurrentPatternIndex();
         int n   = mPM->getNumPatterns();
 
-        // List all patterns - tick marks current
+        // List all patterns - tick marks current.  QA-G Task 6 (docket #2):
+        // non-4/4 effective signatures suffix the name ("Synths 7/8").
         for (int i = 0; i < n; ++i)
-            m.addItem(i + 1, mPM->getPattern(i).name, true, i == cur);
+        {
+            const auto& p = mPM->getPattern(i);
+            const juce::String sfx = (p.tsNum == 4 && p.tsDen == 4)
+                ? juce::String()
+                : " " + juce::String(p.tsNum) + "/" + juce::String(p.tsDen);
+            m.addItem(i + 1, p.name + sfx, true, i == cur);
+        }
 
         m.addSeparator();
         m.addItem(-1, juce::String(juce::CharPointer_UTF8("\xe2\x9e\x95")) + "  New Pattern");
         m.addSeparator();
         m.addItem(-2, "Rename...");
         m.addItem(-4, "Change Color...");   // F-1 (2026-04-26)
-        // C.5b: per-pattern intrinsic time signature.  Auto-derived on first
-        // Builder placement; manual override here.
+        // QA-G Task 6 (docket B): the pattern TS surface is the same TYPE-IN
+        // popup the grid markers use, with Reset to Default re-entering the
+        // follower lifecycle.  Replaces the old 8-preset submenu.
         {
-            juce::PopupMenu tsSub;
-            const int curN = mPM->currentPattern().tsNum;
-            const int curD = mPM->currentPattern().tsDen;
-            const bool locked = mPM->currentPattern().tsLocked;
-            struct TsOpt { int n, d; const char* lbl; };
-            static const TsOpt kTsOpts[] = {
-                {4,4,"4/4"}, {3,4,"3/4"}, {2,4,"2/4"}, {6,8,"6/8"},
-                {5,4,"5/4"}, {7,8,"7/8"}, {12,8,"12/8"}, {9,8,"9/8"}
-            };
-            int tsIdBase = 200;   // -200..-207 for the 8 presets
-            for (int i = 0; i < 8; ++i)
+            const auto& curPat = mPM->currentPattern();
+            m.addItem (-200, juce::String("Set Time Signature... (")
+                             + juce::String (curPat.tsNum) + "/" + juce::String (curPat.tsDen)
+                             + (curPat.tsLocked ? ", user-set)" : ", following)"));
+        }
+        // Docket #4 revision: which marker newly-created patterns bind to.
+        // Grayed until 2+ markers exist; auto-selected by the add prompt.
+        {
+            juce::PopupMenu curSub;
+            const int nTs    = mPM->getNumTimeSigChanges();
+            const int curUid = mPM->getCurrentTsMarkerUid();
+            for (int i = 0; i < nTs && i < 64; ++i)
             {
-                const auto& o = kTsOpts[i];
-                const bool tick = (curN == o.n && curD == o.d);
-                tsSub.addItem (-(tsIdBase + i), o.lbl, true, tick);
+                const auto& ts = mPM->getTimeSigChange (i);
+                curSub.addItem (-(300 + i),
+                    "Bar " + juce::String (ts.bar + 1) + "  -  "
+                    + juce::String (ts.num) + "/" + juce::String (ts.den),
+                    true, ts.uid == curUid);
             }
-            tsSub.addSeparator();
-            tsSub.addItem (-208, juce::String("Status: ")
-                                   + (locked ? juce::String("locked at ") + juce::String(curN) + "/" + juce::String(curD)
-                                             : juce::String("default 4/4 (will auto-derive on first placement)")),
-                          false /* disabled, info-only */);
-            m.addSubMenu ("Set Time Signature", tsSub);
+            m.addSubMenu ("Current Time Signature (new patterns)", curSub, nTs >= 2);
         }
         m.addItem(-3, "Delete", n > 1);   // grey out if only one pattern
 
@@ -1110,22 +1136,50 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                             if (mBuilderPage) mBuilderPage->repaint();
                         });
                 }
-                else if (result <= -200 && result >= -207)
+                else if (result == -200)
                 {
-                    // C.5b: manual TS override on current pattern.
-                    struct TsOpt { int n, d; };
-                    static const TsOpt kTsOpts[] = {
-                        {4,4},{3,4},{2,4},{6,8},{5,4},{7,8},{12,8},{9,8}
-                    };
-                    const int optIdx = (-result) - 200;
-                    if (optIdx >= 0 && optIdx < 8)
-                    {
-                        const int idx = mPM->getCurrentPatternIndex();
-                        mPM->setPatternTimeSig (idx, kTsOpts[optIdx].n, kTsOpts[optIdx].d);
-                        // Repaint everything that depends on pattern TS.
-                        if (mPianoRollPage) mPianoRollPage->repaint();
-                        if (mBuilderPage)   mBuilderPage->repaint();
-                    }
+                    // QA-G Task 6: type-in TS dialog (marker-popup parity)
+                    // with Reset to Default (docket #1: clears the user-set
+                    // lock, removes the pattern's still-linked auto-markers,
+                    // re-enters the follower lifecycle).
+                    const int idx = mPM->getCurrentPatternIndex();
+                    const auto& curPat = mPM->currentPattern();
+                    auto* aw = new juce::AlertWindow ("Pattern Time Signature",
+                        "Time signature for \"" + curPat.name + "\":",
+                        juce::MessageBoxIconType::NoIcon);
+                    aw->addTextEditor ("num", juce::String (curPat.tsNum));
+                    aw->addTextEditor ("den", juce::String (curPat.tsDen));
+                    aw->addTextBlock ("Format: numerator (1-32) / denominator (power of 2: "
+                                      "1, 2, 4, 8, 16, 32). Reset to Default returns the "
+                                      "pattern to following the grid markers.");
+                    aw->addButton ("Set", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                    aw->addButton ("Reset to Default", 2);
+                    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                    aw->enterModalState (true,
+                        juce::ModalCallbackFunction::create ([this, idx, aw](int r)
+                        {
+                            if (r == 1)
+                            {
+                                const int n2 = aw->getTextEditorContents("num").getIntValue();
+                                const int d2 = aw->getTextEditorContents("den").getIntValue();
+                                if (n2 > 0 && d2 > 0)
+                                    mPM->setPatternTimeSig (idx, n2, d2);
+                            }
+                            else if (r == 2)
+                            {
+                                mPM->resetPatternTimeSig (idx);
+                            }
+                            refreshPatternBox();
+                            if (mPianoRollPage) mPianoRollPage->repaint();
+                            if (mBuilderPage)   mBuilderPage->repaint();
+                        }), true);
+                }
+                else if (result <= -300 && result >= -363)
+                {
+                    // Docket #4: manual current-TS re-pick.
+                    const int tsIdx = (-result) - 300;
+                    if (tsIdx >= 0 && tsIdx < mPM->getNumTimeSigChanges())
+                        mPM->setCurrentTsMarkerUid (mPM->getTimeSigChange (tsIdx).uid);
                 }
                 else if (result == -3)
                 {
@@ -2181,6 +2235,31 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             pushTempoMarkersToPlayHead();
             if (mProjectManager) mProjectManager->markDirty();
         };
+
+        // QA-G (Split by Player Engine): resolve a (family, engine index) to
+        // its ribbon tab's display name -- tab names auto-populate from
+        // presets, so they are the most accurate split-pattern labels.
+        grid->onGetEngineTabName = [this] (int kind, int index) -> juce::String
+        {
+            if (! mRibbon) return {};
+            for (auto* e : mPages)
+            {
+                if (e == nullptr || e->component == nullptr) continue;
+                int pi = -1;
+                switch (kind)
+                {
+                    case 0: if (auto* p = dynamic_cast<LayersPage*> (e->component.get())) pi = p->getPageIndex(); break;
+                    case 1: if (auto* p = dynamic_cast<BassPage*>   (e->component.get())) pi = p->getPageIndex(); break;
+                    case 2: if (auto* p = dynamic_cast<DrumPage*>   (e->component.get())) pi = p->getPageIndex(); break;
+                    case 3: if (auto* p = dynamic_cast<ClipsPage*>  (e->component.get())) pi = p->getPageIndex(); break;
+                    case 4: if (auto* p = dynamic_cast<InstPage*>   (e->component.get())) pi = p->getPageIndex(); break;
+                    default: break;
+                }
+                if (pi == index)
+                    return mRibbon->getTabName (e->ribbonTabId);
+            }
+            return {};
+        };
         pushTempoMarkersToPlayHead();   // initial publish (also seeds the timeline at startup)
 
         // QA-E Task 7 (FILE-02): enumerate every Vox/Inst/Clips page for the
@@ -2745,7 +2824,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             // / Inst would land here once G-9 wires recording-to-file but
             // those don't have an "import via Builder" path yet, so the
             // Vox/Inst branches below stay null at this stage.
-            constexpr int kMaxRows = 32;
+            constexpr int kMaxRows = ArrangementGrid::kNumRows;
             std::array<bool, kMaxRows> rowHasAudio {};
             for (int i = 0; i < mPM->getNumBlocks(); ++i)
             {
@@ -5599,7 +5678,13 @@ void StandaloneEditor::showPageForTab(int tabId)
 void StandaloneEditor::refreshPatternBox()
 {
     if (!mPM || mPM->getNumPatterns() == 0) return;
-    juce::String label = mPM->currentPattern().name
+    // QA-G Task 6 (docket #2): non-4/4 EFFECTIVE signatures show as a name
+    // suffix ("Synths 7/8") -- followers included.
+    const auto& curPat = mPM->currentPattern();
+    const juce::String tsSuffix = (curPat.tsNum == 4 && curPat.tsDen == 4)
+        ? juce::String()
+        : " " + juce::String(curPat.tsNum) + "/" + juce::String(curPat.tsDen);
+    juce::String label = curPat.name + tsSuffix
                        + "  "
                        + juce::String(juce::CharPointer_UTF8("\xe2\x96\xbe"));  // ▾
     // Change-guarded: also called at 10 Hz by mPatternLabelTimer, so skip the
@@ -5614,14 +5699,29 @@ void StandaloneEditor::refreshPatternBox()
 void StandaloneEditor::startPlayback(double bpm)
 {
     // 2026-04-26 (D-5): precount fires only when both record-arm AND the
-    // precount toggle are on.  Always exactly 1 bar (4 beats) lead-in;
-    // recording engages when bar 1 arrives.  Was variable 1/2/4 bars,
-    // selectable in the metronome panel - simplified per user feedback.
+    // precount toggle are on; exactly 1 bar of lead-in, recording engages
+    // when bar 1 arrives.  QA-G Task 6: the bar is measured at the RECORD
+    // POSITION'S signature (song = marker map at the playhead; pattern =
+    // the pattern's effective TS) -- duration, click unit, and accent all
+    // follow it (a 7/8 count-in is 3.5 quarter-beats of seven 8th clicks).
     if (mPrecountEnabled && mRecordArmed)
     {
-        const double totalBeats = 4.0;   // 1 bar
+        int ciN = 4, ciD = 4;
+        if (mTransport && mTransport->isSongMode() && TsMap::isActive())
+        {
+            const auto bb = TsMap::barBeatAt (juce::jmax (0.0, mPlayHead.getCurrentBeat()));
+            ciN = juce::jmax (1, bb.num); ciD = juce::jmax (1, bb.den);
+        }
+        else if (mPM)
+        {
+            ciN = juce::jmax (1, mPM->currentPattern().tsNum);
+            ciD = juce::jmax (1, mPM->currentPattern().tsDen);
+        }
+        const double totalBeats = (double) ciN * 4.0 / (double) ciD;   // 1 bar
         const int    delayMs    = juce::roundToInt(totalBeats * (60000.0 / juce::jmax(1.0, bpm)));
 
+        mProcessor.mMetro.countInNum.store(ciN, std::memory_order_relaxed);
+        mProcessor.mMetro.countInDen.store(ciD, std::memory_order_relaxed);
         mProcessor.mMetro.countInBpm.store(bpm, std::memory_order_relaxed);
         mProcessor.mMetro.countInActive.store(true, std::memory_order_relaxed);
         mTransport->setPlayState(true, false);

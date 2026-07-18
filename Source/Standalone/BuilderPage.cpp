@@ -1287,6 +1287,7 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
     m.addSeparator();
     if (kind == BrowserItem::Kind::Pattern) {
         m.addItem(2, "Render to WAV...");
+        m.addItem(7, "Split by Player Engine...");   // QA-G (owner docket 5)
         m.addSeparator();
     }
     m.addItem(3, "Delete");
@@ -1311,6 +1312,11 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
             if (result == 2 && kind == BrowserItem::Kind::Pattern)
             {
                 if (onRenderPattern) onRenderPattern(idx);
+                return;
+            }
+            if (result == 7 && kind == BrowserItem::Kind::Pattern)
+            {
+                if (onSplitPattern) onSplitPattern(idx);
                 return;
             }
             if (result == 6 && kind == BrowserItem::Kind::Pattern)
@@ -1585,9 +1591,6 @@ ArrangementGrid::ArrangementGrid(PatternManager& pm,
                                  AudioThumbnailCache& thumbCache)
     : mPM(pm), mAFM(afm), mThumbCache(thumbCache)
 {
-    for (int r = 0; r < kNumRows; ++r)
-        mRowNames[r] = "Track " + String(r + 1);
-
     setWantsKeyboardFocus(true);
 }
 
@@ -1606,6 +1609,11 @@ float ArrangementGrid::xToBar(int x) const
     return mBarOff + (float)x / mPPBar;
 }
 
+float ArrangementGrid::xToBarF(float x) const
+{
+    return mBarOff + x / mPPBar;
+}
+
 int ArrangementGrid::rowToY(int row) const
 {
     return kRulerH + (int)(row * mEffectiveRowH);
@@ -1613,8 +1621,25 @@ int ArrangementGrid::rowToY(int row) const
 
 int ArrangementGrid::yToRow(int y) const
 {
-    int rh = jmax(1, (int)mEffectiveRowH);
-    return (y - kRulerH) / rh;
+    // Float division to stay consistent with rowToY's float product -- int
+    // row-height truncation drifts rows apart at fractional zoom levels.
+    return (int) std::floor ((float)(y - kRulerH) / jmax (1.f, mEffectiveRowH));
+}
+
+int ArrangementGrid::rowHeightPx(int row) const
+{
+    return rowToY(row + 1) - rowToY(row);
+}
+
+// Ruler pinning: the band draws on the scrolling content surface but stays
+// glued to the top of the VISIBLE area by offsetting all ruler drawing and
+// ruler hit-tests by the parent Viewport's vertical scroll.  Row/block
+// geometry keeps its kRulerH content inset (grid-local mappings unchanged).
+int ArrangementGrid::rulerPinY() const
+{
+    if (auto* vp = findParentComponentOfClass<juce::Viewport>())
+        return jmax(0, vp->getViewPositionY());
+    return 0;
 }
 
 float ArrangementGrid::snapBar(float bar) const
@@ -1634,6 +1659,21 @@ float ArrangementGrid::snapBarAlt(float bar) const
     const int g = (div == 1) ? dynamicSnapTicks ((double) mPPBar)
                              : snapDivToTicks (div);
     if (g <= 0) return bar;
+    if (g >= 384 && bar > 0.f)
+    {
+        // QA-G Task 6: bar-level snap targets MAP bar starts (bars resize at
+        // markers); multi-bar divisions step in whole map bars.  Negative
+        // (pre-roll) territory stays uniform via the generic path below.
+        const int barsPer = juce::jmax (1, g / 384);
+        int bi = 0; double bib = 0.0;
+        mPM.beatToBarAndBeatInBar ((double) bar * 4.0, bi, bib);
+        const int    b0 = (bi / barsPer) * barsPer;
+        const int    b1 = b0 + barsPer;
+        const double p  = (double) bar * 4.0;
+        const double s0 = mPM.barStartBeat (b0);
+        const double s1 = mPM.barStartBeat (b1);
+        return (float) (((p - s0 <= s1 - p) ? s0 : s1) / 4.0);
+    }
     const double ticks   = (double) bar * 384.0;                          // bar -> ticks
     const double snapped = std::round (ticks / (double) g) * (double) g;  // nearest grid tick
     return (float) (snapped / 384.0);                                     // ticks -> bar
@@ -1658,7 +1698,7 @@ int ArrangementGrid::totalVisibleBars() const
 // ─────────────────────────────────────────────────────────────────────────────
 int ArrangementGrid::blockAtPos(int x, int y) const
 {
-    if (y < kRulerH) return -1;
+    if (y < rulerPinY() + kRulerH) return -1;
     int row = yToRow(y);
     for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
     {
@@ -1668,7 +1708,7 @@ int ArrangementGrid::blockAtPos(int x, int y) const
         // clips (possibly negative-start, sub-bar precision) hit-test on
         // their actual visible position, not the legacy int-bar startBar.
         int bx = barToX((float) effectiveStartBars(b));
-        int bw = (int)(effectiveLengthBars(b) * mPPBar);
+        int bw = barToX((float)(effectiveStartBars(b) + effectiveLengthBars(b))) - bx;
         if (x >= bx && x < bx + bw) return i;
     }
     return -1;
@@ -1678,7 +1718,7 @@ bool ArrangementGrid::nearRightEdge(int blockIdx, int x) const
 {
     const auto& b = mPM.getBlock(blockIdx);
     int bx = barToX((float) effectiveStartBars(b));
-    int bw = (int)(effectiveLengthBars(b) * mPPBar);
+    int bw = barToX((float)(effectiveStartBars(b) + effectiveLengthBars(b))) - bx;
     return (x >= bx + bw - kResizeZone && x < bx + bw + 2);
 }
 
@@ -1768,9 +1808,9 @@ int ArrangementGrid::hitTestAutomPoint(int blockIdx, int x, int y) const
     if (b.clipType != ClipType::Automation) return -1;
 
     int bx = barToX((float)b.startBar);
-    int bw = jmax(4, (int)(effectiveLengthBars(b) * mPPBar) - 1);
+    int bw = jmax(4, barToX((float)(b.startBar + effectiveLengthBars(b))) - bx - 1);
     int by = rowToY(b.trackRow) + 2;
-    int bh = (int)mEffectiveRowH - 4;
+    int bh = rowHeightPx(b.trackRow) - 4;
 
     const auto& pts = b.automationLane.points;
     for (int i = (int)pts.size() - 1; i >= 0; --i)
@@ -1783,6 +1823,65 @@ int ArrangementGrid::hitTestAutomPoint(int blockIdx, int x, int y) const
             return i;
     }
     return -1;
+}
+
+// QA-G Task 5: evaluate a lane at normalized position t exactly the way the
+// playback applicator does (linear segments; Stepped holds the left value;
+// tension is not applied at runtime -- mirror of PluginProcessor's apply).
+static float evalAutomationLaneAt (std::vector<ControlPoint> pts, float t)
+{
+    if (pts.empty()) return 0.5f;
+    std::sort (pts.begin(), pts.end(),
+               [](const ControlPoint& a, const ControlPoint& b){ return a.timeTicks < b.timeTicks; });
+    if ((int) pts.size() == 1 || t <= pts.front().timeTicks) return pts.front().value01;
+    if (t >= pts.back().timeTicks) return pts.back().value01;
+    for (int i = 0; i < (int) pts.size() - 1; ++i)
+    {
+        if (t >= pts[i].timeTicks && t <= pts[i + 1].timeTicks)
+        {
+            if (pts[i].curveType == CurveType::Stepped) return pts[i].value01;
+            const float span = pts[i + 1].timeTicks - pts[i].timeTicks;
+            const float u    = (span > 0.f) ? (t - pts[i].timeTicks) / span : 0.f;
+            return pts[i].value01 + u * (pts[i + 1].value01 - pts[i].value01);
+        }
+    }
+    return pts.back().value01;
+}
+
+// QA-G Task 5: physically split a lane at a normalized cut position -- each
+// side keeps its own points renormalized to 0..1 plus an interpolated
+// boundary point, so both pieces keep playing exactly what they played
+// before the cut (lane points are block-relative).
+static void splitAutomationLane (AutomationLane& leftLane, AutomationLane& rightLane, float cutFrac)
+{
+    cutFrac = juce::jlimit (0.001f, 0.999f, cutFrac);
+    const float cutVal = evalAutomationLaneAt (leftLane.points, cutFrac);
+
+    std::vector<ControlPoint> sorted = leftLane.points;
+    std::sort (sorted.begin(), sorted.end(),
+               [](const ControlPoint& a, const ControlPoint& b){ return a.timeTicks < b.timeTicks; });
+
+    std::vector<ControlPoint> left, right;
+    for (const auto& p : sorted)
+    {
+        ControlPoint q = p;
+        if (p.timeTicks < cutFrac)
+        {
+            q.timeTicks = p.timeTicks / cutFrac;
+            left.push_back (q);
+        }
+        else
+        {
+            q.timeTicks = (p.timeTicks - cutFrac) / (1.f - cutFrac);
+            right.push_back (q);
+        }
+    }
+    ControlPoint bL; bL.timeTicks = 1.f; bL.value01 = cutVal; bL.curveType = CurveType::Linear; bL.tension = 0.f;
+    ControlPoint bR; bR.timeTicks = 0.f; bR.value01 = cutVal; bR.curveType = CurveType::Linear; bR.tension = 0.f;
+    left.push_back (bL);
+    right.insert (right.begin(), bR);
+    leftLane.points  = std::move (left);
+    rightLane.points = std::move (right);
 }
 
 // Returns original lane->points index of the LEFT-side control point of the
@@ -1834,7 +1933,7 @@ static int hitTestAutomCurveHandleInBlock(const AutomationLane& lane,
 // ─────────────────────────────────────────────────────────────────────────────
 void ArrangementGrid::setRowName(int row, const juce::String& name)
 {
-    if (row >= 0 && row < kNumRows) { mRowNames[row] = name; repaint(); }
+    if (row >= 0 && row < kNumRows) { mPM.setRowName(row, name); repaint(); }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1918,17 +2017,21 @@ const juce::Image* ArrangementGrid::getOrBakeWaveformImage (
 void ArrangementGrid::drawRuler(Graphics& g) const
 {
     auto b = getLocalBounds();
+    // Pinned band: every ruler y is offset by the viewport's vertical scroll
+    // so the band tracks the top of the VISIBLE area, not content y=0.
+    const int   yPin = rulerPinY();
+    const float fPin = (float) yPin;
     g.setColour(kHeaderBg);
-    g.fillRect(0, 0, b.getWidth(), kRulerH);
+    g.fillRect(0, yPin, b.getWidth(), kRulerH);
     g.setColour(VC::Accent.withAlpha(0.6f));
-    g.drawHorizontalLine(kRulerH - 1, 0.f, (float)b.getWidth());
+    g.drawHorizontalLine(yPin + kRulerH - 1, 0.f, (float)b.getWidth());
 
     int totalBars = totalVisibleBars();
     int maxBar    = (int)mBarOff + b.getWidth() / jmax(1, (int)mPPBar) + 2;
 
     // Subdivision tick marks in ruler (adaptive: beat / 1/8 / 1/16 / 1/32).
-    // C.5b (post-revert): Builder grid is uniform 4-beat-per-bar.  Song-level
-    // TS markers are decorative flags drawn separately, not driving the grid.
+    // QA-G Task 6: positions stay beat-uniform (the uniform-position domain
+    // is quarter-beats/4); BAR lines below come from the marker map.
     static constexpr float kMinRulerSpacing = 5.f;
     struct RulerLevel { int denom; float tickH; Colour col; };
     const RulerLevel rulerLevels[] = {
@@ -1945,37 +2048,49 @@ void ArrangementGrid::drawRuler(Graphics& g) const
         g.setColour(rl.col);
         for (float bar = startBar; bar <= (float)(maxBar + 1); bar += step)
         {
-            // Skip positions that are whole bars (drawn below with labels)
-            if (std::fmod(bar, 1.f) < 1e-5f) continue;
             int rx = barToX(bar);
             if (rx < 0 || rx > b.getWidth()) continue;
-            g.drawVerticalLine(rx, (float)(kRulerH - (int)rl.tickH), (float)kRulerH);
+            g.drawVerticalLine(rx, fPin + (float)(kRulerH - (int)rl.tickH), fPin + (float)kRulerH);
         }
     }
 
-    // Bar lines + labels (always shown). No upper cap on bar number - the
+    // Bar lines + labels: MAP-driven (QA-G Task 6) -- bars resize at TS
+    // markers; bar k's left edge sits at barStartBeat(k)/4 in the uniform
+    // position domain.  Negative-bar (pre-roll) territory stays uniform 4/4
+    // (markers cannot exist before bar 0).  No upper cap on bar number - the
     // ruler extends as far as the viewport reaches, regardless of song length.
-    // QA-Ea Task 0c (Option ii): use std::floor instead of (int) so negative
-    // mBarOff (viewport scrolled into negative-bar territory for slip-edited
-    // clips) doesn't lose the first label due to int-truncation-toward-zero.
     (void)totalBars;
-    for (int bar = (int)std::floor(mBarOff); bar <= maxBar; ++bar)
     {
-        int rx = barToX((float)bar);
-        if (rx < 0 || rx > b.getWidth()) continue;
+        int bar = 0;
+        if (mBarOff < 0.f)
+            bar = (int) std::floor (mBarOff);
+        else
+        {
+            double bib = 0.0;
+            mPM.beatToBarAndBeatInBar ((double) mBarOff * 4.0, bar, bib);
+        }
+        // Guard bounds the pathological case (1/32-signature bars at macro
+        // zoom-out) so paint can never spin unbounded.
+        for (int guard = 0; guard < 8192; ++guard, ++bar)
+        {
+            const double barPos = (bar <= 0) ? (double) bar
+                                             : mPM.barStartBeat (bar) / 4.0;
+            int rx = barToX ((float) barPos);
+            if (rx > b.getWidth()) break;
+            if (rx < 0) continue;
 
-        bool isMajor = (bar % (mTimeSig.numerator) == 0);
-        g.setColour(isMajor ? VC::Accent.brighter(0.5f) : VC::Accent.withAlpha(0.5f));
-        g.drawVerticalLine(rx, 0, (float)kRulerH);
+            bool isMajor = (bar % 4 == 0);
+            g.setColour(isMajor ? VC::Accent.brighter(0.5f) : VC::Accent.withAlpha(0.5f));
+            g.drawVerticalLine(rx, fPin, fPin + (float)kRulerH);
 
-        if (isMajor || mPPBar >= 30) {
-            g.setColour(VC::Text);
-            g.setFont(Font(9));
-            // QA-Ea Task 0c (2026-05-20): ruler labels are 0-indexed so the
-            // 1-based labels (owner 2026-07-16): song downbeat (bar 0 in code)
-            // shows as "1"; pre-roll / slip-edited clips show "0", "-1", etc.
-            g.drawText(String(bar + 1), rx + 2, 1, 24, kRulerH - 2,
-                       Justification::centredLeft, false);
+            if (isMajor || mPPBar >= 30) {
+                g.setColour(VC::Text);
+                g.setFont(Font(9));
+                // 1-based labels (owner 2026-07-16): song downbeat (bar 0 in code)
+                // shows as "1"; pre-roll / slip-edited clips show "0", "-1", etc.
+                g.drawText(String(bar + 1), rx + 2, yPin + 1, 24, kRulerH - 2,
+                           Justification::centredLeft, false);
+            }
         }
     }
 
@@ -1985,7 +2100,7 @@ void ArrangementGrid::drawRuler(Graphics& g) const
         float pulse = 0.5f + 0.5f * std::sin(mPulsePhi);
         int px = barToX((float)mPlayheadBar);
         g.setColour(VC::Highlight.withAlpha(0.55f * pulse));
-        g.fillRect(jmax(0, px - 4), 0, 8, kRulerH);
+        g.fillRect(jmax(0, px - 4), yPin, 8, kRulerH);
     }
 
     // Time selection highlight
@@ -1994,14 +2109,10 @@ void ArrangementGrid::drawRuler(Graphics& g) const
         int sx = barToX(mTimeSelStart);
         int ex = barToX(mTimeSelEnd);
         g.setColour(VC::Highlight.withAlpha(0.30f));
-        g.fillRect(sx, 0, ex - sx, kRulerH);
+        g.fillRect(sx, yPin, ex - sx, kRulerH);
         g.setColour(VC::Highlight.withAlpha(0.85f));
-        g.drawVerticalLine(sx, 0.f, (float)kRulerH);
-        g.drawVerticalLine(ex, 0.f, (float)kRulerH);
-
-        // Also shade the full grid column
-        g.setColour(VC::Highlight.withAlpha(0.07f));
-        g.fillRect(sx, kRulerH, ex - sx, getHeight() - kRulerH);
+        g.drawVerticalLine(sx, fPin, fPin + (float)kRulerH);
+        g.drawVerticalLine(ex, fPin, fPin + (float)kRulerH);
     }
 
     // 2026-04-26 (D-2): time-marker flags (yellow pennant) + TS-change labels.
@@ -2018,29 +2129,33 @@ void ArrangementGrid::drawRuler(Graphics& g) const
             if (rx < -16 || rx > b.getWidth()) continue;
             // Pole.
             g.setColour(VC::Yellow.withAlpha(0.9f));
-            g.drawVerticalLine(rx, 1.f, flagH + 1.f);
+            g.drawVerticalLine(rx, fPin + 1.f, fPin + flagH + 1.f);
             // Pennant (small triangle pointing right).
             juce::Path flag;
-            flag.addTriangle((float) rx + 1, 2.f,
-                             (float) rx + 1 + flagW, 2.f + flagH * 0.45f,
-                             (float) rx + 1, 2.f + flagH * 0.45f);
+            flag.addTriangle((float) rx + 1, fPin + 2.f,
+                             (float) rx + 1 + flagW, fPin + 2.f + flagH * 0.45f,
+                             (float) rx + 1, fPin + 2.f + flagH * 0.45f);
             g.fillPath(flag);
         }
 
         for (int i = 0; i < mPM.getNumTimeSigChanges(); ++i)
         {
             const auto& ts = mPM.getTimeSigChange(i);
-            int rx = barToX((float) ts.bar);
+            int rx = barToX((float)(mPM.barStartBeat(ts.bar) / 4.0));
             if (rx < -32 || rx > b.getWidth()) continue;
             const juce::String txt = juce::String(ts.num) + "/" + juce::String(ts.den);
             const int textW = 28;
-            // Background pill.
+            // Linked auto-markers (spawned by a pattern placement, docket B)
+            // draw as an OUTLINE pill -- the visual tell vs solid manual ones.
+            const bool linked = (ts.linkedPattern >= 0);
             g.setColour(VC::Blue.withAlpha(0.85f));
-            g.fillRoundedRectangle((float)(rx + 1), 1.f, (float) textW, (float)(kRulerH - 2), 2.f);
-            // Text.
-            g.setColour(juce::Colours::white);
+            if (linked)
+                g.drawRoundedRectangle((float)(rx + 1), fPin + 1.f, (float) textW, (float)(kRulerH - 2), 2.f, 1.2f);
+            else
+                g.fillRoundedRectangle((float)(rx + 1), fPin + 1.f, (float) textW, (float)(kRulerH - 2), 2.f);
+            g.setColour(linked ? VC::Blue.brighter(0.6f) : juce::Colours::white);
             g.setFont(Font(9.f, Font::bold));
-            g.drawText(txt, rx + 1, 1, textW, kRulerH - 2,
+            g.drawText(txt, rx + 1, yPin + 1, textW, kRulerH - 2,
                        Justification::centred, false);
         }
 
@@ -2054,12 +2169,12 @@ void ArrangementGrid::drawRuler(Graphics& g) const
             const juce::String txt = juce::String((int) std::llround(tc.bpm));
             const int textW = 26;
             g.setColour(juce::Colour(0xffFFB030).withAlpha(0.9f));
-            g.drawVerticalLine(rx, 1.f, (float)(kRulerH - 3));
+            g.drawVerticalLine(rx, fPin + 1.f, fPin + (float)(kRulerH - 3));
             g.setColour(juce::Colour(0xff3A2F18));
-            g.fillRoundedRectangle((float)(rx + 1), 1.f, (float) textW, (float)(kRulerH - 2), 2.f);
+            g.fillRoundedRectangle((float)(rx + 1), fPin + 1.f, (float) textW, (float)(kRulerH - 2), 2.f);
             g.setColour(juce::Colour(0xffFFB030));
             g.setFont(Font(9.f, Font::bold));
-            g.drawText(txt, rx + 1, 1, textW, kRulerH - 2,
+            g.drawText(txt, rx + 1, yPin + 1, textW, kRulerH - 2,
                        Justification::centred, false);
         }
     }
@@ -2072,9 +2187,9 @@ void ArrangementGrid::drawRuler(Graphics& g) const
         {
             g.setColour(VC::Green.withAlpha(0.9f));
             juce::Path tri;
-            tri.addTriangle((float)px,       0.f,
-                            (float)(px - 5), (float)kRulerH,
-                            (float)(px + 5), (float)kRulerH);
+            tri.addTriangle((float)px,       fPin,
+                            (float)(px - 5), fPin + (float)kRulerH,
+                            (float)(px + 5), fPin + (float)kRulerH);
             g.fillPath(tri);
         }
     }
@@ -2082,11 +2197,11 @@ void ArrangementGrid::drawRuler(Graphics& g) const
 
 void ArrangementGrid::drawRowBgs(Graphics& g) const
 {
-    auto b  = getLocalBounds();
-    int  rh = (int)mEffectiveRowH;
+    auto b = getLocalBounds();
     for (int r = 0; r < kNumRows; ++r)
     {
-        int y = rowToY(r);
+        int y  = rowToY(r);
+        int rh = rowHeightPx(r);
         if (y + rh < 0 || y > b.getHeight()) continue;
         g.setColour((r % 2 == 0) ? VC::Panel : VC::Bg.brighter(0.04f));
         g.fillRect(0, y, b.getWidth(), rh);
@@ -2120,7 +2235,10 @@ void ArrangementGrid::drawGrid(Graphics& g) const
     {
         const int    gTicks    = ladder[i];
         const double spacingPx = (double) gTicks / 384.0 * (double) mPPBar;
-        if (spacingPx < (double) kMinLinePx) continue;   // sub-threshold (incl. Bar): declutter at macro zoom-out
+        if (spacingPx < (double) kMinLinePx) continue;   // sub-threshold: declutter at macro zoom-out
+        // QA-G Task 6: bar-level rungs come from the marker MAP below --
+        // sub-bar rungs here stay beat-uniform.
+        if (gTicks >= 384) continue;
 
         const bool  isBar = (gTicks == 384);
         const float alpha = isBar        ? 0.85f
@@ -2139,54 +2257,109 @@ void ArrangementGrid::drawGrid(Graphics& g) const
             g.drawVerticalLine (x, (float) yTop, (float) yBot);
         }
     }
+
+    // QA-G Task 6: bar lines from the marker MAP (bars resize at markers).
+    // Declutter parity with the old bar rung: hidden at macro zoom-out.
+    if ((double) mPPBar >= (double) kMinLinePx)
+    {
+        int bar = 0;
+        if (mBarOff < 0.f)
+            bar = (int) std::floor (mBarOff);
+        else
+        {
+            double bib = 0.0;
+            mPM.beatToBarAndBeatInBar ((double) mBarOff * 4.0, bar, bib);
+        }
+        g.setColour (kGridLineMj.withAlpha (0.85f));
+        for (int guard = 0; guard < 8192; ++guard, ++bar)
+        {
+            const double barPos = (bar <= 0) ? (double) bar
+                                             : mPM.barStartBeat (bar) / 4.0;
+            const int x = barToX ((float) barPos);
+            if (x > b.getWidth()) break;
+            if (x < 0) continue;
+            g.drawVerticalLine (x, (float) yTop, (float) yBot);
+        }
+    }
 }
 
 // MIDI note shading inside a pattern clip.
 // Maps MIDI 72 (C5) to vertical centre; ±24 semitones (2 octaves) span the
 // full clip height. Notes outside that range are clamped to the edges.
-// Aggregates layer rolls, bass rolls, and the drum roll so the clip preview
-// reflects the whole pattern's content.
+// Aggregates layer rolls, bass rolls, and all per-drum rolls (plus the
+// legacy pre-Phase-D drumRoll) so the preview reflects the whole pattern.
+// Owner spec (G1 smoke): notes sit at TRUE musical positions -- BEAT-TRUE
+// (x = quarter-beats, matching playback exactly for every signature); longer
+// blocks tile the pattern per its MUSICAL cycle (bars x effective TS), so a
+// pattern bar aligns with a grid bar under its marker (QA-G Task 6).
 void ArrangementGrid::drawMidiShading(Graphics& g, const ArrangementBlock& b,
                                       int bx, int by, int bw, int bh) const
 {
     if (b.patternIndex < 0 || b.patternIndex >= mPM.getNumPatterns()) return;
     const auto& pat = mPM.getPattern(b.patternIndex);
 
-    // C.5b: block MIDI shading uses the pattern's intrinsic TS to map note
-    // beats to fractional positions inside the block.
-    double beatsPerBar = mPM.getPatternBeatsPerBar (b.patternIndex);
-    double totalBeats  = (double)pat.bars * beatsPerBar;
-    if (totalBeats <= 0.0) return;
+    const double beatsPerBar = mPM.getPatternBeatsPerBar (b.patternIndex);
+    // QA-G Task 6: BEAT-TRUE preview -- x positions are quarter-beat
+    // proportional (uniform bar = 4 quarter-beats), so display == playback
+    // for every signature; the cycle is the pattern's musical length.
+    const double cycleBars   = (double) jmax (1, pat.bars) * beatsPerBar / 4.0;
+    if (beatsPerBar <= 0.0) return;
+
+    const double blockStart = effectiveStartBars (b);
+    const double blockLen   = effectiveLengthBars (b);
+    if (blockLen <= 0.0) return;
 
     constexpr int   kCentreNote   = 72;   // C5
     constexpr float kHalfRangeSt  = 24.f; // ±2 octaves spans full clip height
     const int innerH = jmax(1, bh - 4);
     const int innerY = by + 2;
+    const int clipL  = bx;
+    const int clipR  = bx + bw;
 
-    Colour base   = blockColour(b);
-    Colour noteCol = base.brighter(0.7f).withAlpha(0.6f);
+    g.setColour(blockColour(b).brighter(0.7f).withAlpha(0.6f));
+
+    // QA-G Task 5: the content offset phase-shifts the tiling (a sliced piece
+    // draws its true slice of the pattern -- same mapping playback uses).
+    const double offsetBars = juce::jlimit (0.0, cycleBars,
+                                            (double) b.contentOffsetTicks / 384.0);
+    const int numCycles = (int) std::ceil ((blockLen + offsetBars) / cycleBars);
+    // Cull tiles left of the view (mBarOff = view-left bar; the component is
+    // viewport-sized, so cycles fully before it can never draw).
+    const int firstCycle = jmax (0, (int) (((double) mBarOff - blockStart + offsetBars) / cycleBars) - 1);
 
     auto paintRoll = [&](const PianoRollData& roll)
     {
-        if (roll.notes.empty()) return;
         for (const auto& n : roll.notes)
         {
-            const float startFrac = (float)(n.startBeat / totalBeats);
-            const float lenFrac   = (float)(n.durationBeats / totalBeats);
+            const double noteBar = n.startBeat / 4.0;
+            if (noteBar >= cycleBars) continue;   // outside the pattern's own cycle
+            const double noteEnd = jmin (cycleBars, noteBar + n.durationBeats / 4.0);
             // Centre = 0.5; semitones above centre move up (smaller y), below move down.
-            const float relSt    = (float)(n.midiNote - kCentreNote);
-            const float yFrac    = jlimit(0.f, 1.f, 0.5f - 0.5f * (relSt / kHalfRangeSt));
-            const int nx = bx + (int)(startFrac * bw);
-            const int nw = jmax(1, (int)(lenFrac * bw));
-            const int ny = innerY + (int)(yFrac * (float)(innerH - 2));
-            g.setColour(noteCol);
-            g.fillRect(nx, ny, nw, 2);
+            const float relSt = (float)(n.midiNote - kCentreNote);
+            const float yFrac = jlimit(0.f, 1.f, 0.5f - 0.5f * (relSt / kHalfRangeSt));
+            const int   ny    = innerY + (int)(yFrac * (float)(innerH - 2));
+
+            for (int c = firstCycle; c < numCycles; ++c)
+            {
+                const double sBars = c * cycleBars + noteBar - offsetBars;
+                if (sBars >= blockLen) break;
+                if (sBars < 0.0) continue;   // content left of the slice window
+                const double eBars = jmin (blockLen, c * cycleBars + noteEnd - offsetBars);
+                int nx = barToX((float)(blockStart + sBars));
+                if (nx >= clipR) break;
+                int nw = jmax(1, barToX((float)(blockStart + eBars)) - nx);
+                if (nx + nw <= clipL) continue;
+                nx = jmax(nx, clipL);
+                nw = jmin(nx + nw, clipR) - nx;
+                g.fillRect(nx, ny, nw, 2);
+            }
         }
     };
 
     for (const auto& lr : pat.layerRoll) paintRoll(lr);
     for (const auto& br : pat.bassRoll)  paintRoll(br);
-    paintRoll(pat.drumRoll);
+    for (const auto& dr : pat.drumRolls) paintRoll(dr);
+    paintRoll(pat.drumRoll);   // legacy pre-migration data (usually empty)
 }
 
 void ArrangementGrid::drawPatternClip(Graphics& g, const ArrangementBlock& b,
@@ -2725,8 +2898,8 @@ void ArrangementGrid::drawAutomationClip(Graphics& g, const ArrangementBlock& b,
 
 void ArrangementGrid::drawBlocks(Graphics& g) const
 {
-    int n  = mPM.getNumBlocks();
-    int rh = (int)mEffectiveRowH;
+    int n = mPM.getNumBlocks();
+    const int visTop = rulerPinY() + kRulerH;   // pinned band occludes above this
     for (int i = 0; i < n; ++i)
     {
         const auto& b = mPM.getBlock(i);
@@ -2734,12 +2907,12 @@ void ArrangementGrid::drawBlocks(Graphics& g) const
         // clips render at their actual visual position (sub-bar precision +
         // possibly negative for clips slipped into the pre-roll zone).
         int bx = barToX((float) effectiveStartBars(b));
-        int bw = jmax(4, (int)(effectiveLengthBars(b) * mPPBar) - 1);
+        int bw = jmax(4, barToX((float)(effectiveStartBars(b) + effectiveLengthBars(b))) - bx - 1);
         int by = rowToY(b.trackRow) + 2;
-        int bh = rh - 4;
+        int bh = rowHeightPx(b.trackRow) - 4;
 
         if (bx + bw < 0 || bx > getWidth()) continue;
-        if (by + bh < kRulerH || by > getHeight()) continue;
+        if (by + bh < visTop || by > getHeight()) continue;
 
         bool sel = isSelected(i);
         switch (b.clipType)
@@ -2776,9 +2949,9 @@ void ArrangementGrid::drawPreviewBlock(Graphics& g) const
     float len = snapBarAlt(mDrawEnd) - snapBarAlt(mDrawStart);
     if (len < 1.f) len = 1.f;
     int x = barToX(snapBarAlt(mDrawStart));
-    int w = jmax(4, (int)(len * mPPBar) - 1);
+    int w = jmax(4, barToX(snapBarAlt(mDrawStart) + len) - x - 1);
     int y = rowToY(mDrawRow) + 2;
-    int h = (int)mEffectiveRowH - 4;
+    int h = rowHeightPx(mDrawRow) - 4;
 
     g.setColour(VC::Highlight.withAlpha(0.45f));
     g.fillRoundedRectangle((float)x, (float)y, (float)w, (float)h, 3.f);
@@ -2791,9 +2964,9 @@ void ArrangementGrid::drawGhostClip(Graphics& g) const
     if (!mHasGhost) return;
     const auto& b = mGhostBlock;
     int x = barToX((float)b.startBar);
-    int w = jmax(4, (int)(effectiveLengthBars(b) * mPPBar) - 1);
+    int w = jmax(4, barToX((float)(b.startBar + effectiveLengthBars(b))) - x - 1);
     int y = rowToY(b.trackRow) + 2;
-    int h = (int)mEffectiveRowH - 4;
+    int h = rowHeightPx(b.trackRow) - 4;
 
     g.setColour(VC::Highlight.withAlpha(mGhostAlpha * 0.7f));
     g.fillRoundedRectangle((float)x, (float)y, (float)w, (float)h, 3.f);
@@ -2830,9 +3003,9 @@ void ArrangementGrid::drawPerformanceOverlays(Graphics& g) const
         if (b.startBar > mPlayheadBar || b.startBar + effectiveLengthBars(b) <= mPlayheadBar) continue;
 
         int bx = barToX((float)b.startBar);
-        int bw = jmax(4, (int)(effectiveLengthBars(b) * mPPBar) - 1);
+        int bw = jmax(4, barToX((float)(b.startBar + effectiveLengthBars(b))) - bx - 1);
         int by = rowToY(b.trackRow) + 2;
-        int bh = (int)mEffectiveRowH - 4;
+        int bh = rowHeightPx(b.trackRow) - 4;
 
         float progress = (float)(mPlayheadBar - b.startBar) / (float) juce::jmax(0.001, effectiveLengthBars(b));
         int progW = (int)(bw * progress);
@@ -2859,7 +3032,16 @@ void ArrangementGrid::paint(Graphics& g)
     drawMarquee(g);
     drawPlayheadOverlay(g);
     drawPerformanceOverlays(g);
-    drawRuler(g);   // ruler on top
+    // Time-selection column wash over the body; lives here (not drawRuler)
+    // so the pinned band's offset never displaces a content-space fill.
+    if (mTimeSelStart >= 0.f && mTimeSelEnd > mTimeSelStart)
+    {
+        const int sx = barToX(mTimeSelStart);
+        const int ex = barToX(mTimeSelEnd);
+        g.setColour(VC::Highlight.withAlpha(0.07f));
+        g.fillRect(sx, kRulerH, ex - sx, getHeight() - kRulerH);
+    }
+    drawRuler(g);   // ruler on top (band pinned to the visible top)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2871,7 +3053,7 @@ void ArrangementGrid::beginEdit(const juce::String& label)
     mPendingBlocks.clear();
     for (int i = 0; i < mPM.getNumBlocks(); ++i)
         mPendingBlocks.push_back(mPM.getBlock(i));
-    mPendingRowNames = mRowNames;
+    mPendingRowNames = mPM.getRowNames();
 }
 
 void ArrangementGrid::commitEdit()
@@ -2885,7 +3067,7 @@ void ArrangementGrid::commitEdit()
     auto* action = new ArrangementEditAction(
         mPendingLabel,
         { mPendingBlocks, std::vector<juce::String>(mPendingRowNames.begin(), mPendingRowNames.end()) },
-        { afterBlocks,    std::vector<juce::String>(mRowNames.begin(), mRowNames.end()) },
+        { afterBlocks,    std::vector<juce::String>(mPM.getRowNames().begin(), mPM.getRowNames().end()) },
         [this](const ArrangementEditAction::Snapshot& s) {
             std::array<juce::String, kNumRows> rn;
             for (int i = 0; i < kNumRows && i < (int)s.rowNames.size(); ++i)
@@ -2895,6 +3077,9 @@ void ArrangementGrid::commitEdit()
 
     mUndoCtx.perform(action, mPendingLabel);
     if (onUndoRedoStateChanged) onUndoRedoStateChanged();
+    // QA-G Task 6: linked markers follow their blocks (delete/undo removal
+    // half) + follower signatures re-derive after any block mutation.
+    mPM.cleanupLinkedMarkers();
     if (onArrangementChanged)   onArrangementChanged();
 }
 
@@ -2903,11 +3088,13 @@ void ArrangementGrid::applySnapshot(const std::vector<ArrangementBlock>& blocks,
 {
     while (mPM.getNumBlocks() > 0) mPM.removeBlock(0);
     for (const auto& b : blocks) mPM.addBlock(b);
-    mRowNames = rowNames;
+    for (int i = 0; i < kNumRows; ++i)
+        mPM.setRowName(i, rowNames[i]);
     mSelection.clear();
     resized();
     repaint();
     if (onUndoRedoStateChanged) onUndoRedoStateChanged();
+    mPM.cleanupLinkedMarkers();   // QA-G Task 6: undo/redo marker + follower sync
     // G1 boundary smoke: undo/redo restore lands HERE, not in commitEdit -
     // without this the audio players keep the pre-undo clip state (a stretch
     // undo reverted the block visually but kept PLAYING stretched).  Fires a
@@ -2961,9 +3148,9 @@ void ArrangementGrid::finaliseMarquee()
     {
         const auto& b = mPM.getBlock(i);
         int bx = barToX((float)b.startBar);
-        int bw = (int)(effectiveLengthBars(b) * mPPBar);
+        int bw = barToX((float)(b.startBar + effectiveLengthBars(b))) - bx;
         int by = rowToY(b.trackRow);
-        if (mMarqueeRect.intersects(Rectangle<int>(bx, by, bw, (int)mEffectiveRowH)))
+        if (mMarqueeRect.intersects(Rectangle<int>(bx, by, bw, rowHeightPx(b.trackRow))))
             mSelection.push_back(i);
     }
     repaint();
@@ -3104,6 +3291,7 @@ void ArrangementGrid::pasteClipboard()
         b.startBar += pasteStart;
         mPM.addBlock(b);
         mSelection.push_back(mPM.getNumBlocks() - 1);
+        afterPatternBlockPlaced(b);   // QA-G Task 6
     }
     commitEdit();
     resized(); repaint();
@@ -3143,6 +3331,7 @@ void ArrangementGrid::duplicateSelected()
         for (auto& nb : newBlocks) {
             mPM.addBlock(nb);
             mSelection.push_back(mPM.getNumBlocks() - 1);
+            afterPatternBlockPlaced(nb);   // QA-G Task 6
         }
         // Shift the time-selection to the new range so a second Ctrl+B repeats
         // the duplication forward.
@@ -3177,9 +3366,326 @@ void ArrangementGrid::duplicateSelected()
     for (auto& nb : newBlocks) {
         mPM.addBlock(nb);
         mSelection.push_back(mPM.getNumBlocks() - 1);
+        afterPatternBlockPlaced(nb);   // QA-G Task 6
     }
     commitEdit();
     resized(); repaint();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Split by Player Engine (QA-G, owner docket 5/5a/5b, 2026-07-17)
+// ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+    // Full project-slice snapshot for the split's SINGLE undo step (owner
+    // lock): patterns + blocks + every per-row state the operation can touch.
+    // Linked TS markers stay outside the undo domain (established seam).
+    struct SplitState
+    {
+        std::vector<Pattern>          patterns;
+        int                           currentPattern { 0 };
+        std::vector<ArrangementBlock> blocks;
+        std::vector<juce::String>     rowNames;
+        std::vector<int>              rowGroups;
+        std::vector<juce::uint32>     rowColors;
+        std::vector<char>             rowMuted, rowSoloed;
+    };
+
+    class SplitPatternUndoAction : public juce::UndoableAction
+    {
+    public:
+        using ApplyFn = std::function<void(const SplitState&)>;
+        SplitPatternUndoAction (SplitState before, SplitState after, ApplyFn apply)
+            : mBefore (std::move (before)), mAfter (std::move (after)),
+              mApply (std::move (apply)) {}
+        bool perform() override { mApply (mAfter);  return true; }
+        bool undo()    override { mApply (mBefore); return true; }
+    private:
+        SplitState mBefore, mAfter;
+        ApplyFn    mApply;
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SplitPatternUndoAction)
+    };
+}
+
+bool ArrangementGrid::rowIsBlank (int r) const
+{
+    if (r < 0 || r >= kNumRows) return false;
+    for (int i = 0; i < mPM.getNumBlocks(); ++i)
+        if (mPM.getBlock (i).trackRow == r) return false;
+    if (mPM.getRowNames()[(size_t) r] != mPM.defaultRowName (r)) return false;
+    if (mPM.isRowMuted (r) || mPM.isRowSoloed (r)) return false;
+    if (mPM.getRowGroup (r) != 0) return false;
+    return true;
+}
+
+bool ArrangementGrid::canInsertRows (int count) const
+{
+    if (count <= 0 || count >= kNumRows) return false;
+    for (int r = kNumRows - count; r < kNumRows; ++r)
+        if (! rowIsBlank (r)) return false;
+    return true;
+}
+
+bool ArrangementGrid::insertBlankRowsAt (int startRow, int count)
+{
+    if (count <= 0 || startRow < 0 || startRow >= kNumRows) return false;
+    if (! canInsertRows (count)) return false;
+    for (int r = kNumRows - 1 - count; r >= startRow; --r)
+    {
+        const int dst = r + count;
+        // Positional defaults ("Track N") stay positional; custom names travel.
+        const juce::String src = mPM.getRowNames()[(size_t) r];
+        mPM.setRowName (dst, src == mPM.defaultRowName (r) ? mPM.defaultRowName (dst) : src);
+        mPM.setRowMuted (dst, mPM.isRowMuted (r));
+        mPM.setRowSoloed(dst, mPM.isRowSoloed (r));
+        mPM.setRowGroup (dst, mPM.getRowGroup (r));
+        mPM.setRowGroupColor (dst, mPM.getRowGroupColor (r));
+    }
+    for (int k = 0; k < count; ++k)
+    {
+        const int r = startRow + k;
+        mPM.setRowName (r, mPM.defaultRowName (r));
+        mPM.setRowMuted (r, false);
+        mPM.setRowSoloed(r, false);
+        mPM.setRowGroup (r, 0);
+        mPM.setRowGroupColor (r, 0);
+    }
+    for (int i = 0; i < mPM.getNumBlocks(); ++i)
+    {
+        auto& b = mPM.getBlock (i);
+        if (b.trackRow >= startRow) b.trackRow += count;
+    }
+    return true;
+}
+
+juce::String ArrangementGrid::engineTabName (int kind, int index) const
+{
+    if (onGetEngineTabName)
+    {
+        const juce::String n = onGetEngineTabName (kind, index);
+        if (n.isNotEmpty()) return n;
+    }
+    static const char* kFallback[] = { "Layer", "Bass", "Drum", "Clips", "Inst" };
+    return juce::String (kFallback[juce::jlimit (0, 4, kind)])
+         + " " + juce::String (index + 1);
+}
+
+void ArrangementGrid::splitPatternByEngine (int patternIndex)
+{
+    if (patternIndex < 0 || patternIndex >= mPM.getNumPatterns()) return;
+
+    // One part per tab entry with MIDI data (docket 5a): every roll across
+    // the five player-carrying families, kept in its ORIGINAL slot so the
+    // same tab/engine keeps playing it.
+    std::vector<std::pair<int,int>> parts;   // {kind, engineIndex}
+    {
+        const auto& pat = mPM.getPattern (patternIndex);
+        for (int i = 0; i < (int) pat.layerRoll.size(); ++i)
+            if (! pat.layerRoll[(size_t) i].notes.empty()) parts.push_back({ 0, i });
+        for (int i = 0; i < (int) pat.bassRoll.size(); ++i)
+            if (! pat.bassRoll[(size_t) i].notes.empty())  parts.push_back({ 1, i });
+        for (int i = 0; i < (int) pat.drumRolls.size(); ++i)
+            if (! pat.drumRolls[(size_t) i].notes.empty()) parts.push_back({ 2, i });
+        for (int i = 0; i < (int) pat.clipRoll.size(); ++i)
+            if (! pat.clipRoll[(size_t) i].notes.empty())  parts.push_back({ 3, i });
+        for (int i = 0; i < (int) pat.instRoll.size(); ++i)
+            if (! pat.instRoll[(size_t) i].notes.empty())  parts.push_back({ 4, i });
+    }
+    if (parts.empty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+            "Split by Player Engine", "This pattern has no MIDI data to split.");
+        return;
+    }
+
+    // ONE group prompt per split op (owner lock) -- asked only when a
+    // replaced block sits on a grouped row.
+    bool anyGrouped = false;
+    for (int i = 0; i < mPM.getNumBlocks() && ! anyGrouped; ++i)
+    {
+        const auto& b = mPM.getBlock (i);
+        anyGrouped = (b.clipType == ClipType::Pattern
+                      && b.patternIndex == patternIndex
+                      && mPM.getRowGroup (b.trackRow) > 0);
+    }
+
+    if (anyGrouped)
+    {
+        auto* aw = new juce::AlertWindow ("Split by Player Engine",
+            "Add the new tracks to the row group?",
+            juce::MessageBoxIconType::QuestionIcon);
+        aw->addButton ("Yes", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        aw->addButton ("No",  0, juce::KeyPress (juce::KeyPress::escapeKey));
+        aw->enterModalState (true, juce::ModalCallbackFunction::create (
+            [this, patternIndex, parts] (int r)
+            { performSplitByEngine (patternIndex, parts, r == 1); }), true);
+    }
+    else
+    {
+        performSplitByEngine (patternIndex, parts, false);
+    }
+}
+
+void ArrangementGrid::performSplitByEngine (int patternIndex,
+                                            const std::vector<std::pair<int,int>>& parts,
+                                            bool joinGroups)
+{
+    if (patternIndex < 0 || patternIndex >= mPM.getNumPatterns() || parts.empty())
+        return;
+
+    auto captureState = [this]() -> SplitState
+    {
+        SplitState s;
+        for (int i = 0; i < mPM.getNumPatterns(); ++i) s.patterns.push_back (mPM.getPattern (i));
+        s.currentPattern = mPM.getCurrentPatternIndex();
+        for (int i = 0; i < mPM.getNumBlocks(); ++i)   s.blocks.push_back (mPM.getBlock (i));
+        for (int r = 0; r < kNumRows; ++r)
+        {
+            s.rowNames.push_back (mPM.getRowNames()[(size_t) r]);
+            s.rowGroups.push_back (mPM.getRowGroup (r));
+            s.rowColors.push_back (mPM.getRowGroupColor (r));
+            s.rowMuted.push_back (mPM.isRowMuted (r) ? 1 : 0);
+            s.rowSoloed.push_back (mPM.isRowSoloed (r) ? 1 : 0);
+        }
+        return s;
+    };
+    auto applyState = [this] (const SplitState& s)
+    {
+        mPM.restorePatternList (s.patterns, s.currentPattern);
+        while (mPM.getNumBlocks() > 0) mPM.removeBlock (0);
+        for (const auto& b : s.blocks) mPM.addBlock (b);
+        for (int r = 0; r < kNumRows; ++r)
+        {
+            mPM.setRowName (r, s.rowNames[(size_t) r]);
+            mPM.setRowMuted (r, s.rowMuted[(size_t) r] != 0);
+            mPM.setRowSoloed(r, s.rowSoloed[(size_t) r] != 0);
+            mPM.setRowGroup (r, s.rowGroups[(size_t) r]);
+            mPM.setRowGroupColor (r, s.rowColors[(size_t) r]);
+        }
+        mSelection.clear();
+        mPM.cleanupLinkedMarkers();
+        resized(); repaint();
+        if (onUndoRedoStateChanged) onUndoRedoStateChanged();
+        if (onArrangementChanged)   onArrangementChanged();
+    };
+
+    const SplitState before = captureState();
+
+    // 1) Create the split patterns (appended; the original's TS state, bar
+    //    count, and color carry over; only the part's roll is copied).
+    const juce::String origName = mPM.getPattern (patternIndex).name;
+    std::vector<int> newIdx;
+    for (const auto& part : parts)
+    {
+        const int ni = mPM.addPattern (origName + " - "
+                                       + engineTabName (part.first, part.second));
+        auto& np        = mPM.getPattern (ni);
+        const auto& src = mPM.getPattern (patternIndex);
+        np.bars = src.bars; np.stepsPerBar = src.stepsPerBar;
+        np.tsNum = src.tsNum; np.tsDen = src.tsDen;
+        np.tsLocked = src.tsLocked; np.tsBoundMarkerUid = src.tsBoundMarkerUid;
+        np.color = src.color;
+        switch (part.first)
+        {
+            case 0: np.layerRoll[(size_t) part.second] = src.layerRoll[(size_t) part.second]; break;
+            case 1: np.bassRoll [(size_t) part.second] = src.bassRoll [(size_t) part.second]; break;
+            case 2: np.drumRolls[(size_t) part.second] = src.drumRolls[(size_t) part.second]; break;
+            case 3: np.clipRoll [(size_t) part.second] = src.clipRoll [(size_t) part.second]; break;
+            case 4: np.instRoll [(size_t) part.second] = src.instRoll [(size_t) part.second]; break;
+            default: break;
+        }
+        newIdx.push_back (ni);
+    }
+
+    // 2) Replace blocks row by row, bottom-most original row first so row
+    //    insertions never shift rows still waiting to be processed.  Sibling
+    //    rows: the N-1 directly below when ALL whole-row blank, else insert
+    //    fresh rows there (owner rev: shift the in-the-way rows down,
+    //    stealing blank rows from the bottom).
+    const int nParts = (int) parts.size();
+    std::vector<int> rowsWithBlocks;
+    for (int i = 0; i < mPM.getNumBlocks(); ++i)
+    {
+        const auto& b = mPM.getBlock (i);
+        if (b.clipType == ClipType::Pattern && b.patternIndex == patternIndex)
+            if (std::find (rowsWithBlocks.begin(), rowsWithBlocks.end(), b.trackRow)
+                == rowsWithBlocks.end())
+                rowsWithBlocks.push_back (b.trackRow);
+    }
+    std::sort (rowsWithBlocks.rbegin(), rowsWithBlocks.rend());
+
+    bool capacityBlocked = false;
+    for (int rowOrig : rowsWithBlocks)
+    {
+        if (nParts > 1)
+        {
+            if (rowOrig + nParts - 1 >= kNumRows) { capacityBlocked = true; break; }
+            bool allBlank = true;
+            for (int k = 1; k < nParts && allBlank; ++k)
+                allBlank = rowIsBlank (rowOrig + k);
+            if (! allBlank)
+            {
+                if (! canInsertRows (nParts - 1)) { capacityBlocked = true; break; }
+                insertBlankRowsAt (rowOrig + 1, nParts - 1);
+            }
+        }
+        const int nBlocks = mPM.getNumBlocks();
+        for (int i = 0; i < nBlocks; ++i)
+        {
+            ArrangementBlock proto = mPM.getBlock (i);
+            if (proto.clipType != ClipType::Pattern
+                || proto.patternIndex != patternIndex
+                || proto.trackRow != rowOrig) continue;
+            mPM.getBlock (i).patternIndex = newIdx[0];
+            for (int k = 1; k < nParts; ++k)
+            {
+                ArrangementBlock sib = proto;
+                sib.patternIndex = newIdx[(size_t) k];
+                sib.trackRow     = rowOrig + k;
+                mPM.addBlock (sib);
+            }
+        }
+        if (joinGroups && nParts > 1)
+        {
+            const int gid = mPM.getRowGroup (rowOrig);
+            if (gid > 0)
+            {
+                const juce::uint32 col = mPM.getRowGroupColor (rowOrig);
+                for (int k = 1; k < nParts; ++k)
+                {
+                    mPM.setRowGroup (rowOrig + k, gid);
+                    mPM.setRowGroupColor (rowOrig + k, col);
+                }
+            }
+        }
+    }
+
+    if (capacityBlocked)
+    {
+        // Owner spec: prompt + abort untouched.
+        applyState (before);
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+            "Maximum Tracks Reached",
+            "Splitting needs more tracks than remain - all 500 rows are in use.");
+        return;
+    }
+
+    // 3) The original dies (removePattern re-indexes blocks + linked markers;
+    //    the new patterns sit above patternIndex so they shift down by one).
+    if (mPM.getCurrentPatternIndex() == patternIndex)
+        mPM.setCurrentPattern (newIdx[0]);
+    mPM.removePattern (patternIndex);
+
+    const SplitState after = captureState();
+    if (mUndoCtx.isValid())
+        mUndoCtx.perform (new SplitPatternUndoAction (before, after, applyState),
+                          "Split by Player Engine");
+
+    mSelection.clear();
+    mPM.cleanupLinkedMarkers();
+    resized(); repaint();
+    if (onUndoRedoStateChanged) onUndoRedoStateChanged();
+    if (onArrangementChanged)   onArrangementChanged();
 }
 
 void ArrangementGrid::nudgeSelection(int dBars, int dRows)
@@ -3231,7 +3737,8 @@ void ArrangementGrid::fitBlockToViewport(int blockIdx)
 juce::String ArrangementGrid::getTooltip()
 {
     const auto pt = getMouseXYRelative();
-    if (pt.y < 0 || pt.y >= kRulerH) return {};
+    const int  ry = pt.y - rulerPinY();
+    if (ry < 0 || ry >= kRulerH) return {};
 
     const float bar = xToBar (pt.x);
     const int   markerIdx = mPM.findTimeMarkerNearBar (bar, 0.5f);
@@ -3243,8 +3750,10 @@ juce::String ArrangementGrid::getTooltip()
              + "\nRight-click to edit / delete";
     }
 
-    const int snapped = juce::jmax (0, (int) std::floor (bar));
-    const int tsIdx = mPM.findTimeSigChangeAtBar (snapped);
+    // QA-G Task 6: TS markers live at MAP bar indices.
+    int tsBar = 0; double tsBib = 0.0;
+    mPM.beatToBarAndBeatInBar (juce::jmax (0.0, (double) bar * 4.0), tsBar, tsBib);
+    const int tsIdx = mPM.findTimeSigChangeAtBar (tsBar);
     if (tsIdx >= 0)
     {
         const auto& ts = mPM.getTimeSigChange (tsIdx);
@@ -3272,9 +3781,13 @@ void ArrangementGrid::showRulerContextMenu(int xPx)
 {
     const float clickedBar  = xToBar(xPx);
     const int   snappedBar  = juce::jmax(0, (int) std::floor(clickedBar));
+    // QA-G Task 6: TS markers live at MAP bar indices (bars resize at
+    // markers); time markers + tempo flags stay uniform-bar time events.
+    int tsBar = 0; double tsBib = 0.0;
+    mPM.beatToBarAndBeatInBar(juce::jmax(0.0, (double) clickedBar * 4.0), tsBar, tsBib);
 
     const int existingMarker = mPM.findTimeMarkerNearBar(clickedBar, 0.5f);
-    const int existingTS     = mPM.findTimeSigChangeAtBar(snappedBar);
+    const int existingTS     = mPM.findTimeSigChangeAtBar(tsBar);
     const int existingTempo  = mPM.findTempoChangeNearBar(clickedBar, 0.5f);
 
     juce::PopupMenu m;
@@ -3305,17 +3818,24 @@ void ArrangementGrid::showRulerContextMenu(int xPx)
         m.addSeparator();
     }
     m.addItem (10, "Add Time Marker at Bar " + juce::String(snappedBar + 1) + "...");
-    m.addItem (11, "Add Time Signature at Bar " + juce::String(snappedBar + 1) + "...");
+    m.addItem (11, "Add Time Signature at Bar " + juce::String(tsBar + 1) + "...");
     m.addItem (12, "Add Tempo Change at Bar " + juce::String(snappedBar + 1) + "...");
 
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent(this),
-        [this, snappedBar, existingMarker, existingTS, existingTempo](int result)
+        [this, snappedBar, tsBar, existingMarker, existingTS, existingTempo](int result)
         {
             if (result <= 0) return;
             if (result == 1 && existingMarker >= 0) promptRenameTimeMarker(existingMarker);
             else if (result == 2 && existingMarker >= 0) { mPM.removeTimeMarker(existingMarker); repaint(); }
             else if (result == 3 && existingTS >= 0)     promptEditTimeSigChange(existingTS);
-            else if (result == 4 && existingTS >= 0)     { mPM.removeTimeSigChange(existingTS); repaint(); }
+            else if (result == 4 && existingTS >= 0)
+            {
+                mPM.removeTimeSigChange(existingTS);
+                repaint();
+                // Docket 4B: the current marker died with 2+ left -> re-ask.
+                if (mPM.getCurrentTsMarkerUid() < 0)
+                    showCurrentTsPicker();
+            }
             else if (result == 5 && existingTempo >= 0)  promptEditTempoChange(existingTempo);
             else if (result == 6 && existingTempo >= 0)
             {
@@ -3324,7 +3844,7 @@ void ArrangementGrid::showRulerContextMenu(int xPx)
                 repaint();
             }
             else if (result == 10) promptAddTimeMarker(snappedBar);
-            else if (result == 11) promptAddTimeSigChange(snappedBar);
+            else if (result == 11) promptAddTimeSigChange(tsBar);
             else if (result == 12) promptAddTempoChange(snappedBar);
         });
 }
@@ -3409,6 +3929,48 @@ void ArrangementGrid::promptRenameTimeMarker(int idx)
         }), true);
 }
 
+// QA-G Task 6 (docket B): placement events of USER-SET patterns spawn a
+// linked marker at the block's map bar.  Same-bar existing markers win
+// (manual or otherwise); follower patterns never spawn.
+void ArrangementGrid::afterPatternBlockPlaced (const ArrangementBlock& b)
+{
+    if (b.clipType != ClipType::Pattern) return;
+    if (b.patternIndex < 0 || b.patternIndex >= mPM.getNumPatterns()) return;
+    const auto& pat = mPM.getPattern (b.patternIndex);
+    if (! pat.tsLocked) return;
+    int bar = 0; double bib = 0.0;
+    mPM.beatToBarAndBeatInBar (jmax (0.0, effectiveStartBeats (b)), bar, bib);
+    if (mPM.findTimeSigChangeAtBar (bar) >= 0) return;
+    mPM.addTimeSigChange (bar, pat.tsNum, pat.tsDen, b.patternIndex);
+    repaint();
+}
+
+// QA-G Task 6 (docket #4 revision): pick which marker is "current" (the one
+// newly-created patterns bind to).  Fired after every marker add beyond the
+// first, and after the current marker is deleted with 2+ left (4B).
+void ArrangementGrid::showCurrentTsPicker()
+{
+    const int n = mPM.getNumTimeSigChanges();
+    if (n < 2) return;
+    juce::PopupMenu m;
+    m.addSectionHeader ("Current time signature (for new patterns)");
+    const int curUid = mPM.getCurrentTsMarkerUid();
+    for (int i = 0; i < n; ++i)
+    {
+        const auto& ts = mPM.getTimeSigChange (i);
+        m.addItem (i + 1, "Bar " + juce::String (ts.bar + 1) + "  -  "
+                          + juce::String (ts.num) + "/" + juce::String (ts.den),
+                   true, ts.uid == curUid);
+    }
+    m.showMenuAsync (juce::PopupMenu::Options{}.withTargetComponent (this),
+        [this] (int result)
+        {
+            if (result <= 0 || result > mPM.getNumTimeSigChanges()) return;
+            mPM.setCurrentTsMarkerUid (mPM.getTimeSigChange (result - 1).uid);
+            repaint();
+        });
+}
+
 void ArrangementGrid::promptAddTimeSigChange(int bar)
 {
     auto* aw = new juce::AlertWindow ("Add Time Signature Change",
@@ -3427,6 +3989,9 @@ void ArrangementGrid::promptAddTimeSigChange(int bar)
             const int d = aw->getTextEditorContents("den").getIntValue();
             mPM.addTimeSigChange (bar, n, d);
             repaint();
+            // Docket #4: every add beyond the first re-asks which marker is
+            // current (the picker defaults its tick to the standing choice).
+            showCurrentTsPicker();
         }), true);
 }
 
@@ -4061,7 +4626,7 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     if (routeChannel == 0 && onAudioClipAdded)
     {
         ClipDropDiag::log ("importAudioFile -> onAudioClipAdded", "firing cascade; row=" + juce::String (b.trackRow) + " storedPath=" + storedPath);
-        onAudioClipAdded(b.trackRow, mRowNames[b.trackRow], storedPath);
+        onAudioClipAdded(b.trackRow, mPM.getRowNames()[b.trackRow], storedPath);
     }
     else
         ClipDropDiag::log ("importAudioFile DONE", "routeChannel=" + juce::String (routeChannel) + " (routed clip; no Clips-page spawn) storedPath=" + storedPath);
@@ -4153,6 +4718,7 @@ void ArrangementGrid::placeGhostClip()
     mSelection.clear();
     mSelection.push_back(mPM.getNumBlocks() - 1);
     commitEdit();
+    afterPatternBlockPlaced(mGhostBlock);   // QA-G Task 6
     mHasGhost = false;
     resized(); repaint();
 }
@@ -4280,7 +4846,7 @@ void ArrangementGrid::itemDragMove(const SourceDetails& d)
 
     const int x = d.localPosition.getX();
     const int y = d.localPosition.getY();
-    if (y < kRulerH) { mHasGhost = false; repaint(); return; }
+    if (y < rulerPinY() + kRulerH) { mHasGhost = false; repaint(); return; }
 
     mGhostBlock = ArrangementBlock();
     mGhostBlock.trackRow   = jlimit(0, kNumRows - 1, yToRow(y));
@@ -4292,7 +4858,15 @@ void ArrangementGrid::itemDragMove(const SourceDetails& d)
         mGhostBlock.clipType     = ClipType::Pattern;
         mGhostBlock.patternIndex = idx;
         if (idx >= 0 && idx < mPM.getNumPatterns())
+        {
             mGhostBlock.lengthBars = jmax(1, mPM.getPattern(idx).bars);
+            // QA-G Task 6: non-4/4 ghosts preview at their MUSICAL length.
+            const double patBpb = mPM.getPatternBeatsPerBar(idx);
+            if (std::abs(patBpb - 4.0) > 1e-9)
+                mGhostBlock.setLengthBeats((double) mGhostBlock.lengthBars * patBpb);
+            else
+                mGhostBlock.lengthTicks = ArrangementBlock::kLengthTicksUnset;
+        }
     }
     else if (kind == "audio")
     {
@@ -4325,7 +4899,7 @@ void ArrangementGrid::itemDropped(const SourceDetails& d)
 
     const int x = d.localPosition.getX();
     const int y = d.localPosition.getY();
-    if (y < kRulerH) { mHasGhost = false; repaint(); return; }
+    if (y < rulerPinY() + kRulerH) { mHasGhost = false; repaint(); return; }
 
     const int   row = jlimit(0, kNumRows - 1, yToRow(y));
     const float bar = jmax(0.f, snapBar(xToBar(x)));
@@ -4340,10 +4914,19 @@ void ArrangementGrid::itemDropped(const SourceDetails& d)
         b.patternIndex = idx;
         b.startBar     = (int)bar;
         b.lengthBars   = jmax(1, mPM.getPattern(idx).bars);
+        // QA-G Task 6: non-4/4 patterns place at their MUSICAL length
+        // (bars x effective beats-per-bar), so one pattern bar spans one
+        // map bar under the auto-marker.  4/4 keeps the bar-length fields.
+        {
+            const double patBpb = mPM.getPatternBeatsPerBar(idx);
+            if (std::abs(patBpb - 4.0) > 1e-9)
+                b.setLengthBeats((double) b.lengthBars * patBpb);
+        }
         mPM.addBlock(b);
         mSelection.clear();
         mSelection.push_back(mPM.getNumBlocks() - 1);
         commitEdit();
+        afterPatternBlockPlaced(b);
     }
     else if (kind == "audio")
     {
@@ -4460,7 +5043,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
 
     // Ruler zone: Ctrl+drag = time selection; bare click = seek playhead;
     // right-click = ruler context menu (D-2: time markers + TS changes).
-    if (e.y < kRulerH)
+    if (e.y < rulerPinY() + kRulerH)
     {
         if (e.mods.isRightButtonDown())
         {
@@ -4671,19 +5254,77 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         return;
     }
 
-    // Slice tool: split clip at click position
+    // Slice tool: split clip at click position.  QA-G Task 5: snap-resolution
+    // cuts (piano-roll parity, no int-bar truncation) + content continuation
+    // per clip type -- the right piece plays exactly what it played before
+    // the cut instead of restarting.
     if (mActiveTool == AGTool::Slice)
     {
         int hit = blockAtPos(e.x, e.y);
         if (hit >= 0) {
             auto& orig = mPM.getBlock(hit);
-            float cutBar = snapBar(xToBar(e.x));
-            if (cutBar > orig.startBar && cutBar < orig.startBar + orig.lengthBars) {
+            const double startBars = effectiveStartBars (orig);
+            const double endBars   = startBars + effectiveLengthBars (orig);
+            const double cutBars   = (double) snapBar (xToBar (e.x));
+            constexpr double kMinPieceBars = 1.0 / 384.0;   // 1 tick
+            if (cutBars > startBars + kMinPieceBars && cutBars < endBars - kMinPieceBars)
+            {
                 beginEdit("Slice");
+                const double cutBeats = (cutBars - startBars) * 4.0;
                 ArrangementBlock right = orig;
-                right.startBar  = (int)cutBar;
-                right.lengthBars = orig.startBar + orig.lengthBars - (int)cutBar;
-                orig.lengthBars = (int)cutBar - orig.startBar;
+                right.setStartBeats  (cutBars * 4.0);
+                right.setLengthBeats ((endBars - cutBars) * 4.0);
+                right.startBar   = (int) std::floor (cutBars);
+                right.lengthBars = jmax (1, (int) std::round (endBars - cutBars));
+                switch (orig.clipType)
+                {
+                    case ClipType::Pattern:
+                    {
+                        // Continuation = content offset advances by the cut
+                        // distance, wrapped into the pattern's MUSICAL cycle
+                        // (bars x effective beats-per-bar -- QA-G Task 6).
+                        const bool valid = (orig.patternIndex >= 0
+                                            && orig.patternIndex < mPM.getNumPatterns());
+                        const int patBars = valid
+                            ? jmax (1, mPM.getPattern (orig.patternIndex).bars) : 1;
+                        const double patBpb = valid
+                            ? mPM.getPatternBeatsPerBar (orig.patternIndex) : 4.0;
+                        const juce::int64 cycleTicks = jmax ((juce::int64) 1,
+                            (juce::int64) std::llround ((double) patBars * patBpb * 96.0));
+                        right.contentOffsetTicks =
+                            (orig.contentOffsetTicks + beatsToTicks (cutBeats)) % cycleTicks;
+                        break;
+                    }
+                    case ClipType::Audio:
+                    {
+                        // Continuation = content start advances by the file
+                        // samples the cut span consumes.  Mirrors the render
+                        // beat-domain mapping: file advances at
+                        // fileRate * 60 / originalBPM per project beat
+                        // (identical in Stretch and Resample modes).
+                        const juce::File f = onResolveStoredPath
+                            ? onResolveStoredPath (orig.audioFilePath)
+                            : juce::File (orig.audioFilePath);
+                        if (auto reader = std::unique_ptr<juce::AudioFormatReader> (
+                                mAFM.createReaderFor (f)))
+                        {
+                            const double fileBPM = (orig.originalBPM > 0.f)
+                                ? (double) orig.originalBPM : 120.0;
+                            right.contentStartSamples = orig.contentStartSamples
+                                + (juce::int64) std::llround (
+                                      cutBeats * reader->sampleRate * 60.0 / fileBPM);
+                        }
+                        break;
+                    }
+                    case ClipType::Automation:
+                    {
+                        splitAutomationLane (orig.automationLane, right.automationLane,
+                            (float) ((cutBars - startBars) / jmax (1.0e-9, endBars - startBars)));
+                        break;
+                    }
+                }
+                orig.setLengthBeats (cutBeats);
+                orig.lengthBars = jmax (1, (int) std::round (cutBars - startBars));
                 mPM.addBlock(right);
                 commitEdit();
                 resized(); repaint();
@@ -4718,9 +5359,10 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
             {
                 mAutomEditBlock = hit;
                 int bx = barToX((float)mPM.getBlock(hit).startBar);
-                int bw = jmax(4, (int)(mPM.getBlock(hit).lengthBars * mPPBar) - 1);
+                int bw = jmax(4, barToX((float)(mPM.getBlock(hit).startBar
+                                                + mPM.getBlock(hit).lengthBars)) - bx - 1);
                 int by = rowToY(mPM.getBlock(hit).trackRow) + 2;
-                int bh = (int)mEffectiveRowH - 4;
+                int bh = rowHeightPx(mPM.getBlock(hit).trackRow) - 4;
 
                 // ── Right-click on point → Reset / Delete menu ──────────────
                 if (e.mods.isRightButtonDown())
@@ -4845,6 +5487,22 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                     mMoveOrigBars.push_back((float)mPM.getBlock(idx).startBar);
                     mMoveOrigRows.push_back(mPM.getBlock(idx).trackRow);
                 }
+                // QA-G Task 6: capture follower signatures for the
+                // move-across-TS prompt (compared at the move commit).
+                mMovePreTs.clear();
+                for (int mvIdx : mMoveIndices)
+                {
+                    const auto& mb = mPM.getBlock(mvIdx);
+                    if (mb.clipType != ClipType::Pattern) continue;
+                    if (mb.patternIndex < 0 || mb.patternIndex >= mPM.getNumPatterns()) continue;
+                    const auto& mp = mPM.getPattern(mb.patternIndex);
+                    if (mp.tsLocked || ! mPM.patternHasNotes(mb.patternIndex)) continue;
+                    bool seen = false;
+                    for (auto& pre : mMovePreTs)
+                        if (pre[0] == mb.patternIndex) { seen = true; break; }
+                    if (! seen)
+                        mMovePreTs.push_back({ mb.patternIndex, mp.tsNum, mp.tsDen });
+                }
                 beginEdit("Move");
             }
         }
@@ -4882,6 +5540,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         b.lengthBars   = 1;
         b.layerTrack   = true;
         mPM.addBlock(b);
+        afterPatternBlockPlaced(b);   // QA-G Task 6
         // (commitEdit on mouseUp)
         repaint();
         return;
@@ -4913,6 +5572,22 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                     mMoveIndices.push_back(idx);
                     mMoveOrigBars.push_back((float)mPM.getBlock(idx).startBar);
                     mMoveOrigRows.push_back(mPM.getBlock(idx).trackRow);
+                }
+                // QA-G Task 6: capture follower signatures for the
+                // move-across-TS prompt (compared at the move commit).
+                mMovePreTs.clear();
+                for (int mvIdx : mMoveIndices)
+                {
+                    const auto& mb = mPM.getBlock(mvIdx);
+                    if (mb.clipType != ClipType::Pattern) continue;
+                    if (mb.patternIndex < 0 || mb.patternIndex >= mPM.getNumPatterns()) continue;
+                    const auto& mp = mPM.getPattern(mb.patternIndex);
+                    if (mp.tsLocked || ! mPM.patternHasNotes(mb.patternIndex)) continue;
+                    bool seen = false;
+                    for (auto& pre : mMovePreTs)
+                        if (pre[0] == mb.patternIndex) { seen = true; break; }
+                    if (! seen)
+                        mMovePreTs.push_back({ mb.patternIndex, mp.tsNum, mp.tsDen });
                 }
                 beginEdit("Move");
             }
@@ -4969,9 +5644,9 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
             if (nextTick <= 1.f && std::abs(dv) >= 0.02f)
             {
                 int bx = barToX((float)blk.startBar);
-                int bw = jmax(4, (int)(blk.lengthBars * mPPBar) - 1);
+                int bw = jmax(4, barToX((float)(blk.startBar + blk.lengthBars)) - bx - 1);
                 int by = rowToY(blk.trackRow) + 2;
-                int bh = (int)mEffectiveRowH - 4;
+                int bh = rowHeightPx(blk.trackRow) - 4;
                 float dragVal = jlimit(0.f, 1.f, 1.f - (float)(e.y - by) / (float)bh);
                 // FL formula inverse at x=0.5: evalFL(0.5, T) = 0.5*T + 0.5 => T = 2*y - 1
                 float y_mid   = (dragVal - p0.value01) / dv;
@@ -4988,9 +5663,9 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
     {
         auto& blk = mPM.getBlock(mAutomEditBlock);
         int bx = barToX((float)blk.startBar);
-        int bw = jmax(4, (int)(blk.lengthBars * mPPBar) - 1);
+        int bw = jmax(4, barToX((float)(blk.startBar + blk.lengthBars)) - bx - 1);
         int by = rowToY(blk.trackRow) + 2;
-        int bh = (int)mEffectiveRowH - 4;
+        int bh = rowHeightPx(blk.trackRow) - 4;
 
         float relX = jlimit(0.f, 1.f, (float)(e.x - bx) / (float)bw);
         float relY = jlimit(0.f, 1.f, 1.f - (float)(e.y - by) / (float)bh);
@@ -5100,6 +5775,7 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
             b.lengthBars   = 1;
             b.layerTrack   = true;
             mPM.addBlock(b);
+            afterPatternBlockPlaced(b);   // QA-G Task 6
             mPaintLastBar = bar;
             repaint();
         }
@@ -5380,7 +6056,39 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
         mStretchOrigBeats = 0.0;
         updateCursor(); return;
     }
-    if (mMoving)   { commitEdit(); mMoving = false; mMoveIndices.clear(); updateCursor(); return; }
+    if (mMoving)
+    {
+        commitEdit();
+        // QA-G Task 6: user-set patterns' linked markers relocate with the
+        // move (commitEdit's cleanup removed the stale ones; re-spawn at the
+        // new positions), then follower patterns whose governing signature
+        // changed get the Proceed / Lock Previous TS prompt (docket #3).
+        for (int mvIdx : mMoveIndices)
+            if (mvIdx >= 0 && mvIdx < mPM.getNumBlocks())
+                afterPatternBlockPlaced (mPM.getBlock (mvIdx));
+        for (const auto& pre : mMovePreTs)
+        {
+            const int pi = pre[0];
+            if (pi < 0 || pi >= mPM.getNumPatterns()) continue;
+            const auto& p = mPM.getPattern (pi);
+            if (p.tsLocked) continue;
+            if (p.tsNum == pre[1] && p.tsDen == pre[2]) continue;
+            auto* aw = new AlertWindow ("Time Signature Change",
+                "\"" + p.name + "\" moved into a different time signature ("
+                    + String (pre[1]) + "/" + String (pre[2]) + " -> "
+                    + String (p.tsNum) + "/" + String (p.tsDen) + ").",
+                AlertWindow::QuestionIcon);
+            aw->addButton ("Proceed", 1, KeyPress (KeyPress::returnKey));
+            aw->addButton ("Lock Previous TS", 2);
+            aw->enterModalState (true,
+                ModalCallbackFunction::create ([this, pi, pre] (int r)
+                {
+                    if (r == 2) mPM.setPatternTimeSig (pi, pre[1], pre[2]);
+                }), true);
+        }
+        mMovePreTs.clear();
+        mMoving = false; mMoveIndices.clear(); updateCursor(); return;
+    }
     // QA-Ea Task 0c (FL pre-roll record): finalize the slip-edit drag.
     // commitEdit() snapshots the new contentStartSamples / lengthBeats for
     // undo + fires onArrangementChanged -> rebuildAudioClipPlayers so the
@@ -5422,6 +6130,7 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
             b.layerTrack   = true;
             mPM.addBlock(b);
             commitEdit();
+            afterPatternBlockPlaced(b);   // QA-G Task 6
             mSelection.clear();
             mSelection.push_back(mPM.getNumBlocks() - 1);
         }
@@ -5461,7 +6170,7 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
 
 void ArrangementGrid::mouseDoubleClick(const MouseEvent& e)
 {
-    if (e.y < kRulerH) return;
+    if (e.y < rulerPinY() + kRulerH) return;
     int hit = blockAtPos(e.x, e.y);
     if (hit >= 0 && mPM.getBlock(hit).clipType == ClipType::Audio)
         showAudioClipProperties(hit);
@@ -5472,9 +6181,9 @@ void ArrangementGrid::mouseDoubleClick(const MouseEvent& e)
         {
             const auto& b  = mPM.getBlock(hit);
             int bx = barToX(b.startBar);
-            int bw = jmax(4, (int)(effectiveLengthBars(b) * mPPBar) - 1);
+            int bw = jmax(4, barToX((float)(b.startBar + effectiveLengthBars(b))) - bx - 1);
             int by = rowToY(b.trackRow) + 2;
-            int bh = (int)mEffectiveRowH - 4;
+            int bh = rowHeightPx(b.trackRow) - 4;
             int chIdx = hitTestAutomCurveHandleInBlock(b.automationLane,
                 bx, bw, by, bh, e.x, e.y);
             if (chIdx >= 0)
@@ -5525,10 +6234,12 @@ void ArrangementGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetail
     else if (e.mods.isAltDown())
     {
         // Alt+scroll = vertical zoom anchored to the cursor: the row under the
-        // mouse stays under the mouse.  full out = all kNumRows fill viewport, full in = 8 rows.
+        // mouse stays under the mouse.  full out = kMaxRowsInView rows fill
+        // the viewport, full in = 8 rows.  Clamp subtracts the ruler band so
+        // zoom-out tiles ruler + rows exactly (no residual dead strip).
         float factor = (wheel.deltaY > 0.f) ? 1.15f : (1.f / 1.15f);
-        float minRH  = vpH / (float)kNumRows;
-        float maxRH  = vpH / 8.f;
+        float minRH  = (vpH - (float) kRulerH) / (float)kMaxRowsInView;
+        float maxRH  = jmax(minRH, (vpH - (float) kRulerH) / 8.f);
         const float oldRH = mEffectiveRowH;
         mEffectiveRowH = jlimit(minRH, maxRH, mEffectiveRowH * factor);
         resized();
@@ -5714,7 +6425,6 @@ bool ArrangementGrid::keyPressed(const KeyPress& key)
 
 void ArrangementGrid::resized()
 {
-    int totalBars = totalVisibleBars();
     // Get viewport size so we never leave blank space at the edges
     float vpW = 800.f, vpH = 600.f;
     if (auto* vp = findParentComponentOfClass<juce::Viewport>())
@@ -5722,7 +6432,11 @@ void ArrangementGrid::resized()
         vpW = (float)jmax(1, vp->getWidth());
         vpH = (float)jmax(1, vp->getHeight());
     }
-    int w = jmax((int)vpW, (int)(totalBars * mPPBar));
+    // Horizontal panning is virtual (mBarOff shifts barToX's origin): the
+    // component never exceeds the viewport width, so the viewport scrolls
+    // VERTICAL only and BuilderPage's external scrollbar is the single
+    // horizontal mechanism.
+    int w = (int)vpW;
     int h = jmax((int)vpH, kRulerH + (int)(kNumRows * mEffectiveRowH));
     setSize(w, h);
 }
@@ -5740,11 +6454,23 @@ void TrackHeaderPanel::setViewportYOffset(int yPixels)
     if (mYOffset != yPixels) { mYOffset = yPixels; repaint(); }
 }
 
+void TrackHeaderPanel::notifyArrangementChanged()
+{
+    if (mGrid.onArrangementChanged) mGrid.onArrangementChanged();
+    mPM.notifyContentChanged();
+}
+
+// Default band colours for newly-created track groups, cycled by group id.
+static constexpr juce::uint32 kGroupPalette[] = {
+    0xffe06868, 0xff5aa8d8, 0xff6cc070, 0xffd8a050,
+    0xffb078d0, 0xff50c0b0, 0xffcfcf5e, 0xffe07898,
+};
+
 int TrackHeaderPanel::yToRow(int y) const
 {
-    int gridY = y - ArrangementGrid::kRulerH + mYOffset;
-    int rh    = jmax(1, (int)mGrid.getEffectiveRowH());
-    return gridY / rh;
+    // Delegate to the grid's mapping so header rows can never drift from the
+    // grid rows (int row-height truncation used to accumulate down the list).
+    return mGrid.yToRow(y + mYOffset);
 }
 
 // Vertical offset of an LED from the top of its track row.
@@ -5772,12 +6498,13 @@ void TrackHeaderPanel::paint(Graphics& g)
     g.setFont(Font(8.f, Font::bold));
     g.drawText("BUILDER", 4, 1, b.getWidth() - 8, ArrangementGrid::kRulerH - 2, Justification::centredLeft);
 
-    // Track rows
+    // Track rows -- geometry comes from the grid's rowToY/rowHeightPx so the
+    // labels stay pixel-locked to the grid rows at every zoom level.
     const auto& names = mGrid.getRowNames();
-    int rh = jmax(1, (int)mGrid.getEffectiveRowH());
     for (int r = 0; r < ArrangementGrid::kNumRows; ++r)
     {
-        int y = ArrangementGrid::kRulerH + r * rh - mYOffset;
+        const int rh = jmax(1, mGrid.rowHeightPx(r));
+        int y = mGrid.rowToY(r) - mYOffset;
         if (y + rh < 0 || y > b.getHeight()) continue;
 
         g.setColour(kHeaderBg);
@@ -5787,6 +6514,20 @@ void TrackHeaderPanel::paint(Graphics& g)
         if (r % 2 == 0) {
             g.setColour(Colours::white.withAlpha(0.02f));
             g.fillRect(0, y, b.getWidth(), rh);
+        }
+
+        // Track-group signifier: colour band + soft row tint (visual-only V1).
+        // Band sits at x 0..2; LEDs start at kLedMuteX = 4, no overlap.
+        const int gid = mPM.getRowGroup(r);
+        if (gid > 0)
+        {
+            Colour gc (mPM.getRowGroupColor(r));
+            if (gc.getARGB() == 0)
+                gc = Colour (kGroupPalette[(gid - 1) % (int) juce::numElementsInArray (kGroupPalette)]);
+            g.setColour(gc.withAlpha(0.10f));
+            g.fillRect(0, y, b.getWidth(), rh);
+            g.setColour(gc.withAlpha(0.9f));
+            g.fillRect(0, y, 3, rh);
         }
 
         // ── Mute / Solo LEDs ────────────────────────────────────────────
@@ -5839,11 +6580,11 @@ int TrackHeaderPanel::hitTestLed(int x, int y, int& kind) const
 {
     kind = -1;
     if (y < ArrangementGrid::kRulerH) return -1;
-    const int rh = jmax(1, (int)mGrid.getEffectiveRowH());
-    const int gridY = y - ArrangementGrid::kRulerH + mYOffset;
-    const int row   = gridY / rh;
+    const int gridY = y + mYOffset;
+    const int row   = mGrid.yToRow(gridY);
     if (row < 0 || row >= ArrangementGrid::kNumRows) return -1;
-    const int yInRow = gridY - row * rh;
+    const int rh     = jmax(1, mGrid.rowHeightPx(row));
+    const int yInRow = gridY - mGrid.rowToY(row);
     const int ledTop = ledTopInRow(rh);
     if (yInRow < ledTop || yInRow >= ledTop + kLedSize) return -1;
     if (x >= kLedMuteX && x < kLedMuteX + kLedSize) { kind = 0; return row; }
@@ -5898,11 +6639,18 @@ void TrackHeaderPanel::mouseDoubleClick(const MouseEvent& e)
 
 void TrackHeaderPanel::showTrackContextMenu(int row)
 {
+    const int gid = mPM.getRowGroup(row);
+
     PopupMenu m;
     m.addItem(1, "Rename...");
     m.addSeparator();
     m.addItem(2, "Move Up");
     m.addItem(3, "Move Down");
+    m.addItem(8, "Insert Track Above");
+    m.addSeparator();
+    m.addItem(5, "Group with Above", row > 0);
+    m.addItem(6, "Remove from Group", gid > 0);
+    m.addItem(7, "Color Group...", gid > 0);
     m.addSeparator();
     m.addItem(4, "Delete Track Clips");
 
@@ -5927,28 +6675,105 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
             case 2:
             case 3:
             {
-                // Swap row names + move all blocks in these rows
                 int otherRow = (result == 2) ? row - 1 : row + 1;
                 if (otherRow < 0 || otherRow >= ArrangementGrid::kNumRows) break;
-                // Swap names
+                mGrid.beginEdit((result == 2) ? "Move Track Up" : "Move Track Down");
+                // Swap names.  Positional defaults ("Track N") stay positional
+                // -- only custom names travel with the track.
                 auto names = mGrid.getRowNames();
-                String tmp = names[row];
-                mGrid.setRowName(row, names[otherRow]);
-                mGrid.setRowName(otherRow, tmp);
+                const bool aDef = (names[row]      == mPM.defaultRowName(row));
+                const bool bDef = (names[otherRow] == mPM.defaultRowName(otherRow));
+                mGrid.setRowName(row,      bDef ? mPM.defaultRowName(row)      : names[otherRow]);
+                mGrid.setRowName(otherRow, aDef ? mPM.defaultRowName(otherRow) : names[row]);
+                // Row state moves with the track (mute / solo / group / colour)
+                const bool m1 = mPM.isRowMuted(row),      s1 = mPM.isRowSoloed(row);
+                const bool m2 = mPM.isRowMuted(otherRow), s2 = mPM.isRowSoloed(otherRow);
+                mPM.setRowMuted (row, m2);      mPM.setRowSoloed(row, s2);
+                mPM.setRowMuted (otherRow, m1); mPM.setRowSoloed(otherRow, s1);
+                const int          g1 = mPM.getRowGroup(row);
+                const int          g2 = mPM.getRowGroup(otherRow);
+                const juce::uint32 c1 = mPM.getRowGroupColor(row);
+                const juce::uint32 c2 = mPM.getRowGroupColor(otherRow);
+                mPM.setRowGroup(row, g2);      mPM.setRowGroupColor(row, c2);
+                mPM.setRowGroup(otherRow, g1); mPM.setRowGroupColor(otherRow, c1);
                 // Swap block rows
                 for (int i = 0; i < mPM.getNumBlocks(); ++i) {
                     auto& b = mPM.getBlock(i);
                     if (b.trackRow == row)       b.trackRow = otherRow;
                     else if (b.trackRow == otherRow) b.trackRow = row;
                 }
+                mGrid.commitEdit();
+                notifyArrangementChanged();
+                mGrid.repaint();
                 repaint();
                 break;
             }
             case 4:
             {
-                // Delete all clips on this track row
+                mGrid.beginEdit("Delete Track Clips");
                 for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
                     if (mPM.getBlock(i).trackRow == row) mPM.removeBlock(i);
+                mGrid.commitEdit();
+                notifyArrangementChanged();
+                mGrid.repaint();
+                repaint();
+                break;
+            }
+            case 5:
+            {
+                const int above = row - 1;
+                if (above < 0) break;
+                int g = mPM.getRowGroup(above);
+                if (g <= 0)
+                {
+                    g = mPM.allocateRowGroupId();
+                    mPM.setRowGroup(above, g);
+                    mPM.setRowGroupColor(above,
+                        kGroupPalette[(g - 1) % (int) juce::numElementsInArray(kGroupPalette)]);
+                }
+                mPM.setRowGroup(row, g);
+                mPM.setRowGroupColor(row, mPM.getRowGroupColor(above));
+                repaint();
+                break;
+            }
+            case 6:
+            {
+                mPM.setRowGroup(row, 0);
+                mPM.setRowGroupColor(row, 0);
+                repaint();
+                break;
+            }
+            case 7:
+            {
+                const int g = mPM.getRowGroup(row);
+                if (g <= 0) break;
+                PatternColorPicker::showAsync(this, Colour(mPM.getRowGroupColor(row)),
+                    [this, g](Colour c)
+                    {
+                        for (int r = 0; r < ArrangementGrid::kNumRows; ++r)
+                            if (mPM.getRowGroup(r) == g)
+                                mPM.setRowGroupColor(r, c.getARGB());
+                        repaint();
+                    });
+                break;
+            }
+            case 8:
+            {
+                // QA-G (owner rev 2026-07-17, with the Split work): the
+                // full-grid edge PROMPTS instead of silently no-oping.
+                if (! mGrid.canInsertRows(1))
+                {
+                    juce::AlertWindow::showMessageBoxAsync(
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Maximum Tracks Reached",
+                        "All 500 tracks are in use - cannot insert another track.");
+                    break;
+                }
+                mGrid.beginEdit("Insert Track Above");
+                mGrid.insertBlankRowsAt(row, 1);
+                mGrid.commitEdit();
+                notifyArrangementChanged();
+                mGrid.repaint();
                 repaint();
                 break;
             }
@@ -6171,6 +6996,11 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
         }
     };
     mBrowser->onRenderPattern = [this](int idx) { renderPatternToWav(idx); };
+    // (Split completion may be async behind its group prompt; the browser's
+    // diff-based timer refresh picks up the new pattern list either way.)
+    mBrowser->onSplitPattern  = [this](int idx) {
+        if (mGrid) mGrid->splitPatternByEngine(idx);
+    };
     mBrowser->onImportAudio   = [this](const String& path) {
         if (mGrid) mGrid->importAudioFile(path, 0, 0.f);
     };
@@ -6188,9 +7018,16 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
 
     mGridViewport = std::make_unique<Viewport>();
     mGridViewport->setViewedComponent(mGrid.get(), false);
-    mGridViewport->setScrollBarsShown(true, true);
+    // Vertical only -- horizontal panning is the grid's virtual mBarOff,
+    // driven by the external scrollbar below (one mechanism, not two).
+    mGridViewport->setScrollBarsShown(true, false);
     mGridViewport->setScrollBarThickness(10);
     addAndMakeVisible(*mGridViewport);
+
+    mGridHScroll = std::make_unique<ScrollBar>(false);
+    mGridHScroll->setAutoHide(false);
+    mGridHScroll->addListener(this);
+    addAndMakeVisible(*mGridHScroll);
 
     // Track header panel (Task 10 - fixed left label column)
     mTrackHeader = std::make_unique<TrackHeaderPanel>(*mGrid, pm);
@@ -6219,8 +7056,8 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
         // Anchor zoom around the bar currently at viewport center so content
         // doesn't slide off-screen on each click.
         const float centreVpX = vpW * 0.5f;
-        const float centreGridX = (float)mGridViewport->getViewPositionX() + centreVpX;
-        const float anchorBar = mGrid->xToBar((int)centreGridX);
+        const float centreGridX = centreVpX;   // viewport X is always 0 (mBarOff pans)
+        const float anchorBar = mGrid->xToBarF(centreGridX);
         mGrid->mPPBar = jlimit(minPP, maxPP, mGrid->mPPBar * factor);
         // Keep anchorBar at the same grid-local x by adjusting mBarOff.
         // QA-Ea Task 0c (Option ii): allow negative-bar viewport.
@@ -6330,13 +7167,20 @@ void BuilderPage::resized()
     // Toolbar (right of browser, below menu bar)
     mToolbar->setBounds(b.removeFromTop(ArrangementToolbar::kHeight));
 
+    // Bottom band: external horizontal scrollbar (spans the grid area only;
+    // the strip under the label column stays page background).
+    auto hScrollRow = b.removeFromBottom(mGridViewport->getScrollBarThickness());
+
     // Track header (fixed left label column)
     mTrackHeader->setBounds(b.removeFromLeft(ArrangementGrid::kLabelW));
 
     // Grid viewport (remaining area)
     mGridViewport->setBounds(b);
+    if (mGridHScroll)
+        mGridHScroll->setBounds(hScrollRow.removeFromRight(b.getWidth()));
     // Grid content sized by ArrangementGrid::resized() - just trigger it
     if (mGrid) mGrid->resized();
+    syncGridHScroll();
 }
 
 void BuilderPage::setPlayHead(StandalonePlayHead* ph)
@@ -6409,6 +7253,30 @@ void BuilderPage::timerCallback()
     // Keep track header in sync (belt-and-suspenders, in case scroll happened)
     if (mTrackHeader && mGridViewport)
         mTrackHeader->setViewportYOffset(mGridViewport->getViewPositionY());
+
+    // Keep the horizontal scrollbar tracking the grid view (range is dynamic:
+    // it re-tightens when the view returns from past-the-content territory).
+    syncGridHScroll();
+}
+
+void BuilderPage::syncGridHScroll()
+{
+    if (!mGrid || !mGridHScroll || !mGridViewport) return;
+    const float vpW      = (float) jmax(1, mGridViewport->getWidth());
+    const float viewBars = vpW / jmax(1.f, mGrid->mPPBar);
+    const float lo = jmin(0.f, jmin(mGrid->mBarOff,
+                                    -(float) mGrid->maxRevealableNegativeBars()));
+    const float hi = jmax((float) mGrid->totalVisibleBars(),
+                          mGrid->mBarOff + viewBars);
+    mGridHScroll->setRangeLimits(lo, hi, dontSendNotification);
+    mGridHScroll->setCurrentRange(mGrid->mBarOff, viewBars, dontSendNotification);
+}
+
+void BuilderPage::scrollBarMoved(ScrollBar* sb, double newRangeStart)
+{
+    if (sb != mGridHScroll.get() || !mGrid) return;
+    mGrid->mBarOff = (float) newRangeStart;
+    mGrid->repaint();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6472,8 +7340,8 @@ void BuilderPage::doZoom(float factor)
     const float vpW = (float)jmax(1, mGridViewport->getWidth());
     const float minPP = mGrid->minZoomPPBar (vpW), maxPP = mGrid->maxZoomPPBar (vpW);
     const float centreVpX = vpW * 0.5f;
-    const float centreGridX = (float)mGridViewport->getViewPositionX() + centreVpX;
-    const float anchorBar = mGrid->xToBar((int)centreGridX);
+    const float centreGridX = centreVpX;   // viewport X is always 0 (mBarOff pans)
+    const float anchorBar = mGrid->xToBarF(centreGridX);
     mGrid->mPPBar = jlimit(minPP, maxPP, mGrid->mPPBar * factor);
     // QA-Ea Task 0c (Option ii): allow negative-bar viewport.
     mGrid->mBarOff = jmax(-(float) mGrid->maxRevealableNegativeBars(),

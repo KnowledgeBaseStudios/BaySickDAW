@@ -1,4 +1,5 @@
 #include "PatternManager.h"
+#include "TsMapRead.h"
 
 // ── AutomationLane::evaluateAt ────────────────────────────────────────────────
 float AutomationLane::evaluateAt(float pos01) const
@@ -133,14 +134,20 @@ const char* PatternManager::kDrumNames[MAX_DRUM_SOUNDS] = {
 PatternManager::PatternManager()
 {
     mDrumEnabled.fill(false);
+    for (int i = 0; i < kMaxArrangementRows; ++i)
+        mRowNames[i] = defaultRowName(i);
     addPattern("Pattern 1");
+    publishTimeSigMap();   // TsMap live from startup (implicit 4/4)
 }
 
 int PatternManager::addPattern(const juce::String& name)
 {
     Pattern p;
     p.name = name.isEmpty() ? "Pattern " + juce::String(mPatterns.size()+1) : name;
+    // QA-G Task 6 (docket #4): new patterns bind to the current-TS selection.
+    p.tsBoundMarkerUid = mCurrentTsMarkerUid;
     mPatterns.push_back(std::move(p));
+    refreshPatternTimeSigs();
     notifyContentChanged();
     return (int)mPatterns.size() - 1;
 }
@@ -330,8 +337,51 @@ void PatternManager::removePattern(int index)
 {
     if (index < 0 || index >= (int)mPatterns.size() || mPatterns.size() <= 1) return;
     mPatterns.erase(mPatterns.begin() + index);
+    // QA-G (found during Split): the erase never re-indexed the rest of the
+    // project -- every block referencing a pattern ABOVE the removed index
+    // silently played the wrong (shifted) pattern, blocks OF the removed
+    // pattern dangled past the end, and linked TS markers kept stale pattern
+    // indices.  Re-index everything; blocks + markers of the dead pattern go.
+    for (int i = (int) mArrangement.size() - 1; i >= 0; --i)
+    {
+        auto& b = mArrangement[(size_t) i];
+        if (b.clipType != ClipType::Pattern) continue;
+        if (b.patternIndex == index)
+            mArrangement.erase(mArrangement.begin() + i);
+        else if (b.patternIndex > index)
+            --b.patternIndex;
+    }
+    for (int i = (int) mTimeSigChanges.size() - 1; i >= 0; --i)
+    {
+        auto& ts = mTimeSigChanges[(size_t) i];
+        if (ts.linkedPattern == index)
+        {
+            const int uid = ts.uid;
+            mTimeSigChanges.erase(mTimeSigChanges.begin() + i);
+            if (uid == mCurrentTsMarkerUid)
+                mCurrentTsMarkerUid = ((int) mTimeSigChanges.size() == 1)
+                                        ? mTimeSigChanges[0].uid : -1;
+        }
+        else if (ts.linkedPattern > index)
+            --ts.linkedPattern;
+    }
+    if (mCurrentPattern > index) --mCurrentPattern;
     mCurrentPattern = juce::jlimit(0, (int)mPatterns.size()-1, mCurrentPattern);
+    refreshPatternTimeSigs();
+    publishTimeSigMap();
     notifyContentChanged();
+    if (onTimeSigStateChanged) onTimeSigStateChanged();
+}
+
+void PatternManager::restorePatternList (const std::vector<Pattern>& patterns, int currentIndex)
+{
+    if (patterns.empty()) return;
+    mPatterns = patterns;
+    mCurrentPattern = juce::jlimit(0, (int)mPatterns.size()-1, currentIndex);
+    refreshPatternTimeSigs();
+    publishTimeSigMap();
+    notifyContentChanged();
+    if (onTimeSigStateChanged) onTimeSigStateChanged();
 }
 
 void PatternManager::renamePattern(int index, const juce::String& name)
@@ -429,32 +479,69 @@ int PatternManager::findTimeMarkerNearBar (float bar, float tolerance) const
     return bestIdx;
 }
 
-// ── Time-signature changes (D-2) ────────────────────────────────────────
-void PatternManager::addTimeSigChange (int bar, int num, int den)
+// ── Time-signature changes (D-2; QA-G Task 6: the SOLE played source) ───
+static int roundTsDenominator (int den)
 {
-    bar = juce::jmax(0, bar);
-    num = juce::jlimit(1, 32, num);
-    // Round denominator to the nearest power of 2 in [1, 32].
     static const int kAllowedDen[] = { 1, 2, 4, 8, 16, 32 };
     int closest = 4;
     int bestDiff = 999;
     for (int d : kAllowedDen)
         if (std::abs(d - den) < bestDiff) { closest = d; bestDiff = std::abs(d - den); }
-    den = closest;
+    return closest;
+}
 
-    // Replace existing change at the same bar (one TS per bar).
+void PatternManager::tsStateChanged()
+{
+    refreshPatternTimeSigs();
+    publishTimeSigMap();
+    notifyContentChanged();
+    if (onTimeSigStateChanged) onTimeSigStateChanged();
+}
+
+void PatternManager::addTimeSigChange (int bar, int num, int den, int linkedPattern)
+{
+    bar = juce::jmax(0, bar);
+    num = juce::jlimit(1, 32, num);
+    den = roundTsDenominator(den);
+
+    // One TS per bar.  A manual marker owns its bar: a linked spawn onto an
+    // occupied bar is a no-op (docket B "same-bar manual wins"); a MANUAL
+    // write takes the bar over (and unlinks whatever held it).
     for (auto& ts : mTimeSigChanges)
-        if (ts.bar == bar) { ts.num = num; ts.den = den; return; }
+        if (ts.bar == bar)
+        {
+            if (linkedPattern >= 0) return;
+            ts.num = num; ts.den = den; ts.linkedPattern = -1;
+            tsStateChanged();
+            return;
+        }
 
-    mTimeSigChanges.push_back({ bar, num, den });
+    TimeSigChange ts;
+    ts.bar = bar; ts.num = num; ts.den = den;
+    ts.uid = mNextTsUid++;
+    ts.linkedPattern = linkedPattern;
+    mTimeSigChanges.push_back(ts);
     std::sort(mTimeSigChanges.begin(), mTimeSigChanges.end(),
               [](const TimeSigChange& a, const TimeSigChange& b) { return a.bar < b.bar; });
+    // Current-selection maintenance: a sole marker is automatically current.
+    if ((int) mTimeSigChanges.size() == 1)
+        mCurrentTsMarkerUid = ts.uid;
+    tsStateChanged();
 }
 
 void PatternManager::removeTimeSigChange (int idx)
 {
-    if (idx >= 0 && idx < (int) mTimeSigChanges.size())
-        mTimeSigChanges.erase(mTimeSigChanges.begin() + idx);
+    if (idx < 0 || idx >= (int) mTimeSigChanges.size()) return;
+    const int removedUid = mTimeSigChanges[(size_t) idx].uid;
+    mTimeSigChanges.erase(mTimeSigChanges.begin() + idx);
+    if (removedUid == mCurrentTsMarkerUid)
+    {
+        // Docket 4B: sole survivor auto-becomes current; 2+ left -> unset
+        // (the Builder re-prompts); none -> unset.
+        mCurrentTsMarkerUid = ((int) mTimeSigChanges.size() == 1)
+                                ? mTimeSigChanges[0].uid : -1;
+    }
+    tsStateChanged();
 }
 
 int PatternManager::findTimeSigChangeAtBar (int bar) const
@@ -462,6 +549,21 @@ int PatternManager::findTimeSigChangeAtBar (int bar) const
     for (int i = 0; i < (int) mTimeSigChanges.size(); ++i)
         if (mTimeSigChanges[(size_t) i].bar == bar) return i;
     return -1;
+}
+
+int PatternManager::findTimeSigChangeByUid (int uid) const
+{
+    if (uid < 0) return -1;
+    for (int i = 0; i < (int) mTimeSigChanges.size(); ++i)
+        if (mTimeSigChanges[(size_t) i].uid == uid) return i;
+    return -1;
+}
+
+void PatternManager::setCurrentTsMarkerUid (int uid)
+{
+    if (mCurrentTsMarkerUid == uid) return;
+    mCurrentTsMarkerUid = uid;
+    tsStateChanged();
 }
 
 // ── Tempo changes (QA-TempoMap, 2026-07-08) ─────────────────────────────
@@ -587,17 +689,153 @@ double PatternManager::getPatternBeatsPerBar (int patternIndex) const
     return (double) juce::jmax (1, pat.tsNum) * 4.0 / (double) den;
 }
 
-bool PatternManager::autoDerivePatternTimeSig (int patternIndex, int placementBar)
+// QA-G Task 6: follower lifecycle.  autoDerivePatternTimeSig (orphaned C.5b
+// machinery, zero callers) is replaced by this live re-derivation.
+void PatternManager::refreshPatternTimeSigs()
+{
+    for (int pi = 0; pi < (int) mPatterns.size(); ++pi)
+    {
+        auto& pat = mPatterns[(size_t) pi];
+        if (pat.tsLocked) continue;   // user-set: fields are authoritative
+
+        // Placed follower: the marker in effect at the EARLIEST block start.
+        double earliestBeat = std::numeric_limits<double>::max();
+        for (const auto& b : mArrangement)
+            if (b.clipType == ClipType::Pattern && b.patternIndex == pi)
+                earliestBeat = juce::jmin (earliestBeat, effectiveStartBeats (b));
+        if (earliestBeat < std::numeric_limits<double>::max())
+        {
+            int bar = 0; double bib = 0.0;
+            beatToBarAndBeatInBar (juce::jmax (0.0, earliestBeat), bar, bib);
+            const auto eff = getEffectiveTimeSigAtBar (bar);
+            pat.tsNum = eff.num;
+            pat.tsDen = eff.den;
+            continue;
+        }
+
+        // Unplaced follower: binding -> current -> 4/4.  Dead bindings
+        // re-bind to the current selection (owner wiring, 2026-07-17).
+        if (pat.tsBoundMarkerUid >= 0
+            && findTimeSigChangeByUid (pat.tsBoundMarkerUid) < 0)
+            pat.tsBoundMarkerUid = mCurrentTsMarkerUid;
+        int mi = findTimeSigChangeByUid (pat.tsBoundMarkerUid);
+        if (mi < 0) mi = findTimeSigChangeByUid (mCurrentTsMarkerUid);
+        if (mi >= 0)
+        {
+            pat.tsNum = mTimeSigChanges[(size_t) mi].num;
+            pat.tsDen = mTimeSigChanges[(size_t) mi].den;
+        }
+        else
+        {
+            pat.tsNum = 4;
+            pat.tsDen = 4;
+        }
+    }
+}
+
+void PatternManager::resetPatternTimeSig (int patternIndex)
+{
+    if (patternIndex < 0 || patternIndex >= (int) mPatterns.size()) return;
+    auto& pat = mPatterns[(size_t) patternIndex];
+    pat.tsLocked = false;
+    pat.tsBoundMarkerUid = mCurrentTsMarkerUid;
+    // "Acts like it never was changed": its still-linked auto-markers go
+    // too (manual + unlinked markers stay -- they are the user's).
+    for (int i = (int) mTimeSigChanges.size() - 1; i >= 0; --i)
+        if (mTimeSigChanges[(size_t) i].linkedPattern == patternIndex)
+        {
+            const int uid = mTimeSigChanges[(size_t) i].uid;
+            mTimeSigChanges.erase (mTimeSigChanges.begin() + i);
+            if (uid == mCurrentTsMarkerUid)
+                mCurrentTsMarkerUid = ((int) mTimeSigChanges.size() == 1)
+                                        ? mTimeSigChanges[0].uid : -1;
+        }
+    tsStateChanged();
+}
+
+void PatternManager::cleanupLinkedMarkers()
+{
+    // Two-phase: resolve orphans against the CURRENT map first (erasing
+    // mid-loop would shift bar indexing for later conversions), then erase.
+    std::vector<int> orphanUids;
+    for (const auto& ts : mTimeSigChanges)
+    {
+        if (ts.linkedPattern < 0) continue;
+        bool hasBlock = false;
+        if (ts.linkedPattern < (int) mPatterns.size())
+            for (const auto& b : mArrangement)
+            {
+                if (b.clipType != ClipType::Pattern
+                    || b.patternIndex != ts.linkedPattern) continue;
+                int bar = 0; double bib = 0.0;
+                beatToBarAndBeatInBar (juce::jmax (0.0, effectiveStartBeats (b)), bar, bib);
+                if (bar == ts.bar) { hasBlock = true; break; }
+            }
+        if (! hasBlock) orphanUids.push_back (ts.uid);
+    }
+    for (const int uid : orphanUids)
+    {
+        const int idx = findTimeSigChangeByUid (uid);
+        if (idx < 0) continue;
+        mTimeSigChanges.erase (mTimeSigChanges.begin() + idx);
+        if (uid == mCurrentTsMarkerUid)
+            mCurrentTsMarkerUid = ((int) mTimeSigChanges.size() == 1)
+                                    ? mTimeSigChanges[0].uid : -1;
+    }
+    // Always re-derive followers + refresh the UI -- block edits change
+    // placed-follower governance even when no marker was removed.  Only a
+    // real removal republishes / dirties.
+    refreshPatternTimeSigs();
+    if (! orphanUids.empty())
+    {
+        publishTimeSigMap();
+        notifyContentChanged();
+    }
+    if (onTimeSigStateChanged) onTimeSigStateChanged();
+}
+
+bool PatternManager::patternHasNotes (int patternIndex) const
 {
     if (patternIndex < 0 || patternIndex >= (int) mPatterns.size()) return false;
-    auto& pat = mPatterns[(size_t) patternIndex];
-    if (pat.tsLocked) return false;   // user already set or already auto-derived
+    const auto& p = mPatterns[(size_t) patternIndex];
+    for (const auto& r : p.layerRoll) if (! r.notes.empty()) return true;
+    for (const auto& r : p.bassRoll)  if (! r.notes.empty()) return true;
+    for (const auto& r : p.drumRolls) if (! r.notes.empty()) return true;
+    for (const auto& r : p.clipRoll)  if (! r.notes.empty()) return true;
+    for (const auto& r : p.voxRoll)   if (! r.notes.empty()) return true;
+    for (const auto& r : p.instRoll)  if (! r.notes.empty()) return true;
+    if (! p.baySickRustyDrumsRoll.notes.empty()) return true;
+    if (! p.drumRoll.notes.empty()) return true;
+    return false;
+}
 
-    const auto eff = getEffectiveTimeSigAtBar (placementBar);
-    pat.tsNum    = eff.num;
-    pat.tsDen    = eff.den;
-    pat.tsLocked = true;
-    return true;
+void PatternManager::publishTimeSigMap() const
+{
+    double beats[TsMap::kMaxSegs]; double bpbs[TsMap::kMaxSegs];
+    int    nums [TsMap::kMaxSegs]; int    dens[TsMap::kMaxSegs];
+    int    bars [TsMap::kMaxSegs];
+    // Segment 0 = the opening signature (bar-0 marker or implicit 4/4).
+    int i0 = 0, curNum = 4, curDen = 4;
+    if (! mTimeSigChanges.empty() && mTimeSigChanges[0].bar <= 0)
+    {
+        curNum = mTimeSigChanges[0].num;
+        curDen = mTimeSigChanges[0].den;
+        i0 = 1;
+    }
+    beats[0] = 0.0;
+    bpbs [0] = (double) curNum * 4.0 / (double) juce::jmax (1, curDen);
+    nums [0] = curNum; dens[0] = curDen; bars[0] = 0;
+    int n = 1;
+    for (int i = i0; i < (int) mTimeSigChanges.size() && n < TsMap::kMaxSegs; ++i)
+    {
+        const auto& ts = mTimeSigChanges[(size_t) i];
+        if (ts.bar <= bars[n - 1]) continue;   // sorted; defensive vs dupes
+        beats[n] = beats[n - 1] + (double) (ts.bar - bars[n - 1]) * bpbs[n - 1];
+        bpbs [n] = (double) ts.num * 4.0 / (double) juce::jmax (1, ts.den);
+        nums [n] = ts.num; dens[n] = ts.den; bars[n] = ts.bar;
+        ++n;
+    }
+    TsMap::publish (beats, bpbs, nums, dens, bars, n);
 }
 
 void PatternManager::setPatternTimeSig (int patternIndex, int num, int den)
@@ -605,13 +843,13 @@ void PatternManager::setPatternTimeSig (int patternIndex, int num, int den)
     if (patternIndex < 0 || patternIndex >= (int) mPatterns.size()) return;
     auto& pat = mPatterns[(size_t) patternIndex];
     pat.tsNum    = juce::jlimit (1, 32, num);
-    // Round denominator to nearest power of 2 in [1, 32].
-    static const int kAllowedDen[] = { 1, 2, 4, 8, 16, 32 };
-    int closest = 4, bestDiff = 999;
-    for (int d : kAllowedDen)
-        if (std::abs (d - den) < bestDiff) { closest = d; bestDiff = std::abs (d - den); }
-    pat.tsDen    = closest;
+    pat.tsDen    = roundTsDenominator (den);
     pat.tsLocked = true;
+    // Docket B: pattern-TS edits update all still-linked markers.  Spawns
+    // nothing -- marker creation is placement-event-driven in the grid.
+    for (auto& ts : mTimeSigChanges)
+        if (ts.linkedPattern == patternIndex) { ts.num = pat.tsNum; ts.den = pat.tsDen; }
+    tsStateChanged();
 }
 
 double PatternManager::barStartBeat (int bar) const
@@ -897,6 +1135,14 @@ void PatternManager::reset()
     mCurrentPattern = 0;
     mGlobalTempo    = 120.0;
     mArrangement.clear();
+    // QA-G Task 6: File > New previously LEAKED ruler markers into the fresh
+    // project (reset never cleared them) -- clear all three lists + TS state.
+    mTimeMarkers.clear();
+    mTimeSigChanges.clear();
+    mTempoChanges.clear();
+    mCurrentTsMarkerUid = -1;
+    mNextTsUid          = 1;
+    publishTimeSigMap();
     // QA-RustyMeter Task 4 (2026-05-30): clear the audio library on blank-reset.
     // reset() is the "wipe to empty project" path (resetToBlankState -> here, hit
     // by all File > New / New-from-template entry points); it cleared patterns /
@@ -913,6 +1159,10 @@ void PatternManager::reset()
     mDrumEnabled.fill (true);
     for (auto& m : mRowMuted)  m.store (false, std::memory_order_relaxed);
     for (auto& s : mRowSoloed) s.store (false, std::memory_order_relaxed);
+    for (int i = 0; i < kMaxArrangementRows; ++i)
+        mRowNames[i] = defaultRowName(i);
+    mRowGroupId.fill(0);
+    mRowGroupColor.fill(0);
     mAutomationTemplates.clear();
 }
 
@@ -975,6 +1225,23 @@ juce::ValueTree PatternManager::toValueTree() const
         }
         n.setProperty("mute", mute.joinIntoString(""), nullptr);
         n.setProperty("solo", solo.joinIntoString(""), nullptr);
+        // QA-G: sparse <Row> children carry non-default names + group state
+        // (child elements, not CSV, so names may contain any character).
+        for (int i = 0; i < kMaxArrangementRows; ++i)
+        {
+            const bool named   = (mRowNames[i] != defaultRowName(i));
+            const bool grouped = (mRowGroupId[i] != 0);
+            if (!named && !grouped) continue;
+            juce::ValueTree r("Row");
+            r.setProperty("i", i, nullptr);
+            if (named)   r.setProperty("name", mRowNames[i], nullptr);
+            if (grouped)
+            {
+                r.setProperty("group",      mRowGroupId[i],           nullptr);
+                r.setProperty("groupColor", (int) mRowGroupColor[i],  nullptr);
+            }
+            n.addChild(r, -1, nullptr);
+        }
         root.addChild(n, -1, nullptr);
     }
 
@@ -991,6 +1258,7 @@ juce::ValueTree PatternManager::toValueTree() const
         pNode.setProperty("tsNum",       p.tsNum,       nullptr);
         pNode.setProperty("tsDen",       p.tsDen,       nullptr);
         pNode.setProperty("tsLocked",    p.tsLocked,    nullptr);
+        pNode.setProperty("tsBoundUid",  p.tsBoundMarkerUid, nullptr);   // QA-G Task 6
 
         // Legacy per-row drum step grid
         for (int d = 0; d < MAX_DRUM_SOUNDS; ++d)
@@ -1190,6 +1458,9 @@ juce::ValueTree PatternManager::toValueTree() const
         // old float "startBeats" prop is migrated on load (downgrade unsupported).
         if (b.startTicks != ArrangementBlock::kStartTicksUnset)
             bNode.setProperty("startTicks", b.startTicks, nullptr);
+        // QA-G Task 5: slice content offset (skip when 0 -- unsliced default).
+        if (b.contentOffsetTicks != 0)
+            bNode.setProperty("contentOffsetTicks", b.contentOffsetTicks, nullptr);
         if (b.clipType == ClipType::Automation)
             bNode.addChild(automationLaneToValueTree(b.automationLane), -1, nullptr);
         arrNode.addChild(bNode, -1, nullptr);
@@ -1209,12 +1480,16 @@ juce::ValueTree PatternManager::toValueTree() const
         root.addChild(tm, -1, nullptr);
 
         juce::ValueTree ts("TimeSigChanges");
+        ts.setProperty("currentUid", mCurrentTsMarkerUid, nullptr);   // QA-G Task 6
+        ts.setProperty("nextUid",    mNextTsUid,          nullptr);
         for (const auto& s : mTimeSigChanges)
         {
             juce::ValueTree e("TS");
             e.setProperty("bar", s.bar, nullptr);
             e.setProperty("num", s.num, nullptr);
             e.setProperty("den", s.den, nullptr);
+            e.setProperty("uid",           s.uid,           nullptr);
+            e.setProperty("linkedPattern", s.linkedPattern, nullptr);
             ts.addChild(e, -1, nullptr);
         }
         root.addChild(ts, -1, nullptr);
@@ -1336,6 +1611,13 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         }
     }
     {
+        // Names + groups always reset to defaults first so a project without
+        // <Row> children (or no RowState at all) never inherits prior state.
+        for (int i = 0; i < kMaxArrangementRows; ++i)
+            mRowNames[i] = defaultRowName(i);
+        mRowGroupId.fill(0);
+        mRowGroupColor.fill(0);
+
         auto n = root.getChildWithName("RowState");
         if (n.isValid())
         {
@@ -1351,6 +1633,16 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
                 if (s) anySolo = true;
             }
             mAnyRowSoloed.store(anySolo, std::memory_order_relaxed);
+
+            for (const auto r : n)
+            {
+                if (!r.hasType("Row")) continue;
+                const int i = (int) r.getProperty("i", -1);
+                if (i < 0 || i >= kMaxArrangementRows) continue;
+                if (r.hasProperty("name")) mRowNames[i] = r.getProperty("name").toString();
+                mRowGroupId[i]    = (int) r.getProperty("group", 0);
+                mRowGroupColor[i] = (juce::uint32)(int) r.getProperty("groupColor", 0);
+            }
         }
     }
 
@@ -1366,6 +1658,7 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         p.tsNum       = (int) pNode.getProperty("tsNum",    4);
         p.tsDen       = (int) pNode.getProperty("tsDen",    4);
         p.tsLocked    =       pNode.getProperty("tsLocked", false);
+        p.tsBoundMarkerUid = (int) pNode.getProperty("tsBoundUid", -1);   // QA-G Task 6
         // F-1: missing color attribute → fall back to default (light grey).
         if (pNode.hasProperty("color"))
             p.color = juce::Colour ((juce::uint32) (int) pNode.getProperty ("color"));
@@ -1612,6 +1905,7 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
             const double sb = (double) bNode.getProperty ("startBeats", (double) -1.0e6);
             b.startTicks    = (sb > -1.0e5) ? beatsToTicks (sb) : ArrangementBlock::kStartTicksUnset;
         }
+        b.contentOffsetTicks = (juce::int64) bNode.getProperty ("contentOffsetTicks", (juce::int64) 0);
         if (b.clipType == ClipType::Automation)
         {
             auto la = bNode.getChildWithName("AutomationLane");
@@ -1638,6 +1932,8 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
                   [](const TimeMarker& a, const TimeMarker& b) { return a.bar < b.bar; });
 
         auto ts = root.getChildWithName("TimeSigChanges");
+        mCurrentTsMarkerUid = (int) ts.getProperty("currentUid", -1);
+        mNextTsUid          = (int) ts.getProperty("nextUid",     1);
         for (int i = 0; i < ts.getNumChildren(); ++i)
         {
             auto e = ts.getChild(i);
@@ -1646,10 +1942,18 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
             s.bar = (int) e.getProperty("bar", 0);
             s.num = (int) e.getProperty("num", 4);
             s.den = (int) e.getProperty("den", 4);
+            s.uid           = (int) e.getProperty("uid", -1);
+            s.linkedPattern = (int) e.getProperty("linkedPattern", -1);
             mTimeSigChanges.push_back(s);
         }
         std::sort(mTimeSigChanges.begin(), mTimeSigChanges.end(),
                   [](const TimeSigChange& a, const TimeSigChange& b) { return a.bar < b.bar; });
+        // QA-G Task 6: pre-uid projects -- assign fresh uids; sole marker
+        // auto-becomes current when no selection was stored.
+        for (auto& s : mTimeSigChanges)
+            if (s.uid < 0) s.uid = mNextTsUid++;
+        if (mCurrentTsMarkerUid < 0 && (int) mTimeSigChanges.size() == 1)
+            mCurrentTsMarkerUid = mTimeSigChanges[0].uid;
 
         // QA-TempoMap (2026-07-08): ruler tempo flags (absent in old projects).
         mTempoChanges.clear();
@@ -1666,6 +1970,12 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         std::sort(mTempoChanges.begin(), mTempoChanges.end(),
                   [](const TempoChange& a, const TempoChange& b) { return a.bar < b.bar; });
     }
+
+    // QA-G Task 6: patterns + arrangement + markers are all in -- resolve the
+    // follower caches and hand the marker timeline to the audio side.  (No
+    // notifyContentChanged here: loading must not dirty the project.)
+    refreshPatternTimeSigs();
+    publishTimeSigMap();
 
     // ── Audio library + automation-lane template library ────────────────────
     {
@@ -1713,6 +2023,49 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-track mute / solo (arrangement playback gate)
 // ─────────────────────────────────────────────────────────────────────────────
+void PatternManager::setRowName(int row, const juce::String& name)
+{
+    if (row < 0 || row >= kMaxArrangementRows) return;
+    if (mRowNames[row] == name) return;
+    mRowNames[row] = name;
+    notifyContentChanged();
+}
+
+int PatternManager::getRowGroup(int row) const
+{
+    if (row < 0 || row >= kMaxArrangementRows) return 0;
+    return mRowGroupId[row];
+}
+
+void PatternManager::setRowGroup(int row, int groupId)
+{
+    if (row < 0 || row >= kMaxArrangementRows) return;
+    if (mRowGroupId[row] == groupId) return;
+    mRowGroupId[row] = groupId;
+    notifyContentChanged();
+}
+
+juce::uint32 PatternManager::getRowGroupColor(int row) const
+{
+    if (row < 0 || row >= kMaxArrangementRows) return 0;
+    return mRowGroupColor[row];
+}
+
+void PatternManager::setRowGroupColor(int row, juce::uint32 argb)
+{
+    if (row < 0 || row >= kMaxArrangementRows) return;
+    if (mRowGroupColor[row] == argb) return;
+    mRowGroupColor[row] = argb;
+    notifyContentChanged();
+}
+
+int PatternManager::allocateRowGroupId() const
+{
+    int maxId = 0;
+    for (const int g : mRowGroupId) maxId = juce::jmax(maxId, g);
+    return maxId + 1;
+}
+
 void PatternManager::setRowMuted(int row, bool m)
 {
     if (row < 0 || row >= kMaxArrangementRows) return;

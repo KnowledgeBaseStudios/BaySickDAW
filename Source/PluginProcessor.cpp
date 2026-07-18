@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "TempoMapRead.h"   // QA-TempoMap: stepped tempo timeline (standalone publishes; VST falls back)
+#include "TsMapRead.h"      // QA-G Task 6: stepped time-signature timeline (PatternManager publishes)
 
 // QA-Ec x QA-TempoMap seam: audio-clip block boundaries are BEAT-authored, so
 // with a published timeline their sample positions must resolve through it -
@@ -2156,15 +2157,19 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             // blkStartBeat (absolute song beat).  contentHi: song viewport end
             // (a note past the clip edge = silence) else +inf.  offHi: clamp the
             // note-off so an overrun is cut at the loop / clip boundary.
+            // QA-G Task 5: contentLo masks notes that begin BEFORE the clip
+            // window -- a sliced right piece must not re-trigger notes that
+            // started left of the cut (tiles can extend before the block).
             auto scheduleRollWindows = [&] (const std::vector<PianoNote>& notes,
                                             juce::MidiBuffer& buf, int target,
-                                            double absOffset, double contentHi, double offHi)
+                                            double absOffset, double contentHi, double offHi,
+                                            double contentLo = -1.0e18)
             {
                 for (const auto& note : notes)
                 {
                     if (note.muted) continue;
                     const double absStart = absOffset + note.startBeat;
-                    if (absStart >= contentHi) continue;
+                    if (absStart < contentLo || absStart >= contentHi) continue;
                     for (int w = 0; w < nWin; ++w)
                     {
                         if (absStart >= windows[w].winStart && absStart < windows[w].winEnd)
@@ -2202,8 +2207,6 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 // song beat, masked by [blkStartBeat, blkEndBeat); note-offs
                 // clamp to the clip end (and to loopEnd in a song-loop).  The
                 // loop-seam window split handles a song-loop wrap sample-exactly.
-                // C.5b: Builder grid is uniform 4-beat-per-bar.
-                constexpr double kBPB = 4.0;
                 for (int blkIdx = 0; blkIdx < mPatternManager->getNumBlocks(); ++blkIdx)
                 {
                     const auto& blk = mPatternManager->getBlock(blkIdx);
@@ -2227,8 +2230,34 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
                     const double offHi = (loopEndBeat > 0.0) ? juce::jmin (blkEndBeat, loopEndBeat) : blkEndBeat;
                     const auto& sPat = mPatternManager->getPattern(blk.patternIndex);
+                    // QA-G Task 5: blocks TILE their pattern (cycle = pattern
+                    // bar count on the uniform grid); the content offset
+                    // phase-shifts the tiling so slice pieces play their true
+                    // slice.  Each tile is a shifted viewport: contentLo masks
+                    // tile-0 notes starting before the block (left of a cut);
+                    // per-tile contentHi masks notes past the cycle end + the
+                    // block end (mirrors the preview's per-tile clamp).
+                    // QA-G Task 6: the cycle is the pattern's MUSICAL length
+                    // (bars x its effective beats-per-bar) -- a 3/4 pattern
+                    // tiles every 3 quarter-beats, matching its roll grid and
+                    // the preview.  4/4 keeps bars x 4 exactly.
+                    const double patBpb      = (double) juce::jmax (1, sPat.tsNum) * 4.0
+                                               / (double) juce::jmax (1, sPat.tsDen);
+                    const double cycleBeats  = juce::jmax (1.0, (double) sPat.bars * patBpb);
+                    const double offsetBeats = juce::jlimit (0.0, cycleBeats,
+                                                   ticksToBeats (blk.contentOffsetTicks));
+                    const int nTiles = (int) std::ceil ((effectiveLengthBeats (blk) + offsetBeats) / cycleBeats);
                     auto sched = [&] (const std::vector<PianoNote>& notes, juce::MidiBuffer& buf, int target)
-                    { scheduleRollWindows (notes, buf, target, blkStartBeat, blkEndBeat, offHi); };
+                    {
+                        for (int k = 0; k < nTiles; ++k)
+                        {
+                            const double origin = blkStartBeat - offsetBeats + k * cycleBeats;
+                            if (origin >= blkEndBeat) break;
+                            scheduleRollWindows (notes, buf, target, origin,
+                                                 juce::jmin (blkEndBeat, origin + cycleBeats),
+                                                 offHi, blkStartBeat);
+                        }
+                    };
 
                     for (int pi = 0; pi < kMaxLayerPages; ++pi)
                         sched (sPat.layerRoll[pi].notes, layerPageMidi[pi], pi);
@@ -2822,12 +2851,13 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
         {
             const double bpm = mMetro.countInBpm.load(std::memory_order_relaxed);
             const double bps = juce::jmax(1e-6, bpm / (60.0 * mSampleRate));
-            // C.5b: count-in accent honors the CURRENT pattern's intrinsic TS
-            // (FL-style - patterns own their own TS).  Falls back to 4 when
-            // no pattern.
-            const int countInBeatsPerBar = mPatternManager
-                ? juce::jmax (1, mPatternManager->currentPattern().tsNum)
-                : 4;
+            // QA-G Task 6: count-in clicks run in DENOMINATOR units (7/8
+            // counts seven 8ths per bar), accent on the bar start.  The
+            // signature is captured at record start (song = marker map at
+            // the record position; pattern = the pattern's effective TS).
+            const int    ciNum   = juce::jmax (1, mMetro.countInNum.load(std::memory_order_relaxed));
+            const int    ciDen   = juce::jmax (1, mMetro.countInDen.load(std::memory_order_relaxed));
+            const double clickIv = 4.0 / (double) ciDen;   // quarter-beats per click
             for (int s = 0; s < numSamples; ++s)
             {
                 if (mMetro.countInDelaySamp > 0)
@@ -2845,12 +2875,12 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                     }
                     double prevPhase = mMetro.countInPhase;
                     mMetro.countInPhase += bps;
-                    if ((long long)mMetro.countInPhase > (long long)prevPhase)
+                    if ((long long)(mMetro.countInPhase / clickIv) > (long long)(prevPhase / clickIv))
                     {
-                        // Crossing into integer N means beat (N+1).  countInBeatsFired
-                        // tracks how many beats have fired so far.
+                        // Crossing a click boundary; countInBeatsFired tracks
+                        // how many clicks have fired so far.
                         ++mMetro.countInBeatsFired;
-                        triggerClick((mMetro.countInBeatsFired - 1) % countInBeatsPerBar == 0);
+                        triggerClick((mMetro.countInBeatsFired - 1) % ciNum == 0);
                     }
                 }
                 float s0 = synthClick();
@@ -2877,26 +2907,38 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                     const double bps  = juce::jmax(1e-6, bpmV / (60.0 * mSampleRate));
                     const double bs0  = pi->getPpqPosition().orFallback(0.0);
 
-                    // C.5b: accent on every Nth beat where N = current
-                    // pattern's intrinsic numerator (FL-style - pattern owns
-                    // its own TS).  Falls back to 4 when no pattern.
-                    const int accentEvery = mPatternManager
-                        ? juce::jmax (1, mPatternManager->currentPattern().tsNum)
-                        : 4;
+                    // QA-G Task 6: clicks run in DENOMINATOR units with the
+                    // accent on bar starts.  SONG mode reads the marker
+                    // timeline (TsMap -- the sole played source, docket #14);
+                    // PATTERN mode uses the current pattern's effective TS
+                    // (its roll grid; beats are pattern-local so bar starts
+                    // sit at multiples of its bar length from 0).  4/4 with
+                    // no markers degenerates to the pre-Task-6 behavior.
+                    const bool songTs = mSongMode.load(std::memory_order_relaxed)
+                                        && TsMap::isActive();
+                    int patNum = 4, patDen = 4;
+                    if (mPatternManager)
+                    {
+                        patNum = juce::jmax (1, mPatternManager->currentPattern().tsNum);
+                        patDen = juce::jmax (1, mPatternManager->currentPattern().tsDen);
+                    }
 
                     // QA-TempoMap: this metronome is the marker ear-check
                     // instrument, so tick placement must stay sample-exact
                     // through a tempo step - split the block at the boundary
                     // (one per block is the realistic case) into constant-
-                    // tempo spans instead of one linear sweep.  Fallback = the
-                    // pre-map single span.
+                    // tempo spans instead of one linear sweep.  QA-G Task 6
+                    // additionally splits each tempo span at time-signature
+                    // boundaries so the click unit / accent base flip at the
+                    // exact marker beat.  Fallback = the pre-map single span.
                     // QA-Fe2 PDC: the grid derives from the DELAYED clock
                     // (transport minus pdcSamples).  TempoMap extrapolates
                     // segment 0 linearly below sample 0, so the sub-zero
                     // region right after a song-top start stays exact; clicks
                     // for negative beats are suppressed in the loop.
-                    struct MetroSpan { int s0; int s1; double beat0; double bps; };
-                    MetroSpan spans[2];
+                    struct MetroSpan { int s0; int s1; double beat0; double bps;
+                                       double tsBase; double clickIv; int num; };
+                    MetroSpan spans[4];
                     int nSpans = 0;
                     if (TempoMap::isActive())
                     {
@@ -2906,14 +2948,70 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                         const int cut = (bnd > smp0 && bnd < smp0 + numSamples)
                                           ? (int)(bnd - smp0) : numSamples;
                         spans[nSpans++] = { 0, cut, TempoMap::beatAtSample(smp0),
-                                            juce::jmax(1e-6, TempoMap::bpmAtSample(smp0) / (60.0 * mSampleRate)) };
+                                            juce::jmax(1e-6, TempoMap::bpmAtSample(smp0) / (60.0 * mSampleRate)),
+                                            0.0, 1.0, 4 };
                         if (cut < numSamples)
                             spans[nSpans++] = { cut, numSamples, TempoMap::beatAtSample(bnd),
-                                                juce::jmax(1e-6, TempoMap::bpmAtSample(bnd) / (60.0 * mSampleRate)) };
+                                                juce::jmax(1e-6, TempoMap::bpmAtSample(bnd) / (60.0 * mSampleRate)),
+                                                0.0, 1.0, 4 };
                     }
                     else
                     {
-                        spans[nSpans++] = { 0, numSamples, bs0 - pdcSamples * bps, bps };
+                        spans[nSpans++] = { 0, numSamples, bs0 - pdcSamples * bps, bps,
+                                            0.0, 1.0, 4 };
+                    }
+
+                    // Signature assignment + TS-boundary split (song mode).
+                    if (songTs)
+                    {
+                        const int nTempo = nSpans;
+                        MetroSpan out[4];
+                        int nOut = 0;
+                        for (int t = 0; t < nTempo && nOut < 4; ++t)
+                        {
+                            MetroSpan cur = spans[t];
+                            const double spanEndBeat = cur.beat0
+                                + (double)(cur.s1 - cur.s0) * cur.bps;
+                            const double tsBnd = TsMap::nextBoundaryAfterBeat (cur.beat0);
+                            if (tsBnd > cur.beat0 && tsBnd < spanEndBeat && nOut < 3)
+                            {
+                                const int sCut = juce::jlimit (cur.s0 + 1, cur.s1,
+                                    cur.s0 + (int) std::ceil ((tsBnd - cur.beat0)
+                                                              / juce::jmax (1e-12, cur.bps)));
+                                MetroSpan a = cur;  a.s1 = sCut;
+                                MetroSpan b = cur;  b.s0 = sCut;
+                                b.beat0 = cur.beat0 + (double)(sCut - cur.s0) * cur.bps;
+                                const auto bbA = TsMap::barBeatAt (a.beat0);
+                                a.tsBase = bbA.barStartBeat;
+                                a.clickIv = 4.0 / (double) juce::jmax (1, bbA.den);
+                                a.num = juce::jmax (1, bbA.num);
+                                const auto bbB = TsMap::barBeatAt (b.beat0);
+                                b.tsBase = bbB.barStartBeat;
+                                b.clickIv = 4.0 / (double) juce::jmax (1, bbB.den);
+                                b.num = juce::jmax (1, bbB.num);
+                                out[nOut++] = a;
+                                out[nOut++] = b;
+                            }
+                            else
+                            {
+                                const auto bb = TsMap::barBeatAt (cur.beat0);
+                                cur.tsBase = bb.barStartBeat;
+                                cur.clickIv = 4.0 / (double) juce::jmax (1, bb.den);
+                                cur.num = juce::jmax (1, bb.num);
+                                out[nOut++] = cur;
+                            }
+                        }
+                        for (int i = 0; i < nOut; ++i) spans[i] = out[i];
+                        nSpans = nOut;
+                    }
+                    else
+                    {
+                        for (int i = 0; i < nSpans; ++i)
+                        {
+                            spans[i].tsBase  = 0.0;
+                            spans[i].clickIv = 4.0 / (double) patDen;
+                            spans[i].num     = patNum;
+                        }
                     }
 
                     // QA-Fe2 PDC: play-start edge seeds the grid one below the
@@ -2921,27 +3019,45 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                     // count-in handoff) still clicks at sample 0 while the
                     // deferral can't fire a stale catch-up click mid-beat --
                     // the first click otherwise lands on the next real
-                    // crossing.
+                    // crossing.  lastBeatFloor holds the last CLICK-UNIT floor
+                    // (quarter-beats in 4/4 -- unchanged there).
                     if (!mMetro.transportWasPlaying)
-                        mMetro.lastBeatFloor = std::ceil(spans[0].beat0) - 1.0;
+                        mMetro.lastBeatFloor =
+                            std::ceil((spans[0].beat0 - spans[0].tsBase) / spans[0].clickIv) - 1.0;
 
+                    double prevTsBase = spans[0].tsBase;
+                    double prevIv     = spans[0].clickIv;
                     for (int sp = 0; sp < nSpans; ++sp)
-                    for (int s = spans[sp].s0; s < spans[sp].s1; ++s)
                     {
-                        double sampleBeat = spans[sp].beat0 + (s - spans[sp].s0) * spans[sp].bps;
-                        double beatFloor  = std::floor(sampleBeat);
-                        if (beatFloor < mMetro.lastBeatFloor - 1.0)
-                            mMetro.lastBeatFloor = beatFloor - 1.0;
-                        if (beatFloor > mMetro.lastBeatFloor)
+                        // Entering a new signature segment: the click-unit
+                        // basis is discontinuous -- reseed one below the next
+                        // crossing (the boundary itself is a bar start, so
+                        // its click fires with the accent).
+                        if (sp > 0 && (spans[sp].tsBase != prevTsBase
+                                       || spans[sp].clickIv != prevIv))
+                            mMetro.lastBeatFloor =
+                                std::ceil((spans[sp].beat0 - spans[sp].tsBase) / spans[sp].clickIv) - 1.0;
+                        prevTsBase = spans[sp].tsBase;
+                        prevIv     = spans[sp].clickIv;
+
+                        for (int s = spans[sp].s0; s < spans[sp].s1; ++s)
                         {
-                            mMetro.lastBeatFloor = beatFloor;
-                            long long bf = (long long)std::round(beatFloor);
-                            if (bf >= 0)   // sub-zero = the first pdcSamples after a song-top start
-                                triggerClick ((((bf % accentEvery) + accentEvery) % accentEvery) == 0);
+                            double sampleBeat = spans[sp].beat0 + (s - spans[sp].s0) * spans[sp].bps;
+                            double clickPos   = (sampleBeat - spans[sp].tsBase) / spans[sp].clickIv;
+                            double posFloor   = std::floor(clickPos);
+                            if (posFloor < mMetro.lastBeatFloor - 1.0)
+                                mMetro.lastBeatFloor = posFloor - 1.0;
+                            if (posFloor > mMetro.lastBeatFloor)
+                            {
+                                mMetro.lastBeatFloor = posFloor;
+                                long long ci = (long long)std::round(posFloor);
+                                if (sampleBeat >= 0.0)   // sub-zero = the first pdcSamples after a song-top start
+                                    triggerClick ((((ci % spans[sp].num) + spans[sp].num) % spans[sp].num) == 0);
+                            }
+                            float s0 = synthClick();
+                            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                                buffer.addSample(ch, s, s0);
                         }
-                        float s0 = synthClick();
-                        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-                            buffer.addSample(ch, s, s0);
                     }
                 }
             }

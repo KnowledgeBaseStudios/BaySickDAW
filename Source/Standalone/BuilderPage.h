@@ -212,6 +212,7 @@ public:
 
     std::function<void(int)>                  onPatternSelected;
     std::function<void(int)>                  onRenderPattern;   // right-click → Render to WAV
+    std::function<void(int)>                  onSplitPattern;    // right-click → Split by Player Engine (QA-G)
     std::function<void(const juce::String&)>  onImportAudio;     // File → Import Audio (path)
     std::function<void()>                     onArrangementChanged; // delete-block triggers → rebuild
     // QA-E Task 5 (2026-05-15): fires when the user deletes the LAST library
@@ -388,7 +389,8 @@ private:
 // Tools: P=Draw  B=Paint  E=Select  D=Delete  T=Mute  S=SlipEdit  C=Slice
 //        Shift+Z=Zoom  Y=PlaySelected
 // Zoom:    Ctrl+Scroll (horizontal)
-// Pan:     Scroll (horizontal)  |  Viewport scroll (vertical)
+// Pan:     Shift+Scroll / bottom scrollbar (horizontal, virtual mBarOff)
+//          |  Viewport scroll (vertical)
 // Keys:    Ctrl+Z/Y undo/redo, Ctrl+A/C/V/B, Delete, Shift+Arrows, Escape
 // ─────────────────────────────────────────────────────────────────────────────
 class ArrangementGrid : public juce::Component,
@@ -458,7 +460,6 @@ public:
 
     void setPlayheadBar(double bar) { mPlayheadBar = bar; repaint(); }
     void setPerformanceMode(bool on) { mPerfMode = on; repaint(); }
-    void setTimeSignature(TimeSignature ts) { mTimeSig = ts; repaint(); }
 
     void setSelectedPatternIndex(int idx) { mBrowserSelection = idx; }
 
@@ -476,7 +477,12 @@ public:
     static constexpr int kRowH       = 40;
     static constexpr int kRulerH     = 18;
     static constexpr int kLabelW     = 120;   // kept for external use (BuilderPage layout)
-    static constexpr int kNumRows    = 50;
+    // Owner call 2026-07-17: FL-parity 500 tracks (supersedes marathon-5's
+    // "keep 50 stock rows" -- 50 was an arbitrary early constant, not a spec).
+    static constexpr int kNumRows    = 500;
+    // Alt-zoom-out floor: at most this many rows in view (preserves the
+    // pre-500 zoom range; all kNumRows in view would be ~1.5 px rows).
+    static constexpr int kMaxRowsInView = 50;
     static constexpr int kResizeZone = 8;
     // QA-Ea Task 0c (2026-05-20 update): dynamic negative-bar viewport limit.
     // Replaces the earlier hardcoded -8 floor.  Scans all Audio blocks for
@@ -615,7 +621,11 @@ public:
     std::function<juce::String(const AutomationLane&)> onResolveDisplayName;
 
     // ── Row names (shared with TrackHeaderPanel) ──────────────────────────────
-    const std::array<juce::String, kNumRows>& getRowNames() const { return mRowNames; }
+    // QA-G: row names live in PatternManager (project data, serialized in
+    // RowState) -- the grid is a pass-through view, no parallel copy.
+    static_assert(kNumRows == kMaxArrangementRows,
+                  "Builder grid rows must match PatternManager row-state arrays");
+    const std::array<juce::String, kNumRows>& getRowNames() const { return mPM.getRowNames(); }
     void setRowName(int row, const juce::String& name);
 
     // ── View state (public - BuilderPage accesses these directly) ────────────
@@ -637,7 +647,6 @@ public:
         mTimeSelEnd   = endBar;
         repaint();
     }
-    float getEffectiveRowH() const { return mEffectiveRowH; }
 
     // ── Public operations (called from BuilderPage) ───────────────────────────
     // QA-E Task 4 (2026-05-12): routeChannel param (default 0 = generic
@@ -658,9 +667,30 @@ public:
     // reads metadata, creates a routed block.
     void placeAudioLibraryEntry(int libIdx, int targetRow, float targetBar);
 
-    // ── Public coordinate helpers (used by BuilderPage zoom anchoring) ────
+    // ── Split by Player Engine (QA-G, owner docket 5/5a/5b 2026-07-17) ────
+    // One new pattern per tab entry with MIDI data (Layers/Bass/Drums/Clips/
+    // Inst), named "Original - <tab name>"; original destroyed; placed blocks
+    // replaced in place with siblings stacked directly below; ONE undo step.
+    void splitPatternByEngine (int patternIndex);
+    // Tab display names for the split ("<tab name>" auto-populates from
+    // presets); kind: 0=Layer 1=Bass 2=Drum 3=Clip 4=Inst.  Fallback =
+    // generic "Layer N" style when unwired/empty.
+    std::function<juce::String(int kind, int engineIndex)> onGetEngineTabName;
+    // Row-insertion primitives (shared by the split + Insert Track Above):
+    // whole-row blank test, bottom-capacity check, and the shift-down insert.
+    bool rowIsBlank (int row) const;
+    bool canInsertRows (int count) const;
+    bool insertBlankRowsAt (int startRow, int count);
+
+    // ── Public coordinate helpers (BuilderPage zoom anchoring + scrollbar
+    //    sync; TrackHeaderPanel row alignment) ───────────────────────────────
     int   barToX(float bar) const;
     float xToBar(int x)     const;
+    float xToBarF(float x)  const;   // all-float anchor math (toolbar centre zoom)
+    int   rowToY (int row)  const;
+    int   yToRow (int y)    const;
+    int   rowHeightPx(int row) const;   // rowToY(row+1) - rowToY(row)
+    int   totalVisibleBars() const;
 
 private:
     PatternManager&            mPM;
@@ -704,14 +734,8 @@ private:
     // ── Performance mode ──────────────────────────────────────────────────────
     bool         mPerfMode  { false };
 
-    // ── Time signature ────────────────────────────────────────────────────────
-    TimeSignature mTimeSig;
-
     // ── Browser selection ─────────────────────────────────────────────────────
     int mBrowserSelection { 0 };
-
-    // ── Row names ─────────────────────────────────────────────────────────────
-    std::array<juce::String, kNumRows> mRowNames;
 
     // ── Ghost clip (drag preview from Source Picker) ──────────────────────────
     bool           mHasGhost   { false };
@@ -830,9 +854,8 @@ private:
     float mTimeSelAnchor   {  0.f };   // anchor bar (drag origin)
     bool  mTimeSelDragging { false };
 
-    // ── Coordinate helpers (barToX/xToBar declared public above) ──────────────
-    int   rowToY   (int row)   const;
-    int   yToRow   (int y)     const;
+    // ── Coordinate helpers (bar/row mappings declared public above) ───────────
+    int   rulerPinY() const;   // pinned-ruler band top in grid-local coords
     float snapBar  (float bar) const;
     float snapBarAlt(float bar) const; // snap ignoring Alt override
 
@@ -879,6 +902,16 @@ public:
     void promptRenameTimeMarker(int idx);
     void promptAddTimeSigChange(int bar);
     void promptEditTimeSigChange(int idx);
+    // QA-G Task 6: linked auto-marker spawn (fires at placement events of
+    // USER-SET patterns only, docket B), the current-TS picker (docket #4
+    // revision), and the follower move-across-TS prompt state.
+    void afterPatternBlockPlaced (const ArrangementBlock& b);
+    void showCurrentTsPicker();
+    std::vector<std::array<int, 3>> mMovePreTs;   // {patternIndex, num, den} at move start
+    void performSplitByEngine (int patternIndex,
+                               const std::vector<std::pair<int,int>>& parts,
+                               bool joinGroups);
+    juce::String engineTabName (int kind, int index) const;
     // QA-TempoMap (2026-07-08): ruler tempo-flag prompts.
     void promptAddTempoChange(int bar);
     void promptEditTempoChange(int idx);
@@ -906,7 +939,6 @@ public:
     int  hitTestAutomPoint(int blockIdx, int x, int y) const;
 
     void updateCursor();
-    int  totalVisibleBars() const;
 };
 
 // ── TrackHeaderPanel ──────────────────────────────────────────────────────────
@@ -939,6 +971,10 @@ private:
 
     void showTrackContextMenu(int row);
     int  yToRow(int y) const;
+
+    // Mirrors BuilderPage::notifyArrangementChanged for header-panel block
+    // mutations (audio-clip players re-derive trackRow; project dirty flag).
+    void notifyArrangementChanged();
 
     // Returns row the LED was hit on, or -1. kind: 0 = mute, 1 = solo, -1 = none.
     int  hitTestLed(int x, int y, int& kind) const;
@@ -1011,7 +1047,8 @@ class BuilderMenuBar;   // defined after BuilderPage
 class BuilderPage : public juce::Component,
                     public juce::Timer,
                     public juce::KeyListener,
-                    public juce::DragAndDropContainer
+                    public juce::DragAndDropContainer,
+                    public juce::ScrollBar::Listener
 {
 public:
     BuilderPage(VibeSynthProcessor& p, PatternManager& pm);
@@ -1109,6 +1146,15 @@ private:
     std::unique_ptr<ArrangementToolbar>   mToolbar;
     std::unique_ptr<juce::Viewport>       mGridViewport;
     std::unique_ptr<ArrangementGrid>      mGrid;
+
+    // External horizontal scrollbar under the grid: the ONE horizontal scroll
+    // mechanism (drives the grid's virtual mBarOff; the viewport scrolls
+    // vertical only).  Range recomputes on the UI timer so it tracks content
+    // + the current view dynamically (shrinks back when the view returns from
+    // empty territory).
+    std::unique_ptr<juce::ScrollBar>      mGridHScroll;
+    void scrollBarMoved(juce::ScrollBar*, double newRangeStart) override;
+    void syncGridHScroll();
 
     // Menu bar (sits above toolbar, replaces hamburger popup).
     // QA-D Task 4 / QA-0a finding #8: model declared FIRST so it outlives

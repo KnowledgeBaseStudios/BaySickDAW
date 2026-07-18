@@ -881,6 +881,112 @@ are the PDC scope addition's FIRST functional pass (bulk-run R2 deferred them he
 
 ---
 
+### §B.13 — QA-G (timeline geometry + TS system + 500 tracks + Split by Player Engine)
+
+`blocks:` (QA-G batch commit — hash backfilled at the next docs commit per the B.12
+precedent). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`. Covers the
+plan's 6 tasks PLUS the mid-batch owner additions (row alignment + horizontal scrollbar
+rework, 500-track cap, Split by Player Engine) and the in-batch bug fixes (rename
+persistence, Move Up/Down state carry, drum-note previews, removePattern re-index,
+File > New marker leak).
+
+- [ ] **G-1 — ruler pin.** Scroll the Builder track list down (wheel + scrollbar).
+      Expected: the timeline ruler stays pinned at the top (like the header corner);
+      row labels and grid rows stay aligned; ruler clicks (seek, Ctrl+drag time-select,
+      right-click menu) work identically while scrolled. `D:__ R:__` notes:
+- [ ] **G-2 — zoom edge alignment.** Deep zoom in/out (Ctrl+wheel AND toolbar +/-).
+      Expected: block right edges kiss their grid lines at every zoom; repeated toolbar
+      +/- does not creep sideways; stretch badges / follow dots / pre-roll arrows stay
+      cornered on their blocks. `D:__ R:__` notes:
+- [ ] **G-3 — row alignment + zoom-out fit.** Alt+scroll to the vertical extremes.
+      Expected: header rows stay pixel-locked to grid rows at EVERY row height (the old
+      drift grew down the list); full zoom-out tiles ruler + rows exactly (no black strip
+      below the last visible row); clicking blocks on deep rows at fractional zoom hits
+      the right row. `D:__ R:__` notes:
+- [ ] **G-4 — horizontal scrollbar.** Shift+scroll far right past the content.
+      Expected: the bottom scrollbar thumb tracks the view live; dragging it left works;
+      when the view returns to content territory the runway re-tightens on its own;
+      Ctrl+zoom / zoom-to-rect / negative-bar pre-roll reveal all stay in sync with it.
+      `D:__ R:__` notes:
+- [ ] **G-5 — 500 tracks.** Scroll to track 500 (labels "Track 500"); place a block on a
+      deep row; save/reopen. Expected: all state survives; zoom-out still shows ~50 rows
+      max (500 reached by scrolling). `D:__ R:__` notes:
+- [ ] **G-6 — track right-click set.** On a populated row: Insert Track Above (blocks +
+      names + mute/solo + groups all shift down; positional "Track N" defaults stay
+      positional, custom names travel); Group with Above two rows, Color Group... (live
+      preview), Remove from Group; Move Up/Down carries mute/solo/group state WITH the
+      track. Save/reopen: groups + colors + custom names all restored (rename
+      persistence is NEW — renames never survived before this batch). `D:__ R:__` notes:
+- [ ] **G-7 — insert at capacity.** Fill/occupy the bottom row (place a block on track
+      500), then Insert Track Above anywhere. Expected: "Maximum Tracks Reached" prompt,
+      nothing changes. `D:__ R:__` notes:
+- [ ] **G-8 — note preview true positions.** 1-bar pattern on a 4-bar block: notes tile
+      4x at true positions (not stretched); 2-bar pattern on a 1-bar block: first bar
+      only; a drums-only pattern shows its notes on the block (drum previews were BLANK
+      since Phase D). `D:__ R:__` notes:
+- [ ] **G-9 — song-mode tiling (DELIBERATE CHANGE).** A 4-bar block of a 1-bar pattern
+      now LOOPS the pattern 4x in song mode (pre-batch: one pass + 3 bars silence).
+      Audio matches the preview exactly. `D:__ R:__` notes:
+- [ ] **G-10 — slice, Jeff's use case.** 1-bar pattern block, 3 one-beat notes + 2
+      half-beat notes in the last beat; snap at 1/4; Slice at the last beat. Expected:
+      the cut lands at snap resolution (1-bar blocks are sliceable now); the right piece
+      shows AND plays only the 2 half-beat notes at their true timing; copy/paste it
+      elsewhere plays identically; the pattern itself and its other blocks unchanged;
+      undo restores the un-sliced block. `D:__ R:__` notes:
+- [ ] **G-11 — slice continuation (loop/audio/automation).** Slice a looped 4-bar block
+      of a 1-bar pattern mid-loop: both pieces play/display the correct continuation.
+      Slice an audio clip off-bar: the right piece continues the file (no restart), in
+      Stretch AND Resample modes. Slice an automation clip: both halves keep playing
+      their original curve segments (value preserved at the cut). `D:__ R:__` notes:
+- [ ] **G-12 — TS markers drive playback (the #14 regression re-run).** Type 7/8 into a
+      grid marker mid-song (ruler right-click, free type-in). Expected: from that bar the
+      ruler bars resize, bar numbering follows, the transport readout counts 1..7 in 8th
+      units, and the METRONOME accents the true downbeats — verify 3/4, 7/8, 5/4 back to
+      back, plus a mid-song 4/4 -> 7/8 switch staying sample-tight. Pattern-mode
+      metronome follows the pattern's own signature. `D:__ R:__` notes:
+- [ ] **G-13 — count-in at the record signature.** Precount + record with a 3/4 marker at
+      the playhead (song mode). Expected: count-in lasts ONE 3/4 bar (3 beats, was
+      hardcoded 4) with 3 clicks, accent first; a 7/8 position counts seven 8ths.
+      `D:__ R:__` notes:
+- [ ] **G-14 — pattern TS lifecycle.** Set a pattern to 3/4 via the NEW type-in dialog
+      (presets submenu is GONE — deliberate); its roll grid shows 3-beat bars; the
+      dropdown shows "Name 3/4". Drop its block: a linked OUTLINE marker pill appears at
+      the block's bar; move the block — the marker follows; delete it — the marker goes;
+      edit the pattern TS — the marker updates; edit the MARKER itself — it unlinks
+      (solid pill, block edits no longer touch it); a manual marker on the same bar wins.
+      Reset to Default in the dialog: the pattern re-enters following and its still-linked
+      markers vanish. `D:__ R:__` notes:
+- [ ] **G-15 — followers.** Never-set pattern placed after a 3/4 marker: its roll grid +
+      suffix show 3/4 (live: moving the block or editing the marker re-derives; earliest
+      block governs when several). Unplaced never-set patterns follow the sole marker;
+      at the 2nd marker the current-TS prompt appears and NEW patterns bind to the pick;
+      the transport dropdown's "Current Time Signature" submenu (grayed under 2 markers)
+      re-picks manually; deleting the current marker with 2+ left re-prompts.
+      `D:__ R:__` notes:
+- [ ] **G-16 — move-across-TS prompt.** Follower pattern WITH notes moved from a 4/4
+      region into a 3/4 region: prompt offers Proceed / Lock Previous TS. Proceed =
+      it follows 3/4; Lock = it stays user-set 4/4 and NO marker appears from the move.
+      Empty follower patterns move silently. `D:__ R:__` notes:
+- [ ] **G-17 — File > New marker leak (fix).** Add TS + tempo + time markers, File > New.
+      Expected: fresh project has a clean ruler (all three marker types cleared — they
+      leaked before this batch). `D:__ R:__` notes:
+- [ ] **G-18 — Split by Player Engine.** Pattern with MIDI on 3 of 5 tabs (e.g. a layer,
+      a bass, a drum), placed twice on the grid, one placement on a grouped row.
+      Right-click the pattern in the browser > Split by Player Engine. Expected: ONE
+      group prompt (Yes = each stack's new rows join that row's group); 3 new patterns
+      named "Original - <tab name>" (tab names, preset-derived); each placement becomes
+      3 stacked blocks (original row + 2 directly below, in-the-way rows shifted down);
+      everything still SOUNDS identical; the original pattern is gone; ONE Ctrl+Z
+      restores the original pattern, its blocks, and the row state. `D:__ R:__` notes:
+- [ ] **G-19 — split edge cases.** Split an empty pattern: info dialog, no-op. Split when
+      the bottom rows are occupied enough to block the shift: "Maximum Tracks Reached" +
+      project untouched. Split a 5-entry BaySickBasses-style case: 5 patterns, 5 stacked
+      blocks. `D:__ R:__` notes:
+- [ ] **G-20 — pattern delete re-index (fix).** Three patterns with blocks of each on the
+      grid; delete the MIDDLE pattern from the dropdown. Expected: the other two
+      patterns' blocks keep playing THEIR patterns (pre-batch they silently shifted one
+      pattern over); the deleted pattern's blocks disappear. `D:__ R:__` notes:
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is

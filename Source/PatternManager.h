@@ -165,14 +165,20 @@ struct Pattern
     juce::String name        { "Pattern 1" };
     int          bars        { DEFAULT_BARS };
     int          stepsPerBar { DEFAULT_SPB  };
-    // C.5b (2026-04-30): per-pattern intrinsic time signature (FL-style).
-    // Drives the piano roll's bar width + beat sub-divisions for THIS pattern.
-    // Default 4/4.  Auto-assigned on first Builder placement (looks up song
-    // TS at the placement bar).  Right-click pattern menu lets users override
-    // and locks tsLocked = true so subsequent placements don't re-derive.
+    // C.5b / QA-G Task 6: per-pattern time signature.  tsNum/tsDen are the
+    // EFFECTIVE signature every consumer reads (roll grid, tiling, suffix,
+    // pattern-mode metronome).  tsLocked == true -> USER-SET via the type-in
+    // popup (the only state that spawns linked grid markers on placement).
+    // tsLocked == false -> FOLLOWER: refreshPatternTimeSigs() re-derives the
+    // fields live (placed -> marker at earliest block; unplaced -> bound
+    // marker -> current-TS selection -> 4/4).  tsBoundMarkerUid = the
+    // unplaced-follower binding, stamped at pattern creation from the
+    // project's current-TS selection; re-bound to current when its marker
+    // dies.  Reset-to-default clears the lock and re-enters the lifecycle.
     int          tsNum       { 4 };
     int          tsDen       { 4 };
-    bool         tsLocked    { false };   // true once user-set or first-placed
+    bool         tsLocked    { false };
+    int          tsBoundMarkerUid { -1 };
     // Phase F-1 (2026-04-26): per-pattern user colour, shown on Builder grid
     // blocks + Browser pattern items.  Default = light grey.  Persisted to the
     // project XML; loaded patterns without the attribute fall back to the
@@ -256,6 +262,13 @@ struct TimeSigChange
     int bar { 0 };
     int num { 4 };   // beats per bar (numerator)
     int den { 4 };   // note value (denominator - power of 2)
+    // QA-G Task 6: stable identity + link ownership.  uid survives sorts /
+    // add / remove (referenced by pattern follower bindings + the project's
+    // current-TS selection).  linkedPattern >= 0 marks an AUTO-SPAWNED marker
+    // owned by that pattern's placement (docket B); -1 = manual.  Editing a
+    // linked marker unlinks it (B2a).
+    int uid           { -1 };
+    int linkedPattern { -1 };
 };
 
 // QA-TempoMap (2026-07-08): stepped tempo-change flags on the Builder ruler.
@@ -358,6 +371,13 @@ struct ArrangementBlock
     // Default 0 = play from file sample 0 (every pre-Task-0c project /
     // every non-count-in recording is backwards-compatible).
     juce::int64 contentStartSamples { 0 };
+    // QA-G Task 5 (slice content-offset): pattern-content phase for this
+    // block, in grid ticks (384/bar).  The block plays its pattern starting
+    // at this offset into the cycle; preview + playback tile from it, so a
+    // sliced piece keeps its notes in place instead of restarting.  Only
+    // meaningful for ClipType::Pattern (Audio continues via
+    // contentStartSamples; Automation lanes are physically split at the cut).
+    juce::int64 contentOffsetTicks { 0 };
 };
 
 // 2026-04-24: central helper for the "effective length in beats" of an
@@ -453,7 +473,7 @@ struct MixerState
 };
 
 // Maximum number of arrangement track rows (matches ArrangementGrid::kNumRows).
-static constexpr int kMaxArrangementRows = 50;
+static constexpr int kMaxArrangementRows = 500;
 
 class PatternManager
 {
@@ -498,13 +518,44 @@ public:
     void                renameTimeMarker (int idx, const juce::String& label);
     int                 findTimeMarkerNearBar (float bar, float tolerance = 0.5f) const;
 
-    // ── Time-signature changes (D-2) ─────────────────────────────────────
+    // ── Time-signature changes (D-2; QA-G Task 6: the SOLE played source) ──
     int                  getNumTimeSigChanges() const { return (int) mTimeSigChanges.size(); }
     const TimeSigChange& getTimeSigChange (int idx) const { return mTimeSigChanges[(size_t) idx]; }
     TimeSigChange&       getTimeSigChange (int idx)       { return mTimeSigChanges[(size_t) idx]; }
-    void                 addTimeSigChange (int bar, int num, int den);
+    void                 addTimeSigChange (int bar, int num, int den, int linkedPattern = -1);
     void                 removeTimeSigChange (int idx);
     int                  findTimeSigChangeAtBar (int bar) const;   // exact-bar match, -1 otherwise
+    int                  findTimeSigChangeByUid (int uid) const;   // index, -1 otherwise
+    // Project-level current-TS selection: the marker newly-created patterns
+    // bind to (docket #4 revision).  Auto = the sole marker while exactly one
+    // exists; user-picked via prompt / transport dropdown at 2+.
+    int                  getCurrentTsMarkerUid() const { return mCurrentTsMarkerUid; }
+    void                 setCurrentTsMarkerUid (int uid);
+    // Fired after any change that can alter effective pattern signatures
+    // (marker mutations, current-selection change, lifecycle refresh).
+    // StandaloneEditor refreshes rolls / dropdown / Builder from it.
+    std::function<void()> onTimeSigStateChanged;
+
+    // ── Pattern TS lifecycle (QA-G Task 6) ───────────────────────────────
+    // Re-derives every FOLLOWER pattern's effective tsNum/tsDen (placed ->
+    // marker at earliest block; unplaced -> binding -> current -> 4/4),
+    // re-binding dead bindings to the current selection.  Cheap; called by
+    // every marker / block / lifecycle mutation path.
+    void refreshPatternTimeSigs();
+    // Reset-to-default: clears the user-set lock, removes the pattern's
+    // still-linked auto-markers, re-enters the follower lifecycle.
+    void resetPatternTimeSig (int patternIndex);
+    // Removes linked markers whose (pattern, bar) no longer has a block
+    // starting there (block delete / undo / redo).  Spawns nothing — marker
+    // creation is placement-event-driven in the Builder grid.
+    void cleanupLinkedMarkers();
+    bool patternHasNotes (int patternIndex) const;
+    // Publish the marker timeline to the audio-side TsMap seqlock.
+    void publishTimeSigMap() const;
+    // QA-G (Split by Player Engine): raw pattern-list restore for the split's
+    // undo snapshot.  No per-pattern side effects -- just swap the list,
+    // clamp the current index, refresh follower caches, notify.
+    void restorePatternList (const std::vector<Pattern>& patterns, int currentIndex);
 
     // ── Tempo changes (QA-TempoMap, 2026-07-08) ──────────────────────────
     int                getNumTempoChanges() const { return (int) mTempoChanges.size(); }
@@ -531,11 +582,9 @@ public:
     // Per-pattern beats-per-bar (Pattern.tsNum/tsDen).  PPQ-beat (quarter note)
     // basis: 4/4 = 4, 3/4 = 3, 6/8 = 3, 5/4 = 5, 7/8 = 3.5.  Defaults 4/4.
     double getPatternBeatsPerBar (int patternIndex) const;
-    // Auto-derive a pattern's intrinsic TS from the song-level TS at the
-    // given placement bar.  No-op if pattern.tsLocked is already true.
-    // Sets pattern.tsLocked = true after derive.  Returns true if changed.
-    bool   autoDerivePatternTimeSig (int patternIndex, int placementBar);
-    // Manual TS setter (right-click override).  Always locks.
+    // User TS setter (type-in popup / Lock Previous TS).  Locks the pattern
+    // (user-set) + updates its still-linked markers' signatures.  Spawns no
+    // markers — spawning is placement-event-driven.
     void   setPatternTimeSig (int patternIndex, int num, int den);
 
     // ── Audio file library (persists independently of blocks) ────────────
@@ -634,6 +683,21 @@ public:
     bool isRowAudible (int row) const;
     bool anyRowSoloed () const { return mAnyRowSoloed.load(std::memory_order_relaxed); }
 
+    // ── Per-track row names + visual groups (QA-G) ────────────────────────
+    // Builder-row PROJECT data serialized in the RowState node; the
+    // ArrangementGrid reads/writes through these instead of owning a parallel
+    // copy.  Groups are visual-only in V1 (header band + tint); group id 0 =
+    // ungrouped, ids 1+ come from allocateRowGroupId().  UI-thread only (no
+    // audio-thread reads), hence non-atomic unlike mute/solo above.
+    const std::array<juce::String, kMaxArrangementRows>& getRowNames() const { return mRowNames; }
+    void setRowName (int row, const juce::String& name);
+    juce::String defaultRowName (int row) const { return "Track " + juce::String (row + 1); }
+    int          getRowGroup      (int row) const;
+    void         setRowGroup      (int row, int groupId);      // 0 = ungrouped
+    juce::uint32 getRowGroupColor (int row) const;
+    void         setRowGroupColor (int row, juce::uint32 argb);
+    int          allocateRowGroupId () const;                  // max used + 1 (>= 1)
+
     // ── Effective playback loop length ────────────────────────────────────
     // Returns the loop length in beats for the current pattern, following this priority:
     //   1. If the pattern has blocks on the builder that extend beyond 1 bar,
@@ -673,6 +737,12 @@ private:
     // D-2 (2026-04-26): time-markers + time-signature-changes - project scope.
     std::vector<TimeMarker>       mTimeMarkers;
     std::vector<TimeSigChange>    mTimeSigChanges;
+    // QA-G Task 6: current-TS selection (uid, -1 = none) + monotonic uid source.
+    int mCurrentTsMarkerUid { -1 };
+    int mNextTsUid          { 1 };
+    // Shared tail of every TS-affecting mutation: refresh follower caches,
+    // republish the audio-side map, dirty the project, notify the UI.
+    void tsStateChanged();
     // QA-TempoMap (2026-07-08): ruler tempo flags - project scope.
     std::vector<TempoChange>      mTempoChanges;
     int                           mCurrentPattern { 0 };
@@ -684,6 +754,11 @@ private:
     std::array<std::atomic<bool>, kMaxArrangementRows> mRowMuted {};
     std::array<std::atomic<bool>, kMaxArrangementRows> mRowSoloed {};
     std::atomic<bool>                                  mAnyRowSoloed { false };
+
+    // Builder row names + visual group state (QA-G).  UI-thread only.
+    std::array<juce::String, kMaxArrangementRows> mRowNames;
+    std::array<int,          kMaxArrangementRows> mRowGroupId    {};  // 0 = ungrouped
+    std::array<juce::uint32, kMaxArrangementRows> mRowGroupColor {};
 
     // ── Browser library storage (persists across block delete) ──────────
     // D3 (2026-04-25): chokeGroup is 0 = none, 1..16 = group id.  When this

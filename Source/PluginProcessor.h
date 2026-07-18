@@ -1143,6 +1143,11 @@ public:
         // Count-in (independent of transport):
         std::atomic<bool>   countInActive { false };
         std::atomic<double> countInBpm    { 120.0 };
+        // QA-G Task 6: signature at the record position (song = marker map,
+        // pattern = pattern's effective TS), captured by the record path so
+        // count-in clicks run in DENOMINATOR units with the right accent.
+        std::atomic<int>    countInNum    { 4 };
+        std::atomic<int>    countInDen    { 4 };
         // Audio-thread-only state (no atomic needed):
         double lastBeatFloor    { -99999.0 };
         int    clickSampLeft    { 0 };

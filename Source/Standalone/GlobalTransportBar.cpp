@@ -1,4 +1,5 @@
 #include "GlobalTransportBar.h"
+#include "../TsMapRead.h"   // QA-G Task 6: marker-map readout in song mode
 #include "SharedUI.h"
 #if JUCE_WINDOWS
  #include <windows.h>
@@ -976,20 +977,41 @@ juce::String TransportPositionReadout::buildText() const
     }
 
     const double beat = onGetBeat ? juce::jmax (0.0, onGetBeat()) : 0.0;
-    // Song mode counts uniform 4 beats/bar (the grid playback uses everywhere);
-    // pattern mode counts the pattern's tsNum so the bar rollover lands on the
-    // metronome accent.  Display is 1-based (bar 1 : beat 1 : tick 00 at start).
-    double bpb = 4.0;
-    if (onGetSongMode && ! onGetSongMode() && onGetPatternTsNum)
-        bpb = (double) juce::jmax (1, onGetPatternTsNum());
-
-    // Quantize to ticks BEFORE splitting so 95.99 ticks can't render as tick 96.
-    const juce::int64 totalTicks  = (juce::int64) std::llround (beat * 96.0);
-    const juce::int64 ticksPerBar = juce::jmax ((juce::int64) 1, (juce::int64) std::llround (bpb * 96.0));
-    const juce::int64 bar   = totalTicks / ticksPerBar;
-    const juce::int64 inBar = totalTicks - bar * ticksPerBar;
-    return juce::String (bar + 1) + ":" + juce::String ((int) (inBar / 96) + 1)
-         + ":" + juce::String ((int) (inBar % 96)).paddedLeft ('0', 2);
+    // QA-G Task 6: song mode reads the marker map (bars resize at TS
+    // markers); pattern mode uses the pattern's effective signature.  Beats
+    // display in DENOMINATOR units (7/8 counts 1..7), matching the
+    // metronome; ticks are 96-PPQ within the beat unit.  1-based display.
+    // Quantize to ticks BEFORE splitting so 95.99 ticks can't render as 96.
+    const juce::int64 totalTicks = (juce::int64) std::llround (beat * 96.0);
+    int num = 4, den = 4;
+    juce::int64 barNum = 0, inBar = 0;
+    const bool songMode = onGetSongMode && onGetSongMode();
+    if (songMode && TsMap::isActive())
+    {
+        const double qBeat = (double) totalTicks / 96.0;
+        const auto bb = TsMap::barBeatAt (qBeat + 1.0e-9);
+        num = juce::jmax (1, bb.num);
+        den = juce::jmax (1, bb.den);
+        barNum = bb.bar;
+        inBar  = juce::jmax ((juce::int64) 0,
+                    totalTicks - (juce::int64) std::llround (bb.barStartBeat * 96.0));
+    }
+    else
+    {
+        if (! songMode && onGetPatternTs) onGetPatternTs (num, den);
+        num = juce::jmax (1, num);
+        den = juce::jmax (1, den);
+        const juce::int64 ticksPerBar = juce::jmax ((juce::int64) 1,
+            (juce::int64) std::llround ((double) num * 4.0 / (double) den * 96.0));
+        barNum = totalTicks / ticksPerBar;
+        inBar  = totalTicks - barNum * ticksPerBar;
+    }
+    const juce::int64 unit  = juce::jmax ((juce::int64) 1,
+        (juce::int64) std::llround (96.0 * 4.0 / (double) den));
+    const juce::int64 beatN = inBar / unit;
+    const juce::int64 tick  = inBar % unit;
+    return juce::String (barNum + 1) + ":" + juce::String ((int) beatN + 1)
+         + ":" + juce::String ((int) tick).paddedLeft ('0', 2);
 }
 
 void TransportPositionReadout::paint (juce::Graphics& g)

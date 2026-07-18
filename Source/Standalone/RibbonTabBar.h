@@ -143,6 +143,13 @@ public:
 
     int  getSelectedTabId() const { return mSelectedId; }
     int  getTabCount()      const { return (int)mTabs.size(); }
+    // QA-G (Split by Player Engine): display name of a tab by id ({} if gone).
+    juce::String getTabName (int tabId) const
+    {
+        for (const auto& t : mTabs)
+            if (t.id == tabId) return t.name;
+        return {};
+    }
     const Tab* getTabById(int id) const;
 
     // Returns true if the tab type shows a ▾ arrow

@@ -21,7 +21,10 @@ public:
     std::function<double()> onGetBeat;          // musical position (pattern mode arrives pre-wrapped)
     std::function<double()> onGetTimeSeconds;   // wall-clock position (sample-derived)
     std::function<bool()>   onGetSongMode;
-    std::function<int()>    onGetPatternTsNum;  // beats-per-bar in pattern mode (matches metronome accents)
+    // QA-G Task 6: pattern-mode signature (num + den -- beats display in
+    // DENOMINATOR units, matching the metronome).  Song mode reads the
+    // marker map (TsMap) directly.
+    std::function<void(int&, int&)> onGetPatternTs;
 
     std::function<void(bool)> onDisplayModeChanged;   // user click-toggle -> persistence hook (true = time)
 
