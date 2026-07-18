@@ -724,6 +724,16 @@ private:
     // Used when creating automation blocks to seed the initial control points.
     std::map<juce::String, std::function<float()>>     mAutomationValueReaders;
 
+    // Statics = every APVTS param + "global_tempo".  Called from the ctor and
+    // re-called after resetProjectState()'s full map clear (nothing else
+    // re-registers them; dynamic entries re-register when their UI rebuilds).
+    void registerStaticAutomationHandlers();
+    // Tab-close hygiene: drop both maps' entries for a closed channel's
+    // paramId families.  Registration only ever inserted (std::map operator[],
+    // no erase path existed), so tab churn grew the maps unbounded and kept
+    // dead paramIds listed in the Event Editor's param browser.
+    void eraseAutomationEntriesWithPrefix (const juce::String& prefix);
+
     // QA-Ed (Problem 3): last beat at which automation was applied.  The 30 Hz
     // timer re-applies automation whenever the playhead beat changes -- playback
     // OR a stopped seek/scrub -- so any param on an active automation snaps to

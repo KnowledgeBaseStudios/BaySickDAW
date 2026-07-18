@@ -1084,8 +1084,8 @@ CC delivery, player CC ordering).
 
 ### §B.15 — QA-I (heavy-op progress overlay: load / shutdown / engine + kit loads)
 
-`blocks:` `________` (QA-I, the whole batch in one commit; hash backfills at the next
-docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`. The
+`blocks:` `b6f51617` (QA-I, the whole batch in one commit). Debug exe FIRST, then
+Release — mark each scenario `D:` and `R:`. The
 overlay repaints via explicit paint-pump at step boundaries: determinate bars move per
 step; indeterminate ops show a sweep segment + wait cursor that only advance at step
 boundaries (no animation mid-grind — by design, the ops stay synchronous on the message
@@ -1125,6 +1125,48 @@ thread).
       Instrument..." busy overlay over the default keyswitch-SFZ load; the tab lands
       selected and playable after. During a PROJECT LOAD the engine restores surface as
       load-overlay steps only (no double overlay). `D:__ R:__` notes:
+
+### §B.16 — QA-J' (stacking-batch residuals: unmute re-sync + applicator-map hygiene)
+
+`blocks:` `________` (QA-J', the whole batch in one commit; hash backfills at the next
+docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+Background: mute gates skip a clip's whole render body, freezing the stretch reader's
+file position while the transport advances — pre-fix, a mute shorter than ~2 seconds
+slipped under the seek tolerance and playback resumed OFFSET by the mute length,
+permanently (only a >2 s drift re-seeked). Separately, the automation applicator/reader
+maps had no erase path at all — closed tabs and prior projects kept entries forever.
+
+- [ ] **J-1 — sub-2 s unmute re-sync (timeline clip, stretch engaged).** Import a WAV
+      to the Builder at 120 BPM, then set the BPM field to ~100 so the stretch path
+      engages (clip defaults to Stretch mode; tempo mismatch = vocoder active). Play in
+      song mode; mute the clip's Builder track for half a bar to a bar, then unmute:
+      playback continues at the RIGHT song position immediately — no behind-the-song
+      offset persisting after unmute. Repeat using the Clips strip's MUTE LED instead
+      of the track mute. Let playback loop-wrap once after — no new artifacts. Repeat
+      once in pattern mode. `D:__ R:__` notes:
+- [ ] **J-2 — Vox FilePlay path.** Same shape on a Vox page: prerecorded clip on a Vox
+      track, project tempo moved off the clip's import tempo, play; mute the clip's
+      Builder track under a bar, unmute: correct position immediately. If a warp map is
+      applied with the chain ON, repeat once — same result (align-warp path carries the
+      same re-sync). `D:__ R:__` notes:
+- [ ] **J-3 — long-mute threshold path unharmed.** Same setup as J-1; mute for 5+
+      seconds, unmute: still correct (the pre-existing >2 s re-seek — must not have
+      regressed). `D:__ R:__` notes:
+- [ ] **J-4 — applicator-map hygiene (tab churn + project switch).** Add a Layers tab +
+      engine, visit its mixer strip, right-click any knob -> Automate to open the Event
+      Editor; the param browser lists the strip's params (mixer_layer_N_...). Close
+      that tab; reopen the browser: those entries are GONE. Then load a DIFFERENT
+      project: its automation lanes still drive their targets during playback, and a
+      global tempo automation lane still changes the BPM (statics re-seed after the
+      project-boundary map clear). New Project behaves the same. `D:__ R:__` notes:
+- [ ] **J-5 — rack-knob automation on Aux/Vox/Inst/Rusty strips (docket-1 re-key).**
+      Add Mixer Strip (aux) -> Effects page -> select the aux channel -> load Chorus in
+      a slot -> right-click a rack knob -> "Automate: ..." -> lane created; play: the
+      knob follows the lane. Spot-check the same on a Vox strip and a Rusty strip rack
+      knob. ACCEPTED BREAK (docket-1): projects saved BEFORE this batch with lanes on
+      aux/vox/inst/rusty RACK knobs (incl. Rusty Bus) show those lanes stale in the
+      browser — re-automate recreates them; mixer-strip knob lanes are unaffected.
+      `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

@@ -726,10 +726,12 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
 
         if (player.mutedByChoke)
         {
+            player.unmuteResync = true;
             continue;
         }
         if (rowMuted || builderRowMuted)
         {
+            player.unmuteResync = true;
             continue;
         }
 
@@ -820,6 +822,12 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
 
         if (! doReverse && pvRefPos >= fileTotalSamples) continue;   // forward EOF
 
+        // Muted-edge flag (set by the gates above): consume on the first
+        // audible block so the PV path force-resyncs instead of resuming
+        // from the frozen feed position.
+        const bool unmuteResync = player.unmuteResync;
+        player.unmuteResync = false;
+
         clipScratch.clear();
         const float gain = ctx.masterGain;
         float       peak = 0.0f;
@@ -839,7 +847,7 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
             // player.expectedFilePos / streamer->seek track the absolute file frame.
             // For reverse it counts DOWN and the read chunk is flipped before push.
             const juce::int64 pvReadPos = player.expectedFilePos;
-            const bool seekNeeded =
+            const bool seekNeeded = unmuteResync ||
                 (pvReadPos == 0 && pvRefPos > (juce::int64) mSampleRate) ||
                 (pvReadPos != 0 &&
                  std::abs (pvRefPos - pvReadPos) > (juce::int64) (mSampleRate * 2));
@@ -1171,10 +1179,12 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
 
     if (player.mutedByChoke)
     {
+        player.unmuteResync = true;
         return false;
     }
     if (rowMuted || builderRowMuted)
     {
+        player.unmuteResync = true;
         return false;
     }
 
@@ -1235,6 +1245,12 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
         effectiveClipEnd - (ctx.projectStart + bufOffset));
 
     if (outSamples <= 0) return false;
+
+    // Muted-edge flag (set by the gates above): consume on the first audible
+    // block so the PV paths below (warp + pristine) force-resync instead of
+    // resuming from the frozen feed position.
+    const bool unmuteResync = player.unmuteResync;
+    player.unmuteResync = false;
 
     // ── Decode into ctx.clipScratch (Phase vocoder OR direct path) ───────────
     clipScratch.clear();
@@ -1545,7 +1561,11 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                     // forceSeek = a detach-pill law jump this block.
                     const juce::int64 pvRefPos  = (juce::int64) std::llround (pStart);
                     const juce::int64 pvReadPos = player.expectedFilePos;
+                    // unmuteResync skips a just-primed engage (fadeMode +1):
+                    // the prefill above already positioned the feed at pStart;
+                    // a forced reset here would empty the OLA it just built.
                     const bool seekNeeded = forceSeek ||
+                        (unmuteResync && fadeMode != +1) ||
                         (pvReadPos == 0 && pvRefPos > (juce::int64) mSampleRate) ||
                         (pvReadPos  > 0
                          && std::abs (pvRefPos - pvReadPos) > (juce::int64)(mSampleRate * 2));
@@ -1695,7 +1715,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
             : (int64) ((double) outPosInClip * readRatio / stretchRatio) + contentStart;
         const int64 pvReadPos = player.expectedFilePos;
 
-        const bool seekNeeded =
+        const bool seekNeeded = unmuteResync ||
             (pvReadPos == 0 && pvRefPos > (int64) mSampleRate) ||
             (pvReadPos  > 0
              && std::abs (pvRefPos - pvReadPos) > (int64)(mSampleRate * 2));

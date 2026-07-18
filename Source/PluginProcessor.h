@@ -539,6 +539,12 @@ public:
         // carries the interp phase across blocks (peekOutput/advanceOutput
         // pattern); reset alongside vocoder->reset() on seeks.
         double pvOutFrac { 0.0 };
+        // Mute/choke gates skip this player's whole render body, freezing
+        // expectedFilePos while the transport advances -- a sub-2-second gap
+        // slips under the PV seek tolerance and playback resumes offset (and
+        // stays offset).  Set by the gates, consumed by the first rendered
+        // block after them to force the re-sync.
+        bool unmuteResync { false };
         // QA-Fa recovery: align live-warp per-clip state.  The warp branch
         // in decodeFilePlayClip owns these; all zero-cost when the clip's
         // channel has no applied map.

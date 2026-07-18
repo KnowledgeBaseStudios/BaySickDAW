@@ -89,3 +89,26 @@ that smells like re-architecture (off-thread loading) gets ASKED, not built.
 
 - Shutdown: QA-Eb WindowState save/restore block (StandaloneApp) — do not regress the
   maximize-restore fix (restore-after-setResizeLimits ordering).
+
+## Carry-Over — 2026-07-18 (QA-I close; session end)
+
+- **Completed:** QA-I in full — Tasks 1-4 (overlay component + paint-pump; project-load
+  wiring w/ four entry wraps; shutdown teardown reorder, window destroyed LAST;
+  engine-swap/sample/kit busy wraps) — ONE batch commit `b6f51617`, every task gate
+  build-confirmed clean (one Debug-only C2664 fixed at the Task 3 gate). §B.15 authored
+  (7 scenarios); Work Log entry drafted + HELD in the running notes; carries the two
+  QA-H doc stragglers.
+- **In-flight:** nothing in code. TWO expected doc stragglers in the tree for QA-J''s
+  commit (B.13/B.14/B.15 precedent): the §B.15 `blocks:` hash backfill (`b6f51617`) +
+  this carry-over block.
+- **Assumptions changed:** the plan's "startup restore" load flow does not exist
+  (startup = blank + default tabs per QA-Ef #6); the real fourth load path is
+  Restore-from-Backup — wired under the §5 "wired to load" lock.  ResizableWindow hides
+  addChildComponent behind a JUCE_DEBUG-only misuse trap (Debug-only C2664; the
+  sanctioned bypass is an explicit `Component::` base-class call).
+- **Resume action (NEW session):** paste the QA-J' prompt (handed to Jeff at this
+  session's close) — /standup -> Main Plan §0 -> caribou G3 sections ->
+  prompt-reseeking-newt.md IN FULL -> confirm `b6f51617` at HEAD (+ the two stragglers
+  dirty) -> QA-J' Task 1.
+- **Work-Log entry needed:** none new — QA-I's is drafted + HELD in
+  `Running Notes/patient-veiling-tortoise.md` (applies at §B.15 section pass).

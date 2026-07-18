@@ -885,6 +885,7 @@ juce::String EffectsPage::getChannelPrefix() const
         case 9:  return "vox_bus2";
         case 10: return "inst_bus2";
         case 11: return "inst_bus3";
+        case 12: return "rusty_bus";
         default: break;
     }
     if (id >= 100 && id < 200)
@@ -895,10 +896,20 @@ juce::String EffectsPage::getChannelPrefix() const
         return "bass_" + juce::String(id - 299);
     if (id >= 400 && id < 400 + MixerState::kMaxAudioRows) // 50 audio inserts
         return "audio_" + juce::String(id - 400);
-    if (id >= 600 && id < 600 + MixerChannelIds::kMaxVoxStrips)  // 6 vox inserts
-        return "vox_" + juce::String(id - 600);
-    if (id >= 700 && id < 700 + MixerChannelIds::kMaxInstStrips) // 20 inst inserts
-        return "inst_" + juce::String(id - 700);
+    // Aux/Vox/Inst/Rusty ranges mirror the J-6 dropdown numbering (Aux 600+ /
+    // Vox 700+ / Inst 800+ / Rusty 900+).  These prefixes key the rack-slot
+    // automation paramIds that lanes persist, so this table must track the
+    // dropdown builder (pre-fix it still held the pre-J-6 600=Vox/700=Inst
+    // layout: aux/vox rack pids were stamped with wrong-kind prefixes and
+    // inst/rusty dropped to the "fx" fallback).
+    if (id >= 600 && id < 600 + (int) MixerChannelIds::kMaxAuxStrips)
+        return "aux_" + juce::String(id - 600);
+    if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)
+        return "vox_" + juce::String(id - 700);
+    if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)
+        return "inst_" + juce::String(id - 800);
+    if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)
+        return "rusty_" + juce::String(id - 900);
     return "fx";
 }
 

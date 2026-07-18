@@ -588,48 +588,10 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // KeyListener fires for any descendant whose key wasn't already handled.
     mMidiLearnUI->installOnTopLevelComponent (this);
 
-    // Auto-register all static APVTS params (instrument synths, EQ bands, etc.)
-    for (auto* p : mProcessor.getParameters())
-    {
-        if (auto* rap = dynamic_cast<juce::RangedAudioParameter*>(p))
-        {
-            juce::String pid = rap->paramID;
-            mAutomationApplicators[pid] = [rap](float v01)
-            {
-                rap->setValueNotifyingHost(v01);
-            };
-            mAutomationValueReaders[pid] = [rap]() -> float
-            {
-                return rap->getValue();  // already 0..1
-            };
-        }
-    }
-
-    // 2026-04-24: "global_tempo" automation.  Linear map 0..1 <-> 20..300 BPM.
-    // Applicator updates the playhead + PatternManager's stored tempo; reader
-    // returns normalised tempo.  Right-clicking the transport BPM field opens
-    // the standard Event Editor via openEventEditorForParam("global_tempo"),
-    // producing an Automation clip on the arrangement just like any other
-    // automatable param.
-    constexpr float kTempoMinBpm = 20.0f;
-    constexpr float kTempoMaxBpm = 300.0f;
-    mAutomationApplicators["global_tempo"] = [this, kTempoMinBpm, kTempoMaxBpm](float v01)
-    {
-        const double bpm = juce::jlimit (kTempoMinBpm, kTempoMaxBpm,
-            kTempoMinBpm + v01 * (kTempoMaxBpm - kTempoMinBpm));
-        // QA-TempoMap: automation is a LIVE override (truncate-and-append tail
-        // segment; ruler tempo flags ahead re-assert = last-writer-wins).  It
-        // no longer writes the persisted BASE tempo - the BPM field owns that
-        // (Jeff's E pick); pre-map code wrote setGlobalTempo here, which would
-        // now corrupt the base with transient automation values.
-        mPlayHead.setLiveTempo (bpm);
-    };
-    mAutomationValueReaders["global_tempo"] = [this, kTempoMinBpm, kTempoMaxBpm]() -> float
-    {
-        const double bpm = mPlayHead.getBPM();
-        return juce::jlimit (0.0f, 1.0f,
-            (float) ((bpm - kTempoMinBpm) / (kTempoMaxBpm - kTempoMinBpm)));
-    };
+    // Static registrations (all current APVTS params + "global_tempo") live in
+    // registerStaticAutomationHandlers() so resetProjectState() can re-seed
+    // them after its full map clear.
+    registerStaticAutomationHandlers();
 
     // ── Global LAF + Tooltip ──────────────────────────────────────────────────
     juce::LookAndFeel::setDefaultLookAndFeel(&VibeLAF::get());
@@ -4282,6 +4244,13 @@ void StandaloneEditor::onTabClosed(int tabId)
                 // capture the page raw ptr.
                 if (mPianoRollPage && idx >= 0)
                     mPianoRollPage->unregisterEngine ({ EngineKind::Layer, idx });
+                if (idx >= 0)
+                {
+                    eraseAutomationEntriesWithPrefix ("mixer_layer_" + juce::String (idx) + "_");
+                    // Rack-slot pids are 1-based for layers/basses
+                    // (EffectsPage::getChannelPrefix maps dropdown id-199).
+                    eraseAutomationEntriesWithPrefix ("layer_" + juce::String (idx + 1) + "_");
+                }
             }
 
             // Free bass index slot for any BassPage being closed
@@ -4292,6 +4261,11 @@ void StandaloneEditor::onTabClosed(int tabId)
                     mUsedBassIndices[idx] = false;
                 if (mPianoRollPage && idx >= 0)
                     mPianoRollPage->unregisterEngine ({ EngineKind::Bass, idx });
+                if (idx >= 0)
+                {
+                    eraseAutomationEntriesWithPrefix ("mixer_bass_" + juce::String (idx) + "_");
+                    eraseAutomationEntriesWithPrefix ("bass_" + juce::String (idx + 1) + "_");
+                }
             }
 
             // D1.4: Free drum index slot for any DrumPage being closed
@@ -4302,6 +4276,11 @@ void StandaloneEditor::onTabClosed(int tabId)
                     mUsedDrumIndices[idx] = false;
                 if (mPianoRollPage && idx >= 0)
                     mPianoRollPage->unregisterEngine ({ EngineKind::Drum, idx });
+                if (idx >= 0)
+                {
+                    eraseAutomationEntriesWithPrefix ("mixer_drum_" + juce::String (idx) + "_");
+                    eraseAutomationEntriesWithPrefix ("drum_" + juce::String (idx) + "_");
+                }
             }
 
             // Clips tab close - unregister the audio engine + piano-roll
@@ -4332,6 +4311,8 @@ void StandaloneEditor::onTabClosed(int tabId)
                     clipStripIdx = idx;
                     if (mPianoRollPage)
                         mPianoRollPage->unregisterEngine ({ EngineKind::Clip, idx });
+                    eraseAutomationEntriesWithPrefix ("mixer_audio_" + juce::String (idx) + "_");
+                    eraseAutomationEntriesWithPrefix ("audio_" + juce::String (idx) + "_");
                 }
                 if (mPM && idx >= 0)
                 {
@@ -4378,6 +4359,8 @@ void StandaloneEditor::onTabClosed(int tabId)
                 {
                     mProcessor.unregisterVoxEngine (idx);
                     voxStripIdx = idx;
+                    eraseAutomationEntriesWithPrefix ("mixer_vox_" + juce::String (idx) + "_");
+                    eraseAutomationEntriesWithPrefix ("vox_" + juce::String (idx) + "_");
                 }
                 // QA-E Task 5 (2026-05-15): library + block cascade for Vox
                 // tab close.  Walks every library entry owned by this Vox
@@ -4435,6 +4418,8 @@ void StandaloneEditor::onTabClosed(int tabId)
                 {
                     mProcessor.unregisterInstEngine (idx);
                     instStripIdx = idx;
+                    eraseAutomationEntriesWithPrefix ("mixer_inst_" + juce::String (idx) + "_");
+                    eraseAutomationEntriesWithPrefix ("inst_" + juce::String (idx) + "_");
                 }
                 if (ip->getSource() == InstPage::Source::BaySickGuitars)
                 {
@@ -4495,6 +4480,11 @@ void StandaloneEditor::onTabClosed(int tabId)
                 if (mMixerPage) mMixerPage->clearAllRustyChannels();
                 if (mPianoRollPage)
                     mPianoRollPage->unregisterEngine ({ EngineKind::BaySickRustyDrums, 0 });
+                for (int r = 0; r < (int) MixerChannelIds::kMaxRustyStrips; ++r)
+                {
+                    eraseAutomationEntriesWithPrefix ("mixer_rusty_" + juce::String (r) + "_");
+                    eraseAutomationEntriesWithPrefix ("rusty_" + juce::String (r) + "_");
+                }
             }
 
             // Clear legacy raw pointers if we're removing those pages
@@ -10405,6 +10395,75 @@ void StandaloneEditor::resetProjectState()
     mNextGuitarNameNum  = 1;
     mNextBassesNameNum  = 1;
     mNextClipNameNum    = 1;
+
+    // Project boundary: drop every automation applicator/reader so a load
+    // never inherits the previous project's closures, then re-seed the
+    // statics (APVTS params + "global_tempo") -- those only register at
+    // construction; dynamic entries re-register as their owning UI rebuilds.
+    mAutomationApplicators.clear();
+    mAutomationValueReaders.clear();
+    registerStaticAutomationHandlers();
+}
+
+void StandaloneEditor::registerStaticAutomationHandlers()
+{
+    // Auto-register all static APVTS params (instrument synths, EQ bands, etc.)
+    for (auto* p : mProcessor.getParameters())
+    {
+        if (auto* rap = dynamic_cast<juce::RangedAudioParameter*>(p))
+        {
+            juce::String pid = rap->paramID;
+            mAutomationApplicators[pid] = [rap](float v01)
+            {
+                rap->setValueNotifyingHost(v01);
+            };
+            mAutomationValueReaders[pid] = [rap]() -> float
+            {
+                return rap->getValue();  // already 0..1
+            };
+        }
+    }
+
+    // "global_tempo" automation.  Linear map 0..1 <-> 20..300 BPM.
+    // Applicator updates the playhead + PatternManager's stored tempo; reader
+    // returns normalised tempo.  Right-clicking the transport BPM field opens
+    // the standard Event Editor via openEventEditorForParam("global_tempo"),
+    // producing an Automation clip on the arrangement just like any other
+    // automatable param.
+    constexpr float kTempoMinBpm = 20.0f;
+    constexpr float kTempoMaxBpm = 300.0f;
+    mAutomationApplicators["global_tempo"] = [this, kTempoMinBpm, kTempoMaxBpm](float v01)
+    {
+        const double bpm = juce::jlimit (kTempoMinBpm, kTempoMaxBpm,
+            kTempoMinBpm + v01 * (kTempoMaxBpm - kTempoMinBpm));
+        // Automation is a LIVE override (truncate-and-append tail segment;
+        // ruler tempo flags ahead re-assert = last-writer-wins).  It does not
+        // write the persisted BASE tempo - the BPM field owns that (Jeff's E
+        // pick); pre-map code wrote setGlobalTempo here, which would corrupt
+        // the base with transient automation values.
+        mPlayHead.setLiveTempo (bpm);
+    };
+    mAutomationValueReaders["global_tempo"] = [this, kTempoMinBpm, kTempoMaxBpm]() -> float
+    {
+        const double bpm = mPlayHead.getBPM();
+        return juce::jlimit (0.0f, 1.0f,
+            (float) ((bpm - kTempoMinBpm) / (kTempoMaxBpm - kTempoMinBpm)));
+    };
+}
+
+void StandaloneEditor::eraseAutomationEntriesWithPrefix (const juce::String& prefix)
+{
+    if (prefix.isEmpty()) return;
+    auto eraseFrom = [&prefix] (auto& map)
+    {
+        for (auto it = map.begin(); it != map.end();)
+        {
+            if (it->first.startsWith (prefix)) it = map.erase (it);
+            else                               ++it;
+        }
+    };
+    eraseFrom (mAutomationApplicators);
+    eraseFrom (mAutomationValueReaders);
 }
 
 void StandaloneEditor::advanceCountersFromRestoredTabs()
