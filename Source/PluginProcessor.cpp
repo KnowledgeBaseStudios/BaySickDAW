@@ -4843,6 +4843,8 @@ void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
     setProjectLoadInProgress (true);
     juce::Thread::sleep (30);
 
+    if (onLoadProgress) onLoadProgress ("Reading project state...");
+
     // QA-Ef #4 (2026-05-22): tear down every aux insert (engine + render task)
     // from the PRIOR project before the new project's params load and
     // restoreAuxStripsFromState rebuilds.  Without this, prior-project auxes
@@ -4894,6 +4896,8 @@ void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
             break;   // only one APVTS state child expected
         }
     }
+
+    if (onLoadProgress) onLoadProgress ("Restoring patterns...");
 
     // PatternManager - top-level child named "PatternManager".
     if (mPatternManager != nullptr)

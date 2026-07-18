@@ -1522,6 +1522,7 @@ StandaloneEditor::~StandaloneEditor()
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
     stopPlayback();
     mProcessor.setPatternManager(nullptr);
+    mProcessor.onLoadProgress = nullptr;
     // Detach the keymap-set listener installed in the ctor.  GlobalTransportBar
     // is no longer a KeyListener (Phase A 2026-04-26 - keymap migration).
     if (auto* set = mCmdMgr.getKeyMappings())
@@ -1699,12 +1700,27 @@ void StandaloneEditor::buildDefaultTabs()
         }
     }
 
+    // Heavy-op overlay: added last + always-on-top so it covers every page.
+    addChildComponent (mHeavyOpOverlay);
+    mProcessor.onLoadProgress = [this] (const juce::String& label)
+    {
+        mHeavyOpOverlay.setStepLabel (label);
+    };
+
     // Default dynamic tabs.
     addDefaultDynamicTabs();
 
     // Start on Builder tab (id=3)
     mRibbon->selectTab(3);
     onTabSelected(3);
+}
+
+HeavyOperationOverlay* StandaloneEditor::busyOverlayFor (juce::Component* c)
+{
+    if (c != nullptr)
+        if (auto* ed = c->findParentComponentOfClass<StandaloneEditor>())
+            return &ed->mHeavyOpOverlay;
+    return nullptr;
 }
 
 void StandaloneEditor::addDefaultDynamicTabs()
@@ -6851,6 +6867,9 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
         return;
     }
 
+    HeavyOperationOverlay::ScopedOp heavyOp (mHeavyOpOverlay, "Loading Kit...", true);
+    mHeavyOpOverlay.setStepLabel ("Building drum tabs...");
+
     // Tear down every existing drum tab.  Drums-only - keep Layers + Bass.
     // Mirrors closeAllDynamicTabs's pattern (onTabClosed handles mPages /
     // slot freeing; ribbon needs a separate wipe via clearTabsOfType).
@@ -7601,6 +7620,9 @@ void StandaloneEditor::addBaySickGuitarsTab()
     }
     if (! ip) return;
 
+    HeavyOperationOverlay::ScopedOp heavyOp (mHeavyOpOverlay,
+                                             "Loading Instrument...", true);
+
     // Step 3: load the default kit BEFORE switching source so the engine
     // exists when rebuildEngineChain runs on setSource.  The race-safe wrapper
     // creates the engine slot on first call + flips the active flag once the
@@ -7695,6 +7717,9 @@ void StandaloneEditor::addBaySickBassesTab()
             }
     }
     if (! ip) return;
+
+    HeavyOperationOverlay::ScopedOp heavyOp (mHeavyOpOverlay,
+                                             "Loading Instrument...", true);
 
     const juce::File defaultKit =
         juce::File::getSpecialLocation (juce::File::windowsLocalAppData)
@@ -9107,6 +9132,9 @@ void StandaloneEditor::menuItemSelected(int id, int)
                 // P5: dirty prompt first, then open.
                 confirmDiscardChanges ([this, target]
                 {
+                    HeavyOperationOverlay::ScopedOp heavyOp (mHeavyOpOverlay,
+                                                             "Loading Project...");
+                    mHeavyOpOverlay.setStepLabel ("Closing old tabs...");
                     // 2026-04-24: wipe in-memory state before loading a
                     // different project so residual tabs / rack effects /
                     // etc. from the prior session don't bleed through.
@@ -9762,6 +9790,9 @@ void StandaloneEditor::doFileNewFromTemplate()
                 [this, tpl] (juce::String name)
                 {
                     if (! ProjectManager::isValidProjectName (name)) return;
+                    HeavyOperationOverlay::ScopedOp heavyOp (mHeavyOpOverlay,
+                                                             "Creating Project...");
+                    mHeavyOpOverlay.setStepLabel ("Copying template files...");
                     if (! mProjectManager->newProject (name, tpl)) return;
                     auto seedXml = mProjectManager->getCurrentFolder()
                                         .getChildFile ("project.xml");
@@ -9860,6 +9891,9 @@ void StandaloneEditor::doFileOpen()
 
     browser->onOpenSelected = [this, browser] (const juce::File& folder)
     {
+        HeavyOperationOverlay::ScopedOp heavyOp (mHeavyOpOverlay,
+                                                 "Loading Project...");
+        mHeavyOpOverlay.setStepLabel ("Closing old tabs...");
         // 2026-04-24: wipe before load (see Open Recent path for details).
         closeAllDynamicTabs();
         if (mMixerPage) mMixerPage->clearDynamicStrips();
@@ -10012,6 +10046,9 @@ void StandaloneEditor::doFileRestoreBackup()
                     [this, file] (int result)
                     {
                         if (result != 1) return;
+                        HeavyOperationOverlay::ScopedOp heavyOp (mHeavyOpOverlay,
+                                                                 "Restoring Backup...");
+                        mHeavyOpOverlay.setStepLabel ("Closing old tabs...");
                         // 2026-04-24: wipe before restore.
                         closeAllDynamicTabs();
                         if (mMixerPage) mMixerPage->clearDynamicStrips();
@@ -10457,6 +10494,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
     auto* tabs = ui->getChildByName ("Tabs");
     if (tabs == nullptr) return;
 
+    mHeavyOpOverlay.setStepLabel ("Closing old tabs...");
     closeAllDynamicTabs();
 
     auto applyEngineState = [](juce::AudioProcessor* eng, const juce::String& base64)
@@ -10467,6 +10505,14 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             eng->setStateInformation (mb.getData(), (int) mb.getSize());
     };
 
+    int tabTotal = 0;
+    for (auto* rec : tabs->getChildWithTagNameIterator ("Tab"))
+    {
+        juce::ignoreUnused (rec);
+        ++tabTotal;
+    }
+    int tabNum = 0;
+
     for (auto* rec : tabs->getChildWithTagNameIterator ("Tab"))
     {
         const juce::String type      = rec->getStringAttribute ("type");
@@ -10474,6 +10520,11 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
         const juce::String name      = rec->getStringAttribute ("name");
         const juce::String engine    = rec->getStringAttribute ("engine");
         const juce::String engineData= rec->getStringAttribute ("engineData");
+
+        ++tabNum;
+        mHeavyOpOverlay.setStep (tabNum, tabTotal,
+            "Tab " + juce::String (tabNum) + " of " + juce::String (tabTotal)
+            + " - " + (name.isNotEmpty() ? name : type));
 
         if (type == "Layers")
         {
@@ -11194,6 +11245,9 @@ static void syncTempoFromPatternManager (StandalonePlayHead& ph,
 void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
 {
     if (mPM == nullptr) return;
+
+    if (mHeavyOpOverlay.isActive())
+        mHeavyOpOverlay.setStepLabel ("Rebuilding audio strips...");
 
     // QA-Fe2: grid-default picks are per-project session state ("locks until
     // the project is shut down") -- every load path runs through here.

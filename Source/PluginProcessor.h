@@ -122,6 +122,11 @@ public:
     std::function<void(juce::XmlElement&)>       onSerializeUIState;
     std::function<void(const juce::XmlElement&)> onDeserializeUIState;
 
+    // Load-progress hook: deserializeProject reports phase labels so the
+    // editor's HeavyOperationOverlay can repaint mid-load.  Message thread
+    // only (fired from inside the synchronous load path).
+    std::function<void(const juce::String&)>     onLoadProgress;
+
     // P4: current project folder on disk, used to resolve relative
     // audioFilePath values like "Samples/<name>.wav" for audio-clip playback.
     // Set from ProjectManager after newProject / openProject / saveProjectAs.

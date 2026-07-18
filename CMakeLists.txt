@@ -410,6 +410,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/Standalone/SharedUI.cpp
     Source/Standalone/EngineChainProcessor.cpp
     Source/Standalone/BaySickTitleBar.cpp   # QA-A (2026-05-09)
+    Source/Standalone/HeavyOperationOverlay.cpp   # QA-I (2026-07-18)
     # Main shell
     Source/Standalone/StandaloneApp.cpp
     Source/Standalone/StandaloneEditor.cpp

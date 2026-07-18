@@ -12,6 +12,7 @@
 #include "EventEditor.h"
 #include "DrumPage.h"   // D2: KitDrumInfo struct used in helper signatures below
 #include "PagePresetIO.h"   // G-7: PageKind enum used in helper signatures below
+#include "HeavyOperationOverlay.h"
 
 class PatternManager;
 class ProjectManager;
@@ -52,6 +53,12 @@ public:
     StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph,
                      juce::AudioDeviceManager& dm);
     ~StandaloneEditor() override;
+
+    // Busy-overlay lookup for page-level heavy ops (engine swaps, sample +
+    // kit loads).  Static walk-up so pages don't carry an editor pointer;
+    // returns null while the component isn't parented yet (project restore
+    // runs selectEngine pre-parent -- the load overlay covers that path).
+    static HeavyOperationOverlay* busyOverlayFor (juce::Component* c);
 
     void paint(juce::Graphics&) override;
     void paintOverChildren(juce::Graphics&) override;
@@ -464,6 +471,11 @@ private:
 
     // Currently visible page component
     juce::Component* mVisiblePage { nullptr };
+
+    // Heavy-op progress overlay (project load / restore / heavy engine ops).
+    // Always-on-top child covering the whole editor; the synchronous ops pump
+    // paints through it at step boundaries (see HeavyOperationOverlay.h).
+    HeavyOperationOverlay mHeavyOpOverlay;
 
     // (mHasDrumsTab removed - Drums is now a permanent slot in the ribbon)
 

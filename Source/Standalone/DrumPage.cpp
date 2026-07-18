@@ -5,6 +5,7 @@
 #include "../VibePlayer/VibePlayerEditor.h"
 #include "../SampleLibrary.h"
 #include "PagePresetIO.h"
+#include "StandaloneEditor.h"
 using namespace juce;
 
 // ── Helper: recursive Core Library menu builder ──────────────────────────────
@@ -308,6 +309,9 @@ void DrumPage::selectEngine(const juce::String& engineName)
     // tear down old + create new.  Triggers fresh APVTS param registration
     // for the new engine type via registerParamsForTrack (idempotent on prefix).
     if (engineName == mEngineType && mEngineProcessor) return;
+
+    HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
+                                          "Loading " + engineName + "...", true);
 
     // Tear down previous engine if engine type is changing.
     if (mEngineProcessor)
@@ -674,6 +678,8 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
 // ─────────────────────────────────────────────────────────────────────────────
 void DrumPage::loadSampleFile (const juce::File& f)
 {
+    HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
+                                          "Loading Sample...", true);
     selectEngine ("BaySickPlayer");
     if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
     {
@@ -693,6 +699,8 @@ void DrumPage::loadSampleFile (const juce::File& f)
 
 void DrumPage::loadSampleFolder (const juce::File& f)
 {
+    HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
+                                          "Loading Samples...", true);
     selectEngine ("BaySickPlayer");
     if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
     {
@@ -710,6 +718,8 @@ void DrumPage::loadSampleFolder (const juce::File& f)
 
 void DrumPage::loadSampleSFZ (const juce::File& f)
 {
+    HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
+                                          "Loading SFZ...", true);
     selectEngine ("BaySickPlayer");
     if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
     {
@@ -726,6 +736,8 @@ void DrumPage::loadSampleSFZ (const juce::File& f)
 
 void DrumPage::loadSynthPreset (const juce::File& xml)
 {
+    HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
+                                          "Loading Preset...", true);
     selectEngine ("BaySickSynth");
     auto* bss = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get());
     if (bss == nullptr) return;
@@ -924,6 +936,8 @@ void DrumPage::loadPlayerPreset (const juce::File& xml)
     auto parsed = juce::XmlDocument::parse (xml);
     if (! parsed || ! parsed->hasTagName ("BaySickPlayerState")) return;
 
+    HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
+                                          "Loading Preset...", true);
     selectEngine ("BaySickPlayer");
     auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get());
     if (vp == nullptr) return;

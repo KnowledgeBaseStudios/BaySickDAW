@@ -160,3 +160,27 @@ manual-parity routes to a Forks entry at section pass, not endless iteration.
 - Task 2 engines: audition pattern + APVTS binding sections (per-engine glide precedents).
 - Task 8 #6: QA-Ed/QA-TempoMap song-length derivation (do not regress loop/tempo work).
 - Scout surface maps: group-open running notes (2026-07-17).
+
+## Carry-Over — 2026-07-18 (QA-H close; session end)
+
+- **Completed:** QA-H in full — Tasks 1-8 + owner mid-batch calls (BOTH slides ship:
+  Ramp + Retrigger, "RP Slide"/"RT Slide" labels; Standard displays as "Flat") — ONE
+  batch commit `50c6eeb9`, every task gate build-confirmed clean. §B.14 authored
+  (14 scenarios); Work Log entry drafted + HELD in the running notes; the 3 in-batch
+  transport-bug fixes + folded Builder fixes all recorded there.
+- **In-flight:** nothing in code. TWO expected doc stragglers in the tree for QA-I's
+  commit (B.12/B.13 precedent): the §B.14 `blocks:` hash backfill + this carry-over
+  block.
+- **Assumptions changed:** the single "Slide" type split into TWO (RampSlide=1 keeps
+  the old serialized value, RetrigSlide=3 appends); the old instant Randomize is
+  REPLACED by the FL dialog (docket #1=B); #19's delete-rebuilds-tree half was already
+  shipped by QA-Fe2 (absorption); the per-note CC-before-noteOn transport carried two
+  pre-existing delivery holes since Batch E (juce channel-gated controllerMoved never
+  reached cold voices; VibeSynth delivered CCs one note late) — fixed via
+  `Source/BroadcastSynthesiser.h` + the player's inline in-order broadcast.
+- **Resume action (NEW session):** paste the QA-I prompt (handed to Jeff at this
+  session's close) — /standup -> Main Plan §0 -> caribou G3 sections ->
+  patient-veiling-tortoise.md IN FULL -> confirm `50c6eeb9` at HEAD (+ the two
+  stragglers dirty) -> QA-I Task 1.
+- **Work-Log entry needed:** none new — QA-H's is drafted + HELD in
+  `Running Notes/ghostly-riffing-moth.md` (applies at §B.14 section pass).

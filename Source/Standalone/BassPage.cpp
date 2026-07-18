@@ -7,6 +7,7 @@
 #include "../VibePlayer/VibePlayerEditor.h"
 #include "../SampleLibrary.h"
 #include "PagePresetIO.h"
+#include "StandaloneEditor.h"
 using namespace juce;
 
 // ── Constructor / Destructor ──────────────────────────────────────────────────
@@ -129,6 +130,9 @@ void BassPage::setUndoContext(const UndoContext& ctx)
 void BassPage::selectEngine(const juce::String& engineName)
 {
     if (mEngineLocked) return;
+
+    HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
+                                          "Loading " + engineName + "...", true);
 
     mEngineType   = engineName;
     mEngineLocked = true;

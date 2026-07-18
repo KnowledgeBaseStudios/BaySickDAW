@@ -4,6 +4,7 @@
 #include "AriaControlPanel.h"   // K-5 (2026-05-05): moved to Source/Standalone/
 #include "../VibeGraph.h"
 #include "SampleLibrary.h"
+#include "StandaloneEditor.h"
 
 namespace
 {
@@ -188,6 +189,8 @@ void BaySickRustyDrumsPage::buildPianoRollTab()
 
 bool BaySickRustyDrumsPage::loadKit (const juce::File& sfzPath)
 {
+    HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
+                                          "Loading Kit...", true);
     if (! mProcessor.loadBaySickRustyDrumsKit (sfzPath))
         return false;
     if (mKitGraphic) mKitGraphic->setEngine (mProcessor.getBaySickRustyDrums());

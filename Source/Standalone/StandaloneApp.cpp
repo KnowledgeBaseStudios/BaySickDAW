@@ -1,5 +1,6 @@
 #include "StandaloneApp.h"
 #include "StandaloneEditor.h"
+#include "HeavyOperationOverlay.h"
 #include "BaySickAssets.h"   // BaySickDAWLogo_png / _pngSize (logo for splash + window icon)
 #include "EffectPresetIO.h"  // H-9 prep: seed factory presets at launch
 #include "../VibeGraph.h"    // MeterLatencyComp::recomputeFromDevice (2026-05-02)
@@ -971,7 +972,32 @@ void VibesynthStandaloneApp::shutdown()
         ws->setAttribute ("h", wb.getHeight());
         root->writeTo (f);
     }
-    mWindow = nullptr;
+    // Shutdown overlay is owned HERE, parented on the window -- the editor's
+    // own overlay dies with the content.  The window stays alive (visible,
+    // overlaid) through editor + engine teardown and is destroyed LAST, which
+    // kills the black-window period (previously `mWindow = nullptr` ran
+    // first, leaving a bare black DocumentWindow on screen while
+    // ~StandaloneEditor ground through closeAllDynamicTabs + engine
+    // destruction).  The message loop is already stopped at this point;
+    // the overlay's own peer paint-pump is what keeps it rendering.
+    std::unique_ptr<HeavyOperationOverlay> shutdownOverlay;
+    if (mWindow)
+    {
+        shutdownOverlay = std::make_unique<HeavyOperationOverlay>();
+        // Base-class call: ResizableWindow hides addChildComponent behind a
+        // Debug-only misuse trap (juce_ResizableWindow.h:376) whose own docs
+        // say to call the Component base method when a direct child (not
+        // content) is genuinely intended -- which an overlay that must outlive
+        // clearContentComponent() is.
+        mWindow->Component::addChildComponent (*shutdownOverlay);
+        shutdownOverlay->beginOp ("Shutting Down...", true);
+        shutdownOverlay->setStepLabel ("Closing tabs and engines...");
+        // Editor teardown (the heavy half) happens now, under the overlay.
+        mWindow->clearContentComponent();
+    }
+
+    if (shutdownOverlay)
+        shutdownOverlay->setStepLabel ("Releasing audio device...");
     if (mDeviceManager)
         mDeviceManager->removeChangeListener(this);
     // C.3 (2026-04-30): unregister MIDI input callbacks before tearing down
@@ -991,6 +1017,13 @@ void VibesynthStandaloneApp::shutdown()
     mProcessor     = nullptr;
     mPlayHead      = nullptr;
     mDeviceManager = nullptr;
+
+    if (shutdownOverlay)
+    {
+        shutdownOverlay->endOp();
+        shutdownOverlay = nullptr;   // detach from the window before it dies
+    }
+    mWindow = nullptr;
 }
 
 // C.3 (2026-04-30): MIDI input thread -> processor's collector.  Keep this

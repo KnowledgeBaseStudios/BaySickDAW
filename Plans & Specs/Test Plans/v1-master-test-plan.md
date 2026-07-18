@@ -989,8 +989,8 @@ File > New marker leak).
 
 ### §B.14 — QA-H (piano-roll features: note types + properties + FL tools + Builder fixes)
 
-`blocks:` (QA-H batch commit - hash backfilled at the next docs commit, B.12/B.13
-precedent). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`. Covers the
+`blocks:` `50c6eeb9` (QA-H, the whole batch in one commit). Debug exe FIRST, then
+Release — mark each scenario `D:` and `R:`. Covers the
 plan's 8 tasks plus the mid-batch owner calls (BOTH slides ship: Ramp + Retrigger;
 "Flat" display name) and the in-batch transport fixes (expression-CC bleed, cold-voice
 CC delivery, player CC ordering).
@@ -1081,6 +1081,50 @@ CC delivery, player CC ordering).
       template's automation block places at the drawn length. Switch browser tabs:
       the drop type re-arms to that tab's last pick; a tab with nothing picked places
       nothing. `D:__ R:__` notes:
+
+### §B.15 — QA-I (heavy-op progress overlay: load / shutdown / engine + kit loads)
+
+`blocks:` `________` (QA-I, the whole batch in one commit; hash backfills at the next
+docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`. The
+overlay repaints via explicit paint-pump at step boundaries: determinate bars move per
+step; indeterminate ops show a sweep segment + wait cursor that only advance at step
+boundaries (no animation mid-grind — by design, the ops stay synchronous on the message
+thread).
+
+- [ ] **I-1 — project load overlay (APP-03).** FILE > Open Project... (or Open Recent)
+      on a multi-tab project: dimmed overlay titled "Loading Project..." with live step
+      text — "Closing old tabs..." -> "Reading project state..." -> "Restoring
+      patterns..." -> per-tab "Tab N of M - <name>" with the bar filling -> "Rebuilding
+      audio strips..." — then the overlay drops and the UI is fully interactive. Wait
+      cursor for the duration; clicks landing on the dimmed UI do nothing. A tiny
+      project just flashes the steps through; bigger projects hold them readable.
+      `D:__ R:__` notes:
+- [ ] **I-2 — New from Template + Restore Backup.** FILE > New from Template... (pick a
+      sample-heavy template): "Creating Project..." + "Copying template files..." then
+      the I-1 step flow. FILE > Restore from Backup... (pick a backup): "Restoring
+      Backup..." + the same step flow. Both end fully interactive. `D:__ R:__` notes:
+- [ ] **I-3 — failed load never sticks.** Rename a test project's project.xml on disk,
+      then open it from Open Recent: "Could not open project" alert shows and the
+      overlay is GONE (no stuck dim layer, no stuck wait cursor); rename the file back,
+      open again — loads normally. `D:__ R:__` notes:
+- [ ] **I-4 — shutdown overlay (APP-02).** Load a heavy session (multiple engine tabs +
+      Rusty), quit: the window stays up showing "Shutting Down..." — "Closing tabs and
+      engines..." -> "Releasing audio device..." — until the app exits; NO bare black
+      window period. Relaunch: maximized/sized window state restores exactly as before
+      (QA-Eb regression guard). `D:__ R:__` notes:
+- [ ] **I-5 — engine pick busy sign (NAV-02).** Fresh Layers tab -> pick an engine
+      (Harmless / BaySickPlayer / BaySickSynth): "Loading <engine>..." busy overlay +
+      wait cursor during the build (fast engines may only flash it). Same on a Bass tab
+      pick and a Drums tab engine swap via the sound picker. `D:__ R:__` notes:
+- [ ] **I-6 — drum sound + kit loads.** Drums tab picker: Browse a big sample folder ->
+      "Loading Samples..."; an SFZ -> "Loading SFZ..."; a factory preset -> "Loading
+      Preset...". Load a saved drum kit from the Kit menu: "Loading Kit..." +
+      "Building drum tabs..." while the kit's drum tabs spawn. Rusty program switch
+      (Full <-> Basic): "Loading Kit...". `D:__ R:__` notes:
+- [ ] **I-7 — sfizz instrument spawn.** + Add Guitar and + Add Basses: "Loading
+      Instrument..." busy overlay over the default keyswitch-SFZ load; the tab lands
+      selected and playable after. During a PROJECT LOAD the engine restores surface as
+      load-overlay steps only (no double overlay). `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 
