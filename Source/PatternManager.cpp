@@ -1034,6 +1034,8 @@ namespace
         if (n.muted)                                 t.setProperty ("u",  true,           nullptr);
         if (n.groupId      != -1)                    t.setProperty ("g",  n.groupId,      nullptr);
         if (n.filterCutoff != 0.5f)                  t.setProperty ("c",  n.filterCutoff, nullptr);
+        if (n.releaseAmt   != 0.5f)                  t.setProperty ("r",  n.releaseAmt,   nullptr);
+        if (n.resonance    != 0.5f)                  t.setProperty ("q",  n.resonance,    nullptr);
         if (n.slotIndex    != -1)                    t.setProperty ("sl", n.slotIndex,    nullptr);
         return t;
     }
@@ -1055,6 +1057,8 @@ namespace
         n.muted         = (bool)          t.getProperty ("u",  false);
         n.groupId       = (int)           t.getProperty ("g",  -1);
         n.filterCutoff  = (float)(double) t.getProperty ("c",  0.5);
+        n.releaseAmt    = (float)(double) t.getProperty ("r",  0.5);
+        n.resonance     = (float)(double) t.getProperty ("q",  0.5);
         n.slotIndex     = (int)           t.getProperty ("sl", -1);
         return n;
     }

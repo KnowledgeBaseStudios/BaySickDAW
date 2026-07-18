@@ -54,7 +54,11 @@ struct AutomationLane
 };
 
 // ── Piano roll note type ──────────────────────────────────────────────────────
-enum class NoteType { Standard, Slide, Portamento };
+// Values serialize as ints ("t" note attr): RetrigSlide APPENDS so previously
+// saved Slide notes (1) load as RampSlide.  RampSlide = takeover bend (no new
+// attack - the sounding note bends to this pitch across this note's length);
+// RetrigSlide = own attack, pitch glides in from the previous note's pitch.
+enum class NoteType { Standard, RampSlide, Portamento, RetrigSlide };
 
 // ── Piano roll note ───────────────────────────────────────────────────────────
 struct PianoNote
@@ -65,10 +69,12 @@ struct PianoNote
     float    velocity      { 0.8f };                 // 0–1
     float    panning       { 0.0f };                 // -1 (left) to +1 (right)
     float    finePitch     { 0.0f };                 // cents ±100
-    NoteType type          { NoteType::Standard };   // Standard / Slide / Portamento
+    NoteType type          { NoteType::Standard };   // Standard / RampSlide / RetrigSlide / Portamento
     bool     muted         { false };                // muted notes play silently
     int      groupId       { -1 };                   // -1 = ungrouped; same id = grouped
     float    filterCutoff  { 0.5f };                 // 0=closed, 1=fully open (control lane)
+    float    releaseAmt    { 0.5f };                 // release-time scale, 0.5 = neutral (CC72)
+    float    resonance     { 0.5f };                 // filter resonance offset, 0.5 = neutral (CC71)
     // §P4.2 Phase C1: drum slot index (0..15) for drumRoll notes.
     //   -1 = not a drum note (used on layerRoll / bassRoll).
     //   For drum-grid-mode notes created pre-C2 this is redundant with

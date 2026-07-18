@@ -3,6 +3,7 @@
 #include <vector>
 #include "BaySickSynthVoice.h"
 #include "../SynthSound.h"
+#include "../BroadcastSynthesiser.h"
 
 // ── BaySickSynthDSP ───────────────────────────────────────────────────────────
 // Polyphonic synthesiser wrapper. Owns 16 BaySickSynthVoice instances and a
@@ -91,7 +92,7 @@ public:
 private:
     static constexpr int kNumVoices = 16;
 
-    juce::Synthesiser  mSynth;
+    BroadcastSynthesiser mSynth;   // CCs reach idle voices too (per-note stash)
     BaySickSynthVoice* mVoices[kNumVoices] { nullptr };  // raw ptrs (owned by mSynth)
 
     // ── Mono/Lead/Legato state ────────────────────────────────────────────────

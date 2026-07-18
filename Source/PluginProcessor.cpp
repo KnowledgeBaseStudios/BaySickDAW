@@ -41,48 +41,155 @@ static inline double clipFilePosForBeat (double beatsIntoClip, double fileSample
   #include "PluginEditor.h"
 #endif
 
-// 2026-04-30 (audit C11+C12): emit a noteOn with the per-note panning +
-// fine-pitch values carried as standard MIDI CC10 + PitchWheel.  Was the
-// missing half of the piano roll's Panning + Pitch Bend control lanes -
-// users could draw values, the project saved them, but no audio response.
-// Channel-wide (not MPE), so chord-with-mixed-per-note-pan behaves as
-// "last note wins" for the channel state.  Acceptable for melodic lines.
+// 2026-04-30 (audit C11+C12): emit a noteOn with the per-note expression
+// values carried as standard MIDI so engines stay decoupled from the roll:
+// CC10 pan, PitchWheel fine pitch (±100 cents mapped to ±4096 = ±1 semi at
+// a ±2-semi bend range), CC74 cutoff (±2 oct around 0.5), CC71 resonance
+// offset (0.5 neutral), CC72 release-time scale (0.5 neutral).  Channel-wide
+// (not MPE), so chord-with-mixed-per-note-values behaves as "last note wins"
+// for the channel state.  Acceptable for melodic lines.
+// All five expression events emit UNCONDITIONALLY: the old skip-at-neutral
+// shortcut left the previous note's channel state in place, so a neutral
+// note silently inherited the last non-neutral pan/bend/cutoff.
+// Slide/Portamento glides ride CC84 (portamento control = source note) plus
+// an optional CC5/CC37 14-bit glide time in ms (slide = glide spans the note;
+// absent for porta = engine uses its own glide time).  Voices consume the
+// stash one-shot at the next noteOn.
 static void emitPianoNoteOn (juce::MidiBuffer& dst,
-                              const PianoNote& note, int samplePos)
+                              const PianoNote& note, int samplePos,
+                              int glideFromNote = -1, int glideTimeMs = -1)
 {
     constexpr int ch = 1;
     const int vel = juce::jlimit (1, 127, (int) (note.velocity * 127.f));
 
-    // CC10 pan: center 64, full L = 0, full R = 127.  Skip when value is
-    // basically center to avoid spamming the channel with no-op CCs.
-    if (std::abs (note.panning) > 0.005f)
+    const int pan = juce::jlimit (0, 127,
+        (int) std::round (64.f + note.panning * 63.f));
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 10, pan), samplePos);
+
+    const int wheel = juce::jlimit (0, 16383,
+        (int) std::round (8192.f + note.finePitch * 4096.f));
+    dst.addEvent (juce::MidiMessage::pitchWheel (ch, wheel), samplePos);
+
+    const int cutoff = juce::jlimit (0, 127,
+        (int) std::round (note.filterCutoff * 127.0f));
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 74, cutoff), samplePos);
+
+    const int reso = juce::jlimit (0, 127,
+        (int) std::round (note.resonance * 127.0f));
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 71, reso), samplePos);
+
+    const int rel = juce::jlimit (0, 127,
+        (int) std::round (note.releaseAmt * 127.0f));
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 72, rel), samplePos);
+
+    if (glideFromNote >= 0)
     {
-        const int pan = juce::jlimit (0, 127,
-            (int) std::round (64.f + note.panning * 63.f));
-        dst.addEvent (juce::MidiMessage::controllerEvent (ch, 10, pan), samplePos);
+        if (glideTimeMs >= 0)
+        {
+            const int t = juce::jlimit (0, 16383, glideTimeMs);
+            dst.addEvent (juce::MidiMessage::controllerEvent (ch, 5,  (t >> 7) & 0x7F), samplePos);
+            dst.addEvent (juce::MidiMessage::controllerEvent (ch, 37,  t       & 0x7F), samplePos);
+        }
+        dst.addEvent (juce::MidiMessage::controllerEvent (ch, 84,
+                          juce::jlimit (0, 127, glideFromNote)), samplePos);
     }
-    // PitchWheel: 14-bit, center 8192.  finePitch is documented as
-    // ±100 cents, mapped to ±4096 from center - i.e. ±50 % of a typical
-    // ±2-semitone synth pitch-bend range = ±1 semitone in the synth's
-    // tuning.  Synths with non-default pitch-bend ranges will scale.
-    if (std::abs (note.finePitch) > 0.005f)
-    {
-        const int wheel = juce::jlimit (0, 16383,
-            (int) std::round (8192.f + note.finePitch * 4096.f));
-        dst.addEvent (juce::MidiMessage::pitchWheel (ch, wheel), samplePos);
-    }
-    // Batch E #2 (2026-05-01): per-note Filter Cutoff via standard CC 74
-    // ("Brightness").  Engine voices listen for CC 74 and apply a +/-2-octave
-    // offset on top of the master cutoff for the upcoming note.  0.5 = neutral,
-    // 0 = full close (-2 oct), 1 = full open (+2 oct).
-    if (std::abs (note.filterCutoff - 0.5f) > 0.005f)
-    {
-        const int cc = juce::jlimit (0, 127,
-            (int) std::round (note.filterCutoff * 127.0f));
-        dst.addEvent (juce::MidiMessage::controllerEvent (ch, 74, cc), samplePos);
-    }
+
     dst.addEvent (juce::MidiMessage::noteOn (ch, note.midiNote, (juce::uint8) vel),
                   samplePos);
+}
+
+// QA-H Task 2: glide source for a RetrigSlide/Portamento note = the roll's
+// nearest preceding note start (latest startBeat strictly before this note's).
+// Returns -1 (no glide) when the note has no predecessor.
+static int findGlideSourcePitch (const std::vector<PianoNote>& notes,
+                                 const PianoNote& target)
+{
+    int    best     = -1;
+    double bestBeat = -1.0e18;
+    for (const auto& n : notes)
+    {
+        if (&n == &target || n.muted) continue;
+        if (n.startBeat < target.startBeat - 1.0e-9 && n.startBeat > bestBeat)
+        {
+            bestBeat = n.startBeat;
+            best     = n.midiNote;
+        }
+    }
+    return best;
+}
+
+// QA-H Ramp Slide: a note's audible length extends through any connected
+// chain of RampSlide notes riding it - ramp slides never retrigger, they
+// keep the source voice sounding and bend it, so the source's noteOff must
+// move to the chain's end.  Connected = each ramp starts at/inside the
+// current audible span (butt-joined counts).
+static double rampChainDurationBeats (const std::vector<PianoNote>& notes,
+                                      const PianoNote& src)
+{
+    constexpr double eps = 1.0e-6;
+    double end  = src.startBeat + src.durationBeats;
+    bool   grew = true;
+    while (grew)
+    {
+        grew = false;
+        for (const auto& n : notes)
+        {
+            if (n.muted || n.type != NoteType::RampSlide) continue;
+            if (n.startBeat >= src.startBeat - eps && n.startBeat <= end + eps
+                && n.startBeat + n.durationBeats > end)
+            {
+                end  = n.startBeat + n.durationBeats;
+                grew = true;
+            }
+        }
+    }
+    return end - src.startBeat;
+}
+
+// QA-H Ramp Slide: anchor of a ramp chain = the first non-RampSlide note
+// found walking back through connected predecessors.  Returns its pitch, or
+// -1 when the chain is broken (nothing would be sounding at the slide's
+// start, so the ramp is silent - FL-style takeover semantics).
+static int findRampAnchorPitch (const std::vector<PianoNote>& notes,
+                                const PianoNote& slide)
+{
+    constexpr double eps = 1.0e-6;
+    const PianoNote* cur = &slide;
+    for (int hops = 0; hops < 1024; ++hops)
+    {
+        const PianoNote* prev = nullptr;
+        for (const auto& n : notes)
+        {
+            if (&n == cur || n.muted) continue;
+            if (n.startBeat < cur->startBeat - eps
+                && (prev == nullptr || n.startBeat > prev->startBeat))
+                prev = &n;
+        }
+        if (prev == nullptr) return -1;
+        if (prev->startBeat + prev->durationBeats < cur->startBeat - eps)
+            return -1;   // gap - the chain is not sounding here
+        if (prev->type != NoteType::RampSlide) return prev->midiNote;
+        cur = prev;
+    }
+    return -1;
+}
+
+// QA-H Ramp Slide: bend the sounding anchor voice - deliberately NO noteOn.
+// CC5/37 glide time + CC84 anchor note + CC85 bend target; the voice whose
+// (juce) playing note matches CC84 retargets its pitch over the time, and
+// every voice clears the glide stash when CC85 lands so nothing leaks into
+// a later noteOn.
+static void emitRampSlide (juce::MidiBuffer& dst, int anchorNote, int targetNote,
+                           int timeMs, int samplePos)
+{
+    constexpr int ch = 1;
+    const int t = juce::jlimit (0, 16383, timeMs);
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 5,  (t >> 7) & 0x7F), samplePos);
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 37,  t       & 0x7F), samplePos);
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 84,
+                      juce::jlimit (0, 127, anchorNote)), samplePos);
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 85,
+                      juce::jlimit (0, 127, targetNote)), samplePos);
 }
 
 // ── Parameter layout ──────────────────────────────────────────────────────────
@@ -2175,8 +2282,44 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                         if (absStart >= windows[w].winStart && absStart < windows[w].winEnd)
                         {
                             const int smp = beatToSmpInWindow (absStart, windows[w]);
-                            emitPianoNoteOn (buf, note, smp);
-                            double off = absStart + note.durationBeats;
+                            // Musical beats -> wall-clock ms at this position
+                            // (map-exact under a TempoMap; linear otherwise).
+                            auto beatsToMs = [&] (double atBeat, double beats) -> double
+                            {
+                                if (tmActive)
+                                    return (double) (TempoMap::sampleAtBeat (atBeat + beats)
+                                                     - TempoMap::sampleAtBeat (atBeat))
+                                           * 1000.0 / mSampleRate;
+                                return beats * spb * 1000.0 / mSampleRate;
+                            };
+
+                            if (note.type == NoteType::RampSlide)
+                            {
+                                // Takeover bend: no noteOn, no own note-off -
+                                // the anchor's off was extended to the chain
+                                // end when the anchor was scheduled.  Chain
+                                // broken (nothing sounding) = silent.
+                                const int anchor = findRampAnchorPitch (notes, note);
+                                if (anchor >= 0)
+                                    emitRampSlide (buf, anchor, note.midiNote,
+                                        (int) std::llround (beatsToMs (absStart, note.durationBeats)),
+                                        smp);
+                                break;
+                            }
+
+                            int glideFrom = -1, glideMs = -1;
+                            if (note.type == NoteType::Portamento)
+                                glideFrom = findGlideSourcePitch (notes, note);
+                            else if (note.type == NoteType::RetrigSlide)
+                            {
+                                glideFrom = findGlideSourcePitch (notes, note);
+                                if (glideFrom >= 0)
+                                    glideMs = (int) std::llround (
+                                        beatsToMs (absStart, note.durationBeats));
+                            }
+                            emitPianoNoteOn (buf, note, smp, glideFrom, glideMs);
+                            double off = absStart
+                                       + rampChainDurationBeats (notes, note);
                             if (off > offHi) off = offHi;
                             mPRPendingOffs.push_back ({ off, note.midiNote, target });
                             break;   // a note fires in at most one window

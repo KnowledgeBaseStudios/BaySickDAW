@@ -424,7 +424,7 @@ void HarmlessSynth::setBeatsPerSecond (double bps) noexcept
 void HarmlessSynth::getAggregatedPartialAmplitudes (float* outBuf, int numPartials) const
 {
     std::fill (outBuf, outBuf + numPartials, 0.0f);
-    auto& syn = const_cast<juce::Synthesiser&> (mSynth);
+    auto& syn = const_cast<BroadcastSynthesiser&> (mSynth);
     for (int i = 0; i < syn.getNumVoices(); ++i)
         if (auto* v = dynamic_cast<const AdditiveVoice*> (syn.getVoice (i)))
             v->accumulatePartialAmplitudes (outBuf, numPartials);

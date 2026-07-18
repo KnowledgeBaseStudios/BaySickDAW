@@ -271,6 +271,12 @@ void PianoKeyboard::paint(Graphics& g)
 
 void PianoKeyboard::mouseDown(const MouseEvent& e)
 {
+    // QA-H Task 7 (MIDI-01): Ctrl+click = select the pitch row, no audition.
+    if (e.mods.isCtrlDown())
+    {
+        if (onCtrlClickPitch) onCtrlClickPitch (yToNote (e.y));
+        return;
+    }
     mPreviewNote = yToNote(e.y);
     if (onNotePreview) onNotePreview(mPreviewNote, true);
     repaint();
@@ -640,6 +646,18 @@ void PianoRollGrid::setTool(PRTool t) { mActiveTool = t; updateCursor(); }
 // ─────────────────────────────────────────────────────────────────────────────
 // Undo / Redo
 // ─────────────────────────────────────────────────────────────────────────────
+void PianoRollGrid::cycleNewNoteType()
+{
+    switch (mNewNoteType)
+    {
+        case NoteType::Standard:    mNewNoteType = NoteType::RampSlide;   break;
+        case NoteType::RampSlide:   mNewNoteType = NoteType::RetrigSlide; break;
+        case NoteType::RetrigSlide: mNewNoteType = NoteType::Portamento;  break;
+        case NoteType::Portamento:  mNewNoteType = NoteType::Standard;    break;
+    }
+    if (onNoteTypeArmChanged) onNoteTypeArmChanged();
+}
+
 void PianoRollGrid::beginEdit(const juce::String& label)
 {
     if (!mData) return;
@@ -688,6 +706,16 @@ void PianoRollGrid::toggleSelection(int idx)
     auto it = std::find(mSelection.begin(), mSelection.end(), idx);
     if (it != mSelection.end()) mSelection.erase(it);
     else                         mSelection.push_back(idx);
+}
+
+void PianoRollGrid::selectAllAtPitch (int midiNote)
+{
+    if (!mData) return;
+    for (int i = 0; i < (int) mData->notes.size(); ++i)
+        if (mData->notes[(size_t) i].midiNote == midiNote
+            && ! isNoteIndexSelected (i))
+            mSelection.push_back (i);
+    repaint();
 }
 
 void PianoRollGrid::selectAll()
@@ -1146,28 +1174,22 @@ bool PianoRollGrid::keyPressed(const KeyPress& key)
             }
         }
 
-        // S = cycle note type (Standard→Slide→Portamento) on selection, or for new notes
         if (key.getKeyCode() == 'S' || key.getKeyCode() == 's')
         {
-            auto cycleType = [](NoteType t) {
-                switch (t) {
-                    case NoteType::Standard:   return NoteType::Slide;
-                    case NoteType::Slide:      return NoteType::Portamento;
-                    case NoteType::Portamento: return NoteType::Standard;
-                }
-                return NoteType::Standard;
-            };
+            cycleNewNoteType();
             if (!mSelection.empty() && mData)
             {
-                beginEdit("Change Type");
-                for (int idx : mSelection) mData->notes[idx].type = cycleType(mData->notes[idx].type);
-                commitEdit();
-                if (onNotesChanged) onNotesChanged();
-                repaint();
-            }
-            else
-            {
-                mNewNoteType = cycleType(mNewNoteType);
+                bool anyChange = false;
+                for (int idx : mSelection)
+                    if (mData->notes[idx].type != mNewNoteType) { anyChange = true; break; }
+                if (anyChange)
+                {
+                    beginEdit("Change Type");
+                    for (int idx : mSelection) mData->notes[idx].type = mNewNoteType;
+                    commitEdit();
+                    if (onNotesChanged) onNotesChanged();
+                    repaint();
+                }
             }
             return true;
         }
@@ -1241,6 +1263,7 @@ bool PianoRollGrid::keyPressed(const KeyPress& key)
         else if (kc == 'u') { toolChop(4);         return true; }  // default: chop into 4
         else if (kc == 'l') { toolArticulate();    return true; }
         else if (kc == 'r') { toolRandomize();     return true; }
+        else if (kc == 'e') { toolRiffMachine();   return true; }   // D-6
         else if (kc == 'p') { toolGenerateChords();return true; }
         else if (kc == 'm') { muteSelectedNotes(true);  return true; }   // D-1
         else if (kc == 'f') { flamSelected();      return true; }        // D-7
@@ -1336,10 +1359,182 @@ void PianoRollGrid::mouseMove(const MouseEvent& e)
 // ─────────────────────────────────────────────────────────────────────────────
 // Mouse - button down
 // ─────────────────────────────────────────────────────────────────────────────
+// ── QA-H Task 2: Note Properties popup (double-left-click a note) ────────────
+// CallOutBox content editing the per-note fields (type + velocity, release,
+// fine pitch, panning, filter cutoff, resonance).  Edits apply live to every
+// target note; the FIRST change lazily opens one grid undo edit and the panel
+// destructor (box dismissal) commits it, so a popup session is a single undo
+// step - and an untouched popup registers no undo entry at all.
+class NotePropsPanel : public juce::Component
+{
+public:
+    NotePropsPanel (PianoRollGrid& grid, PianoRollData* data,
+                    std::vector<int> targets, int anchorIdx)
+        : mGrid (&grid), mData (data), mTargets (std::move (targets))
+    {
+        const PianoNote& src = mData->notes[(size_t) anchorIdx];
+
+        auto addTypeBtn = [this] (std::unique_ptr<TextButton>& b,
+                                  const char* name, NoteType t)
+        {
+            b = std::make_unique<TextButton> (name);
+            b->onClick = [this, t] { applyType (t); };
+            addAndMakeVisible (*b);
+        };
+        addTypeBtn (mTypeNormal,  "Flat",     NoteType::Standard);
+        addTypeBtn (mTypeRpSlide, "RP Slide", NoteType::RampSlide);
+        addTypeBtn (mTypeRtSlide, "RT Slide", NoteType::RetrigSlide);
+        addTypeBtn (mTypePorta,   "Porta",    NoteType::Portamento);
+        reflectType (src.type);
+
+        auto addRow = [this] (int row, const char* name, double lo, double hi,
+                              double init, const char* suffix,
+                              std::function<void (PianoNote&, float)> apply)
+        {
+            auto& lbl = mLabels[row];
+            lbl = std::make_unique<Label> (String(), name);
+            lbl->setFont (Font (12.0f));
+            addAndMakeVisible (*lbl);
+
+            auto& sl = mSliders[row];
+            sl = std::make_unique<Slider> (Slider::LinearHorizontal,
+                                           Slider::TextBoxRight);
+            sl->setRange (lo, hi, 1.0);
+            sl->setValue (init, dontSendNotification);
+            sl->setTextValueSuffix (suffix);
+            sl->setTextBoxStyle (Slider::TextBoxRight, false, 52, 18);
+            sl->onValueChange = [this, apply, s = sl.get()] {
+                if (mGrid == nullptr || mData == nullptr) return;
+                beginIfNeeded();
+                const float v = (float) s->getValue();
+                for (int idx : mTargets)
+                    if (idx >= 0 && idx < (int) mData->notes.size())
+                        apply (mData->notes[(size_t) idx], v);
+                mGrid->repaint();
+            };
+            addAndMakeVisible (*sl);
+        };
+        addRow (0, "Velocity",      0, 100, src.velocity     * 100.0, " %",
+                [] (PianoNote& n, float v) { n.velocity     = v / 100.0f; });
+        addRow (1, "Release",       0, 100, src.releaseAmt   * 100.0, " %",
+                [] (PianoNote& n, float v) { n.releaseAmt   = v / 100.0f; });
+        addRow (2, "Fine Pitch", -100, 100, src.finePitch    * 100.0, " ct",
+                [] (PianoNote& n, float v) { n.finePitch    = v / 100.0f; });
+        addRow (3, "Panning",    -100, 100, src.panning      * 100.0, " %",
+                [] (PianoNote& n, float v) { n.panning      = v / 100.0f; });
+        addRow (4, "Filter Cutoff", 0, 100, src.filterCutoff * 100.0, " %",
+                [] (PianoNote& n, float v) { n.filterCutoff = v / 100.0f; });
+        addRow (5, "Resonance",     0, 100, src.resonance    * 100.0, " %",
+                [] (PianoNote& n, float v) { n.resonance    = v / 100.0f; });
+
+        setSize (300, kPad * 2 + kRowH * 7);
+    }
+
+    ~NotePropsPanel() override
+    {
+        if (mDirty && mGrid != nullptr)
+        {
+            mGrid->commitEdit();
+            if (mGrid->onNotesChanged) mGrid->onNotesChanged();
+            mGrid->repaint();
+        }
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (kPad);
+        auto typeRow = b.removeFromTop (kRowH).reduced (0, 2);
+        const int tw = typeRow.getWidth() / 4;
+        mTypeNormal ->setBounds (typeRow.removeFromLeft (tw).reduced (2, 0));
+        mTypeRpSlide->setBounds (typeRow.removeFromLeft (tw).reduced (2, 0));
+        mTypeRtSlide->setBounds (typeRow.removeFromLeft (tw).reduced (2, 0));
+        mTypePorta  ->setBounds (typeRow.reduced (2, 0));
+        for (int i = 0; i < 6; ++i)
+        {
+            auto row = b.removeFromTop (kRowH);
+            mLabels[i] ->setBounds (row.removeFromLeft (86));
+            mSliders[i]->setBounds (row.reduced (0, 2));
+        }
+    }
+
+private:
+    static constexpr int kRowH = 26, kPad = 8;
+
+    void beginIfNeeded()
+    {
+        if (mDirty || mGrid == nullptr) return;
+        mGrid->beginEdit ("Note Properties");
+        mDirty = true;
+    }
+
+    void applyType (NoteType t)
+    {
+        if (mGrid == nullptr || mData == nullptr) return;
+        beginIfNeeded();
+        for (int idx : mTargets)
+            if (idx >= 0 && idx < (int) mData->notes.size())
+                mData->notes[(size_t) idx].type = t;
+        reflectType (t);
+        mGrid->repaint();
+    }
+
+    void reflectType (NoteType t)
+    {
+        mTypeNormal ->setToggleState (t == NoteType::Standard,    dontSendNotification);
+        mTypeRpSlide->setToggleState (t == NoteType::RampSlide,   dontSendNotification);
+        mTypeRtSlide->setToggleState (t == NoteType::RetrigSlide, dontSendNotification);
+        mTypePorta  ->setToggleState (t == NoteType::Portamento,  dontSendNotification);
+    }
+
+    Component::SafePointer<PianoRollGrid> mGrid;
+    PianoRollData*   mData;
+    std::vector<int> mTargets;
+    bool             mDirty { false };
+    std::unique_ptr<TextButton> mTypeNormal, mTypeRpSlide, mTypeRtSlide, mTypePorta;
+    std::unique_ptr<Label>  mLabels[6];
+    std::unique_ptr<Slider> mSliders[6];
+};
+
+void PianoRollGrid::openNoteProperties (int noteIdx, juce::Point<int> clickPos)
+{
+    if (!mData || noteIdx < 0 || noteIdx >= (int) mData->notes.size()) return;
+
+    // Double-click on a selected note edits the whole (group-expanded)
+    // selection; on an unselected note just that note.
+    std::vector<int> targets;
+    if (isNoteIndexSelected (noteIdx))
+    {
+        targets = mSelection;
+        expandForGroups (targets);
+        std::sort (targets.begin(), targets.end());
+        targets.erase (std::unique (targets.begin(), targets.end()), targets.end());
+    }
+    else
+        targets.push_back (noteIdx);
+
+    auto panel = std::make_unique<NotePropsPanel> (*this, mData,
+                                                   std::move (targets), noteIdx);
+    const auto scr = localAreaToGlobal (
+        juce::Rectangle<int> (clickPos.x - 4, clickPos.y - 4, 8, 8));
+    juce::CallOutBox::launchAsynchronously (std::move (panel), scr, nullptr);
+}
+
+void PianoRollGrid::mouseDoubleClick (const MouseEvent& e)
+{
+    if (mLastClickCreated) { mLastClickCreated = false; return; }
+    if (e.mods.isRightButtonDown() || e.mods.isCtrlDown()) return;
+    if (mActiveTool != PRTool::Draw && mActiveTool != PRTool::Select) return;
+    if (!mData) return;
+    const int idx = noteIndexAtPos (e.x, e.y);
+    if (idx < 0) return;
+    openNoteProperties (idx, e.getPosition());
+}
+
 void PianoRollGrid::mouseDown(const MouseEvent& e)
 {
     if (!mData) return;
     grabKeyboardFocus();
+    if (e.getNumberOfClicks() == 1) mLastClickCreated = false;
 
     // ── Below MIDI 0 guard (2026-04-21) ───────────────────────────────────
     // Reject clicks in the sliver below the last visible note row so a
@@ -1879,6 +2074,7 @@ void PianoRollGrid::mouseUp(const MouseEvent&)
 
         mData->notes.push_back({ mDrawNote, mDrawStart, dur, 0.8f, 0.f, 0.f, nt });
         tagLastCreatedNote (mDrawNote);   // Phase C §P4.2: slotIndex tagging
+        mLastClickCreated = true;
         sortNotes(mData->notes);
         commitEdit();
         if (onNotesChanged) onNotesChanged();
@@ -2254,9 +2450,11 @@ void PianoRollGrid::paint(Graphics& g)
             }
 
             // ── Slide / Portamento type indicators ────────────────────────
-            if (n.type == NoteType::Slide && w > 8)
+            // Ramp Slide = filled right-pointing triangle; Retrig Slide = the
+            // same triangle as an outline (retriggers its own attack).
+            if ((n.type == NoteType::RampSlide || n.type == NoteType::RetrigSlide)
+                && w > 8)
             {
-                // Right-pointing triangle at note's right end
                 float tx  = (float)(x + w - 2);
                 float ty  = (float)(y + 2);
                 float th  = (float)(mNoteH - 4);
@@ -2264,7 +2462,10 @@ void PianoRollGrid::paint(Graphics& g)
                 Path tri;
                 tri.addTriangle(tx - tw2, ty, tx - tw2, ty + th, tx, ty + th * 0.5f);
                 g.setColour(Colours::white.withAlpha(0.85f));
-                g.fillPath(tri);
+                if (n.type == NoteType::RampSlide)
+                    g.fillPath(tri);
+                else
+                    g.strokePath(tri, PathStrokeType(1.2f));
             }
             else if (n.type == NoteType::Portamento && w > 6)
             {
@@ -2515,9 +2716,12 @@ void ControlLane::paint(Graphics& g)
     static const char* kModeNames[] = {
         "Control > Velocity",
         "Control > Panning",
-        "Control > Pitch Bend"
+        "Control > Pitch Bend",
+        "Control > Filter Cutoff"
     };
-    int modeIdx = (mMode == Velocity) ? 0 : (mMode == Panning) ? 1 : 2;
+    int modeIdx = (mMode == Velocity)  ? 0
+                : (mMode == Panning)   ? 1
+                : (mMode == PitchBend) ? 2 : 3;
     g.setColour(VC::Text); g.setFont(Font(10, Font::bold));
     g.drawText(juce::String(kModeNames[modeIdx]) + "  \xe2\x96\xbe", // ▾
                6, 1, b.getWidth() - 12, kHeaderH - 2, Justification::centredLeft);
@@ -2555,6 +2759,23 @@ void ControlLane::paint(Graphics& g)
         int cy = contentY + contentH / 2;
         g.setColour(VC::Accent.withAlpha(0.45f));
         g.drawHorizontalLine(cy, 4.f, (float)b.getWidth() - 4);
+    }
+    else
+    {
+        // QA-H Task 6: horizontal reference guides + labels in the unipolar
+        // modes (Velocity / Filter Cutoff); the bipolar modes keep their
+        // single centre line above.
+        g.setFont (Font (8.0f));
+        for (int pct : { 25, 50, 75 })
+        {
+            const int gy = b.getHeight() - 4
+                         - (int) ((float) pct / 100.0f * (float) (contentH - 6));
+            g.setColour (VC::Accent.withAlpha (pct == 50 ? 0.30f : 0.18f));
+            g.drawHorizontalLine (gy, 4.f, (float) b.getWidth() - 30);
+            g.setColour (VC::Text.withAlpha (0.45f));
+            g.drawText (String (pct) + "%", b.getWidth() - 28, gy - 5, 26, 10,
+                        Justification::centredLeft, false);
+        }
     }
 
     // ── Stem + node + tail rendering ─────────────────────────────────────
@@ -2634,6 +2855,22 @@ void ControlLane::mouseDown(const MouseEvent& e)
         int relY     = py - kHeaderH;
         return jlimit(0.f, 1.f, 1.f - (float)relY / (float)contentH);
     };
+
+    // QA-H Task 6 (#5/MIDI-02): Ctrl+drag = scrub.  Sweeps across the lane
+    // setting each SELECTED note's dot from the cursor's Y path as the
+    // cursor passes its X (locked: selected notes only - no selection means
+    // no targets).  Plain drag keeps the single-dot behavior below.
+    if (e.mods.isCtrlDown())
+    {
+        if (! (hasAnySelection && hasAnySelection())) return;   // no targets, no edit
+        mScrubbing    = true;
+        mLastScrubX   = e.x;
+        mLastScrubVal = yToValWithHeader (e.y);
+        if (onBeginEdit) onBeginEdit ("Scrub Lane Values");
+        scrubApply (e.x - 2, e.x + 2, mLastScrubVal, mLastScrubVal);
+        return;
+    }
+
     mDragNote = noteNearX(e.x, e.y);
     if (mDragNote)
     {
@@ -2644,18 +2881,53 @@ void ControlLane::mouseDown(const MouseEvent& e)
     }
 }
 
+// Sweep [x0,x1] (unordered): every SELECTED note whose dot X lies inside
+// gets the value interpolated along the cursor's path for that X.
+void ControlLane::scrubApply (int x0, int x1, float v0, float v1)
+{
+    if (!mData || mPPB <= 0) return;
+    const int lo = jmin (x0, x1), hi = jmax (x0, x1);
+    bool touched = false;
+    for (auto& n : mData->notes)
+    {
+        if (! (isNoteSelected && isNoteSelected (&n))) continue;
+        const int nx = (int) ((n.startBeat - mBeatOff) * mPPB);
+        if (nx < lo || nx > hi) continue;
+        const float t = (x1 == x0) ? 1.0f
+                      : jlimit (0.0f, 1.0f, (float) (nx - x0) / (float) (x1 - x0));
+        setVal (n, v0 + (v1 - v0) * t);
+        touched = true;
+    }
+    if (touched)
+    {
+        if (onChanged) onChanged();
+        repaint();
+    }
+}
+
 void ControlLane::mouseDrag(const MouseEvent& e)
 {
-    if (!mData || !mDragNote || e.y < kHeaderH) return;
+    if (!mData || e.y < kHeaderH) return;
     int contentH = jmax(1, getHeight() - kHeaderH);
     int relY     = e.y - kHeaderH;
     float val    = jlimit(0.f, 1.f, 1.f - (float)relY / (float)contentH);
+
+    if (mScrubbing)
+    {
+        scrubApply (mLastScrubX, e.x, mLastScrubVal, val);
+        mLastScrubX   = e.x;
+        mLastScrubVal = val;
+        return;
+    }
+
+    if (!mDragNote) return;
     setVal(*mDragNote, val); if (onChanged) onChanged(); repaint();
 }
 
 void ControlLane::mouseUp(const MouseEvent&)
 {
-    mDragNote = nullptr;
+    mDragNote  = nullptr;
+    mScrubbing = false;
     if (onCommitEdit) onCommitEdit();
 }
 
@@ -2754,7 +3026,12 @@ PianoRollContainer::PianoRollContainer()
         if (mGrid) mGrid->mouseWheelMove(e, wheel);
     };
 
-    // ── Toolbar row 1: Magnet | 7 tool buttons | Undo | Redo | H ─
+    // QA-H Task 7 (MIDI-01): Ctrl+click a key = select that pitch's notes.
+    mKeyboard->onCtrlClickPitch = [this] (int note) {
+        if (mGrid) mGrid->selectAllAtPitch (note);
+    };
+
+    // ── Toolbar row 1: Magnet | tool buttons | armed note type | Undo | Redo | H ─
     // QA-UICleanup Task 4: Tools wrench button removed; its popup folded into the
     // menu-bar Tools menu.
     mMagnetBtn = std::make_unique<RightClickTextButton>();
@@ -2787,7 +3064,7 @@ PianoRollContainer::PianoRollContainer()
     startTimer (200);
 
     static const char* toolLabels[] = {
-        "Draw","Paint","Del","Mute","Slice","Sel","Zoom","Stamp" };
+        "Draw","Paint","Del","Mute","Slice","Select","Zoom","Stamp" };
     static const char* toolTips[] = {
         "Draw (P) - LMB draw | click note to move | near right edge to resize | Ctrl+click select",
         "Paint (B) - drag to paint notes continuously",
@@ -2795,7 +3072,7 @@ PianoRollContainer::PianoRollContainer()
         "Mute (T) - toggle note mute",
         "Slice (C) - drag to draw cut line",
         "Select (E) - marquee select | drag notes to move",
-        "Zoom (Shift+Z) - click to zoom in | drag region | RMB to zoom out",
+        "Zoom (Z) - click to zoom in | drag region | RMB to zoom out",
         "Stamp - click to place selected chord"
     };
 
@@ -2808,6 +3085,16 @@ PianoRollContainer::PianoRollContainer()
         if (i < 7) addAndMakeVisible(*mToolBtns[i]); // Stamp (7) hidden from toolbar
     }
     mToolBtns[0]->setToggleState(true, dontSendNotification);
+
+    mNoteTypeBtn = std::make_unique<TextButton>("Flat");
+    mNoteTypeBtn->setTooltip("Armed note type for new notes - click or S cycles "
+                             "Flat/RP Slide/RT Slide/Porta; S with notes selected "
+                             "also converts them");
+    mNoteTypeBtn->onClick = [this] {
+        if (mGrid) { mGrid->cycleNewNoteType(); mGrid->grabKeyboardFocus(); }
+    };
+    addAndMakeVisible(*mNoteTypeBtn);
+    mGrid->onNoteTypeArmChanged = [this] { refreshNoteTypeButton(); };
 
     mUndoBtn = std::make_unique<TextButton>("Undo");
     mUndoBtn->setTooltip("Undo (Ctrl+Z)");
@@ -3457,6 +3744,17 @@ PianoRollContainer::~PianoRollContainer()
     }
 }
 
+void PianoRollContainer::refreshNoteTypeButton()
+{
+    if (!mNoteTypeBtn) return;
+    const NoteType t = mGrid ? mGrid->getNewNoteType() : NoteType::Standard;
+    mNoteTypeBtn->setButtonText(t == NoteType::RampSlide   ? "RP Slide"
+                              : t == NoteType::RetrigSlide ? "RT Slide"
+                              : t == NoteType::Portamento  ? "Porta"
+                                                           : "Flat");
+    mNoteTypeBtn->setToggleState(t != NoteType::Standard, dontSendNotification);
+}
+
 void PianoRollContainer::resized()
 {
     auto b = getLocalBounds();
@@ -3464,13 +3762,16 @@ void PianoRollContainer::resized()
     // Menu bar (20 px)
     if (mMenuBar) mMenuBar->setBounds(b.removeFromTop(kMenuBarH));
 
-    // Single toolbar row (28 px): Magnet | tool buttons | Undo | Redo | H
+    // Single toolbar row (28 px): Magnet | tools | note type | Undo | Redo | H
     auto row1 = b.removeFromTop(kToolbarH);
     row1.removeFromLeft(4);
     mMagnetBtn->setBounds(row1.removeFromLeft(38).reduced(2, 3));
     row1.removeFromLeft(4);
-    for (int i = 0; i < 7; ++i)   // Draw(0)..Zoom(6); Stamp(7) always hidden
+    for (int i = 0; i < 6; ++i)   // Draw(0)..Select(5); Stamp(7) always hidden
         mToolBtns[i]->setBounds(row1.removeFromLeft(62).reduced(2, 3));   // 2026-04-26: 36→62 to match Builder
+    if (mNoteTypeBtn)
+        mNoteTypeBtn->setBounds(row1.removeFromLeft(62).reduced(2, 3));
+    mToolBtns[6]->setBounds(row1.removeFromLeft(62).reduced(2, 3));       // Zoom
     row1.removeFromLeft(4);
     mUndoBtn   ->setBounds(row1.removeFromLeft(48).reduced(2, 3));        // 40→48
     mRedoBtn   ->setBounds(row1.removeFromLeft(48).reduced(2, 3));        // 40→48
@@ -3553,6 +3854,300 @@ std::vector<int> PianoRollGrid::getWorkingSet() const
     std::vector<int> expanded = mSelection;
     expandForGroups(expanded);
     return expanded;
+}
+
+// ── QA-H Task 3: Humanize (FL-replica dialog, docket #1) ─────────────────────
+// CallOutBox content.  Start Time / Duration / Velocity each carry a Range +
+// Offset knob pair; randomization is seeded (reproducible), quasi-normal
+// distributed (mean of three uniforms), and time values scale by the Start
+// Time Max Interval division.  Start-time randomness is late-biased (0..range
+// delay, FL's human-lag model) - a negative Offset re-centers it; duration +
+// velocity randomness is bipolar around the original.  Preview applies live
+// to the roll; Accept commits ONE undo edit; any other dismissal restores
+// the original notes untouched.
+class HumanizePanel : public juce::Component
+{
+public:
+    HumanizePanel (PianoRollGrid& grid, PianoRollData* data, std::vector<int> targets)
+        : mGrid (&grid), mData (data), mTargets (std::move (targets))
+    {
+        std::sort (mTargets.begin(), mTargets.end());
+        mOriginal.reserve (mTargets.size());
+        for (int idx : mTargets)
+            mOriginal.push_back (mData->notes[(size_t) idx]);
+
+        mTitle = std::make_unique<Label> (String(), "Humanize");
+        mTitle->setFont (Font (13.0f, Font::bold));
+        addAndMakeVisible (*mTitle);
+        mRangeHdr  = std::make_unique<Label> (String(), "Range");
+        mOffsetHdr = std::make_unique<Label> (String(), "Offset");
+        for (auto* l : { mRangeHdr.get(), mOffsetHdr.get() })
+        {
+            l->setFont (Font (11.0f));
+            l->setJustificationType (Justification::centred);
+            addAndMakeVisible (*l);
+        }
+
+        auto addKnob = [this] (std::unique_ptr<Slider>& sl,
+                               double lo, double hi, double init)
+        {
+            sl = std::make_unique<Slider> (Slider::RotaryHorizontalVerticalDrag,
+                                           Slider::TextBoxRight);
+            sl->setRange (lo, hi, 1.0);
+            sl->setValue (init, dontSendNotification);
+            sl->setTextValueSuffix (" %");
+            sl->setTextBoxStyle (Slider::TextBoxRight, false, 46, 16);
+            sl->onValueChange = [this] { paramsChanged(); };
+            addAndMakeVisible (*sl);
+        };
+        addKnob (mStartRange, 0, 100, kDefStartRange);
+        addKnob (mStartOffset, -100, 100, 0);
+        addKnob (mDurRange,   0, 100, kDefDurRange);
+        addKnob (mDurOffset,  -100, 100, 0);
+        addKnob (mVelRange,   0, 100, kDefVelRange);
+        addKnob (mVelOffset,  -100, 100, 0);
+
+        static const char* kSectionNames[] = { "Start Time", "Duration", "Velocity" };
+        for (int i = 0; i < 3; ++i)
+        {
+            mSectionLabels[i] = std::make_unique<Label> (String(), kSectionNames[i]);
+            mSectionLabels[i]->setFont (Font (12.0f));
+            addAndMakeVisible (*mSectionLabels[i]);
+        }
+
+        auto addRowLabel = [this] (std::unique_ptr<Label>& l, const char* text)
+        {
+            l = std::make_unique<Label> (String(), text);
+            l->setFont (Font (12.0f));
+            addAndMakeVisible (*l);
+        };
+        addRowLabel (mDistLabel,     "Distribution");
+        addRowLabel (mIntervalLabel, "Start Time Max Interval");
+        addRowLabel (mSeedLabel,     "Seed");
+
+        mDistCombo = std::make_unique<ComboBox>();
+        mDistCombo->addItem ("Quasi-Normal", 1);
+        mDistCombo->setSelectedId (1, dontSendNotification);
+        addAndMakeVisible (*mDistCombo);
+
+        mIntervalCombo = std::make_unique<ComboBox>();
+        for (int d = 2; d < kNumUnifiedSnapDivs; ++d)   // fixed divisions only
+            mIntervalCombo->addItem (kUnifiedSnapLabels[d], d);
+        mIntervalCombo->setSelectedId (6, dontSendNotification);   // Step (1/16)
+        mIntervalCombo->onChange = [this] { paramsChanged(); };
+        addAndMakeVisible (*mIntervalCombo);
+
+        mSeedSlider = std::make_unique<Slider> (Slider::IncDecButtons,
+                                                Slider::TextBoxLeft);
+        mSeedSlider->setRange (0, 99999, 1);
+        mSeedSlider->setValue (12345, dontSendNotification);
+        mSeedSlider->setTextBoxStyle (Slider::TextBoxLeft, false, 60, 18);
+        mSeedSlider->onValueChange = [this] { paramsChanged(); };
+        addAndMakeVisible (*mSeedSlider);
+
+        mPreviewToggle = std::make_unique<ToggleButton> ("Preview");
+        mPreviewToggle->setToggleState (true, dontSendNotification);
+        mPreviewToggle->onClick = [this] {
+            if (mPreviewToggle->getToggleState()) applyPreview();
+            else                                  { restoreOriginal(); repaintGrid(); }
+        };
+        addAndMakeVisible (*mPreviewToggle);
+
+        auto addBtn = [this] (std::unique_ptr<TextButton>& b, const char* name,
+                              std::function<void()> fn)
+        {
+            b = std::make_unique<TextButton> (name);
+            b->onClick = std::move (fn);
+            addAndMakeVisible (*b);
+        };
+        addBtn (mResetBtn, "Reset", [this] {
+            mStartRange ->setValue (kDefStartRange, dontSendNotification);
+            mStartOffset->setValue (0,   dontSendNotification);
+            mDurRange   ->setValue (kDefDurRange, dontSendNotification);
+            mDurOffset  ->setValue (0,   dontSendNotification);
+            mVelRange   ->setValue (kDefVelRange, dontSendNotification);
+            mVelOffset  ->setValue (0,   dontSendNotification);
+            mIntervalCombo->setSelectedId (6, dontSendNotification);
+            paramsChanged();
+        });
+        addBtn (mRegenBtn, "Regenerate", [this] {
+            mSeedSlider->setValue (juce::Random::getSystemRandom().nextInt (100000),
+                                   juce::sendNotification);
+        });
+        addBtn (mAcceptBtn, "Accept", [this] { accept(); });
+
+        // First preview with the starting parameters.
+        applyPreview();
+        setSize (390, 300);
+    }
+
+    ~HumanizePanel() override
+    {
+        if (! mAccepted)
+        {
+            restoreOriginal();
+            repaintGrid();
+        }
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (8);
+        mTitle->setBounds (b.removeFromTop (18));
+        auto hdr = b.removeFromTop (14);
+        hdr.removeFromLeft (92);
+        mRangeHdr ->setBounds (hdr.removeFromLeft (110));
+        mOffsetHdr->setBounds (hdr.removeFromLeft (110));
+
+        Slider* knobs[3][2] = { { mStartRange.get(), mStartOffset.get() },
+                                { mDurRange.get(),   mDurOffset.get()   },
+                                { mVelRange.get(),   mVelOffset.get()   } };
+        for (int i = 0; i < 3; ++i)
+        {
+            auto row = b.removeFromTop (36);
+            mSectionLabels[i]->setBounds (row.removeFromLeft (92));
+            knobs[i][0]->setBounds (row.removeFromLeft (110).reduced (0, 1));
+            knobs[i][1]->setBounds (row.removeFromLeft (110).reduced (0, 1));
+        }
+
+        auto distRow = b.removeFromTop (26);
+        mDistLabel->setBounds (distRow.removeFromLeft (150));
+        mDistCombo->setBounds (distRow.reduced (0, 2));
+        auto intRow = b.removeFromTop (26);
+        mIntervalLabel->setBounds (intRow.removeFromLeft (150));
+        mIntervalCombo->setBounds (intRow.reduced (0, 2));
+        auto seedRow = b.removeFromTop (26);
+        mSeedLabel->setBounds (seedRow.removeFromLeft (150));
+        mSeedSlider->setBounds (seedRow.removeFromLeft (120).reduced (0, 2));
+
+        auto btns = b.removeFromBottom (26);
+        mPreviewToggle->setBounds (btns.removeFromLeft (84));
+        mAcceptBtn->setBounds (btns.removeFromRight (70));
+        btns.removeFromRight (6);
+        mRegenBtn->setBounds (btns.removeFromRight (92));
+        btns.removeFromRight (6);
+        mResetBtn->setBounds (btns.removeFromRight (64));
+    }
+
+private:
+    static constexpr double kDefStartRange = 20, kDefDurRange = 0, kDefVelRange = 10;
+
+    void paramsChanged()
+    {
+        if (mPreviewToggle && mPreviewToggle->getToggleState()) applyPreview();
+    }
+
+    void applyPreview()
+    {
+        restoreOriginal();
+        applyToNotes();
+        repaintGrid();
+    }
+
+    void restoreOriginal()
+    {
+        if (mData == nullptr) return;
+        for (size_t k = 0; k < mTargets.size(); ++k)
+        {
+            const int idx = mTargets[k];
+            if (idx >= 0 && idx < (int) mData->notes.size())
+                mData->notes[(size_t) idx] = mOriginal[k];
+        }
+    }
+
+    void applyToNotes()
+    {
+        if (mData == nullptr) return;
+        juce::Random rng ((juce::int64) (int) mSeedSlider->getValue());
+        const double intervalBeats =
+            snapDivToTicks (mIntervalCombo->getSelectedId()) / (double) kTicksPerBeat;
+        const float startR = (float) mStartRange ->getValue() / 100.0f;
+        const float startO = (float) mStartOffset->getValue() / 100.0f;
+        const float durR   = (float) mDurRange   ->getValue() / 100.0f;
+        const float durO   = (float) mDurOffset  ->getValue() / 100.0f;
+        const float velR   = (float) mVelRange   ->getValue() / 100.0f;
+        const float velO   = (float) mVelOffset  ->getValue() / 100.0f;
+
+        auto qn = [&rng] {
+            return (rng.nextFloat() + rng.nextFloat() + rng.nextFloat()) * (1.0f / 3.0f);
+        };
+
+        for (size_t k = 0; k < mTargets.size(); ++k)
+        {
+            const int idx = mTargets[k];
+            if (idx < 0 || idx >= (int) mData->notes.size()) continue;
+            auto& n = mData->notes[(size_t) idx];
+            const PianoNote& o = mOriginal[k];
+            const float uStart = qn();                // late-biased 0..1
+            const float bDur   = qn() * 2.0f - 1.0f;  // bell around 0
+            const float bVel   = qn() * 2.0f - 1.0f;
+            n.startBeat = juce::jmax (0.0,
+                o.startBeat + (double) (startO + uStart * startR) * intervalBeats);
+            n.durationBeats = juce::jmax (1.0 / (double) kTicksPerBeat,
+                o.durationBeats + (double) (durO + bDur * durR) * intervalBeats);
+            n.velocity = juce::jlimit (0.01f, 1.0f,
+                o.velocity + velO + bVel * velR);
+        }
+    }
+
+    void repaintGrid() { if (mGrid != nullptr) mGrid->repaint(); }
+
+    void accept()
+    {
+        restoreOriginal();
+        if (mGrid != nullptr && mData != nullptr)
+        {
+            mGrid->beginEdit ("Humanize");
+            applyToNotes();
+            mGrid->commitEdit();
+            if (mGrid->onNotesChanged) mGrid->onNotesChanged();
+            mGrid->repaint();
+        }
+        mAccepted = true;
+        if (auto* box = findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+    }
+
+    Component::SafePointer<PianoRollGrid> mGrid;
+    PianoRollData*         mData;
+    std::vector<int>       mTargets;
+    std::vector<PianoNote> mOriginal;
+    bool                   mAccepted { false };
+
+    std::unique_ptr<Label>  mTitle, mRangeHdr, mOffsetHdr;
+    std::unique_ptr<Label>  mSectionLabels[3];
+    std::unique_ptr<Label>  mDistLabel, mIntervalLabel, mSeedLabel;
+    std::unique_ptr<Slider> mStartRange, mStartOffset, mDurRange, mDurOffset,
+                            mVelRange, mVelOffset, mSeedSlider;
+    std::unique_ptr<ComboBox>     mDistCombo, mIntervalCombo;
+    std::unique_ptr<ToggleButton> mPreviewToggle;
+    std::unique_ptr<TextButton>   mResetBtn, mRegenBtn, mAcceptBtn;
+};
+
+void PianoRollGrid::toolHumanize()
+{
+    if (!mData || mData->notes.empty()) return;
+
+    // Selection-or-all (group-expanded, deduped).
+    std::vector<int> targets;
+    if (! mSelection.empty())
+    {
+        targets = mSelection;
+        expandForGroups (targets);
+        std::sort (targets.begin(), targets.end());
+        targets.erase (std::unique (targets.begin(), targets.end()), targets.end());
+    }
+    else
+    {
+        targets.reserve (mData->notes.size());
+        for (int i = 0; i < (int) mData->notes.size(); ++i)
+            targets.push_back (i);
+    }
+
+    auto panel = std::make_unique<HumanizePanel> (*this, mData, std::move (targets));
+    const auto scr = localAreaToGlobal (
+        juce::Rectangle<int> (getWidth() / 2 - 4, kRulerH + 8, 8, 8));
+    juce::CallOutBox::launchAsynchronously (std::move (panel), scr, nullptr);
 }
 
 void PianoRollGrid::toolQuantize()
@@ -3983,25 +4578,1153 @@ void PianoRollGrid::toolStrum()
     if (onNotesChanged) onNotesChanged();
 }
 
+// ── QA-H Task 4: Randomize (FL-replica dialog, docket #1=B) ──────────────────
+// Replaces the old instant velocity/start jitter.  Two sections per the FL
+// manual: Pattern GENERATES notes (octave/range/key/scale pitch pool over the
+// roll's span at the snap grid; length in fixed 1/16 steps + variation;
+// population density; stack = extra chord notes; Random Portamento tags
+// generated notes NoteType::Portamento; Merge Same Notes joins adjacent
+// same-pitch notes) and Levels randomizes the six per-note properties
+// (bipolar wheels; MODX = Filter Cutoff, MODY = Resonance per docket D=B).
+// Each section is independently seeded.  Live preview (no toggle - FL
+// behavior); Accept commits ONE undo edit; other dismissal restores.
+class RandomizePanel : public juce::Component
+{
+public:
+    RandomizePanel (PianoRollGrid& grid, PianoRollData* data,
+                    std::vector<int> levelsTargets,
+                    double spanBeats, double stepBeats)
+        : mGrid (&grid), mData (data), mLevelsTargets (std::move (levelsTargets)),
+          mSpanBeats (spanBeats), mStepBeats (stepBeats),
+          mOriginalAll (data->notes)
+    {
+        mTitle = std::make_unique<Label> (String(), "Randomize");
+        mTitle->setFont (Font (13.0f, Font::bold));
+        addAndMakeVisible (*mTitle);
+
+        auto addLabel = [this] (std::unique_ptr<Label>& l, const char* text,
+                                float size = 12.0f, bool bold = false)
+        {
+            l = std::make_unique<Label> (String(), text);
+            l->setFont (Font (size, bold ? Font::bold : Font::plain));
+            addAndMakeVisible (*l);
+        };
+        auto addKnob = [this] (std::unique_ptr<Slider>& sl, double lo, double hi,
+                               double init, double step, const char* suffix)
+        {
+            sl = std::make_unique<Slider> (Slider::RotaryHorizontalVerticalDrag,
+                                           Slider::TextBoxRight);
+            sl->setRange (lo, hi, step);
+            sl->setValue (init, dontSendNotification);
+            sl->setTextValueSuffix (suffix);
+            sl->setTextBoxStyle (Slider::TextBoxRight, false, 46, 16);
+            sl->onValueChange = [this] { applyPreview(); };
+            addAndMakeVisible (*sl);
+        };
+        auto addIncDec = [this] (std::unique_ptr<Slider>& sl, double lo, double hi,
+                                 double init)
+        {
+            sl = std::make_unique<Slider> (Slider::IncDecButtons, Slider::TextBoxLeft);
+            sl->setRange (lo, hi, 1.0);
+            sl->setValue (init, dontSendNotification);
+            sl->setTextBoxStyle (Slider::TextBoxLeft, false, 52, 18);
+            sl->onValueChange = [this] { applyPreview(); };
+            addAndMakeVisible (*sl);
+        };
+        auto addToggle = [this] (std::unique_ptr<ToggleButton>& t, const char* name,
+                                 bool on)
+        {
+            t = std::make_unique<ToggleButton> (name);
+            t->setToggleState (on, dontSendNotification);
+            t->onClick = [this] { applyPreview(); };
+            addAndMakeVisible (*t);
+        };
+
+        // ── Pattern section ──────────────────────────────────────────────
+        addToggle (mPatternOn, "Pattern (generate)", true);
+        addLabel  (mPatSeedLabel, "Seed");
+        addIncDec (mPatSeed, 0, 99999, 1234);
+
+        addLabel  (mOctaveLabel, "Octave");   addIncDec (mOctave,   1, 7, 4);
+        addLabel  (mRangeLabel,  "Range");    addIncDec (mRangeOct, 1, 4, 2);
+
+        static const char* kKeyNames[] = {
+            "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
+        addLabel (mKeyLabel, "Key");
+        mKeyCombo = std::make_unique<ComboBox>();
+        for (int i = 0; i < 12; ++i) mKeyCombo->addItem (kKeyNames[i], i + 1);
+        mKeyCombo->setSelectedId (1, dontSendNotification);
+        mKeyCombo->onChange = [this] { applyPreview(); };
+        addAndMakeVisible (*mKeyCombo);
+
+        addLabel (mScaleLabel, "Scale");
+        mScaleCombo = std::make_unique<ComboBox>();
+        for (int i = 0; i < kNumScales; ++i)
+            mScaleCombo->addItem (kScaleDefs[i].name, i + 1);
+        mScaleCombo->setSelectedId (1, dontSendNotification);
+        mScaleCombo->onChange = [this] { applyPreview(); };
+        addAndMakeVisible (*mScaleCombo);
+
+        addLabel (mLengthLabel, "Length");     addKnob (mLength,    1, 16, 1, 1, " st");
+        addLabel (mVarLabel,    "Variation");  addKnob (mVariation, 0, 100, 0, 1, " %");
+        addLabel (mPopLabel,    "Population"); addKnob (mPopulation, 0, 100, 50, 1, " %");
+        addLabel (mStackLabel,  "Stack");      addKnob (mStack,     0, 100, 0, 1, " %");
+        addLabel (mPortaLabel,  "Random Portamento");
+        addKnob  (mPorta, 0, 100, 0, 1, " %");
+        addToggle (mMergeToggle, "Merge Same Notes", false);
+
+        // ── Levels section ───────────────────────────────────────────────
+        addLabel  (mLevelsHdr, "Levels", 12.0f, true);
+        addLabel  (mLvlSeedLabel, "Seed");
+        addIncDec (mLvlSeed, 0, 99999, 5678);
+
+        static const char* kWheelNames[6] = {
+            "Velocity", "Pan", "Fine Pitch", "Release", "Cutoff", "Resonance" };
+        for (int i = 0; i < 6; ++i)
+        {
+            addLabel (mWheelLabels[i], kWheelNames[i]);
+            addKnob  (mWheels[i], -100, 100, 0, 1, " %");
+        }
+        addToggle (mResetBefore, "Reset Before Processing", false);
+        addToggle (mBipolar,     "Bipolar",                 true);
+
+        auto addBtn = [this] (std::unique_ptr<TextButton>& b, const char* name,
+                              std::function<void()> fn)
+        {
+            b = std::make_unique<TextButton> (name);
+            b->onClick = std::move (fn);
+            addAndMakeVisible (*b);
+        };
+        addBtn (mResetBtn, "Reset", [this] {
+            mOctave->setValue (4, dontSendNotification);
+            mRangeOct->setValue (2, dontSendNotification);
+            mKeyCombo->setSelectedId (1, dontSendNotification);
+            mScaleCombo->setSelectedId (1, dontSendNotification);
+            mLength->setValue (1, dontSendNotification);
+            mVariation->setValue (0, dontSendNotification);
+            mPopulation->setValue (50, dontSendNotification);
+            mStack->setValue (0, dontSendNotification);
+            mPorta->setValue (0, dontSendNotification);
+            mMergeToggle->setToggleState (false, dontSendNotification);
+            for (auto& w : mWheels) w->setValue (0, dontSendNotification);
+            mResetBefore->setToggleState (false, dontSendNotification);
+            mBipolar->setToggleState (true, dontSendNotification);
+            applyPreview();
+        });
+        addBtn (mAcceptBtn, "Accept", [this] { accept(); });
+
+        applyPreview();
+        setSize (470, 420);
+    }
+
+    ~RandomizePanel() override
+    {
+        if (! mAccepted)
+        {
+            restoreOriginal();
+            if (mGrid != nullptr) mGrid->repaint();
+        }
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (8);
+        mTitle->setBounds (b.removeFromTop (18));
+
+        auto patHdr = b.removeFromTop (24);
+        mPatternOn->setBounds (patHdr.removeFromLeft (150));
+        mPatSeed->setBounds (patHdr.removeFromRight (110).reduced (0, 2));
+        mPatSeedLabel->setBounds (patHdr.removeFromRight (40));
+
+        auto half = [] (juce::Rectangle<int>& row) {
+            return row.removeFromLeft (row.getWidth() / 2);
+        };
+        auto pair = [] (juce::Rectangle<int> area, Label* l, Component* c) {
+            l->setBounds (area.removeFromLeft (78));
+            c->setBounds (area.reduced (2));
+        };
+
+        auto r1 = b.removeFromTop (26); auto r1l = half (r1);
+        pair (r1l, mOctaveLabel.get(), mOctave.get());
+        pair (r1,  mRangeLabel.get(),  mRangeOct.get());
+        auto r2 = b.removeFromTop (26); auto r2l = half (r2);
+        pair (r2l, mKeyLabel.get(),   mKeyCombo.get());
+        pair (r2,  mScaleLabel.get(), mScaleCombo.get());
+        auto r3 = b.removeFromTop (32); auto r3l = half (r3);
+        pair (r3l, mLengthLabel.get(), mLength.get());
+        pair (r3,  mVarLabel.get(),    mVariation.get());
+        auto r4 = b.removeFromTop (32); auto r4l = half (r4);
+        pair (r4l, mPopLabel.get(),   mPopulation.get());
+        pair (r4,  mStackLabel.get(), mStack.get());
+        auto r5 = b.removeFromTop (32); auto r5l = half (r5);
+        mPortaLabel->setBounds (r5l.removeFromLeft (130));
+        mPorta->setBounds (r5l.reduced (2));
+        mMergeToggle->setBounds (r5.reduced (2));
+
+        auto lvlHdr = b.removeFromTop (24);
+        mLevelsHdr->setBounds (lvlHdr.removeFromLeft (100));
+        mLvlSeed->setBounds (lvlHdr.removeFromRight (110).reduced (0, 2));
+        mLvlSeedLabel->setBounds (lvlHdr.removeFromRight (40));
+
+        for (int rowI = 0; rowI < 2; ++rowI)
+        {
+            auto row = b.removeFromTop (32);
+            const int w3 = row.getWidth() / 3;
+            for (int k = 0; k < 3; ++k)
+            {
+                auto cell = row.removeFromLeft (w3);
+                mWheelLabels[rowI * 3 + k]->setBounds (cell.removeFromLeft (64));
+                mWheels[rowI * 3 + k]->setBounds (cell.reduced (2));
+            }
+        }
+        auto togRow = b.removeFromTop (24);
+        mResetBefore->setBounds (togRow.removeFromLeft (200));
+        mBipolar->setBounds (togRow.removeFromLeft (110));
+
+        auto btns = b.removeFromBottom (26);
+        mAcceptBtn->setBounds (btns.removeFromRight (70));
+        btns.removeFromRight (6);
+        mResetBtn->setBounds (btns.removeFromRight (64));
+    }
+
+private:
+    void restoreOriginal()
+    {
+        if (mData != nullptr) mData->notes = mOriginalAll;
+    }
+
+    void generate (std::vector<PianoNote>& out, juce::Random& rng) const
+    {
+        const int  octave  = (int) mOctave->getValue();
+        const int  rangeOc = (int) mRangeOct->getValue();
+        const int  key     = mKeyCombo->getSelectedId() - 1;
+        const auto& inKey  = kScaleDefs[(size_t) (mScaleCombo->getSelectedId() - 1)].inKey;
+        const double lenSteps = mLength->getValue();
+        const float  lenVar   = (float) mVariation->getValue();
+        const float  pop      = (float) mPopulation->getValue();
+        const float  stack    = (float) mStack->getValue();
+        const float  porta    = (float) mPorta->getValue();
+
+        std::vector<int> pool;
+        for (int oc = 0; oc < rangeOc; ++oc)
+            for (int pc = 0; pc < 12; ++pc)
+                if (inKey[(size_t) pc])
+                {
+                    const int midi = 12 * (octave + oc) + 12 + key + pc;
+                    if (midi >= 0 && midi <= 127) pool.push_back (midi);
+                }
+        if (pool.empty()) return;
+
+        const double step = mStepBeats > 1.0e-6 ? mStepBeats : 0.25;
+        for (double t = 0.0; t < mSpanBeats - 1.0e-9; t += step)
+        {
+            if (rng.nextFloat() * 100.0f >= pop) { rng.nextFloat(); continue; }
+            double dur = 0.25 * lenSteps
+                * (1.0 + (rng.nextFloat() * 2.0 - 1.0) * lenVar / 100.0);
+            dur = juce::jlimit (1.0 / (double) kTicksPerBeat,
+                                juce::jmax (1.0 / (double) kTicksPerBeat, mSpanBeats - t),
+                                dur);
+            PianoNote n;
+            n.midiNote      = pool[(size_t) rng.nextInt ((int) pool.size())];
+            n.startBeat     = t;
+            n.durationBeats = dur;
+            if (rng.nextFloat() * 100.0f < porta) n.type = NoteType::Portamento;
+            out.push_back (n);
+            for (int extra = 0; extra < 2; ++extra)
+            {
+                if (rng.nextFloat() * 100.0f >= stack) break;
+                PianoNote s = n;
+                s.type     = NoteType::Standard;
+                s.midiNote = pool[(size_t) rng.nextInt ((int) pool.size())];
+                bool dup = false;
+                for (const auto& e : out)
+                    if (e.midiNote == s.midiNote
+                        && std::abs (e.startBeat - t) < 1.0e-9) { dup = true; break; }
+                if (! dup) out.push_back (s);
+            }
+        }
+
+        if (mMergeToggle->getToggleState())
+        {
+            std::sort (out.begin(), out.end(), [] (const PianoNote& a, const PianoNote& b)
+                       { return a.midiNote != b.midiNote ? a.midiNote < b.midiNote
+                                                         : a.startBeat < b.startBeat; });
+            for (size_t i = 1; i < out.size();)
+            {
+                auto& prev = out[i - 1];
+                auto& cur  = out[i];
+                if (prev.midiNote == cur.midiNote
+                    && cur.startBeat <= prev.startBeat + prev.durationBeats + 1.0e-9)
+                {
+                    prev.durationBeats = juce::jmax (prev.durationBeats,
+                        cur.startBeat + cur.durationBeats - prev.startBeat);
+                    out.erase (out.begin() + (long) i);
+                }
+                else ++i;
+            }
+        }
+    }
+
+    void applyLevelsToNote (PianoNote& n, juce::Random& rng) const
+    {
+        const bool bip = mBipolar->getToggleState();
+        if (mResetBefore->getToggleState())
+        {
+            n.velocity = 0.8f; n.panning = 0.0f; n.finePitch = 0.0f;
+            n.releaseAmt = 0.5f; n.filterCutoff = 0.5f; n.resonance = 0.5f;
+        }
+        float r[6];
+        for (auto& v : r)
+        {
+            const float u = rng.nextFloat();
+            v = bip ? u * 2.0f - 1.0f : u;
+        }
+        auto apply = [] (float& field, float lo, float hi, double wheelPct, float rnd)
+        {
+            if (wheelPct == 0.0) return;
+            field = juce::jlimit (lo, hi,
+                field + rnd * (float) (wheelPct / 100.0) * (hi - lo));
+        };
+        apply (n.velocity,     0.01f, 1.f, mWheels[0]->getValue(), r[0]);
+        apply (n.panning,     -1.f,   1.f, mWheels[1]->getValue(), r[1]);
+        apply (n.finePitch,   -1.f,   1.f, mWheels[2]->getValue(), r[2]);
+        apply (n.releaseAmt,   0.f,   1.f, mWheels[3]->getValue(), r[3]);
+        apply (n.filterCutoff, 0.f,   1.f, mWheels[4]->getValue(), r[4]);
+        apply (n.resonance,    0.f,   1.f, mWheels[5]->getValue(), r[5]);
+    }
+
+    void computeInto()
+    {
+        if (mData == nullptr) return;
+        if (mPatternOn->getToggleState())
+        {
+            std::vector<PianoNote> gen;
+            juce::Random prng ((juce::int64) (int) mPatSeed->getValue());
+            generate (gen, prng);
+            mData->notes = std::move (gen);
+            juce::Random lrng ((juce::int64) (int) mLvlSeed->getValue());
+            for (auto& n : mData->notes) applyLevelsToNote (n, lrng);
+        }
+        else
+        {
+            juce::Random lrng ((juce::int64) (int) mLvlSeed->getValue());
+            for (int idx : mLevelsTargets)
+                if (idx >= 0 && idx < (int) mData->notes.size())
+                    applyLevelsToNote (mData->notes[(size_t) idx], lrng);
+        }
+        sortNotes (mData->notes);
+    }
+
+    void applyPreview()
+    {
+        restoreOriginal();
+        computeInto();
+        if (mGrid != nullptr) mGrid->repaint();
+    }
+
+    void accept()
+    {
+        restoreOriginal();
+        if (mGrid != nullptr && mData != nullptr)
+        {
+            mGrid->beginEdit ("Randomize");
+            computeInto();
+            mGrid->commitEdit();
+            mGrid->clearSelection();
+            if (mGrid->onNotesChanged) mGrid->onNotesChanged();
+            mGrid->repaint();
+        }
+        mAccepted = true;
+        if (auto* box = findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+    }
+
+    Component::SafePointer<PianoRollGrid> mGrid;
+    PianoRollData*         mData;
+    std::vector<int>       mLevelsTargets;
+    double                 mSpanBeats, mStepBeats;
+    std::vector<PianoNote> mOriginalAll;
+    bool                   mAccepted { false };
+
+    std::unique_ptr<Label> mTitle, mPatSeedLabel, mOctaveLabel, mRangeLabel,
+                           mKeyLabel, mScaleLabel, mLengthLabel, mVarLabel,
+                           mPopLabel, mStackLabel, mPortaLabel,
+                           mLevelsHdr, mLvlSeedLabel;
+    std::unique_ptr<Label>  mWheelLabels[6];
+    std::unique_ptr<Slider> mPatSeed, mOctave, mRangeOct, mLength, mVariation,
+                            mPopulation, mStack, mPorta, mLvlSeed;
+    std::unique_ptr<Slider> mWheels[6];
+    std::unique_ptr<ComboBox>     mKeyCombo, mScaleCombo;
+    std::unique_ptr<ToggleButton> mPatternOn, mMergeToggle, mResetBefore, mBipolar;
+    std::unique_ptr<TextButton>   mResetBtn, mAcceptBtn;
+};
+
 void PianoRollGrid::toolRandomize()
 {
     if (!mData) return;
-    auto targets = getWorkingSet();
-    if (targets.empty()) return;
-    beginEdit("Randomize");
-    juce::Random rng;
-    double snap = snapUnitBeats();
-    for (int i : targets)
+
+    // Levels-only targets (Pattern OFF): selection-or-all, group-expanded.
+    std::vector<int> targets;
+    if (! mSelection.empty())
     {
-        auto& n = mData->notes[i];
-        n.velocity  = jlimit(0.f, 1.f, n.velocity + (rng.nextFloat() - 0.5f) * 0.4f);
-        n.startBeat = jmax(0.0, n.startBeat + (rng.nextDouble() - 0.5) * snap);
+        targets = mSelection;
+        expandForGroups (targets);
+        std::sort (targets.begin(), targets.end());
+        targets.erase (std::unique (targets.begin(), targets.end()), targets.end());
     }
-    sortNotes(mData->notes);
-    commitEdit();
-    clearSelection();
-    repaint();
-    if (onNotesChanged) onNotesChanged();
+    else
+    {
+        targets.reserve (mData->notes.size());
+        for (int i = 0; i < (int) mData->notes.size(); ++i)
+            targets.push_back (i);
+    }
+
+    const double spanBeats = (double) juce::jmax (1, mData->numBars)
+                           * (double) juce::jmax (1, mTsNum)
+                           * 4.0 / (double) juce::jmax (1, mTsDen);
+    const int div = onGetSnapDiv ? onGetSnapDiv() : 6;
+    const double stepBeats = (div >= 2 && div < kNumUnifiedSnapDivs)
+        ? snapDivToTicks (div) / (double) kTicksPerBeat
+        : 0.25;
+
+    auto panel = std::make_unique<RandomizePanel> (*this, mData, std::move (targets),
+                                                   spanBeats, stepBeats);
+    const auto scr = localAreaToGlobal (
+        juce::Rectangle<int> (getWidth() / 2 - 4, kRulerH + 8, 8, 8));
+    juce::CallOutBox::launchAsynchronously (std::move (panel), scr, nullptr);
+}
+
+// ── QA-H Task 5: Riff Machine (FL-replica 8-step generator, docket #2=A) ─────
+// Eight pipeline steps per the FL manual - Progression, Chords, Arpeggiation,
+// Mirror, Levels, Articulation, Groove, Fit - each with an enable + Reset +
+// Random, shown one page at a time behind a step-tab row.  Globals: Preview
+// to step (stages past it are skipped), Work on existing score (stages 4-8
+// transform the roll's notes instead of generating), Length (bars), Start
+// Over, Dice (randomize everything), Accept.  Starter preset sets for the
+// Progression / Chord / Arp / Articulation / Groove selectors are authored
+// here (plan-sanctioned).  Live preview; Accept = ONE undo edit; any other
+// dismissal restores the roll.
+class RiffMachinePanel : public juce::Component
+{
+public:
+    RiffMachinePanel (PianoRollGrid& grid, PianoRollData* data,
+                      double barBeats, double stepBeats, int rollBars)
+        : mGrid (&grid), mData (data), mBarBeats (barBeats), mStepBeats (stepBeats),
+          mOriginalAll (data->notes)
+    {
+        mTitle = std::make_unique<Label> (String(), "Riff Machine");
+        mTitle->setFont (Font (13.0f, Font::bold));
+        addAndMakeVisible (*mTitle);
+
+        static const char* kStepNames[8] = {
+            "Prog", "Chords", "Arp", "Mirror", "Levels", "Artic", "Groove", "Fit" };
+        for (int i = 0; i < 8; ++i)
+        {
+            mStepTabs[i] = std::make_unique<TextButton> (String (i + 1) + " " + kStepNames[i]);
+            mStepTabs[i]->onClick = [this, i] { setStep (i); };
+            addAndMakeVisible (*mStepTabs[i]);
+
+            mStepEnable[i] = std::make_unique<ToggleButton> ("Step enabled");
+            mStepEnable[i]->setToggleState (i == 0 || i == 1 || i == 2 || i == 7, dontSendNotification);
+            mStepEnable[i]->onClick = [this] { applyPreview(); };
+            addChildComponent (*mStepEnable[i]);
+        }
+
+        auto addPageLabel = [this] (int page, std::unique_ptr<Label>& l, const char* text)
+        {
+            l = std::make_unique<Label> (String(), text);
+            l->setFont (Font (12.0f));
+            addChildComponent (*l);
+            mPageRows[page].push_back ({ l.get(), nullptr });
+        };
+        auto regComp = [this] (int page, Component* c)
+        {
+            addChildComponent (*c);
+            mPageRows[page].back().comp = c;
+        };
+        auto addCombo = [&] (int page, std::unique_ptr<Label>& l, const char* name,
+                             std::unique_ptr<ComboBox>& cb)
+        {
+            addPageLabel (page, l, name);
+            cb = std::make_unique<ComboBox>();
+            cb->onChange = [this] { applyPreview(); };
+            regComp (page, cb.get());
+        };
+        auto addKnob = [&] (int page, std::unique_ptr<Label>& l, const char* name,
+                            std::unique_ptr<Slider>& sl, double lo, double hi,
+                            double init, const char* suffix)
+        {
+            addPageLabel (page, l, name);
+            sl = std::make_unique<Slider> (Slider::RotaryHorizontalVerticalDrag,
+                                           Slider::TextBoxRight);
+            sl->setRange (lo, hi, 1.0);
+            sl->setValue (init, dontSendNotification);
+            sl->setTextValueSuffix (suffix);
+            sl->setTextBoxStyle (Slider::TextBoxRight, false, 46, 16);
+            sl->onValueChange = [this] { applyPreview(); };
+            regComp (page, sl.get());
+        };
+        auto addIncDec = [&] (int page, std::unique_ptr<Label>& l, const char* name,
+                              std::unique_ptr<Slider>& sl, double lo, double hi, double init)
+        {
+            addPageLabel (page, l, name);
+            sl = std::make_unique<Slider> (Slider::IncDecButtons, Slider::TextBoxLeft);
+            sl->setRange (lo, hi, 1.0);
+            sl->setValue (init, dontSendNotification);
+            sl->setTextBoxStyle (Slider::TextBoxLeft, false, 52, 18);
+            sl->onValueChange = [this] { applyPreview(); };
+            regComp (page, sl.get());
+        };
+
+        // ── Page 0: Progression ──────────────────────────────────────────
+        addCombo (0, mProgLabel, "Progression", mProgCombo);
+        for (int i = 0; i < kNumProgs; ++i) mProgCombo->addItem (kProgs[i].name, i + 1);
+        mProgCombo->setSelectedId (2, dontSendNotification);   // Pop I-V-vi-IV
+        addCombo (0, mRateLabel, "Chord rate", mRateCombo);
+        mRateCombo->addItem ("Bar", 1); mRateCombo->addItem ("Half bar", 2);
+        mRateCombo->addItem ("Beat", 3);
+        mRateCombo->setSelectedId (1, dontSendNotification);
+
+        // ── Page 1: Chords ───────────────────────────────────────────────
+        addCombo (1, mChordLabel, "Chord", mChordCombo);
+        for (int i = 0; i < kNumChordSets; ++i) mChordCombo->addItem (kChordSets[i].name, i + 1);
+        mChordCombo->setSelectedId (4, dontSendNotification);  // Triad
+
+        // ── Page 2: Arpeggiation ─────────────────────────────────────────
+        addCombo (2, mArpPatLabel, "Pattern", mArpPatCombo);
+        {
+            static const char* kArpNames[8] = { "Up", "Down", "Up-Down", "Down-Up",
+                                                "Converge", "Diverge", "Random", "Off (hold chord)" };
+            for (int i = 0; i < 8; ++i) mArpPatCombo->addItem (kArpNames[i], i + 1);
+            mArpPatCombo->setSelectedId (1, dontSendNotification);
+        }
+        addCombo (2, mArpModeLabel, "Mode", mArpModeCombo);
+        mArpModeCombo->addItem ("Normal", 1); mArpModeCombo->addItem ("Flip", 2);
+        mArpModeCombo->addItem ("Alternate", 3);
+        mArpModeCombo->setSelectedId (1, dontSendNotification);
+        addCombo (2, mArpSyncLabel, "Sync", mArpSyncCombo);
+        mArpSyncCombo->addItem ("Time", 1); mArpSyncCombo->addItem ("Block", 2);
+        mArpSyncCombo->addItem ("Chord", 3);
+        mArpSyncCombo->setSelectedId (1, dontSendNotification);
+        addKnob (2, mGateLabel, "Gate", mGate, 5, 100, 80, " %");
+
+        // ── Page 3: Mirror ───────────────────────────────────────────────
+        addKnob (3, mMirrorLabel, "Flip chance", mMirrorChance, 0, 100, 30, " %");
+
+        // ── Page 4: Levels (PAN/VEL/REL/MODX/MODY/PITCH per the manual) ──
+        {
+            static const char* kWheelNames[6] = {
+                "Pan", "Velocity", "Release", "Cutoff", "Resonance", "Fine Pitch" };
+            for (int i = 0; i < 6; ++i)
+                addKnob (4, mWheelLabels[i], kWheelNames[i], mWheels[i], -100, 100, 0, " %");
+        }
+        addPageLabel (4, mBipolarLabel, "");
+        mBipolar = std::make_unique<ToggleButton> ("Bipolar");
+        mBipolar->setToggleState (true, dontSendNotification);
+        mBipolar->onClick = [this] { applyPreview(); };
+        regComp (4, mBipolar.get());
+        addIncDec (4, mSeedLabel, "Seed", mSeed, 0, 99999, 4242);
+
+        // ── Page 5: Articulation ─────────────────────────────────────────
+        addCombo (5, mArticLabel, "Preset", mArticCombo);
+        {
+            static const char* kArticNames[6] = { "None", "Staccato 50%", "Staccato 25%",
+                                                  "Legato", "Accent downbeats", "Soft offbeats" };
+            for (int i = 0; i < 6; ++i) mArticCombo->addItem (kArticNames[i], i + 1);
+            mArticCombo->setSelectedId (1, dontSendNotification);
+        }
+
+        // ── Page 6: Groove ───────────────────────────────────────────────
+        addCombo (6, mGrooveLabel, "Preset", mGrooveCombo);
+        {
+            static const char* kGrooveNames[6] = { "Straight", "Swing light", "Swing",
+                                                   "Swing hard", "Push", "Laid back" };
+            for (int i = 0; i < 6; ++i) mGrooveCombo->addItem (kGrooveNames[i], i + 1);
+            mGrooveCombo->setSelectedId (1, dontSendNotification);
+        }
+
+        // ── Page 7: Fit ──────────────────────────────────────────────────
+        addCombo (7, mKeyLabel, "Key", mKeyCombo);
+        {
+            static const char* kKeyNames[12] = {
+                "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
+            for (int i = 0; i < 12; ++i) mKeyCombo->addItem (kKeyNames[i], i + 1);
+            mKeyCombo->setSelectedId (1, dontSendNotification);
+        }
+        addCombo (7, mScaleLabel, "Scale", mScaleCombo);
+        for (int i = 0; i < kNumScales; ++i) mScaleCombo->addItem (kScaleDefs[i].name, i + 1);
+        mScaleCombo->setSelectedId (1, dontSendNotification);
+        addIncDec (7, mMinLabel, "Min note", mMinNote, 0, 115, 36);
+        addIncDec (7, mMaxLabel, "Max note", mMaxNote, 12, 127, 84);
+        addPageLabel (7, mSnapLabel, "");
+        mSnapScale = std::make_unique<ToggleButton> ("Snap to scale");
+        mSnapScale->setToggleState (true, dontSendNotification);
+        mSnapScale->onClick = [this] { applyPreview(); };
+        regComp (7, mSnapScale.get());
+
+        // ── Per-step Reset / Random ──────────────────────────────────────
+        mStepResetBtn = std::make_unique<TextButton> ("Reset");
+        mStepResetBtn->onClick = [this] { resetStep (mCurStep); applyPreview(); };
+        addAndMakeVisible (*mStepResetBtn);
+        mStepRandomBtn = std::make_unique<TextButton> ("Random");
+        mStepRandomBtn->onClick = [this] { randomizeStep (mCurStep); applyPreview(); };
+        addAndMakeVisible (*mStepRandomBtn);
+
+        // ── Globals ──────────────────────────────────────────────────────
+        mPreviewLabel = std::make_unique<Label> (String(), "Preview to step");
+        mPreviewLabel->setFont (Font (12.0f));
+        addAndMakeVisible (*mPreviewLabel);
+        mPreviewStep = std::make_unique<Slider> (Slider::IncDecButtons, Slider::TextBoxLeft);
+        mPreviewStep->setRange (1, 8, 1);
+        mPreviewStep->setValue (8, dontSendNotification);
+        mPreviewStep->setTextBoxStyle (Slider::TextBoxLeft, false, 40, 18);
+        mPreviewStep->onValueChange = [this] { applyPreview(); };
+        addAndMakeVisible (*mPreviewStep);
+
+        mWorkExisting = std::make_unique<ToggleButton> ("Work on existing score");
+        mWorkExisting->setToggleState (false, dontSendNotification);
+        mWorkExisting->onClick = [this] { applyPreview(); };
+        addAndMakeVisible (*mWorkExisting);
+
+        mLengthLabel = std::make_unique<Label> (String(), "Length (bars)");
+        mLengthLabel->setFont (Font (12.0f));
+        addAndMakeVisible (*mLengthLabel);
+        mLengthBars = std::make_unique<Slider> (Slider::IncDecButtons, Slider::TextBoxLeft);
+        mLengthBars->setRange (1, 16, 1);
+        mLengthBars->setValue (juce::jlimit (1, 16, rollBars), dontSendNotification);
+        mLengthBars->setTextBoxStyle (Slider::TextBoxLeft, false, 40, 18);
+        mLengthBars->onValueChange = [this] { applyPreview(); };
+        addAndMakeVisible (*mLengthBars);
+
+        auto addBtn = [this] (std::unique_ptr<TextButton>& b, const char* name,
+                              std::function<void()> fn)
+        {
+            b = std::make_unique<TextButton> (name);
+            b->onClick = std::move (fn);
+            addAndMakeVisible (*b);
+        };
+        addBtn (mStartOverBtn, "Start over", [this] {
+            for (int i = 0; i < 8; ++i)
+            {
+                resetStep (i);
+                mStepEnable[i]->setToggleState (i == 0 || i == 1 || i == 2 || i == 7,
+                                                dontSendNotification);
+            }
+            mPreviewStep->setValue (8, dontSendNotification);
+            mWorkExisting->setToggleState (false, dontSendNotification);
+            mSeed->setValue (4242, dontSendNotification);
+            applyPreview();
+        });
+        addBtn (mDiceBtn, "Dice", [this] {
+            for (int i = 0; i < 8; ++i) randomizeStep (i);
+            mSeed->setValue (juce::Random::getSystemRandom().nextInt (100000),
+                             dontSendNotification);
+            applyPreview();
+        });
+        addBtn (mAcceptBtn, "Accept", [this] { accept(); });
+
+        setStep (0);
+        applyPreview();
+        setSize (540, 400);
+    }
+
+    ~RiffMachinePanel() override
+    {
+        if (! mAccepted)
+        {
+            if (mData != nullptr) mData->notes = mOriginalAll;
+            if (mGrid != nullptr) mGrid->repaint();
+        }
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (8);
+        mTitle->setBounds (b.removeFromTop (18));
+
+        auto tabs = b.removeFromTop (24);
+        const int tw = tabs.getWidth() / 8;
+        for (int i = 0; i < 8; ++i)
+            mStepTabs[i]->setBounds (tabs.removeFromLeft (tw).reduced (1, 0));
+
+        auto enRow = b.removeFromTop (24);
+        for (int i = 0; i < 8; ++i)
+            mStepEnable[i]->setBounds (enRow.withWidth (130));
+        mStepRandomBtn->setBounds (enRow.removeFromRight (70).reduced (0, 1));
+        enRow.removeFromRight (6);
+        mStepResetBtn->setBounds (enRow.removeFromRight (60).reduced (0, 1));
+
+        auto page = b.removeFromTop (150);
+        const auto& rows = mPageRows[mCurStep];
+        const int colW = page.getWidth() / 2;
+        for (size_t k = 0; k < rows.size(); ++k)
+        {
+            const int col = (int) k % 2, rowI = (int) k / 2;
+            juce::Rectangle<int> cell (page.getX() + col * colW,
+                                       page.getY() + rowI * 34, colW, 32);
+            if (rows[k].label != nullptr)
+                rows[k].label->setBounds (cell.removeFromLeft (78));
+            if (rows[k].comp != nullptr)
+                rows[k].comp->setBounds (cell.reduced (2));
+        }
+
+        auto g1 = b.removeFromTop (24);
+        mPreviewLabel->setBounds (g1.removeFromLeft (100));
+        mPreviewStep->setBounds (g1.removeFromLeft (86).reduced (0, 2));
+        g1.removeFromLeft (10);
+        mWorkExisting->setBounds (g1);
+        auto g2 = b.removeFromTop (24);
+        mLengthLabel->setBounds (g2.removeFromLeft (100));
+        mLengthBars->setBounds (g2.removeFromLeft (86).reduced (0, 2));
+
+        auto btns = b.removeFromBottom (26);
+        mAcceptBtn->setBounds (btns.removeFromRight (70));
+        btns.removeFromRight (6);
+        mDiceBtn->setBounds (btns.removeFromRight (60));
+        btns.removeFromRight (6);
+        mStartOverBtn->setBounds (btns.removeFromRight (84));
+    }
+
+private:
+    struct PageRow { Label* label; Component* comp; };
+
+    struct ProgDef { const char* name; int len; int deg[8]; };
+    static constexpr ProgDef kProgs[8] = {
+        { "Static I",             1, { 0 } },
+        { "Pop I-V-vi-IV",        4, { 0, 4, 5, 3 } },
+        { "Rising I-IV-V",        3, { 0, 3, 4 } },
+        { "Cadence ii-V-I",       3, { 1, 4, 0 } },
+        { "Minor drift i-VI-VII", 3, { 0, 5, 6 } },
+        { "Pendulum I-V",         2, { 0, 4 } },
+        { "Descending walk",      8, { 7, 6, 5, 4, 3, 2, 1, 0 } },
+        { "Random walk",          0, { 0 } },
+    };
+    static constexpr int kNumProgs = 8;
+    struct ChordSetDef { const char* name; int n; int add[3]; }; // degree offsets; 100+k = octave+k degrees
+    static constexpr ChordSetDef kChordSets[8] = {
+        { "Single note",     0, { 0 } },
+        { "Octave",          1, { 100 } },
+        { "Fifth (power)",   1, { 4 } },
+        { "Triad",           2, { 2, 4 } },
+        { "Triad + Octave",  3, { 2, 4, 100 } },
+        { "Seventh",         3, { 2, 4, 6 } },
+        { "Sus4",            2, { 3, 4 } },
+        { "Wide (5th+10th)", 2, { 4, 102 } },
+    };
+    static constexpr int kNumChordSets = 8;
+
+    void setStep (int step)
+    {
+        mCurStep = juce::jlimit (0, 7, step);
+        for (int i = 0; i < 8; ++i)
+        {
+            mStepTabs[i]->setToggleState (i == mCurStep, dontSendNotification);
+            mStepEnable[i]->setVisible (i == mCurStep);
+            for (auto& r : mPageRows[i])
+            {
+                if (r.label != nullptr) r.label->setVisible (i == mCurStep);
+                if (r.comp  != nullptr) r.comp ->setVisible (i == mCurStep);
+            }
+        }
+        resized();
+    }
+
+    void resetStep (int i)
+    {
+        switch (i)
+        {
+            case 0: mProgCombo->setSelectedId (2, dontSendNotification);
+                    mRateCombo->setSelectedId (1, dontSendNotification); break;
+            case 1: mChordCombo->setSelectedId (4, dontSendNotification); break;
+            case 2: mArpPatCombo->setSelectedId (1, dontSendNotification);
+                    mArpModeCombo->setSelectedId (1, dontSendNotification);
+                    mArpSyncCombo->setSelectedId (1, dontSendNotification);
+                    mGate->setValue (80, dontSendNotification); break;
+            case 3: mMirrorChance->setValue (30, dontSendNotification); break;
+            case 4: for (auto& w : mWheels) w->setValue (0, dontSendNotification);
+                    mBipolar->setToggleState (true, dontSendNotification); break;
+            case 5: mArticCombo->setSelectedId (1, dontSendNotification); break;
+            case 6: mGrooveCombo->setSelectedId (1, dontSendNotification); break;
+            case 7: mKeyCombo->setSelectedId (1, dontSendNotification);
+                    mScaleCombo->setSelectedId (1, dontSendNotification);
+                    mMinNote->setValue (36, dontSendNotification);
+                    mMaxNote->setValue (84, dontSendNotification);
+                    mSnapScale->setToggleState (true, dontSendNotification); break;
+        }
+    }
+
+    void randomizeStep (int i)
+    {
+        auto& sr = juce::Random::getSystemRandom();
+        switch (i)
+        {
+            case 0: mProgCombo->setSelectedId (1 + sr.nextInt (kNumProgs), dontSendNotification);
+                    mRateCombo->setSelectedId (1 + sr.nextInt (3), dontSendNotification); break;
+            case 1: mChordCombo->setSelectedId (1 + sr.nextInt (kNumChordSets), dontSendNotification); break;
+            case 2: mArpPatCombo->setSelectedId (1 + sr.nextInt (7), dontSendNotification);
+                    mArpModeCombo->setSelectedId (1 + sr.nextInt (3), dontSendNotification);
+                    mArpSyncCombo->setSelectedId (1 + sr.nextInt (3), dontSendNotification);
+                    mGate->setValue (30 + sr.nextInt (71), dontSendNotification); break;
+            case 3: mMirrorChance->setValue (sr.nextInt (61), dontSendNotification); break;
+            case 4: for (auto& w : mWheels) w->setValue (sr.nextInt (81) - 40, dontSendNotification); break;
+            case 5: mArticCombo->setSelectedId (1 + sr.nextInt (6), dontSendNotification); break;
+            case 6: mGrooveCombo->setSelectedId (1 + sr.nextInt (6), dontSendNotification); break;
+            case 7: break;   // key/scale/range stay the user's musical frame
+        }
+    }
+
+    // Scale-degree resolution basis: Fit's key/scale drives degree math even
+    // when Fit's fold/snap is disabled (degrees are meaningless without one).
+    void scaleBasis (std::vector<int>& degSemis, int& key) const
+    {
+        key = mKeyCombo->getSelectedId() - 1;
+        const auto& inKey = kScaleDefs[(size_t) (mScaleCombo->getSelectedId() - 1)].inKey;
+        degSemis.clear();
+        for (int pc = 0; pc < 12; ++pc)
+            if (inKey[(size_t) pc]) degSemis.push_back (pc);
+        if (degSemis.empty()) degSemis.push_back (0);
+    }
+    static int degreeToSemis (const std::vector<int>& degSemis, int d)
+    {
+        const int n   = (int) degSemis.size();
+        const int oct = (d >= 0 ? d / n : (d - n + 1) / n);
+        const int idx = ((d % n) + n) % n;
+        return 12 * oct + degSemis[(size_t) idx];
+    }
+
+    void computeInto()
+    {
+        if (mData == nullptr) return;
+        const int preview = (int) mPreviewStep->getValue();
+        auto stageOn = [&] (int oneBased) {
+            return mStepEnable[oneBased - 1]->getToggleState() && preview >= oneBased;
+        };
+        const juce::int64 seed = (juce::int64) (int) mSeed->getValue();
+
+        std::vector<int> degSemis; int key = 0;
+        scaleBasis (degSemis, key);
+        const int nDeg = (int) degSemis.size();
+
+        std::vector<PianoNote> notes;
+
+        if (mWorkExisting->getToggleState())
+        {
+            notes = mOriginalAll;
+        }
+        else
+        {
+            const double span = mLengthBars->getValue() * mBarBeats;
+            const int rateId  = mRateCombo->getSelectedId();
+            const double rate = rateId == 1 ? mBarBeats
+                              : rateId == 2 ? mBarBeats * 0.5 : 1.0;
+            juce::Random prng (seed * 8 + 1);
+            const auto& prog = kProgs[(size_t) (mProgCombo->getSelectedId() - 1)];
+
+            const int segCount = (int) std::ceil (span / rate - 1.0e-9);
+            for (int s = 0; s < segCount; ++s)
+            {
+                const double segT   = s * rate;
+                const double segEnd = juce::jmin (span, segT + rate);
+
+                int rootDeg = 0;
+                if (stageOn (1))
+                    rootDeg = (prog.len == 0) ? prng.nextInt (2 * nDeg)
+                                              : prog.deg[s % prog.len];
+
+                std::vector<int> midis;
+                midis.push_back (60 + key + degreeToSemis (degSemis, rootDeg));
+                if (stageOn (2))
+                {
+                    const auto& cs = kChordSets[(size_t) (mChordCombo->getSelectedId() - 1)];
+                    for (int a = 0; a < cs.n; ++a)
+                    {
+                        const int off = cs.add[a] >= 100 ? nDeg + (cs.add[a] - 100)
+                                                         : cs.add[a];
+                        midis.push_back (60 + key
+                            + degreeToSemis (degSemis, rootDeg + off));
+                    }
+                }
+                std::sort (midis.begin(), midis.end());
+                midis.erase (std::unique (midis.begin(), midis.end()), midis.end());
+                const int m = (int) midis.size();
+
+                const int arpPat = mArpPatCombo->getSelectedId();   // 8 = Off
+                if (! stageOn (3) || m <= 1 || arpPat == 8)
+                {
+                    for (int mi : midis)
+                    {
+                        PianoNote n;
+                        n.midiNote = mi; n.startBeat = segT;
+                        n.durationBeats = segEnd - segT;
+                        notes.push_back (n);
+                    }
+                }
+                else
+                {
+                    const int syncId = mArpSyncCombo->getSelectedId();
+                    double stepDur = syncId == 1 ? (mStepBeats > 1.0e-6 ? mStepBeats : 0.25)
+                                   : syncId == 2 ? 1.0
+                                                 : (segEnd - segT) / m;
+                    stepDur = juce::jmax (1.0 / (double) kTicksPerBeat, stepDur);
+
+                    std::vector<int> order (static_cast<size_t> (m));
+                    for (int k = 0; k < m; ++k) order[(size_t) k] = k;
+                    switch (arpPat)
+                    {
+                        case 2: std::reverse (order.begin(), order.end()); break;
+                        case 3: for (int k = m - 2; k >= 1; --k) order.push_back (k); break; // Up-Down
+                        case 4: std::reverse (order.begin(), order.end());
+                                for (int k = 1; k <= m - 2; ++k) order.push_back (k); break; // Down-Up
+                        case 5: { std::vector<int> o; int lo = 0, hi = m - 1;               // Converge
+                                  while (lo <= hi) { o.push_back (lo++); if (lo <= hi) o.push_back (hi--); }
+                                  order = std::move (o); } break;
+                        case 6: { std::vector<int> o; int lo = 0, hi = m - 1;               // Diverge
+                                  while (lo <= hi) { o.push_back (lo++); if (lo <= hi) o.push_back (hi--); }
+                                  std::reverse (o.begin(), o.end()); order = std::move (o); } break;
+                        default: break;   // 1 Up / 7 Random (shuffled per cycle below)
+                    }
+                    const int  modeId  = mArpModeCombo->getSelectedId();
+                    const bool altFlip = (modeId == 3) && (s % 2 == 1);
+                    const double gate  = mGate->getValue() / 100.0;
+                    const int cycleLen = (int) order.size();
+                    int k = 0;
+                    for (double t = segT; t < segEnd - 1.0e-9; t += stepDur, ++k)
+                    {
+                        const int cyc = k / cycleLen;
+                        if (arpPat == 7 && k % cycleLen == 0)
+                        {
+                            juce::Random srng (seed * 977 + s * 131 + cyc);
+                            for (int j = cycleLen - 1; j > 0; --j)
+                                std::swap (order[(size_t) j],
+                                           order[(size_t) srng.nextInt (j + 1)]);
+                        }
+                        bool rev = altFlip;
+                        if (modeId == 2 && (cyc % 2 == 1)) rev = ! rev;   // Flip per cycle
+                        const int oi = k % cycleLen;
+                        const int idx = order[(size_t) (rev ? cycleLen - 1 - oi : oi)];
+                        PianoNote n;
+                        n.midiNote  = midis[(size_t) idx];
+                        n.startBeat = t;
+                        n.durationBeats = juce::jlimit (1.0 / (double) kTicksPerBeat,
+                                                        segEnd - t, stepDur * gate);
+                        notes.push_back (n);
+                    }
+                }
+            }
+        }
+
+        // ── 4 Mirror ─────────────────────────────────────────────────────
+        if (stageOn (4) && ! notes.empty())
+        {
+            double sum = 0.0;
+            for (const auto& n : notes) sum += n.midiNote;
+            const int center = (int) std::lround (sum / (double) notes.size());
+            juce::Random mrng (seed * 8 + 4);
+            const float chance = (float) mMirrorChance->getValue();
+            for (auto& n : notes)
+                if (mrng.nextFloat() * 100.0f < chance)
+                    n.midiNote = juce::jlimit (0, 127, 2 * center - n.midiNote);
+        }
+
+        // ── 5 Levels (PAN/VEL/REL/MODX/MODY/PITCH) ───────────────────────
+        if (stageOn (5))
+        {
+            juce::Random lrng (seed * 8 + 5);
+            const bool bip = mBipolar->getToggleState();
+            for (auto& n : notes)
+            {
+                float r[6];
+                for (auto& v : r)
+                {
+                    const float u = lrng.nextFloat();
+                    v = bip ? u * 2.0f - 1.0f : u;
+                }
+                auto apply = [] (float& field, float lo, float hi, double wheelPct, float rnd)
+                {
+                    if (wheelPct == 0.0) return;
+                    field = juce::jlimit (lo, hi,
+                        field + rnd * (float) (wheelPct / 100.0) * (hi - lo));
+                };
+                apply (n.panning,     -1.f,   1.f, mWheels[0]->getValue(), r[0]);
+                apply (n.velocity,     0.01f, 1.f, mWheels[1]->getValue(), r[1]);
+                apply (n.releaseAmt,   0.f,   1.f, mWheels[2]->getValue(), r[2]);
+                apply (n.filterCutoff, 0.f,   1.f, mWheels[3]->getValue(), r[3]);
+                apply (n.resonance,    0.f,   1.f, mWheels[4]->getValue(), r[4]);
+                apply (n.finePitch,   -1.f,   1.f, mWheels[5]->getValue(), r[5]);
+            }
+        }
+
+        // ── 6 Articulation ───────────────────────────────────────────────
+        if (stageOn (6) && ! notes.empty())
+        {
+            const int a = mArticCombo->getSelectedId();
+            if (a == 2 || a == 3)
+            {
+                const double f = (a == 2) ? 0.5 : 0.25;
+                for (auto& n : notes)
+                    n.durationBeats = juce::jmax (1.0 / (double) kTicksPerBeat,
+                                                  n.durationBeats * f);
+            }
+            else if (a == 4)   // Legato: extend to the next later start
+            {
+                for (auto& n : notes)
+                {
+                    double next = 1.0e18;
+                    for (const auto& o : notes)
+                        if (o.startBeat > n.startBeat + 1.0e-9)
+                            next = juce::jmin (next, o.startBeat);
+                    if (next < 1.0e17)
+                        n.durationBeats = juce::jmax (1.0 / (double) kTicksPerBeat,
+                                                      next - n.startBeat);
+                }
+            }
+            else if (a == 5)   // Accent downbeats
+            {
+                for (auto& n : notes)
+                {
+                    const double inBar = std::fmod (n.startBeat, mBarBeats);
+                    if (inBar < 1.0e-6 || mBarBeats - inBar < 1.0e-6)
+                        n.velocity = juce::jmin (1.0f, n.velocity * 1.25f);
+                }
+            }
+            else if (a == 6)   // Soft offbeats
+            {
+                for (auto& n : notes)
+                {
+                    const double inBeat = std::fmod (n.startBeat, 1.0);
+                    if (inBeat > 1.0e-6 && 1.0 - inBeat > 1.0e-6)
+                        n.velocity = juce::jmax (0.05f, n.velocity * 0.75f);
+                }
+            }
+        }
+
+        // ── 7 Groove ─────────────────────────────────────────────────────
+        if (stageOn (7))
+        {
+            const int gId = mGrooveCombo->getSelectedId();
+            const double step = mStepBeats > 1.0e-6 ? mStepBeats : 0.25;
+            double oddShift = 0.0, allShift = 0.0;
+            switch (gId)
+            {
+                case 2: oddShift = 0.10; break;
+                case 3: oddShift = 0.33; break;
+                case 4: oddShift = 0.50; break;
+                case 5: allShift = -0.05; break;
+                case 6: allShift =  0.05; break;
+                default: break;
+            }
+            for (auto& n : notes)
+            {
+                double s2 = n.startBeat + allShift * step;
+                const double k = n.startBeat / step;
+                const long   ki = std::lround (k);
+                if (std::abs (k - (double) ki) < 1.0e-6 && (ki % 2 != 0))
+                    s2 += oddShift * step;
+                n.startBeat = juce::jmax (0.0, s2);
+            }
+        }
+
+        // ── 8 Fit ────────────────────────────────────────────────────────
+        if (stageOn (8))
+        {
+            int minN = (int) mMinNote->getValue();
+            int maxN = (int) mMaxNote->getValue();
+            if (maxN < minN + 11) maxN = juce::jmin (127, minN + 11);
+            std::array<bool, 12> inKeyAbs {};
+            const auto& inKey = kScaleDefs[(size_t) (mScaleCombo->getSelectedId() - 1)].inKey;
+            for (int pc = 0; pc < 12; ++pc)
+                inKeyAbs[(size_t) pc] = inKey[(size_t) (((pc - key) % 12 + 12) % 12)];
+            for (auto& n : notes)
+            {
+                int mi = n.midiNote;
+                while (mi > maxN) mi -= 12;
+                while (mi < minN) mi += 12;
+                if (mSnapScale->getToggleState())
+                {
+                    for (int off = 0; off <= 6; ++off)
+                    {
+                        if (inKeyAbs[(size_t) ((mi - off) % 12 + 12) % 12] && mi - off >= 0)
+                            { mi -= off; break; }
+                        if (inKeyAbs[(size_t) ((mi + off) % 12) % 12] && mi + off <= 127)
+                            { mi += off; break; }
+                    }
+                }
+                n.midiNote = juce::jlimit (0, 127, mi);
+            }
+        }
+
+        sortNotes (notes);
+        mData->notes = std::move (notes);
+    }
+
+    void applyPreview()
+    {
+        if (mData == nullptr) return;
+        mData->notes = mOriginalAll;
+        computeInto();
+        if (mGrid != nullptr) mGrid->repaint();
+    }
+
+    void accept()
+    {
+        if (mGrid != nullptr && mData != nullptr)
+        {
+            mData->notes = mOriginalAll;
+            mGrid->beginEdit ("Riff Machine");
+            computeInto();
+            mGrid->commitEdit();
+            mGrid->clearSelection();
+            if (mGrid->onNotesChanged) mGrid->onNotesChanged();
+            mGrid->repaint();
+        }
+        mAccepted = true;
+        if (auto* box = findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+    }
+
+    Component::SafePointer<PianoRollGrid> mGrid;
+    PianoRollData*         mData;
+    double                 mBarBeats, mStepBeats;
+    std::vector<PianoNote> mOriginalAll;
+    bool                   mAccepted { false };
+    int                    mCurStep  { 0 };
+
+    std::unique_ptr<Label>        mTitle;
+    std::unique_ptr<TextButton>   mStepTabs[8];
+    std::unique_ptr<ToggleButton> mStepEnable[8];
+    std::vector<PageRow>          mPageRows[8];
+
+    std::unique_ptr<Label>    mProgLabel, mRateLabel, mChordLabel, mArpPatLabel,
+                              mArpModeLabel, mArpSyncLabel, mGateLabel, mMirrorLabel,
+                              mWheelLabels[6], mBipolarLabel, mSeedLabel, mArticLabel,
+                              mGrooveLabel, mKeyLabel, mScaleLabel, mMinLabel, mMaxLabel,
+                              mSnapLabel, mPreviewLabel, mLengthLabel;
+    std::unique_ptr<ComboBox> mProgCombo, mRateCombo, mChordCombo, mArpPatCombo,
+                              mArpModeCombo, mArpSyncCombo, mArticCombo, mGrooveCombo,
+                              mKeyCombo, mScaleCombo;
+    std::unique_ptr<Slider>   mGate, mMirrorChance, mWheels[6], mSeed, mMinNote,
+                              mMaxNote, mPreviewStep, mLengthBars;
+    std::unique_ptr<ToggleButton> mBipolar, mSnapScale, mWorkExisting;
+    std::unique_ptr<TextButton>   mStepResetBtn, mStepRandomBtn, mStartOverBtn,
+                                  mDiceBtn, mAcceptBtn;
+};
+
+void PianoRollGrid::toolRiffMachine()
+{
+    if (!mData) return;
+
+    const double barBeats = (double) juce::jmax (1, mTsNum) * 4.0
+                          / (double) juce::jmax (1, mTsDen);
+    const int div = onGetSnapDiv ? onGetSnapDiv() : 6;
+    const double stepBeats = (div >= 2 && div < kNumUnifiedSnapDivs)
+        ? snapDivToTicks (div) / (double) kTicksPerBeat
+        : 0.25;
+
+    auto panel = std::make_unique<RiffMachinePanel> (*this, mData, barBeats, stepBeats,
+                                                     juce::jmax (1, mData->numBars));
+    const auto scr = localAreaToGlobal (
+        juce::Rectangle<int> (getWidth() / 2 - 4, kRulerH + 8, 8, 8));
+    juce::CallOutBox::launchAsynchronously (std::move (panel), scr, nullptr);
 }
 
 void PianoRollGrid::toolArticulate()
@@ -4165,6 +5888,8 @@ juce::PopupMenu PianoRollMenuBar::getMenuForIndex(int idx, const juce::String&)
         menu.addItem(63, "Glue\tCtrl+G");
         menu.addItem(64, "Articulate\tAlt+L");
         menu.addItem(65, "Randomize\tAlt+R");
+        menu.addItem(67, "Humanize...");
+        menu.addItem(68, "Riff Machine...\tAlt+E");
         menu.addItem(66, "Generate Chords\tAlt+P");
 
         menu.addSeparator();
@@ -4246,6 +5971,8 @@ void PianoRollMenuBar::menuItemSelected(int id, int)
     else if (id == 64) { if (auto* g = o.mGrid.get()) g->toolArticulate(); }
     else if (id == 65) { if (auto* g = o.mGrid.get()) g->toolRandomize(); }
     else if (id == 66) { if (auto* g = o.mGrid.get()) g->toolGenerateChords(); }
+    else if (id == 67) { if (auto* g = o.mGrid.get()) g->toolHumanize(); }
+    else if (id == 68) { if (auto* g = o.mGrid.get()) g->toolRiffMachine(); }
     else if (id >= 70 && id <= 74)
     {
         constexpr int kDivs[] = { 2, 3, 4, 6, 8 };

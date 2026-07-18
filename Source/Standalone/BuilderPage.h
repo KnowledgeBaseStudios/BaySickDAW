@@ -118,6 +118,8 @@ public:
     // Choke Group / Delete / Rename context flow.
     std::function<void(juce::Point<int>)> onContextMenu;
     std::function<void()>                 onRenameRequested;
+    // QA-H Task 8 (#20): fires on plain single click (drop-type tracking).
+    std::function<void()>                 onSelected;
 
 private:
     CategorizedAudioEntry mEntry;
@@ -198,6 +200,10 @@ public:
     explicit BrowserPanel(PatternManager& pm,
                           juce::AudioFormatManager& afm,
                           juce::AudioThumbnailCache& thumbCache);
+    // QA-H Task 8 (#17): mAudioTree is declared before mAudioRoot, so
+    // reverse-order member destruction kills the root while the TreeView
+    // still points at it - drop the root reference first (shutdown UAF).
+    ~BrowserPanel() override { if (mAudioTree) mAudioTree->setRootItem (nullptr); }
     void paint(juce::Graphics&) override;
     void resized() override;
     void refresh();
@@ -211,6 +217,11 @@ public:
     void selectTab(int t) { switchTab(t); }
 
     std::function<void(int)>                  onPatternSelected;
+    // QA-H Task 8 (#20): last-clicked browser entry -> the grid's active
+    // drop type.  tab: 0 = pattern, 1 = audio, 2 = automation; refIdx is
+    // the pattern index / audio library index / automation template index
+    // (-1 = none picked yet on that tab).
+    std::function<void(int tab, int refIdx)>  onDropTypeChanged;
     std::function<void(int)>                  onRenderPattern;   // right-click → Render to WAV
     std::function<void(int)>                  onSplitPattern;    // right-click → Split by Player Engine (QA-G)
     std::function<void(const juce::String&)>  onImportAudio;     // File → Import Audio (path)
@@ -295,6 +306,11 @@ private:
     std::vector<std::unique_ptr<BrowserItem>> mAudioItems;     // G-5 legacy - kept empty post-tree migration
     std::vector<std::unique_ptr<BrowserItem>> mAutomItems;
     int mSelectedPat { 0 };
+    // QA-H Task 8 (#20): last-clicked audio library idx / automation
+    // template idx (per-tab memory for the drop-type callback).
+    int mLastAudioSel { -1 };
+    int mLastAutomSel { -1 };
+    void selectAutomationItem (int itemIdx);
 
     // G-5 (2026-04-29): unified audio tree replacing the flat mAudioItems
     // when Audio tab is active.  Owns a hidden root TreeViewItem populated
@@ -462,6 +478,18 @@ public:
     void setPerformanceMode(bool on) { mPerfMode = on; repaint(); }
 
     void setSelectedPatternIndex(int idx) { mBrowserSelection = idx; }
+
+    // QA-H Task 8 (#20): what an empty-grid Draw click places = the last
+    // browser entry clicked (piano-roll last-type parity).  Pattern rides
+    // mBrowserSelection; Audio/Automation carry their own ref index.
+    enum class BrowserDropKind { Pattern, Audio, Automation };
+    void setActiveDropKind (BrowserDropKind k, int refIdx)
+    {
+        mDropKind = k;
+        if      (k == BrowserDropKind::Audio)      mDropAudioIdx = refIdx;
+        else if (k == BrowserDropKind::Automation) mDropAutomIdx = refIdx;
+        else if (refIdx >= 0)                      mBrowserSelection = refIdx;
+    }
 
     // Ghost clip for Source Picker drag preview
     void setGhostClip(const juce::OptionalScopedPointer<ArrangementBlock>* ghost);
@@ -736,6 +764,9 @@ private:
 
     // ── Browser selection ─────────────────────────────────────────────────────
     int mBrowserSelection { 0 };
+    BrowserDropKind mDropKind     { BrowserDropKind::Pattern };
+    int             mDropAudioIdx { -1 };
+    int             mDropAutomIdx { -1 };
 
     // ── Ghost clip (drag preview from Source Picker) ──────────────────────────
     bool           mHasGhost   { false };

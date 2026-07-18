@@ -51,6 +51,32 @@ void PianoRollPage::timerCallback()
             roll->setLiveHeldNotes (lo, hi);
         }
 
+    // QA-H Task 7 (docket 4b): ghost-note producer.  Every OTHER registered
+    // instrument roll feeds the active roll, tinted with its source tab's
+    // note color.  dataAccessor closures are live (pattern switches track),
+    // and the ghost render reads the note vectors at paint time, so only the
+    // (pointer, color) SET needs re-pushing - change-guarded because the
+    // grid repaints on every setGhostData.  Runs before the playhead
+    // early-return so ghosts work with no playhead attached.
+    if (auto* active = getActivePianoRoll())
+    {
+        std::vector<std::pair<const PianoRollData*, juce::Colour>> ghosts;
+        for (auto& kv : mConns)
+        {
+            if (kv.first == mActive || ! kv.second.dataAccessor) continue;
+            if (auto* d = kv.second.dataAccessor())
+                if (! d->notes.empty())
+                    ghosts.push_back ({ d, kv.second.noteColor });
+        }
+        std::sort (ghosts.begin(), ghosts.end(),
+                   [] (const auto& a, const auto& b) { return a.first < b.first; });
+        if (ghosts != mLastGhosts)
+        {
+            mLastGhosts = ghosts;
+            active->setGhostData (ghosts);
+        }
+    }
+
     if (mPlayHead == nullptr) return;
     const bool song = (isSongMode && isSongMode());
     const double beat = song ? -1.0 : mPlayHead->getCurrentBeat();

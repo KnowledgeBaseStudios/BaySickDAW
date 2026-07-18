@@ -46,6 +46,9 @@ public:
     std::function<void(int midiNote, bool noteOn)> onNotePreview;
     // 2026-04-21: forward wheel events to the grid so scrolling works over keys too.
     std::function<void(const juce::MouseEvent&, const juce::MouseWheelDetails&)> onWheel;
+    // QA-H Task 7 (MIDI-01): Ctrl+click a key selects every note at that
+    // pitch in the grid (additive - no preview fires for the click).
+    std::function<void(int midiNote)> onCtrlClickPitch;
 
     static constexpr int kWidth = 64;
 
@@ -87,6 +90,7 @@ public:
     void mouseDown     (const juce::MouseEvent&)                                  override;
     void mouseDrag     (const juce::MouseEvent&)                                  override;
     void mouseUp       (const juce::MouseEvent&)                                  override;
+    void mouseDoubleClick(const juce::MouseEvent&)                                override;
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&)  override;
     bool keyPressed    (const juce::KeyPress&)                                    override;
 
@@ -100,10 +104,18 @@ public:
     void setTool         (PRTool t);
     PRTool getActiveTool () const { return mActiveTool; }
 
+    // Armed new-note type.  The grid owns the state; the container's toolbar
+    // button mirrors it via onNoteTypeArmChanged (button click and the S key
+    // both cycle it; S additionally converts a selection).
+    NoteType getNewNoteType  () const { return mNewNoteType; }
+    void     cycleNewNoteType();
+    std::function<void()> onNoteTypeArmChanged;
+
     // ── Selection ─────────────────────────────────────────────────────────
     void selectAll      ();
     void clearSelection ();
     void invertSelection();
+    void selectAllAtPitch(int midiNote);   // additive (MIDI-01 keyboard Ctrl+click)
     bool hasSelection   () const { return !mSelection.empty(); }
     // 2026-04-26 (D-7 sub-4): public accessors so the ControlLane can honour
     // selection (red rendering + selection-locked edits + Alt+Wheel target).
@@ -178,6 +190,8 @@ public:
     void toolRandomize  ();
     void toolArticulate ();
     void toolGenerateChords();
+    void toolHumanize   ();
+    void toolRiffMachine();
 
     // ── Undo / Redo ───────────────────────────────────────────────────────
     // Set the global undo context (called by PianoRollContainer after it
@@ -291,6 +305,12 @@ private:
     double   mClickMemoryDur  { 0.25 };
     NoteType mClickMemoryType { NoteType::Standard };
     bool     mDrawHasDragged  { false };
+    // Double-click-created suppression: the first click of a double-click on
+    // empty grid CREATES a note, so the pair would instantly open the Note
+    // Properties popup on it.  Set by the Draw create paths, reset by the next
+    // single-click mouseDown, checked+consumed by mouseDoubleClick.
+    bool     mLastClickCreated { false };
+    void openNoteProperties (int noteIdx, juce::Point<int> clickPos);
 
     // ── Move interaction ──────────────────────────────────────────────────
     bool                mMoving { false };
@@ -381,7 +401,7 @@ private:
     // ── Per-instrument color ──────────────────────────────────────────────
     juce::Colour mNoteColor { juce::Colour(0xff44bbff) };  // default: light blue
 
-    // ── New-note type toggle (S / O key) ──────────────────────────────────
+    // ── New-note type (armed via S key / container toolbar button) ────────
     NoteType             mNewNoteType { NoteType::Standard };
 
     // ── Coordinate helpers ────────────────────────────────────────────────
@@ -470,8 +490,14 @@ private:
     float      getVal     (const PianoNote& n)  const;
     void       setVal     (PianoNote& n, float v);
     float      yToNormVal (int y)              const;
+    void       scrubApply (int x0, int x1, float v0, float v1);
 
     PianoNote* mDragNote { nullptr };  // locked on mouseDown, cleared on mouseUp
+    // QA-H Task 6 (#5/MIDI-02): Ctrl+drag scrub - sweeps the SELECTED notes'
+    // dots, setting each from the cursor's Y path as it passes their X.
+    bool  mScrubbing    { false };
+    int   mLastScrubX   { 0 };
+    float mLastScrubVal { 0.0f };
 };
 
 // ── Helper: TextButton with right-click callback ───────────────────────────
@@ -661,8 +687,10 @@ private:
     // ScrollBar::Listener
     void scrollBarMoved(juce::ScrollBar* sb, double newRangeStart) override;
 
-    // Toolbar row 1: Magnet | 7 tool buttons | Undo | Redo | H
+    // Toolbar row 1: Magnet | tool buttons | armed note type | Undo | Redo | H
     std::array<std::unique_ptr<juce::TextButton>, 8> mToolBtns; // [7] = Stamp, always hidden
+    std::unique_ptr<juce::TextButton>        mNoteTypeBtn;   // mirrors grid's armed type
+    void refreshNoteTypeButton();
     std::unique_ptr<juce::TextButton>        mUndoBtn, mRedoBtn, mHistoryBtn;
     std::unique_ptr<RightClickTextButton>    mMagnetBtn;     // snap resolution dropdown
 

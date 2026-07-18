@@ -111,6 +111,28 @@ void AdditiveVoice::startNote (int midiNote, float velocity,
         mCurrentHz = mNoteHz;   // instant snap (no glide)
     // else: mCurrentHz retains its current value → portamento glide to mTargetHz
 
+    // QA-H per-note glide (CC84-armed slide/porta) overrides both paths: the
+    // voice starts AT the source pitch and smooths to the target.  Slide
+    // carries its own time (CC5/37 = the note's length); porta uses the
+    // engine glide param, falling back to 60 ms when it is 0.
+    mPerNoteGlideActive = false;
+    if (mGlideFromNote >= 0)
+    {
+        mCurrentHz = midiNoteToHz (mGlideFromNote, mPitchWheelSemis);
+        const float tSec = mGlideTimePending
+            ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
+            : (mGlideTimeSec > 0.001f ? mGlideTimeSec : 0.06f);
+        // tau = t/3 -> ~95% of the sweep lands inside the requested time.
+        mPerNoteGlideCoeff  = float (std::exp (-3.0 / (juce::jmax (0.005f, tSec) * mSampleRate)));
+        mPerNoteGlideActive = (mCurrentHz != mNoteHz);
+    }
+    mGlideFromNote    = -1;      // one-shot: never leaks into the next note
+    mGlideTimePending = false;
+
+    // Consume the per-note expression stashes (QA-H).
+    mActiveResOffset = mPendResOffset;
+    mActiveRelScale  = mPendRelScale;
+
     // S3 T2-N: vel_link refactor. mVolSmooth no longer pre-multiplies velocity;
     // we store velocity separately and apply per-part in the render loop based
     // on mVelLink (ON: both A+B scale with velocity; OFF: only A scales).
@@ -155,7 +177,9 @@ void AdditiveVoice::startNote (int midiNote, float velocity,
         mVibEnvPos  = 0.0f;
 
         mAmpADSR.setSampleRate (mSampleRate);
-        mAmpADSR.setParameters (mAmpParams);
+        auto scaled = mAmpParams;   // QA-H: per-note CC72 release scale
+        scaled.release = juce::jmax (0.001f, scaled.release * mActiveRelScale);
+        mAmpADSR.setParameters (scaled);
         mAmpADSR.noteOn();
         // S2 T2-A: filter envelopes also retrigger on fresh noteOn.
         mFltADSR1.setSampleRate (mSampleRate);
@@ -255,6 +279,35 @@ void AdditiveVoice::controllerMoved (int controllerNumber, int newValue)
         const float norm = (float) newValue / 127.0f;          // 0..1
         mPerNoteCutoffOctaves = (norm - 0.5f) * 4.0f;          // -2..+2
     }
+    else if (controllerNumber == 71)  // per-note resonance offset (QA-H)
+        mPendResOffset = ((float) newValue / 127.0f - 0.5f) * 2.0f;   // -1..+1 Q
+    else if (controllerNumber == 72)  // per-note release scale (QA-H)
+        mPendRelScale = std::pow (2.0f, ((float) newValue / 127.0f - 0.5f) * 4.0f);
+    else if (controllerNumber == 84)  // glide source note (QA-H slide/porta)
+        mGlideFromNote = newValue;
+    else if (controllerNumber == 5)   { mGlideTimeMsbMs = newValue; mGlideTimePending = true; }
+    else if (controllerNumber == 37)  { mGlideTimeLsbMs = newValue; mGlideTimePending = true; }
+    else if (controllerNumber == 85)  // QA-H Ramp Slide: bend the sounding anchor voice
+    {
+        // Takeover semantics - no retrigger.  Only the voice whose (juce)
+        // playing note matches the CC84 anchor bends; EVERY voice clears the
+        // glide stash so a ramp never leaks into a later noteOn.
+        if (isVoiceActive() && ! mInRelease
+            && getCurrentlyPlayingNote() == mGlideFromNote)
+        {
+            // mCurrentHz keeps its value; moving mNoteHz re-aims the
+            // per-sample target and the per-note coefficient carries the bend.
+            mNoteHz   = midiNoteToHz (newValue, mPitchWheelSemis);
+            mTargetHz = mNoteHz;
+            const float tSec = mGlideTimePending
+                ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
+                : 0.06f;
+            mPerNoteGlideCoeff  = float (std::exp (-3.0 / (juce::jmax (0.005f, tSec) * mSampleRate)));
+            mPerNoteGlideActive = true;
+        }
+        mGlideFromNote    = -1;
+        mGlideTimePending = false;
+    }
 }
 
 //==============================================================================
@@ -302,8 +355,11 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
     const bool hasB = (wtB != nullptr);
 
     // Choose the frequency smoothing coefficient:
-    // use glide coefficient when portamento is active, fast coefficient otherwise.
-    const float freqCoeff = (mGlideTimeSec > 0.001f) ? mGlideCoeff : mFreqCoeff;
+    // per-note glide (QA-H slide/porta) wins while its sweep is in flight
+    // (the land-check in the sample loop hands back to normal selection),
+    // then glide coefficient when portamento is active, else the fast snap.
+    const float freqCoeff = mPerNoteGlideActive ? mPerNoteGlideCoeff
+                          : (mGlideTimeSec > 0.001f) ? mGlideCoeff : mFreqCoeff;
 
     // S2 T2-A + SLA #34 + T2-N: per-block filter cutoff computation.
     // Effective cutoff = baseCutoff * 2^((envAmt*envValue + cutoffOfs/12 +
@@ -353,8 +409,9 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
     const float flt2Cutoff = juce::jlimit (20.f, 20000.f,
                                            mFilter2Cutoff * std::pow (2.0f, flt2Semis / 12.0f));
     // S4 Batch 2b: resonance mod on top of the base value.
-    const float effRes1 = juce::jlimit (0.05f, 10.0f, mFilterRes  + modFlt1Res);
-    const float effRes2 = juce::jlimit (0.05f, 10.0f, mFilter2Res + modFlt2Res);
+    // QA-H: per-note CC71 offset (+-1 Q) applies to both filters.
+    const float effRes1 = juce::jlimit (0.05f, 10.0f, mFilterRes  + modFlt1Res + mActiveResOffset);
+    const float effRes2 = juce::jlimit (0.05f, 10.0f, mFilter2Res + modFlt2Res + mActiveResOffset);
     if (mFilterType != 3)
     {
         mFilter.setCutoffFrequency (flt1Cutoff);
@@ -416,6 +473,11 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
         // One-pole IIR frequency smoothing - safe for portamento since it
         // never resets the current value unlike juce::SmoothedValue::reset().
         mCurrentHz += (targetWithPitch - mCurrentHz) * (1.0f - freqCoeff);
+        // QA-H per-note glide landed (~3 cents of the live target): flag off
+        // so the next block returns to the normal coefficient selection.
+        if (mPerNoteGlideActive
+            && std::abs (mCurrentHz - targetWithPitch) < 0.002f * targetWithPitch)
+            mPerNoteGlideActive = false;
 
         const float envGain = mAmpADSR.getNextSample();
         const float vol     = mVolSmooth  .getNextValue();

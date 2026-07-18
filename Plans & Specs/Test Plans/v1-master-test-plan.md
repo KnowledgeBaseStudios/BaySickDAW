@@ -883,8 +883,8 @@ are the PDC scope addition's FIRST functional pass (bulk-run R2 deferred them he
 
 ### §B.13 — QA-G (timeline geometry + TS system + 500 tracks + Split by Player Engine)
 
-`blocks:` (QA-G batch commit — hash backfilled at the next docs commit per the B.12
-precedent). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`. Covers the
+`blocks:` `928eca1d` (QA-G, the whole batch in one commit). Debug exe FIRST, then
+Release — mark each scenario `D:` and `R:`. Covers the
 plan's 6 tasks PLUS the mid-batch owner additions (row alignment + horizontal scrollbar
 rework, 500-track cap, Split by Player Engine) and the in-batch bug fixes (rename
 persistence, Move Up/Down state carry, drum-note previews, removePattern re-index,
@@ -986,6 +986,101 @@ File > New marker leak).
       grid; delete the MIDDLE pattern from the dropdown. Expected: the other two
       patterns' blocks keep playing THEIR patterns (pre-batch they silently shifted one
       pattern over); the deleted pattern's blocks disappear. `D:__ R:__` notes:
+
+### §B.14 — QA-H (piano-roll features: note types + properties + FL tools + Builder fixes)
+
+`blocks:` (QA-H batch commit - hash backfilled at the next docs commit, B.12/B.13
+precedent). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`. Covers the
+plan's 8 tasks plus the mid-batch owner calls (BOTH slides ship: Ramp + Retrigger;
+"Flat" display name) and the in-batch transport fixes (expression-CC bleed, cold-voice
+CC delivery, player CC ordering).
+
+- [ ] **H-1 — armed note-type button + S.** The toolbar button between Select and Zoom
+      cycles Flat -> RP Slide -> RT Slide -> Porta on click AND on S (grey at Flat, lit
+      otherwise; tool row reads "Select" not "Sel"). With notes selected, S also converts
+      the selection to the newly armed type (one undo step; no junk entry when already
+      matching). New notes draw as the armed type (RP = filled right triangle, RT =
+      outline triangle, Porta = orange arc). `D:__ R:__` notes:
+- [ ] **H-2 — Note Properties popup.** Double-left-click a note (Draw + Select tools):
+      popup shows Flat/RP Slide/RT Slide/Porta + Velocity, Release, Fine Pitch, Panning,
+      Filter Cutoff, Resonance; edits apply LIVE; with the clicked note in a selection
+      every selected note takes the edit; ONE undo restores the whole popup session; a
+      popup opened and closed untouched adds NO undo entry. Fast double-click-drawing a
+      new note does NOT open the popup on it. `D:__ R:__` notes:
+- [ ] **H-3 — RT Slide (retrigger).** Note A, then an RT Slide note B at another pitch:
+      B re-attacks and its pitch GLIDES from A's pitch to B's across B's full length
+      (short B = fast glide, long B = slow). Works on BaySickSynth, BaySickBass,
+      Harmless, BaySickPlayer (incl. drum tabs on those engines); also works when A ended
+      earlier (glides in from A's pitch after silence). Inst/Rusty/Vox (sfizz) rolls:
+      slide types are silent no-ops by scope. `D:__ R:__` notes:
+- [ ] **H-4 — RP Slide (takeover).** Note A held, RP Slide note B overlapping or
+      BUTT-JOINED to A's end: NO new attack — A keeps sounding and bends to B's pitch
+      over B's length, and A's audible tail extends through B (release starts at B's
+      end). Chain A -> RP1 -> RP2: one continuous voice bending twice. An RP note with
+      NOTHING sounding at its start (gap) is silent. Works on all 4 engine families.
+      `D:__ R:__` notes:
+- [ ] **H-5 — Porta.** A porta note re-attacks and glides in QUICKLY from the previous
+      note's pitch: BaySickSynth/Bass follow their glide-time param when set; Harmless
+      follows glide_time; BaySickPlayer (no glide param) uses the fixed ~60 ms fallback —
+      audibly a snap-glide, campaign-tunable. `D:__ R:__` notes:
+- [ ] **H-6 — Release + Resonance per note.** Two identical notes, one with Release 100%
+      / one at 0%: audibly longer vs clipped tail on Synth/Bass/Harmless/Player. Same
+      A/B for Resonance (50% = neutral, 100% = squelch) — on the player it rides the
+      hardness filter. Values persist through save/reload ("r"/"q" attrs). `D:__ R:__`
+      notes:
+- [ ] **H-7 — expression isolation (bleed fix + cold voices).** Note A pan hard-left +
+      cutoff high, then neutral note B: B plays CENTERED and neutral (pre-batch it
+      inherited A's channel state). Flip side (documented): while A still SOUNDS, B's
+      start snaps the shared channel pan/bend — last-note-wins, unchanged in kind.
+      Cold-voice check: after 5+ seconds of silence, a single note with a non-neutral
+      cutoff/resonance/release STILL applies it on all 4 families (juce only delivered
+      CCs to warm voices; the player delivered them one note late). `D:__ R:__` notes:
+- [ ] **H-8 — Humanize.** Tools > Humanize... on a quantized 8-note line: Start/Duration/
+      Velocity Range+Offset knob pairs, Distribution (Quasi-Normal), Start Time Max
+      Interval (snap list), Seed + Regenerate, Preview toggle (on = live), Reset, Accept.
+      Same seed reproduces identical results; start shifts are late-biased within the
+      interval; Accept = ONE undo; Esc/click-away reverts fully. Selection-or-all.
+      `D:__ R:__` notes:
+- [ ] **H-9 — Randomize (replaces the old instant jitter).** Alt+R / Tools > Randomize:
+      Pattern section (Octave/Range/Key/Scale/Length st/Variation/Population/Stack/
+      Random Portamento/Merge Same Notes/Seed arrows) generates into the roll live;
+      Levels section (six -100..+100% wheels: Velocity/Pan/Fine Pitch/Release/Cutoff/
+      Resonance + Reset Before Processing + Bipolar + Seed arrows) randomizes; Pattern
+      OFF = Levels on the selection-or-all only. Seeds reproduce; Accept = ONE undo;
+      cancel restores. Random Portamento notes audibly glide (H-5). `D:__ R:__` notes:
+- [ ] **H-10 — Riff Machine.** Alt+E / Tools > Riff Machine...: walk the 8 steps
+      (Progression presets + rate; Chord presets; Arp pattern/mode/sync/gate — notes land
+      at the SNAP length via Sync=Time; Mirror chance; Levels wheels + Bipolar + Seed;
+      Articulation presets; Groove presets; Fit key/scale/min-max/snap) with per-step
+      enable + Reset + Random. Preview-to-step N kills stages past N; Dice rerolls
+      everything; Work on existing score transforms the roll's notes via steps 4-8;
+      Length sets the generated bars; Accept = ONE undo; cancel restores. `D:__ R:__`
+      notes:
+- [ ] **H-11 — lane scrub + guides + header.** Select some notes, Ctrl+drag a sweep
+      across the control lane: ONLY the selected notes' dots set as the cursor passes
+      them (value follows the cursor height); unselected dots untouched; no selection =
+      nothing (and no undo entry); plain drag still edits one dot. Velocity + Filter
+      Cutoff lanes show 25/50/75% guides + labels; pan/pitch keep the centre line. The
+      Filter Cutoff lane header reads "Control > Filter Cutoff" (was "Pitch Bend").
+      `D:__ R:__` notes:
+- [ ] **H-12 — ghosts + pitch-row select.** Piano Roll page with notes on 3+ tabs:
+      the active roll shows the OTHER rolls' notes tinted with their tabs' colors;
+      switching the active roll re-tints correctly; View > Ghost Notes hides/shows them;
+      pattern switches track. Ctrl+click a piano key: every note at that pitch selects
+      (no audition); Ctrl+click more keys ADDS their rows. `D:__ R:__` notes:
+- [ ] **H-13 — Builder #6 + #17 + #19.** (#6) Song mode, one 2-bar block, MUTE it:
+      playback still runs 2 bars of silence (loop mode wraps at 2 bars; pre-batch the
+      song shrank). (#17) Populate the Builder browser (audio tab expanded), quit the
+      app: no crash. (#19) Move/delete a library entry's file on disk, then drag it from
+      the browser to the grid: "Audio File Not Found" dialog with the path (was a dead
+      click). `D:__ R:__` notes:
+- [ ] **H-14 — Builder #20 active drop type.** Click a PATTERN in the browser, click
+      empty grid with Draw: that pattern places (as before). Click an AUDIO leaf, empty-
+      click: that clip places at its file length. Click an AUTOMATION entry (it now
+      highlights on click — they were drag-only), empty-DRAW a 2-bar span: that
+      template's automation block places at the drawn length. Switch browser tabs:
+      the drop type re-arms to that tab's last pick; a tab with nothing picked places
+      nothing. `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

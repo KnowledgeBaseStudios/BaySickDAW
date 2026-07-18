@@ -4,6 +4,7 @@
 #include "AdditiveVoice.h"
 #include "HarmlessModRegistry.h"
 #include "SynthSound.h"
+#include "../BroadcastSynthesiser.h"
 
 // ── HarmlessSynth ─────────────────────────────────────────────────────────────
 // Polyphonic synthesiser: 16 AdditiveVoice instances sharing two HarmonicEngines
@@ -241,8 +242,9 @@ private:
     HarmonicEngine mPartA;
     HarmonicEngine mPartB;
 
-    // juce::Synthesiser manages voice stealing and MIDI routing.
-    juce::Synthesiser mSynth;
+    // juce::Synthesiser manages voice stealing and MIDI routing; the
+    // Broadcast subclass routes CCs to idle voices too (per-note stash).
+    BroadcastSynthesiser mSynth;
 
     double mSampleRate    { 44100.0 };
     float  mStrumTimeSec  { 0.0f };

@@ -182,7 +182,9 @@ void AudioBrowserItem::itemClicked (const MouseEvent& e)
         if (onRenameRequested) onRenameRequested();
         return;
     }
-    // Single left click: TreeView default selection behavior.
+    // Single left click: TreeView default selection behavior, plus the
+    // QA-H (#20) drop-type notification.
+    if (onSelected) onSelected();
 }
 
 AudioCategoryItem::AudioCategoryItem (const String& name, Colour accent)
@@ -376,6 +378,12 @@ void BrowserPanel::switchTab(int t)
     if (isAud)  rebuildAudioRows();
     if (isAuto) rebuildAutomationRows();
     resized();
+
+    // QA-H Task 8 (#20): switching tabs re-arms the drop type with that
+    // tab's remembered pick (-1 = nothing picked there yet).
+    if (onDropTypeChanged)
+        onDropTypeChanged (t, t == 0 ? mSelectedPat
+                            : t == 1 ? mLastAudioSel : mLastAutomSel);
 }
 
 void BrowserPanel::selectPattern(int idx)
@@ -384,7 +392,19 @@ void BrowserPanel::selectPattern(int idx)
     mPM.setCurrentPattern(idx);
     for (int i = 0; i < (int)mPatItems.size(); ++i)
         if (mPatItems[i]) mPatItems[i]->setSelected(i == idx);
-    if (onPatternSelected) onPatternSelected(idx);
+    if (onPatternSelected)   onPatternSelected(idx);
+    if (onDropTypeChanged)   onDropTypeChanged(0, idx);
+}
+
+// QA-H Task 8 (#20): automation rows were drag-only - a click now records
+// the entry (selection highlight + drop-type callback).
+void BrowserPanel::selectAutomationItem (int itemIdx)
+{
+    mLastAutomSel = (itemIdx >= 0 && itemIdx < (int) mAutomBlockIndices.size())
+                  ? mAutomBlockIndices[(size_t) itemIdx] : -1;
+    for (int i = 0; i < (int) mAutomItems.size(); ++i)
+        if (mAutomItems[i]) mAutomItems[i]->setSelected (i == itemIdx);
+    if (onDropTypeChanged) onDropTypeChanged (2, mLastAutomSel);
 }
 
 void BrowserPanel::rebuildPatternRows()
@@ -477,6 +497,11 @@ void BrowserPanel::rebuildAudioRows()
         leaf->onContextMenu = [this, leaf](Point<int> pt)
         {
             showAudioTreeContextMenu (*leaf, pt);
+        };
+        leaf->onSelected = [this, leaf]
+        {
+            mLastAudioSel = leaf->getAudioLibIdx();
+            if (onDropTypeChanged) onDropTypeChanged (1, mLastAudioSel);
         };
         return leaf;
     };
@@ -1139,6 +1164,7 @@ void BrowserPanel::rebuildAutomationRows()
         BrowserItem* raw = item.get();
         raw->onRenameRequested = [this, raw] { openRenamePopup(*raw); };
         raw->onContextMenu     = [this, raw](Point<int> pt) { showItemContextMenu(*raw, pt); };
+        raw->onClicked         = [this, idx] { selectAutomationItem (idx); };
         addAndMakeVisible(*item);
         mAutomItems.push_back(std::move(item));
     }
@@ -4651,7 +4677,18 @@ void ArrangementGrid::placeAudioLibraryEntry(int libIdx, int targetRow, float ta
         const juce::File resolved = onResolveStoredPath (path);
         if (resolved.existsAsFile()) f = resolved;
     }
-    if (! f.existsAsFile()) return;
+    if (! f.existsAsFile())
+    {
+        // QA-H Task 8 (#19): the silent return here made a re-drop of a
+        // moved/deleted file look like a dead click.
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Audio File Not Found",
+            "Cannot place this clip - the file is missing:\n\n" + path
+            + "\n\nIt may have been moved or deleted. Restore the file, or "
+              "remove the entry from the browser (right-click > Remove).");
+        return;
+    }
 
     // Read file metadata for exact lengthBeats (mirrors importAudioFile).
     juce::AudioFormatManager fm;
@@ -6121,18 +6158,46 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
         int   row   = mDrawRow;
         if (row >= 0 && row < kNumRows)
         {
-            beginEdit("Draw");
-            ArrangementBlock b;
-            b.trackRow     = row;
-            b.patternIndex = mBrowserSelection;
-            b.startBar     = (int)start;
-            b.lengthBars   = len;
-            b.layerTrack   = true;
-            mPM.addBlock(b);
-            commitEdit();
-            afterPatternBlockPlaced(b);   // QA-G Task 6
-            mSelection.clear();
-            mSelection.push_back(mPM.getNumBlocks() - 1);
+            // QA-H Task 8 (#20): the empty-grid Draw places the last-clicked
+            // browser entry's TYPE (pattern / audio clip / automation).
+            if (mDropKind == BrowserDropKind::Audio)
+            {
+                if (mDropAudioIdx >= 0)
+                    placeAudioLibraryEntry (mDropAudioIdx, row, start);
+            }
+            else if (mDropKind == BrowserDropKind::Automation)
+            {
+                if (mDropAutomIdx >= 0
+                    && mDropAutomIdx < mPM.getNumAutomationTemplates())
+                {
+                    beginEdit("Draw");
+                    ArrangementBlock b;
+                    b.clipType       = ClipType::Automation;
+                    b.trackRow       = row;
+                    b.startBar       = (int)start;
+                    b.lengthBars     = len;
+                    b.automationLane = mPM.getAutomationTemplate(mDropAutomIdx);
+                    mPM.addBlock(b);
+                    commitEdit();
+                    mSelection.clear();
+                    mSelection.push_back(mPM.getNumBlocks() - 1);
+                }
+            }
+            else
+            {
+                beginEdit("Draw");
+                ArrangementBlock b;
+                b.trackRow     = row;
+                b.patternIndex = mBrowserSelection;
+                b.startBar     = (int)start;
+                b.lengthBars   = len;
+                b.layerTrack   = true;
+                mPM.addBlock(b);
+                commitEdit();
+                afterPatternBlockPlaced(b);   // QA-G Task 6
+                mSelection.clear();
+                mSelection.push_back(mPM.getNumBlocks() - 1);
+            }
         }
         mDrawRow = -1;
         resized(); repaint();
@@ -6985,6 +7050,13 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
         if (clamped != mBrowserWidth) { mBrowserWidth = clamped; resized(); }
     };
     addAndMakeVisible (*mBrowserGrip);
+    // QA-H Task 8 (#20): browser click -> the grid's active drop type.
+    mBrowser->onDropTypeChanged = [this] (int tab, int refIdx) {
+        if (! mGrid) return;
+        using K = ArrangementGrid::BrowserDropKind;
+        mGrid->setActiveDropKind (tab == 1 ? K::Audio
+                                : tab == 2 ? K::Automation : K::Pattern, refIdx);
+    };
     mBrowser->onPatternSelected = [this](int idx) {
         mPM.setCurrentPattern(idx);
         if (mGrid) mGrid->setSelectedPatternIndex(idx);

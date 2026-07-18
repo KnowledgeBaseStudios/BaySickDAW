@@ -167,3 +167,24 @@ before coding past them. Findings elsewhere → running notes, route at section 
 - Task 1/2: none (post-dates carry-forward; scout map in group-open notes is the reference).
 - Task 5: QA-TempoMap §B.3 + G1 carry-over (TempoMap spans, metronome PDC deferral from QA-Fe2
   — do not regress the click-deferral work: `MetroDSP::countInDelaySamp` + delayed-clock grid).
+
+## Carry-Over — 2026-07-17 (QA-G close; session end)
+
+- **Completed:** QA-G in full — Tasks 1-6 + owner additions (row alignment + external
+  H-scrollbar rework, 500 tracks superseding marathon-5's keep-50, Split by Player
+  Engine + Insert-Above max-prompt retrofit) — ONE batch commit `928eca1d`, every task
+  build-confirmed clean. §B.13 authored (20 scenarios); Work Log entry drafted + HELD in
+  the running notes; 7 in-batch bug fixes + known seams all recorded there.
+- **In-flight:** nothing in code. TWO expected doc stragglers in the tree for QA-H's
+  commit (B.12 precedent): §B.13 `blocks:` hash backfill + this carry-over block.
+- **Assumptions changed:** see the running notes Task-6 recon entry (autoDerive/
+  barStartBeat were orphaned C.5b machinery; metronome accent was pattern-driven;
+  count-in was hardcoded 4 beats; removePattern never re-indexed; File > New leaked
+  markers; renames never persisted). Marathon-5 "keep 50 rows" superseded by owner call
+  (500). Silent Insert-Above edge superseded by the max prompt (owner rev).
+- **Resume action (NEW session):** paste the QA-H prompt (handed to Jeff at this
+  session's close) — /standup -> Main Plan §0 -> caribou G3 sections -> ghostly-riffing-
+  moth.md IN FULL -> confirm `928eca1d` at HEAD (+ the two stragglers dirty) -> QA-H
+  Task 1.
+- **Work-Log entry needed:** none new — QA-G's is drafted + HELD in
+  `Running Notes/steady-pinning-heron.md` (applies at §B.13 section pass).

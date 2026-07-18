@@ -188,6 +188,25 @@ private:
     // -2..+2 octaves applied multiplicatively to effCutoff in renderNextBlock.
     float mPerNoteCutoffOctaves { 0.0f };
 
+    // QA-H per-note expression: pending stashes are written by controllerMoved
+    // (the roll emits the CCs just before each noteOn) and consumed into the
+    // active values at startNote, so a still-sounding voice keeps its own
+    // resonance/release when the NEXT note's CCs arrive on the channel.
+    float mPendResOffset   { 0.0f };   // CC71: -0.5..+0.5 on the 0-1 res scale
+    float mPendRelScale    { 1.0f };   // CC72: 0.25x..4x release-time scale
+    float mActiveResOffset { 0.0f };
+    float mActiveRelScale  { 1.0f };
+    // CC84 glide source note + optional CC5/CC37 14-bit glide time (ms).
+    // Consumed one-shot at startNote; time absent = porta (engine glide time,
+    // 60 ms fallback when the glide param is 0), present = slide (spans note).
+    int   mGlideFromNote    { -1 };
+    int   mGlideTimeMsbMs   { 0 };
+    int   mGlideTimeLsbMs   { 0 };
+    bool  mGlideTimePending { false };
+    // Base amp ADSR as last set by the DSP (setters only fire on user change,
+    // so startNote re-applies base * active release scale itself each note).
+    float mAmpA { 0.01f }, mAmpD { 0.1f }, mAmpS { 0.8f }, mAmpR { 0.3f };
+
     // ── Filter state ──────────────────────────────────────────────────────────
     BssFilterType mFilterType       { BssFilterType::LowPass };
     float         mFilterBaseCutoff { 20000.0f };
@@ -245,6 +264,7 @@ private:
     static float midiToHz (int note, float extraSemis = 0.0f) noexcept;
     void rebuildOscWavetable();
     void updateFilterType();
+    void applyEffectiveFilterRes();   // base res + per-note CC71 offset -> Q
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickSynthVoice)
 };

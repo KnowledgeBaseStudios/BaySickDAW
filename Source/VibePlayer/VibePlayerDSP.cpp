@@ -826,11 +826,40 @@ void VibeVoice::startNote (int midiNote, float velocity,
     const double resampRatio = (region->fileSampleRate / mSampleRate) * pitchRatio
                                * (double) juce::jlimit (0.5f, 2.0f, mStretch);
 
+    // QA-H per-note glide (CC84-armed slide/porta): ramp the resampling ratio
+    // in semitone space from the source pitch to this note's pitch.  Slide
+    // carries its own time (CC5/37); porta falls back to 60 ms (no glide param
+    // on the player).
+    mGlideSamplesLeft = 0;
+    mGlideSemisCur    = 0.0f;
+    mNoteStartedAt    = midiNote;
+    mCurTargetNote    = (float) midiNote;
+    mBaseRatioTarget  = resampRatio;
+    mGlideBaseRatio   = resampRatio;
+    if (mGlideFromNote >= 0 && mGlideFromNote != midiNote)
+    {
+        const float tSec = mGlideTimePending
+            ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
+            : 0.06f;
+        mGlideSamplesLeft = juce::jmax (1, (int) (tSec * mSampleRate));
+        mGlideSemisCur    = (float) (mGlideFromNote - midiNote);
+        mGlideSemisStep   = -mGlideSemisCur / (float) mGlideSamplesLeft;
+        mGlideBaseRatio   = resampRatio;
+    }
+    mGlideFromNote    = -1;      // one-shot: never leaks into the next note
+    mGlideTimePending = false;
+
+    // Consume the per-note expression stashes (QA-H).
+    mActiveResOffset = mPendResOffset;
+    mActiveRelScale  = mPendRelScale;
+
     // QA-VoicePool Task 2: flushBuffers() clears the resampler's per-channel
     // filter histories + readahead buffer; setResamplingRatio() updates the
     // pitch ratio.  prepareToPlay was hoisted to VibeVoice::prepareForPlayback.
     mActiveResamp->flushBuffers ();
-    mActiveResamp->setResamplingRatio (resampRatio);
+    mActiveResamp->setResamplingRatio (mGlideSamplesLeft > 0
+        ? mGlideBaseRatio * std::pow (2.0, (double) mGlideSemisCur / 12.0)
+        : resampRatio);
 
     // Sensitivity: reshape velocity curve (0→flat, 1→very responsive)
     const float sensExp = 2.0f - mSensitivity * 1.8f; // 0→2.0, 0.5→1.1, 1→0.2
@@ -857,6 +886,13 @@ void VibeVoice::startNote (int midiNote, float velocity,
     }
 
     mFilter.reset();
+    // QA-H: per-note CC72 release scale on top of the user's base ADSR (the
+    // engine's setAdsr only fires on user change, so re-apply per note).
+    {
+        auto p = mAdsrBase;
+        p.release = juce::jmax (0.001f, p.release * mActiveRelScale);
+        mAdsr.setParameters (p);
+    }
     mAdsr.noteOn();
     mLfoPhase  = 0.0;
     mReductHold = 0;
@@ -903,8 +939,35 @@ void VibeVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
 
     // Read from resampled source (QA-VoicePool Task 2: mActiveResamp points
     // to either mForwardResamp or mReverseResamp; set by startNote).
-    juce::AudioSourceChannelInfo info (&mTmpBuffer, 0, numSamples);
-    mActiveResamp->getNextAudioBlock (info);
+    // QA-H per-note glide: pull in 64-sample chunks with the ratio re-derived
+    // from the ramping semitone offset (~1.3 ms steps - smooth to the ear),
+    // then snap to the target ratio when the sweep completes.
+    if (mGlideSamplesLeft > 0)
+    {
+        int done = 0;
+        while (done < numSamples)
+        {
+            const int chunk = juce::jmin (64, numSamples - done);
+            mActiveResamp->setResamplingRatio (mGlideBaseRatio
+                * std::pow (2.0, (double) mGlideSemisCur / 12.0));
+            juce::AudioSourceChannelInfo ci (&mTmpBuffer, done, chunk);
+            mActiveResamp->getNextAudioBlock (ci);
+            const int adv = juce::jmin (chunk, mGlideSamplesLeft);
+            mGlideSemisCur    += mGlideSemisStep * (float) adv;
+            mGlideSamplesLeft -= adv;
+            if (mGlideSamplesLeft <= 0)
+            {
+                mGlideSemisCur = 0.0f;
+                mActiveResamp->setResamplingRatio (mGlideBaseRatio);
+            }
+            done += chunk;
+        }
+    }
+    else
+    {
+        juce::AudioSourceChannelInfo info (&mTmpBuffer, 0, numSamples);
+        mActiveResamp->getNextAudioBlock (info);
+    }
 
     // ── ADSR ─────────────────────────────────────────────────────────────────
     mAdsr.applyEnvelopeToBuffer (mTmpBuffer, 0, numSamples);
@@ -916,15 +979,16 @@ void VibeVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
         return;
     }
 
-    // ── Apply per-note filter bias (muffle + hardness + Batch E #2 CC74) ────
+    // ── Apply per-note filter bias (muffle + hardness + CC74 + QA-H CC71) ───
     if (mNoteCutoffBias > 0.001f || mNoteResBias > 0.001f
-        || mPerNoteCutoffOctaves != 0.0f)
+        || mPerNoteCutoffOctaves != 0.0f || mActiveResOffset != 0.0f)
     {
         float effCutoff = juce::jlimit (20.f, 20000.f, mBaseCutoff - mNoteCutoffBias);
         if (mPerNoteCutoffOctaves != 0.0f)
             effCutoff = juce::jlimit (20.f, 20000.f,
                                        effCutoff * std::pow (2.0f, mPerNoteCutoffOctaves));
-        const float effRes    = juce::jlimit (0.5f, 10.0f, mBaseRes + mNoteResBias * 9.5f);
+        const float effRes    = juce::jlimit (0.5f, 10.0f,
+            mBaseRes + mNoteResBias * 9.5f + mActiveResOffset);
         mFilter.setCutoffFrequency (effCutoff);
         mFilter.setResonance       (effRes);
     }
@@ -1045,6 +1109,7 @@ void VibeVoice::setAdsr (float a, float d, float s, float r) noexcept
     p.decay   = juce::jmax (0.001f, d);
     p.sustain = juce::jlimit (0.f, 1.f, s);
     p.release = juce::jmax (0.001f, r);
+    mAdsrBase = p;   // QA-H: pre-scale base for the per-note CC72 release scale
     // QA-VoicePool Task 3: if a steal-quick-release override is active, don't
     // disturb mAdsr's in-flight 1.5 ms release - save the new user setting so
     // startNote can restore it on the next note allocation instead.
@@ -1359,6 +1424,24 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
         }
         else
         {
+            // QA-H: per-note expression CCs must reach the voices IN ORDER
+            // with the synchronously-dispatched noteOns above - deferring
+            // them to filteredMidi delivers them AFTER every noteOn in the
+            // block (one-note-late stashes; the hole Batch E's CC74 shipped
+            // with here).  Broadcast inline to every voice (idle ones just
+            // stash) and consume the event.
+            if (msg.isController())
+            {
+                const int num = msg.getControllerNumber();
+                if (num == 5 || num == 37 || num == 71 || num == 72
+                    || num == 74 || num == 84 || num == 85)
+                {
+                    const int val = msg.getControllerValue();
+                    forEachVoice ([num, val] (VibeVoice& v)
+                                  { v.controllerMoved (num, val); });
+                    continue;
+                }
+            }
             // Per-pitch note-off strip (always on - paired with per-pitch preempt).
             // Drop any note-off whose pitch has a later-or-equal note-on in the
             // same block: that stale note-off would kill the fresh voice.

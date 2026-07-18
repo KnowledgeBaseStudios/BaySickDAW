@@ -308,12 +308,46 @@ public:
     void pitchWheelMoved (int newValue)                                override {}
     // Batch E #2 (2026-05-01): CC74 = per-note filter cutoff offset
     // (-2..+2 octaves multiplied into effCutoff in renderNextBlock).
+    // QA-H: CC71 resonance offset + CC72 release scale (pending -> consumed at
+    // startNote) + CC84/CC5/CC37 slide/porta glide stash.
     void controllerMoved (int controllerNumber, int newValue)          override
     {
         if (controllerNumber == 74)
         {
             const float norm = (float) newValue / 127.0f;
             mPerNoteCutoffOctaves = (norm - 0.5f) * 4.0f;
+        }
+        else if (controllerNumber == 71)
+            mPendResOffset = ((float) newValue / 127.0f - 0.5f) * 4.0f;   // -2..+2 Q
+        else if (controllerNumber == 72)
+            mPendRelScale = std::pow (2.0f, ((float) newValue / 127.0f - 0.5f) * 4.0f);
+        else if (controllerNumber == 84)
+            mGlideFromNote = newValue;
+        else if (controllerNumber == 5)  { mGlideTimeMsbMs = newValue; mGlideTimePending = true; }
+        else if (controllerNumber == 37) { mGlideTimeLsbMs = newValue; mGlideTimePending = true; }
+        else if (controllerNumber == 85) // QA-H Ramp Slide: bend the sounding anchor voice
+        {
+            // Takeover semantics - no retrigger.  Only the voice whose (juce)
+            // playing note matches the CC84 anchor bends; EVERY voice clears
+            // the glide stash so a ramp never leaks into a later noteOn.
+            if (mIsActive.load (std::memory_order_acquire) && ! mInRelease
+                && getCurrentlyPlayingNote() == mGlideFromNote
+                && mActiveResamp != nullptr)
+            {
+                const float tSec = mGlideTimePending
+                    ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
+                    : 0.06f;
+                const float curOffsetFromNew =
+                    (mCurTargetNote + mGlideSemisCur) - (float) newValue;
+                mGlideBaseRatio   = mBaseRatioTarget
+                    * std::pow (2.0, (double) (newValue - mNoteStartedAt) / 12.0);
+                mGlideSemisCur    = curOffsetFromNew;
+                mGlideSamplesLeft = juce::jmax (1, (int) (tSec * mSampleRate));
+                mGlideSemisStep   = -mGlideSemisCur / (float) mGlideSamplesLeft;
+                mCurTargetNote    = (float) newValue;
+            }
+            mGlideFromNote    = -1;
+            mGlideTimePending = false;
         }
     }
     void renderNextBlock (juce::AudioBuffer<float>& buf,
@@ -451,6 +485,32 @@ private:
     // Batch E #2 (2026-05-01): per-note cutoff offset from CC74 (Brightness).
     // -2..+2 octaves multiplied into effCutoff in renderNextBlock.
     float  mPerNoteCutoffOctaves { 0.0f };
+    // QA-H per-note expression: pending stashes written by controllerMoved,
+    // consumed into active values at startNote so a still-sounding voice keeps
+    // its own resonance/release when the next note's CCs land on the channel.
+    float  mPendResOffset    { 0.0f };   // CC71: -2..+2 Q
+    float  mPendRelScale     { 1.0f };   // CC72: 0.25x..4x release-time scale
+    float  mActiveResOffset  { 0.0f };
+    float  mActiveRelScale   { 1.0f };
+    juce::ADSR::Parameters mAdsrBase;    // last user params (setAdsr), pre-scale
+    // CC84 glide source + optional CC5/CC37 time (ms).  The glide ramps the
+    // resampling ratio in semitone space via sub-block chunks in
+    // renderNextBlock; porta without a time uses a fixed 60 ms (the player
+    // has no glide param).
+    int    mGlideFromNote    { -1 };
+    int    mGlideTimeMsbMs   { 0 };
+    int    mGlideTimeLsbMs   { 0 };
+    bool   mGlideTimePending { false };
+    int    mGlideSamplesLeft { 0 };
+    float  mGlideSemisCur    { 0.0f };   // current offset from target, ramps to 0
+    float  mGlideSemisStep   { 0.0f };   // per-sample delta
+    double mGlideBaseRatio   { 1.0 };    // CURRENT target resampling ratio
+    // Ramp-slide pitch tracking: the juce playing note stays the startNote
+    // pitch (so the extended noteOff still finds this voice); these carry the
+    // voice's actual pitch target for ratio math across chained ramps.
+    int    mNoteStartedAt    { 60 };     // startNote midi note
+    double mBaseRatioTarget  { 1.0 };    // resampRatio at pitch == mNoteStartedAt
+    float  mCurTargetNote    { 60.0f };  // note the ratio currently targets
 
     // Resampling hold counter (for sample-rate reduction)
     int    mReductHold  { 0 };

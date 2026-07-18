@@ -863,10 +863,12 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             double songEnd = 0.0;
             if (mPM)
             {
+                // QA-H Task 8 (#6): muted blocks still COUNT toward song
+                // length - mute silences a block, it does not shorten the
+                // song (a lone muted 2-bar block = a 2-bar silent song).
                 for (int i = 0; i < mPM->getNumBlocks(); ++i)
                 {
                     const auto& blk = mPM->getBlock(i);
-                    if (blk.muted) continue;
                     const double blkEnd = blk.startBar * 4.0 + effectiveLengthBeats (blk);
                     if (blkEnd > songEnd) songEnd = blkEnd;
                 }

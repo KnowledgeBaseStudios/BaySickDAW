@@ -170,6 +170,8 @@ private:
     EngineId            mActive { EngineKind::DrumKit, 0 };
     StandalonePlayHead* mPlayHead { nullptr };
     UndoContext         mUndoCtx;
+    // QA-H Task 7: last ghost set pushed to the active roll (change guard).
+    std::vector<std::pair<const PianoRollData*, juce::Colour>> mLastGhosts;
 
     // Apply mActive's container to bounds; hide the rest.
     void applyActiveVisibility();

@@ -41,10 +41,30 @@ void BaySickSynthVoice::startNote (int midiNote, float velocity,
 
     const float targetHz = midiToHz (midiNote + mTranspose);
 
+    // QA-H per-note glide (CC84-armed slide/porta) takes precedence over the
+    // mono-context glide: the voice starts AT the source pitch and glides to
+    // the target, regardless of what this voice played before.
+    if (mGlideFromNote >= 0)
+    {
+        mCurrentFreqHz = midiToHz (mGlideFromNote + mTranspose);
+        mTargetFreqHz  = targetHz;
+        const float tSec = mGlideTimePending
+            ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
+            : (mGlideTime > 0.001f ? mGlideTime : 0.06f);
+        const float glideSamples = tSec * (float) getSampleRate();
+        if (glideSamples > 1.0f && mCurrentFreqHz > 0.0f
+            && mCurrentFreqHz != mTargetFreqHz)
+            mGlideRatio = std::pow (mTargetFreqHz / mCurrentFreqHz, 1.0f / glideSamples);
+        else
+        {
+            mCurrentFreqHz = targetHz;
+            mGlideRatio    = 1.0f;
+        }
+    }
     // Glide only when the previous note is still HELD (not already in release).
     // Otherwise, a voice being reallocated from its release tail would inherit
     // stale mCurrentFreqHz and glide from the wrong starting pitch.
-    if (mCurrentNote >= 0 && ! mInRelease && mGlideTime > 0.001f && mCurrentFreqHz > 0.0f)
+    else if (mCurrentNote >= 0 && ! mInRelease && mGlideTime > 0.001f && mCurrentFreqHz > 0.0f)
     {
         mTargetFreqHz = targetHz;
         const float glideSamples = mGlideTime * (float) getSampleRate();
@@ -59,6 +79,16 @@ void BaySickSynthVoice::startNote (int midiNote, float velocity,
         mTargetFreqHz  = targetHz;
         mGlideRatio    = 1.0f;
     }
+    mGlideFromNote    = -1;      // one-shot: never leaks into the next note
+    mGlideTimePending = false;
+
+    // Consume the per-note expression stashes; re-apply the base envelope with
+    // this note's release scale (the DSP's setters only fire on user change).
+    mActiveResOffset = mPendResOffset;
+    mActiveRelScale  = mPendRelScale;
+    mAmpEnv.setParameters (mAmpA, mAmpD, mAmpS,
+                           juce::jmax (0.001f, mAmpR * mActiveRelScale));
+    applyEffectiveFilterRes();
 
     mCurrentNote = midiNote;
     mInRelease   = false;
@@ -204,6 +234,44 @@ void BaySickSynthVoice::controllerMoved (int cc, int value)
         // Map 0..127 (cc) -> -2..+2 octaves, centered at 64.
         const float norm = (float) value / 127.0f;          // 0..1
         mPerNoteCutoffOctaves = (norm - 0.5f) * 4.0f;        // -2 .. +2
+    }
+    else if (cc == 71) // per-note resonance offset (QA-H)
+        mPendResOffset = ((float) value / 127.0f - 0.5f);    // -0.5..+0.5
+    else if (cc == 72) // per-note release scale (QA-H)
+        mPendRelScale = std::pow (2.0f, ((float) value / 127.0f - 0.5f) * 4.0f); // 0.25x..4x
+    else if (cc == 84) // glide source note (QA-H slide/porta)
+        mGlideFromNote = value;
+    else if (cc == 5)  { mGlideTimeMsbMs = value; mGlideTimePending = true; }
+    else if (cc == 37) { mGlideTimeLsbMs = value; mGlideTimePending = true; }
+    else if (cc == 85) // QA-H Ramp Slide: bend the sounding anchor voice
+    {
+        // Takeover semantics - no retrigger.  Only the voice whose (juce)
+        // playing note matches the CC84 anchor bends; EVERY voice clears the
+        // glide stash so a ramp never leaks into a later noteOn.
+        if (isVoiceActive() && ! mInRelease
+            && getCurrentlyPlayingNote() == mGlideFromNote)
+        {
+            const float target = midiToHz (value + mTranspose);
+            const float tSec = mGlideTimePending
+                ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
+                : 0.06f;
+            const float glideSamples = tSec * (float) getSampleRate();
+            if (mCurrentFreqHz > 0.0f && glideSamples > 1.0f
+                && target != mCurrentFreqHz)
+            {
+                mTargetFreqHz = target;
+                mGlideRatio   = std::pow (target / mCurrentFreqHz, 1.0f / glideSamples);
+            }
+            else
+            {
+                mCurrentFreqHz = target;
+                mTargetFreqHz  = target;
+                mGlideRatio    = 1.0f;
+            }
+            mCurrentNote = value;   // kb-track etc. follow the bend target
+        }
+        mGlideFromNote    = -1;
+        mGlideTimePending = false;
     }
 }
 
@@ -740,7 +808,8 @@ void BaySickSynthVoice::setModWheelAmt  (float a)  { mModWheelAmt  = juce::jlimi
 
 void BaySickSynthVoice::setAmpEnv (float a, float d, float s, float r)
 {
-    mAmpEnv.setParameters (a, d, s, r);
+    mAmpA = a; mAmpD = d; mAmpS = s; mAmpR = r;
+    mAmpEnv.setParameters (a, d, s, juce::jmax (0.001f, r * mActiveRelScale));
 }
 
 void BaySickSynthVoice::setVelAmpTrack (float amount)
@@ -804,7 +873,13 @@ void BaySickSynthVoice::setFilterCutoff (float hz)
 void BaySickSynthVoice::setFilterRes (float res)
 {
     mFilterRes = juce::jlimit (0.0f, 1.0f, res);
-    const float q = 0.707f + mFilterRes * (10.0f - 0.707f);
+    applyEffectiveFilterRes();
+}
+
+void BaySickSynthVoice::applyEffectiveFilterRes()
+{
+    const float eff = juce::jlimit (0.0f, 1.0f, mFilterRes + mActiveResOffset);
+    const float q   = 0.707f + eff * (10.0f - 0.707f);
     mFilter.setResonance (q);
 }
 

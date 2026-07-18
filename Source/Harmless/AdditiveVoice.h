@@ -204,6 +204,24 @@ private:
     // Batch E #2 (2026-05-01): per-note filter cutoff offset from CC74.
     // -2..+2 octaves added to filter-cutoff multiplier in renderNextBlock.
     float  mPerNoteCutoffOctaves { 0.0f };
+    // QA-H per-note expression: pending stashes written by controllerMoved
+    // (roll emits CCs just before each noteOn), consumed into active values at
+    // startNote so a still-sounding voice keeps its own values when the next
+    // note's CCs land on the channel.
+    float  mPendResOffset    { 0.0f };   // CC71: -1..+1 Q offset on both filters
+    float  mPendRelScale     { 1.0f };   // CC72: 0.25x..4x release-time scale
+    float  mActiveResOffset  { 0.0f };
+    float  mActiveRelScale   { 1.0f };
+    // CC84 glide source + optional CC5/CC37 glide time (ms).  Per-note glide
+    // runs the one-pole smoother with its own coefficient until the pitch
+    // lands (~3 time constants inside the requested time), then hands back to
+    // the normal fast/glide coefficient selection.
+    int    mGlideFromNote    { -1 };
+    int    mGlideTimeMsbMs   { 0 };
+    int    mGlideTimeLsbMs   { 0 };
+    bool   mGlideTimePending { false };
+    bool   mPerNoteGlideActive { false };
+    float  mPerNoteGlideCoeff  { 0.997f };
     float  mMasterPanL      { 1.0f };   // from setPan() - constant-power
     float  mMasterPanR      { 1.0f };
 
