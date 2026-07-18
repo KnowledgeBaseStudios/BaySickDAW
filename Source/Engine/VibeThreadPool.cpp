@@ -11,6 +11,12 @@
 // folder for download instructions.
 #include "concurrentqueue.h"
 
+#if JUCE_WINDOWS
+ #include <windows.h>
+ #include <avrt.h>              // AvSetMmThreadCharacteristics (MMCSS)
+ #pragma comment (lib, "avrt.lib")
+#endif
+
 struct VibeThreadPool::Impl
 {
     // Worker-eligible task queue (MPMC).  Workers tryPop this in workerLoop.
@@ -154,6 +160,15 @@ void VibeThreadPool::clearQueues() noexcept
 
 void VibeThreadPool::workerLoop (int workerIndex) noexcept
 {
+   #if JUCE_WINDOWS
+    // MMCSS "Pro Audio" registration for the worker's whole lifetime: a raw
+    // std::thread runs at OS-default priority and loses its core to any
+    // foreground burst mid-block.  A null handle (service unavailable /
+    // registry policy denies) is fine -- the worker just runs unboosted.
+    DWORD  mmcssTaskIndex = 0;
+    HANDLE mmcssHandle    = AvSetMmThreadCharacteristicsW (L"Pro Audio", &mmcssTaskIndex);
+   #endif
+
     auto& waker = *mImpl->wakers[(size_t) workerIndex];
 
     while (! mShutdown.load (std::memory_order_acquire))
@@ -223,4 +238,9 @@ void VibeThreadPool::workerLoop (int workerIndex) noexcept
 
         mImpl->activeWaiters.fetch_sub (1, std::memory_order_release);
     }
+
+   #if JUCE_WINDOWS
+    if (mmcssHandle != nullptr)
+        AvRevertMmThreadCharacteristics (mmcssHandle);
+   #endif
 }

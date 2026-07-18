@@ -354,6 +354,9 @@ namespace
         // fresh-instance default flipped to Mid (Task 9).
         { EffectType::Reverb, "70s Plate", [](DSPBase* p){ AS(ReverbDSP)
             d->setProcessingMode (0);
+            // Pin the algorithm the NAME promises (Schroeder plate topology);
+            // without the pin the preset inherits whatever the slot last ran.
+            d->setAlgorithm (0);
             d->setSize (0.55f);
             d->setDecay (1.8f);
             d->setDamp (0.40f);
@@ -363,6 +366,7 @@ namespace
         }},
         { EffectType::Reverb, "Cathedral", [](DSPBase* p){ AS(ReverbDSP)
             d->setProcessingMode (0);
+            d->setAlgorithm (1);   // pin Hall FDN (was slot-inherited)
             d->setSize (0.95f);
             d->setDecay (4.5f);
             d->setDamp (0.55f);
@@ -608,7 +612,7 @@ namespace
         }},
         { EffectType::Limiter, "Brick Wall", [](DSPBase* p){ AS(LimiterDSP)
             d->setCeilingDb (-0.3f);
-            d->setReleaseMs (5.0f);
+            d->setReleaseMs (10.0f);   // setter floor is 10 ms; 5 silently clamped
         }},
         { EffectType::Limiter, "Transparent", [](DSPBase* p){ AS(LimiterDSP)
             d->setCeilingDb (-3.0f);
@@ -692,6 +696,18 @@ void seedFactoryPresets()
 {
     presetsRoot().createDirectory();
 
+    // Versioned seeding: the skip-if-exists guard below froze factory files
+    // at their first seed -- code-table or serializer changes never reached
+    // an existing install (its factory presets diverged from what the current
+    // binary would seed).  Bump kFactorySeedVersion whenever factoryTable()
+    // values or any effect's preset serialization changes; a stale stamp
+    // rewrites FACTORY files from current code on next launch.  My Presets/
+    // is never touched.
+    constexpr int kFactorySeedVersion = 2;   // 1 = the frozen 2026-05-02 era
+    const auto stampFile = presetsRoot().getChildFile ("factory_seed_version.txt");
+    const bool forceReseed =
+        stampFile.loadFileAsString().trim().getIntValue() < kFactorySeedVersion;
+
     // I-15c (2026-05-03): ensure folder tree exists for EVERY pedal type so
     // the user sees a complete `Presets/Effects/Pedals/{TypeName}/` layout
     // even for pedals without factory presets.  Previously folders were
@@ -725,7 +741,7 @@ void seedFactoryPresets()
         ensureFolderTree (def.type);
         const auto file = factoryDir (def.type)
                               .getChildFile (juce::String (def.name) + ".xml");
-        if (file.existsAsFile()) continue;   // already seeded
+        if (! forceReseed && file.existsAsFile()) continue;   // already seeded
 
         auto dsp = EffectRack::createEffect (def.type);
         if (! dsp) continue;
@@ -740,6 +756,8 @@ void seedFactoryPresets()
         writePresetXml (file, def.type, def.name, blob, err);
         // Silent on failure -- factory presets are best-effort during boot.
     }
+
+    stampFile.replaceWithText (juce::String (kFactorySeedVersion));
 }
 
 }   // namespace EffectPresetIO

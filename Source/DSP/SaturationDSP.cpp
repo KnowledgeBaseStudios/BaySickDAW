@@ -782,8 +782,8 @@ void SaturationDSP::setStateInformation (const void* data, int sz)
     mTapePreShelfDb   = (float) xml->getDoubleAttribute ("tape_preShelfDb",   mTapePreShelfDb);
     mTapeDeShelfDb    = (float) xml->getDoubleAttribute ("tape_deShelfDb",    mTapeDeShelfDb);
     mTapeLpHz         = (float) xml->getDoubleAttribute ("tape_lpHz",         mTapeLpHz);
-    // Default false on load so old Tape presets (pre-cassette-IR) preserve their
-    // sound; fresh patches keep the construction default (IR on).
+    // Default false on load so old Tape presets (pre-cassette-IR) preserve
+    // their sound; matches the construction default (IR off, SaturationDSP.h).
     mTapeIrOn         =         xml->getBoolAttribute    ("tape_irOn",        false);
     mTapeCassetteIdx  = juce::jlimit (0, kNumCassettes - 1,
                                       xml->getIntAttribute ("tape_cassetteIdx", mTapeCassetteIdx));

@@ -1128,8 +1128,8 @@ thread).
 
 ### §B.16 — QA-J' (stacking-batch residuals: unmute re-sync + applicator-map hygiene)
 
-`blocks:` `________` (QA-J', the whole batch in one commit; hash backfills at the next
-docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+`blocks:` `b54a44d4` (QA-J', the whole batch in one commit). Debug exe FIRST, then
+Release — mark each scenario `D:` and `R:`.
 Background: mute gates skip a clip's whole render body, freezing the stretch reader's
 file position while the transport advances — pre-fix, a mute shorter than ~2 seconds
 slipped under the seek tolerance and playback resumed OFFSET by the mute length,
@@ -1167,6 +1167,56 @@ maps had no erase path at all — closed tabs and prior projects kept entries fo
       aux/vox/inst/rusty RACK knobs (incl. Rusty Bus) show those lanes stale in the
       browser — re-automate recreates them; mixer-strip knob lanes are unaffected.
       `D:__ R:__` notes:
+
+### §B.17 — QA-K (priority/MMCSS + ASIO panel + live buffer-size + preset audit fixes)
+
+`blocks:` `________` (QA-K, the whole batch in one commit; hash backfills at the next
+docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+Background: process now runs Above Normal with MMCSS "Pro Audio" render workers;
+buffer-size-only changes apply live (10b feasibility verdict happens HERE); first
+launch performs the one-time factory-effect-preset re-seed (versioned seeding).
+
+- [ ] **K-1 — priority + MMCSS regression.** Launch; Task Manager > Details >
+      BaySickDAW.exe shows priority "Above normal". Play a busy project at a 128
+      buffer while dragging windows / opening pages hard: no NEW glitches vs the
+      pre-batch build (MMCSS should only ever help; any regression here is a red
+      flag). `D:__ R:__` notes:
+- [ ] **K-2 — one-time factory re-seed.** First launch after this build: playback and
+      effect racks behave normally; afterward git status shows rewritten
+      `Presets/Effects/**` factory XMLs + the new `factory_seed_version.txt` (expected
+      heal, not rot). Load Reverb factory presets on a rack slot: "Vocal Tame" now
+      sounds tight/dark (VocalBooth — clearly not the big hall), "70s Plate" pins the
+      Plate topology, "Cathedral" stays the big hall. `My Presets/` files untouched.
+      Second launch: no further rewrites. `D:__ R:__` notes:
+- [ ] **K-3 — ASIO Control Panel button.** Audio Settings on the ASIO device: "Open
+      ASIO Control Panel" enabled; click opens the vendor panel; change the buffer
+      size IN the vendor panel and close it — device restarts, audio resumes, LAT
+      readout reflects the new size. Switch the Audio Mode combo to Windows Audio
+      WITHOUT applying: button stays keyed to the LIVE device (still enabled). On a
+      machine/session where the live device is non-ASIO: button greyed.
+      `D:__ R:__` notes:
+- [ ] **K-4 — DSP-11 live buffer-size change (Debug FIRST — this is the 10b
+      feasibility verdict).** Audio Settings: change ONLY Buffer Size, Apply: NO
+      restart prompt; dialog closes; playback continues; LAT readout shows the new
+      size. Repeat several sizes up/down during playback. Then change Sample Rate (or
+      device): the old pending-file + restart prompt appears as before. If anything
+      crashes/hangs in Debug here, capture it — the locked fallback is reverting the
+      live path to pending+restart (Jeff decides at this section's pass).
+      `D:__ R:__` notes:
+- [ ] **K-5 — preset data fixes (ear list).** Lasersaw + Bell Lead sustain held notes;
+      Tropical Pluck / Shimmer Drone / Shimmer Pad have their full body back; 606
+      Closed Hat + Sleigh Bells are audible hats/bells (bright, not silent); 808
+      Claves rings ~40 ms (not a click); the 7 transpose-clamped presets play at the
+      same pitch as before (data now matches the clamp). Drum picker: Cabasa Shaker /
+      Rimshot Acoustic / Stick-Hit Drum / Tambourine each appear ONCE (Hand
+      Percussion only). `D:__ R:__` notes:
+- [ ] **K-6 — Rusty extended-CC round-trip.** Rusty page: move the hi-hat pedal macro
+      (an extended CC >= 128), save a player preset, tweak the macro elsewhere, reload
+      the preset: the macro position restores (old saves silently dropped it).
+      `D:__ R:__` notes:
+
+*(DSP-08 Tascam outputs 21/22 pair test stays its own campaign hardware item per
+marathon 10a — not part of this section.)*
 
 ## §C — Deferred re-verify ledger
 

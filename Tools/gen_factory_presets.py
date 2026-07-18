@@ -4326,6 +4326,26 @@ def main():
     synth_recipes, synth_report = merge_with_dedupe(SYNTH_RECIPES, NEW_SYNTH_RECIPES, SYNTH_CATEGORIES)
     bass_recipes,  bass_report  = merge_with_dedupe(BASS_RECIPES,  NEW_BASS_RECIPES,  BASS_CATEGORIES)
 
+    # Stale-category cleanup: when a recipe's category mapping moves, the old
+    # folder keeps its copy forever (the 2026-04-25 Hand Percussion move
+    # shipped 4 duplicate drum presets that way).  Delete any same-named XML
+    # sitting outside the recipe's CURRENT category folder.  My Presets/ is
+    # never touched.
+    stale = 0
+    for eng_dir, recipes, cats in ((DRUMS_DIR, drum_recipes, DRUM_CATEGORIES),
+                                   (SYNTH_DIR, synth_recipes, SYNTH_CATEGORIES),
+                                   (BASS_DIR,  bass_recipes,  BASS_CATEGORIES)):
+        if not eng_dir.is_dir(): continue
+        for name, _ in recipes:
+            expected = eng_dir / cats[name] if name in cats else eng_dir
+            for f in eng_dir.rglob(name + ".xml"):
+                if "My Presets" in f.parts: continue
+                if f.parent != expected:
+                    f.unlink()
+                    stale += 1
+    if stale:
+        print(f"Removed {stale} stale-category preset copy(ies).")
+
     print(f"\nDrum presets -> {DRUMS_DIR}")
     for name, overrides in drum_recipes:
         if args.starter_only and name not in starter_set:

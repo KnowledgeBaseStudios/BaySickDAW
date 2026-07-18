@@ -121,6 +121,19 @@ public:
         };
         addAndMakeVisible(mCloseBtn);
 
+        // Vendor control panel exists only for ASIO devices (hasControlPanel).
+        // Enablement keys on the LIVE device, not the combo selection -- this
+        // dialog never touches the live device until Apply.
+        mPanelBtn.setButtonText("Open ASIO Control Panel");
+        mPanelBtn.setColour(juce::TextButton::buttonColourId,  VC::Panel);
+        mPanelBtn.setColour(juce::TextButton::textColourOffId, VC::Text);
+        {
+            auto* liveDev = mMgr.getCurrentAudioDevice();
+            mPanelBtn.setEnabled(liveDev != nullptr && liveDev->hasControlPanel());
+        }
+        mPanelBtn.onClick = [this] { showAsioControlPanel(); };
+        addAndMakeVisible(mPanelBtn);
+
         populateFromManager();
 
         // Set the dialog size after the toggles are built so resized() can
@@ -163,6 +176,7 @@ public:
         y = midiBlockTop + (int) juce::jmax((size_t) 1, mMidiToggles.size()) * togH + 12;
 
         const int btnW = 90, btnH = 28;
+        mPanelBtn.setBounds(kPad, y, 176, btnH);
         mApplyBtn.setBounds(getWidth() - kPad - btnW * 2 - 8, y, btnW, btnH);
         mCloseBtn.setBounds(getWidth() - kPad - btnW,         y, btnW, btnH);
     }
@@ -284,6 +298,33 @@ private:
             return;
         }
 
+        // Buffer-size-ONLY changes reconfigure the live device in place: same
+        // type, same device, same rate, different buffer, device actually
+        // open.  Everything else keeps the pending-file + restart flow below
+        // (the WASAPI-exclusive hot-swap crash class makes arbitrary live
+        // device swaps unsafe; a same-device buffer resize is the one narrow
+        // reconfigure the startup live-reconfigure precedent already does).
+        if (mMgr.getCurrentAudioDevice() != nullptr)
+        {
+            juce::AudioDeviceManager::AudioDeviceSetup cur;
+            mMgr.getAudioDeviceSetup(cur);
+
+            auto* curType = mMgr.getCurrentDeviceTypeObject();
+            const bool sameType = curType != nullptr
+                               && mTypeBox.getText() == curType->getTypeName();
+            const bool sameDev  = mDevBox.getText() == cur.outputDeviceName;
+            const bool sameRate = mRateBox.getSelectedId() > 0
+                               && mRateBox.getSelectedId() == (int) std::llround(cur.sampleRate);
+            const int  newBuf   = mBufBox.getSelectedId();
+
+            if (sameType && sameDev && sameRate
+                && newBuf > 0 && newBuf != cur.bufferSize)
+            {
+                applyBufferSizeLive(newBuf);
+                return;
+            }
+        }
+
         // Start from the current saved state so we only change what we touched.
         auto xml = mMgr.createStateXml();
         if (!xml)
@@ -354,6 +395,74 @@ private:
         });
     }
 
+    // ── Live buffer-size reconfigure (buffer-only Apply path) ─────────────────
+    void applyBufferSizeLive(int newBufferSize)
+    {
+        juce::AudioDeviceManager::AudioDeviceSetup setup;
+        mMgr.getAudioDeviceSetup(setup);
+        setup.bufferSize = newBufferSize;
+
+        // Quiesce our render callback around the reconfigure:
+        // removeAudioCallback BLOCKS until any in-flight callback returns, so
+        // none of BaySickDAW's code runs while the device closes + reopens at
+        // the new size.  The documented WASAPI-exclusive crash class is stream
+        // teardown racing the device's own render thread -- keeping our
+        // callback out of that window is the practical shield here (the
+        // dialog holds no processor reference for the bail-early shield).
+        if (mCallback != nullptr)
+            mMgr.removeAudioCallback(mCallback);
+
+        const juce::String err = mMgr.setAudioDeviceSetup(setup, /*treatAsChosenDevice*/ true);
+
+        if (mCallback != nullptr)
+            mMgr.addAudioCallback(mCallback);
+
+        if (err.isNotEmpty())
+        {
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::MessageBoxIconType::WarningIcon,
+                "Buffer Size Change Failed",
+                "The device rejected the new buffer size:\n\n" + err
+                    + "\n\nThe previous settings remain active.",
+                "OK");
+            return;
+        }
+
+        // The manager now holds the new size: shutdown's saveAudioSettings
+        // persists it to the live settings file.  No pending file, no restart
+        // prompt.  The manager's change broadcast refreshes output-latency +
+        // meter compensation via the existing StandaloneApp listener.
+        if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+            dw->exitModalState(0);
+    }
+
+    // ── ASIO vendor control panel ─────────────────────────────────────────────
+    // Mirrors juce::AudioDeviceSelectorComponent::showDeviceUIPanel: a modal
+    // shield while the vendor panel is up, then close + restart the device when
+    // the panel reports changed settings (ASIO buffer edits only take effect on
+    // reopen).  The restart is safe here despite this dialog's no-live-touch
+    // design: hasControlPanel gates this to ASIO only, so the WASAPI-exclusive
+    // hot-swap crash class the design avoids can't reach this path.
+    void showAsioControlPanel()
+    {
+        auto* dev = mMgr.getCurrentAudioDevice();
+        if (dev == nullptr || ! dev->hasControlPanel())
+            return;
+
+        juce::Component modalShield;
+        modalShield.setOpaque(true);
+        modalShield.addToDesktop(0);
+        modalShield.enterModalState();
+
+        if (dev->showControlPanel())
+        {
+            mMgr.closeAudioDevice();
+            mMgr.restartLastAudioDevice();
+            if (auto* top = getTopLevelComponent())
+                top->toFront(true);
+        }
+    }
+
     // C.3 (2026-04-30): build a ToggleButton per detected MIDI input device.
     // Each toggle's onClick calls setMidiInputDeviceEnabled live.  Persistence
     // happens via the device manager's auto-saved settings XML on shutdown.
@@ -399,7 +508,7 @@ private:
     juce::Label      mTypeLbl, mDevLbl, mRateLbl, mBufLbl;
     juce::Label      mMidiLbl, mMidiNoneLbl;
     juce::ComboBox   mTypeBox, mDevBox, mRateBox, mBufBox;
-    juce::TextButton mApplyBtn, mCloseBtn;
+    juce::TextButton mApplyBtn, mCloseBtn, mPanelBtn;
     std::vector<std::unique_ptr<juce::ToggleButton>> mMidiToggles;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioSettingsDialog)

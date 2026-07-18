@@ -11,7 +11,7 @@
   <PARAM id="tk_lay_0_harm_amp_a" value="0.001"/>
   <PARAM id="tk_lay_0_harm_amp_d" value="0.3"/>
   <PARAM id="tk_lay_0_harm_amp_s" value="0.0"/>
-  <PARAM id="tk_lay_0_harm_amp_r" value="0.0"/>
+  <PARAM id="tk_lay_0_harm_amp_r" value="0.001"/>
   <PARAM id="tk_lay_0_harm_flt_a" value="0.01"/>
   <PARAM id="tk_lay_0_harm_flt_d" value="0.1"/>
   <PARAM id="tk_lay_0_harm_flt_s" value="0.5"/>

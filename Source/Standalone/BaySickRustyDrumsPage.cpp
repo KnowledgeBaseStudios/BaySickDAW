@@ -388,7 +388,10 @@ void BaySickRustyDrumsPage::savePlayerPresetAs()
                     pe->setAttribute ("v",  natural);
                 }
             };
-            for (int cc = 0; cc < 128; ++cc)
+            // Full registered CC space, not MIDI's 128: kit-author "extended
+            // CCs" >= 128 (hi-hat macro CC400/401 etc.) must round-trip too --
+            // the old 128 cap silently dropped them from player presets.
+            for (int cc = 0; cc < BaySickRustyDrumsProcessor::kCcCount; ++cc)
                 pushParam ("brd_cc" + juce::String (cc));
             pushParam ("brd_outVol");
 

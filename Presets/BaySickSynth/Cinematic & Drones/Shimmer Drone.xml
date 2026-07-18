@@ -34,7 +34,7 @@
   <PARAM id="tk_lay_0_bss_burst_mode" value="0.0"/>
   <PARAM id="tk_lay_0_bss_burst_count" value="4.0"/>
   <PARAM id="tk_lay_0_bss_burst_spacing" value="20.0"/>
-  <PARAM id="tk_lay_0_bss_flt_type" value="1.0"/>
+  <PARAM id="tk_lay_0_bss_flt_type" value="0.0"/>
   <PARAM id="tk_lay_0_bss_flt_cutoff" value="20000.0"/>
   <PARAM id="tk_lay_0_bss_flt_res" value="0.0"/>
   <PARAM id="tk_lay_0_bss_flt_env_amt" value="0.0"/>

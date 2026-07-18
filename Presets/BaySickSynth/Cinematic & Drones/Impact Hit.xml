@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <BaySickSynthState>
   <PARAM id="tk_lay_0_bss_waveform" value="10.0"/>
-  <PARAM id="tk_lay_0_bss_transpose" value="-36.0"/>
+  <PARAM id="tk_lay_0_bss_transpose" value="-24.0"/>
   <PARAM id="tk_lay_0_bss_modifier" value="0.5"/>
   <PARAM id="tk_lay_0_bss_dualOscMode" value="0.0"/>
   <PARAM id="tk_lay_0_bss_oscSync" value="0.0"/>

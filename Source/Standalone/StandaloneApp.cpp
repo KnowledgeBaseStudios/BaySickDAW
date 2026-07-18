@@ -7,6 +7,10 @@
 #include "../ProjectManager.h"            // ProjectManager::getSettingsFile (Batch 10 Phase 3)
 #include "../Engine/RenderEngineFlags.h"  // gMultiThreadedEngineEnabled atomic (Batch 10 Phase 3)
 
+#if JUCE_WINDOWS
+ #include <windows.h>   // SetPriorityClass (process priority class)
+#endif
+
 // ── VibeSynthWindow ───────────────────────────────────────────────────────────
 // Subclass so the OS close button actually quits the application.
 class VibeSynthWindow : public juce::DocumentWindow
@@ -536,6 +540,15 @@ void VibesynthStandaloneApp::changeListenerCallback(juce::ChangeBroadcaster*)
 // ── VibesynthStandaloneApp ────────────────────────────────────────────────────
 void VibesynthStandaloneApp::initialise(const juce::String&)
 {
+   #if JUCE_WINDOWS
+    // Lift the whole process above NORMAL class so audio/render scheduling
+    // wins against background apps under load.  ABOVE_NORMAL, not HIGH or
+    // REALTIME -- the aggressive classes starve input/compositing and can
+    // priority-invert against drivers.  The per-thread boost for the render
+    // workers is MMCSS "Pro Audio" in VibeThreadPool::workerLoop.
+    SetPriorityClass (GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+   #endif
+
     // ── Splash screen (2026-04-21) ───────────────────────────────────────────
     // Shows the BaySickDAW logo on launch while the DAW initialises. The
     // juce::SplashScreen is self-managing - it deletes itself after the delay

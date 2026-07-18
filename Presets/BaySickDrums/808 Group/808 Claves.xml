@@ -19,7 +19,7 @@
   <PARAM id="tk_lay_0_bss_modWheelDest" value="0.0"/>
   <PARAM id="tk_lay_0_bss_modWheelAmt" value="0.0"/>
   <PARAM id="tk_lay_0_bss_amp_attack" value="0.001"/>
-  <PARAM id="tk_lay_0_bss_amp_decay" value="0.015"/>
+  <PARAM id="tk_lay_0_bss_amp_decay" value="0.04"/>
   <PARAM id="tk_lay_0_bss_amp_sustain" value="0.0"/>
   <PARAM id="tk_lay_0_bss_amp_release" value="0.3"/>
   <PARAM id="tk_lay_0_bss_velAmpTrack" value="1.0"/>
