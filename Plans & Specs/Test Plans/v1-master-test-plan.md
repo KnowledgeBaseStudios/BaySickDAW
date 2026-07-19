@@ -1259,8 +1259,8 @@ Release — mark each scenario `D:` and `R:`.
 
 ### §B.19 — QA-M (engine restoration lifecycle: kit-load vs Rusty)
 
-`blocks:` `________` (QA-M, the whole batch in one commit; hash backfills at the next
-docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+`blocks:` `ce4cb33c` (QA-M, the whole batch in one commit). Debug exe FIRST, then
+Release — mark each scenario `D:` and `R:`.
 Background: a full-kit load used to destroy the Rusty tab (Drums-typed, caught in the
 type-wide teardown) and never re-spawn it; re-adding Rusty gave an empty page.
 
@@ -1282,6 +1282,27 @@ type-wide teardown) and never re-spawn it; re-adding Rusty gave an empty page.
       loaded yet): + Add BaySickRustyDrums shows the pick-a-program overlay (no
       phantom kit). Then save a Rusty project, close, reopen: the kit restores exactly
       as before (restore path unchanged). `D:__ R:__` notes:
+
+### §B.20 — QA-N (DSP meter sum-of-cores, DIAG-02)
+
+`blocks:` `________` (QA-N, the whole batch in one commit; hash backfills at the next
+docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+Background: under MT the DSP% used to measure the audio thread's wall-clock only, so
+parallel worker time vanished (it read the critical path, not total work). It now sums
+per-task busy time across the audio-thread pump + every worker.
+
+- [ ] **N-1 — MT reads higher (total work counted).** Heavy project (many tracks/FX),
+      Multi-core Rendering ON: the transport DSP% reads NOTICEABLY HIGHER than the same
+      project on the pre-batch build (parallel work now included), and climbs further as
+      you add tracks. No audio glitches vs pre-batch at 128 buffer (measurement change
+      only). `D:__ R:__` notes:
+- [ ] **N-2 — MT OFF unchanged.** Same project, Multi-core Rendering OFF
+      (serial-diagnostic): DSP% matches the OLD behavior (single-thread wall-clock — the
+      audio thread runs the whole graph, so its wall-clock is the total). Toggling the
+      mode live flips the reading between the two without a restart. `D:__ R:__` notes:
+- [ ] **N-3 — idle/light near-zero, no jitter.** Empty or light project, both modes:
+      DSP% sits near zero; no new meter jitter or audio jitter at 128 buffer vs
+      pre-batch. `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

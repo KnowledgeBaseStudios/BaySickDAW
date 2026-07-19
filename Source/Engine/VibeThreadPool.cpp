@@ -92,7 +92,24 @@ void VibeThreadPool::runOneTask (RenderTask* task) noexcept
     if (task == nullptr)
         return;
 
-    task->run();
+    // QA-N (DIAG-02): accumulate this task's wall-clock into the per-block
+    // busy sum so the DSP meter can report TOTAL render work (audio-thread
+    // pump + every worker), not just the audio thread's critical path.  Gated
+    // on the MT flag: with workers parked (serial-diagnostic), only the audio
+    // thread runs tasks and its own processBlock wall-clock already IS the
+    // total -- so the tick reads would be pure overhead.  Zero cost when MT is
+    // off (the plan's contract).  relaxed: diagnostic, no ordering dependency.
+    if (RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_relaxed))
+    {
+        const auto s = juce::Time::getHighResolutionTicks();
+        task->run();
+        mBusyTicks.fetch_add (juce::Time::getHighResolutionTicks() - s,
+                              std::memory_order_relaxed);
+    }
+    else
+    {
+        task->run();
+    }
 
     // Decrement each child's dep counter. acq_rel guarantees that this
     // task's writes to mOutputBuffer are visible to the worker that picks

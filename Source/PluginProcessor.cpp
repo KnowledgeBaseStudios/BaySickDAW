@@ -2873,10 +2873,10 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         // the node-level atomics by this point; we just promote them.
         drainMeterAtomicsForUI();
 
-        // Drive the DSP-load meter + overload-protection path.  This measures
-        // audio-thread wall-clock; with worker parallelism it reads lower than
-        // a single-threaded run would (the architectural win).  Toggle
-        // "Multi-core Rendering" off (serial-diagnostic) to compare.
+        // Drive the DSP-load meter + overload-protection path.  QA-N (DIAG-02):
+        // the MT meter now sums per-worker + audio-thread task busy time, so it
+        // reports TOTAL render work; toggle "Multi-core Rendering" off to see
+        // the serial-path wall-clock instead.
         measureDspLoadAndOverload (t0, numSamples);
         return;
     }
@@ -3453,18 +3453,24 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
 }
 
 // 2026-05-07 (Batch 10): DSP-load measurement + overload protection.
-// Runs after dispatchBlock.  The audio thread isn't idle while workers run --
-// it participates as a worker via VibeThreadPool::runUntilOrTimeout, popping +
-// executing tasks itself -- so wall-clock t1-t0 captures meaningful work time,
-// and with worker parallelism the meter reads lower than a single-threaded run
-// would (the architectural win).  Voice-stealing on sustained 85% overload
-// fires regardless of worker count.
+// Runs after dispatchBlock.  QA-N (DIAG-02): the number is TOTAL render work
+// (audio-thread pump + every worker), so it tracks "% of one core" of the
+// whole graph instead of the audio thread's critical-path wall-clock.  MT
+// path reads the pool's summed per-task busy ticks; ST path (workers parked)
+// keeps the wall-clock measure -- there the audio thread runs the whole graph
+// serially, so t1-t0 already IS the total (byte-identical to pre-batch).
+// Voice-stealing on sustained 85% overload fires regardless of worker count.
 void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int numSamples)
 {
-    const auto   t1       = juce::Time::getHighResolutionTicks();
-    const double elapsed  = (double)(t1 - t0Ticks)
-                            / (double)juce::Time::getHighResolutionTicksPerSecond();
-    const double bufDur   = numSamples / juce::jmax (1.0, mSampleRate);
+    const double ticksPerSec = (double) juce::Time::getHighResolutionTicksPerSecond();
+    const double bufDur      = numSamples / juce::jmax (1.0, mSampleRate);
+    // MT: total parallel task work (sum across the audio-thread pump + all
+    // workers, accumulated in VibeThreadPool::runOneTask, reset per block by
+    // the dispatcher).  ST: audio-thread wall-clock, unchanged.
+    const double workSeconds =
+        RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire)
+            ? (double) mRenderPool.getBusyTicks() / ticksPerSec
+            : (double) (juce::Time::getHighResolutionTicks() - t0Ticks) / ticksPerSec;
     // 2026-05-09 (QA-Md): cap raised from 2.f (200%) to 10.f (1000%) after
     // diagnostic capture proved both Debug-MT-on (450%) and Debug-MT-off
     // (870%) sit well above the original 200% cap, masking the true parallel-
@@ -3474,7 +3480,7 @@ void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int num
     // QA-Audit "Pre-release decisions to revisit" docket -- see Main Plan
     // §5 QA-Audit + Future State CL-291.
     const float  rawLoad  = (bufDur > 0.0)
-                                ? juce::jlimit (0.f, 10.f, (float)(elapsed / bufDur))
+                                ? juce::jlimit (0.f, 10.f, (float)(workSeconds / bufDur))
                                 : 0.f;
 
     // Exponential smoothing - ~80 ms time constant at 512/44100 block rate

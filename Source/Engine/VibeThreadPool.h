@@ -74,6 +74,16 @@ public:
     // wait state until new tasks arrive.
     void clearQueues() noexcept;
 
+    // QA-N (DIAG-02): per-block busy-tick accumulator.  runOneTask (the single
+    // funnel for BOTH workers and the audio thread's runUntilOrTimeout pump)
+    // adds each task's wall-clock here, so the sum is total parallel render
+    // work rather than the audio thread's critical-path wall-clock.  The
+    // dispatcher resets it at block start; the DSP meter reads the sum on the
+    // MT path.  relaxed everywhere: diagnostic measurement, no algorithmic
+    // dependency on the value.
+    void        resetBusyTicks() noexcept       { mBusyTicks.store (0, std::memory_order_relaxed); }
+    juce::int64 getBusyTicks()   const noexcept { return mBusyTicks.load (std::memory_order_relaxed); }
+
 private:
     void workerLoop (int workerIndex) noexcept;
     void runOneTask (RenderTask* task) noexcept;
@@ -83,4 +93,8 @@ private:
 
     int               mNumWorkers = 0;
     std::atomic<bool> mShutdown   { false };
+
+    // Cache-line isolated (workers fetch_add it concurrently under MT) so the
+    // contended accumulator never false-shares with mShutdown / mNumWorkers.
+    alignas (64) std::atomic<juce::int64> mBusyTicks { 0 };
 };

@@ -228,6 +228,11 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
     if (RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed))
         RenderEngine::MtDiagnostic::gBlockCount.fetch_add (1, std::memory_order_relaxed);
 
+    // QA-N (DIAG-02): reset the pool's per-block busy accumulator at the block
+    // boundary.  runOneTask (workers + audio-thread pump) adds to it below;
+    // measureDspLoadAndOverload reads the sum after this dispatch returns.
+    mPool.resetBusyTicks();
+
     // ── Reset dep counters + assign ctx for every task ──────────────────────
     // Release ordering on the counter store pairs with the worker's acquire
     // when picking up a child whose deps just hit zero - guarantees the
