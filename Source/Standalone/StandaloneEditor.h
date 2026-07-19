@@ -715,6 +715,11 @@ private:
     // sOnMidi* callbacks in the StandaloneEditor constructor.
     std::unique_ptr<class MidiLearnUI> mMidiLearnUI;
 
+    // Session memory of the last Rusty kit (LIFE-02): captured on every kit
+    // load + at tab close; re-adding the Rusty tab auto-reloads it.  Not
+    // persisted -- project restore carries its own kitPath record.
+    juce::File mLastRustyKitFile;
+
     // ── Automation playback (Phase 4D) ────────────────────────────────────────
     // Maps paramId → function that applies a 0..1 normalised value on the message thread.
     // Populated automatically from APVTS params + registrations from panels/strips.

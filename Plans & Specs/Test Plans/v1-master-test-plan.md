@@ -1220,8 +1220,8 @@ marathon 10a — not part of this section.)*
 
 ### §B.18 — QA-L (UI polish + navigation + per-drum MIDI notes)
 
-`blocks:` `________` (QA-L, the whole batch in one commit; hash backfills at the next
-docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+`blocks:` `2e2df50a` (QA-L, the whole batch in one commit). Debug exe FIRST, then
+Release — mark each scenario `D:` and `R:`.
 
 - [ ] **L-1 — right-click menu trigger (UI-01).** Open any menu (drum context menu,
       hamburger, pattern dropdown): RIGHT-click over a highlighted item — nothing
@@ -1256,6 +1256,32 @@ docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`
       controller (or the typing keyboard); held-note release works; an unassigned
       drum still plays only when its tab is focused; the focused drum still plays
       chromatically. Assignments survive save/reload (APVTS param). `D:__ R:__` notes:
+
+### §B.19 — QA-M (engine restoration lifecycle: kit-load vs Rusty)
+
+`blocks:` `________` (QA-M, the whole batch in one commit; hash backfills at the next
+docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+Background: a full-kit load used to destroy the Rusty tab (Drums-typed, caught in the
+type-wide teardown) and never re-spawn it; re-adding Rusty gave an empty page.
+
+- [ ] **M-1 — kit load leaves Rusty alone (LIFE-01).** Have a Rusty tab with a kit
+      loaded AND one or more DrumPage drum tabs. Load a full kit from the kit menu:
+      "Replace Drums?" prompt appears with the "(BaySickRustyDrums is not affected...)"
+      line; on Proceed the DrumPage tabs are replaced by the kit's drums and the Rusty
+      tab is STILL there, still playing its kit (audition it). `D:__ R:__` notes:
+- [ ] **M-2 — Rusty-only project, honest prompt (LIFE-01).** Rusty tab loaded, NO
+      DrumPage tabs. Load a kit: NO "Replace Drums?" prompt (nothing to replace); the
+      kit's DrumPage drums load in alongside the untouched Rusty. `D:__ R:__` notes:
+- [ ] **M-3 — re-add auto-reloads last kit (LIFE-02).** Load a Rusty kit (Full or
+      Basic), delete the Rusty tab (confirm the delete prompt), then re-add Rusty from
+      the ribbon +menu: the last kit auto-loads — kit graphic populated, program combo
+      shows the right program, ARIA panel rendered, and it plays (not the empty
+      pick-a-program overlay). Switch program to the other one, delete + re-add again:
+      the NEW last program comes back. `D:__ R:__` notes:
+- [ ] **M-4 — fresh session + project restore regression.** Brand-new session (no Rusty
+      loaded yet): + Add BaySickRustyDrums shows the pick-a-program overlay (no
+      phantom kit). Then save a Rusty project, close, reopen: the kit restores exactly
+      as before (restore path unchanged). `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

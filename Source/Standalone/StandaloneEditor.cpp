@@ -4694,6 +4694,11 @@ void StandaloneEditor::onTabClosed(int tabId)
             const bool isRusty = dynamic_cast<BaySickRustyDrumsPage*>(mPages[i]->component.get()) != nullptr;
             if (isRusty)
             {
+                // Last-kit session memory (LIFE-02) -- the engine is still
+                // alive here (destroyed only after mPages.remove below).
+                if (auto* eng = mProcessor.getBaySickRustyDrums())
+                    if (eng->getCurrentKitPath().existsAsFile())
+                        mLastRustyKitFile = eng->getCurrentKitPath();
                 if (mMixerPage) mMixerPage->clearAllRustyChannels();
                 if (mPianoRollPage)
                     mPianoRollPage->unregisterEngine ({ EngineKind::BaySickRustyDrums, 0 });
@@ -7074,9 +7079,11 @@ void StandaloneEditor::saveKitAs()
 
 void StandaloneEditor::loadKit (const juce::File& kitXml)
 {
-    // 2026-04-26: kit-replace confirmation.  If any existing drum tab has an
-    // engine loaded, prompt the user before tearing it all down.  Skipped if
-    // the user previously checked "Don't show again".
+    // Kit-replace confirmation.  Scans DrumPage engines ONLY, deliberately
+    // (docket pick 2): a kit load replaces DrumPage tabs and never touches
+    // the Rusty singleton (LIFE-01), so a Rusty-only project loads with no
+    // prompt -- nothing gets replaced.  Skipped if the user previously
+    // checked "Don't show again".
     bool anyExistingDrum = false;
     for (auto& e : mPages)
     {
@@ -7086,10 +7093,20 @@ void StandaloneEditor::loadKit (const juce::File& kitXml)
     }
     if (anyExistingDrum && mProjectManager && ! mProjectManager->getSkipKitReplacePrompt())
     {
+        bool hasRusty = false;
+        for (auto& e : mPages)
+            if (e && dynamic_cast<BaySickRustyDrumsPage*> (e->component.get()) != nullptr)
+                { hasRusty = true; break; }
+
+        juce::String msg = "This will replace all of your current drum tabs "
+                           "with the new kit's drums, do you wish to proceed?";
+        if (hasRusty)
+            msg += "\n\n(BaySickRustyDrums is not affected by kit loads.)";
+
         auto dontAsk = std::make_unique<juce::ToggleButton> ("Don't show again");
         dontAsk->setSize (160, 24);
         auto* aw = new juce::AlertWindow ("Replace Drums?",
-            "This action will remove all currently selected drums, do you wish to proceed?",
+            msg,
             juce::AlertWindow::QuestionIcon);
         aw->addCustomComponent (dontAsk.get());
         aw->addButton ("Proceed", 1, juce::KeyPress (juce::KeyPress::returnKey));
@@ -7143,18 +7160,23 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
     HeavyOperationOverlay::ScopedOp heavyOp (mHeavyOpOverlay, "Loading Kit...", true);
     mHeavyOpOverlay.setStepLabel ("Building drum tabs...");
 
-    // Tear down every existing drum tab.  Drums-only - keep Layers + Bass.
-    // Mirrors closeAllDynamicTabs's pattern (onTabClosed handles mPages /
-    // slot freeing; ribbon needs a separate wipe via clearTabsOfType).
+    // Tear down every existing DrumPage tab.  Drums-only - keep Layers +
+    // Bass.  The Rusty tab is ALSO Drums-typed, but a kit load replaces
+    // DrumPage kits, never the singleton Rusty engine (LIFE-01) -- filter it
+    // out, and close per-id instead of the type-wide ribbon clear so Rusty's
+    // ribbon tab survives.  closeTab fires onTabClosed itself (the Rusty
+    // delete flow's documented behavior), so one call = the complete close.
     {
         juce::Array<int> drumIds;
         for (auto& e : mPages)
-            if (e && e->type == RibbonTabBar::TabType::Drums)
+            if (e && e->type == RibbonTabBar::TabType::Drums
+                && dynamic_cast<BaySickRustyDrumsPage*> (e->component.get()) == nullptr)
                 drumIds.add (e->ribbonTabId);
         for (int id : drumIds)
-            onTabClosed (id);
-        if (mRibbon)
-            mRibbon->clearTabsOfType (RibbonTabBar::TabType::Drums);
+        {
+            if (mRibbon) mRibbon->closeTab (id);
+            else         onTabClosed (id);
+        }
     }
 
     // Rebuild.  Supports two <Drum slot="N"> formats:
@@ -7769,6 +7791,7 @@ void StandaloneEditor::addBaySickRustyDrumsTab()
                 mMixerPage->addRustyChannelAtIndex ((int) i, chans[i].name);
             // 2026-05-05 dirty-flag wiring: engine exists post-load.
             wireEngineDirtyHook (eng);
+            mLastRustyKitFile = eng->getCurrentKitPath();   // LIFE-02 session memory
         }
     };
 
@@ -7837,9 +7860,19 @@ void StandaloneEditor::addBaySickRustyDrumsTab()
     // Roll" sub-tab can redirect to it.
     registerBaySickRustyDrumsPianoRoll();
 
-    // J-8 stage 1 (2026-05-04): no auto-load on tab spawn.  The user must
+    // LIFE-02: a re-add within the session auto-reloads the last kit via the
+    // restore primitive (program combo + ARIA panel synced; the loadKit
+    // funnel shows its busy sign).  Skipped during project load -- the
+    // restore path drives its own reload right after -- and on fresh
+    // sessions with no memory.
+    if (mLastRustyKitFile.existsAsFile()
+        && ! mProcessor.isProjectLoadInProgress())
+        rawPage->reloadForProjectRestore (mLastRustyKitFile);
+
+    // J-8 stage 1 (2026-05-04): no auto-load on FIRST spawn.  The user must
     // pick Full or Basic from the "Load Player" dropdown on the sub-tab bar.
     // Until then the kit graphic shows the "Pick a program to begin" overlay.
+    // (LIFE-02 above is the session-re-add exception.)
     // Auto-select the newly created tab.  RibbonTabBar::selectTab updates
     // internal state but doesn't fire onTabSelected, so call onTabSelected
     // explicitly to trigger showPageForTab + page-menu setup.
