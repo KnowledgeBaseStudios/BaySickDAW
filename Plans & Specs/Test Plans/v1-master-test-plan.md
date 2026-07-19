@@ -1170,8 +1170,8 @@ maps had no erase path at all — closed tabs and prior projects kept entries fo
 
 ### §B.17 — QA-K (priority/MMCSS + ASIO panel + live buffer-size + preset audit fixes)
 
-`blocks:` `________` (QA-K, the whole batch in one commit; hash backfills at the next
-docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+`blocks:` `684cf253` (QA-K, the whole batch in one commit). Debug exe FIRST, then
+Release — mark each scenario `D:` and `R:`.
 Background: process now runs Above Normal with MMCSS "Pro Audio" render workers;
 buffer-size-only changes apply live (10b feasibility verdict happens HERE); first
 launch performs the one-time factory-effect-preset re-seed (versioned seeding).
@@ -1217,6 +1217,45 @@ launch performs the one-time factory-effect-preset re-seed (versioned seeding).
 
 *(DSP-08 Tascam outputs 21/22 pair test stays its own campaign hardware item per
 marathon 10a — not part of this section.)*
+
+### §B.18 — QA-L (UI polish + navigation + per-drum MIDI notes)
+
+`blocks:` `________` (QA-L, the whole batch in one commit; hash backfills at the next
+docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+
+- [ ] **L-1 — right-click menu trigger (UI-01).** Open any menu (drum context menu,
+      hamburger, pattern dropdown): RIGHT-click over a highlighted item — nothing
+      activates and the menu stays up; left-click still selects. Spot-check in two
+      different menus. `D:__ R:__` notes:
+- [ ] **L-2 — deleted-slot lane names (UI-02).** Automate a rack knob (right-click ->
+      Automate), then delete that effect from its slot: the lane's row + Event Editor
+      title read "<Channel - Effect - Param> (deleted)" — no UUID soup; the stale-row
+      tint still shows. `D:__ R:__` notes:
+- [ ] **L-3 — strip lifecycle (MIX-05/07).** Close a Layers page: its mixer strip
+      disappears and neighbors re-flow; the Effects-page channel dropdown no longer
+      lists it. Re-add a Layers tab at the same slot: ONE strip, no overlap, prior
+      fader/pan restored. Repeat once with a Drum tab. `D:__ R:__` notes:
+- [ ] **L-4 — Builder header sync (NAV-01).** Scroll the Builder vertically, then
+      resize the window and zoom rows: track header rows stay glued to grid rows at
+      every step (no one-tick lag). `D:__ R:__` notes:
+- [ ] **L-5 — nav buttons (#18 + C).** Every page type (Layers/Bass/Drums/Clips/Vox/
+      Inst both variants): "FX Rack" at the right end of the sub-tab row jumps to that
+      strip's rack on the Effects page. Piano Roll page: "Player Page" + "FX Rack"
+      right of the roll dropdown act on the selected roll (edge picks: Drum Kit roll ->
+      first Drums tab / Drums Bus rack; Rusty -> Rusty Bus rack). `D:__ R:__` notes:
+- [ ] **L-6 — duplicate names (FILE-03).** Get two same-named entries (+ Add New Clip
+      picking an already-imported file): the second shows auto-numbered "(2)". Rename/
+      delete one — the OTHER survives untouched (grid clip titles follow the right
+      one). `D:__ R:__` notes:
+- [ ] **L-7 — roll click accuracy (LDT-394).** At deep zoom (in and out), click just
+      left/right of a beat line and just above/below a row boundary: notes land on the
+      intended beat/row; near-edge resize grabs still work. `D:__ R:__` notes:
+- [ ] **L-8 — per-drum MIDI notes (#10).** Fresh project: nothing mapped (pads only
+      play the focused drum). Assign notes to 3 drums via right-click -> MIDI Note;
+      focus ANY drum tab: the 3 pads fire kick/snare/hat simultaneously from a
+      controller (or the typing keyboard); held-note release works; an unassigned
+      drum still plays only when its tab is focused; the focused drum still plays
+      chromatically. Assignments survive save/reload (APVTS param). `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

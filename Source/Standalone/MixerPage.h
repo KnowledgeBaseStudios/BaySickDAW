@@ -12,11 +12,12 @@
 //
 // Default state: Master (fixed) + 4 Bus strips.
 // Instrument channel strips are created lazily:
-//   addLayerChannel(tabId, name) - called when a Layers tab is opened
-//   addBassChannel (tabId, name) - called when a Bass tab is opened
-//   addDrumChannel (slot,  name) - called when a drum slot gets a sound
+//   addLayerChannel(pageIndex, name) - called when a Layers tab is opened
+//   addBassChannel (pageIndex, name) - called when a Bass tab is opened
+//   addDrumChannel (slot,      name) - called when a drum slot gets a sound
 //
-// Strips never get destroyed (preserves effects chain).
+// Closing a tab removes its strip WIDGET only -- the InsertNode + APVTS
+// params persist, so re-adding the same index restores prior settings.
 //
 // Bidirectional name sync for Layer/Bass:
 //   mixer strip rename  → onChannelRenamed(tabId, newName) → ribbon renameTab()
@@ -101,8 +102,8 @@ public:
     // ── Lazy channel creation ─────────────────────────────────────────────────
     // Called by StandaloneEditor when a page tab is opened or a sound assigned.
     // Strips persist once created; passing an empty name to addDrumChannel is a no-op.
-    void addLayerChannel(int tabId, const juce::String& name);
-    void addBassChannel (int tabId, const juce::String& name);
+    void addLayerChannel(int pageIndex, const juce::String& name);
+    void addBassChannel (int pageIndex, const juce::String& name);
     void addDrumChannel (int slot,  const juce::String& name);
     void addAudioChannel(int row,   const juce::String& name);  // one strip per arrangement row
 
@@ -122,6 +123,13 @@ public:
     void removeInstChannel(int idx);
     void removeVoxChannel(int idx);
     void removeClipChannel(int idx);
+    // Same orphan class for the engine-page strips (MIX-05's real cause):
+    // Layer/Bass/Drum tab closes never removed their strip, so strips
+    // overlapped after re-add and the add-side count(idx) guard blocked
+    // reuse.  Same preserve-APVTS convention as the trio above.
+    void removeLayerChannel(int pageIndex);
+    void removeBassChannel (int pageIndex);
+    void removeDrumChannel (int slot);
 
     // G-7 (2026-04-29): full delete via right-click → Delete prompt.  Sweeps
     // every strip's send params and resets any pointing at this aux's

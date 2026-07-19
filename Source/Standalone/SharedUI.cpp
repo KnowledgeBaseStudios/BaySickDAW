@@ -1450,6 +1450,7 @@ void PageMenuBar::clearTabSlots()
     mTabSlotBtns.clear();
     if (mMidBtn)  { removeChildComponent(mMidBtn.get());  mMidBtn.reset(); }
     if (mSideBtn) { removeChildComponent(mSideBtn.get()); mSideBtn.reset(); }
+    if (mFxRackBtn) { removeChildComponent(mFxRackBtn.get()); mFxRackBtn.reset(); }
     mMidSideVisible = false;
     clearExtraRightComponents();
     resized();
@@ -1483,6 +1484,25 @@ void PageMenuBar::setMidSideSlots(std::function<void()> onMid,
     };
     mMidBtn ->setToggleState( midActive, juce::dontSendNotification);
     mSideBtn->setToggleState(!midActive, juce::dontSendNotification);
+    resized();
+}
+
+void PageMenuBar::setFxRackSlot(std::function<void()> onClick)
+{
+    if (! onClick)
+    {
+        if (mFxRackBtn) mFxRackBtn->setVisible(false);
+        resized();
+        return;
+    }
+    if (! mFxRackBtn)
+    {
+        mFxRackBtn = std::make_unique<juce::TextButton>("FX Rack");
+        mFxRackBtn->setTooltip("Open this page's effect rack on the Effects page");
+        addAndMakeVisible(*mFxRackBtn);
+    }
+    mFxRackBtn->setVisible(true);
+    mFxRackBtn->onClick = std::move(onClick);
     resized();
 }
 
@@ -1575,6 +1595,13 @@ void PageMenuBar::resized()
     {
         b.removeFromLeft(6);
         mBankIndicator->setBounds(b.removeFromLeft(56).reduced(1, 1));
+    }
+
+    // FX Rack jump at the right end of the page-tab button cluster.
+    if (mFxRackBtn && mFxRackBtn->isVisible())
+    {
+        b.removeFromLeft(6);
+        mFxRackBtn->setBounds(b.removeFromLeft(58).reduced(1, 1));
     }
 
     // Extra right components (Kit, Nav combo, etc.) flush to right

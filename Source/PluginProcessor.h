@@ -993,6 +993,12 @@ private:
     // mDrumSlotBufs removed (BaySickDrumsProcessor deleted).
     juce::SpinLock                                         mDrumEngineLock;
     std::array<juce::AudioProcessor*, kMaxDrumPages>       mDrumEngines {};
+    // Per-drum MIDI trigger note (kit fan-out): pre-resolved pointer to the
+    // lazily-registered mixer_drum_{N}_inputNote raw value.  Published with a
+    // release store on the message thread at registerDrumEngine (the param
+    // exists by then); audio thread acquire-loads per event.  null = strip
+    // not registered yet = unmapped.
+    std::array<std::atomic<std::atomic<float>*>, kMaxDrumPages> mDrumInputNotePtr {};
     juce::AudioBuffer<float>                               mDrumEngineBuf;     // per-drum render scratch
     juce::AudioBuffer<float>                               mDrumEngineScratch; // per-drum sum scratch
     // Fast-path bypass - true only when at least one DrumPage tab has registered

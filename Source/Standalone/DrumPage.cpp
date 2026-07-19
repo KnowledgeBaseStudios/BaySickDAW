@@ -1041,6 +1041,9 @@ void DrumPage::showContextMenu (juce::Component* anchor)
     constexpr int kIdSaveAs    = 20;
     // D3: choke-group submenu - 200 = None, 201..216 = groups 1..16.
     constexpr int kIdChokeBase = 200;   // 200 = None
+    // Per-drum MIDI note - 299 = Unassign, 300 + n = MIDI note n (0..127).
+    constexpr int kIdNoteUnassign = 299;
+    constexpr int kIdNoteBase     = 300;
     constexpr int kIdDelete    = 99;
 
     juce::PopupMenu menu;
@@ -1094,6 +1097,39 @@ void DrumPage::showContextMenu (juce::Component* anchor)
         menu.addSubMenu ("Choke Group", chokeSub);
     }
 
+    // Per-drum MIDI trigger note (kit fan-out): while any drum tab holds MIDI
+    // focus, an incoming note matching the assignment fires this drum too.
+    // Octave submenus; labels use the roll's FL-style octave numbering (C5 =
+    // 60, note/12).
+    {
+        const juce::String pid = "mixer_drum_" + juce::String (mPageIndex) + "_inputNote";
+        int curNote = -1;
+        if (auto* p = mProcessor.apvts.getRawParameterValue (pid))
+            curNote = juce::jlimit (-1, 127, (int) std::round (p->load()));
+
+        juce::PopupMenu noteSub;
+        noteSub.addItem (kIdNoteUnassign, "Unassigned", true, curNote < 0);
+        for (int oct = 0; oct * 12 < 128; ++oct)
+        {
+            const int lo = oct * 12;
+            const int hi = juce::jmin (127, lo + 11);
+            juce::PopupMenu octSub;
+            for (int n = lo; n <= hi; ++n)
+                octSub.addItem (kIdNoteBase + n,
+                                juce::MidiMessage::getMidiNoteName (n, true, true, 5)
+                                    + "  (" + juce::String (n) + ")",
+                                true, curNote == n);
+            noteSub.addSubMenu (juce::MidiMessage::getMidiNoteName (lo, true, true, 5)
+                                    + " - "
+                                    + juce::MidiMessage::getMidiNoteName (hi, true, true, 5),
+                                octSub);
+        }
+        menu.addSubMenu (curNote >= 0
+                             ? "MIDI Note: " + juce::MidiMessage::getMidiNoteName (curNote, true, true, 5)
+                             : juce::String ("MIDI Note"),
+                         noteSub);
+    }
+
     menu.addSeparator();
     const bool canSave = mEngineProcessor != nullptr
                           && (mEngineType == "BaySickSynth" || mEngineType == "BaySickPlayer");
@@ -1107,10 +1143,23 @@ void DrumPage::showContextMenu (juce::Component* anchor)
         juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis,
          kIdLock, kIdPolyphony, kIdRename, kIdDuplicate,
-         kIdChokeBase, kIdSaveAs, kIdDelete] (int r)
+         kIdChokeBase, kIdNoteUnassign, kIdNoteBase, kIdSaveAs, kIdDelete] (int r)
         {
             if (! safeThis || r <= 0) return;
             auto* dp = safeThis.getComponent();
+
+            // Per-drum MIDI note (299 = Unassign, 300 + n = note n).
+            if (r == kIdNoteUnassign || (r >= kIdNoteBase && r < kIdNoteBase + 128))
+            {
+                const int newNote = (r == kIdNoteUnassign) ? -1 : (r - kIdNoteBase);
+                const juce::String pid = "mixer_drum_" + juce::String (dp->mPageIndex) + "_inputNote";
+                if (auto* p = dp->mProcessor.apvts.getParameter (pid))
+                {
+                    const auto& range = p->getNormalisableRange();
+                    p->setValueNotifyingHost (range.convertTo0to1 ((float) newNote));
+                }
+                return;
+            }
 
             // D3: choke-group submenu (200..216 → 0..16).
             if (r >= kIdChokeBase && r <= kIdChokeBase + 16)

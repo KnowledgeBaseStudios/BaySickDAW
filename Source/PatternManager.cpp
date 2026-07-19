@@ -193,7 +193,32 @@ void PatternManager::addAudioToLibrary(const juce::String& path,
             return;
         }
     }
-    mAudioLibrary.push_back({ path, alias, 0 /* chokeGroup = none */, pageOwnerChannelId });
+    // Same display name twice made the browser's delete/rename ambiguous
+    // (FILE-03): auto-number the NEW entry's alias when its display name
+    // (alias, else filename) collides with any existing entry's.  Single
+    // point -- every add path (drops, Add New Clip, recordings) inherits it.
+    auto displayOf = [] (const juce::String& p, const juce::String& a)
+    {
+        return a.isNotEmpty() ? a : juce::File (p).getFileName();
+    };
+    juce::String finalAlias = alias;
+    {
+        const juce::String want = displayOf (path, alias);
+        auto taken = [&] (const juce::String& name)
+        {
+            for (const auto& e : mAudioLibrary)
+                if (displayOf (e.path, e.alias) == name) return true;
+            return false;
+        };
+        if (taken (want))
+        {
+            int n = 2;
+            juce::String alt;
+            do { alt = want + " (" + juce::String (n++) + ")"; } while (taken (alt));
+            finalAlias = alt;
+        }
+    }
+    mAudioLibrary.push_back({ path, finalAlias, 0 /* chokeGroup = none */, pageOwnerChannelId });
 }
 
 void PatternManager::removeAudioFromLibrary(const juce::String& path)
@@ -1089,6 +1114,7 @@ namespace
         juce::ValueTree t ("AutomationLane");
         t.setProperty ("paramId",         lane.paramId,         nullptr);
         t.setProperty ("userDisplayName", lane.userDisplayName, nullptr);
+        t.setProperty ("lastKnownName",   lane.lastKnownName,   nullptr);
         t.setProperty ("isLFO",           lane.isLFO,           nullptr);
         t.setProperty ("lfoShape",        lane.lfoShape,        nullptr);
         t.setProperty ("lfoRate",         lane.lfoRate,         nullptr);
@@ -1112,6 +1138,7 @@ namespace
         if (! t.isValid()) return lane;
         lane.paramId         =                   t.getProperty ("paramId",         juce::String()).toString();
         lane.userDisplayName =                   t.getProperty ("userDisplayName", juce::String()).toString();
+        lane.lastKnownName   =                   t.getProperty ("lastKnownName",   juce::String()).toString();
         lane.isLFO           = (bool)            t.getProperty ("isLFO",    false);
         lane.lfoShape        = (int)             t.getProperty ("lfoShape", 0);
         lane.lfoRate         = (float)(double)   t.getProperty ("lfoRate",  1.0);

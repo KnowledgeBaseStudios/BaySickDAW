@@ -319,6 +319,12 @@ public:
     // EQ-tab click appended a new entry.
     void setBankIndicator(juce::Component* indicator);
 
+    // FX Rack jump slot at the right end of the page-tab button cluster
+    // (after tabs / MID-SIDE / bank pill).  Set per page-show with that
+    // page's jump; empty fn hides it.  clearTabSlots() clears it too --
+    // the slot belongs to the tab cluster's lifecycle.
+    void setFxRackSlot(std::function<void()> onClick);
+
     void paint(juce::Graphics&) override;
     void resized() override;
 
@@ -340,6 +346,7 @@ private:
     std::vector<std::unique_ptr<juce::TextButton>> mTabSlotBtns;
     std::unique_ptr<juce::TextButton>              mMidBtn;
     std::unique_ptr<juce::TextButton>              mSideBtn;
+    std::unique_ptr<juce::TextButton>              mFxRackBtn;
     bool                                           mMidSideVisible { false };
 
     // 2026-04-19: bank indicator slot (non-owning, single pointer).

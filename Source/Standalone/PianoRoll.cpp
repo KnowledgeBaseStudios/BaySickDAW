@@ -502,12 +502,19 @@ void PianoRollGrid::stampChordAt(int x, int y)
     repaint();
 }
 
-double PianoRollGrid::xToBeat(int x)      const { return mBeatOff + (double)x / mPPB; }
-int    PianoRollGrid::beatToX(double beat) const { return (int)((beat - mBeatOff) * mPPB); }
+// Mouse-mapping accuracy (LDT-394): xToBeat samples the CENTER of pixel
+// column x (the old left-edge form biased every click a half-pixel early);
+// beatToX rounds instead of truncating (truncation also rounds toward zero
+// for off-view-left geometry -- 1 px the wrong way); yToNote floors instead
+// of int-dividing (int division truncates toward zero, so clicks in a
+// partial top row mapped one row low).
+double PianoRollGrid::xToBeat(int x)      const { return mBeatOff + ((double)x + 0.5) / mPPB; }
+int    PianoRollGrid::beatToX(double beat) const { return (int) std::llround((beat - mBeatOff) * mPPB); }
 int    PianoRollGrid::noteToY(int note)    const { return mNoteYOffset + (mTopNote - note) * mNoteH; }
 int    PianoRollGrid::yToNote(int y)       const
 {
-    int n = mTopNote - (y - mNoteYOffset) / jmax(1, mNoteH);
+    const int n = mTopNote
+                - (int) std::floor ((double)(y - mNoteYOffset) / jmax(1, mNoteH));
     if (mIsFixedRange) return jlimit(mFixedRangeBottom, mFixedRangeTop, n);
     return jlimit(0, 127, n);
 }

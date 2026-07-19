@@ -1489,9 +1489,14 @@ private:
     void checkButtonState (Point<int> localMousePos, const uint32 timeNow,
                            const bool wasDown, const bool overScrollArea, const bool isOverAny)
     {
+        // BaySickDAW vendored-JUCE workaround: stock JUCE lets ANY mouse
+        // button's release trigger the highlighted item, so a right-click
+        // over an open menu activated entries.  The press/release transition
+        // tracked here keys on the LEFT button only; outside-click dismissal
+        // is unaffected (the modal input-attempt path owns that).
         isDown = window.mouseHasBeenOver()
-                    && (ModifierKeys::getCurrentModifiers().isAnyMouseButtonDown()
-                         || ComponentPeer::getCurrentModifiersRealtime().isAnyMouseButtonDown());
+                    && (ModifierKeys::getCurrentModifiers().isLeftButtonDown()
+                         || ComponentPeer::getCurrentModifiersRealtime().isLeftButtonDown());
 
         const auto reallyContained = window.reallyContains (localMousePos, true);
 

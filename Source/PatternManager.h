@@ -43,10 +43,18 @@ struct AutomationLane
     //  - userDisplayName   : user-renamed label. Empty by default. When
     //                        non-empty, takes precedence over the auto name
     //                        everywhere in the UI. "Revert to auto" clears it.
-    // The auto-generated display string is NOT stored here; it's resolved at
-    // display time via StandaloneEditor::resolveAutomationDisplayName(paramId)
-    // so effect-swap inside a slot reflects immediately without migration.
+    //  - lastKnownName     : auto-resolved label captured at lane creation,
+    //                        while the target still existed.  Deleted-slot
+    //                        lanes fall back to it so the row keeps saying
+    //                        WHICH effect it drove.  Never goes stale for
+    //                        rack lanes: a slot UUID never revives (effect
+    //                        swap = old-slot deletion + a fresh UUID).
+    // The auto-generated display string is otherwise NOT stored here; it's
+    // resolved at display time via
+    // StandaloneEditor::resolveAutomationDisplayName(paramId) so effect-swap
+    // inside a slot reflects immediately without migration.
     juce::String              userDisplayName;
+    juce::String              lastKnownName;
 
     // Evaluate the lane at normalised clip position pos01 (0 = start, 1 = end).
     // Returns a normalised 0..1 parameter value.

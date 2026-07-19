@@ -1099,6 +1099,21 @@ void AutomationBrowserPane::paint(juce::Graphics& g)
     g.drawHorizontalLine(22, 0.f, (float)getWidth());
 }
 
+// Raw-paramId fallback formatting (used when no resolver is wired): a rack
+// pid embeds a 32-hex slot UUID -- collapse it to "(slot)" and space the
+// underscores so the row reads as words instead of UUID soup.
+static juce::String readableParamIdFallback (const juce::String& pid)
+{
+    juce::StringArray out;
+    for (auto& s : juce::StringArray::fromTokens (pid, "_", ""))
+    {
+        const bool isUuid = s.length() == 32
+                         && s.containsOnly ("0123456789abcdef");
+        out.add (isUuid ? juce::String ("(slot)") : s);
+    }
+    return out.joinIntoString (" ");
+}
+
 void AutomationBrowserPane::refresh(PatternManager* pm)
 {
     mRows.clear();
@@ -1115,7 +1130,7 @@ void AutomationBrowserPane::refresh(PatternManager* pm)
                 // one wired up (covers userDisplayName + effect-swap tracking).
                 juce::String label;
                 if (onResolveDisplayName) label = onResolveDisplayName(b.automationLane);
-                if (label.isEmpty()) label = b.automationLane.paramId;
+                if (label.isEmpty()) label = readableParamIdFallback(b.automationLane.paramId);
                 if (label.isEmpty()) label = juce::String("Block ") + juce::String(i);
                 r.label = label;
                 // Batch E #3: flag rows whose target param has been deleted.
@@ -1379,7 +1394,7 @@ void EventEditorContent::setBlock(PatternManager* pm, int blockIdx)
         // rack state so swapping effects inside a slot updates the label).
         juce::String pretty;
         if (onResolveDisplayName) pretty = onResolveDisplayName(lane);
-        if (pretty.isEmpty())     pretty = lane.paramId;
+        if (pretty.isEmpty())     pretty = readableParamIdFallback(lane.paramId);
 
         if (mTitleLabel)
         {

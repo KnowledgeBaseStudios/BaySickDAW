@@ -734,6 +734,15 @@ private:
     // dead paramIds listed in the Event Editor's param browser.
     void eraseAutomationEntriesWithPrefix (const juce::String& prefix);
 
+    // Nav: land on the Effects page with the given strip selected -- the same
+    // three-line handoff the mixer strips' FX buttons use (mLastFXChannel is
+    // consumed by onTabSelected's Effects branch).
+    void jumpToFxRackForPrefix (const juce::String& mixerPrefix);
+    // Piano-roll menu-bar nav: both derive their target from the roll
+    // dropdown's active EngineId.
+    void jumpToRollPlayerPage();
+    void jumpToRollFxRack();
+
     // QA-Ed (Problem 3): last beat at which automation was applied.  The 30 Hz
     // timer re-applies automation whenever the playhead beat changes -- playback
     // OR a stopped seek/scrub -- so any param on an active automation snaps to

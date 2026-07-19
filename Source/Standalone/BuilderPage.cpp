@@ -1464,24 +1464,26 @@ void BrowserPanel::renamePatternAt(int idx, const String& newName)
 void BrowserPanel::renameAudioAt(int idx, const String& newName)
 {
     if (idx < 0 || idx >= mAudioPaths.size()) return;
-    const String path = mAudioPaths[idx];
-    // Dup-check against other audio library aliases (not against self).
-    const int libIdx = [&]() -> int
-    {
-        for (int i = 0; i < mPM.getNumAudioLibrary(); ++i)
-            if (mPM.getAudioLibraryPath(i) == path) return i;
-        return -1;
-    }();
+    // mAudioPaths is populated in audioLibrary index order (rebuildAudioRows),
+    // so idx IS the library index.  The old path->index first-match re-resolve
+    // collapsed same-path entries onto the first one -- renaming the wrong
+    // entry whenever a file exists under multiple page owners (FILE-03).
+    const int libIdx = (idx < mPM.getNumAudioLibrary()) ? idx : -1;
+    const String path  = mAudioPaths[idx];
+    const int    owner = (libIdx >= 0) ? mPM.getAudioLibraryPageOwner (libIdx) : 0;
     const juce::String finalName = ensureUniqueBrowserName (
         newName, libIdx, mPM.getNumAudioLibrary(),
         [this] (int i) { return mPM.getAudioLibraryAlias(i); });
     // Persist the alias in the library so it survives block deletion.
     if (libIdx >= 0) mPM.setAudioLibraryAlias(libIdx, finalName);
     // Also stamp every currently-placed block so the clip title matches.
+    // (path, owner) match, not path-only -- same-path entries on OTHER pages
+    // keep their own alias (the delete cascade's keying, FILE-03).
     for (int i = 0; i < mPM.getNumBlocks(); ++i)
     {
         auto& bb = mPM.getBlock(i);
-        if (bb.clipType == ClipType::Audio && bb.audioFilePath == path)
+        if (bb.clipType == ClipType::Audio && bb.audioFilePath == path
+            && bb.routeChannel == owner)
             bb.displayAlias = finalName;
     }
     rebuildAudioRows();
@@ -7086,9 +7088,35 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
     };
     mGrid->onUndoRedoStateChanged = [this] { syncToolbar(); };
     mGrid->onImportAudioRequested = [this] { doImportAudio(); };
-    mGrid->onRowHeightChanged     = [this] { if (mTrackHeader) mTrackHeader->repaint(); };
+    mGrid->onRowHeightChanged     = [this]
+    {
+        if (mTrackHeader && mGridViewport)   // zoom leg of the NAV-01 sync
+            mTrackHeader->setViewportYOffset (mGridViewport->getViewPositionY());
+        if (mTrackHeader) mTrackHeader->repaint();
+    };
 
-    mGridViewport = std::make_unique<Viewport>();
+    // NAV-01: header <-> grid vertical sync must be event-driven -- the timer
+    // tick alone left the header rows visibly desynced until the next tick
+    // after a scroll/resize/zoom.  visibleAreaChanged fires on every
+    // view-position change INCLUDING the re-clamp a resize or zoom causes, so
+    // the offset pushes immediately; the timer call stays as backstop.
+    struct HeaderSyncViewport : Viewport
+    {
+        std::function<void()> onViewMoved;
+        void visibleAreaChanged (const juce::Rectangle<int>&) override
+        {
+            if (onViewMoved) onViewMoved();
+        }
+    };
+    {
+        auto vp = std::make_unique<HeaderSyncViewport>();
+        vp->onViewMoved = [this]
+        {
+            if (mTrackHeader && mGridViewport)
+                mTrackHeader->setViewportYOffset (mGridViewport->getViewPositionY());
+        };
+        mGridViewport = std::move (vp);
+    }
     mGridViewport->setViewedComponent(mGrid.get(), false);
     // Vertical only -- horizontal panning is the grid's virtual mBarOff,
     // driven by the external scrollbar below (one mechanism, not two).
@@ -7248,6 +7276,8 @@ void BuilderPage::resized()
 
     // Grid viewport (remaining area)
     mGridViewport->setBounds(b);
+    if (mTrackHeader)   // resize leg of the NAV-01 sync (no-clamp resizes too)
+        mTrackHeader->setViewportYOffset (mGridViewport->getViewPositionY());
     if (mGridHScroll)
         mGridHScroll->setBounds(hScrollRow.removeFromRight(b.getWidth()));
     // Grid content sized by ArrangementGrid::resized() - just trigger it

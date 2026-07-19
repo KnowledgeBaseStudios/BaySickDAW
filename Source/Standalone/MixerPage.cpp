@@ -2715,6 +2715,7 @@ void MixerPage::removeAuxChannel(int idx)
     // Note: InsertNode + APVTS params intentionally preserved so re-creating
     // an aux at the same idx restores its prior settings.
     if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
 }
 
 // 2026-05-05: orphaned-strip cleanup.  When a tab close fires we destroy the
@@ -2732,6 +2733,7 @@ void MixerPage::removeInstChannel(int idx)
     mInstOrder.erase(std::remove(mInstOrder.begin(), mInstOrder.end(), idx),
                      mInstOrder.end());
     if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
 }
 
 void MixerPage::removeVoxChannel(int idx)
@@ -2741,6 +2743,7 @@ void MixerPage::removeVoxChannel(int idx)
     mVoxOrder.erase(std::remove(mVoxOrder.begin(), mVoxOrder.end(), idx),
                     mVoxOrder.end());
     if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
 }
 
 void MixerPage::removeClipChannel(int idx)
@@ -2758,6 +2761,44 @@ void MixerPage::removeClipChannel(int idx)
     mAudioRowOrder.erase(std::remove(mAudioRowOrder.begin(), mAudioRowOrder.end(), idx),
                          mAudioRowOrder.end());
     if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+}
+
+// MIX-05's real cause (QA-L scout): the engine-page strips had NO removal at
+// all -- a closed Layer/Bass/Drum tab left its strip in the live mixer, the
+// packed layout overlapped after re-adds, and the add-side count(idx) guard
+// blocked index reuse.  Widget + order entry only; InsertNode + APVTS params
+// persist (house convention above).  All removers fire onAudioStripRenamed so
+// the Effects-page dropdown rebuilds on every close/delete path (MIX-07 --
+// only deleteSecondaryBus fired it before).
+void MixerPage::removeLayerChannel(int pageIndex)
+{
+    mStripCacheDirty = true;
+    mLayerStrips.erase(pageIndex);
+    mLayerTabOrder.erase(std::remove(mLayerTabOrder.begin(), mLayerTabOrder.end(), pageIndex),
+                         mLayerTabOrder.end());
+    if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+}
+
+void MixerPage::removeBassChannel(int pageIndex)
+{
+    mStripCacheDirty = true;
+    mBassStrips.erase(pageIndex);
+    mBassTabOrder.erase(std::remove(mBassTabOrder.begin(), mBassTabOrder.end(), pageIndex),
+                        mBassTabOrder.end());
+    if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+}
+
+void MixerPage::removeDrumChannel(int slot)
+{
+    mStripCacheDirty = true;
+    mDrumStrips.erase(slot);
+    mDrumSlotOrder.erase(std::remove(mDrumSlotOrder.begin(), mDrumSlotOrder.end(), slot),
+                         mDrumSlotOrder.end());
+    if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
 }
 
 // G-7 (2026-04-29): full aux delete via right-click → Delete prompt.

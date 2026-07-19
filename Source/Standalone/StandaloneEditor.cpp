@@ -3243,6 +3243,9 @@ int StandaloneEditor::createAutomationBlock(const juce::String& paramId)
     block.patternIndex   = mPM->getCurrentPatternIndex();
     block.layerTrack     = false;
     block.automationLane.paramId = paramId;
+    // Capture the live-resolved label while the target exists: deleted-slot
+    // lanes fall back to it (the UUID never revives, so it stays correct).
+    block.automationLane.lastKnownName = resolveAutomationDisplayName(paramId);
 
     ControlPoint cpStart, cpEnd;
     cpStart.timeTicks = 0.f;  cpStart.value01 = seedVal;
@@ -3763,7 +3766,13 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
 juce::String StandaloneEditor::displayNameFor(const AutomationLane& lane) const
 {
     if (lane.userDisplayName.isNotEmpty()) return lane.userDisplayName;
-    return resolveAutomationDisplayName(lane.paramId);
+    const juce::String autoName = resolveAutomationDisplayName(lane.paramId);
+    // Deleted-slot lanes keep saying WHICH effect they drove: the resolver
+    // can only offer "(deleted slot)" once the UUID is gone, but the label
+    // captured at lane creation names it.
+    if (lane.lastKnownName.isNotEmpty() && autoName.contains("(deleted slot)"))
+        return lane.lastKnownName + " (deleted)";
+    return autoName;
 }
 
 std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
@@ -4335,6 +4344,97 @@ void StandaloneEditor::onTabSelected(int tabId)
     // Pattern at startup, set in GlobalTransportBar's button construction).
 }
 
+void StandaloneEditor::jumpToFxRackForPrefix (const juce::String& mixerPrefix)
+{
+    mLastFXChannel = mixerPrefix;
+    if (mRibbon) mRibbon->selectTab (2);
+    onTabSelected (2);
+}
+
+// Both roll jumps resolve their target BEFORE any tab switch (the switch
+// replaces PageMenuBar callbacks mid-invocation -- the Sub-Phase A
+// use-after-free family) and then touch only locals.
+void StandaloneEditor::jumpToRollPlayerPage()
+{
+    if (! mPianoRollPage) return;
+    const EngineId id = mPianoRollPage->getActiveEngineId();
+
+    int targetTabId = -1;
+    for (auto* entry : mPages)
+    {
+        if (! entry) continue;
+        auto* c = entry->component.get();
+        bool match = false;
+        if (id.kind == EngineKind::Layer)
+        {
+            auto* p = dynamic_cast<LayersPage*> (c);
+            match = p != nullptr && p->getPageIndex() == id.index;
+        }
+        else if (id.kind == EngineKind::Bass)
+        {
+            auto* p = dynamic_cast<BassPage*> (c);
+            match = p != nullptr && p->getPageIndex() == id.index;
+        }
+        else if (id.kind == EngineKind::Drum)
+        {
+            auto* p = dynamic_cast<DrumPage*> (c);
+            match = p != nullptr && p->getPageIndex() == id.index;
+        }
+        else if (id.kind == EngineKind::Clip)
+        {
+            auto* p = dynamic_cast<ClipsPage*> (c);
+            match = p != nullptr && p->getPageIndex() == id.index;
+        }
+        else if (id.kind == EngineKind::BaySickGuitars
+              || id.kind == EngineKind::BaySickBasses)
+        {
+            auto* p = dynamic_cast<InstPage*> (c);
+            const auto want = id.kind == EngineKind::BaySickGuitars
+                            ? InstPage::Source::BaySickGuitars
+                            : InstPage::Source::BaySickBasses;
+            match = p != nullptr && p->getSource() == want
+                                 && p->getPageIndex() == id.index;
+        }
+        else if (id.kind == EngineKind::BaySickRustyDrums)
+        {
+            match = dynamic_cast<BaySickRustyDrumsPage*> (c) != nullptr;
+        }
+        else if (id.kind == EngineKind::DrumKit)
+        {
+            // The kit view spans every drum -- land on the first Drums tab.
+            match = dynamic_cast<DrumPage*> (c) != nullptr;
+        }
+        if (match) { targetTabId = entry->ribbonTabId; break; }
+    }
+    if (targetTabId < 0) return;
+
+    auto* rbn = mRibbon.get();
+    if (rbn != nullptr) rbn->selectTab (targetTabId);
+    onTabSelected (targetTabId);
+}
+
+void StandaloneEditor::jumpToRollFxRack()
+{
+    if (! mPianoRollPage) return;
+    const EngineId id = mPianoRollPage->getActiveEngineId();
+
+    juce::String prefix;
+    if      (id.kind == EngineKind::Layer) prefix = "mixer_layer_" + juce::String (id.index);
+    else if (id.kind == EngineKind::Bass)  prefix = "mixer_bass_"  + juce::String (id.index);
+    else if (id.kind == EngineKind::Drum)  prefix = "mixer_drum_"  + juce::String (id.index);
+    else if (id.kind == EngineKind::Clip)  prefix = "mixer_audio_" + juce::String (id.index);
+    else if (id.kind == EngineKind::BaySickGuitars
+          || id.kind == EngineKind::BaySickBasses)
+        prefix = "mixer_inst_" + juce::String (id.index);
+    else if (id.kind == EngineKind::BaySickRustyDrums)
+        prefix = "mixer_rustybus";        // singleton engine -> its bus rack
+    else if (id.kind == EngineKind::DrumKit)
+        prefix = "mixer_drums";           // kit view spans drums -> Drums Bus rack
+    if (prefix.isEmpty()) return;
+
+    jumpToFxRackForPrefix (prefix);
+}
+
 void StandaloneEditor::onTabClosed(int tabId)
 {
     // Find and remove the page entry
@@ -4342,6 +4442,11 @@ void StandaloneEditor::onTabClosed(int tabId)
     {
         if (mPages[i]->ribbonTabId == tabId)
         {
+            // MIX-05 (QA-L): capture engine-page strip indices here; the
+            // orphan-strip removal happens in the tail with the Inst/Vox/
+            // Clips trio (same convention).
+            int layerStripIdx = -1, bassStripIdx = -1, drumStripIdx = -1;
+
             // Free layer index slot for any LayersPage being closed
             if (auto* lp = dynamic_cast<LayersPage*>(mPages[i]->component.get()))
             {
@@ -4355,6 +4460,7 @@ void StandaloneEditor::onTabClosed(int tabId)
                     mPianoRollPage->unregisterEngine ({ EngineKind::Layer, idx });
                 if (idx >= 0)
                 {
+                    layerStripIdx = idx;
                     eraseAutomationEntriesWithPrefix ("mixer_layer_" + juce::String (idx) + "_");
                     // Rack-slot pids are 1-based for layers/basses
                     // (EffectsPage::getChannelPrefix maps dropdown id-199).
@@ -4372,6 +4478,7 @@ void StandaloneEditor::onTabClosed(int tabId)
                     mPianoRollPage->unregisterEngine ({ EngineKind::Bass, idx });
                 if (idx >= 0)
                 {
+                    bassStripIdx = idx;
                     eraseAutomationEntriesWithPrefix ("mixer_bass_" + juce::String (idx) + "_");
                     eraseAutomationEntriesWithPrefix ("bass_" + juce::String (idx + 1) + "_");
                 }
@@ -4387,6 +4494,7 @@ void StandaloneEditor::onTabClosed(int tabId)
                     mPianoRollPage->unregisterEngine ({ EngineKind::Drum, idx });
                 if (idx >= 0)
                 {
+                    drumStripIdx = idx;
                     eraseAutomationEntriesWithPrefix ("mixer_drum_" + juce::String (idx) + "_");
                     eraseAutomationEntriesWithPrefix ("drum_" + juce::String (idx) + "_");
                 }
@@ -4658,6 +4766,14 @@ void StandaloneEditor::onTabClosed(int tabId)
             // until reload.  APVTS params stay (matches the Inst/Vox/Aux convention).
             if (clipStripIdx >= 0 && mMixerPage)
                 mMixerPage->removeClipChannel (clipStripIdx);
+            // MIX-05: the engine pages join the orphan-strip removal (their
+            // strips were never removed on close -- the overlap's real cause).
+            if (layerStripIdx >= 0 && mMixerPage)
+                mMixerPage->removeLayerChannel (layerStripIdx);
+            if (bassStripIdx >= 0 && mMixerPage)
+                mMixerPage->removeBassChannel (bassStripIdx);
+            if (drumStripIdx >= 0 && mMixerPage)
+                mMixerPage->removeDrumChannel (drumStripIdx);
             resized();
             refreshAllKitViews();   // D2: drum row freed → kit view shrinks
 
@@ -5038,6 +5154,16 @@ void StandaloneEditor::showPageForTab(int tabId)
                 }, lp->getActiveTab(), lp->getPageColor());
             syncPagePresetMenu (lp->getActiveTab());
             mPageMenuBar->setMidSideVisible(false);
+            mPageMenuBar->setFxRackSlot ([this, safe]
+            {
+                auto* p = safe.getComponent();
+                if (p == nullptr) return;
+                // Build the prefix BEFORE the tab switch: the jump replaces
+                // this lambda's callback slot mid-invocation (the Sub-Phase A
+                // use-after-free family) -- no member/page access after it.
+                const juce::String prefix = "mixer_layer_" + juce::String (p->getPageIndex());
+                jumpToFxRackForPrefix (prefix);
+            });
         }
         else if (auto* bp = dynamic_cast<BassPage*>(mVisiblePage))
         {
@@ -5083,6 +5209,14 @@ void StandaloneEditor::showPageForTab(int tabId)
                 }, bp->getActiveTab(), bp->getPageColor());
             syncPagePresetMenu (bp->getActiveTab());
             mPageMenuBar->setMidSideVisible(false);
+            mPageMenuBar->setFxRackSlot ([this, safe]
+            {
+                auto* p = safe.getComponent();
+                if (p == nullptr) return;
+                // Prefix built pre-switch -- see the Layers slot comment.
+                const juce::String prefix = "mixer_bass_" + juce::String (p->getPageIndex());
+                jumpToFxRackForPrefix (prefix);
+            });
         }
         else if (auto* cp = dynamic_cast<ClipsPage*>(mVisiblePage))
         {
@@ -5136,6 +5270,14 @@ void StandaloneEditor::showPageForTab(int tabId)
                 }, cp->getActiveTab(), cp->getPageColor());
             syncPagePresetMenu (cp->getActiveTab());
             mPageMenuBar->setMidSideVisible (false);
+            mPageMenuBar->setFxRackSlot ([this, safe]
+            {
+                auto* p = safe.getComponent();
+                if (p == nullptr) return;
+                // Prefix built pre-switch -- see the Layers slot comment.
+                const juce::String prefix = "mixer_audio_" + juce::String (p->getPageIndex());
+                jumpToFxRackForPrefix (prefix);
+            });
         }
         else if (auto* vp = dynamic_cast<VoxPage*>(mVisiblePage))
         {
@@ -5174,6 +5316,14 @@ void StandaloneEditor::showPageForTab(int tabId)
                 }, vp->getActiveTab(), vp->getPageColor());
             syncPagePresetMenu (vp->getActiveTab());
             mPageMenuBar->setMidSideVisible (false);
+            mPageMenuBar->setFxRackSlot ([this, safe]
+            {
+                auto* p = safe.getComponent();
+                if (p == nullptr) return;
+                // Prefix built pre-switch -- see the Layers slot comment.
+                const juce::String prefix = "mixer_vox_" + juce::String (p->getPageIndex());
+                jumpToFxRackForPrefix (prefix);
+            });
             // QA-E Task 4 (2026-05-12): mClipFileLabel removed from VoxPage;
             // file-association lives in PatternManager AudioLibrary now.
         }
@@ -5246,6 +5396,16 @@ void StandaloneEditor::showPageForTab(int tabId)
                 }, ip->getActiveTab(), ip->getPageColor());
             syncPagePresetMenu (ip->getActiveTab());
             mPageMenuBar->setMidSideVisible (false);
+            mPageMenuBar->setFxRackSlot ([this, safe]
+            {
+                auto* p = safe.getComponent();
+                if (p == nullptr) return;
+                // Prefix built pre-switch -- see the Layers slot comment.
+                // Covers BOTH Inst variants (live input + Guitars/Basses
+                // player) -- one branch, one strip family.
+                const juce::String prefix = "mixer_inst_" + juce::String (p->getPageIndex());
+                jumpToFxRackForPrefix (prefix);
+            });
             // I-0b: clip-name label hosted on the right of the PageMenuBar
             // (mirrors Vox).
             if (auto* lbl = ip->getClipFileLabel())
@@ -5329,6 +5489,14 @@ void StandaloneEditor::showPageForTab(int tabId)
                 }, dp->getActiveTab(), dp->getPageColor());
             syncPagePresetMenu (dp->getActiveTab());
             mPageMenuBar->setMidSideVisible(false);
+            mPageMenuBar->setFxRackSlot ([this, safe]
+            {
+                auto* p = safe.getComponent();
+                if (p == nullptr) return;
+                // Prefix built pre-switch -- see the Layers slot comment.
+                const juce::String prefix = "mixer_drum_" + juce::String (p->getPageIndex());
+                jumpToFxRackForPrefix (prefix);
+            });
         }
         else if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*>(mVisiblePage))
         {
@@ -5756,11 +5924,17 @@ void StandaloneEditor::showPageForTab(int tabId)
             pillLabel += "  ";
             pillLabel += juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"));
 
+            // Nav pair immediately right of the roll dropdown: "Player Page"
+            // lands on the selected roll's engine tab; "FX Rack" lands on its
+            // strip on the Effects page.  Same slot row as the pill, so they
+            // sit exactly where the dropdown is.
             mPageMenuBar->setTabSlots (
-                { pillLabel },
-                [this] (int)
+                { pillLabel, "Player Page", "FX Rack" },
+                [this] (int slot)
                 {
                     if (! mPianoRollPage) return;
+                    if (slot == 1) { jumpToRollPlayerPage(); return; }
+                    if (slot == 2) { jumpToRollFxRack();     return; }
                     juce::PopupMenu m = mPianoRollPage->buildEngineDropdown();
                     m.showMenuAsync (juce::PopupMenu::Options(),
                         [this] (int r)

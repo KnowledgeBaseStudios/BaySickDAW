@@ -2729,6 +2729,25 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
                 if (dest != nullptr)
                     dest->addEvent (msg, m.samplePosition);
+
+                // Kit fan-out: while ANY drum tab holds MIDI focus, a note
+                // also fires every OTHER drum whose assigned input note
+                // matches (pad controller plays the kit).  The focused tab
+                // already got the full stream above (an assigned drum still
+                // plays normally when focused); unassigned drums receive
+                // nothing extra.  Note-offs follow the same route so fanned
+                // voices release.  null pointer / -1 = unmapped.
+                if (kind == 3 && msg.isNoteOnOrOff())
+                {
+                    const int noteNum = msg.getNoteNumber();
+                    for (int di = 0; di < kMaxDrumPages; ++di)
+                    {
+                        if (di == idx) continue;   // focused tab handled above
+                        auto* p = mDrumInputNotePtr[(size_t) di].load (std::memory_order_acquire);
+                        if (p != nullptr && (int) std::lround (p->load()) == noteNum)
+                            drumPageMidi[di].addEvent (msg, m.samplePosition);
+                    }
+                }
             }
             // Non-routed targets (DrumKit grid / Clip / Vox / live-input Inst /
             // unset) leave dest null -- dropped for ENGINE routing only; allMidi
@@ -5316,6 +5335,11 @@ void VibeSynthProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* e
     {
         const juce::String prefix = "mixer_drum_" + juce::String(pageIdx);
         ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kDrumsBus);
+        // Publish the input-note pointer for the live-MIDI kit fan-out (the
+        // param exists as of the ensure above; audio thread acquire-loads it).
+        mDrumInputNotePtr[(size_t) pageIdx].store(
+            apvts.getRawParameterValue(prefix + "_inputNote"),
+            std::memory_order_release);
         mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Drum, pageIdx,
                                      "Drum " + juce::String(pageIdx + 1), prefix);
 
@@ -5343,6 +5367,9 @@ void VibeSynthProcessor::unregisterDrumEngine(int pageIdx)
         juce::SpinLock::ScopedLockType lk(mDrumEngineLock);
         mDrumEngines[pageIdx] = nullptr;
     }
+    // Closed drum stops listening for kit fan-out (param persists; re-register
+    // re-publishes the pointer).
+    mDrumInputNotePtr[(size_t) pageIdx].store(nullptr, std::memory_order_release);
     bool any = false;
     for (auto* e : mDrumEngines) if (e) { any = true; break; }
     mAnyDrumPageActive.store(any, std::memory_order_release);
@@ -5654,6 +5681,13 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
     // to choke.
     if (kind == MixerStripKind::Insert)
         addI(prefix + "_chokeGroup", prefix + " Choke Group", 0, 16, 0);
+
+    // Per-drum MIDI trigger note (kit fan-out): -1 = unmapped (the default --
+    // nothing fans out until the user assigns).  While ANY drum tab holds
+    // MIDI focus, an incoming note matching this value also fires this drum.
+    // Drums only -- other inserts have no kit concept.
+    if (kind == MixerStripKind::Insert && prefix.startsWith("mixer_drum_"))
+        addI(prefix + "_inputNote", prefix + " Input Note", -1, 127, -1);
 }
 
 bool VibeSynthProcessor::ensureMixerStripParams(const juce::String& prefix,
