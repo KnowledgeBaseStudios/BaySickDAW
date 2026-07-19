@@ -4536,6 +4536,33 @@ struct OctaveStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+
+        // QA-OctavePedal: BaySickPedals tile (~190x137 inner) is too narrow for
+        // the full-mode right-cluster + 66px mode column -- they collapse.  In
+        // pedal mode drop the dBFS column entirely (it's hidden here anyway) and
+        // grid the 5 knobs + mode chickenhead 2x3 so all six stay visible +
+        // finger-sized.  FurmanEQ's 3x3 pedal grid is the reference.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+        {
+            constexpr int kCols = 3, kRows = 2;
+            const int cellW = b.getWidth()  / kCols;
+            const int cellH = b.getHeight() / kRows;
+            auto cell = [&] (int idx)
+            {
+                return juce::Rectangle<int> (b.getX() + (idx % kCols) * cellW,
+                                             b.getY() + (idx / kCols) * cellH,
+                                             cellW, cellH);
+            };
+            const int kSz = juce::jlimit (28, 56, juce::jmin (cellW - 6, cellH - 16));
+            for (int i = 0; i < (int) knobs.size(); ++i)   // Direct / +1 / -1 / -2 / Range
+                if (knobs[i])
+                    knobs[i]->setBounds (cell (i).withSizeKeepingCentre (kSz, kSz + 14));
+            if (modeSel)
+                modeSel->setBounds (cell ((int) knobs.size()).reduced (3));   // last cell: Mode
+            return;
+        }
+
+        // Full (FX rack) mode: right-skewed cluster, dBFS column at the edge.
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         auto remainingLeft = rightClusterKnobs (b, knobs);

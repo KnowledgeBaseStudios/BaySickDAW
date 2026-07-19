@@ -5,9 +5,12 @@ namespace
     constexpr float kRangeMinHz = 300.0f;
     constexpr float kRangeMaxHz = 3000.0f;
 
-    // QA-EffectsReview Task 5: period-doubler confidence gating.
-    constexpr float kConfThreshold = 0.5f;   // YIN confidence to engage the doubler
-    constexpr float kConfSmooth    = 0.25f;  // per-block confidence fade coef
+    // QA-OctavePedal engine handoff: hysteresis around the YIN confidence so the
+    // doubler/granular switch cannot flap and park mid-blend (the old single
+    // 0.5 threshold left both octave-down engines summed at half gain = comb).
+    constexpr float kConfEngage  = 0.55f;
+    constexpr float kConfRelease = 0.35f;
+    constexpr float kConfSmooth  = 0.25f;   // per-block switch-fade coef (~50-90 ms at typical block sizes)
 
     // QA-EffectsReview Task 5 (C3): voicing -- transient duck + shifted-voice LP.
     constexpr float kTransRatio = 1.5f;    // fast-env > slow-env * this -> a transient/attack
@@ -106,89 +109,154 @@ void OctaveStyleDSP::GranularShifter::process (const float* input,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PeriodDoubler (PSOLA octave-down) -- QA-EffectsReview Task 5
+// PeriodDoubler (pitch-synchronous octave-down: 1/N-speed segment playout with
+// mark-anchored hops) -- QA-OctavePedal
 // ─────────────────────────────────────────────────────────────────────────────
 void OctaveStyleDSP::PeriodDoubler::reset()
 {
     ring.fill (0.0f);
-    writePos    = 0;
-    readPos     = 0.0;
-    xfadeOldPos = 0.0;
+    markCount   = 0;
+    writeIdx    = 0;
+    writeAbs    = 0.0;
+    readAbs     = 0.0;
+    xfadeOldAbs = 0.0;
     xfadeLeft   = 0;
-    grainCount  = 0;
-    repeat      = 0;
-    period      = pendingPeriod;
+    xfadeLen    = kXfadeMin;
+    segStart    = 0.0;
+    segEnd      = 0.0;
+    primed      = false;
 }
 
-float OctaveStyleDSP::PeriodDoubler::interp (double pos) const noexcept
+float OctaveStyleDSP::PeriodDoubler::interp (double absPos) const noexcept
 {
-    while (pos < 0.0)          pos += kRingSize;
-    while (pos >= kRingSize)   pos -= kRingSize;
-    const int   i0 = (int) pos;
-    const int   i1 = (i0 + 1) % kRingSize;
-    const float f  = (float) (pos - (double) i0);
+    double p = std::fmod (absPos, (double) kRingSize);
+    if (p < 0.0) p += (double) kRingSize;
+    const int   i0 = (int) p;
+    const int   i1 = (i0 + 1 < kRingSize) ? i0 + 1 : 0;
+    const float f  = (float) (p - (double) i0);
     return ring[(size_t) i0] * (1.0f - f) + ring[(size_t) i1] * f;
+}
+
+void OctaveStyleDSP::PeriodDoubler::pushMark (double absPos)
+{
+    if (markCount > 0 && absPos <= marks[(size_t) markCount - 1])
+        return;                                        // marks must ascend
+    if (markCount >= kMarkQueue)
+    {
+        // Full: drop consumed marks first; if STILL full the stream is
+        // pathological sub-period chatter -- drop the incoming mark and let
+        // the owner's synth-fill heal the grid.
+        purgeMarksBelow (primed ? segEnd : absPos - 4.0 * period);
+        if (markCount >= kMarkQueue) return;
+    }
+    marks[(size_t) markCount++] = absPos;
+}
+
+bool OctaveStyleDSP::PeriodDoubler::markAfter (double x, int k, double& out) const noexcept
+{
+    // k-th mark strictly greater than x (k >= 1); k == 0 is x itself.
+    if (k <= 0) { out = x; return true; }
+    int found = 0;
+    for (int i = 0; i < markCount; ++i)
+        if (marks[(size_t) i] > x + 1.0e-6)
+            if (++found == k) { out = marks[(size_t) i]; return true; }
+    return false;
+}
+
+void OctaveStyleDSP::PeriodDoubler::purgeMarksBelow (double x) noexcept
+{
+    int keep = 0;
+    for (int i = 0; i < markCount; ++i)
+        if (marks[(size_t) i] >= x)
+            marks[(size_t) keep++] = marks[(size_t) i];
+    markCount = keep;
+}
+
+void OctaveStyleDSP::PeriodDoubler::beginSeam (double target)
+{
+    xfadeOldAbs = readAbs;   // old head keeps playing forward under the fade
+    xfadeLen    = juce::jlimit (kXfadeMin, kXfadeMax, (int) (period * 0.25));
+    xfadeLeft   = xfadeLen;
+    readAbs     = target;
 }
 
 void OctaveStyleDSP::PeriodDoubler::process (const float* input, float* output, int numSamples)
 {
     for (int i = 0; i < numSamples; ++i)
     {
-        ring[(size_t) writePos] = input[i];
-        writePos = (writePos + 1) % kRingSize;
+        ring[(size_t) writeIdx] = input[i];
+        if (++writeIdx >= kRingSize) writeIdx = 0;
+        writeAbs += 1.0;
 
-        // Read the doubled grain, with a short seam crossfade across the jumps.
-        float s = interp (readPos);
-        if (xfadeLeft > 0)
+        if (! primed)
         {
-            const float t = (float) xfadeLeft / (float) kXfade;   // 1 -> 0
-            s = s * (1.0f - t) + interp (xfadeOldPos) * t;
-            xfadeOldPos += 1.0;
-            if (xfadeOldPos >= (double) kRingSize) xfadeOldPos -= (double) kRingSize;
-            --xfadeLeft;
-        }
-        output[i] = s;
-
-        // Keep readPos wrapped into [0,kRingSize).  CRITICAL: if it grows unbounded
-        // (~1 sample/sample) the interp() + lag-guard wraps become O(readPos/kRingSize)
-        // loops and the CPU climbs the longer you play (and persists across transport
-        // pause, since the pointer isn't reset).
-        readPos += 1.0;
-        if (readPos >= (double) kRingSize) readPos -= (double) kRingSize;
-        if (++grainCount >= period)
-        {
-            grainCount  = 0;
-            xfadeOldPos = readPos;     // old head keeps going during the crossfade
-            xfadeLeft   = kXfade;
-            if (++repeat < repeatsPerGrain)
+            // Engage once two marks exist: play [m0, m1) from m0.  Marks are
+            // detected at the write head, so the lag is ~one period by
+            // construction (the doubler's intrinsic latency).
+            if (markCount >= 2)
             {
-                readPos -= (double) period;                         // replay this period
-                if (readPos < 0.0) readPos += (double) kRingSize;
+                segStart = marks[(size_t) markCount - 2];
+                segEnd   = marks[(size_t) markCount - 1];
+                purgeMarksBelow (segStart);
+                readAbs  = segStart;
+                primed   = true;
             }
             else
             {
-                repeat  = 0;
-                readPos += (double) (repeatsPerGrain - 1) * period; // skip the discarded periods
-                while (readPos >= (double) kRingSize) readPos -= (double) kRingSize;
-                period  = pendingPeriod;                            // adopt the new period at the boundary
-            }
-
-            // Lag guard: keep readPos safely behind the write head (read only
-            // already-written data; never overtake it).  Re-anchor ~2 periods back
-            // on drift -- rare, only on large pitch glides.  INVARIANT: minLag must
-            // stay >= period + kXfade so the crossfade's old head can't read ahead
-            // of the write pointer (the +8 is slack); preserve that if revisiting.
-            double lag = (double) writePos - readPos;
-            while (lag < 0.0)        lag += (double) kRingSize;
-            while (lag >= kRingSize) lag -= (double) kRingSize;
-            const double minLag = (double) (period + kXfade + 8);
-            const double maxLag = (double) (kRingSize - 2 * period - kXfade - 8);
-            if (lag < minLag || lag > maxLag)
-            {
-                readPos = (double) writePos - (double) (2 * period);
-                while (readPos < 0.0) readPos += (double) kRingSize;
+                output[i] = 0.0f;
+                continue;
             }
         }
+
+        if (readAbs >= segEnd)
+        {
+            // Seam: the segment just finished its 1/octaveDiv-speed playout
+            // (octaveDiv periods of output time per one input period).  Hop
+            // forward octaveDiv-1 marks so consumption balances real time.
+            // Lag correction happens HERE, at marks, one period per step:
+            // under-lag hops one mark less, over-lag one extra.  Bounds keep
+            // both crossfade heads behind the write head and inside the ring.
+            const double overshoot = readAbs - segEnd;   // < readRate; preserved across the jump
+            const double lag    = writeAbs - readAbs;
+            const double lagMin = 0.5 * period + (double) xfadeLen + 8.0;
+            const double lagMax = 3.0 * period + (double) xfadeLen;
+            int skip = octaveDiv - 1;
+            if      (lag < lagMin) skip = juce::jmax (0, skip - 1);
+            else if (lag > lagMax) ++skip;
+
+            double ns = 0.0, ne = 0.0;
+            if (! (markAfter (segEnd, skip, ns) && markAfter (segEnd, skip + 1, ne)))
+            {
+                // Mark starvation (quiet input / tracker dropout): stay on
+                // the synthesized period grid so the engine never stalls --
+                // the owner has faded this path out by then anyway.
+                ns = segEnd + (double) skip * period;
+                ne = ns + period;
+            }
+            if (ne - ns < kMinPeriod * 0.5 || ne - ns > kMaxPeriod * 2.0)
+                ne = ns + period;                        // degenerate mark spacing
+            while (skip > 0 && writeAbs - ns < lagMin)
+            {
+                --skip;                                  // never let the new segment start hug the write head
+                if (! markAfter (segEnd, skip, ns))            ns = segEnd + (double) skip * period;
+                if (! markAfter (segEnd, skip + 1, ne) || ne <= ns) ne = ns + period;
+            }
+            beginSeam (ns + overshoot);
+            segStart = ns;
+            segEnd   = ne;
+            purgeMarksBelow (segStart);
+        }
+
+        float s = interp (readAbs);
+        if (xfadeLeft > 0)
+        {
+            const float t = (float) xfadeLeft / (float) xfadeLen;   // 1 -> 0
+            s = s * (1.0f - t) + interp (xfadeOldAbs) * t;
+            xfadeOldAbs += readRate;   // old head keeps playing at shifted speed
+            --xfadeLeft;
+        }
+        output[i] = s;
+        readAbs += readRate;
     }
 }
 
@@ -209,6 +277,7 @@ void OctaveStyleDSP::prepare (double sampleRate, int maxBlockSize)
 
     const int n = juce::jmax (1, maxBlockSize);
     mFilteredBuf .setSize (2, n, false, true, true);
+    mMonoScratch .setSize (1, n, false, true, true);
     for (auto& b : mShiftedBuf)
         b.setSize (2, n, false, true, true);
     for (auto& b : mDoublerScratch)
@@ -223,15 +292,26 @@ void OctaveStyleDSP::prepare (double sampleRate, int maxBlockSize)
         for (auto& s : chArr) s.reset();
     }
 
-    // QA-EffectsReview Task 5: PSOLA period-doublers (octave-DOWN) + pitch tracker.
+    // Pitch-synchronous octave-down shifters + pitch tracker + mark detector.
     for (auto& chArr : mDoublers)
     {
-        chArr[kDdMinusOne].setRepeats (2);   // -1 oct
-        chArr[kDdMinusTwo].setRepeats (4);   // -2 oct
+        chArr[kDdMinusOne].setOctaveDivisor (2);   // -1 oct
+        chArr[kDdMinusTwo].setOctaveDivisor (4);   // -2 oct
         for (auto& d : chArr) d.reset();
     }
-    mConf = 0.0f;
+    mDoublerMix    = 0.0f;
+    mDoublerOn     = false;
+    mTrackedPeriod = 256.0;
+    mMarkSchmittHi = false;
+    mMarkPrevMono  = 0.0f;
+    mLastMarkAbs   = -1.0e12;
+    mMarkClockAbs  = 0.0;
     mYin.prepare (sampleRate);
+    mPoly.prepare (sampleRate);
+    // #12 (Jeff 2026-07-18, docket pick a): single wide auto range, no
+    // instrument selector -- ~4-string bass low E (41 Hz) up through the
+    // guitar's high register.  Max notes stays the 6-string default.
+    mPoly.setFreqRange (40.0f, 1300.0f);
 
     // QA-EffectsReview Task 5 (C3): voicing coefs.
     mFastAtkCoef     = 1.0f - std::exp (-1.0f / (float) (0.001 * sampleRate));   // ~1 ms attack
@@ -261,7 +341,14 @@ void OctaveStyleDSP::reset()
         for (auto& d : chArr)
             d.reset();
     mYin.reset();
-    mConf = 0.0f;
+    mPoly.reset();
+    mDoublerMix    = 0.0f;
+    mDoublerOn     = false;
+    mTrackedPeriod = 256.0;
+    mMarkSchmittHi = false;
+    mMarkPrevMono  = 0.0f;
+    mLastMarkAbs   = -1.0e12;
+    mMarkClockAbs  = 0.0;
     mFastEnv = mSlowEnv = 0.0f;
     mDuck = 1.0f;
     for (auto& v : mVoiceLpState) { v[0] = v[1] = 0.0f; }
@@ -307,14 +394,17 @@ void OctaveStyleDSP::process (juce::AudioBuffer<float>& buffer)
     const int n     = buffer.getNumSamples();
     if (numCh == 0 || n == 0) return;
 
+    // Floor of 2 channels: the mono-input lockstep path below parks the ch-1
+    // doublers' output in the scratch buffers' spare channel.
     auto ensureSize = [n, numCh] (juce::AudioBuffer<float>& b)
     {
         if (b.getNumChannels() < numCh || b.getNumSamples() < n)
-            b.setSize (numCh, n, false, false, true);
+            b.setSize (juce::jmax (2, numCh), n, false, false, true);
     };
     ensureSize (mFilteredBuf);
     for (auto& b : mShiftedBuf) ensureSize (b);
     for (auto& b : mDoublerScratch) ensureSize (b);
+    if (mMonoScratch.getNumSamples() < n) mMonoScratch.setSize (1, n, false, false, true);
 
     // 1. Copy input into the Range-filtered scratch (used as the source for
     //    the pitch-shift paths; the dry signal stays in `buffer` until the
@@ -331,29 +421,121 @@ void OctaveStyleDSP::process (juce::AudioBuffer<float>& buffer)
     // 2. Generate the three pitch-shifted streams.
     if (mMode == Mode::Polyphonic)
     {
-        // Feed the pitch tracker (Range-filtered input so the fundamental dominates).
-        if (numCh > 1)
-            mYin.pushAudio (mFilteredBuf.getReadPointer (0), mFilteredBuf.getReadPointer (1), n);
-        else
-            mYin.pushAudio (mFilteredBuf.getReadPointer (0), n);
+        // Mono mix of the Range-filtered input (fundamental dominates) -> both
+        // trackers + the mark detector, one pass.
+        {
+            float* mono = mMonoScratch.getWritePointer (0);
+            const float* lp = mFilteredBuf.getReadPointer (0);
+            const float* rp = (numCh > 1) ? mFilteredBuf.getReadPointer (1) : lp;
+            for (int i = 0; i < n; ++i) mono[i] = 0.5f * (lp[i] + rp[i]);
+        }
+        const float* mono = mMonoScratch.getReadPointer (0);
+        mYin .pushAudio (mono, n);
+        mPoly.pushAudio (mono, n);   // #12: real poly detection feeds the granular grain sizing
 
-        // Read the published pitch -> a period-aligned granular grain (kills the
-        // warble) + the doublers' period; smooth the confidence (it crossfades the
-        // crisp doubler vs the granular fallback below).
+        // YIN drives the doubler (a mono, single-note engine) -- eligibility +
+        // the fractional tracked period.
         const float hz   = mYin.getFrequencyHz();
         const float conf = mYin.getConfidence();
+        bool doublerEligible = false;
         if (hz >= PitchTrackerYIN::kMinFreqHz)
         {
-            const double P     = mSampleRate / (double) hz;
-            const int    Pi    = (int) std::lround (P);
-            const int    nPer  = juce::jmax (1, (int) std::lround (1024.0 / P));   // ~1024-sample target
-            const int    grain = juce::jlimit (256, GranularShifter::kBufferSize / 2, nPer * Pi);
-            for (auto& chArr : mShifters) for (auto& s : chArr) s.setGrainSize (grain);
-            for (auto& chArr : mDoublers) for (auto& d : chArr) d.setPendingPeriod (Pi);
+            const double P = mSampleRate / (double) hz;
+            if (P >= PeriodDoubler::kMinPeriod && P <= PeriodDoubler::kMaxPeriod)
+            {
+                mTrackedPeriod = P;
+                for (auto& chArr : mDoublers) for (auto& d : chArr) d.setTrackedPeriod (P);
+                doublerEligible = true;
+            }
         }
-        const float confTarget = (hz >= PitchTrackerYIN::kMinFreqHz && conf > kConfThreshold) ? 1.0f : 0.0f;
-        const float prevConf   = mConf;
-        mConf += (confTarget - mConf) * kConfSmooth;   // per-block one-pole
+
+        // Granular grain size -> period-aligned OLA (kills warble).  #12: on a
+        // chord the mono YIN reading is garbage, so size the grain to the
+        // LOWEST detected poly note instead of the flailing mono period; a
+        // confident single note stays on YIN (mono behavior preserved).
+        double grainP = 0.0;
+        if (hz >= PitchTrackerYIN::kMinFreqHz && conf > kConfEngage)
+        {
+            grainP = mSampleRate / (double) hz;                 // confident mono -> YIN
+        }
+        else
+        {
+            const auto notes = mPoly.getNotes();
+            if (notes.count > 0)
+            {
+                float lowest = notes.freqs[0];
+                for (int k = 1; k < notes.count; ++k)
+                    if (notes.freqs[k] > 0.0f) lowest = juce::jmin (lowest, notes.freqs[k]);
+                if (lowest > 0.0f) grainP = mSampleRate / (double) lowest;   // chord -> lowest note
+            }
+            if (grainP <= 0.0 && hz >= PitchTrackerYIN::kMinFreqHz)
+                grainP = mSampleRate / (double) hz;             // low-conf mono still beats nothing
+        }
+        if (grainP > 0.0)
+        {
+            const int Pi    = juce::jmax (1, (int) std::lround (grainP));
+            const int nPer  = juce::jmax (1, (int) std::lround (1024.0 / grainP));   // ~1024-sample target
+            const int grain = juce::jlimit (256, GranularShifter::kBufferSize / 2, nPer * Pi);
+            for (auto& chArr : mShifters) for (auto& s : chArr) s.setGrainSize (grain);
+        }
+
+        // Engine handoff (QA-OctavePedal): doubler vs granular is SWITCHED with
+        // a short fade, never summed as a standing blend -- two desynced
+        // octave-down engines at half gain comb.  Hysteresis stops the switch
+        // flapping around a single confidence threshold.
+        if (mDoublerOn) { if (! doublerEligible || conf < kConfRelease) mDoublerOn = false; }
+        else            { if (  doublerEligible && conf > kConfEngage)  mDoublerOn = true;  }
+        const float mixTarget = mDoublerOn ? 1.0f : 0.0f;
+        const float prevMix   = mDoublerMix;
+        mDoublerMix += (mixTarget - mDoublerMix) * kConfSmooth;   // per-block one-pole
+        if (std::abs (mDoublerMix - mixTarget) < 1.0e-3f) mDoublerMix = mixTarget;
+
+        // Pitch-mark detection, shared across channels: Schmitt rising crossings
+        // on the mono Range-filtered input, sub-sample refined at the threshold
+        // crossing, validated against the YIN period (>= half a period since the
+        // last mark rejects harmonic chatter).  Brief Schmitt dropouts are
+        // bridged by synthesizing marks on the tracked-period grid so the
+        // doublers never starve mid-note.
+        {
+            const double P = mTrackedPeriod;
+            for (int i = 0; i < n; ++i)
+            {
+                const float m     = mono[i];
+                const bool  wasHi = mMarkSchmittHi;
+                if      (m > kSchmittHi) mMarkSchmittHi = true;
+                else if (m < kSchmittLo) mMarkSchmittHi = false;
+                if (mMarkSchmittHi && ! wasHi)
+                {
+                    const float denom = m - mMarkPrevMono;
+                    const double frac = (denom > 1.0e-9f)
+                        ? juce::jlimit (0.0, 1.0, (double) ((kSchmittHi - mMarkPrevMono) / denom))
+                        : 0.0;
+                    const double c = mMarkClockAbs + (double) (i - 1) + frac;
+                    if (c - mLastMarkAbs >= 0.5 * P)
+                    {
+                        for (auto& chArr : mDoublers) for (auto& d : chArr) d.pushMark (c);
+                        mLastMarkAbs = c;
+                    }
+                }
+                mMarkPrevMono = m;
+            }
+            mMarkClockAbs += (double) n;
+            if (doublerEligible && mLastMarkAbs >= 0.0)
+            {
+                const double gap = mMarkClockAbs - mLastMarkAbs;
+                if (gap > 6.0 * P)
+                {
+                    // Long dropout: re-sync instead of backfilling the whole gap.
+                    mLastMarkAbs = mMarkClockAbs - 2.0 * P;
+                    for (auto& chArr : mDoublers) for (auto& d : chArr) d.pushMark (mLastMarkAbs);
+                }
+                else while (mMarkClockAbs - mLastMarkAbs > 2.0 * P)
+                {
+                    mLastMarkAbs += P;
+                    for (auto& chArr : mDoublers) for (auto& d : chArr) d.pushMark (mLastMarkAbs);
+                }
+            }
+        }
 
         for (int ch = 0; ch < numCh; ++ch)
         {
@@ -364,8 +546,8 @@ void OctaveStyleDSP::process (juce::AudioBuffer<float>& buffer)
             mShifters[(size_t) chIdx][kPlusOne].process (
                 src, mShiftedBuf[kPlusOne].getWritePointer (ch), n);
 
-            // -1 / -2 oct: crossfade the PSOLA doubler (confident single notes) against
-            // the period-synced granular (chords / unvoiced) by the smoothed confidence.
+            // -1 / -2 oct: both engines always run (rings + clocks stay warm for
+            // instant switch-back); only the OUTPUT mix is switched.
             mShifters[(size_t) chIdx][kMinusOne].process (
                 src, mShiftedBuf[kMinusOne].getWritePointer (ch), n);
             mShifters[(size_t) chIdx][kMinusTwo].process (
@@ -375,13 +557,34 @@ void OctaveStyleDSP::process (juce::AudioBuffer<float>& buffer)
             mDoublers[(size_t) chIdx][kDdMinusTwo].process (
                 src, mDoublerScratch[1].getWritePointer (ch), n);
 
-            // granular *= (1 - conf); doubler *= conf; sum -> mShiftedBuf.
-            mShiftedBuf[kMinusOne].applyGainRamp (ch, 0, n, 1.0f - prevConf, 1.0f - mConf);
-            mShiftedBuf[kMinusTwo].applyGainRamp (ch, 0, n, 1.0f - prevConf, 1.0f - mConf);
-            mDoublerScratch[0].applyGainRamp (ch, 0, n, prevConf, mConf);
-            mDoublerScratch[1].applyGainRamp (ch, 0, n, prevConf, mConf);
-            mShiftedBuf[kMinusOne].addFrom (ch, 0, mDoublerScratch[0], ch, 0, n);
-            mShiftedBuf[kMinusTwo].addFrom (ch, 0, mDoublerScratch[1], ch, 0, n);
+            if (prevMix < 1.0f || mDoublerMix < 1.0f)
+            {
+                mShiftedBuf[kMinusOne].applyGainRamp (ch, 0, n, 1.0f - prevMix, 1.0f - mDoublerMix);
+                mShiftedBuf[kMinusTwo].applyGainRamp (ch, 0, n, 1.0f - prevMix, 1.0f - mDoublerMix);
+            }
+            else
+            {
+                mShiftedBuf[kMinusOne].clear (ch, 0, n);
+                mShiftedBuf[kMinusTwo].clear (ch, 0, n);
+            }
+            if (prevMix > 0.0f || mDoublerMix > 0.0f)
+            {
+                mDoublerScratch[0].applyGainRamp (ch, 0, n, prevMix, mDoublerMix);
+                mDoublerScratch[1].applyGainRamp (ch, 0, n, prevMix, mDoublerMix);
+                mShiftedBuf[kMinusOne].addFrom (ch, 0, mDoublerScratch[0], ch, 0, n);
+                mShiftedBuf[kMinusTwo].addFrom (ch, 0, mDoublerScratch[1], ch, 0, n);
+            }
+        }
+
+        if (numCh == 1)
+        {
+            // Mono blocks would stall the ch-1 doublers' write clocks and desync
+            // every future mark compare against the shared mark clock -- keep
+            // them in lockstep by feeding them the same mono input (outputs land
+            // in the scratch buffers' spare channel and are discarded).
+            const float* src = mFilteredBuf.getReadPointer (0);
+            mDoublers[1][kDdMinusOne].process (src, mDoublerScratch[0].getWritePointer (1), n);
+            mDoublers[1][kDdMinusTwo].process (src, mDoublerScratch[1].getWritePointer (1), n);
         }
     }
     else // Vintage
@@ -466,7 +669,7 @@ void OctaveStyleDSP::process (juce::AudioBuffer<float>& buffer)
             for (int ch = 0; ch < numCh; ++ch)
             {
                 float* d  = mShiftedBuf[v].getWritePointer (ch);
-                float& lp = mVoiceLpState[v][ch];
+                float& lp = mVoiceLpState[v][juce::jmin (ch, 1)];   // state array is 2-wide; extra channels share ch1
                 lp += (d[i] - lp) * mVoiceLpCoef;            // gentle 1-pole LP
                 d[i] = lp * mDuck;                           // + transient duck
             }

@@ -6323,6 +6323,17 @@ void VibeSynthProcessor::addLiveInputParams (const juce::String& prefix)
         apvts.createAndAddParameter (std::make_unique<juce::AudioParameterInt> (
             VID(prefix + "_monitorMode"),
             prefix + " Monitor Mode", 0, 2, 2));
+    // QA-OctavePedal Task 5: Inst live-monitor mode -- TWO values only (no
+    // bypass-corrector middle; that's a vocal-only stage):
+    //   0 = Dry         (raw strip input -- zero added latency, tight playing)
+    //   1 = With Effect (the page's full processed chain) -- DEFAULT (Jeff 2026-07-18)
+    // Monitor-only fork: the recorded take (raw DI tap) + playback (DI -> engine)
+    // are identical in both modes.
+    if (prefix.startsWith ("mixer_inst_")
+        && apvts.getParameter (prefix + "_monitorMode") == nullptr)
+        apvts.createAndAddParameter (std::make_unique<juce::AudioParameterInt> (
+            VID(prefix + "_monitorMode"),
+            prefix + " Monitor Mode", 0, 1, 1));
 }
 
 void VibeSynthProcessor::setInputChannelName (const juce::String& stripPrefix,

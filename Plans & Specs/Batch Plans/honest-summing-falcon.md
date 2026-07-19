@@ -72,3 +72,50 @@ trigger — log, don't chase here.
 
 - MT engine records (dispatcher + MasterTask release-store pattern) before touching the
   block lifecycle; QA-Md "MT works in Debug" standing correction.
+
+## Carry-Over — 2026-07-18 (G3 session end; QA-N close)
+
+Consolidated session carry-over (one block per the QA-I->QA-J' precedent, not one per
+batch — each closed batch already carries a full CODE-COMPLETE + held Work Log entry in
+its own running notes).
+
+- **Completed this session (5 batches, 6 commits, each build-confirmed clean at every
+  task gate):** QA-J' `b54a44d4` (unmute re-sync across 3 PV seek sites + applicator-map
+  hygiene + EffectsPage rack-pid J-6 range fix); QA-K `684cf253` (APP-04 priority/MMCSS
+  + APP-05 ASIO panel + DSP-11 live buffer path + DSP-01 Lasersaw/22 preset-data fixes +
+  9 deletions + factory-preset audit report + versioned effect-preset seeding + Rusty
+  512-CC save); QA-L `2e2df50a` (PopupMenu left-only trigger [vendored] + deleted-slot
+  lane names + mixer strip lifecycle/dropdown refresh + NAV-01 header sync + FX Rack /
+  Player Page nav buttons + FILE-03 dup handling + LDT-394 roll accuracy + per-drum MIDI
+  notes w/ kit fan-out); QA-M `ce4cb33c` (kit-load leaves Rusty alone + Rusty re-add
+  auto-reloads last kit); QA-N `2e44ab78` (DSP meter sum-of-cores DIAG-02). QA-I
+  `b6f51617` closed the prior session.
+- **In-flight:** nothing in code. ONE expected doc straggler in the tree for
+  QA-OctavePedal's commit: the §B.20 `blocks:` hash backfill (`2e44ab78`) in
+  `v1-master-test-plan.md` (B.13-B.19 precedent — the batch commit lands, then its own
+  §B hash backfills as the next commit's straggler).
+- **Assumptions changed / notable:** QA-K's versioned effect-preset re-seed FIRED at the
+  QA-L gate as forecast (28 factory Effects XMLs rewritten from the fixed table + the new
+  stamp file — rode the QA-L commit, expected one-time heal). Docket picks resolved
+  in-session: QA-J' docket-1 = a (fix rack-pid range in-batch); QA-K 1a/2c/3c + LOW adds
+  (Bell Lead, 808 Claves) + versioned-seeding sub-pick 1; QA-L Task-4 flagged
+  interpretation CONFIRMED by Jeff ("This is correct, proceed" — the two piano-roll nav
+  buttons); QA-M replace-prompt scan = pick 2 (DrumPage-only scan, text clarified — the
+  "count Rusty too" half was vestigial post-teardown-fix). CLAUDE.md Source-layout entry
+  for PageMenuBar is stale (lives in SharedUI, not a PageMenuBar.h) — noted, not fixed.
+- **Resume action (NEW session):** paste the QA-OctavePedal prompt (handed to Jeff at
+  this session's close) — /standup -> Main Plan §0 in full -> caribou G3 sections ->
+  confirm `2e44ab78` at HEAD (+ the one B.20 straggler dirty) -> read
+  `Batch Plans/locked-doubling-frog.md` IN FULL -> begin QA-OctavePedal Task 1.
+  **RE-FLAG BEFORE CODING:** the last baked-pending-veto interpretation — inst monitor
+  default = With Effect (T5) — must be re-surfaced to Jeff before that task is coded
+  (per the group-open standing list). QA-OctavePedal also carries the folded Rule-3 item:
+  BaySickPedals PDC latency reporting (pull model) -> Task 4 + the octave-internal-latency
+  companion.
+- **After QA-OctavePedal closes = G3 GROUP BOUNDARY:** R3 `/review-batch` over the
+  combined G3 diff (QA-G..QA-OctavePedal; findings fixed before proceeding) + Jeff's
+  15-30 min smoke (Debug first, then Release; §7 items 1-5). Then G4 opens.
+- **Work-Log entries needed:** none new to author — all 6 batches' entries are drafted +
+  HELD in their running notes, applying at each §B section pass during the campaign (R2).
+  Push: 6 commits unpushed (origin at `50c6eeb9`/QA-H); Jeff pushes when he wants the
+  backup current.

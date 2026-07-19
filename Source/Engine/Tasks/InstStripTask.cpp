@@ -52,6 +52,11 @@ void InstStripTask::run()
     const auto* idxP    = apvts.getRawParameterValue (mPrefix + "_inputChannelIdx");
     const auto* stereoP = apvts.getRawParameterValue (mPrefix + "_inputChannelStereo");
     const auto* listenP = apvts.getRawParameterValue (mPrefix + "_listen");
+    // QA-OctavePedal Task 5: live-monitor mode (0 = Dry raw input, 1 = With
+    // Effect processed; default 1 = With Effect per Jeff 2026-07-18).  A
+    // monitor-only fork applied around the engine render below.
+    const auto* monModeP    = apvts.getRawParameterValue (mPrefix + "_monitorMode");
+    const int   monitorMode = (monModeP != nullptr) ? (int) monModeP->load() : 1;
 
     const int  chIdx    = (idxP != nullptr) ? (int) idxP->load() : -1;
     const bool isStereo = (stereoP != nullptr) && stereoP->load() > 0.5f;
@@ -258,7 +263,47 @@ void InstStripTask::run()
                               ? &mCtx->instPageMidi[mIndex]
                               : &emptyMidi;
 
+    // QA-OctavePedal Task 5: stash the pre-engine live signal so the monitor
+    // can cross-fade back to it in Dry mode.  Live-input strips only -- for
+    // sfizz sources `active` is already false (arm/listen forced off), and pure
+    // FilePlay playback returned above, so this only fires for real monitoring.
+    // Gated so steady "With Effect" (the default) pays ZERO extra work: the
+    // fork engages only while Dry is selected or a flip is still fading out.
+    const bool monitorFork = active && (monitorMode == 0 || mMonitorDryGain > 0.0f);
+    if (monitorFork)
+    {
+        mMonitorDryBuf.setSize (blockView.getNumChannels(), n, false, false, true);
+        for (int ch = 0; ch < blockView.getNumChannels(); ++ch)
+            mMonitorDryBuf.copyFrom (ch, 0, blockView, ch, 0, n);
+    }
+
     mEngine->processBlock (blockView, *midi);
+
+    // Monitor-only fork: With Effect (default) keeps the processed output; Dry
+    // cross-fades back to the raw pre-engine signal (~15 ms ramp per flip =
+    // click-free).  The recorded take (raw DI tap above) + playback (DI ->
+    // engine) are byte-identical in both modes -- this re-weights the MONITOR
+    // path only.
+    if (monitorFork)
+    {
+        const float target = (monitorMode == 0) ? 1.0f : 0.0f;   // 1 = Dry, 0 = With Effect
+        const float step   = 1.0f / juce::jmax (1.0f, 0.015f * (float) mProcessor->mSampleRate);
+        const int   nc     = juce::jmin (blockView.getNumChannels(), mMonitorDryBuf.getNumChannels());
+        float gEnd = mMonitorDryGain;
+        for (int ch = 0; ch < nc; ++ch)
+        {
+            float*       out = blockView.getWritePointer (ch);
+            const float* dry = mMonitorDryBuf.getReadPointer (ch);
+            float g = mMonitorDryGain;
+            for (int i = 0; i < n; ++i)
+            {
+                out[i] += (dry[i] - out[i]) * g;             // out*(1-g) + dry*g
+                g += juce::jlimit (-step, step, target - g);
+            }
+            gEnd = g;
+        }
+        mMonitorDryGain = gEnd;
+    }
 
     mGraph->processInsert (VibeGraph::InsertKind::Inst, mIndex,
                            blockView, mCtx->bpm, mCtx->anySolo);

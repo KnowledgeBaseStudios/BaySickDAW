@@ -101,6 +101,11 @@ Plans & Specs/Issue Tracker.txt
 /WORLD_*.wav
 /enable_pitch_diag.txt
 
+# QA-OctavePedal octave-engine A/B render byproducts (2026-07-18) — throwaway
+# old-vs-new dev comparison clips for the pitch-synchronous octave-down rework;
+# regenerable from the scratchpad A/B script, never shipped.
+/octave_ab_*.wav
+
 # QA-Fe pitch-engine test harnesses (2026-07-13) — throwaway build/render
 # scaffolding for the engine A/B; stripped at QA-Fe Task 7.
 /Tools/signalsmith-test/

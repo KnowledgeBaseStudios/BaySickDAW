@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "DSPBase.h"
 #include "PitchTrackerYIN.h"
+#include "PolyPitchTracker.h"
 #include <array>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10,15 +11,14 @@
 // OC Style Octave pedal.  Adds parallel pitch-shifted copies (+1 oct, -1 oct,
 // -2 oct) on top of the dry signal.  Two modes:
 //
-//   Polyphonic -- granular pitch shifter per octave path.  Two crossfaded
-//                 read heads in a ring buffer, played back at pitch-ratio
-//                 speed (2.0 / 0.5 / 0.25 respectively).  Hann-windowed
-//                 50 ms grains; produces clean shifts on monophonic bass at
-//                 the cost of mild "warble" character on dense polyphony.
-//                 Reuses the same windowed-grain spectral approach as our
-//                 PhaseVocoder / BaySickPitch chain (locked spec wording);
-//                 inline implementation here keeps the OC-Style module self-
-//                 contained without touching the existing PV class.
+//   Polyphonic -- hybrid per the 2026-06-18 octave-engine research: the -1/-2
+//                 oct paths are a pitch-synchronous PSOLA period-doubler on
+//                 confident single-note input (grain seams anchored to Schmitt
+//                 pitch marks validated by YIN), hysteresis-SWITCHED (short
+//                 fade, never a standing blend) to a granular fallback on
+//                 chords / unvoiced input.  The +1 oct path and the fallback
+//                 are the granular shifter: two crossfaded read heads in a
+//                 ring, played at pitch-ratio speed, Hann-windowed grains.
 //
 //   Vintage    -- low-CPU mono path:
 //                   +1 oct  = full-wave rectifier (4x oversampled abs(x))
@@ -52,6 +52,20 @@ public:
     void prepare (double sampleRate, int maxBlockSize) override;
     void process (juce::AudioBuffer<float>& buffer)    override;
     void reset()                                        override;
+
+    // PDC (QA-OctavePedal): the Polyphonic pitch-shift path is inherently
+    // latent (doubler ~1-2 pitch periods; granular ~half its period-synced
+    // grain).  Report a STABLE representative figure -- a per-block-varying
+    // value would thrash the host's delay-comp (a click each poll).  ~512 smp
+    // = half the ~1024-smp period-synced grain; SR-independent (the grain is
+    // sample-defined) so it never changes underfoot.  Vintage's Schmitt divider
+    // is sample-instantaneous -> 0.  The board pull-sum + the 5 Hz PDC solve
+    // carry this into the Inst-strip compensation (mode flips picked up free).
+    static constexpr int kPolyLatencySamples = 512;
+    int getLatencySamples() const override
+    {
+        return mMode == Mode::Polyphonic ? kPolyLatencySamples : 0;
+    }
 
     void getStateInformation (juce::MemoryBlock& dest)  override;
     void setStateInformation (const void* data, int sz) override;
@@ -116,46 +130,85 @@ private:
     std::array<std::array<GranularShifter, 3>, 2> mShifters;
     enum { kPlusOne = 0, kMinusOne = 1, kMinusTwo = 2 };
 
-    // ── PSOLA period-doubler (Polyphonic mode, octave-DOWN -- QA-EffectsReview T5) ─
-    // Re-emits each detected pitch period N times (N=2 for -1 oct, N=4 for -2 oct),
-    // crossfading at the period-aligned seams so the down-octave is tight + crisp
-    // (vs the granular shifter's warble).  Driven by PitchTrackerYIN's published
-    // period; on low pitch confidence the doubler output is faded out (it's a
-    // single-note engine -- the granular fallback for chords lands in the next
-    // sub-step).  Latency ~ one pitch period (well inside the guitar threshold).
+    // ── Pitch-synchronous octave-down shifter (Polyphonic mode) ──────────────
+    // QA-OctavePedal rework.  Plays each inter-mark segment at 1/octaveDiv
+    // speed (sub-sample interpolated read -- every harmonic halves/quarters, a
+    // genuine full-spectrum octave-down even on stationary tones), then hops
+    // forward octaveDiv-1 marks at the seam so consumption stays balanced with
+    // real time.  The pre-rework build replayed each period back-to-back at
+    // 1x speed, which is an IDENTITY on a stationary tone (replaying period A
+    // equals playing period B when B ~= A) -- its only "octave" content was
+    // period-to-period difference + seam discontinuity, i.e. the broken bell.
+    //
+    // Grain boundaries sit on Schmitt-crossing pitch marks (sub-sample
+    // refined, YIN-validated, pushed by the owner via pushMark()), so every
+    // seam joins matched waveform phase; segment lengths are fractional mark
+    // distances -- no integer-period quantization beat.  Seam crossfades are
+    // period-proportional.  Lag corrections happen only AT seams as one mark
+    // more / fewer to hop (one period per step) through the normal crossfade
+    // -- never a hard readPos snap.
+    //
+    // Coordinates are UNWRAPPED sample counts in doubles; interp() maps into
+    // the ring with a single O(1) fmod per call, so per-sample cost is bounded
+    // (no wrap loops -- the climbing-CPU hazard is the loop pattern, not the
+    // magnitude) and the 53-bit mantissa keeps sub-sample precision for years
+    // of continuous audio.  Latency ~ one-to-two pitch periods.
     struct PeriodDoubler
     {
-        static constexpr int kRingSize  = 8192;
-        static constexpr int kXfade     = 64;     // seam crossfade (samples)
-        static constexpr int kMinPeriod = 24;     // ~1.8 kHz @ 44.1 k
-        static constexpr int kMaxPeriod = 1024;   // ~43 Hz @ 44.1 k
+        static constexpr int    kRingSize  = 16384;  // lag reaches ~4 periods mid-cycle at octaveDiv 4 + correction headroom at kMaxPeriod
+        static constexpr int    kMarkQueue = 128;    // spans max lag + one max block even at kMinPeriod mark spacing
+        static constexpr int    kXfadeMin  = 4;
+        static constexpr int    kXfadeMax  = 64;
+        static constexpr double kMinPeriod = 24.0;   // ~1.8 kHz @ 44.1 k -- above this the doubler is ineligible
+        static constexpr double kMaxPeriod = 2048.0; // ~23 Hz @ 48 k (YIN's analysis window is the real low bound)
 
-        std::array<float, kRingSize> ring {};
-        int    writePos        { 0 };
-        double readPos         { 0.0 };
-        double xfadeOldPos     { 0.0 };
-        int    xfadeLeft       { 0 };
-        int    period          { 256 };
-        int    pendingPeriod   { 256 };
-        int    grainCount      { 0 };
-        int    repeat          { 0 };
-        int    repeatsPerGrain { 2 };   // 2 = -1 oct, 4 = -2 oct
+        std::array<float,  kRingSize>  ring  {};
+        std::array<double, kMarkQueue> marks {};   // ascending unwrapped positions
+        int    markCount   { 0 };
+        int    writeIdx    { 0 };
+        double writeAbs    { 0.0 };
+        double readAbs     { 0.0 };
+        double readRate    { 0.5 };     // 1 / octaveDiv; exact binary fractions, no drift
+        double xfadeOldAbs { 0.0 };
+        int    xfadeLeft   { 0 };
+        int    xfadeLen    { kXfadeMin };
+        double period      { 256.0 };   // YIN-tracked period: seam-fade length, starvation synthesis, lag bounds
+        double segStart    { 0.0 };
+        double segEnd      { 0.0 };
+        int    octaveDiv   { 2 };       // 2 = -1 oct, 4 = -2 oct
+        bool   primed      { false };
 
         void reset();
-        void setRepeats (int r)       { repeatsPerGrain = juce::jlimit (2, 4, r); }
-        void setPendingPeriod (int p) { pendingPeriod   = juce::jlimit (kMinPeriod, kMaxPeriod, p); }
+        void setOctaveDivisor (int d)    { octaveDiv = juce::jlimit (2, 4, d); readRate = 1.0 / (double) octaveDiv; }
+        void setTrackedPeriod (double p) { period = juce::jlimit (kMinPeriod, kMaxPeriod, p); }
+        void pushMark (double absPos);
         void process (const float* input, float* output, int numSamples);
 
     private:
-        float interp (double pos) const noexcept;
+        float interp (double absPos) const noexcept;
+        void  beginSeam (double target);
+        bool  markAfter (double x, int k, double& out) const noexcept;
+        void  purgeMarksBelow (double x) noexcept;
     };
 
     // 2 channels x 2 down-octave paths ([-1 oct, -2 oct]).
     std::array<std::array<PeriodDoubler, 2>, 2> mDoublers;
     enum { kDdMinusOne = 0, kDdMinusTwo = 1 };
 
-    PitchTrackerYIN mYin;
-    float mConf { 0.0f };   // smoothed pitch confidence (drives the doubler fade)
+    PitchTrackerYIN  mYin;    // mono: drives the doubler (single-note octave-down)
+    PolyPitchTracker mPoly;   // QA-OctavePedal #12: chord detection -> granular grain sizing (no longer mono-driven)
+    float  mDoublerMix    { 0.0f };    // 0 = granular, 1 = doubler; hysteresis-switched, short fade between
+    bool   mDoublerOn     { false };
+    double mTrackedPeriod { 256.0 };   // last YIN period accepted into doubler range (samples, fractional)
+
+    // Pitch-mark detector state (Polyphonic doubler).  Same Schmitt thresholds
+    // as the Vintage divider -- the shared crossing detector is the mark source
+    // per the 2026-06-18 research -- but separate state so the two modes never
+    // entangle across a mode switch.
+    bool   mMarkSchmittHi { false };
+    float  mMarkPrevMono  { 0.0f };
+    double mLastMarkAbs   { -1.0e12 };   // sentinel: first crossing always accepted; synth-fill waits for a real mark
+    double mMarkClockAbs  { 0.0 };       // unwrapped write-side clock, lockstep with every doubler's writeAbs
 
     // QA-EffectsReview Task 5 (C3): POG-style voicing on the shifted streams -- a
     // transient duck (let the dry attack lead, fade the shifted voices in behind it)
@@ -196,6 +249,7 @@ private:
 
     // Scratch buffers: filtered input + per-octave-path output sums.
     juce::AudioBuffer<float> mFilteredBuf;
+    juce::AudioBuffer<float> mMonoScratch;   // L+R average fed to both pitch trackers + the mark detector
     juce::AudioBuffer<float> mShiftedBuf[3];   // [+1, -1, -2]
     // QA-EffectsReview Task 5 (C2): doubler output for the -1/-2 paths, crossfaded
     // against the granular shifter by pitch confidence (PSOLA on confident single

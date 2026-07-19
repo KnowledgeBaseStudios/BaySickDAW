@@ -153,6 +153,17 @@ public:
     DSPBase*    getSlotEffect(int slot) const noexcept;   // pending if swapPending else active
     bool        isSlotBypassed(int slot) const noexcept;  // reads APVTS
 
+    // QA-OctavePedal PDC (pull model): sum of the non-bypassed slots' inherent
+    // DSP latencies (the Octave doubler, drive-pedal oversamplers, ...).  Uses
+    // getSlotEffect resolution (pending-aware = the effect that WILL process)
+    // and honors bsp_slot{N}_bypass exactly as processBlock does, so the report
+    // always matches the live audio path.  Message thread ONLY -- takes
+    // mSlotsLock (mirrors moveSlot; the audio thread try-locks + drops on
+    // contention, negligible at the 5 Hz solve rate).  Consumed by
+    // EngineChainProcessor's Pedals special-case; the 5 Hz updateBusLatencies
+    // solve carries slot swaps + bypass flips for free (no trigger plumbing).
+    int getChainLatencySamples();
+
     // ── Pedalboard preset library ─────────────────────────────────────────────
     // Documents/BaySickDAW/Presets/Pedalboards/{name}.xml - full 8-slot snapshot
     // wrapped in <Pedalboard> envelope.  Distinct from per-pedal presets which

@@ -1285,8 +1285,8 @@ type-wide teardown) and never re-spawn it; re-adding Rusty gave an empty page.
 
 ### §B.20 — QA-N (DSP meter sum-of-cores, DIAG-02)
 
-`blocks:` `________` (QA-N, the whole batch in one commit; hash backfills at the next
-docs commit). Debug exe FIRST, then Release — mark each scenario `D:` and `R:`.
+`blocks:` `2e44ab78` (QA-N, the whole batch in one commit). Debug exe FIRST, then
+Release — mark each scenario `D:` and `R:`.
 Background: under MT the DSP% used to measure the audio thread's wall-clock only, so
 parallel worker time vanished (it read the critical path, not total work). It now sums
 per-task busy time across the audio-thread pump + every worker.
@@ -1303,6 +1303,48 @@ per-task busy time across the audio-thread pump + every worker.
 - [ ] **N-3 — idle/light near-zero, no jitter.** Empty or light project, both modes:
       DSP% sits near zero; no new meter jitter or audio jitter at 128 buffer vs
       pre-batch. `D:__ R:__` notes:
+
+### §B.21 — QA-OctavePedal (octave engine fix + poly grain + pedal UI + PDC pull + Inst monitor)
+
+`blocks:` (backfill the QA-OctavePedal close commit hash at commit — the whole batch in one
+commit). Debug exe FIRST (screenshot any jassert), then Release — mark each scenario `D:` and `R:`.
+Background: the OC-Style octave pedal (Polyphonic mode) "rang like a broken bell" — the shipped
+period-doubler was free-running period-length OLA that, on a stationary tone, reconstructs the
+INPUT pitch (an identity), so its -1/-2 voices never actually shifted; the octave content was
+seam clicks + period drift. Rebuilt as a mark-anchored 1/N-speed pitch-synchronous shifter.
+Setup: an Inst page (Guitars/Basses or a live DI on an Inst strip) with the OC-Style octave
+pedal loaded in BaySickPedals; Polyphonic mode unless noted.
+
+- [ ] **OP-1 — bell is dead (octave -1 held note).** Play a held single note (low-mid guitar
+      range) with -1 Oct up and Direct at 0 (effect-only). The octave-down is a clean note one
+      octave below — NO metallic ring, NO comb/hollow coloration, and no slow beat against the
+      dry note when you raise Direct. Sweep a few pitches across the range. `D:__ R:__` notes:
+- [ ] **OP-2 — glides + high notes (no snap / no beat).** Under -1 Oct, play a legato slide up
+      and down: the octave tracks smoothly with NO click/snap at the turnaround. High-register
+      single notes: no amplitude "beating"/tremolo on the sustained octave. `D:__ R:__` notes:
+- [ ] **OP-3 — real polyphonic chord tracking.** Hold a chord (3-6 notes) in Polyphonic mode:
+      the octave-down follows the chord (sized off the lowest note) — audibly tighter/less
+      warbly than a single-note-only engine would manage on a chord. Mono single-note lines
+      still sound exactly as in OP-1 (mono behavior preserved). Works on guitar AND bass range
+      (auto — no instrument selector). `D:__ R:__` notes:
+- [ ] **OP-4 — pedal-mode tile layout.** Open BaySickPedals with the octave in a slot: all five
+      knobs (Direct / +1 / -1 / -2 / Range) AND the mode chickenhead are visible, finger-sized,
+      NO overlap, no dBFS strip. Then load the octave into the FX Rack (Effects page): the rack
+      view is the original horizontal layout, unchanged. `D:__ R:__` notes:
+- [ ] **OP-5 — PDC latency (LAT readout + bounce alignment).** On an Inst strip: loading drive
+      pedals (distortion/fuzz/overdrive) nudges the transport LAT readout UP (~1 ms class for a
+      full board); bypassing a drive pedal mid-play drops it back and re-aligns within ~200 ms
+      (ONE soft click is the documented PDC cost, allowed). Delay/chorus pedals do NOT move the
+      readout (their wet delay is the effect, not latency). With the octave active + Direct at 0,
+      bounce/export a riff: the octave-down lands ON the grid vs a no-pedal bounce. NOTE (by
+      design, Jeff 2026-07-18): with Direct RAISED (dry blended in) the dry portion sits ~11 ms
+      early — that is expected, not a bug (dry is left instant). `D:__ R:__` notes:
+- [ ] **OP-6 — Inst monitor Dry vs With Effect.** Right-click an Inst strip's Listen LED: menu
+      shows "Dry" and "With Effect" (default = With Effect on a new strip). With Effect monitors
+      the processed tone; Dry monitors the raw input. They're audibly distinct; the flip is
+      click-free. With Effect through the active octave feels ~low-latency (~11 ms, NOT a ~50 ms
+      slapback). A recorded take sounds identical whichever monitor mode was used while tracking
+      (monitor-only fork; recording is the raw DI). `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

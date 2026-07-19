@@ -124,6 +124,23 @@ bool BaySickPedalsProcessor::isSlotBypassed (int slot) const noexcept
     return false;
 }
 
+int BaySickPedalsProcessor::getChainLatencySamples()
+{
+    // Message-thread pull.  Mirror processBlock's slot walk exactly (skip
+    // bsp_slot{N}_bypass) so the reported latency == the delay the audio path
+    // actually introduces.  No board-level bypass exists on the pedalboard --
+    // per-slot bypass is the only bypass, matching this sum.
+    const juce::SpinLock::ScopedLockType lk (mSlotsLock);
+    int total = 0;
+    for (int i = 0; i < kNumSlots; ++i)
+    {
+        if (isSlotBypassed (i)) continue;
+        if (auto* eff = getSlotEffect (i))
+            total += juce::jmax (0, eff->getLatencySamples());
+    }
+    return total;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Slot mutation -- wait-free swap-pending pattern (mirrors EffectRack).
 // ─────────────────────────────────────────────────────────────────────────────

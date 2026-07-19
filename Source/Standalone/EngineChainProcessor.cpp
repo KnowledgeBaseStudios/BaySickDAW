@@ -1,4 +1,22 @@
 #include "EngineChainProcessor.h"
+#include "../BaySickPedals/BaySickPedalsProcessor.h"
+
+int EngineChainProcessor::getChainLatencySamples()
+{
+    const juce::SpinLock::ScopedLockType lk (mLock);
+    int total = 0;
+    for (auto* s : mStages)
+    {
+        if (s == nullptr) continue;
+        // Pedals stage reports 0 via the AudioProcessor accessor; pull its
+        // live per-slot sum instead (the octave doubler etc. live there).
+        if (auto* pedals = dynamic_cast<BaySickPedalsProcessor*> (s))
+            total += juce::jmax (0, pedals->getChainLatencySamples());
+        else
+            total += juce::jmax (0, s->getLatencySamples());
+    }
+    return total;
+}
 
 EngineChainProcessor::EngineChainProcessor()
     : juce::AudioProcessor (BusesProperties()

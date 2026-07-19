@@ -32,16 +32,12 @@ public:
     void setChain (std::initializer_list<juce::AudioProcessor*> stages);
 
     // QA-Fe2 PDC: summed stage latency (NAM/IR reports its oversampling via
-    // setLatencySamples; sfizz/Pedals stages report 0).  Message thread --
-    // feeds VibeGraph::onGetInstStripEngineLatency.
-    int getChainLatencySamples()
-    {
-        const juce::SpinLock::ScopedLockType lk (mLock);
-        int total = 0;
-        for (auto* s : mStages)
-            if (s != nullptr) total += juce::jmax (0, s->getLatencySamples());
-        return total;
-    }
+    // setLatencySamples).  QA-OctavePedal: the Pedals stage is special-cased --
+    // its AudioProcessor::getLatencySamples() is a fixed 0 (it never calls
+    // setLatencySamples), so we pull its live per-slot sum via the pedal
+    // board's own getChainLatencySamples() instead.  Message thread -- feeds
+    // VibeGraph::onGetInstStripEngineLatency.
+    int getChainLatencySamples();
 
     // ── AudioProcessor overrides ──────────────────────────────────────────────
     void prepareToPlay (double sampleRate, int blockSize) override;

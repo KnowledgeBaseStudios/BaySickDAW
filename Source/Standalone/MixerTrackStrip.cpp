@@ -361,6 +361,32 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
                 });
             };
         }
+        // QA-OctavePedal Task 5: Inst strips get the TWO-mode monitor selector
+        // (Dry / With Effect) on the same Listen-LED right-click.  Writes
+        // mixer_inst_<n>_monitorMode; InstStripTask forks the engine render.
+        else if (mType == StripType::Inst
+            && apvts.getParameter(paramPrefix + "_monitorMode") != nullptr)
+        {
+            auto* apvtsPtr = &apvts;
+            mListenBtn.onRightClick = [apvtsPtr, prefix = paramPrefix]
+            {
+                auto* p  = apvtsPtr->getParameter        (prefix + "_monitorMode");
+                auto* rv = apvtsPtr->getRawParameterValue (prefix + "_monitorMode");
+                if (p == nullptr || rv == nullptr) return;
+                const int cur = (int) rv->load();
+                juce::PopupMenu m;
+                m.addItem (1, "Dry",         true, cur == 0);
+                m.addItem (2, "With Effect", true, cur == 1);
+                m.showMenuAsync (juce::PopupMenu::Options(), [p] (int r)
+                {
+                    if (r <= 0) return;
+                    p->beginChangeGesture();
+                    p->setValueNotifyingHost (
+                        p->getNormalisableRange().convertTo0to1 ((float) (r - 1)));
+                    p->endChangeGesture();
+                });
+            };
+        }
     }
 }
 

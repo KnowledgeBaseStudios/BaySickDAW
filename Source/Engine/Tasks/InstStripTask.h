@@ -62,4 +62,12 @@ private:
     // scratches that produced all-clips-mixed-into-every-strip on MT playback.
     juce::AudioBuffer<float> mClipScratch;
     juce::AudioBuffer<float> mEngineScratch;
+
+    // QA-OctavePedal Task 5: live-monitor fork (Dry vs With Effect).  The
+    // pre-engine live signal is stashed here so the monitor output can cross-
+    // fade back to it in Dry mode without a click.  mMonitorDryGain is the
+    // smoothed dry weight (0 = With Effect, 1 = Dry); ramped one block per flip.
+    // Owned per-task (audio thread only) -- no cross-thread access.
+    juce::AudioBuffer<float> mMonitorDryBuf;
+    float                    mMonitorDryGain { 0.0f };
 };
