@@ -1885,7 +1885,7 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - Effort: plan-estimated ~4-6 weeks honest; executed 2026-07-23 -> 2026-07-24 across bulk-run sessions.
 
 #### **QA-VibeSlider: App-wide juce::Slider → VibeSlider refactor** (added 2026-05-08 via Rule 3 — see §9)
-**Plan file:** TBD (silly-name file when batch starts).
+**Plan file:** [`Plans & Specs/Batch Plans/gentle-swapping-gecko.md`](Batch Plans/gentle-swapping-gecko.md) *(G4 group open 2026-07-25 — see §9 sixty-fourth Forks entry)*
 - Items: BLU-493 (App-wide refactor; PRESET-SAFE; ~150-300 sites).
 - Scope: replace every plain `juce::Slider` instance across the app with `VibeSlider` (defined in `Source/Standalone/SharedUI.h:956`), which swallows right-click events. Without this, right-clicking a `LinearVertical` slider with snap-to-mouse enabled snaps the value to the click Y — UX bug whenever the user is trying to right-click to reach the Automate menu. Currently only EQ widget + DynamicParamsPopout + MixerTrackStrip pan/width/fader use VibeSlider; everything else (Harmless / BaySickSynth / BaySickBass / VibePlayer / Pedals / NAMIR / Vocal editors + all effect panels) still uses raw `juce::Slider`.
 - Risk: low. Per-class subclass swap; `VibeSlider` inherits all `juce::Slider` API. Build verifies + per-page interactive sanity.
@@ -1895,7 +1895,7 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 
 #### **QA-NativeDialogs: Native OS File Dialogs Everywhere** *(NEW — inserted 2026-05-23)*
 
-**Plan file:** `<silly-name>.md (when started)`
+**Plan file:** [`Plans & Specs/Batch Plans/polite-homing-pigeon.md`](Batch Plans/polite-homing-pigeon.md) *(G4 group open 2026-07-25 — premise corrected: all 18 chooser sites are already OS-native; batch re-shaped to native Open Project + "Quick Open Project" browser item + default-folder fixes — see §9 sixty-fourth Forks entry)*
 - Items: replace every custom internal browser / file-picker UI in the app with native Windows file/folder dialogs (`juce::FileChooser` with native dialog enabled), each routed to the correct default folder for its context.  Origin: Jeff's testing during QA-Ef surfaced both the visual mismatch ("the button opens a windows style file opener... we don't use this style of window for opening files and instead have these kind of old and clunky looking internal windows that pop up... never asked about this nor would I want that") and the wrong-default-folder behavior (the "New from Template..." item opens the projects folder, not the templates folder).  Jeff's call: "can be addressed in a separate batch."  See §9 twenty-ninth Forks entry.
 - Scope:
   - Audit every on-disk file-open / file-save / folder-pick surface in the app: project open, project save-as, project save-bundle (when wired by QA-ProjectSave), template open, template save-as, sample/audio import (browser drag-from-disk + Library "Add Folder"), preset open / save-as across every engine (Harmless / BaySickPlayer / BaySickSynth / BaySickBass / BaySickPedals / BaySickVocal / BaySickGuitars / BaySickBasses / BaySickRustyDrums / BaySickNAMIR), Pedals preset, BaySickAlign / BaySickPitch render-target picks, audio export (when wired by QA-Export), etc.
@@ -1911,7 +1911,7 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - Verify (own plan file will detail): every file-open / file-save / folder-pick surface in the app shows the native Windows dialog (not a custom internal one); each surface opens to the correct default folder for its context; file-extension filters work; Save replaces existing files cleanly; Cancel returns without state change; no missed call-sites (grep `juce::FileChooser` for any remaining non-native instances; grep for the deleted custom-browser class names returns no live references).
 
 #### **QA-ApvtsAutomation: Full APVTS + Automation Coverage Review** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry)*
-**Plan file:** TBD (written in the bulk-run G4 group plan-file pass).
+**Plan file:** [`Plans & Specs/Batch Plans/wired-lassoing-crane.md`](Batch Plans/wired-lassoing-crane.md) *(G4 group open 2026-07-25 — scope grew: per-instance ids + selector audit + capture-lock gate; BLU-378/379/492 migration confirmed (marathon 18) — see §9 sixty-fourth Forks entry)*
 - Items: audit EVERY user-changeable control across every editor/panel (10 engines + effect panels + mixer strips + system pages) — APVTS-bound with proper param setup, automatable end-to-end (right-click Automate resolves, stable componentID, attachment present) — and fix every gap found (Jeff request 2026-07-08 at bulk-run plan review).
 - **2026-07-10 (mid-QA-Fc, owner-confirmed — §9 entry rides the QA-Fc section pass):** the engine-param application gap is CONFIRMED, not audit-hypothesis. Automation lanes for engine-page params (`tk_{lay|bas}_{N}_{engineTag}_*`, `tk_drm_*`) create, label, and draw correctly but NEVER apply at playback: both application sites (the audio-thread pass in `PluginProcessor.cpp` and the UI-thread `applyAutomationAtCurrentPosition` in `StandaloneEditor.cpp`) resolve main-APVTS ids plus the `mAutomationApplicators` registry only — no path reaches the engines' own APVTSes, and the main-APVTS `tk_` mirror set (`registerParamsForTrack`) is id-mismatched with the knobs' engine-tagged ids and has zero consumers. Owner-verified 2026-07-10 (Harmless lane sweep, no knob/sound response). Also in this batch's audit scope: BaySickNAMIR editor controls carry no componentID at all (no Automate menu offered). This batch owns both fixes at its existing slot (Jeff pick 3a, 2026-07-10).
 - Scope: natural superset of three items currently folded into QA-L — BLU-378 (componentID on sliders), BLU-379 (SliderAttachment sync verify), BLU-492 (combo-box → APVTS params, **PRESET-BREAK** at preset-format level).  **Proposed migration of those three out of QA-L into this batch is PENDING Jeff's confirm at the bulk-run spec marathon (docket item 18) — QA-L's entry is unchanged until confirmed.**  PRESET-BREAK sequencing constraint: must land BEFORE the Master Test Plan per-engine preset walk and BEFORE QA-Templates authors factory presets.
@@ -1923,7 +1923,7 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - Verify (Master Test Plan §B section): sampled controls per engine/panel automate end-to-end (lane writes + playback drives the control); the audit table shows zero unbound user-changeable controls; combo-box params round-trip through preset save/load post-BLU-492.
 
 #### **QA-Verify: Phase 5A/5B/5C systems verification** (added 2026-05-08 via Rule 3 — see §9)
-**Plan file:** TBD.
+**Plan file:** [`Plans & Specs/Batch Plans/sturdy-tagging-pangolin.md`](Batch Plans/sturdy-tagging-pangolin.md) *(G4 group open 2026-07-25 — code half collapsed to pedals state hygiene: the pedalboard preset bug is already fixed (2026-05-05 base64 fix, runtime-log-verified); the 10-engine walk = campaign §E — see §9 sixty-fourth Forks entry)*
 - Items: LDT-169 (5A Project Serialization), LDT-170 (5B Template System), LDT-171 (5C Per-Engine Preset System).
 - Scope: end-to-end verification that project save/load + templates + presets work correctly across every engine (Harmless, BaySickPlayer, BaySickSynth, BaySickBass, BaySickPedals, BaySickVocal, BaySickGuitars, BaySickBasses, BaySickRustyDrums, BaySickNAMIR). Includes the **pedalboard preset bug** confirmed in QA-Inventory walk runtime testing — `BaySickPedalsProcessor` preset save/load doesn't restore correctly. Per-engine: load every factory preset, verify all params restore + audio plays as expected; save user preset, reload, verify identical state; test save/load round-trip across project save/load.
 - Risk: medium. Touches every engine's preset state path; pedalboard preset bug is concrete known regression.
@@ -1933,7 +1933,7 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - **Scope note (2026-07-08, Jeff at bulk-run setup):** the verification walk (Master Test Plan §E under the bulk run) expands beyond engine presets to four round-trip-verified families — engine presets, effect-rack presets (`EffectPresetIO` + per-effect preset menus), engine "Save Current Patch As..." flows (Layers/Bass/Drum/Clips + per-drum context menu), and page-level "Save Page Preset As..."/Load + "Save Page Preset & Delete" paths on all 7 page types + Pedals "Save as Default".  Detail with source refs in [`Batch Plans/swift-stampeding-caribou.md`](Batch Plans/swift-stampeding-caribou.md) §E.
 
 #### **QA-Export: Audio Export rebuild + Project Bundle** (added 2026-05-08 via Rule 3 — see §9)
-**Plan file:** TBD.
+**Plan file:** [`Plans & Specs/Batch Plans/loud-bouncing-walrus.md`](Batch Plans/loud-bouncing-walrus.md) *(G4 group open 2026-07-25 — MP3 = vendored libmp3lame (docket 7=A; no LAME existed in-tree); bundle scope = user choice per pack (docket 8) — see §9 sixty-fourth Forks entry)*
 - Items: FSW-065 (D-9 Export Audio rebuild — Ctrl+R, format/bitdepth/SR/tail; render path itself broken), LDT-172 (5D Audio Export — WAV/MP3/OGG codecs), BLU-529 (Project Bundle & Export — copy samples into target folder/.zip).
 - Scope: rebuild the song-mode audio export pipeline. Currently the only render-to-WAV path is per-pattern right-click in BrowserPanel (`BuilderPage.h/.cpp`); no song-mode export, no MP3/OGG, no format/bitdepth/SR/tail options. **Plus** Project Bundle & Export: zip-all-samples-and-project-into-shareable-archive. User confirmed in QA-Inventory walk that zip bundle is REQUIRED (not deferred per original 5D-BUNDLE plan).
 - Risk: medium. New audio-export code path. Bundle path involves filesystem operations on user samples.
@@ -1943,7 +1943,7 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 
 #### **QA-ProjectSave: Project Save / Template / Sample Handling** *(NEW — inserted 2026-05-23)*
 
-**Plan file:** `<silly-name>.md (when started)`
+**Plan file:** [`Plans & Specs/Batch Plans/deep-packing-badger.md`](Batch Plans/deep-packing-badger.md) *(G4 group open 2026-07-25 — premise updates: FND-1 already uniform on six of seven page types (RustyDrums = the gap, docket 11=A); item 102 is a project-CLONE flow, dropped per docket 10=A; loadTemplate dirty-bypass confirmed + owned by the unified flow; templates v2 = project UIState shape (docket 9=A) — see §9 sixty-fourth Forks entry)*
 - Items: consolidated batch absorbing all of QA-Ef's deferred #7 work + sample-retention / FL-Studio-style file handling + the related save-format / migration questions.  Origin: initially issue 5 from Jeff's earlier triage (templates save channels but not clips/samples); scope expanded mid-QA-Ef when the #7 deferral surfaced that the L/B/D-only template scope is fundamentally incomplete for what "template" means AND `loadTemplate`'s destructive teardown is functional brokenness (not a tradeoff); plus the sample-retention discussion was parked here; plus the full original-#7 menu/restructure work moved here so it's only built once the underlying templates are functional ("no point wiring a polished menu to a fundamentally broken target").  See §9 thirtieth Forks entry.
 - Scope:
   - **Template scope expansion** — `saveTemplateAs` (`Source/Standalone/StandaloneEditor.cpp:6148-6224`) and the template XML format extended to save **vox / inst / clip / rusty / aux / samples** in addition to L/B/D.  Mirrors the project-save shape so any template is a complete project skeleton (just without arrangement content).
@@ -1963,7 +1963,7 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - Verify (own plan file will detail): saving a template with full project state (L/B/D + vox/inst/clip/rusty/aux/samples) round-trips through Load Template intact; loading a template into a project with other-type tabs leaves those tabs untouched (non-destructive teardown); user templates with inline `<Drum>` children load correctly (drum inline-load fix); the New-from-Template submenu shows Default / Premade / My Templates in the correct folders; dirty-check flow prompts on dirty project and loads directly on clean; sample reference-vs-copy behavior matches the source-aware hybrid spec; Pack project produces a portable zip with all referenced samples resolved correctly on the receiving end; existing per-project-copy samples migrate cleanly (no orphaned files, no broken references); Save Template As dialog text accurately describes the expanded scope.
 
 #### **QA-UndoCoverage: App-Wide Undo-History Coverage Review** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry)*
-**Plan file:** TBD (written in the bulk-run G4 group plan-file pass).
+**Plan file:** [`Plans & Specs/Batch Plans/long-rewinding-yak.md`](Batch Plans/long-rewinding-yak.md) *(G4 group open 2026-07-25 — RESHAPED: the setProperty population is serialization-only (no live-state audit exists to run); scope = one global UndoManager everywhere (docket 13=A+ii) + snapshot-gap wrapping + Event Editor unification (docket 12=A, 14=a) — see §9 sixty-fourth Forks entry)*
 - Items: everything the user can change must register in the central UndoManager (`Source/Standalone/StandaloneEditor.h:300`) — audit every mutable surface (pattern/note edits, arrangement blocks, mixer state, engine params, effect params, page state, renames) and wire the gaps via `ParameterAttachment`s or explicit transactions (Jeff request 2026-07-08 at bulk-run plan review).
 - Scope: this is the "Strict UndoManager Plumbing" half of QA-DirtyFlag's locked spec, promoted to its own batch; **QA-DirtyFlag re-scopes to the transaction-pointer system on top of it** (its correctness depends on this coverage being complete).  Sizing intel (source-verified 2026-07-08): 477 `setProperty(..., nullptr)` sites across 50 files, of which ~300 are detached-tree preset serialization (correctly nullptr — OUT of scope); real targets = PatternManager (105 sites) + live UI writes; the main APVTS is currently constructed with a nullptr UndoManager (`PluginProcessor.cpp:159`).  UndoCoverage/DirtyFlag boundary + which UndoManager becomes the single global authority = marathon docket item 19.
 - Risk: medium-high — codebase-wide audit; a missed site silently fails to register undo.
@@ -1975,7 +1975,7 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 
 #### **QA-DirtyFlag: UndoManager-Aware Project Dirty Tracking** *(NEW — inserted 2026-05-24)*
 
-**Plan file:** `<silly-name>.md (when started)`
+**Plan file:** [`Plans & Specs/Batch Plans/clean-pointing-stoat.md`](Batch Plans/clean-pointing-stoat.md) *(G4 group open 2026-07-25 — + dual structural counter so non-undoable ops (tab add/delete) still dirty honestly — see §9 sixty-fourth Forks entry)*
 - **Re-scope (2026-07-08 — see §9 fifty-fifth Forks entry):** the "Strict UndoManager Plumbing" audit half of the locked spec below moved to the new **QA-UndoCoverage** batch (runs immediately before this one); QA-DirtyFlag keeps the TransactionTracker / transaction-pointer system + dynamic dirty evaluation, built on that completed plumbing.  Original spec text below preserved as written.
 - Items: refactor BaySickDAW's project dirty state tracking from the current "anything touched since load" model to a transaction-pointer system mimicking major DAWs.  Origin: surfaced 2026-05-23 mid-QA-Eg-Task-3 testing — clicking a solo button and unclicking it marks the project dirty even though net state matches the saved file.  Verified by code-read: `ApvtsDirtyTracker` (`Source/Standalone/ApvtsDirtyTracker.h:39-42`) is a `ValueTree::Listener` that fires `onAny` on every property write regardless of old-vs-new equality; `ProjectManager::markDirty` (`Source/ProjectManager.cpp:98-102`) sets `mDirty=true` unconditionally.  The flag tracks "anything touched since load" — NOT "state differs from file."  See §9 thirty-second Forks entry.
 - Scope (Jeff's verbatim spec, locked 2026-05-23):
@@ -6315,3 +6315,55 @@ fixed everything fixable in-batch. What survives the close routes here; no new b
 **Files:** `do_build.bat`, `.gitignore` (`/SymbolStore/`, `/CrashDumps/`), `Source/G3PlayheadDiag.h`,
 HKCU WER registry (outside repo).  **Verification:** dump capture path untestable until a crash
 recurs; symbol archiving verified by inspecting `SymbolStore/` after Jeff's builds.
+
+### 2026-07-25 — G4 group open: docket locked (14 items), eight plans approved, three batches premise-reshaped (sixty-fourth Forks entry)
+
+**Group open per bulk-run R4/R5** (single approval, Jeff 2026-07-25). Seven read-only scouts
+swept all eight batch surfaces at HEAD `17c9cdf7`; every load-bearing claim desk-verified
+before the docket. All G4 spec calls walked in chat (items 1-14 + 2a-2d sub-letters + two
+clarification rounds) — condensed answer table in the run plan's "G4 docket answers" section
+([`Batch Plans/swift-stampeding-caribou.md`](Batch Plans/swift-stampeding-caribou.md)); answers
+baked into each plan file's locked-calls table. Composition unchanged (eight batches, §6 order).
+Premise corrections recorded per batch:
+
+- **QA-Verify (code half) COLLAPSED:** the QA-Inventory "pedalboard preset doesn't restore"
+  regression was fixed 2026-05-05 (`MemoryBlock::fromBase64Encoding` vs the raw decoder that
+  returned 0 bytes on the `<byteCount>.` prefix); the always-on round-trip log shows exactly one
+  failing restore event ever (pre-fix) and 1,150+ clean since. Remaining code = state hygiene
+  (root/APVTS tag collision w/ legacy-tag load tolerance, FX-rack enum ordinal pinning,
+  `pedalsLog` strip per docket 6=B + log=A). Runtime confirmation = campaign §E.
+- **QA-UndoCoverage RESHAPED:** the "477 setProperty sites" audit premise is void — that
+  population is detached-tree serialization, and PatternManager's live model is C++ structs
+  (no ValueTree). Real scope = processor-owned UndoManager into ALL APVTSes (main + 10 engines,
+  docket 13=A), listener-driven history sync w/ owner tags + hidden/auto-skipped dead-tab rows
+  (13=ii), wrapping the dirty-but-not-undo gestures (12=A), Event Editor unification
+  (Ctrl+Alt+Z + display-only Key Binds section, 14=a).
+- **QA-NativeDialogs premise corrected:** all 18 `juce::FileChooser` sites are ALREADY OS-native
+  (JUCE ctor default). Re-shaped to: native Open Project + the browser surviving as a new
+  "Quick Open Project" item (docket 1=C variant), four default-folder fixes (2a-2d), NAM-pedal
+  path resolver centralization, dead-code delete. The one non-native surface (DrumPage dual
+  files+dirs browse) stays by choice (3=c).
+- **QA-ApvtsAutomation grew:** + per-instance id disambiguation for bare-id engines, + the
+  BLU-492 selector audit under the tone-vs-view rule (5=A), + the capture-lock automation gate
+  (4=A — lanes suppressed on gated vocal params while that strip records). The dead main-APVTS
+  `tk_` mirror set retires. Gap re-confirmed live at HEAD post-G3.
+- **QA-ProjectSave premise updates:** FND-1 is already uniform on six of seven page types
+  (RustyDrums = the lone gap → "Save Kit & Delete", 11=A); menu item 102 is a
+  clone-an-existing-project flow, not a template picker — capability dropped with the submenu
+  restructure (10=A); `loadTemplate` bypasses `confirmDiscardChanges` (verified) — owned by the
+  unified dirty-check flow; templates v2 adopt the project UIState shape w/ dual-format factory
+  load (9=A); default-template pointer finally gains its consumer (the submenu) and
+  `newProject`'s dead folder-seed branch goes.
+- **QA-Export:** no LAME exists in-tree (the 7a "vendored LAME" premise was aspirational) —
+  vendor libmp3lame source + link (docket 7=A; LGPL routes to QA-LegalReview); WAV+OGG encoders
+  already compiled. File-menu items 120/121 are dispatch-less no-ops today — replaced by one
+  "Export Audio…" dialog. Bundle walker built as the shared `ProjectBundler` that
+  QA-ProjectSave's Pack reuses (scope choice per pack, docket 8).
+
+**Plan files (mirrored + running notes seeded 2026-07-25):** QA-VibeSlider
+`gentle-swapping-gecko` / QA-NativeDialogs `polite-homing-pigeon` / QA-ApvtsAutomation
+`wired-lassoing-crane` / QA-Verify `sturdy-tagging-pangolin` / QA-Export `loud-bouncing-walrus`
+/ QA-ProjectSave `deep-packing-badger` / QA-UndoCoverage `long-rewinding-yak` / QA-DirtyFlag
+`clean-pointing-stoat`.  Baked-pending-veto interpretations (listed in each plan file) were
+surfaced with the docket and drew no veto.  QA-DirtyFlag's commit closes G4 code; the group
+boundary (R3 combined-diff review + smoke) follows per the run plan.

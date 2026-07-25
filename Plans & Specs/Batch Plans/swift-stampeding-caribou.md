@@ -1171,3 +1171,56 @@ pending veto:** inst monitor default = With Effect; NAV-04 = the two buttons abo
   -> QA-OctavePedal; R3 review + smoke at the group boundary.
 - **Work-Log entries needed:** none new (group open is docs-only; each batch drafts + HOLDs
   its own entry at code-complete per R2).
+
+## G4 docket answers — LOCKED 2026-07-25 (group open; chat docket, numbered options, no recommendations)
+
+Full narrative in Main Plan §9 sixty-fourth; per-batch detail in each plan file's locked table.
+Condensed record (item = pick):
+
+| # | Pick | | # | Pick |
+|---|------|-|---|------|
+| 1 | C variant — Open Project native; browser survives as "Quick Open Project" | | 8 | BOTH bundle scopes, user choice per pack |
+| 2a | i — Templates root + both subfolders guaranteed to exist | | 9 | A — templates v2 = project UIState shape + dual-format factory load |
+| 2b | iii — create Documents\BaySickDAW\MIDI | | 10 | A — clone-a-project flow dies ("we already have a save as") |
+| 2c | ii — create Presets\Effects\IR home | | 11 | A — Rusty gets 3-button "Save Kit & Delete" |
+| 2d | ii — both audio imports open My Samples | | 12 | A — full UndoCoverage reshape (i)-(iv) |
+| 3 | c — DrumPage dual browse keeps the JUCE browser | | 13 | A + ii — one manager everywhere; dead-tab rows HIDDEN + auto-skipped |
+| 4 | A — automation suppressed on capture-gated vocal params during the take | | 14 | a — Event Editor adopts Ctrl+Alt+Z; + display-only EE section in Key Binds |
+| 5 | A — tone selectors -> APVTS params; view selectors stay local | | — | |
+| 6 | B + log A — pedals hygiene (tag collision + enum pinning); pedalsLog removed | | — | |
+| 7 | A — vendor libmp3lame source, linked (LGPL -> QA-LegalReview) | | — | |
+
+Baked-pending-veto interpretations (listed per plan file) drew no veto: VibeSlider literal
+sweep + guard-only vocal swap; NativeDialogs name-prompts out of scope + dead-browser-block
+delete + NAM resolver; Export single "Export Audio…" item + exact-beats stop + async render;
+ApvtsAutomation applicator mechanism; ProjectSave loadTemplate dirty-bypass owned by the
+unified flow; Verify legacy-tag load tolerance (one-line, not a migration); DirtyFlag dual
+structural counter + autosave-semantics preservation.
+
+## Carry-Over — 2026-07-25 (G4 group-open session)
+
+- **Completed:** session open per protocol (standup + Main Plan §0 in full + this file in full
+  + doc-lag reconciliation — the other session's G3 docs commit `17c9cdf7` confirmed at HEAD,
+  nothing routed into G4). Seven read-only scouts over all eight batch surfaces (one re-run
+  after a dead first launch); every load-bearing scout claim desk-verified before the docket
+  (notable: pedals preset bug already fixed w/ runtime-log proof; UndoCoverage setProperty
+  framing void; all 18 choosers already native; no LAME in tree; FND-1 six-of-seven already
+  uniform; loadTemplate dirty bypass). Complete G4 docket walked (record above). EIGHT §0 plan
+  files written + approved in one R5 pass, mirrored to Batch Plans/ (home copies deleted):
+  gecko / pigeon / crane / pangolin / walrus / badger / yak / stoat. Eight running-notes files
+  seeded. Main Plan: eight §5 plan-file pointers + §9 sixty-fourth entry.
+- **In-flight:** the group-open docs commit rides at this session's close (message + full git
+  status -> Jeff's approval). No source code touched this session.
+- **Assumptions changed:** the six premise corrections in the §9 sixty-fourth entry (Verify
+  collapse, UndoCoverage reshape, NativeDialogs all-native, ApvtsAutomation growth, ProjectSave
+  flips, Export LAME-absent). The bulk-run plan-file template now carries an explicit
+  "Batch close (bulk-run per-batch loop)" section per file — per-task commit steps are
+  superseded by one-commit-per-batch (Jeff flagged the omission mid-write; retrofitted).
+- **Resume action (NEW session, fresh context):** paste the G4 execution prompt (handed to
+  Jeff at this session's close): /standup -> Main Plan §0 in full -> this file's G4 sections
+  (docket record + this block) -> `Batch Plans/gentle-swapping-gecko.md` in full -> confirm the
+  group-open commit is at HEAD -> begin QA-VibeSlider Task 1. Per-batch loop per R1-R5; batch
+  order gecko -> pigeon -> crane -> pangolin -> walrus -> badger -> yak -> stoat; R3 review +
+  smoke at the G4 boundary (after stoat's commit). The campaign follows G4.
+- **Work-Log entries needed:** none new (group open is docs-only; each batch drafts + HOLDs
+  its own entry at code-complete per R2).
