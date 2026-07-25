@@ -452,6 +452,13 @@ mud). Jeff: not useful for current sounds -> Future State, revisit with denser S
   approach, back-ref the sixty-first entry) + QA-H §5 annotation (the engine-aware NotePropsPanel redo);
   strip the Task-1 `[SlideSampler]` DBG (borderline -- useful at the smoke; Jeff's call at the commit);
   apply the HELD Work Log entry + backfill timestamp/hash.
+  **EXECUTED 2026-07-24 post-`b54d4681`** (all but the campaign-held pieces): §5 entry CREATED (no
+  entry existed to "flip" — the sixty-first had reserved the slot for Jeff; placed after
+  QA-SlideSliceGlide on his approval) + §6 arrow token (46 asterisks; renumbered from 45 when the
+  full four-batch boundary set went in) + footnote + §9 sixty-second + the QA-H annotation; hash
+  backfilled into the HELD entry (timestamp still owed at apply); DBG strip resolved KEEP (Debug-only,
+  Jeff at the QA-G3Smoke close).  Work Log apply + STATUS flip remain campaign-pass items (R2).
+  Full record: the bison notes 2026-07-24 doc-pass entry.
 - HEAD unchanged; nothing committed this session.
 
 ---
@@ -459,14 +466,15 @@ mud). Jeff: not useful for current sounds -> Future State, revisit with denser S
 ## HELD Implemented Work Log entry (applies at the §B.23 campaign pass, bulk-run R2)
 
 > Drafted at code-complete via `/draft-doc batch-close`; NOT yet applied to `Implemented Work Log.md`.
-> Applies with the §5 STATUS flip when §B.23 passes the campaign walk (R2).  Backfill the timestamp +
-> close commit hash at commit.  Bucket = Players (the core is the SlideSampler + Guitars/Basses engines;
+> Applies with the §5 STATUS flip when §B.23 passes the campaign walk (R2).  Close hash `b54d4681`
+> (the G3 boundary commit) backfilled 2026-07-24; the timestamp is still owed at apply.  Bucket =
+> Players (the core is the SlideSampler + Guitars/Basses engines;
 > the diff also touches PianoRoll/StandaloneEditor UI + PatternManager serialization, but Players is the
 > dominant domain per Jeff's call).
 
-### 2026-07-2X — QA-SlideSampler — Blended multi-sample slide (new SlideSampler) + native Bend for the sfizz Guitars/Basses engines; reopens + delivers QA-SlideSliceGlide A-1
+### 2026-07-22 — QA-SlideSampler — Blended multi-sample slide (new SlideSampler) + native Bend for the sfizz Guitars/Basses engines; reopens + delivers QA-SlideSliceGlide A-1
 
-**Bucket:** Players. Batch `silky-gliding-lynx`. `blocks:` (backfill hash).
+**Bucket:** Players. Batch `silky-gliding-lynx`. `blocks:` `b54d4681`.
 
 #### Done
 - **Task 1 — Region extraction (`SlideRegionMap`).** NEW `Source/SlideSampler/SlideRegionMap.h/.cpp`:

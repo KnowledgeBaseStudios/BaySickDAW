@@ -1203,15 +1203,48 @@ dirty-rects -- a naive rate bump would have doubled the full-canvas cost).  Buil
 UI cost than before AND half the trail.  Both playhead residuals are now closed -- the §9
 route shrinks to the crash watch + the two no-action captures.
 
+## 2026-07-24 — Boundary commit `b54d4681` + Main Plan doc pass (post-close)
+
+**Boundary commit LANDED:** `b54d4681` (95 files, +13101/-1094) on Jeff's explicit approval; his
+build was clean beforehand.  Carries all five stacked batches (otter/lynx/marmot/bison code+docs +
+frog doc amendments).
+
+**Doc-lag note for the G4 researcher:** `Files For Claude/bulkrun_group_session_boilerplate.md`
+gained a "G3 BOUNDARY DOC LAG" block (Jeff's direction) — names `b54d4681`, states the Main Plan
+records are being authored and do NOT block research, and points at all four plan + running-notes
+files + the defect dossier so the researcher reads the real content.
+
+**Hash backfills:** `b54d4681` filled into the test plan (§B.22 / §B.23 / §B.24 + the §B.18
+L-9..L-14 rows) and the otter/lynx/bison HELD-entry `blocks:` fields; lynx heading date resolved to
+2026-07-22, bison to 2026-07-24.  **§B.10 (QA-Fd) `blocks:` left UNFILLED** — git log shows only
+`b9f1894f` labeled "QA-Fd checkpoint", no unambiguous close commit; flagged to Jeff rather than
+guessed.
+
+**Main Plan doc pass applied** (two doc-drafter dispatches; every anchor verified against the file
+before apply): four §5 entries in Jeff-approved order (QA-OctavePedal → QA-SlideSliceGlide →
+QA-SlideSampler → QA-L-Fix → QA-G3Smoke, before QA-VibeSlider) with STATUS-at-boundary lines;
+§6 arrow tokens 45/46/47/48 + four footnotes; §9 sixty-second (QA-SlideSampler close) +
+sixty-third (this batch's close); the sixty-first's two OVERDUE post-close annotations applied
+(QA-G / `steady-pinning-heron`: B-1..B-5 + the B-2 LATENT-not-regression record correction; QA-H /
+`ghostly-riffing-moth`: S-1..S-10) plus lynx's QA-H annotation (engine-aware NotePropsPanel), in
+chronological order at the QA-H seam.  Lynx pieces updated at apply: renumbered 45→46 (otter takes
+45), STATUS "NOTHING committed" → committed at `b54d4681`, position phrase → "after
+QA-SlideSliceGlide".  This batch's HELD-entry heading tail corrected to the shrunken §9 route
+(playhead residuals were FIXED at close; route = crash watch + two captures).
+
+**Chronology note on record:** marmot (QA-L-Fix) began 2026-07-19, before otter (QA-SlideSliceGlide)
+opened 2026-07-20 — the §5/§6 order above is Jeff's approved sequencing, not a chronology claim.
+
 ## HELD Implemented Work Log entry (applies at the §B.24 campaign pass, bulk-run R2)
 
 > Drafted at close via `/draft-doc batch-close`; NOT yet applied to `Implemented Work Log.md`.
 > Applies with the §5/§9 doc queue at the boundary commit + the R2 campaign walk of §B.24.
-> Backfill the full `YYYY-MM-DD HH:MM PT` timestamp + the boundary-commit hash at apply.
+> Backfill the full `YYYY-MM-DD HH:MM PT` timestamp at apply; boundary-commit hash `b54d4681`
+> filled 2026-07-24.
 
-### 2026-07-XX -- QA-G3Smoke -- G3 boundary-smoke 37-defect sweep (all seven clusters) + voiced SlideSampler rework (extraction/voice-DSP/engine integration, 12b/12c voicing completion) + net-new Swing SW-1..6 + Guitars/Basses Cut Self (G-12/13/14) + scheduler lock-free roll snapshot (#30b) + 8A beats-authoritative blocks + FL-style playhead marker on all three surfaces; three smoke rounds + close review fixed in-batch; crash-dump watch + playhead paint/park residuals routed via §9
+### 2026-07-24 -- QA-G3Smoke -- G3 boundary-smoke 37-defect sweep (all seven clusters) + voiced SlideSampler rework (extraction/voice-DSP/engine integration, 12b/12c voicing completion) + net-new Swing SW-1..6 + Guitars/Basses Cut Self (G-12/13/14) + scheduler lock-free roll snapshot (#30b) + 8A beats-authoritative blocks + FL-style playhead marker on all three surfaces; three smoke rounds + close review fixed in-batch; crash-dump watch + two unevaluated SlideSampler captures routed via §9
 
-**Bucket:** Players, System Pages, Cross-cutting Infrastructure, UI / L&F / Theming, Effects. Batch `burly-restringing-bison`. `blocks:` (backfill hash).
+**Bucket:** Players, System Pages, Cross-cutting Infrastructure, UI / L&F / Theming, Effects. Batch `burly-restringing-bison`. `blocks:` `b54d4681`.
 
 #### Done
 

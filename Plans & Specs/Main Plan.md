@@ -1666,6 +1666,9 @@ needed to find what you should pull up to review the work.
 
 #### **QA-G: Timeline Geometry**
 **Plan file:** [`Plans & Specs/Batch Plans/steady-pinning-heron.md`](Batch Plans/steady-pinning-heron.md) *(G3 group open 2026-07-17; scope grew: +track menu/groups/colors, +note-preview true positions, +pattern-block slice w/ content-offset, +the full time-signature system — see §9 sixtieth Forks entry)*
+
+> **Post-close annotation (2026-07-20 — QA-SlideSliceGlide):** the Builder tiling + slice surfaces this batch built were redone by QA-SlideSliceGlide (`wistful-sliding-otter`, found during the G3 boundary smoke).  B-1: the tiling cycle is now the pattern's REAL content length (`getPatternContentBeats(patternIndex)`), not `Pattern.bars`.  B-2 + record correction: the roll-slice infinite-line bug is **LATENT since the initial commit, NOT a QA-G regression** (git blame).  B-3: mid-note slice = clamp-and-play the straddling note's fragment at read time — NO pattern copy (the "fork the pattern" research claim was wrong, source-verified; blocks stay `patternIndex` + `contentOffsetTicks` windows).  B-4: the click-split became a drag-line with a short-block guard fix + a visible seam.  B-5: Shift-snap on both slice paths.  Test plan: §B.22 supersedes §B.13 G-8..G-11.  See §9 sixty-first Forks entry.
+
 - Items: BUILD-01 (100 tracks), BUILD-02 (ruler freeze), BUILD-03 (zoom
   alignment).
 - Scope: refactor BuilderPage Viewport. Extract ruler from vertical
@@ -1677,6 +1680,11 @@ needed to find what you should pull up to review the work.
 
 #### **QA-H: Builder Polish + Piano Roll Features**
 **Plan file:** [`Plans & Specs/Batch Plans/ghostly-riffing-moth.md`](Batch Plans/ghostly-riffing-moth.md) *(G3 group open 2026-07-17; scope grew: +D-6 Riff Machine + D-8 Note Properties (new Release/Resonance note fields, slide/porta made audible) + Randomize FL rebuild; NAV-05 + folded-#15 already shipped; BUILD-06 verified moot — see §9 sixtieth)*
+
+> **Post-close annotation (2026-07-20 — QA-SlideSliceGlide):** the D-8 slide + Note Properties work this batch shipped was redone by QA-SlideSliceGlide (`wistful-sliding-otter`, found during the G3 boundary smoke).  S-1..S-10: co-start source resolution (a slide off a co-starting base note now works); RT = cut-base + retrigger + block-length glide (no more twin voice); Porta glides over a new per-note "Porta Length in Beats" (`PianoNote.portaLengthBeats`, default 1) instead of the ~60 ms snap; RP now emits the per-note expression block and ramps loudness base->slide velocity over the glide (Jeff's option C, new CC86 transport); **app-wide panning fixed** — CC10 was emitted but NO voice consumed it; a CC10 consumer + per-voice pan stage was added to BaySickSynth/Bass, Harmless, VibePlayer; the popup gains the Porta-length box (greyed unless Porta), double-click-to-default, and a Close button.  Test plan: §B.22 supersedes §B.14 H-2..H-5.  See §9 sixty-first Forks entry.
+
+> **Post-close annotation (2026-07-22 — QA-SlideSampler):** the D-8 Note Properties popup is SUPERSEDED on the Guitars/Basses rolls by QA-SlideSampler's engine-aware NotePropsPanel (Flat / RP Slide / Bend + Velocity + the patch-range-gated Bend dropdowns only — Pan/Cutoff/Resonance/Release verified INERT there, CCs unmapped by the karoryfer patches; Fine Pitch + the Porta box + the dead in-house RP/RT/Porta buttons stripped per Jeff).  In-house engine rolls keep this batch's full panel unchanged.  See §9 sixty-second Forks entry.
+
 - Items: BUILD-04 (ghost notes static), BUILD-05 ('s' keybind dead),
   BUILD-06 (WAV-clip stretch missing rebuild trigger), NAV-05 (REMOVE
   Builder hamburger), MIDI-01 (Ctrl+click row select), MIDI-02
@@ -1835,6 +1843,46 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - Risk: medium-high — audio-thread pitch DSP (already partly built) + tight <10 ms latency budget + UI layout.
 - Dependencies: QA-Fe (PSOLA retirement + engine decisions); the June octave research.
 - Effort: medium-large.
+
+#### **QA-SlideSliceGlide: Note-Type Slides + Note Properties Popup + Builder Tiling/Slice** *(NEW — G3 boundary batch; found during the 2026-07-20 G3 boundary smoke, workshopped + executed same day; §5 entry added 2026-07-24 at the G3 boundary commit — see §9 sixty-first Forks entry)*
+**Plan file:** [`Plans & Specs/Batch Plans/wistful-sliding-otter.md`](Batch Plans/wistful-sliding-otter.md) *(S-1..S-10 / B-1..B-5 / A-1 locked decision tables + source-verified root causes; paired running notes hold the HELD Work Log entry)*
+- **Bucket:** Players, System Pages.
+- Items: S-1..S-10 (note-type slide semantics + Note Properties popup + the app-wide CC10 pan fix), B-1..B-5 (Builder pattern-block tiling + slice), A-1 (sfizz/Aria glide — DEFERRED, see STATUS).
+- Scope: slides — a co-starting base note now resolves as the glide source (S-1); RT = cut the base + retrigger + block-length glide, one voice (S-3/S-5, shared mono-cut emitted post-pass so it survives same-sample co-start); Porta glides over a new per-note "Porta Length In Beats" (`PianoNote.portaLengthBeats`, default 1, `"pl"` serialization) instead of the hard ~60 ms fallback (S-4/S-10); RP keeps its takeover bend but now emits the per-note expression block (`emitNoteExpression`) plus an option-C loudness ramp base->slide velocity over the glide via a new CC86 transport (S-2/S-6); **app-wide panning fix** — pan was emitted as CC10 but NO voice consumed it; added a CC10 consumer + per-voice center-preserving pan stage to BaySickSynth (covers Bass via shared DSP), Harmless/AdditiveVoice, and VibePlayer (whose manual CC dispatch filter also dropped CC10) — fixes panning for every note, not just slides (S-7). Note Properties popup: double-click-to-neutral-default on the 6 sliders, a "Porta Length" type-in box (BPM-box style, greyed unless the note type is Porta), a Close button, +2 rows (S-8/S-9/S-10). Builder: tiling cycle = the pattern's REAL content length via the new `getPatternContentBeats(patternIndex)`, scheduler + ghost preview, the >4-bar note cull self-fixed (B-1); roll slice cuts a finite drawn segment, not an infinite line (B-2); mid-note slice = clamp-and-play the straddling note's fragment at read time — NO pattern copy, blocks stay `patternIndex` + `contentOffsetTicks` windows (B-3); Builder click-split converted to a drag-line with two-dot preview, short-block guard fix, and a visible seam at continuation pieces (B-4); Shift = a vertical cut snapped to the active snap-div on both slice paths (B-5).
+- **STATUS: code-complete 2026-07-20 (Tasks 1-5 shipped through per-task build gates, all CLEAN; Task 6 / A-1 sfizz glide DEFERRED to QA-SlideSampler after the MPE premise was source-falsified; Task 7 = docs-only close on Jeff's direction; `/review-batch` 2026-07-21: 0 BLOCKERS, code READY); committed at the G3 boundary commit `b54d4681`; Work Log entry HELD per R2 (applies at the §B.22 campaign pass, with this entry's STATUS flip to CLOSED); §B.22 supersedes §B.14 H-2..H-5 + §B.13 G-8..G-11; behavioral verification runs at the §B.22 campaign pass.**
+- Risk: high — audio-thread slide scheduler + slide DSP across the 4 in-house voice classes, engine-wide panning, and the Builder tiling + slice model.
+- Dependencies: stacked on the uncommitted G3 boundary tree (the 12 boundary review-fixes + the QA-L-Fix work were already dirty at open — do-not-disturb honored; every edit located by symbol, not stale line numbers).
+- Effort: large (~20-30h planned across six work tasks; five shipped, A-1 deferred).
+
+#### **QA-SlideSampler: Blended Multi-Sample Slide (new SlideSampler) + Native Bend on the sfizz Guitars/Basses Engines** *(NEW — split 2026-07-20 out of QA-SlideSliceGlide at its A-1 STOP, see §9 sixty-first Forks entry; executed 2026-07-21/22; entry recorded at the G3 boundary commit — see §9 sixty-second)*
+**Plan file:** [`Plans & Specs/Batch Plans/silky-gliding-lynx.md`](Batch Plans/silky-gliding-lynx.md)
+- **Bucket:** Players.
+- Items: A-1 (the sfizz slide QA-SlideSliceGlide STOPPED on — sfizz has no per-note bend and the karoryfer patches ship only small native bend, guitar ~+3 up-only / bass +/-2, so a real slide can't come from sfizz). Option C hybrid per the 2026-07-20 workshop + feasibility spike ([`daw-architecture-sample-based-continuous-pitch-slide-2026-07-20.md`](Research Reports/daw-architecture-sample-based-continuous-pitch-slide-2026-07-20.md)): sfizz keeps normal notes; a purpose-built crossfading SlideSampler plays the slide gesture from the patch's own sustain samples; plus a native "Bend" note type + an engine-aware Note Properties redo on the Guitars/Basses rolls.
+- Scope (7 tasks, full detail in the plan file): SFZ sustain-region extraction (`SlideRegionMap`, CENTER-voice default-keyswitch filter + native bend-range capture); `SlideSampler` + process-wide path-keyed `SlideSampleCache` (spec-call A=(b) full velocity bands; synchronous decode-at-load option (b) SUPERSEDES the band-lazy half of spec-call A; RAM ~110/141 MB per unique patch, decoded once + shared across tabs); RP Slide interception/suppress/handoff on the CC84/85/5/37/86 transport (SS-Q4=(a) ring-out, PROVISIONAL); native Bend (`NoteType::Bend` + signed `bendSemitones` + `bendShape`, SS-Q3=A) + engine-aware NotePropsPanel (supersedes QA-H's popup on the Guitars/Basses rolls only); SS-Q5 structural artifact pass (option 1 — perceptual values held for the smoke via the `SS-Q5 TUNE` checklist); VibePlayer reuse review (DEFERRED to Future State [CL-302 / AQ]); docs close.
+- **STATUS: code-complete 2026-07-22 (Tasks 1-5 build-gated clean + /review-batch BLOCKER fixed in-batch); committed at the G3 boundary commit `b54d4681`; Work Log entry HELD per R2 (applies at the §B.23 campaign pass — §B.23 supersedes §B.22 SS-A); SS-Q5 by-ear tuning + the SS-Q4=(a) landing-thinness A/B owed at that pass.**
+- Risk: medium-high — new audio-thread sampler DSP inside the sfizz engines' processBlock; mitigated by the alloc/lock-free voice design + per-task build gates + /review-batch at close.
+- Dependencies: QA-SlideSliceGlide (the slide-note transport + note-props groundwork it builds on); the 2026-07-20 feasibility spike.
+- Effort: large (7 tasks across the 2026-07-21/22 sessions).
+
+#### **QA-L-Fix: Per-Drum MIDI Kit Triggers (MIDI Learn + note/CC + play-pitch)** *(NEW — G3 boundary defect fix on QA-L's shipped per-drum MIDI feature (`2e2df50a`); surfaced at the G3 boundary 2026-07-19; Jeff's call: defect fix, not new scope, blocks the boundary commit; workshopped 2026-07-19, executed 2026-07-19/20; §5 entry added 2026-07-24 at the G3 boundary commit)*
+**Plan file:** [`Plans & Specs/Batch Plans/eager-thumping-marmot.md`](Batch Plans/eager-thumping-marmot.md) *(D-1..D-16 locked decision table + the "pads send CC" premise-correction record; paired running notes hold the HELD Work Log entry)*
+- **Bucket:** Players, System Pages, Cross-cutting Infrastructure.
+- Items: the QA-L per-drum-MIDI redesign (D-1..D-16) — `mixer_drum_{N}_inputNote` -> `_playNote` play-pitch semantics, kit-only MIDI menu split, D-6 re-pitch, new `DrumTriggerMap` note-or-CC MIDI Learn + trigger dispatch, app-wide MIDI-trigger-velocity toggle; plus 4 folded-in real-time fixes to the pre-existing I-3b MIDI Learn subsystem (Jeff-directed, fixed in-batch rather than routed).
+- Scope: the shipped QA-L feature was unreachable on the kit (the note fan-out ran only while a *drum tab* held MIDI focus AND skipped the focused drum — nothing fired from the Drum Kit surface, and on a drum's own tab the assignment was ignored). Redesign: "MIDI Note" becomes the drum's **play pitch** (`_playNote`, default C5; kit hits stamp it; changing it re-pitches that drum's hits at the OLD note across ALL patterns via a dedicated `DrumRepitchAction`, one Ctrl+Z); the MIDI menu renders only from the kit entry points (D-2); new `Source/MidiLearn/DrumTriggerMap.h/.cpp` — a sibling to `MidiLearnRegistry`, not built on it (D-13) — captures a note OR CC per drum (one lock-free `std::atomic<uint32_t>` per drum on the audio thread; no locks, no allocation, no `juce::String` on that path; learn handshake committed on the message thread), dispatches in the live-MIDI loop preserving `m.samplePosition` (CC triggers fire globally; note triggers only while the kit is the focused surface per D-8/D-16; either fires the drum at its assigned play note, D-9), CC-hold 1 s safety timeout, `<DrumTriggers>` project persistence (D-14); global "MIDI trigger velocity: From controller / Fixed" toggle in the Mixer hamburger, persisted to `settings.xml` (D-11). Premise correction on record: the plan's "Jeff's pads send CC" root cause was disproven by hardware test (Novation FLkey 61 pads send notes) — the defect stood on the hardware-independent focus/skip reasoning. Folded I-3b RT fixes: audio-thread heap free in the learn queue (device-name interning), per-event allocation in `dispatchEvent` (fixed stack array), four violations in `tryCaptureLearn` (capture callback removed, timer handshake), plus a fourth defect caught inside the fix itself (message-thread `paramId` clear).
+- **STATUS: code-complete 2026-07-20 (Tasks 1-3 + the folded I-3b RT fixes + the close `/review-batch` round — 1 BLOCKER + 5 NEEDS-FIX + 6 NITs, every one fixed in-batch; builds clean Debug + Release, confirmed by Jeff); committed at the G3 boundary commit `b54d4681`; Work Log entry HELD per R2 (applies at the §B.18 campaign pass — §B.18: L-8 SUPERSEDED, new L-9..L-14); OWED at the same campaign pass: the §9 Forks entry back-referencing QA-L (deliberately deferred by the batch's own notes; the folded RT fixes get NO Forks entry — fixed on Jeff's direction, not routed).**
+- Risk: medium — new trigger subsystem + audio-thread dispatch + a deliberate play-pitch semantics change (`_inputNote` -> `_playNote`, default -1 -> 60; pre-v1, no migration).
+- Dependencies: none — G3 boundary work that blocked the boundary commit; the 12 boundary review-fixes were already in the tree (do-not-disturb honored).
+- Effort: ~6-10h.
+
+#### **QA-G3Smoke: G3 Boundary Smoke Defect Sweep (all 37 dossier defects) + Voiced SlideSampler Rework + Swing + Guitars/Basses Cut Self** *(NEW — the 2026-07-22 G3 boundary smoke surfaced 37 defects across seven clusters, compiled into `Plans & Specs/G3 Smoke - Master Defect Dossier.md`; plan review session 2026-07-23 re-verified every load-bearing dossier line against the tree + locked G-1..G-16 and SW-1..SW-6 with Jeff; executed 2026-07-23/24; §5 entry added 2026-07-24 at the G3 boundary commit — see §9 sixty-third Forks entry)*
+**Plan file:** [`Plans & Specs/Batch Plans/burly-restringing-bison.md`](Batch Plans/burly-restringing-bison.md) *(paired running notes hold the HELD Work Log entry + the dossier-corrections / deviation-supersede / owned-errors records)*
+- **Bucket:** Players, System Pages, Cross-cutting Infrastructure, UI / L&F / Theming, Effects.
+- Items: all 37 dossier defects (#1..#37) with the plan's dossier-corrections record overriding the dossier where they conflict; the voiced SlideSampler rework (G-1 full patch voicing + full control surface; G-11 decode-ALL-articulations residency; Tasks 10-12 + Jeff-directed 12b/12c voicing completion); net-new Swing (G-7, SW-1..SW-6: global transport knob + per-player Swing Mix + Truncate Swing Notes, applied at scheduling, project-persisted); Guitars/Basses Cut Self with QA-CutSelfReview parity + the slide-tail policy (G-12/G-13/G-14); scheduler lock-free roll snapshot for ALL roll families (#30b, G-6); 8A beats-authoritative `ArrangementBlock` (G-5); FL-style playhead marker on all three surfaces + title-bar normalization (G-16).
+- Scope: ONE plan, 13 tasks ordered by surface so no region is written twice (Jeff's directive). sfizz pitch-wheel centered-convention fix across all nine sends (#1/#8, prerequisite for the slide tasks); scheduler core rework (#30b RCU snapshot reusing the Batch-9c `RetirementQueue` — recorded deviation from the plan's two-slot sketch; #24 de-tiling; 8A; #36; the swing transform + eager swing params; #11 CC89 pan-ramp emit); in-house voice consumers (#36/#11/#37); Builder grid + tracks (#21-#29); playhead behavior (#30/#31 + the G-9 characterization — NO unknown static offset reproduced; FL-style final marker form on Jeff's direction); swing UI + G-16 title-bar moves; piano-roll tools (#9-#20); drums unit (#32-#34 — the drum-recording permanent-loss hole closed); octave-up #35 (OLA normalize reverted at smoke round 1; the plan's named structural re-anchor backup shipped); the voiced SlideSampler extraction / voice-DSP / engine-integration tasks + 12b/12c; three smoke rounds (Jeff's v2-numbered report; Debug readings; automation-vs-pattern-mode) + close `/review-batch` fixes + the close addendum (pause park-snap to nearest 16th, extended-CC pseudo-CC synthesis, dirty-rect playhead paint + 60 Hz roll timer). Crash evidence infrastructure: WER LocalDumps armed + `do_build.bat` symbol archiving to SymbolStore/.
+- **STATUS: code-complete 2026-07-24 (13 tasks + 12b/12c + three smoke rounds + close `/review-batch` — 1 BLOCKER + 6 NEEDS-FIX + 7 NITs, all fixed in-batch except two recorded NITs (swing loop-edge = campaign-ear watch; `[G3 PLAYHEAD]` catalog drift = moot, diagnostics kept) — + the close addendum; per-task build gates all cleared); committed at the G3 boundary commit `b54d4681`; Work Log entry HELD per R2 (applies at the §B.24 campaign pass — 41 scenarios G3-1..G3-41; supersedes §B.23 SLS-1/3/4/5); OWED at the campaign pass: the G-11 articulation-residency RAM figure (capture from the Debug `[SlideSampler]` line at G3-20 setup) + the G3-36 bar-1 re-test; routed via §9 sixty-third: the General-2 crash-dump watch + the two unevaluated SlideSampler captures (offset_oncc25 + the structural fil2 statics); diagnostics strip call (Jeff): KEEP ALL FOUR (Debug-only).**
+- Risk: high — a scheduler-core rewrite, a new data-model domain (8A), and a multi-week voiced-DSP build, all touching the audio thread.
+- Dependencies: stacks on the entire uncommitted G3 boundary tree (QA-SlideSliceGlide + QA-SlideSampler + QA-L-Fix + the boundary review-fixes + QA-OctavePedal, all riding `b54d4681`); the sfizz pitch-wheel fix precedes the slide tasks (plan §11.3).
+- Effort: plan-estimated ~4-6 weeks honest; executed 2026-07-23 -> 2026-07-24 across bulk-run sessions.
 
 #### **QA-VibeSlider: App-wide juce::Slider → VibeSlider refactor** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** TBD (silly-name file when batch starts).
@@ -2243,7 +2291,7 @@ records the same set so cross-doc grep stays consistent.
 ```
 QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-Rules*********************************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-ClipPlayback************************************ → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-TransportDisplay************************************* → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-Fd***************************************** → QA-Fe****************************************** → QA-Fe2******************************************** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
-   → QA-M → QA-Drum-Polish**** → QA-N → QA-OctavePedal******************************************* → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-ApvtsAutomation************************************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-UndoCoverage*************************************** → QA-DirtyFlag*******************
+   → QA-M → QA-Drum-Polish**** → QA-N → QA-OctavePedal******************************************* → QA-SlideSliceGlide********************************************* → QA-SlideSampler********************************************** → QA-L-Fix*********************************************** → QA-G3Smoke************************************************ → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-ApvtsAutomation************************************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-UndoCoverage*************************************** → QA-DirtyFlag*******************
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -2388,6 +2436,47 @@ takes, Gate + De-reverb vocal-chain stages, Builder-browser recording
 groups, WORLD-to-stock, and the arc's five deferred leftovers.  The G2
 boundary closes after QA-Fe + QA-Fe2 wrap together.  See §9 fifty-ninth
 Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-SlideSliceGlide** inserted 2026-07-24 at the
+G3 boundary commit (retro-add — the batch opened + executed 2026-07-20 off
+the G3 boundary smoke; Jeff's placement, after QA-OctavePedal).  Fixed the
+note-type slides + the Note Properties popup (S-1..S-10, incl. the app-wide
+CC10 panning fix across the 4 in-house voice classes) and Builder
+tiling/slice (B-1..B-5); A-1 sfizz glide DEFERRED to the new QA-SlideSampler
+batch.  See §9 sixty-first Forks entry.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-SlideSampler** split 2026-07-20 out of
+QA-SlideSliceGlide at its A-1 STOP (sfizz has no per-note bend; the
+karoryfer patches ship only small native bend — guitar ~+3 up-only,
+bass +/-2) and run 2026-07-21/22.  A purpose-built crossfading
+SlideSampler plays the slide gesture from the patch's own sustain
+samples (sfizz keeps normal notes), plus a native "Bend" note type + an
+engine-aware Note Properties redo on the Guitars/Basses rolls.
+Recorded in the arrow at the G3 boundary commit in execution order,
+after QA-SlideSliceGlide.  See §9 sixty-first + sixty-second Forks entries.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-L-Fix** inserted 2026-07-24 at the G3
+boundary commit (retro-add — workshopped 2026-07-19 at the G3 boundary,
+executed 2026-07-19/20; Jeff's call: a QA-L defect fix, not new scope,
+blocking the boundary commit).  Rebuilds QA-L's per-drum MIDI feature
+(`2e2df50a`), which was unreachable on the kit: "MIDI Note" becomes the
+drum's play pitch (`_playNote`), the MIDI menu goes kit-only, and a new
+lock-free `DrumTriggerMap` delivers note-or-CC MIDI Learn triggers + a
+global trigger-velocity toggle; 4 real-time fixes to the I-3b MIDI Learn
+subsystem folded in on Jeff's direction.  Its §9 Forks entry
+(back-referencing QA-L) is deliberately deferred to the §B.18 campaign
+pass — see [`Batch Plans/eager-thumping-marmot.md`](Batch Plans/eager-thumping-marmot.md)
++ its paired running notes.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-G3Smoke** inserted 2026-07-24 at the G3
+boundary commit — the 2026-07-22 G3 boundary smoke surfaced 37 defects
+across seven clusters (compiled into
+`Plans & Specs/G3 Smoke - Master Defect Dossier.md`); this batch executed
+ALL of them 2026-07-23/24 plus the voiced SlideSampler rework, the net-new
+Swing feature (SW-1..SW-6), Guitars/Basses Cut Self, the lock-free roll
+snapshot (#30b), 8A beats-authoritative blocks, and the FL-style playhead
+marker; three smoke rounds + the close review fixed in-batch.  See §9
+sixty-third Forks entry.
 
 \*\*\*\*\*\*\*\*\* **QA-Ea** inserted 2026-05-15 at the QA-E Task 6
 (DSP-09) pre-task spec-call.  Slotted **immediately after QA-E, before
@@ -6131,3 +6220,98 @@ directed **no commit** — commit on his approval). Routing per Rule 3:
   SFZ). **Its §5 sequence slot is Jeff's call** (place when he sequences it).
 - **Held for the campaign pass (bulk-run R2):** the Implemented Work Log entry + the §5 STATUS flip
   (drafted in the batch running notes); §B.22 authored (supersedes §B.14 H-2..H-5 + §B.13 G-8..G-11).
+
+### 2026-07-22 — QA-SlideSampler close: A-1 REOPENED + DELIVERED — blended multi-sample SlideSampler + native Bend supersede the global-pitch-wheel approach (sixty-second Forks entry)
+
+**Trigger:** batch QA-SlideSampler (`silky-gliding-lynx`), split out at the sixty-first entry's A-1
+STOP, executed 2026-07-21/22. Tasks 1-5 source-verified + build-gated CLEAN (Jeff); `/review-batch`
+found 1 BLOCKER (a note set to Bend via the type button never seeded `bendSemitones` -> silent bend
+on the natural path) + 1 dead getter, both fixed in-batch (3 NITs logged for a later polish pass).
+Jeff directed NO commit at close — the batch rode the G3 boundary commit `b54d4681`. Routing per Rule 3:
+
+- **A-1 REOPENED + DELIVERED — supersedes the global-pitch-wheel approach.** The sixty-first entry
+  deferred A-1 after source-falsifying its premise: sfizz's only pitch control is the GLOBAL wheel
+  (chord-wide) inside tiny native ranges (guitar ~+3 up-only / bass +/-2) — unusable for a real
+  slide. Delivered instead: NEW `Source/SlideSampler/` — `SlideRegionMap` (sustain-region
+  extraction; guitar 141 samples = 47 keys x 3 vel bands, bass 168 = 42 x 4; fully chromatic so the
+  micro-bend stays < 1 semi) + shared path-keyed `SlideSampleCache` + a 4-voice equal-power
+  crossfading `SlideSampler` (at-or-below zone pick, <=1-semi bend-up, attack-offset +
+  zero-crossing-snapped hops). Guitars/Basses processBlock intercepts the QA-SlideSliceGlide
+  CC84/85/5/37/86 transport, suppresses the sfizz anchor, drives a 64-sample sub-block pitch ramp,
+  and hands off SS-Q4=(a) ring-out (PROVISIONAL — landing-thinness A/B at the smoke). The wheel now
+  serves only the new Bend, within the patch's real bend range by design (chord-wide; the always-on
+  note-props notice covers it).
+- **Native Bend + engine-aware Note Properties redo (QA-H touched).** `NoteType::Bend` + signed
+  `bendSemitones` + `bendShape` (4 shapes), `"bs"`/`"bsh"` serialization — SS-Q3=A keeps
+  `portaLengthBeats` single-meaning on the synth-family Porta notes. NotePropsPanel is engine-aware:
+  Guitars/Basses rolls get Flat / RP Slide / Bend + Velocity + the patch-range-gated Bend dropdowns;
+  the inert controls (Pan/Cutoff/Resonance/Release — CCs unmapped by the karoryfer patches, no sfizz
+  default), Fine Pitch, the Porta box + the dead in-house RP/RT/Porta buttons are stripped there;
+  in-house rolls unchanged. **QA-H's §5 entry annotated** (its D-8 popup superseded on those two
+  roll types only).
+- **Option removal (paper trail):** spec-call A's band-lazy decode half SUPERSEDED by option (b)
+  synchronous decode-at-load inside the loadKit processing-gate window — the lazy first-slide
+  latency (~150-300 ms SSD, up to ~1-2 s HDD) is a real musical defect; the rework net-REMOVED the
+  decode thread/timer/queue layer. RAM ceiling ~110 (guitar) / ~141 (bass) MB per unique patch,
+  decoded once + shared across tabs.
+- **Sub-spec calls resolved in-batch:** SS-Q1 the main sustain articulation is one-shots (no loops —
+  correct for plucked strings; no loop synthesis needed); SS-Q2 slide table ~28/27 MB per band
+  (about half sfizz's own preload); SS-Q3=A; SS-Q4=(a); SS-Q5=option 1 (safe structural
+  artifact-reducers now, perceptual values dialed by ear at the smoke via the `SS-Q5 TUNE` checklist
+  in the running notes).
+- **Task 6 VibePlayer reuse -> DEFERRED to Future State §P2 [CL-302 / AQ]** (Jeff's call): the blend
+  needs dense/chromatic sampling; VibePlayer sounds are frequently sparse. No VibePlayer code landed.
+- **Held for the G3 boundary commit / §B.23 campaign pass (bulk-run R2):** the HELD Work Log entry
+  (drafted in the running notes; close hash `b54d4681` backfilled 2026-07-24, timestamp at apply) +
+  the §5 STATUS flip at the section pass; the Task-1 `[SlideSampler]` DBG strip was resolved at the
+  QA-G3Smoke close — Jeff: keep, Debug-only.
+
+**Plan files affected:**
+- `Plans & Specs/Main Plan.md` — §5 QA-SlideSampler entry + STATUS recorded (Phase 5, after
+  QA-SlideSliceGlide); §6 arrow gains `-> QA-SlideSampler` (46 asterisks) + footnote; §5 QA-H
+  post-close annotation; §9 this entry.
+- `Plans & Specs/Batch Plans/silky-gliding-lynx.md` + `Plans & Specs/Running Notes/silky-gliding-lynx.md`
+  — the plan + the full execution record (SS-Q1..SS-Q5 resolutions, the SS-Q5 TUNING CHECKLIST, the
+  HELD Work Log entry).
+- `Plans & Specs/Test Plans/v1-master-test-plan.md` — §B.23 authored (supersedes §B.22 SS-A).
+- `Plans & Specs/Future State.md` — §P2 [CL-302 / AQ] (VibePlayer/SlideSampler reuse deferral).
+- `Plans & Specs/Research Reports/daw-architecture-sample-based-continuous-pitch-slide-2026-07-20.md`
+  — the feasibility spike the design stands on.
+
+**Verification:** this fork closes when (a) the G3 boundary commit lands the batch — DONE, `b54d4681`
+(close hash backfilled into the HELD Work Log entry) — and (b) §B.23 passes the R2 campaign walk —
+including the SS-Q5 by-ear tuning pass + the SS-Q4=(a) landing-thinness A/B — at which point the
+Work Log entry applies and the §5 STATUS flips per R2.
+
+### 2026-07-24 — QA-G3Smoke close: crash watch armed + two no-action SlideSampler captures (sixty-third Forks entry)
+
+**Trigger:** QA-G3Smoke (`burly-restringing-bison`) closed at the G3 boundary commit `b54d4681`
+after three smoke rounds; all 37 dossier defects executed, and the close review + close addendum
+fixed everything fixable in-batch. What survives the close routes here; no new batch is scheduled.
+
+- **General-2 — random Release crash (ACTIVE WATCH, passive).**  Three APPCRASH c0000005
+  readouts from Reliability Monitor, heap-corruption family; the two crashing builds
+  (TimeDateStamps 6a62eedc / 6a60d100) were overwritten by later builds, so their faulting
+  offsets are unmappable.  Armed instead of blind-patched: (1) WER LocalDumps under HKCU
+  (DumpType 1 -> `Documents/BaySickDAW/CrashDumps/`), (2) `do_build.bat` now archives every
+  outgoing Release exe+pdb pair to `SymbolStore/<timestamp>/` (newest 5 kept, PE TimeDateStamp
+  matching).  Next crash produces a minidump that maps against an archived pair.  Route: read
+  the dump when one lands; escalate to a fix batch only with a mapped stack.
+- **SlideSampler no-action captures (2).**  (a) `offset_oncc25` — sample-start-offset CC routing
+  in the source SFZs is parsed but not evaluated; no audible complaint surfaced in three smoke
+  rounds.  (b) fil2 statics — the structural second-filter static opcodes are captured in the
+  ArtSet tables but unevaluated.  Both are capture-without-evaluation by design; evaluate only
+  if a future ear pass hears a gap.
+- **Resolutions recorded here so nobody re-opens them:** #19 pan span — [G3 PAN]
+  instrumentation proved the ramp correct; the percept IS the designed span; spec closed as-is
+  (Jeff).  Playhead residual (b) paint-lag — FIXED at close (dirty-rect marker repaint +
+  60 Hz roll page timer).  Playhead residual (c) off-grid park — FIXED at close
+  (pause-quantize to nearest 16th).  Extended-CC internal inputs — FIXED at close.  None of
+  these fork forward.
+- **Diagnostics stay in (Debug-only):** [G3 PLAYHEAD] / [G3 PAN] / [G3 BAR1] loggers +
+  `G3PlayheadDiag.h` remain compiled in Debug per Jeff ("If they are all debug only leave them
+  in for now since they don't impact the user").  Strip pass deferred indefinitely.
+
+**Files:** `do_build.bat`, `.gitignore` (`/SymbolStore/`, `/CrashDumps/`), `Source/G3PlayheadDiag.h`,
+HKCU WER registry (outside repo).  **Verification:** dump capture path untestable until a crash
+recurs; symbol archiving verified by inspecting `SymbolStore/` after Jeff's builds.

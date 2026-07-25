@@ -1255,8 +1255,8 @@ Release — mark each scenario `D:` and `R:`.
       nothing on CC pads and the kit-trigger workflow it existed for was unreachable.
       Redesigned as per-drum kit triggers — see L-9..L-14. `D:n/a R:n/a`
 
-**L-9 .. L-14 (per-drum MIDI kit triggers)** `blocks:` the QA-L-Fix commit (hash
-backfilled at close) — plan `Batch Plans/eager-thumping-marmot.md`, design D-1..D-14
+**L-9 .. L-14 (per-drum MIDI kit triggers)** `blocks:` `b54d4681` (QA-L-Fix, at the
+G3 boundary commit) — plan `Batch Plans/eager-thumping-marmot.md`, design D-1..D-14
 locked 2026-07-19. Needs a MIDI controller with pads; a CC-sending pad is required for
 L-11.
 
@@ -1379,7 +1379,7 @@ pedal loaded in BaySickPedals; Polyphonic mode unless noted.
 
 ### §B.22 — QA-SlideSliceGlide (note-type slides + note properties + Builder tiling/slice; sfizz slide DEFERRED)
 
-`blocks:` (backfill the QA-SlideSliceGlide close commit hash at commit). Debug exe FIRST
+`blocks:` `b54d4681` (QA-SlideSliceGlide, at the G3 boundary commit). Debug exe FIRST
 (screenshot any jassert), then Release — mark each scenario `D:` and `R:`.
 **Supersedes** the stale §B.14 H-2 / H-3 / H-4 / H-5 (this batch redid the slide DSP + Note
 Properties popup) and the §B.13 G-8 / G-9 / G-10 / G-11 (tiling + slice re-done as content-length
@@ -1439,7 +1439,7 @@ BaySickPlayer) — the slide fixes are on those four. sfizz Inst engines (Guitar
 
 ### §B.23 — QA-SlideSampler (blended multi-sample slide + native Bend + engine-aware note-props for Guitars/Basses)
 
-`blocks:` (backfill the QA-SlideSampler close commit hash at commit). Debug exe FIRST (screenshot any
+`blocks:` `b54d4681` (QA-SlideSampler, at the G3 boundary commit). Debug exe FIRST (screenshot any
 jassert), then Release — mark each scenario `D:` and `R:`. **Supersedes** §B.22 SS-A (the sfizz slide is
 now real). Setup: a **BaySickGuitars** and a **BaySickBasses** Inst tab, each on its default keyswitch
 patch (Guitars `01-green_keyswitch`, Basses `01-darkblack_keysw`).
@@ -1487,7 +1487,7 @@ patch (Guitars `01-green_keyswitch`, Basses `01-darkblack_keysw`).
 
 ### §B.24 — QA-G3Smoke (G3 boundary-smoke 37-defect sweep + voiced SlideSampler + Swing + Cut Self)
 
-`blocks:` (backfill the QA-G3Smoke close commit hash at commit). Debug exe FIRST (screenshot any
+`blocks:` `b54d4681` (QA-G3Smoke, at the G3 boundary commit). Debug exe FIRST (screenshot any
 jassert), then Release — mark each scenario `D:` and `R:`. **Supersedes §B.23** where the voiced
 rework changed behavior: SLS-1 (the slide voice now runs the full patch chain), SLS-3 (velocity =
 real velcurve bands + base-note anchor), SLS-4 (landing decay = the patch ampeg release), SLS-5

@@ -458,12 +458,12 @@ A-1 deferred to QA-SlideSampler. HEAD unchanged (d6abc38b); nothing committed th
 ## HELD Implemented Work Log entry (applies at the §B.22 campaign pass, bulk-run R2)
 
 > Draft below; NOT yet applied to `Implemented Work Log.md`. Applies with the §5 STATUS flip when §B.22
-> passes the campaign walk (R2). Backfill the close commit hash at commit.
+> passes the campaign walk (R2). Close hash `b54d4681` (the G3 boundary commit) backfilled 2026-07-24.
 
 ### 2026-07-20 — QA-SlideSliceGlide — note-type slides + Note Properties + Builder tiling/slice; sfizz slide deferred
 
 **Bucket:** 2 Players (slide DSP + app-wide panning across the 4 in-house engines) + 4 System Pages
-(Note Properties popup, Builder tiling/slice). Batch `wistful-sliding-otter`. `blocks:` (backfill hash).
+(Note Properties popup, Builder tiling/slice). Batch `wistful-sliding-otter`. `blocks:` `b54d4681`.
 
 #### Done
 - **S-1** relaxed both slide source resolvers (`findGlideSourcePitch` / `findRampAnchorPitch`) to
